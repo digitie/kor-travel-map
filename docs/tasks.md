@@ -16,7 +16,7 @@
     (`main@d2104f15`, branch `chore/t-vn-sync-main`)
   - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate** (T-VN-00/C6c cutover와 동일 배포 단위)
   - [ ] `T-VN-04A` — **admin 비공개 feature 공간 조회·카드 표면 복원** (#741)
-  - [ ] `T-VN-15` — **search total과 cursor fingerprint**
+  - [ ] `T-VN-15` — **search total과 HMAC cursor fingerprint** (agent B 구현·리뷰 대기)
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
     `T-VN-16` weather batch와 부모 404.
@@ -34,7 +34,7 @@
   - [ ] `T-VN-41` — **cache-target generation·outbox 전파**
   - [ ] `T-VN-51` — **MVT tile 도입 조건 측정**
   - [ ] `T-VN-52` — **범용 feature-context batch 도입 조건 측정**
-  - [ ] `T-VN-53` — **cursor HMAC 도입 조건 측정**
+  - [ ] `T-VN-53` — **cursor signing key rotation 운영 측정**
   - [ ] `T-VN-54` — **weather partition·hypertable·event clock 측정**
   - [ ] `T-VN-55` — **물리 listener/process 분리 측정**
   - [ ] `T-VN-56` — **대규모 fixture 실행 주기 측정**
@@ -217,10 +217,12 @@ main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-v
   기존 pipeline/schedule ledger를 회귀 기준선으로 두고 남은 retryable command에 body fingerprint,
   result replay, key reuse 409를 domain별로 구현한다.
 
-- [ ] T-VN-15 — **search total과 cursor fingerprint**
+- [ ] T-VN-15 — **search total과 HMAC cursor fingerprint**
 
-  `include_total=false`에서 COUNT를 실행하지 않고 cursor version·query fingerprint를 검증해 다른
-  query 재사용을 typed error로 거부한다.
+  `include_total=false`에서 COUNT statement 자체를 실행하지 않는다. cursor는 repository와 같은
+  정규화 query/filter/sort/page contract의 SHA-256 fingerprint와 keyset을 versioned payload에
+  넣고 전용 server-only secret의 HMAC-SHA256으로 보호한다. 다른 query 재사용, unknown version,
+  malformed와 tamper를 DB 전에 서로 다른 typed RFC7807 422로 거부한다. DB table은 추가하지 않는다.
 
 - [ ] T-VN-16 — **weather batch와 부모 404**
 
@@ -296,10 +298,11 @@ main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-v
   실제 consumer round-trip과 query count를 측정해 weather 전용 batch를 넘어선 범용 batch의
   필요 조건·최대 크기·응답 shape를 먼저 고정한다.
 
-- [ ] T-VN-53 — **cursor HMAC 도입 조건 측정**
+- [ ] T-VN-53 — **cursor signing key rotation 운영 측정**
 
-  fingerprint cursor의 위변조 위험과 운영 비용을 측정하고 서명 필요성이 입증될 때 key rotation과
-  실패 계약을 포함한 구현 task를 연다.
+  T-VN-15가 search cursor HMAC을 clean-cut으로 채택했으므로 도입 여부 측정은 폐기한다. 실제
+  rotation 주기·진행 cursor 무효화율·다중 key grace window 필요성을 측정하고, grace window가
+  단순 clean cut보다 우월하다고 입증될 때만 별도 구현 task를 연다.
 
 - [ ] T-VN-54 — **weather partition·hypertable·event clock 측정**
 

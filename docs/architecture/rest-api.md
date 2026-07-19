@@ -44,11 +44,12 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 DB/source identity, 선정 감사 필드는 직렬화되지 않고 `/v1/admin/features/curated*`에만
 남는다. 알 수 없는 kind는 공개 목록에서 제외하고 상세는 404다(T-VN-05R).
 `include_geometry`는 동일 candidate set의 serialization만 바꾸고, `include_total=false`이면 COUNT를
-실행하지 않는다. cursor는 version과 정규화 query fingerprint가 다르면
-`CURSOR_QUERY_MISMATCH`로 거부한다. body actor, 동작하지 않는 beach 옵션, 수기 OpenAPI allowlist는
+실행하지 않는다. search cursor는 version과 정규화 query fingerprint를 검증하고 HMAC-SHA256으로
+payload 무결성을 보호한다. 다른 query 재사용은 `CURSOR_QUERY_MISMATCH`, 변조는
+`FEATURE_SEARCH_CURSOR_TAMPERED`로 거부한다. body actor, 동작하지 않는 beach 옵션, 수기 OpenAPI allowlist는
 제거하고 route policy에서 public/service/operator profile을 생성한다.
 
-MVT tile, 범용 `feature-context` batch, cursor HMAC, 물리 listener 분리는 목표 계약이 아니라
+MVT tile, 범용 `feature-context` batch, 물리 listener 분리는 목표 계약이 아니라
 T-VN-51~55의 실측 결과가 채택 조건을 충족할 때만 새 결정을 연다.
 
 ## 0. 한눈에 — #317이 한 것 vs ADR-048 delta
@@ -166,7 +167,32 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
 - 2-티어 캡: 기본(detail/admin/ops) 50/최대 200, 지도(`nearby`·`by-target`) 100/최대 500.
 - `/v1/features` 평면: `page_size`+`cursor`(`limit le=5000` 폐기). `/v1/features/in-bounds`:
   cursor 없이 `max_items` 하드캡 5000→2000 + 결정적 `feature_id` 정렬(T-212d).
-- `meta.page.total`은 `?include_total=true` opt-in(기본 `null`; 현재 `search`는 항상 COUNT).
+- `meta.page.total`은 `?include_total=true` opt-in(기본 `null`). `/v1/features/search`는
+  `include_total=false`일 때 COUNT SQL을 만들거나 실행하지 않고 page-size+1 keyset 조회 한 번만
+  수행한다. `true`일 때만 같은 정규화 filter의 별도 COUNT를 실행한다.
+
+#### 1.6.1 feature search cursor v1
+
+- cursor는 `base64url(canonical_payload).base64url(hmac_sha256)`의 opaque token이다. payload는
+  `v=1`, cursor kind, query fingerprint, 마지막 keyset(`score`+`feature_id` 또는
+  `feature_id`)만 가진다. 서명은 payload 원문과 cursor kind domain separator를 함께 덮고
+  `hmac.compare_digest`로 검증한다. 원 검색어·secret은 cursor에 넣지 않는다.
+- query fingerprint는 repository가 실제 SQL에 사용하는 정규화 계약을 canonical JSON으로 만든 뒤
+  SHA-256한다. `q`는 trim 후 빈 문자열을 `null`, bbox는 유한한 WGS84 float 4개, `kind`/`category`는
+  중복 제거·사전순 정렬(빈 배열은 `null`)한다. 여기에 q 유무로 결정되는 sort
+  (`score DESC, feature_id ASC` 또는 `feature_id ASC`), `page_size`, `include_total`을 포함한다.
+  따라서 필터 순서만 바꾼 요청은 같은 계약이고, 결과집합·정렬·page metadata를 바꾸는 요청은
+  다른 계약이다.
+- 디코드 순서는 형식/길이 → HMAC → version/kind → fingerprint → keyset type·finite score다.
+  malformed는 `FEATURE_SEARCH_CURSOR_INVALID`, 서명이 맞지만 알 수 없는 version은
+  `FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED`, 서명 불일치는
+  `FEATURE_SEARCH_CURSOR_TAMPERED`, 현재 query와 fingerprint가 다르면
+  `CURSOR_QUERY_MISMATCH`인 RFC7807 422다. 어느 실패도 DB query 전에 끝난다.
+- HMAC key는 server-only `KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET`이며 public API key,
+  service token, admin proxy secret과 공유하지 않는다. production에서 feature search surface가
+  켜져 있으면 공백 없는 최소 32자 secret이 없을 때 기동을 거부한다. `local-dev` 미설정 시에만
+  process-local 난수 key를 허용하며 재시작·다중 worker 사이 cursor 지속성을 보장하지 않는다.
+  운영 rotation은 새 key 배포와 동시에 기존 cursor를 의도적으로 무효화하는 clean cut이다.
 
 ### 1.7 idempotency · rate limit (T-214g)
 - 일반 변경 POST는 endpoint 계약에 따라 `Idempotency-Key`를 사용할 수 있다. canonical
@@ -731,7 +757,9 @@ GET /v1/debug/mois-license/{license_id}
 ---
 
 ## 4. 표준 에러 코드
-`FEATURE_NOT_FOUND`(404) · `INVALID_BBOX`(422) · `TOO_MANY_IDS`(422) · `VALIDATION_ERROR`(422)
+`FEATURE_NOT_FOUND`(404) · `INVALID_BBOX`(422) · `TOO_MANY_IDS`(422) · `VALIDATION_ERROR`(422) ·
+`FEATURE_SEARCH_CURSOR_INVALID`(422) · `FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED`(422) ·
+`FEATURE_SEARCH_CURSOR_TAMPERED`(422) · `CURSOR_QUERY_MISMATCH`(422)
 · `RATE_LIMITED`(429) · `LOCK_BUSY`(409,`Retry-After:15`) · `DESTRUCTIVE_DISABLED`(403) ·
 `UNAUTHORIZED`(401) · `UPSTREAM_UNAVAILABLE`(503) ·
 `PIPELINE_EXECUTION_NOT_FOUND`(404) · `PIPELINE_CANCELLATION_IN_PROGRESS`(409) ·
