@@ -687,6 +687,84 @@ def public_active_notice_filter_sql(feature_alias: str) -> str:
 
 _PUBLIC_ACTIVE_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("f")
 
+
+# ─── in-bounds 후보 술어 단일화 (F-8 / ADR-073 D-9-3·D-9-4) ──────────────────
+# bbox in-bounds 조회는 세 변형(경량 items / geometry items / cluster rollup)이
+# 있고, 이전에는 각자 WHERE 절에 같은 attribute 필터를 복제했으며 include_geometry
+# 만 route/area geom을 후보에 넣어 **결과집합**이 달라졌다(EXPLAIN 재현 2220→2221행).
+# 아래 두 fragment로 후보 술어를 한 곳에 정의해 재사용한다:
+#   - ``_bbox_candidate_predicate_sql`` : items(경량/geometry) 공유 공간 후보 술어.
+#   - ``_bbox_attribute_filter_sql``    : kind/category/provider 공통 속성 필터(3변형 공유).
+
+
+def _bbox_envelope_sql() -> str:
+    """4326 입력 bbox envelope (ADR-012 — 술어에 ST_Transform 없음)."""
+    return """x_extension.ST_MakeEnvelope(
+        CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
+        CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)"""
+
+
+def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
+    """items in-bounds 단일 후보 술어 (F-8 / ADR-073 D-9-3).
+
+    ``include_geometry`` 유무와 **무관하게 동일한** 후보 집합을 만든다 — 플래그는
+    응답 직렬화(SELECT projection)만 제어하고 membership은 바꾸지 않는다.
+
+    - **point 좌표(``coord``)**: ``&&`` MBR 술어는 점-envelope 교차에서 이미 정확하다
+      (점의 MBR = 점 자신) — 그대로 두고 ``idx_features_coord_gist``를 구동한다.
+    - **route/area ``geom``**: ``&&`` MBR prefilter만으로는 false positive가 실재하므로
+      (F-8) partial GiST(``idx_features_geom_gist``)를 ``&&``로 구동한 뒤 exact
+      ``ST_Intersects``를 덧대 실제 envelope 교차만 남긴다. ``ST_Transform``을 술어에
+      넣지 않는다(ADR-012). 두 arm은 각각 index 가능해 planner가 BitmapOr로 결합한다
+      (features base-table seq scan 없음 — T-VN-21 tier-1 gate).
+    """
+    if not feature_alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    env = _bbox_envelope_sql()
+    return f"""(
+    (
+      {feature_alias}.coord IS NOT NULL
+      AND {feature_alias}.coord OPERATOR(x_extension.&&) {env}
+    )
+    OR (
+      {feature_alias}.kind IN ('route', 'area')
+      AND {feature_alias}.geom IS NOT NULL
+      AND {feature_alias}.geom OPERATOR(x_extension.&&) {env}
+      AND x_extension.ST_Intersects({feature_alias}.geom, {env})
+    )
+  )"""
+
+
+def _bbox_attribute_filter_sql(feature_alias: str) -> str:
+    """kind/category/provider 공통 속성 필터 (items 경량/geometry + cluster 공유).
+
+    세 변형이 같은 SQL을 재사용해 이중 복제를 제거한다(ADR-073 D-9-4). NULL 배열이면
+    술어가 단락(short-circuit)돼 인덱스 기반 조회에 영향이 없다. provider 필터는
+    primary source(``provider_sync.is_primary_source``) 기준 EXISTS다.
+    """
+    if not feature_alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    return f"""
+  AND (CAST(:kinds AS text[]) IS NULL OR {feature_alias}.kind = ANY(CAST(:kinds AS text[])))
+  AND (
+    CAST(:categories AS text[]) IS NULL
+    OR {feature_alias}.category = ANY(CAST(:categories AS text[]))
+  )
+  AND (
+    CAST(:providers AS text[]) IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM provider_sync.source_links AS pl
+      JOIN provider_sync.source_entities AS pr
+        ON pr.source_entity_key = pl.source_entity_key
+      WHERE pl.feature_id = {feature_alias}.feature_id
+        AND pl.is_primary_source
+        AND pr.provider = ANY(CAST(:providers AS text[]))
+    )
+  )
+"""
+
+
 _PUBLIC_ACTIVE_NOTICE_IDS_SQL: Final[str] = f"""
 SELECT f.feature_id
 FROM feature.public_features AS f
@@ -847,27 +925,8 @@ LEFT JOIN LATERAL (
         COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
     LIMIT 1
 ) AS ws ON f.kind = 'weather'
-WHERE f.coord IS NOT NULL
-  AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
-        CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
-        CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-  AND (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
-  AND (
-    CAST(:categories AS text[]) IS NULL
-    OR f.category = ANY(CAST(:categories AS text[]))
-  )
-  AND (
-    CAST(:providers AS text[]) IS NULL
-    OR EXISTS (
-      SELECT 1
-      FROM provider_sync.source_links AS pl
-      JOIN provider_sync.source_entities AS pr
-        ON pr.source_entity_key = pl.source_entity_key
-      WHERE pl.feature_id = f.feature_id
-        AND pl.is_primary_source
-        AND pr.provider = ANY(CAST(:providers AS text[]))
-    )
-  )
+WHERE {_bbox_candidate_predicate_sql("f")}
+{_bbox_attribute_filter_sql("f")}
   AND (
     CAST(:cursor_feature_id AS text) IS NULL
     OR f.feature_id > CAST(:cursor_feature_id AS text)
@@ -1001,38 +1060,8 @@ LEFT JOIN LATERAL (
         COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
     LIMIT 1
 ) AS ws ON f.kind = 'weather'
-WHERE (
-    (
-      f.coord IS NOT NULL
-      AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
-            CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
-            CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-    )
-    OR (
-      f.kind IN ('route', 'area')
-      AND f.geom IS NOT NULL
-      AND f.geom OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
-            CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
-            CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-    )
-  )
-  AND (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
-  AND (
-    CAST(:categories AS text[]) IS NULL
-    OR f.category = ANY(CAST(:categories AS text[]))
-  )
-  AND (
-    CAST(:providers AS text[]) IS NULL
-    OR EXISTS (
-      SELECT 1
-      FROM provider_sync.source_links AS pl
-      JOIN provider_sync.source_entities AS pr
-        ON pr.source_entity_key = pl.source_entity_key
-      WHERE pl.feature_id = f.feature_id
-        AND pl.is_primary_source
-        AND pr.provider = ANY(CAST(:providers AS text[]))
-    )
-  )
+WHERE {_bbox_candidate_predicate_sql("f")}
+{_bbox_attribute_filter_sql("f")}
   AND (
     CAST(:cursor_feature_id AS text) IS NULL
     OR f.feature_id > CAST(:cursor_feature_id AS text)
@@ -1047,6 +1076,14 @@ LIMIT :limit
 # (allowlist — SQL injection 불가). bbox 술어는 STORED coord의 GIST 인덱스(&&)를
 # 그대로 쓰고(ADR-012, 변환 없음), 행정코드별 count + 평균 좌표(대표 마커 위치)를
 # 집계한다. ``ST_Transform``을 술어에 넣지 않는다.
+#
+# 후보 술어 단일화(ADR-073 D-9-4): 공통 attribute 필터(kind/category/provider)는
+# ``_bbox_attribute_filter_sql``로 items 변형과 공유한다. 공간 술어는 cluster가
+# **centroid coord 기준 rollup**이라 items의 geometry 포함 후보 술어(route/area geom)를
+# 쓰지 않고 ``coord && envelope``만 쓴다. route/area는 대개 centroid coord를 갖지만
+# (``geometry_centroid``), geom이 bbox와 교차하되 centroid가 bbox 밖인 경계 case는
+# items에는 잡히고 cluster count에는 빠진다(저zoom rollup에서 무시 가능, cluster ≤ items).
+# point coord의 ``&&``는 이미 정확하므로 exact 술어도 불필요하다.
 def _cluster_bbox_sql(code_col: str) -> str:
     return f"""
 SELECT
@@ -1060,23 +1097,7 @@ WHERE f.coord IS NOT NULL
   AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
         CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-  AND (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
-  AND (
-    CAST(:categories AS text[]) IS NULL
-    OR f.category = ANY(CAST(:categories AS text[]))
-  )
-  AND (
-    CAST(:providers AS text[]) IS NULL
-    OR EXISTS (
-      SELECT 1
-      FROM provider_sync.source_links AS pl
-      JOIN provider_sync.source_entities AS pr
-        ON pr.source_entity_key = pl.source_entity_key
-      WHERE pl.feature_id = f.feature_id
-        AND pl.is_primary_source
-        AND pr.provider = ANY(CAST(:providers AS text[]))
-    )
-  )
+{_bbox_attribute_filter_sql("f")}
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 GROUP BY f.{code_col}
 ORDER BY feature_count DESC, cluster_key
@@ -3604,11 +3625,16 @@ async def features_in_bbox(
     """bbox 안의 feature 경량 표현 list (지도/목록용). 좌표는 ``lon``/``lat`` (4326).
 
     ADR-012 — 입력 bbox는 4326, ``coord``의 GIST 인덱스(``idx_features_coord_gist``)를
-    사용하는 ``&&`` 연산. 공개 여부는 ADR-067 ``feature.public_features`` projection이
-    결정하고(``coord IS NOT NULL`` 추가), ``kinds``가
+    사용하는 ``&&`` 연산. 공개 여부는 ADR-067 ``feature.public_features`` projection
+    (``status='active' AND deleted_at IS NULL``)이 결정한다. ``kinds``가
     ``None``이면 전체 kind. DTO 매핑은 상위(client) 책임 — 본 repo는 raw row만.
-    ``include_geometry``가 true이면 route/area용 ``geom``도 bbox 후보에 포함해
-    지도 표시용 GeoJSON/면적을 반환한다. ``providers``가 주어지면 primary source
+
+    **``include_geometry``는 직렬화(serialization)만 제어한다** (F-8 / ADR-073 D-9-3):
+    후보 술어는 두 변형이 **동일**하다 — point ``coord``가 bbox에 들거나 route/area
+    ``geom``이 bbox와 exact ``ST_Intersects``하면 후보다(``include_geometry`` 무관).
+    ``include_geometry=true``이면 그 후보 중 route/area의 GeoJSON geometry + 면적을
+    응답 payload에 **추가로 직렬화**할 뿐, 반환되는 feature id 집합(membership)은
+    바꾸지 않는다. ``providers``가 주어지면 primary source
     provider 기준(``provider_sync.source_links.is_primary_source``)으로 추가 필터한다
     — ``None``이면 술어가 단락(short-circuit)돼 인덱스 기반 bbox 조회에 영향이 없다.
     ``price_stale_hide_days``보다 오래된 price 관측은 ``price_summary``에서 제외한다

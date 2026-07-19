@@ -261,6 +261,16 @@ class FeatureObservationHistoryResponse(BaseModel):
 
 
 ClusterUnit = Literal["sido", "sigungu", "eupmyeondong"]
+InBoundsMode = Literal["items", "clusters"]
+
+# cluster drill-down 순서 (ADR-073 D-9-2). 각 rollup 단위에서 한 단계 더 확대(zoom-in)
+# 할 때 소비자가 다음에 요청할 단위. ``eupmyeondong``의 다음은 개별 feature(items)이므로
+# ``None``이다. cluster_key(행정코드) + 이 단위로 결정적(deterministic) drill-down이 된다.
+_CLUSTER_DRILL_DOWN: dict[ClusterUnit, ClusterUnit | None] = {
+    "sido": "sigungu",
+    "sigungu": "eupmyeondong",
+    "eupmyeondong": None,
+}
 
 
 class ClusterSummary(BaseModel):
@@ -274,17 +284,51 @@ class ClusterSummary(BaseModel):
     lat: float
 
 
-class PublicFeatureListData(BaseModel):
-    """public feature 목록 data payload.
+class InBoundsCoverage(BaseModel):
+    """in-bounds 응답 완결성 기술자 (F-8 silent truncation 해소, ADR-073 D-9-2).
 
-    ``cluster_unit``이 None이면 ``items``(개별 feature), 아니면 ``clusters``
-    (행정구역 rollup)를 채운다(T-213c).
+    ``returned``는 이 응답에 실린 항목 수(items 또는 clusters), ``limit``은 이 조회에
+    적용된 ``max_items`` 상한이다. ``returned == limit`` 이고 상위 ``truncated`` 가
+    참이면 경계 안에 더 많은 후보가 있으니 소비자는 zoom-in(cluster drill-down)하거나
+    더 좁은 bbox로 다시 조회해야 한다.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    items: list[FeatureSummary]
+    returned: int
+    limit: int
+
+
+class PublicFeatureListData(BaseModel):
+    """public feature 목록 data payload (ADR-073 D-9-2 지도 완결성 계약).
+
+    ``mode``가 ``items``면 개별 feature(``items``), ``clusters``면 행정구역
+    rollup(``clusters``)을 채운다(T-213c). ``truncated``는 결과가 ``max_items``
+    상한에서 잘렸는지를 **명시**한다(F-8: silent truncation 해소). cluster 모드는
+    결정적 ``cluster_key``(행정코드)와 ``cluster_unit``/``drill_down_unit``으로
+    drill-down 경로를 노출한다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: InBoundsMode
+    items: list[FeatureSummary] = []
     clusters: list[ClusterSummary] = []
+    cluster_unit: ClusterUnit | None = Field(
+        default=None,
+        description="clusters 모드에서 이 rollup의 행정구역 단위. items 모드면 null.",
+    )
+    drill_down_unit: ClusterUnit | None = Field(
+        default=None,
+        description=(
+            "한 단계 확대 시 요청할 다음 cluster_unit. clusters 모드의 "
+            "eupmyeondong·items 모드면 다음이 개별 feature이므로 null."
+        ),
+    )
+    truncated: bool = Field(
+        description="결과가 max_items 상한에서 잘렸으면 true(더 많은 후보 존재).",
+    )
+    coverage: InBoundsCoverage
 
 
 class FeaturesInBoundsResponse(BaseModel):
@@ -745,6 +789,9 @@ async def list_public_features_in_bounds(
         )
     resolved_unit = _resolve_cluster_unit(cluster_unit, zoom)
     if resolved_unit is not None:
+        # max_items+1을 요청해 상한 초과 여부(truncated)를 명시적으로 판정한다
+        # (F-8: silent truncation 해소). 초과분은 결정적 ORDER BY(feature_count
+        # DESC, cluster_key)로 잘라 상위 max_items개만 남긴다.
         clusters_raw = await feature_repo.cluster_features_in_bbox(
             session,
             min_lon=min_lon,
@@ -755,13 +802,19 @@ async def list_public_features_in_bounds(
             kinds=kind,
             categories=category,
             providers=provider,
-            limit=max_items,
+            limit=max_items + 1,
         )
-        clusters = [ClusterSummary(**c) for c in clusters_raw]
+        truncated = len(clusters_raw) > max_items
+        clusters = [ClusterSummary(**c) for c in clusters_raw[:max_items]]
         return FeaturesInBoundsResponse(
             data=PublicFeatureListData(
+                mode="clusters",
                 items=[],
                 clusters=clusters,
+                cluster_unit=resolved_unit,
+                drill_down_unit=_CLUSTER_DRILL_DOWN[resolved_unit],
+                truncated=truncated,
+                coverage=InBoundsCoverage(returned=len(clusters), limit=max_items),
             ),
             meta=make_meta(
                 request,
@@ -769,6 +822,8 @@ async def list_public_features_in_bounds(
                 cluster_unit=resolved_unit,
             ),
         )
+    # items 모드도 max_items+1로 truncated를 판정한다. include_geometry는
+    # membership을 바꾸지 않고 geometry 직렬화만 제어한다(F-8 / ADR-073 D-9-3).
     rows = await feature_repo.features_in_bbox(
         session,
         min_lon=min_lon,
@@ -778,14 +833,18 @@ async def list_public_features_in_bounds(
         kinds=kind,
         categories=category,
         providers=provider,
-        limit=max_items,
+        limit=max_items + 1,
         include_geometry=include_geometry,
         price_stale_hide_days=None,
     )
-    items = [FeatureSummary(**row) for row in rows]
+    truncated = len(rows) > max_items
+    items = [FeatureSummary(**row) for row in rows[:max_items]]
     return FeaturesInBoundsResponse(
         data=PublicFeatureListData(
+            mode="items",
             items=items,
+            truncated=truncated,
+            coverage=InBoundsCoverage(returned=len(items), limit=max_items),
         ),
         meta=make_meta(request, started_at=started_at),
     )

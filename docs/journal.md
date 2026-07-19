@@ -12,6 +12,36 @@
 - `T-VN-05R/17R/21R/14R`를 독립 PR 경계로 추가했다. 0060은 아직 main cutover 전이므로
   transactional non-concurrent UNIQUE로 직접 정정하고, #768은 열린 PR #763에 후속 커밋한다.
 
+## 2026-07-19 (claude, agent A2) — T-VN-14 지도 in-bounds 완결성 + exact 공간 술어
+
+- ADR-073 D-9-3/D-9-4 / F-8: `include_geometry`가 응답이 아니라 **결과집합**을 바꾸던
+  버그(2220→2221행)를 고쳤다. `_FEATURES_IN_BBOX_SQL`(경량)과
+  `_FEATURES_IN_BBOX_WITH_GEOMETRY_SQL`(geometry)의 WHERE를 **동일한 단일 후보 술어**로
+  통일했다 — 두 SQL의 WHERE가 문자적으로 같아졌고(import 검증), 차이는 SELECT projection
+  (route/area GeoJSON + 면적 직렬화)뿐이다. membership은 안정, payload만 다르다.
+- exact 공간 술어: 후보 술어의 route/area arm에 `&& envelope AND ST_Intersects(geom,
+  envelope)`를 적용했다. `&&`는 partial GiST(`idx_features_geom_gist`)를 구동하는 MBR
+  prefilter로 남기고 exact `ST_Intersects`로 false positive를 제거한다. point `coord`의
+  `&&`는 점-envelope 교차에서 이미 정확해 그대로 뒀다. `ST_Transform`은 술어에 없다(ADR-012).
+- 후보 술어 단일화(D-9-4): 공통 attribute 필터(kind/category/provider EXISTS)를
+  `_bbox_attribute_filter_sql`로, items 공간 후보 술어를 `_bbox_candidate_predicate_sql`로
+  한 곳에 정의해 경량/geometry/cluster 3변형이 재사용한다. **결정**: cluster는 centroid
+  coord 기준 rollup이라 items의 geometry 포함 술어를 쓰지 않고(geom-only feature는 대표
+  좌표를 만들 수 없음) 공통 attribute 필터만 공유한다 — cluster의 point `&&`는 이미 정확.
+- in-bounds 응답 완결성: `PublicFeatureListData`에 `mode`(items|clusters)·`truncated`·
+  `coverage`(returned/limit)·`cluster_unit`/`drill_down_unit`을 명시했다. truncation은
+  `max_items+1` 조회로 판정해 **명시적**으로 노출한다(F-8 silent truncation 해소). cluster
+  drill-down은 결정적 `cluster_key`(행정코드) + 다음 단위(sido→sigungu→eupmyeondong→items).
+- 스코프 준수: bbox/in-bounds/cluster **READ SQL + in-bounds 응답 DTO만** 수정. public_features
+  view(T-VN-04)·weather/price LATERAL(T-VN-38)·인덱스/모델(T-VN-18)·write 경로(A1 T-VN-13)는
+  무수정. OpenAPI admin/user 재생성(drift 0).
+- 검증(WSL testcontainers PostGIS, 최소 seed): 신규 membership-stability 통합 2건(exact
+  ST_Intersects가 MBR false positive 제외 + include_geometry true/false 동일 집합) +
+  perf-gate tier-1 12건(경량 bbox가 여전히 coord GiST, features Seq Scan 없음 — ST_Intersects
+  OR-arm 추가 후에도 green) + public-features-view/cluster 회귀 17건 = 31 green. router 단위
+  30 green(mode/truncated/coverage/drill-down 계약 assert 추가). ruff·mypy --strict(core+api)·
+  lint-imports·redaction clean. C: 디스크 무증가.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-21 3단 성능·DDL gate 인프라
 
 - ADR-075 D-12-4 / performance.md §8.3을 3단 gate의 **정본**으로 확정하고 CI·release
