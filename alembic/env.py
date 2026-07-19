@@ -21,6 +21,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+from alembic.script import ScriptDirectory
 from kortravelmap.infra.db import normalize_async_dsn
 from kortravelmap.infra.models import metadata
 
@@ -52,6 +53,50 @@ else:
 
 # autogenerate 대상 metadata.
 target_metadata = metadata
+
+_FORWARD_ONLY_BOUNDARY = "0060_weather_integrity"
+
+
+def _revision_includes_forward_only_boundary(
+    script: ScriptDirectory,
+    revision: str | tuple[str, ...] | None,
+) -> bool:
+    """revision 또는 그 조상에 0060 forward-only 경계가 있는지 반환한다."""
+    if revision is None:
+        return False
+    return any(
+        node.revision == _FORWARD_ONLY_BOUNDARY
+        for node in script.iterate_revisions(revision, None, inclusive=True)
+    )
+
+
+def _guard_forward_only_target() -> None:
+    """0060 이상 DB를 그 아래 target으로 내리는 실행을 migration 전에 거부한다."""
+    try:
+        destination = context.get_revision_argument()
+    except (KeyError, TypeError):
+        # ``current``처럼 destination revision이 없는 read-only command.
+        return
+
+    migration_context = context.get_context()
+    current_heads = migration_context.get_current_heads()
+    if not current_heads:
+        return
+
+    script = ScriptDirectory.from_config(config)
+    current_has_boundary = _revision_includes_forward_only_boundary(
+        script,
+        current_heads,
+    )
+    destination_has_boundary = _revision_includes_forward_only_boundary(
+        script,
+        destination,
+    )
+    if current_has_boundary and not destination_has_boundary:
+        raise RuntimeError(
+            "0060 is forward-only: restore the pre-cutover backup/PITR under a "
+            "writer fence and roll back the writer image as one operation"
+        )
 
 
 # ``alembic check`` 정합 필터 (ADR-075 D-12-2, T-VN-19).
@@ -150,6 +195,9 @@ def do_run_migrations(connection: Connection) -> None:
         include_object=_include_object,
     )
     with context.begin_transaction():
+        # 0061+ descendant의 downgrade가 일부 commit된 뒤 0060에서 멈추지 않도록
+        # destination 전체를 migration step 실행 전에 판정한다.
+        _guard_forward_only_target()
         # ADR-008 — search_path를 Alembic이 소유한 트랜잭션 **안에서** 설정.
         # 0002의 ``coord_5179`` STORED 생성 컬럼이 ``x_extension`` 의 PostGIS
         # ``ST_Transform`` 을 참조하므로 DDL 실행 전 search_path 필요.

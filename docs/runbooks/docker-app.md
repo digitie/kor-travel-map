@@ -467,8 +467,9 @@ source와 대조한 승인된 data repair 또는 cutover 전 backup/PITR 복원�
 commit 전에 SQLSTATE `23514`로 실패한다.
 
 migration은 5초 안에 `SHARE ROW EXCLUSIVE`를 얻지 못하면 전체 rollback한다. lock을 얻은 뒤
-과거 실패에서 남은 동명 valid/INVALID index를 drop하고, dedup과 non-concurrent UNIQUE를 같은
-transaction에서 commit한다. 따라서 새 실행은 INVALID index를 남기지 않는다. 세 VALIDATE도
+dedup과 non-concurrent UNIQUE를 같은 transaction에서 commit한다. 과거 실패의 동명 index/constraint는
+그 전에 5초 timeout의 짧은 autocommit DDL로만 정규화해 main build 동안 `ACCESS EXCLUSIVE`를
+보유하지 않는다. fresh 0059에는 정리 DDL이 없다. 따라서 새 실행은 INVALID index를 남기지 않는다. 세 VALIDATE도
 각각 session-level 5초 lock timeout을 적용하고 성공·실패 뒤 RESET한다.
 
 배포할 API image ID와 OCI revision, root-only runtime env snapshot, compose network를 먼저 exact
@@ -516,17 +517,48 @@ WHERE conrelid = 'feature.feature_weather_values'::regclass
       'fk_weather_value_source_record'
   )
 ORDER BY conname;
+
+SELECT count(*) AS duplicate_losers
+FROM (
+    SELECT row_number() OVER (
+        PARTITION BY feature_id, provider, weather_domain, forecast_style,
+                     metric_key, issued_at, valid_at, observed_at
+        ORDER BY collected_at DESC NULLS LAST,
+                 updated_at DESC NULLS LAST,
+                 weather_value_key DESC
+    ) AS rn
+    FROM feature.feature_weather_values
+) ranked
+WHERE rn > 1;
+
+SELECT count(*) FILTER (
+           WHERE valid_from IS NOT NULL AND valid_until IS NOT NULL
+             AND valid_from > valid_until
+       ) AS range_violations,
+       count(*) FILTER (
+           WHERE jsonb_typeof(payload) <> 'object'
+       ) AS payload_violations,
+       count(*) FILTER (
+           WHERE source_record_key IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM provider_sync.source_records AS sr
+                 WHERE sr.source_record_key = w.source_record_key
+             )
+       ) AS orphan_source_records
+FROM feature.feature_weather_values AS w;
 ```
 
-정상은 index boolean 네 값과 세 `convalidated`가 모두 true이고 preflight의
-`duplicate_losers=0`, violation 세 값이 모두 0이다. 실패하면 service fence를 유지하고 Alembic
+정상은 index boolean 네 값과 세 `convalidated`가 모두 true이고 **post-check의**
+`duplicate_losers=0`, violation 세 값이 모두 0이다. 최초 preflight의 duplicate 수는 migration이
+제거할 예상 loser이므로 0보다 클 수 있다. 실패하면 service fence를 유지하고 Alembic
 current, 위 index, 세 constraint validity를 다시 캡처한다.
 
 - violation이 하나라도 남으면 같은 corrupt row를 둔 재시도를 금지한다. authoritative source 기반
   repair 또는 cutover 전 restore/PITR 후 preflight부터 다시 수행한다.
 - current가 0059인데 valid UNIQUE와 NOT VALID/일부 VALID constraint가 있으면 VALIDATE lock timeout
   등 autocommit 뒤 실패다. violation 0과 active writer 0을 다시 확인한 뒤 **같은 immutable image**의
-  `upgrade head`를 재실행한다. 0060은 exact 세 constraint/index를 lock 아래 정규화한다.
+  `upgrade head`를 재실행한다. 0060은 exact 세 constraint/index를 별도 짧은 retry transaction으로
+  정규화한 뒤 writer-only main cutover를 다시 수행한다.
 - 동명 INVALID index가 있으면 과거 concurrent 구현의 잔재다. 다음 원자 cleanup 뒤 preflight와 같은
   immutable image migration을 재실행한다.
 

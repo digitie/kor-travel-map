@@ -35,6 +35,7 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _PRE_REVISION = "0059_public_features_view"
 _TARGET_REVISION = "0060_weather_integrity"
+_HEAD_REVISION = "0061_gist_brin_index_audit"
 _DEDUP_GATE_KEY = 766_060
 _VALIDATE_GATE_KEY = 766_061
 
@@ -85,6 +86,21 @@ WHERE conrelid = 'feature.feature_weather_values'::regclass
       'ck_weather_value_payload_object',
       'fk_weather_value_source_record'
   )
+ORDER BY conname
+"""
+_WEATHER_INDEX_SNAPSHOT_SQL = """
+SELECT n.nspname, c.relname, i.indisvalid, i.indisready, i.indisunique,
+       i.indnullsnotdistinct, pg_get_indexdef(i.indexrelid)
+FROM pg_index AS i
+JOIN pg_class AS c ON c.oid = i.indexrelid
+JOIN pg_namespace AS n ON n.oid = c.relnamespace
+WHERE i.indrelid = 'feature.feature_weather_values'::regclass
+ORDER BY n.nspname, c.relname
+"""
+_WEATHER_CONSTRAINT_SNAPSHOT_SQL = """
+SELECT conname, convalidated, pg_get_constraintdef(oid, true)
+FROM pg_constraint
+WHERE conrelid = 'feature.feature_weather_values'::regclass
 ORDER BY conname
 """
 
@@ -228,6 +244,72 @@ async def test_weather_integrity_dedup_and_forward_only(pg_container: Any) -> No
         await admin_engine.dispose()
 
 
+async def test_forward_only_guard_runs_before_descendant_downgrade(
+    pg_container: Any,
+) -> None:
+    """0061 head→0059 요청은 0061 DDL도 실행하기 전에 전역 거부한다."""
+    async with _fresh_database(pg_container) as dsn:
+        await asyncio.to_thread(_run_alembic, dsn, _HEAD_REVISION)
+        engine = make_async_engine(dsn)
+        try:
+            async with engine.connect() as connection:
+                before = (
+                    await connection.scalar(
+                        text("SELECT version_num FROM alembic_version")
+                    ),
+                    tuple(
+                        tuple(row)
+                        for row in (
+                            await connection.execute(
+                                text(_WEATHER_INDEX_SNAPSHOT_SQL)
+                            )
+                        ).all()
+                    ),
+                    tuple(
+                        tuple(row)
+                        for row in (
+                            await connection.execute(
+                                text(_WEATHER_CONSTRAINT_SNAPSHOT_SQL)
+                            )
+                        ).all()
+                    ),
+                )
+
+            with pytest.raises(RuntimeError, match="0060 is forward-only"):
+                await asyncio.to_thread(
+                    _run_alembic,
+                    dsn,
+                    _PRE_REVISION,
+                    downgrade=True,
+                )
+
+            async with engine.connect() as connection:
+                after = (
+                    await connection.scalar(
+                        text("SELECT version_num FROM alembic_version")
+                    ),
+                    tuple(
+                        tuple(row)
+                        for row in (
+                            await connection.execute(
+                                text(_WEATHER_INDEX_SNAPSHOT_SQL)
+                            )
+                        ).all()
+                    ),
+                    tuple(
+                        tuple(row)
+                        for row in (
+                            await connection.execute(
+                                text(_WEATHER_CONSTRAINT_SNAPSHOT_SQL)
+                            )
+                        ).all()
+                    ),
+                )
+            assert after == before
+        finally:
+            await engine.dispose()
+
+
 async def test_upgrade_fences_writer_from_dedup_through_unique(
     pg_container: Any,
 ) -> None:
@@ -278,31 +360,63 @@ async def test_upgrade_fences_writer_from_dedup_through_unique(
                 migration_task = asyncio.create_task(
                     asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
                 )
-                waiting = False
+                migration_pid: int | None = None
                 try:
                     for _ in range(100):
                         async with engine.connect() as observer:
-                            waiting = bool(
-                                await observer.scalar(
-                                    text(
-                                        "SELECT EXISTS ("
-                                        " SELECT 1 FROM pg_locks"
-                                        " WHERE locktype = 'advisory'"
-                                        " AND database = ("
-                                        "   SELECT oid FROM pg_database"
-                                        "   WHERE datname = current_database()"
-                                        " )"
-                                        " AND classid = 0 AND objid = :key"
-                                        " AND objsubid = 1 AND NOT granted"
-                                        ")"
-                                    ),
-                                    {"key": _DEDUP_GATE_KEY},
-                                )
+                            migration_pid = await observer.scalar(
+                                text(
+                                    "SELECT pid FROM pg_locks"
+                                    " WHERE locktype = 'advisory'"
+                                    " AND database = ("
+                                    "   SELECT oid FROM pg_database"
+                                    "   WHERE datname = current_database()"
+                                    " )"
+                                    " AND classid = 0 AND objid = :key"
+                                    " AND objsubid = 1 AND NOT granted"
+                                    " LIMIT 1"
+                                ),
+                                {"key": _DEDUP_GATE_KEY},
                             )
-                        if waiting:
+                        if migration_pid is not None:
                             break
                         await asyncio.sleep(0.05)
-                    assert waiting, "migration did not reach the dedup gate"
+                    assert migration_pid is not None, (
+                        "migration did not reach the dedup gate"
+                    )
+
+                    # Fresh 0059 main cutover의 장기 table lock은 writer-only여야 한다.
+                    # Retry normalization의 ACCESS EXCLUSIVE는 별도 짧은 transaction이다.
+                    async with engine.connect() as observer:
+                        relation_modes = {
+                            row[0]
+                            for row in (
+                                await observer.execute(
+                                    text(
+                                        "SELECT mode FROM pg_locks"
+                                        " WHERE pid = :pid"
+                                        " AND relation = "
+                                        "   'feature.feature_weather_values'::regclass"
+                                        " AND granted"
+                                    ),
+                                    {"pid": migration_pid},
+                                )
+                            ).all()
+                        }
+                    assert "ShareRowExclusiveLock" in relation_modes
+                    assert "AccessExclusiveLock" not in relation_modes
+
+                    async with engine.connect() as reader:
+                        await reader.execute(text("SET statement_timeout = '1000ms'"))
+                        assert (
+                            await reader.scalar(
+                                text(
+                                    "SELECT count(*) "
+                                    "FROM feature.feature_weather_values"
+                                )
+                            )
+                            == 5
+                        )
 
                     async with engine.connect() as writer:
                         await writer.execute(text("SET statement_timeout = '1500ms'"))

@@ -66,7 +66,9 @@
   기존 중복 dedup(최신 collected_at 우선)과 non-concurrent unique index를 한 transaction으로
   수행한다. 실패 시 모두 rollback되어 INVALID index가 남지 않는다. 기존 CHECK/FK 오염은 첫
   commit 전에 거부하고 VALIDATE lock 대기도 5초로 제한한다. destructive dedup을 되돌릴 수 없는
-  0060 downgrade는 backup/PITR+구 writer image 동시 복구만 허용하도록 fail-closed한다.
+  0060 downgrade는 Alembic destination 전역 guard로 descendant DDL 전에 차단하고,
+  backup/PITR+구 writer image 동시 복구만 허용한다. 과거 partial retry 객체의
+  `ACCESS EXCLUSIVE` 정리는 main build와 분리한 짧은 transaction에서만 수행한다.
 
 ### body actor 제거 — 감사 actor는 인증 principal에서만 파생 (2026-07-19, ADR-066 D-2 T-VN-20)
 
