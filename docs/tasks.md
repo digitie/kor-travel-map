@@ -10,6 +10,11 @@
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
+- **진행 중 — 최근 48시간 Claude PR 적대 리뷰 후속**
+  - [ ] `T-VN-05R` — **public curated raw payload·lineage 우회 차단** (#765)
+  - [ ] `T-VN-17R` — **weather UNIQUE cutover writer race 봉인** (#766)
+  - [ ] `T-VN-21R` — **실데이터 benchmark cardinality·buffer 정확성** (#767)
+  - [ ] `T-VN-14R` — **cluster/items 공간 후보집합 단일화** (#768, PR #763 후속 커밋)
 - **예정 — vNext 재설계 (`T-ADM-C6c`/`C7` 종결 뒤 시작)**
   - [ ] `T-VN-01` — **production fail-closed 전환**
   - [ ] `T-VN-02` — **route policy matrix와 미분류 CI gate**
@@ -152,6 +157,30 @@ main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-v
 (공유 브랜치이므로 rebase 금지). C7 종결 후 `integration/t-vn` → main PR 1건으로 합류하며,
 그 전에는 T-VN 변경이 main에 직접 들어가지 않는다. CI workflow 4종은
 `integration/t-vn` 대상 push/PR에도 동일하게 실행된다.
+
+#### 최근 48시간 Claude PR 적대 리뷰 후속 (2026-07-19, #765~#768)
+
+단일 전문 리뷰어가 PR #752/#756/#757/#759/#760/#763을 닫힘 여부와 무관하게 재검토했다.
+#757/#759는 P0~P3 잔여가 없고, 아래 네 finding은 서로 다른 파일·검증 경계이므로 agent A/B가
+병렬 처리한다. 모든 신규 PR base는 `integration/t-vn`이며, 열려 있는 PR #763 finding은 새 PR로
+분기하지 않고 그 PR에 커밋을 추가한다. 코드 변경은 같은 전문 리뷰어 1명이 테스트 전에 검토한다.
+
+- [ ] `T-VN-05R` / issue #765 / agent B — public curated 전용 allowlist DTO/projection으로
+  `detail.payload`, `source_record_key`와 raw lineage를 제거한다. admin/operator 표면은 유지하고
+  public list/detail sentinel, user OpenAPI·생성 타입 drift를 한 PR에서 닫는다.
+- [ ] `T-VN-17R` / issue #766 / agent A — 아직 main에 배포되지 않은 migration 0060을
+  호환성 shim 없이 정정한다. dedup과 semantic UNIQUE를 한 transaction의 non-concurrent
+  cutover로 묶어 writer를 DB lock에서 차단하며, 두 connection blocking/unique 회귀와 실패 복구
+  runbook을 같은 PR에 둔다. `CONCURRENTLY`와 INVALID index 복구 복잡성은 제거한다.
+- [ ] `T-VN-21R` / issue #767 / agent B — `--skip-seed`가 실제 public feature 200개를
+  결정적으로 선택하고 부족하면 실패하게 한다. 모든 viewport의 matched/returned cardinality를
+  기록하며, EXPLAIN shared read는 누적 top-level Plan 값을 한 번만 센다.
+- [ ] `T-VN-14R` / issue #768 / agent A — open PR #763의 branch에 후속 커밋한다. cluster와
+  items가 coord-null·centroid-outside 교차 geometry를 포함하는 같은 exact 후보 predicate를 쓰고,
+  route/area 행정구역 귀속과 cluster count/items universe 관계를 PostGIS 회귀로 고정한다.
+
+각 task는 독립 PR 단위다. #765/#766/#767은 서로 병렬, #768은 PR #763 안에서 처리한다. task별
+CI green·`integration/t-vn` 병합 뒤 해당 issue를 닫고 이 섹션을 완료 이력으로 옮긴다.
 
 ### Wave 0 — P0, 즉시 가역
 

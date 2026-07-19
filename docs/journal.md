@@ -2,6 +2,16 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — 최근 48시간 Claude PR 단일 적대 리뷰
+
+- 닫힘 여부와 무관하게 PR #752/#756/#757/#759/#760/#763을 전문 리뷰어 1명이 재검토했다.
+  기존 상세 리뷰 완료·리뷰 반영 전용·문서/기계적 PR은 사용자 지시에 따라 중복 리뷰하지 않았다.
+- PR #752의 public curated raw lineage 우회(#765), PR #756의 dedup→UNIQUE writer race(#766),
+  PR #760의 0행 실데이터 batch와 EXPLAIN buffer 중복 합산(#767), PR #763의 cluster/items 공간
+  후보집합 불일치(#768)를 상세 코멘트하고 아이템별 이슈로 묶었다. #757/#759는 잔여 finding이 없다.
+- `T-VN-05R/17R/21R/14R`를 독립 PR 경계로 추가했다. 0060은 아직 main cutover 전이므로
+  transactional non-concurrent UNIQUE로 직접 정정하고, #768은 열린 PR #763에 후속 커밋한다.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-21 3단 성능·DDL gate 인프라
 
 - ADR-075 D-12-4 / performance.md §8.3을 3단 gate의 **정본**으로 확정하고 CI·release
