@@ -26,7 +26,14 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _NOW = datetime(2026, 7, 19, 21, 0, tzinfo=_KST)
-_BBOX = {"min_lon": 126.9, "min_lat": 37.5, "max_lon": 127.1, "max_lat": 37.7}
+_TEST_LON = 126.987654
+_TEST_LAT = 37.576543
+_BBOX = {
+    "min_lon": _TEST_LON - 0.00001,
+    "min_lat": _TEST_LAT - 0.00001,
+    "max_lon": _TEST_LON + 0.00001,
+    "max_lat": _TEST_LAT + 0.00001,
+}
 
 
 async def _insert_feature(
@@ -35,8 +42,8 @@ async def _insert_feature(
     feature_id: str,
     status: str,
     kind: str = "place",
-    lon: float | None = 126.98,
-    lat: float | None = 37.57,
+    lon: float | None = _TEST_LON,
+    lat: float | None = _TEST_LAT,
     geom_wkt: str | None = None,
     deleted_at: datetime | None = None,
     user_deleted_at: datetime | None = None,
@@ -143,8 +150,8 @@ async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
         {
             "cluster_key": "11",
             "feature_count": 1,
-            "lon": pytest.approx(126.98),
-            "lat": pytest.approx(37.57),
+            "lon": pytest.approx(_TEST_LON),
+            "lat": pytest.approx(_TEST_LAT),
         }
     ]
 
@@ -166,7 +173,10 @@ async def test_admin_bbox_geometry_membership_is_serialization_only(
         status="hidden",
         lon=None,
         lat=None,
-        geom_wkt="LINESTRING(126.8 37.6, 127.2 37.6)",
+        geom_wkt=(
+            f"LINESTRING({_TEST_LON - 0.001} {_TEST_LAT}, "
+            f"{_TEST_LON + 0.001} {_TEST_LAT})"
+        ),
     )
     # coord는 bbox 안이고 geom MBR도 bbox와 겹치지만 실제 선은 bbox 바깥이다.
     # route/area가 coord arm으로 우회하거나 MBR만 검사하면 잘못 포함된다.
@@ -175,9 +185,13 @@ async def test_admin_bbox_geometry_membership_is_serialization_only(
         feature_id="admin-map-hidden-false-positive",
         kind="route",
         status="hidden",
-        lon=126.98,
-        lat=37.57,
-        geom_wkt="LINESTRING(126.8 37.49, 127.2 37.49, 127.2 37.8)",
+        lon=_TEST_LON,
+        lat=_TEST_LAT,
+        geom_wkt=(
+            f"LINESTRING({_TEST_LON - 0.001} {_BBOX['min_lat'] - 0.001}, "
+            f"{_TEST_LON + 0.001} {_BBOX['min_lat'] - 0.001}, "
+            f"{_TEST_LON + 0.001} {_TEST_LAT + 0.001})"
+        ),
     )
     await migrated_session.flush()
 
@@ -224,8 +238,8 @@ async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
         feature_id="admin-hidden-weather-anchor",
         status="hidden",
         kind="weather",
-        lon=126.981,
-        lat=37.571,
+        lon=_TEST_LON + 0.000001,
+        lat=_TEST_LAT + 0.000001,
     )
     await weather_repo.load_weather_values(
         migrated_session,
