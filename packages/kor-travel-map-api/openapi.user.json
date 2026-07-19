@@ -6421,6 +6421,12 @@
       }
     },
     "securitySchemes": {
+      "PublicApiKey": {
+        "description": "외부/비신뢰 public read용 VWorld 호환 API key. ServiceToken 요청은 같은 runtime dependency에서 별도 principal로 허용한다.",
+        "in": "query",
+        "name": "key",
+        "type": "apiKey"
+      },
       "ServiceToken": {
         "description": "외부 서비스 호출 토큰 (ADR-045 D-1).",
         "in": "header",
@@ -6751,6 +6757,26 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
           }
         ],
         "responses": {
@@ -6785,6 +6811,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "PublicApiKey": []
+          },
+          {
+            "ServiceToken": []
+          }
+        ],
         "summary": "List Curated Features Route",
         "tags": [
           "curated"
@@ -6802,6 +6836,26 @@
             "schema": {
               "title": "Curated Feature Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
             }
           }
         ],
@@ -6837,6 +6891,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "PublicApiKey": []
+          },
+          {
+            "ServiceToken": []
+          }
+        ],
         "summary": "Get Curated Feature Route",
         "tags": [
           "curated"

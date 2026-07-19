@@ -710,7 +710,7 @@ def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
     assert schemes["OpsToken"] == {
         "type": "apiKey",
         "description": (
-            "canonical ops server-to-server read/cancel token. scope 문자열만으로는 "
+            "ops server-to-server read/cancel token. scope 문자열만으로는 "
             "권한을 얻지 못하며, token 종류와 method/exact path도 일치해야 한다."
         ),
         "in": "header",
@@ -777,6 +777,122 @@ def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
         item["in"] == "header" and item["name"] == OPS_SCOPE_HEADER
         for item in admin_operation.get("parameters", [])
     )
+
+    observability_paths = {
+        "/v1/ops/api-call-logs",
+        "/v1/ops/consistency/issues",
+        "/v1/ops/consistency/reports",
+        "/v1/ops/health-deep",
+        "/v1/ops/metrics",
+        "/v1/ops/system-logs",
+    }
+    for path in observability_paths:
+        operation = spec["paths"][path]["get"]
+        assert operation["security"] == [
+            {"AdminBFF": []},
+            {"OpsToken": [], "OpsScope": []},
+        ]
+        assert any(
+            item["in"] == "header" and item["name"] == OPS_SCOPE_HEADER
+            for item in operation.get("parameters", [])
+        )
+
+    public_key = schemes["PublicApiKey"]
+    assert public_key == {
+        "type": "apiKey",
+        "in": "query",
+        "name": "key",
+        "description": (
+            "외부/비신뢰 public read용 VWorld 호환 API key. ServiceToken 요청은 "
+            "같은 runtime dependency에서 별도 principal로 허용한다."
+        ),
+    }
+    for path in {
+        "/v1/curated-features",
+        "/v1/curated-features/{curated_feature_id}",
+        "/v1/curated-sources",
+        "/v1/curated-themes",
+    }:
+        assert spec["paths"][path]["get"]["security"] == [
+            {"PublicApiKey": []},
+            {"ServiceToken": []},
+        ]
+
+    mois = spec["paths"]["/v1/debug/mois-license/{license_id}"]["get"]
+    assert mois["security"] == [{"AdminBFF": []}]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/ops/api-call-logs",
+        "/v1/ops/consistency/issues",
+        "/v1/ops/consistency/reports",
+        "/v1/ops/health-deep",
+        "/v1/ops/metrics",
+        "/v1/ops/system-logs",
+    ],
+)
+def test_ops_observability_routes_reject_headerless_and_wrong_principals(
+    path: str,
+) -> None:
+    client = _ops_client()
+    headerless = client.get(path)
+    service_only = client.get(
+        path,
+        headers={SERVICE_TOKEN_HEADER: "not-an-ops-token"},
+    )
+    cancel_as_read = client.get(
+        path,
+        headers={
+            OPS_TOKEN_HEADER: OPS_CANCEL_TOKEN,
+            OPS_SCOPE_HEADER: "ops:read",
+        },
+    )
+    assert (headerless.status_code, headerless.json()["code"]) == (
+        401,
+        "OPS_TOKEN_REQUIRED",
+    )
+    assert (service_only.status_code, service_only.json()["code"]) == (
+        401,
+        "OPS_TOKEN_REQUIRED",
+    )
+    assert (cancel_as_read.status_code, cancel_as_read.json()["code"]) == (
+        403,
+        "OPS_SCOPE_FORBIDDEN",
+    )
+
+
+@pytest.mark.unit
+def test_ops_observability_health_accepts_bff_and_read_principal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops as ops_module
+
+    async def _ok(_session: object) -> ops_module.OpsHealthCheck:
+        return ops_module.OpsHealthCheck(component="probe", status="ok")
+
+    monkeypatch.setattr(ops_module, "_check_database", _ok)
+    monkeypatch.setattr(ops_module, "_check_postgis", _ok)
+    monkeypatch.setattr(ops_module, "_check_prewarm", _ok)
+    client = _ops_client()
+    bff = client.get(
+        "/v1/ops/health-deep",
+        headers={
+            ADMIN_ACTOR_HEADER: "frontend-admin",
+            ADMIN_PROXY_SECRET_HEADER: "proxy-secret",
+        },
+    )
+    service = client.get(
+        "/v1/ops/health-deep",
+        headers={
+            OPS_TOKEN_HEADER: OPS_READ_TOKEN,
+            OPS_SCOPE_HEADER: "ops:read",
+        },
+    )
+    assert bff.status_code == 200
+    assert service.status_code == 200
 
 
 @pytest.mark.unit

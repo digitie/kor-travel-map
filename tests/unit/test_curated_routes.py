@@ -172,6 +172,29 @@ def test_curated_routes_are_in_openapi() -> None:
     assert "/v1/admin/curated-source-rules/{rule_id}/apply" in paths
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/curated-features",
+        "/v1/curated-features/11111111-1111-4111-8111-111111111111",
+        "/v1/curated-sources",
+        "/v1/curated-themes",
+    ],
+)
+def test_public_curated_routes_reject_keyless_requests(path: str) -> None:
+    app = create_app(
+        ApiSettings(
+            _env_file=None,
+            public_api_key_required=True,
+            vworld_api_key=SecretStr("public-key-for-curated-route-test"),
+        )
+    )
+    response = TestClient(app).get(path)
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "UNAUTHORIZED"
+
+
 def test_curated_source_rule_view_accepts_detail_selector() -> None:
     from kortravelmap.infra.curated_repo import CuratedSourceRule
 

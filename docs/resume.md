@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex, agent B) — T-VN-03 Map 구현 head 준비
+
+curated GET 4개에 `require_public_api_key`, ops 관측 GET 6개에
+`require_ops_operator`, local-dev MOIS raw debug에 `require_admin_frontend`를 배선하고
+route policy exception을 0건으로 줄였다. production은 기존 profile matrix와 compose
+기본값으로 debug route를 mount하지 않으며, 새 env/secret/DB migration은 없다. full/user
+OpenAPI security와 admin/user 생성 TypeScript, same-origin BFF 회귀를 함께 갱신한다.
+CodeGraph는 `create_app` 181개, ops dependency 199개, public dependency 58개, wiring gate
+44개 영향 심볼을 보고했다. **다음 한 작업**은 생성물을 포함한 exact Map head와 PinVi
+PR #393 exact head를 동일 전문 리뷰어에게 교차 제출하는 것이다. 승인 전에는 테스트·lint·
+build를 실행하지 않는다.
+
 ## 2026-07-19 (codex, agent B) — T-VN-03 route gate docs-first 착수
 
 `integration/t-vn@a45bc3ac` 기준으로 curated GET 4개, ops 관측 GET 6개, MOIS raw debug

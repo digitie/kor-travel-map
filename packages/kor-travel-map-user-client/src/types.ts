@@ -2673,6 +2673,8 @@ export interface operations {
                 display_title?: string | null;
                 page_size?: number;
                 cursor?: string | null;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -2711,7 +2713,10 @@ export interface operations {
     };
     get_curated_feature_route_v1_curated_features__curated_feature_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path: {
                 curated_feature_id: string;

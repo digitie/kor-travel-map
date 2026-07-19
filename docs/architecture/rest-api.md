@@ -504,6 +504,14 @@ canonical 그룹만 사용한다. C6B clean-cut 이후 `/ops/dagster*`, `/ops/im
 `/ops/import-job-events`, `/ops/providers*`, `/admin/features/update-requests*`,
 `/admin/provider-refresh-policies*`는 존재하지 않는다.
 
+`GET /v1/ops/{metrics,health-deep,system-logs,api-call-logs,consistency/*}`는
+canonical 조작 표면과 동일하게 trusted admin BFF 또는 read token과 `ops:read` scope의
+AND 결합만 허용한다. service token, cancel token, headerless 요청은 권한을 얻지 못한다.
+OpenAPI full profile은 각 GET에 `AdminBFF OR (OpsToken AND OpsScope)`를 선언하고 user
+profile에서는 ops 전체를 제외한다. PinVi 관측 consumer는 issue #392에서 같은 read
+principal을 선전환하며, Map/PinVi exact heads는 C6c manifest v4의 동일 source pair로만
+활성화한다.
+
 `POST /v1/ops/pipeline/requests`의 응답에는 서로 다른 두 멱등성 결과를 항상 함께 둔다.
 `idempotent_replay`는 동일 `Idempotency-Key` 요청 재생 여부이고,
 `reused_active_request`는 새 key로 제출한 계획이 이미 실행 중인 같은 canonical 계획을
@@ -710,6 +718,16 @@ GET /v1/debug/mois-license/{license_id}
 ✅ /debug/health · /debug/version 제거됨(T-214h, clean cut). 상태확인은 /health·/version·
    /v1/ops/health-deep로 수렴. dataset preview는 `/v1/ops/datasets/preview` fixture-only다.
 ```
+MOIS route는 원본 provider payload를 포함하므로 `local-dev`에서
+`debug_routes_enabled=true`일 때만 mount하고, mount 뒤에도 trusted admin BFF를 요구한다.
+production은 `debug_routes_enabled=false`를 기동 조건으로 강제해 route 자체가 없으며,
+debug token·legacy header·경로 alias는 제공하지 않는다.
+
+`GET /v1/curated-features*`, `/v1/curated-sources`, `/v1/curated-themes`는 다른 public
+read와 같은 `require_public_api_key` 경계다. production keyless 요청은 401이고 public
+key 또는 service principal만 public OpenAPI 계약에 선언한다. trusted admin BFF의 내부
+우회는 기존 same-origin UI 동작을 위한 runtime 경계이며 user OpenAPI principal로
+노출하지 않는다.
 - **action sub-resource 규약(ADR-048 #8)**: 부수효과 상태전이는 `POST {col}/{id}/{verb}`
   (`deactivate`/`cancel`/`run-now`/`approve`/`reject`/`load`/`validate`/`swap`), 순수 수정은
   `PATCH {id}`, 생성 `POST {col}`, 조회 `GET`. 신규 action도 같은 형태로 확장.

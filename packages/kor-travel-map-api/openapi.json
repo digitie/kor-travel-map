@@ -24754,9 +24754,15 @@
         "type": "apiKey"
       },
       "OpsToken": {
-        "description": "canonical ops server-to-server read/cancel token. scope 문자열만으로는 권한을 얻지 못하며, token 종류와 method/exact path도 일치해야 한다.",
+        "description": "ops server-to-server read/cancel token. scope 문자열만으로는 권한을 얻지 못하며, token 종류와 method/exact path도 일치해야 한다.",
         "in": "header",
         "name": "X-Kor-Travel-Map-Ops-Token",
+        "type": "apiKey"
+      },
+      "PublicApiKey": {
+        "description": "외부/비신뢰 public read용 VWorld 호환 API key. ServiceToken 요청은 같은 runtime dependency에서 별도 principal로 허용한다.",
+        "in": "query",
+        "name": "key",
         "type": "apiKey"
       },
       "ServiceToken": {
@@ -32583,6 +32589,26 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
           }
         ],
         "responses": {
@@ -32617,6 +32643,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "PublicApiKey": []
+          },
+          {
+            "ServiceToken": []
+          }
+        ],
         "summary": "List Curated Features Route",
         "tags": [
           "curated"
@@ -32634,6 +32668,26 @@
             "schema": {
               "title": "Curated Feature Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
             }
           }
         ],
@@ -32669,6 +32723,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "PublicApiKey": []
+          },
+          {
+            "ServiceToken": []
+          }
+        ],
         "summary": "Get Curated Feature Route",
         "tags": [
           "curated"
@@ -32744,6 +32806,26 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
           }
         ],
         "responses": {
@@ -32778,6 +32860,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "PublicApiKey": []
+          },
+          {
+            "ServiceToken": []
+          }
+        ],
         "summary": "List Curated Sources Route",
         "tags": [
           "curated"
@@ -32815,6 +32905,26 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
           }
         ],
         "responses": {
@@ -32849,6 +32959,14 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "PublicApiKey": []
+          },
+          {
+            "ServiceToken": []
+          }
+        ],
         "summary": "List Curated Themes Route",
         "tags": [
           "curated"
@@ -33430,6 +33548,11 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
         "summary": "MOIS 인허가 on-demand 상세 (Step D, detail 우선)",
         "tags": [
           "debug",
@@ -36083,6 +36206,24 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
           }
         ],
         "responses": {
@@ -36117,6 +36258,15 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsScope": [],
+            "OpsToken": []
+          }
+        ],
         "summary": "Get Api Call Logs",
         "tags": [
           "ops"
@@ -36264,6 +36414,24 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
           }
         ],
         "responses": {
@@ -36298,6 +36466,15 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsScope": [],
+            "OpsToken": []
+          }
+        ],
         "summary": "List Integrity Issues",
         "tags": [
           "ops"
@@ -36357,6 +36534,24 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
           }
         ],
         "responses": {
@@ -36391,6 +36586,15 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsScope": [],
+            "OpsToken": []
+          }
+        ],
         "summary": "List Consistency Reports",
         "tags": [
           "ops"
@@ -36869,6 +37073,26 @@
       "get": {
         "description": "DB 연결 + PostGIS 확장 readiness를 점검한다. liveness용 public ``/health``(DB-free 정적 200)와 달리 실제 DB를 친다. 한 컴포넌트라도 error면 전체 ``status=degraded`` + HTTP 503(모니터링이 body로 컴포넌트별 상태를 읽음).",
         "operationId": "get_ops_health_deep_v1_ops_health_deep_get",
+        "parameters": [
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -36880,7 +37104,7 @@
             },
             "description": "Successful Response"
           },
-          "default": {
+          "422": {
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -36888,29 +37112,7 @@
                 }
               }
             },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "summary": "deep readiness (DB/PostGIS)",
-        "tags": [
-          "ops"
-        ]
-      }
-    },
-    "/v1/ops/metrics": {
-      "get": {
-        "description": "운영 홈/대시보드가 쓰는 DB 기반 summary metric.",
-        "operationId": "get_ops_metrics_v1_ops_metrics_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpsMetricsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
+            "description": "Validation Error"
           },
           "default": {
             "content": {
@@ -36923,6 +37125,86 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsScope": [],
+            "OpsToken": []
+          }
+        ],
+        "summary": "deep readiness (DB/PostGIS)",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/metrics": {
+      "get": {
+        "description": "운영 홈/대시보드가 쓰는 DB 기반 summary metric.",
+        "operationId": "get_ops_metrics_v1_ops_metrics_get",
+        "parameters": [
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsMetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsScope": [],
+            "OpsToken": []
+          }
+        ],
         "summary": "Get Ops Metrics",
         "tags": [
           "ops"
@@ -39321,6 +39603,24 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
           }
         ],
         "responses": {
@@ -39355,6 +39655,15 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsScope": [],
+            "OpsToken": []
+          }
+        ],
         "summary": "Get System Logs",
         "tags": [
           "ops"

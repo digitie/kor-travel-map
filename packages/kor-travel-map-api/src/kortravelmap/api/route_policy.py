@@ -170,18 +170,17 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/public/festivals/map-markers": RoutePolicy.PUBLIC_KEYED,
     "/v1/public/festivals/monthly": RoutePolicy.PUBLIC_KEYED,
     "/v1/public/festivals/{feature_id}": RoutePolicy.PUBLIC_KEYED,
-    # legacy 무키 curated 공개 read — 목표 정책은 public-keyed다. 현재 배선
-    # gap은 KNOWN_WIRING_EXCEPTIONS(T-VN-03) 참조 (F-3).
+    # curated 공개 read도 다른 public read와 같은 public-keyed 경계다.
     "/v1/curated-features": RoutePolicy.PUBLIC_KEYED,
     "/v1/curated-features/{curated_feature_id}": RoutePolicy.PUBLIC_KEYED,
     "/v1/curated-sources": RoutePolicy.PUBLIC_KEYED,
     "/v1/curated-themes": RoutePolicy.PUBLIC_KEYED,
     # -- service — service-to-service surface (X-Kor-Travel-Map-Service-Token).
     "/v1/features/batch": RoutePolicy.SERVICE,
-    # -- debug — 인증 없는 개발자 표면. enforcing 경계는 settings flag
-    #    (`debug_routes_enabled`)이며 production profile은 T-VN-01 fail-closed
-    #    검증이 이 flag 자체를 거부한다.
-    "/v1/debug/mois-license/{license_id}": RoutePolicy.DEBUG,
+    # -- operator/debug — raw provider payload은 local-dev debug mount에서만
+    #    노출하되 mount된 route도 trusted admin BFF를 요구한다. production은
+    #    debug_routes_enabled=false로 route 자체를 내린다.
+    "/v1/debug/mois-license/{license_id}": RoutePolicy.OPERATOR,
     # -- operator — feature raw lineage(관측/source). T-VN-05(ADR-073/D-9-1):
     #    raw_data/raw_payload_hash/source_record_key는 공개 detail에서 제거하고
     #    admin BFF 인증 표면으로 이동했다.
@@ -297,8 +296,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/ops/pipeline/schedules/{schedule_name}/commands": RoutePolicy.OPERATOR,
     # -- operator — ops-live WebSocket (#725 HMAC ticket 재사용, ADR-064).
     "/v1/ops/live": RoutePolicy.OPERATOR,
-    # -- operator — 존치 ops 관측 read. 목표 정책은 operator다. 현재 무의존
-    #    mount gap은 KNOWN_WIRING_EXCEPTIONS(T-VN-03) 참조 (F-3·F-17 조율).
+    # -- operator — 존치 ops 관측 read(BFF 또는 ops:read principal).
     "/v1/ops/metrics": RoutePolicy.OPERATOR,
     "/v1/ops/system-logs": RoutePolicy.OPERATOR,
     "/v1/ops/api-call-logs": RoutePolicy.OPERATOR,
@@ -308,35 +306,8 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
 }
 
 
-_T_VN_03_OWNER = "T-VN-03 (codex b1)"
-_T_VN_03_OPS_NOTE = (
-    "무의존 mount ops 관측 read — PinVi admin proxy가 라이브 소비 중이라 "
-    "T-VN-00 service/operator principal 설치·PinVi caller 전환과 같은 "
-    "cutover에서 operator 경계로 이동한다 (F-3·F-17)."
-)
-_T_VN_03_CURATED_NOTE = (
-    "무키 legacy curated 공개 read — public-keyed 정책으로 이동은 "
-    "T-VN-03이 소유한다 (F-3)."
-)
-
-#: 배선≠정책이 **허용되는** 유일한 목록. 소유 task가 gap을 닫으면 해당
-#: entry는 stale이 되어 CI가 제거를 강제한다 (ledger는 줄어들기만 한다).
-KNOWN_WIRING_EXCEPTIONS: tuple[WiringException, ...] = (
-    WiringException("/v1/curated-features", _T_VN_03_OWNER, _T_VN_03_CURATED_NOTE),
-    WiringException(
-        "/v1/curated-features/{curated_feature_id}",
-        _T_VN_03_OWNER,
-        _T_VN_03_CURATED_NOTE,
-    ),
-    WiringException("/v1/curated-sources", _T_VN_03_OWNER, _T_VN_03_CURATED_NOTE),
-    WiringException("/v1/curated-themes", _T_VN_03_OWNER, _T_VN_03_CURATED_NOTE),
-    WiringException("/v1/ops/metrics", _T_VN_03_OWNER, _T_VN_03_OPS_NOTE),
-    WiringException("/v1/ops/system-logs", _T_VN_03_OWNER, _T_VN_03_OPS_NOTE),
-    WiringException("/v1/ops/api-call-logs", _T_VN_03_OWNER, _T_VN_03_OPS_NOTE),
-    WiringException("/v1/ops/consistency/reports", _T_VN_03_OWNER, _T_VN_03_OPS_NOTE),
-    WiringException("/v1/ops/consistency/issues", _T_VN_03_OWNER, _T_VN_03_OPS_NOTE),
-    WiringException("/v1/ops/health-deep", _T_VN_03_OWNER, _T_VN_03_OPS_NOTE),
-)
+#: 배선≠정책이 허용되는 유일한 목록. T-VN-03 clean-cut 뒤 예외는 0건이다.
+KNOWN_WIRING_EXCEPTIONS: tuple[WiringException, ...] = ()
 
 
 # ---------------------------------------------------------------------------

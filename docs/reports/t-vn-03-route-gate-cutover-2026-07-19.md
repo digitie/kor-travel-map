@@ -62,7 +62,7 @@ container는 trusted frontend `/32`가 아니므로 `403`이 된다. PinVi issue
 
 배포 가능 조건은 다음 exact pair가 모두 준비된 때뿐이다.
 
-1. PinVi #392 구현 head가 모든 실제 관측 read에 `ops:read`만 전송하고 direct caller가 없는 두
+1. PinVi PR #393 구현 head가 모든 실제 관측 read에 `ops:read`만 전송하고 direct caller가 없는 두
    경로는 새 호출을 만들지 않았음을 contract test로 고정한다.
 2. Map T-VN-03 head가 route policy exception 0건, full/user OpenAPI와 admin 생성 타입 일치를
    증명한다.
@@ -91,5 +91,5 @@ container는 trusted frontend `/32`가 아니므로 `403`이 된다. PinVi issue
 - ops 6경로의 headerless/service-only/cancel-token 거부와 BFF/read-token 허용 검증
 - MOIS raw의 production unmount와 local-dev operator gate 검증
 - full/user OpenAPI와 생성 TypeScript 소비 계약 일치
-- PinVi #392 head와 Map head가 C6c manifest v4 exact pair source에 결박
+- PinVi PR #393 head와 Map head가 C6c manifest v4 exact pair source에 결박
 - 단일 리뷰 승인 뒤 로컬 gate와 n150 production live E2E 통과

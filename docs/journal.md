@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex, agent B) — T-VN-03 Map route gate 구현
+
+- public curated 4경로를 public key dependency에 포함하고, ops metrics/log/
+  consistency/deep-health 6경로는 BFF 또는 read token+`ops:read`로 닫았다. MOIS raw는
+  local-dev mount에서도 BFF를 요구하며 production에는 mount하지 않는다.
+- route policy registry의 MOIS를 operator로 옮기고 T-VN-03 wiring exception 10개를
+  모두 삭제했다. 삭제 route·alias·legacy header fallback·새 env·DB migration은 없다.
+- OpenAPI full에는 curated `PublicApiKey OR ServiceToken`, ops 관측
+  `AdminBFF OR (OpsToken AND OpsScope)`, MOIS `AdminBFF`를 선언한다. user subset은 ops/debug를
+  제외하고 public scheme만 유지하며 admin/user TypeScript를 같은 spec에서 재생성한다.
+- same-origin admin UI BFF가 관측 read에도 actor+proxy secret을 주입하는 회귀와 Python auth/
+  route-policy/OpenAPI 회귀를 추가했다. PinVi issue #392의 구현 PR #393과 이 Map exact head는
+  C6c manifest v4 exact source pair로만 활성화한다.
+- CodeGraph 영향도는 `create_app` 181개, `require_ops_operator` 199개,
+  `require_public_api_key` 58개, `assert_route_policy_wiring` 44개 심볼이다. 사용자 지시에 따라
+  동일 리뷰어 승인 전 테스트·lint·build는 실행하지 않는다.
+
 ## 2026-07-19 (codex, agent B) — T-VN-03 route gate docs-first
 
 - 최신 `integration/t-vn@a45bc3ac`에서 curated public GET 4개, ops 관측 GET 6개,
