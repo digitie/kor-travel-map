@@ -8,6 +8,7 @@ import {
 import {
   KMA_DATASET_KEY,
   KMA_PROVIDER,
+  assertKmaDagsterWorkerJobDefinition,
   assertExactKmaPreviewResponse,
   assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
@@ -214,6 +215,7 @@ test.describe("C7 KMA grid cap destructive live E2E", () => {
     const syncScope = `external_system:${externalSystem}`;
     const state = createCleanupState("cap", RUN_ID);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
+    await assertKmaDagsterWorkerJobDefinition();
 
     await withC7Cleanup(
       page,

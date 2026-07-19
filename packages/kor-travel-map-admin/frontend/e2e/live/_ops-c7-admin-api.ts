@@ -90,12 +90,6 @@ export type CleanupState = {
   allTargetRefs: Map<string, TargetJournalRef>;
 };
 
-type OwnedTargetRef = TargetRef & {
-  entityTag: string;
-  lockVersion: number;
-  targetId: string;
-};
-
 type TargetJournalRef = TargetRef & {
   body: PoiCacheTargetUpsertRequest;
   entityTag: string | null;
@@ -117,26 +111,8 @@ type CleanupIssue = {
   resource: string;
 };
 
-type CleanupManifest = {
-  active_target_counts: Record<string, number | null>;
-  durable_residue_counts: {
-    observed_event_rows: number;
-    scope_states: number;
-    update_requests: number;
-  };
-  issues: CleanupIssue[];
-  preserved_for_manual_cleanup: boolean;
-  request_ids: string[];
-  request_terminal_statuses: Record<string, string>;
-  run_id: string;
-  scenario: CleanupScenario;
-  target_refs: OwnedTargetRef[];
-  version: 1;
-};
-
 type CleanupExecution = {
   issues: CleanupIssue[];
-  manifest: CleanupManifest;
   result: CleanupResult;
 };
 
@@ -144,7 +120,7 @@ type CleanupExecution = {
 export const KMA_PROVIDER = "python-kma-api" as const;
 export const KMA_DATASET_KEY = "kma_ultra_short_nowcast" as const;
 export const KMA_SAFE_DAGSTER_JOB =
-  "feature_weather_kma_ultra_short_nowcast_job" as const;
+  "feature_update_request_worker" as const;
 export const QUEUE_SENSOR_NAME = "feature_update_request_queue_sensor" as const;
 
 export const REQUEST_TERMINAL_TIMEOUT = 8 * 60 * 1000;
@@ -155,11 +131,58 @@ const POI_TARGETS_PATH = "/v1/admin/poi-cache-targets";
 const PIPELINE_REQUESTS_PATH = "/v1/ops/pipeline/requests";
 const FORBIDDEN_PROVIDER_PATTERN = /opinet/i;
 const BROWSER_FETCH_TIMEOUT_MS = 30_000;
+const DAGSTER_GRAPHQL_TIMEOUT_MS = 15_000;
+const DAGSTER_RUN_SETTLEMENT_TIMEOUT_MS = 60_000;
 const OWNED_TARGET_PAGE_SIZE = 500;
 const OWNED_TARGET_SET_LIMIT = 501;
 const OWNED_TARGET_PAGE_LIMIT = 2;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const bootstrappedPages = new WeakSet<Page>();
+
+const KMA_DAGSTER_JOB_DISCOVERY_QUERY = `
+query C7KmaWorkerJobDiscovery {
+  repositoriesOrError {
+    __typename
+    ... on RepositoryConnection {
+      nodes {
+        pipelines { name isJob }
+      }
+    }
+  }
+}
+`;
+
+const KMA_DAGSTER_RUN_IDENTITY_QUERY = `
+query C7KmaWorkerRunIdentity($runId: ID!) {
+  runOrError(runId: $runId) {
+    __typename
+    ... on Run {
+      runId
+      jobName
+      status
+      tags { key value }
+    }
+  }
+}
+`;
+
+const FEATURE_UPDATE_REQUEST_ID_TAG =
+  "kor_travel_map.feature_update_request_id";
+const FEATURE_UPDATE_REQUEST_GENERATION_TAG =
+  "kor_travel_map.feature_update_request_generation";
+const FEATURE_UPDATE_SCOPE_TYPE_TAG =
+  "kor_travel_map.feature_update_scope_type";
+const DAGSTER_SENSOR_NAME_TAG = "dagster/sensor_name";
+const DAGSTER_TERMINAL_STATUSES = new Set([
+  "SUCCESS",
+  "FAILURE",
+  "CANCELED",
+]);
+
+type GraphqlEnvelope = {
+  data?: unknown;
+  errors?: unknown;
+};
 
 type DurableCleanupJournal = {
   cleanup_result: CleanupResult | null;
@@ -853,6 +876,191 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function dagsterGraphqlEndpoint(): URL {
+  const raw = process.env.E2E_DAGSTER_URL;
+  const expectedHash = process.env.E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256;
+  if (!raw || !expectedHash || !SHA256_PATTERN.test(expectedHash)) {
+    throw new Error(
+      "C7 Dagster GraphQL endpoint/hash attestation이 필요합니다 (values redacted)",
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("C7 Dagster GraphQL endpoint가 안전하지 않습니다");
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error("C7 Dagster GraphQL endpoint가 안전하지 않습니다");
+  }
+  const pathname = url.pathname.replace(/\/+$/, "");
+  url.pathname = pathname.endsWith("/graphql")
+    ? pathname
+    : `${pathname}/graphql`;
+  if (sha256(url.href) !== expectedHash) {
+    throw new Error(
+      "C7 Dagster GraphQL endpoint attestation이 불일치합니다 (values redacted)",
+    );
+  }
+  return url;
+}
+
+async function postDagsterGraphql(
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  let response: globalThis.Response;
+  try {
+    response = await fetch(dagsterGraphqlEndpoint(), {
+      body: JSON.stringify({ query, variables }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(DAGSTER_GRAPHQL_TIMEOUT_MS),
+    });
+  } catch {
+    throw new Error("C7 Dagster GraphQL transport가 실패했습니다 (values redacted)");
+  }
+  if (!response.ok) {
+    throw new Error("C7 Dagster GraphQL HTTP 계약이 실패했습니다 (values redacted)");
+  }
+  let envelope: GraphqlEnvelope;
+  try {
+    envelope = (await response.json()) as GraphqlEnvelope;
+  } catch {
+    throw new Error("C7 Dagster GraphQL JSON 계약이 실패했습니다 (values redacted)");
+  }
+  if (Array.isArray(envelope.errors) && envelope.errors.length > 0) {
+    throw new Error("C7 Dagster GraphQL 응답에 오류가 있습니다 (values redacted)");
+  }
+  const data = asRecord(envelope.data);
+  if (data === null) {
+    throw new Error("C7 Dagster GraphQL data 계약이 실패했습니다 (values redacted)");
+  }
+  return data;
+}
+
+/** KMA destructive mutation 전에 실제 queue worker job 정의를 단 하나로 결박한다. */
+export async function assertKmaDagsterWorkerJobDefinition(): Promise<void> {
+  const data = await postDagsterGraphql(KMA_DAGSTER_JOB_DISCOVERY_QUERY, {});
+  const root = asRecord(data.repositoriesOrError);
+  if (root?.__typename !== "RepositoryConnection") {
+    throw new Error("C7 Dagster repository 조회 계약이 실패했습니다 (values redacted)");
+  }
+  const matches = asArray(root.nodes).flatMap((nodeValue) => {
+    const node = asRecord(nodeValue);
+    return asArray(node?.pipelines)
+      .map(asRecord)
+      .filter((pipeline) => pipeline?.name === KMA_SAFE_DAGSTER_JOB);
+  });
+  if (matches.length !== 1 || matches[0]?.isJob !== true) {
+    throw new Error(
+      "C7 Dagster queue worker job cardinality/isJob 계약이 실패했습니다 (values redacted)",
+    );
+  }
+}
+
+function dagsterRunTags(value: unknown): Map<string, string> {
+  const tags = new Map<string, string>();
+  for (const rawTag of asArray(value)) {
+    const tag = asRecord(rawTag);
+    if (
+      typeof tag?.key !== "string" ||
+      !tag.key ||
+      typeof tag.value !== "string" ||
+      tags.has(tag.key)
+    ) {
+      throw new Error("C7 Dagster run tag 계약이 실패했습니다 (values redacted)");
+    }
+    tags.set(tag.key, tag.value);
+  }
+  return tags;
+}
+
+function expectedDagsterTerminalStatus(status: string): string {
+  if (status === "done") return "SUCCESS";
+  if (status === "failed") return "FAILURE";
+  if (status === "cancelled") return "CANCELED";
+  throw new Error("C7 request terminal status 계약이 실패했습니다");
+}
+
+async function assertTerminalDagsterRunIdentity(
+  page: Page,
+  detail: PipelineExecutionDetailResponse,
+): Promise<void> {
+  const execution = detail.data.execution;
+  const updateRequest = detail.data.update_request;
+  const runId = execution.dagster_run_id;
+  if (
+    !runId ||
+    updateRequest === null ||
+    updateRequest.request_id !== execution.id ||
+    updateRequest.dagster_run_id !== runId ||
+    !Number.isSafeInteger(updateRequest.generation) ||
+    updateRequest.generation <= 0 ||
+    updateRequest.scope.type !== "provider_dataset" ||
+    updateRequest.scope.provider !== KMA_PROVIDER ||
+    updateRequest.scope.dataset_key !== KMA_DATASET_KEY
+  ) {
+    throw new Error(
+      "C7 terminal request/Dagster owner identity 계약이 실패했습니다 (values redacted)",
+    );
+  }
+  const expectedStatus = expectedDagsterTerminalStatus(execution.status);
+  const deadline = Date.now() + DAGSTER_RUN_SETTLEMENT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const data = await postDagsterGraphql(KMA_DAGSTER_RUN_IDENTITY_QUERY, {
+      runId,
+    });
+    const run = asRecord(data.runOrError);
+    if (run?.__typename !== "Run") {
+      await page.waitForTimeout(1_000);
+      continue;
+    }
+    const tags = dagsterRunTags(run.tags);
+    const sensorName = tags.get(DAGSTER_SENSOR_NAME_TAG);
+    if (
+      run.runId !== runId ||
+      run.jobName !== KMA_SAFE_DAGSTER_JOB ||
+      tags.get(FEATURE_UPDATE_REQUEST_ID_TAG) !== updateRequest.request_id ||
+      tags.get(FEATURE_UPDATE_REQUEST_GENERATION_TAG) !==
+        String(updateRequest.generation) ||
+      tags.get(FEATURE_UPDATE_SCOPE_TYPE_TAG) !== "provider_dataset" ||
+      sensorName !== QUEUE_SENSOR_NAME
+    ) {
+      throw new Error(
+        "C7 Dagster run job/tag identity 계약이 실패했습니다 (values redacted)",
+      );
+    }
+    if (run.status === expectedStatus) return;
+    if (
+      typeof run.status !== "string" ||
+      DAGSTER_TERMINAL_STATUSES.has(run.status)
+    ) {
+      throw new Error(
+        "C7 Dagster run terminal status 계약이 실패했습니다 (values redacted)",
+      );
+    }
+    await page.waitForTimeout(1_000);
+  }
+  throw new Error(
+    "C7 Dagster run terminal settlement 제한 시간을 초과했습니다 (values redacted)",
+  );
 }
 
 function parseStrongEntityTag(
@@ -2490,6 +2698,7 @@ export async function waitForTerminal(
     }
     await writeDurableJournal(state, "request_terminal");
   }
+  await assertTerminalDagsterRunIdentity(page, detail);
   return detail;
 }
 
@@ -2604,25 +2813,12 @@ async function recoverUnresolvedTargetIntents(
   return { complete: issues.length === 0, issues };
 }
 
-async function attachManifest(
-  testInfo: TestInfo,
-  manifest: CleanupManifest,
-): Promise<void> {
-  await testInfo.attach("c7-cleanup-manifest.json", {
-    body: JSON.stringify(manifest, null, 2),
-    contentType: "application/json",
-  });
-}
-
 async function cleanupResources(
   page: Page,
-  testInfo: TestInfo,
   state: CleanupState,
   terminalTimeout: number,
 ): Promise<CleanupExecution> {
   const issues: CleanupIssue[] = [];
-  const statuses: Record<string, string> = {};
-  let observedEventRows = 0;
   let exactScopeDiscoveryComplete = true;
   const targetRecovery = await recoverUnresolvedTargetIntents(page, state);
   issues.push(...targetRecovery.issues);
@@ -2694,8 +2890,6 @@ async function cleanupResources(
       continue;
     }
     const status = result.body.data.execution.status;
-    statuses[requestId] = status;
-    observedEventRows += result.body.data.events.length;
     if (!TERMINAL_STATUSES.has(status)) cancelIds.push(requestId);
   }
 
@@ -2743,7 +2937,6 @@ async function cleanupResources(
     }
     const { requestId, status } = settled.value;
     if (status && TERMINAL_STATUSES.has(status)) {
-      statuses[requestId] = status;
       state.requestTerminalStatuses.set(requestId, status);
     } else {
       everyRequestTerminal = false;
@@ -2869,40 +3062,11 @@ async function cleanupResources(
     restored: !preservedForManualCleanup,
   };
   state.cleanupResult = result;
-  const manifest: CleanupManifest = {
-    active_target_counts: activeTargetCounts,
-    durable_residue_counts: {
-      observed_event_rows: observedEventRows,
-      scope_states: state.scopeStateCount,
-      update_requests: requestIds.length,
-    },
-    issues,
-    preserved_for_manual_cleanup: preservedForManualCleanup,
-    request_ids: requestIds,
-    request_terminal_statuses: statuses,
-    run_id: state.runId,
-    scenario: state.scenario,
-    target_refs: state.targets.map(({
-      entityTag,
-      externalSystem,
-      lockVersion,
-      targetId,
-      targetKey,
-    }) => ({
-      entityTag,
-      externalSystem,
-      lockVersion,
-      targetId,
-      targetKey,
-    })),
-    version: 1,
-  };
   await writeDurableJournal(
     state,
     result.restored ? "restored" : "cleanup_blocked",
   );
-  await attachManifest(testInfo, manifest);
-  return { issues, manifest, result };
+  return { issues, result };
 }
 
 export async function withC7Cleanup(
@@ -2923,7 +3087,6 @@ export async function withC7Cleanup(
     try {
       cleanup = await cleanupResources(
         page,
-        testInfo,
         state,
         options.terminalTimeout ?? CLEANUP_TERMINAL_TIMEOUT,
       );
@@ -2936,39 +3099,11 @@ export async function withC7Cleanup(
         preservedForManualCleanup: true,
         restored: false,
       };
-      const fallbackManifest: CleanupManifest = {
-        active_target_counts: Object.fromEntries(
-          [...state.externalSystems].sort().map((value) => [value, null]),
-        ),
-        durable_residue_counts: {
-          observed_event_rows: 0,
-          scope_states: state.scopeStateCount,
-          update_requests: state.requestIds.size,
-        },
-        issues,
-        preserved_for_manual_cleanup: true,
-        request_ids: [...state.requestIds].sort(),
-        request_terminal_statuses: {},
-        run_id: state.runId,
-        scenario: state.scenario,
-        target_refs: state.targets.map(
-          ({ entityTag, externalSystem, lockVersion, targetId, targetKey }) => ({
-            entityTag,
-            externalSystem,
-            lockVersion,
-            targetId,
-            targetKey,
-          }),
-        ),
-        version: 1,
-      };
       await writeDurableJournal(state, "cleanup_boundary_failed").catch(
         () => undefined,
       );
-      await attachManifest(testInfo, fallbackManifest).catch(() => undefined);
       cleanup = {
         issues,
-        manifest: fallbackManifest,
         result: state.cleanupResult,
       };
     }
@@ -2978,11 +3113,11 @@ export async function withC7Cleanup(
     if (cleanup.issues.length > 0) {
       testInfo.annotations.push({
         type: "cleanup-error",
-        description: `C7 cleanup issue ${cleanup.issues.length}건; sanitized manifest 확인`,
+        description: `C7 cleanup issue ${cleanup.issues.length}건; root-owned journal 확인`,
       });
       if (primaryError === undefined) {
         throw new Error(
-          `C7 cleanup 실패 ${cleanup.issues.length}건; target 보존 여부는 sanitized manifest 확인`,
+          `C7 cleanup 실패 ${cleanup.issues.length}건; target 보존 여부는 root-owned journal 확인`,
         );
       }
     }

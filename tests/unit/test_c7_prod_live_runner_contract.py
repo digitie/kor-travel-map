@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "run-c7-prod-live-e2e.sh"
+ATTESTATION = ROOT / "scripts" / "lib" / "c7_prod_attestation.py"
 LIVE_DIR = (
     ROOT / "packages" / "kor-travel-map-admin" / "frontend" / "e2e" / "live"
 )
@@ -26,35 +27,43 @@ def _assert_in_order(source: str, *markers: str) -> None:
 
 def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     script = _read(RUNNER)
+    attestation = _read(ATTESTATION)
 
-    host_python_invocations = (
-        'python3 - "$target"',
-        'python3 - "$STATE_ROOT"',
-        'python3 - "$LOCK_FILE"',
-        'python3 - "$HOST_ATTESTATION_FILE"',
-        "| python3 -c '",
-        'python3 - "$kind" "$state_file"',
-    )
-    for invocation in host_python_invocations:
-        assert script.count(invocation) == 1
-    assert [
-        line.strip() for line in script.splitlines() if line.lstrip().startswith("python ")
-    ] == ["python -c \\"]
+    assert "require_command node" not in script
+    assert "require_command npm" not in script
+    assert "\nnpm run e2e:live" not in script
+    assert "docker_run_playwright npm run e2e:live" in script
+    assert "docker_run_playwright node -" in script
     assert "| python " not in script
     _assert_in_order(
         script,
         "require_command python3\n",
+        "verify_root_owned_orchestrator_snapshot ||",
+        "verify_trusted_runtime_attestation",
+        "verify_alembic_state",
+        "verify_ui_auth_preflight ||",
         "initialize_state_paths\n",
+        "verify_clean_state_audit\n",
         "start_orchestrator_lock_guard\n",
-        '[[ ! -e "$BLOCKED_FILE" ]]',
+        '[[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]]',
+        "has_residual_state &&",
         "create_blocked_sentinel\n",
+        "trap finish EXIT INT TERM",
     )
     assert '/etc/kor-travel-map/c7-prod-live-e2e-attestation.json' in script
-    assert 'machine_id_sha256' in script
-    assert 'hostname_sha256' in script
-    assert 'KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH=' in script
-    assert 'response.status !== 200' in script
-    assert 'response.headers.get("set-cookie")' in script
+    assert 'machine_id_sha256' in attestation
+    assert 'hostname_sha256' in attestation
+    assert 'compatible_pair_manifest_sha256' in attestation
+    assert 'compose_project_sha256' in attestation
+    assert 'service_runtime' in attestation
+    assert '"orchestrator_files"' in script
+    assert 'attestation["version"] != 3' in attestation
+    assert 'expected_base: Path = Path("/usr/local/lib/kor-travel-map/c7-runner")' in attestation
+    assert 'scripts/lib/c7_prod_attestation.py' in script
+    assert 'compile(module_bytes, str(module_path), "exec")' in script
+    assert "require_command git" not in script
+    assert 'response.status != 200' in script
+    assert 'response.headers.get("Set-Cookie")' in script
     assert 'poi-cache-targets-write.live.spec.ts' in script
     assert 'state_is_exact_restored poi "$POI_STATE_FILE"' in script
     # causal POI spec 선택은 한글 제목이 아니라 안정 tag grep으로 고정한다.
@@ -211,6 +220,62 @@ def test_kma_preview_terminal_and_metadata_are_exact_kma_only() -> None:
     assert "KMA_BASE_DATETIME_PATTERN" in active
 
 
+def test_kma_dagster_job_and_terminal_run_identity_are_exact() -> None:
+    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
+    specs = [
+        _read(LIVE_DIR / name)
+        for name in (
+            "ops-c7-kma-active-write.live.spec.ts",
+            "ops-c7-kma-empty-write.live.spec.ts",
+            "ops-c7-kma-cap-write.live.spec.ts",
+        )
+    ]
+
+    assert '"feature_update_request_worker" as const' in helper
+    assert "pipelines { name isJob }" in helper
+    assert "matches.length !== 1 || matches[0]?.isJob !== true" in helper
+    terminal = _section(
+        helper,
+        "async function assertTerminalDagsterRunIdentity(",
+        "function parseStrongEntityTag(",
+    )
+    for marker in (
+        "run.runId !== runId",
+        "run.jobName !== KMA_SAFE_DAGSTER_JOB",
+        "FEATURE_UPDATE_REQUEST_ID_TAG",
+        "FEATURE_UPDATE_REQUEST_GENERATION_TAG",
+        'FEATURE_UPDATE_SCOPE_TYPE_TAG) !== "provider_dataset"',
+        "sensorName !== QUEUE_SENSOR_NAME",
+    ):
+        assert marker in terminal
+    wait = _section(
+        helper,
+        "export async function waitForTerminal(",
+        "export async function rediscoverExactActiveRequest(",
+    )
+    _assert_in_order(
+        wait,
+        'await writeDurableJournal(state, "request_terminal")',
+        "await assertTerminalDagsterRunIdentity(page, detail)",
+        "return detail",
+    )
+    for spec, mutation_marker in zip(
+        specs,
+        (
+            "await withC7Cleanup(",
+            "await previewEmptyRequestFromUi(",
+            "await withC7Cleanup(",
+        ),
+        strict=True,
+    ):
+        _assert_in_order(
+            spec,
+            'await bootstrapC7SameOriginPage(page, "/ops/pipeline")',
+            "await assertKmaDagsterWorkerJobDefinition()",
+            mutation_marker,
+        )
+
+
 def test_route_fetch_handlers_have_settlement_barriers() -> None:
     live_browser = _read(LIVE_DIR / "_ops-live-browser.ts")
     read_auth = _read(LIVE_DIR / "ops-c7-read-auth.live.spec.ts")
@@ -312,14 +377,128 @@ def test_runner_uses_fixed_root_owned_atomic_state() -> None:
     assert "stat.S_IMODE(observed.st_mode) != 0o600" in lock_guard
     assert "fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)" in lock_guard
     assert "O_TRUNC" not in lock_guard
-    invocation = script[script.index("initialize_state_paths\nreadonly") :]
+    invocation = script[
+        script.index("# 여기까지는 수집/파이프라인 domain state를 바꾸지 않는 preflight다.") :
+    ]
     _assert_in_order(
         invocation,
+        "verify_root_owned_orchestrator_snapshot",
+        "verify_trusted_runtime_attestation",
+        "verify_alembic_state",
+        "verify_ui_auth_preflight",
         "initialize_state_paths",
+        "verify_clean_state_audit",
         "start_orchestrator_lock_guard",
-        '[[ ! -e "$BLOCKED_FILE" ]]',
-        "create_blocked_sentinel",
+        '[[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]]',
         "has_residual_state",
+        "create_blocked_sentinel",
+    )
+
+
+def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidence() -> None:
+    script = _read(RUNNER)
+    attestation = _read(ATTESTATION)
+    build_script = _read(ROOT / "scripts" / "build-c7-playwright-image.sh")
+    lifecycle = _read(ROOT / "scripts" / "lib" / "c7-prod-runner-lifecycle.sh")
+    dockerfile = _read(ROOT / "docker" / "c7-playwright.Dockerfile")
+    dockerignore = _read(ROOT / ".dockerignore")
+    compose = _read(ROOT / "docker-compose.yml")
+    config = _read(
+        ROOT
+        / "packages"
+        / "kor-travel-map-admin"
+        / "frontend"
+        / "playwright.live.config.ts"
+    )
+    reporter = _read(
+        ROOT
+        / "packages"
+        / "kor-travel-map-admin"
+        / "frontend"
+        / "e2e"
+        / "c7-redacted-reporter.ts"
+    )
+    admin_helper = _read(
+        ROOT
+        / "packages"
+        / "kor-travel-map-admin"
+        / "frontend"
+        / "e2e"
+        / "live"
+        / "_ops-c7-admin-api.ts"
+    )
+
+    assert "mcr.microsoft.com/playwright:v1.60.0-noble@sha256:" in dockerfile
+    assert 'git -C "$REPO_ROOT" archive --format=tar "$commit"' in build_script
+    assert "--pull=false" in build_script
+    assert "**/*.tsbuildinfo" in dockerignore
+    assert "**/*.local.md" in dockerignore
+    assert 'io.kortravelmap.c7.repository-commit' in dockerfile
+    assert 'io.kortravelmap.c7.playwright-base' in dockerfile
+    for image_dockerfile in ("api.Dockerfile", "dagster.Dockerfile", "frontend.Dockerfile"):
+        source = _read(ROOT / "docker" / image_dockerfile)
+        assert 'LABEL org.opencontainers.image.revision="$KOR_TRAVEL_MAP_GIT_COMMIT"' in source
+    revision_arg = "KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}"
+    assert compose.count(revision_arg) == 4
+    frontend_build = _section(compose, "  frontend:\n", "    environment:\n")
+    assert frontend_build.count("      args:\n") == 1
+    assert "        KOR_TRAVEL_MAP_GIT_COMMIT:" in frontend_build
+    assert "        NEXT_PUBLIC_KOR_TRAVEL_MAP_API:" in frontend_build
+    assert '[[ "$E2E_C7_PLAYWRIGHT_IMAGE" =~ ^sha256:' in script
+    assert 'executor.get("Id") != environ["E2E_C7_PLAYWRIGHT_IMAGE"]' in attestation
+    assert 'image_labels.get("org.opencontainers.image.revision")' in attestation
+    assert '"source_commits"' in attestation
+    assert 'manifest["version"] != 3' in attestation
+    assert 'active["map_source_revision"] != source_commits["map"]' in attestation
+    assert 'active["pinvi_source_revision"] != source_commits["pinvi"]' in attestation
+    assert "len(set(role_services.values())) != len(role_services)" in attestation
+    assert "len(observed_containers) != len(role_services)" in attestation
+    assert 'docker create --pull=never' in script
+    assert 'docker start --attach --interactive' in script
+    assert "--network bridge --ipc private" in script
+    assert "--network host" not in script
+    assert "--ipc host" not in script
+    assert "write_container_reference \\\n    creating" in script
+    assert '"phase": phase' in script
+    assert '\\"phase\\":\\"create\\"' in script
+    assert "--read-only" in script
+    assert "--security-opt no-new-privileges" in script
+    assert "--cap-drop ALL" in script
+    assert 'kill -0 "$LOCK_GUARD_PID"' in script
+    assert 'ACTIVE_COMMAND_PID=$!' in script
+    _assert_in_order(
+        lifecycle,
+        'kill -TERM -- "-$pgid"',
+        'kill -KILL -- "-$pgid"',
+    )
+    assert '"c7-results.xml"' in script
+    assert 'source.suffix.lower() == ".png"' not in script
+    assert "testInfo.attach(" not in admin_helper
+    assert "c7-cleanup-manifest.json" not in admin_helper
+    assert 'trace: shouldAssertC7OriginGuard() ? "off"' in config
+    assert 'screenshot: shouldAssertC7OriginGuard() ? "off"' in config
+    assert '"./e2e/c7-redacted-reporter.ts"' in config
+    assert "test.location.file" in reporter
+    assert "result.errors" not in reporter
+    assert "result.stdout" not in reporter
+    assert "result.stderr" not in reporter
+
+
+def test_runner_preserves_recovery_state_on_failure_and_runs_full_audit() -> None:
+    script = _read(RUNNER)
+    finish = _section(script, "finish()", "create_blocked_sentinel()")
+
+    assert 'python3 "$SCRIPT_DIR/audit-c7-prod-live-state.py" >/dev/null' in script
+    _assert_in_order(
+        script,
+        "initialize_state_paths\n",
+        "verify_clean_state_audit\n",
+        "start_orchestrator_lock_guard\n",
+    )
+    assert finish.count("status == 0 && ORCHESTRATOR_VERIFIED == 1") >= 3
+    assert finish.count("container_clean == 1 && evidence_preserved == 1") >= 3
+    assert finish.index('rm -f -- "$E2E_STORAGE_STATE"') < finish.index(
+        'rm -rf -- "$RUNTIME_DIR"'
     )
 
 

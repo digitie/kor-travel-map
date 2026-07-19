@@ -2,6 +2,42 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — Agent A PR #754 심층 리뷰 보안 후속
+
+- 단일 전문 리뷰에서 local-only 배포 문서의 Docker context 유입, 실패 뒤 recovery
+  runtime 삭제, Playwright container의 host network/IPC 공유, 제한된 residue glob만
+  쓰는 preflight를 S2/S3로 확인했다.
+- `*.local.md`를 build context에서 제외하고 executor를 bridge/private 경계로 줄였다.
+  전체 상태 auditor가 unsafe·unexpected·active·recovery residue를 거부한 뒤에만 lock과
+  mutation 상태를 만들며, 실패 경로는 `BLOCKED.json`과 journal/runtime을 보존한다.
+- Linux `/tmp` 기준 대상 보안/unit 51개와 전체 unit 1,525개, `bash -n`, Ruff,
+  strict mypy, import-linter를 통과했다.
+
+## 2026-07-19 (codex) — C7 prod readiness 차단 리뷰 반영
+
+- 단일 적대 리뷰에서 배포 pair·DB schema·실제 service runtime attestation 부재, host npm/Chromium
+  의존, 잘못된 Dagster job 선언, preflight 이전 sentinel, 실패 증거 삭제를 P1/P2로 판정했다.
+  실제 실행 job `feature_update_request_worker`의 repository cardinality와 terminal run/tag identity를
+  파괴적 mutation 전에 검증하도록 계약을 바로잡았다.
+- `docs/runbooks/c7-prod-live-e2e.md`와 `T-ADM-C7H`를 먼저 작성했다. host runner/helper는 exact
+  commit의 root-owned Git archive snapshot과 attested SHA-256에서만 실행한다. runner는
+  C6c v3 manifest(source revision 포함), compose project, Map API/UI/Dagster web·daemon/PinVi API
+  runtime hash, 단일 Alembic
+  head/check와 UI login을 모두 read-only 검증한 뒤에만 root state와 `BLOCKED.json`을 만든다.
+- PR #754 리뷰의 정적 계약 테스트 한계를 반영해 snapshot/runtime 검증 코어를 import 가능한
+  `c7_prod_attestation.py`로 분리했다. runner bootstrap은 검증한 동일 module bytes를 실행하며
+  runner/helper/module hash, owner/mode/ancestor와 compatible-pair·OCI/runtime metadata 변조를
+  실행형 음수 fixture로 고정했다.
+- Playwright는 고정 official digest 기반의 commit-labelled executor image ID로만 실행한다. spec별
+  redacted JUnit/HTML/JSON과 journal을 root-owned evidence에 fsync하며 screenshot, auth storage와 trace ZIP은
+  제외한다. `audit-c7-prod-live-state.py`는 값·UUID 없이 partial restore, active lock, unsafe residue를
+  보고하고 자동 clear는 제공하지 않는다.
+- executor container는 durable creator PID/PGID/start ticks와 atomic create outcome을 먼저 기록하고
+  `docker create --pull=never` 결과 CID/identity를 검증한 뒤에만 start한다. create 완료 여부가 불명확하면
+  stop 도구도 ref를 지우지 않아 late container를 감사 범위 밖으로 보내지 않는다.
+- n150 접속 감시 10분 41회가 모두 인증 전에 `No route to host`로 끝났고 별도 Windows TCP/22 진단도
+  실패했다. passwordless sudo는 미확인으로 남겼으며 원격 변경은 하지 않았다.
+
 ## 2026-07-19 (codex) — T-ADM-C7M mocked UI projection·pagination 병합
 
 - `/ops/datasets` mocked E2E가 이름 있는 summary landmark 안에서 행·실패·SLA 초과·미실행·이슈를

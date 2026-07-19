@@ -1,5 +1,34 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — Agent A PR #754 심층 리뷰 보완
+
+- 단일 전문 리뷰의 4개 finding을 반영해 `*.local.md` Docker context 차단, Playwright
+  bridge/private 격리, 전체 상태 auditor preflight, 실패 recovery journal/runtime
+  보존을 구현했다.
+- 대상 보안/unit 51개와 전체 unit 1,525개, `bash -n`, Ruff, strict mypy,
+  import-linter가 통과했다.
+- **다음 한 작업**: PR #754 원격 CI를 통과한 뒤 `main`에 머지하고, 최근 2일 Agent A
+  PR을 다시 조회해 닫힌 PR도 순서대로 심층 검토한다.
+
+## 2026-07-19 (codex) — T-ADM-C7H 실행 경계 보강 진행
+
+- C7 실행 전 단일 적대 리뷰에서 실제 배포 pair/DB schema 증거 부재, host npm/Chromium 의존,
+  잘못 선언된 Dagster job 이름, preflight 전 `BLOCKED.json`, 실패 evidence 유실을 차단 finding으로
+  확정했다. 실제 run-now job은 provider별 KMA job이 아니라 `feature_update_request_worker`다.
+- 문서·task를 먼저 갱신하고 `fix/c7-prod-readiness`에서 compatible-pair manifest와 root-owned
+  exact-commit orchestrator snapshot 계약,
+  5개 service image/command/environment와 compose project, source commits, executor image, Alembic
+  current/head/check를 read-only 대조하도록 runner를 보강 중이다. mutation 상태는 모든 preflight 뒤에만
+  만들고 spec별 redacted evidence와 별도 감사 도구를 남긴다.
+- PR #754 리뷰 후속으로 snapshot/runtime 검증 코어를 import 가능한 모듈로 분리하고, runner가
+  root-owned hash를 확인한 동일 bytes를 실행하게 했다. runner/helper/module과 attestation·pair·OCI
+  runtime 변조의 실행형 음수 fixture는 동일 리뷰어 승인 전이라 아직 실행하지 않았다.
+- n150은 WSL SSH 41회와 Windows TCP/22 boolean 진단 모두 연결 전에 실패했다. 따라서
+  `sudo -n true`는 아직 성공/실패 어느 쪽으로도 판정하지 않았고 원격 mutation도 0건이다.
+- **다음 한 작업**: 동일 리뷰어의 재검토를 반영한 뒤 로컬 gate·PR·CI merge를 완료한다. 그 사이
+  n150 접속이 복구되면 passwordless sudo→backup/PITR→forward-only migration→C6c capture→C7 live
+  E2E 순서로 끝내고 #684/#694/#712/#719를 증거와 함께 닫는다.
+
 ## 2026-07-19 (codex) — T-ADM-C7M mocked UI 수용 증거 병합·아카이브
 
 - `/ops/datasets` summary landmark의 exact projection과 오염 negative fixture,

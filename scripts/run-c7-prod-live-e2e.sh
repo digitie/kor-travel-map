@@ -8,13 +8,15 @@ umask 077
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-readonly FRONTEND_DIR="$REPO_ROOT/packages/kor-travel-map-admin/frontend"
 readonly COMPOSE_PROJECT_DIR="$PWD"
-readonly SAFE_DAGSTER_JOB="feature_weather_kma_ultra_short_nowcast_job"
+readonly SAFE_DAGSTER_JOB="feature_update_request_worker"
 readonly SAFE_SCHEDULE="feature_weather_kma_short_forecast_hourly_schedule"
 readonly HOST_ATTESTATION_FILE="/etc/kor-travel-map/c7-prod-live-e2e-attestation.json"
 readonly FIXED_STATE_ROOT="/var/lib/kor-travel-map/c7-prod-live-e2e"
+readonly PLAYWRIGHT_BASE_IMAGE="mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948"
 STATE_ROOT=""
+EVIDENCE_ROOT=""
+EVIDENCE_RUN_DIR=""
 BLOCKED_FILE=""
 LOCK_FILE=""
 LOCK_GUARD_INPUT_FD=""
@@ -26,6 +28,19 @@ SCHEDULE_STATE_FILE=""
 KMA_STATE_FILE=""
 POI_STATE_FILE=""
 RUNTIME_DIR=""
+PLAYWRIGHT_IMAGE_ID=""
+REPOSITORY_COMMIT=""
+COMPATIBLE_PAIR_MANIFEST_SHA256=""
+ALEMBIC_HEAD=""
+ACTIVE_COMMAND_PID=""
+ACTIVE_COMMAND_PGID=""
+ACTIVE_CID_FILE=""
+ACTIVE_CONTAINER_REF_FILE=""
+ACTIVE_CREATE_OUTCOME_FILE=""
+ACTIVE_CONTAINER_NAME=""
+HOST_ATTESTATION_SHA256=""
+HOST_ATTESTATION_SNAPSHOT=""
+COMPATIBLE_PAIR_SNAPSHOT=""
 
 die() {
   printf 'C7 prod live E2E orchestrator failed: %s (values redacted)\n' "$1" >&2
@@ -66,6 +81,19 @@ initialize_state_paths() {
   ]] || die "state root is not canonical root-owned production storage"
   BLOCKED_FILE="$STATE_ROOT/BLOCKED.json"
   LOCK_FILE="$STATE_ROOT/orchestrator.lock"
+  EVIDENCE_ROOT="$STATE_ROOT/evidence"
+  if [[ -e "$EVIDENCE_ROOT" || -L "$EVIDENCE_ROOT" ]]; then
+    [[
+      -d "$EVIDENCE_ROOT" &&
+      ! -L "$EVIDENCE_ROOT" &&
+      "$(stat -c '%u:%g:%a' -- "$EVIDENCE_ROOT")" == "0:0:700"
+    ]] || die "evidence root is not canonical root-owned storage"
+  else
+    mkdir -- "$EVIDENCE_ROOT"
+    chown 0:0 -- "$EVIDENCE_ROOT"
+    chmod 700 -- "$EVIDENCE_ROOT"
+    fsync_state_root
+  fi
 }
 
 fsync_file_and_parent() {
@@ -203,14 +231,290 @@ validate_service_env() {
     die "invalid compose service env: $name"
 }
 
+snapshot_attested_inputs() {
+  HOST_ATTESTATION_SNAPSHOT="$STATE_ROOT/attestation-$$.json"
+  COMPATIBLE_PAIR_SNAPSHOT="$STATE_ROOT/compatible-pair-$$.json"
+  python3 - \
+    "$HOST_ATTESTATION_FILE" \
+    "$HOST_ATTESTATION_SNAPSHOT" \
+    "$HOST_ATTESTATION_SHA256" \
+    "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" \
+    "$COMPATIBLE_PAIR_SNAPSHOT" \
+    "$COMPATIBLE_PAIR_MANIFEST_SHA256" <<'PY'
+import hashlib
+import os
+import stat
+import sys
+from pathlib import Path
+
+pairs = zip(sys.argv[1::3], sys.argv[2::3], sys.argv[3::3], strict=True)
+created: list[Path] = []
+try:
+    for source_raw, destination_raw, expected_sha256 in pairs:
+        source = Path(source_raw)
+        destination = Path(destination_raw)
+        source_fd = os.open(source, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        try:
+            observed = os.fstat(source_fd)
+            if (
+                not stat.S_ISREG(observed.st_mode)
+                or observed.st_uid != 0
+                or observed.st_gid != 0
+                or stat.S_IMODE(observed.st_mode) != 0o600
+            ):
+                raise RuntimeError("unsafe attested input")
+            chunks = []
+            while chunk := os.read(source_fd, 1024 * 1024):
+                chunks.append(chunk)
+            payload = b"".join(chunks)
+        finally:
+            os.close(source_fd)
+        if hashlib.sha256(payload).hexdigest() != expected_sha256:
+            raise RuntimeError("attested input changed after preflight")
+        destination_fd = os.open(
+            destination,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600,
+        )
+        created.append(destination)
+        try:
+            os.fchown(destination_fd, 0, 0)
+            os.fchmod(destination_fd, 0o600)
+            offset = 0
+            while offset < len(payload):
+                offset += os.write(destination_fd, payload[offset:])
+            os.fsync(destination_fd)
+        finally:
+            os.close(destination_fd)
+    directory_fd = os.open(
+        Path(sys.argv[2]).parent,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+    )
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+except Exception:
+    for path in created:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    raise
+PY
+}
+
+preserve_evidence() {
+  local status="$1"
+  local temporary
+  [[ -n "$EVIDENCE_ROOT" && -d "$EVIDENCE_ROOT" && ! -L "$EVIDENCE_ROOT" ]] ||
+    return 1
+  temporary="$(mktemp -d "$EVIDENCE_ROOT/.run.XXXXXX")" || return 1
+  chmod 700 -- "$temporary" || return 1
+  EVIDENCE_RUN_DIR="$EVIDENCE_ROOT/run-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  [[ ! -e "$EVIDENCE_RUN_DIR" && ! -L "$EVIDENCE_RUN_DIR" ]] || return 1
+  python3 - \
+    "$temporary" \
+    "$RUNTIME_DIR" \
+    "$RUN_STATE_FILE" \
+    "$SCHEDULE_STATE_FILE" \
+    "$KMA_STATE_FILE" \
+    "$POI_STATE_FILE" \
+    "$status" \
+    "$ORCHESTRATOR_VERIFIED" \
+    "$REPOSITORY_COMMIT" \
+    "$PLAYWRIGHT_IMAGE_ID" \
+    "$COMPATIBLE_PAIR_MANIFEST_SHA256" \
+    "$ALEMBIC_HEAD" \
+    "$HOST_ATTESTATION_SHA256" \
+    "$HOST_ATTESTATION_SNAPSHOT" \
+    "$COMPATIBLE_PAIR_SNAPSHOT" <<'PY'
+import hashlib
+import json
+import os
+import shutil
+import stat
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+(
+    destination_raw,
+    runtime_raw,
+    run_raw,
+    schedule_raw,
+    kma_raw,
+    poi_raw,
+    status_raw,
+    verified_raw,
+    repository_commit,
+    playwright_image_id,
+    pair_manifest_sha256,
+    alembic_head,
+    host_attestation_sha256,
+    host_attestation_raw,
+    compatible_pair_raw,
+) = sys.argv[1:]
+destination = Path(destination_raw)
+runtime = Path(runtime_raw) if runtime_raw else None
+
+
+def copy_regular(source: Path, target: Path) -> None:
+    observed = source.lstat()
+    if not stat.S_ISREG(observed.st_mode) or source.is_symlink():
+        raise RuntimeError("unsafe evidence source")
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    shutil.copyfile(source, target)
+    os.chown(target, 0, 0)
+    os.chmod(target, 0o600)
+
+
+for name, raw in (
+    ("sensor.json", run_raw),
+    ("schedule.json", schedule_raw),
+    ("kma.json", kma_raw),
+    ("poi.json", poi_raw),
+):
+    source = Path(raw) if raw else None
+    if source is not None and source.exists():
+        copy_regular(source, destination / "journals" / name)
+
+for name, raw in (
+    ("runtime-attestation.json", host_attestation_raw),
+    ("compatible-pair.json", compatible_pair_raw),
+):
+    source = Path(raw)
+    copy_regular(source, destination / name)
+
+if (
+    hashlib.sha256((destination / "runtime-attestation.json").read_bytes()).hexdigest()
+    != host_attestation_sha256
+    or hashlib.sha256((destination / "compatible-pair.json").read_bytes()).hexdigest()
+    != pair_manifest_sha256
+):
+    raise RuntimeError("attested evidence snapshot hash mismatch")
+
+if runtime is not None and runtime.exists():
+    playwright = runtime / "playwright"
+    if playwright.exists():
+        for source in playwright.rglob("*"):
+            relative = source.relative_to(playwright)
+            if source.is_symlink():
+                raise RuntimeError("symlink in Playwright evidence")
+            if source.is_dir():
+                target_directory = destination / "playwright" / relative
+                target_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+                os.chown(target_directory, 0, 0)
+                os.chmod(target_directory, 0o700)
+                continue
+            safe_report = source.name in {
+                "c7-results.xml",
+                "c7-summary.html",
+                "c7-summary.json",
+            }
+            if not safe_report:
+                continue
+            copy_regular(source, destination / "playwright" / relative)
+
+files = []
+for path in sorted(destination.rglob("*")):
+    if path.is_file() and not path.is_symlink():
+        files.append(
+            {
+                "path": path.relative_to(destination).as_posix(),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "size": path.stat().st_size,
+            }
+        )
+manifest = {
+    "alembic_head": alembic_head,
+    "compatible_pair_manifest_sha256": pair_manifest_sha256,
+    "files": files,
+    "finished_at": datetime.now(UTC).isoformat(),
+    "orchestrator_verified": verified_raw == "1",
+    "host_attestation_sha256": host_attestation_sha256,
+    "playwright_image_id": playwright_image_id,
+    "repository_commit": repository_commit,
+    "status": int(status_raw),
+    "version": 1,
+}
+manifest_path = destination / "manifest.json"
+manifest_path.write_text(
+    json.dumps(manifest, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    + "\n",
+    encoding="utf-8",
+)
+os.chown(manifest_path, 0, 0)
+os.chmod(manifest_path, 0o600)
+
+for path in sorted(destination.rglob("*"), reverse=True):
+    if path.is_file():
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    elif path.is_dir():
+        os.chown(path, 0, 0)
+        os.chmod(path, 0o700)
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+root_fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+try:
+    os.fsync(root_fd)
+finally:
+    os.close(root_fd)
+PY
+  mv -T -- "$temporary" "$EVIDENCE_RUN_DIR" || return 1
+  chmod 700 -- "$EVIDENCE_RUN_DIR" || return 1
+  fsync_file_and_parent "$EVIDENCE_RUN_DIR/manifest.json" || return 1
+}
+
 finish() {
   local status=$?
+  local container_clean=1
+  local evidence_preserved=0
   trap - EXIT INT TERM
   set +e
-  if [[ -n "$RUNTIME_DIR" ]] && runtime_is_private_direct_child; then
+  if [[ -n "$ACTIVE_COMMAND_PID" ]]; then
+    terminate_active_command || status=1
+    status=1
+  fi
+  remove_active_container || {
+    status=1
+    container_clean=0
+  }
+  if [[ -n "${E2E_STORAGE_STATE-}" ]]; then
+    rm -f -- "$E2E_STORAGE_STATE" || status=1
+  fi
+  if (( container_clean == 1 )) && [[ -e "$BLOCKED_FILE" ]]; then
+    if preserve_evidence "$status"; then
+      evidence_preserved=1
+    else
+      status=1
+    fi
+  fi
+  if ((
+    status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
+      container_clean == 1 && evidence_preserved == 1
+  )); then
+    rm -f -- "$HOST_ATTESTATION_SNAPSHOT" "$COMPATIBLE_PAIR_SNAPSHOT" || status=1
+  fi
+  if ((
+    status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
+      container_clean == 1 && evidence_preserved == 1
+  )) &&
+    [[ -n "$RUNTIME_DIR" ]] && runtime_is_private_direct_child; then
     rm -rf -- "$RUNTIME_DIR" || status=1
     [[ ! -e "$RUNTIME_DIR" && ! -L "$RUNTIME_DIR" ]] || status=1
-  elif [[ -n "$RUNTIME_DIR" ]]; then
+  elif [[ -n "$RUNTIME_DIR" ]] &&
+    ((
+      status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
+        container_clean == 1 && evidence_preserved == 1
+    )); then
     status=1
   fi
   if (( status == 0 && ORCHESTRATOR_VERIFIED == 1 )); then
@@ -241,38 +545,42 @@ create_blocked_sentinel() {
     die "BLOCKED.json was created concurrently"
   atomic_replace_state \
     "$BLOCKED_FILE" \
-    '{"phase":"orchestrator_preflight","version":2}'
+    '{"phase":"orchestrator_preflight","version":3}'
 }
 
 has_residual_state() {
   compgen -G "$STATE_ROOT/run-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/schedule-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/kma-*.json" >/dev/null ||
-    compgen -G "$STATE_ROOT/poi-*.json" >/dev/null
+    compgen -G "$STATE_ROOT/poi-*.json" >/dev/null ||
+    compgen -G "$STATE_ROOT/runtime.*" >/dev/null ||
+    compgen -G "$STATE_ROOT/.state.*" >/dev/null ||
+    compgen -G "$STATE_ROOT/cap.*" >/dev/null ||
+    compgen -G "$STATE_ROOT/attestation-*.json" >/dev/null ||
+    compgen -G "$STATE_ROOT/compatible-pair-*.json" >/dev/null ||
+    compgen -G "$STATE_ROOT/container-*.cid" >/dev/null ||
+    compgen -G "$STATE_ROOT/container-*.json" >/dev/null ||
+    compgen -G "$STATE_ROOT/container-*.outcome.json" >/dev/null
+}
+
+verify_clean_state_audit() {
+  local audit_status
+  if python3 "$SCRIPT_DIR/audit-c7-prod-live-state.py" >/dev/null; then
+    audit_status=0
+  else
+    audit_status=$?
+  fi
+  (( audit_status == 0 )) ||
+    die "C7 state audit rejected unsafe, unexpected, active, or recoverable residue"
 }
 
 require_command python3
-initialize_state_paths
-readonly STATE_ROOT BLOCKED_FILE LOCK_FILE
-start_orchestrator_lock_guard
-
-[[ ! -e "$BLOCKED_FILE" ]] ||
-  die "BLOCKED.json exists; audited recovery is required before another run"
-create_blocked_sentinel
-trap finish EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-has_residual_state &&
-  die "residual run/schedule/KMA state exists; audited recovery is required"
-
-RUNTIME_DIR="$(mktemp -d "$STATE_ROOT/runtime.XXXXXX")" ||
-  die "private runtime directory creation failed"
-chmod 700 -- "$RUNTIME_DIR"
-export E2E_STORAGE_STATE="$RUNTIME_DIR/admin-state.json"
-export PLAYWRIGHT_ARTIFACT_ROOT="$RUNTIME_DIR/playwright"
-mkdir -p -- "$PLAYWRIGHT_ARTIFACT_ROOT"
-chmod 700 -- "$PLAYWRIGHT_ARTIFACT_ROOT"
+require_command docker
+require_command mkfifo
+require_command setsid
+require_command timeout
+docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is unavailable"
+(( EUID == 0 )) || die "production live runner requires root execution"
 
 require_env E2E_BASE_URL
 require_env NEXT_PUBLIC_KOR_TRAVEL_MAP_API
@@ -280,12 +588,24 @@ require_env E2E_DAGSTER_URL
 require_env E2E_ADMIN_PASSWORD
 require_env E2E_DAGSTER_JOB
 require_env E2E_C7_SCHEDULE
+require_env E2E_C7_EXPECTED_GIT_COMMIT
+require_env E2E_C7_COMPATIBLE_PAIR_MANIFEST
+require_env E2E_C7_PLAYWRIGHT_IMAGE
 validate_sha256_env E2E_C7_EXPECTED_UI_ORIGIN_SHA256
 validate_sha256_env E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
 validate_sha256_env E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256
 validate_service_env E2E_C7_DAGSTER_WEB_SERVICE
 validate_service_env E2E_C7_DAGSTER_DAEMON_SERVICE
 validate_service_env E2E_C7_UI_SERVICE
+validate_service_env E2E_C7_MAP_API_SERVICE
+validate_service_env E2E_C7_PINVI_API_SERVICE
+
+[[ "$E2E_C7_EXPECTED_GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
+  die "expected Git commit is invalid"
+[[ "$E2E_C7_PLAYWRIGHT_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+  die "Playwright executor must be an immutable image ID"
+[[ "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" == /* ]] ||
+  die "compatible-pair manifest path must be absolute"
 
 require_enabled E2E_LIVE_ALLOW_PROD
 require_enabled E2E_ADMIN_WRITE
@@ -296,208 +616,181 @@ require_enabled E2E_DAGSTER_RUN
 require_enabled E2E_QUEUE_SENSOR_BARRIER
 
 [[ "$E2E_DAGSTER_JOB" == "$SAFE_DAGSTER_JOB" ]] ||
-  die "E2E_DAGSTER_JOB is not the allowlisted KMA job"
+  die "E2E_DAGSTER_JOB is not the allowlisted update-request worker"
 [[ "$E2E_C7_SCHEDULE" == "$SAFE_SCHEDULE" ]] ||
   die "E2E_C7_SCHEDULE is not the allowlisted KMA schedule"
 
-verify_trusted_host_attestation() {
-  [[ -f "$HOST_ATTESTATION_FILE" && ! -L "$HOST_ATTESTATION_FILE" ]] ||
-    die "trusted host attestation file is missing or unsafe"
-  [[ "$(stat -c '%u' -- "$HOST_ATTESTATION_FILE")" == "0" ]] ||
-    die "trusted host attestation must be root-owned"
-  local mode
-  mode="$(stat -c '%a' -- "$HOST_ATTESTATION_FILE")" ||
-    die "trusted host attestation mode read failed"
-  (( (8#$mode & 8#022) == 0 )) ||
-    die "trusted host attestation must not be group/world writable"
-  python3 - "$HOST_ATTESTATION_FILE" <<'PY'
+run_verified_attestation_module() {
+  python3 -I -B - \
+    "$SCRIPT_DIR/lib/c7_prod_attestation.py" \
+    "$HOST_ATTESTATION_FILE" \
+    "$REPO_ROOT" \
+    "$E2E_C7_EXPECTED_GIT_COMMIT" \
+    "$@" <<'PY'
 import hashlib
-import ipaddress
 import json
 import os
-import socket
+import stat
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+
+module_path = Path(sys.argv[1])
+attestation_path = Path(sys.argv[2])
+snapshot_root = Path(sys.argv[3])
+commit = sys.argv[4]
+module_arguments = sys.argv[5:]
+expected_root = Path("/usr/local/lib/kor-travel-map/c7-runner") / commit
+expected_module = expected_root / "scripts/lib/c7_prod_attestation.py"
+expected_paths = {
+    "scripts/lib/c7-prod-runner-lifecycle.sh",
+    "scripts/lib/c7_prod_attestation.py",
+    "scripts/run-c7-prod-live-e2e.sh",
+}
 
 
-def sha256(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()
-
-
-def public_origin(
-    raw: str, *, websocket: bool = False, require_root_path: bool = True
-) -> str:
-    parsed = urlsplit(raw)
-    if (
-        parsed.scheme != "https"
-        or parsed.username is not None
-        or parsed.password is not None
-        or not parsed.hostname
-        or (require_root_path and parsed.path not in {"", "/"})
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise SystemExit(10)
-    host = parsed.hostname.rstrip(".").lower()
-    if host == "localhost" or host.endswith(".localhost"):
-        raise SystemExit(11)
+def safe_file(path: Path, mode: int) -> bytes:
+    if not path.is_absolute():
+        raise RuntimeError("non-absolute bootstrap input")
+    for parent in path.parents:
+        observed_parent = parent.lstat()
+        if (
+            not stat.S_ISDIR(observed_parent.st_mode)
+            or parent.is_symlink()
+            or observed_parent.st_uid != 0
+            or observed_parent.st_gid != 0
+            or stat.S_IMODE(observed_parent.st_mode) & 0o022
+        ):
+            raise RuntimeError("unsafe bootstrap ancestor")
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        address = None
-    if address is not None and (
-        address.is_loopback
-        or address.is_link_local
-        or address.is_unspecified
-    ):
-        raise SystemExit(12)
-    port = f":{parsed.port}" if parsed.port is not None else ""
-    scheme = "wss" if websocket else "https"
-    return urlunsplit((scheme, f"{host}{port}", "", "", ""))
+        observed = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or observed.st_uid != 0
+            or observed.st_gid != 0
+            or stat.S_IMODE(observed.st_mode) != mode
+        ):
+            raise RuntimeError("unsafe bootstrap file")
+        chunks = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
 
 
-def canonical_graphql(raw: str) -> str:
-    parsed = urlsplit(raw)
-    origin = public_origin(raw, require_root_path=False)
-    pathname = parsed.path.rstrip("/")
-    pathname = pathname if pathname.endswith("/graphql") else f"{pathname}/graphql"
-    return f"{origin}{pathname}"
-
-
-attestation_path = Path(sys.argv[1])
+if snapshot_root != expected_root or module_path != expected_module:
+    raise SystemExit(1)
 try:
-    attestation = json.loads(attestation_path.read_text(encoding="utf-8"))
-    machine_id = Path("/etc/machine-id").read_text(encoding="utf-8").strip()
-except (OSError, ValueError):
-    raise SystemExit(2)
-
-required = {
-    "api_ws_origin_sha256",
-    "dagster_graphql_url_sha256",
-    "hostname_sha256",
-    "machine_id_sha256",
-    "ui_origin_sha256",
-    "version",
-}
-if not isinstance(attestation, dict) or set(attestation) != required:
-    raise SystemExit(3)
-if attestation["version"] != 1 or not machine_id:
-    raise SystemExit(4)
-for key in required - {"version"}:
-    value = attestation[key]
-    if not isinstance(value, str) or len(value) != 64 or any(
-        char not in "0123456789abcdef" for char in value
+    module_bytes = safe_file(module_path, 0o555)
+    attestation = json.loads(safe_file(attestation_path, 0o600))
+    orchestrator_files = attestation.get("orchestrator_files")
+    if (
+        attestation.get("repository_commit") != commit
+        or not isinstance(orchestrator_files, dict)
+        or set(orchestrator_files) != expected_paths
+        or orchestrator_files["scripts/lib/c7_prod_attestation.py"]
+        != hashlib.sha256(module_bytes).hexdigest()
     ):
-        raise SystemExit(5)
-
-hostname = socket.getfqdn().rstrip(".").lower()
-ui_origin = public_origin(os.environ["E2E_BASE_URL"])
-api_ws_origin = public_origin(
-    os.environ["NEXT_PUBLIC_KOR_TRAVEL_MAP_API"], websocket=True
-)
-dagster_graphql = canonical_graphql(os.environ["E2E_DAGSTER_URL"])
-observed = {
-    "api_ws_origin_sha256": sha256(api_ws_origin),
-    "dagster_graphql_url_sha256": sha256(dagster_graphql),
-    "hostname_sha256": sha256(hostname),
-    "machine_id_sha256": sha256(machine_id),
-    "ui_origin_sha256": sha256(ui_origin),
-}
-if any(attestation[key] != value for key, value in observed.items()):
-    raise SystemExit(6)
-if os.environ["E2E_C7_EXPECTED_UI_ORIGIN_SHA256"] != observed["ui_origin_sha256"]:
-    raise SystemExit(7)
-if (
-    os.environ["E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256"]
-    != observed["api_ws_origin_sha256"]
-):
-    raise SystemExit(8)
-if (
-    os.environ["E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256"]
-    != observed["dagster_graphql_url_sha256"]
-):
-    raise SystemExit(9)
+        raise RuntimeError("attestation bootstrap mismatch")
+    sys.argv = [str(module_path), *module_arguments]
+    exec(
+        compile(module_bytes, str(module_path), "exec"),
+        {
+            "__builtins__": __builtins__,
+            "__file__": str(module_path),
+            "__name__": "__main__",
+            "__package__": None,
+        },
+    )
+except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+    raise SystemExit(1)
 PY
 }
 
-verify_trusted_host_attestation ||
-  die "trusted production host/machine/origin attestation failed"
+verify_root_owned_orchestrator_snapshot() {
+  run_verified_attestation_module \
+    snapshot \
+    "$REPO_ROOT" \
+    "${BASH_SOURCE[0]}" \
+    "$SCRIPT_DIR/lib/c7-prod-runner-lifecycle.sh" \
+    "$SCRIPT_DIR/lib/c7_prod_attestation.py" \
+    "$HOST_ATTESTATION_FILE" \
+    "$E2E_C7_EXPECTED_GIT_COMMIT" || return 1
+  REPOSITORY_COMMIT="$E2E_C7_EXPECTED_GIT_COMMIT"
+}
+
+verify_trusted_runtime_attestation() {
+  run_verified_attestation_module \
+    runtime \
+    "$HOST_ATTESTATION_FILE" \
+    "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" \
+    "$COMPOSE_PROJECT_DIR" \
+    "$PLAYWRIGHT_BASE_IMAGE"
+}
 
 canonical_dagster_graphql_sha256() {
-  node <<'NODE'
-const { createHash } = require("node:crypto");
-let url;
-try {
-  url = new URL(process.env.E2E_DAGSTER_URL);
-} catch {
-  process.exit(2);
-}
+  python3 - <<'PY'
+import hashlib
+import os
+from urllib.parse import urlsplit, urlunsplit
+
+parsed = urlsplit(os.environ["E2E_DAGSTER_URL"])
 if (
-  url.protocol !== "https:" ||
-  url.username !== "" ||
-  url.password !== "" ||
-  url.search !== "" ||
-  url.hash !== ""
-) {
-  process.exit(3);
+    parsed.scheme != "https"
+    or parsed.username is not None
+    or parsed.password is not None
+    or not parsed.hostname
+    or parsed.query
+    or parsed.fragment
+):
+    raise SystemExit(2)
+host = parsed.hostname.rstrip(".").lower()
+port = f":{parsed.port}" if parsed.port is not None else ""
+pathname = parsed.path.rstrip("/")
+pathname = pathname if pathname.endswith("/graphql") else f"{pathname}/graphql"
+canonical = urlunsplit(("https", f"{host}{port}", pathname, "", ""))
+print(hashlib.sha256(canonical.encode()).hexdigest())
+PY
 }
-const pathname = url.pathname.replace(/\/+$/, "");
-url.pathname = pathname.endsWith("/graphql")
-  ? pathname
-  : `${pathname}/graphql`;
-process.stdout.write(createHash("sha256").update(url.href).digest("hex"));
-NODE
+
+verify_alembic_state() {
+  local current_output heads_output
+  heads_output="$(
+    docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T \
+      "$E2E_C7_MAP_API_SERVICE" alembic heads 2>/dev/null
+  )" || return 1
+  current_output="$(
+    docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T \
+      "$E2E_C7_MAP_API_SERVICE" alembic current 2>/dev/null
+  )" || return 1
+  docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T \
+    "$E2E_C7_MAP_API_SERVICE" alembic check >/dev/null 2>&1 || return 1
+  python3 - "$heads_output" "$current_output" <<'PY'
+import re
+import sys
+
+pattern = re.compile(r"^([0-9A-Za-z_]+) \(head\)$")
+parsed = []
+for raw in sys.argv[1:]:
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise SystemExit(1)
+    match = pattern.fullmatch(lines[0])
+    if match is None:
+        raise SystemExit(1)
+    parsed.append(match.group(1))
+if parsed[0] != parsed[1]:
+    raise SystemExit(1)
+print(parsed[0])
+PY
 }
-
-actual_dagster_origin_sha256="$(canonical_dagster_graphql_sha256)" ||
-  die "Dagster GraphQL HTTPS endpoint canonicalization failed"
-[[ "$actual_dagster_origin_sha256" =~ ^[0-9a-f]{64}$ ]] ||
-  die "Dagster GraphQL endpoint SHA-256 attestation output is invalid"
-[[ "$actual_dagster_origin_sha256" == "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256" ]] ||
-  die "Dagster GraphQL endpoint origin attestation mismatch"
-
-export E2E_LIVE_ALLOW_PROD
-export E2E_ADMIN_WRITE E2E_C7_READ_AUTH_WRITE E2E_KMA_SCOPE_WRITE
-export E2E_DAGSTER_WRITE E2E_DAGSTER_RUN E2E_QUEUE_SENSOR_BARRIER
-export E2E_C7_SCHEDULE
-export E2E_C7_EXPECTED_UI_ORIGIN_SHA256
-export E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
-export E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256
-
-RUN_STATE_FILE="$STATE_ROOT/run-$(date -u +%Y%m%dT%H%M%SZ)-$$.json"
-SCHEDULE_STATE_FILE="$STATE_ROOT/schedule-$(date -u +%Y%m%dT%H%M%SZ)-$$.json"
-KMA_STATE_FILE="$STATE_ROOT/kma-$(date -u +%Y%m%dT%H%M%SZ)-$$.json"
-POI_STATE_FILE="$STATE_ROOT/poi-$(date -u +%Y%m%dT%H%M%SZ)-$$.json"
-printf -v run_state_payload \
-  '{"dagsterGraphqlEndpointSha256":"%s","phase":"orchestrator_started","version":2}' \
-  "$actual_dagster_origin_sha256"
-atomic_replace_state "$RUN_STATE_FILE" "$run_state_payload"
-printf -v schedule_state_payload \
-  '{"dagsterGraphqlEndpointSha256":"%s","phase":"schedule_snapshot_pending","version":2}' \
-  "$actual_dagster_origin_sha256"
-atomic_replace_state "$SCHEDULE_STATE_FILE" "$schedule_state_payload"
-# helper의 이전-run fail-closed 검사와 호환되는 빈 restored baseline이다. 최종
-# 검증은 sentinel run_id와 null cleanup_result를 거부하므로 실행 생략을 성공으로
-# 오인하지 않는다.
-atomic_replace_state \
-  "$KMA_STATE_FILE" \
-  '{"cleanup_result":null,"completed_scenarios":[],"external_systems":[],"idempotency_entries":[],"phase":"restored","request_ids":[],"request_terminal_statuses":{},"run_id":"__orchestrator_pending__","target_history":[],"target_refs":[],"version":3}'
-atomic_replace_state \
-  "$POI_STATE_FILE" \
-  '{"phase":"orchestrator_pending","version":1}'
-
-printf -v blocked_running_payload \
-  '{"dagsterGraphqlEndpointSha256":"%s","expectedDagsterGraphqlEndpointSha256":"%s","phase":"orchestrator_running","version":2}' \
-  "$actual_dagster_origin_sha256" \
-  "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256"
-atomic_replace_state "$BLOCKED_FILE" "$blocked_running_payload"
 
 read_cap() {
   local service="$1"
   local temporary value
   local -a lines
-  temporary="$(mktemp "$STATE_ROOT/cap.XXXXXX")"
+  temporary="$(mktemp /tmp/kor-travel-map-c7-cap.XXXXXX)" || return 1
   chmod 600 -- "$temporary"
   if ! docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T "$service" \
     python -c \
@@ -519,69 +812,412 @@ print(value)' \
   printf '%s\n' "$value"
 }
 
+verify_ui_auth_preflight() {
+  python3 - <<'PY'
+import json
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+base = urllib.parse.urlsplit(os.environ["E2E_BASE_URL"])
+login_url = urllib.parse.urlunsplit(
+    (base.scheme, base.netloc, "/api/auth/login", "", "")
+)
+payload = json.dumps(
+    {
+        "password": os.environ["E2E_ADMIN_PASSWORD"],
+        "username": os.environ.get("E2E_ADMIN_USERNAME", "admin"),
+    },
+    separators=(",", ":"),
+).encode()
+request = urllib.request.Request(
+    login_url,
+    data=payload,
+    headers={
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Origin": urllib.parse.urlunsplit((base.scheme, base.netloc, "", "", "")),
+    },
+    method="POST",
+)
+try:
+    with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
+        if response.status != 200 or not response.headers.get("Set-Cookie"):
+            raise SystemExit(1)
+        response.read()
+except (OSError, urllib.error.HTTPError, urllib.error.URLError, ValueError):
+    raise SystemExit(1)
+PY
+}
+
+write_container_reference() {
+  local phase="$1" pid="$2" pgid="$3" sid="$4" start_ticks="$5" payload
+  payload="$(python3 - \
+    "$ACTIVE_CONTAINER_NAME" "$phase" "$pid" "$pgid" "$sid" "$start_ticks" "$RUNTIME_DIR" <<'PY'
+import json
+import sys
+
+name, phase, pid, pgid, sid, start_ticks, runtime = sys.argv[1:]
+print(
+    json.dumps(
+        {
+            "container_name": name,
+            "creator_pgid": int(pgid),
+            "creator_pid": int(pid),
+            "creator_sid": int(sid),
+            "creator_start_ticks": int(start_ticks),
+            "phase": phase,
+            "runtime": runtime,
+            "version": 1,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+)
+PY
+  )" || die "Docker creator reference serialization failed"
+  atomic_replace_state "$ACTIVE_CONTAINER_REF_FILE" "$payload"
+}
+
+verify_created_playwright_container() {
+  python3 - "$ACTIVE_CID_FILE" "$ACTIVE_CONTAINER_NAME" "$RUNTIME_DIR" "$PLAYWRIGHT_IMAGE_ID" <<'PY'
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+
+cid_path, name, runtime, image_id = sys.argv[1:]
+fd = os.open(cid_path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+try:
+    observed = os.fstat(fd)
+    payload = os.read(fd, 256).decode("ascii").strip()
+finally:
+    os.close(fd)
+if (
+    not stat.S_ISREG(observed.st_mode)
+    or observed.st_uid != 0
+    or observed.st_gid != 0
+    or stat.S_IMODE(observed.st_mode) != 0o600
+    or re.fullmatch(r"[0-9a-f]{64}", payload) is None
+):
+    raise SystemExit(1)
+completed = subprocess.run(
+    ["docker", "container", "inspect", "--", payload],
+    check=True,
+    capture_output=True,
+    text=True,
+    timeout=10,
+)
+records = json.loads(completed.stdout)
+if not isinstance(records, list) or len(records) != 1 or not isinstance(records[0], dict):
+    raise SystemExit(1)
+record = records[0]
+config = record.get("Config", {})
+host = record.get("HostConfig", {})
+state = record.get("State", {})
+mounts = record.get("Mounts", [])
+labels = config.get("Labels", {}) if isinstance(config, dict) else {}
+runtime_binds = {
+    item.get("Source")
+    for item in mounts
+    if isinstance(item, dict)
+    and item.get("Type") == "bind"
+    and item.get("RW") is True
+    and item.get("Source") == item.get("Destination")
+}
+if (
+    record.get("Id") != payload
+    or record.get("Name") != f"/{name}"
+    or record.get("Image") != image_id
+    or not isinstance(labels, dict)
+    or labels.get("io.kortravelmap.c7.runner") != "prod-live-e2e"
+    or runtime_binds != {runtime}
+    or not isinstance(host, dict)
+    or host.get("ReadonlyRootfs") is not True
+    or host.get("NetworkMode") not in {"bridge", "default"}
+    or host.get("IpcMode") != "private"
+    or host.get("CapDrop") != ["ALL"]
+    or "no-new-privileges" not in (host.get("SecurityOpt") or [])
+    or not isinstance(state, dict)
+    or state.get("Running") is not False
+):
+    raise SystemExit(1)
+PY
+}
+
+docker_run_playwright() {
+  local -a environment_args=()
+  local -a creator_fields=()
+  local attempt command_status creator_identity creator_sid creator_start_ticks gate name
+  for name in \
+    E2E_BASE_URL NEXT_PUBLIC_KOR_TRAVEL_MAP_API E2E_DAGSTER_URL \
+    E2E_ADMIN_PASSWORD E2E_ADMIN_WRITE E2E_C7_READ_AUTH_WRITE \
+    E2E_KMA_SCOPE_WRITE E2E_DAGSTER_WRITE E2E_DAGSTER_RUN \
+    E2E_QUEUE_SENSOR_BARRIER E2E_LIVE_ALLOW_PROD E2E_DAGSTER_JOB \
+    E2E_C7_SCHEDULE E2E_C7_EXPECTED_UI_ORIGIN_SHA256 \
+    E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256 E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256 \
+    E2E_C7_ORCHESTRATOR_STATE_FILE E2E_C7_SCHEDULE_STATE_FILE \
+    E2E_C7_KMA_STATE_FILE E2E_C7_POI_STATE_FILE E2E_KMA_GRID_CAP \
+    E2E_KMA_GRID_CAP_FROM_RUNTIME E2E_LIVE_WORKERS E2E_POI_CACHE_WRITE \
+    E2E_STORAGE_STATE PLAYWRIGHT_ARTIFACT_ROOT; do
+    environment_args+=(--env "$name")
+  done
+  [[ -z "${E2E_ADMIN_USERNAME-}" ]] || environment_args+=(--env E2E_ADMIN_USERNAME)
+  [[ -n "$LOCK_GUARD_PID" ]] && kill -0 "$LOCK_GUARD_PID" 2>/dev/null ||
+    die "orchestrator lock guard is not alive"
+  [[
+    -n "$ACTIVE_CID_FILE" && -n "$ACTIVE_CONTAINER_REF_FILE" &&
+    -n "$ACTIVE_CREATE_OUTCOME_FILE" &&
+    "$ACTIVE_CONTAINER_NAME" =~ ^kor-travel-map-c7-e2e-[0-9]+$ &&
+    ! -e "$ACTIVE_CID_FILE" && ! -L "$ACTIVE_CID_FILE" &&
+    ! -e "$ACTIVE_CONTAINER_REF_FILE" && ! -L "$ACTIVE_CONTAINER_REF_FILE" &&
+    ! -e "$ACTIVE_CREATE_OUTCOME_FILE" && ! -L "$ACTIVE_CREATE_OUTCOME_FILE"
+  ]] || die "Playwright container reference is unsafe or already present"
+
+  gate="$RUNTIME_DIR/docker-create-$$.fifo"
+  [[ ! -e "$gate" && ! -L "$gate" ]] || die "Docker creator gate already exists"
+  mkfifo --mode=600 -- "$gate" || die "Docker creator gate creation failed"
+  setsid /bin/bash -c '
+    exec 9<>"$1"
+    IFS= read -r -t 15 -u 9 permit || exit 125
+    [[ "$permit" == "create" ]] || exit 125
+    outcome=$2
+    cid=$3
+    shift 3
+    set +e
+    "$@" >"$cid"
+    status=$?
+    python3 -c "import json,os,sys,tempfile; p=sys.argv[1]; s=int(sys.argv[2]); b=(json.dumps({\"phase\":\"create\",\"status\":s,\"version\":1},separators=(\",\",\":\"),sort_keys=True)+\"\\n\").encode(); fd,t=tempfile.mkstemp(prefix=\".state.\",dir=os.path.dirname(p)); os.fchmod(fd,0o600); os.fchown(fd,0,0); os.write(fd,b); os.fsync(fd); os.close(fd); os.replace(t,p); d=os.open(os.path.dirname(p),os.O_RDONLY|os.O_DIRECTORY); os.fsync(d); os.close(d)" "$outcome" "$status" || exit 126
+    exit "$status"
+  ' -- \
+    "$gate" \
+    "$ACTIVE_CREATE_OUTCOME_FILE" \
+    "$ACTIVE_CID_FILE" \
+    docker create --pull=never --rm --interactive \
+    --name "$ACTIVE_CONTAINER_NAME" \
+    --label io.kortravelmap.c7.runner=prod-live-e2e \
+    --network bridge --ipc private --read-only \
+    --security-opt no-new-privileges \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777 \
+    --tmpfs /root/.cache:rw,nosuid,nodev,noexec,mode=700 \
+    --tmpfs /root/.config:rw,nosuid,nodev,noexec,mode=700 \
+    --tmpfs /root/.npm:rw,nosuid,nodev,noexec,mode=700 \
+    --cap-drop ALL \
+    --mount "type=bind,src=$RUNTIME_DIR,dst=$RUNTIME_DIR" \
+    "${environment_args[@]}" \
+    "$PLAYWRIGHT_IMAGE_ID" \
+    bash -c 'umask 077; exec "$@"' -- "$@" &
+  ACTIVE_COMMAND_PID=$!
+  ACTIVE_COMMAND_PGID=""
+  creator_sid=""
+  creator_start_ticks=""
+  for (( attempt = 0; attempt < 80; attempt += 1 )); do
+    if creator_identity="$(python3 - "$ACTIVE_COMMAND_PID" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+pid = int(sys.argv[1])
+try:
+    raw = (Path("/proc") / str(pid) / "stat").read_text(encoding="ascii")
+    fields = raw[raw.rfind(")") + 2 :].split()
+    pgid = os.getpgid(pid)
+    sid = os.getsid(pid)
+except (FileNotFoundError, OSError, ValueError):
+    raise SystemExit(1)
+if pgid != pid or sid != pid or len(fields) <= 19:
+    raise SystemExit(1)
+print(pgid)
+print(sid)
+print(fields[19])
+PY
+    )"; then
+      mapfile -t creator_fields <<<"$creator_identity"
+      if (( ${#creator_fields[@]} == 3 )) &&
+        [[
+          "${creator_fields[0]}" =~ ^[0-9]+$ &&
+          "${creator_fields[1]}" =~ ^[0-9]+$ &&
+          "${creator_fields[2]}" =~ ^[0-9]+$
+        ]]; then
+        ACTIVE_COMMAND_PGID="${creator_fields[0]}"
+        creator_sid="${creator_fields[1]}"
+        creator_start_ticks="${creator_fields[2]}"
+        break
+      fi
+    fi
+    sleep 0.025
+  done
+  [[
+    "$ACTIVE_COMMAND_PGID" == "$ACTIVE_COMMAND_PID" &&
+    "$creator_sid" == "$ACTIVE_COMMAND_PID" &&
+    -n "$creator_start_ticks"
+  ]] ||
+    die "Docker creator process-group identity could not be attested"
+  write_container_reference \
+    creating \
+    "$ACTIVE_COMMAND_PID" \
+    "$ACTIVE_COMMAND_PGID" \
+    "$creator_sid" \
+    "$creator_start_ticks"
+  printf 'create\n' >"$gate" || die "Docker creator gate release failed"
+  rm -f -- "$gate" || die "Docker creator gate cleanup failed"
+  while kill -0 "$ACTIVE_COMMAND_PID" 2>/dev/null; do
+    if ! kill -0 "$LOCK_GUARD_PID" 2>/dev/null; then
+      terminate_active_command
+      die "orchestrator lock guard exited during Docker create"
+    fi
+    sleep 0.25
+  done
+  if wait "$ACTIVE_COMMAND_PID"; then command_status=0; else command_status=$?; fi
+  ACTIVE_COMMAND_PID=""
+  ACTIVE_COMMAND_PGID=""
+  python3 - "$ACTIVE_CREATE_OUTCOME_FILE" "$command_status" <<'PY'
+import json
+import os
+import stat
+import sys
+
+path, expected_raw = sys.argv[1:]
+fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+try:
+    observed = os.fstat(fd)
+    value = json.loads(os.read(fd, 1024))
+finally:
+    os.close(fd)
+if (
+    not stat.S_ISREG(observed.st_mode)
+    or observed.st_uid != 0
+    or observed.st_gid != 0
+    or stat.S_IMODE(observed.st_mode) != 0o600
+    or not isinstance(value, dict)
+    or set(value) != {"phase", "status", "version"}
+    or value["phase"] != "create"
+    or type(value["status"]) is not int
+    or value["status"] != int(expected_raw)
+    or value["version"] != 1
+):
+    raise SystemExit(1)
+PY
+  (( command_status == 0 )) || return "$command_status"
+  fsync_file_and_parent "$ACTIVE_CID_FILE" || return 1
+  verify_created_playwright_container || return 1
+  write_container_reference created 0 0 0 0
+
+  setsid docker start --attach --interactive "$(<"$ACTIVE_CID_FILE")" &
+  ACTIVE_COMMAND_PID=$!
+  ACTIVE_COMMAND_PGID="$ACTIVE_COMMAND_PID"
+  while kill -0 "$ACTIVE_COMMAND_PID" 2>/dev/null; do
+    if ! kill -0 "$LOCK_GUARD_PID" 2>/dev/null; then
+      terminate_active_command
+      die "orchestrator lock guard exited during Playwright execution"
+    fi
+    sleep 0.25
+  done
+  if wait "$ACTIVE_COMMAND_PID"; then command_status=0; else command_status=$?; fi
+  ACTIVE_COMMAND_PID=""
+  ACTIVE_COMMAND_PGID=""
+  remove_active_container || return 1
+  return "$command_status"
+}
+
+# 여기까지는 수집/파이프라인 domain state를 바꾸지 않는 preflight다. UI login은
+# session/auth audit를 만들 수 있으나 provider/request/POI/schedule mutation은 하지 않는다.
+# 고정 C7 상태 root와 BLOCKED sentinel은 모든 실행 identity 검증 뒤에만 만든다.
+verify_root_owned_orchestrator_snapshot ||
+  die "runner is not the attested root-owned exact commit snapshot"
+source "$SCRIPT_DIR/lib/c7-prod-runner-lifecycle.sh"
+mapfile -t runtime_attestation_output < <(verify_trusted_runtime_attestation 2>/dev/null) ||
+  die "trusted host/runtime/compatible-pair attestation failed"
+(( ${#runtime_attestation_output[@]} == 2 )) ||
+  die "trusted runtime attestation output cardinality is invalid"
+COMPATIBLE_PAIR_MANIFEST_SHA256="${runtime_attestation_output[0]}"
+HOST_ATTESTATION_SHA256="${runtime_attestation_output[1]}"
+[[ "$COMPATIBLE_PAIR_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+  die "compatible-pair manifest attestation output is invalid"
+[[ "$HOST_ATTESTATION_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+  die "host runtime attestation output is invalid"
+PLAYWRIGHT_IMAGE_ID="$E2E_C7_PLAYWRIGHT_IMAGE"
+actual_dagster_origin_sha256="$(canonical_dagster_graphql_sha256)" ||
+  die "Dagster GraphQL HTTPS endpoint canonicalization failed"
+[[ "$actual_dagster_origin_sha256" == "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256" ]] ||
+  die "Dagster GraphQL endpoint origin attestation mismatch"
+ALEMBIC_HEAD="$(verify_alembic_state)" ||
+  die "Map API Alembic current/head/check attestation failed"
+[[ "$ALEMBIC_HEAD" =~ ^[0-9A-Za-z_]+$ ]] || die "Alembic head output is invalid"
 web_cap="$(read_cap "$E2E_C7_DAGSTER_WEB_SERVICE")" ||
   die "Dagster web cap attestation failed"
 daemon_cap="$(read_cap "$E2E_C7_DAGSTER_DAEMON_SERVICE")" ||
   die "Dagster daemon cap attestation failed"
 [[ "$web_cap" == "$daemon_cap" ]] || die "Dagster cap attestation mismatch"
-
-verify_ui_auth_preflight() {
-  local -a container_ids
-  mapfile -t container_ids < <(
-    docker compose --project-directory "$COMPOSE_PROJECT_DIR" \
-      ps -q "$E2E_C7_UI_SERVICE"
-  )
-  (( ${#container_ids[@]} == 1 )) ||
-    die "UI compose service must resolve to exactly one running container"
-  [[ -n "${container_ids[0]}" ]] || die "UI container id is empty"
-  docker inspect -- "${container_ids[0]}" | python3 -c '
-import json
-import sys
-
-try:
-    records = json.load(sys.stdin)
-    env = records[0]["Config"]["Env"]
-except (IndexError, KeyError, TypeError, ValueError):
-    raise SystemExit(2)
-prefix = "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH="
-values = [item[len(prefix):] for item in env if isinstance(item, str) and item.startswith(prefix)]
-if len(values) != 1 or not values[0]:
-    raise SystemExit(3)
-' >/dev/null || die "UI admin password hash runtime attestation failed"
-
-  node <<'NODE'
-async function main() {
-  const baseUrl = new URL(process.env.E2E_BASE_URL);
-  const loginUrl = new URL("/api/auth/login", baseUrl);
-  const username = process.env.E2E_ADMIN_USERNAME || "admin";
-  const response = await fetch(loginUrl, {
-    body: JSON.stringify({ password: process.env.E2E_ADMIN_PASSWORD, username }),
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      Origin: baseUrl.origin,
-    },
-    method: "POST",
-    redirect: "manual",
-    signal: AbortSignal.timeout(30_000),
-  });
-  const setCookie = response.headers.get("set-cookie");
-  if (
-    response.status !== 200 ||
-    typeof setCookie !== "string" ||
-    setCookie.length === 0
-  ) {
-    process.exit(2);
-  }
-}
-main().catch(() => {
-  process.exitCode = 3;
-});
-NODE
-}
-
 verify_ui_auth_preflight || die "UI login POST/Set-Cookie preflight failed"
 
+initialize_state_paths
+verify_clean_state_audit
+start_orchestrator_lock_guard
+[[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
+  die "prior BLOCKED state requires operator recovery"
+has_residual_state && die "prior C7 journal/runtime residue requires operator recovery"
+create_blocked_sentinel
+trap finish EXIT INT TERM
+
+RUNTIME_DIR="$(mktemp -d "$STATE_ROOT/runtime.XXXXXX")" ||
+  die "private runtime directory creation failed"
+chown 0:0 -- "$RUNTIME_DIR"
+chmod 700 -- "$RUNTIME_DIR"
+runtime_is_private_direct_child || die "private runtime directory validation failed"
+mkdir -- "$RUNTIME_DIR/playwright" "$RUNTIME_DIR/journals"
+chown 0:0 -- "$RUNTIME_DIR/playwright" "$RUNTIME_DIR/journals"
+chmod 700 -- "$RUNTIME_DIR/playwright" "$RUNTIME_DIR/journals"
+export E2E_STORAGE_STATE="$RUNTIME_DIR/admin-state.json"
+ACTIVE_CID_FILE="$STATE_ROOT/container-$$.cid"
+ACTIVE_CONTAINER_REF_FILE="$STATE_ROOT/container-$$.json"
+ACTIVE_CREATE_OUTCOME_FILE="$STATE_ROOT/container-$$.outcome.json"
+ACTIVE_CONTAINER_NAME="kor-travel-map-c7-e2e-$$"
+snapshot_attested_inputs || die "attested input immutable snapshot failed"
+
+RUN_STATE_FILE="$RUNTIME_DIR/journals/sensor.json"
+SCHEDULE_STATE_FILE="$RUNTIME_DIR/journals/schedule.json"
+KMA_STATE_FILE="$RUNTIME_DIR/journals/kma.json"
+POI_STATE_FILE="$RUNTIME_DIR/journals/poi.json"
+printf -v run_state_payload \
+  '{"dagsterGraphqlEndpointSha256":"%s","phase":"orchestrator_started","version":2}' \
+  "$actual_dagster_origin_sha256"
+atomic_replace_state "$RUN_STATE_FILE" "$run_state_payload"
+printf -v schedule_state_payload \
+  '{"dagsterGraphqlEndpointSha256":"%s","phase":"schedule_snapshot_pending","version":2}' \
+  "$actual_dagster_origin_sha256"
+atomic_replace_state "$SCHEDULE_STATE_FILE" "$schedule_state_payload"
+# helper의 이전-run fail-closed 검사와 호환되는 빈 restored baseline이다. 최종
+# 검증은 sentinel run_id와 null cleanup_result를 거부하므로 실행 생략을 성공으로
+# 오인하지 않는다.
+atomic_replace_state \
+  "$KMA_STATE_FILE" \
+  '{"cleanup_result":null,"completed_scenarios":[],"external_systems":[],"idempotency_entries":[],"phase":"restored","request_ids":[],"request_terminal_statuses":{},"run_id":"__orchestrator_pending__","target_history":[],"target_refs":[],"version":3}'
+atomic_replace_state \
+  "$POI_STATE_FILE" \
+  '{"phase":"orchestrator_pending","version":1}'
+printf -v blocked_running_payload \
+  '{"dagsterGraphqlEndpointSha256":"%s","expectedDagsterGraphqlEndpointSha256":"%s","phase":"orchestrator_running","version":3}' \
+  "$actual_dagster_origin_sha256" \
+  "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256"
+atomic_replace_state "$BLOCKED_FILE" "$blocked_running_payload"
+
+export E2E_LIVE_ALLOW_PROD
+export E2E_ADMIN_WRITE E2E_C7_READ_AUTH_WRITE E2E_KMA_SCOPE_WRITE
+export E2E_DAGSTER_WRITE E2E_DAGSTER_RUN E2E_QUEUE_SENSOR_BARRIER
+export E2E_C7_SCHEDULE
+export E2E_C7_EXPECTED_UI_ORIGIN_SHA256
+export E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
+export E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256
 export E2E_C7_ORCHESTRATOR_STATE_FILE="$RUN_STATE_FILE"
 export E2E_C7_SCHEDULE_STATE_FILE="$SCHEDULE_STATE_FILE"
 export E2E_C7_KMA_STATE_FILE="$KMA_STATE_FILE"
@@ -591,7 +1227,6 @@ export E2E_KMA_GRID_CAP_FROM_RUNTIME=1
 export E2E_LIVE_WORKERS=1
 export E2E_POI_CACHE_WRITE=1
 
-cd -- "$FRONTEND_DIR"
 readonly SPECS=(
   "e2e/live/ops-c7-read-auth.live.spec.ts"
   "e2e/live/ops-c7-kma-active-write.live.spec.ts"
@@ -600,11 +1235,21 @@ readonly SPECS=(
   "e2e/live/ops-c7-schedule-write.live.spec.ts"
 )
 for spec in "${SPECS[@]}"; do
-  npm run e2e:live -- "$spec" --workers=1 --retries=0
+  artifact_name="${spec##*/}"
+  artifact_name="${artifact_name%.live.spec.ts}"
+  export PLAYWRIGHT_ARTIFACT_ROOT="$RUNTIME_DIR/playwright/$artifact_name"
+  mkdir -- "$PLAYWRIGHT_ARTIFACT_ROOT"
+  chown 0:0 -- "$PLAYWRIGHT_ARTIFACT_ROOT"
+  chmod 700 -- "$PLAYWRIGHT_ARTIFACT_ROOT"
+  docker_run_playwright npm run e2e:live -- "$spec" --workers=1 --retries=0
 done
 # `@c7-causal`은 spec 제목의 안정 tag다. Playwright는 grep이 아무 test도 매칭하지
 # 못하면 fail-loud로 실패한다(no-match를 무시하는 옵션은 쓰지 않는다).
-npm run e2e:live -- \
+export PLAYWRIGHT_ARTIFACT_ROOT="$RUNTIME_DIR/playwright/poi-cache-targets-write-causal"
+mkdir -- "$PLAYWRIGHT_ARTIFACT_ROOT"
+chown 0:0 -- "$PLAYWRIGHT_ARTIFACT_ROOT"
+chmod 700 -- "$PLAYWRIGHT_ARTIFACT_ROOT"
+docker_run_playwright npm run e2e:live -- \
   "e2e/live/poi-cache-targets-write.live.spec.ts" \
   --workers=1 \
   --retries=0 \
@@ -970,7 +1615,7 @@ PY
 }
 
 remote_state_is_exact_restored() {
-  node - \
+  docker_run_playwright node - \
     "$RUN_STATE_FILE" \
     "$SCHEDULE_STATE_FILE" \
     "$KMA_STATE_FILE" \
