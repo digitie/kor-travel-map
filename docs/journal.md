@@ -11,6 +11,17 @@
   후보집합 불일치(#768)를 상세 코멘트하고 아이템별 이슈로 묶었다. #757/#759는 잔여 finding이 없다.
 - `T-VN-05R/17R/21R/14R`를 독립 PR 경계로 추가했다. 0060은 아직 main cutover 전이므로
   transactional non-concurrent UNIQUE로 직접 정정하고, #768은 열린 PR #763에 후속 커밋한다.
+- T-VN-17R은 retry 잔여가 있을 때만 동명 index/constraint를 5초 제한의 짧은 autocommit DDL로
+  먼저 정리한다. main transaction은 `SHARE ROW EXCLUSIVE`로 SELECT를 허용하고 weather DML만
+  차단한 채 dedup, non-concurrent UNIQUE, NOT VALID 제약 추가를 commit한 뒤 VALIDATE한다.
+  실제 migration DELETE를 advisory gate로 멈춰 두 번째 connection INSERT가 막히는 회귀와
+  과거 concurrent 실패가 남긴 INVALID index를 새 migration이 교체하는 회귀를 작성했다.
+- 첫 단일 적대 리뷰의 P1/P2를 반영해 autocommit VALIDATE에도 session-level 5초 lock timeout과
+  `RESET`을 보장하고, range/payload/FK 기존 오염은 첫 commit 전에 SQLSTATE `23514`로 거부한다.
+  VALIDATE blocker를 실제로 선점시킨 timeout·partial-state 재시도 회귀를 추가했으며, 실패한
+  `asyncio.to_thread` migration은 backend terminate 후 bounded join한다. 0060 downgrade는 dedup loser와
+  semantic writer를 함께 복원할 수 없어 backup/PITR+구 image 동시 복구만 허용한다. Alembic env의
+  destination guard가 현재 head에서 0060 아래 target을 descendant DDL 실행 전에 전역 거부한다.
 
 ## 2026-07-19 (claude, agent A2) — T-VN-14 지도 in-bounds 완결성 + exact 공간 술어
 
@@ -238,6 +249,8 @@
   immutable이라 삭제가 드물어 즉시 위험 낮음(리뷰 판단).
 - 위생: #752가 실수로 커밋한 repo-root ``uv.lock``(origin/main 미추적, uv는
   pyproject/CI/docs 어디에도 정본으로 참조되지 않는 로컬 아티팩트)을 제거했다.
+- **후속 정정(#766)**: 위 concurrent 절차는 dedup commit 뒤 writer가 semantic duplicate를
+  재삽입할 수 있어 T-VN-17R의 transactional writer-lock cutover로 대체한다.
 
 ## 2026-07-19 (codex) — Agent A PR #748 적대적 심층 리뷰 후속
 

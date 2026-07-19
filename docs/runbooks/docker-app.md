@@ -389,6 +389,195 @@ ADR-075/T-VN-39 cutover에서는 §8 cold backup만으로 rollback 가능하다�
 실패한 DDL은 lock 획득 시간과 보유 시간을 구분해 기록한다. `CREATE INDEX CONCURRENTLY` 실패 시
 INVALID index를 찾아 제거하며, UNIQUE writer conflict target을 index보다 먼저 전환하지 않는다.
 
+### 8.2 weather 0060 semantic UNIQUE cutover
+
+0060은 dedup과 UNIQUE 사이에 writer가 들어오는 것을 허용하지 않는다. 아래 절차는 API mutation,
+Dagster schedule/sensor/manual/backfill ingress를 service 단위로 막고, migration의 DB lock을 마지막
+불변식으로 사용한다. frontend까지 멈춰 admin write 진입점을 닫는다.
+
+```bash
+docker compose stop frontend api dagster dagster-daemon
+test -z "$(docker compose ps --status running -q frontend api dagster dagster-daemon)"
+```
+
+DB에서 기존 write transaction, semantic duplicate, 제약 위반, index/constraint 상태를 확인한다.
+첫 쿼리가 0행이 아니면 임의 종료하지 말고 소유 작업을 drain/취소한 뒤 다시 확인한다.
+
+```sql
+SELECT a.pid, a.application_name, a.state, l.mode
+FROM pg_locks l
+JOIN pg_stat_activity a ON a.pid = l.pid
+WHERE l.relation = 'feature.feature_weather_values'::regclass
+  AND l.granted
+  AND l.mode IN (
+      'RowExclusiveLock', 'ShareRowExclusiveLock',
+      'ExclusiveLock', 'AccessExclusiveLock'
+  );
+
+SELECT c.relname, i.indisvalid, i.indisready, i.indisunique
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_index i ON i.indexrelid = c.oid
+WHERE n.nspname = 'feature'
+  AND c.relname = 'uq_weather_value_identity';
+
+SELECT count(*) AS duplicate_losers
+FROM (
+    SELECT row_number() OVER (
+        PARTITION BY feature_id, provider, weather_domain, forecast_style,
+                     metric_key, issued_at, valid_at, observed_at
+        ORDER BY collected_at DESC NULLS LAST,
+                 updated_at DESC NULLS LAST,
+                 weather_value_key DESC
+    ) AS rn
+    FROM feature.feature_weather_values
+) ranked
+WHERE rn > 1;
+
+SELECT count(*) FILTER (
+           WHERE valid_from IS NOT NULL AND valid_until IS NOT NULL
+             AND valid_from > valid_until
+       ) AS range_violations,
+       count(*) FILTER (
+           WHERE jsonb_typeof(payload) <> 'object'
+       ) AS payload_violations,
+       count(*) FILTER (
+           WHERE source_record_key IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM provider_sync.source_records AS sr
+                 WHERE sr.source_record_key = w.source_record_key
+             )
+       ) AS orphan_source_records
+FROM feature.feature_weather_values AS w;
+
+SELECT conname, convalidated
+FROM pg_constraint
+WHERE conrelid = 'feature.feature_weather_values'::regclass
+  AND conname IN (
+      'ck_weather_value_range',
+      'ck_weather_value_payload_object',
+      'fk_weather_value_source_record'
+  )
+ORDER BY conname;
+```
+
+migration 전 세 violation count는 모두 0이어야 한다. 0이 아니면 실행하지 말고 authoritative
+source와 대조한 승인된 data repair 또는 cutover 전 backup/PITR 복원을 선택한다. 임의 삭제·NULL
+치환으로 통과시키지 않는다. migration도 같은 위반을 writer lock 아래 재검사해 destructive
+commit 전에 SQLSTATE `23514`로 실패한다.
+
+migration은 5초 안에 `SHARE ROW EXCLUSIVE`를 얻지 못하면 전체 rollback한다. lock을 얻은 뒤
+dedup과 non-concurrent UNIQUE를 같은 transaction에서 commit한다. 과거 실패의 동명 index/constraint는
+그 전에 5초 timeout의 짧은 autocommit DDL로만 정규화해 main build 동안 `ACCESS EXCLUSIVE`를
+보유하지 않는다. fresh 0059에는 정리 DDL이 없다. 따라서 새 실행은 INVALID index를 남기지 않는다. 세 VALIDATE도
+각각 session-level 5초 lock timeout을 적용하고 성공·실패 뒤 RESET한다.
+
+배포할 API image ID와 OCI revision, root-only runtime env snapshot, compose network를 먼저 exact
+검증한다. tag나 mutable compose build를 migration 입력으로 쓰지 않는다. 다음 immutable image
+명령을 `upgrade` 한 번과 read-only 확인에 동일하게 사용한다.
+
+```bash
+readonly MAP_API_IMAGE_ID='sha256:<64-hex-image-id>'
+readonly MAP_NETWORK='<compose-project>_default'
+readonly MAP_API_ENV_FILE='/root/<root-only-api-runtime-env>'
+
+sudo test "$(stat -c '%U:%G %a' "$MAP_API_ENV_FILE")" = 'root:root 600'
+sudo docker image inspect "$MAP_API_IMAGE_ID" \
+  --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'
+sudo docker run --rm --pull never --network "$MAP_NETWORK" \
+  --env-file "$MAP_API_ENV_FILE" --entrypoint alembic \
+  "$MAP_API_IMAGE_ID" upgrade head
+sudo docker run --rm --pull never --network "$MAP_NETWORK" \
+  --env-file "$MAP_API_ENV_FILE" --entrypoint alembic \
+  "$MAP_API_IMAGE_ID" current
+sudo docker run --rm --pull never --network "$MAP_NETWORK" \
+  --env-file "$MAP_API_ENV_FILE" --entrypoint alembic \
+  "$MAP_API_IMAGE_ID" heads
+sudo docker run --rm --pull never --network "$MAP_NETWORK" \
+  --env-file "$MAP_API_ENV_FILE" --entrypoint alembic \
+  "$MAP_API_IMAGE_ID" check
+```
+
+`current`와 유일한 `heads`가 같고 `check`가 성공한 뒤 다음을 모두 확인한다.
+
+```sql
+SELECT i.indisvalid, i.indisready, i.indisunique, i.indnullsnotdistinct
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_index i ON i.indexrelid = c.oid
+WHERE n.nspname = 'feature'
+  AND c.relname = 'uq_weather_value_identity';
+
+SELECT conname, convalidated
+FROM pg_constraint
+WHERE conrelid = 'feature.feature_weather_values'::regclass
+  AND conname IN (
+      'ck_weather_value_range',
+      'ck_weather_value_payload_object',
+      'fk_weather_value_source_record'
+  )
+ORDER BY conname;
+
+SELECT count(*) AS duplicate_losers
+FROM (
+    SELECT row_number() OVER (
+        PARTITION BY feature_id, provider, weather_domain, forecast_style,
+                     metric_key, issued_at, valid_at, observed_at
+        ORDER BY collected_at DESC NULLS LAST,
+                 updated_at DESC NULLS LAST,
+                 weather_value_key DESC
+    ) AS rn
+    FROM feature.feature_weather_values
+) ranked
+WHERE rn > 1;
+
+SELECT count(*) FILTER (
+           WHERE valid_from IS NOT NULL AND valid_until IS NOT NULL
+             AND valid_from > valid_until
+       ) AS range_violations,
+       count(*) FILTER (
+           WHERE jsonb_typeof(payload) <> 'object'
+       ) AS payload_violations,
+       count(*) FILTER (
+           WHERE source_record_key IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM provider_sync.source_records AS sr
+                 WHERE sr.source_record_key = w.source_record_key
+             )
+       ) AS orphan_source_records
+FROM feature.feature_weather_values AS w;
+```
+
+정상은 index boolean 네 값과 세 `convalidated`가 모두 true이고 **post-check의**
+`duplicate_losers=0`, violation 세 값이 모두 0이다. 최초 preflight의 duplicate 수는 migration이
+제거할 예상 loser이므로 0보다 클 수 있다. 실패하면 service fence를 유지하고 Alembic
+current, 위 index, 세 constraint validity를 다시 캡처한다.
+
+- violation이 하나라도 남으면 같은 corrupt row를 둔 재시도를 금지한다. authoritative source 기반
+  repair 또는 cutover 전 restore/PITR 후 preflight부터 다시 수행한다.
+- current가 0059인데 valid UNIQUE와 NOT VALID/일부 VALID constraint가 있으면 VALIDATE lock timeout
+  등 autocommit 뒤 실패다. violation 0과 active writer 0을 다시 확인한 뒤 **같은 immutable image**의
+  `upgrade head`를 재실행한다. 0060은 exact 세 constraint/index를 별도 짧은 retry transaction으로
+  정규화한 뒤 writer-only main cutover를 다시 수행한다.
+- 동명 INVALID index가 있으면 과거 concurrent 구현의 잔재다. 다음 원자 cleanup 뒤 preflight와 같은
+  immutable image migration을 재실행한다.
+
+```sql
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE feature.feature_weather_values IN SHARE ROW EXCLUSIVE MODE;
+DROP INDEX IF EXISTS feature.uq_weather_value_identity;
+COMMIT;
+```
+
+새 API/Dagster image와 migration head/check, semantic upsert smoke가 모두 성공한 뒤에만
+Dagster web/daemon→API→frontend 순서로 재기동한다. 구 writer image는 다시 기동하지 않는다.
+
+0060 `alembic downgrade`는 지원하지 않는다. dedup loser와 semantic conflict-target writer를
+DDL만으로 원자 복원할 수 없기 때문이다. 0060 이전으로 돌아가야 하면 writer fence를 유지한 채
+cutover 전 backup/PITR과 그 backup에 대응하는 구 API·Dagster image를 함께 복원하고, old semantic
+writer smoke가 성공한 뒤에만 서비스를 연다.
+
 ## 9. T-108 양 노드 배포 경계
 
 T-108의 양 노드 운영은 같은 image tag를 N150 16GB(x86_64)와 Odroid M1S(ARM64)에 배포할

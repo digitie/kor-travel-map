@@ -458,7 +458,9 @@ index/DDL을 바꾸는 PR은 변경 **전후 write 비용·index 크기**(및 �
   index 생성/삭제(migration)는 호출자가 하고, helper는 순수 측정만 한다.
 - GiST/BRIN은 실제 predicate·시간 정렬을 지원할 때만 채택한다. GiST 6→partial 정리의 write
   **~1.6× 개선** 실측이 선례다(§13, T-VN-18 계열이 이 helper로 before/after를 첨부한다).
-- concurrent build 실패 뒤 INVALID index가 0건인지 확인한다(§6.6 관련 runbook).
+- concurrent build 실패 뒤 INVALID index가 0건인지 확인한다(§6.6 관련 runbook). dedup과
+  UNIQUE 사이 writer race가 있는 0060은 성능보다 원자성을 우선해 table writer lock 아래
+  non-concurrent build를 사용하므로 lock 대기·보유 시간과 fence 범위를 대신 기록한다.
 
 MVT, 범용 batch, cursor HMAC, weather partition/hypertable, 물리 listener, 대규모 fixture 주기는
 T-VN-51~56에서 먼저 채택 기준을 측정하며, "확장 가능해 보인다"는 이유만으로 구현하지 않는다.

@@ -9,6 +9,14 @@
 - 문서를 먼저 갱신해 `T-VN-05R/17R/21R/14R` 네 PR 경계와 agent A/B 병렬 lane을 고정했다.
   #765/#766/#767은 `integration/t-vn` 대상 독립 PR, #768은 열려 있는 PR #763의 후속 커밋이다.
   0060은 호환성보다 원자성을 우선해 dedup+non-concurrent UNIQUE를 한 transaction으로 묶는다.
+- `T-VN-17R` 구현은 과거 retry 잔여만 짧은 autocommit DDL로 정리한 뒤 0060이 5초 제한의
+  `SHARE ROW EXCLUSIVE`를 얻어 dedup→non-concurrent semantic UNIQUE를 한 transaction에서 commit하도록
+  정정했다. main build는 SELECT를 허용한다. VALIDATE에도 session-level 5초 timeout과 RESET을
+  적용하고, 기존 제약 위반은 destructive commit 전에 `23514`로 거부하며, downgrade는
+  backup/PITR 전용으로 fail-closed한다. 실제 migration
+  DELETE 내부를 advisory gate로 멈춘 writer 차단, VALIDATE blocker timeout·재시도, 과거 concurrent
+  실패 INVALID index 자동 복구, head→0059 무변경 전역 downgrade 거부 회귀를 추가했으며 두 번째
+  단일 리뷰 finding 반영 후 재리뷰 대기다.
 - **다음 한 작업**: 문서 PR 병합 직후 네 task를 병렬 구현하고, 같은 리뷰어 1명의 테스트 전
   승인→로컬 gate→CI green→integration 병합→issue close까지 수행한다.
 
@@ -111,6 +119,8 @@
   head green. #752가 실수 커밋한 uv.lock 제거.
 - **다음 한 작업**: 이 브랜치 orchestrator 리뷰·PR·머지 후 다음 T-VN 배정 task.
   (dagster 통합 테스트는 이 venv에 dagster 미설치라 미실행 — 환경 한계.)
+- **후속 정정(#766)**: dedup 뒤 concurrent build 사이 writer race가 확인돼 T-VN-17R에서
+  transactional writer-lock cutover로 교체한다. 이 항목의 `CONCURRENTLY` 설명은 당시 구현 이력이다.
 
 ## 2026-07-19 (codex) — Agent A T-VN-07 소비자 clean-cut 리뷰 보완
 

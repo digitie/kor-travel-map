@@ -16,6 +16,7 @@ import asyncio
 from logging.config import fileConfig
 from typing import TYPE_CHECKING
 
+from alembic.script import ScriptDirectory
 from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -52,6 +53,69 @@ else:
 
 # autogenerate 대상 metadata.
 target_metadata = metadata
+
+_FORWARD_ONLY_BOUNDARY = "0060_weather_integrity"
+
+
+def _revisions_include_forward_only_boundary(
+    script: ScriptDirectory,
+    revisions: tuple[str, ...],
+) -> bool:
+    """revision 집합 또는 그 조상에 0060 forward-only 경계가 있는지 반환한다."""
+    if not revisions:
+        return False
+    return any(
+        node.revision == _FORWARD_ONLY_BOUNDARY
+        for node in script.iterate_revisions(revisions, None, inclusive=True)
+    )
+
+
+def _guard_forward_only_target() -> None:
+    """downgrade/stamp 계획이 0060 아래로 가면 첫 step 전에 거부한다."""
+    migration_context = context.get_context()
+    migration_fn = migration_context.opts.get("fn")
+    if migration_fn is None or migration_fn.__name__ not in {
+        "downgrade",
+        "do_stamp",
+    }:
+        # upgrade는 경계를 내리지 않는다. current/check/autogenerate callback은
+        # 여기서 실행하면 출력·reflection·hook이 두 번 실행되므로 건드리지 않는다.
+        return
+
+    current_heads = migration_context.get_current_heads()
+    script = ScriptDirectory.from_config(config)
+    destination = migration_context.opts.get("destination_rev")
+    if migration_fn.__name__ == "downgrade":
+        planned_steps = tuple(
+            script._downgrade_revs(  # type: ignore[arg-type]  # noqa: SLF001
+                destination,
+                current_heads,
+            )
+        )
+    else:
+        # stamp --purge는 run_migrations()가 version table을 비운 뒤 callback을
+        # 실행한다. guard는 purge 전 current head로 하향 경계만 판정하고 실제
+        # callback은 Alembic이 정상 시점에 정확히 한 번 실행하게 둔다.
+        planned_steps = tuple(
+            script._stamp_revs(destination, current_heads)  # noqa: SLF001
+        )
+    crosses_boundary = any(
+        step.is_downgrade
+        and _revisions_include_forward_only_boundary(
+            script,
+            step.from_revisions_no_deps,
+        )
+        and not _revisions_include_forward_only_boundary(
+            script,
+            step.to_revisions_no_deps,
+        )
+        for step in planned_steps
+    )
+    if crosses_boundary:
+        raise RuntimeError(
+            "0060 is forward-only: restore the pre-cutover backup/PITR under a "
+            "writer fence and roll back the writer image as one operation"
+        )
 
 
 # ``alembic check`` 정합 필터 (ADR-075 D-12-2, T-VN-19).
@@ -150,6 +214,9 @@ def do_run_migrations(connection: Connection) -> None:
         include_object=_include_object,
     )
     with context.begin_transaction():
+        # 0061+ descendant의 downgrade가 일부 commit된 뒤 0060에서 멈추지 않도록
+        # destination 전체를 migration step 실행 전에 판정한다.
+        _guard_forward_only_target()
         # ADR-008 — search_path를 Alembic이 소유한 트랜잭션 **안에서** 설정.
         # 0002의 ``coord_5179`` STORED 생성 컬럼이 ``x_extension`` 의 PostGIS
         # ``ST_Transform`` 을 참조하므로 DDL 실행 전 search_path 필요.
