@@ -44,6 +44,7 @@ from kortravelmap.api.auth import (
     require_admin_frontend,
 )
 from kortravelmap.api.db import get_session
+from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.routers.curations import AdminCurationItemView
 from kortravelmap.api.settings import ApiSettings
@@ -337,6 +338,10 @@ class AdminFeatureChangeRequestRecord(BaseModel):
     action: Literal["add", "update", "delete"]
     status: Literal["pending", "applied", "rejected"]
     review_mode: FeatureMutationReviewMode
+    base_row_revision: int | None = Field(
+        default=None,
+        description="update/delete 요청 제출 시 확인한 feature row_revision.",
+    )
     payload: dict[str, Any]
     reason: str | None = None
     requested_by: str | None = None
@@ -411,6 +416,10 @@ class AdminFeatureDetailFeatureRecord(BaseModel):
     sibling_group_id: str | None = None
     data_origin: str
     data_version: int
+    row_revision: int = Field(
+        ge=1,
+        description="correction If-Match에 사용할 server-owned revision.",
+    )
     user_change_kind: str | None = None
     user_change_status: str | None = None
     user_change_request_id: str | None = None
@@ -553,6 +562,23 @@ class AdminFeatureDetailResponse(BaseModel):
     meta: Meta
 
 
+class AdminFeatureRevisionData(BaseModel):
+    """correction precondition용 feature core revision snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    row_revision: int = Field(ge=1)
+
+
+class AdminFeatureRevisionResponse(BaseModel):
+    """동적 aggregate를 제외한 stable revision representation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminFeatureRevisionData
+
+
 class AdminFeatureReviewActionRequest(BaseModel):
     """approve/reject body."""
 
@@ -642,6 +668,7 @@ def _change_record(row: FeatureChangeRequest) -> AdminFeatureChangeRequestRecord
         action=row.action,
         status=row.state,
         review_mode=row.review_mode,
+        base_row_revision=row.base_row_revision,
         payload=row.payload,
         reason=row.reason,
         requested_by=row.requested_by,
@@ -757,63 +784,20 @@ def _change_error(exc: FeatureChangeConflict) -> HTTPException:
     return HTTPException(status_code=status_code, detail=str(exc))
 
 
-# ── If-Match / ETag row-revision 낙관적 동시성 (T-VN-13, D-10-3/D-9-8) ──────────
-# ETag는 feature의 server-owned row_revision을 담은 strong validator다.
-_ETAG_PATTERN = re.compile(r'\s*(?:W/)?"?(\d+)"?\s*')
-
-
-def _feature_etag(revision: int) -> str:
-    """row_revision을 strong entity-tag로 직렬화한다 (예: ``"7"``)."""
-    return f'"{revision}"'
-
-
+# ── If-Match row-revision 낙관적 동시성 (T-VN-13, D-10-3) ─────────────────────
 def _set_feature_etag(response: Response, revision: int) -> None:
-    response.headers["ETag"] = _feature_etag(revision)
-
-
-def _parse_etag_revisions(values: list[str]) -> list[int]:
-    """헤더 값들(콤마 분리 포함)에서 row_revision 정수만 추출한다."""
-    revisions: list[int] = []
-    for raw in values:
-        for token in raw.split(","):
-            matched = _ETAG_PATTERN.fullmatch(token)
-            if matched is not None:
-                revisions.append(int(matched.group(1)))
-    return revisions
+    response.headers["ETag"] = revision_etag(revision)
 
 
 def _require_if_match_revision(request: Request) -> int:
     """correction 요청의 ``If-Match``를 row_revision으로 파싱한다.
 
-    누락 → 428, 정확히 하나의 strong row_revision ETag가 아니면 → 422.
-    strong ``"7"`` 과 관대하게 bare ``7`` 을 모두 허용한다(W/ weak은 거부).
+    누락 → 428, 정확히 한 physical header line의 canonical strong ETag가 아니면
+    → 422. bare/weak/wildcard/list/0/선행 0/BIGINT 초과는 모두 거부한다.
     """
-    values = request.headers.getlist("if-match")
-    if not values:
-        raise HTTPException(
-            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
-            detail={
-                "code": "PRECONDITION_REQUIRED",
-                "message": "If-Match header가 필요합니다.",
-            },
-        )
-    revisions = _parse_etag_revisions(values)
-    if len(revisions) != 1 or any(v.strip().startswith("W/") for v in values):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="If-Match는 정확히 하나의 row_revision strong ETag여야 합니다.",
-        )
-    return revisions[0]
-
-
-def _if_none_match_hit(request: Request, revision: int) -> bool:
-    """조건부 GET: ``If-None-Match``가 현재 revision(또는 ``*``)과 일치하는지."""
-    values = request.headers.getlist("if-none-match")
-    if not values:
-        return False
-    if any(token.strip() == "*" for raw in values for token in raw.split(",")):
-        return True
-    return revision in _parse_etag_revisions(values)
+    revision = parse_revision_header(request, "If-Match", required=True)
+    assert revision is not None
+    return revision
 
 
 def _precondition_failed(exc: FeaturePreconditionFailed) -> HTTPException:
@@ -842,15 +826,6 @@ _IF_MATCH_OPENAPI_PARAMETER = {
     "description": "직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성).",
     "schema": {"type": "string"},
 }
-_IF_NONE_MATCH_OPENAPI_PARAMETER = {
-    "name": "If-None-Match",
-    "in": "header",
-    "required": False,
-    "description": "이전 ETag(row_revision)와 같으면 304로 응답한다.",
-    "schema": {"type": "string"},
-}
-
-
 @router.get("", response_model=AdminFeaturesListResponse)
 async def list_features(
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -965,35 +940,45 @@ async def list_feature_change_request_route(
 
 
 @router.get(
-    "/{feature_id}",
-    response_model=AdminFeatureDetailResponse,
+    "/{feature_id}/revision",
+    response_model=AdminFeatureRevisionResponse,
     responses={
         404: {"description": "feature 없음"},
-        304: {"description": "If-None-Match row_revision 일치 (본문 없음)"},
         200: {"headers": _ETAG_RESPONSE_HEADER},
     },
-    openapi_extra={"parameters": [_IF_NONE_MATCH_OPENAPI_PARAMETER]},
 )
-async def get_feature_detail_route(
+async def get_feature_revision_route(
     feature_id: str,
-    request: Request,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> AdminFeatureDetailResponse | Response:
-    started_at = perf_counter()
+) -> AdminFeatureRevisionResponse:
     revision = await get_feature_row_revision(session, feature_id)
     if revision is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
         )
-    etag = _feature_etag(revision)
-    if _if_none_match_hit(request, revision):
-        return Response(
-            status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag}
+    _set_feature_etag(response, revision)
+    return AdminFeatureRevisionResponse(
+        data=AdminFeatureRevisionData(
+            feature_id=feature_id,
+            row_revision=revision,
         )
+    )
+
+
+@router.get(
+    "/{feature_id}",
+    response_model=AdminFeatureDetailResponse,
+    responses={404: {"description": "feature 없음"}},
+)
+async def get_feature_detail_route(
+    feature_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminFeatureDetailResponse:
+    started_at = perf_counter()
     row = await get_admin_feature_detail(session, feature_id)
-    if row is None:  # pragma: no cover - revision/detail 원자적 조회 방어
+    if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
@@ -1001,7 +986,6 @@ async def get_feature_detail_route(
     curations = await curation_repo.list_curation_items_by_feature_ids(
         session, feature_ids=[feature_id], public_only=False
     )
-    _set_feature_etag(response, revision)
     return _detail_response(
         row,
         started_at=started_at,
@@ -1135,29 +1119,23 @@ async def delete_feature_route(
         404: {"description": "request 없음"},
         409: {"description": "승인 불가"},
         412: {"description": "If-Match row_revision 불일치"},
-        422: {"description": "If-Match가 row_revision strong ETag가 아님"},
-        428: {"description": "If-Match 누락"},
         200: {"headers": _ETAG_RESPONSE_HEADER},
     },
-    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 async def approve_feature_change_request_route(
     request_id: str,
     body: AdminFeatureReviewActionRequest,
-    request: Request,
     response: Response,
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
-    expected_revision = _require_if_match_revision(request)
     async with session.begin():
         try:
             result = await apply_feature_change_request(
                 session,
                 request_id,
                 operator=context.actor,
-                expected_row_revision=expected_revision,
             )
         except FeaturePreconditionFailed as exc:
             raise _precondition_failed(exc) from exc

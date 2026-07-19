@@ -25,7 +25,7 @@ from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
 from kortravelmap.infra import (
     curation_repo,
@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_frontend, require_service_token
 from kortravelmap.api.db import get_session
+from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.response import ClusterUnit, Meta, make_meta
 from kortravelmap.api.routers.curations import CurationItemView
 
@@ -216,6 +217,10 @@ class FeatureDetailResponse(BaseModel):
     marker_icon: str | None = None
     marker_color: str | None = None
     status: str
+    row_revision: int = Field(
+        ge=1,
+        description="server-owned feature revision. ETag과 같은 값이다.",
+    )
     updated_at: datetime
     curations: list[CurationItemView] = Field(
         default_factory=list,
@@ -553,6 +558,7 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         marker_icon=row["marker_icon"],
         marker_color=row["marker_color"],
         status=row["status"],
+        row_revision=row["row_revision"],
         updated_at=row["updated_at"],
     )
 
@@ -1101,15 +1107,37 @@ async def list_features_nearby_by_target(
     "/{feature_id}",
     response_model=FeatureDetailEnvelopeResponse,
     summary="feature 단건 상세",
-    responses={404: {"description": "feature_id 없음"}},
+    responses={
+        404: {"description": "feature_id 없음"},
+        304: {"description": "If-None-Match row_revision 일치 (본문 없음)"},
+        422: {"description": "If-None-Match가 canonical strong ETag가 아님"},
+        200: {
+            "headers": {
+                "ETag": {
+                    "description": "현재 feature row_revision strong entity tag.",
+                    "schema": {"type": "string"},
+                }
+            }
+        },
+    },
 )
 async def get_feature(
     request: Request,
+    response: Response,
     feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> FeatureDetailEnvelopeResponse:
+) -> FeatureDetailEnvelopeResponse | Response:
     started_at = perf_counter()
     row = await _public_feature_row_or_404(session, feature_id)
+    revision = int(row["row_revision"])
+    expected = parse_revision_header(
+        request,
+        "If-None-Match",
+        required=False,
+    )
+    etag = revision_etag(revision)
+    if expected == revision:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
     curations = await curation_repo.list_curation_items_by_feature_ids(
         session, feature_ids=[feature_id], public_only=True
     )
@@ -1118,6 +1146,7 @@ async def get_feature(
             "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
         }
     )
+    response.headers["ETag"] = etag
     return FeatureDetailEnvelopeResponse(
         data=detail,
         meta=make_meta(request, started_at=started_at),

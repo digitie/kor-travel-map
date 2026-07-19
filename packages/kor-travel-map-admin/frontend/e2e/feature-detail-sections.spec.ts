@@ -74,6 +74,7 @@ function makeFeature(
     marker_icon: "marker",
     name: "여의도공원",
     raw_refs: [],
+    row_revision: 3,
     sido_code: "11",
     sigungu_code: "11560",
     status: "active",

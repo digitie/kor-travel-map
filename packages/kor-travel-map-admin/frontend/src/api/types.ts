@@ -610,6 +610,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/features/{feature_id}/revision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Feature Revision Route */
+        get: operations["get_feature_revision_route_v1_admin_features__feature_id__revision_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/files": {
         parameters: {
             query?: never;
@@ -2462,6 +2479,11 @@ export interface components {
             /** Applied At */
             applied_at?: string | null;
             /**
+             * Base Row Revision
+             * @description update/delete 요청 제출 시 확인한 feature row_revision.
+             */
+            base_row_revision?: number | null;
+            /**
              * Created At
              * Format: date-time
              */
@@ -2722,6 +2744,11 @@ export interface components {
             road_address_management_no?: string | null;
             /** Road Name Code */
             road_name_code?: string | null;
+            /**
+             * Row Revision
+             * @description correction If-Match에 사용할 server-owned revision.
+             */
+            row_revision: number;
             /** Sibling Group Id */
             sibling_group_id?: string | null;
             /** Sido Code */
@@ -3118,6 +3145,23 @@ export interface components {
             operator?: string | null;
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * AdminFeatureRevisionData
+         * @description correction precondition용 feature core revision snapshot.
+         */
+        AdminFeatureRevisionData: {
+            /** Feature Id */
+            feature_id: string;
+            /** Row Revision */
+            row_revision: number;
+        };
+        /**
+         * AdminFeatureRevisionResponse
+         * @description 동적 aggregate를 제외한 stable revision representation.
+         */
+        AdminFeatureRevisionResponse: {
+            data: components["schemas"]["AdminFeatureRevisionData"];
         };
         /**
          * AdminFeaturesListData
@@ -5543,6 +5587,11 @@ export interface components {
             marker_icon?: string | null;
             /** Name */
             name: string;
+            /**
+             * Row Revision
+             * @description server-owned feature revision. ETag과 같은 값이다.
+             */
+            row_revision: number;
             /** Sido Code */
             sido_code?: string | null;
             /** Sigungu Code */
@@ -11730,10 +11779,7 @@ export interface operations {
     approve_feature_change_request_route_v1_admin_features_change_requests__request_id__approve_post: {
         parameters: {
             query?: never;
-            header: {
-                /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
-                "If-Match": string;
-            };
+            header?: never;
             path: {
                 request_id: string;
             };
@@ -11783,17 +11829,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description If-Match가 row_revision strong ETag가 아님 */
+            /** @description Validation Error */
             422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description If-Match 누락 */
-            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12574,10 +12611,7 @@ export interface operations {
     get_feature_detail_route_v1_admin_features__feature_id__get: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description 이전 ETag(row_revision)와 같으면 304로 응답한다. */
-                "If-None-Match"?: string;
-            };
+            header?: never;
             path: {
                 feature_id: string;
             };
@@ -12588,20 +12622,11 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
-                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
-                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["AdminFeatureDetailResponse"];
                 };
-            };
-            /** @description If-None-Match row_revision 일치 (본문 없음) */
-            304: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description feature 없음 */
             404: {
@@ -12846,6 +12871,57 @@ export interface operations {
             };
             /** @description feature 상태 전이 불가 */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_revision_route_v1_admin_features__feature_id__revision_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureRevisionResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15151,11 +15227,20 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 feature row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["FeatureDetailEnvelopeResponse"];
                 };
+            };
+            /** @description If-None-Match row_revision 일치 (본문 없음) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description feature_id 없음 */
             404: {
@@ -15166,7 +15251,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description If-None-Match가 canonical strong ETag가 아님 */
             422: {
                 headers: {
                     [name: string]: unknown;

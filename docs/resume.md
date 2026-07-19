@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — PR #772 T-VN-13 적대 리뷰 보완 완료
+
+전문 리뷰어 1명의 테스트 전 심층 검토에서 승인 TOCTOU, add overwrite, validator 범위·형식,
+migration 원자성, public/Admin/PinVi 소비자 계약 누락을 확인했다. pending 요청은 제출 시
+`base_row_revision`을 고정하고 승인 시 row lock 아래서 비교하며, add는 같은 ID를 덮어쓰지 않는다.
+public detail ETag/304와 Admin 전용 revision endpoint를 분리했고 bundled frontend와 PinVi client가
+revision GET의 raw ETag를 PATCH/DELETE `If-Match`로 전달한다. PinVi는 stale 412를
+`PRECONDITION_FAILED`로 노출한다. PinVi 소비자 PR #391은 main에 먼저 병합됐고 원 PR #772가
+검증 중 선행 병합되어, **다음 한 작업**은 후속 PR #776을 최신 `integration/t-vn` 기준 CI green 뒤
+같은 통합 브랜치에 병합하는 것이다.
+
 ## 2026-07-19 (codex) — PR #773 2차 적대 리뷰 blocker 구현 완료
 
 - 경계 geometry의 cluster 귀속을 저장 canonical 행정코드 기준 feature당 1회로 확정하고

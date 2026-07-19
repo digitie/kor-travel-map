@@ -218,6 +218,7 @@ function makeAdminFeatureDetailResponse(
         lon: feature.lon ?? null,
         name: feature.name,
         raw_refs: [],
+        row_revision: 1,
         status: feature.status,
         updated_at: feature.updated_at,
         urls: {},

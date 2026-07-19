@@ -17,6 +17,7 @@ from kortravelmap.infra.admin_feature_repo import (
     FeatureStateConflict,
     apply_feature_change_request,
     deactivate_feature,
+    get_feature_row_revision,
     list_admin_features,
     list_dedup_reviews,
     merge_dedup_review,
@@ -255,6 +256,9 @@ async def test_user_update_version_overrides_provider_reload(
         review_mode="immediate",
         reason="사용자 제보 반영",
         requested_by="admin",
+        expected_row_revision=await get_feature_row_revision(
+            migrated_session, feature_id
+        ),
     )
     assert request.state == "applied"
 
@@ -269,6 +273,9 @@ async def test_user_update_version_overrides_provider_reload(
         review_mode="immediate",
         reason="사용자 제보 추가 반영",
         requested_by="admin",
+        expected_row_revision=await get_feature_row_revision(
+            migrated_session, feature_id
+        ),
     )
     assert second_request.state == "applied"
 
@@ -350,6 +357,9 @@ async def test_user_delete_soft_delete_prevents_provider_resurrection(
         review_mode="immediate",
         reason="사용자 삭제 요청",
         requested_by="admin",
+        expected_row_revision=await get_feature_row_revision(
+            migrated_session, feature_id
+        ),
     )
     assert request.state == "applied"
 

@@ -173,6 +173,7 @@ def test_get_feature_404_when_notice_is_ended_or_non_latest(
         "feature_id": "notice-old",
         "kind": "notice",
         "status": "active",
+        "row_revision": 7,
         "deleted_at": None,
     }
 
@@ -524,6 +525,7 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         "marker_icon": "star",
         "marker_color": "P-11",
         "status": "active",
+        "row_revision": 7,
         "parent_feature_id": None,
         "sibling_group_id": None,
         "created_at": "2026-05-29T00:00:00+09:00",
@@ -561,6 +563,8 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         assert body["data"]["detail"] == {"event_kind": "festival"}
         assert "payload" not in body["data"]["detail"]
         assert body["data"]["updated_at"] == "2026-05-29T00:00:00+09:00"
+        assert body["data"]["row_revision"] == 7
+        assert r.headers["ETag"] == '"7"'
         assert body["data"]["curations"] == []
         # T-VN-05: raw observation lineage는 공개 detail에서 제거됐다.
         assert "observations" not in body["data"]
@@ -570,6 +574,20 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         assert "coord_5179_srid" not in body["data"]
         assert "parent_feature_id" not in body["data"]
         assert "sibling_group_id" not in body["data"]
+
+        cached = client.get(
+            "/v1/features/f1",
+            headers={"If-None-Match": '"7"'},
+        )
+        assert cached.status_code == 304
+        assert cached.headers["ETag"] == '"7"'
+        assert cached.content == b""
+
+        malformed = client.get(
+            "/v1/features/f1",
+            headers={"If-None-Match": 'W/"7"'},
+        )
+        assert malformed.status_code == 422
     finally:
         client.app.dependency_overrides.clear()
 
@@ -619,6 +637,7 @@ def test_mois_place_detail_strips_raw_provider_payload(
         "marker_icon": "restaurant",
         "marker_color": "P-07",
         "status": "active",
+        "row_revision": 3,
         "updated_at": "2026-05-29T00:00:00+09:00",
         "deleted_at": None,
     }
@@ -788,6 +807,7 @@ def test_features_batch_returns_items_and_missing(
         "marker_icon": "star",
         "marker_color": "P-11",
         "status": "active",
+        "row_revision": 9,
         "parent_feature_id": None,
         "sibling_group_id": None,
         "created_at": "2026-05-29T00:00:00+09:00",
@@ -826,6 +846,7 @@ def test_features_batch_returns_items_and_missing(
         body = r.json()
         found = body["data"]["found"]["f1"]
         assert found["name"] == "축제"
+        assert found["row_revision"] == 9
         assert "coord_5179_srid" not in found
         assert "parent_feature_id" not in found
         assert "sibling_group_id" not in found

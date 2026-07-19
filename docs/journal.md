@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — PR #772 T-VN-13 단일 적대 리뷰 보완
+
+- 전문 리뷰어 1명이 테스트 전에 PR 전체를 심층 검토해 pending 승인 TOCTOU, add의 기존 feature
+  덮어쓰기, aggregate detail의 잘못된 validator, public ETag 누락, 느슨한/중복 ETag 허용,
+  migration partial-state 위험, Admin·PinVi 소비자 미배선을 확인했다.
+- pending update/delete는 제출 시 `base_row_revision`을 저장하고 승인 transaction의 row lock 아래서
+  다시 비교한다. add는 `ON CONFLICT DO NOTHING` 뒤 충돌 처리해 중간 insert를 보존한다. PATCH/DELETE는
+  정확히 한 개의 canonical strong `If-Match`만 받고 missing/stale/invalid를 404/412/422/428로 구분한다.
+- public detail에 ETag/304를 제공하고 Admin에는 feature row만 대표하는 revision endpoint를 분리했다.
+  bundled frontend와 PinVi client는 revision GET→raw ETag 전달을 수행하며 PinVi는 412를
+  `PRECONDITION_FAILED`로 보존한다. OpenAPI와 생성 TypeScript 타입도 같은 계약으로 갱신했다.
+- 리뷰 후 Map 라우터 단위 46건, 실제 PostgreSQL migration·repository 경쟁 14건, Ruff,
+  strict mypy(main 115/API 54), import 계약 4개, OpenAPI·생성 타입 drift와 frontend 앱/E2E
+  typecheck를 통과했다. PinVi 쪽은 Admin client 단위 110건과 412/no-audit 통합 1건,
+  Ruff·strict mypy 188개 소스를 통과했다.
+- 원 PR #772가 검증 중 먼저 병합되어 보완은 후속 PR #776으로 `integration/t-vn`에 반영한다.
+
 ## 2026-07-19 (codex) — PR #773 2차 적대 리뷰 blocker 구현
 
 - 행정 경계를 가로지르는 route/area도 선택 단위의 **저장 canonical 행정코드 하나에 1회
@@ -128,19 +145,17 @@
   독립 실행.
 - **online-safety(D-12)**: `ADD COLUMN ... DEFAULT 1`은 PG11+ 메타데이터 전용이라 대형
   features rewrite/backfill 없이 즉시 적용. CHECK(`row_revision >= 1`)는 NOT VALID 후
-  별도 autocommit_block에서 VALIDATE. model(`FeatureRow`)에 컬럼+CHECK를 미러링해 T-VN-19
+  같은 migration transaction에서 VALIDATE. model(`FeatureRow`)에 컬럼+CHECK를 미러링해 T-VN-19
   metadata 정합 gate(autogenerate diff 0) green.
 - **If-Match/ETag 배선**: ETag = row_revision strong validator(`"7"`). correction
-  PATCH/DELETE/approve는 If-Match 필수 — 누락 428, 형식오류 422, stale 412(제출·적용
-  직전 `SELECT ... FOR UPDATE`로 현재 revision 대조, 없는 feature는 하위 404 경로에 위임).
-  성공 시 새 ETag 반환. admin detail GET은 ETag 헤더 + If-None-Match 일치 시 304(본문 없음).
-  낙관적 검사는 repo(`submit/apply_feature_change_request`의 `expected_row_revision`)에
-  원자적으로 넣어 라우터는 428/412/304 사상만 담당. `FeaturePreconditionFailed`는
+  PATCH/DELETE는 If-Match 필수 — 누락 428, 형식오류 422, stale 412(제출 직전
+  `SELECT ... FOR UPDATE`로 현재 revision 대조, 없는 feature는 404). 승인 요청은 제출 때 저장한
+  `base_row_revision`을 적용 직전 다시 대조한다. public detail GET은 ETag/304, Admin은 별도
+  revision endpoint를 제공한다. `FeaturePreconditionFailed`는
   `FeatureChangeConflict`(409)와 구분되는 별도 예외.
-- **breaking**: If-Match 필수라 admin frontend·PinVi가 지금 이 헤더를 안 보내면 correction이
-  428이다. backend-first 계약 변경(T-VN-20 PinVi 패턴과 동일) — admin UI의 GET-ETag→
-  If-Match 전송 배선과 PinVi client 갱신은 별도 follow-up(cross-repo). OpenAPI/생성 TS
-  타입은 재생성했고 frontend build/type-check는 green(헤더는 client에서 optional이라 컴파일 무해).
+- **breaking**: bundled admin frontend와 PinVi Admin client가 revision GET→If-Match를 수행한다.
+  PinVi는 upstream 412를 자체 Admin API의 412 `PRECONDITION_FAILED`로 보존한다. OpenAPI/생성 TS
+  타입도 재생성했다.
 - 검증: 신규 admin_features 라우터 단위 16 green(428/422/412/304/ETag·expected_row_revision
   passthrough 포함), row_revision 통합 3 green(트리거 단조·If-Match precondition, WSL
   testcontainers 1행 seed), alembic metadata 정합 gate green, ruff/mypy(--strict 신규 파일)/

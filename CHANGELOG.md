@@ -48,15 +48,22 @@
 - **ADDED**: migration 0062가 `feature.features`에 server-owned monotonic `row_revision`
   (bigint, DEFAULT 1)과 이를 모든 UPDATE에서 강제 증가시키는 `BEFORE UPDATE` 트리거를
   도입한다(0058 poi lock_version 패턴). `ADD COLUMN ... DEFAULT`는 PG11+ 메타데이터 전용,
-  CHECK는 NOT VALID→VALIDATE로 online-safe. #727 provider-refresh policy revision과는
+  CHECK는 같은 migration transaction에서 NOT VALID→VALIDATE한다. pending change request에는
+  제출 시점의 `base_row_revision`을 함께 저장한다. #727 provider-refresh policy revision과는
   별개 자원이다(합치지 않음).
-- **ADDED**: admin feature detail GET이 `ETag: "<row_revision>"`를 반환하고,
-  `If-None-Match`가 일치하면 `304 Not Modified`(본문 없음)로 응답한다(조건부 GET).
-- **CHANGED (breaking)**: admin feature correction PATCH/DELETE와 change-request approve가
-  `If-Match: "<row_revision>"`를 **필수**로 요구한다 — 누락 `428`, strong ETag 형식 위반
-  `422`, 현재 revision과 불일치 `412`. 성공 시 새 `ETag`를 반환한다. 낙관적 동시성으로
-  stale overwrite를 차단한다. 기존 caller(admin frontend·PinVi)는 If-Match 전송을 추가해야
-  한다(별도 follow-up).
+- **ADDED**: public feature detail GET이 `ETag: "<row_revision>"`를 반환하고,
+  `If-None-Match`가 일치하면 `304 Not Modified`(본문 없음)로 응답한다. Admin 소비자는 집계형
+  detail 응답이 아니라 `GET /v1/admin/features/{feature_id}/revision`에서 같은 strong ETag를
+  읽는다.
+- **CHANGED (breaking)**: admin feature correction PATCH/DELETE는 정확히 한 개의 canonical
+  `If-Match: "<row_revision>"`를 필수로 요구한다. 누락은 `428`, weak·wildcard·결합·중복·
+  비정상/범위 초과 값은 `422`, stale 값은 `412`, 실제 부재는 `404`다. change-request 승인은
+  호출자가 새 ETag를 보내지 않고 요청에 저장된 `base_row_revision`을 잠금 안에서 검증해,
+  제출 뒤 provider 갱신이나 삭제가 끼어든 경우 `412`로 중단한다. add는 중간에 같은 ID가
+  생기면 덮어쓰지 않고 충돌한다.
+- **CHANGED**: bundled Admin frontend와 PinVi Admin HTTP client가 revision GET의 raw ETag를
+  그대로 PATCH/DELETE `If-Match`로 전달하고, `412`를 새로고침 후 재시도가 필요한
+  `PRECONDITION_FAILED`로 노출한다.
 
 ### 중복 GiST 제거 + weather source-record index (2026-07-19, D-12-3 T-VN-18)
 

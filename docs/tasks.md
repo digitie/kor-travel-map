@@ -12,10 +12,11 @@
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - 완료·병합됨(integration/t-vn): `T-VN-01`·`02`·`04`·`05`·`06`·`07`(Wave 0) /
-    `T-VN-13`·`14`·`17`·`18`·`19`·`20`·`21`(Wave 1) — 각 적대 리뷰 반영 후 병합.
+    `T-VN-14`·`17`·`18`·`19`·`20`·`21`(Wave 1) — 각 적대 리뷰 반영 후 병합.
     상세는 [`docs/tasks-done.md`](tasks-done.md)·`docs/journal.md`.
   - 열린 KTM-내부: 아래 미완 항목만 checkbox 유지.
   - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate** (T-VN-00/C6c cutover와 동일 배포 단위)
+  - [ ] `T-VN-13` — **Feature row_revision + If-Match/ETag 낙관적 동시성**
   - [ ] `T-VN-15` — **search total과 cursor fingerprint**
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·

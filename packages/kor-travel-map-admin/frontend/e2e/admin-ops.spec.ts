@@ -643,6 +643,7 @@ function featureDetailResponse(featureId: string): AdminFeatureDetailResponse {
         lon: 126.978,
         name: `Existing ${featureId}`,
         raw_refs: [],
+        row_revision: 1,
         status: "active",
         updated_at: MOCK_NOW,
         urls: {},

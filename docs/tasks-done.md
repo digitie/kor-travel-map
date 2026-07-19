@@ -14,7 +14,6 @@
 - [x] **T-VN-05 raw payload 경계 제거** (#752) — 공개 DTO raw/lineage를 operator 표면으로.
 - [x] **T-VN-06 notice 방어적 cast** (#746) — 오염 timestamp의 공개 read 500 차단.
 - [x] **T-VN-07 no-op 옵션 삭제 + actor principal 1차** (#748).
-- [x] **T-VN-13 Feature row_revision + If-Match/ETag** (본 PR) — 낙관적 동시성(428/412/304).
 - [x] **T-VN-14 지도 completeness + exact ST_Intersects** (#763) — mode/truncated/coverage.
 - [x] **T-VN-17 weather 무결성 제약** (#756) — semantic UNIQUE(CONCURRENTLY) + writer cutover.
 - [x] **T-VN-18 중복 GiST 제거 + BRIN 감사** (#759) — write 1.2~1.3x 개선 실측.
