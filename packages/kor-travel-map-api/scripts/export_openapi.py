@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from fastapi import FastAPI
+
 from kortravelmap.api.route_policy import RoutePolicy, build_route_policy_matrix
 
 OpenApiProfile = Literal["admin", "user"]
