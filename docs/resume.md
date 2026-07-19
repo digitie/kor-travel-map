@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — T-ADM-C7H 실행 경계 보강 진행
+
+- C7 실행 전 단일 적대 리뷰에서 실제 배포 pair/DB schema 증거 부재, host npm/Chromium 의존,
+  잘못 선언된 Dagster job 이름, preflight 전 `BLOCKED.json`, 실패 evidence 유실을 차단 finding으로
+  확정했다. 실제 run-now job은 provider별 KMA job이 아니라 `feature_update_request_worker`다.
+- 문서·task를 먼저 갱신하고 `fix/c7-prod-readiness`에서 compatible-pair manifest와 root-owned
+  exact-commit orchestrator snapshot 계약,
+  5개 service image/command/environment와 compose project, source commits, executor image, Alembic
+  current/head/check를 read-only 대조하도록 runner를 보강 중이다. mutation 상태는 모든 preflight 뒤에만
+  만들고 spec별 redacted evidence와 별도 감사 도구를 남긴다.
+- n150은 WSL SSH 41회와 Windows TCP/22 boolean 진단 모두 연결 전에 실패했다. 따라서
+  `sudo -n true`는 아직 성공/실패 어느 쪽으로도 판정하지 않았고 원격 mutation도 0건이다.
+- **다음 한 작업**: 동일 리뷰어의 재검토를 반영한 뒤 로컬 gate·PR·CI merge를 완료한다. 그 사이
+  n150 접속이 복구되면 passwordless sudo→backup/PITR→forward-only migration→C6c capture→C7 live
+  E2E 순서로 끝내고 #684/#694/#712/#719를 증거와 함께 닫는다.
+
 ## 2026-07-19 (codex) — Agent A PR #744 manual link 재활성화 보완
 
 - 단일 전문 리뷰에서 비활성 manual link가 resolver relation으로 복귀하지 못하고 stale

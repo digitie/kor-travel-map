@@ -19,6 +19,10 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 FROM python:3.12-slim AS runtime
 
+ARG KOR_TRAVEL_MAP_GIT_COMMIT=development
+
+LABEL org.opencontainers.image.revision="$KOR_TRAVEL_MAP_GIT_COMMIT"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 

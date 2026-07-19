@@ -23,6 +23,17 @@ packages/**/.next/
 packages/**/coverage/
 packages/**/playwright-report/
 packages/**/test-results/
+packages/**/blob-report/
+packages/**/playwright/.cache/
+packages/**/.turbo/
+packages/**/out/
+**/*.tsbuildinfo
+**/*.tmp
+**/.DS_Store
+**/.idea/
+**/.vscode/
+**/next-env.d.ts
+**/src/api/types.ts.bak
 *.egg-info/
 *.log
 __pycache__/

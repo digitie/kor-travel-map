@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — C7 prod readiness 차단 리뷰 반영
+
+- 단일 적대 리뷰에서 배포 pair·DB schema·실제 service runtime attestation 부재, host npm/Chromium
+  의존, 잘못된 Dagster job 선언, preflight 이전 sentinel, 실패 증거 삭제를 P1/P2로 판정했다.
+  실제 실행 job `feature_update_request_worker`의 repository cardinality와 terminal run/tag identity를
+  파괴적 mutation 전에 검증하도록 계약을 바로잡았다.
+- `docs/runbooks/c7-prod-live-e2e.md`와 `T-ADM-C7H`를 먼저 작성했다. host runner/helper는 exact
+  commit의 root-owned Git archive snapshot과 attested SHA-256에서만 실행한다. runner는
+  C6c v3 manifest(source revision 포함), compose project, Map API/UI/Dagster web·daemon/PinVi API runtime hash, 단일 Alembic
+  head/check와 UI login을 모두 read-only 검증한 뒤에만 root state와 `BLOCKED.json`을 만든다.
+- Playwright는 고정 official digest 기반의 commit-labelled executor image ID로만 실행한다. spec별
+  redacted JUnit/HTML/JSON과 journal을 root-owned evidence에 fsync하며 screenshot, auth storage와 trace ZIP은
+  제외한다. `audit-c7-prod-live-state.py`는 값·UUID 없이 partial restore, active lock, unsafe residue를
+  보고하고 자동 clear는 제공하지 않는다.
+- executor container는 durable creator PID/PGID/start ticks와 atomic create outcome을 먼저 기록하고
+  `docker create --pull=never` 결과 CID/identity를 검증한 뒤에만 start한다. create 완료 여부가 불명확하면
+  stop 도구도 ref를 지우지 않아 late container를 감사 범위 밖으로 보내지 않는다.
+- n150 접속 감시 10분 41회가 모두 인증 전에 `No route to host`로 끝났고 별도 Windows TCP/22 진단도
+  실패했다. passwordless sudo는 미확인으로 남겼으며 원격 변경은 하지 않았다.
+
 ## 2026-07-19 (codex) — Agent A PR #744 적대적 심층 리뷰 후속
 
 - 전문 리뷰어 1명이 닫혀서 `main`에 병합된 PR #744를 재검토해, 비활성 manual link를

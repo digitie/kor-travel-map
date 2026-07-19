@@ -397,10 +397,26 @@ identity가 page 2의 첫 identity보다 앞서야 한다. 첫 행 존재, count
 
 ### 5.5 C7 prod 파괴적 live E2E의 복구·인과성 gate
 
-C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. root-owned 고정 attestation 파일의
-machine-id/hostname/origin hash와 실제 host·URL을 대조하고, 로그인 POST `200 + Set-Cookie` 및
-UI container의 비어 있지 않은 admin password hash를 선행 조건으로 둔다. 값은 로그·attachment에
-출력하지 않는다.
+C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. host runner/helper도
+`/usr/local/lib/kor-travel-map/c7-runner/<exact commit>`의 root-owned Git archive snapshot과
+attested file hash에서만 실행한다. root-owned 고정 attestation 파일의
+machine-id/hostname/origin hash뿐 아니라 clean Git commit, C6c compatible-pair manifest hash와
+generation, compose project, Map API/UI/Dagster web·daemon/PinVi API의 실제 image·command·정렬 env
+hash를 대조한다. Map API image의 Alembic `current == unique heads`와 `alembic check`, 로그인 POST
+`200 + Set-Cookie`도 선행 조건이다. 로그인은 session/auth audit를 만들 수 있는 domain-state 비파괴
+검증이며, 나머지는 read-only다. 이 preflight를 모두 통과하기 전에는 고정 state root의
+`BLOCKED.json`과 mutation journal을 만들지 않는다. 값은 로그·attachment에 출력하지 않는다.
+
+Playwright는 host npm/Chromium이 아니라 `docker/c7-playwright.Dockerfile`로 만든 immutable image ID에서
+worker 1·retry 0으로 실행한다. executor의 source commit/base digest label도 attestation과 같아야 한다.
+container는 creator PID/PGID/session ID/start ticks와 outcome을 먼저 fsync한
+`docker create --pull=never`와 valid CID 검증 뒤
+`docker start --attach`를 분리해, SIGKILL create gap에서도 실행 중인 미추적 container를 만들지 않는다.
+실제 Dagster repository에는 `feature_update_request_worker`가 정확히 하나인 job으로 존재해야 하고,
+terminal `runOrError`의 job name, request ID, 양수 generation, `provider_dataset` scope와 queue sensor tag를
+REST request와 exact 비교한다. spec별 redacted JUnit/HTML/JSON은 root-owned evidence에 보존하되
+운영값을 픽셀로 노출할 수 있는 screenshot과 auth storage/cookie를 담을 수 있는 trace ZIP은
+생성하지 않는다.
 
 POI target mutation은 PUT 전에 자연키와 intended body를 원자 journal에 먼저 기록하고 응답 뒤
 UUID·strong ETag·version을 보강한다. 모든 DELETE/cleanup은 직전 exact GET ETag를 `If-Match`로
@@ -426,8 +442,10 @@ exact 일치해야 한다. terminal matched scope의 eligible/skipped/executed �
 
 KMA/sensor/schedule/runner journal은 임시 파일 fsync 뒤 rename하고 최종 파일과 부모 디렉터리도
 fsync한다. runner state·lock·`BLOCKED.json`은 root-owned `0700` 고정 경로만 사용하며
-`XDG_STATE_HOME` override를 fail-closed한다. 이 순서와 모든 route handler settlement→unroute 순서는
-실제 source 구간을 읽는 정적 회귀 테스트로 고정한다.
+`XDG_STATE_HOME` override를 fail-closed한다. 실패·signal·부분 복구 때는 `BLOCKED.json`을 유지하고
+`audit-c7-prod-live-state.py`가 값이나 UUID 없이 lock/journal phase/runtime/temp/evidence 안전성만 보고한다.
+이 순서와 모든 route handler settlement→unroute 순서는 source 계약과 subprocess lock 회귀 테스트로
+고정한다.
 
 누적 journal의 이전 payload는 현재 in-memory state를 합치기 전에 독립적으로 restored residue를
 통과해야 한다. 합칠 때 현재 target/request/idempotency key나 더 전진한 status는 이전 snapshot으로

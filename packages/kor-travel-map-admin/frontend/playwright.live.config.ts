@@ -159,20 +159,24 @@ export default defineConfig({
   workers: liveWorkers(),
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: [
-    ["list"],
-    [
-      "html",
-      {
-        open: "never",
-        outputFolder: path.join(artifactRoot, "report"),
-      },
-    ],
-  ],
+  reporter: shouldAssertC7OriginGuard()
+    ? [["./e2e/c7-redacted-reporter.ts", { outputFolder: artifactRoot }]]
+    : [
+        ["list"],
+        [
+          "html",
+          {
+            open: "never",
+            outputFolder: path.join(artifactRoot, "report"),
+          },
+        ],
+      ],
   use: {
     baseURL,
-    trace: "on-first-retry",
-    screenshot: "only-on-failure",
+    // C7 evidence에는 session cookie가 포함될 수 있는 trace ZIP을 남기지 않는다.
+    trace: shouldAssertC7OriginGuard() ? "off" : "on-first-retry",
+    // C7 evidence는 UI 운영 데이터가 픽셀에 남을 수 있는 screenshot도 생성하지 않는다.
+    screenshot: shouldAssertC7OriginGuard() ? "off" : "only-on-failure",
   },
   projects: [
     // #520 인증 게이트 대응: chromium 전에 로그인 세션을 1회 만들어 STORAGE_STATE에 저장.

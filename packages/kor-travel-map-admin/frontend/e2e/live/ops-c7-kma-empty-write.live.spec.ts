@@ -17,6 +17,7 @@ import {
 import {
   KMA_DATASET_KEY,
   KMA_PROVIDER,
+  assertKmaDagsterWorkerJobDefinition,
   assertExactKmaPreviewResponse,
   assertExactNonTerminalFeatureUpdateRequests,
   assertKmaOnlyTerminalProviderScopes,
@@ -221,6 +222,7 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
     });
     const state = createCleanupState("empty", RUN_ID);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
+    await assertKmaDagsterWorkerJobDefinition();
     await previewEmptyRequestFromUi(page, syncScope, reason);
     const controller = await createQueueSensorController();
     const sensorSnapshot = await snapshotQueueSensor(controller);

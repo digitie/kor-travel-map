@@ -5,6 +5,24 @@
 
 ## [Unreleased]
 
+### C7 prod 실행 경계·증거 보강 (2026-07-19, T-ADM-C7H)
+
+- **SECURITY**: 파괴적 live E2E 전에 exact Git commit의 root-owned runner/helper archive snapshot,
+  C6c compatible-pair manifest와 실제 Map/PinVi
+  API image, compose project, Map API/UI/Dagster web·daemon/PinVi API의 image·command·environment,
+  단일 Alembic current/head/check를 root-owned attestation과 exact 대조한다. 모든 read-only preflight
+  전에는 `BLOCKED.json`이나 mutation journal을 만들지 않는다.
+- **CHANGED**: C7은 고정 official digest 기반의 commit-labelled Playwright executor image ID에서만
+  실행한다. 실제 Dagster `feature_update_request_worker` definition과 terminal run의 request/generation/
+  scope/sensor tag를 검증한다. spec별 redacted JUnit/HTML/JSON과 복구 journal은 root-owned evidence로
+  보존하고 screenshot, auth storage와 trace ZIP은 생성하지 않는다.
+- **ADDED**: `audit-c7-prod-live-state.py`가 secret·UUID를 출력하지 않고 active lock, journal phase,
+  partial runtime/temp/evidence 안전성을 점검한다. 자동 sentinel clear는 제공하지 않는다.
+- **ADDED**: Map API/UI/Dagster image는 source revision OCI label을 싣고 C7 attestation이 실제 image
+  label과 clean checkout을 대조한다. C7 executor는 durable creator/outcome/CID 아래 create/start를
+  분리한다. SIGKILL 뒤 남은 C7 container는 creator identity·CID/name·label·run 전용 mount·비활성
+  lock을 확인하는 `stop-c7-prod-live-container.py`로만 중지하며 journal/sentinel은 보존한다.
+
 ### #744 심층 리뷰 후속 수정 (2026-07-19)
 
 - **FIXED**: resolver snapshot은 활성 `manual` link만 보존한다. target move/delete로
