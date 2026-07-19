@@ -865,6 +865,12 @@ export type AdminFeaturesListResponse =
 export type AdminFeatureDetailResponse =
   FeatureSchemas["AdminFeatureDetailResponse"];
 export type AdminFeatureDetailData = FeatureSchemas["AdminFeatureDetailData"];
+export interface CorrectionBasis {
+  detail: AdminFeatureDetailResponse;
+  entityTag: string;
+  featureId: string;
+  rowRevision: number;
+}
 export type AdminFeaturesListParams = Omit<
   AdminFeaturesListQuery,
   "cursor" | "updated_from" | "updated_to"
@@ -924,6 +930,45 @@ function fetchAdminFeatureDetail(
   );
 }
 
+const CORRECTION_BASIS_FETCH_ATTEMPTS = 3;
+
+export async function fetchAdminFeatureCorrectionBasis(
+  featureId: string,
+  signal?: AbortSignal,
+): Promise<CorrectionBasis> {
+  const revisionPath =
+    `/v1/admin/features/${encodeURIComponent(featureId)}/revision`;
+  for (let attempt = 0; attempt < CORRECTION_BASIS_FETCH_ATTEMPTS; attempt += 1) {
+    const { body: revision, response } = await getJsonWithResponse<
+      FeatureSchemas["AdminFeatureRevisionResponse"]
+    >(revisionPath, { signal });
+    const entityTag = response.headers.get("ETag");
+    if (entityTag === null) {
+      throw new Error(`GET ${revisionPath} 응답에 ETag가 없습니다.`);
+    }
+    if (revision.data.feature_id !== featureId) {
+      throw new Error(`GET ${revisionPath} 응답의 feature_id가 다릅니다.`);
+    }
+
+    const detail = await fetchAdminFeatureDetail(featureId, signal);
+    const feature = detail.data.feature;
+    if (
+      feature.feature_id === featureId &&
+      feature.row_revision === revision.data.row_revision
+    ) {
+      return {
+        detail,
+        entityTag,
+        featureId,
+        rowRevision: revision.data.row_revision,
+      };
+    }
+  }
+  throw new Error(
+    `${featureId}의 revision과 상세가 ${CORRECTION_BASIS_FETCH_ATTEMPTS}회 연속 일치하지 않았습니다.`,
+  );
+}
+
 export function useAdminFeatureDetail(featureId: string | null) {
   return useQuery<AdminFeatureDetailResponse, Error>({
     queryKey: ["admin-feature-detail", featureId] as const,
@@ -931,6 +976,21 @@ export function useAdminFeatureDetail(featureId: string | null) {
       fetchAdminFeatureDetail(featureId as string, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 30_000,
+  });
+}
+
+export function useAdminFeatureCorrectionBasis(featureId: string | null) {
+  return useQuery<CorrectionBasis, Error>({
+    queryKey: ["admin-feature-correction-basis", featureId] as const,
+    queryFn: ({ signal }) =>
+      fetchAdminFeatureCorrectionBasis(featureId as string, signal),
+    enabled: featureId !== null && featureId.length > 0,
+    gcTime: 0,
+    retry: false,
+    staleTime: Infinity,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -991,42 +1051,28 @@ function createAdminFeature(
   return postJson<AdminFeatureChangeResponse>("/v1/admin/features", body);
 }
 
-function patchAdminFeature(
+export function patchAdminFeature(
   featureId: string,
+  entityTag: string,
   body: AdminFeaturePatchRequest,
 ): Promise<AdminFeatureChangeResponse> {
-  return fetchFeatureRevisionEtag(featureId).then((entityTag) =>
-    patchJson<AdminFeatureChangeResponse>(
-      `/v1/admin/features/${encodeURIComponent(featureId)}`,
-      body,
-      { headers: { "If-Match": entityTag } },
-    ),
+  return patchJson<AdminFeatureChangeResponse>(
+    `/v1/admin/features/${encodeURIComponent(featureId)}`,
+    body,
+    { headers: { "If-Match": entityTag } },
   );
 }
 
-function deleteAdminFeature(
+export function deleteAdminFeature(
   featureId: string,
+  entityTag: string,
   body: AdminFeatureDeleteRequest,
 ): Promise<AdminFeatureChangeResponse> {
-  return fetchFeatureRevisionEtag(featureId).then((entityTag) =>
-    deleteJson<AdminFeatureChangeResponse>(
-      `/v1/admin/features/${encodeURIComponent(featureId)}`,
-      body,
-      { headers: { "If-Match": entityTag } },
-    ),
+  return deleteJson<AdminFeatureChangeResponse>(
+    `/v1/admin/features/${encodeURIComponent(featureId)}`,
+    body,
+    { headers: { "If-Match": entityTag } },
   );
-}
-
-async function fetchFeatureRevisionEtag(featureId: string): Promise<string> {
-  const path = `/v1/admin/features/${encodeURIComponent(featureId)}/revision`;
-  const { response } = await getJsonWithResponse<
-    FeatureSchemas["AdminFeatureRevisionResponse"]
-  >(path);
-  const entityTag = response.headers.get("ETag");
-  if (entityTag === null) {
-    throw new Error(`GET ${path} 응답에 ETag가 없습니다.`);
-  }
-  return entityTag;
 }
 
 function approveAdminFeatureChangeRequest(
@@ -1120,9 +1166,14 @@ export function usePatchAdminFeatureMutation() {
   return useMutation<
     AdminFeatureChangeResponse,
     Error,
-    { featureId: string; body: AdminFeaturePatchRequest }
+    {
+      featureId: string;
+      entityTag: string;
+      body: AdminFeaturePatchRequest;
+    }
   >({
-    mutationFn: ({ featureId, body }) => patchAdminFeature(featureId, body),
+    mutationFn: ({ featureId, entityTag, body }) =>
+      patchAdminFeature(featureId, entityTag, body),
     onSuccess: (data, variables) =>
       invalidateFeatureChangeQueries(
         queryClient,
@@ -1136,9 +1187,14 @@ export function useDeleteAdminFeatureMutation() {
   return useMutation<
     AdminFeatureChangeResponse,
     Error,
-    { featureId: string; body: AdminFeatureDeleteRequest }
+    {
+      featureId: string;
+      entityTag: string;
+      body: AdminFeatureDeleteRequest;
+    }
   >({
-    mutationFn: ({ featureId, body }) => deleteAdminFeature(featureId, body),
+    mutationFn: ({ featureId, entityTag, body }) =>
+      deleteAdminFeature(featureId, entityTag, body),
     onSuccess: (data, variables) =>
       invalidateFeatureChangeQueries(
         queryClient,

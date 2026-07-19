@@ -16,6 +16,7 @@ type AdminFeatureChangeResponse =
   components["schemas"]["AdminFeatureChangeResponse"];
 type AdminFeatureDetailResponse =
   components["schemas"]["AdminFeatureDetailResponse"];
+type AdminFeatureDetail = AdminFeatureDetailResponse["data"]["feature"];
 type AdminFeatureCreateRequest =
   components["schemas"]["AdminFeatureCreateRequest"];
 type AdminFeaturePatchRequest =
@@ -190,10 +191,16 @@ async function mockCategories(page: Page) {
   });
 }
 
-async function fulfillJson(route: Route, body: unknown, status = 200) {
+async function fulfillJson(
+  route: Route,
+  body: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+) {
   await route.fulfill({
     body: JSON.stringify(body),
     contentType: "application/json",
+    headers,
     status,
   });
 }
@@ -625,7 +632,12 @@ function featureChangeResponse(
   };
 }
 
-function featureDetailResponse(featureId: string): AdminFeatureDetailResponse {
+function featureDetailResponse(
+  featureId: string,
+  rowRevision = 1,
+  name = `Existing ${featureId}`,
+  overrides: Partial<AdminFeatureDetail> = {},
+): AdminFeatureDetailResponse {
   return {
     data: {
       change_requests: [],
@@ -641,12 +653,13 @@ function featureDetailResponse(featureId: string): AdminFeatureDetailResponse {
         kind: "place",
         lat: 37.5665,
         lon: 126.978,
-        name: `Existing ${featureId}`,
+        name,
         raw_refs: [],
-        row_revision: 1,
+        row_revision: rowRevision,
         status: "active",
         updated_at: MOCK_NOW,
         urls: {},
+        ...overrides,
       },
       files: [],
       issues: [],
@@ -674,12 +687,29 @@ function applyFeatureChange(
 async function mockFeatureChangeMutations(
   page: Page,
   options: {
+    deferFirstBasisDetail?: boolean;
+    failReloadOnceAfterStale?: boolean;
     initial?: AdminFeatureChangeRecord[];
     reviewMode?: AdminFeatureReviewMode;
+    stalePatchOnce?: boolean;
+    featureDetailOverrides?: Partial<AdminFeatureDetail>;
   } = {},
 ) {
   const reviewMode = options.reviewMode ?? "require_review";
   let changes = [...(options.initial ?? [])];
+  let deferredDetailConsumed = false;
+  let markDeferredDetailStarted: () => void = () => undefined;
+  let releaseDeferredDetail: () => void = () => undefined;
+  const deferredDetailStarted = new Promise<void>((resolve) => {
+    markDeferredDetailStarted = () => resolve();
+  });
+  const deferredDetailRelease = new Promise<void>((resolve) => {
+    releaseDeferredDetail = () => resolve();
+  });
+  let reloadFailureInjected = false;
+  let stalePatchInjected = false;
+  const featureNames = new Map<string, string>();
+  const featureRevisions = new Map<string, number>();
   const requests = {
     approve: 0,
     create: 0,
@@ -687,9 +717,13 @@ async function mockFeatureChangeMutations(
     list: 0,
     patch: 0,
     reject: 0,
+    revision: 0,
+    resolveDeferredDetail: () => releaseDeferredDetail(),
+    waitForDeferredDetail: () => deferredDetailStarted,
     createBodies: [] as AdminFeatureCreateRequest[],
     deleteBodies: [] as AdminFeatureDeleteRequest[],
     patchBodies: [] as AdminFeaturePatchRequest[],
+    mutationEtags: [] as string[],
     reviewBodies: [] as AdminFeatureReviewActionRequest[],
   };
 
@@ -810,11 +844,58 @@ async function mockFeatureChangeMutations(
       return;
     }
 
-    const featurePathMatch = apiPath.match(/^\/v1\/admin\/features\/([^/]+)$/);
-    if (request.method() === "GET" && featurePathMatch) {
+    const revisionPathMatch = apiPath.match(
+      /^\/v1\/admin\/features\/([^/]+)\/revision$/,
+    );
+    if (request.method() === "GET" && revisionPathMatch) {
+      requests.revision += 1;
+      const featureId = decodeURIComponent(revisionPathMatch[1]);
+      if (
+        options.failReloadOnceAfterStale &&
+        stalePatchInjected &&
+        !reloadFailureInjected
+      ) {
+        reloadFailureInjected = true;
+        await fulfillJson(
+          route,
+          {
+            code: "CORRECTION_BASIS_RELOAD_FAILED",
+            detail: "reload fixture failure",
+            status: 500,
+            title: "reload failed",
+            type: "about:blank",
+          },
+          500,
+        );
+        return;
+      }
+      const rowRevision = featureRevisions.get(featureId) ?? 1;
+      featureRevisions.set(featureId, rowRevision);
       await fulfillJson(
         route,
-        featureDetailResponse(decodeURIComponent(featurePathMatch[1])),
+        { data: { feature_id: featureId, row_revision: rowRevision } },
+        200,
+        { ETag: `"${rowRevision}"` },
+      );
+      return;
+    }
+
+    const featurePathMatch = apiPath.match(/^\/v1\/admin\/features\/([^/]+)$/);
+    if (request.method() === "GET" && featurePathMatch) {
+      const featureId = decodeURIComponent(featurePathMatch[1]);
+      if (options.deferFirstBasisDetail && !deferredDetailConsumed) {
+        deferredDetailConsumed = true;
+        markDeferredDetailStarted();
+        await deferredDetailRelease;
+      }
+      await fulfillJson(
+        route,
+        featureDetailResponse(
+          featureId,
+          featureRevisions.get(featureId) ?? 1,
+          featureNames.get(featureId),
+          options.featureDetailOverrides,
+        ),
       );
       return;
     }
@@ -823,6 +904,29 @@ async function mockFeatureChangeMutations(
       const body = request.postDataJSON() as AdminFeaturePatchRequest;
       requests.patchBodies.push(body);
       const featureId = decodeURIComponent(featurePathMatch[1]);
+      const receivedEntityTag = request.headers()["if-match"] ?? "";
+      requests.mutationEtags.push(receivedEntityTag);
+      if (options.stalePatchOnce && !stalePatchInjected) {
+        const nextRevision = (featureRevisions.get(featureId) ?? 1) + 1;
+        featureRevisions.set(featureId, nextRevision);
+        featureNames.set(featureId, `Server latest ${featureId}`);
+        stalePatchInjected = true;
+      }
+      const expectedEntityTag = `"${featureRevisions.get(featureId) ?? 1}"`;
+      if (receivedEntityTag !== expectedEntityTag) {
+        await fulfillJson(
+          route,
+          {
+            code: "FEATURE_REVISION_PRECONDITION_FAILED",
+            detail: "Feature revision이 변경되었습니다.",
+            status: 412,
+            title: "Precondition Failed",
+            type: "about:blank",
+          },
+          412,
+        );
+        return;
+      }
       const updated = storeChange(
         changeStateForWrite(
           makeFeatureChange({
@@ -845,6 +949,13 @@ async function mockFeatureChangeMutations(
       const body = request.postDataJSON() as AdminFeatureDeleteRequest;
       requests.deleteBodies.push(body);
       const featureId = decodeURIComponent(featurePathMatch[1]);
+      const receivedEntityTag = request.headers()["if-match"] ?? "";
+      requests.mutationEtags.push(receivedEntityTag);
+      const expectedEntityTag = `"${featureRevisions.get(featureId) ?? 1}"`;
+      if (receivedEntityTag !== expectedEntityTag) {
+        await fulfillJson(route, { detail: "stale feature revision" }, 412);
+        return;
+      }
       const deleted = storeChange(
         changeStateForWrite(
           makeFeatureChange({
@@ -1082,9 +1193,12 @@ test.describe("admin/ops pages", () => {
     ).toHaveValue("Existing feature-update-1");
     await page.getByLabel("change reason", { exact: true }).fill("이름 수정");
     await page.getByLabel("change name", { exact: true }).fill("Updated feature");
+    const revisionReadsBeforePatch = requests.revision;
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.revision).toBe(revisionReadsBeforePatch);
+    expect(requests.mutationEtags[0]).toBe('"1"');
     expect(requests.patchBodies[0]).toMatchObject({
       name: "Updated feature",
       reason: "이름 수정",
@@ -1098,14 +1212,18 @@ test.describe("admin/ops pages", () => {
     await page
       .getByLabel("change feature id", { exact: true })
       .fill("feature-delete-1");
+    await expect(page.getByText("데이터 로드됨")).toBeVisible();
     await page.getByLabel("change reason", { exact: true }).fill("soft delete");
+    const revisionReadsBeforeDelete = requests.revision;
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => requests.delete).toBe(1);
-    expect(requests.deleteBodies[0]).toMatchObject({
-      operator: "local-admin",
+    expect(requests.revision).toBe(revisionReadsBeforeDelete);
+    expect(requests.mutationEtags[1]).toBe('"1"');
+    expect(requests.deleteBodies[0]).toEqual({
       reason: "soft delete",
     });
+    expect(requests.deleteBodies[0]).not.toHaveProperty("operator");
 
     await page.goto("/admin/features/change-reviews");
     await page.getByLabel("change status", { exact: true }).selectOption("all");
@@ -1123,6 +1241,208 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByRole("row", { name: /Updated feature/ })).toHaveCount(
       0,
     );
+  });
+
+  test("stale correction은 draft를 보존하고 명시적 reload 뒤에만 새 ETag를 쓴다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureChangeMutations(page, {
+      failReloadOnceAfterStale: true,
+      stalePatchOnce: true,
+    });
+
+    await page.goto("/admin/features/change-requests");
+    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page.getByLabel("change feature id", { exact: true }).fill("feature-stale-1");
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Existing feature-stale-1",
+    );
+    await page.getByLabel("change reason", { exact: true }).fill("stale draft reason");
+    await page.getByLabel("change name", { exact: true }).fill("Operator draft");
+    const revisionReadsBeforePatch = requests.revision;
+
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.revision).toBe(revisionReadsBeforePatch);
+    expect(requests.mutationEtags[0]).toBe('"1"');
+    const conflictStatus = page
+      .getByRole("status")
+      .filter({ hasText: "서버의 Feature가 변경되었습니다" });
+    const reloadButton = conflictStatus.getByRole("button", {
+      name: "최신값으로 폼 다시 불러오기",
+    });
+    await expect(conflictStatus).toBeVisible();
+    await expect(reloadButton).toBeVisible();
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Operator draft",
+    );
+    await expect(page.getByLabel("change reason", { exact: true })).toHaveValue(
+      "stale draft reason",
+    );
+
+    const submitButton = page.getByRole("button", { name: "요청 생성" });
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("  feature-stale-1  ");
+    await expect(submitButton).toBeDisabled();
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("feature-stale-1");
+    await expect(submitButton).toBeDisabled();
+    expect(requests.patch).toBe(1);
+
+    await reloadButton.click();
+    await expect(conflictStatus).toBeVisible();
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Operator draft",
+    );
+    await expect(page.getByLabel("change reason", { exact: true })).toHaveValue(
+      "stale draft reason",
+    );
+    await expect.poll(() => requests.revision).toBe(revisionReadsBeforePatch + 1);
+    await expect(page.getByText(/reload fixture failure/)).toBeVisible();
+
+    await reloadButton.click();
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Server latest feature-stale-1",
+    );
+    await expect.poll(() => requests.revision).toBe(revisionReadsBeforePatch + 2);
+
+    await page.getByLabel("change name", { exact: true }).fill("Reapplied draft");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => requests.patch).toBe(2);
+    expect(requests.mutationEtags[1]).toBe('"2"');
+  });
+
+  test("최초 basis가 늦게 도착하면 untouched 필드만 채우고 dirty draft를 보존한다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureChangeMutations(page, {
+      deferFirstBasisDetail: true,
+      featureDetailOverrides: {
+        category: "01070400",
+        marker_color: "P-02",
+        marker_icon: "park",
+      },
+    });
+
+    await page.goto("/admin/features/change-requests");
+    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page.getByLabel("change feature id", { exact: true }).fill("feature-slow-1");
+    await requests.waitForDeferredDetail();
+
+    await page.getByLabel("change reason", { exact: true }).fill("slow draft reason");
+    await page.getByLabel("change name", { exact: true }).fill("Slow operator draft");
+    requests.resolveDeferredDetail();
+
+    await expect(page.getByText("데이터 로드됨")).toBeVisible();
+    await expect(page.getByLabel("change reason", { exact: true })).toHaveValue(
+      "slow draft reason",
+    );
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Slow operator draft",
+    );
+    await expect(page.getByLabel("change category", { exact: true })).toHaveValue(
+      "01070400",
+    );
+    await expect(
+      page.getByLabel("change marker icon", { exact: true }),
+    ).toHaveValue("park");
+    await expect(
+      page.getByLabel("change marker color", { exact: true }),
+    ).toHaveValue("P-02");
+
+    await page.getByRole("button", { name: "요청 생성" }).click();
+    await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.patchBodies[0]).toMatchObject({
+      name: "Slow operator draft",
+      reason: "slow draft reason",
+    });
+    expect(requests.patchBodies[0]).not.toHaveProperty("category");
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_icon");
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_color");
+  });
+
+  test("marker가 없는 basis는 name-only 수정에서 표시 기본값을 PATCH하지 않는다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureChangeMutations(page);
+
+    await page.goto("/admin/features/change-requests");
+    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("feature-null-marker-1");
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Existing feature-null-marker-1",
+    );
+
+    await page.getByLabel("change reason", { exact: true }).fill("name only reason");
+    await page.getByLabel("change name", { exact: true }).fill("Name only draft");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.patchBodies[0]).toMatchObject({
+      name: "Name only draft",
+      reason: "name only reason",
+    });
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_icon");
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_color");
+  });
+
+  test("deferred basis 중 위치 좌표만 편집하면 server marker를 유지한다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureChangeMutations(page, {
+      deferFirstBasisDetail: true,
+      featureDetailOverrides: {
+        category: "01070400",
+        marker_color: "P-02",
+        marker_icon: "park",
+      },
+    });
+
+    await page.goto("/admin/features/change-requests");
+    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("feature-dialog-slow-1");
+    await requests.waitForDeferredDetail();
+    await page
+      .getByLabel("change reason", { exact: true })
+      .fill("location only reason");
+    await page.getByRole("button", { name: "위치 편집" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "위치/마커 편집" });
+    await dialog.getByLabel("lon", { exact: true }).fill("127.123456");
+    await dialog.getByLabel("lat", { exact: true }).fill("37.654321");
+    requests.resolveDeferredDetail();
+
+    await expect(dialog.getByLabel("marker_icon", { exact: true })).toHaveValue(
+      "park",
+    );
+    await expect(dialog.getByLabel("marker_color", { exact: true })).toHaveValue(
+      "P-02",
+    );
+    await dialog.getByRole("button", { name: "적용" }).click();
+
+    await expect(
+      page.getByLabel("change marker icon", { exact: true }),
+    ).toHaveValue("park");
+    await expect(
+      page.getByLabel("change marker color", { exact: true }),
+    ).toHaveValue("P-02");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.patchBodies[0].coord).toEqual({
+      lat: 37.654321,
+      lon: 127.123456,
+    });
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_icon");
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_color");
   });
 
   test("/v1/admin/issues", async ({ page }) => {

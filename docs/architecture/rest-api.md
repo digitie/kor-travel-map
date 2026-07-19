@@ -399,6 +399,7 @@ source record 연결을 제거한 미연결 item으로 투영한다.
 GET    /v1/admin/features                              # 목록(page_size+cursor)
 GET    /v1/admin/features/in-bounds                    # raw bbox items/cluster(status 반복 필터)
 GET    /v1/admin/features/{feature_id}                 # 상세
+GET    /v1/admin/features/{feature_id}/revision        # row_revision + raw strong ETag 편집 기준
 GET    /v1/admin/features/{feature_id}/weather         # 비공개 포함 admin weather card
 GET    /v1/admin/features/{feature_id}/price           # 비공개 포함 admin price card
 POST   /v1/admin/features                              # ✅#317 단건 생성(K-15)
@@ -433,6 +434,16 @@ DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id} # item soft 
 GET    /v1/admin/curations/import-template.csv          # UTF-8 BOM CSV 양식 다운로드
 POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 authoritative replace
 ```
+
+PATCH/DELETE correction UI는 `GET .../{feature_id}/revision`의 body `row_revision`과 응답 header
+`ETag`를 먼저 읽고, 이어서 `GET .../{feature_id}` detail의 `feature.row_revision`과 같을 때만
+불변 `CorrectionBasis`를 확정한다. 둘이 다르면 경쟁 갱신이므로 제한 횟수만 다시 읽고 실패 시
+쓰기 조작을 닫는다. `ETag`는 따옴표를 포함한 raw header 문자열을 그대로 보존해 `If-Match`로
+전달하며 mutation 직전에 revision을 재조회하거나 최신값으로 자동 rebasing하지 않는다.
+
+stale basis의 PATCH/DELETE는 `412 Precondition Failed`다. consumer는 draft를 보존하고 자동
+재시도하지 않으며, 운영자의 명시적 reload가 성공한 경우에만 최신 detail과 새 basis로 교체한다.
+이 규칙은 기존 REST/OpenAPI request·response schema와 DB schema를 변경하지 않는다.
 - **admin 공간·카드 read**: admin 지도는 공개 `/v1/features*`를 재사용하지 않는다.
   `/v1/admin/features/in-bounds`는 `feature.features` base row에서 삭제 전 운영 상태를
   직접 조회하며, `status` 미지정 시 `draft|active|inactive|hidden|broken` 전체를 대상으로 한다.

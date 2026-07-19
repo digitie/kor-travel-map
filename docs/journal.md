@@ -23,6 +23,39 @@
   admin/user TypeScript, 수기 public curation 타입을 생성·갱신했다. 이는 구현 산출물 생성이며
   적대적 리뷰 승인 전 test·lint·build·OpenAPI `--check`는 아직 실행하지 않았다.
 
+## 2026-07-20 (codex) — T-VN-58 correction 편집 기준 ETag 설계 고정
+
+- issue #785의 stale correction 경로를 ADR-074의 lost-update 원칙으로 구체화했다. 편집 시작 시
+  `/revision`과 detail의 같은 `row_revision`을 확인하고 feature ID·raw strong `ETag`·snapshot을
+  불변 `CorrectionBasis`로 묶으며, mutation 직전 최신 revision 자동 rebasing을 금지한다.
+- `412 Precondition Failed`에서는 작성 중인 draft를 보존하고 자동 재시도하지 않는다. 명시적
+  reload 성공 뒤에만 최신 detail과 basis를 적용하며 update와 delete는 각 선택 feature basis를
+  사용한다. DB와 REST/OpenAPI schema는 변경하지 않는다.
+- 전용 worktree codegraph를 완성한 결과 `fetchFeatureRevisionEtag` caller는 PATCH/DELETE 두 함수,
+  mutation hook caller는 `FeatureChangeRequestsClient` 하나로 확인됐다. file-level TypeScript impact의
+  저해상도 결과는 직접 symbol inventory로 보완해 API client/hook, change-request component,
+  mocked/live Playwright 경계를 고정했다.
+- `/revision`→detail 안정 snapshot 재시도, caller-supplied ETag mutation, background refetch 차단,
+  412 draft 보존·명시적 reload, delete basis와 live cleanup ETag를 구현하고 API/hook/mocked/live
+  회귀 fixture를 작성했다. **다음 한 작업**은 exact head의 단일 적대 리뷰이며, 승인 전에는
+  test·lint·build를 실행하지 않는다.
+- 첫 적대 리뷰가 최초 basis in-flight draft 덮어쓰기, 실패한 explicit reload의 old data 오인,
+  전역 query retry로 인한 3-pair budget 중복, live UI mutation ETag 미단정을 차단했다. edit-session
+  dirty guard, refetch error/fetchStatus gate, hook `retry=false`, update/delete baseline raw ETag exact
+  assertion과 deferred/500 음성 fixture로 네 건을 보강했다. 새 exact head 재리뷰 전에는
+  test·lint·build를 실행하지 않는다.
+- 두 번째 적대 리뷰에서 전역 dirty boolean이 basis 전체 적용을 건너뛰어 untouched category/marker에
+  add 기본값이 남는 문제와, 의미가 같은 Feature ID 공백 편집이 412 mutation state를 초기화하는
+  문제를 확인했다. 필드별 dirty overlay와 `action + trimmed feature_id` 편집 세션 identity로
+  교체하고, baseline과 다른 category/marker fixture의 PATCH 미포함 및 동일 identity의 mutation
+  횟수 불변 회귀를 추가했다. 명시적 reload 성공은 dirty set 전체를 초기화한다.
+- 세 번째 적대 리뷰에서 nullable marker baseline의 표시 fallback이 name-only PATCH에 섞이는 경로와
+  deferred basis 중 열린 위치 편집창이 stale marker 기본값까지 parent dirty로 만드는 경로를
+  확인했다. PATCH의 category/marker는 해당 form key를 실제 편집한 경우에만 포함하고, 위치 편집창은
+  local dirty key만 parent에 적용하며 basis 변경 시 untouched draft만 동기화한다. null marker 및
+  dialog 좌표-only deferred fixture로 marker 미포함을 고정했다. `kind`/`status`는 update PATCH
+  계약에 없어 다른 non-null add 기본값 ingress가 없음을 함께 확인했다.
+
 ## 2026-07-20 (codex, agent B) — T-VN-57 public route 계약 단일 정본 설계
 
 - T-VN-SYNC-02 적대적 리뷰에서 production runtime은 public-keyed GET 29개를 모두
@@ -36,7 +69,6 @@
   `ROUTE_POLICIES` 57개, `create_app` 176개, route wiring gate caller 5개다. 문서 선행 PR 뒤
   구현을 추가하고 동일 단일 적대 리뷰 승인 전에는 테스트·lint·build·OpenAPI check를 실행하지
   않는다.
-
 ## 2026-07-20 (codex) — vNext integration 병합·cross-repo cutover 상태 정리
 
 - main→integration 동기화 PR #781은 CI 8개 green 뒤 merge commit

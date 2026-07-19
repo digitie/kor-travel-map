@@ -226,6 +226,7 @@ T-207c 구현분은 `/admin/features` 목록, deactivate status override, `/admi
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/admin/features/change-requests` | 사용자 요청 변경 목록. `state`, `action`, `q`, `limit` 필터 |
+| GET | `/admin/features/{feature_id}/revision` | correction용 현재 `row_revision`과 raw strong `ETag` 조회 |
 | POST | `/admin/features` | `place`/`event` feature 추가 요청 |
 | PATCH | `/admin/features/{feature_id}` | `place`/`event` feature 수정 요청 |
 | DELETE | `/admin/features/{feature_id}` | `place`/`event` feature 사용자 요청 soft delete |
@@ -234,6 +235,17 @@ T-207c 구현분은 `/admin/features` 목록, deactivate status override, `/admi
 
 공통 응답은 `{data: {request}, meta}` envelope다. `request.state`가 `pending`이면 아직
 `feature.features`에는 반영되지 않았고, `applied`이면 반영이 끝난 상태다.
+
+수정·삭제 consumer는 `/revision` 응답 header의 raw `ETag`와 body `row_revision`, 이어서 읽은
+feature detail snapshot을 불변 `CorrectionBasis`로 묶는다. revision과 detail의
+`feature.row_revision`이 다르면 제한 횟수만 다시 읽고, 일치하지 않는 상태에서는 mutation을
+허용하지 않는다. PATCH/DELETE는 그 basis의 raw `ETag`를 `If-Match`에 그대로 전달하며 submit
+시점에 `/revision`을 다시 호출해 최신값으로 바꾸지 않는다.
+
+stale basis는 RFC7807 `412 Precondition Failed`로 거부한다. admin UI는 작성 중인 draft를
+보존하고 자동 재시도하지 않으며, 운영자가 명시적으로 최신값 다시 불러오기를 선택한 뒤에만
+새 detail·basis를 form에 적용한다. T-VN-58은 이 소비 규칙만 교정하며 DB와 OpenAPI schema를
+변경하지 않는다.
 
 저장 우선순위:
 
