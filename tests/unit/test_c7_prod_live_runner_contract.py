@@ -411,6 +411,15 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
         / "e2e"
         / "c7-redacted-reporter.ts"
     )
+    admin_helper = _read(
+        ROOT
+        / "packages"
+        / "kor-travel-map-admin"
+        / "frontend"
+        / "e2e"
+        / "live"
+        / "_ops-c7-admin-api.ts"
+    )
 
     assert "mcr.microsoft.com/playwright:v1.60.0-noble@sha256:" in dockerfile
     assert 'git -C "$REPO_ROOT" archive --format=tar "$commit"' in build_script
@@ -453,6 +462,8 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     )
     assert '"c7-results.xml"' in script
     assert 'source.suffix.lower() == ".png"' not in script
+    assert "testInfo.attach(" not in admin_helper
+    assert "c7-cleanup-manifest.json" not in admin_helper
     assert 'trace: shouldAssertC7OriginGuard() ? "off"' in config
     assert 'screenshot: shouldAssertC7OriginGuard() ? "off"' in config
     assert '"./e2e/c7-redacted-reporter.ts"' in config

@@ -90,12 +90,6 @@ export type CleanupState = {
   allTargetRefs: Map<string, TargetJournalRef>;
 };
 
-type OwnedTargetRef = TargetRef & {
-  entityTag: string;
-  lockVersion: number;
-  targetId: string;
-};
-
 type TargetJournalRef = TargetRef & {
   body: PoiCacheTargetUpsertRequest;
   entityTag: string | null;
@@ -117,26 +111,8 @@ type CleanupIssue = {
   resource: string;
 };
 
-type CleanupManifest = {
-  active_target_counts: Record<string, number | null>;
-  durable_residue_counts: {
-    observed_event_rows: number;
-    scope_states: number;
-    update_requests: number;
-  };
-  issues: CleanupIssue[];
-  preserved_for_manual_cleanup: boolean;
-  request_ids: string[];
-  request_terminal_statuses: Record<string, string>;
-  run_id: string;
-  scenario: CleanupScenario;
-  target_refs: OwnedTargetRef[];
-  version: 1;
-};
-
 type CleanupExecution = {
   issues: CleanupIssue[];
-  manifest: CleanupManifest;
   result: CleanupResult;
 };
 
@@ -2837,25 +2813,12 @@ async function recoverUnresolvedTargetIntents(
   return { complete: issues.length === 0, issues };
 }
 
-async function attachManifest(
-  testInfo: TestInfo,
-  manifest: CleanupManifest,
-): Promise<void> {
-  await testInfo.attach("c7-cleanup-manifest.json", {
-    body: JSON.stringify(manifest, null, 2),
-    contentType: "application/json",
-  });
-}
-
 async function cleanupResources(
   page: Page,
-  testInfo: TestInfo,
   state: CleanupState,
   terminalTimeout: number,
 ): Promise<CleanupExecution> {
   const issues: CleanupIssue[] = [];
-  const statuses: Record<string, string> = {};
-  let observedEventRows = 0;
   let exactScopeDiscoveryComplete = true;
   const targetRecovery = await recoverUnresolvedTargetIntents(page, state);
   issues.push(...targetRecovery.issues);
@@ -2927,8 +2890,6 @@ async function cleanupResources(
       continue;
     }
     const status = result.body.data.execution.status;
-    statuses[requestId] = status;
-    observedEventRows += result.body.data.events.length;
     if (!TERMINAL_STATUSES.has(status)) cancelIds.push(requestId);
   }
 
@@ -2976,7 +2937,6 @@ async function cleanupResources(
     }
     const { requestId, status } = settled.value;
     if (status && TERMINAL_STATUSES.has(status)) {
-      statuses[requestId] = status;
       state.requestTerminalStatuses.set(requestId, status);
     } else {
       everyRequestTerminal = false;
@@ -3102,40 +3062,11 @@ async function cleanupResources(
     restored: !preservedForManualCleanup,
   };
   state.cleanupResult = result;
-  const manifest: CleanupManifest = {
-    active_target_counts: activeTargetCounts,
-    durable_residue_counts: {
-      observed_event_rows: observedEventRows,
-      scope_states: state.scopeStateCount,
-      update_requests: requestIds.length,
-    },
-    issues,
-    preserved_for_manual_cleanup: preservedForManualCleanup,
-    request_ids: requestIds,
-    request_terminal_statuses: statuses,
-    run_id: state.runId,
-    scenario: state.scenario,
-    target_refs: state.targets.map(({
-      entityTag,
-      externalSystem,
-      lockVersion,
-      targetId,
-      targetKey,
-    }) => ({
-      entityTag,
-      externalSystem,
-      lockVersion,
-      targetId,
-      targetKey,
-    })),
-    version: 1,
-  };
   await writeDurableJournal(
     state,
     result.restored ? "restored" : "cleanup_blocked",
   );
-  await attachManifest(testInfo, manifest);
-  return { issues, manifest, result };
+  return { issues, result };
 }
 
 export async function withC7Cleanup(
@@ -3156,7 +3087,6 @@ export async function withC7Cleanup(
     try {
       cleanup = await cleanupResources(
         page,
-        testInfo,
         state,
         options.terminalTimeout ?? CLEANUP_TERMINAL_TIMEOUT,
       );
@@ -3169,39 +3099,11 @@ export async function withC7Cleanup(
         preservedForManualCleanup: true,
         restored: false,
       };
-      const fallbackManifest: CleanupManifest = {
-        active_target_counts: Object.fromEntries(
-          [...state.externalSystems].sort().map((value) => [value, null]),
-        ),
-        durable_residue_counts: {
-          observed_event_rows: 0,
-          scope_states: state.scopeStateCount,
-          update_requests: state.requestIds.size,
-        },
-        issues,
-        preserved_for_manual_cleanup: true,
-        request_ids: [...state.requestIds].sort(),
-        request_terminal_statuses: {},
-        run_id: state.runId,
-        scenario: state.scenario,
-        target_refs: state.targets.map(
-          ({ entityTag, externalSystem, lockVersion, targetId, targetKey }) => ({
-            entityTag,
-            externalSystem,
-            lockVersion,
-            targetId,
-            targetKey,
-          }),
-        ),
-        version: 1,
-      };
       await writeDurableJournal(state, "cleanup_boundary_failed").catch(
         () => undefined,
       );
-      await attachManifest(testInfo, fallbackManifest).catch(() => undefined);
       cleanup = {
         issues,
-        manifest: fallbackManifest,
         result: state.cleanupResult,
       };
     }
@@ -3211,11 +3113,11 @@ export async function withC7Cleanup(
     if (cleanup.issues.length > 0) {
       testInfo.annotations.push({
         type: "cleanup-error",
-        description: `C7 cleanup issue ${cleanup.issues.length}건; sanitized manifest 확인`,
+        description: `C7 cleanup issue ${cleanup.issues.length}건; root-owned journal 확인`,
       });
       if (primaryError === undefined) {
         throw new Error(
-          `C7 cleanup 실패 ${cleanup.issues.length}건; target 보존 여부는 sanitized manifest 확인`,
+          `C7 cleanup 실패 ${cleanup.issues.length}건; target 보존 여부는 root-owned journal 확인`,
         );
       }
     }
