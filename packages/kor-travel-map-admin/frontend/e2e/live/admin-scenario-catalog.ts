@@ -146,8 +146,10 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     route: "/features",
     readyHeading: "Feature 지도",
     readApis: [
-      "/v1/features",
-      "/v1/features/{feature_id}",
+      "/v1/admin/features/in-bounds",
+      "/v1/admin/features/{feature_id}",
+      "/v1/admin/features/{feature_id}/weather",
+      "/v1/admin/features/{feature_id}/price",
       "/v1/ops/datasets",
     ],
     writeApis: [],
@@ -158,9 +160,9 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     route: "/features/{feature_id}",
     readyHeading: "Feature 상세",
     readApis: [
-      "/v1/features/{feature_id}",
       "/v1/admin/features/{feature_id}",
-      "/v1/features/{feature_id}/weather",
+      "/v1/admin/features/{feature_id}/weather",
+      "/v1/admin/features/{feature_id}/price",
       "/v1/features/nearby",
     ],
     writeApis: [],
@@ -500,7 +502,7 @@ export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
         for (const viewport of VIEWPORTS) {
           addScenario(scenarios, {
             apiExpectation:
-              "/v1/features bbox query, then /v1/admin/features detail parity",
+              "/v1/admin/features/in-bounds query, then admin detail parity",
             idParts: [
               "features-map",
               String(placeName),
@@ -521,17 +523,19 @@ export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
   }
 
   for (const featureId of featureIds) {
-    for (const apiKind of ["public", "admin", "weather", "nearby"] as const) {
+    for (const apiKind of ["admin", "weather", "price", "nearby"] as const) {
       for (const viewport of VIEWPORTS) {
         addScenario(scenarios, {
           apiExpectation:
             apiKind === "admin"
               ? "/v1/admin/features/{feature_id}"
               : apiKind === "weather"
-                ? "/v1/features/{feature_id}/weather"
+                ? "/v1/admin/features/{feature_id}/weather"
+                : apiKind === "price"
+                  ? "/v1/admin/features/{feature_id}/price"
                 : apiKind === "nearby"
                   ? "/v1/features/nearby"
-                  : "/v1/features/{feature_id}",
+                  : "/v1/admin/features/{feature_id}",
           idParts: ["feature-detail", featureId, apiKind, viewport],
           mode: "catalog",
           reflectedSurface: "/admin/features",

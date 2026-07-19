@@ -28,6 +28,9 @@ export type FeatureSummary = FeatureSchemas["FeatureSummary"];
 export type FeaturesInBboxResponse = FeatureSchemas["FeaturesInBboxResponse"];
 export type FeatureCluster = FeatureSchemas["ClusterSummary"];
 type FeaturesInBoundsResponse = FeatureSchemas["FeaturesInBoundsResponse"];
+export type AdminFeatureMapItem = FeatureSchemas["AdminFeatureMapItem"];
+type AdminFeaturesInBoundsResponse =
+  FeatureSchemas["AdminFeaturesInBoundsResponse"];
 
 /**
  * tiled fetch가 merged 응답에 덧붙이는 비계약 메타. 생성된 OpenAPI 타입(`Meta`)에는
@@ -430,6 +433,102 @@ export interface FeatureClustersParams {
   zoom: number;
 }
 
+export const ADMIN_FEATURE_STATUSES = [
+  "draft",
+  "active",
+  "inactive",
+  "hidden",
+  "broken",
+] as const satisfies readonly AdminFeatureMapItem["status"][];
+export type AdminFeatureStatus = AdminFeatureMapItem["status"];
+
+export interface AdminFeaturesInBoundsParams extends FeatureClustersParams {
+  statuses?: AdminFeatureStatus[];
+  includeGeometry?: boolean;
+}
+
+export function adminFeaturesInBoundsPath(
+  params: AdminFeaturesInBoundsParams,
+  options: { clustered: boolean },
+) {
+  return pathWithQuery("/v1/admin/features/in-bounds", {
+    min_lon: params.min_lon,
+    min_lat: params.min_lat,
+    max_lon: params.max_lon,
+    max_lat: params.max_lat,
+    kind: params.kinds,
+    provider: params.provider,
+    status: params.statuses,
+    zoom: options.clustered ? Math.floor(params.zoom) : undefined,
+    max_items: 2000,
+    include_geometry: options.clustered ? undefined : params.includeGeometry,
+  });
+}
+
+async function fetchAdminFeaturesInBounds(
+  params: AdminFeaturesInBoundsParams,
+  options: { clustered: boolean },
+  signal?: AbortSignal,
+): Promise<AdminFeaturesInBoundsResponse> {
+  return getJson<AdminFeaturesInBoundsResponse>(
+    adminFeaturesInBoundsPath(params, options),
+    { signal },
+  );
+}
+
+export function useAdminFeaturesInBbox(
+  params: AdminFeaturesInBoundsParams,
+  options?: { enabled?: boolean },
+) {
+  const key = [
+    "admin-features",
+    "items",
+    params.min_lon.toFixed(4),
+    params.min_lat.toFixed(4),
+    params.max_lon.toFixed(4),
+    params.max_lat.toFixed(4),
+    params.kinds?.join(",") ?? "",
+    params.provider?.join(",") ?? "",
+    params.statuses?.join(",") ?? "",
+    params.includeGeometry ?? false,
+  ] as const;
+  return useQuery<AdminFeaturesInBoundsResponse, Error>({
+    queryKey: key,
+    queryFn: ({ signal }) =>
+      fetchAdminFeaturesInBounds(params, { clustered: false }, signal),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
+export function useAdminFeatureClustersInBbox(
+  params: AdminFeaturesInBoundsParams,
+  options?: { enabled?: boolean },
+) {
+  const zoom = Math.floor(params.zoom);
+  const key = [
+    "admin-features",
+    "clusters",
+    params.min_lon.toFixed(2),
+    params.min_lat.toFixed(2),
+    params.max_lon.toFixed(2),
+    params.max_lat.toFixed(2),
+    zoom,
+    params.kinds?.join(",") ?? "",
+    params.provider?.join(",") ?? "",
+    params.statuses?.join(",") ?? "",
+  ] as const;
+  return useQuery<AdminFeaturesInBoundsResponse, Error>({
+    queryKey: key,
+    queryFn: ({ signal }) =>
+      fetchAdminFeaturesInBounds(params, { clustered: true }, signal),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
 async function fetchFeaturesInBounds(
   params: FeatureClustersParams,
   zoomInt: number,
@@ -531,39 +630,39 @@ export function useFeatureDetail(featureId: string | null) {
   });
 }
 
-async function fetchFeatureWeather(
+async function fetchAdminFeatureWeather(
   featureId: string,
   params: { asof?: string | Date | null } = {},
   signal?: AbortSignal,
 ): Promise<FeatureWeatherResponse> {
   return getJson<FeatureWeatherResponse>(
-    pathWithQuery(`/v1/features/${encodeURIComponent(featureId)}/weather`, {
+    pathWithQuery(`/v1/admin/features/${encodeURIComponent(featureId)}/weather`, {
       asof: params.asof,
     }),
     { signal },
   );
 }
 
-export function useFeatureWeather(
+export function useAdminFeatureWeather(
   featureId: string | null,
   params: { asof?: string | Date | null } = {},
 ) {
   return useQuery<FeatureWeatherResponse, Error>({
-    queryKey: ["feature", featureId, "weather", params.asof ?? null] as const,
+    queryKey: ["admin-feature-card", featureId, "weather", params.asof ?? null] as const,
     queryFn: ({ signal }) =>
-      fetchFeatureWeather(featureId as string, params, signal),
+      fetchAdminFeatureWeather(featureId as string, params, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 60_000,
   });
 }
 
-async function fetchFeaturePrice(
+async function fetchAdminFeaturePrice(
   featureId: string,
   params: { asof?: string | Date | null; historyLimit?: number } = {},
   signal?: AbortSignal,
 ): Promise<FeaturePriceResponse> {
   return getJson<FeaturePriceResponse>(
-    pathWithQuery(`/v1/features/${encodeURIComponent(featureId)}/price`, {
+    pathWithQuery(`/v1/admin/features/${encodeURIComponent(featureId)}/price`, {
       asof: params.asof,
       history_limit: params.historyLimit,
     }),
@@ -571,19 +670,20 @@ async function fetchFeaturePrice(
   );
 }
 
-export function useFeaturePrice(
+export function useAdminFeaturePrice(
   featureId: string | null,
   params: { asof?: string | Date | null; historyLimit?: number } = {},
 ) {
   return useQuery<FeaturePriceResponse, Error>({
     queryKey: [
-      "feature",
+      "admin-feature-card",
       featureId,
       "price",
       params.asof ?? null,
       params.historyLimit ?? null,
     ] as const,
-    queryFn: ({ signal }) => fetchFeaturePrice(featureId as string, params, signal),
+    queryFn: ({ signal }) =>
+      fetchAdminFeaturePrice(featureId as string, params, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 60_000,
   });

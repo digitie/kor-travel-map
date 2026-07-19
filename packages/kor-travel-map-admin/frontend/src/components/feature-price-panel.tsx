@@ -4,8 +4,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 import { FuelIcon, HistoryIcon } from "lucide-react";
 import { useMemo } from "react";
 
-import { ApiClientError } from "@/api/client";
-import { useFeaturePrice, type PricePoint } from "@/api/features";
+import { useAdminFeaturePrice, type PricePoint } from "@/api/features";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -176,20 +175,12 @@ export function FeaturePricePanel({
   featureId: string | null;
   compact?: boolean;
 }) {
-  const price = useFeaturePrice(featureId, {
+  const price = useAdminFeaturePrice(featureId, {
     historyLimit: compact ? 30 : 100,
   });
   const data = price.data?.data;
   const current = data?.current ?? [];
   const history = data?.history ?? [];
-  // T-VN-04: 공개 predicate 단일화로 비공개/미존재 feature의 price 카드는
-  // 404를 반환한다. admin 전용 카드 surface가 생기기 전까지(#741) 404는 오류가
-  // 아니라 "공개 카드 없음" 빈 상태로 취급한다.
-  const publicCardMissing =
-    price.isError &&
-    price.error instanceof ApiClientError &&
-    price.error.status === 404;
-
   const historyColumns = useMemo<ColumnDef<PricePoint, unknown>[]>(() => {
     const cols: ColumnDef<PricePoint, unknown>[] = [
       {
@@ -262,11 +253,7 @@ export function FeaturePricePanel({
         </div>
       </div>
 
-      {publicCardMissing ? (
-        <div className="m-4 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-          공개 price 카드가 없습니다 (비공개 feature).
-        </div>
-      ) : price.isError ? (
+      {price.isError ? (
         <Alert className="m-4" variant="destructive">
           <AlertTitle>price 호출 실패</AlertTitle>
           <AlertDescription>{price.error.message}</AlertDescription>

@@ -1119,6 +1119,36 @@
         "title": "AdminFeatureChangeResponse",
         "type": "object"
       },
+      "AdminFeatureCluster": {
+        "additionalProperties": false,
+        "description": "Admin base Feature의 canonical 행정구역 rollup.",
+        "properties": {
+          "cluster_key": {
+            "title": "Cluster Key",
+            "type": "string"
+          },
+          "feature_count": {
+            "title": "Feature Count",
+            "type": "integer"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "cluster_key",
+          "feature_count",
+          "lon",
+          "lat"
+        ],
+        "title": "AdminFeatureCluster",
+        "type": "object"
+      },
       "AdminFeatureCoordInput": {
         "additionalProperties": false,
         "description": "Feature mutation 좌표 입력.",
@@ -2580,6 +2610,141 @@
         "title": "AdminFeatureIssueRecord",
         "type": "object"
       },
+      "AdminFeatureMapItem": {
+        "additionalProperties": false,
+        "description": "Admin 지도용 base Feature 경량 표현.",
+        "properties": {
+          "area_square_meters": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Square Meters"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "marker_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Color"
+          },
+          "marker_icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "price_summary": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PricePointOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Summary"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "active",
+              "inactive",
+              "hidden",
+              "broken"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "weather_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "lon",
+          "lat",
+          "status"
+        ],
+        "title": "AdminFeatureMapItem",
+        "type": "object"
+      },
       "AdminFeatureOverrideRecord": {
         "additionalProperties": false,
         "description": "생성/갱신된 feature override.",
@@ -3059,6 +3224,68 @@
         "title": "AdminFeatureRevisionResponse",
         "type": "object"
       },
+      "AdminFeaturesInBoundsData": {
+        "additionalProperties": false,
+        "description": "Admin 지도 item/cluster envelope data.",
+        "properties": {
+          "clusters": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureCluster"
+            },
+            "title": "Clusters",
+            "type": "array"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/AdminInBoundsCoverage"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureMapItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "items",
+              "clusters"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode",
+          "items",
+          "clusters",
+          "truncated",
+          "coverage"
+        ],
+        "title": "AdminFeaturesInBoundsData",
+        "type": "object"
+      },
+      "AdminFeaturesInBoundsResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/features/in-bounds`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminFeaturesInBoundsData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminFeaturesInBoundsResponse",
+        "type": "object"
+      },
       "AdminFeaturesListData": {
         "additionalProperties": false,
         "description": "Admin feature 목록 data.",
@@ -3093,6 +3320,26 @@
           "meta"
         ],
         "title": "AdminFeaturesListResponse",
+        "type": "object"
+      },
+      "AdminInBoundsCoverage": {
+        "additionalProperties": false,
+        "description": "Admin in-bounds 결과 상한과 반환 건수.",
+        "properties": {
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "returned": {
+            "title": "Returned",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "returned",
+          "limit"
+        ],
+        "title": "AdminInBoundsCoverage",
         "type": "object"
       },
       "AdminIssueActionData": {
@@ -28657,6 +28904,252 @@
         ]
       }
     },
+    "/v1/admin/features/in-bounds": {
+      "get": {
+        "operationId": "list_admin_features_in_bounds_v1_admin_features_in_bounds_get",
+        "parameters": [
+          {
+            "description": "bbox 최소 경도 (WGS84).",
+            "in": "query",
+            "name": "min_lon",
+            "required": true,
+            "schema": {
+              "description": "bbox 최소 경도 (WGS84).",
+              "title": "Min Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최소 위도.",
+            "in": "query",
+            "name": "min_lat",
+            "required": true,
+            "schema": {
+              "description": "bbox 최소 위도.",
+              "title": "Min Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최대 경도.",
+            "in": "query",
+            "name": "max_lon",
+            "required": true,
+            "schema": {
+              "description": "bbox 최대 경도.",
+              "title": "Max Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최대 위도.",
+            "in": "query",
+            "name": "max_lat",
+            "required": true,
+            "schema": {
+              "description": "bbox 최대 위도.",
+              "title": "Max Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "운영 상태 반복 필터. 미지정 시 삭제 전 draft/active/inactive/hidden/broken 전체.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "draft",
+                      "active",
+                      "inactive",
+                      "hidden",
+                      "broken"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "운영 상태 반복 필터. 미지정 시 삭제 전 draft/active/inactive/hidden/broken 전체.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "feature kind 반복 필터.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature kind 반복 필터.",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "category code 반복 필터.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "category code 반복 필터.",
+              "title": "Category"
+            }
+          },
+          {
+            "description": "primary provider 반복 필터.",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "primary provider 반복 필터.",
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "zoom",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 24,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Zoom"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cluster_unit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "sido",
+                    "sigungu",
+                    "eupmyeondong"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cluster Unit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_items",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 2000,
+              "minimum": 1,
+              "title": "Max Items",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "item mode에서 route/area GeoJSON을 포함한다.",
+            "in": "query",
+            "name": "include_geometry",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "item mode에서 route/area GeoJSON을 포함한다.",
+              "title": "Include Geometry",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeaturesInBoundsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Admin bbox 안 base Feature item/cluster",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
     "/v1/admin/features/{feature_id}": {
       "delete": {
         "operationId": "delete_feature_route_v1_admin_features__feature_id__delete",
@@ -29065,6 +29558,102 @@
         ]
       }
     },
+    "/v1/admin/features/{feature_id}/price": {
+      "get": {
+        "operationId": "get_admin_feature_price_v1_admin_features__feature_id__price_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "asof",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asof"
+            }
+          },
+          {
+            "in": "query",
+            "name": "history_limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "History Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeaturePriceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Admin feature price card",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
     "/v1/admin/features/{feature_id}/revision": {
       "get": {
         "operationId": "get_feature_revision_route_v1_admin_features__feature_id__revision_get",
@@ -29135,6 +29724,90 @@
           }
         ],
         "summary": "Get Feature Revision Route",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
+    "/v1/admin/features/{feature_id}/weather": {
+      "get": {
+        "operationId": "get_admin_feature_weather_v1_admin_features__feature_id__weather_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "asof",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asof"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureWeatherResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Admin feature weather card",
         "tags": [
           "admin-features"
         ]

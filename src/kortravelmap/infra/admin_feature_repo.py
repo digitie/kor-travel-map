@@ -62,9 +62,12 @@ __all__ = [
     "reject_feature_change_request",
     "list_feature_change_requests",
     "get_admin_feature_detail",
+    "admin_feature_card_target_exists",
     "get_feature_row_revision",
     "get_dedup_review_detail",
     "get_enrichment_review_detail",
+    "admin_features_in_bbox",
+    "cluster_admin_features_in_bbox",
     "list_admin_features",
     "list_dedup_reviews",
     "list_enrichment_reviews",
@@ -505,6 +508,294 @@ _ADMIN_FEATURE_SORT_COLUMNS: Final[dict[str, str]] = {
 }
 _TEXT_SORTS: Final[set[str]] = {"name", "kind", "status", "provider"}
 _DATETIME_SORTS: Final[set[str]] = {"updated_at", "created_at"}
+
+
+def _admin_bbox_envelope_sql() -> str:
+    """WGS84 bbox envelope SQL. 입력 geometry는 상수로 한 번만 만든다."""
+
+    return (
+        "x_extension.ST_MakeEnvelope("
+        ":min_lon, :min_lat, :max_lon, :max_lat, 4326)"
+    )
+
+
+def _admin_bbox_candidate_sql(alias: str) -> str:
+    """Admin item/cluster가 공유하는 exact 공간 후보 술어."""
+
+    if not alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    envelope = _admin_bbox_envelope_sql()
+    return f"""(
+      (
+        {alias}.coord IS NOT NULL
+        AND (
+          {alias}.kind NOT IN ('route', 'area')
+          OR {alias}.geom IS NULL
+        )
+        AND {alias}.coord OPERATOR(x_extension.&&) {envelope}
+      )
+      OR (
+        {alias}.kind IN ('route', 'area')
+        AND {alias}.geom IS NOT NULL
+        AND {alias}.geom OPERATOR(x_extension.&&) {envelope}
+        AND x_extension.ST_Intersects({alias}.geom, {envelope})
+      )
+    )"""
+
+
+def _admin_bbox_filters_sql(alias: str) -> str:
+    """Admin item/cluster 공통 운영 상태·속성 필터."""
+
+    if not alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    return f"""
+  AND {alias}.deleted_at IS NULL
+  AND {alias}.user_deleted_at IS NULL
+  AND {alias}.status <> 'deleted'
+  AND (
+    CAST(:statuses AS text[]) IS NULL
+    OR {alias}.status = ANY(CAST(:statuses AS text[]))
+  )
+  AND (
+    CAST(:kinds AS text[]) IS NULL
+    OR {alias}.kind = ANY(CAST(:kinds AS text[]))
+  )
+  AND (
+    CAST(:categories AS text[]) IS NULL
+    OR {alias}.category = ANY(CAST(:categories AS text[]))
+  )
+  AND (
+    CAST(:providers AS text[]) IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM provider_sync.source_links AS sl
+      JOIN provider_sync.source_entities AS se
+        ON se.source_entity_key = sl.source_entity_key
+      JOIN provider_sync.source_records AS sr
+        ON sr.source_record_key = se.current_source_record_key
+      WHERE sl.feature_id = {alias}.feature_id
+        AND sl.is_primary_source
+        AND sr.provider = ANY(CAST(:providers AS text[]))
+    )
+  )
+"""
+
+
+_ADMIN_FEATURES_IN_BBOX_SQL: Final[str] = f"""
+WITH candidates AS (
+  SELECT
+      f.feature_id,
+      f.kind,
+      f.name,
+      f.category,
+      f.marker_icon,
+      f.marker_color,
+      f.status,
+      CASE
+        WHEN f.kind IN ('route', 'area')
+          AND f.geom IS NOT NULL
+          AND f.geom OPERATOR(x_extension.&&) {_admin_bbox_envelope_sql()}
+          AND x_extension.ST_Intersects(f.geom, {_admin_bbox_envelope_sql()})
+        THEN x_extension.ST_PointOnSurface(
+          x_extension.ST_Intersection(f.geom, {_admin_bbox_envelope_sql()})
+        )
+        ELSE f.coord
+      END AS marker_coord,
+      CASE
+        WHEN CAST(:include_geometry AS boolean)
+          AND f.kind = 'route'
+          AND f.geom IS NOT NULL
+        THEN CAST(
+          x_extension.ST_AsGeoJSON(x_extension.ST_Simplify(f.geom, 0.0001), 6)
+          AS jsonb
+        )
+        WHEN CAST(:include_geometry AS boolean)
+          AND f.kind = 'area'
+          AND f.geom IS NOT NULL
+        THEN CAST(
+          x_extension.ST_AsGeoJSON(
+            x_extension.ST_SimplifyPreserveTopology(f.geom, 0.0001), 6
+          ) AS jsonb
+        )
+        ELSE NULL
+      END AS geometry,
+      CASE
+        WHEN CAST(:include_geometry AS boolean)
+          AND f.kind = 'area'
+          AND f.geom IS NOT NULL
+        THEN x_extension.ST_Area(CAST(f.geom AS x_extension.geography))
+        ELSE NULL
+      END AS area_square_meters
+  FROM feature.features AS f
+  WHERE {_admin_bbox_candidate_sql("f")}
+{_admin_bbox_filters_sql("f")}
+  ORDER BY f.feature_id
+  LIMIT :limit
+)
+SELECT
+    c.feature_id,
+    c.kind,
+    c.name,
+    c.category,
+    x_extension.ST_X(c.marker_coord) AS lon,
+    x_extension.ST_Y(c.marker_coord) AS lat,
+    c.marker_icon,
+    c.marker_color,
+    c.status,
+    c.geometry,
+    c.area_square_meters,
+    ps.price_summary,
+    ws.weather_summary
+FROM candidates AS c
+LEFT JOIN LATERAL (
+  SELECT jsonb_agg(
+      jsonb_build_object(
+        'provider', provider,
+        'price_domain', price_domain,
+        'product_key', product_key,
+        'product_name', product_name,
+        'source_product_key', source_product_key,
+        'source_product_name', source_product_name,
+        'value_number', value_number,
+        'unit', unit,
+        'observed_at', observed_at
+      )
+      ORDER BY
+        CASE product_key
+          WHEN 'gasoline' THEN 10
+          WHEN 'diesel' THEN 20
+          WHEN 'premium_gasoline' THEN 30
+          WHEN 'lpg' THEN 40
+          ELSE 100
+        END,
+        product_name NULLS LAST,
+        product_key
+  ) AS price_summary
+  FROM (
+    SELECT DISTINCT ON (product_key)
+        provider,
+        price_domain,
+        product_key,
+        product_name,
+        source_product_key,
+        source_product_name,
+        value_number,
+        unit,
+        observed_at
+    FROM feature.feature_price_values AS pv
+    WHERE pv.feature_id = c.feature_id
+    ORDER BY product_key, observed_at DESC
+  ) AS latest_price
+) AS ps ON c.kind = 'price'
+LEFT JOIN LATERAL (
+  SELECT jsonb_build_object(
+      'provider', provider,
+      'weather_domain', weather_domain,
+      'forecast_style', forecast_style,
+      'metric_key', metric_key,
+      'metric_name', metric_name,
+      'value_number', value_number,
+      'value_text', value_text,
+      'unit', unit,
+      'issued_at', issued_at,
+      'valid_at', valid_at,
+      'observed_at', observed_at
+  ) AS weather_summary
+  FROM feature.feature_weather_values AS w
+  WHERE w.feature_id = c.feature_id
+    AND w.metric_key IN (
+      'T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP',
+      'PM10', 'PM2_5', 'CAI', 'O3', 'NO2', 'SO2', 'CO'
+    )
+  ORDER BY
+      CASE w.metric_key
+        WHEN 'T1H' THEN 10
+        WHEN 'TMP' THEN 20
+        WHEN 'TMN' THEN 30
+        WHEN 'TMX' THEN 40
+        WHEN 'POP' THEN 50
+        WHEN 'SKY' THEN 60
+        WHEN 'REH' THEN 70
+        WHEN 'PTY' THEN 80
+        WHEN 'PCP' THEN 90
+        WHEN 'PM10' THEN 110
+        WHEN 'PM2_5' THEN 120
+        WHEN 'CAI' THEN 130
+        WHEN 'O3' THEN 140
+        WHEN 'NO2' THEN 150
+        WHEN 'SO2' THEN 160
+        WHEN 'CO' THEN 170
+        ELSE 100
+      END,
+      CASE w.forecast_style
+        WHEN 'observed' THEN 10
+        WHEN 'nowcast' THEN 20
+        WHEN 'ultra_short' THEN 30
+        WHEN 'short' THEN 40
+        WHEN 'mid' THEN 50
+        ELSE 100
+      END,
+      CASE
+        WHEN COALESCE(w.valid_at, w.observed_at, w.issued_at) >= now() THEN 0
+        ELSE 1
+      END,
+      abs(
+        extract(
+          epoch FROM (COALESCE(w.valid_at, w.observed_at, w.issued_at) - now())
+        )
+      ) ASC NULLS LAST,
+      COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
+  LIMIT 1
+) AS ws ON c.kind = 'weather'
+ORDER BY c.feature_id
+"""
+
+
+_ADMIN_CLUSTER_CODE_COLUMNS: Final[dict[str, str]] = {
+    "sido": "sido_code",
+    "sigungu": "sigungu_code",
+    "eupmyeondong": "legal_dong_code",
+}
+
+
+def _admin_cluster_bbox_sql(code_column: str) -> str:
+    envelope = _admin_bbox_envelope_sql()
+    return f"""
+WITH candidates AS (
+  SELECT
+      f.{code_column} AS cluster_key,
+      CASE
+        WHEN f.kind IN ('route', 'area')
+          AND f.geom IS NOT NULL
+          AND f.geom OPERATOR(x_extension.&&) {envelope}
+          AND x_extension.ST_Intersects(f.geom, {envelope})
+        THEN x_extension.ST_PointOnSurface(
+          x_extension.ST_Intersection(f.geom, {envelope})
+        )
+        ELSE f.coord
+      END AS marker_coord
+  FROM feature.features AS f
+  WHERE f.{code_column} IS NOT NULL
+    AND {_admin_bbox_candidate_sql("f")}
+{_admin_bbox_filters_sql("f")}
+)
+SELECT
+    cluster_key,
+    count(*) AS feature_count,
+    avg(x_extension.ST_X(marker_coord)) AS lon,
+    avg(x_extension.ST_Y(marker_coord)) AS lat
+FROM candidates
+WHERE marker_coord IS NOT NULL
+GROUP BY cluster_key
+ORDER BY feature_count DESC, cluster_key
+LIMIT :limit
+"""
+
+
+_ADMIN_CLUSTER_BBOX_SQL_BY_UNIT: Final[dict[str, str]] = {
+    unit: _admin_cluster_bbox_sql(column)
+    for unit, column in _ADMIN_CLUSTER_CODE_COLUMNS.items()
+}
 
 
 def _normalize_values(values: Sequence[str] | None) -> list[str] | None:
@@ -1328,6 +1619,96 @@ async def _get_review_feature_detail(
     return _review_feature_detail(detail) if detail is not None else None
 
 
+async def admin_features_in_bbox(
+    session: AsyncSession,
+    *,
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    statuses: Sequence[str] | None = None,
+    kinds: Sequence[str] | None = None,
+    categories: Sequence[str] | None = None,
+    providers: Sequence[str] | None = None,
+    include_geometry: bool = False,
+    limit: int = 2000,
+) -> list[dict[str, Any]]:
+    """삭제 전 base Feature를 bbox에서 조회한다.
+
+    공개 projection을 사용하지 않으며 ``draft``·``inactive``·``hidden``·``broken``을
+    운영자가 상태 필터로 찾을 수 있다. route/area는 bbox MBR 후보 뒤 exact
+    ``ST_Intersects``를 적용하고, ``include_geometry``는 payload만 제어한다.
+    """
+
+    if min_lon > max_lon or min_lat > max_lat:
+        raise ValueError("invalid bbox")
+    rows = (
+        await session.execute(
+            text(_ADMIN_FEATURES_IN_BBOX_SQL),
+            {
+                "min_lon": min_lon,
+                "min_lat": min_lat,
+                "max_lon": max_lon,
+                "max_lat": max_lat,
+                "statuses": _normalize_values(statuses),
+                "kinds": _normalize_values(kinds),
+                "categories": _normalize_values(categories),
+                "providers": _normalize_values(providers),
+                "include_geometry": include_geometry,
+                "limit": max(1, limit),
+            },
+        )
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+async def cluster_admin_features_in_bbox(
+    session: AsyncSession,
+    *,
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    cluster_unit: str,
+    statuses: Sequence[str] | None = None,
+    kinds: Sequence[str] | None = None,
+    categories: Sequence[str] | None = None,
+    providers: Sequence[str] | None = None,
+    limit: int = 2000,
+) -> list[dict[str, Any]]:
+    """Admin base Feature를 canonical 행정코드 단위로 bbox rollup한다."""
+
+    if cluster_unit not in _ADMIN_CLUSTER_BBOX_SQL_BY_UNIT:
+        raise ValueError("cluster_unit must be one of sido, sigungu, eupmyeondong")
+    if min_lon > max_lon or min_lat > max_lat:
+        raise ValueError("invalid bbox")
+    rows = (
+        await session.execute(
+            text(_ADMIN_CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit]),
+            {
+                "min_lon": min_lon,
+                "min_lat": min_lat,
+                "max_lon": max_lon,
+                "max_lat": max_lat,
+                "statuses": _normalize_values(statuses),
+                "kinds": _normalize_values(kinds),
+                "categories": _normalize_values(categories),
+                "providers": _normalize_values(providers),
+                "limit": max(1, limit),
+            },
+        )
+    ).mappings().all()
+    return [
+        {
+            "cluster_key": str(row["cluster_key"]),
+            "feature_count": int(row["feature_count"]),
+            "lon": float(row["lon"]),
+            "lat": float(row["lat"]),
+        }
+        for row in rows
+    ]
+
+
 async def list_admin_features(
     session: AsyncSession,
     *,
@@ -1750,6 +2131,17 @@ FROM feature.features
 WHERE feature_id = :feature_id
 """
 
+_ADMIN_FEATURE_CARD_TARGET_EXISTS_SQL: Final[str] = """
+SELECT EXISTS (
+  SELECT 1
+  FROM feature.features
+  WHERE feature_id = :feature_id
+    AND deleted_at IS NULL
+    AND user_deleted_at IS NULL
+    AND status <> 'deleted'
+)
+"""
+
 _LOCK_FEATURE_ROW_REVISION_SQL: Final[str] = """
 SELECT row_revision
 FROM feature.features
@@ -2060,6 +2452,21 @@ async def get_feature_row_revision(
         )
     ).scalar_one_or_none()
     return int(revision) if revision is not None else None
+
+
+async def admin_feature_card_target_exists(
+    session: AsyncSession, feature_id: str
+) -> bool:
+    """Admin weather/price card의 삭제 전 target인지 검사한다."""
+
+    return bool(
+        (
+            await session.execute(
+                text(_ADMIN_FEATURE_CARD_TARGET_EXISTS_SQL),
+                {"feature_id": feature_id},
+            )
+        ).scalar_one()
+    )
 
 
 async def _assert_feature_revision(

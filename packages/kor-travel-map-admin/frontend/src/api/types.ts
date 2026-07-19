@@ -574,6 +574,23 @@ export interface paths {
         patch: operations["decide_review_v1_admin_features_enrichment_reviews__review_id__patch"];
         trace?: never;
     };
+    "/v1/admin/features/in-bounds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin bbox 안 base Feature item/cluster */
+        get: operations["list_admin_features_in_bounds_v1_admin_features_in_bounds_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/features/{feature_id}": {
         parameters: {
             query?: never;
@@ -610,6 +627,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/features/{feature_id}/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin feature price card */
+        get: operations["get_admin_feature_price_v1_admin_features__feature_id__price_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/features/{feature_id}/revision": {
         parameters: {
             query?: never;
@@ -619,6 +653,23 @@ export interface paths {
         };
         /** Get Feature Revision Route */
         get: operations["get_feature_revision_route_v1_admin_features__feature_id__revision_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}/weather": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin feature weather card */
+        get: operations["get_admin_feature_weather_v1_admin_features__feature_id__weather_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2524,6 +2575,20 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * AdminFeatureCluster
+         * @description Admin base Feature의 canonical 행정구역 rollup.
+         */
+        AdminFeatureCluster: {
+            /** Cluster Key */
+            cluster_key: string;
+            /** Feature Count */
+            feature_count: number;
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
+        };
+        /**
          * AdminFeatureCoordInput
          * @description Feature mutation 좌표 입력.
          */
@@ -3013,6 +3078,42 @@ export interface components {
             violation_type?: string | null;
         };
         /**
+         * AdminFeatureMapItem
+         * @description Admin 지도용 base Feature 경량 표현.
+         */
+        AdminFeatureMapItem: {
+            /** Area Square Meters */
+            area_square_meters?: number | null;
+            /** Category */
+            category: string;
+            /** Feature Id */
+            feature_id: string;
+            /** Geometry */
+            geometry?: {
+                [key: string]: unknown;
+            } | null;
+            /** Kind */
+            kind: string;
+            /** Lat */
+            lat: number | null;
+            /** Lon */
+            lon: number | null;
+            /** Marker Color */
+            marker_color?: string | null;
+            /** Marker Icon */
+            marker_icon?: string | null;
+            /** Name */
+            name: string;
+            /** Price Summary */
+            price_summary?: components["schemas"]["PricePointOut"][] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "active" | "inactive" | "hidden" | "broken";
+            weather_summary?: components["schemas"]["WeatherSummaryOut"] | null;
+        };
+        /**
          * AdminFeatureOverrideRecord
          * @description 생성/갱신된 feature override.
          */
@@ -3164,6 +3265,32 @@ export interface components {
             data: components["schemas"]["AdminFeatureRevisionData"];
         };
         /**
+         * AdminFeaturesInBoundsData
+         * @description Admin 지도 item/cluster envelope data.
+         */
+        AdminFeaturesInBoundsData: {
+            /** Clusters */
+            clusters: components["schemas"]["AdminFeatureCluster"][];
+            coverage: components["schemas"]["AdminInBoundsCoverage"];
+            /** Items */
+            items: components["schemas"]["AdminFeatureMapItem"][];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "items" | "clusters";
+            /** Truncated */
+            truncated: boolean;
+        };
+        /**
+         * AdminFeaturesInBoundsResponse
+         * @description ``GET /admin/features/in-bounds`` 응답.
+         */
+        AdminFeaturesInBoundsResponse: {
+            data: components["schemas"]["AdminFeaturesInBoundsData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * AdminFeaturesListData
          * @description Admin feature 목록 data.
          */
@@ -3178,6 +3305,16 @@ export interface components {
         AdminFeaturesListResponse: {
             data: components["schemas"]["AdminFeaturesListData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * AdminInBoundsCoverage
+         * @description Admin in-bounds 결과 상한과 반환 건수.
+         */
+        AdminInBoundsCoverage: {
+            /** Limit */
+            limit: number;
+            /** Returned */
+            returned: number;
         };
         /**
          * AdminIssueActionData
@@ -12608,6 +12745,66 @@ export interface operations {
             };
         };
     };
+    list_admin_features_in_bounds_v1_admin_features_in_bounds_get: {
+        parameters: {
+            query: {
+                /** @description bbox 최소 경도 (WGS84). */
+                min_lon: number;
+                /** @description bbox 최소 위도. */
+                min_lat: number;
+                /** @description bbox 최대 경도. */
+                max_lon: number;
+                /** @description bbox 최대 위도. */
+                max_lat: number;
+                /** @description 운영 상태 반복 필터. 미지정 시 삭제 전 draft/active/inactive/hidden/broken 전체. */
+                status?: ("draft" | "active" | "inactive" | "hidden" | "broken")[] | null;
+                /** @description feature kind 반복 필터. */
+                kind?: string[] | null;
+                /** @description category code 반복 필터. */
+                category?: string[] | null;
+                /** @description primary provider 반복 필터. */
+                provider?: string[] | null;
+                zoom?: number | null;
+                cluster_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
+                max_items?: number;
+                /** @description item mode에서 route/area GeoJSON을 포함한다. */
+                include_geometry?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeaturesInBoundsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     get_feature_detail_route_v1_admin_features__feature_id__get: {
         parameters: {
             query?: never;
@@ -12898,6 +13095,58 @@ export interface operations {
             };
         };
     };
+    get_admin_feature_price_v1_admin_features__feature_id__price_get: {
+        parameters: {
+            query?: {
+                asof?: string | null;
+                history_limit?: number;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturePriceResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     get_feature_revision_route_v1_admin_features__feature_id__revision_get: {
         parameters: {
             query?: never;
@@ -12918,6 +13167,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminFeatureRevisionResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_admin_feature_weather_v1_admin_features__feature_id__weather_get: {
+        parameters: {
+            query?: {
+                asof?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureWeatherResponse"];
                 };
             };
             /** @description feature 없음 */
