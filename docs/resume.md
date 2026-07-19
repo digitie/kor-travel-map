@@ -29,6 +29,10 @@
   state 초기화를 `action + trimmed feature_id` identity가 실제로 바뀔 때로 제한했다. deferred
   basis의 untouched category/marker baseline 적용과 same-value/공백 Feature ID 편집 뒤 412 제출
   차단을 mocked E2E로 고정했다.
+- 세 번째 적대 리뷰의 P1 2건에 따라 nullable marker fallback은 dirty key일 때만 PATCH하고,
+  위치 편집창은 dialog-local dirty key만 parent에 반영하며 parent basis의 untouched 필드를 계속
+  동기화하도록 보강했다. null marker name-only와 deferred basis 중 좌표-only dialog 회귀가 모두
+  marker PATCH 미포함을 단정한다.
 - **다음 한 작업**: 이 exact head를 push하고 같은 단일 적대 리뷰어에게 재제출한다. 승인 전에는
   test·lint·build를 실행하지 않는다.
 

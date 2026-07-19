@@ -49,6 +49,12 @@
   문제를 확인했다. 필드별 dirty overlay와 `action + trimmed feature_id` 편집 세션 identity로
   교체하고, baseline과 다른 category/marker fixture의 PATCH 미포함 및 동일 identity의 mutation
   횟수 불변 회귀를 추가했다. 명시적 reload 성공은 dirty set 전체를 초기화한다.
+- 세 번째 적대 리뷰에서 nullable marker baseline의 표시 fallback이 name-only PATCH에 섞이는 경로와
+  deferred basis 중 열린 위치 편집창이 stale marker 기본값까지 parent dirty로 만드는 경로를
+  확인했다. PATCH의 category/marker는 해당 form key를 실제 편집한 경우에만 포함하고, 위치 편집창은
+  local dirty key만 parent에 적용하며 basis 변경 시 untouched draft만 동기화한다. null marker 및
+  dialog 좌표-only deferred fixture로 marker 미포함을 고정했다. `kind`/`status`는 update PATCH
+  계약에 없어 다른 non-null add 기본값 ingress가 없음을 함께 확인했다.
 
 ## 2026-07-20 (codex, agent B) — T-VN-57 public route 계약 단일 정본 설계
 

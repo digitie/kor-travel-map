@@ -437,13 +437,13 @@ function correctionSessionIdentity(form: FeatureChangeFormState): string {
   return `${form.action}:${form.featureId.trim()}`;
 }
 
-function applyUntouchedFormPatch(
-  current: FeatureChangeFormState,
-  patch: Partial<FeatureChangeFormState>,
-  dirtyFields: ReadonlySet<keyof FeatureChangeFormState>,
-): FeatureChangeFormState {
+function applyUntouchedPatch<T extends object>(
+  current: T,
+  patch: Partial<T>,
+  dirtyFields: ReadonlySet<keyof T>,
+): T {
   const next = { ...current };
-  for (const key of Object.keys(patch) as Array<keyof FeatureChangeFormState>) {
+  for (const key of Object.keys(patch) as Array<keyof T>) {
     if (!dirtyFields.has(key)) {
       Object.assign(next, { [key]: patch[key] });
     }
@@ -632,12 +632,16 @@ function buildCreatePayload(
 
 // category/marker_icon/marker_color는 initialForm 기본값이 비어있지 않아 optionalString이
 // 항상 통과 → prefill 안 된 update에서 기존 feature 값을 기본값으로 덮어쓰는 사고가 났다(#613).
-// 로드된 feature(baseline)와 다를 때만 PATCH에 포함하고, baseline이 없으면 생략한다.
+// displayed add-default는 실제로 해당 폼 필드를 편집했고 baseline과 다를 때만 PATCH한다.
+// update payload의 나머지 initialForm non-null 기본값(kind/status)은 PATCH 계약에 없다.
 function patchDefaultedField(
+  key: "category" | "markerColor" | "markerIcon",
   formValue: string,
   baselineValue: string | null | undefined,
   baseline: AdminFeatureDetailData["feature"] | null,
+  dirtyFields: ReadonlySet<keyof FeatureChangeFormState>,
 ): string | undefined {
+  if (!dirtyFields.has(key)) return undefined;
   const trimmed = formValue.trim();
   if (trimmed.length === 0) return undefined;
   if (!baseline) return undefined;
@@ -648,6 +652,7 @@ function patchDefaultedField(
 function buildPatchPayload(
   form: FeatureChangeFormState,
   baseline: AdminFeatureDetailData["feature"] | null,
+  dirtyFields: ReadonlySet<keyof FeatureChangeFormState>,
 ): AdminFeaturePatchRequest {
   if (form.featureId.trim().length === 0) {
     throw new Error("update에는 feature_id가 필요합니다.");
@@ -659,14 +664,32 @@ function buildPatchPayload(
   return {
     reason: form.reason.trim(),
     name: optionalString(form.name),
-    category: patchDefaultedField(form.category, baseline?.category, baseline),
+    category: patchDefaultedField(
+      "category",
+      form.category,
+      baseline?.category,
+      baseline,
+      dirtyFields,
+    ),
     coord,
     coord_precision_digits: parseOptionalInteger(
       "coord_precision_digits",
       form.coordPrecisionDigits,
     ),
-    marker_icon: patchDefaultedField(form.markerIcon, baseline?.marker_icon, baseline),
-    marker_color: patchDefaultedField(form.markerColor, baseline?.marker_color, baseline),
+    marker_icon: patchDefaultedField(
+      "markerIcon",
+      form.markerIcon,
+      baseline?.marker_icon,
+      baseline,
+      dirtyFields,
+    ),
+    marker_color: patchDefaultedField(
+      "markerColor",
+      form.markerColor,
+      baseline?.marker_color,
+      baseline,
+      dirtyFields,
+    ),
     sido_code: optionalString(form.sidoCode),
     sigungu_code: optionalString(form.sigunguCode),
     legal_dong_code: optionalString(form.legalDongCode),
@@ -753,6 +776,7 @@ function LocationEditDialog({
   const [draft, setDraft] = useState<LocationDraft>(() =>
     locationDraftFromForm(form),
   );
+  const dirtyFieldsRef = useRef<Set<keyof LocationDraft>>(new Set());
   const mountedRef = useRef(true);
   const coord = parseCoordInput(draft.lon, draft.lat);
   const coordError = coordValidationMessage(draft.lon, draft.lat);
@@ -766,10 +790,35 @@ function LocationEditDialog({
     : [DEFAULT_VIEWPORT.lon, DEFAULT_VIEWPORT.lat];
   const dialogZoom = coord ? 13 : DEFAULT_VIEWPORT.zoom;
 
+  const updateDraftFields = (patch: Partial<LocationDraft>) => {
+    setDraft((current) => {
+      let next = current;
+      for (const key of Object.keys(patch) as Array<keyof LocationDraft>) {
+        const value = patch[key];
+        if (value !== undefined && next[key] !== value) {
+          dirtyFieldsRef.current.add(key);
+          next = Object.assign({ ...next }, { [key]: value });
+        }
+      }
+      return next;
+    });
+  };
+
   const updateDraft = <K extends keyof LocationDraft>(
     key: K,
     value: LocationDraft[K],
-  ) => setDraft((current) => ({ ...current, [key]: value }));
+  ) => {
+    const patch: Partial<LocationDraft> = {};
+    Object.assign(patch, { [key]: value });
+    updateDraftFields(patch);
+  };
+
+  useEffect(() => {
+    const baseline = locationDraftFromForm(form);
+    setDraft((current) =>
+      applyUntouchedPatch(current, baseline, dirtyFieldsRef.current),
+    );
+  }, [form]);
 
   useEffect(
     () => () => {
@@ -779,12 +828,11 @@ function LocationEditDialog({
   );
 
   const selectPoint = async (lon: number, lat: number) => {
-    setDraft((current) => ({
-      ...current,
+    updateDraftFields({
       lat: lat.toFixed(6),
       lon: lon.toFixed(6),
-    }));
-      setReverseMessage("위치의 시군구를 확인하는 중...");
+    });
+    setReverseMessage("위치의 시군구를 확인하는 중...");
     try {
       const response = await reverseGeocode({ lon, lat });
       const candidate = response.candidates[0];
@@ -793,7 +841,7 @@ function LocationEditDialog({
         : null;
       if (!mountedRef.current) return;
       if (sigungu) {
-        setDraft((current) => ({ ...current, sigunguCode: sigungu.code }));
+        updateDraft("sigunguCode", sigungu.code);
         setReverseMessage(`${sigungu.label} · ${sigungu.code}`);
       } else {
         setReverseMessage("시군구 후보 없음");
@@ -805,11 +853,9 @@ function LocationEditDialog({
   };
 
   const applyDraft = () => {
-    updateForm("lon", draft.lon);
-    updateForm("lat", draft.lat);
-    updateForm("markerIcon", draft.markerIcon);
-    updateForm("markerColor", draft.markerColor);
-    updateForm("sigunguCode", draft.sigunguCode);
+    for (const key of dirtyFieldsRef.current) {
+      updateForm(key, draft[key]);
+    }
     onClose();
   };
 
@@ -1171,7 +1217,7 @@ export function FeatureChangeRequestsClient({
     appliedFeaturePrefillRef.current = key;
     queueMicrotask(() => {
       setForm((current) =>
-        applyUntouchedFormPatch(
+        applyUntouchedPatch(
           current,
           {
             ...detailToFormPatch(feature),
@@ -1249,7 +1295,11 @@ export function FeatureChangeRequestsClient({
         const response = await patchFeature.mutateAsync({
           featureId,
           entityTag: selectedCorrectionBasis.entityTag,
-          body: buildPatchPayload(form, loadedUpdateFeature),
+          body: buildPatchPayload(
+            form,
+            loadedUpdateFeature,
+            editDraftDirtyFieldsRef.current,
+          ),
         });
         setSelectedRequest(response.data.request);
       } else {

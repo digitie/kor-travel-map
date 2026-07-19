@@ -1366,6 +1366,86 @@ test.describe("admin/ops pages", () => {
     expect(requests.patchBodies[0]).not.toHaveProperty("marker_color");
   });
 
+  test("marker가 없는 basis는 name-only 수정에서 표시 기본값을 PATCH하지 않는다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureChangeMutations(page);
+
+    await page.goto("/admin/features/change-requests");
+    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("feature-null-marker-1");
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Existing feature-null-marker-1",
+    );
+
+    await page.getByLabel("change reason", { exact: true }).fill("name only reason");
+    await page.getByLabel("change name", { exact: true }).fill("Name only draft");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.patchBodies[0]).toMatchObject({
+      name: "Name only draft",
+      reason: "name only reason",
+    });
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_icon");
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_color");
+  });
+
+  test("deferred basis 중 위치 좌표만 편집하면 server marker를 유지한다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureChangeMutations(page, {
+      deferFirstBasisDetail: true,
+      featureDetailOverrides: {
+        category: "01070400",
+        marker_color: "P-02",
+        marker_icon: "park",
+      },
+    });
+
+    await page.goto("/admin/features/change-requests");
+    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("feature-dialog-slow-1");
+    await requests.waitForDeferredDetail();
+    await page
+      .getByLabel("change reason", { exact: true })
+      .fill("location only reason");
+    await page.getByRole("button", { name: "위치 편집" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "위치/마커 편집" });
+    await dialog.getByLabel("lon", { exact: true }).fill("127.123456");
+    await dialog.getByLabel("lat", { exact: true }).fill("37.654321");
+    requests.resolveDeferredDetail();
+
+    await expect(dialog.getByLabel("marker_icon", { exact: true })).toHaveValue(
+      "park",
+    );
+    await expect(dialog.getByLabel("marker_color", { exact: true })).toHaveValue(
+      "P-02",
+    );
+    await dialog.getByRole("button", { name: "적용" }).click();
+
+    await expect(
+      page.getByLabel("change marker icon", { exact: true }),
+    ).toHaveValue("park");
+    await expect(
+      page.getByLabel("change marker color", { exact: true }),
+    ).toHaveValue("P-02");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.patchBodies[0].coord).toEqual({
+      lat: 37.654321,
+      lon: 127.123456,
+    });
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_icon");
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_color");
+  });
+
   test("/v1/admin/issues", async ({ page }) => {
     await page.goto("/admin/issues");
 
