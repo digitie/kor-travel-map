@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-19 (codex) — Agent A PR #754 심층 리뷰 보완
+## 2026-07-19 (codex) — T-ADM-C7H 병합·아카이브
 
 - 단일 전문 리뷰의 4개 finding을 반영해 `*.local.md` Docker context 차단, Playwright
   bridge/private 격리, 전체 상태 auditor preflight, 실패 recovery journal/runtime
@@ -9,10 +9,13 @@
   INT/TERM 종료를 130/143으로 고정했다. 같은 리뷰어의 최종 판정은 P0~P3 잔여 없음이다.
 - 대상 보안/unit 55개와 전체 unit 1,529개, `bash -n`, Ruff, strict mypy,
   import-linter가 통과했다.
-- **다음 한 작업**: PR #754 원격 CI를 통과한 뒤 `main`에 머지하고, 최근 2일 Agent A
-  PR을 다시 조회해 닫힌 PR도 순서대로 심층 검토한다.
+- PR #754와 누락된 두 P1을 닫은 PR #762는 PostGIS integration을 포함한 CI 8개를 각각
+  모두 통과해 merge commit `b9f23a42`, `bece2c32`로 `main`에 반영됐다. current exact commit의
+  immutable executor image build도 성공했다. `T-ADM-C7H`는 완료 이력으로 옮겼다.
+- **다음 한 작업**: n150 SSH 경로가 복구되는 즉시 passwordless sudo→backup/PITR→forward-only
+  migration→C6c capture→C7 live E2E를 실행하고 #684/#694/#712/#719를 증거와 함께 닫는다.
 
-## 2026-07-19 (codex) — T-ADM-C7H 실행 경계 보강 진행
+## 2026-07-19 (codex) — T-ADM-C7H 실행 경계 보강
 
 - C7 실행 전 단일 적대 리뷰에서 실제 배포 pair/DB schema 증거 부재, host npm/Chromium 의존,
   잘못 선언된 Dagster job 이름, preflight 전 `BLOCKED.json`, 실패 evidence 유실을 차단 finding으로
@@ -29,9 +32,7 @@
   동일 리뷰어가 P0~P3 잔여 없음으로 승인했다.
 - n150은 WSL SSH 41회와 Windows TCP/22 boolean 진단 모두 연결 전에 실패했다. 따라서
   `sudo -n true`는 아직 성공/실패 어느 쪽으로도 판정하지 않았고 원격 mutation도 0건이다.
-- **다음 한 작업**: PR #754에 후속 커밋을 push하고 CI green 뒤 merge한다. 그 사이
-  n150 접속이 복구되면 passwordless sudo→backup/PITR→forward-only migration→C6c capture→C7 live
-  E2E 순서로 끝내고 #684/#694/#712/#719를 증거와 함께 닫는다.
+- **후속 결과**: PR #754와 PR #762로 병합·아카이브했으며 n150 live 실행만 남았다.
 
 ## 2026-07-19 (codex) — T-ADM-C7M mocked UI 수용 증거 병합·아카이브
 

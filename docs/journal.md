@@ -16,6 +16,10 @@
   P0~P3 잔여 없음으로 승인받았다.
 - Linux `/tmp` 기준 대상 보안/unit 55개와 전체 unit 1,529개, `bash -n`, Ruff,
   strict mypy, import-linter를 통과했다.
+- PR #754와 네 파일 attestation·signal 종료 후속 PR #762는 PostGIS integration을 포함한
+  CI 8개를 각각 통과해 merge commit `b9f23a42`, `bece2c32`로 `main`에 반영됐다. 현재
+  exact commit Git archive 기반 immutable executor build도 성공했으며 `T-ADM-C7H`를 완료
+  이력으로 옮겼다.
 
 ## 2026-07-19 (codex) — C7 prod readiness 차단 리뷰 반영
 
