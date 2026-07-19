@@ -40,6 +40,13 @@
 - OUT(범위 밖): 5-state batch envelope·trip_card 재구성(T-VN-11), UUID identity,
   스키마/migration, observation lineage anti-join 비용(T-VN-37). admin/operator
   payload 내용은 그대로(raw 유지).
+- **T-VN-37 후보(typed 승격)**: `payload` strip은 전 kind 일괄이라 `area.payload`
+  (hazard_type/domain/protection_type)와 `notice.payload`(domain) 같은 ADR-027/028
+  분류 의미도 함께 사라진다 — area(hazard_zone)/notice(generic)에서 이 값은 오직
+  payload에만 존재한다. 현재 공개 소비자 0(grep 확인)이라 능동적 회귀는 아니지만,
+  공개 지도가 위험구역 색칠/공지 domain 필터를 필요로 하면 이 필드들을 typed
+  공개 필드로 승격해야 한다(festival public_views의 typed-extraction이 선례).
+  승격/strip 범위 조정은 T-VN-37(typed notice/subtype) 소유 — 지금은 하지 않는다.
 
 ## 2026-07-19 (codex) — Agent A PR #746 적대적 심층 리뷰 후속
 

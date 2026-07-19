@@ -257,14 +257,18 @@ test.describe("공식 큐레이션 collection live", () => {
     await expect(featureDetail.getByText("2023-2024", { exact: true })).toBeVisible();
     await expect(featureDetail.getByText("2025-2026", { exact: true })).toBeVisible();
 
+    // T-VN-05: raw observation lineage는 공개 detail에서 제거돼 operator 표면
+    // (GET /v1/features/{id}/sources)으로 이동했다. browserJson은 admin BFF
+    // (/api/proxy)를 통해 호출하므로 operator로 인증된다.
     const observed = await browserJson<
       Envelope<{ observations: Observation[] }>
-    >(page, `/v1/features/${encodeURIComponent(MULTI_OBSERVATION_FEATURE_ID)}`);
+    >(page, `/v1/features/${encodeURIComponent(MULTI_OBSERVATION_FEATURE_ID)}/sources`);
     expect(observed.data.observations.length).toBeGreaterThanOrEqual(2);
     expect(observed.data.observations.map((item) => item.provider)).toEqual(
       expect.arrayContaining(["data.go.kr-standard", "python-visitkorea-api"]),
     );
     for (const observation of observed.data.observations) {
+      // observation history도 operator-gated — 동일하게 인증된 BFF proxy 경유.
       const history = await browserJson<Envelope<{ items: unknown[] }>>(
         page,
         `/v1/features/${encodeURIComponent(
