@@ -13,6 +13,17 @@
 - **다음 한 작업**: 구현 exact head를 동일 적대적 리뷰어에게 제출한다. 승인 전에는
   test·lint·build·OpenAPI drift gate를 실행하지 않는다.
 
+## 2026-07-20 (codex) — T-VN-58 correction 편집 기준 ETag 고정 착수
+
+- issue #785를 `integration/t-vn` 기준 독립 task로 열었다. admin 수정·삭제가 submit 직전 최신
+  revision을 다시 읽어 stale draft를 최신 기준으로 오인하는 경로를 제거하고, detail snapshot과
+  raw strong `ETag`를 불변 `CorrectionBasis`로 고정한다.
+- DB·REST/OpenAPI schema는 바꾸지 않는다. 412에서는 draft를 보존하고 운영자의 명시적 reload가
+  성공할 때만 최신 detail·basis를 적용한다. update/delete, background refetch 보호, mocked/live
+  Playwright cleanup까지 같은 PR에 묶는다.
+- **다음 한 작업**: docs-first draft PR을 연 뒤 client/UI/e2e 구현 head를 단일 적대 리뷰어에게
+  제출한다. 승인 전에는 test·lint·build를 실행하지 않는다.
+
 ## 2026-07-20 (codex, agent B) — T-VN-57 public security 계약 docs-first 착수
 
 - T-VN-SYNC-02 적대적 리뷰에서 runtime `PUBLIC_KEYED` 29개 GET과 full OpenAPI의 security
@@ -26,7 +37,6 @@
   5개를 보고했다. **다음 한 작업**은 docs-first draft PR을 연 뒤 구현 diff를 같은 단일 적대
   리뷰어에게 제출하는 것이다. 승인 전에는 생성 artifact 작성 외 test/lint/build/OpenAPI check를
   실행하지 않는다.
-
 ## 2026-07-20 (codex) — vNext integration 구현 병합·최종 cutover 추적 정렬
 
 - T-VN-04A PR #779는 merge commit `21ad4e312b3d2a3e1b8baf1b3103daa6cec15e87`,

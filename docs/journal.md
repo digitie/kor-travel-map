@@ -23,6 +23,21 @@
   admin/user TypeScript, 수기 public curation 타입을 생성·갱신했다. 이는 구현 산출물 생성이며
   적대적 리뷰 승인 전 test·lint·build·OpenAPI `--check`는 아직 실행하지 않았다.
 
+## 2026-07-20 (codex) — T-VN-58 correction 편집 기준 ETag 설계 고정
+
+- issue #785의 stale correction 경로를 ADR-074의 lost-update 원칙으로 구체화했다. 편집 시작 시
+  `/revision`과 detail의 같은 `row_revision`을 확인하고 feature ID·raw strong `ETag`·snapshot을
+  불변 `CorrectionBasis`로 묶으며, mutation 직전 최신 revision 자동 rebasing을 금지한다.
+- `412 Precondition Failed`에서는 작성 중인 draft를 보존하고 자동 재시도하지 않는다. 명시적
+  reload 성공 뒤에만 최신 detail과 basis를 적용하며 update와 delete는 각 선택 feature basis를
+  사용한다. DB와 REST/OpenAPI schema는 변경하지 않는다.
+- 수정 전 codegraph file impact는 `features.ts`의 `useFeaturesInBbox` 1개만 보고하고 correction
+  symbol caller를 해석하지 못했다. 이를 직접 symbol inventory로 보완해 실제 변경 경계를
+  `features.ts`의 revision/PATCH/DELETE hooks, change-request client, mocked `admin-ops.spec.ts`,
+  live `admin-features-change-requests-write.live.spec.ts`와 API unit으로 고정했다.
+- docs-first commit·draft PR 뒤 구현과 단일 적대 리뷰를 이어간다. 승인 전에는 test·lint·build를
+  실행하지 않는다.
+
 ## 2026-07-20 (codex, agent B) — T-VN-57 public route 계약 단일 정본 설계
 
 - T-VN-SYNC-02 적대적 리뷰에서 production runtime은 public-keyed GET 29개를 모두
@@ -36,7 +51,6 @@
   `ROUTE_POLICIES` 57개, `create_app` 176개, route wiring gate caller 5개다. 문서 선행 PR 뒤
   구현을 추가하고 동일 단일 적대 리뷰 승인 전에는 테스트·lint·build·OpenAPI check를 실행하지
   않는다.
-
 ## 2026-07-20 (codex) — vNext integration 병합·cross-repo cutover 상태 정리
 
 - main→integration 동기화 PR #781은 CI 8개 green 뒤 merge commit

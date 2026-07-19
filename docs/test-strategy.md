@@ -461,6 +461,23 @@ cursor별 응답을 명시한다. 이 fixture의 6+6 분할은 canonical `page_s
 identity가 page 2의 첫 identity보다 앞서야 한다. 첫 행 존재, count summary, 페이지 전체 문자열만의
 단언은 #694·#719 수용 증거로 인정하지 않는다.
 
+#### 5.4.2 correction 편집 기준·stale draft 수용 기준
+
+frontend client 단위 회귀는 `/revision` → detail 순서, 같은 `row_revision`에서만 basis 확정,
+불일치 시 제한 재시도와 raw `ETag` 보존을 검증한다. PATCH/DELETE 함수는 호출자가 넘긴
+`entityTag` 없이는 호출할 수 없어야 하며 mutation 내부 revision GET이 한 번도 발생하지 않음을
+고정한다.
+
+mocked Playwright는 edit basis를 읽은 뒤 서버 revision을 증가시켜 첫 PATCH가 원래 raw
+`If-Match`로 전송되고 `412`가 되는 흐름을 만든다. 실패 뒤 입력 draft가 byte-for-byte 유지되고,
+명시적 최신값 다시 불러오기 전에는 background refetch가 form이나 basis를 바꾸지 않으며, reload
+뒤에만 새 detail·ETag로 재제출되는지 확인한다. delete도 선택 feature의 basis를 사용하고 mutation
+직전 자동 revision GET이 없음을 별도 fixture로 증명한다.
+
+n150 live destructive E2E의 임시 correction 정리는 DELETE 직전에 `/revision`을 읽어 얻은 raw
+`ETag`를 `If-Match`로 전달한다. cleanup의 `428`/`412`를 무시하지 않고 복구 실패로 남기며,
+작성한 feature와 change request가 최종 상태에서 제거·복원됐는지 read-only 재검증한다.
+
 ### 5.5 C7 prod 파괴적 live E2E의 복구·인과성 gate
 
 C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. host runner/helper/attestation 검증

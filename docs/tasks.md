@@ -26,6 +26,7 @@
     (#741, PR #779 integration 병합·n150 live 대기)
   - [ ] `T-VN-15` — **search total과 HMAC cursor fingerprint**
     (PR #780 integration 병합·n150 live 대기)
+  - [ ] `T-VN-58` — **correction 편집 기준 ETag 고정** (#785)
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
     `T-VN-16` weather batch와 부모 404.
@@ -253,6 +254,25 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
     `integration/t-vn@21ad4e31`에 병합했다.
   - [ ] n150 live UI에서 `inactive`·`draft`·`hidden` marker와 weather/price 카드를 검증하고
     issue #741을 닫는다.
+
+- [ ] T-VN-58 — **correction 편집 기준 ETag 고정** (#785)
+
+  admin 수정·삭제 요청은 편집을 시작한 feature snapshot과 그 시점의 strong `ETag`를 하나의
+  불변 `CorrectionBasis`로 묶는다. mutation 직전에 `/revision`을 다시 읽어 최신값으로 자동
+  rebasing하지 않으며, 서버가 `412 Precondition Failed`를 반환하면 작성 중인 draft를 보존하고
+  운영자가 명시적으로 최신값을 다시 불러온 뒤 검토·재적용하게 한다. DB와 REST/OpenAPI schema는
+  바꾸지 않는다.
+
+  - [ ] `/revision` → feature detail 순서로 읽고 두 응답의 `row_revision`이 같을 때만 basis를
+    확정한다. 경쟁 갱신으로 다르면 제한 횟수만 재시도하고, 응답 header의 raw `ETag` 문자열을
+    재구성·정규화하지 않은 채 feature ID와 함께 고정한다.
+  - [ ] PATCH/DELETE mutation 변수는 고정된 `entityTag`를 필수로 받고 내부 `/revision` 재조회 없이
+    그대로 `If-Match`에 전달한다. update와 delete 선택은 각각 자기 feature basis를 사용한다.
+  - [ ] background refetch·query invalidation은 dirty form과 고정 basis를 덮어쓰지 않는다. 412 UI는
+    draft를 유지하고 명시적 reload 조작을 제공하며, reload 성공 때만 새 detail·basis를 적용한다.
+  - [ ] frontend client/component 회귀, mocked Playwright의 stale 412→reload 흐름, live cleanup의
+    직전 revision ETag 기반 DELETE를 추가한다. 단일 적대 리뷰 승인 전에는 test·lint·build를
+    실행하지 않는다.
 
 - [ ] T-VN-08 — **PinVi false-broken 수정**
 
