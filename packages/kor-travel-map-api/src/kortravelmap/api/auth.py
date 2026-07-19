@@ -7,8 +7,8 @@ ADR-045 D-1 defense-in-depth (ADR-005 amendment): 운영 인증의 **1차 책임
 - ``require_service_token`` — ``settings.service_token`` 설정 시 외부 surface에서
   ``X-Kor-Travel-Map-Service-Token`` 헤더를 **상수시간** 비교로 검증. 미설정이면 통과
   (intranet/dev 하위호환).
-- ``require_ops_operator`` — canonical datasets/pipeline에 trusted frontend BFF,
-  read-only principal 또는 exact import-job cancel principal만 허용.
+- ``require_ops_operator`` — canonical datasets/pipeline과 ops 관측 read에 trusted
+  frontend BFF, read-only principal 또는 exact import-job cancel principal만 허용.
 - ``require_admin_destructive_enabled`` — 파괴적 ``/admin`` 작업 kill-switch.
 
 ``APIKeyHeader``를 ``Security``로 의존하므로 OpenAPI ``securitySchemes``에 자동
@@ -116,7 +116,7 @@ _ops_token_scheme = APIKeyHeader(
     scheme_name="OpsToken",
     auto_error=False,
     description=(
-        "canonical ops server-to-server read/cancel token. scope 문자열만으로는 "
+        "ops server-to-server read/cancel token. scope 문자열만으로는 "
         "권한을 얻지 못하며, token 종류와 method/exact path도 일치해야 한다."
     ),
 )
@@ -131,7 +131,7 @@ class AdminProxyContext:
 
 @dataclass(frozen=True, slots=True)
 class OpsOperatorContext:
-    """canonical ops route가 신뢰한 audit actor 컨텍스트."""
+    """ops route가 신뢰한 audit actor 컨텍스트."""
 
     actor: str
 
@@ -279,7 +279,7 @@ def require_ops_operator(
         ),
     ] = None,
 ) -> OpsOperatorContext:
-    """canonical ops의 BFF 또는 read/exact-cancel principal을 검증한다."""
+    """ops route의 BFF 또는 read/exact-cancel principal을 검증한다."""
 
     settings = _settings(request)
     # admin secret이 없는 개발 환경은 ops principal도 완전히 꺼졌을 때만

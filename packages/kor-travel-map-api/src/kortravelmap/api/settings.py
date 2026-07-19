@@ -144,7 +144,7 @@ class ApiSettings(BaseSettings):
             "32자 이상) 필수, ops surface 활성 시 read/cancel token 필수, features "
             "surface 활성 시 ``public_api_key_required=True``와 service token(앞뒤 "
             "공백 없는 32자 이상) 필수, metrics endpoint 활성 시 metrics token "
-            "필수, 인증 없는 ``/debug`` 라우터 비활성 필수. secret 미설정 "
+            "필수, ``/debug`` 라우터 비활성 필수. secret 미설정 "
             "local-dev fallback은 ``local-dev``에서만 동작한다. Docker "
             "image/compose 기본값은 production이고 코드 기본값은 local-dev다"
             "(비-Docker 로컬 하위호환). env ``KOR_TRAVEL_MAP_API_PROFILE``."
@@ -153,8 +153,9 @@ class ApiSettings(BaseSettings):
     debug_routes_enabled: bool = Field(
         default=True,
         description=(
-            "``/debug/...`` 라우터 활성 여부. 프로덕션 admin-only 운영 시 False로 "
-            "내려 두면 발견 reduce. ``/admin/...`` 운영 라우터는 별도 flag (Sprint 4+)."
+            "``/debug/...`` 라우터 활성 여부. 현재 MOIS raw route는 mount 뒤에도 "
+            "admin BFF 인증을 요구하지만 production은 이 flag를 False로 강제해 route "
+            "자체를 내린다. ``/admin/...`` 운영 라우터는 별도 flag (Sprint 4+)."
         ),
     )
     features_routes_enabled: bool = Field(
@@ -280,7 +281,7 @@ class ApiSettings(BaseSettings):
         validation_alias="KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
         description=(
             "PinVi server가 canonical ``/v1/ops/datasets*``·"
-            "``/v1/ops/pipeline*``의 GET을 호출할 때만 사용하는 API-only "
+            "``/v1/ops/pipeline*``와 잔여 ops 관측 GET을 호출할 때만 사용하는 API-only "
             "token. ``X-Kor-Travel-Map-Ops-Token``으로 전달하며 admin frontend "
             "BFF secret이나 public service token과 공유하지 않는다."
         ),
@@ -519,8 +520,8 @@ class ApiSettings(BaseSettings):
         default=False,
         description=(
             "True면 public REST surface(`/v1/features`, `/v1/public`, `/v1/categories`, "
-            "`/v1/providers`)에 VWorld 호환 `key` query 검증을 적용한다. trusted admin "
-            "frontend proxy 또는 service-token 요청은 우회한다."
+            "`/v1/providers`, `/v1/curated-*`)에 VWorld 호환 `key` query 검증을 "
+            "적용한다. trusted admin frontend proxy 또는 service-token 요청은 우회한다."
         ),
     )
     public_api_key_cache_ttl_s: int = Field(
@@ -712,7 +713,7 @@ class ApiSettings(BaseSettings):
         """ADR-066 D-1의 production 불변식을 검증한다.
 
         secret 미설정 fallback(admin actor ``local-dev`` 통과, keyless public read,
-        인증 없는 ``/debug``)은 non-production profile에서만 허용한다. Docker 밖
+        ``/debug`` mount)은 non-production profile에서만 허용한다. Docker 밖
         배포도 같은 검증을 받도록 entrypoint(shell)가 아닌 settings에서 검사하며,
         admin/service secret 기준은 ``docker/api-entrypoint.sh``의 admin secret과
         동일하다(앞뒤 공백 없는 32자 이상). cursor secret은 profile과 무관하게

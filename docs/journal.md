@@ -2,6 +2,48 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex, agent B) — T-VN-03 교차 리뷰 P2 수정
+
+- 적대적 교차 리뷰에서 runtime/full OpenAPI에는 존재하는 curated sources/themes가
+  `USER_OPERATIONS`에 없어 user OpenAPI와 `@kor-travel-map/map-user-client`에서 누락된
+  P2를 확인했다.
+- public curated 계약을 feature list/detail, sources, themes 네 GET으로 고정하고 user
+  allowlist/export 회귀/생성 타입을 함께 갱신한다. `settings.py` E501은 의미 변화 없는
+  줄바꿈으로 처리한다.
+- docker-manager production env mapping P1은 manager PR이 소유하므로 Map diff에 섞지 않는다.
+  같은 리뷰어 재승인 전에는 테스트·lint·build를 실행하지 않는다.
+
+## 2026-07-19 (codex, agent B) — T-VN-03 Map route gate 구현
+
+- public curated 4경로를 public key dependency에 포함하고, ops metrics/log/
+  consistency/deep-health 6경로는 BFF 또는 read token+`ops:read`로 닫았다. MOIS raw는
+  local-dev mount에서도 BFF를 요구하며 production에는 mount하지 않는다.
+- route policy registry의 MOIS를 operator로 옮기고 T-VN-03 wiring exception 10개를
+  모두 삭제했다. 삭제 route·alias·legacy header fallback·새 env·DB migration은 없다.
+- OpenAPI full에는 curated `PublicApiKey OR ServiceToken`, ops 관측
+  `AdminBFF OR (OpsToken AND OpsScope)`, MOIS `AdminBFF`를 선언한다. user subset은 ops/debug를
+  제외하고 public scheme만 유지하며 admin/user TypeScript를 같은 spec에서 재생성한다.
+- same-origin admin UI BFF가 관측 read에도 actor+proxy secret을 주입하는 회귀와 Python auth/
+  route-policy/OpenAPI 회귀를 추가했다. PinVi issue #392의 구현 PR #393과 이 Map exact head는
+  C6c manifest v4 exact source pair로만 활성화한다.
+- CodeGraph 영향도는 `create_app` 181개, `require_ops_operator` 199개,
+  `require_public_api_key` 58개, `assert_route_policy_wiring` 44개 심볼이다. 사용자 지시에 따라
+  동일 리뷰어 승인 전 테스트·lint·build는 실행하지 않는다.
+
+## 2026-07-19 (codex, agent B) — T-VN-03 route gate docs-first
+
+- 최신 `integration/t-vn@a45bc3ac`에서 curated public GET 4개, ops 관측 GET 6개,
+  MOIS raw debug GET 1개의 현행 mount와 route policy를 대조했다.
+- ops는 기존 `require_ops_operator`, curated는 `require_public_api_key`, MOIS raw는 production
+  unmount를 유지하면서 local-dev mount에도 `require_admin_frontend`를 적용하는 clean-cut을 정했다.
+  새 secret/env, DB migration, alias, 삭제 route 복원은 없다.
+- PinVi PR #387의 관측 client 네 메서드가 `_ops_headers("ops:read")`를 사용하지 않는 blocker를
+  확인해 issue #392를 만들었다. Map+PinVi exact heads는 C6c manifest v4 source pair에 함께
+  결박해야 한다.
+- CodeGraph 영향도는 Map `app.py` 38 symbols, ops dependency caller 10개, public dependency
+  caller 3개, route wiring gate caller 5개다. 동일 리뷰어의 양 저장소 교차 승인 전에는
+  테스트·lint·build를 실행하지 않는다.
+
 ## 2026-07-19 (codex, agent B) — T-VN-15 search total·HMAC cursor 구현 준비
 
 - `/v1/features/search`는 `include_total=false`에서 COUNT SQL을 만들거나 실행하지 않고,
@@ -18,7 +60,6 @@
 - repository statement spy와 실제 PostgreSQL COUNT 관측, query mismatch DB 0회, 변조·unknown
   version·malformed/keyset 회귀, production/runtime env matrix, API error code와 UI request builder
   테스트를 작성했다. 이 단계에서는 리뷰 정책에 따라 아직 실행하지 않았다.
-
 ## 2026-07-19 — T-VN-04A admin 비공개 Feature 공간·카드 구현 (codex agent B)
 
 - issue #741의 두 회귀를 한 PR 경계로 확정했다. admin `/features` 지도는 공개 bbox/cluster를

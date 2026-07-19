@@ -173,15 +173,9 @@ def test_route_policy_wiring_matches_with_known_exceptions_only() -> None:
 
 @pytest.mark.unit
 def test_known_exceptions_reference_owner_and_live_routes() -> None:
-    app = _representative_app()
-    mounted_paths = {row.path for row in build_route_policy_matrix(app)}
-    assert KNOWN_WIRING_EXCEPTIONS  # T-VN-03 landing 전까지는 비어 있지 않다.
-    for exception in KNOWN_WIRING_EXCEPTIONS:
-        # ledger는 소유 task를 참조해야 하며(축소 추적), 실제 mount route와
-        # registry 분류를 가리켜야 한다 (dead ledger entry 금지).
-        assert "T-VN-" in exception.owner, exception
-        assert exception.path in mounted_paths, exception
-        assert exception.path in ROUTE_POLICIES, exception
+    # T-VN-03 clean-cut 뒤 정책과 실제 dependency가 전부 일치한다. 이후 gap은
+    # 새 ledger로 숨기지 않고 같은 PR에서 배선을 완결해야 한다.
+    assert KNOWN_WIRING_EXCEPTIONS == ()
 
 
 @pytest.mark.unit
@@ -207,16 +201,13 @@ def test_stale_exception_entry_fails_when_gap_is_closed(
 
 @pytest.mark.unit
 def test_unlisted_wiring_gap_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    # ledger에 없는 배선 gap은 실패한다 — 기존 gap 하나를 ledger에서 제거해 재현.
-    from kortravelmap.api import route_policy as module
-
-    remaining = tuple(
-        entry
-        for entry in KNOWN_WIRING_EXCEPTIONS
-        if entry.path != "/v1/curated-themes"
+    # registry 정책만 operator로 바꾸고 public dependency를 그대로 두면 예외 없이
+    # 즉시 실패한다.
+    monkeypatch.setitem(
+        ROUTE_POLICIES,
+        "/v1/curated-themes",
+        RoutePolicy.OPERATOR,
     )
-    assert len(remaining) == len(KNOWN_WIRING_EXCEPTIONS) - 1
-    monkeypatch.setattr(module, "KNOWN_WIRING_EXCEPTIONS", remaining)
     with pytest.raises(RoutePolicyError, match="/v1/curated-themes"):
         assert_route_policy_wiring(_representative_app())
 
@@ -315,14 +306,13 @@ def test_service_policy_covers_features_batch_only() -> None:
 
 
 @pytest.mark.unit
-def test_debug_policy_covers_docs_uis_and_mois_in_local_dev() -> None:
+def test_debug_policy_covers_interactive_docs_only() -> None:
     matrix = build_route_policy_matrix(_representative_app())
     debug_paths = {row.path for row in matrix if row.policy is RoutePolicy.DEBUG}
     assert debug_paths == {
         "/docs",
         "/docs/oauth2-redirect",
         "/redoc",
-        "/v1/debug/mois-license/{license_id}",
     }
     for row in matrix:
         if row.policy is RoutePolicy.DEBUG:
@@ -330,15 +320,53 @@ def test_debug_policy_covers_docs_uis_and_mois_in_local_dev() -> None:
 
 
 @pytest.mark.unit
-def test_mois_debug_route_disappears_when_debug_flag_off_docs_remain() -> None:
+def test_mois_debug_route_is_operator_gated_and_disappears_with_debug_flag() -> None:
+    matrix = build_route_policy_matrix(_representative_app())
+    mois = next(
+        row
+        for row in matrix
+        if row.path == "/v1/debug/mois-license/{license_id}"
+    )
+    assert mois.policy is RoutePolicy.OPERATOR
+    assert mois.observed_enforcement == ("require_admin_frontend",)
+
     # ``debug_routes_enabled=False``는 ``/v1/debug/*``만 내린다. interactive docs
     # UI는 별도로 ``is_production``으로 gate되므로 local-dev에서는 그대로 남는다.
-    matrix = build_route_policy_matrix(
+    disabled_matrix = build_route_policy_matrix(
         _representative_app(debug_routes_enabled=False)
     )
-    debug_paths = {row.path for row in matrix if row.policy is RoutePolicy.DEBUG}
-    assert "/v1/debug/mois-license/{license_id}" not in debug_paths
+    mounted_paths = {row.path for row in disabled_matrix}
+    debug_paths = {
+        row.path for row in disabled_matrix if row.policy is RoutePolicy.DEBUG
+    }
+    assert "/v1/debug/mois-license/{license_id}" not in mounted_paths
     assert {"/docs", "/redoc", "/docs/oauth2-redirect"} <= debug_paths
+
+
+@pytest.mark.unit
+def test_t_vn_03_public_and_ops_routes_have_exact_enforcement() -> None:
+    matrix = build_route_policy_matrix(_representative_app())
+    rows = {row.path: row for row in matrix}
+    public_curated = {
+        "/v1/curated-features",
+        "/v1/curated-features/{curated_feature_id}",
+        "/v1/curated-sources",
+        "/v1/curated-themes",
+    }
+    ops_observability = {
+        "/v1/ops/api-call-logs",
+        "/v1/ops/consistency/issues",
+        "/v1/ops/consistency/reports",
+        "/v1/ops/health-deep",
+        "/v1/ops/metrics",
+        "/v1/ops/system-logs",
+    }
+    for path in public_curated:
+        assert rows[path].policy is RoutePolicy.PUBLIC_KEYED
+        assert rows[path].observed_enforcement == ("require_public_api_key",)
+    for path in ops_observability:
+        assert rows[path].policy is RoutePolicy.OPERATOR
+        assert rows[path].observed_enforcement == ("require_ops_operator",)
 
 
 @pytest.mark.unit

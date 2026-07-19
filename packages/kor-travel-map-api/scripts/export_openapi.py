@@ -67,6 +67,8 @@ USER_OPERATIONS: dict[str, frozenset[str]] = {
     "/v1/public/festivals/{feature_id}": frozenset({"get"}),
     "/v1/curated-features": frozenset({"get"}),
     "/v1/curated-features/{curated_feature_id}": frozenset({"get"}),
+    "/v1/curated-sources": frozenset({"get"}),
+    "/v1/curated-themes": frozenset({"get"}),
     "/v1/curations": frozenset({"get"}),
     "/v1/curations/collections": frozenset({"get"}),
     "/v1/curations/collections/{collection_id}": frozenset({"get"}),

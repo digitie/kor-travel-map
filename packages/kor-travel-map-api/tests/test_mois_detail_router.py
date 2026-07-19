@@ -53,6 +53,23 @@ def test_mois_detail_unmounts_when_features_disabled() -> None:
 
 
 @pytest.mark.unit
+def test_mois_detail_requires_admin_bff_when_operator_gate_is_enabled() -> None:
+    app = create_app(
+        ApiSettings(
+            _env_file=None,
+            admin_proxy_secret="mois-debug-admin-secret",
+            admin_trusted_proxy_cidrs=["127.0.0.1/32"],
+        )
+    )
+    guarded = TestClient(app, client=("127.0.0.1", 50000))
+    response = guarded.get("/v1/debug/mois-license/general_restaurants::A1")
+    assert response.status_code == 403
+    spec = guarded.get("/openapi.json").json()
+    operation = spec["paths"]["/v1/debug/mois-license/{license_id}"]["get"]
+    assert operation["security"] == [{"AdminBFF": []}]
+
+
+@pytest.mark.unit
 def test_mois_detail_404_when_missing(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

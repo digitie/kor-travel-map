@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### T-VN-03 잔여 route 인증 경계 clean-cut (2026-07-19)
+
+- **SECURITY**: public curated GET 4개를 public API key 경계로, ops metrics/log/
+  consistency/deep-health GET 6개를 admin BFF 또는 `OpsToken+ops:read` 경계로 옮겼다.
+  MOIS raw debug는 local-dev mount에서도 admin BFF를 요구하고 production에서는 route를
+  mount하지 않는다.
+- **CHANGED**: route policy wiring exception을 0건으로 만들고 full/user OpenAPI와
+  admin/user 생성 TypeScript에 public/operator security 계약을 반영했다. 삭제 route,
+  호환 alias, 새 secret/env, DB migration은 추가하지 않았다.
+
 ### Feature search COUNT opt-in + signed cursor (2026-07-19, T-VN-15)
 
 - **CHANGED (breaking)**: `/v1/features/search`의 `include_total` 기본값은 `false`다.

@@ -14694,6 +14694,8 @@ export interface operations {
                 display_title?: string | null;
                 page_size?: number;
                 cursor?: string | null;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -14732,7 +14734,10 @@ export interface operations {
     };
     get_curated_feature_route_v1_curated_features__curated_feature_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path: {
                 curated_feature_id: string;
@@ -14777,6 +14782,8 @@ export interface operations {
                 dataset_key?: string | null;
                 provider_status?: ("implemented" | "provider_needed" | "manual_only" | "deprecated") | null;
                 limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -14818,6 +14825,8 @@ export interface operations {
             query?: {
                 theme_group?: string | null;
                 limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -15956,7 +15965,10 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -16003,7 +16015,10 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -16045,7 +16060,10 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -16385,7 +16403,10 @@ export interface operations {
     get_ops_health_deep_v1_ops_health_deep_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -16398,6 +16419,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsHealthDeepResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
@@ -16414,7 +16444,10 @@ export interface operations {
     get_ops_metrics_v1_ops_metrics_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -16427,6 +16460,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsMetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
@@ -17752,7 +17794,10 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

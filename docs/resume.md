@@ -1,5 +1,35 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex, agent B) — T-VN-03 교차 리뷰 P2 반영
+
+Map/PinVi 교차 리뷰가 user export allowlist에서 public curated sources/themes 두 GET이
+빠진 계약 drift를 확인했다. `USER_OPERATIONS`를 curated 4 GET 전체로 맞추고
+`openapi.user.json`과 user TypeScript를 정본 생성기로 다시 만든다. CI E501 한 건은
+기계적 줄바꿈으로 함께 고친다. **다음 한 작업**은 새 exact head를 같은 리뷰어에게
+재제출하는 것이며, 승인 전 테스트·lint·build는 실행하지 않는다.
+
+## 2026-07-19 (codex, agent B) — T-VN-03 Map 구현 head 준비
+
+curated GET 4개에 `require_public_api_key`, ops 관측 GET 6개에
+`require_ops_operator`, local-dev MOIS raw debug에 `require_admin_frontend`를 배선하고
+route policy exception을 0건으로 줄였다. production은 기존 profile matrix와 compose
+기본값으로 debug route를 mount하지 않으며, 새 env/secret/DB migration은 없다. full/user
+OpenAPI security와 admin/user 생성 TypeScript, same-origin BFF 회귀를 함께 갱신한다.
+CodeGraph는 `create_app` 181개, ops dependency 199개, public dependency 58개, wiring gate
+44개 영향 심볼을 보고했다. **다음 한 작업**은 생성물을 포함한 exact Map head와 PinVi
+PR #393 exact head를 동일 전문 리뷰어에게 교차 제출하는 것이다. 승인 전에는 테스트·lint·
+build를 실행하지 않는다.
+
+## 2026-07-19 (codex, agent B) — T-VN-03 route gate docs-first 착수
+
+`integration/t-vn@a45bc3ac` 기준으로 curated GET 4개, ops 관측 GET 6개, MOIS raw debug
+GET 1개의 잔여 인증 경계를 inventory했다. PinVi PR #387이 principal 설정은 추가했지만
+consistency/log client 네 메서드에 `ops:read`를 보내지 않아 Map gate 선적용 시 403이 되는
+cross-repo blocker를 확인했고 PinVi issue #392로 분리했다. 설계 정본은
+`docs/reports/t-vn-03-route-gate-cutover-2026-07-19.md`다. **다음 한 작업**은 양 저장소
+docs-first draft PR을 연 뒤 구현 head를 동일 전문 리뷰어에게 교차 제출하는 것이다. 승인 전에는
+테스트·lint·build를 실행하지 않는다.
+
 ## 2026-07-19 (codex, agent B) — T-VN-15 구현·생성 계약 준비 완료, 테스트 전 리뷰 대기
 
 `/v1/features/search`의 total opt-in을 repository 실행 계약으로 내리고,
@@ -12,7 +42,6 @@ admin UI consumer, admin/user OpenAPI와 생성 TypeScript, repository spy·실�
 matrix 테스트까지 PR #780에 준비했다. **다음 한 작업**은 최신 `integration/t-vn`에 rebase한 exact
 head를 push하고 같은 단일 적대 리뷰어에게 테스트 전 검토를 요청하는 것이다. 승인 전에는
 test/lint/build를 실행하지 않는다.
-
 ## 2026-07-19 (codex, agent B) — T-VN-04A admin 비공개 Feature 구현·리뷰 대기
 
 - issue #741을 `integration/t-vn` 기준 독립 PR로 분리했다. public projection을 우회하거나

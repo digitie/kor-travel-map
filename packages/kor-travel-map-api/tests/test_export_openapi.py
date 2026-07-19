@@ -119,6 +119,8 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/public/festivals/{feature_id}",
         "/v1/curated-features",
         "/v1/curated-features/{curated_feature_id}",
+        "/v1/curated-sources",
+        "/v1/curated-themes",
         "/v1/curations",
         "/v1/curations/collections",
         "/v1/curations/collections/{collection_id}",
@@ -127,7 +129,20 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert not any(path.startswith("/admin") for path in user["paths"])
     assert not any(path.startswith("/ops") for path in user["paths"])
     assert not any(path.startswith("/debug") for path in user["paths"])
-    assert set(user["components"]["securitySchemes"]) == {"ServiceToken"}
+    assert set(user["components"]["securitySchemes"]) == {
+        "PublicApiKey",
+        "ServiceToken",
+    }
+    for path in {
+        "/v1/curated-features",
+        "/v1/curated-features/{curated_feature_id}",
+        "/v1/curated-sources",
+        "/v1/curated-themes",
+    }:
+        assert user["paths"][path]["get"]["security"] == [
+            {"PublicApiKey": []},
+            {"ServiceToken": []},
+        ]
 
     schemas = user["components"]["schemas"]
     assert "FeatureBatchResponse" in schemas
