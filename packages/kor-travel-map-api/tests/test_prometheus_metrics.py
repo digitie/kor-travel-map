@@ -244,3 +244,82 @@ def test_prometheus_metrics_can_be_disabled() -> None:
     response = client.get("/metrics")
     assert response.status_code == 404
     assert "/metrics" not in client.get("/openapi.json").json()["paths"]
+
+
+# ── /metrics scrape identity 경계 (ADR-066 결정 4, T-VN-02) ──────────────────
+
+_METRICS_TOKEN = "metrics-token-0000000000000000000000000000"
+
+
+@pytest.mark.unit
+def test_metrics_endpoint_requires_bearer_token_when_configured() -> None:
+    app = create_app(
+        ApiSettings(
+            features_routes_enabled=False,
+            metrics_token=_METRICS_TOKEN,
+        )
+    )
+    client = TestClient(app)
+
+    missing = client.get("/metrics")
+    assert missing.status_code == 401
+
+    wrong = client.get(
+        "/metrics",
+        headers={"Authorization": "Bearer not-the-metrics-token-000000000000000"},
+    )
+    assert wrong.status_code == 401
+
+    wrong_scheme = client.get(
+        "/metrics",
+        headers={"Authorization": _METRICS_TOKEN},
+    )
+    assert wrong_scheme.status_code == 401
+
+    # Prometheus scrape_config `authorization`(type Bearer) 경로.
+    granted = client.get(
+        "/metrics",
+        headers={"Authorization": f"Bearer {_METRICS_TOKEN}"},
+    )
+    assert granted.status_code == 200
+    assert granted.headers["content-type"].startswith("text/plain")
+
+
+@pytest.mark.unit
+def test_metrics_endpoint_stays_open_without_token_in_local_dev(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 미설정(None)은 로컬 scrape 하위호환 — 기존 open scrape 유지 (T-VN-02).
+    monkeypatch.delenv("KOR_TRAVEL_MAP_API_METRICS_TOKEN", raising=False)
+    app = create_app(ApiSettings(features_routes_enabled=False))
+    assert app.state.settings.metrics_token is None
+    client = TestClient(app)
+    assert client.get("/metrics").status_code == 200
+
+
+@pytest.mark.unit
+def test_metrics_non_ascii_authorization_fails_closed_401_not_500() -> None:
+    # Starlette은 raw 헤더 bytes를 latin-1로 디코드하므로 비-ASCII Authorization
+    # 값은 code point >127을 가진 str이 된다. 이를 상수시간 str 비교에 그대로
+    # 넣으면 TypeError(→500)가 난다. dependency를 직접 호출해(httpx가 client측에서
+    # 비-ASCII 헤더를 막으므로 Starlette 디코드 결과를 재현) 401 fail-closed를
+    # 검증한다.
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from kortravelmap.api.auth import require_metrics_token
+
+    settings = ApiSettings(
+        _env_file=None,
+        features_routes_enabled=False,
+        metrics_token=_METRICS_TOKEN,
+    )
+    # latin-1 디코드 결과와 동일한, code point 0xFF/0xFE를 담은 헤더 값.
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
+        headers={"Authorization": "Bearer ÿþ-not-the-token"},
+    )
+    with pytest.raises(HTTPException) as excinfo:
+        require_metrics_token(request)  # type: ignore[arg-type]
+    assert excinfo.value.status_code == 401
