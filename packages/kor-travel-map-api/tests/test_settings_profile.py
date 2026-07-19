@@ -19,6 +19,7 @@ ADMIN_PROXY_SECRET = "admin-proxy-secret-000000000000000000000000"
 OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
 SERVICE_TOKEN = "service-token-0000000000000000000000000000"
+METRICS_TOKEN = "metrics-token-0000000000000000000000000000"
 
 # 명시하지 않은 필드에 ambient host env가 스며들어 기본값 검증을 오염시키지
 # 않도록, 이 파일의 모든 테스트에서 관련 env를 제거한다.
@@ -37,6 +38,8 @@ _HERMETIC_ENV_VARS = (
     "KOR_TRAVEL_MAP_API_OPS_ACTOR",
     "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
     "KOR_TRAVEL_MAP_API_VWORLD_API_KEY",
+    "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
+    "KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED",
 )
 
 
@@ -71,6 +74,7 @@ def _production_settings(**overrides: Any) -> ApiSettings:
         "public_api_key_required": True,
         "debug_routes_enabled": False,
         "service_token": SERVICE_TOKEN,
+        "metrics_token": METRICS_TOKEN,
         "vworld_api_key": None,
     }
     values.update(overrides)
@@ -107,6 +111,7 @@ def test_profile_reads_env_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED", "false")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_SERVICE_TOKEN", SERVICE_TOKEN)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_METRICS_TOKEN", METRICS_TOKEN)
     settings = ApiSettings(_env_file=None)
     assert settings.is_production
 
@@ -145,6 +150,7 @@ def test_production_docker_compose_env_equivalent_boots(
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_SERVICE_TOKEN", SERVICE_TOKEN)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_METRICS_TOKEN", METRICS_TOKEN)
     settings = ApiSettings(_env_file=None)
     assert settings.is_production
     assert settings.debug_routes_enabled is False
@@ -329,6 +335,92 @@ def test_production_rejects_bad_service_token_shape_even_without_features(
     assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN" in str(excinfo.value)
 
 
+# ── metrics scrape token (ADR-066 결정 4, T-VN-02) ───────────────────────────
+
+
+@pytest.mark.unit
+def test_production_requires_metrics_token_while_metrics_endpoint_enabled() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        _production_settings(metrics_token=None)
+    message = str(excinfo.value)
+    assert "KOR_TRAVEL_MAP_API_METRICS_TOKEN" in message
+    assert "Prometheus metrics endpoint is enabled" in message
+
+
+@pytest.mark.unit
+def test_production_metrics_token_not_required_when_metrics_disabled() -> None:
+    settings = _production_settings(
+        prometheus_metrics_enabled=False,
+        metrics_token=None,
+    )
+    assert settings.metrics_token is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "metrics_token",
+    ["short", "m" * 31, f" {METRICS_TOKEN}", f"{METRICS_TOKEN} "],
+)
+def test_production_rejects_blank_padded_or_short_metrics_token(
+    metrics_token: str,
+) -> None:
+    # service token과 같은 배포 가능 형태(앞뒤 공백 없는 32자 이상) 기준.
+    with pytest.raises(ValidationError) as excinfo:
+        _production_settings(metrics_token=metrics_token)
+    assert "KOR_TRAVEL_MAP_API_METRICS_TOKEN" in str(excinfo.value)
+
+
+@pytest.mark.unit
+def test_production_rejects_bad_metrics_token_shape_even_when_disabled() -> None:
+    # metrics endpoint off라도 설정된 token은 배포 가능한 형태여야 한다.
+    with pytest.raises(ValidationError) as excinfo:
+        _production_settings(
+            prometheus_metrics_enabled=False,
+            metrics_token="short",
+        )
+    assert "KOR_TRAVEL_MAP_API_METRICS_TOKEN" in str(excinfo.value)
+
+
+@pytest.mark.unit
+def test_local_dev_accepts_placeholder_metrics_token_shape() -> None:
+    # root .env.example의 CHANGE_ME placeholder가 local-dev full-stack 검증을
+    # 막지 않는다 (T-VN-01 service token과 같은 패턴 — production만 형태 강제).
+    settings = _local_settings(metrics_token="CHANGE_ME")
+    assert settings.metrics_token is not None
+
+
+@pytest.mark.unit
+def test_metrics_token_empty_string_disables_like_none() -> None:
+    settings = _local_settings(metrics_token="")
+    assert settings.metrics_token is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("reused_field", "protected_name"),
+    [
+        ("admin_proxy_secret", "admin proxy secret"),
+        ("service_token", "service token"),
+    ],
+)
+def test_metrics_token_must_be_distinct_from_other_secrets(
+    reused_field: str,
+    protected_name: str,
+) -> None:
+    with pytest.raises(ValidationError, match=f"distinct from {protected_name}"):
+        _local_settings(metrics_token=METRICS_TOKEN, **{reused_field: METRICS_TOKEN})
+
+
+@pytest.mark.unit
+def test_metrics_token_must_be_distinct_from_ops_tokens() -> None:
+    with pytest.raises(ValidationError, match="distinct from ops read token"):
+        _local_settings(
+            metrics_token=OPS_READ_TOKEN,
+            ops_read_token=OPS_READ_TOKEN,
+            ops_cancel_token=OPS_CANCEL_TOKEN,
+        )
+
+
 @pytest.mark.unit
 def test_production_error_aggregates_every_missing_requirement() -> None:
     # 전부-기본값(local-dev fallback) 상태로 production을 켜면 한 번의 에러에
@@ -341,6 +433,7 @@ def test_production_error_aggregates_every_missing_requirement() -> None:
     assert "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED" in message
     assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN" in message
     assert "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED" in message
+    assert "KOR_TRAVEL_MAP_API_METRICS_TOKEN" in message
 
 
 # ── local-dev 격리 ───────────────────────────────────────────────────────────

@@ -43,6 +43,7 @@ from kortravelmap.api.response import ProblemDetail
 __all__ = [
     "ADMIN_ACTOR_HEADER",
     "ADMIN_PROXY_SECRET_HEADER",
+    "METRICS_AUTHORIZATION_SCHEME",
     "OPS_ACTOR",
     "OPS_SCOPE_HEADER",
     "OPS_TOKEN_HEADER",
@@ -51,6 +52,7 @@ __all__ = [
     "AdminProxyContext",
     "OpsOperatorContext",
     "require_admin_frontend",
+    "require_metrics_token",
     "require_ops_operator",
     "require_service_token",
     "require_public_api_key",
@@ -61,6 +63,7 @@ __all__ = [
 
 ADMIN_ACTOR_HEADER = "X-Kor-Travel-Map-Actor"
 ADMIN_PROXY_SECRET_HEADER = "X-Kor-Travel-Map-Admin-Proxy-Secret"
+METRICS_AUTHORIZATION_SCHEME = "Bearer"
 OPS_ACTOR = "service:pinvi"
 OPS_SCOPE_HEADER = "X-Kor-Travel-Map-Ops-Scope"
 OPS_TOKEN_HEADER = "X-Kor-Travel-Map-Ops-Token"
@@ -432,6 +435,51 @@ def _vworld_default_key_hashes(settings: ApiSettings) -> frozenset[str]:
     if not key:
         return frozenset()
     return frozenset({hash_public_api_key(key)})
+
+
+def require_metrics_token(request: Request) -> None:
+    """``metrics_token`` 설정 시 Prometheus scrape identity를 검증한다.
+
+    ADR-066 결정 4(T-VN-02) — ``/metrics``는 scrape identity/management 경계로
+    제한한다. Prometheus scrape config가 네이티브로 지원하는
+    ``Authorization: Bearer <token>``을 상수시간 비교로 검증한다. 미설정(None)
+    이면 non-production 하위호환으로 열어 두며(로컬 scrape 유지), production
+    profile은 settings 검증이 metrics endpoint 활성 시 token을 필수화하므로
+    token 없는 production 상태는 방어적으로 403으로 닫는다.
+    """
+
+    settings = _settings(request)
+    expected = settings.metrics_token
+    if expected is None:
+        if settings.is_production:
+            # T-VN-01 admin gate와 같은 방어 분기 — production settings는 기동
+            # 시점에 token을 필수화하므로 검증 우회 상태에서만 도달한다.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "production profile에서는 metrics token 없이 /metrics를 "
+                    "사용할 수 없습니다."
+                ),
+            )
+        return
+    provided = request.headers.get("Authorization") or ""
+    scheme, _, credential = provided.partition(" ")
+    # RFC7235 — auth-scheme은 대소문자 무관. Starlette은 헤더를 latin-1로
+    # 디코드하므로 비-ASCII Authorization 값을 그대로 ``hmac.compare_digest(str,
+    # str)``에 넣으면 TypeError(→500)가 난다. UTF-8 bytes로 비교해 잘못된 헤더가
+    # 500이 아니라 401로 fail-closed되게 한다(latin-1 디코드는 code point 0~255만
+    # 내므로 UTF-8 인코딩은 항상 성공한다).
+    scheme_matches = scheme.lower() == METRICS_AUTHORIZATION_SCHEME.lower()
+    credential_bytes = credential.strip().encode("utf-8")
+    expected_bytes = expected.get_secret_value().encode("utf-8")
+    if not scheme_matches or not hmac.compare_digest(credential_bytes, expected_bytes):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                f"유효한 Authorization: {METRICS_AUTHORIZATION_SCHEME} metrics "
+                "token이 필요합니다."
+            ),
+        )
 
 
 def require_admin_destructive_enabled(request: Request) -> None:

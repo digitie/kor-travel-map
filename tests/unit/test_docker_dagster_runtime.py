@@ -181,19 +181,27 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
         "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+        # ADR-066 결정 4 (T-VN-02) — /metrics scrape identity token도 같은
+        # hard-require 패턴이다.
+        "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
     }
     assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in api["environment"]
     # admin secret과 같은 hard-require 패턴 — host env 누락 시 compose 평가 실패.
     assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN is required" in str(
         api["environment"]["KOR_TRAVEL_MAP_API_SERVICE_TOKEN"]
     )
+    assert "KOR_TRAVEL_MAP_API_METRICS_TOKEN is required" in str(
+        api["environment"]["KOR_TRAVEL_MAP_API_METRICS_TOKEN"]
+    )
 
     root_api_keys = _assigned_env_keys(_script(".env.example"), prefix="KOR_TRAVEL_MAP_API_")
     assert root_api_keys == {
         "KOR_TRAVEL_MAP_API_PORT",
         "KOR_TRAVEL_MAP_API_INTERNAL_URL",
-        # compose interpolation이 root env에서 읽는 hard-require secret (T-VN-01).
+        # compose interpolation이 root env에서 읽는 hard-require secret
+        # (T-VN-01 service token, T-VN-02 metrics token).
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+        "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
     }
 
     package_api_keys = _assigned_env_keys(
@@ -210,6 +218,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
         "KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED",
+        "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
         "KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED",
         "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
         "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED",
@@ -794,22 +803,29 @@ def test_api_container_rejects_invalid_ops_principal_pair(
     assert expected_error in result.stderr
 
 
-@pytest.mark.unit
-def test_api_container_allows_two_empty_ops_tokens_when_not_required(
-    tmp_path: Path,
-) -> None:
+def _entrypoint_stub_path(tmp_path: Path) -> str:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name in ("alembic", "python"):
         command = bin_dir / name
         command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         command.chmod(0o755)
+    return f"{bin_dir}:{os.environ['PATH']}"
 
+
+@pytest.mark.unit
+def test_api_container_allows_two_empty_ops_tokens_when_not_required(
+    tmp_path: Path,
+) -> None:
+    # ADR-066 T-VN-02 (#742): 컨테이너 기본 profile은 production이므로 빈 ops
+    # pair opt-out은 local-dev를 명시할 때만 유효하다(production은 아래
+    # 전용 테스트에서 migration 전에 거부됨을 검증).
     result = subprocess.run(
         ["sh", "docker/api-entrypoint.sh"],
         cwd=ROOT,
         env={
-            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "PATH": _entrypoint_stub_path(tmp_path),
+            "KOR_TRAVEL_MAP_API_PROFILE": "local-dev",
             "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
                 "shared-secret-at-least-32-characters"
             ),
@@ -823,6 +839,186 @@ def test_api_container_allows_two_empty_ops_tokens_when_not_required(
     )
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "ops_env",
+    [
+        # #742 재현: production + both-explicit-empty pair.
+        {
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
+            "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
+        },
+        # pair 완전 미설정도 같은 사유로 거부된다.
+        {},
+    ],
+)
+def test_api_container_production_refuses_unconfigured_ops_pair_before_migration(
+    ops_env: dict[str, str],
+) -> None:
+    """production + ops surface 활성 + ops pair 미구성 → migration 전에 단일
+    일관 에러로 거부한다 (ADR-066 T-VN-02, issue #742).
+
+    PROFILE env를 주지 않는다 — Docker image ENV/compose 기본과 같은 production
+    기본을 entrypoint가 따르는지 함께 검증한다. alembic stub이 없으므로
+    migration이 실행되면 다른 에러가 나온다 — settings production matrix와
+    lockstep인 문구 하나만 나와야 한다.
+    """
+
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
+                "shared-secret-at-least-32-characters"
+            ),
+            **ops_env,
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert (
+        "production profile is fail-closed (ADR-066): "
+        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN "
+        "must be configured while the ops surface is enabled"
+    ) in result.stderr
+    assert "alembic" not in result.stderr
+
+
+@pytest.mark.unit
+def test_api_container_production_allows_empty_ops_pair_when_ops_surface_off(
+    tmp_path: Path,
+) -> None:
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": _entrypoint_stub_path(tmp_path),
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
+                "shared-secret-at-least-32-characters"
+            ),
+            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
+            "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
+            "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
+            "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+def test_api_container_production_ops_surface_follows_features_flag(
+    tmp_path: Path,
+) -> None:
+    # settings의 resolved_ops_routes_enabled와 같은 해석: OPS flag 미설정이면
+    # FEATURES flag를 따른다 — features off면 ops pair 없이도 기동한다.
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": _entrypoint_stub_path(tmp_path),
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
+                "shared-secret-at-least-32-characters"
+            ),
+            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("env_updates", "expected_error"),
+    [
+        (
+            {"KOR_TRAVEL_MAP_API_PROFILE": "prod"},
+            "KOR_TRAVEL_MAP_API_PROFILE must be exactly production or local-dev",
+        ),
+        (
+            # set-but-empty PROFILE은 조용히 production으로 접히지 않고 거부된다
+            # (`+x` set-vs-unset — 직접 docker run 경로, T-VN-02 리뷰 S3.4).
+            {"KOR_TRAVEL_MAP_API_PROFILE": ""},
+            "KOR_TRAVEL_MAP_API_PROFILE must be exactly production or local-dev",
+        ),
+        (
+            {"KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "TRUE"},
+            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED must be exactly true or false",
+        ),
+        (
+            {"KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "1"},
+            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED must be exactly true or false",
+        ),
+    ],
+)
+def test_api_container_rejects_ambiguous_profile_or_surface_flags(
+    env_updates: dict[str, str],
+    expected_error: str,
+) -> None:
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
+                "shared-secret-at-least-32-characters"
+            ),
+            **env_updates,
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+
+
+@pytest.mark.unit
+def test_ops_pair_validation_messages_are_lockstep_across_layers() -> None:
+    """settings production matrix(정본)와 entrypoint 검사 메시지 lockstep (#742).
+
+    같은 실패를 두 계층이 다른 문구로 설명하면 운영자가 두 번 헤맨다 —
+    공유 문구가 양쪽 소스에 그대로 존재해야 한다.
+    """
+
+    entrypoint = _script("docker/api-entrypoint.sh")
+    settings_source = (
+        ROOT
+        / "packages"
+        / "kor-travel-map-api"
+        / "src"
+        / "kortravelmap"
+        / "api"
+        / "settings.py"
+    ).read_text(encoding="utf-8")
+
+    for shared_phrase in (
+        "must be configured together",
+        "must both be empty or both be non-empty",
+        "ops read and cancel tokens must be distinct",
+        "must be configured while ",
+        "the ops surface is enabled",
+        "production profile is fail-closed (ADR-066)",
+    ):
+        assert shared_phrase in entrypoint, shared_phrase
+        assert shared_phrase in settings_source, shared_phrase
+    # 제거된 문구가 한쪽에만 되살아나는 회귀 방지 — 옛 provenance 문구.
+    assert "absent or configured together" not in entrypoint
+    assert "absent or configured together" not in settings_source
 
 
 @pytest.mark.unit

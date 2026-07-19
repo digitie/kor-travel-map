@@ -5,6 +5,49 @@
 
 ## [Unreleased]
 
+### route policy matrix + `/metrics` scrape identity 경계 (2026-07-19, ADR-066 T-VN-02)
+
+- **ADDED**: `kortravelmap.api.route_policy` — 전 HTTP route와 WebSocket을
+  `public-unauthenticated`/`public-keyed`/`service`/`operator`/`debug`/`metrics` 중 정확히
+  하나로 분류하는 명시적 in-code registry(`ROUTE_POLICIES`)와 matrix 생성기. 분류는
+  dependency 배선에서 추론하지 않고 registry가 정본이며, 미분류 route는 `create_app` 앱
+  구성 검사와 CI(`test_route_policy.py`)가 함께 실패한다. FastAPI 0.136+의 lazy
+  `_IncludedRouter`는 OpenAPI 생성기와 같은 공개 helper(`iter_route_contexts`)로
+  평탄화한다(WebSocket은 OpenAPI paths에 없어 openapi() 열거로는 불충분). 정책-배선
+  일치는 route별 관측 enforcing dependency로 검증하고, 다른 task 소유의 알려진 gap
+  (무키 legacy `/v1/curated-*` → public-keyed, 무의존 `/v1/ops/{metrics,system-logs,
+  api-call-logs,consistency/*,health-deep}` → operator — 모두 T-VN-03/codex b1 소유,
+  PinVi cutover 조율)은 `KNOWN_WIRING_EXCEPTIONS` ledger에만 허용하며 gap이 닫히면
+  stale entry가 CI에서 실패해 ledger 축소를 강제한다. ops-live WebSocket은 #725 HMAC
+  ticket dependency를 enforcing 인증으로 기록만 하고 재사용한다(중복 구현 없음).
+- **SECURITY**: `/metrics`가 scrape identity 경계를 얻었다 (ADR-066 결정 4).
+  `KOR_TRAVEL_MAP_API_METRICS_TOKEN` 설정 시 `Authorization: Bearer <token>` 상수시간
+  검증(불일치 401), production profile은 metrics endpoint 활성 시 이 token(앞뒤 공백
+  없는 32자 이상, admin secret·service/ops token과 distinct)을 기동 필수로 요구한다.
+  compose는 admin secret·service token과 같은 hard-require 패턴으로 host env를
+  전달한다. **배포 전제(zero-gap 순서)**: kor-travel-docker-manager의
+  `config/prometheus/prometheus.yml`에는 현재 map-api(:12701) scrape job이 아예
+  없다(prometheus·cadvisor·kor-travel-geo만 존재) — 이 scrape는 신규 추가
+  대상이다. (1) **먼저** docker-manager scrape config에 map-api job을
+  `authorization: {type: Bearer, credentials: <token>}`와 함께 추가하고(변경 전
+  무인증 API는 헤더를 무시하므로 무해), (2) **그다음** root `.env`에 같은 값의
+  metrics token을 넣고 API를 배포한다. 순서를 뒤집으면 그 사이 scrape가 401 gap이
+  된다(조용한 파손이 아니라 scrape 실패로 드러남). token 미설정 local-dev는 기존
+  open scrape 유지. 상세·YAML 예시는 `docs/deploy.md`.
+- **CHANGED** (ADR-066 D-1, T-VN-02): production profile은 인증 없는 interactive
+  docs UI(`/docs`·`/redoc`·swagger oauth2-redirect)를 내린다(`docs_url`/`redoc_url`
+  =None). D-1의 "public-unauthenticated=(liveness/version)"을 넓히지 않기 위함이며
+  debug 라우터를 production에서 내리는 것과 같은 패턴이다. 기계 판독 공개 계약
+  `/openapi.json`(ADR-031 served artifact)은 유지한다. 세 route 모두
+  `include_in_schema=False`라 committed `openapi.json` `paths`는 불변(drift 없음).
+- **CHANGED** (#742 consolidation): ops pair 검증 정본은 settings production matrix로
+  일원화했다. `docker/api-entrypoint.sh`는 production profile + ops surface 활성 +
+  ops pair 미구성(양쪽 빈 값 포함)을 migration **전에** settings와 동일 문구로
+  거부해 2단계 혼란 실패를 없앴고(entrypoint의 profile 기본값은 Docker image와 같은
+  production), settings의 pair provenance 메시지를 entrypoint와 lockstep으로
+  정렬했다("must be configured together"). 메시지 lockstep은
+  `test_docker_dagster_runtime.py`가 양쪽 소스를 대조해 상시 검증한다.
+
 ### 공개 predicate 단일화 — `feature.public_features` view (2026-07-19, ADR-067 T-VN-04)
 
 - **ADDED**: migration 0059가 공개 정본 projection `feature.public_features`

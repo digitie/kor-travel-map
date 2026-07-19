@@ -21,9 +21,43 @@ Prometheus 성능 메트릭은 별도 포트를 열지 않고 `api`의 같은 ho
 `/v1/providers`·`/v1/public`), `/admin`, `/ops`, `/debug`, system route의 HTTP 요청
 수/지연 시간/응답 크기/예외와 DB query 수/지연 시간을 함께 제공한다.
 `kor-travel-docker-manager` 관측 스택은 Grafana `12205`, cAdvisor Exporter
-`12301`, Prometheus `12401`을 사용하며, Prometheus가
-`http://<kor-travel-map-api>:12701/metrics`를 pull scrape한다. 앱이 Prometheus로 능동
-연결하지 않는다.
+`12301`, Prometheus `12401`을 사용한다. 앱은 Prometheus로 능동 연결하지 않고
+pull scrape 대상이 된다.
+
+`/metrics`는 scrape identity 경계다(ADR-066 결정 4, T-VN-02).
+`KOR_TRAVEL_MAP_API_METRICS_TOKEN`이 설정되면 `Authorization: Bearer <token>`이
+일치해야 하고, production profile은 metrics endpoint 활성 시 이 token(앞뒤 공백
+없는 32자 이상, admin secret·service/ops token과 다른 값)을 필수화한다 —
+compose는 host env `KOR_TRAVEL_MAP_API_METRICS_TOKEN`을 hard-require로 전달한다.
+token 미설정 local-dev는 기존 open scrape를 유지한다.
+
+> **현재 상태(중요)**: `kor-travel-docker-manager`의
+> `config/prometheus/prometheus.yml`에는 아직 **map-api(:12701) scrape job이
+> 없다**(현재 job은 prometheus·cadvisor·kor-travel-geo-api/ui뿐). 즉 위 12701
+> scrape는 "목표"이며, 이 배포에서 **인증과 함께 job을 신규 추가**해야 한다.
+
+**배포 전제 — zero-gap 순서(반드시 이 순서로)**:
+
+1. **먼저** kor-travel-docker-manager Prometheus scrape config에 map-api job을
+   `authorization: {type: Bearer, credentials: <token>}`와 함께 **추가**한다.
+   변경 전 API(현재 `/metrics` 무인증)는 이 헤더를 무시하므로 이 단계는 무해하다.
+
+   ```yaml
+   - job_name: kor-travel-map-api
+     metrics_path: /metrics
+     authorization:
+       type: Bearer
+       credentials: <KOR_TRAVEL_MAP_API_METRICS_TOKEN>
+     static_configs:
+       - targets:
+           - 127.0.0.1:12701
+   ```
+
+2. **그다음** root `.env`에 `KOR_TRAVEL_MAP_API_METRICS_TOKEN`(scrape config와
+   같은 값)을 넣고 API를 배포한다.
+
+순서를 뒤집으면(토큰 먼저, scrape config 나중) 그 사이 scrape가 401로 gap이
+생긴다 — 조용한 유실이 아니라 scrape 실패로 드러난다.
 
 `kor-travel-docker-manager`가 공유 PostGIS/RustFS를 이미 구동하는 로컬 환경에서는 kor-travel-map의
 local `postgres`/`rustfs` 서비스를 함께 띄우면 `5432`/`12101`이 충돌한다. 이때는
