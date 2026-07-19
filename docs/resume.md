@@ -18,6 +18,20 @@
 - 전체 main unit 1,503건, API router 26건, PostGIS/성능/공개 회귀 34건과 OpenAPI·TS·
   Ruff·mypy·import-linter·redaction 게이트가 통과했다.
 - **다음 한 작업**: 후속 PR을 CI green 뒤 `integration/t-vn`에 병합한다.
+## 2026-07-19 (codex, agent B) — T-VN-05R 공개 curated raw 경계 보강
+
+- issue #765의 우회 경로를 닫기 위해 공개 curated list/detail을 admin
+  `CuratedFeatureView`에서 분리한 `PublicCuratedFeatureView` allowlist로 전환했다.
+  동일 리뷰어 후속 3건을 반영해 `feature_kind` 판별 7종 union, strict 주소/kind별 detail,
+  place 시설·영업시간·전화·리뷰 링크 projector를 완결했다. 실제 concierge
+  YouTube/transcript/evidence 미러와 미승인 nested raw를 제거하며 알 수 없는 kind는
+  목록 제외/상세 404로 fail-closed한다. 공개 목록의 내부 identity 필터
+  `theme_id/source_id/provider/dataset_key`도 제거했다.
+- admin `/v1/admin/features/curated*`는 기존 전체 DTO와 raw 감사값을 유지한다. 공개
+  list/detail sentinel 회귀와 full/user OpenAPI schema 분리, admin/user 생성 타입 갱신을
+  같은 변경에 포함한다.
+- **다음 한 작업**: OpenAPI/TypeScript 생성물을 갱신하고 PR #774에 후속 커밋한다. 이번
+  커밋은 요청대로 테스트를 실행하지 않고 CI 결과를 후속 확인한다.
 
 ## 2026-07-19 (codex, agent B) — T-VN-21R 구현 완료·리뷰 대기
 

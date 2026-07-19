@@ -3896,7 +3896,7 @@ export interface components {
         };
         /**
          * CuratedFeatureView
-         * @description curated feature overlay view.
+         * @description admin/operator curated feature overlay view.
          */
         CuratedFeatureView: {
             /** Address */
@@ -9104,6 +9104,686 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * PublicCuratedAddress
+         * @description 표시용 주소만 포함하는 공개 주소 계약.
+         */
+        PublicCuratedAddress: {
+            /** Admin */
+            admin?: string | null;
+            /** Legal */
+            legal?: string | null;
+            /** Road */
+            road?: string | null;
+            /** Sido Name */
+            sido_name?: string | null;
+            /** Sigungu Name */
+            sigungu_name?: string | null;
+            /** Zipcode */
+            zipcode?: string | null;
+        };
+        /** PublicCuratedAreaDetail */
+        PublicCuratedAreaDetail: {
+            /** Administrative Office */
+            administrative_office?: string | null;
+            /**
+             * Area Kind
+             * @default area
+             */
+            area_kind: string;
+            /** Area Square Meters */
+            area_square_meters?: number | null;
+            /** Boundary Source */
+            boundary_source?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Regulation Scope */
+            regulation_scope?: string | null;
+        };
+        /** PublicCuratedAreaFeatureView */
+        PublicCuratedAreaFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            detail: components["schemas"]["PublicCuratedAreaDetail"];
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "area";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PublicCuratedEventDetail */
+        PublicCuratedEventDetail: {
+            /** Area Code */
+            area_code?: string | null;
+            /** Content Id */
+            content_id?: string | null;
+            /** Content Type Id */
+            content_type_id?: string | null;
+            /** Ends On */
+            ends_on?: string | null;
+            /**
+             * Event Kind
+             * @default festival
+             */
+            event_kind: string;
+            /** Feature Id */
+            feature_id: string;
+            opening_hours?: components["schemas"]["PublicCuratedOpeningHours"] | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Starts On */
+            starts_on?: string | null;
+            /** Tel */
+            tel?: string | null;
+            /**
+             * Timezone
+             * @default Asia/Seoul
+             * @constant
+             */
+            timezone: "Asia/Seoul";
+            /** Venue Name */
+            venue_name?: string | null;
+        };
+        /** PublicCuratedEventFeatureView */
+        PublicCuratedEventFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            detail: components["schemas"]["PublicCuratedEventDetail"];
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "event";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PublicCuratedFeatureResponse */
+        PublicCuratedFeatureResponse: {
+            data: components["schemas"]["PublicCuratedFeatureView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicCuratedFeatureView
+         * @description ``feature_kind``가 판별자인 공개 feature union.
+         */
+        PublicCuratedFeatureView: components["schemas"]["PublicCuratedPlaceFeatureView"] | components["schemas"]["PublicCuratedEventFeatureView"] | components["schemas"]["PublicCuratedNoticeFeatureView"] | components["schemas"]["PublicCuratedAreaFeatureView"] | components["schemas"]["PublicCuratedRouteFeatureView"] | components["schemas"]["PublicCuratedPriceFeatureView"] | components["schemas"]["PublicCuratedWeatherFeatureView"];
+        /** PublicCuratedFeaturesData */
+        PublicCuratedFeaturesData: {
+            /** Items */
+            items: components["schemas"]["PublicCuratedFeatureView"][];
+        };
+        /** PublicCuratedFeaturesResponse */
+        PublicCuratedFeaturesResponse: {
+            data: components["schemas"]["PublicCuratedFeaturesData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** PublicCuratedNoticeDetail */
+        PublicCuratedNoticeDetail: {
+            /** Feature Id */
+            feature_id: string;
+            /** Notice Type */
+            notice_type: string;
+            /** Officer Name */
+            officer_name?: string | null;
+            /** Severity */
+            severity?: number | null;
+            /** Source Agency */
+            source_agency?: string | null;
+            /** Valid End Time */
+            valid_end_time?: string | null;
+            /** Valid Start Time */
+            valid_start_time?: string | null;
+        };
+        /** PublicCuratedNoticeFeatureView */
+        PublicCuratedNoticeFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            detail: components["schemas"]["PublicCuratedNoticeDetail"];
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "notice";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * PublicCuratedOpeningHours
+         * @description 자유 텍스트 없이 구조화된 KST 영업시간만 노출한다.
+         */
+        PublicCuratedOpeningHours: {
+            /** Open Now */
+            open_now?: boolean | null;
+            /** Periods */
+            periods?: components["schemas"]["PublicCuratedOpeningPeriod"][];
+            /** Special Days */
+            special_days?: components["schemas"]["PublicCuratedSpecialOpeningDay"][];
+            /**
+             * Timezone
+             * @default Asia/Seoul
+             * @constant
+             */
+            timezone: "Asia/Seoul";
+        };
+        /** PublicCuratedOpeningPeriod */
+        PublicCuratedOpeningPeriod: {
+            close?: components["schemas"]["PublicCuratedOpeningTime"] | null;
+            open: components["schemas"]["PublicCuratedOpeningTime"];
+        };
+        /** PublicCuratedOpeningTime */
+        PublicCuratedOpeningTime: {
+            /** Day */
+            day: number;
+            /** Time */
+            time: string;
+        };
+        /** PublicCuratedPlaceDetail */
+        PublicCuratedPlaceDetail: {
+            /** Biz Number */
+            biz_number?: string | null;
+            business_hours?: components["schemas"]["PublicCuratedOpeningHours"] | null;
+            facility_info?: components["schemas"]["PublicCuratedPlaceFacilityInfo"];
+            /** Feature Id */
+            feature_id: string;
+            /** License Date */
+            license_date?: string | null;
+            /** Phones */
+            phones?: string[];
+            /**
+             * Place Kind
+             * @default place
+             */
+            place_kind: string;
+            reviews_link?: components["schemas"]["PublicCuratedReviewLinks"];
+        };
+        /**
+         * PublicCuratedPlaceFacilityInfo
+         * @description 공개 표시 가치가 확인된 place 시설 필드.
+         *
+         *     provider identity와 concierge 영상·transcript·evidence 미러는 의도적으로
+         *     선언하지 않는다. 새 필드는 공개 계약 검토 후에만 이 모델과 projector 양쪽에
+         *     추가한다.
+         */
+        PublicCuratedPlaceFacilityInfo: {
+            /** Appn Year */
+            appn_year?: number | null;
+            /** Beach Kind */
+            beach_kind?: string | null;
+            /** Brand Code */
+            brand_code?: string | null;
+            /** Category */
+            category?: string | null;
+            /** Category Label */
+            category_label?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Direction */
+            direction?: string | null;
+            /** Fclty Type */
+            fclty_type?: string | null;
+            /** Forest Type */
+            forest_type?: string | null;
+            /** Gemini Enriched Description */
+            gemini_enriched_description?: string | null;
+            /** Highway Name */
+            highway_name?: string | null;
+            /** Hole Count */
+            hole_count?: string | null;
+            /** Homepage Url */
+            homepage_url?: string | null;
+            /** Icao Code */
+            icao_code?: string | null;
+            /** Image Url */
+            image_url?: string | null;
+            /** Institution Nm */
+            institution_nm?: string | null;
+            /** Instt Nm */
+            instt_nm?: string | null;
+            /** Lpg Yn */
+            lpg_yn?: boolean | null;
+            /** Management Agency */
+            management_agency?: string | null;
+            /** Media Title */
+            media_title?: string | null;
+            /** Name English */
+            name_english?: string | null;
+            /** Operating Time */
+            operating_time?: string | null;
+            /** Operator */
+            operator?: string | null;
+            /** Parkingchrge Info */
+            parkingchrge_info?: string | null;
+            /** Prkcmprt */
+            prkcmprt?: number | null;
+            /** Prkplce Se */
+            prkplce_se?: string | null;
+            /** Provider Category */
+            provider_category?: string | null;
+            /** Reference Date */
+            reference_date?: string | null;
+            /** Region */
+            region?: string | null;
+            /** Region Name */
+            region_name?: string | null;
+            /** Sales Method Name */
+            sales_method_name?: string | null;
+            /** Service Slug */
+            service_slug?: string | null;
+            /** Source Category */
+            source_category?: string | null;
+            /** Stor Number */
+            stor_number?: number | null;
+            /** Stret Intrcn */
+            stret_intrcn?: string | null;
+            /** Stret Lt */
+            stret_lt?: number | null;
+            /** Subtype Name */
+            subtype_name?: string | null;
+            /** Trrsrt Se */
+            trrsrt_se?: string | null;
+            /** Wheelchair */
+            wheelchair?: boolean | null;
+        };
+        /** PublicCuratedPlaceFeatureView */
+        PublicCuratedPlaceFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            detail: components["schemas"]["PublicCuratedPlaceDetail"];
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "place";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PublicCuratedPriceFeatureView */
+        PublicCuratedPriceFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            /** Detail */
+            detail?: null;
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "price";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * PublicCuratedReviewLinks
+         * @description 검토된 리뷰 서비스의 HTTP(S) 링크.
+         */
+        PublicCuratedReviewLinks: {
+            /** Google */
+            google?: string | null;
+            /** Kakao */
+            kakao?: string | null;
+            /** Naver */
+            naver?: string | null;
+            /** Tripadvisor */
+            tripadvisor?: string | null;
+        };
+        /** PublicCuratedRouteDetail */
+        PublicCuratedRouteDetail: {
+            /** Begin Address */
+            begin_address?: string | null;
+            /** Begin Name */
+            begin_name?: string | null;
+            /** Difficulty */
+            difficulty?: string | null;
+            /** End Address */
+            end_address?: string | null;
+            /** End Name */
+            end_name?: string | null;
+            /** Expected Duration Minutes */
+            expected_duration_minutes?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Geometry Source */
+            geometry_source?: string | null;
+            /** Geometry Status */
+            geometry_status?: string | null;
+            /**
+             * Route Type
+             * @default route
+             */
+            route_type: string;
+            /** Total Distance Meters */
+            total_distance_meters?: number | null;
+        };
+        /** PublicCuratedRouteFeatureView */
+        PublicCuratedRouteFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            detail: components["schemas"]["PublicCuratedRouteDetail"];
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "route";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PublicCuratedSpecialOpeningDay */
+        PublicCuratedSpecialOpeningDay: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /**
+             * Exceptional Hours
+             * @default true
+             */
+            exceptional_hours: boolean;
+            /**
+             * Is Closed
+             * @default false
+             */
+            is_closed: boolean;
+            /** Periods */
+            periods?: components["schemas"]["PublicCuratedOpeningPeriod"][] | null;
+        };
+        /** PublicCuratedWeatherFeatureView */
+        PublicCuratedWeatherFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            /** Detail */
+            detail?: null;
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "weather";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
          * PublicFeatureListData
          * @description public feature 목록 data payload (ADR-073 D-9-2 지도 완결성 계약).
          *
@@ -13582,11 +14262,7 @@ export interface operations {
     list_curated_features_route_v1_curated_features_get: {
         parameters: {
             query?: {
-                theme_id?: string | null;
                 theme_slug?: string | null;
-                source_id?: string | null;
-                provider?: string | null;
-                dataset_key?: string | null;
                 region_code?: string | null;
                 sido_code?: string | null;
                 sigungu_code?: string | null;
@@ -13612,7 +14288,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CuratedFeaturesResponse"];
+                    "application/json": components["schemas"]["PublicCuratedFeaturesResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13652,7 +14328,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CuratedFeatureResponse"];
+                    "application/json": components["schemas"]["PublicCuratedFeatureResponse"];
                 };
             };
             /** @description Validation Error */

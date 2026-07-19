@@ -36,6 +36,13 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | operator | `/v1/provider-datasets` | ADR-069 DB-owned dataset 관리 |
 
 공개 DTO에는 `raw_data`, `raw_payload_hash`, `source_record_key`, provider payload passthrough가 없다.
+공개 curated list/detail도 admin overlay DTO와 분리한 명시적 allowlist를 사용한다.
+`PublicCuratedFeatureView`는 `feature_kind`로 판별하는 7종
+`place|event|notice|area|route|price|weather` union이다. 주소와 kind별 detail은 strict
+중첩 DTO이며, place의 시설·영업시간·전화·리뷰 링크도 검토된 키와 값만 새로 조립한다.
+따라서 `detail.payload`, concierge YouTube/transcript/evidence 미러, 알 수 없는 nested raw,
+DB/source identity, 선정 감사 필드는 직렬화되지 않고 `/v1/admin/features/curated*`에만
+남는다. 알 수 없는 kind는 공개 목록에서 제외하고 상세는 404다(T-VN-05R).
 `include_geometry`는 동일 candidate set의 serialization만 바꾸고, `include_total=false`이면 COUNT를
 실행하지 않는다. cursor는 version과 정규화 query fingerprint가 다르면
 `CURSOR_QUERY_MISMATCH`로 거부한다. body actor, 동작하지 않는 beach 옵션, 수기 OpenAPI allowlist는
@@ -301,6 +308,11 @@ GET /v1/curated-features
 GET /v1/curated-features/{curated_feature_id}
 GET /v1/curated-features/{curated_feature_id}/pinvi-copy
 ```
+
+공개 목록은 `theme_slug`, 표시 텍스트(`q`, `feature_name`, `display_title`), 행정구역·bbox와
+cursor만 받는다. `theme_id`, `source_id`, `provider`, `dataset_key` 같은 내부 identity
+필터는 `/v1/admin/features/curated`에만 둔다. 응답의 7종 판별 union과 strict nested
+projection은 알 수 없는 kind/필드를 fail-closed 처리한다(T-VN-05R).
 
 write/admin 표면은 `/v1/admin/curated-*`로 둔다. T-223c-1은 DB/API foundation과
 rule apply endpoint까지 제공하며, Dagster 자동 실행과 Admin UI는 T-223c-2/c-3 후속이다.

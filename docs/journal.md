@@ -32,6 +32,19 @@
   cluster EXPLAIN 2건, tier-1 성능 12건, public view/cluster 회귀 17건이 통과했다.
   OpenAPI admin/user drift, admin/user TypeScript type-check, E2E ESLint, Ruff, main strict
   mypy, 변경 API strict mypy, import-linter 4계약, redaction도 통과했다.
+## 2026-07-19 (codex, agent B) — T-VN-05R public curated allowlist
+
+- PR #752의 T-VN-05가 feature detail/batch에서 제거한 raw 경계를 public curated
+  list/detail이 기존 admin DTO 재사용으로 우회하던 issue #765를 구현했다.
+- 공개 전용 DTO와 명시 mapper를 추가해 표시·위치·큐레이션·출처 표시 필드만
+  직렬화한다. 동일 리뷰어 지적을 반영해 공개 모델을 `feature_kind` 판별 7종 union으로
+  구체화하고 주소·kind별 detail·place 시설/영업시간/전화/리뷰 링크를 strict 중첩 DTO와
+  명시 projector로 닫았다. 알 수 없는 kind는 목록 제외/상세 404다.
+- 실제 concierge YouTube/transcript/evidence 평면 미러와 중첩 raw sentinel을 주입해
+  공개 list/detail에서 제거되는 회귀, admin raw 보존,
+  full/user OpenAPI의 public/admin schema 분리와 user generated type drift를 함께 고정했다.
+  공개 query의 `theme_id/source_id/provider/dataset_key`도 제거해 표시·위치 탐색과 admin
+  identity 탐색을 분리했다. 요청에 따라 이 커밋에서는 테스트를 실행하지 않는다.
 
 ## 2026-07-19 (codex, agent B) — T-VN-21R release benchmark 측정 정확성
 

@@ -135,6 +135,24 @@
   `uq_curated_features_theme_feature_active`의 잘못된 `NULLS NOT DISTINCT` metadata 옵션은
   제거해 migration과 일치시키고 Alembic 일반 비교 대상으로 복귀시켰다.
 
+### 공개 curated raw lineage 우회 차단 (2026-07-19, ADR-073 T-VN-05R)
+
+- **SECURITY**: `GET /v1/curated-features`와 단건 상세가 admin DTO를 재사용하지 않고
+  공개 전용 `PublicCuratedFeatureView` allowlist를 반환한다. 공개 계약은 `feature_kind`가
+  판별자인 `place|event|notice|area|route|price|weather` union이며, 알 수 없는 kind는
+  목록에서 제외하고 상세에서 404로 닫는다. `detail.payload`,
+  `source_record_key`, DB/source identity, 선정 감사값, 자유형 metadata는 공개 응답과
+  `openapi.user.json`/user 생성 타입에서 제거했다.
+- **SECURITY**: `address`와 kind별 `detail`을 strict 중첩 DTO로 전환했다. place의
+  `phones`, `reviews_link`, `business_hours`, `facility_info`도 검토된 키와 값 형태만 새로
+  조립하므로 concierge YouTube/transcript/evidence 미러와 알 수 없는 nested raw 키가
+  공개 응답을 우회할 수 없다.
+- **REMOVED**: 공개 목록 query에서 내부 identity 필터 `theme_id`, `source_id`, `provider`,
+  `dataset_key`를 제거했다. 공개 탐색은 `theme_slug`, 표시 텍스트, 위치 필터만 사용하고
+  내부 identity 필터는 admin 목록에만 남는다.
+- **UNCHANGED**: `/v1/admin/features/curated*`는 기존 `CuratedFeatureView`를 계속 사용해
+  source record와 raw detail, 감사 actor/시각을 보존한다.
+
 ### 공개 raw payload 경계 제거 (2026-07-19, ADR-073 T-VN-05)
 
 - **SECURITY**: 공개 feature detail·batch(`GET /v1/features/{id}`,

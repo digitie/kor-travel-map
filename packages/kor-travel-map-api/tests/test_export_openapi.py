@@ -69,6 +69,29 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "curation_status" in _query_parameter_names(
         full, "/v1/admin/features/curated"
     )
+    public_curated_queries = _query_parameter_names(full, "/v1/curated-features")
+    admin_curated_queries = _query_parameter_names(
+        full, "/v1/admin/features/curated"
+    )
+    assert {"theme_slug", "q", "feature_name", "display_title"} <= (
+        public_curated_queries
+    )
+    assert {"theme_id", "source_id", "provider", "dataset_key"}.isdisjoint(
+        public_curated_queries
+    )
+    assert {"theme_id", "source_id", "provider", "dataset_key"} <= (
+        admin_curated_queries
+    )
+    assert _refs(
+        full["paths"]["/v1/curated-features"]["get"]["responses"]["200"]
+    ) == {"PublicCuratedFeaturesResponse"}
+    assert _refs(
+        full["paths"]["/v1/admin/features/curated"]["get"]["responses"]["200"]
+    ) == {"CuratedFeaturesResponse"}
+    full_schemas = full["components"]["schemas"]
+    assert "source_record_key" in _schema_properties(full, "CuratedFeatureView")
+    assert "PublicCuratedFeatureView" in full_schemas
+    assert "CuratedFeatureView" in full_schemas
 
     assert user["info"]["title"] == "kor-travel-map-user"
     assert set(user["paths"]) == {
@@ -110,7 +133,8 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "FeatureBatchResponse" in schemas
     assert "BeachPublicView" in schemas
     assert "FestivalPublicView" in schemas
-    assert "CuratedFeatureView" in schemas
+    assert "PublicCuratedFeatureView" in schemas
+    assert "CuratedFeatureView" not in schemas
     assert "FeatureCurationGroupsResponse" in schemas
     assert "CurationCollectionResponse" in schemas
     assert "FeatureCurationGroupResponse" in schemas
@@ -122,6 +146,98 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "FeatureObservationView" not in schemas
     assert "FeatureSourcesResponse" not in schemas
     assert "FeatureSourcesData" not in schemas
+    # T-VN-05R: 공개 schema는 feature_kind 판별 union이고 각 variant/nested DTO가
+    # extra를 닫는다. admin/source identity와 raw lineage는 어느 variant에도 없다.
+    public_union = schemas["PublicCuratedFeatureView"]
+    discriminator = public_union["discriminator"]
+    variant_names = {
+        "place": "PublicCuratedPlaceFeatureView",
+        "event": "PublicCuratedEventFeatureView",
+        "notice": "PublicCuratedNoticeFeatureView",
+        "area": "PublicCuratedAreaFeatureView",
+        "route": "PublicCuratedRouteFeatureView",
+        "price": "PublicCuratedPriceFeatureView",
+        "weather": "PublicCuratedWeatherFeatureView",
+    }
+    assert discriminator["propertyName"] == "feature_kind"
+    assert discriminator["mapping"] == {
+        kind: f"#/components/schemas/{name}" for kind, name in variant_names.items()
+    }
+    assert _refs(public_union["oneOf"]) == set(variant_names.values())
+
+    internal_fields = {
+        "theme_id",
+        "source_id",
+        "provider",
+        "dataset_key",
+        "source_record_key",
+        "selection_origin",
+        "selected_by",
+        "selected_at",
+        "rejected_by",
+        "rejected_at",
+        "rejection_reason",
+        "metadata",
+        "created_at",
+        "archived_at",
+    }
+    common_public_fields = {
+        "curated_feature_id",
+        "theme_slug",
+        "feature_id",
+        "detail",
+        "source_name",
+        "content_version",
+        "updated_at",
+    }
+    for variant_name in variant_names.values():
+        assert schemas[variant_name]["additionalProperties"] is False
+        properties = _schema_properties(user, variant_name)
+        assert internal_fields.isdisjoint(properties)
+        assert common_public_fields <= properties
+
+    strict_nested_schemas = {
+        "PublicCuratedAddress",
+        "PublicCuratedOpeningTime",
+        "PublicCuratedOpeningPeriod",
+        "PublicCuratedSpecialOpeningDay",
+        "PublicCuratedOpeningHours",
+        "PublicCuratedReviewLinks",
+        "PublicCuratedPlaceFacilityInfo",
+        "PublicCuratedPlaceDetail",
+        "PublicCuratedEventDetail",
+        "PublicCuratedNoticeDetail",
+        "PublicCuratedAreaDetail",
+        "PublicCuratedRouteDetail",
+    }
+    for schema_name in strict_nested_schemas:
+        assert schemas[schema_name]["additionalProperties"] is False
+    assert {
+        "youtube_video_id",
+        "youtube_video_url",
+        "youtube_video_title",
+        "youtube_channel_id",
+        "youtube_channel_title",
+        "youtube_playlist_id",
+        "youtube_playlist_title",
+        "youtube_source_type",
+        "youtube_source_value",
+        "youtube_source_title",
+        "youtube_source_search_query",
+        "youtube_corrected_search_query",
+        "timestamp_start",
+        "timestamp_end",
+        "transcript_excerpt",
+        "gemini_url_evidence",
+        "confidence_score",
+        "source_record_key",
+    }.isdisjoint(_schema_properties(user, "PublicCuratedPlaceFacilityInfo"))
+    assert {
+        "bjd_code",
+        "admin_dong_code",
+        "road_name_code",
+        "road_address_management_no",
+    }.isdisjoint(_schema_properties(user, "PublicCuratedAddress"))
     assert _refs(user["paths"]) <= set(schemas)
     assert {
         "coord_5179_srid",

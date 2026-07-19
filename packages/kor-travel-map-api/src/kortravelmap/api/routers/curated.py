@@ -19,6 +19,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
+from kortravelmap.api.curated_public_schema import (
+    PublicCuratedFeatureResponse,
+    PublicCuratedFeaturesData,
+    PublicCuratedFeaturesResponse,
+    PublicCuratedFeatureView,
+    public_curated_feature_view,
+)
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
 
@@ -138,7 +145,7 @@ class CuratedSourceRuleView(BaseModel):
 
 
 class CuratedFeatureView(BaseModel):
-    """curated feature overlay view."""
+    """admin/operator curated feature overlay view."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -494,6 +501,14 @@ def _feature_view(row: curated_repo.CuratedFeature) -> CuratedFeatureView:
     return CuratedFeatureView(**row.__dict__)
 
 
+def _public_feature_view(
+    row: curated_repo.CuratedFeature,
+) -> PublicCuratedFeatureView | None:
+    """테스트/호출부가 공유하는 공개 projection 진입점."""
+
+    return public_curated_feature_view(row)
+
+
 def _snapshot_view(
     row: curated_repo.CuratedFeatureDetailSnapshot,
 ) -> CuratedFeatureDetailSnapshotView:
@@ -839,14 +854,14 @@ async def list_curated_sources_route(
     )
 
 
-@router.get("/curated-features", response_model=CuratedFeaturesResponse)
+@router.get(
+    "/curated-features",
+    response_model=PublicCuratedFeaturesResponse,
+    response_model_exclude_none=True,
+)
 async def list_curated_features_route(
     session: Annotated[AsyncSession, Depends(get_session)],
-    theme_id: Annotated[str | None, Query()] = None,
     theme_slug: Annotated[str | None, Query()] = None,
-    source_id: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
-    dataset_key: Annotated[str | None, Query()] = None,
     region_code: Annotated[str | None, Query()] = None,
     sido_code: Annotated[str | None, Query()] = None,
     sigungu_code: Annotated[str | None, Query()] = None,
@@ -859,16 +874,12 @@ async def list_curated_features_route(
     display_title: Annotated[str | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
-) -> CuratedFeaturesResponse:
+) -> PublicCuratedFeaturesResponse:
     started_at = perf_counter()
     try:
         page = await curated_repo.list_curated_features(
             session,
-            theme_id=theme_id,
             theme_slug=theme_slug,
-            source_id=source_id,
-            provider=provider,
-            dataset_key=dataset_key,
             curation_status="curated",
             region_code=region_code,
             sido_code=sido_code,
@@ -886,25 +897,35 @@ async def list_curated_features_route(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return CuratedFeaturesResponse(
-        data=CuratedFeaturesData(items=[_feature_view(row) for row in page.items]),
+    return PublicCuratedFeaturesResponse(
+        data=PublicCuratedFeaturesData(
+            items=[
+                item
+                for row in page.items
+                if (item := _public_feature_view(row)) is not None
+            ]
+        ),
         meta=make_meta(started_at=started_at, next_cursor=page.next_cursor),
     )
 
 
 @router.get(
     "/curated-features/{curated_feature_id}",
-    response_model=CuratedFeatureResponse,
+    response_model=PublicCuratedFeatureResponse,
+    response_model_exclude_none=True,
 )
 async def get_curated_feature_route(
     curated_feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> CuratedFeatureResponse:
+) -> PublicCuratedFeatureResponse:
     started_at = perf_counter()
     # 공개 표면 — underlying feature가 공개 projection에 없으면 404 (ADR-067).
     row = await _feature_or_404(session, curated_feature_id, public_only=True)
-    return CuratedFeatureResponse(
-        data=_feature_view(row),
+    view = _public_feature_view(row)
+    if view is None:
+        raise HTTPException(status_code=404, detail="지원하지 않는 공개 feature kind")
+    return PublicCuratedFeatureResponse(
+        data=view,
         meta=make_meta(started_at=started_at),
     )
 
