@@ -457,16 +457,14 @@ async def test_forward_only_guard_invokes_non_destination_callbacks_once(
         assert output.getvalue().count(_HEAD_REVISION) == 1
 
         calls = 0
-        original = RevisionContext.run_autogenerate
 
         def count_autogenerate(
-            self: RevisionContext,
-            rev: tuple[str, ...],
-            migration_context: Any,
+            _self: RevisionContext,
+            _rev: tuple[str, ...],
+            _migration_context: Any,
         ) -> None:
             nonlocal calls
             calls += 1
-            original(self, rev, migration_context)
 
         monkeypatch.setattr(RevisionContext, "run_autogenerate", count_autogenerate)
         await asyncio.to_thread(command.check, _alembic_config(dsn))
