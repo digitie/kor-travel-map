@@ -19,6 +19,17 @@
   Ruff·mypy·import-linter·redaction 게이트가 통과했다.
 - **다음 한 작업**: 후속 PR을 CI green 뒤 `integration/t-vn`에 병합한다.
 
+## 2026-07-19 (codex, agent B) — T-VN-21R 구현 완료·리뷰 대기
+
+- #767 구현을 `fix/t-vn-21r-benchmark-correctness`에 준비했다. Tier-2 harness는
+  seed/skip-seed 모드 모두 DB의 non-notice public ID 200개로 batch를 구성하고,
+  terminal LIMIT 전 `matched_rows`와 LIMIT 뒤 `returned_rows`/최소 cardinality를
+  분리해 검증한다. shared read는 최상위 Plan 누적값으로 단일화했다.
+- seed inactive 규칙·notice 후보 제외·199건 부족·실제 truncation·모든 viewport
+  수량·root/child·Append/parallel plan 회귀 테스트를 작성했다. **다음 한 작업**:
+  같은 적대적 리뷰어 1명의
+  테스트 전 승인을 받고 finding을 반영한 뒤 로컬 gate를 실행한다.
+
 ## 2026-07-19 (codex) — 최근 48시간 Claude PR 적대 리뷰 후속 계획
 
 - 단일 전문 리뷰어가 PR #752/#756/#757/#759/#760/#763을 심층 검토했다. #757/#759는

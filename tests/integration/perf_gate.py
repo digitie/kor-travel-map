@@ -366,7 +366,7 @@ INSERT INTO feature.features (
     created_at, updated_at
 )
 SELECT
-    'perf:f:' || lpad(g::text, 6, '0') AS feature_id,
+    :feature_id_prefix || lpad(g::text, 6, '0') AS feature_id,
     CASE WHEN g % 19 = 0 THEN 'event' WHEN g % 23 = 0 THEN 'weather'
          ELSE 'place' END AS kind,
     CASE
@@ -456,13 +456,19 @@ INSERT INTO provider_sync.source_links (
     match_method, confidence, is_primary_source, created_at
 )
 SELECT
-    'perf:f:' || lpad(g::text, 6, '0'), 'perf:se:' || lpad(g::text, 6, '0'),
+    :feature_id_prefix || lpad(g::text, 6, '0'),
+    'perf:se:' || lpad(g::text, 6, '0'),
     'primary', 'natural_key', 100, true, now()
 FROM generate_series(1, :n) AS g
 """
 
 
-async def seed_hot_query_features(session: AsyncSession, *, n: int = 3200) -> None:
+async def seed_hot_query_features(
+    session: AsyncSession,
+    *,
+    n: int = 3200,
+    feature_id_prefix: str = "perf:f:",
+) -> None:
     """서울/부산/제주 분포의 features + primary source lineage를 seed하고 ANALYZE한다.
 
     tier-1 EXPLAIN이 실제 planner 선택을 보려면 통계가 필요하므로 ANALYZE한다. 공개
@@ -470,9 +476,14 @@ async def seed_hot_query_features(session: AsyncSession, *, n: int = 3200) -> No
     LATERAL이 실측 plan을 내도록 source_entities/records/links도 함께 채운다(빈
     상태면 planner가 features를 seq-scan한다). ops/review 계열은 public hot query에
     불필요해 생략한다. n은 selective 쿼리에서 planner가 index를 선호하기에 충분하다.
+    ``feature_id_prefix``는 tier-2가 고정 fixture ID에 의존하지 않는 경로를 검증할 때만
+    바꾸며 tier-1 기본 계약은 ``perf:f:``를 유지한다.
     """
 
-    await session.execute(text(_SEED_FEATURES_SQL), {"n": n})
+    await session.execute(
+        text(_SEED_FEATURES_SQL),
+        {"n": n, "feature_id_prefix": feature_id_prefix},
+    )
     await session.execute(text(_SEED_SOURCE_ENTITIES_SQL), {"n": n})
     await session.execute(text(_SEED_SOURCE_RECORDS_SQL), {"n": n})
     await session.execute(
@@ -482,5 +493,8 @@ async def seed_hot_query_features(session: AsyncSession, *, n: int = 3200) -> No
             "WHERE se.source_entity_key LIKE 'perf:se:%'"
         )
     )
-    await session.execute(text(_SEED_SOURCE_LINKS_SQL), {"n": n})
+    await session.execute(
+        text(_SEED_SOURCE_LINKS_SQL),
+        {"n": n, "feature_id_prefix": feature_id_prefix},
+    )
     await session.execute(text("ANALYZE"))
