@@ -26,6 +26,9 @@ type FeatureSchemas = components["schemas"];
 
 export type FeatureSummary = FeatureSchemas["FeatureSummary"];
 export type FeaturesInBboxResponse = FeatureSchemas["FeaturesInBboxResponse"];
+export type FeatureSearchResponse = FeatureSchemas["FeatureSearchResponse"];
+export type FeatureSearchProblem = FeatureSchemas["FeatureSearchProblem"];
+export type FeatureSearchErrorCode = FeatureSearchProblem["code"];
 export type FeatureCluster = FeatureSchemas["ClusterSummary"];
 type FeaturesInBoundsResponse = FeatureSchemas["FeaturesInBoundsResponse"];
 export type AdminFeatureMapItem = FeatureSchemas["AdminFeatureMapItem"];
@@ -415,6 +418,70 @@ export function featureViewportQueryKey(
     params.includeGeometry ? "geometry" : "summary",
     params.page_size ?? 500,
   ] as const;
+}
+
+// ── 공개 feature 검색 (`GET /v1/features/search`) ─────────────────────────────
+
+type FeatureSearchQuery = NonNullable<
+  paths["/v1/features/search"]["get"]["parameters"]["query"]
+>;
+
+/** BFF가 인증을 소유하므로 browser consumer에서는 public `key`를 받지 않는다. */
+export type FeatureSearchParams = Omit<
+  FeatureSearchQuery,
+  "category" | "key" | "kind"
+> & {
+  category?: string[];
+  kind?: string[];
+};
+
+export function featureSearchPath(params: FeatureSearchParams): string {
+  return pathWithQuery("/v1/features/search", {
+    q: params.q,
+    kind: params.kind,
+    category: params.category,
+    min_lon: params.min_lon,
+    min_lat: params.min_lat,
+    max_lon: params.max_lon,
+    max_lat: params.max_lat,
+    page_size: params.page_size,
+    cursor: params.cursor,
+    // COUNT는 사용자가 명시한 경우에만 켠다. undefined를 보내 서버 기본에
+    // 기대지 않고 UI query/cache 계약에도 false를 고정한다.
+    include_total: params.include_total ?? false,
+  });
+}
+
+export async function fetchFeatureSearch(
+  params: FeatureSearchParams,
+  signal?: AbortSignal,
+): Promise<FeatureSearchResponse> {
+  return getJson<FeatureSearchResponse>(featureSearchPath(params), { signal });
+}
+
+function hasFeatureSearchScope(params: FeatureSearchParams | null): boolean {
+  if (params === null) return false;
+  if (typeof params.q === "string" && params.q.trim().length > 0) return true;
+  return (
+    typeof params.min_lon === "number" &&
+    typeof params.min_lat === "number" &&
+    typeof params.max_lon === "number" &&
+    typeof params.max_lat === "number"
+  );
+}
+
+export function useFeatureSearch(
+  params: FeatureSearchParams | null,
+  options?: { enabled?: boolean },
+) {
+  return useQuery<FeatureSearchResponse, Error>({
+    queryKey: ["feature-search", params] as const,
+    queryFn: ({ signal }) =>
+      fetchFeatureSearch(params as FeatureSearchParams, signal),
+    enabled: (options?.enabled ?? true) && hasFeatureSearchScope(params),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
 }
 
 // ── 저zoom region 클러스터 (`GET /v1/features/in-bounds`, zoom 유도) ─────────────

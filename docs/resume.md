@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex, agent B) — T-VN-15 구현·생성 계약 준비 완료, 테스트 전 리뷰 대기
+
+`/v1/features/search`의 total opt-in을 repository 실행 계약으로 내리고,
+`include_total=false`에서는 COUNT statement를 전혀 실행하지 않도록 고정했다. cursor는 DB table 없는
+stateless v1이며, SQL과 같은 정규화 q/filter/sort/page contract fingerprint와 keyset을 전용
+server-only secret의 HMAC-SHA256으로 보호한다. production secret 누락/짧음/재사용은 fail-closed,
+local-dev만 process-local 난수 fallback이다. malformed, unknown version, tamper, query mismatch는
+DB 전에 별도 typed RFC7807 422로 반환한다. repository/client/API, settings/entrypoint/Compose,
+admin UI consumer, admin/user OpenAPI와 생성 TypeScript, repository spy·실제 PostgreSQL·runtime
+matrix 테스트까지 PR #780에 준비했다. **다음 한 작업**은 최신 `integration/t-vn`에 rebase한 exact
+head를 push하고 같은 단일 적대 리뷰어에게 테스트 전 검토를 요청하는 것이다. 승인 전에는
+test/lint/build를 실행하지 않는다.
+
 ## 2026-07-19 (codex, agent B) — T-VN-04A admin 비공개 Feature 구현·리뷰 대기
 
 - issue #741을 `integration/t-vn` 기준 독립 PR로 분리했다. public projection을 우회하거나
@@ -10,7 +23,6 @@
 - full OpenAPI와 admin TypeScript 타입을 재생성하고 repository/router/frontend/PostGIS·route-mock
   회귀를 작성했다. **다음 한 작업**: 정확한 구현 head를 같은 적대 리뷰어 1명이 테스트 전에
   검토한다. 승인 전 테스트·lint·build는 실행하지 않는다.
-
 ## 2026-07-19 (codex) — latest main → integration/t-vn 동기화 리뷰 대기
 
 `integration/t-vn@22bf35a5`에 `main@d2104f15`를 merge하는 전용 sync branch를 만들었다.

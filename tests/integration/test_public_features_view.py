@@ -39,6 +39,7 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _NOW = datetime(2026, 7, 19, 12, 0, tzinfo=_KST)
+_SEARCH_CURSOR_KEY = b"integration-feature-search-cursor-signing-key-0001"
 
 # 서울시청 근처 bbox.
 _BBOX = {"min_lon": 126.9, "min_lat": 37.5, "max_lon": 127.1, "max_lat": 37.7}
@@ -193,13 +194,19 @@ async def test_bbox_cluster_search_nearby_share_projection(
     )
     assert {c["cluster_key"]: c["feature_count"] for c in clusters} == {"11140": 1}
 
-    search_q = await feature_repo.search_features(migrated_session, q="교차로장소")
+    search_q = await feature_repo.search_features(
+        migrated_session,
+        q="교차로장소",
+        include_total=True,
+        cursor_signing_key=_SEARCH_CURSOR_KEY,
+    )
     assert {item.feature_id for item in search_q.items} == public
     assert search_q.total_count == len(public)
 
     search_bbox = await feature_repo.search_features(
         migrated_session,
         bbox=(_BBOX["min_lon"], _BBOX["min_lat"], _BBOX["max_lon"], _BBOX["max_lat"]),
+        cursor_signing_key=_SEARCH_CURSOR_KEY,
     )
     assert {item.feature_id for item in search_bbox.items} == public
 

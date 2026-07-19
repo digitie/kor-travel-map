@@ -189,13 +189,22 @@ async def test_search_features_delegates_to_repo(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(client_mod, "repo_search_features", _fake)
     client = _read_client(monkeypatch)
-    out = await client.search_features(q="불국사", kinds=["place"], limit=10)
+    cursor_signing_key = b"unit-test-feature-search-cursor-signing-key-0001"
+    out = await client.search_features(
+        q="불국사",
+        kinds=["place"],
+        page_size=10,
+        include_total=True,
+        cursor_signing_key=cursor_signing_key,
+    )
     assert out is sentinel
     assert recorded["q"] == "불국사"
     assert recorded["kinds"] == ["place"]
-    assert recorded["limit"] == 10
+    assert recorded["page_size"] == 10
     assert recorded["bbox"] is None
     assert recorded["cursor"] is None
+    assert recorded["include_total"] is True
+    assert recorded["cursor_signing_key"] == cursor_signing_key
 
 
 async def test_features_nearby_target_delegates_to_repo(

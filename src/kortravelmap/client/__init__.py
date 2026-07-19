@@ -1721,15 +1721,18 @@ class AsyncKorTravelMapClient:
         bbox: tuple[float, float, float, float] | None = None,
         kinds: Sequence[str] | None = None,
         categories: Sequence[str] | None = None,
-        limit: int = 50,
+        page_size: int = 50,
         cursor: str | None = None,
+        include_total: bool = False,
+        cursor_signing_key: bytes,
     ) -> FeatureSearchPage:
         """사용자 feature 검색(pg_trgm ``q`` 또는 ``bbox``) — keyset cursor.
 
         ``infra.feature_repo.search_features`` 위임. ``q``/``bbox`` 중 하나는 필수
-        (둘 다 없으면 ``ValueError``). ``q``는 ``SET LOCAL`` threshold로만 적용한다
-        (ADR-004). T-213d로 admin ``/features/search``와 같은 read path를 client에서도
-        재사용한다.
+        (둘 다 없으면 ``ValueError``). ``cursor_signing_key``는 인증 credential과
+        분리한 32-byte 이상 HMAC key다. ``include_total=False``면 COUNT를 실행하지
+        않고 ``total_count=None``을 반환한다. ``q``는 ``SET LOCAL`` threshold로만
+        적용한다(ADR-004).
         """
         async with self._session_factory() as session:
             return await repo_search_features(
@@ -1738,8 +1741,10 @@ class AsyncKorTravelMapClient:
                 bbox=bbox,
                 kinds=kinds,
                 categories=categories,
-                limit=limit,
+                page_size=page_size,
                 cursor=cursor,
+                include_total=include_total,
+                cursor_signing_key=cursor_signing_key,
             )
 
     async def features_nearby(

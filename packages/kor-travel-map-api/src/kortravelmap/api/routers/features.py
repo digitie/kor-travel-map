@@ -26,6 +26,13 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from kortravelmap.core.exceptions import (
+    FeatureSearchCursorError,
+    FeatureSearchCursorInvalidError,
+    FeatureSearchCursorQueryMismatchError,
+    FeatureSearchCursorTamperedError,
+    FeatureSearchCursorVersionUnsupportedError,
+)
 from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
 from kortravelmap.infra import (
     curation_repo,
@@ -44,8 +51,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kortravelmap.api.auth import require_admin_frontend, require_service_token
 from kortravelmap.api.db import get_session
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
-from kortravelmap.api.response import ClusterUnit, Meta, make_meta
+from kortravelmap.api.response import ClusterUnit, Meta, ProblemDetail, make_meta
 from kortravelmap.api.routers.curations import CurationItemView
+from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
     "router",
@@ -57,6 +65,7 @@ __all__ = [
     "FeatureBatchRequest",
     "FeatureBatchResponse",
     "FeatureSearchResponse",
+    "FeatureSearchProblem",
     "FeatureSourcesResponse",
     "FeaturesNearbyByTargetResponse",
 ]
@@ -72,6 +81,35 @@ _PUBLIC_DETAIL_STRIPPED_KEYS: frozenset[str] = frozenset({"payload"})
 
 router = APIRouter(prefix="/features", tags=["features"])
 NearbySort = Literal["distance", "name", "last_updated_at"]
+
+
+def _search_cursor_signing_key(request: Request) -> bytes:
+    settings = getattr(request.app.state, "settings", None)
+    if not isinstance(settings, ApiSettings):
+        raise RuntimeError("ApiSettings is not configured on the application")
+    return settings.cursor_signing_key
+
+
+def _search_cursor_http_error(exc: FeatureSearchCursorError) -> HTTPException:
+    if isinstance(exc, FeatureSearchCursorVersionUnsupportedError):
+        code = "FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED"
+        message = "지원하지 않는 feature search cursor version입니다."
+    elif isinstance(exc, FeatureSearchCursorTamperedError):
+        code = "FEATURE_SEARCH_CURSOR_TAMPERED"
+        message = "Feature search cursor 무결성 검증에 실패했습니다."
+    elif isinstance(exc, FeatureSearchCursorQueryMismatchError):
+        code = "CURSOR_QUERY_MISMATCH"
+        message = "Feature search cursor가 현재 검색 조건과 일치하지 않습니다."
+    elif isinstance(exc, FeatureSearchCursorInvalidError):
+        code = "FEATURE_SEARCH_CURSOR_INVALID"
+        message = "Feature search cursor 형식이 올바르지 않습니다."
+    else:
+        code = "FEATURE_SEARCH_CURSOR_INVALID"
+        message = "Feature search cursor를 사용할 수 없습니다."
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={"code": code, "message": message, "details": {}},
+    )
 
 
 # ── 응답 schema ────────────────────────────────────────────────────────
@@ -406,6 +444,21 @@ class FeatureSearchResponse(BaseModel):
 
     data: FeatureSearchData
     meta: Meta
+
+
+FeatureSearchErrorCode = Literal[
+    "VALIDATION_ERROR",
+    "FEATURE_SEARCH_CURSOR_INVALID",
+    "FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED",
+    "FEATURE_SEARCH_CURSOR_TAMPERED",
+    "CURSOR_QUERY_MISMATCH",
+]
+
+
+class FeatureSearchProblem(ProblemDetail):
+    """Feature search request/cursor typed RFC7807 422."""
+
+    code: FeatureSearchErrorCode
 
 
 class AreaContainedFeaturesData(BaseModel):
@@ -848,7 +901,12 @@ async def list_public_features_in_bounds(
     "/search",
     response_model=FeatureSearchResponse,
     summary="feature 검색 (이름 trgm + bbox)",
-    responses={422: {"description": "검색 범위 또는 cursor 오류"}},
+    responses={
+        422: {
+            "model": FeatureSearchProblem,
+            "description": "검색 범위 또는 typed cursor 오류",
+        }
+    },
 )
 async def search_public_features(
     request: Request,
@@ -885,9 +943,13 @@ async def search_public_features(
             bbox=bbox,
             kinds=kind,
             categories=category,
-            limit=page_size,
+            page_size=page_size,
             cursor=cursor,
+            include_total=include_total,
+            cursor_signing_key=_search_cursor_signing_key(request),
         )
+    except FeatureSearchCursorError as exc:
+        raise _search_cursor_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     items = [
@@ -913,7 +975,7 @@ async def search_public_features(
             started_at=started_at,
             page_size=page_size,
             next_cursor=page.next_cursor,
-            total=page.total_count if include_total else None,
+            total=page.total_count,
         ),
     )
 

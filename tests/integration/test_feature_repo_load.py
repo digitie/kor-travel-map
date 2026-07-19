@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import (
@@ -46,6 +46,7 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 5, 29, 12, 0, tzinfo=_KST)
+_SEARCH_CURSOR_KEY = b"integration-feature-search-cursor-signing-key-0001"
 
 
 @dataclass(frozen=True)
@@ -1148,8 +1149,10 @@ async def test_get_feature_rows_by_ids_and_search_features(
             bbox=(lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1),
             kinds=["event"],
             categories=[first.feature.category],
-            limit=1,
+            page_size=1,
             cursor=cursor,
+            include_total=True,
+            cursor_signing_key=_SEARCH_CURSOR_KEY,
         )
         assert len(page.items) == 1
         assert page.total_count == 3
@@ -1169,10 +1172,52 @@ async def test_get_feature_rows_by_ids_and_search_features(
     bbox_only = await feature_repo.search_features(
         migrated_session,
         bbox=(lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1),
-        limit=10,
+        page_size=10,
+        include_total=True,
+        cursor_signing_key=_SEARCH_CURSOR_KEY,
     )
     assert bbox_only.total_count == 3
     assert first.feature.feature_id in {item.feature_id for item in bbox_only.items}
+
+
+async def test_search_features_include_total_false_skips_count_in_postgres(
+    migrated_session: AsyncSession,
+) -> None:
+    engine = migrated_session.get_bind()
+    statements: list[str] = []
+
+    def _record_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        statements.append(" ".join(statement.lower().split()))
+
+    event.listen(engine, "before_cursor_execute", _record_statement)
+    try:
+        without_total = await feature_repo.search_features(
+            migrated_session,
+            bbox=(126.0, 33.0, 130.0, 39.0),
+            include_total=False,
+            cursor_signing_key=_SEARCH_CURSOR_KEY,
+        )
+        assert without_total.total_count is None
+        assert not any("count(*)" in statement for statement in statements)
+
+        statements.clear()
+        with_total = await feature_repo.search_features(
+            migrated_session,
+            bbox=(126.0, 33.0, 130.0, 39.0),
+            include_total=True,
+            cursor_signing_key=_SEARCH_CURSOR_KEY,
+        )
+        assert with_total.total_count is not None
+        assert sum("count(*)" in statement for statement in statements) == 1
+    finally:
+        event.remove(engine, "before_cursor_execute", _record_statement)
 
 
 async def test_inactivate_geometryless_area_features_by_source(

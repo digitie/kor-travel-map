@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### Feature search COUNT opt-in + signed cursor (2026-07-19, T-VN-15)
+
+- **CHANGED (breaking)**: `/v1/features/search`의 `include_total` 기본값은 `false`다.
+  이 모드에서는 COUNT SQL을 실행하지 않고 `meta.page.total=null`을 반환하며,
+  `include_total=true`일 때만 같은 정규화 filter의 COUNT를 1회 실행한다.
+- **SECURITY**: search cursor를 version·정규화 query fingerprint·keyset을 담은 canonical
+  payload와 HMAC-SHA256 서명으로 교체했다. 변조, 알 수 없는 version, 다른 query/filter/page
+  계약에 재사용한 cursor는 DB 접근 전에 서로 구분되는 typed RFC7807 422로 거부한다.
+- **SECURITY**: production feature surface는 API 전용
+  `KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET`(공백 없는 32자 이상)을 필수화한다. 이 값은
+  public/admin/service/ops/metrics credential과 공유할 수 없고 API container에만 주입한다.
+  local-dev 미설정은 process-local 난수 key를 쓰므로 재시작·multi-worker 연속성을 보장하지 않는다.
+- **CHANGED (breaking)**: 내부 `feature_repo.search_features`와
+  `AsyncKorTravelMapClient.search_features`는 `limit` 대신 `page_size`, 명시적
+  `cursor_signing_key`, `include_total` 계약을 사용한다. 호환 shim은 두지 않는다.
+
 ### C6c manifest v4 Map runtime provenance (2026-07-19, T-ADM-C7P)
 
 - **SECURITY**: C7 runtime attestation은 compatible-pair manifest v4의 Map API·UI·

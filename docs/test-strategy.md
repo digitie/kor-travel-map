@@ -360,6 +360,26 @@ async def test_get_features_in_bounds(debug_client, seeded_features):
     assert len(body["features"]) > 0
 ```
 
+#### 5.1.1 feature search total·cursor 무결성
+
+T-VN-15는 repository spy와 실제 PostgreSQL 통합 테스트를 함께 둔다. 첫 페이지와 continuation에서
+`include_total=false`이면 실행 statement에 COUNT SQL이 0개이고 page-size+1 data SELECT가
+1개인지, `true`이면 동일 filter COUNT가 정확히 1개인지 검증한다. `q` 검색은 두 모드 모두
+transaction-local pg_trgm threshold 설정 statement가 별도로 실행될 수 있다. 두 모드 모두
+items와 next keyset은 같고
+`meta.page.total`만 `null`/정수로 달라야 한다.
+
+cursor 회귀는 q trim, filter 중복·순서, bbox float, q 유무 sort, page_size, include_total을 포함한
+canonical contract를 고정한다. 같은 의미의 filter 순서 변경은 continuation을 허용하고, q/bbox/
+kind/category/page_size/include_total 중 하나라도 의미가 바뀌면 DB 호출 0회와 RFC7807 422
+`CURSOR_QUERY_MISMATCH`를 단언한다. payload 또는 signature 한 byte 변조,
+truncated/non-base64/oversized token, 유효 서명의 unknown version, 잘못된 kind, NaN/무한대 score는
+각각 typed 422(`FEATURE_SEARCH_CURSOR_TAMPERED`/
+`FEATURE_SEARCH_CURSOR_INVALID`/`FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED`)로 fail-closed해야 한다.
+OpenAPI admin/user와 생성 TypeScript type은 네 cursor error code와 `include_total` 기본 false를
+같이 고정한다. production settings/entrypoint/Compose matrix는 feature surface가 켜진 상태의 secret
+누락·짧음·다른 신뢰 경계 secret 재사용을 기동 전에 거부하고 local-dev 난수 fallback만 허용한다.
+
 ### 5.2 인증 없음 동작 확인 (ADR-005)
 
 ```python

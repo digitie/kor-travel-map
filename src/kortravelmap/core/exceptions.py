@@ -37,6 +37,11 @@ __all__ = [
     "ImportJobConflictError",
     "ProviderError",
     "FileStoreError",
+    "FeatureSearchCursorError",
+    "FeatureSearchCursorInvalidError",
+    "FeatureSearchCursorVersionUnsupportedError",
+    "FeatureSearchCursorTamperedError",
+    "FeatureSearchCursorQueryMismatchError",
 ]
 
 
@@ -119,3 +124,23 @@ class FileStoreError(KorTravelMapError):
 
     HTTP 502 매핑.
     """
+
+
+class FeatureSearchCursorError(ValidationError):
+    """Feature search cursor 검증 실패의 typed base."""
+
+
+class FeatureSearchCursorInvalidError(FeatureSearchCursorError):
+    """Cursor 형식·kind·keyset 값이 유효하지 않다."""
+
+
+class FeatureSearchCursorVersionUnsupportedError(FeatureSearchCursorError):
+    """무결성은 확인됐지만 cursor version을 지원하지 않는다."""
+
+
+class FeatureSearchCursorTamperedError(FeatureSearchCursorError):
+    """Cursor HMAC이 일치하지 않아 변조된 payload로 판정했다."""
+
+
+class FeatureSearchCursorQueryMismatchError(FeatureSearchCursorError):
+    """Cursor가 현재 search query/filter/page 계약에 속하지 않는다."""

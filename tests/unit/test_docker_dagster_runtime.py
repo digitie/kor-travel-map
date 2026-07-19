@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+_CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
 
 
 def _compose() -> dict[str, Any]:
@@ -181,6 +182,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
         "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
         # ADR-066 결정 4 (T-VN-02) — /metrics scrape identity token도 같은
         # hard-require 패턴이다.
         "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
@@ -193,14 +195,18 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     assert "KOR_TRAVEL_MAP_API_METRICS_TOKEN is required" in str(
         api["environment"]["KOR_TRAVEL_MAP_API_METRICS_TOKEN"]
     )
+    assert "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET is required" in str(
+        api["environment"]["KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"]
+    )
 
     root_api_keys = _assigned_env_keys(_script(".env.example"), prefix="KOR_TRAVEL_MAP_API_")
     assert root_api_keys == {
         "KOR_TRAVEL_MAP_API_PORT",
         "KOR_TRAVEL_MAP_API_INTERNAL_URL",
         # compose interpolation이 root env에서 읽는 hard-require secret
-        # (T-VN-01 service token, T-VN-02 metrics token).
+        # (T-VN-01 service token, T-VN-02 metrics token, T-VN-15 cursor key).
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
         "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
     }
 
@@ -217,6 +223,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
         "KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED",
         "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
         "KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED",
@@ -226,6 +233,11 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED",
     } <= package_api_keys
     assert "KOR_TRAVEL_MAP_API_OPS_ACTOR" not in package_api_keys
+    assert all(
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"
+        not in services[name]["environment"]
+        for name in ("frontend", "dagster", "dagster-daemon")
+    )
 
     ops_keys = {
         "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
@@ -354,6 +366,7 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     assert "KOR_TRAVEL_MAP_API_OPS_ACTOR was removed" in script
     assert "ops read and cancel tokens must be distinct" in script
     assert "ops principal keys are allowed only in the API package env" in script
+    assert "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET" in script
     assert 'cd "$ROOT_DIR/packages/kor-travel-map-api"' in script
     assert "start_bg api env -i" in script
     assert "start_bg web env -i" in script
@@ -486,6 +499,115 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
     )
     assert removed_provider_key.returncode != 0
     assert "removed provider runtime key is not allowed" in removed_provider_key.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("extra_lines", "expected_error"),
+    [
+        ("", "must be configured while the public features surface is enabled"),
+        (
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=short\n",
+            "must be at least 32 characters",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET="
+            "cursor signing secret value 00000000000000000000\n",
+            "must contain no whitespace",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=shared-secret-at-least-32-characters\n",
+            "must be distinct from admin and service credentials",
+        ),
+        (
+            f"KOR_TRAVEL_MAP_API_SERVICE_TOKEN={_CURSOR_SIGNING_SECRET}\n"
+            f"KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET={_CURSOR_SIGNING_SECRET}\n",
+            "must be distinct from admin and service credentials",
+        ),
+        (
+            f"KOR_TRAVEL_MAP_API_METRICS_TOKEN={_CURSOR_SIGNING_SECRET}\n"
+            f"KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET={_CURSOR_SIGNING_SECRET}\n",
+            "must be distinct from the metrics credential",
+        ),
+        (
+            f"KOR_TRAVEL_MAP_API_VWORLD_API_KEY={_CURSOR_SIGNING_SECRET}\n"
+            f"KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET={_CURSOR_SIGNING_SECRET}\n",
+            "must be distinct from the public API key",
+        ),
+    ],
+)
+def test_local_admin_stack_validates_cursor_signing_secret(
+    tmp_path: Path,
+    extra_lines: str,
+    expected_error: str,
+) -> None:
+    root_env = tmp_path / "root.env"
+    api_env = tmp_path / "api.env"
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret-at-least-32-characters\n",
+        encoding="utf-8",
+    )
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=true\n"
+        "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n"
+        + extra_lines,
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(tmp_path),
+            "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
+            "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+            "KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY": "1",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+
+
+@pytest.mark.unit
+def test_local_admin_stack_accepts_production_cursor_signing_secret(
+    tmp_path: Path,
+) -> None:
+    root_env = tmp_path / "root.env"
+    api_env = tmp_path / "api.env"
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret-at-least-32-characters\n",
+        encoding="utf-8",
+    )
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=true\n"
+        "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n"
+        f"KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET={_CURSOR_SIGNING_SECRET}\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(tmp_path),
+            "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
+            "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+            "KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY": "1",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.unit
@@ -907,6 +1029,7 @@ def test_api_container_production_allows_empty_ops_pair_when_ops_surface_off(
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET": _CURSOR_SIGNING_SECRET,
         },
         check=False,
         capture_output=True,
@@ -914,6 +1037,99 @@ def test_api_container_production_allows_empty_ops_pair_when_ops_surface_off(
     )
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("cursor_secret", "expected_error"),
+    [
+        (None, "must be configured while the public features surface is enabled"),
+        ("short", "must be at least 32 characters"),
+        ("cursor signing secret " + "c" * 32, "must contain no whitespace"),
+        (
+            "shared-secret-at-least-32-characters",
+            "must be distinct from admin and service credentials",
+        ),
+    ],
+)
+def test_api_container_rejects_invalid_cursor_secret_before_migration(
+    cursor_secret: str | None,
+    expected_error: str,
+) -> None:
+    env = {
+        "PATH": os.environ["PATH"],
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
+            "shared-secret-at-least-32-characters"
+        ),
+        "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
+    }
+    if cursor_secret is not None:
+        env["KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"] = cursor_secret
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+    assert "alembic" not in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("credential_env", "expected_error"),
+    [
+        (
+            {"KOR_TRAVEL_MAP_API_SERVICE_TOKEN": _CURSOR_SIGNING_SECRET},
+            "must be distinct from admin and service credentials",
+        ),
+        (
+            {"KOR_TRAVEL_MAP_API_METRICS_TOKEN": _CURSOR_SIGNING_SECRET},
+            "must be distinct from the metrics credential",
+        ),
+        (
+            {"KOR_TRAVEL_MAP_API_VWORLD_API_KEY": _CURSOR_SIGNING_SECRET},
+            "must be distinct from the public API key",
+        ),
+        (
+            {
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": _CURSOR_SIGNING_SECRET,
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": (
+                    "cancel-token-000000000000000000000000000000"
+                ),
+            },
+            "must be distinct from ops credentials",
+        ),
+    ],
+)
+def test_api_container_rejects_cursor_secret_reused_as_credential(
+    credential_env: dict[str, str],
+    expected_error: str,
+) -> None:
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
+                "shared-secret-at-least-32-characters"
+            ),
+            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET": _CURSOR_SIGNING_SECRET,
+            **credential_env,
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+    assert "alembic" not in result.stderr
 
 
 @pytest.mark.unit
@@ -1019,6 +1235,32 @@ def test_ops_pair_validation_messages_are_lockstep_across_layers() -> None:
     # 제거된 문구가 한쪽에만 되살아나는 회귀 방지 — 옛 provenance 문구.
     assert "absent or configured together" not in entrypoint
     assert "absent or configured together" not in settings_source
+
+
+@pytest.mark.unit
+def test_cursor_signing_secret_messages_are_lockstep_across_runtime_layers() -> None:
+    settings_source = (
+        ROOT
+        / "packages"
+        / "kor-travel-map-api"
+        / "src"
+        / "kortravelmap"
+        / "api"
+        / "settings.py"
+    ).read_text(encoding="utf-8")
+    entrypoint = _script("docker/api-entrypoint.sh")
+    launcher = _script("scripts/run-admin-stack.sh")
+
+    for shared_phrase in (
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
+        "must be at least 32 characters",
+        "contain no whitespace",
+        "must be distinct from",
+        "while the public features surface is enabled",
+    ):
+        assert shared_phrase in settings_source, shared_phrase
+        assert shared_phrase in entrypoint, shared_phrase
+        assert shared_phrase in launcher, shared_phrase
 
 
 @pytest.mark.unit

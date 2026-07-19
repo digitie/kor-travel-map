@@ -17,6 +17,12 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from kortravelmap.core.exceptions import (
+    FeatureSearchCursorInvalidError,
+    FeatureSearchCursorQueryMismatchError,
+    FeatureSearchCursorTamperedError,
+    FeatureSearchCursorVersionUnsupportedError,
+)
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.settings import ApiSettings
@@ -922,6 +928,10 @@ def test_search_features_maps_page_and_requires_scope(
 
     async def _search(_session: Any, **_kw: Any) -> FeatureSearchPage:
         assert _kw["q"] == "경복궁"
+        assert _kw["page_size"] == 50
+        assert _kw["include_total"] is True
+        assert isinstance(_kw["cursor_signing_key"], bytes)
+        assert len(_kw["cursor_signing_key"]) >= 32
         return FeatureSearchPage(
             items=(
                 FeatureSearchRow(
@@ -960,6 +970,85 @@ def test_search_features_maps_page_and_requires_scope(
             "next_cursor": None,
             "total": 1,
         }
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_search_features_omits_total_without_count_request(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.infra.feature_repo import FeatureSearchPage
+
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    async def _search(_session: Any, **kwargs: Any) -> FeatureSearchPage:
+        assert kwargs["include_total"] is False
+        return FeatureSearchPage(items=(), total_count=None, next_cursor=None)
+
+    monkeypatch.setattr(features_mod.feature_repo, "search_features", _search)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        response = client.get("/v1/features/search", params={"q": "경복궁"})
+        assert response.status_code == 200
+        assert response.json()["meta"]["page"]["total"] is None
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "expected_code"),
+    [
+        (
+            FeatureSearchCursorInvalidError("invalid"),
+            "FEATURE_SEARCH_CURSOR_INVALID",
+        ),
+        (
+            FeatureSearchCursorVersionUnsupportedError("unsupported"),
+            "FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED",
+        ),
+        (
+            FeatureSearchCursorTamperedError("tampered"),
+            "FEATURE_SEARCH_CURSOR_TAMPERED",
+        ),
+        (
+            FeatureSearchCursorQueryMismatchError("mismatch"),
+            "CURSOR_QUERY_MISMATCH",
+        ),
+    ],
+)
+def test_search_features_maps_typed_cursor_errors(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected_code: str,
+) -> None:
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    async def _search(_session: Any, **_kwargs: Any) -> None:
+        raise error
+
+    monkeypatch.setattr(features_mod.feature_repo, "search_features", _search)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        response = client.get(
+            "/v1/features/search",
+            params={"q": "경복궁", "cursor": "opaque"},
+        )
+        assert response.status_code == 422
+        assert response.headers["content-type"].startswith("application/problem+json")
+        assert response.json()["code"] == expected_code
     finally:
         client.app.dependency_overrides.clear()
 

@@ -1013,6 +1013,49 @@ export interface components {
             items: components["schemas"]["FeatureSummary"][];
         };
         /**
+         * FeatureSearchProblem
+         * @description Feature search request/cursor typed RFC7807 422.
+         */
+        FeatureSearchProblem: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "VALIDATION_ERROR" | "FEATURE_SEARCH_CURSOR_INVALID" | "FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED" | "FEATURE_SEARCH_CURSOR_TAMPERED" | "CURSOR_QUERY_MISMATCH";
+            /**
+             * Detail
+             * @description 이 발생 건에 대한 사람이 읽는 설명.
+             */
+            detail: string;
+            /**
+             * Errors
+             * @description 필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).
+             */
+            errors?: components["schemas"]["ProblemDetailError"][];
+            /**
+             * Request Id
+             * @description 요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).
+             */
+            request_id: string;
+            /**
+             * Status
+             * @description HTTP 상태 코드.
+             */
+            status: number;
+            /**
+             * Title
+             * @description 사람이 읽는 짧은 요약(= detail).
+             */
+            title: string;
+            /**
+             * Type
+             * @description 오류 유형 URI. 예: https://kor-travel-map/errors/not-found
+             */
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * FeatureSearchResponse
          * @description ``GET /features/search`` 응답.
          */
@@ -3160,13 +3203,13 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureSearchResponse"];
                 };
             };
-            /** @description 검색 범위 또는 cursor 오류 */
+            /** @description 검색 범위 또는 typed cursor 오류 */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["FeatureSearchProblem"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */

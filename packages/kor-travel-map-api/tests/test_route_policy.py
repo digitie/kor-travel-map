@@ -30,6 +30,7 @@ OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
 SERVICE_TOKEN = "service-token-0000000000000000000000000000"
 METRICS_TOKEN = "metrics-token-0000000000000000000000000000"
+CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
 
 _HERMETIC_ENV_VARS = (
     "KOR_TRAVEL_MAP_API_PROFILE",
@@ -46,6 +47,7 @@ _HERMETIC_ENV_VARS = (
     "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
     "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
     "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+    "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
     "KOR_TRAVEL_MAP_API_VWORLD_API_KEY",
 )
 
@@ -71,6 +73,7 @@ def _representative_settings(**overrides: object) -> ApiSettings:
         "ops_read_token": OPS_READ_TOKEN,
         "ops_cancel_token": OPS_CANCEL_TOKEN,
         "service_token": SERVICE_TOKEN,
+        "cursor_signing_secret": CURSOR_SIGNING_SECRET,
         "metrics_token": METRICS_TOKEN,
         "vworld_api_key": None,
     }

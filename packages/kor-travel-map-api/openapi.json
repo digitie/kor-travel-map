@@ -10858,6 +10858,66 @@
         "title": "FeatureSearchData",
         "type": "object"
       },
+      "FeatureSearchProblem": {
+        "additionalProperties": true,
+        "description": "Feature search request/cursor typed RFC7807 422.",
+        "properties": {
+          "code": {
+            "enum": [
+              "VALIDATION_ERROR",
+              "FEATURE_SEARCH_CURSOR_INVALID",
+              "FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED",
+              "FEATURE_SEARCH_CURSOR_TAMPERED",
+              "CURSOR_QUERY_MISMATCH"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "description": "이 발생 건에 대한 사람이 읽는 설명.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "errors": {
+            "description": "필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).",
+            "items": {
+              "$ref": "#/components/schemas/ProblemDetailError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "request_id": {
+            "description": "요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "HTTP 상태 코드.",
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "사람이 읽는 짧은 요약(= detail).",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "오류 유형 URI. 예: https://kor-travel-map/errors/not-found",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "request_id"
+        ],
+        "title": "FeatureSearchProblem",
+        "type": "object"
+      },
       "FeatureSearchResponse": {
         "additionalProperties": false,
         "description": "``GET /features/search`` 응답.",
@@ -34588,11 +34648,11 @@
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
+                  "$ref": "#/components/schemas/FeatureSearchProblem"
                 }
               }
             },
-            "description": "검색 범위 또는 cursor 오류"
+            "description": "검색 범위 또는 typed cursor 오류"
           },
           "default": {
             "content": {

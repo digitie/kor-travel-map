@@ -48,6 +48,15 @@ T-VN-31 이후 shadow migration으로 전환한다.
 kind/geometry/category/상태/시간 범위처럼 query와 무결성에 필요한 값은 typed column과 FK/CHECK로
 표현한다. 보관 기간은 기존 정책을 유지하지만 보관 여부를 공개 상태로 대신 표현하지 않는다.
 
+### 0.2 feature search cursor는 stateless REST 상태
+
+`/v1/features/search`의 query fingerprint, keyset, version, HMAC은 요청과 응답 사이의 짧은 REST
+전송 상태이며 PostgreSQL 도메인 상태가 아니다. cursor table, session row, 만료 row, sequence를
+추가하지 않는다. 검색 SQL은 cursor에서 검증된 keyset만 bind하고, `include_total=false`에서는
+COUNT SQL을 실행하지 않는다. 서버 재시작을 넘어 cursor를 유지해야 하는 production은 별도
+server-only signing secret을 배포해 stateless 검증하며, key rotation 때 진행 중 cursor가
+무효화되는 clean cut을 허용한다.
+
 ## 1. `feature.features` (기준 테이블)
 
 ```sql

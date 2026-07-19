@@ -382,6 +382,11 @@ ADR-075/T-VN-39 cutover에서는 §8 cold backup만으로 rollback 가능하다�
   semantic duplicate 0건을 검증한다.
 - PinVi consumer를 먼저 배포한 뒤 KTM DB/API를 전환하고, typed contract와 principal 401/403/422,
   read/write smoke를 수행한다.
+- map API 재생성 전 `KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET`이 API container에만 공백 없는
+  32자 이상으로 주입됐고 admin/service/ops/metrics credential과 다른지 확인한다. 실제 값은
+  출력하거나 저장소에 기록하지 않는다. `/v1/features/search`는 첫 page cursor로 같은 query의
+  다음 page를 조회하고, filter 변경·서명 변조가 각각 typed 422인지 확인한다. rotation 직후 기존
+  cursor 무효화는 의도된 동작이며 배포 기록에 남긴다.
 - rollback window에는 fence를 유지한다. fence 이후 delta가 있으면 old snapshot만 복원하지 말고
   검증된 journal/PITR을 적용한다. upstream 재수집으로 정본·감사·weather 이력을 대체하지 않는다.
 - soak와 reconciliation 전에는 legacy table/column/alias와 backup을 제거하지 않는다.

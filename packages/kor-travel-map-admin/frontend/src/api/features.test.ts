@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   adminFeaturesInBoundsPath,
   buildFeatureTiles,
+  featureSearchPath,
   featureViewportQueryKey,
   type FeaturesInBboxParams,
 } from "./features";
@@ -118,5 +119,34 @@ describe("feature map tile selection", () => {
     expect(featureViewportQueryKey(second, [])[2]).not.toBe(
       featureViewportQueryKey(first, [])[2],
     );
+  });
+});
+
+describe("feature search request contract", () => {
+  it("COUNT opt-in 기본값을 false로 보내고 opaque cursor를 그대로 인코딩한다", () => {
+    const path = featureSearchPath({
+      q: "경복궁",
+      kind: ["place", "event"],
+      page_size: 25,
+      cursor: "payload.signature",
+    });
+    const url = new URL(path, "http://localhost");
+
+    expect(url.pathname).toBe("/v1/features/search");
+    expect(url.searchParams.get("include_total")).toBe("false");
+    expect(url.searchParams.getAll("kind")).toEqual(["place", "event"]);
+    expect(url.searchParams.get("cursor")).toBe("payload.signature");
+  });
+
+  it("total이 필요한 화면만 include_total=true를 명시한다", () => {
+    const path = featureSearchPath({
+      min_lon: 126,
+      min_lat: 37,
+      max_lon: 128,
+      max_lat: 38,
+      include_total: true,
+    });
+    expect(new URL(path, "http://localhost").searchParams.get("include_total"))
+      .toBe("true");
   });
 });
