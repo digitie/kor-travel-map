@@ -2,6 +2,41 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (claude, agent A1) — T-VN-19 Alembic metadata 정합 CI gate
+
+- ADR-075 D-12-2 / §8.1: 빈 PostGIS DB에서 `alembic upgrade head && alembic check`가
+  diff 0건이 되도록 metadata/env를 정합화하고 상시 CI gate를 추가했다. WSL docker
+  PostGIS(testcontainers와 동일 image)에서 반복 실행하며 초기 ~100건 diff를 0건으로 닫았다.
+- env.py `include_object`로 명시 제외(이름 나열, blanket 아님): PostGIS `spatial_ref_sys`,
+  ORM 모델 없는 app table 8개(feature_weather_values/feature_price_values/system_log/
+  api_call_log/public_api_keys/admin_auth_events/ops_live_ticket_claims/
+  ops_live_topic_revisions — weather/price는 T-VN-17/38이 모델 도입 시 제거),
+  alembic이 round-trip 못하는 partial/expression index 5개(features yt_channel/yt_playlist/
+  dedup_refresh_keyset, source_records kma_alert_history, curated_features의 UUID(as_uuid=
+  False) reflection 위양성).
+- models.py 실매핑 정합(마이그레이션 아님): DB가 TEXT인데 모델이 String이던 27개 컬럼
+  Text화(features/feature_versions/feature_change_requests/source_entities/source_links/
+  source_records.source_entity_key/notice_lifecycle_scopes/notice_lineage_states — DB에
+  varchar/text가 혼재해 flagged 컬럼만 교체), dagster_schedule_active_claims에 0054가 만든
+  resolvable_after/operation_finished_at 컬럼·CHECK 2개·created_at clock_timestamp() 기본값
+  보강, source_records unique명 uq_source_records로 정정, curated_themes theme_slug를 0025
+  inline UNIQUE의 PG 기본명(curated_themes_theme_slug_key)으로 명시, import_jobs.queue_sequence
+  의 SERIAL 위양성 server_default 제거. repo는 raw SQL, DDL은 migration 소유라 런타임 불변.
+- 새 test는 전용 빈 DB를 만들어 격리 실행하고, deferrable 상호 FK(ADR-063 head-pointer)의
+  위상정렬 SAWarning과 coord_5179 computed-default UserWarning(둘 다 양성, CLI check는 통과)만
+  test-local filterwarnings로 허용한다. 비교에서 제외한 5개 index의 **실제 존재**는
+  test_alembic_upgrade.py의 `test_alembic_excluded_indexes_still_exist`(4개: features yt_channel/
+  yt_playlist, source_records kma_alert_history, curated_features 유일 index)와
+  test_t212d_perf_explain.py(dedup_refresh_keyset)가 지켜, exclusion이 연 커버리지 공백을
+  메운다(향후 migration이 실수로 drop하면 이 존재 단언이 실패).
+- **GENUINE 마이그레이션 필요 drift는 없었다** — 전부 모델 metadata 버그(수정) 또는 alembic
+  autogenerate 위양성(제외)이었다. 비차단 후속 관찰: (a) DB에 varchar/text가 의미상 같은
+  컬럼군에 혼재 — 향후 정규화 migration 후보. (b) curated_themes/source_records 제약이 naming
+  convention 밖 이름(0025 inline UNIQUE·0002) — 향후 rename migration 후보.
+- 검증: 로컬 WSL PostGIS upgrade+check exit 0, 새 integration test green,
+  affected ORM round-trip integration 100+ green, main unit 1492 green(사전존재 Windows-only
+  15건: run-admin-stack bash·import_linter cp949 — 무관), ruff/mypy --strict/lint-imports clean.
+
 ## 2026-07-19 (codex) — Agent A PR #748 적대적 심층 리뷰 후속
 
 - 전문 리뷰어 1명이 PR #748을 최신 `integration/t-vn`에서 재검토해, 서버/OpenAPI에서

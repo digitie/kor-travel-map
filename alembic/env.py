@@ -54,6 +54,69 @@ else:
 target_metadata = metadata
 
 
+# ``alembic check`` 정합 필터 (ADR-075 D-12-2, T-VN-19).
+# ``include_schemas=True`` + ``compare_type`` 은 app schema 밖 객체와 아직 ORM
+# 모델이 없는 app table까지 비교해 clean DB check 를 실패시킨다. 아래 3개 명시
+# 목록만 비교에서 제외한다(blanket ignore 아님 — 이름을 전부 나열).
+#
+# 1) PostGIS/extension 소유 객체: ``spatial_ref_sys`` 는 x_extension 확장이
+#    소유하며 app 스키마가 관리하지 않는다(search_path 때문에 schema=None 으로도
+#    반사돼 이름으로 건다). ``alembic_version`` 은 alembic 이 자동 제외한다.
+_POSTGIS_TABLE_NAMES = frozenset({"spatial_ref_sys"})
+
+# 2) ORM 모델이 아직 없는 app-owned table (raw-SQL migration 으로만 생성).
+#    weather/price 는 T-VN-17/38 이, ops-live/log/key 계열은 별도 wave 가 모델을
+#    도입할 때 이 목록에서 제거한다. 그때까지 명시 제외한다.
+_UNMAPPED_APP_TABLES = frozenset(
+    {
+        "feature_weather_values",
+        "feature_price_values",
+        "system_log",
+        "api_call_log",
+        "public_api_keys",
+        "admin_auth_events",
+        "ops_live_ticket_claims",
+        "ops_live_topic_revisions",
+    }
+)
+
+# 3) alembic autogenerate 가 round-trip 하지 못하는 index. partial/expression
+#    index 는 WHERE 절·JSONB expression 의 reflected 표현을 metadata 표현과
+#    byte-identical 로 맞추지 못하고, ``uq_curated_features_theme_feature_active``
+#    는 ``UUID(as_uuid=False)`` 컬럼을 reflection 이 ``UUID()`` 로 되읽어
+#    compare_type 위양성이 난다(둘 다 실제 DB 타입은 uuid/text 로 동일). 이름으로만
+#    제외하며, exclusion 이 여는 삭제-미탐지 공백은 존재 단언으로 메운다:
+#    ``idx_features_dedup_refresh_keyset`` 는
+#    ``tests/integration/test_t212d_perf_explain.py`` 의 EXPLAIN 이, 나머지 4개는
+#    ``tests/integration/test_alembic_upgrade.py::test_alembic_excluded_indexes_still_exist``
+#    가 pg_indexes 로 존재를 지킨다.
+_UNCOMPARED_INDEXES = frozenset(
+    {
+        "idx_features_dedup_refresh_keyset",
+        "idx_features_yt_channel_id",
+        "idx_features_yt_playlist_id",
+        "idx_source_records_kma_alert_history",
+        "uq_curated_features_theme_feature_active",
+    }
+)
+
+
+def _include_object(
+    object_: object,
+    name: str | None,
+    type_: str,
+    reflected: bool,  # noqa: FBT001 — alembic callback signature.
+    compare_to: object,
+) -> bool:
+    """비-app 객체와 미모델 app table/expression index 를 비교에서 제외한다."""
+
+    if type_ == "table":
+        return name not in _POSTGIS_TABLE_NAMES and name not in _UNMAPPED_APP_TABLES
+    if type_ == "index":
+        return name not in _UNCOMPARED_INDEXES
+    return True
+
+
 def run_migrations_offline() -> None:
     """offline mode — SQL 출력만 (실 DB connect 안 함)."""
     url = config.get_main_option("sqlalchemy.url")
@@ -83,6 +146,8 @@ def do_run_migrations(connection: Connection) -> None:
         # 비교 시 server_default / type / nullable / ... 변경 모두 감지.
         compare_type=True,
         compare_server_default=True,
+        # 비-app·미모델 객체 제외 (ADR-075 D-12-2, T-VN-19 alembic check gate).
+        include_object=_include_object,
     )
     with context.begin_transaction():
         # ADR-008 — search_path를 Alembic이 소유한 트랜잭션 **안에서** 설정.
