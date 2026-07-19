@@ -5,6 +5,46 @@
 
 ## [Unreleased]
 
+### C6c manifest v4 Map runtime provenance (2026-07-19, T-ADM-C7P)
+
+- **SECURITY**: C7 runtime attestation은 compatible-pair manifest v4의 Map API·UI·
+  Dagster web·Dagster daemon image ID를 실제 compose runtime과 각각 exact 비교한다.
+  v3 manifest, 누락·추가 필드, role별 image mismatch는 mutation 전에 fail-close한다.
+
+### C7 mocked summary 가시성 검증 보완 (2026-07-19, PR #755 리뷰 후속)
+
+- **FIXED (test)**: `/ops/datasets` 상태 요약의 exact projection이 DOM에 하나만
+  존재하는 것뿐 아니라 실제로 보이는지도 mocked E2E에서 검증한다.
+
+### C7 prod 심층 리뷰 보안 후속 (2026-07-19, PR #754)
+
+- **SECURITY**: Docker build context에서 모든 `*.local.md`를 제외하고, C7 Playwright
+  executor의 host network/IPC 공유를 bridge network/private IPC로 축소했다.
+- **FIXED**: runner가 전체 상태 감사 도구를 통과해야 lock과 mutation 상태를 만들며,
+  실패 시 `BLOCKED.json`과 복구 journal/runtime을 보존한다. 성공이 완전히 입증된
+  경우에만 runtime과 attestation snapshot을 정리한다.
+
+### C7 prod 실행 경계·증거 보강 (2026-07-19, T-ADM-C7H)
+
+- **SECURITY**: 파괴적 live E2E 전에 exact Git commit의 root-owned runner/helper/attestation module
+  archive snapshot,
+  C6c compatible-pair manifest와 실제 Map/PinVi
+  API image, compose project, Map API/UI/Dagster web·daemon/PinVi API의 image·command·environment,
+  단일 Alembic current/head/check를 root-owned attestation과 exact 대조한다. 모든 read-only preflight
+  전에는 `BLOCKED.json`이나 mutation journal을 만들지 않는다.
+- **SECURITY**: attestation 모듈은 runner bootstrap이 owner/mode/ancestor/hash를 확인한 동일 bytes만
+  실행한다. root로 실행하는 runner/helper/module/상태 감사기 4개 hash와 compatible-pair·OCI/runtime
+  metadata 변조는 실행형 음수 테스트로 fail-closed를 고정한다. INT/TERM은 130/143으로 종료한다.
+- **CHANGED**: C7은 고정 official digest 기반의 commit-labelled Playwright executor image ID에서만
+  실행한다. 실제 Dagster `feature_update_request_worker` definition과 terminal run의 request/generation/
+  scope/sensor tag를 검증한다. spec별 redacted JUnit/HTML/JSON과 복구 journal은 root-owned evidence로
+  보존하고 screenshot, auth storage와 trace ZIP은 생성하지 않는다.
+- **ADDED**: `audit-c7-prod-live-state.py`가 secret·UUID를 출력하지 않고 active lock, journal phase,
+  partial runtime/temp/evidence 안전성을 점검한다. 자동 sentinel clear는 제공하지 않는다.
+- **ADDED**: Map API/UI/Dagster image는 source revision OCI label을 싣고 C7 attestation이 실제 image
+  label과 clean checkout을 대조한다. C7 executor는 durable creator/outcome/CID 아래 create/start를
+  분리한다. SIGKILL 뒤 남은 C7 container는 creator identity·CID/name·label·run 전용 mount·비활성
+  lock을 확인하는 `stop-c7-prod-live-container.py`로만 중지하며 journal/sentinel은 보존한다.
 ### Tier-2 release benchmark 측정 정확성 (2026-07-19, T-VN-21R #767)
 
 - **FIXED**: `--skip-seed` 200건 batch가 fixture 전용 고정 ID를 조회해 0행을

@@ -395,12 +395,50 @@ admin frontend의 Playwright e2e suite는 n150 Linux 우선으로 실행하며, 
 curated-features, `features/new`, 그리고 3개 상세 페이지는 아직 시나리오로
 커버되지 않는다 (상세는 `docs/reports/e2e-scenario-coverage-2026-06-16.md`).
 
+#### 5.4.1 ops mocked UI projection·pagination 수용 기준
+
+`/ops/datasets` 상태 요약은 `aria-label="데이터셋 상태 요약"` landmark를 먼저 고른 뒤 그 안의
+행·실패·SLA 초과·미실행·이슈 count를 exact 검증한다. 표·drawer·다른 landmark의 같은 문자열은
+요약 증거가 아니다. 정상 grid fixture에서 요약 대상 원천 행은 유지한 채 summary projection 하나를
+제거하거나 다른 값으로 오염하는 negative contract도 두어, page-global text 단언으로의 퇴행을
+검출한다.
+
+`/ops/pipeline` 실행과 전역 event mocked 수용 fixture는 각각 11건 이상을 두 주입 페이지에 나누고
+cursor별 응답을 명시한다. 이 fixture의 6+6 분할은 canonical `page_size=50`의 실제 overflow 증거가
+아니라 UI cursor plumbing·DOM identity 증거다. 실제 page-size overflow는 n150 live에서 51건 이상으로
+별도 검증한다. 다음-page 조작 뒤 request의 provider/dataset/sync_scope와 cursor가 exact인지,
+각 페이지 DOM의 전체 `data-row-identity` 배열이 응답 tuple 배열과 순서까지 같은지 검증한다.
+페이지 내부는 total-order가 엄격한 내림차순이어야 하며 페이지끼리 서로소이고 page 1의 마지막
+identity가 page 2의 첫 identity보다 앞서야 한다. 첫 행 존재, count summary, 페이지 전체 문자열만의
+단언은 #694·#719 수용 증거로 인정하지 않는다.
+
 ### 5.5 C7 prod 파괴적 live E2E의 복구·인과성 gate
 
-C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. root-owned 고정 attestation 파일의
-machine-id/hostname/origin hash와 실제 host·URL을 대조하고, 로그인 POST `200 + Set-Cookie` 및
-UI container의 비어 있지 않은 admin password hash를 선행 조건으로 둔다. 값은 로그·attachment에
-출력하지 않는다.
+C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. host runner/helper/attestation 검증
+모듈/상태 감사기도
+`/usr/local/lib/kor-travel-map/c7-runner/<exact commit>`의 root-owned Git archive snapshot과
+attested file hash에서만 실행한다. root-owned 고정 attestation 파일의
+machine-id/hostname/origin hash뿐 아니라 clean Git commit, C6c compatible-pair manifest hash와
+generation, compose project, Map API/UI/Dagster web·daemon/PinVi API의 실제 image·command·정렬 env
+hash를 대조한다. Map API image의 Alembic `current == unique heads`와 `alembic check`, 로그인 POST
+`200 + Set-Cookie`도 선행 조건이다. 로그인은 session/auth audit를 만들 수 있는 domain-state 비파괴
+검증이며, 나머지는 read-only다. 이 preflight를 모두 통과하기 전에는 고정 state root의
+`BLOCKED.json`과 mutation journal을 만들지 않는다. 값은 로그·attachment에 출력하지 않는다.
+보안 코어는 import 가능한 Python 모듈로 두고 runner가 검증한 동일 module bytes를 직접 실행한다.
+unit gate는 runner/helper/module 각각의 hash 변조, file/ancestor owner·mode 위반, attestation exact
+shape 위반, compatible-pair·OCI image/service runtime metadata 불일치를 실제 예외 또는 non-zero로
+확인한다. runner 문자열만 검사하는 정적 fixture는 이 보안 gate를 대체하지 않는다.
+
+Playwright는 host npm/Chromium이 아니라 `docker/c7-playwright.Dockerfile`로 만든 immutable image ID에서
+worker 1·retry 0으로 실행한다. executor의 source commit/base digest label도 attestation과 같아야 한다.
+container는 creator PID/PGID/session ID/start ticks와 outcome을 먼저 fsync한
+`docker create --pull=never`와 valid CID 검증 뒤
+`docker start --attach`를 분리해, SIGKILL create gap에서도 실행 중인 미추적 container를 만들지 않는다.
+실제 Dagster repository에는 `feature_update_request_worker`가 정확히 하나인 job으로 존재해야 하고,
+terminal `runOrError`의 job name, request ID, 양수 generation, `provider_dataset` scope와 queue sensor tag를
+REST request와 exact 비교한다. spec별 redacted JUnit/HTML/JSON은 root-owned evidence에 보존하되
+운영값을 픽셀로 노출할 수 있는 screenshot과 auth storage/cookie를 담을 수 있는 trace ZIP은
+생성하지 않는다.
 
 POI target mutation은 PUT 전에 자연키와 intended body를 원자 journal에 먼저 기록하고 응답 뒤
 UUID·strong ETag·version을 보강한다. 모든 DELETE/cleanup은 직전 exact GET ETag를 `If-Match`로
@@ -426,8 +464,10 @@ exact 일치해야 한다. terminal matched scope의 eligible/skipped/executed �
 
 KMA/sensor/schedule/runner journal은 임시 파일 fsync 뒤 rename하고 최종 파일과 부모 디렉터리도
 fsync한다. runner state·lock·`BLOCKED.json`은 root-owned `0700` 고정 경로만 사용하며
-`XDG_STATE_HOME` override를 fail-closed한다. 이 순서와 모든 route handler settlement→unroute 순서는
-실제 source 구간을 읽는 정적 회귀 테스트로 고정한다.
+`XDG_STATE_HOME` override를 fail-closed한다. 실패·signal·부분 복구 때는 `BLOCKED.json`을 유지하고
+`audit-c7-prod-live-state.py`가 값이나 UUID 없이 lock/journal phase/runtime/temp/evidence 안전성만 보고한다.
+이 순서와 모든 route handler settlement→unroute 순서는 source 계약과 subprocess lock 회귀 테스트로
+고정한다.
 
 누적 journal의 이전 payload는 현재 in-memory state를 합치기 전에 독립적으로 restored residue를
 통과해야 한다. 합칠 때 현재 target/request/idempotency key나 더 전진한 status는 이전 snapshot으로

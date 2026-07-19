@@ -9,22 +9,17 @@
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
+  - [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화** (#777)
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
-  - 완료·병합됨(integration/t-vn): `T-VN-01`·`02`·`04`·`05`·`06`·`07`(Wave 0) /
-    `T-VN-13`·`14`·`17`·`18`·`19`·`20`·`21`(Wave 1) — 각 적대 리뷰 반영 후 병합.
-    상세는 [`docs/tasks-done.md`](tasks-done.md)·`docs/journal.md`.
-  - 열린 KTM-내부: 아래 미완 항목만 checkbox 유지.
+  - [ ] `T-VN-SYNC-01` — **latest main → integration/t-vn 동기화**
+    (`main@d2104f15`, branch `chore/t-vn-sync-main`)
   - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate** (T-VN-00/C6c cutover와 동일 배포 단위)
+  - [ ] `T-VN-04A` — **admin 비공개 feature 공간 조회·카드 표면 복원** (#741)
   - [ ] `T-VN-15` — **search total과 cursor fingerprint**
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
     `T-VN-16` weather batch와 부모 404.
-- **진행 중 — Claude PR 적대 리뷰 후속(codex)**
-  - [ ] `T-VN-05R` — **public curated raw payload·lineage 우회 차단** (#765)
-  - [ ] `T-VN-17R` — **weather UNIQUE cutover writer race 봉인** (#771)
-  - [ ] `T-VN-21R` — **실데이터 benchmark cardinality·buffer 정확성** (#767)
-  - `T-VN-14R`(cluster/items 후보집합 단일화)은 PR #763에 folding 완료.
 - **예정 — vNext Wave 2 구조 전환 (Wave 1 안정화 + cutover 뒤)**
   - [ ] `T-VN-31` — **vNext target freeze**
   - [ ] `T-VN-32` — **UUID identity shadow 전환**
@@ -99,11 +94,26 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   attestation을 local-only 운영 절차로 provision한다. 운영 종결이 남은 #684/#694/#712/#719는
   최종 live 증거를 첨부한 뒤 닫는다.
 
+- [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화**
+  (issue #777, docker-manager PR #61과 같은 배포 단위): compatible-pair manifest를
+  v4로 clean-cut하고 active/rollback pair에 Map API·UI·Dagster web·Dagster daemon
+  네 immutable image ID와 하나의 Map source revision을 함께 결박한다. C7
+  attestation은 manifest의 네 Map image ID를 실제 compose runtime role과 각각 exact
+  비교한다. host attestation document version 3은 유지하되, manager compatible-pair
+  manifest version 3은 거부하고 호환 shim을 두지 않는다. 완료 조건은 manager·Map
+  두 PR의 단일 적대적 리뷰 승인, 실행형 v3/v4·image mismatch 음성 계약,
+  n150의 root-owned manifest snapshot·runtime attestation 통과다.
+  병합과 활성화는 분리한다. manager·Map C7P PR은 먼저 병합하되 즉시 배포하지
+  않는다. 그 다음 latest main을 `integration/t-vn`에 병합해 C7 runner와 vNext DB/API를
+  하나의 소스 tree로 만들고, `T-VN-03`·`T-VN-15`·잔여 admin 비공개 feature
+  blocker를 닫은 뒤 integration을 main에 병합한다. 이 최종 main·PinVi·manager
+  조합으로 C6c v4 capture를 수행한 뒤에만 C7 live를 실행한다.
+
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,
 **Wave 4**의 C7B-UI까지 완료했다. 현재는 누락된 소비자 선전환을 C6c로 복구한 뒤
 C7 n150을 수행한다.
-C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720·AUD-686·AUD-718·C7B-API·C7B-UI·C7C는
+C45X-B·C4/C4R·C5·C6a·C6b·C7A·C7B-720·AUD-686·AUD-718·C7B-API·C7B-UI·C7C·C7M은
 완료 이력으로 옮겼다. 각 wave 시작·PR 직전·병합 직후 원격 main에 자주 rebase한다.
 
 Alembic은 병렬 branch에서 복수 head를 만들지 않는다. migration 정본은
@@ -125,6 +135,13 @@ PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin
 각 코드 PR은 테스트 전에 적대적 리뷰어 1명의 리뷰를 반영한다. 문서 전용·rebase-only·단순
 변수명/import 정렬 변경은 추가 적대적 재리뷰 대상이 아니다.
 
+#### T-VN-SYNC-01 — latest main → integration/t-vn 동기화
+
+`chore/t-vn-sync-main`에서 `main@d2104f15`를 `integration/t-vn@22bf35a5` 위에 merge한다.
+공유 integration branch 자체는 rebase하지 않는다. 완료 조건은 양쪽 문서 이력, API image의
+OCI revision label+production profile, 완료/미완 task 정본, Alembic `0058 → 0062` 단일 chain을
+보존하고 동일 전문 리뷰어 승인 뒤 CI green으로 integration에 병합하는 것이다.
+
 #### Lane 분배 (2026-07-19, issue #738)
 
 KTM 내부 표면은 agent A(Claude), PinVi 결합·C6c cutover 결합·기존
@@ -133,14 +150,13 @@ A lane은 즉시 착수하고, B lane은 `T-ADM-C6c`/`T-ADM-C7` 종결 뒤 착�
 
 | lane | 담당 | 순서 | 비고 |
 |---|---|---|---|
-| a1 | Claude | T-VN-01 → T-VN-02 → T-VN-07 → T-VN-19 | 기동 fail-closed → route matrix → actor 1차 → alembic 정합 CI |
-| a2 | Claude | T-VN-04 → T-VN-06 → T-VN-05 → T-VN-17 | 공개 predicate view → notice cast → raw payload 경계 → weather 제약 |
+| a | Claude | T-VN-04A → T-VN-15 | admin 비공개 feature 운영성 복원 → search 계약 완결 |
 | b1 | codex | T-VN-03 → T-VN-11 → T-VN-12 | T-VN-03은 C6c principal cutover와 **같은 배포 단위**(F-17 재발 방지) |
 | b2 | codex | T-VN-08 → T-VN-16 → T-VN-41 | PinVi consumer 수정 → weather batch(N+1 제거) → cache-target outbox |
 
-migration 번호는 a2가 0059를 예약했고, 이후 branch는 PR 직전 rebase에서 단일 head를
-재확인 후 재번호한다. T-VN-13/14/15/18/20/21과 Wave 2(T-VN-31~40)는 위 lane 소화 후
-재분배한다. 같은 파일 충돌 시 먼저 머지된 쪽이 우선하고 나중 PR이 rebase한다.
+migration 정본은 `0058 → 0059 → 0060 → 0061 → 0062` 단일 chain이다. 후속 migration은
+PR 직전 `0062` 단일 head를 재확인한 뒤 번호를 배정한다. Wave 2(T-VN-31~40)는 열린 lane을
+소화한 뒤 재분배한다. 같은 파일 충돌 시 먼저 머지된 쪽이 우선하고 나중 PR이 rebase한다.
 
 **통합 브랜치 규율**: `T-ADM-C7` 종결 전까지 모든 T-VN task PR(a·b lane 공통)의 base는
 main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-vn` PR(CI green 후
@@ -149,66 +165,18 @@ main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-v
 그 전에는 T-VN 변경이 main에 직접 들어가지 않는다. CI workflow 4종은
 `integration/t-vn` 대상 push/PR에도 동일하게 실행된다.
 
-#### 최근 48시간 Claude PR 적대 리뷰 후속 (2026-07-19, #765~#768)
-
-단일 전문 리뷰어가 PR #752/#756/#757/#759/#760/#763을 닫힘 여부와 무관하게 재검토했다.
-#757/#759는 P0~P3 잔여가 없고, 아래 네 finding은 서로 다른 파일·검증 경계이므로 agent A/B가
-병렬 처리한다. 모든 신규 PR base는 `integration/t-vn`이며, 열려 있는 PR #763 finding은 새 PR로
-분기하지 않고 그 PR에 커밋을 추가한다. 코드 변경은 같은 전문 리뷰어 1명이 테스트 전에 검토한다.
-
-- [ ] `T-VN-05R` / issue #765 / agent B — public curated 전용 allowlist DTO/projection으로
-  `detail.payload`, `source_record_key`와 raw lineage를 제거한다. admin/operator 표면은 유지하고
-  public list/detail sentinel, user OpenAPI·생성 타입 drift를 한 PR에서 닫는다.
-- [ ] `T-VN-17R` / issue #766 / agent A — 아직 main에 배포되지 않은 migration 0060을
-  호환성 shim 없이 정정한다. dedup과 semantic UNIQUE를 한 transaction의 non-concurrent
-  cutover로 묶어 writer를 DB lock에서 차단하며, 두 connection blocking/unique 회귀와 실패 복구
-  runbook을 같은 PR에 둔다. `CONCURRENTLY`와 INVALID index 복구 복잡성은 제거한다.
-- [ ] `T-VN-21R` / issue #767 / agent B — `--skip-seed`가 실제 public feature 200개를
-  결정적으로 선택하고 부족하면 실패하게 한다. 모든 viewport의 matched/returned cardinality를
-  기록하며, EXPLAIN shared read는 누적 top-level Plan 값을 한 번만 센다.
-- [ ] `T-VN-14R` / issue #768 / agent A — open PR #763의 branch에 후속 커밋한다. cluster와
-  items가 coord-null·centroid-outside 교차 geometry를 포함하는 같은 exact 후보 predicate를 쓰고,
-  route/area 행정구역 귀속과 cluster count/items universe 관계를 PostGIS 회귀로 고정한다.
-
-각 task는 독립 PR 단위다. #765/#766/#767은 서로 병렬, #768은 PR #763 안에서 처리한다. task별
-CI green·`integration/t-vn` 병합 뒤 해당 issue를 닫고 이 섹션을 완료 이력으로 옮긴다.
-
 ### Wave 0 — P0, 즉시 가역
-
-- [ ] T-VN-01 — **production fail-closed 전환**
-
-  Production profile에서 필수 secret 누락 시 기동을 거부하고 local-dev fallback을 별도 profile로
-  격리한다. 수용 기준은 ADR-066과 보고서 D-1·§8이다.
-
-- [ ] T-VN-02 — **route policy matrix와 미분류 CI gate**
-
-  전 HTTP/WS route 분류 생성기, 미분류 CI 실패, `/metrics` management 경계를 구현한다.
-  ops-live는 기존 HMAC ticket을 재사용하고 인증을 중복 구현하지 않는다.
 
 - [ ] T-VN-03 — **잔여 운영 read·debug·public-key gate**
 
   ops metrics/log/consistency와 MOIS raw debug를 operator/debug로, 무키 legacy curated read를
   public-keyed로 옮긴다. PinVi principal 선전환과 같은 cutover에서 수행하며 삭제 route는 복원하지 않는다.
 
-- [ ] T-VN-04 — **공개 predicate 단일화 1차**
+- [ ] T-VN-04A — **admin 비공개 feature 공간 조회·카드 표면 복원** (#741)
 
-  현행 상태 위에 `feature.public_features` view를 만들고 모든 공개 SQL을 그 projection으로
-  교체해 retired 은닉과 draft/broken 노출을 동시에 막는다.
-
-- [ ] T-VN-05 — **공개 raw payload 경계 제거**
-
-  공개 DTO의 raw data/hash/source record와 MOIS `detail.payload` passthrough를 제거하고 observation
-  lineage를 operator 표면으로 이동한다. service batch는 고정 typed payload만 반환한다.
-
-- [ ] T-VN-06 — **notice 방어적 cast**
-
-  오염된 notice timestamp 한 행이 전체 공개 read를 500으로 만들지 않도록 안전한 1차 완화를
-  적용한다. typed notice 재설계는 T-VN-37이 소유한다.
-
-- [ ] T-VN-07 — **no-op 옵션 삭제와 principal actor 1차**
-
-  실제 동작하지 않는 beach 옵션을 OpenAPI와 코드에서 제거하고 auth-event 등 최소 write 경로에서
-  body actor 우선을 없앤다.
+  admin bbox/cluster 조회를 raw feature 기준 status filter와 함께 제공해 inactive/draft/hidden
+  marker를 다시 찾을 수 있게 한다. 비공개 feature 상세의 weather/price 카드도 admin 전용 read
+  표면으로 복원한다. 공개 `feature.public_features` 경계는 넓히지 않는다.
 
 - [ ] T-VN-08 — **PinVi false-broken 수정**
 
@@ -227,16 +195,6 @@ CI green·`integration/t-vn` 병합 뒤 해당 issue를 닫고 이 섹션을 완
   기존 pipeline/schedule ledger를 회귀 기준선으로 두고 남은 retryable command에 body fingerprint,
   result replay, key reuse 409를 domain별로 구현한다.
 
-- [ ] T-VN-13 — **Feature row revision과 If-Match**
-
-  Feature에 단조 revision을 추가하고 correction PATCH/DELETE에 `If-Match`/412, read에 ETag/304를
-  연결한다. policy revision ledger와 합치지 않는다.
-
-- [ ] T-VN-14 — **지도 completeness와 exact spatial predicate**
-
-  in-bounds의 mode/truncated/coverage/cluster key를 명시하고 `include_geometry`를 serialization으로만
-  사용한다. candidate 술어를 하나로 만들고 exact `ST_Intersects`를 적용한다.
-
 - [ ] T-VN-15 — **search total과 cursor fingerprint**
 
   `include_total=false`에서 COUNT를 실행하지 않고 cursor version·query fingerprint를 검증해 다른
@@ -246,31 +204,6 @@ CI green·`integration/t-vn` 병합 뒤 해당 issue를 닫고 이 섹션을 완
 
   set-based weather batch와 `target_at`/`known_at` parameter를 제공해 PinVi N+1을 없애고 존재하지
   않는 parent feature를 빈 결과가 아닌 404로 구분한다.
-
-- [ ] T-VN-17 — **weather 무결성 제약**
-
-  semantic UNIQUE를 concurrent writer cutover와 함께 도입하고 range/payload CHECK와 source FK는
-  `NOT VALID`→`VALIDATE`로 적용한다.
-
-- [ ] T-VN-18 — **중복 GiST 제거와 BRIN 감사**
-
-  자동 full GiST를 제거하고 필요한 partial GiST만 유지한다. 전후 write 비용과 hot query를 실측하고
-  weather/price BRIN은 실제 누락된 시간축만 보강한다.
-
-- [ ] T-VN-19 — **Alembic metadata 정합 CI**
-
-  모든 소유 table mapping/include filter를 정리하고 빈 PostGIS DB의
-  `alembic upgrade head && alembic check`를 상시 CI gate로 만든다.
-
-- [ ] T-VN-20 — **principal actor 전면 전환**
-
-  모든 write schema에서 body `operator`/`actor`/`created_by`/`reviewed_by`를 제거하고 제출·승인
-  principal을 인증 context에서 보존해 ADR-066의 actor 결정을 완결한다.
-
-- [ ] T-VN-21 — **3단 성능 gate**
-
-  PR planner-default smoke·query-count/shape, release 실분포 분석, index before/after write 비용의
-  3단 gate를 CI와 release 절차에 연결한다. 정본은 performance.md의 vNext 절이다.
 
 ### Wave 2 — shadow와 write-fence 구조 전환
 
