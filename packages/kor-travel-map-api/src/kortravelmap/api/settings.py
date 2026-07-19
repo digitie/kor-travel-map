@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -13,6 +14,7 @@ __all__ = ["ApiSettings"]
 
 
 _BEARER_B64TOKEN_PATTERN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
+_LOCAL_DEV_CURSOR_SIGNING_KEY = secrets.token_bytes(32)
 
 
 def _deployable_secret_shape(raw: str) -> bool:
@@ -179,6 +181,15 @@ class ApiSettings(BaseSettings):
             "operator는 proxy SSO). env ``KOR_TRAVEL_MAP_API_SERVICE_TOKEN``."
         ),
     )
+    cursor_signing_secret: SecretStr | None = Field(
+        default=None,
+        description=(
+            "``/v1/features/search`` stateless cursor HMAC-SHA256 전용 server-only "
+            "secret. public API key/service token/admin·ops·metrics secret과 공유하지 "
+            "않는다. production에서 features surface 활성 시 공백 없는 32자 이상 "
+            "값이 필수다. local-dev 미설정 시 process-local 난수 key를 사용한다."
+        ),
+    )
     admin_proxy_secret: SecretStr | None = Field(
         default=None,
         validation_alias="KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
@@ -327,6 +338,25 @@ class ApiSettings(BaseSettings):
                 )
         return value
 
+    @field_validator("cursor_signing_secret", mode="before")
+    @classmethod
+    def _validate_cursor_signing_secret(cls, value: object) -> object:
+        """활성 signing secret은 공백 없는 32자 이상으로 제한한다."""
+
+        if value is None:
+            return value
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+        if not isinstance(raw, str):
+            return value
+        if raw == "":
+            return None
+        if len(raw) < 32 or any(character.isspace() for character in raw):
+            raise ValueError(
+                "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be at least 32 "
+                "characters and contain no whitespace"
+            )
+        return value
+
     @model_validator(mode="after")
     def _validate_ops_principal_pair(self) -> ApiSettings:
         """C6c principal은 read/cancel secret을 한 쌍으로만 활성화한다."""
@@ -355,6 +385,7 @@ class ApiSettings(BaseSettings):
         protected_secrets = {
             "admin proxy secret": self.admin_proxy_secret,
             "service token": self.service_token,
+            "cursor signing secret": self.cursor_signing_secret,
         }
         for ops_name, ops_token in (
             ("ops read token", read),
@@ -385,6 +416,7 @@ class ApiSettings(BaseSettings):
             ("service token", self.service_token),
             ("ops read token", self.ops_read_token),
             ("ops cancel token", self.ops_cancel_token),
+            ("cursor signing secret", self.cursor_signing_secret),
         ):
             if (
                 protected_secret is not None
@@ -394,6 +426,38 @@ class ApiSettings(BaseSettings):
                     f"metrics token must be distinct from {protected_name}"
                 )
         return self
+
+    @model_validator(mode="after")
+    def _validate_cursor_signing_secret_distinct(self) -> ApiSettings:
+        """Cursor HMAC key를 인증·scrape trust boundary secret과 분리한다."""
+
+        if self.cursor_signing_secret is None:
+            return self
+        raw_cursor_secret = self.cursor_signing_secret.get_secret_value()
+        for protected_name, protected_secret in (
+            ("admin proxy secret", self.admin_proxy_secret),
+            ("service token", self.service_token),
+            ("ops read token", self.ops_read_token),
+            ("ops cancel token", self.ops_cancel_token),
+            ("metrics token", self.metrics_token),
+            ("public API key", self.vworld_api_key),
+        ):
+            if (
+                protected_secret is not None
+                and raw_cursor_secret == protected_secret.get_secret_value()
+            ):
+                raise ValueError(
+                    f"cursor signing secret must be distinct from {protected_name}"
+                )
+        return self
+
+    @property
+    def cursor_signing_key(self) -> bytes:
+        """설정된 cursor HMAC key 또는 local-dev process-local fallback."""
+
+        if self.cursor_signing_secret is None:
+            return _LOCAL_DEV_CURSOR_SIGNING_KEY
+        return self.cursor_signing_secret.get_secret_value().encode("utf-8")
 
     public_api_key_required: bool = Field(
         default=False,
@@ -627,6 +691,13 @@ class ApiSettings(BaseSettings):
             problems.append(
                 "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED must be true while "
                 "the public features surface is enabled"
+            )
+
+        if self.features_routes_enabled and self.cursor_signing_secret is None:
+            problems.append(
+                "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be set to at least "
+                "32 characters without whitespace while the public features "
+                "surface is enabled"
             )
 
         if self.debug_routes_enabled:

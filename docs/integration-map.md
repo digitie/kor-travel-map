@@ -91,6 +91,14 @@
   추가한다. 배포는 secret 선주입 → map API → signed read/cancel smoke → PinVi API 순서다.
   rollback은 map만 먼저 내리지 않고 검증된 map/PinVi image pair를 함께 복원한다. 한쪽 token이
   없거나 짧거나 공백을 포함하거나 두 token이 같으면 C6c를 활성화하지 않는다.
+- `/v1/features/search` cursor 서명에는 API 전용
+  `KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET`을 사용한다. 이 값은 public API key나
+  admin/service/ops/metrics credential과 공유하지 않고 map API container에만 주입한다.
+  production features surface는 공백 없는 32자 이상 값이 없으면 기동을 거부한다. n150
+  cutover에서는 API 재생성 전에 secret을 먼저 주입하고, 첫 page cursor로 같은 query의 다음
+  page 성공과 query 변경·변조 cursor의 typed 422를 확인한다. 값 rotation은 발급 당시 key로
+  만든 기존 cursor를 즉시 무효화하므로 배포 창의 허용 동작으로 기록하며, local-dev의
+  process-local fallback은 재시작·multi-worker 간 cursor 연속성을 보장하지 않는다.
 
 | PinVi 현재 용도 | 삭제된 KTM 호출 | canonical 전환 대상 | 필수 의미 변환 |
 |---|---|---|---|
@@ -155,6 +163,11 @@ write fence → KTM API/DB 전환 → PinVi 활성화 → 양방향 smoke → so
 write fence를 유지하거나 검증된 forward journal/PITR로 fence 이후 delta를 되살릴 수 있어야 한다.
 단순 old snapshot 복원과 upstream 재수집은 rollback이 아니다. 어느 gate든 실패하면 consumer와 KTM을
 이전 pinned compatible pair로 유지하고 새 writer를 열지 않는다(ADR-075).
+
+`/v1/features/search` 전환에는 `include_total=false`의 COUNT 0회, `true`의 COUNT 1회,
+동일 정규화 query에서만 이어지는 signed cursor, 알 수 없는 version·변조·query mismatch의
+typed 422를 포함한다. production API의 cursor signing secret은 다른 runtime과 frontend로
+전파하지 않으며 실제 값은 배포 전용 env에만 둔다.
 
 현재 공개 read·weather·batch 경로를 목표 계약으로 바꾸는 호환 alias는 두지 않는다. 변경 시점은
 각 T-VN task와 PinVi mirror task가 소유하며, 이 문서는 조건만 고정한다.

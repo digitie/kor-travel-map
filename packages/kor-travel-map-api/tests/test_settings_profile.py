@@ -20,6 +20,7 @@ OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
 SERVICE_TOKEN = "service-token-0000000000000000000000000000"
 METRICS_TOKEN = "metrics-token-0000000000000000000000000000"
+CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
 
 # 명시하지 않은 필드에 ambient host env가 스며들어 기본값 검증을 오염시키지
 # 않도록, 이 파일의 모든 테스트에서 관련 env를 제거한다.
@@ -37,6 +38,7 @@ _HERMETIC_ENV_VARS = (
     "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
     "KOR_TRAVEL_MAP_API_OPS_ACTOR",
     "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+    "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
     "KOR_TRAVEL_MAP_API_VWORLD_API_KEY",
     "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
     "KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED",
@@ -56,6 +58,7 @@ def _local_settings(**overrides: Any) -> ApiSettings:
         "ops_read_token": None,
         "public_api_key_required": False,
         "service_token": None,
+        "cursor_signing_secret": None,
         "vworld_api_key": None,
     }
     values.update(overrides)
@@ -74,6 +77,7 @@ def _production_settings(**overrides: Any) -> ApiSettings:
         "public_api_key_required": True,
         "debug_routes_enabled": False,
         "service_token": SERVICE_TOKEN,
+        "cursor_signing_secret": CURSOR_SIGNING_SECRET,
         "metrics_token": METRICS_TOKEN,
         "vworld_api_key": None,
     }
@@ -111,6 +115,10 @@ def test_profile_reads_env_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED", "false")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_SERVICE_TOKEN", SERVICE_TOKEN)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
+        CURSOR_SIGNING_SECRET,
+    )
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_METRICS_TOKEN", METRICS_TOKEN)
     settings = ApiSettings(_env_file=None)
     assert settings.is_production
@@ -150,6 +158,10 @@ def test_production_docker_compose_env_equivalent_boots(
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_SERVICE_TOKEN", SERVICE_TOKEN)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
+        CURSOR_SIGNING_SECRET,
+    )
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_METRICS_TOKEN", METRICS_TOKEN)
     settings = ApiSettings(_env_file=None)
     assert settings.is_production
@@ -168,6 +180,7 @@ def test_production_without_any_surface_needs_only_admin_secret() -> None:
         ops_principal_required=False,
         public_api_key_required=False,
         service_token=None,
+        cursor_signing_secret=None,
     )
     assert settings.is_production
     assert not settings.resolved_ops_routes_enabled
@@ -304,6 +317,83 @@ def test_production_service_token_not_required_without_features_surface() -> Non
         service_token=None,
     )
     assert settings.service_token is None
+
+
+# ── feature search cursor signing secret (T-VN-15) ──────────────────────────
+
+
+@pytest.mark.unit
+def test_production_requires_cursor_signing_secret_while_features_enabled() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        _production_settings(cursor_signing_secret=None)
+    message = str(excinfo.value)
+    assert "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET" in message
+    assert "features surface is enabled" in message
+
+
+@pytest.mark.unit
+def test_production_cursor_signing_secret_not_required_without_features() -> None:
+    settings = _production_settings(
+        features_routes_enabled=False,
+        cursor_signing_secret=None,
+    )
+    assert settings.cursor_signing_secret is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "cursor_signing_secret",
+    ["", "short", "c" * 31, "cursor signing secret " + "c" * 32],
+)
+def test_cursor_signing_secret_rejects_short_or_whitespace(
+    cursor_signing_secret: str,
+) -> None:
+    if cursor_signing_secret == "":
+        settings = _local_settings(cursor_signing_secret=cursor_signing_secret)
+        assert settings.cursor_signing_secret is None
+        return
+    with pytest.raises(ValidationError) as excinfo:
+        _local_settings(cursor_signing_secret=cursor_signing_secret)
+    assert "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET" in str(excinfo.value)
+
+
+@pytest.mark.unit
+def test_local_dev_cursor_fallback_is_process_local_and_stable() -> None:
+    first = _local_settings()
+    second = _local_settings()
+    assert first.cursor_signing_secret is None
+    assert first.cursor_signing_key == second.cursor_signing_key
+    assert len(first.cursor_signing_key) >= 32
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "reused_field",
+    [
+        "admin_proxy_secret",
+        "service_token",
+        "metrics_token",
+        "vworld_api_key",
+    ],
+)
+def test_cursor_signing_secret_must_be_distinct_from_other_secrets(
+    reused_field: str,
+) -> None:
+    with pytest.raises(ValidationError, match="must be distinct"):
+        _local_settings(
+            cursor_signing_secret=CURSOR_SIGNING_SECRET,
+            **{reused_field: CURSOR_SIGNING_SECRET},
+        )
+
+
+@pytest.mark.unit
+def test_cursor_signing_secret_must_be_distinct_from_ops_tokens() -> None:
+    with pytest.raises(ValidationError, match="distinct from cursor signing secret"):
+        _local_settings(
+            cursor_signing_secret=OPS_READ_TOKEN,
+            ops_read_token=OPS_READ_TOKEN,
+            ops_cancel_token=OPS_CANCEL_TOKEN,
+        )
 
 
 @pytest.mark.unit
@@ -450,6 +540,7 @@ def test_production_error_aggregates_every_missing_requirement() -> None:
     assert "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN" in message
     assert "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED" in message
     assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN" in message
+    assert "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET" in message
     assert "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED" in message
     assert "KOR_TRAVEL_MAP_API_METRICS_TOKEN" in message
 

@@ -2,7 +2,7 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
-## 2026-07-19 (codex, agent B) — T-VN-15 search total·HMAC cursor 계약 선행
+## 2026-07-19 (codex, agent B) — T-VN-15 search total·HMAC cursor 구현 준비
 
 - `/v1/features/search`는 `include_total=false`에서 COUNT SQL을 만들거나 실행하지 않고,
   `true`에서만 같은 filter COUNT를 한 번 실행한다. items/keyset은 total opt-in과 무관하다.
@@ -12,6 +12,12 @@
 - cursor는 stateless REST 상태이므로 schema/migration을 추가하지 않는다. production은 feature
   surface 활성 시 전용 32자 이상 secret을 기동 전에 요구하고, local-dev만 process-local 난수
   fallback을 허용한다. 테스트/lint/build는 동일 단일 적대 리뷰어 승인 뒤 실행한다.
+- repository/client/API와 typed RFC7807 매핑, API-only settings·Compose·entrypoint·launcher,
+  admin UI consumer, admin/user OpenAPI·생성 TypeScript를 같은 계약으로 갱신했다. cursor secret은
+  public/admin/service/ops/metrics 경계와 재사용할 수 없고 실제 값은 코드·문서에 기록하지 않는다.
+- repository statement spy와 실제 PostgreSQL COUNT 관측, query mismatch DB 0회, 변조·unknown
+  version·malformed/keyset 회귀, production/runtime env matrix, API error code와 UI request builder
+  테스트를 작성했다. 이 단계에서는 리뷰 정책에 따라 아직 실행하지 않았다.
 
 ## 2026-07-19 — T-VN-04A admin 비공개 Feature 공간·카드 구현 (codex agent B)
 

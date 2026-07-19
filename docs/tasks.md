@@ -16,7 +16,7 @@
     (`main@d2104f15`, branch `chore/t-vn-sync-main`)
   - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate** (T-VN-00/C6c cutover와 동일 배포 단위)
   - [ ] `T-VN-04A` — **admin 비공개 feature 공간 조회·카드 표면 복원** (#741)
-  - [ ] `T-VN-15` — **search total과 HMAC cursor fingerprint** (agent B 구현·리뷰 대기)
+  - [ ] `T-VN-15` — **search total과 HMAC cursor fingerprint** (PR #780 구현 준비 완료·테스트 전 리뷰 대기)
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
     `T-VN-16` weather batch와 부모 404.
@@ -223,6 +223,8 @@ main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-v
   정규화 query/filter/sort/page contract의 SHA-256 fingerprint와 keyset을 versioned payload에
   넣고 전용 server-only secret의 HMAC-SHA256으로 보호한다. 다른 query 재사용, unknown version,
   malformed와 tamper를 DB 전에 서로 다른 typed RFC7807 422로 거부한다. DB table은 추가하지 않는다.
+  PR #780에 repository/API/runtime/UI/OpenAPI·생성 타입과 테스트를 준비했으며, 단일 적대 리뷰 승인 뒤
+  test/lint/build·실환경 검증을 실행한다.
 
 - [ ] T-VN-16 — **weather batch와 부모 404**
 

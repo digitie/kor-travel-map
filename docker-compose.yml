@@ -134,6 +134,10 @@ services:
       # 함 — entrypoint가 거부). admin secret과 같은 패턴으로 host env 누락 시
       # compose 평가가 즉시 실패한다.
       KOR_TRAVEL_MAP_API_SERVICE_TOKEN: ${KOR_TRAVEL_MAP_API_SERVICE_TOKEN:?KOR_TRAVEL_MAP_API_SERVICE_TOKEN is required}
+      # T-VN-15 — 검색 cursor는 인증 credential과 분리한 server-only HMAC
+      # secret으로 서명한다. API container에만 주입하며 host env 누락 시 compose
+      # 평가가 즉시 실패한다.
+      KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET: ${KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET:?KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET is required}
       # ADR-066 결정 4 (T-VN-02) — production은 /metrics를 scrape identity로
       # 제한한다. Prometheus scrape_config의 authorization(type Bearer)과 같은
       # 값을 주입해야 하며(앞뒤 공백 없는 32자 이상, 다른 secret과 달라야 함),

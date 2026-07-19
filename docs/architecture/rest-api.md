@@ -189,7 +189,7 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
   `FEATURE_SEARCH_CURSOR_TAMPERED`, 현재 query와 fingerprint가 다르면
   `CURSOR_QUERY_MISMATCH`인 RFC7807 422다. 어느 실패도 DB query 전에 끝난다.
 - HMAC key는 server-only `KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET`이며 public API key,
-  service token, admin proxy secret과 공유하지 않는다. production에서 feature search surface가
+  service token, admin proxy secret, ops token, metrics token과 공유하지 않는다. production에서 feature search surface가
   켜져 있으면 공백 없는 최소 32자 secret이 없을 때 기동을 거부한다. `local-dev` 미설정 시에만
   process-local 난수 key를 허용하며 재시작·다중 worker 사이 cursor 지속성을 보장하지 않는다.
   운영 rotation은 새 key 배포와 동시에 기존 cursor를 의도적으로 무효화하는 clean cut이다.

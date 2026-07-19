@@ -164,6 +164,49 @@ if [ "$api_profile" = "production" ] && [ "$ops_routes_enabled" = "true" ] \
   exit 1
 fi
 
+# T-VN-15 — search cursor signing secret은 인증 credential과 분리한다. production
+# features surface는 migration 전에 누락을 거부하고, 설정된 값은 profile과 무관하게
+# 공백 없는 32자 이상이어야 한다. local-dev 미설정만 process-local fallback을 쓴다.
+cursor_signing_secret="${KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET:-}"
+if [ "$api_profile" = "production" ] && [ "$features_routes_enabled" = "true" ] \
+  && [ -z "$cursor_signing_secret" ]; then
+  echo "production profile is fail-closed (ADR-066): KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be configured while the public features surface is enabled" >&2
+  exit 1
+fi
+if [ -n "$cursor_signing_secret" ]; then
+  case "$cursor_signing_secret" in
+    *[[:space:]]*)
+      echo "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must contain no whitespace" >&2
+      exit 1
+      ;;
+  esac
+  if [ "${#cursor_signing_secret}" -lt 32 ]; then
+    echo "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be at least 32 characters" >&2
+    exit 1
+  fi
+  if [ "$cursor_signing_secret" = "$api_proxy_secret" ] \
+    || { [ -n "$api_service_token" ] && [ "$cursor_signing_secret" = "$api_service_token" ]; }; then
+    echo "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be distinct from admin and service credentials" >&2
+    exit 1
+  fi
+  if [ "$ops_pair_configured" = "true" ] \
+    && { [ "$cursor_signing_secret" = "$KOR_TRAVEL_MAP_API_OPS_READ_TOKEN" ] \
+      || [ "$cursor_signing_secret" = "$KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN" ]; }; then
+    echo "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be distinct from ops credentials" >&2
+    exit 1
+  fi
+  api_metrics_token="${KOR_TRAVEL_MAP_API_METRICS_TOKEN:-}"
+  if [ -n "$api_metrics_token" ] && [ "$cursor_signing_secret" = "$api_metrics_token" ]; then
+    echo "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be distinct from the metrics credential" >&2
+    exit 1
+  fi
+  api_public_key="${KOR_TRAVEL_MAP_API_VWORLD_API_KEY:-}"
+  if [ -n "$api_public_key" ] && [ "$cursor_signing_secret" = "$api_public_key" ]; then
+    echo "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be distinct from the public API key" >&2
+    exit 1
+  fi
+fi
+
 retries="${KOR_TRAVEL_MAP_MIGRATION_RETRIES:-30}"
 sleep_seconds="${KOR_TRAVEL_MAP_MIGRATION_RETRY_SLEEP_SECONDS:-2}"
 attempt=1

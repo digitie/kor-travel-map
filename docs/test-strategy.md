@@ -363,8 +363,10 @@ async def test_get_features_in_bounds(debug_client, seeded_features):
 #### 5.1.1 feature search total·cursor 무결성
 
 T-VN-15는 repository spy와 실제 PostgreSQL 통합 테스트를 함께 둔다. 첫 페이지와 continuation에서
-`include_total=false`이면 실행 statement에 COUNT SQL이 0개이고 page-size+1 조회만 1개인지,
-`true`이면 동일 filter COUNT가 정확히 1개인지 검증한다. 두 모드 모두 items와 next keyset은 같고
+`include_total=false`이면 실행 statement에 COUNT SQL이 0개이고 page-size+1 data SELECT가
+1개인지, `true`이면 동일 filter COUNT가 정확히 1개인지 검증한다. `q` 검색은 두 모드 모두
+transaction-local pg_trgm threshold 설정 statement가 별도로 실행될 수 있다. 두 모드 모두
+items와 next keyset은 같고
 `meta.page.total`만 `null`/정수로 달라야 한다.
 
 cursor 회귀는 q trim, filter 중복·순서, bbox float, q 유무 sort, page_size, include_total을 포함한

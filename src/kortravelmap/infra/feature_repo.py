@@ -31,14 +31,24 @@ ADR 참조
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
+import hmac
 import json
+import math
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
+
+from kortravelmap.core.exceptions import (
+    FeatureSearchCursorInvalidError,
+    FeatureSearchCursorQueryMismatchError,
+    FeatureSearchCursorTamperedError,
+    FeatureSearchCursorVersionUnsupportedError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -3764,50 +3774,282 @@ def encode_bbox_cursor(feature_id: str) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
-def _search_cursor_payload(cursor: str | None, *, q_enabled: bool) -> dict[str, Any]:
+_SEARCH_CURSOR_KIND: Final[str] = "feature_search"
+_SEARCH_CURSOR_VERSION: Final[int] = 1
+_SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
+_SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
+
+
+@dataclass(frozen=True)
+class _FeatureSearchContract:
+    q: str | None
+    bbox: tuple[float, float, float, float] | None
+    kinds: tuple[str, ...] | None
+    categories: tuple[str, ...] | None
+    page_size: int
+    include_total: bool
+
+    @property
+    def q_enabled(self) -> bool:
+        return self.q is not None
+
+    @property
+    def sort(self) -> str:
+        return "score_desc_feature_id_asc" if self.q_enabled else "feature_id_asc"
+
+    @property
+    def fingerprint(self) -> str:
+        canonical = json.dumps(
+            {
+                "q": self.q,
+                "bbox": self.bbox,
+                "kinds": self.kinds,
+                "categories": self.categories,
+                "sort": self.sort,
+                "page_size": self.page_size,
+                "include_total": self.include_total,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
+
+def _normalize_search_filter(values: Sequence[str] | None) -> tuple[str, ...] | None:
+    if values is None:
+        return None
+    normalized = sorted({str(value).strip() for value in values if str(value).strip()})
+    return tuple(normalized) or None
+
+
+def _feature_search_contract(
+    *,
+    q: str | None,
+    bbox: tuple[float, float, float, float] | None,
+    kinds: Sequence[str] | None,
+    categories: Sequence[str] | None,
+    page_size: int,
+    include_total: bool,
+) -> _FeatureSearchContract:
+    normalized_q = q.strip() if q is not None else None
+    if normalized_q == "":
+        normalized_q = None
+    if page_size <= 0:
+        raise ValueError("page_size must be greater than 0")
+
+    normalized_bbox: tuple[float, float, float, float] | None = None
+    if bbox is not None:
+        if len(bbox) != 4:
+            raise ValueError("invalid bbox")
+        normalized_bbox = (
+            float(bbox[0]),
+            float(bbox[1]),
+            float(bbox[2]),
+            float(bbox[3]),
+        )
+        if not all(math.isfinite(value) for value in normalized_bbox):
+            raise ValueError("invalid bbox")
+        min_lon, min_lat, max_lon, max_lat = normalized_bbox
+        if (
+            min_lon < -180
+            or max_lon > 180
+            or min_lat < -90
+            or max_lat > 90
+            or min_lon > max_lon
+            or min_lat > max_lat
+        ):
+            raise ValueError("invalid bbox")
+        normalized_bbox = (
+            0.0 if min_lon == 0.0 else min_lon,
+            0.0 if min_lat == 0.0 else min_lat,
+            0.0 if max_lon == 0.0 else max_lon,
+            0.0 if max_lat == 0.0 else max_lat,
+        )
+    if normalized_q is None and normalized_bbox is None:
+        raise ValueError("q 또는 bbox 중 하나는 필요합니다")
+
+    return _FeatureSearchContract(
+        q=normalized_q,
+        bbox=normalized_bbox,
+        kinds=_normalize_search_filter(kinds),
+        categories=_normalize_search_filter(categories),
+        page_size=min(page_size, 200),
+        include_total=include_total,
+    )
+
+
+def _search_cursor_signing_key(signing_key: bytes) -> bytes:
+    if not isinstance(signing_key, bytes) or len(signing_key) < 32:
+        raise ValueError("feature search cursor signing key must be at least 32 bytes")
+    return signing_key
+
+
+def _cursor_b64encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _cursor_b64decode(segment: str) -> bytes:
+    if not segment or "=" in segment:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    try:
+        decoded = base64.b64decode(
+            segment + "=" * (-len(segment) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+    except (ValueError, binascii.Error) as exc:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor") from exc
+    if _cursor_b64encode(decoded) != segment:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    return decoded
+
+
+def _sign_search_cursor_payload(payload_segment: str, *, signing_key: bytes) -> bytes:
+    return hmac.new(
+        _search_cursor_signing_key(signing_key),
+        _SEARCH_CURSOR_DOMAIN + payload_segment.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+
+
+def _encode_search_cursor_payload(payload: Mapping[str, Any], *, signing_key: bytes) -> str:
+    raw = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    payload_segment = _cursor_b64encode(raw)
+    signature = _sign_search_cursor_payload(payload_segment, signing_key=signing_key)
+    return f"{payload_segment}.{_cursor_b64encode(signature)}"
+
+
+def _search_cursor_payload(
+    cursor: str | None,
+    *,
+    contract: _FeatureSearchContract,
+    signing_key: bytes,
+) -> dict[str, Any]:
     if cursor is None:
         return {}
+    _search_cursor_signing_key(signing_key)
+    if len(cursor) > _SEARCH_CURSOR_MAX_LENGTH or cursor.count(".") != 1:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    payload_segment, signature_segment = cursor.split(".", 1)
+    raw_payload = _cursor_b64decode(payload_segment)
+    actual_signature = _cursor_b64decode(signature_segment)
+    if len(actual_signature) != hashlib.sha256().digest_size:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    expected_signature = _sign_search_cursor_payload(
+        payload_segment,
+        signing_key=signing_key,
+    )
+    if not hmac.compare_digest(actual_signature, expected_signature):
+        raise FeatureSearchCursorTamperedError("feature search cursor signature mismatch")
     try:
-        padded = cursor + "=" * (-len(cursor) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise ValueError("invalid feature search cursor") from exc
-    if not isinstance(payload, dict) or bool(payload.get("q_enabled")) != q_enabled:
-        raise ValueError("invalid feature search cursor")
-    feature_id = payload.get("feature_id")
-    if not isinstance(feature_id, str) or not feature_id:
-        raise ValueError("invalid feature search cursor")
+        payload = json.loads(raw_payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor") from exc
+    if not isinstance(payload, dict) or set(payload) != {"v", "kind", "query", "keyset"}:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    try:
+        canonical_payload = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor") from exc
+    if raw_payload != canonical_payload:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    if type(payload["v"]) is not int:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    if payload["v"] != _SEARCH_CURSOR_VERSION:
+        raise FeatureSearchCursorVersionUnsupportedError(
+            "unsupported feature search cursor version"
+        )
+    if not isinstance(payload["kind"], str) or payload["kind"] != _SEARCH_CURSOR_KIND:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    query_fingerprint = payload["query"]
+    if (
+        not isinstance(query_fingerprint, str)
+        or len(query_fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in query_fingerprint)
+    ):
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    if query_fingerprint != contract.fingerprint:
+        raise FeatureSearchCursorQueryMismatchError(
+            "feature search cursor does not match the current query"
+        )
+    if not isinstance(payload["keyset"], dict):
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
     return payload
 
 
-def _search_cursor_params(cursor: str | None, *, q_enabled: bool) -> dict[str, Any]:
-    payload = _search_cursor_payload(cursor, q_enabled=q_enabled)
+def _search_cursor_params(
+    cursor: str | None,
+    *,
+    contract: _FeatureSearchContract,
+    signing_key: bytes,
+) -> dict[str, Any]:
+    payload = _search_cursor_payload(
+        cursor,
+        contract=contract,
+        signing_key=signing_key,
+    )
     params: dict[str, Any] = {
         "cursor_score": None,
         "cursor_feature_id": None,
     }
     if not payload:
         return params
-    params["cursor_feature_id"] = payload["feature_id"]
-    if q_enabled:
+    keyset = payload["keyset"]
+    expected_keys = {"feature_id", "score"} if contract.q_enabled else {"feature_id"}
+    if set(keyset) != expected_keys:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    feature_id = keyset["feature_id"]
+    if (
+        not isinstance(feature_id, str)
+        or not feature_id
+        or feature_id != feature_id.strip()
+    ):
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    params["cursor_feature_id"] = feature_id
+    if contract.q_enabled:
         try:
-            score = str(payload["score"])
-            float(score)
+            score = keyset["score"]
+            if not isinstance(score, str) or not math.isfinite(float(score)):
+                raise ValueError("score must be a finite string")
             params["cursor_score"] = score
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError("invalid feature search cursor") from exc
+            raise FeatureSearchCursorInvalidError("invalid feature search cursor") from exc
     return params
 
 
-def _encode_search_cursor(item: FeatureSearchRow, *, q_enabled: bool) -> str:
+def _encode_search_cursor(
+    item: FeatureSearchRow,
+    *,
+    contract: _FeatureSearchContract,
+    signing_key: bytes,
+) -> str:
+    keyset: dict[str, Any] = {"feature_id": item.feature_id}
+    if contract.q_enabled:
+        score = item.score_cursor if item.score_cursor is not None else str(item.score)
+        if not math.isfinite(float(score)):
+            raise ValueError("feature search score cursor must be finite")
+        keyset["score"] = score
     payload: dict[str, Any] = {
-        "q_enabled": q_enabled,
-        "feature_id": item.feature_id,
+        "v": _SEARCH_CURSOR_VERSION,
+        "kind": _SEARCH_CURSOR_KIND,
+        "query": contract.fingerprint,
+        "keyset": keyset,
     }
-    if q_enabled:
-        payload["score"] = item.score_cursor if item.score_cursor is not None else str(item.score)
-    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    return _encode_search_cursor_payload(payload, signing_key=signing_key)
 
 
 def _search_row(row: Any) -> FeatureSearchRow:
@@ -3837,8 +4079,10 @@ async def search_features(
     bbox: tuple[float, float, float, float] | None = None,
     kinds: Sequence[str] | None = None,
     categories: Sequence[str] | None = None,
-    limit: int = 50,
+    page_size: int = 50,
     cursor: str | None = None,
+    include_total: bool = False,
+    cursor_signing_key: bytes,
 ) -> FeatureSearchPage:
     """사용자 feature 검색.
 
@@ -3846,72 +4090,91 @@ async def search_features(
     threshold는 현재 transaction에만 ``SET LOCAL``로 적용한다(ADR-004/성능 가이드).
     bbox 술어는 stored ``coord`` 컬럼과 ``ST_MakeEnvelope``만 사용한다.
     """
-    normalized_q = q.strip() if q is not None else None
-    if normalized_q == "":
-        normalized_q = None
-    if normalized_q is None and bbox is None:
-        raise ValueError("q 또는 bbox 중 하나는 필요합니다")
-    if limit <= 0:
-        raise ValueError("limit must be greater than 0")
+    contract = _feature_search_contract(
+        q=q,
+        bbox=bbox,
+        kinds=kinds,
+        categories=categories,
+        page_size=page_size,
+        include_total=include_total,
+    )
+    cursor_params = _search_cursor_params(
+        cursor,
+        contract=contract,
+        signing_key=cursor_signing_key,
+    )
     min_lon: float | None
     min_lat: float | None
     max_lon: float | None
     max_lat: float | None
-    if bbox is not None:
-        min_lon, min_lat, max_lon, max_lat = bbox
-        if min_lon > max_lon or min_lat > max_lat:
-            raise ValueError("invalid bbox")
+    if contract.bbox is not None:
+        min_lon, min_lat, max_lon, max_lat = contract.bbox
     else:
         min_lon = min_lat = max_lon = max_lat = None
 
-    q_enabled = normalized_q is not None
+    q_enabled = contract.q_enabled
     if q_enabled:
         await session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.2"))
-    effective_limit = min(limit, 200)
+    effective_limit = contract.page_size
     rows = (
         (
             await session.execute(
                 text(_FEATURE_SEARCH_BY_SCORE_SQL if q_enabled else _FEATURE_SEARCH_BY_ID_SQL),
                 {
-                    "q": normalized_q,
-                    "bbox_enabled": bbox is not None,
+                    "q": contract.q,
+                    "bbox_enabled": contract.bbox is not None,
                     "min_lon": min_lon,
                     "min_lat": min_lat,
                     "max_lon": max_lon,
                     "max_lat": max_lat,
-                    "kinds": _normalized_filter(kinds),
-                    "categories": _normalized_filter(categories),
+                    "kinds": list(contract.kinds) if contract.kinds is not None else None,
+                    "categories": (
+                        list(contract.categories)
+                        if contract.categories is not None
+                        else None
+                    ),
                     "limit_plus_one": effective_limit + 1,
-                    **_search_cursor_params(cursor, q_enabled=q_enabled),
+                    **cursor_params,
                 },
             )
         )
         .mappings()
         .all()
     )
-    count_result = await session.execute(
-        text(_FEATURE_SEARCH_SCORE_COUNT_SQL if q_enabled else _FEATURE_SEARCH_COUNT_SQL),
-        {
-            "q": normalized_q,
-            "bbox_enabled": bbox is not None,
-            "min_lon": min_lon,
-            "min_lat": min_lat,
-            "max_lon": max_lon,
-            "max_lat": max_lat,
-            "kinds": _normalized_filter(kinds),
-            "categories": _normalized_filter(categories),
-        },
-    )
+    total_count: int | None = None
+    if contract.include_total:
+        count_result = await session.execute(
+            text(_FEATURE_SEARCH_SCORE_COUNT_SQL if q_enabled else _FEATURE_SEARCH_COUNT_SQL),
+            {
+                "q": contract.q,
+                "bbox_enabled": contract.bbox is not None,
+                "min_lon": min_lon,
+                "min_lat": min_lat,
+                "max_lon": max_lon,
+                "max_lat": max_lat,
+                "kinds": list(contract.kinds) if contract.kinds is not None else None,
+                "categories": (
+                    list(contract.categories)
+                    if contract.categories is not None
+                    else None
+                ),
+            },
+        )
+        total_count = int(count_result.scalar_one())
     items = tuple(_search_row(row) for row in rows[:effective_limit])
     next_cursor = (
-        _encode_search_cursor(items[-1], q_enabled=q_enabled)
+        _encode_search_cursor(
+            items[-1],
+            contract=contract,
+            signing_key=cursor_signing_key,
+        )
         if len(rows) > effective_limit and items
         else None
     )
     return FeatureSearchPage(
         items=items,
         next_cursor=next_cursor,
-        total_count=int(count_result.scalar_one()),
+        total_count=total_count,
     )
 
 
