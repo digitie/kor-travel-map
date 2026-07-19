@@ -13,6 +13,16 @@
 - **다음 한 작업**: docs-first PR을 연 뒤 구현을 추가하고 단일 적대 리뷰 승인 후 테스트·CI를
   통과해 main에 병합한다. 이후 n150 exact image rebuild와 C6c capture를 재개한다.
 
+## 2026-07-20 (claude, n150) — T-VN-H02 destructive admin 기본값 fail-closed 완료
+
+- `admin_destructive_enabled` 기본값을 fail-closed(False)로 내리고, 문서화된 env alias
+  `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED`가 실제로 바인딩되도록 `validation_alias`를 추가했다.
+  Docker compose는 컨테이너 기본 true를 주입해 기존 배포를 유지한다.
+- **배포 전제**: n150 prod와 파괴적 작업이 필요한 배포는 host env로
+  `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=true`를 유지해야 한다. 미설정 시 restore/swap·feature
+  deactivate·POI/backup/offline delete·file purge가 403.
+- **다음 한 작업**: 남은 독립 하드닝(T-VN-H03 surface별 CORS 분리 등)을 이어서 진행한다.
+
 ## 2026-07-20 (codex agent B) — T-VN-59 public raw lineage 보강 착수
 
 - T-VN-SYNC-02 적대적 리뷰 blocker를 issue #786·`T-VN-59`로 분리했다. public forecast의

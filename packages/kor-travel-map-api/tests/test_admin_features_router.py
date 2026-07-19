@@ -56,6 +56,7 @@ def session() -> _FakeSession:
 def client(session: _FakeSession) -> TestClient:
     app = create_app(
         ApiSettings(
+            admin_destructive_enabled=True,
             admin_proxy_secret=None,
             public_api_key_required=False,
             service_token=None,

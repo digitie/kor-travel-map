@@ -17,6 +17,24 @@
 - CodeGraph에서 `_include_object`의 앱 caller가 없고 Alembic callback으로만 소비됨을 확인했다.
   DB schema나 migration revision은 추가하지 않는다. 구현은 단일 적대 리뷰 전 테스트하지 않는다.
 
+## 2026-07-20 (claude, n150) — T-VN-H02 destructive admin 기본값 fail-closed
+
+- `admin_destructive_enabled` 기본값을 `True`에서 `False`(fail-closed)로 내렸다. env
+  `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=true`를 명시하지 않으면 파괴적 `/admin`
+  작업(restore/swap·feature deactivate·POI cache target·backup·offline upload delete·managed
+  file purge)이 403을 반환한다.
+- 문서·`.env.example`이 참조하던 env 이름이 실제로는 필드에 바인딩되지 않던 잠복 버그를 함께
+  고쳤다. env prefix 규칙상 `KOR_TRAVEL_MAP_API_ADMIN_DESTRUCTIVE_ENABLED`만 동작하고 문서화된
+  `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED`는 무시됐다 — `validation_alias`로 문서화된 이름을
+  정본으로 고정했다.
+- BREAKING 배포 변경: Docker compose에 컨테이너 기본 `true`를 주입해 기존 Docker 배포는 그대로
+  동작한다(PUBLIC_API_KEY_REQUIRED·PROFILE와 같은 T-VN-01 패턴). n150 prod는 host env로 이 값을
+  유지해야 파괴적 admin 작업이 계속 동작한다. 읽기/관측 전용 배포는 기본값 그대로 둔다.
+- 기본 True에 의존하던 router 테스트(admin_files purge, admin_backups delete/restore/swap,
+  offline upload delete, admin_features deactivate) fixture에 `admin_destructive_enabled=True`를
+  명시했다. test_auth에 기본값 False→403, env enable→통과를 단정하는 테스트 2건을 추가했다.
+- n150 CI-parity docker(python:3.13)에서 ruff·대상 pytest·redaction guard를 실행했다.
+
 ## 2026-07-20 (codex agent B) — T-VN-59 public weather·curation raw lineage 계약 문서화
 
 - 기준 `integration/t-vn@f5cdeeaa`에서 static/CodeGraph 영향도를 확인했다. weather public

@@ -12,6 +12,14 @@
   분류(PUBLIC_KEYED)는 불변. PinVi·admin consumer는 헤더 전송으로 전환해야 한다(cross-repo
   coordination — T-VN-20 PinVi 패턴).
 
+## destructive admin 기본값 fail-closed (2026-07-20, `T-VN-H02`)
+
+- [x] **T-VN-H02 — destructive admin 기본값 fail-closed.** `admin_destructive_enabled`
+  기본값을 `True`→`False`(fail-closed)로 내리고, 문서화된 env alias
+  `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED`가 실제로 바인딩되도록 `validation_alias`를 추가했다.
+  Docker compose는 컨테이너 기본 true를 주입해 기존 배포를 유지한다(배포 전제: 파괴적 작업이
+  필요한 배포는 host env로 이 값을 유지). PR #TBD.
+
 ## vNext main 동기화 (2026-07-20, `T-VN-SYNC-01`)
 
 - [x] **T-VN-SYNC-01 — latest main을 integration/t-vn에 동기화.**

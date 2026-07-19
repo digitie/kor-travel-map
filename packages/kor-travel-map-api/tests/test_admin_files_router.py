@@ -20,6 +20,7 @@ from kortravelmap.api.settings import ApiSettings
 
 
 def _make_app(tmp_path: Path, **overrides: Any) -> Any:
+    overrides.setdefault("admin_destructive_enabled", True)
     settings = ApiSettings(
         admin_proxy_secret=None,
         backup_root=tmp_path,
