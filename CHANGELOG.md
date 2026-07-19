@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### C7 mocked summary 가시성 검증 보완 (2026-07-19, PR #755 리뷰 후속)
+
+- **FIXED (test)**: `/ops/datasets` 상태 요약의 exact projection이 DOM에 하나만
+  존재하는 것뿐 아니라 실제로 보이는지도 mocked E2E에서 검증한다.
+
 ### C7 prod 심층 리뷰 보안 후속 (2026-07-19, PR #754)
 
 - **SECURITY**: Docker build context에서 모든 `*.local.md`를 제외하고, C7 Playwright

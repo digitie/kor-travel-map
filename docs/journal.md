@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — Agent A PR #755 심층 리뷰 후속
+
+- 단일 전문 리뷰에서 `/ops/datasets` summary projection이 exact count만 확인해
+  `hidden`/`display:none` 회귀도 통과할 수 있는 S3를 확인했다.
+- positive·오염 negative fixture의 12개 exact projection을 각각 유일성 확인 뒤
+  `toBeVisible()`로 검증하도록 보완했다.
+- Next dev server를 별도 기동한 targeted mocked E2E 3개와 E2E TypeScript,
+  대상 ESLint가 통과했다.
+
 ## 2026-07-19 (codex) — Agent A PR #754 심층 리뷰 보안 후속
 
 - 단일 전문 리뷰에서 local-only 배포 문서의 Docker context 유입, 실패 뒤 recovery
