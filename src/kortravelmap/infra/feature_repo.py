@@ -710,8 +710,10 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
     ``include_geometry`` 유무와 **무관하게 동일한** 후보 집합을 만든다 — 플래그는
     응답 직렬화(SELECT projection)만 제어하고 membership은 바꾸지 않는다.
 
-    - **point 좌표(``coord``)**: ``&&`` MBR 술어는 점-envelope 교차에서 이미 정확하다
-      (점의 MBR = 점 자신) — 그대로 두고 ``idx_features_coord_gist``를 구동한다.
+    - **point/legacy 좌표(``coord``)**: ``&&`` MBR 술어는 점-envelope 교차에서 이미
+      정확하다(점의 MBR = 점 자신). route/area에 geometry가 있으면 이 arm을 타지 않고
+      아래 exact geometry arm만 사용하며, geometry가 없는 legacy route/area만 coord로
+      fallback한다.
     - **route/area ``geom``**: ``&&`` MBR prefilter만으로는 false positive가 실재하므로
       (F-8) partial GiST(``idx_features_geom_gist``)를 ``&&``로 구동한 뒤 exact
       ``ST_Intersects``를 덧대 실제 envelope 교차만 남긴다. ``ST_Transform``을 술어에
@@ -724,6 +726,10 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
     return f"""(
     (
       {feature_alias}.coord IS NOT NULL
+      AND (
+        {feature_alias}.kind NOT IN ('route', 'area')
+        OR {feature_alias}.geom IS NULL
+      )
       AND {feature_alias}.coord OPERATOR(x_extension.&&) {env}
     )
     OR (
@@ -1073,33 +1079,38 @@ LIMIT :limit
 
 
 # bbox 내 region rollup 클러스터링 (T-213c). cluster_unit → 고정 행정코드 컬럼
-# (allowlist — SQL injection 불가). bbox 술어는 STORED coord의 GIST 인덱스(&&)를
-# 그대로 쓰고(ADR-012, 변환 없음), 행정코드별 count + 평균 좌표(대표 마커 위치)를
-# 집계한다. ``ST_Transform``을 술어에 넣지 않는다.
-#
-# 후보 술어 단일화(ADR-073 D-9-4): 공통 attribute 필터(kind/category/provider)는
-# ``_bbox_attribute_filter_sql``로 items 변형과 공유한다. 공간 술어는 cluster가
-# **centroid coord 기준 rollup**이라 items의 geometry 포함 후보 술어(route/area geom)를
-# 쓰지 않고 ``coord && envelope``만 쓴다. route/area는 대개 centroid coord를 갖지만
-# (``geometry_centroid``), geom이 bbox와 교차하되 centroid가 bbox 밖인 경계 case는
-# items에는 잡히고 cluster count에는 빠진다(저zoom rollup에서 무시 가능, cluster ≤ items).
-# point coord의 ``&&``는 이미 정확하므로 exact 술어도 불필요하다.
+# (allowlist — SQL injection 불가). items와 같은 exact 후보 술어를 사용해 mode 전환이
+# 공간 후보 universe를 바꾸지 않게 한다(ADR-073 D-9-2·D-9-4). point/legacy 후보의
+# 대표 좌표는 coord, geometry 후보의 대표 좌표는 bbox와 실제 교차한 부분 위의 점이다.
+# 따라서 centroid가 bbox 밖인 route/area도 count와 지도 마커에 빠지지 않으며 반환
+# marker는 bbox 내부에 있다. ``ST_Transform``은 술어에 넣지 않는다(ADR-012).
 def _cluster_bbox_sql(code_col: str) -> str:
+    env = _bbox_envelope_sql()
     return f"""
-SELECT
-    f.{code_col} AS cluster_key,
-    count(*) AS feature_count,
-    avg(x_extension.ST_X(f.coord)) AS lon,
-    avg(x_extension.ST_Y(f.coord)) AS lat
-FROM feature.public_features AS f
-WHERE f.coord IS NOT NULL
-  AND f.{code_col} IS NOT NULL
-  AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
-        CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
-        CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
+WITH bbox_candidates AS (
+  SELECT
+      f.{code_col} AS cluster_key,
+      CASE
+        WHEN f.kind IN ('route', 'area') AND f.geom IS NOT NULL
+          THEN x_extension.ST_PointOnSurface(
+            x_extension.ST_Intersection(f.geom, {env})
+          )
+        ELSE f.coord
+      END AS marker_coord
+  FROM feature.public_features AS f
+  WHERE f.{code_col} IS NOT NULL
+    AND {_bbox_candidate_predicate_sql("f")}
 {_bbox_attribute_filter_sql("f")}
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
-GROUP BY f.{code_col}
+)
+SELECT
+    cluster_key,
+    count(*) AS feature_count,
+    avg(x_extension.ST_X(marker_coord)) AS lon,
+    avg(x_extension.ST_Y(marker_coord)) AS lat
+FROM bbox_candidates
+WHERE marker_coord IS NOT NULL
+GROUP BY cluster_key
 ORDER BY feature_count DESC, cluster_key
 LIMIT :limit
 """
@@ -1133,8 +1144,9 @@ async def cluster_features_in_bbox(
 
     ``cluster_unit`` ∈ {sido, sigungu, eupmyeondong} → 각 region code별
     ``{cluster_key, feature_count, lon, lat}``(lon/lat=region 내 feature 평균 좌표).
-    bbox 술어는 STORED ``coord``의 GIST 인덱스를 사용(ADR-012). region code가 없는
-    feature는 제외된다(주소 미보강 등).
+    point/legacy coord와 route/area geometry의 exact 후보 술어는 items 조회와 같다.
+    geometry 후보의 대표 마커는 bbox 교차 부분 위의 점을 사용한다. region code가 없는
+    feature는 rollup할 수 없어 제외된다(주소 미보강 등).
     """
     if cluster_unit not in _CLUSTER_BBOX_SQL_BY_UNIT:
         raise ValueError("cluster_unit must be one of sido, sigungu, eupmyeondong")

@@ -103,7 +103,8 @@ T-VN-51~55의 실측 결과가 채택 조건을 충족할 때만 새 결정을 �
   id-keyed map은 `found`처럼 별도 키를 쓴다.
 - **페이지네이션·추적·뷰 해석 메타는 `meta`로 일원화**:
   `meta = { duration_ms, request_id, page?: { page_size, next_cursor, total },
-  cluster?: { cluster_unit } }`(`page`는 pageable 목록에만, `total`은 opt-in `null` 기본,
+  cluster?: { cluster_unit, drill_down_unit } }`(`page`는 pageable 목록에만,
+  `total`은 opt-in `null` 기본,
   `cluster`는 in-bounds에만). `data.next_cursor`/`data.total_count`/`data.cluster_unit`/
   파생 `count`는 **폐기**.
 - 라우터별 `FeatureListMeta`/`FeatureDetailMeta`/… 중복 → 공유 `Meta` 1개 + `data` payload

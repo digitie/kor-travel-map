@@ -63,6 +63,13 @@ class ClusterMeta(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cluster_unit: str | None = None
+    drill_down_unit: str | None = Field(
+        default=None,
+        description=(
+            "한 단계 확대 시 요청할 다음 cluster_unit. eupmyeondong 다음은 "
+            "개별 feature이므로 null."
+        ),
+    )
 
 
 class Meta(BaseModel):
@@ -163,6 +170,7 @@ def make_meta(
     next_cursor: str | None = None,
     total: int | None = None,
     cluster_unit: str | None = None,
+    cluster_drill_down_unit: str | None = None,
 ) -> Meta:
     """Build common response ``meta``.
 
@@ -181,7 +189,10 @@ def make_meta(
             if page_size is not None
             else None
         ),
-        cluster=ClusterMeta(cluster_unit=cluster_unit)
+        cluster=ClusterMeta(
+            cluster_unit=cluster_unit,
+            drill_down_unit=cluster_drill_down_unit,
+        )
         if cluster_unit is not None
         else None,
     )

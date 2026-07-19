@@ -13,14 +13,20 @@
   응답 payload에 직렬화할지만 제어한다(같은 feature 집합, payload만 차이).
 - **FIXED**: route/area bbox 후보에 exact `ST_Intersects(geom, envelope)`를 추가했다. `&&`
   MBR prefilter만으로 생기던 false positive(경계상자만 겹치고 실제 geometry는 교차하지 않는
-  route/area)를 제거한다. point `coord`의 `&&`는 이미 정확해 그대로 두었고, `ST_Transform`은
-  술어에 넣지 않는다(ADR-012 — partial GiST `idx_features_geom_gist`가 `&&`로 구동됨).
+  route/area)를 제거한다. geometry가 있는 route/area는 centroid `coord` arm으로 우회하지
+  않고 exact geometry arm만 사용하며, geometry가 없는 legacy 행만 coord로 fallback한다.
+  point `coord`의 `&&`는 이미 정확해 그대로 두었고, `ST_Transform`은 술어에 넣지 않는다
+  (ADR-012 — partial GiST `idx_features_geom_gist`가 `&&`로 구동됨).
+- **FIXED**: cluster와 items가 같은 exact 공간 후보 universe를 사용한다. geometry가 bbox와
+  교차하지만 centroid가 밖인 route/area도 cluster count에 포함하고, 대표 marker는 bbox와
+  실제 교차한 geometry 부분 위에서 계산한다.
 - **CHANGED (계약)**: in-bounds 응답 `data`가 지도 완결성 계약을 명시한다 — `mode`(items|
   clusters), `truncated`(bool, F-8 silent truncation 해소), `coverage`(returned/limit),
-  cluster 모드의 결정적 `cluster_key` + `cluster_unit`/`drill_down_unit`(drill-down 경로).
-  truncation은 `max_items+1` 조회로 명시 판정한다.
+  cluster 모드의 결정적 `cluster_key`. view 해석 metadata인 `cluster_unit`과
+  `drill_down_unit`은 ADR-048 envelope 불변식대로 `meta.cluster`에만 둔다. truncation은
+  `max_items+1` 조회로 명시 판정한다.
 - **INTERNAL**: bbox 후보 술어를 단일화했다 — 공통 attribute 필터(kind/category/provider)를
-  `_bbox_attribute_filter_sql`로, items 공간 후보 술어를 `_bbox_candidate_predicate_sql`로
+  `_bbox_attribute_filter_sql`로, 공통 공간 후보 술어를 `_bbox_candidate_predicate_sql`로
   한 곳에 정의해 경량/geometry/cluster 3변형의 이중 SQL 복제를 제거했다(D-9-4). weather/price
   LATERAL과 인덱스/모델은 건드리지 않았다(T-VN-38/T-VN-18 소유).
 

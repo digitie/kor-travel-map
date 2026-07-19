@@ -87,7 +87,9 @@ function makeFeaturesInBoundsResponse(
       mode: "clusters",
       truncated: false,
     },
-    meta: makeMeta({ cluster: { cluster_unit: "sido" } }),
+    meta: makeMeta({
+      cluster: { cluster_unit: "sido", drill_down_unit: "sigungu" },
+    }),
   };
 }
 

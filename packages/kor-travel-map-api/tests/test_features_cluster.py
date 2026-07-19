@@ -47,15 +47,18 @@ def test_in_bounds_cluster_unit_returns_clusters(
         assert r.status_code == 200
         body = r.json()
         d = body["data"]
-        assert body["meta"]["cluster"] == {"cluster_unit": "sigungu"}
+        assert body["meta"]["cluster"] == {
+            "cluster_unit": "sigungu",
+            "drill_down_unit": "eupmyeondong",
+        }
         assert d["mode"] == "clusters"
         assert d["items"] == []
         assert d["clusters"][0]["cluster_key"] == "11110"
         assert d["clusters"][0]["feature_count"] == 3
         # 지도 완결성 계약 (ADR-073 D-9-2): truncated/coverage/drill-down 명시.
         assert d["truncated"] is False
-        assert d["cluster_unit"] == "sigungu"
-        assert d["drill_down_unit"] == "eupmyeondong"
+        assert "cluster_unit" not in d
+        assert "drill_down_unit" not in d
         assert d["coverage"] == {"returned": 1, "limit": 1000}
     finally:
         client.app.dependency_overrides.clear()
@@ -92,7 +95,10 @@ def test_in_bounds_cluster_truncation_is_explicit(
         assert d["mode"] == "clusters"
         assert d["truncated"] is True
         assert len(d["clusters"]) == 2  # 상위 max_items개만 반환.
-        assert d["drill_down_unit"] == "sigungu"  # sido → sigungu
+        assert r.json()["meta"]["cluster"] == {
+            "cluster_unit": "sido",
+            "drill_down_unit": "sigungu",
+        }
         assert d["coverage"] == {"returned": 2, "limit": 2}
     finally:
         client.app.dependency_overrides.clear()
@@ -147,10 +153,10 @@ def test_in_bounds_high_zoom_returns_individual_features(
         assert d["mode"] == "items"
         assert d["items"][0]["feature_id"] == "f1"
         assert d["clusters"] == []
-        # items 모드 완결성 계약: truncated/coverage 명시, cluster/drill-down 없음.
+        # items 모드 완결성 계약: truncated/coverage 명시, cluster metadata 없음.
         assert d["truncated"] is False
-        assert d["cluster_unit"] is None
-        assert d["drill_down_unit"] is None
+        assert "cluster_unit" not in d
+        assert "drill_down_unit" not in d
         assert d["coverage"] == {"returned": 1, "limit": 1000}
     finally:
         client.app.dependency_overrides.clear()

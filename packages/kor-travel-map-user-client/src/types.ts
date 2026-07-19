@@ -650,6 +650,11 @@ export interface components {
         ClusterMeta: {
             /** Cluster Unit */
             cluster_unit?: string | null;
+            /**
+             * Drill Down Unit
+             * @description 한 단계 확대 시 요청할 다음 cluster_unit. eupmyeondong 다음은 개별 feature이므로 null.
+             */
+            drill_down_unit?: string | null;
         };
         /**
          * ClusterSummary
@@ -1565,26 +1570,17 @@ export interface components {
          *     ``mode``가 ``items``면 개별 feature(``items``), ``clusters``면 행정구역
          *     rollup(``clusters``)을 채운다(T-213c). ``truncated``는 결과가 ``max_items``
          *     상한에서 잘렸는지를 **명시**한다(F-8: silent truncation 해소). cluster 모드는
-         *     결정적 ``cluster_key``(행정코드)와 ``cluster_unit``/``drill_down_unit``으로
-         *     drill-down 경로를 노출한다.
+         *     결정적 ``cluster_key``(행정코드)를 노출한다. payload 해석용
+         *     ``cluster_unit``/``drill_down_unit``은 envelope 불변식에 따라 ``meta.cluster``에
+         *     일원화한다.
          */
         PublicFeatureListData: {
-            /**
-             * Cluster Unit
-             * @description clusters 모드에서 이 rollup의 행정구역 단위. items 모드면 null.
-             */
-            cluster_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
             /**
              * Clusters
              * @default []
              */
             clusters: components["schemas"]["ClusterSummary"][];
             coverage: components["schemas"]["InBoundsCoverage"];
-            /**
-             * Drill Down Unit
-             * @description 한 단계 확대 시 요청할 다음 cluster_unit. clusters 모드의 eupmyeondong·items 모드면 다음이 개별 feature이므로 null.
-             */
-            drill_down_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
             /**
              * Items
              * @default []

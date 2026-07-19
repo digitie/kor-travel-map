@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — Agent A PR #763 심층 리뷰 후속 보완
+
+- route/area exact predicate의 centroid coord 우회를 차단하고, cluster도 items와 같은 exact
+  공간 후보 술어를 공유하게 했다. geometry 후보의 cluster marker는 bbox와 실제 교차한
+  부분 위에서 계산한다.
+- ADR-048 envelope 불변식 위반을 닫아 `cluster_unit`/`drill_down_unit`을 data에서 제거하고
+  `meta.cluster` 한 곳으로 이동했다. OpenAPI admin/user와 두 TypeScript client type도 이
+  정본에서 다시 생성한다.
+- geometric centroid가 bbox 안이지만 polygon hole이 bbox를 포함하는 음수 fixture와
+  coord 없는 교차 geometry가 cluster count/marker에 포함되는 회귀 검증을 추가했다.
+- #763이 검증 중 먼저 `integration/t-vn`에 병합되어, 수정은 같은 통합 브랜치 대상 후속
+  PR로 반영한다(`main` 직접 병합 없음).
+- 검증: 전체 main unit 1,503건, API router 26건, exact membership/cluster 통합 3건,
+  cluster EXPLAIN 2건, tier-1 성능 12건, public view/cluster 회귀 17건이 통과했다.
+  OpenAPI admin/user drift, admin/user TypeScript type-check, E2E ESLint, Ruff, main strict
+  mypy, 변경 API strict mypy, import-linter 4계약, redaction도 통과했다.
+
 ## 2026-07-19 (codex) — 최근 48시간 Claude PR 단일 적대 리뷰
 
 - 닫힘 여부와 무관하게 PR #752/#756/#757/#759/#760/#763을 전문 리뷰어 1명이 재검토했다.
@@ -24,14 +41,13 @@
   prefilter로 남기고 exact `ST_Intersects`로 false positive를 제거한다. point `coord`의
   `&&`는 점-envelope 교차에서 이미 정확해 그대로 뒀다. `ST_Transform`은 술어에 없다(ADR-012).
 - 후보 술어 단일화(D-9-4): 공통 attribute 필터(kind/category/provider EXISTS)를
-  `_bbox_attribute_filter_sql`로, items 공간 후보 술어를 `_bbox_candidate_predicate_sql`로
-  한 곳에 정의해 경량/geometry/cluster 3변형이 재사용한다. **결정**: cluster는 centroid
-  coord 기준 rollup이라 items의 geometry 포함 술어를 쓰지 않고(geom-only feature는 대표
-  좌표를 만들 수 없음) 공통 attribute 필터만 공유한다 — cluster의 point `&&`는 이미 정확.
+  `_bbox_attribute_filter_sql`로, 공간 후보 술어를 `_bbox_candidate_predicate_sql`로
+  한 곳에 정의해 경량/geometry/cluster 3변형이 재사용한다. 심층 리뷰 후 cluster도 exact
+  geometry 후보를 집계하고 bbox 교차 부분 위의 대표 좌표를 만들도록 바로잡았다.
 - in-bounds 응답 완결성: `PublicFeatureListData`에 `mode`(items|clusters)·`truncated`·
-  `coverage`(returned/limit)·`cluster_unit`/`drill_down_unit`을 명시했다. truncation은
-  `max_items+1` 조회로 판정해 **명시적**으로 노출한다(F-8 silent truncation 해소). cluster
-  drill-down은 결정적 `cluster_key`(행정코드) + 다음 단위(sido→sigungu→eupmyeondong→items).
+  `coverage`(returned/limit)를 명시했다. truncation은 `max_items+1` 조회로 판정해
+  **명시적**으로 노출한다(F-8 silent truncation 해소). cluster drill-down은 data의 결정적
+  `cluster_key`(행정코드)와 `meta.cluster`의 현재/다음 단위로 표현한다.
 - 스코프 준수: bbox/in-bounds/cluster **READ SQL + in-bounds 응답 DTO만** 수정. public_features
   view(T-VN-04)·weather/price LATERAL(T-VN-38)·인덱스/모델(T-VN-18)·write 경로(A1 T-VN-13)는
   무수정. OpenAPI admin/user 재생성(drift 0).
