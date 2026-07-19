@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — Agent A T-VN-06 심층 리뷰 보완
+
+- PR #746의 단일 전문 리뷰에서 #745 이후 alias-aware notice 필터 충돌(S1)을 확인해
+  공유 helper에 방어 cast를 이식했다. 동시 head 갱신도 같은 리뷰어가 재검토해 문서 정본
+  회귀(S2)와 curated 단건·collection count 테스트 공백(S3)을 추가로 확인하고 보완했다.
+- **다음 한 작업**: 같은 리뷰어의 최종 승인 후 전체 CI를 통과시키고 PR #746을
+  `integration/t-vn`에만 머지한다. 이후 최근 Agent A PR을 다시 검색한다.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-02 route policy matrix + /metrics 경계 구현
 
 - `feat/t-vn-02-route-policy`(base `integration/t-vn`, #743·#744 rebase 반영)에 ADR-066
@@ -32,6 +40,20 @@
   차단했다. 공개 query parameter 2개와 OpenAPI/생성 타입도 clean-cut 계약으로 동기화했다.
 - 승인 뒤 unit/API 70건, PostGIS 15건과 Ruff가 통과했다. 최신 `integration/t-vn` 재배치와 CI
   green 뒤 PR #743을 통합 브랜치에만 머지한다.
+
+## 2026-07-19 (claude, agent A2) — T-VN-06 notice 방어적 cast 완료
+
+- T-VN-04는 #743으로 integration/t-vn에 병합됐다. 이어 T-VN-06:
+  ``_ended_notice_hidden_sql``(#745가 curated/curation/collection 공개 표면의
+  notice 감산 정본으로 만든 함수)의 valid_end_time 직접 CAST를
+  ``pg_input_is_valid`` 가드 CASE로 교체해 오염 row 1건이 전체 공개 read를
+  500으로 만들던 F-9를 완화했다(fail-closed 제외, 스키마/migration 0).
+  브랜치 ``feat/t-vn-06-notice-cast``(base ``integration/t-vn``).
+- 오염 4종 상태 matrix 통합 테스트 + 수정 전 SQL 재현 확인, notice lifecycle/
+  public view/perf EXPLAIN 회귀 green. ETL purge·reconcile의 잔여 cast와
+  관측(카운터)·typed 재설계는 T-VN-37 소유로 명시.
+- **다음 한 작업**: 이 브랜치 전체 게이트·리뷰·PR·머지(오케스트레이터 소관)
+  후 다음 T-VN 배정 task를 진행한다.
 
 ## 2026-07-19 (claude, agent A2) — T-VN-04 공개 predicate view 단일화 완료
 

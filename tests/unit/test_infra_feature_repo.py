@@ -161,6 +161,74 @@ def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:
     assert "f.coord_5179 IS NOT NULL" in sql
 
 
+def _guard(alias: str) -> str:
+    return f"pg_input_is_valid({alias}.detail ->> 'valid_end_time', 'timestamptz')"
+
+
+def test_shared_notice_filter_function_carries_defensive_cast_guard() -> None:
+    """중앙화된 notice 종료 감산 함수가 pg_input_is_valid 가드를 담아야 한다.
+
+    #745가 이 감산 SQL을 ``_ended_notice_hidden_sql(alias)`` /
+    ``public_active_notice_filter_sql(alias)`` 함수로 중앙화하고 curation/curated
+    표면까지 정본으로 확산시켰다 — 그 단일 함수의 가드가 곧 전 표면의 방어다
+    (T-VN-06/F-9). alias를 그대로 반영하는지도 함께 고정한다.
+    """
+    for alias in ("f", "pf", "public_count_pf"):
+        ended = feature_repo._ended_notice_hidden_sql(alias)
+        assert _guard(alias) in ended
+        # 오염 시 fail-closed (제외) — 노출 방향이 아님을 SQL 수준에서 고정.
+        assert "ELSE false" in ended
+        assert _guard(alias) in feature_repo.public_active_notice_filter_sql(alias)
+    # 기존 정적 상수(alias 'f')도 여전히 가드를 담는다.
+    assert _guard("f") in feature_repo._PUBLIC_ACTIVE_NOTICE_FILTER_SQL
+
+
+def test_every_composed_public_read_sql_embeds_notice_cast_guard() -> None:
+    """_PUBLIC_ACTIVE_NOTICE_FILTER_SQL을 합성한 모든 공개 read 상수가 가드를 포함.
+
+    미래에 특정 표면이 이 필터를 fork하며 가드를 빠뜨리면(F-9 재발) fast-fail한다.
+    관측(카운터)·typed 재설계는 T-VN-37 소유 — 여기서는 정적 존재만 단언한다.
+    """
+    guard = _guard("f")
+    scalar_sql = {
+        "_PUBLIC_ACTIVE_NOTICE_IDS_SQL": feature_repo._PUBLIC_ACTIVE_NOTICE_IDS_SQL,
+        "_FEATURES_IN_BBOX_SQL": feature_repo._FEATURES_IN_BBOX_SQL,
+        "_FEATURES_IN_BBOX_WITH_GEOMETRY_SQL": (
+            feature_repo._FEATURES_IN_BBOX_WITH_GEOMETRY_SQL
+        ),
+        "_FEATURE_SEARCH_CTE_SQL": feature_repo._FEATURE_SEARCH_CTE_SQL,
+        "_FEATURE_SEARCH_SCORE_CTE_SQL": feature_repo._FEATURE_SEARCH_SCORE_CTE_SQL,
+        "_NEARBY_TARGET_CTE_SQL": feature_repo._NEARBY_TARGET_CTE_SQL,
+        "_NEARBY_COORD_CTE_SQL": feature_repo._NEARBY_COORD_CTE_SQL,
+        "_FEATURES_CONTAINED_IN_AREA_SQL": feature_repo._FEATURES_CONTAINED_IN_AREA_SQL,
+        "_CATEGORY_FEATURE_COUNTS_SQL": feature_repo._CATEGORY_FEATURE_COUNTS_SQL,
+    }
+    for name, sql in scalar_sql.items():
+        assert guard in sql, f"{name} dropped the valid_end_time cast guard"
+    # cluster는 unit별 3종을 dict로 조립 — 각 변형이 가드를 담아야 한다.
+    for unit, sql in feature_repo._CLUSTER_BBOX_SQL_BY_UNIT.items():
+        assert guard in sql, f"cluster SQL[{unit}] dropped the cast guard"
+
+
+def test_curation_and_curated_route_through_shared_notice_filter() -> None:
+    """#745가 확산한 curation/curated 공개 표면이 중앙 함수를 경유해 가드를 상속.
+
+    각 repo의 합성 SQL 상수가 자신의 alias로 만든 가드를 담고 있어야 한다 —
+    naked cast를 다시 인라인하면(가드 우회) 여기서 fast-fail한다.
+    """
+    from kortravelmap.infra import curated_repo, curation_repo
+
+    # curation collection count(count_pf / public_count_pf)·item 필터(pf).
+    assert _guard("count_pf") in curation_repo._COLLECTION_COUNT_NOTICE_FILTER_SQL
+    assert (
+        _guard("public_count_pf")
+        in curation_repo._COLLECTION_PUBLIC_COUNT_NOTICE_FILTER_SQL
+    )
+    assert _guard("pf") in curation_repo._ITEM_PUBLIC_NOTICE_FILTER_SQL
+    # curated feature 목록 공개 필터(f 별칭).
+    assert _guard("f") in curated_repo._PUBLIC_FEATURE_FILTERS_SQL
+
+
 def test_nearby_cursor_round_trips_distance_name_and_updated_at() -> None:
     row = NearbyFeatureRow(
         feature_id="feature-1",

@@ -751,10 +751,19 @@ WITH base AS (
     ) AS issue ON TRUE
     WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
       AND (
+        -- 방어적 cast (report §2 D-9-7 + T-VN-06): free-form jsonb인
+        -- valid_end_time이 오염된 한 행이 직접 CAST에서 예외를 던지면
+        -- include_ended=false admin notice 목록(운영자가 바로 그 오염 row를
+        -- 찾아야 하는 화면)이 500이 된다. 공개 read와 같은 pg_input_is_valid
+        -- 가드 + fail-closed 적용. CASE로 cast 평가를 봉인(AND/OR 순서 미보장).
         CAST(:include_ended AS boolean)
         OR f.kind <> 'notice'
         OR (f.detail ->> 'valid_end_time') IS NULL
-        OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
+        OR CASE
+             WHEN pg_input_is_valid(f.detail ->> 'valid_end_time', 'timestamptz')
+             THEN CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
+             ELSE false
+           END
       )
       AND (
         CAST(:categories AS text[]) IS NULL

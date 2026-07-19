@@ -536,6 +536,20 @@ def _canonical_notice_feature_sql(feature_alias: str, source_alias: str) -> str:
     """
 
 
+# 종료된 notice 숨김 — valid_end_time이 지난 notice는 지도/검색에서 제외한다
+# (§9 "활성 notice만 표시", #632). KREX feed 소멸 reconcile·KMA 해제가 채운
+# valid_end_time이 이 필터로 즉시 반영된다.
+#
+# 방어적 cast (report §2 D-9-7 (+ T-VN-06 row)): detail->>'valid_end_time'은
+# free-form jsonb라 오염된 한 행(빈 문자열·garbage·잘못된 timezone)이 직접
+# CAST에서 예외를 던지면 이 함수를 공유하는 **모든** 공개 read가 500이 된다.
+# #745가 이 함수를 curated/curation/collection 표면의 notice 감산 정본으로
+# 만들었으므로, 여기 한 곳의 가드가 그 표면들까지 동시에 보호한다.
+# pg_input_is_valid(PG16+, 배포/테스트 이미지 모두 16 고정)로 가드하고,
+# 파싱 불가면 fail-closed로 그 notice를 제외한다(ELSE false — 노출 아님).
+# JSON null/키 부재는 기존 의미 유지(종료시각 없음 = 활성). CASE는 THEN이
+# WHEN 참일 때만 평가되는 것을 보장한다(AND/OR는 평가 순서 미보장).
+# typed notice 재설계·관측(카운터)은 T-VN-37 소유.
 def _ended_notice_hidden_sql(feature_alias: str) -> str:
     """종료된 notice를 숨기는 SQL fragment를 feature alias에 맞춰 만든다."""
 
@@ -543,7 +557,11 @@ def _ended_notice_hidden_sql(feature_alias: str) -> str:
   AND (
     {feature_alias}.kind <> 'notice'
     OR ({feature_alias}.detail ->> 'valid_end_time') IS NULL
-    OR CAST({feature_alias}.detail ->> 'valid_end_time' AS timestamptz) > now()
+    OR CASE
+         WHEN pg_input_is_valid({feature_alias}.detail ->> 'valid_end_time', 'timestamptz')
+         THEN CAST({feature_alias}.detail ->> 'valid_end_time' AS timestamptz) > now()
+         ELSE false
+       END
   )
 """
 

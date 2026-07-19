@@ -2,6 +2,16 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — Agent A PR #746 적대적 심층 리뷰 후속
+
+- 전문 리뷰어 1명이 최신 `integration/t-vn` 기준으로 PR #746을 재검토해 #745의
+  alias-aware notice 필터와 충돌하는 S1을 확인했다. 방어 cast를 공유 helper에 이식해
+  `f`, `pf`, `count_pf`, `public_count_pf` 공개 소비자가 같은 fail-closed 경계를 쓰게 했다.
+- Agent A의 동시 head 갱신 뒤 같은 리뷰어가 현재 diff를 다시 확인해, 리뷰 기록·현재 진행
+  정본이 사라진 문서 회귀(S2)와 corrupted curated 단건 및 collection count가 실제로
+  검증되지 않는 테스트 공백(S3)을 확인했다. 단건은 `None`, collection detail/list는 정상
+  item 1건만 집계하는지 직접 단언하도록 보완했다.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-02 route policy matrix + /metrics 경계 + #742
 
 - ADR-066 결정 1: `kortravelmap.api.route_policy`에 전 HTTP/WS route를 6개 정책 중
@@ -69,6 +79,47 @@
   TypeScript 산출물을 재생성했다.
 - 승인 뒤 unit/API 70건과 PostGIS 공개 경계 15건, Ruff를 통과했다. pytest 첫 실행의 WSL 3.14
   capture 임시파일 오류는 전용 `/tmp`와 capture-off 재실행으로 코드 실패가 아님을 확인했다.
+
+## 2026-07-19 (claude, agent A2) — T-VN-06 notice timestamp 방어적 cast (+ 리뷰 S3 반영, #745 rebase)
+
+- report §2 D-9-7(+T-VN-06 row): ``detail->>'valid_end_time'`` 직접 CAST 때문에
+  오염된 notice 한 행이 ``_PUBLIC_ACTIVE_NOTICE_FILTER_SQL``을 공유하는 모든
+  공개 read(bbox/search/nearby/in-area/cluster/counts/notice IDs + notice
+  detail·batch 가시성)를 500으로 만들었다. Wave 0 완화로 notice 종료 감산
+  SQL 한 곳(#745 rebase 후 ``_ended_notice_hidden_sql(feature_alias)`` 함수)에
+  ``pg_input_is_valid``(PG16+, 배포·테스트 이미지 모두 16 고정) 가드 CASE를
+  넣었다 — 파싱 불가 row는 fail-closed로 "notice 없음" 강등(노출 아님),
+  JSON null/키 부재는 기존 의미(활성) 유지. 스키마 변경 0, migration 0.
+- **#745 rebase(공개 curation 경계 후속)**: #745가 종료 notice 감산을
+  ``_ended_notice_hidden_sql(feature_alias)`` 함수로 중앙화하고 curation_repo·
+  curated_repo(``/v1/curated-features``·``/v1/curations``·``/v1/curations/
+  collections/{id}``)까지 정본으로 확산시켰다 — 단, **naked** cast로. 내 가드를
+  그 함수 본문에 이식(``f`` → ``{feature_alias}``)해 그 6개 신규 표면까지 한
+  곳으로 동시에 방어했다(충돌 리뷰가 지적한 S1 blast-radius를 닫음). 가드 존재
+  단위 단언과 통합 테스트를 새 함수/표면 기준으로 갱신했다.
+- 리뷰 S3 반영: (1) ADR-073 인용 정정 — ADR-073 결정 목록에 D-9-7이 없어
+  코드 주석·CHANGELOG를 "report §2 D-9-7 (+ T-VN-06 row)"로 교체(ADR-073
+  본문은 미변경 — 설계 문서 변경은 범위 밖). (2) admin naked cast fold-in —
+  ``admin_feature_repo`` notice 목록(요청 경로, include_ended=false면 운영자가
+  바로 그 오염 row를 찾는 화면)에도 동일 가드 5줄 적용. (3) 가드 존재 단위
+  단언 — 필터를 합성한 10개 공개 read 상수(bbox lite/geom, cluster×3, search×2,
+  nearby×2, in-area, counts, notice IDs) 각각이 ``pg_input_is_valid``를 포함하는지
+  단위 테스트로 고정(미래 per-surface fork가 가드를 빠뜨리면 fast-fail).
+- 통합 테스트: 오염 4종(빈 문자열/garbage/달력 불가값/불가능 timezone) ×
+  bbox(경량/geometry)/search/notice IDs/단건 가시성 + admin 목록(기본/감사) —
+  수정 전 SQL로는 ``InvalidDatetimeFormatError`` 재현을 확인했다. notice
+  lifecycle·public view matrix·perf EXPLAIN 회귀 green.
+- 범위 외로 남긴 cast: ``_PURGE_EXPIRED_NOTICES_SQL``(ETL maintenance)·notice
+  reconcile CTE(``feature_repo.py`` ~2741-2769, Dagster write 경로) — 요청 경로가
+  아니라 T-VN-37 소유. lineage anti-join 상시 비용도 T-VN-37(불변).
+- **텔레메트리 공백(T-VN-37 선행 후보)**: 이번 완화로 오염된 **active** notice는
+  텔레메트리 0으로 공개·admin 표면에서 조용히 사라진다(fail-closed 제외라
+  안전하지만 관측 불가). 게다가 그 오염 row는 reconcile CTE에서 여전히 직접
+  CAST를 만나 Dagster job이 그 자리에서 깨진다(self-heal 불가 — 오염을 스스로
+  치우지 못한다). typed 재설계 전이라도 값싼 주기적 ops count 쿼리
+  (예: ``kind='notice' AND deleted_at IS NULL AND detail ? 'valid_end_time' AND
+  NOT pg_input_is_valid(detail->>'valid_end_time','timestamptz')`` 행 수)를
+  T-VN-37 선행 후보로 남긴다 — 이 task 범위에서는 코드 추가 없음.
 
 ## 2026-07-19 (claude, agent A2) — T-VN-04 공개 predicate view 단일화 + 적대 리뷰 반영
 
