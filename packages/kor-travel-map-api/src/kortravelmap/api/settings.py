@@ -774,9 +774,9 @@ class ApiSettings(BaseSettings):
 
         if self.features_routes_enabled and cursor_secret_raw is None:
             problems.append(
-                "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be set to at least "
-                "32 characters without whitespace while the public features "
-                "surface is enabled"
+                "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be set to at least 32 "
+                "characters without whitespace "
+                "while the public features surface is enabled"
             )
 
         if self.debug_routes_enabled:
