@@ -38,6 +38,16 @@ PAIR_RUNTIME_IMAGE_FIELDS = (
 CommandRunner = Callable[[list[str], str], str]
 SecureReader = Callable[[Path, int], bytes]
 
+_CURSOR_SECRET_ENV = "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"
+_CURSOR_PROTECTED_ENVS = {
+    "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+    "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
+    "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+    "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
+    "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+    "KOR_TRAVEL_MAP_API_VWORLD_API_KEY",
+}
+
 
 class AttestationError(RuntimeError):
     """Attestation 계약 위반을 값 노출 없이 나타낸다."""
@@ -57,6 +67,45 @@ def _canonical_json(value: object) -> bytes:
 
 def _exact_dict(value: object, keys: set[str]) -> bool:
     return isinstance(value, dict) and set(value) == keys
+
+
+def _runtime_environment(items: list[str]) -> dict[str, str]:
+    """Docker Env 배열을 중복 없는 exact name/value mapping으로 만든다."""
+
+    values: dict[str, str] = {}
+    for item in items:
+        if "=" not in item:
+            raise AttestationError("runtime environment shape")
+        name, value = item.split("=", 1)
+        if not name or name in values:
+            raise AttestationError("runtime environment shape")
+        values[name] = value
+    return values
+
+
+def _validate_cursor_secret_runtime(role: str, environment: dict[str, str]) -> None:
+    """T-VN-15 cursor secret의 API-only shape·전용성을 값 노출 없이 검증한다."""
+
+    if role != "map_api":
+        if _CURSOR_SECRET_ENV in environment:
+            raise AttestationError("cursor secret escaped API runtime")
+        return
+    cursor = environment.get(_CURSOR_SECRET_ENV)
+    if (
+        environment.get("KOR_TRAVEL_MAP_API_PROFILE") != "production"
+        or environment.get("KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED") != "true"
+        or cursor is None
+        or len(cursor) < 32
+        or any(character.isspace() for character in cursor)
+    ):
+        raise AttestationError("cursor secret runtime shape")
+    protected = {
+        environment[name]
+        for name in _CURSOR_PROTECTED_ENVS
+        if name in environment and environment[name]
+    }
+    if cursor in protected:
+        raise AttestationError("cursor secret runtime reuse")
 
 
 def _read_secure_file(
@@ -463,6 +512,8 @@ def verify_runtime_attestation_payloads(
             or not all(isinstance(item, str) for item in environment)
         ):
             raise AttestationError("compose/runtime identity")
+        environment_values = _runtime_environment(environment)
+        _validate_cursor_secret_runtime(role, environment_values)
         project_name = labels.get("com.docker.compose.project")
         if not isinstance(project_name, str) or not project_name:
             raise AttestationError("compose project identity")

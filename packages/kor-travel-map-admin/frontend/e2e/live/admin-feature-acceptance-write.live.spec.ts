@@ -349,11 +349,11 @@ async function assertPublicInBoundsExcludes(
   lat: number,
 ): Promise<void> {
   const params = new URLSearchParams({
-    max_items: "100",
-    max_lat: String(lat + 0.0005),
-    max_lon: String(lon + 0.0005),
-    min_lat: String(lat - 0.0005),
-    min_lon: String(lon - 0.0005),
+    max_items: "10",
+    max_lat: String(lat + 0.00001),
+    max_lon: String(lon + 0.00001),
+    min_lat: String(lat - 0.00001),
+    min_lon: String(lon - 0.00001),
     zoom: "16",
   });
   const result = requireBody(
@@ -362,6 +362,11 @@ async function assertPublicInBoundsExcludes(
       `/v1/features/in-bounds?${params.toString()}`,
     ),
     "public in-bounds",
+  );
+  expect(result.data.mode).toBe("items");
+  expect(result.data.truncated).toBe(false);
+  expect(result.data.coverage.returned).toBeLessThan(
+    result.data.coverage.limit,
   );
   expect(result.data.items.map((item) => item.feature_id)).not.toContain(
     featureId,

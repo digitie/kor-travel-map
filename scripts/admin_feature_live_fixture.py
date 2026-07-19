@@ -64,7 +64,10 @@ async def _assert_owned_or_absent(
     session: AsyncSession,
     run_id: str,
     feature_ids: tuple[str, str],
+    *,
+    lock: bool = False,
 ) -> set[str]:
+    lock_clause = " FOR UPDATE" if lock else ""
     rows = (
         await session.execute(
             text(
@@ -78,6 +81,7 @@ async def _assert_owned_or_absent(
                 WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
                 ORDER BY feature_id
                 """
+                + lock_clause
             ),
             {"feature_ids": list(feature_ids)},
         )
@@ -275,8 +279,15 @@ async def _assert_owned_state(
     session: AsyncSession,
     run_id: str,
     feature_ids: tuple[str, str],
+    *,
+    lock: bool = False,
 ) -> tuple[dict[str, int], dict[str, int]]:
-    present = await _assert_owned_or_absent(session, run_id, feature_ids)
+    present = await _assert_owned_or_absent(
+        session,
+        run_id,
+        feature_ids,
+        lock=lock,
+    )
     counts = await _counts(session, feature_ids)
     if counts["features"] != len(present):
         raise RuntimeError("owned fixture cardinality와 fingerprint가 다릅니다")
@@ -388,7 +399,9 @@ async def _cleanup(
     run_id: str,
 ) -> tuple[dict[str, int], dict[str, int]]:
     feature_ids = _feature_ids(run_id)
-    await _assert_owned_state(session, run_id, feature_ids)
+    # Parent FOR UPDATE는 concurrent FK insert의 KEY SHARE와 충돌한다. 같은
+    # transaction 안에서 fingerprint/FK audit/delete를 끝내 late child를 막는다.
+    await _assert_owned_state(session, run_id, feature_ids, lock=True)
     await session.execute(
         text(
             """

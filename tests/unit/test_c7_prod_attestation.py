@@ -196,10 +196,15 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
         "map_ui": "map-ui",
         "pinvi_api": "pinvi-api",
     }
-    environments = {
-        role: (["KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH=hash"] if role == "map_ui" else ["A=1"])
-        for role in services
-    }
+    environments = {role: ["A=1"] for role in services}
+    environments["map_api"] = [
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=admin-proxy-0000000000000000000000000000",
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=cursor-secret-000000000000000000000000000",
+        "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=true",
+        "KOR_TRAVEL_MAP_API_PROFILE=production",
+        "KOR_TRAVEL_MAP_API_SERVICE_TOKEN=service-token-000000000000000000000000000",
+    ]
+    environments["map_ui"] = ["KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH=hash"]
     records: dict[str, dict[str, object]] = {}
     image_records: dict[str, dict[str, object]] = {
         image_id: {
