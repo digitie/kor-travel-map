@@ -5,7 +5,7 @@
 
 ## vNext 독립 하드닝 — public API key header 전환 (2026-07-20, `T-VN-H01`, integration/t-vn)
 
-- [x] **T-VN-H01 public API key를 URL query에서 header로 이동** (#PRNUM) — 공개 REST API key를
+- [x] **T-VN-H01 public API key를 URL query에서 header로 이동** (#794) — 공개 REST API key를
   `?key=` 쿼리에서 clean-cut하고 `X-Kor-Travel-Map-Api-Key` 헤더로만 받는다(access log·Referer
   유출 차단, breaking change). OpenAPI `PublicApiKey` security scheme을 apiKey-in-header로 바꾸고
   `openapi.json`/`openapi.user.json`과 admin·user-client `types.ts`를 재생성했다. route policy
