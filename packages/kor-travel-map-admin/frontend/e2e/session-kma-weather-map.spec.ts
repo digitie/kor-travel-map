@@ -79,7 +79,10 @@ function makeFeaturesInBoundsResponse(
               },
             ]
           : [],
+      coverage: { limit: 500, returned: items.length > 0 ? 1 : 0 },
       items: [],
+      mode: "clusters",
+      truncated: false,
     },
     meta: makeMeta({ cluster: { cluster_unit: "sido" } }),
   };

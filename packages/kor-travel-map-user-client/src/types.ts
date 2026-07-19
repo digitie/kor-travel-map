@@ -1288,6 +1288,21 @@ export interface components {
             status: string;
         };
         /**
+         * InBoundsCoverage
+         * @description in-bounds 응답 완결성 기술자 (F-8 silent truncation 해소, ADR-073 D-9-2).
+         *
+         *     ``returned``는 이 응답에 실린 항목 수(items 또는 clusters), ``limit``은 이 조회에
+         *     적용된 ``max_items`` 상한이다. ``returned == limit`` 이고 상위 ``truncated`` 가
+         *     참이면 경계 안에 더 많은 후보가 있으니 소비자는 zoom-in(cluster drill-down)하거나
+         *     더 좁은 bbox로 다시 조회해야 한다.
+         */
+        InBoundsCoverage: {
+            /** Limit */
+            limit: number;
+            /** Returned */
+            returned: number;
+        };
+        /**
          * Meta
          * @description 전 REST 표면에서 공유하는 성공 응답 metadata.
          */
@@ -1545,19 +1560,46 @@ export interface components {
         };
         /**
          * PublicFeatureListData
-         * @description public feature 목록 data payload.
+         * @description public feature 목록 data payload (ADR-073 D-9-2 지도 완결성 계약).
          *
-         *     ``cluster_unit``이 None이면 ``items``(개별 feature), 아니면 ``clusters``
-         *     (행정구역 rollup)를 채운다(T-213c).
+         *     ``mode``가 ``items``면 개별 feature(``items``), ``clusters``면 행정구역
+         *     rollup(``clusters``)을 채운다(T-213c). ``truncated``는 결과가 ``max_items``
+         *     상한에서 잘렸는지를 **명시**한다(F-8: silent truncation 해소). cluster 모드는
+         *     결정적 ``cluster_key``(행정코드)와 ``cluster_unit``/``drill_down_unit``으로
+         *     drill-down 경로를 노출한다.
          */
         PublicFeatureListData: {
+            /**
+             * Cluster Unit
+             * @description clusters 모드에서 이 rollup의 행정구역 단위. items 모드면 null.
+             */
+            cluster_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
             /**
              * Clusters
              * @default []
              */
             clusters: components["schemas"]["ClusterSummary"][];
-            /** Items */
+            coverage: components["schemas"]["InBoundsCoverage"];
+            /**
+             * Drill Down Unit
+             * @description 한 단계 확대 시 요청할 다음 cluster_unit. clusters 모드의 eupmyeondong·items 모드면 다음이 개별 feature이므로 null.
+             */
+            drill_down_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
+            /**
+             * Items
+             * @default []
+             */
             items: components["schemas"]["FeatureSummary"][];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "items" | "clusters";
+            /**
+             * Truncated
+             * @description 결과가 max_items 상한에서 잘렸으면 true(더 많은 후보 존재).
+             */
+            truncated: boolean;
         };
         /**
          * PublicFestivalDetailResponse
