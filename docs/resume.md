@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — 최근 48시간 Claude PR 적대 리뷰 후속 계획
+
+- 단일 전문 리뷰어가 PR #752/#756/#757/#759/#760/#763을 심층 검토했다. #757/#759는
+  추가 P0~P3가 없고, public curated raw lineage(#765), weather UNIQUE cutover race(#766),
+  release benchmark cardinality·buffer 합산(#767), cluster/items 공간 universe drift(#768)를
+  상세 PR 코멘트와 네 이슈로 기록했다.
+- 문서를 먼저 갱신해 `T-VN-05R/17R/21R/14R` 네 PR 경계와 agent A/B 병렬 lane을 고정했다.
+  #765/#766/#767은 `integration/t-vn` 대상 독립 PR, #768은 열려 있는 PR #763의 후속 커밋이다.
+  0060은 호환성보다 원자성을 우선해 dedup+non-concurrent UNIQUE를 한 transaction으로 묶는다.
+- **다음 한 작업**: 문서 PR 병합 직후 네 task를 병렬 구현하고, 같은 리뷰어 1명의 테스트 전
+  승인→로컬 gate→CI green→integration 병합→issue close까지 수행한다.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-21 3단 성능·DDL gate 인프라 구현
 
 - `feat/t-vn-21-perf-gate`(base `integration/t-vn`)에서 ADR-075 D-12-4의 3단 성능·DDL
