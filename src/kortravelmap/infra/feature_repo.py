@@ -1080,8 +1080,10 @@ LIMIT :limit
 # 후보 술어 단일화(ADR-073 D-9-4): 공통 attribute 필터(kind/category/provider)는
 # ``_bbox_attribute_filter_sql``로 items 변형과 공유한다. 공간 술어는 cluster가
 # **centroid coord 기준 rollup**이라 items의 geometry 포함 후보 술어(route/area geom)를
-# 쓰지 않는다 — geom-only feature는 대표 좌표(avg(coord))를 만들 수 없어 rollup 단위가
-# 될 수 없기 때문이다. point coord의 ``&&``는 이미 정확하므로 exact 술어도 불필요하다.
+# 쓰지 않고 ``coord && envelope``만 쓴다. route/area는 대개 centroid coord를 갖지만
+# (``geometry_centroid``), geom이 bbox와 교차하되 centroid가 bbox 밖인 경계 case는
+# items에는 잡히고 cluster count에는 빠진다(저zoom rollup에서 무시 가능, cluster ≤ items).
+# point coord의 ``&&``는 이미 정확하므로 exact 술어도 불필요하다.
 def _cluster_bbox_sql(code_col: str) -> str:
     return f"""
 SELECT
@@ -3623,8 +3625,8 @@ async def features_in_bbox(
     """bbox 안의 feature 경량 표현 list (지도/목록용). 좌표는 ``lon``/``lat`` (4326).
 
     ADR-012 — 입력 bbox는 4326, ``coord``의 GIST 인덱스(``idx_features_coord_gist``)를
-    사용하는 ``&&`` 연산. 공개 여부는 ADR-067 ``feature.public_features`` projection이
-    결정하고(``coord IS NOT NULL`` 추가), ``kinds``가
+    사용하는 ``&&`` 연산. 공개 여부는 ADR-067 ``feature.public_features`` projection
+    (``status='active' AND deleted_at IS NULL``)이 결정한다. ``kinds``가
     ``None``이면 전체 kind. DTO 매핑은 상위(client) 책임 — 본 repo는 raw row만.
 
     **``include_geometry``는 직렬화(serialization)만 제어한다** (F-8 / ADR-073 D-9-3):
