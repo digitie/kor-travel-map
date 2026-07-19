@@ -159,9 +159,6 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/features/weather/forecast": RoutePolicy.PUBLIC_KEYED,
     "/v1/features/{feature_id}": RoutePolicy.PUBLIC_KEYED,
     "/v1/features/{feature_id}/contained-features": RoutePolicy.PUBLIC_KEYED,
-    "/v1/features/{feature_id}/observations/{source_entity_key}/history": (
-        RoutePolicy.PUBLIC_KEYED
-    ),
     "/v1/features/{feature_id}/price": RoutePolicy.PUBLIC_KEYED,
     "/v1/features/{feature_id}/weather": RoutePolicy.PUBLIC_KEYED,
     "/v1/features/{feature_id}/weather/forecast": RoutePolicy.PUBLIC_KEYED,
@@ -185,6 +182,13 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     #    (`debug_routes_enabled`)이며 production profile은 T-VN-01 fail-closed
     #    검증이 이 flag 자체를 거부한다.
     "/v1/debug/mois-license/{license_id}": RoutePolicy.DEBUG,
+    # -- operator — feature raw lineage(관측/source). T-VN-05(ADR-073/D-9-1):
+    #    raw_data/raw_payload_hash/source_record_key는 공개 detail에서 제거하고
+    #    admin BFF 인증 표면으로 이동했다.
+    "/v1/features/{feature_id}/sources": RoutePolicy.OPERATOR,
+    "/v1/features/{feature_id}/observations/{source_entity_key}/history": (
+        RoutePolicy.OPERATOR
+    ),
     # -- operator — admin BFF(trusted proxy secret+actor) 표면.
     "/v1/admin/auth-events": RoutePolicy.OPERATOR,
     "/v1/admin/backups": RoutePolicy.OPERATOR,

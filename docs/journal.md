@@ -14,6 +14,33 @@
 - 같은 리뷰어 재검토에서 기존 S2/S3 해소를 확인했고, 지적된 import 순서 1건은
   기계적으로 정리했다. 관련 API unit 87건과 Ruff가 통과했다.
 
+## 2026-07-19 (claude, agent A2) — T-VN-05 공개 raw payload 경계 제거
+
+- D-9-1/F-3(ADR-073): 공개 read에서 provider raw 경계를 제거했다. DB 컬럼·ETL은
+  건드리지 않고 **공개 read projection에서만** 벗겨낸다.
+- 공개 detail/batch(`FeatureDetailResponse`)에서 raw observation lineage
+  (`observations`: raw_data/raw_payload_hash/source_record_key)를 제거하고,
+  `detail` JSONB의 provider raw passthrough(`payload`, 예: MOIS PlaceDetail.payload의
+  mng_no/status_code/detail_status_*/opn_authority_code/title/epsg5174)를
+  `_public_detail`로 벗겨낸다. typed 공개-안전 필드(place_kind/phones/facility_info/
+  license_date 등)는 유지.
+- raw lineage를 operator 표면으로 이동: 신규 `GET /features/{id}/sources`(operator,
+  현재 관측값)와 기존 observation history endpoint를 `require_admin_frontend`로
+  게이팅. 두 endpoint는 공개 가시성 gate 대신 raw row 존재로 404 판정(operator는
+  비공개/종료 feature도 감사). route_policy 레지스트리: history를 PUBLIC_KEYED→
+  OPERATOR로 재분류, `/sources`를 OPERATOR로 신규 등록(미분류 gate green 유지).
+  user OpenAPI subset(`USER_OPERATIONS`)에서 raw lineage 두 표면 제외.
+- service batch: `FeatureBatchRequest`가 `extra=forbid`로 feature_ids만 받아 raw
+  opt-in이 불가하고, 공유 `FeatureDetailResponse`가 이제 typed-only라 batch도
+  raw 없이 고정 payload만 반환한다. (trip_card 명명/5-state 재구성은 T-VN-11.)
+- 테스트: 공개 detail/batch에 raw 필드 0(raw_data/raw_payload_hash/
+  source_record_key/observations/detail.payload) — MOIS place 포함; operator
+  sources/history는 admin secret 설정 시 인증 없이는 403; operator는 raw를 그대로
+  조회. OpenAPI 양 profile 재생성 + drift clean, admin/user TS types 재생성.
+- OUT(범위 밖): 5-state batch envelope·trip_card 재구성(T-VN-11), UUID identity,
+  스키마/migration, observation lineage anti-join 비용(T-VN-37). admin/operator
+  payload 내용은 그대로(raw 유지).
+
 ## 2026-07-19 (codex) — Agent A PR #746 적대적 심층 리뷰 후속
 
 - 전문 리뷰어 1명이 최신 `integration/t-vn` 기준으로 PR #746을 재검토해 #745의

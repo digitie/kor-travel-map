@@ -1,9 +1,14 @@
-"""Feature current observations와 payload history REST 계약."""
+"""Feature raw 관측 lineage REST 계약 (T-VN-05 이후 operator 전용).
+
+T-VN-05(ADR-073/D-9-1): raw observation lineage(raw_data/raw_payload_hash/
+source_record_key)는 공개 detail에서 제거하고 operator 표면
+(``GET /features/{id}/sources``·observation history)으로 이동했다. 두 표면은
+admin BFF 인증(``require_admin_frontend``)이 필요하다.
+"""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -19,18 +24,36 @@ from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
 
+# admin BFF secret이 없는 로컬-dev 프로필 — require_admin_frontend가 actor
+# "local-dev"로 통과시킨다(기존 admin 라우터 테스트와 동일 패턴).
+_OPERATOR_SETTINGS = ApiSettings(
+    admin_proxy_secret=None,
+    public_api_key_required=False,
+    service_token=None,
+    vworld_api_key=None,
+)
+# admin secret이 설정되면 로컬-dev 우회가 닫혀 인증 없는 호출은 거부된다.
+_SECURED_SETTINGS = ApiSettings(
+    admin_proxy_secret="secret",
+    public_api_key_required=False,
+    service_token=None,
+    vworld_api_key=None,
+)
 
-@pytest.fixture
-def client() -> TestClient:
-    app = create_app(
-        ApiSettings(public_api_key_required=False, vworld_api_key=None)
-    )
+
+def _client(settings: ApiSettings) -> TestClient:
+    app = create_app(settings)
 
     async def _session() -> AsyncIterator[object]:
         yield object()
 
     app.dependency_overrides[get_session] = _session
     return TestClient(app)
+
+
+@pytest.fixture
+def client() -> TestClient:
+    return _client(_OPERATOR_SETTINGS)
 
 
 def _observation(*, current: bool = True) -> FeatureObservation:
@@ -90,7 +113,7 @@ def _feature_row() -> dict[str, Any]:
 
 
 @pytest.mark.unit
-def test_feature_detail_returns_every_current_observation(
+def test_feature_sources_returns_every_current_observation_for_operator(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from kortravelmap.api.routers import features as module
@@ -98,12 +121,11 @@ def test_feature_detail_returns_every_current_observation(
     async def _row(_session: object, _feature_id: str) -> dict[str, Any]:
         return _feature_row()
 
-    async def _curations(_session: object, **_kwargs: Any) -> dict[str, tuple[Any, ...]]:
-        return {}
-
     async def _observations(
         _session: object, _feature_id: str
     ) -> tuple[FeatureObservation, FeatureObservation]:
+        from dataclasses import replace
+
         second = replace(
             _observation(),
             source_entity_key="se_mois",
@@ -114,23 +136,27 @@ def test_feature_detail_returns_every_current_observation(
         )
         return _observation(), second
 
-    monkeypatch.setattr(module.feature_repo, "get_public_feature_row", _row)
-    monkeypatch.setattr(module.curation_repo, "list_curation_items_by_feature_ids", _curations)
+    monkeypatch.setattr(module.feature_repo, "get_feature_row", _row)
     monkeypatch.setattr(module.observation_repo, "get_current_observations", _observations)
 
-    response = client.get("/v1/features/feature:multi")
+    response = client.get("/v1/features/feature:multi/sources")
 
     assert response.status_code == 200
-    observations = response.json()["data"]["observations"]
+    data = response.json()["data"]
+    assert data["feature_id"] == "feature:multi"
+    observations = data["observations"]
     assert {item["provider"] for item in observations} == {
         "python-mcst-api",
         "python-mois-api",
     }
+    # operator 표면은 raw lineage를 그대로 노출한다.
     assert observations[0]["raw_data"]["edition"] == "2025"
+    assert observations[0]["raw_payload_hash"] == "hash-current"
+    assert observations[0]["source_record_key"] == "sr_current"
 
 
 @pytest.mark.unit
-def test_observation_history_exposes_cursor_page(
+def test_observation_history_exposes_cursor_page_for_operator(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from kortravelmap.api.routers import features as module
@@ -144,7 +170,7 @@ def test_observation_history_exposes_cursor_page(
         assert kwargs["limit"] == 1
         return ObservationHistoryPage(items=(_observation(current=False),), next_cursor="next")
 
-    monkeypatch.setattr(module.feature_repo, "get_public_feature_row", _row)
+    monkeypatch.setattr(module.feature_repo, "get_feature_row", _row)
     monkeypatch.setattr(module.observation_repo, "get_observation_history", _history)
 
     response = client.get(
@@ -161,29 +187,37 @@ def test_observation_history_exposes_cursor_page(
 @pytest.mark.parametrize(
     "path",
     [
-        "/v1/features/feature:multi",
+        "/v1/features/feature:multi/sources",
         "/v1/features/feature:multi/observations/se_mcst/history",
     ],
 )
-def test_public_feature_detail_and_history_hide_non_public_features(
+def test_raw_lineage_requires_operator_auth(path: str) -> None:
+    """admin secret이 설정되면 인증 없는 raw lineage 호출은 403이다 (T-VN-05)."""
+    client = _client(_SECURED_SETTINGS)
+    response = client.get(path)
+    assert response.status_code == 403
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/features/feature:missing/sources",
+        "/v1/features/feature:missing/observations/se_mcst/history",
+    ],
+)
+def test_raw_lineage_404_when_feature_absent(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     path: str,
 ) -> None:
-    """비공개 feature는 detail/history에서 404다.
-
-    T-VN-04(ADR-067) 이후 공개 판정은 라우터가 아니라 ``feature.public_features``
-    projection이 내린다 — 비공개 row는 ``get_public_feature_row``가 ``None``을
-    돌려주고 라우터는 404로 응답한다. 상태별(hidden/deleted/retired/draft/broken/
-    admin-inactive) SQL 판정 자체는 통합 테스트
-    ``tests/integration/test_public_features_view.py``의 상태 matrix가 검증한다.
-    """
+    """operator lineage는 raw row 존재로 판정한다 — 없는 feature는 404."""
     from kortravelmap.api.routers import features as module
 
     async def _row(_session: object, _feature_id: str) -> None:
         return None
 
-    monkeypatch.setattr(module.feature_repo, "get_public_feature_row", _row)
+    monkeypatch.setattr(module.feature_repo, "get_feature_row", _row)
 
     response = client.get(path)
 

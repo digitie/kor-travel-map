@@ -1374,7 +1374,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** feature 제공기관 payload 관측 이력 */
+        /** feature 제공기관 payload 관측 이력 (operator) */
         get: operations["get_feature_observation_history_v1_features__feature_id__observations__source_entity_key__history_get"];
         put?: never;
         post?: never;
@@ -1393,6 +1393,30 @@ export interface paths {
         };
         /** feature price card (제품별 최신 가격 + 최근 이력) */
         get: operations["get_feature_price_v1_features__feature_id__price_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/{feature_id}/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * feature 제공기관 raw 관측 lineage (operator)
+         * @description operator 전용 — feature에 연결된 모든 제공기관 entity의 현재 raw 관측값.
+         *
+         *     T-VN-05: raw lineage(raw_data/raw_payload_hash/source_record_key)는 공개 detail에서
+         *     제거하고 이 operator 표면으로 이동했다. 비공개/종료 feature도 감사 대상이라
+         *     공개 가시성 gate 없이 raw row 존재만 확인한다.
+         */
+        get: operations["get_feature_sources_v1_features__feature_id__sources_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5490,11 +5514,6 @@ export interface components {
             marker_icon?: string | null;
             /** Name */
             name: string;
-            /**
-             * Observations
-             * @description 이 Feature에 연결된 모든 제공기관 entity의 현재 관측값.
-             */
-            observations?: components["schemas"]["FeatureObservationView"][];
             /** Sido Code */
             sido_code?: string | null;
             /** Sigungu Code */
@@ -5640,6 +5659,24 @@ export interface components {
          */
         FeatureSearchResponse: {
             data: components["schemas"]["FeatureSearchData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FeatureSourcesData
+         * @description ``GET /features/{feature_id}/sources`` data payload (operator, raw lineage).
+         */
+        FeatureSourcesData: {
+            /** Feature Id */
+            feature_id: string;
+            /** Observations */
+            observations: components["schemas"]["FeatureObservationView"][];
+        };
+        /**
+         * FeatureSourcesResponse
+         * @description ``GET /features/{feature_id}/sources`` 응답 (operator 전용 raw lineage).
+         */
+        FeatureSourcesResponse: {
+            data: components["schemas"]["FeatureSourcesData"];
             meta: components["schemas"]["Meta"];
         };
         /**
@@ -14413,7 +14450,7 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureObservationHistoryResponse"];
                 };
             };
-            /** @description 공개 feature 또는 observation 없음 */
+            /** @description feature 또는 observation 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -14470,6 +14507,58 @@ export interface operations {
                 };
             };
             /** @description 공개 feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_sources_v1_features__feature_id__sources_get: {
+        parameters: {
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureSourcesResponse"];
+                };
+            };
+            /** @description feature 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;

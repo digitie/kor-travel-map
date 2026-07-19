@@ -11,6 +11,19 @@
 - **다음 한 작업**: 후속 PR의 전체 CI를 통과시켜 `integration/t-vn`에만 머지하고,
   최근 Agent A PR을 다시 검색한다.
 
+## 2026-07-19 (claude, agent A2) — T-VN-05 공개 raw payload 경계 제거 완료
+
+- 공개 detail/batch에서 raw observation lineage(observations)와 provider raw
+  passthrough(detail.payload, MOIS 포함)를 제거하고, raw lineage를 operator 표면
+  (신규 `GET /features/{id}/sources` + operator-gated observation history)으로
+  이동했다. route_policy 재분류(history PUBLIC_KEYED→OPERATOR, /sources OPERATOR
+  신규), user OpenAPI subset에서 제외. service batch는 extra=forbid + typed-only로
+  raw opt-in 불가. 브랜치 `feat/t-vn-05-raw-payload`(base `integration/t-vn`).
+- 게이트: ruff/mypy(main+api)/lint-imports green, API 657 passed(신규 MOIS strip·
+  operator auth 403·404 테스트 포함), OpenAPI drift clean, admin/user types 재생성·
+  type-check green, redaction clean.
+- **다음 한 작업**: 이 브랜치 orchestrator 리뷰·PR·머지 후 다음 T-VN 배정 task.
+
 ## 2026-07-19 (codex) — Agent A T-VN-06 심층 리뷰 보완
 
 - PR #746의 단일 전문 리뷰에서 #745 이후 alias-aware notice 필터 충돌(S1)을 확인해

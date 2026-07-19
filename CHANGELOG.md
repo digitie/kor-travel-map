@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### 공개 raw payload 경계 제거 (2026-07-19, ADR-073 T-VN-05)
+
+- **SECURITY**: 공개 feature detail·batch(`GET /v1/features/{id}`,
+  `POST /v1/features/batch`)에서 provider raw 경계를 제거했다. raw observation
+  lineage(`observations`: raw_data/raw_payload_hash/source_record_key)와
+  `detail`의 provider raw passthrough(`payload` — MOIS 인허가의 mng_no/status_code/
+  detail_status_*/opn_authority_code/title/epsg5174 포함)가 더 이상 공개 표면에
+  노출되지 않는다. DB 컬럼·ETL은 그대로이며 공개 read projection에서만 벗겨낸다.
+- **ADDED**: operator 전용 `GET /v1/features/{feature_id}/sources`(admin BFF 인증)
+  가 feature의 현재 raw 관측 lineage를 제공한다.
+- **CHANGED**: `GET /v1/features/{feature_id}/observations/{source_entity_key}/history`
+  가 공개(public-keyed)에서 operator 인증(admin BFF)으로 이동했다. 두 raw lineage
+  표면은 비공개/종료 feature도 감사할 수 있게 raw row 존재로 404를 판정한다.
+- **CHANGED**: user-facing OpenAPI subset에서 raw observation lineage 표면 2종을
+  제외했다(admin spec에는 유지). service batch는 요청 스키마가 `extra=forbid`라
+  raw opt-in이 불가하고 고정 typed payload만 반환한다.
+
 ### notice timestamp 방어적 cast (2026-07-19, report §2 D-9-7 (+ T-VN-06 row))
 
 - **FIXED**: `detail->>'valid_end_time'`이 오염된 notice 한 행이 공개 read

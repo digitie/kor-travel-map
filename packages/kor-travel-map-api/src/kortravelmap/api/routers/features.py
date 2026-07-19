@@ -41,7 +41,7 @@ from kortravelmap.infra.poi_cache_target_repo import (
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.auth import require_service_token
+from kortravelmap.api.auth import require_admin_frontend, require_service_token
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.routers.curations import CurationItemView
@@ -56,8 +56,17 @@ __all__ = [
     "FeatureBatchRequest",
     "FeatureBatchResponse",
     "FeatureSearchResponse",
+    "FeatureSourcesResponse",
     "FeaturesNearbyByTargetResponse",
 ]
+
+# T-VN-05 (ADR-073 / D-9-1 · F-3): 공개 read에서 제거하는 provider raw 경계.
+# ``detail.payload``는 kind-discriminated typed DTO의 자유형 provider passthrough라
+# (예: MOIS PlaceDetail.payload의 mng_no/status_code/detail_status_*/opn_authority_code
+# /epsg5174) 공개 표면에 노출하지 않는다. DB 컬럼·ETL은 건드리지 않고 **공개 read
+# projection에서만** 벗겨낸다. raw observation lineage(raw_data/raw_payload_hash/
+# source_record_key)는 operator 표면으로 이동한다.
+_PUBLIC_DETAIL_STRIPPED_KEYS: frozenset[str] = frozenset({"payload"})
 
 
 router = APIRouter(prefix="/features", tags=["features"])
@@ -212,10 +221,26 @@ class FeatureDetailResponse(BaseModel):
         default_factory=list,
         description="이 Feature가 속한 공개 큐레이션 membership 전부.",
     )
-    observations: list[FeatureObservationView] = Field(
-        default_factory=list,
-        description="이 Feature에 연결된 모든 제공기관 entity의 현재 관측값.",
-    )
+    # T-VN-05: raw observation lineage는 공개 detail에서 제거하고 operator 표면
+    # (``GET /features/{id}/sources``·observation history)으로 이동했다.
+
+
+class FeatureSourcesData(BaseModel):
+    """``GET /features/{feature_id}/sources`` data payload (operator, raw lineage)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    observations: list[FeatureObservationView]
+
+
+class FeatureSourcesResponse(BaseModel):
+    """``GET /features/{feature_id}/sources`` 응답 (operator 전용 raw lineage)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureSourcesData
+    meta: Meta
 
 
 class FeatureObservationHistoryData(BaseModel):
@@ -463,6 +488,20 @@ def _resolve_cluster_unit(cluster_unit: ClusterUnit | None, zoom: int | None) ->
     return None
 
 
+def _public_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    """공개 detail projection — provider raw passthrough(``payload``)를 벗겨낸다.
+
+    T-VN-05: kind-discriminated typed DTO의 공개-안전 필드만 남기고, 자유형
+    provider raw subset(MOIS ``payload`` 등)은 공개 표면에서 제외한다. DB 컬럼과
+    ETL이 쓰는 값은 그대로 두고 **읽기 projection에서만** 제거한다.
+    """
+    return {
+        key: value
+        for key, value in detail.items()
+        if key not in _PUBLIC_DETAIL_STRIPPED_KEYS
+    }
+
+
 def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
     return FeatureDetailResponse(
         feature_id=row["feature_id"],
@@ -473,7 +512,7 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         lat=row["lat"],
         area_square_meters=row.get("area_square_meters"),
         address=row["address"],
-        detail=row["detail"],
+        detail=_public_detail(row["detail"]),
         urls=row["urls"],
         legal_dong_code=row["legal_dong_code"],
         sido_code=row["sido_code"],
@@ -521,6 +560,23 @@ async def _public_feature_row_or_404(
             detail=f"feature 없음: {feature_id!r}",
         )
     return row
+
+
+async def _operator_feature_or_404(
+    session: AsyncSession,
+    feature_id: str,
+) -> None:
+    """operator raw lineage 표면용 존재 확인 — 공개 가시성 gate를 적용하지 않는다.
+
+    T-VN-05: raw lineage는 operator 전용이므로 비공개/종료 feature도 감사 대상이다.
+    공개 projection이 아니라 raw row 존재만으로 404를 판정한다(없으면 404).
+    """
+    row = await feature_repo.get_feature_row(session, feature_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
 
 
 def _curation_item_view(row: curation_repo.CurationItem) -> CurationItemView:
@@ -1010,11 +1066,9 @@ async def get_feature(
     curations = await curation_repo.list_curation_items_by_feature_ids(
         session, feature_ids=[feature_id], public_only=True
     )
-    observations = await observation_repo.get_current_observations(session, feature_id)
     detail = _detail_from_row(row).model_copy(
         update={
             "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
-            "observations": [_observation_view(item) for item in observations],
         }
     )
     return FeatureDetailEnvelopeResponse(
@@ -1024,11 +1078,42 @@ async def get_feature(
 
 
 @router.get(
+    "/{feature_id}/sources",
+    response_model=FeatureSourcesResponse,
+    summary="feature 제공기관 raw 관측 lineage (operator)",
+    dependencies=[Depends(require_admin_frontend)],
+    responses={404: {"description": "feature 없음"}},
+)
+async def get_feature_sources(
+    request: Request,
+    feature_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> FeatureSourcesResponse:
+    """operator 전용 — feature에 연결된 모든 제공기관 entity의 현재 raw 관측값.
+
+    T-VN-05: raw lineage(raw_data/raw_payload_hash/source_record_key)는 공개 detail에서
+    제거하고 이 operator 표면으로 이동했다. 비공개/종료 feature도 감사 대상이라
+    공개 가시성 gate 없이 raw row 존재만 확인한다.
+    """
+    started_at = perf_counter()
+    await _operator_feature_or_404(session, feature_id)
+    observations = await observation_repo.get_current_observations(session, feature_id)
+    return FeatureSourcesResponse(
+        data=FeatureSourcesData(
+            feature_id=feature_id,
+            observations=[_observation_view(item) for item in observations],
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@router.get(
     "/{feature_id}/observations/{source_entity_key}/history",
     response_model=FeatureObservationHistoryResponse,
-    summary="feature 제공기관 payload 관측 이력",
+    summary="feature 제공기관 payload 관측 이력 (operator)",
+    dependencies=[Depends(require_admin_frontend)],
     responses={
-        404: {"description": "공개 feature 또는 observation 없음"},
+        404: {"description": "feature 또는 observation 없음"},
         422: {"description": "cursor 또는 page_size 오류"},
     },
 )
@@ -1041,7 +1126,7 @@ async def get_feature_observation_history(
     cursor: Annotated[str | None, Query()] = None,
 ) -> FeatureObservationHistoryResponse:
     started_at = perf_counter()
-    await _public_feature_row_or_404(session, feature_id)
+    await _operator_feature_or_404(session, feature_id)
     try:
         page = await observation_repo.get_observation_history(
             session,
@@ -1272,16 +1357,13 @@ async def get_features_batch(
     curations = await curation_repo.list_curation_items_by_feature_ids(
         session, feature_ids=feature_ids, public_only=True
     )
-    observations = await observation_repo.get_current_observations_by_feature_ids(
-        session, feature_ids
-    )
+    # T-VN-05: service batch는 고정 typed payload만 반환한다 — raw observation
+    # lineage/payload passthrough 없음, raw opt-in 없음(FeatureBatchRequest는
+    # extra=forbid로 feature_ids만 받는다).
     items = {
         feature_id: _detail_from_row(public_rows[feature_id]).model_copy(
             update={
                 "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
-                "observations": [
-                    _observation_view(item) for item in observations.get(feature_id, ())
-                ],
             }
         )
         for feature_id in feature_ids
