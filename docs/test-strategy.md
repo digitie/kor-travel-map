@@ -398,7 +398,7 @@ identity가 page 2의 첫 identity보다 앞서야 한다. 첫 행 존재, count
 ### 5.5 C7 prod 파괴적 live E2E의 복구·인과성 gate
 
 C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. host runner/helper/attestation 검증
-모듈도
+모듈/상태 감사기도
 `/usr/local/lib/kor-travel-map/c7-runner/<exact commit>`의 root-owned Git archive snapshot과
 attested file hash에서만 실행한다. root-owned 고정 attestation 파일의
 machine-id/hostname/origin hash뿐 아니라 clean Git commit, C6c compatible-pair manifest hash와

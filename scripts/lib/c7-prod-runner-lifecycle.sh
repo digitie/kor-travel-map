@@ -2,6 +2,16 @@
 
 # C7 runner가 source하는 process/container lifecycle primitive. 이 파일은 단독 실행하지 않는다.
 
+exit_for_signal() {
+  local status="$1"
+  case "$status" in
+    130|143) ;;
+    *) return 2 ;;
+  esac
+  trap - INT TERM
+  exit "$status"
+}
+
 terminate_active_command() {
   local grace_attempts="${1:-40}"
   local attempt pgid="${ACTIVE_COMMAND_PGID-}" pid="$ACTIVE_COMMAND_PID"
