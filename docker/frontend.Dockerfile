@@ -50,6 +50,10 @@ RUN npm -w packages/kor-travel-map-admin/frontend run build
 
 FROM node:22-bookworm-slim AS runner
 
+ARG KOR_TRAVEL_MAP_GIT_COMMIT=development
+
+LABEL org.opencontainers.image.revision="$KOR_TRAVEL_MAP_GIT_COMMIT"
+
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=12705 \

@@ -1131,12 +1131,21 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       page.getByRole("heading", { level: 1, name: "데이터셋" }),
     ).toBeVisible();
 
-    // 요약 배지 — 실패/오래됨/미실행/이슈 (never_run은 stale로 세지 않는다).
-    await expect(page.getByText("행 3")).toBeVisible();
-    await expect(page.getByText("실패 1")).toBeVisible();
-    await expect(page.getByText(/오래됨\(SLA 초과\) 1/)).toBeVisible();
-    await expect(page.getByText("미실행 1")).toBeVisible();
-    await expect(page.getByText("이슈 3")).toBeVisible();
+    // 요약 projection은 이름 있는 landmark 안에서 exact 검증한다. 표·drawer의
+    // 우연히 같은 문자열은 이 계약을 만족할 수 없다.
+    const summary = page.getByRole("region", { name: "데이터셋 상태 요약" });
+    for (const text of [
+      "제공자 3",
+      "행 3",
+      "실패 1",
+      "오래됨(SLA 초과) 1",
+      "미실행 1",
+      "이슈 3",
+    ]) {
+      const projection = summary.getByText(text, { exact: true });
+      await expect(projection).toHaveCount(1);
+      await expect(projection).toBeVisible();
+    }
 
     const grid = page.getByRole("table", { name: "데이터셋 그리드" });
     await expect(
@@ -1155,6 +1164,49 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(krexRow.getByText("2", { exact: true })).toBeVisible();
     await expect(krexRow.getByText("3", { exact: true })).toBeVisible();
     await expect(krexRow).toContainText(/26\. 7\. 15\. (?:오전|AM) 8:30:00/);
+  });
+
+  test("상태 요약은 표의 page-global 오염 문자열을 projection 증거로 쓰지 않는다", async ({
+    page,
+  }) => {
+    const contaminatedRow = makeGridRow({
+      provider: "행 3",
+      dataset_key: "실패 1",
+      sync_scope: "오래됨(SLA 초과) 1",
+      schedule: makeScheduleSummary({
+        schedule_names: [],
+        active_schedule_names: [],
+        next_scheduled_at: null,
+        status: null,
+      }),
+    });
+    await mockOpsDatasets(page, { items: [contaminatedRow], details: {} });
+    await mockPipelineRequests(page);
+
+    await page.goto("/ops/datasets");
+
+    const grid = page.getByRole("table", { name: "데이터셋 그리드" });
+    await expect(grid.getByText("행 3", { exact: true })).toBeVisible();
+    await expect(grid.getByText("실패 1", { exact: true })).toBeVisible();
+    await expect(
+      grid.getByText("오래됨(SLA 초과) 1", { exact: true }),
+    ).toBeVisible();
+
+    const summary = page.getByRole("region", { name: "데이터셋 상태 요약" });
+    for (const text of [
+      "제공자 1",
+      "행 1",
+      "실패 0",
+      "오래됨(SLA 초과) 0",
+      "미실행 0",
+      "이슈 0",
+    ]) {
+      const projection = summary.getByText(text, { exact: true });
+      await expect(projection).toHaveCount(1);
+      await expect(projection).toBeVisible();
+    }
+    await expect(summary.getByText("행 3", { exact: true })).toHaveCount(0);
+    await expect(summary.getByText("실패 1", { exact: true })).toHaveCount(0);
   });
 
   test("검색·상태 필터가 행을 좁힌다", async ({ page }) => {

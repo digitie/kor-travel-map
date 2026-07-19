@@ -1,5 +1,81 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — latest main → integration/t-vn 동기화 리뷰 대기
+
+`integration/t-vn@22bf35a5`에 `main@d2104f15`를 merge하는 전용 sync branch를 만들었다.
+main의 C7 manifest v4·4-image attestation과 integration의 vNext DB/API를 한 source tree로
+결합하면서 Dockerfile의 OCI revision label과 production profile을 모두 보존했고, 문서 이력과
+완료 task 정본을 정리했다. Alembic은 `0058 → 0059 → 0060 → 0061 → 0062` 단일 head다.
+**다음 한 작업**은 draft PR의 동일 전문 리뷰어가 코드 conflict 해소를 승인하는 것이다. 승인
+전에는 테스트·lint·build를 실행하지 않고, 승인 뒤 integration 대상 CI gate를 수행한다.
+
+## 2026-07-19 (codex) — T-ADM-C7P compatible-pair manifest v4 동기화 착수
+
+- docker-manager C6c provenance를 Map API/UI/Dagster web/Dagster daemon 네 image에 닫으면
+  기존 Map C7 attestation의 manifest v3 exact parser와 충돌함을 확인했다.
+- issue #777을 추가하고 host attestation version 3과 manager compatible-pair manifest
+  version 4를 분리했다. v4 active/rollback은 Map 네 image ID·Map source revision·PinVi
+  image/revision·contract generation·recorded time의 exact 9-field pair다.
+- **다음 한 작업**: 문서 선행 commit 후 C7 attestation parser·runtime image 비교·음성
+  fixture를 v4로 clean-cut하고, manager PR #61과 함께 단일 적대적 리뷰를 받는다.
+- **최종 cutover 순서**: C7P 두 PR 병합(미배포) → main을 `integration/t-vn`에
+  병합 → 잔여 T-VN blocker 종결 → integration을 main에 병합 → 최종 exact image
+  조합 C6c v4 capture → C7 destructive live E2E다. 이로써 `T-VN-03`의 C6c 동일
+  배포 조건과 C7 runner v4 조건을 모두 만족한다.
+
+## 2026-07-19 (codex) — Agent A PR #755 summary 가시성 보완
+
+- 단일 전문 리뷰에서 확인한 mocked E2E 가시성 공백을 닫아, summary exact projection
+  12개가 DOM에 유일하게 존재하고 실제 사용자에게 보여야 통과하도록 수정했다.
+- targeted mocked E2E 3개와 E2E TypeScript, 대상 ESLint가 통과했다.
+- **다음 한 작업**: `main` 후속 PR을 CI green으로 병합하고 최근 2일 Agent A PR을
+  다시 조회한다.
+
+## 2026-07-19 (codex) — T-ADM-C7H 병합·아카이브
+
+- 단일 전문 리뷰의 4개 finding을 반영해 `*.local.md` Docker context 차단, Playwright
+  bridge/private 격리, 전체 상태 auditor preflight, 실패 recovery journal/runtime
+  보존을 구현했다.
+- 후속 재검토의 P1 두 건을 반영해 auditor를 root-owned 4파일 exact attestation에 포함하고
+  INT/TERM 종료를 130/143으로 고정했다. 같은 리뷰어의 최종 판정은 P0~P3 잔여 없음이다.
+- 대상 보안/unit 55개와 전체 unit 1,529개, `bash -n`, Ruff, strict mypy,
+  import-linter가 통과했다.
+- PR #754와 누락된 두 P1을 닫은 PR #762는 PostGIS integration을 포함한 CI 8개를 각각
+  모두 통과해 merge commit `b9f23a42`, `bece2c32`로 `main`에 반영됐다. current exact commit의
+  immutable executor image build도 성공했다. `T-ADM-C7H`는 완료 이력으로 옮겼다.
+- **다음 한 작업**: n150 SSH 경로가 복구되는 즉시 passwordless sudo→backup/PITR→forward-only
+  migration→C6c capture→C7 live E2E를 실행하고 #684/#694/#712/#719를 증거와 함께 닫는다.
+
+## 2026-07-19 (codex) — T-ADM-C7H 실행 경계 보강
+
+- C7 실행 전 단일 적대 리뷰에서 실제 배포 pair/DB schema 증거 부재, host npm/Chromium 의존,
+  잘못 선언된 Dagster job 이름, preflight 전 `BLOCKED.json`, 실패 evidence 유실을 차단 finding으로
+  확정했다. 실제 run-now job은 provider별 KMA job이 아니라 `feature_update_request_worker`다.
+- 문서·task를 먼저 갱신하고 `fix/c7-prod-readiness`에서 compatible-pair manifest와 root-owned
+  exact-commit orchestrator snapshot 계약,
+  5개 service image/command/environment와 compose project, source commits, executor image, Alembic
+  current/head/check를 read-only 대조하도록 runner를 보강 중이다. mutation 상태는 모든 preflight 뒤에만
+  만들고 spec별 redacted evidence와 별도 감사 도구를 남긴다.
+- PR #754 리뷰 후속으로 snapshot/runtime 검증 코어를 import 가능한 모듈로 분리하고, runner가
+  root-owned hash를 확인한 동일 bytes를 실행하게 했다. root로 실행하는 runner/helper/module/상태
+  감사기 4개를 exact hash에 묶고 INT/TERM을 130/143으로 보존했다. attestation·pair·OCI runtime
+  변조와 signal 종료의 실행형 음수 fixture를 포함한 대상 55개, 전체 unit 1,529개를 통과했고
+  동일 리뷰어가 P0~P3 잔여 없음으로 승인했다.
+- n150은 WSL SSH 41회와 Windows TCP/22 boolean 진단 모두 연결 전에 실패했다. 따라서
+  `sudo -n true`는 아직 성공/실패 어느 쪽으로도 판정하지 않았고 원격 mutation도 0건이다.
+- **후속 결과**: PR #754와 PR #762로 병합·아카이브했으며 n150 live 실행만 남았다.
+
+## 2026-07-19 (codex) — T-ADM-C7M mocked UI 수용 증거 병합·아카이브
+
+- `/ops/datasets` summary landmark의 exact projection과 오염 negative fixture,
+  `/ops/pipeline` 실행·event의 6+6 cursor 주입, 요청 scope·cursor와 전체 DOM identity·정렬·페이지
+  경계를 PR #755에서 고정했다.
+- 6+6 fixture는 canonical `page_size=50` overflow 증거가 아니라 cursor plumbing 증거로 명시했다.
+  실제 51건 이상 continuation과 #694/#719의 최종 live 종결은 열린 `T-ADM-C7` n150 검증에 남긴다.
+- 단일 적대적 리뷰 지적을 반영하고 targeted mocked E2E 3건과 CI 8개 게이트를 통과했다.
+  PR #755는 merge commit `54150c91`로 `main`에 반영됐으며 `T-ADM-C7M`은 완료 이력으로 옮겼다.
+- **다음 한 작업**: PR #754의 C7 production live E2E 실행 경계 보강을 CI green으로 병합한 뒤,
+  n150 compatible-pair 배포와 파괴적 live 검증을 수행한다.
 ## 2026-07-19 (codex) — PR #772 T-VN-13 적대 리뷰 보완 완료
 
 전문 리뷰어 1명의 테스트 전 심층 검토에서 승인 TOCTOU, add overwrite, validator 범위·형식,

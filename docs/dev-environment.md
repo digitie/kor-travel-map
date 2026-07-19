@@ -323,39 +323,31 @@ Playwright가 WSL 서버가 아니라 stale Windows 서버를 본다. e2e 전 Wi
 > Windows-only dependency와 localhost forwarding 착시를 줄인다. WSL은 개발 서버/정적
 > 검증 경계로만 쓰고, Windows 실행은 n150에서 실행할 수 없을 때의 보조 검증 경로다.
 
-#### 8.1.1 n150에서 live e2e 표준 실행 경로 — **docker playwright 이미지** (2026-07-03 확립)
+#### 8.1.1 n150에서 live e2e 표준 실행 경로 — **고정 Playwright executor**
 
-n150 호스트는 Playwright 브라우저 공유 라이브러리(`libatk-1.0.so.0` 등)가 없고
-passwordless sudo도 없어 `~/.cache/ms-playwright` 캐시로는 chromium 실행이 실패한다
-(`error while loading shared libraries`). **호스트에 deps를 깔지 말고
-`mcr.microsoft.com/playwright` 공식 이미지로 실행한다** — 태그는 반드시
-`frontend/package.json`의 `@playwright/test` 버전과 일치시킨다(예: `^1.60.0` →
-`v1.60.0-noble`).
+n150 호스트의 브라우저 공유 라이브러리·host npm·host Chromium 설치 상태를 실행 계약으로
+사용하지 않는다. C7은 다음 공식 image digest를 base로 하는 저장소 전용 executor를 exact
+Git commit으로 build하고, tag가 아닌 최종 image ID를 attestation한다.
 
 ```bash
-# n150에서 — ~/kor-travel-map은 검증 대상 rev로 rsync돼 있어야 한다.
-docker run -d --name e2e-live --network host \
-  -v /home/digitie/kor-travel-map:/work \
-  -w /work/packages/kor-travel-map-admin/frontend \
-  -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-  -e E2E_LIVE_ALLOW_PROD=1 \
-  -e E2E_ADMIN_PASSWORD=<admin-pw — docs/prod-access.local.md> \
-  -e E2E_BASE_URL=<UI 공개 도메인 — docs/deploy-runbook.local.md> \
-  -e E2E_DAGSTER_URL=<dagster 공개 도메인> \
-  -e E2E_LIVE_WORKERS=2 \
-  mcr.microsoft.com/playwright:v1.60.0-noble \
-  npx playwright test --config playwright.live.config.ts <spec 파일들> --retries=1
-docker logs -f e2e-live   # 완료 후: docker rm -f e2e-live
+git rev-parse HEAD
+git status --porcelain=v1
+scripts/build-c7-playwright-image.sh
 ```
 
-- `--network host`: 공개 도메인/로컬 포트 모두 접근. `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`가
-  이미지 내장 브라우저를 쓰게 한다(호스트 캐시 무시).
-- 쓰기 스펙은 해당 게이트(`E2E_ADMIN_WRITE=1` 또는 표면별 `E2E_CURATED_WRITE=1` 등)를
-  명시적으로 추가할 때만 실행된다.
-- 실제 자격값은 gitignore된 `docs/*.local.md`에만 둔다 — 로그/셸 출력에 echo 금지.
+base는
+`mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948`
+로 고정한다. 최종 C7은 임의 `docker run`이나 host `npm` 명령으로 실행하지 않고
+build도 ignored/untracked file이 들어갈 수 없는 exact Git archive script로만 수행한다.
+runbook 절차로 설치한 `/usr/local/lib/kor-travel-map/c7-runner/<exact-commit>/scripts/`
+[`run-c7-prod-live-e2e.sh`](../scripts/run-c7-prod-live-e2e.sh)의 root-owned snapshot만 호출한다. runner는
+attested orchestrator file hash, compatible pair, 5개 service runtime hash, Alembic head/check와 UI login을
+read-only로 검증한 뒤에만 상태 journal과 파괴적 spec을 시작한다. 실제 env와 attestation 생성은
+gitignore된 local runbook에만 두며 셸이나 로그에 값을 출력하지 않는다.
 
-자세히는 `packages/kor-travel-map-admin/frontend/README.md` §"e2e (Playwright)"
-+ `frontend/playwright.config.ts` 상단 주석.
+sudo 권한은 실행 직전 `sudo -n true`로 다시 확인한다. 접속 자체가 실패한 결과를 passwordless sudo
+부재로 해석하지 않는다. C7 실행·복구·evidence 절차는
+[`C7 production live E2E 실행·복구`](runbooks/c7-prod-live-e2e.md)가 정본이다.
 
 ### 8.2 디버그 UI 서버 기동 실패 시 1회 점검표
 

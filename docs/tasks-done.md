@@ -3,6 +3,39 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## C7 prod runner attestation·복구 경계 (2026-07-19, `T-ADM-C7H`)
+
+- [x] **T-ADM-C7H — 파괴적 live 실행 전 runtime을 exact attestation에 결박.** C6c compatible-pair,
+  clean source commit과 OCI revision, Map API/UI/Dagster web·daemon/PinVi API의 실제
+  image·command·environment, compose project, 단일 Alembic head/check, UI login을 read-only로
+  대조한 뒤에만 `BLOCKED.json`과 mutation journal을 만든다.
+- [x] **root 실행 파일과 복구 증거를 fail-closed로 고정.** runner/helper/attestation 모듈/상태
+  감사기 네 파일을 exact Git archive와 root-owned SHA-256에 묶었다. 실패·signal 경로는
+  runtime/journal/sentinel을 보존하고 INT/TERM은 130/143으로 종료한다. Playwright container는
+  bridge/private IPC, durable creator/outcome/CID와 별도 검증형 stop 도구만 사용한다.
+- [x] **단일 적대 리뷰와 실행형 gate 완료.** 최종 P0~P3 잔여 없음 판정 뒤 C7 대상 55건,
+  전체 unit 1,529건, Ruff, strict mypy, import 계약, exact-commit immutable executor build를
+  통과했다. PR #754와 보안 후속 PR #762는 각각 CI 8개가 모두 성공한 뒤 merge commit
+  `b9f23a42`, `bece2c32`로 `main`에 반영됐다. 실제 배포·파괴적 browser 증거는 열린
+  `T-ADM-C7` n150 gate가 담당한다.
+
+## C7 mocked UI projection·pagination 수용 증거 (2026-07-19, `T-ADM-C7M`)
+
+- [x] **T-ADM-C7M — datasets summary를 이름 있는 영역의 exact projection으로 검증.**
+  `/ops/datasets` mocked E2E는 행·실패·SLA 초과·미실행·이슈 요약을 summary landmark 안에서
+  검증한다. 같은 문자열로 표 행을 오염해도 summary 영역에 잘못 투영되지 않는 negative fixture를
+  포함해 페이지 전역 문자열 검색으로 생기는 거짓 양성을 차단했다.
+- [x] **pipeline continuation의 요청·응답·DOM 경계를 함께 고정.** 실행과 전역 event를 각각
+  6+6 두 페이지로 주입하고 exact provider/dataset/scope/page size와 null/expected cursor 요청,
+  페이지별 전체 DOM identity 배열, 전체 정렬, 페이지 간 서로소와 마지막 continuation 종료를
+  검증한다.
+- [x] **mock 증거와 live 수용 범위를 분리.** 6+6 fixture는 `page_size=50`의 실제 overflow가 아니라
+  cursor plumbing 증거다. canonical page size를 넘는 51건 이상의 실제 continuation은 열린
+  `T-ADM-C7` n150 live E2E가 담당한다.
+- [x] **PR #755 병합 완료.** 단일 적대적 리뷰의 query-scope 지적을 exact validator와 cursor 관측
+  검증으로 반영한 뒤 targeted mocked E2E 3건을 통과했다. 문구·fixture 설명 후속까지 포함한
+  PR #755는 CI 8개 게이트가 모두 통과한 뒤 merge commit `54150c91`로 `main`에 반영됐다.
+
 ## vNext 재설계 Wave 0~1 (2026-07-19, `T-VN-*`, integration/t-vn)
 
 > C7 종결 전까지 `integration/t-vn` 통합 브랜치에 누적. 각 task는 적대 리뷰(실전 결함 반영)
@@ -16,12 +49,23 @@
 - [x] **T-VN-07 no-op 옵션 삭제 + actor principal 1차** (#748).
 - [x] **T-VN-13 Feature row_revision + If-Match/ETag** (#772, 리뷰 후속 #776) — 낙관적 동시성(428/412/304).
 - [x] **T-VN-14 지도 completeness + exact ST_Intersects** (#763) — mode/truncated/coverage.
-- [x] **T-VN-17 weather 무결성 제약** (#756) — semantic UNIQUE(CONCURRENTLY) + writer cutover.
+- [x] **T-VN-17 weather 무결성 제약** (#756) — semantic UNIQUE와 writer cutover 기반 도입.
 - [x] **T-VN-18 중복 GiST 제거 + BRIN 감사** (#759) — write 1.2~1.3x 개선 실측.
 - [x] **T-VN-19 Alembic metadata 정합 CI** (#753) — 빈 DB upgrade→check 게이트.
 - [x] **T-VN-20 principal actor 전면 전환** (#757) — body actor 위조 경로 제거.
 - [x] **T-VN-21 3단 성능 gate** (#760) — planner-default EXPLAIN·N+1·shape 회귀.
 - codex 후속 병합: #745(curation), #749(metrics), #750(beach doc), #751(manual-link, main).
+
+## vNext 적대 리뷰 후속 (2026-07-19, `T-VN-*R`, integration/t-vn)
+
+- [x] **T-VN-05R public curated raw lineage 우회 차단** (#774, issue #765) — 공개 전용
+  allowlist DTO/projection과 strict kind별 detail로 admin raw 계약과 공개 계약을 분리했다.
+- [x] **T-VN-14R cluster/items exact 후보집합 단일화** (#773, issue #768) — PR #763 후속으로
+  교차 geometry의 cluster count/items universe와 canonical 행정코드 귀속을 일치시켰다.
+- [x] **T-VN-17R weather UNIQUE writer race 봉인** (#771, issue #766) — migration 0060을
+  transactional non-concurrent UNIQUE cutover로 정정해 dedup과 writer fence를 원자화했다.
+- [x] **T-VN-21R release benchmark 측정 정확성** (#775, issue #767) — 실제 public batch
+  cardinality, matched/returned 구분과 top-level shared read 단일 합산을 고정했다.
 
 ## POI target causal receipt·조건부 삭제 (2026-07-18, `T-ADM-C7C`)
 

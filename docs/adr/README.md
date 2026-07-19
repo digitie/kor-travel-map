@@ -89,6 +89,7 @@
 | ADR-073 | Typed public/service/operator REST 계약 | [073-public-rest-contract.md](073-public-rest-contract.md) |
 | ADR-074 | Domain-owned replay, revision, outbox 쓰기 안전성 | [074-write-safety.md](074-write-safety.md) |
 | ADR-075 | 보존 우선 cutover와 DDL 규율 | [075-cutover-and-ddl-discipline.md](075-cutover-and-ddl-discipline.md) |
+| ADR-076 | C6c compatible-pair manifest v4와 Map 4-image C7 provenance 결박 | [076-c6c-manifest-v4-map-runtime-provenance.md](076-c6c-manifest-v4-map-runtime-provenance.md) |
 
 ## 새 ADR 작성 규약
 

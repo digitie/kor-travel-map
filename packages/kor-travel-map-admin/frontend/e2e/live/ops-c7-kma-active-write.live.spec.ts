@@ -13,6 +13,7 @@ import {
 import {
   KMA_DATASET_KEY,
   KMA_PROVIDER,
+  assertKmaDagsterWorkerJobDefinition,
   assertExactKmaPreviewResponse,
   assertExactOwnedTargetsAtServer,
   assertKmaOnlyTerminalProviderScopes,
@@ -811,6 +812,7 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
     }
     test.setTimeout(TEST_TIMEOUT);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
+    await assertKmaDagsterWorkerJobDefinition();
     const externalSystem = `e2e-${RUN_ID}`;
     const syncScope = `external_system:${externalSystem}`;
     const state = createCleanupState("active", RUN_ID);

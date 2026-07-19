@@ -2,6 +2,104 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — latest main → integration/t-vn 동기화 PR 준비
+
+- `integration/t-vn@22bf35a5`에서 전용 branch `chore/t-vn-sync-main`을 만들고
+  `main@d2104f15`를 merge했다. 공유 integration branch 자체는 rebase하지 않는다.
+- `CHANGELOG.md`, `docs/journal.md`, `docs/resume.md`, `docs/tasks-done.md`는 main의 더 최신
+  기록 뒤에 integration 기록을 이어 양쪽 역시간 이력을 보존했다. API Dockerfile은 main의
+  OCI revision `ARG`/`LABEL`과 integration의 production profile fail-closed 기본값을 함께 유지했다.
+- 완료된 T-VN Wave 0~1과 `T-VN-05R/14R/17R/21R`을 완료 정본으로 옮기고 active backlog에서
+  제거했다. 실제 미완 `T-VN-03`, `T-VN-04A`(#741), `T-VN-15`는 유지했으며 migration은
+  `0058 → 0059 → 0060 → 0061 → 0062` 단일 chain을 확인했다.
+- 코드 충돌을 포함한 sync이므로 동일 전문 리뷰어 승인 전 테스트·lint·build는 실행하지 않는다.
+  정적 conflict marker, merge tree, 비밀·prod redaction 검증 뒤 draft PR로 제출한다.
+
+## 2026-07-19 (codex) — T-ADM-C7P manifest v4 교차 계약 착수
+
+- 승인된 local-only n150 SSH target에서 passwordless sudo를 재확인했고, C6c
+  capture 실패의 직접 원인이 cAdvisor listen 포트와 image에 상속된
+  healthcheck 포트의 drift임을 확인했다.
+- docker-manager PR #61 적대적 리뷰에서 Map API만 compatible pair에 기록하면
+  UI·Dagster web·daemon의 `development` image가 남을 수 있는 교차 사각지를
+  blocker로 확정했다. manager는 Map 네 image ID를 모두 결박하는 manifest v4로
+  clean-cut한다.
+- Map C7 attestation은 manager manifest v3과 API/PinVi image ID만 exact 허용해 v4를
+  즉시 거부한다. issue #777·T-ADM-C7P는 manifest v4의 9-field pair와 네 Map
+  runtime role를 동기화하는 독립 PR 단위다.
+- `T-VN-03=C6c 동일 배포`와 `C7 이후 integration→main`을 동시에 적용하면
+  순환 의존이 된다. C7P code를 main에 먼저 병합하되 활성화하지 않고,
+  main→integration 동기화→잔여 T-VN 종결→integration→main→C6c capture→C7 live
+  순서로 순환을 제거한다.
+
+## 2026-07-19 (codex) — Agent A PR #755 심층 리뷰 후속
+
+- 단일 전문 리뷰에서 `/ops/datasets` summary projection이 exact count만 확인해
+  `hidden`/`display:none` 회귀도 통과할 수 있는 S3를 확인했다.
+- positive·오염 negative fixture의 12개 exact projection을 각각 유일성 확인 뒤
+  `toBeVisible()`로 검증하도록 보완했다.
+- Next dev server를 별도 기동한 targeted mocked E2E 3개와 E2E TypeScript,
+  대상 ESLint가 통과했다.
+
+## 2026-07-19 (codex) — Agent A PR #754 심층 리뷰 보안 후속
+
+- 단일 전문 리뷰에서 local-only 배포 문서의 Docker context 유입, 실패 뒤 recovery
+  runtime 삭제, Playwright container의 host network/IPC 공유, 제한된 residue glob만
+  쓰는 preflight를 S2/S3로 확인했다.
+- `*.local.md`를 build context에서 제외하고 executor를 bridge/private 경계로 줄였다.
+  전체 상태 auditor가 unsafe·unexpected·active·recovery residue를 거부한 뒤에만 lock과
+  mutation 상태를 만들며, 실패 경로는 `BLOCKED.json`과 journal/runtime을 보존한다.
+- 같은 리뷰어의 재검토에서 root로 실행하는 auditor가 3파일 attestation 밖에 있던 문제와
+  INT/TERM이 active child 없는 구간에서 성공으로 정리될 수 있던 문제를 P1으로 확인했다.
+  auditor를 4파일 exact snapshot/hash에 포함하고 signal 종료를 130/143으로 고정한 뒤
+  P0~P3 잔여 없음으로 승인받았다.
+- Linux `/tmp` 기준 대상 보안/unit 55개와 전체 unit 1,529개, `bash -n`, Ruff,
+  strict mypy, import-linter를 통과했다.
+- PR #754와 네 파일 attestation·signal 종료 후속 PR #762는 PostGIS integration을 포함한
+  CI 8개를 각각 통과해 merge commit `b9f23a42`, `bece2c32`로 `main`에 반영됐다. 현재
+  exact commit Git archive 기반 immutable executor build도 성공했으며 `T-ADM-C7H`를 완료
+  이력으로 옮겼다.
+
+## 2026-07-19 (codex) — C7 prod readiness 차단 리뷰 반영
+
+- 단일 적대 리뷰에서 배포 pair·DB schema·실제 service runtime attestation 부재, host npm/Chromium
+  의존, 잘못된 Dagster job 선언, preflight 이전 sentinel, 실패 증거 삭제를 P1/P2로 판정했다.
+  실제 실행 job `feature_update_request_worker`의 repository cardinality와 terminal run/tag identity를
+  파괴적 mutation 전에 검증하도록 계약을 바로잡았다.
+- `docs/runbooks/c7-prod-live-e2e.md`와 `T-ADM-C7H`를 먼저 작성했다. host runner/helper는 exact
+  commit의 root-owned Git archive snapshot과 attested SHA-256에서만 실행한다. runner는
+  C6c v3 manifest(source revision 포함), compose project, Map API/UI/Dagster web·daemon/PinVi API
+  runtime hash, 단일 Alembic
+  head/check와 UI login을 모두 read-only 검증한 뒤에만 root state와 `BLOCKED.json`을 만든다.
+- PR #754 리뷰의 정적 계약 테스트 한계를 반영해 snapshot/runtime 검증 코어를 import 가능한
+  `c7_prod_attestation.py`로 분리했다. runner bootstrap은 검증한 동일 module bytes를 실행하며
+  root로 실행하는 runner/helper/module/상태 감사기 4개의 hash, owner/mode/ancestor와
+  compatible-pair·OCI/runtime metadata 변조를 실행형 음수 fixture로 고정했다. INT/TERM은
+  각각 130/143으로 종료해 신호 중단을 성공 정리로 오인하지 않는다. 같은 단일 리뷰어의
+  최종 판정은 P0~P3 잔여 없음이며 대상 55개와 전체 unit 1,529개가 통과했다.
+- Playwright는 고정 official digest 기반의 commit-labelled executor image ID로만 실행한다. spec별
+  redacted JUnit/HTML/JSON과 journal을 root-owned evidence에 fsync하며 screenshot, auth storage와 trace ZIP은
+  제외한다. `audit-c7-prod-live-state.py`는 값·UUID 없이 partial restore, active lock, unsafe residue를
+  보고하고 자동 clear는 제공하지 않는다.
+- executor container는 durable creator PID/PGID/start ticks와 atomic create outcome을 먼저 기록하고
+  `docker create --pull=never` 결과 CID/identity를 검증한 뒤에만 start한다. create 완료 여부가 불명확하면
+  stop 도구도 ref를 지우지 않아 late container를 감사 범위 밖으로 보내지 않는다.
+- n150 접속 감시 10분 41회가 모두 인증 전에 `No route to host`로 끝났고 별도 Windows TCP/22 진단도
+  실패했다. passwordless sudo는 미확인으로 남겼으며 원격 변경은 하지 않았다.
+
+## 2026-07-19 (codex) — T-ADM-C7M mocked UI projection·pagination 병합
+
+- `/ops/datasets` mocked E2E가 이름 있는 summary landmark 안에서 행·실패·SLA 초과·미실행·이슈를
+  exact 검증하고, 같은 문자열로 표 행을 오염한 negative fixture로 page-global text 거짓 양성을
+  차단하도록 보강했다.
+- `/ops/pipeline`은 실행과 전역 event 각각 6+6 두 페이지를 주입해 exact
+  provider/dataset/scope/page size, null/expected cursor 요청, 페이지별 전체 DOM identity 배열,
+  total order, 페이지 간 서로소와 continuation 종료를 함께 검증한다.
+- 단일 적대적 리뷰에서 느슨한 query route를 확인해 exact query validator와 관측 cursor set을
+  반영했다. 6+6은 실제 `page_size=50` overflow가 아닌 cursor plumbing 증거로 문서화했고,
+  51건 이상 실제 continuation은 `T-ADM-C7` n150 live E2E에 유지했다.
+- targeted mocked E2E 3건과 CI 8개 게이트가 통과했다. PR #755는 merge commit `54150c91`로
+  `main`에 반영됐으며 `T-ADM-C7M`을 완료 아카이브로 이동했다.
 ## 2026-07-19 (codex) — PR #772 T-VN-13 단일 적대 리뷰 보완
 
 - 전문 리뷰어 1명이 테스트 전에 PR 전체를 심층 검토해 pending 승인 TOCTOU, add의 기존 feature

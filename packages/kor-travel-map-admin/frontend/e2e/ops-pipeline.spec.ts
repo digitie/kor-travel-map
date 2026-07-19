@@ -33,6 +33,7 @@ type PipelineExecutionDetailResponse =
   Schemas["PipelineExecutionDetailResponse"];
 type PipelineDagsterRunsResponse = Schemas["PipelineDagsterRunsResponse"];
 type PipelineEventsListResponse = Schemas["PipelineEventsListResponse"];
+type PipelineJobEventRecord = Schemas["PipelineJobEventRecord"];
 type PipelineSchedulesResponse = Schemas["PipelineSchedulesResponse"];
 type PipelineScheduleCommandResponse =
   Schemas["PipelineScheduleCommandResponse"];
@@ -357,6 +358,67 @@ function makeRoots(): PipelineExecutionRootRecord[] {
   return [requestRoot, standaloneRoot];
 }
 
+function makeOverflowExecution(index: number): PipelineExecutionRootRecord {
+  const identitySequence = 12 - index;
+  const id =
+    `70000000-0000-4000-8000-` +
+    String(identitySequence).padStart(12, "0");
+  const createdAt =
+    `2026-07-14T11:` +
+    `${String(59 - Math.floor(index / 2)).padStart(2, "0")}:00.000Z`;
+  const source = makeRoots()[1];
+  return {
+    ...source,
+    id,
+    created_at: createdAt,
+    providers: ["python-kma-api"],
+    dataset_keys: ["kma_short_forecast"],
+    provider_datasets: [
+      {
+        provider: "python-kma-api",
+        dataset_key: "kma_short_forecast",
+        sync_scope: "target_grids",
+        operation_member_id: id,
+        status: "done",
+      },
+    ],
+    projected_job: {
+      ...source.projected_job,
+      id,
+      created_at: createdAt,
+      detail_url: `/v1/ops/pipeline/executions/import_job/${id}`,
+    },
+    detail_url: `/v1/ops/pipeline/executions/import_job/${id}`,
+  };
+}
+
+function makeOverflowEvent(index: number): PipelineJobEventRecord {
+  const identitySequence = 12 - index;
+  const eventId =
+    `80000000-0000-4000-8000-` +
+    String(identitySequence).padStart(12, "0");
+  const jobId =
+    `90000000-0000-4000-8000-` +
+    String(identitySequence).padStart(12, "0");
+  const occurredAt =
+    `2026-07-14T10:` +
+    `${String(59 - Math.floor(index / 2)).padStart(2, "0")}:00.000Z`;
+  return {
+    event_id: eventId,
+    job_id: jobId,
+    provider: "python-kma-api",
+    dataset_key: "kma_short_forecast",
+    sync_scope: "target_grids",
+    feature_id: null,
+    stage: "loading",
+    level: "info",
+    code: "provider.page",
+    message: `overflow event ${index + 1}`,
+    payload: {},
+    occurred_at: occurredAt,
+  };
+}
+
 function makeOverview(options: {
   queueSensorStatus?: string | null;
   queueSensorPresent?: boolean;
@@ -651,6 +713,47 @@ function observedApiContract(request: { method(): string; url(): string }) {
   return `${request.method()} ${pathname}`;
 }
 
+type ExactPagedScope = {
+  datasetKey: string;
+  pageSize: number;
+  provider: string;
+  syncScope: string;
+};
+
+function requireExactPagedQuery(
+  query: URLSearchParams,
+  expected: ExactPagedScope,
+  nextCursor: string,
+  resource: string,
+): string | null {
+  const exactValues = {
+    dataset_key: expected.datasetKey,
+    page_size: String(expected.pageSize),
+    provider: expected.provider,
+    sync_scope: expected.syncScope,
+  };
+  const allowedKeys = new Set([...Object.keys(exactValues), "cursor"]);
+  for (const [key, value] of Object.entries(exactValues)) {
+    if (query.getAll(key).length !== 1 || query.get(key) !== value) {
+      throw new Error(`Unexpected ${resource} ${key}`);
+    }
+  }
+  for (const key of query.keys()) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`Unexpected ${resource} query key: ${key}`);
+    }
+  }
+  const cursorValues = query.getAll("cursor");
+  if (cursorValues.length > 1) {
+    throw new Error(`Unexpected ${resource} cursor cardinality`);
+  }
+  const cursor = cursorValues[0] ?? null;
+  if (cursor !== null && cursor !== nextCursor) {
+    throw new Error(`Unexpected ${resource} cursor`);
+  }
+  return cursor;
+}
+
 interface MockOptions {
   executions?: PipelineExecutionRootRecord[];
   executionsForQuery?: (
@@ -660,6 +763,18 @@ interface MockOptions {
   headExecutions?: PipelineExecutionRootRecord[];
   nextCursor?: string;
   eventNextCursor?: string;
+  executionPages?: {
+    exactScope: ExactPagedScope;
+    first: PipelineExecutionRootRecord[];
+    nextCursor: string;
+    second: PipelineExecutionRootRecord[];
+  };
+  eventPages?: {
+    exactScope: ExactPagedScope;
+    first: PipelineJobEventRecord[];
+    nextCursor: string;
+    second: PipelineJobEventRecord[];
+  };
   overview?: PipelineOverviewResponse;
   scheduleCommandStatus?: "ok" | "error";
   schedulePatchStatus?: "ok" | "error";
@@ -792,22 +907,34 @@ async function installPipelineMocks(
       return;
     }
     if (pathname.endsWith("/v1/ops/pipeline/executions")) {
+      const cursor = options.executionPages
+        ? requireExactPagedQuery(
+            url.searchParams,
+            options.executionPages.exactScope,
+            options.executionPages.nextCursor,
+            "execution",
+          )
+        : url.searchParams.get("cursor");
       counters.executionQueries.push(url.searchParams);
-      const queriedExecutions =
-        options.executionsForQuery?.(url.searchParams) ?? executions;
-      const cursor = url.searchParams.get("cursor");
+      const queriedExecutions = options.executionPages
+        ? cursor === null
+          ? options.executionPages.first
+          : options.executionPages.second
+        : (options.executionsForQuery?.(url.searchParams) ?? executions);
       if (!cursor) {
         firstPageQueries += 1;
       }
-      const items = cursor
-        ? queriedExecutions.slice(1)
-        : (options.headExecutions || options.headExecution) &&
-            firstPageQueries > 1
-          ? [
-              ...(options.headExecutions ?? [options.headExecution!]),
-              ...queriedExecutions,
-            ]
-          : queriedExecutions;
+      const items = options.executionPages
+        ? queriedExecutions
+        : cursor
+          ? queriedExecutions.slice(1)
+          : (options.headExecutions || options.headExecution) &&
+              firstPageQueries > 1
+            ? [
+                ...(options.headExecutions ?? [options.headExecution!]),
+                ...queriedExecutions,
+              ]
+            : queriedExecutions;
       const body: PipelineExecutionsListResponse = {
         data: {
           canonical_url: canonicalPipelineUrl(
@@ -831,7 +958,11 @@ async function installPipelineMocks(
           ...META,
           page: {
             page_size: 50,
-            next_cursor: cursor ? null : (options.nextCursor ?? null),
+            next_cursor: cursor
+              ? null
+              : (options.executionPages?.nextCursor ??
+                options.nextCursor ??
+                null),
             total: null,
           },
         },
@@ -950,8 +1081,15 @@ async function installPipelineMocks(
       return;
     }
     if (pathname.endsWith("/v1/ops/pipeline/events")) {
+      const cursor = options.eventPages
+        ? requireExactPagedQuery(
+            url.searchParams,
+            options.eventPages.exactScope,
+            options.eventPages.nextCursor,
+            "event",
+          )
+        : url.searchParams.get("cursor");
       counters.eventQueries.push(url.searchParams);
-      const cursor = url.searchParams.get("cursor");
       const body: PipelineEventsListResponse = {
         data: {
           canonical_url: canonicalPipelineUrl(
@@ -959,13 +1097,21 @@ async function installPipelineMocks(
             url.searchParams,
             ["job_id", "level", "provider", "dataset_key", "sync_scope"],
           ),
-          items: makeDetail().data.events ?? [],
+          items: options.eventPages
+            ? cursor === null
+              ? options.eventPages.first
+              : options.eventPages.second
+            : (makeDetail().data.events ?? []),
         },
         meta: {
           ...META,
           page: {
             page_size: 50,
-            next_cursor: cursor ? null : (options.eventNextCursor ?? null),
+            next_cursor: cursor
+              ? null
+              : (options.eventPages?.nextCursor ??
+                options.eventNextCursor ??
+                null),
             total: null,
           },
         },
@@ -1713,6 +1859,149 @@ test.describe("/ops/pipeline", () => {
     await page.goForward();
     await expect(page.getByLabel("이벤트 데이터셋 필터")).toHaveValue("");
     await expect(page.getByLabel("이벤트 sync scope 필터")).toBeDisabled();
+  });
+
+  test("실행·event 12건 주입 cursor가 exact scope와 전체 DOM total-order를 보존한다", async ({
+    page,
+  }) => {
+    const executions = Array.from({ length: 12 }, (_, index) =>
+      makeOverflowExecution(index),
+    );
+    const events = Array.from({ length: 12 }, (_, index) =>
+      makeOverflowEvent(index),
+    );
+    const executionCursor = "execution-overflow-page-2";
+    const eventCursor = "event-overflow-page-2";
+    const exactPagedScope: ExactPagedScope = {
+      datasetKey: "kma_short_forecast",
+      pageSize: 50,
+      provider: "python-kma-api",
+      syncScope: "target_grids",
+    };
+    const counters = await installPipelineMocks(page, {
+      executionPages: {
+        exactScope: exactPagedScope,
+        first: executions.slice(0, 6),
+        nextCursor: executionCursor,
+        second: executions.slice(6),
+      },
+      eventPages: {
+        exactScope: exactPagedScope,
+        first: events.slice(0, 6),
+        nextCursor: eventCursor,
+        second: events.slice(6),
+      },
+    });
+    const exactScope =
+      "provider=python-kma-api&dataset_key=kma_short_forecast&" +
+      "sync_scope=target_grids";
+    const renderedIdentities = async (ariaLabel: string) =>
+      page
+        .getByRole("table", { name: ariaLabel })
+        .locator('tbody tr[data-row-identity]')
+        .evaluateAll((rows) =>
+          rows.map((row) => row.getAttribute("data-row-identity")),
+        );
+    const executionIdentity = (item: PipelineExecutionRootRecord) =>
+      JSON.stringify([item.created_at, item.id, item.kind]);
+    const eventIdentity = (item: PipelineJobEventRecord) =>
+      JSON.stringify([item.occurred_at, item.event_id]);
+    const descendingTupleOrder = (left: string[], right: string[]) => {
+      for (let index = 0; index < left.length; index += 1) {
+        const compared = right[index]!.localeCompare(left[index]!);
+        if (compared !== 0) return compared;
+      }
+      return 0;
+    };
+    const firstExecutionIdentities = executions
+      .slice(0, 6)
+      .map(executionIdentity);
+    const secondExecutionIdentities = executions
+      .slice(6)
+      .map(executionIdentity);
+    const firstEventIdentities = events.slice(0, 6).map(eventIdentity);
+    const secondEventIdentities = events.slice(6).map(eventIdentity);
+
+    await page.goto(`/ops/pipeline?tab=executions&${exactScope}`);
+    await expect
+      .poll(() => renderedIdentities("실행 타임라인"))
+      .toEqual(firstExecutionIdentities);
+    await expect(
+      page.getByText("page 1 · 이 페이지 6행", { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "실행 타임라인 다음 페이지" })
+      .click();
+    await expect
+      .poll(() => renderedIdentities("실행 타임라인"))
+      .toEqual(secondExecutionIdentities);
+    await expect(
+      page.getByText("page 2 · 이 페이지 6행", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "실행 타임라인 다음 페이지" }),
+    ).toBeDisabled();
+    await expect
+      .poll(() =>
+        [...new Set(counters.executionQueries.map((query) => query.get("cursor")))]
+          .map((cursor) => cursor ?? "first-page")
+          .toSorted(),
+      )
+      .toEqual(["first-page", executionCursor].toSorted());
+    expect(
+      firstExecutionIdentities.filter((identity) =>
+        secondExecutionIdentities.includes(identity),
+      ),
+    ).toEqual([]);
+    expect([
+      ...firstExecutionIdentities,
+      ...secondExecutionIdentities,
+    ]).toEqual(executions.map(executionIdentity));
+    // fixture 순서 자체가 수용 계약을 만족해야 DOM==fixture 단언도 product의
+    // total-order 회귀를 전달하므로, 실행·event 주입 데이터의 전제도 별도로 고정한다.
+    const executionTuples = executions.map((item) => [
+      item.created_at,
+      item.id,
+      item.kind,
+    ]);
+    expect(executionTuples).toEqual(
+      executionTuples.toSorted(descendingTupleOrder),
+    );
+
+    await page.goto(`/ops/pipeline?tab=events&${exactScope}`);
+    await expect
+      .poll(() => renderedIdentities("전역 job 이벤트"))
+      .toEqual(firstEventIdentities);
+    await expect(
+      page.getByText("page 1 · 이 페이지 6건", { exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "job 이벤트 다음 페이지" }).click();
+    await expect
+      .poll(() => renderedIdentities("전역 job 이벤트"))
+      .toEqual(secondEventIdentities);
+    await expect(
+      page.getByText("page 2 · 이 페이지 6건", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "job 이벤트 다음 페이지" }),
+    ).toBeDisabled();
+    await expect
+      .poll(() =>
+        [...new Set(counters.eventQueries.map((query) => query.get("cursor")))]
+          .map((cursor) => cursor ?? "first-page")
+          .toSorted(),
+      )
+      .toEqual(["first-page", eventCursor].toSorted());
+    expect(
+      firstEventIdentities.filter((identity) =>
+        secondEventIdentities.includes(identity),
+      ),
+    ).toEqual([]);
+    expect([...firstEventIdentities, ...secondEventIdentities]).toEqual(
+      events.map(eventIdentity),
+    );
+    const eventTuples = events.map((item) => [item.occurred_at, item.event_id]);
+    expect(eventTuples).toEqual(eventTuples.toSorted(descendingTupleOrder));
   });
 
   test("텍스트 필터는 여러 글자를 입력해도 focus와 URL 상태를 유지한다", async ({
