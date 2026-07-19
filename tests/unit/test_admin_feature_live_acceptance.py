@@ -144,7 +144,7 @@ def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue
     assert "process_environment.update(runtime_environment)" in supervisor
     assert 'for value in ("--env", name)' in supervisor
     assert "process_environment=process_environment" in supervisor
-    assert '"--network",\n                "none"' in supervisor
+    assert '"--network",\n            "none"' in supervisor
     assert '"docker", "network", "connect"' in supervisor
     assert "io.kortravelmap.admin-feature-acceptance.run-key" in supervisor
     assert "io.kortravelmap.admin-feature-acceptance.operation" in supervisor
