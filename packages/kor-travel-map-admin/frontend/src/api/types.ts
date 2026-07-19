@@ -11050,7 +11050,10 @@ export interface operations {
     approve_feature_change_request_route_v1_admin_features_change_requests__request_id__approve_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
+                "If-Match": string;
+            };
             path: {
                 request_id: string;
             };
@@ -11065,6 +11068,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -11089,8 +11094,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description If-Match row_revision 불일치 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match가 row_revision strong ETag가 아님 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11871,7 +11894,10 @@ export interface operations {
     get_feature_detail_route_v1_admin_features__feature_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description 이전 ETag(row_revision)와 같으면 304로 응답한다. */
+                "If-None-Match"?: string;
+            };
             path: {
                 feature_id: string;
             };
@@ -11882,11 +11908,20 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["AdminFeatureDetailResponse"];
                 };
+            };
+            /** @description If-None-Match row_revision 일치 (본문 없음) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description feature 없음 */
             404: {
@@ -11920,7 +11955,10 @@ export interface operations {
     delete_feature_route_v1_admin_features__feature_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
+                "If-Match": string;
+            };
             path: {
                 feature_id: string;
             };
@@ -11935,6 +11973,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -11959,8 +11999,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description If-Match row_revision 불일치 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match가 row_revision strong ETag가 아님 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11982,7 +12040,10 @@ export interface operations {
     patch_feature_route_v1_admin_features__feature_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
+                "If-Match": string;
+            };
             path: {
                 feature_id: string;
             };
@@ -11997,6 +12058,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -12021,8 +12084,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description If-Match row_revision 불일치 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match가 row_revision strong ETag가 아님 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

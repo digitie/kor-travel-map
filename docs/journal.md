@@ -42,6 +42,42 @@
   30 green(mode/truncated/coverage/drill-down 계약 assert 추가). ruff·mypy --strict(core+api)·
   lint-imports·redaction clean. C: 디스크 무증가.
 
+## 2026-07-19 (claude, agent A1) — T-VN-13 Feature row_revision + If-Match/ETag
+
+- report D-10-3/D-9-8: `feature.features`에 server-owned monotonic `row_revision`
+  (bigint)을 추가하고(migration 0062) correction PATCH/DELETE/approve에 If-Match/412·
+  admin detail read에 ETag/304를 연결했다. policy revision ledger(#727/0056)와 합치지
+  않는다(F-2: 그건 provider-refresh-policy CAS로 별개 자원).
+- **revision 메커니즘 = BEFORE UPDATE 트리거**(0058 poi lock_version 패턴 미러링):
+  `feature.force_features_row_revision()`가 모든 UPDATE에서 `NEW.row_revision :=
+  OLD.row_revision + 1`을 강제 — application이 값을 무엇으로 보내도 우회 불가·server-owned.
+  provider upsert의 ON CONFLICT DO UPDATE, soft-delete, deactivate, change apply 등
+  **모든 write 경로가 자동 bump**(provider path 비면제 — F-2가 지목한 data_version은
+  provider load에서 0이라 validator 부적합). 한 correction이 여러 UPDATE(apply +
+  data_version set)를 내면 revision이 2 이상 뛴다 — 단조·불투명 counter라 무방(clients는
+  ETag를 opaque로 취급). 기존 `trg_features_coord_precision`(coord 한정 BEFORE 트리거)과
+  독립 실행.
+- **online-safety(D-12)**: `ADD COLUMN ... DEFAULT 1`은 PG11+ 메타데이터 전용이라 대형
+  features rewrite/backfill 없이 즉시 적용. CHECK(`row_revision >= 1`)는 NOT VALID 후
+  별도 autocommit_block에서 VALIDATE. model(`FeatureRow`)에 컬럼+CHECK를 미러링해 T-VN-19
+  metadata 정합 gate(autogenerate diff 0) green.
+- **If-Match/ETag 배선**: ETag = row_revision strong validator(`"7"`). correction
+  PATCH/DELETE/approve는 If-Match 필수 — 누락 428, 형식오류 422, stale 412(제출·적용
+  직전 `SELECT ... FOR UPDATE`로 현재 revision 대조, 없는 feature는 하위 404 경로에 위임).
+  성공 시 새 ETag 반환. admin detail GET은 ETag 헤더 + If-None-Match 일치 시 304(본문 없음).
+  낙관적 검사는 repo(`submit/apply_feature_change_request`의 `expected_row_revision`)에
+  원자적으로 넣어 라우터는 428/412/304 사상만 담당. `FeaturePreconditionFailed`는
+  `FeatureChangeConflict`(409)와 구분되는 별도 예외.
+- **breaking**: If-Match 필수라 admin frontend·PinVi가 지금 이 헤더를 안 보내면 correction이
+  428이다. backend-first 계약 변경(T-VN-20 PinVi 패턴과 동일) — admin UI의 GET-ETag→
+  If-Match 전송 배선과 PinVi client 갱신은 별도 follow-up(cross-repo). OpenAPI/생성 TS
+  타입은 재생성했고 frontend build/type-check는 green(헤더는 client에서 optional이라 컴파일 무해).
+- 검증: 신규 admin_features 라우터 단위 16 green(428/422/412/304/ETag·expected_row_revision
+  passthrough 포함), row_revision 통합 3 green(트리거 단조·If-Match precondition, WSL
+  testcontainers 1행 seed), alembic metadata 정합 gate green, ruff/mypy(--strict 신규 파일)/
+  lint-imports clean, openapi drift 0(user spec 무변경). feature_repo READ SQL/라우터/모델의
+  bbox 경로(A2 T-VN-14)는 건드리지 않음 — write/revision/ETag 경로만 국소 변경.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-21 3단 성능·DDL gate 인프라
 
 - ADR-075 D-12-4 / performance.md §8.3을 3단 gate의 **정본**으로 확정하고 CI·release

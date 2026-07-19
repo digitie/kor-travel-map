@@ -29,6 +29,21 @@
 - **다음 한 작업**: 적대적 리뷰(오케스트레이터) → full gates → PR·CI green·머지. cluster가
   geometry 후보 술어를 공유하지 않는 결정(centroid rollup 한계)은 리뷰에서 재확인 대상.
 
+## 2026-07-19 (claude, agent A1) — T-VN-13 Feature row_revision + If-Match/ETag 구현
+
+- `feat/t-vn-13-row-revision`(base `integration/t-vn`, migration head 0061)에서
+  `feature.features`에 server-owned monotonic `row_revision`을 추가(migration 0062,
+  BEFORE UPDATE 트리거 = 0058 poi lock_version 미러링)하고 correction PATCH/DELETE/approve에
+  If-Match(누락 428·형식 422·stale 412·성공 시 새 ETag), admin detail GET에 ETag/304를
+  연결했다. #727 policy revision과 합치지 않음(F-2). 낙관적 검사는 repo `expected_row_revision`에
+  원자적으로(FOR UPDATE) 넣고 라우터는 사상만 담당. model에 컬럼+CHECK 미러링 → T-VN-19 gate green.
+- 검증: 라우터 단위 16 + row_revision 통합 3(WSL testcontainers 1행 seed) + alembic metadata
+  정합 gate green, ruff/mypy/lint-imports clean, openapi drift 0, 생성 TS 타입 재생성·frontend
+  type-check green.
+- **다음 한 작업**: 적대적 리뷰(오케스트레이터) → PR·CI green·머지. **follow-up(별도)**: admin
+  frontend가 GET ETag → correction에 If-Match 전송(현재 미전송 시 428), PinVi client 동일 갱신
+  (cross-repo). 그리고 아래 **환경 사고**(dev postgres 컨테이너 오삭제) 복구를 사용자가 처리해야 함.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-21 3단 성능·DDL gate 인프라 구현
 
 - `feat/t-vn-21-perf-gate`(base `integration/t-vn`)에서 ADR-075 D-12-4의 3단 성능·DDL
