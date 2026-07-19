@@ -11,10 +11,12 @@ import re
 import stat
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 _CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{64}$")
 _NETWORK_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROBE_MESSAGE = (
     "production profile is fail-closed (ADR-066): "
     "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be configured while "
@@ -22,10 +24,16 @@ _PROBE_MESSAGE = (
 )
 
 
-def _run(command: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[bytes]:
+def _run(
+    command: list[str],
+    *,
+    capture: bool = False,
+    env: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         command,
         check=False,
+        env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
         stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
@@ -51,12 +59,18 @@ def _write_all(descriptor: int, body: bytes) -> None:
         offset += os.write(descriptor, body[offset:])
 
 
-def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+def _unique_environment(items: object) -> dict[str, str]:
+    if not isinstance(items, list):
+        raise RuntimeError("API runtime environment shape is unsafe")
+    environment: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, str) or "=" not in item or "\0" in item:
+            raise RuntimeError("API runtime environment shape is unsafe")
+        name, value = item.split("=", 1)
+        if _ENV_NAME_RE.fullmatch(name) is None or name in environment:
+            raise RuntimeError("API runtime environment shape is unsafe")
+        environment[name] = value
+    return environment
 
 
 class Supervisor:
@@ -154,11 +168,17 @@ class Supervisor:
         if observed.returncode == 0:
             raise RuntimeError("deterministic container name is occupied")
 
-    def create(self, command: list[str], kind: str) -> None:
+    def create(
+        self,
+        command: list[str],
+        kind: str,
+        *,
+        process_environment: Mapping[str, str] | None = None,
+    ) -> None:
         self.lifecycle("claim-pending", kind)
         self.active("create-pending", "active")
         self.ensure_name_absent()
-        completed = _run(command, capture=True)
+        completed = _run(command, capture=True, env=process_environment)
         if completed.returncode != 0:
             raise RuntimeError("docker create failed")
         container_id = completed.stdout.decode("ascii", errors="strict").strip()
@@ -233,67 +253,53 @@ class Supervisor:
         networks = record.get("NetworkSettings", {}).get("Networks")
         environment = config.get("Env") if isinstance(config, dict) else None
         if (
-            not isinstance(environment, list)
-            or not all(
-                isinstance(value, str) and "\n" not in value and "\r" not in value
-                for value in environment
-            )
-            or not isinstance(networks, dict)
+            not isinstance(networks, dict)
             or not networks
             or not all(_NETWORK_RE.fullmatch(value) for value in networks)
         ):
             raise RuntimeError("API runtime clone inputs are unsafe")
-        env_file = self.args.runtime_dir / f".{self.args.operation}.env"
-        descriptor = os.open(
-            env_file,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
-            0o600,
+        runtime_environment = _unique_environment(environment)
+        process_environment = dict(os.environ)
+        process_environment.update(runtime_environment)
+        environment_arguments = [
+            value
+            for name in sorted(runtime_environment)
+            for value in ("--env", name)
+        ]
+        command = [
+            "docker",
+            "create",
+            "--pull=never",
+            "--name",
+            self.args.container_name,
+            *self.labels(),
+            "--network",
+            "none",
+            "--read-only",
+            "--security-opt",
+            "no-new-privileges",
+            "--cap-drop",
+            "ALL",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,noexec,mode=1777",
+            *environment_arguments,
+            "--volumes-from",
+            f"{self.args.api_container}:ro",
+            "--mount",
+            f"type=bind,src={self.args.fixture},dst=/opt/admin-feature-live-fixture.py,readonly",
+            "--entrypoint",
+            "python",
+            self.args.image,
+            "/opt/admin-feature-live-fixture.py",
+            self.args.helper_action,
+            "--run-id",
+            self.args.run_id,
+        ]
+        self.create(
+            command,
+            "helper",
+            process_environment=process_environment,
         )
-        try:
-            os.fchown(descriptor, 0, 0)
-            body = ("\n".join(environment) + "\n").encode()
-            _write_all(descriptor, body)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        try:
-            command = [
-                "docker",
-                "create",
-                "--pull=never",
-                "--name",
-                self.args.container_name,
-                *self.labels(),
-                "--network",
-                "none",
-                "--read-only",
-                "--security-opt",
-                "no-new-privileges",
-                "--cap-drop",
-                "ALL",
-                "--tmpfs",
-                "/tmp:rw,nosuid,nodev,noexec,mode=1777",
-                "--env-file",
-                str(env_file),
-                "--volumes-from",
-                f"{self.args.api_container}:ro",
-                "--mount",
-                f"type=bind,src={self.args.fixture},dst=/opt/admin-feature-live-fixture.py,readonly",
-                "--entrypoint",
-                "python",
-                self.args.image,
-                "/opt/admin-feature-live-fixture.py",
-                self.args.helper_action,
-                "--run-id",
-                self.args.run_id,
-            ]
-            self.create(command, "helper")
-        finally:
-            try:
-                os.unlink(env_file)
-                _fsync_directory(env_file.parent)
-            except FileNotFoundError:
-                pass
         for network in sorted(networks):
             if (
                 _run(["docker", "network", "connect", "--", network, self.container_id]).returncode

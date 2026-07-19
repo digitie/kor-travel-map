@@ -356,6 +356,21 @@ async function cleanupApiOwnedFeatures(page: Page): Promise<void> {
   if (remainingPending.length !== 0) {
     throw new Error("owned pending change request가 cleanup 뒤 남았습니다");
   }
+  const searchAfterCleanup = requireBody(
+    await browserFetch<FeatureSearchResponse>(
+      page,
+      `/v1/features/search?${new URLSearchParams({
+        include_total: "true",
+        page_size: "1",
+        q: SEARCH_QUERY,
+      }).toString()}`,
+    ),
+    "owned search fixture cleanup",
+  );
+  expect(searchAfterCleanup.data.items).toEqual([]);
+  expect(searchAfterCleanup.meta.page).toBeDefined();
+  expect(searchAfterCleanup.meta.page?.total).toBe(0);
+  expect(searchAfterCleanup.meta.page?.next_cursor ?? null).toBeNull();
 }
 
 async function assertPublicInBoundsExcludes(

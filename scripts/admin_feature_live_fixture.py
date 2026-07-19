@@ -210,7 +210,10 @@ async def _assert_owned_values(
     session: AsyncSession,
     feature_ids: tuple[str, str],
     present: set[str],
+    *,
+    lock: bool = False,
 ) -> None:
+    lock_clause = " FOR UPDATE" if lock else ""
     weather_rows = (
         await session.execute(
             text(
@@ -222,6 +225,7 @@ async def _assert_owned_values(
                 FROM feature.feature_weather_values
                 WHERE feature_id = :feature_id
                 """
+                + lock_clause
             ),
             {"feature_id": feature_ids[0]},
         )
@@ -236,6 +240,7 @@ async def _assert_owned_values(
                 FROM feature.feature_price_values
                 WHERE feature_id = :feature_id
                 """
+                + lock_clause
             ),
             {"feature_id": feature_ids[1]},
         )
@@ -292,7 +297,7 @@ async def _assert_owned_state(
     counts = await _counts(session, feature_ids)
     if counts["features"] != len(present):
         raise RuntimeError("owned fixture cardinality와 fingerprint가 다릅니다")
-    await _assert_owned_values(session, feature_ids, present)
+    await _assert_owned_values(session, feature_ids, present, lock=lock)
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
     if feature_ids[0] in present:
@@ -400,8 +405,8 @@ async def _cleanup(
     run_id: str,
 ) -> tuple[dict[str, int], dict[str, int]]:
     feature_ids = _feature_ids(run_id)
-    # Parent FOR UPDATE는 concurrent FK insert의 KEY SHARE와 충돌한다. 같은
-    # transaction 안에서 fingerprint/FK audit/delete를 끝내 late child를 막는다.
+    # Parent FOR UPDATE는 concurrent FK insert의 KEY SHARE와 충돌한다. 기존 child도
+    # FOR UPDATE한 같은 transaction 안에서 fingerprint/FK audit/delete를 끝낸다.
     await _assert_owned_state(session, run_id, feature_ids, lock=True)
     await session.execute(
         text(

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
+from types import ModuleType
+
+import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 _RUNNER = _ROOT / "scripts" / "run-admin-feature-live-acceptance.sh"
@@ -10,6 +14,13 @@ _FIXTURE = _ROOT / "scripts" / "admin_feature_live_fixture.py"
 _STATE = _ROOT / "scripts" / "admin_feature_live_state.py"
 _SUPERVISOR = _ROOT / "scripts" / "admin_feature_live_supervisor.py"
 _ATTESTATION = _ROOT / "scripts" / "lib" / "c7_prod_attestation.py"
+_LIVE_CONFIG = (
+    _ROOT
+    / "packages"
+    / "kor-travel-map-admin"
+    / "frontend"
+    / "playwright.live.config.ts"
+)
 _SPEC = (
     _ROOT
     / "packages"
@@ -20,6 +31,25 @@ _SPEC = (
     / "admin-feature-acceptance-write.live.spec.ts"
 )
 _C7_RUNNER = _ROOT / "scripts" / "run-c7-prod-live-e2e.sh"
+
+
+def _load_script_module(name: str, path: Path) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        name,
+        path,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_STATE_MODULE = _load_script_module("admin_feature_live_state", _STATE)
+_SUPERVISOR_MODULE = _load_script_module(
+    "admin_feature_live_supervisor",
+    _SUPERVISOR,
+)
 
 
 def test_targeted_lane_is_not_part_of_strict_c7_runner() -> None:
@@ -83,7 +113,7 @@ def test_sigkill_safe_supervisor_owns_docker_lifecycle_and_barrier() -> None:
         'return self.helper()'
     )
     assert supervisor.index('self.active("create-pending", "active")') < supervisor.index(
-        "completed = _run(command, capture=True)"
+        "completed = _run(command, capture=True, env=process_environment)"
     )
     assert supervisor.index('self.active("created", "active")') < supervisor.index(
         '["docker", "start", "--", self.container_id]'
@@ -107,7 +137,12 @@ def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue
     supervisor = _SUPERVISOR.read_text()
     assert "docker compose exec" not in (runner + supervisor)
     assert '"--volumes-from",\n                f"{self.args.api_container}:ro"' in supervisor
-    assert '"--env-file",\n                str(env_file)' in supervisor
+    assert "--env-file" not in supervisor
+    assert 'f".{self.args.operation}.env"' not in supervisor
+    assert "runtime_environment = _unique_environment(environment)" in supervisor
+    assert "process_environment.update(runtime_environment)" in supervisor
+    assert 'for value in ("--env", name)' in supervisor
+    assert "process_environment=process_environment" in supervisor
     assert '"--network",\n                "none"' in supervisor
     assert '"docker", "network", "connect"' in supervisor
     assert "io.kortravelmap.admin-feature-acceptance.run-key" in supervisor
@@ -117,6 +152,27 @@ def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue
     assert "owned Docker container residue remains" in runner
     assert "deterministic Docker container name residue remains" in runner
     assert "recovery mode cannot seed fixtures" in runner
+
+
+def test_helper_environment_parser_preserves_values_without_disk_copy() -> None:
+    assert _SUPERVISOR_MODULE._unique_environment(  # noqa: SLF001
+        ["A=one", "B=two=three", "EMPTY="]
+    ) == {"A": "one", "B": "two=three", "EMPTY": ""}
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        object(),
+        ["NO_SEPARATOR"],
+        ["1INVALID=value"],
+        ["DUPLICATE=first", "DUPLICATE=second"],
+        ["NUL=value\0tail"],
+    ],
+)
+def test_helper_environment_parser_rejects_ambiguous_shapes(items: object) -> None:
+    with pytest.raises(RuntimeError, match="environment shape"):
+        _SUPERVISOR_MODULE._unique_environment(items)  # noqa: SLF001
 
 
 def test_runner_requires_exact_root_source_snapshot() -> None:
@@ -138,7 +194,14 @@ def test_runner_requires_exact_root_source_snapshot() -> None:
 def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None:
     fixture = _FIXTURE.read_text()
     cleanup = fixture[fixture.index("async def _cleanup(") : fixture.index("async def _run(")]
-    assert 'lock_clause = " FOR UPDATE" if lock else ""' in fixture
+    owned_values = fixture[
+        fixture.index("async def _assert_owned_values(") : fixture.index(
+            "async def _assert_owned_state("
+        )
+    ]
+    assert fixture.count('lock_clause = " FOR UPDATE" if lock else ""') == 2
+    assert owned_values.count("+ lock_clause") == 2
+    assert "_assert_owned_values(session, feature_ids, present, lock=lock)" in fixture
     lock = cleanup.index("lock=True")
     foreign_key_audit = cleanup.index("DELETE FROM feature.features")
     assert lock < foreign_key_audit
@@ -186,6 +249,10 @@ def test_browser_lane_covers_t_vn_15_search_contract_only_through_bff() -> None:
     assert "FEATURE_SEARCH_CURSOR_TAMPERED" in spec
     assert "tamperCursorPayload" in spec
     assert "expect(serialized).not.toContain(cursor)" in spec
+    assert '"owned search fixture cleanup"' in spec
+    assert "searchAfterCleanup.data.items).toEqual([])" in spec
+    assert "searchAfterCleanup.meta.page?.total).toBe(0)" in spec
+    assert "searchAfterCleanup.meta.page?.next_cursor ?? null).toBeNull()" in spec
     assert '?key=' not in spec
     assert 'searchParams.set("key"' not in spec
     assert "X-API-Key" not in spec
@@ -209,6 +276,13 @@ def test_evidence_validator_requires_exact_schema_phase_counts_and_fsync() -> No
     state = _STATE.read_text()
     assert "evidence exact file set mismatch" in state
     assert "redacted report mismatch" in state
+    assert "redacted report exact file set mismatch" in state
+    assert "set(os.listdir(path)) != _REPORT_NAMES" in state
+    assert '"c7-results.xml"' in state
+    assert '"c7-summary.html"' in state
+    assert "_validated_report_rows(" in state
+    assert "redacted report test identity mismatch" in state
+    assert "os.O_NONBLOCK" in state
     assert "direct evidence mismatch" in state
     assert "lifecycle exact file set mismatch" in state
     assert "lifecycle event count mismatch" in state
@@ -222,3 +296,35 @@ def test_evidence_validator_requires_exact_schema_phase_counts_and_fsync() -> No
     assert runner.index("  write_result passed") < runner.index(
         '  state_helper clear-blocked --path "$BLOCKED_FILE"'
     )
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        '<testcase classname="c7-redacted" name="unexpected.spec.ts#1" '
+        'time="0.001"></testcase>',
+        '<testcase classname="c7-redacted" name="auth.setup.ts#1" '
+        'time="0.001"><failure/></testcase>',
+    ],
+)
+def test_redacted_report_rows_reject_unknown_or_failure_content(rows: str) -> None:
+    with pytest.raises(ValueError, match="redacted report"):
+        _STATE_MODULE._validated_report_rows(  # noqa: SLF001
+            f"<suite>{rows}</suite>\n",
+            prefix="<suite>",
+            sequence_group=2,
+            spec_group=1,
+            suffix="</suite>\n",
+            row_pattern=_STATE_MODULE._XML_CASE_RE,  # noqa: SLF001
+        )
+
+
+def test_c7_raw_playwright_output_is_outside_evidence_bind() -> None:
+    config = _LIVE_CONFIG.read_text()
+    assert (
+        'path.join(\n  "/tmp",\n  `kor-travel-map-c7-test-results-${process.pid}`'
+        in config
+    )
+    assert "outputDir: shouldAssertC7OriginGuard()" in config
+    assert "? c7RawOutputDir" in config
+    assert ': path.join(artifactRoot, "test-results")' in config

@@ -19,6 +19,23 @@ _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 _TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 _C7_MODULE_RELATIVE: Final[str] = "scripts/lib/c7_prod_attestation.py"
 _C7_BASE: Final[Path] = Path("/usr/local/lib/kor-travel-map/c7-runner")
+_REPORT_NAMES: Final[set[str]] = {
+    "c7-results.xml",
+    "c7-summary.html",
+    "c7-summary.json",
+}
+_REPORT_SPECS: Final[set[str]] = {
+    "admin-feature-acceptance-write.live.spec.ts",
+    "auth.setup.ts",
+}
+_XML_CASE_RE: Final[re.Pattern[str]] = re.compile(
+    r'<testcase classname="c7-redacted" name="([A-Za-z0-9._-]+)#([12])" '
+    r'time="([0-9]{1,10}\.[0-9]{3})"></testcase>'
+)
+_HTML_ROW_RE: Final[re.Pattern[str]] = re.compile(
+    r"<tr><td>([12])</td><td>([A-Za-z0-9._-]+)</td>"
+    r"<td>passed</td><td>([0-9]{1,12})</td></tr>"
+)
 
 
 def _owned_ids(run_id: str) -> list[str]:
@@ -80,21 +97,24 @@ def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _read_regular(path: Path, mode: int, limit: int = 65_536) -> bytes:
-    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    descriptor = os.open(
+        path,
+        os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+    )
     try:
         observed = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or observed.st_uid != 0
+            or observed.st_gid != 0
+            or stat.S_IMODE(observed.st_mode) != mode
+        ):
+            raise ValueError("root file metadata mismatch")
         body = os.read(descriptor, limit)
         if os.read(descriptor, 1):
             raise ValueError("file is too large")
     finally:
         os.close(descriptor)
-    if (
-        not stat.S_ISREG(observed.st_mode)
-        or observed.st_uid != 0
-        or observed.st_gid != 0
-        or stat.S_IMODE(observed.st_mode) != mode
-    ):
-        raise ValueError("root file metadata mismatch")
     return body
 
 
@@ -481,8 +501,48 @@ def _validate_direct(path: Path, action: str, counts: dict[str, int], references
     return int(payload["foreign_key_constraints_checked"])
 
 
+def _read_report_text(path: Path, limit: int) -> str:
+    try:
+        return _read_regular(path, 0o600, limit).decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise ValueError("redacted report encoding mismatch") from exc
+
+
+def _validated_report_rows(
+    body: str,
+    *,
+    prefix: str,
+    sequence_group: int,
+    spec_group: int,
+    suffix: str,
+    row_pattern: re.Pattern[str],
+) -> None:
+    if not body.startswith(prefix) or not body.endswith(suffix):
+        raise ValueError("redacted report content mismatch")
+    rows_body = body[len(prefix) : len(body) - len(suffix)]
+    matches = list(row_pattern.finditer(rows_body))
+    if "".join(match.group(0) for match in matches) != rows_body:
+        raise ValueError("redacted report row mismatch")
+    if (
+        len(matches) != 2
+        or {match.group(sequence_group) for match in matches} != {"1", "2"}
+        or {match.group(spec_group) for match in matches} != _REPORT_SPECS
+    ):
+        raise ValueError("redacted report test identity mismatch")
+
+
 def _validate_report(path: Path) -> None:
-    payload = _read_root_json(path / "c7-summary.json")
+    observed = os.lstat(path)
+    if (
+        not stat.S_ISDIR(observed.st_mode)
+        or stat.S_ISLNK(observed.st_mode)
+        or observed.st_uid != 0
+        or observed.st_gid != 0
+        or stat.S_IMODE(observed.st_mode) != 0o700
+        or set(os.listdir(path)) != _REPORT_NAMES
+    ):
+        raise ValueError("redacted report exact file set mismatch")
+    payload = json.loads(_read_report_text(path / "c7-summary.json", 4096))
     if payload != {
         "counts": {"passed": 2},
         "result": "passed",
@@ -491,6 +551,30 @@ def _validate_report(path: Path) -> None:
         "version": 1,
     }:
         raise ValueError("redacted report mismatch")
+    xml = _read_report_text(path / "c7-results.xml", 16_384)
+    _validated_report_rows(
+        xml,
+        prefix='<?xml version="1.0" encoding="UTF-8"?><testsuite tests="2">',
+        sequence_group=2,
+        spec_group=1,
+        suffix="</testsuite>\n",
+        row_pattern=_XML_CASE_RE,
+    )
+    html = _read_report_text(path / "c7-summary.html", 32_768)
+    _validated_report_rows(
+        html,
+        prefix=(
+            '<!doctype html><html lang="ko"><meta charset="utf-8">'
+            "<title>C7 redacted result</title><body><h1>C7 redacted result</h1>"
+            "<p>result=passed planned=2 observed=2</p>"
+            "<table><thead><tr><th>#</th><th>spec</th><th>status</th>"
+            "<th>duration_ms</th></tr></thead><tbody>"
+        ),
+        sequence_group=1,
+        spec_group=2,
+        suffix="</tbody></table></body></html>\n",
+        row_pattern=_HTML_ROW_RE,
+    )
 
 
 def _validate_root_tree(root: Path) -> None:
