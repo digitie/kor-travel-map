@@ -44,6 +44,11 @@
   dirty guard, refetch error/fetchStatus gate, hook `retry=false`, update/delete baseline raw ETag exact
   assertion과 deferred/500 음성 fixture로 네 건을 보강했다. 새 exact head 재리뷰 전에는
   test·lint·build를 실행하지 않는다.
+- 두 번째 적대 리뷰에서 전역 dirty boolean이 basis 전체 적용을 건너뛰어 untouched category/marker에
+  add 기본값이 남는 문제와, 의미가 같은 Feature ID 공백 편집이 412 mutation state를 초기화하는
+  문제를 확인했다. 필드별 dirty overlay와 `action + trimmed feature_id` 편집 세션 identity로
+  교체하고, baseline과 다른 category/marker fixture의 PATCH 미포함 및 동일 identity의 mutation
+  횟수 불변 회귀를 추가했다. 명시적 reload 성공은 dirty set 전체를 초기화한다.
 
 ## 2026-07-20 (codex, agent B) — T-VN-57 public route 계약 단일 정본 설계
 

@@ -433,6 +433,24 @@ function detailToFormPatch(
   };
 }
 
+function correctionSessionIdentity(form: FeatureChangeFormState): string {
+  return `${form.action}:${form.featureId.trim()}`;
+}
+
+function applyUntouchedFormPatch(
+  current: FeatureChangeFormState,
+  patch: Partial<FeatureChangeFormState>,
+  dirtyFields: ReadonlySet<keyof FeatureChangeFormState>,
+): FeatureChangeFormState {
+  const next = { ...current };
+  for (const key of Object.keys(patch) as Array<keyof FeatureChangeFormState>) {
+    if (!dirtyFields.has(key)) {
+      Object.assign(next, { [key]: patch[key] });
+    }
+  }
+  return next;
+}
+
 function locationDraftFromForm(form: FeatureChangeFormState): LocationDraft {
   return {
     lat: form.lat,
@@ -978,7 +996,9 @@ export function FeatureChangeRequestsClient({
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const appliedQueryPrefillRef = useRef<string | null>(null);
   const appliedFeaturePrefillRef = useRef<string | null>(null);
-  const editDraftDirtyRef = useRef(false);
+  const editDraftDirtyFieldsRef = useRef<Set<keyof FeatureChangeFormState>>(
+    new Set(),
+  );
   const categories = useCategories({ include_counts: false });
   // update/delete는 동일 feature snapshot과 raw ETag를 편집 수명 동안 함께 고정한다.
   const correctionLookupId =
@@ -1053,12 +1073,18 @@ export function FeatureChangeRequestsClient({
     value: FeatureChangeFormState[K],
   ) => {
     if (key === "action" || key === "featureId") {
-      editDraftDirtyRef.current = false;
-      patchFeature.reset();
-      deleteFeature.reset();
-      setFormError(null);
+      const nextForm: FeatureChangeFormState = { ...form, [key]: value };
+      if (
+        correctionSessionIdentity(form) !== correctionSessionIdentity(nextForm)
+      ) {
+        editDraftDirtyFieldsRef.current.clear();
+        appliedFeaturePrefillRef.current = null;
+        patchFeature.reset();
+        deleteFeature.reset();
+        setFormError(null);
+      }
     } else {
-      editDraftDirtyRef.current = true;
+      editDraftDirtyFieldsRef.current.add(key);
     }
     setForm((current) => ({ ...current, [key]: value }));
   };
@@ -1068,7 +1094,7 @@ export function FeatureChangeRequestsClient({
     setFormError(null);
     appliedQueryPrefillRef.current = null;
     appliedFeaturePrefillRef.current = null;
-    editDraftDirtyRef.current = false;
+    editDraftDirtyFieldsRef.current.clear();
     patchFeature.reset();
     deleteFeature.reset();
   };
@@ -1077,24 +1103,35 @@ export function FeatureChangeRequestsClient({
     const nextCoord = korTravelGeoCandidateToCoord(candidate);
     const address = korTravelGeoCandidateToAddressRecord(candidate);
     const codes = korTravelGeoCodesFromCandidate(candidate);
-    editDraftDirtyRef.current = true;
-    setForm((current) => ({
-      ...current,
-      addressAdmin: fieldText(address.admin) || current.addressAdmin,
-      addressLegal: fieldText(address.legal) || current.addressLegal,
-      addressRoad: fieldText(address.road) || current.addressRoad,
-      adminDongCode: codes.admin_dong_code ?? current.adminDongCode,
-      legalDongCode: codes.legal_dong_code ?? current.legalDongCode,
-      roadNameCode: codes.road_name_code ?? current.roadNameCode,
-      sidoCode: codes.sido_code ?? current.sidoCode,
-      sigunguCode: codes.sigungu_code ?? current.sigunguCode,
+    const addressAdmin = fieldText(address.admin);
+    const addressLegal = fieldText(address.legal);
+    const addressRoad = fieldText(address.road);
+    const regionPatch: Partial<FeatureChangeFormState> = {
+      ...(addressAdmin ? { addressAdmin } : {}),
+      ...(addressLegal ? { addressLegal } : {}),
+      ...(addressRoad ? { addressRoad } : {}),
+      ...(codes.admin_dong_code
+        ? { adminDongCode: codes.admin_dong_code }
+        : {}),
+      ...(codes.legal_dong_code
+        ? { legalDongCode: codes.legal_dong_code }
+        : {}),
+      ...(codes.road_name_code ? { roadNameCode: codes.road_name_code } : {}),
+      ...(codes.sido_code ? { sidoCode: codes.sido_code } : {}),
+      ...(codes.sigungu_code ? { sigunguCode: codes.sigungu_code } : {}),
       ...(nextCoord
         ? {
             lat: nextCoord.lat.toFixed(6),
             lon: nextCoord.lon.toFixed(6),
           }
         : {}),
-    }));
+    };
+    for (const key of Object.keys(regionPatch) as Array<
+      keyof FeatureChangeFormState
+    >) {
+      editDraftDirtyFieldsRef.current.add(key);
+    }
+    setForm((current) => ({ ...current, ...regionPatch }));
   };
 
   useEffect(() => {
@@ -1104,7 +1141,7 @@ export function FeatureChangeRequestsClient({
     const nextAction = prefill?.action;
     const nextFeatureId = prefill?.featureId?.trim() ?? "";
     const nextReason = prefill?.reason?.trim() ?? "";
-    editDraftDirtyRef.current = false;
+    editDraftDirtyFieldsRef.current.clear();
     setForm((current) => ({
       ...current,
       action:
@@ -1133,12 +1170,16 @@ export function FeatureChangeRequestsClient({
     }
     appliedFeaturePrefillRef.current = key;
     queueMicrotask(() => {
-      if (editDraftDirtyRef.current) return;
-      setForm((current) => ({
-        ...current,
-        ...detailToFormPatch(feature),
-        reason: current.reason || "admin feature detail edit",
-      }));
+      setForm((current) =>
+        applyUntouchedFormPatch(
+          current,
+          {
+            ...detailToFormPatch(feature),
+            ...(current.reason ? {} : { reason: "admin feature detail edit" }),
+          },
+          editDraftDirtyFieldsRef.current,
+        ),
+      );
     });
   }, [
     correctionBasis.data,
@@ -1176,7 +1217,7 @@ export function FeatureChangeRequestsClient({
       }));
       appliedFeaturePrefillRef.current = feature.feature_id;
     }
-    editDraftDirtyRef.current = false;
+    editDraftDirtyFieldsRef.current.clear();
     patchFeature.reset();
     deleteFeature.reset();
   };

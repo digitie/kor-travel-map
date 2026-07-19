@@ -16,6 +16,7 @@ type AdminFeatureChangeResponse =
   components["schemas"]["AdminFeatureChangeResponse"];
 type AdminFeatureDetailResponse =
   components["schemas"]["AdminFeatureDetailResponse"];
+type AdminFeatureDetail = AdminFeatureDetailResponse["data"]["feature"];
 type AdminFeatureCreateRequest =
   components["schemas"]["AdminFeatureCreateRequest"];
 type AdminFeaturePatchRequest =
@@ -635,6 +636,7 @@ function featureDetailResponse(
   featureId: string,
   rowRevision = 1,
   name = `Existing ${featureId}`,
+  overrides: Partial<AdminFeatureDetail> = {},
 ): AdminFeatureDetailResponse {
   return {
     data: {
@@ -657,6 +659,7 @@ function featureDetailResponse(
         status: "active",
         updated_at: MOCK_NOW,
         urls: {},
+        ...overrides,
       },
       files: [],
       issues: [],
@@ -689,6 +692,7 @@ async function mockFeatureChangeMutations(
     initial?: AdminFeatureChangeRecord[];
     reviewMode?: AdminFeatureReviewMode;
     stalePatchOnce?: boolean;
+    featureDetailOverrides?: Partial<AdminFeatureDetail>;
   } = {},
 ) {
   const reviewMode = options.reviewMode ?? "require_review";
@@ -890,6 +894,7 @@ async function mockFeatureChangeMutations(
           featureId,
           featureRevisions.get(featureId) ?? 1,
           featureNames.get(featureId),
+          options.featureDetailOverrides,
         ),
       );
       return;
@@ -1271,6 +1276,17 @@ test.describe("admin/ops pages", () => {
       "stale draft reason",
     );
 
+    const submitButton = page.getByRole("button", { name: "요청 생성" });
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("  feature-stale-1  ");
+    await expect(submitButton).toBeDisabled();
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("feature-stale-1");
+    await expect(submitButton).toBeDisabled();
+    expect(requests.patch).toBe(1);
+
     await page
       .getByRole("button", { name: "최신값으로 폼 다시 불러오기" })
       .click();
@@ -1301,11 +1317,16 @@ test.describe("admin/ops pages", () => {
     expect(requests.mutationEtags[1]).toBe('"2"');
   });
 
-  test("최초 basis가 늦게 도착해도 로딩 중 작성한 전체 draft를 덮지 않는다", async ({
+  test("최초 basis가 늦게 도착하면 untouched 필드만 채우고 dirty draft를 보존한다", async ({
     page,
   }) => {
     const requests = await mockFeatureChangeMutations(page, {
       deferFirstBasisDetail: true,
+      featureDetailOverrides: {
+        category: "01070400",
+        marker_color: "P-02",
+        marker_icon: "park",
+      },
     });
 
     await page.goto("/admin/features/change-requests");
@@ -1315,8 +1336,6 @@ test.describe("admin/ops pages", () => {
 
     await page.getByLabel("change reason", { exact: true }).fill("slow draft reason");
     await page.getByLabel("change name", { exact: true }).fill("Slow operator draft");
-    await page.getByLabel("change lon", { exact: true }).fill("127.123456");
-    await page.getByLabel("change lat", { exact: true }).fill("37.654321");
     requests.resolveDeferredDetail();
 
     await expect(page.getByText("데이터 로드됨")).toBeVisible();
@@ -1326,12 +1345,25 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
       "Slow operator draft",
     );
-    await expect(page.getByLabel("change lon", { exact: true })).toHaveValue(
-      "127.123456",
+    await expect(page.getByLabel("change category", { exact: true })).toHaveValue(
+      "01070400",
     );
-    await expect(page.getByLabel("change lat", { exact: true })).toHaveValue(
-      "37.654321",
-    );
+    await expect(
+      page.getByLabel("change marker icon", { exact: true }),
+    ).toHaveValue("park");
+    await expect(
+      page.getByLabel("change marker color", { exact: true }),
+    ).toHaveValue("P-02");
+
+    await page.getByRole("button", { name: "요청 생성" }).click();
+    await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.patchBodies[0]).toMatchObject({
+      name: "Slow operator draft",
+      reason: "slow draft reason",
+    });
+    expect(requests.patchBodies[0]).not.toHaveProperty("category");
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_icon");
+    expect(requests.patchBodies[0]).not.toHaveProperty("marker_color");
   });
 
   test("/v1/admin/issues", async ({ page }) => {

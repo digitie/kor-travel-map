@@ -25,7 +25,11 @@
   ETag mutation, dirty form 보호, 412 explicit reload, update/delete와 live cleanup 회귀를 구현했다.
 - 첫 적대 리뷰의 P1 2건/P2 2건에 따라 initial in-flight 전체 draft guard, 실패 reload old-data
   거부, exact 3-pair retry budget, live update/delete baseline ETag 단정을 보강했다.
-- **다음 한 작업**: 보강 exact head를 push하고 같은 단일 적대 리뷰어에게 재제출한다. 승인 전에는
+- 두 번째 적대 리뷰의 P1/P2에 따라 전역 dirty guard를 필드별 dirty overlay로 바꾸고, mutation
+  state 초기화를 `action + trimmed feature_id` identity가 실제로 바뀔 때로 제한했다. deferred
+  basis의 untouched category/marker baseline 적용과 same-value/공백 Feature ID 편집 뒤 412 제출
+  차단을 mocked E2E로 고정했다.
+- **다음 한 작업**: 이 exact head를 push하고 같은 단일 적대 리뷰어에게 재제출한다. 승인 전에는
   test·lint·build를 실행하지 않는다.
 
 ## 2026-07-20 (codex, agent B) — T-VN-57 public security 계약 docs-first 착수
