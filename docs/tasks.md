@@ -12,15 +12,17 @@
   - [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화** (#777)
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
-  - [ ] `T-VN-SYNC-01` — **latest main → integration/t-vn 동기화**
-    (`main@d2104f15`, branch `chore/t-vn-sync-main`)
+  - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
   - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate**
     ([설계](reports/t-vn-03-route-gate-cutover-2026-07-19.md), PinVi issue
     [#392](https://github.com/digitie/pinvi/issues/392)). curated GET 4개는 public key,
     ops 관측 GET 6개는 operator, MOIS raw debug는 local-dev mount+operator로 clean-cut한다.
-    PinVi PR #393 head와 Map head를 C6c manifest v4 exact pair source에 포함한 동일 배포 단위만 허용한다.
-  - [ ] `T-VN-04A` — **admin 비공개 feature 공간 조회·카드 표면 복원** (#741)
-  - [ ] `T-VN-15` — **search total과 HMAC cursor fingerprint** (PR #780 구현 준비 완료·테스트 전 리뷰 대기)
+    PR #782는 integration, PinVi PR #393과 docker-manager PR #64는 각 main에 병합됐으며,
+    exact pair activation과 n150 live 전까지 active로 유지한다.
+  - [ ] `T-VN-04A` — **admin 비공개 feature 공간 조회·카드 표면 복원**
+    (#741, PR #779 integration 병합·n150 live 대기)
+  - [ ] `T-VN-15` — **search total과 HMAC cursor fingerprint**
+    (PR #780 integration 병합·n150 live 대기)
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
     `T-VN-16` weather batch와 부모 404.
@@ -139,34 +141,22 @@ PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin
 각 코드 PR은 테스트 전에 적대적 리뷰어 1명의 리뷰를 반영한다. 문서 전용·rebase-only·단순
 변수명/import 정렬 변경은 추가 적대적 재리뷰 대상이 아니다.
 
-#### T-VN-SYNC-01 — latest main → integration/t-vn 동기화
+#### T-VN-SYNC-02 — integration/t-vn → main 최종 합류
 
-`chore/t-vn-sync-main`에서 `main@d2104f15`를 `integration/t-vn@22bf35a5` 위에 merge한다.
-공유 integration branch 자체는 rebase하지 않는다. 완료 조건은 양쪽 문서 이력, API image의
-OCI revision label+production profile, 완료/미완 task 정본, Alembic `0058 → 0062` 단일 chain을
-보존하고 동일 전문 리뷰어 승인 뒤 CI green으로 integration에 병합하는 것이다.
+`T-VN-03` PR #782와 이 문서 추적 PR까지 `integration/t-vn`에 병합한 exact head를 `main`으로
+합류시키는 독립 PR이다. 공유 integration branch는 rebase하지 않고 GitHub PR의
+`base=main`, `head=integration/t-vn`로 전체 ancestry를 보존한다.
 
-### T-VN-04A — admin 비공개 feature 공간 조회·카드 복원 (#741)
-
-`feature.public_features`를 정본으로 삼은 T-VN-04 이후 admin 지도와 weather/price 카드가
-공개 API를 재사용해 `inactive`·`draft`·`hidden` Feature를 찾거나 점검할 수 없게 된 회귀를
-복원한다. DB schema는 바꾸지 않는다. 이미 존재하는 `feature.features`의 상태·좌표·geometry와
-공간 인덱스를 admin repository가 직접 조회하고, public projection과 SQL 경계를 섞지 않는다.
-
-- [ ] `GET /v1/admin/features/in-bounds`가 base Feature의 bbox item/행정구역 cluster를
-  `status` 반복 필터와 함께 반환한다. 기본은 삭제 전 전체 운영 상태이며, item과 cluster가
-  같은 exact 공간 후보·kind/category/provider/status 필터를 사용한다.
-- [ ] `GET /v1/admin/features/{feature_id}/weather|price`가 공개 여부와 무관하게 삭제 전
-  Feature의 카드를 반환한다. 실제 미존재·`deleted_at`/`user_deleted_at` soft-delete·
-  `status=deleted` target은 404로 구분하고, weather의 근접 anchor도 같은 삭제 전 admin
-  base predicate를 사용한다.
-- [ ] admin `/features` 지도·표·상세가 위 admin API만 사용하고 상태 필터를 제공한다.
-  공개 API 404를 빈 카드로 숨기는 임시 완화는 제거한다.
-- [ ] admin/full OpenAPI와 생성 TypeScript, repository/router/frontend 단위·PostGIS 회귀,
-  n150 live UI e2e에서 `inactive`·`draft`·`hidden` marker와 weather/price 카드를 검증한다.
-
-작업 브랜치는 `fix/t-vn-admin-nonpublic-features`, PR base는 `integration/t-vn`이다. 구현 diff는
-테스트 전에 단일 적대 리뷰어의 승인을 받고, 승인 전에는 정적 검토만 수행한다.
+- [ ] PR 생성 직전에 `origin/main`을 integration에 merge해 conflict를 해소하고,
+  `T-VN-03`·`T-VN-04A`·`T-VN-15` 코드와 문서가 같은 tree에 있는지 확인한다.
+- [ ] Alembic `0058 → 0059 → 0060 → 0061 → 0062` 단일 head, admin/user OpenAPI drift 0건,
+  unit·PostGIS integration·fixture replay·Python 3버전·frontend type/build를 CI 8개 green으로
+  증명한다.
+- [ ] 코드 통합 diff는 단일 적대 리뷰어 승인을 받고, exact source revision을 고정한 merge
+  commit으로 main에 합류한다. 문서 전용 후속은 추가 적대 재리뷰를 요구하지 않는다.
+- [ ] main 합류 뒤 PinVi PR #393과 docker-manager PR #64의 exact revision을 포함한 C6c
+  compatible-pair v4를 capture하고, n150 C7 live E2E 전에는 `T-VN-03`·`T-VN-04A`·
+  `T-VN-15`를 완료 아카이브하지 않는다.
 
 #### Lane 분배 (2026-07-19, issue #738)
 
@@ -196,13 +186,29 @@ main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-v
 - [ ] T-VN-03 — **잔여 운영 read·debug·public-key gate**
 
   ops metrics/log/consistency와 MOIS raw debug를 operator/debug로, 무키 legacy curated read를
-  public-keyed로 옮긴다. PinVi principal 선전환과 같은 cutover에서 수행하며 삭제 route는 복원하지 않는다.
+  public-keyed로 옮긴다. 삭제 route는 복원하지 않는다.
+
+  - [x] Map route gate와 user OpenAPI/생성 client를 단일 적대 리뷰와 CI 8개 green 뒤 PR #782로
+    `integration/t-vn@226f81c2`에 병합했다.
+  - [x] PinVi principal caller PR #393과 docker-manager production env PR #64를 각각 main에
+    병합해 배포 source 조합을 준비했다.
+  - [ ] T-VN-SYNC-02로 Map main에 합류하고 exact compatible-pair v4 activation과 n150 live에서
+    public/operator/debug 경계와 principal 성공·401/403을 검증한 뒤 issue #392와 task를 닫는다.
 
 - [ ] T-VN-04A — **admin 비공개 feature 공간 조회·카드 표면 복원** (#741)
 
-  admin bbox/cluster 조회를 raw feature 기준 status filter와 함께 제공해 inactive/draft/hidden
-  marker를 다시 찾을 수 있게 한다. 비공개 feature 상세의 weather/price 카드도 admin 전용 read
-  표면으로 복원한다. 공개 `feature.public_features` 경계는 넓히지 않는다.
+  `feature.public_features`를 넓히지 않고 `feature.features`의 기존 상태·좌표·geometry와 공간
+  인덱스를 admin repository가 직접 조회한다. DB schema는 바꾸지 않는다.
+
+  - [x] `GET /v1/admin/features/in-bounds`가 삭제 전 base Feature의 item/행정구역 cluster를
+    반복 `status`와 exact kind/category/provider/공간 필터로 반환한다.
+  - [x] `GET /v1/admin/features/{feature_id}/weather|price`가 비공개 Feature 카드도 반환하고,
+    실제 미존재·soft-delete·`status=deleted` target은 404로 구분한다.
+  - [x] admin `/features` 지도·표·상세를 admin API로 전환하고 상태 필터, full OpenAPI,
+    생성 TypeScript, repository/router/frontend/PostGIS 회귀를 PR #779로
+    `integration/t-vn@21ad4e31`에 병합했다.
+  - [ ] n150 live UI에서 `inactive`·`draft`·`hidden` marker와 weather/price 카드를 검증하고
+    issue #741을 닫는다.
 
 - [ ] T-VN-08 — **PinVi false-broken 수정**
 
@@ -227,8 +233,10 @@ main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-v
   정규화 query/filter/sort/page contract의 SHA-256 fingerprint와 keyset을 versioned payload에
   넣고 전용 server-only secret의 HMAC-SHA256으로 보호한다. 다른 query 재사용, unknown version,
   malformed와 tamper를 DB 전에 서로 다른 typed RFC7807 422로 거부한다. DB table은 추가하지 않는다.
-  PR #780에 repository/API/runtime/UI/OpenAPI·생성 타입과 테스트를 준비했으며, 단일 적대 리뷰 승인 뒤
-  test/lint/build·실환경 검증을 실행한다.
+  repository/API/runtime/UI/OpenAPI·생성 타입과 회귀를 단일 적대 리뷰와 CI 8개 green 뒤
+  PR #780으로 `integration/t-vn@7604fc92`에 병합했다. 최종 main 합류와 n150 live에서 production
+  signing secret의 fail-closed 기동, 정상 continuation, 변조·query mismatch 422를 확인할 때까지
+  task는 active로 유지한다.
 
 - [ ] T-VN-16 — **weather batch와 부모 404**
 

@@ -3,6 +3,18 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## vNext main 동기화 (2026-07-20, `T-VN-SYNC-01`)
+
+- [x] **T-VN-SYNC-01 — latest main을 integration/t-vn에 동기화.**
+  `main@d2104f15`를 `integration/t-vn@22bf35a5` 위 전용 branch에서 merge하고, 양쪽 문서 이력,
+  API image OCI revision label과 production profile, 완료/미완 task 정본을 함께 보존했다.
+- [x] **migration과 CI 계약 확인.** Alembic `0058 → 0059 → 0060 → 0061 → 0062` 단일 chain을
+  유지했고 lint, OpenAPI drift, Python 3.11/3.12/3.13, fixture replay, PostGIS integration,
+  frontend type-check/build의 CI 8개를 모두 통과했다.
+- [x] **PR #781 병합 완료.** PR head `aa976f13ae747d75fe67318d9c41fb2bddfddb04`를 merge commit
+  `a45bc3ac401e5675811f1031a4592991498d899f`로 `integration/t-vn`에 반영했다. 이후 최종
+  integration→main 합류는 열린 `T-VN-SYNC-02`가 담당한다.
+
 ## C7 prod runner attestation·복구 경계 (2026-07-19, `T-ADM-C7H`)
 
 - [x] **T-ADM-C7H — 파괴적 live 실행 전 runtime을 exact attestation에 결박.** C6c compatible-pair,
