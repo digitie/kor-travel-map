@@ -3,6 +3,22 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## C7 prod runner attestation·복구 경계 (2026-07-19, `T-ADM-C7H`)
+
+- [x] **T-ADM-C7H — 파괴적 live 실행 전 runtime을 exact attestation에 결박.** C6c compatible-pair,
+  clean source commit과 OCI revision, Map API/UI/Dagster web·daemon/PinVi API의 실제
+  image·command·environment, compose project, 단일 Alembic head/check, UI login을 read-only로
+  대조한 뒤에만 `BLOCKED.json`과 mutation journal을 만든다.
+- [x] **root 실행 파일과 복구 증거를 fail-closed로 고정.** runner/helper/attestation 모듈/상태
+  감사기 네 파일을 exact Git archive와 root-owned SHA-256에 묶었다. 실패·signal 경로는
+  runtime/journal/sentinel을 보존하고 INT/TERM은 130/143으로 종료한다. Playwright container는
+  bridge/private IPC, durable creator/outcome/CID와 별도 검증형 stop 도구만 사용한다.
+- [x] **단일 적대 리뷰와 실행형 gate 완료.** 최종 P0~P3 잔여 없음 판정 뒤 C7 대상 55건,
+  전체 unit 1,529건, Ruff, strict mypy, import 계약, exact-commit immutable executor build를
+  통과했다. PR #754와 보안 후속 PR #762는 각각 CI 8개가 모두 성공한 뒤 merge commit
+  `b9f23a42`, `bece2c32`로 `main`에 반영됐다. 실제 배포·파괴적 browser 증거는 열린
+  `T-ADM-C7` n150 gate가 담당한다.
+
 ## C7 mocked UI projection·pagination 수용 증거 (2026-07-19, `T-ADM-C7M`)
 
 - [x] **T-ADM-C7M — datasets summary를 이름 있는 영역의 exact projection으로 검증.**

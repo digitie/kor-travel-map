@@ -10,7 +10,6 @@
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
-  - [ ] `T-ADM-C7H` — **prod runner 실행 전 attestation·복구·evidence hardening**
 - **예정 — vNext 재설계 (`T-ADM-C6c`/`C7` 종결 뒤 시작)**
   - [ ] `T-VN-01` — **production fail-closed 전환**
   - [ ] `T-VN-02` — **route policy matrix와 미분류 CI gate**
@@ -104,22 +103,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   attestation을 local-only 운영 절차로 provision한다. 운영 종결이 남은 #684/#694/#712/#719는
   최종 live 증거를 첨부한 뒤 닫는다.
 
-- [ ] `T-ADM-C7H` — **prod runner 실행 전 attestation·복구·evidence hardening**
-  (C7 실행 차단 리뷰 후속): C6c compatible-pair manifest와 실제 API image, exact Git
-  commit의 root-owned runner/helper/attestation 모듈 snapshot, Map API/UI/Dagster web·daemon/PinVi
-  API의 image·command·environment hash,
-  Alembic current/head/check를 read-only preflight로 결박한다. 실제 실행 job은
-  `feature_update_request_worker` repository identity와 terminal run/tags로 검증한다.
-  Playwright는 v1.60.0 noble digest 기반 executor image에서만 실행하고, 모든 preflight
-  뒤 `BLOCKED.json`을 만든다. 운영값을 픽셀로 노출할 수 있는 screenshot과 auth
-  storage/trace는 만들거나 보존하지 않고, redacted report와 복구 증거만 root-owned
-  evidence로 보존하며 tracked 감사·복구 도구를 둔다.
-  Map API/UI/Dagster와 PinVi API image 자체의 OCI revision label을 각 clean source commit에
-  결박한다. Playwright container는 durable creator/outcome/CID 아래 create와 start를 분리하고,
-  SIGKILL 잔존 container는 PID/PGID/session ID/start ticks와 CID/name/label/runtime mount를 검증하는 별도
-  stop 도구로만 중지한다. runner/helper/attestation 모듈 3개를 동일 root-owned snapshot과
-  `orchestrator_files` exact hash에 묶고, 검증 모듈의 실행형 음수 테스트로 file·ancestor
-  owner/mode/hash와 attestation/compatible-pair/OCI runtime metadata 변조를 fail-closed 검증한다.
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,
 **Wave 4**의 C7B-UI까지 완료했다. 현재는 누락된 소비자 선전환을 C6c로 복구한 뒤

@@ -27,8 +27,8 @@
   단일 Alembic current/head/check를 root-owned attestation과 exact 대조한다. 모든 read-only preflight
   전에는 `BLOCKED.json`이나 mutation journal을 만들지 않는다.
 - **SECURITY**: attestation 모듈은 runner bootstrap이 owner/mode/ancestor/hash를 확인한 동일 bytes만
-  실행한다. 세 orchestrator 파일 hash와 compatible-pair·OCI/runtime metadata 변조는 실행형 음수
-  테스트로 fail-closed를 고정한다.
+  실행한다. root로 실행하는 runner/helper/module/상태 감사기 4개 hash와 compatible-pair·OCI/runtime
+  metadata 변조는 실행형 음수 테스트로 fail-closed를 고정한다. INT/TERM은 130/143으로 종료한다.
 - **CHANGED**: C7은 고정 official digest 기반의 commit-labelled Playwright executor image ID에서만
   실행한다. 실제 Dagster `feature_update_request_worker` definition과 terminal run의 request/generation/
   scope/sensor tag를 검증한다. spec별 redacted JUnit/HTML/JSON과 복구 journal은 root-owned evidence로

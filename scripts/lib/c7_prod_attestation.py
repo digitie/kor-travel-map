@@ -22,6 +22,7 @@ IMAGE_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 GENERATION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 ORCHESTRATOR_PATHS = (
+    "scripts/audit-c7-prod-live-state.py",
     "scripts/lib/c7-prod-runner-lifecycle.sh",
     "scripts/lib/c7_prod_attestation.py",
     "scripts/run-c7-prod-live-e2e.sh",
@@ -112,6 +113,7 @@ def _root_reader(path: Path, mode: int) -> bytes:
 def verify_root_owned_orchestrator_snapshot(
     snapshot_root: Path,
     runner_path: Path,
+    audit_path: Path,
     helper_path: Path,
     module_path: Path,
     attestation_path: Path,
@@ -120,20 +122,22 @@ def verify_root_owned_orchestrator_snapshot(
     expected_base: Path = Path("/usr/local/lib/kor-travel-map/c7-runner"),
     secure_reader: SecureReader = _root_reader,
 ) -> None:
-    """exact commit root 아래 세 orchestrator 파일의 위치·shape·hash를 검증한다."""
+    """exact commit root 아래 네 orchestrator 파일의 위치·shape·hash를 검증한다."""
 
     expected_root = expected_base / expected_commit
     expected_files = {
-        ORCHESTRATOR_PATHS[0]: helper_path,
-        ORCHESTRATOR_PATHS[1]: module_path,
-        ORCHESTRATOR_PATHS[2]: runner_path,
+        ORCHESTRATOR_PATHS[0]: audit_path,
+        ORCHESTRATOR_PATHS[1]: helper_path,
+        ORCHESTRATOR_PATHS[2]: module_path,
+        ORCHESTRATOR_PATHS[3]: runner_path,
     }
     if (
         COMMIT_PATTERN.fullmatch(expected_commit) is None
         or snapshot_root != expected_root
-        or runner_path != snapshot_root / ORCHESTRATOR_PATHS[2]
-        or helper_path != snapshot_root / ORCHESTRATOR_PATHS[0]
-        or module_path != snapshot_root / ORCHESTRATOR_PATHS[1]
+        or runner_path != snapshot_root / ORCHESTRATOR_PATHS[3]
+        or audit_path != snapshot_root / ORCHESTRATOR_PATHS[0]
+        or helper_path != snapshot_root / ORCHESTRATOR_PATHS[1]
+        or module_path != snapshot_root / ORCHESTRATOR_PATHS[2]
     ):
         raise AttestationError("orchestrator snapshot identity")
 
@@ -582,14 +586,15 @@ def main(argv: list[str] | None = None) -> int:
 
     arguments = sys.argv[1:] if argv is None else argv
     try:
-        if len(arguments) == 7 and arguments[0] == "snapshot":
+        if len(arguments) == 8 and arguments[0] == "snapshot":
             verify_root_owned_orchestrator_snapshot(
                 Path(arguments[1]),
                 Path(arguments[2]),
                 Path(arguments[3]),
                 Path(arguments[4]),
                 Path(arguments[5]),
-                arguments[6],
+                Path(arguments[6]),
+                arguments[7],
             )
             return 0
         if len(arguments) == 5 and arguments[0] == "runtime":

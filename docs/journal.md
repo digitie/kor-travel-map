@@ -19,8 +19,16 @@
 - `*.local.md`를 build context에서 제외하고 executor를 bridge/private 경계로 줄였다.
   전체 상태 auditor가 unsafe·unexpected·active·recovery residue를 거부한 뒤에만 lock과
   mutation 상태를 만들며, 실패 경로는 `BLOCKED.json`과 journal/runtime을 보존한다.
-- Linux `/tmp` 기준 대상 보안/unit 51개와 전체 unit 1,525개, `bash -n`, Ruff,
+- 같은 리뷰어의 재검토에서 root로 실행하는 auditor가 3파일 attestation 밖에 있던 문제와
+  INT/TERM이 active child 없는 구간에서 성공으로 정리될 수 있던 문제를 P1으로 확인했다.
+  auditor를 4파일 exact snapshot/hash에 포함하고 signal 종료를 130/143으로 고정한 뒤
+  P0~P3 잔여 없음으로 승인받았다.
+- Linux `/tmp` 기준 대상 보안/unit 55개와 전체 unit 1,529개, `bash -n`, Ruff,
   strict mypy, import-linter를 통과했다.
+- PR #754와 네 파일 attestation·signal 종료 후속 PR #762는 PostGIS integration을 포함한
+  CI 8개를 각각 통과해 merge commit `b9f23a42`, `bece2c32`로 `main`에 반영됐다. 현재
+  exact commit Git archive 기반 immutable executor build도 성공했으며 `T-ADM-C7H`를 완료
+  이력으로 옮겼다.
 
 ## 2026-07-19 (codex) — C7 prod readiness 차단 리뷰 반영
 
@@ -35,8 +43,10 @@
   head/check와 UI login을 모두 read-only 검증한 뒤에만 root state와 `BLOCKED.json`을 만든다.
 - PR #754 리뷰의 정적 계약 테스트 한계를 반영해 snapshot/runtime 검증 코어를 import 가능한
   `c7_prod_attestation.py`로 분리했다. runner bootstrap은 검증한 동일 module bytes를 실행하며
-  runner/helper/module hash, owner/mode/ancestor와 compatible-pair·OCI/runtime metadata 변조를
-  실행형 음수 fixture로 고정했다.
+  root로 실행하는 runner/helper/module/상태 감사기 4개의 hash, owner/mode/ancestor와
+  compatible-pair·OCI/runtime metadata 변조를 실행형 음수 fixture로 고정했다. INT/TERM은
+  각각 130/143으로 종료해 신호 중단을 성공 정리로 오인하지 않는다. 같은 단일 리뷰어의
+  최종 판정은 P0~P3 잔여 없음이며 대상 55개와 전체 unit 1,529개가 통과했다.
 - Playwright는 고정 official digest 기반의 commit-labelled executor image ID로만 실행한다. spec별
   redacted JUnit/HTML/JSON과 journal을 root-owned evidence에 fsync하며 screenshot, auth storage와 trace ZIP은
   제외한다. `audit-c7-prod-live-state.py`는 값·UUID 없이 partial restore, active lock, unsafe residue를

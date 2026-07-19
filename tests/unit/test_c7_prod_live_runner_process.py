@@ -5,12 +5,44 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "run-c7-prod-live-e2e.sh"
 LIFECYCLE = ROOT / "scripts" / "lib" / "c7-prod-runner-lifecycle.sh"
+
+
+@pytest.mark.parametrize(
+    ("signal_name", "expected_status"),
+    [("INT", 128 + signal.SIGINT), ("TERM", 128 + signal.SIGTERM)],
+)
+def test_lifecycle_preserves_signal_exit_status(
+    tmp_path: Path,
+    signal_name: str,
+    expected_status: int,
+) -> None:
+    marker = tmp_path / "exit-status"
+    script = f"""
+set -euo pipefail
+source {LIFECYCLE!s}
+trap 'printf "%s" "$?" > {marker!s}' EXIT
+trap 'exit_for_signal {expected_status}' {signal_name}
+kill -s {signal_name} "$$"
+"""
+
+    result = subprocess.run(
+        ["/bin/bash", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+
+    assert result.returncode == expected_status, result.stderr
+    assert marker.read_text(encoding="ascii") == str(expected_status)
 
 
 def test_runner_missing_docker_fails_before_state_mutation(tmp_path: Path) -> None:

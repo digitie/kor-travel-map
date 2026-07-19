@@ -29,6 +29,15 @@ def _load_module() -> ModuleType:
 ATTESTATION = _load_module()
 
 
+def test_orchestrator_snapshot_covers_every_root_executed_file() -> None:
+    assert ATTESTATION.ORCHESTRATOR_PATHS == (
+        "scripts/audit-c7-prod-live-state.py",
+        "scripts/lib/c7-prod-runner-lifecycle.sh",
+        "scripts/lib/c7_prod_attestation.py",
+        "scripts/run-c7-prod-live-e2e.sh",
+    )
+
+
 def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -42,6 +51,8 @@ def _snapshot_fixture(tmp_path: Path) -> tuple[dict[str, Path], Path, str, Calla
     expected_base = tmp_path / "c7-runner"
     snapshot_root = expected_base / commit
     paths = {
+        "scripts/audit-c7-prod-live-state.py": snapshot_root
+        / "scripts/audit-c7-prod-live-state.py",
         "scripts/lib/c7-prod-runner-lifecycle.sh": snapshot_root
         / "scripts/lib/c7-prod-runner-lifecycle.sh",
         "scripts/lib/c7_prod_attestation.py": snapshot_root
@@ -97,6 +108,7 @@ def test_snapshot_rejects_each_tampered_orchestrator_file(
         ATTESTATION.verify_root_owned_orchestrator_snapshot(
             tmp_path / "c7-runner" / commit,
             paths["scripts/run-c7-prod-live-e2e.sh"],
+            paths["scripts/audit-c7-prod-live-state.py"],
             paths["scripts/lib/c7-prod-runner-lifecycle.sh"],
             paths["scripts/lib/c7_prod_attestation.py"],
             attestation_path,
