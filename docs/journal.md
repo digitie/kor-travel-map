@@ -2,6 +2,33 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (claude, agent A1) — T-VN-21 3단 성능·DDL gate 인프라
+
+- ADR-075 D-12-4 / performance.md §8.3을 3단 gate의 **정본**으로 확정하고 CI·release
+  절차에 연결했다. 일회성 측정이 아니라 상시 인프라다(무엇이·어디서·어떻게 실행되는지 §8.3).
+- tier-1(매 PR, 기존 integration job): `tests/integration/test_perf_gate_tier1.py`가
+  hot public query 9종(bbox/in-bounds·nearby·search·detail·batch·category counts·
+  cluster sido/sigungu/eupmyeondong)을 planner-default EXPLAIN(`enable_seqscan` 미조작)해
+  `feature.features` Seq Scan 부재 + 기대 index 사용을 검증하고, public batch read의 SQL
+  statement 수가 item 50→100에도 1건으로 일정함(N+1 가드), 결과 컬럼이 frozen snapshot과
+  일치함(response-shape 회귀)을 확인한다. hot query registry·seed·EXPLAIN helper는
+  `tests/integration/perf_gate.py`. hot query 추가는 `HOT_QUERIES` 한 줄.
+- tier-2(release/cutover, **CI 아님**): `scripts/perf_tier2_release_harness.py`가 100만+
+  실분포 fixture에서 대표 viewport(서울 밀집·전국 low-zoom·100km nearby·상용 검색어·200건
+  batch)를 EXPLAIN(ANALYZE,BUFFERS)로 재고 p50/p95·shared read blocks·응답 bytes를 JSON으로
+  기록한다. `--rows 2000` smoke green(예: 200건 batch p95 0.41ms, 100km nearby p95 11.65ms).
+- tier-3(index/DDL PR): `perf_gate.measure_index_write_cost`로 변경 전후 write 비용·index
+  크기를 측정해 PR에 첨부한다(GiST partial 정리 ~1.6× write 개선 선례). 변경별 index가 달라
+  하드 CI gate 불가라 리뷰가 첨부 여부를 enforce한다.
+- 스코프 준수: `feature_repo` 쿼리/라우터/마이그레이션/모델 무수정(hot SQL 상수는 읽기만).
+  모든 hot query가 planner 기본에서 `features` clean — 실 perf-bug 없음(STOP 불필요).
+  small-fixture에서 category-counts 등 집계가 index를 타려면 공개 notice 필터의 `source_links`
+  NOT EXISTS anti-join이 populated여야 해서 seed가 features + source lineage를 함께 채운다.
+  price/weather LATERAL의 빈 aux 테이블 seq scan은 fixture-size 산물(`features` 아님)이며 aux
+  index 실효는 tier-2 실분포에서 잰다.
+- 검증: tier-1 12 tests green(WSL testcontainers PostGIS), ruff·mypy --strict(신규 파일, main
+  패키지 무변경)·lint-imports·redaction clean. src 무변경이라 openapi drift 없음.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-20 body actor 전면 제거 (principal 파생 완결)
 
 - ADR-066 D-2: 모든 admin write의 감사 actor를 request body가 아니라 인증
