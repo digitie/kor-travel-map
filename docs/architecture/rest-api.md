@@ -94,15 +94,19 @@ T-VN-51~55의 실측 결과가 채택 조건을 충족할 때만 새 결정을 �
   (`Deprecation`/`Sunset` 헤더), OpenAPI major별 분리 export. 즉 "지금은 깨도 되고, GA 후엔
   `/v2`로만 깬다"를 규칙화.
 
-### 1.3 인증 (현행 구현; 목표 ADR-066)
-- `POST /v1/features/batch`(service read): `ServiceToken`(`X-Kor-Travel-Map-Service-Token`, 미설정 시
-  비강제, 상수시간) route-level gate. 나머지 `/v1/features/*` GET은 공용 read.
-- `/v1/features/*`(GET)·`/v1/categories`·`/v1/providers/*`·`/v1/curations*`: 공용 read,
-  앱 토큰 비강제(인프라 SSO).
-- `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`: 인프라 SSO + IP allowlist. 파괴적 admin은
-  `admin_destructive_enabled` kill-switch.
-- 위 opt-out은 현재 구현 설명일 뿐 목표 정책이 아니다. T-VN-01~03에서 production secret 누락
-  기동 거부, 전 route matrix, principal actor, 공개 read-only DB role로 clean-cut한다(ADR-066).
+### 1.3 인증 (ADR-066·T-VN-57)
+- `RoutePolicy.PUBLIC_KEYED`로 분류된 모든 public operation은 production에서 VWorld 호환
+  `key` query 또는 `ServiceToken` 중 하나를 요구한다. OpenAPI도 두 scheme을 OR 대안으로
+  선언한다. trusted admin BFF 우회는 same-origin UI용 내부 경계이며 public consumer
+  security에는 노출하지 않는다.
+- `POST /v1/features/batch`는 `RoutePolicy.SERVICE`이며 `ServiceToken`
+  (`X-Kor-Travel-Map-Service-Token`) 전용이다. `/health`·`/version`·기계 판독
+  `/openapi.json`만 public-unauthenticated다.
+- `/v1/admin/*`는 trusted Admin BFF, `/v1/ops/*`는 경로·method별 Admin BFF 또는 제한된
+  ops principal, `/metrics`는 metrics token을 사용한다. production은 필요한 secret이나 public
+  key gate가 빠진 구성을 기동 전에 거부한다.
+- route 추가·삭제 시 runtime policy, full OpenAPI, user OpenAPI를 각각 수기로 갱신하지 않는다.
+  `ROUTE_POLICIES`와 조립된 route method metadata에서 파생하고 양방향 전수 drift gate로 고정한다.
 
 ### 1.4 응답 envelope (🔁 ADR-048 — payload/meta 완전 분리)
 - 성공 `{ "data": <payload>, "meta": <Meta> }`. **`data`는 payload만**:
@@ -723,10 +727,10 @@ MOIS route는 원본 provider payload를 포함하므로 `local-dev`에서
 production은 `debug_routes_enabled=false`를 기동 조건으로 강제해 route 자체가 없으며,
 debug token·legacy header·경로 alias는 제공하지 않는다.
 
-`GET /v1/curated-features*`, `/v1/curated-sources`, `/v1/curated-themes`는 다른 public
-read와 같은 `require_public_api_key` 경계다. production keyless 요청은 401이고 public
-key 또는 service principal만 public OpenAPI 계약에 선언한다. trusted admin BFF의 내부
-우회는 기존 same-origin UI 동작을 위한 runtime 경계이며 user OpenAPI principal로
+`GET /v1/curated-features*`, `/v1/curated-sources`, `/v1/curated-themes`를 포함한 모든
+public-keyed operation은 같은 `require_public_api_key` 경계다. production keyless 요청은
+401이고 public key 또는 service principal만 public OpenAPI 계약에 선언한다. trusted admin
+BFF의 내부 우회는 기존 same-origin UI 동작을 위한 runtime 경계이며 user OpenAPI principal로
 노출하지 않는다.
 - **action sub-resource 규약(ADR-048 #8)**: 부수효과 상태전이는 `POST {col}/{id}/{verb}`
   (`deactivate`/`cancel`/`run-now`/`approve`/`reject`/`load`/`validate`/`swap`), 순수 수정은

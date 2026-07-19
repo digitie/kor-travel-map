@@ -12,6 +12,18 @@ ADR-048/T-216g 기계 정본)에서 `openapi-typescript`로 생성한 **TypeScri
 - T-222b부터 `BeachPublicView`/`FestivalPublicView`와 `/v1/public/*` 공개 해수욕장·
   축제 view 경로를 named alias와 compile-time 경로 단언에 포함한다.
 
+## 인증 계약
+
+- production의 모든 `public-keyed` operation은 query의 VWorld 호환 `key` 또는
+  `X-Kor-Travel-Map-Service-Token` 헤더 중 하나를 요구한다. 두 방식은 OpenAPI
+  `security`에서 OR 대안으로 선언된다.
+- `openapi-typescript` 생성 타입에는 `security` metadata가 나타나지 않는다. public operation의
+  `parameters.query.key`가 optional인 것은 service principal과 trusted admin BFF의 runtime 우회 및
+  local-dev 구성을 함께 표현하기 때문이며, production의 무인증 호출을 허용한다는 뜻이 아니다.
+- 본 패키지는 runtime HTTP client를 제공하지 않는다. 소비자는 public key query 또는 server-only
+  service token header 중 자기 principal에 맞는 한 가지만 전송해야 하며 service token을 브라우저에
+  노출하면 안 된다.
+
 ## 소비 방법 (downstream)
 
 1. **vendoring** — `src/types.ts` + `src/index.ts`(named alias)를 복사해 commit

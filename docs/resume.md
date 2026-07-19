@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-20 (codex, agent B) — T-VN-57 public security 계약 docs-first 착수
+
+- T-VN-SYNC-02 적대적 리뷰에서 runtime `PUBLIC_KEYED` 29개 GET과 full OpenAPI의 security
+  선언을 전수 대조했다. runtime은 전부 `require_public_api_key`를 적용하지만 full spec은
+  curated 4개만 `PublicApiKey OR ServiceToken`을 선언해 25개가 누락되고, user spec도 노출한
+  27개 중 23개가 누락된다. 최상위 security가 없어 기계 계약상 무인증으로 해석되는 P1이다.
+- `USER_OPERATIONS`도 별도 수기 allowlist라 신규 public route의 user 편입 누락을 조용히 허용하는
+  P2다. T-VN-57/#784는 `ROUTE_POLICIES`와 조립된 method metadata를 runtime·full/user 계약의
+  단일 정본으로 사용하고 양방향 누락·과포함·method/security drift를 막는다.
+- CodeGraph는 `ROUTE_POLICIES` 57개, `create_app` 176개 영향 심볼과 route wiring gate caller
+  5개를 보고했다. **다음 한 작업**은 docs-first draft PR을 연 뒤 구현 diff를 같은 단일 적대
+  리뷰어에게 제출하는 것이다. 승인 전에는 생성 artifact 작성 외 test/lint/build/OpenAPI check를
+  실행하지 않는다.
+
 ## 2026-07-20 (codex) — vNext integration 구현 병합·최종 cutover 추적 정렬
 
 - T-VN-04A PR #779는 merge commit `21ad4e312b3d2a3e1b8baf1b3103daa6cec15e87`,

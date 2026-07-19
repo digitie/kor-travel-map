@@ -40,9 +40,11 @@ secret이 없는 local-dev의 `local-dev` actor fallback은 `require_admin_front
   `KNOWN_WIRING_EXCEPTIONS` 10개를 모두 삭제한다. registry가 정책 정본이며 stale exception은 0개다.
 - `auth.py`/`settings.py`: 기존 `require_public_api_key`, `require_ops_operator`,
   `require_admin_frontend`와 production fail-closed matrix를 그대로 재사용한다. 새 secret/env는 없다.
-- OpenAPI: full 계약의 curated GET은 `PublicApiKey`, ops 관측과 MOIS raw는 실제 runtime과 같은
-  `AdminBFF` 또는 `OpsToken+OpsScope`/`AdminBFF` security를 선언한다. user subset은 공개 curated만
-  유지하고 ops/debug route는 포함하지 않는다.
+- OpenAPI: full 계약의 모든 `RoutePolicy.PUBLIC_KEYED` operation은
+  `PublicApiKey OR ServiceToken`, ops 관측과 MOIS raw는 실제 runtime과 같은 `AdminBFF` 또는
+  `OpsToken+OpsScope`/`AdminBFF` security를 선언한다. user subset은 route policy에서 공개
+  operation을 파생하고 ops/debug route는 포함하지 않는다. curated 4개만 열거하는 수기
+  allowlist는 T-VN-57/#784에서 제거한다.
 - 생성 TypeScript: full/admin과 user client를 재생성한다. 경로·DTO는 바뀌지 않고 security 계약만
   바뀌므로 호출 API shape 호환 shim은 두지 않는다.
 - Admin UI: same-origin proxy가 operator header를 주입하므로 ops 화면 route 문자열은 유지한다.
@@ -78,7 +80,8 @@ container는 trusted frontend `/32`가 아니므로 `403`이 된다. PinVi issue
 검사한다. 승인 뒤 다음을 실행한다.
 
 1. Map route policy/auth/router 단위 회귀와 full API gate.
-2. OpenAPI full/user 재생성 및 admin/user TypeScript drift/typecheck.
+2. route policy ↔ full OpenAPI ↔ user OpenAPI의 path/method/security 양방향 전수 대조,
+   OpenAPI full/user 재생성 및 admin/user TypeScript drift/typecheck.
 3. PinVi admin client unit/contract와 API 전체 정적 gate.
 4. C6c manifest v4 exact pair capture 뒤 n150 production에서 public key 음성/양성,
    ops BFF/`ops:read` 음성/양성, MOIS production unmounted, live Admin UI를 검증한다.
@@ -87,7 +90,8 @@ container는 trusted frontend `/32`가 아니므로 `403`이 된다. PinVi issue
 ## 6. 완료 조건
 
 - route policy exception 0건, 삭제 route 복원 0건, compatibility shim 0건
-- curated 4경로 keyless 요청 거부와 public/admin/service 허용 경계 검증
+- 모든 public-keyed operation의 `PublicApiKey OR ServiceToken` 기계 계약과 runtime 배선 일치,
+  대표 경로의 keyless 요청 거부와 public/admin/service 허용 경계 검증
 - ops 6경로의 headerless/service-only/cancel-token 거부와 BFF/read-token 허용 검증
 - MOIS raw의 production unmount와 local-dev operator gate 검증
 - full/user OpenAPI와 생성 TypeScript 소비 계약 일치

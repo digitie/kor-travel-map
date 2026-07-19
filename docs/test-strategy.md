@@ -380,6 +380,19 @@ OpenAPI admin/user와 생성 TypeScript type은 네 cursor error code와 `includ
 같이 고정한다. production settings/entrypoint/Compose matrix는 feature surface가 켜진 상태의 secret
 누락·짧음·다른 신뢰 경계 secret 재사용을 기동 전에 거부하고 local-dev 난수 fallback만 허용한다.
 
+#### 5.1.2 public route policy·OpenAPI·user surface 양방향 정합
+
+T-VN-57은 조립된 FastAPI route의 path/method와 `ROUTE_POLICIES`를 단일 입력으로 사용한다.
+full OpenAPI의 모든 `PUBLIC_KEYED` operation은 정확히 `PublicApiKey OR ServiceToken`,
+`PUBLIC_UNAUTHENTICATED`는 무인증, `SERVICE`는 service scheme이어야 한다. 정책에 없는 operation의
+과포함과 정책 operation의 누락을 모두 실패시켜 한 방향 subset 검사로는 통과할 수 없게 한다.
+
+user OpenAPI도 공개 가능한 정책 집합에서 직접 파생하고 full spec과 path/method/security를
+양방향 비교한다. operator/debug/metrics가 user spec에 들어오거나 public-keyed route가 빠지거나
+같은 path의 method가 달라지면 실패한다. `openapi-typescript`는 security metadata를 생성 타입에
+표현하지 않으므로 Python OpenAPI 회귀가 인증 의미를 소유하고, admin/user `gen:types:check`는
+query/header/DTO shape drift를 별도로 고정한다.
+
 ### 5.2 인증 없음 동작 확인 (ADR-005)
 
 ```python
