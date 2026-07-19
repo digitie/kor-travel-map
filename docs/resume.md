@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — Agent A T-VN-07 소비자 clean-cut 리뷰 보완
+
+- PR #748의 단일 전문 리뷰에서 삭제된 beach no-op query가 이 저장소의 구현 사양과
+  PinVi primary consumer에 남은 S2를 확인했다. `public-views-api` 표를 실제 계약과
+  맞추고 PinVi route/client/vendored OpenAPI 후속을 병행한다.
+- 같은 리뷰어가 양 저장소 최종 diff를 승인했고, 문서 diff/redaction 및 PinVi 관련
+  Python 31개·정적 gate가 통과했다.
+- **다음 한 작업**: 문서 PR을 `integration/t-vn`에만 머지하고 PinVi 소비자 PR도 CI
+  green으로 머지한다.
+
 ## 2026-07-19 (codex) — Agent A T-VN-02 심층 리뷰 보완
 
 - PR #747의 단일 전문 리뷰에서 Prometheus token을 추적 config에 inline하게 하는

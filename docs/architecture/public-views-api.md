@@ -30,8 +30,6 @@
 | `q` | string | 없음 | 이름/주소 검색 |
 | `page_size` | int | 50 | 최대 200 |
 | `cursor` | string | 없음 | keyset cursor |
-| `include_quality` | bool | false | 수질 최신값 포함 |
-| `include_forecast` | bool | false | KHOA/KMA index·weather 요약 포함 |
 
 응답 `data.items[]`: `BeachPublicView`.
 

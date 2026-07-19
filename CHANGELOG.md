@@ -23,6 +23,9 @@
   필드(`latest_water_quality`·`upcoming_index_forecasts`·`latest_weather`)는 모델
   기본값(null/[])으로 유지해 응답 계약은 불변이다. FastAPI가 미지 query 파라미터를
   무시하므로 옛 caller가 옵션을 보내도 정상 200(no 500).
+- **FIXED**: 구현 사양 `docs/architecture/public-views-api.md`에서도 삭제된 두 query
+  행을 제거했다. PinVi route·Python/TS client·vendored OpenAPI의 소비자 clean-cut은
+  별도 PinVi 후속 PR에서 함께 반영한다.
 - **SECURITY**: admin auth-event write(`POST /v1/admin/auth-events`)의 감사 actor를
   `body.actor or context.actor`에서 인증 principal(`context.actor`)만으로 좁혔다(ADR-066
   D-2, F-4). request body의 `actor`는 신뢰 경계 안에서 위조 가능했다. 본 slice는
