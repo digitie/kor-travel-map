@@ -558,11 +558,8 @@ def _ended_notice_hidden_sql(feature_alias: str) -> str:
     {feature_alias}.kind <> 'notice'
     OR ({feature_alias}.detail ->> 'valid_end_time') IS NULL
     OR CASE
-         WHEN pg_input_is_valid(
-                {feature_alias}.detail ->> 'valid_end_time', 'timestamptz'
-              )
-         THEN CAST({feature_alias}.detail ->> 'valid_end_time' AS timestamptz)
-              > now()
+         WHEN pg_input_is_valid({feature_alias}.detail ->> 'valid_end_time', 'timestamptz')
+         THEN CAST({feature_alias}.detail ->> 'valid_end_time' AS timestamptz) > now()
          ELSE false
        END
   )

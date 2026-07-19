@@ -5,7 +5,7 @@
 
 ## [Unreleased]
 
-### notice timestamp 방어적 cast (2026-07-19, ADR-073 T-VN-06)
+### notice timestamp 방어적 cast (2026-07-19, report §2 D-9-7 (+ T-VN-06 row))
 
 - **FIXED**: `detail->>'valid_end_time'`이 오염된 notice 한 행이 공개 read
   전체(bbox/search/nearby/in-area/cluster/counts/notice detail·batch)를 500으로

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from kortravelmap.infra import feature_repo
+from kortravelmap.infra import admin_feature_repo, feature_repo
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -187,3 +187,39 @@ async def test_notice_ids_and_detail_visibility_fail_closed(
         )
         row = await feature_repo.get_public_feature_row(migrated_session, corrupted_id)
         assert row is not None  # 예외 없이 조회되고, 가시성 판정만 제외한다.
+
+
+async def test_admin_notice_list_survives_corrupted_timestamp(
+    migrated_session: AsyncSession,
+) -> None:
+    """admin notice 목록(요청 경로)도 같은 방어적 cast로 오염 row에 500 없이 동작한다.
+
+    운영자가 오염 row를 바로 찾아야 하는 화면이라 fold-in했다(T-VN-06 리뷰 S3).
+    - include_ended=False(기본): pg_input_is_valid 가드 + fail-closed로 오염
+      notice를 종료된 것처럼 제외한다. 정상 규칙(미래/없음 활성, 과거 종료)
+      회귀 불변.
+    - include_ended=True(감사): include_ended 단락으로 cast 자체를 건너뛰어
+      오염 notice도 500 없이 전부 반환한다.
+    """
+    ids = await _seed_notice_matrix(migrated_session)
+    # 이 fixture의 notice는 source_link/계보가 없어 admin latest 필터와 무관하다.
+
+    default_page = await admin_feature_repo.list_admin_features(
+        migrated_session, kinds=["notice"], statuses=None, page_size=100
+    )
+    default_ids = {item.feature_id for item in default_page.items}
+    seeded_notice_ids = {fid for s, fid in ids.items() if s != "place"}
+    assert default_ids & seeded_notice_ids == {
+        ids[s] for s in _EXPECTED_VISIBLE_NOTICES
+    }
+
+    audit_page = await admin_feature_repo.list_admin_features(
+        migrated_session,
+        kinds=["notice"],
+        statuses=None,
+        include_ended=True,
+        page_size=100,
+    )
+    audit_ids = {item.feature_id for item in audit_page.items}
+    # 감사 목록은 오염 4종 + 정상/과거까지 seeded notice 전부 포함(500 없음).
+    assert seeded_notice_ids <= audit_ids
