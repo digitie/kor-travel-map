@@ -21,6 +21,7 @@ from kortravelmap.infra.admin_feature_repo import (
     FeatureChangeRequest,
     FeatureDeactivateResult,
     FeatureOverride,
+    FeaturePreconditionFailed,
     FeatureStateConflict,
 )
 
@@ -347,7 +348,12 @@ def test_get_admin_feature_detail_returns_linked_operational_data(
         }
         return {"feature-1": ()}
 
+    async def _revision(_session: Any, feature_id: str) -> int:
+        assert feature_id == "feature-1"
+        return 7
+
     monkeypatch.setattr(router_mod, "get_admin_feature_detail", _detail)
+    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
     monkeypatch.setattr(
         router_mod.curation_repo,
         "list_curation_items_by_feature_ids",
@@ -357,6 +363,7 @@ def test_get_admin_feature_detail_returns_linked_operational_data(
     response = client.get("/v1/admin/features/feature-1")
 
     assert response.status_code == 200
+    assert response.headers["ETag"] == '"7"'
     body = response.json()
     assert body["data"]["feature"]["feature_id"] == "feature-1"
     assert body["data"]["feature"]["raw_refs"] == [{"source": "fixture"}]
@@ -377,10 +384,10 @@ def test_get_admin_feature_detail_returns_404(
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
-    async def _detail(_session: Any, feature_id: str) -> None:
+    async def _revision(_session: Any, feature_id: str) -> None:
         assert feature_id == "missing"
 
-    monkeypatch.setattr(router_mod, "get_admin_feature_detail", _detail)
+    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
 
     response = client.get("/v1/admin/features/missing")
 
@@ -497,6 +504,7 @@ def test_patch_feature_request_can_apply_immediately(
         assert kwargs["feature_id"] == "feature-1"
         assert kwargs["payload"] == {"name": "수정된 장소"}
         assert kwargs["review_mode"] == "immediate"
+        assert kwargs["expected_row_revision"] == 4  # If-Match row_revision
         return _change_request(
             feature_id=kwargs["feature_id"],
             action=kwargs["action"],
@@ -506,10 +514,16 @@ def test_patch_feature_request_can_apply_immediately(
             applied_at=datetime(2026, 6, 3, tzinfo=UTC),
         )
 
+    async def _revision(_session: Any, feature_id: str) -> int:
+        assert feature_id == "feature-1"
+        return 5  # 적용 후 trigger가 4→5로 증가
+
     monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
+    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
 
     response = client.patch(
         "/v1/admin/features/feature-1",
+        headers={"If-Match": '"4"'},
         json={
             "name": "수정된 장소",
             "reason": "사용자 수정",
@@ -517,6 +531,7 @@ def test_patch_feature_request_can_apply_immediately(
     )
 
     assert response.status_code == 200
+    assert response.headers["ETag"] == '"5"'
     assert response.json()["data"]["request"]["status"] == "applied"
     assert session.begin_count == 1
 
@@ -534,6 +549,7 @@ def test_delete_feature_request_submits_soft_delete(
         assert kwargs["feature_id"] == "feature-1"
         assert kwargs["payload"] == {}
         assert kwargs["reason"] == "사용자 삭제 요청"
+        assert kwargs["expected_row_revision"] == 9
         return _change_request(
             feature_id=kwargs["feature_id"],
             action=kwargs["action"],
@@ -541,15 +557,22 @@ def test_delete_feature_request_submits_soft_delete(
             reason=kwargs["reason"],
         )
 
+    async def _revision(_session: Any, feature_id: str) -> int:
+        assert feature_id == "feature-1"
+        return 10
+
     monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
+    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
 
     response = client.request(
         "DELETE",
         "/v1/admin/features/feature-1",
+        headers={"If-Match": "9"},
         json={"reason": "사용자 삭제 요청"},
     )
 
     assert response.status_code == 200
+    assert response.headers["ETag"] == '"10"'
     assert response.json()["data"]["request"]["action"] == "delete"
     assert session.begin_count == 1
 
@@ -569,12 +592,17 @@ def test_approve_and_reject_feature_change_requests(
     ) -> FeatureChangeRequest:
         assert request_id == "change-1"
         assert kwargs["operator"] == "local-dev"  # T-VN-20: principal, not body operator
+        assert kwargs["expected_row_revision"] == 2  # If-Match row_revision
         return _change_request(
             request_id=request_id,
             state="applied",
             reviewed_by=kwargs["operator"],
             applied_at=datetime(2026, 6, 3, tzinfo=UTC),
         )
+
+    async def _revision(_session: Any, feature_id: str) -> int:
+        assert feature_id == "feature-1"
+        return 3
 
     async def _reject(
         _session: Any,
@@ -593,9 +621,11 @@ def test_approve_and_reject_feature_change_requests(
 
     monkeypatch.setattr(router_mod, "apply_feature_change_request", _apply)
     monkeypatch.setattr(router_mod, "reject_feature_change_request", _reject)
+    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
 
     approve = client.post(
         "/v1/admin/features/change-requests/change-1/approve",
+        headers={"If-Match": '"2"'},
         json={"operator": "reviewer"},
     )
     reject = client.post(
@@ -604,10 +634,85 @@ def test_approve_and_reject_feature_change_requests(
     )
 
     assert approve.status_code == 200
+    assert approve.headers["ETag"] == '"3"'
     assert approve.json()["data"]["request"]["status"] == "applied"
     assert reject.status_code == 200
     assert reject.json()["data"]["request"]["status"] == "rejected"
     assert session.begin_count == 2
+
+
+@pytest.mark.unit
+def test_patch_feature_without_if_match_returns_428(client: TestClient) -> None:
+    response = client.patch(
+        "/v1/admin/features/feature-1",
+        json={"name": "x", "reason": "r"},
+    )
+    assert response.status_code == 428
+    assert response.json()["code"] == "PRECONDITION_REQUIRED"
+
+
+@pytest.mark.unit
+def test_delete_feature_with_malformed_if_match_returns_422(
+    client: TestClient,
+) -> None:
+    response = client.request(
+        "DELETE",
+        "/v1/admin/features/feature-1",
+        headers={"If-Match": "not-a-revision"},
+        json={"reason": "r"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_patch_feature_stale_if_match_returns_412(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    async def _submit(_session: Any, **kwargs: Any) -> FeatureChangeRequest:
+        raise FeaturePreconditionFailed(
+            feature_id=kwargs["feature_id"], expected=3, current=8
+        )
+
+    monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
+
+    response = client.patch(
+        "/v1/admin/features/feature-1",
+        headers={"If-Match": '"3"'},
+        json={"name": "x", "reason": "r"},
+    )
+    assert response.status_code == 412
+    body = response.json()
+    assert body["code"] == "PRECONDITION_FAILED"
+    assert "current=8" in body["detail"]
+
+
+@pytest.mark.unit
+def test_get_feature_detail_conditional_get_returns_304(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    async def _revision(_session: Any, feature_id: str) -> int:
+        assert feature_id == "feature-1"
+        return 12
+
+    async def _detail(_session: Any, feature_id: str) -> AdminFeatureDetail:
+        raise AssertionError("304 경로는 detail을 조회하지 않아야 한다")
+
+    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
+    monkeypatch.setattr(router_mod, "get_admin_feature_detail", _detail)
+
+    response = client.get(
+        "/v1/admin/features/feature-1",
+        headers={"If-None-Match": '"12"'},
+    )
+    assert response.status_code == 304
+    assert response.headers["ETag"] == '"12"'
+    assert response.content == b""
 
 
 @pytest.mark.unit

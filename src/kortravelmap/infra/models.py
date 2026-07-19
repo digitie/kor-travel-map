@@ -179,6 +179,7 @@ class FeatureRow(Base):
             name="ck_features_data_origin",
         ),
         CheckConstraint("data_version >= 0", name="ck_features_data_version"),
+        CheckConstraint("row_revision >= 1", name="ck_features_row_revision"),
         CheckConstraint(
             "user_change_kind IS NULL OR user_change_kind IN ('add','update','delete')",
             name="ck_features_user_change_kind",
@@ -358,6 +359,14 @@ class FeatureRow(Base):
         Integer,
         nullable=False,
         server_default=text("0"),
+    )
+    # T-VN-13(D-10-3): server-owned monotonic row revision. 모든 UPDATE에서
+    # feature.force_features_row_revision() 트리거가 +1 강제 — If-Match/ETag 낙관적
+    # 동시성 validator. provider-owned data_version(위)과 별개다.
+    row_revision: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("1"),
     )
     user_change_kind: Mapped[str | None] = mapped_column(Text)
     user_change_status: Mapped[str | None] = mapped_column(Text)

@@ -24,6 +24,21 @@
   한 곳에 정의해 경량/geometry/cluster 3변형의 이중 SQL 복제를 제거했다(D-9-4). weather/price
   LATERAL과 인덱스/모델은 건드리지 않았다(T-VN-38/T-VN-18 소유).
 
+### Feature row_revision + If-Match/ETag 낙관적 동시성 (2026-07-19, D-10-3/D-9-8 T-VN-13)
+
+- **ADDED**: migration 0062가 `feature.features`에 server-owned monotonic `row_revision`
+  (bigint, DEFAULT 1)과 이를 모든 UPDATE에서 강제 증가시키는 `BEFORE UPDATE` 트리거를
+  도입한다(0058 poi lock_version 패턴). `ADD COLUMN ... DEFAULT`는 PG11+ 메타데이터 전용,
+  CHECK는 NOT VALID→VALIDATE로 online-safe. #727 provider-refresh policy revision과는
+  별개 자원이다(합치지 않음).
+- **ADDED**: admin feature detail GET이 `ETag: "<row_revision>"`를 반환하고,
+  `If-None-Match`가 일치하면 `304 Not Modified`(본문 없음)로 응답한다(조건부 GET).
+- **CHANGED (breaking)**: admin feature correction PATCH/DELETE와 change-request approve가
+  `If-Match: "<row_revision>"`를 **필수**로 요구한다 — 누락 `428`, strong ETag 형식 위반
+  `422`, 현재 revision과 불일치 `412`. 성공 시 새 `ETag`를 반환한다. 낙관적 동시성으로
+  stale overwrite를 차단한다. 기존 caller(admin frontend·PinVi)는 If-Match 전송을 추가해야
+  한다(별도 follow-up).
+
 ### 중복 GiST 제거 + weather source-record index (2026-07-19, D-12-3 T-VN-18)
 
 - **CHANGED**: `feature.features`의 geometry 컬럼(coord/coord_5179/geom)에 geoalchemy2가

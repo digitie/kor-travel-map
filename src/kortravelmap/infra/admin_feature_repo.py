@@ -54,6 +54,7 @@ __all__ = [
     "FeatureStateConflict",
     "FeatureOverride",
     "FeatureChangeConflict",
+    "FeaturePreconditionFailed",
     "FeatureChangeRequest",
     "deactivate_feature",
     "submit_feature_change_request",
@@ -61,6 +62,7 @@ __all__ = [
     "reject_feature_change_request",
     "list_feature_change_requests",
     "get_admin_feature_detail",
+    "get_feature_row_revision",
     "get_dedup_review_detail",
     "get_enrichment_review_detail",
     "list_admin_features",
@@ -343,6 +345,23 @@ class FeatureChangeConflict(ValueError):
                 reason = f"{reason}, user_deleted_at={user_deleted_at.isoformat()}"
             message = f"feature {feature_id!r}는 {action!r} 적용 불가: {reason}"
         super().__init__(message)
+
+
+class FeaturePreconditionFailed(Exception):
+    """If-Match row_revision이 현재 feature 행과 불일치할 때 발생 (T-VN-13).
+
+    ``FeatureChangeConflict``(상태 충돌 → 409)와 구분되는 낙관적 동시성 실패로,
+    라우터가 412 Precondition Failed로 사상한다.
+    """
+
+    def __init__(self, *, feature_id: str, expected: int, current: int) -> None:
+        self.feature_id = feature_id
+        self.expected = expected
+        self.current = current
+        super().__init__(
+            f"feature {feature_id!r} If-Match 불일치: "
+            f"expected row_revision={expected}, current={current}"
+        )
 
 
 @dataclass(frozen=True)
@@ -1750,6 +1769,19 @@ SET data_version = :version,
 WHERE feature_id = :feature_id
 """
 
+_GET_FEATURE_ROW_REVISION_SQL: Final[str] = """
+SELECT row_revision
+FROM feature.features
+WHERE feature_id = :feature_id
+"""
+
+_LOCK_FEATURE_ROW_REVISION_SQL: Final[str] = """
+SELECT row_revision
+FROM feature.features
+WHERE feature_id = :feature_id
+FOR UPDATE
+"""
+
 _INSERT_USER_VERSION_FROM_FEATURE_SQL: Final[str] = """
 INSERT INTO feature.feature_versions (
     feature_id, version, origin, change_kind, payload, request_id, created_by
@@ -2035,6 +2067,42 @@ async def _apply_change(
     )
 
 
+async def get_feature_row_revision(
+    session: AsyncSession, feature_id: str
+) -> int | None:
+    """feature의 현재 server-owned ``row_revision``. 없으면 None (T-VN-13 ETag)."""
+    revision = (
+        await session.execute(
+            text(_GET_FEATURE_ROW_REVISION_SQL),
+            {"feature_id": feature_id},
+        )
+    ).scalar_one_or_none()
+    return int(revision) if revision is not None else None
+
+
+async def _assert_feature_revision(
+    session: AsyncSession, feature_id: str, expected: int
+) -> None:
+    """If-Match row_revision을 현재 행과 대조한다 (T-VN-13).
+
+    행을 ``FOR UPDATE``로 잠가 검사~변경 사이 경합을 막는다. feature가 없으면
+    (하위 not-found 경로가 404를 내도록) 통과시키고, revision이 어긋나면
+    ``FeaturePreconditionFailed``를 던진다(라우터가 412로 사상).
+    """
+    current = (
+        await session.execute(
+            text(_LOCK_FEATURE_ROW_REVISION_SQL),
+            {"feature_id": feature_id},
+        )
+    ).scalar_one_or_none()
+    if current is None:
+        return
+    if int(current) != expected:
+        raise FeaturePreconditionFailed(
+            feature_id=feature_id, expected=expected, current=int(current)
+        )
+
+
 async def submit_feature_change_request(
     session: AsyncSession,
     *,
@@ -2044,8 +2112,16 @@ async def submit_feature_change_request(
     review_mode: FeatureChangeReviewMode,
     reason: str | None,
     requested_by: str | None,
+    expected_row_revision: int | None = None,
 ) -> FeatureChangeRequest:
-    """feature add/update/delete 요청을 만들고 설정에 따라 즉시 적용한다."""
+    """feature add/update/delete 요청을 만들고 설정에 따라 즉시 적용한다.
+
+    ``expected_row_revision``(If-Match)이 주어지면 update/delete 대상 행의 현재
+    revision을 제출 시점에 대조한다(불일치 → ``FeaturePreconditionFailed``). add는
+    기존 행이 없으므로 대조하지 않는다.
+    """
+    if expected_row_revision is not None and action in ("update", "delete"):
+        await _assert_feature_revision(session, feature_id, expected_row_revision)
     initial_state = "applied" if review_mode == "immediate" else "pending"
     row = (
         await session.execute(
@@ -2079,8 +2155,13 @@ async def apply_feature_change_request(
     request_id: str,
     *,
     operator: str | None,
+    expected_row_revision: int | None = None,
 ) -> FeatureChangeRequest | None:
-    """pending feature change request를 승인하고 적용한다."""
+    """pending feature change request를 승인하고 적용한다.
+
+    ``expected_row_revision``(If-Match)이 주어지면 적용 직전에 대상 feature 행의
+    현재 revision을 대조한다(불일치 → ``FeaturePreconditionFailed`` → 412).
+    """
     row = (
         await session.execute(
             text(_GET_CHANGE_REQUEST_FOR_UPDATE_SQL),
@@ -2090,6 +2171,10 @@ async def apply_feature_change_request(
     if row is None:
         return None
     request = _feature_change_row(row)
+    if expected_row_revision is not None:
+        await _assert_feature_revision(
+            session, request.feature_id, expected_row_revision
+        )
     if request.state != "pending":
         raise FeatureChangeConflict(
             feature_id=request.feature_id,

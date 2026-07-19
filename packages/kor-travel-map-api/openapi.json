@@ -24404,6 +24404,15 @@
               "title": "Request Id",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성).",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -24425,7 +24434,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 feature의 server-owned row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "content": {
@@ -24447,6 +24464,16 @@
             },
             "description": "승인 불가"
           },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match row_revision 불일치"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -24455,7 +24482,17 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "If-Match가 row_revision strong ETag가 아님"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
@@ -26131,6 +26168,15 @@
               "title": "Feature Id",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성).",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -26152,7 +26198,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 feature의 server-owned row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "content": {
@@ -26174,6 +26228,16 @@
             },
             "description": "삭제 불가"
           },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match row_revision 불일치"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -26182,7 +26246,17 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "If-Match가 row_revision strong ETag가 아님"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
@@ -26216,6 +26290,15 @@
               "title": "Feature Id",
               "type": "string"
             }
+          },
+          {
+            "description": "이전 ETag(row_revision)와 같으면 304로 응답한다.",
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -26227,7 +26310,18 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 feature의 server-owned row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "If-None-Match row_revision 일치 (본문 없음)"
           },
           "404": {
             "content": {
@@ -26281,6 +26375,15 @@
               "title": "Feature Id",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성).",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -26302,7 +26405,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 feature의 server-owned row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "content": {
@@ -26324,6 +26435,16 @@
             },
             "description": "변경 불가"
           },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match row_revision 불일치"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -26332,7 +26453,17 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "If-Match가 row_revision strong ETag가 아님"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
