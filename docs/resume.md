@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — PR #773 2차 적대 리뷰 blocker 구현 완료
+
+- 경계 geometry의 cluster 귀속을 저장 canonical 행정코드 기준 feature당 1회로 확정하고
+  문서/교차 bbox fixture에 고정했다. marker 계산은 실제 bbox 교차 부분을 유지한다.
+- 공유 `ClusterUnit`을 기준으로 `meta.cluster.cluster_unit`을 필수 enum,
+  `drill_down_unit`을 필수 enum|null로 만들고 OpenAPI/TypeScript 산출물을 갱신했다.
+- geom-only 대표 분포의 planner-default partial GiST EXPLAIN 회귀까지 추가했다.
+- **다음 한 작업**: 같은 적대 리뷰어가 blocker를 재검토한 뒤 승인되면 전체 테스트 게이트를
+  실행한다. 재리뷰 전 테스트는 사용자 지시에 따라 미실행 상태다.
+
 ## 2026-07-19 (codex) — Agent A PR #763 심층 리뷰 후속 보완 완료
 
 - route/area exact predicate의 centroid 우회를 차단하고 cluster/items 공간 후보를

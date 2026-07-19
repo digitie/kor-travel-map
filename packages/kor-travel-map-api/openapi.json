@@ -4619,19 +4619,23 @@
         "description": "Map clustering metadata.",
         "properties": {
           "cluster_unit": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "description": "현재 응답의 행정구역 cluster 단위.",
+            "enum": [
+              "sido",
+              "sigungu",
+              "eupmyeondong"
             ],
-            "title": "Cluster Unit"
+            "title": "Cluster Unit",
+            "type": "string"
           },
           "drill_down_unit": {
             "anyOf": [
               {
+                "enum": [
+                  "sido",
+                  "sigungu",
+                  "eupmyeondong"
+                ],
                 "type": "string"
               },
               {
@@ -4642,6 +4646,10 @@
             "title": "Drill Down Unit"
           }
         },
+        "required": [
+          "cluster_unit",
+          "drill_down_unit"
+        ],
         "title": "ClusterMeta",
         "type": "object"
       },

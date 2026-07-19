@@ -10,7 +10,7 @@ F-8 / ADR-073 D-9-3 검증:
    positive를 exact ``ST_Intersects``로 제거한다 — MBR은 겹치지만 실제 geometry가
    envelope와 교차하지 않는 route는 두 변형 모두에서 제외된다.
 
-최소 seed(6 feature)만 사용한다(디스크 제약).
+기능 회귀는 최소 seed만, planner 회귀는 geometry-only 대표 분포를 사용한다.
 """
 
 from __future__ import annotations
@@ -272,3 +272,64 @@ async def test_clusters_share_items_exact_spatial_universe(
     # 요청 bbox 안에 남는다.
     assert _BBOX["min_lon"] <= clusters[0]["lon"] <= _BBOX["max_lon"]
     assert _BBOX["min_lat"] <= clusters[0]["lat"] <= _BBOX["max_lat"]
+
+
+async def test_cross_boundary_geometry_uses_stored_canonical_code_once(
+    migrated_session: AsyncSession,
+) -> None:
+    """경계를 가로지르는 geometry는 저장 canonical code 하나에만 귀속된다.
+
+    두 feature 모두 같은 bbox를 가로지르지만 저장된 행정코드는 서로 다르다. geometry
+    교차 영역을 기준으로 양쪽 cluster에 복제하지 않고, 선택 단위의 저장 코드에 정확히
+    한 번씩 집계해 cluster 합계와 code 보강된 items 수를 같게 유지한다.
+    """
+    await _ins_geom(
+        migrated_session,
+        feature_id="ib:route-stored-seoul",
+        kind="route",
+        wkt="LINESTRING(126.9 37.03, 127.2 37.03)",
+        sido_code="11",
+        sigungu_code="11110",
+        legal_dong_code="1111010100",
+    )
+    await _ins_geom(
+        migrated_session,
+        feature_id="ib:area-stored-busan",
+        kind="area",
+        wkt=(
+            "POLYGON((126.95 36.95,127.15 36.95,127.15 37.15,"
+            "126.95 37.15,126.95 36.95))"
+        ),
+        sido_code="26",
+        sigungu_code="26110",
+        legal_dong_code="2611010100",
+    )
+    await migrated_session.flush()
+
+    items = await feature_repo.features_in_bbox(
+        migrated_session,
+        **_BBOX,
+        include_geometry=False,
+        price_stale_hide_days=None,
+    )
+    assert {row["feature_id"] for row in items} == {
+        "ib:route-stored-seoul",
+        "ib:area-stored-busan",
+    }
+
+    expected_by_unit = {
+        "sido": {"11": 1, "26": 1},
+        "sigungu": {"11110": 1, "26110": 1},
+        "eupmyeondong": {"1111010100": 1, "2611010100": 1},
+    }
+    for unit, expected in expected_by_unit.items():
+        clusters = await feature_repo.cluster_features_in_bbox(
+            migrated_session,
+            **_BBOX,
+            cluster_unit=unit,
+        )
+        actual = {
+            row["cluster_key"]: row["feature_count"] for row in clusters
+        }
+        assert actual == expected
+        assert sum(actual.values()) == len(items)

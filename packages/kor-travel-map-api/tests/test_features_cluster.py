@@ -7,8 +7,10 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from kortravelmap.api.app import create_app
+from kortravelmap.api.response import ClusterMeta
 from kortravelmap.api.settings import ApiSettings
 
 _BBOX = {"min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38}
@@ -26,6 +28,36 @@ def _fake_session(client: TestClient) -> None:
         yield object()
 
     client.app.dependency_overrides[get_session] = _fs
+
+
+@pytest.mark.unit
+def test_cluster_meta_requires_shared_enum_contract() -> None:
+    """cluster meta가 있으면 현재 단위는 필수이고 drill-down은 enum|null이다."""
+    schema = ClusterMeta.model_json_schema()
+
+    assert set(schema["required"]) == {"cluster_unit", "drill_down_unit"}
+    assert schema["properties"]["cluster_unit"]["enum"] == [
+        "sido",
+        "sigungu",
+        "eupmyeondong",
+    ]
+    assert schema["properties"]["drill_down_unit"]["anyOf"] == [
+        {"enum": ["sido", "sigungu", "eupmyeondong"], "type": "string"},
+        {"type": "null"},
+    ]
+    assert ClusterMeta(
+        cluster_unit="eupmyeondong",
+        drill_down_unit=None,
+    ).model_dump() == {
+        "cluster_unit": "eupmyeondong",
+        "drill_down_unit": None,
+    }
+    with pytest.raises(ValidationError):
+        ClusterMeta.model_validate({"drill_down_unit": "sigungu"})
+    with pytest.raises(ValidationError):
+        ClusterMeta.model_validate(
+            {"cluster_unit": "sido", "drill_down_unit": "ri"}
+        )
 
 
 @pytest.mark.unit

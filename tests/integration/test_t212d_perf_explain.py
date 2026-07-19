@@ -350,6 +350,64 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
     await session.execute(text("ANALYZE"))
 
 
+async def _seed_geom_only_perf_data(
+    session: AsyncSession,
+    *,
+    n: int = 3200,
+) -> None:
+    """coord 없이 geometry만 가진 route/area의 대표 planner 분포를 만든다."""
+    await session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, coord, geom, status,
+                sido_code, sigungu_code, legal_dong_code, created_at, updated_at
+            )
+            SELECT
+                'perf:geom:' || lpad(g::text, 6, '0'),
+                CASE WHEN g % 2 = 0 THEN 'route' ELSE 'area' END,
+                'geometry-only feature ' || g::text,
+                '02000000',
+                NULL,
+                CASE
+                  WHEN g % 2 = 0 THEN x_extension.ST_SetSRID(
+                    x_extension.ST_MakeLine(
+                      x_extension.ST_MakePoint(
+                        126.0 + ((g % 1000)::float * 0.002),
+                        36.0 + ((g % 800)::float * 0.002)
+                      ),
+                      x_extension.ST_MakePoint(
+                        126.0004 + ((g % 1000)::float * 0.002),
+                        36.0004 + ((g % 800)::float * 0.002)
+                      )
+                    ),
+                    4326
+                  )
+                  ELSE x_extension.ST_SetSRID(
+                    x_extension.ST_MakeEnvelope(
+                      126.0 + ((g % 1000)::float * 0.002),
+                      36.0 + ((g % 800)::float * 0.002),
+                      126.0004 + ((g % 1000)::float * 0.002),
+                      36.0004 + ((g % 800)::float * 0.002)
+                    ),
+                    4326
+                  )
+                END,
+                'active',
+                '11',
+                '11110',
+                '1111010100',
+                now(),
+                now()
+            FROM generate_series(1, :n) AS g
+            """
+        ),
+        {"n": n},
+    )
+    await session.flush()
+    await session.execute(text("ANALYZE feature.features"))
+
+
 async def _explain_json(
     session: AsyncSession,
     sql: str,
@@ -537,6 +595,32 @@ async def test_t212d_cluster_hot_reads_use_spatial_index_without_mv(
     )
     _assert_uses_index(representative, *_COORD_SPATIAL_INDEXES)
     _assert_no_seq_scan_on(representative, "features")
+
+
+async def test_t212d_geom_only_cluster_uses_partial_gist_representatively(
+    migrated_session: AsyncSession,
+) -> None:
+    """coord 없는 route/area cluster도 실제 planner에서 geom partial GiST를 쓴다."""
+    await _seed_geom_only_perf_data(migrated_session)
+
+    plan = await _explain_json(
+        migrated_session,
+        _CLUSTER_BBOX_SQL_BY_UNIT["sigungu"],
+        {
+            "min_lon": 126.975,
+            "min_lat": 36.975,
+            "max_lon": 126.985,
+            "max_lat": 36.985,
+            "kinds": ["route", "area"],
+            "categories": None,
+            "providers": None,
+            "limit": 200,
+        },
+        force_index=False,
+    )
+
+    _assert_uses_index(plan, "idx_features_geom_gist")
+    _assert_no_seq_scan_on(plan, "features")
 
 
 async def test_t212d_cluster_provider_filter_uses_spatial_index(

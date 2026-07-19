@@ -43,7 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_frontend, require_service_token
 from kortravelmap.api.db import get_session
-from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.response import ClusterUnit, Meta, make_meta
 from kortravelmap.api.routers.curations import CurationItemView
 
 __all__ = [
@@ -260,7 +260,6 @@ class FeatureObservationHistoryResponse(BaseModel):
     meta: Meta
 
 
-ClusterUnit = Literal["sido", "sigungu", "eupmyeondong"]
 InBoundsMode = Literal["items", "clusters"]
 
 # cluster drill-down 순서 (ADR-073 D-9-2). 각 rollup 단위에서 한 단계 더 확대(zoom-in)

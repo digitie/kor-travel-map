@@ -19,12 +19,14 @@
   (ADR-012 — partial GiST `idx_features_geom_gist`가 `&&`로 구동됨).
 - **FIXED**: cluster와 items가 같은 exact 공간 후보 universe를 사용한다. geometry가 bbox와
   교차하지만 centroid가 밖인 route/area도 cluster count에 포함하고, 대표 marker는 bbox와
-  실제 교차한 geometry 부분 위에서 계산한다.
+  실제 교차한 geometry 부분 위에서 계산한다. 행정 경계를 가로지르는 geometry의 cluster
+  귀속은 선택 단위의 저장 canonical 행정코드 하나로 고정해 feature당 1회만 집계한다.
 - **CHANGED (계약)**: in-bounds 응답 `data`가 지도 완결성 계약을 명시한다 — `mode`(items|
   clusters), `truncated`(bool, F-8 silent truncation 해소), `coverage`(returned/limit),
   cluster 모드의 결정적 `cluster_key`. view 해석 metadata인 `cluster_unit`과
   `drill_down_unit`은 ADR-048 envelope 불변식대로 `meta.cluster`에만 둔다. truncation은
-  `max_items+1` 조회로 명시 판정한다.
+  `max_items+1` 조회로 명시 판정한다. `meta.cluster`가 존재할 때 `cluster_unit`은 필수
+  enum이고 `drill_down_unit`은 필수 enum|null인 strict OpenAPI/TypeScript 계약이다.
 - **INTERNAL**: bbox 후보 술어를 단일화했다 — 공통 attribute 필터(kind/category/provider)를
   `_bbox_attribute_filter_sql`로, 공통 공간 후보 술어를 `_bbox_candidate_predicate_sql`로
   한 곳에 정의해 경량/geometry/cluster 3변형의 이중 SQL 복제를 제거했다(D-9-4). weather/price

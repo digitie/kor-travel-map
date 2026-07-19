@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar, Token
 from time import perf_counter
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import Request
@@ -11,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
     "ClusterMeta",
+    "ClusterUnit",
     "Meta",
     "OffsetMeta",
     "OffsetPageMeta",
@@ -57,14 +59,18 @@ class OffsetPageMeta(BaseModel):
     total: int | None = None
 
 
+ClusterUnit = Literal["sido", "sigungu", "eupmyeondong"]
+
+
 class ClusterMeta(BaseModel):
     """Map clustering metadata."""
 
     model_config = ConfigDict(extra="forbid")
 
-    cluster_unit: str | None = None
-    drill_down_unit: str | None = Field(
-        default=None,
+    cluster_unit: ClusterUnit = Field(
+        description="현재 응답의 행정구역 cluster 단위.",
+    )
+    drill_down_unit: ClusterUnit | None = Field(
         description=(
             "한 단계 확대 시 요청할 다음 cluster_unit. eupmyeondong 다음은 "
             "개별 feature이므로 null."
@@ -169,8 +175,8 @@ def make_meta(
     page_size: int | None = None,
     next_cursor: str | None = None,
     total: int | None = None,
-    cluster_unit: str | None = None,
-    cluster_drill_down_unit: str | None = None,
+    cluster_unit: ClusterUnit | None = None,
+    cluster_drill_down_unit: ClusterUnit | None = None,
 ) -> Meta:
     """Build common response ``meta``.
 

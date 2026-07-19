@@ -1078,9 +1078,12 @@ LIMIT :limit
 """
 
 
-# bbox 내 region rollup 클러스터링 (T-213c). cluster_unit → 고정 행정코드 컬럼
-# (allowlist — SQL injection 불가). items와 같은 exact 후보 술어를 사용해 mode 전환이
-# 공간 후보 universe를 바꾸지 않게 한다(ADR-073 D-9-2·D-9-4). point/legacy 후보의
+# bbox 내 region rollup 클러스터링 (T-213c). cluster_unit → 고정 canonical 행정코드
+# 컬럼(allowlist — SQL injection 불가). 경계를 가로지르는 geometry도 선택 단위의 저장
+# 코드 하나에만 귀속한다. 공간 교차 지점별로 여러 cluster에 복제하지 않으므로 cluster
+# feature_count 합계가 code 보강된 items 후보 수와 일치한다. items와 같은 exact 후보
+# 술어를 사용해 mode 전환이 공간 후보 universe를 바꾸지 않게 한다
+# (ADR-073 D-9-2·D-9-4). point/legacy 후보의
 # 대표 좌표는 coord, geometry 후보의 대표 좌표는 bbox와 실제 교차한 부분 위의 점이다.
 # 따라서 centroid가 bbox 밖인 route/area도 count와 지도 마커에 빠지지 않으며 반환
 # marker는 bbox 내부에 있다. ``ST_Transform``은 술어에 넣지 않는다(ADR-012).
@@ -1145,8 +1148,10 @@ async def cluster_features_in_bbox(
     ``cluster_unit`` ∈ {sido, sigungu, eupmyeondong} → 각 region code별
     ``{cluster_key, feature_count, lon, lat}``(lon/lat=region 내 feature 평균 좌표).
     point/legacy coord와 route/area geometry의 exact 후보 술어는 items 조회와 같다.
-    geometry 후보의 대표 마커는 bbox 교차 부분 위의 점을 사용한다. region code가 없는
-    feature는 rollup할 수 없어 제외된다(주소 미보강 등).
+    geometry 후보의 대표 마커는 bbox 교차 부분 위의 점을 사용하되, cluster 귀속은
+    geometry가 걸친 공간이 아니라 저장된 canonical 행정코드 하나로 결정한다. 따라서
+    경계를 가로지르는 feature도 선택 단위에서 정확히 한 번만 집계된다. region code가
+    없는 feature는 rollup할 수 없어 제외된다(주소 미보강 등).
     """
     if cluster_unit not in _CLUSTER_BBOX_SQL_BY_UNIT:
         raise ValueError("cluster_unit must be one of sido, sigungu, eupmyeondong")

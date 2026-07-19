@@ -648,13 +648,17 @@ export interface components {
          * @description Map clustering metadata.
          */
         ClusterMeta: {
-            /** Cluster Unit */
-            cluster_unit?: string | null;
+            /**
+             * Cluster Unit
+             * @description 현재 응답의 행정구역 cluster 단위.
+             * @enum {string}
+             */
+            cluster_unit: "sido" | "sigungu" | "eupmyeondong";
             /**
              * Drill Down Unit
              * @description 한 단계 확대 시 요청할 다음 cluster_unit. eupmyeondong 다음은 개별 feature이므로 null.
              */
-            drill_down_unit?: string | null;
+            drill_down_unit: ("sido" | "sigungu" | "eupmyeondong") | null;
         };
         /**
          * ClusterSummary

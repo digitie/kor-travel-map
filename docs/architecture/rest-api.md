@@ -110,6 +110,22 @@ T-VN-51~55의 실측 결과가 채택 조건을 충족할 때만 새 결정을 �
 - 라우터별 `FeatureListMeta`/`FeatureDetailMeta`/… 중복 → 공유 `Meta` 1개 + `data` payload
   모델. 확장 시 `meta.page`만 늘리면 됨(payload 불변). 성공 응답에도 `request_id`(추적 대칭).
 
+#### 1.4.1 in-bounds cluster 귀속 규칙
+
+- `meta.cluster`가 존재하면 `cluster_unit`은 필수 enum(`sido | sigungu |
+  eupmyeondong`)이고, `drill_down_unit`도 필수 필드이되 값은 같은 enum 또는 `null`이다.
+  `eupmyeondong`의 다음 단계는 개별 feature이므로 `null`을 반환한다.
+- cluster 귀속 정본은 feature에 저장된 canonical 행정코드(`sido_code` / `sigungu_code` /
+  `legal_dong_code`)다. bbox와 교차하는 route/area가 행정 경계를 가로질러도 선택한 단위의
+  저장 코드 **하나에 정확히 한 번** 귀속하며, 교차 영역별로 여러 cluster에 분할·복제하지
+  않는다. 따라서 `feature_count` 합계는 해당 단위 코드가 보강된 items 후보 수와 일치한다.
+- geometry의 bbox 교차 부분은 지도 marker 위치를 계산할 때만 사용한다. marker 위치가
+  cluster 귀속 코드를 바꾸지 않는다. 선택 단위의 저장 코드가 `null`인 feature는 items에는
+  남지만 해당 cluster rollup에서는 제외된다.
+- 이 규칙은 본 DB가 feature-level canonical 주소 코드를 보유하고 행정경계 polygon을
+  소유하지 않는 현재 구조에 맞춘 것이다. 공간 분할 귀속이 필요해지면 경계 polygon과
+  중복 집계 의미를 별도 데이터/API 계약으로 먼저 도입해야 한다.
+
 ### 1.5 에러 — RFC 7807 `application/problem+json` (🔁 ADR-048 / T-214g)
 ```json
 { "type":"https://kor-travel-map/errors/feature-not-found", "title":"Feature not found",

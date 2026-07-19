@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — PR #773 2차 적대 리뷰 blocker 구현
+
+- 행정 경계를 가로지르는 route/area도 선택 단위의 **저장 canonical 행정코드 하나에 1회
+  귀속**하는 규칙을 `rest-api.md` 정본과 repository docstring에 명시했다. geometry 교차
+  부분은 bbox 내부 marker 위치에만 쓰고 cluster 귀속을 바꾸지 않는다.
+- `ClusterUnit` literal을 공통 response 모듈로 옮기고 `ClusterMeta`의 현재 단위를 필수
+  enum, drill-down을 필수 enum|null로 좁혔다. OpenAPI admin/user와 두 TypeScript 타입을
+  다시 생성했다.
+- 서로 다른 저장 코드를 가진 교차 route/area가 각 단계에서 정확히 한 번씩 집계되는 통합
+  fixture, strict schema 단위 회귀, coord 없는 route/area 대표 분포에서 partial geom GiST를
+  planner 기본 설정으로 고정하는 EXPLAIN 회귀를 추가했다.
+- 사용자 지시에 따라 적대적 재리뷰 전 테스트는 실행하지 않는다. 다음 단계는 같은 리뷰어의
+  blocker 재검토이며, 승인 뒤 테스트 게이트를 실행한다.
+
 ## 2026-07-19 (codex) — Agent A PR #763 심층 리뷰 후속 보완
 
 - route/area exact predicate의 centroid coord 우회를 차단하고, cluster도 items와 같은 exact
