@@ -43,7 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_frontend, require_service_token
 from kortravelmap.api.db import get_session
-from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.response import ClusterUnit, Meta, make_meta
 from kortravelmap.api.routers.curations import CurationItemView
 
 __all__ = [
@@ -260,7 +260,6 @@ class FeatureObservationHistoryResponse(BaseModel):
     meta: Meta
 
 
-ClusterUnit = Literal["sido", "sigungu", "eupmyeondong"]
 InBoundsMode = Literal["items", "clusters"]
 
 # cluster drill-down 순서 (ADR-073 D-9-2). 각 rollup 단위에서 한 단계 더 확대(zoom-in)
@@ -305,8 +304,9 @@ class PublicFeatureListData(BaseModel):
     ``mode``가 ``items``면 개별 feature(``items``), ``clusters``면 행정구역
     rollup(``clusters``)을 채운다(T-213c). ``truncated``는 결과가 ``max_items``
     상한에서 잘렸는지를 **명시**한다(F-8: silent truncation 해소). cluster 모드는
-    결정적 ``cluster_key``(행정코드)와 ``cluster_unit``/``drill_down_unit``으로
-    drill-down 경로를 노출한다.
+    결정적 ``cluster_key``(행정코드)를 노출한다. payload 해석용
+    ``cluster_unit``/``drill_down_unit``은 envelope 불변식에 따라 ``meta.cluster``에
+    일원화한다.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -314,17 +314,6 @@ class PublicFeatureListData(BaseModel):
     mode: InBoundsMode
     items: list[FeatureSummary] = []
     clusters: list[ClusterSummary] = []
-    cluster_unit: ClusterUnit | None = Field(
-        default=None,
-        description="clusters 모드에서 이 rollup의 행정구역 단위. items 모드면 null.",
-    )
-    drill_down_unit: ClusterUnit | None = Field(
-        default=None,
-        description=(
-            "한 단계 확대 시 요청할 다음 cluster_unit. clusters 모드의 "
-            "eupmyeondong·items 모드면 다음이 개별 feature이므로 null."
-        ),
-    )
     truncated: bool = Field(
         description="결과가 max_items 상한에서 잘렸으면 true(더 많은 후보 존재).",
     )
@@ -811,8 +800,6 @@ async def list_public_features_in_bounds(
                 mode="clusters",
                 items=[],
                 clusters=clusters,
-                cluster_unit=resolved_unit,
-                drill_down_unit=_CLUSTER_DRILL_DOWN[resolved_unit],
                 truncated=truncated,
                 coverage=InBoundsCoverage(returned=len(clusters), limit=max_items),
             ),
@@ -820,6 +807,7 @@ async def list_public_features_in_bounds(
                 request,
                 started_at=started_at,
                 cluster_unit=resolved_unit,
+                cluster_drill_down_unit=_CLUSTER_DRILL_DOWN[resolved_unit],
             ),
         )
     # items 모드도 max_items+1로 truncated를 판정한다. include_geometry는

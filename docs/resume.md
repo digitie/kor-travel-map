@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — PR #773 2차 적대 리뷰 blocker 구현 완료
+
+- 경계 geometry의 cluster 귀속을 저장 canonical 행정코드 기준 feature당 1회로 확정하고
+  문서/교차 bbox fixture에 고정했다. marker 계산은 실제 bbox 교차 부분을 유지한다.
+- 공유 `ClusterUnit`을 기준으로 `meta.cluster.cluster_unit`을 필수 enum,
+  `drill_down_unit`을 필수 enum|null로 만들고 OpenAPI/TypeScript 산출물을 갱신했다.
+- geom-only 대표 분포의 planner-default partial GiST EXPLAIN 회귀까지 추가했다.
+- **다음 한 작업**: 같은 적대 리뷰어가 blocker를 재검토한 뒤 승인되면 전체 테스트 게이트를
+  실행한다. 재리뷰 전 테스트는 사용자 지시에 따라 미실행 상태다.
+
+## 2026-07-19 (codex) — Agent A PR #763 심층 리뷰 후속 보완 완료
+
+- route/area exact predicate의 centroid 우회를 차단하고 cluster/items 공간 후보를
+  일치시켰으며, geometry marker를 bbox 교차 부분에서 계산한다.
+  `cluster_unit`/`drill_down_unit`은 `meta.cluster`로 일원화했다.
+- 전체 main unit 1,503건, API router 26건, PostGIS/성능/공개 회귀 34건과 OpenAPI·TS·
+  Ruff·mypy·import-linter·redaction 게이트가 통과했다.
+- **다음 한 작업**: 후속 PR을 CI green 뒤 `integration/t-vn`에 병합한다.
+
 ## 2026-07-19 (codex) — 최근 48시간 Claude PR 적대 리뷰 후속 계획
 
 - 단일 전문 리뷰어가 PR #752/#756/#757/#759/#760/#763을 심층 검토했다. #757/#759는
@@ -34,8 +53,8 @@
   view·weather/price LATERAL·인덱스/모델·write 경로 무수정. OpenAPI 재생성(drift 0).
   검증: 신규 통합 2 + perf-gate tier-1 12 + 회귀 17 = 31 green(WSL testcontainers, 최소 seed),
   router 단위 30 green, ruff/mypy --strict/lint-imports/redaction clean, C: 무증가.
-- **다음 한 작업**: 적대적 리뷰(오케스트레이터) → full gates → PR·CI green·머지. cluster가
-  geometry 후보 술어를 공유하지 않는 결정(centroid rollup 한계)은 리뷰에서 재확인 대상.
+- **후속**: 적대적 리뷰에서 cluster/items 후보 발산과 centroid coord 우회가 확인되어 위
+  보완 항목에서 수정했다.
 
 ## 2026-07-19 (claude, agent A1) — T-VN-13 Feature row_revision + If-Match/ETag 구현
 
