@@ -18,7 +18,7 @@
   기본값을 `True`→`False`(fail-closed)로 내리고, 문서화된 env alias
   `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED`가 실제로 바인딩되도록 `validation_alias`를 추가했다.
   Docker compose는 컨테이너 기본 true를 주입해 기존 배포를 유지한다(배포 전제: 파괴적 작업이
-  필요한 배포는 host env로 이 값을 유지). PR #TBD.
+  필요한 배포는 host env로 이 값을 유지). PR #793.
 
 ## vNext main 동기화 (2026-07-20, `T-VN-SYNC-01`)
 
