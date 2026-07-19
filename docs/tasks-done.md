@@ -3,6 +3,26 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## vNext 재설계 Wave 0~1 (2026-07-19, `T-VN-*`, integration/t-vn)
+
+> C7 종결 전까지 `integration/t-vn` 통합 브랜치에 누적. 각 task는 적대 리뷰(실전 결함 반영)
+> + GitHub CI + n150 CI-parity 게이트를 거쳐 병합. 세부는 각 PR diff와 journal.
+
+- [x] **T-VN-01 production fail-closed** (#740) — production profile secret 누락 시 기동 거부.
+- [x] **T-VN-02 route policy matrix + 미분류 CI gate + /metrics 경계** (#747, +#742 수렴).
+- [x] **T-VN-04 공개 predicate 단일화** (#743) — `feature.public_features` view, F-1 양방향 봉인.
+- [x] **T-VN-05 raw payload 경계 제거** (#752) — 공개 DTO raw/lineage를 operator 표면으로.
+- [x] **T-VN-06 notice 방어적 cast** (#746) — 오염 timestamp의 공개 read 500 차단.
+- [x] **T-VN-07 no-op 옵션 삭제 + actor principal 1차** (#748).
+- [x] **T-VN-13 Feature row_revision + If-Match/ETag** (본 PR) — 낙관적 동시성(428/412/304).
+- [x] **T-VN-14 지도 completeness + exact ST_Intersects** (#763) — mode/truncated/coverage.
+- [x] **T-VN-17 weather 무결성 제약** (#756) — semantic UNIQUE(CONCURRENTLY) + writer cutover.
+- [x] **T-VN-18 중복 GiST 제거 + BRIN 감사** (#759) — write 1.2~1.3x 개선 실측.
+- [x] **T-VN-19 Alembic metadata 정합 CI** (#753) — 빈 DB upgrade→check 게이트.
+- [x] **T-VN-20 principal actor 전면 전환** (#757) — body actor 위조 경로 제거.
+- [x] **T-VN-21 3단 성능 gate** (#760) — planner-default EXPLAIN·N+1·shape 회귀.
+- codex 후속 병합: #745(curation), #749(metrics), #750(beach doc), #751(manual-link, main).
+
 ## POI target causal receipt·조건부 삭제 (2026-07-18, `T-ADM-C7C`)
 
 - [x] **T-ADM-C7C — mutation과 live invalidation을 transaction-coupled receipt로 결박.** POI target

@@ -10,31 +10,22 @@
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
-- **진행 중 — 최근 48시간 Claude PR 적대 리뷰 후속**
-  - [ ] `T-VN-05R` — **public curated raw payload·lineage 우회 차단** (#765)
-  - [ ] `T-VN-17R` — **weather UNIQUE cutover writer race 봉인** (#766)
-  - [ ] `T-VN-21R` — **실데이터 benchmark cardinality·buffer 정확성** (#767)
-  - [ ] `T-VN-14R` — **cluster/items 공간 후보집합 단일화** (#768, PR #763 후속 커밋)
-- **예정 — vNext 재설계 (`T-ADM-C6c`/`C7` 종결 뒤 시작)**
-  - [ ] `T-VN-01` — **production fail-closed 전환**
-  - [ ] `T-VN-02` — **route policy matrix와 미분류 CI gate**
-  - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate**
-  - [ ] `T-VN-04` — **공개 predicate 단일화 1차**
-  - [ ] `T-VN-05` — **공개 raw payload 경계 제거**
-  - [ ] `T-VN-06` — **notice 방어적 cast**
-  - [ ] `T-VN-07` — **no-op 옵션 삭제와 principal actor 1차**
-  - [ ] `T-VN-08` — **PinVi false-broken 수정**
-  - [ ] `T-VN-11` — **service batch 5-state 계약**
-  - [ ] `T-VN-12` — **domain-owned Idempotency-Key 전개**
-  - [ ] `T-VN-13` — **Feature row revision과 If-Match**
-  - [ ] `T-VN-14` — **지도 completeness와 exact spatial predicate**
+- **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
+  - 완료·병합됨(integration/t-vn): `T-VN-01`·`02`·`04`·`05`·`06`·`07`(Wave 0) /
+    `T-VN-13`·`14`·`17`·`18`·`19`·`20`·`21`(Wave 1) — 각 적대 리뷰 반영 후 병합.
+    상세는 [`docs/tasks-done.md`](tasks-done.md)·`docs/journal.md`.
+  - 열린 KTM-내부: 아래 미완 항목만 checkbox 유지.
+  - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate** (T-VN-00/C6c cutover와 동일 배포 단위)
   - [ ] `T-VN-15` — **search total과 cursor fingerprint**
-  - [ ] `T-VN-16` — **weather batch와 부모 404**
-  - [ ] `T-VN-17` — **weather 무결성 제약**
-  - [ ] `T-VN-18` — **중복 GiST 제거와 BRIN 감사**
-  - [ ] `T-VN-19` — **Alembic metadata 정합 CI**
-  - [ ] `T-VN-20` — **principal actor 전면 전환**
-  - [ ] `T-VN-21` — **3단 성능 gate**
+  - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
+    `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
+    `T-VN-16` weather batch와 부모 404.
+- **진행 중 — Claude PR 적대 리뷰 후속(codex)**
+  - [ ] `T-VN-05R` — **public curated raw payload·lineage 우회 차단** (#765)
+  - [ ] `T-VN-17R` — **weather UNIQUE cutover writer race 봉인** (#771)
+  - [ ] `T-VN-21R` — **실데이터 benchmark cardinality·buffer 정확성** (#767)
+  - `T-VN-14R`(cluster/items 후보집합 단일화)은 PR #763에 folding 완료.
+- **예정 — vNext Wave 2 구조 전환 (Wave 1 안정화 + cutover 뒤)**
   - [ ] `T-VN-31` — **vNext target freeze**
   - [ ] `T-VN-32` — **UUID identity shadow 전환**
   - [ ] `T-VN-33` — **provider dataset 정본 전환**
