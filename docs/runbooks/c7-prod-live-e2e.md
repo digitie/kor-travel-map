@@ -129,6 +129,10 @@ active pair의 `map_source_revision`이어야 하며 PinVi API도 동일한 방�
 
 ## 3. runner 실행
 
+runner를 실행하기 전 Map exact commit은 C7P v4 reader와 모든 필수
+`integration/t-vn` producer/consumer 변경이 main에 함께 병합된 최종 commit이어야 한다.
+C7P PR만 main에 병합된 중간 commit은 배포·capture·live 실행 대상이 아니다.
+
 `/usr/local/lib/kor-travel-map/c7-runner/<exact-commit>/scripts/run-c7-prod-live-e2e.sh`의
 root-owned snapshot만 root로 실행한다. 모든 URL·credential·service 이름·
 origin hash·Git commit·manifest path·executor image ID와 destructive opt-in은 명시 env로

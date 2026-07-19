@@ -14,6 +14,10 @@
 - Map C7 attestation은 manager manifest v3과 API/PinVi image ID만 exact 허용해 v4를
   즉시 거부한다. issue #777·T-ADM-C7P는 manifest v4의 9-field pair와 네 Map
   runtime role를 동기화하는 독립 PR 단위다.
+- `T-VN-03=C6c 동일 배포`와 `C7 이후 integration→main`을 동시에 적용하면
+  순환 의존이 된다. C7P code를 main에 먼저 병합하되 활성화하지 않고,
+  main→integration 동기화→잔여 T-VN 종결→integration→main→C6c capture→C7 live
+  순서로 순환을 제거한다.
 
 ## 2026-07-19 (codex) — Agent A PR #755 심층 리뷰 후속
 

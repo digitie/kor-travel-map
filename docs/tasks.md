@@ -113,6 +113,11 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   manifest version 3은 거부하고 호환 shim을 두지 않는다. 완료 조건은 manager·Map
   두 PR의 단일 적대적 리뷰 승인, 실행형 v3/v4·image mismatch 음성 계약,
   n150의 root-owned manifest snapshot·runtime attestation 통과다.
+  병합과 활성화는 분리한다. manager·Map C7P PR은 먼저 병합하되 즉시 배포하지
+  않는다. 그 다음 latest main을 `integration/t-vn`에 병합해 C7 runner와 vNext DB/API를
+  하나의 소스 tree로 만들고, `T-VN-03`·`T-VN-15`·잔여 admin 비공개 feature
+  blocker를 닫은 뒤 integration을 main에 병합한다. 이 최종 main·PinVi·manager
+  조합으로 C6c v4 capture를 수행한 뒤에만 C7 live를 실행한다.
 
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,
