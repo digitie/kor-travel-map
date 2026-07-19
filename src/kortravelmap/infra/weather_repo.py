@@ -140,7 +140,35 @@ class WeatherAlertHistoryRow:
     payload: dict[str, Any]
 
 
-_INSERT_SQL: Final[str] = """
+# weather semantic identity tuple — alembic 0060 ``uq_weather_value_identity``
+# (NULLS NOT DISTINCT) index 컬럼과 **정확히 동일**하고, ``WeatherValue.identity()``·
+# ``make_weather_value_key`` 축과도 같다(timeline_bucket 제외). 단일 정본으로 두어
+# writer conflict target이 DB unique index와 항상 일치하도록 강제한다(T-VN-17).
+_WEATHER_IDENTITY_COLUMNS: Final[tuple[str, ...]] = (
+    "feature_id",
+    "provider",
+    "weather_domain",
+    "forecast_style",
+    "metric_key",
+    "issued_at",
+    "valid_at",
+    "observed_at",
+)
+_WEATHER_CONFLICT_TARGET: Final[str] = ", ".join(_WEATHER_IDENTITY_COLUMNS)
+
+# T-VN-17: ON CONFLICT 대상을 PK(weather_value_key 해시)에서 semantic tuple index로
+# 전환한다. 해시 PK는 tz 표기 차이로 같은 instant가 다른 key를 받는 구멍이 있었고,
+# semantic UNIQUE(NULLS NOT DISTINCT)가 참 무결성 경계다. update-wins(ADR-072):
+# 같은 semantic tuple 재적재는 최신 값/payload/source로 갱신한다(weather_value_key는
+# 기존 행 값을 유지).
+#
+# 수용된 last-writer-wins(price writer와 동일 정책): known_at 가드가 없어 순서가
+# 뒤바뀐/backfill 재적재가 더 최신 값을 덮어쓸 수 있다. in-order 수집에는 무해하고
+# price도 같은 blind upsert다(parity). backfill 역행이 문제가 되면 향후
+# ``... DO UPDATE SET ... WHERE EXCLUDED.collected_at >=
+# feature_weather_values.collected_at`` 가드를 추가하는 옵션이 있으나 지금은
+# 범위 밖(price 대칭 유지).
+_INSERT_SQL: Final[str] = f"""
 INSERT INTO feature.feature_weather_values (
     weather_value_key, feature_id, provider, weather_domain, forecast_style,
     timeline_bucket, metric_key, metric_name, source_metric_key, source_metric_name,
@@ -154,7 +182,7 @@ INSERT INTO feature.feature_weather_values (
     :valid_until, :observed_at, :normalization_version, CAST(:payload AS jsonb),
     :source_record_key, :collected_at, now()
 )
-ON CONFLICT (weather_value_key) DO UPDATE SET
+ON CONFLICT ({_WEATHER_CONFLICT_TARGET}) DO UPDATE SET
     value_number = EXCLUDED.value_number,
     value_text = EXCLUDED.value_text,
     unit = EXCLUDED.unit,

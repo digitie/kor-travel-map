@@ -14,6 +14,19 @@
   후속 관찰(별도 migration task 후보): DB의 varchar/text 혼재 정규화, curated_themes·
   source_records 제약의 naming-convention rename.
 
+## 2026-07-19 (claude, agent A2) — T-VN-17 weather 무결성 제약 완료
+
+- alembic 0060으로 ``feature_weather_values``에 semantic UNIQUE(CONCURRENTLY,
+  NULLS NOT DISTINCT) + range/payload CHECK + source FK(NOT VALID→VALIDATE)를
+  price 패턴 미러링으로 도입하고, dedup-first + writer ON CONFLICT cutover를 같은
+  PR에 담았다(F-7/ADR-072/075). ~30M행 rewrite/STORED 없음. 브랜치
+  ``feat/t-vn-17-weather-integrity``.
+- 게이트: ruff/mypy(main)/lint-imports green, 신규 통합 테스트(제약 7 + migration
+  dedup·왕복 1) + 기존 weather/orchestration 회귀 green, fresh-DB alembic upgrade
+  head green. #752가 실수 커밋한 uv.lock 제거.
+- **다음 한 작업**: 이 브랜치 orchestrator 리뷰·PR·머지 후 다음 T-VN 배정 task.
+  (dagster 통합 테스트는 이 venv에 dagster 미설치라 미실행 — 환경 한계.)
+
 ## 2026-07-19 (codex) — Agent A T-VN-07 소비자 clean-cut 리뷰 보완
 
 - PR #748의 단일 전문 리뷰에서 삭제된 beach no-op query가 이 저장소의 구현 사양과
