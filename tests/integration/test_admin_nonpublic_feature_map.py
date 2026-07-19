@@ -39,13 +39,15 @@ async def _insert_feature(
     lat: float | None = 37.57,
     geom_wkt: str | None = None,
     deleted_at: datetime | None = None,
+    user_deleted_at: datetime | None = None,
 ) -> None:
     await session.execute(
         text(
             """
             INSERT INTO feature.features (
                 feature_id, kind, name, category, coord, geom, status,
-                sido_code, sigungu_code, legal_dong_code, updated_at, deleted_at
+                sido_code, sigungu_code, legal_dong_code, updated_at,
+                deleted_at, user_deleted_at
             ) VALUES (
                 :feature_id, :kind, :feature_id, '06020000',
                 CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
@@ -56,7 +58,8 @@ async def _insert_feature(
                      ELSE x_extension.ST_SetSRID(
                          x_extension.ST_GeomFromText(:geom_wkt), 4326
                      ) END,
-                :status, '11', '11110', '1111010100', :updated_at, :deleted_at
+                :status, '11', '11110', '1111010100', :updated_at,
+                :deleted_at, :user_deleted_at
             )
             """
         ),
@@ -69,6 +72,7 @@ async def _insert_feature(
             "status": status,
             "updated_at": _NOW,
             "deleted_at": deleted_at,
+            "user_deleted_at": user_deleted_at,
         },
     )
 
@@ -88,7 +92,26 @@ async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
         status="deleted",
         deleted_at=_NOW,
     )
+    await _insert_feature(
+        migrated_session,
+        feature_id="admin-map-user-deleted",
+        status="inactive",
+        user_deleted_at=_NOW,
+    )
     await migrated_session.flush()
+
+    assert await admin_feature_repo.admin_feature_card_target_exists(
+        migrated_session, "admin-map-hidden"
+    )
+    assert not await admin_feature_repo.admin_feature_card_target_exists(
+        migrated_session, "admin-map-deleted"
+    )
+    assert not await admin_feature_repo.admin_feature_card_target_exists(
+        migrated_session, "admin-map-user-deleted"
+    )
+    assert not await admin_feature_repo.admin_feature_card_target_exists(
+        migrated_session, "admin-map-missing"
+    )
 
     admin_rows = await admin_feature_repo.admin_features_in_bbox(
         migrated_session,

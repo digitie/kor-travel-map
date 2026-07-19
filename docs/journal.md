@@ -15,6 +15,9 @@
 - repository/API/UI를 구현하고 full OpenAPI·admin TypeScript 타입을 재생성했다. admin 지도
   route-mock과 base/public 분리 PostGIS 회귀도 작성했다. 사용자 지시에 따라 구현 테스트·lint·
   build는 정확한 diff의 적대 리뷰 승인 뒤에만 실행한다.
+- 첫 정적 리뷰의 soft-delete finding을 반영해 admin weather/price target 존재 판정을
+  row revision 조회에서 삭제 전 base predicate로 분리했다. inactive/draft/hidden은 유지하고
+  `deleted_at`·`user_deleted_at`·`status=deleted`와 실제 미존재는 404로 닫는다.
 
 ## 2026-07-19 (codex) — latest main → integration/t-vn 동기화 PR 준비
 

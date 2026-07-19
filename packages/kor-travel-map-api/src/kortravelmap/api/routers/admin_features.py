@@ -26,6 +26,7 @@ from kortravelmap.infra.admin_feature_repo import (
     FeatureOverride,
     FeaturePreconditionFailed,
     FeatureStateConflict,
+    admin_feature_card_target_exists,
     apply_feature_change_request,
     admin_features_in_bbox,
     cluster_admin_features_in_bbox,
@@ -933,7 +934,7 @@ async def _admin_feature_exists_or_404(
     session: AsyncSession,
     feature_id: str,
 ) -> None:
-    if await get_feature_row_revision(session, feature_id) is None:
+    if not await admin_feature_card_target_exists(session, feature_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",

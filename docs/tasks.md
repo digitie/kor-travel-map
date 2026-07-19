@@ -152,9 +152,10 @@ OCI revision label+production profile, 완료/미완 task 정본, Alembic `0058 
 - [ ] `GET /v1/admin/features/in-bounds`가 base Feature의 bbox item/행정구역 cluster를
   `status` 반복 필터와 함께 반환한다. 기본은 삭제 전 전체 운영 상태이며, item과 cluster가
   같은 exact 공간 후보·kind/category/provider/status 필터를 사용한다.
-- [ ] `GET /v1/admin/features/{feature_id}/weather|price`가 공개 여부와 무관하게 존재하는
-  Feature의 카드를 반환하고, 실제 미존재 Feature만 404로 구분한다. weather의 근접 anchor도
-  admin base projection을 사용한다.
+- [ ] `GET /v1/admin/features/{feature_id}/weather|price`가 공개 여부와 무관하게 삭제 전
+  Feature의 카드를 반환한다. 실제 미존재·`deleted_at`/`user_deleted_at` soft-delete·
+  `status=deleted` target은 404로 구분하고, weather의 근접 anchor도 같은 삭제 전 admin
+  base predicate를 사용한다.
 - [ ] admin `/features` 지도·표·상세가 위 admin API만 사용하고 상태 필터를 제공한다.
   공개 API 404를 빈 카드로 숨기는 임시 완화는 제거한다.
 - [ ] admin/full OpenAPI와 생성 TypeScript, repository/router/frontend 단위·PostGIS 회귀,

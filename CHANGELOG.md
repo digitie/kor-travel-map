@@ -52,7 +52,8 @@
   `inactive`·`hidden`·`broken`을 선택하며, public active-only projection은 바꾸지 않는다.
 - **ADDED**: admin weather/price card endpoint가 비공개 Feature의 존재와 weather anchor를
   admin 경계에서 판정한다. 운영 지도와 상세 화면은 이 경로만 사용하므로 공개 projection의
-  404/빈 카드로 비공개 상태가 가려지지 않는다.
+  404/빈 카드로 비공개 상태가 가려지지 않는다. soft-delete 또는 `status=deleted` target은
+  삭제 전 운영 상태와 구분해 404로 fail-closed한다.
 - **CHANGED**: Admin Feature 지도에 운영 상태 필터와 truncation 표시를 추가하고, 지도·테이블·
   marker 상세가 동일한 admin in-bounds 결과를 사용하도록 통일했다.
 

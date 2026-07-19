@@ -397,8 +397,9 @@ POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 
   직접 조회하며, `status` 미지정 시 `draft|active|inactive|hidden|broken` 전체를 대상으로 한다.
   반복 `status`를 지정하면 item과 cluster에 동일하게 적용한다. bbox 후보는 point의 `coord`와
   route/area의 exact geometry 교차를 함께 사용하고, cluster 귀속은 저장 canonical 행정코드로
-  feature당 한 번만 계산한다. `/weather`와 `/price` admin subresource도 base Feature 존재 여부만
-  검사하므로 비공개 Feature를 404로 오분류하지 않는다. public endpoint와
+  feature당 한 번만 계산한다. `/weather`와 `/price` admin subresource도 삭제 전 base Feature
+  존재 여부를 검사하므로 비공개 Feature를 404로 오분류하지 않되, `deleted_at`·
+  `user_deleted_at`·`status=deleted` target은 fail-closed 404로 처리한다. public endpoint와
   `feature.public_features`의 공개 술어는 변경하지 않는다(T-VN-04A, #741).
 - **Feature update 감사 actor**: create와 run-now body는 `operator`/`actor` override를
   받지 않으며 포함하면 422다. 저장 `operator`는 인증된 admin proxy의

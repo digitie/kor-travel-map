@@ -372,9 +372,8 @@ def test_admin_weather_and_price_cards_accept_nonpublic_feature(
     from kortravelmap.infra.price_repo import PriceCard
     from kortravelmap.infra.weather_repo import WeatherCard
 
-    async def _revision(_session: Any, feature_id: str) -> int:
-        assert feature_id == "hidden-1"
-        return 3
+    async def _exists(_session: Any, feature_id: str) -> bool:
+        return feature_id == "hidden-1"
 
     async def _weather(_session: Any, **kwargs: Any) -> WeatherCard:
         assert kwargs["feature_id"] == "hidden-1"
@@ -398,17 +397,21 @@ def test_admin_weather_and_price_cards_accept_nonpublic_feature(
             is_stale=True,
         )
 
-    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
+    monkeypatch.setattr(router_mod, "admin_feature_card_target_exists", _exists)
     monkeypatch.setattr(router_mod.weather_repo, "build_admin_weather_card", _weather)
     monkeypatch.setattr(router_mod.price_repo, "build_price_card", _price)
 
     weather = client.get("/v1/admin/features/hidden-1/weather")
     price = client.get("/v1/admin/features/hidden-1/price")
+    deleted_weather = client.get("/v1/admin/features/deleted-1/weather")
+    deleted_price = client.get("/v1/admin/features/deleted-1/price")
 
     assert weather.status_code == 200
     assert weather.json()["data"]["feature_id"] == "hidden-1"
     assert price.status_code == 200
     assert price.json()["data"]["feature_id"] == "hidden-1"
+    assert deleted_weather.status_code == 404
+    assert deleted_price.status_code == 404
 
 
 @pytest.mark.unit

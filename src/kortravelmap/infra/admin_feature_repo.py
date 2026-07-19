@@ -62,6 +62,7 @@ __all__ = [
     "reject_feature_change_request",
     "list_feature_change_requests",
     "get_admin_feature_detail",
+    "admin_feature_card_target_exists",
     "get_feature_row_revision",
     "get_dedup_review_detail",
     "get_enrichment_review_detail",
@@ -2130,6 +2131,17 @@ FROM feature.features
 WHERE feature_id = :feature_id
 """
 
+_ADMIN_FEATURE_CARD_TARGET_EXISTS_SQL: Final[str] = """
+SELECT EXISTS (
+  SELECT 1
+  FROM feature.features
+  WHERE feature_id = :feature_id
+    AND deleted_at IS NULL
+    AND user_deleted_at IS NULL
+    AND status <> 'deleted'
+)
+"""
+
 _LOCK_FEATURE_ROW_REVISION_SQL: Final[str] = """
 SELECT row_revision
 FROM feature.features
@@ -2440,6 +2452,21 @@ async def get_feature_row_revision(
         )
     ).scalar_one_or_none()
     return int(revision) if revision is not None else None
+
+
+async def admin_feature_card_target_exists(
+    session: AsyncSession, feature_id: str
+) -> bool:
+    """Admin weather/price card의 삭제 전 target인지 검사한다."""
+
+    return bool(
+        (
+            await session.execute(
+                text(_ADMIN_FEATURE_CARD_TARGET_EXISTS_SQL),
+                {"feature_id": feature_id},
+            )
+        ).scalar_one()
+    )
 
 
 async def _assert_feature_revision(
