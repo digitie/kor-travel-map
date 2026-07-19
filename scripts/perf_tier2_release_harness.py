@@ -18,9 +18,10 @@ p95 실행시간·shared read blocks·응답 bytes budget을 기록한다. CI에
       python scripts/perf_tier2_release_harness.py --rows 1000000 --iterations 30
 
 ``--skip-seed``로 이미 적재된 DB를 그대로 잰다. 이 모드의 200건 batch는
-public projection의 실제 ID를 정렬해 사용한다. fixture 생성은 수 분~수십 분이
-걸릴 수 있다. 각 viewport가 최소 반환 행 계약을 만족할 때만 JSON을
-stdout에 출력하여 release 리포트에 첨부한다.
+public projection의 실제 non-notice ID를 정렬해 사용한다. notice 전용 추가 감산
+predicate와 batch 후보 의미가 어긋나지 않도록 notice는 선택하지 않는다. fixture
+생성은 수 분~수십 분이 걸릴 수 있다. 각 viewport가 최소 반환 행 계약을 만족할
+때만 JSON을 stdout에 출력하여 release 리포트에 첨부한다.
 """
 
 from __future__ import annotations
@@ -107,13 +108,20 @@ _COMMON_SEARCH = {
 }
 
 _BATCH_CARDINALITY = 200
-_SELECT_PUBLIC_BATCH_IDS_SQL = """
+_PUBLIC_BATCH_CANDIDATE_PREDICATE_SQL = "kind <> 'notice'"
+_SELECT_PUBLIC_BATCH_IDS_SQL = f"""
 SELECT feature_id
 FROM feature.public_features
+WHERE {_PUBLIC_BATCH_CANDIDATE_PREDICATE_SQL}
 ORDER BY feature_id
 LIMIT :limit
 """
 _COUNT_PUBLIC_FEATURES_SQL = "SELECT count(*) FROM feature.public_features"
+_COUNT_PUBLIC_BATCH_CANDIDATES_SQL = f"""
+SELECT count(*)
+FROM feature.public_features
+WHERE {_PUBLIC_BATCH_CANDIDATE_PREDICATE_SQL}
+"""
 
 
 class BenchmarkCardinalityError(RuntimeError):
@@ -128,7 +136,33 @@ class Viewport:
     sql: str
     params: Mapping[str, Any]
     min_returned_rows: int
+    terminal_limit_parameter: str | None = None
     pre: tuple[str, ...] = ()
+
+    @property
+    def matched_rows_sql(self) -> str:
+        """cursor/filter 적용 후 terminal LIMIT 전 전체 cardinality SQL."""
+
+        return _count_matching_rows_sql(self.sql, self.terminal_limit_parameter)
+
+
+def _count_matching_rows_sql(sql: str, terminal_limit_parameter: str | None) -> str:
+    """production SQL의 terminal LIMIT만 제거해 전체 match count를 만든다.
+
+    LATERAL/CTE 내부의 ``LIMIT 1``은 query 의미의 일부이므로 보존한다. 호출자가
+    지정한 terminal placeholder가 실제 마지막 clause가 아니면 조용히 잘못된
+    evidence를 만들지 않고 즉시 실패한다.
+    """
+
+    matched_sql = sql.rstrip()
+    if terminal_limit_parameter is not None:
+        terminal_limit = f"\nLIMIT :{terminal_limit_parameter}"
+        if not matched_sql.endswith(terminal_limit):
+            raise ValueError(
+                f"query must end with {terminal_limit.strip()} to count pre-limit rows"
+            )
+        matched_sql = matched_sql[: -len(terminal_limit)]
+    return f"SELECT count(*) AS matched_rows FROM ({matched_sql}) AS matched"
 
 
 def _build_viewports(batch_feature_ids: list[str]) -> tuple[Viewport, ...]:
@@ -136,39 +170,43 @@ def _build_viewports(batch_feature_ids: list[str]) -> tuple[Viewport, ...]:
 
     if len(batch_feature_ids) != _BATCH_CARDINALITY:
         raise BenchmarkCardinalityError(
-            f"200건 batch에 public feature {_BATCH_CARDINALITY}건이 필요하지만 "
+            f"200건 batch에 non-notice public feature {_BATCH_CARDINALITY}건이 필요하지만 "
             f"{len(batch_feature_ids)}건만 선택됨"
         )
     return (
         Viewport(
-            "서울 밀집 in-bounds",
-            _FEATURES_IN_BBOX_SQL,
-            _SEOUL_DENSE_BBOX,
+            name="서울 밀집 in-bounds",
+            sql=_FEATURES_IN_BBOX_SQL,
+            params=_SEOUL_DENSE_BBOX,
             min_returned_rows=1,
+            terminal_limit_parameter="limit",
         ),
         Viewport(
-            "전국 low-zoom cluster(sido)",
-            _CLUSTER_BBOX_SQL_BY_UNIT["sido"],
-            _NATIONWIDE_LOWZOOM_BBOX,
+            name="전국 low-zoom cluster(sido)",
+            sql=_CLUSTER_BBOX_SQL_BY_UNIT["sido"],
+            params=_NATIONWIDE_LOWZOOM_BBOX,
             min_returned_rows=1,
+            terminal_limit_parameter="limit",
         ),
         Viewport(
-            "100km nearby",
-            _NEARBY_COORD_DISTANCE_SQL,
-            _NEARBY_100KM,
+            name="100km nearby",
+            sql=_NEARBY_COORD_DISTANCE_SQL,
+            params=_NEARBY_100KM,
             min_returned_rows=1,
+            terminal_limit_parameter="limit_plus_one",
         ),
         Viewport(
-            "상용 검색어 search",
-            _FEATURE_SEARCH_BY_SCORE_SQL,
-            _COMMON_SEARCH,
+            name="상용 검색어 search",
+            sql=_FEATURE_SEARCH_BY_SCORE_SQL,
+            params=_COMMON_SEARCH,
             min_returned_rows=1,
+            terminal_limit_parameter="limit_plus_one",
             pre=("SET LOCAL pg_trgm.similarity_threshold = 0.2",),
         ),
         Viewport(
-            "200건 batch",
-            _GET_PUBLIC_FEATURES_BY_IDS_SQL,
-            {"feature_ids": batch_feature_ids},
+            name="200건 batch",
+            sql=_GET_PUBLIC_FEATURES_BY_IDS_SQL,
+            params={"feature_ids": batch_feature_ids},
             min_returned_rows=_BATCH_CARDINALITY,
         ),
     )
@@ -193,7 +231,7 @@ def _plan_returned_rows(plan: Mapping[str, Any]) -> int:
 
 
 async def _select_public_batch_feature_ids(session: AsyncSession) -> list[str]:
-    """public predicate를 만족하는 실제 ID 200개를 결정적으로 선택한다."""
+    """notice visibility drift가 없는 실제 public ID 200개를 결정적으로 선택한다."""
 
     result = await session.execute(
         text(_SELECT_PUBLIC_BATCH_IDS_SQL), {"limit": _BATCH_CARDINALITY}
@@ -201,19 +239,26 @@ async def _select_public_batch_feature_ids(session: AsyncSession) -> list[str]:
     feature_ids = [str(row[0]) for row in result.all()]
     if len(feature_ids) != _BATCH_CARDINALITY:
         raise BenchmarkCardinalityError(
-            f"--skip-seed 포함 모든 모드에 public feature "
+            f"--skip-seed 포함 모든 모드에 non-notice public feature "
             f"{_BATCH_CARDINALITY}건이 필요하지만 {len(feature_ids)}건만 존재함"
         )
     return feature_ids
 
 
-async def _measure_response(
+async def _measure_cardinality_and_response(
     session: AsyncSession, viewport: Viewport
-) -> tuple[int, int]:
-    """실제 query 반환 행 수와 JSON 바이트를 한 번의 scan으로 재고 검증한다."""
+) -> tuple[int, int, int]:
+    """LIMIT 전 match와 실제 반환 행·JSON 바이트를 분리해 재고 검증한다."""
 
     for statement in viewport.pre:
         await session.execute(text(statement))
+    matched_rows = int(
+        (
+            await session.execute(
+                text(viewport.matched_rows_sql), dict(viewport.params)
+            )
+        ).scalar_one()
+    )
     row = (
         await session.execute(
             text(
@@ -226,12 +271,17 @@ async def _measure_response(
     ).one()
     returned_rows = int(row.returned_rows)
     response_bytes = int(row.response_bytes or 0)
+    if returned_rows > matched_rows:
+        raise BenchmarkCardinalityError(
+            f"{viewport.name}: returned_rows={returned_rows}가 "
+            f"matched_rows={matched_rows}보다 큼"
+        )
     if returned_rows < viewport.min_returned_rows:
         raise BenchmarkCardinalityError(
             f"{viewport.name}: 최소 {viewport.min_returned_rows}행이 필요하지만 "
             f"{returned_rows}행만 반환됨"
         )
-    return returned_rows, response_bytes
+    return matched_rows, returned_rows, response_bytes
 
 
 async def _explain_analyze(
@@ -284,18 +334,26 @@ async def _run(dsn: str, rows: int, iterations: int, skip_seed: bool) -> dict[st
                         await session.execute(text(_COUNT_PUBLIC_FEATURES_SQL))
                     ).scalar_one()
                 )
+                batch_candidate_rows = int(
+                    (
+                        await session.execute(
+                            text(_COUNT_PUBLIC_BATCH_CANDIDATES_SQL)
+                        )
+                    ).scalar_one()
+                )
                 batch_feature_ids = await _select_public_batch_feature_ids(session)
             report["public_feature_rows"] = public_feature_rows
+            report["batch_candidate_rows"] = batch_candidate_rows
             viewports = _build_viewports(batch_feature_ids)
 
             for viewport in viewports:
                 durations_ms: list[float] = []
                 shared_reads: list[int] = []
-                matched_rows: list[int] = []
+                plan_returned_rows: list[int] = []
                 plan_json: dict[str, Any] = {}
                 async with session.begin():
-                    returned_rows, response_bytes = await _measure_response(
-                        session, viewport
+                    matched_rows, returned_rows, response_bytes = (
+                        await _measure_cardinality_and_response(session, viewport)
                     )
 
                 for _ in range(iterations):
@@ -309,12 +367,12 @@ async def _run(dsn: str, rows: int, iterations: int, skip_seed: bool) -> dict[st
                     plan = explained["Plan"]
                     durations_ms.append(float(explained.get("Execution Time", 0.0)))
                     shared_reads.append(_shared_read_blocks(plan))
-                    matched_rows.append(_plan_returned_rows(plan))
+                    plan_returned_rows.append(_plan_returned_rows(plan))
                     plan_json = plan
 
-                if any(count != returned_rows for count in matched_rows):
+                if any(count != returned_rows for count in plan_returned_rows):
                     raise BenchmarkCardinalityError(
-                        f"{viewport.name}: EXPLAIN matched_rows={matched_rows}와 "
+                        f"{viewport.name}: EXPLAIN returned_rows={plan_returned_rows}와 "
                         f"response returned_rows={returned_rows}가 다름"
                     )
 
@@ -323,7 +381,7 @@ async def _run(dsn: str, rows: int, iterations: int, skip_seed: bool) -> dict[st
                 report["viewports"].append(
                     {
                         "name": viewport.name,
-                        "matched_rows": matched_rows[0],
+                        "matched_rows": matched_rows,
                         "returned_rows": returned_rows,
                         "minimum_returned_rows": viewport.min_returned_rows,
                         "p50_ms": round(statistics.median(durations_ms), 2),

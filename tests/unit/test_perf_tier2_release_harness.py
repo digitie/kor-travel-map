@@ -8,6 +8,7 @@ import scripts.perf_tier2_release_harness as harness
 from scripts.perf_tier2_release_harness import (
     BenchmarkCardinalityError,
     _build_viewports,
+    _count_matching_rows_sql,
     _plan_returned_rows,
     _shared_read_blocks,
 )
@@ -53,6 +54,27 @@ def test_plan_returned_rows_accounts_for_root_loops() -> None:
     assert _plan_returned_rows({"Actual Rows": 25, "Actual Loops": 4}) == 100
 
 
+def test_count_matching_rows_sql_removes_only_terminal_limit() -> None:
+    sql = """
+SELECT f.feature_id
+FROM feature.public_features AS f
+LEFT JOIN LATERAL (SELECT 1 LIMIT 1) AS child ON true
+ORDER BY f.feature_id
+LIMIT :limit
+"""
+
+    count_sql = _count_matching_rows_sql(sql, "limit")
+
+    assert "SELECT 1 LIMIT 1" in count_sql
+    assert "LIMIT :limit" not in count_sql
+    assert count_sql.startswith("SELECT count(*) AS matched_rows FROM (")
+
+
+def test_count_matching_rows_sql_rejects_drifted_terminal_limit() -> None:
+    with pytest.raises(ValueError, match="query must end with LIMIT :limit"):
+        _count_matching_rows_sql("SELECT 1 LIMIT :other_limit", "limit")
+
+
 def test_batch_viewport_uses_selected_database_ids() -> None:
     selected = [f"existing:f:{index:06d}" for index in range(200)]
 
@@ -60,6 +82,7 @@ def test_batch_viewport_uses_selected_database_ids() -> None:
 
     assert batch.params == {"feature_ids": selected}
     assert batch.min_returned_rows == 200
+    assert "LIMIT" not in batch.matched_rows_sql
     assert not any(feature_id.startswith("perf:f:") for feature_id in selected)
 
 

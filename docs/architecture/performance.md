@@ -444,12 +444,15 @@ JSON으로 기록한다. **CI에서 절대 돌리지 않는다**(대용량 fixtu
   200건 batch.
 - 실행: `KOR_TRAVEL_MAP_PG_DSN=… python scripts/perf_tier2_release_harness.py --rows 1000000
   --iterations 30`(alembic head 적용된 빈 DB에). 이미 적재된 DB는 `--skip-seed`.
-- `--skip-seed`는 `feature.public_features`에서 `feature_id` 200개를 정렬해 실제 batch
-  파라미터로 사용한다. public row가 200건 미만이거나 대표 viewport가 각 최소
-  cardinality(일반 1행, batch 200행)를 만족하지 못하면 성공 JSON을 출력하지 않고
-  종료 코드 2로 실패한다.
-- 각 viewport는 EXPLAIN 최상위 Plan의 `matched_rows`와 실제 응답의
-  `returned_rows`/`minimum_returned_rows`를 기록하고 수치 불일치를 거부한다.
+- `--skip-seed`는 `feature.public_features`에서 non-notice `feature_id` 200개를 정렬해
+  실제 batch 파라미터로 사용한다. notice는 공개 list가 추가 lifecycle 감산을 적용하므로
+  batch 후보에서 제외해 selector와 응답 visibility 의미를 일치시킨다. 후보가 200건
+  미만이거나 대표 viewport가 각 최소 cardinality(일반 1행, batch 200행)를 만족하지
+  못하면 성공 JSON을 출력하지 않고 종료 코드 2로 실패한다.
+- 각 viewport는 terminal `LIMIT` 전 별도 count의 `matched_rows`와 실제 응답의
+  `returned_rows`/`minimum_returned_rows`를 기록해 truncation을 보존한다. EXPLAIN
+  최상위 Plan 행 수는 LIMIT 적용 뒤 `returned_rows`와 같아야 한다. count는 p95 측정
+  loop 밖에서 한 번만 실행한다.
   `shared_read_blocks_p95`는 child 누적값을 재귀 합산하지 않고 최상위 Plan의
   query 전체 누적값만 사용한다.
 - 결과는 release 리포트(`docs/reports/`)에 첨부하고, budget 초과 viewport는 index/쿼리 재설계

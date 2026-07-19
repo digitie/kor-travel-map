@@ -244,9 +244,12 @@ async def test_features_nearby_sql_uses_coord_5179_gist(pg_session, seeded_featu
 않는다.
 
 - seed/skip-seed 양쪽에서 과거 `perf:f:000001..000200` ID가 없어도 public
-  projection의 실제 ID 200개를 결정적으로 선택하는지 통합 테스트한다.
-- 199건 이하 public fixture, 빈 대표 viewport, EXPLAIN `matched_rows`와 응답
-  `returned_rows` 불일치는 모두 fail-closed 대상이다.
+  projection의 실제 non-notice ID 200개를 결정적으로 선택하는지 통합 테스트한다.
+  seed의 매 29번째 inactive 규칙과 selector 기대값을 동일하게 계산하고 active notice가
+  정렬상 먼저 와도 batch 후보에서는 제외되는지 검증한다.
+- 199건 이하 public batch 후보, 빈 대표 viewport, EXPLAIN 최상위 Plan 행과 응답
+  `returned_rows` 불일치는 모두 fail-closed 대상이다. terminal `LIMIT` 전 별도 count인
+  `matched_rows`가 `returned_rows`보다 큰 fixture로 실제 truncation도 단언한다.
 - `Shared Read Blocks`는 최상위 Plan의 누적값을 query 전체 정본으로 삼는다.
   root/child 단일 tree와 `Gather -> Append -> parallel child` fixture로 중복 합산이
   없음을 단위 테스트한다.

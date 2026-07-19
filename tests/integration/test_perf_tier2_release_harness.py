@@ -30,7 +30,7 @@ INSERT INTO feature.features (
 SELECT
     :prefix || lpad(g::text, 6, '0'),
     'place',
-    '실데이터 카페 ' || g::text,
+    '카페',
     '01070300',
     x_extension.ST_SetSRID(
         x_extension.ST_MakePoint(
@@ -86,11 +86,19 @@ def _assert_report_cardinality(report: dict[str, object]) -> None:
     assert len(viewports) == 5
     for viewport in viewports:
         assert isinstance(viewport, dict)
-        assert viewport["matched_rows"] == viewport["returned_rows"]
+        assert viewport["matched_rows"] >= viewport["returned_rows"]
         assert viewport["returned_rows"] >= viewport["minimum_returned_rows"]
         assert viewport["response_bytes"] > 0
     batch = next(viewport for viewport in viewports if viewport["name"] == "200건 batch")
     assert batch["matched_rows"] == batch["returned_rows"] == 200
+
+
+def _expected_seed_public_ids(prefix: str, rows: int) -> list[str]:
+    """``perf_gate`` seed의 매 29번째 inactive 규칙을 그대로 반영한다."""
+
+    return [
+        f"{prefix}{index:06d}" for index in range(1, rows + 1) if index % 29 != 0
+    ]
 
 
 async def test_seed_mode_resolves_database_ids_instead_of_legacy_fixed_batch(
@@ -102,7 +110,9 @@ async def test_seed_mode_resolves_database_ids_instead_of_legacy_fixed_batch(
 
         assert report["mode"] == "seeded"
         assert report["requested_seed_rows"] == 220
-        assert report["public_feature_rows"] >= 200
+        expected_public_ids = _expected_seed_public_ids("tier2:f:", 220)
+        assert report["public_feature_rows"] == len(expected_public_ids)
+        assert report["batch_candidate_rows"] == len(expected_public_ids)
         _assert_report_cardinality(report)
         async with AsyncSession(migrated_engine) as session:
             selected = await _select_public_batch_feature_ids(session)
@@ -128,7 +138,7 @@ async def test_seed_mode_resolves_database_ids_instead_of_legacy_fixed_batch(
             )
         assert legacy_count == 0
         assert tier2_count == 220
-        assert selected == [f"tier2:f:{index:06d}" for index in range(1, 201)]
+        assert selected == expected_public_ids[:200]
     finally:
         await _cleanup_committed_fixture(migrated_engine)
 
@@ -147,8 +157,42 @@ async def test_skip_seed_uses_real_public_rows_when_legacy_fixed_ids_are_absent(
         assert report["mode"] == "existing"
         assert report["requested_seed_rows"] is None
         assert report["public_feature_rows"] == 220
+        assert report["batch_candidate_rows"] == 220
         _assert_report_cardinality(report)
         assert selected == [f"existing:f:{index:06d}" for index in range(1, 201)]
+        viewports = {
+            viewport["name"]: viewport
+            for viewport in report["viewports"]
+            if isinstance(viewport, dict)
+        }
+        assert viewports["서울 밀집 in-bounds"]["matched_rows"] == 220
+        assert viewports["서울 밀집 in-bounds"]["returned_rows"] == 200
+        assert viewports["100km nearby"]["matched_rows"] == 220
+        assert viewports["100km nearby"]["returned_rows"] == 51
+        assert viewports["상용 검색어 search"]["matched_rows"] == 220
+        assert viewports["상용 검색어 search"]["returned_rows"] == 51
+    finally:
+        await _cleanup_committed_fixture(migrated_engine)
+
+
+async def test_batch_selector_excludes_notice_candidates(
+    migrated_engine: AsyncEngine,
+) -> None:
+    await _cleanup_committed_fixture(migrated_engine)
+    try:
+        await _seed_custom_public_features(migrated_engine, rows=201)
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            await session.execute(
+                text(
+                    "UPDATE feature.features SET kind = 'notice', category = '99000000' "
+                    "WHERE feature_id = 'existing:f:000001'"
+                )
+            )
+        async with AsyncSession(migrated_engine) as session:
+            selected = await _select_public_batch_feature_ids(session)
+
+        assert "existing:f:000001" not in selected
+        assert selected == [f"existing:f:{index:06d}" for index in range(2, 202)]
     finally:
         await _cleanup_committed_fixture(migrated_engine)
 

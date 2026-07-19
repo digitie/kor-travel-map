@@ -8,12 +8,13 @@
 ### Tier-2 release benchmark 측정 정확성 (2026-07-19, T-VN-21R #767)
 
 - **FIXED**: `--skip-seed` 200건 batch가 fixture 전용 고정 ID를 조회해 0행을
-  성공 측정하던 문제를 제거했다. public projection의 실제 ID 200개를 결정적으로
-  선택하고, 수량이 부족하거나 대표 viewport가 비어 있으면 성공 report 없이
-  fail-closed한다.
+  성공 측정하던 문제를 제거했다. public projection의 실제 non-notice ID 200개를
+  결정적으로 선택하고, 수량이 부족하거나 대표 viewport가 비어 있으면 성공 report
+  없이 fail-closed한다. seed의 inactive 분포와 selector 기대도 같은 규칙을 쓴다.
 - **FIXED**: `EXPLAIN (BUFFERS)`의 상위 Plan에 이미 포함된 child shared read를
-  재귀 합산하던 중복 계산을 제거했다. 각 viewport report는
-  `matched_rows`/`returned_rows`/`minimum_returned_rows`를 함께 기록한다.
+  재귀 합산하던 중복 계산을 제거했다. 각 viewport report는 terminal `LIMIT` 전
+  `matched_rows`와 LIMIT 뒤 `returned_rows`/`minimum_returned_rows`를 함께 기록해
+  truncation을 보존한다.
 
 ### 지도 in-bounds 완결성 + exact 공간 술어 (2026-07-19, ADR-073 D-9-3·D-9-4 T-VN-14)
 
