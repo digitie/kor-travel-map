@@ -100,8 +100,13 @@ group/other writable ancestor, mode `0555`, hash 불일치를 모두 거부한 �
 
 `/etc/kor-travel-map/c7-prod-live-e2e-attestation.json`은 배포가 끝난 뒤 local-only
 절차로 원자 생성한다. mode는 `0600`, owner는 `root:root`, version은 runner가 요구하는
-정확한 version 3이어야 한다. active/rollback pair에는 Map·PinVi source revision이 필수다.
-Manager canonical compatible-pair manifest도 capture 직후 bytes를
+정확한 version 3이어야 한다. 이 version은 host attestation document 계약이며
+Manager compatible-pair manifest version과 다르다. Manager canonical compatible-pair manifest는
+정확한 version 4이고, active/rollback은 각각
+`map_image_id`, `map_ui_image_id`, `map_dagster_image_id`,
+`map_dagster_daemon_image_id`, `map_source_revision`, `pinvi_image_id`,
+`pinvi_source_revision`, `contract_generation`, `recorded_at`만 가지는 exact pair여야 한다.
+v3 manifest나 누락·추가 필드는 호환 변환 없이 거부한다. capture 직후 bytes를
 root-owned `0600` snapshot으로 만들고, runner에는 그 absolute path를 전달한다. 원본과 snapshot
 SHA-256이 다르면 실행하지 않는다. attestation에는 다음 비민감 증거만 넣는다.
 
@@ -118,6 +123,9 @@ SHA-256이 다르면 실행하지 않는다. attestation에는 다음 비민감 
 
 environment hash는 값 자체를 출력하지 않고 container inspect 결과를 정렬한 canonical
 JSON bytes에서 계산한다. attestation 작성 명령과 실제 값은 local runbook에만 둔다.
+runner는 위 다섯 runtime role의 image ID를 host attestation과 비교한 뒤, Map 네 role를
+manifest active pair의 네 Map image ID와 각각 비교한다. 네 image의 OCI revision은 모두
+active pair의 `map_source_revision`이어야 하며 PinVi API도 동일한 방식으로 검증한다.
 
 ## 3. runner 실행
 

@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — T-ADM-C7P compatible-pair manifest v4 동기화 착수
+
+- docker-manager C6c provenance를 Map API/UI/Dagster web/Dagster daemon 네 image에 닫으면
+  기존 Map C7 attestation의 manifest v3 exact parser와 충돌함을 확인했다.
+- issue #777을 추가하고 host attestation version 3과 manager compatible-pair manifest
+  version 4를 분리했다. v4 active/rollback은 Map 네 image ID·Map source revision·PinVi
+  image/revision·contract generation·recorded time의 exact 9-field pair다.
+- **다음 한 작업**: 문서 선행 commit 후 C7 attestation parser·runtime image 비교·음성
+  fixture를 v4로 clean-cut하고, manager PR #61과 함께 단일 적대적 리뷰를 받는다.
+
 ## 2026-07-19 (codex) — Agent A PR #755 summary 가시성 보완
 
 - 단일 전문 리뷰에서 확인한 mocked E2E 가시성 공백을 닫아, summary exact projection

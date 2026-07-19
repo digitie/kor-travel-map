@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — T-ADM-C7P manifest v4 교차 계약 착수
+
+- 승인된 local-only n150 SSH target에서 passwordless sudo를 재확인했고, C6c
+  capture 실패의 직접 원인이 cAdvisor listen 포트와 image에 상속된
+  healthcheck 포트의 drift임을 확인했다.
+- docker-manager PR #61 적대적 리뷰에서 Map API만 compatible pair에 기록하면
+  UI·Dagster web·daemon의 `development` image가 남을 수 있는 교차 사각지를
+  blocker로 확정했다. manager는 Map 네 image ID를 모두 결박하는 manifest v4로
+  clean-cut한다.
+- Map C7 attestation은 manager manifest v3과 API/PinVi image ID만 exact 허용해 v4를
+  즉시 거부한다. issue #777·T-ADM-C7P는 manifest v4의 9-field pair와 네 Map
+  runtime role를 동기화하는 독립 PR 단위다.
+
 ## 2026-07-19 (codex) — Agent A PR #755 심층 리뷰 후속
 
 - 단일 전문 리뷰에서 `/ops/datasets` summary projection이 exact count만 확인해

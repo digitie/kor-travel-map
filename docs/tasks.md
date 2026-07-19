@@ -9,6 +9,7 @@
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
+  - [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화** (#777)
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **예정 — vNext 재설계 (`T-ADM-C6c`/`C7` 종결 뒤 시작)**
   - [ ] `T-VN-01` — **production fail-closed 전환**
@@ -102,6 +103,16 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   남긴다. n150 host runner는 `python3`를 명시적으로 요구하고, 실행 전 root-owned host/origin
   attestation을 local-only 운영 절차로 provision한다. 운영 종결이 남은 #684/#694/#712/#719는
   최종 live 증거를 첨부한 뒤 닫는다.
+
+- [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화**
+  (issue #777, docker-manager PR #61과 같은 배포 단위): compatible-pair manifest를
+  v4로 clean-cut하고 active/rollback pair에 Map API·UI·Dagster web·Dagster daemon
+  네 immutable image ID와 하나의 Map source revision을 함께 결박한다. C7
+  attestation은 manifest의 네 Map image ID를 실제 compose runtime role과 각각 exact
+  비교한다. host attestation document version 3은 유지하되, manager compatible-pair
+  manifest version 3은 거부하고 호환 shim을 두지 않는다. 완료 조건은 manager·Map
+  두 PR의 단일 적대적 리뷰 승인, 실행형 v3/v4·image mismatch 음성 계약,
+  n150의 root-owned manifest snapshot·runtime attestation 통과다.
 
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,

@@ -128,6 +128,12 @@
 ADR-073 목표 REST는 문서에 채택됐지만 아직 현재 OpenAPI/운영 계약이 아니다. PinVi 변경은 다음
 compatible pair가 모두 준비된 뒤에만 활성화한다.
 
+Production C6c compatible-pair manifest의 정본은 docker-manager의 version 4다.
+active/rollback 각 pair는 Map API·UI·Dagster web·Dagster daemon image ID 네 개,
+공통 Map source revision, PinVi API image ID/source revision, contract generation, recorded time의
+exact 9-field를 갖는다. Map C7 attestation은 이 네 Map image ID와 실제 compose runtime을
+각각 비교하며 v3 manifest나 확장 필드를 허용하지 않는다(ADR-076).
+
 | 변경 | PinVi 선행 조건 | KTM 전환 조건 |
 |---|---|---|
 | ops datasets/pipeline | `T-ADM-C6c` canonical caller, 최소 service/operator principal, 삭제 경로 0건 | 양 저장소 commit pair 인증·응답 smoke 뒤 C7 |
