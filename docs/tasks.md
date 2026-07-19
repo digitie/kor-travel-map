@@ -10,6 +10,7 @@
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
+  - [ ] `T-ADM-C7M` — **mocked UI projection·pagination 수용 증거 보강**
 - **예정 — vNext 재설계 (`T-ADM-C6c`/`C7` 종결 뒤 시작)**
   - [ ] `T-VN-01` — **production fail-closed 전환**
   - [ ] `T-VN-02` — **route policy matrix와 미분류 CI gate**
@@ -102,6 +103,14 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   남긴다. n150 host runner는 `python3`를 명시적으로 요구하고, 실행 전 root-owned host/origin
   attestation을 local-only 운영 절차로 provision한다. 운영 종결이 남은 #684/#694/#712/#719는
   최종 live 증거를 첨부한 뒤 닫는다.
+
+- [ ] `T-ADM-C7M` — **mocked UI projection·pagination 수용 증거 보강** (#694, #719):
+  `/ops/datasets` 상태 요약은 페이지 전체의 우연한 문자열이 아니라 이름 있는 summary landmark
+  안에서 행·실패·SLA 초과·미실행·이슈의 exact projection을 검증한다. 정상 표 행은 유지하되
+  summary projection만 제거하거나 오염한 negative fixture가 실패해야 한다. `/ops/pipeline`의 실행과
+  전역 event는 각각 11건 이상의 두 페이지 fixture로 실제 다음-page cursor 요청, 페이지별 전체 DOM
+  identity 배열, total-order, page 경계의 서로소·scope 보존을 검증한다. route mock은 cursor별 응답을
+  명시하며 첫 행이나 page-global text 일부의 존재만으로 통과시키지 않는다.
 
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,
