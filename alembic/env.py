@@ -135,17 +135,22 @@ def _guard_forward_only_target() -> None:
 #    extension namespace와 무관하게 전용 ``topology`` schema에 객체를 만든다.
 #    ``alembic_version`` 은 alembic 이 자동 제외한다.
 _POSTGIS_TABLE_NAMES = frozenset({"spatial_ref_sys"})
-_POSTGIS_OWNED_SCHEMAS = frozenset({"topology"})
+_POSTGIS_OWNED_TABLES = frozenset(
+    {
+        ("topology", "layer"),
+        ("topology", "topology"),
+    }
+)
 
-_APP_TABLES_IN_POSTGIS_SCHEMAS = sorted(
+_MAPPED_POSTGIS_OWNED_TABLES = sorted(
     f"{table.schema}.{table.name}"
     for table in target_metadata.tables.values()
-    if table.schema in _POSTGIS_OWNED_SCHEMAS
+    if (table.schema, table.name) in _POSTGIS_OWNED_TABLES
 )
-if _APP_TABLES_IN_POSTGIS_SCHEMAS:
+if _MAPPED_POSTGIS_OWNED_TABLES:
     raise RuntimeError(
-        "application metadata uses PostGIS-owned schemas: "
-        + ", ".join(_APP_TABLES_IN_POSTGIS_SCHEMAS)
+        "application metadata maps PostGIS-owned tables: "
+        + ", ".join(_MAPPED_POSTGIS_OWNED_TABLES)
     )
 
 # 2) ORM 모델이 아직 없는 app-owned table (raw-SQL migration 으로만 생성).
@@ -193,13 +198,12 @@ def _include_object(
     """비-app 객체와 미모델 app table/expression index 를 비교에서 제외한다."""
 
     schema = _object_schema(object_) or _object_schema(compare_to)
-    if reflected and schema in _POSTGIS_OWNED_SCHEMAS:
-        return False
     if type_ == "table":
-        return name not in _POSTGIS_TABLE_NAMES and (
-            schema,
-            name,
-        ) not in _UNMAPPED_APP_TABLES
+        return (
+            name not in _POSTGIS_TABLE_NAMES
+            and not (reflected and (schema, name) in _POSTGIS_OWNED_TABLES)
+            and (schema, name) not in _UNMAPPED_APP_TABLES
+        )
     if type_ == "index":
         return (schema, name) not in _UNCOMPARED_INDEXES
     return True
