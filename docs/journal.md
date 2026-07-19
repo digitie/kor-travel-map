@@ -38,6 +38,20 @@
 - n150 접속 감시 10분 41회가 모두 인증 전에 `No route to host`로 끝났고 별도 Windows TCP/22 진단도
   실패했다. passwordless sudo는 미확인으로 남겼으며 원격 변경은 하지 않았다.
 
+## 2026-07-19 (codex) — T-ADM-C7M mocked UI projection·pagination 병합
+
+- `/ops/datasets` mocked E2E가 이름 있는 summary landmark 안에서 행·실패·SLA 초과·미실행·이슈를
+  exact 검증하고, 같은 문자열로 표 행을 오염한 negative fixture로 page-global text 거짓 양성을
+  차단하도록 보강했다.
+- `/ops/pipeline`은 실행과 전역 event 각각 6+6 두 페이지를 주입해 exact
+  provider/dataset/scope/page size, null/expected cursor 요청, 페이지별 전체 DOM identity 배열,
+  total order, 페이지 간 서로소와 continuation 종료를 함께 검증한다.
+- 단일 적대적 리뷰에서 느슨한 query route를 확인해 exact query validator와 관측 cursor set을
+  반영했다. 6+6은 실제 `page_size=50` overflow가 아닌 cursor plumbing 증거로 문서화했고,
+  51건 이상 실제 continuation은 `T-ADM-C7` n150 live E2E에 유지했다.
+- targeted mocked E2E 3건과 CI 8개 게이트가 통과했다. PR #755는 merge commit `54150c91`로
+  `main`에 반영됐으며 `T-ADM-C7M`을 완료 아카이브로 이동했다.
+
 ## 2026-07-19 (codex) — Agent A PR #744 적대적 심층 리뷰 후속
 
 - 전문 리뷰어 1명이 닫혀서 `main`에 병합된 PR #744를 재검토해, 비활성 manual link를

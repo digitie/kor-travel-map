@@ -29,6 +29,18 @@
   n150 접속이 복구되면 passwordless sudo→backup/PITR→forward-only migration→C6c capture→C7 live
   E2E 순서로 끝내고 #684/#694/#712/#719를 증거와 함께 닫는다.
 
+## 2026-07-19 (codex) — T-ADM-C7M mocked UI 수용 증거 병합·아카이브
+
+- `/ops/datasets` summary landmark의 exact projection과 오염 negative fixture,
+  `/ops/pipeline` 실행·event의 6+6 cursor 주입, 요청 scope·cursor와 전체 DOM identity·정렬·페이지
+  경계를 PR #755에서 고정했다.
+- 6+6 fixture는 canonical `page_size=50` overflow 증거가 아니라 cursor plumbing 증거로 명시했다.
+  실제 51건 이상 continuation과 #694/#719의 최종 live 종결은 열린 `T-ADM-C7` n150 검증에 남긴다.
+- 단일 적대적 리뷰 지적을 반영하고 targeted mocked E2E 3건과 CI 8개 게이트를 통과했다.
+  PR #755는 merge commit `54150c91`로 `main`에 반영됐으며 `T-ADM-C7M`은 완료 이력으로 옮겼다.
+- **다음 한 작업**: PR #754의 C7 production live E2E 실행 경계 보강을 CI green으로 병합한 뒤,
+  n150 compatible-pair 배포와 파괴적 live 검증을 수행한다.
+
 ## 2026-07-19 (codex) — Agent A PR #744 manual link 재활성화 보완
 
 - 단일 전문 리뷰에서 비활성 manual link가 resolver relation으로 복귀하지 못하고 stale
