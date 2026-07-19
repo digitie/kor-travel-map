@@ -16,12 +16,12 @@ import asyncio
 from logging.config import fileConfig
 from typing import TYPE_CHECKING
 
+from alembic.script import ScriptDirectory
 from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-from alembic.script import ScriptDirectory
 from kortravelmap.infra.db import normalize_async_dsn
 from kortravelmap.infra.models import metadata
 
