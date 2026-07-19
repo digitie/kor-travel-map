@@ -1,95 +1,134 @@
-# T-VN-04A·58 n150 targeted live 인수 설계
+# T-VN-04A·15·58 n150 targeted live 인수 설계
 
-## 1. 목적과 실행 경계
+## 1. 목적과 PR 경계
 
-이 문서는 issue #741과 #785의 마지막 완료 조건인 production live UI 증거를
-독립 Playwright lane으로 고정한다. 두 이슈의 API·UI 구현은 이미 `main`에 병합됐고,
-이번 변경은 운영 데이터를 소유권 없이 빌리거나 strict C7 복구 경계를 넓히지 않는다.
+PR #792는 issue #741, #785와 `T-VN-15`의 마지막 production 증거만 소유한다. 세 기능의
+API/UI 구현은 이미 integration을 거쳐 main에 들어왔으므로 제품 경로를 다시 설계하지 않고,
+실제 배포 조합에서 owned fixture·browser BFF·복구를 끝까지 증명한다.
 
-- strict `T-ADM-C7` runner에는 feature mutation을 추가하지 않는다.
-- 새 lane은 `E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1`을 별도로 요구하고 serial 1-worker로만
-  실행한다.
-- 상태 marker와 correction write fixture는 실행별 고유 `user_request::...` feature ID와
-  사유를 사용한다. weather/price kind fixture는 admin change API가 place/event만 허용하므로
-  별도 fixture helper가 고유 ID로 직접 만들되, mutation 전 root-owned journal에 ID와 복구
-  단계를 기록한다.
-- 각 browser 시나리오는 `try/finally`에서 서버의 **현재 raw strong ETag**를 다시 읽은 뒤
-  DELETE 변경 요청을 만들고 승인한다. cleanup의 조회·요청·승인·삭제 확인 중 하나라도
-  실패하면 원래 테스트 결과와 무관하게 실패한다.
-- 운영의 기존 Feature는 수정하지 않는다. 테스트가 만든 pending 요청도 실패 경로에서
-  reject 또는 approve-delete 순서로 종결한다.
-- fixed state root의 `BLOCKED.json`은 Playwright container가 시작되기 전에 만들어진다.
-  journal은 `run_id`와 그 값에서 결정적으로 파생한 owned Feature ID 6개를 함께 기록한다.
-  정상 cleanup·residual audit·evidence 보존이 모두 끝난 뒤에만 제거한다. SIGKILL 등으로
-  남으면 같은 `run_id`의 recovery-only 실행 없이는 새 run을 거부한다.
-- executor image와 실행 중인 Map API/UI image의 source revision이 같은 exact commit이고 두
-  runtime이 모두 healthy인지 mutation 전에 fail-close로 확인한다.
-- runner/helper/state helper는 고정 root snapshot의 exact 4-file set, ancestor ownership/mode, manifest
-  commit과 SHA256을 통과해야 한다. executor create/start/wait/remove phase는 raw container
-  identity 대신 SHA256만 durable journal에 남긴다.
-- Playwright는 기존 C7 origin guard·redacted reporter를 재사용해 response/error text, URL,
-  run/Feature ID, trace, screenshot을 evidence에 남기지 않는다.
+- strict `T-ADM-C7` runner에는 Feature mutation을 추가하지 않는다.
+- 새 lane은 C7 host attestation v3와 compatible-pair v4를 read-only로 재검증한 뒤 별도
+  `BLOCKED.json`, `ACTIVE.json`, evidence root를 사용한다.
+- `E2E_LIVE_ALLOW_PROD=1`과 `E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1`을 동시에 요구하며
+  Playwright worker/retry는 1/0이다.
+- run별 Feature ID 8개만 소유한다. 기존 운영 row, 공개 row, 임의 weather/price row를
+  fixture로 빌리지 않는다.
+- 구현 exact head를 단일 적대적 리뷰어가 승인하기 전에는 test·lint·build·parser를 실행하지
+  않는다. 승인 뒤 WSL에서 SSH로 n150 production에 접속해 파괴적 live lane을 실행한다.
 
-## 2. #785 stale correction 인수 시나리오
+## 2. 배포·secret attestation
 
-하나의 owned `place` Feature를 add 요청과 승인으로 만든 뒤 다음 순서를 실제 browser UI와
-admin BFF/API에 걸쳐 검증한다.
+targeted runner 자체의 source 신뢰는 commit별 root snapshot 4파일과 exact manifest로 고정한다.
+실제 배포 신뢰는 root-owned C7 verifier를 호출해 다음을 비교한다.
 
-1. 변경 요청 UI가 `/revision`과 detail을 읽어 같은 revision의 basis를 만들 때 응답 header의
-   raw `ETag`를 캡처한다.
-2. 이름 필드에 사용자의 dirty draft를 입력한다.
-3. 별도 admin API 호출이 같은 baseline `If-Match`로 경쟁 update 요청을 만들고 이를 승인해
-   Feature revision을 전진시킨다.
-4. UI submit request가 최초 basis의 raw `ETag`를 그대로 `If-Match`로 보냈음을 wire에서
-   단언하고, 서버의 `412 Precondition Failed`를 확인한다.
-5. 412 뒤 dirty 입력값과 conflict 안내가 유지되고, 자동 refetch/retry로 mutation이 더
-   발생하지 않음을 확인한다.
-6. 운영자가 명시적으로 `최신값 다시 불러오기`를 눌러야만 경쟁 update 값과 새 basis가
-   적용됨을 확인한다.
-7. cleanup은 새 current ETag로 delete 요청을 만들고 승인해 `status=deleted`까지 확인한다.
+- host machine/hostname, compose project, 공개 UI/API/Dagster origin hash
+- compatible pair active의 Map API/UI/Dagster web/daemon, PinVi API image ID와 source revision
+- 다섯 service의 actual command/environment hash와 건강 상태
+- exact Playwright executor image와 source revision
+- Map API에만 존재하는 production cursor signing secret의 중복 없음·길이·공백·credential 분리
 
-경쟁 update는 단순 row revision 조작이 아니라 실제 승인된 변경 요청이어야 한다. 그래야
-correction UI, review/apply path, row-revision trigger의 결합을 함께 증명한다.
+cursor 값은 출력하지 않는다. Map UI, Dagster web/daemon, PinVi API에 같은 env name이 하나라도
+있으면 mutation 전에 실패한다. exact API image를 network 없이 별도 생성해 cursor secret만
+누락한 production 설정이 Alembic 전에 generic error와 exit 1로 닫히는 것도 증명한다. probe는
+DB와 기존 runtime을 변경하지 않고 종료·삭제되며 enum 결과만 root evidence에 남긴다.
 
-## 3. #741 비공개 Feature 인수 시나리오
+## 3. #785 stale correction
 
-`draft`·`inactive`·`hidden` 상태별 owned `place` Feature 세 건을 add 요청과 승인으로 만든다.
-각 상태에서 다음을 확인한다.
+owned active `place`를 add 요청과 승인으로 만든 뒤 다음 순서를 실제 UI와 BFF에서 검증한다.
 
-- admin `GET /v1/admin/features/in-bounds`의 exact status 조회에는 owned Feature가 포함된다.
-- public detail과 public in-bounds에는 포함되지 않아 active-only predicate가 넓어지지 않는다.
-- `/features` 운영 지도에서 `place`와 exact status 필터를 선택하고 충분히 확대한 뒤 owned
-  marker의 accessible name과 선택 상세의 상태를 실제 DOM에서 확인한다.
+1. `/revision` response header의 raw strong `ETag`와 detail revision으로 편집 basis를 만든다.
+2. 운영자 name/reason dirty draft를 입력한다.
+3. 별도 BFF PATCH가 같은 baseline `If-Match`로 competing change request를 만들고 승인한다.
+4. UI submit이 최초 basis의 raw `If-Match`를 그대로 전송해 412를 받는지 wire에서 확인한다.
+5. dirty draft·conflict UI가 유지되고 자동 refetch/retry/PATCH가 더 생기지 않음을 확인한다.
+6. `최신값으로 폼 다시 불러오기` 뒤에만 competing value와 새 ETag basis가 적용되는지 확인한다.
+7. 새 basis를 쓰는 재요청이 200/pending인지 확인하고 fixture request는 reject한다.
 
-admin API가 만들 수 없는 `weather`·`price` kind는 전용 fixture helper가 hidden owned Feature와
-최소 1개 metric/history row를 transaction으로 만든다. runner는 helper 호출 전에 두 ID를
-root-owned journal과 `BLOCKED.json`에 기록한다. browser는 각 Feature의 admin card 200·target
-identity·non-empty row, kind별 UI panel의 non-error DOM을 확인하고 public detail/card/bbox는
-404 또는 미포함임을 함께 단언한다. 정상·오류 cleanup은 child value row와 owned Feature를
-transaction으로 물리 삭제한다. 삭제 전에는 ID뿐 아니라 `data_origin`·kind·name ownership
-fingerprint와 value fingerprint도 확인한다. 삭제 뒤에는 `pg_catalog.pg_constraint`에서 찾은
-모든 `feature.features(feature_id)` FK reference가 0인지 확인하며, recovery-only도 같은 exact
-ID 외에는 건드리지 않고 seed/add/correction write를 거부한다.
+cleanup은 매번 직전 `/revision` header의 ETag로 delete request를 만들고 승인한다. 최초 ETag,
+JS number로 재구성한 revision, 테스트 메모리 snapshot을 재사용하지 않는다.
 
-## 4. 실패와 복구 불변식
+## 4. #741 비공개 Feature
 
-- setup 중 일부 add만 승인된 경우에도 기록된 모든 owned ID를 역순 cleanup한다.
-- stale UI PATCH가 예상과 달리 200을 반환하거나 pending request를 남기면 cleanup 전에 해당
-  요청을 조회·종결하고 테스트를 실패시킨다.
-- `412` 이후 최신 ETag를 추측하거나 JS number로 재구성하지 않는다.
-- cleanup은 최초 ETag나 테스트 메모리의 revision을 재사용하지 않는다. 직전 `/revision`
-  응답 header를 그대로 사용한다.
-- 기존 Feature를 빌리지 않으므로 원복 body snapshot이나 provider 재적재에 기대지 않는다.
-- normal failure는 best-effort가 아니라 recovery-only browser cleanup과 DB fixture cleanup의
-  결과를 각각 journal에 남기고 residual이 있으면 `BLOCKED.json`을 유지한다. SIGKILL 뒤 수동
-  recovery도 같은 순서를 실행하며 성공 전 새 run을 시작하지 않는다.
+admin API로 `draft`, `inactive`, `hidden` place를 각각 만들고 승인한다. 각 상태에 대해 admin
+exact-status bbox와 실제 지도 marker/detail 상태를 확인한다. public detail은 404여야 하며,
+owned 좌표 주위의 좁은 public bbox가 `mode=items`, `truncated=false`, 반환 수가 limit보다 작은
+조건에서도 ID를 포함하지 않아야 한다. 이 선행 조건은 unrelated public row가 limit을 채워
+숨김 ID의 누출을 가리는 false-green을 막는다.
 
-## 5. 검증 순서
+admin API가 만들 수 없는 hidden weather/price는 exact API image의 standalone helper가
+DB transaction으로 Feature 2개와 value 각 1개를 만든다. browser는 admin exact-kind bbox,
+card target identity·non-empty metric/history, UI panel의 실제 값과 error DOM 부재를 확인하고,
+public detail/card/bbox 404·미포함을 함께 단언한다.
 
-1. docs-first commit과 draft PR을 먼저 공개한다.
-2. exact 구현 head를 단일 적대 리뷰어가 검토한다.
-3. P0~P3가 없다는 승인을 받은 뒤에만 TypeScript·mocked/static gate를 실행한다.
-4. CI green과 배포 exact revision을 확인한 뒤 WSL에서 SSH로 n150에 접속해 official
-   Playwright image로 targeted lane을 1-worker 실행한다.
-5. owned ID 전부가 `deleted`이고 public projection에 남지 않았음을 확인한 증거를 이슈에
-   남긴 뒤 #741·#785를 닫는다.
+direct cleanup은 두 parent의 kind/name/category/status/coordinate/data-origin 및 child value
+fingerprint를 확인한다. `SELECT ... FOR UPDATE` parent lock을 잡은 같은 transaction에서
+`pg_catalog.pg_constraint`로 발견한 모든 child FK를 audit하고 parent를 삭제해 late child
+insert를 막는다. 이후 direct counts 0/0/0과 FK references 0을 다시 확인한다.
+
+## 5. T-VN-15 search total·cursor
+
+같은 유일 검색어를 이름에 포함하되 ID가 다른 active place alpha/beta 2개를 생성·승인한다.
+각 create idempotency key는 `SHA256(feature_id)`로 만들어 두 요청의 충돌을 막는다. browser는
+public key query가 아닌 same-origin `/api/proxy/v1/features/search`만 사용한다.
+
+| 시나리오 | 필수 결과 |
+|---|---|
+| `q`, `page_size=1`, `include_total=false` 첫 page | item 1, `total=null`, non-empty cursor |
+| 같은 query continuation | 다른 owned ID 1, `total=null` |
+| `include_total=true` 첫 page | item 1, `total=2`, non-empty cursor |
+| 같은 query continuation | 다른 owned ID 1, `total=2` |
+| cursor의 `q`만 변경 | 422 problem+json, `CURSOR_QUERY_MISMATCH` |
+| cursor의 `include_total`만 변경 | 422 problem+json, `CURSOR_QUERY_MISMATCH` |
+| payload segment 한 글자 변조·원 signature 유지 | 422 problem+json, `FEATURE_SEARCH_CURSOR_TAMPERED` |
+
+문제 응답은 원 cursor와 변조 cursor를 포함하지 않아야 한다. redacted reporter도 response body,
+assertion value, URL, cursor를 기록하지 않는다.
+
+## 6. SIGKILL·복구 모델
+
+첫 적대 리뷰는 runner가 `docker compose exec` 또는 `docker create` 도중 SIGKILL되면 recovery
+clear 뒤 늦은 seed/container가 생길 수 있는 P1을 확인했다. 최종 설계는 영구 tombstone 대신
+다음 barrier/supervisor 프로토콜을 사용한다.
+
+```mermaid
+sequenceDiagram
+    participant R as runner
+    participant B as barrier flock
+    participant S as setsid supervisor
+    participant D as Docker
+    R->>B: exclusive FD 획득
+    R->>S: FD 상속, operation 실행
+    S->>S: PID/PGID/SID/start ticks + intent fsync
+    S->>D: deterministic labeled create
+    S->>S: CID fsync
+    S->>D: prepare/start/wait/remove
+    S->>S: terminal fsync
+    S-->>B: exit 후 FD 해제
+```
+
+runner만 SIGKILL되면 supervisor는 barrier를 유지한 채 한 operation을 종결한다. recovery는 barrier
+획득 뒤 dead supervisor의 terminal ACTIVE를 요구하고 exact label/name/CID를 대조해 drain한다.
+runner와 supervisor가 함께 사라져 terminal이 없으면 cgroup/OOM/daemon ambiguity로 간주해 자동
+clear하지 않는다. BLOCKED를 유지하고 daemon restart 또는 host reboot로 late work가 없음을
+운영자가 확정해야 한다.
+
+각 정상 operation은 `claim-pending`, `created`, `prepared`, `start-pending`, `started`, `exited`,
+`removed`, `terminal` 8개 exact phase를 갖는다. normal evidence는 probe, seed helper, main/recovery
+executor, cleanup/audit helper의 6×8 events를, recovery evidence는 3×8 events를 요구한다. raw
+container identity는 ACTIVE에만 있고 보존 lifecycle에는 hash만 있다.
+
+## 7. 완료 기준
+
+1. PR #792 exact implementation/docs head를 단일 적대적 리뷰어가 P0~P3 없음으로 승인한다.
+2. 그 뒤 static/unit/frontend/build 및 관련 repository/attestation gate를 실행한다.
+   exact-tree PostgreSQL regression에서 `include_total=false`의 COUNT statement 0회와
+   `include_total=true`의 COUNT statement 1회를 함께 증명한다. live HTTP total 값만으로 이
+   실행 횟수를 추정하지 않는다.
+3. CI green과 exact 배포 commit/image/attestation을 확인한다.
+4. WSL에서 n150 production에 SSH로 접속해 targeted lane을 실행한다.
+5. API pending 0, API-owned deleted/public 0, direct 0/0/0, FK reference 0,
+   Docker label/name 0, BLOCKED/ACTIVE 없음, exact evidence fsync를 확인한다.
+6. redacted live 결과를 #741/#785와 T-VN-15 추적에 남기고 두 issue를 닫는다.
+
+운영 명령, snapshot mode, catastrophic recovery 판단, evidence 판정은
+[targeted runbook](../runbooks/admin-feature-live-acceptance.md)을 정본으로 한다.

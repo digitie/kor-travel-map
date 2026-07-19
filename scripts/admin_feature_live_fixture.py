@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """#741 production live 인수용 weather/price owned fixture 관리.
 
-이 helper는 API container 안에서 stdin으로 실행한다. 운영 기존 row를 빌리지 않고
-실행별 exact ID 두 건만 transaction으로 seed/cleanup/audit한다. host runner가 mutation
-전에 root-owned BLOCKED/journal을 기록하는 것이 선행조건이다.
+이 helper는 exact API image의 standalone container에 read-only bind mount해 실행한다.
+운영 기존 row를 빌리지 않고 실행별 exact ID 두 건만 transaction으로
+seed/cleanup/audit한다. host runner가 mutation 전에 root-owned BLOCKED/journal을 기록하는
+것이 선행조건이다.
 """
 
 from __future__ import annotations

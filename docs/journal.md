@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex agent B) — targeted production lane 적대 리뷰 보강
+
+- PR #792의 첫 적대 리뷰 P1/P2 다섯 건을 반영했다. runner process가 죽은 뒤 늦은 Docker
+  create/exec가 recovery clear를 추월하는 창을 없애기 위해 `docker compose exec`를 폐기하고,
+  inherited flock과 `setsid` supervisor가 create/start/wait/remove/terminal 전체를 소유하게 했다.
+  permanent tombstone은 남기지 않는다. supervisor까지 terminal 없이 죽은 상태만 운영자 확인이
+  필요한 fail-closed BLOCKED로 유지한다.
+- caller/OCI self-label 비교 대신 root-owned strict C7 attestation verifier를 exact snapshot에서
+  재사용한다. host/origin/compose project, compatible-pair v4 active image, command/env hash,
+  source revision을 actual runtime과 비교하고, cursor signing secret이 Map API에 정확히 한 번만
+  존재하며 다른 credential과 다르고 네 다른 role에는 없는지 음수 테스트로 고정했다.
+- exact API image를 network-none/read-only로 생성해 cursor secret 누락 시 migration 전에 exit 1과
+  generic message로 닫히는 probe를 추가했다. probe/container raw identity나 stderr는 evidence에
+  남기지 않고 enum 결과와 hash lifecycle만 보존한다.
+- #741 public bbox는 좁은 좌표 범위에서 items/non-truncated/non-full 조건을 선행 단언한다.
+  cleanup은 owned parent를 `FOR UPDATE`로 잠근 transaction 안에서 fingerprint·FK audit·delete를
+  수행한다. 이는 PostgreSQL child FK insert의 `KEY SHARE`와 경합하므로 late child를 막는다.
+- `T-VN-15`는 같은 검색어의 active place 2건과 Feature-ID-derived idempotency key를 사용한다.
+  BFF search의 total on/off 두 page, query/include_total mismatch, payload 한 글자 tamper와 cursor
+  비반사를 production live 계약에 포함했다.
+- lifecycle/evidence exact file set·phase·count·schema·root mode와 fsync-before-result/clear를 정적
+  계약으로 고정했다. 구현/static contract 커밋 시점에는 정책에 따라 테스트·lint·build·parser를
+  실행하지 않았다.
+
 ## 2026-07-20 (codex agent B) — #741·#785 live 인수 경계 문서화
 
 - issue #741·#785의 구현은 main에 있지만 production browser가 보낸 stale raw

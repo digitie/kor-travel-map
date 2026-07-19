@@ -18,7 +18,7 @@ Codex / Google Antigravity 가 **같은 파일을 공유**한다 — 내용은 �
 | [branch-protection.md](./branch-protection.md) | GitHub `main` branch protection 운영자 설정. PR 필수, required checks, force-push 차단 |
 | [docker-app.md](./docker-app.md) | 독립 Docker app 기동/중지/스모크. 고정 포트: API 12701, admin UI 12705, Dagster 12702 |
 | [c7-prod-live-e2e.md](./c7-prod-live-e2e.md) | C6c 뒤 n150 production 파괴적 C7 live E2E의 image/schema/job attestation, 실행, evidence, `BLOCKED.json` 복구 |
-| [admin-feature-live-acceptance.md](./admin-feature-live-acceptance.md) | #741/#785 전용 owned Feature production live lane, 별도 `BLOCKED.json`·recovery-only cleanup |
+| [admin-feature-live-acceptance.md](./admin-feature-live-acceptance.md) | #741/#785/T-VN-15 owned Feature production live lane, C7 attestation 재사용, SIGKILL-safe supervisor·별도 recovery |
 | [admin-ui-screen-checklist.md](./admin-ui-screen-checklist.md) | admin UI 16 route 화면별 점검(필터/cursor/빈·에러/kill-switch/a11y/e2e 매트릭스) + 신규 폼 추가 절차 (T-218f) |
 | [cross-repo-audit-checklist.md](./cross-repo-audit-checklist.md) | 분기 1회 4-repo 계약/문서 drift 점검(origin/main 실측·계약 대조·전제 신선도·결정 전파) (T-217d) — 연동 지도는 [`../integration-map.md`](../integration-map.md) |
 | [../backup-restore.md](../backup-restore.md) | 독립 app cold backup/restore 경계. 대상: `kor_travel_map` + `kor_travel_map_dagster` + RustFS |

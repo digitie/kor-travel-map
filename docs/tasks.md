@@ -28,6 +28,8 @@
   - [ ] `T-VN-15` — **search total과 HMAC cursor fingerprint**
     (PR #780 integration 병합·n150 live 대기)
   - [ ] `T-VN-58` — **correction 편집 기준 ETag 고정** (#785)
+  - [ ] `T-VN-LIVE-01` — **#741/#785/T-VN-15 targeted production 인수**
+    (agent B, draft PR #792; 단일 적대 리뷰·gate·n150 live·issue close 대기)
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
     `T-VN-16` weather batch와 부모 404.
@@ -274,14 +276,14 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
   운영자가 명시적으로 최신값을 다시 불러온 뒤 검토·재적용하게 한다. DB와 REST/OpenAPI schema는
   바꾸지 않는다.
 
-  - [ ] `/revision` → feature detail 순서로 읽고 두 응답의 `row_revision`이 같을 때만 basis를
+  - [x] `/revision` → feature detail 순서로 읽고 두 응답의 `row_revision`이 같을 때만 basis를
     확정한다. 경쟁 갱신으로 다르면 제한 횟수만 재시도하고, 응답 header의 raw `ETag` 문자열을
     재구성·정규화하지 않은 채 feature ID와 함께 고정한다.
-  - [ ] PATCH/DELETE mutation 변수는 고정된 `entityTag`를 필수로 받고 내부 `/revision` 재조회 없이
+  - [x] PATCH/DELETE mutation 변수는 고정된 `entityTag`를 필수로 받고 내부 `/revision` 재조회 없이
     그대로 `If-Match`에 전달한다. update와 delete 선택은 각각 자기 feature basis를 사용한다.
-  - [ ] background refetch·query invalidation은 dirty form과 고정 basis를 덮어쓰지 않는다. 412 UI는
+  - [x] background refetch·query invalidation은 dirty form과 고정 basis를 덮어쓰지 않는다. 412 UI는
     draft를 유지하고 명시적 reload 조작을 제공하며, reload 성공 때만 새 detail·basis를 적용한다.
-  - [ ] frontend client/component 회귀, mocked Playwright의 stale 412→reload 흐름, live cleanup의
+  - [x] frontend client/component 회귀, mocked Playwright의 stale 412→reload 흐름, live cleanup의
     직전 revision ETag 기반 DELETE를 추가한다. 단일 적대 리뷰 승인 전에는 test·lint·build를
     실행하지 않는다.
   - [ ] [targeted n150 live lane](reports/t-vn-live-acceptance-741-785-2026-07-20.md)에서 승인된
@@ -315,6 +317,25 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
   PR #780으로 `integration/t-vn@7604fc92`에 병합했다. 최종 main 합류와 n150 live에서 production
   signing secret의 fail-closed 기동, 정상 continuation, 변조·query mismatch 422를 확인할 때까지
   task는 active로 유지한다.
+
+- [ ] T-VN-LIVE-01 — **#741/#785/T-VN-15 targeted production 인수**
+
+  agent B가 draft PR #792 한 개로 소유한다. agent A의 C6c/C7P/C7 배포 조합 확정과 병행하되,
+  strict C7 state에는 Feature mutation을 넣지 않는다.
+
+  - [x] owned ID 8개, standalone direct helper, API/BFF browser cleanup, root-owned BLOCKED/ACTIVE,
+    commit별 source snapshot을 구현한다.
+  - [x] setsid lifecycle supervisor와 inherited barrier flock으로 runner SIGKILL 뒤 late Docker
+    create/start/remove를 직렬화하고, terminal 없는 cgroup/OOM kill은 자동 clear하지 않는다.
+  - [x] C7 host attestation v3·compatible-pair v4 actual runtime 검증, API-only cursor secret 음성
+    계약, exact API image의 pre-migration missing-secret probe를 추가한다.
+  - [x] #741 좁은 public bbox 비누출, #785 stale raw ETag, `T-VN-15` total/continuation/query
+    mismatch/tamper를 same-origin BFF live spec으로 묶고 cleanup parent `FOR UPDATE`를 적용한다.
+  - [ ] exact implementation/docs head를 단일 적대적 리뷰어가 P0~P3 없음으로 승인한다.
+  - [ ] 승인 뒤 static/unit/frontend/build gate와 CI를 통과하고 exact-tree PostgreSQL regression의
+    search total false/true COUNT 0/1회를 확인한다.
+  - [ ] WSL SSH를 통한 n150 production destructive live에서 cleanup/audit/container/evidence 0/완결을
+    증명하고 #741·#785를 닫은 뒤 이 task를 `tasks-done.md`로 옮긴다.
 
 - [ ] T-VN-16 — **weather batch와 부모 404**
 
