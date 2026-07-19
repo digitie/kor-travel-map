@@ -127,7 +127,7 @@
 | kor-travel-map admin + canonical ops (`/v1/admin/*`·`/v1/ops/{datasets,pipeline}*`) | same-origin Next.js BFF의 proxy secret + actor + trusted peer CIDR. Docker는 secret 필수·frontend 단일 `/32` | 〃 | 〃 |
 | kor-travel-map ops live WebSocket | BFF가 발급한 짧은 수명 HMAC subprotocol ticket + DB nonce 단일 소비 + bounded lease | WebSocket event frame | 인증/만료는 data frame 없이 close 4401/4408 |
 | kor-travel-map Prometheus `/metrics` | `KOR_TRAVEL_MAP_API_METRICS_TOKEN` 설정 시 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) — production은 token 필수. **목표**: docker-manager Prometheus가 인증 헤더로 12701 scrape(현재 그 job 없음 — 배포 시 `authorization`(Bearer)와 함께 신규 추가, scrape config→token 순서) | Prometheus exposition | 비-Bearer/불일치 401 |
-| kor-travel-map 관측/debug 잔여 (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep}`, `/v1/debug/mois-license/*`) | 현재 app dependency 없음 — **해결 전 노출 금지인 알려진 gap**(route policy matrix의 `KNOWN_WIRING_EXCEPTIONS` ledger, T-VN-03 소유) | 표면별 기존 envelope | 표면별 기존 계약 |
+| kor-travel-map 관측/debug 잔여 (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep}`, `/v1/debug/mois-license/*`) | **T-VN-03 목표**: ops는 AdminBFF 또는 `OpsToken+OpsScope(ops:read)`, MOIS raw는 production unmount + local-dev AdminBFF/operator gate. PinVi issue #392 소비자 선전환과 동일 cutover 전까지 현행 무의존 route 노출 금지 | 표면별 기존 envelope | RFC7807 `problem+json` |
 | kor-travel-concierge export (`/api/v1/features/*`) | DB `read` scope `X-API-Key` | **무-envelope** `{items, next_cursor, has_more}` (내부 export 단순 계약) | HTTP status |
 | PinVi 자체 API (`:9021`) | 쿠키 세션/OAuth | PinVi 자체 `Envelope` | PinVi 자체 |
 
@@ -152,6 +152,7 @@ C6c v4 capture를 수행하고, 그 capture 증거로 C7 live를 실행한다.
 | 변경 | PinVi 선행 조건 | KTM 전환 조건 |
 |---|---|---|
 | ops datasets/pipeline | `T-ADM-C6c` canonical caller, 최소 service/operator principal, 삭제 경로 0건 | 양 저장소 commit pair 인증·응답 smoke 뒤 C7 |
+| ops 관측 read | PinVi issue #392의 consistency/log caller `ops:read` 전환과 metrics/health-deep direct caller inventory | T-VN-03 operator gate·route exception 0건; 두 head를 C6c manifest v4 exact pair source에 포함 |
 | feature batch | 5-state typed DTO, transport 503 stale 유지, opaque UUID 보존 | state classifier와 revision, pinned service OpenAPI |
 | Feature UUID | legacy alias-map DB 이관과 모든 FK/consumer 참조 shadow 검증 | UUID read/write 전환, alias lookup 보존, checksum 일치 |
 | weather | set-based batch와 `target_at`/`known_at` typed consumer | bitemporal fact/current projection과 parent 404 |

@@ -14,7 +14,11 @@
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-01` — **latest main → integration/t-vn 동기화**
     (`main@d2104f15`, branch `chore/t-vn-sync-main`)
-  - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate** (T-VN-00/C6c cutover와 동일 배포 단위)
+  - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate**
+    ([설계](reports/t-vn-03-route-gate-cutover-2026-07-19.md), PinVi issue
+    [#392](https://github.com/digitie/pinvi/issues/392)). curated GET 4개는 public key,
+    ops 관측 GET 6개는 operator, MOIS raw debug는 local-dev mount+operator로 clean-cut한다.
+    PinVi #392 head와 Map head를 C6c manifest v4 exact pair source에 포함한 동일 배포 단위만 허용한다.
   - [ ] `T-VN-04A` — **admin 비공개 feature 공간 조회·카드 표면 복원** (#741)
   - [ ] `T-VN-15` — **search total과 HMAC cursor fingerprint** (PR #780 구현 준비 완료·테스트 전 리뷰 대기)
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·

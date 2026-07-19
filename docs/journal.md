@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex, agent B) — T-VN-03 route gate docs-first
+
+- 최신 `integration/t-vn@a45bc3ac`에서 curated public GET 4개, ops 관측 GET 6개,
+  MOIS raw debug GET 1개의 현행 mount와 route policy를 대조했다.
+- ops는 기존 `require_ops_operator`, curated는 `require_public_api_key`, MOIS raw는 production
+  unmount를 유지하면서 local-dev mount에도 `require_admin_frontend`를 적용하는 clean-cut을 정했다.
+  새 secret/env, DB migration, alias, 삭제 route 복원은 없다.
+- PinVi PR #387의 관측 client 네 메서드가 `_ops_headers("ops:read")`를 사용하지 않는 blocker를
+  확인해 issue #392를 만들었다. Map+PinVi exact heads는 C6c manifest v4 source pair에 함께
+  결박해야 한다.
+- CodeGraph 영향도는 Map `app.py` 38 symbols, ops dependency caller 10개, public dependency
+  caller 3개, route wiring gate caller 5개다. 동일 리뷰어의 양 저장소 교차 승인 전에는
+  테스트·lint·build를 실행하지 않는다.
+
 ## 2026-07-19 (codex, agent B) — T-VN-15 search total·HMAC cursor 구현 준비
 
 - `/v1/features/search`는 `include_total=false`에서 COUNT SQL을 만들거나 실행하지 않고,
@@ -18,7 +32,6 @@
 - repository statement spy와 실제 PostgreSQL COUNT 관측, query mismatch DB 0회, 변조·unknown
   version·malformed/keyset 회귀, production/runtime env matrix, API error code와 UI request builder
   테스트를 작성했다. 이 단계에서는 리뷰 정책에 따라 아직 실행하지 않았다.
-
 ## 2026-07-19 — T-VN-04A admin 비공개 Feature 공간·카드 구현 (codex agent B)
 
 - issue #741의 두 회귀를 한 PR 경계로 확정했다. admin `/features` 지도는 공개 bbox/cluster를
