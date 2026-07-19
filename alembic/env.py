@@ -16,11 +16,18 @@ import asyncio
 from logging.config import fileConfig
 from typing import TYPE_CHECKING
 
+from alembic.script import ScriptDirectory
 from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+from kortravelmap.infra.alembic_exclusions import (
+    UNCOMPARED_INDEXES as _UNCOMPARED_INDEXES,
+)
+from kortravelmap.infra.alembic_exclusions import (
+    UNMAPPED_APP_TABLES as _UNMAPPED_APP_TABLES,
+)
 from kortravelmap.infra.db import normalize_async_dsn
 from kortravelmap.infra.models import metadata
 
@@ -53,6 +60,134 @@ else:
 # autogenerate 대상 metadata.
 target_metadata = metadata
 
+_FORWARD_ONLY_BOUNDARY = "0060_weather_integrity"
+
+
+def _revisions_include_forward_only_boundary(
+    script: ScriptDirectory,
+    revisions: tuple[str, ...],
+) -> bool:
+    """revision 집합 또는 그 조상에 0060 forward-only 경계가 있는지 반환한다."""
+    if not revisions:
+        return False
+    return any(
+        node.revision == _FORWARD_ONLY_BOUNDARY
+        for node in script.iterate_revisions(revisions, None, inclusive=True)
+    )
+
+
+def _guard_forward_only_target() -> None:
+    """downgrade/stamp 계획이 0060 아래로 가면 첫 step 전에 거부한다."""
+    migration_context = context.get_context()
+    migration_fn = migration_context.opts.get("fn")
+    if migration_fn is None or migration_fn.__name__ not in {
+        "downgrade",
+        "do_stamp",
+    }:
+        # upgrade는 경계를 내리지 않는다. current/check/autogenerate callback은
+        # 여기서 실행하면 출력·reflection·hook이 두 번 실행되므로 건드리지 않는다.
+        return
+
+    current_heads = migration_context.get_current_heads()
+    script = ScriptDirectory.from_config(config)
+    destination = migration_context.opts.get("destination_rev")
+    if migration_fn.__name__ == "downgrade":
+        planned_steps = tuple(
+            script._downgrade_revs(  # type: ignore[arg-type]  # noqa: SLF001
+                destination,
+                current_heads,
+            )
+        )
+    else:
+        # stamp --purge는 run_migrations()가 version table을 비운 뒤 callback을
+        # 실행한다. guard는 purge 전 current head로 하향 경계만 판정하고 실제
+        # callback은 Alembic이 정상 시점에 정확히 한 번 실행하게 둔다.
+        planned_steps = tuple(
+            script._stamp_revs(destination, current_heads)  # noqa: SLF001
+        )
+    crosses_boundary = any(
+        step.is_downgrade
+        and _revisions_include_forward_only_boundary(
+            script,
+            step.from_revisions_no_deps,
+        )
+        and not _revisions_include_forward_only_boundary(
+            script,
+            step.to_revisions_no_deps,
+        )
+        for step in planned_steps
+    )
+    if crosses_boundary:
+        raise RuntimeError(
+            "0060 is forward-only: restore the pre-cutover backup/PITR under a "
+            "writer fence and roll back the writer image as one operation"
+        )
+
+
+# ``alembic check`` 정합 필터 (ADR-075 D-12-2, T-VN-19).
+# ``include_schemas=True`` + ``compare_type`` 은 app schema 밖 객체와 아직 ORM
+# 모델이 없는 app table까지 비교해 clean DB check 를 실패시킨다. 아래 3개 명시
+# 목록만 비교에서 제외한다(blanket ignore 아님 — 이름을 전부 나열).
+#
+# 1) PostGIS/extension 소유 객체: ``spatial_ref_sys`` 는 x_extension 확장이
+#    소유하며 app 스키마가 관리하지 않는다(search_path 때문에 schema=None 으로도
+#    반사돼 이름으로 건다). ``alembic_version`` 은 alembic 이 자동 제외한다.
+_POSTGIS_TABLE_NAMES = frozenset({"spatial_ref_sys"})
+
+# 2) ORM 모델이 아직 없는 app-owned table (raw-SQL migration 으로만 생성).
+#    weather/price 는 T-VN-17/38 이, ops-live/log/key 계열은 별도 wave 가 모델을
+#    도입할 때 공용 ledger에서 제거한다. 그때까지 명시 제외한다.
+
+# 모델을 추가한 뒤 위 제외 목록을 지우지 않으면 새 metadata drift를 영구히
+# 숨길 수 있다. Alembic이 시작될 때 즉시 실패시켜 exclusion의 수명을 제한한다.
+_STALE_UNMAPPED_APP_TABLES = _UNMAPPED_APP_TABLES.intersection(
+    (table.schema, table.name) for table in target_metadata.tables.values()
+)
+if _STALE_UNMAPPED_APP_TABLES:
+    stale_names = ", ".join(
+        f"{schema}.{table}" for schema, table in sorted(_STALE_UNMAPPED_APP_TABLES)
+    )
+    msg = (
+        "alembic unmapped-table exclusions now have SQLAlchemy mappings; "
+        f"remove the stale exclusions: {stale_names}"
+    )
+    raise RuntimeError(msg)
+
+# 3) alembic autogenerate 가 round-trip 하지 못하는 partial/expression index.
+#    WHERE 절·JSONB expression 의 reflected 표현을 metadata 표현과 byte-identical 로
+#    맞추지 못한다. 이름으로 제외하되, 삭제·정의 변경 미탐지 공백은
+#    ``test_alembic_uncompared_indexes_keep_exact_semantics``가 UNIQUE 여부·키 순서·
+#    predicate까지 PostgreSQL catalog로 고정해 메운다.
+
+
+def _object_schema(object_: object) -> str | None:
+    schema = getattr(object_, "schema", None)
+    if isinstance(schema, str):
+        return schema
+    table = getattr(object_, "table", None)
+    table_schema = getattr(table, "schema", None)
+    return table_schema if isinstance(table_schema, str) else None
+
+
+def _include_object(
+    object_: object,
+    name: str | None,
+    type_: str,
+    reflected: bool,  # noqa: FBT001 — alembic callback signature.
+    compare_to: object,
+) -> bool:
+    """비-app 객체와 미모델 app table/expression index 를 비교에서 제외한다."""
+
+    schema = _object_schema(object_) or _object_schema(compare_to)
+    if type_ == "table":
+        return name not in _POSTGIS_TABLE_NAMES and (
+            schema,
+            name,
+        ) not in _UNMAPPED_APP_TABLES
+    if type_ == "index":
+        return (schema, name) not in _UNCOMPARED_INDEXES
+    return True
+
 
 def run_migrations_offline() -> None:
     """offline mode — SQL 출력만 (실 DB connect 안 함)."""
@@ -83,8 +218,13 @@ def do_run_migrations(connection: Connection) -> None:
         # 비교 시 server_default / type / nullable / ... 변경 모두 감지.
         compare_type=True,
         compare_server_default=True,
+        # 비-app·미모델 객체 제외 (ADR-075 D-12-2, T-VN-19 alembic check gate).
+        include_object=_include_object,
     )
     with context.begin_transaction():
+        # 0061+ descendant의 downgrade가 일부 commit된 뒤 0060에서 멈추지 않도록
+        # destination 전체를 migration step 실행 전에 판정한다.
+        _guard_forward_only_target()
         # ADR-008 — search_path를 Alembic이 소유한 트랜잭션 **안에서** 설정.
         # 0002의 ``coord_5179`` STORED 생성 컬럼이 ``x_extension`` 의 PostGIS
         # ``ST_Transform`` 을 참조하므로 DDL 실행 전 search_path 필요.

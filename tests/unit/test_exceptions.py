@@ -11,6 +11,11 @@ import pytest
 from kortravelmap.core.exceptions import (
     DuplicateFeatureError,
     FeatureNotFoundError,
+    FeatureSearchCursorError,
+    FeatureSearchCursorInvalidError,
+    FeatureSearchCursorQueryMismatchError,
+    FeatureSearchCursorTamperedError,
+    FeatureSearchCursorVersionUnsupportedError,
     FileStoreError,
     ImportJobConflictError,
     KorTravelMapError,
@@ -35,6 +40,11 @@ def test_base_exception_is_subclass_of_exception() -> None:
         ImportJobConflictError,
         ProviderError,
         FileStoreError,
+        FeatureSearchCursorError,
+        FeatureSearchCursorInvalidError,
+        FeatureSearchCursorVersionUnsupportedError,
+        FeatureSearchCursorTamperedError,
+        FeatureSearchCursorQueryMismatchError,
     ],
 )
 def test_all_subclasses_inherit_from_base(exc_cls: type[KorTravelMapError]) -> None:
@@ -79,6 +89,11 @@ def test_all_exported_via_module() -> None:
         "ImportJobConflictError",
         "ProviderError",
         "FileStoreError",
+        "FeatureSearchCursorError",
+        "FeatureSearchCursorInvalidError",
+        "FeatureSearchCursorVersionUnsupportedError",
+        "FeatureSearchCursorTamperedError",
+        "FeatureSearchCursorQueryMismatchError",
     }
     assert set(exc_mod.__all__) == expected
     for name in expected:
@@ -98,5 +113,10 @@ def test_exceptions_reexported_from_core_package() -> None:
         "ImportJobConflictError",
         "ProviderError",
         "FileStoreError",
+        "FeatureSearchCursorError",
+        "FeatureSearchCursorInvalidError",
+        "FeatureSearchCursorVersionUnsupportedError",
+        "FeatureSearchCursorTamperedError",
+        "FeatureSearchCursorQueryMismatchError",
     ):
         assert hasattr(core, name), f"{name} not re-exported from kortravelmap.core"

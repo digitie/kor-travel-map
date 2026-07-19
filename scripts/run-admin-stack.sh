@@ -189,6 +189,55 @@ else
   fi
 fi
 
+cursor_signing_key=KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET
+cursor_signing_secret="${API_SCOPED_VALUES[$cursor_signing_key]:-}"
+api_profile="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_PROFILE]:-local-dev}"
+features_routes_enabled="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED]:-true}"
+if [[ "$api_profile" != "production" && "$api_profile" != "local-dev" ]]; then
+  echo "KOR_TRAVEL_MAP_API_PROFILE must be exactly production or local-dev" >&2
+  exit 1
+fi
+if [[ "$features_routes_enabled" != "true" && "$features_routes_enabled" != "false" ]]; then
+  echo "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED must be exactly true or false" >&2
+  exit 1
+fi
+if [[ "$api_profile" == "production" && "$features_routes_enabled" == "true" && -z "$cursor_signing_secret" ]]; then
+  echo "production profile is fail-closed (ADR-066): $cursor_signing_key must be configured while the public features surface is enabled" >&2
+  exit 1
+fi
+if [[ -n "$cursor_signing_secret" ]]; then
+  if [[ "$cursor_signing_secret" =~ [[:space:]] ]]; then
+    echo "$cursor_signing_key must contain no whitespace" >&2
+    exit 1
+  fi
+  if [[ ${#cursor_signing_secret} -lt 32 ]]; then
+    echo "$cursor_signing_key must be at least 32 characters" >&2
+    exit 1
+  fi
+  api_service_token="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_SERVICE_TOKEN]:-}"
+  api_metrics_token="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_METRICS_TOKEN]:-}"
+  api_public_key="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_VWORLD_API_KEY]:-}"
+  if [[ "$cursor_signing_secret" == "$frontend_proxy_secret" \
+    || ( -n "$api_service_token" && "$cursor_signing_secret" == "$api_service_token" ) ]]; then
+    echo "$cursor_signing_key must be distinct from admin and service credentials" >&2
+    exit 1
+  fi
+  if [[ "$ops_read_is_set" == "1" \
+    && ( "$cursor_signing_secret" == "${API_SCOPED_VALUES[$ops_read_key]}" \
+      || "$cursor_signing_secret" == "${API_SCOPED_VALUES[$ops_cancel_key]}" ) ]]; then
+    echo "$cursor_signing_key must be distinct from ops credentials" >&2
+    exit 1
+  fi
+  if [[ -n "$api_metrics_token" && "$cursor_signing_secret" == "$api_metrics_token" ]]; then
+    echo "$cursor_signing_key must be distinct from the metrics credential" >&2
+    exit 1
+  fi
+  if [[ -n "$api_public_key" && "$cursor_signing_secret" == "$api_public_key" ]]; then
+    echo "$cursor_signing_key must be distinct from the public API key" >&2
+    exit 1
+  fi
+fi
+
 api_backup_root="${API_SCOPED_VALUES[KOR_TRAVEL_MAP_API_BACKUP_ROOT]:-data/backups}"
 if [[ "$api_backup_root" != /* ]]; then
   api_backup_root="$ROOT_DIR/$api_backup_root"

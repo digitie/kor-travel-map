@@ -31,14 +31,24 @@ ADR 참조
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
+import hmac
 import json
+import math
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
+
+from kortravelmap.core.exceptions import (
+    FeatureSearchCursorInvalidError,
+    FeatureSearchCursorQueryMismatchError,
+    FeatureSearchCursorTamperedError,
+    FeatureSearchCursorVersionUnsupportedError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -75,6 +85,9 @@ __all__ = [
     "purge_expired_notices",
     "get_feature_row",
     "get_feature_rows_by_ids",
+    "get_public_feature_row",
+    "get_public_feature_rows_by_ids",
+    "public_active_notice_filter_sql",
     "public_active_notice_feature_ids",
     "list_active_place_coords",
     "list_primary_place_locator",
@@ -378,8 +391,9 @@ ON CONFLICT (feature_id, source_entity_key) DO UPDATE SET
 RETURNING (xmax = 0) AS inserted
 """
 
-_GET_FEATURE_SQL: Final[str] = """
-SELECT
+# feature 상세 row projection — raw read(``feature.features``)와 공개
+# read(``feature.public_features``, ADR-067)가 같은 컬럼 목록을 공유한다.
+_FEATURE_ROW_COLUMNS_SQL: Final[str] = """
     feature_id, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
     coord_precision_digits,
@@ -393,28 +407,34 @@ SELECT
     legal_dong_code, sido_code, sigungu_code,
     marker_icon, marker_color, status,
     parent_feature_id, sibling_group_id,
-    created_at, updated_at, deleted_at
+    created_at, updated_at, deleted_at,
+    row_revision
+"""
+
+_GET_FEATURE_SQL: Final[str] = f"""
+SELECT {_FEATURE_ROW_COLUMNS_SQL}
 FROM feature.features
 WHERE feature_id = :feature_id
 """
 
-_GET_FEATURES_BY_IDS_SQL: Final[str] = """
-SELECT
-    feature_id, kind, name, category,
-    x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
-    coord_precision_digits,
-    CASE
-      WHEN kind = 'area' AND geom IS NOT NULL
-      THEN x_extension.ST_Area(CAST(geom AS x_extension.geography))
-      ELSE NULL
-    END AS area_square_meters,
-    x_extension.ST_SRID(coord_5179) AS coord_5179_srid,
-    address, detail, urls, raw_refs,
-    legal_dong_code, sido_code, sigungu_code,
-    marker_icon, marker_color, status,
-    parent_feature_id, sibling_group_id,
-    created_at, updated_at, deleted_at
+_GET_FEATURES_BY_IDS_SQL: Final[str] = f"""
+SELECT {_FEATURE_ROW_COLUMNS_SQL}
 FROM feature.features
+WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+"""
+
+# 공개 단건/batch — ADR-067 단일 공개 projection(``feature.public_features``,
+# alembic 0059)만 조회한다. 술어(status='active' AND deleted_at IS NULL)는
+# VIEW 한 곳에만 정의되어 있고 여기서는 재구현하지 않는다.
+_GET_PUBLIC_FEATURE_SQL: Final[str] = f"""
+SELECT {_FEATURE_ROW_COLUMNS_SQL}
+FROM feature.public_features
+WHERE feature_id = :feature_id
+"""
+
+_GET_PUBLIC_FEATURES_BY_IDS_SQL: Final[str] = f"""
+SELECT {_FEATURE_ROW_COLUMNS_SQL}
+FROM feature.public_features
 WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
 """
 
@@ -530,20 +550,42 @@ def _canonical_notice_feature_sql(feature_alias: str, source_alias: str) -> str:
 # 종료된 notice 숨김 — valid_end_time이 지난 notice는 지도/검색에서 제외한다
 # (§9 "활성 notice만 표시", #632). KREX feed 소멸 reconcile·KMA 해제가 채운
 # valid_end_time이 이 필터로 즉시 반영된다.
-_ENDED_NOTICE_HIDDEN_SQL: Final[str] = """
+#
+# 방어적 cast (report §2 D-9-7 (+ T-VN-06 row)): detail->>'valid_end_time'은
+# free-form jsonb라 오염된 한 행(빈 문자열·garbage·잘못된 timezone)이 직접
+# CAST에서 예외를 던지면 이 함수를 공유하는 **모든** 공개 read가 500이 된다.
+# #745가 이 함수를 curated/curation/collection 표면의 notice 감산 정본으로
+# 만들었으므로, 여기 한 곳의 가드가 그 표면들까지 동시에 보호한다.
+# pg_input_is_valid(PG16+, 배포/테스트 이미지 모두 16 고정)로 가드하고,
+# 파싱 불가면 fail-closed로 그 notice를 제외한다(ELSE false — 노출 아님).
+# JSON null/키 부재는 기존 의미 유지(종료시각 없음 = 활성). CASE는 THEN이
+# WHEN 참일 때만 평가되는 것을 보장한다(AND/OR는 평가 순서 미보장).
+# typed notice 재설계·관측(카운터)은 T-VN-37 소유.
+def _ended_notice_hidden_sql(feature_alias: str) -> str:
+    """종료된 notice를 숨기는 SQL fragment를 feature alias에 맞춰 만든다."""
+
+    return f"""
   AND (
-    f.kind <> 'notice'
-    OR (f.detail ->> 'valid_end_time') IS NULL
-    OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
+    {feature_alias}.kind <> 'notice'
+    OR ({feature_alias}.detail ->> 'valid_end_time') IS NULL
+    OR CASE
+         WHEN pg_input_is_valid({feature_alias}.detail ->> 'valid_end_time', 'timestamptz')
+         THEN CAST({feature_alias}.detail ->> 'valid_end_time' AS timestamptz) > now()
+         ELSE false
+       END
   )
 """
+
 
 # 한 feature에 여러 계보의 primary entity가 연결될 수 있다. 각 계보의 실제 최신 row를
 # 고른 뒤 **모든 계보에서 밀린 feature만** 숨긴다. 한 계보라도 winner면 feature 전체를
 # 보존하며, current primary source가 없는 notice도 기존처럼 표시한다.
-_LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
+def _latest_notice_only_sql(feature_alias: str) -> str:
+    """구버전 notice를 숨기는 SQL fragment를 feature alias에 맞춰 만든다."""
+
+    return f"""
   AND (
-    f.kind <> 'notice'
+    {feature_alias}.kind <> 'notice'
     OR NOT EXISTS (
       SELECT 1
       FROM (
@@ -561,13 +603,13 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
                 cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
             ) AS seen_at,
             cur_sr.source_record_key,
-            {_canonical_notice_feature_sql("f", "cur_sr")} AS canonical_identity
+            {_canonical_notice_feature_sql(feature_alias, "cur_sr")} AS canonical_identity
         FROM provider_sync.source_links AS cur_sl
         JOIN provider_sync.source_entities AS cur_se
           ON cur_se.source_entity_key = cur_sl.source_entity_key
         JOIN provider_sync.source_records AS cur_sr
           ON cur_sr.source_record_key = cur_se.current_source_record_key
-        WHERE cur_sl.feature_id = f.feature_id
+        WHERE cur_sl.feature_id = {feature_alias}.feature_id
           AND cur_sl.is_primary_source
         ORDER BY
             cur_sr.provider,
@@ -593,7 +635,7 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
           AND other_se.dataset_key = current_notice.dataset_key
           AND other_se.source_entity_type = current_notice.source_entity_type
           AND other_sl.is_primary_source
-          AND other_f.feature_id <> f.feature_id
+          AND other_f.feature_id <> {feature_alias}.feature_id
           AND other_f.kind = 'notice'
           AND other_f.deleted_at IS NULL
           AND (
@@ -619,7 +661,7 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
                 OR (
                   {_canonical_notice_feature_sql("other_f", "other_sr")}
                     = current_notice.canonical_identity
-                  AND other_f.feature_id < f.feature_id
+                  AND other_f.feature_id < {feature_alias}.feature_id
                 )
               )
             )
@@ -635,15 +677,116 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
 # 지도 bbox뿐 아니라 cluster/search/nearby/area/count에도 같은 술어를 적용해야
 # legacy/current feature가 동시에 남은 기간에 목록·집계별 노출 결과가 어긋나지 않는다.
 # infra raw 단건/다건과 admin 감사 목록만 과거 계보/종료 notice 추적을 위해 제외한다.
-_PUBLIC_ACTIVE_NOTICE_FILTER_SQL: Final[str] = _ENDED_NOTICE_HIDDEN_SQL + _LATEST_NOTICE_ONLY_SQL
+#
+# 공개 여부 자체는 ADR-067 ``feature.public_features`` projection이 정본이고, 이
+# 필터는 그 위에 겹치는 notice 전용 **추가 감산**이다(노출 확대 불가). 경쟁자 후보
+# 판정(``_LATEST_NOTICE_ONLY_SQL``의 ``other_f.deleted_at IS NULL``)은 reconcile
+# 의미론(T-VN-06/37 소유)이라 T-VN-04에서 view로 바꾸지 않았다 — 비공개 신규
+# feature가 구 feature를 계속 밀어내는 현행 동작 유지.
+def public_active_notice_filter_sql(feature_alias: str) -> str:
+    """모든 공개 read가 공유하는 active/latest notice 감산 SQL을 반환한다.
+
+    호출자는 신뢰된 정적 SQL alias만 넘긴다. 공개 여부의 기본 집합은
+    ``feature.public_features``이고, 이 fragment는 종료·구버전 notice만 추가로
+    제외한다.
+    """
+
+    if not feature_alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    return _ended_notice_hidden_sql(feature_alias) + _latest_notice_only_sql(feature_alias)
+
+
+_PUBLIC_ACTIVE_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("f")
+
+
+# ─── in-bounds 후보 술어 단일화 (F-8 / ADR-073 D-9-3·D-9-4) ──────────────────
+# bbox in-bounds 조회는 세 변형(경량 items / geometry items / cluster rollup)이
+# 있고, 이전에는 각자 WHERE 절에 같은 attribute 필터를 복제했으며 include_geometry
+# 만 route/area geom을 후보에 넣어 **결과집합**이 달라졌다(EXPLAIN 재현 2220→2221행).
+# 아래 두 fragment로 후보 술어를 한 곳에 정의해 재사용한다:
+#   - ``_bbox_candidate_predicate_sql`` : items(경량/geometry) 공유 공간 후보 술어.
+#   - ``_bbox_attribute_filter_sql``    : kind/category/provider 공통 속성 필터(3변형 공유).
+
+
+def _bbox_envelope_sql() -> str:
+    """4326 입력 bbox envelope (ADR-012 — 술어에 ST_Transform 없음)."""
+    return """x_extension.ST_MakeEnvelope(
+        CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
+        CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)"""
+
+
+def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
+    """items in-bounds 단일 후보 술어 (F-8 / ADR-073 D-9-3).
+
+    ``include_geometry`` 유무와 **무관하게 동일한** 후보 집합을 만든다 — 플래그는
+    응답 직렬화(SELECT projection)만 제어하고 membership은 바꾸지 않는다.
+
+    - **point/legacy 좌표(``coord``)**: ``&&`` MBR 술어는 점-envelope 교차에서 이미
+      정확하다(점의 MBR = 점 자신). route/area에 geometry가 있으면 이 arm을 타지 않고
+      아래 exact geometry arm만 사용하며, geometry가 없는 legacy route/area만 coord로
+      fallback한다.
+    - **route/area ``geom``**: ``&&`` MBR prefilter만으로는 false positive가 실재하므로
+      (F-8) partial GiST(``idx_features_geom_gist``)를 ``&&``로 구동한 뒤 exact
+      ``ST_Intersects``를 덧대 실제 envelope 교차만 남긴다. ``ST_Transform``을 술어에
+      넣지 않는다(ADR-012). 두 arm은 각각 index 가능해 planner가 BitmapOr로 결합한다
+      (features base-table seq scan 없음 — T-VN-21 tier-1 gate).
+    """
+    if not feature_alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    env = _bbox_envelope_sql()
+    return f"""(
+    (
+      {feature_alias}.coord IS NOT NULL
+      AND (
+        {feature_alias}.kind NOT IN ('route', 'area')
+        OR {feature_alias}.geom IS NULL
+      )
+      AND {feature_alias}.coord OPERATOR(x_extension.&&) {env}
+    )
+    OR (
+      {feature_alias}.kind IN ('route', 'area')
+      AND {feature_alias}.geom IS NOT NULL
+      AND {feature_alias}.geom OPERATOR(x_extension.&&) {env}
+      AND x_extension.ST_Intersects({feature_alias}.geom, {env})
+    )
+  )"""
+
+
+def _bbox_attribute_filter_sql(feature_alias: str) -> str:
+    """kind/category/provider 공통 속성 필터 (items 경량/geometry + cluster 공유).
+
+    세 변형이 같은 SQL을 재사용해 이중 복제를 제거한다(ADR-073 D-9-4). NULL 배열이면
+    술어가 단락(short-circuit)돼 인덱스 기반 조회에 영향이 없다. provider 필터는
+    primary source(``provider_sync.is_primary_source``) 기준 EXISTS다.
+    """
+    if not feature_alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    return f"""
+  AND (CAST(:kinds AS text[]) IS NULL OR {feature_alias}.kind = ANY(CAST(:kinds AS text[])))
+  AND (
+    CAST(:categories AS text[]) IS NULL
+    OR {feature_alias}.category = ANY(CAST(:categories AS text[]))
+  )
+  AND (
+    CAST(:providers AS text[]) IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM provider_sync.source_links AS pl
+      JOIN provider_sync.source_entities AS pr
+        ON pr.source_entity_key = pl.source_entity_key
+      WHERE pl.feature_id = {feature_alias}.feature_id
+        AND pl.is_primary_source
+        AND pr.provider = ANY(CAST(:providers AS text[]))
+    )
+  )
+"""
+
 
 _PUBLIC_ACTIVE_NOTICE_IDS_SQL: Final[str] = f"""
 SELECT f.feature_id
-FROM feature.features AS f
+FROM feature.public_features AS f
 WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
   AND f.kind = 'notice'
-  AND f.deleted_at IS NULL
-  AND f.status NOT IN ('hidden', 'deleted')
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 """
 
@@ -651,13 +794,16 @@ WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
 # + 연결 feature core. Step D(on-demand detail) 등 단건 조회용. ``source_entity_id``로
 # 매칭(provider/dataset/entity_type 한정). primary link 1개만(LIMIT 1).
 #
-# 정합성(issue #509 Problem B): 같은 안정 식별자에 inactive+deleted_at 구 feature와
-# active 신 feature가 둘 다 primary link로 남을 수 있다(re-key 정리 직전/직후). 따라서:
-#   - ``f.deleted_at IS NULL`` — soft-delete된 구 feature 제외.
-#   - 결정적 ``ORDER BY`` (active 우선 → imported_at 최신 → feature_id) 후 LIMIT 1 —
-#     동률 시에도 deterministic하게 active 신 feature를 반환(admin_feature_repo.py /
-#     curated_repo.py의 동일 패턴 미러). caller(mois_detail)는 active-only 기대
-#     (test_mois_loader가 status='active' 단언).
+# 공개 표면(`/v1/mois/licenses/...`)이 소비하므로 ADR-067 공개 projection
+# (``feature.public_features``)만 조인한다 — 과거에는 ``deleted_at IS NULL``만
+# 요구하고 ``ORDER BY (status='active') DESC``로 active를 우선했을 뿐이라, active
+# 후보가 없으면 draft/inactive feature가 그대로 노출됐다(F-1). caller(mois_detail)는
+# 원래 active-only를 기대한다(test_mois_loader가 status='active' 단언).
+#
+# 정합성(issue #509 Problem B): 같은 안정 식별자에 구/신 feature가 둘 다 primary
+# link로 남을 수 있다(re-key 정리 직전/직후). view가 non-active를 제거한 뒤에도
+# active 동률이 남을 수 있으므로 결정적 ``ORDER BY``(imported_at 최신 → feature_id)
+# 후 LIMIT 1로 deterministic하게 반환한다.
 _GET_PRIMARY_SOURCE_DETAIL_SQL: Final[str] = """
 SELECT
     f.feature_id, f.kind, f.name, f.category, f.status,
@@ -672,19 +818,21 @@ JOIN provider_sync.source_records AS sr
   ON sr.source_record_key = se.current_source_record_key
 JOIN provider_sync.source_links AS sl
   ON sl.source_entity_key = se.source_entity_key
-JOIN feature.features AS f
+JOIN feature.public_features AS f
   ON f.feature_id = sl.feature_id
 WHERE sr.provider = :provider
   AND sr.dataset_key = :dataset_key
   AND sr.source_entity_type = :source_entity_type
   AND sr.source_entity_id = :source_entity_id
   AND sl.is_primary_source
-  AND f.deleted_at IS NULL
-ORDER BY (f.status = 'active') DESC, sr.imported_at DESC NULLS LAST, f.feature_id
+ORDER BY sr.imported_at DESC NULLS LAST, f.feature_id
 LIMIT 1
 """
 
-# bbox 조회 — ADR-012: 입력 bbox는 4326, GIST(coord) 인덱스 사용. deleted_at 제외.
+# bbox 조회 — ADR-012: 입력 bbox는 4326, GIST(coord) 인덱스 사용. 공개 여부는
+# ADR-067 단일 projection(``feature.public_features``)이 결정한다 — 이 파일의
+# 공개 read SQL은 술어를 재구현하지 않는다. view 술어가 ``deleted_at IS NULL``을
+# 함의하므로 partial GiST 인덱스는 그대로 사용된다.
 # kinds 필터는 NULL이면 전체 (asyncpg ARRAY 바인딩). 경량 표현(좌표 + 표시 메타).
 _FEATURES_IN_BBOX_SQL: Final[str] = f"""
 SELECT
@@ -693,7 +841,7 @@ SELECT
     f.marker_icon, f.marker_color, f.status,
     ps.price_summary,
     ws.weather_summary
-FROM feature.features AS f
+FROM feature.public_features AS f
 LEFT JOIN LATERAL (
     SELECT jsonb_agg(
         jsonb_build_object(
@@ -794,28 +942,8 @@ LEFT JOIN LATERAL (
         COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
     LIMIT 1
 ) AS ws ON f.kind = 'weather'
-WHERE f.deleted_at IS NULL
-  AND f.coord IS NOT NULL
-  AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
-        CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
-        CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-  AND (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
-  AND (
-    CAST(:categories AS text[]) IS NULL
-    OR f.category = ANY(CAST(:categories AS text[]))
-  )
-  AND (
-    CAST(:providers AS text[]) IS NULL
-    OR EXISTS (
-      SELECT 1
-      FROM provider_sync.source_links AS pl
-      JOIN provider_sync.source_entities AS pr
-        ON pr.source_entity_key = pl.source_entity_key
-      WHERE pl.feature_id = f.feature_id
-        AND pl.is_primary_source
-        AND pr.provider = ANY(CAST(:providers AS text[]))
-    )
-  )
+WHERE {_bbox_candidate_predicate_sql("f")}
+{_bbox_attribute_filter_sql("f")}
   AND (
     CAST(:cursor_feature_id AS text) IS NULL
     OR f.feature_id > CAST(:cursor_feature_id AS text)
@@ -848,7 +976,7 @@ SELECT
       THEN x_extension.ST_Area(CAST(f.geom AS x_extension.geography))
       ELSE NULL
     END AS area_square_meters
-FROM feature.features AS f
+FROM feature.public_features AS f
 LEFT JOIN LATERAL (
     SELECT jsonb_agg(
         jsonb_build_object(
@@ -949,39 +1077,8 @@ LEFT JOIN LATERAL (
         COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
     LIMIT 1
 ) AS ws ON f.kind = 'weather'
-WHERE f.deleted_at IS NULL
-  AND (
-    (
-      f.coord IS NOT NULL
-      AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
-            CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
-            CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-    )
-    OR (
-      f.kind IN ('route', 'area')
-      AND f.geom IS NOT NULL
-      AND f.geom OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
-            CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
-            CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-    )
-  )
-  AND (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
-  AND (
-    CAST(:categories AS text[]) IS NULL
-    OR f.category = ANY(CAST(:categories AS text[]))
-  )
-  AND (
-    CAST(:providers AS text[]) IS NULL
-    OR EXISTS (
-      SELECT 1
-      FROM provider_sync.source_links AS pl
-      JOIN provider_sync.source_entities AS pr
-        ON pr.source_entity_key = pl.source_entity_key
-      WHERE pl.feature_id = f.feature_id
-        AND pl.is_primary_source
-        AND pr.provider = ANY(CAST(:providers AS text[]))
-    )
-  )
+WHERE {_bbox_candidate_predicate_sql("f")}
+{_bbox_attribute_filter_sql("f")}
   AND (
     CAST(:cursor_feature_id AS text) IS NULL
     OR f.feature_id > CAST(:cursor_feature_id AS text)
@@ -992,43 +1089,42 @@ LIMIT :limit
 """
 
 
-# bbox 내 region rollup 클러스터링 (T-213c). cluster_unit → 고정 행정코드 컬럼
-# (allowlist — SQL injection 불가). bbox 술어는 STORED coord의 GIST 인덱스(&&)를
-# 그대로 쓰고(ADR-012, 변환 없음), 행정코드별 count + 평균 좌표(대표 마커 위치)를
-# 집계한다. ``ST_Transform``을 술어에 넣지 않는다.
+# bbox 내 region rollup 클러스터링 (T-213c). cluster_unit → 고정 canonical 행정코드
+# 컬럼(allowlist — SQL injection 불가). 경계를 가로지르는 geometry도 선택 단위의 저장
+# 코드 하나에만 귀속한다. 공간 교차 지점별로 여러 cluster에 복제하지 않으므로 cluster
+# feature_count 합계가 code 보강된 items 후보 수와 일치한다. items와 같은 exact 후보
+# 술어를 사용해 mode 전환이 공간 후보 universe를 바꾸지 않게 한다
+# (ADR-073 D-9-2·D-9-4). point/legacy 후보의
+# 대표 좌표는 coord, geometry 후보의 대표 좌표는 bbox와 실제 교차한 부분 위의 점이다.
+# 따라서 centroid가 bbox 밖인 route/area도 count와 지도 마커에 빠지지 않으며 반환
+# marker는 bbox 내부에 있다. ``ST_Transform``은 술어에 넣지 않는다(ADR-012).
 def _cluster_bbox_sql(code_col: str) -> str:
+    env = _bbox_envelope_sql()
     return f"""
-SELECT
-    f.{code_col} AS cluster_key,
-    count(*) AS feature_count,
-    avg(x_extension.ST_X(f.coord)) AS lon,
-    avg(x_extension.ST_Y(f.coord)) AS lat
-FROM feature.features AS f
-WHERE f.deleted_at IS NULL
-  AND f.coord IS NOT NULL
-  AND f.{code_col} IS NOT NULL
-  AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
-        CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
-        CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-  AND (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
-  AND (
-    CAST(:categories AS text[]) IS NULL
-    OR f.category = ANY(CAST(:categories AS text[]))
-  )
-  AND (
-    CAST(:providers AS text[]) IS NULL
-    OR EXISTS (
-      SELECT 1
-      FROM provider_sync.source_links AS pl
-      JOIN provider_sync.source_entities AS pr
-        ON pr.source_entity_key = pl.source_entity_key
-      WHERE pl.feature_id = f.feature_id
-        AND pl.is_primary_source
-        AND pr.provider = ANY(CAST(:providers AS text[]))
-    )
-  )
+WITH bbox_candidates AS (
+  SELECT
+      f.{code_col} AS cluster_key,
+      CASE
+        WHEN f.kind IN ('route', 'area') AND f.geom IS NOT NULL
+          THEN x_extension.ST_PointOnSurface(
+            x_extension.ST_Intersection(f.geom, {env})
+          )
+        ELSE f.coord
+      END AS marker_coord
+  FROM feature.public_features AS f
+  WHERE f.{code_col} IS NOT NULL
+    AND {_bbox_candidate_predicate_sql("f")}
+{_bbox_attribute_filter_sql("f")}
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
-GROUP BY f.{code_col}
+)
+SELECT
+    cluster_key,
+    count(*) AS feature_count,
+    avg(x_extension.ST_X(marker_coord)) AS lon,
+    avg(x_extension.ST_Y(marker_coord)) AS lat
+FROM bbox_candidates
+WHERE marker_coord IS NOT NULL
+GROUP BY cluster_key
 ORDER BY feature_count DESC, cluster_key
 LIMIT :limit
 """
@@ -1062,8 +1158,11 @@ async def cluster_features_in_bbox(
 
     ``cluster_unit`` ∈ {sido, sigungu, eupmyeondong} → 각 region code별
     ``{cluster_key, feature_count, lon, lat}``(lon/lat=region 내 feature 평균 좌표).
-    bbox 술어는 STORED ``coord``의 GIST 인덱스를 사용(ADR-012). region code가 없는
-    feature는 제외된다(주소 미보강 등).
+    point/legacy coord와 route/area geometry의 exact 후보 술어는 items 조회와 같다.
+    geometry 후보의 대표 마커는 bbox 교차 부분 위의 점을 사용하되, cluster 귀속은
+    geometry가 걸친 공간이 아니라 저장된 canonical 행정코드 하나로 결정한다. 따라서
+    경계를 가로지르는 feature도 선택 단위에서 정확히 한 번만 집계된다. region code가
+    없는 feature는 rollup할 수 없어 제외된다(주소 미보강 등).
     """
     if cluster_unit not in _CLUSTER_BBOX_SQL_BY_UNIT:
         raise ValueError("cluster_unit must be one of sido, sigungu, eupmyeondong")
@@ -1115,9 +1214,8 @@ WITH candidates AS (
             WHEN CAST(:q AS text) IS NULL THEN NULL
             ELSE x_extension.similarity(f.name, CAST(:q AS text))
         END AS score
-    FROM feature.features AS f
-    WHERE f.deleted_at IS NULL
-      AND (
+    FROM feature.public_features AS f
+    WHERE (
         CAST(:q AS text) IS NULL
         OR f.name OPERATOR(x_extension.%) CAST(:q AS text)
       )
@@ -1154,9 +1252,8 @@ WITH name_candidates AS MATERIALIZED (
         f.marker_icon,
         f.marker_color,
         f.status,
-        f.deleted_at,
         x_extension.similarity(f.name, CAST(:q AS text)) AS score
-    FROM feature.features AS f
+    FROM feature.public_features AS f
     WHERE f.name OPERATOR(x_extension.%) CAST(:q AS text)
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 ),
@@ -1173,8 +1270,7 @@ candidates AS (
         status,
         score
     FROM name_candidates
-    WHERE deleted_at IS NULL
-      AND (
+    WHERE (
         CAST(:bbox_enabled AS boolean) IS FALSE
         OR (
           coord IS NOT NULL
@@ -1271,9 +1367,8 @@ candidates AS (
         ps.dataset_key AS primary_dataset_key,
         f.updated_at AS last_updated_at
     FROM target AS t
-    JOIN feature.features AS f
-      ON f.deleted_at IS NULL
-     AND f.coord IS NOT NULL
+    JOIN feature.public_features AS f
+      ON f.coord IS NOT NULL
      AND f.coord_5179 IS NOT NULL
      AND x_extension.ST_DWithin(f.coord_5179, t.coord_5179, t.radius_m)
     LEFT JOIN LATERAL (
@@ -1389,9 +1484,8 @@ candidates AS (
         ps.dataset_key AS primary_dataset_key,
         f.updated_at AS last_updated_at
     FROM origin AS o
-    JOIN feature.features AS f
-      ON f.deleted_at IS NULL
-     AND f.coord IS NOT NULL
+    JOIN feature.public_features AS f
+      ON f.coord IS NOT NULL
      AND f.coord_5179 IS NOT NULL
      AND x_extension.ST_DWithin(f.coord_5179, o.pt_5179, o.radius_m)
     LEFT JOIN LATERAL (
@@ -3269,15 +3363,53 @@ async def get_feature_rows_by_ids(
     """여러 feature 상세 row를 한 번에 조회한다.
 
     ``feature_ids`` 순서는 반환 dict에서 보장하지 않는다. 호출자는 입력 순서와
-    key 존재 여부를 비교해 missing 목록을 만든다. soft-deleted(inactive) feature도
-    status와 함께 반환한다(D-12, 2026-06-10) — 단건 ``get_feature_row``와 동일 정책.
-    소비자는 ``missing``(미존재)과 ``status='inactive'``("철회/폐업됨")를 구분할 수
-    있어야 한다. 목록/검색 read(search/in-bounds/nearby)는 기존대로 기본 active만.
+    key 존재 여부를 비교해 missing 목록을 만든다. **admin/감사·내부 파이프라인용
+    raw read** — soft-deleted/inactive feature도 status와 함께 반환한다(단건
+    ``get_feature_row``와 동일 정책). 공개/서비스 read는 ADR-067 projection을 쓰는
+    ``get_public_feature_rows_by_ids``를 사용한다.
     """
     normalized = _normalized_filter(feature_ids)
     if normalized is None:
         return {}
     result = await session.execute(text(_GET_FEATURES_BY_IDS_SQL), {"feature_ids": normalized})
+    rows = result.mappings().all()
+    return {str(row["feature_id"]): _deserialize_feature_row(row) for row in rows}
+
+
+async def get_public_feature_row(
+    session: AsyncSession, feature_id: str
+) -> dict[str, Any] | None:
+    """공개 feature 단건 조회 — ADR-067 ``feature.public_features`` projection.
+
+    공개 API 단건 상세가 사용한다. 비공개(draft/broken/hidden/inactive/soft-deleted)
+    row는 존재하지 않는 것으로 취급되어 ``None``을 반환한다 — 공개 술어는 VIEW
+    (alembic 0059) 한 곳에만 정의되어 있고 여기서 재구현하지 않는다(F-1 재발 방지).
+    row shape은 ``get_feature_row``와 동일하다. admin/감사용 raw read는 기존
+    ``get_feature_row``를 그대로 사용한다.
+    """
+    result = await session.execute(text(_GET_PUBLIC_FEATURE_SQL), {"feature_id": feature_id})
+    row = result.mappings().first()
+    if row is None:
+        return None
+    return _deserialize_feature_row(row)
+
+
+async def get_public_feature_rows_by_ids(
+    session: AsyncSession, feature_ids: Sequence[str]
+) -> dict[str, dict[str, Any]]:
+    """여러 공개 feature 상세 row를 한 번에 조회한다 (ADR-067 projection).
+
+    공개/service batch read가 사용한다. 반환 dict에 없는 ID는 "공개 row 없음"
+    (미존재·retired·suppressed 구분 없이)이며, 상태 구분이 필요한 service batch
+    item-state 계약은 T-VN-11에서 이 projection과 base 상태를 조합해 구현한다.
+    row shape·순서 계약은 ``get_feature_rows_by_ids``와 동일하다.
+    """
+    normalized = _normalized_filter(feature_ids)
+    if normalized is None:
+        return {}
+    result = await session.execute(
+        text(_GET_PUBLIC_FEATURES_BY_IDS_SQL), {"feature_ids": normalized}
+    )
     rows = result.mappings().all()
     return {str(row["feature_id"]): _deserialize_feature_row(row) for row in rows}
 
@@ -3521,10 +3653,16 @@ async def features_in_bbox(
     """bbox 안의 feature 경량 표현 list (지도/목록용). 좌표는 ``lon``/``lat`` (4326).
 
     ADR-012 — 입력 bbox는 4326, ``coord``의 GIST 인덱스(``idx_features_coord_gist``)를
-    사용하는 ``&&`` 연산. ``deleted_at IS NULL`` + ``coord IS NOT NULL``만. ``kinds``가
+    사용하는 ``&&`` 연산. 공개 여부는 ADR-067 ``feature.public_features`` projection
+    (``status='active' AND deleted_at IS NULL``)이 결정한다. ``kinds``가
     ``None``이면 전체 kind. DTO 매핑은 상위(client) 책임 — 본 repo는 raw row만.
-    ``include_geometry``가 true이면 route/area용 ``geom``도 bbox 후보에 포함해
-    지도 표시용 GeoJSON/면적을 반환한다. ``providers``가 주어지면 primary source
+
+    **``include_geometry``는 직렬화(serialization)만 제어한다** (F-8 / ADR-073 D-9-3):
+    후보 술어는 두 변형이 **동일**하다 — point ``coord``가 bbox에 들거나 route/area
+    ``geom``이 bbox와 exact ``ST_Intersects``하면 후보다(``include_geometry`` 무관).
+    ``include_geometry=true``이면 그 후보 중 route/area의 GeoJSON geometry + 면적을
+    응답 payload에 **추가로 직렬화**할 뿐, 반환되는 feature id 집합(membership)은
+    바꾸지 않는다. ``providers``가 주어지면 primary source
     provider 기준(``provider_sync.source_links.is_primary_source``)으로 추가 필터한다
     — ``None``이면 술어가 단락(short-circuit)돼 인덱스 기반 bbox 조회에 영향이 없다.
     ``price_stale_hide_days``보다 오래된 price 관측은 ``price_summary``에서 제외한다
@@ -3552,9 +3690,8 @@ async def features_in_bbox(
 _FEATURES_CONTAINED_IN_AREA_SQL: Final[str] = f"""
 WITH area_feature AS (
     SELECT feature_id, geom
-    FROM feature.features
+    FROM feature.public_features
     WHERE feature_id = :feature_id
-      AND deleted_at IS NULL
       AND kind = 'area'
       AND geom IS NOT NULL
 )
@@ -3569,9 +3706,8 @@ SELECT
     f.marker_color,
     f.status
 FROM area_feature AS a
-JOIN feature.features AS f
-  ON f.deleted_at IS NULL
- AND f.feature_id <> a.feature_id
+JOIN feature.public_features AS f
+  ON f.feature_id <> a.feature_id
  AND f.coord IS NOT NULL
  AND a.geom OPERATOR(x_extension.&&) f.coord
  AND x_extension.ST_Covers(a.geom, f.coord)
@@ -3638,50 +3774,282 @@ def encode_bbox_cursor(feature_id: str) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
-def _search_cursor_payload(cursor: str | None, *, q_enabled: bool) -> dict[str, Any]:
+_SEARCH_CURSOR_KIND: Final[str] = "feature_search"
+_SEARCH_CURSOR_VERSION: Final[int] = 1
+_SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
+_SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
+
+
+@dataclass(frozen=True)
+class _FeatureSearchContract:
+    q: str | None
+    bbox: tuple[float, float, float, float] | None
+    kinds: tuple[str, ...] | None
+    categories: tuple[str, ...] | None
+    page_size: int
+    include_total: bool
+
+    @property
+    def q_enabled(self) -> bool:
+        return self.q is not None
+
+    @property
+    def sort(self) -> str:
+        return "score_desc_feature_id_asc" if self.q_enabled else "feature_id_asc"
+
+    @property
+    def fingerprint(self) -> str:
+        canonical = json.dumps(
+            {
+                "q": self.q,
+                "bbox": self.bbox,
+                "kinds": self.kinds,
+                "categories": self.categories,
+                "sort": self.sort,
+                "page_size": self.page_size,
+                "include_total": self.include_total,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
+
+def _normalize_search_filter(values: Sequence[str] | None) -> tuple[str, ...] | None:
+    if values is None:
+        return None
+    normalized = sorted({str(value).strip() for value in values if str(value).strip()})
+    return tuple(normalized) or None
+
+
+def _feature_search_contract(
+    *,
+    q: str | None,
+    bbox: tuple[float, float, float, float] | None,
+    kinds: Sequence[str] | None,
+    categories: Sequence[str] | None,
+    page_size: int,
+    include_total: bool,
+) -> _FeatureSearchContract:
+    normalized_q = q.strip() if q is not None else None
+    if normalized_q == "":
+        normalized_q = None
+    if page_size <= 0:
+        raise ValueError("page_size must be greater than 0")
+
+    normalized_bbox: tuple[float, float, float, float] | None = None
+    if bbox is not None:
+        if len(bbox) != 4:
+            raise ValueError("invalid bbox")
+        normalized_bbox = (
+            float(bbox[0]),
+            float(bbox[1]),
+            float(bbox[2]),
+            float(bbox[3]),
+        )
+        if not all(math.isfinite(value) for value in normalized_bbox):
+            raise ValueError("invalid bbox")
+        min_lon, min_lat, max_lon, max_lat = normalized_bbox
+        if (
+            min_lon < -180
+            or max_lon > 180
+            or min_lat < -90
+            or max_lat > 90
+            or min_lon > max_lon
+            or min_lat > max_lat
+        ):
+            raise ValueError("invalid bbox")
+        normalized_bbox = (
+            0.0 if min_lon == 0.0 else min_lon,
+            0.0 if min_lat == 0.0 else min_lat,
+            0.0 if max_lon == 0.0 else max_lon,
+            0.0 if max_lat == 0.0 else max_lat,
+        )
+    if normalized_q is None and normalized_bbox is None:
+        raise ValueError("q 또는 bbox 중 하나는 필요합니다")
+
+    return _FeatureSearchContract(
+        q=normalized_q,
+        bbox=normalized_bbox,
+        kinds=_normalize_search_filter(kinds),
+        categories=_normalize_search_filter(categories),
+        page_size=min(page_size, 200),
+        include_total=include_total,
+    )
+
+
+def _search_cursor_signing_key(signing_key: bytes) -> bytes:
+    if not isinstance(signing_key, bytes) or len(signing_key) < 32:
+        raise ValueError("feature search cursor signing key must be at least 32 bytes")
+    return signing_key
+
+
+def _cursor_b64encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _cursor_b64decode(segment: str) -> bytes:
+    if not segment or "=" in segment:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    try:
+        decoded = base64.b64decode(
+            segment + "=" * (-len(segment) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+    except (ValueError, binascii.Error) as exc:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor") from exc
+    if _cursor_b64encode(decoded) != segment:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    return decoded
+
+
+def _sign_search_cursor_payload(payload_segment: str, *, signing_key: bytes) -> bytes:
+    return hmac.new(
+        _search_cursor_signing_key(signing_key),
+        _SEARCH_CURSOR_DOMAIN + payload_segment.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+
+
+def _encode_search_cursor_payload(payload: Mapping[str, Any], *, signing_key: bytes) -> str:
+    raw = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    payload_segment = _cursor_b64encode(raw)
+    signature = _sign_search_cursor_payload(payload_segment, signing_key=signing_key)
+    return f"{payload_segment}.{_cursor_b64encode(signature)}"
+
+
+def _search_cursor_payload(
+    cursor: str | None,
+    *,
+    contract: _FeatureSearchContract,
+    signing_key: bytes,
+) -> dict[str, Any]:
+    _search_cursor_signing_key(signing_key)
     if cursor is None:
         return {}
+    if len(cursor) > _SEARCH_CURSOR_MAX_LENGTH or cursor.count(".") != 1:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    payload_segment, signature_segment = cursor.split(".", 1)
+    raw_payload = _cursor_b64decode(payload_segment)
+    actual_signature = _cursor_b64decode(signature_segment)
+    if len(actual_signature) != hashlib.sha256().digest_size:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    expected_signature = _sign_search_cursor_payload(
+        payload_segment,
+        signing_key=signing_key,
+    )
+    if not hmac.compare_digest(actual_signature, expected_signature):
+        raise FeatureSearchCursorTamperedError("feature search cursor signature mismatch")
     try:
-        padded = cursor + "=" * (-len(cursor) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise ValueError("invalid feature search cursor") from exc
-    if not isinstance(payload, dict) or bool(payload.get("q_enabled")) != q_enabled:
-        raise ValueError("invalid feature search cursor")
-    feature_id = payload.get("feature_id")
-    if not isinstance(feature_id, str) or not feature_id:
-        raise ValueError("invalid feature search cursor")
+        payload = json.loads(raw_payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor") from exc
+    if not isinstance(payload, dict) or set(payload) != {"v", "kind", "query", "keyset"}:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    try:
+        canonical_payload = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor") from exc
+    if raw_payload != canonical_payload:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    if type(payload["v"]) is not int:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    if payload["v"] != _SEARCH_CURSOR_VERSION:
+        raise FeatureSearchCursorVersionUnsupportedError(
+            "unsupported feature search cursor version"
+        )
+    if not isinstance(payload["kind"], str) or payload["kind"] != _SEARCH_CURSOR_KIND:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    query_fingerprint = payload["query"]
+    if (
+        not isinstance(query_fingerprint, str)
+        or len(query_fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in query_fingerprint)
+    ):
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    if query_fingerprint != contract.fingerprint:
+        raise FeatureSearchCursorQueryMismatchError(
+            "feature search cursor does not match the current query"
+        )
+    if not isinstance(payload["keyset"], dict):
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
     return payload
 
 
-def _search_cursor_params(cursor: str | None, *, q_enabled: bool) -> dict[str, Any]:
-    payload = _search_cursor_payload(cursor, q_enabled=q_enabled)
+def _search_cursor_params(
+    cursor: str | None,
+    *,
+    contract: _FeatureSearchContract,
+    signing_key: bytes,
+) -> dict[str, Any]:
+    payload = _search_cursor_payload(
+        cursor,
+        contract=contract,
+        signing_key=signing_key,
+    )
     params: dict[str, Any] = {
         "cursor_score": None,
         "cursor_feature_id": None,
     }
     if not payload:
         return params
-    params["cursor_feature_id"] = payload["feature_id"]
-    if q_enabled:
+    keyset = payload["keyset"]
+    expected_keys = {"feature_id", "score"} if contract.q_enabled else {"feature_id"}
+    if set(keyset) != expected_keys:
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    feature_id = keyset["feature_id"]
+    if (
+        not isinstance(feature_id, str)
+        or not feature_id
+        or feature_id != feature_id.strip()
+    ):
+        raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+    params["cursor_feature_id"] = feature_id
+    if contract.q_enabled:
         try:
-            score = str(payload["score"])
-            float(score)
+            score = keyset["score"]
+            if not isinstance(score, str) or not math.isfinite(float(score)):
+                raise ValueError("score must be a finite string")
             params["cursor_score"] = score
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError("invalid feature search cursor") from exc
+            raise FeatureSearchCursorInvalidError("invalid feature search cursor") from exc
     return params
 
 
-def _encode_search_cursor(item: FeatureSearchRow, *, q_enabled: bool) -> str:
+def _encode_search_cursor(
+    item: FeatureSearchRow,
+    *,
+    contract: _FeatureSearchContract,
+    signing_key: bytes,
+) -> str:
+    keyset: dict[str, Any] = {"feature_id": item.feature_id}
+    if contract.q_enabled:
+        score = item.score_cursor if item.score_cursor is not None else str(item.score)
+        if not math.isfinite(float(score)):
+            raise ValueError("feature search score cursor must be finite")
+        keyset["score"] = score
     payload: dict[str, Any] = {
-        "q_enabled": q_enabled,
-        "feature_id": item.feature_id,
+        "v": _SEARCH_CURSOR_VERSION,
+        "kind": _SEARCH_CURSOR_KIND,
+        "query": contract.fingerprint,
+        "keyset": keyset,
     }
-    if q_enabled:
-        payload["score"] = item.score_cursor if item.score_cursor is not None else str(item.score)
-    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    return _encode_search_cursor_payload(payload, signing_key=signing_key)
 
 
 def _search_row(row: Any) -> FeatureSearchRow:
@@ -3711,8 +4079,10 @@ async def search_features(
     bbox: tuple[float, float, float, float] | None = None,
     kinds: Sequence[str] | None = None,
     categories: Sequence[str] | None = None,
-    limit: int = 50,
+    page_size: int = 50,
     cursor: str | None = None,
+    include_total: bool = False,
+    cursor_signing_key: bytes,
 ) -> FeatureSearchPage:
     """사용자 feature 검색.
 
@@ -3720,72 +4090,91 @@ async def search_features(
     threshold는 현재 transaction에만 ``SET LOCAL``로 적용한다(ADR-004/성능 가이드).
     bbox 술어는 stored ``coord`` 컬럼과 ``ST_MakeEnvelope``만 사용한다.
     """
-    normalized_q = q.strip() if q is not None else None
-    if normalized_q == "":
-        normalized_q = None
-    if normalized_q is None and bbox is None:
-        raise ValueError("q 또는 bbox 중 하나는 필요합니다")
-    if limit <= 0:
-        raise ValueError("limit must be greater than 0")
+    contract = _feature_search_contract(
+        q=q,
+        bbox=bbox,
+        kinds=kinds,
+        categories=categories,
+        page_size=page_size,
+        include_total=include_total,
+    )
+    cursor_params = _search_cursor_params(
+        cursor,
+        contract=contract,
+        signing_key=cursor_signing_key,
+    )
     min_lon: float | None
     min_lat: float | None
     max_lon: float | None
     max_lat: float | None
-    if bbox is not None:
-        min_lon, min_lat, max_lon, max_lat = bbox
-        if min_lon > max_lon or min_lat > max_lat:
-            raise ValueError("invalid bbox")
+    if contract.bbox is not None:
+        min_lon, min_lat, max_lon, max_lat = contract.bbox
     else:
         min_lon = min_lat = max_lon = max_lat = None
 
-    q_enabled = normalized_q is not None
+    q_enabled = contract.q_enabled
     if q_enabled:
         await session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.2"))
-    effective_limit = min(limit, 200)
+    effective_limit = contract.page_size
     rows = (
         (
             await session.execute(
                 text(_FEATURE_SEARCH_BY_SCORE_SQL if q_enabled else _FEATURE_SEARCH_BY_ID_SQL),
                 {
-                    "q": normalized_q,
-                    "bbox_enabled": bbox is not None,
+                    "q": contract.q,
+                    "bbox_enabled": contract.bbox is not None,
                     "min_lon": min_lon,
                     "min_lat": min_lat,
                     "max_lon": max_lon,
                     "max_lat": max_lat,
-                    "kinds": _normalized_filter(kinds),
-                    "categories": _normalized_filter(categories),
+                    "kinds": list(contract.kinds) if contract.kinds is not None else None,
+                    "categories": (
+                        list(contract.categories)
+                        if contract.categories is not None
+                        else None
+                    ),
                     "limit_plus_one": effective_limit + 1,
-                    **_search_cursor_params(cursor, q_enabled=q_enabled),
+                    **cursor_params,
                 },
             )
         )
         .mappings()
         .all()
     )
-    count_result = await session.execute(
-        text(_FEATURE_SEARCH_SCORE_COUNT_SQL if q_enabled else _FEATURE_SEARCH_COUNT_SQL),
-        {
-            "q": normalized_q,
-            "bbox_enabled": bbox is not None,
-            "min_lon": min_lon,
-            "min_lat": min_lat,
-            "max_lon": max_lon,
-            "max_lat": max_lat,
-            "kinds": _normalized_filter(kinds),
-            "categories": _normalized_filter(categories),
-        },
-    )
+    total_count: int | None = None
+    if contract.include_total:
+        count_result = await session.execute(
+            text(_FEATURE_SEARCH_SCORE_COUNT_SQL if q_enabled else _FEATURE_SEARCH_COUNT_SQL),
+            {
+                "q": contract.q,
+                "bbox_enabled": contract.bbox is not None,
+                "min_lon": min_lon,
+                "min_lat": min_lat,
+                "max_lon": max_lon,
+                "max_lat": max_lat,
+                "kinds": list(contract.kinds) if contract.kinds is not None else None,
+                "categories": (
+                    list(contract.categories)
+                    if contract.categories is not None
+                    else None
+                ),
+            },
+        )
+        total_count = int(count_result.scalar_one())
     items = tuple(_search_row(row) for row in rows[:effective_limit])
     next_cursor = (
-        _encode_search_cursor(items[-1], q_enabled=q_enabled)
+        _encode_search_cursor(
+            items[-1],
+            contract=contract,
+            signing_key=cursor_signing_key,
+        )
         if len(rows) > effective_limit and items
         else None
     )
     return FeatureSearchPage(
         items=items,
         next_cursor=next_cursor,
-        total_count=int(count_result.scalar_one()),
+        total_count=total_count,
     )
 
 
@@ -3899,6 +4288,11 @@ async def features_nearby_poi_cache_target(
 
     ADR-012: 반경 술어는 target과 feature의 STORED ``coord_5179`` 컬럼에 직접
     적용한다. 입력 좌표 변환이나 ``ST_Transform``은 WHERE 술어에 두지 않는다.
+
+    공개 read이므로 ADR-067 ``feature.public_features`` projection 안에서만
+    조회한다. ``statuses``는 그 projection과 **교집합**으로만 동작한다 —
+    projection에는 ``status='active'`` row만 있으므로 active 외 값을 넘기면
+    빈 결과가 된다(비공개 status 노출 금지, F-1).
     """
     if sort not in _NEARBY_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
@@ -3957,6 +4351,8 @@ async def features_nearby(
     직접 ``ST_DWithin``/``ST_Distance``를 적용한다(GiST ``idx_features_coord_5179_gist``).
     cursor/정렬/응답 shape는 ``features_nearby_poi_cache_target``과 동일
     (``NearbyFeaturePage``). ``sort`` ∈ {distance, name, last_updated_at}.
+    공개 read이므로 ADR-067 ``feature.public_features`` projection 안에서만
+    조회하고, ``statuses``는 projection과 교집합으로만 동작한다(위 함수와 동일).
     """
     if sort not in _NEARBY_COORD_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
@@ -3997,25 +4393,22 @@ async def features_nearby(
 
 _CATEGORY_FEATURE_COUNTS_SQL: Final[str] = f"""
 SELECT f.category, count(*) AS n
-FROM feature.features AS f
-WHERE f.deleted_at IS NULL
-  AND (NOT CAST(:active_only AS boolean) OR f.status = 'active')
+FROM feature.public_features AS f
+WHERE TRUE
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 GROUP BY f.category
 """
 
 
-async def category_feature_counts(
-    session: AsyncSession, *, active_only: bool = False
-) -> dict[str, int]:
-    """category code → 적재 feature 수 (soft-deleted 제외).
+async def category_feature_counts(session: AsyncSession) -> dict[str, int]:
+    """category code → 공개 feature 수 (ADR-067 ``public_features`` projection).
 
-    ``active_only=True``면 ``status='active'``만 센다. ``GET /categories?include_counts``
-    (T-213f)에서 정적 카탈로그(144건)에 현재 DB 분포를 합쳐 보여주기 위한 집계.
-    카탈로그에 없는(미지정/legacy) category code도 그대로 반환하므로 호출자가
-    카탈로그와 교차한다.
+    ``GET /categories?include_counts``(T-213f)에서 정적 카탈로그(144건)에 현재 DB
+    분포를 합쳐 보여주기 위한 집계. 공개 표면이므로 비공개(draft/broken/hidden/
+    inactive/soft-deleted) feature는 집계에 포함하지 않는다 — 과거의
+    ``active_only`` 스위치는 비공개 분포를 공개 counts로 노출했기에 제거됐다
+    (T-VN-04, F-1). 카탈로그에 없는(미지정/legacy) category code도 그대로
+    반환하므로 호출자가 카탈로그와 교차한다.
     """
-    rows = (
-        await session.execute(text(_CATEGORY_FEATURE_COUNTS_SQL), {"active_only": active_only})
-    ).all()
+    rows = (await session.execute(text(_CATEGORY_FEATURE_COUNTS_SQL))).all()
     return {str(row[0]): int(row[1]) for row in rows}

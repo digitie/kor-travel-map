@@ -1,5 +1,133 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-20 (codex agent B) — T-VN-59 public raw lineage 보강 착수
+
+- T-VN-SYNC-02 적대적 리뷰 blocker를 issue #786·`T-VN-59`로 분리했다. public forecast의
+  `source_record_key`, public alert의 원문 payload·lineage·수집 시각, public curation item의
+  `source_record_key`·자유형 metadata가 user OpenAPI와 생성 client까지 도달하는 상태다.
+- public typed DTO와 operator raw DTO를 상속 없이 분리하고, 공개 응답 schema의 재귀
+  reachability를 검사하는 forbidden-field gate로 같은 종류의 누출을 구조적으로 막는다.
+- 문서-first commit으로 draft PR #788을 연 뒤 구현과 full/user OpenAPI·admin/user TypeScript
+  산출물을 추가했다. DB schema와 저장 repository는 바꾸지 않았고, admin curation 및 새
+  admin weather alert raw route가 operator 정보를 보존한다.
+- **다음 한 작업**: 구현 exact head를 동일 적대적 리뷰어에게 제출한다. 승인 전에는
+  test·lint·build·OpenAPI drift gate를 실행하지 않는다.
+
+## 2026-07-20 (codex) — T-VN-58 correction 편집 기준 ETag 고정 착수
+
+- issue #785를 `integration/t-vn` 기준 독립 task로 열었다. admin 수정·삭제가 submit 직전 최신
+  revision을 다시 읽어 stale draft를 최신 기준으로 오인하는 경로를 제거하고, detail snapshot과
+  raw strong `ETag`를 불변 `CorrectionBasis`로 고정한다.
+- DB·REST/OpenAPI schema는 바꾸지 않는다. 412에서는 draft를 보존하고 운영자의 명시적 reload가
+  성공할 때만 최신 detail·basis를 적용한다. update/delete, background refetch 보호, mocked/live
+  Playwright cleanup까지 같은 PR에 묶는다.
+- draft PR #789에 docs-first commit을 push한 뒤 `/revision`→detail 안정 basis, caller-supplied raw
+  ETag mutation, dirty form 보호, 412 explicit reload, update/delete와 live cleanup 회귀를 구현했다.
+- 첫 적대 리뷰의 P1 2건/P2 2건에 따라 initial in-flight 전체 draft guard, 실패 reload old-data
+  거부, exact 3-pair retry budget, live update/delete baseline ETag 단정을 보강했다.
+- 두 번째 적대 리뷰의 P1/P2에 따라 전역 dirty guard를 필드별 dirty overlay로 바꾸고, mutation
+  state 초기화를 `action + trimmed feature_id` identity가 실제로 바뀔 때로 제한했다. deferred
+  basis의 untouched category/marker baseline 적용과 same-value/공백 Feature ID 편집 뒤 412 제출
+  차단을 mocked E2E로 고정했다.
+- 세 번째 적대 리뷰의 P1 2건에 따라 nullable marker fallback은 dirty key일 때만 PATCH하고,
+  위치 편집창은 dialog-local dirty key만 parent에 반영하며 parent basis의 untouched 필드를 계속
+  동기화하도록 보강했다. null marker name-only와 deferred basis 중 좌표-only dialog 회귀가 모두
+  marker PATCH 미포함을 단정한다.
+- **다음 한 작업**: 이 exact head를 push하고 같은 단일 적대 리뷰어에게 재제출한다. 승인 전에는
+  test·lint·build를 실행하지 않는다.
+
+## 2026-07-20 (codex, agent B) — T-VN-57 public security 계약 docs-first 착수
+
+- T-VN-SYNC-02 적대적 리뷰에서 runtime `PUBLIC_KEYED` 29개 GET과 full OpenAPI의 security
+  선언을 전수 대조했다. runtime은 전부 `require_public_api_key`를 적용하지만 full spec은
+  curated 4개만 `PublicApiKey OR ServiceToken`을 선언해 25개가 누락되고, user spec도 노출한
+  27개 중 23개가 누락된다. 최상위 security가 없어 기계 계약상 무인증으로 해석되는 P1이다.
+- `USER_OPERATIONS`도 별도 수기 allowlist라 신규 public route의 user 편입 누락을 조용히 허용하는
+  P2다. T-VN-57/#784는 `ROUTE_POLICIES`와 조립된 method metadata를 runtime·full/user 계약의
+  단일 정본으로 사용하고 양방향 누락·과포함·method/security drift를 막는다.
+- CodeGraph는 `ROUTE_POLICIES` 57개, `create_app` 176개 영향 심볼과 route wiring gate caller
+  5개를 보고했다. **다음 한 작업**은 docs-first draft PR을 연 뒤 구현 diff를 같은 단일 적대
+  리뷰어에게 제출하는 것이다. 승인 전에는 생성 artifact 작성 외 test/lint/build/OpenAPI check를
+  실행하지 않는다.
+## 2026-07-20 (codex) — vNext integration 구현 병합·최종 cutover 추적 정렬
+
+- T-VN-04A PR #779는 merge commit `21ad4e312b3d2a3e1b8baf1b3103daa6cec15e87`,
+  T-VN-15 PR #780은 merge commit `7604fc92585d8f973725f11bf8234a6d22034bc4`,
+  T-VN-03 PR #782는 merge commit `226f81c2cb5f89dec9bdd696121f4f8cd60f96c0`로
+  `integration/t-vn`에 반영됐다. 세 PR 모두 CI 8개가 green이지만 세 task와 issue #741은
+  final n150 live UI 증거 전까지 active다.
+- PinVi T-VN-03 소비자 PR #393은 merge commit
+  `61820f0ab0a7000948477511b3e92926fe78d1d4`, docker-manager production env PR #64는
+  merge commit `3f9973806e8addff96eb1339602f992ed424fb1c`로 각 저장소 main에 반영됐다.
+- 완료된 main→integration 동기화 `T-VN-SYNC-01`은 PR #781 merge commit
+  `a45bc3ac401e5675811f1031a4592991498d899f` 근거로 완료 이력에 옮겼다. 최종
+  integration→main 합류는 독립 `T-VN-SYNC-02`로 추적한다.
+- **다음 한 작업**: 문서 추적 PR #783을 최신 integration에 병합한 뒤 `T-VN-SYNC-02`를 수행한다.
+  최종 main·PinVi·manager exact 조합으로 C6c manifest v4 capture와 n150 C7 live E2E를 마치기
+  전에는 `T-VN-03`·`T-VN-04A`·`T-VN-15`, `T-ADM-C6c`·`T-ADM-C7P`·`T-ADM-C7`를
+  아카이브하지 않는다.
+
+## 2026-07-19 (codex, agent B) — T-VN-03 교차 리뷰 P2 반영
+
+Map/PinVi 교차 리뷰가 user export allowlist에서 public curated sources/themes 두 GET이
+빠진 계약 drift를 확인했다. `USER_OPERATIONS`를 curated 4 GET 전체로 맞추고
+`openapi.user.json`과 user TypeScript를 정본 생성기로 다시 만든다. CI E501 한 건은
+기계적 줄바꿈으로 함께 고친다. **다음 한 작업**은 새 exact head를 같은 리뷰어에게
+재제출하는 것이며, 승인 전 테스트·lint·build는 실행하지 않는다.
+
+## 2026-07-19 (codex, agent B) — T-VN-03 Map 구현 head 준비
+
+curated GET 4개에 `require_public_api_key`, ops 관측 GET 6개에
+`require_ops_operator`, local-dev MOIS raw debug에 `require_admin_frontend`를 배선하고
+route policy exception을 0건으로 줄였다. production은 기존 profile matrix와 compose
+기본값으로 debug route를 mount하지 않으며, 새 env/secret/DB migration은 없다. full/user
+OpenAPI security와 admin/user 생성 TypeScript, same-origin BFF 회귀를 함께 갱신한다.
+CodeGraph는 `create_app` 181개, ops dependency 199개, public dependency 58개, wiring gate
+44개 영향 심볼을 보고했다. **다음 한 작업**은 생성물을 포함한 exact Map head와 PinVi
+PR #393 exact head를 동일 전문 리뷰어에게 교차 제출하는 것이다. 승인 전에는 테스트·lint·
+build를 실행하지 않는다.
+
+## 2026-07-19 (codex, agent B) — T-VN-03 route gate docs-first 착수
+
+`integration/t-vn@a45bc3ac` 기준으로 curated GET 4개, ops 관측 GET 6개, MOIS raw debug
+GET 1개의 잔여 인증 경계를 inventory했다. PinVi PR #387이 principal 설정은 추가했지만
+consistency/log client 네 메서드에 `ops:read`를 보내지 않아 Map gate 선적용 시 403이 되는
+cross-repo blocker를 확인했고 PinVi issue #392로 분리했다. 설계 정본은
+`docs/reports/t-vn-03-route-gate-cutover-2026-07-19.md`다. **다음 한 작업**은 양 저장소
+docs-first draft PR을 연 뒤 구현 head를 동일 전문 리뷰어에게 교차 제출하는 것이다. 승인 전에는
+테스트·lint·build를 실행하지 않는다.
+
+## 2026-07-19 (codex, agent B) — T-VN-15 구현·생성 계약 준비 완료, 테스트 전 리뷰 대기
+
+`/v1/features/search`의 total opt-in을 repository 실행 계약으로 내리고,
+`include_total=false`에서는 COUNT statement를 전혀 실행하지 않도록 고정했다. cursor는 DB table 없는
+stateless v1이며, SQL과 같은 정규화 q/filter/sort/page contract fingerprint와 keyset을 전용
+server-only secret의 HMAC-SHA256으로 보호한다. production secret 누락/짧음/재사용은 fail-closed,
+local-dev만 process-local 난수 fallback이다. malformed, unknown version, tamper, query mismatch는
+DB 전에 별도 typed RFC7807 422로 반환한다. repository/client/API, settings/entrypoint/Compose,
+admin UI consumer, admin/user OpenAPI와 생성 TypeScript, repository spy·실제 PostgreSQL·runtime
+matrix 테스트까지 PR #780에 준비했다. **다음 한 작업**은 최신 `integration/t-vn`에 rebase한 exact
+head를 push하고 같은 단일 적대 리뷰어에게 테스트 전 검토를 요청하는 것이다. 승인 전에는
+test/lint/build를 실행하지 않는다.
+## 2026-07-19 (codex, agent B) — T-VN-04A admin 비공개 Feature 구현·리뷰 대기
+
+- issue #741을 `integration/t-vn` 기준 독립 PR로 분리했다. public projection을 우회하거나
+  느슨하게 만들지 않고, base Feature용 admin bbox/cluster와 admin weather/price card를 구현했다.
+  지도·테이블·marker 상세·상태 필터가 동일한 admin 경계를 사용하며 공개 active-only 계약은
+  유지한다. 카드 target도 `deleted_at`/`user_deleted_at`/`status=deleted`를 제외한다. 기존
+  partial GiST가 모든 nondeleted 상태를 포함하므로 DB migration은 만들지 않았다.
+- full OpenAPI와 admin TypeScript 타입을 재생성하고 repository/router/frontend/PostGIS·route-mock
+  회귀를 작성했다. **다음 한 작업**: 정확한 구현 head를 같은 적대 리뷰어 1명이 테스트 전에
+  검토한다. 승인 전 테스트·lint·build는 실행하지 않는다.
+## 2026-07-19 (codex) — latest main → integration/t-vn 동기화 리뷰 대기
+
+`integration/t-vn@22bf35a5`에 `main@d2104f15`를 merge하는 전용 sync branch를 만들었다.
+main의 C7 manifest v4·4-image attestation과 integration의 vNext DB/API를 한 source tree로
+결합하면서 Dockerfile의 OCI revision label과 production profile을 모두 보존했고, 문서 이력과
+완료 task 정본을 정리했다. Alembic은 `0058 → 0059 → 0060 → 0061 → 0062` 단일 head다.
+**다음 한 작업**은 draft PR의 동일 전문 리뷰어가 코드 conflict 해소를 승인하는 것이다. 승인
+전에는 테스트·lint·build를 실행하지 않고, 승인 뒤 integration 대상 CI gate를 수행한다.
+
 ## 2026-07-19 (codex) — T-ADM-C7P compatible-pair manifest v4 동기화 착수
 
 - docker-manager C6c provenance를 Map API/UI/Dagster web/Dagster daemon 네 image에 닫으면
@@ -67,6 +195,324 @@
   PR #755는 merge commit `54150c91`로 `main`에 반영됐으며 `T-ADM-C7M`은 완료 이력으로 옮겼다.
 - **다음 한 작업**: PR #754의 C7 production live E2E 실행 경계 보강을 CI green으로 병합한 뒤,
   n150 compatible-pair 배포와 파괴적 live 검증을 수행한다.
+## 2026-07-19 (codex) — PR #772 T-VN-13 적대 리뷰 보완 완료
+
+전문 리뷰어 1명의 테스트 전 심층 검토에서 승인 TOCTOU, add overwrite, validator 범위·형식,
+migration 원자성, public/Admin/PinVi 소비자 계약 누락을 확인했다. pending 요청은 제출 시
+`base_row_revision`을 고정하고 승인 시 row lock 아래서 비교하며, add는 같은 ID를 덮어쓰지 않는다.
+public detail ETag/304와 Admin 전용 revision endpoint를 분리했고 bundled frontend와 PinVi client가
+revision GET의 raw ETag를 PATCH/DELETE `If-Match`로 전달한다. PinVi는 stale 412를
+`PRECONDITION_FAILED`로 노출한다. PinVi 소비자 PR #391은 main에 먼저 병합됐고 원 PR #772가
+검증 중 선행 병합되어 보완은 후속 PR #776에 담았다. **다음 한 작업**은 #776 CI green·통합 병합
+뒤 C6c/C7 gate를 재확인하고 Agent B lane의 다음 미완 task를 시작하는 것이다.
+
+## 2026-07-19 (codex) — PR #773 2차 적대 리뷰 blocker 구현 완료
+
+- 경계 geometry의 cluster 귀속을 저장 canonical 행정코드 기준 feature당 1회로 확정하고
+  문서/교차 bbox fixture에 고정했다. marker 계산은 실제 bbox 교차 부분을 유지한다.
+- 공유 `ClusterUnit`을 기준으로 `meta.cluster.cluster_unit`을 필수 enum,
+  `drill_down_unit`을 필수 enum|null로 만들고 OpenAPI/TypeScript 산출물을 갱신했다.
+- geom-only 대표 분포의 planner-default partial GiST EXPLAIN 회귀까지 추가했다.
+- **다음 한 작업**: 같은 적대 리뷰어가 blocker를 재검토한 뒤 승인되면 전체 테스트 게이트를
+  실행한다. 재리뷰 전 테스트는 사용자 지시에 따라 미실행 상태다.
+
+## 2026-07-19 (codex) — Agent A PR #763 심층 리뷰 후속 보완 완료
+
+- route/area exact predicate의 centroid 우회를 차단하고 cluster/items 공간 후보를
+  일치시켰으며, geometry marker를 bbox 교차 부분에서 계산한다.
+  `cluster_unit`/`drill_down_unit`은 `meta.cluster`로 일원화했다.
+- 전체 main unit 1,503건, API router 26건, PostGIS/성능/공개 회귀 34건과 OpenAPI·TS·
+  Ruff·mypy·import-linter·redaction 게이트가 통과했다.
+- **다음 한 작업**: 후속 PR을 CI green 뒤 `integration/t-vn`에 병합한다.
+## 2026-07-19 (codex, agent B) — T-VN-05R 공개 curated raw 경계 보강
+
+- issue #765의 우회 경로를 닫기 위해 공개 curated list/detail을 admin
+  `CuratedFeatureView`에서 분리한 `PublicCuratedFeatureView` allowlist로 전환했다.
+  동일 리뷰어 후속 3건을 반영해 `feature_kind` 판별 7종 union, strict 주소/kind별 detail,
+  place 시설·영업시간·전화·리뷰 링크 projector를 완결했다. 실제 concierge
+  YouTube/transcript/evidence 미러와 미승인 nested raw를 제거하며 알 수 없는 kind는
+  목록 제외/상세 404로 fail-closed한다. 공개 목록의 내부 identity 필터
+  `theme_id/source_id/provider/dataset_key`도 제거했다.
+- admin `/v1/admin/features/curated*`는 기존 전체 DTO와 raw 감사값을 유지한다. 공개
+  list/detail sentinel 회귀와 full/user OpenAPI schema 분리, admin/user 생성 타입 갱신을
+  같은 변경에 포함한다.
+- **다음 한 작업**: OpenAPI/TypeScript 생성물을 갱신하고 PR #774에 후속 커밋한다. 이번
+  커밋은 요청대로 테스트를 실행하지 않고 CI 결과를 후속 확인한다.
+
+## 2026-07-19 (codex, agent B) — T-VN-21R 구현 완료·리뷰 대기
+
+- #767 구현을 `fix/t-vn-21r-benchmark-correctness`에 준비했다. Tier-2 harness는
+  seed/skip-seed 모드 모두 DB의 non-notice public ID 200개로 batch를 구성하고,
+  terminal LIMIT 전 `matched_rows`와 LIMIT 뒤 `returned_rows`/최소 cardinality를
+  분리해 검증한다. shared read는 최상위 Plan 누적값으로 단일화했다.
+- seed inactive 규칙·notice 후보 제외·199건 부족·실제 truncation·모든 viewport
+  수량·root/child·Append/parallel plan 회귀 테스트를 작성했다. **다음 한 작업**:
+  같은 적대적 리뷰어 1명의
+  테스트 전 승인을 받고 finding을 반영한 뒤 로컬 gate를 실행한다.
+
+## 2026-07-19 (codex) — 최근 48시간 Claude PR 적대 리뷰 후속 계획
+
+- 단일 전문 리뷰어가 PR #752/#756/#757/#759/#760/#763을 심층 검토했다. #757/#759는
+  추가 P0~P3가 없고, public curated raw lineage(#765), weather UNIQUE cutover race(#766),
+  release benchmark cardinality·buffer 합산(#767), cluster/items 공간 universe drift(#768)를
+  상세 PR 코멘트와 네 이슈로 기록했다.
+- 문서를 먼저 갱신해 `T-VN-05R/17R/21R/14R` 네 PR 경계와 agent A/B 병렬 lane을 고정했다.
+  #765/#766/#767은 `integration/t-vn` 대상 독립 PR, #768은 열려 있는 PR #763의 후속 커밋이다.
+  0060은 호환성보다 원자성을 우선해 dedup+non-concurrent UNIQUE를 한 transaction으로 묶는다.
+- `T-VN-17R` 구현은 과거 retry 잔여만 짧은 autocommit DDL로 정리한 뒤 0060이 5초 제한의
+  `SHARE ROW EXCLUSIVE`를 얻어 dedup→non-concurrent semantic UNIQUE를 한 transaction에서 commit하도록
+  정정했다. main build는 SELECT를 허용한다. VALIDATE에도 session-level 5초 timeout과 RESET을
+  적용하고, 기존 제약 위반은 destructive commit 전에 `23514`로 거부하며, downgrade는
+  backup/PITR 전용으로 fail-closed한다. 실제 migration
+  DELETE 내부를 advisory gate로 멈춘 writer 차단, VALIDATE blocker timeout·재시도, 과거 concurrent
+  실패 INVALID index 자동 복구, head→0059 무변경 전역 downgrade 거부 회귀를 추가했으며 두 번째
+  단일 리뷰 finding 반영 후 재리뷰 대기다.
+- **다음 한 작업**: 문서 PR 병합 직후 네 task를 병렬 구현하고, 같은 리뷰어 1명의 테스트 전
+  승인→로컬 gate→CI green→integration 병합→issue close까지 수행한다.
+
+## 2026-07-19 (claude, agent A2) — T-VN-14 지도 in-bounds 완결성 + exact 공간 술어 구현
+
+- `feat/t-vn-14-map-completeness`(base `integration/t-vn`)에서 ADR-073 D-9-3/D-9-4·F-8을
+  구현했다. (1) `include_geometry`를 serialization-only로 만들었다 — 경량/geometry bbox SQL의
+  WHERE를 단일 후보 술어(`_bbox_candidate_predicate_sql`)로 통일해 membership이 플래그와
+  무관하게 동일하고 payload만 다르다(2220→2221 버그 해소). (2) route/area에 exact
+  `ST_Intersects`를 적용해 `&&` MBR false positive를 제거(point `&&`는 유지, `ST_Transform`
+  없음). (3) in-bounds 응답 DTO에 `mode`/`truncated`/`coverage`/`cluster_key`+drill-down을
+  명시하고 `max_items+1`로 truncation을 명시 판정. (4) 공통 attribute 필터를
+  `_bbox_attribute_filter_sql`로 단일화해 3변형의 이중 SQL 복제 제거.
+- 스코프 준수: bbox/in-bounds/cluster READ SQL + in-bounds DTO만 수정. public_features
+  view·weather/price LATERAL·인덱스/모델·write 경로 무수정. OpenAPI 재생성(drift 0).
+  검증: 신규 통합 2 + perf-gate tier-1 12 + 회귀 17 = 31 green(WSL testcontainers, 최소 seed),
+  router 단위 30 green, ruff/mypy --strict/lint-imports/redaction clean, C: 무증가.
+- **후속**: 적대적 리뷰에서 cluster/items 후보 발산과 centroid coord 우회가 확인되어 위
+  보완 항목에서 수정했다.
+
+## 2026-07-19 (claude, agent A1) — T-VN-13 Feature row_revision + If-Match/ETag 구현
+
+- `feat/t-vn-13-row-revision`(base `integration/t-vn`, migration head 0061)에서
+  `feature.features`에 server-owned monotonic `row_revision`을 추가(migration 0062,
+  BEFORE UPDATE 트리거 = 0058 poi lock_version 미러링)하고 correction PATCH/DELETE/approve에
+  If-Match(누락 428·형식 422·stale 412·성공 시 새 ETag), admin detail GET에 ETag/304를
+  연결했다. #727 policy revision과 합치지 않음(F-2). 낙관적 검사는 repo `expected_row_revision`에
+  원자적으로(FOR UPDATE) 넣고 라우터는 사상만 담당. model에 컬럼+CHECK 미러링 → T-VN-19 gate green.
+- 검증: 라우터 단위 16 + row_revision 통합 3(WSL testcontainers 1행 seed) + alembic metadata
+  정합 gate green, ruff/mypy/lint-imports clean, openapi drift 0, 생성 TS 타입 재생성·frontend
+  type-check green.
+- **다음 한 작업**: 적대적 리뷰(오케스트레이터) → PR·CI green·머지. **follow-up(별도)**: admin
+  frontend가 GET ETag → correction에 If-Match 전송(현재 미전송 시 428), PinVi client 동일 갱신
+  (cross-repo). 그리고 아래 **환경 사고**(dev postgres 컨테이너 오삭제) 복구를 사용자가 처리해야 함.
+
+## 2026-07-19 (claude, agent A1) — T-VN-21 3단 성능·DDL gate 인프라 구현
+
+- `feat/t-vn-21-perf-gate`(base `integration/t-vn`)에서 ADR-075 D-12-4의 3단 성능·DDL
+  gate를 CI·release 절차에 연결했다. tier-1(매 PR, integration job):
+  `tests/integration/test_perf_gate_tier1.py`가 hot public query 9종을 planner-default
+  EXPLAIN해 `feature.features` Seq Scan 부재·기대 index·N+1 가드·response-shape 회귀를
+  검증(helper·registry·seed는 `tests/integration/perf_gate.py`). tier-2(release, CI 아님):
+  `scripts/perf_tier2_release_harness.py`가 100만+ 실분포에서 대표 viewport를
+  EXPLAIN(ANALYZE,BUFFERS)로 재고 p95·shared read·bytes를 JSON 기록. tier-3(index PR):
+  `measure_index_write_cost` helper + 리뷰 enforce. 정본은 performance.md §8.3.
+- 스코프 준수: feature_repo 쿼리/라우터/마이그레이션/모델 무수정. 모든 hot query가
+  planner 기본에서 `features` clean(실 perf-bug 없음). tier-1 12 tests green
+  (WSL testcontainers), ruff/mypy(신규 파일)/lint-imports/redaction clean, openapi drift 없음.
+- **다음 한 작업**: 적대적 리뷰(오케스트레이터) → PR·CI green·머지. tier-2 harness의 실제
+  100만행 실분포 측정과 release 리포트 첨부는 실제 cutover 시점 별도 작업.
+
+## 2026-07-19 (claude, agent A1) — T-VN-20 body actor 전면 제거 구현
+
+- `feat/t-vn-20-actor-principal`(base `integration/t-vn`)에서 모든 admin write의 감사
+  actor를 인증 principal(`AdminProxyContext.actor`)에서만 파생하도록 완결했다(ADR-066
+  D-2, T-VN-07 완성). PinVi `origin/main` client 대조로 결정: PinVi가 보내는 feature/
+  issue operator·dedup reviewed_by는 deprecated 수용·무시, 나머지(auth-event/curated/
+  enrichment/offline)는 schema 제거(422). admin frontend에서 body actor 전송 제거,
+  OpenAPI/TS 재생성, 두 class(principal 기록 + 422/ignored) 테스트. PinVi 전송 중단
+  follow-up은 `docs/integration-map.md` §3.3에 성문화.
+- **다음 한 작업**: 적대적 리뷰(오케스트레이터) → full gates → PR·CI green·머지. PinVi
+  client의 operator/reviewed_by 전송 제거는 PinVi 저장소 별도 PR(cross-repo).
+
+## 2026-07-19 (claude, agent A2) — T-VN-18 중복 GiST 제거 + BRIN 감사 완료
+
+- migration 0061 + models.py `spatial_index=False`로 자동 full GiST 3개를 제거하고
+  공개 술어 partial GiST 3개만 유지, weather source-record 지원 index 추가(T-VN-17
+  이월), BRIN은 누락 hot 축이 없어 추가 안 함(감사). write-cost 실측 6-GiST vs
+  3-partial ≈ 1.18~1.29× 개선(§8.3). 브랜치 `feat/t-vn-18-gist-brin`.
+- 게이트: ruff/mypy(main)/lint-imports/redaction green; T-VN-18 통합 5 + metadata
+  gate/upgrade 11 + perf-explain/public-view 5 passed. **미완**: 세션 누적으로
+  Windows C:가 0 bytes → Docker read-only가 되어 `test_weather_repo.py` 회귀
+  미실행(정적으로는 partial index 단언이라 호환). C: 확보 후 재실행 + 최종 rebase
+  검증 필요.
+- **다음 한 작업**: C: 디스크 확보 → weather 회귀 재실행 → orchestrator 리뷰·PR·머지.
+## 2026-07-19 (codex) — Agent A T-VN-19 심층 리뷰 보완
+
+- PR #753의 단일 전문 리뷰에서 metadata 비교 제외 table 8개의 구조 gate 부재와,
+  제외 index가 이름만 같으면 잘못된 UNIQUE·키·predicate도 통과하는 S2 두 건을
+  확인했다. 전체 column type/nullability, 핵심 constraint/index, 인증·운영 CHECK
+  거부 동작과 index 의미를 빈 DB migration 뒤 검증하도록 보완했다.
+- 새 ORM mapping이 임시 제외 목록에 남으면 Alembic 시작 시 실패하는 stale-exclusion
+  guard도 추가했다. env와 테스트는 schema-qualified 공용 ledger를 사용하며 대체 계약
+  집합의 정확한 일치를 검증한다. migration에 없던 curated feature index의
+  `NULLS NOT DISTINCT` metadata 옵션은 제거해 일반 Alembic 비교로 복귀시켰다.
+- 같은 전문 리뷰어의 재검토 승인을 받았고 변경 대상 통합 테스트 13개, unit 1,503개,
+  ruff, mypy strict, import-linter를 통과했다. 전체 integration 재실행은 Docker Desktop의
+  containerd metadata filesystem read-only 장애로 중단했으므로 원격 CI에서 재검증한다.
+- **다음 한 작업**: 후속 PR을 `integration/t-vn`에만 열어 CI green 뒤 머지하고, Agent A
+  PR #754의 갱신 head를 같은 전문 리뷰어로 재검토해 보안 finding을 보완한다.
+
+## 2026-07-19 (claude, agent A1) — T-VN-19 Alembic metadata 정합 CI gate 구현
+
+- `feat/t-vn-19-alembic-check`(base `integration/t-vn`)에서 빈 PostGIS DB의 `alembic
+  upgrade head && alembic check` diff 0건 gate를 구현했다(ADR-075 D-12-2, §8.1). env.py
+  `include_object`로 PostGIS·미모델 app table 8개·round-trip 불가 index 4개를 이름으로 명시
+  제외하고, models.py를 배포 DB에 정합화(String→Text 27컬럼, dagster claim 누락 컬럼/CHECK/
+  기본값, source_records·curated_themes 제약명 정정, import_jobs SERIAL 위양성 제거).
+  `tests/integration/test_alembic_metadata_consistency.py`가 기존 integration CI에서 상시
+  실행하고, 제외 index 4개의 구조 의미는 test_alembic_upgrade.py가 catalog로 단언한다.
+  **마이그레이션 없음**(scope guard 준수) — 배포 DB 자체 drift는 발견되지 않았다.
+- **다음 한 작업**: 적대적 리뷰(오케스트레이터) → full gates → PR·CI green·머지. 비차단
+  후속 관찰(별도 migration task 후보): DB의 varchar/text 혼재 정규화, curated_themes·
+  source_records 제약의 naming-convention rename.
+
+## 2026-07-19 (claude, agent A2) — T-VN-17 weather 무결성 제약 완료
+
+- alembic 0060으로 ``feature_weather_values``에 semantic UNIQUE(CONCURRENTLY,
+  NULLS NOT DISTINCT) + range/payload CHECK + source FK(NOT VALID→VALIDATE)를
+  price 패턴 미러링으로 도입하고, dedup-first + writer ON CONFLICT cutover를 같은
+  PR에 담았다(F-7/ADR-072/075). ~30M행 rewrite/STORED 없음. 브랜치
+  ``feat/t-vn-17-weather-integrity``.
+- 게이트: ruff/mypy(main)/lint-imports green, 신규 통합 테스트(제약 7 + migration
+  dedup·왕복 1) + 기존 weather/orchestration 회귀 green, fresh-DB alembic upgrade
+  head green. #752가 실수 커밋한 uv.lock 제거.
+- **다음 한 작업**: 이 브랜치 orchestrator 리뷰·PR·머지 후 다음 T-VN 배정 task.
+  (dagster 통합 테스트는 이 venv에 dagster 미설치라 미실행 — 환경 한계.)
+- **후속 정정(#766)**: dedup 뒤 concurrent build 사이 writer race가 확인돼 T-VN-17R에서
+  transactional writer-lock cutover로 교체한다. 이 항목의 `CONCURRENTLY` 설명은 당시 구현 이력이다.
+
+## 2026-07-19 (codex) — Agent A T-VN-07 소비자 clean-cut 리뷰 보완
+
+- PR #748의 단일 전문 리뷰에서 삭제된 beach no-op query가 이 저장소의 구현 사양과
+  PinVi primary consumer에 남은 S2를 확인했다. `public-views-api` 표를 실제 계약과
+  맞추고 PinVi route/client/vendored OpenAPI 후속을 병행한다.
+- 같은 리뷰어가 양 저장소 최종 diff를 승인했고, 문서 diff/redaction 및 PinVi 관련
+  Python 31개·정적 gate가 통과했다.
+- **다음 한 작업**: 문서 PR을 `integration/t-vn`에만 머지하고 PinVi 소비자 PR도 CI
+  green으로 머지한다.
+
+## 2026-07-19 (codex) — Agent A T-VN-02 심층 리뷰 보완
+
+- PR #747의 단일 전문 리뷰에서 Prometheus token을 추적 config에 inline하게 하는
+  배포 안내(S2)와 비ASCII token의 header/env 인코딩 불일치(S3)를 확인했다.
+  `credentials_file` + repository 밖 read-only secret mount를 선행 조건으로 문서를
+  고치고, metrics token 설정을 RFC 6750 `b64token` ASCII로 제한했다.
+- 같은 리뷰어가 기존 S2/S3 해소를 확인했고, 남은 import 순서 1건은 사용자 지침의
+  기계적 변경으로 정리했다. 관련 API unit 87건과 Ruff가 통과했다.
+
+## 2026-07-19 (claude, agent A2) — T-VN-05 공개 raw payload 경계 제거 완료
+
+- 공개 detail/batch에서 raw observation lineage(observations)와 provider raw
+  passthrough(detail.payload, MOIS 포함)를 제거하고, raw lineage를 operator 표면
+  (신규 `GET /features/{id}/sources` + operator-gated observation history)으로
+  이동했다. route_policy 재분류(history PUBLIC_KEYED→OPERATOR, /sources OPERATOR
+  신규), user OpenAPI subset에서 제외. service batch는 extra=forbid + typed-only로
+  raw opt-in 불가. 브랜치 `feat/t-vn-05-raw-payload`(base `integration/t-vn`).
+- 게이트: ruff/mypy(main+api)/lint-imports green, API 657 passed(신규 MOIS strip·
+  operator auth 403·404 테스트 포함), OpenAPI drift clean, admin/user types 재생성·
+  type-check green, redaction clean.
+- **다음 한 작업**: 이 브랜치 orchestrator 리뷰·PR·머지 후 다음 T-VN 배정 task.
+
+## 2026-07-19 (codex) — Agent A T-VN-06 심층 리뷰 보완
+
+- PR #746의 단일 전문 리뷰에서 #745 이후 alias-aware notice 필터 충돌(S1)을 확인해
+  공유 helper에 방어 cast를 이식했다. 동시 head 갱신도 같은 리뷰어가 재검토해 문서 정본
+  회귀(S2)와 curated 단건·collection count 테스트 공백(S3)을 추가로 확인하고 보완했다.
+- **다음 한 작업**: 같은 리뷰어의 최종 승인 후 전체 CI를 통과시키고 PR #746을
+  `integration/t-vn`에만 머지한다. 이후 최근 Agent A PR을 다시 검색한다.
+
+## 2026-07-19 (claude, agent A1) — T-VN-07 no-op 옵션 삭제 + actor principal 1차 구현
+
+- `feat/t-vn-07-noop-actor`(base `integration/t-vn@0e0f7fe2`)에서 (1) 무동작 beach
+  `include_quality`/`include_forecast` query 옵션을 route/OpenAPI(admin·user)/생성 TS
+  타입에서 제거하고(응답 필드는 모델 기본값으로 유지 — D-9-6), (2) auth-event 감사 actor를
+  `body.actor or context.actor` → 인증 principal `context.actor`로 좁혔다(D-2·F-4). 옛
+  caller no 500, body-actor 위조 차단. openapi/TS drift 0, 게이트 green.
+- **다음 한 작업**: 이 브랜치 적대적 리뷰(오케스트레이터) → full gates → PR·CI green·
+  `integration/t-vn` 머지. body-actor 필드 전면 제거·`actor` schema 제거는 T-VN-20이
+  admin feature/curated/issue/offline/dedup/enrichment와 함께 이어받는다.
+
+## 2026-07-19 (claude, agent A1) — T-VN-02 route policy matrix + /metrics 경계 구현
+
+- `feat/t-vn-02-route-policy`(base `integration/t-vn`, #743·#744 rebase 반영)에 ADR-066
+  결정 1의 route policy matrix를 구현했다: `kortravelmap.api.route_policy`의 명시적
+  registry가 전 HTTP/WS route를 6개 정책으로 분류하고, 미분류 route는 `create_app`
+  구성 검사와 CI가 함께 실패한다. 배선≠정책 gap은 소유 task를 명시한
+  `KNOWN_WIRING_EXCEPTIONS` ledger(현재 전부 T-VN-03 소유 — legacy `/v1/curated-*`
+  4건, 무의존 `/v1/ops/*` 관측 read 6건)만 허용하며 gap이 닫히면 stale entry가
+  실패해 축소를 강제한다. ops-live WS는 #725 ticket 인증을 기록만 하고 재사용.
+- ADR-066 결정 4의 `/metrics` scrape identity 경계를 이 task에서 닫았다
+  (`KOR_TRAVEL_MAP_API_METRICS_TOKEN` + Bearer 검증, production 필수, compose
+  hard-require). **배포 전제**: n150 root `.env`에 metrics token 추가 +
+  kor-travel-docker-manager Prometheus scrape_config `authorization`(Bearer) 반영.
+- issue #742 합류: ops pair 검증 정본을 settings production matrix로 일원화, entrypoint가
+  production+both-empty pair를 migration 전에 동일 문구로 거부, 메시지 lockstep 테스트 추가.
+- 리뷰(PASS-WITH-FIXES) 반영 완료: /metrics 배포 문서에 zero-gap 순서 + "docker-manager에
+  현재 12701 scrape job 없음(신규 추가 대상)" 정정, production에서 interactive docs UI
+  (`/docs`·`/redoc`) off + `debug` 재분류(`/openapi.json`은 유지), metrics 검사 비-ASCII
+  헤더 401 fail-closed, ledger GET-only 강제, entrypoint PROFILE `+x` 판정, anti-spoof
+  테스트. defer(범위 밖): entrypoint DEBUG_ROUTES_ENABLED 철자 게이트, 기존 auth.py 3곳
+  latin-1 TypeError 패턴.
+- **다음 한 작업**: 오케스트레이터가 PR을 생성·CI green·`integration/t-vn` 머지한다(본 에이전트는
+  PR 생성 안 함). T-VN-03(codex b1)이 ledger의 curated/ops 관측 gap을 닫을 때
+  `KNOWN_WIRING_EXCEPTIONS`에서 해당 entry 제거가 강제된다.
+
+## 2026-07-19 (codex) — Agent A T-VN-04 심층 리뷰 보완 완료
+
+- PR #743의 공개 경계를 전문 리뷰어 1명이 재검증해 `admin_only` theme/비공개 overlay,
+  복제 장소정보를 가진 비공개 연결 item, 종료·구버전 notice의 우회 노출을 모두 SQL 단계에서
+  차단했다. 공개 query parameter 2개와 OpenAPI/생성 타입도 clean-cut 계약으로 동기화했다.
+- 승인 뒤 unit/API 70건, PostGIS 15건과 Ruff가 통과했다. 최신 `integration/t-vn` 재배치와 CI
+  green 뒤 PR #743을 통합 브랜치에만 머지한다.
+
+## 2026-07-19 (claude, agent A2) — T-VN-06 notice 방어적 cast 완료
+
+- T-VN-04는 #743으로 integration/t-vn에 병합됐다. 이어 T-VN-06:
+  ``_ended_notice_hidden_sql``(#745가 curated/curation/collection 공개 표면의
+  notice 감산 정본으로 만든 함수)의 valid_end_time 직접 CAST를
+  ``pg_input_is_valid`` 가드 CASE로 교체해 오염 row 1건이 전체 공개 read를
+  500으로 만들던 F-9를 완화했다(fail-closed 제외, 스키마/migration 0).
+  브랜치 ``feat/t-vn-06-notice-cast``(base ``integration/t-vn``).
+- 오염 4종 상태 matrix 통합 테스트 + 수정 전 SQL 재현 확인, notice lifecycle/
+  public view/perf EXPLAIN 회귀 green. ETL purge·reconcile의 잔여 cast와
+  관측(카운터)·typed 재설계는 T-VN-37 소유로 명시.
+- **다음 한 작업**: 이 브랜치 전체 게이트·리뷰·PR·머지(오케스트레이터 소관)
+  후 다음 T-VN 배정 task를 진행한다.
+
+## 2026-07-19 (claude, agent A2) — T-VN-04 공개 predicate view 단일화 완료
+
+- alembic 0059 `feature.public_features` VIEW로 공개 술어를 단일화하고 모든 공개 read 경로
+  (bbox/cluster/search/nearby/in-area/detail/batch/counts/notice/weather anchor/특보 이력/
+  public views/curation·curated)를 projection으로 수렴했다. 적대 리뷰 S1(collection item
+  연결 feature leak)·S2(특보 이력 base join, admin panel 404 처리, PinVi batch 계약 노트)·S3
+  전부 반영. 브랜치 `feat/t-vn-04-public-predicate`(base `integration/t-vn`).
+- 소비자 가시 변경: batch 비공개=`missing` 균일화(PinVi false-broken 가능 — resolver T-VN-11,
+  `docs/integration-map.md` §3.2), weather/price 카드 404, categories `active_only` 제거,
+  특보 응답 `feature_status` 제거. admin 전용 카드 표면은 issue #741로 분리.
+- **다음 한 작업**: 이 브랜치 PR 생성·CI green·`integration/t-vn` 머지(오케스트레이터 소관)
+  후, T-VN Wave 0의 다음 미착수 task를 `docs/tasks.md`에서 골라 진행한다.
+
+## 2026-07-19 (claude) — T-VN-01 production fail-closed 전환 구현·리뷰 반영
+
+- `feat/t-vn-01-fail-closed`에 `KOR_TRAVEL_MAP_API_PROFILE`(production|local-dev)과 production
+  기동 거부 matrix를 구현했다: admin proxy secret(앞뒤 공백 없는 32자 이상), ops surface 활성 시
+  read/cancel token, features surface 활성 시 `public_api_key_required=true`+service token(앞뒤
+  공백 없는 32자 이상), 인증 없는 `/debug` off. local-dev fallback은 non-production 전용으로
+  격리하고 auth dependency도 production에서 방어적으로 닫는다.
+- Docker image/compose는 기본 production으로 기동하고 compose가 debug off·public key 필수를
+  컨테이너 기본으로 주입한다. 적대 리뷰(PASS-WITH-FIXES)의 S2/S3 — service token 필수화·
+  compose hard-require·root/package env 문서화·hermetic 테스트 — 를 반영했다.
+- **배포 전제**: n150 다음 배포 전 root `.env`에 admin secret·ops token들과 서로 다른 32자 이상
+  `KOR_TRAVEL_MAP_API_SERVICE_TOKEN`을 추가해야 compose가 기동한다.
+- **다음 한 작업**: orchestrator가 `feat/t-vn-01-fail-closed`를 `integration/t-vn` 대상 PR로 열어
+  CI green 후 머지하고, T-VN-02(route policy matrix)·T-VN-03(잔여 read 게이트)과의 통합 순서를
+  진행한다.
 
 ## 2026-07-19 (codex) — Agent A PR #744 manual link 재활성화 보완
 

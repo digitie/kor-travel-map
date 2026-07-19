@@ -49,7 +49,9 @@
                                                        ops caller는 T-ADM-C6c 전환 대기)
 
 [kor-travel-docker-manager] ═══ 인프라 계층(별도 데이터 흐름 없음): PostGIS(5432)·RustFS(12101) 구동/관리
-[kor-travel-docker-manager Prometheus :12401] ──(pull scrape)──▶ [kor-travel-map :12701/metrics]
+[kor-travel-docker-manager Prometheus :12401] ┄┄(목표: Authorization Bearer metrics token으로
+       12701 scrape — ADR-066 T-VN-02. 현재 docker-manager prometheus.yml에
+       12701 job 없음, 배포 시 인증과 함께 신규 추가)┄▶ [kor-travel-map :12701/metrics]
 ```
 
 - PinVi ↔ kor-travel-map: **HTTP만**(라이브러리 import·공유 DB 없음, ADR-045/PinVi ADR-026).
@@ -89,6 +91,14 @@
   추가한다. 배포는 secret 선주입 → map API → signed read/cancel smoke → PinVi API 순서다.
   rollback은 map만 먼저 내리지 않고 검증된 map/PinVi image pair를 함께 복원한다. 한쪽 token이
   없거나 짧거나 공백을 포함하거나 두 token이 같으면 C6c를 활성화하지 않는다.
+- `/v1/features/search` cursor 서명에는 API 전용
+  `KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET`을 사용한다. 이 값은 public API key나
+  admin/service/ops/metrics credential과 공유하지 않고 map API container에만 주입한다.
+  production features surface는 공백 없는 32자 이상 값이 없으면 기동을 거부한다. n150
+  cutover에서는 API 재생성 전에 secret을 먼저 주입하고, 첫 page cursor로 같은 query의 다음
+  page 성공과 query 변경·변조 cursor의 typed 422를 확인한다. 값 rotation은 발급 당시 key로
+  만든 기존 cursor를 즉시 무효화하므로 배포 창의 허용 동작으로 기록하며, local-dev의
+  process-local fallback은 재시작·multi-worker 간 cursor 연속성을 보장하지 않는다.
 
 | PinVi 현재 용도 | 삭제된 KTM 호출 | canonical 전환 대상 | 필수 의미 변환 |
 |---|---|---|---|
@@ -116,7 +126,8 @@
 | kor-travel-map service read (`POST /v1/features/batch`) | 설정 시 `X-Kor-Travel-Map-Service-Token`; 미설정은 현재 하위호환 통과(목표는 production fail-closed) | 〃 (`data={found{},missing[]}`) | 〃 |
 | kor-travel-map admin + canonical ops (`/v1/admin/*`·`/v1/ops/{datasets,pipeline}*`) | same-origin Next.js BFF의 proxy secret + actor + trusted peer CIDR. Docker는 secret 필수·frontend 단일 `/32` | 〃 | 〃 |
 | kor-travel-map ops live WebSocket | BFF가 발급한 짧은 수명 HMAC subprotocol ticket + DB nonce 단일 소비 + bounded lease | WebSocket event frame | 인증/만료는 data frame 없이 close 4401/4408 |
-| kor-travel-map 관측/debug 잔여 (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*}`, `/v1/debug/mois-license/*`, `/metrics`) | 현재 app dependency 없음 — **해결 전 노출 금지인 알려진 gap** | 표면별 기존 envelope/Prometheus | 표면별 기존 계약 |
+| kor-travel-map Prometheus `/metrics` | `KOR_TRAVEL_MAP_API_METRICS_TOKEN` 설정 시 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) — production은 token 필수. **목표**: docker-manager Prometheus가 인증 헤더로 12701 scrape(현재 그 job 없음 — 배포 시 `authorization`(Bearer)와 함께 신규 추가, scrape config→token 순서) | Prometheus exposition | 비-Bearer/불일치 401 |
+| kor-travel-map 관측/debug 잔여 (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep}`, `/v1/debug/mois-license/*`) | **T-VN-03 목표**: ops는 AdminBFF 또는 `OpsToken+OpsScope(ops:read)`, MOIS raw는 production unmount + local-dev AdminBFF/operator gate. PinVi issue #392/PR #393 소비자 선전환과 동일 cutover 전까지 현행 무의존 route 노출 금지 | 표면별 기존 envelope | RFC7807 `problem+json` |
 | kor-travel-concierge export (`/api/v1/features/*`) | DB `read` scope `X-API-Key` | **무-envelope** `{items, next_cursor, has_more}` (내부 export 단순 계약) | HTTP status |
 | PinVi 자체 API (`:9021`) | 쿠키 세션/OAuth | PinVi 자체 `Envelope` | PinVi 자체 |
 
@@ -141,6 +152,7 @@ C6c v4 capture를 수행하고, 그 capture 증거로 C7 live를 실행한다.
 | 변경 | PinVi 선행 조건 | KTM 전환 조건 |
 |---|---|---|
 | ops datasets/pipeline | `T-ADM-C6c` canonical caller, 최소 service/operator principal, 삭제 경로 0건 | 양 저장소 commit pair 인증·응답 smoke 뒤 C7 |
+| ops 관측 read | PinVi PR #393의 consistency/log caller `ops:read` 전환과 metrics/health-deep direct caller inventory | T-VN-03 operator gate·route exception 0건; 두 head를 C6c manifest v4 exact pair source에 포함 |
 | feature batch | 5-state typed DTO, transport 503 stale 유지, opaque UUID 보존 | state classifier와 revision, pinned service OpenAPI |
 | Feature UUID | legacy alias-map DB 이관과 모든 FK/consumer 참조 shadow 검증 | UUID read/write 전환, alias lookup 보존, checksum 일치 |
 | weather | set-based batch와 `target_at`/`known_at` typed consumer | bitemporal fact/current projection과 parent 404 |
@@ -153,8 +165,49 @@ write fence를 유지하거나 검증된 forward journal/PITR로 fence 이후 de
 단순 old snapshot 복원과 upstream 재수집은 rollback이 아니다. 어느 gate든 실패하면 consumer와 KTM을
 이전 pinned compatible pair로 유지하고 새 writer를 열지 않는다(ADR-075).
 
+`/v1/features/search` 전환에는 `include_total=false`의 COUNT 0회, `true`의 COUNT 1회,
+동일 정규화 query에서만 이어지는 signed cursor, 알 수 없는 version·변조·query mismatch의
+typed 422를 포함한다. production API의 cursor signing secret은 다른 runtime과 frontend로
+전파하지 않으며 실제 값은 배포 전용 env에만 둔다.
+
 현재 공개 read·weather·batch 경로를 목표 계약으로 바꾸는 호환 alias는 두지 않는다. 변경 시점은
 각 T-VN task와 PinVi mirror task가 소유하며, 이 문서는 조건만 고정한다.
+
+### 3.2 T-VN-04 batch 의미 변화 (PinVi 조정 대기, resolver = T-VN-11)
+
+T-VN-04(공개 predicate를 `feature.public_features` view로 단일화)로
+`POST /v1/features/batch`의 분류가 바뀌었다: 이전에는 admin-inactive feature가
+`found`(status `inactive`)로 내려갔지만(구 D-12 분기), 이제 admin-inactive/draft/broken 등
+모든 비공개 feature는 균일하게 `missing`이다. PinVi trip view는 `missing`을 깨진 참조로
+표시하므로, 그 사이 admin-inactive place가 일시적으로 false-broken으로 보일 수 있다.
+PinVi 측 `kor_travel_map.py`의 batch docstring은 구 D-12 분기를 성문화하고 있어 현재
+stale이다. 해소는 **T-VN-11 5-state typed DTO**(§3.1 feature batch 행)가 소유한다 —
+그 전까지 PinVi는 `missing`을 "비공개 또는 미존재"로 읽어야 한다.
+
+### 3.3 body actor 제거 (T-VN-20, ADR-066 D-2) — PinVi 전송 중단 필요
+
+T-VN-20이 모든 admin write의 감사 actor를 인증 principal(admin BFF의
+`X-Kor-Travel-Map-Actor`)에서만 파생하도록 완결했다. request body의
+`operator`/`actor`/`created_by`/`reviewed_by`는 더 이상 감사 actor 원천이 아니다.
+
+PinVi `origin/main`의 `apps/api/app/clients/kor_travel_map_admin.py`가 아직 body로
+보내는 필드는 **수용하되 무시**(accept-and-ignore)한다 — 아래 endpoint는 body에
+해당 필드가 있어도 `422`가 아니고, 값은 무시되며 저장 actor는 principal이다:
+
+| KTM endpoint | PinVi가 보내는 body 필드 | 처리 |
+|---|---|---|
+| `POST/PATCH/DELETE /v1/admin/features*`, `.../change-requests/{id}/approve\|reject` | `operator`(고정 `"pinvi-admin"`) | 수용·무시, actor=principal |
+| `PATCH /v1/admin/issues/{id}` | `operator` | 수용·무시, actor=principal |
+| `PATCH /v1/admin/dedup-reviews/{id}` | `reviewed_by` | 수용·무시, actor=principal |
+
+**PinVi follow-up (별도 PR)**: 위 3개 client 메서드에서 `operator`/`reviewed_by`
+body 전송을 제거한다(감사 actor는 KTM이 BFF principal로 기록하므로 불필요). 제거 전까지
+KTM은 deprecated 필드로 수용하며, 두 필드 모두 OpenAPI에 `deprecated: true`로 표기된다.
+
+반면 PinVi가 **호출하지 않는** admin frontend 전용 write(auth-event `actor`, curated
+select/unselect `actor`, enrichment review `reviewed_by`, offline upload
+`created_by`·validate `operator`)는 body 필드를 **schema에서 제거**했다 — 옛 caller가
+보내면 `422`다(admin frontend는 이미 전송 중단, BFF actor header만 사용).
 
 ## 4. 계약 정본 위치
 

@@ -574,6 +574,40 @@ export interface paths {
         patch: operations["decide_review_v1_admin_features_enrichment_reviews__review_id__patch"];
         trace?: never;
     };
+    "/v1/admin/features/in-bounds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin bbox 안 base Feature item/cluster */
+        get: operations["list_admin_features_in_bounds_v1_admin_features_in_bounds_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/weather/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** KMA 기상특보 raw lineage 이력 */
+        get: operations["list_admin_weather_alert_history_v1_admin_features_weather_alerts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/features/{feature_id}": {
         parameters: {
             query?: never;
@@ -604,6 +638,57 @@ export interface paths {
         put?: never;
         /** Deactivate Feature Route */
         post: operations["deactivate_feature_route_v1_admin_features__feature_id__deactivate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin feature price card */
+        get: operations["get_admin_feature_price_v1_admin_features__feature_id__price_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}/revision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Feature Revision Route */
+        get: operations["get_feature_revision_route_v1_admin_features__feature_id__revision_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}/weather": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin feature weather card */
+        get: operations["get_admin_feature_weather_v1_admin_features__feature_id__weather_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1024,7 +1109,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** PlaceCategory 정적 카탈로그(145건, 선택적 DB 분포) */
+        /**
+         * PlaceCategory 정적 카탈로그(145건, 선택적 DB 분포)
+         * @description counts는 항상 ADR-067 공개 projection(``public_features``) 기준이다.
+         *
+         *     과거의 ``active_only`` 스위치는 비공개(draft/hidden/inactive 등) 분포를 공개
+         *     표면에 노출했기에 제거됐다(T-VN-04, F-1) — 미지정 query param은 무시되므로
+         *     기존 caller는 깨지지 않는다.
+         */
         get: operations["list_categories_v1_categories_get"];
         put?: never;
         post?: never;
@@ -1196,7 +1288,7 @@ export interface paths {
         };
         /**
          * bbox 안 feature 목록 (지도 뷰포트)
-         * @description 주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST 인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 필터 (예: ``?kind=place&kind=event``). 삭제된 feature 제외.
+         * @description 주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST 인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 필터 (예: ``?kind=place&kind=event``). 공개 feature만 반환한다 (ADR-067 ``public_features`` projection — 비공개/삭제 feature 제외).
          */
         get: operations["list_features_in_bbox_v1_features_get"];
         put?: never;
@@ -1367,7 +1459,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** feature 제공기관 payload 관측 이력 */
+        /** feature 제공기관 payload 관측 이력 (operator) */
         get: operations["get_feature_observation_history_v1_features__feature_id__observations__source_entity_key__history_get"];
         put?: never;
         post?: never;
@@ -1386,6 +1478,30 @@ export interface paths {
         };
         /** feature price card (제품별 최신 가격 + 최근 이력) */
         get: operations["get_feature_price_v1_features__feature_id__price_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/{feature_id}/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * feature 제공기관 raw 관측 lineage (operator)
+         * @description operator 전용 — feature에 연결된 모든 제공기관 entity의 현재 raw 관측값.
+         *
+         *     T-VN-05: raw lineage(raw_data/raw_payload_hash/source_record_key)는 공개 detail에서
+         *     제거하고 이 operator 표면으로 이동했다. 비공개/종료 feature도 감사 대상이라
+         *     공개 가시성 gate 없이 raw row 존재만 확인한다.
+         */
+        get: operations["get_feature_sources_v1_features__feature_id__sources_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2116,8 +2232,6 @@ export interface components {
          * @description Next.js login/logout API가 남기는 감사 이벤트.
          */
         AdminAuthEventCreateRequest: {
-            /** Actor */
-            actor?: string | null;
             /** Attempted Username */
             attempted_username?: string | null;
             /** Client Ip */
@@ -2433,6 +2547,11 @@ export interface components {
             /** Applied At */
             applied_at?: string | null;
             /**
+             * Base Row Revision
+             * @description update/delete 요청 제출 시 확인한 feature row_revision.
+             */
+            base_row_revision?: number | null;
+            /**
              * Created At
              * Format: date-time
              */
@@ -2471,6 +2590,20 @@ export interface components {
         AdminFeatureChangeResponse: {
             data: components["schemas"]["AdminFeatureChangeData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * AdminFeatureCluster
+         * @description Admin base Feature의 canonical 행정구역 rollup.
+         */
+        AdminFeatureCluster: {
+            /** Cluster Key */
+            cluster_key: string;
+            /** Feature Count */
+            feature_count: number;
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
         };
         /**
          * AdminFeatureCoordInput
@@ -2527,7 +2660,11 @@ export interface components {
             marker_icon: string;
             /** Name */
             name: string;
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /** Parent Feature Id */
             parent_feature_id?: string | null;
@@ -2574,7 +2711,11 @@ export interface components {
          * @description ``POST /admin/features/{feature_id}/deactivate`` body.
          */
         AdminFeatureDeactivateRequest: {
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /**
              * Prevent Provider Reactivation
@@ -2597,7 +2738,11 @@ export interface components {
          * @description ``DELETE /admin/features/{feature_id}`` body.
          */
         AdminFeatureDeleteRequest: {
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /** Reason */
             reason: string;
@@ -2681,6 +2826,11 @@ export interface components {
             road_address_management_no?: string | null;
             /** Road Name Code */
             road_name_code?: string | null;
+            /**
+             * Row Revision
+             * @description correction If-Match에 사용할 server-owned revision.
+             */
+            row_revision: number;
             /** Sibling Group Id */
             sibling_group_id?: string | null;
             /** Sido Code */
@@ -2945,6 +3095,42 @@ export interface components {
             violation_type?: string | null;
         };
         /**
+         * AdminFeatureMapItem
+         * @description Admin 지도용 base Feature 경량 표현.
+         */
+        AdminFeatureMapItem: {
+            /** Area Square Meters */
+            area_square_meters?: number | null;
+            /** Category */
+            category: string;
+            /** Feature Id */
+            feature_id: string;
+            /** Geometry */
+            geometry?: {
+                [key: string]: unknown;
+            } | null;
+            /** Kind */
+            kind: string;
+            /** Lat */
+            lat: number | null;
+            /** Lon */
+            lon: number | null;
+            /** Marker Color */
+            marker_color?: string | null;
+            /** Marker Icon */
+            marker_icon?: string | null;
+            /** Name */
+            name: string;
+            /** Price Summary */
+            price_summary?: components["schemas"]["PricePointOut"][] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "active" | "inactive" | "hidden" | "broken";
+            weather_summary?: components["schemas"]["WeatherSummaryOut"] | null;
+        };
+        /**
          * AdminFeatureOverrideRecord
          * @description 생성/갱신된 feature override.
          */
@@ -2999,7 +3185,11 @@ export interface components {
             marker_icon?: string | null;
             /** Name */
             name?: string | null;
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /** Parent Feature Id */
             parent_feature_id?: string | null;
@@ -3065,10 +3255,57 @@ export interface components {
          * @description approve/reject body.
          */
         AdminFeatureReviewActionRequest: {
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * AdminFeatureRevisionData
+         * @description correction precondition용 feature core revision snapshot.
+         */
+        AdminFeatureRevisionData: {
+            /** Feature Id */
+            feature_id: string;
+            /** Row Revision */
+            row_revision: number;
+        };
+        /**
+         * AdminFeatureRevisionResponse
+         * @description 동적 aggregate를 제외한 stable revision representation.
+         */
+        AdminFeatureRevisionResponse: {
+            data: components["schemas"]["AdminFeatureRevisionData"];
+        };
+        /**
+         * AdminFeaturesInBoundsData
+         * @description Admin 지도 item/cluster envelope data.
+         */
+        AdminFeaturesInBoundsData: {
+            /** Clusters */
+            clusters: components["schemas"]["AdminFeatureCluster"][];
+            coverage: components["schemas"]["AdminInBoundsCoverage"];
+            /** Items */
+            items: components["schemas"]["AdminFeatureMapItem"][];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "items" | "clusters";
+            /** Truncated */
+            truncated: boolean;
+        };
+        /**
+         * AdminFeaturesInBoundsResponse
+         * @description ``GET /admin/features/in-bounds`` 응답.
+         */
+        AdminFeaturesInBoundsResponse: {
+            data: components["schemas"]["AdminFeaturesInBoundsData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * AdminFeaturesListData
@@ -3085,6 +3322,16 @@ export interface components {
         AdminFeaturesListResponse: {
             data: components["schemas"]["AdminFeaturesListData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * AdminInBoundsCoverage
+         * @description Admin in-bounds 결과 상한과 반환 건수.
+         */
+        AdminInBoundsCoverage: {
+            /** Limit */
+            limit: number;
+            /** Returned */
+            returned: number;
         };
         /**
          * AdminIssueActionData
@@ -3181,7 +3428,11 @@ export interface components {
             coord?: components["schemas"]["IssueCoordBody"] | null;
             /** Legal Dong Code */
             legal_dong_code?: string | null;
-            /** Operator */
+            /**
+             * Operator
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             operator?: string | null;
             /**
              * Prevent Provider Reactivation
@@ -3231,6 +3482,71 @@ export interface components {
             status: string;
             /** Violation Type */
             violation_type: string;
+        };
+        /**
+         * AdminWeatherAlertHistoryData
+         * @description operator ``GET /admin/features/weather/alerts`` data payload.
+         */
+        AdminWeatherAlertHistoryData: {
+            /**
+             * History From
+             * Format: date-time
+             */
+            history_from: string;
+            /** Items */
+            items: components["schemas"]["AdminWeatherAlertHistoryItem"][];
+        };
+        /**
+         * AdminWeatherAlertHistoryItem
+         * @description operator KMA 기상특보 raw lineage row 1건.
+         */
+        AdminWeatherAlertHistoryItem: {
+            /** Alert Type */
+            alert_type?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Effective From */
+            effective_from?: string | null;
+            /** Effective Until */
+            effective_until?: string | null;
+            /** Feature Id */
+            feature_id?: string | null;
+            /** Feature Name */
+            feature_name?: string | null;
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Imported At */
+            imported_at?: string | null;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Last Seen At */
+            last_seen_at?: string | null;
+            /** Level */
+            level?: string | null;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Phenomenon */
+            phenomenon?: string | null;
+            /** Region Code */
+            region_code?: string | null;
+            /** Region Name */
+            region_name?: string | null;
+            /** Source Agency */
+            source_agency?: string | null;
+            /** Source Record Key */
+            source_record_key: string;
+            /** Title */
+            title?: string | null;
+        };
+        /**
+         * AdminWeatherAlertHistoryResponse
+         * @description operator KMA 기상특보 raw lineage 이력 응답.
+         */
+        AdminWeatherAlertHistoryResponse: {
+            data: components["schemas"]["AdminWeatherAlertHistoryData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * ApiCallLogRecord
@@ -3533,8 +3849,6 @@ export interface components {
         };
         /** Body_create_offline_upload_request_v1_admin_offline_uploads_post */
         Body_create_offline_upload_request_v1_admin_offline_uploads_post: {
-            /** Created By */
-            created_by?: string | null;
             /** Dataset Key */
             dataset_key: string;
             /**
@@ -3660,8 +3974,17 @@ export interface components {
          * @description Map clustering metadata.
          */
         ClusterMeta: {
-            /** Cluster Unit */
-            cluster_unit?: string | null;
+            /**
+             * Cluster Unit
+             * @description 현재 응답의 행정구역 cluster 단위.
+             * @enum {string}
+             */
+            cluster_unit: "sido" | "sigungu" | "eupmyeondong";
+            /**
+             * Drill Down Unit
+             * @description 한 단계 확대 시 요청할 다음 cluster_unit. eupmyeondong 다음은 개별 feature이므로 null.
+             */
+            drill_down_unit: ("sido" | "sigungu" | "eupmyeondong") | null;
         };
         /**
          * ClusterSummary
@@ -3831,14 +4154,12 @@ export interface components {
         };
         /** CuratedFeatureStatusRequest */
         CuratedFeatureStatusRequest: {
-            /** Actor */
-            actor?: string | null;
             /** Reason */
             reason?: string | null;
         };
         /**
          * CuratedFeatureView
-         * @description curated feature overlay view.
+         * @description admin/operator curated feature overlay view.
          */
         CuratedFeatureView: {
             /** Address */
@@ -4370,9 +4691,9 @@ export interface components {
         };
         /** CurationCollectionData */
         CurationCollectionData: {
-            collection: components["schemas"]["CurationCollectionView"];
+            collection: components["schemas"]["PublicCurationCollectionView"];
             /** Items */
-            items: components["schemas"]["CurationItemView"][];
+            items: components["schemas"]["PublicCurationItemView"][];
         };
         /** CurationCollectionPatchRequest */
         CurationCollectionPatchRequest: {
@@ -4409,75 +4730,10 @@ export interface components {
             data: components["schemas"]["CurationCollectionData"];
             meta: components["schemas"]["Meta"];
         };
-        /** CurationCollectionView */
-        CurationCollectionView: {
-            /** Archived At */
-            archived_at: string | null;
-            /**
-             * Collection Id
-             * Format: uuid
-             */
-            collection_id: string;
-            /** Collection Key */
-            collection_key: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Dataset Key */
-            dataset_key: string | null;
-            /** Description */
-            description: string | null;
-            /** Edition Key */
-            edition_key: string;
-            /** Item Count */
-            item_count: number;
-            /** Metadata */
-            metadata: {
-                [key: string]: unknown;
-            };
-            /** Provider */
-            provider: string | null;
-            /** Source Id */
-            source_id: string | null;
-            /** Source Name */
-            source_name: string | null;
-            /** Source Url */
-            source_url: string | null;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "draft" | "published" | "archived";
-            /** Theme Group */
-            theme_group: string;
-            /**
-             * Theme Id
-             * Format: uuid
-             */
-            theme_id: string;
-            /** Theme Name */
-            theme_name: string;
-            /** Theme Slug */
-            theme_slug: string;
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /**
-             * Visibility
-             * @enum {string}
-             */
-            visibility: "admin_only" | "public";
-        };
         /** CurationCollectionsData */
         CurationCollectionsData: {
             /** Items */
-            items: components["schemas"]["CurationCollectionView"][];
+            items: components["schemas"]["PublicCurationCollectionView"][];
         };
         /** CurationCollectionsResponse */
         CurationCollectionsResponse: {
@@ -4676,100 +4932,6 @@ export interface components {
              * @enum {string}
              */
             status?: "candidate" | "included" | "rejected";
-        };
-        /** CurationItemView */
-        CurationItemView: {
-            /** Address */
-            address: {
-                [key: string]: unknown;
-            };
-            /** Address Hint */
-            address_hint: string | null;
-            /** Archived At */
-            archived_at: string | null;
-            /**
-             * Collection Id
-             * Format: uuid
-             */
-            collection_id: string;
-            /** Collection Key */
-            collection_key: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Curation Item Id
-             * Format: uuid
-             */
-            curation_item_id: string;
-            /**
-             * Curation Relation
-             * @enum {string}
-             */
-            curation_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
-            /** Dataset Key */
-            dataset_key: string | null;
-            /** Edition Key */
-            edition_key: string;
-            /** External Item Id */
-            external_item_id: string;
-            /** Feature Category */
-            feature_category: string | null;
-            /** Feature Id */
-            feature_id: string | null;
-            /** Feature Kind */
-            feature_kind: string | null;
-            /** Feature Name */
-            feature_name: string | null;
-            /** Item Summary */
-            item_summary: string | null;
-            /** Item Title */
-            item_title: string | null;
-            /** Lat */
-            lat: number | null;
-            /** Lon */
-            lon: number | null;
-            /** Metadata */
-            metadata: {
-                [key: string]: unknown;
-            };
-            /** Place Name */
-            place_name: string;
-            /** Provider */
-            provider: string | null;
-            /**
-             * Reuse Policy
-             * @enum {string}
-             */
-            reuse_policy: "allowed" | "blocked" | "manual_review";
-            /** Sort Order */
-            sort_order: number;
-            /** Source Name */
-            source_name: string | null;
-            /** Source Record Key */
-            source_record_key: string | null;
-            /** Source Url */
-            source_url: string | null;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "candidate" | "included" | "rejected" | "archived";
-            /** Theme Group */
-            theme_group: string;
-            /** Theme Name */
-            theme_name: string;
-            /** Theme Slug */
-            theme_slug: string;
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
         };
         /**
          * DagsterGraphqlError
@@ -5080,7 +5242,11 @@ export interface components {
             decision_reason?: string | null;
             /** Master Feature Id */
             master_feature_id?: string | null;
-            /** Reviewed By */
+            /**
+             * Reviewed By
+             * @deprecated
+             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
+             */
             reviewed_by?: string | null;
         };
         /**
@@ -5222,8 +5388,6 @@ export interface components {
             decision: "accepted" | "rejected" | "ignored";
             /** Decision Reason */
             decision_reason?: string | null;
-            /** Reviewed By */
-            reviewed_by?: string | null;
             /**
              * Selected Detail Source
              * @description 운영자가 비교 다이얼로그에서 선택한 상세 source. 현재 accept 적용 데이터는 바꾸지 않고 decision_reason audit marker로만 기록한다.
@@ -5421,7 +5585,7 @@ export interface components {
             /** Curation Count */
             curation_count: number;
             /** Curations */
-            curations: components["schemas"]["CurationItemView"][];
+            curations: components["schemas"]["PublicCurationItemView"][];
             feature: components["schemas"]["CurationFeatureView"];
         };
         /** FeatureCurationGroupsData */
@@ -5462,7 +5626,7 @@ export interface components {
              * Curations
              * @description 이 Feature가 속한 공개 큐레이션 membership 전부.
              */
-            curations?: components["schemas"]["CurationItemView"][];
+            curations?: components["schemas"]["PublicCurationItemView"][];
             /** Detail */
             detail: {
                 [key: string]: unknown;
@@ -5484,10 +5648,10 @@ export interface components {
             /** Name */
             name: string;
             /**
-             * Observations
-             * @description 이 Feature에 연결된 모든 제공기관 entity의 현재 관측값.
+             * Row Revision
+             * @description server-owned feature revision. ETag과 같은 값이다.
              */
-            observations?: components["schemas"]["FeatureObservationView"][];
+            row_revision: number;
             /** Sido Code */
             sido_code?: string | null;
             /** Sigungu Code */
@@ -5628,11 +5792,72 @@ export interface components {
             items: components["schemas"]["FeatureSummary"][];
         };
         /**
+         * FeatureSearchProblem
+         * @description Feature search request/cursor typed RFC7807 422.
+         */
+        FeatureSearchProblem: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "VALIDATION_ERROR" | "FEATURE_SEARCH_CURSOR_INVALID" | "FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED" | "FEATURE_SEARCH_CURSOR_TAMPERED" | "CURSOR_QUERY_MISMATCH";
+            /**
+             * Detail
+             * @description 이 발생 건에 대한 사람이 읽는 설명.
+             */
+            detail: string;
+            /**
+             * Errors
+             * @description 필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).
+             */
+            errors?: components["schemas"]["ProblemDetailError"][];
+            /**
+             * Request Id
+             * @description 요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).
+             */
+            request_id: string;
+            /**
+             * Status
+             * @description HTTP 상태 코드.
+             */
+            status: number;
+            /**
+             * Title
+             * @description 사람이 읽는 짧은 요약(= detail).
+             */
+            title: string;
+            /**
+             * Type
+             * @description 오류 유형 URI. 예: https://kor-travel-map/errors/not-found
+             */
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * FeatureSearchResponse
          * @description ``GET /features/search`` 응답.
          */
         FeatureSearchResponse: {
             data: components["schemas"]["FeatureSearchData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FeatureSourcesData
+         * @description ``GET /features/{feature_id}/sources`` data payload (operator, raw lineage).
+         */
+        FeatureSourcesData: {
+            /** Feature Id */
+            feature_id: string;
+            /** Observations */
+            observations: components["schemas"]["FeatureObservationView"][];
+        };
+        /**
+         * FeatureSourcesResponse
+         * @description ``GET /features/{feature_id}/sources`` 응답 (operator 전용 raw lineage).
+         */
+        FeatureSourcesResponse: {
+            data: components["schemas"]["FeatureSourcesData"];
             meta: components["schemas"]["Meta"];
         };
         /**
@@ -6139,6 +6364,21 @@ export interface components {
             service: string;
             /** Status */
             status: string;
+        };
+        /**
+         * InBoundsCoverage
+         * @description in-bounds 응답 완결성 기술자 (F-8 silent truncation 해소, ADR-073 D-9-2).
+         *
+         *     ``returned``는 이 응답에 실린 항목 수(items 또는 clusters), ``limit``은 이 조회에
+         *     적용된 ``max_items`` 상한이다. ``returned == limit`` 이고 상위 ``truncated`` 가
+         *     참이면 경계 안에 더 많은 후보가 있으니 소비자는 zoom-in(cluster drill-down)하거나
+         *     더 좁은 bbox로 다시 조회해야 한다.
+         */
+        InBoundsCoverage: {
+            /** Limit */
+            limit: number;
+            /** Returned */
+            returned: number;
         };
         /**
          * IssueCoordBody
@@ -6653,8 +6893,6 @@ export interface components {
          */
         OfflineUploadValidationRequest: {
             column_mapping: components["schemas"]["OfflineUploadColumnMappingRecord"];
-            /** Operator */
-            operator?: string | null;
             /**
              * Sample Size
              * @default 1000
@@ -9018,11 +9256,844 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
-         * PublicFeatureListData
-         * @description public feature 목록 data payload.
+         * PublicCuratedAddress
+         * @description 표시용 주소만 포함하는 공개 주소 계약.
+         */
+        PublicCuratedAddress: {
+            /** Admin */
+            admin?: string | null;
+            /** Legal */
+            legal?: string | null;
+            /** Road */
+            road?: string | null;
+            /** Sido Name */
+            sido_name?: string | null;
+            /** Sigungu Name */
+            sigungu_name?: string | null;
+            /** Zipcode */
+            zipcode?: string | null;
+        };
+        /** PublicCuratedAreaDetail */
+        PublicCuratedAreaDetail: {
+            /** Administrative Office */
+            administrative_office?: string | null;
+            /**
+             * Area Kind
+             * @default area
+             */
+            area_kind: string;
+            /** Area Square Meters */
+            area_square_meters?: number | null;
+            /** Boundary Source */
+            boundary_source?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Regulation Scope */
+            regulation_scope?: string | null;
+        };
+        /** PublicCuratedAreaFeatureView */
+        PublicCuratedAreaFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            detail: components["schemas"]["PublicCuratedAreaDetail"];
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "area";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PublicCuratedEventDetail */
+        PublicCuratedEventDetail: {
+            /** Area Code */
+            area_code?: string | null;
+            /** Content Id */
+            content_id?: string | null;
+            /** Content Type Id */
+            content_type_id?: string | null;
+            /** Ends On */
+            ends_on?: string | null;
+            /**
+             * Event Kind
+             * @default festival
+             */
+            event_kind: string;
+            /** Feature Id */
+            feature_id: string;
+            opening_hours?: components["schemas"]["PublicCuratedOpeningHours"] | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Starts On */
+            starts_on?: string | null;
+            /** Tel */
+            tel?: string | null;
+            /**
+             * Timezone
+             * @default Asia/Seoul
+             * @constant
+             */
+            timezone: "Asia/Seoul";
+            /** Venue Name */
+            venue_name?: string | null;
+        };
+        /** PublicCuratedEventFeatureView */
+        PublicCuratedEventFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            detail: components["schemas"]["PublicCuratedEventDetail"];
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "event";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PublicCuratedFeatureResponse */
+        PublicCuratedFeatureResponse: {
+            data: components["schemas"]["PublicCuratedFeatureView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicCuratedFeatureView
+         * @description ``feature_kind``가 판별자인 공개 feature union.
+         */
+        PublicCuratedFeatureView: components["schemas"]["PublicCuratedPlaceFeatureView"] | components["schemas"]["PublicCuratedEventFeatureView"] | components["schemas"]["PublicCuratedNoticeFeatureView"] | components["schemas"]["PublicCuratedAreaFeatureView"] | components["schemas"]["PublicCuratedRouteFeatureView"] | components["schemas"]["PublicCuratedPriceFeatureView"] | components["schemas"]["PublicCuratedWeatherFeatureView"];
+        /** PublicCuratedFeaturesData */
+        PublicCuratedFeaturesData: {
+            /** Items */
+            items: components["schemas"]["PublicCuratedFeatureView"][];
+        };
+        /** PublicCuratedFeaturesResponse */
+        PublicCuratedFeaturesResponse: {
+            data: components["schemas"]["PublicCuratedFeaturesData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** PublicCuratedNoticeDetail */
+        PublicCuratedNoticeDetail: {
+            /** Feature Id */
+            feature_id: string;
+            /** Notice Type */
+            notice_type: string;
+            /** Officer Name */
+            officer_name?: string | null;
+            /** Severity */
+            severity?: number | null;
+            /** Source Agency */
+            source_agency?: string | null;
+            /** Valid End Time */
+            valid_end_time?: string | null;
+            /** Valid Start Time */
+            valid_start_time?: string | null;
+        };
+        /** PublicCuratedNoticeFeatureView */
+        PublicCuratedNoticeFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            detail: components["schemas"]["PublicCuratedNoticeDetail"];
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "notice";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * PublicCuratedOpeningHours
+         * @description 자유 텍스트 없이 구조화된 KST 영업시간만 노출한다.
+         */
+        PublicCuratedOpeningHours: {
+            /** Open Now */
+            open_now?: boolean | null;
+            /** Periods */
+            periods?: components["schemas"]["PublicCuratedOpeningPeriod"][];
+            /** Special Days */
+            special_days?: components["schemas"]["PublicCuratedSpecialOpeningDay"][];
+            /**
+             * Timezone
+             * @default Asia/Seoul
+             * @constant
+             */
+            timezone: "Asia/Seoul";
+        };
+        /** PublicCuratedOpeningPeriod */
+        PublicCuratedOpeningPeriod: {
+            close?: components["schemas"]["PublicCuratedOpeningTime"] | null;
+            open: components["schemas"]["PublicCuratedOpeningTime"];
+        };
+        /** PublicCuratedOpeningTime */
+        PublicCuratedOpeningTime: {
+            /** Day */
+            day: number;
+            /** Time */
+            time: string;
+        };
+        /** PublicCuratedPlaceDetail */
+        PublicCuratedPlaceDetail: {
+            /** Biz Number */
+            biz_number?: string | null;
+            business_hours?: components["schemas"]["PublicCuratedOpeningHours"] | null;
+            facility_info?: components["schemas"]["PublicCuratedPlaceFacilityInfo"];
+            /** Feature Id */
+            feature_id: string;
+            /** License Date */
+            license_date?: string | null;
+            /** Phones */
+            phones?: string[];
+            /**
+             * Place Kind
+             * @default place
+             */
+            place_kind: string;
+            reviews_link?: components["schemas"]["PublicCuratedReviewLinks"];
+        };
+        /**
+         * PublicCuratedPlaceFacilityInfo
+         * @description 공개 표시 가치가 확인된 place 시설 필드.
          *
-         *     ``cluster_unit``이 None이면 ``items``(개별 feature), 아니면 ``clusters``
-         *     (행정구역 rollup)를 채운다(T-213c).
+         *     provider identity와 concierge 영상·transcript·evidence 미러는 의도적으로
+         *     선언하지 않는다. 새 필드는 공개 계약 검토 후에만 이 모델과 projector 양쪽에
+         *     추가한다.
+         */
+        PublicCuratedPlaceFacilityInfo: {
+            /** Appn Year */
+            appn_year?: number | null;
+            /** Beach Kind */
+            beach_kind?: string | null;
+            /** Brand Code */
+            brand_code?: string | null;
+            /** Category */
+            category?: string | null;
+            /** Category Label */
+            category_label?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Direction */
+            direction?: string | null;
+            /** Fclty Type */
+            fclty_type?: string | null;
+            /** Forest Type */
+            forest_type?: string | null;
+            /** Gemini Enriched Description */
+            gemini_enriched_description?: string | null;
+            /** Highway Name */
+            highway_name?: string | null;
+            /** Hole Count */
+            hole_count?: string | null;
+            /** Homepage Url */
+            homepage_url?: string | null;
+            /** Icao Code */
+            icao_code?: string | null;
+            /** Image Url */
+            image_url?: string | null;
+            /** Institution Nm */
+            institution_nm?: string | null;
+            /** Instt Nm */
+            instt_nm?: string | null;
+            /** Lpg Yn */
+            lpg_yn?: boolean | null;
+            /** Management Agency */
+            management_agency?: string | null;
+            /** Media Title */
+            media_title?: string | null;
+            /** Name English */
+            name_english?: string | null;
+            /** Operating Time */
+            operating_time?: string | null;
+            /** Operator */
+            operator?: string | null;
+            /** Parkingchrge Info */
+            parkingchrge_info?: string | null;
+            /** Prkcmprt */
+            prkcmprt?: number | null;
+            /** Prkplce Se */
+            prkplce_se?: string | null;
+            /** Provider Category */
+            provider_category?: string | null;
+            /** Reference Date */
+            reference_date?: string | null;
+            /** Region */
+            region?: string | null;
+            /** Region Name */
+            region_name?: string | null;
+            /** Sales Method Name */
+            sales_method_name?: string | null;
+            /** Service Slug */
+            service_slug?: string | null;
+            /** Source Category */
+            source_category?: string | null;
+            /** Stor Number */
+            stor_number?: number | null;
+            /** Stret Intrcn */
+            stret_intrcn?: string | null;
+            /** Stret Lt */
+            stret_lt?: number | null;
+            /** Subtype Name */
+            subtype_name?: string | null;
+            /** Trrsrt Se */
+            trrsrt_se?: string | null;
+            /** Wheelchair */
+            wheelchair?: boolean | null;
+        };
+        /** PublicCuratedPlaceFeatureView */
+        PublicCuratedPlaceFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            detail: components["schemas"]["PublicCuratedPlaceDetail"];
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "place";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PublicCuratedPriceFeatureView */
+        PublicCuratedPriceFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            /** Detail */
+            detail?: null;
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "price";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * PublicCuratedReviewLinks
+         * @description 검토된 리뷰 서비스의 HTTP(S) 링크.
+         */
+        PublicCuratedReviewLinks: {
+            /** Google */
+            google?: string | null;
+            /** Kakao */
+            kakao?: string | null;
+            /** Naver */
+            naver?: string | null;
+            /** Tripadvisor */
+            tripadvisor?: string | null;
+        };
+        /** PublicCuratedRouteDetail */
+        PublicCuratedRouteDetail: {
+            /** Begin Address */
+            begin_address?: string | null;
+            /** Begin Name */
+            begin_name?: string | null;
+            /** Difficulty */
+            difficulty?: string | null;
+            /** End Address */
+            end_address?: string | null;
+            /** End Name */
+            end_name?: string | null;
+            /** Expected Duration Minutes */
+            expected_duration_minutes?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Geometry Source */
+            geometry_source?: string | null;
+            /** Geometry Status */
+            geometry_status?: string | null;
+            /**
+             * Route Type
+             * @default route
+             */
+            route_type: string;
+            /** Total Distance Meters */
+            total_distance_meters?: number | null;
+        };
+        /** PublicCuratedRouteFeatureView */
+        PublicCuratedRouteFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            detail: components["schemas"]["PublicCuratedRouteDetail"];
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "route";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PublicCuratedSpecialOpeningDay */
+        PublicCuratedSpecialOpeningDay: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /**
+             * Exceptional Hours
+             * @default true
+             */
+            exceptional_hours: boolean;
+            /**
+             * Is Closed
+             * @default false
+             */
+            is_closed: boolean;
+            /** Periods */
+            periods?: components["schemas"]["PublicCuratedOpeningPeriod"][] | null;
+        };
+        /** PublicCuratedWeatherFeatureView */
+        PublicCuratedWeatherFeatureView: {
+            address: components["schemas"]["PublicCuratedAddress"];
+            /** Content Version */
+            content_version: number;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
+            /** Detail */
+            detail?: null;
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            feature_kind: "weather";
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PublicCurationCollectionView */
+        PublicCurationCollectionView: {
+            /** Archived At */
+            archived_at: string | null;
+            /**
+             * Collection Id
+             * Format: uuid
+             */
+            collection_id: string;
+            /** Collection Key */
+            collection_key: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Key */
+            dataset_key: string | null;
+            /** Description */
+            description: string | null;
+            /** Edition Key */
+            edition_key: string;
+            /** Item Count */
+            item_count: number;
+            /** Provider */
+            provider: string | null;
+            /** Source Id */
+            source_id: string | null;
+            /** Source Name */
+            source_name: string | null;
+            /** Source Url */
+            source_url: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "published" | "archived";
+            /** Theme Group */
+            theme_group: string;
+            /**
+             * Theme Id
+             * Format: uuid
+             */
+            theme_id: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "admin_only" | "public";
+        };
+        /** PublicCurationItemView */
+        PublicCurationItemView: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Address Hint */
+            address_hint: string | null;
+            /** Archived At */
+            archived_at: string | null;
+            /**
+             * Collection Id
+             * Format: uuid
+             */
+            collection_id: string;
+            /** Collection Key */
+            collection_key: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Curation Item Id
+             * Format: uuid
+             */
+            curation_item_id: string;
+            /**
+             * Curation Relation
+             * @enum {string}
+             */
+            curation_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+            /** Dataset Key */
+            dataset_key: string | null;
+            /** Edition Key */
+            edition_key: string;
+            /** External Item Id */
+            external_item_id: string;
+            /** Feature Category */
+            feature_category: string | null;
+            /** Feature Id */
+            feature_id: string | null;
+            /** Feature Kind */
+            feature_kind: string | null;
+            /** Feature Name */
+            feature_name: string | null;
+            /** Item Summary */
+            item_summary: string | null;
+            /** Item Title */
+            item_title: string | null;
+            /** Lat */
+            lat: number | null;
+            /** Lon */
+            lon: number | null;
+            /** Place Name */
+            place_name: string;
+            /** Provider */
+            provider: string | null;
+            /**
+             * Reuse Policy
+             * @enum {string}
+             */
+            reuse_policy: "allowed" | "blocked" | "manual_review";
+            /** Sort Order */
+            sort_order: number;
+            /** Source Name */
+            source_name: string | null;
+            /** Source Url */
+            source_url: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "included" | "rejected" | "archived";
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * PublicFeatureListData
+         * @description public feature 목록 data payload (ADR-073 D-9-2 지도 완결성 계약).
+         *
+         *     ``mode``가 ``items``면 개별 feature(``items``), ``clusters``면 행정구역
+         *     rollup(``clusters``)을 채운다(T-213c). ``truncated``는 결과가 ``max_items``
+         *     상한에서 잘렸는지를 **명시**한다(F-8: silent truncation 해소). cluster 모드는
+         *     결정적 ``cluster_key``(행정코드)를 노출한다. payload 해석용
+         *     ``cluster_unit``/``drill_down_unit``은 envelope 불변식에 따라 ``meta.cluster``에
+         *     일원화한다.
          */
         PublicFeatureListData: {
             /**
@@ -9030,8 +10101,22 @@ export interface components {
              * @default []
              */
             clusters: components["schemas"]["ClusterSummary"][];
-            /** Items */
+            coverage: components["schemas"]["InBoundsCoverage"];
+            /**
+             * Items
+             * @default []
+             */
             items: components["schemas"]["FeatureSummary"][];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "items" | "clusters";
+            /**
+             * Truncated
+             * @description 결과가 max_items 상한에서 잘렸으면 true(더 많은 후보 존재).
+             */
+            truncated: boolean;
         };
         /**
          * PublicFestivalDetailResponse
@@ -9129,6 +10214,134 @@ export interface components {
         PublicVersionResponse: {
             data: components["schemas"]["VersionData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicWeatherAlertHistoryData
+         * @description ``GET /features/weather/alerts`` data payload.
+         */
+        PublicWeatherAlertHistoryData: {
+            /**
+             * History From
+             * Format: date-time
+             */
+            history_from: string;
+            /** Items */
+            items: components["schemas"]["PublicWeatherAlertHistoryItem"][];
+        };
+        /**
+         * PublicWeatherAlertHistoryItem
+         * @description 공개 KMA 기상특보 typed 이력 row 1건.
+         */
+        PublicWeatherAlertHistoryItem: {
+            /** Alert Type */
+            alert_type?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Effective From */
+            effective_from?: string | null;
+            /** Effective Until */
+            effective_until?: string | null;
+            /** Feature Id */
+            feature_id?: string | null;
+            /** Feature Name */
+            feature_name?: string | null;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Level */
+            level?: string | null;
+            /** Phenomenon */
+            phenomenon?: string | null;
+            /** Region Code */
+            region_code?: string | null;
+            /** Region Name */
+            region_name?: string | null;
+            /** Source Agency */
+            source_agency?: string | null;
+            /** Title */
+            title?: string | null;
+        };
+        /**
+         * PublicWeatherAlertHistoryResponse
+         * @description 공개 KMA 기상특보 typed 이력 응답.
+         */
+        PublicWeatherAlertHistoryResponse: {
+            data: components["schemas"]["PublicWeatherAlertHistoryData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicWeatherForecastData
+         * @description ``GET /features/.../weather/forecast`` data payload.
+         */
+        PublicWeatherForecastData: {
+            anchor?: components["schemas"]["WeatherAnchorOut"] | null;
+            /**
+             * History From
+             * Format: date-time
+             */
+            history_from: string;
+            /** Items */
+            items: components["schemas"]["PublicWeatherValueItem"][];
+            /** Radius M */
+            radius_m: number;
+            /** Target Feature Id */
+            target_feature_id?: string | null;
+            /** Target Lat */
+            target_lat?: number | null;
+            /** Target Lon */
+            target_lon?: number | null;
+        };
+        /**
+         * PublicWeatherForecastResponse
+         * @description 공개 weather forecast timeline 응답.
+         */
+        PublicWeatherForecastResponse: {
+            data: components["schemas"]["PublicWeatherForecastData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicWeatherValueItem
+         * @description weather timeline row 1건.
+         */
+        PublicWeatherValueItem: {
+            /**
+             * Collected At
+             * Format: date-time
+             */
+            collected_at: string;
+            /** Feature Id */
+            feature_id: string;
+            /** Forecast Style */
+            forecast_style: string;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Metric Key */
+            metric_key: string;
+            /** Metric Name */
+            metric_name?: string | null;
+            /** Observed At */
+            observed_at?: string | null;
+            /** Provider */
+            provider: string;
+            /** Severity */
+            severity?: string | null;
+            /** Timeline Bucket */
+            timeline_bucket?: string | null;
+            /** Unit */
+            unit?: string | null;
+            /** Valid At */
+            valid_at?: string | null;
+            /** Valid From */
+            valid_from?: string | null;
+            /** Valid Until */
+            valid_until?: string | null;
+            /** Value Number */
+            value_number?: number | null;
+            /** Value Text */
+            value_text?: string | null;
+            /** Weather Domain */
+            weather_domain: string;
+            /** Weather Value Key */
+            weather_value_key: string;
         };
         /** RescanData */
         RescanData: {
@@ -9446,73 +10659,6 @@ export interface components {
             version: string;
         };
         /**
-         * WeatherAlertHistoryData
-         * @description ``GET /features/weather/alerts`` data payload.
-         */
-        WeatherAlertHistoryData: {
-            /**
-             * History From
-             * Format: date-time
-             */
-            history_from: string;
-            /** Items */
-            items: components["schemas"]["WeatherAlertHistoryItem"][];
-        };
-        /**
-         * WeatherAlertHistoryItem
-         * @description KMA 기상특보 이력 row 1건.
-         */
-        WeatherAlertHistoryItem: {
-            /** Alert Type */
-            alert_type?: string | null;
-            /** Description */
-            description?: string | null;
-            /** Effective From */
-            effective_from?: string | null;
-            /** Effective Until */
-            effective_until?: string | null;
-            /** Feature Id */
-            feature_id?: string | null;
-            /** Feature Name */
-            feature_name?: string | null;
-            /** Feature Status */
-            feature_status?: string | null;
-            /** Fetched At */
-            fetched_at?: string | null;
-            /** Imported At */
-            imported_at?: string | null;
-            /** Issued At */
-            issued_at?: string | null;
-            /** Last Seen At */
-            last_seen_at?: string | null;
-            /** Level */
-            level?: string | null;
-            /** Payload */
-            payload: {
-                [key: string]: unknown;
-            };
-            /** Phenomenon */
-            phenomenon?: string | null;
-            /** Region Code */
-            region_code?: string | null;
-            /** Region Name */
-            region_name?: string | null;
-            /** Source Agency */
-            source_agency?: string | null;
-            /** Source Record Key */
-            source_record_key: string;
-            /** Title */
-            title?: string | null;
-        };
-        /**
-         * WeatherAlertHistoryResponse
-         * @description KMA 기상특보 이력 응답.
-         */
-        WeatherAlertHistoryResponse: {
-            data: components["schemas"]["WeatherAlertHistoryData"];
-            meta: components["schemas"]["Meta"];
-        };
-        /**
          * WeatherAnchorOut
          * @description 예보/관측값을 제공한 weather anchor feature.
          */
@@ -9545,36 +10691,6 @@ export interface components {
             metrics: components["schemas"]["WeatherMetricOut"][];
             /** Source Styles */
             source_styles: string[];
-        };
-        /**
-         * WeatherForecastData
-         * @description ``GET /features/.../weather/forecast`` data payload.
-         */
-        WeatherForecastData: {
-            anchor?: components["schemas"]["WeatherAnchorOut"] | null;
-            /**
-             * History From
-             * Format: date-time
-             */
-            history_from: string;
-            /** Items */
-            items: components["schemas"]["WeatherValueItem"][];
-            /** Radius M */
-            radius_m: number;
-            /** Target Feature Id */
-            target_feature_id?: string | null;
-            /** Target Lat */
-            target_lat?: number | null;
-            /** Target Lon */
-            target_lon?: number | null;
-        };
-        /**
-         * WeatherForecastResponse
-         * @description 공개 weather forecast timeline 응답.
-         */
-        WeatherForecastResponse: {
-            data: components["schemas"]["WeatherForecastData"];
-            meta: components["schemas"]["Meta"];
         };
         /**
          * WeatherMetricOut
@@ -9631,53 +10747,6 @@ export interface components {
             value_text?: string | null;
             /** Weather Domain */
             weather_domain?: string | null;
-        };
-        /**
-         * WeatherValueItem
-         * @description weather timeline row 1건.
-         */
-        WeatherValueItem: {
-            /**
-             * Collected At
-             * Format: date-time
-             */
-            collected_at: string;
-            /** Feature Id */
-            feature_id: string;
-            /** Forecast Style */
-            forecast_style: string;
-            /** Issued At */
-            issued_at?: string | null;
-            /** Metric Key */
-            metric_key: string;
-            /** Metric Name */
-            metric_name?: string | null;
-            /** Observed At */
-            observed_at?: string | null;
-            /** Provider */
-            provider: string;
-            /** Severity */
-            severity?: string | null;
-            /** Source Record Key */
-            source_record_key?: string | null;
-            /** Timeline Bucket */
-            timeline_bucket?: string | null;
-            /** Unit */
-            unit?: string | null;
-            /** Valid At */
-            valid_at?: string | null;
-            /** Valid From */
-            valid_from?: string | null;
-            /** Valid Until */
-            valid_until?: string | null;
-            /** Value Number */
-            value_number?: number | null;
-            /** Value Text */
-            value_text?: string | null;
-            /** Weather Domain */
-            weather_domain: string;
-            /** Weather Value Key */
-            weather_value_key: string;
         };
     };
     responses: never;
@@ -10963,6 +12032,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10980,6 +12051,15 @@ export interface operations {
             };
             /** @description 승인 불가 */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match row_revision 불일치 */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11766,6 +12846,117 @@ export interface operations {
             };
         };
     };
+    list_admin_features_in_bounds_v1_admin_features_in_bounds_get: {
+        parameters: {
+            query: {
+                /** @description bbox 최소 경도 (WGS84). */
+                min_lon: number;
+                /** @description bbox 최소 위도. */
+                min_lat: number;
+                /** @description bbox 최대 경도. */
+                max_lon: number;
+                /** @description bbox 최대 위도. */
+                max_lat: number;
+                /** @description 운영 상태 반복 필터. 미지정 시 삭제 전 draft/active/inactive/hidden/broken 전체. */
+                status?: ("draft" | "active" | "inactive" | "hidden" | "broken")[] | null;
+                /** @description feature kind 반복 필터. */
+                kind?: string[] | null;
+                /** @description category code 반복 필터. */
+                category?: string[] | null;
+                /** @description primary provider 반복 필터. */
+                provider?: string[] | null;
+                zoom?: number | null;
+                cluster_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
+                max_items?: number;
+                /** @description item mode에서 route/area GeoJSON을 포함한다. */
+                include_geometry?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeaturesInBoundsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_admin_weather_alert_history_v1_admin_features_weather_alerts_get: {
+        parameters: {
+            query?: {
+                /** @description KMA 특보 구역 코드 필터. */
+                region_code?: string | null;
+                /** @description 현상 토큰 필터(예: 호우, 폭염, weather_alert). */
+                phenomenon?: string | null;
+                /** @description 특보 등급 필터(예: 주의보, 경보). */
+                level?: string | null;
+                /** @description 발표시각 시작. */
+                issued_from?: string | null;
+                /** @description 발표시각 종료. */
+                issued_to?: string | null;
+                history_days?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminWeatherAlertHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     get_feature_detail_route_v1_admin_features__feature_id__get: {
         parameters: {
             query?: never;
@@ -11818,7 +13009,10 @@ export interface operations {
     delete_feature_route_v1_admin_features__feature_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
+                "If-Match": string;
+            };
             path: {
                 feature_id: string;
             };
@@ -11833,6 +13027,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -11857,8 +13053,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description If-Match row_revision 불일치 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match가 row_revision strong ETag가 아님 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11880,7 +13094,10 @@ export interface operations {
     patch_feature_route_v1_admin_features__feature_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
+                "If-Match": string;
+            };
             path: {
                 feature_id: string;
             };
@@ -11895,6 +13112,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -11919,8 +13138,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description If-Match row_revision 불일치 */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match가 row_revision strong ETag가 아님 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description If-Match 누락 */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11983,6 +13220,160 @@ export interface operations {
             };
             /** @description feature 상태 전이 불가 */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_admin_feature_price_v1_admin_features__feature_id__price_get: {
+        parameters: {
+            query?: {
+                asof?: string | null;
+                history_limit?: number;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturePriceResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_revision_route_v1_admin_features__feature_id__revision_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 feature의 server-owned row_revision strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureRevisionResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_admin_feature_weather_v1_admin_features__feature_id__weather_get: {
+        parameters: {
+            query?: {
+                asof?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureWeatherResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13356,10 +14747,8 @@ export interface operations {
     list_categories_v1_categories_get: {
         parameters: {
             query?: {
-                /** @description 현재 DB feature 분포(category별 수)를 포함 */
+                /** @description 현재 DB 공개 feature 분포(category별 수)를 포함 */
                 include_counts?: boolean;
-                /** @description counts를 status='active' feature만으로 집계 */
-                active_only?: boolean;
                 /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
                 key?: string | null;
             };
@@ -13401,12 +14790,7 @@ export interface operations {
     list_curated_features_route_v1_curated_features_get: {
         parameters: {
             query?: {
-                theme_id?: string | null;
                 theme_slug?: string | null;
-                source_id?: string | null;
-                provider?: string | null;
-                dataset_key?: string | null;
-                curation_status?: ("candidate" | "curated" | "rejected" | "archived") | null;
                 region_code?: string | null;
                 sido_code?: string | null;
                 sigungu_code?: string | null;
@@ -13419,6 +14803,8 @@ export interface operations {
                 display_title?: string | null;
                 page_size?: number;
                 cursor?: string | null;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -13432,7 +14818,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CuratedFeaturesResponse"];
+                    "application/json": components["schemas"]["PublicCuratedFeaturesResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13457,7 +14843,10 @@ export interface operations {
     };
     get_curated_feature_route_v1_curated_features__curated_feature_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path: {
                 curated_feature_id: string;
@@ -13472,7 +14861,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CuratedFeatureResponse"];
+                    "application/json": components["schemas"]["PublicCuratedFeatureResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13502,6 +14891,8 @@ export interface operations {
                 dataset_key?: string | null;
                 provider_status?: ("implemented" | "provider_needed" | "manual_only" | "deprecated") | null;
                 limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -13541,9 +14932,10 @@ export interface operations {
     list_curated_themes_route_v1_curated_themes_get: {
         parameters: {
             query?: {
-                visibility?: ("admin_only" | "public") | null;
                 theme_group?: string | null;
                 limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -13992,7 +15384,7 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 반복 필터. */
                 category?: string[] | null;
-                /** @description feature status 반복 필터. 기본 active. */
+                /** @description feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34). */
                 status?: string[] | null;
                 /** @description primary provider 반복 필터. */
                 provider?: string[] | null;
@@ -14050,7 +15442,7 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 반복 필터. */
                 category?: string[] | null;
-                /** @description feature status 반복 필터. 기본 active. */
+                /** @description feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34). */
                 status?: string[] | null;
                 /** @description primary provider 반복 필터. */
                 provider?: string[] | null;
@@ -14143,13 +15535,13 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureSearchResponse"];
                 };
             };
-            /** @description 검색 범위 또는 cursor 오류 */
+            /** @description 검색 범위 또는 typed cursor 오류 */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["FeatureSearchProblem"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
@@ -14193,7 +15585,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WeatherAlertHistoryResponse"];
+                    "application/json": components["schemas"]["PublicWeatherAlertHistoryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -14256,7 +15648,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WeatherForecastResponse"];
+                    "application/json": components["schemas"]["PublicWeatherForecastResponse"];
                 };
             };
             /** @description Validation Error */
@@ -14296,11 +15688,20 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 feature row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["FeatureDetailEnvelopeResponse"];
                 };
+            };
+            /** @description If-None-Match row_revision 일치 (본문 없음) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description feature_id 없음 */
             404: {
@@ -14311,7 +15712,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description If-None-Match가 canonical strong ETag가 아님 */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14412,7 +15813,7 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureObservationHistoryResponse"];
                 };
             };
-            /** @description 공개 feature 또는 observation 없음 */
+            /** @description feature 또는 observation 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -14468,6 +15869,67 @@ export interface operations {
                     "application/json": components["schemas"]["FeaturePriceResponse"];
                 };
             };
+            /** @description 공개 feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_sources_v1_features__feature_id__sources_get: {
+        parameters: {
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureSourcesResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -14511,6 +15973,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FeatureWeatherResponse"];
+                };
+            };
+            /** @description 공개 feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description Validation Error */
@@ -14571,7 +16042,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WeatherForecastResponse"];
+                    "application/json": components["schemas"]["PublicWeatherForecastResponse"];
                 };
             };
             /** @description Validation Error */
@@ -14603,7 +16074,10 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -14650,7 +16124,10 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -14692,7 +16169,10 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -15032,7 +16512,10 @@ export interface operations {
     get_ops_health_deep_v1_ops_health_deep_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -15045,6 +16528,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsHealthDeepResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
@@ -15061,7 +16553,10 @@ export interface operations {
     get_ops_metrics_v1_ops_metrics_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -15074,6 +16569,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsMetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
@@ -16399,7 +17903,10 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -16539,8 +18046,6 @@ export interface operations {
                 q?: string | null;
                 page_size?: number;
                 cursor?: string | null;
-                include_quality?: boolean;
-                include_forecast?: boolean;
                 /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
                 key?: string | null;
             };
@@ -16630,8 +18135,6 @@ export interface operations {
     get_public_beach_v1_public_beaches__feature_id__get: {
         parameters: {
             query?: {
-                include_quality?: boolean;
-                include_forecast?: boolean;
                 /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
                 key?: string | null;
             };

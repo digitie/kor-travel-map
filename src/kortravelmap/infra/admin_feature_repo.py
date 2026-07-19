@@ -54,6 +54,7 @@ __all__ = [
     "FeatureStateConflict",
     "FeatureOverride",
     "FeatureChangeConflict",
+    "FeaturePreconditionFailed",
     "FeatureChangeRequest",
     "deactivate_feature",
     "submit_feature_change_request",
@@ -61,8 +62,12 @@ __all__ = [
     "reject_feature_change_request",
     "list_feature_change_requests",
     "get_admin_feature_detail",
+    "admin_feature_card_target_exists",
+    "get_feature_row_revision",
     "get_dedup_review_detail",
     "get_enrichment_review_detail",
+    "admin_features_in_bbox",
+    "cluster_admin_features_in_bbox",
     "list_admin_features",
     "list_dedup_reviews",
     "list_enrichment_reviews",
@@ -142,6 +147,7 @@ class AdminFeatureDetailFeature:
     sibling_group_id: str | None
     data_origin: str
     data_version: int
+    row_revision: int
     user_change_kind: str | None
     user_change_status: str | None
     user_change_request_id: str | None
@@ -345,6 +351,23 @@ class FeatureChangeConflict(ValueError):
         super().__init__(message)
 
 
+class FeaturePreconditionFailed(Exception):
+    """If-Match row_revision이 현재 feature 행과 불일치할 때 발생 (T-VN-13).
+
+    ``FeatureChangeConflict``(상태 충돌 → 409)와 구분되는 낙관적 동시성 실패로,
+    라우터가 412 Precondition Failed로 사상한다.
+    """
+
+    def __init__(self, *, feature_id: str, expected: int, current: int) -> None:
+        self.feature_id = feature_id
+        self.expected = expected
+        self.current = current
+        super().__init__(
+            f"feature {feature_id!r} If-Match 불일치: "
+            f"expected row_revision={expected}, current={current}"
+        )
+
+
 @dataclass(frozen=True)
 class FeatureChangeRequest:
     """``ops.feature_change_requests`` row summary."""
@@ -354,6 +377,7 @@ class FeatureChangeRequest:
     action: str
     state: str
     review_mode: str
+    base_row_revision: int | None
     payload: dict[str, Any]
     reason: str | None
     requested_by: str | None
@@ -484,6 +508,294 @@ _ADMIN_FEATURE_SORT_COLUMNS: Final[dict[str, str]] = {
 }
 _TEXT_SORTS: Final[set[str]] = {"name", "kind", "status", "provider"}
 _DATETIME_SORTS: Final[set[str]] = {"updated_at", "created_at"}
+
+
+def _admin_bbox_envelope_sql() -> str:
+    """WGS84 bbox envelope SQL. 입력 geometry는 상수로 한 번만 만든다."""
+
+    return (
+        "x_extension.ST_MakeEnvelope("
+        ":min_lon, :min_lat, :max_lon, :max_lat, 4326)"
+    )
+
+
+def _admin_bbox_candidate_sql(alias: str) -> str:
+    """Admin item/cluster가 공유하는 exact 공간 후보 술어."""
+
+    if not alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    envelope = _admin_bbox_envelope_sql()
+    return f"""(
+      (
+        {alias}.coord IS NOT NULL
+        AND (
+          {alias}.kind NOT IN ('route', 'area')
+          OR {alias}.geom IS NULL
+        )
+        AND {alias}.coord OPERATOR(x_extension.&&) {envelope}
+      )
+      OR (
+        {alias}.kind IN ('route', 'area')
+        AND {alias}.geom IS NOT NULL
+        AND {alias}.geom OPERATOR(x_extension.&&) {envelope}
+        AND x_extension.ST_Intersects({alias}.geom, {envelope})
+      )
+    )"""
+
+
+def _admin_bbox_filters_sql(alias: str) -> str:
+    """Admin item/cluster 공통 운영 상태·속성 필터."""
+
+    if not alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    return f"""
+  AND {alias}.deleted_at IS NULL
+  AND {alias}.user_deleted_at IS NULL
+  AND {alias}.status <> 'deleted'
+  AND (
+    CAST(:statuses AS text[]) IS NULL
+    OR {alias}.status = ANY(CAST(:statuses AS text[]))
+  )
+  AND (
+    CAST(:kinds AS text[]) IS NULL
+    OR {alias}.kind = ANY(CAST(:kinds AS text[]))
+  )
+  AND (
+    CAST(:categories AS text[]) IS NULL
+    OR {alias}.category = ANY(CAST(:categories AS text[]))
+  )
+  AND (
+    CAST(:providers AS text[]) IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM provider_sync.source_links AS sl
+      JOIN provider_sync.source_entities AS se
+        ON se.source_entity_key = sl.source_entity_key
+      JOIN provider_sync.source_records AS sr
+        ON sr.source_record_key = se.current_source_record_key
+      WHERE sl.feature_id = {alias}.feature_id
+        AND sl.is_primary_source
+        AND sr.provider = ANY(CAST(:providers AS text[]))
+    )
+  )
+"""
+
+
+_ADMIN_FEATURES_IN_BBOX_SQL: Final[str] = f"""
+WITH candidates AS (
+  SELECT
+      f.feature_id,
+      f.kind,
+      f.name,
+      f.category,
+      f.marker_icon,
+      f.marker_color,
+      f.status,
+      CASE
+        WHEN f.kind IN ('route', 'area')
+          AND f.geom IS NOT NULL
+          AND f.geom OPERATOR(x_extension.&&) {_admin_bbox_envelope_sql()}
+          AND x_extension.ST_Intersects(f.geom, {_admin_bbox_envelope_sql()})
+        THEN x_extension.ST_PointOnSurface(
+          x_extension.ST_Intersection(f.geom, {_admin_bbox_envelope_sql()})
+        )
+        ELSE f.coord
+      END AS marker_coord,
+      CASE
+        WHEN CAST(:include_geometry AS boolean)
+          AND f.kind = 'route'
+          AND f.geom IS NOT NULL
+        THEN CAST(
+          x_extension.ST_AsGeoJSON(x_extension.ST_Simplify(f.geom, 0.0001), 6)
+          AS jsonb
+        )
+        WHEN CAST(:include_geometry AS boolean)
+          AND f.kind = 'area'
+          AND f.geom IS NOT NULL
+        THEN CAST(
+          x_extension.ST_AsGeoJSON(
+            x_extension.ST_SimplifyPreserveTopology(f.geom, 0.0001), 6
+          ) AS jsonb
+        )
+        ELSE NULL
+      END AS geometry,
+      CASE
+        WHEN CAST(:include_geometry AS boolean)
+          AND f.kind = 'area'
+          AND f.geom IS NOT NULL
+        THEN x_extension.ST_Area(CAST(f.geom AS x_extension.geography))
+        ELSE NULL
+      END AS area_square_meters
+  FROM feature.features AS f
+  WHERE {_admin_bbox_candidate_sql("f")}
+{_admin_bbox_filters_sql("f")}
+  ORDER BY f.feature_id
+  LIMIT :limit
+)
+SELECT
+    c.feature_id,
+    c.kind,
+    c.name,
+    c.category,
+    x_extension.ST_X(c.marker_coord) AS lon,
+    x_extension.ST_Y(c.marker_coord) AS lat,
+    c.marker_icon,
+    c.marker_color,
+    c.status,
+    c.geometry,
+    c.area_square_meters,
+    ps.price_summary,
+    ws.weather_summary
+FROM candidates AS c
+LEFT JOIN LATERAL (
+  SELECT jsonb_agg(
+      jsonb_build_object(
+        'provider', provider,
+        'price_domain', price_domain,
+        'product_key', product_key,
+        'product_name', product_name,
+        'source_product_key', source_product_key,
+        'source_product_name', source_product_name,
+        'value_number', value_number,
+        'unit', unit,
+        'observed_at', observed_at
+      )
+      ORDER BY
+        CASE product_key
+          WHEN 'gasoline' THEN 10
+          WHEN 'diesel' THEN 20
+          WHEN 'premium_gasoline' THEN 30
+          WHEN 'lpg' THEN 40
+          ELSE 100
+        END,
+        product_name NULLS LAST,
+        product_key
+  ) AS price_summary
+  FROM (
+    SELECT DISTINCT ON (product_key)
+        provider,
+        price_domain,
+        product_key,
+        product_name,
+        source_product_key,
+        source_product_name,
+        value_number,
+        unit,
+        observed_at
+    FROM feature.feature_price_values AS pv
+    WHERE pv.feature_id = c.feature_id
+    ORDER BY product_key, observed_at DESC
+  ) AS latest_price
+) AS ps ON c.kind = 'price'
+LEFT JOIN LATERAL (
+  SELECT jsonb_build_object(
+      'provider', provider,
+      'weather_domain', weather_domain,
+      'forecast_style', forecast_style,
+      'metric_key', metric_key,
+      'metric_name', metric_name,
+      'value_number', value_number,
+      'value_text', value_text,
+      'unit', unit,
+      'issued_at', issued_at,
+      'valid_at', valid_at,
+      'observed_at', observed_at
+  ) AS weather_summary
+  FROM feature.feature_weather_values AS w
+  WHERE w.feature_id = c.feature_id
+    AND w.metric_key IN (
+      'T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP',
+      'PM10', 'PM2_5', 'CAI', 'O3', 'NO2', 'SO2', 'CO'
+    )
+  ORDER BY
+      CASE w.metric_key
+        WHEN 'T1H' THEN 10
+        WHEN 'TMP' THEN 20
+        WHEN 'TMN' THEN 30
+        WHEN 'TMX' THEN 40
+        WHEN 'POP' THEN 50
+        WHEN 'SKY' THEN 60
+        WHEN 'REH' THEN 70
+        WHEN 'PTY' THEN 80
+        WHEN 'PCP' THEN 90
+        WHEN 'PM10' THEN 110
+        WHEN 'PM2_5' THEN 120
+        WHEN 'CAI' THEN 130
+        WHEN 'O3' THEN 140
+        WHEN 'NO2' THEN 150
+        WHEN 'SO2' THEN 160
+        WHEN 'CO' THEN 170
+        ELSE 100
+      END,
+      CASE w.forecast_style
+        WHEN 'observed' THEN 10
+        WHEN 'nowcast' THEN 20
+        WHEN 'ultra_short' THEN 30
+        WHEN 'short' THEN 40
+        WHEN 'mid' THEN 50
+        ELSE 100
+      END,
+      CASE
+        WHEN COALESCE(w.valid_at, w.observed_at, w.issued_at) >= now() THEN 0
+        ELSE 1
+      END,
+      abs(
+        extract(
+          epoch FROM (COALESCE(w.valid_at, w.observed_at, w.issued_at) - now())
+        )
+      ) ASC NULLS LAST,
+      COALESCE(w.observed_at, w.valid_at, w.issued_at) DESC NULLS LAST
+  LIMIT 1
+) AS ws ON c.kind = 'weather'
+ORDER BY c.feature_id
+"""
+
+
+_ADMIN_CLUSTER_CODE_COLUMNS: Final[dict[str, str]] = {
+    "sido": "sido_code",
+    "sigungu": "sigungu_code",
+    "eupmyeondong": "legal_dong_code",
+}
+
+
+def _admin_cluster_bbox_sql(code_column: str) -> str:
+    envelope = _admin_bbox_envelope_sql()
+    return f"""
+WITH candidates AS (
+  SELECT
+      f.{code_column} AS cluster_key,
+      CASE
+        WHEN f.kind IN ('route', 'area')
+          AND f.geom IS NOT NULL
+          AND f.geom OPERATOR(x_extension.&&) {envelope}
+          AND x_extension.ST_Intersects(f.geom, {envelope})
+        THEN x_extension.ST_PointOnSurface(
+          x_extension.ST_Intersection(f.geom, {envelope})
+        )
+        ELSE f.coord
+      END AS marker_coord
+  FROM feature.features AS f
+  WHERE f.{code_column} IS NOT NULL
+    AND {_admin_bbox_candidate_sql("f")}
+{_admin_bbox_filters_sql("f")}
+)
+SELECT
+    cluster_key,
+    count(*) AS feature_count,
+    avg(x_extension.ST_X(marker_coord)) AS lon,
+    avg(x_extension.ST_Y(marker_coord)) AS lat
+FROM candidates
+WHERE marker_coord IS NOT NULL
+GROUP BY cluster_key
+ORDER BY feature_count DESC, cluster_key
+LIMIT :limit
+"""
+
+
+_ADMIN_CLUSTER_BBOX_SQL_BY_UNIT: Final[dict[str, str]] = {
+    unit: _admin_cluster_bbox_sql(column)
+    for unit, column in _ADMIN_CLUSTER_CODE_COLUMNS.items()
+}
 
 
 def _normalize_values(values: Sequence[str] | None) -> list[str] | None:
@@ -751,10 +1063,19 @@ WITH base AS (
     ) AS issue ON TRUE
     WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
       AND (
+        -- 방어적 cast (report §2 D-9-7 + T-VN-06): free-form jsonb인
+        -- valid_end_time이 오염된 한 행이 직접 CAST에서 예외를 던지면
+        -- include_ended=false admin notice 목록(운영자가 바로 그 오염 row를
+        -- 찾아야 하는 화면)이 500이 된다. 공개 read와 같은 pg_input_is_valid
+        -- 가드 + fail-closed 적용. CASE로 cast 평가를 봉인(AND/OR 순서 미보장).
         CAST(:include_ended AS boolean)
         OR f.kind <> 'notice'
         OR (f.detail ->> 'valid_end_time') IS NULL
-        OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
+        OR CASE
+             WHEN pg_input_is_valid(f.detail ->> 'valid_end_time', 'timestamptz')
+             THEN CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
+             ELSE false
+           END
       )
       AND (
         CAST(:categories AS text[]) IS NULL
@@ -850,6 +1171,7 @@ SELECT
     sibling_group_id::text AS sibling_group_id,
     data_origin,
     data_version,
+    row_revision,
     user_change_kind,
     user_change_status,
     user_change_request_id::text AS user_change_request_id,
@@ -958,6 +1280,7 @@ SELECT
     action,
     state,
     review_mode,
+    base_row_revision,
     payload,
     reason,
     requested_by,
@@ -1036,6 +1359,7 @@ def _admin_feature_detail_feature(row: Any) -> AdminFeatureDetailFeature:
         sibling_group_id=row["sibling_group_id"],
         data_origin=str(row["data_origin"]),
         data_version=int(row["data_version"]),
+        row_revision=int(row["row_revision"]),
         user_change_kind=row["user_change_kind"],
         user_change_status=row["user_change_status"],
         user_change_request_id=row["user_change_request_id"],
@@ -1295,6 +1619,96 @@ async def _get_review_feature_detail(
     return _review_feature_detail(detail) if detail is not None else None
 
 
+async def admin_features_in_bbox(
+    session: AsyncSession,
+    *,
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    statuses: Sequence[str] | None = None,
+    kinds: Sequence[str] | None = None,
+    categories: Sequence[str] | None = None,
+    providers: Sequence[str] | None = None,
+    include_geometry: bool = False,
+    limit: int = 2000,
+) -> list[dict[str, Any]]:
+    """삭제 전 base Feature를 bbox에서 조회한다.
+
+    공개 projection을 사용하지 않으며 ``draft``·``inactive``·``hidden``·``broken``을
+    운영자가 상태 필터로 찾을 수 있다. route/area는 bbox MBR 후보 뒤 exact
+    ``ST_Intersects``를 적용하고, ``include_geometry``는 payload만 제어한다.
+    """
+
+    if min_lon > max_lon or min_lat > max_lat:
+        raise ValueError("invalid bbox")
+    rows = (
+        await session.execute(
+            text(_ADMIN_FEATURES_IN_BBOX_SQL),
+            {
+                "min_lon": min_lon,
+                "min_lat": min_lat,
+                "max_lon": max_lon,
+                "max_lat": max_lat,
+                "statuses": _normalize_values(statuses),
+                "kinds": _normalize_values(kinds),
+                "categories": _normalize_values(categories),
+                "providers": _normalize_values(providers),
+                "include_geometry": include_geometry,
+                "limit": max(1, limit),
+            },
+        )
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+async def cluster_admin_features_in_bbox(
+    session: AsyncSession,
+    *,
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    cluster_unit: str,
+    statuses: Sequence[str] | None = None,
+    kinds: Sequence[str] | None = None,
+    categories: Sequence[str] | None = None,
+    providers: Sequence[str] | None = None,
+    limit: int = 2000,
+) -> list[dict[str, Any]]:
+    """Admin base Feature를 canonical 행정코드 단위로 bbox rollup한다."""
+
+    if cluster_unit not in _ADMIN_CLUSTER_BBOX_SQL_BY_UNIT:
+        raise ValueError("cluster_unit must be one of sido, sigungu, eupmyeondong")
+    if min_lon > max_lon or min_lat > max_lat:
+        raise ValueError("invalid bbox")
+    rows = (
+        await session.execute(
+            text(_ADMIN_CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit]),
+            {
+                "min_lon": min_lon,
+                "min_lat": min_lat,
+                "max_lon": max_lon,
+                "max_lat": max_lat,
+                "statuses": _normalize_values(statuses),
+                "kinds": _normalize_values(kinds),
+                "categories": _normalize_values(categories),
+                "providers": _normalize_values(providers),
+                "limit": max(1, limit),
+            },
+        )
+    ).mappings().all()
+    return [
+        {
+            "cluster_key": str(row["cluster_key"]),
+            "feature_count": int(row["feature_count"]),
+            "lon": float(row["lon"]),
+            "lat": float(row["lat"]),
+        }
+        for row in rows
+    ]
+
+
 async def list_admin_features(
     session: AsyncSession,
     *,
@@ -1497,20 +1911,22 @@ async def deactivate_feature(
 _INSERT_FEATURE_CHANGE_REQUEST_SQL: Final[str] = """
 INSERT INTO ops.feature_change_requests (
     request_id, feature_id, action, state, review_mode,
-    payload, reason, requested_by
+    base_row_revision, payload, reason, requested_by
 ) VALUES (
     x_extension.gen_random_uuid(), :feature_id, :action, :state, :review_mode,
-    CAST(:payload AS jsonb), :reason, :requested_by
+    :base_row_revision, CAST(:payload AS jsonb), :reason, :requested_by
 )
 RETURNING
     request_id::text, feature_id, action, state, review_mode,
-    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
+    applied_at, created_at
 """
 
 _GET_CHANGE_REQUEST_FOR_UPDATE_SQL: Final[str] = """
 SELECT
     request_id::text, feature_id, action, state, review_mode,
-    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
+    applied_at, created_at
 FROM ops.feature_change_requests
 WHERE request_id::text = :request_id
 FOR UPDATE
@@ -1519,7 +1935,8 @@ FOR UPDATE
 _LIST_CHANGE_REQUESTS_SQL: Final[str] = """
 SELECT
     request_id::text, feature_id, action, state, review_mode,
-    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
+    applied_at, created_at
 FROM ops.feature_change_requests
 WHERE (CAST(:states AS text[]) IS NULL OR state = ANY(CAST(:states AS text[])))
   AND (CAST(:actions AS text[]) IS NULL OR action = ANY(CAST(:actions AS text[])))
@@ -1576,40 +1993,7 @@ INSERT INTO feature.features (
     CAST(:request_id AS uuid), NULL, NULL, :reason,
     now(), now(), NULL
 )
-ON CONFLICT (feature_id) DO UPDATE SET
-    kind = EXCLUDED.kind,
-    name = EXCLUDED.name,
-    category = EXCLUDED.category,
-    coord = EXCLUDED.coord,
-    coord_precision_digits = EXCLUDED.coord_precision_digits,
-    geom = EXCLUDED.geom,
-    address = EXCLUDED.address,
-    legal_dong_code = EXCLUDED.legal_dong_code,
-    road_name_code = EXCLUDED.road_name_code,
-    road_address_management_no = EXCLUDED.road_address_management_no,
-    admin_dong_code = EXCLUDED.admin_dong_code,
-    sido_code = EXCLUDED.sido_code,
-    sigungu_code = EXCLUDED.sigungu_code,
-    urls = EXCLUDED.urls,
-    marker_icon = EXCLUDED.marker_icon,
-    marker_color = EXCLUDED.marker_color,
-    parent_feature_id = EXCLUDED.parent_feature_id,
-    sibling_group_id = EXCLUDED.sibling_group_id,
-    detail = EXCLUDED.detail,
-    status = EXCLUDED.status,
-    data_origin = 'user_request',
-    data_version = GREATEST(features.data_version, 1),
-    user_change_kind = 'add',
-    user_change_status = 'applied',
-    user_change_request_id = CAST(:request_id AS uuid),
-    user_deleted_at = NULL,
-    user_deleted_by = NULL,
-    user_change_reason = :reason,
-    updated_at = now(),
-    deleted_at = NULL
-WHERE features.user_deleted_at IS NULL
-  AND features.status <> 'deleted'
-  AND features.kind IN ('place','event')
+ON CONFLICT (feature_id) DO NOTHING
 RETURNING feature_id, status, user_deleted_at
 """
 
@@ -1741,6 +2125,30 @@ SET data_version = :version,
 WHERE feature_id = :feature_id
 """
 
+_GET_FEATURE_ROW_REVISION_SQL: Final[str] = """
+SELECT row_revision
+FROM feature.features
+WHERE feature_id = :feature_id
+"""
+
+_ADMIN_FEATURE_CARD_TARGET_EXISTS_SQL: Final[str] = """
+SELECT EXISTS (
+  SELECT 1
+  FROM feature.features
+  WHERE feature_id = :feature_id
+    AND deleted_at IS NULL
+    AND user_deleted_at IS NULL
+    AND status <> 'deleted'
+)
+"""
+
+_LOCK_FEATURE_ROW_REVISION_SQL: Final[str] = """
+SELECT row_revision
+FROM feature.features
+WHERE feature_id = :feature_id
+FOR UPDATE
+"""
+
 _INSERT_USER_VERSION_FROM_FEATURE_SQL: Final[str] = """
 INSERT INTO feature.feature_versions (
     feature_id, version, origin, change_kind, payload, request_id, created_by
@@ -1795,7 +2203,8 @@ SET state = 'applied',
 WHERE request_id::text = :request_id
 RETURNING
     request_id::text, feature_id, action, state, review_mode,
-    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
+    applied_at, created_at
 """
 
 _MARK_CHANGE_REJECTED_SQL: Final[str] = """
@@ -1808,7 +2217,8 @@ WHERE request_id::text = :request_id
   AND state = 'pending'
 RETURNING
     request_id::text, feature_id, action, state, review_mode,
-    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
+    applied_at, created_at
 """
 
 
@@ -1822,6 +2232,11 @@ def _feature_change_row(row: Any) -> FeatureChangeRequest:
         action=str(row["action"]),
         state=str(row["state"]),
         review_mode=str(row["review_mode"]),
+        base_row_revision=(
+            int(row["base_row_revision"])
+            if row["base_row_revision"] is not None
+            else None
+        ),
         payload=dict(payload or {}),
         reason=row["reason"],
         requested_by=row["requested_by"],
@@ -2026,6 +2441,61 @@ async def _apply_change(
     )
 
 
+async def get_feature_row_revision(
+    session: AsyncSession, feature_id: str
+) -> int | None:
+    """feature의 현재 server-owned ``row_revision``. 없으면 None (T-VN-13 ETag)."""
+    revision = (
+        await session.execute(
+            text(_GET_FEATURE_ROW_REVISION_SQL),
+            {"feature_id": feature_id},
+        )
+    ).scalar_one_or_none()
+    return int(revision) if revision is not None else None
+
+
+async def admin_feature_card_target_exists(
+    session: AsyncSession, feature_id: str
+) -> bool:
+    """Admin weather/price card의 삭제 전 target인지 검사한다."""
+
+    return bool(
+        (
+            await session.execute(
+                text(_ADMIN_FEATURE_CARD_TARGET_EXISTS_SQL),
+                {"feature_id": feature_id},
+            )
+        ).scalar_one()
+    )
+
+
+async def _assert_feature_revision(
+    session: AsyncSession, feature_id: str, expected: int
+) -> None:
+    """If-Match row_revision을 현재 행과 대조한다 (T-VN-13).
+
+    행을 ``FOR UPDATE``로 잠가 검사~변경 사이 경합을 막는다. feature가 없으면
+    ``FeatureChangeConflict``(라우터 404), revision이 어긋나면
+    ``FeaturePreconditionFailed``(라우터 412)를 던진다.
+    """
+    current = (
+        await session.execute(
+            text(_LOCK_FEATURE_ROW_REVISION_SQL),
+            {"feature_id": feature_id},
+        )
+    ).scalar_one_or_none()
+    if current is None:
+        raise FeatureChangeConflict(
+            feature_id=feature_id,
+            action="update",
+            message=f"feature 없음: {feature_id!r}",
+        )
+    if int(current) != expected:
+        raise FeaturePreconditionFailed(
+            feature_id=feature_id, expected=expected, current=int(current)
+        )
+
+
 async def submit_feature_change_request(
     session: AsyncSession,
     *,
@@ -2035,8 +2505,19 @@ async def submit_feature_change_request(
     review_mode: FeatureChangeReviewMode,
     reason: str | None,
     requested_by: str | None,
+    expected_row_revision: int | None = None,
 ) -> FeatureChangeRequest:
-    """feature add/update/delete 요청을 만들고 설정에 따라 즉시 적용한다."""
+    """feature add/update/delete 요청을 만들고 설정에 따라 즉시 적용한다.
+
+    update/delete는 ``expected_row_revision``(If-Match)을 필수로 받아 대상 행을
+    잠그고 제출 시점에 대조한 뒤 request의 ``base_row_revision``에 보존한다.
+    add는 기존 행이 없어 NULL을 저장하고 실제 INSERT 충돌로 absence를 검증한다.
+    """
+    if action in ("update", "delete") and expected_row_revision is None:
+        raise ValueError("update/delete에는 expected_row_revision이 필요합니다.")
+    if action in ("update", "delete"):
+        assert expected_row_revision is not None
+        await _assert_feature_revision(session, feature_id, expected_row_revision)
     initial_state = "applied" if review_mode == "immediate" else "pending"
     row = (
         await session.execute(
@@ -2046,6 +2527,7 @@ async def submit_feature_change_request(
                 "action": action,
                 "state": initial_state,
                 "review_mode": review_mode,
+                "base_row_revision": expected_row_revision,
                 "payload": _change_payload_json(payload),
                 "reason": reason,
                 "requested_by": requested_by,
@@ -2071,7 +2553,12 @@ async def apply_feature_change_request(
     *,
     operator: str | None,
 ) -> FeatureChangeRequest | None:
-    """pending feature change request를 승인하고 적용한다."""
+    """pending feature change request를 승인하고 적용한다.
+
+    update/delete는 제출 때 저장한 ``base_row_revision``을 적용 직전에 잠금·대조한다.
+    따라서 reviewer가 별도 feature ETag를 전달하지 않아도 제출 이후 provider write를
+    감지한다. add는 INSERT ``ON CONFLICT DO NOTHING``으로 absence를 원자 검증한다.
+    """
     row = (
         await session.execute(
             text(_GET_CHANGE_REQUEST_FOR_UPDATE_SQL),
@@ -2086,6 +2573,19 @@ async def apply_feature_change_request(
             feature_id=request.feature_id,
             action=request.action,
             message=f"request {request_id!r}는 pending 상태가 아님: {request.state!r}",
+        )
+    if request.action in ("update", "delete"):
+        if request.base_row_revision is None:
+            raise FeatureChangeConflict(
+                feature_id=request.feature_id,
+                action=request.action,
+                message=(
+                    f"request {request_id!r}에 base_row_revision이 없어 승인할 수 없습니다; "
+                    "현재 revision으로 다시 제출하세요."
+                ),
+            )
+        await _assert_feature_revision(
+            session, request.feature_id, request.base_row_revision
         )
     await _apply_change(session, request, operator=operator)
     applied = (

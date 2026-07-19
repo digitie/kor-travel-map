@@ -23,7 +23,11 @@ shape를 완전하게 표현하지 않는다.
 4. `include_geometry`는 동일 candidate set의 serialization만 제어한다. in-bounds는
    `mode`, `truncated`, `coverage`, `cluster_key`를 명시하고 exact spatial predicate를 사용한다.
 5. `include_total=false`는 COUNT를 실행하지 않는다. cursor에는 version과 정규화 query
-   fingerprint를 넣어 다른 query 재사용을 `CURSOR_QUERY_MISMATCH`로 거부한다.
+   fingerprint를 넣고 API process 전용 server-only key로 HMAC-SHA256 서명한다. production은
+   충분한 길이의 전용 key가 없거나 다른 인증 secret과 재사용되면 fail-closed한다. malformed,
+   unknown version, 변조, 다른 query 재사용은 각각 typed RFC7807 422로 DB 접근 전에 거부한다.
+   최초 도입은 단일 key clean cut이며 rotation 주기·진행 cursor 무효화율·다중 key grace window는
+   운영 측정 뒤 별도 결정한다.
 6. ETag는 `row_revision`/catalog revision에서 만들고 `If-None-Match` 304를 지원한다. 미구현
    옵션과 no-op beach 옵션은 OpenAPI에서 제거한다.
 7. OpenAPI는 public/service/operator profile을 route policy에서 생성한다. 수기 allowlist는

@@ -179,6 +179,7 @@ class FeatureRow(Base):
             name="ck_features_data_origin",
         ),
         CheckConstraint("data_version >= 0", name="ck_features_data_version"),
+        CheckConstraint("row_revision >= 1", name="ck_features_row_revision"),
         CheckConstraint(
             "user_change_kind IS NULL OR user_change_kind IN ('add','update','delete')",
             name="ck_features_user_change_kind",
@@ -285,16 +286,24 @@ class FeatureRow(Base):
     category: Mapped[str] = mapped_column(String, nullable=False)
 
     # 좌표 (ADR-012 — 양 좌표계 보유, coord_5179는 STORED generated).
-    coord: Mapped[Any | None] = mapped_column(Geometry("POINT", srid=4326))
+    # T-VN-18(F-8/D-12-3): geoalchemy2 자동 full GiST를 끈다(spatial_index=False).
+    # 공개 술어 partial GiST(idx_features_*_gist, WHERE deleted_at IS NULL)만
+    # __table_args__에 명시적으로 유지한다 — 자동 full은 write 비용만 늘리고 공개
+    # 조회는 partial로 충분하다. 0061이 DB의 자동 full 3개를 drop한다.
+    coord: Mapped[Any | None] = mapped_column(
+        Geometry("POINT", srid=4326, spatial_index=False)
+    )
     coord_precision_digits: Mapped[int | None] = mapped_column(SmallInteger)
     coord_5179: Mapped[Any | None] = mapped_column(
-        Geometry("POINT", srid=5179),
+        Geometry("POINT", srid=5179, spatial_index=False),
         Computed(
             "CASE WHEN coord IS NULL THEN NULL ELSE ST_Transform(coord, 5179) END",
             persisted=True,
         ),
     )
-    geom: Mapped[Any | None] = mapped_column(Geometry("GEOMETRY", srid=4326))
+    geom: Mapped[Any | None] = mapped_column(
+        Geometry("GEOMETRY", srid=4326, spatial_index=False)
+    )
 
     # 주소 (kortravelmap.dto.Address 직렬화, ADR-041 — kraddr-base 흡수).
     address: Mapped[dict[str, Any]] = mapped_column(
@@ -342,7 +351,7 @@ class FeatureRow(Base):
         server_default=text("'active'"),
     )
     data_origin: Mapped[str] = mapped_column(
-        String,
+        Text,
         nullable=False,
         server_default=text("'provider'"),
     )
@@ -351,11 +360,19 @@ class FeatureRow(Base):
         nullable=False,
         server_default=text("0"),
     )
-    user_change_kind: Mapped[str | None] = mapped_column(String)
-    user_change_status: Mapped[str | None] = mapped_column(String)
+    # T-VN-13(D-10-3): server-owned monotonic row revision. 모든 UPDATE에서
+    # feature.force_features_row_revision() 트리거가 +1 강제 — If-Match/ETag 낙관적
+    # 동시성 validator. provider-owned data_version(위)과 별개다.
+    row_revision: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("1"),
+    )
+    user_change_kind: Mapped[str | None] = mapped_column(Text)
+    user_change_status: Mapped[str | None] = mapped_column(Text)
     user_change_request_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     user_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    user_deleted_by: Mapped[str | None] = mapped_column(String)
+    user_deleted_by: Mapped[str | None] = mapped_column(Text)
     user_change_reason: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -399,15 +416,15 @@ class FeatureVersionRow(Base):
         primary_key=True,
     )
     version: Mapped[int] = mapped_column(Integer, primary_key=True)
-    origin: Mapped[str] = mapped_column(String, nullable=False)
-    change_kind: Mapped[str] = mapped_column(String, nullable=False)
+    origin: Mapped[str] = mapped_column(Text, nullable=False)
+    change_kind: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
     request_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
-    created_by: Mapped[str | None] = mapped_column(String)
+    created_by: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -455,12 +472,12 @@ class SourceEntityRow(Base):
         {"schema": "provider_sync"},
     )
 
-    source_entity_key: Mapped[str] = mapped_column(String, primary_key=True)
-    provider: Mapped[str] = mapped_column(String, nullable=False)
-    dataset_key: Mapped[str] = mapped_column(String, nullable=False)
-    source_entity_type: Mapped[str] = mapped_column(String, nullable=False)
-    source_entity_id: Mapped[str] = mapped_column(String, nullable=False)
-    current_source_record_key: Mapped[str | None] = mapped_column(String)
+    source_entity_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
+    source_entity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    source_entity_id: Mapped[str] = mapped_column(Text, nullable=False)
+    current_source_record_key: Mapped[str | None] = mapped_column(Text)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -477,12 +494,12 @@ class NoticeLifecycleScopeRow(Base):
         {"schema": "provider_sync"},
     )
 
-    provider: Mapped[str] = mapped_column(String, primary_key=True)
-    dataset_key: Mapped[str] = mapped_column(String, primary_key=True)
-    source_entity_type: Mapped[str] = mapped_column(String, primary_key=True)
-    mode: Mapped[str] = mapped_column(String, nullable=False)
+    provider: Mapped[str] = mapped_column(Text, primary_key=True)
+    dataset_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_entity_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    mode: Mapped[str] = mapped_column(Text, nullable=False)
     applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    state_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    state_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class NoticeLineageStateRow(Base):
@@ -503,10 +520,10 @@ class NoticeLineageStateRow(Base):
         {"schema": "provider_sync"},
     )
 
-    provider: Mapped[str] = mapped_column(String, primary_key=True)
-    dataset_key: Mapped[str] = mapped_column(String, primary_key=True)
-    source_entity_type: Mapped[str] = mapped_column(String, primary_key=True)
-    lineage_key: Mapped[str] = mapped_column(String, primary_key=True)
+    provider: Mapped[str] = mapped_column(Text, primary_key=True)
+    dataset_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_entity_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    lineage_key: Mapped[str] = mapped_column(Text, primary_key=True)
     present: Mapped[bool] = mapped_column(Boolean, nullable=False)
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -528,7 +545,7 @@ class SourceRecordRow(Base):
             "source_entity_type",
             "source_entity_id",
             "raw_payload_hash",
-            name="source_records",
+            name="uq_source_records",
         ),
         UniqueConstraint(
             "source_entity_key",
@@ -575,7 +592,7 @@ class SourceRecordRow(Base):
 
     source_record_key: Mapped[str] = mapped_column(String, primary_key=True)
     source_entity_key: Mapped[str] = mapped_column(
-        String,
+        Text,
         ForeignKey(
             "provider_sync.source_entities.source_entity_key",
             ondelete="RESTRICT",
@@ -660,7 +677,7 @@ class SourceLinkRow(Base):
         primary_key=True,
     )
     source_entity_key: Mapped[str] = mapped_column(
-        String,
+        Text,
         ForeignKey(
             "provider_sync.source_entities.source_entity_key",
             ondelete="RESTRICT",
@@ -699,6 +716,11 @@ class CuratedThemeRow(Base):
             "visibility IN ('admin_only','public')",
             name="ck_curated_themes_visibility",
         ),
+        # 0025는 inline ``TEXT NOT NULL UNIQUE``로 만들어 PostgreSQL 기본명
+        # ``curated_themes_theme_slug_key``를 얻는다. 명시 constraint로 그 이름을
+        # 그대로 반영한다(naming convention은 ``uq_curated_themes_theme_slug``라
+        # 달라 column ``unique=True``는 이름이 어긋난다).
+        UniqueConstraint("theme_slug", name="curated_themes_theme_slug_key"),
         Index(
             "idx_curated_themes_group_visibility",
             "theme_group",
@@ -713,7 +735,7 @@ class CuratedThemeRow(Base):
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
     )
-    theme_slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    theme_slug: Mapped[str] = mapped_column(Text, nullable=False)
     theme_name: Mapped[str] = mapped_column(Text, nullable=False)
     theme_description: Mapped[str] = mapped_column(
         Text,
@@ -960,7 +982,6 @@ class CuratedFeatureRow(Base):
             "feature_id",
             unique=True,
             postgresql_where=text("archived_at IS NULL"),
-            postgresql_nulls_not_distinct=True,
         ),
         Index(
             "idx_curated_features_status_keyset",
@@ -1656,13 +1677,14 @@ class FeatureChangeRequestRow(Base):
         server_default=text("x_extension.gen_random_uuid()"),
     )
     feature_id: Mapped[str] = mapped_column(String, nullable=False)
-    action: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
     state: Mapped[str] = mapped_column(
-        String,
+        Text,
         nullable=False,
         server_default=text("'pending'"),
     )
-    review_mode: Mapped[str] = mapped_column(String, nullable=False)
+    review_mode: Mapped[str] = mapped_column(Text, nullable=False)
+    base_row_revision: Mapped[int | None] = mapped_column(BigInteger)
     payload: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
@@ -1898,7 +1920,10 @@ class ImportJobRow(Base):
     queue_sequence: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,
-        server_default=text("nextval('ops.import_jobs_queue_sequence_seq'::regclass)"),
+        # DB default는 ``nextval('ops.import_jobs_queue_sequence_seq')``이지만
+        # alembic은 이 sequence를 SERIAL로 인식해 비교에서 omit한다. metadata에
+        # 명시 server_default를 두면 None↔nextval 위양성 diff가 생겨 제거한다
+        # (실제 default 부여는 0020 migration의 컬럼 DEFAULT가 담당).
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     load_batch_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
@@ -3118,6 +3143,14 @@ class DagsterScheduleActiveClaimRow(Base):
             "btrim(schedule_name) <> ''",
             name=conv("ck_dagster_schedule_active_claims_schedule_name_not_blank"),
         ),
+        CheckConstraint(
+            "resolvable_after >= created_at + interval '5 minutes'",
+            name=conv("ck_dagster_schedule_active_claims_resolution_lease"),
+        ),
+        CheckConstraint(
+            "operation_finished_at IS NULL OR operation_finished_at >= created_at",
+            name=conv("ck_dagster_schedule_active_claims_finished_after_create"),
+        ),
         UniqueConstraint(
             "schedule_name",
             name=conv("uq_dagster_schedule_active_claims_schedule_name"),
@@ -3133,7 +3166,16 @@ class DagsterScheduleActiveClaimRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=text("now()"),
+        server_default=text("clock_timestamp()"),
+    )
+    resolvable_after: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        # PostgreSQL이 저장·반사하는 정규형(괄호 포함 interval 리터럴)과 일치시킨다.
+        server_default=text("(clock_timestamp() + '00:05:00'::interval)"),
+    )
+    operation_finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
     )
 
 

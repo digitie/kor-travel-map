@@ -4,7 +4,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 import { CloudSunIcon } from "lucide-react";
 import { useMemo } from "react";
 
-import { useFeatureWeather, type WeatherMetric } from "@/api/features";
+import { useAdminFeatureWeather, type WeatherMetric } from "@/api/features";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -25,9 +25,8 @@ export function FeatureWeatherPanel({
   featureId: string | null;
   compact?: boolean;
 }) {
-  const weather = useFeatureWeather(featureId);
+  const weather = useAdminFeatureWeather(featureId);
   const data = weather.data?.data;
-
   const metrics = data?.metrics ?? [];
 
   const columns = useMemo<ColumnDef<WeatherMetric, unknown>[]>(() => {

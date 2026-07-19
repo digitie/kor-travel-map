@@ -9,13 +9,15 @@ from __future__ import annotations
 import base64
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, TypedDict
 from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
+
+from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -226,7 +228,16 @@ class CurationImportResult(TypedDict):
     removals: tuple[CurationItem, ...]
 
 
-_COLLECTION_SELECT: Final[str] = """
+_COLLECTION_COUNT_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql(
+    "count_pf"
+)
+_COLLECTION_PUBLIC_COUNT_NOTICE_FILTER_SQL: Final[str] = (
+    public_active_notice_filter_sql("public_count_pf")
+)
+_ITEM_PUBLIC_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("pf")
+
+
+_COLLECTION_SELECT: Final[str] = f"""
 SELECT
     c.collection_id::text AS collection_id,
     c.collection_key,
@@ -250,6 +261,16 @@ SELECT
         FROM feature.curation_items AS count_item
         WHERE count_item.collection_id = c.collection_id
           AND count_item.archived_at IS NULL
+          AND (
+              NOT CAST(:public_only AS boolean)
+              OR count_item.feature_id IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM feature.public_features AS count_pf
+                  WHERE count_pf.feature_id = count_item.feature_id
+                  {_COLLECTION_COUNT_NOTICE_FILTER_SQL}
+              )
+          )
     ) AS item_count,
     (
         SELECT count(*)::integer
@@ -257,6 +278,16 @@ SELECT
         WHERE public_count_item.collection_id = c.collection_id
           AND public_count_item.archived_at IS NULL
           AND public_count_item.status = 'included'
+          AND (
+              NOT CAST(:public_only AS boolean)
+              OR public_count_item.feature_id IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM feature.public_features AS public_count_pf
+                  WHERE public_count_pf.feature_id = public_count_item.feature_id
+                  {_COLLECTION_PUBLIC_COUNT_NOTICE_FILTER_SQL}
+              )
+          )
     ) AS public_item_count,
     c.created_by,
     c.updated_by,
@@ -268,7 +299,7 @@ JOIN feature.curated_themes AS t ON t.theme_id = c.theme_id
 LEFT JOIN feature.curated_sources AS s ON s.source_id = c.source_id
 """
 
-_ITEM_SELECT_FIELDS: Final[str] = """
+_ITEM_SELECT_FIELDS: Final[str] = f"""
     i.curation_item_id::text AS curation_item_id,
     i.collection_id::text AS collection_id,
     c.collection_key,
@@ -288,8 +319,12 @@ _ITEM_SELECT_FIELDS: Final[str] = """
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     f.address,
-    f.status AS linked_feature_status,
-    f.deleted_at AS linked_feature_deleted_at,
+    EXISTS (
+        SELECT 1
+        FROM feature.public_features AS pf
+        WHERE pf.feature_id = i.feature_id
+        {_ITEM_PUBLIC_NOTICE_FILTER_SQL}
+    ) AS linked_feature_is_public,
     i.source_record_key,
     i.external_item_id,
     i.place_name,
@@ -326,6 +361,14 @@ _LIST_COLLECTIONS_SQL: Final[str] = (
     _COLLECTION_SELECT
     + """
 WHERE (:include_archived OR c.archived_at IS NULL)
+  AND (
+      NOT CAST(:public_only AS boolean)
+      OR (
+          c.status = 'published'
+          AND c.visibility = 'public'
+          AND t.visibility = 'public'
+      )
+  )
   AND (CAST(:status AS text) IS NULL OR c.status = CAST(:status AS text))
   AND (
       CAST(:visibility AS text) IS NULL
@@ -366,6 +409,14 @@ _GET_COLLECTION_SQL: Final[str] = (
     + """
 WHERE c.collection_id = CAST(:collection_id AS uuid)
   AND (:include_archived OR c.archived_at IS NULL)
+  AND (
+      NOT CAST(:public_only AS boolean)
+      OR (
+          c.status = 'published'
+          AND c.visibility = 'public'
+          AND t.visibility = 'public'
+      )
+  )
 """
 )
 
@@ -374,14 +425,32 @@ _GET_COLLECTION_BY_KEY_SQL: Final[str] = (
     + """
 WHERE c.collection_key = :collection_key
   AND (:include_archived OR c.archived_at IS NULL)
+  AND (
+      NOT CAST(:public_only AS boolean)
+      OR (
+          c.status = 'published'
+          AND c.visibility = 'public'
+          AND t.visibility = 'public'
+      )
+  )
 """
 )
 
 _LIST_COLLECTION_ITEMS_SQL: Final[str] = (
     _ITEM_SELECT
-    + """
+    + f"""
 WHERE i.collection_id = CAST(:collection_id AS uuid)
   AND (:include_archived OR i.archived_at IS NULL)
+  AND (
+      NOT CAST(:public_only AS boolean)
+      OR i.feature_id IS NULL
+      OR EXISTS (
+          SELECT 1
+          FROM feature.public_features AS pf
+          WHERE pf.feature_id = i.feature_id
+          {_ITEM_PUBLIC_NOTICE_FILTER_SQL}
+      )
+  )
 ORDER BY i.sort_order, i.curation_item_id
 """
 )
@@ -407,6 +476,7 @@ WHERE i.feature_id = :feature_id
           i.status = 'included'
           AND c.status = 'published'
           AND c.visibility = 'public'
+          AND t.visibility = 'public'
       )
   )
 ORDER BY c.edition_key DESC, c.title, i.sort_order, i.curation_item_id
@@ -425,6 +495,7 @@ WHERE i.feature_id = ANY(CAST(:feature_ids AS text[]))
           i.status = 'included'
           AND c.status = 'published'
           AND c.visibility = 'public'
+          AND t.visibility = 'public'
       )
   )
 ORDER BY i.feature_id, c.edition_key DESC, c.title, i.sort_order,
@@ -432,12 +503,14 @@ ORDER BY i.feature_id, c.edition_key DESC, c.title, i.sort_order,
 """
 )
 
-_LIST_GROUP_KEYS_SQL: Final[str] = """
+# 공개 큐레이션 group read — feature 공개 여부는 ADR-067
+# ``feature.public_features`` projection이 정본이다(T-VN-04, F-1). 과거의
+# ``status NOT IN ('deleted','hidden')`` 재구현은 draft/broken/inactive를
+# 노출했다. ``:public_only``는 collection/item 상태 필터에만 관여한다.
+_LIST_GROUP_KEYS_SQL: Final[str] = f"""
 SELECT f.feature_id
-FROM feature.features AS f
-WHERE f.deleted_at IS NULL
-  AND f.status NOT IN ('deleted','hidden')
-  AND (
+FROM feature.public_features AS f
+WHERE (
       NOT CAST(:bbox_enabled AS boolean)
       OR (
           f.coord IS NOT NULL
@@ -464,6 +537,7 @@ WHERE f.deleted_at IS NULL
                 matched_item.status = 'included'
                 AND matched_collection.status = 'published'
                 AND matched_collection.visibility = 'public'
+                AND matched_theme.visibility = 'public'
             )
         )
         AND (
@@ -489,11 +563,12 @@ WHERE f.deleted_at IS NULL
       CAST(:cursor_feature_id AS text) IS NULL
       OR f.feature_id > CAST(:cursor_feature_id AS text)
   )
+  {public_active_notice_filter_sql("f")}
 ORDER BY f.feature_id
 LIMIT :limit
 """
 
-_GET_FEATURE_SQL: Final[str] = """
+_GET_FEATURE_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
     f.name,
@@ -503,13 +578,12 @@ SELECT
     x_extension.ST_Y(f.coord) AS lat,
     f.address,
     f.status
-FROM feature.features AS f
+FROM feature.public_features AS f
 WHERE f.feature_id = :feature_id
-  AND f.deleted_at IS NULL
-  AND f.status NOT IN ('deleted','hidden')
+{public_active_notice_filter_sql("f")}
 """
 
-_GET_FEATURES_BY_IDS_SQL: Final[str] = """
+_GET_FEATURES_BY_IDS_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
     f.name,
@@ -519,8 +593,9 @@ SELECT
     x_extension.ST_Y(f.coord) AS lat,
     f.address,
     f.status
-FROM feature.features AS f
+FROM feature.public_features AS f
 WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+{public_active_notice_filter_sql("f")}
 """
 
 _CREATE_COLLECTION_SQL: Final[str] = """
@@ -1081,30 +1156,6 @@ def _item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
     )
 
 
-def _public_item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
-    """비공개 Feature 연결은 공식 미연결 item처럼 투영해 장소 정보 노출을 막는다."""
-
-    item = _item(row)
-    feature_is_public = (
-        row.get("linked_feature_status") is not None
-        and row.get("linked_feature_deleted_at") is None
-        and row.get("linked_feature_status") not in {"deleted", "hidden"}
-    )
-    if item.feature_id is None or feature_is_public:
-        return item
-    return replace(
-        item,
-        feature_id=None,
-        feature_name=None,
-        feature_kind=None,
-        feature_category=None,
-        lon=None,
-        lat=None,
-        address={},
-        source_record_key=None,
-    )
-
-
 def _feature_match(row: RowMapping | Mapping[str, Any]) -> FeatureMatch:
     return FeatureMatch(
         feature_id=str(row["feature_id"]),
@@ -1175,6 +1226,7 @@ async def list_curation_collections(
     provider: str | None = None,
     q: str | None = None,
     include_archived: bool = False,
+    public_only: bool = False,
     limit: int = 200,
     cursor: str | None = None,
 ) -> tuple[tuple[CurationCollection, ...], str | None]:
@@ -1196,6 +1248,7 @@ async def list_curation_collections(
                     "provider": provider,
                     "q": f"%{q.strip()}%" if q and q.strip() else None,
                     "include_archived": include_archived,
+                    "public_only": public_only,
                     "cursor_updated_at": decoded_cursor[0] if decoded_cursor else None,
                     "cursor_collection_id": (decoded_cursor[1] if decoded_cursor else None),
                     "limit": effective_limit + 1,
@@ -1225,7 +1278,11 @@ async def get_curation_collection(
         (
             await session.execute(
                 text(_GET_COLLECTION_SQL),
-                {"collection_id": collection_id, "include_archived": include_archived},
+                {
+                    "collection_id": collection_id,
+                    "include_archived": include_archived,
+                    "public_only": public_only,
+                },
             )
         )
         .mappings()
@@ -1237,14 +1294,17 @@ async def get_curation_collection(
         (
             await session.execute(
                 text(_LIST_COLLECTION_ITEMS_SQL),
-                {"collection_id": collection_id, "include_archived": include_archived},
+                {
+                    "collection_id": collection_id,
+                    "include_archived": include_archived,
+                    "public_only": public_only,
+                },
             )
         )
         .mappings()
         .all()
     )
-    item_factory = _public_item if public_only else _item
-    return _collection(row), tuple(item_factory(item_row) for item_row in item_rows)
+    return _collection(row), tuple(_item(item_row) for item_row in item_rows)
 
 
 async def get_curation_item(
@@ -1699,6 +1759,13 @@ async def archive_curation_item(
 async def get_feature_curation_group(
     session: AsyncSession, *, feature_id: str, public_only: bool = True
 ) -> FeatureCurationGroup | None:
+    """feature 1건의 큐레이션 group을 조회한다.
+
+    feature 자체의 공개 여부는 ``public_only``와 무관하게 항상 ADR-067
+    ``feature.public_features`` projection을 따른다(공개 표면 전용 read).
+    ``public_only``는 collection/item 상태(published·included·public) 필터만
+    제어한다.
+    """
     feature = (
         (await session.execute(text(_GET_FEATURE_SQL), {"feature_id": feature_id}))
         .mappings()

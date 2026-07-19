@@ -11,6 +11,41 @@ vi.mock("@/lib/auth", () => ({
 describe("admin API proxy response headers", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("ops 관측 read를 same-origin BFF principal로 전달한다", async () => {
+    vi.stubEnv(
+      "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+      "ops-observability-proxy-secret",
+    );
+    const fetchMock = vi.fn(
+      (input: RequestInfo | URL, init?: RequestInit) => {
+        void input;
+        void init;
+        return Promise.resolve(
+          Response.json({ data: { items: [] }, meta: { duration_ms: 0 } }),
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new NextRequest(
+      "http://127.0.0.1:12705/api/proxy/v1/ops/consistency/reports",
+    );
+
+    const response = await GET(request, {
+      params: Promise.resolve({
+        path: ["v1", "ops", "consistency", "reports"],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const forwarded = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(forwarded.get("x-kor-travel-map-actor")).toBe("proxy-test-admin");
+    expect(forwarded.get("x-kor-travel-map-admin-proxy-secret")).toBe(
+      "ops-observability-proxy-secret",
+    );
+    expect(forwarded.get("x-kor-travel-map-ops-token")).toBeNull();
   });
 
   it("응답 allowlist만 브라우저에 전달한다", async () => {

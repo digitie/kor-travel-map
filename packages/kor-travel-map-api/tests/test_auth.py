@@ -23,6 +23,7 @@ from kortravelmap.api.auth import (
     require_admin_frontend,
     require_ops_operator,
     require_service_token,
+    resolve_admin_proxy_context,
 )
 from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
@@ -332,6 +333,34 @@ def test_admin_frontend_gate_keeps_local_dev_compat_when_secret_unset() -> None:
         headers={},
     )
     assert require_admin_frontend(request).actor == "local-dev"
+
+
+@pytest.mark.unit
+def test_admin_frontend_local_dev_fallback_is_closed_in_production() -> None:
+    # ADR-066(T-VN-01): production settings는 생성 시점에 secret을 필수화하므로
+    # 이 상태는 검증 우회(model_construct)로만 만들 수 있다. 그래도 dependency는
+    # local-dev actor를 돌려주지 않고 fail-closed로 닫혀야 한다.
+    settings = ApiSettings.model_construct(profile="production")
+    assert settings.admin_proxy_secret is None
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={ADMIN_ACTOR_HEADER: "admin"},
+    )
+    with pytest.raises(HTTPException) as exc:
+        require_admin_frontend(request)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.unit
+def test_resolve_admin_proxy_context_returns_none_in_production_without_secret() -> None:
+    settings = ApiSettings.model_construct(profile="production")
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={ADMIN_ACTOR_HEADER: "admin"},
+    )
+    assert resolve_admin_proxy_context(request, settings) is None
 
 
 @pytest.mark.unit
@@ -681,7 +710,7 @@ def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
     assert schemes["OpsToken"] == {
         "type": "apiKey",
         "description": (
-            "canonical ops server-to-server read/cancel token. scope 문자열만으로는 "
+            "ops server-to-server read/cancel token. scope 문자열만으로는 "
             "권한을 얻지 못하며, token 종류와 method/exact path도 일치해야 한다."
         ),
         "in": "header",
@@ -749,20 +778,140 @@ def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
         for item in admin_operation.get("parameters", [])
     )
 
+    observability_paths = {
+        "/v1/ops/api-call-logs",
+        "/v1/ops/consistency/issues",
+        "/v1/ops/consistency/reports",
+        "/v1/ops/health-deep",
+        "/v1/ops/metrics",
+        "/v1/ops/system-logs",
+    }
+    for path in observability_paths:
+        operation = spec["paths"][path]["get"]
+        assert operation["security"] == [
+            {"AdminBFF": []},
+            {"OpsToken": [], "OpsScope": []},
+        ]
+        assert any(
+            item["in"] == "header" and item["name"] == OPS_SCOPE_HEADER
+            for item in operation.get("parameters", [])
+        )
+
+    public_key = schemes["PublicApiKey"]
+    assert public_key == {
+        "type": "apiKey",
+        "in": "query",
+        "name": "key",
+        "description": (
+            "외부/비신뢰 public read용 VWorld 호환 API key. ServiceToken 요청은 "
+            "같은 runtime dependency에서 별도 principal로 허용한다."
+        ),
+    }
+    for path in {
+        "/v1/curated-features",
+        "/v1/curated-features/{curated_feature_id}",
+        "/v1/curated-sources",
+        "/v1/curated-themes",
+    }:
+        assert spec["paths"][path]["get"]["security"] == [
+            {"PublicApiKey": []},
+            {"ServiceToken": []},
+        ]
+
+    mois = spec["paths"]["/v1/debug/mois-license/{license_id}"]["get"]
+    assert mois["security"] == [{"AdminBFF": []}]
+
 
 @pytest.mark.unit
-def test_openapi_declares_service_token_scheme() -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/ops/api-call-logs",
+        "/v1/ops/consistency/issues",
+        "/v1/ops/consistency/reports",
+        "/v1/ops/health-deep",
+        "/v1/ops/metrics",
+        "/v1/ops/system-logs",
+    ],
+)
+def test_ops_observability_routes_reject_headerless_and_wrong_principals(
+    path: str,
+) -> None:
+    client = _ops_client()
+    headerless = client.get(path)
+    service_only = client.get(
+        path,
+        headers={SERVICE_TOKEN_HEADER: "not-an-ops-token"},
+    )
+    cancel_as_read = client.get(
+        path,
+        headers={
+            OPS_TOKEN_HEADER: OPS_CANCEL_TOKEN,
+            OPS_SCOPE_HEADER: "ops:read",
+        },
+    )
+    assert (headerless.status_code, headerless.json()["code"]) == (
+        401,
+        "OPS_TOKEN_REQUIRED",
+    )
+    assert (service_only.status_code, service_only.json()["code"]) == (
+        401,
+        "OPS_TOKEN_REQUIRED",
+    )
+    assert (cancel_as_read.status_code, cancel_as_read.json()["code"]) == (
+        403,
+        "OPS_SCOPE_FORBIDDEN",
+    )
+
+
+@pytest.mark.unit
+def test_ops_observability_health_accepts_bff_and_read_principal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops as ops_module
+
+    async def _ok(_session: object) -> ops_module.OpsHealthCheck:
+        return ops_module.OpsHealthCheck(component="probe", status="ok")
+
+    monkeypatch.setattr(ops_module, "_check_database", _ok)
+    monkeypatch.setattr(ops_module, "_check_postgis", _ok)
+    monkeypatch.setattr(ops_module, "_check_prewarm", _ok)
+    client = _ops_client()
+    bff = client.get(
+        "/v1/ops/health-deep",
+        headers={
+            ADMIN_ACTOR_HEADER: "frontend-admin",
+            ADMIN_PROXY_SECRET_HEADER: "proxy-secret",
+        },
+    )
+    service = client.get(
+        "/v1/ops/health-deep",
+        headers={
+            OPS_TOKEN_HEADER: OPS_READ_TOKEN,
+            OPS_SCOPE_HEADER: "ops:read",
+        },
+    )
+    assert bff.status_code == 200
+    assert service.status_code == 200
+
+
+@pytest.mark.unit
+def test_openapi_declares_service_and_public_key_security_schemes() -> None:
     client = _client(_api_settings(service_token=SecretStr("tok")))
     spec = client.get("/openapi.json").json()
     assert "ServiceToken" in spec["components"]["securitySchemes"]
     scheme = spec["components"]["securitySchemes"]["ServiceToken"]
     assert scheme["in"] == "header"
     assert scheme["name"] == SERVICE_TOKEN_HEADER
-    # /features/batch service read는 security 요구, /features 공용 GET read는 없음.
+    # service operation은 service token만, public-keyed operation은 public key 또는
+    # service token 중 하나를 요구한다.
     tri = spec["paths"]["/v1/features/batch"]["post"]
-    assert tri.get("security")
+    assert tri["security"] == [{"ServiceToken": []}]
     feat = spec["paths"]["/v1/features"]["get"]
-    assert not feat.get("security")
+    assert feat["security"] == [
+        {"PublicApiKey": []},
+        {"ServiceToken": []},
+    ]
 
 
 @pytest.mark.unit
@@ -849,6 +998,85 @@ def test_admin_proxy_secret_deny_and_allow_over_http() -> None:
         ).status_code
         == 200
     )
+
+
+@pytest.mark.unit
+def test_auth_event_records_authenticated_principal_not_body_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ADR-066 D-2 (T-VN-07) — 감사 actor는 인증 principal에서만 파생한다. body가
+    # 다른 actor를 보내도 저장·응답 actor는 proxy actor header(principal)여야 한다.
+    from datetime import UTC, datetime
+
+    from kortravelmap.infra.auth_event_repo import AdminAuthEventRow
+
+    from kortravelmap.api.routers import admin_auth as admin_auth_mod
+
+    captured: dict[str, Any] = {}
+
+    async def _record(_session: Any, **kwargs: Any) -> AdminAuthEventRow:
+        captured.update(kwargs)
+        return AdminAuthEventRow(
+            auth_event_id="ae_1",
+            event_type=kwargs["event_type"],
+            outcome=kwargs["outcome"],
+            attempted_username=kwargs["attempted_username"],
+            actor=kwargs["actor"],
+            reason=kwargs["reason"],
+            next_path=kwargs["next_path"],
+            client_ip=kwargs["client_ip"],
+            user_agent=kwargs["user_agent"],
+            request_id=kwargs["request_id"],
+            created_at=datetime(2026, 7, 19, tzinfo=UTC),
+        )
+
+    monkeypatch.setattr(admin_auth_mod, "record_admin_auth_event", _record)
+
+    class _CommitSession:
+        async def commit(self) -> None:
+            return None
+
+    async def _session() -> AsyncIterator[Any]:
+        yield _CommitSession()
+
+    client = _client(_api_settings(admin_proxy_secret=SecretStr("proxy-secret")))
+    client.app.dependency_overrides[get_session] = _session
+
+    response = client.post(
+        "/v1/admin/auth-events",
+        headers={
+            ADMIN_ACTOR_HEADER: "admin:real",
+            ADMIN_PROXY_SECRET_HEADER: "proxy-secret",
+        },
+        json={
+            "event_type": "login",
+            "outcome": "succeeded",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    # 저장·응답 actor 모두 인증 principal이어야 한다.
+    assert captured["actor"] == "admin:real"
+    assert response.json()["data"]["item"]["actor"] == "admin:real"
+
+
+@pytest.mark.unit
+def test_auth_event_rejects_removed_body_actor_field() -> None:
+    # T-VN-20 (ADR-066 D-2): body.actor 필드는 제거됐다 — 보내면 extra="forbid"로 422.
+    client = _client(_api_settings(admin_proxy_secret=SecretStr("proxy-secret")))
+    response = client.post(
+        "/v1/admin/auth-events",
+        headers={
+            ADMIN_ACTOR_HEADER: "admin:real",
+            ADMIN_PROXY_SECRET_HEADER: "proxy-secret",
+        },
+        json={
+            "event_type": "login",
+            "outcome": "succeeded",
+            "actor": "attacker:forged",
+        },
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.unit

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 import pytest
 
 from kortravelmap.api.app import create_app
+from kortravelmap.api.route_policy import RoutePolicy, build_route_policy_matrix
 from kortravelmap.api.settings import ApiSettings
 
 
@@ -47,12 +49,52 @@ def _schema_properties(spec: dict[str, Any], name: str) -> set[str]:
     return set(properties)
 
 
+def _query_parameter_names(spec: dict[str, Any], path: str) -> set[str]:
+    parameters = spec["paths"][path]["get"].get("parameters", [])
+    return {
+        str(parameter["name"])
+        for parameter in parameters
+        if parameter.get("in") == "query"
+    }
+
+
 @pytest.mark.unit
 def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     module = _load_script_module()
-    full = create_app(ApiSettings()).openapi()
+    app = create_app(ApiSettings())
+    full = app.openapi()
 
-    user = module.user_openapi_spec(full)
+    user = module.user_openapi_spec(full, app=app)
+
+    assert "visibility" not in _query_parameter_names(full, "/v1/curated-themes")
+    assert "visibility" in _query_parameter_names(full, "/v1/admin/curated-themes")
+    assert "curation_status" not in _query_parameter_names(full, "/v1/curated-features")
+    assert "curation_status" in _query_parameter_names(
+        full, "/v1/admin/features/curated"
+    )
+    public_curated_queries = _query_parameter_names(full, "/v1/curated-features")
+    admin_curated_queries = _query_parameter_names(
+        full, "/v1/admin/features/curated"
+    )
+    assert {"theme_slug", "q", "feature_name", "display_title"} <= (
+        public_curated_queries
+    )
+    assert {"theme_id", "source_id", "provider", "dataset_key"}.isdisjoint(
+        public_curated_queries
+    )
+    assert {"theme_id", "source_id", "provider", "dataset_key"} <= (
+        admin_curated_queries
+    )
+    assert _refs(
+        full["paths"]["/v1/curated-features"]["get"]["responses"]["200"]
+    ) == {"PublicCuratedFeaturesResponse"}
+    assert _refs(
+        full["paths"]["/v1/admin/features/curated"]["get"]["responses"]["200"]
+    ) == {"CuratedFeaturesResponse"}
+    full_schemas = full["components"]["schemas"]
+    assert "source_record_key" in _schema_properties(full, "CuratedFeatureView")
+    assert "PublicCuratedFeatureView" in full_schemas
+    assert "CuratedFeatureView" in full_schemas
 
     assert user["info"]["title"] == "kor-travel-map-user"
     assert set(user["paths"]) == {
@@ -61,12 +103,13 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/providers/{provider}/last-sync",
         "/health",
         "/version",
+        "/v1/features",
         "/v1/features/in-bounds",
         "/v1/features/nearby",
         "/v1/features/nearby/by-target",
         "/v1/features/search",
         "/v1/features/{feature_id}",
-        "/v1/features/{feature_id}/observations/{source_entity_key}/history",
+        "/v1/features/{feature_id}/contained-features",
         "/v1/features/{feature_id}/price",
         "/v1/features/{feature_id}/weather",
         "/v1/features/{feature_id}/weather/forecast",
@@ -81,6 +124,8 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/public/festivals/{feature_id}",
         "/v1/curated-features",
         "/v1/curated-features/{curated_feature_id}",
+        "/v1/curated-sources",
+        "/v1/curated-themes",
         "/v1/curations",
         "/v1/curations/collections",
         "/v1/curations/collections/{collection_id}",
@@ -89,25 +134,139 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert not any(path.startswith("/admin") for path in user["paths"])
     assert not any(path.startswith("/ops") for path in user["paths"])
     assert not any(path.startswith("/debug") for path in user["paths"])
-    assert set(user["components"]["securitySchemes"]) == {"ServiceToken"}
+    assert set(user["components"]["securitySchemes"]) == {
+        "PublicApiKey",
+        "ServiceToken",
+    }
+    for row in build_route_policy_matrix(app):
+        if not row.include_in_schema or row.policy is not RoutePolicy.PUBLIC_KEYED:
+            continue
+        for method in row.methods:
+            assert user["paths"][row.schema_path][method.lower()]["security"] == [
+                {"PublicApiKey": []},
+                {"ServiceToken": []},
+            ]
 
     schemas = user["components"]["schemas"]
     assert "FeatureBatchResponse" in schemas
     assert "BeachPublicView" in schemas
     assert "FestivalPublicView" in schemas
-    assert "CuratedFeatureView" in schemas
-    assert "FeatureObservationHistoryResponse" in schemas
+    assert "PublicCuratedFeatureView" in schemas
+    assert "CuratedFeatureView" not in schemas
     assert "FeatureCurationGroupsResponse" in schemas
     assert "CurationCollectionResponse" in schemas
     assert "FeatureCurationGroupResponse" in schemas
+    assert "PublicCurationItemView" in schemas
+    assert "PublicCurationCollectionView" in schemas
+    assert "AdminCurationItemView" not in schemas
+    assert "AdminWeatherAlertHistoryItem" not in schemas
     assert "CuratedFeatureDetailSnapshotView" not in schemas
     assert "OpsMetricsResponse" not in schemas
     assert "AdminFeatureListResponse" not in schemas
+    # T-VN-05: raw observation lineage schema/route는 user-facing subset에서 제외.
+    assert "FeatureObservationHistoryResponse" not in schemas
+    assert "FeatureObservationView" not in schemas
+    assert "FeatureSourcesResponse" not in schemas
+    assert "FeatureSourcesData" not in schemas
+    # T-VN-05R: 공개 schema는 feature_kind 판별 union이고 각 variant/nested DTO가
+    # extra를 닫는다. admin/source identity와 raw lineage는 어느 variant에도 없다.
+    public_union = schemas["PublicCuratedFeatureView"]
+    discriminator = public_union["discriminator"]
+    variant_names = {
+        "place": "PublicCuratedPlaceFeatureView",
+        "event": "PublicCuratedEventFeatureView",
+        "notice": "PublicCuratedNoticeFeatureView",
+        "area": "PublicCuratedAreaFeatureView",
+        "route": "PublicCuratedRouteFeatureView",
+        "price": "PublicCuratedPriceFeatureView",
+        "weather": "PublicCuratedWeatherFeatureView",
+    }
+    assert discriminator["propertyName"] == "feature_kind"
+    assert discriminator["mapping"] == {
+        kind: f"#/components/schemas/{name}" for kind, name in variant_names.items()
+    }
+    assert _refs(public_union["oneOf"]) == set(variant_names.values())
+
+    internal_fields = {
+        "theme_id",
+        "source_id",
+        "provider",
+        "dataset_key",
+        "source_record_key",
+        "selection_origin",
+        "selected_by",
+        "selected_at",
+        "rejected_by",
+        "rejected_at",
+        "rejection_reason",
+        "metadata",
+        "created_at",
+        "archived_at",
+    }
+    common_public_fields = {
+        "curated_feature_id",
+        "theme_slug",
+        "feature_id",
+        "detail",
+        "source_name",
+        "content_version",
+        "updated_at",
+    }
+    for variant_name in variant_names.values():
+        assert schemas[variant_name]["additionalProperties"] is False
+        properties = _schema_properties(user, variant_name)
+        assert internal_fields.isdisjoint(properties)
+        assert common_public_fields <= properties
+
+    strict_nested_schemas = {
+        "PublicCuratedAddress",
+        "PublicCuratedOpeningTime",
+        "PublicCuratedOpeningPeriod",
+        "PublicCuratedSpecialOpeningDay",
+        "PublicCuratedOpeningHours",
+        "PublicCuratedReviewLinks",
+        "PublicCuratedPlaceFacilityInfo",
+        "PublicCuratedPlaceDetail",
+        "PublicCuratedEventDetail",
+        "PublicCuratedNoticeDetail",
+        "PublicCuratedAreaDetail",
+        "PublicCuratedRouteDetail",
+    }
+    for schema_name in strict_nested_schemas:
+        assert schemas[schema_name]["additionalProperties"] is False
+    assert {
+        "youtube_video_id",
+        "youtube_video_url",
+        "youtube_video_title",
+        "youtube_channel_id",
+        "youtube_channel_title",
+        "youtube_playlist_id",
+        "youtube_playlist_title",
+        "youtube_source_type",
+        "youtube_source_value",
+        "youtube_source_title",
+        "youtube_source_search_query",
+        "youtube_corrected_search_query",
+        "timestamp_start",
+        "timestamp_end",
+        "transcript_excerpt",
+        "gemini_url_evidence",
+        "confidence_score",
+        "source_record_key",
+    }.isdisjoint(_schema_properties(user, "PublicCuratedPlaceFacilityInfo"))
+    assert {
+        "bjd_code",
+        "admin_dong_code",
+        "road_name_code",
+        "road_address_management_no",
+    }.isdisjoint(_schema_properties(user, "PublicCuratedAddress"))
     assert _refs(user["paths"]) <= set(schemas)
     assert {
         "coord_5179_srid",
         "parent_feature_id",
         "sibling_group_id",
+        # T-VN-05: raw observation lineage는 공개 detail에 없다.
+        "observations",
     }.isdisjoint(_schema_properties(user, "FeatureDetailResponse"))
     assert {
         "target_id",
@@ -119,20 +278,194 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "primary_provider",
         "primary_dataset_key",
     }.isdisjoint(_schema_properties(user, "NearbyFeatureSummary"))
+    assert {
+        "source_record_key",
+        "metadata",
+    }.isdisjoint(_schema_properties(user, "PublicCurationItemView"))
+    assert "metadata" not in _schema_properties(
+        user, "PublicCurationCollectionView"
+    )
+    assert "source_record_key" not in _schema_properties(
+        user, "PublicWeatherValueItem"
+    )
+    assert {
+        "source_record_key",
+        "payload",
+        "fetched_at",
+        "imported_at",
+        "last_seen_at",
+    }.isdisjoint(_schema_properties(user, "PublicWeatherAlertHistoryItem"))
 
 
 @pytest.mark.unit
-def test_user_operations_are_present_in_full_openapi() -> None:
+@pytest.mark.parametrize(
+    ("path", "schemas", "expected"),
+    [
+        (
+            "/v1/features/weather/alerts",
+            {
+                "Root": {
+                    "type": "object",
+                    "properties": {"source_record_key": {"type": "string"}},
+                }
+            },
+            "source_record_key",
+        ),
+        (
+            "/v1/features/weather/forecast",
+            {
+                "Root": {
+                    "type": "array",
+                    "items": {"$ref": "#/components/schemas/Branch"},
+                },
+                "Branch": {
+                    "oneOf": [
+                        {
+                            "allOf": [
+                                {"$ref": "#/components/schemas/Cycle"},
+                                {
+                                    "type": "object",
+                                    "properties": {"payload": {"type": "object"}},
+                                },
+                            ]
+                        }
+                    ]
+                },
+                "Cycle": {
+                    "anyOf": [
+                        {"$ref": "#/components/schemas/Branch"},
+                        {"type": "null"},
+                    ]
+                },
+            },
+            "payload",
+        ),
+        (
+            "/v1/curations",
+            {
+                "Root": {
+                    "type": "object",
+                    "properties": {
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "metadata": {
+                                        "type": "object",
+                                        "additionalProperties": True,
+                                    }
+                                },
+                            },
+                        }
+                    },
+                }
+            },
+            "metadata",
+        ),
+    ],
+)
+def test_user_response_schema_gate_rejects_recursive_raw_fields(
+    path: str,
+    schemas: dict[str, Any],
+    expected: str,
+) -> None:
     module = _load_script_module()
-    full = create_app(ApiSettings()).openapi()
+    spec = {
+        "components": {"schemas": schemas},
+        "paths": {
+            path: {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Root"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
 
-    for path, methods in module.USER_OPERATIONS.items():
-        assert not path.startswith("/admin")
-        assert path in full["paths"]
-        path_item = full["paths"][path]
-        assert methods <= {
-            key for key in path_item if key in module.HTTP_METHODS
-        }
+    with pytest.raises(ValueError, match=expected):
+        module._validate_user_response_schemas(spec)
+
+
+@pytest.mark.unit
+def test_route_policy_full_and_user_operations_match_bidirectionally() -> None:
+    module = _load_script_module()
+    app = create_app(ApiSettings())
+    full = app.openapi()
+    user = module.user_openapi_spec(full, app=app)
+
+    route_operations = {
+        (row.schema_path, method.lower())
+        for row in build_route_policy_matrix(app)
+        if row.include_in_schema and not row.is_websocket
+        for method in row.methods
+        if method.lower() in module.HTTP_METHODS
+    }
+    full_operations = module._openapi_operations(full)
+    expected_user_operations = {
+        (row.schema_path, method.lower())
+        for row in build_route_policy_matrix(app)
+        if row.include_in_schema
+        and not row.is_websocket
+        and row.policy in module.USER_ROUTE_POLICIES
+        for method in row.methods
+        if method.lower() in module.HTTP_METHODS
+    }
+
+    assert full_operations == route_operations
+    assert module._openapi_operations(user) == expected_user_operations
+
+
+@pytest.mark.unit
+def test_user_openapi_rejects_route_method_drift() -> None:
+    module = _load_script_module()
+    app = create_app(ApiSettings())
+    full = copy.deepcopy(app.openapi())
+    del full["paths"]["/v1/features"]["get"]
+
+    with pytest.raises(ValueError, match="route/OpenAPI operation drift"):
+        module.user_openapi_spec(full, app=app)
+
+
+@pytest.mark.unit
+def test_public_security_matches_route_policy_in_full_and_user_specs() -> None:
+    module = _load_script_module()
+    app = create_app(ApiSettings())
+    full = app.openapi()
+    user = module.user_openapi_spec(full, app=app)
+    policies = {
+        row.schema_path: row.policy
+        for row in build_route_policy_matrix(app)
+        if row.include_in_schema and not row.is_websocket
+    }
+    expected_security = {
+        RoutePolicy.PUBLIC_UNAUTHENTICATED: [],
+        RoutePolicy.PUBLIC_KEYED: [
+            {"PublicApiKey": []},
+            {"ServiceToken": []},
+        ],
+        RoutePolicy.SERVICE: [{"ServiceToken": []}],
+    }
+
+    for spec in (full, user):
+        for path, method in module._openapi_operations(spec):
+            policy = policies[path]
+            operation = spec["paths"][path][method]
+            if policy in expected_security:
+                assert operation.get("security", []) == expected_security[policy], (
+                    path,
+                    method,
+                    policy,
+                )
+            if {"PublicApiKey": []} in operation.get("security", []):
+                assert policy is RoutePolicy.PUBLIC_KEYED
 
 
 @pytest.mark.unit

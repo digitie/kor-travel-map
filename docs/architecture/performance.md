@@ -401,23 +401,80 @@ ORDER BY valid_at DESC NULLS LAST
 LIMIT 1;
 ```
 
-### 8.3 vNext 3단 성능·DDL gate (ADR-075)
+### 8.3 vNext 3단 성능·DDL gate (ADR-075 D-12-4) — **본 절이 정본**
 
-성능 최적화는 도입 전 budget과 재현 fixture를 고정하고 다음 세 계층으로 검증한다.
+성능 최적화는 도입 전 budget과 재현 fixture를 고정하고 다음 세 계층으로 검증한다. T-VN-21이
+이 세 계층을 CI/release 절차에 연결했다. 각 계층의 **무엇이·어디서·어떻게** 실행되는지가 아래
+정본이다.
 
-1. **모든 PR**: planner 설정을 바꾸지 않은 hot-query `EXPLAIN` smoke, batch item 수에 비례해
-   DB query 수가 늘지 않는 검사, response shape 회귀를 수행한다. `enable_seqscan=off` 결과는
-   채택 근거가 아니다.
-2. **release/cutover**: 100만 건 이상 실제 분포 fixture에서 `EXPLAIN (ANALYZE, BUFFERS)`를
-   실행한다. 서울 밀집 viewport, 전국 low-zoom, 100km nearby, 상용 검색어, 200건 batch를
-   고정하고 n150 기준 p95, shared read blocks, response bytes를 기록한다.
-3. **index/DDL PR**: 변경 전후 read와 write 비용, index 크기, WAL, lock acquisition/보유 시간을
-   함께 측정한다. GiST/BRIN은 실제 predicate·시간 정렬을 지원할 때만 채택하고, concurrent build
-   실패 뒤 INVALID index가 0건인지 확인한다.
+#### Tier 1 — 매 PR (CI ``integration`` job에서 상시)
 
-T-VN-21이 이 계층을 CI/release 절차에 연결한다. MVT, 범용 batch, cursor HMAC, weather partition/
-hypertable, 물리 listener, 대규모 fixture 주기는 T-VN-51~56에서 먼저 채택 기준을 측정하며,
-"확장 가능해 보인다"는 이유만으로 구현하지 않는다.
+`tests/integration/test_perf_gate_tier1.py` (`@pytest.mark.perf_gate`)가 testcontainers
+PostGIS에서 다음 셋을 검사한다. 기존 integration job(`pytest tests/integration`)이 그대로
+실행하므로 `main`·`integration/t-vn` 대상 모든 PR에서 돈다.
+
+1. **planner-default EXPLAIN smoke**: `tests/integration/perf_gate.py`의 `HOT_QUERIES`
+   registry(public bbox/in-bounds·nearby·search·detail·batch·category counts·cluster
+   rollup 3종)를 **`enable_seqscan`을 건드리지 않고** EXPLAIN해 `feature.features`
+   base-table `Seq Scan`이 없고 기대 index를 타는지 확인한다. `enable_seqscan=off` 결과는
+   회귀 감시(=index 적격성 확인)에만 쓰고 **채택 근거로 삼지 않는다**.
+2. **query 수 ≠ batch item 수 가드**: public batch read를 item 50개·100개로 호출해 발생 SQL
+   statement 수가 item 수에 비례하지 않고 1건으로 일정한지 확인한다(N+1 회귀 차단).
+3. **response-shape 회귀**: hot query 결과 컬럼 집합을 frozen snapshot과 비교해 우발적 필드
+   추가/삭제를 잡는다(OpenAPI drift gate와 별개 — SQL 컬럼 계약 회귀).
+
+**hot query 추가 절차**: `perf_gate.HOT_QUERIES`에 `HotQuery(name, sql, params,
+expected_indexes, no_seq_scan_on=…)` 한 줄을 더한다. 정본 SQL 상수는 `feature_repo`에서
+**읽기만** 하고 재구현하지 않는다. small-fixture에서 planner가 index를 선호하도록
+`seed_hot_query_features`가 features + primary source lineage를 3,200행 규모로 seed·ANALYZE한다.
+
+> **집계 hot query 주의**: category counts처럼 활성 전 행을 훑는 full aggregate는, 공개 notice
+> 감산 필터의 `source_links` NOT EXISTS anti-join이 populated 여야 index를 탄다. 그래서 seed가
+> source lineage를 함께 채운다. `feature_price_values`/`feature_weather_values`는 tier-1 seed에
+> 넣지 않으므로 bbox의 price/weather LATERAL은 빈 aux 테이블을 seq-scan한다(`features` 아님) —
+> 이는 fixture-size 산물이고 aux 테이블 index 실효는 tier-2 실분포에서 잰다.
+
+#### Tier 2 — release/cutover (수동, **CI 아님**)
+
+`scripts/perf_tier2_release_harness.py`가 100만+ 실분포 fixture에서 대표 viewport를
+`EXPLAIN (ANALYZE, BUFFERS)`로 재고 n150 기준 p50/p95, shared read blocks p95, 응답 bytes를
+JSON으로 기록한다. **CI에서 절대 돌리지 않는다**(대용량 fixture는 CI 시간/자원 초과).
+
+- 대표 viewport: 서울 밀집 in-bounds, 전국 low-zoom cluster, 100km nearby, 상용 검색어 search,
+  200건 batch.
+- 실행: `KOR_TRAVEL_MAP_PG_DSN=… python scripts/perf_tier2_release_harness.py --rows 1000000
+  --iterations 30`(alembic head 적용된 빈 DB에). 이미 적재된 DB는 `--skip-seed`.
+- `--skip-seed`는 `feature.public_features`에서 non-notice `feature_id` 200개를 정렬해
+  실제 batch 파라미터로 사용한다. notice는 공개 list가 추가 lifecycle 감산을 적용하므로
+  batch 후보에서 제외해 selector와 응답 visibility 의미를 일치시킨다. 후보가 200건
+  미만이거나 대표 viewport가 각 최소 cardinality(일반 1행, batch 200행)를 만족하지
+  못하면 성공 JSON을 출력하지 않고 종료 코드 2로 실패한다.
+- 각 viewport는 terminal `LIMIT` 전 별도 count의 `matched_rows`와 실제 응답의
+  `returned_rows`/`minimum_returned_rows`를 기록해 truncation을 보존한다. EXPLAIN
+  최상위 Plan 행 수는 LIMIT 적용 뒤 `returned_rows`와 같아야 한다. count는 p95 측정
+  loop 밖에서 한 번만 실행한다.
+  `shared_read_blocks_p95`는 child 누적값을 재귀 합산하지 않고 최상위 Plan의
+  query 전체 누적값만 사용한다.
+- 결과는 release 리포트(`docs/reports/`)에 첨부하고, budget 초과 viewport는 index/쿼리 재설계
+  근거로 쓴다.
+
+#### Tier 3 — index/DDL 변경 PR (정책 + helper, 리뷰 enforce)
+
+index/DDL을 바꾸는 PR은 변경 **전후 write 비용·index 크기**(및 필요 시 WAL·lock 획득/보유
+시간)를 측정해 PR에 첨부해야 한다. 하드 CI gate로 만들 수 없다(변경별 index가 달라 generic
+게이트 불가) — **리뷰가 첨부 여부를 확인**한다.
+
+- 재사용 helper: `perf_gate.measure_index_write_cost(session, label=…, insert_sql=…,
+  row_batches=…, index_relation=…)`가 write 소요 시간과 `pg_relation_size(index)`를 반환한다.
+  index 생성/삭제(migration)는 호출자가 하고, helper는 순수 측정만 한다.
+- GiST/BRIN은 실제 predicate·시간 정렬을 지원할 때만 채택한다. GiST 6→partial 정리의 write
+  **~1.6× 개선** 실측이 선례다(§13, T-VN-18 계열이 이 helper로 before/after를 첨부한다).
+- concurrent build 실패 뒤 INVALID index가 0건인지 확인한다(§6.6 관련 runbook). dedup과
+  UNIQUE 사이 writer race가 있는 0060은 성능보다 원자성을 우선해 table writer lock 아래
+  non-concurrent build를 사용하므로 lock 대기·보유 시간과 fence 범위를 대신 기록한다.
+
+MVT, 범용 batch, cursor HMAC, weather partition/hypertable, 물리 listener, 대규모 fixture 주기는
+T-VN-51~56에서 먼저 채택 기준을 측정하며, "확장 가능해 보인다"는 이유만으로 구현하지 않는다.
 
 ## 9. 캐싱 정책 (Postgres 외)
 

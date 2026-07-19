@@ -52,7 +52,32 @@ CurationRelation = Literal[
 ReusePolicy = Literal["allowed", "blocked", "manual_review"]
 
 
-class CurationCollectionView(BaseModel):
+class PublicCurationCollectionView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: UUID
+    collection_key: str
+    theme_id: UUID
+    theme_slug: str
+    theme_name: str
+    theme_group: str
+    source_id: UUID | None
+    provider: str | None
+    dataset_key: str | None
+    source_name: str | None
+    source_url: str | None
+    title: str
+    edition_key: str
+    description: str | None
+    status: CollectionStatus
+    visibility: CollectionVisibility
+    item_count: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None
+
+
+class AdminCurationCollectionView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     collection_id: UUID
@@ -73,18 +98,51 @@ class CurationCollectionView(BaseModel):
     visibility: CollectionVisibility
     metadata: dict[str, Any]
     item_count: int
+    public_item_count: int
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None
+    created_by: str | None
+    updated_by: str | None
+
+
+class PublicCurationItemView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    curation_item_id: UUID
+    collection_id: UUID
+    collection_key: str
+    title: str
+    edition_key: str
+    theme_slug: str
+    theme_name: str
+    theme_group: str
+    provider: str | None
+    dataset_key: str | None
+    source_name: str | None
+    source_url: str | None
+    feature_id: str | None
+    feature_name: str | None
+    feature_kind: str | None
+    feature_category: str | None
+    lon: float | None
+    lat: float | None
+    address: dict[str, Any]
+    external_item_id: str
+    place_name: str
+    address_hint: str | None
+    status: ItemStatus
+    sort_order: int
+    item_title: str | None
+    item_summary: str | None
+    curation_relation: CurationRelation
+    reuse_policy: ReusePolicy
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
 
 
-class AdminCurationCollectionView(CurationCollectionView):
-    public_item_count: int
-    created_by: str | None
-    updated_by: str | None
-
-
-class CurationItemView(BaseModel):
+class AdminCurationItemView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     curation_item_id: UUID
@@ -120,9 +178,6 @@ class CurationItemView(BaseModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
-
-
-class AdminCurationItemView(CurationItemView):
     created_by: str | None
     updated_by: str | None
 
@@ -144,14 +199,14 @@ class FeatureCurationGroupView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     feature: CurationFeatureView
-    curations: list[CurationItemView]
+    curations: list[PublicCurationItemView]
     curation_count: int
 
 
 class CurationCollectionsData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    items: list[CurationCollectionView]
+    items: list[PublicCurationCollectionView]
 
 
 class AdminCurationCollectionsData(BaseModel):
@@ -163,8 +218,8 @@ class AdminCurationCollectionsData(BaseModel):
 class CurationCollectionData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    collection: CurationCollectionView
-    items: list[CurationItemView]
+    collection: PublicCurationCollectionView
+    items: list[PublicCurationItemView]
 
 
 class AdminCurationCollectionData(BaseModel):
@@ -225,7 +280,7 @@ class FeatureCurationGroupResponse(BaseModel):
 class CurationItemResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    data: CurationItemView
+    data: PublicCurationItemView
     meta: Meta
 
 
@@ -381,10 +436,10 @@ class CurationImportResponse(BaseModel):
     meta: Meta
 
 
-def _collection_view(
+def _public_collection_view(
     row: curation_repo.CurationCollection,
-) -> CurationCollectionView:
-    view = CurationCollectionView.model_validate(row, from_attributes=True)
+) -> PublicCurationCollectionView:
+    view = PublicCurationCollectionView.model_validate(row, from_attributes=True)
     return view.model_copy(update={"item_count": row.public_item_count})
 
 
@@ -394,8 +449,8 @@ def _admin_collection_view(
     return AdminCurationCollectionView.model_validate(row, from_attributes=True)
 
 
-def _item_view(row: curation_repo.CurationItem) -> CurationItemView:
-    return CurationItemView.model_validate(row, from_attributes=True)
+def _public_item_view(row: curation_repo.CurationItem) -> PublicCurationItemView:
+    return PublicCurationItemView.model_validate(row, from_attributes=True)
 
 
 def _admin_item_view(row: curation_repo.CurationItem) -> AdminCurationItemView:
@@ -416,7 +471,7 @@ def _group_view(
             address=row.address,
             status=row.status,
         ),
-        curations=[_item_view(item) for item in row.curations],
+        curations=[_public_item_view(item) for item in row.curations],
         curation_count=len(row.curations),
     )
 
@@ -737,13 +792,14 @@ async def list_public_curation_collections(
             edition_key=edition_key,
             provider=provider,
             q=q,
+            public_only=True,
             limit=page_size,
             cursor=cursor,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return CurationCollectionsResponse(
-        data=CurationCollectionsData(items=[_collection_view(row) for row in rows]),
+        data=CurationCollectionsData(items=[_public_collection_view(row) for row in rows]),
         meta=make_meta(
             request,
             started_at=started_at,
@@ -769,8 +825,8 @@ async def get_public_curation_collection(
     public_items = [item for item in items if item.status == "included"]
     return CurationCollectionResponse(
         data=CurationCollectionData(
-            collection=_collection_view(collection),
-            items=[_item_view(item) for item in public_items],
+            collection=_public_collection_view(collection),
+            items=[_public_item_view(item) for item in public_items],
         ),
         meta=make_meta(request, started_at=started_at),
     )

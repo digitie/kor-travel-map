@@ -4,7 +4,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 import { FuelIcon, HistoryIcon } from "lucide-react";
 import { useMemo } from "react";
 
-import { useFeaturePrice, type PricePoint } from "@/api/features";
+import { useAdminFeaturePrice, type PricePoint } from "@/api/features";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -175,13 +175,12 @@ export function FeaturePricePanel({
   featureId: string | null;
   compact?: boolean;
 }) {
-  const price = useFeaturePrice(featureId, {
+  const price = useAdminFeaturePrice(featureId, {
     historyLimit: compact ? 30 : 100,
   });
   const data = price.data?.data;
   const current = data?.current ?? [];
   const history = data?.history ?? [];
-
   const historyColumns = useMemo<ColumnDef<PricePoint, unknown>[]>(() => {
     const cols: ColumnDef<PricePoint, unknown>[] = [
       {

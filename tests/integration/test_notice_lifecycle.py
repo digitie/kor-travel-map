@@ -49,6 +49,7 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _NOW = datetime(2026, 7, 3, 12, 0, tzinfo=_KST)
+_SEARCH_CURSOR_KEY = b"integration-feature-search-cursor-signing-key-0001"
 
 _KREX = "python-krex-api"
 _KREX_DS = "krex_traffic_notices"
@@ -644,7 +645,9 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
         migrated_session,
         bbox=bbox,
         kinds=["notice"],
-        limit=20,
+        page_size=20,
+        include_total=True,
+        cursor_signing_key=_SEARCH_CURSOR_KEY,
     )
     assert {item.feature_id for item in search_by_bbox.items} == expected_ids
     assert search_by_bbox.total_count == 1
@@ -653,7 +656,9 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
         migrated_session,
         q="[테스트] 동일 교통 공지",
         kinds=["notice"],
-        limit=20,
+        page_size=20,
+        include_total=True,
+        cursor_signing_key=_SEARCH_CURSOR_KEY,
     )
     assert {item.feature_id for item in search_by_name.items} == expected_ids
     assert search_by_name.total_count == 1
@@ -2173,7 +2178,9 @@ async def test_public_active_reads_share_latest_and_ended_notice_filter(
         migrated_session,
         bbox=bbox,
         kinds=["notice"],
-        limit=20,
+        page_size=20,
+        include_total=True,
+        cursor_signing_key=_SEARCH_CURSOR_KEY,
     )
     assert {item.feature_id for item in search_page.items} == expected_ids
     assert search_page.total_count == 1

@@ -237,6 +237,23 @@ async def test_features_nearby_sql_uses_coord_5179_gist(pg_session, seeded_featu
         f"seq scan on features: {plan}"
 ```
 
+#### 4.2.1 Tier-2 release 측정 정확성
+
+`scripts/perf_tier2_release_harness.py`는 CI benchmark가 아니라 release/cutover 증거 생성기다.
+그러므로 빈 결과나 plan tree 모양에 따라 변하는 누적값을 성공 증거로 남기지
+않는다.
+
+- seed/skip-seed 양쪽에서 과거 `perf:f:000001..000200` ID가 없어도 public
+  projection의 실제 non-notice ID 200개를 결정적으로 선택하는지 통합 테스트한다.
+  seed의 매 29번째 inactive 규칙과 selector 기대값을 동일하게 계산하고 active notice가
+  정렬상 먼저 와도 batch 후보에서는 제외되는지 검증한다.
+- 199건 이하 public batch 후보, 빈 대표 viewport, EXPLAIN 최상위 Plan 행과 응답
+  `returned_rows` 불일치는 모두 fail-closed 대상이다. terminal `LIMIT` 전 별도 count인
+  `matched_rows`가 `returned_rows`보다 큰 fixture로 실제 truncation도 단언한다.
+- `Shared Read Blocks`는 최상위 Plan의 누적값을 query 전체 정본으로 삼는다.
+  root/child 단일 tree와 `Gather -> Append -> parallel child` fixture로 중복 합산이
+  없음을 단위 테스트한다.
+
 ### 4.3 인덱스 빠짐 회귀 차단
 
 ```python
@@ -343,6 +360,55 @@ async def test_get_features_in_bounds(debug_client, seeded_features):
     assert len(body["features"]) > 0
 ```
 
+#### 5.1.1 feature search total·cursor 무결성
+
+T-VN-15는 repository spy와 실제 PostgreSQL 통합 테스트를 함께 둔다. 첫 페이지와 continuation에서
+`include_total=false`이면 실행 statement에 COUNT SQL이 0개이고 page-size+1 data SELECT가
+1개인지, `true`이면 동일 filter COUNT가 정확히 1개인지 검증한다. `q` 검색은 두 모드 모두
+transaction-local pg_trgm threshold 설정 statement가 별도로 실행될 수 있다. 두 모드 모두
+items와 next keyset은 같고
+`meta.page.total`만 `null`/정수로 달라야 한다.
+
+cursor 회귀는 q trim, filter 중복·순서, bbox float, q 유무 sort, page_size, include_total을 포함한
+canonical contract를 고정한다. 같은 의미의 filter 순서 변경은 continuation을 허용하고, q/bbox/
+kind/category/page_size/include_total 중 하나라도 의미가 바뀌면 DB 호출 0회와 RFC7807 422
+`CURSOR_QUERY_MISMATCH`를 단언한다. payload 또는 signature 한 byte 변조,
+truncated/non-base64/oversized token, 유효 서명의 unknown version, 잘못된 kind, NaN/무한대 score는
+각각 typed 422(`FEATURE_SEARCH_CURSOR_TAMPERED`/
+`FEATURE_SEARCH_CURSOR_INVALID`/`FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED`)로 fail-closed해야 한다.
+OpenAPI admin/user와 생성 TypeScript type은 네 cursor error code와 `include_total` 기본 false를
+같이 고정한다. production settings/entrypoint/Compose matrix는 feature surface가 켜진 상태의 secret
+누락·짧음·다른 신뢰 경계 secret 재사용을 기동 전에 거부하고 local-dev 난수 fallback만 허용한다.
+
+#### 5.1.2 public route policy·OpenAPI·user surface 양방향 정합
+
+T-VN-57은 조립된 FastAPI route의 path/method와 `ROUTE_POLICIES`를 단일 입력으로 사용한다.
+full OpenAPI의 모든 `PUBLIC_KEYED` operation은 정확히 `PublicApiKey OR ServiceToken`,
+`PUBLIC_UNAUTHENTICATED`는 무인증, `SERVICE`는 service scheme이어야 한다. 정책에 없는 operation의
+과포함과 정책 operation의 누락을 모두 실패시켜 한 방향 subset 검사로는 통과할 수 없게 한다.
+
+user OpenAPI도 공개 가능한 정책 집합에서 직접 파생하고 full spec과 path/method/security를
+양방향 비교한다. operator/debug/metrics가 user spec에 들어오거나 public-keyed route가 빠지거나
+같은 path의 method가 달라지면 실패한다. `openapi-typescript`는 security metadata를 생성 타입에
+표현하지 않으므로 Python OpenAPI 회귀가 인증 의미를 소유하고, admin/user `gen:types:check`는
+query/header/DTO shape drift를 별도로 고정한다.
+
+#### 5.1.3 사용자 OpenAPI reachable schema raw 경계
+
+user OpenAPI의 모든 operation response schema를 root로 삼아 local `$ref`, array `items`, object
+`properties`/`additionalProperties`, `allOf`/`anyOf`/`oneOf`를 cycle-safe하게 재귀 순회한다.
+도달 가능한 schema에 `source_record_key`, `raw_data`, `raw_payload_hash`, `fetched_at`,
+`imported_at`, `last_seen_at`, provider 원문 의미의 `payload` 또는 curation item `metadata`가
+있으면 실패한다. 해당 raw field가 `additionalProperties: true` object면 내부 key를 알 수
+없어도 field 자체로 거부한다. 주소처럼 공개 계약에 명시된 다른 object까지 일괄 금지하지는
+않는다. 이름이 비슷한 미도달 admin component가 full spec에 존재하는 것은 허용하되 user
+spec에서 public response root로 연결되면 실패해야 한다.
+
+positive fixture는 forecast·alert·curation public response의 typed field만 도달함을,
+negative fixture는 direct property, nested `$ref`, array, `allOf`/`anyOf`/`oneOf`, recursive cycle에
+주입한 forbidden field가 모두 탐지됨을 고정한다. full/user OpenAPI와 admin/user 생성
+TypeScript drift도 같은 PR의 필수 gate다.
+
 ### 5.2 인증 없음 동작 확인 (ADR-005)
 
 ```python
@@ -394,6 +460,29 @@ cursor별 응답을 명시한다. 이 fixture의 6+6 분할은 canonical `page_s
 페이지 내부는 total-order가 엄격한 내림차순이어야 하며 페이지끼리 서로소이고 page 1의 마지막
 identity가 page 2의 첫 identity보다 앞서야 한다. 첫 행 존재, count summary, 페이지 전체 문자열만의
 단언은 #694·#719 수용 증거로 인정하지 않는다.
+
+#### 5.4.2 correction 편집 기준·stale draft 수용 기준
+
+frontend client 단위 회귀는 `/revision` → detail 순서, 같은 `row_revision`에서만 basis 확정,
+불일치 시 제한 재시도와 raw `ETag` 보존을 검증한다. PATCH/DELETE 함수는 호출자가 넘긴
+`entityTag` 없이는 호출할 수 없어야 하며 mutation 내부 revision GET이 한 번도 발생하지 않음을
+고정한다. correction query는 전역 query retry 설정과 무관하게 자체 `retry=false`를 사용해 지속
+불일치가 정확히 3 pair/HTTP 6회에서 끝나야 한다.
+
+mocked Playwright는 edit basis를 읽은 뒤 서버 revision을 증가시켜 첫 PATCH가 원래 raw
+`If-Match`로 전송되고 `412`가 되는 흐름을 만든다. 실패 뒤 입력 draft가 byte-for-byte 유지되고,
+명시적 최신값 다시 불러오기 전에는 background refetch가 form이나 basis를 바꾸지 않으며, reload
+뒤에만 새 detail·ETag로 재제출되는지 확인한다. delete도 선택 feature의 basis를 사용하고 mutation
+직전 자동 revision GET이 없음을 별도 fixture로 증명한다. 최초 detail 응답을 지연한 동안 reason,
+name, 좌표를 입력하는 fixture는 응답 뒤에도 전체 draft가 그대로인지 확인한다. 412 뒤 explicit
+reload가 500으로 실패하면 React Query에 남은 old data를 적용하거나 conflict를 reset하지 않고,
+두 번째 성공 reload 뒤에만 form과 basis를 바꾸는 음성 회귀를 둔다.
+
+n150 live destructive E2E의 임시 correction 정리는 DELETE 직전에 `/revision`을 읽어 얻은 raw
+`ETag`를 `If-Match`로 전달한다. cleanup의 `428`/`412`를 무시하지 않고 복구 실패로 남기며,
+작성한 feature와 change request가 최종 상태에서 제거·복원됐는지 read-only 재검증한다.
+정상 live UI update/delete도 form basis `/revision` 응답의 raw `ETag`를 각각 capture하고 실제
+PATCH/DELETE request `If-Match`와 exact equality를 단정한다.
 
 ### 5.5 C7 prod 파괴적 live E2E의 복구·인과성 gate
 
@@ -634,6 +723,22 @@ def mask_sensitive(obj):
 | 계약 drift | base/cancellation/nullable `dagster_run_status`/freshness/trigger status와 engine 시각 분리, pipeline/datasets 양쪽 OpenAPI admin/user drift와 admin generated type drift; cancellation member operation kind/run-termination 및 cancellation run engine start/finish 포함 |
 | writer | offline validate/load/reserve, MOIS 3종, exact update member는 실컬럼+event pair; multi-scope/batch aggregate NULL; event mismatch 거부 |
 | 배포 | API/manual/backfill/schedule/sensor ingress 차단, active 0 drain, 두 번 backfill, Dagster 전 구성 재기동, 신 API/Dagster 정지 후 migration-image downgrade |
+
+### 7.3 Weather semantic UNIQUE cutover 회귀 (T-VN-17R)
+
+0060은 실제 migration을 0059 DB에 적용하는 두-connection 회귀로 검증한다. DELETE trigger의
+advisory gate로 dedup statement 내부를 결정적으로 멈춘 동안 다른 connection의 weather INSERT는
+statement timeout으로 막혀야 한다. gate 해제 뒤 migration은 valid·ready·unique·NULLS NOT DISTINCT
+index와 semantic duplicate 0건을 한 번에 남겨야 한다. 과거 concurrent build를 중복 fixture에서
+의도적으로 실패시켜 INVALID index를 만든 뒤, 새 0060이 별도 짧은 retry transaction에서 이를
+제거하고 정상 index로 재생성하는 복구 회귀도 필수다. retry 잔여의 `ACCESS EXCLUSIVE` 정리는 별도 짧은
+autocommit transaction이어야 하며, fresh cutover가 dedup에서 멈춘 동안 실제 migration PID는
+`SHARE ROW EXCLUSIVE`만 보유하고 concurrent SELECT가 성공해야 한다. VALIDATE 직전 실제 table
+blocker를 먼저 queue해 session lock timeout이 5초 안에 실패하고, valid UNIQUE+NOT VALID 제약의 미stamp 상태를 같은 migration이
+재시도 복구하는지도 검증한다. 실패 경로의 `asyncio.to_thread`는 cancel로 끝났다고 간주하지 않고
+DB backend 종료와 bounded join 뒤에만 fresh DB를 drop한다. 기존 range/payload/FK 오염은 첫 commit
+전 `23514`, 현재 head에서 0060 아래로 향하는 downgrade는 descendant DDL 전에 schema/version/index
+무변경 fail-closed여야 한다. SQL 문자열 순서만 확인하는 테스트는 수용 증거가 아니다.
 
 ## 8. 테스트 데이터 정책
 

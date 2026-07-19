@@ -35,13 +35,24 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | operator | `/v1/ops/datasets/*`, `/v1/ops/pipeline/*` | ADR-064 canonical control plane 유지 |
 | operator | `/v1/provider-datasets` | ADR-069 DB-owned dataset 관리 |
 
-공개 DTO에는 `raw_data`, `raw_payload_hash`, `source_record_key`, provider payload passthrough가 없다.
+공개 DTO에는 `raw_data`, `raw_payload_hash`, `source_record_key`, provider payload passthrough와
+ingestion timestamp(`fetched_at`/`imported_at`/`last_seen_at`)가 없다. 공개 operation의 response
+root에서 재귀적으로 도달 가능한 모든 component에 같은 규칙을 적용한다. public DTO와
+admin/operator raw DTO는 상속하지 않으며 서로 독립된 projection이다.
+공개 curated list/detail도 admin overlay DTO와 분리한 명시적 allowlist를 사용한다.
+`PublicCuratedFeatureView`는 `feature_kind`로 판별하는 7종
+`place|event|notice|area|route|price|weather` union이다. 주소와 kind별 detail은 strict
+중첩 DTO이며, place의 시설·영업시간·전화·리뷰 링크도 검토된 키와 값만 새로 조립한다.
+따라서 `detail.payload`, concierge YouTube/transcript/evidence 미러, 알 수 없는 nested raw,
+DB/source identity, 선정 감사 필드는 직렬화되지 않고 `/v1/admin/features/curated*`에만
+남는다. 알 수 없는 kind는 공개 목록에서 제외하고 상세는 404다(T-VN-05R).
 `include_geometry`는 동일 candidate set의 serialization만 바꾸고, `include_total=false`이면 COUNT를
-실행하지 않는다. cursor는 version과 정규화 query fingerprint가 다르면
-`CURSOR_QUERY_MISMATCH`로 거부한다. body actor, 동작하지 않는 beach 옵션, 수기 OpenAPI allowlist는
+실행하지 않는다. search cursor는 version과 정규화 query fingerprint를 검증하고 HMAC-SHA256으로
+payload 무결성을 보호한다. 다른 query 재사용은 `CURSOR_QUERY_MISMATCH`, 변조는
+`FEATURE_SEARCH_CURSOR_TAMPERED`로 거부한다. body actor, 동작하지 않는 beach 옵션, 수기 OpenAPI allowlist는
 제거하고 route policy에서 public/service/operator profile을 생성한다.
 
-MVT tile, 범용 `feature-context` batch, cursor HMAC, 물리 listener 분리는 목표 계약이 아니라
+MVT tile, 범용 `feature-context` batch, 물리 listener 분리는 목표 계약이 아니라
 T-VN-51~55의 실측 결과가 채택 조건을 충족할 때만 새 결정을 연다.
 
 ## 0. 한눈에 — #317이 한 것 vs ADR-048 delta
@@ -86,15 +97,19 @@ T-VN-51~55의 실측 결과가 채택 조건을 충족할 때만 새 결정을 �
   (`Deprecation`/`Sunset` 헤더), OpenAPI major별 분리 export. 즉 "지금은 깨도 되고, GA 후엔
   `/v2`로만 깬다"를 규칙화.
 
-### 1.3 인증 (현행 구현; 목표 ADR-066)
-- `POST /v1/features/batch`(service read): `ServiceToken`(`X-Kor-Travel-Map-Service-Token`, 미설정 시
-  비강제, 상수시간) route-level gate. 나머지 `/v1/features/*` GET은 공용 read.
-- `/v1/features/*`(GET)·`/v1/categories`·`/v1/providers/*`·`/v1/curations*`: 공용 read,
-  앱 토큰 비강제(인프라 SSO).
-- `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`: 인프라 SSO + IP allowlist. 파괴적 admin은
-  `admin_destructive_enabled` kill-switch.
-- 위 opt-out은 현재 구현 설명일 뿐 목표 정책이 아니다. T-VN-01~03에서 production secret 누락
-  기동 거부, 전 route matrix, principal actor, 공개 read-only DB role로 clean-cut한다(ADR-066).
+### 1.3 인증 (ADR-066·T-VN-57)
+- `RoutePolicy.PUBLIC_KEYED`로 분류된 모든 public operation은 production에서 VWorld 호환
+  `key` query 또는 `ServiceToken` 중 하나를 요구한다. OpenAPI도 두 scheme을 OR 대안으로
+  선언한다. trusted admin BFF 우회는 same-origin UI용 내부 경계이며 public consumer
+  security에는 노출하지 않는다.
+- `POST /v1/features/batch`는 `RoutePolicy.SERVICE`이며 `ServiceToken`
+  (`X-Kor-Travel-Map-Service-Token`) 전용이다. `/health`·`/version`·기계 판독
+  `/openapi.json`만 public-unauthenticated다.
+- `/v1/admin/*`는 trusted Admin BFF, `/v1/ops/*`는 경로·method별 Admin BFF 또는 제한된
+  ops principal, `/metrics`는 metrics token을 사용한다. production은 필요한 secret이나 public
+  key gate가 빠진 구성을 기동 전에 거부한다.
+- route 추가·삭제 시 runtime policy, full OpenAPI, user OpenAPI를 각각 수기로 갱신하지 않는다.
+  `ROUTE_POLICIES`와 조립된 route method metadata에서 파생하고 양방향 전수 drift gate로 고정한다.
 
 ### 1.4 응답 envelope (🔁 ADR-048 — payload/meta 완전 분리)
 - 성공 `{ "data": <payload>, "meta": <Meta> }`. **`data`는 payload만**:
@@ -103,11 +118,28 @@ T-VN-51~55의 실측 결과가 채택 조건을 충족할 때만 새 결정을 �
   id-keyed map은 `found`처럼 별도 키를 쓴다.
 - **페이지네이션·추적·뷰 해석 메타는 `meta`로 일원화**:
   `meta = { duration_ms, request_id, page?: { page_size, next_cursor, total },
-  cluster?: { cluster_unit } }`(`page`는 pageable 목록에만, `total`은 opt-in `null` 기본,
+  cluster?: { cluster_unit, drill_down_unit } }`(`page`는 pageable 목록에만,
+  `total`은 opt-in `null` 기본,
   `cluster`는 in-bounds에만). `data.next_cursor`/`data.total_count`/`data.cluster_unit`/
   파생 `count`는 **폐기**.
 - 라우터별 `FeatureListMeta`/`FeatureDetailMeta`/… 중복 → 공유 `Meta` 1개 + `data` payload
   모델. 확장 시 `meta.page`만 늘리면 됨(payload 불변). 성공 응답에도 `request_id`(추적 대칭).
+
+#### 1.4.1 in-bounds cluster 귀속 규칙
+
+- `meta.cluster`가 존재하면 `cluster_unit`은 필수 enum(`sido | sigungu |
+  eupmyeondong`)이고, `drill_down_unit`도 필수 필드이되 값은 같은 enum 또는 `null`이다.
+  `eupmyeondong`의 다음 단계는 개별 feature이므로 `null`을 반환한다.
+- cluster 귀속 정본은 feature에 저장된 canonical 행정코드(`sido_code` / `sigungu_code` /
+  `legal_dong_code`)다. bbox와 교차하는 route/area가 행정 경계를 가로질러도 선택한 단위의
+  저장 코드 **하나에 정확히 한 번** 귀속하며, 교차 영역별로 여러 cluster에 분할·복제하지
+  않는다. 따라서 `feature_count` 합계는 해당 단위 코드가 보강된 items 후보 수와 일치한다.
+- geometry의 bbox 교차 부분은 지도 marker 위치를 계산할 때만 사용한다. marker 위치가
+  cluster 귀속 코드를 바꾸지 않는다. 선택 단위의 저장 코드가 `null`인 feature는 items에는
+  남지만 해당 cluster rollup에서는 제외된다.
+- 이 규칙은 본 DB가 feature-level canonical 주소 코드를 보유하고 행정경계 polygon을
+  소유하지 않는 현재 구조에 맞춘 것이다. 공간 분할 귀속이 필요해지면 경계 polygon과
+  중복 집계 의미를 별도 데이터/API 계약으로 먼저 도입해야 한다.
 
 ### 1.5 에러 — RFC 7807 `application/problem+json` (🔁 ADR-048 / T-214g)
 ```json
@@ -142,7 +174,32 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
 - 2-티어 캡: 기본(detail/admin/ops) 50/최대 200, 지도(`nearby`·`by-target`) 100/최대 500.
 - `/v1/features` 평면: `page_size`+`cursor`(`limit le=5000` 폐기). `/v1/features/in-bounds`:
   cursor 없이 `max_items` 하드캡 5000→2000 + 결정적 `feature_id` 정렬(T-212d).
-- `meta.page.total`은 `?include_total=true` opt-in(기본 `null`; 현재 `search`는 항상 COUNT).
+- `meta.page.total`은 `?include_total=true` opt-in(기본 `null`). `/v1/features/search`는
+  `include_total=false`일 때 COUNT SQL을 만들거나 실행하지 않고 page-size+1 keyset 조회 한 번만
+  수행한다. `true`일 때만 같은 정규화 filter의 별도 COUNT를 실행한다.
+
+#### 1.6.1 feature search cursor v1
+
+- cursor는 `base64url(canonical_payload).base64url(hmac_sha256)`의 opaque token이다. payload는
+  `v=1`, cursor kind, query fingerprint, 마지막 keyset(`score`+`feature_id` 또는
+  `feature_id`)만 가진다. 서명은 payload 원문과 cursor kind domain separator를 함께 덮고
+  `hmac.compare_digest`로 검증한다. 원 검색어·secret은 cursor에 넣지 않는다.
+- query fingerprint는 repository가 실제 SQL에 사용하는 정규화 계약을 canonical JSON으로 만든 뒤
+  SHA-256한다. `q`는 trim 후 빈 문자열을 `null`, bbox는 유한한 WGS84 float 4개, `kind`/`category`는
+  중복 제거·사전순 정렬(빈 배열은 `null`)한다. 여기에 q 유무로 결정되는 sort
+  (`score DESC, feature_id ASC` 또는 `feature_id ASC`), `page_size`, `include_total`을 포함한다.
+  따라서 필터 순서만 바꾼 요청은 같은 계약이고, 결과집합·정렬·page metadata를 바꾸는 요청은
+  다른 계약이다.
+- 디코드 순서는 형식/길이 → HMAC → version/kind → fingerprint → keyset type·finite score다.
+  malformed는 `FEATURE_SEARCH_CURSOR_INVALID`, 서명이 맞지만 알 수 없는 version은
+  `FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED`, 서명 불일치는
+  `FEATURE_SEARCH_CURSOR_TAMPERED`, 현재 query와 fingerprint가 다르면
+  `CURSOR_QUERY_MISMATCH`인 RFC7807 422다. 어느 실패도 DB query 전에 끝난다.
+- HMAC key는 server-only `KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET`이며 public API key,
+  service token, admin proxy secret, ops token, metrics token과 공유하지 않는다. production에서 feature search surface가
+  켜져 있으면 공백 없는 최소 32자 secret이 없을 때 기동을 거부한다. `local-dev` 미설정 시에만
+  process-local 난수 key를 허용하며 재시작·다중 worker 사이 cursor 지속성을 보장하지 않는다.
+  운영 rotation은 새 key 배포와 동시에 기존 cursor를 의도적으로 무효화하는 clean cut이다.
 
 ### 1.7 idempotency · rate limit (T-214g)
 - 일반 변경 POST는 endpoint 계약에 따라 `Idempotency-Key`를 사용할 수 있다. canonical
@@ -251,7 +308,8 @@ feature API의 weather subresource를 쓴다.
 ```
 GET /v1/features/weather/forecast                # lon/lat 기준 nearest weather anchor forecast
 GET /v1/features/{feature_id}/weather/forecast   # feature 좌표 기준 nearest weather anchor forecast
-GET /v1/features/weather/alerts                  # KMA 기상특보 source_record 이력
+GET /v1/features/weather/alerts                  # KMA 기상특보 typed 공개 이력
+GET /v1/admin/features/weather/alerts            # 원문·lineage 포함 operator 이력
 ```
 
 핵심 계약:
@@ -263,8 +321,12 @@ GET /v1/features/weather/alerts                  # KMA 기상특보 source_recor
 - 좌표 기반 forecast는 반경 내 가장 가까운 KMA 예보 anchor를 사용한다. anchor가 없으면
   200 + 빈 `items`로 반환한다.
 - 중기예보는 `forecast_style=mid`, `weather_domain=kma_mid_forecast`로 포함한다.
-- 기상특보 이력은 `provider_sync.source_records`의 KMA weather alert payload를 공개 projection으로
-  반환한다. 별도 alert history table은 만들지 않는다.
+- 공개 forecast row는 원천 record identity를 반환하지 않는다. 공개 기상특보 이력은
+  `provider_sync.source_records`에서 도메인 필드와 발표·유효 시각만 typed projection하고,
+  원문 payload·source record identity·ingestion timestamp는 반환하지 않는다.
+- operator 기상특보 이력은 admin BFF 인증 아래 원문 payload와 lineage/ingestion timestamp를
+  보존한다. 별도 alert history table은 만들지 않는다. forecast의 상세 lineage는 기존
+  `/v1/features/{feature_id}/sources|observations` operator 표면에서 조회한다.
 
 ### 2.4.3 `/v1/curated-features*` — 테마형 큐레이션 후보 (T-223c-1 구현)
 
@@ -284,6 +346,11 @@ GET /v1/curated-features
 GET /v1/curated-features/{curated_feature_id}
 GET /v1/curated-features/{curated_feature_id}/pinvi-copy
 ```
+
+공개 목록은 `theme_slug`, 표시 텍스트(`q`, `feature_name`, `display_title`), 행정구역·bbox와
+cursor만 받는다. `theme_id`, `source_id`, `provider`, `dataset_key` 같은 내부 identity
+필터는 `/v1/admin/features/curated`에만 둔다. 응답의 7종 판별 union과 strict nested
+projection은 알 수 없는 kind/필드를 fail-closed 처리한다(T-VN-05R).
 
 write/admin 표면은 `/v1/admin/curated-*`로 둔다. T-223c-1은 DB/API foundation과
 rule apply endpoint까지 제공하며, Dagster 자동 실행과 Admin UI는 T-223c-2/c-3 후속이다.
@@ -317,7 +384,10 @@ membership 수를 구분하므로 같은 장소가 2023~2024·2025~2026 회차�
 collection 상세의 item은 `feature_id`가 nullable이다. 기존 Feature와 안전하게 연결하지
 못한 공식 항목도 `place_name`, `address_hint`, 원천키와 함께 반환한다. 미연결 항목에는
 Feature 좌표·category가 없으며 임의 인접 위치로 대체하지 않는다. Feature별 group과
-Feature 상세에는 연결된 item만 나타난다. public collection summary의 `item_count`는 실제
+Feature 상세에는 연결된 item만 나타난다. 공개 item은 source record identity와 자유형
+`metadata`를 반환하지 않는다. 동일 저장 row를 쓰더라도 admin collection/item DTO는 별도
+타입으로 `source_record_key`와 `metadata`를 보존한다. public DTO가 admin DTO의 base class가
+되거나 그 반대가 되는 상속 구조는 금지한다. public collection summary의 `item_count`는 실제
 반환 가능한 active `included` item 수만 뜻하며 후보·거절 건수와 `public_item_count`는
 노출하지 않는다. admin summary는 전체 active `item_count`와 공개 가능한
 `public_item_count`를 함께 반환한다. 연결 Feature가 hidden/deleted로 바뀐 public
@@ -327,7 +397,11 @@ source record 연결을 제거한 미연결 item으로 투영한다.
 ### 2.5 `/v1/admin/*` — 운영자 (인프라 SSO + kill-switch)
 ```
 GET    /v1/admin/features                              # 목록(page_size+cursor)
+GET    /v1/admin/features/in-bounds                    # raw bbox items/cluster(status 반복 필터)
 GET    /v1/admin/features/{feature_id}                 # 상세
+GET    /v1/admin/features/{feature_id}/revision        # row_revision + raw strong ETag 편집 기준
+GET    /v1/admin/features/{feature_id}/weather         # 비공개 포함 admin weather card
+GET    /v1/admin/features/{feature_id}/price           # 비공개 포함 admin price card
 POST   /v1/admin/features                              # ✅#317 단건 생성(K-15)
 PATCH  /v1/admin/features/{feature_id}                 # ✅#317 수정
 DELETE /v1/admin/features/{feature_id}                 # ✅#317 soft delete
@@ -360,6 +434,26 @@ DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id} # item soft 
 GET    /v1/admin/curations/import-template.csv          # UTF-8 BOM CSV 양식 다운로드
 POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 authoritative replace
 ```
+
+PATCH/DELETE correction UI는 `GET .../{feature_id}/revision`의 body `row_revision`과 응답 header
+`ETag`를 먼저 읽고, 이어서 `GET .../{feature_id}` detail의 `feature.row_revision`과 같을 때만
+불변 `CorrectionBasis`를 확정한다. 둘이 다르면 경쟁 갱신이므로 제한 횟수만 다시 읽고 실패 시
+쓰기 조작을 닫는다. `ETag`는 따옴표를 포함한 raw header 문자열을 그대로 보존해 `If-Match`로
+전달하며 mutation 직전에 revision을 재조회하거나 최신값으로 자동 rebasing하지 않는다.
+
+stale basis의 PATCH/DELETE는 `412 Precondition Failed`다. consumer는 draft를 보존하고 자동
+재시도하지 않으며, 운영자의 명시적 reload가 성공한 경우에만 최신 detail과 새 basis로 교체한다.
+이 규칙은 기존 REST/OpenAPI request·response schema와 DB schema를 변경하지 않는다.
+- **admin 공간·카드 read**: admin 지도는 공개 `/v1/features*`를 재사용하지 않는다.
+  `/v1/admin/features/in-bounds`는 `feature.features` base row에서 삭제 전 운영 상태를
+  직접 조회하며, `status` 미지정 시 `draft|active|inactive|hidden|broken` 전체를 대상으로 한다.
+  반복 `status`를 지정하면 item과 cluster에 동일하게 적용한다. 응답의 `items`와 `clusters`는
+  양 mode에서 모두 필수 배열이며 사용하지 않는 쪽을 `[]`로 반환한다. bbox 후보는 point의 `coord`와
+  route/area의 exact geometry 교차를 함께 사용하고, cluster 귀속은 저장 canonical 행정코드로
+  feature당 한 번만 계산한다. `/weather`와 `/price` admin subresource도 삭제 전 base Feature
+  존재 여부를 검사하므로 비공개 Feature를 404로 오분류하지 않되, `deleted_at`·
+  `user_deleted_at`·`status=deleted` target은 fail-closed 404로 처리한다. public endpoint와
+  `feature.public_features`의 공개 술어는 변경하지 않는다(T-VN-04A, #741).
 - **Feature update 감사 actor**: create와 run-now body는 `operator`/`actor` override를
   받지 않으며 포함하면 422다. 저장 `operator`는 인증된 admin proxy의
   `AdminProxyContext.actor`에서만 파생한다. 실행 계획 필드 외에 create body만 `reason`을
@@ -435,6 +529,14 @@ Dagster 실행·스케줄 조작, import job/event, 갱신 요청, provider 상�
 canonical 그룹만 사용한다. C6B clean-cut 이후 `/ops/dagster*`, `/ops/import-jobs*`,
 `/ops/import-job-events`, `/ops/providers*`, `/admin/features/update-requests*`,
 `/admin/provider-refresh-policies*`는 존재하지 않는다.
+
+`GET /v1/ops/{metrics,health-deep,system-logs,api-call-logs,consistency/*}`는
+canonical 조작 표면과 동일하게 trusted admin BFF 또는 read token과 `ops:read` scope의
+AND 결합만 허용한다. service token, cancel token, headerless 요청은 권한을 얻지 못한다.
+OpenAPI full profile은 각 GET에 `AdminBFF OR (OpsToken AND OpsScope)`를 선언하고 user
+profile에서는 ops 전체를 제외한다. PinVi 관측 consumer는 issue #392에서 같은 read
+principal을 선전환하며, Map/PinVi exact heads는 C6c manifest v4의 동일 source pair로만
+활성화한다.
 
 `POST /v1/ops/pipeline/requests`의 응답에는 서로 다른 두 멱등성 결과를 항상 함께 둔다.
 `idempotent_replay`는 동일 `Idempotency-Key` 요청 재생 여부이고,
@@ -642,6 +744,16 @@ GET /v1/debug/mois-license/{license_id}
 ✅ /debug/health · /debug/version 제거됨(T-214h, clean cut). 상태확인은 /health·/version·
    /v1/ops/health-deep로 수렴. dataset preview는 `/v1/ops/datasets/preview` fixture-only다.
 ```
+MOIS route는 원본 provider payload를 포함하므로 `local-dev`에서
+`debug_routes_enabled=true`일 때만 mount하고, mount 뒤에도 trusted admin BFF를 요구한다.
+production은 `debug_routes_enabled=false`를 기동 조건으로 강제해 route 자체가 없으며,
+debug token·legacy header·경로 alias는 제공하지 않는다.
+
+`GET /v1/curated-features*`, `/v1/curated-sources`, `/v1/curated-themes`를 포함한 모든
+public-keyed operation은 같은 `require_public_api_key` 경계다. production keyless 요청은
+401이고 public key 또는 service principal만 public OpenAPI 계약에 선언한다. trusted admin
+BFF의 내부 우회는 기존 same-origin UI 동작을 위한 runtime 경계이며 user OpenAPI principal로
+노출하지 않는다.
 - **action sub-resource 규약(ADR-048 #8)**: 부수효과 상태전이는 `POST {col}/{id}/{verb}`
   (`deactivate`/`cancel`/`run-now`/`approve`/`reject`/`load`/`validate`/`swap`), 순수 수정은
   `PATCH {id}`, 생성 `POST {col}`, 조회 `GET`. 신규 action도 같은 형태로 확장.
@@ -689,7 +801,9 @@ GET /v1/debug/mois-license/{license_id}
 ---
 
 ## 4. 표준 에러 코드
-`FEATURE_NOT_FOUND`(404) · `INVALID_BBOX`(422) · `TOO_MANY_IDS`(422) · `VALIDATION_ERROR`(422)
+`FEATURE_NOT_FOUND`(404) · `INVALID_BBOX`(422) · `TOO_MANY_IDS`(422) · `VALIDATION_ERROR`(422) ·
+`FEATURE_SEARCH_CURSOR_INVALID`(422) · `FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED`(422) ·
+`FEATURE_SEARCH_CURSOR_TAMPERED`(422) · `CURSOR_QUERY_MISMATCH`(422)
 · `RATE_LIMITED`(429) · `LOCK_BUSY`(409,`Retry-After:15`) · `DESTRUCTIVE_DISABLED`(403) ·
 `UNAUTHORIZED`(401) · `UPSTREAM_UNAVAILABLE`(503) ·
 `PIPELINE_EXECUTION_NOT_FOUND`(404) · `PIPELINE_CANCELLATION_IN_PROGRESS`(409) ·

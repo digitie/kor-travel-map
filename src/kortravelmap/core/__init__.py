@@ -40,6 +40,11 @@ from kortravelmap.core.address import (
 from kortravelmap.core.exceptions import (
     DuplicateFeatureError,
     FeatureNotFoundError,
+    FeatureSearchCursorError,
+    FeatureSearchCursorInvalidError,
+    FeatureSearchCursorQueryMismatchError,
+    FeatureSearchCursorTamperedError,
+    FeatureSearchCursorVersionUnsupportedError,
     FileStoreError,
     ImportJobConflictError,
     KorTravelMapError,
@@ -120,6 +125,11 @@ __all__ = [
     "ImportJobConflictError",
     "ProviderError",
     "FileStoreError",
+    "FeatureSearchCursorError",
+    "FeatureSearchCursorInvalidError",
+    "FeatureSearchCursorVersionUnsupportedError",
+    "FeatureSearchCursorTamperedError",
+    "FeatureSearchCursorQueryMismatchError",
     # ids (PR#20 ADR-009 / PR#26 source key + payload hash / PR#38 weather /
     # PR#42 price)
     "make_feature_id",

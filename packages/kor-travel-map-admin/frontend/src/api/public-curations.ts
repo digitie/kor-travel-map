@@ -41,7 +41,6 @@ export interface PublicCurationItem {
   lon: number | null;
   lat: number | null;
   address: Record<string, unknown>;
-  source_record_key: string | null;
   external_item_id: string;
   place_name: string;
   address_hint: string | null;
@@ -51,7 +50,6 @@ export interface PublicCurationItem {
   item_summary: string | null;
   curation_relation: CurationRelation;
   reuse_policy: CurationReusePolicy;
-  metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
@@ -80,7 +78,6 @@ export interface PublicCurationCollection {
   description: string | null;
   status: CurationCollectionStatus;
   visibility: CurationCollectionVisibility;
-  metadata: Record<string, unknown>;
   item_count: number;
   created_at: string;
   updated_at: string;

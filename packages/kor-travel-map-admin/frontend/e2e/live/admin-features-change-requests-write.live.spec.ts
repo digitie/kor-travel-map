@@ -9,11 +9,14 @@ type AdminFeatureDeactivateResponse =
   components["schemas"]["AdminFeatureDeactivateResponse"];
 type AdminFeatureDetailResponse =
   components["schemas"]["AdminFeatureDetailResponse"];
+type AdminFeatureRevisionResponse =
+  components["schemas"]["AdminFeatureRevisionResponse"];
 type FeatureDetailEnvelopeResponse =
   components["schemas"]["FeatureDetailEnvelopeResponse"];
 
 type BrowserFetchResult<T> = {
   body: T | null;
+  entityTag: string | null;
   status: number;
   text: string;
 };
@@ -86,6 +89,10 @@ function adminFeaturePath(featureId: string): string {
   return `/v1/admin/features/${encodeURIComponent(featureId)}`;
 }
 
+function adminFeatureRevisionPath(featureId: string): string {
+  return `${adminFeaturePath(featureId)}/revision`;
+}
+
 function publicFeaturePath(featureId: string): string {
   return `/v1/features/${encodeURIComponent(featureId)}`;
 }
@@ -120,17 +127,29 @@ async function readChangeResponse(
   return (await response.json()) as AdminFeatureChangeResponse;
 }
 
+function requireRawEntityTag(response: Response, label: string): string {
+  expect(response.status(), `${label} revision HTTP status`).toBe(200);
+  const entityTag = response.headers()["etag"] ?? null;
+  expect(entityTag, `${label} revision ETag`).not.toBeNull();
+  return entityTag as string;
+}
+
 async function browserFetch<T>(
   page: Page,
   path: string,
-  options: { body?: unknown; method?: "GET" | "POST" | "PATCH" | "DELETE" } = {},
+  options: {
+    body?: unknown;
+    headers?: Record<string, string>;
+    method?: "GET" | "POST" | "PATCH" | "DELETE";
+  } = {},
 ): Promise<BrowserFetchResult<T>> {
   return page.evaluate(
-    async ({ body, method, path }) => {
+    async ({ body, headers, method, path }) => {
       const response = await fetch(`/api/proxy${path}`, {
         method,
         headers: {
           Accept: "application/json",
+          ...headers,
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         credentials: "same-origin",
@@ -144,10 +163,16 @@ async function browserFetch<T>(
       } catch {
         parsed = null;
       }
-      return { body: parsed as T | null, status: response.status, text };
+      return {
+        body: parsed as T | null,
+        entityTag: response.headers.get("ETag"),
+        status: response.status,
+        text,
+      };
     },
     {
       body: options.body,
+      headers: options.headers,
       method: options.method ?? "GET",
       path,
     },
@@ -535,14 +560,30 @@ async function cleanupFeatureByApi(
     return;
   }
 
+  const revision = await browserFetch<AdminFeatureRevisionResponse>(
+    page,
+    adminFeatureRevisionPath(featureId),
+  );
+  if (revision.status !== 200 || revision.entityTag === null) {
+    throw new Error(
+      `cleanup revision 조회 실패: HTTP ${revision.status} ${revision.text}`,
+    );
+  }
+
   const deleteResponse = await browserFetch<AdminFeatureChangeResponse>(
     page,
     adminFeaturePath(featureId),
     {
       body: { operator: "local-admin", reason: `${BASE_REASON} cleanup delete` },
+      headers: { "If-Match": revision.entityTag },
       method: "DELETE",
     },
   );
+  if (deleteResponse.status !== 200 || !deleteResponse.body?.data.request) {
+    throw new Error(
+      `cleanup DELETE 실패: HTTP ${deleteResponse.status} ${deleteResponse.text}`,
+    );
+  }
   const request = deleteResponse.body?.data.request;
   if (deleteResponse.status === 200 && request?.status === "pending") {
     await approveChangeRequestByApi(page, request.request_id);
@@ -885,7 +926,17 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await test.step("update change request를 생성하고 승인 후 서비스 상세가 갱신된다", async () => {
         await gotoChangeRequests(page);
         await page.getByLabel("change action", { exact: true }).selectOption("update");
+        const basisResponsePromise = waitForApiResponse(
+          page,
+          "GET",
+          decodeURIComponent(adminFeatureRevisionPath(FEATURE_ID)),
+        );
         await page.getByLabel("change feature id").fill(FEATURE_ID);
+        const baselineEntityTag = requireRawEntityTag(
+          await basisResponsePromise,
+          "update basis",
+        );
+        await expect(page.getByText("데이터 로드됨")).toBeVisible(T);
         await page.getByLabel("change reason").fill(`${BASE_REASON} update`);
         await page.getByLabel("change name").fill(UPDATED_NAME);
         await page.getByLabel("change category").selectOption("01070400");
@@ -905,7 +956,11 @@ test.describe("/admin/features + feature change requests live write workflow", (
           decodeURIComponent(adminFeaturePath(FEATURE_ID)),
         );
         await page.getByRole("button", { name: "요청 생성" }).click();
-        const updateResponse = await readChangeResponse(await responsePromise);
+        const updateApiResponse = await responsePromise;
+        expect(updateApiResponse.request().headers()["if-match"]).toBe(
+          baselineEntityTag,
+        );
+        const updateResponse = await readChangeResponse(updateApiResponse);
         updateRequestId = updateResponse.data.request.request_id;
         expect(updateResponse.data.request).toMatchObject({
           action: "update",
@@ -1045,7 +1100,17 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await test.step("delete change request를 생성, 승인하고 public 상세에서 제거를 확인한다", async () => {
         await gotoChangeRequests(page);
         await page.getByLabel("change action", { exact: true }).selectOption("delete");
+        const basisResponsePromise = waitForApiResponse(
+          page,
+          "GET",
+          decodeURIComponent(adminFeatureRevisionPath(FEATURE_ID)),
+        );
         await page.getByLabel("change feature id").fill(FEATURE_ID);
+        const baselineEntityTag = requireRawEntityTag(
+          await basisResponsePromise,
+          "delete basis",
+        );
+        await expect(page.getByText("데이터 로드됨")).toBeVisible(T);
         await page.getByLabel("change reason").fill(`${BASE_REASON} delete`);
 
         const responsePromise = waitForApiResponse(
@@ -1054,7 +1119,11 @@ test.describe("/admin/features + feature change requests live write workflow", (
           decodeURIComponent(adminFeaturePath(FEATURE_ID)),
         );
         await page.getByRole("button", { name: "요청 생성" }).click();
-        const deleteResponse = await readChangeResponse(await responsePromise);
+        const deleteApiResponse = await responsePromise;
+        expect(deleteApiResponse.request().headers()["if-match"]).toBe(
+          baselineEntityTag,
+        );
+        const deleteResponse = await readChangeResponse(deleteApiResponse);
         deleteRequestId = deleteResponse.data.request.request_id;
         expect(deleteResponse.data.request).toMatchObject({
           action: "delete",

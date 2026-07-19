@@ -473,7 +473,6 @@ export function EnrichmentReviewClient() {
         decision: value,
         decision_reason: `admin-ui ${value}`,
         selected_detail_source: detailSource ?? undefined,
-        reviewed_by: "local-admin",
       },
     });
   };

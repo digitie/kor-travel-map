@@ -48,6 +48,15 @@ T-VN-31 이후 shadow migration으로 전환한다.
 kind/geometry/category/상태/시간 범위처럼 query와 무결성에 필요한 값은 typed column과 FK/CHECK로
 표현한다. 보관 기간은 기존 정책을 유지하지만 보관 여부를 공개 상태로 대신 표현하지 않는다.
 
+### 0.2 feature search cursor는 stateless REST 상태
+
+`/v1/features/search`의 query fingerprint, keyset, version, HMAC은 요청과 응답 사이의 짧은 REST
+전송 상태이며 PostgreSQL 도메인 상태가 아니다. cursor table, session row, 만료 row, sequence를
+추가하지 않는다. 검색 SQL은 cursor에서 검증된 keyset만 bind하고, `include_total=false`에서는
+COUNT SQL을 실행하지 않는다. 서버 재시작을 넘어 cursor를 유지해야 하는 production은 별도
+server-only signing secret을 배포해 stateless 검증하며, key rotation 때 진행 중 cursor가
+무효화되는 clean cut을 허용한다.
+
 ## 1. `feature.features` (기준 테이블)
 
 ```sql
@@ -2401,8 +2410,11 @@ make_price_value_key(*, feature_id: str, provider: str, price_domain: str,
 - 모든 schema 변경은 Alembic migration + ADR 동반.
 - 마이그레이션은 호환성보다 데이터 보존과 검증 가능한 cutover를 우선한다. 작은 additive 제약은
   `NOT VALID`→backfill→`VALIDATE`, 대형 변경은 shadow/backfill/write-fence/swap으로 수행한다.
-- 인덱스 추가는 `CREATE INDEX CONCURRENTLY`로 하되 lock acquisition·INVALID 잔여·writer 동시
-  cutover를 ADR-075 절차로 검증한다.
+- 일반 online 인덱스 추가는 `CREATE INDEX CONCURRENTLY`로 하되 lock acquisition·INVALID
+  잔여를 검증한다. dedup 뒤 semantic UNIQUE가 필요한 0060은 writer race를 허용하지 않도록
+  `SHARE ROW EXCLUSIVE`→dedup→non-concurrent UNIQUE를 한 transaction으로 수행한다. 삭제된
+  loser를 DDL로 복원할 수 없으므로 0060 downgrade는 거부하고 backup/PITR+구 writer image를
+  하나의 복구 단위로 사용한다.
 - 인덱스 삭제는 `DROP INDEX CONCURRENTLY IF EXISTS`.
 - 컬럼 타입 변경은 `USING` cast + downtime 또는 새 컬럼 + 백필 + swap.
 

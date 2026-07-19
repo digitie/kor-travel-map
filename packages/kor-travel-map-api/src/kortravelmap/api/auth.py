@@ -7,8 +7,8 @@ ADR-045 D-1 defense-in-depth (ADR-005 amendment): 운영 인증의 **1차 책임
 - ``require_service_token`` — ``settings.service_token`` 설정 시 외부 surface에서
   ``X-Kor-Travel-Map-Service-Token`` 헤더를 **상수시간** 비교로 검증. 미설정이면 통과
   (intranet/dev 하위호환).
-- ``require_ops_operator`` — canonical datasets/pipeline에 trusted frontend BFF,
-  read-only principal 또는 exact import-job cancel principal만 허용.
+- ``require_ops_operator`` — canonical datasets/pipeline과 ops 관측 read에 trusted
+  frontend BFF, read-only principal 또는 exact import-job cancel principal만 허용.
 - ``require_admin_destructive_enabled`` — 파괴적 ``/admin`` 작업 kill-switch.
 
 ``APIKeyHeader``를 ``Security``로 의존하므로 OpenAPI ``securitySchemes``에 자동
@@ -43,6 +43,7 @@ from kortravelmap.api.response import ProblemDetail
 __all__ = [
     "ADMIN_ACTOR_HEADER",
     "ADMIN_PROXY_SECRET_HEADER",
+    "METRICS_AUTHORIZATION_SCHEME",
     "OPS_ACTOR",
     "OPS_SCOPE_HEADER",
     "OPS_TOKEN_HEADER",
@@ -51,6 +52,7 @@ __all__ = [
     "AdminProxyContext",
     "OpsOperatorContext",
     "require_admin_frontend",
+    "require_metrics_token",
     "require_ops_operator",
     "require_service_token",
     "require_public_api_key",
@@ -61,6 +63,7 @@ __all__ = [
 
 ADMIN_ACTOR_HEADER = "X-Kor-Travel-Map-Actor"
 ADMIN_PROXY_SECRET_HEADER = "X-Kor-Travel-Map-Admin-Proxy-Secret"
+METRICS_AUTHORIZATION_SCHEME = "Bearer"
 OPS_ACTOR = "service:pinvi"
 OPS_SCOPE_HEADER = "X-Kor-Travel-Map-Ops-Scope"
 OPS_TOKEN_HEADER = "X-Kor-Travel-Map-Ops-Token"
@@ -113,7 +116,7 @@ _ops_token_scheme = APIKeyHeader(
     scheme_name="OpsToken",
     auto_error=False,
     description=(
-        "canonical ops server-to-server read/cancel token. scope 문자열만으로는 "
+        "ops server-to-server read/cancel token. scope 문자열만으로는 "
         "권한을 얻지 못하며, token 종류와 method/exact path도 일치해야 한다."
     ),
 )
@@ -128,7 +131,7 @@ class AdminProxyContext:
 
 @dataclass(frozen=True, slots=True)
 class OpsOperatorContext:
-    """canonical ops route가 신뢰한 audit actor 컨텍스트."""
+    """ops route가 신뢰한 audit actor 컨텍스트."""
 
     actor: str
 
@@ -173,10 +176,14 @@ def resolve_admin_proxy_context(
 
     ``admin_proxy_secret``이 설정되지 않은 개발/테스트 환경에서는 기존 localhost
     직접 호출을 유지한다. 운영/로컬 실사용은 gitignored ``.env``에 secret을 넣어
-    Next.js 프론트 프록시만 FastAPI admin API를 호출하게 한다.
+    Next.js 프론트 프록시만 FastAPI admin API를 호출하게 한다. ADR-066(T-VN-01):
+    이 local-dev fallback은 non-production profile 전용이다 — production은 settings
+    검증이 secret을 필수화하므로 secret 없는 production 상태는 방어적으로 거부한다.
     """
 
     if settings.admin_proxy_secret is None:
+        if settings.is_production:
+            return None
         return AdminProxyContext(actor="local-dev")
     if not _peer_is_trusted(request, settings):
         return None
@@ -199,6 +206,17 @@ def require_admin_frontend(
 
     settings = _settings(request)
     if settings.admin_proxy_secret is None:
+        # ADR-066(T-VN-01): secret 없는 local-dev pass-through는 non-production
+        # 전용. production settings는 기동 시점에 secret을 필수화하므로 이 분기는
+        # 검증 우회로 만든 비정상 상태에서만 도달한다 — fail-closed로 닫는다.
+        if settings.is_production:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "production profile에서는 admin proxy secret 없이 admin API를 "
+                    "사용할 수 없습니다."
+                ),
+            )
         return AdminProxyContext(actor="local-dev")
     if not _peer_is_trusted(request, settings):
         raise HTTPException(
@@ -261,7 +279,7 @@ def require_ops_operator(
         ),
     ] = None,
 ) -> OpsOperatorContext:
-    """canonical ops의 BFF 또는 read/exact-cancel principal을 검증한다."""
+    """ops route의 BFF 또는 read/exact-cancel principal을 검증한다."""
 
     settings = _settings(request)
     # admin secret이 없는 개발 환경은 ops principal도 완전히 꺼졌을 때만
@@ -417,6 +435,51 @@ def _vworld_default_key_hashes(settings: ApiSettings) -> frozenset[str]:
     if not key:
         return frozenset()
     return frozenset({hash_public_api_key(key)})
+
+
+def require_metrics_token(request: Request) -> None:
+    """``metrics_token`` 설정 시 Prometheus scrape identity를 검증한다.
+
+    ADR-066 결정 4(T-VN-02) — ``/metrics``는 scrape identity/management 경계로
+    제한한다. Prometheus scrape config가 네이티브로 지원하는
+    ``Authorization: Bearer <token>``을 상수시간 비교로 검증한다. 미설정(None)
+    이면 non-production 하위호환으로 열어 두며(로컬 scrape 유지), production
+    profile은 settings 검증이 metrics endpoint 활성 시 token을 필수화하므로
+    token 없는 production 상태는 방어적으로 403으로 닫는다.
+    """
+
+    settings = _settings(request)
+    expected = settings.metrics_token
+    if expected is None:
+        if settings.is_production:
+            # T-VN-01 admin gate와 같은 방어 분기 — production settings는 기동
+            # 시점에 token을 필수화하므로 검증 우회 상태에서만 도달한다.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "production profile에서는 metrics token 없이 /metrics를 "
+                    "사용할 수 없습니다."
+                ),
+            )
+        return
+    provided = request.headers.get("Authorization") or ""
+    scheme, _, credential = provided.partition(" ")
+    # RFC7235 — auth-scheme은 대소문자 무관. Starlette은 헤더를 latin-1로
+    # 디코드하므로 비-ASCII Authorization 값을 그대로 ``hmac.compare_digest(str,
+    # str)``에 넣으면 TypeError(→500)가 난다. UTF-8 bytes로 비교해 잘못된 헤더가
+    # 500이 아니라 401로 fail-closed되게 한다(latin-1 디코드는 code point 0~255만
+    # 내므로 UTF-8 인코딩은 항상 성공한다).
+    scheme_matches = scheme.lower() == METRICS_AUTHORIZATION_SCHEME.lower()
+    credential_bytes = credential.strip().encode("utf-8")
+    expected_bytes = expected.get_secret_value().encode("utf-8")
+    if not scheme_matches or not hmac.compare_digest(credential_bytes, expected_bytes):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                f"유효한 Authorization: {METRICS_AUTHORIZATION_SCHEME} metrics "
+                "token이 필요합니다."
+            ),
+        )
 
 
 def require_admin_destructive_enabled(request: Request) -> None:

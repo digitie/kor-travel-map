@@ -3,6 +3,18 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## vNext main 동기화 (2026-07-20, `T-VN-SYNC-01`)
+
+- [x] **T-VN-SYNC-01 — latest main을 integration/t-vn에 동기화.**
+  `main@d2104f15`를 `integration/t-vn@22bf35a5` 위 전용 branch에서 merge하고, 양쪽 문서 이력,
+  API image OCI revision label과 production profile, 완료/미완 task 정본을 함께 보존했다.
+- [x] **migration과 CI 계약 확인.** Alembic `0058 → 0059 → 0060 → 0061 → 0062` 단일 chain을
+  유지했고 lint, OpenAPI drift, Python 3.11/3.12/3.13, fixture replay, PostGIS integration,
+  frontend type-check/build의 CI 8개를 모두 통과했다.
+- [x] **PR #781 병합 완료.** PR head `aa976f13ae747d75fe67318d9c41fb2bddfddb04`를 merge commit
+  `a45bc3ac401e5675811f1031a4592991498d899f`로 `integration/t-vn`에 반영했다. 이후 최종
+  integration→main 합류는 열린 `T-VN-SYNC-02`가 담당한다.
+
 ## C7 prod runner attestation·복구 경계 (2026-07-19, `T-ADM-C7H`)
 
 - [x] **T-ADM-C7H — 파괴적 live 실행 전 runtime을 exact attestation에 결박.** C6c compatible-pair,
@@ -35,6 +47,37 @@
 - [x] **PR #755 병합 완료.** 단일 적대적 리뷰의 query-scope 지적을 exact validator와 cursor 관측
   검증으로 반영한 뒤 targeted mocked E2E 3건을 통과했다. 문구·fixture 설명 후속까지 포함한
   PR #755는 CI 8개 게이트가 모두 통과한 뒤 merge commit `54150c91`로 `main`에 반영됐다.
+
+## vNext 재설계 Wave 0~1 (2026-07-19, `T-VN-*`, integration/t-vn)
+
+> C7 종결 전까지 `integration/t-vn` 통합 브랜치에 누적. 각 task는 적대 리뷰(실전 결함 반영)
+> + GitHub CI + n150 CI-parity 게이트를 거쳐 병합. 세부는 각 PR diff와 journal.
+
+- [x] **T-VN-01 production fail-closed** (#740) — production profile secret 누락 시 기동 거부.
+- [x] **T-VN-02 route policy matrix + 미분류 CI gate + /metrics 경계** (#747, +#742 수렴).
+- [x] **T-VN-04 공개 predicate 단일화** (#743) — `feature.public_features` view, F-1 양방향 봉인.
+- [x] **T-VN-05 raw payload 경계 제거** (#752) — 공개 DTO raw/lineage를 operator 표면으로.
+- [x] **T-VN-06 notice 방어적 cast** (#746) — 오염 timestamp의 공개 read 500 차단.
+- [x] **T-VN-07 no-op 옵션 삭제 + actor principal 1차** (#748).
+- [x] **T-VN-13 Feature row_revision + If-Match/ETag** (#772, 리뷰 후속 #776) — 낙관적 동시성(428/412/304).
+- [x] **T-VN-14 지도 completeness + exact ST_Intersects** (#763) — mode/truncated/coverage.
+- [x] **T-VN-17 weather 무결성 제약** (#756) — semantic UNIQUE와 writer cutover 기반 도입.
+- [x] **T-VN-18 중복 GiST 제거 + BRIN 감사** (#759) — write 1.2~1.3x 개선 실측.
+- [x] **T-VN-19 Alembic metadata 정합 CI** (#753) — 빈 DB upgrade→check 게이트.
+- [x] **T-VN-20 principal actor 전면 전환** (#757) — body actor 위조 경로 제거.
+- [x] **T-VN-21 3단 성능 gate** (#760) — planner-default EXPLAIN·N+1·shape 회귀.
+- codex 후속 병합: #745(curation), #749(metrics), #750(beach doc), #751(manual-link, main).
+
+## vNext 적대 리뷰 후속 (2026-07-19, `T-VN-*R`, integration/t-vn)
+
+- [x] **T-VN-05R public curated raw lineage 우회 차단** (#774, issue #765) — 공개 전용
+  allowlist DTO/projection과 strict kind별 detail로 admin raw 계약과 공개 계약을 분리했다.
+- [x] **T-VN-14R cluster/items exact 후보집합 단일화** (#773, issue #768) — PR #763 후속으로
+  교차 geometry의 cluster count/items universe와 canonical 행정코드 귀속을 일치시켰다.
+- [x] **T-VN-17R weather UNIQUE writer race 봉인** (#771, issue #766) — migration 0060을
+  transactional non-concurrent UNIQUE cutover로 정정해 dedup과 writer fence를 원자화했다.
+- [x] **T-VN-21R release benchmark 측정 정확성** (#775, issue #767) — 실제 public batch
+  cardinality, matched/returned 구분과 top-level shared read 단일 합산을 고정했다.
 
 ## POI target causal receipt·조건부 삭제 (2026-07-18, `T-ADM-C7C`)
 

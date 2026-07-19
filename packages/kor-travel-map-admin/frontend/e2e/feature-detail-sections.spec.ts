@@ -9,12 +9,11 @@ import type { components } from "../src/api/types";
  * weather 패널 visible, nearby 1건, weather empty, 404 alert)은 **재계획하지 않고**,
  * 행/셀/컬럼헤더/토글/에러 격리/요청 카운터 같은 **깊이**만 추가한다.
  *
- * 본 페이지는 admin 상세 라우트 `GET /v1/admin/features/{id}` + 공개
- * `GET /v1/features/nearby` + `GET /v1/features/{id}/weather`를 쓴다.
+ * 본 페이지는 admin 상세/weather 라우트 + 공개 `GET /v1/features/nearby`를 쓴다.
  * 모든 mock body는 생성된 OpenAPI 스키마(`components["schemas"][...]`)에 바인딩해
  * 백엔드 DTO 변경 시 컴파일이 깨지도록 한다(admin-ops.spec 패턴).
  *
- * NOTE: Playwright는 Windows 호스트에서만 실행된다. 라이브 실행 검증은 Windows 런 필요.
+ * 라이브 실행 검증은 n150 Linux 환경에서 수행한다.
  */
 
 type AdminFeatureDetailData = components["schemas"]["AdminFeatureDetailData"];
@@ -74,6 +73,7 @@ function makeFeature(
     marker_icon: "marker",
     name: "여의도공원",
     raw_refs: [],
+    row_revision: 3,
     sido_code: "11",
     sigungu_code: "11560",
     status: "active",
@@ -391,6 +391,15 @@ async function mockFeatureDetail(
     const request = route.request();
     const url = new URL(request.url());
     const pathname = apiPath(url);
+    if (request.method() === "GET" && pathname.endsWith("/weather")) {
+      counters.weather += 1;
+      if (options.weatherStatus && options.weatherStatus >= 400) {
+        await fulfillJson(route, { detail: "weather 조회 실패" }, options.weatherStatus);
+        return;
+      }
+      await fulfillJson(route, makeWeatherResponse(options.weather));
+      return;
+    }
     if (request.method() === "GET" && pathname === DETAIL_PATH) {
       counters.detail += 1;
       counters.detailPaths.push(pathname);
@@ -411,15 +420,6 @@ async function mockFeatureDetail(
         return;
       }
       await fulfillJson(route, makeNearbyResponse(nearby));
-      return;
-    }
-    if (request.method() === "GET" && url.pathname.endsWith("/weather")) {
-      counters.weather += 1;
-      if (options.weatherStatus && options.weatherStatus >= 400) {
-        await fulfillJson(route, { detail: "weather 조회 실패" }, options.weatherStatus);
-        return;
-      }
-      await fulfillJson(route, makeWeatherResponse(options.weather));
       return;
     }
     await route.continue();

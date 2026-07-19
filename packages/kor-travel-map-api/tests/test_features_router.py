@@ -17,6 +17,12 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from kortravelmap.core.exceptions import (
+    FeatureSearchCursorInvalidError,
+    FeatureSearchCursorQueryMismatchError,
+    FeatureSearchCursorTamperedError,
+    FeatureSearchCursorVersionUnsupportedError,
+)
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.settings import ApiSettings
@@ -148,7 +154,7 @@ def test_get_feature_404_when_missing(client: TestClient, monkeypatch: pytest.Mo
     async def _none_get_row(_session: Any, _fid: str) -> None:
         return None
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _none_get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _none_get_row)
 
     async def _fake_session() -> AsyncIterator[Any]:
         yield object()
@@ -173,6 +179,7 @@ def test_get_feature_404_when_notice_is_ended_or_non_latest(
         "feature_id": "notice-old",
         "kind": "notice",
         "status": "active",
+        "row_revision": 7,
         "deleted_at": None,
     }
 
@@ -183,7 +190,7 @@ def test_get_feature_404_when_notice_is_ended_or_non_latest(
         assert feature_ids == ["notice-old"]
         return set()
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.feature_repo,
         "public_active_notice_feature_ids",
@@ -515,7 +522,7 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         "lat": 37.52,
         "coord_5179_srid": 5179,
         "address": {"road": "서울"},
-        "detail": {"event_kind": "festival"},
+        "detail": {"event_kind": "festival", "payload": {"raw_source_field": "x"}},
         "urls": {},
         "raw_refs": [],
         "legal_dong_code": None,
@@ -524,6 +531,7 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         "marker_icon": "star",
         "marker_color": "P-11",
         "status": "active",
+        "row_revision": 7,
         "parent_feature_id": None,
         "sibling_group_id": None,
         "created_at": "2026-05-29T00:00:00+09:00",
@@ -541,20 +549,11 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         assert public_only is True
         return {}
 
-    async def _observations(_session: Any, feature_id: str) -> tuple[Any, ...]:
-        assert feature_id == "f1"
-        return ()
-
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.curation_repo,
         "list_curation_items_by_feature_ids",
         _curations,
-    )
-    monkeypatch.setattr(
-        features_mod.observation_repo,
-        "get_current_observations",
-        _observations,
     )
 
     async def _fake_session() -> AsyncIterator[Any]:
@@ -566,16 +565,128 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["kind"] == "event"
+        # T-VN-05: provider raw passthrough(``payload``)는 공개 detail에서 벗겨진다.
         assert body["data"]["detail"] == {"event_kind": "festival"}
+        assert "payload" not in body["data"]["detail"]
         assert body["data"]["updated_at"] == "2026-05-29T00:00:00+09:00"
+        assert body["data"]["row_revision"] == 7
+        assert r.headers["ETag"] == '"7"'
         assert body["data"]["curations"] == []
-        assert body["data"]["observations"] == []
+        # T-VN-05: raw observation lineage는 공개 detail에서 제거됐다.
+        assert "observations" not in body["data"]
         assert "duration_ms" in body["meta"]
         # 공개 응답 schema는 raw/infra/dedup 전용 필드를 노출하지 않는다.
         assert "created_at" not in body["data"]
         assert "coord_5179_srid" not in body["data"]
         assert "parent_feature_id" not in body["data"]
         assert "sibling_group_id" not in body["data"]
+
+        cached = client.get(
+            "/v1/features/f1",
+            headers={"If-None-Match": '"7"'},
+        )
+        assert cached.status_code == 304
+        assert cached.headers["ETag"] == '"7"'
+        assert cached.content == b""
+
+        malformed = client.get(
+            "/v1/features/f1",
+            headers={"If-None-Match": 'W/"7"'},
+        )
+        assert malformed.status_code == 422
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_mois_place_detail_strips_raw_provider_payload(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MOIS 인허가 place의 공개 detail은 provider raw subset(``payload``)을 감춘다.
+
+    T-VN-05(F-3): providers/mois.py PlaceDetail.payload의 mng_no/status_code/
+    detail_status_*/opn_authority_code/title/epsg5174가 공개 표면에 새면 안 된다.
+    typed 공개-안전 필드(place_kind/phones/facility_info/license_date)는 유지한다.
+    """
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    row = {
+        "feature_id": "mois:1",
+        "kind": "place",
+        "name": "관광식당",
+        "category": "07010100",
+        "lon": 127.0,
+        "lat": 37.5,
+        "address": {"road": "서울"},
+        "detail": {
+            "feature_id": "mois:1",
+            "place_kind": "license_place",
+            "phones": ["02-000-0000"],
+            "facility_info": {"seats": 40},
+            "license_date": "2020-01-01",
+            "payload": {
+                "mng_no": "MNG-123",
+                "status_code": "01",
+                "status_name": "영업중",
+                "detail_status_code": "13",
+                "detail_status_name": "영업중",
+                "opn_authority_code": "3210000",
+                "title": "내부 원문 제목",
+                "epsg5174": {"x": 1.0, "y": 2.0},
+            },
+        },
+        "urls": {},
+        "legal_dong_code": None,
+        "sido_code": "11",
+        "sigungu_code": "11110",
+        "marker_icon": "restaurant",
+        "marker_color": "P-07",
+        "status": "active",
+        "row_revision": 3,
+        "updated_at": "2026-05-29T00:00:00+09:00",
+        "deleted_at": None,
+    }
+
+    async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
+        return row
+
+    async def _curations(
+        _session: Any, *, feature_ids: list[str], public_only: bool
+    ) -> dict[str, tuple[Any, ...]]:
+        return {}
+
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
+    monkeypatch.setattr(
+        features_mod.curation_repo,
+        "list_curation_items_by_feature_ids",
+        _curations,
+    )
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get("/v1/features/mois:1")
+        assert r.status_code == 200
+        detail = r.json()["data"]["detail"]
+        # provider raw subset은 통째로 사라진다.
+        assert "payload" not in detail
+        serialized = str(r.json())
+        for raw_key in (
+            "mng_no",
+            "status_code",
+            "detail_status_code",
+            "opn_authority_code",
+            "epsg5174",
+        ):
+            assert raw_key not in serialized
+        # typed 공개-안전 필드는 유지된다.
+        assert detail["place_kind"] == "license_place"
+        assert detail["facility_info"] == {"seats": 40}
+        assert detail["license_date"] == "2020-01-01"
+        assert "observations" not in r.json()["data"]
     finally:
         client.app.dependency_overrides.clear()
 
@@ -629,7 +740,7 @@ def test_get_area_contained_features_maps_rows(
         assert kw["limit"] == 51
         return contained_rows
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.feature_repo,
         "features_contained_in_area",
@@ -663,7 +774,7 @@ def test_get_area_contained_features_rejects_non_area(
     async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
         return {"feature_id": "place1", "kind": "place", "deleted_at": None}
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_row", _get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
 
     async def _fake_session() -> AsyncIterator[Any]:
         yield object()
@@ -693,7 +804,7 @@ def test_features_batch_returns_items_and_missing(
         "lat": 37.52,
         "coord_5179_srid": 5179,
         "address": {"road": "서울"},
-        "detail": {"event_kind": "festival"},
+        "detail": {"event_kind": "festival", "payload": {"raw_source_field": "x"}},
         "urls": {},
         "raw_refs": [],
         "legal_dong_code": None,
@@ -702,6 +813,7 @@ def test_features_batch_returns_items_and_missing(
         "marker_icon": "star",
         "marker_color": "P-11",
         "status": "active",
+        "row_revision": 9,
         "parent_feature_id": None,
         "sibling_group_id": None,
         "created_at": "2026-05-29T00:00:00+09:00",
@@ -720,20 +832,11 @@ def test_features_batch_returns_items_and_missing(
         assert public_only is True
         return {}
 
-    async def _observations(_session: Any, feature_ids: list[str]) -> dict[str, tuple[Any, ...]]:
-        assert feature_ids == ["f1", "missing"]
-        return {}
-
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_rows_by_ids", _get_rows)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_rows_by_ids", _get_rows)
     monkeypatch.setattr(
         features_mod.curation_repo,
         "list_curation_items_by_feature_ids",
         _curations,
-    )
-    monkeypatch.setattr(
-        features_mod.observation_repo,
-        "get_current_observations_by_feature_ids",
-        _observations,
     )
 
     async def _fake_session() -> AsyncIterator[Any]:
@@ -747,12 +850,16 @@ def test_features_batch_returns_items_and_missing(
         )
         assert r.status_code == 200
         body = r.json()
-        assert body["data"]["found"]["f1"]["name"] == "축제"
-        assert "coord_5179_srid" not in body["data"]["found"]["f1"]
-        assert "parent_feature_id" not in body["data"]["found"]["f1"]
-        assert "sibling_group_id" not in body["data"]["found"]["f1"]
-        assert body["data"]["found"]["f1"]["curations"] == []
-        assert body["data"]["found"]["f1"]["observations"] == []
+        found = body["data"]["found"]["f1"]
+        assert found["name"] == "축제"
+        assert found["row_revision"] == 9
+        assert "coord_5179_srid" not in found
+        assert "parent_feature_id" not in found
+        assert "sibling_group_id" not in found
+        assert found["curations"] == []
+        # T-VN-05: service batch는 고정 typed payload — raw lineage/payload 없음.
+        assert "observations" not in found
+        assert "payload" not in found["detail"]
         assert body["data"]["missing"] == ["missing"]
     finally:
         client.app.dependency_overrides.clear()
@@ -783,7 +890,7 @@ def test_features_batch_reports_ended_or_non_latest_notice_as_missing(
     async def _empty(_session: Any, *args: Any, **kwargs: Any) -> dict[str, tuple[Any, ...]]:
         return {}
 
-    monkeypatch.setattr(features_mod.feature_repo, "get_feature_rows_by_ids", _get_rows)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_rows_by_ids", _get_rows)
     monkeypatch.setattr(
         features_mod.feature_repo,
         "public_active_notice_feature_ids",
@@ -792,11 +899,6 @@ def test_features_batch_reports_ended_or_non_latest_notice_as_missing(
     monkeypatch.setattr(
         features_mod.curation_repo,
         "list_curation_items_by_feature_ids",
-        _empty,
-    )
-    monkeypatch.setattr(
-        features_mod.observation_repo,
-        "get_current_observations_by_feature_ids",
         _empty,
     )
 
@@ -826,6 +928,10 @@ def test_search_features_maps_page_and_requires_scope(
 
     async def _search(_session: Any, **_kw: Any) -> FeatureSearchPage:
         assert _kw["q"] == "경복궁"
+        assert _kw["page_size"] == 50
+        assert _kw["include_total"] is True
+        assert isinstance(_kw["cursor_signing_key"], bytes)
+        assert len(_kw["cursor_signing_key"]) >= 32
         return FeatureSearchPage(
             items=(
                 FeatureSearchRow(
@@ -864,6 +970,85 @@ def test_search_features_maps_page_and_requires_scope(
             "next_cursor": None,
             "total": 1,
         }
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_search_features_omits_total_without_count_request(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.infra.feature_repo import FeatureSearchPage
+
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    async def _search(_session: Any, **kwargs: Any) -> FeatureSearchPage:
+        assert kwargs["include_total"] is False
+        return FeatureSearchPage(items=(), total_count=None, next_cursor=None)
+
+    monkeypatch.setattr(features_mod.feature_repo, "search_features", _search)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        response = client.get("/v1/features/search", params={"q": "경복궁"})
+        assert response.status_code == 200
+        assert response.json()["meta"]["page"]["total"] is None
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "expected_code"),
+    [
+        (
+            FeatureSearchCursorInvalidError("invalid"),
+            "FEATURE_SEARCH_CURSOR_INVALID",
+        ),
+        (
+            FeatureSearchCursorVersionUnsupportedError("unsupported"),
+            "FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED",
+        ),
+        (
+            FeatureSearchCursorTamperedError("tampered"),
+            "FEATURE_SEARCH_CURSOR_TAMPERED",
+        ),
+        (
+            FeatureSearchCursorQueryMismatchError("mismatch"),
+            "CURSOR_QUERY_MISMATCH",
+        ),
+    ],
+)
+def test_search_features_maps_typed_cursor_errors(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected_code: str,
+) -> None:
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    async def _search(_session: Any, **_kwargs: Any) -> None:
+        raise error
+
+    monkeypatch.setattr(features_mod.feature_repo, "search_features", _search)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        response = client.get(
+            "/v1/features/search",
+            params={"q": "경복궁", "cursor": "opaque"},
+        )
+        assert response.status_code == 422
+        assert response.headers["content-type"].startswith("application/problem+json")
+        assert response.json()["code"] == expected_code
     finally:
         client.app.dependency_overrides.clear()
 

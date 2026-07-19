@@ -39,9 +39,11 @@ def test_weather_public_routes_in_openapi(client: TestClient) -> None:
     assert "/v1/features/weather/forecast" in spec["paths"]
     assert "/v1/features/{feature_id}/weather/forecast" in spec["paths"]
     assert "/v1/features/weather/alerts" in spec["paths"]
+    assert "/v1/admin/features/weather/alerts" in spec["paths"]
     assert not any(path.startswith("/v1/weather") for path in spec["paths"])
-    assert "WeatherForecastResponse" in spec["components"]["schemas"]
-    assert "WeatherAlertHistoryResponse" in spec["components"]["schemas"]
+    assert "PublicWeatherForecastResponse" in spec["components"]["schemas"]
+    assert "PublicWeatherAlertHistoryResponse" in spec["components"]["schemas"]
+    assert "AdminWeatherAlertHistoryResponse" in spec["components"]["schemas"]
 
 
 @pytest.mark.unit
@@ -101,6 +103,7 @@ def test_weather_forecast_coordinate_response(
         assert data["anchor"]["feature_id"] == "f_w"
         assert data["items"][0]["weather_domain"] == "kma_mid_forecast"
         assert data["items"][0]["value_number"] == 31.5
+        assert "source_record_key" not in data["items"][0]
     finally:
         client.app.dependency_overrides.clear()
 
@@ -151,7 +154,6 @@ def test_weather_alert_history_response(
                 source_record_key="sr_alert",
                 feature_id="f_notice",
                 feature_name="호우주의보",
-                feature_status="active",
                 region_code="11B10101",
                 region_name="서울특별시",
                 phenomenon="호우",
@@ -176,8 +178,25 @@ def test_weather_alert_history_response(
         response = client.get("/v1/features/weather/alerts?region_code=11B10101")
         assert response.status_code == 200
         item = response.json()["data"]["items"][0]
-        assert item["source_record_key"] == "sr_alert"
         assert item["region_code"] == "11B10101"
         assert item["phenomenon"] == "호우"
+        assert {
+            "source_record_key",
+            "payload",
+            "fetched_at",
+            "imported_at",
+            "last_seen_at",
+        }.isdisjoint(item)
+        # T-VN-04: 공개 join으로 상수화된 feature_status는 응답에서 제거됐다.
+        assert "feature_status" not in item
+
+        admin_response = client.get(
+            "/v1/admin/features/weather/alerts?region_code=11B10101"
+        )
+        assert admin_response.status_code == 200
+        admin_item = admin_response.json()["data"]["items"][0]
+        assert admin_item["source_record_key"] == "sr_alert"
+        assert admin_item["payload"] == {"region_code": "11B10101"}
+        assert admin_item["fetched_at"] == issued.isoformat().replace("+00:00", "Z")
     finally:
         client.app.dependency_overrides.clear()

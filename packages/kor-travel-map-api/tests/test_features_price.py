@@ -70,7 +70,12 @@ def test_price_card_response_maps_current_and_history(
         assert kw["history_limit"] == 25
         return card
 
+    async def _public_row(_s: Any, feature_id: str) -> dict[str, Any]:
+        assert feature_id == "f1"
+        return {"feature_id": "f1", "kind": "price", "status": "active"}
+
     monkeypatch.setattr(mod.price_repo, "build_price_card", _card)
+    monkeypatch.setattr(mod.feature_repo, "get_public_feature_row", _public_row)
     _fake_session(client)
     try:
         r = client.get("/v1/features/f1/price?history_limit=25")
@@ -82,5 +87,29 @@ def test_price_card_response_maps_current_and_history(
         assert d["current"][0]["product_key"] == "gasoline"
         assert d["current"][0]["value_number"] == 1820.0
         assert d["history"][0]["source_product_key"] == "B027"
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_price_card_404_when_feature_not_public(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """비공개 parent feature의 price payload는 노출되지 않는다 — ADR-067 단일
+    공개 projection, F-1 (T-VN-04)."""
+    from kortravelmap.api.routers import features as mod
+
+    async def _none(_s: Any, _fid: str) -> None:
+        return None
+
+    async def _card_should_not_run(_s: Any, **_kw: Any) -> Any:
+        raise AssertionError("build_price_card must not run for non-public feature")
+
+    monkeypatch.setattr(mod.feature_repo, "get_public_feature_row", _none)
+    monkeypatch.setattr(mod.price_repo, "build_price_card", _card_should_not_run)
+    _fake_session(client)
+    try:
+        r = client.get("/v1/features/hidden-f/price")
+        assert r.status_code == 404
     finally:
         client.app.dependency_overrides.clear()

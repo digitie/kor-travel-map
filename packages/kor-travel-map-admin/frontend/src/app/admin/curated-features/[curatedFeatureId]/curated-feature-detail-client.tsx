@@ -69,7 +69,7 @@ export function CuratedFeatureDetailClient({
     selectFeature.mutate(
       {
         curatedFeatureId: item.curated_feature_id,
-        body: { actor: "admin-ui", reason: "admin curated selection" },
+        body: { reason: "admin curated selection" },
       },
       {
         onSuccess: () => {
@@ -88,7 +88,7 @@ export function CuratedFeatureDetailClient({
     unselectFeature.mutate(
       {
         curatedFeatureId: item.curated_feature_id,
-        body: { actor: "admin-ui", reason: "admin curated unselect" },
+        body: { reason: "admin curated unselect" },
       },
       {
         onSuccess: () => {
@@ -114,7 +114,7 @@ export function CuratedFeatureDetailClient({
     archiveFeature.mutate(
       {
         curatedFeatureId: item.curated_feature_id,
-        body: { actor: "admin-ui", reason: "admin curated archive" },
+        body: { reason: "admin curated archive" },
       },
       {
         onSuccess: () => {

@@ -12,15 +12,28 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
-import { deleteJson, getJson, patchJson, pathWithQuery, postJson } from "./client";
+import {
+  deleteJson,
+  getJson,
+  getJsonWithResponse,
+  patchJson,
+  pathWithQuery,
+  postJson,
+} from "./client";
 import type { components, paths } from "./types";
 
 type FeatureSchemas = components["schemas"];
 
 export type FeatureSummary = FeatureSchemas["FeatureSummary"];
 export type FeaturesInBboxResponse = FeatureSchemas["FeaturesInBboxResponse"];
+export type FeatureSearchResponse = FeatureSchemas["FeatureSearchResponse"];
+export type FeatureSearchProblem = FeatureSchemas["FeatureSearchProblem"];
+export type FeatureSearchErrorCode = FeatureSearchProblem["code"];
 export type FeatureCluster = FeatureSchemas["ClusterSummary"];
 type FeaturesInBoundsResponse = FeatureSchemas["FeaturesInBoundsResponse"];
+export type AdminFeatureMapItem = FeatureSchemas["AdminFeatureMapItem"];
+type AdminFeaturesInBoundsResponse =
+  FeatureSchemas["AdminFeaturesInBoundsResponse"];
 
 /**
  * tiled fetch가 merged 응답에 덧붙이는 비계약 메타. 생성된 OpenAPI 타입(`Meta`)에는
@@ -407,6 +420,70 @@ export function featureViewportQueryKey(
   ] as const;
 }
 
+// ── 공개 feature 검색 (`GET /v1/features/search`) ─────────────────────────────
+
+type FeatureSearchQuery = NonNullable<
+  paths["/v1/features/search"]["get"]["parameters"]["query"]
+>;
+
+/** BFF가 인증을 소유하므로 browser consumer에서는 public `key`를 받지 않는다. */
+export type FeatureSearchParams = Omit<
+  FeatureSearchQuery,
+  "category" | "key" | "kind"
+> & {
+  category?: string[];
+  kind?: string[];
+};
+
+export function featureSearchPath(params: FeatureSearchParams): string {
+  return pathWithQuery("/v1/features/search", {
+    q: params.q,
+    kind: params.kind,
+    category: params.category,
+    min_lon: params.min_lon,
+    min_lat: params.min_lat,
+    max_lon: params.max_lon,
+    max_lat: params.max_lat,
+    page_size: params.page_size,
+    cursor: params.cursor,
+    // COUNT는 사용자가 명시한 경우에만 켠다. undefined를 보내 서버 기본에
+    // 기대지 않고 UI query/cache 계약에도 false를 고정한다.
+    include_total: params.include_total ?? false,
+  });
+}
+
+export async function fetchFeatureSearch(
+  params: FeatureSearchParams,
+  signal?: AbortSignal,
+): Promise<FeatureSearchResponse> {
+  return getJson<FeatureSearchResponse>(featureSearchPath(params), { signal });
+}
+
+function hasFeatureSearchScope(params: FeatureSearchParams | null): boolean {
+  if (params === null) return false;
+  if (typeof params.q === "string" && params.q.trim().length > 0) return true;
+  return (
+    typeof params.min_lon === "number" &&
+    typeof params.min_lat === "number" &&
+    typeof params.max_lon === "number" &&
+    typeof params.max_lat === "number"
+  );
+}
+
+export function useFeatureSearch(
+  params: FeatureSearchParams | null,
+  options?: { enabled?: boolean },
+) {
+  return useQuery<FeatureSearchResponse, Error>({
+    queryKey: ["feature-search", params] as const,
+    queryFn: ({ signal }) =>
+      fetchFeatureSearch(params as FeatureSearchParams, signal),
+    enabled: (options?.enabled ?? true) && hasFeatureSearchScope(params),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
 // ── 저zoom region 클러스터 (`GET /v1/features/in-bounds`, zoom 유도) ─────────────
 //
 // zoom ≤13에선 개별 feature를 tile로 대량 조회(4코어 박스 포화)하지 않고, 서버가
@@ -421,6 +498,102 @@ export interface FeatureClustersParams {
   kinds?: string[];
   provider?: string[];
   zoom: number;
+}
+
+export const ADMIN_FEATURE_STATUSES = [
+  "draft",
+  "active",
+  "inactive",
+  "hidden",
+  "broken",
+] as const satisfies readonly AdminFeatureMapItem["status"][];
+export type AdminFeatureStatus = AdminFeatureMapItem["status"];
+
+export interface AdminFeaturesInBoundsParams extends FeatureClustersParams {
+  statuses?: AdminFeatureStatus[];
+  includeGeometry?: boolean;
+}
+
+export function adminFeaturesInBoundsPath(
+  params: AdminFeaturesInBoundsParams,
+  options: { clustered: boolean },
+) {
+  return pathWithQuery("/v1/admin/features/in-bounds", {
+    min_lon: params.min_lon,
+    min_lat: params.min_lat,
+    max_lon: params.max_lon,
+    max_lat: params.max_lat,
+    kind: params.kinds,
+    provider: params.provider,
+    status: params.statuses,
+    zoom: options.clustered ? Math.floor(params.zoom) : undefined,
+    max_items: 2000,
+    include_geometry: options.clustered ? undefined : params.includeGeometry,
+  });
+}
+
+async function fetchAdminFeaturesInBounds(
+  params: AdminFeaturesInBoundsParams,
+  options: { clustered: boolean },
+  signal?: AbortSignal,
+): Promise<AdminFeaturesInBoundsResponse> {
+  return getJson<AdminFeaturesInBoundsResponse>(
+    adminFeaturesInBoundsPath(params, options),
+    { signal },
+  );
+}
+
+export function useAdminFeaturesInBbox(
+  params: AdminFeaturesInBoundsParams,
+  options?: { enabled?: boolean },
+) {
+  const key = [
+    "admin-features",
+    "items",
+    params.min_lon.toFixed(4),
+    params.min_lat.toFixed(4),
+    params.max_lon.toFixed(4),
+    params.max_lat.toFixed(4),
+    params.kinds?.join(",") ?? "",
+    params.provider?.join(",") ?? "",
+    params.statuses?.join(",") ?? "",
+    params.includeGeometry ?? false,
+  ] as const;
+  return useQuery<AdminFeaturesInBoundsResponse, Error>({
+    queryKey: key,
+    queryFn: ({ signal }) =>
+      fetchAdminFeaturesInBounds(params, { clustered: false }, signal),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
+export function useAdminFeatureClustersInBbox(
+  params: AdminFeaturesInBoundsParams,
+  options?: { enabled?: boolean },
+) {
+  const zoom = Math.floor(params.zoom);
+  const key = [
+    "admin-features",
+    "clusters",
+    params.min_lon.toFixed(2),
+    params.min_lat.toFixed(2),
+    params.max_lon.toFixed(2),
+    params.max_lat.toFixed(2),
+    zoom,
+    params.kinds?.join(",") ?? "",
+    params.provider?.join(",") ?? "",
+    params.statuses?.join(",") ?? "",
+  ] as const;
+  return useQuery<AdminFeaturesInBoundsResponse, Error>({
+    queryKey: key,
+    queryFn: ({ signal }) =>
+      fetchAdminFeaturesInBounds(params, { clustered: true }, signal),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
 }
 
 async function fetchFeaturesInBounds(
@@ -524,39 +697,39 @@ export function useFeatureDetail(featureId: string | null) {
   });
 }
 
-async function fetchFeatureWeather(
+async function fetchAdminFeatureWeather(
   featureId: string,
   params: { asof?: string | Date | null } = {},
   signal?: AbortSignal,
 ): Promise<FeatureWeatherResponse> {
   return getJson<FeatureWeatherResponse>(
-    pathWithQuery(`/v1/features/${encodeURIComponent(featureId)}/weather`, {
+    pathWithQuery(`/v1/admin/features/${encodeURIComponent(featureId)}/weather`, {
       asof: params.asof,
     }),
     { signal },
   );
 }
 
-export function useFeatureWeather(
+export function useAdminFeatureWeather(
   featureId: string | null,
   params: { asof?: string | Date | null } = {},
 ) {
   return useQuery<FeatureWeatherResponse, Error>({
-    queryKey: ["feature", featureId, "weather", params.asof ?? null] as const,
+    queryKey: ["admin-feature-card", featureId, "weather", params.asof ?? null] as const,
     queryFn: ({ signal }) =>
-      fetchFeatureWeather(featureId as string, params, signal),
+      fetchAdminFeatureWeather(featureId as string, params, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 60_000,
   });
 }
 
-async function fetchFeaturePrice(
+async function fetchAdminFeaturePrice(
   featureId: string,
   params: { asof?: string | Date | null; historyLimit?: number } = {},
   signal?: AbortSignal,
 ): Promise<FeaturePriceResponse> {
   return getJson<FeaturePriceResponse>(
-    pathWithQuery(`/v1/features/${encodeURIComponent(featureId)}/price`, {
+    pathWithQuery(`/v1/admin/features/${encodeURIComponent(featureId)}/price`, {
       asof: params.asof,
       history_limit: params.historyLimit,
     }),
@@ -564,19 +737,20 @@ async function fetchFeaturePrice(
   );
 }
 
-export function useFeaturePrice(
+export function useAdminFeaturePrice(
   featureId: string | null,
   params: { asof?: string | Date | null; historyLimit?: number } = {},
 ) {
   return useQuery<FeaturePriceResponse, Error>({
     queryKey: [
-      "feature",
+      "admin-feature-card",
       featureId,
       "price",
       params.asof ?? null,
       params.historyLimit ?? null,
     ] as const,
-    queryFn: ({ signal }) => fetchFeaturePrice(featureId as string, params, signal),
+    queryFn: ({ signal }) =>
+      fetchAdminFeaturePrice(featureId as string, params, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 60_000,
   });
@@ -691,6 +865,12 @@ export type AdminFeaturesListResponse =
 export type AdminFeatureDetailResponse =
   FeatureSchemas["AdminFeatureDetailResponse"];
 export type AdminFeatureDetailData = FeatureSchemas["AdminFeatureDetailData"];
+export interface CorrectionBasis {
+  detail: AdminFeatureDetailResponse;
+  entityTag: string;
+  featureId: string;
+  rowRevision: number;
+}
 export type AdminFeaturesListParams = Omit<
   AdminFeaturesListQuery,
   "cursor" | "updated_from" | "updated_to"
@@ -750,6 +930,45 @@ function fetchAdminFeatureDetail(
   );
 }
 
+const CORRECTION_BASIS_FETCH_ATTEMPTS = 3;
+
+export async function fetchAdminFeatureCorrectionBasis(
+  featureId: string,
+  signal?: AbortSignal,
+): Promise<CorrectionBasis> {
+  const revisionPath =
+    `/v1/admin/features/${encodeURIComponent(featureId)}/revision`;
+  for (let attempt = 0; attempt < CORRECTION_BASIS_FETCH_ATTEMPTS; attempt += 1) {
+    const { body: revision, response } = await getJsonWithResponse<
+      FeatureSchemas["AdminFeatureRevisionResponse"]
+    >(revisionPath, { signal });
+    const entityTag = response.headers.get("ETag");
+    if (entityTag === null) {
+      throw new Error(`GET ${revisionPath} 응답에 ETag가 없습니다.`);
+    }
+    if (revision.data.feature_id !== featureId) {
+      throw new Error(`GET ${revisionPath} 응답의 feature_id가 다릅니다.`);
+    }
+
+    const detail = await fetchAdminFeatureDetail(featureId, signal);
+    const feature = detail.data.feature;
+    if (
+      feature.feature_id === featureId &&
+      feature.row_revision === revision.data.row_revision
+    ) {
+      return {
+        detail,
+        entityTag,
+        featureId,
+        rowRevision: revision.data.row_revision,
+      };
+    }
+  }
+  throw new Error(
+    `${featureId}의 revision과 상세가 ${CORRECTION_BASIS_FETCH_ATTEMPTS}회 연속 일치하지 않았습니다.`,
+  );
+}
+
 export function useAdminFeatureDetail(featureId: string | null) {
   return useQuery<AdminFeatureDetailResponse, Error>({
     queryKey: ["admin-feature-detail", featureId] as const,
@@ -757,6 +976,21 @@ export function useAdminFeatureDetail(featureId: string | null) {
       fetchAdminFeatureDetail(featureId as string, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 30_000,
+  });
+}
+
+export function useAdminFeatureCorrectionBasis(featureId: string | null) {
+  return useQuery<CorrectionBasis, Error>({
+    queryKey: ["admin-feature-correction-basis", featureId] as const,
+    queryFn: ({ signal }) =>
+      fetchAdminFeatureCorrectionBasis(featureId as string, signal),
+    enabled: featureId !== null && featureId.length > 0,
+    gcTime: 0,
+    retry: false,
+    staleTime: Infinity,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -817,23 +1051,27 @@ function createAdminFeature(
   return postJson<AdminFeatureChangeResponse>("/v1/admin/features", body);
 }
 
-function patchAdminFeature(
+export function patchAdminFeature(
   featureId: string,
+  entityTag: string,
   body: AdminFeaturePatchRequest,
 ): Promise<AdminFeatureChangeResponse> {
   return patchJson<AdminFeatureChangeResponse>(
     `/v1/admin/features/${encodeURIComponent(featureId)}`,
     body,
+    { headers: { "If-Match": entityTag } },
   );
 }
 
-function deleteAdminFeature(
+export function deleteAdminFeature(
   featureId: string,
+  entityTag: string,
   body: AdminFeatureDeleteRequest,
 ): Promise<AdminFeatureChangeResponse> {
   return deleteJson<AdminFeatureChangeResponse>(
     `/v1/admin/features/${encodeURIComponent(featureId)}`,
     body,
+    { headers: { "If-Match": entityTag } },
   );
 }
 
@@ -928,9 +1166,14 @@ export function usePatchAdminFeatureMutation() {
   return useMutation<
     AdminFeatureChangeResponse,
     Error,
-    { featureId: string; body: AdminFeaturePatchRequest }
+    {
+      featureId: string;
+      entityTag: string;
+      body: AdminFeaturePatchRequest;
+    }
   >({
-    mutationFn: ({ featureId, body }) => patchAdminFeature(featureId, body),
+    mutationFn: ({ featureId, entityTag, body }) =>
+      patchAdminFeature(featureId, entityTag, body),
     onSuccess: (data, variables) =>
       invalidateFeatureChangeQueries(
         queryClient,
@@ -944,9 +1187,14 @@ export function useDeleteAdminFeatureMutation() {
   return useMutation<
     AdminFeatureChangeResponse,
     Error,
-    { featureId: string; body: AdminFeatureDeleteRequest }
+    {
+      featureId: string;
+      entityTag: string;
+      body: AdminFeatureDeleteRequest;
+    }
   >({
-    mutationFn: ({ featureId, body }) => deleteAdminFeature(featureId, body),
+    mutationFn: ({ featureId, entityTag, body }) =>
+      deleteAdminFeature(featureId, entityTag, body),
     onSuccess: (data, variables) =>
       invalidateFeatureChangeQueries(
         queryClient,

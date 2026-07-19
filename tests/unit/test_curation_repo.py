@@ -130,8 +130,7 @@ def _item_row(**overrides: Any) -> dict[str, Any]:
         "lon": 126.98,
         "lat": 37.56,
         "address": {"road": "서울"},
-        "linked_feature_status": "active",
-        "linked_feature_deleted_at": None,
+        "linked_feature_is_public": True,
         "source_record_key": "source-record:one",
         "external_item_id": "official:one",
         "place_name": "테스트 장소",
@@ -207,7 +206,7 @@ def _encoded(value: Any) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
-def test_row_projection_and_public_feature_redaction() -> None:
+def test_row_projection() -> None:
     collection = repo._collection(_collection_row(source_id=None, metadata='{"from_json":true}'))
     assert collection.source_id is None
     assert collection.metadata == {"from_json": True}
@@ -215,15 +214,8 @@ def test_row_projection_and_public_feature_redaction() -> None:
     linked = repo._item(_item_row())
     assert linked.feature_id == "feature:one"
     assert linked.lon == 126.98
-    assert repo._public_item(_item_row()) == linked
 
-    hidden = repo._public_item(_item_row(linked_feature_status="hidden"))
-    assert hidden.feature_id is None
-    assert hidden.feature_name is None
-    assert hidden.address == {}
-    assert hidden.source_record_key is None
-
-    unresolved = repo._public_item(
+    unresolved = repo._item(
         _item_row(
             feature_id=None,
             feature_name=None,
@@ -232,7 +224,7 @@ def test_row_projection_and_public_feature_redaction() -> None:
             lon=None,
             lat=None,
             address=None,
-            linked_feature_status=None,
+            linked_feature_is_public=False,
         )
     )
     assert unresolved.feature_id is None
@@ -363,7 +355,7 @@ async def test_get_collection_found_missing_and_public_projection() -> None:
 
     found = _FakeSession(
         _FakeResult(rows=[_collection_row()]),
-        _FakeResult(rows=[_item_row(linked_feature_status="hidden")]),
+        _FakeResult(rows=[]),
     )
     result = await repo.get_curation_collection(
         found,
@@ -373,7 +365,9 @@ async def test_get_collection_found_missing_and_public_projection() -> None:
     )
     assert result is not None
     assert result[0].collection_id == _COLLECTION_ID
-    assert result[1][0].feature_id is None
+    assert result[1] == ()
+    assert found.calls[0][1]["public_only"] is True
+    assert found.calls[1][1]["public_only"] is True
 
 
 async def test_get_item_found_and_missing() -> None:

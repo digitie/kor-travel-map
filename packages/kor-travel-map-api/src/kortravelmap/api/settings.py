@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import secrets
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -9,6 +11,93 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = ["ApiSettings"]
+
+
+_BEARER_B64TOKEN_PATTERN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
+_LOCAL_DEV_CURSOR_SIGNING_KEY = secrets.token_bytes(32)
+_CURSOR_SIGNING_SECRET_NAME = "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"
+_CURSOR_SIGNING_PROTECTED_FIELDS = (
+    ("admin proxy secret", "admin_proxy_secret"),
+    ("service token", "service_token"),
+    ("ops read token", "ops_read_token"),
+    ("ops cancel token", "ops_cancel_token"),
+    ("metrics token", "metrics_token"),
+    ("public API key", "vworld_api_key"),
+)
+
+
+def _deployable_secret_shape(raw: str) -> bool:
+    """production 배포 가능한 secret 형태 — 앞뒤 공백 없는 32자 이상.
+
+    ``docker/api-entrypoint.sh``의 admin proxy secret 검사와 같은 기준이다.
+    내부 공백 금지는 ops token 전용 규칙이라 여기서는 강제하지 않는다.
+    """
+
+    return raw == raw.strip() and len(raw) >= 32
+
+
+def _optional_secret_text(value: object, *, setting_name: str) -> str | None:
+    """Pydantic 검증 전후의 optional secret을 같은 규칙으로 안전하게 읽는다."""
+
+    if value is None:
+        return None
+    if isinstance(value, SecretStr):
+        return value.get_secret_value()
+    if isinstance(value, str):
+        return value
+    raise ValueError(f"{setting_name} must be a string when set")
+
+
+def _validated_cursor_signing_secret(value: object) -> str | None:
+    """Cursor signing secret의 단일 형태 정본.
+
+    정상 field validation뿐 아니라 ``model_copy``/``model_construct`` 우회 객체와
+    ``create_app`` runtime guard도 이 helper를 호출한다.
+    """
+
+    raw = _optional_secret_text(value, setting_name=_CURSOR_SIGNING_SECRET_NAME)
+    if raw in (None, ""):
+        return None
+    if len(raw) < 32 or any(character.isspace() for character in raw):
+        raise ValueError(
+            f"{_CURSOR_SIGNING_SECRET_NAME} must be at least 32 characters "
+            "and contain no whitespace"
+        )
+    return raw
+
+
+def _cursor_signing_secret_distinct_problems(
+    cursor_secret: str | None,
+    protected_secrets: Mapping[str, object],
+) -> list[str]:
+    """Cursor HMAC secret과 다른 trust-boundary credential의 중복을 찾는다."""
+
+    if cursor_secret is None:
+        return []
+    problems: list[str] = []
+    for protected_name, protected_secret in protected_secrets.items():
+        try:
+            protected_raw = _optional_secret_text(
+                protected_secret,
+                setting_name=protected_name,
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
+            continue
+        if protected_raw is not None and cursor_secret == protected_raw:
+            problems.append(
+                f"cursor signing secret must be distinct from {protected_name}"
+            )
+    return problems
+
+
+def _cursor_signing_protected_secrets(settings: object) -> dict[str, object]:
+    """전용성 검증 대상 필드 목록의 단일 정본을 현재 settings 값에 매핑한다."""
+
+    return {
+        protected_name: getattr(settings, field_name, None)
+        for protected_name, field_name in _CURSOR_SIGNING_PROTECTED_FIELDS
+    }
 
 
 class ApiSettings(BaseSettings):
@@ -46,11 +135,27 @@ class ApiSettings(BaseSettings):
         default="info",
         description="uvicorn log level — debug/info/warning/error.",
     )
+    profile: str = Field(
+        default="local-dev",
+        pattern="^(production|local-dev)$",
+        description=(
+            "실행 profile (ADR-066 D-1, T-VN-01/T-VN-02). ``production``은 "
+            "fail-closed로 기동을 검증한다 — admin proxy secret(앞뒤 공백 없는 "
+            "32자 이상) 필수, ops surface 활성 시 read/cancel token 필수, features "
+            "surface 활성 시 ``public_api_key_required=True``와 service token(앞뒤 "
+            "공백 없는 32자 이상) 필수, metrics endpoint 활성 시 metrics token "
+            "필수, ``/debug`` 라우터 비활성 필수. secret 미설정 "
+            "local-dev fallback은 ``local-dev``에서만 동작한다. Docker "
+            "image/compose 기본값은 production이고 코드 기본값은 local-dev다"
+            "(비-Docker 로컬 하위호환). env ``KOR_TRAVEL_MAP_API_PROFILE``."
+        ),
+    )
     debug_routes_enabled: bool = Field(
         default=True,
         description=(
-            "``/debug/...`` 라우터 활성 여부. 프로덕션 admin-only 운영 시 False로 "
-            "내려 두면 발견 reduce. ``/admin/...`` 운영 라우터는 별도 flag (Sprint 4+)."
+            "``/debug/...`` 라우터 활성 여부. 현재 MOIS raw route는 mount 뒤에도 "
+            "admin BFF 인증을 요구하지만 production은 이 flag를 False로 강제해 route "
+            "자체를 내린다. ``/admin/...`` 운영 라우터는 별도 flag (Sprint 4+)."
         ),
     )
     features_routes_enabled: bool = Field(
@@ -96,8 +201,23 @@ class ApiSettings(BaseSettings):
         default="/metrics",
         pattern=r"^/[A-Za-z0-9/_\-.]*$",
         description=(
-            "Prometheus exposition endpoint path. kor-travel-docker-manager의 "
-            "Prometheus는 API 포트(기본 12701)의 이 path를 scrape한다."
+            "Prometheus exposition endpoint path. 목표 배포에서 "
+            "kor-travel-docker-manager의 Prometheus가 API 포트(기본 12701)의 이 "
+            "path를 pull scrape한다(현재 docker-manager prometheus.yml에는 12701 "
+            "job이 아직 없어 배포 시 인증과 함께 추가한다 — T-VN-02)."
+        ),
+    )
+    metrics_token: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Prometheus scrape identity token (ADR-066 결정 4, T-VN-02). 설정되면 "
+            "metrics endpoint는 ``Authorization: Bearer <token>``이 이 값과 "
+            "일치(상수시간 비교)해야 한다. 미설정(None)이면 강제하지 않음"
+            "(로컬 scrape 하위호환) — 단 production profile은 metrics endpoint "
+            "활성 시 앞뒤 공백 없는 32자 이상 값을 필수화한다. admin proxy "
+            "secret·service token·ops token들과 서로 달라야 한다. scrape 측은 "
+            "Prometheus scrape_config의 ``authorization``(type Bearer)로 주입한다. "
+            "env ``KOR_TRAVEL_MAP_API_METRICS_TOKEN``."
         ),
     )
     feature_change_review_mode: str = Field(
@@ -129,8 +249,19 @@ class ApiSettings(BaseSettings):
             "``/providers``)는 ``X-Kor-Travel-Map-Service-Token`` 헤더가 이 값과 일치(상수시간 "
             "비교)해야 한다. **미설정(None)이면 강제하지 않음**(intranet/dev 기본, 하위호환 — "
             "운영 인증의 1차 책임은 여전히 infra 계층의 reverse proxy/Cloudflare). "
+            "단 production profile은 features surface 활성 시 이 token을 앞뒤 공백 "
+            "없는 32자 이상으로 필수화한다(ADR-066 T-VN-01). "
             "``/health`` · ``/version`` · ``/debug`` · ``/admin`` · ``/ops``는 면제(liveness/"
             "operator는 proxy SSO). env ``KOR_TRAVEL_MAP_API_SERVICE_TOKEN``."
+        ),
+    )
+    cursor_signing_secret: SecretStr | None = Field(
+        default=None,
+        description=(
+            "``/v1/features/search`` stateless cursor HMAC-SHA256 전용 server-only "
+            "secret. public API key/service token/admin·ops·metrics secret과 공유하지 "
+            "않는다. production에서 features surface 활성 시 공백 없는 32자 이상 "
+            "값이 필수다. local-dev 미설정 시 process-local 난수 key를 사용한다."
         ),
     )
     admin_proxy_secret: SecretStr | None = Field(
@@ -150,7 +281,7 @@ class ApiSettings(BaseSettings):
         validation_alias="KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
         description=(
             "PinVi server가 canonical ``/v1/ops/datasets*``·"
-            "``/v1/ops/pipeline*``의 GET을 호출할 때만 사용하는 API-only "
+            "``/v1/ops/pipeline*``와 잔여 ops 관측 GET을 호출할 때만 사용하는 API-only "
             "token. ``X-Kor-Travel-Map-Ops-Token``으로 전달하며 admin frontend "
             "BFF secret이나 public service token과 공유하지 않는다."
         ),
@@ -212,9 +343,10 @@ class ApiSettings(BaseSettings):
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
         )
         if (read is missing) != (cancel is missing):
+            # docker/api-entrypoint.sh와 동일 문구 (issue #742 lockstep).
             raise ValueError(
                 "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and "
-                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must both be absent or configured together"
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured together"
             )
         if read is missing:
             return data
@@ -252,6 +384,42 @@ class ApiSettings(BaseSettings):
                 "ops token must be non-empty, at least 32 characters, "
                 "and contain no whitespace"
             )
+        return value
+
+    @field_validator("metrics_token", mode="before")
+    @classmethod
+    def _normalize_metrics_token(cls, value: object) -> object:
+        """빈 문자열을 opt-out으로 정규화하고 RFC 6750 token 형태를 강제한다.
+
+        배포 가능한 형태(앞뒤 공백 없는 32자 이상)는 service token과 같은
+        기준으로 production matrix(``assert_production_ready``)가 검사한다 —
+        root ``.env.example``의 CHANGE_ME placeholder가 local-dev full-stack
+        검증을 막지 않게 한다(T-VN-01 service token 패턴). HTTP Bearer credential은
+        RFC 6750 ``b64token`` ASCII 범위로 제한해 Starlette의 latin-1 header decode와
+        환경변수 UTF-8 인코딩 사이에 서로 다른 표현이 생기지 않게 한다.
+        """
+
+        if value is None:
+            return value
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+        if isinstance(raw, str):
+            if raw == "":
+                return None
+            if _BEARER_B64TOKEN_PATTERN.fullmatch(raw) is None:
+                raise ValueError(
+                    "KOR_TRAVEL_MAP_API_METRICS_TOKEN must use the RFC 6750 "
+                    "b64token ASCII character set"
+                )
+        return value
+
+    @field_validator("cursor_signing_secret", mode="before")
+    @classmethod
+    def _validate_cursor_signing_secret(cls, value: object) -> object:
+        """활성 signing secret은 공백 없는 32자 이상으로 제한한다."""
+
+        raw = _validated_cursor_signing_secret(value)
+        if raw is None:
+            return None
         return value
 
     @model_validator(mode="after")
@@ -300,12 +468,60 @@ class ApiSettings(BaseSettings):
                     )
         return self
 
+    @model_validator(mode="after")
+    def _validate_metrics_token_distinct(self) -> ApiSettings:
+        """scrape token은 다른 신뢰 경계 secret과 재사용을 금지한다 (T-VN-02)."""
+
+        if self.metrics_token is None:
+            return self
+        raw_metrics_token = self.metrics_token.get_secret_value()
+        for protected_name, protected_secret in (
+            ("admin proxy secret", self.admin_proxy_secret),
+            ("service token", self.service_token),
+            ("ops read token", self.ops_read_token),
+            ("ops cancel token", self.ops_cancel_token),
+        ):
+            if (
+                protected_secret is not None
+                and raw_metrics_token == protected_secret.get_secret_value()
+            ):
+                raise ValueError(
+                    f"metrics token must be distinct from {protected_name}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_cursor_signing_secret_distinct(self) -> ApiSettings:
+        """Cursor HMAC key를 인증·scrape trust boundary secret과 분리한다."""
+
+        raw_cursor_secret = _validated_cursor_signing_secret(
+            self.cursor_signing_secret
+        )
+        problems = _cursor_signing_secret_distinct_problems(
+            raw_cursor_secret,
+            _cursor_signing_protected_secrets(self),
+        )
+        if problems:
+            raise ValueError("; ".join(problems))
+        return self
+
+    @property
+    def cursor_signing_key(self) -> bytes:
+        """설정된 cursor HMAC key 또는 local-dev process-local fallback."""
+
+        raw_cursor_secret = _validated_cursor_signing_secret(
+            self.cursor_signing_secret
+        )
+        if raw_cursor_secret is None:
+            return _LOCAL_DEV_CURSOR_SIGNING_KEY
+        return raw_cursor_secret.encode("utf-8")
+
     public_api_key_required: bool = Field(
         default=False,
         description=(
             "True면 public REST surface(`/v1/features`, `/v1/public`, `/v1/categories`, "
-            "`/v1/providers`)에 VWorld 호환 `key` query 검증을 적용한다. trusted admin "
-            "frontend proxy 또는 service-token 요청은 우회한다."
+            "`/v1/providers`, `/v1/curated-*`)에 VWorld 호환 `key` query 검증을 "
+            "적용한다. trusted admin frontend proxy 또는 service-token 요청은 우회한다."
         ),
     )
     public_api_key_cache_ttl_s: int = Field(
@@ -470,3 +686,171 @@ class ApiSettings(BaseSettings):
         min_length=1,
         description="Default staging RustFS Docker volume for restore command plans.",
     )
+
+    @property
+    def is_production(self) -> bool:
+        """production profile 여부 (ADR-066 fail-closed 검증 대상)."""
+
+        return self.profile == "production"
+
+    @property
+    def resolved_admin_routes_enabled(self) -> bool:
+        """``None``이면 features flag를 따르는 admin 라우터 활성 최종값."""
+
+        if self.admin_routes_enabled is None:
+            return self.features_routes_enabled
+        return self.admin_routes_enabled
+
+    @property
+    def resolved_ops_routes_enabled(self) -> bool:
+        """``None``이면 features flag를 따르는 ops 라우터 활성 최종값."""
+
+        if self.ops_routes_enabled is None:
+            return self.features_routes_enabled
+        return self.ops_routes_enabled
+
+    def assert_production_ready(self) -> None:
+        """ADR-066 D-1의 production 불변식을 검증한다.
+
+        secret 미설정 fallback(admin actor ``local-dev`` 통과, keyless public read,
+        ``/debug`` mount)은 non-production profile에서만 허용한다. Docker 밖
+        배포도 같은 검증을 받도록 entrypoint(shell)가 아닌 settings에서 검사하며,
+        admin/service secret 기준은 ``docker/api-entrypoint.sh``의 admin secret과
+        동일하다(앞뒤 공백 없는 32자 이상). cursor secret은 profile과 무관하게
+        설정된 값의 형태·전용성을 재검증해 Pydantic validator 우회도 fail-closed한다.
+        """
+
+        problems: list[str] = []
+
+        cursor_secret_raw: str | None = None
+        try:
+            cursor_secret_raw = _validated_cursor_signing_secret(
+                self.cursor_signing_secret
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
+        else:
+            problems.extend(
+                _cursor_signing_secret_distinct_problems(
+                    cursor_secret_raw,
+                    _cursor_signing_protected_secrets(self),
+                )
+            )
+
+        if not self.is_production:
+            if problems:
+                raise ValueError(
+                    "runtime settings are invalid: " + "; ".join(problems)
+                )
+            return
+
+        admin_secret: str | None = None
+        try:
+            admin_secret = _optional_secret_text(
+                self.admin_proxy_secret,
+                setting_name="KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
+        if admin_secret is None or not _deployable_secret_shape(admin_secret):
+            problems.append(
+                "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be set to at least 32 "
+                "characters without surrounding whitespace"
+            )
+
+        if self.resolved_ops_routes_enabled and (
+            self.ops_read_token is None or self.ops_cancel_token is None
+        ):
+            problems.append(
+                "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and "
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured while "
+                "the ops surface is enabled"
+            )
+
+        if self.features_routes_enabled and not self.public_api_key_required:
+            problems.append(
+                "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED must be true while "
+                "the public features surface is enabled"
+            )
+
+        if self.features_routes_enabled and cursor_secret_raw is None:
+            problems.append(
+                "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be set to at least 32 "
+                "characters without whitespace "
+                "while the public features surface is enabled"
+            )
+
+        if self.debug_routes_enabled:
+            problems.append(
+                "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED must be false because "
+                "/debug routes have no authentication"
+            )
+
+        # ADR-066 결정 4 (T-VN-02) — `/metrics`는 scrape identity 경계로만
+        # 노출한다. service token과 같은 배포 가능 형태 기준을 적용한다.
+        metrics_token_raw: str | None = None
+        try:
+            metrics_token_raw = _optional_secret_text(
+                self.metrics_token,
+                setting_name="KOR_TRAVEL_MAP_API_METRICS_TOKEN",
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
+        if self.prometheus_metrics_enabled:
+            if metrics_token_raw is None or not _deployable_secret_shape(
+                metrics_token_raw
+            ):
+                problems.append(
+                    "KOR_TRAVEL_MAP_API_METRICS_TOKEN must be set to at least 32 "
+                    "characters without surrounding whitespace while the "
+                    "Prometheus metrics endpoint is enabled"
+                )
+        elif metrics_token_raw is not None and not _deployable_secret_shape(
+            metrics_token_raw
+        ):
+            problems.append(
+                "KOR_TRAVEL_MAP_API_METRICS_TOKEN must be at least 32 characters "
+                "without surrounding whitespace when set"
+            )
+
+        service_token_raw: str | None = None
+        try:
+            service_token_raw = _optional_secret_text(
+                self.service_token,
+                setting_name="KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
+        if admin_secret is not None and admin_secret == service_token_raw:
+            problems.append(
+                "KOR_TRAVEL_MAP_API_SERVICE_TOKEN must be distinct from "
+                "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET"
+            )
+        if self.features_routes_enabled:
+            # D-1-2의 service secret: `/v1/features/batch` 같은 service surface가
+            # public key로만 조용히 격하되지 않도록 features surface에서는 필수다.
+            if service_token_raw is None or not _deployable_secret_shape(service_token_raw):
+                problems.append(
+                    "KOR_TRAVEL_MAP_API_SERVICE_TOKEN must be set to at least 32 "
+                    "characters without surrounding whitespace while the public "
+                    "features surface is enabled"
+                )
+        elif service_token_raw is not None and not _deployable_secret_shape(
+            service_token_raw
+        ):
+            problems.append(
+                "KOR_TRAVEL_MAP_API_SERVICE_TOKEN must be at least 32 characters "
+                "without surrounding whitespace when set"
+            )
+
+        if problems:
+            raise ValueError(
+                "production profile is fail-closed (ADR-066): " + "; ".join(problems)
+            )
+
+    @model_validator(mode="after")
+    def _validate_production_fail_closed(self) -> ApiSettings:
+        """정상 settings 생성 시 production 불변식을 적용한다."""
+
+        self.assert_production_ready()
+        return self

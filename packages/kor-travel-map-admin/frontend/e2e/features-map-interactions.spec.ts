@@ -12,17 +12,14 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
 //   - bbox list 쿼리 5xx → destructive Alert(role=alert) + 상태 배지
 //   - count=0 명시 empty 상태(헤더 배지 + 테이블 빈 메시지)
 //   - 초기 bbox fetch 1회 + kind 필터 토글 시 kind= 파라미터로 결정적 refetch
-type FeatureSummary = components["schemas"]["FeatureSummary"];
-type FeaturesInBboxResponse = components["schemas"]["FeaturesInBboxResponse"];
-type FeaturesInBoundsResponse =
-  components["schemas"]["FeaturesInBoundsResponse"];
+type AdminFeatureMapItem = components["schemas"]["AdminFeatureMapItem"];
+type AdminFeaturesInBoundsResponse =
+  components["schemas"]["AdminFeaturesInBoundsResponse"];
 type Meta = components["schemas"]["Meta"];
-type FeatureDetailResponse = components["schemas"]["FeatureDetailResponse"];
-type FeatureDetailEnvelopeResponse =
-  components["schemas"]["FeatureDetailEnvelopeResponse"];
 type FeatureWeatherResponse = components["schemas"]["FeatureWeatherResponse"];
 type FeaturePriceResponse = components["schemas"]["FeaturePriceResponse"];
-type AdminFeatureDetailData = components["schemas"]["AdminFeatureDetailData"];
+type AdminFeatureDetailFeatureRecord =
+  components["schemas"]["AdminFeatureDetailFeatureRecord"];
 type AdminFeatureDetailResponse =
   components["schemas"]["AdminFeatureDetailResponse"];
 type AdminFeatureDetailSourceRecord =
@@ -43,9 +40,9 @@ function makeMeta(overrides: Partial<Meta> = {}): Meta {
   };
 }
 
-function makeFeatureSummary(
-  overrides: Partial<FeatureSummary> = {},
-): FeatureSummary {
+function makeAdminFeatureMapItem(
+  overrides: Partial<AdminFeatureMapItem> = {},
+): AdminFeatureMapItem {
   return {
     category: "01070300",
     feature_id: FEATURE_ID,
@@ -60,19 +57,14 @@ function makeFeatureSummary(
   };
 }
 
-function makeFeaturesInBboxResponse(
-  items: FeatureSummary[],
-): FeaturesInBboxResponse {
-  return { data: { items }, meta: makeMeta() };
-}
-
-function makeFeaturesInBoundsResponse(
-  items: FeatureSummary[],
-): FeaturesInBoundsResponse {
+function makeAdminFeaturesInBoundsResponse(
+  items: AdminFeatureMapItem[],
+  clustered = false,
+): AdminFeaturesInBoundsResponse {
   return {
     data: {
       clusters:
-        items.length > 0
+        clustered && items.length > 0
           ? [
               {
                 cluster_key: "1100000000",
@@ -82,9 +74,17 @@ function makeFeaturesInBoundsResponse(
               },
             ]
           : [],
-      items: [],
+      coverage: {
+        limit: 2000,
+        returned: clustered && items.length > 0 ? 1 : items.length,
+      },
+      items: clustered ? [] : items,
+      mode: clustered ? "clusters" : "items",
+      truncated: false,
     },
-    meta: makeMeta({ cluster: { cluster_unit: "sido" } }),
+    meta: makeMeta({
+      cluster: { cluster_unit: "sido", drill_down_unit: "sigungu" },
+    }),
   };
 }
 
@@ -114,31 +114,6 @@ async function setMapZoom(
       zoom: nextZoom,
     });
   }, { nextCenter: center, nextZoom: zoom });
-}
-
-function makeFeatureDetail(
-  overrides: Partial<FeatureDetailResponse> = {},
-): FeatureDetailResponse {
-  return {
-    address: { road: "세종대로 110" },
-    category: "01070300",
-    detail: { source: "e2e-mock" },
-    feature_id: FEATURE_ID,
-    kind: "place",
-    lat: 37.5665,
-    lon: 126.978,
-    name: MOCK_NAME,
-    status: "active",
-    updated_at: MOCK_UPDATED_AT,
-    urls: {},
-    ...overrides,
-  };
-}
-
-function makeFeatureDetailEnvelope(
-  detail: FeatureDetailResponse = makeFeatureDetail(),
-): FeatureDetailEnvelopeResponse {
-  return { data: detail, meta: makeMeta({ request_id: "e2e-feature-detail" }) };
 }
 
 function makeAdminSource(
@@ -215,7 +190,7 @@ function makeAdminCuration(
 }
 
 function makeAdminFeatureDetailResponse(
-  overrides: Partial<AdminFeatureDetailData> = {},
+  featureOverrides: Partial<AdminFeatureDetailFeatureRecord> = {},
 ): AdminFeatureDetailResponse {
   return {
     data: {
@@ -234,16 +209,17 @@ function makeAdminFeatureDetailResponse(
         lon: 126.978,
         name: MOCK_NAME,
         raw_refs: [],
+        row_revision: 1,
         status: "active",
         updated_at: MOCK_UPDATED_AT,
         urls: {},
+        ...featureOverrides,
       },
       files: [],
       issues: [],
       overrides: [],
       sources: [makeAdminSource()],
       versions: [],
-      ...overrides,
     },
     meta: makeMeta({ request_id: "e2e-admin-feature-detail" }),
   };
@@ -298,9 +274,7 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 
 interface FeaturesRouteOptions {
   /** 200 list 응답으로 돌려줄 feature 목록. */
-  items?: FeatureSummary[];
-  /** detail 응답 override. price feature 선택 등 상세 kind가 list와 달라지지 않게 한다. */
-  detail?: FeatureDetailResponse;
+  items?: AdminFeatureMapItem[];
   /** price card 응답 override. */
   price?: FeaturePriceResponse;
   /** list 쿼리에 강제할 HTTP status (500 등 에러 표면 검증용). */
@@ -314,18 +288,17 @@ interface FeaturesRouteOptions {
 }
 
 /**
- * `**​/v1/features**` 글로브는 list(`/v1/features`), detail(`/v1/features/{id}`),
- * weather(`/v1/features/{id}/weather`)를 모두 잡는다 — 단일 핸들러에서 pathname으로
- * 분기한다. RSC/document 요청은 route.continue()(admin-ops idiom).
+ * Admin 지도·상세·weather·price가 쓰는 `**​/v1/admin/features/**` 요청을 단일
+ * 핸들러에서 pathname으로 분기한다. RSC/document 요청은 route.continue()
+ * (admin-ops idiom).
  * 반환된 카운터로 요청 shape를 expect.poll 단언한다.
  */
 async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {}) {
   await mockOpsDatasetCatalog(page);
-  const items = options.items ?? [makeFeatureSummary()];
+  const items = options.items ?? [makeAdminFeatureMapItem()];
   const requests = {
     list: 0,
     cluster: 0,
-    detail: 0,
     adminDetail: 0,
     price: 0,
     weather: 0,
@@ -335,22 +308,12 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
     clusterKinds: [] as string[][],
     /** route/area geometry 요청 여부 기록. */
     listIncludeGeometry: [] as string[],
+    /** 운영 상태 필터 요청 shape. */
+    listStatuses: [] as string[][],
+    clusterStatuses: [] as string[][],
   };
 
   await page.route("**/v1/admin/features/**", async (route) => {
-    requests.adminDetail += 1;
-    if (options.adminDetailStatus && options.adminDetailStatus >= 400) {
-      await fulfillJson(
-        route,
-        { detail: "admin feature 상세 실패" },
-        options.adminDetailStatus,
-      );
-      return;
-    }
-    await fulfillJson(route, options.adminDetail ?? makeAdminFeatureDetailResponse());
-  });
-
-  await page.route("**/v1/features**", async (route) => {
     const request = route.request();
     if (request.resourceType() === "document") {
       await route.continue();
@@ -362,30 +325,38 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
       return;
     }
 
-    // price: `/v1/features/{id}/price`
+    // price: `/v1/admin/features/{id}/price`
     if (url.pathname.endsWith("/price")) {
       requests.price += 1;
       await fulfillJson(route, options.price ?? makeFeaturePriceResponse());
       return;
     }
 
-    // weather: `/v1/features/{id}/weather`
+    // weather: `/v1/admin/features/{id}/weather`
     if (url.pathname.endsWith("/weather")) {
       requests.weather += 1;
       await fulfillJson(route, makeFeatureWeatherResponse());
       return;
     }
 
-    // list: `/v1/features` 또는 BFF `/api/proxy/v1/features` (정확히)
+    // item/cluster: `/v1/admin/features/in-bounds` 또는 BFF proxy.
     if (
-      url.pathname === "/v1/features" ||
-      url.pathname === "/api/proxy/v1/features"
+      url.pathname === "/v1/admin/features/in-bounds" ||
+      url.pathname === "/api/proxy/v1/admin/features/in-bounds"
     ) {
-      requests.list += 1;
-      requests.listKinds.push(url.searchParams.getAll("kind"));
-      requests.listIncludeGeometry.push(
-        url.searchParams.get("include_geometry") ?? "",
-      );
+      const clustered = url.searchParams.has("zoom");
+      if (clustered) {
+        requests.cluster += 1;
+        requests.clusterKinds.push(url.searchParams.getAll("kind"));
+        requests.clusterStatuses.push(url.searchParams.getAll("status"));
+      } else {
+        requests.list += 1;
+        requests.listKinds.push(url.searchParams.getAll("kind"));
+        requests.listStatuses.push(url.searchParams.getAll("status"));
+        requests.listIncludeGeometry.push(
+          url.searchParams.get("include_geometry") ?? "",
+        );
+      }
       if (options.listStatus && options.listStatus >= 400) {
         await route.fulfill({
           body: options.listErrorBody ?? "internal error",
@@ -394,35 +365,35 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
         });
         return;
       }
-      await fulfillJson(route, makeFeaturesInBboxResponse(items));
-      return;
-    }
-
-    // cluster: `/v1/features/in-bounds` 또는 BFF `/api/proxy/v1/features/in-bounds`
-    if (
-      url.pathname === "/v1/features/in-bounds" ||
-      url.pathname === "/api/proxy/v1/features/in-bounds"
-    ) {
-      requests.cluster += 1;
-      requests.clusterKinds.push(url.searchParams.getAll("kind"));
-      await fulfillJson(route, makeFeaturesInBoundsResponse(items));
-      return;
-    }
-
-    // detail: `/v1/features/{id}`
-    if (
-      url.pathname.startsWith("/v1/features/") ||
-      url.pathname.startsWith("/api/proxy/v1/features/")
-    ) {
-      requests.detail += 1;
       await fulfillJson(
         route,
-        makeFeatureDetailEnvelope(options.detail ?? makeFeatureDetail()),
+        makeAdminFeaturesInBoundsResponse(items, clustered),
       );
       return;
     }
 
-    throw new Error(`Unhandled features route: ${request.method()} ${url}`);
+    // detail: `/v1/admin/features/{id}`
+    if (
+      url.pathname.startsWith("/v1/admin/features/") ||
+      url.pathname.startsWith("/api/proxy/v1/admin/features/")
+    ) {
+      requests.adminDetail += 1;
+      if (options.adminDetailStatus && options.adminDetailStatus >= 400) {
+        await fulfillJson(
+          route,
+          { detail: "admin feature 상세 실패" },
+          options.adminDetailStatus,
+        );
+        return;
+      }
+      await fulfillJson(
+        route,
+        options.adminDetail ?? makeAdminFeatureDetailResponse(),
+      );
+      return;
+    }
+
+    throw new Error(`Unhandled admin features route: ${request.method()} ${url}`);
   });
 
   return requests;
@@ -636,7 +607,7 @@ test.describe("/features map interactions", () => {
   }) => {
     const requests = await mockFeatureRoutes(page, {
       items: [
-        makeFeatureSummary({
+        makeAdminFeatureMapItem({
           feature_id: "mock-route-1",
           kind: "route",
           name: "Seoul Trail",
@@ -649,7 +620,7 @@ test.describe("/features map interactions", () => {
           },
           marker_color: "P-06",
         }),
-        makeFeatureSummary({
+        makeAdminFeatureMapItem({
           area_square_meters: 1_234_567,
           feature_id: "mock-area-1",
           kind: "area",
@@ -735,7 +706,7 @@ test.describe("/features map interactions", () => {
   }) => {
     const requests = await mockFeatureRoutes(page, {
       items: Array.from({ length: 4 }, (_, index) =>
-        makeFeatureSummary({
+        makeAdminFeatureMapItem({
           area_square_meters: 1_234_567 + index,
           feature_id: `mock-area-${index + 1}`,
           kind: "area",
@@ -796,8 +767,7 @@ test.describe("/features map interactions", () => {
     await expect(panel.getByText("선택 Feature")).toBeVisible();
     await expect(panel.getByText(FEATURE_ID)).toBeVisible();
 
-    // useFeatureDetail → /v1/features/{id} mock 반영(상세 data name/badge kind·status·category).
-    await expect.poll(() => requests.detail).toBeGreaterThanOrEqual(1);
+    // admin 상세 응답으로 name/badge kind·status·category를 렌더한다.
     await expect(
       panel.getByRole("heading", { level: 2, name: MOCK_NAME }),
     ).toBeVisible();
@@ -835,8 +805,8 @@ test.describe("/features map interactions", () => {
     await page.getByRole("tab", { name: "지도" }).click();
 
     const panel = page.getByTestId("feature-detail-panel");
-    await expect(panel.getByText("admin 연결 정보 조회 실패")).toBeVisible();
-    await expect(panel.getByText("조회 실패", { exact: true }).first()).toBeVisible();
+    await expect(panel.getByText("상세 호출 실패")).toBeVisible();
+    await expect(panel).toContainText("HTTP 500");
     await expect(panel.getByText("연결된 큐레이션이 없습니다.")).toHaveCount(0);
   });
 
@@ -881,12 +851,12 @@ test.describe("/features map interactions", () => {
       },
     ];
     const requests = await mockFeatureRoutes(page, {
-      detail: makeFeatureDetail({
+      adminDetail: makeAdminFeatureDetailResponse({
         kind: "price",
         name: "서울주유소 유가",
       }),
       items: [
-        makeFeatureSummary({
+        makeAdminFeatureMapItem({
           kind: "price",
           marker_icon: "fuel",
           name: "서울주유소 유가",
@@ -990,6 +960,27 @@ test.describe("/features map interactions", () => {
     await expect(page.getByText("표시할 feature가 없습니다.")).toBeVisible();
   });
 
+  test("비공개 운영 상태 필터 — inactive 쿼리와 테이블 상태를 함께 반영", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureRoutes(page, {
+      items: [makeAdminFeatureMapItem({ status: "inactive" })],
+    });
+
+    await page.goto("/features");
+    await page.getByLabel("상태 필터").selectOption("inactive");
+    await setMapZoom(page, 14);
+
+    await expect
+      .poll(() => requests.listStatuses.at(-1))
+      .toEqual(["inactive"]);
+    await page.getByRole("tab", { name: "테이블" }).click();
+    const row = page
+      .getByRole("table", { name: "이름순 feature" })
+      .getByRole("row", { name: new RegExp(MOCK_NAME) });
+    await expect(row.getByRole("cell", { name: "비활성" })).toBeVisible();
+  });
+
   test("초기 저zoom bbox fetch 1회 + 기본 kind 필터가 cluster 요청에 적용", async ({
     page,
   }) => {
@@ -997,7 +988,7 @@ test.describe("/features map interactions", () => {
 
     await page.goto("/features");
 
-    // 기본 zoom 6.5는 clusterMode → /v1/features/in-bounds 요청이 최소 1회 발생.
+    // 기본 zoom 6.5는 clusterMode → admin in-bounds 요청이 최소 1회 발생.
     await expect.poll(() => requests.cluster).toBeGreaterThanOrEqual(1);
     // 기본 kind 필터는 weather + notice.
     expect(requests.clusterKinds[0]).toEqual(["weather", "notice"]);

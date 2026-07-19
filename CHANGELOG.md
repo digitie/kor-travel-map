@@ -5,6 +5,65 @@
 
 ## [Unreleased]
 
+### Public weather·curation raw lineage clean-cut (2026-07-20, T-VN-59)
+
+- **SECURITY (breaking)**: public forecast row에서 `source_record_key`를 제거하고, public KMA
+  alert는 typed 도메인 필드만 반환한다. alert source record identity·provider 원문 payload·
+  ingestion timestamp는 새 admin BFF operator endpoint로 이동했다.
+- **SECURITY (breaking)**: public curation collection/item에서 자유형 `metadata`를 제거하고,
+  public item에서 `source_record_key`를 제거했다. admin collection/item DTO는 두 값을 계속
+  제공한다.
+- **CHANGED**: user OpenAPI exporter가 모든 public response reachable schema를 재귀 순회해 raw
+  lineage field와 curation metadata 재유입을 거부한다. 공개 DTO와 admin/operator raw DTO는
+  상속 없는 별도 타입이다.
+
+### Admin correction 편집 기준 고정 (2026-07-20, T-VN-58 #785)
+
+- **FIXED**: Feature 수정·삭제가 제출 직전에 최신 revision을 다시 읽어 stale draft를 새 기준으로
+  제출하던 동작을 제거했다. 편집 시작 detail과 raw strong `ETag`를 불변 basis로 고정해 원래
+  `If-Match`를 그대로 보낸다.
+- **CHANGED**: 서버가 `412 Precondition Failed`를 반환하면 작성 중인 입력을 보존하고 자동
+  재시도하지 않는다. 운영자가 명시적으로 최신값을 다시 불러온 경우에만 새 detail과 basis를
+  적용한다. DB와 REST/OpenAPI schema는 바뀌지 않는다.
+
+### Public route security·user OpenAPI 단일 정본 (2026-07-20, T-VN-57)
+
+- **SECURITY**: 조립된 route policy matrix에서 모든 `public-keyed` operation의
+  `PublicApiKey OR ServiceToken`, `public-unauthenticated`의 무인증, `service`의
+  `ServiceToken` OpenAPI 계약을 자동 파생한다. curated 4경로만 별도 처리하던 수동 목록을
+  제거했다.
+- **CHANGED (breaking)**: user OpenAPI 표면도 같은 route policy와 method metadata에서
+  자동 파생한다. 기존 수동 목록에서 누락됐던 `GET /v1/features`와
+  `GET /v1/features/{feature_id}/contained-features`가 user spec과 생성 TypeScript에
+  포함된다.
+- **TEST**: 조립 route ↔ full OpenAPI ↔ user OpenAPI의 path/method/security를 양방향
+  비교해 누락·과포함·method/security drift를 거부한다.
+### T-VN-03 잔여 route 인증 경계 clean-cut (2026-07-19)
+
+- **SECURITY**: public curated GET 4개를 public API key 경계로, ops metrics/log/
+  consistency/deep-health GET 6개를 admin BFF 또는 `OpsToken+ops:read` 경계로 옮겼다.
+  MOIS raw debug는 local-dev mount에서도 admin BFF를 요구하고 production에서는 route를
+  mount하지 않는다.
+- **CHANGED**: route policy wiring exception을 0건으로 만들고 full/user OpenAPI와
+  admin/user 생성 TypeScript에 public/operator security 계약을 반영했다. 삭제 route,
+  호환 alias, 새 secret/env, DB migration은 추가하지 않았다.
+
+### Feature search COUNT opt-in + signed cursor (2026-07-19, T-VN-15)
+
+- **CHANGED (breaking)**: `/v1/features/search`의 `include_total` 기본값은 `false`다.
+  이 모드에서는 COUNT SQL을 실행하지 않고 `meta.page.total=null`을 반환하며,
+  `include_total=true`일 때만 같은 정규화 filter의 COUNT를 1회 실행한다.
+- **SECURITY**: search cursor를 version·정규화 query fingerprint·keyset을 담은 canonical
+  payload와 HMAC-SHA256 서명으로 교체했다. 변조, 알 수 없는 version, 다른 query/filter/page
+  계약에 재사용한 cursor는 DB 접근 전에 서로 구분되는 typed RFC7807 422로 거부한다.
+- **SECURITY**: production feature surface는 API 전용
+  `KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET`(공백 없는 32자 이상)을 필수화한다. 이 값은
+  public/admin/service/ops/metrics credential과 공유할 수 없고 API container에만 주입한다.
+  local-dev 미설정은 process-local 난수 key를 쓰므로 재시작·multi-worker 연속성을 보장하지 않는다.
+- **CHANGED (breaking)**: 내부 `feature_repo.search_features`와
+  `AsyncKorTravelMapClient.search_features`는 `limit` 대신 `page_size`, 명시적
+  `cursor_signing_key`, `include_total` 계약을 사용한다. 호환 shim은 두지 않는다.
+
 ### C6c manifest v4 Map runtime provenance (2026-07-19, T-ADM-C7P)
 
 - **SECURITY**: C7 runtime attestation은 compatible-pair manifest v4의 Map API·UI·
@@ -45,6 +104,332 @@
   label과 clean checkout을 대조한다. C7 executor는 durable creator/outcome/CID 아래 create/start를
   분리한다. SIGKILL 뒤 남은 C7 container는 creator identity·CID/name·label·run 전용 mount·비활성
   lock을 확인하는 `stop-c7-prod-live-container.py`로만 중지하며 journal/sentinel은 보존한다.
+### Admin 지도 비공개 Feature 조회·카드 복원 (2026-07-19, T-VN-04A #741)
+
+- **ADDED**: `GET /v1/admin/features/in-bounds`가 삭제되지 않은 base Feature를 대상으로
+  bbox item과 행정구역 cluster를 제공한다. 반복 `status` 필터로 `draft`·`active`·
+  `inactive`·`hidden`·`broken`을 선택하며, public active-only projection은 바꾸지 않는다.
+- **ADDED**: admin weather/price card endpoint가 비공개 Feature의 존재와 weather anchor를
+  admin 경계에서 판정한다. 운영 지도와 상세 화면은 이 경로만 사용하므로 공개 projection의
+  404/빈 카드로 비공개 상태가 가려지지 않는다. soft-delete 또는 `status=deleted` target은
+  삭제 전 운영 상태와 구분해 404로 fail-closed한다.
+- **CHANGED**: Admin Feature 지도에 운영 상태 필터와 truncation 표시를 추가하고, 지도·테이블·
+  marker 상세가 동일한 admin in-bounds 결과를 사용하도록 통일했다.
+
+### Tier-2 release benchmark 측정 정확성 (2026-07-19, T-VN-21R #767)
+
+- **FIXED**: `--skip-seed` 200건 batch가 fixture 전용 고정 ID를 조회해 0행을
+  성공 측정하던 문제를 제거했다. public projection의 실제 non-notice ID 200개를
+  결정적으로 선택하고, 수량이 부족하거나 대표 viewport가 비어 있으면 성공 report
+  없이 fail-closed한다. seed의 inactive 분포와 selector 기대도 같은 규칙을 쓴다.
+- **FIXED**: `EXPLAIN (BUFFERS)`의 상위 Plan에 이미 포함된 child shared read를
+  재귀 합산하던 중복 계산을 제거했다. 각 viewport report는 terminal `LIMIT` 전
+  `matched_rows`와 LIMIT 뒤 `returned_rows`/`minimum_returned_rows`를 함께 기록해
+  truncation을 보존한다.
+
+### 지도 in-bounds 완결성 + exact 공간 술어 (2026-07-19, ADR-073 D-9-3·D-9-4 T-VN-14)
+
+- **FIXED**: `GET /v1/features/in-bounds`(및 `GET /v1/features`)의 `include_geometry`가
+  결과집합(membership)을 바꾸던 버그를 고쳤다(F-8, EXPLAIN 재현 2220→2221행). 이제 후보
+  술어가 `include_geometry` 값과 **무관하게 단일·동일**하고, 플래그는 route/area geometry를
+  응답 payload에 직렬화할지만 제어한다(같은 feature 집합, payload만 차이).
+- **FIXED**: route/area bbox 후보에 exact `ST_Intersects(geom, envelope)`를 추가했다. `&&`
+  MBR prefilter만으로 생기던 false positive(경계상자만 겹치고 실제 geometry는 교차하지 않는
+  route/area)를 제거한다. geometry가 있는 route/area는 centroid `coord` arm으로 우회하지
+  않고 exact geometry arm만 사용하며, geometry가 없는 legacy 행만 coord로 fallback한다.
+  point `coord`의 `&&`는 이미 정확해 그대로 두었고, `ST_Transform`은 술어에 넣지 않는다
+  (ADR-012 — partial GiST `idx_features_geom_gist`가 `&&`로 구동됨).
+- **FIXED**: cluster와 items가 같은 exact 공간 후보 universe를 사용한다. geometry가 bbox와
+  교차하지만 centroid가 밖인 route/area도 cluster count에 포함하고, 대표 marker는 bbox와
+  실제 교차한 geometry 부분 위에서 계산한다. 행정 경계를 가로지르는 geometry의 cluster
+  귀속은 선택 단위의 저장 canonical 행정코드 하나로 고정해 feature당 1회만 집계한다.
+- **CHANGED (계약)**: in-bounds 응답 `data`가 지도 완결성 계약을 명시한다 — `mode`(items|
+  clusters), `truncated`(bool, F-8 silent truncation 해소), `coverage`(returned/limit),
+  cluster 모드의 결정적 `cluster_key`. view 해석 metadata인 `cluster_unit`과
+  `drill_down_unit`은 ADR-048 envelope 불변식대로 `meta.cluster`에만 둔다. truncation은
+  `max_items+1` 조회로 명시 판정한다. `meta.cluster`가 존재할 때 `cluster_unit`은 필수
+  enum이고 `drill_down_unit`은 필수 enum|null인 strict OpenAPI/TypeScript 계약이다.
+- **INTERNAL**: bbox 후보 술어를 단일화했다 — 공통 attribute 필터(kind/category/provider)를
+  `_bbox_attribute_filter_sql`로, 공통 공간 후보 술어를 `_bbox_candidate_predicate_sql`로
+  한 곳에 정의해 경량/geometry/cluster 3변형의 이중 SQL 복제를 제거했다(D-9-4). weather/price
+  LATERAL과 인덱스/모델은 건드리지 않았다(T-VN-38/T-VN-18 소유).
+
+### Feature row_revision + If-Match/ETag 낙관적 동시성 (2026-07-19, D-10-3/D-9-8 T-VN-13)
+
+- **ADDED**: migration 0062가 `feature.features`에 server-owned monotonic `row_revision`
+  (bigint, DEFAULT 1)과 이를 모든 UPDATE에서 강제 증가시키는 `BEFORE UPDATE` 트리거를
+  도입한다(0058 poi lock_version 패턴). `ADD COLUMN ... DEFAULT`는 PG11+ 메타데이터 전용,
+  CHECK는 같은 migration transaction에서 NOT VALID→VALIDATE한다. pending change request에는
+  제출 시점의 `base_row_revision`을 함께 저장한다. #727 provider-refresh policy revision과는
+  별개 자원이다(합치지 않음).
+- **ADDED**: public feature detail GET이 `ETag: "<row_revision>"`를 반환하고,
+  `If-None-Match`가 일치하면 `304 Not Modified`(본문 없음)로 응답한다. Admin 소비자는 집계형
+  detail 응답이 아니라 `GET /v1/admin/features/{feature_id}/revision`에서 같은 strong ETag를
+  읽는다.
+- **CHANGED (breaking)**: admin feature correction PATCH/DELETE는 정확히 한 개의 canonical
+  `If-Match: "<row_revision>"`를 필수로 요구한다. 누락은 `428`, weak·wildcard·결합·중복·
+  비정상/범위 초과 값은 `422`, stale 값은 `412`, 실제 부재는 `404`다. change-request 승인은
+  호출자가 새 ETag를 보내지 않고 요청에 저장된 `base_row_revision`을 잠금 안에서 검증해,
+  제출 뒤 provider 갱신이나 삭제가 끼어든 경우 `412`로 중단한다. add는 중간에 같은 ID가
+  생기면 덮어쓰지 않고 충돌한다.
+- **CHANGED**: bundled Admin frontend와 PinVi Admin HTTP client가 revision GET의 raw ETag를
+  그대로 PATCH/DELETE `If-Match`로 전달하고, `412`를 새로고침 후 재시도가 필요한
+  `PRECONDITION_FAILED`로 노출한다.
+
+### 중복 GiST 제거 + weather source-record index (2026-07-19, D-12-3 T-VN-18)
+
+- **CHANGED**: `feature.features`의 geometry 컬럼(coord/coord_5179/geom)에 geoalchemy2가
+  자동 생성하던 full GiST 3개를 제거하고(migration 0061 + models
+  `spatial_index=False`), 공개 술어 partial GiST 3개(`WHERE deleted_at IS NULL`)만
+  유지한다. 공개 조회(bbox/nearby/in-area)는 모두 `deleted_at IS NULL`을 포함해
+  partial index를 쓰므로 읽기 영향이 없고, insert/update마다 유지하던 색인이 6→3개로
+  줄어 geometry write-cost가 낮아진다(실측 ≈1.2~1.3×).
+- **ADDED**: `idx_weather_values_source_record`(partial) — 0060의 weather
+  source-record FK(`ON DELETE SET NULL`)가 source_record 삭제 시 대용량 seq-scan하지
+  않게 price 패턴을 미러링한 지원 index.
+
+### 3단 성능·DDL gate 인프라 (2026-07-19, ADR-075 D-12-4 T-VN-21)
+
+- **ADDED (CI gate)**: tier-1 성능 gate가 매 PR의 integration job에서 상시 실행된다
+  (`tests/integration/test_perf_gate_tier1.py`). hot public query(bbox/in-bounds·nearby·
+  search·detail·batch·category counts·cluster rollup)를 **planner 기본 설정으로** EXPLAIN해
+  `feature.features` Seq Scan 부재와 기대 index 사용을 검증하고(`enable_seqscan=off` crutch
+  금지), public batch read의 SQL 수가 item 수에 비례하지 않음(N+1 가드), 결과 컬럼이 frozen
+  snapshot과 일치함(response-shape 회귀)을 확인한다. hot query registry·seed·EXPLAIN helper는
+  `tests/integration/perf_gate.py`.
+- **ADDED (release 도구, CI 아님)**: tier-2 release/cutover harness
+  (`scripts/perf_tier2_release_harness.py`)가 100만+ 실분포 fixture에서 대표 viewport를
+  `EXPLAIN (ANALYZE, BUFFERS)`로 재고 p50/p95·shared read blocks·응답 bytes를 JSON으로 기록한다.
+- **ADDED (index PR 정책·helper)**: tier-3은 index/DDL 변경 PR이 변경 전후 write 비용·index
+  크기를 첨부하도록 요구하고(리뷰 enforce), `perf_gate.measure_index_write_cost` helper를 제공한다.
+- **DOCS**: `docs/architecture/performance.md` §8.3(ADR-075 D-12-4)이 세 계층 전체의 **정본**이다.
+
+### weather 무결성 제약 (2026-07-19, ADR-072/075 T-VN-17)
+
+- **ADDED**: migration 0060이 ``feature.feature_weather_values``에 price(0034)
+  패턴을 미러링한 무결성 제약을 도입한다 — semantic tuple UNIQUE
+  (feature_id, provider, weather_domain, forecast_style, metric_key, issued_at,
+  valid_at, observed_at; ``NULLS NOT DISTINCT``), ``valid_from <= valid_until`` range CHECK, payload-object
+  CHECK, source-record FK(``ON DELETE SET NULL``). CHECK/FK는 ``NOT VALID`` 후
+  ``VALIDATE``, ~30M행이라 테이블 rewrite·STORED 추가 없이 적용한다.
+- **CHANGED**: weather upsert writer가 ON CONFLICT 대상을 PK 해시에서 semantic
+  tuple index로 전환한다(update-wins). 같은 순간을 다른 tz 표기로 적재해 생기던
+  중복이 이제 흡수된다. migration은 `SHARE ROW EXCLUSIVE` writer fence를 먼저 잡고
+  기존 중복 dedup(최신 collected_at 우선)과 non-concurrent unique index를 한 transaction으로
+  수행한다. 실패 시 모두 rollback되어 INVALID index가 남지 않는다. 기존 CHECK/FK 오염은 첫
+  commit 전에 거부하고 VALIDATE lock 대기도 5초로 제한한다. destructive dedup을 되돌릴 수 없는
+  0060 downgrade는 Alembic destination 전역 guard로 descendant DDL 전에 차단하고,
+  backup/PITR+구 writer image 동시 복구만 허용한다. 과거 partial retry 객체의
+  `ACCESS EXCLUSIVE` 정리는 main build와 분리한 짧은 transaction에서만 수행한다.
+
+### body actor 제거 — 감사 actor는 인증 principal에서만 파생 (2026-07-19, ADR-066 D-2 T-VN-20)
+
+- **SECURITY**: 모든 admin write의 감사 actor(operator/actor/created_by/reviewed_by)를
+  request body가 아니라 인증 principal(admin BFF의 `X-Kor-Travel-Map-Actor` →
+  `AdminProxyContext.actor`)에서만 파생하도록 완결했다(ADR-066 D-2, T-VN-07 slice 완성).
+  신뢰 경계 안에서 body가 감사 주체를 위조하던 경로를 제거한다. 대상: admin feature
+  create/patch/delete·change-request approve/reject·deactivate(operator), admin issue
+  조치(operator), dedup review(reviewed_by), auth-event(actor), curated select/unselect
+  (actor), enrichment review(reviewed_by), offline upload create(created_by)·validate
+  (operator). 제출·승인이 분리된 흐름(feature change-request)은 제출 principal과 승인
+  principal을 각각 그 시점의 principal에서 보존한다.
+- **REMOVED (breaking, admin-frontend-only)**: PinVi가 호출하지 않는 admin frontend 전용
+  write는 body actor 필드를 schema에서 제거했다 — auth-event `actor`, curated
+  select/unselect `actor`, enrichment review `reviewed_by`, offline upload
+  `created_by`·validate `operator`. `extra="forbid"`라 옛 caller가 이 필드를 보내면 `422`다.
+  admin frontend는 전송을 중단했다(BFF actor header만 사용).
+- **DEPRECATED (accept-and-ignore, PinVi 호환)**: PinVi `origin/main` client가 아직 body로
+  보내는 필드는 수용하되 무시한다(OpenAPI `deprecated: true`) — admin feature/issue의
+  `operator`, dedup review의 `reviewed_by`. 저장 actor는 principal이며 body 값은 무시된다.
+  PinVi가 전송을 중단하면(별도 PR, `docs/integration-map.md` §3.3) 제거한다.
+### Alembic 제외 정책 구조 검증 보완 (2026-07-19, T-VN-19 리뷰 후속)
+
+- **FIXED (internal)**: metadata 비교에서 임시 제외한 app-owned table 8개의 전체
+  column type/nullability와 핵심 constraint/index를 빈 DB migration 통합 테스트로
+  고정했다. 인증·운영 table의 핵심 CHECK도 잘못된 row를 실제 거부하는지 검증한다.
+- **FIXED (internal)**: 비교 제외 index 4개를 이름 존재만 확인하지 않고 UNIQUE 여부,
+  key 순서·표현식, partial predicate까지 PostgreSQL catalog 기준으로 검증한다. 새 ORM
+  mapping이 생긴 table이 제외 목록에 남으면 Alembic 시작 단계에서 실패한다.
+  `uq_curated_features_theme_feature_active`의 잘못된 `NULLS NOT DISTINCT` metadata 옵션은
+  제거해 migration과 일치시키고 Alembic 일반 비교 대상으로 복귀시켰다.
+
+### 공개 curated raw lineage 우회 차단 (2026-07-19, ADR-073 T-VN-05R)
+
+- **SECURITY**: `GET /v1/curated-features`와 단건 상세가 admin DTO를 재사용하지 않고
+  공개 전용 `PublicCuratedFeatureView` allowlist를 반환한다. 공개 계약은 `feature_kind`가
+  판별자인 `place|event|notice|area|route|price|weather` union이며, 알 수 없는 kind는
+  목록에서 제외하고 상세에서 404로 닫는다. `detail.payload`,
+  `source_record_key`, DB/source identity, 선정 감사값, 자유형 metadata는 공개 응답과
+  `openapi.user.json`/user 생성 타입에서 제거했다.
+- **SECURITY**: `address`와 kind별 `detail`을 strict 중첩 DTO로 전환했다. place의
+  `phones`, `reviews_link`, `business_hours`, `facility_info`도 검토된 키와 값 형태만 새로
+  조립하므로 concierge YouTube/transcript/evidence 미러와 알 수 없는 nested raw 키가
+  공개 응답을 우회할 수 없다.
+- **REMOVED**: 공개 목록 query에서 내부 identity 필터 `theme_id`, `source_id`, `provider`,
+  `dataset_key`를 제거했다. 공개 탐색은 `theme_slug`, 표시 텍스트, 위치 필터만 사용하고
+  내부 identity 필터는 admin 목록에만 남는다.
+- **UNCHANGED**: `/v1/admin/features/curated*`는 기존 `CuratedFeatureView`를 계속 사용해
+  source record와 raw detail, 감사 actor/시각을 보존한다.
+
+### 공개 raw payload 경계 제거 (2026-07-19, ADR-073 T-VN-05)
+
+- **SECURITY**: 공개 feature detail·batch(`GET /v1/features/{id}`,
+  `POST /v1/features/batch`)에서 provider raw 경계를 제거했다. raw observation
+  lineage(`observations`: raw_data/raw_payload_hash/source_record_key)와
+  `detail`의 provider raw passthrough(`payload` — MOIS 인허가의 mng_no/status_code/
+  detail_status_*/opn_authority_code/title/epsg5174 포함)가 더 이상 공개 표면에
+  노출되지 않는다. DB 컬럼·ETL은 그대로이며 공개 read projection에서만 벗겨낸다.
+- **ADDED**: operator 전용 `GET /v1/features/{feature_id}/sources`(admin BFF 인증)
+  가 feature의 현재 raw 관측 lineage를 제공한다.
+- **CHANGED**: `GET /v1/features/{feature_id}/observations/{source_entity_key}/history`
+  가 공개(public-keyed)에서 operator 인증(admin BFF)으로 이동했다. 두 raw lineage
+  표면은 비공개/종료 feature도 감사할 수 있게 raw row 존재로 404를 판정한다.
+- **CHANGED**: user-facing OpenAPI subset에서 raw observation lineage 표면 2종을
+  제외했다(admin spec에는 유지). service batch는 요청 스키마가 `extra=forbid`라
+  raw opt-in이 불가하고 고정 typed payload만 반환한다.
+
+### Alembic metadata 정합 CI gate (2026-07-19, ADR-075 D-12-2 T-VN-19)
+
+- **ADDED**: `tests/integration/test_alembic_metadata_consistency.py` — 빈 PostGIS DB →
+  `alembic upgrade head` → `alembic check` diff 0건을 상시 검증하는 §8.1 gate. 기존
+  integration CI job이 실행하며, 새 migration/table이 metadata 매핑이나 env.py 제외
+  목록에서 빠지면 실패해 F-10 회귀를 차단한다.
+- **CHANGED (internal)**: `alembic/env.py`에 `include_object` 필터를 추가해 비-app·미모델
+  객체를 비교에서 명시 제외한다(blanket ignore 아님, 이름 나열): PostGIS `spatial_ref_sys`,
+  ORM 모델이 아직 없는 app table 8개(weather/price/log/api-key/auth-event 계열 + ops-live
+  claim/topic), alembic이 round-trip 못하는 partial/expression index 4개.
+- **FIXED (internal)**: `models.py` metadata를 배포 DB에 정합화(마이그레이션 없음) —
+  DB가 TEXT인데 모델이 String이던 27개 컬럼 Text화, `dagster_schedule_active_claims`의
+  누락 컬럼 2개·CHECK 2개·`created_at` 기본값(now→clock_timestamp), `source_records`
+  unique 제약명(→`uq_source_records`), `curated_themes.theme_slug` 제약명 명시,
+  `import_jobs.queue_sequence`의 SERIAL 위양성 server_default 제거. 런타임 동작 불변
+  (repo는 raw SQL 사용, DDL은 migration 소유).
+
+### notice timestamp 방어적 cast (2026-07-19, report §2 D-9-7 (+ T-VN-06 row))
+
+- **FIXED**: `detail->>'valid_end_time'`이 오염된 notice 한 행이 공개 read
+  전체(bbox/search/nearby/in-area/cluster/counts/notice detail·batch)를 500으로
+  만들지 않는다. 종료 필터가 `pg_input_is_valid`(PostgreSQL 16+) 가드로
+  파싱 가능한 값만 cast한다.
+- **CHANGED**: 파싱 불가한 `valid_end_time`을 가진 notice는 fail-closed로 공개
+  표면에서 제외된다(이전: 500, 노출 아님). JSON null/키 부재는 기존 의미
+  (종료시각 없음 = 활성)를 유지한다. typed notice 재설계·오염 관측은 T-VN-37.
+
+### no-op beach 옵션 삭제 + auth-event actor principal 1차 (2026-07-19, ADR-066 D-2/D-9-6 T-VN-07)
+
+- **REMOVED**: `/v1/public/beaches`·`/v1/public/beaches/{feature_id}`의 무동작
+  `include_quality`·`include_forecast` query 옵션을 route 서명·OpenAPI(admin/user)·생성
+  TS 타입에서 제거했다(D-9-6 — water quality/forecast 미구현, 구현 시점 재도입). 응답
+  필드(`latest_water_quality`·`upcoming_index_forecasts`·`latest_weather`)는 모델
+  기본값(null/[])으로 유지해 응답 계약은 불변이다. FastAPI가 미지 query 파라미터를
+  무시하므로 옛 caller가 옵션을 보내도 정상 200(no 500).
+- **FIXED**: 구현 사양 `docs/architecture/public-views-api.md`에서도 삭제된 두 query
+  행을 제거했다. PinVi route·Python/TS client·vendored OpenAPI의 소비자 clean-cut은
+  별도 PinVi 후속 PR에서 함께 반영한다.
+- **SECURITY**: admin auth-event write(`POST /v1/admin/auth-events`)의 감사 actor를
+  `body.actor or context.actor`에서 인증 principal(`context.actor`)만으로 좁혔다(ADR-066
+  D-2, F-4). request body의 `actor`는 신뢰 경계 안에서 위조 가능했다. 본 slice는
+  auth-event 한 경로만 다루며, admin feature/curated/issue/offline/dedup/enrichment
+  write의 body-actor 전면 제거와 `actor` 필드 schema 제거는 T-VN-20 소관이라 여기서는
+  필드를 유지·무시만 한다.
+
+### route policy matrix + `/metrics` scrape identity 경계 (2026-07-19, ADR-066 T-VN-02)
+
+- **ADDED**: `kortravelmap.api.route_policy` — 전 HTTP route와 WebSocket을
+  `public-unauthenticated`/`public-keyed`/`service`/`operator`/`debug`/`metrics` 중 정확히
+  하나로 분류하는 명시적 in-code registry(`ROUTE_POLICIES`)와 matrix 생성기. 분류는
+  dependency 배선에서 추론하지 않고 registry가 정본이며, 미분류 route는 `create_app` 앱
+  구성 검사와 CI(`test_route_policy.py`)가 함께 실패한다. FastAPI 0.136+의 lazy
+  `_IncludedRouter`는 OpenAPI 생성기와 같은 공개 helper(`iter_route_contexts`)로
+  평탄화한다(WebSocket은 OpenAPI paths에 없어 openapi() 열거로는 불충분). 정책-배선
+  일치는 route별 관측 enforcing dependency로 검증하고, 다른 task 소유의 알려진 gap
+  (무키 legacy `/v1/curated-*` → public-keyed, 무의존 `/v1/ops/{metrics,system-logs,
+  api-call-logs,consistency/*,health-deep}` → operator — 모두 T-VN-03/codex b1 소유,
+  PinVi cutover 조율)은 `KNOWN_WIRING_EXCEPTIONS` ledger에만 허용하며 gap이 닫히면
+  stale entry가 CI에서 실패해 ledger 축소를 강제한다. ops-live WebSocket은 #725 HMAC
+  ticket dependency를 enforcing 인증으로 기록만 하고 재사용한다(중복 구현 없음).
+- **SECURITY**: `/metrics`가 scrape identity 경계를 얻었다 (ADR-066 결정 4).
+  `KOR_TRAVEL_MAP_API_METRICS_TOKEN` 설정 시 `Authorization: Bearer <token>` 상수시간
+  검증(불일치 401), production profile은 metrics endpoint 활성 시 이 token(앞뒤 공백
+  없는 32자 이상, admin secret·service/ops token과 distinct)을 기동 필수로 요구한다.
+  compose는 admin secret·service token과 같은 hard-require 패턴으로 host env를
+  전달한다. **배포 전제(zero-gap 순서)**: kor-travel-docker-manager의
+  `config/prometheus/prometheus.yml`에는 현재 map-api(:12701) scrape job이 아예
+  없다(prometheus·cadvisor·kor-travel-geo만 존재) — 이 scrape는 신규 추가
+  대상이다. (1) **먼저** docker-manager가 repository 밖의 secret 파일을 read-only
+  mount하고 scrape config의 `authorization.credentials_file`로 읽도록 변경한 뒤
+  map-api job을 추가하고(변경 전 무인증 API는 헤더를 무시하므로 무해), (2)
+  **그다음** root `.env`에 같은 값의 metrics token을 넣고 API를 배포한다. 추적 중인
+  Prometheus config의 inline `credentials`에는 실제 secret을 쓰지 않는다. 순서를
+  뒤집으면 그 사이 scrape가 401 gap이 된다(조용한 파손이 아니라 scrape 실패로
+  드러남). token 미설정 local-dev는 기존 open scrape 유지. 상세·YAML 예시는
+  `docs/deploy.md`.
+- **SECURITY**: metrics token 설정은 RFC 6750 `b64token` ASCII 문자만 허용한다.
+  설정 단계에서 비ASCII/공백/구분자 문자를 거부해 Starlette의 latin-1 header decode와
+  환경변수 UTF-8 인코딩 불일치로 올바른 token이 항상 401이 되는 구성을 막는다.
+- **CHANGED** (ADR-066 D-1, T-VN-02): production profile은 인증 없는 interactive
+  docs UI(`/docs`·`/redoc`·swagger oauth2-redirect)를 내린다(`docs_url`/`redoc_url`
+  =None). D-1의 "public-unauthenticated=(liveness/version)"을 넓히지 않기 위함이며
+  debug 라우터를 production에서 내리는 것과 같은 패턴이다. 기계 판독 공개 계약
+  `/openapi.json`(ADR-031 served artifact)은 유지한다. 세 route 모두
+  `include_in_schema=False`라 committed `openapi.json` `paths`는 불변(drift 없음).
+- **CHANGED** (#742 consolidation): ops pair 검증 정본은 settings production matrix로
+  일원화했다. `docker/api-entrypoint.sh`는 production profile + ops surface 활성 +
+  ops pair 미구성(양쪽 빈 값 포함)을 migration **전에** settings와 동일 문구로
+  거부해 2단계 혼란 실패를 없앴고(entrypoint의 profile 기본값은 Docker image와 같은
+  production), settings의 pair provenance 메시지를 entrypoint와 lockstep으로
+  정렬했다("must be configured together"). 메시지 lockstep은
+  `test_docker_dagster_runtime.py`가 양쪽 소스를 대조해 상시 검증한다.
+
+### 공개 predicate 단일화 — `feature.public_features` view (2026-07-19, ADR-067 T-VN-04)
+
+- **ADDED**: migration 0059가 공개 정본 projection `feature.public_features`
+  (`status='active' AND deleted_at IS NULL`) VIEW를 추가했다. bbox/cluster/search/nearby/
+  in-area/detail/batch/category counts/notice/weather anchor/public views/curation·curated의
+  모든 공개 read가 이 한 정의를 소비한다.
+- **SECURITY**: admin-inactive/draft/broken feature가 일부 공개 경로(단건/batch/특보 이력/
+  curation collection item)에 노출되고 provider-retired feature가 경로마다 다르게 은닉되던
+  F-1 양방향 오분류를 해소했다. 무인증 collection 상세는 비공개·종료·구버전 notice에 연결된
+  item을 SQL에서 행째 제외해 복제 저장된 `place_name`/`address_hint`/metadata 우회도 차단한다.
+- **SECURITY**: `admin_only` theme와 candidate/rejected overlay가 공개 curated/curation 표면으로
+  노출되던 경계를 닫았다. 공개 theme는 `visibility=public`, 공개 overlay는 `curated`만 허용하며
+  feature 단건·batch에 결합되는 curation도 같은 theme visibility를 강제한다.
+- **CHANGED**: `POST /v1/features/batch`는 모든 비공개 feature를 균일하게 `missing`으로
+  분류한다(이전: admin-inactive는 `found`+`status='inactive'`). 5-state typed DTO 전환은
+  T-VN-11 — 소비자 조정 노트는 `docs/integration-map.md` §3.2.
+- **CHANGED**: `GET /v1/features/{id}/weather`·`/price`는 비공개/미존재 feature에서 404를
+  반환한다(이전: 임의 id에 200 + 빈/합성 카드).
+- **CHANGED**: `GET /v1/features/weather/alerts`는 anchor를 공개 projection에 LEFT JOIN한다 —
+  alert row는 유지되고 비공개 anchor의 `feature_id`/`feature_name`은 null이다. 항상
+  `'active'`로 상수화된 응답 필드 `feature_status`는 제거됐다.
+- **REMOVED**: `GET /v1/categories`의 `active_only` 파라미터 — counts는 항상 공개
+  projection 기준이다.
+- **REMOVED**: 공개 `GET /v1/curated-themes`의 `visibility`와
+  `GET /v1/curated-features`의 `curation_status` 파라미터 — 관리자 전용 상태를 요청으로
+  다시 열 수 없고 각 공개 계약으로 고정된다.
+- **CHANGED**: nearby `status` 파라미터는 공개 projection과 교집합으로만 동작한다는 설명이
+  OpenAPI에 명시됐다(active 외 값은 빈 결과, 파라미터 정리는 T-VN-11/34).
+
+### production profile fail-closed 기동 검증 (2026-07-19, ADR-066 T-VN-01)
+
+- **SECURITY**: `KOR_TRAVEL_MAP_API_PROFILE=production`이면 `ApiSettings`가 기동 시점에
+  fail-closed 검증을 수행한다. admin proxy secret(앞뒤 공백 없는 32자 이상) 누락, ops surface
+  활성 상태의 read/cancel token 누락, public features surface의 `public_api_key_required=false`
+  또는 service token 누락(앞뒤 공백 없는 32자 이상 필수 — `/v1/features/batch` service surface가
+  public key 접근으로 조용히 격하되는 것을 막는다), 인증 없는 `/debug` 라우터 활성은 각각 기동
+  거부 사유다. profile matrix 위반은 하나의 에러에 함께 나열되지만, 기존 ops token pair/shape
+  검증(둘 중 하나만 설정 등)은 정의 순서상 먼저 단독으로 실패한다. secret 미설정 local-dev
+  fallback(admin actor `local-dev` pass-through)은 non-production profile에서만 동작하고,
+  production 상태에서는 dependency 수준에서도 403으로 닫힌다.
+- **CHANGED**: API Docker image와 compose는 기본 production profile로 기동한다. compose는
+  `/debug` 라우터 off와 `public_api_key_required=true`를 컨테이너 기본값으로 함께 주입하고
+  (`environment`가 package `.env`보다 우선 — 단 legacy `/v1/curated-*` read는 T-VN-03 전까지
+  keyless로 남는 F-3 잔여 gap), `KOR_TRAVEL_MAP_API_SERVICE_TOKEN`을 admin secret과 같은
+  hard-require 패턴(`${...:?}`)으로 api 컨테이너에 전달한다. **배포 전제**: n150은 다음 배포에서
+  root `.env`에 admin secret·ops token들과 서로 다른 32자 이상 service token을 추가해야 하며,
+  없으면 compose 평가가 즉시 실패한다. 로컬 full-stack 검증은
+  `KOR_TRAVEL_MAP_API_PROFILE=local-dev`를 host env로 명시해 기존 fallback을 유지하고,
+  비-Docker 실행의 코드 기본값은 `local-dev`로 하위호환을 유지한다.
 
 ### #744 심층 리뷰 후속 수정 (2026-07-19)
 

@@ -36,6 +36,8 @@ from typing import Any, Literal, cast
 
 from fastapi import FastAPI
 
+from kortravelmap.api.route_policy import RoutePolicy, build_route_policy_matrix
+
 OpenApiProfile = Literal["admin", "user"]
 
 API_OPENAPI_PATH = Path("packages/kor-travel-map-api/openapi.json")
@@ -44,45 +46,28 @@ USER_OPENAPI_PATH = Path("packages/kor-travel-map-api/openapi.user.json")
 # ADR-048/T-216g: 현재 pre-1.0 단계의 기계 정본은 ``/v1`` 경로를 in-place로
 # 갱신하는 admin/user spec 2종이다. v1.0.0 GA 이후 breaking change는 ``/v2``와
 # major별 별도 export 파일을 추가하고, N-1 지원 정책은 문서/CI에서 함께 고정한다.
-USER_OPERATIONS: dict[str, frozenset[str]] = {
-    # 사용자/서비스 표면은 ``/v1`` prefix. liveness ``/health``·``/version``은
-    # 비버저닝 유지(ADR-048).
-    "/v1/features/in-bounds": frozenset({"get"}),
-    "/v1/features/{feature_id}": frozenset({"get"}),
-    "/v1/features/{feature_id}/observations/{source_entity_key}/history": frozenset(
-        {"get"}
-    ),
-    "/v1/features/{feature_id}/price": frozenset({"get"}),
-    "/v1/features/{feature_id}/weather": frozenset({"get"}),
-    "/v1/features/{feature_id}/weather/forecast": frozenset({"get"}),
-    "/v1/features/weather/forecast": frozenset({"get"}),
-    "/v1/features/weather/alerts": frozenset({"get"}),
-    "/v1/features/search": frozenset({"get"}),
-    "/v1/features/nearby": frozenset({"get"}),
-    "/v1/features/nearby/by-target": frozenset({"get"}),
-    "/v1/public/beaches": frozenset({"get"}),
-    "/v1/public/beaches/map-markers": frozenset({"get"}),
-    "/v1/public/beaches/{feature_id}": frozenset({"get"}),
-    "/v1/public/festivals/monthly": frozenset({"get"}),
-    "/v1/public/festivals/map-markers": frozenset({"get"}),
-    "/v1/public/festivals/{feature_id}": frozenset({"get"}),
-    "/v1/curated-features": frozenset({"get"}),
-    "/v1/curated-features/{curated_feature_id}": frozenset({"get"}),
-    "/v1/curations": frozenset({"get"}),
-    "/v1/curations/collections": frozenset({"get"}),
-    "/v1/curations/collections/{collection_id}": frozenset({"get"}),
-    "/v1/curations/features/{feature_id}": frozenset({"get"}),
-    "/v1/categories": frozenset({"get"}),
-    "/v1/providers": frozenset({"get"}),
-    "/v1/providers/{provider}/last-sync": frozenset({"get"}),
-    "/health": frozenset({"get"}),
-    "/version": frozenset({"get"}),
-    "/v1/features/batch": frozenset({"post"}),
-}
-
 HTTP_METHODS: frozenset[str] = frozenset(
     {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
 )
+USER_ROUTE_POLICIES: frozenset[RoutePolicy] = frozenset(
+    {
+        RoutePolicy.PUBLIC_UNAUTHENTICATED,
+        RoutePolicy.PUBLIC_KEYED,
+        RoutePolicy.SERVICE,
+    }
+)
+USER_RESPONSE_FORBIDDEN_PROPERTIES: frozenset[str] = frozenset(
+    {
+        "source_record_key",
+        "raw_data",
+        "raw_payload_hash",
+        "payload",
+        "fetched_at",
+        "imported_at",
+        "last_seen_at",
+    }
+)
+CURATION_RESPONSE_FORBIDDEN_PROPERTIES: frozenset[str] = frozenset({"metadata"})
 
 
 def _load_app() -> FastAPI:
@@ -171,31 +156,201 @@ def _prune_security_schemes(spec: dict[str, Any]) -> dict[str, Any]:
     return spec
 
 
-def _validate_user_operations(spec: dict[str, Any]) -> None:
+def _openapi_operations(spec: dict[str, Any]) -> set[tuple[str, str]]:
     paths = spec.get("paths", {})
     if not isinstance(paths, dict):
         raise ValueError("OpenAPI spec paths must be an object.")
 
-    missing: list[str] = []
-    for path, allowed_methods in USER_OPERATIONS.items():
-        path_item = paths.get(path)
-        if not isinstance(path_item, dict):
-            missing.append(path)
+    return {
+        (path, method)
+        for path, path_item in paths.items()
+        if isinstance(path, str) and isinstance(path_item, dict)
+        for method in path_item
+        if method in HTTP_METHODS
+    }
+
+
+def _user_operations(
+    app: FastAPI,
+    spec: dict[str, Any],
+) -> dict[str, frozenset[str]]:
+    """조립 route metadata와 full spec에서 user operation을 자동 파생한다."""
+
+    route_policies: dict[str, RoutePolicy] = {}
+    mounted_operations: set[tuple[str, str]] = set()
+    for row in build_route_policy_matrix(app):
+        if row.is_websocket or not row.include_in_schema:
             continue
-        available_methods = {
-            method for method in path_item if method in HTTP_METHODS
-        }
-        missing_methods = sorted(allowed_methods - available_methods)
-        if missing_methods:
-            missing.append(f"{path} [{', '.join(missing_methods)}]")
-    if missing:
-        details = "; ".join(sorted(missing))
-        raise ValueError(f"USER_OPERATIONS drift: missing {details}")
+        route_policies[row.schema_path] = row.policy
+        mounted_operations.update(
+            (row.schema_path, method.lower())
+            for method in row.methods
+            if method.lower() in HTTP_METHODS
+        )
+
+    full_operations = _openapi_operations(spec)
+    if mounted_operations != full_operations:
+        missing = sorted(mounted_operations - full_operations)
+        extra = sorted(full_operations - mounted_operations)
+        raise ValueError(
+            "route/OpenAPI operation drift: "
+            f"missing={missing!r}; extra={extra!r}"
+        )
+
+    selected: dict[str, set[str]] = {}
+    for path, method in full_operations:
+        policy = route_policies[path]
+        if policy in USER_ROUTE_POLICIES:
+            selected.setdefault(path, set()).add(method)
+    return {
+        path: frozenset(methods)
+        for path, methods in sorted(selected.items())
+    }
 
 
-def user_openapi_spec(spec: dict[str, Any]) -> dict[str, Any]:
-    """Return user-facing subset spec from the full admin spec."""
-    _validate_user_operations(spec)
+def _response_schema_roots(operation: dict[str, Any]) -> list[dict[str, Any]]:
+    roots: list[dict[str, Any]] = []
+    responses = operation.get("responses")
+    if not isinstance(responses, dict):
+        return roots
+    for response in responses.values():
+        if not isinstance(response, dict):
+            continue
+        content = response.get("content")
+        if not isinstance(content, dict):
+            continue
+        for media in content.values():
+            if not isinstance(media, dict):
+                continue
+            schema = media.get("schema")
+            if isinstance(schema, dict):
+                roots.append(schema)
+    return roots
+
+
+def _find_forbidden_schema_properties(
+    schema: dict[str, Any],
+    *,
+    schemas: dict[str, Any],
+    forbidden: frozenset[str],
+    location: str,
+    seen_refs: set[str],
+) -> list[str]:
+    violations: list[str] = []
+    ref = schema.get("$ref")
+    prefix = "#/components/schemas/"
+    if isinstance(ref, str) and ref.startswith(prefix):
+        name = ref.removeprefix(prefix)
+        if name in seen_refs:
+            return violations
+        seen_refs.add(name)
+        target = schemas.get(name)
+        if isinstance(target, dict):
+            violations.extend(
+                _find_forbidden_schema_properties(
+                    target,
+                    schemas=schemas,
+                    forbidden=forbidden,
+                    location=f"{location} -> {name}",
+                    seen_refs=seen_refs,
+                )
+            )
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for field in sorted(forbidden.intersection(properties)):
+            violations.append(f"{location}.{field}")
+        for field, child in properties.items():
+            if isinstance(child, dict):
+                violations.extend(
+                    _find_forbidden_schema_properties(
+                        child,
+                        schemas=schemas,
+                        forbidden=forbidden,
+                        location=f"{location}.{field}",
+                        seen_refs=seen_refs,
+                    )
+                )
+
+    items = schema.get("items")
+    if isinstance(items, dict):
+        violations.extend(
+            _find_forbidden_schema_properties(
+                items,
+                schemas=schemas,
+                forbidden=forbidden,
+                location=f"{location}[]",
+                seen_refs=seen_refs,
+            )
+        )
+    additional = schema.get("additionalProperties")
+    if isinstance(additional, dict):
+        violations.extend(
+            _find_forbidden_schema_properties(
+                additional,
+                schemas=schemas,
+                forbidden=forbidden,
+                location=f"{location}{{}}",
+                seen_refs=seen_refs,
+            )
+        )
+    for keyword in ("allOf", "anyOf", "oneOf"):
+        branches = schema.get(keyword)
+        if not isinstance(branches, list):
+            continue
+        for index, branch in enumerate(branches):
+            if isinstance(branch, dict):
+                violations.extend(
+                    _find_forbidden_schema_properties(
+                        branch,
+                        schemas=schemas,
+                        forbidden=forbidden,
+                        location=f"{location}.{keyword}[{index}]",
+                        seen_refs=seen_refs,
+                    )
+                )
+    return violations
+
+
+def _validate_user_response_schemas(spec: dict[str, Any]) -> None:
+    """공개 response root에서 reachable raw lineage field를 fail-closed한다."""
+    components = spec.get("components")
+    paths = spec.get("paths", {})
+    if not isinstance(components, dict) or not isinstance(paths, dict):
+        raise ValueError("OpenAPI user spec paths/schemas must be objects.")
+    schemas = components.get("schemas")
+    if not isinstance(schemas, dict):
+        raise ValueError("OpenAPI user spec paths/schemas must be objects.")
+
+    violations: list[str] = []
+    for path, path_item in paths.items():
+        if not isinstance(path, str) or not isinstance(path_item, dict):
+            continue
+        forbidden = USER_RESPONSE_FORBIDDEN_PROPERTIES
+        if path.startswith("/v1/curations"):
+            forbidden |= CURATION_RESPONSE_FORBIDDEN_PROPERTIES
+        for method, operation in path_item.items():
+            if method not in HTTP_METHODS or not isinstance(operation, dict):
+                continue
+            for index, root in enumerate(_response_schema_roots(operation)):
+                violations.extend(
+                    _find_forbidden_schema_properties(
+                        root,
+                        schemas=schemas,
+                        forbidden=forbidden,
+                        location=f"{method.upper()} {path} response[{index}]",
+                        seen_refs=set(),
+                    )
+                )
+    if violations:
+        details = "; ".join(sorted(set(violations)))
+        raise ValueError(f"user response raw lineage schema reachable: {details}")
+
+
+def user_openapi_spec(spec: dict[str, Any], *, app: FastAPI) -> dict[str, Any]:
+    """조립된 route policy에서 user-facing subset spec을 파생한다."""
+
+    user_operations = _user_operations(app, spec)
     out = copy.deepcopy(spec)
     out["info"] = {
         **out.get("info", {}),
@@ -206,7 +361,7 @@ def user_openapi_spec(spec: dict[str, Any]) -> dict[str, Any]:
         ),
     }
     filtered_paths: dict[str, Any] = {}
-    for path, allowed_methods in USER_OPERATIONS.items():
+    for path, allowed_methods in user_operations.items():
         path_item = spec.get("paths", {}).get(path)
         if not isinstance(path_item, dict):
             continue
@@ -218,19 +373,25 @@ def user_openapi_spec(spec: dict[str, Any]) -> dict[str, Any]:
         if any(method in filtered_item for method in allowed_methods):
             filtered_paths[path] = filtered_item
     out["paths"] = filtered_paths
-    return _prune_security_schemes(_prune_schemas(out))
+    out = _prune_security_schemes(_prune_schemas(out))
+    _validate_user_response_schemas(out)
+    return out
 
 
-def _profile_spec(spec: dict[str, Any], profile: OpenApiProfile) -> dict[str, Any]:
+def _profile_spec(
+    app: FastAPI,
+    spec: dict[str, Any],
+    profile: OpenApiProfile,
+) -> dict[str, Any]:
     if profile == "admin":
         return spec
-    return user_openapi_spec(spec)
+    return user_openapi_spec(spec, app=app)
 
 
 def export(output: Path, *, profile: OpenApiProfile = "admin") -> dict[str, Any]:
     """Generate the selected OpenAPI spec and write it to `output`."""
     app = _load_app()
-    spec = _profile_spec(app.openapi(), profile)
+    spec = _profile_spec(app, app.openapi(), profile)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         json.dumps(spec, indent=2, sort_keys=True, ensure_ascii=False),
@@ -247,7 +408,7 @@ def check(output: Path, *, profile: OpenApiProfile = "admin") -> int:
         return 1
     app = _load_app()
     current = json.dumps(
-        _profile_spec(app.openapi(), profile),
+        _profile_spec(app, app.openapi(), profile),
         indent=2,
         sort_keys=True,
         ensure_ascii=False,

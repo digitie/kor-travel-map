@@ -8,14 +8,14 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
 //   - #604: 같은 격자 좌표에 겹친 마커(초단기·단기) 클릭 시 "겹친 지점 N개" 팝업 → 행 선택
 // features-map-interactions.spec.ts idiom을 따른다(OpenAPI 스키마 바인딩 mock factory).
 
-type FeatureSummary = components["schemas"]["FeatureSummary"];
-type FeaturesInBboxResponse = components["schemas"]["FeaturesInBboxResponse"];
-type FeaturesInBoundsResponse =
-  components["schemas"]["FeaturesInBoundsResponse"];
+type AdminFeatureMapItem = components["schemas"]["AdminFeatureMapItem"];
+type AdminFeaturesInBoundsResponse =
+  components["schemas"]["AdminFeaturesInBoundsResponse"];
+type AdminFeatureDetailFeatureRecord =
+  components["schemas"]["AdminFeatureDetailFeatureRecord"];
+type AdminFeatureDetailResponse =
+  components["schemas"]["AdminFeatureDetailResponse"];
 type Meta = components["schemas"]["Meta"];
-type FeatureDetailResponse = components["schemas"]["FeatureDetailResponse"];
-type FeatureDetailEnvelopeResponse =
-  components["schemas"]["FeatureDetailEnvelopeResponse"];
 type FeatureWeatherResponse = components["schemas"]["FeatureWeatherResponse"];
 
 // 기본 viewport(서울) 안 좌표 — 마커가 화면에 뜨도록.
@@ -33,8 +33,8 @@ function makeMeta(overrides: Partial<Meta> = {}): Meta {
 }
 
 function makeWeatherFeature(
-  overrides: Partial<FeatureSummary> = {},
-): FeatureSummary {
+  overrides: Partial<AdminFeatureMapItem> = {},
+): AdminFeatureMapItem {
   return {
     category: "99000000",
     feature_id: "kma::ultra::seoul",
@@ -57,19 +57,14 @@ function makeWeatherFeature(
   };
 }
 
-function makeFeaturesInBboxResponse(
-  items: FeatureSummary[],
-): FeaturesInBboxResponse {
-  return { data: { items }, meta: makeMeta() };
-}
-
-function makeFeaturesInBoundsResponse(
-  items: FeatureSummary[],
-): FeaturesInBoundsResponse {
+function makeAdminFeaturesInBoundsResponse(
+  items: AdminFeatureMapItem[],
+  clustered: boolean,
+): AdminFeaturesInBoundsResponse {
   return {
     data: {
       clusters:
-        items.length > 0
+        clustered && items.length > 0
           ? [
               {
                 cluster_key: "1100000000",
@@ -79,9 +74,17 @@ function makeFeaturesInBoundsResponse(
               },
             ]
           : [],
-      items: [],
+      coverage: {
+        limit: 2000,
+        returned: clustered && items.length > 0 ? 1 : items.length,
+      },
+      items: clustered ? [] : items,
+      mode: clustered ? "clusters" : "items",
+      truncated: false,
     },
-    meta: makeMeta({ cluster: { cluster_unit: "sido" } }),
+    meta: makeMeta({
+      cluster: { cluster_unit: "sido", drill_down_unit: "sigungu" },
+    }),
   };
 }
 
@@ -93,18 +96,23 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   });
 }
 
-function makeFeatureDetail(
-  overrides: Partial<FeatureDetailResponse> = {},
-): FeatureDetailResponse {
+function makeAdminFeatureDetail(
+  overrides: Partial<AdminFeatureDetailFeatureRecord> = {},
+): AdminFeatureDetailFeatureRecord {
   return {
     address: { road: "서울 중구 세종대로" },
     category: "99000000",
+    created_at: "2026-06-29T00:00:00.000Z",
+    data_origin: "provider",
+    data_version: 1,
     detail: {},
     feature_id: "kma::ultra::seoul",
     kind: "weather",
     lat: SEOUL_LAT,
     lon: SEOUL_LON,
     name: "기상청 초단기 서울",
+    row_revision: 1,
+    raw_refs: [],
     status: "active",
     updated_at: "2026-06-29T00:00:00.000Z",
     urls: {},
@@ -112,11 +120,20 @@ function makeFeatureDetail(
   };
 }
 
-function makeFeatureDetailEnvelope(
-  detail: FeatureDetailResponse,
-): FeatureDetailEnvelopeResponse {
+function makeAdminFeatureDetailResponse(
+  detail: AdminFeatureDetailFeatureRecord,
+): AdminFeatureDetailResponse {
   return {
-    data: detail,
+    data: {
+      change_requests: [],
+      curations: [],
+      feature: detail,
+      files: [],
+      issues: [],
+      overrides: [],
+      sources: [],
+      versions: [],
+    },
     meta: makeMeta({ request_id: "e2e-session-kma-detail" }),
   };
 }
@@ -163,10 +180,10 @@ async function setMapZoom(page: Page, zoom: number) {
 
 async function mockFeatureRoutes(
   page: Page,
-  items: FeatureSummary[],
-  detailById: Record<string, FeatureDetailResponse> = {},
+  items: AdminFeatureMapItem[],
+  detailById: Record<string, AdminFeatureDetailFeatureRecord> = {},
 ) {
-  await page.route("**/v1/features**", async (route) => {
+  await page.route("**/v1/admin/features/**", async (route) => {
     const request = route.request();
     if (request.resourceType() === "document") {
       await route.continue();
@@ -187,26 +204,22 @@ async function mockFeatureRoutes(
       return;
     }
     if (
-      url.pathname === "/v1/features" ||
-      url.pathname === "/api/proxy/v1/features"
+      url.pathname === "/v1/admin/features/in-bounds" ||
+      url.pathname === "/api/proxy/v1/admin/features/in-bounds"
     ) {
-      await fulfillJson(route, makeFeaturesInBboxResponse(items));
+      await fulfillJson(
+        route,
+        makeAdminFeaturesInBoundsResponse(items, url.searchParams.has("zoom")),
+      );
       return;
     }
     if (
-      url.pathname === "/v1/features/in-bounds" ||
-      url.pathname === "/api/proxy/v1/features/in-bounds"
-    ) {
-      await fulfillJson(route, makeFeaturesInBoundsResponse(items));
-      return;
-    }
-    if (
-      url.pathname.startsWith("/v1/features/") ||
-      url.pathname.startsWith("/api/proxy/v1/features/")
+      url.pathname.startsWith("/v1/admin/features/") ||
+      url.pathname.startsWith("/api/proxy/v1/admin/features/")
     ) {
       const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
-      const detail = detailById[id] ?? makeFeatureDetail({ feature_id: id });
-      await fulfillJson(route, makeFeatureDetailEnvelope(detail));
+      const detail = detailById[id] ?? makeAdminFeatureDetail({ feature_id: id });
+      await fulfillJson(route, makeAdminFeatureDetailResponse(detail));
       return;
     }
     await route.continue();
@@ -298,11 +311,11 @@ test.describe("/features — KMA 격자 weather 마커 (#603/#604)", () => {
       lat: SEOUL_LAT,
     });
     await mockFeatureRoutes(page, [ultra, short], {
-      "kma::ultra::seoul": makeFeatureDetail({
+      "kma::ultra::seoul": makeAdminFeatureDetail({
         feature_id: "kma::ultra::seoul",
         name: "기상청 초단기 서울",
       }),
-      "kma::short::seoul": makeFeatureDetail({
+      "kma::short::seoul": makeAdminFeatureDetail({
         feature_id: "kma::short::seoul",
         name: "기상청 단기 서울",
       }),

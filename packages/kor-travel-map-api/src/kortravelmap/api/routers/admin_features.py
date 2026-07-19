@@ -7,9 +7,9 @@ from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.core import make_feature_id
-from kortravelmap.infra import curation_repo
+from kortravelmap.infra import curation_repo, price_repo, weather_repo
 from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureDetail,
     AdminFeatureDetailFeature,
@@ -24,10 +24,15 @@ from kortravelmap.infra.admin_feature_repo import (
     FeatureChangeRequest,
     FeatureDeactivateResult,
     FeatureOverride,
+    FeaturePreconditionFailed,
     FeatureStateConflict,
+    admin_feature_card_target_exists,
+    admin_features_in_bbox,
     apply_feature_change_request,
+    cluster_admin_features_in_bbox,
     deactivate_feature,
     get_admin_feature_detail,
+    get_feature_row_revision,
     list_admin_features,
     list_feature_change_requests,
     reject_feature_change_request,
@@ -36,10 +41,24 @@ from kortravelmap.infra.admin_feature_repo import (
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.auth import require_admin_destructive_enabled
+from kortravelmap.api.auth import (
+    AdminProxyContext,
+    require_admin_destructive_enabled,
+    require_admin_frontend,
+)
 from kortravelmap.api.db import get_session
-from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.http_revision import parse_revision_header, revision_etag
+from kortravelmap.api.response import ClusterUnit, Meta, make_meta
 from kortravelmap.api.routers.curations import AdminCurationItemView
+from kortravelmap.api.routers.features import (
+    FeaturePriceResponse,
+    FeatureWeatherResponse,
+    PriceCardData,
+    PricePointOut,
+    WeatherCardData,
+    WeatherMetricOut,
+    WeatherSummaryOut,
+)
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
@@ -122,6 +141,76 @@ class AdminFeaturesListResponse(BaseModel):
     meta: Meta
 
 
+AdminFeatureOperationalStatus = Literal[
+    "draft",
+    "active",
+    "inactive",
+    "hidden",
+    "broken",
+]
+
+
+class AdminFeatureMapItem(BaseModel):
+    """Admin 지도용 base Feature 경량 표현."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    kind: str
+    name: str
+    category: str
+    lon: float | None
+    lat: float | None
+    marker_icon: str | None = None
+    marker_color: str | None = None
+    status: AdminFeatureOperationalStatus
+    geometry: dict[str, Any] | None = None
+    area_square_meters: float | None = None
+    price_summary: list[PricePointOut] | None = None
+    weather_summary: WeatherSummaryOut | None = None
+
+
+class AdminFeatureCluster(BaseModel):
+    """Admin base Feature의 canonical 행정구역 rollup."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cluster_key: str
+    feature_count: int
+    lon: float
+    lat: float
+
+
+class AdminInBoundsCoverage(BaseModel):
+    """Admin in-bounds 결과 상한과 반환 건수."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    returned: int
+    limit: int
+
+
+class AdminFeaturesInBoundsData(BaseModel):
+    """Admin 지도 item/cluster envelope data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["items", "clusters"]
+    items: list[AdminFeatureMapItem]
+    clusters: list[AdminFeatureCluster]
+    truncated: bool
+    coverage: AdminInBoundsCoverage
+
+
+class AdminFeaturesInBoundsResponse(BaseModel):
+    """``GET /admin/features/in-bounds`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminFeaturesInBoundsData
+    meta: Meta
+
+
 class AdminFeatureOverrideRecord(BaseModel):
     """생성/갱신된 feature override."""
 
@@ -143,7 +232,15 @@ class AdminFeatureDeactivateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str = Field(min_length=1)
-    operator: str | None = None
+    operator: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
     prevent_provider_reactivation: bool = True
 
 
@@ -259,7 +356,15 @@ class AdminFeatureCreateRequest(AdminFeatureBaseMutation):
     marker_color: str = Field(pattern=r"^P-(0[1-9]|1[0-6])$")
     status: Literal["draft", "active", "inactive", "hidden"] = "active"
     reason: str = Field(min_length=1)
-    operator: str | None = None
+    operator: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
     idempotency_key: str | None = Field(
         default=None,
         description="feature_id 미지정 시 source_natural_key로 쓰는 caller-provided key.",
@@ -270,7 +375,15 @@ class AdminFeaturePatchRequest(AdminFeatureBaseMutation):
     """``PATCH /admin/features/{feature_id}`` body."""
 
     reason: str = Field(min_length=1)
-    operator: str | None = None
+    operator: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _at_least_one_patch_field(self) -> AdminFeaturePatchRequest:
@@ -286,7 +399,15 @@ class AdminFeatureDeleteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str = Field(min_length=1)
-    operator: str | None = None
+    operator: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
 
 
 class AdminFeatureChangeRequestRecord(BaseModel):
@@ -299,6 +420,10 @@ class AdminFeatureChangeRequestRecord(BaseModel):
     action: Literal["add", "update", "delete"]
     status: Literal["pending", "applied", "rejected"]
     review_mode: FeatureMutationReviewMode
+    base_row_revision: int | None = Field(
+        default=None,
+        description="update/delete 요청 제출 시 확인한 feature row_revision.",
+    )
     payload: dict[str, Any]
     reason: str | None = None
     requested_by: str | None = None
@@ -373,6 +498,10 @@ class AdminFeatureDetailFeatureRecord(BaseModel):
     sibling_group_id: str | None = None
     data_origin: str
     data_version: int
+    row_revision: int = Field(
+        ge=1,
+        description="correction If-Match에 사용할 server-owned revision.",
+    )
     user_change_kind: str | None = None
     user_change_status: str | None = None
     user_change_request_id: str | None = None
@@ -515,12 +644,37 @@ class AdminFeatureDetailResponse(BaseModel):
     meta: Meta
 
 
+class AdminFeatureRevisionData(BaseModel):
+    """correction precondition용 feature core revision snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    row_revision: int = Field(ge=1)
+
+
+class AdminFeatureRevisionResponse(BaseModel):
+    """동적 aggregate를 제외한 stable revision representation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminFeatureRevisionData
+
+
 class AdminFeatureReviewActionRequest(BaseModel):
     """approve/reject body."""
 
     model_config = ConfigDict(extra="forbid")
 
-    operator: str | None = None
+    operator: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
     reason: str | None = None
 
 
@@ -596,6 +750,7 @@ def _change_record(row: FeatureChangeRequest) -> AdminFeatureChangeRequestRecord
         action=row.action,
         status=row.state,
         review_mode=row.review_mode,
+        base_row_revision=row.base_row_revision,
         payload=row.payload,
         reason=row.reason,
         requested_by=row.requested_by,
@@ -711,6 +866,266 @@ def _change_error(exc: FeatureChangeConflict) -> HTTPException:
     return HTTPException(status_code=status_code, detail=str(exc))
 
 
+# ── If-Match row-revision 낙관적 동시성 (T-VN-13, D-10-3) ─────────────────────
+def _set_feature_etag(response: Response, revision: int) -> None:
+    response.headers["ETag"] = revision_etag(revision)
+
+
+def _require_if_match_revision(request: Request) -> int:
+    """correction 요청의 ``If-Match``를 row_revision으로 파싱한다.
+
+    누락 → 428, 정확히 한 physical header line의 canonical strong ETag가 아니면
+    → 422. bare/weak/wildcard/list/0/선행 0/BIGINT 초과는 모두 거부한다.
+    """
+    revision = parse_revision_header(request, "If-Match", required=True)
+    assert revision is not None
+    return revision
+
+
+def _precondition_failed(exc: FeaturePreconditionFailed) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_412_PRECONDITION_FAILED,
+        detail={
+            "code": "PRECONDITION_FAILED",
+            "message": (
+                "If-Match row_revision이 현재 feature 행과 다릅니다: "
+                f"current={exc.current}."
+            ),
+        },
+    )
+
+
+_ETAG_RESPONSE_HEADER = {
+    "ETag": {
+        "description": "현재 feature의 server-owned row_revision strong entity tag.",
+        "schema": {"type": "string"},
+    }
+}
+_IF_MATCH_OPENAPI_PARAMETER = {
+    "name": "If-Match",
+    "in": "header",
+    "required": True,
+    "description": "직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성).",
+    "schema": {"type": "string"},
+}
+_ADMIN_CLUSTER_DRILL_DOWN: dict[ClusterUnit, ClusterUnit | None] = {
+    "sido": "sigungu",
+    "sigungu": "eupmyeondong",
+    "eupmyeondong": None,
+}
+
+
+def _resolve_admin_cluster_unit(
+    cluster_unit: ClusterUnit | None,
+    zoom: int | None,
+) -> ClusterUnit | None:
+    if cluster_unit is not None:
+        return cluster_unit
+    if zoom is None or zoom >= 14:
+        return None
+    if zoom <= 7:
+        return "sido"
+    if zoom <= 10:
+        return "sigungu"
+    return "eupmyeondong"
+
+
+async def _admin_feature_exists_or_404(
+    session: AsyncSession,
+    feature_id: str,
+) -> None:
+    if not await admin_feature_card_target_exists(session, feature_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+
+
+@router.get(
+    "/in-bounds",
+    response_model=AdminFeaturesInBoundsResponse,
+    summary="Admin bbox 안 base Feature item/cluster",
+)
+async def list_admin_features_in_bounds(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    min_lon: Annotated[float, Query(description="bbox 최소 경도 (WGS84).")],
+    min_lat: Annotated[float, Query(description="bbox 최소 위도.")],
+    max_lon: Annotated[float, Query(description="bbox 최대 경도.")],
+    max_lat: Annotated[float, Query(description="bbox 최대 위도.")],
+    feature_status: Annotated[
+        list[AdminFeatureOperationalStatus] | None,
+        Query(
+            alias="status",
+            description=(
+                "운영 상태 반복 필터. 미지정 시 삭제 전 draft/active/inactive/hidden/"
+                "broken 전체."
+            ),
+        ),
+    ] = None,
+    kind: Annotated[list[str] | None, Query(description="feature kind 반복 필터.")] = None,
+    category: Annotated[
+        list[str] | None,
+        Query(description="category code 반복 필터."),
+    ] = None,
+    provider: Annotated[
+        list[str] | None,
+        Query(description="primary provider 반복 필터."),
+    ] = None,
+    zoom: Annotated[int | None, Query(ge=0, le=24)] = None,
+    cluster_unit: Annotated[ClusterUnit | None, Query()] = None,
+    max_items: Annotated[int, Query(ge=1, le=2000)] = 1000,
+    include_geometry: Annotated[
+        bool,
+        Query(description="item mode에서 route/area GeoJSON을 포함한다."),
+    ] = False,
+) -> AdminFeaturesInBoundsResponse:
+    started_at = perf_counter()
+    if min_lon > max_lon or min_lat > max_lat:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="bbox min 좌표가 max보다 큽니다.",
+        )
+    resolved_unit = _resolve_admin_cluster_unit(cluster_unit, zoom)
+    try:
+        if resolved_unit is not None:
+            raw_clusters = await cluster_admin_features_in_bbox(
+                session,
+                min_lon=min_lon,
+                min_lat=min_lat,
+                max_lon=max_lon,
+                max_lat=max_lat,
+                cluster_unit=resolved_unit,
+                statuses=feature_status,
+                kinds=kind,
+                categories=category,
+                providers=provider,
+                limit=max_items + 1,
+            )
+            truncated = len(raw_clusters) > max_items
+            clusters = [
+                AdminFeatureCluster(**row) for row in raw_clusters[:max_items]
+            ]
+            return AdminFeaturesInBoundsResponse(
+                data=AdminFeaturesInBoundsData(
+                    mode="clusters",
+                    items=[],
+                    clusters=clusters,
+                    truncated=truncated,
+                    coverage=AdminInBoundsCoverage(
+                        returned=len(clusters),
+                        limit=max_items,
+                    ),
+                ),
+                meta=make_meta(
+                    request,
+                    started_at=started_at,
+                    cluster_unit=resolved_unit,
+                    cluster_drill_down_unit=_ADMIN_CLUSTER_DRILL_DOWN[resolved_unit],
+                ),
+            )
+        raw_items = await admin_features_in_bbox(
+            session,
+            min_lon=min_lon,
+            min_lat=min_lat,
+            max_lon=max_lon,
+            max_lat=max_lat,
+            statuses=feature_status,
+            kinds=kind,
+            categories=category,
+            providers=provider,
+            include_geometry=include_geometry,
+            limit=max_items + 1,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    truncated = len(raw_items) > max_items
+    items = [AdminFeatureMapItem(**row) for row in raw_items[:max_items]]
+    return AdminFeaturesInBoundsResponse(
+        data=AdminFeaturesInBoundsData(
+            mode="items",
+            items=items,
+            clusters=[],
+            truncated=truncated,
+            coverage=AdminInBoundsCoverage(returned=len(items), limit=max_items),
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@router.get(
+    "/{feature_id}/weather",
+    response_model=FeatureWeatherResponse,
+    summary="Admin feature weather card",
+    responses={404: {"description": "feature 없음"}},
+)
+async def get_admin_feature_weather(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    feature_id: str,
+    asof: Annotated[datetime | None, Query()] = None,
+) -> FeatureWeatherResponse:
+    started_at = perf_counter()
+    await _admin_feature_exists_or_404(session, feature_id)
+    card = await weather_repo.build_admin_weather_card(
+        session,
+        feature_id=feature_id,
+        asof=asof,
+    )
+    return FeatureWeatherResponse(
+        data=WeatherCardData(
+            feature_id=card.feature_id,
+            asof=card.asof,
+            source_styles=card.source_styles,
+            metrics=[
+                WeatherMetricOut.model_validate(metric, from_attributes=True)
+                for metric in card.metrics
+            ],
+            latest_at=card.latest_at,
+            is_stale=card.is_stale,
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@router.get(
+    "/{feature_id}/price",
+    response_model=FeaturePriceResponse,
+    summary="Admin feature price card",
+    responses={404: {"description": "feature 없음"}},
+)
+async def get_admin_feature_price(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    feature_id: str,
+    asof: Annotated[datetime | None, Query()] = None,
+    history_limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> FeaturePriceResponse:
+    started_at = perf_counter()
+    await _admin_feature_exists_or_404(session, feature_id)
+    card = await price_repo.build_price_card(
+        session,
+        feature_id=feature_id,
+        asof=asof,
+        history_limit=history_limit,
+    )
+    return FeaturePriceResponse(
+        data=PriceCardData(
+            feature_id=card.feature_id,
+            asof=card.asof,
+            current=[
+                PricePointOut.model_validate(point, from_attributes=True)
+                for point in card.current
+            ],
+            history=[
+                PricePointOut.model_validate(point, from_attributes=True)
+                for point in card.history
+            ],
+            latest_at=card.latest_at,
+            is_stale=card.is_stale,
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
 @router.get("", response_model=AdminFeaturesListResponse)
 async def list_features(
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -825,6 +1240,34 @@ async def list_feature_change_request_route(
 
 
 @router.get(
+    "/{feature_id}/revision",
+    response_model=AdminFeatureRevisionResponse,
+    responses={
+        404: {"description": "feature 없음"},
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+    },
+)
+async def get_feature_revision_route(
+    feature_id: str,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminFeatureRevisionResponse:
+    revision = await get_feature_row_revision(session, feature_id)
+    if revision is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+    _set_feature_etag(response, revision)
+    return AdminFeatureRevisionResponse(
+        data=AdminFeatureRevisionData(
+            feature_id=feature_id,
+            row_revision=revision,
+        )
+    )
+
+
+@router.get(
     "/{feature_id}",
     response_model=AdminFeatureDetailResponse,
     responses={404: {"description": "feature 없음"}},
@@ -853,6 +1296,7 @@ async def get_feature_detail_route(
 @router.post("", response_model=AdminFeatureChangeResponse)
 async def create_feature_route(
     body: AdminFeatureCreateRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[ApiSettings, Depends(_settings)],
 ) -> AdminFeatureChangeResponse:
@@ -869,7 +1313,7 @@ async def create_feature_route(
                 payload=payload,
                 review_mode=_review_mode(settings),
                 reason=body.reason,
-                requested_by=body.operator,
+                requested_by=context.actor,
             )
         except FeatureChangeConflict as exc:
             raise _change_error(exc) from exc
@@ -879,15 +1323,27 @@ async def create_feature_route(
 @router.patch(
     "/{feature_id}",
     response_model=AdminFeatureChangeResponse,
-    responses={404: {"description": "feature 없음"}, 409: {"description": "변경 불가"}},
+    responses={
+        404: {"description": "feature 없음"},
+        409: {"description": "변경 불가"},
+        412: {"description": "If-Match row_revision 불일치"},
+        422: {"description": "If-Match가 row_revision strong ETag가 아님"},
+        428: {"description": "If-Match 누락"},
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 async def patch_feature_route(
     feature_id: str,
     body: AdminFeaturePatchRequest,
+    request: Request,
+    response: Response,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[ApiSettings, Depends(_settings)],
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
+    expected_revision = _require_if_match_revision(request)
     async with session.begin():
         try:
             result = await submit_feature_change_request(
@@ -897,25 +1353,43 @@ async def patch_feature_route(
                 payload=_payload(body),
                 review_mode=_review_mode(settings),
                 reason=body.reason,
-                requested_by=body.operator,
+                requested_by=context.actor,
+                expected_row_revision=expected_revision,
             )
+        except FeaturePreconditionFailed as exc:
+            raise _precondition_failed(exc) from exc
         except FeatureChangeConflict as exc:
             raise _change_error(exc) from exc
+        new_revision = await get_feature_row_revision(session, feature_id)
+    if new_revision is not None:
+        _set_feature_etag(response, new_revision)
     return _change_response(result, started_at=started_at)
 
 
 @router.delete(
     "/{feature_id}",
     response_model=AdminFeatureChangeResponse,
-    responses={404: {"description": "feature 없음"}, 409: {"description": "삭제 불가"}},
+    responses={
+        404: {"description": "feature 없음"},
+        409: {"description": "삭제 불가"},
+        412: {"description": "If-Match row_revision 불일치"},
+        422: {"description": "If-Match가 row_revision strong ETag가 아님"},
+        428: {"description": "If-Match 누락"},
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 async def delete_feature_route(
     feature_id: str,
     body: AdminFeatureDeleteRequest,
+    request: Request,
+    response: Response,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[ApiSettings, Depends(_settings)],
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
+    expected_revision = _require_if_match_revision(request)
     async with session.begin():
         try:
             result = await submit_feature_change_request(
@@ -925,21 +1399,34 @@ async def delete_feature_route(
                 payload={},
                 review_mode=_review_mode(settings),
                 reason=body.reason,
-                requested_by=body.operator,
+                requested_by=context.actor,
+                expected_row_revision=expected_revision,
             )
+        except FeaturePreconditionFailed as exc:
+            raise _precondition_failed(exc) from exc
         except FeatureChangeConflict as exc:
             raise _change_error(exc) from exc
+        new_revision = await get_feature_row_revision(session, feature_id)
+    if new_revision is not None:
+        _set_feature_etag(response, new_revision)
     return _change_response(result, started_at=started_at)
 
 
 @router.post(
     "/change-requests/{request_id}/approve",
     response_model=AdminFeatureChangeResponse,
-    responses={404: {"description": "request 없음"}, 409: {"description": "승인 불가"}},
+    responses={
+        404: {"description": "request 없음"},
+        409: {"description": "승인 불가"},
+        412: {"description": "If-Match row_revision 불일치"},
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+    },
 )
 async def approve_feature_change_request_route(
     request_id: str,
     body: AdminFeatureReviewActionRequest,
+    response: Response,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
@@ -948,15 +1435,20 @@ async def approve_feature_change_request_route(
             result = await apply_feature_change_request(
                 session,
                 request_id,
-                operator=body.operator,
+                operator=context.actor,
             )
+        except FeaturePreconditionFailed as exc:
+            raise _precondition_failed(exc) from exc
         except FeatureChangeConflict as exc:
             raise _change_error(exc) from exc
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"feature change request 없음: {request_id!r}",
-        )
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"feature change request 없음: {request_id!r}",
+            )
+        new_revision = await get_feature_row_revision(session, result.feature_id)
+    if new_revision is not None:
+        _set_feature_etag(response, new_revision)
     return _change_response(result, started_at=started_at)
 
 
@@ -968,6 +1460,7 @@ async def approve_feature_change_request_route(
 async def reject_feature_change_request_route(
     request_id: str,
     body: AdminFeatureReviewActionRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
@@ -975,7 +1468,7 @@ async def reject_feature_change_request_route(
         result = await reject_feature_change_request(
             session,
             request_id,
-            operator=body.operator,
+            operator=context.actor,
             reason=body.reason,
         )
     if result is None:
@@ -999,6 +1492,7 @@ async def reject_feature_change_request_route(
 async def deactivate_feature_route(
     feature_id: str,
     body: AdminFeatureDeactivateRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureDeactivateResponse:
     started_at = perf_counter()
@@ -1008,7 +1502,7 @@ async def deactivate_feature_route(
                 session,
                 feature_id,
                 reason=body.reason,
-                operator=body.operator,
+                operator=context.actor,
                 prevent_provider_reactivation=body.prevent_provider_reactivation,
             )
         except FeatureStateConflict as exc:

@@ -29,6 +29,7 @@ from kortravelmap.infra.merge_repo import (
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, OffsetMeta, make_meta, make_offset_meta
 
@@ -198,7 +199,15 @@ class DedupReviewDecisionRequest(BaseModel):
     decision: DedupDecision
     master_feature_id: str | None = None
     decision_reason: str | None = Field(default=None, min_length=1)
-    reviewed_by: str | None = None
+    reviewed_by: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
+            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
+            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
+        ),
+    )
 
 
 class DedupReviewDecisionData(BaseModel):
@@ -416,6 +425,7 @@ async def decide_review(
     request: Request,
     review_id: str,
     body: DedupReviewDecisionRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> DedupReviewDecisionResponse:
     started_at = perf_counter()
@@ -429,7 +439,7 @@ async def decide_review(
                     session,
                     review_id,
                     master_feature_id=body.master_feature_id,
-                    merged_by=body.reviewed_by,
+                    merged_by=context.actor,
                     reason=body.decision_reason,
                 )
         except MergeError as exc:
@@ -461,7 +471,7 @@ async def decide_review(
             session,
             review_id,
             decision=body.decision,
-            reviewed_by=body.reviewed_by,
+            reviewed_by=context.actor,
             decision_reason=body.decision_reason,
         )
     if not changed:

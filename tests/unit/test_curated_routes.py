@@ -2,18 +2,159 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 from kortravelmap.api.app import create_app
+from kortravelmap.api.curated_public_schema import (
+    PublicCuratedAreaFeatureView,
+    PublicCuratedEventFeatureView,
+    PublicCuratedNoticeFeatureView,
+    PublicCuratedPlaceFeatureView,
+    PublicCuratedPriceFeatureView,
+    PublicCuratedRouteFeatureView,
+    PublicCuratedWeatherFeatureView,
+)
+from kortravelmap.api.db import get_session
 from kortravelmap.api.routers import curated
+from kortravelmap.api.settings import ApiSettings
 from pydantic import SecretStr
 
+from kortravelmap.infra.curated_repo import CuratedFeature, CuratedFeaturePage
 from kortravelmap.settings import KorTravelMapSettings
 
 pytestmark = pytest.mark.unit
+
+
+def _raw_curated_feature() -> CuratedFeature:
+    now = datetime(2026, 7, 19, tzinfo=UTC)
+    return CuratedFeature(
+        curated_feature_id="11111111-1111-4111-8111-111111111111",
+        theme_id="22222222-2222-4222-8222-222222222222",
+        theme_slug="public-raw-boundary",
+        theme_name="공개 raw 경계",
+        theme_group="test",
+        feature_id="feature:public-curated",
+        feature_name="공개 큐레이션 장소",
+        feature_category="01070100",
+        feature_kind="place",
+        lon=126.978,
+        lat=37.566,
+        sido_code="11",
+        sigungu_code="11110",
+        legal_dong_code="1111010100",
+        address={
+            "road": "서울특별시 공개로 1",
+            "legal": "서울특별시 공개동 1",
+            "zipcode": "03172",
+            "sido_name": "서울특별시",
+            "bjd_code": "1111010100",
+            "road_address_management_no": "RAW_ADDRESS_MANAGEMENT_NO",
+            "unknown_address": "RAW_ADDRESS_SENTINEL",
+        },
+        detail={
+            "feature_id": "feature:public-curated",
+            "place_kind": "museum",
+            "phones": [
+                "02-0000-0000",
+                {"raw": "RAW_PHONE_OBJECT"},
+                "RAW_PHONE_SENTINEL",
+            ],
+            "reviews_link": {
+                "naver": "https://map.naver.com/example",
+                "raw_provider": "https://raw.example.test/review",
+            },
+            "business_hours": {
+                "timezone": "Asia/Seoul",
+                "open_now": True,
+                "periods": [
+                    {
+                        "open": {"day": 1, "time": "0900", "raw": "RAW_OPEN"},
+                        "close": {"day": 1, "time": "1800"},
+                        "raw": "RAW_PERIOD",
+                    }
+                ],
+                "weekday_text": ["RAW_WEEKDAY_TEXT"],
+                "raw": "RAW_BUSINESS_HOURS",
+            },
+            "facility_info": {
+                "wheelchair": True,
+                "description": "공개 장소 설명",
+                "gemini_enriched_description": "검수된 공개 설명",
+                "category_label": "박물관",
+                "youtube_video_id": "video-raw-1",
+                "youtube_video_url": "https://youtube.example.test/raw",
+                "youtube_video_title": "RAW_VIDEO_TITLE",
+                "youtube_channel_id": "RAW_CHANNEL_ID",
+                "youtube_channel_title": "RAW_CHANNEL_TITLE",
+                "youtube_playlist_id": "RAW_PLAYLIST_ID",
+                "youtube_playlist_title": "RAW_PLAYLIST_TITLE",
+                "youtube_source_type": "RAW_SOURCE_TYPE",
+                "youtube_source_value": "RAW_SOURCE_VALUE",
+                "youtube_source_title": "RAW_SOURCE_TITLE",
+                "youtube_source_search_query": "RAW_SEARCH_QUERY",
+                "youtube_corrected_search_query": "RAW_CORRECTED_QUERY",
+                "timestamp_start": "00:03:12",
+                "timestamp_end": "00:03:41",
+                "transcript_excerpt": "RAW_TRANSCRIPT_EXCERPT",
+                "gemini_url_evidence": "RAW_GEMINI_EVIDENCE",
+                "confidence_score": 86,
+                "source_record_key": "RAW_FACILITY_SOURCE_KEY",
+                "unknown_nested": {"sentinel": "RAW_FACILITY_SENTINEL"},
+            },
+            "payload": {
+                "sentinel": "RAW_DETAIL_PAYLOAD",
+                "source_record_key": "RAW_NESTED_SOURCE_RECORD_KEY",
+                "raw_payload_hash": "RAW_NESTED_HASH",
+            },
+            "raw_data": {"sentinel": "RAW_DETAIL_ROOT"},
+        },
+        source_id="33333333-3333-4333-8333-333333333333",
+        provider="raw-provider-internal",
+        dataset_key="raw-dataset-internal",
+        source_name="공개 출처명",
+        source_url="https://example.test/source",
+        source_record_key="RAW_TOP_LEVEL_SOURCE_RECORD_KEY",
+        curation_status="curated",
+        selection_origin="source_rule",
+        selected_by="RAW_ADMIN_ACTOR",
+        selected_at=now,
+        rejected_by=None,
+        rejected_at=None,
+        rejection_reason=None,
+        rank_score=99.0,
+        display_title="공개 제목",
+        display_summary="공개 요약",
+        curation_relation="nearby_option",
+        reuse_policy="allowed",
+        content_version=3,
+        metadata={"raw_external_id": "RAW_METADATA_ID"},
+        created_at=now,
+        updated_at=now,
+        archived_at=None,
+    )
+
+
+def _nested_keys(value: object) -> set[str]:
+    if isinstance(value, dict):
+        return set(value) | {
+            nested_key
+            for nested_value in value.values()
+            for nested_key in _nested_keys(nested_value)
+        }
+    if isinstance(value, list):
+        return {
+            nested_key
+            for nested_value in value
+            for nested_key in _nested_keys(nested_value)
+        }
+    return set()
 
 
 def test_curated_routes_are_in_openapi() -> None:
@@ -29,6 +170,29 @@ def test_curated_routes_are_in_openapi() -> None:
     assert "/v1/admin/curated-features" not in paths
     assert "/v1/admin/curated-features/{curated_feature_id}/select" not in paths
     assert "/v1/admin/curated-source-rules/{rule_id}/apply" in paths
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/curated-features",
+        "/v1/curated-features/11111111-1111-4111-8111-111111111111",
+        "/v1/curated-sources",
+        "/v1/curated-themes",
+    ],
+)
+def test_public_curated_routes_reject_keyless_requests(path: str) -> None:
+    app = create_app(
+        ApiSettings(
+            _env_file=None,
+            public_api_key_required=True,
+            vworld_api_key=SecretStr("public-key-for-curated-route-test"),
+        )
+    )
+    response = TestClient(app).get(path)
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "UNAUTHORIZED"
 
 
 def test_curated_source_rule_view_accepts_detail_selector() -> None:
@@ -59,6 +223,241 @@ def test_curated_source_rule_view_accepts_detail_selector() -> None:
     assert view.detail_selector == {
         "path": ["payload", "channel_id"],
         "value": "channel-A",
+    }
+
+
+def test_public_curated_list_and_detail_strip_raw_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#765: 공개 list/detail은 같은 fail-closed allowlist를 사용한다."""
+
+    row = _raw_curated_feature()
+
+    async def _list(_session: object, **kwargs: Any) -> CuratedFeaturePage:
+        assert kwargs["public_only"] is True
+        assert {"theme_id", "source_id", "provider", "dataset_key"}.isdisjoint(kwargs)
+        return CuratedFeaturePage(items=(row,), next_cursor=None)
+
+    async def _get(_session: object, **kwargs: Any) -> CuratedFeature:
+        assert kwargs["public_only"] is True
+        return row
+
+    monkeypatch.setattr(curated.curated_repo, "list_curated_features", _list)
+    monkeypatch.setattr(curated.curated_repo, "get_curated_feature", _get)
+
+    app = create_app(
+        ApiSettings(public_api_key_required=False, vworld_api_key=None)
+    )
+
+    async def _session() -> AsyncIterator[object]:
+        yield object()
+
+    app.dependency_overrides[get_session] = _session
+    client = TestClient(app)
+
+    listed = client.get("/v1/curated-features")
+    detailed = client.get(f"/v1/curated-features/{row.curated_feature_id}")
+
+    assert listed.status_code == 200
+    assert detailed.status_code == 200
+    list_item = listed.json()["data"]["items"][0]
+    detail_item = detailed.json()["data"]
+    assert list_item == detail_item
+    assert detail_item["feature_kind"] == "place"
+    assert detail_item["address"] == {
+        "road": "서울특별시 공개로 1",
+        "legal": "서울특별시 공개동 1",
+        "zipcode": "03172",
+        "sido_name": "서울특별시",
+    }
+    assert detail_item["detail"] == {
+        "feature_id": "feature:public-curated",
+        "place_kind": "museum",
+        "phones": ["02-0000-0000"],
+        "reviews_link": {"naver": "https://map.naver.com/example"},
+        "business_hours": {
+            "timezone": "Asia/Seoul",
+            "open_now": True,
+            "periods": [
+                {
+                    "open": {"day": 1, "time": "0900"},
+                    "close": {"day": 1, "time": "1800"},
+                }
+            ],
+            "special_days": [],
+        },
+        "facility_info": {
+            "description": "공개 장소 설명",
+            "gemini_enriched_description": "검수된 공개 설명",
+            "category_label": "박물관",
+            "wheelchair": True,
+        },
+    }
+    assert {
+        "payload",
+        "raw",
+        "raw_data",
+        "raw_provider",
+        "raw_payload_hash",
+        "source_record_key",
+        "source_id",
+        "metadata",
+        "selected_by",
+        "road_address_management_no",
+        "unknown_address",
+        "unknown_nested",
+        "weekday_text",
+        "youtube_video_id",
+        "youtube_video_url",
+        "youtube_video_title",
+        "youtube_channel_id",
+        "youtube_channel_title",
+        "youtube_playlist_id",
+        "youtube_playlist_title",
+        "youtube_source_type",
+        "youtube_source_value",
+        "youtube_source_title",
+        "youtube_source_search_query",
+        "youtube_corrected_search_query",
+        "timestamp_start",
+        "timestamp_end",
+        "transcript_excerpt",
+        "gemini_url_evidence",
+        "confidence_score",
+    }.isdisjoint(_nested_keys(detail_item))
+    serialized = json.dumps(detail_item, ensure_ascii=False)
+    for raw_value in (
+        "RAW_PHONE_OBJECT",
+        "RAW_PHONE_SENTINEL",
+        "RAW_ADDRESS_SENTINEL",
+        "RAW_BUSINESS_HOURS",
+        "video-raw-1",
+        "RAW_VIDEO_TITLE",
+        "RAW_CHANNEL_ID",
+        "RAW_PLAYLIST_ID",
+        "RAW_TRANSCRIPT_EXCERPT",
+        "RAW_GEMINI_EVIDENCE",
+        "RAW_FACILITY_SENTINEL",
+    ):
+        assert raw_value not in serialized
+
+    # 같은 repository row의 admin/operator projection은 감사 원문을 그대로 유지한다.
+    admin_item = curated._feature_view(row).model_dump(mode="json")
+    assert admin_item["source_record_key"] == "RAW_TOP_LEVEL_SOURCE_RECORD_KEY"
+    assert admin_item["detail"]["payload"]["sentinel"] == "RAW_DETAIL_PAYLOAD"
+    assert admin_item["detail"]["facility_info"]["youtube_video_id"] == "video-raw-1"
+    assert admin_item["metadata"]["raw_external_id"] == "RAW_METADATA_ID"
+
+
+@pytest.mark.parametrize(
+    ("feature_kind", "view_type"),
+    [
+        ("place", PublicCuratedPlaceFeatureView),
+        ("event", PublicCuratedEventFeatureView),
+        ("notice", PublicCuratedNoticeFeatureView),
+        ("area", PublicCuratedAreaFeatureView),
+        ("route", PublicCuratedRouteFeatureView),
+        ("price", PublicCuratedPriceFeatureView),
+        ("weather", PublicCuratedWeatherFeatureView),
+    ],
+)
+def test_public_curated_projection_uses_feature_kind_discriminator(
+    feature_kind: str,
+    view_type: type[object],
+) -> None:
+    row = replace(_raw_curated_feature(), feature_kind=feature_kind)
+
+    view = curated._public_feature_view(row)
+
+    assert view is not None
+    assert isinstance(view.root, view_type)
+    assert view.root.feature_kind == feature_kind
+
+
+def test_public_curated_projection_rejects_unknown_kind() -> None:
+    row = replace(_raw_curated_feature(), feature_kind="internal-experiment")
+
+    assert curated._public_feature_view(row) is None
+
+
+def test_public_curated_routes_hide_unknown_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = replace(_raw_curated_feature(), feature_kind="internal-experiment")
+
+    async def _list(_session: object, **_kwargs: Any) -> CuratedFeaturePage:
+        return CuratedFeaturePage(items=(row,), next_cursor=None)
+
+    async def _get(_session: object, **_kwargs: Any) -> CuratedFeature:
+        return row
+
+    monkeypatch.setattr(curated.curated_repo, "list_curated_features", _list)
+    monkeypatch.setattr(curated.curated_repo, "get_curated_feature", _get)
+    app = create_app(ApiSettings(public_api_key_required=False, vworld_api_key=None))
+
+    async def _session() -> AsyncIterator[object]:
+        yield object()
+
+    app.dependency_overrides[get_session] = _session
+    client = TestClient(app)
+
+    listed = client.get("/v1/curated-features")
+    detailed = client.get(f"/v1/curated-features/{row.curated_feature_id}")
+
+    assert listed.status_code == 200
+    assert listed.json()["data"]["items"] == []
+    assert detailed.status_code == 404
+
+
+def test_public_curated_routes_fail_closed_on_malformed_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _raw_curated_feature()
+    malformed_detail = {
+        **base.detail,
+        "reviews_link": {
+            "naver": "https://example.test:99999/review",
+        },
+        "facility_info": {
+            "description": "URL 오류와 무관한 공개 설명",
+            "homepage_url": "https://example.test:99999/home",
+            "image_url": "https://[malformed-ipv6",
+        },
+    }
+    row = replace(
+        base,
+        source_url="https://[malformed-ipv6",
+        detail=malformed_detail,
+    )
+
+    async def _list(_session: object, **_kwargs: Any) -> CuratedFeaturePage:
+        return CuratedFeaturePage(items=(row,), next_cursor=None)
+
+    async def _get(_session: object, **_kwargs: Any) -> CuratedFeature:
+        return row
+
+    monkeypatch.setattr(curated.curated_repo, "list_curated_features", _list)
+    monkeypatch.setattr(curated.curated_repo, "get_curated_feature", _get)
+    app = create_app(ApiSettings(public_api_key_required=False, vworld_api_key=None))
+
+    async def _session() -> AsyncIterator[object]:
+        yield object()
+
+    app.dependency_overrides[get_session] = _session
+    client = TestClient(app)
+
+    listed = client.get("/v1/curated-features")
+    detailed = client.get(f"/v1/curated-features/{row.curated_feature_id}")
+
+    assert listed.status_code == 200
+    assert detailed.status_code == 200
+    list_item = listed.json()["data"]["items"][0]
+    detail_item = detailed.json()["data"]
+    assert list_item == detail_item
+    assert "source_url" not in detail_item
+    assert detail_item["detail"]["reviews_link"] == {}
+    assert detail_item["detail"]["facility_info"] == {
+        "description": "URL 오류와 무관한 공개 설명"
     }
 
 

@@ -61,7 +61,7 @@ KTM 내부 green만으로 cross-repo 계약이 보존됐다고 간주하지 않�
 | F-4 | **canonical ops actor는 principal로 수렴했지만 legacy admin write가 남았다**: pipeline request/cancel/schedule·curation collection write는 `context.actor`를 쓴다. 반면 admin Feature create/patch/delete/review/deactivate, legacy curated select/unselect, admin auth-event에 더해 data-integrity 이슈 액션, offline upload 생성·검증, dedup/enrichment 검수도 body `operator`/`actor`/`created_by`/`reviewed_by`를 감사 actor로 저장한다. PinVi client는 이 중 admin Feature·curated·auth-event·이슈 액션·dedup 검수에서 해당 필드를 계속 전송한다(enrichment 검수·offline upload는 PinVi 미호출) | `ops_pipeline.py:1369-1992`; `curations.py:865-1065`; `admin_features.py:853-1011`; `curated.py:1123-1174`; `admin_auth.py:187-202`; `admin_issues.py:437,567,616`; `offline_uploads.py:780,838,1146,1165`; `dedup_review.py:432,464`; `enrichment_review.py:381`; PinVi `kor_travel_map_admin.py:260-319,437-455,488-502` |
 | F-5 | **Feature ID(64-bit SHA-1 prefix)는 정본 identity로 부적합**: 코드 주석의 "10^9건 충돌 ~3e-11"은 birthday bound(≈2.7%) 오인. 게다가 bjd/category가 해시 입력이라 보정만으로 재키잉 발생(코드가 자인) | `ids.py:68-70,149-154` |
 | F-6 | **source lineage denorm 미정합**: head-pointer deferrable FK는 존재하나, `source_records`의 denorm identity 4튜플(provider/dataset/type/id)이 부모 entity와 일치하도록 강제하는 composite FK는 없다(entity A에 provider B record 연결 가능) | `models.py:431-440,519-533` |
-| F-7 | **weather/price 비대칭**: weather에는 semantic UNIQUE·source-record FK·`valid_from<=valid_until` CHECK가 없다. price는 semantic UNIQUE·source-record FK·nonnegative CHECK를 보유한다. PG16에서 UNIQUE는 `NOT VALID` 불가 — `CREATE UNIQUE INDEX CONCURRENTLY`(+writer conflict target 배포와 **같은 cutover**)로 도입해야 한다 | `0017` vs `0034` DDL; PG16 문법 사실 |
+| F-7 | **weather/price 비대칭**: weather에는 semantic UNIQUE·source-record FK·`valid_from<=valid_until` CHECK가 없다. price는 semantic UNIQUE·source-record FK·nonnegative CHECK를 보유한다. PG16에서 UNIQUE는 `NOT VALID` 불가다. 후속 #766에서 dedup race를 확인해 writer lock→dedup→non-concurrent UNIQUE의 원자 transaction으로 정정했다 | `0017` vs `0034` DDL; PG16 문법 사실; issue #766 |
 | F-8 | **공간·조회 결함**: `include_geometry`가 응답이 아닌 **결과집합**을 바꿈(EXPLAIN 재현 2220→2221행), `&&`-only MBR false positive 실재, bbox LATERAL이 kind 무관 매행 실행, GiST 6개(자동 full 3 + 수동 partial 3)로 write ~1.6×, `include_total=false`여도 COUNT 무조건 실행, cursor가 query 파라미터 미포함(재사용 시 조용한 누락/중복) | `feature_repo.py:689,828,963,3534,3766-3788`; `models.py:204-221,288-297`; scratch EXPLAIN 실측 |
 | F-9 | **notice cast 취약**: `detail->>'valid_end_time'` timestamptz 직접 cast — 오염 row 1건이 모든 공개 read를 500으로 만들 수 있고, lineage anti-join이 모든 공개 read의 상시 hot-path 비용 | `feature_repo.py:533-539,638` |
 | F-10 | **Alembic metadata ≠ schema**: weather/price/log/api-key/auth-event 등 table이 `models.metadata`에 없고 `include_object` 콜백도 없어 clean DB `alembic check`가 실패(PostGIS object까지 drop 후보) | `env.py:54,65,82` |
@@ -90,6 +90,27 @@ stack 미노출), PinVi의 OpenAPI HTTP 경계(직접 DB/패키지 접근 금지
 영속화·실행 manifest·양방향 reconcile·typed scope·append-only command audit·exact-scope history
 (0050~0057, #709/#710/#711/#713/#714/#715·#701·#691·#725~#729),
 provider×dataset×scope datasets 운영 화면(#698·#723).
+
+### 1.1 T-VN-59 공개 schema reachability 보강 (2026-07-20)
+
+T-VN-SYNC-02 적대적 통합 리뷰에서 F-3/D-1의 raw provider payload operator 격리가
+feature detail에는 적용됐지만 public weather·curation 응답에는 끝까지 전파되지 않은 것을
+확인했다. public `WeatherValueItem`은 `source_record_key`를, public alert는 source record
+identity·원문 payload·ingestion timestamp를, public curation item은
+`source_record_key`·자유형 metadata를 노출한다. 이 schema는 `openapi.user.json`의 response
+root에서 재귀적으로 도달 가능하므로 단순 route allowlist만으로는 공개 경계를 보장하지 못한다.
+
+T-VN-59는 다음 보강 결정을 적용한다.
+
+1. public DTO는 typed domain projection만 소유하고 admin/operator raw DTO와 상속 없이
+   분리한다. 호환 alias는 만들지 않는다.
+2. alert raw source-record 이력은 admin BFF operator endpoint로 이동한다. forecast lineage는
+   기존 feature source/observation operator endpoint에서 조회한다.
+3. user OpenAPI gate는 operation response root에서 모든 component 참조와 container 조합을
+   재귀 순회한다. 공개 경계에서 raw lineage field나 arbitrary provider payload가 reachable이면
+   export를 거부한다.
+4. 이는 REST projection clean-cut이며 immutable source record와 curation 저장 DB 구조는
+   그대로 유지한다.
 
 ## 2. 설계 결정 (ADR 후보)
 
@@ -251,8 +272,9 @@ provider×dataset×scope datasets 운영 화면(#698·#723).
   3. `include_geometry`는 serialization만 제어(candidate 술어는 option 무관 단일) —
      route/area는 `&& envelope AND ST_Intersects`.
   4. `include_total`을 repo까지 전달(false면 COUNT 미실행). cursor에 **canonical query
-     fingerprint + version byte**를 넣고 불일치는 `CURSOR_QUERY_MISMATCH` 거부(HMAC은 인가
-     미탑재이므로 도입하지 않음 — 측정/위협 변화 시 재검토).
+     fingerprint + version byte**를 넣고 전용 server-only key로 HMAC-SHA256 서명한다. 불일치는
+     `CURSOR_QUERY_MISMATCH`, 변조는 `CURSOR_SIGNATURE_INVALID`로 DB 접근 전에 거부한다. cursor는
+     인가 수단이 아니지만 신뢰할 수 없는 client 입력이므로 서명 필요성은 인가 탑재 여부와 무관하다.
   5. weather 단건은 부모 공개 확인(없으면 404), **`POST /v1/features/weather/batch`**(set-based,
      item별 `found|no_data|retired`, 전체 `unavailable` 분리)로 PinVi N+1 제거. 범용
      feature-context batch는 측정 후.
@@ -359,7 +381,7 @@ provider×dataset×scope datasets 운영 화면(#698·#723).
 | effective 값 | provider base + field-level `feature_overrides` → `effective_features` projection | override field-path UNIQUE, whole-row 동결 제거 | D-7 |
 | 공개 정본 | `public_features` VIEW/projection (`published∧active∧valid`) | base table의 동일 술어 partial index, 전 공개 payload SQL이 VIEW만 사용 | D-3 |
 | notice | `notice_states`: typed lineage + `valid_during tstzrange` + `is_current` | current partial UNIQUE, range GiST, hot path에서 JSON cast/anti-join 제거 | D-9-7 |
-| weather/price | typed history(bitemporal) + `current_*_summary` | tuple UNIQUE(NULLS NOT DISTINCT, CONCURRENTLY), range·payload CHECK, source/kind FK, BRIN-on-time | D-8 |
+| weather/price | typed history(bitemporal) + `current_*_summary` | tuple UNIQUE(NULLS NOT DISTINCT, writer-lock transactional cutover), range·payload CHECK, source/kind FK, BRIN-on-time | D-8, #766 |
 | operation | `ops.import_jobs`가 provider load와 feature refresh lifecycle 정본(0050~0057) + typed/exact `sync_scope`·dispatch intent·active partial UNIQUE·append-only event history 구현, `feature_update_requests`는 입력·감사·generation companion | 기존 identity UNIQUE/트리거·registry·reconcile 유지, provider_datasets FK 후속 정렬 | D-5, D-10, ADR-064 계열 |
 | curation | `curation_collections/items` **단일 write model** — legacy `curated_features`·단방향 trigger·legacy route는 제거, 후보는 `theme_feature_candidates` 분리 | archive 상태·`archived_at` 결합 CHECK | F-16 |
 | idempotency | `feature_update_request_idempotency` + schedule command audit/active claim/resolution처럼 lifecycle별 append-only 저장소 | `(principal, operation, key)`·request hash·terminal replay/409. 같은 lifecycle이 검증될 때만 공용 저장소 | D-10 |
@@ -391,7 +413,8 @@ operator-api  (admin principal, If-Match/Idempotency-Key)
 
 제거: no-op beach 옵션, 수기 OpenAPI allowlist(표면별 생성으로 대체),
       공개 표면의 raw_data/raw_payload_hash/source_record_key, body operator/actor.
-측정 후: MVT tile, feature-context:batch(범용), cursor HMAC, 물리 listener 분리.
+측정 후: MVT tile, feature-context:batch(범용), cursor signing key rotation/grace window,
+        물리 listener 분리.
 ```
 
 현재 `main`에서 `/v1/features/batch`를 PinVi가 실제 소비하고, canonical
@@ -471,9 +494,9 @@ admin-ops 통합은 canonical operation·admin gate·schema/service 경계를 �
 | T-VN-12 | Idempotency-Key protocol 전개 | 0054의 도메인 ledger를 회귀 기준선으로 보존하고 남은 command에 key/body/result replay·409를 전개. lifecycle이 다른 저장소를 범용 table 하나로 합치지 않음 | D-10 |
 | T-VN-13 | row_revision + If-Match | Feature용 revision 신설, correction PATCH/DELETE, 이후 ETag/304. #727 policy CAS는 resource-specific 선례로만 재사용 | D-10, D-9-8 |
 | T-VN-14 | 지도 completeness | mode/truncated/coverage/cluster_key + include_geometry serialization화 + candidate 술어 단일화 + `ST_Intersects` | D-9 |
-| T-VN-15 | search 계약 | include_total 실전달 + cursor fingerprint/version | D-9 |
+| T-VN-15 | search 계약 | include_total 실전달 + cursor fingerprint/version/HMAC | D-9 |
 | T-VN-16 | weather batch + 부모 404 | set-based batch, bitemporal 파라미터, PinVi N+1 제거 | D-8·D-9 |
-| T-VN-17 | weather 무결성 가드 | tuple UNIQUE(CONCURRENTLY, writer 동시 cutover) + range/payload CHECK(NOT VALID→VALIDATE) + source FK | D-8, F-7 |
+| T-VN-17 | weather 무결성 가드 | tuple UNIQUE(writer lock→dedup→transactional build) + range/payload CHECK(NOT VALID→VALIDATE) + source FK | D-8, F-7, #766 |
 | T-VN-18 | 중복 GiST 제거 + BRIN 감사 | spatial_index=False, partial만 유지(전후 write 실측 첨부), 기존 weather/price BRIN 보존·누락 hot path만 보강 | D-12 |
 | T-VN-19 | alembic 정합 CI | metadata 매핑/include_object + 빈 DB `upgrade→check` exit 0 게이트 | D-12, F-10 |
 | T-VN-20 | actor principal 전면 + body 필드 제거 | D-2 완결(스키마에서 operator/actor 제거) | D-2 |
@@ -497,9 +520,10 @@ admin-ops 통합은 canonical operation·admin gate·schema/service 경계를 �
 
 ### 6.5 Wave 3 — 측정 후
 
-MVT tile, 범용 feature-context:batch, cursor HMAC, weather partition/hypertable·event clock
-직렬화, 물리 listener/process 분리, 매 PR 대규모 fixture. 각각 **도입 조건(측정 지표)을 먼저
-정의**하고 지표가 충족될 때만 착수한다.
+MVT tile, 범용 feature-context:batch, cursor signing key rotation/grace window, weather
+partition/hypertable·event clock 직렬화, 물리 listener/process 분리, 매 PR 대규모 fixture. cursor
+HMAC 최초 도입은 T-VN-15에서 단일 key clean cut으로 완료한다. 나머지는 각각 **도입 조건(측정
+지표)을 먼저 정의**하고 지표가 충족될 때만 착수한다.
 
 ### 6.6 하드닝 백로그 (wave 배정 유동 — 각 항목 PR 1개 규모)
 
@@ -512,6 +536,8 @@ MVT tile, 범용 feature-context:batch, cursor HMAC, weather partition/hypertabl
 - CONCURRENTLY 실패로 남는 INVALID index 탐지·drop runbook(모든 CONCURRENTLY task의 전제).
 - admin 목록 API OFFSET pagination → keyset 전환.
 - PinVi contract test를 필드 레벨(required/type/enum)로 강화 + OpenAPI SHA manifest 검증.
+- cursor signing key rotation 주기·진행 cursor 무효화율을 측정하고, 다중 key grace window가 단일
+  key clean cut보다 우월하다고 입증될 때만 별도 구현한다.
 
 ### 6.7 공통 규율
 
@@ -566,8 +592,8 @@ cross-repo 차단은 `T-ADM-C6c`와 양 저장소 task에 함께 mirror. (4) 본
   collection 교차 검사) — F-1 양방향 모두.
 - 공개 스키마·payload에 raw provider 필드 0건. batch가 5-state를 구분하고 503에서 소비자
   snapshot이 stale로 유지된다(broken 합성 금지).
-- opaque ID byte-for-byte 보존, cursor mismatch 거부, `include_total=false`에서 COUNT 0회,
-  미구현 옵션은 OpenAPI에 없음.
+- opaque ID byte-for-byte 보존, cursor malformed·unknown version·tamper·query mismatch를 각각
+  typed 422로 DB 접근 전에 거부, `include_total=false`에서 COUNT 0회, 미구현 옵션은 OpenAPI에 없음.
 - active scope 동시 생성은 operation 1개로 수렴하고 같은 계획만 재사용하며 다른 계획은 409.
 - terminal 뒤에도 같은 Idempotency-Key·같은 body는 각 도메인 ledger에서 저장된 동일 결과를
   replay한다. 같은 key·다른 body는 409, stale If-Match는 412, 조건부 GET은 304다.
@@ -604,3 +630,9 @@ scratch EXPLAIN·write 실측 포함), #704(§13 대질 — retired/missing·멱
 PR #736(`docs/vnext-review-propagation`)에서 §7 매핑을 ADR-066~075, architecture, integration,
 deploy/runbook, tasks, entry/status 문서에 전개했다. merge 뒤에도 본 보고서를 설계 근거 정본으로
 유지하고 구현 완료 증거는 각 T-VN task와 PR에 기록한다.
+
+2026-07-19 T-VN-15 구현에서 fingerprint만으로는 client가 payload를 다시 서명하지 않고 변조하는
+것을 막을 수 없음을 확인했다. PR #780은 최초 cursor를 전용 API-only HMAC key의 단일-key clean
+cut으로 채택한다. 이에 D-9, §6.3, §6.5, §6.6, §8.2와 ADR-073을 함께 amend하며, 기존 Wave 3의
+"HMAC 도입 측정"은 signing key rotation 주기·진행 cursor 무효화율·다중 key grace window 측정으로
+대체한다.

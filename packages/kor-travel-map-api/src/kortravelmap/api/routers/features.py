@@ -25,7 +25,14 @@ from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from kortravelmap.core.exceptions import (
+    FeatureSearchCursorError,
+    FeatureSearchCursorInvalidError,
+    FeatureSearchCursorQueryMismatchError,
+    FeatureSearchCursorTamperedError,
+    FeatureSearchCursorVersionUnsupportedError,
+)
 from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
 from kortravelmap.infra import (
     curation_repo,
@@ -41,10 +48,12 @@ from kortravelmap.infra.poi_cache_target_repo import (
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.auth import require_service_token
+from kortravelmap.api.auth import require_admin_frontend, require_service_token
 from kortravelmap.api.db import get_session
-from kortravelmap.api.response import Meta, make_meta
-from kortravelmap.api.routers.curations import CurationItemView
+from kortravelmap.api.http_revision import parse_revision_header, revision_etag
+from kortravelmap.api.response import ClusterUnit, Meta, ProblemDetail, make_meta
+from kortravelmap.api.routers.curations import PublicCurationItemView
+from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
     "router",
@@ -56,13 +65,51 @@ __all__ = [
     "FeatureBatchRequest",
     "FeatureBatchResponse",
     "FeatureSearchResponse",
+    "FeatureSearchProblem",
+    "FeatureSourcesResponse",
     "FeaturesNearbyByTargetResponse",
 ]
+
+# T-VN-05 (ADR-073 / D-9-1 · F-3): 공개 read에서 제거하는 provider raw 경계.
+# ``detail.payload``는 kind-discriminated typed DTO의 자유형 provider passthrough라
+# (예: MOIS PlaceDetail.payload의 mng_no/status_code/detail_status_*/opn_authority_code
+# /epsg5174) 공개 표면에 노출하지 않는다. DB 컬럼·ETL은 건드리지 않고 **공개 read
+# projection에서만** 벗겨낸다. raw observation lineage(raw_data/raw_payload_hash/
+# source_record_key)는 operator 표면으로 이동한다.
+_PUBLIC_DETAIL_STRIPPED_KEYS: frozenset[str] = frozenset({"payload"})
 
 
 router = APIRouter(prefix="/features", tags=["features"])
 NearbySort = Literal["distance", "name", "last_updated_at"]
-_PUBLICLY_HIDDEN_FEATURE_STATUSES = frozenset({"hidden", "deleted"})
+
+
+def _search_cursor_signing_key(request: Request) -> bytes:
+    settings = getattr(request.app.state, "settings", None)
+    if not isinstance(settings, ApiSettings):
+        raise RuntimeError("ApiSettings is not configured on the application")
+    return settings.cursor_signing_key
+
+
+def _search_cursor_http_error(exc: FeatureSearchCursorError) -> HTTPException:
+    if isinstance(exc, FeatureSearchCursorVersionUnsupportedError):
+        code = "FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED"
+        message = "지원하지 않는 feature search cursor version입니다."
+    elif isinstance(exc, FeatureSearchCursorTamperedError):
+        code = "FEATURE_SEARCH_CURSOR_TAMPERED"
+        message = "Feature search cursor 무결성 검증에 실패했습니다."
+    elif isinstance(exc, FeatureSearchCursorQueryMismatchError):
+        code = "CURSOR_QUERY_MISMATCH"
+        message = "Feature search cursor가 현재 검색 조건과 일치하지 않습니다."
+    elif isinstance(exc, FeatureSearchCursorInvalidError):
+        code = "FEATURE_SEARCH_CURSOR_INVALID"
+        message = "Feature search cursor 형식이 올바르지 않습니다."
+    else:
+        code = "FEATURE_SEARCH_CURSOR_INVALID"
+        message = "Feature search cursor를 사용할 수 없습니다."
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={"code": code, "message": message, "details": {}},
+    )
 
 
 # ── 응답 schema ────────────────────────────────────────────────────────
@@ -208,15 +255,35 @@ class FeatureDetailResponse(BaseModel):
     marker_icon: str | None = None
     marker_color: str | None = None
     status: str
+    row_revision: int = Field(
+        ge=1,
+        description="server-owned feature revision. ETag과 같은 값이다.",
+    )
     updated_at: datetime
-    curations: list[CurationItemView] = Field(
+    curations: list[PublicCurationItemView] = Field(
         default_factory=list,
         description="이 Feature가 속한 공개 큐레이션 membership 전부.",
     )
-    observations: list[FeatureObservationView] = Field(
-        default_factory=list,
-        description="이 Feature에 연결된 모든 제공기관 entity의 현재 관측값.",
-    )
+    # T-VN-05: raw observation lineage는 공개 detail에서 제거하고 operator 표면
+    # (``GET /features/{id}/sources``·observation history)으로 이동했다.
+
+
+class FeatureSourcesData(BaseModel):
+    """``GET /features/{feature_id}/sources`` data payload (operator, raw lineage)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    observations: list[FeatureObservationView]
+
+
+class FeatureSourcesResponse(BaseModel):
+    """``GET /features/{feature_id}/sources`` 응답 (operator 전용 raw lineage)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureSourcesData
+    meta: Meta
 
 
 class FeatureObservationHistoryData(BaseModel):
@@ -236,7 +303,16 @@ class FeatureObservationHistoryResponse(BaseModel):
     meta: Meta
 
 
-ClusterUnit = Literal["sido", "sigungu", "eupmyeondong"]
+InBoundsMode = Literal["items", "clusters"]
+
+# cluster drill-down 순서 (ADR-073 D-9-2). 각 rollup 단위에서 한 단계 더 확대(zoom-in)
+# 할 때 소비자가 다음에 요청할 단위. ``eupmyeondong``의 다음은 개별 feature(items)이므로
+# ``None``이다. cluster_key(행정코드) + 이 단위로 결정적(deterministic) drill-down이 된다.
+_CLUSTER_DRILL_DOWN: dict[ClusterUnit, ClusterUnit | None] = {
+    "sido": "sigungu",
+    "sigungu": "eupmyeondong",
+    "eupmyeondong": None,
+}
 
 
 class ClusterSummary(BaseModel):
@@ -250,17 +326,41 @@ class ClusterSummary(BaseModel):
     lat: float
 
 
-class PublicFeatureListData(BaseModel):
-    """public feature 목록 data payload.
+class InBoundsCoverage(BaseModel):
+    """in-bounds 응답 완결성 기술자 (F-8 silent truncation 해소, ADR-073 D-9-2).
 
-    ``cluster_unit``이 None이면 ``items``(개별 feature), 아니면 ``clusters``
-    (행정구역 rollup)를 채운다(T-213c).
+    ``returned``는 이 응답에 실린 항목 수(items 또는 clusters), ``limit``은 이 조회에
+    적용된 ``max_items`` 상한이다. ``returned == limit`` 이고 상위 ``truncated`` 가
+    참이면 경계 안에 더 많은 후보가 있으니 소비자는 zoom-in(cluster drill-down)하거나
+    더 좁은 bbox로 다시 조회해야 한다.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    items: list[FeatureSummary]
+    returned: int
+    limit: int
+
+
+class PublicFeatureListData(BaseModel):
+    """public feature 목록 data payload (ADR-073 D-9-2 지도 완결성 계약).
+
+    ``mode``가 ``items``면 개별 feature(``items``), ``clusters``면 행정구역
+    rollup(``clusters``)을 채운다(T-213c). ``truncated``는 결과가 ``max_items``
+    상한에서 잘렸는지를 **명시**한다(F-8: silent truncation 해소). cluster 모드는
+    결정적 ``cluster_key``(행정코드)를 노출한다. payload 해석용
+    ``cluster_unit``/``drill_down_unit``은 envelope 불변식에 따라 ``meta.cluster``에
+    일원화한다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: InBoundsMode
+    items: list[FeatureSummary] = []
     clusters: list[ClusterSummary] = []
+    truncated: bool = Field(
+        description="결과가 max_items 상한에서 잘렸으면 true(더 많은 후보 존재).",
+    )
+    coverage: InBoundsCoverage
 
 
 class FeaturesInBoundsResponse(BaseModel):
@@ -344,6 +444,21 @@ class FeatureSearchResponse(BaseModel):
 
     data: FeatureSearchData
     meta: Meta
+
+
+FeatureSearchErrorCode = Literal[
+    "VALIDATION_ERROR",
+    "FEATURE_SEARCH_CURSOR_INVALID",
+    "FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED",
+    "FEATURE_SEARCH_CURSOR_TAMPERED",
+    "CURSOR_QUERY_MISMATCH",
+]
+
+
+class FeatureSearchProblem(ProblemDetail):
+    """Feature search request/cursor typed RFC7807 422."""
+
+    code: FeatureSearchErrorCode
 
 
 class AreaContainedFeaturesData(BaseModel):
@@ -464,6 +579,20 @@ def _resolve_cluster_unit(cluster_unit: ClusterUnit | None, zoom: int | None) ->
     return None
 
 
+def _public_detail(detail: dict[str, Any]) -> dict[str, Any]:
+    """공개 detail projection — provider raw passthrough(``payload``)를 벗겨낸다.
+
+    T-VN-05: kind-discriminated typed DTO의 공개-안전 필드만 남기고, 자유형
+    provider raw subset(MOIS ``payload`` 등)은 공개 표면에서 제외한다. DB 컬럼과
+    ETL이 쓰는 값은 그대로 두고 **읽기 projection에서만** 제거한다.
+    """
+    return {
+        key: value
+        for key, value in detail.items()
+        if key not in _PUBLIC_DETAIL_STRIPPED_KEYS
+    }
+
+
 def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
     return FeatureDetailResponse(
         feature_id=row["feature_id"],
@@ -474,7 +603,7 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         lat=row["lat"],
         area_square_meters=row.get("area_square_meters"),
         address=row["address"],
-        detail=row["detail"],
+        detail=_public_detail(row["detail"]),
         urls=row["urls"],
         legal_dong_code=row["legal_dong_code"],
         sido_code=row["sido_code"],
@@ -482,37 +611,68 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         marker_icon=row["marker_icon"],
         marker_color=row["marker_color"],
         status=row["status"],
+        row_revision=row["row_revision"],
         updated_at=row["updated_at"],
     )
 
 
-def _is_public_feature(row: dict[str, Any] | None) -> bool:
-    return bool(
-        row is not None
-        and row.get("deleted_at") is None
-        and row.get("status") not in _PUBLICLY_HIDDEN_FEATURE_STATUSES
-    )
-
-
-async def _is_public_feature_for_request(
+async def _public_feature_row(
     session: AsyncSession,
-    row: dict[str, Any] | None,
-) -> bool:
-    """기본 공개 상태와 notice의 active/latest 계보 조건을 함께 확인한다."""
-    if not _is_public_feature(row):
-        return False
-    assert row is not None
+    feature_id: str,
+) -> dict[str, Any] | None:
+    """공개 feature row 1건 — ADR-067 단일 공개 projection + notice 계보 조건.
+
+    공개 여부 술어는 ``feature.public_features`` VIEW(alembic 0059) 한 곳에만
+    있고 본 라우터는 재구현하지 않는다(F-1 재발 방지). notice는 추가로
+    active/latest 계보 조건(``public_active_notice_feature_ids``)을 통과해야 한다.
+    비공개면 ``None``.
+    """
+    row = await feature_repo.get_public_feature_row(session, feature_id)
+    if row is None:
+        return None
     if row.get("kind") != "notice":
-        return True
+        return row
     visible_ids = await feature_repo.public_active_notice_feature_ids(
         session,
         [str(row["feature_id"])],
     )
-    return str(row["feature_id"]) in visible_ids
+    if str(row["feature_id"]) not in visible_ids:
+        return None
+    return row
 
 
-def _curation_item_view(row: curation_repo.CurationItem) -> CurationItemView:
-    return CurationItemView.model_validate(row, from_attributes=True)
+async def _public_feature_row_or_404(
+    session: AsyncSession,
+    feature_id: str,
+) -> dict[str, Any]:
+    row = await _public_feature_row(session, feature_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+    return row
+
+
+async def _operator_feature_or_404(
+    session: AsyncSession,
+    feature_id: str,
+) -> None:
+    """operator raw lineage 표면용 존재 확인 — 공개 가시성 gate를 적용하지 않는다.
+
+    T-VN-05: raw lineage는 operator 전용이므로 비공개/종료 feature도 감사 대상이다.
+    공개 projection이 아니라 raw row 존재만으로 404를 판정한다(없으면 404).
+    """
+    row = await feature_repo.get_feature_row(session, feature_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+
+
+def _curation_item_view(row: curation_repo.CurationItem) -> PublicCurationItemView:
+    return PublicCurationItemView.model_validate(row, from_attributes=True)
 
 
 def _observation_view(
@@ -545,7 +705,8 @@ def _price_point_out(point: price_repo.PricePoint) -> PricePointOut:
     description=(
         "주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST "
         "인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 "
-        "필터 (예: ``?kind=place&kind=event``). 삭제된 feature 제외."
+        "필터 (예: ``?kind=place&kind=event``). 공개 feature만 반환한다 "
+        "(ADR-067 ``public_features`` projection — 비공개/삭제 feature 제외)."
     ),
 )
 async def list_features_in_bbox(
@@ -676,6 +837,9 @@ async def list_public_features_in_bounds(
         )
     resolved_unit = _resolve_cluster_unit(cluster_unit, zoom)
     if resolved_unit is not None:
+        # max_items+1을 요청해 상한 초과 여부(truncated)를 명시적으로 판정한다
+        # (F-8: silent truncation 해소). 초과분은 결정적 ORDER BY(feature_count
+        # DESC, cluster_key)로 잘라 상위 max_items개만 남긴다.
         clusters_raw = await feature_repo.cluster_features_in_bbox(
             session,
             min_lon=min_lon,
@@ -686,20 +850,27 @@ async def list_public_features_in_bounds(
             kinds=kind,
             categories=category,
             providers=provider,
-            limit=max_items,
+            limit=max_items + 1,
         )
-        clusters = [ClusterSummary(**c) for c in clusters_raw]
+        truncated = len(clusters_raw) > max_items
+        clusters = [ClusterSummary(**c) for c in clusters_raw[:max_items]]
         return FeaturesInBoundsResponse(
             data=PublicFeatureListData(
+                mode="clusters",
                 items=[],
                 clusters=clusters,
+                truncated=truncated,
+                coverage=InBoundsCoverage(returned=len(clusters), limit=max_items),
             ),
             meta=make_meta(
                 request,
                 started_at=started_at,
                 cluster_unit=resolved_unit,
+                cluster_drill_down_unit=_CLUSTER_DRILL_DOWN[resolved_unit],
             ),
         )
+    # items 모드도 max_items+1로 truncated를 판정한다. include_geometry는
+    # membership을 바꾸지 않고 geometry 직렬화만 제어한다(F-8 / ADR-073 D-9-3).
     rows = await feature_repo.features_in_bbox(
         session,
         min_lon=min_lon,
@@ -709,14 +880,18 @@ async def list_public_features_in_bounds(
         kinds=kind,
         categories=category,
         providers=provider,
-        limit=max_items,
+        limit=max_items + 1,
         include_geometry=include_geometry,
         price_stale_hide_days=None,
     )
-    items = [FeatureSummary(**row) for row in rows]
+    truncated = len(rows) > max_items
+    items = [FeatureSummary(**row) for row in rows[:max_items]]
     return FeaturesInBoundsResponse(
         data=PublicFeatureListData(
+            mode="items",
             items=items,
+            truncated=truncated,
+            coverage=InBoundsCoverage(returned=len(items), limit=max_items),
         ),
         meta=make_meta(request, started_at=started_at),
     )
@@ -726,7 +901,12 @@ async def list_public_features_in_bounds(
     "/search",
     response_model=FeatureSearchResponse,
     summary="feature 검색 (이름 trgm + bbox)",
-    responses={422: {"description": "검색 범위 또는 cursor 오류"}},
+    responses={
+        422: {
+            "model": FeatureSearchProblem,
+            "description": "검색 범위 또는 typed cursor 오류",
+        }
+    },
 )
 async def search_public_features(
     request: Request,
@@ -763,9 +943,13 @@ async def search_public_features(
             bbox=bbox,
             kinds=kind,
             categories=category,
-            limit=page_size,
+            page_size=page_size,
             cursor=cursor,
+            include_total=include_total,
+            cursor_signing_key=_search_cursor_signing_key(request),
         )
+    except FeatureSearchCursorError as exc:
+        raise _search_cursor_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     items = [
@@ -791,7 +975,7 @@ async def search_public_features(
             started_at=started_at,
             page_size=page_size,
             next_cursor=page.next_cursor,
-            total=page.total_count if include_total else None,
+            total=page.total_count,
         ),
     )
 
@@ -818,7 +1002,14 @@ async def list_features_nearby(
     ] = None,
     feature_status: Annotated[
         list[str] | None,
-        Query(alias="status", description="feature status 반복 필터. 기본 active."),
+        Query(
+            alias="status",
+            description=(
+                "feature status 반복 필터. 기본 active. 공개 projection"
+                "(feature.public_features)과 교집합으로만 동작하므로 active 외"
+                " 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34)."
+            ),
+        ),
     ] = None,
     provider: Annotated[
         list[str] | None,
@@ -904,7 +1095,14 @@ async def list_features_nearby_by_target(
     ] = None,
     feature_status: Annotated[
         list[str] | None,
-        Query(alias="status", description="feature status 반복 필터. 기본 active."),
+        Query(
+            alias="status",
+            description=(
+                "feature status 반복 필터. 기본 active. 공개 projection"
+                "(feature.public_features)과 교집합으로만 동작하므로 active 외"
+                " 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34)."
+            ),
+        ),
     ] = None,
     provider: Annotated[
         list[str] | None,
@@ -971,31 +1169,46 @@ async def list_features_nearby_by_target(
     "/{feature_id}",
     response_model=FeatureDetailEnvelopeResponse,
     summary="feature 단건 상세",
-    responses={404: {"description": "feature_id 없음"}},
+    responses={
+        404: {"description": "feature_id 없음"},
+        304: {"description": "If-None-Match row_revision 일치 (본문 없음)"},
+        422: {"description": "If-None-Match가 canonical strong ETag가 아님"},
+        200: {
+            "headers": {
+                "ETag": {
+                    "description": "현재 feature row_revision strong entity tag.",
+                    "schema": {"type": "string"},
+                }
+            }
+        },
+    },
 )
 async def get_feature(
     request: Request,
+    response: Response,
     feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> FeatureDetailEnvelopeResponse:
+) -> FeatureDetailEnvelopeResponse | Response:
     started_at = perf_counter()
-    row = await feature_repo.get_feature_row(session, feature_id)
-    if not await _is_public_feature_for_request(session, row):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"feature 없음: {feature_id!r}",
-        )
-    assert row is not None
+    row = await _public_feature_row_or_404(session, feature_id)
+    revision = int(row["row_revision"])
+    expected = parse_revision_header(
+        request,
+        "If-None-Match",
+        required=False,
+    )
+    etag = revision_etag(revision)
+    if expected == revision:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
     curations = await curation_repo.list_curation_items_by_feature_ids(
         session, feature_ids=[feature_id], public_only=True
     )
-    observations = await observation_repo.get_current_observations(session, feature_id)
     detail = _detail_from_row(row).model_copy(
         update={
             "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
-            "observations": [_observation_view(item) for item in observations],
         }
     )
+    response.headers["ETag"] = etag
     return FeatureDetailEnvelopeResponse(
         data=detail,
         meta=make_meta(request, started_at=started_at),
@@ -1003,11 +1216,42 @@ async def get_feature(
 
 
 @router.get(
+    "/{feature_id}/sources",
+    response_model=FeatureSourcesResponse,
+    summary="feature 제공기관 raw 관측 lineage (operator)",
+    dependencies=[Depends(require_admin_frontend)],
+    responses={404: {"description": "feature 없음"}},
+)
+async def get_feature_sources(
+    request: Request,
+    feature_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> FeatureSourcesResponse:
+    """operator 전용 — feature에 연결된 모든 제공기관 entity의 현재 raw 관측값.
+
+    T-VN-05: raw lineage(raw_data/raw_payload_hash/source_record_key)는 공개 detail에서
+    제거하고 이 operator 표면으로 이동했다. 비공개/종료 feature도 감사 대상이라
+    공개 가시성 gate 없이 raw row 존재만 확인한다.
+    """
+    started_at = perf_counter()
+    await _operator_feature_or_404(session, feature_id)
+    observations = await observation_repo.get_current_observations(session, feature_id)
+    return FeatureSourcesResponse(
+        data=FeatureSourcesData(
+            feature_id=feature_id,
+            observations=[_observation_view(item) for item in observations],
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@router.get(
     "/{feature_id}/observations/{source_entity_key}/history",
     response_model=FeatureObservationHistoryResponse,
-    summary="feature 제공기관 payload 관측 이력",
+    summary="feature 제공기관 payload 관측 이력 (operator)",
+    dependencies=[Depends(require_admin_frontend)],
     responses={
-        404: {"description": "공개 feature 또는 observation 없음"},
+        404: {"description": "feature 또는 observation 없음"},
         422: {"description": "cursor 또는 page_size 오류"},
     },
 )
@@ -1020,12 +1264,7 @@ async def get_feature_observation_history(
     cursor: Annotated[str | None, Query()] = None,
 ) -> FeatureObservationHistoryResponse:
     started_at = perf_counter()
-    row = await feature_repo.get_feature_row(session, feature_id)
-    if not await _is_public_feature_for_request(session, row):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"feature 없음: {feature_id!r}",
-        )
+    await _operator_feature_or_404(session, feature_id)
     try:
         page = await observation_repo.get_observation_history(
             session,
@@ -1093,6 +1332,7 @@ class FeatureWeatherResponse(BaseModel):
     "/{feature_id}/weather",
     response_model=FeatureWeatherResponse,
     summary="feature weather card (forecast_style별 최신값 + freshness)",
+    responses={404: {"description": "공개 feature 없음"}},
 )
 async def get_feature_weather(
     request: Request,
@@ -1104,6 +1344,9 @@ async def get_feature_weather(
     ] = None,
 ) -> FeatureWeatherResponse:
     started_at = perf_counter()
+    # parent feature 공개 검사 (ADR-067) — 비공개/미존재 feature의 weather payload
+    # 노출 금지. detail 단건과 동일한 404 계약.
+    await _public_feature_row_or_404(session, feature_id)
     card = await weather_repo.build_weather_card(session, feature_id=feature_id, asof=asof)
     metrics = [
         WeatherMetricOut(
@@ -1154,13 +1397,7 @@ async def get_area_contained_features(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> AreaContainedFeaturesResponse:
     started_at = perf_counter()
-    area_row = await feature_repo.get_feature_row(session, feature_id)
-    if not await _is_public_feature_for_request(session, area_row):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"feature 없음: {feature_id!r}",
-        )
-    assert area_row is not None
+    area_row = await _public_feature_row_or_404(session, feature_id)
     if area_row["kind"] != "area":
         raise HTTPException(
             status_code=422,
@@ -1186,6 +1423,7 @@ async def get_area_contained_features(
     "/{feature_id}/price",
     response_model=FeaturePriceResponse,
     summary="feature price card (제품별 최신 가격 + 최근 이력)",
+    responses={404: {"description": "공개 feature 없음"}},
 )
 async def get_feature_price(
     request: Request,
@@ -1201,6 +1439,9 @@ async def get_feature_price(
     ] = 100,
 ) -> FeaturePriceResponse:
     started_at = perf_counter()
+    # parent feature 공개 검사 (ADR-067) — 비공개/미존재 feature의 price payload
+    # 노출 금지. detail 단건과 동일한 404 계약.
+    await _public_feature_row_or_404(session, feature_id)
     card = await price_repo.build_price_card(
         session,
         feature_id=feature_id,
@@ -1234,8 +1475,10 @@ async def get_features_batch(
 ) -> FeatureBatchResponse:
     started_at = perf_counter()
     feature_ids = list(dict.fromkeys(body.feature_ids))
-    rows = await feature_repo.get_feature_rows_by_ids(session, feature_ids)
-    public_rows = {feature_id: row for feature_id, row in rows.items() if _is_public_feature(row)}
+    # 공개 batch — ADR-067 단일 projection에서만 payload를 만든다. projection에
+    # 없는 ID는 일괄 ``missing``이며, retired/suppressed 세분화(5-state item 계약)는
+    # T-VN-11에서 이 projection과 base 상태를 조합해 도입한다.
+    public_rows = await feature_repo.get_public_feature_rows_by_ids(session, feature_ids)
     notice_ids = [
         feature_id for feature_id, row in public_rows.items() if row.get("kind") == "notice"
     ]
@@ -1252,16 +1495,13 @@ async def get_features_batch(
     curations = await curation_repo.list_curation_items_by_feature_ids(
         session, feature_ids=feature_ids, public_only=True
     )
-    observations = await observation_repo.get_current_observations_by_feature_ids(
-        session, feature_ids
-    )
+    # T-VN-05: service batch는 고정 typed payload만 반환한다 — raw observation
+    # lineage/payload passthrough 없음, raw opt-in 없음(FeatureBatchRequest는
+    # extra=forbid로 feature_ids만 받는다).
     items = {
         feature_id: _detail_from_row(public_rows[feature_id]).model_copy(
             update={
                 "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
-                "observations": [
-                    _observation_view(item) for item in observations.get(feature_id, ())
-                ],
             }
         )
         for feature_id in feature_ids

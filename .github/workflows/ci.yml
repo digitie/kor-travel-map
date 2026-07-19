@@ -136,6 +136,13 @@ jobs:
       - name: Run integration tests (testcontainers PostGIS via Docker)
         # Docker는 ubuntu-latest runner에서 자동 제공.
         # 통합 테스트는 conftest의 pg_container fixture가 PostGIS 컨테이너 자동 부팅.
+        # ADR-075 D-12-2 / T-VN-19 §8.1 gate — 빈 PostGIS DB → alembic upgrade head →
+        # alembic check clean 은 tests/integration/test_alembic_metadata_consistency.py
+        # 가 이 job 안에서 상시 실행한다(새 migration/table 의 metadata 정합 회귀 차단).
+        # ADR-075 D-12-4 / T-VN-21 §8.3 tier-1 성능 gate — hot query planner-default
+        # EXPLAIN(no features Seq Scan)·query-count(N+1)·response-shape 회귀는
+        # tests/integration/test_perf_gate_tier1.py 가 같은 job 에서 상시 실행한다.
+        # tier-2(대용량 실분포)는 CI 아님 — scripts/perf_tier2_release_harness.py 수동.
         run: |
           pytest tests/integration -q \
             --cov=src/kortravelmap --cov-append \

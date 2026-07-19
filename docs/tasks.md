@@ -11,26 +11,26 @@
   - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
   - [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화** (#777)
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
-- **예정 — vNext 재설계 (`T-ADM-C6c`/`C7` 종결 뒤 시작)**
-  - [ ] `T-VN-01` — **production fail-closed 전환**
-  - [ ] `T-VN-02` — **route policy matrix와 미분류 CI gate**
+- **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
+  - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
+  - [ ] `T-VN-57` — **public route policy·OpenAPI security·user surface 단일 정본** (#784)
+  - [ ] `T-VN-59` — **public weather·curation raw lineage 계약 분리**
+    (#786, T-VN-SYNC-02 적대적 리뷰 blocker)
   - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate**
-  - [ ] `T-VN-04` — **공개 predicate 단일화 1차**
-  - [ ] `T-VN-05` — **공개 raw payload 경계 제거**
-  - [ ] `T-VN-06` — **notice 방어적 cast**
-  - [ ] `T-VN-07` — **no-op 옵션 삭제와 principal actor 1차**
-  - [ ] `T-VN-08` — **PinVi false-broken 수정**
-  - [ ] `T-VN-11` — **service batch 5-state 계약**
-  - [ ] `T-VN-12` — **domain-owned Idempotency-Key 전개**
-  - [ ] `T-VN-13` — **Feature row revision과 If-Match**
-  - [ ] `T-VN-14` — **지도 completeness와 exact spatial predicate**
-  - [ ] `T-VN-15` — **search total과 cursor fingerprint**
-  - [ ] `T-VN-16` — **weather batch와 부모 404**
-  - [ ] `T-VN-17` — **weather 무결성 제약**
-  - [ ] `T-VN-18` — **중복 GiST 제거와 BRIN 감사**
-  - [ ] `T-VN-19` — **Alembic metadata 정합 CI**
-  - [ ] `T-VN-20` — **principal actor 전면 전환**
-  - [ ] `T-VN-21` — **3단 성능 gate**
+    ([설계](reports/t-vn-03-route-gate-cutover-2026-07-19.md), PinVi issue
+    [#392](https://github.com/digitie/pinvi/issues/392)). curated GET 4개는 public key,
+    ops 관측 GET 6개는 operator, MOIS raw debug는 local-dev mount+operator로 clean-cut한다.
+    PR #782는 integration, PinVi PR #393과 docker-manager PR #64는 각 main에 병합됐으며,
+    exact pair activation과 n150 live 전까지 active로 유지한다.
+  - [ ] `T-VN-04A` — **admin 비공개 feature 공간 조회·카드 표면 복원**
+    (#741, PR #779 integration 병합·n150 live 대기)
+  - [ ] `T-VN-15` — **search total과 HMAC cursor fingerprint**
+    (PR #780 integration 병합·n150 live 대기)
+  - [ ] `T-VN-58` — **correction 편집 기준 ETag 고정** (#785)
+  - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
+    `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
+    `T-VN-16` weather batch와 부모 404.
+- **예정 — vNext Wave 2 구조 전환 (Wave 1 안정화 + cutover 뒤)**
   - [ ] `T-VN-31` — **vNext target freeze**
   - [ ] `T-VN-32` — **UUID identity shadow 전환**
   - [ ] `T-VN-33` — **provider dataset 정본 전환**
@@ -44,7 +44,7 @@
   - [ ] `T-VN-41` — **cache-target generation·outbox 전파**
   - [ ] `T-VN-51` — **MVT tile 도입 조건 측정**
   - [ ] `T-VN-52` — **범용 feature-context batch 도입 조건 측정**
-  - [ ] `T-VN-53` — **cursor HMAC 도입 조건 측정**
+  - [ ] `T-VN-53` — **cursor signing key rotation 운영 측정**
   - [ ] `T-VN-54` — **weather partition·hypertable·event clock 측정**
   - [ ] `T-VN-55` — **물리 listener/process 분리 측정**
   - [ ] `T-VN-56` — **대규모 fixture 실행 주기 측정**
@@ -145,6 +145,45 @@ PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin
 각 코드 PR은 테스트 전에 적대적 리뷰어 1명의 리뷰를 반영한다. 문서 전용·rebase-only·단순
 변수명/import 정렬 변경은 추가 적대적 재리뷰 대상이 아니다.
 
+#### T-VN-SYNC-02 — integration/t-vn → main 최종 합류
+
+`T-VN-03` PR #782와 이 문서 추적 PR까지 `integration/t-vn`에 병합한 exact head를 `main`으로
+합류시키는 독립 PR이다. 공유 integration branch는 rebase하지 않고 GitHub PR의
+`base=main`, `head=integration/t-vn`로 전체 ancestry를 보존한다.
+
+- [ ] PR 생성 직전에 `origin/main`을 integration에 merge해 conflict를 해소하고,
+  `T-VN-03`·`T-VN-04A`·`T-VN-15` 코드와 문서가 같은 tree에 있는지 확인한다.
+- [ ] Alembic `0058 → 0059 → 0060 → 0061 → 0062` 단일 head, admin/user OpenAPI drift 0건,
+  unit·PostGIS integration·fixture replay·Python 3버전·frontend type/build를 CI 8개 green으로
+  증명한다.
+- [ ] 코드 통합 diff는 단일 적대 리뷰어 승인을 받고, exact source revision을 고정한 merge
+  commit으로 main에 합류한다. 문서 전용 후속은 추가 적대 재리뷰를 요구하지 않는다.
+- [ ] `T-VN-57`이 runtime route policy와 full/user OpenAPI security·user operation을
+  양방향 전수 대조한 뒤에만 최종 합류한다.
+- [ ] main 합류 뒤 PinVi PR #393과 docker-manager PR #64의 exact revision을 포함한 C6c
+  compatible-pair v4를 capture하고, n150 C7 live E2E 전에는 `T-VN-03`·`T-VN-04A`·
+  `T-VN-15`를 완료 아카이브하지 않는다.
+
+#### T-VN-57 — public route policy·OpenAPI security·user surface 단일 정본 (#784)
+
+T-VN-SYNC-02 적대적 통합 리뷰에서 production runtime의 public-key gate와 기계 계약 사이의
+구조적 drift를 확인했다. `RoutePolicy.PUBLIC_KEYED` 29개 GET은 runtime에서
+`require_public_api_key`를 적용하지만 full OpenAPI는 curated 4개만
+`PublicApiKey OR ServiceToken`을 선언해 25개가 무인증으로 기술된다. user OpenAPI도 노출한
+public-keyed 27개 중 같은 4개만 선언해 23개가 누락된다.
+
+- [ ] `ROUTE_POLICIES`와 조립된 route metadata를 runtime·full OpenAPI security·user surface의
+  단일 정본으로 사용하고 `_PUBLIC_CURATED_PATHS`·`USER_OPERATIONS` 수기 path 정본을 제거한다.
+- [ ] 모든 `PUBLIC_KEYED` operation은 `PublicApiKey OR ServiceToken`,
+  `PUBLIC_UNAUTHENTICATED`는 무인증, `SERVICE`는 service scheme으로 정확히 선언한다. trusted
+  Admin BFF의 내부 우회는 public consumer 계약에 노출하지 않는다.
+- [ ] runtime policy ↔ full spec ↔ user spec을 양방향 전수 비교해 path 누락·과포함·method drift와
+  잘못된 security를 CI에서 거부한다. full/user OpenAPI와 admin/user 생성 TypeScript도 같은
+  정본에서 재생성한다.
+- [ ] DB schema·REST path·DTO·runtime 인증 의미는 바꾸지 않는다. exact 구현 diff는 단일 적대
+  리뷰어가 승인한 뒤에만 test/lint/build/OpenAPI/frontend gate를 실행하고, 완료 전
+  T-VN-SYNC-02를 병합하지 않는다.
+
 #### Lane 분배 (2026-07-19, issue #738)
 
 KTM 내부 표면은 agent A(Claude), PinVi 결합·C6c cutover 결합·기존
@@ -153,14 +192,13 @@ A lane은 즉시 착수하고, B lane은 `T-ADM-C6c`/`T-ADM-C7` 종결 뒤 착�
 
 | lane | 담당 | 순서 | 비고 |
 |---|---|---|---|
-| a1 | Claude | T-VN-01 → T-VN-02 → T-VN-07 → T-VN-19 | 기동 fail-closed → route matrix → actor 1차 → alembic 정합 CI |
-| a2 | Claude | T-VN-04 → T-VN-06 → T-VN-05 → T-VN-17 | 공개 predicate view → notice cast → raw payload 경계 → weather 제약 |
+| a | Claude | T-VN-04A → T-VN-15 | admin 비공개 feature 운영성 복원 → search 계약 완결 |
 | b1 | codex | T-VN-03 → T-VN-11 → T-VN-12 | T-VN-03은 C6c principal cutover와 **같은 배포 단위**(F-17 재발 방지) |
 | b2 | codex | T-VN-08 → T-VN-16 → T-VN-41 | PinVi consumer 수정 → weather batch(N+1 제거) → cache-target outbox |
 
-migration 번호는 a2가 0059를 예약했고, 이후 branch는 PR 직전 rebase에서 단일 head를
-재확인 후 재번호한다. T-VN-13/14/15/18/20/21과 Wave 2(T-VN-31~40)는 위 lane 소화 후
-재분배한다. 같은 파일 충돌 시 먼저 머지된 쪽이 우선하고 나중 PR이 rebase한다.
+migration 정본은 `0058 → 0059 → 0060 → 0061 → 0062` 단일 chain이다. 후속 migration은
+PR 직전 `0062` 단일 head를 재확인한 뒤 번호를 배정한다. Wave 2(T-VN-31~40)는 열린 lane을
+소화한 뒤 재분배한다. 같은 파일 충돌 시 먼저 머지된 쪽이 우선하고 나중 PR이 rebase한다.
 
 **통합 브랜치 규율**: `T-ADM-C7` 종결 전까지 모든 T-VN task PR(a·b lane 공통)의 base는
 main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-vn` PR(CI green 후
@@ -169,42 +207,72 @@ main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-v
 그 전에는 T-VN 변경이 main에 직접 들어가지 않는다. CI workflow 4종은
 `integration/t-vn` 대상 push/PR에도 동일하게 실행된다.
 
+#### T-VN-59 — public weather·curation raw lineage 계약 분리 (#786)
+
+T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 feature detail에만
+적용되고 public weather·curation reachable schema에는 적용되지 않은 것이 확인됐다.
+호환 alias 없이 공개 DTO와 operator DTO를 분리한다.
+
+- [ ] public forecast row에서 `source_record_key`를 제거한다. 기상특보 public row는 도메인
+  필드와 발표·유효 시각만 반환하고 `source_record_key`, provider 원문 `payload`,
+  `fetched_at`·`imported_at`·`last_seen_at`을 반환하지 않는다.
+- [ ] 특보 raw lineage는 admin BFF가 인증하는 operator endpoint에서 별도 raw DTO로 제공한다.
+  forecast lineage는 기존 feature source/observation operator 표면으로 추적한다.
+- [ ] public curation item은 `source_record_key`와 자유형 `metadata`를 반환하지 않는다.
+  admin collection/item DTO는 두 필드를 보존하며 public DTO를 상속하지 않는다.
+- [ ] `openapi.user.json`의 각 operation response에서 재귀적으로 도달 가능한 schema를 순회해
+  `source_record_key`, `raw_data`, `raw_payload_hash`, raw `payload`, curation item `metadata`,
+  ingestion timestamp가 공개 경계로 다시 들어오면 실패하는 계약 테스트를 둔다.
+- [ ] full/user OpenAPI, admin/user 생성 TypeScript와 수기 public curation client를 같은
+  변경에서 갱신한다. DB 저장 구조는 바꾸지 않는다.
+
 ### Wave 0 — P0, 즉시 가역
-
-- [ ] T-VN-01 — **production fail-closed 전환**
-
-  Production profile에서 필수 secret 누락 시 기동을 거부하고 local-dev fallback을 별도 profile로
-  격리한다. 수용 기준은 ADR-066과 보고서 D-1·§8이다.
-
-- [ ] T-VN-02 — **route policy matrix와 미분류 CI gate**
-
-  전 HTTP/WS route 분류 생성기, 미분류 CI 실패, `/metrics` management 경계를 구현한다.
-  ops-live는 기존 HMAC ticket을 재사용하고 인증을 중복 구현하지 않는다.
 
 - [ ] T-VN-03 — **잔여 운영 read·debug·public-key gate**
 
   ops metrics/log/consistency와 MOIS raw debug를 operator/debug로, 무키 legacy curated read를
-  public-keyed로 옮긴다. PinVi principal 선전환과 같은 cutover에서 수행하며 삭제 route는 복원하지 않는다.
+  public-keyed로 옮긴다. 삭제 route는 복원하지 않는다.
 
-- [ ] T-VN-04 — **공개 predicate 단일화 1차**
+  - [x] Map route gate와 user OpenAPI/생성 client를 단일 적대 리뷰와 CI 8개 green 뒤 PR #782로
+    `integration/t-vn@226f81c2`에 병합했다.
+  - [x] PinVi principal caller PR #393과 docker-manager production env PR #64를 각각 main에
+    병합해 배포 source 조합을 준비했다.
+  - [ ] T-VN-SYNC-02로 Map main에 합류하고 exact compatible-pair v4 activation과 n150 live에서
+    public/operator/debug 경계와 principal 성공·401/403을 검증한 뒤 issue #392와 task를 닫는다.
 
-  현행 상태 위에 `feature.public_features` view를 만들고 모든 공개 SQL을 그 projection으로
-  교체해 retired 은닉과 draft/broken 노출을 동시에 막는다.
+- [ ] T-VN-04A — **admin 비공개 feature 공간 조회·카드 표면 복원** (#741)
 
-- [ ] T-VN-05 — **공개 raw payload 경계 제거**
+  `feature.public_features`를 넓히지 않고 `feature.features`의 기존 상태·좌표·geometry와 공간
+  인덱스를 admin repository가 직접 조회한다. DB schema는 바꾸지 않는다.
 
-  공개 DTO의 raw data/hash/source record와 MOIS `detail.payload` passthrough를 제거하고 observation
-  lineage를 operator 표면으로 이동한다. service batch는 고정 typed payload만 반환한다.
+  - [x] `GET /v1/admin/features/in-bounds`가 삭제 전 base Feature의 item/행정구역 cluster를
+    반복 `status`와 exact kind/category/provider/공간 필터로 반환한다.
+  - [x] `GET /v1/admin/features/{feature_id}/weather|price`가 비공개 Feature 카드도 반환하고,
+    실제 미존재·soft-delete·`status=deleted` target은 404로 구분한다.
+  - [x] admin `/features` 지도·표·상세를 admin API로 전환하고 상태 필터, full OpenAPI,
+    생성 TypeScript, repository/router/frontend/PostGIS 회귀를 PR #779로
+    `integration/t-vn@21ad4e31`에 병합했다.
+  - [ ] n150 live UI에서 `inactive`·`draft`·`hidden` marker와 weather/price 카드를 검증하고
+    issue #741을 닫는다.
 
-- [ ] T-VN-06 — **notice 방어적 cast**
+- [ ] T-VN-58 — **correction 편집 기준 ETag 고정** (#785)
 
-  오염된 notice timestamp 한 행이 전체 공개 read를 500으로 만들지 않도록 안전한 1차 완화를
-  적용한다. typed notice 재설계는 T-VN-37이 소유한다.
+  admin 수정·삭제 요청은 편집을 시작한 feature snapshot과 그 시점의 strong `ETag`를 하나의
+  불변 `CorrectionBasis`로 묶는다. mutation 직전에 `/revision`을 다시 읽어 최신값으로 자동
+  rebasing하지 않으며, 서버가 `412 Precondition Failed`를 반환하면 작성 중인 draft를 보존하고
+  운영자가 명시적으로 최신값을 다시 불러온 뒤 검토·재적용하게 한다. DB와 REST/OpenAPI schema는
+  바꾸지 않는다.
 
-- [ ] T-VN-07 — **no-op 옵션 삭제와 principal actor 1차**
-
-  실제 동작하지 않는 beach 옵션을 OpenAPI와 코드에서 제거하고 auth-event 등 최소 write 경로에서
-  body actor 우선을 없앤다.
+  - [ ] `/revision` → feature detail 순서로 읽고 두 응답의 `row_revision`이 같을 때만 basis를
+    확정한다. 경쟁 갱신으로 다르면 제한 횟수만 재시도하고, 응답 header의 raw `ETag` 문자열을
+    재구성·정규화하지 않은 채 feature ID와 함께 고정한다.
+  - [ ] PATCH/DELETE mutation 변수는 고정된 `entityTag`를 필수로 받고 내부 `/revision` 재조회 없이
+    그대로 `If-Match`에 전달한다. update와 delete 선택은 각각 자기 feature basis를 사용한다.
+  - [ ] background refetch·query invalidation은 dirty form과 고정 basis를 덮어쓰지 않는다. 412 UI는
+    draft를 유지하고 명시적 reload 조작을 제공하며, reload 성공 때만 새 detail·basis를 적용한다.
+  - [ ] frontend client/component 회귀, mocked Playwright의 stale 412→reload 흐름, live cleanup의
+    직전 revision ETag 기반 DELETE를 추가한다. 단일 적대 리뷰 승인 전에는 test·lint·build를
+    실행하지 않는다.
 
 - [ ] T-VN-08 — **PinVi false-broken 수정**
 
@@ -223,50 +291,21 @@ main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-v
   기존 pipeline/schedule ledger를 회귀 기준선으로 두고 남은 retryable command에 body fingerprint,
   result replay, key reuse 409를 domain별로 구현한다.
 
-- [ ] T-VN-13 — **Feature row revision과 If-Match**
+- [ ] T-VN-15 — **search total과 HMAC cursor fingerprint**
 
-  Feature에 단조 revision을 추가하고 correction PATCH/DELETE에 `If-Match`/412, read에 ETag/304를
-  연결한다. policy revision ledger와 합치지 않는다.
-
-- [ ] T-VN-14 — **지도 completeness와 exact spatial predicate**
-
-  in-bounds의 mode/truncated/coverage/cluster key를 명시하고 `include_geometry`를 serialization으로만
-  사용한다. candidate 술어를 하나로 만들고 exact `ST_Intersects`를 적용한다.
-
-- [ ] T-VN-15 — **search total과 cursor fingerprint**
-
-  `include_total=false`에서 COUNT를 실행하지 않고 cursor version·query fingerprint를 검증해 다른
-  query 재사용을 typed error로 거부한다.
+  `include_total=false`에서 COUNT statement 자체를 실행하지 않는다. cursor는 repository와 같은
+  정규화 query/filter/sort/page contract의 SHA-256 fingerprint와 keyset을 versioned payload에
+  넣고 전용 server-only secret의 HMAC-SHA256으로 보호한다. 다른 query 재사용, unknown version,
+  malformed와 tamper를 DB 전에 서로 다른 typed RFC7807 422로 거부한다. DB table은 추가하지 않는다.
+  repository/API/runtime/UI/OpenAPI·생성 타입과 회귀를 단일 적대 리뷰와 CI 8개 green 뒤
+  PR #780으로 `integration/t-vn@7604fc92`에 병합했다. 최종 main 합류와 n150 live에서 production
+  signing secret의 fail-closed 기동, 정상 continuation, 변조·query mismatch 422를 확인할 때까지
+  task는 active로 유지한다.
 
 - [ ] T-VN-16 — **weather batch와 부모 404**
 
   set-based weather batch와 `target_at`/`known_at` parameter를 제공해 PinVi N+1을 없애고 존재하지
   않는 parent feature를 빈 결과가 아닌 404로 구분한다.
-
-- [ ] T-VN-17 — **weather 무결성 제약**
-
-  semantic UNIQUE를 concurrent writer cutover와 함께 도입하고 range/payload CHECK와 source FK는
-  `NOT VALID`→`VALIDATE`로 적용한다.
-
-- [ ] T-VN-18 — **중복 GiST 제거와 BRIN 감사**
-
-  자동 full GiST를 제거하고 필요한 partial GiST만 유지한다. 전후 write 비용과 hot query를 실측하고
-  weather/price BRIN은 실제 누락된 시간축만 보강한다.
-
-- [ ] T-VN-19 — **Alembic metadata 정합 CI**
-
-  모든 소유 table mapping/include filter를 정리하고 빈 PostGIS DB의
-  `alembic upgrade head && alembic check`를 상시 CI gate로 만든다.
-
-- [ ] T-VN-20 — **principal actor 전면 전환**
-
-  모든 write schema에서 body `operator`/`actor`/`created_by`/`reviewed_by`를 제거하고 제출·승인
-  principal을 인증 context에서 보존해 ADR-066의 actor 결정을 완결한다.
-
-- [ ] T-VN-21 — **3단 성능 gate**
-
-  PR planner-default smoke·query-count/shape, release 실분포 분석, index before/after write 비용의
-  3단 gate를 CI와 release 절차에 연결한다. 정본은 performance.md의 vNext 절이다.
 
 ### Wave 2 — shadow와 write-fence 구조 전환
 
@@ -337,10 +376,11 @@ main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-v
   실제 consumer round-trip과 query count를 측정해 weather 전용 batch를 넘어선 범용 batch의
   필요 조건·최대 크기·응답 shape를 먼저 고정한다.
 
-- [ ] T-VN-53 — **cursor HMAC 도입 조건 측정**
+- [ ] T-VN-53 — **cursor signing key rotation 운영 측정**
 
-  fingerprint cursor의 위변조 위험과 운영 비용을 측정하고 서명 필요성이 입증될 때 key rotation과
-  실패 계약을 포함한 구현 task를 연다.
+  T-VN-15가 search cursor HMAC을 clean-cut으로 채택했으므로 도입 여부 측정은 폐기한다. 실제
+  rotation 주기·진행 cursor 무효화율·다중 key grace window 필요성을 측정하고, grace window가
+  단순 clean cut보다 우월하다고 입증될 때만 별도 구현 task를 연다.
 
 - [ ] T-VN-54 — **weather partition·hypertable·event clock 측정**
 

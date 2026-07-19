@@ -248,6 +248,7 @@ async def test_get_admin_feature_detail_aggregates_rows_without_feature_files_ta
         "sibling_group_id": None,
         "data_origin": "provider",
         "data_version": 0,
+        "row_revision": 1,
         "user_change_kind": None,
         "user_change_status": None,
         "user_change_request_id": None,
@@ -323,6 +324,7 @@ async def test_get_admin_feature_detail_aggregates_rows_without_feature_files_ta
         "action": "update",
         "state": "applied",
         "review_mode": "immediate",
+        "base_row_revision": 1,
         "payload": '{"name": "광화문"}',
         "reason": "사용자 수정",
         "requested_by": "local-admin",
@@ -349,12 +351,14 @@ async def test_get_admin_feature_detail_aggregates_rows_without_feature_files_ta
     )
 
     assert detail is not None
+    assert detail.feature.row_revision == 1
     assert detail.feature.raw_refs == [{"source": "fixture"}]
     assert detail.sources[0].raw_data == {"id": "sr-feature-1"}
     assert detail.issues[0].payload == {"field": "address"}
     assert detail.overrides[0].override_value == "inactive"
     assert detail.versions[0].payload == {"name": "광화문"}
     assert detail.change_requests[0].payload == {"name": "광화문"}
+    assert detail.change_requests[0].base_row_revision == 1
     assert detail.files == ()
     assert "feature.feature_files" in session.calls[-1]["statement"]
 

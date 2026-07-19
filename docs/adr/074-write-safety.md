@@ -17,7 +17,10 @@
    정규화 body fingerprint, 최초 결과를 저장하는 append-only ledger를 소유한다(D-10-1 3요소 key).
    같은 key/같은 body는 결과를 replay하고 다른 body는 409다.
 2. mutable resource는 단조 `row_revision`과 `If-Match`를 사용한다. `If-Match` 누락은 428,
-   stale write는 412다(D-10-3). 기존 policy revision은 resource-specific 선례로 유지한다.
+   stale write는 412다(D-10-3). consumer는 편집을 시작한 snapshot의 feature ID,
+   `row_revision`, 응답 header의 raw strong `ETag`를 불변 편집 기준으로 함께 보존한다. mutation
+   직전에 최신 revision을 다시 읽어 기준을 자동 rebasing하는 동작은 금지한다. 기존 policy
+   revision은 resource-specific 선례로 유지한다.
 3. cache target은 `(external_system, target_key)` identity, 단일 canonical coordinate,
    `source_generation`과 restore epoch을 가진다. 낮은 generation은 적용하지 않는다.
 4. DB commit 뒤 외부 전파는 transactional outbox와 멱등 relay가 담당한다. critical write path에서
@@ -29,6 +32,11 @@
 
 resource lifecycle에 맞는 안전장치를 각 domain이 소유해야 replay 결과와 동시성 의미가 분명하다.
 revision과 outbox는 lost update와 dual-write를 별도로 해결한다.
+
+admin UI는 `412`를 자동 재시도하지 않는다. 작성 중인 draft와 실패한 편집 기준을 보존하고,
+운영자가 명시적으로 최신 snapshot을 다시 불러온 경우에만 새 편집 기준과 form을 교체한다.
+초기 기준을 만들 때 revision과 detail 사이에 경쟁 갱신이 보이면 제한 횟수만 다시 읽고, 끝내
+같은 `row_revision`을 얻지 못하면 mutation을 활성화하지 않는다.
 
 ## 결과
 

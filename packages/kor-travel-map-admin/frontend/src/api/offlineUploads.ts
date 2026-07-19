@@ -31,7 +31,6 @@ export interface OfflineUploadCreateRequest {
   provider: string;
   datasetKey: string;
   syncScope?: string;
-  createdBy?: string;
 }
 
 export type OfflineUploadWriteResponse =
@@ -53,7 +52,6 @@ export interface OfflineUploadValidateRequest {
   uploadId: string;
   sampleSize?: number;
   columnMapping: OfflineUploadColumnMapping;
-  operator?: string;
 }
 
 export type OfflineUploadLaunchResponse =
@@ -118,9 +116,6 @@ function createOfflineUpload(
   form.append("provider", body.provider);
   form.append("dataset_key", body.datasetKey);
   form.append("sync_scope", body.syncScope ?? "default");
-  if (body.createdBy) {
-    form.append("created_by", body.createdBy);
-  }
   return postFormData<OfflineUploadWriteResponse>("/v1/admin/offline-uploads", form);
 }
 
@@ -131,7 +126,6 @@ function validateOfflineUpload(
     `/v1/admin/offline-uploads/${encodeURIComponent(body.uploadId)}/validate`,
     {
       sample_size: body.sampleSize ?? 1000,
-      operator: body.operator,
       column_mapping: body.columnMapping,
     },
   );

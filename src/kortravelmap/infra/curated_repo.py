@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 
 from sqlalchemy import text
 
+from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -386,12 +388,32 @@ _FEATURE_COLUMNS: Final[str] = """
     cf.updated_at,
     cf.archived_at
 """
+# 공개 read는 ADR-067 단일 공개 projection(``feature.public_features``)만 조인해
+# 비공개(draft/broken/hidden/inactive/soft-deleted) feature의 큐레이션 노출을 막는다
+# (T-VN-04, F-1). admin read는 기존대로 base table을 조인해 전 상태를 본다 —
+# 상태 sweep(``sweep_curated_feature_status``) 사이 창에서도 공개 read가 새지 않는다.
 _FEATURE_FROM_SQL: Final[str] = """
 FROM feature.curated_features AS cf
 JOIN feature.curated_themes AS t ON t.theme_id = cf.theme_id
 JOIN feature.curated_sources AS s ON s.source_id = cf.source_id
 JOIN feature.features AS f ON f.feature_id = cf.feature_id
 """
+
+_PUBLIC_FEATURE_FROM_SQL: Final[str] = """
+FROM feature.curated_features AS cf
+JOIN feature.curated_themes AS t ON t.theme_id = cf.theme_id
+JOIN feature.curated_sources AS s ON s.source_id = cf.source_id
+JOIN feature.public_features AS f ON f.feature_id = cf.feature_id
+"""
+
+_PUBLIC_FEATURE_FILTERS_SQL: Final[str] = (
+    """
+  AND t.visibility = 'public'
+  AND cf.curation_status = 'curated'
+  AND cf.archived_at IS NULL
+"""
+    + public_active_notice_filter_sql("f")
+)
 
 _LIST_THEMES_SQL: Final[str] = f"""
 SELECT {_THEME_COLUMNS}
@@ -515,10 +537,13 @@ _FEATURE_CURSOR_SQL: Final[str] = """
   )
 """
 
-_LIST_FEATURES_SQL: Final[str] = f"""
+
+def _list_features_sql(*, public_only: bool) -> str:
+    return f"""
 SELECT {_FEATURE_COLUMNS}
-{_FEATURE_FROM_SQL}
+{_PUBLIC_FEATURE_FROM_SQL if public_only else _FEATURE_FROM_SQL}
 {_FEATURE_FILTERS_SQL}
+{_PUBLIC_FEATURE_FILTERS_SQL if public_only else ""}
 {_FEATURE_CURSOR_SQL}
 ORDER BY cf.updated_at DESC, cf.curated_feature_id DESC
 LIMIT :limit
@@ -532,11 +557,13 @@ LIMIT :limit
 # 커서 정렬을 적용해 페이지네이션 정합성을 유지한다(curated_feature_id는 서브쿼리에서 text로
 # alias돼 있어 커서 비교도 text — 표준 uuid는 text 정렬이 uuid 정렬과 일치).
 # 관리자 per-curation 목록은 이 변형을 쓰지 않아 모든 큐레이션을 그대로 본다.
-_LIST_FEATURES_DISTINCT_SQL: Final[str] = f"""
+def _list_features_distinct_sql(*, public_only: bool) -> str:
+    return f"""
 SELECT * FROM (
     SELECT DISTINCT ON (cf.feature_id) {_FEATURE_COLUMNS}
-    {_FEATURE_FROM_SQL}
+    {_PUBLIC_FEATURE_FROM_SQL if public_only else _FEATURE_FROM_SQL}
     {_FEATURE_FILTERS_SQL}
+    {_PUBLIC_FEATURE_FILTERS_SQL if public_only else ""}
     ORDER BY cf.feature_id, cf.rank_score DESC NULLS LAST,
              cf.updated_at DESC, cf.curated_feature_id DESC
 ) AS d
@@ -554,11 +581,14 @@ ORDER BY d.updated_at DESC, d.curated_feature_id DESC
 LIMIT :limit
 """
 
-_GET_FEATURE_SQL: Final[str] = f"""
+
+def _get_feature_sql(*, public_only: bool) -> str:
+    return f"""
 SELECT {_FEATURE_COLUMNS}
-{_FEATURE_FROM_SQL}
+{_PUBLIC_FEATURE_FROM_SQL if public_only else _FEATURE_FROM_SQL}
 WHERE cf.curated_feature_id = CAST(:curated_feature_id AS uuid)
   AND (CAST(:include_archived AS boolean) OR cf.archived_at IS NULL)
+{_PUBLIC_FEATURE_FILTERS_SQL if public_only else ""}
 """
 
 _CREATE_FEATURE_SQL: Final[str] = """
@@ -1330,18 +1360,29 @@ async def list_curated_features(
     page_size: int = 50,
     cursor: str | None = None,
     distinct_by_feature: bool = False,
+    public_only: bool = False,
 ) -> CuratedFeaturePage:
     """curated feature 목록을 keyset으로 조회한다.
 
     ``distinct_by_feature=True``면 물리 feature당 rank_score 최고 큐레이션 1건만
     반환한다(지도 경로 — cross-theme 중복 제거). 관리자 per-curation 목록은 기본값
     False로 모든 큐레이션을 그대로 본다.
+
+    ``public_only=True``(공개 `/v1/curated-features` 표면)면 공개 theme의
+    ``curated`` overlay와 active/latest underlying feature만 반환한다. 기본 공개
+    집합은 ADR-067 ``feature.public_features`` projection, notice 추가 감산은
+    ``public_active_notice_filter_sql`` 정본을 공유한다. 관리자 표면은 기본값
+    False로 전 상태를 그대로 본다.
     """
 
     if curation_status is not None:
         _validate_choice(curation_status, _CURATION_STATUSES, "curation_status")
     safe_page_size = _safe_limit(page_size, _MAX_PAGE_SIZE)
-    list_sql = _LIST_FEATURES_DISTINCT_SQL if distinct_by_feature else _LIST_FEATURES_SQL
+    list_sql = (
+        _list_features_distinct_sql(public_only=public_only)
+        if distinct_by_feature
+        else _list_features_sql(public_only=public_only)
+    )
     rows = (
         await session.execute(
             text(list_sql),
@@ -1390,12 +1431,17 @@ async def get_curated_feature(
     *,
     curated_feature_id: str,
     include_archived: bool = False,
+    public_only: bool = False,
 ) -> CuratedFeature | None:
-    """curated feature 단건을 조회한다."""
+    """curated feature 단건을 조회한다.
+
+    ``public_only=True``(공개 표면)면 theme/overlay/underlying feature가 모두
+    공개 계약을 통과할 때만 반환한다. 종료·구버전 notice도 ``None``이다.
+    """
 
     row = (
         await session.execute(
-            text(_GET_FEATURE_SQL),
+            text(_get_feature_sql(public_only=public_only)),
             {
                 "curated_feature_id": curated_feature_id,
                 "include_archived": include_archived,

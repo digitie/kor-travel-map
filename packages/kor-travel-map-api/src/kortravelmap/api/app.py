@@ -32,6 +32,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from kortravelmap.infra.log_repo import record_api_call
+from kortravelmap.infra.public_api_keys import PUBLIC_API_KEY_QUERY_PARAM
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 
@@ -40,6 +41,7 @@ from kortravelmap.api.auth import (
     OPS_SCOPE_HEADER,
     require_admin_destructive_enabled,
     require_admin_frontend,
+    require_metrics_token,
     require_ops_operator,
     require_public_api_key,
 )
@@ -47,6 +49,12 @@ from kortravelmap.api.db import configure_prometheus_metrics
 from kortravelmap.api.prometheus import PrometheusMetrics
 from kortravelmap.api.response import ProblemDetail, bind_request_id, reset_request_id
 from kortravelmap.api.response import request_id as response_request_id
+from kortravelmap.api.route_policy import (
+    RoutePolicy,
+    RoutePolicyMatrixRow,
+    assert_routes_classified,
+    build_route_policy_matrix,
+)
 from kortravelmap.api.routers import (
     admin_auth_router,
     admin_backups_router,
@@ -56,6 +64,7 @@ from kortravelmap.api.routers import (
     admin_files_router,
     admin_issues_router,
     admin_restore_router,
+    admin_weather_router,
     categories_router,
     curated_router,
     curations_router,
@@ -113,6 +122,17 @@ _OPS_CANONICAL_PREFIXES = (
     "/v1/ops/datasets",
     "/v1/ops/pipeline",
 )
+_OPS_OBSERVABILITY_PATHS = frozenset(
+    {
+        "/v1/ops/api-call-logs",
+        "/v1/ops/consistency/issues",
+        "/v1/ops/consistency/reports",
+        "/v1/ops/health-deep",
+        "/v1/ops/metrics",
+        "/v1/ops/system-logs",
+    }
+)
+_MOIS_DEBUG_PATH = "/v1/debug/mois-license/{license_id}"
 _OPS_CANCEL_PATH = "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
 _ADMIN_BFF_SECURITY: list[dict[str, list[str]]] = [{"AdminBFF": []}]
 # service principal 대안은 OpsToken과 OpsScope를 AND로 함께 요구한다 — 런타임
@@ -121,6 +141,10 @@ _ADMIN_BFF_SECURITY: list[dict[str, list[str]]] = [{"AdminBFF": []}]
 _ADMIN_OR_OPS_SECURITY: list[dict[str, list[str]]] = [
     {"AdminBFF": []},
     {"OpsToken": [], "OpsScope": []},
+]
+_PUBLIC_READ_SECURITY: list[dict[str, list[str]]] = [
+    {"PublicApiKey": []},
+    {"ServiceToken": []},
 ]
 
 # OpsScope는 runtime dependency상 `Header` 파라미터라 FastAPI가 security scheme을
@@ -135,6 +159,15 @@ _OPS_SCOPE_SECURITY_SCHEME: dict[str, str] = {
         "`ops:read`, exact import-job cancel POST는 `ops:cancel`이다. scope "
         "문자열만으로는 권한을 얻지 못하며 token 종류와 method/exact path도 "
         "일치해야 한다."
+    ),
+}
+_PUBLIC_API_KEY_SECURITY_SCHEME: dict[str, str] = {
+    "type": "apiKey",
+    "in": "query",
+    "name": PUBLIC_API_KEY_QUERY_PARAM,
+    "description": (
+        "외부/비신뢰 public read용 VWorld 호환 API key. ServiceToken 요청은 "
+        "같은 runtime dependency에서 별도 principal로 허용한다."
     ),
 }
 
@@ -248,26 +281,72 @@ def _augment_problem_responses(schema: dict[str, Any]) -> None:
         components.pop(orphan, None)
 
 
-def _apply_ops_security_contract(schema: dict[str, Any]) -> None:
-    """canonical ops operation별 실제 BFF/service principal 권한을 선언한다.
+def _apply_route_security_contract(
+    schema: dict[str, Any],
+    route_matrix: tuple[RoutePolicyMatrixRow, ...],
+) -> None:
+    """public/operator route별 실제 principal 대안을 OpenAPI에 선언한다.
 
     FastAPI는 router dependency의 여러 ``Security`` scheme을 operation 단위 권한으로
-    정확히 분리하지 못한다. 실제 런타임 판정과 동일하게 GET 및 exact import-job
-    cancel만 OpsToken+OpsScope AND 대안을 열고, 나머지 mutation은 AdminBFF만
-    허용한다.
+    정확히 분리하지 못한다. canonical ops와 잔여 관측 GET은 BFF 또는 read
+    principal, exact import-job cancel만 cancel principal, 나머지 ops mutation과
+    MOIS raw debug는 BFF만 허용한다. 조립된 route policy matrix의 모든
+    ``public-keyed`` operation은 public key와 trusted service principal을 OR로,
+    ``service`` operation은 service principal만으로 선언한다.
+    ``public-unauthenticated`` operation은 security 요구를 제거한다. trusted admin BFF
+    우회는 public consumer 계약에 노출하지 않는다.
     """
 
-    security_schemes = schema.get("components", {}).get("securitySchemes")
-    if isinstance(security_schemes, dict) and "OpsToken" in security_schemes:
-        security_schemes.setdefault("OpsScope", dict(_OPS_SCOPE_SECURITY_SCHEME))
+    components = schema.setdefault("components", {})
+    security_schemes = components.setdefault("securitySchemes", {})
+    if isinstance(security_schemes, dict):
+        if "OpsToken" in security_schemes:
+            security_schemes.setdefault("OpsScope", dict(_OPS_SCOPE_SECURITY_SCHEME))
+        security_schemes.setdefault(
+            "PublicApiKey",
+            dict(_PUBLIC_API_KEY_SECURITY_SCHEME),
+        )
 
     paths = schema.get("paths")
     if not isinstance(paths, dict):
         return
+
+    public_security_by_policy: dict[RoutePolicy, list[dict[str, list[str]]]] = {
+        RoutePolicy.PUBLIC_UNAUTHENTICATED: [],
+        RoutePolicy.PUBLIC_KEYED: _PUBLIC_READ_SECURITY,
+        RoutePolicy.SERVICE: [{"ServiceToken": []}],
+    }
+    for row in route_matrix:
+        security = public_security_by_policy.get(row.policy)
+        if security is None or row.is_websocket or not row.include_in_schema:
+            continue
+        path_item = paths.get(row.schema_path)
+        if not isinstance(path_item, dict):
+            continue
+        for method in row.methods:
+            operation = path_item.get(method.lower())
+            if not isinstance(operation, dict):
+                continue
+            if security:
+                operation["security"] = [
+                    dict(requirement) for requirement in security
+                ]
+            else:
+                operation.pop("security", None)
+
     for path, path_item in paths.items():
-        if not isinstance(path, str) or not path.startswith(_OPS_CANONICAL_PREFIXES):
+        if not isinstance(path, str):
             continue
         if not isinstance(path_item, dict):
+            continue
+        canonical_ops = path.startswith(_OPS_CANONICAL_PREFIXES)
+        observability_ops = path in _OPS_OBSERVABILITY_PATHS
+        if path == _MOIS_DEBUG_PATH:
+            operation = path_item.get("get")
+            if isinstance(operation, dict):
+                operation["security"] = _ADMIN_BFF_SECURITY
+            continue
+        if not canonical_ops and not observability_ops:
             continue
         for method, operation in path_item.items():
             if method not in _OPENAPI_HTTP_METHODS or not isinstance(operation, dict):
@@ -420,16 +499,13 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     """
     if settings is None:
         settings = ApiSettings()
-    admin_routes_enabled = (
-        settings.features_routes_enabled
-        if settings.admin_routes_enabled is None
-        else settings.admin_routes_enabled
-    )
-    ops_routes_enabled = (
-        settings.features_routes_enabled
-        if settings.ops_routes_enabled is None
-        else settings.ops_routes_enabled
-    )
+    # ``model_construct``/``model_copy(update=...)``처럼 Pydantic 검증을 우회한
+    # settings가 주입되더라도 production app 조립 전에 같은 불변식을 다시 확인한다.
+    settings.assert_production_ready()
+    # flag 해석은 settings의 resolved 속성이 정본이다 — production fail-closed
+    # 검증(ADR-066 T-VN-01)이 mount 규칙과 같은 해석을 공유해야 하기 때문.
+    admin_routes_enabled = settings.resolved_admin_routes_enabled
+    ops_routes_enabled = settings.resolved_ops_routes_enabled
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -445,6 +521,16 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             if isinstance(client, httpx.AsyncClient):
                 await client.aclose()
 
+    # ADR-066 D-1 (T-VN-02) — 인증 없는 interactive docs UI(``/docs``·``/redoc``·
+    # swagger oauth2 redirect)는 production에서 내린다. D-1의
+    # public-unauthenticated=(liveness/version)을 넓히지 않기 위함이며, debug
+    # 라우터를 production에서 내리는 것과 같은 패턴이다. 기계 판독 공개 계약
+    # ``/openapi.json``(ADR-031 served artifact)은 유지한다 — 세 route 모두
+    # ``include_in_schema=False``라 committed openapi.json ``paths``에는 애초에
+    # 없어 drift가 없다.
+    docs_url = None if settings.is_production else "/docs"
+    redoc_url = None if settings.is_production else "/redoc"
+
     application = FastAPI(
         title="kor-travel-map-api",
         version=__version__,
@@ -456,6 +542,8 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         # ADR-031 — `--check` mode drift gate 안정성을 위해 ``servers``는 OpenAPI
         # spec에 포함하지 않는다 (호스트별 차이로 drift 발생 우려).
         servers=[],
+        docs_url=docs_url,
+        redoc_url=redoc_url,
         lifespan=lifespan,
     )
     application.state.settings = settings
@@ -470,7 +558,14 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         configure_prometheus_metrics(prometheus_metrics)
         endpoint_metrics = prometheus_metrics
 
-        @application.get(settings.prometheus_metrics_path, include_in_schema=False)
+        # ADR-066 결정 4 (T-VN-02) — `/metrics`는 scrape identity(management
+        # 경계)로 제한한다. metrics token 미설정 local-dev는 기존 open scrape를
+        # 유지하고, production은 settings 검증이 token을 필수화한다.
+        @application.get(
+            settings.prometheus_metrics_path,
+            include_in_schema=False,
+            dependencies=[Depends(require_metrics_token)],
+        )
         async def prometheus_metrics_endpoint() -> Response:
             return endpoint_metrics.response()
     else:
@@ -622,7 +717,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             prefix="/v1",
             dependencies=public_dependencies,
         )
-        application.include_router(curated_router, prefix="/v1")
+        application.include_router(
+            curated_router,
+            prefix="/v1",
+            dependencies=public_dependencies,
+        )
         application.include_router(
             curations_router,
             prefix="/v1",
@@ -639,8 +738,14 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             dependencies=public_dependencies,
         )
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
+        # raw provider payload이므로 local-dev debug mount에서도 operator BFF를
+        # 요구한다. production은 debug_routes_enabled=false라 route 자체가 없다.
         if settings.debug_routes_enabled:
-            application.include_router(mois_detail_router, prefix="/v1")
+            application.include_router(
+                mois_detail_router,
+                prefix="/v1",
+                dependencies=[Depends(require_admin_frontend)],
+            )
 
     if admin_routes_enabled:
         admin_dependencies = [Depends(require_admin_frontend)]
@@ -677,6 +782,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             admin_curations_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            admin_weather_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )
@@ -722,9 +832,18 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
 
     if ops_routes_enabled:
-        application.include_router(ops_router, prefix="/v1")
+        observability_dependencies = [Depends(require_ops_operator)]
+        application.include_router(
+            ops_router,
+            prefix="/v1",
+            dependencies=observability_dependencies,
+        )
         application.include_router(ops_live_router, prefix="/v1")
-        application.include_router(ops_logs_router, prefix="/v1")
+        application.include_router(
+            ops_logs_router,
+            prefix="/v1",
+            dependencies=observability_dependencies,
+        )
 
     # ADR-064 (T-ADM-C2/C6c) — canonical `/ops/datasets`는 기존 admin frontend와
     # read-only server-to-server principal만 허용한다. service mutation은 거부한다.
@@ -756,11 +875,16 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             return application.openapi_schema
         schema = _default_openapi()
         _augment_problem_responses(schema)
-        _apply_ops_security_contract(schema)
+        _apply_route_security_contract(schema, build_route_policy_matrix(application))
         application.openapi_schema = schema
         return schema
 
     application.openapi = _custom_openapi  # type: ignore[method-assign]
+
+    # ADR-066 결정 1 (T-VN-02) — 조립된 app의 모든 HTTP/WS route는 route policy
+    # matrix에 분류돼 있어야 한다. 미분류 route는 여기(앱 구성 검사)와 CI
+    # (`tests/test_route_policy.py`)에서 함께 실패한다.
+    assert_routes_classified(application)
 
     return application
 

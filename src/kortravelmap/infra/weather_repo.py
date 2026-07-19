@@ -35,6 +35,7 @@ __all__ = [
     "DEFAULT_WEATHER_FRESHNESS_SECONDS",
     "DEFAULT_WEATHER_HISTORY_RETENTION_DAYS",
     "load_weather_values",
+    "build_admin_weather_card",
     "build_weather_card",
     "list_weather_values",
     "weather_history_floor",
@@ -123,7 +124,6 @@ class WeatherAlertHistoryRow:
     source_record_key: str
     feature_id: str | None
     feature_name: str | None
-    feature_status: str | None
     region_code: str | None
     region_name: str | None
     phenomenon: str | None
@@ -141,7 +141,35 @@ class WeatherAlertHistoryRow:
     payload: dict[str, Any]
 
 
-_INSERT_SQL: Final[str] = """
+# weather semantic identity tuple — alembic 0060 ``uq_weather_value_identity``
+# (NULLS NOT DISTINCT) index 컬럼과 **정확히 동일**하고, ``WeatherValue.identity()``·
+# ``make_weather_value_key`` 축과도 같다(timeline_bucket 제외). 단일 정본으로 두어
+# writer conflict target이 DB unique index와 항상 일치하도록 강제한다(T-VN-17).
+_WEATHER_IDENTITY_COLUMNS: Final[tuple[str, ...]] = (
+    "feature_id",
+    "provider",
+    "weather_domain",
+    "forecast_style",
+    "metric_key",
+    "issued_at",
+    "valid_at",
+    "observed_at",
+)
+_WEATHER_CONFLICT_TARGET: Final[str] = ", ".join(_WEATHER_IDENTITY_COLUMNS)
+
+# T-VN-17: ON CONFLICT 대상을 PK(weather_value_key 해시)에서 semantic tuple index로
+# 전환한다. 해시 PK는 tz 표기 차이로 같은 instant가 다른 key를 받는 구멍이 있었고,
+# semantic UNIQUE(NULLS NOT DISTINCT)가 참 무결성 경계다. update-wins(ADR-072):
+# 같은 semantic tuple 재적재는 최신 값/payload/source로 갱신한다(weather_value_key는
+# 기존 행 값을 유지).
+#
+# 수용된 last-writer-wins(price writer와 동일 정책): known_at 가드가 없어 순서가
+# 뒤바뀐/backfill 재적재가 더 최신 값을 덮어쓸 수 있다. in-order 수집에는 무해하고
+# price도 같은 blind upsert다(parity). backfill 역행이 문제가 되면 향후
+# ``... DO UPDATE SET ... WHERE EXCLUDED.collected_at >=
+# feature_weather_values.collected_at`` 가드를 추가하는 옵션이 있으나 지금은
+# 범위 밖(price 대칭 유지).
+_INSERT_SQL: Final[str] = f"""
 INSERT INTO feature.feature_weather_values (
     weather_value_key, feature_id, provider, weather_domain, forecast_style,
     timeline_bucket, metric_key, metric_name, source_metric_key, source_metric_name,
@@ -155,7 +183,7 @@ INSERT INTO feature.feature_weather_values (
     :valid_until, :observed_at, :normalization_version, CAST(:payload AS jsonb),
     :source_record_key, :collected_at, now()
 )
-ON CONFLICT (weather_value_key) DO UPDATE SET
+ON CONFLICT ({_WEATHER_CONFLICT_TARGET}) DO UPDATE SET
     value_number = EXCLUDED.value_number,
     value_text = EXCLUDED.value_text,
     unit = EXCLUDED.unit,
@@ -221,19 +249,21 @@ def _nearest_anchor_sql(exists_predicate: str) -> str:
     재작성하고, weather 보유 여부는 ``EXISTS`` 상관 서브쿼리로 확인한다. 결정적
     tie-break으로 ``f.feature_id``를 정렬 말미에 둔다(같은 좌표 다수 시 안정).
     ADR-012: STORED ``coord_5179`` 대상, ``x_extension`` qualify, ST_Transform 금지.
+
+    공개 weather 표면(card/forecast)이 anchor feature_id를 응답에 노출하므로
+    target·anchor 모두 ADR-067 ``feature.public_features`` projection에서만 찾는다
+    — 비공개 feature는 anchor가 될 수 없고, 비공개 target은 빈 결과가 된다(F-1).
     """
     return f"""
 WITH target AS (
     SELECT coord_5179
-    FROM feature.features
+    FROM feature.public_features
     WHERE feature_id = :feature_id
-      AND deleted_at IS NULL
       AND coord_5179 IS NOT NULL
 )
 SELECT f.feature_id
-FROM feature.features AS f, target AS t
-WHERE f.deleted_at IS NULL
-  AND f.coord_5179 IS NOT NULL
+FROM feature.public_features AS f, target AS t
+WHERE f.coord_5179 IS NOT NULL
   AND x_extension.ST_DWithin(
         f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
       )
@@ -258,6 +288,48 @@ _NEAREST_KMA_FORECAST_SQL: Final[str] = _nearest_anchor_sql(
 
 # 반경 내 가장 가까운 관측 기온 anchor — observed T1H/TMP 보유(휴게소 등).
 _NEAREST_OBSERVED_TEMP_SQL: Final[str] = _nearest_anchor_sql(
+    f"AND {_OBSERVED_TEMP_PREDICATE}"
+)
+
+
+def _admin_nearest_anchor_sql(exists_predicate: str) -> str:
+    """삭제 전 base Feature에서 admin weather anchor를 찾는 SQL."""
+
+    return f"""
+WITH target AS (
+    SELECT coord_5179
+    FROM feature.features
+    WHERE feature_id = :feature_id
+      AND deleted_at IS NULL
+      AND user_deleted_at IS NULL
+      AND status <> 'deleted'
+      AND coord_5179 IS NOT NULL
+)
+SELECT f.feature_id
+FROM feature.features AS f, target AS t
+WHERE f.deleted_at IS NULL
+  AND f.user_deleted_at IS NULL
+  AND f.status <> 'deleted'
+  AND f.coord_5179 IS NOT NULL
+  AND x_extension.ST_DWithin(
+        f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
+      )
+  AND EXISTS (
+        SELECT 1
+        FROM feature.feature_weather_values AS w
+        WHERE w.feature_id = f.feature_id
+          {exists_predicate}
+      )
+ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179, f.feature_id
+LIMIT 1
+"""
+
+
+_ADMIN_NEAREST_WEATHER_SQL: Final[str] = _admin_nearest_anchor_sql("")
+_ADMIN_NEAREST_KMA_FORECAST_SQL: Final[str] = _admin_nearest_anchor_sql(
+    f"AND {_KMA_FORECAST_PREDICATE}"
+)
+_ADMIN_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _admin_nearest_anchor_sql(
     f"AND {_OBSERVED_TEMP_PREDICATE}"
 )
 
@@ -334,9 +406,8 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     x_extension.ST_Distance(f.coord_5179, input.geom_5179) AS distance_m
-FROM feature.features AS f, input
-WHERE f.deleted_at IS NULL
-  AND f.coord IS NOT NULL
+FROM feature.public_features AS f, input
+WHERE f.coord IS NOT NULL
   AND f.coord_5179 IS NOT NULL
   AND x_extension.ST_DWithin(
         f.coord_5179, input.geom_5179, CAST(:radius_m AS double precision)
@@ -354,9 +425,8 @@ LIMIT 1
 _NEAREST_WEATHER_BY_FEATURE_SQL: Final[str] = f"""
 WITH target AS (
     SELECT coord_5179
-    FROM feature.features
+    FROM feature.public_features
     WHERE feature_id = :feature_id
-      AND deleted_at IS NULL
       AND coord_5179 IS NOT NULL
 )
 SELECT
@@ -365,9 +435,8 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     x_extension.ST_Distance(f.coord_5179, target.coord_5179) AS distance_m
-FROM feature.features AS f, target
-WHERE f.deleted_at IS NULL
-  AND f.coord IS NOT NULL
+FROM feature.public_features AS f, target
+WHERE f.coord IS NOT NULL
   AND f.coord_5179 IS NOT NULL
   AND x_extension.ST_DWithin(
         f.coord_5179, target.coord_5179, CAST(:radius_m AS double precision)
@@ -386,9 +455,8 @@ _KMA_WEATHER_ALERT_HISTORY_SQL: Final[str] = """
 WITH alert_records AS (
     SELECT
         sr.source_record_key,
-        sl.feature_id,
+        f.feature_id,
         f.name AS feature_name,
-        f.status AS feature_status,
         sr.raw_data,
         sr.raw_data->>'region_code' AS region_code,
         sr.raw_data->>'region_name' AS region_name,
@@ -417,7 +485,9 @@ WITH alert_records AS (
     LEFT JOIN provider_sync.source_links AS sl
       ON sl.source_entity_key = sr.source_entity_key
      AND sl.is_primary_source
-    LEFT JOIN feature.features AS f
+    -- 공개 projection에만 조인: 비공개 anchor의 alert row는 살아남되
+    -- feature_id/feature_name은 NULL로 떨어진다 (ADR-067 / T-VN-04).
+    LEFT JOIN feature.public_features AS f
       ON f.feature_id = sl.feature_id
     WHERE sr.provider = 'python-kma-api'
       AND sr.dataset_key = 'kma_weather_alerts'
@@ -670,7 +740,6 @@ def _alert_history_row(row: RowMapping) -> WeatherAlertHistoryRow:
         source_record_key=str(row["source_record_key"]),
         feature_id=row["feature_id"],
         feature_name=row["feature_name"],
-        feature_status=row["feature_status"],
         region_code=row["region_code"],
         region_name=row["region_name"],
         phenomenon=row["phenomenon"],
@@ -722,12 +791,15 @@ async def list_kma_weather_alert_history(
     return [_alert_history_row(row) for row in rows]
 
 
-async def build_weather_card(
+async def _build_weather_card(
     session: AsyncSession,
     *,
     feature_id: str,
-    asof: datetime | None = None,
-    freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
+    asof: datetime | None,
+    freshness_seconds: int,
+    nearest_weather_sql: str,
+    nearest_kma_forecast_sql: str,
+    nearest_observed_temp_sql: str,
 ) -> WeatherCard:
     """feature의 weather card — forecast_style × metric_key별 최신값 + freshness.
 
@@ -789,11 +861,11 @@ async def build_weather_card(
     # 자기 row에 기온(T1H/TMP)이 없으면 tier 폴백. KMA 예보 tier를 먼저 병합해
     # SKY/POP/TMN/TMX를 우선 확보하고, 그 다음 관측 기온 tier로 증강한다.
     if not any(r["metric_key"] in ("T1H", "TMP") for r in rows):
-        _merge(await _anchor_rows(_NEAREST_KMA_FORECAST_SQL))
-        _merge(await _anchor_rows(_NEAREST_OBSERVED_TEMP_SQL))
+        _merge(await _anchor_rows(nearest_kma_forecast_sql))
+        _merge(await _anchor_rows(nearest_observed_temp_sql))
     # 어느 tier도 반경에 없으면(완전 미적재 지역) 가장 가까운 임의 weather로 폴백(빈 카드 회피).
     if not rows:
-        _merge(await _anchor_rows(_NEAREST_WEATHER_SQL))
+        _merge(await _anchor_rows(nearest_weather_sql))
     metrics = [
         WeatherMetric(
             forecast_style=str(row["forecast_style"]),
@@ -831,4 +903,44 @@ async def build_weather_card(
         metrics=metrics,
         latest_at=latest_at,
         is_stale=is_stale,
+    )
+
+
+async def build_weather_card(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    asof: datetime | None = None,
+    freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
+) -> WeatherCard:
+    """공개 Feature와 공개 anchor만 사용하는 weather card."""
+
+    return await _build_weather_card(
+        session,
+        feature_id=feature_id,
+        asof=asof,
+        freshness_seconds=freshness_seconds,
+        nearest_weather_sql=_NEAREST_WEATHER_SQL,
+        nearest_kma_forecast_sql=_NEAREST_KMA_FORECAST_SQL,
+        nearest_observed_temp_sql=_NEAREST_OBSERVED_TEMP_SQL,
+    )
+
+
+async def build_admin_weather_card(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    asof: datetime | None = None,
+    freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
+) -> WeatherCard:
+    """삭제 전 base Feature와 base anchor를 사용하는 admin weather card."""
+
+    return await _build_weather_card(
+        session,
+        feature_id=feature_id,
+        asof=asof,
+        freshness_seconds=freshness_seconds,
+        nearest_weather_sql=_ADMIN_NEAREST_WEATHER_SQL,
+        nearest_kma_forecast_sql=_ADMIN_NEAREST_KMA_FORECAST_SQL,
+        nearest_observed_temp_sql=_ADMIN_NEAREST_OBSERVED_TEMP_SQL,
     )

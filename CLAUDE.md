@@ -32,7 +32,7 @@ identity table은 `AGENTS.md` §식별자가 정본이다.
 > DA-D-01). 아래는 잘 바뀌지 않는 기준값만 둔다.
 
 - v1은 `v1` 브랜치 보존, main은 orphan으로 v2 재시작(ADR-001); v1 스펙은 루트 `kor-travel-map-spec.docx`.
-- ADR 현황·작성 규약은 `docs/adr/README.md`(다음 후보 ADR-076). 고정 기준값만 아래 둔다.
+- ADR 현황·작성 규약은 `docs/adr/README.md`(다음 후보 ADR-077). 고정 기준값만 아래 둔다.
 - **고정 포트(ADR-047)**: API `12701` · admin UI `12705` · Dagster `12702` ·
   Postgres host `5432` · RustFS S3 `12101`/console `12105`.
 - **geocoding 정본**: kor-travel-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본

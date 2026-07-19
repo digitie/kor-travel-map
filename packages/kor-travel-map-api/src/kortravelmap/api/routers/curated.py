@@ -18,6 +18,14 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
+from kortravelmap.api.curated_public_schema import (
+    PublicCuratedFeatureResponse,
+    PublicCuratedFeaturesData,
+    PublicCuratedFeaturesResponse,
+    PublicCuratedFeatureView,
+    public_curated_feature_view,
+)
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
 
@@ -137,7 +145,7 @@ class CuratedSourceRuleView(BaseModel):
 
 
 class CuratedFeatureView(BaseModel):
-    """curated feature overlay view."""
+    """admin/operator curated feature overlay view."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -471,7 +479,9 @@ class CuratedFeaturePatchRequest(BaseModel):
 class CuratedFeatureStatusRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    actor: str | None = None
+    # ADR-066 D-2 (T-VN-20): 감사 actor는 인증 principal에서만 파생한다. body의
+    # actor 필드는 제거했다 — 옛 caller가 보내면 extra="forbid"로 422다. curated
+    # select/unselect는 admin frontend 전용이고 PinVi는 호출하지 않는다.
     reason: str | None = None
 
 
@@ -489,6 +499,14 @@ def _rule_view(row: curated_repo.CuratedSourceRule) -> CuratedSourceRuleView:
 
 def _feature_view(row: curated_repo.CuratedFeature) -> CuratedFeatureView:
     return CuratedFeatureView(**row.__dict__)
+
+
+def _public_feature_view(
+    row: curated_repo.CuratedFeature,
+) -> PublicCuratedFeatureView | None:
+    """테스트/호출부가 공유하는 공개 projection 진입점."""
+
+    return public_curated_feature_view(row)
 
 
 def _snapshot_view(
@@ -767,23 +785,25 @@ async def _feature_or_404(
     curated_feature_id: str,
     *,
     include_archived: bool = False,
+    public_only: bool = False,
 ) -> curated_repo.CuratedFeature:
     row = await curated_repo.get_curated_feature(
         session,
         curated_feature_id=curated_feature_id,
         include_archived=include_archived,
+        public_only=public_only,
     )
     if row is None:
         raise HTTPException(status_code=404, detail="curated feature 없음")
     return row
 
 
-@router.get("/curated-themes", response_model=CuratedThemesResponse)
-async def list_curated_themes_route(
+async def _list_curated_themes_response(
     session: Annotated[AsyncSession, Depends(get_session)],
-    visibility: Annotated[ThemeVisibility | None, Query()] = None,
-    theme_group: Annotated[str | None, Query()] = None,
-    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    *,
+    visibility: ThemeVisibility | None,
+    theme_group: str | None,
+    limit: int,
 ) -> CuratedThemesResponse:
     started_at = perf_counter()
     rows = await curated_repo.list_curated_themes(
@@ -795,6 +815,20 @@ async def list_curated_themes_route(
     return CuratedThemesResponse(
         data=CuratedThemesData(items=[_theme_view(row) for row in rows]),
         meta=make_meta(started_at=started_at),
+    )
+
+
+@router.get("/curated-themes", response_model=CuratedThemesResponse)
+async def list_curated_themes_route(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    theme_group: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+) -> CuratedThemesResponse:
+    return await _list_curated_themes_response(
+        session,
+        visibility="public",
+        theme_group=theme_group,
+        limit=limit,
     )
 
 
@@ -820,15 +854,14 @@ async def list_curated_sources_route(
     )
 
 
-@router.get("/curated-features", response_model=CuratedFeaturesResponse)
+@router.get(
+    "/curated-features",
+    response_model=PublicCuratedFeaturesResponse,
+    response_model_exclude_none=True,
+)
 async def list_curated_features_route(
     session: Annotated[AsyncSession, Depends(get_session)],
-    theme_id: Annotated[str | None, Query()] = None,
     theme_slug: Annotated[str | None, Query()] = None,
-    source_id: Annotated[str | None, Query()] = None,
-    provider: Annotated[str | None, Query()] = None,
-    dataset_key: Annotated[str | None, Query()] = None,
-    curation_status: Annotated[CurationStatus | None, Query()] = "curated",
     region_code: Annotated[str | None, Query()] = None,
     sido_code: Annotated[str | None, Query()] = None,
     sigungu_code: Annotated[str | None, Query()] = None,
@@ -841,17 +874,13 @@ async def list_curated_features_route(
     display_title: Annotated[str | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
-) -> CuratedFeaturesResponse:
+) -> PublicCuratedFeaturesResponse:
     started_at = perf_counter()
     try:
         page = await curated_repo.list_curated_features(
             session,
-            theme_id=theme_id,
             theme_slug=theme_slug,
-            source_id=source_id,
-            provider=provider,
-            dataset_key=dataset_key,
-            curation_status=curation_status,
+            curation_status="curated",
             region_code=region_code,
             sido_code=sido_code,
             sigungu_code=sigungu_code,
@@ -864,27 +893,39 @@ async def list_curated_features_route(
             display_title=display_title,
             page_size=page_size,
             cursor=cursor,
+            public_only=True,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return CuratedFeaturesResponse(
-        data=CuratedFeaturesData(items=[_feature_view(row) for row in page.items]),
+    return PublicCuratedFeaturesResponse(
+        data=PublicCuratedFeaturesData(
+            items=[
+                item
+                for row in page.items
+                if (item := _public_feature_view(row)) is not None
+            ]
+        ),
         meta=make_meta(started_at=started_at, next_cursor=page.next_cursor),
     )
 
 
 @router.get(
     "/curated-features/{curated_feature_id}",
-    response_model=CuratedFeatureResponse,
+    response_model=PublicCuratedFeatureResponse,
+    response_model_exclude_none=True,
 )
 async def get_curated_feature_route(
     curated_feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> CuratedFeatureResponse:
+) -> PublicCuratedFeatureResponse:
     started_at = perf_counter()
-    row = await _feature_or_404(session, curated_feature_id)
-    return CuratedFeatureResponse(
-        data=_feature_view(row),
+    # 공개 표면 — underlying feature가 공개 projection에 없으면 404 (ADR-067).
+    row = await _feature_or_404(session, curated_feature_id, public_only=True)
+    view = _public_feature_view(row)
+    if view is None:
+        raise HTTPException(status_code=404, detail="지원하지 않는 공개 feature kind")
+    return PublicCuratedFeatureResponse(
+        data=view,
         meta=make_meta(started_at=started_at),
     )
 
@@ -1131,6 +1172,7 @@ async def delete_admin_curated_feature_route(
 async def select_admin_curated_feature_route(
     curated_feature_id: str,
     body: CuratedFeatureStatusRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
@@ -1139,7 +1181,7 @@ async def select_admin_curated_feature_route(
             session,
             curated_feature_id=curated_feature_id,
             curation_status="curated",
-            actor=body.actor,
+            actor=context.actor,
             reason=body.reason,
         )
     if row is None:
@@ -1162,6 +1204,7 @@ async def select_admin_curated_feature_route(
 async def unselect_admin_curated_feature_route(
     curated_feature_id: str,
     body: CuratedFeatureStatusRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
@@ -1170,7 +1213,7 @@ async def unselect_admin_curated_feature_route(
             session,
             curated_feature_id=curated_feature_id,
             curation_status="rejected",
-            actor=body.actor,
+            actor=context.actor,
             reason=body.reason,
         )
     if row is None:
@@ -1188,8 +1231,8 @@ async def list_admin_curated_themes_route(
     theme_group: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> CuratedThemesResponse:
-    return await list_curated_themes_route(
-        session=session,
+    return await _list_curated_themes_response(
+        session,
         visibility=visibility,
         theme_group=theme_group,
         limit=limit,

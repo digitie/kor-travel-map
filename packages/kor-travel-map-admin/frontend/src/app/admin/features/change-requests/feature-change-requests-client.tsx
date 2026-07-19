@@ -24,6 +24,7 @@ import {
 } from "react";
 
 import { useCategories, type CategorySummary } from "@/api/categories";
+import { ApiClientError } from "@/api/client";
 import {
   type AdminFeatureChangeAction,
   type AdminFeatureChangeRecord,
@@ -31,7 +32,7 @@ import {
   type AdminFeatureDetailData,
   type AdminFeatureCreateRequest,
   type AdminFeaturePatchRequest,
-  useAdminFeatureDetail,
+  useAdminFeatureCorrectionBasis,
   useAdminFeatureChangeRequests,
   useApproveAdminFeatureChangeMutation,
   useCreateAdminFeatureMutation,
@@ -167,7 +168,6 @@ interface FeatureChangeFormState {
   markerColor: string;
   markerIcon: string;
   name: string;
-  operator: string;
   organizer: string;
   parentFeatureId: string;
   phone: string;
@@ -218,7 +218,6 @@ function initialForm(): FeatureChangeFormState {
     markerColor: "P-01",
     markerIcon: "marker",
     name: "",
-    operator: "local-admin",
     organizer: "",
     parentFeatureId: "",
     phone: "",
@@ -434,6 +433,24 @@ function detailToFormPatch(
   };
 }
 
+function correctionSessionIdentity(form: FeatureChangeFormState): string {
+  return `${form.action}:${form.featureId.trim()}`;
+}
+
+function applyUntouchedPatch<T extends object>(
+  current: T,
+  patch: Partial<T>,
+  dirtyFields: ReadonlySet<keyof T>,
+): T {
+  const next = { ...current };
+  for (const key of Object.keys(patch) as Array<keyof T>) {
+    if (!dirtyFields.has(key)) {
+      Object.assign(next, { [key]: patch[key] });
+    }
+  }
+  return next;
+}
+
 function locationDraftFromForm(form: FeatureChangeFormState): LocationDraft {
   return {
     lat: form.lat,
@@ -597,7 +614,6 @@ function buildCreatePayload(
     marker_color: form.markerColor.trim(),
     status: form.status,
     reason: form.reason.trim(),
-    operator: optionalString(form.operator),
     feature_id: optionalString(form.featureId),
     idempotency_key: optionalString(form.idempotencyKey),
     sido_code: optionalString(form.sidoCode),
@@ -616,12 +632,16 @@ function buildCreatePayload(
 
 // category/marker_icon/marker_color는 initialForm 기본값이 비어있지 않아 optionalString이
 // 항상 통과 → prefill 안 된 update에서 기존 feature 값을 기본값으로 덮어쓰는 사고가 났다(#613).
-// 로드된 feature(baseline)와 다를 때만 PATCH에 포함하고, baseline이 없으면 생략한다.
+// displayed add-default는 실제로 해당 폼 필드를 편집했고 baseline과 다를 때만 PATCH한다.
+// update payload의 나머지 initialForm non-null 기본값(kind/status)은 PATCH 계약에 없다.
 function patchDefaultedField(
+  key: "category" | "markerColor" | "markerIcon",
   formValue: string,
   baselineValue: string | null | undefined,
   baseline: AdminFeatureDetailData["feature"] | null,
+  dirtyFields: ReadonlySet<keyof FeatureChangeFormState>,
 ): string | undefined {
+  if (!dirtyFields.has(key)) return undefined;
   const trimmed = formValue.trim();
   if (trimmed.length === 0) return undefined;
   if (!baseline) return undefined;
@@ -632,6 +652,7 @@ function patchDefaultedField(
 function buildPatchPayload(
   form: FeatureChangeFormState,
   baseline: AdminFeatureDetailData["feature"] | null,
+  dirtyFields: ReadonlySet<keyof FeatureChangeFormState>,
 ): AdminFeaturePatchRequest {
   if (form.featureId.trim().length === 0) {
     throw new Error("update에는 feature_id가 필요합니다.");
@@ -642,16 +663,33 @@ function buildPatchPayload(
   const coord = parseOptionalCoord(form.lon, form.lat);
   return {
     reason: form.reason.trim(),
-    operator: optionalString(form.operator),
     name: optionalString(form.name),
-    category: patchDefaultedField(form.category, baseline?.category, baseline),
+    category: patchDefaultedField(
+      "category",
+      form.category,
+      baseline?.category,
+      baseline,
+      dirtyFields,
+    ),
     coord,
     coord_precision_digits: parseOptionalInteger(
       "coord_precision_digits",
       form.coordPrecisionDigits,
     ),
-    marker_icon: patchDefaultedField(form.markerIcon, baseline?.marker_icon, baseline),
-    marker_color: patchDefaultedField(form.markerColor, baseline?.marker_color, baseline),
+    marker_icon: patchDefaultedField(
+      "markerIcon",
+      form.markerIcon,
+      baseline?.marker_icon,
+      baseline,
+      dirtyFields,
+    ),
+    marker_color: patchDefaultedField(
+      "markerColor",
+      form.markerColor,
+      baseline?.marker_color,
+      baseline,
+      dirtyFields,
+    ),
     sido_code: optionalString(form.sidoCode),
     sigungu_code: optionalString(form.sigunguCode),
     legal_dong_code: optionalString(form.legalDongCode),
@@ -738,6 +776,7 @@ function LocationEditDialog({
   const [draft, setDraft] = useState<LocationDraft>(() =>
     locationDraftFromForm(form),
   );
+  const dirtyFieldsRef = useRef<Set<keyof LocationDraft>>(new Set());
   const mountedRef = useRef(true);
   const coord = parseCoordInput(draft.lon, draft.lat);
   const coordError = coordValidationMessage(draft.lon, draft.lat);
@@ -751,10 +790,35 @@ function LocationEditDialog({
     : [DEFAULT_VIEWPORT.lon, DEFAULT_VIEWPORT.lat];
   const dialogZoom = coord ? 13 : DEFAULT_VIEWPORT.zoom;
 
+  const updateDraftFields = (patch: Partial<LocationDraft>) => {
+    setDraft((current) => {
+      let next = current;
+      for (const key of Object.keys(patch) as Array<keyof LocationDraft>) {
+        const value = patch[key];
+        if (value !== undefined && next[key] !== value) {
+          dirtyFieldsRef.current.add(key);
+          next = Object.assign({ ...next }, { [key]: value });
+        }
+      }
+      return next;
+    });
+  };
+
   const updateDraft = <K extends keyof LocationDraft>(
     key: K,
     value: LocationDraft[K],
-  ) => setDraft((current) => ({ ...current, [key]: value }));
+  ) => {
+    const patch: Partial<LocationDraft> = {};
+    Object.assign(patch, { [key]: value });
+    updateDraftFields(patch);
+  };
+
+  useEffect(() => {
+    const baseline = locationDraftFromForm(form);
+    setDraft((current) =>
+      applyUntouchedPatch(current, baseline, dirtyFieldsRef.current),
+    );
+  }, [form]);
 
   useEffect(
     () => () => {
@@ -764,12 +828,11 @@ function LocationEditDialog({
   );
 
   const selectPoint = async (lon: number, lat: number) => {
-    setDraft((current) => ({
-      ...current,
+    updateDraftFields({
       lat: lat.toFixed(6),
       lon: lon.toFixed(6),
-    }));
-      setReverseMessage("위치의 시군구를 확인하는 중...");
+    });
+    setReverseMessage("위치의 시군구를 확인하는 중...");
     try {
       const response = await reverseGeocode({ lon, lat });
       const candidate = response.candidates[0];
@@ -778,7 +841,7 @@ function LocationEditDialog({
         : null;
       if (!mountedRef.current) return;
       if (sigungu) {
-        setDraft((current) => ({ ...current, sigunguCode: sigungu.code }));
+        updateDraft("sigunguCode", sigungu.code);
         setReverseMessage(`${sigungu.label} · ${sigungu.code}`);
       } else {
         setReverseMessage("시군구 후보 없음");
@@ -790,11 +853,9 @@ function LocationEditDialog({
   };
 
   const applyDraft = () => {
-    updateForm("lon", draft.lon);
-    updateForm("lat", draft.lat);
-    updateForm("markerIcon", draft.markerIcon);
-    updateForm("markerColor", draft.markerColor);
-    updateForm("sigunguCode", draft.sigunguCode);
+    for (const key of dirtyFieldsRef.current) {
+      updateForm(key, draft[key]);
+    }
     onClose();
   };
 
@@ -981,18 +1042,25 @@ export function FeatureChangeRequestsClient({
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const appliedQueryPrefillRef = useRef<string | null>(null);
   const appliedFeaturePrefillRef = useRef<string | null>(null);
-  const categories = useCategories({ active_only: false, include_counts: false });
-  // update 대상 feature는 URL prefill뿐 아니라 폼의 Feature ID 입력에서도 조회한다 —
-  // 폼이 실제 feature 값으로 채워져야 기본값 덮어쓰기(#613)를 막을 수 있다.
-  const detailLookupId =
-    form.action === "update"
+  const editDraftDirtyFieldsRef = useRef<Set<keyof FeatureChangeFormState>>(
+    new Set(),
+  );
+  const categories = useCategories({ include_counts: false });
+  // update/delete는 동일 feature snapshot과 raw ETag를 편집 수명 동안 함께 고정한다.
+  const correctionLookupId =
+    form.action === "update" || form.action === "delete"
       ? form.featureId.trim() || prefillFeatureId
-      : prefillFeatureId;
-  const prefillFeature = useAdminFeatureDetail(detailLookupId);
+      : null;
+  const correctionBasis = useAdminFeatureCorrectionBasis(correctionLookupId);
+  const selectedCorrectionBasis =
+    correctionBasis.data?.featureId === correctionLookupId
+      ? correctionBasis.data
+      : null;
   const loadedUpdateFeature =
     form.action === "update" &&
-    prefillFeature.data?.data.feature?.feature_id === form.featureId.trim()
-      ? prefillFeature.data.data.feature
+    selectedCorrectionBasis?.detail.data.feature.feature_id ===
+      form.featureId.trim()
+      ? selectedCorrectionBasis.detail.data.feature
       : null;
   const unsupportedUpdateKind =
     loadedUpdateFeature &&
@@ -1031,6 +1099,11 @@ export function FeatureChangeRequestsClient({
     deleteFeature.error ??
     approveChange.error ??
     rejectChange.error;
+  const correctionConflict =
+    (patchFeature.error instanceof ApiClientError &&
+      patchFeature.error.status === 412) ||
+    (deleteFeature.error instanceof ApiClientError &&
+      deleteFeature.error.status === 412);
   const categoryItems = categories.data?.data.items ?? [];
   const formCoord = parseCoordInput(form.lon, form.lat);
   const formCoordError =
@@ -1044,36 +1117,67 @@ export function FeatureChangeRequestsClient({
   const updateForm = <K extends keyof FeatureChangeFormState>(
     key: K,
     value: FeatureChangeFormState[K],
-  ) => setForm((current) => ({ ...current, [key]: value }));
+  ) => {
+    if (key === "action" || key === "featureId") {
+      const nextForm: FeatureChangeFormState = { ...form, [key]: value };
+      if (
+        correctionSessionIdentity(form) !== correctionSessionIdentity(nextForm)
+      ) {
+        editDraftDirtyFieldsRef.current.clear();
+        appliedFeaturePrefillRef.current = null;
+        patchFeature.reset();
+        deleteFeature.reset();
+        setFormError(null);
+      }
+    } else {
+      editDraftDirtyFieldsRef.current.add(key);
+    }
+    setForm((current) => ({ ...current, [key]: value }));
+  };
 
   const resetForm = () => {
     setForm(initialForm());
     setFormError(null);
     appliedQueryPrefillRef.current = null;
     appliedFeaturePrefillRef.current = null;
+    editDraftDirtyFieldsRef.current.clear();
+    patchFeature.reset();
+    deleteFeature.reset();
   };
 
   const applyRegionCandidate = (candidate: KorTravelGeoCandidate) => {
     const nextCoord = korTravelGeoCandidateToCoord(candidate);
     const address = korTravelGeoCandidateToAddressRecord(candidate);
     const codes = korTravelGeoCodesFromCandidate(candidate);
-    setForm((current) => ({
-      ...current,
-      addressAdmin: fieldText(address.admin) || current.addressAdmin,
-      addressLegal: fieldText(address.legal) || current.addressLegal,
-      addressRoad: fieldText(address.road) || current.addressRoad,
-      adminDongCode: codes.admin_dong_code ?? current.adminDongCode,
-      legalDongCode: codes.legal_dong_code ?? current.legalDongCode,
-      roadNameCode: codes.road_name_code ?? current.roadNameCode,
-      sidoCode: codes.sido_code ?? current.sidoCode,
-      sigunguCode: codes.sigungu_code ?? current.sigunguCode,
+    const addressAdmin = fieldText(address.admin);
+    const addressLegal = fieldText(address.legal);
+    const addressRoad = fieldText(address.road);
+    const regionPatch: Partial<FeatureChangeFormState> = {
+      ...(addressAdmin ? { addressAdmin } : {}),
+      ...(addressLegal ? { addressLegal } : {}),
+      ...(addressRoad ? { addressRoad } : {}),
+      ...(codes.admin_dong_code
+        ? { adminDongCode: codes.admin_dong_code }
+        : {}),
+      ...(codes.legal_dong_code
+        ? { legalDongCode: codes.legal_dong_code }
+        : {}),
+      ...(codes.road_name_code ? { roadNameCode: codes.road_name_code } : {}),
+      ...(codes.sido_code ? { sidoCode: codes.sido_code } : {}),
+      ...(codes.sigungu_code ? { sigunguCode: codes.sigungu_code } : {}),
       ...(nextCoord
         ? {
             lat: nextCoord.lat.toFixed(6),
             lon: nextCoord.lon.toFixed(6),
           }
         : {}),
-    }));
+    };
+    for (const key of Object.keys(regionPatch) as Array<
+      keyof FeatureChangeFormState
+    >) {
+      editDraftDirtyFieldsRef.current.add(key);
+    }
+    setForm((current) => ({ ...current, ...regionPatch }));
   };
 
   useEffect(() => {
@@ -1083,6 +1187,7 @@ export function FeatureChangeRequestsClient({
     const nextAction = prefill?.action;
     const nextFeatureId = prefill?.featureId?.trim() ?? "";
     const nextReason = prefill?.reason?.trim() ?? "";
+    editDraftDirtyFieldsRef.current.clear();
     setForm((current) => ({
       ...current,
       action:
@@ -1096,15 +1201,14 @@ export function FeatureChangeRequestsClient({
   }, [prefill, queryPrefillKey]);
 
   useEffect(() => {
-    const feature = prefillFeature.data?.data.feature;
+    const feature = correctionBasis.data?.detail.data.feature;
     if (!feature) return;
+    if (form.action !== "update") return;
     // URL prefill 또는 update에서 직접 입력한 Feature ID의 feature가 로드되면 폼을 그 값으로 채운다.
-    const targetId =
-      form.action === "update"
-        ? form.featureId.trim() || prefillFeatureId
-        : prefillFeatureId;
+    const targetId = form.featureId.trim() || prefillFeatureId;
     if (!targetId || feature.feature_id !== targetId) return;
-    const key = `${feature.feature_id}:${feature.updated_at}`;
+    // basis가 explicit reload로 바뀌어도 effect가 dirty form을 자동으로 덮지 않는다.
+    const key = feature.feature_id;
     if (appliedFeaturePrefillRef.current === key) return;
     if (isUnsupportedManualMutationKind(feature.kind)) {
       appliedFeaturePrefillRef.current = key;
@@ -1112,23 +1216,65 @@ export function FeatureChangeRequestsClient({
     }
     appliedFeaturePrefillRef.current = key;
     queueMicrotask(() => {
-      setForm((current) => ({
-        ...current,
-        ...detailToFormPatch(feature),
-        reason: current.reason || "admin feature detail edit",
-      }));
+      setForm((current) =>
+        applyUntouchedPatch(
+          current,
+          {
+            ...detailToFormPatch(feature),
+            ...(current.reason ? {} : { reason: "admin feature detail edit" }),
+          },
+          editDraftDirtyFieldsRef.current,
+        ),
+      );
     });
   }, [
-    prefillFeature.data?.data.feature,
+    correctionBasis.data,
     prefillFeatureId,
     form.action,
     form.featureId,
   ]);
 
+  const reloadCorrectionBasis = async () => {
+    setFormError(null);
+    const result = await correctionBasis.refetch();
+    if (
+      result.fetchStatus !== "idle" ||
+      result.isError ||
+      result.error !== null ||
+      !result.data
+    ) {
+      throw result.error ?? new Error("최신 Feature 편집 기준을 불러오지 못했습니다.");
+    }
+    const feature = result.data.detail.data.feature;
+    if (
+      feature.feature_id !== correctionLookupId ||
+      feature.row_revision !== result.data.rowRevision
+    ) {
+      throw new Error("다른 Feature의 편집 기준이 반환되었습니다.");
+    }
+    if (form.action === "update") {
+      if (isUnsupportedManualMutationKind(feature.kind)) {
+        throw new Error(`${feature.kind} Feature는 수동 생성/수정 대상이 아닙니다.`);
+      }
+      setForm((current) => ({
+        ...current,
+        ...detailToFormPatch(feature),
+        reason: current.reason || "admin feature detail edit",
+      }));
+      appliedFeaturePrefillRef.current = feature.feature_id;
+    }
+    editDraftDirtyFieldsRef.current.clear();
+    patchFeature.reset();
+    deleteFeature.reset();
+  };
+
   const submitChange = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError(null);
     try {
+      if (correctionConflict) {
+        throw new Error("최신 Feature를 다시 불러온 뒤 제출해야 합니다.");
+      }
       // delete는 feature_id + reason만 필요 — marker/category/coord 카탈로그 검증은 건너뛴다(#613).
       if (form.action !== "delete") {
         validateTextFields(form, categoryItems);
@@ -1143,9 +1289,17 @@ export function FeatureChangeRequestsClient({
           );
         }
         const featureId = form.featureId.trim();
+        if (!selectedCorrectionBasis) {
+          throw new Error("수정할 Feature의 편집 기준을 먼저 불러와야 합니다.");
+        }
         const response = await patchFeature.mutateAsync({
           featureId,
-          body: buildPatchPayload(form, loadedUpdateFeature),
+          entityTag: selectedCorrectionBasis.entityTag,
+          body: buildPatchPayload(
+            form,
+            loadedUpdateFeature,
+            editDraftDirtyFieldsRef.current,
+          ),
         });
         setSelectedRequest(response.data.request);
       } else {
@@ -1156,17 +1310,26 @@ export function FeatureChangeRequestsClient({
         if (form.reason.trim().length === 0) {
           throw new Error("reason은 필수입니다.");
         }
+        if (!selectedCorrectionBasis) {
+          throw new Error("삭제할 Feature의 편집 기준을 먼저 불러와야 합니다.");
+        }
         const response = await deleteFeature.mutateAsync({
           featureId,
+          entityTag: selectedCorrectionBasis.entityTag,
           body: {
-            operator: optionalString(form.operator),
             reason: form.reason.trim(),
           },
         });
         setSelectedRequest(response.data.request);
       }
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : String(error));
+      setFormError(
+        error instanceof ApiClientError && error.status === 412
+          ? null
+          : error instanceof Error
+            ? error.message
+            : String(error),
+      );
     }
   };
 
@@ -1174,7 +1337,7 @@ export function FeatureChangeRequestsClient({
     approveChangeRequest(
       {
         requestId: request.request_id,
-        body: { operator: "local-admin", reason: "admin-ui approve" },
+        body: { reason: "admin-ui approve" },
       },
       { onSuccess: (data) => setSelectedRequest(data.data.request) },
     );
@@ -1184,7 +1347,7 @@ export function FeatureChangeRequestsClient({
     rejectChangeRequest(
       {
         requestId: request.request_id,
-        body: { operator: "local-admin", reason: "admin-ui reject" },
+        body: { reason: "admin-ui reject" },
       },
       { onSuccess: (data) => setSelectedRequest(data.data.request) },
     );
@@ -1385,14 +1548,48 @@ export function FeatureChangeRequestsClient({
       title={showReview ? "Feature 검수" : "변경 요청 작성"}
     >
       <div className="flex flex-col gap-4">
-        {(changes.isError || mutationError || formError) && (
+        {(changes.isError ||
+          (!correctionConflict && mutationError) ||
+          correctionBasis.isError ||
+          formError) && (
           <Alert variant="destructive">
             <AlertTitle>Feature 변경 처리 실패</AlertTitle>
             <AlertDescription>
-              {formError ?? changes.error?.message ?? mutationError?.message}
+              {formError ??
+                changes.error?.message ??
+                correctionBasis.error?.message ??
+                mutationError?.message}
             </AlertDescription>
           </Alert>
         )}
+
+        {correctionConflict ? (
+          <Alert>
+            <AlertTitle>서버의 Feature가 변경되었습니다</AlertTitle>
+            <AlertDescription className="flex flex-col items-start gap-3">
+              <span>
+                작성 중인 내용은 그대로 보존했습니다. 최신값을 다시 불러온 뒤 변경 내용을
+                검토하고 다시 제출하세요.
+              </span>
+              <Button
+                disabled={correctionBasis.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  void reloadCorrectionBasis().catch((error: unknown) =>
+                    setFormError(
+                      error instanceof Error ? error.message : String(error),
+                    ),
+                  )
+                }
+              >
+                <RefreshCwIcon data-icon="inline-start" />
+                최신값으로 폼 다시 불러오기
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         {showRequestForm ? (
           <form className="flex flex-col gap-4" onSubmit={submitChange}>
@@ -1401,10 +1598,10 @@ export function FeatureChangeRequestsClient({
               <div className="min-w-0">
                 <h2 className="font-medium">변경 요청 작성</h2>
                 <div className="mt-1 flex min-h-6 flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  {prefillFeature.isFetching ? (
+                  {correctionBasis.isFetching ? (
                     <Badge variant="outline">불러오는 중</Badge>
                   ) : null}
-                  {prefillFeatureId && prefillFeature.data?.data.feature ? (
+                  {selectedCorrectionBasis ? (
                     <Badge variant="secondary">데이터 로드됨</Badge>
                   ) : null}
                 </div>
@@ -1422,7 +1619,9 @@ export function FeatureChangeRequestsClient({
                 <Button
                   disabled={
                     anyMutationPending ||
-                    (form.action === "update" && prefillFeature.isFetching) ||
+                    correctionConflict ||
+                    ((form.action === "update" || form.action === "delete") &&
+                      (!selectedCorrectionBasis || correctionBasis.isFetching)) ||
                     Boolean(unsupportedUpdateKind)
                   }
                   size="sm"
@@ -1470,13 +1669,6 @@ export function FeatureChangeRequestsClient({
                 placeholder="예: 전화번호 수정"
                 value={form.reason}
                 onChange={(event) => updateForm("reason", event.target.value)}
-              />
-              <FormField
-                aria-label="change operator"
-                id="change-operator"
-                label="담당자"
-                value={form.operator}
-                onChange={(event) => updateForm("operator", event.target.value)}
               />
             </div>
             <div className="mt-3 grid gap-3 lg:grid-cols-4">
@@ -1545,12 +1737,6 @@ export function FeatureChangeRequestsClient({
                 <div className="text-sm text-destructive">
                   {categories.error.message}
                 </div>
-              ) : null}
-              {prefillFeature.isError ? (
-                <Alert variant="destructive">
-                  <AlertTitle>feature 상세 prefill 실패</AlertTitle>
-                  <AlertDescription>{prefillFeature.error.message}</AlertDescription>
-                </Alert>
               ) : null}
               {unsupportedUpdateKind ? (
                 <Alert variant="destructive">
