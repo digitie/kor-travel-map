@@ -9,11 +9,14 @@ type AdminFeatureDeactivateResponse =
   components["schemas"]["AdminFeatureDeactivateResponse"];
 type AdminFeatureDetailResponse =
   components["schemas"]["AdminFeatureDetailResponse"];
+type AdminFeatureRevisionResponse =
+  components["schemas"]["AdminFeatureRevisionResponse"];
 type FeatureDetailEnvelopeResponse =
   components["schemas"]["FeatureDetailEnvelopeResponse"];
 
 type BrowserFetchResult<T> = {
   body: T | null;
+  entityTag: string | null;
   status: number;
   text: string;
 };
@@ -86,6 +89,10 @@ function adminFeaturePath(featureId: string): string {
   return `/v1/admin/features/${encodeURIComponent(featureId)}`;
 }
 
+function adminFeatureRevisionPath(featureId: string): string {
+  return `${adminFeaturePath(featureId)}/revision`;
+}
+
 function publicFeaturePath(featureId: string): string {
   return `/v1/features/${encodeURIComponent(featureId)}`;
 }
@@ -123,14 +130,19 @@ async function readChangeResponse(
 async function browserFetch<T>(
   page: Page,
   path: string,
-  options: { body?: unknown; method?: "GET" | "POST" | "PATCH" | "DELETE" } = {},
+  options: {
+    body?: unknown;
+    headers?: Record<string, string>;
+    method?: "GET" | "POST" | "PATCH" | "DELETE";
+  } = {},
 ): Promise<BrowserFetchResult<T>> {
   return page.evaluate(
-    async ({ body, method, path }) => {
+    async ({ body, headers, method, path }) => {
       const response = await fetch(`/api/proxy${path}`, {
         method,
         headers: {
           Accept: "application/json",
+          ...headers,
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         credentials: "same-origin",
@@ -144,10 +156,16 @@ async function browserFetch<T>(
       } catch {
         parsed = null;
       }
-      return { body: parsed as T | null, status: response.status, text };
+      return {
+        body: parsed as T | null,
+        entityTag: response.headers.get("ETag"),
+        status: response.status,
+        text,
+      };
     },
     {
       body: options.body,
+      headers: options.headers,
       method: options.method ?? "GET",
       path,
     },
@@ -535,14 +553,30 @@ async function cleanupFeatureByApi(
     return;
   }
 
+  const revision = await browserFetch<AdminFeatureRevisionResponse>(
+    page,
+    adminFeatureRevisionPath(featureId),
+  );
+  if (revision.status !== 200 || revision.entityTag === null) {
+    throw new Error(
+      `cleanup revision 조회 실패: HTTP ${revision.status} ${revision.text}`,
+    );
+  }
+
   const deleteResponse = await browserFetch<AdminFeatureChangeResponse>(
     page,
     adminFeaturePath(featureId),
     {
       body: { operator: "local-admin", reason: `${BASE_REASON} cleanup delete` },
+      headers: { "If-Match": revision.entityTag },
       method: "DELETE",
     },
   );
+  if (deleteResponse.status !== 200 || !deleteResponse.body?.data.request) {
+    throw new Error(
+      `cleanup DELETE 실패: HTTP ${deleteResponse.status} ${deleteResponse.text}`,
+    );
+  }
   const request = deleteResponse.body?.data.request;
   if (deleteResponse.status === 200 && request?.status === "pending") {
     await approveChangeRequestByApi(page, request.request_id);

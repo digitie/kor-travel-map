@@ -190,10 +190,16 @@ async function mockCategories(page: Page) {
   });
 }
 
-async function fulfillJson(route: Route, body: unknown, status = 200) {
+async function fulfillJson(
+  route: Route,
+  body: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+) {
   await route.fulfill({
     body: JSON.stringify(body),
     contentType: "application/json",
+    headers,
     status,
   });
 }
@@ -625,7 +631,11 @@ function featureChangeResponse(
   };
 }
 
-function featureDetailResponse(featureId: string): AdminFeatureDetailResponse {
+function featureDetailResponse(
+  featureId: string,
+  rowRevision = 1,
+  name = `Existing ${featureId}`,
+): AdminFeatureDetailResponse {
   return {
     data: {
       change_requests: [],
@@ -641,9 +651,9 @@ function featureDetailResponse(featureId: string): AdminFeatureDetailResponse {
         kind: "place",
         lat: 37.5665,
         lon: 126.978,
-        name: `Existing ${featureId}`,
+        name,
         raw_refs: [],
-        row_revision: 1,
+        row_revision: rowRevision,
         status: "active",
         updated_at: MOCK_NOW,
         urls: {},
@@ -676,10 +686,14 @@ async function mockFeatureChangeMutations(
   options: {
     initial?: AdminFeatureChangeRecord[];
     reviewMode?: AdminFeatureReviewMode;
+    stalePatchOnce?: boolean;
   } = {},
 ) {
   const reviewMode = options.reviewMode ?? "require_review";
   let changes = [...(options.initial ?? [])];
+  let stalePatchInjected = false;
+  const featureNames = new Map<string, string>();
+  const featureRevisions = new Map<string, number>();
   const requests = {
     approve: 0,
     create: 0,
@@ -687,9 +701,11 @@ async function mockFeatureChangeMutations(
     list: 0,
     patch: 0,
     reject: 0,
+    revision: 0,
     createBodies: [] as AdminFeatureCreateRequest[],
     deleteBodies: [] as AdminFeatureDeleteRequest[],
     patchBodies: [] as AdminFeaturePatchRequest[],
+    mutationEtags: [] as string[],
     reviewBodies: [] as AdminFeatureReviewActionRequest[],
   };
 
@@ -810,11 +826,33 @@ async function mockFeatureChangeMutations(
       return;
     }
 
-    const featurePathMatch = apiPath.match(/^\/v1\/admin\/features\/([^/]+)$/);
-    if (request.method() === "GET" && featurePathMatch) {
+    const revisionPathMatch = apiPath.match(
+      /^\/v1\/admin\/features\/([^/]+)\/revision$/,
+    );
+    if (request.method() === "GET" && revisionPathMatch) {
+      requests.revision += 1;
+      const featureId = decodeURIComponent(revisionPathMatch[1]);
+      const rowRevision = featureRevisions.get(featureId) ?? 1;
+      featureRevisions.set(featureId, rowRevision);
       await fulfillJson(
         route,
-        featureDetailResponse(decodeURIComponent(featurePathMatch[1])),
+        { data: { feature_id: featureId, row_revision: rowRevision } },
+        200,
+        { ETag: `"${rowRevision}"` },
+      );
+      return;
+    }
+
+    const featurePathMatch = apiPath.match(/^\/v1\/admin\/features\/([^/]+)$/);
+    if (request.method() === "GET" && featurePathMatch) {
+      const featureId = decodeURIComponent(featurePathMatch[1]);
+      await fulfillJson(
+        route,
+        featureDetailResponse(
+          featureId,
+          featureRevisions.get(featureId) ?? 1,
+          featureNames.get(featureId),
+        ),
       );
       return;
     }
@@ -823,6 +861,29 @@ async function mockFeatureChangeMutations(
       const body = request.postDataJSON() as AdminFeaturePatchRequest;
       requests.patchBodies.push(body);
       const featureId = decodeURIComponent(featurePathMatch[1]);
+      const receivedEntityTag = request.headers()["if-match"] ?? "";
+      requests.mutationEtags.push(receivedEntityTag);
+      if (options.stalePatchOnce && !stalePatchInjected) {
+        const nextRevision = (featureRevisions.get(featureId) ?? 1) + 1;
+        featureRevisions.set(featureId, nextRevision);
+        featureNames.set(featureId, `Server latest ${featureId}`);
+        stalePatchInjected = true;
+      }
+      const expectedEntityTag = `"${featureRevisions.get(featureId) ?? 1}"`;
+      if (receivedEntityTag !== expectedEntityTag) {
+        await fulfillJson(
+          route,
+          {
+            code: "FEATURE_REVISION_PRECONDITION_FAILED",
+            detail: "Feature revision이 변경되었습니다.",
+            status: 412,
+            title: "Precondition Failed",
+            type: "about:blank",
+          },
+          412,
+        );
+        return;
+      }
       const updated = storeChange(
         changeStateForWrite(
           makeFeatureChange({
@@ -845,6 +906,13 @@ async function mockFeatureChangeMutations(
       const body = request.postDataJSON() as AdminFeatureDeleteRequest;
       requests.deleteBodies.push(body);
       const featureId = decodeURIComponent(featurePathMatch[1]);
+      const receivedEntityTag = request.headers()["if-match"] ?? "";
+      requests.mutationEtags.push(receivedEntityTag);
+      const expectedEntityTag = `"${featureRevisions.get(featureId) ?? 1}"`;
+      if (receivedEntityTag !== expectedEntityTag) {
+        await fulfillJson(route, { detail: "stale feature revision" }, 412);
+        return;
+      }
       const deleted = storeChange(
         changeStateForWrite(
           makeFeatureChange({
@@ -1082,9 +1150,12 @@ test.describe("admin/ops pages", () => {
     ).toHaveValue("Existing feature-update-1");
     await page.getByLabel("change reason", { exact: true }).fill("이름 수정");
     await page.getByLabel("change name", { exact: true }).fill("Updated feature");
+    const revisionReadsBeforePatch = requests.revision;
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.revision).toBe(revisionReadsBeforePatch);
+    expect(requests.mutationEtags[0]).toBe('"1"');
     expect(requests.patchBodies[0]).toMatchObject({
       name: "Updated feature",
       reason: "이름 수정",
@@ -1098,10 +1169,14 @@ test.describe("admin/ops pages", () => {
     await page
       .getByLabel("change feature id", { exact: true })
       .fill("feature-delete-1");
+    await expect(page.getByText("데이터 로드됨")).toBeVisible();
     await page.getByLabel("change reason", { exact: true }).fill("soft delete");
+    const revisionReadsBeforeDelete = requests.revision;
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => requests.delete).toBe(1);
+    expect(requests.revision).toBe(revisionReadsBeforeDelete);
+    expect(requests.mutationEtags[1]).toBe('"1"');
     expect(requests.deleteBodies[0]).toMatchObject({
       operator: "local-admin",
       reason: "soft delete",
@@ -1123,6 +1198,53 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByRole("row", { name: /Updated feature/ })).toHaveCount(
       0,
     );
+  });
+
+  test("stale correction은 draft를 보존하고 명시적 reload 뒤에만 새 ETag를 쓴다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureChangeMutations(page, {
+      stalePatchOnce: true,
+    });
+
+    await page.goto("/admin/features/change-requests");
+    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page.getByLabel("change feature id", { exact: true }).fill("feature-stale-1");
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Existing feature-stale-1",
+    );
+    await page.getByLabel("change reason", { exact: true }).fill("stale draft reason");
+    await page.getByLabel("change name", { exact: true }).fill("Operator draft");
+    const revisionReadsBeforePatch = requests.revision;
+
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.revision).toBe(revisionReadsBeforePatch);
+    expect(requests.mutationEtags[0]).toBe('"1"');
+    await expect(
+      page.getByRole("heading", { name: "서버의 Feature가 변경되었습니다" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Operator draft",
+    );
+    await expect(page.getByLabel("change reason", { exact: true })).toHaveValue(
+      "stale draft reason",
+    );
+
+    await page
+      .getByRole("button", { name: "최신값으로 폼 다시 불러오기" })
+      .click();
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Server latest feature-stale-1",
+    );
+    await expect.poll(() => requests.revision).toBe(revisionReadsBeforePatch + 1);
+
+    await page.getByLabel("change name", { exact: true }).fill("Reapplied draft");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => requests.patch).toBe(2);
+    expect(requests.mutationEtags[1]).toBe('"2"');
   });
 
   test("/v1/admin/issues", async ({ page }) => {

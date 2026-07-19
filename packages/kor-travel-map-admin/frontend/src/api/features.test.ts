@@ -1,12 +1,48 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   adminFeaturesInBoundsPath,
   buildFeatureTiles,
+  deleteAdminFeature,
+  fetchAdminFeatureCorrectionBasis,
   featureSearchPath,
   featureViewportQueryKey,
+  patchAdminFeature,
   type FeaturesInBboxParams,
 } from "./features";
+
+function jsonResponse(
+  body: unknown,
+  options: { entityTag?: string; status?: number } = {},
+): Response {
+  return new Response(JSON.stringify(body), {
+    status: options.status ?? 200,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.entityTag ? { ETag: options.entityTag } : {}),
+    },
+  });
+}
+
+function revisionResponse(rowRevision: number, entityTag: string): Response {
+  return jsonResponse(
+    { data: { feature_id: "feature-1", row_revision: rowRevision } },
+    { entityTag },
+  );
+}
+
+function detailResponse(rowRevision: number): Response {
+  return jsonResponse({
+    data: {
+      feature: { feature_id: "feature-1", row_revision: rowRevision },
+    },
+    meta: {},
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function params(overrides: Partial<FeaturesInBboxParams> = {}): FeaturesInBboxParams {
   return {
@@ -148,5 +184,90 @@ describe("feature search request contract", () => {
     });
     expect(new URL(path, "http://localhost").searchParams.get("include_total"))
       .toBe("true");
+  });
+});
+
+describe("admin feature correction basis", () => {
+  it("revision과 detail이 같은 시점일 때 raw ETag를 그대로 고정한다", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(revisionResponse(7, '"7"'))
+      .mockResolvedValueOnce(detailResponse(7));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const basis = await fetchAdminFeatureCorrectionBasis("feature-1");
+
+    expect(basis).toMatchObject({
+      entityTag: '"7"',
+      featureId: "feature-1",
+      rowRevision: 7,
+    });
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "/api/proxy/v1/admin/features/feature-1/revision",
+      "/api/proxy/v1/admin/features/feature-1",
+    ]);
+  });
+
+  it("revision과 detail 사이 경쟁 갱신은 제한 재조회 후 일치하는 basis만 반환한다", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(revisionResponse(7, '"7"'))
+      .mockResolvedValueOnce(detailResponse(8))
+      .mockResolvedValueOnce(revisionResponse(8, '"8"'))
+      .mockResolvedValueOnce(detailResponse(8));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const basis = await fetchAdminFeatureCorrectionBasis("feature-1");
+
+    expect(basis.entityTag).toBe('"8"');
+    expect(basis.rowRevision).toBe(8);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("revision과 detail이 계속 다르면 세 번만 읽고 쓰기 basis를 만들지 않는다", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(revisionResponse(1, '"1"'))
+      .mockResolvedValueOnce(detailResponse(2))
+      .mockResolvedValueOnce(revisionResponse(2, '"2"'))
+      .mockResolvedValueOnce(detailResponse(3))
+      .mockResolvedValueOnce(revisionResponse(3, '"3"'))
+      .mockResolvedValueOnce(detailResponse(4));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchAdminFeatureCorrectionBasis("feature-1"),
+    ).rejects.toThrow("3회 연속 일치하지 않았습니다");
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("PATCH와 DELETE는 caller basis만 보내고 mutation 직전 revision을 다시 읽지 않는다", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse({ data: { request: { feature_id: "feature-1" } }, meta: {} }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await patchAdminFeature("feature-1", '"4"', {
+      reason: "edit",
+    });
+    await deleteAdminFeature("feature-1", '"5"', {
+      reason: "delete",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "/api/proxy/v1/admin/features/feature-1",
+      "/api/proxy/v1/admin/features/feature-1",
+    ]);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual([
+      "PATCH",
+      "DELETE",
+    ]);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.headers)).toEqual([
+      expect.objectContaining({ "If-Match": '"4"' }),
+      expect.objectContaining({ "If-Match": '"5"' }),
+    ]);
   });
 });

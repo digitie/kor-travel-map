@@ -24,6 +24,7 @@ import {
 } from "react";
 
 import { useCategories, type CategorySummary } from "@/api/categories";
+import { ApiClientError } from "@/api/client";
 import {
   type AdminFeatureChangeAction,
   type AdminFeatureChangeRecord,
@@ -31,7 +32,7 @@ import {
   type AdminFeatureDetailData,
   type AdminFeatureCreateRequest,
   type AdminFeaturePatchRequest,
-  useAdminFeatureDetail,
+  useAdminFeatureCorrectionBasis,
   useAdminFeatureChangeRequests,
   useApproveAdminFeatureChangeMutation,
   useCreateAdminFeatureMutation,
@@ -978,17 +979,21 @@ export function FeatureChangeRequestsClient({
   const appliedQueryPrefillRef = useRef<string | null>(null);
   const appliedFeaturePrefillRef = useRef<string | null>(null);
   const categories = useCategories({ include_counts: false });
-  // update 대상 feature는 URL prefill뿐 아니라 폼의 Feature ID 입력에서도 조회한다 —
-  // 폼이 실제 feature 값으로 채워져야 기본값 덮어쓰기(#613)를 막을 수 있다.
-  const detailLookupId =
-    form.action === "update"
+  // update/delete는 동일 feature snapshot과 raw ETag를 편집 수명 동안 함께 고정한다.
+  const correctionLookupId =
+    form.action === "update" || form.action === "delete"
       ? form.featureId.trim() || prefillFeatureId
-      : prefillFeatureId;
-  const prefillFeature = useAdminFeatureDetail(detailLookupId);
+      : null;
+  const correctionBasis = useAdminFeatureCorrectionBasis(correctionLookupId);
+  const selectedCorrectionBasis =
+    correctionBasis.data?.featureId === correctionLookupId
+      ? correctionBasis.data
+      : null;
   const loadedUpdateFeature =
     form.action === "update" &&
-    prefillFeature.data?.data.feature?.feature_id === form.featureId.trim()
-      ? prefillFeature.data.data.feature
+    selectedCorrectionBasis?.detail.data.feature.feature_id ===
+      form.featureId.trim()
+      ? selectedCorrectionBasis.detail.data.feature
       : null;
   const unsupportedUpdateKind =
     loadedUpdateFeature &&
@@ -1027,6 +1032,11 @@ export function FeatureChangeRequestsClient({
     deleteFeature.error ??
     approveChange.error ??
     rejectChange.error;
+  const correctionConflict =
+    (patchFeature.error instanceof ApiClientError &&
+      patchFeature.error.status === 412) ||
+    (deleteFeature.error instanceof ApiClientError &&
+      deleteFeature.error.status === 412);
   const categoryItems = categories.data?.data.items ?? [];
   const formCoord = parseCoordInput(form.lon, form.lat);
   const formCoordError =
@@ -1040,13 +1050,22 @@ export function FeatureChangeRequestsClient({
   const updateForm = <K extends keyof FeatureChangeFormState>(
     key: K,
     value: FeatureChangeFormState[K],
-  ) => setForm((current) => ({ ...current, [key]: value }));
+  ) => {
+    if (key === "action" || key === "featureId") {
+      patchFeature.reset();
+      deleteFeature.reset();
+      setFormError(null);
+    }
+    setForm((current) => ({ ...current, [key]: value }));
+  };
 
   const resetForm = () => {
     setForm(initialForm());
     setFormError(null);
     appliedQueryPrefillRef.current = null;
     appliedFeaturePrefillRef.current = null;
+    patchFeature.reset();
+    deleteFeature.reset();
   };
 
   const applyRegionCandidate = (candidate: KorTravelGeoCandidate) => {
@@ -1092,15 +1111,14 @@ export function FeatureChangeRequestsClient({
   }, [prefill, queryPrefillKey]);
 
   useEffect(() => {
-    const feature = prefillFeature.data?.data.feature;
+    const feature = correctionBasis.data?.detail.data.feature;
     if (!feature) return;
+    if (form.action !== "update") return;
     // URL prefill 또는 update에서 직접 입력한 Feature ID의 feature가 로드되면 폼을 그 값으로 채운다.
-    const targetId =
-      form.action === "update"
-        ? form.featureId.trim() || prefillFeatureId
-        : prefillFeatureId;
+    const targetId = form.featureId.trim() || prefillFeatureId;
     if (!targetId || feature.feature_id !== targetId) return;
-    const key = `${feature.feature_id}:${feature.updated_at}`;
+    // basis가 explicit reload로 바뀌어도 effect가 dirty form을 자동으로 덮지 않는다.
+    const key = feature.feature_id;
     if (appliedFeaturePrefillRef.current === key) return;
     if (isUnsupportedManualMutationKind(feature.kind)) {
       appliedFeaturePrefillRef.current = key;
@@ -1115,11 +1133,36 @@ export function FeatureChangeRequestsClient({
       }));
     });
   }, [
-    prefillFeature.data?.data.feature,
+    correctionBasis.data,
     prefillFeatureId,
     form.action,
     form.featureId,
   ]);
+
+  const reloadCorrectionBasis = async () => {
+    setFormError(null);
+    const result = await correctionBasis.refetch();
+    if (!result.data) {
+      throw result.error ?? new Error("최신 Feature 편집 기준을 불러오지 못했습니다.");
+    }
+    const feature = result.data.detail.data.feature;
+    if (feature.feature_id !== correctionLookupId) {
+      throw new Error("다른 Feature의 편집 기준이 반환되었습니다.");
+    }
+    if (form.action === "update") {
+      if (isUnsupportedManualMutationKind(feature.kind)) {
+        throw new Error(`${feature.kind} Feature는 수동 생성/수정 대상이 아닙니다.`);
+      }
+      setForm((current) => ({
+        ...current,
+        ...detailToFormPatch(feature),
+        reason: current.reason || "admin feature detail edit",
+      }));
+      appliedFeaturePrefillRef.current = feature.feature_id;
+    }
+    patchFeature.reset();
+    deleteFeature.reset();
+  };
 
   const submitChange = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1139,8 +1182,12 @@ export function FeatureChangeRequestsClient({
           );
         }
         const featureId = form.featureId.trim();
+        if (!selectedCorrectionBasis) {
+          throw new Error("수정할 Feature의 편집 기준을 먼저 불러와야 합니다.");
+        }
         const response = await patchFeature.mutateAsync({
           featureId,
+          entityTag: selectedCorrectionBasis.entityTag,
           body: buildPatchPayload(form, loadedUpdateFeature),
         });
         setSelectedRequest(response.data.request);
@@ -1152,8 +1199,12 @@ export function FeatureChangeRequestsClient({
         if (form.reason.trim().length === 0) {
           throw new Error("reason은 필수입니다.");
         }
+        if (!selectedCorrectionBasis) {
+          throw new Error("삭제할 Feature의 편집 기준을 먼저 불러와야 합니다.");
+        }
         const response = await deleteFeature.mutateAsync({
           featureId,
+          entityTag: selectedCorrectionBasis.entityTag,
           body: {
             reason: form.reason.trim(),
           },
@@ -1161,7 +1212,13 @@ export function FeatureChangeRequestsClient({
         setSelectedRequest(response.data.request);
       }
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : String(error));
+      setFormError(
+        error instanceof ApiClientError && error.status === 412
+          ? null
+          : error instanceof Error
+            ? error.message
+            : String(error),
+      );
     }
   };
 
@@ -1380,14 +1437,48 @@ export function FeatureChangeRequestsClient({
       title={showReview ? "Feature 검수" : "변경 요청 작성"}
     >
       <div className="flex flex-col gap-4">
-        {(changes.isError || mutationError || formError) && (
+        {(changes.isError ||
+          (!correctionConflict && mutationError) ||
+          correctionBasis.isError ||
+          formError) && (
           <Alert variant="destructive">
             <AlertTitle>Feature 변경 처리 실패</AlertTitle>
             <AlertDescription>
-              {formError ?? changes.error?.message ?? mutationError?.message}
+              {formError ??
+                changes.error?.message ??
+                correctionBasis.error?.message ??
+                mutationError?.message}
             </AlertDescription>
           </Alert>
         )}
+
+        {correctionConflict ? (
+          <Alert>
+            <AlertTitle>서버의 Feature가 변경되었습니다</AlertTitle>
+            <AlertDescription className="flex flex-col items-start gap-3">
+              <span>
+                작성 중인 내용은 그대로 보존했습니다. 최신값을 다시 불러온 뒤 변경 내용을
+                검토하고 다시 제출하세요.
+              </span>
+              <Button
+                disabled={correctionBasis.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  void reloadCorrectionBasis().catch((error: unknown) =>
+                    setFormError(
+                      error instanceof Error ? error.message : String(error),
+                    ),
+                  )
+                }
+              >
+                <RefreshCwIcon data-icon="inline-start" />
+                최신값으로 폼 다시 불러오기
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         {showRequestForm ? (
           <form className="flex flex-col gap-4" onSubmit={submitChange}>
@@ -1396,10 +1487,10 @@ export function FeatureChangeRequestsClient({
               <div className="min-w-0">
                 <h2 className="font-medium">변경 요청 작성</h2>
                 <div className="mt-1 flex min-h-6 flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  {prefillFeature.isFetching ? (
+                  {correctionBasis.isFetching ? (
                     <Badge variant="outline">불러오는 중</Badge>
                   ) : null}
-                  {prefillFeatureId && prefillFeature.data?.data.feature ? (
+                  {selectedCorrectionBasis ? (
                     <Badge variant="secondary">데이터 로드됨</Badge>
                   ) : null}
                 </div>
@@ -1417,7 +1508,8 @@ export function FeatureChangeRequestsClient({
                 <Button
                   disabled={
                     anyMutationPending ||
-                    (form.action === "update" && prefillFeature.isFetching) ||
+                    ((form.action === "update" || form.action === "delete") &&
+                      (!selectedCorrectionBasis || correctionBasis.isFetching)) ||
                     Boolean(unsupportedUpdateKind)
                   }
                   size="sm"
@@ -1533,12 +1625,6 @@ export function FeatureChangeRequestsClient({
                 <div className="text-sm text-destructive">
                   {categories.error.message}
                 </div>
-              ) : null}
-              {prefillFeature.isError ? (
-                <Alert variant="destructive">
-                  <AlertTitle>feature 상세 prefill 실패</AlertTitle>
-                  <AlertDescription>{prefillFeature.error.message}</AlertDescription>
-                </Alert>
               ) : null}
               {unsupportedUpdateKind ? (
                 <Alert variant="destructive">

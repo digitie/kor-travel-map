@@ -21,8 +21,10 @@
 - DB·REST/OpenAPI schema는 바꾸지 않는다. 412에서는 draft를 보존하고 운영자의 명시적 reload가
   성공할 때만 최신 detail·basis를 적용한다. update/delete, background refetch 보호, mocked/live
   Playwright cleanup까지 같은 PR에 묶는다.
-- **다음 한 작업**: docs-first draft PR을 연 뒤 client/UI/e2e 구현 head를 단일 적대 리뷰어에게
-  제출한다. 승인 전에는 test·lint·build를 실행하지 않는다.
+- draft PR #789에 docs-first commit을 push한 뒤 `/revision`→detail 안정 basis, caller-supplied raw
+  ETag mutation, dirty form 보호, 412 explicit reload, update/delete와 live cleanup 회귀를 구현했다.
+- **다음 한 작업**: 구현 exact head를 push하고 단일 적대 리뷰어에게 제출한다. 승인 전에는
+  test·lint·build를 실행하지 않는다.
 
 ## 2026-07-20 (codex, agent B) — T-VN-57 public security 계약 docs-first 착수
 

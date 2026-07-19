@@ -17,6 +17,15 @@
   lineage field와 curation metadata 재유입을 거부한다. 공개 DTO와 admin/operator raw DTO는
   상속 없는 별도 타입이다.
 
+### Admin correction 편집 기준 고정 (2026-07-20, T-VN-58 #785)
+
+- **FIXED**: Feature 수정·삭제가 제출 직전에 최신 revision을 다시 읽어 stale draft를 새 기준으로
+  제출하던 동작을 제거했다. 편집 시작 detail과 raw strong `ETag`를 불변 basis로 고정해 원래
+  `If-Match`를 그대로 보낸다.
+- **CHANGED**: 서버가 `412 Precondition Failed`를 반환하면 작성 중인 입력을 보존하고 자동
+  재시도하지 않는다. 운영자가 명시적으로 최신값을 다시 불러온 경우에만 새 detail과 basis를
+  적용한다. DB와 REST/OpenAPI schema는 바뀌지 않는다.
+
 ### Public route security·user OpenAPI 단일 정본 (2026-07-20, T-VN-57)
 
 - **SECURITY**: 조립된 route policy matrix에서 모든 `public-keyed` operation의
@@ -29,7 +38,6 @@
   포함된다.
 - **TEST**: 조립 route ↔ full OpenAPI ↔ user OpenAPI의 path/method/security를 양방향
   비교해 누락·과포함·method/security drift를 거부한다.
-
 ### T-VN-03 잔여 route 인증 경계 clean-cut (2026-07-19)
 
 - **SECURITY**: public curated GET 4개를 public API key 경계로, ops metrics/log/

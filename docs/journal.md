@@ -31,12 +31,14 @@
 - `412 Precondition Failed`에서는 작성 중인 draft를 보존하고 자동 재시도하지 않는다. 명시적
   reload 성공 뒤에만 최신 detail과 basis를 적용하며 update와 delete는 각 선택 feature basis를
   사용한다. DB와 REST/OpenAPI schema는 변경하지 않는다.
-- 수정 전 codegraph file impact는 `features.ts`의 `useFeaturesInBbox` 1개만 보고하고 correction
-  symbol caller를 해석하지 못했다. 이를 직접 symbol inventory로 보완해 실제 변경 경계를
-  `features.ts`의 revision/PATCH/DELETE hooks, change-request client, mocked `admin-ops.spec.ts`,
-  live `admin-features-change-requests-write.live.spec.ts`와 API unit으로 고정했다.
-- docs-first commit·draft PR 뒤 구현과 단일 적대 리뷰를 이어간다. 승인 전에는 test·lint·build를
-  실행하지 않는다.
+- 전용 worktree codegraph를 완성한 결과 `fetchFeatureRevisionEtag` caller는 PATCH/DELETE 두 함수,
+  mutation hook caller는 `FeatureChangeRequestsClient` 하나로 확인됐다. file-level TypeScript impact의
+  저해상도 결과는 직접 symbol inventory로 보완해 API client/hook, change-request component,
+  mocked/live Playwright 경계를 고정했다.
+- `/revision`→detail 안정 snapshot 재시도, caller-supplied ETag mutation, background refetch 차단,
+  412 draft 보존·명시적 reload, delete basis와 live cleanup ETag를 구현하고 API/hook/mocked/live
+  회귀 fixture를 작성했다. **다음 한 작업**은 exact head의 단일 적대 리뷰이며, 승인 전에는
+  test·lint·build를 실행하지 않는다.
 
 ## 2026-07-20 (codex, agent B) — T-VN-57 public route 계약 단일 정본 설계
 
