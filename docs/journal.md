@@ -29,6 +29,46 @@
   전송 중단 follow-up(별도 PR)을 성문화했다. 검증: api 관련 router 테스트 159 green,
   openapi drift 0, ruff/mypy --strict clean.
 
+## 2026-07-19 (claude, agent A2) — T-VN-18 중복 GiST 제거 + BRIN 감사 (migration 0061)
+
+- F-8/D-12-3: geoalchemy2 기본 `spatial_index=True`가 0002 create_table 시 만든
+  자동 full GiST 3개(`idx_features_coord`/`idx_features_coord_5179`/
+  `idx_features_geom`, WHERE 없음)를 제거하고, 공개 술어 partial GiST 3개
+  (`idx_features_*_gist`, `WHERE deleted_at IS NULL`)만 유지한다.
+- models.py: 3 geometry 컬럼에 `spatial_index=False` → metadata가 partial 3개만
+  선언(T-VN-19 metadata gate 정합 유지, gate green 확인). 0061이 DB의 자동 full
+  3개를 `DROP INDEX CONCURRENTLY`(autocommit_block)로 제거.
+- **write-cost 실측(§8.3 필수)**: 전용 testcontainers DB에서 full 재생성(6 GiST)
+  vs partial만(3 GiST)로 40k point INSERT 비교 — 2회 측정 6-GiST≈1.98~2.39s,
+  3-partial≈1.67~1.85s, **ratio(6/3)≈1.18~1.29×**(partial-only가 빠름; 점 insert는
+  coord/coord_5179 축만 색인해 report의 ~1.6× 대비 완만, geom은 point row에서 색인
+  대상 아님). `test_gist_brin_index_audit.py::test_dropping_full_gist_reduces_write_cost`.
+- **읽기 회귀 안전(감사)**: 전 파일의 geometry spatial 술어를 감사한 결과 GiST를
+  구동(driving)하는 모든 조회는 `deleted_at IS NULL`(직접 또는 public_features view)
+  을 포함해 partial index를 쓴다. `deleted_at` 없이 geometry를 참조하는 3곳
+  (curated_repo._LIST_FEATURES_SQL, ops_repo violations bbox, consistency.py CRS-drift)
+  은 PK-join residual `&&` 또는 negated `ST_DWithin`+`ST_Transform`(GiST 부적격,
+  설계상 full-scan ETL)이라 full index를 구동하지 않아 seq-scan 회귀 없음. `geom`은
+  어떤 조회에서도 spatial 술어로 안 쓰이므로 `idx_features_geom` drop은 read 영향 0.
+  EXPLAIN 회귀: 공개 bbox→`idx_features_coord_gist`, nearest-weather(coord_5179
+  ST_DWithin)→`idx_features_coord_5179_gist` 선택 확인.
+- **BRIN 감사(D-12-3, 추가 안 함)**: 기존 weather `brin_weather_values_valid_at`(0017)·
+  `collected_at`(0043), price `observed_at`(0034), source_records imported_at/
+  fetched_at/last_seen_at. weather card/history는 항상 feature-scoped라 0043 복합
+  B-tree(feature_id+issued_at/valid_at)를 쓰고, cross-feature append-time 축은 이미
+  BRIN 보유. 누락된 hot 시간축이 없어 speculative BRIN 추가 안 함.
+- **source-record FK 지원 index(T-VN-17 이월)**: price의 `idx_price_values_source_record`
+  미러링해 `idx_weather_values_source_record`(partial, `WHERE source_record_key IS
+  NOT NULL`)를 CONCURRENTLY 추가 — 0060 FK의 ON DELETE SET NULL이 ~30M행 seq-scan
+  하지 않게.
+- 게이트: ruff(6 trees)/mypy(main)/lint-imports/redaction green. 통합 테스트 통과분:
+  T-VN-18 gist/brin 5, metadata gate + upgrade 11, perf-explain + public-view 5.
+  **환경 사고**: 세션 누적 testcontainer 사용으로 Windows C:가 0 bytes로 차
+  Docker containerd metadata가 read-only가 됐다(write-cost 대용량 seed가 마지막
+  수 GB 소모 기여). 이 시점 이후 `test_weather_repo.py` 회귀는 setup 단계 Docker
+  오류로 미실행 — 단, 해당 nearest-temp 테스트는 partial `idx_features_coord_5179_gist`
+  를 단언(정적 확인)해 본 변경과 호환. C: 확보 후 재실행 필요.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-19 Alembic metadata 정합 CI gate
 
 - ADR-075 D-12-2 / §8.1: 빈 PostGIS DB에서 `alembic upgrade head && alembic check`가

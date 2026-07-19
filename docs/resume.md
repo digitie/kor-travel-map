@@ -12,6 +12,19 @@
 - **다음 한 작업**: 적대적 리뷰(오케스트레이터) → full gates → PR·CI green·머지. PinVi
   client의 operator/reviewed_by 전송 제거는 PinVi 저장소 별도 PR(cross-repo).
 
+## 2026-07-19 (claude, agent A2) — T-VN-18 중복 GiST 제거 + BRIN 감사 완료
+
+- migration 0061 + models.py `spatial_index=False`로 자동 full GiST 3개를 제거하고
+  공개 술어 partial GiST 3개만 유지, weather source-record 지원 index 추가(T-VN-17
+  이월), BRIN은 누락 hot 축이 없어 추가 안 함(감사). write-cost 실측 6-GiST vs
+  3-partial ≈ 1.18~1.29× 개선(§8.3). 브랜치 `feat/t-vn-18-gist-brin`.
+- 게이트: ruff/mypy(main)/lint-imports/redaction green; T-VN-18 통합 5 + metadata
+  gate/upgrade 11 + perf-explain/public-view 5 passed. **미완**: 세션 누적으로
+  Windows C:가 0 bytes → Docker read-only가 되어 `test_weather_repo.py` 회귀
+  미실행(정적으로는 partial index 단언이라 호환). C: 확보 후 재실행 + 최종 rebase
+  검증 필요.
+- **다음 한 작업**: C: 디스크 확보 → weather 회귀 재실행 → orchestrator 리뷰·PR·머지.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-19 Alembic metadata 정합 CI gate 구현
 
 - `feat/t-vn-19-alembic-check`(base `integration/t-vn`)에서 빈 PostGIS DB의 `alembic
