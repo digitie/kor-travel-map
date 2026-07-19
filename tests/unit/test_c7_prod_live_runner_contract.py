@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "run-c7-prod-live-e2e.sh"
+ATTESTATION = ROOT / "scripts" / "lib" / "c7_prod_attestation.py"
 LIVE_DIR = (
     ROOT / "packages" / "kor-travel-map-admin" / "frontend" / "e2e" / "live"
 )
@@ -26,6 +27,7 @@ def _assert_in_order(source: str, *markers: str) -> None:
 
 def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     script = _read(RUNNER)
+    attestation = _read(ATTESTATION)
 
     assert "require_command node" not in script
     assert "require_command npm" not in script
@@ -48,14 +50,16 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
         "trap finish EXIT INT TERM",
     )
     assert '/etc/kor-travel-map/c7-prod-live-e2e-attestation.json' in script
-    assert 'machine_id_sha256' in script
-    assert 'hostname_sha256' in script
-    assert 'compatible_pair_manifest_sha256' in script
-    assert 'compose_project_sha256' in script
-    assert 'service_runtime' in script
+    assert 'machine_id_sha256' in attestation
+    assert 'hostname_sha256' in attestation
+    assert 'compatible_pair_manifest_sha256' in attestation
+    assert 'compose_project_sha256' in attestation
+    assert 'service_runtime' in attestation
     assert '"orchestrator_files"' in script
-    assert 'attestation["version"] != 3' in script
-    assert 'Path("/usr/local/lib/kor-travel-map/c7-runner") / commit' in script
+    assert 'attestation["version"] != 3' in attestation
+    assert 'expected_base: Path = Path("/usr/local/lib/kor-travel-map/c7-runner")' in attestation
+    assert 'scripts/lib/c7_prod_attestation.py' in script
+    assert 'compile(module_bytes, str(module_path), "exec")' in script
     assert "require_command git" not in script
     assert 'response.status != 200' in script
     assert 'response.headers.get("Set-Cookie")' in script
@@ -391,6 +395,7 @@ def test_runner_uses_fixed_root_owned_atomic_state() -> None:
 
 def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidence() -> None:
     script = _read(RUNNER)
+    attestation = _read(ATTESTATION)
     build_script = _read(ROOT / "scripts" / "build-c7-playwright-image.sh")
     lifecycle = _read(ROOT / "scripts" / "lib" / "c7-prod-runner-lifecycle.sh")
     dockerfile = _read(ROOT / "docker" / "c7-playwright.Dockerfile")
@@ -437,14 +442,14 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert "        KOR_TRAVEL_MAP_GIT_COMMIT:" in frontend_build
     assert "        NEXT_PUBLIC_KOR_TRAVEL_MAP_API:" in frontend_build
     assert '[[ "$E2E_C7_PLAYWRIGHT_IMAGE" =~ ^sha256:' in script
-    assert 'executor.get("Id") != os.environ["E2E_C7_PLAYWRIGHT_IMAGE"]' in script
-    assert 'image_labels.get("org.opencontainers.image.revision")' in script
-    assert '"source_commits"' in script
-    assert 'manifest["version"] != 3' in script
-    assert 'active["map_source_revision"] != source_commits["map"]' in script
-    assert 'active["pinvi_source_revision"] != source_commits["pinvi"]' in script
-    assert "len(set(role_services.values())) != len(role_services)" in script
-    assert "len(observed_containers) != len(role_services)" in script
+    assert 'executor.get("Id") != environ["E2E_C7_PLAYWRIGHT_IMAGE"]' in attestation
+    assert 'image_labels.get("org.opencontainers.image.revision")' in attestation
+    assert '"source_commits"' in attestation
+    assert 'manifest["version"] != 3' in attestation
+    assert 'active["map_source_revision"] != source_commits["map"]' in attestation
+    assert 'active["pinvi_source_revision"] != source_commits["pinvi"]' in attestation
+    assert "len(set(role_services.values())) != len(role_services)" in attestation
+    assert "len(observed_containers) != len(role_services)" in attestation
     assert 'docker create --pull=never' in script
     assert 'docker start --attach --interactive' in script
     assert "write_container_reference \\\n    creating" in script

@@ -397,7 +397,8 @@ identity가 page 2의 첫 identity보다 앞서야 한다. 첫 행 존재, count
 
 ### 5.5 C7 prod 파괴적 live E2E의 복구·인과성 gate
 
-C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. host runner/helper도
+C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. host runner/helper/attestation 검증
+모듈도
 `/usr/local/lib/kor-travel-map/c7-runner/<exact commit>`의 root-owned Git archive snapshot과
 attested file hash에서만 실행한다. root-owned 고정 attestation 파일의
 machine-id/hostname/origin hash뿐 아니라 clean Git commit, C6c compatible-pair manifest hash와
@@ -406,6 +407,10 @@ hash를 대조한다. Map API image의 Alembic `current == unique heads`와 `ale
 `200 + Set-Cookie`도 선행 조건이다. 로그인은 session/auth audit를 만들 수 있는 domain-state 비파괴
 검증이며, 나머지는 read-only다. 이 preflight를 모두 통과하기 전에는 고정 state root의
 `BLOCKED.json`과 mutation journal을 만들지 않는다. 값은 로그·attachment에 출력하지 않는다.
+보안 코어는 import 가능한 Python 모듈로 두고 runner가 검증한 동일 module bytes를 직접 실행한다.
+unit gate는 runner/helper/module 각각의 hash 변조, file/ancestor owner·mode 위반, attestation exact
+shape 위반, compatible-pair·OCI image/service runtime metadata 불일치를 실제 예외 또는 non-zero로
+확인한다. runner 문자열만 검사하는 정적 fixture는 이 보안 gate를 대체하지 않는다.
 
 Playwright는 host npm/Chromium이 아니라 `docker/c7-playwright.Dockerfile`로 만든 immutable image ID에서
 worker 1·retry 0으로 실행한다. executor의 source commit/base digest label도 attestation과 같아야 한다.

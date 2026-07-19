@@ -10,7 +10,8 @@ C7은 다음 조건을 모두 만족해야 완료다.
 
 1. `T-ADM-C6c` compatible-pair capture가 성공했고 Manager v3 manifest의 active
    Map·PinVi image가 실제 두 API container image와 일치한다.
-2. host runner/helper는 exact commit의 root-owned Git archive snapshot으로 고정되고, API·UI·Dagster web·Dagster daemon·
+2. host runner/helper/attestation 검증 모듈은 exact commit의 root-owned Git archive snapshot으로
+   고정되고, API·UI·Dagster web·Dagster daemon·
    PinVi API의 image/command/environment hash가 root-owned attestation과 일치한다.
 3. Map DB의 Alembic current가 image의 유일한 head와 같고 `alembic check`가 통과한다.
 4. Playwright는 host Chromium이 아니라
@@ -53,7 +54,8 @@ C7은 다음 조건을 모두 만족해야 완료다.
 ### 2.2 실행 checkout과 Playwright executor
 
 GitHub에서 직접 최신 branch를 다시 해석하지 않는다. CI green으로 병합된 exact commit을
-n150 source checkout에 fetch한 뒤, root shell의 `git archive <exact commit>`으로 runner와 helper만
+n150 source checkout에 fetch한 뒤, root shell의 `git archive <exact commit>`으로 runner, helper,
+attestation 검증 모듈만
 immutable snapshot에 배치한다. 파괴적 실행은 user-writable checkout의 script를 직접 `sudo`하지 않는다.
 
 ```bash
@@ -73,7 +75,8 @@ sudo env SOURCE_REPO="$PWD" C7_COMMIT="$commit" /bin/bash -o pipefail -ceu '
   git -c safe.directory="$SOURCE_REPO" -C "$SOURCE_REPO" archive --format=tar \
     "$C7_COMMIT" \
     scripts/run-c7-prod-live-e2e.sh \
-    scripts/lib/c7-prod-runner-lifecycle.sh |
+    scripts/lib/c7-prod-runner-lifecycle.sh \
+    scripts/lib/c7_prod_attestation.py |
     tar --no-same-owner -xf - -C "$temporary"
   chown -R root:root "$temporary"
   find "$temporary" -type d -exec chmod 0755 {} +
@@ -86,8 +89,10 @@ sudo env SOURCE_REPO="$PWD" C7_COMMIT="$commit" /bin/bash -o pipefail -ceu '
 script는 ignored/untracked file을 포함할 수 없는 exact Git archive context로 build한다. `git status`가
 비어 있지 않거나 executor label/image ID가 root attestation과 다르면 실행하지 않는다. runner에는
 tag가 아니라 script가 출력한 `sha256:<64>` executor image ID를 전달한다.
-attestation의 `orchestrator_files`에는 위 snapshot의 runner/helper 상대경로와 SHA-256을 정확히
-기록한다. runner는 `/usr/local/lib/kor-travel-map/c7-runner/<commit>` 외 위치, root 외 owner,
+attestation의 `orchestrator_files`에는 위 snapshot의 runner/helper/attestation 모듈 상대경로와
+SHA-256을 정확히 기록한다. runner bootstrap은 검증 모듈을 한 번 읽어 owner/mode/ancestor/hash를
+확인한 동일 bytes만 실행한다. 그 모듈은 다시 전체 snapshot의 exact shape와 세 파일 hash를 검증한다.
+runner는 `/usr/local/lib/kor-travel-map/c7-runner/<commit>` 외 위치, root 외 owner,
 group/other writable ancestor, mode `0555`, hash 불일치를 모두 거부한 뒤에만 helper를 source한다.
 
 ### 2.3 root-owned attestation
@@ -103,7 +108,7 @@ SHA-256이 다르면 실행하지 않는다. attestation에는 다음 비민감 
 - compose project 이름의 SHA-256
 - clean repository commit
 - Map·PinVi source commit과 각 immutable image의 `org.opencontainers.image.revision`
-- root-owned runner/helper 상대경로 2개의 SHA-256(`orchestrator_files`)
+- root-owned runner/helper/attestation 검증 모듈 상대경로 3개의 SHA-256(`orchestrator_files`)
 - C6c compatible-pair manifest bytes의 SHA-256과 contract generation
 - Map API·UI·Dagster web·Dagster daemon·PinVi API별 image ID, canonical
   `{Path,Args,Entrypoint,Cmd}` command SHA-256,

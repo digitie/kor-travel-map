@@ -599,13 +599,13 @@ require_enabled E2E_QUEUE_SENSOR_BARRIER
 [[ "$E2E_C7_SCHEDULE" == "$SAFE_SCHEDULE" ]] ||
   die "E2E_C7_SCHEDULE is not the allowlisted KMA schedule"
 
-verify_root_owned_orchestrator_snapshot() {
-  python3 - \
+run_verified_attestation_module() {
+  python3 -I -B - \
+    "$SCRIPT_DIR/lib/c7_prod_attestation.py" \
+    "$HOST_ATTESTATION_FILE" \
     "$REPO_ROOT" \
-    "${BASH_SOURCE[0]}" \
-    "$SCRIPT_DIR/lib/c7-prod-runner-lifecycle.sh" \
-    "$HOST_ATTESTATION_FILE" \
-    "$E2E_C7_EXPECTED_GIT_COMMIT" <<'PY'
+    "$E2E_C7_EXPECTED_GIT_COMMIT" \
+    "$@" <<'PY'
 import hashlib
 import json
 import os
@@ -613,117 +613,23 @@ import stat
 import sys
 from pathlib import Path
 
-root = Path(sys.argv[1])
-runner = Path(sys.argv[2])
-helper = Path(sys.argv[3])
-attestation_path = Path(sys.argv[4])
-commit = sys.argv[5]
+module_path = Path(sys.argv[1])
+attestation_path = Path(sys.argv[2])
+snapshot_root = Path(sys.argv[3])
+commit = sys.argv[4]
+module_arguments = sys.argv[5:]
 expected_root = Path("/usr/local/lib/kor-travel-map/c7-runner") / commit
-expected_files = {
-    "scripts/lib/c7-prod-runner-lifecycle.sh": helper,
-    "scripts/run-c7-prod-live-e2e.sh": runner,
+expected_module = expected_root / "scripts/lib/c7_prod_attestation.py"
+expected_paths = {
+    "scripts/lib/c7-prod-runner-lifecycle.sh",
+    "scripts/lib/c7_prod_attestation.py",
+    "scripts/run-c7-prod-live-e2e.sh",
 }
 
 
-def safe_file(path: Path, *, mode: int) -> bytes:
-    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-    try:
-        observed = os.fstat(fd)
-        if (
-            not stat.S_ISREG(observed.st_mode)
-            or observed.st_uid != 0
-            or observed.st_gid != 0
-            or stat.S_IMODE(observed.st_mode) != mode
-        ):
-            raise RuntimeError("unsafe root-owned file")
-        chunks = []
-        while chunk := os.read(fd, 1024 * 1024):
-            chunks.append(chunk)
-        return b"".join(chunks)
-    finally:
-        os.close(fd)
-
-
-if root != expected_root or runner != root / "scripts/run-c7-prod-live-e2e.sh":
-    raise SystemExit(1)
-for directory in (root, *root.parents):
-    observed = directory.lstat()
-    if (
-        not stat.S_ISDIR(observed.st_mode)
-        or directory.is_symlink()
-        or observed.st_uid != 0
-        or observed.st_gid != 0
-        or stat.S_IMODE(observed.st_mode) & 0o022
-    ):
-        raise SystemExit(1)
-attestation = json.loads(safe_file(attestation_path, mode=0o600))
-orchestrator_files = attestation.get("orchestrator_files")
-if (
-    attestation.get("repository_commit") != commit
-    or not isinstance(orchestrator_files, dict)
-    or set(orchestrator_files) != set(expected_files)
-):
-    raise SystemExit(1)
-for relative, path in expected_files.items():
-    expected_sha256 = orchestrator_files[relative]
-    if (
-        not isinstance(expected_sha256, str)
-        or len(expected_sha256) != 64
-        or any(character not in "0123456789abcdef" for character in expected_sha256)
-        or hashlib.sha256(safe_file(path, mode=0o555)).hexdigest() != expected_sha256
-    ):
-        raise SystemExit(1)
-PY
-  REPOSITORY_COMMIT="$E2E_C7_EXPECTED_GIT_COMMIT"
-}
-
-verify_trusted_runtime_attestation() {
-  python3 - \
-    "$HOST_ATTESTATION_FILE" \
-    "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" \
-    "$COMPOSE_PROJECT_DIR" \
-    "$PLAYWRIGHT_BASE_IMAGE" <<'PY'
-import hashlib
-import ipaddress
-import json
-import os
-import re
-import socket
-import stat
-import subprocess
-import sys
-from datetime import datetime
-from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
-
-attestation_path = Path(sys.argv[1])
-manifest_path = Path(sys.argv[2])
-project_directory = sys.argv[3]
-playwright_base = sys.argv[4]
-sha256_pattern = re.compile(r"^[0-9a-f]{64}$")
-image_pattern = re.compile(r"^sha256:[0-9a-f]{64}$")
-generation_pattern = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
-
-
-def sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def sha256_text(value: str) -> str:
-    return sha256_bytes(value.encode())
-
-
-def canonical_json(value: object) -> bytes:
-    return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
-
-
-def exact_dict(value: object, keys: set[str]) -> bool:
-    return isinstance(value, dict) and set(value) == keys
-
-
-def safe_root_file(path: Path) -> bytes:
+def safe_file(path: Path, mode: int) -> bytes:
     if not path.is_absolute():
-        raise RuntimeError("root file path is not absolute")
+        raise RuntimeError("non-absolute bootstrap input")
     for parent in path.parents:
         observed_parent = parent.lstat()
         if (
@@ -733,382 +639,73 @@ def safe_root_file(path: Path) -> bytes:
             or observed_parent.st_gid != 0
             or stat.S_IMODE(observed_parent.st_mode) & 0o022
         ):
-            raise RuntimeError("unsafe root file parent")
-    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+            raise RuntimeError("unsafe bootstrap ancestor")
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     try:
-        observed = os.fstat(fd)
+        observed = os.fstat(descriptor)
         if (
             not stat.S_ISREG(observed.st_mode)
             or observed.st_uid != 0
             or observed.st_gid != 0
-            or stat.S_IMODE(observed.st_mode) != 0o600
+            or stat.S_IMODE(observed.st_mode) != mode
         ):
-            raise RuntimeError("unsafe root file")
+            raise RuntimeError("unsafe bootstrap file")
         chunks = []
-        while chunk := os.read(fd, 1024 * 1024):
+        while chunk := os.read(descriptor, 1024 * 1024):
             chunks.append(chunk)
         return b"".join(chunks)
     finally:
-        os.close(fd)
+        os.close(descriptor)
 
 
-def public_origin(
-    raw: str, *, websocket: bool = False, require_root_path: bool = True
-) -> str:
-    parsed = urlsplit(raw)
-    if (
-        parsed.scheme != "https"
-        or parsed.username is not None
-        or parsed.password is not None
-        or not parsed.hostname
-        or (require_root_path and parsed.path not in {"", "/"})
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise RuntimeError("unsafe origin")
-    host = parsed.hostname.rstrip(".").lower()
-    if host == "localhost" or host.endswith(".localhost"):
-        raise RuntimeError("local origin")
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        address = None
-    if address is not None and (
-        address.is_loopback or address.is_link_local or address.is_unspecified
-    ):
-        raise RuntimeError("unsafe address")
-    port = f":{parsed.port}" if parsed.port is not None else ""
-    return urlunsplit(("wss" if websocket else "https", f"{host}{port}", "", "", ""))
-
-
-def canonical_graphql(raw: str) -> str:
-    parsed = urlsplit(raw)
-    origin = public_origin(raw, require_root_path=False)
-    pathname = parsed.path.rstrip("/")
-    pathname = pathname if pathname.endswith("/graphql") else f"{pathname}/graphql"
-    return f"{origin}{pathname}"
-
-
-def run_json(command: list[str]) -> object:
-    completed = subprocess.run(
-        command,
-        cwd=project_directory,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    return json.loads(completed.stdout)
-
-
-def compose_container(service: str) -> dict[str, object]:
-    completed = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "--project-directory",
-            project_directory,
-            "ps",
-            "-q",
-            service,
-        ],
-        cwd=project_directory,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    ids = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-    if len(ids) != 1:
-        raise RuntimeError("compose service cardinality")
-    records = run_json(["docker", "inspect", "--", ids[0]])
-    if not isinstance(records, list) or len(records) != 1 or not isinstance(records[0], dict):
-        raise RuntimeError("container inspect shape")
-    return records[0]
-
-
-def validate_pair(value: object) -> None:
-    if not exact_dict(
-        value,
-        {
-            "contract_generation",
-            "map_image_id",
-            "map_source_revision",
-            "pinvi_image_id",
-            "pinvi_source_revision",
-            "recorded_at",
-        },
-    ):
-        raise RuntimeError("pair shape")
-    assert isinstance(value, dict)
-    if not image_pattern.fullmatch(value["map_image_id"]):
-        raise RuntimeError("Map image")
-    if not image_pattern.fullmatch(value["pinvi_image_id"]):
-        raise RuntimeError("PinVi image")
-    if not re.fullmatch(r"[0-9a-f]{40}", value["map_source_revision"]):
-        raise RuntimeError("Map source revision")
-    if not re.fullmatch(r"[0-9a-f]{40}", value["pinvi_source_revision"]):
-        raise RuntimeError("PinVi source revision")
-    if not generation_pattern.fullmatch(value["contract_generation"]):
-        raise RuntimeError("generation")
-    observed_at = datetime.fromisoformat(value["recorded_at"])
-    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
-        raise RuntimeError("recorded_at")
-
-
-try:
-    attestation_bytes = safe_root_file(attestation_path)
-    attestation = json.loads(attestation_bytes)
-    manifest_bytes = safe_root_file(manifest_path)
-    manifest = json.loads(manifest_bytes)
-    machine_id = Path("/etc/machine-id").read_text(encoding="utf-8").strip()
-
-    top_keys = {
-        "api_ws_origin_sha256",
-        "c6c_contract_generation",
-        "compatible_pair_manifest_sha256",
-        "compose_project_sha256",
-        "dagster_graphql_url_sha256",
-        "hostname_sha256",
-        "machine_id_sha256",
-        "orchestrator_files",
-        "playwright_base",
-        "playwright_image_id",
-        "repository_commit",
-        "service_runtime",
-        "source_commits",
-        "ui_origin_sha256",
-        "version",
-    }
-    if not exact_dict(attestation, top_keys) or attestation["version"] != 3:
-        raise RuntimeError("attestation shape")
-    orchestrator_files = attestation["orchestrator_files"]
-    if (
-        not exact_dict(
-            orchestrator_files,
-            {
-                "scripts/lib/c7-prod-runner-lifecycle.sh",
-                "scripts/run-c7-prod-live-e2e.sh",
-            },
-        )
-        or not all(
-            isinstance(value, str) and sha256_pattern.fullmatch(value)
-            for value in orchestrator_files.values()
-        )
-    ):
-        raise RuntimeError("orchestrator file attestation")
-    source_commits = attestation["source_commits"]
-    if (
-        not exact_dict(source_commits, {"map", "pinvi"})
-        or not all(
-            isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value)
-            for value in source_commits.values()
-        )
-        or source_commits["map"] != os.environ["E2E_C7_EXPECTED_GIT_COMMIT"]
-    ):
-        raise RuntimeError("source commit identity")
-    for key in {
-        "api_ws_origin_sha256",
-        "compatible_pair_manifest_sha256",
-        "compose_project_sha256",
-        "dagster_graphql_url_sha256",
-        "hostname_sha256",
-        "machine_id_sha256",
-        "ui_origin_sha256",
-    }:
-        if not isinstance(attestation[key], str) or not sha256_pattern.fullmatch(attestation[key]):
-            raise RuntimeError("attestation hash")
-    if (
-        not re.fullmatch(r"[0-9a-f]{40}", attestation["repository_commit"])
-        or attestation["repository_commit"] != os.environ["E2E_C7_EXPECTED_GIT_COMMIT"]
-        or attestation["playwright_base"] != playwright_base
-        or not image_pattern.fullmatch(attestation["playwright_image_id"])
-        or attestation["playwright_image_id"] != os.environ["E2E_C7_PLAYWRIGHT_IMAGE"]
-        or not generation_pattern.fullmatch(attestation["c6c_contract_generation"])
-        or not machine_id
-    ):
-        raise RuntimeError("attestation identity")
-
-    manifest_sha256 = sha256_bytes(manifest_bytes)
-    if not exact_dict(manifest, {"active", "rollback", "version"}) or manifest["version"] != 3:
-        raise RuntimeError("manifest shape")
-    validate_pair(manifest["active"])
-    validate_pair(manifest["rollback"])
-    active = manifest["active"]
-    if (
-        manifest_sha256 != attestation["compatible_pair_manifest_sha256"]
-        or active["contract_generation"] != attestation["c6c_contract_generation"]
-        or active["map_source_revision"] != source_commits["map"]
-        or active["pinvi_source_revision"] != source_commits["pinvi"]
-    ):
-        raise RuntimeError("compatible pair mismatch")
-
-    observed_origins = {
-        "api_ws_origin_sha256": sha256_text(
-            public_origin(os.environ["NEXT_PUBLIC_KOR_TRAVEL_MAP_API"], websocket=True)
-        ),
-        "dagster_graphql_url_sha256": sha256_text(
-            canonical_graphql(os.environ["E2E_DAGSTER_URL"])
-        ),
-        "hostname_sha256": sha256_text(socket.getfqdn().rstrip(".").lower()),
-        "machine_id_sha256": sha256_text(machine_id),
-        "ui_origin_sha256": sha256_text(public_origin(os.environ["E2E_BASE_URL"])),
-    }
-    if any(attestation[key] != value for key, value in observed_origins.items()):
-        raise RuntimeError("host/origin mismatch")
-    for env_name, observed_key in (
-        ("E2E_C7_EXPECTED_UI_ORIGIN_SHA256", "ui_origin_sha256"),
-        ("E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256", "api_ws_origin_sha256"),
-        ("E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256", "dagster_graphql_url_sha256"),
-    ):
-        if os.environ[env_name] != observed_origins[observed_key]:
-            raise RuntimeError("caller origin mismatch")
-
-    role_services = {
-        "map_api": os.environ["E2E_C7_MAP_API_SERVICE"],
-        "map_dagster_daemon": os.environ["E2E_C7_DAGSTER_DAEMON_SERVICE"],
-        "map_dagster_web": os.environ["E2E_C7_DAGSTER_WEB_SERVICE"],
-        "map_ui": os.environ["E2E_C7_UI_SERVICE"],
-        "pinvi_api": os.environ["E2E_C7_PINVI_API_SERVICE"],
-    }
-    if len(set(role_services.values())) != len(role_services):
-        raise RuntimeError("compose services are not distinct")
-    runtime_attestation = attestation["service_runtime"]
-    if not exact_dict(runtime_attestation, set(role_services)):
-        raise RuntimeError("runtime roles")
-    compose_project_hashes = set()
-    observed_containers: set[str] = set()
-    observed_images: dict[str, str] = {}
-    for role, service in role_services.items():
-        expected = runtime_attestation[role]
-        if not exact_dict(expected, {"command_sha256", "environment_sha256", "image_id"}):
-            raise RuntimeError("runtime shape")
-        if (
-            not image_pattern.fullmatch(expected["image_id"])
-            or not sha256_pattern.fullmatch(expected["command_sha256"])
-            or not sha256_pattern.fullmatch(expected["environment_sha256"])
-        ):
-            raise RuntimeError("runtime attestation value")
-        record = compose_container(service)
-        container_id = record.get("Id")
-        if not isinstance(container_id, str) or not re.fullmatch(r"[0-9a-f]{64}", container_id):
-            raise RuntimeError("runtime container identity")
-        observed_containers.add(container_id)
-        config = record.get("Config")
-        state = record.get("State")
-        if not isinstance(config, dict) or not isinstance(state, dict):
-            raise RuntimeError("runtime inspect")
-        health = state.get("Health")
-        if (
-            state.get("Running") is not True
-            or state.get("Paused") is True
-            or state.get("Restarting") is True
-            or (isinstance(health, dict) and health.get("Status") != "healthy")
-        ):
-            raise RuntimeError("runtime is not healthy")
-        labels = config.get("Labels")
-        environment = config.get("Env")
-        if (
-            not isinstance(labels, dict)
-            or labels.get("com.docker.compose.service") != service
-            or not isinstance(environment, list)
-            or not all(isinstance(item, str) for item in environment)
-        ):
-            raise RuntimeError("compose/runtime identity")
-        project_name = labels.get("com.docker.compose.project")
-        if not isinstance(project_name, str) or not project_name:
-            raise RuntimeError("compose project identity")
-        if role == "map_ui":
-            password_hash_prefix = "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH="
-            password_hashes = [
-                item.removeprefix(password_hash_prefix)
-                for item in environment
-                if item.startswith(password_hash_prefix)
-            ]
-            if len(password_hashes) != 1 or not password_hashes[0]:
-                raise RuntimeError("UI admin password hash")
-        compose_project_hashes.add(sha256_text(project_name))
-        command_sha256 = sha256_bytes(
-            canonical_json(
-                {
-                    "Args": record.get("Args"),
-                    "Cmd": config.get("Cmd"),
-                    "Entrypoint": config.get("Entrypoint"),
-                    "Path": record.get("Path"),
-                }
-            )
-        )
-        environment_sha256 = sha256_bytes(canonical_json(sorted(environment)))
-        image_id = record.get("Image")
-        if (
-            image_id != expected["image_id"]
-            or command_sha256 != expected["command_sha256"]
-            or environment_sha256 != expected["environment_sha256"]
-        ):
-            raise RuntimeError("runtime attestation mismatch")
-        image_records = run_json(["docker", "image", "inspect", "--", image_id])
-        if (
-            not isinstance(image_records, list)
-            or len(image_records) != 1
-            or not isinstance(image_records[0], dict)
-        ):
-            raise RuntimeError("runtime image inspect")
-        image_config = image_records[0].get("Config")
-        image_labels = image_config.get("Labels") if isinstance(image_config, dict) else None
-        expected_source_commit = source_commits[
-            "pinvi" if role == "pinvi_api" else "map"
-        ]
-        if (
-            not isinstance(image_labels, dict)
-            or image_labels.get("org.opencontainers.image.revision")
-            != expected_source_commit
-        ):
-            raise RuntimeError("runtime image source provenance")
-        observed_images[role] = image_id
-    if len(observed_containers) != len(role_services):
-        raise RuntimeError("runtime containers are not distinct")
-    if compose_project_hashes != {attestation["compose_project_sha256"]}:
-        raise RuntimeError("wrong compose project")
-    if (
-        observed_images["map_api"] != active["map_image_id"]
-        or observed_images["pinvi_api"] != active["pinvi_image_id"]
-    ):
-        raise RuntimeError("active pair is not deployed")
-
-    executor_records = run_json(
-        ["docker", "image", "inspect", "--", os.environ["E2E_C7_PLAYWRIGHT_IMAGE"]]
-    )
-    if (
-        not isinstance(executor_records, list)
-        or len(executor_records) != 1
-        or not isinstance(executor_records[0], dict)
-    ):
-        raise RuntimeError("executor inspect")
-    executor = executor_records[0]
-    executor_labels = executor.get("Config", {}).get("Labels", {})
-    if (
-        executor.get("Id") != os.environ["E2E_C7_PLAYWRIGHT_IMAGE"]
-        or not isinstance(executor_labels, dict)
-        or executor_labels.get("io.kortravelmap.c7.repository-commit")
-        != attestation["repository_commit"]
-        or executor_labels.get("io.kortravelmap.c7.playwright-base") != playwright_base
-    ):
-        raise RuntimeError("executor identity")
-except (
-    AssertionError,
-    AttributeError,
-    KeyError,
-    OSError,
-    RuntimeError,
-    TypeError,
-    ValueError,
-    subprocess.SubprocessError,
-):
+if snapshot_root != expected_root or module_path != expected_module:
     raise SystemExit(1)
-
-print(manifest_sha256)
-print(sha256_bytes(attestation_bytes))
+try:
+    module_bytes = safe_file(module_path, 0o555)
+    attestation = json.loads(safe_file(attestation_path, 0o600))
+    orchestrator_files = attestation.get("orchestrator_files")
+    if (
+        attestation.get("repository_commit") != commit
+        or not isinstance(orchestrator_files, dict)
+        or set(orchestrator_files) != expected_paths
+        or orchestrator_files["scripts/lib/c7_prod_attestation.py"]
+        != hashlib.sha256(module_bytes).hexdigest()
+    ):
+        raise RuntimeError("attestation bootstrap mismatch")
+    sys.argv = [str(module_path), *module_arguments]
+    exec(
+        compile(module_bytes, str(module_path), "exec"),
+        {
+            "__builtins__": __builtins__,
+            "__file__": str(module_path),
+            "__name__": "__main__",
+            "__package__": None,
+        },
+    )
+except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+    raise SystemExit(1)
 PY
+}
+
+verify_root_owned_orchestrator_snapshot() {
+  run_verified_attestation_module \
+    snapshot \
+    "$REPO_ROOT" \
+    "${BASH_SOURCE[0]}" \
+    "$SCRIPT_DIR/lib/c7-prod-runner-lifecycle.sh" \
+    "$SCRIPT_DIR/lib/c7_prod_attestation.py" \
+    "$HOST_ATTESTATION_FILE" \
+    "$E2E_C7_EXPECTED_GIT_COMMIT" || return 1
+  REPOSITORY_COMMIT="$E2E_C7_EXPECTED_GIT_COMMIT"
+}
+
+verify_trusted_runtime_attestation() {
+  run_verified_attestation_module \
+    runtime \
+    "$HOST_ATTESTATION_FILE" \
+    "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" \
+    "$COMPOSE_PROJECT_DIR" \
+    "$PLAYWRIGHT_BASE_IMAGE"
 }
 
 canonical_dagster_graphql_sha256() {

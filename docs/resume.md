@@ -10,6 +10,9 @@
   5개 service image/command/environment와 compose project, source commits, executor image, Alembic
   current/head/check를 read-only 대조하도록 runner를 보강 중이다. mutation 상태는 모든 preflight 뒤에만
   만들고 spec별 redacted evidence와 별도 감사 도구를 남긴다.
+- PR #754 리뷰 후속으로 snapshot/runtime 검증 코어를 import 가능한 모듈로 분리하고, runner가
+  root-owned hash를 확인한 동일 bytes를 실행하게 했다. runner/helper/module과 attestation·pair·OCI
+  runtime 변조의 실행형 음수 fixture는 동일 리뷰어 승인 전이라 아직 실행하지 않았다.
 - n150은 WSL SSH 41회와 Windows TCP/22 boolean 진단 모두 연결 전에 실패했다. 따라서
   `sudo -n true`는 아직 성공/실패 어느 쪽으로도 판정하지 않았고 원격 mutation도 0건이다.
 - **다음 한 작업**: 동일 리뷰어의 재검토를 반영한 뒤 로컬 gate·PR·CI merge를 완료한다. 그 사이

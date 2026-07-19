@@ -10,8 +10,13 @@
   파괴적 mutation 전에 검증하도록 계약을 바로잡았다.
 - `docs/runbooks/c7-prod-live-e2e.md`와 `T-ADM-C7H`를 먼저 작성했다. host runner/helper는 exact
   commit의 root-owned Git archive snapshot과 attested SHA-256에서만 실행한다. runner는
-  C6c v3 manifest(source revision 포함), compose project, Map API/UI/Dagster web·daemon/PinVi API runtime hash, 단일 Alembic
+  C6c v3 manifest(source revision 포함), compose project, Map API/UI/Dagster web·daemon/PinVi API
+  runtime hash, 단일 Alembic
   head/check와 UI login을 모두 read-only 검증한 뒤에만 root state와 `BLOCKED.json`을 만든다.
+- PR #754 리뷰의 정적 계약 테스트 한계를 반영해 snapshot/runtime 검증 코어를 import 가능한
+  `c7_prod_attestation.py`로 분리했다. runner bootstrap은 검증한 동일 module bytes를 실행하며
+  runner/helper/module hash, owner/mode/ancestor와 compatible-pair·OCI/runtime metadata 변조를
+  실행형 음수 fixture로 고정했다.
 - Playwright는 고정 official digest 기반의 commit-labelled executor image ID로만 실행한다. spec별
   redacted JUnit/HTML/JSON과 journal을 root-owned evidence에 fsync하며 screenshot, auth storage와 trace ZIP은
   제외한다. `audit-c7-prod-live-state.py`는 값·UUID 없이 partial restore, active lock, unsafe residue를

@@ -7,11 +7,15 @@
 
 ### C7 prod 실행 경계·증거 보강 (2026-07-19, T-ADM-C7H)
 
-- **SECURITY**: 파괴적 live E2E 전에 exact Git commit의 root-owned runner/helper archive snapshot,
+- **SECURITY**: 파괴적 live E2E 전에 exact Git commit의 root-owned runner/helper/attestation module
+  archive snapshot,
   C6c compatible-pair manifest와 실제 Map/PinVi
   API image, compose project, Map API/UI/Dagster web·daemon/PinVi API의 image·command·environment,
   단일 Alembic current/head/check를 root-owned attestation과 exact 대조한다. 모든 read-only preflight
   전에는 `BLOCKED.json`이나 mutation journal을 만들지 않는다.
+- **SECURITY**: attestation 모듈은 runner bootstrap이 owner/mode/ancestor/hash를 확인한 동일 bytes만
+  실행한다. 세 orchestrator 파일 hash와 compatible-pair·OCI/runtime metadata 변조는 실행형 음수
+  테스트로 fail-closed를 고정한다.
 - **CHANGED**: C7은 고정 official digest 기반의 commit-labelled Playwright executor image ID에서만
   실행한다. 실제 Dagster `feature_update_request_worker` definition과 terminal run의 request/generation/
   scope/sensor tag를 검증한다. spec별 redacted JUnit/HTML/JSON과 복구 journal은 root-owned evidence로
