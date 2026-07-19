@@ -5,6 +5,7 @@ import {
   type Request,
   type Response,
 } from "@playwright/test";
+import { createHash } from "node:crypto";
 
 import type { components } from "../../src/api/types";
 
@@ -12,6 +13,8 @@ type ChangeResponse = components["schemas"]["AdminFeatureChangeResponse"];
 type ChangeListResponse =
   components["schemas"]["AdminFeatureChangeListResponse"];
 type DetailResponse = components["schemas"]["AdminFeatureDetailResponse"];
+type FeatureSearchProblem = components["schemas"]["FeatureSearchProblem"];
+type FeatureSearchResponse = components["schemas"]["FeatureSearchResponse"];
 type InBoundsResponse = components["schemas"]["AdminFeaturesInBoundsResponse"];
 type PublicInBoundsResponse = components["schemas"]["FeaturesInBoundsResponse"];
 type PriceResponse = components["schemas"]["FeaturePriceResponse"];
@@ -20,6 +23,7 @@ type WeatherResponse = components["schemas"]["FeatureWeatherResponse"];
 
 type FetchResult<T> = {
   body: T | null;
+  contentType: string | null;
   entityTag: string | null;
   status: number;
 };
@@ -67,9 +71,18 @@ const PRICE_FEATURE = {
   lon: LON - 0.002,
   name: `E2E hidden price ${RUN_ID}`,
 };
+const SEARCH_QUERY = `E2E search ${RUN_ID}`;
+const SEARCH_FEATURES = ["alpha", "beta"].map((suffix, index) => ({
+  featureId: `${PREFIX}::search::${suffix}`,
+  lat: LAT + 0.004 + index * 0.001,
+  lon: LON + 0.004 + index * 0.001,
+  name: `${SEARCH_QUERY} ${suffix}`,
+  status: "active" as const,
+}));
 const API_OWNED_FEATURE_IDS = [
   ...STATUS_FEATURES.map(({ featureId }) => featureId),
   CORRECTION_FEATURE.featureId,
+  ...SEARCH_FEATURES.map(({ featureId }) => featureId),
 ];
 const REASON = `admin feature live acceptance ${RUN_ID}`;
 
@@ -143,6 +156,7 @@ async function browserFetch<T>(
       }
       return {
         body: parsed as T | null,
+        contentType: response.headers.get("Content-Type"),
         entityTag: response.headers.get("ETag"),
         status: response.status,
       };
@@ -206,7 +220,9 @@ async function createOwnedPlace(
         category: "01070300",
         coord: { lat: fixture.lat, lon: fixture.lon },
         feature_id: fixture.featureId,
-        idempotency_key: `${RUN_ID}-${fixture.status}-${fixture.featureId.length}`,
+        idempotency_key: createHash("sha256")
+          .update(fixture.featureId, "utf8")
+          .digest("hex"),
         kind: "place",
         marker_color: "P-02",
         marker_icon: "marker",
@@ -370,6 +386,167 @@ async function assertPublicInBoundsExcludes(
   );
   expect(result.data.items.map((item) => item.feature_id)).not.toContain(
     featureId,
+  );
+}
+
+function requiredSearchCursor(
+  response: FeatureSearchResponse,
+  label: string,
+): string {
+  const cursor = response.meta.page?.next_cursor;
+  if (typeof cursor !== "string" || cursor.length === 0) {
+    throw new Error(`${label} cursor가 없습니다 (value redacted)`);
+  }
+  return cursor;
+}
+
+function tamperCursorPayload(cursor: string): string {
+  const segments = cursor.split(".");
+  if (
+    segments.length !== 2 ||
+    segments[0].length === 0 ||
+    segments[1].length === 0
+  ) {
+    throw new Error("search cursor wire shape이 올바르지 않습니다 (value redacted)");
+  }
+  const first = segments[0][0];
+  const replacement = first === "A" ? "B" : "A";
+  return `${replacement}${segments[0].slice(1)}.${segments[1]}`;
+}
+
+async function assertSearchProblem(
+  page: Page,
+  params: URLSearchParams,
+  code: "CURSOR_QUERY_MISMATCH" | "FEATURE_SEARCH_CURSOR_TAMPERED",
+  forbiddenCursors: string[],
+): Promise<void> {
+  const result = await browserFetch<FeatureSearchProblem>(
+    page,
+    `/v1/features/search?${params.toString()}`,
+  );
+  expect(result.status).toBe(422);
+  expect(result.contentType?.startsWith("application/problem+json")).toBe(true);
+  if (result.body === null) {
+    throw new Error("feature search problem body가 없습니다 (response redacted)");
+  }
+  expect(result.body.code).toBe(code);
+  const serialized = JSON.stringify(result.body);
+  for (const cursor of forbiddenCursors) {
+    expect(serialized).not.toContain(cursor);
+  }
+}
+
+async function assertSearchCursorContract(page: Page): Promise<void> {
+  const owned = new Set(SEARCH_FEATURES.map(({ featureId }) => featureId));
+  const firstWithoutTotal = requireBody(
+    await browserFetch<FeatureSearchResponse>(
+      page,
+      `/v1/features/search?${new URLSearchParams({
+        include_total: "false",
+        page_size: "1",
+        q: SEARCH_QUERY,
+      }).toString()}`,
+    ),
+    "feature search without total first page",
+  );
+  expect(firstWithoutTotal.meta.page?.total).toBeNull();
+  expect(firstWithoutTotal.data.items).toHaveLength(1);
+  const firstWithoutTotalId = firstWithoutTotal.data.items[0].feature_id;
+  expect(owned.has(firstWithoutTotalId)).toBe(true);
+  const withoutTotalCursor = requiredSearchCursor(
+    firstWithoutTotal,
+    "without-total first page",
+  );
+
+  const secondWithoutTotal = requireBody(
+    await browserFetch<FeatureSearchResponse>(
+      page,
+      `/v1/features/search?${new URLSearchParams({
+        cursor: withoutTotalCursor,
+        include_total: "false",
+        page_size: "1",
+        q: SEARCH_QUERY,
+      }).toString()}`,
+    ),
+    "feature search without total continuation",
+  );
+  expect(secondWithoutTotal.meta.page?.total).toBeNull();
+  expect(secondWithoutTotal.data.items).toHaveLength(1);
+  expect(owned.has(secondWithoutTotal.data.items[0].feature_id)).toBe(true);
+  expect(secondWithoutTotal.data.items[0].feature_id).not.toBe(
+    firstWithoutTotalId,
+  );
+
+  const firstWithTotal = requireBody(
+    await browserFetch<FeatureSearchResponse>(
+      page,
+      `/v1/features/search?${new URLSearchParams({
+        include_total: "true",
+        page_size: "1",
+        q: SEARCH_QUERY,
+      }).toString()}`,
+    ),
+    "feature search with total first page",
+  );
+  expect(firstWithTotal.meta.page?.total).toBe(2);
+  expect(firstWithTotal.data.items).toHaveLength(1);
+  const firstWithTotalId = firstWithTotal.data.items[0].feature_id;
+  expect(owned.has(firstWithTotalId)).toBe(true);
+  const withTotalCursor = requiredSearchCursor(
+    firstWithTotal,
+    "with-total first page",
+  );
+
+  const secondWithTotal = requireBody(
+    await browserFetch<FeatureSearchResponse>(
+      page,
+      `/v1/features/search?${new URLSearchParams({
+        cursor: withTotalCursor,
+        include_total: "true",
+        page_size: "1",
+        q: SEARCH_QUERY,
+      }).toString()}`,
+    ),
+    "feature search with total continuation",
+  );
+  expect(secondWithTotal.meta.page?.total).toBe(2);
+  expect(secondWithTotal.data.items).toHaveLength(1);
+  expect(owned.has(secondWithTotal.data.items[0].feature_id)).toBe(true);
+  expect(secondWithTotal.data.items[0].feature_id).not.toBe(firstWithTotalId);
+
+  await assertSearchProblem(
+    page,
+    new URLSearchParams({
+      cursor: withoutTotalCursor,
+      include_total: "false",
+      page_size: "1",
+      q: `${SEARCH_QUERY} changed`,
+    }),
+    "CURSOR_QUERY_MISMATCH",
+    [withoutTotalCursor],
+  );
+  await assertSearchProblem(
+    page,
+    new URLSearchParams({
+      cursor: withoutTotalCursor,
+      include_total: "true",
+      page_size: "1",
+      q: SEARCH_QUERY,
+    }),
+    "CURSOR_QUERY_MISMATCH",
+    [withoutTotalCursor],
+  );
+  const tamperedCursor = tamperCursorPayload(withoutTotalCursor);
+  await assertSearchProblem(
+    page,
+    new URLSearchParams({
+      cursor: tamperedCursor,
+      include_total: "false",
+      page_size: "1",
+      q: SEARCH_QUERY,
+    }),
+    "FEATURE_SEARCH_CURSOR_TAMPERED",
+    [withoutTotalCursor, tamperedCursor],
   );
 }
 
@@ -732,6 +909,9 @@ test("@admin-feature-live-acceptance #741/#785 owned production acceptance", asy
       ...CORRECTION_FEATURE,
       status: "active",
     });
+    for (const fixture of SEARCH_FEATURES) {
+      await createOwnedPlace(page, fixture);
+    }
 
     for (const fixture of STATUS_FEATURES) {
       await test.step(`${fixture.status} admin marker와 public 음성`, () =>
@@ -739,6 +919,8 @@ test("@admin-feature-live-acceptance #741/#785 owned production acceptance", asy
     }
     await test.step("hidden weather/price admin card와 UI panel", () =>
       assertNonpublicKindCards(page));
+    await test.step("T-VN-15 search total/cursor/mismatch/tamper", () =>
+      assertSearchCursorContract(page));
     await test.step("approved competing update 뒤 stale raw If-Match 412", () =>
       assertStaleCorrection(page));
   } catch (error: unknown) {

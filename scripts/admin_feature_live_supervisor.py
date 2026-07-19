@@ -45,6 +45,20 @@ def _start_ticks() -> int:
     return int(fields[21])
 
 
+def _write_all(descriptor: int, body: bytes) -> None:
+    offset = 0
+    while offset < len(body):
+        offset += os.write(descriptor, body[offset:])
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 class Supervisor:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
@@ -220,7 +234,10 @@ class Supervisor:
         environment = config.get("Env") if isinstance(config, dict) else None
         if (
             not isinstance(environment, list)
-            or not all(isinstance(value, str) and "\n" not in value for value in environment)
+            or not all(
+                isinstance(value, str) and "\n" not in value and "\r" not in value
+                for value in environment
+            )
             or not isinstance(networks, dict)
             or not networks
             or not all(_NETWORK_RE.fullmatch(value) for value in networks)
@@ -235,7 +252,7 @@ class Supervisor:
         try:
             os.fchown(descriptor, 0, 0)
             body = ("\n".join(environment) + "\n").encode()
-            os.write(descriptor, body)
+            _write_all(descriptor, body)
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
@@ -274,6 +291,7 @@ class Supervisor:
         finally:
             try:
                 os.unlink(env_file)
+                _fsync_directory(env_file.parent)
             except FileNotFoundError:
                 pass
         for network in sorted(networks):
@@ -295,7 +313,7 @@ class Supervisor:
         )
         try:
             os.fchown(descriptor, 0, 0)
-            os.write(descriptor, log.stdout)
+            _write_all(descriptor, log.stdout)
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
@@ -429,7 +447,6 @@ class Supervisor:
 
     def execute(self) -> int:
         self.verify_barrier()
-        self.lifecycle("claim-pending", self.args.mode)
         self.active("intent", "active")
         if self.args.mode == "helper":
             return self.helper()

@@ -300,7 +300,18 @@ def _validated_active(path: Path) -> dict[str, Any]:
         or payload.get("version") != 1
         or not isinstance(payload.get("run_key"), str)
         or _SHA256_RE.fullmatch(payload["run_key"]) is None
+        or not isinstance(payload.get("actor"), str)
+        or _TOKEN_RE.fullmatch(payload["actor"]) is None
+        or type(payload.get("attempt")) is not int
+        or payload["attempt"] < 0
+        or not isinstance(payload.get("operation"), str)
+        or _TOKEN_RE.fullmatch(payload["operation"]) is None
+        or not isinstance(payload.get("phase"), str)
+        or _TOKEN_RE.fullmatch(payload["phase"]) is None
+        or payload.get("status") not in {"active", "failed", "succeeded"}
+        or not isinstance(payload.get("recorded_at"), str)
         or not isinstance(payload.get("container_name"), str)
+        or not payload["container_name"]
         or (
             payload.get("container_id")
             and (
@@ -308,8 +319,22 @@ def _validated_active(path: Path) -> dict[str, Any]:
                 or re.fullmatch(r"[0-9a-f]{64}", payload["container_id"]) is None
             )
         )
-        or type(payload.get("supervisor_pid")) is not int
-        or type(payload.get("supervisor_start_ticks")) is not int
+        or not all(
+            type(payload.get(key)) is int and payload[key] > 0
+            for key in (
+                "supervisor_pid",
+                "supervisor_pgid",
+                "supervisor_sid",
+                "supervisor_start_ticks",
+            )
+        )
+        or (
+            payload.get("exit_code") is not None
+            and (
+                type(payload["exit_code"]) is not int
+                or not 0 <= payload["exit_code"] <= 255
+            )
+        )
     ):
         raise ValueError("active operation shape mismatch")
     return payload
@@ -324,6 +349,13 @@ def _read_terminal_active(args: argparse.Namespace) -> None:
     print(payload["container_id"])
     print(payload["container_name"])
     print(payload["exit_code"] if payload["exit_code"] is not None else -1)
+
+
+def _describe_active(args: argparse.Namespace) -> None:
+    payload = _validated_active(args.path)
+    if payload["run_key"] != args.run_key or payload.get("phase") != "terminal":
+        raise ValueError("active operation is not terminal")
+    print(payload["actor"], payload["attempt"], payload["operation"])
 
 
 def _clear_active(args: argparse.Namespace) -> None:
@@ -397,7 +429,8 @@ def _validate_source(args: argparse.Namespace) -> None:
     for name, expected_hash in manifest["files"].items():
         if not isinstance(expected_hash, str) or _SHA256_RE.fullmatch(expected_hash) is None:
             raise ValueError("manifest hash mismatch")
-        if _file_sha256(root / name) != expected_hash:
+        expected_mode = 0o555 if name == "run-admin-feature-live-acceptance.sh" else 0o444
+        if _file_sha256(root / name, expected_mode) != expected_hash:
             raise ValueError("snapshot file hash mismatch")
 
 
@@ -557,9 +590,24 @@ def _validate_evidence(args: argparse.Namespace) -> None:
     )
     _validate_report(runtime / "playwright-recovery")
     phases: dict[str, set[str]] = {}
+    expected_phase_order = (
+        "claim-pending",
+        "created",
+        "prepared",
+        "start-pending",
+        "started",
+        "exited",
+        "removed",
+        "terminal",
+    )
+    expected_lifecycle_names = {
+        f"{actor}-{args.attempt}-{operation}-{sequence:02d}-{phase}.json"
+        for operation in required_operations
+        for sequence, phase in enumerate(expected_phase_order, start=1)
+    }
     lifecycle_files = list(lifecycle.glob("*.json"))
-    if not lifecycle_files:
-        raise ValueError("lifecycle evidence is empty")
+    if {path.name for path in lifecycle_files} != expected_lifecycle_names:
+        raise ValueError("lifecycle exact file set mismatch")
     lifecycle_keys = {
         "actor",
         "attempt",
@@ -580,6 +628,16 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             or not isinstance(event.get("actor"), str)
             or not isinstance(event.get("operation"), str)
             or not isinstance(event.get("phase"), str)
+            or event.get("kind") not in {"executor", "helper", "probe"}
+            or type(event.get("attempt")) is not int
+            or not isinstance(event.get("recorded_at"), str)
+            or (
+                event.get("exit_code") is not None
+                and (
+                    type(event["exit_code"]) is not int
+                    or not 0 <= event["exit_code"] <= 255
+                )
+            )
             or (
                 event.get("container_id_sha256") is not None
                 and (
@@ -591,20 +649,45 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             or _SHA256_RE.fullmatch(event["container_name_sha256"]) is None
         ):
             raise ValueError("lifecycle evidence mismatch")
-        if event["actor"] == actor and event.get("attempt") == args.attempt:
-            phases.setdefault(event["operation"], set()).add(event["phase"])
-    common = {
-        "claim-pending",
-        "created",
-        "exited",
-        "prepared",
-        "removed",
-        "start-pending",
-        "started",
-        "terminal",
-    }
+        if (
+            event["actor"] != actor
+            or event.get("attempt") != args.attempt
+            or event["operation"] not in required_operations
+        ):
+            raise ValueError("lifecycle identity mismatch")
+        expected_kind = (
+            "executor"
+            if event["operation"].startswith("executor-")
+            else "helper"
+            if event["operation"].startswith("helper-")
+            else "probe"
+        )
+        expected_exit = 1 if expected_kind == "probe" else 0
+        before_exit = event["phase"] in {
+            "claim-pending",
+            "created",
+            "prepared",
+            "start-pending",
+            "started",
+        }
+        if (
+            event["kind"] != expected_kind
+            or (event["container_id_sha256"] is None) != (event["phase"] == "claim-pending")
+            or (event["exit_code"] is None) != before_exit
+            or (not before_exit and event["exit_code"] != expected_exit)
+        ):
+            raise ValueError("lifecycle phase payload mismatch")
+        operation_phases = phases.setdefault(event["operation"], set())
+        if event["phase"] in operation_phases:
+            raise ValueError("duplicate lifecycle phase")
+        operation_phases.add(event["phase"])
+    common = set(expected_phase_order)
+    if len(lifecycle_files) != len(required_operations) * len(common):
+        raise ValueError("lifecycle event count mismatch")
+    if set(phases) != required_operations:
+        raise ValueError("lifecycle operation set mismatch")
     for operation in required_operations:
-        if not common.issubset(phases.get(operation, set())):
+        if phases[operation] != common:
             raise ValueError("lifecycle phase set mismatch")
     _validate_root_tree(runtime)
     validation_path = runtime / "validation.json"
@@ -620,6 +703,16 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             "version": 1,
         },
     )
+    if _read_root_json(validation_path) != {
+        "direct_foreign_key_constraints_checked": constraints,
+        "lifecycle_files": len(lifecycle_files),
+        "mode": args.mode,
+        "phase": "evidence-validated",
+        "recovery_attempt": args.attempt,
+        "reports_passed": 2 if args.mode == "normal" else 1,
+        "version": 1,
+    }:
+        raise ValueError("validation evidence mismatch")
     _validate_root_tree(runtime)
     _fsync_tree(runtime)
 
@@ -691,6 +784,11 @@ def _parser() -> argparse.ArgumentParser:
     read_active.add_argument("--path", type=_path, required=True)
     read_active.add_argument("--run-key", required=True)
     read_active.set_defaults(handler=_read_terminal_active)
+
+    describe_active = subparsers.add_parser("describe-active")
+    describe_active.add_argument("--path", type=_path, required=True)
+    describe_active.add_argument("--run-key", required=True)
+    describe_active.set_defaults(handler=_describe_active)
 
     clear_active = subparsers.add_parser("clear-active")
     clear_active.add_argument("--path", type=_path, required=True)
