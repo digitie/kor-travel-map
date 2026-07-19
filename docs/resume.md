@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-20 (codex) — vNext integration 구현 병합·최종 cutover 추적 정렬
+
+- T-VN-04A PR #779는 merge commit `21ad4e312b3d2a3e1b8baf1b3103daa6cec15e87`,
+  T-VN-15 PR #780은 merge commit `7604fc92585d8f973725f11bf8234a6d22034bc4`,
+  T-VN-03 PR #782는 merge commit `226f81c2cb5f89dec9bdd696121f4f8cd60f96c0`로
+  `integration/t-vn`에 반영됐다. 세 PR 모두 CI 8개가 green이지만 세 task와 issue #741은
+  final n150 live UI 증거 전까지 active다.
+- PinVi T-VN-03 소비자 PR #393은 merge commit
+  `61820f0ab0a7000948477511b3e92926fe78d1d4`, docker-manager production env PR #64는
+  merge commit `3f9973806e8addff96eb1339602f992ed424fb1c`로 각 저장소 main에 반영됐다.
+- 완료된 main→integration 동기화 `T-VN-SYNC-01`은 PR #781 merge commit
+  `a45bc3ac401e5675811f1031a4592991498d899f` 근거로 완료 이력에 옮겼다. 최종
+  integration→main 합류는 독립 `T-VN-SYNC-02`로 추적한다.
+- **다음 한 작업**: 문서 추적 PR #783을 최신 integration에 병합한 뒤 `T-VN-SYNC-02`를 수행한다.
+  최종 main·PinVi·manager exact 조합으로 C6c manifest v4 capture와 n150 C7 live E2E를 마치기
+  전에는 `T-VN-03`·`T-VN-04A`·`T-VN-15`, `T-ADM-C6c`·`T-ADM-C7P`·`T-ADM-C7`를
+  아카이브하지 않는다.
+
 ## 2026-07-19 (codex, agent B) — T-VN-03 교차 리뷰 P2 반영
 
 Map/PinVi 교차 리뷰가 user export allowlist에서 public curated sources/themes 두 GET이

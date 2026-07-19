@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex) — vNext integration 병합·cross-repo cutover 상태 정리
+
+- main→integration 동기화 PR #781은 CI 8개 green 뒤 merge commit
+  `a45bc3ac401e5675811f1031a4592991498d899f`로 병합됐다. `T-VN-SYNC-01`을 완료 이력으로 옮기고
+  최종 integration→main PR 단위 `T-VN-SYNC-02`를 active backlog에 추가했다.
+- admin 비공개 Feature PR #779는 merge commit
+  `21ad4e312b3d2a3e1b8baf1b3103daa6cec15e87`, search total·HMAC cursor PR #780은 merge commit
+  `7604fc92585d8f973725f11bf8234a6d22034bc4`, route 인증 gate PR #782는 merge commit
+  `226f81c2cb5f89dec9bdd696121f4f8cd60f96c0`로 `integration/t-vn`에 반영됐다. 세 PR 모두
+  lint·OpenAPI drift·Python 3버전·fixture replay·PostGIS·frontend를 포함한 CI 8개가 green이다.
+- PinVi ops principal PR #393은 merge commit `61820f0ab0a7000948477511b3e92926fe78d1d4`,
+  docker-manager production env PR #64는 merge commit
+  `3f9973806e8addff96eb1339602f992ed424fb1c`로 각 저장소 main에 반영됐다. 구현 병합과 운영 완료를
+  분리해 T-VN-03/04A/15와 T-ADM-C6c/C7P/C7은 final n150 live 증거 전까지 active로 둔다.
+- 다음 순서는 이 문서 PR을 integration에 병합 → T-VN-SYNC-02 integration→main → exact
+  compatible-pair v4 capture → n150 파괴적 live UI E2E다. T-VN-53 rotation 운영 측정은 별도
+  active task로 유지한다.
+
 ## 2026-07-19 (codex, agent B) — T-VN-03 교차 리뷰 P2 수정
 
 - 적대적 교차 리뷰에서 runtime/full OpenAPI에는 존재하는 curated sources/themes가
