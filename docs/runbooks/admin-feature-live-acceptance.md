@@ -115,7 +115,10 @@ barrier를 잡은 뒤 다음 순서로 실행한다.
    dummy credential·production profile·features=true를 넣는다. Alembic 전에 exit 1과 generic
    cursor-secret 누락 문구가 정확히 나오는지 확인한다.
 3. exact API image의 env/volume/network를 복제한 standalone labeled helper가 hidden
-   weather/price Feature와 value 각 1건을 seed한다. `docker compose exec`는 사용하지 않는다.
+   weather/price Feature와 value 각 1건을 seed한다. inspect한 environment는 중복 없는
+   name/value map으로 memory에서만 보유하고, Docker child process env와 `--env NAME`으로
+   전달한다. 값이 argv·journal·파일에 기록되는 env snapshot은 만들지 않으며
+   `docker compose exec`도 사용하지 않는다.
 4. browser가 draft/inactive/hidden marker, correction, 같은 검색 이름을 공유하는 active
    search alpha/beta를 admin change request로 만들고 승인한다. idempotency key는 Feature ID의
    SHA256이라 각 생성이 충돌하지 않는다.
@@ -133,8 +136,12 @@ barrier를 잡은 뒤 다음 순서로 실행한다.
 9. 모든 evidence file과 directory를 `fsync`하고 result를 durable 기록한 뒤에만
    `BLOCKED.json`을 지우고 state directory를 `fsync`한다.
 
-Playwright main/recovery report는 각각 setup/auth와 단일 live spec의 2 passed만 기록한다.
-trace, screenshot, video, URL, response/error body, raw cursor는 보존하지 않는다.
+Playwright main/recovery report directory는 top-level regular file
+`c7-summary.json`, `c7-results.xml`, `c7-summary.html` 정확히 3개만 허용한다. JSON schema와
+XML/HTML의 exact redacted row·spec identity를 검증하고 fsync한다. C7 raw `test-results`는
+evidence bind가 아니라 container tmpfs `/tmp/kor-travel-map-c7-test-results-<pid>`에 생성되어
+container 제거와 함께 사라진다. trace, screenshot, video, URL, response/error body, raw cursor는
+보존하지 않는다.
 
 ## 5. SIGKILL-safe Docker lifecycle
 
@@ -169,15 +176,16 @@ sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,
 recovery attempt는 BLOCKED에서 원자적으로 증가한다. 새 fixture를 만들지 않고 다음만 한다.
 
 - terminal ACTIVE drain과 exact owned container removal
-- API-owned pending request reject 또는 delete approve, 모든 API-owned Feature `deleted`·public 404
-- direct weather/price parent의 full ownership fingerprint를 `SELECT ... FOR UPDATE`로 잠근 같은
-  transaction 안에서 child value fingerprint·모든 FK reference를 audit하고 두 parent를 삭제
+- API-owned pending request reject 또는 delete approve, 모든 API-owned Feature `deleted`·public 404,
+  exact search query의 `items=[]`, `total=0`, cursor null/absent
+- direct weather/price parent와 기존 weather/price child row를 모두 `SELECT ... FOR UPDATE`로 잠근
+  같은 transaction 안에서 child value fingerprint·모든 FK reference를 audit하고 두 parent를 삭제
 - 삭제 후 direct 0/0/0·FK reference 0, label/name container 0, ACTIVE 없음 확인
 - recovery report/evidence exact 검증·fsync, recovered result 기록, 마지막 BLOCKED unlink
 
-`FOR UPDATE` parent lock은 concurrent child insert가 얻는 `KEY SHARE`와 충돌하므로 audit와 delete
-사이에 late child가 생기는 창을 닫는다. fingerprint가 다르면 다른 운영 row일 수 있으므로
-아무 것도 삭제하지 않고 BLOCKED를 유지한다.
+`FOR UPDATE` parent lock은 concurrent child insert가 얻는 `KEY SHARE`와 충돌하고 기존 child
+row lock은 fingerprint 검사 중 동시 변경을 막으므로 audit와 delete 사이의 창을 닫는다.
+fingerprint가 다르면 다른 운영 row일 수 있으므로 아무 것도 삭제하지 않고 BLOCKED를 유지한다.
 
 ## 7. 완료 판정
 
@@ -187,7 +195,9 @@ recovery attempt는 BLOCKED에서 원자적으로 증가한다. 새 fixture를 �
 - normal은 probe/direct seed·cleanup·audit, main/recovery report, 6개 operation × 8개 exact
   lifecycle phase가 있음; recovery는 3개 operation × 8개 phase가 있음
 - 모든 evidence directory `root:root 0700`, file `root:root 0600`
+- 각 Playwright directory의 exact 3-file redacted report 외 directory·symlink·extra file 없음
 - direct audit 0/0/0, FK reference 0, API-owned pending 0, public projection 0
+- exact search query의 items 0, total 0, next cursor null/absent
 - run label container 0 및 가능한 모든 actor/attempt/operation deterministic name container 0
 - 같은 exact tree의 PostgreSQL regression 증거에서 search `include_total=false` COUNT 0회,
   `include_total=true` COUNT 1회. production HTTP 결과만으로 SQL 실행 횟수를 추정하지 않음

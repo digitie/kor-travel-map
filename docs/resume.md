@@ -22,7 +22,12 @@
   schema·count·root metadata를 검증하고 전체 file/directory fsync 뒤 result와 BLOCKED clear를
   순서대로 확정한다. 구현/static contract 커밋까지 만들었으며 test·lint·build·parser는 아직
   실행하지 않았다.
-- **다음 한 작업**: 문서 커밋으로 exact head를 고정해 단일 적대적 리뷰어에게 제출한다. P0~P3
+- 동일 리뷰어의 재검토 P2 4건도 반영했다. C7 raw output은 container `/tmp` tmpfs로 분리하고
+  evidence report subtree는 exact 3 regular files와 JSON/XML/HTML content를 검증한다. helper
+  runtime env는 unique memory map→Docker child env와 `--env NAME`만 사용해 disk copy를 없앴다.
+  direct cleanup은 parent에 이어 기존 child도 `FOR UPDATE`하며, browser cleanup은 exact search
+  `items=[]`, `total=0`, cursor null/absent를 normal/recovery-only 모두에서 확인한다.
+- **다음 한 작업**: 보강 exact head를 같은 단일 적대적 리뷰어에게 재제출한다. P0~P3
   없음 승인 뒤에만 gate를 실행하고, CI green·exact 배포 확인 뒤 WSL SSH로 n150 production
   destructive live를 완료해 #741·#785를 닫는다.
 

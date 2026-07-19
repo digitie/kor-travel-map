@@ -56,12 +56,14 @@ owned 좌표 주위의 좁은 public bbox가 `mode=items`, `truncated=false`, �
 숨김 ID의 누출을 가리는 false-green을 막는다.
 
 admin API가 만들 수 없는 hidden weather/price는 exact API image의 standalone helper가
-DB transaction으로 Feature 2개와 value 각 1개를 만든다. browser는 admin exact-kind bbox,
+DB transaction으로 Feature 2개와 value 각 1개를 만든다. API runtime environment는 unique
+memory map과 Docker child env로만 전달하고 디스크 env snapshot·argv 값·journal 값은 만들지 않는다.
+browser는 admin exact-kind bbox,
 card target identity·non-empty metric/history, UI panel의 실제 값과 error DOM 부재를 확인하고,
 public detail/card/bbox 404·미포함을 함께 단언한다.
 
 direct cleanup은 두 parent의 kind/name/category/status/coordinate/data-origin 및 child value
-fingerprint를 확인한다. `SELECT ... FOR UPDATE` parent lock을 잡은 같은 transaction에서
+fingerprint를 확인한다. `SELECT ... FOR UPDATE` parent·기존 child lock을 잡은 같은 transaction에서
 `pg_catalog.pg_constraint`로 발견한 모든 child FK를 audit하고 parent를 삭제해 late child
 insert를 막는다. 이후 direct counts 0/0/0과 FK references 0을 다시 확인한다.
 
@@ -83,6 +85,8 @@ public key query가 아닌 same-origin `/api/proxy/v1/features/search`만 사용
 
 문제 응답은 원 cursor와 변조 cursor를 포함하지 않아야 한다. redacted reporter도 response body,
 assertion value, URL, cursor를 기록하지 않는다.
+normal과 recovery-only cleanup의 마지막에는 같은 exact query를 `include_total=true`로 다시 읽어
+`items=[]`, `total=0`, next cursor null/absent를 typed response에서 확인한다.
 
 ## 6. SIGKILL·복구 모델
 
@@ -116,6 +120,10 @@ clear하지 않는다. BLOCKED를 유지하고 daemon restart 또는 host reboot
 `removed`, `terminal` 8개 exact phase를 갖는다. normal evidence는 probe, seed helper, main/recovery
 executor, cleanup/audit helper의 6×8 events를, recovery evidence는 3×8 events를 요구한다. raw
 container identity는 ACTIVE에만 있고 보존 lifecycle에는 hash만 있다.
+
+Playwright raw `test-results`는 evidence bind 밖 container `/tmp` tmpfs로 분리한다. main/recovery
+evidence subtree는 root-owned `c7-summary.json`, `c7-results.xml`, `c7-summary.html` 세 regular
+file만 허용하고 JSON/XML/HTML의 exact redacted schema·spec 2건·passed content를 검증한 뒤 fsync한다.
 
 ## 7. 완료 기준
 

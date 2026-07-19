@@ -331,6 +331,8 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
     계약, exact API image의 pre-migration missing-secret probe를 추가한다.
   - [x] #741 좁은 public bbox 비누출, #785 stale raw ETag, `T-VN-15` total/continuation/query
     mismatch/tamper를 same-origin BFF live spec으로 묶고 cleanup parent `FOR UPDATE`를 적용한다.
+  - [x] 동일 리뷰어 P2에 따라 raw Playwright output의 `/tmp` 분리와 exact 3-file report 검증,
+    diskless helper env 전달, 기존 child `FOR UPDATE`, cleanup search 0/0/null을 보강한다.
   - [ ] exact implementation/docs head를 단일 적대적 리뷰어가 P0~P3 없음으로 승인한다.
   - [ ] 승인 뒤 static/unit/frontend/build gate와 CI를 통과하고 exact-tree PostgreSQL regression의
     search total false/true COUNT 0/1회를 확인한다.

@@ -25,6 +25,12 @@
 - lifecycle/evidence exact file set·phase·count·schema·root mode와 fsync-before-result/clear를 정적
   계약으로 고정했다. 구현/static contract 커밋 시점에는 정책에 따라 테스트·lint·build·parser를
   실행하지 않았다.
+- 동일 리뷰어 재검토의 P2 4건에 따라 report subtree를 JSON/XML/HTML exact 3-file allowlist로
+  닫고 raw Playwright output을 evidence bind 밖 container `/tmp`로 옮겼다. API runtime env는
+  on-disk 파일 없이 unique memory map과 Docker child env·name-only argv로만 전달한다. 기존
+  weather/price child도 `FOR UPDATE`하고, normal/recovery cleanup 끝에서 unique search fixture가
+  items 0·total 0·cursor 없음인지 다시 단언한다. 관련 strict C7/static·env parser 음수 회귀를
+  추가했으며 테스트 실행 금지는 유지했다.
 
 ## 2026-07-20 (codex agent B) — #741·#785 live 인수 경계 문서화
 
