@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex) — n150 0062 전환과 PostGIS topology check 오탐 발견
+
+- 최종 main·PinVi·Manager exact clone과 fresh root-owned backup을 확인하고 C6c capture를
+  시작했다. 오래된 Geo env에서 host source와 container path가 뒤섞인 문제를 실제 n150
+  source bind와 `/data/juso`로 분리해, 원천 파일 156개와 핵심 테이블 3개의 non-empty
+  검증을 통과시켰다.
+- Map DB는 예상된 0058이 아니라 실제 0023이었다. capture의 API health timeout보다
+  `0060_weather_integrity`가 오래 걸려 transaction이 안전하게 rollback된 뒤, exact revision
+  candidate API image로 migration-only를 실행해 0062 head까지 forward migration했다.
+- `alembic check`는 app 객체가 아닌 shared Postgres infra owner의 `postgis_topology`가 만든
+  `topology.layer`·`topology.topology`를 제거 대상으로 오인했다. production 소유권 배치를
+  integration gate에 재현하고 extension-owned schema만 제외하는 `T-ADM-C7F`로 분리했다.
+- CodeGraph에서 `_include_object`의 앱 caller가 없고 Alembic callback으로만 소비됨을 확인했다.
+  DB schema나 migration revision은 추가하지 않는다. 구현은 단일 적대 리뷰 전 테스트하지 않는다.
+
 ## 2026-07-20 (codex agent B) — T-VN-59 public weather·curation raw lineage 계약 문서화
 
 - 기준 `integration/t-vn@f5cdeeaa`에서 static/CodeGraph 영향도를 확인했다. weather public

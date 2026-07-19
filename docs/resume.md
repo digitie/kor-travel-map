@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-20 (codex) — T-ADM-C7F prod topology Alembic check 보강 착수
+
+- n150 최종 main 배포에서 실제 DB를 `0023`에서 `0062_feature_row_revision`까지
+  forward migration했고 `current == head`를 확인했다. 대용량 `0060`이 Manager API health
+  timeout보다 오래 걸려 exact candidate image의 migration-only 경로로 완료했다.
+- 필수 `alembic check`는 app drift가 아니라 infra owner의 `postgis_topology`가 소유한
+  `topology.layer`·`topology.topology`를 삭제 대상으로 오인해 실패했다. 빈 DB CI는 migration
+  user가 topology extension을 제거하므로 이 production 소유권 배치를 재현하지 못했다.
+- `T-ADM-C7F`는 extension-owned `topology` schema만 Alembic 비교에서 제외하고, head 적용 뒤
+  topology extension을 다시 설치한 production-equivalent integration gate를 추가한다.
+- **다음 한 작업**: docs-first PR을 연 뒤 구현을 추가하고 단일 적대 리뷰 승인 후 테스트·CI를
+  통과해 main에 병합한다. 이후 n150 exact image rebuild와 C6c capture를 재개한다.
+
 ## 2026-07-20 (codex agent B) — T-VN-59 public raw lineage 보강 착수
 
 - T-VN-SYNC-02 적대적 리뷰 blocker를 issue #786·`T-VN-59`로 분리했다. public forecast의
