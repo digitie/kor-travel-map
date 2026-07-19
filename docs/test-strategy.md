@@ -386,8 +386,10 @@ curated-features, `features/new`, 그리고 3개 상세 페이지는 아직 시�
 제거하거나 다른 값으로 오염하는 negative contract도 두어, page-global text 단언으로의 퇴행을
 검출한다.
 
-`/ops/pipeline` 실행과 전역 event 수용 fixture는 각각 11건 이상을 두 페이지에 나누고 cursor별
-응답을 명시한다. 다음-page 조작 뒤 request의 provider/dataset/sync_scope와 cursor가 exact인지,
+`/ops/pipeline` 실행과 전역 event mocked 수용 fixture는 각각 11건 이상을 두 주입 페이지에 나누고
+cursor별 응답을 명시한다. 이 fixture의 6+6 분할은 canonical `page_size=50`의 실제 overflow 증거가
+아니라 UI cursor plumbing·DOM identity 증거다. 실제 page-size overflow는 n150 live에서 51건 이상으로
+별도 검증한다. 다음-page 조작 뒤 request의 provider/dataset/sync_scope와 cursor가 exact인지,
 각 페이지 DOM의 전체 `data-row-identity` 배열이 응답 tuple 배열과 순서까지 같은지 검증한다.
 페이지 내부는 total-order가 엄격한 내림차순이어야 하며 페이지끼리 서로소이고 page 1의 마지막
 identity가 page 2의 첫 identity보다 앞서야 한다. 첫 행 존재, count summary, 페이지 전체 문자열만의

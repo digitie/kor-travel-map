@@ -1861,7 +1861,7 @@ test.describe("/ops/pipeline", () => {
     await expect(page.getByLabel("이벤트 sync scope 필터")).toBeDisabled();
   });
 
-  test("실행·event 12건 overflow가 exact scope cursor와 전체 DOM total-order를 보존한다", async ({
+  test("실행·event 12건 주입 cursor가 exact scope와 전체 DOM total-order를 보존한다", async ({
     page,
   }) => {
     const executions = Array.from({ length: 12 }, (_, index) =>
@@ -1957,6 +1957,8 @@ test.describe("/ops/pipeline", () => {
       ...firstExecutionIdentities,
       ...secondExecutionIdentities,
     ]).toEqual(executions.map(executionIdentity));
+    // fixture 순서 자체가 수용 계약을 만족해야 DOM==fixture 단언도 product의
+    // total-order 회귀를 전달하므로, 실행·event 주입 데이터의 전제도 별도로 고정한다.
     const executionTuples = executions.map((item) => [
       item.created_at,
       item.id,

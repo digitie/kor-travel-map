@@ -110,7 +110,9 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   summary projection만 제거하거나 오염한 negative fixture가 실패해야 한다. `/ops/pipeline`의 실행과
   전역 event는 각각 11건 이상의 두 페이지 fixture로 실제 다음-page cursor 요청, 페이지별 전체 DOM
   identity 배열, total-order, page 경계의 서로소·scope 보존을 검증한다. route mock은 cursor별 응답을
-  명시하며 첫 행이나 page-global text 일부의 존재만으로 통과시키지 않는다.
+  명시하며 첫 행이나 page-global text 일부의 존재만으로 통과시키지 않는다. 6+6 mocked 분할은 cursor
+  plumbing 증거이며 canonical `page_size=50` 실제 overflow는 C7 n150 live 51건 이상 검증이 담당한다.
+  PR #755의 targeted mocked E2E는 통과했고, CI·merge 뒤 본 항목을 완료 archive로 이동한다.
 
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,
