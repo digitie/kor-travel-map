@@ -20,6 +20,16 @@
   Docker compose는 컨테이너 기본 true를 주입해 기존 배포를 유지한다(배포 전제: 파괴적 작업이
   필요한 배포는 host env로 이 값을 유지). PR #793.
 
+## surface별 CORS 분리 (2026-07-20, `T-VN-H03`)
+
+- [x] **T-VN-H03 — surface별 CORS를 표면 정책으로 분리.** route policy matrix(T-VN-02)의
+  분류를 재사용해 browser-facing public 표면(public-unauthenticated·public-keyed)에만 CORS를
+  적용하고, service(server-to-server token)·operator(admin BFF same-origin proxy)·metrics·debug
+  표면은 `Access-Control-Allow-Origin`을 내보내지 않는다. app-global `CORSMiddleware`를 route
+  policy로 게이트하는 표면 범위 미들웨어(`kortravelmap.api.cors.SurfaceScopedCORSMiddleware`)로
+  구현했고, 경로 판정은 비-public 매칭 시 무조건 제외하는 security-safe 규칙을 쓴다. CORS는
+  미들웨어라 OpenAPI spec 무관(drift 없음). PR #(pending).
+
 ## vNext main 동기화 (2026-07-20, `T-VN-SYNC-01`)
 
 - [x] **T-VN-SYNC-01 — latest main을 integration/t-vn에 동기화.**

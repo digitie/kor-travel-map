@@ -30,7 +30,6 @@ import httpx
 from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from kortravelmap.infra.log_repo import record_api_call
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
@@ -44,6 +43,10 @@ from kortravelmap.api.auth import (
     require_metrics_token,
     require_ops_operator,
     require_public_api_key,
+)
+from kortravelmap.api.cors import (
+    SurfaceScopedCORSMiddleware,
+    build_cors_surface_patterns,
 )
 from kortravelmap.api.db import configure_prometheus_metrics
 from kortravelmap.api.prometheus import PrometheusMetrics
@@ -634,17 +637,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             request_id=request_id,
         )
 
-    # frontend(Next.js dev/start 12705)가 브라우저에서 backend(12701)로 cross-origin
-    # fetch → CORS 필요 (ADR-005: 내부 debug 도구, origin은 localhost frontend로
-    # 한정). OpenAPI spec에는 영향 없음(미들웨어, ADR-031 drift gate 무관).
-    if settings.cors_allow_origins:
-        application.add_middleware(
-            CORSMiddleware,
-            allow_origins=settings.cors_allow_origins,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-
     @application.middleware("http")
     async def attach_request_id(
         request: Request,
@@ -887,6 +879,21 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     # matrix에 분류돼 있어야 한다. 미분류 route는 여기(앱 구성 검사)와 CI
     # (`tests/test_route_policy.py`)에서 함께 실패한다.
     assert_routes_classified(application)
+
+    # ADR-066 T-VN-H03 — surface별 CORS 분리. route policy matrix(T-VN-02)의
+    # 분류를 재사용해 browser-facing public 표면(public-unauthenticated·
+    # public-keyed)에만 CORS를 적용한다. operator(admin BFF same-origin proxy)·
+    # service(server-to-server token)·metrics·debug 표면은 CORS 헤더를 내보내지
+    # 않는다. app-global CORSMiddleware를 route policy로 게이트하는 표면 범위
+    # 미들웨어라 가장 바깥에 둔다. OpenAPI spec 무관(미들웨어, ADR-031 drift 무관).
+    if settings.cors_allow_origins:
+        application.add_middleware(
+            SurfaceScopedCORSMiddleware,
+            surface_patterns=build_cors_surface_patterns(
+                build_route_policy_matrix(application)
+            ),
+            allow_origins=settings.cors_allow_origins,
+        )
 
     return application
 
