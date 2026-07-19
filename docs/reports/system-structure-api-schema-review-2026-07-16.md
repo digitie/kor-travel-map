@@ -571,8 +571,8 @@ cross-repo 차단은 `T-ADM-C6c`와 양 저장소 task에 함께 mirror. (4) 본
   collection 교차 검사) — F-1 양방향 모두.
 - 공개 스키마·payload에 raw provider 필드 0건. batch가 5-state를 구분하고 503에서 소비자
   snapshot이 stale로 유지된다(broken 합성 금지).
-- opaque ID byte-for-byte 보존, cursor mismatch 거부, `include_total=false`에서 COUNT 0회,
-  미구현 옵션은 OpenAPI에 없음.
+- opaque ID byte-for-byte 보존, cursor malformed·unknown version·tamper·query mismatch를 각각
+  typed 422로 DB 접근 전에 거부, `include_total=false`에서 COUNT 0회, 미구현 옵션은 OpenAPI에 없음.
 - active scope 동시 생성은 operation 1개로 수렴하고 같은 계획만 재사용하며 다른 계획은 409.
 - terminal 뒤에도 같은 Idempotency-Key·같은 body는 각 도메인 ledger에서 저장된 동일 결과를
   replay한다. 같은 key·다른 body는 409, stale If-Match는 412, 조건부 GET은 304다.
@@ -609,3 +609,9 @@ scratch EXPLAIN·write 실측 포함), #704(§13 대질 — retired/missing·멱
 PR #736(`docs/vnext-review-propagation`)에서 §7 매핑을 ADR-066~075, architecture, integration,
 deploy/runbook, tasks, entry/status 문서에 전개했다. merge 뒤에도 본 보고서를 설계 근거 정본으로
 유지하고 구현 완료 증거는 각 T-VN task와 PR에 기록한다.
+
+2026-07-19 T-VN-15 구현에서 fingerprint만으로는 client가 payload를 다시 서명하지 않고 변조하는
+것을 막을 수 없음을 확인했다. PR #780은 최초 cursor를 전용 API-only HMAC key의 단일-key clean
+cut으로 채택한다. 이에 D-9, §6.3, §6.5, §6.6, §8.2와 ADR-073을 함께 amend하며, 기존 Wave 3의
+"HMAC 도입 측정"은 signing key rotation 주기·진행 cursor 무효화율·다중 key grace window 측정으로
+대체한다.
