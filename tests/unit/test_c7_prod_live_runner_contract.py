@@ -43,6 +43,7 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
         "verify_alembic_state",
         "verify_ui_auth_preflight ||",
         "initialize_state_paths\n",
+        "verify_clean_state_audit\n",
         "start_orchestrator_lock_guard\n",
         '[[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]]',
         "has_residual_state &&",
@@ -386,6 +387,7 @@ def test_runner_uses_fixed_root_owned_atomic_state() -> None:
         "verify_alembic_state",
         "verify_ui_auth_preflight",
         "initialize_state_paths",
+        "verify_clean_state_audit",
         "start_orchestrator_lock_guard",
         '[[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]]',
         "has_residual_state",
@@ -430,6 +432,7 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert 'git -C "$REPO_ROOT" archive --format=tar "$commit"' in build_script
     assert "--pull=false" in build_script
     assert "**/*.tsbuildinfo" in dockerignore
+    assert "**/*.local.md" in dockerignore
     assert 'io.kortravelmap.c7.repository-commit' in dockerfile
     assert 'io.kortravelmap.c7.playwright-base' in dockerfile
     for image_dockerfile in ("api.Dockerfile", "dagster.Dockerfile", "frontend.Dockerfile"):
@@ -452,6 +455,9 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert "len(observed_containers) != len(role_services)" in attestation
     assert 'docker create --pull=never' in script
     assert 'docker start --attach --interactive' in script
+    assert "--network bridge --ipc private" in script
+    assert "--network host" not in script
+    assert "--ipc host" not in script
     assert "write_container_reference \\\n    creating" in script
     assert '"phase": phase' in script
     assert '\\"phase\\":\\"create\\"' in script
@@ -476,6 +482,24 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert "result.errors" not in reporter
     assert "result.stdout" not in reporter
     assert "result.stderr" not in reporter
+
+
+def test_runner_preserves_recovery_state_on_failure_and_runs_full_audit() -> None:
+    script = _read(RUNNER)
+    finish = _section(script, "finish()", "create_blocked_sentinel()")
+
+    assert 'python3 "$SCRIPT_DIR/audit-c7-prod-live-state.py" >/dev/null' in script
+    _assert_in_order(
+        script,
+        "initialize_state_paths\n",
+        "verify_clean_state_audit\n",
+        "start_orchestrator_lock_guard\n",
+    )
+    assert finish.count("status == 0 && ORCHESTRATOR_VERIFIED == 1") >= 3
+    assert finish.count("container_clean == 1 && evidence_preserved == 1") >= 3
+    assert finish.index('rm -f -- "$E2E_STORAGE_STATE"') < finish.index(
+        'rm -rf -- "$RUNTIME_DIR"'
+    )
 
 
 def test_runner_requires_distinct_recreated_target_history() -> None:

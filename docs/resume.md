@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — Agent A PR #754 심층 리뷰 보완
+
+- 단일 전문 리뷰의 4개 finding을 반영해 `*.local.md` Docker context 차단, Playwright
+  bridge/private 격리, 전체 상태 auditor preflight, 실패 recovery journal/runtime
+  보존을 구현했다.
+- 대상 보안/unit 51개와 전체 unit 1,525개, `bash -n`, Ruff, strict mypy,
+  import-linter가 통과했다.
+- **다음 한 작업**: PR #754 원격 CI를 통과한 뒤 `main`에 머지하고, 최근 2일 Agent A
+  PR을 다시 조회해 닫힌 PR도 순서대로 심층 검토한다.
+
 ## 2026-07-19 (codex) — T-ADM-C7H 실행 경계 보강 진행
 
 - C7 실행 전 단일 적대 리뷰에서 실제 배포 pair/DB schema 증거 부재, host npm/Chromium 의존,

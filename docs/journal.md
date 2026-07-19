@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — Agent A PR #754 심층 리뷰 보안 후속
+
+- 단일 전문 리뷰에서 local-only 배포 문서의 Docker context 유입, 실패 뒤 recovery
+  runtime 삭제, Playwright container의 host network/IPC 공유, 제한된 residue glob만
+  쓰는 preflight를 S2/S3로 확인했다.
+- `*.local.md`를 build context에서 제외하고 executor를 bridge/private 경계로 줄였다.
+  전체 상태 auditor가 unsafe·unexpected·active·recovery residue를 거부한 뒤에만 lock과
+  mutation 상태를 만들며, 실패 경로는 `BLOCKED.json`과 journal/runtime을 보존한다.
+- Linux `/tmp` 기준 대상 보안/unit 51개와 전체 unit 1,525개, `bash -n`, Ruff,
+  strict mypy, import-linter를 통과했다.
+
 ## 2026-07-19 (codex) — C7 prod readiness 차단 리뷰 반영
 
 - 단일 적대 리뷰에서 배포 pair·DB schema·실제 service runtime attestation 부재, host npm/Chromium

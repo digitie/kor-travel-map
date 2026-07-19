@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### C7 prod 심층 리뷰 보안 후속 (2026-07-19, PR #754)
+
+- **SECURITY**: Docker build context에서 모든 `*.local.md`를 제외하고, C7 Playwright
+  executor의 host network/IPC 공유를 bridge network/private IPC로 축소했다.
+- **FIXED**: runner가 전체 상태 감사 도구를 통과해야 lock과 mutation 상태를 만들며,
+  실패 시 `BLOCKED.json`과 복구 journal/runtime을 보존한다. 성공이 완전히 입증된
+  경우에만 runtime과 attestation snapshot을 정리한다.
+
 ### C7 prod 실행 경계·증거 보강 (2026-07-19, T-ADM-C7H)
 
 - **SECURITY**: 파괴적 live E2E 전에 exact Git commit의 root-owned runner/helper/attestation module

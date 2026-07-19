@@ -497,15 +497,25 @@ finish() {
       status=1
     fi
   fi
-  if (( container_clean == 1 && evidence_preserved == 1 )) &&
+  if ((
+    status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
+      container_clean == 1 && evidence_preserved == 1
+  )); then
+    rm -f -- "$HOST_ATTESTATION_SNAPSHOT" "$COMPATIBLE_PAIR_SNAPSHOT" || status=1
+  fi
+  if ((
+    status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
+      container_clean == 1 && evidence_preserved == 1
+  )) &&
     [[ -n "$RUNTIME_DIR" ]] && runtime_is_private_direct_child; then
     rm -rf -- "$RUNTIME_DIR" || status=1
     [[ ! -e "$RUNTIME_DIR" && ! -L "$RUNTIME_DIR" ]] || status=1
-  elif [[ -n "$RUNTIME_DIR" ]] && (( container_clean == 1 && evidence_preserved == 1 )); then
+  elif [[ -n "$RUNTIME_DIR" ]] &&
+    ((
+      status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
+        container_clean == 1 && evidence_preserved == 1
+    )); then
     status=1
-  fi
-  if (( evidence_preserved == 1 )); then
-    rm -f -- "$HOST_ATTESTATION_SNAPSHOT" "$COMPATIBLE_PAIR_SNAPSHOT" || status=1
   fi
   if (( status == 0 && ORCHESTRATOR_VERIFIED == 1 )); then
     if rm -f -- \
@@ -551,6 +561,17 @@ has_residual_state() {
     compgen -G "$STATE_ROOT/container-*.cid" >/dev/null ||
     compgen -G "$STATE_ROOT/container-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/container-*.outcome.json" >/dev/null
+}
+
+verify_clean_state_audit() {
+  local audit_status
+  if python3 "$SCRIPT_DIR/audit-c7-prod-live-state.py" >/dev/null; then
+    audit_status=0
+  else
+    audit_status=$?
+  fi
+  (( audit_status == 0 )) ||
+    die "C7 state audit rejected unsafe, unexpected, active, or recoverable residue"
 }
 
 require_command python3
@@ -922,8 +943,8 @@ if (
     or runtime_binds != {runtime}
     or not isinstance(host, dict)
     or host.get("ReadonlyRootfs") is not True
-    or host.get("NetworkMode") != "host"
-    or host.get("IpcMode") != "host"
+    or host.get("NetworkMode") not in {"bridge", "default"}
+    or host.get("IpcMode") != "private"
     or host.get("CapDrop") != ["ALL"]
     or "no-new-privileges" not in (host.get("SecurityOpt") or [])
     or not isinstance(state, dict)
@@ -984,7 +1005,7 @@ docker_run_playwright() {
     docker create --pull=never --rm --interactive \
     --name "$ACTIVE_CONTAINER_NAME" \
     --label io.kortravelmap.c7.runner=prod-live-e2e \
-    --network host --ipc host --read-only \
+    --network bridge --ipc private --read-only \
     --security-opt no-new-privileges \
     --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777 \
     --tmpfs /root/.cache:rw,nosuid,nodev,noexec,mode=700 \
@@ -1140,6 +1161,7 @@ daemon_cap="$(read_cap "$E2E_C7_DAGSTER_DAEMON_SERVICE")" ||
 verify_ui_auth_preflight || die "UI login POST/Set-Cookie preflight failed"
 
 initialize_state_paths
+verify_clean_state_audit
 start_orchestrator_lock_guard
 [[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
   die "prior BLOCKED state requires operator recovery"
