@@ -82,7 +82,6 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/features/nearby/by-target",
         "/v1/features/search",
         "/v1/features/{feature_id}",
-        "/v1/features/{feature_id}/observations/{source_entity_key}/history",
         "/v1/features/{feature_id}/price",
         "/v1/features/{feature_id}/weather",
         "/v1/features/{feature_id}/weather/forecast",
@@ -112,18 +111,24 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "BeachPublicView" in schemas
     assert "FestivalPublicView" in schemas
     assert "CuratedFeatureView" in schemas
-    assert "FeatureObservationHistoryResponse" in schemas
     assert "FeatureCurationGroupsResponse" in schemas
     assert "CurationCollectionResponse" in schemas
     assert "FeatureCurationGroupResponse" in schemas
     assert "CuratedFeatureDetailSnapshotView" not in schemas
     assert "OpsMetricsResponse" not in schemas
     assert "AdminFeatureListResponse" not in schemas
+    # T-VN-05: raw observation lineage schema/route는 user-facing subset에서 제외.
+    assert "FeatureObservationHistoryResponse" not in schemas
+    assert "FeatureObservationView" not in schemas
+    assert "FeatureSourcesResponse" not in schemas
+    assert "FeatureSourcesData" not in schemas
     assert _refs(user["paths"]) <= set(schemas)
     assert {
         "coord_5179_srid",
         "parent_feature_id",
         "sibling_group_id",
+        # T-VN-05: raw observation lineage는 공개 detail에 없다.
+        "observations",
     }.isdisjoint(_schema_properties(user, "FeatureDetailResponse"))
     assert {
         "target_id",

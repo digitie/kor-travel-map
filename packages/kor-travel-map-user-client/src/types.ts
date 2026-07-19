@@ -286,23 +286,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/features/{feature_id}/observations/{source_entity_key}/history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** feature 제공기관 payload 관측 이력 */
-        get: operations["get_feature_observation_history_v1_features__feature_id__observations__source_entity_key__history_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/features/{feature_id}/price": {
         parameters: {
             query?: never;
@@ -1094,11 +1077,6 @@ export interface components {
             marker_icon?: string | null;
             /** Name */
             name: string;
-            /**
-             * Observations
-             * @description 이 Feature에 연결된 모든 제공기관 entity의 현재 관측값.
-             */
-            observations?: components["schemas"]["FeatureObservationView"][];
             /** Sido Code */
             sido_code?: string | null;
             /** Sigungu Code */
@@ -1114,100 +1092,6 @@ export interface components {
             urls: {
                 [key: string]: unknown;
             };
-        };
-        /**
-         * FeatureObservationHistoryData
-         * @description provider entity별 immutable payload history data.
-         */
-        FeatureObservationHistoryData: {
-            /** Items */
-            items: components["schemas"]["FeatureObservationView"][];
-        };
-        /**
-         * FeatureObservationHistoryResponse
-         * @description 관측 payload history cursor 응답.
-         */
-        FeatureObservationHistoryResponse: {
-            data: components["schemas"]["FeatureObservationHistoryData"];
-            meta: components["schemas"]["Meta"];
-        };
-        /**
-         * FeatureObservationView
-         * @description 한 제공기관 entity의 현재 또는 과거 payload 관측값.
-         */
-        FeatureObservationView: {
-            /** Confidence */
-            confidence: number;
-            /** Dataset Key */
-            dataset_key: string;
-            /**
-             * Entity Last Seen At
-             * Format: date-time
-             */
-            entity_last_seen_at: string;
-            /** Expires At */
-            expires_at: string | null;
-            /** Feature Id */
-            feature_id: string;
-            /**
-             * Fetched At
-             * Format: date-time
-             */
-            fetched_at: string;
-            /**
-             * First Seen At
-             * Format: date-time
-             */
-            first_seen_at: string;
-            /**
-             * Imported At
-             * Format: date-time
-             */
-            imported_at: string;
-            /** Is Current */
-            is_current: boolean;
-            /** Is Primary Source */
-            is_primary_source: boolean;
-            /**
-             * Linked At
-             * Format: date-time
-             */
-            linked_at: string;
-            /** Match Method */
-            match_method: string;
-            /** Provider */
-            provider: string;
-            /** Raw Address */
-            raw_address: string | null;
-            /** Raw Data */
-            raw_data: {
-                [key: string]: unknown;
-            };
-            /** Raw Latitude */
-            raw_latitude: number | null;
-            /** Raw Longitude */
-            raw_longitude: number | null;
-            /** Raw Name */
-            raw_name: string | null;
-            /** Raw Payload Hash */
-            raw_payload_hash: string;
-            /**
-             * Record Last Seen At
-             * Format: date-time
-             */
-            record_last_seen_at: string;
-            /** Source Entity Id */
-            source_entity_id: string;
-            /** Source Entity Key */
-            source_entity_key: string;
-            /** Source Entity Type */
-            source_entity_type: string;
-            /** Source Record Key */
-            source_record_key: string;
-            /** Source Role */
-            source_role: string;
-            /** Source Version */
-            source_version: string | null;
         };
         /**
          * FeaturePriceResponse
@@ -2833,61 +2717,6 @@ export interface operations {
                 };
             };
             /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    get_feature_observation_history_v1_features__feature_id__observations__source_entity_key__history_get: {
-        parameters: {
-            query?: {
-                page_size?: number;
-                cursor?: string | null;
-                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
-                key?: string | null;
-            };
-            header?: never;
-            path: {
-                feature_id: string;
-                source_entity_key: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatureObservationHistoryResponse"];
-                };
-            };
-            /** @description 공개 feature 또는 observation 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description cursor 또는 page_size 오류 */
             422: {
                 headers: {
                     [name: string]: unknown;

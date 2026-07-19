@@ -10220,14 +10220,6 @@
             "title": "Name",
             "type": "string"
           },
-          "observations": {
-            "description": "이 Feature에 연결된 모든 제공기관 entity의 현재 관측값.",
-            "items": {
-              "$ref": "#/components/schemas/FeatureObservationView"
-            },
-            "title": "Observations",
-            "type": "array"
-          },
           "sido_code": {
             "anyOf": [
               {
@@ -10585,6 +10577,47 @@
           "meta"
         ],
         "title": "FeatureSearchResponse",
+        "type": "object"
+      },
+      "FeatureSourcesData": {
+        "additionalProperties": false,
+        "description": "``GET /features/{feature_id}/sources`` data payload (operator, raw lineage).",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureObservationView"
+            },
+            "title": "Observations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "feature_id",
+          "observations"
+        ],
+        "title": "FeatureSourcesData",
+        "type": "object"
+      },
+      "FeatureSourcesResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features/{feature_id}/sources`` 응답 (operator 전용 raw lineage).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureSourcesData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureSourcesResponse",
         "type": "object"
       },
       "FeatureSummary": {
@@ -31983,7 +32016,7 @@
                 }
               }
             },
-            "description": "공개 feature 또는 observation 없음"
+            "description": "feature 또는 observation 없음"
           },
           "422": {
             "content": {
@@ -32006,7 +32039,12 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "feature 제공기관 payload 관측 이력",
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "feature 제공기관 payload 관측 이력 (operator)",
         "tags": [
           "features"
         ]
@@ -32122,6 +32160,94 @@
           }
         },
         "summary": "feature price card (제품별 최신 가격 + 최근 이력)",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/v1/features/{feature_id}/sources": {
+      "get": {
+        "description": "operator 전용 — feature에 연결된 모든 제공기관 entity의 현재 raw 관측값.\n\nT-VN-05: raw lineage(raw_data/raw_payload_hash/source_record_key)는 공개 detail에서\n제거하고 이 operator 표면으로 이동했다. 비공개/종료 feature도 감사 대상이라\n공개 가시성 gate 없이 raw row 존재만 확인한다.",
+        "operationId": "get_feature_sources_v1_features__feature_id__sources_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureSourcesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "feature 제공기관 raw 관측 lineage (operator)",
         "tags": [
           "features"
         ]

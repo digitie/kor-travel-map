@@ -49,9 +49,8 @@ USER_OPERATIONS: dict[str, frozenset[str]] = {
     # 비버저닝 유지(ADR-048).
     "/v1/features/in-bounds": frozenset({"get"}),
     "/v1/features/{feature_id}": frozenset({"get"}),
-    "/v1/features/{feature_id}/observations/{source_entity_key}/history": frozenset(
-        {"get"}
-    ),
+    # T-VN-05: raw observation lineage(``/sources``·observation history)는 operator
+    # 전용으로 이동해 user-facing subset에서 제외한다 (ADR-073/D-9-1).
     "/v1/features/{feature_id}/price": frozenset({"get"}),
     "/v1/features/{feature_id}/weather": frozenset({"get"}),
     "/v1/features/{feature_id}/weather/forecast": frozenset({"get"}),
