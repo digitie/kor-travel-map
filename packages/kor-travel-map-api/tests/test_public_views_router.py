@@ -129,6 +129,8 @@ def test_list_public_beaches_maps_page(
     )
     client.app.dependency_overrides[get_session] = _fake_session
     try:
+        # T-VN-07: 제거된 no-op 옵션(include_forecast)을 옛 caller가 보내도 FastAPI가
+        # 미지 파라미터를 무시해 정상 200이어야 한다(no 500).
         r = client.get(
             "/v1/public/beaches",
             params={"sido_code": "26", "page_size": 10, "include_forecast": "true"},
@@ -141,6 +143,10 @@ def test_list_public_beaches_maps_page(
         assert item["beach_width_m"] == 25.0
         assert item["beach_length_m"] == 1400.0
         assert item["source_providers"] == ["python-khoa-api"]
+        # 응답 필드는 옵션 제거 뒤에도 모델 기본값(null/[])으로 유지된다(구현 시 재도입).
+        assert item["latest_water_quality"] is None
+        assert item["upcoming_index_forecasts"] == []
+        assert item["latest_weather"] is None
         assert body["meta"]["page"] == {
             "page_size": 10,
             "next_cursor": "n",
@@ -148,6 +154,21 @@ def test_list_public_beaches_maps_page(
         }
     finally:
         client.app.dependency_overrides.clear()
+
+
+def test_openapi_drops_beach_noop_quality_forecast_options(client: TestClient) -> None:
+    # T-VN-07 (D-9-6) — 아무 동작 없던 include_quality/include_forecast 옵션을
+    # OpenAPI route 서명에서 제거한다. 응답 필드는 구현 시점 재도입을 위해 유지한다.
+    spec = client.get("/openapi.json").json()
+    for path in ("/v1/public/beaches", "/v1/public/beaches/{feature_id}"):
+        params = spec["paths"][path]["get"].get("parameters", [])
+        names = {parameter["name"] for parameter in params}
+        assert "include_quality" not in names, path
+        assert "include_forecast" not in names, path
+    beach_properties = spec["components"]["schemas"]["BeachPublicView"]["properties"]
+    assert "latest_water_quality" in beach_properties
+    assert "upcoming_index_forecasts" in beach_properties
+    assert "latest_weather" in beach_properties
 
 
 def test_public_beach_markers_reject_partial_bbox(client: TestClient) -> None:

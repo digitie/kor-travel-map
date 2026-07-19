@@ -304,9 +304,6 @@ def _validate_bbox(
 
 def _beach_view(
     row: public_views_repo.PublicBeachRow,
-    *,
-    include_quality: bool,
-    include_forecast: bool,
 ) -> BeachPublicView:
     address = row.address
     detail = row.detail
@@ -353,9 +350,10 @@ def _beach_view(
         ),
         homepage_url=_text(row.urls.get("homepage")),
         image_url=_first_text(facility.get("image_url"), source_raw.get("image_url")),
-        latest_water_quality=None if include_quality else None,
-        upcoming_index_forecasts=[] if include_forecast else [],
-        latest_weather=None if include_forecast else None,
+        # water quality/forecast는 아직 미구현이라 항상 비어 있다(D-9-6). 이를
+        # 채우던 척하던 include_quality/include_forecast no-op 옵션은 T-VN-07에서
+        # 제거했다 — 구현 시점에 옵션과 함께 재도입한다. 필드는 모델 기본값(None/[])을
+        # 유지한다(응답 계약 불변, 재도입 지점).
         source_providers=list(row.source_providers),
         updated_at=row.updated_at,
     )
@@ -418,8 +416,6 @@ async def list_public_beaches(
     q: Annotated[str | None, Query(max_length=100)] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: str | None = None,
-    include_quality: bool = False,
-    include_forecast: bool = False,
 ) -> PublicBeachListResponse:
     """해수욕장 공개 목록 view."""
 
@@ -436,16 +432,7 @@ async def list_public_beaches(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return PublicBeachListResponse(
-        data=PublicBeachListData(
-            items=[
-                _beach_view(
-                    row,
-                    include_quality=include_quality,
-                    include_forecast=include_forecast,
-                )
-                for row in page.items
-            ]
-        ),
+        data=PublicBeachListData(items=[_beach_view(row) for row in page.items]),
         meta=make_meta(
             request,
             started_at=started,
@@ -503,8 +490,6 @@ async def get_public_beach(
     feature_id: str,
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-    include_quality: bool = False,
-    include_forecast: bool = False,
 ) -> PublicBeachDetailResponse:
     """해수욕장 공개 상세 view."""
 
@@ -513,11 +498,7 @@ async def get_public_beach(
     if row is None:
         raise HTTPException(status_code=404, detail=f"beach not found: {feature_id}")
     return PublicBeachDetailResponse(
-        data=_beach_view(
-            row,
-            include_quality=include_quality,
-            include_forecast=include_forecast,
-        ),
+        data=_beach_view(row),
         meta=make_meta(request, started_at=started),
     )
 

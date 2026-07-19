@@ -8,6 +8,17 @@
 - **다음 한 작업**: 같은 리뷰어의 최종 승인 후 전체 CI를 통과시키고 PR #746을
   `integration/t-vn`에만 머지한다. 이후 최근 Agent A PR을 다시 검색한다.
 
+## 2026-07-19 (claude, agent A1) — T-VN-07 no-op 옵션 삭제 + actor principal 1차 구현
+
+- `feat/t-vn-07-noop-actor`(base `integration/t-vn@0e0f7fe2`)에서 (1) 무동작 beach
+  `include_quality`/`include_forecast` query 옵션을 route/OpenAPI(admin·user)/생성 TS
+  타입에서 제거하고(응답 필드는 모델 기본값으로 유지 — D-9-6), (2) auth-event 감사 actor를
+  `body.actor or context.actor` → 인증 principal `context.actor`로 좁혔다(D-2·F-4). 옛
+  caller no 500, body-actor 위조 차단. openapi/TS drift 0, 게이트 green.
+- **다음 한 작업**: 이 브랜치 적대적 리뷰(오케스트레이터) → full gates → PR·CI green·
+  `integration/t-vn` 머지. body-actor 필드 전면 제거·`actor` schema 제거는 T-VN-20이
+  admin feature/curated/issue/offline/dedup/enrichment와 함께 이어받는다.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-02 route policy matrix + /metrics 경계 구현
 
 - `feat/t-vn-02-route-policy`(base `integration/t-vn`, #743·#744 rebase 반영)에 ADR-066
