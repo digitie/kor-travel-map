@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — Agent A T-VN-02 심층 리뷰 보완
+
+- PR #747의 단일 전문 리뷰에서 Prometheus token을 추적 config에 inline하게 하는
+  배포 안내(S2)와 비ASCII token의 header/env 인코딩 불일치(S3)를 확인했다.
+  `credentials_file` + repository 밖 read-only secret mount를 선행 조건으로 문서를
+  고치고, metrics token 설정을 RFC 6750 `b64token` ASCII로 제한했다.
+- 같은 리뷰어가 기존 S2/S3 해소를 확인했고, 남은 import 순서 1건은 사용자 지침의
+  기계적 변경으로 정리했다. 관련 API unit 87건과 Ruff가 통과했다.
+- **다음 한 작업**: 후속 PR의 전체 CI를 통과시켜 `integration/t-vn`에만 머지하고,
+  최근 Agent A PR을 다시 검색한다.
+
 ## 2026-07-19 (codex) — Agent A T-VN-06 심층 리뷰 보완
 
 - PR #746의 단일 전문 리뷰에서 #745 이후 alias-aware notice 필터 충돌(S1)을 확인해

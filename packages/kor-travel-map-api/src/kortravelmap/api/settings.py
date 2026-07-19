@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -9,6 +10,9 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = ["ApiSettings"]
+
+
+_BEARER_B64TOKEN_PATTERN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
 
 
 def _deployable_secret_shape(raw: str) -> bool:
@@ -300,19 +304,27 @@ class ApiSettings(BaseSettings):
     @field_validator("metrics_token", mode="before")
     @classmethod
     def _normalize_metrics_token(cls, value: object) -> object:
-        """빈 문자열은 미설정(None)과 같은 opt-out으로 정규화한다.
+        """빈 문자열을 opt-out으로 정규화하고 RFC 6750 token 형태를 강제한다.
 
         배포 가능한 형태(앞뒤 공백 없는 32자 이상)는 service token과 같은
         기준으로 production matrix(``assert_production_ready``)가 검사한다 —
         root ``.env.example``의 CHANGE_ME placeholder가 local-dev full-stack
-        검증을 막지 않게 한다(T-VN-01 service token 패턴).
+        검증을 막지 않게 한다(T-VN-01 service token 패턴). HTTP Bearer credential은
+        RFC 6750 ``b64token`` ASCII 범위로 제한해 Starlette의 latin-1 header decode와
+        환경변수 UTF-8 인코딩 사이에 서로 다른 표현이 생기지 않게 한다.
         """
 
         if value is None:
             return value
         raw = value.get_secret_value() if isinstance(value, SecretStr) else value
-        if isinstance(raw, str) and raw == "":
-            return None
+        if isinstance(raw, str):
+            if raw == "":
+                return None
+            if _BEARER_B64TOKEN_PATTERN.fullmatch(raw) is None:
+                raise ValueError(
+                    "KOR_TRAVEL_MAP_API_METRICS_TOKEN must use the RFC 6750 "
+                    "b64token ASCII character set"
+                )
         return value
 
     @model_validator(mode="after")

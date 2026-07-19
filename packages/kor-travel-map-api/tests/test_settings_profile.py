@@ -390,6 +390,24 @@ def test_local_dev_accepts_placeholder_metrics_token_shape() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "metrics_token",
+    ["é" * 32, "metrics token " + "m" * 32, "metrics:token:" + "m" * 32],
+)
+def test_metrics_token_rejects_non_b64token_characters(
+    metrics_token: str,
+) -> None:
+    with pytest.raises(ValidationError, match="RFC 6750 b64token ASCII"):
+        _local_settings(metrics_token=metrics_token)
+
+
+@pytest.mark.unit
+def test_metrics_token_accepts_rfc6750_b64token_padding() -> None:
+    settings = _local_settings(metrics_token="metrics-token_0123456789+/abcdef==")
+    assert settings.metrics_token is not None
+
+
+@pytest.mark.unit
 def test_metrics_token_empty_string_disables_like_none() -> None:
     settings = _local_settings(metrics_token="")
     assert settings.metrics_token is None

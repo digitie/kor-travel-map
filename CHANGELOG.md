@@ -38,12 +38,17 @@
   전달한다. **배포 전제(zero-gap 순서)**: kor-travel-docker-manager의
   `config/prometheus/prometheus.yml`에는 현재 map-api(:12701) scrape job이 아예
   없다(prometheus·cadvisor·kor-travel-geo만 존재) — 이 scrape는 신규 추가
-  대상이다. (1) **먼저** docker-manager scrape config에 map-api job을
-  `authorization: {type: Bearer, credentials: <token>}`와 함께 추가하고(변경 전
-  무인증 API는 헤더를 무시하므로 무해), (2) **그다음** root `.env`에 같은 값의
-  metrics token을 넣고 API를 배포한다. 순서를 뒤집으면 그 사이 scrape가 401 gap이
-  된다(조용한 파손이 아니라 scrape 실패로 드러남). token 미설정 local-dev는 기존
-  open scrape 유지. 상세·YAML 예시는 `docs/deploy.md`.
+  대상이다. (1) **먼저** docker-manager가 repository 밖의 secret 파일을 read-only
+  mount하고 scrape config의 `authorization.credentials_file`로 읽도록 변경한 뒤
+  map-api job을 추가하고(변경 전 무인증 API는 헤더를 무시하므로 무해), (2)
+  **그다음** root `.env`에 같은 값의 metrics token을 넣고 API를 배포한다. 추적 중인
+  Prometheus config의 inline `credentials`에는 실제 secret을 쓰지 않는다. 순서를
+  뒤집으면 그 사이 scrape가 401 gap이 된다(조용한 파손이 아니라 scrape 실패로
+  드러남). token 미설정 local-dev는 기존 open scrape 유지. 상세·YAML 예시는
+  `docs/deploy.md`.
+- **SECURITY**: metrics token 설정은 RFC 6750 `b64token` ASCII 문자만 허용한다.
+  설정 단계에서 비ASCII/공백/구분자 문자를 거부해 Starlette의 latin-1 header decode와
+  환경변수 UTF-8 인코딩 불일치로 올바른 token이 항상 401이 되는 구성을 막는다.
 - **CHANGED** (ADR-066 D-1, T-VN-02): production profile은 인증 없는 interactive
   docs UI(`/docs`·`/redoc`·swagger oauth2-redirect)를 내린다(`docs_url`/`redoc_url`
   =None). D-1의 "public-unauthenticated=(liveness/version)"을 넓히지 않기 위함이며
