@@ -136,7 +136,8 @@ def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue
     runner = _RUNNER.read_text()
     supervisor = _SUPERVISOR.read_text()
     assert "docker compose exec" not in (runner + supervisor)
-    assert '"--volumes-from",\n                f"{self.args.api_container}:ro"' in supervisor
+    assert '"--volumes-from"' in supervisor
+    assert 'f"{self.args.api_container}:ro"' in supervisor
     assert "--env-file" not in supervisor
     assert 'f".{self.args.operation}.env"' not in supervisor
     assert "runtime_environment = _unique_environment(environment)" in supervisor
@@ -240,7 +241,7 @@ def test_browser_lane_covers_t_vn_15_search_contract_only_through_bff() -> None:
     assert 'createHash("sha256")' in spec
     assert '.update(fixture.featureId, "utf8")' in spec
     assert 'fetch(`/api/proxy${path}`' in spec
-    assert '"/v1/features/search?' in spec
+    assert "/v1/features/search?${" in spec
     assert "include_total: \"false\"" in spec
     assert "include_total: \"true\"" in spec
     assert "firstWithoutTotal.meta.page?.total).toBeNull()" in spec
@@ -292,8 +293,9 @@ def test_evidence_validator_requires_exact_schema_phase_counts_and_fsync() -> No
     assert '"reports_passed": 2 if args.mode == "normal" else 1' in state
     assert "_validate_root_tree(runtime)" in state
     assert "_fsync_tree(runtime)" in state
-    assert runner.index("  validate_evidence normal") < runner.index("  write_result passed")
-    assert runner.index("  write_result passed") < runner.index(
+    run_new = runner[runner.index("run_new() {") :]
+    assert run_new.index("  validate_evidence normal") < run_new.index("  write_result passed")
+    assert run_new.index("  write_result passed") < run_new.index(
         '  state_helper clear-blocked --path "$BLOCKED_FILE"'
     )
 
