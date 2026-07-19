@@ -21,6 +21,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+from alembic.script import ScriptDirectory
 from kortravelmap.infra.db import normalize_async_dsn
 from kortravelmap.infra.models import metadata
 
@@ -56,19 +57,58 @@ target_metadata = metadata
 _FORWARD_ONLY_BOUNDARY = "0060_weather_integrity"
 
 
+def _revisions_include_forward_only_boundary(
+    script: ScriptDirectory,
+    revisions: tuple[str, ...],
+) -> bool:
+    """revision 집합 또는 그 조상에 0060 forward-only 경계가 있는지 반환한다."""
+    if not revisions:
+        return False
+    return any(
+        node.revision == _FORWARD_ONLY_BOUNDARY
+        for node in script.iterate_revisions(revisions, None, inclusive=True)
+    )
+
+
 def _guard_forward_only_target() -> None:
-    """Alembic의 실제 실행 계획이 0060을 내리면 첫 step 전에 거부한다."""
+    """downgrade/stamp 계획이 0060 아래로 가면 첫 step 전에 거부한다."""
     migration_context = context.get_context()
     migration_fn = migration_context.opts.get("fn")
-    if migration_fn is None:
-        # ``current``처럼 migration plan이 없는 read-only command.
+    if migration_fn is None or migration_fn.__name__ not in {
+        "downgrade",
+        "do_stamp",
+    }:
+        # upgrade는 경계를 내리지 않는다. current/check/autogenerate callback은
+        # 여기서 실행하면 출력·reflection·hook이 두 번 실행되므로 건드리지 않는다.
         return
 
     current_heads = migration_context.get_current_heads()
-    planned_steps = tuple(migration_fn(current_heads, migration_context))
+    script = ScriptDirectory.from_config(config)
+    destination = migration_context.opts.get("destination_rev")
+    if migration_fn.__name__ == "downgrade":
+        planned_steps = tuple(
+            script._downgrade_revs(  # type: ignore[arg-type]  # noqa: SLF001
+                destination,
+                current_heads,
+            )
+        )
+    else:
+        # stamp --purge는 run_migrations()가 version table을 비운 뒤 callback을
+        # 실행한다. guard는 purge 전 current head로 하향 경계만 판정하고 실제
+        # callback은 Alembic이 정상 시점에 정확히 한 번 실행하게 둔다.
+        planned_steps = tuple(
+            script._stamp_revs(destination, current_heads)  # noqa: SLF001
+        )
     crosses_boundary = any(
         step.is_downgrade
-        and _FORWARD_ONLY_BOUNDARY in step.from_revisions_no_deps
+        and _revisions_include_forward_only_boundary(
+            script,
+            step.from_revisions_no_deps,
+        )
+        and not _revisions_include_forward_only_boundary(
+            script,
+            step.to_revisions_no_deps,
+        )
         for step in planned_steps
     )
     if crosses_boundary:

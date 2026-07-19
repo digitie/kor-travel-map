@@ -17,11 +17,13 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from alembic.autogenerate.api import RevisionContext
 from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
@@ -114,6 +116,22 @@ def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
         command.downgrade(config, revision)
     else:
         command.upgrade(config, revision)
+
+
+def _stamp_alembic(dsn: str, revision: str) -> None:
+    root = Path(__file__).resolve().parents[2]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "alembic"))
+    config.set_main_option("sqlalchemy.url", dsn)
+    command.stamp(config, revision)
+
+
+def _alembic_config(dsn: str) -> Config:
+    root = Path(__file__).resolve().parents[2]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "alembic"))
+    config.set_main_option("sqlalchemy.url", dsn)
+    return config
 
 
 async def _seed_weather_feature_and_duplicates(dsn: str) -> None:
@@ -359,6 +377,100 @@ async def test_forward_only_guard_resolves_relative_targets_from_current_head(
                 )
         finally:
             await engine.dispose()
+
+
+@pytest.mark.parametrize("revision", [_PRE_REVISION, "base"])
+async def test_forward_only_guard_blocks_stamp_below_boundary_before_mutation(
+    pg_container: Any,
+    revision: str,
+) -> None:
+    """stamp도 source/destination ancestry로 0060 경계 하향을 원자 차단한다."""
+    async with _fresh_database(pg_container) as dsn:
+        await asyncio.to_thread(_run_alembic, dsn, _HEAD_REVISION)
+        engine = make_async_engine(dsn)
+        try:
+            async with engine.connect() as connection:
+                before = (
+                    await connection.scalar(
+                        text("SELECT version_num FROM alembic_version")
+                    ),
+                    tuple(
+                        tuple(row)
+                        for row in (
+                            await connection.execute(
+                                text(_WEATHER_INDEX_SNAPSHOT_SQL)
+                            )
+                        ).all()
+                    ),
+                    tuple(
+                        tuple(row)
+                        for row in (
+                            await connection.execute(
+                                text(_WEATHER_CONSTRAINT_SNAPSHOT_SQL)
+                            )
+                        ).all()
+                    ),
+                )
+
+            with pytest.raises(RuntimeError, match="0060 is forward-only"):
+                await asyncio.to_thread(_stamp_alembic, dsn, revision)
+
+            async with engine.connect() as connection:
+                after = (
+                    await connection.scalar(
+                        text("SELECT version_num FROM alembic_version")
+                    ),
+                    tuple(
+                        tuple(row)
+                        for row in (
+                            await connection.execute(
+                                text(_WEATHER_INDEX_SNAPSHOT_SQL)
+                            )
+                        ).all()
+                    ),
+                    tuple(
+                        tuple(row)
+                        for row in (
+                            await connection.execute(
+                                text(_WEATHER_CONSTRAINT_SNAPSHOT_SQL)
+                            )
+                        ).all()
+                    ),
+                )
+            assert after == before
+        finally:
+            await engine.dispose()
+
+
+async def test_forward_only_guard_invokes_non_destination_callbacks_once(
+    pg_container: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """current 출력과 check autogenerate callback을 guard가 중복 실행하지 않는다."""
+    async with _fresh_database(pg_container) as dsn:
+        await asyncio.to_thread(_run_alembic, dsn, _HEAD_REVISION)
+
+        current_config = _alembic_config(dsn)
+        output = StringIO()
+        current_config.stdout = output
+        await asyncio.to_thread(command.current, current_config)
+        assert output.getvalue().count(_HEAD_REVISION) == 1
+
+        calls = 0
+        original = RevisionContext.run_autogenerate
+
+        def count_autogenerate(
+            self: RevisionContext,
+            rev: tuple[str, ...],
+            migration_context: Any,
+        ) -> None:
+            nonlocal calls
+            calls += 1
+            original(self, rev, migration_context)
+
+        monkeypatch.setattr(RevisionContext, "run_autogenerate", count_autogenerate)
+        await asyncio.to_thread(command.check, _alembic_config(dsn))
+        assert calls == 1
 
 
 async def test_upgrade_fences_writer_from_dedup_through_unique(
