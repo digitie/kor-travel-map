@@ -355,7 +355,9 @@ def test_patch_manual_override_applies_and_resolves(
     assert captured["lat"] == 37.5665
     assert captured["legal_dong_code"] == "1156010100"
     assert captured["reason"] == "수동 보정"
-    assert captured["operator"] == "ops-1"
+    # T-VN-20 (ADR-066 D-2): 감사 operator는 인증 principal에서 파생한다. body가
+    # "ops-1"을 보내도(수용·무시) 저장 operator는 principal(local-dev)이어야 한다.
+    assert captured["operator"] == "local-dev"
     body = response.json()
     assert body["data"]["issue"]["status"] == "resolved"
     assert body["data"]["feature"]["feature_id"] == "feature-1"

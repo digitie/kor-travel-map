@@ -931,14 +931,32 @@ def test_auth_event_records_authenticated_principal_not_body_actor(
         json={
             "event_type": "login",
             "outcome": "succeeded",
-            "actor": "attacker:forged",
         },
     )
 
     assert response.status_code == 200, response.text
-    # 저장·응답 actor 모두 인증 principal이어야 하고 body actor는 무시된다.
+    # 저장·응답 actor 모두 인증 principal이어야 한다.
     assert captured["actor"] == "admin:real"
     assert response.json()["data"]["item"]["actor"] == "admin:real"
+
+
+@pytest.mark.unit
+def test_auth_event_rejects_removed_body_actor_field() -> None:
+    # T-VN-20 (ADR-066 D-2): body.actor 필드는 제거됐다 — 보내면 extra="forbid"로 422.
+    client = _client(_api_settings(admin_proxy_secret=SecretStr("proxy-secret")))
+    response = client.post(
+        "/v1/admin/auth-events",
+        headers={
+            ADMIN_ACTOR_HEADER: "admin:real",
+            ADMIN_PROXY_SECRET_HEADER: "proxy-secret",
+        },
+        json={
+            "event_type": "login",
+            "outcome": "succeeded",
+            "actor": "attacker:forged",
+        },
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.unit

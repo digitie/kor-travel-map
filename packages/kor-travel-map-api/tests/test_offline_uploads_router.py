@@ -182,6 +182,8 @@ def test_create_offline_upload_writes_object_and_metadata(
         assert kwargs["detected_format"] == "jsonl"
         assert kwargs["detected_encoding"] is None
         assert kwargs["checksum_sha256"] == expected_checksum
+        # T-VN-20 (ADR-066 D-2): created_by는 인증 principal(local-dev)에서만 파생한다.
+        assert kwargs["created_by"] == "local-dev"
         return _upload(
             upload_id=kwargs["upload_id"],
             storage_key=kwargs["storage_key"],
@@ -197,7 +199,6 @@ def test_create_offline_upload_writes_object_and_metadata(
             "provider": "offline-test-provider",
             "dataset_key": "offline_jsonl",
             "sync_scope": "default",
-            "created_by": "pytest",
         },
         files={
             "file": (
@@ -855,6 +856,8 @@ def test_validate_offline_upload_runs_validation_job(
         assert kwargs["store"] is store
         assert kwargs["column_mapping"]["name"] == "name"
         assert kwargs["sample_size"] == 100
+        # T-VN-20 (ADR-066 D-2): operator는 인증 principal(local-dev)에서만 파생한다.
+        assert kwargs["operator"] == "local-dev"
         return validate_offline_tabular_upload(
             validated_upload,
             body,
@@ -871,7 +874,6 @@ def test_validate_offline_upload_runs_validation_job(
         f"/v1/admin/offline-uploads/{upload.upload_id}/validate",
         json={
             "sample_size": 100,
-            "operator": "pytest",
             "column_mapping": {
                 "name": "name",
                 "lon": "lon",
@@ -886,6 +888,20 @@ def test_validate_offline_upload_runs_validation_job(
     assert body_json["data"]["status"] == "validated"
     assert body_json["meta"]["valid_rows"] == 1
     assert body_json["meta"]["issues"] == []
+
+
+@pytest.mark.unit
+def test_validate_rejects_removed_operator_body_field(client: TestClient) -> None:
+    # T-VN-20 (ADR-066 D-2): 제거된 body actor 필드를 보내면 extra="forbid"로 422.
+    response = client.post(
+        "/v1/admin/offline-uploads/upload-x/validate",
+        json={
+            "sample_size": 100,
+            "operator": "attacker",
+            "column_mapping": {"name": "name", "lon": "lon", "lat": "lat"},
+        },
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.unit

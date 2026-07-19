@@ -473,7 +473,6 @@ function ValidationPanel({
             validateUpload.mutate({
               uploadId: selected.upload_id,
               columnMapping: mappingPayload(mapping),
-              operator: "local-admin",
               sampleSize: 1000,
             })
           }
@@ -548,7 +547,6 @@ export function OfflineUploadsClient() {
   const [provider, setProvider] = useState("offline-test-provider");
   const [datasetKey, setDatasetKey] = useState("offline_csv");
   const [syncScope, setSyncScope] = useState("default");
-  const [createdBy, setCreatedBy] = useState("local-admin");
   const [status, setStatus] = useState<OfflineUploadStatus | "all">("uploaded");
   const [providerFilter, setProviderFilter] = useState("");
   const [datasetFilter, setDatasetFilter] = useState("");
@@ -745,7 +743,6 @@ export function OfflineUploadsClient() {
         provider,
         datasetKey,
         syncScope,
-        createdBy: createdBy.trim() || undefined,
       },
       {
         onSuccess: (data) => {
@@ -817,12 +814,6 @@ export function OfflineUploadsClient() {
                 placeholder="sync_scope"
                 value={syncScope}
                 onChange={(event) => setSyncScope(event.target.value)}
-              />
-              <FormField
-                label="created by"
-                placeholder="created_by"
-                value={createdBy}
-                onChange={(event) => setCreatedBy(event.target.value)}
               />
               <Button
                 data-testid="offline-upload-submit"

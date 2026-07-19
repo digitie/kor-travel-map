@@ -2,6 +2,33 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (claude, agent A1) — T-VN-20 body actor 전면 제거 (principal 파생 완결)
+
+- ADR-066 D-2: 모든 admin write의 감사 actor를 request body가 아니라 인증
+  principal(`AdminProxyContext.actor`, admin BFF의 `X-Kor-Travel-Map-Actor`)에서만
+  파생하도록 완결했다(T-VN-07 auth-event slice의 전면 sweep). 7개 router handler에
+  `context = Depends(require_admin_frontend)`를 주입하고(FastAPI가 router-level
+  dependency와 캐시 공유) body.operator/actor/reviewed_by/created_by → context.actor로
+  전환했다.
+- REMOVE vs ACCEPT-AND-IGNORE 결정은 stale F-4가 아니라 PinVi `origin/main`의 실제
+  client(`apps/api/app/clients/kor_travel_map_admin.py`)를 대조해 판정했다. PinVi가
+  실제로 보내는 것은 feature(operator="pinvi-admin")·issue(operator)·dedup(reviewed_by)
+  뿐이라 이 3개는 deprecated 필드로 **수용·무시**(옛 caller 422 방지), 나머지 4개
+  (auth-event actor·curated select/unselect actor·enrichment reviewed_by·offline
+  created_by/operator)는 PinVi 미호출이라 **schema에서 제거**(extra="forbid" → 422).
+  현재 PinVi에는 auth-event/curated select-unselect client 메서드가 없어 F-4보다 좁다.
+- admin frontend sweep(subagent): auth-audit·curated·dedup·enrichment·issues·features·
+  offline client에서 body actor 전송(하드코딩 "admin-ui"/"local-admin"/"ui-auth")과
+  operator/created_by 폼 입력을 제거하고 BFF actor header만 쓰게 했다. OpenAPI/생성 TS
+  타입 재생성 + typecheck/build.
+- 테스트: 각 swept route가 principal(local-dev)을 기록하고 body 위조 값은 무시함을
+  검증하고, 제거된 필드를 보내면 422(auth-event·curated·enrichment·offline), deprecated
+  필드는 200+무시(feature·issue·dedup)임을 두 class로 확인했다. 기존 router 테스트의
+  body-actor 단언을 principal로 갱신하고 422 테스트를 추가했다.
+- PinVi 조정: `docs/integration-map.md` §3.3에 accept-and-ignore 3필드와 PinVi client의
+  전송 중단 follow-up(별도 PR)을 성문화했다. 검증: api 관련 router 테스트 159 green,
+  openapi drift 0, ruff/mypy --strict clean.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-19 Alembic metadata 정합 CI gate
 
 - ADR-075 D-12-2 / §8.1: 빈 PostGIS DB에서 `alembic upgrade head && alembic check`가

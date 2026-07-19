@@ -40,7 +40,10 @@ class AdminAuthEventCreateRequest(BaseModel):
     event_type: AdminAuthEventType
     outcome: AdminAuthEventOutcome
     attempted_username: str | None = Field(default=None, max_length=80)
-    actor: str | None = Field(default=None, max_length=120)
+    # ADR-066 D-2 (T-VN-20): 감사 actor는 인증 principal(context.actor)에서만
+    # 파생한다. T-VN-07이 우선순위를 없앴고 이제 body.actor 필드도 제거한다 — 옛
+    # caller가 보내면 extra="forbid"로 422다. auth-event는 admin frontend BFF
+    # 전용이고 PinVi는 호출하지 않는다.
     reason: str | None = Field(default=None, max_length=120)
     next_path: str | None = Field(default=None, max_length=2048)
     client_ip: str | None = Field(default=None, max_length=128)
@@ -193,9 +196,8 @@ async def create_admin_auth_event(
     """Next.js login/logout API가 기록하는 admin 인증 감사 이벤트."""
 
     started_at = perf_counter()
-    # ADR-066 D-2 (T-VN-07) — 감사 actor는 인증 principal에서만 파생한다. body의
-    # actor를 우선하던 신뢰 경계 위조 경로를 제거하고 context.actor만 신뢰한다.
-    # body.actor 필드 자체의 schema 제거는 T-VN-20 소관이라 여기서는 무시만 한다.
+    # ADR-066 D-2 — 감사 actor는 인증 principal에서만 파생한다. T-VN-07이 body
+    # actor 우선 경로를 제거했고 T-VN-20이 body.actor 필드까지 제거해 완결했다.
     item = await record_admin_auth_event(
         session,
         event_type=body.event_type,

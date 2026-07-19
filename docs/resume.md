@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (claude, agent A1) — T-VN-20 body actor 전면 제거 구현
+
+- `feat/t-vn-20-actor-principal`(base `integration/t-vn`)에서 모든 admin write의 감사
+  actor를 인증 principal(`AdminProxyContext.actor`)에서만 파생하도록 완결했다(ADR-066
+  D-2, T-VN-07 완성). PinVi `origin/main` client 대조로 결정: PinVi가 보내는 feature/
+  issue operator·dedup reviewed_by는 deprecated 수용·무시, 나머지(auth-event/curated/
+  enrichment/offline)는 schema 제거(422). admin frontend에서 body actor 전송 제거,
+  OpenAPI/TS 재생성, 두 class(principal 기록 + 422/ignored) 테스트. PinVi 전송 중단
+  follow-up은 `docs/integration-map.md` §3.3에 성문화.
+- **다음 한 작업**: 적대적 리뷰(오케스트레이터) → full gates → PR·CI green·머지. PinVi
+  client의 operator/reviewed_by 전송 제거는 PinVi 저장소 별도 PR(cross-repo).
+
 ## 2026-07-19 (claude, agent A1) — T-VN-19 Alembic metadata 정합 CI gate 구현
 
 - `feat/t-vn-19-alembic-check`(base `integration/t-vn`)에서 빈 PostGIS DB의 `alembic

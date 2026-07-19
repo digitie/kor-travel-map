@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
 
@@ -471,7 +472,9 @@ class CuratedFeaturePatchRequest(BaseModel):
 class CuratedFeatureStatusRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    actor: str | None = None
+    # ADR-066 D-2 (T-VN-20): 감사 actor는 인증 principal에서만 파생한다. body의
+    # actor 필드는 제거했다 — 옛 caller가 보내면 extra="forbid"로 422다. curated
+    # select/unselect는 admin frontend 전용이고 PinVi는 호출하지 않는다.
     reason: str | None = None
 
 
@@ -1148,6 +1151,7 @@ async def delete_admin_curated_feature_route(
 async def select_admin_curated_feature_route(
     curated_feature_id: str,
     body: CuratedFeatureStatusRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
@@ -1156,7 +1160,7 @@ async def select_admin_curated_feature_route(
             session,
             curated_feature_id=curated_feature_id,
             curation_status="curated",
-            actor=body.actor,
+            actor=context.actor,
             reason=body.reason,
         )
     if row is None:
@@ -1179,6 +1183,7 @@ async def select_admin_curated_feature_route(
 async def unselect_admin_curated_feature_route(
     curated_feature_id: str,
     body: CuratedFeatureStatusRequest,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
@@ -1187,7 +1192,7 @@ async def unselect_admin_curated_feature_route(
             session,
             curated_feature_id=curated_feature_id,
             curation_status="rejected",
-            actor=body.actor,
+            actor=context.actor,
             reason=body.reason,
         )
     if row is None:

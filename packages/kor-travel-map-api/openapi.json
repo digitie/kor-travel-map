@@ -5,18 +5,6 @@
         "additionalProperties": false,
         "description": "Next.js login/logout API가 남기는 감사 이벤트.",
         "properties": {
-          "actor": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Actor"
-          },
           "attempted_username": {
             "anyOf": [
               {
@@ -1290,6 +1278,8 @@
                 "type": "null"
               }
             ],
+            "deprecated": true,
+            "description": "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).",
             "title": "Operator"
           },
           "parent_feature_id": {
@@ -1455,6 +1445,8 @@
                 "type": "null"
               }
             ],
+            "deprecated": true,
+            "description": "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).",
             "title": "Operator"
           },
           "prevent_provider_reactivation": {
@@ -1505,6 +1497,8 @@
                 "type": "null"
               }
             ],
+            "deprecated": true,
+            "description": "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).",
             "title": "Operator"
           },
           "reason": {
@@ -2772,6 +2766,8 @@
                 "type": "null"
               }
             ],
+            "deprecated": true,
+            "description": "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).",
             "title": "Operator"
           },
           "parent_feature_id": {
@@ -2990,6 +2986,8 @@
                 "type": "null"
               }
             ],
+            "deprecated": true,
+            "description": "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).",
             "title": "Operator"
           },
           "reason": {
@@ -3326,6 +3324,8 @@
                 "type": "null"
               }
             ],
+            "deprecated": true,
+            "description": "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).",
             "title": "Operator"
           },
           "prevent_provider_reactivation": {
@@ -4300,17 +4300,6 @@
       },
       "Body_create_offline_upload_request_v1_admin_offline_uploads_post": {
         "properties": {
-          "created_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created By"
-          },
           "dataset_key": {
             "minLength": 1,
             "title": "Dataset Key",
@@ -5138,17 +5127,6 @@
       "CuratedFeatureStatusRequest": {
         "additionalProperties": false,
         "properties": {
-          "actor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Actor"
-          },
           "reason": {
             "anyOf": [
               {
@@ -9052,6 +9030,8 @@
                 "type": "null"
               }
             ],
+            "deprecated": true,
+            "description": "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).",
             "title": "Reviewed By"
           }
         },
@@ -9433,17 +9413,6 @@
               }
             ],
             "title": "Decision Reason"
-          },
-          "reviewed_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reviewed By"
           },
           "selected_detail_source": {
             "anyOf": [
@@ -13496,17 +13465,6 @@
         "properties": {
           "column_mapping": {
             "$ref": "#/components/schemas/OfflineUploadColumnMappingRecord"
-          },
-          "operator": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operator"
           },
           "sample_size": {
             "default": 1000,

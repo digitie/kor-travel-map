@@ -444,7 +444,6 @@ export function DedupReviewClient() {
       body: {
         decision: value,
         decision_reason: `admin-ui ${value}`,
-        reviewed_by: "local-admin",
       },
     });
   }, [decision]);
@@ -463,7 +462,6 @@ export function DedupReviewClient() {
           decision_reason: masterFeatureId
             ? "admin-ui merge (master 수동 선택)"
             : "admin-ui merge (master 자동 선정)",
-          reviewed_by: "local-admin",
         },
       },
       { onSettled: () => setMergeKey(null) },

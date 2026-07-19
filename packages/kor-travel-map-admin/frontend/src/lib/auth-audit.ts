@@ -34,7 +34,6 @@ export async function recordAuthAuditEvent(
       cache: "no-store",
       body: JSON.stringify({
         attempted_username: event.attemptedUsername?.trim() || null,
-        actor: AUTH_AUDIT_ACTOR,
         client_ip: clientIpFromRequest(request),
         event_type: event.eventType,
         next_path: event.nextPath ?? null,

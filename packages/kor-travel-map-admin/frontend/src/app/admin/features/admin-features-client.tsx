@@ -331,7 +331,6 @@ export function AdminFeaturesClient({
     deactivate.mutate({
       featureId: feature.feature_id,
       body: {
-        operator: "local-admin",
         prevent_provider_reactivation: true,
         reason: "admin-ui deactivate",
       },
