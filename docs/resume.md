@@ -8,8 +8,8 @@ migration 원자성, public/Admin/PinVi 소비자 계약 누락을 확인했다.
 public detail ETag/304와 Admin 전용 revision endpoint를 분리했고 bundled frontend와 PinVi client가
 revision GET의 raw ETag를 PATCH/DELETE `If-Match`로 전달한다. PinVi는 stale 412를
 `PRECONDITION_FAILED`로 노출한다. PinVi 소비자 PR #391은 main에 먼저 병합됐고 원 PR #772가
-검증 중 선행 병합되어, **다음 한 작업**은 후속 PR #776을 최신 `integration/t-vn` 기준 CI green 뒤
-같은 통합 브랜치에 병합하는 것이다.
+검증 중 선행 병합되어 보완은 후속 PR #776에 담았다. **다음 한 작업**은 #776 CI green·통합 병합
+뒤 C6c/C7 gate를 재확인하고 Agent B lane의 다음 미완 task를 시작하는 것이다.
 
 ## 2026-07-19 (codex) — PR #773 2차 적대 리뷰 blocker 구현 완료
 
