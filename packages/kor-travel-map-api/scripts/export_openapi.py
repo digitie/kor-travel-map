@@ -55,6 +55,18 @@ USER_ROUTE_POLICIES: frozenset[RoutePolicy] = frozenset(
         RoutePolicy.SERVICE,
     }
 )
+USER_RESPONSE_FORBIDDEN_PROPERTIES: frozenset[str] = frozenset(
+    {
+        "source_record_key",
+        "raw_data",
+        "raw_payload_hash",
+        "payload",
+        "fetched_at",
+        "imported_at",
+        "last_seen_at",
+    }
+)
+CURATION_RESPONSE_FORBIDDEN_PROPERTIES: frozenset[str] = frozenset({"metadata"})
 
 
 def _load_app() -> FastAPI:
@@ -195,6 +207,145 @@ def _user_operations(
     }
 
 
+def _response_schema_roots(operation: dict[str, Any]) -> list[dict[str, Any]]:
+    roots: list[dict[str, Any]] = []
+    responses = operation.get("responses")
+    if not isinstance(responses, dict):
+        return roots
+    for response in responses.values():
+        if not isinstance(response, dict):
+            continue
+        content = response.get("content")
+        if not isinstance(content, dict):
+            continue
+        for media in content.values():
+            if not isinstance(media, dict):
+                continue
+            schema = media.get("schema")
+            if isinstance(schema, dict):
+                roots.append(schema)
+    return roots
+
+
+def _find_forbidden_schema_properties(
+    schema: dict[str, Any],
+    *,
+    schemas: dict[str, Any],
+    forbidden: frozenset[str],
+    location: str,
+    seen_refs: set[str],
+) -> list[str]:
+    violations: list[str] = []
+    ref = schema.get("$ref")
+    prefix = "#/components/schemas/"
+    if isinstance(ref, str) and ref.startswith(prefix):
+        name = ref.removeprefix(prefix)
+        if name in seen_refs:
+            return violations
+        seen_refs.add(name)
+        target = schemas.get(name)
+        if isinstance(target, dict):
+            violations.extend(
+                _find_forbidden_schema_properties(
+                    target,
+                    schemas=schemas,
+                    forbidden=forbidden,
+                    location=f"{location} -> {name}",
+                    seen_refs=seen_refs,
+                )
+            )
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for field in sorted(forbidden.intersection(properties)):
+            violations.append(f"{location}.{field}")
+        for field, child in properties.items():
+            if isinstance(child, dict):
+                violations.extend(
+                    _find_forbidden_schema_properties(
+                        child,
+                        schemas=schemas,
+                        forbidden=forbidden,
+                        location=f"{location}.{field}",
+                        seen_refs=seen_refs,
+                    )
+                )
+
+    items = schema.get("items")
+    if isinstance(items, dict):
+        violations.extend(
+            _find_forbidden_schema_properties(
+                items,
+                schemas=schemas,
+                forbidden=forbidden,
+                location=f"{location}[]",
+                seen_refs=seen_refs,
+            )
+        )
+    additional = schema.get("additionalProperties")
+    if isinstance(additional, dict):
+        violations.extend(
+            _find_forbidden_schema_properties(
+                additional,
+                schemas=schemas,
+                forbidden=forbidden,
+                location=f"{location}{{}}",
+                seen_refs=seen_refs,
+            )
+        )
+    for keyword in ("allOf", "anyOf", "oneOf"):
+        branches = schema.get(keyword)
+        if not isinstance(branches, list):
+            continue
+        for index, branch in enumerate(branches):
+            if isinstance(branch, dict):
+                violations.extend(
+                    _find_forbidden_schema_properties(
+                        branch,
+                        schemas=schemas,
+                        forbidden=forbidden,
+                        location=f"{location}.{keyword}[{index}]",
+                        seen_refs=seen_refs,
+                    )
+                )
+    return violations
+
+
+def _validate_user_response_schemas(spec: dict[str, Any]) -> None:
+    """공개 response root에서 reachable raw lineage field를 fail-closed한다."""
+    components = spec.get("components")
+    paths = spec.get("paths", {})
+    if not isinstance(components, dict) or not isinstance(paths, dict):
+        raise ValueError("OpenAPI user spec paths/schemas must be objects.")
+    schemas = components.get("schemas")
+    if not isinstance(schemas, dict):
+        raise ValueError("OpenAPI user spec paths/schemas must be objects.")
+
+    violations: list[str] = []
+    for path, path_item in paths.items():
+        if not isinstance(path, str) or not isinstance(path_item, dict):
+            continue
+        forbidden = USER_RESPONSE_FORBIDDEN_PROPERTIES
+        if path.startswith("/v1/curations"):
+            forbidden |= CURATION_RESPONSE_FORBIDDEN_PROPERTIES
+        for method, operation in path_item.items():
+            if method not in HTTP_METHODS or not isinstance(operation, dict):
+                continue
+            for index, root in enumerate(_response_schema_roots(operation)):
+                violations.extend(
+                    _find_forbidden_schema_properties(
+                        root,
+                        schemas=schemas,
+                        forbidden=forbidden,
+                        location=f"{method.upper()} {path} response[{index}]",
+                        seen_refs=set(),
+                    )
+                )
+    if violations:
+        details = "; ".join(sorted(set(violations)))
+        raise ValueError(f"user response raw lineage schema reachable: {details}")
+
+
 def user_openapi_spec(spec: dict[str, Any], *, app: FastAPI) -> dict[str, Any]:
     """조립된 route policy에서 user-facing subset spec을 파생한다."""
 
@@ -221,7 +372,9 @@ def user_openapi_spec(spec: dict[str, Any], *, app: FastAPI) -> dict[str, Any]:
         if any(method in filtered_item for method in allowed_methods):
             filtered_paths[path] = filtered_item
     out["paths"] = filtered_paths
-    return _prune_security_schemes(_prune_schemas(out))
+    out = _prune_security_schemes(_prune_schemas(out))
+    _validate_user_response_schemas(out)
+    return out
 
 
 def _profile_spec(

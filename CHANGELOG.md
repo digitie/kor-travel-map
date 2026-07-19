@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### Public weather·curation raw lineage clean-cut (2026-07-20, T-VN-59)
+
+- **SECURITY (breaking)**: public forecast row에서 `source_record_key`를 제거하고, public KMA
+  alert는 typed 도메인 필드만 반환한다. alert source record identity·provider 원문 payload·
+  ingestion timestamp는 새 admin BFF operator endpoint로 이동했다.
+- **SECURITY (breaking)**: public curation collection/item에서 자유형 `metadata`를 제거하고,
+  public item에서 `source_record_key`를 제거했다. admin collection/item DTO는 두 값을 계속
+  제공한다.
+- **CHANGED**: user OpenAPI exporter가 모든 public response reachable schema를 재귀 순회해 raw
+  lineage field와 curation metadata 재유입을 거부한다. 공개 DTO와 admin/operator raw DTO는
+  상속 없는 별도 타입이다.
+
 ### Public route security·user OpenAPI 단일 정본 (2026-07-20, T-VN-57)
 
 - **SECURITY**: 조립된 route policy matrix에서 모든 `public-keyed` operation의

@@ -16,6 +16,12 @@
 - 단일 component 이름만 검사하지 않고 user operation response에서 `$ref`, array,
   `allOf`/`anyOf`/`oneOf`, object property를 재귀 순회하는 forbidden reachable-schema gate를
   완료 조건으로 고정했다. 이번 문서 단계에서는 테스트·lint·build를 실행하지 않았다.
+- draft PR #788 위에 public/admin curation DTO를 상속 없는 타입으로 분리하고 public weather
+  DTO도 명시적 이름으로 clean-cut했다. alert 원문은 `/v1/admin/features/weather/alerts`에서
+  기존 repository row를 raw operator DTO로 투영한다.
+- exporter의 response-root 재귀 gate와 회귀 fixture를 추가하고 full/user OpenAPI,
+  admin/user TypeScript, 수기 public curation 타입을 생성·갱신했다. 이는 구현 산출물 생성이며
+  적대적 리뷰 승인 전 test·lint·build·OpenAPI `--check`는 아직 실행하지 않았다.
 
 ## 2026-07-20 (codex, agent B) — T-VN-57 public route 계약 단일 정본 설계
 

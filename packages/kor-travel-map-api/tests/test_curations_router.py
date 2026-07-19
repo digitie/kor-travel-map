@@ -89,7 +89,7 @@ def _item(*, item_id: str, edition: str) -> CurationItem:
         lon=126.978,
         lat=37.566,
         address={"road": "서울특별시"},
-        source_record_key=None,
+        source_record_key=f"source::{edition}",
         external_item_id=f"official-{edition}",
         place_name="겹치는 관광지",
         address_hint="서울특별시",
@@ -409,6 +409,9 @@ def test_public_group_returns_all_editions(
         "2023-2024",
         "2025-2026",
     }
+    for item in group["curations"]:
+        assert "source_record_key" not in item
+        assert "metadata" not in item
 
 
 @pytest.mark.unit
@@ -429,6 +432,7 @@ def test_public_collection_count_hides_non_public_items(
     assert response.status_code == 200
     assert payload["item_count"] == 1
     assert "public_item_count" not in payload
+    assert "metadata" not in payload
 
 
 @pytest.mark.unit
@@ -482,6 +486,8 @@ def test_admin_can_patch_and_archive_single_curation_item(
     assert calls[1][0] == "delete"
     assert calls[1][1]["actor"] == "local-dev"
     assert patched.json()["data"]["created_by"] == "fixture-creator"
+    assert patched.json()["data"]["source_record_key"] == "source::2026"
+    assert patched.json()["data"]["metadata"] == {"edition": "2026"}
 
 
 @pytest.mark.unit

@@ -16,14 +16,15 @@ from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
-    "WeatherAlertHistoryItem",
-    "WeatherAlertHistoryResponse",
-    "WeatherForecastResponse",
-    "WeatherValueItem",
+    "AdminWeatherAlertHistoryResponse",
+    "PublicWeatherAlertHistoryResponse",
+    "PublicWeatherForecastResponse",
+    "admin_router",
     "router",
 ]
 
 router = APIRouter(prefix="/features", tags=["features"])
+admin_router = APIRouter(prefix="/admin/features", tags=["admin-features"])
 
 
 class WeatherAnchorOut(BaseModel):
@@ -38,7 +39,7 @@ class WeatherAnchorOut(BaseModel):
     distance_m: float | None = None
 
 
-class WeatherValueItem(BaseModel):
+class PublicWeatherValueItem(BaseModel):
     """weather timeline row 1건."""
 
     model_config = ConfigDict(extra="forbid")
@@ -61,10 +62,9 @@ class WeatherValueItem(BaseModel):
     valid_until: datetime | None = None
     observed_at: datetime | None = None
     collected_at: datetime
-    source_record_key: str | None = None
 
 
-class WeatherForecastData(BaseModel):
+class PublicWeatherForecastData(BaseModel):
     """``GET /features/.../weather/forecast`` data payload."""
 
     model_config = ConfigDict(extra="forbid")
@@ -75,20 +75,58 @@ class WeatherForecastData(BaseModel):
     radius_m: float
     history_from: datetime
     anchor: WeatherAnchorOut | None = None
-    items: list[WeatherValueItem]
+    items: list[PublicWeatherValueItem]
 
 
-class WeatherForecastResponse(BaseModel):
+class PublicWeatherForecastResponse(BaseModel):
     """공개 weather forecast timeline 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
-    data: WeatherForecastData
+    data: PublicWeatherForecastData
     meta: Meta
 
 
-class WeatherAlertHistoryItem(BaseModel):
-    """KMA 기상특보 이력 row 1건."""
+class PublicWeatherAlertHistoryItem(BaseModel):
+    """공개 KMA 기상특보 typed 이력 row 1건."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str | None = None
+    feature_name: str | None = None
+    region_code: str | None = None
+    region_name: str | None = None
+    phenomenon: str | None = None
+    alert_type: str | None = None
+    level: str | None = None
+    title: str | None = None
+    description: str | None = None
+    issued_at: datetime | None = None
+    effective_from: datetime | None = None
+    effective_until: datetime | None = None
+    source_agency: str | None = None
+
+
+class PublicWeatherAlertHistoryData(BaseModel):
+    """``GET /features/weather/alerts`` data payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    history_from: datetime
+    items: list[PublicWeatherAlertHistoryItem]
+
+
+class PublicWeatherAlertHistoryResponse(BaseModel):
+    """공개 KMA 기상특보 typed 이력 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: PublicWeatherAlertHistoryData
+    meta: Meta
+
+
+class AdminWeatherAlertHistoryItem(BaseModel):
+    """operator KMA 기상특보 raw lineage row 1건."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -112,21 +150,21 @@ class WeatherAlertHistoryItem(BaseModel):
     payload: dict[str, Any]
 
 
-class WeatherAlertHistoryData(BaseModel):
-    """``GET /features/weather/alerts`` data payload."""
+class AdminWeatherAlertHistoryData(BaseModel):
+    """operator ``GET /admin/features/weather/alerts`` data payload."""
 
     model_config = ConfigDict(extra="forbid")
 
     history_from: datetime
-    items: list[WeatherAlertHistoryItem]
+    items: list[AdminWeatherAlertHistoryItem]
 
 
-class WeatherAlertHistoryResponse(BaseModel):
-    """KMA 기상특보 이력 응답."""
+class AdminWeatherAlertHistoryResponse(BaseModel):
+    """operator KMA 기상특보 raw lineage 이력 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
-    data: WeatherAlertHistoryData
+    data: AdminWeatherAlertHistoryData
     meta: Meta
 
 
@@ -146,8 +184,10 @@ def _anchor_out(anchor: weather_repo.WeatherAnchor | None) -> WeatherAnchorOut |
     )
 
 
-def _value_out(value: weather_repo.WeatherValueTimelineRow) -> WeatherValueItem:
-    return WeatherValueItem(
+def _public_value_out(
+    value: weather_repo.WeatherValueTimelineRow,
+) -> PublicWeatherValueItem:
+    return PublicWeatherValueItem(
         weather_value_key=value.weather_value_key,
         feature_id=value.feature_id,
         provider=value.provider,
@@ -166,12 +206,33 @@ def _value_out(value: weather_repo.WeatherValueTimelineRow) -> WeatherValueItem:
         valid_until=value.valid_until,
         observed_at=value.observed_at,
         collected_at=value.collected_at,
-        source_record_key=value.source_record_key,
     )
 
 
-def _alert_out(value: weather_repo.WeatherAlertHistoryRow) -> WeatherAlertHistoryItem:
-    return WeatherAlertHistoryItem(
+def _public_alert_out(
+    value: weather_repo.WeatherAlertHistoryRow,
+) -> PublicWeatherAlertHistoryItem:
+    return PublicWeatherAlertHistoryItem(
+        feature_id=value.feature_id,
+        feature_name=value.feature_name,
+        region_code=value.region_code,
+        region_name=value.region_name,
+        phenomenon=value.phenomenon,
+        alert_type=value.alert_type,
+        level=value.level,
+        title=value.title,
+        description=value.description,
+        issued_at=value.issued_at,
+        effective_from=value.effective_from,
+        effective_until=value.effective_until,
+        source_agency=value.source_agency,
+    )
+
+
+def _admin_alert_out(
+    value: weather_repo.WeatherAlertHistoryRow,
+) -> AdminWeatherAlertHistoryItem:
+    return AdminWeatherAlertHistoryItem(
         source_record_key=value.source_record_key,
         feature_id=value.feature_id,
         feature_name=value.feature_name,
@@ -212,8 +273,8 @@ async def _forecast_response(
     valid_to: datetime | None,
     limit: int,
     started_at: float,
-) -> WeatherForecastResponse:
-    items: list[WeatherValueItem] = []
+) -> PublicWeatherForecastResponse:
+    items: list[PublicWeatherValueItem] = []
     if anchor is not None:
         rows = await weather_repo.list_weather_values(
             session,
@@ -228,9 +289,9 @@ async def _forecast_response(
             valid_to=valid_to,
             limit=limit,
         )
-        items = [_value_out(row) for row in rows]
-    return WeatherForecastResponse(
-        data=WeatherForecastData(
+        items = [_public_value_out(row) for row in rows]
+    return PublicWeatherForecastResponse(
+        data=PublicWeatherForecastData(
             target_feature_id=target_feature_id,
             target_lon=target_lon,
             target_lat=target_lat,
@@ -245,7 +306,7 @@ async def _forecast_response(
 
 @router.get(
     "/weather/forecast",
-    response_model=WeatherForecastResponse,
+    response_model=PublicWeatherForecastResponse,
     summary="좌표 기반 weather forecast timeline",
 )
 async def get_weather_forecast_by_coordinate(
@@ -278,7 +339,7 @@ async def get_weather_forecast_by_coordinate(
         Query(ge=1, le=weather_repo.DEFAULT_WEATHER_HISTORY_RETENTION_DAYS),
     ] = weather_repo.DEFAULT_WEATHER_HISTORY_RETENTION_DAYS,
     limit: Annotated[int, Query(ge=1, le=5000)] = 500,
-) -> WeatherForecastResponse:
+) -> PublicWeatherForecastResponse:
     started_at = perf_counter()
     history_from = weather_repo.weather_history_floor(retention_days=history_days)
     anchor = await weather_repo.nearest_weather_feature_for_coordinate(
@@ -310,7 +371,7 @@ async def get_weather_forecast_by_coordinate(
 
 @router.get(
     "/{feature_id}/weather/forecast",
-    response_model=WeatherForecastResponse,
+    response_model=PublicWeatherForecastResponse,
     summary="feature 기준 nearest weather forecast timeline",
 )
 async def get_weather_forecast_by_feature(
@@ -342,7 +403,7 @@ async def get_weather_forecast_by_feature(
         Query(ge=1, le=weather_repo.DEFAULT_WEATHER_HISTORY_RETENTION_DAYS),
     ] = weather_repo.DEFAULT_WEATHER_HISTORY_RETENTION_DAYS,
     limit: Annotated[int, Query(ge=1, le=5000)] = 500,
-) -> WeatherForecastResponse:
+) -> PublicWeatherForecastResponse:
     started_at = perf_counter()
     history_from = weather_repo.weather_history_floor(retention_days=history_days)
     anchor = await weather_repo.nearest_weather_feature_for_feature(
@@ -373,7 +434,7 @@ async def get_weather_forecast_by_feature(
 
 @router.get(
     "/weather/alerts",
-    response_model=WeatherAlertHistoryResponse,
+    response_model=PublicWeatherAlertHistoryResponse,
     summary="KMA 기상특보 이력",
 )
 async def list_weather_alert_history(
@@ -398,7 +459,7 @@ async def list_weather_alert_history(
         Query(ge=1, le=weather_repo.DEFAULT_WEATHER_HISTORY_RETENTION_DAYS),
     ] = weather_repo.DEFAULT_WEATHER_HISTORY_RETENTION_DAYS,
     limit: Annotated[int, Query(ge=1, le=5000)] = 200,
-) -> WeatherAlertHistoryResponse:
+) -> PublicWeatherAlertHistoryResponse:
     started_at = perf_counter()
     history_from = weather_repo.weather_history_floor(retention_days=history_days)
     rows = await weather_repo.list_kma_weather_alert_history(
@@ -411,10 +472,59 @@ async def list_weather_alert_history(
         issued_to=issued_to,
         limit=limit,
     )
-    return WeatherAlertHistoryResponse(
-        data=WeatherAlertHistoryData(
+    return PublicWeatherAlertHistoryResponse(
+        data=PublicWeatherAlertHistoryData(
             history_from=history_from,
-            items=[_alert_out(row) for row in rows],
+            items=[_public_alert_out(row) for row in rows],
+        ),
+        meta=make_meta(request, started_at=started_at, page_size=limit),
+    )
+
+
+@admin_router.get(
+    "/weather/alerts",
+    response_model=AdminWeatherAlertHistoryResponse,
+    summary="KMA 기상특보 raw lineage 이력",
+)
+async def list_admin_weather_alert_history(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    region_code: Annotated[
+        str | None,
+        Query(description="KMA 특보 구역 코드 필터."),
+    ] = None,
+    phenomenon: Annotated[
+        str | None,
+        Query(description="현상 토큰 필터(예: 호우, 폭염, weather_alert)."),
+    ] = None,
+    level: Annotated[
+        str | None,
+        Query(description="특보 등급 필터(예: 주의보, 경보)."),
+    ] = None,
+    issued_from: Annotated[datetime | None, Query(description="발표시각 시작.")] = None,
+    issued_to: Annotated[datetime | None, Query(description="발표시각 종료.")] = None,
+    history_days: Annotated[
+        int,
+        Query(ge=1, le=weather_repo.DEFAULT_WEATHER_HISTORY_RETENTION_DAYS),
+    ] = weather_repo.DEFAULT_WEATHER_HISTORY_RETENTION_DAYS,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 200,
+) -> AdminWeatherAlertHistoryResponse:
+    started_at = perf_counter()
+    history_from = weather_repo.weather_history_floor(retention_days=history_days)
+    rows = await weather_repo.list_kma_weather_alert_history(
+        session,
+        region_code=region_code,
+        phenomenon=phenomenon,
+        level=level,
+        history_from=history_from,
+        issued_from=issued_from,
+        issued_to=issued_to,
+        limit=limit,
+    )
+    return AdminWeatherAlertHistoryResponse(
+        data=AdminWeatherAlertHistoryData(
+            history_from=history_from,
+            items=[_admin_alert_out(row) for row in rows],
         ),
         meta=make_meta(request, started_at=started_at, page_size=limit),
     )

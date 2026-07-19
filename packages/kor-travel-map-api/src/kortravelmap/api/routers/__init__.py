@@ -50,12 +50,14 @@ from kortravelmap.api.routers.poi_cache_targets import (
 from kortravelmap.api.routers.public_providers import router as public_providers_router
 from kortravelmap.api.routers.public_status import router as public_status_router
 from kortravelmap.api.routers.public_views import router as public_views_router
+from kortravelmap.api.routers.weather import admin_router as admin_weather_router
 from kortravelmap.api.routers.weather import router as weather_router
 
 __all__ = [
     "admin_backups_router",
     "admin_auth_router",
     "admin_restore_router",
+    "admin_weather_router",
     "admin_features_router",
     "admin_files_router",
     "admin_curated_router",
