@@ -285,16 +285,24 @@ class FeatureRow(Base):
     category: Mapped[str] = mapped_column(String, nullable=False)
 
     # 좌표 (ADR-012 — 양 좌표계 보유, coord_5179는 STORED generated).
-    coord: Mapped[Any | None] = mapped_column(Geometry("POINT", srid=4326))
+    # T-VN-18(F-8/D-12-3): geoalchemy2 자동 full GiST를 끈다(spatial_index=False).
+    # 공개 술어 partial GiST(idx_features_*_gist, WHERE deleted_at IS NULL)만
+    # __table_args__에 명시적으로 유지한다 — 자동 full은 write 비용만 늘리고 공개
+    # 조회는 partial로 충분하다. 0061이 DB의 자동 full 3개를 drop한다.
+    coord: Mapped[Any | None] = mapped_column(
+        Geometry("POINT", srid=4326, spatial_index=False)
+    )
     coord_precision_digits: Mapped[int | None] = mapped_column(SmallInteger)
     coord_5179: Mapped[Any | None] = mapped_column(
-        Geometry("POINT", srid=5179),
+        Geometry("POINT", srid=5179, spatial_index=False),
         Computed(
             "CASE WHEN coord IS NULL THEN NULL ELSE ST_Transform(coord, 5179) END",
             persisted=True,
         ),
     )
-    geom: Mapped[Any | None] = mapped_column(Geometry("GEOMETRY", srid=4326))
+    geom: Mapped[Any | None] = mapped_column(
+        Geometry("GEOMETRY", srid=4326, spatial_index=False)
+    )
 
     # 주소 (kortravelmap.dto.Address 직렬화, ADR-041 — kraddr-base 흡수).
     address: Mapped[dict[str, Any]] = mapped_column(

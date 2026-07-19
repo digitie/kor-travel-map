@@ -5,7 +5,17 @@
 
 ## [Unreleased]
 
-### weather 무결성 제약 (2026-07-19, ADR-072/075 T-VN-17)
+### 중복 GiST 제거 + weather source-record index (2026-07-19, D-12-3 T-VN-18)
+
+- **CHANGED**: `feature.features`의 geometry 컬럼(coord/coord_5179/geom)에 geoalchemy2가
+  자동 생성하던 full GiST 3개를 제거하고(migration 0061 + models
+  `spatial_index=False`), 공개 술어 partial GiST 3개(`WHERE deleted_at IS NULL`)만
+  유지한다. 공개 조회(bbox/nearby/in-area)는 모두 `deleted_at IS NULL`을 포함해
+  partial index를 쓰므로 읽기 영향이 없고, insert/update마다 유지하던 색인이 6→3개로
+  줄어 geometry write-cost가 낮아진다(실측 ≈1.2~1.3×).
+- **ADDED**: `idx_weather_values_source_record`(partial) — 0060의 weather
+  source-record FK(`ON DELETE SET NULL`)가 source_record 삭제 시 대용량 seq-scan하지
+  않게 price 패턴을 미러링한 지원 index.
 
 - **ADDED**: migration 0060이 ``feature.feature_weather_values``에 price(0034)
   패턴을 미러링한 무결성 제약을 도입한다 — semantic tuple UNIQUE
