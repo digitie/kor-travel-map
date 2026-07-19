@@ -19,8 +19,16 @@
 - 운영의 기존 Feature는 수정하지 않는다. 테스트가 만든 pending 요청도 실패 경로에서
   reject 또는 approve-delete 순서로 종결한다.
 - fixed state root의 `BLOCKED.json`은 Playwright container가 시작되기 전에 만들어진다.
+  journal은 `run_id`와 그 값에서 결정적으로 파생한 owned Feature ID 6개를 함께 기록한다.
   정상 cleanup·residual audit·evidence 보존이 모두 끝난 뒤에만 제거한다. SIGKILL 등으로
   남으면 같은 `run_id`의 recovery-only 실행 없이는 새 run을 거부한다.
+- executor image와 실행 중인 Map API/UI image의 source revision이 같은 exact commit이고 두
+  runtime이 모두 healthy인지 mutation 전에 fail-close로 확인한다.
+- runner/helper/state helper는 고정 root snapshot의 exact 4-file set, ancestor ownership/mode, manifest
+  commit과 SHA256을 통과해야 한다. executor create/start/wait/remove phase는 raw container
+  identity 대신 SHA256만 durable journal에 남긴다.
+- Playwright는 기존 C7 origin guard·redacted reporter를 재사용해 response/error text, URL,
+  run/Feature ID, trace, screenshot을 evidence에 남기지 않는다.
 
 ## 2. #785 stale correction 인수 시나리오
 
@@ -58,7 +66,10 @@ admin API가 만들 수 없는 `weather`·`price` kind는 전용 fixture helper�
 root-owned journal과 `BLOCKED.json`에 기록한다. browser는 각 Feature의 admin card 200·target
 identity·non-empty row, kind별 UI panel의 non-error DOM을 확인하고 public detail/card/bbox는
 404 또는 미포함임을 함께 단언한다. 정상·오류 cleanup은 child value row와 owned Feature를
-transaction으로 물리 삭제하며, recovery-only도 같은 exact ID 외에는 건드리지 않는다.
+transaction으로 물리 삭제한다. 삭제 전에는 ID뿐 아니라 `data_origin`·kind·name ownership
+fingerprint와 value fingerprint도 확인한다. 삭제 뒤에는 `pg_catalog.pg_constraint`에서 찾은
+모든 `feature.features(feature_id)` FK reference가 0인지 확인하며, recovery-only도 같은 exact
+ID 외에는 건드리지 않고 seed/add/correction write를 거부한다.
 
 ## 4. 실패와 복구 불변식
 
