@@ -202,6 +202,7 @@ markers = [
   "slow: 느린 테스트 (CI nightly only)",
   "fixture_replay: replay fixture 회귀",
   "live: 외부 라이브 서비스 호출(예: kor-travel-geo). 도달 불가 시 자동 skip.",
+  "perf_gate: T-VN-21 tier-1 성능 gate (planner-default EXPLAIN·query-count·shape).",
 ]
 filterwarnings = [
   "error",

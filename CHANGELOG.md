@@ -17,6 +17,24 @@
   source-record FK(`ON DELETE SET NULL`)가 source_record 삭제 시 대용량 seq-scan하지
   않게 price 패턴을 미러링한 지원 index.
 
+### 3단 성능·DDL gate 인프라 (2026-07-19, ADR-075 D-12-4 T-VN-21)
+
+- **ADDED (CI gate)**: tier-1 성능 gate가 매 PR의 integration job에서 상시 실행된다
+  (`tests/integration/test_perf_gate_tier1.py`). hot public query(bbox/in-bounds·nearby·
+  search·detail·batch·category counts·cluster rollup)를 **planner 기본 설정으로** EXPLAIN해
+  `feature.features` Seq Scan 부재와 기대 index 사용을 검증하고(`enable_seqscan=off` crutch
+  금지), public batch read의 SQL 수가 item 수에 비례하지 않음(N+1 가드), 결과 컬럼이 frozen
+  snapshot과 일치함(response-shape 회귀)을 확인한다. hot query registry·seed·EXPLAIN helper는
+  `tests/integration/perf_gate.py`.
+- **ADDED (release 도구, CI 아님)**: tier-2 release/cutover harness
+  (`scripts/perf_tier2_release_harness.py`)가 100만+ 실분포 fixture에서 대표 viewport를
+  `EXPLAIN (ANALYZE, BUFFERS)`로 재고 p50/p95·shared read blocks·응답 bytes를 JSON으로 기록한다.
+- **ADDED (index PR 정책·helper)**: tier-3은 index/DDL 변경 PR이 변경 전후 write 비용·index
+  크기를 첨부하도록 요구하고(리뷰 enforce), `perf_gate.measure_index_write_cost` helper를 제공한다.
+- **DOCS**: `docs/architecture/performance.md` §8.3(ADR-075 D-12-4)이 세 계층 전체의 **정본**이다.
+
+### weather 무결성 제약 (2026-07-19, ADR-072/075 T-VN-17)
+
 - **ADDED**: migration 0060이 ``feature.feature_weather_values``에 price(0034)
   패턴을 미러링한 무결성 제약을 도입한다 — semantic tuple UNIQUE
   (feature_id, provider, weather_domain, forecast_style, metric_key, issued_at,

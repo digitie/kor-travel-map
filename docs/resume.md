@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (claude, agent A1) — T-VN-21 3단 성능·DDL gate 인프라 구현
+
+- `feat/t-vn-21-perf-gate`(base `integration/t-vn`)에서 ADR-075 D-12-4의 3단 성능·DDL
+  gate를 CI·release 절차에 연결했다. tier-1(매 PR, integration job):
+  `tests/integration/test_perf_gate_tier1.py`가 hot public query 9종을 planner-default
+  EXPLAIN해 `feature.features` Seq Scan 부재·기대 index·N+1 가드·response-shape 회귀를
+  검증(helper·registry·seed는 `tests/integration/perf_gate.py`). tier-2(release, CI 아님):
+  `scripts/perf_tier2_release_harness.py`가 100만+ 실분포에서 대표 viewport를
+  EXPLAIN(ANALYZE,BUFFERS)로 재고 p95·shared read·bytes를 JSON 기록. tier-3(index PR):
+  `measure_index_write_cost` helper + 리뷰 enforce. 정본은 performance.md §8.3.
+- 스코프 준수: feature_repo 쿼리/라우터/마이그레이션/모델 무수정. 모든 hot query가
+  planner 기본에서 `features` clean(실 perf-bug 없음). tier-1 12 tests green
+  (WSL testcontainers), ruff/mypy(신규 파일)/lint-imports/redaction clean, openapi drift 없음.
+- **다음 한 작업**: 적대적 리뷰(오케스트레이터) → PR·CI green·머지. tier-2 harness의 실제
+  100만행 실분포 측정과 release 리포트 첨부는 실제 cutover 시점 별도 작업.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-20 body actor 전면 제거 구현
 
 - `feat/t-vn-20-actor-principal`(base `integration/t-vn`)에서 모든 admin write의 감사
