@@ -13,6 +13,12 @@ from decimal import Decimal
 
 import pytest
 
+from kortravelmap.core.exceptions import (
+    FeatureSearchCursorInvalidError,
+    FeatureSearchCursorQueryMismatchError,
+    FeatureSearchCursorTamperedError,
+    FeatureSearchCursorVersionUnsupportedError,
+)
 from kortravelmap.dto import (
     Coordinate,
     Feature,
@@ -21,12 +27,6 @@ from kortravelmap.dto import (
     SourceRecord,
 )
 from kortravelmap.dto._enums import FeatureKind, SourceRole
-from kortravelmap.core.exceptions import (
-    FeatureSearchCursorInvalidError,
-    FeatureSearchCursorQueryMismatchError,
-    FeatureSearchCursorTamperedError,
-    FeatureSearchCursorVersionUnsupportedError,
-)
 from kortravelmap.infra import feature_repo
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,

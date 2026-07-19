@@ -511,7 +511,8 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
             "must be at least 32 characters",
         ),
         (
-            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=cursor signing secret value 00000000000000000000\n",
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET="
+            "cursor signing secret value 00000000000000000000\n",
             "must contain no whitespace",
         ),
         (
