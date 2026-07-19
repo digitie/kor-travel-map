@@ -251,8 +251,9 @@ provider×dataset×scope datasets 운영 화면(#698·#723).
   3. `include_geometry`는 serialization만 제어(candidate 술어는 option 무관 단일) —
      route/area는 `&& envelope AND ST_Intersects`.
   4. `include_total`을 repo까지 전달(false면 COUNT 미실행). cursor에 **canonical query
-     fingerprint + version byte**를 넣고 불일치는 `CURSOR_QUERY_MISMATCH` 거부(HMAC은 인가
-     미탑재이므로 도입하지 않음 — 측정/위협 변화 시 재검토).
+     fingerprint + version byte**를 넣고 전용 server-only key로 HMAC-SHA256 서명한다. 불일치는
+     `CURSOR_QUERY_MISMATCH`, 변조는 `CURSOR_SIGNATURE_INVALID`로 DB 접근 전에 거부한다. cursor는
+     인가 수단이 아니지만 신뢰할 수 없는 client 입력이므로 서명 필요성은 인가 탑재 여부와 무관하다.
   5. weather 단건은 부모 공개 확인(없으면 404), **`POST /v1/features/weather/batch`**(set-based,
      item별 `found|no_data|retired`, 전체 `unavailable` 분리)로 PinVi N+1 제거. 범용
      feature-context batch는 측정 후.
@@ -391,7 +392,8 @@ operator-api  (admin principal, If-Match/Idempotency-Key)
 
 제거: no-op beach 옵션, 수기 OpenAPI allowlist(표면별 생성으로 대체),
       공개 표면의 raw_data/raw_payload_hash/source_record_key, body operator/actor.
-측정 후: MVT tile, feature-context:batch(범용), cursor HMAC, 물리 listener 분리.
+측정 후: MVT tile, feature-context:batch(범용), cursor signing key rotation/grace window,
+        물리 listener 분리.
 ```
 
 현재 `main`에서 `/v1/features/batch`를 PinVi가 실제 소비하고, canonical
@@ -471,7 +473,7 @@ admin-ops 통합은 canonical operation·admin gate·schema/service 경계를 �
 | T-VN-12 | Idempotency-Key protocol 전개 | 0054의 도메인 ledger를 회귀 기준선으로 보존하고 남은 command에 key/body/result replay·409를 전개. lifecycle이 다른 저장소를 범용 table 하나로 합치지 않음 | D-10 |
 | T-VN-13 | row_revision + If-Match | Feature용 revision 신설, correction PATCH/DELETE, 이후 ETag/304. #727 policy CAS는 resource-specific 선례로만 재사용 | D-10, D-9-8 |
 | T-VN-14 | 지도 completeness | mode/truncated/coverage/cluster_key + include_geometry serialization화 + candidate 술어 단일화 + `ST_Intersects` | D-9 |
-| T-VN-15 | search 계약 | include_total 실전달 + cursor fingerprint/version | D-9 |
+| T-VN-15 | search 계약 | include_total 실전달 + cursor fingerprint/version/HMAC | D-9 |
 | T-VN-16 | weather batch + 부모 404 | set-based batch, bitemporal 파라미터, PinVi N+1 제거 | D-8·D-9 |
 | T-VN-17 | weather 무결성 가드 | tuple UNIQUE(writer lock→dedup→transactional build) + range/payload CHECK(NOT VALID→VALIDATE) + source FK | D-8, F-7, #766 |
 | T-VN-18 | 중복 GiST 제거 + BRIN 감사 | spatial_index=False, partial만 유지(전후 write 실측 첨부), 기존 weather/price BRIN 보존·누락 hot path만 보강 | D-12 |
@@ -497,9 +499,10 @@ admin-ops 통합은 canonical operation·admin gate·schema/service 경계를 �
 
 ### 6.5 Wave 3 — 측정 후
 
-MVT tile, 범용 feature-context:batch, cursor HMAC, weather partition/hypertable·event clock
-직렬화, 물리 listener/process 분리, 매 PR 대규모 fixture. 각각 **도입 조건(측정 지표)을 먼저
-정의**하고 지표가 충족될 때만 착수한다.
+MVT tile, 범용 feature-context:batch, cursor signing key rotation/grace window, weather
+partition/hypertable·event clock 직렬화, 물리 listener/process 분리, 매 PR 대규모 fixture. cursor
+HMAC 최초 도입은 T-VN-15에서 단일 key clean cut으로 완료한다. 나머지는 각각 **도입 조건(측정
+지표)을 먼저 정의**하고 지표가 충족될 때만 착수한다.
 
 ### 6.6 하드닝 백로그 (wave 배정 유동 — 각 항목 PR 1개 규모)
 
@@ -512,6 +515,8 @@ MVT tile, 범용 feature-context:batch, cursor HMAC, weather partition/hypertabl
 - CONCURRENTLY 실패로 남는 INVALID index 탐지·drop runbook(모든 CONCURRENTLY task의 전제).
 - admin 목록 API OFFSET pagination → keyset 전환.
 - PinVi contract test를 필드 레벨(required/type/enum)로 강화 + OpenAPI SHA manifest 검증.
+- cursor signing key rotation 주기·진행 cursor 무효화율을 측정하고, 다중 key grace window가 단일
+  key clean cut보다 우월하다고 입증될 때만 별도 구현한다.
 
 ### 6.7 공통 규율
 
