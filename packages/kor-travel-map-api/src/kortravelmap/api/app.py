@@ -40,6 +40,7 @@ from kortravelmap.api.auth import (
     OPS_SCOPE_HEADER,
     require_admin_destructive_enabled,
     require_admin_frontend,
+    require_metrics_token,
     require_ops_operator,
     require_public_api_key,
 )
@@ -47,6 +48,7 @@ from kortravelmap.api.db import configure_prometheus_metrics
 from kortravelmap.api.prometheus import PrometheusMetrics
 from kortravelmap.api.response import ProblemDetail, bind_request_id, reset_request_id
 from kortravelmap.api.response import request_id as response_request_id
+from kortravelmap.api.route_policy import assert_routes_classified
 from kortravelmap.api.routers import (
     admin_auth_router,
     admin_backups_router,
@@ -467,7 +469,14 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         configure_prometheus_metrics(prometheus_metrics)
         endpoint_metrics = prometheus_metrics
 
-        @application.get(settings.prometheus_metrics_path, include_in_schema=False)
+        # ADR-066 결정 4 (T-VN-02) — `/metrics`는 scrape identity(management
+        # 경계)로 제한한다. metrics token 미설정 local-dev는 기존 open scrape를
+        # 유지하고, production은 settings 검증이 token을 필수화한다.
+        @application.get(
+            settings.prometheus_metrics_path,
+            include_in_schema=False,
+            dependencies=[Depends(require_metrics_token)],
+        )
         async def prometheus_metrics_endpoint() -> Response:
             return endpoint_metrics.response()
     else:
@@ -758,6 +767,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         return schema
 
     application.openapi = _custom_openapi  # type: ignore[method-assign]
+
+    # ADR-066 결정 1 (T-VN-02) — 조립된 app의 모든 HTTP/WS route는 route policy
+    # matrix에 분류돼 있어야 한다. 미분류 route는 여기(앱 구성 검사)와 CI
+    # (`tests/test_route_policy.py`)에서 함께 실패한다.
+    assert_routes_classified(application)
 
     return application
 

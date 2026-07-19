@@ -25,6 +25,16 @@ Prometheus 성능 메트릭은 별도 포트를 열지 않고 `api`의 같은 ho
 `http://<kor-travel-map-api>:12701/metrics`를 pull scrape한다. 앱이 Prometheus로 능동
 연결하지 않는다.
 
+`/metrics`는 scrape identity 경계다(ADR-066 결정 4, T-VN-02).
+`KOR_TRAVEL_MAP_API_METRICS_TOKEN`이 설정되면 `Authorization: Bearer <token>`이
+일치해야 하고, production profile은 metrics endpoint 활성 시 이 token(앞뒤 공백
+없는 32자 이상, admin secret·service/ops token과 다른 값)을 필수화한다 —
+compose는 host env `KOR_TRAVEL_MAP_API_METRICS_TOKEN`을 hard-require로 전달한다.
+**배포 전제**: kor-travel-docker-manager Prometheus scrape_config에 같은 값을
+`authorization`(type `Bearer`, credentials)으로 함께 반영해야 scrape가 유지된다
+(미반영 시 401 — 조용한 유실이 아니라 scrape 실패로 드러난다). token 미설정
+local-dev는 기존 open scrape를 유지한다.
+
 `kor-travel-docker-manager`가 공유 PostGIS/RustFS를 이미 구동하는 로컬 환경에서는 kor-travel-map의
 local `postgres`/`rustfs` 서비스를 함께 띄우면 `5432`/`12101`이 충돌한다. 이때는
 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh`를 사용해 API, Web UI,

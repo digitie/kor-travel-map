@@ -2,6 +2,43 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (claude, agent A1) — T-VN-02 route policy matrix + /metrics 경계 + #742
+
+- ADR-066 결정 1: `kortravelmap.api.route_policy`에 전 HTTP/WS route를 6개 정책 중
+  정확히 하나로 분류하는 명시적 registry(`ROUTE_POLICIES`, 경로→정책)와 matrix
+  생성기를 구현했다. 분류는 배선에서 추론하지 않으며, 미분류 route는 `create_app`
+  구성 검사(RoutePolicyError)와 CI(`test_route_policy.py` — registry↔mount 양방향
+  set-equality, 죽은 registry entry도 실패)가 함께 거부한다. FastAPI 0.136+ lazy
+  `_IncludedRouter`는 OpenAPI 생성기가 쓰는 공개 helper
+  `fastapi.routing.iter_route_contexts`로 평탄화하고(구버전은 concrete routes
+  fallback), WS의 해석 경로는 `RouteContext.path`가 아니라 `starlette_route`
+  프록시로 얻는다(0.139.2에서 WS는 `path=""`인 내부 표현 실측). 0.135.3/0.139.2
+  양쪽 venv에서 동일 matrix(157 rows) green.
+- 정책-배선 검증: route별 관측 enforcing dependency(callable identity)로 판정하고,
+  배선≠정책은 `KNOWN_WIRING_EXCEPTIONS` ledger(소유 task 명시)만 허용한다. 현재
+  ledger는 전부 T-VN-03(codex b1) 소유 — 무키 legacy `/v1/curated-*` 4건(→
+  public-keyed)과 무의존 `/v1/ops/{metrics,system-logs,api-call-logs,
+  consistency/reports,consistency/issues,health-deep}` 6건(→ operator, PinVi
+  라이브 소비라 T-VN-00 principal·caller 전환과 같은 cutover). gap이 닫히면 stale
+  entry가 CI에서 실패해 ledger가 줄어들기만 한다. ops-live WS는 #725
+  `authenticate_ops_live_websocket`을 enforcing dependency로 기록만 하고 재사용.
+- ADR-066 결정 4: `/metrics`를 scrape identity 경계로 닫았다 —
+  `KOR_TRAVEL_MAP_API_METRICS_TOKEN` 설정 시 `Authorization: Bearer` 상수시간 검증,
+  production은 metrics endpoint 활성 시 token 필수(형태 기준은 service token과 동일
+  `_deployable_secret_shape` — root `.env.example` CHANGE_ME가 local-dev full-stack을
+  막지 않게 field-level 32자 강제는 하지 않음). compose hard-require + 배포 전제
+  (Prometheus scrape_config authorization)는 CHANGELOG/deploy.md/.env.example에 명시.
+- issue #742: ops pair 검증 정본을 settings production matrix로 일원화하고,
+  entrypoint가 production+ops surface 활성+pair 미구성을 migration 전에 settings와
+  동일 문구로 거부하게 했다(2단계 혼란 실패 제거, profile 기본값은 image와 같은
+  production). settings provenance 메시지를 "must be configured together"로
+  lockstep 정렬했고, 메시지 동기화는 양쪽 소스를 대조하는 unit 테스트로 상시 강제.
+- 검증: api 패키지 전체 649 passed(rebase 전) + rebase(#743·#744 반영) 후 관련 5개
+  파일 150 passed, `tests/unit/test_docker_dagster_runtime.py`는 신규 포함 53
+  passed(사전 존재 Windows 한정 `run-admin-stack.sh` bash 실패 14건은 base에서도
+  동일 재현 — 본 변경과 무관), `ruff check` clean, `mypy --strict -p
+  kortravelmap.api` clean, openapi drift 없음(`/metrics`는 스키마 밖).
+
 ## 2026-07-19 (codex) — Agent A PR #743 적대적 심층 리뷰 후속
 
 - 전문 리뷰어 1명이 PR #743 최신 head를 테스트 전에 독립 검토해 `admin_only` theme의 공개

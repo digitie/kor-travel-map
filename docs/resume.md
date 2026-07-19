@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (claude, agent A1) — T-VN-02 route policy matrix + /metrics 경계 구현
+
+- `feat/t-vn-02-route-policy`(base `integration/t-vn`, #743·#744 rebase 반영)에 ADR-066
+  결정 1의 route policy matrix를 구현했다: `kortravelmap.api.route_policy`의 명시적
+  registry가 전 HTTP/WS route를 6개 정책으로 분류하고, 미분류 route는 `create_app`
+  구성 검사와 CI가 함께 실패한다. 배선≠정책 gap은 소유 task를 명시한
+  `KNOWN_WIRING_EXCEPTIONS` ledger(현재 전부 T-VN-03 소유 — legacy `/v1/curated-*`
+  4건, 무의존 `/v1/ops/*` 관측 read 6건)만 허용하며 gap이 닫히면 stale entry가
+  실패해 축소를 강제한다. ops-live WS는 #725 ticket 인증을 기록만 하고 재사용.
+- ADR-066 결정 4의 `/metrics` scrape identity 경계를 이 task에서 닫았다
+  (`KOR_TRAVEL_MAP_API_METRICS_TOKEN` + Bearer 검증, production 필수, compose
+  hard-require). **배포 전제**: n150 root `.env`에 metrics token 추가 +
+  kor-travel-docker-manager Prometheus scrape_config `authorization`(Bearer) 반영.
+- issue #742 합류: ops pair 검증 정본을 settings production matrix로 일원화, entrypoint가
+  production+both-empty pair를 migration 전에 동일 문구로 거부, 메시지 lockstep 테스트 추가.
+- **다음 한 작업**: 이 브랜치의 적대적 리뷰(오케스트레이터 소관) → full gates → PR·CI
+  green·`integration/t-vn` 머지. T-VN-03(codex b1)이 ledger의 curated/ops 관측 gap을 닫을
+  때 `KNOWN_WIRING_EXCEPTIONS`에서 해당 entry 제거가 강제된다.
+
 ## 2026-07-19 (codex) — Agent A T-VN-04 심층 리뷰 보완 완료
 
 - PR #743의 공개 경계를 전문 리뷰어 1명이 재검증해 `admin_only` theme/비공개 overlay,
@@ -7,8 +26,6 @@
   차단했다. 공개 query parameter 2개와 OpenAPI/생성 타입도 clean-cut 계약으로 동기화했다.
 - 승인 뒤 unit/API 70건, PostGIS 15건과 Ruff가 통과했다. 최신 `integration/t-vn` 재배치와 CI
   green 뒤 PR #743을 통합 브랜치에만 머지한다.
-- **다음 한 작업**: 최근 Agent A PR 추가분을 다시 점검한 뒤 C6c compatible-pair와 C7 n150
-  live E2E를 종결한다. Agent B lane은 C7 완료 전 시작하지 않는다.
 
 ## 2026-07-19 (claude, agent A2) — T-VN-04 공개 predicate view 단일화 완료
 

@@ -60,11 +60,12 @@ class ApiSettings(BaseSettings):
         default="local-dev",
         pattern="^(production|local-dev)$",
         description=(
-            "실행 profile (ADR-066 D-1, T-VN-01). ``production``은 fail-closed로 "
-            "기동을 검증한다 — admin proxy secret(앞뒤 공백 없는 32자 이상) 필수, "
-            "ops surface 활성 시 read/cancel token 필수, features surface 활성 시 "
-            "``public_api_key_required=True``와 service token(앞뒤 공백 없는 32자 "
-            "이상) 필수, 인증 없는 ``/debug`` 라우터 비활성 필수. secret 미설정 "
+            "실행 profile (ADR-066 D-1, T-VN-01/T-VN-02). ``production``은 "
+            "fail-closed로 기동을 검증한다 — admin proxy secret(앞뒤 공백 없는 "
+            "32자 이상) 필수, ops surface 활성 시 read/cancel token 필수, features "
+            "surface 활성 시 ``public_api_key_required=True``와 service token(앞뒤 "
+            "공백 없는 32자 이상) 필수, metrics endpoint 활성 시 metrics token "
+            "필수, 인증 없는 ``/debug`` 라우터 비활성 필수. secret 미설정 "
             "local-dev fallback은 ``local-dev``에서만 동작한다. Docker "
             "image/compose 기본값은 production이고 코드 기본값은 local-dev다"
             "(비-Docker 로컬 하위호환). env ``KOR_TRAVEL_MAP_API_PROFILE``."
@@ -122,6 +123,19 @@ class ApiSettings(BaseSettings):
         description=(
             "Prometheus exposition endpoint path. kor-travel-docker-manager의 "
             "Prometheus는 API 포트(기본 12701)의 이 path를 scrape한다."
+        ),
+    )
+    metrics_token: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Prometheus scrape identity token (ADR-066 결정 4, T-VN-02). 설정되면 "
+            "metrics endpoint는 ``Authorization: Bearer <token>``이 이 값과 "
+            "일치(상수시간 비교)해야 한다. 미설정(None)이면 강제하지 않음"
+            "(로컬 scrape 하위호환) — 단 production profile은 metrics endpoint "
+            "활성 시 앞뒤 공백 없는 32자 이상 값을 필수화한다. admin proxy "
+            "secret·service token·ops token들과 서로 달라야 한다. scrape 측은 "
+            "Prometheus scrape_config의 ``authorization``(type Bearer)로 주입한다. "
+            "env ``KOR_TRAVEL_MAP_API_METRICS_TOKEN``."
         ),
     )
     feature_change_review_mode: str = Field(
@@ -238,9 +252,10 @@ class ApiSettings(BaseSettings):
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
         )
         if (read is missing) != (cancel is missing):
+            # docker/api-entrypoint.sh와 동일 문구 (issue #742 lockstep).
             raise ValueError(
                 "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and "
-                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must both be absent or configured together"
+                "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured together"
             )
         if read is missing:
             return data
@@ -278,6 +293,24 @@ class ApiSettings(BaseSettings):
                 "ops token must be non-empty, at least 32 characters, "
                 "and contain no whitespace"
             )
+        return value
+
+    @field_validator("metrics_token", mode="before")
+    @classmethod
+    def _normalize_metrics_token(cls, value: object) -> object:
+        """빈 문자열은 미설정(None)과 같은 opt-out으로 정규화한다.
+
+        배포 가능한 형태(앞뒤 공백 없는 32자 이상)는 service token과 같은
+        기준으로 production matrix(``assert_production_ready``)가 검사한다 —
+        root ``.env.example``의 CHANGE_ME placeholder가 local-dev full-stack
+        검증을 막지 않게 한다(T-VN-01 service token 패턴).
+        """
+
+        if value is None:
+            return value
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+        if isinstance(raw, str) and raw == "":
+            return None
         return value
 
     @model_validator(mode="after")
@@ -324,6 +357,28 @@ class ApiSettings(BaseSettings):
                     raise ValueError(
                         f"{ops_name} must be distinct from {protected_name}"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_metrics_token_distinct(self) -> ApiSettings:
+        """scrape token은 다른 신뢰 경계 secret과 재사용을 금지한다 (T-VN-02)."""
+
+        if self.metrics_token is None:
+            return self
+        raw_metrics_token = self.metrics_token.get_secret_value()
+        for protected_name, protected_secret in (
+            ("admin proxy secret", self.admin_proxy_secret),
+            ("service token", self.service_token),
+            ("ops read token", self.ops_read_token),
+            ("ops cancel token", self.ops_cancel_token),
+        ):
+            if (
+                protected_secret is not None
+                and raw_metrics_token == protected_secret.get_secret_value()
+            ):
+                raise ValueError(
+                    f"metrics token must be distinct from {protected_name}"
+                )
         return self
 
     public_api_key_required: bool = Field(
@@ -564,6 +619,28 @@ class ApiSettings(BaseSettings):
             problems.append(
                 "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED must be false because "
                 "/debug routes have no authentication"
+            )
+
+        # ADR-066 결정 4 (T-VN-02) — `/metrics`는 scrape identity 경계로만
+        # 노출한다. service token과 같은 배포 가능 형태 기준을 적용한다.
+        metrics_token_raw = (
+            None if self.metrics_token is None else self.metrics_token.get_secret_value()
+        )
+        if self.prometheus_metrics_enabled:
+            if metrics_token_raw is None or not _deployable_secret_shape(
+                metrics_token_raw
+            ):
+                problems.append(
+                    "KOR_TRAVEL_MAP_API_METRICS_TOKEN must be set to at least 32 "
+                    "characters without surrounding whitespace while the "
+                    "Prometheus metrics endpoint is enabled"
+                )
+        elif metrics_token_raw is not None and not _deployable_secret_shape(
+            metrics_token_raw
+        ):
+            problems.append(
+                "KOR_TRAVEL_MAP_API_METRICS_TOKEN must be at least 32 characters "
+                "without surrounding whitespace when set"
             )
 
         service_token_raw = (

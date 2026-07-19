@@ -244,3 +244,54 @@ def test_prometheus_metrics_can_be_disabled() -> None:
     response = client.get("/metrics")
     assert response.status_code == 404
     assert "/metrics" not in client.get("/openapi.json").json()["paths"]
+
+
+# ── /metrics scrape identity 경계 (ADR-066 결정 4, T-VN-02) ──────────────────
+
+_METRICS_TOKEN = "metrics-token-0000000000000000000000000000"
+
+
+@pytest.mark.unit
+def test_metrics_endpoint_requires_bearer_token_when_configured() -> None:
+    app = create_app(
+        ApiSettings(
+            features_routes_enabled=False,
+            metrics_token=_METRICS_TOKEN,
+        )
+    )
+    client = TestClient(app)
+
+    missing = client.get("/metrics")
+    assert missing.status_code == 401
+
+    wrong = client.get(
+        "/metrics",
+        headers={"Authorization": "Bearer not-the-metrics-token-000000000000000"},
+    )
+    assert wrong.status_code == 401
+
+    wrong_scheme = client.get(
+        "/metrics",
+        headers={"Authorization": _METRICS_TOKEN},
+    )
+    assert wrong_scheme.status_code == 401
+
+    # Prometheus scrape_config `authorization`(type Bearer) 경로.
+    granted = client.get(
+        "/metrics",
+        headers={"Authorization": f"Bearer {_METRICS_TOKEN}"},
+    )
+    assert granted.status_code == 200
+    assert granted.headers["content-type"].startswith("text/plain")
+
+
+@pytest.mark.unit
+def test_metrics_endpoint_stays_open_without_token_in_local_dev(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 미설정(None)은 로컬 scrape 하위호환 — 기존 open scrape 유지 (T-VN-02).
+    monkeypatch.delenv("KOR_TRAVEL_MAP_API_METRICS_TOKEN", raising=False)
+    app = create_app(ApiSettings(features_routes_enabled=False))
+    assert app.state.settings.metrics_token is None
+    client = TestClient(app)
+    assert client.get("/metrics").status_code == 200

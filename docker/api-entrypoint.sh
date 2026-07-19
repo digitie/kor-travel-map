@@ -120,6 +120,44 @@ else
   fi
 fi
 
+# ADR-066 T-VN-02 (#742) — 검증 정본은 settings production matrix
+# (ApiSettings.assert_production_ready)다. 그중 "production + ops surface 활성 +
+# ops pair 미구성"은 migration이 이미 실행된 뒤 uvicorn 기동에서야 실패해
+# 2단계 혼란을 만들므로, 같은 문구로 migration 전에 거부한다(메시지 lockstep).
+# profile 기본값은 Docker image ENV(production)와 같다.
+api_profile="${KOR_TRAVEL_MAP_API_PROFILE:-production}"
+case "$api_profile" in
+  production | local-dev) ;;
+  *)
+    echo "KOR_TRAVEL_MAP_API_PROFILE must be exactly production or local-dev" >&2
+    exit 1
+    ;;
+esac
+for flag_name in KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED; do
+  eval "flag_is_set=\${$flag_name+x}"
+  if [ "$flag_is_set" = "x" ]; then
+    eval "flag_value=\$$flag_name"
+    case "$flag_value" in
+      true | false) ;;
+      *)
+        echo "$flag_name must be exactly true or false" >&2
+        exit 1
+        ;;
+    esac
+  fi
+done
+features_routes_enabled="${KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED:-true}"
+ops_routes_enabled="${KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED:-$features_routes_enabled}"
+ops_pair_configured=false
+if [ "$ops_read_is_set" = "x" ] && [ -n "${KOR_TRAVEL_MAP_API_OPS_READ_TOKEN}" ]; then
+  ops_pair_configured=true
+fi
+if [ "$api_profile" = "production" ] && [ "$ops_routes_enabled" = "true" ] \
+  && [ "$ops_pair_configured" = "false" ]; then
+  echo "production profile is fail-closed (ADR-066): KOR_TRAVEL_MAP_API_OPS_READ_TOKEN and KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN must be configured while the ops surface is enabled" >&2
+  exit 1
+fi
+
 retries="${KOR_TRAVEL_MAP_MIGRATION_RETRIES:-30}"
 sleep_seconds="${KOR_TRAVEL_MAP_MIGRATION_RETRY_SLEEP_SECONDS:-2}"
 attempt=1
