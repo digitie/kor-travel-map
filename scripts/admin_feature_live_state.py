@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import suppress
 import hashlib
 import json
 import os
 import re
 import stat
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -57,7 +58,7 @@ def _sha256(value: str) -> str:
 
 
 def _recorded_at() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _fsync_directory(path: Path) -> None:
@@ -83,10 +84,8 @@ def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
             offset += os.write(descriptor, body[offset:])
         os.fsync(descriptor)
     except BaseException:
-        try:
+        with suppress(FileNotFoundError):
             os.unlink(temporary)
-        except FileNotFoundError:
-            pass
         raise
     finally:
         os.close(descriptor)
