@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — Agent A PR #747 적대적 심층 리뷰 후속
+
+- 전문 리뷰어 1명이 PR #747의 route matrix와 `/metrics` 경계를 최신
+  `integration/t-vn`에서 재검토했다. 인증 우회·미분류 route·후속 PR 충돌은 없었지만,
+  추적 중인 Prometheus config에 실제 token을 inline하도록 한 배포 안내(S2)와 설정이
+  허용한 비ASCII token이 header 인코딩 차이로 항상 401이 되는 경계(S3)를 확인했다.
+- 배포 안내를 repository 밖 secret 파일의 read-only mount +
+  `authorization.credentials_file` 선행 조건으로 바꾸고, metrics token은 RFC 6750
+  `b64token` ASCII 범위만 허용하도록 설정 검증과 회귀 테스트를 추가했다.
+- 같은 리뷰어 재검토에서 기존 S2/S3 해소를 확인했고, 지적된 import 순서 1건은
+  기계적으로 정리했다. 관련 API unit 87건과 Ruff가 통과했다.
+
 ## 2026-07-19 (codex) — Agent A PR #746 적대적 심층 리뷰 후속
 
 - 전문 리뷰어 1명이 최신 `integration/t-vn` 기준으로 PR #746을 재검토해 #745의

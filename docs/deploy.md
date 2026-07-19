@@ -38,22 +38,30 @@ token 미설정 local-dev는 기존 open scrape를 유지한다.
 
 **배포 전제 — zero-gap 순서(반드시 이 순서로)**:
 
-1. **먼저** kor-travel-docker-manager Prometheus scrape config에 map-api job을
-   `authorization: {type: Bearer, credentials: <token>}`와 함께 **추가**한다.
-   변경 전 API(현재 `/metrics` 무인증)는 이 헤더를 무시하므로 이 단계는 무해하다.
+1. **먼저** kor-travel-docker-manager에 git 밖의 전용 secret 파일을 read-only로
+   mount하고, Prometheus scrape config에 map-api job을 `credentials_file`과 함께
+   **추가**한다. 변경 전 API(현재 `/metrics` 무인증)는 이 헤더를 무시하므로 이
+   단계는 무해하다. 아래 host secret 파일은 `chmod 600`으로 관리하고 repository
+   안에 만들지 않는다. 추적 중인 `config/prometheus/prometheus.yml`의
+   `credentials:`에 실제 token을 직접 쓰면 안 된다.
 
    ```yaml
    - job_name: kor-travel-map-api
      metrics_path: /metrics
      authorization:
        type: Bearer
-       credentials: <KOR_TRAVEL_MAP_API_METRICS_TOKEN>
+       credentials_file: /run/secrets/kor_travel_map_metrics_token
      static_configs:
        - targets:
            - 127.0.0.1:12701
    ```
 
-2. **그다음** root `.env`에 `KOR_TRAVEL_MAP_API_METRICS_TOKEN`(scrape config와
+   docker-manager compose에는 예를 들어 host의
+   `/etc/kor-travel-map/secrets/metrics-token`을 위 container 경로에 read-only로
+   mount해야 한다. 이 mount가 없는 현재 docker-manager 상태에서는 배포하지 않고
+   선행 변경으로 먼저 반영한다.
+
+2. **그다음** root `.env`에 `KOR_TRAVEL_MAP_API_METRICS_TOKEN`(secret 파일과
    같은 값)을 넣고 API를 배포한다.
 
 순서를 뒤집으면(토큰 먼저, scrape config 나중) 그 사이 scrape가 401로 gap이
