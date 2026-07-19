@@ -47,12 +47,28 @@ def _schema_properties(spec: dict[str, Any], name: str) -> set[str]:
     return set(properties)
 
 
+def _query_parameter_names(spec: dict[str, Any], path: str) -> set[str]:
+    parameters = spec["paths"][path]["get"].get("parameters", [])
+    return {
+        str(parameter["name"])
+        for parameter in parameters
+        if parameter.get("in") == "query"
+    }
+
+
 @pytest.mark.unit
 def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     module = _load_script_module()
     full = create_app(ApiSettings()).openapi()
 
     user = module.user_openapi_spec(full)
+
+    assert "visibility" not in _query_parameter_names(full, "/v1/curated-themes")
+    assert "visibility" in _query_parameter_names(full, "/v1/admin/curated-themes")
+    assert "curation_status" not in _query_parameter_names(full, "/v1/curated-features")
+    assert "curation_status" in _query_parameter_names(
+        full, "/v1/admin/features/curated"
+    )
 
     assert user["info"]["title"] == "kor-travel-map-user"
     assert set(user["paths"]) == {

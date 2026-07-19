@@ -13409,7 +13409,6 @@ export interface operations {
                 source_id?: string | null;
                 provider?: string | null;
                 dataset_key?: string | null;
-                curation_status?: ("candidate" | "curated" | "rejected" | "archived") | null;
                 region_code?: string | null;
                 sido_code?: string | null;
                 sigungu_code?: string | null;
@@ -13544,7 +13543,6 @@ export interface operations {
     list_curated_themes_route_v1_curated_themes_get: {
         parameters: {
             query?: {
-                visibility?: ("admin_only" | "public") | null;
                 theme_group?: string | null;
                 limit?: number;
             };

@@ -4619,29 +4619,6 @@
           },
           {
             "in": "query",
-            "name": "curation_status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "candidate",
-                    "curated",
-                    "rejected",
-                    "archived"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": "curated",
-              "title": "Curation Status"
-            }
-          },
-          {
-            "in": "query",
             "name": "region_code",
             "required": false,
             "schema": {

@@ -13,8 +13,11 @@
   모든 공개 read가 이 한 정의를 소비한다.
 - **SECURITY**: admin-inactive/draft/broken feature가 일부 공개 경로(단건/batch/특보 이력/
   curation collection item)에 노출되고 provider-retired feature가 경로마다 다르게 은닉되던
-  F-1 양방향 오분류를 해소했다. 무인증 collection 상세의 연결 feature 공개 판정도 view 기반
-  `linked_feature_is_public`으로 교체됐다.
+  F-1 양방향 오분류를 해소했다. 무인증 collection 상세는 비공개·종료·구버전 notice에 연결된
+  item을 SQL에서 행째 제외해 복제 저장된 `place_name`/`address_hint`/metadata 우회도 차단한다.
+- **SECURITY**: `admin_only` theme와 candidate/rejected overlay가 공개 curated/curation 표면으로
+  노출되던 경계를 닫았다. 공개 theme는 `visibility=public`, 공개 overlay는 `curated`만 허용하며
+  feature 단건·batch에 결합되는 curation도 같은 theme visibility를 강제한다.
 - **CHANGED**: `POST /v1/features/batch`는 모든 비공개 feature를 균일하게 `missing`으로
   분류한다(이전: admin-inactive는 `found`+`status='inactive'`). 5-state typed DTO 전환은
   T-VN-11 — 소비자 조정 노트는 `docs/integration-map.md` §3.2.
@@ -25,6 +28,9 @@
   `'active'`로 상수화된 응답 필드 `feature_status`는 제거됐다.
 - **REMOVED**: `GET /v1/categories`의 `active_only` 파라미터 — counts는 항상 공개
   projection 기준이다.
+- **REMOVED**: 공개 `GET /v1/curated-themes`의 `visibility`와
+  `GET /v1/curated-features`의 `curation_status` 파라미터 — 관리자 전용 상태를 요청으로
+  다시 열 수 없고 각 공개 계약으로 고정된다.
 - **CHANGED**: nearby `status` 파라미터는 공개 projection과 교집합으로만 동작한다는 설명이
   OpenAPI에 명시됐다(active 외 값은 빈 결과, 파라미터 정리는 T-VN-11/34).
 

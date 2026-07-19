@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — Agent A T-VN-04 심층 리뷰 보완 완료
+
+- PR #743의 공개 경계를 전문 리뷰어 1명이 재검증해 `admin_only` theme/비공개 overlay,
+  복제 장소정보를 가진 비공개 연결 item, 종료·구버전 notice의 우회 노출을 모두 SQL 단계에서
+  차단했다. 공개 query parameter 2개와 OpenAPI/생성 타입도 clean-cut 계약으로 동기화했다.
+- 승인 뒤 unit/API 70건, PostGIS 15건과 Ruff가 통과했다. 최신 `integration/t-vn` 재배치와 CI
+  green 뒤 PR #743을 통합 브랜치에만 머지한다.
+- **다음 한 작업**: 최근 Agent A PR 추가분을 다시 점검한 뒤 C6c compatible-pair와 C7 n150
+  live E2E를 종결한다. Agent B lane은 C7 완료 전 시작하지 않는다.
+
 ## 2026-07-19 (claude, agent A2) — T-VN-04 공개 predicate view 단일화 완료
 
 - alembic 0059 `feature.public_features` VIEW로 공개 술어를 단일화하고 모든 공개 read 경로

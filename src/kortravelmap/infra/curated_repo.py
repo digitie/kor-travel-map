@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 
 from sqlalchemy import text
 
+from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -404,6 +406,15 @@ JOIN feature.curated_sources AS s ON s.source_id = cf.source_id
 JOIN feature.public_features AS f ON f.feature_id = cf.feature_id
 """
 
+_PUBLIC_FEATURE_FILTERS_SQL: Final[str] = (
+    """
+  AND t.visibility = 'public'
+  AND cf.curation_status = 'curated'
+  AND cf.archived_at IS NULL
+"""
+    + public_active_notice_filter_sql("f")
+)
+
 _LIST_THEMES_SQL: Final[str] = f"""
 SELECT {_THEME_COLUMNS}
 FROM feature.curated_themes
@@ -532,6 +543,7 @@ def _list_features_sql(*, public_only: bool) -> str:
 SELECT {_FEATURE_COLUMNS}
 {_PUBLIC_FEATURE_FROM_SQL if public_only else _FEATURE_FROM_SQL}
 {_FEATURE_FILTERS_SQL}
+{_PUBLIC_FEATURE_FILTERS_SQL if public_only else ""}
 {_FEATURE_CURSOR_SQL}
 ORDER BY cf.updated_at DESC, cf.curated_feature_id DESC
 LIMIT :limit
@@ -551,6 +563,7 @@ SELECT * FROM (
     SELECT DISTINCT ON (cf.feature_id) {_FEATURE_COLUMNS}
     {_PUBLIC_FEATURE_FROM_SQL if public_only else _FEATURE_FROM_SQL}
     {_FEATURE_FILTERS_SQL}
+    {_PUBLIC_FEATURE_FILTERS_SQL if public_only else ""}
     ORDER BY cf.feature_id, cf.rank_score DESC NULLS LAST,
              cf.updated_at DESC, cf.curated_feature_id DESC
 ) AS d
@@ -575,6 +588,7 @@ SELECT {_FEATURE_COLUMNS}
 {_PUBLIC_FEATURE_FROM_SQL if public_only else _FEATURE_FROM_SQL}
 WHERE cf.curated_feature_id = CAST(:curated_feature_id AS uuid)
   AND (CAST(:include_archived AS boolean) OR cf.archived_at IS NULL)
+{_PUBLIC_FEATURE_FILTERS_SQL if public_only else ""}
 """
 
 _CREATE_FEATURE_SQL: Final[str] = """
@@ -1354,10 +1368,11 @@ async def list_curated_features(
     반환한다(지도 경로 — cross-theme 중복 제거). 관리자 per-curation 목록은 기본값
     False로 모든 큐레이션을 그대로 본다.
 
-    ``public_only=True``(공개 `/v1/curated-features` 표면)면 underlying feature를
-    ADR-067 ``feature.public_features`` projection에서만 조인해 비공개 feature의
-    큐레이션이 노출되지 않는다(T-VN-04, F-1). 관리자 표면은 기본값 False로 전
-    상태를 그대로 본다.
+    ``public_only=True``(공개 `/v1/curated-features` 표면)면 공개 theme의
+    ``curated`` overlay와 active/latest underlying feature만 반환한다. 기본 공개
+    집합은 ADR-067 ``feature.public_features`` projection, notice 추가 감산은
+    ``public_active_notice_filter_sql`` 정본을 공유한다. 관리자 표면은 기본값
+    False로 전 상태를 그대로 본다.
     """
 
     if curation_status is not None:
@@ -1420,8 +1435,8 @@ async def get_curated_feature(
 ) -> CuratedFeature | None:
     """curated feature 단건을 조회한다.
 
-    ``public_only=True``(공개 표면)면 underlying feature가 ADR-067
-    ``feature.public_features`` projection에 없을 때 ``None``을 반환한다.
+    ``public_only=True``(공개 표면)면 theme/overlay/underlying feature가 모두
+    공개 계약을 통과할 때만 반환한다. 종료·구버전 notice도 ``None``이다.
     """
 
     row = (
