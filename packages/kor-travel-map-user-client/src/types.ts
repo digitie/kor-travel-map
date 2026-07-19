@@ -2122,7 +2122,6 @@ export interface operations {
                 source_id?: string | null;
                 provider?: string | null;
                 dataset_key?: string | null;
-                curation_status?: ("candidate" | "curated" | "rejected" | "archived") | null;
                 region_code?: string | null;
                 sido_code?: string | null;
                 sigungu_code?: string | null;

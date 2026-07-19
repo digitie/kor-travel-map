@@ -28978,29 +28978,6 @@
           },
           {
             "in": "query",
-            "name": "curation_status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "candidate",
-                    "curated",
-                    "rejected",
-                    "archived"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": "curated",
-              "title": "Curation Status"
-            }
-          },
-          {
-            "in": "query",
             "name": "region_code",
             "required": false,
             "schema": {
@@ -29391,26 +29368,6 @@
       "get": {
         "operationId": "list_curated_themes_route_v1_curated_themes_get",
         "parameters": [
-          {
-            "in": "query",
-            "name": "visibility",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "admin_only",
-                    "public"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Visibility"
-            }
-          },
           {
             "in": "query",
             "name": "theme_group",

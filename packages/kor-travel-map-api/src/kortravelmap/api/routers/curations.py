@@ -737,6 +737,7 @@ async def list_public_curation_collections(
             edition_key=edition_key,
             provider=provider,
             q=q,
+            public_only=True,
             limit=page_size,
             cursor=cursor,
         )

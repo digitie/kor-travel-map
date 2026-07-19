@@ -77,6 +77,7 @@ __all__ = [
     "get_feature_rows_by_ids",
     "get_public_feature_row",
     "get_public_feature_rows_by_ids",
+    "public_active_notice_filter_sql",
     "public_active_notice_feature_ids",
     "list_active_place_coords",
     "list_primary_place_locator",
@@ -535,23 +536,27 @@ def _canonical_notice_feature_sql(feature_alias: str, source_alias: str) -> str:
     """
 
 
-# 종료된 notice 숨김 — valid_end_time이 지난 notice는 지도/검색에서 제외한다
-# (§9 "활성 notice만 표시", #632). KREX feed 소멸 reconcile·KMA 해제가 채운
-# valid_end_time이 이 필터로 즉시 반영된다.
-_ENDED_NOTICE_HIDDEN_SQL: Final[str] = """
+def _ended_notice_hidden_sql(feature_alias: str) -> str:
+    """종료된 notice를 숨기는 SQL fragment를 feature alias에 맞춰 만든다."""
+
+    return f"""
   AND (
-    f.kind <> 'notice'
-    OR (f.detail ->> 'valid_end_time') IS NULL
-    OR CAST(f.detail ->> 'valid_end_time' AS timestamptz) > now()
+    {feature_alias}.kind <> 'notice'
+    OR ({feature_alias}.detail ->> 'valid_end_time') IS NULL
+    OR CAST({feature_alias}.detail ->> 'valid_end_time' AS timestamptz) > now()
   )
 """
+
 
 # 한 feature에 여러 계보의 primary entity가 연결될 수 있다. 각 계보의 실제 최신 row를
 # 고른 뒤 **모든 계보에서 밀린 feature만** 숨긴다. 한 계보라도 winner면 feature 전체를
 # 보존하며, current primary source가 없는 notice도 기존처럼 표시한다.
-_LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
+def _latest_notice_only_sql(feature_alias: str) -> str:
+    """구버전 notice를 숨기는 SQL fragment를 feature alias에 맞춰 만든다."""
+
+    return f"""
   AND (
-    f.kind <> 'notice'
+    {feature_alias}.kind <> 'notice'
     OR NOT EXISTS (
       SELECT 1
       FROM (
@@ -569,13 +574,13 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
                 cur_sr.last_seen_at, cur_sr.imported_at, cur_sr.fetched_at
             ) AS seen_at,
             cur_sr.source_record_key,
-            {_canonical_notice_feature_sql("f", "cur_sr")} AS canonical_identity
+            {_canonical_notice_feature_sql(feature_alias, "cur_sr")} AS canonical_identity
         FROM provider_sync.source_links AS cur_sl
         JOIN provider_sync.source_entities AS cur_se
           ON cur_se.source_entity_key = cur_sl.source_entity_key
         JOIN provider_sync.source_records AS cur_sr
           ON cur_sr.source_record_key = cur_se.current_source_record_key
-        WHERE cur_sl.feature_id = f.feature_id
+        WHERE cur_sl.feature_id = {feature_alias}.feature_id
           AND cur_sl.is_primary_source
         ORDER BY
             cur_sr.provider,
@@ -601,7 +606,7 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
           AND other_se.dataset_key = current_notice.dataset_key
           AND other_se.source_entity_type = current_notice.source_entity_type
           AND other_sl.is_primary_source
-          AND other_f.feature_id <> f.feature_id
+          AND other_f.feature_id <> {feature_alias}.feature_id
           AND other_f.kind = 'notice'
           AND other_f.deleted_at IS NULL
           AND (
@@ -627,7 +632,7 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
                 OR (
                   {_canonical_notice_feature_sql("other_f", "other_sr")}
                     = current_notice.canonical_identity
-                  AND other_f.feature_id < f.feature_id
+                  AND other_f.feature_id < {feature_alias}.feature_id
                 )
               )
             )
@@ -649,7 +654,20 @@ _LATEST_NOTICE_ONLY_SQL: Final[str] = f"""
 # 판정(``_LATEST_NOTICE_ONLY_SQL``의 ``other_f.deleted_at IS NULL``)은 reconcile
 # 의미론(T-VN-06/37 소유)이라 T-VN-04에서 view로 바꾸지 않았다 — 비공개 신규
 # feature가 구 feature를 계속 밀어내는 현행 동작 유지.
-_PUBLIC_ACTIVE_NOTICE_FILTER_SQL: Final[str] = _ENDED_NOTICE_HIDDEN_SQL + _LATEST_NOTICE_ONLY_SQL
+def public_active_notice_filter_sql(feature_alias: str) -> str:
+    """모든 공개 read가 공유하는 active/latest notice 감산 SQL을 반환한다.
+
+    호출자는 신뢰된 정적 SQL alias만 넘긴다. 공개 여부의 기본 집합은
+    ``feature.public_features``이고, 이 fragment는 종료·구버전 notice만 추가로
+    제외한다.
+    """
+
+    if not feature_alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    return _ended_notice_hidden_sql(feature_alias) + _latest_notice_only_sql(feature_alias)
+
+
+_PUBLIC_ACTIVE_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("f")
 
 _PUBLIC_ACTIVE_NOTICE_IDS_SQL: Final[str] = f"""
 SELECT f.feature_id

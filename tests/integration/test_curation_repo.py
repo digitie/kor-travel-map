@@ -231,10 +231,8 @@ async def test_same_feature_returns_every_edition_and_subcourse_membership(
     )
     assert public_collection is not None
     assert admin_collection is not None
-    assert public_collection[1][0].feature_id is None
-    assert public_collection[1][0].feature_name is None
-    assert public_collection[1][0].address == {}
-    assert public_collection[1][0].place_name == "겹치는 관광지"
+    assert public_collection[0].public_item_count == 0
+    assert public_collection[1] == ()
     assert admin_collection[1][0].feature_id == _FEATURE_ID
     hidden_matches = await resolve_feature_matches(
         migrated_session,

@@ -780,12 +780,12 @@ async def _feature_or_404(
     return row
 
 
-@router.get("/curated-themes", response_model=CuratedThemesResponse)
-async def list_curated_themes_route(
+async def _list_curated_themes_response(
     session: Annotated[AsyncSession, Depends(get_session)],
-    visibility: Annotated[ThemeVisibility | None, Query()] = None,
-    theme_group: Annotated[str | None, Query()] = None,
-    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    *,
+    visibility: ThemeVisibility | None,
+    theme_group: str | None,
+    limit: int,
 ) -> CuratedThemesResponse:
     started_at = perf_counter()
     rows = await curated_repo.list_curated_themes(
@@ -797,6 +797,20 @@ async def list_curated_themes_route(
     return CuratedThemesResponse(
         data=CuratedThemesData(items=[_theme_view(row) for row in rows]),
         meta=make_meta(started_at=started_at),
+    )
+
+
+@router.get("/curated-themes", response_model=CuratedThemesResponse)
+async def list_curated_themes_route(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    theme_group: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+) -> CuratedThemesResponse:
+    return await _list_curated_themes_response(
+        session,
+        visibility="public",
+        theme_group=theme_group,
+        limit=limit,
     )
 
 
@@ -830,7 +844,6 @@ async def list_curated_features_route(
     source_id: Annotated[str | None, Query()] = None,
     provider: Annotated[str | None, Query()] = None,
     dataset_key: Annotated[str | None, Query()] = None,
-    curation_status: Annotated[CurationStatus | None, Query()] = "curated",
     region_code: Annotated[str | None, Query()] = None,
     sido_code: Annotated[str | None, Query()] = None,
     sigungu_code: Annotated[str | None, Query()] = None,
@@ -853,7 +866,7 @@ async def list_curated_features_route(
             source_id=source_id,
             provider=provider,
             dataset_key=dataset_key,
-            curation_status=curation_status,
+            curation_status="curated",
             region_code=region_code,
             sido_code=sido_code,
             sigungu_code=sigungu_code,
@@ -1192,8 +1205,8 @@ async def list_admin_curated_themes_route(
     theme_group: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> CuratedThemesResponse:
-    return await list_curated_themes_route(
-        session=session,
+    return await _list_curated_themes_response(
+        session,
         visibility=visibility,
         theme_group=theme_group,
         limit=limit,

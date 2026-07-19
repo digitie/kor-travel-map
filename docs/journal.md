@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex) — Agent A PR #743 적대적 심층 리뷰 후속
+
+- 전문 리뷰어 1명이 PR #743 최신 head를 테스트 전에 독립 검토해 `admin_only` theme의 공개
+  curated/curation 노출(S1), 비공개 연결 item의 복제 장소정보 잔존(S2), 종료·구버전 notice의
+  curation 재노출(S2)을 확인했다. 공개 theme/overlay를 SQL에서 고정하고 비공개 연결 item은
+  부분 NULL 처리 대신 행째 제외했으며, notice 감산 SQL을 모든 공개 소비자가 공유하게 했다.
+- 같은 리뷰어가 보완 diff를 재검토해 public feature detail/batch curation의 theme visibility
+  누락을 추가 차단한 뒤 최종 승인했다. 공개 query parameter 2개를 제거하고 OpenAPI/admin·user
+  TypeScript 산출물을 재생성했다.
+- 승인 뒤 unit/API 70건과 PostGIS 공개 경계 15건, Ruff를 통과했다. pytest 첫 실행의 WSL 3.14
+  capture 임시파일 오류는 전용 `/tmp`와 capture-off 재실행으로 코드 실패가 아님을 확인했다.
+
 ## 2026-07-19 (claude, agent A2) — T-VN-04 공개 predicate view 단일화 + 적대 리뷰 반영
 
 - ADR-067 Wave 0: alembic 0059가 `feature.public_features` VIEW(`status='active' AND
@@ -9,10 +21,10 @@
   search/nearby/in-area/detail/batch/category counts/notice ids/weather anchor/public views/
   curation·curated 공개 read를 전부 그 projection으로 수렴했다. F-1 양방향(provider-retired
   은닉 vs admin-inactive/draft/broken 노출)을 endpoint별 술어 재구현 삭제로 동시 해소.
-- 적대 리뷰 BLOCK 반영: (S1) 무인증 `GET /v1/curations/collections/{id}`의 `_public_item`이
-  구 술어를 재구현해 비공개 연결 feature의 id/이름/좌표/주소가 새던 구멍을
-  `EXISTS(... public_features)` 컬럼(`linked_feature_is_public`)으로 봉인하고 8-state matrix
-  통합 테스트를 추가했다. (S2) 특보 이력 `/v1/features/weather/alerts`는 base features 대신
+- 적대 리뷰 BLOCK 반영: (S1) 무인증 `GET /v1/curations/collections/{id}`에서 비공개 연결
+  feature의 id/이름/좌표/주소와 복제 장소정보가 새던 구멍을 공개 SQL의 item 행 제외로
+  봉인하고 8-state matrix 통합 테스트를 추가했다. (S2) 특보 이력
+  `/v1/features/weather/alerts`는 base features 대신
   공개 projection에 LEFT JOIN — alert row는 생존, 비공개 anchor의 feature 필드는 NULL,
   상수화된 `feature_status` 필드는 응답에서 제거(OpenAPI/TS 재생성). (S2) admin weather/price
   panel은 404를 오류 Alert가 아니라 "공개 카드 없음" 빈 상태로 처리(전용 admin 카드 표면은

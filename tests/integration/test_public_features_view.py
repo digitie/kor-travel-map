@@ -470,7 +470,7 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
 async def test_curated_public_read_uses_projection_admin_unchanged(
     migrated_session: AsyncSession,
 ) -> None:
-    """legacy curated 공개 read는 projection을 쓰고, admin read는 전 상태를 본다."""
+    """공개 curated read는 public theme의 curated overlay만 노출한다 (리뷰 S1)."""
     theme_id, source_id = await _seed_curation_foundation(migrated_session)
     for suffix, status in (("active", "active"), ("admin-inactive", "inactive")):
         await _ins_feature(
@@ -487,17 +487,57 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
             curation_status="curated",
         )
 
+    admin_theme = await curated_repo.create_curated_theme(
+        migrated_session,
+        theme_slug="pfv-admin-only-theme",
+        theme_name="관리자 전용 테마",
+        theme_group="internal",
+        visibility="admin_only",
+    )
+    overlay_cases = (
+        ("admin-theme", admin_theme.theme_id, "curated"),
+        ("candidate", theme_id, "candidate"),
+        ("rejected", theme_id, "rejected"),
+    )
+    restricted_overlays = []
+    for suffix, overlay_theme_id, curation_status in overlay_cases:
+        await _ins_feature(
+            migrated_session,
+            feature_id=f"pfv:curated:{suffix}",
+            name=f"제한 큐레이션 {suffix}",
+        )
+        restricted_overlays.append(
+            await curated_repo.create_curated_feature(
+                migrated_session,
+                theme_id=overlay_theme_id,
+                feature_id=f"pfv:curated:{suffix}",
+                source_id=source_id,
+                curation_status=curation_status,
+                selected_by="private-operator",
+                rejected_by=("private-reviewer" if curation_status == "rejected" else None),
+                rejection_reason=("internal reason" if curation_status == "rejected" else None),
+                metadata={"internal": True},
+            )
+        )
+
     public_page = await curated_repo.list_curated_features(
-        migrated_session, theme_slug="pfv-matrix-theme", public_only=True
+        migrated_session, public_only=True
     )
     assert {row.feature_id for row in public_page.items} == {"pfv:curated:active"}
+    rejected_public_page = await curated_repo.list_curated_features(
+        migrated_session, curation_status="rejected", public_only=True
+    )
+    assert rejected_public_page.items == ()
 
     admin_page = await curated_repo.list_curated_features(
-        migrated_session, theme_slug="pfv-matrix-theme"
+        migrated_session, curation_status=None
     )
     assert {row.feature_id for row in admin_page.items} == {
         "pfv:curated:active",
         "pfv:curated:admin-inactive",
+        "pfv:curated:admin-theme",
+        "pfv:curated:candidate",
+        "pfv:curated:rejected",
     }
 
     # 단건: 공개는 비공개 feature에서 None, admin은 조회 가능.
@@ -519,6 +559,145 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
         )
         is not None
     )
+    for restricted in restricted_overlays:
+        assert (
+            await curated_repo.get_curated_feature(
+                migrated_session,
+                curated_feature_id=restricted.curated_feature_id,
+                public_only=True,
+            )
+            is None
+        )
+
+    admin_collection = await curation_repo.create_curation_collection(
+        migrated_session,
+        collection_key="pfv-admin-only:2026",
+        theme_id=admin_theme.theme_id,
+        source_id=source_id,
+        title="관리자 전용 테마의 공개 표시 컬렉션",
+        edition_key="2026",
+        status="published",
+        visibility="public",
+    )
+    admin_theme_feature_id = "pfv:curation:admin-theme"
+    await _ins_feature(
+        migrated_session,
+        feature_id=admin_theme_feature_id,
+        name="관리자 전용 큐레이션 연결 장소",
+    )
+    await curation_repo.add_curation_item(
+        migrated_session,
+        collection_id=admin_collection.collection_id,
+        feature_id=admin_theme_feature_id,
+        external_item_id="pfv-admin-theme-item",
+        status="included",
+        metadata={"internal": True},
+    )
+    public_collections, _cursor = await curation_repo.list_curation_collections(
+        migrated_session, public_only=True
+    )
+    assert admin_collection.collection_id not in {
+        collection.collection_id for collection in public_collections
+    }
+    assert (
+        await curation_repo.get_curation_collection(
+            migrated_session,
+            collection_id=admin_collection.collection_id,
+            public_only=True,
+        )
+        is None
+    )
+    public_groups, _cursor = await curation_repo.list_feature_curation_groups(
+        migrated_session, public_only=True
+    )
+    assert admin_theme_feature_id not in {group.feature_id for group in public_groups}
+    assert (
+        await curation_repo.get_feature_curation_group(
+            migrated_session,
+            feature_id=admin_theme_feature_id,
+            public_only=True,
+        )
+        is None
+    )
+    assert (
+        await curation_repo.list_curation_items_by_feature_ids(
+            migrated_session,
+            feature_ids=[admin_theme_feature_id],
+            public_only=True,
+        )
+        == {}
+    )
+    admin_items = await curation_repo.list_curation_items_by_feature_ids(
+        migrated_session,
+        feature_ids=[admin_theme_feature_id],
+        public_only=False,
+    )
+    assert admin_items[admin_theme_feature_id][0].metadata == {"internal": True}
+
+
+async def test_ended_notice_is_hidden_from_curation_and_curated_surfaces(
+    migrated_session: AsyncSession,
+) -> None:
+    """종료 notice가 feature detail 밖 큐레이션 표면에서 재노출되지 않는다 (S2)."""
+    theme_id, source_id = await _seed_curation_foundation(migrated_session)
+    feature_id = "pfv:notice:ended"
+    await _ins_feature(
+        migrated_session,
+        feature_id=feature_id,
+        name="종료된 공개 특보",
+        kind="notice",
+        detail=json.dumps({"valid_end_time": "2000-01-01T00:00:00+00:00"}),
+    )
+    overlay = await curated_repo.create_curated_feature(
+        migrated_session,
+        theme_id=theme_id,
+        feature_id=feature_id,
+        source_id=source_id,
+        curation_status="curated",
+    )
+    collection = await curation_repo.create_curation_collection(
+        migrated_session,
+        collection_key="pfv-ended-notice:2026",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="종료 notice 컬렉션",
+        edition_key="2026",
+        status="published",
+        visibility="public",
+    )
+    await curation_repo.add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=feature_id,
+        external_item_id="pfv-ended-notice",
+        status="included",
+    )
+
+    assert (
+        await curated_repo.get_curated_feature(
+            migrated_session,
+            curated_feature_id=overlay.curated_feature_id,
+            public_only=True,
+        )
+        is None
+    )
+    public_overlays = await curated_repo.list_curated_features(
+        migrated_session, theme_slug="pfv-matrix-theme", public_only=True
+    )
+    assert feature_id not in {item.feature_id for item in public_overlays.items}
+    assert (
+        await curation_repo.get_feature_curation_group(
+            migrated_session, feature_id=feature_id, public_only=True
+        )
+        is None
+    )
+    collection_result = await curation_repo.get_curation_collection(
+        migrated_session, collection_id=collection.collection_id, public_only=True
+    )
+    assert collection_result is not None
+    public_collection, items = collection_result
+    assert items == ()
+    assert public_collection.item_count == public_collection.public_item_count == 0
 
 
 async def test_category_counts_use_projection(migrated_session: AsyncSession) -> None:
@@ -532,11 +711,12 @@ async def test_category_counts_use_projection(migrated_session: AsyncSession) ->
 async def test_collection_items_redact_non_public_linked_features(
     migrated_session: AsyncSession,
 ) -> None:
-    """공개 collection 상세의 item 연결 feature 판정도 view 한 곳이다 (리뷰 S1).
+    """공개 collection은 비공개 연결 item 전체를 SQL에서 제외한다 (리뷰 S2).
 
-    ``GET /v1/curations/collections/{id}``(무인증)의 ``_public_item``이 예전
-    술어(status not in deleted/hidden)를 재구현해 draft/broken/admin-inactive
-    연결 feature의 id/name/좌표/주소가 새던 구멍을 상태 matrix 전체로 잠근다.
+    feature 이름을 ``place_name``으로 자동 복제하고 CSV가 ``address_hint``와
+    metadata를 저장하므로 Python에서 feature 필드 일부만 NULL 처리해서는 비공개
+    전환 뒤에도 장소 정보를 숨길 수 없다. 공개 SQL은 연결 feature가 최종 공개
+    집합에 없으면 item 자체를 반환하지 않고, 공식 미연결 item은 유지한다.
     """
     theme_id, source_id = await _seed_curation_foundation(migrated_session)
     collection = await curation_repo.create_curation_collection(
@@ -565,9 +745,23 @@ async def test_collection_items_redact_non_public_linked_features(
             collection_id=collection.collection_id,
             feature_id=f"pfv:item:{suffix}",
             external_item_id=f"pfv-item-{suffix}",
+            place_name=f"복제 장소명 {suffix}",
+            address_hint=f"복제 주소 {suffix}",
             status="included",
             sort_order=i,
+            metadata={"copied_name": f"아이템장소 {suffix}"},
         )
+    await curation_repo.add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=None,
+        external_item_id="pfv-item-unlinked",
+        place_name="공식 미연결 장소",
+        address_hint="공식 주소",
+        status="included",
+        sort_order=len(_STATE_MATRIX),
+        metadata={"official": True},
+    )
     for suffix, status, soft_deleted, _public in _STATE_MATRIX:
         await migrated_session.execute(
             text(
@@ -594,26 +788,27 @@ async def test_collection_items_redact_non_public_linked_features(
         migrated_session, collection_id=collection.collection_id, public_only=True
     )
     assert result is not None
-    _row, items = result
-    # item row 자체는 전부 남는다 — 연결 feature 정보만 공개 판정으로 가려진다.
-    assert len(items) == len(_STATE_MATRIX)
+    row, items = result
     by_external = {item.external_item_id: item for item in items}
-    for suffix, _status, _deleted, public in _STATE_MATRIX:
-        item = by_external[f"pfv-item-{suffix}"]
-        if public:
-            assert item.feature_id == f"pfv:item:{suffix}"
-            assert item.feature_name == f"아이템장소 {suffix}"
-            assert item.lon is not None
-            assert item.lat is not None
-        else:
-            assert item.feature_id is None, f"linked feature leaked for {suffix}"
-            assert item.feature_name is None
-            assert item.feature_kind is None
-            assert item.feature_category is None
-            assert item.lon is None
-            assert item.lat is None
-            assert item.address == {}
-            assert item.source_record_key is None
+    assert set(by_external) == {"pfv-item-active", "pfv-item-unlinked"}
+    active = by_external["pfv-item-active"]
+    assert active.feature_id == "pfv:item:active"
+    assert active.feature_name == "아이템장소 active"
+    assert active.lon is not None
+    assert active.lat is not None
+    assert by_external["pfv-item-unlinked"].feature_id is None
+    assert row.item_count == row.public_item_count == 2
+
+    admin_result = await curation_repo.get_curation_collection(
+        migrated_session, collection_id=collection.collection_id
+    )
+    assert admin_result is not None
+    _admin_row, admin_items = admin_result
+    assert len(admin_items) == len(_STATE_MATRIX) + 1
+    hidden = next(item for item in admin_items if item.external_item_id == "pfv-item-hidden")
+    assert hidden.place_name == "복제 장소명 hidden"
+    assert hidden.address_hint == "복제 주소 hidden"
+    assert hidden.metadata == {"copied_name": "아이템장소 hidden"}
 
 
 async def test_weather_alert_history_hides_non_public_anchor(
