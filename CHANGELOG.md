@@ -5,6 +5,25 @@
 
 ## [Unreleased]
 
+### 지도 in-bounds 완결성 + exact 공간 술어 (2026-07-19, ADR-073 D-9-3·D-9-4 T-VN-14)
+
+- **FIXED**: `GET /v1/features/in-bounds`(및 `GET /v1/features`)의 `include_geometry`가
+  결과집합(membership)을 바꾸던 버그를 고쳤다(F-8, EXPLAIN 재현 2220→2221행). 이제 후보
+  술어가 `include_geometry` 값과 **무관하게 단일·동일**하고, 플래그는 route/area geometry를
+  응답 payload에 직렬화할지만 제어한다(같은 feature 집합, payload만 차이).
+- **FIXED**: route/area bbox 후보에 exact `ST_Intersects(geom, envelope)`를 추가했다. `&&`
+  MBR prefilter만으로 생기던 false positive(경계상자만 겹치고 실제 geometry는 교차하지 않는
+  route/area)를 제거한다. point `coord`의 `&&`는 이미 정확해 그대로 두었고, `ST_Transform`은
+  술어에 넣지 않는다(ADR-012 — partial GiST `idx_features_geom_gist`가 `&&`로 구동됨).
+- **CHANGED (계약)**: in-bounds 응답 `data`가 지도 완결성 계약을 명시한다 — `mode`(items|
+  clusters), `truncated`(bool, F-8 silent truncation 해소), `coverage`(returned/limit),
+  cluster 모드의 결정적 `cluster_key` + `cluster_unit`/`drill_down_unit`(drill-down 경로).
+  truncation은 `max_items+1` 조회로 명시 판정한다.
+- **INTERNAL**: bbox 후보 술어를 단일화했다 — 공통 attribute 필터(kind/category/provider)를
+  `_bbox_attribute_filter_sql`로, items 공간 후보 술어를 `_bbox_candidate_predicate_sql`로
+  한 곳에 정의해 경량/geometry/cluster 3변형의 이중 SQL 복제를 제거했다(D-9-4). weather/price
+  LATERAL과 인덱스/모델은 건드리지 않았다(T-VN-38/T-VN-18 소유).
+
 ### 중복 GiST 제거 + weather source-record index (2026-07-19, D-12-3 T-VN-18)
 
 - **CHANGED**: `feature.features`의 geometry 컬럼(coord/coord_5179/geom)에 geoalchemy2가

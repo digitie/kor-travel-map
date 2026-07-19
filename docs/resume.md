@@ -12,6 +12,23 @@
 - **다음 한 작업**: 문서 PR 병합 직후 네 task를 병렬 구현하고, 같은 리뷰어 1명의 테스트 전
   승인→로컬 gate→CI green→integration 병합→issue close까지 수행한다.
 
+## 2026-07-19 (claude, agent A2) — T-VN-14 지도 in-bounds 완결성 + exact 공간 술어 구현
+
+- `feat/t-vn-14-map-completeness`(base `integration/t-vn`)에서 ADR-073 D-9-3/D-9-4·F-8을
+  구현했다. (1) `include_geometry`를 serialization-only로 만들었다 — 경량/geometry bbox SQL의
+  WHERE를 단일 후보 술어(`_bbox_candidate_predicate_sql`)로 통일해 membership이 플래그와
+  무관하게 동일하고 payload만 다르다(2220→2221 버그 해소). (2) route/area에 exact
+  `ST_Intersects`를 적용해 `&&` MBR false positive를 제거(point `&&`는 유지, `ST_Transform`
+  없음). (3) in-bounds 응답 DTO에 `mode`/`truncated`/`coverage`/`cluster_key`+drill-down을
+  명시하고 `max_items+1`로 truncation을 명시 판정. (4) 공통 attribute 필터를
+  `_bbox_attribute_filter_sql`로 단일화해 3변형의 이중 SQL 복제 제거.
+- 스코프 준수: bbox/in-bounds/cluster READ SQL + in-bounds DTO만 수정. public_features
+  view·weather/price LATERAL·인덱스/모델·write 경로 무수정. OpenAPI 재생성(drift 0).
+  검증: 신규 통합 2 + perf-gate tier-1 12 + 회귀 17 = 31 green(WSL testcontainers, 최소 seed),
+  router 단위 30 green, ruff/mypy --strict/lint-imports/redaction clean, C: 무증가.
+- **다음 한 작업**: 적대적 리뷰(오케스트레이터) → full gates → PR·CI green·머지. cluster가
+  geometry 후보 술어를 공유하지 않는 결정(centroid rollup 한계)은 리뷰에서 재확인 대상.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-21 3단 성능·DDL gate 인프라 구현
 
 - `feat/t-vn-21-perf-gate`(base `integration/t-vn`)에서 ADR-075 D-12-4의 3단 성능·DDL
