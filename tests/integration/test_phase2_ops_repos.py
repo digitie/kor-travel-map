@@ -19,6 +19,7 @@ from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTargetConflict,
     PoiCacheTargetFeatureLinkCandidate,
+    deactivate_poi_cache_target_feature_links,
     delete_poi_cache_target,
     get_poi_cache_target_by_key,
     list_poi_cache_target_feature_links,
@@ -343,17 +344,8 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
     assert links["feature:poi:resolver"].active is False
     assert links["feature:poi:resolver-next"].active is True
 
-    # resolver가 같은 (target, feature)를 재-upsert해도 manual 분류를 되돌리지
-    # 못한다 — 되돌아가면 다음 snapshot sync가 manual link를 비활성화하게 된다.
-    reclassified_direct = await upsert_poi_cache_target_feature_link(
-        migrated_session,
-        target_id=target.target_id,
-        feature_id="feature:poi:manual",
-        relation="within_radius",
-    )
-    assert reclassified_direct is not None
-    assert reclassified_direct.relation == "manual"
-
+    # resolver snapshot이 같은 (target, feature)를 재-upsert해도 활성 manual 분류를
+    # 되돌리지 않는다.
     resynced = await sync_poi_cache_target_feature_links(
         migrated_session,
         target_ids=(target.target_id,),
@@ -367,6 +359,52 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
     )
     assert [link.relation for link in resynced] == ["manual"]
 
+    # 명시적 단건 upsert의 relation은 caller가 정본이다.
+    reclassified_direct = await upsert_poi_cache_target_feature_link(
+        migrated_session,
+        target_id=target.target_id,
+        feature_id="feature:poi:manual",
+        relation="within_radius",
+    )
+    assert reclassified_direct is not None
+    assert reclassified_direct.relation == "within_radius"
+
+    restored_manual = await upsert_poi_cache_target_feature_link(
+        migrated_session,
+        target_id=target.target_id,
+        feature_id="feature:poi:manual",
+        relation="manual",
+    )
+    assert restored_manual is not None
+    assert restored_manual.relation == "manual"
+
+    # move/delete 경로로 비활성화된 manual row는 resolver가 재분류할 수 있다.
+    assert await deactivate_poi_cache_target_feature_links(
+        migrated_session, target.target_id
+    ) == 1
+
+    resynced = await sync_poi_cache_target_feature_links(
+        migrated_session,
+        target_ids=(target.target_id,),
+        candidates=(
+            PoiCacheTargetFeatureLinkCandidate(
+                target_id=target.target_id,
+                feature_id="feature:poi:manual",
+                relation="within_radius",
+            ),
+        ),
+    )
+    assert [link.relation for link in resynced] == ["within_radius"]
+
+    assert (
+        await sync_poi_cache_target_feature_links(
+            migrated_session,
+            target_ids=(target.target_id,),
+            candidates=(),
+        )
+        == ()
+    )
+
     links = {
         link.feature_id: link
         for link in await list_poi_cache_target_feature_links(
@@ -375,9 +413,8 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
             active_only=False,
         )
     }
-    assert links["feature:poi:manual"].active is True
-    assert links["feature:poi:manual"].relation == "manual"
-    # manual이 아닌 resolver link는 이번 sync 후보에 없으므로 비활성화된다.
+    assert links["feature:poi:manual"].active is False
+    assert links["feature:poi:manual"].relation == "within_radius"
     assert links["feature:poi:resolver-next"].active is False
 
 

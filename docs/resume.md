@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — Agent A PR #744 manual link 재활성화 보완
+
+- 단일 전문 리뷰에서 비활성 manual link가 resolver relation으로 복귀하지 못하고 stale
+  active manual로 고착되는 S3를 확인했다. direct upsert와 resolver snapshot SQL을 분리해
+  활성 manual만 보존하고, 비활성 row는 resolver가 재분류할 수 있게 수정했다.
+- 같은 리뷰어가 수정본을 승인했고, 관련 unit/PostGIS 테스트 30개, Ruff, strict mypy
+  115개 소스, import 계약 4개, prod redaction이 통과했다.
+- **다음 한 작업**: main 후속 PR을 CI green으로 병합한다.
+
 ## 2026-07-19 (claude) — #733~#737 심층 적대 리뷰 후속 수정 (fix/codex-pr-deep-review)
 
 - S2-1 POI target upsert TOCTOU를 lock-first(moved/reject 판정을 `FOR UPDATE` row lock
