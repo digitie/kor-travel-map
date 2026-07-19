@@ -642,6 +642,7 @@ module_arguments = sys.argv[5:]
 expected_root = Path("/usr/local/lib/kor-travel-map/c7-runner") / commit
 expected_module = expected_root / "scripts/lib/c7_prod_attestation.py"
 expected_paths = {
+    "scripts/audit-c7-prod-live-state.py",
     "scripts/lib/c7-prod-runner-lifecycle.sh",
     "scripts/lib/c7_prod_attestation.py",
     "scripts/run-c7-prod-live-e2e.sh",
@@ -713,6 +714,7 @@ verify_root_owned_orchestrator_snapshot() {
     snapshot \
     "$REPO_ROOT" \
     "${BASH_SOURCE[0]}" \
+    "$SCRIPT_DIR/audit-c7-prod-live-state.py" \
     "$SCRIPT_DIR/lib/c7-prod-runner-lifecycle.sh" \
     "$SCRIPT_DIR/lib/c7_prod_attestation.py" \
     "$HOST_ATTESTATION_FILE" \
@@ -1167,7 +1169,9 @@ start_orchestrator_lock_guard
   die "prior BLOCKED state requires operator recovery"
 has_residual_state && die "prior C7 journal/runtime residue requires operator recovery"
 create_blocked_sentinel
-trap finish EXIT INT TERM
+trap finish EXIT
+trap 'exit_for_signal 130' INT
+trap 'exit_for_signal 143' TERM
 
 RUNTIME_DIR="$(mktemp -d "$STATE_ROOT/runtime.XXXXXX")" ||
   die "private runtime directory creation failed"

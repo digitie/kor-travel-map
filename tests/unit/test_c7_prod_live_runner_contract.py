@@ -48,7 +48,9 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
         '[[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]]',
         "has_residual_state &&",
         "create_blocked_sentinel\n",
-        "trap finish EXIT INT TERM",
+        "trap finish EXIT\n",
+        "trap 'exit_for_signal 130' INT\n",
+        "trap 'exit_for_signal 143' TERM",
     )
     assert '/etc/kor-travel-map/c7-prod-live-e2e-attestation.json' in script
     assert 'machine_id_sha256' in attestation
@@ -60,6 +62,7 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     assert 'attestation["version"] != 3' in attestation
     assert 'expected_base: Path = Path("/usr/local/lib/kor-travel-map/c7-runner")' in attestation
     assert 'scripts/lib/c7_prod_attestation.py' in script
+    assert 'scripts/audit-c7-prod-live-state.py' in script
     assert 'compile(module_bytes, str(module_path), "exec")' in script
     assert "require_command git" not in script
     assert 'response.status != 200' in script
