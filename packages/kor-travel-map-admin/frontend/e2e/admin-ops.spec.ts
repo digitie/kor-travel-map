@@ -1220,10 +1220,10 @@ test.describe("admin/ops pages", () => {
     await expect.poll(() => requests.delete).toBe(1);
     expect(requests.revision).toBe(revisionReadsBeforeDelete);
     expect(requests.mutationEtags[1]).toBe('"1"');
-    expect(requests.deleteBodies[0]).toMatchObject({
-      operator: "local-admin",
+    expect(requests.deleteBodies[0]).toEqual({
       reason: "soft delete",
     });
+    expect(requests.deleteBodies[0]).not.toHaveProperty("operator");
 
     await page.goto("/admin/features/change-reviews");
     await page.getByLabel("change status", { exact: true }).selectOption("all");
@@ -1266,9 +1266,14 @@ test.describe("admin/ops pages", () => {
     await expect.poll(() => requests.patch).toBe(1);
     expect(requests.revision).toBe(revisionReadsBeforePatch);
     expect(requests.mutationEtags[0]).toBe('"1"');
-    await expect(
-      page.getByRole("heading", { name: "서버의 Feature가 변경되었습니다" }),
-    ).toBeVisible();
+    const conflictStatus = page
+      .getByRole("status")
+      .filter({ hasText: "서버의 Feature가 변경되었습니다" });
+    const reloadButton = conflictStatus.getByRole("button", {
+      name: "최신값으로 폼 다시 불러오기",
+    });
+    await expect(conflictStatus).toBeVisible();
+    await expect(reloadButton).toBeVisible();
     await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
       "Operator draft",
     );
@@ -1287,12 +1292,8 @@ test.describe("admin/ops pages", () => {
     await expect(submitButton).toBeDisabled();
     expect(requests.patch).toBe(1);
 
-    await page
-      .getByRole("button", { name: "최신값으로 폼 다시 불러오기" })
-      .click();
-    await expect(
-      page.getByRole("heading", { name: "서버의 Feature가 변경되었습니다" }),
-    ).toBeVisible();
+    await reloadButton.click();
+    await expect(conflictStatus).toBeVisible();
     await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
       "Operator draft",
     );
@@ -1302,9 +1303,7 @@ test.describe("admin/ops pages", () => {
     await expect.poll(() => requests.revision).toBe(revisionReadsBeforePatch + 1);
     await expect(page.getByText(/reload fixture failure/)).toBeVisible();
 
-    await page
-      .getByRole("button", { name: "최신값으로 폼 다시 불러오기" })
-      .click();
+    await reloadButton.click();
     await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
       "Server latest feature-stale-1",
     );
