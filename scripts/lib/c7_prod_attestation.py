@@ -27,6 +27,13 @@ ORCHESTRATOR_PATHS = (
     "scripts/lib/c7_prod_attestation.py",
     "scripts/run-c7-prod-live-e2e.sh",
 )
+PAIR_RUNTIME_IMAGE_FIELDS = (
+    ("map_api", "map_image_id"),
+    ("map_ui", "map_ui_image_id"),
+    ("map_dagster_web", "map_dagster_image_id"),
+    ("map_dagster_daemon", "map_dagster_daemon_image_id"),
+    ("pinvi_api", "pinvi_image_id"),
+)
 
 CommandRunner = Callable[[list[str], str], str]
 SecureReader = Callable[[Path, int], bytes]
@@ -242,27 +249,23 @@ def _compose_container(
 
 
 def _validate_pair(value: object) -> None:
+    image_fields = {field for _, field in PAIR_RUNTIME_IMAGE_FIELDS}
     if not _exact_dict(
         value,
-        {
+        image_fields
+        | {
             "contract_generation",
-            "map_image_id",
             "map_source_revision",
-            "pinvi_image_id",
             "pinvi_source_revision",
             "recorded_at",
         },
     ):
         raise AttestationError("pair shape")
     assert isinstance(value, dict)
-    if not isinstance(value["map_image_id"], str) or IMAGE_PATTERN.fullmatch(
-        value["map_image_id"]
-    ) is None:
-        raise AttestationError("Map image")
-    if not isinstance(value["pinvi_image_id"], str) or IMAGE_PATTERN.fullmatch(
-        value["pinvi_image_id"]
-    ) is None:
-        raise AttestationError("PinVi image")
+    for field in image_fields:
+        image_id = value[field]
+        if not isinstance(image_id, str) or IMAGE_PATTERN.fullmatch(image_id) is None:
+            raise AttestationError("pair image")
     if not isinstance(value["map_source_revision"], str) or COMMIT_PATTERN.fullmatch(
         value["map_source_revision"]
     ) is None:
@@ -368,7 +371,7 @@ def verify_runtime_attestation_payloads(
         raise AttestationError("attestation identity")
 
     manifest_sha256 = _sha256_bytes(manifest_bytes)
-    if not _exact_dict(manifest, {"active", "rollback", "version"}) or manifest["version"] != 3:
+    if not _exact_dict(manifest, {"active", "rollback", "version"}) or manifest["version"] != 4:
         raise AttestationError("manifest shape")
     assert isinstance(manifest, dict)
     _validate_pair(manifest["active"])
@@ -518,11 +521,9 @@ def verify_runtime_attestation_payloads(
         raise AttestationError("runtime containers are not distinct")
     if compose_project_hashes != {attestation["compose_project_sha256"]}:
         raise AttestationError("wrong compose project")
-    if (
-        observed_images["map_api"] != active["map_image_id"]
-        or observed_images["pinvi_api"] != active["pinvi_image_id"]
-    ):
-        raise AttestationError("active pair is not deployed")
+    for role, field in PAIR_RUNTIME_IMAGE_FIELDS:
+        if observed_images[role] != active[field]:
+            raise AttestationError("active pair is not deployed")
 
     executor_records = json.loads(
         run_json(

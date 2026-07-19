@@ -451,7 +451,15 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert 'executor.get("Id") != environ["E2E_C7_PLAYWRIGHT_IMAGE"]' in attestation
     assert 'image_labels.get("org.opencontainers.image.revision")' in attestation
     assert '"source_commits"' in attestation
-    assert 'manifest["version"] != 3' in attestation
+    assert 'manifest["version"] != 4' in attestation
+    for field in (
+        "map_image_id",
+        "map_ui_image_id",
+        "map_dagster_image_id",
+        "map_dagster_daemon_image_id",
+        "pinvi_image_id",
+    ):
+        assert field in attestation
     assert 'active["map_source_revision"] != source_commits["map"]' in attestation
     assert 'active["pinvi_source_revision"] != source_commits["pinvi"]' in attestation
     assert "len(set(role_services.values())) != len(role_services)" in attestation
