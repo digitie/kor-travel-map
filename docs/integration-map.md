@@ -49,8 +49,9 @@
                                                        ops caller는 T-ADM-C6c 전환 대기)
 
 [kor-travel-docker-manager] ═══ 인프라 계층(별도 데이터 흐름 없음): PostGIS(5432)·RustFS(12101) 구동/관리
-[kor-travel-docker-manager Prometheus :12401] ──(pull scrape, Authorization Bearer
-                                                 metrics token — ADR-066 T-VN-02)──▶ [kor-travel-map :12701/metrics]
+[kor-travel-docker-manager Prometheus :12401] ┄┄(목표: Authorization Bearer metrics token으로
+       12701 scrape — ADR-066 T-VN-02. 현재 docker-manager prometheus.yml에
+       12701 job 없음, 배포 시 인증과 함께 신규 추가)┄▶ [kor-travel-map :12701/metrics]
 ```
 
 - PinVi ↔ kor-travel-map: **HTTP만**(라이브러리 import·공유 DB 없음, ADR-045/PinVi ADR-026).
@@ -117,7 +118,7 @@
 | kor-travel-map service read (`POST /v1/features/batch`) | 설정 시 `X-Kor-Travel-Map-Service-Token`; 미설정은 현재 하위호환 통과(목표는 production fail-closed) | 〃 (`data={found{},missing[]}`) | 〃 |
 | kor-travel-map admin + canonical ops (`/v1/admin/*`·`/v1/ops/{datasets,pipeline}*`) | same-origin Next.js BFF의 proxy secret + actor + trusted peer CIDR. Docker는 secret 필수·frontend 단일 `/32` | 〃 | 〃 |
 | kor-travel-map ops live WebSocket | BFF가 발급한 짧은 수명 HMAC subprotocol ticket + DB nonce 단일 소비 + bounded lease | WebSocket event frame | 인증/만료는 data frame 없이 close 4401/4408 |
-| kor-travel-map Prometheus `/metrics` | `KOR_TRAVEL_MAP_API_METRICS_TOKEN` 설정 시 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) — production은 token 필수, docker-manager Prometheus scrape_config `authorization`(Bearer)에 같은 값 반영 | Prometheus exposition | 401/403 `problem+json` |
+| kor-travel-map Prometheus `/metrics` | `KOR_TRAVEL_MAP_API_METRICS_TOKEN` 설정 시 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) — production은 token 필수. **목표**: docker-manager Prometheus가 인증 헤더로 12701 scrape(현재 그 job 없음 — 배포 시 `authorization`(Bearer)와 함께 신규 추가, scrape config→token 순서) | Prometheus exposition | 비-Bearer/불일치 401 |
 | kor-travel-map 관측/debug 잔여 (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep}`, `/v1/debug/mois-license/*`) | 현재 app dependency 없음 — **해결 전 노출 금지인 알려진 gap**(route policy matrix의 `KNOWN_WIRING_EXCEPTIONS` ledger, T-VN-03 소유) | 표면별 기존 envelope | 표면별 기존 계약 |
 | kor-travel-concierge export (`/api/v1/features/*`) | DB `read` scope `X-API-Key` | **무-envelope** `{items, next_cursor, has_more}` (내부 export 단순 계약) | HTTP status |
 | PinVi 자체 API (`:9021`) | 쿠키 세션/OAuth | PinVi 자체 `Envelope` | PinVi 자체 |

@@ -82,6 +82,18 @@ def _representative_app(**overrides: object) -> FastAPI:
     return create_app(_representative_settings(**overrides))
 
 
+def _production_app(**overrides: object) -> FastAPI:
+    """전 surface 활성 production 구성 — docs UI off·debug off를 검증한다."""
+
+    return create_app(
+        _representative_settings(
+            profile="production",
+            debug_routes_enabled=False,
+            **overrides,
+        )
+    )
+
+
 # ── 미분류 CI gate (§8.2 — route policy matrix에 미분류 route 0건) ────────────
 
 
@@ -206,6 +218,67 @@ def test_unlisted_wiring_gap_fails(monkeypatch: pytest.MonkeyPatch) -> None:
         assert_route_policy_wiring(_representative_app())
 
 
+@pytest.mark.unit
+def test_every_ledgered_path_is_get_only() -> None:
+    # ledger는 읽기 전용 gap만 면제한다 — 각 예외 경로가 실제로 GET-only인지
+    # matrix에서 확인한다(무인증 MUTATION이 ledger 아래 숨는 것 방지).
+    matrix = build_route_policy_matrix(_representative_app())
+    methods_by_path = {row.path: set(row.methods) for row in matrix}
+    for entry in KNOWN_WIRING_EXCEPTIONS:
+        methods = methods_by_path[entry.path]
+        assert methods - {"GET", "HEAD"} == set(), (entry.path, methods)
+
+
+@pytest.mark.unit
+def test_ledger_exempting_a_mutation_route_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ledger에 POST 등 비-GET route를 넣으면 wiring gate가 거부해야 한다 —
+    # T-VN-03 배선 전 무인증 MUTATION이 조용히 면제되는 것을 막는 가드.
+    from kortravelmap.api import route_policy as module
+    from kortravelmap.api.route_policy import WiringException
+
+    # `/v1/admin/features`는 GET+POST를 노출한다.
+    monkeypatch.setattr(
+        module,
+        "KNOWN_WIRING_EXCEPTIONS",
+        (
+            *KNOWN_WIRING_EXCEPTIONS,
+            WiringException("/v1/admin/features", "T-VN-99 (probe)", "mutation probe"),
+        ),
+    )
+    with pytest.raises(RoutePolicyError, match="non-GET method must not be"):
+        assert_route_policy_wiring(_representative_app())
+
+
+# ── callable-identity anti-spoof ─────────────────────────────────────────────
+
+
+@pytest.mark.unit
+def test_enforcement_is_identity_not_name_based() -> None:
+    # 같은 이름의 impostor dependency는 enforcement로 기록되지 않는다 — 관측은
+    # callable identity로만 판정하므로 이름만 흉내낸 경계는 wiring gate를 통과
+    # 못 한다(정책 미충족 → 실패). 실제 callable은 정확히 기록됨을 함께 확인한다.
+    from types import SimpleNamespace
+
+    from kortravelmap.api import route_policy as module
+
+    def require_public_api_key() -> None:  # noqa: D401 — same __name__ impostor.
+        return None
+
+    assert require_public_api_key.__name__ == "require_public_api_key"
+    impostor_dep = SimpleNamespace(call=require_public_api_key, dependencies=[])
+    impostor_root = SimpleNamespace(dependencies=[impostor_dep])
+    assert module._observed_enforcement(impostor_root) == ()
+
+    real_dep = SimpleNamespace(
+        call=module.require_public_api_key,
+        dependencies=[],
+    )
+    real_root = SimpleNamespace(dependencies=[real_dep])
+    assert module._observed_enforcement(real_root) == ("require_public_api_key",)
+
+
 # ── 정책별 대표 검증 ─────────────────────────────────────────────────────────
 
 
@@ -239,12 +312,43 @@ def test_service_policy_covers_features_batch_only() -> None:
 
 
 @pytest.mark.unit
-def test_debug_policy_routes_disappear_when_debug_flag_is_off() -> None:
+def test_debug_policy_covers_docs_uis_and_mois_in_local_dev() -> None:
+    matrix = build_route_policy_matrix(_representative_app())
+    debug_paths = {row.path for row in matrix if row.policy is RoutePolicy.DEBUG}
+    assert debug_paths == {
+        "/docs",
+        "/docs/oauth2-redirect",
+        "/redoc",
+        "/v1/debug/mois-license/{license_id}",
+    }
+    for row in matrix:
+        if row.policy is RoutePolicy.DEBUG:
+            assert row.observed_enforcement == ()
+
+
+@pytest.mark.unit
+def test_mois_debug_route_disappears_when_debug_flag_off_docs_remain() -> None:
+    # ``debug_routes_enabled=False``는 ``/v1/debug/*``만 내린다. interactive docs
+    # UI는 별도로 ``is_production``으로 gate되므로 local-dev에서는 그대로 남는다.
     matrix = build_route_policy_matrix(
         _representative_app(debug_routes_enabled=False)
     )
-    # debug 정책의 enforcing 경계는 dependency가 아니라 settings flag mount다.
-    assert not [row for row in matrix if row.policy is RoutePolicy.DEBUG]
+    debug_paths = {row.path for row in matrix if row.policy is RoutePolicy.DEBUG}
+    assert "/v1/debug/mois-license/{license_id}" not in debug_paths
+    assert {"/docs", "/redoc", "/docs/oauth2-redirect"} <= debug_paths
+
+
+@pytest.mark.unit
+def test_docs_uis_absent_in_production_openapi_contract_kept() -> None:
+    # ADR-066 D-1 (T-VN-02) — 인증 없는 interactive docs UI는 production에서
+    # 사라지고(debug policy = production-off), 기계 판독 계약 /openapi.json은 남는다.
+    matrix = build_route_policy_matrix(_production_app())
+    paths = {row.path for row in matrix}
+    assert not (paths & {"/docs", "/redoc", "/docs/oauth2-redirect"})
+    assert "/openapi.json" in paths
+    assert "/v1/debug/mois-license/{license_id}" not in paths
+    openapi_row = next(row for row in matrix if row.path == "/openapi.json")
+    assert openapi_row.policy is RoutePolicy.PUBLIC_UNAUTHENTICATED
 
 
 @pytest.mark.unit
@@ -255,14 +359,8 @@ def test_public_unauthenticated_is_liveness_version_and_openapi_contract() -> No
         for row in matrix
         if row.policy is RoutePolicy.PUBLIC_UNAUTHENTICATED
     }
-    assert paths == {
-        "/health",
-        "/version",
-        "/docs",
-        "/docs/oauth2-redirect",
-        "/redoc",
-        "/openapi.json",
-    }
+    # D-1: interactive docs UI는 여기 없다(→ debug). 기계 판독 계약만 유지.
+    assert paths == {"/health", "/version", "/openapi.json"}
     for row in matrix:
         if row.policy is RoutePolicy.PUBLIC_UNAUTHENTICATED:
             assert row.observed_enforcement == ()

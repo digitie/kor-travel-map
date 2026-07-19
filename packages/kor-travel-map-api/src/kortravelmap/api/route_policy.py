@@ -131,15 +131,19 @@ class WiringException:
 # ---------------------------------------------------------------------------
 
 ROUTE_POLICIES: dict[str, RoutePolicy] = {
-    # -- public-unauthenticated — liveness/version (ADR-066 결정 1) + OpenAPI
-    #    계약 표면. docs/openapi는 저장소에 export되는 공개 계약(ADR-031,
-    #    `packages/kor-travel-map-api/openapi.json`)의 정적 UI라 비밀이 아니다.
+    # -- public-unauthenticated — liveness/version (ADR-066 결정 1)만. D-1의
+    #    "public-unauthenticated=(liveness/version)"을 넓히지 않는다.
+    #    ``/openapi.json``은 저장소에 export/commit되는 기계 판독 공개 계약
+    #    (ADR-031)이라 비밀이 아니고 모든 profile에서 유지한다.
     "/health": RoutePolicy.PUBLIC_UNAUTHENTICATED,
     "/version": RoutePolicy.PUBLIC_UNAUTHENTICATED,
-    "/docs": RoutePolicy.PUBLIC_UNAUTHENTICATED,
-    "/docs/oauth2-redirect": RoutePolicy.PUBLIC_UNAUTHENTICATED,
-    "/redoc": RoutePolicy.PUBLIC_UNAUTHENTICATED,
     "/openapi.json": RoutePolicy.PUBLIC_UNAUTHENTICATED,
+    # -- debug — 인증 없는 interactive docs UI. production에서 내린다
+    #    (app.py의 ``docs_url``/``redoc_url``=None). debug policy의 enforcing
+    #    경계는 dependency가 아니라 production-off이며 ``/v1/debug/*``와 같다.
+    "/docs": RoutePolicy.DEBUG,
+    "/docs/oauth2-redirect": RoutePolicy.DEBUG,
+    "/redoc": RoutePolicy.DEBUG,
     # -- public-keyed — 공개 REST read (VWorld 호환 public API key).
     "/v1/categories": RoutePolicy.PUBLIC_KEYED,
     "/v1/curations": RoutePolicy.PUBLIC_KEYED,
@@ -485,6 +489,17 @@ def assert_route_policy_wiring(app: FastAPI) -> tuple[RoutePolicyMatrixRow, ...]
         satisfied = _wiring_satisfied(row)
         exception = exceptions_by_path.get(row.path)
         if exception is not None:
+            # ledger는 읽기 전용 gap만 임시 면제한다. ledger된 경로 아래 무인증
+            # MUTATION이 T-VN-03 배선 전에 조용히 면제되는 것을 막는다 — 현재
+            # ledger 항목은 전부 GET-only ops/curated read다.
+            non_get_methods = set(row.methods) - {"GET", "HEAD"}
+            if non_get_methods:
+                problems.append(
+                    f"{row.path}: KNOWN_WIRING_EXCEPTIONS may only exempt read-only "
+                    f"routes but this route exposes {sorted(non_get_methods)!r} — "
+                    "a non-GET method must not be ledger-exempted; wire the "
+                    "enforcing dependency instead"
+                )
             if satisfied:
                 problems.append(
                     f"{row.path}: KNOWN_WIRING_EXCEPTIONS entry is stale — "

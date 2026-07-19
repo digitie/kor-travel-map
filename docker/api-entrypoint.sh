@@ -124,8 +124,14 @@ fi
 # (ApiSettings.assert_production_ready)다. 그중 "production + ops surface 활성 +
 # ops pair 미구성"은 migration이 이미 실행된 뒤 uvicorn 기동에서야 실패해
 # 2단계 혼란을 만들므로, 같은 문구로 migration 전에 거부한다(메시지 lockstep).
-# profile 기본값은 Docker image ENV(production)와 같다.
-api_profile="${KOR_TRAVEL_MAP_API_PROFILE:-production}"
+# profile 기본값은 Docker image ENV(production)와 같다. set-but-empty를 조용히
+# production으로 접지 않도록 set-vs-unset(+x)로 판정한다 — compose는 막지만
+# 직접 ``docker run``은 빈 값을 넘길 수 있고 settings도 빈 문자열을 거부한다.
+if [ "${KOR_TRAVEL_MAP_API_PROFILE+x}" = "x" ]; then
+  api_profile="$KOR_TRAVEL_MAP_API_PROFILE"
+else
+  api_profile="production"
+fi
 case "$api_profile" in
   production | local-dev) ;;
   *)

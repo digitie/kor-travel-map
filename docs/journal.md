@@ -38,6 +38,25 @@
   passed(사전 존재 Windows 한정 `run-admin-stack.sh` bash 실패 14건은 base에서도
   동일 재현 — 본 변경과 무관), `ruff check` clean, `mypy --strict -p
   kortravelmap.api` clean, openapi drift 없음(`/metrics`는 스키마 밖).
+- 리뷰 반영(PASS-WITH-FIXES): (S2) deploy.md/CHANGELOG/integration-map/settings
+  docstring을 정정 — docker-manager `prometheus.yml`에 **현재 12701 scrape job이
+  없음**을 명시하고("목표"로 wording), zero-gap 순서(scrape config에 Bearer
+  authorization job 신규 추가 → 그다음 token 켜고 배포; 역순은 401 gap)를 YAML
+  예시와 함께 성문화. (S3.1) 인증 없는 interactive docs UI(`/docs`·`/redoc`·swagger
+  oauth2-redirect)를 production에서 내리고(`docs_url`/`redoc_url`=None) `debug`로
+  재분류 — D-1 public-unauthenticated를 넓히지 않는다. 기계 판독 `/openapi.json`은
+  유지(ADR-031, `include_in_schema=False`라 committed openapi.json 불변, drift 없음).
+  (S3.2) metrics token 검사를 UTF-8 bytes 비교로 바꿔 비-ASCII Authorization 헤더가
+  500이 아닌 401 fail-closed(TypeError→500 재현 후 수정 확인). (S3.3)
+  `assert_route_policy_wiring`에 ledger 경로 GET-only 강제 + 비-GET 면제 거부 가드와
+  테스트 추가. (S3.4) entrypoint PROFILE을 `+x` set-vs-unset으로 판정해 set-but-empty가
+  조용히 production으로 접히지 않게 함(직접 `docker run` 경로). (S3.5) callable-identity
+  anti-spoof 테스트(같은 이름 impostor는 enforcement로 기록 안 됨) pin.
+- 리뷰 지시대로 defer(범위 밖, 1줄 note): (a) entrypoint의 DEBUG_ROUTES_ENABLED
+  ambiguous-spelling 게이트 — #742는 PROFILE/FEATURES/OPS만 정정, DEBUG flag는 후속.
+  (b) 기존 auth.py의 동일 latin-1 TypeError 패턴 3곳(`_admin_proxy_secret_matches`
+  L167 계열·`require_ops_operator` L308 계열·`service_token_matches` L363 계열,
+  본 PR 이전 코드) — 이번 metrics 검사만 bytes 비교로 고쳤고 나머지는 별도 후속.
 
 ## 2026-07-19 (codex) — Agent A PR #743 적대적 심층 리뷰 후속
 

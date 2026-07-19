@@ -464,10 +464,15 @@ def require_metrics_token(request: Request) -> None:
         return
     provided = request.headers.get("Authorization") or ""
     scheme, _, credential = provided.partition(" ")
-    # RFC7235 — auth-scheme은 대소문자 무관. credential 비교만 상수시간이면 된다.
-    if scheme.lower() != METRICS_AUTHORIZATION_SCHEME.lower() or not hmac.compare_digest(
-        credential.strip(), expected.get_secret_value()
-    ):
+    # RFC7235 — auth-scheme은 대소문자 무관. Starlette은 헤더를 latin-1로
+    # 디코드하므로 비-ASCII Authorization 값을 그대로 ``hmac.compare_digest(str,
+    # str)``에 넣으면 TypeError(→500)가 난다. UTF-8 bytes로 비교해 잘못된 헤더가
+    # 500이 아니라 401로 fail-closed되게 한다(latin-1 디코드는 code point 0~255만
+    # 내므로 UTF-8 인코딩은 항상 성공한다).
+    scheme_matches = scheme.lower() == METRICS_AUTHORIZATION_SCHEME.lower()
+    credential_bytes = credential.strip().encode("utf-8")
+    expected_bytes = expected.get_secret_value().encode("utf-8")
+    if not scheme_matches or not hmac.compare_digest(credential_bytes, expected_bytes):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=(

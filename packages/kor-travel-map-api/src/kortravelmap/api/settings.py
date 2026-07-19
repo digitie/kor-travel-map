@@ -121,8 +121,10 @@ class ApiSettings(BaseSettings):
         default="/metrics",
         pattern=r"^/[A-Za-z0-9/_\-.]*$",
         description=(
-            "Prometheus exposition endpoint path. kor-travel-docker-manager의 "
-            "Prometheus는 API 포트(기본 12701)의 이 path를 scrape한다."
+            "Prometheus exposition endpoint path. 목표 배포에서 "
+            "kor-travel-docker-manager의 Prometheus가 API 포트(기본 12701)의 이 "
+            "path를 pull scrape한다(현재 docker-manager prometheus.yml에는 12701 "
+            "job이 아직 없어 배포 시 인증과 함께 추가한다 — T-VN-02)."
         ),
     )
     metrics_token: SecretStr | None = Field(

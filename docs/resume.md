@@ -15,9 +15,15 @@
   kor-travel-docker-manager Prometheus scrape_config `authorization`(Bearer) 반영.
 - issue #742 합류: ops pair 검증 정본을 settings production matrix로 일원화, entrypoint가
   production+both-empty pair를 migration 전에 동일 문구로 거부, 메시지 lockstep 테스트 추가.
-- **다음 한 작업**: 이 브랜치의 적대적 리뷰(오케스트레이터 소관) → full gates → PR·CI
-  green·`integration/t-vn` 머지. T-VN-03(codex b1)이 ledger의 curated/ops 관측 gap을 닫을
-  때 `KNOWN_WIRING_EXCEPTIONS`에서 해당 entry 제거가 강제된다.
+- 리뷰(PASS-WITH-FIXES) 반영 완료: /metrics 배포 문서에 zero-gap 순서 + "docker-manager에
+  현재 12701 scrape job 없음(신규 추가 대상)" 정정, production에서 interactive docs UI
+  (`/docs`·`/redoc`) off + `debug` 재분류(`/openapi.json`은 유지), metrics 검사 비-ASCII
+  헤더 401 fail-closed, ledger GET-only 강제, entrypoint PROFILE `+x` 판정, anti-spoof
+  테스트. defer(범위 밖): entrypoint DEBUG_ROUTES_ENABLED 철자 게이트, 기존 auth.py 3곳
+  latin-1 TypeError 패턴.
+- **다음 한 작업**: 오케스트레이터가 PR을 생성·CI green·`integration/t-vn` 머지한다(본 에이전트는
+  PR 생성 안 함). T-VN-03(codex b1)이 ledger의 curated/ops 관측 gap을 닫을 때
+  `KNOWN_WIRING_EXCEPTIONS`에서 해당 entry 제거가 강제된다.
 
 ## 2026-07-19 (codex) — Agent A T-VN-04 심층 리뷰 보완 완료
 

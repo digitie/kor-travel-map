@@ -25,10 +25,21 @@
   검증(불일치 401), production profile은 metrics endpoint 활성 시 이 token(앞뒤 공백
   없는 32자 이상, admin secret·service/ops token과 distinct)을 기동 필수로 요구한다.
   compose는 admin secret·service token과 같은 hard-require 패턴으로 host env를
-  전달한다. **배포 전제**: n150은 root `.env`에 metrics token을 추가하고
-  kor-travel-docker-manager Prometheus scrape_config에 같은 값을
-  `authorization`(type Bearer)으로 반영해야 scrape가 유지된다(미반영 시 401로
-  드러남 — 조용한 파손 아님). token 미설정 local-dev는 기존 open scrape 유지.
+  전달한다. **배포 전제(zero-gap 순서)**: kor-travel-docker-manager의
+  `config/prometheus/prometheus.yml`에는 현재 map-api(:12701) scrape job이 아예
+  없다(prometheus·cadvisor·kor-travel-geo만 존재) — 이 scrape는 신규 추가
+  대상이다. (1) **먼저** docker-manager scrape config에 map-api job을
+  `authorization: {type: Bearer, credentials: <token>}`와 함께 추가하고(변경 전
+  무인증 API는 헤더를 무시하므로 무해), (2) **그다음** root `.env`에 같은 값의
+  metrics token을 넣고 API를 배포한다. 순서를 뒤집으면 그 사이 scrape가 401 gap이
+  된다(조용한 파손이 아니라 scrape 실패로 드러남). token 미설정 local-dev는 기존
+  open scrape 유지. 상세·YAML 예시는 `docs/deploy.md`.
+- **CHANGED** (ADR-066 D-1, T-VN-02): production profile은 인증 없는 interactive
+  docs UI(`/docs`·`/redoc`·swagger oauth2-redirect)를 내린다(`docs_url`/`redoc_url`
+  =None). D-1의 "public-unauthenticated=(liveness/version)"을 넓히지 않기 위함이며
+  debug 라우터를 production에서 내리는 것과 같은 패턴이다. 기계 판독 공개 계약
+  `/openapi.json`(ADR-031 served artifact)은 유지한다. 세 route 모두
+  `include_in_schema=False`라 committed `openapi.json` `paths`는 불변(drift 없음).
 - **CHANGED** (#742 consolidation): ops pair 검증 정본은 settings production matrix로
   일원화했다. `docker/api-entrypoint.sh`는 production profile + ops surface 활성 +
   ops pair 미구성(양쪽 빈 값 포함)을 migration **전에** settings와 동일 문구로

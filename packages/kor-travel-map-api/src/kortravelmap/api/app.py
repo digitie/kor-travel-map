@@ -444,6 +444,16 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             if isinstance(client, httpx.AsyncClient):
                 await client.aclose()
 
+    # ADR-066 D-1 (T-VN-02) — 인증 없는 interactive docs UI(``/docs``·``/redoc``·
+    # swagger oauth2 redirect)는 production에서 내린다. D-1의
+    # public-unauthenticated=(liveness/version)을 넓히지 않기 위함이며, debug
+    # 라우터를 production에서 내리는 것과 같은 패턴이다. 기계 판독 공개 계약
+    # ``/openapi.json``(ADR-031 served artifact)은 유지한다 — 세 route 모두
+    # ``include_in_schema=False``라 committed openapi.json ``paths``에는 애초에
+    # 없어 drift가 없다.
+    docs_url = None if settings.is_production else "/docs"
+    redoc_url = None if settings.is_production else "/redoc"
+
     application = FastAPI(
         title="kor-travel-map-api",
         version=__version__,
@@ -455,6 +465,8 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         # ADR-031 — `--check` mode drift gate 안정성을 위해 ``servers``는 OpenAPI
         # spec에 포함하지 않는다 (호스트별 차이로 drift 발생 우려).
         servers=[],
+        docs_url=docs_url,
+        redoc_url=redoc_url,
         lifespan=lifespan,
     )
     application.state.settings = settings

@@ -949,6 +949,12 @@ def test_api_container_production_ops_surface_follows_features_flag(
             "KOR_TRAVEL_MAP_API_PROFILE must be exactly production or local-dev",
         ),
         (
+            # set-but-empty PROFILE은 조용히 production으로 접히지 않고 거부된다
+            # (`+x` set-vs-unset — 직접 docker run 경로, T-VN-02 리뷰 S3.4).
+            {"KOR_TRAVEL_MAP_API_PROFILE": ""},
+            "KOR_TRAVEL_MAP_API_PROFILE must be exactly production or local-dev",
+        ),
+        (
             {"KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "TRUE"},
             "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED must be exactly true or false",
         ),
