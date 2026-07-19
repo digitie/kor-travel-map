@@ -316,8 +316,13 @@ GET /v1/curated-features/{curated_feature_id}/pinvi-copy
 - Feature 표시: `feature_id/name/category/kind`, 좌표·행정코드, `address`, `detail`
 - 출처 표시: `source_name`, `source_url`
 
-`detail`은 Feature kind별 typed 필드 allowlist를 거치며 자유형 `payload`와 raw
-lineage 키는 통과하지 않는다. `theme_id`, `source_id`, `provider`, `dataset_key`,
+`PublicCuratedFeatureView`는 `feature_kind`가 판별자인
+`place|event|notice|area|route|price|weather` 7종 union이다. 알 수 없는 kind는 목록에서
+제외하고 단건 상세는 404로 닫는다. `address`와 kind별 `detail`은 모두
+`extra="forbid"`인 공개 중첩 DTO다. place의 `phones`, `reviews_link`,
+`business_hours`, `facility_info`는 검토된 키와 값 형태만 명시적으로 다시 조립한다.
+따라서 자유형 `payload`, concierge의 YouTube/transcript/evidence 평면 미러, 알 수 없는
+nested raw와 lineage 키는 통과하지 않는다. `theme_id`, `source_id`, `provider`, `dataset_key`,
 `source_record_key`, 선정/제외 actor·시각, `metadata` 같은 DB/source identity와 감사
 필드는 공개 schema에 없다. 이 값들은 `/v1/admin/features/curated*`의
 `CuratedFeatureView`에 그대로 남겨 운영 감사에 사용한다(T-VN-05R, ADR-073).
@@ -325,14 +330,13 @@ lineage 키는 통과하지 않는다. `theme_id`, `source_id`, `provider`, `dat
 `GET /v1/curated-features` 주요 query:
 
 - `theme_slug`
-- `theme_id`
-- `source_id`
-- `provider`
-- `dataset_key`
-- `curation_status` 기본 `curated`
 - `region_code` 또는 `sido_code`/`sigungu_code`
 - `bbox`는 기존 표준인 `min_lon/min_lat/max_lon/max_lat`
+- `q`, `feature_name`, `display_title`
 - `page_size`/`cursor`
+
+내부 identity 필터 `theme_id`, `source_id`, `provider`, `dataset_key`와 상태 필터는
+`/v1/admin/features/curated`에서만 제공한다.
 
 `pinvi-copy` 응답은 PinVi import에 필요한 snapshot을 닫힌 형태로 제공한다. PinVi는
 이 응답을 `app.curated_trip_plans` 1건과 `app.curated_plan_pois` N건으로 복사한다.

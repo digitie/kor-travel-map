@@ -22,13 +22,16 @@
 
 - issue #765의 우회 경로를 닫기 위해 공개 curated list/detail을 admin
   `CuratedFeatureView`에서 분리한 `PublicCuratedFeatureView` allowlist로 전환했다.
-  kind별 detail allowlist가 `payload`와 미승인 raw 키를 fail-closed로 제거하고,
-  source/DB identity·감사값·자유형 metadata도 공개 schema에서 제외한다.
+  동일 리뷰어 후속 3건을 반영해 `feature_kind` 판별 7종 union, strict 주소/kind별 detail,
+  place 시설·영업시간·전화·리뷰 링크 projector를 완결했다. 실제 concierge
+  YouTube/transcript/evidence 미러와 미승인 nested raw를 제거하며 알 수 없는 kind는
+  목록 제외/상세 404로 fail-closed한다. 공개 목록의 내부 identity 필터
+  `theme_id/source_id/provider/dataset_key`도 제거했다.
 - admin `/v1/admin/features/curated*`는 기존 전체 DTO와 raw 감사값을 유지한다. 공개
   list/detail sentinel 회귀와 full/user OpenAPI schema 분리, admin/user 생성 타입 갱신을
   같은 변경에 포함한다.
-- **다음 한 작업**: 동일 전문 리뷰어 1명의 테스트 전 검토를 받은 뒤 지적을 반영하고,
-  로컬 gate→PR→CI green→`integration/t-vn` 병합→#765 닫기를 진행한다.
+- **다음 한 작업**: OpenAPI/TypeScript 생성물을 갱신하고 PR #774에 후속 커밋한다. 이번
+  커밋은 요청대로 테스트를 실행하지 않고 CI 결과를 후속 확인한다.
 
 ## 2026-07-19 (codex) — 최근 48시간 Claude PR 적대 리뷰 후속 계획
 
