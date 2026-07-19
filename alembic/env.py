@@ -21,7 +21,6 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-from alembic.script import ScriptDirectory
 from kortravelmap.infra.db import normalize_async_dsn
 from kortravelmap.infra.models import metadata
 
@@ -57,42 +56,22 @@ target_metadata = metadata
 _FORWARD_ONLY_BOUNDARY = "0060_weather_integrity"
 
 
-def _revision_includes_forward_only_boundary(
-    script: ScriptDirectory,
-    revision: str | tuple[str, ...] | None,
-) -> bool:
-    """revision 또는 그 조상에 0060 forward-only 경계가 있는지 반환한다."""
-    if revision is None:
-        return False
-    return any(
-        node.revision == _FORWARD_ONLY_BOUNDARY
-        for node in script.iterate_revisions(revision, None, inclusive=True)
-    )
-
-
 def _guard_forward_only_target() -> None:
-    """0060 이상 DB를 그 아래 target으로 내리는 실행을 migration 전에 거부한다."""
-    try:
-        destination = context.get_revision_argument()
-    except (KeyError, TypeError):
-        # ``current``처럼 destination revision이 없는 read-only command.
-        return
-
+    """Alembic의 실제 실행 계획이 0060을 내리면 첫 step 전에 거부한다."""
     migration_context = context.get_context()
-    current_heads = migration_context.get_current_heads()
-    if not current_heads:
+    migration_fn = migration_context.opts.get("fn")
+    if migration_fn is None:
+        # ``current``처럼 migration plan이 없는 read-only command.
         return
 
-    script = ScriptDirectory.from_config(config)
-    current_has_boundary = _revision_includes_forward_only_boundary(
-        script,
-        current_heads,
+    current_heads = migration_context.get_current_heads()
+    planned_steps = tuple(migration_fn(current_heads, migration_context))
+    crosses_boundary = any(
+        step.is_downgrade
+        and _FORWARD_ONLY_BOUNDARY in step.from_revisions_no_deps
+        for step in planned_steps
     )
-    destination_has_boundary = _revision_includes_forward_only_boundary(
-        script,
-        destination,
-    )
-    if current_has_boundary and not destination_has_boundary:
+    if crosses_boundary:
         raise RuntimeError(
             "0060 is forward-only: restore the pre-cutover backup/PITR under a "
             "writer fence and roll back the writer image as one operation"

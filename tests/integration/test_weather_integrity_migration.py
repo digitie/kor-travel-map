@@ -310,6 +310,57 @@ async def test_forward_only_guard_runs_before_descendant_downgrade(
             await engine.dispose()
 
 
+async def test_forward_only_guard_resolves_relative_targets_from_current_head(
+    pg_container: Any,
+) -> None:
+    """상대 target은 현재 DB head 기준으로 계획하되 0060을 내리는 step만 막는다."""
+    async with _fresh_database(pg_container) as dsn:
+        await asyncio.to_thread(_run_alembic, dsn, _HEAD_REVISION)
+
+        # 0061 -> 0060은 forward-only 경계를 보존하므로 허용한다.
+        await asyncio.to_thread(_run_alembic, dsn, "-1", downgrade=True)
+        engine = make_async_engine(dsn)
+        try:
+            async with engine.connect() as connection:
+                assert (
+                    await connection.scalar(
+                        text("SELECT version_num FROM alembic_version")
+                    )
+                    == _TARGET_REVISION
+                )
+        finally:
+            await engine.dispose()
+
+        # 0060 -> 0061 상대 upgrade도 현재 head 기준으로 정상 해석한다.
+        await asyncio.to_thread(_run_alembic, dsn, "+1")
+        engine = make_async_engine(dsn)
+        try:
+            async with engine.connect() as connection:
+                assert (
+                    await connection.scalar(
+                        text("SELECT version_num FROM alembic_version")
+                    )
+                    == _HEAD_REVISION
+                )
+        finally:
+            await engine.dispose()
+
+        # 0061 -> 0059는 실제 plan에 0060 downgrade가 포함되어 첫 step 전에 차단한다.
+        with pytest.raises(RuntimeError, match="0060 is forward-only"):
+            await asyncio.to_thread(_run_alembic, dsn, "-2", downgrade=True)
+        engine = make_async_engine(dsn)
+        try:
+            async with engine.connect() as connection:
+                assert (
+                    await connection.scalar(
+                        text("SELECT version_num FROM alembic_version")
+                    )
+                    == _HEAD_REVISION
+                )
+        finally:
+            await engine.dispose()
+
+
 async def test_upgrade_fences_writer_from_dedup_through_unique(
     pg_container: Any,
 ) -> None:
