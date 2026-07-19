@@ -12,7 +12,14 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
-import { deleteJson, getJson, patchJson, pathWithQuery, postJson } from "./client";
+import {
+  deleteJson,
+  getJson,
+  getJsonWithResponse,
+  patchJson,
+  pathWithQuery,
+  postJson,
+} from "./client";
 import type { components, paths } from "./types";
 
 type FeatureSchemas = components["schemas"];
@@ -821,9 +828,12 @@ function patchAdminFeature(
   featureId: string,
   body: AdminFeaturePatchRequest,
 ): Promise<AdminFeatureChangeResponse> {
-  return patchJson<AdminFeatureChangeResponse>(
-    `/v1/admin/features/${encodeURIComponent(featureId)}`,
-    body,
+  return fetchFeatureRevisionEtag(featureId).then((entityTag) =>
+    patchJson<AdminFeatureChangeResponse>(
+      `/v1/admin/features/${encodeURIComponent(featureId)}`,
+      body,
+      { headers: { "If-Match": entityTag } },
+    ),
   );
 }
 
@@ -831,10 +841,25 @@ function deleteAdminFeature(
   featureId: string,
   body: AdminFeatureDeleteRequest,
 ): Promise<AdminFeatureChangeResponse> {
-  return deleteJson<AdminFeatureChangeResponse>(
-    `/v1/admin/features/${encodeURIComponent(featureId)}`,
-    body,
+  return fetchFeatureRevisionEtag(featureId).then((entityTag) =>
+    deleteJson<AdminFeatureChangeResponse>(
+      `/v1/admin/features/${encodeURIComponent(featureId)}`,
+      body,
+      { headers: { "If-Match": entityTag } },
+    ),
   );
+}
+
+async function fetchFeatureRevisionEtag(featureId: string): Promise<string> {
+  const path = `/v1/admin/features/${encodeURIComponent(featureId)}/revision`;
+  const { response } = await getJsonWithResponse<
+    FeatureSchemas["AdminFeatureRevisionResponse"]
+  >(path);
+  const entityTag = response.headers.get("ETag");
+  if (entityTag === null) {
+    throw new Error(`GET ${path} 응답에 ETag가 없습니다.`);
+  }
+  return entityTag;
 }
 
 function approveAdminFeatureChangeRequest(

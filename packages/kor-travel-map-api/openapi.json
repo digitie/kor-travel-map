@@ -996,6 +996,18 @@
             ],
             "title": "Applied At"
           },
+          "base_row_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "update/delete 요청 제출 시 확인한 feature row_revision.",
+            "title": "Base Row Revision"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1767,6 +1779,12 @@
             ],
             "title": "Road Name Code"
           },
+          "row_revision": {
+            "description": "correction If-Match에 사용할 server-owned revision.",
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
           "sibling_group_id": {
             "anyOf": [
               {
@@ -1894,6 +1912,7 @@
           "raw_refs",
           "data_origin",
           "data_version",
+          "row_revision",
           "created_at",
           "updated_at"
         ],
@@ -3003,6 +3022,41 @@
           }
         },
         "title": "AdminFeatureReviewActionRequest",
+        "type": "object"
+      },
+      "AdminFeatureRevisionData": {
+        "additionalProperties": false,
+        "description": "correction precondition용 feature core revision snapshot.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "row_revision": {
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_id",
+          "row_revision"
+        ],
+        "title": "AdminFeatureRevisionData",
+        "type": "object"
+      },
+      "AdminFeatureRevisionResponse": {
+        "additionalProperties": false,
+        "description": "동적 aggregate를 제외한 stable revision representation.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminFeatureRevisionData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "AdminFeatureRevisionResponse",
         "type": "object"
       },
       "AdminFeaturesListData": {
@@ -10209,6 +10263,12 @@
             "title": "Name",
             "type": "string"
           },
+          "row_revision": {
+            "description": "server-owned feature revision. ETag과 같은 값이다.",
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
           "sido_code": {
             "anyOf": [
               {
@@ -10255,6 +10315,7 @@
           "detail",
           "urls",
           "status",
+          "row_revision",
           "updated_at"
         ],
         "title": "FeatureDetailResponse",
@@ -26863,15 +26924,6 @@
               "title": "Request Id",
               "type": "string"
             }
-          },
-          {
-            "description": "직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성).",
-            "in": "header",
-            "name": "If-Match",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -26941,17 +26993,7 @@
                 }
               }
             },
-            "description": "If-Match가 row_revision strong ETag가 아님"
-          },
-          "428": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "If-Match 누락"
+            "description": "Validation Error"
           },
           "default": {
             "content": {
@@ -28749,15 +28791,6 @@
               "title": "Feature Id",
               "type": "string"
             }
-          },
-          {
-            "description": "이전 ETag(row_revision)와 같으면 304로 응답한다.",
-            "in": "header",
-            "name": "If-None-Match",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -28769,18 +28802,7 @@
                 }
               }
             },
-            "description": "Successful Response",
-            "headers": {
-              "ETag": {
-                "description": "현재 feature의 server-owned row_revision strong entity tag.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "304": {
-            "description": "If-None-Match row_revision 일치 (본문 없음)"
+            "description": "Successful Response"
           },
           "404": {
             "content": {
@@ -29038,6 +29060,81 @@
           }
         ],
         "summary": "Deactivate Feature Route",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
+    "/v1/admin/features/{feature_id}/revision": {
+      "get": {
+        "operationId": "get_feature_revision_route_v1_admin_features__feature_id__revision_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeatureRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 feature의 server-owned row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Get Feature Revision Route",
         "tags": [
           "admin-features"
         ]
@@ -34329,7 +34426,18 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 feature row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "If-None-Match row_revision 일치 (본문 없음)"
           },
           "404": {
             "content": {
@@ -34349,7 +34457,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "If-None-Match가 canonical strong ETag가 아님"
           },
           "default": {
             "content": {

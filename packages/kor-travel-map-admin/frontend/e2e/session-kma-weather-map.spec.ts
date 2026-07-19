@@ -110,6 +110,7 @@ function makeFeatureDetail(
     lat: SEOUL_LAT,
     lon: SEOUL_LON,
     name: "기상청 초단기 서울",
+    row_revision: 1,
     status: "active",
     updated_at: "2026-06-29T00:00:00.000Z",
     urls: {},

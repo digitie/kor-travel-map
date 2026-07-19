@@ -454,6 +454,24 @@ export function getJson<T>(
   });
 }
 
+export async function getJsonWithResponse<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<{ body: T; response: Response }> {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    method: "GET",
+    headers: { Accept: "application/json", ...options.headers },
+    credentials: "same-origin",
+    cache: "no-store",
+    signal: options.signal,
+  });
+  if (!response.ok) {
+    redirectToLoginOnAuthRequired(response.status);
+    throw await apiClientErrorFromResponse("GET", path, response);
+  }
+  return { body: (await response.json()) as T, response };
+}
+
 export function postJson<T>(
   path: string,
   body?: unknown,

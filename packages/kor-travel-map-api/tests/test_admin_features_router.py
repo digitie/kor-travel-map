@@ -126,6 +126,7 @@ def _feature_detail() -> AdminFeatureDetail:
         sibling_group_id=None,
         data_origin="provider",
         data_version=0,
+        row_revision=7,
         user_change_kind=None,
         user_change_status=None,
         user_change_request_id=None,
@@ -236,6 +237,7 @@ def _change_request(
     action: str = "add",
     state: str = "pending",
     review_mode: str = "require_review",
+    base_row_revision: int | None = None,
     payload: dict[str, Any] | None = None,
     reason: str | None = "사용자 제보",
     requested_by: str | None = "local-admin",
@@ -249,6 +251,7 @@ def _change_request(
         action=action,
         state=state,
         review_mode=review_mode,
+        base_row_revision=base_row_revision,
         payload=payload or {},
         reason=reason,
         requested_by=requested_by,
@@ -265,6 +268,7 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/features" in spec["paths"]
     assert set(spec["paths"]["/v1/admin/features"]) >= {"get", "post"}
     assert "/v1/admin/features/{feature_id}" in spec["paths"]
+    assert "/v1/admin/features/{feature_id}/revision" in spec["paths"]
     assert set(spec["paths"]["/v1/admin/features/{feature_id}"]) >= {
         "get",
         "patch",
@@ -348,12 +352,7 @@ def test_get_admin_feature_detail_returns_linked_operational_data(
         }
         return {"feature-1": ()}
 
-    async def _revision(_session: Any, feature_id: str) -> int:
-        assert feature_id == "feature-1"
-        return 7
-
     monkeypatch.setattr(router_mod, "get_admin_feature_detail", _detail)
-    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
     monkeypatch.setattr(
         router_mod.curation_repo,
         "list_curation_items_by_feature_ids",
@@ -363,9 +362,10 @@ def test_get_admin_feature_detail_returns_linked_operational_data(
     response = client.get("/v1/admin/features/feature-1")
 
     assert response.status_code == 200
-    assert response.headers["ETag"] == '"7"'
+    assert "ETag" not in response.headers
     body = response.json()
     assert body["data"]["feature"]["feature_id"] == "feature-1"
+    assert body["data"]["feature"]["row_revision"] == 7
     assert body["data"]["feature"]["raw_refs"] == [{"source": "fixture"}]
     assert body["data"]["sources"][0]["source_entity_key"] == "se-feature-1"
     assert body["data"]["sources"][0]["raw_data"] == {"id": "sr-feature-1"}
@@ -384,15 +384,36 @@ def test_get_admin_feature_detail_returns_404(
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
-    async def _revision(_session: Any, feature_id: str) -> None:
+    async def _detail(_session: Any, feature_id: str) -> None:
         assert feature_id == "missing"
 
-    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
+    monkeypatch.setattr(router_mod, "get_admin_feature_detail", _detail)
 
     response = client.get("/v1/admin/features/missing")
 
     assert response.status_code == 404
     assert response.json()["code"] == "NOT_FOUND"
+
+
+@pytest.mark.unit
+def test_get_feature_revision_returns_stable_etag(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    async def _revision(_session: Any, feature_id: str) -> int:
+        assert feature_id == "feature-1"
+        return 7
+
+    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
+    response = client.get("/v1/admin/features/feature-1/revision")
+
+    assert response.status_code == 200
+    assert response.headers["ETag"] == '"7"'
+    assert response.json() == {
+        "data": {"feature_id": "feature-1", "row_revision": 7}
+    }
 
 
 @pytest.mark.unit
@@ -567,7 +588,7 @@ def test_delete_feature_request_submits_soft_delete(
     response = client.request(
         "DELETE",
         "/v1/admin/features/feature-1",
-        headers={"If-Match": "9"},
+        headers={"If-Match": '"9"'},
         json={"reason": "사용자 삭제 요청"},
     )
 
@@ -592,7 +613,7 @@ def test_approve_and_reject_feature_change_requests(
     ) -> FeatureChangeRequest:
         assert request_id == "change-1"
         assert kwargs["operator"] == "local-dev"  # T-VN-20: principal, not body operator
-        assert kwargs["expected_row_revision"] == 2  # If-Match row_revision
+        assert "expected_row_revision" not in kwargs
         return _change_request(
             request_id=request_id,
             state="applied",
@@ -625,7 +646,6 @@ def test_approve_and_reject_feature_change_requests(
 
     approve = client.post(
         "/v1/admin/features/change-requests/change-1/approve",
-        headers={"If-Match": '"2"'},
         json={"operator": "reviewer"},
     )
     reject = client.post(
@@ -652,14 +672,40 @@ def test_patch_feature_without_if_match_returns_428(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_delete_feature_with_malformed_if_match_returns_422(
+@pytest.mark.parametrize(
+    "entity_tag",
+    [
+        "not-a-revision",
+        "7",
+        'W/"7"',
+        "*",
+        '"0"',
+        '"007"',
+        '"7", "8"',
+        '"9223372036854775808"',
+    ],
+)
+def test_delete_feature_with_noncanonical_if_match_returns_422(
     client: TestClient,
+    entity_tag: str,
 ) -> None:
     response = client.request(
         "DELETE",
         "/v1/admin/features/feature-1",
-        headers={"If-Match": "not-a-revision"},
+        headers={"If-Match": entity_tag},
         json={"reason": "r"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_patch_feature_with_duplicate_if_match_lines_returns_422(
+    client: TestClient,
+) -> None:
+    response = client.patch(
+        "/v1/admin/features/feature-1",
+        headers=[("If-Match", '"7"'), ("If-Match", '"7"')],
+        json={"name": "x", "reason": "r"},
     )
     assert response.status_code == 422
 
@@ -690,29 +736,34 @@ def test_patch_feature_stale_if_match_returns_412(
 
 
 @pytest.mark.unit
-def test_get_feature_detail_conditional_get_returns_304(
+def test_get_feature_detail_does_not_use_row_revision_as_aggregate_validator(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import admin_features as router_mod
 
-    async def _revision(_session: Any, feature_id: str) -> int:
-        assert feature_id == "feature-1"
-        return 12
-
     async def _detail(_session: Any, feature_id: str) -> AdminFeatureDetail:
-        raise AssertionError("304 경로는 detail을 조회하지 않아야 한다")
+        return _feature_detail()
 
-    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
+    async def _curations(
+        _session: Any, **_kwargs: Any
+    ) -> dict[str, tuple[Any, ...]]:
+        return {}
+
     monkeypatch.setattr(router_mod, "get_admin_feature_detail", _detail)
+    monkeypatch.setattr(
+        router_mod.curation_repo,
+        "list_curation_items_by_feature_ids",
+        _curations,
+    )
 
     response = client.get(
         "/v1/admin/features/feature-1",
         headers={"If-None-Match": '"12"'},
     )
-    assert response.status_code == 304
-    assert response.headers["ETag"] == '"12"'
-    assert response.content == b""
+    assert response.status_code == 200
+    assert "ETag" not in response.headers
+    assert response.json()["data"]["feature"]["row_revision"] == 7
 
 
 @pytest.mark.unit

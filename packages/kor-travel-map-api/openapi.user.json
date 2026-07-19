@@ -1389,6 +1389,12 @@
             "title": "Name",
             "type": "string"
           },
+          "row_revision": {
+            "description": "server-owned feature revision. ETag과 같은 값이다.",
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
           "sido_code": {
             "anyOf": [
               {
@@ -1435,6 +1441,7 @@
           "detail",
           "urls",
           "status",
+          "row_revision",
           "updated_at"
         ],
         "title": "FeatureDetailResponse",
@@ -8804,7 +8811,18 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 feature row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "If-None-Match row_revision 일치 (본문 없음)"
           },
           "404": {
             "content": {
@@ -8824,7 +8842,7 @@
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "If-None-Match가 canonical strong ETag가 아님"
           },
           "default": {
             "content": {

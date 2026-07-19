@@ -1684,6 +1684,7 @@ class FeatureChangeRequestRow(Base):
         server_default=text("'pending'"),
     )
     review_mode: Mapped[str] = mapped_column(Text, nullable=False)
+    base_row_revision: Mapped[int | None] = mapped_column(BigInteger)
     payload: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,

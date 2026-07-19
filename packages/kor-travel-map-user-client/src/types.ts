@@ -975,6 +975,11 @@ export interface components {
             marker_icon?: string | null;
             /** Name */
             name: string;
+            /**
+             * Row Revision
+             * @description server-owned feature revision. ETag과 같은 값이다.
+             */
+            row_revision: number;
             /** Sido Code */
             sido_code?: string | null;
             /** Sigungu Code */
@@ -3308,11 +3313,20 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 현재 feature row_revision strong entity tag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["FeatureDetailEnvelopeResponse"];
                 };
+            };
+            /** @description If-None-Match row_revision 일치 (본문 없음) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description feature_id 없음 */
             404: {
@@ -3323,7 +3337,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description If-None-Match가 canonical strong ETag가 아님 */
             422: {
                 headers: {
                     [name: string]: unknown;

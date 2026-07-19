@@ -397,7 +397,8 @@ _FEATURE_ROW_COLUMNS_SQL: Final[str] = """
     legal_dong_code, sido_code, sigungu_code,
     marker_icon, marker_color, status,
     parent_feature_id, sibling_group_id,
-    created_at, updated_at, deleted_at
+    created_at, updated_at, deleted_at,
+    row_revision
 """
 
 _GET_FEATURE_SQL: Final[str] = f"""

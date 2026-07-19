@@ -144,6 +144,7 @@ class AdminFeatureDetailFeature:
     sibling_group_id: str | None
     data_origin: str
     data_version: int
+    row_revision: int
     user_change_kind: str | None
     user_change_status: str | None
     user_change_request_id: str | None
@@ -373,6 +374,7 @@ class FeatureChangeRequest:
     action: str
     state: str
     review_mode: str
+    base_row_revision: int | None
     payload: dict[str, Any]
     reason: str | None
     requested_by: str | None
@@ -878,6 +880,7 @@ SELECT
     sibling_group_id::text AS sibling_group_id,
     data_origin,
     data_version,
+    row_revision,
     user_change_kind,
     user_change_status,
     user_change_request_id::text AS user_change_request_id,
@@ -986,6 +989,7 @@ SELECT
     action,
     state,
     review_mode,
+    base_row_revision,
     payload,
     reason,
     requested_by,
@@ -1064,6 +1068,7 @@ def _admin_feature_detail_feature(row: Any) -> AdminFeatureDetailFeature:
         sibling_group_id=row["sibling_group_id"],
         data_origin=str(row["data_origin"]),
         data_version=int(row["data_version"]),
+        row_revision=int(row["row_revision"]),
         user_change_kind=row["user_change_kind"],
         user_change_status=row["user_change_status"],
         user_change_request_id=row["user_change_request_id"],
@@ -1525,20 +1530,22 @@ async def deactivate_feature(
 _INSERT_FEATURE_CHANGE_REQUEST_SQL: Final[str] = """
 INSERT INTO ops.feature_change_requests (
     request_id, feature_id, action, state, review_mode,
-    payload, reason, requested_by
+    base_row_revision, payload, reason, requested_by
 ) VALUES (
     x_extension.gen_random_uuid(), :feature_id, :action, :state, :review_mode,
-    CAST(:payload AS jsonb), :reason, :requested_by
+    :base_row_revision, CAST(:payload AS jsonb), :reason, :requested_by
 )
 RETURNING
     request_id::text, feature_id, action, state, review_mode,
-    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
+    applied_at, created_at
 """
 
 _GET_CHANGE_REQUEST_FOR_UPDATE_SQL: Final[str] = """
 SELECT
     request_id::text, feature_id, action, state, review_mode,
-    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
+    applied_at, created_at
 FROM ops.feature_change_requests
 WHERE request_id::text = :request_id
 FOR UPDATE
@@ -1547,7 +1554,8 @@ FOR UPDATE
 _LIST_CHANGE_REQUESTS_SQL: Final[str] = """
 SELECT
     request_id::text, feature_id, action, state, review_mode,
-    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
+    applied_at, created_at
 FROM ops.feature_change_requests
 WHERE (CAST(:states AS text[]) IS NULL OR state = ANY(CAST(:states AS text[])))
   AND (CAST(:actions AS text[]) IS NULL OR action = ANY(CAST(:actions AS text[])))
@@ -1604,40 +1612,7 @@ INSERT INTO feature.features (
     CAST(:request_id AS uuid), NULL, NULL, :reason,
     now(), now(), NULL
 )
-ON CONFLICT (feature_id) DO UPDATE SET
-    kind = EXCLUDED.kind,
-    name = EXCLUDED.name,
-    category = EXCLUDED.category,
-    coord = EXCLUDED.coord,
-    coord_precision_digits = EXCLUDED.coord_precision_digits,
-    geom = EXCLUDED.geom,
-    address = EXCLUDED.address,
-    legal_dong_code = EXCLUDED.legal_dong_code,
-    road_name_code = EXCLUDED.road_name_code,
-    road_address_management_no = EXCLUDED.road_address_management_no,
-    admin_dong_code = EXCLUDED.admin_dong_code,
-    sido_code = EXCLUDED.sido_code,
-    sigungu_code = EXCLUDED.sigungu_code,
-    urls = EXCLUDED.urls,
-    marker_icon = EXCLUDED.marker_icon,
-    marker_color = EXCLUDED.marker_color,
-    parent_feature_id = EXCLUDED.parent_feature_id,
-    sibling_group_id = EXCLUDED.sibling_group_id,
-    detail = EXCLUDED.detail,
-    status = EXCLUDED.status,
-    data_origin = 'user_request',
-    data_version = GREATEST(features.data_version, 1),
-    user_change_kind = 'add',
-    user_change_status = 'applied',
-    user_change_request_id = CAST(:request_id AS uuid),
-    user_deleted_at = NULL,
-    user_deleted_by = NULL,
-    user_change_reason = :reason,
-    updated_at = now(),
-    deleted_at = NULL
-WHERE features.user_deleted_at IS NULL
-  AND features.status <> 'deleted'
-  AND features.kind IN ('place','event')
+ON CONFLICT (feature_id) DO NOTHING
 RETURNING feature_id, status, user_deleted_at
 """
 
@@ -1836,7 +1811,8 @@ SET state = 'applied',
 WHERE request_id::text = :request_id
 RETURNING
     request_id::text, feature_id, action, state, review_mode,
-    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
+    applied_at, created_at
 """
 
 _MARK_CHANGE_REJECTED_SQL: Final[str] = """
@@ -1849,7 +1825,8 @@ WHERE request_id::text = :request_id
   AND state = 'pending'
 RETURNING
     request_id::text, feature_id, action, state, review_mode,
-    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+    base_row_revision, payload, reason, requested_by, reviewed_by, reviewed_at,
+    applied_at, created_at
 """
 
 
@@ -1863,6 +1840,11 @@ def _feature_change_row(row: Any) -> FeatureChangeRequest:
         action=str(row["action"]),
         state=str(row["state"]),
         review_mode=str(row["review_mode"]),
+        base_row_revision=(
+            int(row["base_row_revision"])
+            if row["base_row_revision"] is not None
+            else None
+        ),
         payload=dict(payload or {}),
         reason=row["reason"],
         requested_by=row["requested_by"],
@@ -2086,8 +2068,8 @@ async def _assert_feature_revision(
     """If-Match row_revision을 현재 행과 대조한다 (T-VN-13).
 
     행을 ``FOR UPDATE``로 잠가 검사~변경 사이 경합을 막는다. feature가 없으면
-    (하위 not-found 경로가 404를 내도록) 통과시키고, revision이 어긋나면
-    ``FeaturePreconditionFailed``를 던진다(라우터가 412로 사상).
+    ``FeatureChangeConflict``(라우터 404), revision이 어긋나면
+    ``FeaturePreconditionFailed``(라우터 412)를 던진다.
     """
     current = (
         await session.execute(
@@ -2096,7 +2078,11 @@ async def _assert_feature_revision(
         )
     ).scalar_one_or_none()
     if current is None:
-        return
+        raise FeatureChangeConflict(
+            feature_id=feature_id,
+            action="update",
+            message=f"feature 없음: {feature_id!r}",
+        )
     if int(current) != expected:
         raise FeaturePreconditionFailed(
             feature_id=feature_id, expected=expected, current=int(current)
@@ -2116,11 +2102,14 @@ async def submit_feature_change_request(
 ) -> FeatureChangeRequest:
     """feature add/update/delete 요청을 만들고 설정에 따라 즉시 적용한다.
 
-    ``expected_row_revision``(If-Match)이 주어지면 update/delete 대상 행의 현재
-    revision을 제출 시점에 대조한다(불일치 → ``FeaturePreconditionFailed``). add는
-    기존 행이 없으므로 대조하지 않는다.
+    update/delete는 ``expected_row_revision``(If-Match)을 필수로 받아 대상 행을
+    잠그고 제출 시점에 대조한 뒤 request의 ``base_row_revision``에 보존한다.
+    add는 기존 행이 없어 NULL을 저장하고 실제 INSERT 충돌로 absence를 검증한다.
     """
-    if expected_row_revision is not None and action in ("update", "delete"):
+    if action in ("update", "delete") and expected_row_revision is None:
+        raise ValueError("update/delete에는 expected_row_revision이 필요합니다.")
+    if action in ("update", "delete"):
+        assert expected_row_revision is not None
         await _assert_feature_revision(session, feature_id, expected_row_revision)
     initial_state = "applied" if review_mode == "immediate" else "pending"
     row = (
@@ -2131,6 +2120,7 @@ async def submit_feature_change_request(
                 "action": action,
                 "state": initial_state,
                 "review_mode": review_mode,
+                "base_row_revision": expected_row_revision,
                 "payload": _change_payload_json(payload),
                 "reason": reason,
                 "requested_by": requested_by,
@@ -2155,12 +2145,12 @@ async def apply_feature_change_request(
     request_id: str,
     *,
     operator: str | None,
-    expected_row_revision: int | None = None,
 ) -> FeatureChangeRequest | None:
     """pending feature change request를 승인하고 적용한다.
 
-    ``expected_row_revision``(If-Match)이 주어지면 적용 직전에 대상 feature 행의
-    현재 revision을 대조한다(불일치 → ``FeaturePreconditionFailed`` → 412).
+    update/delete는 제출 때 저장한 ``base_row_revision``을 적용 직전에 잠금·대조한다.
+    따라서 reviewer가 별도 feature ETag를 전달하지 않아도 제출 이후 provider write를
+    감지한다. add는 INSERT ``ON CONFLICT DO NOTHING``으로 absence를 원자 검증한다.
     """
     row = (
         await session.execute(
@@ -2171,15 +2161,24 @@ async def apply_feature_change_request(
     if row is None:
         return None
     request = _feature_change_row(row)
-    if expected_row_revision is not None:
-        await _assert_feature_revision(
-            session, request.feature_id, expected_row_revision
-        )
     if request.state != "pending":
         raise FeatureChangeConflict(
             feature_id=request.feature_id,
             action=request.action,
             message=f"request {request_id!r}는 pending 상태가 아님: {request.state!r}",
+        )
+    if request.action in ("update", "delete"):
+        if request.base_row_revision is None:
+            raise FeatureChangeConflict(
+                feature_id=request.feature_id,
+                action=request.action,
+                message=(
+                    f"request {request_id!r}에 base_row_revision이 없어 승인할 수 없습니다; "
+                    "현재 revision으로 다시 제출하세요."
+                ),
+            )
+        await _assert_feature_revision(
+            session, request.feature_id, request.base_row_revision
         )
     await _apply_change(session, request, operator=operator)
     applied = (
