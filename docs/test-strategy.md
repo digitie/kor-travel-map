@@ -602,7 +602,12 @@ advisory gate로 dedup statement 내부를 결정적으로 멈춘 동안 다른 
 statement timeout으로 막혀야 한다. gate 해제 뒤 migration은 valid·ready·unique·NULLS NOT DISTINCT
 index와 semantic duplicate 0건을 한 번에 남겨야 한다. 과거 concurrent build를 중복 fixture에서
 의도적으로 실패시켜 INVALID index를 만든 뒤, 새 0060이 writer lock 아래 이를 제거하고 정상
-index로 재생성하는 복구 회귀도 필수다. SQL 문자열 순서만 확인하는 테스트는 수용 증거가 아니다.
+index로 재생성하는 복구 회귀도 필수다. VALIDATE 직전 실제 table blocker를 먼저 queue해 session
+lock timeout이 5초 안에 실패하고, valid UNIQUE+NOT VALID 제약의 미stamp 상태를 같은 migration이
+재시도 복구하는지도 검증한다. 실패 경로의 `asyncio.to_thread`는 cancel로 끝났다고 간주하지 않고
+DB backend 종료와 bounded join 뒤에만 fresh DB를 drop한다. 기존 range/payload/FK 오염은 첫 commit
+전 `23514`, 0060 downgrade는 무변경 fail-closed여야 한다. SQL 문자열 순서만 확인하는 테스트는
+수용 증거가 아니다.
 
 ## 8. 테스트 데이터 정책
 

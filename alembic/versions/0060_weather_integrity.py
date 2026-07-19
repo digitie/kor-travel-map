@@ -27,7 +27,7 @@ DDL 유형별 절차 (ADR-075 결정 5·6, ~30M행 → rewrite/STORED 금지)
 1. **WRITER LOCK FIRST** — migration transaction이
    ``SHARE ROW EXCLUSIVE`` table lock을 먼저 얻는다. 이 lock은 SELECT는 허용하지만
    INSERT/UPDATE/DELETE의 ``ROW EXCLUSIVE``와 충돌하므로, dedup부터 UNIQUE commit까지
-   semantic duplicate가 다시 들어오는 틈을 DB에서 닫는다. lock 획득은 30초 안에
+   semantic duplicate가 다시 들어오는 틈을 DB에서 닫는다. lock 획득은 5초 안에
    끝나지 않으면 migration 전체를 rollback한다. 운영 절차도 API mutation, Dagster
    schedule/sensor/manual/backfill, daemon/code location을 먼저 fence하고 active writer
    0건을 확인해야 하며 DB lock은 마지막 불변식이다.
@@ -91,12 +91,18 @@ DDL 유형별 절차 (ADR-075 결정 5·6, ~30M행 → rewrite/STORED 금지)
        ) AS orphan_source_records
        FROM feature.feature_weather_values;
 
+   migration도 writer lock을 얻은 직후 같은 세 위반을 한 번에 검사한다. 하나라도
+   있으면 dedup/index/제약을 바꾸기 전에 전체 transaction을 실패시킨다. 각
+   ``VALIDATE``는 앞 transaction commit 뒤 별도 statement로 실행되므로 session-level
+   ``lock_timeout=5s``를 다시 설정하며, 성공·실패와 무관하게 ``RESET``한다.
+
 이 revision은 컬럼 추가·타입 변경·STORED 추가·테이블 rewrite를 하지 않는다.
 weather는 아직 SQLAlchemy ``models.metadata``에 모델링되지 않으므로(T-VN-38 소유)
 autogenerate/``alembic check`` 비교 대상이 아니다 — 본 제약은 migration으로만 둔다.
 
-DOWNGRADE는 제약·index를 되돌리지만 DEDUP으로 삭제한 loser 행은 복구하지 않는다
-(파생/중복 데이터라 원본 이력에서 재적재로 복원한다, ADR-072).
+DOWNGRADE는 지원하지 않는다. dedup loser와 새 writer의 semantic ``ON CONFLICT`` 계약을
+동시에 되돌릴 수 없으므로 0060 이전 복구는 maintenance fence 아래 검증된 backup/PITR을
+복원하고 구 writer image를 함께 되돌리는 절차만 허용한다.
 
 source-record FK 지원 index: price(0034)는 ``idx_price_values_source_record``
 (partial, source_record_key)를 두어 source_record 삭제 시 ON DELETE SET NULL의
@@ -119,13 +125,56 @@ depends_on: str | Sequence[str] | None = None
 
 _TABLE = "feature.feature_weather_values"
 _UNIQUE_INDEX = "uq_weather_value_identity"
+_LOCK_TIMEOUT = "5s"
 
 
 def upgrade() -> None:
     # 1) DB-level writer fence. SELECT는 허용하되 모든 weather DML을 dedup 이전부터
     #    UNIQUE commit까지 차단한다. lock을 빨리 얻지 못하면 전체 transaction rollback.
-    op.execute("SET LOCAL lock_timeout = '30s'")
+    op.execute(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'")
     op.execute(f"LOCK TABLE {_TABLE} IN SHARE ROW EXCLUSIVE MODE")
+
+    # VALIDATE 실패가 dedup/UNIQUE commit 뒤에야 드러나지 않도록 기존 오염을
+    # writer lock 아래 한 번에 검사한다. 신규 row는 NOT VALID 제약 추가 시점부터
+    # 제약을 적용받으므로 이 precheck와 이어지는 VALIDATE 사이에 오염될 수 없다.
+    op.execute(
+        f"""
+        DO $migration$
+        DECLARE
+            range_violations bigint;
+            payload_violations bigint;
+            orphan_source_records bigint;
+        BEGIN
+            SELECT
+                count(*) FILTER (
+                    WHERE valid_from IS NOT NULL
+                      AND valid_until IS NOT NULL
+                      AND valid_from > valid_until
+                ),
+                count(*) FILTER (WHERE jsonb_typeof(payload) <> 'object'),
+                count(*) FILTER (
+                    WHERE source_record_key IS NOT NULL
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM provider_sync.source_records AS sr
+                          WHERE sr.source_record_key = w.source_record_key
+                      )
+                )
+            INTO range_violations, payload_violations, orphan_source_records
+            FROM {_TABLE} AS w;
+
+            IF range_violations <> 0
+               OR payload_violations <> 0
+               OR orphan_source_records <> 0 THEN
+                RAISE EXCEPTION
+                    'weather integrity preflight failed: range=%, payload=%, orphan=%',
+                    range_violations, payload_violations, orphan_source_records
+                    USING ERRCODE = '23514';
+            END IF;
+        END
+        $migration$
+        """
+    )
 
     # 과거 0060의 validate 실패는 앞선 autocommit 경계에서 NOT VALID/일부 VALID
     # 제약을 commit했을 수 있다. 미stamp 재시도를 위해 exact 세 제약을 정규화한다.
@@ -220,27 +269,28 @@ def upgrade() -> None:
     # 5) VALIDATE는 autocommit_block에서 실행한다. block 진입이 writer lock,
     #    dedup, UNIQUE와 위 ADD들을 원자 commit하고 ACCESS EXCLUSIVE를 푼다. 각
     #    VALIDATE는 자기 statement에서 SHARE UPDATE EXCLUSIVE만 잡아(전체 스캔이지만
-    #    read/write 비차단) 순차 실행된다. CHECK/FK 모두 VALIDATE 대상이다.
+    #    read/write 비차단) 순차 실행된다. SET LOCAL은 앞 commit에서 소멸하므로
+    #    session-level timeout을 다시 설정하고 성공/실패 양쪽에서 반드시 RESET한다.
     with op.get_context().autocommit_block():
-        op.execute(f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT ck_weather_value_range")
-        op.execute(
-            f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT ck_weather_value_payload_object"
-        )
-        op.execute(
-            f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT fk_weather_value_source_record"
-        )
+        op.execute(f"SET lock_timeout = '{_LOCK_TIMEOUT}'")
+        try:
+            op.execute(
+                f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT ck_weather_value_range"
+            )
+            op.execute(
+                f"ALTER TABLE {_TABLE} "
+                "VALIDATE CONSTRAINT ck_weather_value_payload_object"
+            )
+            op.execute(
+                f"ALTER TABLE {_TABLE} "
+                "VALIDATE CONSTRAINT fk_weather_value_source_record"
+            )
+        finally:
+            op.execute("RESET lock_timeout")
 
 
 def downgrade() -> None:
-    op.execute(
-        f"ALTER TABLE {_TABLE} "
-        "DROP CONSTRAINT IF EXISTS fk_weather_value_source_record"
+    raise RuntimeError(
+        "0060 is forward-only: restore the pre-cutover backup/PITR under a writer "
+        "fence and roll back the writer image as one operation"
     )
-    op.execute(
-        f"ALTER TABLE {_TABLE} "
-        "DROP CONSTRAINT IF EXISTS ck_weather_value_payload_object"
-    )
-    op.execute(
-        f"ALTER TABLE {_TABLE} DROP CONSTRAINT IF EXISTS ck_weather_value_range"
-    )
-    op.execute(f"DROP INDEX IF EXISTS feature.{_UNIQUE_INDEX}")

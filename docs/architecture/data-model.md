@@ -2403,7 +2403,9 @@ make_price_value_key(*, feature_id: str, provider: str, price_domain: str,
   `NOT VALID`→backfill→`VALIDATE`, 대형 변경은 shadow/backfill/write-fence/swap으로 수행한다.
 - 일반 online 인덱스 추가는 `CREATE INDEX CONCURRENTLY`로 하되 lock acquisition·INVALID
   잔여를 검증한다. dedup 뒤 semantic UNIQUE가 필요한 0060은 writer race를 허용하지 않도록
-  `SHARE ROW EXCLUSIVE`→dedup→non-concurrent UNIQUE를 한 transaction으로 수행한다.
+  `SHARE ROW EXCLUSIVE`→dedup→non-concurrent UNIQUE를 한 transaction으로 수행한다. 삭제된
+  loser를 DDL로 복원할 수 없으므로 0060 downgrade는 거부하고 backup/PITR+구 writer image를
+  하나의 복구 단위로 사용한다.
 - 인덱스 삭제는 `DROP INDEX CONCURRENTLY IF EXISTS`.
 - 컬럼 타입 변경은 `USING` cast + downtime 또는 새 컬럼 + 백필 + swap.
 

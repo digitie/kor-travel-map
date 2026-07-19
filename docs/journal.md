@@ -11,11 +11,16 @@
   후보집합 불일치(#768)를 상세 코멘트하고 아이템별 이슈로 묶었다. #757/#759는 잔여 finding이 없다.
 - `T-VN-05R/17R/21R/14R`를 독립 PR 경계로 추가했다. 0060은 아직 main cutover 전이므로
   transactional non-concurrent UNIQUE로 직접 정정하고, #768은 열린 PR #763에 후속 커밋한다.
-- T-VN-17R은 0060의 첫 statement로 30초 제한 `SHARE ROW EXCLUSIVE`를 잡아 SELECT만
+- T-VN-17R은 0060의 첫 statement로 5초 제한 `SHARE ROW EXCLUSIVE`를 잡아 SELECT만
   허용하고 weather DML을 차단한다. 같은 transaction에서 과거 동명 index 정리, dedup,
   non-concurrent UNIQUE, NOT VALID 제약 추가를 commit한 뒤에만 lock을 풀고 VALIDATE한다.
   실제 migration DELETE를 advisory gate로 멈춰 두 번째 connection INSERT가 막히는 회귀와
   과거 concurrent 실패가 남긴 INVALID index를 새 migration이 교체하는 회귀를 작성했다.
+- 첫 단일 적대 리뷰의 P1/P2를 반영해 autocommit VALIDATE에도 session-level 5초 lock timeout과
+  `RESET`을 보장하고, range/payload/FK 기존 오염은 첫 commit 전에 SQLSTATE `23514`로 거부한다.
+  VALIDATE blocker를 실제로 선점시킨 timeout·partial-state 재시도 회귀를 추가했으며, 실패한
+  `asyncio.to_thread` migration은 backend terminate 후 bounded join한다. 0060 downgrade는 dedup loser와
+  semantic writer를 함께 복원할 수 없어 backup/PITR+구 image 동시 복구만 허용한다.
 
 ## 2026-07-19 (claude, agent A2) — T-VN-14 지도 in-bounds 완결성 + exact 공간 술어
 

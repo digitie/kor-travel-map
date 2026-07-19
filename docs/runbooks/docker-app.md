@@ -400,8 +400,8 @@ docker compose stop frontend api dagster dagster-daemon
 test -z "$(docker compose ps --status running -q frontend api dagster dagster-daemon)"
 ```
 
-DB에서 기존 write transaction과 semantic duplicate/index 상태를 확인한다. 첫 쿼리가 0행이 아니면
-임의 종료하지 말고 소유 작업을 drain/취소한 뒤 다시 확인한다.
+DB에서 기존 write transaction, semantic duplicate, 제약 위반, index/constraint 상태를 확인한다.
+첫 쿼리가 0행이 아니면 임의 종료하지 말고 소유 작업을 drain/취소한 뒤 다시 확인한다.
 
 ```sql
 SELECT a.pid, a.application_name, a.state, l.mode
@@ -420,20 +420,6 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_index i ON i.indexrelid = c.oid
 WHERE n.nspname = 'feature'
   AND c.relname = 'uq_weather_value_identity';
-```
-
-migration은 30초 안에 `SHARE ROW EXCLUSIVE`를 얻지 못하면 전체 rollback한다. lock을 얻은 뒤
-과거 실패에서 남은 동명 valid/INVALID index를 drop하고, dedup과 non-concurrent UNIQUE를 같은
-transaction에서 commit한다. 따라서 새 실행은 INVALID index를 남기지 않는다. migration-only
-image로 `0060_weather_integrity` 이상을 적용한 뒤 다음을 모두 확인한다.
-
-```sql
-SELECT i.indisvalid, i.indisready, i.indisunique, i.indnullsnotdistinct
-FROM pg_class c
-JOIN pg_namespace n ON n.oid = c.relnamespace
-JOIN pg_index i ON i.indexrelid = c.oid
-WHERE n.nspname = 'feature'
-  AND c.relname = 'uq_weather_value_identity';
 
 SELECT count(*) AS duplicate_losers
 FROM (
@@ -447,15 +433,106 @@ FROM (
     FROM feature.feature_weather_values
 ) ranked
 WHERE rn > 1;
+
+SELECT count(*) FILTER (
+           WHERE valid_from IS NOT NULL AND valid_until IS NOT NULL
+             AND valid_from > valid_until
+       ) AS range_violations,
+       count(*) FILTER (
+           WHERE jsonb_typeof(payload) <> 'object'
+       ) AS payload_violations,
+       count(*) FILTER (
+           WHERE source_record_key IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM provider_sync.source_records AS sr
+                 WHERE sr.source_record_key = w.source_record_key
+             )
+       ) AS orphan_source_records
+FROM feature.feature_weather_values AS w;
+
+SELECT conname, convalidated
+FROM pg_constraint
+WHERE conrelid = 'feature.feature_weather_values'::regclass
+  AND conname IN (
+      'ck_weather_value_range',
+      'ck_weather_value_payload_object',
+      'fk_weather_value_source_record'
+  )
+ORDER BY conname;
 ```
 
-정상은 index boolean 네 값이 모두 true이고 `duplicate_losers=0`이다. 실패하면 service fence를
-유지하고 Alembic current가 0060 전인지 확인한다. 동명 INVALID index가 남아 있다면 과거
-concurrent 구현의 잔재다. 위 index 조회로 확인한 뒤 다음 원자 cleanup을 수행하고 0060을 재시도한다.
+migration 전 세 violation count는 모두 0이어야 한다. 0이 아니면 실행하지 말고 authoritative
+source와 대조한 승인된 data repair 또는 cutover 전 backup/PITR 복원을 선택한다. 임의 삭제·NULL
+치환으로 통과시키지 않는다. migration도 같은 위반을 writer lock 아래 재검사해 destructive
+commit 전에 SQLSTATE `23514`로 실패한다.
+
+migration은 5초 안에 `SHARE ROW EXCLUSIVE`를 얻지 못하면 전체 rollback한다. lock을 얻은 뒤
+과거 실패에서 남은 동명 valid/INVALID index를 drop하고, dedup과 non-concurrent UNIQUE를 같은
+transaction에서 commit한다. 따라서 새 실행은 INVALID index를 남기지 않는다. 세 VALIDATE도
+각각 session-level 5초 lock timeout을 적용하고 성공·실패 뒤 RESET한다.
+
+배포할 API image ID와 OCI revision, root-only runtime env snapshot, compose network를 먼저 exact
+검증한다. tag나 mutable compose build를 migration 입력으로 쓰지 않는다. 다음 immutable image
+명령을 `upgrade` 한 번과 read-only 확인에 동일하게 사용한다.
+
+```bash
+readonly MAP_API_IMAGE_ID='sha256:<64-hex-image-id>'
+readonly MAP_NETWORK='<compose-project>_default'
+readonly MAP_API_ENV_FILE='/root/<root-only-api-runtime-env>'
+
+sudo test "$(stat -c '%U:%G %a' "$MAP_API_ENV_FILE")" = 'root:root 600'
+sudo docker image inspect "$MAP_API_IMAGE_ID" \
+  --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'
+sudo docker run --rm --pull never --network "$MAP_NETWORK" \
+  --env-file "$MAP_API_ENV_FILE" --entrypoint alembic \
+  "$MAP_API_IMAGE_ID" upgrade head
+sudo docker run --rm --pull never --network "$MAP_NETWORK" \
+  --env-file "$MAP_API_ENV_FILE" --entrypoint alembic \
+  "$MAP_API_IMAGE_ID" current
+sudo docker run --rm --pull never --network "$MAP_NETWORK" \
+  --env-file "$MAP_API_ENV_FILE" --entrypoint alembic \
+  "$MAP_API_IMAGE_ID" heads
+sudo docker run --rm --pull never --network "$MAP_NETWORK" \
+  --env-file "$MAP_API_ENV_FILE" --entrypoint alembic \
+  "$MAP_API_IMAGE_ID" check
+```
+
+`current`와 유일한 `heads`가 같고 `check`가 성공한 뒤 다음을 모두 확인한다.
+
+```sql
+SELECT i.indisvalid, i.indisready, i.indisunique, i.indnullsnotdistinct
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_index i ON i.indexrelid = c.oid
+WHERE n.nspname = 'feature'
+  AND c.relname = 'uq_weather_value_identity';
+
+SELECT conname, convalidated
+FROM pg_constraint
+WHERE conrelid = 'feature.feature_weather_values'::regclass
+  AND conname IN (
+      'ck_weather_value_range',
+      'ck_weather_value_payload_object',
+      'fk_weather_value_source_record'
+  )
+ORDER BY conname;
+```
+
+정상은 index boolean 네 값과 세 `convalidated`가 모두 true이고 preflight의
+`duplicate_losers=0`, violation 세 값이 모두 0이다. 실패하면 service fence를 유지하고 Alembic
+current, 위 index, 세 constraint validity를 다시 캡처한다.
+
+- violation이 하나라도 남으면 같은 corrupt row를 둔 재시도를 금지한다. authoritative source 기반
+  repair 또는 cutover 전 restore/PITR 후 preflight부터 다시 수행한다.
+- current가 0059인데 valid UNIQUE와 NOT VALID/일부 VALID constraint가 있으면 VALIDATE lock timeout
+  등 autocommit 뒤 실패다. violation 0과 active writer 0을 다시 확인한 뒤 **같은 immutable image**의
+  `upgrade head`를 재실행한다. 0060은 exact 세 constraint/index를 lock 아래 정규화한다.
+- 동명 INVALID index가 있으면 과거 concurrent 구현의 잔재다. 다음 원자 cleanup 뒤 preflight와 같은
+  immutable image migration을 재실행한다.
 
 ```sql
 BEGIN;
-SET LOCAL lock_timeout = '30s';
+SET LOCAL lock_timeout = '5s';
 LOCK TABLE feature.feature_weather_values IN SHARE ROW EXCLUSIVE MODE;
 DROP INDEX IF EXISTS feature.uq_weather_value_identity;
 COMMIT;
@@ -463,6 +540,11 @@ COMMIT;
 
 새 API/Dagster image와 migration head/check, semantic upsert smoke가 모두 성공한 뒤에만
 Dagster web/daemon→API→frontend 순서로 재기동한다. 구 writer image는 다시 기동하지 않는다.
+
+0060 `alembic downgrade`는 지원하지 않는다. dedup loser와 semantic conflict-target writer를
+DDL만으로 원자 복원할 수 없기 때문이다. 0060 이전으로 돌아가야 하면 writer fence를 유지한 채
+cutover 전 backup/PITR과 그 backup에 대응하는 구 API·Dagster image를 함께 복원하고, old semantic
+writer smoke가 성공한 뒤에만 서비스를 연다.
 
 ## 9. T-108 양 노드 배포 경계
 
