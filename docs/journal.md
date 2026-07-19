@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 (codex, agent B) — T-VN-03 교차 리뷰 P2 수정
+
+- 적대적 교차 리뷰에서 runtime/full OpenAPI에는 존재하는 curated sources/themes가
+  `USER_OPERATIONS`에 없어 user OpenAPI와 `@kor-travel-map/map-user-client`에서 누락된
+  P2를 확인했다.
+- public curated 계약을 feature list/detail, sources, themes 네 GET으로 고정하고 user
+  allowlist/export 회귀/생성 타입을 함께 갱신한다. `settings.py` E501은 의미 변화 없는
+  줄바꿈으로 처리한다.
+- docker-manager production env mapping P1은 manager PR이 소유하므로 Map diff에 섞지 않는다.
+  같은 리뷰어 재승인 전에는 테스트·lint·build를 실행하지 않는다.
+
 ## 2026-07-19 (codex, agent B) — T-VN-03 Map route gate 구현
 
 - public curated 4경로를 public key dependency에 포함하고, ops metrics/log/

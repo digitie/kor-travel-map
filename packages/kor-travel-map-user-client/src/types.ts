@@ -82,6 +82,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/curated-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Curated Sources Route */
+        get: operations["list_curated_sources_route_v1_curated_sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/curated-themes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Curated Themes Route */
+        get: operations["list_curated_themes_route_v1_curated_themes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/curations": {
         parameters: {
             query?: never;
@@ -673,6 +707,108 @@ export interface components {
             lat: number;
             /** Lon */
             lon: number;
+        };
+        /**
+         * CuratedSourceView
+         * @description curated source metadata view.
+         */
+        CuratedSourceView: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Freshness Note */
+            freshness_note?: string | null;
+            /** Last Checked At */
+            last_checked_at?: string | null;
+            /** Last Source Modified At */
+            last_source_modified_at?: string | null;
+            /** License */
+            license?: string | null;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Next Expected At */
+            next_expected_at?: string | null;
+            /** Provider */
+            provider: string;
+            /** Provider Status */
+            provider_status: string;
+            /** Row Count */
+            row_count?: number | null;
+            /** Source Id */
+            source_id: string;
+            /** Source Kind */
+            source_kind: string;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Update Cycle */
+            update_cycle: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** CuratedSourcesData */
+        CuratedSourcesData: {
+            /** Items */
+            items: components["schemas"]["CuratedSourceView"][];
+        };
+        /** CuratedSourcesResponse */
+        CuratedSourcesResponse: {
+            data: components["schemas"]["CuratedSourcesData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CuratedThemeView
+         * @description curated theme view.
+         */
+        CuratedThemeView: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Default Curated */
+            default_curated: boolean;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Theme Description */
+            theme_description: string;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Id */
+            theme_id: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Visibility */
+            visibility: string;
+        };
+        /** CuratedThemesData */
+        CuratedThemesData: {
+            /** Items */
+            items: components["schemas"]["CuratedThemeView"][];
+        };
+        /** CuratedThemesResponse */
+        CuratedThemesResponse: {
+            data: components["schemas"]["CuratedThemesData"];
+            meta: components["schemas"]["Meta"];
         };
         /** CurationCollectionData */
         CurationCollectionData: {
@@ -2732,6 +2868,94 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicCuratedFeatureResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_curated_sources_route_v1_curated_sources_get: {
+        parameters: {
+            query?: {
+                provider?: string | null;
+                dataset_key?: string | null;
+                provider_status?: ("implemented" | "provider_needed" | "manual_only" | "deprecated") | null;
+                limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourcesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_curated_themes_route_v1_curated_themes_get: {
+        parameters: {
+            query?: {
+                theme_group?: string | null;
+                limit?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedThemesResponse"];
                 };
             };
             /** @description Validation Error */

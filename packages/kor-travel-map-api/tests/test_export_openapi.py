@@ -119,6 +119,8 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/public/festivals/{feature_id}",
         "/v1/curated-features",
         "/v1/curated-features/{curated_feature_id}",
+        "/v1/curated-sources",
+        "/v1/curated-themes",
         "/v1/curations",
         "/v1/curations/collections",
         "/v1/curations/collections/{collection_id}",
@@ -134,6 +136,8 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     for path in {
         "/v1/curated-features",
         "/v1/curated-features/{curated_feature_id}",
+        "/v1/curated-sources",
+        "/v1/curated-themes",
     }:
         assert user["paths"][path]["get"]["security"] == [
             {"PublicApiKey": []},

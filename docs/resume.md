@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex, agent B) — T-VN-03 교차 리뷰 P2 반영
+
+Map/PinVi 교차 리뷰가 user export allowlist에서 public curated sources/themes 두 GET이
+빠진 계약 drift를 확인했다. `USER_OPERATIONS`를 curated 4 GET 전체로 맞추고
+`openapi.user.json`과 user TypeScript를 정본 생성기로 다시 만든다. CI E501 한 건은
+기계적 줄바꿈으로 함께 고친다. **다음 한 작업**은 새 exact head를 같은 리뷰어에게
+재제출하는 것이며, 승인 전 테스트·lint·build는 실행하지 않는다.
+
 ## 2026-07-19 (codex, agent B) — T-VN-03 Map 구현 head 준비
 
 curated GET 4개에 `require_public_api_key`, ops 관측 GET 6개에

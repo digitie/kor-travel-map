@@ -520,8 +520,8 @@ class ApiSettings(BaseSettings):
         default=False,
         description=(
             "True면 public REST surface(`/v1/features`, `/v1/public`, `/v1/categories`, "
-            "`/v1/providers`, `/v1/curated-*`)에 VWorld 호환 `key` query 검증을 적용한다. trusted admin "
-            "frontend proxy 또는 service-token 요청은 우회한다."
+            "`/v1/providers`, `/v1/curated-*`)에 VWorld 호환 `key` query 검증을 "
+            "적용한다. trusted admin frontend proxy 또는 service-token 요청은 우회한다."
         ),
     )
     public_api_key_cache_ttl_s: int = Field(
