@@ -59,10 +59,15 @@ DDL 유형별 절차 (ADR-075 결정 5·6, ~30M행 → rewrite/STORED 금지)
    실패 후 재실행(alembic이 0060을 stamp하기 전 재시도)에서도 leftover INVALID
    index를 지우고 다시 만든다.
 
-3. **range/payload CHECK + source FK** — ``NOT VALID``로 추가(메타데이터만, 즉시
-   완료, 짧은 SHARE UPDATE EXCLUSIVE) 후 별도 ``VALIDATE CONSTRAINT``(테이블 스캔
-   하되 SHARE UPDATE EXCLUSIVE라 write 비차단, rewrite 없음). 운영자 pre-count로
-   VALIDATE 실패를 사전 확인할 수 있다:
+3. **range/payload CHECK + source FK** — 세 제약을 **먼저 전부 ``NOT VALID``로
+   추가**한 뒤(메타데이터만; 각 ADD는 짧은 sub-second ACCESS EXCLUSIVE를 잡는다),
+   **별도 autocommit_block 안에서** ``VALIDATE CONSTRAINT`` 세 개를 순차 실행한다.
+   순서가 중요하다: ``ADD ... NOT VALID``의 ACCESS EXCLUSIVE는 PG가 트랜잭션 끝까지
+   보유하므로, ADD와 VALIDATE가 같은 트랜잭션이면 그 lock이 VALIDATE 전체 스캔
+   내내 유지돼 ~30M행 테이블을 통째로 막는다. autocommit_block 진입이 ADD들을 먼저
+   commit해 ACCESS EXCLUSIVE를 풀고, 각 VALIDATE는 자기 statement에서
+   SHARE UPDATE EXCLUSIVE만 잡아(전체 스캔이지만 read/write 비차단, rewrite 없음)
+   돈다. 운영자 pre-count로 VALIDATE 실패를 사전 확인할 수 있다:
 
        SELECT count(*) FILTER (
            WHERE valid_from IS NOT NULL AND valid_until IS NOT NULL
@@ -149,7 +154,12 @@ def upgrade() -> None:
             """
         )
 
-    # 3) range CHECK — valid_from <= valid_until (둘 중 NULL이면 통과). NOT VALID→VALIDATE.
+    # 3) range/payload CHECK + source FK를 **먼저 전부 NOT VALID로 추가**한다.
+    #    ADD CONSTRAINT ... NOT VALID는 메타데이터 검증(제약 정의 기록)만 하지만
+    #    ACCESS EXCLUSIVE lock을 잡고 PG는 이를 트랜잭션 끝까지 보유한다. 따라서
+    #    ADD와 VALIDATE를 한 트랜잭션에 두면 ADD의 ACCESS EXCLUSIVE가 이어지는
+    #    VALIDATE 스캔 내내 유지돼 ~30M행 테이블의 읽기·쓰기를 전부 막는다(S2).
+    #    세 ADD는 각각 짧은(sub-second, 메타데이터 전용) ACCESS EXCLUSIVE만 잡는다.
     op.execute(
         f"""
         ALTER TABLE {_TABLE}
@@ -162,9 +172,6 @@ def upgrade() -> None:
         NOT VALID
         """
     )
-    op.execute(f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT ck_weather_value_range")
-
-    # 4) payload object CHECK (price 미러 — payload는 JSON object). NOT VALID→VALIDATE.
     op.execute(
         f"""
         ALTER TABLE {_TABLE}
@@ -173,11 +180,6 @@ def upgrade() -> None:
         NOT VALID
         """
     )
-    op.execute(
-        f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT ck_weather_value_payload_object"
-    )
-
-    # 5) source-record FK (price 미러 — ON DELETE SET NULL). NOT VALID→VALIDATE.
     op.execute(
         f"""
         ALTER TABLE {_TABLE}
@@ -188,9 +190,19 @@ def upgrade() -> None:
         NOT VALID
         """
     )
-    op.execute(
-        f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT fk_weather_value_source_record"
-    )
+
+    # 4) VALIDATE는 autocommit_block에서 실행한다. block 진입이 위 ADD들을 먼저
+    #    commit해 ACCESS EXCLUSIVE를 풀고, 각 VALIDATE는 자기 statement에서
+    #    SHARE UPDATE EXCLUSIVE만 잡아(전체 스캔이지만 read/write 비차단) 순차
+    #    실행된다. CHECK/FK 모두 VALIDATE 대상이다.
+    with op.get_context().autocommit_block():
+        op.execute(f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT ck_weather_value_range")
+        op.execute(
+            f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT ck_weather_value_payload_object"
+        )
+        op.execute(
+            f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT fk_weather_value_source_record"
+        )
 
 
 def downgrade() -> None:

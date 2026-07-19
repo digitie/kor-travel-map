@@ -161,6 +161,13 @@ _WEATHER_CONFLICT_TARGET: Final[str] = ", ".join(_WEATHER_IDENTITY_COLUMNS)
 # semantic UNIQUE(NULLS NOT DISTINCT)가 참 무결성 경계다. update-wins(ADR-072):
 # 같은 semantic tuple 재적재는 최신 값/payload/source로 갱신한다(weather_value_key는
 # 기존 행 값을 유지).
+#
+# 수용된 last-writer-wins(price writer와 동일 정책): known_at 가드가 없어 순서가
+# 뒤바뀐/backfill 재적재가 더 최신 값을 덮어쓸 수 있다. in-order 수집에는 무해하고
+# price도 같은 blind upsert다(parity). backfill 역행이 문제가 되면 향후
+# ``... DO UPDATE SET ... WHERE EXCLUDED.collected_at >=
+# feature_weather_values.collected_at`` 가드를 추가하는 옵션이 있으나 지금은
+# 범위 밖(price 대칭 유지).
 _INSERT_SQL: Final[str] = f"""
 INSERT INTO feature.feature_weather_values (
     weather_value_key, feature_id, provider, weather_domain, forecast_style,
