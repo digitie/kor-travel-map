@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-19 (codex) — Agent A PR #755 summary 가시성 보완
+
+- 단일 전문 리뷰에서 확인한 mocked E2E 가시성 공백을 닫아, summary exact projection
+  12개가 DOM에 유일하게 존재하고 실제 사용자에게 보여야 통과하도록 수정했다.
+- targeted mocked E2E 3개와 E2E TypeScript, 대상 ESLint가 통과했다.
+- **다음 한 작업**: `main` 후속 PR을 CI green으로 병합하고 최근 2일 Agent A PR을
+  다시 조회한다.
+
 ## 2026-07-19 (codex) — T-ADM-C7H 병합·아카이브
 
 - 단일 전문 리뷰의 4개 finding을 반영해 `*.local.md` Docker context 차단, Playwright

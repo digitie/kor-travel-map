@@ -1134,14 +1134,18 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // 요약 projection은 이름 있는 landmark 안에서 exact 검증한다. 표·drawer의
     // 우연히 같은 문자열은 이 계약을 만족할 수 없다.
     const summary = page.getByRole("region", { name: "데이터셋 상태 요약" });
-    await expect(summary.getByText("제공자 3", { exact: true })).toHaveCount(1);
-    await expect(summary.getByText("행 3", { exact: true })).toHaveCount(1);
-    await expect(summary.getByText("실패 1", { exact: true })).toHaveCount(1);
-    await expect(
-      summary.getByText("오래됨(SLA 초과) 1", { exact: true }),
-    ).toHaveCount(1);
-    await expect(summary.getByText("미실행 1", { exact: true })).toHaveCount(1);
-    await expect(summary.getByText("이슈 3", { exact: true })).toHaveCount(1);
+    for (const text of [
+      "제공자 3",
+      "행 3",
+      "실패 1",
+      "오래됨(SLA 초과) 1",
+      "미실행 1",
+      "이슈 3",
+    ]) {
+      const projection = summary.getByText(text, { exact: true });
+      await expect(projection).toHaveCount(1);
+      await expect(projection).toBeVisible();
+    }
 
     const grid = page.getByRole("table", { name: "데이터셋 그리드" });
     await expect(
@@ -1189,14 +1193,18 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     ).toBeVisible();
 
     const summary = page.getByRole("region", { name: "데이터셋 상태 요약" });
-    await expect(summary.getByText("제공자 1", { exact: true })).toHaveCount(1);
-    await expect(summary.getByText("행 1", { exact: true })).toHaveCount(1);
-    await expect(summary.getByText("실패 0", { exact: true })).toHaveCount(1);
-    await expect(
-      summary.getByText("오래됨(SLA 초과) 0", { exact: true }),
-    ).toHaveCount(1);
-    await expect(summary.getByText("미실행 0", { exact: true })).toHaveCount(1);
-    await expect(summary.getByText("이슈 0", { exact: true })).toHaveCount(1);
+    for (const text of [
+      "제공자 1",
+      "행 1",
+      "실패 0",
+      "오래됨(SLA 초과) 0",
+      "미실행 0",
+      "이슈 0",
+    ]) {
+      const projection = summary.getByText(text, { exact: true });
+      await expect(projection).toHaveCount(1);
+      await expect(projection).toBeVisible();
+    }
     await expect(summary.getByText("행 3", { exact: true })).toHaveCount(0);
     await expect(summary.getByText("실패 1", { exact: true })).toHaveCount(0);
   });
