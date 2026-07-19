@@ -314,7 +314,8 @@ async function mockEnrichmentReviews(
       }
       target.status = body.decision;
       target.decision_reason = body.decision_reason ?? null;
-      target.reviewed_by = body.reviewed_by ?? null;
+      // T-VN-20: reviewer는 body가 아니라 인증 principal(BFF 주입 헤더)에서 온다.
+      target.reviewed_by = request.headers()["x-kor-travel-map-actor"] ?? null;
       await fulfillJson(
         route,
         decisionResponse(
@@ -440,7 +441,6 @@ test.describe("admin/enrichment-reviews actions", () => {
     expect(requests.patchBodies[0]).toMatchObject({
       decision: "accepted",
       decision_reason: "admin-ui accepted",
-      reviewed_by: "local-admin",
     } satisfies EnrichmentReviewDecisionRequest);
     expect(requests.patchPathnames[0]).toBe(
       `/v1/admin/features/enrichment-reviews/${encodeURIComponent("enrich-accept-1")}`,
@@ -484,7 +484,6 @@ test.describe("admin/enrichment-reviews actions", () => {
     expect(requests.patchBodies[0]).toMatchObject({
       decision: "rejected",
       decision_reason: "admin-ui rejected",
-      reviewed_by: "local-admin",
     } satisfies EnrichmentReviewDecisionRequest);
     // 다음 버튼은 첫 mutation이 settle된 뒤(행이 '완료'로 전환된 뒤) 누른다.
     // 모든 결정 버튼이 decision.isPending 동안 disabled라 transient-disable race를 피한다.
@@ -495,7 +494,6 @@ test.describe("admin/enrichment-reviews actions", () => {
     expect(requests.patchBodies[1]).toMatchObject({
       decision: "ignored",
       decision_reason: "admin-ui ignored",
-      reviewed_by: "local-admin",
     } satisfies EnrichmentReviewDecisionRequest);
     await expect(ignoreRow.getByText("완료")).toBeVisible();
 
