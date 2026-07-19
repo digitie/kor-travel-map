@@ -225,6 +225,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/enrichment-reviews/{review_id}": RoutePolicy.OPERATOR,
     "/v1/admin/features": RoutePolicy.OPERATOR,
     "/v1/admin/features/in-bounds": RoutePolicy.OPERATOR,
+    "/v1/admin/features/weather/alerts": RoutePolicy.OPERATOR,
     "/v1/admin/features/change-requests": RoutePolicy.OPERATOR,
     "/v1/admin/features/change-requests/{request_id}/approve": RoutePolicy.OPERATOR,
     "/v1/admin/features/change-requests/{request_id}/reject": RoutePolicy.OPERATOR,

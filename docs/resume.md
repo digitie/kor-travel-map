@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-20 (codex agent B) — T-VN-59 public raw lineage 보강 착수
+
+- T-VN-SYNC-02 적대적 리뷰 blocker를 issue #786·`T-VN-59`로 분리했다. public forecast의
+  `source_record_key`, public alert의 원문 payload·lineage·수집 시각, public curation item의
+  `source_record_key`·자유형 metadata가 user OpenAPI와 생성 client까지 도달하는 상태다.
+- public typed DTO와 operator raw DTO를 상속 없이 분리하고, 공개 응답 schema의 재귀
+  reachability를 검사하는 forbidden-field gate로 같은 종류의 누출을 구조적으로 막는다.
+- 문서-first commit으로 draft PR #788을 연 뒤 구현과 full/user OpenAPI·admin/user TypeScript
+  산출물을 추가했다. DB schema와 저장 repository는 바꾸지 않았고, admin curation 및 새
+  admin weather alert raw route가 operator 정보를 보존한다.
+- **다음 한 작업**: 구현 exact head를 동일 적대적 리뷰어에게 제출한다. 승인 전에는
+  test·lint·build·OpenAPI drift gate를 실행하지 않는다.
+
 ## 2026-07-20 (codex, agent B) — T-VN-57 public security 계약 docs-first 착수
 
 - T-VN-SYNC-02 적대적 리뷰에서 runtime `PUBLIC_KEYED` 29개 GET과 full OpenAPI의 security

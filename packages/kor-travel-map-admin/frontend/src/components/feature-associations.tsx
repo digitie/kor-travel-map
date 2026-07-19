@@ -2,7 +2,7 @@ import type { components } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/format";
 
-type FeatureCurationMembership = components["schemas"]["CurationItemView"];
+type FeatureCurationMembership = components["schemas"]["AdminCurationItemView"];
 type FeatureObservation = components["schemas"]["FeatureObservationView"];
 type AdminFeatureSource = components["schemas"]["AdminFeatureDetailSourceRecord"];
 type FeatureSourceAssociation = FeatureObservation | AdminFeatureSource;

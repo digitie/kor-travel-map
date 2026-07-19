@@ -869,84 +869,19 @@ export interface components {
         };
         /** CurationCollectionData */
         CurationCollectionData: {
-            collection: components["schemas"]["CurationCollectionView"];
+            collection: components["schemas"]["PublicCurationCollectionView"];
             /** Items */
-            items: components["schemas"]["CurationItemView"][];
+            items: components["schemas"]["PublicCurationItemView"][];
         };
         /** CurationCollectionResponse */
         CurationCollectionResponse: {
             data: components["schemas"]["CurationCollectionData"];
             meta: components["schemas"]["Meta"];
         };
-        /** CurationCollectionView */
-        CurationCollectionView: {
-            /** Archived At */
-            archived_at: string | null;
-            /**
-             * Collection Id
-             * Format: uuid
-             */
-            collection_id: string;
-            /** Collection Key */
-            collection_key: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Dataset Key */
-            dataset_key: string | null;
-            /** Description */
-            description: string | null;
-            /** Edition Key */
-            edition_key: string;
-            /** Item Count */
-            item_count: number;
-            /** Metadata */
-            metadata: {
-                [key: string]: unknown;
-            };
-            /** Provider */
-            provider: string | null;
-            /** Source Id */
-            source_id: string | null;
-            /** Source Name */
-            source_name: string | null;
-            /** Source Url */
-            source_url: string | null;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "draft" | "published" | "archived";
-            /** Theme Group */
-            theme_group: string;
-            /**
-             * Theme Id
-             * Format: uuid
-             */
-            theme_id: string;
-            /** Theme Name */
-            theme_name: string;
-            /** Theme Slug */
-            theme_slug: string;
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /**
-             * Visibility
-             * @enum {string}
-             */
-            visibility: "admin_only" | "public";
-        };
         /** CurationCollectionsData */
         CurationCollectionsData: {
             /** Items */
-            items: components["schemas"]["CurationCollectionView"][];
+            items: components["schemas"]["PublicCurationCollectionView"][];
         };
         /** CurationCollectionsResponse */
         CurationCollectionsResponse: {
@@ -973,100 +908,6 @@ export interface components {
             name: string;
             /** Status */
             status: string;
-        };
-        /** CurationItemView */
-        CurationItemView: {
-            /** Address */
-            address: {
-                [key: string]: unknown;
-            };
-            /** Address Hint */
-            address_hint: string | null;
-            /** Archived At */
-            archived_at: string | null;
-            /**
-             * Collection Id
-             * Format: uuid
-             */
-            collection_id: string;
-            /** Collection Key */
-            collection_key: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Curation Item Id
-             * Format: uuid
-             */
-            curation_item_id: string;
-            /**
-             * Curation Relation
-             * @enum {string}
-             */
-            curation_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
-            /** Dataset Key */
-            dataset_key: string | null;
-            /** Edition Key */
-            edition_key: string;
-            /** External Item Id */
-            external_item_id: string;
-            /** Feature Category */
-            feature_category: string | null;
-            /** Feature Id */
-            feature_id: string | null;
-            /** Feature Kind */
-            feature_kind: string | null;
-            /** Feature Name */
-            feature_name: string | null;
-            /** Item Summary */
-            item_summary: string | null;
-            /** Item Title */
-            item_title: string | null;
-            /** Lat */
-            lat: number | null;
-            /** Lon */
-            lon: number | null;
-            /** Metadata */
-            metadata: {
-                [key: string]: unknown;
-            };
-            /** Place Name */
-            place_name: string;
-            /** Provider */
-            provider: string | null;
-            /**
-             * Reuse Policy
-             * @enum {string}
-             */
-            reuse_policy: "allowed" | "blocked" | "manual_review";
-            /** Sort Order */
-            sort_order: number;
-            /** Source Name */
-            source_name: string | null;
-            /** Source Record Key */
-            source_record_key: string | null;
-            /** Source Url */
-            source_url: string | null;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "candidate" | "included" | "rejected" | "archived";
-            /** Theme Group */
-            theme_group: string;
-            /** Theme Name */
-            theme_name: string;
-            /** Theme Slug */
-            theme_slug: string;
-            /** Title */
-            title: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
         };
         /**
          * FeatureBatchData
@@ -1106,7 +947,7 @@ export interface components {
             /** Curation Count */
             curation_count: number;
             /** Curations */
-            curations: components["schemas"]["CurationItemView"][];
+            curations: components["schemas"]["PublicCurationItemView"][];
             feature: components["schemas"]["CurationFeatureView"];
         };
         /** FeatureCurationGroupsData */
@@ -1147,7 +988,7 @@ export interface components {
              * Curations
              * @description 이 Feature가 속한 공개 큐레이션 membership 전부.
              */
-            curations?: components["schemas"]["CurationItemView"][];
+            curations?: components["schemas"]["PublicCurationItemView"][];
             /** Detail */
             detail: {
                 [key: string]: unknown;
@@ -2393,6 +2234,155 @@ export interface components {
              */
             updated_at: string;
         };
+        /** PublicCurationCollectionView */
+        PublicCurationCollectionView: {
+            /** Archived At */
+            archived_at: string | null;
+            /**
+             * Collection Id
+             * Format: uuid
+             */
+            collection_id: string;
+            /** Collection Key */
+            collection_key: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Key */
+            dataset_key: string | null;
+            /** Description */
+            description: string | null;
+            /** Edition Key */
+            edition_key: string;
+            /** Item Count */
+            item_count: number;
+            /** Provider */
+            provider: string | null;
+            /** Source Id */
+            source_id: string | null;
+            /** Source Name */
+            source_name: string | null;
+            /** Source Url */
+            source_url: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "published" | "archived";
+            /** Theme Group */
+            theme_group: string;
+            /**
+             * Theme Id
+             * Format: uuid
+             */
+            theme_id: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "admin_only" | "public";
+        };
+        /** PublicCurationItemView */
+        PublicCurationItemView: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Address Hint */
+            address_hint: string | null;
+            /** Archived At */
+            archived_at: string | null;
+            /**
+             * Collection Id
+             * Format: uuid
+             */
+            collection_id: string;
+            /** Collection Key */
+            collection_key: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Curation Item Id
+             * Format: uuid
+             */
+            curation_item_id: string;
+            /**
+             * Curation Relation
+             * @enum {string}
+             */
+            curation_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+            /** Dataset Key */
+            dataset_key: string | null;
+            /** Edition Key */
+            edition_key: string;
+            /** External Item Id */
+            external_item_id: string;
+            /** Feature Category */
+            feature_category: string | null;
+            /** Feature Id */
+            feature_id: string | null;
+            /** Feature Kind */
+            feature_kind: string | null;
+            /** Feature Name */
+            feature_name: string | null;
+            /** Item Summary */
+            item_summary: string | null;
+            /** Item Title */
+            item_title: string | null;
+            /** Lat */
+            lat: number | null;
+            /** Lon */
+            lon: number | null;
+            /** Place Name */
+            place_name: string;
+            /** Provider */
+            provider: string | null;
+            /**
+             * Reuse Policy
+             * @enum {string}
+             */
+            reuse_policy: "allowed" | "blocked" | "manual_review";
+            /** Sort Order */
+            sort_order: number;
+            /** Source Name */
+            source_name: string | null;
+            /** Source Url */
+            source_url: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "candidate" | "included" | "rejected" | "archived";
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /**
          * PublicFeatureListData
          * @description public feature 목록 data payload (ADR-073 D-9-2 지도 완결성 계약).
@@ -2525,6 +2515,134 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * PublicWeatherAlertHistoryData
+         * @description ``GET /features/weather/alerts`` data payload.
+         */
+        PublicWeatherAlertHistoryData: {
+            /**
+             * History From
+             * Format: date-time
+             */
+            history_from: string;
+            /** Items */
+            items: components["schemas"]["PublicWeatherAlertHistoryItem"][];
+        };
+        /**
+         * PublicWeatherAlertHistoryItem
+         * @description 공개 KMA 기상특보 typed 이력 row 1건.
+         */
+        PublicWeatherAlertHistoryItem: {
+            /** Alert Type */
+            alert_type?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Effective From */
+            effective_from?: string | null;
+            /** Effective Until */
+            effective_until?: string | null;
+            /** Feature Id */
+            feature_id?: string | null;
+            /** Feature Name */
+            feature_name?: string | null;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Level */
+            level?: string | null;
+            /** Phenomenon */
+            phenomenon?: string | null;
+            /** Region Code */
+            region_code?: string | null;
+            /** Region Name */
+            region_name?: string | null;
+            /** Source Agency */
+            source_agency?: string | null;
+            /** Title */
+            title?: string | null;
+        };
+        /**
+         * PublicWeatherAlertHistoryResponse
+         * @description 공개 KMA 기상특보 typed 이력 응답.
+         */
+        PublicWeatherAlertHistoryResponse: {
+            data: components["schemas"]["PublicWeatherAlertHistoryData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicWeatherForecastData
+         * @description ``GET /features/.../weather/forecast`` data payload.
+         */
+        PublicWeatherForecastData: {
+            anchor?: components["schemas"]["WeatherAnchorOut"] | null;
+            /**
+             * History From
+             * Format: date-time
+             */
+            history_from: string;
+            /** Items */
+            items: components["schemas"]["PublicWeatherValueItem"][];
+            /** Radius M */
+            radius_m: number;
+            /** Target Feature Id */
+            target_feature_id?: string | null;
+            /** Target Lat */
+            target_lat?: number | null;
+            /** Target Lon */
+            target_lon?: number | null;
+        };
+        /**
+         * PublicWeatherForecastResponse
+         * @description 공개 weather forecast timeline 응답.
+         */
+        PublicWeatherForecastResponse: {
+            data: components["schemas"]["PublicWeatherForecastData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicWeatherValueItem
+         * @description weather timeline row 1건.
+         */
+        PublicWeatherValueItem: {
+            /**
+             * Collected At
+             * Format: date-time
+             */
+            collected_at: string;
+            /** Feature Id */
+            feature_id: string;
+            /** Forecast Style */
+            forecast_style: string;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Metric Key */
+            metric_key: string;
+            /** Metric Name */
+            metric_name?: string | null;
+            /** Observed At */
+            observed_at?: string | null;
+            /** Provider */
+            provider: string;
+            /** Severity */
+            severity?: string | null;
+            /** Timeline Bucket */
+            timeline_bucket?: string | null;
+            /** Unit */
+            unit?: string | null;
+            /** Valid At */
+            valid_at?: string | null;
+            /** Valid From */
+            valid_from?: string | null;
+            /** Valid Until */
+            valid_until?: string | null;
+            /** Value Number */
+            value_number?: number | null;
+            /** Value Text */
+            value_text?: string | null;
+            /** Weather Domain */
+            weather_domain: string;
+            /** Weather Value Key */
+            weather_value_key: string;
+        };
+        /**
          * SyncStateSummary
          * @description provider dataset 신선도. 내부 cursor는 공개하지 않는다.
          */
@@ -2552,71 +2670,6 @@ export interface components {
             openapi_version: string;
             /** Version */
             version: string;
-        };
-        /**
-         * WeatherAlertHistoryData
-         * @description ``GET /features/weather/alerts`` data payload.
-         */
-        WeatherAlertHistoryData: {
-            /**
-             * History From
-             * Format: date-time
-             */
-            history_from: string;
-            /** Items */
-            items: components["schemas"]["WeatherAlertHistoryItem"][];
-        };
-        /**
-         * WeatherAlertHistoryItem
-         * @description KMA 기상특보 이력 row 1건.
-         */
-        WeatherAlertHistoryItem: {
-            /** Alert Type */
-            alert_type?: string | null;
-            /** Description */
-            description?: string | null;
-            /** Effective From */
-            effective_from?: string | null;
-            /** Effective Until */
-            effective_until?: string | null;
-            /** Feature Id */
-            feature_id?: string | null;
-            /** Feature Name */
-            feature_name?: string | null;
-            /** Fetched At */
-            fetched_at?: string | null;
-            /** Imported At */
-            imported_at?: string | null;
-            /** Issued At */
-            issued_at?: string | null;
-            /** Last Seen At */
-            last_seen_at?: string | null;
-            /** Level */
-            level?: string | null;
-            /** Payload */
-            payload: {
-                [key: string]: unknown;
-            };
-            /** Phenomenon */
-            phenomenon?: string | null;
-            /** Region Code */
-            region_code?: string | null;
-            /** Region Name */
-            region_name?: string | null;
-            /** Source Agency */
-            source_agency?: string | null;
-            /** Source Record Key */
-            source_record_key: string;
-            /** Title */
-            title?: string | null;
-        };
-        /**
-         * WeatherAlertHistoryResponse
-         * @description KMA 기상특보 이력 응답.
-         */
-        WeatherAlertHistoryResponse: {
-            data: components["schemas"]["WeatherAlertHistoryData"];
-            meta: components["schemas"]["Meta"];
         };
         /**
          * WeatherAnchorOut
@@ -2651,36 +2704,6 @@ export interface components {
             metrics: components["schemas"]["WeatherMetricOut"][];
             /** Source Styles */
             source_styles: string[];
-        };
-        /**
-         * WeatherForecastData
-         * @description ``GET /features/.../weather/forecast`` data payload.
-         */
-        WeatherForecastData: {
-            anchor?: components["schemas"]["WeatherAnchorOut"] | null;
-            /**
-             * History From
-             * Format: date-time
-             */
-            history_from: string;
-            /** Items */
-            items: components["schemas"]["WeatherValueItem"][];
-            /** Radius M */
-            radius_m: number;
-            /** Target Feature Id */
-            target_feature_id?: string | null;
-            /** Target Lat */
-            target_lat?: number | null;
-            /** Target Lon */
-            target_lon?: number | null;
-        };
-        /**
-         * WeatherForecastResponse
-         * @description 공개 weather forecast timeline 응답.
-         */
-        WeatherForecastResponse: {
-            data: components["schemas"]["WeatherForecastData"];
-            meta: components["schemas"]["Meta"];
         };
         /**
          * WeatherMetricOut
@@ -2737,53 +2760,6 @@ export interface components {
             value_text?: string | null;
             /** Weather Domain */
             weather_domain?: string | null;
-        };
-        /**
-         * WeatherValueItem
-         * @description weather timeline row 1건.
-         */
-        WeatherValueItem: {
-            /**
-             * Collected At
-             * Format: date-time
-             */
-            collected_at: string;
-            /** Feature Id */
-            feature_id: string;
-            /** Forecast Style */
-            forecast_style: string;
-            /** Issued At */
-            issued_at?: string | null;
-            /** Metric Key */
-            metric_key: string;
-            /** Metric Name */
-            metric_name?: string | null;
-            /** Observed At */
-            observed_at?: string | null;
-            /** Provider */
-            provider: string;
-            /** Severity */
-            severity?: string | null;
-            /** Source Record Key */
-            source_record_key?: string | null;
-            /** Timeline Bucket */
-            timeline_bucket?: string | null;
-            /** Unit */
-            unit?: string | null;
-            /** Valid At */
-            valid_at?: string | null;
-            /** Valid From */
-            valid_from?: string | null;
-            /** Valid Until */
-            valid_until?: string | null;
-            /** Value Number */
-            value_number?: number | null;
-            /** Value Text */
-            value_text?: string | null;
-            /** Weather Domain */
-            weather_domain: string;
-            /** Weather Value Key */
-            weather_value_key: string;
         };
     };
     responses: never;
@@ -3615,7 +3591,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WeatherAlertHistoryResponse"];
+                    "application/json": components["schemas"]["PublicWeatherAlertHistoryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3678,7 +3654,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WeatherForecastResponse"];
+                    "application/json": components["schemas"]["PublicWeatherForecastResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3965,7 +3941,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WeatherForecastResponse"];
+                    "application/json": components["schemas"]["PublicWeatherForecastResponse"];
                 };
             };
             /** @description Validation Error */

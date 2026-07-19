@@ -832,11 +832,11 @@
         "additionalProperties": false,
         "properties": {
           "collection": {
-            "$ref": "#/components/schemas/CurationCollectionView"
+            "$ref": "#/components/schemas/PublicCurationCollectionView"
           },
           "items": {
             "items": {
-              "$ref": "#/components/schemas/CurationItemView"
+              "$ref": "#/components/schemas/PublicCurationItemView"
             },
             "title": "Items",
             "type": "array"
@@ -866,191 +866,12 @@
         "title": "CurationCollectionResponse",
         "type": "object"
       },
-      "CurationCollectionView": {
-        "additionalProperties": false,
-        "properties": {
-          "archived_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Archived At"
-          },
-          "collection_id": {
-            "format": "uuid",
-            "title": "Collection Id",
-            "type": "string"
-          },
-          "collection_key": {
-            "title": "Collection Key",
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "dataset_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dataset Key"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "edition_key": {
-            "title": "Edition Key",
-            "type": "string"
-          },
-          "item_count": {
-            "title": "Item Count",
-            "type": "integer"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider"
-          },
-          "source_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Id"
-          },
-          "source_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Name"
-          },
-          "source_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Url"
-          },
-          "status": {
-            "enum": [
-              "draft",
-              "published",
-              "archived"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "theme_group": {
-            "title": "Theme Group",
-            "type": "string"
-          },
-          "theme_id": {
-            "format": "uuid",
-            "title": "Theme Id",
-            "type": "string"
-          },
-          "theme_name": {
-            "title": "Theme Name",
-            "type": "string"
-          },
-          "theme_slug": {
-            "title": "Theme Slug",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "visibility": {
-            "enum": [
-              "admin_only",
-              "public"
-            ],
-            "title": "Visibility",
-            "type": "string"
-          }
-        },
-        "required": [
-          "collection_id",
-          "collection_key",
-          "theme_id",
-          "theme_slug",
-          "theme_name",
-          "theme_group",
-          "source_id",
-          "provider",
-          "dataset_key",
-          "source_name",
-          "source_url",
-          "title",
-          "edition_key",
-          "description",
-          "status",
-          "visibility",
-          "metadata",
-          "item_count",
-          "created_at",
-          "updated_at",
-          "archived_at"
-        ],
-        "title": "CurationCollectionView",
-        "type": "object"
-      },
       "CurationCollectionsData": {
         "additionalProperties": false,
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/CurationCollectionView"
+              "$ref": "#/components/schemas/PublicCurationCollectionView"
             },
             "title": "Items",
             "type": "array"
@@ -1143,314 +964,6 @@
         "title": "CurationFeatureView",
         "type": "object"
       },
-      "CurationItemView": {
-        "additionalProperties": false,
-        "properties": {
-          "address": {
-            "additionalProperties": true,
-            "title": "Address",
-            "type": "object"
-          },
-          "address_hint": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Address Hint"
-          },
-          "archived_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Archived At"
-          },
-          "collection_id": {
-            "format": "uuid",
-            "title": "Collection Id",
-            "type": "string"
-          },
-          "collection_key": {
-            "title": "Collection Key",
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "curation_item_id": {
-            "format": "uuid",
-            "title": "Curation Item Id",
-            "type": "string"
-          },
-          "curation_relation": {
-            "enum": [
-              "primary_stop",
-              "food_stop",
-              "cafe_stop",
-              "bookstore_stop",
-              "nearby_option",
-              "accessibility_support",
-              "pet_support",
-              "family_support",
-              "theme_area_anchor"
-            ],
-            "title": "Curation Relation",
-            "type": "string"
-          },
-          "dataset_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dataset Key"
-          },
-          "edition_key": {
-            "title": "Edition Key",
-            "type": "string"
-          },
-          "external_item_id": {
-            "title": "External Item Id",
-            "type": "string"
-          },
-          "feature_category": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feature Category"
-          },
-          "feature_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feature Id"
-          },
-          "feature_kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feature Kind"
-          },
-          "feature_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feature Name"
-          },
-          "item_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Item Summary"
-          },
-          "item_title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Item Title"
-          },
-          "lat": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lat"
-          },
-          "lon": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lon"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
-          },
-          "place_name": {
-            "title": "Place Name",
-            "type": "string"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider"
-          },
-          "reuse_policy": {
-            "enum": [
-              "allowed",
-              "blocked",
-              "manual_review"
-            ],
-            "title": "Reuse Policy",
-            "type": "string"
-          },
-          "sort_order": {
-            "title": "Sort Order",
-            "type": "integer"
-          },
-          "source_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Name"
-          },
-          "source_record_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Record Key"
-          },
-          "source_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Url"
-          },
-          "status": {
-            "enum": [
-              "candidate",
-              "included",
-              "rejected",
-              "archived"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "theme_group": {
-            "title": "Theme Group",
-            "type": "string"
-          },
-          "theme_name": {
-            "title": "Theme Name",
-            "type": "string"
-          },
-          "theme_slug": {
-            "title": "Theme Slug",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          }
-        },
-        "required": [
-          "curation_item_id",
-          "collection_id",
-          "collection_key",
-          "title",
-          "edition_key",
-          "theme_slug",
-          "theme_name",
-          "theme_group",
-          "provider",
-          "dataset_key",
-          "source_name",
-          "source_url",
-          "feature_id",
-          "feature_name",
-          "feature_kind",
-          "feature_category",
-          "lon",
-          "lat",
-          "address",
-          "source_record_key",
-          "external_item_id",
-          "place_name",
-          "address_hint",
-          "status",
-          "sort_order",
-          "item_title",
-          "item_summary",
-          "curation_relation",
-          "reuse_policy",
-          "metadata",
-          "created_at",
-          "updated_at",
-          "archived_at"
-        ],
-        "title": "CurationItemView",
-        "type": "object"
-      },
       "FeatureBatchData": {
         "additionalProperties": false,
         "description": "feature batch 상세 data payload.",
@@ -1541,7 +1054,7 @@
           },
           "curations": {
             "items": {
-              "$ref": "#/components/schemas/CurationItemView"
+              "$ref": "#/components/schemas/PublicCurationItemView"
             },
             "title": "Curations",
             "type": "array"
@@ -1638,7 +1151,7 @@
           "curations": {
             "description": "이 Feature가 속한 공개 큐레이션 membership 전부.",
             "items": {
-              "$ref": "#/components/schemas/CurationItemView"
+              "$ref": "#/components/schemas/PublicCurationItemView"
             },
             "title": "Curations",
             "type": "array"
@@ -5540,6 +5053,469 @@
         "title": "PublicCuratedWeatherFeatureView",
         "type": "object"
       },
+      "PublicCurationCollectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "collection_key": {
+            "title": "Collection Key",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "edition_key": {
+            "title": "Edition Key",
+            "type": "string"
+          },
+          "item_count": {
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "published",
+              "archived"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "theme_group": {
+            "title": "Theme Group",
+            "type": "string"
+          },
+          "theme_id": {
+            "format": "uuid",
+            "title": "Theme Id",
+            "type": "string"
+          },
+          "theme_name": {
+            "title": "Theme Name",
+            "type": "string"
+          },
+          "theme_slug": {
+            "title": "Theme Slug",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "admin_only",
+              "public"
+            ],
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "collection_id",
+          "collection_key",
+          "theme_id",
+          "theme_slug",
+          "theme_name",
+          "theme_group",
+          "source_id",
+          "provider",
+          "dataset_key",
+          "source_name",
+          "source_url",
+          "title",
+          "edition_key",
+          "description",
+          "status",
+          "visibility",
+          "item_count",
+          "created_at",
+          "updated_at",
+          "archived_at"
+        ],
+        "title": "PublicCurationCollectionView",
+        "type": "object"
+      },
+      "PublicCurationItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "address_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Hint"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "collection_key": {
+            "title": "Collection Key",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "curation_item_id": {
+            "format": "uuid",
+            "title": "Curation Item Id",
+            "type": "string"
+          },
+          "curation_relation": {
+            "enum": [
+              "primary_stop",
+              "food_stop",
+              "cafe_stop",
+              "bookstore_stop",
+              "nearby_option",
+              "accessibility_support",
+              "pet_support",
+              "family_support",
+              "theme_area_anchor"
+            ],
+            "title": "Curation Relation",
+            "type": "string"
+          },
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "edition_key": {
+            "title": "Edition Key",
+            "type": "string"
+          },
+          "external_item_id": {
+            "title": "External Item Id",
+            "type": "string"
+          },
+          "feature_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Category"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "feature_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Kind"
+          },
+          "feature_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Name"
+          },
+          "item_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Summary"
+          },
+          "item_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Title"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "place_name": {
+            "title": "Place Name",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "reuse_policy": {
+            "enum": [
+              "allowed",
+              "blocked",
+              "manual_review"
+            ],
+            "title": "Reuse Policy",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "included",
+              "rejected",
+              "archived"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "theme_group": {
+            "title": "Theme Group",
+            "type": "string"
+          },
+          "theme_name": {
+            "title": "Theme Name",
+            "type": "string"
+          },
+          "theme_slug": {
+            "title": "Theme Slug",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "curation_item_id",
+          "collection_id",
+          "collection_key",
+          "title",
+          "edition_key",
+          "theme_slug",
+          "theme_name",
+          "theme_group",
+          "provider",
+          "dataset_key",
+          "source_name",
+          "source_url",
+          "feature_id",
+          "feature_name",
+          "feature_kind",
+          "feature_category",
+          "lon",
+          "lat",
+          "address",
+          "external_item_id",
+          "place_name",
+          "address_hint",
+          "status",
+          "sort_order",
+          "item_title",
+          "item_summary",
+          "curation_relation",
+          "reuse_policy",
+          "created_at",
+          "updated_at",
+          "archived_at"
+        ],
+        "title": "PublicCurationItemView",
+        "type": "object"
+      },
       "PublicFeatureListData": {
         "additionalProperties": false,
         "description": "public feature 목록 data payload (ADR-073 D-9-2 지도 완결성 계약).\n\n``mode``가 ``items``면 개별 feature(``items``), ``clusters``면 행정구역\nrollup(``clusters``)을 채운다(T-213c). ``truncated``는 결과가 ``max_items``\n상한에서 잘렸는지를 **명시**한다(F-8: silent truncation 해소). cluster 모드는\n결정적 ``cluster_key``(행정코드)를 노출한다. payload 해석용\n``cluster_unit``/``drill_down_unit``은 envelope 불변식에 따라 ``meta.cluster``에\n일원화한다.",
@@ -5809,6 +5785,464 @@
         "title": "PublicVersionResponse",
         "type": "object"
       },
+      "PublicWeatherAlertHistoryData": {
+        "additionalProperties": false,
+        "description": "``GET /features/weather/alerts`` data payload.",
+        "properties": {
+          "history_from": {
+            "format": "date-time",
+            "title": "History From",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PublicWeatherAlertHistoryItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "history_from",
+          "items"
+        ],
+        "title": "PublicWeatherAlertHistoryData",
+        "type": "object"
+      },
+      "PublicWeatherAlertHistoryItem": {
+        "additionalProperties": false,
+        "description": "공개 KMA 기상특보 typed 이력 row 1건.",
+        "properties": {
+          "alert_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Until"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "feature_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Name"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "phenomenon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phenomenon"
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code"
+          },
+          "region_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Name"
+          },
+          "source_agency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Agency"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "PublicWeatherAlertHistoryItem",
+        "type": "object"
+      },
+      "PublicWeatherAlertHistoryResponse": {
+        "additionalProperties": false,
+        "description": "공개 KMA 기상특보 typed 이력 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublicWeatherAlertHistoryData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PublicWeatherAlertHistoryResponse",
+        "type": "object"
+      },
+      "PublicWeatherForecastData": {
+        "additionalProperties": false,
+        "description": "``GET /features/.../weather/forecast`` data payload.",
+        "properties": {
+          "anchor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherAnchorOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history_from": {
+            "format": "date-time",
+            "title": "History From",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PublicWeatherValueItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "radius_m": {
+            "title": "Radius M",
+            "type": "number"
+          },
+          "target_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Feature Id"
+          },
+          "target_lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Lat"
+          },
+          "target_lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Lon"
+          }
+        },
+        "required": [
+          "radius_m",
+          "history_from",
+          "items"
+        ],
+        "title": "PublicWeatherForecastData",
+        "type": "object"
+      },
+      "PublicWeatherForecastResponse": {
+        "additionalProperties": false,
+        "description": "공개 weather forecast timeline 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublicWeatherForecastData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PublicWeatherForecastResponse",
+        "type": "object"
+      },
+      "PublicWeatherValueItem": {
+        "additionalProperties": false,
+        "description": "weather timeline row 1건.",
+        "properties": {
+          "collected_at": {
+            "format": "date-time",
+            "title": "Collected At",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "forecast_style": {
+            "title": "Forecast Style",
+            "type": "string"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "metric_key": {
+            "title": "Metric Key",
+            "type": "string"
+          },
+          "metric_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Name"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severity"
+          },
+          "timeline_bucket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeline Bucket"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "valid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid At"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
+          },
+          "value_number": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Number"
+          },
+          "value_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Text"
+          },
+          "weather_domain": {
+            "title": "Weather Domain",
+            "type": "string"
+          },
+          "weather_value_key": {
+            "title": "Weather Value Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "weather_value_key",
+          "feature_id",
+          "provider",
+          "weather_domain",
+          "forecast_style",
+          "metric_key",
+          "collected_at"
+        ],
+        "title": "PublicWeatherValueItem",
+        "type": "object"
+      },
       "SyncStateSummary": {
         "additionalProperties": false,
         "description": "provider dataset 신선도. 내부 cursor는 공개하지 않는다.",
@@ -5898,251 +6332,6 @@
           "openapi_version"
         ],
         "title": "VersionData",
-        "type": "object"
-      },
-      "WeatherAlertHistoryData": {
-        "additionalProperties": false,
-        "description": "``GET /features/weather/alerts`` data payload.",
-        "properties": {
-          "history_from": {
-            "format": "date-time",
-            "title": "History From",
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/WeatherAlertHistoryItem"
-            },
-            "title": "Items",
-            "type": "array"
-          }
-        },
-        "required": [
-          "history_from",
-          "items"
-        ],
-        "title": "WeatherAlertHistoryData",
-        "type": "object"
-      },
-      "WeatherAlertHistoryItem": {
-        "additionalProperties": false,
-        "description": "KMA 기상특보 이력 row 1건.",
-        "properties": {
-          "alert_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Alert Type"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "effective_from": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Effective From"
-          },
-          "effective_until": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Effective Until"
-          },
-          "feature_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feature Id"
-          },
-          "feature_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feature Name"
-          },
-          "fetched_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fetched At"
-          },
-          "imported_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Imported At"
-          },
-          "issued_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Issued At"
-          },
-          "last_seen_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Seen At"
-          },
-          "level": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Level"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "title": "Payload",
-            "type": "object"
-          },
-          "phenomenon": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Phenomenon"
-          },
-          "region_code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Region Code"
-          },
-          "region_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Region Name"
-          },
-          "source_agency": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Agency"
-          },
-          "source_record_key": {
-            "title": "Source Record Key",
-            "type": "string"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          }
-        },
-        "required": [
-          "source_record_key",
-          "payload"
-        ],
-        "title": "WeatherAlertHistoryItem",
-        "type": "object"
-      },
-      "WeatherAlertHistoryResponse": {
-        "additionalProperties": false,
-        "description": "KMA 기상특보 이력 응답.",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/WeatherAlertHistoryData"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "WeatherAlertHistoryResponse",
         "type": "object"
       },
       "WeatherAnchorOut": {
@@ -6256,96 +6445,6 @@
           "is_stale"
         ],
         "title": "WeatherCardData",
-        "type": "object"
-      },
-      "WeatherForecastData": {
-        "additionalProperties": false,
-        "description": "``GET /features/.../weather/forecast`` data payload.",
-        "properties": {
-          "anchor": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/WeatherAnchorOut"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "history_from": {
-            "format": "date-time",
-            "title": "History From",
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/WeatherValueItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "radius_m": {
-            "title": "Radius M",
-            "type": "number"
-          },
-          "target_feature_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Feature Id"
-          },
-          "target_lat": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Lat"
-          },
-          "target_lon": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Lon"
-          }
-        },
-        "required": [
-          "radius_m",
-          "history_from",
-          "items"
-        ],
-        "title": "WeatherForecastData",
-        "type": "object"
-      },
-      "WeatherForecastResponse": {
-        "additionalProperties": false,
-        "description": "공개 weather forecast timeline 응답.",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/WeatherForecastData"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "WeatherForecastResponse",
         "type": "object"
       },
       "WeatherMetricOut": {
@@ -6596,189 +6695,6 @@
           "metric_key"
         ],
         "title": "WeatherSummaryOut",
-        "type": "object"
-      },
-      "WeatherValueItem": {
-        "additionalProperties": false,
-        "description": "weather timeline row 1건.",
-        "properties": {
-          "collected_at": {
-            "format": "date-time",
-            "title": "Collected At",
-            "type": "string"
-          },
-          "feature_id": {
-            "title": "Feature Id",
-            "type": "string"
-          },
-          "forecast_style": {
-            "title": "Forecast Style",
-            "type": "string"
-          },
-          "issued_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Issued At"
-          },
-          "metric_key": {
-            "title": "Metric Key",
-            "type": "string"
-          },
-          "metric_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metric Name"
-          },
-          "observed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Observed At"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "severity": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Severity"
-          },
-          "source_record_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Record Key"
-          },
-          "timeline_bucket": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Timeline Bucket"
-          },
-          "unit": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Unit"
-          },
-          "valid_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Valid At"
-          },
-          "valid_from": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Valid From"
-          },
-          "valid_until": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Valid Until"
-          },
-          "value_number": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value Number"
-          },
-          "value_text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value Text"
-          },
-          "weather_domain": {
-            "title": "Weather Domain",
-            "type": "string"
-          },
-          "weather_value_key": {
-            "title": "Weather Value Key",
-            "type": "string"
-          }
-        },
-        "required": [
-          "weather_value_key",
-          "feature_id",
-          "provider",
-          "weather_domain",
-          "forecast_style",
-          "metric_key",
-          "collected_at"
-        ],
-        "title": "WeatherValueItem",
         "type": "object"
       }
     },
@@ -9482,7 +9398,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WeatherAlertHistoryResponse"
+                  "$ref": "#/components/schemas/PublicWeatherAlertHistoryResponse"
                 }
               }
             },
@@ -9756,7 +9672,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WeatherForecastResponse"
+                  "$ref": "#/components/schemas/PublicWeatherForecastResponse"
                 }
               }
             },
@@ -10469,7 +10385,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WeatherForecastResponse"
+                  "$ref": "#/components/schemas/PublicWeatherForecastResponse"
                 }
               }
             },

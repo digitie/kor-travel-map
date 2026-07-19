@@ -181,8 +181,6 @@ function MembershipCard({ item }: { item: PublicCurationItem }) {
           <dd className="break-all font-mono">{item.curation_item_id}</dd>
           <dt className="text-muted-foreground">theme</dt>
           <dd>{item.theme_group} · {item.theme_slug}</dd>
-          <dt className="text-muted-foreground">source_record_key</dt>
-          <dd className="break-all font-mono">{item.source_record_key ?? "-"}</dd>
           <dt className="text-muted-foreground">place_name</dt>
           <dd>{item.place_name || "-"}</dd>
           <dt className="text-muted-foreground">address_hint</dt>
@@ -200,10 +198,6 @@ function MembershipCard({ item }: { item: PublicCurationItem }) {
           <dt className="text-muted-foreground">archived_at</dt>
           <dd>{item.archived_at ?? "-"}</dd>
         </dl>
-        <div className="mt-2 text-xs font-medium">metadata</div>
-        <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 text-xs">
-          {JSON.stringify(item.metadata, null, 2)}
-        </pre>
       </details>
     </div>
   );

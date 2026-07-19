@@ -52,7 +52,7 @@ from kortravelmap.api.auth import require_admin_frontend, require_service_token
 from kortravelmap.api.db import get_session
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.response import ClusterUnit, Meta, ProblemDetail, make_meta
-from kortravelmap.api.routers.curations import CurationItemView
+from kortravelmap.api.routers.curations import PublicCurationItemView
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
@@ -260,7 +260,7 @@ class FeatureDetailResponse(BaseModel):
         description="server-owned feature revision. ETag과 같은 값이다.",
     )
     updated_at: datetime
-    curations: list[CurationItemView] = Field(
+    curations: list[PublicCurationItemView] = Field(
         default_factory=list,
         description="이 Feature가 속한 공개 큐레이션 membership 전부.",
     )
@@ -671,8 +671,8 @@ async def _operator_feature_or_404(
         )
 
 
-def _curation_item_view(row: curation_repo.CurationItem) -> CurationItemView:
-    return CurationItemView.model_validate(row, from_attributes=True)
+def _curation_item_view(row: curation_repo.CurationItem) -> PublicCurationItemView:
+    return PublicCurationItemView.model_validate(row, from_attributes=True)
 
 
 def _observation_view(

@@ -156,6 +156,10 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "FeatureCurationGroupsResponse" in schemas
     assert "CurationCollectionResponse" in schemas
     assert "FeatureCurationGroupResponse" in schemas
+    assert "PublicCurationItemView" in schemas
+    assert "PublicCurationCollectionView" in schemas
+    assert "AdminCurationItemView" not in schemas
+    assert "AdminWeatherAlertHistoryItem" not in schemas
     assert "CuratedFeatureDetailSnapshotView" not in schemas
     assert "OpsMetricsResponse" not in schemas
     assert "AdminFeatureListResponse" not in schemas
@@ -274,6 +278,120 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "primary_provider",
         "primary_dataset_key",
     }.isdisjoint(_schema_properties(user, "NearbyFeatureSummary"))
+    assert {
+        "source_record_key",
+        "metadata",
+    }.isdisjoint(_schema_properties(user, "PublicCurationItemView"))
+    assert "metadata" not in _schema_properties(
+        user, "PublicCurationCollectionView"
+    )
+    assert "source_record_key" not in _schema_properties(
+        user, "PublicWeatherValueItem"
+    )
+    assert {
+        "source_record_key",
+        "payload",
+        "fetched_at",
+        "imported_at",
+        "last_seen_at",
+    }.isdisjoint(_schema_properties(user, "PublicWeatherAlertHistoryItem"))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "schemas", "expected"),
+    [
+        (
+            "/v1/features/weather/alerts",
+            {
+                "Root": {
+                    "type": "object",
+                    "properties": {"source_record_key": {"type": "string"}},
+                }
+            },
+            "source_record_key",
+        ),
+        (
+            "/v1/features/weather/forecast",
+            {
+                "Root": {
+                    "type": "array",
+                    "items": {"$ref": "#/components/schemas/Branch"},
+                },
+                "Branch": {
+                    "oneOf": [
+                        {
+                            "allOf": [
+                                {"$ref": "#/components/schemas/Cycle"},
+                                {
+                                    "type": "object",
+                                    "properties": {"payload": {"type": "object"}},
+                                },
+                            ]
+                        }
+                    ]
+                },
+                "Cycle": {
+                    "anyOf": [
+                        {"$ref": "#/components/schemas/Branch"},
+                        {"type": "null"},
+                    ]
+                },
+            },
+            "payload",
+        ),
+        (
+            "/v1/curations",
+            {
+                "Root": {
+                    "type": "object",
+                    "properties": {
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "metadata": {
+                                        "type": "object",
+                                        "additionalProperties": True,
+                                    }
+                                },
+                            },
+                        }
+                    },
+                }
+            },
+            "metadata",
+        ),
+    ],
+)
+def test_user_response_schema_gate_rejects_recursive_raw_fields(
+    path: str,
+    schemas: dict[str, Any],
+    expected: str,
+) -> None:
+    module = _load_script_module()
+    spec = {
+        "components": {"schemas": schemas},
+        "paths": {
+            path: {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Root"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match=expected):
+        module._validate_user_response_schemas(spec)
 
 
 @pytest.mark.unit

@@ -1,5 +1,10 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
+import type {
+  PublicCurationCollection,
+  PublicCurationItem,
+} from "../src/api/public-curations";
+
 const FEATURE_ID = "python-visitkorea-api::visitkorea_areas::palace-1";
 
 async function fulfillJson(route: Route, body: unknown) {
@@ -10,7 +15,9 @@ async function fulfillJson(route: Route, body: unknown) {
   });
 }
 
-function membership(overrides: Record<string, unknown>) {
+function membership(
+  overrides: Partial<PublicCurationItem>,
+): PublicCurationItem {
   return {
     curation_item_id: "item-2023",
     collection_id: "collection-2023",
@@ -31,7 +38,6 @@ function membership(overrides: Record<string, unknown>) {
     lon: 126.977,
     lat: 37.5796,
     address: { road_address: "서울 종로구 사직로 161" },
-    source_record_key: "mcst::tourism-100::2023-palace",
     external_item_id: "tourism-100-2023-palace",
     place_name: "경복궁",
     address_hint: "서울 종로구",
@@ -41,7 +47,6 @@ function membership(overrides: Record<string, unknown>) {
     item_summary: "2023~2024 선정지",
     curation_relation: "primary_stop",
     reuse_policy: "allowed",
-    metadata: { official_source: "e2e-membership-metadata" },
     created_at: "2026-07-13T00:00:00.000Z",
     updated_at: "2026-07-13T00:00:00.000Z",
     archived_at: null,
@@ -81,29 +86,31 @@ async function mockPublicCurationRoutes(
       }
       await fulfillJson(route, {
         data: {
-          items: curations.map((item) => ({
-            collection_id: item.collection_id,
-            collection_key: item.collection_key,
-            theme_id: "theme-tourism-100",
-            theme_slug: item.theme_slug,
-            theme_name: item.theme_name,
-            theme_group: item.theme_group,
-            source_id: "source-mcst",
-            provider: item.provider,
-            dataset_key: item.dataset_key,
-            source_name: item.source_name,
-            source_url: item.source_url,
-            title: item.title,
-            edition_key: item.edition_key,
-            description: null,
-            status: "published",
-            visibility: "public",
-            metadata: {},
-            item_count: 1,
-            created_at: item.created_at,
-            updated_at: item.updated_at,
-            archived_at: null,
-          })),
+          items: curations.map(
+            (item) =>
+              ({
+                collection_id: item.collection_id,
+                collection_key: item.collection_key,
+                theme_id: "theme-tourism-100",
+                theme_slug: item.theme_slug,
+                theme_name: item.theme_name,
+                theme_group: item.theme_group,
+                source_id: "source-mcst",
+                provider: item.provider,
+                dataset_key: item.dataset_key,
+                source_name: item.source_name,
+                source_url: item.source_url,
+                title: item.title,
+                edition_key: item.edition_key,
+                description: null,
+                status: "published",
+                visibility: "public",
+                item_count: 1,
+                created_at: item.created_at,
+                updated_at: item.updated_at,
+                archived_at: null,
+              }) satisfies PublicCurationCollection,
+          ),
         },
         meta: { request_id: "e2e-public-curation-collections" },
       });
@@ -182,10 +189,15 @@ test.describe("/curated-features", () => {
     const membership = detail.getByTestId("curation-membership").first();
     await membership.getByText("membership 전체 정보").click();
     await expect(membership.getByText("tourism-100-2023-2024")).toBeVisible();
-    await expect(membership.getByText("mcst::tourism-100::2023-palace")).toBeVisible();
+    await expect(membership.getByText("tourism-100-2023-palace")).toBeVisible();
     await expect(membership.getByText("서울 종로구")).toBeVisible();
     await expect(membership.getByText("allowed", { exact: true })).toBeVisible();
-    await expect(membership.getByText(/e2e-membership-metadata/)).toBeVisible();
+    await expect(
+      membership.getByText("source_record_key", { exact: true }),
+    ).toHaveCount(0);
+    await expect(membership.getByText("metadata", { exact: true })).toHaveCount(0);
+    await expect(membership).not.toContainText("mcst::tourism-100::2023-palace");
+    await expect(membership).not.toContainText("e2e-membership-metadata");
   });
 
   test("collection 필터 조회 실패를 빈 필터처럼 숨기지 않는다", async ({ page }) => {
