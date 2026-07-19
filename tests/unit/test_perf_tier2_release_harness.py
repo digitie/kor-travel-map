@@ -1,0 +1,83 @@
+"""Tier-2 release benchmark를 plan shape·고정 ID와 분리하는 단위 검증."""
+
+from __future__ import annotations
+
+import pytest
+
+import scripts.perf_tier2_release_harness as harness
+from scripts.perf_tier2_release_harness import (
+    BenchmarkCardinalityError,
+    _build_viewports,
+    _plan_returned_rows,
+    _shared_read_blocks,
+)
+
+pytestmark = pytest.mark.unit
+
+
+def test_shared_read_blocks_uses_root_cumulative_total_with_single_child() -> None:
+    plan = {
+        "Node Type": "Limit",
+        "Shared Read Blocks": 10,
+        "Plans": [
+            {
+                "Node Type": "Index Scan",
+                "Shared Read Blocks": 10,
+            }
+        ],
+    }
+
+    assert _shared_read_blocks(plan) == 10
+
+
+def test_shared_read_blocks_is_stable_for_append_and_parallel_plan_shape() -> None:
+    plan = {
+        "Node Type": "Gather",
+        "Shared Read Blocks": 73,
+        "Plans": [
+            {
+                "Node Type": "Append",
+                "Shared Read Blocks": 73,
+                "Plans": [
+                    {"Node Type": "Parallel Seq Scan", "Shared Read Blocks": 31},
+                    {"Node Type": "Parallel Bitmap Heap Scan", "Shared Read Blocks": 42},
+                ],
+            }
+        ],
+    }
+
+    assert _shared_read_blocks(plan) == 73
+
+
+def test_plan_returned_rows_accounts_for_root_loops() -> None:
+    assert _plan_returned_rows({"Actual Rows": 25, "Actual Loops": 4}) == 100
+
+
+def test_batch_viewport_uses_selected_database_ids() -> None:
+    selected = [f"existing:f:{index:06d}" for index in range(200)]
+
+    batch = _build_viewports(selected)[-1]
+
+    assert batch.params == {"feature_ids": selected}
+    assert batch.min_returned_rows == 200
+    assert not any(feature_id.startswith("perf:f:") for feature_id in selected)
+
+
+def test_batch_viewport_rejects_less_than_200_public_ids() -> None:
+    with pytest.raises(BenchmarkCardinalityError, match="199건만 선택됨"):
+        _build_viewports([f"existing:f:{index:06d}" for index in range(199)])
+
+
+def test_main_does_not_emit_success_report_on_cardinality_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async def _fail_run(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise BenchmarkCardinalityError("public feature 199건만 존재함")
+
+    monkeypatch.setattr(harness, "_run", _fail_run)
+
+    assert harness.main(["--dsn", "postgresql+asyncpg://unused", "--skip-seed"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "cardinality 검증 실패" in captured.err

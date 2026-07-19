@@ -17,8 +17,10 @@ p95 실행시간·shared read blocks·응답 bytes budget을 기록한다. CI에
     KOR_TRAVEL_MAP_PG_DSN=postgresql+asyncpg://... \
       python scripts/perf_tier2_release_harness.py --rows 1000000 --iterations 30
 
-``--skip-seed``로 이미 적재된 DB를 그대로 잰다. fixture 생성은 수 분~수십 분이
-걸릴 수 있다. 결과는 JSON으로 stdout에 출력하며 release 리포트에 첨부한다.
+``--skip-seed``로 이미 적재된 DB를 그대로 잰다. 이 모드의 200건 batch는
+public projection의 실제 ID를 정렬해 사용한다. fixture 생성은 수 분~수십 분이
+걸릴 수 있다. 각 viewport가 최소 반환 행 계약을 만족할 때만 JSON을
+stdout에 출력하여 release 리포트에 첨부한다.
 """
 
 from __future__ import annotations
@@ -30,6 +32,8 @@ import os
 import statistics
 import sys
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -101,40 +105,145 @@ _COMMON_SEARCH = {
     "cursor_feature_id": None,
     "limit_plus_one": 51,
 }
-_BATCH_200 = {"feature_ids": [f"perf:f:{i:06d}" for i in range(1, 201)]}
 
-_VIEWPORTS: list[dict[str, Any]] = [
-    {"name": "서울 밀집 in-bounds", "sql": _FEATURES_IN_BBOX_SQL, "params": _SEOUL_DENSE_BBOX},
-    {
-        "name": "전국 low-zoom cluster(sido)",
-        "sql": _CLUSTER_BBOX_SQL_BY_UNIT["sido"],
-        "params": _NATIONWIDE_LOWZOOM_BBOX,
-    },
-    {"name": "100km nearby", "sql": _NEARBY_COORD_DISTANCE_SQL, "params": _NEARBY_100KM},
-    {
-        "name": "상용 검색어 search",
-        "sql": _FEATURE_SEARCH_BY_SCORE_SQL,
-        "params": _COMMON_SEARCH,
-        "pre": ["SET LOCAL pg_trgm.similarity_threshold = 0.2"],
-    },
-    {"name": "200건 batch", "sql": _GET_PUBLIC_FEATURES_BY_IDS_SQL, "params": _BATCH_200},
-]
+_BATCH_CARDINALITY = 200
+_SELECT_PUBLIC_BATCH_IDS_SQL = """
+SELECT feature_id
+FROM feature.public_features
+ORDER BY feature_id
+LIMIT :limit
+"""
+_COUNT_PUBLIC_FEATURES_SQL = "SELECT count(*) FROM feature.public_features"
 
 
-def _shared_read_blocks(plan: dict[str, Any]) -> int:
-    total = int(plan.get("Shared Read Blocks", 0) or 0)
-    for child in plan.get("Plans", []):
-        total += _shared_read_blocks(child)
-    return total
+class BenchmarkCardinalityError(RuntimeError):
+    """성공 release evidence를 만들 수 없는 입력 cardinality 오류."""
+
+
+@dataclass(frozen=True, slots=True)
+class Viewport:
+    """실측 query와 성공 report에 필요한 최소 반환 행 계약."""
+
+    name: str
+    sql: str
+    params: Mapping[str, Any]
+    min_returned_rows: int
+    pre: tuple[str, ...] = ()
+
+
+def _build_viewports(batch_feature_ids: list[str]) -> tuple[Viewport, ...]:
+    """DB에서 실제 선택한 public ID로 batch viewport를 구성한다."""
+
+    if len(batch_feature_ids) != _BATCH_CARDINALITY:
+        raise BenchmarkCardinalityError(
+            f"200건 batch에 public feature {_BATCH_CARDINALITY}건이 필요하지만 "
+            f"{len(batch_feature_ids)}건만 선택됨"
+        )
+    return (
+        Viewport(
+            "서울 밀집 in-bounds",
+            _FEATURES_IN_BBOX_SQL,
+            _SEOUL_DENSE_BBOX,
+            min_returned_rows=1,
+        ),
+        Viewport(
+            "전국 low-zoom cluster(sido)",
+            _CLUSTER_BBOX_SQL_BY_UNIT["sido"],
+            _NATIONWIDE_LOWZOOM_BBOX,
+            min_returned_rows=1,
+        ),
+        Viewport(
+            "100km nearby",
+            _NEARBY_COORD_DISTANCE_SQL,
+            _NEARBY_100KM,
+            min_returned_rows=1,
+        ),
+        Viewport(
+            "상용 검색어 search",
+            _FEATURE_SEARCH_BY_SCORE_SQL,
+            _COMMON_SEARCH,
+            min_returned_rows=1,
+            pre=("SET LOCAL pg_trgm.similarity_threshold = 0.2",),
+        ),
+        Viewport(
+            "200건 batch",
+            _GET_PUBLIC_FEATURES_BY_IDS_SQL,
+            {"feature_ids": batch_feature_ids},
+            min_returned_rows=_BATCH_CARDINALITY,
+        ),
+    )
+
+
+def _shared_read_blocks(plan: Mapping[str, Any]) -> int:
+    """query 전체의 shared read를 최상위 Plan 누적값으로 반환한다.
+
+    PostgreSQL의 상위 node buffer 수치는 child 사용량을 이미 포함한다.
+    plan tree를 재귀 합산하면 plan shape에 따라 같은 I/O가 중복 계산된다.
+    """
+
+    return int(plan.get("Shared Read Blocks", 0) or 0)
+
+
+def _plan_returned_rows(plan: Mapping[str, Any]) -> int:
+    """최상위 Plan이 반환한 전체 행 수를 계산한다."""
+
+    actual_rows = float(plan.get("Actual Rows", 0.0) or 0.0)
+    actual_loops = float(plan.get("Actual Loops", 1.0) or 0.0)
+    return int(round(actual_rows * actual_loops))
+
+
+async def _select_public_batch_feature_ids(session: AsyncSession) -> list[str]:
+    """public predicate를 만족하는 실제 ID 200개를 결정적으로 선택한다."""
+
+    result = await session.execute(
+        text(_SELECT_PUBLIC_BATCH_IDS_SQL), {"limit": _BATCH_CARDINALITY}
+    )
+    feature_ids = [str(row[0]) for row in result.all()]
+    if len(feature_ids) != _BATCH_CARDINALITY:
+        raise BenchmarkCardinalityError(
+            f"--skip-seed 포함 모든 모드에 public feature "
+            f"{_BATCH_CARDINALITY}건이 필요하지만 {len(feature_ids)}건만 존재함"
+        )
+    return feature_ids
+
+
+async def _measure_response(
+    session: AsyncSession, viewport: Viewport
+) -> tuple[int, int]:
+    """실제 query 반환 행 수와 JSON 바이트를 한 번의 scan으로 재고 검증한다."""
+
+    for statement in viewport.pre:
+        await session.execute(text(statement))
+    row = (
+        await session.execute(
+            text(
+                "SELECT count(*) AS returned_rows, "
+                "coalesce(sum(octet_length(coalesce(row_to_json(t)::text, ''))), 0) "
+                "AS response_bytes FROM (" + viewport.sql + ") AS t"
+            ),
+            dict(viewport.params),
+        )
+    ).one()
+    returned_rows = int(row.returned_rows)
+    response_bytes = int(row.response_bytes or 0)
+    if returned_rows < viewport.min_returned_rows:
+        raise BenchmarkCardinalityError(
+            f"{viewport.name}: 최소 {viewport.min_returned_rows}행이 필요하지만 "
+            f"{returned_rows}행만 반환됨"
+        )
+    return returned_rows, response_bytes
 
 
 async def _explain_analyze(
-    session: AsyncSession, sql: str, params: dict[str, Any], pre: list[str]
+    session: AsyncSession,
+    sql: str,
+    params: Mapping[str, Any],
+    pre: tuple[str, ...],
 ) -> dict[str, Any]:
     for statement in pre:
         await session.execute(text(statement))
     result = await session.execute(
-        text("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + sql), params
+        text("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + sql), dict(params)
     )
     explained: dict[str, Any] = result.scalar_one()[0]
     return explained
@@ -151,70 +260,98 @@ async def _run(dsn: str, rows: int, iterations: int, skip_seed: bool) -> dict[st
         finally:
             cur.close()
 
-    report: dict[str, Any] = {"rows": rows, "iterations": iterations, "viewports": []}
-    async with AsyncSession(engine) as session:
-        if not skip_seed:
-            seed_started = time.perf_counter()
-            async with session.begin():
-                await seed_hot_query_features(session, n=rows)
-            report["seed_seconds"] = round(time.perf_counter() - seed_started, 1)
-
-        for viewport in _VIEWPORTS:
-            durations_ms: list[float] = []
-            shared_reads: list[int] = []
-            response_bytes = 0
-            plan_json: dict[str, Any] = {}
-            for _ in range(iterations):
+    try:
+        report: dict[str, Any] = {
+            "mode": "existing" if skip_seed else "seeded",
+            "requested_seed_rows": None if skip_seed else rows,
+            "iterations": iterations,
+            "viewports": [],
+        }
+        async with AsyncSession(engine) as session:
+            if not skip_seed:
+                seed_started = time.perf_counter()
                 async with session.begin():
-                    explained = await _explain_analyze(
+                    await seed_hot_query_features(
                         session,
-                        viewport["sql"],
-                        viewport["params"],
-                        viewport.get("pre", []),
+                        n=rows,
+                        feature_id_prefix="tier2:f:",
                     )
-                plan = explained["Plan"]
-                durations_ms.append(float(explained.get("Execution Time", 0.0)))
-                shared_reads.append(_shared_read_blocks(plan))
-                plan_json = plan
-            # response bytes: 실제 행 직렬화 크기 근사(JSON row_to_json 합).
-            async with session.begin():
-                for statement in viewport.get("pre", []):
-                    await session.execute(text(statement))
-                size_row = (
-                    await session.execute(
-                        text(
-                            "SELECT coalesce(sum(octet_length("
-                            "coalesce(row_to_json(t)::text, ''))), 0) "
-                            "FROM (" + viewport["sql"] + ") AS t"
-                        ),
-                        viewport["params"],
-                    )
-                ).scalar_one()
-                response_bytes = int(size_row or 0)
+                report["seed_seconds"] = round(time.perf_counter() - seed_started, 1)
 
-            ordered = sorted(durations_ms)
-            p95 = ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
-            report["viewports"].append(
-                {
-                    "name": viewport["name"],
-                    "p50_ms": round(statistics.median(durations_ms), 2),
-                    "p95_ms": round(p95, 2),
-                    "max_ms": round(max(durations_ms), 2),
-                    "shared_read_blocks_p95": sorted(shared_reads)[
-                        min(len(shared_reads) - 1, int(len(shared_reads) * 0.95))
-                    ],
-                    "response_bytes": response_bytes,
-                    "top_node": plan_json.get("Node Type"),
-                }
-            )
-    await engine.dispose()
-    return report
+            async with session.begin():
+                public_feature_rows = int(
+                    (
+                        await session.execute(text(_COUNT_PUBLIC_FEATURES_SQL))
+                    ).scalar_one()
+                )
+                batch_feature_ids = await _select_public_batch_feature_ids(session)
+            report["public_feature_rows"] = public_feature_rows
+            viewports = _build_viewports(batch_feature_ids)
+
+            for viewport in viewports:
+                durations_ms: list[float] = []
+                shared_reads: list[int] = []
+                matched_rows: list[int] = []
+                plan_json: dict[str, Any] = {}
+                async with session.begin():
+                    returned_rows, response_bytes = await _measure_response(
+                        session, viewport
+                    )
+
+                for _ in range(iterations):
+                    async with session.begin():
+                        explained = await _explain_analyze(
+                            session,
+                            viewport.sql,
+                            viewport.params,
+                            viewport.pre,
+                        )
+                    plan = explained["Plan"]
+                    durations_ms.append(float(explained.get("Execution Time", 0.0)))
+                    shared_reads.append(_shared_read_blocks(plan))
+                    matched_rows.append(_plan_returned_rows(plan))
+                    plan_json = plan
+
+                if any(count != returned_rows for count in matched_rows):
+                    raise BenchmarkCardinalityError(
+                        f"{viewport.name}: EXPLAIN matched_rows={matched_rows}와 "
+                        f"response returned_rows={returned_rows}가 다름"
+                    )
+
+                ordered = sorted(durations_ms)
+                p95 = ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
+                report["viewports"].append(
+                    {
+                        "name": viewport.name,
+                        "matched_rows": matched_rows[0],
+                        "returned_rows": returned_rows,
+                        "minimum_returned_rows": viewport.min_returned_rows,
+                        "p50_ms": round(statistics.median(durations_ms), 2),
+                        "p95_ms": round(p95, 2),
+                        "max_ms": round(max(durations_ms), 2),
+                        "shared_read_blocks_p95": sorted(shared_reads)[
+                            min(len(shared_reads) - 1, int(len(shared_reads) * 0.95))
+                        ],
+                        "response_bytes": response_bytes,
+                        "top_node": plan_json.get("Node Type"),
+                    }
+                )
+        return report
+    finally:
+        await engine.dispose()
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("1 이상의 정수여야 합니다.")
+    return parsed
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--rows", type=int, default=1_000_000)
-    parser.add_argument("--iterations", type=int, default=30)
+    parser.add_argument("--rows", type=_positive_int, default=1_000_000)
+    parser.add_argument("--iterations", type=_positive_int, default=30)
     parser.add_argument("--skip-seed", action="store_true")
     parser.add_argument(
         "--dsn",
@@ -224,9 +361,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.dsn:
         parser.error("--dsn 또는 KOR_TRAVEL_MAP_PG_DSN이 필요합니다.")
-    report = asyncio.run(
-        _run(args.dsn, args.rows, args.iterations, args.skip_seed)
-    )
+    try:
+        report = asyncio.run(
+            _run(args.dsn, args.rows, args.iterations, args.skip_seed)
+        )
+    except BenchmarkCardinalityError as exc:
+        print(f"benchmark cardinality 검증 실패: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 

@@ -33,6 +33,19 @@
   OpenAPI admin/user drift, admin/user TypeScript type-check, E2E ESLint, Ruff, main strict
   mypy, 변경 API strict mypy, import-linter 4계약, redaction도 통과했다.
 
+## 2026-07-19 (codex, agent B) — T-VN-21R release benchmark 측정 정확성
+
+- #767의 두 finding을 하나의 release evidence 정확성 경계로 묶었다.
+  `--skip-seed`는 `feature.public_features` 실제 ID를 정렬해 200건 batch를 구성하고,
+  seed 모드도 과거 `perf:f:*` 고정 ID와 다른 prefix를 적재한 뒤 DB 선택 경로를
+  공유한다.
+- 대표 viewport별 최소 반환 행(일반 1, batch 200)을 못 채우거나 EXPLAIN
+  `matched_rows`와 실제 `returned_rows`가 다르면 JSON 성공 report를 남기지 않는다.
+  shared read는 최상위 Plan 누적값만 쓰도록 바꿔 child 중복 합산을 제거했다.
+- seed/skip-seed의 고정 ID 부재, public 199건 fail-closed, 모든 viewport
+  cardinality, root/child·Append/parallel plan shape 회귀 테스트를 작성했다.
+  현재 단일 적대적 리뷰 전이므로 테스트는 실행하지 않았다.
+
 ## 2026-07-19 (codex) — 최근 48시간 Claude PR 단일 적대 리뷰
 
 - 닫힘 여부와 무관하게 PR #752/#756/#757/#759/#760/#763을 전문 리뷰어 1명이 재검토했다.
