@@ -12,6 +12,28 @@
   검증되지 않는 테스트 공백(S3)을 확인했다. 단건은 `None`, collection detail/list는 정상
   item 1건만 집계하는지 직접 단언하도록 보완했다.
 
+## 2026-07-19 (claude, agent A1) — T-VN-07 no-op beach 옵션 삭제 + auth-event actor principal 1차
+
+- D-9-6: `/v1/public/beaches`(목록/상세)의 `include_quality`/`include_forecast`는 값을
+  받아도 항상 `latest_water_quality=null`·`upcoming_index_forecasts=[]`·`latest_weather=null`을
+  반환하던 no-op 옵션이었다. route 서명·`_beach_view` 시그니처·no-op 대입을 제거하고
+  `openapi.json`/`openapi.user.json`을 재생성한 뒤 `openapi-typescript@7.13.0`으로 admin
+  frontend·user-client TS 타입을 재생성했다(두 파일 각각 param 4줄만 삭제, 다른 변경 0).
+  응답 필드 3개는 모델 기본값으로 유지해 응답 계약을 바꾸지 않는다 — 구현 시점에 옵션과
+  함께 재도입한다. FastAPI가 미지 query 파라미터를 무시하므로 옛 caller는 정상 200(no 500).
+- D-2/F-4: auth-event write(`POST /v1/admin/auth-events`)의 감사 actor를
+  `body.actor or context.actor` → `context.actor`로 좁혀 body-actor 위조를 차단했다.
+  저장소 전체에서 `X or context.actor` 패턴은 이 한 곳뿐이라 추가 동형 사례는 없었다.
+  admin feature/curated/issue/offline/dedup/enrichment의 body-actor 필드 전면 제거와
+  `AdminAuthEventCreateRequest.actor` 필드 자체의 schema 제거는 T-VN-20 소관이라
+  손대지 않고 필드는 유지·무시한다(`extra="forbid"`라 지금 제거하면 옛 caller가 422 —
+  T-VN-20이 frontend/PinVi와 함께 조율).
+- 테스트: (1) OpenAPI가 beach 옵션을 더 이상 노출하지 않고 응답 필드는 유지됨(contract),
+  (2) 옛 caller의 `include_forecast=true` 전송이 정상 200 + 응답 필드 유지(기존 테스트에
+  단언 추가), (3) auth-event가 body actor가 아닌 인증 principal을 저장·반환. 검증:
+  public_views/auth/export_openapi/route_policy green, openapi drift(admin/user)=0,
+  TS drift(admin/user)=0, ruff/mypy --strict/lint-imports/redaction clean.
+
 ## 2026-07-19 (claude, agent A1) — T-VN-02 route policy matrix + /metrics 경계 + #742
 
 - ADR-066 결정 1: `kortravelmap.api.route_policy`에 전 HTTP/WS route를 6개 정책 중

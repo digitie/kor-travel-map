@@ -193,12 +193,15 @@ async def create_admin_auth_event(
     """Next.js login/logout API가 기록하는 admin 인증 감사 이벤트."""
 
     started_at = perf_counter()
+    # ADR-066 D-2 (T-VN-07) — 감사 actor는 인증 principal에서만 파생한다. body의
+    # actor를 우선하던 신뢰 경계 위조 경로를 제거하고 context.actor만 신뢰한다.
+    # body.actor 필드 자체의 schema 제거는 T-VN-20 소관이라 여기서는 무시만 한다.
     item = await record_admin_auth_event(
         session,
         event_type=body.event_type,
         outcome=body.outcome,
         attempted_username=body.attempted_username,
-        actor=body.actor or context.actor,
+        actor=context.actor,
         reason=body.reason,
         next_path=body.next_path,
         client_ip=body.client_ip,

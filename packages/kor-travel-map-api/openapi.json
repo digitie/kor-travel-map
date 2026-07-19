@@ -36106,26 +36106,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "include_quality",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Include Quality",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "include_forecast",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Include Forecast",
-              "type": "boolean"
-            }
-          },
-          {
             "description": "외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다.",
             "in": "query",
             "name": "key",
@@ -36380,26 +36360,6 @@
             "schema": {
               "title": "Feature Id",
               "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "include_quality",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Include Quality",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "include_forecast",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Include Forecast",
-              "type": "boolean"
             }
           },
           {

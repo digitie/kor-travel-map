@@ -15,6 +15,21 @@
   표면에서 제외된다(이전: 500, 노출 아님). JSON null/키 부재는 기존 의미
   (종료시각 없음 = 활성)를 유지한다. typed notice 재설계·오염 관측은 T-VN-37.
 
+### no-op beach 옵션 삭제 + auth-event actor principal 1차 (2026-07-19, ADR-066 D-2/D-9-6 T-VN-07)
+
+- **REMOVED**: `/v1/public/beaches`·`/v1/public/beaches/{feature_id}`의 무동작
+  `include_quality`·`include_forecast` query 옵션을 route 서명·OpenAPI(admin/user)·생성
+  TS 타입에서 제거했다(D-9-6 — water quality/forecast 미구현, 구현 시점 재도입). 응답
+  필드(`latest_water_quality`·`upcoming_index_forecasts`·`latest_weather`)는 모델
+  기본값(null/[])으로 유지해 응답 계약은 불변이다. FastAPI가 미지 query 파라미터를
+  무시하므로 옛 caller가 옵션을 보내도 정상 200(no 500).
+- **SECURITY**: admin auth-event write(`POST /v1/admin/auth-events`)의 감사 actor를
+  `body.actor or context.actor`에서 인증 principal(`context.actor`)만으로 좁혔다(ADR-066
+  D-2, F-4). request body의 `actor`는 신뢰 경계 안에서 위조 가능했다. 본 slice는
+  auth-event 한 경로만 다루며, admin feature/curated/issue/offline/dedup/enrichment
+  write의 body-actor 전면 제거와 `actor` 필드 schema 제거는 T-VN-20 소관이라 여기서는
+  필드를 유지·무시만 한다.
+
 ### route policy matrix + `/metrics` scrape identity 경계 (2026-07-19, ADR-066 T-VN-02)
 
 - **ADDED**: `kortravelmap.api.route_policy` — 전 HTTP route와 WebSocket을

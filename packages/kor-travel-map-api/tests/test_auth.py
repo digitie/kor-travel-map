@@ -881,6 +881,67 @@ def test_admin_proxy_secret_deny_and_allow_over_http() -> None:
 
 
 @pytest.mark.unit
+def test_auth_event_records_authenticated_principal_not_body_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ADR-066 D-2 (T-VN-07) — 감사 actor는 인증 principal에서만 파생한다. body가
+    # 다른 actor를 보내도 저장·응답 actor는 proxy actor header(principal)여야 한다.
+    from datetime import UTC, datetime
+
+    from kortravelmap.infra.auth_event_repo import AdminAuthEventRow
+
+    from kortravelmap.api.routers import admin_auth as admin_auth_mod
+
+    captured: dict[str, Any] = {}
+
+    async def _record(_session: Any, **kwargs: Any) -> AdminAuthEventRow:
+        captured.update(kwargs)
+        return AdminAuthEventRow(
+            auth_event_id="ae_1",
+            event_type=kwargs["event_type"],
+            outcome=kwargs["outcome"],
+            attempted_username=kwargs["attempted_username"],
+            actor=kwargs["actor"],
+            reason=kwargs["reason"],
+            next_path=kwargs["next_path"],
+            client_ip=kwargs["client_ip"],
+            user_agent=kwargs["user_agent"],
+            request_id=kwargs["request_id"],
+            created_at=datetime(2026, 7, 19, tzinfo=UTC),
+        )
+
+    monkeypatch.setattr(admin_auth_mod, "record_admin_auth_event", _record)
+
+    class _CommitSession:
+        async def commit(self) -> None:
+            return None
+
+    async def _session() -> AsyncIterator[Any]:
+        yield _CommitSession()
+
+    client = _client(_api_settings(admin_proxy_secret=SecretStr("proxy-secret")))
+    client.app.dependency_overrides[get_session] = _session
+
+    response = client.post(
+        "/v1/admin/auth-events",
+        headers={
+            ADMIN_ACTOR_HEADER: "admin:real",
+            ADMIN_PROXY_SECRET_HEADER: "proxy-secret",
+        },
+        json={
+            "event_type": "login",
+            "outcome": "succeeded",
+            "actor": "attacker:forged",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    # 저장·응답 actor 모두 인증 principal이어야 하고 body actor는 무시된다.
+    assert captured["actor"] == "admin:real"
+    assert response.json()["data"]["item"]["actor"] == "admin:real"
+
+
+@pytest.mark.unit
 def test_destructive_admin_blocked_when_disabled() -> None:
     client = _client(_api_settings(admin_destructive_enabled=False))
     assert (

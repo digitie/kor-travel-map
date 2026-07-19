@@ -3183,8 +3183,6 @@ export interface operations {
                 q?: string | null;
                 page_size?: number;
                 cursor?: string | null;
-                include_quality?: boolean;
-                include_forecast?: boolean;
                 /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
                 key?: string | null;
             };
@@ -3274,8 +3272,6 @@ export interface operations {
     get_public_beach_v1_public_beaches__feature_id__get: {
         parameters: {
             query?: {
-                include_quality?: boolean;
-                include_forecast?: boolean;
                 /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
                 key?: string | null;
             };
