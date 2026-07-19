@@ -8,8 +8,9 @@
 
 C7은 다음 조건을 모두 만족해야 완료다.
 
-1. `T-ADM-C6c` compatible-pair capture가 성공했고 Manager v3 manifest의 active
-   Map·PinVi image가 실제 두 API container image와 일치한다.
+1. `T-ADM-C6c` compatible-pair capture가 성공했고 Manager v4 manifest의 active
+   Map API·UI·Dagster web·Dagster daemon·PinVi API image가 실제 다섯
+   runtime container image와 각각 일치한다.
 2. host runner/helper/attestation 검증 모듈/상태 감사기는 exact commit의 root-owned Git archive snapshot으로
    고정되고, API·UI·Dagster web·Dagster daemon·
    PinVi API의 image/command/environment hash가 root-owned attestation과 일치한다.
@@ -48,8 +49,8 @@ C7은 다음 조건을 모두 만족해야 완료다.
    로그아웃→재차단 및 구 credential 401을 확인한다. 실패하면 저장한 env/config/image로
    UI만 정확히 복구한다.
 8. Manager의 `pinvi-pair capture --verified-compatible --build`를 실행한다. manifestless
-   capture가 mutation 뒤 실패하면 임의 rollback 성공을 꾸미지 않고 두 API를 중지한 채
-   operator-required로 남긴다.
+   capture가 mutation 뒤 실패하면 임의 rollback 성공을 꾸미지 않고 Map 네
+   runtime과 PinVi API를 중지한 채 operator-required로 남긴다.
 
 ### 2.2 실행 checkout과 Playwright executor
 
