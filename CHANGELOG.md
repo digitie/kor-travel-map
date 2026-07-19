@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### C6c manifest v4 Map runtime provenance (2026-07-19, T-ADM-C7P)
+
+- **SECURITY**: C7 runtime attestation은 compatible-pair manifest v4의 Map API·UI·
+  Dagster web·Dagster daemon image ID를 실제 compose runtime과 각각 exact 비교한다.
+  v3 manifest, 누락·추가 필드, role별 image mismatch는 mutation 전에 fail-close한다.
+
 ### C7 mocked summary 가시성 검증 보완 (2026-07-19, PR #755 리뷰 후속)
 
 - **FIXED (test)**: `/ops/datasets` 상태 요약의 exact projection이 DOM에 하나만

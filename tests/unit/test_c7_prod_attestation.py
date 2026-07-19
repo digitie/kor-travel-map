@@ -178,12 +178,17 @@ def test_secure_reader_rejects_wrong_mode_and_writable_ancestor(tmp_path: Path) 
 def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, str], Callable]:
     map_commit = "a" * 40
     pinvi_commit = "b" * 40
-    map_image = "sha256:" + "1" * 64
+    map_images = {
+        "map_api": "sha256:" + "1" * 64,
+        "map_ui": "sha256:" + "4" * 64,
+        "map_dagster_web": "sha256:" + "5" * 64,
+        "map_dagster_daemon": "sha256:" + "6" * 64,
+    }
     pinvi_image = "sha256:" + "2" * 64
     executor_image = "sha256:" + "3" * 64
     project_name = "kor-travel-map-prod"
     playwright_base = "playwright@example"
-    generation = "c6c-v3"
+    generation = "c6c-v4"
     services = {
         "map_api": "map-api",
         "map_dagster_daemon": "map-daemon",
@@ -197,27 +202,32 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
     }
     records: dict[str, dict[str, object]] = {}
     image_records: dict[str, dict[str, object]] = {
-        map_image: {
+        image_id: {
             "Config": {"Labels": {"org.opencontainers.image.revision": map_commit}}
-        },
-        pinvi_image: {
-            "Config": {"Labels": {"org.opencontainers.image.revision": pinvi_commit}}
-        },
-        executor_image: {
-            "Config": {
-                "Labels": {
-                    "io.kortravelmap.c7.playwright-base": playwright_base,
-                    "io.kortravelmap.c7.repository-commit": map_commit,
-                }
-            },
-            "Id": executor_image,
-        },
+        }
+        for image_id in map_images.values()
     }
+    image_records.update(
+        {
+            pinvi_image: {
+                "Config": {"Labels": {"org.opencontainers.image.revision": pinvi_commit}}
+            },
+            executor_image: {
+                "Config": {
+                    "Labels": {
+                        "io.kortravelmap.c7.playwright-base": playwright_base,
+                        "io.kortravelmap.c7.repository-commit": map_commit,
+                    }
+                },
+                "Id": executor_image,
+            },
+        }
+    )
     runtime: dict[str, object] = {}
     service_ids: dict[str, str] = {}
     for index, (role, service) in enumerate(services.items(), start=4):
         container_id = str(index) * 64
-        image_id = pinvi_image if role == "pinvi_api" else map_image
+        image_id = pinvi_image if role == "pinvi_api" else map_images[role]
         config = {
             "Cmd": ["serve"],
             "Entrypoint": ["/entrypoint"],
@@ -255,13 +265,16 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
         }
     pair = {
         "contract_generation": generation,
-        "map_image_id": map_image,
+        "map_image_id": map_images["map_api"],
+        "map_ui_image_id": map_images["map_ui"],
+        "map_dagster_image_id": map_images["map_dagster_web"],
+        "map_dagster_daemon_image_id": map_images["map_dagster_daemon"],
         "map_source_revision": map_commit,
         "pinvi_image_id": pinvi_image,
         "pinvi_source_revision": pinvi_commit,
         "recorded_at": "2026-07-19T00:00:00+00:00",
     }
-    manifest = {"active": pair, "rollback": copy.deepcopy(pair), "version": 3}
+    manifest = {"active": pair, "rollback": copy.deepcopy(pair), "version": 4}
     manifest_bytes = _canonical_json(manifest)
     environ = {
         "E2E_BASE_URL": "https://map.example.test",
@@ -378,6 +391,52 @@ def test_runtime_attestation_rejects_compatible_pair_hash_mismatch() -> None:
     attestation["compatible_pair_manifest_sha256"] = "f" * 64
 
     with pytest.raises(ATTESTATION.AttestationError, match="compatible pair mismatch"):
+        _verify_runtime(attestation, manifest, environ, run_command)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value.update({"version": 3}),
+        lambda value: value["active"].pop("map_ui_image_id"),
+        lambda value: value["rollback"].update({"unexpected": True}),
+    ],
+)
+def test_runtime_attestation_rejects_non_v4_or_inexact_pair_shape(
+    mutation: Callable[[dict[str, object]], object],
+) -> None:
+    attestation, manifest, environ, run_command = _runtime_fixture()
+    mutation(manifest)
+    attestation["compatible_pair_manifest_sha256"] = _sha256_bytes(
+        _canonical_json(manifest)
+    )
+
+    with pytest.raises(ATTESTATION.AttestationError):
+        _verify_runtime(attestation, manifest, environ, run_command)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "map_image_id",
+        "map_ui_image_id",
+        "map_dagster_image_id",
+        "map_dagster_daemon_image_id",
+        "pinvi_image_id",
+    ],
+)
+def test_runtime_attestation_rejects_each_active_runtime_image_mismatch(
+    field: str,
+) -> None:
+    attestation, manifest, environ, run_command = _runtime_fixture()
+    active = manifest["active"]
+    assert isinstance(active, dict)
+    active[field] = "sha256:" + "f" * 64
+    attestation["compatible_pair_manifest_sha256"] = _sha256_bytes(
+        _canonical_json(manifest)
+    )
+
+    with pytest.raises(ATTESTATION.AttestationError, match="active pair is not deployed"):
         _verify_runtime(attestation, manifest, environ, run_command)
 
 
