@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex agent B) — T-VN-59 public weather·curation raw lineage 계약 문서화
+
+- 기준 `integration/t-vn@f5cdeeaa`에서 static/CodeGraph 영향도를 확인했다. weather public
+  router는 저장소 timeline/source-record row를 `WeatherValueItem`과
+  `WeatherAlertHistoryItem`으로 직접 투영하고, curation public/admin DTO는
+  `CurationItemView` 상속을 공유한다. 그 결과 user OpenAPI와 생성 client가 raw lineage에
+  도달한다.
+- 공개 DTO는 도메인 표현에 필요한 typed 필드만 소유하고 operator raw DTO는 별도로
+  정의한다. public curation item의 자유형 metadata는 제거하되 admin UI의 source record와
+  metadata 조작·표시는 유지한다. weather alert raw payload와 ingestion timestamp도 admin
+  BFF 표면으로 이동한다.
+- 단일 component 이름만 검사하지 않고 user operation response에서 `$ref`, array,
+  `allOf`/`anyOf`/`oneOf`, object property를 재귀 순회하는 forbidden reachable-schema gate를
+  완료 조건으로 고정했다. 이번 문서 단계에서는 테스트·lint·build를 실행하지 않았다.
+
 ## 2026-07-20 (codex, agent B) — T-VN-57 public route 계약 단일 정본 설계
 
 - T-VN-SYNC-02 적대적 리뷰에서 production runtime은 public-keyed GET 29개를 모두

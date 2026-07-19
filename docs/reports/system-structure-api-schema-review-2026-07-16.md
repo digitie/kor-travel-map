@@ -91,6 +91,27 @@ stack 미노출), PinVi의 OpenAPI HTTP 경계(직접 DB/패키지 접근 금지
 (0050~0057, #709/#710/#711/#713/#714/#715·#701·#691·#725~#729),
 provider×dataset×scope datasets 운영 화면(#698·#723).
 
+### 1.1 T-VN-59 공개 schema reachability 보강 (2026-07-20)
+
+T-VN-SYNC-02 적대적 통합 리뷰에서 F-3/D-1의 raw provider payload operator 격리가
+feature detail에는 적용됐지만 public weather·curation 응답에는 끝까지 전파되지 않은 것을
+확인했다. public `WeatherValueItem`은 `source_record_key`를, public alert는 source record
+identity·원문 payload·ingestion timestamp를, public curation item은
+`source_record_key`·자유형 metadata를 노출한다. 이 schema는 `openapi.user.json`의 response
+root에서 재귀적으로 도달 가능하므로 단순 route allowlist만으로는 공개 경계를 보장하지 못한다.
+
+T-VN-59는 다음 보강 결정을 적용한다.
+
+1. public DTO는 typed domain projection만 소유하고 admin/operator raw DTO와 상속 없이
+   분리한다. 호환 alias는 만들지 않는다.
+2. alert raw source-record 이력은 admin BFF operator endpoint로 이동한다. forecast lineage는
+   기존 feature source/observation operator endpoint에서 조회한다.
+3. user OpenAPI gate는 operation response root에서 모든 component 참조와 container 조합을
+   재귀 순회한다. 공개 경계에서 raw lineage field나 arbitrary provider payload가 reachable이면
+   export를 거부한다.
+4. 이는 REST projection clean-cut이며 immutable source record와 curation 저장 DB 구조는
+   그대로 유지한다.
+
 ## 2. 설계 결정 (ADR 후보)
 
 각 결정은 독립 ADR로 전개 가능한 형태다. 형식: 컨텍스트 → 결정 → 근거 → 영향.

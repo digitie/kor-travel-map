@@ -14,6 +14,8 @@
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
   - [ ] `T-VN-57` — **public route policy·OpenAPI security·user surface 단일 정본** (#784)
+  - [ ] `T-VN-59` — **public weather·curation raw lineage 계약 분리**
+    (#786, T-VN-SYNC-02 적대적 리뷰 blocker)
   - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate**
     ([설계](reports/t-vn-03-route-gate-cutover-2026-07-19.md), PinVi issue
     [#392](https://github.com/digitie/pinvi/issues/392)). curated GET 4개는 public key,
@@ -203,6 +205,25 @@ main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-v
 (공유 브랜치이므로 rebase 금지). C7 종결 후 `integration/t-vn` → main PR 1건으로 합류하며,
 그 전에는 T-VN 변경이 main에 직접 들어가지 않는다. CI workflow 4종은
 `integration/t-vn` 대상 push/PR에도 동일하게 실행된다.
+
+#### T-VN-59 — public weather·curation raw lineage 계약 분리 (#786)
+
+T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 feature detail에만
+적용되고 public weather·curation reachable schema에는 적용되지 않은 것이 확인됐다.
+호환 alias 없이 공개 DTO와 operator DTO를 분리한다.
+
+- [ ] public forecast row에서 `source_record_key`를 제거한다. 기상특보 public row는 도메인
+  필드와 발표·유효 시각만 반환하고 `source_record_key`, provider 원문 `payload`,
+  `fetched_at`·`imported_at`·`last_seen_at`을 반환하지 않는다.
+- [ ] 특보 raw lineage는 admin BFF가 인증하는 operator endpoint에서 별도 raw DTO로 제공한다.
+  forecast lineage는 기존 feature source/observation operator 표면으로 추적한다.
+- [ ] public curation item은 `source_record_key`와 자유형 `metadata`를 반환하지 않는다.
+  admin collection/item DTO는 두 필드를 보존하며 public DTO를 상속하지 않는다.
+- [ ] `openapi.user.json`의 각 operation response에서 재귀적으로 도달 가능한 schema를 순회해
+  `source_record_key`, `raw_data`, `raw_payload_hash`, raw `payload`, curation item `metadata`,
+  ingestion timestamp가 공개 경계로 다시 들어오면 실패하는 계약 테스트를 둔다.
+- [ ] full/user OpenAPI, admin/user 생성 TypeScript와 수기 public curation client를 같은
+  변경에서 갱신한다. DB 저장 구조는 바꾸지 않는다.
 
 ### Wave 0 — P0, 즉시 가역
 

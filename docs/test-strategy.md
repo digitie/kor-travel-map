@@ -393,6 +393,22 @@ user OpenAPI도 공개 가능한 정책 집합에서 직접 파생하고 full sp
 표현하지 않으므로 Python OpenAPI 회귀가 인증 의미를 소유하고, admin/user `gen:types:check`는
 query/header/DTO shape drift를 별도로 고정한다.
 
+#### 5.1.3 사용자 OpenAPI reachable schema raw 경계
+
+user OpenAPI의 모든 operation response schema를 root로 삼아 local `$ref`, array `items`, object
+`properties`/`additionalProperties`, `allOf`/`anyOf`/`oneOf`를 cycle-safe하게 재귀 순회한다.
+도달 가능한 schema에 `source_record_key`, `raw_data`, `raw_payload_hash`, `fetched_at`,
+`imported_at`, `last_seen_at`, provider 원문 의미의 `payload` 또는 curation item `metadata`가
+있으면 실패한다. 해당 raw field가 `additionalProperties: true` object면 내부 key를 알 수
+없어도 field 자체로 거부한다. 주소처럼 공개 계약에 명시된 다른 object까지 일괄 금지하지는
+않는다. 이름이 비슷한 미도달 admin component가 full spec에 존재하는 것은 허용하되 user
+spec에서 public response root로 연결되면 실패해야 한다.
+
+positive fixture는 forecast·alert·curation public response의 typed field만 도달함을,
+negative fixture는 direct property, nested `$ref`, array, `allOf`/`anyOf`/`oneOf`, recursive cycle에
+주입한 forbidden field가 모두 탐지됨을 고정한다. full/user OpenAPI와 admin/user 생성
+TypeScript drift도 같은 PR의 필수 gate다.
+
 ### 5.2 인증 없음 동작 확인 (ADR-005)
 
 ```python

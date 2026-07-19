@@ -35,7 +35,10 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | operator | `/v1/ops/datasets/*`, `/v1/ops/pipeline/*` | ADR-064 canonical control plane 유지 |
 | operator | `/v1/provider-datasets` | ADR-069 DB-owned dataset 관리 |
 
-공개 DTO에는 `raw_data`, `raw_payload_hash`, `source_record_key`, provider payload passthrough가 없다.
+공개 DTO에는 `raw_data`, `raw_payload_hash`, `source_record_key`, provider payload passthrough와
+ingestion timestamp(`fetched_at`/`imported_at`/`last_seen_at`)가 없다. 공개 operation의 response
+root에서 재귀적으로 도달 가능한 모든 component에 같은 규칙을 적용한다. public DTO와
+admin/operator raw DTO는 상속하지 않으며 서로 독립된 projection이다.
 공개 curated list/detail도 admin overlay DTO와 분리한 명시적 allowlist를 사용한다.
 `PublicCuratedFeatureView`는 `feature_kind`로 판별하는 7종
 `place|event|notice|area|route|price|weather` union이다. 주소와 kind별 detail은 strict
@@ -305,7 +308,8 @@ feature API의 weather subresource를 쓴다.
 ```
 GET /v1/features/weather/forecast                # lon/lat 기준 nearest weather anchor forecast
 GET /v1/features/{feature_id}/weather/forecast   # feature 좌표 기준 nearest weather anchor forecast
-GET /v1/features/weather/alerts                  # KMA 기상특보 source_record 이력
+GET /v1/features/weather/alerts                  # KMA 기상특보 typed 공개 이력
+GET /v1/admin/features/weather/alerts            # 원문·lineage 포함 operator 이력
 ```
 
 핵심 계약:
@@ -317,8 +321,12 @@ GET /v1/features/weather/alerts                  # KMA 기상특보 source_recor
 - 좌표 기반 forecast는 반경 내 가장 가까운 KMA 예보 anchor를 사용한다. anchor가 없으면
   200 + 빈 `items`로 반환한다.
 - 중기예보는 `forecast_style=mid`, `weather_domain=kma_mid_forecast`로 포함한다.
-- 기상특보 이력은 `provider_sync.source_records`의 KMA weather alert payload를 공개 projection으로
-  반환한다. 별도 alert history table은 만들지 않는다.
+- 공개 forecast row는 원천 record identity를 반환하지 않는다. 공개 기상특보 이력은
+  `provider_sync.source_records`에서 도메인 필드와 발표·유효 시각만 typed projection하고,
+  원문 payload·source record identity·ingestion timestamp는 반환하지 않는다.
+- operator 기상특보 이력은 admin BFF 인증 아래 원문 payload와 lineage/ingestion timestamp를
+  보존한다. 별도 alert history table은 만들지 않는다. forecast의 상세 lineage는 기존
+  `/v1/features/{feature_id}/sources|observations` operator 표면에서 조회한다.
 
 ### 2.4.3 `/v1/curated-features*` — 테마형 큐레이션 후보 (T-223c-1 구현)
 
@@ -376,7 +384,10 @@ membership 수를 구분하므로 같은 장소가 2023~2024·2025~2026 회차�
 collection 상세의 item은 `feature_id`가 nullable이다. 기존 Feature와 안전하게 연결하지
 못한 공식 항목도 `place_name`, `address_hint`, 원천키와 함께 반환한다. 미연결 항목에는
 Feature 좌표·category가 없으며 임의 인접 위치로 대체하지 않는다. Feature별 group과
-Feature 상세에는 연결된 item만 나타난다. public collection summary의 `item_count`는 실제
+Feature 상세에는 연결된 item만 나타난다. 공개 item은 source record identity와 자유형
+`metadata`를 반환하지 않는다. 동일 저장 row를 쓰더라도 admin collection/item DTO는 별도
+타입으로 `source_record_key`와 `metadata`를 보존한다. public DTO가 admin DTO의 base class가
+되거나 그 반대가 되는 상속 구조는 금지한다. public collection summary의 `item_count`는 실제
 반환 가능한 active `included` item 수만 뜻하며 후보·거절 건수와 `public_item_count`는
 노출하지 않는다. admin summary는 전체 active `item_count`와 공개 가능한
 `public_item_count`를 함께 반환한다. 연결 Feature가 hidden/deleted로 바뀐 public
