@@ -39,6 +39,11 @@
   412 draft 보존·명시적 reload, delete basis와 live cleanup ETag를 구현하고 API/hook/mocked/live
   회귀 fixture를 작성했다. **다음 한 작업**은 exact head의 단일 적대 리뷰이며, 승인 전에는
   test·lint·build를 실행하지 않는다.
+- 첫 적대 리뷰가 최초 basis in-flight draft 덮어쓰기, 실패한 explicit reload의 old data 오인,
+  전역 query retry로 인한 3-pair budget 중복, live UI mutation ETag 미단정을 차단했다. edit-session
+  dirty guard, refetch error/fetchStatus gate, hook `retry=false`, update/delete baseline raw ETag exact
+  assertion과 deferred/500 음성 fixture로 네 건을 보강했다. 새 exact head 재리뷰 전에는
+  test·lint·build를 실행하지 않는다.
 
 ## 2026-07-20 (codex, agent B) — T-VN-57 public route 계약 단일 정본 설계
 

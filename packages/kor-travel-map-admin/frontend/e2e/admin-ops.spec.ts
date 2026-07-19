@@ -684,6 +684,8 @@ function applyFeatureChange(
 async function mockFeatureChangeMutations(
   page: Page,
   options: {
+    deferFirstBasisDetail?: boolean;
+    failReloadOnceAfterStale?: boolean;
     initial?: AdminFeatureChangeRecord[];
     reviewMode?: AdminFeatureReviewMode;
     stalePatchOnce?: boolean;
@@ -691,6 +693,16 @@ async function mockFeatureChangeMutations(
 ) {
   const reviewMode = options.reviewMode ?? "require_review";
   let changes = [...(options.initial ?? [])];
+  let deferredDetailConsumed = false;
+  let markDeferredDetailStarted: () => void = () => undefined;
+  let releaseDeferredDetail: () => void = () => undefined;
+  const deferredDetailStarted = new Promise<void>((resolve) => {
+    markDeferredDetailStarted = () => resolve();
+  });
+  const deferredDetailRelease = new Promise<void>((resolve) => {
+    releaseDeferredDetail = () => resolve();
+  });
+  let reloadFailureInjected = false;
   let stalePatchInjected = false;
   const featureNames = new Map<string, string>();
   const featureRevisions = new Map<string, number>();
@@ -702,6 +714,8 @@ async function mockFeatureChangeMutations(
     patch: 0,
     reject: 0,
     revision: 0,
+    resolveDeferredDetail: () => releaseDeferredDetail(),
+    waitForDeferredDetail: () => deferredDetailStarted,
     createBodies: [] as AdminFeatureCreateRequest[],
     deleteBodies: [] as AdminFeatureDeleteRequest[],
     patchBodies: [] as AdminFeaturePatchRequest[],
@@ -832,6 +846,25 @@ async function mockFeatureChangeMutations(
     if (request.method() === "GET" && revisionPathMatch) {
       requests.revision += 1;
       const featureId = decodeURIComponent(revisionPathMatch[1]);
+      if (
+        options.failReloadOnceAfterStale &&
+        stalePatchInjected &&
+        !reloadFailureInjected
+      ) {
+        reloadFailureInjected = true;
+        await fulfillJson(
+          route,
+          {
+            code: "CORRECTION_BASIS_RELOAD_FAILED",
+            detail: "reload fixture failure",
+            status: 500,
+            title: "reload failed",
+            type: "about:blank",
+          },
+          500,
+        );
+        return;
+      }
       const rowRevision = featureRevisions.get(featureId) ?? 1;
       featureRevisions.set(featureId, rowRevision);
       await fulfillJson(
@@ -846,6 +879,11 @@ async function mockFeatureChangeMutations(
     const featurePathMatch = apiPath.match(/^\/v1\/admin\/features\/([^/]+)$/);
     if (request.method() === "GET" && featurePathMatch) {
       const featureId = decodeURIComponent(featurePathMatch[1]);
+      if (options.deferFirstBasisDetail && !deferredDetailConsumed) {
+        deferredDetailConsumed = true;
+        markDeferredDetailStarted();
+        await deferredDetailRelease;
+      }
       await fulfillJson(
         route,
         featureDetailResponse(
@@ -1204,6 +1242,7 @@ test.describe("admin/ops pages", () => {
     page,
   }) => {
     const requests = await mockFeatureChangeMutations(page, {
+      failReloadOnceAfterStale: true,
       stalePatchOnce: true,
     });
 
@@ -1235,16 +1274,64 @@ test.describe("admin/ops pages", () => {
     await page
       .getByRole("button", { name: "최신값으로 폼 다시 불러오기" })
       .click();
+    await expect(
+      page.getByRole("heading", { name: "서버의 Feature가 변경되었습니다" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Operator draft",
+    );
+    await expect(page.getByLabel("change reason", { exact: true })).toHaveValue(
+      "stale draft reason",
+    );
+    await expect.poll(() => requests.revision).toBe(revisionReadsBeforePatch + 1);
+    await expect(page.getByText(/reload fixture failure/)).toBeVisible();
+
+    await page
+      .getByRole("button", { name: "최신값으로 폼 다시 불러오기" })
+      .click();
     await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
       "Server latest feature-stale-1",
     );
-    await expect.poll(() => requests.revision).toBe(revisionReadsBeforePatch + 1);
+    await expect.poll(() => requests.revision).toBe(revisionReadsBeforePatch + 2);
 
     await page.getByLabel("change name", { exact: true }).fill("Reapplied draft");
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => requests.patch).toBe(2);
     expect(requests.mutationEtags[1]).toBe('"2"');
+  });
+
+  test("최초 basis가 늦게 도착해도 로딩 중 작성한 전체 draft를 덮지 않는다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureChangeMutations(page, {
+      deferFirstBasisDetail: true,
+    });
+
+    await page.goto("/admin/features/change-requests");
+    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page.getByLabel("change feature id", { exact: true }).fill("feature-slow-1");
+    await requests.waitForDeferredDetail();
+
+    await page.getByLabel("change reason", { exact: true }).fill("slow draft reason");
+    await page.getByLabel("change name", { exact: true }).fill("Slow operator draft");
+    await page.getByLabel("change lon", { exact: true }).fill("127.123456");
+    await page.getByLabel("change lat", { exact: true }).fill("37.654321");
+    requests.resolveDeferredDetail();
+
+    await expect(page.getByText("데이터 로드됨")).toBeVisible();
+    await expect(page.getByLabel("change reason", { exact: true })).toHaveValue(
+      "slow draft reason",
+    );
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Slow operator draft",
+    );
+    await expect(page.getByLabel("change lon", { exact: true })).toHaveValue(
+      "127.123456",
+    );
+    await expect(page.getByLabel("change lat", { exact: true })).toHaveValue(
+      "37.654321",
+    );
   });
 
   test("/v1/admin/issues", async ({ page }) => {

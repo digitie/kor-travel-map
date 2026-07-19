@@ -978,6 +978,7 @@ export function FeatureChangeRequestsClient({
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const appliedQueryPrefillRef = useRef<string | null>(null);
   const appliedFeaturePrefillRef = useRef<string | null>(null);
+  const editDraftDirtyRef = useRef(false);
   const categories = useCategories({ include_counts: false });
   // update/delete는 동일 feature snapshot과 raw ETag를 편집 수명 동안 함께 고정한다.
   const correctionLookupId =
@@ -1052,9 +1053,12 @@ export function FeatureChangeRequestsClient({
     value: FeatureChangeFormState[K],
   ) => {
     if (key === "action" || key === "featureId") {
+      editDraftDirtyRef.current = false;
       patchFeature.reset();
       deleteFeature.reset();
       setFormError(null);
+    } else {
+      editDraftDirtyRef.current = true;
     }
     setForm((current) => ({ ...current, [key]: value }));
   };
@@ -1064,6 +1068,7 @@ export function FeatureChangeRequestsClient({
     setFormError(null);
     appliedQueryPrefillRef.current = null;
     appliedFeaturePrefillRef.current = null;
+    editDraftDirtyRef.current = false;
     patchFeature.reset();
     deleteFeature.reset();
   };
@@ -1072,6 +1077,7 @@ export function FeatureChangeRequestsClient({
     const nextCoord = korTravelGeoCandidateToCoord(candidate);
     const address = korTravelGeoCandidateToAddressRecord(candidate);
     const codes = korTravelGeoCodesFromCandidate(candidate);
+    editDraftDirtyRef.current = true;
     setForm((current) => ({
       ...current,
       addressAdmin: fieldText(address.admin) || current.addressAdmin,
@@ -1098,6 +1104,7 @@ export function FeatureChangeRequestsClient({
     const nextAction = prefill?.action;
     const nextFeatureId = prefill?.featureId?.trim() ?? "";
     const nextReason = prefill?.reason?.trim() ?? "";
+    editDraftDirtyRef.current = false;
     setForm((current) => ({
       ...current,
       action:
@@ -1126,6 +1133,7 @@ export function FeatureChangeRequestsClient({
     }
     appliedFeaturePrefillRef.current = key;
     queueMicrotask(() => {
+      if (editDraftDirtyRef.current) return;
       setForm((current) => ({
         ...current,
         ...detailToFormPatch(feature),
@@ -1142,11 +1150,19 @@ export function FeatureChangeRequestsClient({
   const reloadCorrectionBasis = async () => {
     setFormError(null);
     const result = await correctionBasis.refetch();
-    if (!result.data) {
+    if (
+      result.fetchStatus !== "idle" ||
+      result.isError ||
+      result.error !== null ||
+      !result.data
+    ) {
       throw result.error ?? new Error("최신 Feature 편집 기준을 불러오지 못했습니다.");
     }
     const feature = result.data.detail.data.feature;
-    if (feature.feature_id !== correctionLookupId) {
+    if (
+      feature.feature_id !== correctionLookupId ||
+      feature.row_revision !== result.data.rowRevision
+    ) {
       throw new Error("다른 Feature의 편집 기준이 반환되었습니다.");
     }
     if (form.action === "update") {
@@ -1160,6 +1176,7 @@ export function FeatureChangeRequestsClient({
       }));
       appliedFeaturePrefillRef.current = feature.feature_id;
     }
+    editDraftDirtyRef.current = false;
     patchFeature.reset();
     deleteFeature.reset();
   };
@@ -1168,6 +1185,9 @@ export function FeatureChangeRequestsClient({
     event.preventDefault();
     setFormError(null);
     try {
+      if (correctionConflict) {
+        throw new Error("최신 Feature를 다시 불러온 뒤 제출해야 합니다.");
+      }
       // delete는 feature_id + reason만 필요 — marker/category/coord 카탈로그 검증은 건너뛴다(#613).
       if (form.action !== "delete") {
         validateTextFields(form, categoryItems);
@@ -1508,6 +1528,7 @@ export function FeatureChangeRequestsClient({
                 <Button
                   disabled={
                     anyMutationPending ||
+                    correctionConflict ||
                     ((form.action === "update" || form.action === "delete") &&
                       (!selectedCorrectionBasis || correctionBasis.isFetching)) ||
                     Boolean(unsupportedUpdateKind)

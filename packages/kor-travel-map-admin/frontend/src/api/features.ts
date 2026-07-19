@@ -986,6 +986,7 @@ export function useAdminFeatureCorrectionBasis(featureId: string | null) {
       fetchAdminFeatureCorrectionBasis(featureId as string, signal),
     enabled: featureId !== null && featureId.length > 0,
     gcTime: 0,
+    retry: false,
     staleTime: Infinity,
     refetchOnMount: false,
     refetchOnReconnect: false,

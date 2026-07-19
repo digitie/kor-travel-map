@@ -466,17 +466,23 @@ identity가 page 2의 첫 identity보다 앞서야 한다. 첫 행 존재, count
 frontend client 단위 회귀는 `/revision` → detail 순서, 같은 `row_revision`에서만 basis 확정,
 불일치 시 제한 재시도와 raw `ETag` 보존을 검증한다. PATCH/DELETE 함수는 호출자가 넘긴
 `entityTag` 없이는 호출할 수 없어야 하며 mutation 내부 revision GET이 한 번도 발생하지 않음을
-고정한다.
+고정한다. correction query는 전역 query retry 설정과 무관하게 자체 `retry=false`를 사용해 지속
+불일치가 정확히 3 pair/HTTP 6회에서 끝나야 한다.
 
 mocked Playwright는 edit basis를 읽은 뒤 서버 revision을 증가시켜 첫 PATCH가 원래 raw
 `If-Match`로 전송되고 `412`가 되는 흐름을 만든다. 실패 뒤 입력 draft가 byte-for-byte 유지되고,
 명시적 최신값 다시 불러오기 전에는 background refetch가 form이나 basis를 바꾸지 않으며, reload
 뒤에만 새 detail·ETag로 재제출되는지 확인한다. delete도 선택 feature의 basis를 사용하고 mutation
-직전 자동 revision GET이 없음을 별도 fixture로 증명한다.
+직전 자동 revision GET이 없음을 별도 fixture로 증명한다. 최초 detail 응답을 지연한 동안 reason,
+name, 좌표를 입력하는 fixture는 응답 뒤에도 전체 draft가 그대로인지 확인한다. 412 뒤 explicit
+reload가 500으로 실패하면 React Query에 남은 old data를 적용하거나 conflict를 reset하지 않고,
+두 번째 성공 reload 뒤에만 form과 basis를 바꾸는 음성 회귀를 둔다.
 
 n150 live destructive E2E의 임시 correction 정리는 DELETE 직전에 `/revision`을 읽어 얻은 raw
 `ETag`를 `If-Match`로 전달한다. cleanup의 `428`/`412`를 무시하지 않고 복구 실패로 남기며,
 작성한 feature와 change request가 최종 상태에서 제거·복원됐는지 read-only 재검증한다.
+정상 live UI update/delete도 form basis `/revision` 응답의 raw `ETag`를 각각 capture하고 실제
+PATCH/DELETE request `If-Match`와 exact equality를 단정한다.
 
 ### 5.5 C7 prod 파괴적 live E2E의 복구·인과성 gate
 

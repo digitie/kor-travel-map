@@ -28,7 +28,7 @@ function response(body: unknown, entityTag?: string): Response {
 function hookContext(fetchMock: ReturnType<typeof vi.fn<FetchMock>>) {
   vi.stubGlobal("fetch", fetchMock);
   const queryClient = new QueryClient({
-    defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+    defaultOptions: { mutations: { retry: false }, queries: { retry: 1 } },
   });
   const wrapper = ({ children }: PropsWithChildren) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -105,5 +105,54 @@ describe("admin feature correction hooks", () => {
         (queryKey) => queryKey?.[0] === "admin-feature-correction-basis",
       ),
     ).toBe(false);
+  });
+
+  it("전역 query retry가 켜져 있어도 불일치 basis는 세 pair 뒤 한 번만 실패한다", async () => {
+    const fetchMock = vi
+      .fn<FetchMock>()
+      .mockResolvedValueOnce(
+        response(
+          { data: { feature_id: "feature-1", row_revision: 1 } },
+          '"1"',
+        ),
+      )
+      .mockResolvedValueOnce(
+        response({
+          data: { feature: { feature_id: "feature-1", row_revision: 2 } },
+          meta: {},
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(
+          { data: { feature_id: "feature-1", row_revision: 2 } },
+          '"2"',
+        ),
+      )
+      .mockResolvedValueOnce(
+        response({
+          data: { feature: { feature_id: "feature-1", row_revision: 3 } },
+          meta: {},
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(
+          { data: { feature_id: "feature-1", row_revision: 3 } },
+          '"3"',
+        ),
+      )
+      .mockResolvedValueOnce(
+        response({
+          data: { feature: { feature_id: "feature-1", row_revision: 4 } },
+          meta: {},
+        }),
+      );
+    const context = hookContext(fetchMock);
+    const { result } = renderHook(
+      () => useAdminFeatureCorrectionBasis("feature-1"),
+      { wrapper: context.wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 });

@@ -127,6 +127,13 @@ async function readChangeResponse(
   return (await response.json()) as AdminFeatureChangeResponse;
 }
 
+function requireRawEntityTag(response: Response, label: string): string {
+  expect(response.status(), `${label} revision HTTP status`).toBe(200);
+  const entityTag = response.headers()["etag"] ?? null;
+  expect(entityTag, `${label} revision ETag`).not.toBeNull();
+  return entityTag as string;
+}
+
 async function browserFetch<T>(
   page: Page,
   path: string,
@@ -919,7 +926,17 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await test.step("update change request를 생성하고 승인 후 서비스 상세가 갱신된다", async () => {
         await gotoChangeRequests(page);
         await page.getByLabel("change action", { exact: true }).selectOption("update");
+        const basisResponsePromise = waitForApiResponse(
+          page,
+          "GET",
+          decodeURIComponent(adminFeatureRevisionPath(FEATURE_ID)),
+        );
         await page.getByLabel("change feature id").fill(FEATURE_ID);
+        const baselineEntityTag = requireRawEntityTag(
+          await basisResponsePromise,
+          "update basis",
+        );
+        await expect(page.getByText("데이터 로드됨")).toBeVisible(T);
         await page.getByLabel("change reason").fill(`${BASE_REASON} update`);
         await page.getByLabel("change name").fill(UPDATED_NAME);
         await page.getByLabel("change category").selectOption("01070400");
@@ -939,7 +956,11 @@ test.describe("/admin/features + feature change requests live write workflow", (
           decodeURIComponent(adminFeaturePath(FEATURE_ID)),
         );
         await page.getByRole("button", { name: "요청 생성" }).click();
-        const updateResponse = await readChangeResponse(await responsePromise);
+        const updateApiResponse = await responsePromise;
+        expect(updateApiResponse.request().headers()["if-match"]).toBe(
+          baselineEntityTag,
+        );
+        const updateResponse = await readChangeResponse(updateApiResponse);
         updateRequestId = updateResponse.data.request.request_id;
         expect(updateResponse.data.request).toMatchObject({
           action: "update",
@@ -1079,7 +1100,17 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await test.step("delete change request를 생성, 승인하고 public 상세에서 제거를 확인한다", async () => {
         await gotoChangeRequests(page);
         await page.getByLabel("change action", { exact: true }).selectOption("delete");
+        const basisResponsePromise = waitForApiResponse(
+          page,
+          "GET",
+          decodeURIComponent(adminFeatureRevisionPath(FEATURE_ID)),
+        );
         await page.getByLabel("change feature id").fill(FEATURE_ID);
+        const baselineEntityTag = requireRawEntityTag(
+          await basisResponsePromise,
+          "delete basis",
+        );
+        await expect(page.getByText("데이터 로드됨")).toBeVisible(T);
         await page.getByLabel("change reason").fill(`${BASE_REASON} delete`);
 
         const responsePromise = waitForApiResponse(
@@ -1088,7 +1119,11 @@ test.describe("/admin/features + feature change requests live write workflow", (
           decodeURIComponent(adminFeaturePath(FEATURE_ID)),
         );
         await page.getByRole("button", { name: "요청 생성" }).click();
-        const deleteResponse = await readChangeResponse(await responsePromise);
+        const deleteApiResponse = await responsePromise;
+        expect(deleteApiResponse.request().headers()["if-match"]).toBe(
+          baselineEntityTag,
+        );
+        const deleteResponse = await readChangeResponse(deleteApiResponse);
         deleteRequestId = deleteResponse.data.request.request_id;
         expect(deleteResponse.data.request).toMatchObject({
           action: "delete",
