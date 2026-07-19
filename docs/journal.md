@@ -216,6 +216,17 @@
   보이는 내부 표현 변화였다(로컬은 0.135.3, CI는 0.139.2 — CI 버전 재현 venv로 확정). 테스트를
   공개 API인 `application.openapi()["paths"]` 기반으로 고쳐 두 버전 모두 green. 코드 결함 아님.
 
+## 2026-07-19 (codex) — Agent A PR #744 적대적 심층 리뷰 후속
+
+- 전문 리뷰어 1명이 닫혀서 `main`에 병합된 PR #744를 재검토해, 비활성 manual link를
+  resolver가 재발견하면 `active=true, relation='manual'`로 부활시켜 이후 빈 snapshot도
+  제거하지 못하는 S3를 확인했다.
+- direct upsert는 caller relation을 적용하고 resolver snapshot upsert만 기존 row가
+  `active AND relation='manual'`일 때 provenance를 보존하도록 SQL을 분리했다.
+  deactivate→resolver 재분류→빈 snapshot 비활성화 회귀를 추가했다.
+- 같은 리뷰어가 잠금 순서와 provenance 전이를 재검토해 승인했다. 관련 unit/PostGIS
+  테스트 30개, Ruff, strict mypy 115개 소스, import 계약 4개와 prod redaction이 통과했다.
+
 ## 2026-07-19 (claude) — #733~#737 병합 PR 심층 적대 리뷰 후속 수정
 
 - **S2-1**: `upsert_poi_cache_target`의 moved/reject 판정을 unlocked pre-read에서
