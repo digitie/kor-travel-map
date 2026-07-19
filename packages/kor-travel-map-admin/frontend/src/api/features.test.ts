@@ -244,7 +244,7 @@ describe("admin feature correction basis", () => {
   it("PATCH와 DELETE는 caller basis만 보내고 mutation 직전 revision을 다시 읽지 않는다", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(
+      .mockImplementation(async () =>
         jsonResponse({ data: { request: { feature_id: "feature-1" } }, meta: {} }),
       );
     vi.stubGlobal("fetch", fetchMock);
