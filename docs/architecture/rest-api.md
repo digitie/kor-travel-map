@@ -395,7 +395,8 @@ POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 
 - **admin 공간·카드 read**: admin 지도는 공개 `/v1/features*`를 재사용하지 않는다.
   `/v1/admin/features/in-bounds`는 `feature.features` base row에서 삭제 전 운영 상태를
   직접 조회하며, `status` 미지정 시 `draft|active|inactive|hidden|broken` 전체를 대상으로 한다.
-  반복 `status`를 지정하면 item과 cluster에 동일하게 적용한다. bbox 후보는 point의 `coord`와
+  반복 `status`를 지정하면 item과 cluster에 동일하게 적용한다. 응답의 `items`와 `clusters`는
+  양 mode에서 모두 필수 배열이며 사용하지 않는 쪽을 `[]`로 반환한다. bbox 후보는 point의 `coord`와
   route/area의 exact geometry 교차를 함께 사용하고, cluster 귀속은 저장 canonical 행정코드로
   feature당 한 번만 계산한다. `/weather`와 `/price` admin subresource도 삭제 전 base Feature
   존재 여부를 검사하므로 비공개 Feature를 404로 오분류하지 않되, `deleted_at`·

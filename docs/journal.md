@@ -18,6 +18,9 @@
 - 첫 정적 리뷰의 soft-delete finding을 반영해 admin weather/price target 존재 판정을
   row revision 조회에서 삭제 전 base predicate로 분리했다. inactive/draft/hidden은 유지하고
   `deleted_at`·`user_deleted_at`·`status=deleted`와 실제 미존재는 404로 닫는다.
+- 테스트 단계의 frontend type-check가 드러낸 계약 모호성을 제거했다. admin request의 `zoom`은
+  호출부에서 명시하고, in-bounds `items`/`clusters`는 양 mode 모두 필수 배열로 고정해 사용하지
+  않는 쪽을 `[]`로 반환한다. optional cast나 non-null assertion은 추가하지 않았다.
 
 ## 2026-07-19 (codex) — latest main → integration/t-vn 동기화 PR 준비
 

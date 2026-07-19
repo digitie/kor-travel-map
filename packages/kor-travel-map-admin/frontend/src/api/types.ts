@@ -3270,10 +3270,10 @@ export interface components {
          */
         AdminFeaturesInBoundsData: {
             /** Clusters */
-            clusters?: components["schemas"]["AdminFeatureCluster"][];
+            clusters: components["schemas"]["AdminFeatureCluster"][];
             coverage: components["schemas"]["AdminInBoundsCoverage"];
             /** Items */
-            items?: components["schemas"]["AdminFeatureMapItem"][];
+            items: components["schemas"]["AdminFeatureMapItem"][];
             /**
              * Mode
              * @enum {string}

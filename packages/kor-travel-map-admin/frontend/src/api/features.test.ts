@@ -24,6 +24,7 @@ describe("feature map tile selection", () => {
     const path = adminFeaturesInBoundsPath(
       {
         ...params(),
+        zoom: 14,
         statuses: ["inactive", "hidden"],
         includeGeometry: true,
       },
@@ -39,7 +40,7 @@ describe("feature map tile selection", () => {
 
   it("admin cluster viewport는 zoom을 보내고 geometry payload는 요청하지 않는다", () => {
     const path = adminFeaturesInBoundsPath(
-      { ...params({ zoom: 7 }), statuses: ["draft"] },
+      { ...params({ zoom: 7 }), zoom: 7, statuses: ["draft"] },
       { clustered: true },
     );
 

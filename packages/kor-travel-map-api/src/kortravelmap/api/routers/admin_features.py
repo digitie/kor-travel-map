@@ -27,8 +27,8 @@ from kortravelmap.infra.admin_feature_repo import (
     FeaturePreconditionFailed,
     FeatureStateConflict,
     admin_feature_card_target_exists,
-    apply_feature_change_request,
     admin_features_in_bbox,
+    apply_feature_change_request,
     cluster_admin_features_in_bbox,
     deactivate_feature,
     get_admin_feature_detail,
@@ -196,8 +196,8 @@ class AdminFeaturesInBoundsData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["items", "clusters"]
-    items: list[AdminFeatureMapItem] = Field(default_factory=list)
-    clusters: list[AdminFeatureCluster] = Field(default_factory=list)
+    items: list[AdminFeatureMapItem]
+    clusters: list[AdminFeatureCluster]
     truncated: bool
     coverage: AdminInBoundsCoverage
 
@@ -1009,6 +1009,7 @@ async def list_admin_features_in_bounds(
             return AdminFeaturesInBoundsResponse(
                 data=AdminFeaturesInBoundsData(
                     mode="clusters",
+                    items=[],
                     clusters=clusters,
                     truncated=truncated,
                     coverage=AdminInBoundsCoverage(
@@ -1044,6 +1045,7 @@ async def list_admin_features_in_bounds(
         data=AdminFeaturesInBoundsData(
             mode="items",
             items=items,
+            clusters=[],
             truncated=truncated,
             coverage=AdminInBoundsCoverage(returned=len(items), limit=max_items),
         ),

@@ -346,6 +346,7 @@ def test_admin_in_bounds_passes_nonpublic_status_to_items_and_clusters(
     )
     assert item_response.status_code == 200
     assert item_response.json()["data"]["items"][0]["status"] == "inactive"
+    assert item_response.json()["data"]["clusters"] == []
 
     cluster_response = client.get(
         "/v1/admin/features/in-bounds",
@@ -361,6 +362,7 @@ def test_admin_in_bounds_passes_nonpublic_status_to_items_and_clusters(
     assert cluster_response.status_code == 200
     assert cluster_response.json()["data"]["mode"] == "clusters"
     assert cluster_response.json()["data"]["clusters"][0]["feature_count"] == 2
+    assert cluster_response.json()["data"]["items"] == []
 
 
 @pytest.mark.unit
@@ -368,9 +370,10 @@ def test_admin_weather_and_price_cards_accept_nonpublic_feature(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import admin_features as router_mod
     from kortravelmap.infra.price_repo import PriceCard
     from kortravelmap.infra.weather_repo import WeatherCard
+
+    from kortravelmap.api.routers import admin_features as router_mod
 
     async def _exists(_session: Any, feature_id: str) -> bool:
         return feature_id == "hidden-1"
