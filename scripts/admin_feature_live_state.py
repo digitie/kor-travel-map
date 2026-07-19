@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import suppress
 import hashlib
 import json
 import os
 import re
 import stat
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
