@@ -356,7 +356,10 @@ source record 연결을 제거한 미연결 item으로 투영한다.
 ### 2.5 `/v1/admin/*` — 운영자 (인프라 SSO + kill-switch)
 ```
 GET    /v1/admin/features                              # 목록(page_size+cursor)
+GET    /v1/admin/features/in-bounds                    # raw bbox items/cluster(status 반복 필터)
 GET    /v1/admin/features/{feature_id}                 # 상세
+GET    /v1/admin/features/{feature_id}/weather         # 비공개 포함 admin weather card
+GET    /v1/admin/features/{feature_id}/price           # 비공개 포함 admin price card
 POST   /v1/admin/features                              # ✅#317 단건 생성(K-15)
 PATCH  /v1/admin/features/{feature_id}                 # ✅#317 수정
 DELETE /v1/admin/features/{feature_id}                 # ✅#317 soft delete
@@ -389,6 +392,14 @@ DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id} # item soft 
 GET    /v1/admin/curations/import-template.csv          # UTF-8 BOM CSV 양식 다운로드
 POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 authoritative replace
 ```
+- **admin 공간·카드 read**: admin 지도는 공개 `/v1/features*`를 재사용하지 않는다.
+  `/v1/admin/features/in-bounds`는 `feature.features` base row에서 삭제 전 운영 상태를
+  직접 조회하며, `status` 미지정 시 `draft|active|inactive|hidden|broken` 전체를 대상으로 한다.
+  반복 `status`를 지정하면 item과 cluster에 동일하게 적용한다. bbox 후보는 point의 `coord`와
+  route/area의 exact geometry 교차를 함께 사용하고, cluster 귀속은 저장 canonical 행정코드로
+  feature당 한 번만 계산한다. `/weather`와 `/price` admin subresource도 base Feature 존재 여부만
+  검사하므로 비공개 Feature를 404로 오분류하지 않는다. public endpoint와
+  `feature.public_features`의 공개 술어는 변경하지 않는다(T-VN-04A, #741).
 - **Feature update 감사 actor**: create와 run-now body는 `operator`/`actor` override를
   받지 않으며 포함하면 422다. 저장 `operator`는 인증된 admin proxy의
   `AdminProxyContext.actor`에서만 파생한다. 실행 계획 필드 외에 create body만 `reason`을

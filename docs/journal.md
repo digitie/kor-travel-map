@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-19 — T-VN-04A admin 비공개 Feature 공간·카드 경계 문서화 (codex agent B)
+
+- issue #741의 두 회귀를 한 PR 경계로 확정했다. admin `/features` 지도는 공개 bbox/cluster를
+  호출하지 않고 `feature.features` 기반 admin in-bounds API로 전환하며, 반복 `status` 필터로
+  `inactive`·`draft`·`hidden`을 포함한 운영 상태를 찾는다.
+- admin weather/price subresource는 base Feature 존재 여부를 검사한다. 특히 weather의 근접
+  anchor 탐색도 admin projection을 사용해 비공개 target의 카드가 공개 view 때문에 비는 경로를
+  닫는다. public API의 active-only 계약은 그대로 유지한다.
+- schema 변경은 불필요하다고 판단했다. 기존 base table과 coord/geom 인덱스로 요구를 충족하며,
+  신규 호환 shim이나 provider wrapper를 만들지 않는다.
+- 사용자 지시에 따라 구현 테스트는 적대 리뷰 승인 뒤에만 실행한다.
+
 ## 2026-07-19 (codex) — latest main → integration/t-vn 동기화 PR 준비
 
 - `integration/t-vn@22bf35a5`에서 전용 branch `chore/t-vn-sync-main`을 만들고

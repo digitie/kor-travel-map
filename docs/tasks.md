@@ -142,6 +142,27 @@ PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin
 OCI revision label+production profile, 완료/미완 task 정본, Alembic `0058 → 0062` 단일 chain을
 보존하고 동일 전문 리뷰어 승인 뒤 CI green으로 integration에 병합하는 것이다.
 
+### T-VN-04A — admin 비공개 feature 공간 조회·카드 복원 (#741)
+
+`feature.public_features`를 정본으로 삼은 T-VN-04 이후 admin 지도와 weather/price 카드가
+공개 API를 재사용해 `inactive`·`draft`·`hidden` Feature를 찾거나 점검할 수 없게 된 회귀를
+복원한다. DB schema는 바꾸지 않는다. 이미 존재하는 `feature.features`의 상태·좌표·geometry와
+공간 인덱스를 admin repository가 직접 조회하고, public projection과 SQL 경계를 섞지 않는다.
+
+- [ ] `GET /v1/admin/features/in-bounds`가 base Feature의 bbox item/행정구역 cluster를
+  `status` 반복 필터와 함께 반환한다. 기본은 삭제 전 전체 운영 상태이며, item과 cluster가
+  같은 exact 공간 후보·kind/category/provider/status 필터를 사용한다.
+- [ ] `GET /v1/admin/features/{feature_id}/weather|price`가 공개 여부와 무관하게 존재하는
+  Feature의 카드를 반환하고, 실제 미존재 Feature만 404로 구분한다. weather의 근접 anchor도
+  admin base projection을 사용한다.
+- [ ] admin `/features` 지도·표·상세가 위 admin API만 사용하고 상태 필터를 제공한다.
+  공개 API 404를 빈 카드로 숨기는 임시 완화는 제거한다.
+- [ ] admin/full OpenAPI와 생성 TypeScript, repository/router/frontend 단위·PostGIS 회귀,
+  n150 live UI e2e에서 `inactive`·`draft`·`hidden` marker와 weather/price 카드를 검증한다.
+
+작업 브랜치는 `fix/t-vn-admin-nonpublic-features`, PR base는 `integration/t-vn`이다. 구현 diff는
+테스트 전에 단일 적대 리뷰어의 승인을 받고, 승인 전에는 정적 검토만 수행한다.
+
 #### Lane 분배 (2026-07-19, issue #738)
 
 KTM 내부 표면은 agent A(Claude), PinVi 결합·C6c cutover 결합·기존
