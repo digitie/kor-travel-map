@@ -4,8 +4,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 import { CloudSunIcon } from "lucide-react";
 import { useMemo } from "react";
 
-import { ApiClientError } from "@/api/client";
-import { useFeatureWeather, type WeatherMetric } from "@/api/features";
+import { useAdminFeatureWeather, type WeatherMetric } from "@/api/features";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -26,16 +25,8 @@ export function FeatureWeatherPanel({
   featureId: string | null;
   compact?: boolean;
 }) {
-  const weather = useFeatureWeather(featureId);
+  const weather = useAdminFeatureWeather(featureId);
   const data = weather.data?.data;
-  // T-VN-04: 공개 predicate 단일화로 비공개/미존재 feature의 weather 카드는
-  // 404를 반환한다. admin 전용 카드 surface가 생기기 전까지(#741) 404는 오류가
-  // 아니라 "공개 카드 없음" 빈 상태로 취급한다.
-  const publicCardMissing =
-    weather.isError &&
-    weather.error instanceof ApiClientError &&
-    weather.error.status === 404;
-
   const metrics = data?.metrics ?? [];
 
   const columns = useMemo<ColumnDef<WeatherMetric, unknown>[]>(() => {
@@ -128,11 +119,7 @@ export function FeatureWeatherPanel({
         </div>
       </div>
 
-      {publicCardMissing ? (
-        <div className="m-4 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-          공개 weather 카드가 없습니다 (비공개 feature).
-        </div>
-      ) : weather.isError ? (
+      {weather.isError ? (
         <Alert className="m-4" variant="destructive">
           <AlertTitle>weather 호출 실패</AlertTitle>
           <AlertDescription>{weather.error.message}</AlertDescription>

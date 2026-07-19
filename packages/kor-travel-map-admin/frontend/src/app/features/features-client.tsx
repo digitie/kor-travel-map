@@ -24,14 +24,15 @@ import {
   useOpsDatasetCatalog,
 } from "@/api/datasets";
 import {
+  ADMIN_FEATURE_STATUSES,
   FEATURE_CLUSTER_MAX_ZOOM,
   FEATURE_KINDS,
+  useAdminFeatureClustersInBbox,
   useAdminFeatureDetail,
-  useFeatureClustersInBbox,
-  useFeatureDetail,
-  useFeaturesInBbox,
+  useAdminFeaturesInBbox,
+  type AdminFeatureMapItem,
+  type AdminFeatureStatus,
   type FeatureKind,
-  type FeatureSummary,
 } from "@/api/features";
 import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
@@ -105,8 +106,8 @@ function FeatureDetailPanel({
   featureId: string;
   onClose: () => void;
 }) {
-  const detailQuery = useFeatureDetail(featureId);
   const adminDetailQuery = useAdminFeatureDetail(featureId);
+  const feature = adminDetailQuery.data?.data.feature;
   const sourceProviders = useMemo(() => {
     const sources = adminDetailQuery.data?.data.sources ?? [];
     return Array.from(new Set(sources.map((source) => source.provider))).sort();
@@ -145,35 +146,34 @@ function FeatureDetailPanel({
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {detailQuery.isLoading ? <Skeleton className="h-48 w-full" /> : null}
-        {detailQuery.isError ? (
+        {adminDetailQuery.isLoading ? <Skeleton className="h-48 w-full" /> : null}
+        {adminDetailQuery.isError ? (
           <Alert variant="destructive">
             <AlertTitle>상세 호출 실패</AlertTitle>
-            <AlertDescription>{detailQuery.error.message}</AlertDescription>
+            <AlertDescription>{adminDetailQuery.error.message}</AlertDescription>
           </Alert>
         ) : null}
-        {detailQuery.data ? (
+        {feature ? (
           <>
             <div className="flex flex-col gap-2">
-              <h2 className="text-base font-semibold">{detailQuery.data.name}</h2>
+              <h2 className="text-base font-semibold">{feature.name}</h2>
               <div className="flex flex-wrap gap-2">
-                <Badge>{detailQuery.data.kind}</Badge>
+                <Badge>{feature.kind}</Badge>
                 <Badge variant="secondary">
-                  {statusLabel(detailQuery.data.status)}
+                  {statusLabel(feature.status)}
                 </Badge>
-                <Badge variant="outline">{detailQuery.data.category}</Badge>
+                <Badge variant="outline">{feature.category}</Badge>
               </div>
             </div>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
               <dt className="text-muted-foreground">coord</dt>
               <dd className="font-mono">
-                {typeof detailQuery.data.lon === "number" &&
-                typeof detailQuery.data.lat === "number"
-                  ? `${detailQuery.data.lon.toFixed(5)}, ${detailQuery.data.lat.toFixed(5)}`
+                {typeof feature.lon === "number" && typeof feature.lat === "number"
+                  ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
                   : "없음"}
               </dd>
               <dt className="text-muted-foreground">sigungu</dt>
-              <dd>{detailQuery.data.sigungu_code ?? "없음"}</dd>
+              <dd>{feature.sigungu_code ?? "없음"}</dd>
               <dt className="text-muted-foreground">소스</dt>
               <dd className="flex flex-wrap gap-1">
                 {adminDetailQuery.isLoading ? (
@@ -195,19 +195,13 @@ function FeatureDetailPanel({
                 {adminDetailQuery.isError ? "조회 실패" : dataOrigin ?? "없음"}
               </dd>
             </dl>
-            {adminDetailQuery.isError ? (
-              <Alert variant="destructive">
-                <AlertTitle>admin 연결 정보 조회 실패</AlertTitle>
-                <AlertDescription>{adminDetailQuery.error.message}</AlertDescription>
-              </Alert>
-            ) : null}
             <details>
               <summary className="cursor-pointer text-sm font-medium">address</summary>
-              <JsonBlock value={detailQuery.data.address} />
+              <JsonBlock value={feature.address} />
             </details>
             <FeatureKindDetailPanel
               compact
-              feature={detailQuery.data}
+              feature={feature}
               featureId={featureId}
             />
             {adminDetailQuery.isLoading ? (
@@ -221,11 +215,11 @@ function FeatureDetailPanel({
             ) : null}
             <details>
               <summary className="cursor-pointer text-sm font-medium">detail</summary>
-              <JsonBlock value={detailQuery.data.detail} />
+              <JsonBlock value={feature.detail} />
             </details>
             <details>
               <summary className="cursor-pointer text-sm font-medium">urls</summary>
-              <JsonBlock value={detailQuery.data.urls} />
+              <JsonBlock value={feature.urls} />
             </details>
           </>
         ) : null}
@@ -249,6 +243,9 @@ export function FeaturesClient() {
 
   const [bbox, setBbox] = useState<Bbox | null>(null);
   const [providerFilter, setProviderFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<AdminFeatureStatus | "all">(
+    "all",
+  );
   const kindFilter = useMemo(
     () => Array.from(activeFeatureKinds) as FeatureKind[],
     [activeFeatureKinds],
@@ -288,24 +285,23 @@ export function FeaturesClient() {
   // 저zoom(≤13)에선 개별 feature를 tile로 대량 조회하지 않고 서버측 region 클러스터를
   // 쓴다(#649). 개별 fetch와 클러스터 fetch는 zoom에 따라 상호 배타적으로 enable된다.
   const clusterMode = viewport.zoom <= FEATURE_CLUSTER_MAX_ZOOM;
-  const featuresQuery = useFeaturesInBbox(
+  const featuresQuery = useAdminFeaturesInBbox(
     {
       ...(bbox ?? { min_lon: 0, min_lat: 0, max_lon: 0, max_lat: 0 }),
       kinds: kindFilter.length > 0 ? kindFilter : undefined,
       provider: effectiveProvider ? [effectiveProvider] : undefined,
-      // 서버 in-bounds 파라미터는 `page_size`(최대 500). 과거엔 `limit`을 보내
-      // 서버가 무시 → 항상 기본 100건만 표시됐다(110만 중 100개, 필터 체감 약함).
+      statuses: statusFilter === "all" ? undefined : [statusFilter],
       includeGeometry: includeFeatureGeometry,
-      page_size: 500,
       zoom: viewport.zoom,
     },
     { enabled: bbox !== null && !clusterMode },
   );
-  const clustersQuery = useFeatureClustersInBbox(
+  const clustersQuery = useAdminFeatureClustersInBbox(
     {
       ...(bbox ?? { min_lon: 0, min_lat: 0, max_lon: 0, max_lat: 0 }),
       kinds: kindFilter.length > 0 ? kindFilter : undefined,
       provider: effectiveProvider ? [effectiveProvider] : undefined,
+      statuses: statusFilter === "all" ? undefined : [statusFilter],
       zoom: viewport.zoom,
     },
     { enabled: bbox !== null && clusterMode },
@@ -329,7 +325,7 @@ export function FeaturesClient() {
   const [tableSorting, setTableSorting] = useState<SortingState>([
     { id: "name", desc: false },
   ]);
-  const featureColumns = useMemo<ColumnDef<FeatureSummary, unknown>[]>(
+  const featureColumns = useMemo<ColumnDef<AdminFeatureMapItem, unknown>[]>(
     () => [
       {
         accessorKey: "name",
@@ -396,10 +392,9 @@ export function FeaturesClient() {
 
   // tiled fetch가 일부 tile 잘림/실패를 보고하면(부분 결과) 조용히 누락되지 않도록
   // 작은 affordance를 띄운다(#502 M2). 클러스터 모드는 tiling이 없어 해당 없음.
-  const partialMeta =
-    !clusterMode && featuresQuery.data?.meta.partial
-      ? featuresQuery.data.meta
-      : null;
+  const truncated = clusterMode
+    ? (clustersQuery.data?.data.truncated ?? false)
+    : (featuresQuery.data?.data.truncated ?? false);
 
   return (
     <AdminShell
@@ -466,14 +461,10 @@ export function FeaturesClient() {
             >
               {status}
             </Badge>
-            {partialMeta ? (
+            {truncated ? (
               <Badge
                 data-testid="features-partial-indicator"
-                title={
-                  partialMeta.failedTiles
-                    ? `${partialMeta.totalTiles ?? "?"}개 tile 중 ${partialMeta.failedTiles}개 실패 — 결과가 일부만 표시됩니다.`
-                    : "일부 tile이 page 한도까지 채워져 feature가 누락되었을 수 있습니다. 더 확대해 좁은 영역을 보세요."
-                }
+                title="현재 bbox 결과가 서버 상한에서 잘렸습니다. 더 확대해 범위를 좁히세요."
                 variant="destructive"
               >
                 부분 결과
@@ -514,6 +505,21 @@ export function FeaturesClient() {
               초기화
             </Button>
           </div>
+          <NativeSelect
+            aria-label="상태 필터"
+            className="w-40"
+            value={statusFilter}
+            onChange={(event) =>
+              setStatusFilter(event.target.value as AdminFeatureStatus | "all")
+            }
+          >
+            <NativeSelectOption value="all">모든 운영 상태</NativeSelectOption>
+            {ADMIN_FEATURE_STATUSES.map((featureStatus) => (
+              <NativeSelectOption key={featureStatus} value={featureStatus}>
+                {statusLabel(featureStatus)}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
           <NativeSelect
             aria-label="소스 필터"
             className="w-44"

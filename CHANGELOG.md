@@ -45,6 +45,17 @@
   label과 clean checkout을 대조한다. C7 executor는 durable creator/outcome/CID 아래 create/start를
   분리한다. SIGKILL 뒤 남은 C7 container는 creator identity·CID/name·label·run 전용 mount·비활성
   lock을 확인하는 `stop-c7-prod-live-container.py`로만 중지하며 journal/sentinel은 보존한다.
+### Admin 지도 비공개 Feature 조회·카드 복원 (2026-07-19, T-VN-04A #741)
+
+- **ADDED**: `GET /v1/admin/features/in-bounds`가 삭제되지 않은 base Feature를 대상으로
+  bbox item과 행정구역 cluster를 제공한다. 반복 `status` 필터로 `draft`·`active`·
+  `inactive`·`hidden`·`broken`을 선택하며, public active-only projection은 바꾸지 않는다.
+- **ADDED**: admin weather/price card endpoint가 비공개 Feature의 존재와 weather anchor를
+  admin 경계에서 판정한다. 운영 지도와 상세 화면은 이 경로만 사용하므로 공개 projection의
+  404/빈 카드로 비공개 상태가 가려지지 않는다.
+- **CHANGED**: Admin Feature 지도에 운영 상태 필터와 truncation 표시를 추가하고, 지도·테이블·
+  marker 상세가 동일한 admin in-bounds 결과를 사용하도록 통일했다.
+
 ### Tier-2 release benchmark 측정 정확성 (2026-07-19, T-VN-21R #767)
 
 - **FIXED**: `--skip-seed` 200건 batch가 fixture 전용 고정 ID를 조회해 0행을

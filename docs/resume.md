@@ -1,14 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-19 (codex, agent B) — T-VN-04A admin 비공개 Feature 복원 착수
+## 2026-07-19 (codex, agent B) — T-VN-04A admin 비공개 Feature 구현·리뷰 대기
 
 - issue #741을 `integration/t-vn` 기준 독립 PR로 분리했다. public projection을 우회하거나
-  느슨하게 만들지 않고, admin bbox/cluster와 weather/price card가 base Feature를 직접 읽는
-  경계를 문서에 고정했다. 기존 table·상태·공간 인덱스로 충분하므로 DB migration은 만들지 않는다.
-- 완료 조건은 admin 지도 상태 필터와 비공개 marker/detail card, admin/full OpenAPI·생성 타입,
-  repository/router/frontend/PostGIS 회귀, n150 live UI e2e다.
-- **다음 한 작업**: 문서 선행 draft PR을 연 뒤 repository/API/UI 구현 diff를 커밋하고,
-  같은 적대 리뷰어 1명의 테스트 전 검토를 요청한다. 승인 전 테스트·lint·build는 실행하지 않는다.
+  느슨하게 만들지 않고, base Feature용 admin bbox/cluster와 admin weather/price card를 구현했다.
+  지도·테이블·marker 상세·상태 필터가 동일한 admin 경계를 사용하며 공개 active-only 계약은
+  유지한다. 기존 partial GiST가 모든 nondeleted 상태를 포함하므로 DB migration은 만들지 않았다.
+- full OpenAPI와 admin TypeScript 타입을 재생성하고 repository/router/frontend/PostGIS·route-mock
+  회귀를 작성했다. **다음 한 작업**: 정확한 구현 head를 같은 적대 리뷰어 1명이 테스트 전에
+  검토한다. 승인 전 테스트·lint·build는 실행하지 않는다.
 
 ## 2026-07-19 (codex) — latest main → integration/t-vn 동기화 리뷰 대기
 

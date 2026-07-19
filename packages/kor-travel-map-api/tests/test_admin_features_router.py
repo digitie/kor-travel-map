@@ -278,6 +278,9 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/features/change-requests/{request_id}/approve" in spec["paths"]
     assert "/v1/admin/features/change-requests/{request_id}/reject" in spec["paths"]
     assert "/v1/admin/features/{feature_id}/deactivate" in spec["paths"]
+    assert "/v1/admin/features/in-bounds" in spec["paths"]
+    assert "/v1/admin/features/{feature_id}/weather" in spec["paths"]
+    assert "/v1/admin/features/{feature_id}/price" in spec["paths"]
     assert "AdminFeatureRecord" in spec["components"]["schemas"]
     assert "AdminFeatureCreateRequest" in spec["components"]["schemas"]
     assert "AdminFeaturePatchRequest" in spec["components"]["schemas"]
@@ -288,6 +291,124 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
         ]
         is False
     )
+
+
+@pytest.mark.unit
+def test_admin_in_bounds_passes_nonpublic_status_to_items_and_clusters(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    async def _items(_session: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        assert kwargs["statuses"] == ["inactive", "hidden"]
+        assert kwargs["include_geometry"] is True
+        return [
+            {
+                "feature_id": "inactive-1",
+                "kind": "place",
+                "name": "비공개 운영 대상",
+                "category": "01070300",
+                "lon": 126.97,
+                "lat": 37.57,
+                "marker_icon": "place",
+                "marker_color": "P-01",
+                "status": "inactive",
+            }
+        ]
+
+    async def _clusters(_session: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        assert kwargs["statuses"] == ["draft"]
+        assert kwargs["cluster_unit"] == "sido"
+        return [
+            {
+                "cluster_key": "11",
+                "feature_count": 2,
+                "lon": 126.97,
+                "lat": 37.57,
+            }
+        ]
+
+    monkeypatch.setattr(router_mod, "admin_features_in_bbox", _items)
+    monkeypatch.setattr(router_mod, "cluster_admin_features_in_bbox", _clusters)
+
+    item_response = client.get(
+        "/v1/admin/features/in-bounds",
+        params={
+            "min_lon": 126.9,
+            "min_lat": 37.5,
+            "max_lon": 127.0,
+            "max_lat": 37.6,
+            "status": ["inactive", "hidden"],
+            "zoom": 14,
+            "include_geometry": "true",
+        },
+    )
+    assert item_response.status_code == 200
+    assert item_response.json()["data"]["items"][0]["status"] == "inactive"
+
+    cluster_response = client.get(
+        "/v1/admin/features/in-bounds",
+        params={
+            "min_lon": 126.9,
+            "min_lat": 37.5,
+            "max_lon": 127.0,
+            "max_lat": 37.6,
+            "status": "draft",
+            "zoom": 7,
+        },
+    )
+    assert cluster_response.status_code == 200
+    assert cluster_response.json()["data"]["mode"] == "clusters"
+    assert cluster_response.json()["data"]["clusters"][0]["feature_count"] == 2
+
+
+@pytest.mark.unit
+def test_admin_weather_and_price_cards_accept_nonpublic_feature(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+    from kortravelmap.infra.price_repo import PriceCard
+    from kortravelmap.infra.weather_repo import WeatherCard
+
+    async def _revision(_session: Any, feature_id: str) -> int:
+        assert feature_id == "hidden-1"
+        return 3
+
+    async def _weather(_session: Any, **kwargs: Any) -> WeatherCard:
+        assert kwargs["feature_id"] == "hidden-1"
+        return WeatherCard(
+            feature_id="hidden-1",
+            asof=None,
+            source_styles=[],
+            metrics=[],
+            latest_at=None,
+            is_stale=True,
+        )
+
+    async def _price(_session: Any, **kwargs: Any) -> PriceCard:
+        assert kwargs["feature_id"] == "hidden-1"
+        return PriceCard(
+            feature_id="hidden-1",
+            asof=None,
+            current=[],
+            history=[],
+            latest_at=None,
+            is_stale=True,
+        )
+
+    monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
+    monkeypatch.setattr(router_mod.weather_repo, "build_admin_weather_card", _weather)
+    monkeypatch.setattr(router_mod.price_repo, "build_price_card", _price)
+
+    weather = client.get("/v1/admin/features/hidden-1/weather")
+    price = client.get("/v1/admin/features/hidden-1/price")
+
+    assert weather.status_code == 200
+    assert weather.json()["data"]["feature_id"] == "hidden-1"
+    assert price.status_code == 200
+    assert price.json()["data"]["feature_id"] == "hidden-1"
 
 
 @pytest.mark.unit

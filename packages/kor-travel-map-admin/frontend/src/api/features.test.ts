@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  adminFeaturesInBoundsPath,
   buildFeatureTiles,
   featureViewportQueryKey,
   type FeaturesInBboxParams,
@@ -19,6 +20,34 @@ function params(overrides: Partial<FeaturesInBboxParams> = {}): FeaturesInBboxPa
 }
 
 describe("feature map tile selection", () => {
+  it("admin viewport는 status 반복 필터와 admin 경로를 사용한다", () => {
+    const path = adminFeaturesInBoundsPath(
+      {
+        ...params(),
+        statuses: ["inactive", "hidden"],
+        includeGeometry: true,
+      },
+      { clustered: false },
+    );
+
+    expect(path).toContain("/v1/admin/features/in-bounds?");
+    expect(path).toContain("status=inactive");
+    expect(path).toContain("status=hidden");
+    expect(path).toContain("include_geometry=true");
+    expect(path).not.toContain("zoom=");
+  });
+
+  it("admin cluster viewport는 zoom을 보내고 geometry payload는 요청하지 않는다", () => {
+    const path = adminFeaturesInBoundsPath(
+      { ...params({ zoom: 7 }), statuses: ["draft"] },
+      { clustered: true },
+    );
+
+    expect(path).toContain("status=draft");
+    expect(path).toContain("zoom=7");
+    expect(path).not.toContain("include_geometry");
+  });
+
   it("고zoom viewport를 최대 8개의 z13~z15 tile로 제한한다", () => {
     for (const zoom of [14, 15, 16]) {
       const scale = 2 ** (14 - zoom);

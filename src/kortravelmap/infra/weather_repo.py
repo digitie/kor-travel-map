@@ -35,6 +35,7 @@ __all__ = [
     "DEFAULT_WEATHER_FRESHNESS_SECONDS",
     "DEFAULT_WEATHER_HISTORY_RETENTION_DAYS",
     "load_weather_values",
+    "build_admin_weather_card",
     "build_weather_card",
     "list_weather_values",
     "weather_history_floor",
@@ -287,6 +288,48 @@ _NEAREST_KMA_FORECAST_SQL: Final[str] = _nearest_anchor_sql(
 
 # 반경 내 가장 가까운 관측 기온 anchor — observed T1H/TMP 보유(휴게소 등).
 _NEAREST_OBSERVED_TEMP_SQL: Final[str] = _nearest_anchor_sql(
+    f"AND {_OBSERVED_TEMP_PREDICATE}"
+)
+
+
+def _admin_nearest_anchor_sql(exists_predicate: str) -> str:
+    """삭제 전 base Feature에서 admin weather anchor를 찾는 SQL."""
+
+    return f"""
+WITH target AS (
+    SELECT coord_5179
+    FROM feature.features
+    WHERE feature_id = :feature_id
+      AND deleted_at IS NULL
+      AND user_deleted_at IS NULL
+      AND status <> 'deleted'
+      AND coord_5179 IS NOT NULL
+)
+SELECT f.feature_id
+FROM feature.features AS f, target AS t
+WHERE f.deleted_at IS NULL
+  AND f.user_deleted_at IS NULL
+  AND f.status <> 'deleted'
+  AND f.coord_5179 IS NOT NULL
+  AND x_extension.ST_DWithin(
+        f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
+      )
+  AND EXISTS (
+        SELECT 1
+        FROM feature.feature_weather_values AS w
+        WHERE w.feature_id = f.feature_id
+          {exists_predicate}
+      )
+ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179, f.feature_id
+LIMIT 1
+"""
+
+
+_ADMIN_NEAREST_WEATHER_SQL: Final[str] = _admin_nearest_anchor_sql("")
+_ADMIN_NEAREST_KMA_FORECAST_SQL: Final[str] = _admin_nearest_anchor_sql(
+    f"AND {_KMA_FORECAST_PREDICATE}"
+)
+_ADMIN_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _admin_nearest_anchor_sql(
     f"AND {_OBSERVED_TEMP_PREDICATE}"
 )
 
@@ -748,12 +791,15 @@ async def list_kma_weather_alert_history(
     return [_alert_history_row(row) for row in rows]
 
 
-async def build_weather_card(
+async def _build_weather_card(
     session: AsyncSession,
     *,
     feature_id: str,
-    asof: datetime | None = None,
-    freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
+    asof: datetime | None,
+    freshness_seconds: int,
+    nearest_weather_sql: str,
+    nearest_kma_forecast_sql: str,
+    nearest_observed_temp_sql: str,
 ) -> WeatherCard:
     """feature의 weather card — forecast_style × metric_key별 최신값 + freshness.
 
@@ -815,11 +861,11 @@ async def build_weather_card(
     # 자기 row에 기온(T1H/TMP)이 없으면 tier 폴백. KMA 예보 tier를 먼저 병합해
     # SKY/POP/TMN/TMX를 우선 확보하고, 그 다음 관측 기온 tier로 증강한다.
     if not any(r["metric_key"] in ("T1H", "TMP") for r in rows):
-        _merge(await _anchor_rows(_NEAREST_KMA_FORECAST_SQL))
-        _merge(await _anchor_rows(_NEAREST_OBSERVED_TEMP_SQL))
+        _merge(await _anchor_rows(nearest_kma_forecast_sql))
+        _merge(await _anchor_rows(nearest_observed_temp_sql))
     # 어느 tier도 반경에 없으면(완전 미적재 지역) 가장 가까운 임의 weather로 폴백(빈 카드 회피).
     if not rows:
-        _merge(await _anchor_rows(_NEAREST_WEATHER_SQL))
+        _merge(await _anchor_rows(nearest_weather_sql))
     metrics = [
         WeatherMetric(
             forecast_style=str(row["forecast_style"]),
@@ -857,4 +903,44 @@ async def build_weather_card(
         metrics=metrics,
         latest_at=latest_at,
         is_stale=is_stale,
+    )
+
+
+async def build_weather_card(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    asof: datetime | None = None,
+    freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
+) -> WeatherCard:
+    """공개 Feature와 공개 anchor만 사용하는 weather card."""
+
+    return await _build_weather_card(
+        session,
+        feature_id=feature_id,
+        asof=asof,
+        freshness_seconds=freshness_seconds,
+        nearest_weather_sql=_NEAREST_WEATHER_SQL,
+        nearest_kma_forecast_sql=_NEAREST_KMA_FORECAST_SQL,
+        nearest_observed_temp_sql=_NEAREST_OBSERVED_TEMP_SQL,
+    )
+
+
+async def build_admin_weather_card(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    asof: datetime | None = None,
+    freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
+) -> WeatherCard:
+    """삭제 전 base Feature와 base anchor를 사용하는 admin weather card."""
+
+    return await _build_weather_card(
+        session,
+        feature_id=feature_id,
+        asof=asof,
+        freshness_seconds=freshness_seconds,
+        nearest_weather_sql=_ADMIN_NEAREST_WEATHER_SQL,
+        nearest_kma_forecast_sql=_ADMIN_NEAREST_KMA_FORECAST_SQL,
+        nearest_observed_temp_sql=_ADMIN_NEAREST_OBSERVED_TEMP_SQL,
     )

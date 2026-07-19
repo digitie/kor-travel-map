@@ -2,7 +2,7 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
-## 2026-07-19 — T-VN-04A admin 비공개 Feature 공간·카드 경계 문서화 (codex agent B)
+## 2026-07-19 — T-VN-04A admin 비공개 Feature 공간·카드 구현 (codex agent B)
 
 - issue #741의 두 회귀를 한 PR 경계로 확정했다. admin `/features` 지도는 공개 bbox/cluster를
   호출하지 않고 `feature.features` 기반 admin in-bounds API로 전환하며, 반복 `status` 필터로
@@ -12,7 +12,9 @@
   닫는다. public API의 active-only 계약은 그대로 유지한다.
 - schema 변경은 불필요하다고 판단했다. 기존 base table과 coord/geom 인덱스로 요구를 충족하며,
   신규 호환 shim이나 provider wrapper를 만들지 않는다.
-- 사용자 지시에 따라 구현 테스트는 적대 리뷰 승인 뒤에만 실행한다.
+- repository/API/UI를 구현하고 full OpenAPI·admin TypeScript 타입을 재생성했다. admin 지도
+  route-mock과 base/public 분리 PostGIS 회귀도 작성했다. 사용자 지시에 따라 구현 테스트·lint·
+  build는 정확한 diff의 적대 리뷰 승인 뒤에만 실행한다.
 
 ## 2026-07-19 (codex) — latest main → integration/t-vn 동기화 PR 준비
 

@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.core import make_feature_id
-from kortravelmap.infra import curation_repo
+from kortravelmap.infra import curation_repo, price_repo, weather_repo
 from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureDetail,
     AdminFeatureDetailFeature,
@@ -27,6 +27,8 @@ from kortravelmap.infra.admin_feature_repo import (
     FeaturePreconditionFailed,
     FeatureStateConflict,
     apply_feature_change_request,
+    admin_features_in_bbox,
+    cluster_admin_features_in_bbox,
     deactivate_feature,
     get_admin_feature_detail,
     get_feature_row_revision,
@@ -45,8 +47,17 @@ from kortravelmap.api.auth import (
 )
 from kortravelmap.api.db import get_session
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
-from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.response import ClusterUnit, Meta, make_meta
 from kortravelmap.api.routers.curations import AdminCurationItemView
+from kortravelmap.api.routers.features import (
+    FeaturePriceResponse,
+    FeatureWeatherResponse,
+    PriceCardData,
+    PricePointOut,
+    WeatherCardData,
+    WeatherMetricOut,
+    WeatherSummaryOut,
+)
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
@@ -126,6 +137,76 @@ class AdminFeaturesListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: AdminFeaturesListData
+    meta: Meta
+
+
+AdminFeatureOperationalStatus = Literal[
+    "draft",
+    "active",
+    "inactive",
+    "hidden",
+    "broken",
+]
+
+
+class AdminFeatureMapItem(BaseModel):
+    """Admin 지도용 base Feature 경량 표현."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    kind: str
+    name: str
+    category: str
+    lon: float | None
+    lat: float | None
+    marker_icon: str | None = None
+    marker_color: str | None = None
+    status: AdminFeatureOperationalStatus
+    geometry: dict[str, Any] | None = None
+    area_square_meters: float | None = None
+    price_summary: list[PricePointOut] | None = None
+    weather_summary: WeatherSummaryOut | None = None
+
+
+class AdminFeatureCluster(BaseModel):
+    """Admin base Feature의 canonical 행정구역 rollup."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cluster_key: str
+    feature_count: int
+    lon: float
+    lat: float
+
+
+class AdminInBoundsCoverage(BaseModel):
+    """Admin in-bounds 결과 상한과 반환 건수."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    returned: int
+    limit: int
+
+
+class AdminFeaturesInBoundsData(BaseModel):
+    """Admin 지도 item/cluster envelope data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["items", "clusters"]
+    items: list[AdminFeatureMapItem] = Field(default_factory=list)
+    clusters: list[AdminFeatureCluster] = Field(default_factory=list)
+    truncated: bool
+    coverage: AdminInBoundsCoverage
+
+
+class AdminFeaturesInBoundsResponse(BaseModel):
+    """``GET /admin/features/in-bounds`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminFeaturesInBoundsData
     meta: Meta
 
 
@@ -826,6 +907,222 @@ _IF_MATCH_OPENAPI_PARAMETER = {
     "description": "직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성).",
     "schema": {"type": "string"},
 }
+_ADMIN_CLUSTER_DRILL_DOWN: dict[ClusterUnit, ClusterUnit | None] = {
+    "sido": "sigungu",
+    "sigungu": "eupmyeondong",
+    "eupmyeondong": None,
+}
+
+
+def _resolve_admin_cluster_unit(
+    cluster_unit: ClusterUnit | None,
+    zoom: int | None,
+) -> ClusterUnit | None:
+    if cluster_unit is not None:
+        return cluster_unit
+    if zoom is None or zoom >= 14:
+        return None
+    if zoom <= 7:
+        return "sido"
+    if zoom <= 10:
+        return "sigungu"
+    return "eupmyeondong"
+
+
+async def _admin_feature_exists_or_404(
+    session: AsyncSession,
+    feature_id: str,
+) -> None:
+    if await get_feature_row_revision(session, feature_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+
+
+@router.get(
+    "/in-bounds",
+    response_model=AdminFeaturesInBoundsResponse,
+    summary="Admin bbox 안 base Feature item/cluster",
+)
+async def list_admin_features_in_bounds(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    min_lon: Annotated[float, Query(description="bbox 최소 경도 (WGS84).")],
+    min_lat: Annotated[float, Query(description="bbox 최소 위도.")],
+    max_lon: Annotated[float, Query(description="bbox 최대 경도.")],
+    max_lat: Annotated[float, Query(description="bbox 최대 위도.")],
+    feature_status: Annotated[
+        list[AdminFeatureOperationalStatus] | None,
+        Query(
+            alias="status",
+            description=(
+                "운영 상태 반복 필터. 미지정 시 삭제 전 draft/active/inactive/hidden/"
+                "broken 전체."
+            ),
+        ),
+    ] = None,
+    kind: Annotated[list[str] | None, Query(description="feature kind 반복 필터.")] = None,
+    category: Annotated[
+        list[str] | None,
+        Query(description="category code 반복 필터."),
+    ] = None,
+    provider: Annotated[
+        list[str] | None,
+        Query(description="primary provider 반복 필터."),
+    ] = None,
+    zoom: Annotated[int | None, Query(ge=0, le=24)] = None,
+    cluster_unit: Annotated[ClusterUnit | None, Query()] = None,
+    max_items: Annotated[int, Query(ge=1, le=2000)] = 1000,
+    include_geometry: Annotated[
+        bool,
+        Query(description="item mode에서 route/area GeoJSON을 포함한다."),
+    ] = False,
+) -> AdminFeaturesInBoundsResponse:
+    started_at = perf_counter()
+    if min_lon > max_lon or min_lat > max_lat:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="bbox min 좌표가 max보다 큽니다.",
+        )
+    resolved_unit = _resolve_admin_cluster_unit(cluster_unit, zoom)
+    try:
+        if resolved_unit is not None:
+            raw_clusters = await cluster_admin_features_in_bbox(
+                session,
+                min_lon=min_lon,
+                min_lat=min_lat,
+                max_lon=max_lon,
+                max_lat=max_lat,
+                cluster_unit=resolved_unit,
+                statuses=feature_status,
+                kinds=kind,
+                categories=category,
+                providers=provider,
+                limit=max_items + 1,
+            )
+            truncated = len(raw_clusters) > max_items
+            clusters = [
+                AdminFeatureCluster(**row) for row in raw_clusters[:max_items]
+            ]
+            return AdminFeaturesInBoundsResponse(
+                data=AdminFeaturesInBoundsData(
+                    mode="clusters",
+                    clusters=clusters,
+                    truncated=truncated,
+                    coverage=AdminInBoundsCoverage(
+                        returned=len(clusters),
+                        limit=max_items,
+                    ),
+                ),
+                meta=make_meta(
+                    request,
+                    started_at=started_at,
+                    cluster_unit=resolved_unit,
+                    cluster_drill_down_unit=_ADMIN_CLUSTER_DRILL_DOWN[resolved_unit],
+                ),
+            )
+        raw_items = await admin_features_in_bbox(
+            session,
+            min_lon=min_lon,
+            min_lat=min_lat,
+            max_lon=max_lon,
+            max_lat=max_lat,
+            statuses=feature_status,
+            kinds=kind,
+            categories=category,
+            providers=provider,
+            include_geometry=include_geometry,
+            limit=max_items + 1,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    truncated = len(raw_items) > max_items
+    items = [AdminFeatureMapItem(**row) for row in raw_items[:max_items]]
+    return AdminFeaturesInBoundsResponse(
+        data=AdminFeaturesInBoundsData(
+            mode="items",
+            items=items,
+            truncated=truncated,
+            coverage=AdminInBoundsCoverage(returned=len(items), limit=max_items),
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@router.get(
+    "/{feature_id}/weather",
+    response_model=FeatureWeatherResponse,
+    summary="Admin feature weather card",
+    responses={404: {"description": "feature 없음"}},
+)
+async def get_admin_feature_weather(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    feature_id: str,
+    asof: Annotated[datetime | None, Query()] = None,
+) -> FeatureWeatherResponse:
+    started_at = perf_counter()
+    await _admin_feature_exists_or_404(session, feature_id)
+    card = await weather_repo.build_admin_weather_card(
+        session,
+        feature_id=feature_id,
+        asof=asof,
+    )
+    return FeatureWeatherResponse(
+        data=WeatherCardData(
+            feature_id=card.feature_id,
+            asof=card.asof,
+            source_styles=card.source_styles,
+            metrics=[
+                WeatherMetricOut.model_validate(metric, from_attributes=True)
+                for metric in card.metrics
+            ],
+            latest_at=card.latest_at,
+            is_stale=card.is_stale,
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@router.get(
+    "/{feature_id}/price",
+    response_model=FeaturePriceResponse,
+    summary="Admin feature price card",
+    responses={404: {"description": "feature 없음"}},
+)
+async def get_admin_feature_price(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    feature_id: str,
+    asof: Annotated[datetime | None, Query()] = None,
+    history_limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> FeaturePriceResponse:
+    started_at = perf_counter()
+    await _admin_feature_exists_or_404(session, feature_id)
+    card = await price_repo.build_price_card(
+        session,
+        feature_id=feature_id,
+        asof=asof,
+        history_limit=history_limit,
+    )
+    return FeaturePriceResponse(
+        data=PriceCardData(
+            feature_id=card.feature_id,
+            asof=card.asof,
+            current=[
+                PricePointOut.model_validate(point, from_attributes=True)
+                for point in card.current
+            ],
+            history=[
+                PricePointOut.model_validate(point, from_attributes=True)
+                for point in card.history
+            ],
+            latest_at=card.latest_at,
+            is_stale=card.is_stale,
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
 @router.get("", response_model=AdminFeaturesListResponse)
 async def list_features(
     session: Annotated[AsyncSession, Depends(get_session)],

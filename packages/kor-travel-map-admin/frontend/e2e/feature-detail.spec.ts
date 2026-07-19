@@ -7,11 +7,11 @@ import type { components } from "../src/api/types";
  * (T-AUDIT-0616, `docs/reports/e2e-scenario-coverage-2026-06-16.md` §1.5).
  *
  * 본 페이지는 **admin 상세 라우트** `/v1/admin/features/{id}`를 쓴다(공개 라우트 아님).
- * 임의 featureId는 빈 DB에서 404이므로 admin 상세 GET + nearby + weather를 mock한다.
+ * 임의 featureId는 빈 DB에서 404이므로 admin 상세/weather + public nearby를 mock한다.
  * (감사 보고서의 "지도/AddressMatchReport/raw JSON 토글/재검증"은 실제 컴포넌트엔 없다 —
  * 실제 섹션은 Sources/Issues/Overrides/History/Files + Weather/Map/Nearby/Raw(<details>)다.)
  *
- * NOTE: Playwright는 Windows 호스트에서만 실행된다. 라이브 실행 검증은 Windows 런 필요.
+ * 라이브 실행 검증은 n150 Linux 환경에서 수행한다.
  */
 
 type AdminFeatureDetailFeatureRecord =
@@ -94,6 +94,19 @@ async function mockFeatureDetail(
   await page.route("**/v1/admin/features/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname.endsWith("/weather")) {
+      const body: FeatureWeatherResponse = {
+        data: {
+          feature_id: FEATURE_ID,
+          is_stale: false,
+          metrics: [],
+          source_styles: [],
+        },
+        meta,
+      };
+      await fulfillJson(route, body);
+      return;
+    }
     if (
       request.method() === "GET" &&
       (url.pathname === DETAIL_PATH || url.pathname === `/api/proxy${DETAIL_PATH}`)
@@ -117,19 +130,6 @@ async function mockFeatureDetail(
     ) {
       const body: FeaturesNearbyResponse = {
         data: { items: nearby, origin: { lat: 37.5263, lon: 126.9239, radius_m: 3000 } },
-        meta,
-      };
-      await fulfillJson(route, body);
-      return;
-    }
-    if (url.pathname.endsWith("/weather")) {
-      const body: FeatureWeatherResponse = {
-        data: {
-          feature_id: FEATURE_ID,
-          is_stale: false,
-          metrics: [],
-          source_styles: [],
-        },
         meta,
       };
       await fulfillJson(route, body);
