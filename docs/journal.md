@@ -37,6 +37,38 @@
   affected ORM round-trip integration 100+ green, main unit 1492 green(사전존재 Windows-only
   15건: run-admin-stack bash·import_linter cp949 — 무관), ruff/mypy --strict/lint-imports clean.
 
+## 2026-07-19 (claude, agent A2) — T-VN-17 weather 무결성 제약 (migration 0060)
+
+- F-7(weather/price 비대칭) 해소: ``feature_weather_values``에 price(0034) 패턴을
+  미러링해 semantic UNIQUE + range/payload CHECK + source-record FK를 도입했다
+  (ADR-072/075, Wave 1). ~30M행이라 rewrite/STORED 추가 없이 online DDL만 사용.
+- alembic 0060(down_revision=0059): (1) DEDUP FIRST — 같은 semantic tuple 중복
+  (tz 표기 차이로 다른 weather_value_key를 받은 같은 instant 등)을
+  collected_at(known_at proxy) 최신 우선으로 1건만 남기고 삭제(운영자 pre-count
+  SELECT 제공). (2) ``CREATE UNIQUE INDEX CONCURRENTLY``(autocommit_block, NULLS
+  NOT DISTINCT) — 재실행 안전을 위해 CREATE 전에 leftover INVALID index를
+  CONCURRENTLY drop. (3) range/payload CHECK와 source FK를 NOT VALID→VALIDATE로
+  적용. downgrade는 제약·index를 되돌린다(삭제한 중복행은 원본 재적재로 복원).
+- semantic tuple = (feature_id, provider, weather_domain, forecast_style,
+  metric_key, issued_at, valid_at, observed_at) — ``WeatherValue.identity()``·
+  ``make_weather_value_key`` 축과 동일(timeline_bucket 제외). 3개 nullable 시간축
+  때문에 NULLS NOT DISTINCT 필요.
+- writer cutover(같은 PR): ``weather_repo._INSERT_SQL``의 ON CONFLICT 대상을
+  PK(weather_value_key 해시)에서 semantic tuple로 전환. 단일 정본
+  ``_WEATHER_IDENTITY_COLUMNS``에서 conflict target을 만들어 DB index와 항상
+  일치하게 하고, 통합 테스트가 pg_index 컬럼과 대조한다. update-wins(ADR-072).
+- 테스트: 중복 흡수(update-wins)·다른 key 같은 tuple 거부·NULLS NOT DISTINCT·
+  reversed range 거부·payload 비-object 거부·FK orphan 거부·ON DELETE SET NULL,
+  그리고 전용 stepping engine으로 dedup keep-rule + upgrade→downgrade→upgrade
+  왕복. CONCURRENTLY+autocommit_block이 asyncpg env.py에서 정상 동작 확인.
+- 범위 밖(다른 lane): weather SQLAlchemy 모델링(T-VN-38 — 그 전까지 weather는
+  model-less라 T-VN-19 alembic-check 제외 유지), weather batch API(T-VN-16),
+  current summary(T-VN-38), BRIN/GiST(T-VN-18). source FK 지원 index(price의
+  idx_price_values_source_record 등가)는 T-VN-18 소유로 남김 — source_records는
+  immutable이라 삭제가 드물어 즉시 위험 낮음(리뷰 판단).
+- 위생: #752가 실수로 커밋한 repo-root ``uv.lock``(origin/main 미추적, uv는
+  pyproject/CI/docs 어디에도 정본으로 참조되지 않는 로컬 아티팩트)을 제거했다.
+
 ## 2026-07-19 (codex) — Agent A PR #748 적대적 심층 리뷰 후속
 
 - 전문 리뷰어 1명이 PR #748을 최신 `integration/t-vn`에서 재검토해, 서버/OpenAPI에서

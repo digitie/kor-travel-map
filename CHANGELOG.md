@@ -5,7 +5,19 @@
 
 ## [Unreleased]
 
-### 공개 raw payload 경계 제거 (2026-07-19, ADR-073 T-VN-05)
+### weather 무결성 제약 (2026-07-19, ADR-072/075 T-VN-17)
+
+- **ADDED**: migration 0060이 ``feature.feature_weather_values``에 price(0034)
+  패턴을 미러링한 무결성 제약을 도입한다 — semantic tuple UNIQUE
+  (feature_id, provider, weather_domain, forecast_style, metric_key, issued_at,
+  valid_at, observed_at; ``NULLS NOT DISTINCT``, ``CREATE UNIQUE INDEX
+  CONCURRENTLY``), ``valid_from <= valid_until`` range CHECK, payload-object
+  CHECK, source-record FK(``ON DELETE SET NULL``). CHECK/FK는 ``NOT VALID`` 후
+  ``VALIDATE``, ~30M행이라 테이블 rewrite·STORED 추가 없이 적용한다.
+- **CHANGED**: weather upsert writer가 ON CONFLICT 대상을 PK 해시에서 semantic
+  tuple index로 전환한다(update-wins). 같은 순간을 다른 tz 표기로 적재해 생기던
+  중복이 이제 흡수된다. migration이 기존 중복을 먼저 dedup(최신 collected_at 우선)
+  한 뒤 unique index를 만든다.
 
 - **SECURITY**: 공개 feature detail·batch(`GET /v1/features/{id}`,
   `POST /v1/features/batch`)에서 provider raw 경계를 제거했다. raw observation
