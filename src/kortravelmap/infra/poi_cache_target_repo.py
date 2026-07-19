@@ -535,11 +535,11 @@ ORDER BY target_id, feature_id
 FOR UPDATE
 """
 
-# 기존 row가 운영자 ``relation='manual'``이면 resolver 재-upsert가 분류를 되돌리지
-# 못한다(#699 패턴) — 되돌아가면 다음 snapshot sync가 manual link를 비활성화한다.
-# 재분류가 필요하면 운영자가 link를 명시적으로 비활성화/삭제한 뒤 다시 만든다.
-_LINK_RELATION_PRESERVE_MANUAL_SQL: Final[str] = """CASE
-        WHEN poi_cache_target_feature_links.relation = 'manual'
+# resolver snapshot은 활성 manual provenance만 보존한다. target move/delete가 manual
+# link를 명시적으로 비활성화한 뒤에는 resolver가 같은 PK를 다시 분류할 수 있어야 한다.
+_LINK_RELATION_PRESERVE_ACTIVE_MANUAL_SQL: Final[str] = """CASE
+        WHEN poi_cache_target_feature_links.active
+             AND poi_cache_target_feature_links.relation = 'manual'
             THEN poi_cache_target_feature_links.relation
         ELSE EXCLUDED.relation
     END"""
@@ -563,7 +563,7 @@ ON CONFLICT (target_id, feature_id) DO UPDATE SET
     provider = EXCLUDED.provider,
     dataset_key = EXCLUDED.dataset_key,
     distance_m = EXCLUDED.distance_m,
-    relation = {_LINK_RELATION_PRESERVE_MANUAL_SQL},
+    relation = EXCLUDED.relation,
     active = true,
     last_seen_at = now()
 RETURNING {_LINK_COLUMNS}
@@ -581,7 +581,7 @@ ON CONFLICT (target_id, feature_id) DO UPDATE SET
     provider = EXCLUDED.provider,
     dataset_key = EXCLUDED.dataset_key,
     distance_m = EXCLUDED.distance_m,
-    relation = {_LINK_RELATION_PRESERVE_MANUAL_SQL},
+    relation = {_LINK_RELATION_PRESERVE_ACTIVE_MANUAL_SQL},
     active = true,
     last_seen_at = now()
 RETURNING {_LINK_COLUMNS}

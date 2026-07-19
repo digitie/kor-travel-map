@@ -474,6 +474,7 @@ async def test_link_upsert_skips_inactive_parent() -> None:
     )
 
     assert link is None
+    assert "relation = EXCLUDED.relation" in session.statements[0]
 
 
 @pytest.mark.unit
@@ -519,6 +520,8 @@ async def test_link_sync_locks_all_parents_before_link_writes_in_uuid_order() ->
     # snapshot sync는 resolver link만 비활성화한다 — 운영자 manual link 보존(#699).
     assert "relation <> 'manual'" in session.statements[2]
     assert "INSERT INTO ops.poi_cache_target_feature_links" in session.statements[3]
+    assert "poi_cache_target_feature_links.active" in session.statements[3]
+    assert "poi_cache_target_feature_links.relation = 'manual'" in session.statements[3]
     assert session.params == [
         {"target_ids": [first_id, second_id]},
         {"target_ids": [first_id, second_id]},
