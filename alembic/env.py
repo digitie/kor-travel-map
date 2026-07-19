@@ -131,8 +131,22 @@ def _guard_forward_only_target() -> None:
 #
 # 1) PostGIS/extension 소유 객체: ``spatial_ref_sys`` 는 x_extension 확장이
 #    소유하며 app 스키마가 관리하지 않는다(search_path 때문에 schema=None 으로도
-#    반사돼 이름으로 건다). ``alembic_version`` 은 alembic 이 자동 제외한다.
+#    반사돼 이름으로 건다). shared DB의 infra owner가 설치한 ``postgis_topology``는
+#    extension namespace와 무관하게 전용 ``topology`` schema에 객체를 만든다.
+#    ``alembic_version`` 은 alembic 이 자동 제외한다.
 _POSTGIS_TABLE_NAMES = frozenset({"spatial_ref_sys"})
+_POSTGIS_OWNED_SCHEMAS = frozenset({"topology"})
+
+_APP_TABLES_IN_POSTGIS_SCHEMAS = sorted(
+    f"{table.schema}.{table.name}"
+    for table in target_metadata.tables.values()
+    if table.schema in _POSTGIS_OWNED_SCHEMAS
+)
+if _APP_TABLES_IN_POSTGIS_SCHEMAS:
+    raise RuntimeError(
+        "application metadata uses PostGIS-owned schemas: "
+        + ", ".join(_APP_TABLES_IN_POSTGIS_SCHEMAS)
+    )
 
 # 2) ORM 모델이 아직 없는 app-owned table (raw-SQL migration 으로만 생성).
 #    weather/price 는 T-VN-17/38 이, ops-live/log/key 계열은 별도 wave 가 모델을
@@ -179,6 +193,8 @@ def _include_object(
     """비-app 객체와 미모델 app table/expression index 를 비교에서 제외한다."""
 
     schema = _object_schema(object_) or _object_schema(compare_to)
+    if reflected and schema in _POSTGIS_OWNED_SCHEMAS:
+        return False
     if type_ == "table":
         return name not in _POSTGIS_TABLE_NAMES and (
             schema,
