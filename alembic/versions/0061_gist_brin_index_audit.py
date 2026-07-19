@@ -49,7 +49,8 @@ DDL 안전 (ADR-075 D-12, ~30M행)
 -------------------------------
 DROP/CREATE 모두 ``CONCURRENTLY``(autocommit_block)라 ACCESS EXCLUSIVE 없이 write를
 막지 않는다. CREATE는 재실행 안전을 위해 leftover INVALID index를 먼저 CONCURRENTLY
-drop한다. INVALID index 탐지·제거는 0060 docstring과 동일 절차. downgrade는 자동
+drop한다. INVALID index 탐지·제거는 ``docs/runbooks/docker-app.md`` §8.1의 일반
+concurrent DDL 절차를 따른다. downgrade는 자동
 full GiST 3개를 복원하고 weather 지원 index를 제거한다(둘 다 CONCURRENTLY).
 """
 

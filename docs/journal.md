@@ -11,6 +11,11 @@
   후보집합 불일치(#768)를 상세 코멘트하고 아이템별 이슈로 묶었다. #757/#759는 잔여 finding이 없다.
 - `T-VN-05R/17R/21R/14R`를 독립 PR 경계로 추가했다. 0060은 아직 main cutover 전이므로
   transactional non-concurrent UNIQUE로 직접 정정하고, #768은 열린 PR #763에 후속 커밋한다.
+- T-VN-17R은 0060의 첫 statement로 30초 제한 `SHARE ROW EXCLUSIVE`를 잡아 SELECT만
+  허용하고 weather DML을 차단한다. 같은 transaction에서 과거 동명 index 정리, dedup,
+  non-concurrent UNIQUE, NOT VALID 제약 추가를 commit한 뒤에만 lock을 풀고 VALIDATE한다.
+  실제 migration DELETE를 advisory gate로 멈춰 두 번째 connection INSERT가 막히는 회귀와
+  과거 concurrent 실패가 남긴 INVALID index를 새 migration이 교체하는 회귀를 작성했다.
 
 ## 2026-07-19 (claude, agent A2) — T-VN-14 지도 in-bounds 완결성 + exact 공간 술어
 
@@ -202,6 +207,8 @@
   immutable이라 삭제가 드물어 즉시 위험 낮음(리뷰 판단).
 - 위생: #752가 실수로 커밋한 repo-root ``uv.lock``(origin/main 미추적, uv는
   pyproject/CI/docs 어디에도 정본으로 참조되지 않는 로컬 아티팩트)을 제거했다.
+- **후속 정정(#766)**: 위 concurrent 절차는 dedup commit 뒤 writer가 semantic duplicate를
+  재삽입할 수 있어 T-VN-17R의 transactional writer-lock cutover로 대체한다.
 
 ## 2026-07-19 (codex) — Agent A PR #748 적대적 심층 리뷰 후속
 

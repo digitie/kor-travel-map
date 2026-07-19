@@ -3,6 +3,8 @@
 전용 stepping engine으로 검증한다:
 - DEDUP keep-rule: 0059에서 semantic tuple 중복(다른 weather_value_key)을 심고
   0060 upgrade 시 collected_at 최신 winner만 남는지.
+- actual migration이 dedup DELETE 안에서 멈춘 동안 두 번째 connection의 INSERT가
+  writer fence에 막히고, release 뒤 transactional UNIQUE까지 성공하는지.
 - upgrade→downgrade→upgrade 왕복에서 제약/index가 되돌고 복원되는지.
 - lock 규율(S2 회귀): VALIDATE는 SHARE UPDATE EXCLUSIVE만 잡아 concurrent INSERT를
   막지 않고, ADD ... NOT VALID의 ACCESS EXCLUSIVE는 (트랜잭션이 열린 동안) INSERT를
@@ -33,6 +35,7 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _PRE_REVISION = "0059_public_features_view"
 _TARGET_REVISION = "0060_weather_integrity"
+_DEDUP_GATE_KEY = 766_060
 
 
 @asynccontextmanager
@@ -67,6 +70,21 @@ _UNIQUE_INDEX_SQL = """
 SELECT count(*) FROM pg_class c
 JOIN pg_index i ON i.indexrelid = c.oid
 WHERE c.relname = 'uq_weather_value_identity' AND i.indisvalid
+"""
+_INVALID_UNIQUE_INDEX_SQL = """
+SELECT count(*) FROM pg_class c
+JOIN pg_index i ON i.indexrelid = c.oid
+WHERE c.relname = 'uq_weather_value_identity' AND NOT i.indisvalid
+"""
+_CONSTRAINT_VALIDITY_SQL = """
+SELECT conname, convalidated FROM pg_constraint
+WHERE conrelid = 'feature.feature_weather_values'::regclass
+  AND conname IN (
+      'ck_weather_value_range',
+      'ck_weather_value_payload_object',
+      'fk_weather_value_source_record'
+  )
+ORDER BY conname
 """
 
 
@@ -204,6 +222,240 @@ async def test_weather_integrity_dedup_and_roundtrip(pg_container: Any) -> None:
             autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
             await autocommit.execute(text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
         await admin_engine.dispose()
+
+
+async def test_upgrade_fences_writer_from_dedup_through_unique(
+    pg_container: Any,
+) -> None:
+    """실제 0060의 dedup→UNIQUE 경계에서 concurrent writer가 끼어들 수 없다.
+
+    DELETE trigger의 advisory lock은 migration을 dedup statement 내부에 결정적으로
+    정지시킨다. 그 순간 다른 connection INSERT가 table writer fence에 막혀야 하고,
+    gate 해제 뒤 migration은 valid UNIQUE까지 원자 완료해야 한다.
+    """
+    async with _fresh_database(pg_container) as dsn:
+        await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION)
+        await _seed_weather_feature_and_duplicates(dsn)
+        engine = make_async_engine(dsn)
+        migration_task: asyncio.Task[None] | None = None
+        try:
+            async with engine.begin() as setup:
+                await setup.execute(
+                    text(
+                        f"""
+                        CREATE FUNCTION public.pause_weather_dedup()
+                        RETURNS trigger
+                        LANGUAGE plpgsql
+                        AS $function$
+                        BEGIN
+                            PERFORM pg_advisory_xact_lock({_DEDUP_GATE_KEY});
+                            RETURN OLD;
+                        END
+                        $function$
+                        """
+                    )
+                )
+                await setup.execute(
+                    text(
+                        """
+                        CREATE TRIGGER pause_weather_dedup
+                        AFTER DELETE ON feature.feature_weather_values
+                        FOR EACH ROW EXECUTE FUNCTION public.pause_weather_dedup()
+                        """
+                    )
+                )
+
+            async with engine.connect() as gate:
+                await gate.execute(
+                    text("SELECT pg_advisory_lock(:key)"),
+                    {"key": _DEDUP_GATE_KEY},
+                )
+                migration_task = asyncio.create_task(
+                    asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+                )
+                waiting = False
+                try:
+                    for _ in range(100):
+                        async with engine.connect() as observer:
+                            waiting = bool(
+                                await observer.scalar(
+                                    text(
+                                        "SELECT EXISTS ("
+                                        " SELECT 1 FROM pg_locks"
+                                        " WHERE locktype = 'advisory'"
+                                        " AND database = ("
+                                        "   SELECT oid FROM pg_database"
+                                        "   WHERE datname = current_database()"
+                                        " )"
+                                        " AND classid = 0 AND objid = :key"
+                                        " AND objsubid = 1 AND NOT granted"
+                                        ")"
+                                    ),
+                                    {"key": _DEDUP_GATE_KEY},
+                                )
+                            )
+                        if waiting:
+                            break
+                        await asyncio.sleep(0.05)
+                    assert waiting, "migration did not reach the dedup gate"
+
+                    async with engine.connect() as writer:
+                        await writer.execute(text("SET statement_timeout = '1500ms'"))
+                        with pytest.raises(DBAPIError) as blocked:
+                            await writer.execute(
+                                text(
+                                    """
+                                    INSERT INTO feature.feature_weather_values (
+                                        weather_value_key, feature_id, provider,
+                                        weather_domain, forecast_style, metric_key,
+                                        value_number, issued_at, valid_at, collected_at
+                                    ) VALUES (
+                                        'wv_racer', 'f_mig_w', 'python-kma-api',
+                                        'kma_short_forecast', 'short', 'TMP', 30.0,
+                                        TIMESTAMPTZ '2026-07-19T09:00:00+09:00',
+                                        TIMESTAMPTZ '2026-07-19T09:00:00+09:00', now()
+                                    )
+                                    """
+                                )
+                            )
+                        assert getattr(blocked.value.orig, "sqlstate", None) == "57014"
+                finally:
+                    await gate.execute(
+                        text("SELECT pg_advisory_unlock(:key)"),
+                        {"key": _DEDUP_GATE_KEY},
+                    )
+
+                await migration_task
+
+            async with engine.connect() as verify:
+                assert await verify.scalar(text(_UNIQUE_INDEX_SQL)) == 1
+                assert (
+                    await verify.scalar(
+                        text(
+                            "SELECT count(*) FROM feature.feature_weather_values "
+                            "WHERE feature_id = 'f_mig_w'"
+                        )
+                    )
+                    == 2
+                )
+        finally:
+            if migration_task is not None and not migration_task.done():
+                migration_task.cancel()
+            await engine.dispose()
+
+
+async def test_upgrade_replaces_leftover_invalid_unique_index(
+    pg_container: Any,
+) -> None:
+    """과거 concurrent 실패의 INVALID index도 새 원자 cutover가 자동 복구한다."""
+    async with _fresh_database(pg_container) as dsn:
+        await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION)
+        await _seed_weather_feature_and_duplicates(dsn)
+        engine = make_async_engine(dsn)
+        try:
+            async with engine.connect() as connection:
+                autocommit = await connection.execution_options(
+                    isolation_level="AUTOCOMMIT"
+                )
+                with pytest.raises(DBAPIError):
+                    await autocommit.execute(
+                        text(
+                            """
+                            CREATE UNIQUE INDEX CONCURRENTLY uq_weather_value_identity
+                            ON feature.feature_weather_values (
+                                feature_id, provider, weather_domain,
+                                forecast_style, metric_key,
+                                issued_at, valid_at, observed_at
+                            ) NULLS NOT DISTINCT
+                            """
+                        )
+                    )
+            async with engine.connect() as connection:
+                assert (
+                    await connection.scalar(text(_INVALID_UNIQUE_INDEX_SQL)) == 1
+                )
+
+            await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+
+            async with engine.connect() as connection:
+                assert await connection.scalar(text(_UNIQUE_INDEX_SQL)) == 1
+                assert (
+                    await connection.scalar(text(_INVALID_UNIQUE_INDEX_SQL)) == 0
+                )
+        finally:
+            await engine.dispose()
+
+
+async def test_upgrade_normalizes_unstamped_constraints_before_retry(
+    pg_container: Any,
+) -> None:
+    """VALIDATE 실패 뒤 commit된 미stamp 제약도 재시도에서 exact 복구한다."""
+    async with _fresh_database(pg_container) as dsn:
+        await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION)
+        engine = make_async_engine(dsn)
+        try:
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        """
+                        ALTER TABLE feature.feature_weather_values
+                        ADD CONSTRAINT ck_weather_value_range
+                        CHECK (
+                            valid_from IS NULL OR valid_until IS NULL
+                            OR valid_from <= valid_until
+                        ) NOT VALID
+                        """
+                    )
+                )
+                await connection.execute(
+                    text(
+                        """
+                        ALTER TABLE feature.feature_weather_values
+                        ADD CONSTRAINT ck_weather_value_payload_object
+                        CHECK (jsonb_typeof(payload) = 'object') NOT VALID
+                        """
+                    )
+                )
+                await connection.execute(
+                    text(
+                        """
+                        ALTER TABLE feature.feature_weather_values
+                        ADD CONSTRAINT fk_weather_value_source_record
+                        FOREIGN KEY (source_record_key)
+                        REFERENCES provider_sync.source_records(source_record_key)
+                        ON DELETE SET NULL NOT VALID
+                        """
+                    )
+                )
+            async with engine.connect() as connection:
+                before = [
+                    tuple(row)
+                    for row in (
+                        await connection.execute(text(_CONSTRAINT_VALIDITY_SQL))
+                    ).all()
+                ]
+                assert before == [
+                    ("ck_weather_value_payload_object", False),
+                    ("ck_weather_value_range", False),
+                    ("fk_weather_value_source_record", False),
+                ]
+
+            await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+
+            async with engine.connect() as connection:
+                after = [
+                    tuple(row)
+                    for row in (
+                        await connection.execute(text(_CONSTRAINT_VALIDITY_SQL))
+                    ).all()
+                ]
+                assert after == [
+                    ("ck_weather_value_payload_object", True),
+                    ("ck_weather_value_range", True),
+                    ("fk_weather_value_source_record", True),
+                ]
+        finally:
+            await engine.dispose()
 
 
 _LOCK_MODES_SQL = """

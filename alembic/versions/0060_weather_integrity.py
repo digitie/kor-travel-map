@@ -24,7 +24,15 @@ semantic UNIQUE tuple (WeatherValue.identity() / make_weather_value_key 와 동�
 
 DDL 유형별 절차 (ADR-075 결정 5·6, ~30M행 → rewrite/STORED 금지)
 ----------------------------------------------------------------
-1. **DEDUP FIRST** — UNIQUE 빌드는 기존 중복이 있으면 실패하므로 먼저 제거한다.
+1. **WRITER LOCK FIRST** — migration transaction이
+   ``SHARE ROW EXCLUSIVE`` table lock을 먼저 얻는다. 이 lock은 SELECT는 허용하지만
+   INSERT/UPDATE/DELETE의 ``ROW EXCLUSIVE``와 충돌하므로, dedup부터 UNIQUE commit까지
+   semantic duplicate가 다시 들어오는 틈을 DB에서 닫는다. lock 획득은 30초 안에
+   끝나지 않으면 migration 전체를 rollback한다. 운영 절차도 API mutation, Dagster
+   schedule/sensor/manual/backfill, daemon/code location을 먼저 fence하고 active writer
+   0건을 확인해야 하며 DB lock은 마지막 불변식이다.
+
+2. **DEDUP** — UNIQUE 빌드는 기존 중복이 있으면 실패하므로 lock 아래에서 제거한다.
    keep-rule(ADR-072 "새 known_at/issued_at이 이긴다"): 같은 semantic tuple 내에서
    ``collected_at``(=시스템이 알게 된 known_at proxy) 최신, 동률이면 ``updated_at``
    최신, 그래도 동률이면 ``weather_value_key`` 내림차순으로 1건만 남기고 삭제한다.
@@ -44,22 +52,20 @@ DDL 유형별 절차 (ADR-075 결정 5·6, ~30M행 → rewrite/STORED 금지)
        ) t
        WHERE t.rn > 1;
 
-2. **CREATE UNIQUE INDEX CONCURRENTLY** — 트랜잭션 밖(autocommit_block)에서
-   ``NULLS NOT DISTINCT``로 만든다. writer는 같은 PR에서 ON CONFLICT 대상을 이
-   index tuple로 전환한다(``weather_repo._INSERT_SQL`` / ``_WEATHER_CONFLICT_TARGET``).
-   INVALID index 복구: CONCURRENTLY가 실패하면 INVALID index가 남는다. 탐지·제거:
+3. **TRANSACTIONAL UNIQUE** — dedup과 같은 transaction에서 non-concurrent
+   ``CREATE UNIQUE INDEX ... NULLS NOT DISTINCT``를 실행한다. writer는 같은 cutover
+   image에서 ON CONFLICT 대상을 이 index tuple로 전환한다
+   (``weather_repo._INSERT_SQL`` / ``_WEATHER_CONFLICT_TARGET``). 실패하면 dedup과 index가
+   함께 rollback되므로 이 migration은 INVALID index를 만들지 않는다. 과거 0060 시도에서
+   남았을 수 있는 같은 이름의 index와 validation 실패 뒤 미stamp된 제약은 lock 아래
+   먼저 정리해 재시도 입력을 단일화한다.
+   preflight 확인:
 
-       SELECT c.relname, i.indisvalid
+       SELECT c.relname, i.indisvalid, i.indisready, i.indisunique
        FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
        WHERE c.relname = 'uq_weather_value_identity';
-       -- indisvalid=false 이면:
-       DROP INDEX CONCURRENTLY IF EXISTS feature.uq_weather_value_identity;
 
-   본 revision은 CREATE 전에 ``DROP INDEX CONCURRENTLY IF EXISTS``를 실행해
-   실패 후 재실행(alembic이 0060을 stamp하기 전 재시도)에서도 leftover INVALID
-   index를 지우고 다시 만든다.
-
-3. **range/payload CHECK + source FK** — 세 제약을 **먼저 전부 ``NOT VALID``로
+4. **range/payload CHECK + source FK** — 세 제약을 **먼저 전부 ``NOT VALID``로
    추가**한 뒤(메타데이터만; 각 ADD는 짧은 sub-second ACCESS EXCLUSIVE를 잡는다),
    **별도 autocommit_block 안에서** ``VALIDATE CONSTRAINT`` 세 개를 순차 실행한다.
    순서가 중요하다: ``ADD ... NOT VALID``의 ACCESS EXCLUSIVE는 PG가 트랜잭션 끝까지
@@ -116,7 +122,29 @@ _UNIQUE_INDEX = "uq_weather_value_identity"
 
 
 def upgrade() -> None:
-    # 1) DEDUP FIRST — semantic tuple 중복 제거 (NULLS는 PARTITION BY에서 동일 그룹).
+    # 1) DB-level writer fence. SELECT는 허용하되 모든 weather DML을 dedup 이전부터
+    #    UNIQUE commit까지 차단한다. lock을 빨리 얻지 못하면 전체 transaction rollback.
+    op.execute("SET LOCAL lock_timeout = '30s'")
+    op.execute(f"LOCK TABLE {_TABLE} IN SHARE ROW EXCLUSIVE MODE")
+
+    # 과거 0060의 validate 실패는 앞선 autocommit 경계에서 NOT VALID/일부 VALID
+    # 제약을 commit했을 수 있다. 미stamp 재시도를 위해 exact 세 제약을 정규화한다.
+    op.execute(
+        f"ALTER TABLE {_TABLE} "
+        "DROP CONSTRAINT IF EXISTS fk_weather_value_source_record"
+    )
+    op.execute(
+        f"ALTER TABLE {_TABLE} "
+        "DROP CONSTRAINT IF EXISTS ck_weather_value_payload_object"
+    )
+    op.execute(
+        f"ALTER TABLE {_TABLE} DROP CONSTRAINT IF EXISTS ck_weather_value_range"
+    )
+
+    # 과거 concurrent 0060 시도의 leftover valid/INVALID index도 같은 lock 아래 제거한다.
+    op.execute(f"DROP INDEX IF EXISTS feature.{_UNIQUE_INDEX}")
+
+    # 2) semantic tuple 중복 제거 (NULLS는 PARTITION BY에서 동일 그룹).
     #    keep: collected_at(known_at proxy) 최신 → updated_at 최신 → key 내림차순.
     op.execute(
         f"""
@@ -139,22 +167,20 @@ def upgrade() -> None:
         """
     )
 
-    # 2) semantic UNIQUE — CONCURRENTLY + NULLS NOT DISTINCT, 트랜잭션 밖.
-    #    재실행 안전: leftover INVALID index를 먼저 CONCURRENTLY drop한다.
-    with op.get_context().autocommit_block():
-        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS feature.{_UNIQUE_INDEX}")
-        op.execute(
-            f"""
-            CREATE UNIQUE INDEX CONCURRENTLY {_UNIQUE_INDEX}
-            ON {_TABLE} (
-                feature_id, provider, weather_domain, forecast_style, metric_key,
-                issued_at, valid_at, observed_at
-            )
-            NULLS NOT DISTINCT
-            """
+    # 3) semantic UNIQUE — writer lock과 dedup의 같은 transaction. 실패하면 모두
+    #    rollback되며 INVALID index가 남지 않는다.
+    op.execute(
+        f"""
+        CREATE UNIQUE INDEX {_UNIQUE_INDEX}
+        ON {_TABLE} (
+            feature_id, provider, weather_domain, forecast_style, metric_key,
+            issued_at, valid_at, observed_at
         )
+        NULLS NOT DISTINCT
+        """
+    )
 
-    # 3) range/payload CHECK + source FK를 **먼저 전부 NOT VALID로 추가**한다.
+    # 4) range/payload CHECK + source FK를 **먼저 전부 NOT VALID로 추가**한다.
     #    ADD CONSTRAINT ... NOT VALID는 메타데이터 검증(제약 정의 기록)만 하지만
     #    ACCESS EXCLUSIVE lock을 잡고 PG는 이를 트랜잭션 끝까지 보유한다. 따라서
     #    ADD와 VALIDATE를 한 트랜잭션에 두면 ADD의 ACCESS EXCLUSIVE가 이어지는
@@ -191,10 +217,10 @@ def upgrade() -> None:
         """
     )
 
-    # 4) VALIDATE는 autocommit_block에서 실행한다. block 진입이 위 ADD들을 먼저
-    #    commit해 ACCESS EXCLUSIVE를 풀고, 각 VALIDATE는 자기 statement에서
-    #    SHARE UPDATE EXCLUSIVE만 잡아(전체 스캔이지만 read/write 비차단) 순차
-    #    실행된다. CHECK/FK 모두 VALIDATE 대상이다.
+    # 5) VALIDATE는 autocommit_block에서 실행한다. block 진입이 writer lock,
+    #    dedup, UNIQUE와 위 ADD들을 원자 commit하고 ACCESS EXCLUSIVE를 푼다. 각
+    #    VALIDATE는 자기 statement에서 SHARE UPDATE EXCLUSIVE만 잡아(전체 스캔이지만
+    #    read/write 비차단) 순차 실행된다. CHECK/FK 모두 VALIDATE 대상이다.
     with op.get_context().autocommit_block():
         op.execute(f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT ck_weather_value_range")
         op.execute(
@@ -217,5 +243,4 @@ def downgrade() -> None:
     op.execute(
         f"ALTER TABLE {_TABLE} DROP CONSTRAINT IF EXISTS ck_weather_value_range"
     )
-    with op.get_context().autocommit_block():
-        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS feature.{_UNIQUE_INDEX}")
+    op.execute(f"DROP INDEX IF EXISTS feature.{_UNIQUE_INDEX}")

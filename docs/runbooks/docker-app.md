@@ -389,6 +389,81 @@ ADR-075/T-VN-39 cutover에서는 §8 cold backup만으로 rollback 가능하다�
 실패한 DDL은 lock 획득 시간과 보유 시간을 구분해 기록한다. `CREATE INDEX CONCURRENTLY` 실패 시
 INVALID index를 찾아 제거하며, UNIQUE writer conflict target을 index보다 먼저 전환하지 않는다.
 
+### 8.2 weather 0060 semantic UNIQUE cutover
+
+0060은 dedup과 UNIQUE 사이에 writer가 들어오는 것을 허용하지 않는다. 아래 절차는 API mutation,
+Dagster schedule/sensor/manual/backfill ingress를 service 단위로 막고, migration의 DB lock을 마지막
+불변식으로 사용한다. frontend까지 멈춰 admin write 진입점을 닫는다.
+
+```bash
+docker compose stop frontend api dagster dagster-daemon
+test -z "$(docker compose ps --status running -q frontend api dagster dagster-daemon)"
+```
+
+DB에서 기존 write transaction과 semantic duplicate/index 상태를 확인한다. 첫 쿼리가 0행이 아니면
+임의 종료하지 말고 소유 작업을 drain/취소한 뒤 다시 확인한다.
+
+```sql
+SELECT a.pid, a.application_name, a.state, l.mode
+FROM pg_locks l
+JOIN pg_stat_activity a ON a.pid = l.pid
+WHERE l.relation = 'feature.feature_weather_values'::regclass
+  AND l.granted
+  AND l.mode IN (
+      'RowExclusiveLock', 'ShareRowExclusiveLock',
+      'ExclusiveLock', 'AccessExclusiveLock'
+  );
+
+SELECT c.relname, i.indisvalid, i.indisready, i.indisunique
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_index i ON i.indexrelid = c.oid
+WHERE n.nspname = 'feature'
+  AND c.relname = 'uq_weather_value_identity';
+```
+
+migration은 30초 안에 `SHARE ROW EXCLUSIVE`를 얻지 못하면 전체 rollback한다. lock을 얻은 뒤
+과거 실패에서 남은 동명 valid/INVALID index를 drop하고, dedup과 non-concurrent UNIQUE를 같은
+transaction에서 commit한다. 따라서 새 실행은 INVALID index를 남기지 않는다. migration-only
+image로 `0060_weather_integrity` 이상을 적용한 뒤 다음을 모두 확인한다.
+
+```sql
+SELECT i.indisvalid, i.indisready, i.indisunique, i.indnullsnotdistinct
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_index i ON i.indexrelid = c.oid
+WHERE n.nspname = 'feature'
+  AND c.relname = 'uq_weather_value_identity';
+
+SELECT count(*) AS duplicate_losers
+FROM (
+    SELECT row_number() OVER (
+        PARTITION BY feature_id, provider, weather_domain, forecast_style,
+                     metric_key, issued_at, valid_at, observed_at
+        ORDER BY collected_at DESC NULLS LAST,
+                 updated_at DESC NULLS LAST,
+                 weather_value_key DESC
+    ) AS rn
+    FROM feature.feature_weather_values
+) ranked
+WHERE rn > 1;
+```
+
+정상은 index boolean 네 값이 모두 true이고 `duplicate_losers=0`이다. 실패하면 service fence를
+유지하고 Alembic current가 0060 전인지 확인한다. 동명 INVALID index가 남아 있다면 과거
+concurrent 구현의 잔재다. 위 index 조회로 확인한 뒤 다음 원자 cleanup을 수행하고 0060을 재시도한다.
+
+```sql
+BEGIN;
+SET LOCAL lock_timeout = '30s';
+LOCK TABLE feature.feature_weather_values IN SHARE ROW EXCLUSIVE MODE;
+DROP INDEX IF EXISTS feature.uq_weather_value_identity;
+COMMIT;
+```
+
+새 API/Dagster image와 migration head/check, semantic upsert smoke가 모두 성공한 뒤에만
+Dagster web/daemon→API→frontend 순서로 재기동한다. 구 writer image는 다시 기동하지 않는다.
+
 ## 9. T-108 양 노드 배포 경계
 
 T-108의 양 노드 운영은 같은 image tag를 N150 16GB(x86_64)와 Odroid M1S(ARM64)에 배포할

@@ -2401,8 +2401,9 @@ make_price_value_key(*, feature_id: str, provider: str, price_domain: str,
 - 모든 schema 변경은 Alembic migration + ADR 동반.
 - 마이그레이션은 호환성보다 데이터 보존과 검증 가능한 cutover를 우선한다. 작은 additive 제약은
   `NOT VALID`→backfill→`VALIDATE`, 대형 변경은 shadow/backfill/write-fence/swap으로 수행한다.
-- 인덱스 추가는 `CREATE INDEX CONCURRENTLY`로 하되 lock acquisition·INVALID 잔여·writer 동시
-  cutover를 ADR-075 절차로 검증한다.
+- 일반 online 인덱스 추가는 `CREATE INDEX CONCURRENTLY`로 하되 lock acquisition·INVALID
+  잔여를 검증한다. dedup 뒤 semantic UNIQUE가 필요한 0060은 writer race를 허용하지 않도록
+  `SHARE ROW EXCLUSIVE`→dedup→non-concurrent UNIQUE를 한 transaction으로 수행한다.
 - 인덱스 삭제는 `DROP INDEX CONCURRENTLY IF EXISTS`.
 - 컬럼 타입 변경은 `USING` cast + downtime 또는 새 컬럼 + 백필 + swap.
 
