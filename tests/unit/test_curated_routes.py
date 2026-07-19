@@ -11,8 +11,6 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
-
 from kortravelmap.api.app import create_app
 from kortravelmap.api.curated_public_schema import (
     PublicCuratedAreaFeatureView,
@@ -26,6 +24,8 @@ from kortravelmap.api.curated_public_schema import (
 from kortravelmap.api.db import get_session
 from kortravelmap.api.routers import curated
 from kortravelmap.api.settings import ApiSettings
+from pydantic import SecretStr
+
 from kortravelmap.infra.curated_repo import CuratedFeature, CuratedFeaturePage
 from kortravelmap.settings import KorTravelMapSettings
 
