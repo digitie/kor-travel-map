@@ -171,6 +171,24 @@
   수 GB 소모 기여). 이 시점 이후 `test_weather_repo.py` 회귀는 setup 단계 Docker
   오류로 미실행 — 단, 해당 nearest-temp 테스트는 partial `idx_features_coord_5179_gist`
   를 단언(정적 확인)해 본 변경과 호환. C: 확보 후 재실행 필요.
+## 2026-07-19 (codex) — Agent A PR #753 적대적 심층 리뷰 후속
+
+- 전문 리뷰어 1명이 PR #753을 머지 후 재검토해, `alembic check`에서 제외한
+  app-owned table 8개가 구조 drift 사각지대가 되고 제외 index를 이름으로만 확인해
+  UNIQUE·키·predicate 훼손을 놓치는 S2 두 건을 확인했다.
+- 제외 table의 전체 column type/nullability와 핵심 constraint/index를 DB catalog로
+  고정하고, 인증·운영 CHECK의 실제 거부 동작을 검증한다. 제외 index 4개는 UNIQUE,
+  key expression 순서, partial predicate를 정확히 비교한다.
+- 새 SQLAlchemy mapping과 임시 제외 목록이 겹치면 Alembic 시작 시 즉시 실패하게 해
+  T-VN-17/38 등 후속 모델 도입 뒤 stale exclusion이 남지 않도록 했다. table/index
+  공용 ledger와 대체 계약 key의 정확한 집합 일치도 테스트해 검증 없는 제외 추가를 막는다.
+- `uq_curated_features_theme_feature_active`에만 metadata로 잘못 붙어 있던
+  `NULLS NOT DISTINCT`를 제거했다. 두 key는 `NOT NULL`이고 migration은 plain UNIQUE라
+  런타임 의미 변경 없이 실제 DDL과 맞추며, 이 index는 Alembic 일반 비교로 복귀한다.
+- 같은 전문 리뷰어의 재검토 승인을 받은 뒤 변경 대상 통합 테스트 13개와 unit 1,503개,
+  ruff, mypy strict, import-linter를 통과했다. 전체 integration 재실행은 Docker Desktop의
+  containerd metadata filesystem이 read-only로 전환돼 중단했으며, 변경 대상 통합 테스트는
+  장애 전·독립 실행에서 모두 통과했다. 원격 CI에서 전체 gate를 다시 확인한다.
 
 ## 2026-07-19 (claude, agent A1) — T-VN-19 Alembic metadata 정합 CI gate
 
@@ -181,9 +199,8 @@
   ORM 모델 없는 app table 8개(feature_weather_values/feature_price_values/system_log/
   api_call_log/public_api_keys/admin_auth_events/ops_live_ticket_claims/
   ops_live_topic_revisions — weather/price는 T-VN-17/38이 모델 도입 시 제거),
-  alembic이 round-trip 못하는 partial/expression index 5개(features yt_channel/yt_playlist/
-  dedup_refresh_keyset, source_records kma_alert_history, curated_features의 UUID(as_uuid=
-  False) reflection 위양성).
+  alembic이 round-trip 못하는 partial/expression index 4개(features yt_channel/yt_playlist/
+  dedup_refresh_keyset, source_records kma_alert_history).
 - models.py 실매핑 정합(마이그레이션 아님): DB가 TEXT인데 모델이 String이던 27개 컬럼
   Text화(features/feature_versions/feature_change_requests/source_entities/source_links/
   source_records.source_entity_key/notice_lifecycle_scopes/notice_lineage_states — DB에
@@ -194,11 +211,10 @@
   의 SERIAL 위양성 server_default 제거. repo는 raw SQL, DDL은 migration 소유라 런타임 불변.
 - 새 test는 전용 빈 DB를 만들어 격리 실행하고, deferrable 상호 FK(ADR-063 head-pointer)의
   위상정렬 SAWarning과 coord_5179 computed-default UserWarning(둘 다 양성, CLI check는 통과)만
-  test-local filterwarnings로 허용한다. 비교에서 제외한 5개 index의 **실제 존재**는
-  test_alembic_upgrade.py의 `test_alembic_excluded_indexes_still_exist`(4개: features yt_channel/
-  yt_playlist, source_records kma_alert_history, curated_features 유일 index)와
-  test_t212d_perf_explain.py(dedup_refresh_keyset)가 지켜, exclusion이 연 커버리지 공백을
-  메운다(향후 migration이 실수로 drop하면 이 존재 단언이 실패).
+  test-local filterwarnings로 허용한다. 리뷰 후 비교 제외 index 4개는
+  `test_alembic_uncompared_indexes_keep_exact_semantics`가 UNIQUE·key expression·partial
+  predicate를 catalog로 고정한다. curated_features 유일 index는 잘못된 metadata 옵션을
+  제거해 Alembic 일반 비교 대상으로 복귀했다.
 - **GENUINE 마이그레이션 필요 drift는 없었다** — 전부 모델 metadata 버그(수정) 또는 alembic
   autogenerate 위양성(제외)이었다. 비차단 후속 관찰: (a) DB에 varchar/text가 의미상 같은
   컬럼군에 혼재 — 향후 정규화 migration 후보. (b) curated_themes/source_records 제약이 naming
