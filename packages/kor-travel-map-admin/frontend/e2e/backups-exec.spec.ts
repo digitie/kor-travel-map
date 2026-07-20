@@ -227,7 +227,6 @@ test.describe("admin/backups execute depth", () => {
       env_file: null,
       execute: true,
       note: null,
-      operator: null,
       rustfs_volume: null,
       skip_verify: false,
     });

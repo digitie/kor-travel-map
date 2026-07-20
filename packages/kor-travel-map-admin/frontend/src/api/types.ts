@@ -10417,8 +10417,6 @@ export interface components {
             execute: boolean;
             /** Note */
             note?: string | null;
-            /** Operator */
-            operator?: string | null;
             /** Rustfs Volume */
             rustfs_volume?: string | null;
             /**
