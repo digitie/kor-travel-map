@@ -69,6 +69,11 @@ hook은 in-band라 놓치는 파일이 있을 수 있어 주기 스캔이 실체
   `deleted(purged)`로 플래그하고, **실체 S3 object 삭제는 S3 자격이 있는 dagster 스캐너가
   reconcile**한다(api 컨테이너에는 S3 삭제 자격을 두지 않는다).
 
+backup create/delete/restore/swap이 만드는 `downloaded`/`deleted`/`restored` 및 swap temp 등록
+event의 `actor`는 고정 서비스 문자열이나 request body가 아니라 인증된
+`AdminProxyContext.actor`다. `managed_file_events.actor`가 이 principal을 이미 저장하므로
+별도 audit table이나 schema 확장은 하지 않는다(T-VN-H02R, #796).
+
 ## 6. UI (`/admin/files`, 시스템 그룹)
 
 요약 칩(클릭=해당 필터) + 필터 바 + 목록(공용 `DataTable`) + 상세 provenance 패널

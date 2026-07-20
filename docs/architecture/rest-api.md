@@ -455,6 +455,12 @@ PATCH/DELETE correction UI는 `GET .../{feature_id}/revision`의 body `row_revis
 stale basis의 PATCH/DELETE는 `412 Precondition Failed`다. consumer는 draft를 보존하고 자동
 재시도하지 않으며, 운영자의 명시적 reload가 성공한 경우에만 최신 detail과 새 basis로 교체한다.
 이 규칙은 기존 REST/OpenAPI request·response schema와 DB schema를 변경하지 않는다.
+- **backup/restore 감사 actor**: backup create/delete/restore/swap의 managed-file registry
+  event actor는 router body가 아니라 admin BFF 인증에서 얻은 `AdminProxyContext.actor`만
+  사용한다. `RestoreSwapRequest`는 실행 계획 필드와 `note`만 받고 `operator`/`actor`를 받지
+  않으며 포함하면 `422 VALIDATION_ERROR`다. standalone compose는 destructive enablement를
+  기본 `false`로 해석하고 명시적 `true`만 허용한다. 승인된 Manager production 형상은 별도
+  canonical literal `true`와 raw/resolved/runtime attestation을 소유한다(T-VN-H02R, #796).
 - **admin 공간·카드 read**: admin 지도는 공개 `/v1/features*`를 재사용하지 않는다.
   `/v1/admin/features/in-bounds`는 `feature.features` base row에서 삭제 전 운영 상태를
   직접 조회하며, `status` 미지정 시 `draft|active|inactive|hidden|broken` 전체를 대상으로 한다.

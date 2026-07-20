@@ -13,6 +13,17 @@
   import-linter와 docs/redaction gate가 통과했다.
 - **다음 한 작업**: PR 코멘트와 GitHub CI를 확인해 green 뒤 병합하고 issue #797을 닫는다.
 
+## 2026-07-20 (codex) — #796 standalone fail-close·backup principal 착수
+
+- `T-VN-H02R`을 독립 PR로 열어 Map compose의 미설정 destructive 값을 `false`로 바꾸고,
+  explicit `true`만 opt-in으로 인정한다. Manager production의 exact literal true 강제는 companion
+  PR #68과 교차 검증한다.
+- backup create/delete/restore/swap registry event actor를 인증된 `AdminProxyContext.actor`에서만
+  파생하고, 사용되지 않는 `RestoreSwapRequest.operator`를 clean-cut한다. 기존 event schema가
+  principal을 수용하므로 DB migration은 만들지 않는다.
+- **다음 한 작업**: 문서-first commit과 draft PR을 공개한 뒤 구현·OpenAPI 산출물을 추가하고,
+  단일 적대 리뷰 P0~P2 없음 승인 뒤에만 test·lint·build gate를 실행한다.
+
 ## 2026-07-20 (codex) — #798 route wiring·CORS exact 후속 착수
 
 - T-VN-H03 적대 리뷰에서 확인된 두 잔여 경계를 `T-VN-H03R` 독립 PR로 분리했다. 앱 조립 시

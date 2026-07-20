@@ -13,6 +13,14 @@
 - **CHANGED**: current-row의 `collected_at`은 non-null `TIMESTAMPTZ` latest-wins 계약이다.
   DB schema와 OpenAPI는 바뀌지 않는다.
 
+### Destructive 배포·backup actor 경계 완결 (2026-07-20, T-VN-H02R #796)
+
+- **SECURITY (breaking)**: 공식 standalone Docker compose도 destructive 기본값을 `false`로
+  해석한다. 파괴적 조작은 명시적 `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=true`가 있어야 한다.
+- **SECURITY**: backup create/delete/restore/swap의 managed-file event actor를 고정
+  `api:admin` 대신 인증된 `AdminProxyContext.actor`로 기록한다.
+- **API (breaking)**: 사용되지 않던 `RestoreSwapRequest.operator` 입력을 제거한다.
+
 ### Route wiring startup·public CORS exact preflight (2026-07-20, T-VN-H03R #798)
 
 - **SECURITY**: `create_app()`이 route 분류와 실제 dependency wiring을 함께 검증한다. public-keyed/

@@ -17,6 +17,18 @@
   Ruff, strict mypy 116개 파일, import-linter 4개 계약, diff whitespace와 prod redaction gate가
   모두 통과했다.
 
+## 2026-07-20 (codex) — #796 destructive enablement·backup actor 후속 문서화
+
+- T-VN-H02가 애플리케이션 기본값을 `False`로 바꿨지만 공식 standalone compose는 미설정 값을
+  다시 `true`로 덮었다. T-VN-H02R은 Map standalone을 default false / explicit true로 만들고,
+  승인된 Manager production 형상만 canonical literal true를 소유하도록 경계를 분리한다.
+- backup create/delete/restore/swap registry event의 고정 `api:admin` actor를 제거하고 실제
+  `AdminProxyContext.actor`를 전달한다. 사용되지 않는 swap body `operator`는 호환 shim 없이
+  OpenAPI에서 제거하며 다른 principal의 destructive event를 회귀 고정한다.
+- 기존 `ops.managed_file_events.actor`가 필요한 principal을 이미 정규화해 보존하므로 DB schema
+  변경은 이 작업을 더 단순하거나 정확하게 만들지 않는다. 문서-first 단계에서는 테스트·lint를
+  실행하지 않았다.
+
 ## 2026-07-20 (codex) — #798 route wiring startup·CORS exact 계약 문서화
 
 - T-VN-H03의 surface 분리는 유지하되, `create_app()`이 정책 분류만 검증하고 실제 dependency
