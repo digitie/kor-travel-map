@@ -11,6 +11,7 @@
 - 단일 적대 리뷰에서 P0~P2 없이 테스트 승인을 받았다. 이후 대상 unit 15개와 integration
   5개, Ruff, 변경 스크립트 strict mypy, 본 패키지 mypy 116개 파일, import-linter 4개
   계약, `py_compile`, `git diff --check`가 모두 통과했다.
+- 최신 main 기준 draft PR #801을 열었으며 issue #799를 병합 시 자동 종료하도록 연결했다.
 
 ## 2026-07-20 (codex agent B) — targeted production lane 적대 리뷰 보강
 

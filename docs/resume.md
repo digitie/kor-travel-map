@@ -9,7 +9,8 @@
 - 구현 diff는 단일 적대 리뷰에서 P0~P2 없이 테스트 승인을 받았다. 대상 unit 15개·integration
   5개, Ruff, strict mypy·본 패키지 mypy, import-linter, `py_compile`, `git diff --check`가
   통과했다.
-- **다음 한 작업**: 최신 main 재확인과 보안 감사를 거쳐 draft PR을 열고 CI를 확인한다.
+- 최신 main에 rebase한 draft PR #801을 열고 issue #799를 연결했다.
+- **다음 한 작업**: PR 코멘트를 반영하고 CI green 뒤 병합해 #799를 닫는다.
 
 ## 2026-07-20 (codex agent B) — #741·#785·T-VN-15 targeted lane 구현·복구 계약 완결
 
