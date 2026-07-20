@@ -9,7 +9,9 @@
   허용한다. 금지 method/header는 400과 ACAO 부재로 fail-closed하며 service/operator 표면은
   계속 CORS 비노출이다. DB와 OpenAPI schema는 변경하지 않는다.
 - **다음 한 작업**: 문서-first commit과 draft PR 뒤 구현을 추가하고, 같은 단일 적대 리뷰어가
-  P0~P2 없음으로 승인하기 전에는 test·lint를 실행하지 않는다.
+  P0~P2 없음으로 승인하기 전에는 test·lint를 실행하지 않는다. 첫 리뷰의 conditional GET header와
+  전체 public method 합집합 광고 지적을 반영했고 재리뷰 P0~P2 없음 승인을 받았다. focused 58개와
+  API package 전체 746개, Ruff, strict mypy, OpenAPI drift가 통과했다. 이제 CI green 뒤 병합한다.
 
 ## 2026-07-20 (codex agent A) — T-VN-H08 Tier-2 p95 nearest-rank 산식 구현
 
