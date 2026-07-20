@@ -196,10 +196,19 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
         "map_ui": "map-ui",
         "pinvi_api": "pinvi-api",
     }
-    environments = {
-        role: (["KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH=hash"] if role == "map_ui" else ["A=1"])
-        for role in services
-    }
+    environments = {role: ["A=1"] for role in services}
+    environments["map_api"] = [
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=admin-proxy-0000000000000000000000000000",
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=cursor-secret-000000000000000000000000000",
+        "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=true",
+        "KOR_TRAVEL_MAP_API_METRICS_TOKEN=metrics-token-000000000000000000000000000",
+        "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=ops-cancel-000000000000000000000000000",
+        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=ops-read-00000000000000000000000000000",
+        "KOR_TRAVEL_MAP_API_PROFILE=production",
+        "KOR_TRAVEL_MAP_API_SERVICE_TOKEN=service-token-000000000000000000000000000",
+        "KOR_TRAVEL_MAP_API_VWORLD_API_KEY=vworld-key-00000000000000000000000000000",
+    ]
+    environments["map_ui"] = ["KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH=hash"]
     records: dict[str, dict[str, object]] = {}
     image_records: dict[str, dict[str, object]] = {
         image_id: {
@@ -352,6 +361,52 @@ def _verify_runtime(
     )
 
 
+def _mutate_runtime_environment(
+    attestation: dict[str, object],
+    environ: dict[str, str],
+    original_run_command: Callable,
+    role: str,
+    mutation: Callable[[list[str]], None],
+) -> Callable:
+    service_env = {
+        "map_api": "E2E_C7_MAP_API_SERVICE",
+        "map_dagster_daemon": "E2E_C7_DAGSTER_DAEMON_SERVICE",
+        "map_dagster_web": "E2E_C7_DAGSTER_WEB_SERVICE",
+        "map_ui": "E2E_C7_UI_SERVICE",
+        "pinvi_api": "E2E_C7_PINVI_API_SERVICE",
+    }
+    service = environ[service_env[role]]
+    container_id = original_run_command(
+        ["docker", "compose", "--project-directory", "/srv/kor-travel-map", "ps", "-q", service],
+        "/srv/kor-travel-map",
+    ).strip()
+    record = json.loads(
+        original_run_command(
+            ["docker", "inspect", "--", container_id],
+            "/srv/kor-travel-map",
+        )
+    )[0]
+    environment = list(record["Config"]["Env"])
+    mutation(environment)
+    runtime = attestation["service_runtime"]
+    assert isinstance(runtime, dict)
+    role_runtime = runtime[role]
+    assert isinstance(role_runtime, dict)
+    role_runtime["environment_sha256"] = _sha256_bytes(
+        _canonical_json(sorted(environment))
+    )
+
+    def run_command(command: list[str], project_directory: str) -> str:
+        output = original_run_command(command, project_directory)
+        if command[:3] != ["docker", "inspect", "--"] or command[3] != container_id:
+            return output
+        records = json.loads(output)
+        records[0]["Config"]["Env"] = environment
+        return json.dumps(records)
+
+    return run_command
+
+
 def test_runtime_attestation_fixture_accepts_exact_metadata() -> None:
     attestation, manifest, environ, run_command = _runtime_fixture()
 
@@ -455,3 +510,141 @@ def test_runtime_attestation_rejects_wrong_oci_revision() -> None:
 
     with pytest.raises(ATTESTATION.AttestationError, match="source provenance"):
         _verify_runtime(attestation, manifest, environ, tampered_run_command)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda values: values.__setitem__(
+            slice(None),
+            [
+                item
+                for item in values
+                if not item.startswith("KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=")
+            ],
+        ),
+        lambda values: values.__setitem__(
+            next(
+                index
+                for index, item in enumerate(values)
+                if item.startswith("KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=")
+            ),
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=short",
+        ),
+        lambda values: values.__setitem__(
+            next(
+                index
+                for index, item in enumerate(values)
+                if item.startswith("KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=")
+            ),
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=cursor secret with whitespace 000000000000",
+        ),
+        lambda values: values.__setitem__(
+            next(
+                index
+                for index, item in enumerate(values)
+                if item.startswith("KOR_TRAVEL_MAP_API_PROFILE=")
+            ),
+            "KOR_TRAVEL_MAP_API_PROFILE=local-dev",
+        ),
+        lambda values: values.__setitem__(
+            next(
+                index
+                for index, item in enumerate(values)
+                if item.startswith("KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=")
+            ),
+            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=false",
+        ),
+    ],
+)
+def test_runtime_attestation_rejects_invalid_api_cursor_secret_shape(
+    mutation: Callable[[list[str]], None],
+) -> None:
+    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    run_command = _mutate_runtime_environment(
+        attestation,
+        environ,
+        original_run_command,
+        "map_api",
+        mutation,
+    )
+
+    with pytest.raises(ATTESTATION.AttestationError, match="cursor secret runtime shape"):
+        _verify_runtime(attestation, manifest, environ, run_command)
+
+
+@pytest.mark.parametrize(
+    "protected_name",
+    [
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+        "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
+        "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN",
+        "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+        "KOR_TRAVEL_MAP_API_VWORLD_API_KEY",
+    ],
+)
+def test_runtime_attestation_rejects_api_cursor_secret_reuse(
+    protected_name: str,
+) -> None:
+    attestation, manifest, environ, original_run_command = _runtime_fixture()
+
+    def reuse_protected_value(values: list[str]) -> None:
+        cursor = next(
+            item.split("=", 1)[1]
+            for item in values
+            if item.startswith("KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=")
+        )
+        index = next(
+            index
+            for index, item in enumerate(values)
+            if item.startswith(f"{protected_name}=")
+        )
+        values[index] = f"{protected_name}={cursor}"
+
+    run_command = _mutate_runtime_environment(
+        attestation,
+        environ,
+        original_run_command,
+        "map_api",
+        reuse_protected_value,
+    )
+
+    with pytest.raises(ATTESTATION.AttestationError, match="cursor secret runtime reuse"):
+        _verify_runtime(attestation, manifest, environ, run_command)
+
+
+def test_runtime_attestation_rejects_duplicate_cursor_secret_name() -> None:
+    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    run_command = _mutate_runtime_environment(
+        attestation,
+        environ,
+        original_run_command,
+        "map_api",
+        lambda values: values.append(
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=duplicate-0000000000000000000000000000"
+        ),
+    )
+
+    with pytest.raises(ATTESTATION.AttestationError, match="runtime environment shape"):
+        _verify_runtime(attestation, manifest, environ, run_command)
+
+
+@pytest.mark.parametrize(
+    "role",
+    ["map_dagster_daemon", "map_dagster_web", "map_ui", "pinvi_api"],
+)
+def test_runtime_attestation_rejects_cursor_secret_outside_api(role: str) -> None:
+    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    run_command = _mutate_runtime_environment(
+        attestation,
+        environ,
+        original_run_command,
+        role,
+        lambda values: values.append(
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=escaped-00000000000000000000000000000"
+        ),
+    )
+
+    with pytest.raises(ATTESTATION.AttestationError, match="escaped API runtime"):
+        _verify_runtime(attestation, manifest, environ, run_command)

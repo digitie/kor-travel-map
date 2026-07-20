@@ -2,6 +2,52 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex agent B) — targeted production lane 적대 리뷰 보강
+
+- PR #792의 첫 적대 리뷰 P1/P2 다섯 건을 반영했다. runner process가 죽은 뒤 늦은 Docker
+  create/exec가 recovery clear를 추월하는 창을 없애기 위해 `docker compose exec`를 폐기하고,
+  inherited flock과 `setsid` supervisor가 create/start/wait/remove/terminal 전체를 소유하게 했다.
+  permanent tombstone은 남기지 않는다. supervisor까지 terminal 없이 죽은 상태만 운영자 확인이
+  필요한 fail-closed BLOCKED로 유지한다.
+- caller/OCI self-label 비교 대신 root-owned strict C7 attestation verifier를 exact snapshot에서
+  재사용한다. host/origin/compose project, compatible-pair v4 active image, command/env hash,
+  source revision을 actual runtime과 비교하고, cursor signing secret이 Map API에 정확히 한 번만
+  존재하며 다른 credential과 다르고 네 다른 role에는 없는지 음수 테스트로 고정했다.
+- exact API image를 network-none/read-only로 생성해 cursor secret 누락 시 migration 전에 exit 1과
+  generic message로 닫히는 probe를 추가했다. probe/container raw identity나 stderr는 evidence에
+  남기지 않고 enum 결과와 hash lifecycle만 보존한다.
+- #741 public bbox는 좁은 좌표 범위에서 items/non-truncated/non-full 조건을 선행 단언한다.
+  cleanup은 owned parent를 `FOR UPDATE`로 잠근 transaction 안에서 fingerprint·FK audit·delete를
+  수행한다. 이는 PostgreSQL child FK insert의 `KEY SHARE`와 경합하므로 late child를 막는다.
+- `T-VN-15`는 같은 검색어의 active place 2건과 Feature-ID-derived idempotency key를 사용한다.
+  BFF search의 total on/off 두 page, query/include_total mismatch, payload 한 글자 tamper와 cursor
+  비반사를 production live 계약에 포함했다.
+- lifecycle/evidence exact file set·phase·count·schema·root mode와 fsync-before-result/clear를 정적
+  계약으로 고정했다. 구현/static contract 커밋 시점에는 정책에 따라 테스트·lint·build·parser를
+  실행하지 않았다.
+- 동일 리뷰어 재검토의 P2 4건에 따라 report subtree를 JSON/XML/HTML exact 3-file allowlist로
+  닫고 raw Playwright output을 evidence bind 밖 container `/tmp`로 옮겼다. API runtime env는
+  on-disk 파일 없이 unique memory map과 Docker child env·name-only argv로만 전달한다. 기존
+  weather/price child도 `FOR UPDATE`하고, normal/recovery cleanup 끝에서 unique search fixture가
+  items 0·total 0·cursor 없음인지 다시 단언한다. 관련 strict C7/static·env parser 음수 회귀를
+  추가했으며 테스트 실행 금지는 유지했다.
+
+## 2026-07-20 (codex agent B) — #741·#785 live 인수 경계 문서화
+
+- issue #741·#785의 구현은 main에 있지만 production browser가 보낸 stale raw
+  `If-Match`와 비공개 status marker를 owned fixture로 끝까지 증명하는 live lane이 없었다.
+- strict C7 runner에는 새 feature mutation을 넣지 않는다. 별도 opt-in·serial lane에서 실행별
+  고유 user-request Feature만 만들고, 모든 종료 경로는 직전 revision header의 raw ETag로
+  delete 요청을 만든 뒤 승인·삭제 확인까지 실패를 전파한다.
+- #785 competing write는 승인된 change request로 만들어 실제 revision을 전진시킨다. UI가
+  최초 basis ETag로 412를 받은 뒤 dirty draft를 유지하고 명시적 reload 전 자동 rebase하지
+  않는 것을 wire와 DOM에서 함께 단언한다.
+- #741은 draft/inactive/hidden 세 owned marker를 admin bbox·지도에서 확인하고 public
+  active-only 경계의 404/미포함을 함께 단언한다. weather/price는 admin API가 kind 생성을
+  지원하지 않으므로 root-owned BLOCKED/journal과 recovery-only 경계를 먼저 만든 뒤 exact
+  owned ID의 non-empty value fixture만 직접 만들고 UI panel·admin card·public 음성을 검증한다.
+- 이 문서 단계에서는 테스트·lint·build를 실행하지 않았다.
+
 ## 2026-07-20 (codex) — n150 0062 전환과 PostGIS topology check 오탐 발견
 
 - 최종 main·PinVi·Manager exact clone과 fresh root-owned backup을 확인하고 C6c capture를

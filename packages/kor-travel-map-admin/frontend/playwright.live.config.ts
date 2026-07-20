@@ -8,6 +8,10 @@ import { LIVE_STORAGE_STATE } from "./e2e/_auth-state";
 const artifactRoot =
   process.env.PLAYWRIGHT_ARTIFACT_ROOT ??
   path.join(os.tmpdir(), "kor-travel-map-playwright", "admin-frontend-live");
+const c7RawOutputDir = path.join(
+  "/tmp",
+  `kor-travel-map-c7-test-results-${process.pid}`,
+);
 
 const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -152,7 +156,10 @@ export default defineConfig({
   testDir: "./e2e/live",
   timeout: 30_000,
   expect: { timeout: 15_000 },
-  outputDir: path.join(artifactRoot, "test-results"),
+  // C7의 raw attachment/error output은 evidence bind 밖 container tmpfs에만 둔다.
+  outputDir: shouldAssertC7OriginGuard()
+    ? c7RawOutputDir
+    : path.join(artifactRoot, "test-results"),
   fullyParallel: true,
   // worker 상한(#501): 캡이 없으면 fullyParallel이 머신 코어 수만큼 worker를 띄워
   // 라이브 백엔드에 과한 동시성을 건다(flaky·부하). 기본 4, `E2E_LIVE_WORKERS`로 조정.

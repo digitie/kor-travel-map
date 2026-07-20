@@ -1,5 +1,50 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-20 (codex agent B) — #741·#785·T-VN-15 targeted lane 구현·복구 계약 완결
+
+- draft PR #792를 최신 main 계열에 rebase하고, 기존 #741/#785 시나리오에 `T-VN-15`의
+  active search fixture 2건, total on/off continuation, query/include_total mismatch,
+  payload tamper 422를 결합했다. browser는 same-origin `/api/proxy`만 사용하고 public key
+  query는 사용하지 않는다.
+- 첫 적대 리뷰의 late `docker compose exec/create` P1을 반영해 direct helper·Playwright
+  executor·missing-secret probe를 모두 deterministic labeled standalone container로 바꿨다.
+  runner barrier FD를 `setsid` supervisor가 상속하고 PID/PGID/SID/start ticks·intent·CID·terminal을
+  fsync한다. runner SIGKILL 뒤 recovery는 supervisor 종결까지 barrier에서 기다리며, terminal이
+  없는 cgroup/OOM kill은 자동 clear하지 않는다.
+- strict C7 root verifier를 exact C7 snapshot에서 호출해 host attestation v3, compatible-pair v4,
+  actual service image/command/env/compose/origin을 mutation 전에 다시 검증한다. Map API cursor
+  secret의 production/features/중복/길이/공백/credential 분리와 다른 네 role 부재를 확인하며,
+  exact API image의 network-none/read-only missing-secret probe도 추가했다.
+- direct cleanup은 ownership fingerprint parent를 `SELECT ... FOR UPDATE`로 잠근 transaction
+  안에서 child fingerprint·모든 FK를 audit하고 삭제한다. 이 row lock이 late child insert의
+  `KEY SHARE`와 충돌하므로 별도 tombstone이나 DB schema 변경은 필요하지 않다.
+- evidence는 normal 6개 operation×8 phase, recovery 3개×8 phase와 direct/report/probe exact
+  schema·count·root metadata를 검증하고 전체 file/directory fsync 뒤 result와 BLOCKED clear를
+  순서대로 확정한다. 구현/static contract 커밋까지 만들었으며 test·lint·build·parser는 아직
+  실행하지 않았다.
+- 동일 리뷰어의 재검토 P2 4건도 반영했다. C7 raw output은 container `/tmp` tmpfs로 분리하고
+  evidence report subtree는 exact 3 regular files와 JSON/XML/HTML content를 검증한다. helper
+  runtime env는 unique memory map→Docker child env와 `--env NAME`만 사용해 disk copy를 없앴다.
+  direct cleanup은 parent에 이어 기존 child도 `FOR UPDATE`하며, browser cleanup은 exact search
+  `items=[]`, `total=0`, cursor null/absent를 normal/recovery-only 모두에서 확인한다.
+- **다음 한 작업**: 보강 exact head를 같은 단일 적대적 리뷰어에게 재제출한다. P0~P3
+  없음 승인 뒤에만 gate를 실행하고, CI green·exact 배포 확인 뒤 WSL SSH로 n150 production
+  destructive live를 완료해 #741·#785를 닫는다.
+
+## 2026-07-20 (codex agent B) — #741·#785 targeted live 인수 보강 착수
+
+- `main@700c8ccd` 기준으로 두 이슈의 미완료 조건이 n150 live 증거임을 확인했다. strict C7
+  runner의 복구 journal에 feature correction mutation을 섞지 않고 별도 serial lane으로
+  분리한다.
+- #785는 owned Feature의 UI basis raw ETag, 승인된 경쟁 update, stale UI `If-Match` 412,
+  dirty draft 보존, 명시적 reload, current-ETag cleanup을 한 흐름으로 증명한다.
+- #741은 `draft`·`inactive`·`hidden` owned marker의 admin UI/API 노출과 public active-only
+  음성 계약을 증명한다. admin API가 만들 수 없는 weather/price kind는 runner가 mutation 전에
+  root-owned BLOCKED/journal을 만든 뒤 전용 helper로 고유 fixture를 넣고, UI panel·non-empty
+  card·public 음성 계약을 확인한 뒤 exact ID만 물리 삭제한다.
+- **다음 한 작업**: docs-first commit과 draft PR을 공개한 뒤 구현 exact head를 단일 적대
+  리뷰어에게 제출한다. 승인 전에는 test·lint·build를 실행하지 않는다.
+
 ## 2026-07-20 (codex) — T-ADM-C7F prod topology Alembic check 보강 착수
 
 - n150 최종 main 배포에서 실제 DB를 `0023`에서 `0062_feature_row_revision`까지

@@ -153,8 +153,11 @@ runner는 아래 순서를 지킨다.
    뒤에만 `docker start --attach`한다. spec은 worker 1, retry 0으로 실행한다.
 5. 각 spec은 assertion value/error/stdout/stderr/URL을 버린 redacted JUnit/HTML/JSON만
    spec별 디렉터리에 분리한다. 운영값이 픽셀에 남을 수 있는 screenshot, trace, raw
-   Playwright report, attachment와 auth storage는 생성하거나 evidence로 복사하지 않는다. 비밀값이 없는 root runtime
-   attestation과 compatible-pair snapshot은 함께 복제하고 manifest hash로 결박한다.
+   Playwright report, attachment와 auth storage는 evidence로 복사하지 않는다. C7 raw
+   `test-results` output은 evidence bind 밖 container tmpfs
+   `/tmp/kor-travel-map-c7-test-results-<pid>`에만 생성하고 container 제거와 함께 폐기한다.
+   비밀값이 없는 root runtime attestation과 compatible-pair snapshot은 함께 복제하고 manifest
+   hash로 결박한다.
 6. 원격 상태를 다시 읽어 exact restoration을 검증하고 evidence를 fsync한 뒤에만
    journal과 `BLOCKED.json`을 제거한다.
 

@@ -489,6 +489,13 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert 'trace: shouldAssertC7OriginGuard() ? "off"' in config
     assert 'screenshot: shouldAssertC7OriginGuard() ? "off"' in config
     assert '"./e2e/c7-redacted-reporter.ts"' in config
+    assert (
+        'path.join(\n  "/tmp",\n  `kor-travel-map-c7-test-results-${process.pid}`'
+        in config
+    )
+    assert "outputDir: shouldAssertC7OriginGuard()" in config
+    assert "? c7RawOutputDir" in config
+    assert ': path.join(artifactRoot, "test-results")' in config
     assert "test.location.file" in reporter
     assert "result.errors" not in reporter
     assert "result.stdout" not in reporter
