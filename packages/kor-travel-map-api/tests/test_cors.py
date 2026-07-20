@@ -46,11 +46,50 @@ def test_public_keyed_preflight_gets_cors_for_allowed_origin(
         headers={
             "Origin": ALLOWED_ORIGIN,
             "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "X-Kor-Travel-Map-Api-Key",
         },
     )
 
     assert response.status_code == 200
     assert response.headers[_ACAO] == ALLOWED_ORIGIN
+    assert "GET" in response.headers["access-control-allow-methods"].split(", ")
+    assert (
+        "x-kor-travel-map-api-key"
+        in response.headers["access-control-allow-headers"].casefold()
+    )
+
+
+@pytest.mark.unit
+def test_public_preflight_rejects_route_method_without_acao(
+    client: TestClient,
+) -> None:
+    response = client.options(
+        "/v1/features",
+        headers={
+            "Origin": ALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "DELETE",
+        },
+    )
+
+    assert response.status_code == 400
+    assert _ACAO not in response.headers
+
+
+@pytest.mark.unit
+def test_public_preflight_rejects_private_header_without_acao(
+    client: TestClient,
+) -> None:
+    response = client.options(
+        "/v1/features",
+        headers={
+            "Origin": ALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "X-Kor-Travel-Map-Admin-Password",
+        },
+    )
+
+    assert response.status_code == 400
+    assert _ACAO not in response.headers
 
 
 @pytest.mark.unit

@@ -27,6 +27,8 @@ Starlette 라우팅(구체 route 우선 등록)과 일치한다. 오분류가 �
 route가 CORS를 흘린다"가 아니다.
 
 또 credential 모드를 켜지 않으므로 wildcard+credential 조합은 성립할 수 없다.
+preflight는 route matrix의 실제 method와 CORS safelist + public API key header만
+허용하고, 그 밖의 method/header는 ACAO 없이 거부한다.
 """
 
 from __future__ import annotations
@@ -36,6 +38,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.datastructures import Headers
+from starlette.responses import PlainTextResponse
 from starlette.routing import compile_path
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -43,6 +47,8 @@ from kortravelmap.api.route_policy import RoutePolicy, RoutePolicyMatrixRow
 
 __all__ = [
     "CORS_ELIGIBLE_POLICIES",
+    "PUBLIC_CORS_REQUEST_HEADERS",
+    "CorsPublicRoute",
     "CorsSurfacePatterns",
     "SurfaceScopedCORSMiddleware",
     "build_cors_surface_patterns",
@@ -54,6 +60,24 @@ CORS_ELIGIBLE_POLICIES: frozenset[RoutePolicy] = frozenset(
     {RoutePolicy.PUBLIC_UNAUTHENTICATED, RoutePolicy.PUBLIC_KEYED}
 )
 
+#: public browser가 preflight에서 요청할 수 있는 header 정본. CORS safelist를
+#: 명시해 middleware의 판정과 운영 문서가 같은 closed allowlist를 공유한다.
+PUBLIC_CORS_REQUEST_HEADERS: tuple[str, ...] = (
+    "Accept",
+    "Accept-Language",
+    "Content-Language",
+    "Content-Type",
+    "X-Kor-Travel-Map-Api-Key",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CorsPublicRoute:
+    """public route 하나의 경로 정규식과 실제 HTTP method 계약."""
+
+    pattern: re.Pattern[str]
+    methods: frozenset[str]
+
 
 @dataclass(frozen=True, slots=True)
 class CorsSurfacePatterns:
@@ -63,13 +87,26 @@ class CorsSurfacePatterns:
     정규식이다. 판정은 security-safe 규칙(비-public 매칭 시 무조건 제외)을 쓴다.
     """
 
-    public: tuple[re.Pattern[str], ...]
+    public: tuple[CorsPublicRoute, ...]
     blocked: tuple[re.Pattern[str], ...]
 
-    def is_public_path(self, path: str) -> bool:
+    def public_methods(self, path: str) -> frozenset[str] | None:
+        """경로가 public이면 실제 method 집합, 아니면 ``None``을 반환한다."""
+
         if any(pattern.match(path) for pattern in self.blocked):
-            return False
-        return any(pattern.match(path) for pattern in self.public)
+            return None
+        for route in self.public:
+            if route.pattern.match(path):
+                return route.methods
+        return None
+
+    @property
+    def all_public_methods(self) -> tuple[str, ...]:
+        """내부 Starlette middleware에 줄 public method 합집합."""
+
+        return tuple(
+            sorted({method for route in self.public for method in route.methods})
+        )
 
 
 def build_cors_surface_patterns(
@@ -81,20 +118,25 @@ def build_cors_surface_patterns(
     Starlette 라우팅과 동일한 앵커드 정규식으로 변환한다.
     """
 
-    public: list[re.Pattern[str]] = []
+    public_methods_by_path: dict[str, set[str]] = {}
     blocked: list[re.Pattern[str]] = []
-    seen_public: set[str] = set()
     seen_blocked: set[str] = set()
     for row in matrix:
-        path_regex, _path_format, _convertors = compile_path(row.path)
         if row.policy in CORS_ELIGIBLE_POLICIES:
-            if row.path not in seen_public:
-                seen_public.add(row.path)
-                public.append(path_regex)
+            public_methods_by_path.setdefault(row.path, set()).update(row.methods)
         elif row.path not in seen_blocked:
+            path_regex, _path_format, _convertors = compile_path(row.path)
             seen_blocked.add(row.path)
             blocked.append(path_regex)
-    return CorsSurfacePatterns(public=tuple(public), blocked=tuple(blocked))
+
+    public = tuple(
+        CorsPublicRoute(
+            pattern=compile_path(path)[0],
+            methods=frozenset(methods),
+        )
+        for path, methods in public_methods_by_path.items()
+    )
+    return CorsSurfacePatterns(public=public, blocked=tuple(blocked))
 
 
 class SurfaceScopedCORSMiddleware:
@@ -111,24 +153,51 @@ class SurfaceScopedCORSMiddleware:
         *,
         surface_patterns: CorsSurfacePatterns,
         allow_origins: Sequence[str],
-        allow_methods: Sequence[str] = ("*",),
-        allow_headers: Sequence[str] = ("*",),
     ) -> None:
         self.app = app
         self._surface_patterns = surface_patterns
+        self._allowed_header_names = frozenset(
+            header.casefold() for header in PUBLIC_CORS_REQUEST_HEADERS
+        )
         # 내부 CORSMiddleware는 credential 모드를 켜지 않는다 — wildcard+credential
         # 조합을 원천 차단한다(T-VN-H03).
         self._cors = CORSMiddleware(
             app,
             allow_origins=list(allow_origins),
-            allow_methods=list(allow_methods),
-            allow_headers=list(allow_headers),
+            allow_methods=list(surface_patterns.all_public_methods),
+            allow_headers=list(PUBLIC_CORS_REQUEST_HEADERS),
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not self._surface_patterns.is_public_path(
-            scope["path"]
-        ):
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+
+        allowed_methods = self._surface_patterns.public_methods(scope["path"])
+        if allowed_methods is None:
+            await self.app(scope, receive, send)
+            return
+
+        if scope["method"] == "OPTIONS":
+            headers = Headers(scope=scope)
+            origin = headers.get("origin")
+            requested_method = headers.get("access-control-request-method")
+            requested_headers = headers.get("access-control-request-headers")
+            disallowed_method = (
+                requested_method is not None and requested_method not in allowed_methods
+            )
+            requested_header_names = {
+                header.strip().casefold()
+                for header in (requested_headers or "").split(",")
+                if header.strip()
+            }
+            disallowed_headers = not requested_header_names <= self._allowed_header_names
+            if origin is not None and requested_method is not None and (
+                disallowed_method or disallowed_headers
+            ):
+                # Starlette CORSMiddleware는 실패 preflight에도 ACAO를 붙일 수 있다.
+                # trust 계약 밖 요청은 직접 거부해 ACAO 자체를 광고하지 않는다.
+                response = PlainTextResponse("Disallowed CORS request", status_code=400)
+                await response(scope, receive, send)
+                return
         await self._cors(scope, receive, send)
