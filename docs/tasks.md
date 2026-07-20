@@ -11,6 +11,7 @@
   - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
   - [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화** (#777)
   - [ ] `T-ADM-C7F` — **prod PostGIS topology 객체의 Alembic check 오탐 제거**
+  - [ ] `T-ADM-C7W` — **Chromium ops live 인증 거절 close code 복구** (#806)
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
@@ -107,6 +108,16 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   남긴다. n150 host runner는 `python3`를 명시적으로 요구하고, 실행 전 root-owned host/origin
   attestation을 local-only 운영 절차로 provision한다. 운영 종결이 남은 #684/#694/#712/#719는
   최종 live 증거를 첨부한 뒤 닫는다.
+
+- [ ] `T-ADM-C7W` — **Chromium ops live 인증 거절 close code 복구** (#806):
+  변조된 `ktm.ops-live.v1.*` subprotocol을 제시한 실제 Chromium은 서버가 WebSocket
+  subprotocol을 선택하지 않으면 application close `4401` 대신 handshake 실패 `1006`을
+  관측한다. 요청 헤더에서 prefix·단일성·길이 제한을 통과한 candidate만 transport-level
+  subprotocol로 선택하고, 인증·nonce claim·application loop에는 진입하지 않은 채 data
+  frame 없이 `4401`로 닫는다. ticket 없음은 subprotocol 없이 같은 `4401`을 유지한다.
+  selector의 없음·단일·복수·길이 초과와 missing/tampered WebSocket 회귀 테스트를 고정하고,
+  실제 Chromium C7 기대값은 완화하지 않는다. 단일 적대 리뷰와 CI, n150 strict C7 재검증을
+  통과한 뒤 이 task를 `T-ADM-C7`과 함께 아카이브한다.
 
 - [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화**
   (issue #777, docker-manager PR #61과 같은 배포 단위): compatible-pair manifest를

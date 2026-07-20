@@ -161,11 +161,10 @@ def test_ops_live_websocket_rejects_logged_out_connection(
     live_client: TestClient,
     session: _FakeSession,
 ) -> None:
-    with (
-        live_client.websocket_connect("/v1/ops/live") as websocket,
-        pytest.raises(WebSocketDisconnect) as exc_info,
-    ):
-        websocket.receive_json()
+    with live_client.websocket_connect("/v1/ops/live") as websocket:
+        assert websocket.accepted_subprotocol is None
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            websocket.receive_json()
 
     assert exc_info.value.code == 4401
     assert session.rollback_calls == 1
@@ -182,8 +181,10 @@ def test_ops_live_websocket_rejects_tampered_ticket(
     with live_client.websocket_connect(
         "/v1/ops/live",
         subprotocols=[tampered],
-    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
-        websocket.receive_json()
+    ) as websocket:
+        assert websocket.accepted_subprotocol == tampered
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            websocket.receive_json()
 
     assert exc_info.value.code == 4401
     assert session.rollback_calls == 1
@@ -252,6 +253,40 @@ def test_ops_live_ticket_verifier_rejects_invalid_contract(
     from kortravelmap.api.ops_live_auth import verify_ops_live_subprotocol
 
     assert verify_ops_live_subprotocol(protocol, secret=_LIVE_SECRET, now=now) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("requested_protocols", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("chat", None),
+        ("chat, ktm.ops-live.v1.YQ.YQ", "ktm.ops-live.v1.YQ.YQ"),
+        (
+            "ktm.ops-live.v1.YQ.YQ, ktm.ops-live.v1.Yg.Yg",
+            None,
+        ),
+        (f"ktm.ops-live.v1.{'A' * 2_048}.A", None),
+        ("ktm.ops-live.v1.not-a-ticket", None),
+    ],
+    ids=[
+        "none",
+        "empty",
+        "unrelated",
+        "single",
+        "multiple",
+        "too-long",
+        "malformed",
+    ],
+)
+def test_select_ops_live_subprotocol_requires_one_bounded_formatted_candidate(
+    requested_protocols: str | None,
+    expected: str | None,
+) -> None:
+    from kortravelmap.api.ops_live_auth import select_ops_live_subprotocol
+
+    assert select_ops_live_subprotocol(requested_protocols) == expected
 
 
 @pytest.mark.unit

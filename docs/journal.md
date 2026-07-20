@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex) — Chromium ops live 4401 관측 복구 구현
+
+- C7 strict 실행이 운영 쓰기 테스트 전에 두 번 동일하게 중단됐다. 두 실패 실행은 각각 exact
+  hash evidence로 보존하고 root-owned 복구 증거를 만든 뒤 state audit 0건을 확인했다.
+- 실제 Chromium 격리 재현에서 ticket 없음은 `4401`, 변조 ticket은 서버가 요청 subprotocol을
+  선택하지 않아 `1006`으로 관측되는 차이를 확정했다. Python WebSocket probe의 `4401`만으로는
+  실제 browser 계약을 증명하지 못한다.
+- issue #806과 `T-ADM-C7W`를 먼저 문서화하고 draft PR #807을 열었다. 단일 형식 candidate만
+  transport-level로 선택하고 인증·claim·application loop 전에 data frame 없이 `4401`로 닫도록
+  구현했다. ticket 없음·복수·형식 위반·길이 초과는 반사하지 않는다.
+- 테스트 전 단일 적대 리뷰에서 P0~P2 없음으로 승인됐다. selector/router 회귀 49개, API package
+  전체 755개, Ruff, API strict mypy 56개 파일이 통과했다.
+
 ## 2026-07-20 (codex agent A) — weather collected_at 단조 upsert 구현
 
 - issue #797을 `T-VN-H09` 단일 PR task로 등록하고 ADR-072, migration 0060, current weather

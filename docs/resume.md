@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-20 (codex) — T-ADM-C7W browser 4401 수정 검증
+
+- C7 strict의 두 실패는 운영 쓰기 이전 auth probe 경계였고, 실패 증거를 보존한 복구와 residue
+  0건 감사를 완료했다. Chromium은 변조 protocol을 서버가 선택하지 않으면 4401 frame을 받기 전
+  handshake를 `1006`으로 끝내는 것이 원인이었다.
+- PR #807은 형식·단일성·길이 제한을 통과한 요청 candidate만 transport-level로 선택한 뒤,
+  인증 성공 context나 nonce claim 없이 즉시 `4401`로 닫는다. 브라우저 C7 기대값은 완화하지 않았다.
+- 단일 적대 리뷰 P0~P2 없음, 회귀 49개, API 전체 755개, Ruff와 strict mypy를 통과했다.
+- **다음 한 작업**: 최신 main에 rebase하고 CI green 뒤 PR #807을 병합한다. exact Map image와
+  compatible-pair/attestation을 재생성한 뒤 n150 strict C7을 다시 실행한다.
+
 ## 2026-07-20 (codex agent A) — T-VN-H09 weather collected_at 단조성 구현
 
 - issue #797의 current semantic row는 최신 non-null `collected_at`만 승리하도록 writer를

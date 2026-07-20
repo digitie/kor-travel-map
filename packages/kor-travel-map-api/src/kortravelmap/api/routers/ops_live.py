@@ -27,6 +27,7 @@ from kortravelmap.api.ops_live_auth import (
     OpsLiveTicketContext,
     authenticate_ops_live_websocket,
     claim_ops_live_ticket,
+    select_ops_live_subprotocol,
 )
 
 __all__ = [
@@ -1031,12 +1032,15 @@ async def ops_live(
     if auth_context is None:
         # HTTP upgrade 거절은 browser WebSocket API에서 1006으로 뭉개진다. snapshot을
         # 보내지 않는 최소 handshake 뒤 4401을 닫아 client가 재시도를 중단할 수 있게 한다.
+        rejected_subprotocol = select_ops_live_subprotocol(
+            websocket.headers.get("sec-websocket-protocol")
+        )
         await _rollback_and_accept_close(
             websocket,
             session,
             code=OPS_LIVE_AUTH_CLOSE_CODE,
             reason="ops live authentication required",
-            subprotocol=None,
+            subprotocol=rejected_subprotocol,
         )
         return
     remaining_lease_seconds = _remaining_lease_seconds(auth_context.expires_at)
