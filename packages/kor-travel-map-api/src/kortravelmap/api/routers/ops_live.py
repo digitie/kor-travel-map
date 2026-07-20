@@ -814,7 +814,13 @@ async def _accept_and_close_best_effort(
     reason: str,
     subprotocol: str | None,
 ) -> None:
-    await _accept_best_effort(websocket, subprotocol=subprotocol)
+    accepted = await _accept_best_effort(websocket, subprotocol=subprotocol)
+    if not accepted:
+        return
+    # Uvicorn websockets-sansio는 같은 event-loop turn의 HTTP 101과 close frame을
+    # 한 transport flush로 합칠 수 있다. proxy가 handshake에서 tunnel로 전환할
+    # 기회를 준 뒤 close를 보내 browser-observable application code를 보존한다.
+    await asyncio.sleep(0)
     await _close_best_effort(websocket, code=code, reason=reason)
 
 

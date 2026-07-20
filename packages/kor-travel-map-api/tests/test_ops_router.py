@@ -430,6 +430,82 @@ def test_ops_live_ticket_claim_failure_rolls_back_and_retries_later(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_ops_live_accept_yields_before_auth_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
+    events: list[str] = []
+
+    async def _accept(
+        _websocket: Any,
+        *,
+        subprotocol: str | None,
+    ) -> bool:
+        assert subprotocol == "ktm.ops-live.v1.YQ.YQ"
+        events.append("accept")
+        asyncio.get_running_loop().call_soon(events.append, "event-loop-yield")
+        return True
+
+    async def _close(
+        _websocket: Any,
+        *,
+        code: int,
+        reason: str,
+    ) -> None:
+        assert code == 4401
+        assert reason == "authentication required"
+        events.append("close")
+
+    monkeypatch.setattr(live_mod, "_accept_best_effort", _accept)
+    monkeypatch.setattr(live_mod, "_close_best_effort", _close)
+
+    await live_mod._accept_and_close_best_effort(
+        object(),
+        code=4401,
+        reason="authentication required",
+        subprotocol="ktm.ops-live.v1.YQ.YQ",
+    )
+
+    assert events == ["accept", "event-loop-yield", "close"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ops_live_accept_failure_does_not_send_auth_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
+    async def _accept(
+        _websocket: Any,
+        *,
+        subprotocol: str | None,
+    ) -> bool:
+        assert subprotocol is None
+        return False
+
+    async def _close_must_not_run(
+        _websocket: Any,
+        *,
+        code: int,
+        reason: str,
+    ) -> None:
+        raise AssertionError(f"close must not run after failed accept: {code=} {reason=}")
+
+    monkeypatch.setattr(live_mod, "_accept_best_effort", _accept)
+    monkeypatch.setattr(live_mod, "_close_best_effort", _close_must_not_run)
+
+    await live_mod._accept_and_close_best_effort(
+        object(),
+        code=4401,
+        reason="authentication required",
+        subprotocol=None,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_ops_live_send_closes_at_ticket_lease_before_frame(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
