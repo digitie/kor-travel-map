@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Ops live 브라우저 인증 거절 close 복구 (2026-07-20, T-ADM-C7W #806)
+
+- **FIXED**: 변조된 signed WebSocket subprotocol을 제시한 Chromium도 handshake 실패 `1006`
+  대신 인증 거절 `4401`을 관측한다. 서버는 요청된 candidate 중 형식·길이 제한을 통과한 단일
+  protocol만 transport 협상에 사용하고, 인증·nonce claim·application loop에 진입하거나 data
+  frame을 보내지 않은 채 즉시 닫는다.
+- **SECURITY**: ticket 없음, 복수 candidate, 형식 위반과 길이 초과 입력은 반사하지 않는다.
+  서명·payload·TTL·nonce 검증 경계는 바뀌지 않는다.
+
 ### Weather collected_at 단조 upsert (2026-07-20, T-VN-H09 #797)
 
 - **FIXED**: 같은 weather semantic tuple에 더 오래된 provider backfill이 늦게 도착해도 최신

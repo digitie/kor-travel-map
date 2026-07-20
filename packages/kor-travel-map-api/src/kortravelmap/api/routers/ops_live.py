@@ -27,6 +27,7 @@ from kortravelmap.api.ops_live_auth import (
     OpsLiveTicketContext,
     authenticate_ops_live_websocket,
     claim_ops_live_ticket,
+    select_ops_live_subprotocol,
 )
 
 __all__ = [
@@ -715,9 +716,7 @@ async def _dagster_schedules_snapshot(session: AsyncSession) -> dict[str, Any]:
     row = await _row_mapping(session, _DAGSTER_SCHEDULES_LIVE_SQL)
     return {
         "audit_revision": int(row.get("audit_revision") or 0),
-        "claim_resolution_revision": int(
-            row.get("claim_resolution_revision") or 0
-        ),
+        "claim_resolution_revision": int(row.get("claim_resolution_revision") or 0),
         "override_count": int(row.get("override_count") or 0),
         "override_updated_at": _iso(row.get("override_updated_at")),
         "live_revision": int(row.get("live_revision") or 0),
@@ -1031,12 +1030,15 @@ async def ops_live(
     if auth_context is None:
         # HTTP upgrade 거절은 browser WebSocket API에서 1006으로 뭉개진다. snapshot을
         # 보내지 않는 최소 handshake 뒤 4401을 닫아 client가 재시도를 중단할 수 있게 한다.
+        rejected_subprotocol = select_ops_live_subprotocol(
+            websocket.headers.get("sec-websocket-protocol")
+        )
         await _rollback_and_accept_close(
             websocket,
             session,
             code=OPS_LIVE_AUTH_CLOSE_CODE,
             reason="ops live authentication required",
-            subprotocol=None,
+            subprotocol=rejected_subprotocol,
         )
         return
     remaining_lease_seconds = _remaining_lease_seconds(auth_context.expires_at)
@@ -1054,10 +1056,7 @@ async def ops_live(
         async with claim_timeout:
             claimed = await claim_ops_live_ticket(session, auth_context)
     except TimeoutError:
-        if (
-            claim_timeout.expired()
-            or _remaining_lease_seconds(auth_context.expires_at) <= 0
-        ):
+        if claim_timeout.expired() or _remaining_lease_seconds(auth_context.expires_at) <= 0:
             await _rollback_and_accept_close(
                 websocket,
                 session,
@@ -1159,9 +1158,7 @@ async def ops_live(
                     reason="ops live ticket expired",
                 )
                 return
-            remaining_lease_seconds = (
-                auth_context.expires_at - now
-            ).total_seconds()
+            remaining_lease_seconds = (auth_context.expires_at - now).total_seconds()
             try:
                 command = await _receive_command(
                     websocket,

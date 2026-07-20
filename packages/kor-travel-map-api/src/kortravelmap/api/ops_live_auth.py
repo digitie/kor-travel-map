@@ -25,6 +25,7 @@ __all__ = [
     "OpsLiveTicketContext",
     "authenticate_ops_live_websocket",
     "claim_ops_live_ticket",
+    "select_ops_live_subprotocol",
     "verify_ops_live_subprotocol",
 ]
 
@@ -42,9 +43,7 @@ _ACTOR_MAX_LENGTH: Final[int] = 80
 _NONCE_MAX_LENGTH: Final[int] = 128
 _CLAIM_RETENTION_GRACE_SECONDS: Final[int] = 60
 _BASE64URL_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]+$")
-_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
-    {"aud", "exp", "iat", "nonce", "sub", "v"}
-)
+_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset({"aud", "exp", "iat", "nonce", "sub", "v"})
 _CLAIM_SQL: Final[str] = """
 WITH expired AS (
   SELECT nonce_hash
@@ -86,11 +85,7 @@ async def authenticate_ops_live_websocket(
 
     settings = websocket.app.state.settings
     configured_secret = settings.admin_proxy_secret
-    secret = (
-        configured_secret.get_secret_value().strip()
-        if configured_secret is not None
-        else ""
-    )
+    secret = configured_secret.get_secret_value().strip() if configured_secret is not None else ""
     return verify_ops_live_subprotocol(
         websocket.headers.get("sec-websocket-protocol"),
         secret=secret,
@@ -137,24 +132,13 @@ def verify_ops_live_subprotocol(
     유효한 만료 ticket의 protocol을 보존해 router가 browser-observable 4408로 닫기 위함이다.
     """
 
-    if len(secret) < _SECRET_MIN_LENGTH or not requested_protocols:
+    if len(secret) < _SECRET_MIN_LENGTH:
         return None
-    protocols = [part.strip() for part in requested_protocols.split(",") if part.strip()]
-    matching = [
-        protocol for protocol in protocols if protocol.startswith(OPS_LIVE_PROTOCOL_PREFIX)
-    ]
-    if len(matching) != 1:
-        return None
-    protocol = matching[0]
-    if len(protocol) > _MAX_PROTOCOL_LENGTH:
+    protocol = select_ops_live_subprotocol(requested_protocols)
+    if protocol is None:
         return None
     ticket = protocol.removeprefix(OPS_LIVE_PROTOCOL_PREFIX)
-    try:
-        payload_part, signature_part = ticket.split(".")
-    except ValueError:
-        return None
-    if not _is_base64url(payload_part) or not _is_base64url(signature_part):
-        return None
+    payload_part, signature_part = ticket.split(".")
     expected_signature = _base64url_encode(
         hmac.new(
             secret.encode(),
@@ -173,11 +157,7 @@ def verify_ops_live_subprotocol(
     expires_at = payload.get("exp")
     nonce = payload.get("nonce")
     version = payload.get("v")
-    if (
-        payload.get("aud") != _AUDIENCE
-        or version != _VERSION
-        or isinstance(version, bool)
-    ):
+    if payload.get("aud") != _AUDIENCE or version != _VERSION or isinstance(version, bool):
         return None
     if (
         not isinstance(actor, str)
@@ -213,6 +193,33 @@ def verify_ops_live_subprotocol(
         nonce=nonce,
         subprotocol=protocol,
     )
+
+
+def select_ops_live_subprotocol(requested_protocols: str | None) -> str | None:
+    """브라우저 인증 거절 handshake에 되돌릴 단일 ticket candidate를 고른다.
+
+    이 함수는 ticket을 인증하지 않는다. 응답 헤더에 안전하게 사용할 수 있는 형식의
+    candidate 하나만 고르고, 서명·payload·만료·nonce 검증은 verifier와 router가
+    계속 담당한다.
+    """
+
+    if not requested_protocols:
+        return None
+    protocols = [part.strip() for part in requested_protocols.split(",") if part.strip()]
+    matching = [protocol for protocol in protocols if protocol.startswith(OPS_LIVE_PROTOCOL_PREFIX)]
+    if len(matching) != 1:
+        return None
+    protocol = matching[0]
+    if len(protocol) > _MAX_PROTOCOL_LENGTH:
+        return None
+    ticket = protocol.removeprefix(OPS_LIVE_PROTOCOL_PREFIX)
+    try:
+        payload_part, signature_part = ticket.split(".")
+    except ValueError:
+        return None
+    if not _is_base64url(payload_part) or not _is_base64url(signature_part):
+        return None
+    return protocol
 
 
 def _decode_payload(payload_part: str) -> dict[str, Any] | None:
