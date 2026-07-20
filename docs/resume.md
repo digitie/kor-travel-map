@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-20 (codex) — #798 route wiring·CORS exact 후속 착수
+
+- T-VN-H03 적대 리뷰에서 확인된 두 잔여 경계를 `T-VN-H03R` 독립 PR로 분리했다. 앱 조립 시
+  route 분류만 확인하던 경로를 실제 dependency wiring 검증으로 올리고, public CORS preflight가
+  모든 method/header wildcard를 광고하지 않도록 route matrix 기반 exact 계약으로 바꾼다.
+- public browser 계약은 실제 route method와 `X-Kor-Travel-Map-Api-Key` 및 표준 CORS safelist만
+  허용한다. 금지 method/header는 400과 ACAO 부재로 fail-closed하며 service/operator 표면은
+  계속 CORS 비노출이다. DB와 OpenAPI schema는 변경하지 않는다.
+- **다음 한 작업**: 문서-first commit과 draft PR 뒤 구현을 추가하고, 같은 단일 적대 리뷰어가
+  P0~P2 없음으로 승인하기 전에는 test·lint를 실행하지 않는다.
+
 ## 2026-07-20 (codex agent A) — T-VN-H08 Tier-2 p95 nearest-rank 산식 구현
 
 - issue #799를 독립 ext4 `fix/tier2-nearest-rank-p95` branch의 PR 단위 task로 열었다.
