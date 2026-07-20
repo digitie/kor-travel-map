@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex agent A) — Tier-2 nearest-rank percentile 정확화
+
+- issue #799를 `T-VN-H08` 단일 PR로 등록하고 Tier-2 표본 정렬, nearest-rank
+  `ceil(p × n) - 1` index, 비보간 규칙을 성능·테스트 정본에 먼저 기록했다.
+- 실행시간 p50·p95와 shared read blocks p95가 같은 공용 helper를 사용하도록 구현했다.
+  p95는 `n=1/20/30/100`에서 index `0/18/28/94`와 값 `1/19/29/95`를 단언한다.
+- 단일 적대 리뷰에서 P0~P2 없이 테스트 승인을 받았다. 이후 대상 unit 15개와 integration
+  5개, Ruff, 변경 스크립트 strict mypy, 본 패키지 mypy 116개 파일, import-linter 4개
+  계약, `py_compile`, `git diff --check`가 모두 통과했다.
+- 최신 main 기준 draft PR #801을 열었으며 issue #799를 병합 시 자동 종료하도록 연결했다.
+
 ## 2026-07-20 (codex agent B) — targeted production lane 적대 리뷰 보강
 
 - PR #792의 첫 적대 리뷰 P1/P2 다섯 건을 반영했다. runner process가 죽은 뒤 늦은 Docker

@@ -455,6 +455,11 @@ JSON으로 기록한다. **CI에서 절대 돌리지 않는다**(대용량 fixtu
   loop 밖에서 한 번만 실행한다.
   `shared_read_blocks_p95`는 child 누적값을 재귀 합산하지 않고 최상위 Plan의
   query 전체 누적값만 사용한다.
+- percentile 표본은 오름차순 정렬하고 nearest-rank를 사용한다. 표본 수가 `n`이고
+  percentile 비율이 `p`이면 1-based rank는 `ceil(p × n)`, 0-based index는
+  `ceil(p × n) - 1`이다. 보간하지 않으며 실행시간 p50·p95와 shared read blocks p95를
+  모두 같은 helper로 계산한다. 따라서 값이 `1..n`인 p95 표본은 `n=1/20/30/100`에서
+  각각 index `0/18/28/94`, 값 `1/19/29/95`를 선택한다.
 - 결과는 release 리포트(`docs/reports/`)에 첨부하고, budget 초과 viewport는 index/쿼리 재설계
   근거로 쓴다.
 

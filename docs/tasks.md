@@ -55,6 +55,7 @@
   - [ ] `T-VN-H05` — **INVALID concurrent index 복구 runbook**
   - [ ] `T-VN-H06` — **admin 목록 keyset 전환**
   - [ ] `T-VN-H07` — **PinVi field-level contract와 OpenAPI SHA 검증**
+  - [ ] `T-VN-H08` — **Tier-2 p95 nearest-rank 산식 정확화** (#799)
 - **보류/결정 대기**
   - [ ] `T-101` — **Materialized View 도입 검토**
 
@@ -434,8 +435,6 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
 
 ### 독립 하드닝 — 각 항목 PR 1개
 
-
-
 - [ ] T-VN-H04 — **PROJ pin·drift·REINDEX runbook**
 
   `coord_5179` generated 값의 PROJ 버전을 고정하고 drift 검사, 재계산, 공간 index REINDEX와 검증
@@ -455,6 +454,12 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
 
   양 저장소 contract test를 required/type/enum 필드까지 강화하고 배포 compatible pair에 pinned
   OpenAPI SHA manifest를 요구한다.
+
+- [ ] T-VN-H08 — **Tier-2 p95 nearest-rank 산식 정확화** (#799)
+
+  release harness의 실행시간과 shared read blocks p95를 표본 오름차순 정렬 뒤
+  `ceil(0.95 × n) - 1`의 0-based index로 고른다. 두 지표는 공용 helper만 사용하고,
+  `n=1/20/30/100` fixture가 index와 값을 고정한 뒤 release evidence를 다시 생성한다.
 
 ## T-101 — Materialized View 도입 검토
 

@@ -29,14 +29,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
-import statistics
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
@@ -123,9 +123,24 @@ FROM feature.public_features
 WHERE {_PUBLIC_BATCH_CANDIDATE_PREDICATE_SQL}
 """
 
+_PercentileValue = TypeVar("_PercentileValue", int, float)
+
 
 class BenchmarkCardinalityError(RuntimeError):
     """성공 release evidence를 만들 수 없는 입력 cardinality 오류."""
+
+
+def _nearest_rank_percentile(
+    values: Sequence[_PercentileValue], percentile: float
+) -> _PercentileValue:
+    """정렬한 표본의 nearest-rank percentile 값을 보간 없이 반환한다."""
+
+    if not values:
+        raise ValueError("percentile 표본은 비어 있을 수 없습니다.")
+    if not 0.0 < percentile <= 1.0:
+        raise ValueError("percentile은 0보다 크고 1 이하여야 합니다.")
+    ordered = sorted(values)
+    return ordered[math.ceil(percentile * len(ordered)) - 1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -376,20 +391,18 @@ async def _run(dsn: str, rows: int, iterations: int, skip_seed: bool) -> dict[st
                         f"response returned_rows={returned_rows}가 다름"
                     )
 
-                ordered = sorted(durations_ms)
-                p95 = ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
                 report["viewports"].append(
                     {
                         "name": viewport.name,
                         "matched_rows": matched_rows,
                         "returned_rows": returned_rows,
                         "minimum_returned_rows": viewport.min_returned_rows,
-                        "p50_ms": round(statistics.median(durations_ms), 2),
-                        "p95_ms": round(p95, 2),
+                        "p50_ms": round(_nearest_rank_percentile(durations_ms, 0.5), 2),
+                        "p95_ms": round(_nearest_rank_percentile(durations_ms, 0.95), 2),
                         "max_ms": round(max(durations_ms), 2),
-                        "shared_read_blocks_p95": sorted(shared_reads)[
-                            min(len(shared_reads) - 1, int(len(shared_reads) * 0.95))
-                        ],
+                        "shared_read_blocks_p95": _nearest_rank_percentile(
+                            shared_reads, 0.95
+                        ),
                         "response_bytes": response_bytes,
                         "top_node": plan_json.get("Node Type"),
                     }
