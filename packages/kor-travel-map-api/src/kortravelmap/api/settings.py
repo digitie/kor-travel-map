@@ -542,12 +542,15 @@ class ApiSettings(BaseSettings):
         ),
     )
     admin_destructive_enabled: bool = Field(
-        default=True,
+        default=False,
+        validation_alias="KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED",
         description=(
             "파괴적 ``/admin`` 작업(restore/swap/feature deactivate/POI cache target "
             "delete) 허용 여부 kill-switch(defense-in-depth). False면 해당 엔드포인트는 "
-            "403. 읽기/관측 전용 배포에서 내려 둔다. env "
-            "``KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED``."
+            "403. T-VN-H02로 기본값을 ``False``(fail-closed)로 내렸다 — 파괴적 작업이 "
+            "필요한 배포(Docker compose·n150 prod)는 env "
+            "``KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=true``를 설정해야 한다. 읽기/관측 "
+            "전용 배포는 기본값 그대로 둔다."
         ),
     )
     dagster_url: str = Field(

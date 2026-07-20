@@ -181,6 +181,9 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_PROFILE",
         "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
         "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
+        # T-VN-H02 — destructive kill-switch 기본값 fail-closed(False);
+        # compose가 컨테이너 기본 true를 주입해 기존 배포 동작을 유지한다.
+        "KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED",
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
         "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
         # ADR-066 결정 4 (T-VN-02) — /metrics scrape identity token도 같은

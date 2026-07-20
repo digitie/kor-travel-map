@@ -86,7 +86,7 @@ def session() -> _FakeSession:
 
 @pytest.fixture
 def client(session: _FakeSession) -> TestClient:
-    app = create_app(ApiSettings())
+    app = create_app(ApiSettings(admin_destructive_enabled=True))
 
     async def _fake_session() -> AsyncIterator[_FakeSession]:
         yield session

@@ -1111,3 +1111,31 @@ def test_destructive_admin_blocked_when_disabled() -> None:
         ).status_code
         == 403
     )
+
+
+@pytest.mark.unit
+def test_destructive_disabled_by_default_returns_403(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # T-VN-H02 — 기본값 fail-closed: env 미설정이면 파괴적 admin 작업은 403.
+    monkeypatch.delenv("KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED", raising=False)
+    settings = _api_settings()
+    assert settings.admin_destructive_enabled is False
+    client = _client(settings)
+    assert (
+        client.post(
+            "/v1/admin/features/f_x/deactivate", json={"reason": "test"}
+        ).status_code
+        == 403
+    )
+
+
+@pytest.mark.unit
+def test_destructive_enabled_via_env_allows_ops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 배포 전제: env로 명시 enable하면 파괴적 kill-switch를 통과한다.
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED", "true")
+    settings = _api_settings()
+    assert settings.admin_destructive_enabled is True
+    require_admin_destructive_enabled(_request(settings))

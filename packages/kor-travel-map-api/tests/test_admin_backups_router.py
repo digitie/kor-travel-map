@@ -46,6 +46,7 @@ def client(tmp_path: Path) -> TestClient:
     return TestClient(
         create_app(
             ApiSettings(
+                admin_destructive_enabled=True,
                 admin_proxy_secret=None,
                 backup_root=tmp_path,
                 backup_project_root=tmp_path,
@@ -106,6 +107,7 @@ def test_delete_backup_removes_artifact(tmp_path: Path) -> None:
     client = TestClient(
         create_app(
             ApiSettings(
+                admin_destructive_enabled=True,
                 admin_proxy_secret=None,
                 backup_root=tmp_path,
                 backup_project_root=tmp_path,
@@ -187,6 +189,7 @@ def test_execute_backup_uses_command_runner(
     _write_artifact(tmp_path, "manual")
     app = create_app(
         ApiSettings(
+            admin_destructive_enabled=True,
             admin_proxy_secret=None,
             backup_root=tmp_path,
             backup_project_root=tmp_path,
@@ -256,6 +259,7 @@ def test_execute_restore_swap_uses_command_runner(
     _write_artifact(tmp_path, "backup-1")
     app = create_app(
         ApiSettings(
+            admin_destructive_enabled=True,
             admin_proxy_secret=None,
             backup_root=tmp_path,
             backup_project_root=tmp_path,

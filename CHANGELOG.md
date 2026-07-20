@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### destructive admin 기본값 fail-closed (2026-07-20, T-VN-H02)
+
+- **SECURITY (breaking)**: `admin_destructive_enabled` 기본값을 `True`에서 `False`(fail-closed)로
+  내렸다. 파괴적 `/admin` 작업(restore/swap·feature deactivate·POI cache target·backup·offline
+  upload delete·managed file purge)은 `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=true`를 명시하지
+  않으면 403을 반환한다.
+- **FIXED**: 문서화된 env 이름 `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED`가 실제로 필드에
+  바인딩되도록 `validation_alias`를 추가했다. 기존에는 env prefix 규칙상 무시되던 이름이었다.
+- **DEPLOY (breaking)**: Docker compose는 컨테이너 기본 `true`를 주입해 기존 배포 동작을 유지한다.
+  n150 prod 등 파괴적 작업이 필요한 배포는 host env로 이 값을 유지해야 한다.
+
 ### Public weather·curation raw lineage clean-cut (2026-07-20, T-VN-59)
 
 - **SECURITY (breaking)**: public forecast row에서 `source_record_key`를 제거하고, public KMA

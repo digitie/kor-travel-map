@@ -126,6 +126,11 @@ services:
       # pair를 함께 사용하며 새 credential/env를 만들지 않는다(T-VN-03).
       KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED: ${KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED:-false}
       KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED: ${KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED:-true}
+      # ADR-066 T-VN-H02 — 파괴적 admin 작업(restore/swap·feature deactivate·POI
+      # cache target·backup·offline upload delete·managed file purge) 코드 기본값을
+      # fail-closed(False)로 내렸다. Docker 배포는 기존 동작 유지를 위해 컨테이너 기본
+      # true를 주입한다. 읽기/관측 전용 배포는 host env로 false를 명시 override한다.
+      KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED: ${KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED:-true}
       KOR_TRAVEL_MAP_API_DAGSTER_URL: ${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL:-http://dagster:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}}
       KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS: '${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_ALLOWED_HOSTS:-["dagster","127.0.0.1","localhost","::1"]}'
       KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET: ${KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET:?KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET is required}
