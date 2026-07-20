@@ -47,6 +47,7 @@ from kortravelmap.api.route_policy import RoutePolicy, RoutePolicyMatrixRow
 
 __all__ = [
     "CORS_ELIGIBLE_POLICIES",
+    "PUBLIC_CORS_EXPOSE_HEADERS",
     "PUBLIC_CORS_REQUEST_HEADERS",
     "CorsPublicRoute",
     "CorsSurfacePatterns",
@@ -67,8 +68,12 @@ PUBLIC_CORS_REQUEST_HEADERS: tuple[str, ...] = (
     "Accept-Language",
     "Content-Language",
     "Content-Type",
+    "If-None-Match",
     "X-Kor-Travel-Map-Api-Key",
 )
+
+#: public conditional GET에서 browser JavaScript가 읽을 수 있는 response header.
+PUBLIC_CORS_EXPOSE_HEADERS: tuple[str, ...] = ("ETag",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,15 +104,6 @@ class CorsSurfacePatterns:
             if route.pattern.match(path):
                 return route.methods
         return None
-
-    @property
-    def all_public_methods(self) -> tuple[str, ...]:
-        """내부 Starlette middleware에 줄 public method 합집합."""
-
-        return tuple(
-            sorted({method for route in self.public for method in route.methods})
-        )
-
 
 def build_cors_surface_patterns(
     matrix: Iterable[RoutePolicyMatrixRow],
@@ -159,14 +155,19 @@ class SurfaceScopedCORSMiddleware:
         self._allowed_header_names = frozenset(
             header.casefold() for header in PUBLIC_CORS_REQUEST_HEADERS
         )
-        # 내부 CORSMiddleware는 credential 모드를 켜지 않는다 — wildcard+credential
-        # 조합을 원천 차단한다(T-VN-H03).
-        self._cors = CORSMiddleware(
-            app,
-            allow_origins=list(allow_origins),
-            allow_methods=list(surface_patterns.all_public_methods),
-            allow_headers=list(PUBLIC_CORS_REQUEST_HEADERS),
-        )
+        # 성공 preflight도 matching route의 exact method만 광고해야 한다. method
+        # 집합별 middleware를 캐시해 전체 public method 합집합이 새지 않게 한다.
+        # credential 모드는 켜지 않는다(T-VN-H03).
+        self._cors_by_methods = {
+            route.methods: CORSMiddleware(
+                app,
+                allow_origins=list(allow_origins),
+                allow_methods=sorted(route.methods),
+                allow_headers=list(PUBLIC_CORS_REQUEST_HEADERS),
+                expose_headers=list(PUBLIC_CORS_EXPOSE_HEADERS),
+            )
+            for route in surface_patterns.public
+        }
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -200,4 +201,4 @@ class SurfaceScopedCORSMiddleware:
                 response = PlainTextResponse("Disallowed CORS request", status_code=400)
                 await response(scope, receive, send)
                 return
-        await self._cors(scope, receive, send)
+        await self._cors_by_methods[allowed_methods](scope, receive, send)

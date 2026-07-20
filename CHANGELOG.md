@@ -10,8 +10,9 @@
 - **SECURITY**: `create_app()`이 route 분류와 실제 dependency wiring을 함께 검증한다. public-keyed/
   operator miswire와 stale exception은 서버 startup을 실패시킨다.
 - **SECURITY (breaking)**: public CORS preflight는 route policy matrix의 실제 method와 CORS
-  safelist + `X-Kor-Travel-Map-Api-Key`만 허용한다. 다른 method/header는 400이며 ACAO를
-  내보내지 않는다. service/operator 표면의 CORS 비노출은 유지한다.
+  safelist + `If-None-Match` + `X-Kor-Travel-Map-Api-Key`만 허용하고, 성공 응답도 matching
+  route의 method만 광고한다. conditional GET의 `ETag`는 browser에 노출한다. 다른 method/header는
+  400이며 ACAO를 내보내지 않는다. service/operator 표면의 CORS 비노출은 유지한다.
 
 ### destructive admin 기본값 fail-closed (2026-07-20, T-VN-H02)
 

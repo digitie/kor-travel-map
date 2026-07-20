@@ -60,8 +60,9 @@ route의 실제 enforcing dependency가 정책과 일치하는지 startup에서 
 PUBLIC_KEYED/OPERATOR 오배선, stale exception ledger는 서버가 listen하기 전에 실패한다.
 
 브라우저 CORS는 public 표면에만 적용하고 route별 실제 HTTP method를 허용한다. request header는
-CORS safelist(`Accept`, `Accept-Language`, `Content-Language`, `Content-Type`)와
-`X-Kor-Travel-Map-Api-Key`만 허용한다. 다른 method나 admin/service credential header의
+CORS safelist(`Accept`, `Accept-Language`, `Content-Language`, `Content-Type`), conditional GET의
+`If-None-Match`, `X-Kor-Travel-Map-Api-Key`만 허용한다. public conditional GET 응답은 `ETag`를
+browser JavaScript에 노출한다. 다른 method나 admin/service credential header의
 preflight는 400이며 `Access-Control-Allow-Origin`을 내보내지 않는다. service/operator/metrics/
 debug 표면은 origin이 허용 목록에 있어도 CORS를 광고하지 않는다(T-VN-H03R).
 

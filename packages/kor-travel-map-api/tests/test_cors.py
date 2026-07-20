@@ -10,9 +10,18 @@ cross-origin이 아니다 — 따라서 CORS 불필요.
 from __future__ import annotations
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from kortravelmap.api.app import create_app
+from kortravelmap.api.cors import (
+    SurfaceScopedCORSMiddleware,
+    build_cors_surface_patterns,
+)
+from kortravelmap.api.route_policy import (
+    RoutePolicy,
+    RoutePolicyMatrixRow,
+)
 from kortravelmap.api.settings import ApiSettings
 
 ALLOWED_ORIGIN = "http://localhost:12705"
@@ -57,6 +66,82 @@ def test_public_keyed_preflight_gets_cors_for_allowed_origin(
         "x-kor-travel-map-api-key"
         in response.headers["access-control-allow-headers"].casefold()
     )
+
+
+@pytest.mark.unit
+def test_public_conditional_get_preflight_allows_exact_headers(
+    client: TestClient,
+) -> None:
+    response = client.options(
+        "/v1/features/example",
+        headers={
+            "Origin": ALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": (
+                "X-Kor-Travel-Map-Api-Key, If-None-Match"
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers[_ACAO] == ALLOWED_ORIGIN
+    assert response.headers["access-control-allow-methods"] == "GET"
+    allowed_headers = response.headers["access-control-allow-headers"].casefold()
+    assert "x-kor-travel-map-api-key" in allowed_headers
+    assert "if-none-match" in allowed_headers
+
+
+def _synthetic_public_row(
+    path: str,
+    methods: tuple[str, ...],
+) -> RoutePolicyMatrixRow:
+    return RoutePolicyMatrixRow(
+        path=path,
+        schema_path=path,
+        methods=methods,
+        is_websocket=False,
+        include_in_schema=True,
+        policy=RoutePolicy.PUBLIC_UNAUTHENTICATED,
+        observed_enforcement=(),
+    )
+
+
+@pytest.mark.unit
+def test_success_preflight_advertises_only_matching_route_methods() -> None:
+    app = FastAPI()
+    app.add_middleware(
+        SurfaceScopedCORSMiddleware,
+        surface_patterns=build_cors_surface_patterns(
+            (
+                _synthetic_public_row("/read", ("GET",)),
+                _synthetic_public_row("/write", ("POST",)),
+            )
+        ),
+        allow_origins=[ALLOWED_ORIGIN],
+    )
+    synthetic = TestClient(app)
+
+    read = synthetic.options(
+        "/read",
+        headers={
+            "Origin": ALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    write = synthetic.options(
+        "/write",
+        headers={
+            "Origin": ALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert read.status_code == 200
+    assert read.headers["access-control-allow-methods"] == "GET"
+    assert "POST" not in read.headers["access-control-allow-methods"]
+    assert write.status_code == 200
+    assert write.headers["access-control-allow-methods"] == "POST"
+    assert "GET" not in write.headers["access-control-allow-methods"]
 
 
 @pytest.mark.unit
