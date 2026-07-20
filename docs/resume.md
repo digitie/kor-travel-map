@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-20 (codex agent A) — T-VN-H08 Tier-2 p95 nearest-rank 산식 구현
+
+- issue #799를 독립 ext4 `fix/tier2-nearest-rank-p95` branch의 PR 단위 task로 열었다.
+- Tier-2 release harness의 percentile을 오름차순 nearest-rank로 단일화했다. 실행시간 p50·p95와
+  shared read blocks p95 모두 공용 helper를 사용하며 보간하지 않는다.
+- p95 경계 표본 `n=1/20/30/100`의 선택 index와 값을 단위 fixture로 고정했다.
+- 구현 diff는 단일 적대 리뷰에서 P0~P2 없이 테스트 승인을 받았다. 대상 unit 15개·integration
+  5개, Ruff, strict mypy·본 패키지 mypy, import-linter, `py_compile`, `git diff --check`가
+  통과했다.
+- **다음 한 작업**: 최신 main 재확인과 보안 감사를 거쳐 draft PR을 열고 CI를 확인한다.
+
 ## 2026-07-20 (codex agent B) — #741·#785·T-VN-15 targeted lane 구현·복구 계약 완결
 
 - draft PR #792를 최신 main 계열에 rebase하고, 기존 #741/#785 시나리오에 `T-VN-15`의

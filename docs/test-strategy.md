@@ -253,6 +253,9 @@ async def test_features_nearby_sql_uses_coord_5179_gist(pg_session, seeded_featu
 - `Shared Read Blocks`는 최상위 Plan의 누적값을 query 전체 정본으로 삼는다.
   root/child 단일 tree와 `Gather -> Append -> parallel child` fixture로 중복 합산이
   없음을 단위 테스트한다.
+- 실행시간 p50·p95와 shared read blocks p95는 표본을 오름차순 정렬한 뒤
+  nearest-rank `ceil(p × n) - 1`의 0-based index를 사용하고 보간하지 않는다. p95는
+  `n=1/20/30/100` fixture로 선택 index와 값을 함께 고정한다.
 
 ### 4.3 인덱스 빠짐 회귀 차단
 

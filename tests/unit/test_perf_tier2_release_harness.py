@@ -9,11 +9,48 @@ from scripts.perf_tier2_release_harness import (
     BenchmarkCardinalityError,
     _build_viewports,
     _count_matching_rows_sql,
+    _nearest_rank_percentile,
     _plan_returned_rows,
     _shared_read_blocks,
 )
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize(
+    ("sample_size", "expected_index", "expected_value"),
+    [
+        (1, 0, 1),
+        (20, 18, 19),
+        (30, 28, 29),
+        (100, 94, 95),
+    ],
+)
+def test_nearest_rank_p95_selects_expected_sorted_index_and_value(
+    sample_size: int,
+    expected_index: int,
+    expected_value: int,
+) -> None:
+    values = list(range(sample_size, 0, -1))
+    ordered = sorted(values)
+
+    assert ordered[expected_index] == expected_value
+    assert _nearest_rank_percentile(values, 0.95) == expected_value
+
+
+@pytest.mark.parametrize(
+    ("values", "percentile", "message"),
+    [
+        ([], 0.95, "표본은 비어"),
+        ([1], 0.0, "0보다 크고 1 이하"),
+        ([1], 1.01, "0보다 크고 1 이하"),
+    ],
+)
+def test_nearest_rank_percentile_rejects_invalid_input(
+    values: list[int], percentile: float, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _nearest_rank_percentile(values, percentile)
 
 
 def test_shared_read_blocks_uses_root_cumulative_total_with_single_child() -> None:
