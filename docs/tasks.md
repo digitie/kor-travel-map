@@ -51,7 +51,6 @@
   - [ ] `T-VN-54` — **weather partition·hypertable·event clock 측정**
   - [ ] `T-VN-55` — **물리 listener/process 분리 측정**
   - [ ] `T-VN-56` — **대규모 fixture 실행 주기 측정**
-  - [ ] `T-VN-H03` — **surface별 CORS 분리**
   - [ ] `T-VN-H04` — **PROJ pin·drift·REINDEX runbook**
   - [ ] `T-VN-H05` — **INVALID concurrent index 복구 runbook**
   - [ ] `T-VN-H06` — **admin 목록 keyset 전환**
@@ -436,11 +435,6 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
 ### 독립 하드닝 — 각 항목 PR 1개
 
 
-
-- [ ] T-VN-H03 — **surface별 CORS 분리**
-
-  public/service/operator surface별 origin·header·method 정책을 나누고 wildcard와 credential 조합을
-  거부한다.
 
 - [ ] T-VN-H04 — **PROJ pin·drift·REINDEX runbook**
 

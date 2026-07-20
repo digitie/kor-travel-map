@@ -1,4 +1,11 @@
-"""Admin frontend→API CORS 회귀."""
+"""surface별 CORS 분리 회귀 (T-VN-H03, ADR-066).
+
+browser-facing public 표면(public-unauthenticated·public-keyed)만 CORS를 받고,
+service/operator 표면은 CORS 헤더(``Access-Control-Allow-Origin``)를 내보내지
+않는지 검증한다. operator 표면은 admin frontend가 same-origin Next.js BFF
+(``/api/proxy``)로만 접근하고, service 표면은 server-to-server라 브라우저
+cross-origin이 아니다 — 따라서 CORS 불필요.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +15,10 @@ from fastapi.testclient import TestClient
 from kortravelmap.api.app import create_app
 from kortravelmap.api.settings import ApiSettings
 
+ALLOWED_ORIGIN = "http://localhost:12705"
+ARBITRARY_ORIGIN = "https://evil.example.com"
+_ACAO = "access-control-allow-origin"
+
 
 @pytest.fixture
 def client() -> TestClient:
@@ -15,25 +26,83 @@ def client() -> TestClient:
 
 
 @pytest.mark.unit
-def test_cors_allows_frontend_origin_on_surviving_read_route(client: TestClient) -> None:
-    response = client.get(
-        "/health",
-        headers={"Origin": "http://localhost:12705"},
-    )
+def test_public_unauthenticated_route_gets_cors_for_allowed_origin(
+    client: TestClient,
+) -> None:
+    response = client.get("/health", headers={"Origin": ALLOWED_ORIGIN})
 
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "http://localhost:12705"
+    assert response.headers[_ACAO] == ALLOWED_ORIGIN
 
 
 @pytest.mark.unit
-def test_cors_preflight_allows_canonical_admin_mutation(client: TestClient) -> None:
+def test_public_keyed_preflight_gets_cors_for_allowed_origin(
+    client: TestClient,
+) -> None:
+    # public-keyed read. preflight는 CORSMiddleware가 route/의존 실행 전에 직접
+    # 응답하므로 DB 없이도 검증된다.
     response = client.options(
-        "/v1/ops/datasets/preview",
+        "/v1/features",
         headers={
-            "Origin": "http://localhost:12705",
-            "Access-Control-Request-Method": "POST",
+            "Origin": ALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "GET",
         },
     )
 
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "http://localhost:12705"
+    assert response.headers[_ACAO] == ALLOWED_ORIGIN
+
+
+@pytest.mark.unit
+def test_public_route_does_not_reflect_arbitrary_origin(client: TestClient) -> None:
+    # 설정된 public origin 목록에 없는 origin은 public route라도 ACAO를 받지 못한다.
+    response = client.get("/health", headers={"Origin": ARBITRARY_ORIGIN})
+
+    assert response.status_code == 200
+    assert _ACAO not in response.headers
+
+
+@pytest.mark.unit
+def test_operator_route_gets_no_cors_for_allowed_origin(client: TestClient) -> None:
+    # admin BFF surface(operator) — same-origin proxy로만 접근하므로 브라우저
+    # cross-origin이 아니다. 설정된 public origin이라도 CORS를 광고하지 않는다.
+    response = client.options(
+        "/v1/ops/datasets/preview",
+        headers={
+            "Origin": ALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert _ACAO not in response.headers
+
+
+@pytest.mark.unit
+def test_operator_route_does_not_broadly_allow_arbitrary_origin(
+    client: TestClient,
+) -> None:
+    response = client.options(
+        "/v1/ops/datasets/preview",
+        headers={
+            "Origin": ARBITRARY_ORIGIN,
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.headers.get(_ACAO) != "*"
+    assert _ACAO not in response.headers
+
+
+@pytest.mark.unit
+def test_service_route_gets_no_cors(client: TestClient) -> None:
+    # service surface(``/v1/features/batch``, X-Kor-Travel-Map-Service-Token) —
+    # server-to-server라 브라우저 cross-origin이 아니다. CORS 헤더를 내보내지 않는다.
+    response = client.options(
+        "/v1/features/batch",
+        headers={
+            "Origin": ALLOWED_ORIGIN,
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert _ACAO not in response.headers
