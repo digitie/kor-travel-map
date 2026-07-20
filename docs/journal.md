@@ -2,7 +2,7 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
-## 2026-07-20 (codex) — T-VN-H11 ops-live 인증 close proxy flush 분석
+## 2026-07-20 (codex) — T-VN-H11 ops-live 인증 close 전달 보강
 
 - issue #809로 #806의 잔여 production 경계를 분리했다. 같은 n150 API 컨테이너에 LAN 직결한
   실제 Chromium은 ticket 없음과 변조 candidate를 모두 `4401`, data frame 0건으로 관측해
@@ -11,11 +11,17 @@
   Uvicorn 기본 `auto`는 `websockets-sansio`를 선택한다. 이 구현은 101을 쓴 직후 close frame을
   쓰고 transport를 닫는다.
 - 로컬 TCP tap에서 즉시 accept/close는 101과 close frame이 같은 backend read에 합쳐졌고,
-  accept 뒤 `asyncio.sleep(0)`을 두면 두 read로 분리됐다. deprecated legacy WebSocket 엔진
-  고정보다 protocol 독립적인 event-loop yield를 최소 수정으로 선택한다.
+  accept 뒤 `asyncio.sleep(0)`을 두면 두 read로 분리됐다. 이는 공개 proxy `1006`의 선행
+  가설이며 ASGI transport flush 보장은 아니므로, 배포 조합의 best-effort 완화와 실제
+  Uvicorn TCP·공개 Chromium 인수 검증을 함께 적용한다.
 - CodeGraph 영향도는 `_accept_and_close_best_effort`의 caller가
   `_rollback_and_accept_close` 하나이고 callee가 accept/close helper 둘뿐임을 확인했다.
-- 이 커밋은 문서-first 단계이며 테스트·lint는 실행하지 않았다.
+- draft PR #810의 첫 단일 적대 리뷰에서 event-loop yield의 비보장성, accept 뒤 취소 시
+  close 유실 가능성, accept 실패 fallback의 실서버 검증 부재, 문서의 원인 단정이 지적됐다.
+  close를 shield된 child task로 옮겨 outer cancellation에도 정확히 한 번 완료한 뒤 취소를
+  재전파하고, 실제 Uvicorn `websockets-sansio` TCP read 경계와 pre-handshake accept
+  timeout·예외의 HTTP 500 fallback 회귀를 추가했다.
+- 리뷰 반영 head의 동일 리뷰어 재승인 전이므로 테스트·lint는 아직 실행하지 않았다.
 
 ## 2026-07-20 (codex) — Chromium ops live 4401 관측 복구 구현
 

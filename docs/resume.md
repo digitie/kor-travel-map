@@ -1,16 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-20 (codex) — T-VN-H11 ops-live close flush 착수
+## 2026-07-20 (codex) — T-VN-H11 ops-live close 전달 회귀 보강 중
 
 - #806 수정 배포 뒤 n150 API 직결 Chromium은 ticket 없음과 형식이 유효한 변조
   subprotocol을 모두 data frame 없이 `4401`로 닫았지만, 공개 TLS HAProxy 경계에서는 C7
   인증 거절 spec이 계속 `1006`으로 실패했다.
 - 운영과 같은 Uvicorn `websockets-sansio`에서 즉시 `accept`→`close`하면 HTTP 101과 close
-  frame이 같은 transport read에 합쳐지고, 둘 사이에 `asyncio.sleep(0)`을 두면 별도 read로
-  분리됨을 확인했다. DB rollback이나 subprotocol 길이는 원인이 아니다.
-- **다음 한 작업**: #809의 문서-first draft PR에 accept 성공 확인·event-loop yield·close 순서와
-  accept 실패 회귀를 구현하고, 단일 적대 리뷰 승인 뒤 API 게이트와 n150 public strict C7을
-  다시 실행한다.
+  frame이 같은 backend read에 합쳐지고, 둘 사이에 `asyncio.sleep(0)`을 두면 별도 read로
+  분리됨을 확인했다. 공개 proxy의 `1006`과 이 coalescing의 인과관계는 아직 선행 가설이며,
+  ASGI가 transport drain 완료를 보장하지 않으므로 event-loop yield만으로 완료를 선언하지 않는다.
+- draft PR #810의 첫 적대 리뷰(P1 2건, P2 2건)를 반영해 accept 뒤 close를 cancellation-safe
+  child task로 수행하고, 취소 시 close 정확히 1회 후 `CancelledError`를 재전파하도록 보강했다.
+  실제 Uvicorn sansio TCP에서 handshake/close read 경계를 고정하고, accept timeout·예외가
+  pre-handshake HTTP 500 fallback으로 끝나는 회귀도 추가했다.
+- **다음 한 작업**: 수정 head를 동일 리뷰어가 다시 승인한 뒤 API 회귀·전체 gate와 CI를 실행하고,
+  n150 공개 Chromium strict C7을 반복해 `4401`·data frame 0건을 최종 검증한다.
 
 ## 2026-07-20 (codex) — T-ADM-C7W browser 4401 수정 검증
 

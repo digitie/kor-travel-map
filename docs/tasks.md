@@ -171,11 +171,14 @@ PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin
 #### T-VN-H11 — ops-live 인증 close의 proxy 전달 경계 분리 (#809)
 
 운영 Uvicorn `websockets-sansio`는 `websocket.accept`의 HTTP 101과 직후 application
-close frame을 같은 transport flush에 실을 수 있다. API 직결 Chromium은 `4401`을 보지만
-TLS HAProxy 경계에서는 101 뒤의 close가 전달되지 않아 `1006`으로 끝났다. accept 성공 뒤
-event loop에 한 번 제어를 양보해 handshake flush와 close frame을 분리하고, accept 실패에는
-close를 보내지 않는다. data frame 0건과 기존 인증·nonce·rollback 계약은 유지한다. 단위
-회귀, 단일 적대 리뷰, CI와 n150 공개 Chromium strict 재검증 뒤 완료한다.
+close frame을 같은 backend read에 실을 수 있다. API 직결 Chromium은 `4401`을 보지만 공개
+TLS proxy 경계에서는 `1006`으로 끝났으므로 이 coalescing을 선행 가설로 둔다. ASGI에는
+transport drain 확인 계약이 없으므로 accept 성공 뒤 event loop에 한 번 제어를 양보하는 것은
+배포 조합에 한정된 best-effort 완화이며, 실제 Uvicorn TCP 회귀와 n150 공개 Chromium 반복
+strict 결과를 최종 인수 기준으로 삼는다. accept 실패는 application close를 보내지 않고
+Uvicorn의 pre-handshake HTTP 500 fallback에 맡긴다. 이미 accept한 작업이 취소되면 close를
+정확히 한 번 끝낸 뒤 취소를 재전파하며, data frame 0건과 기존 인증·nonce·rollback 계약은
+유지한다. 단일 적대 리뷰, API 게이트와 CI까지 통과한 뒤 완료한다.
 
 #### T-VN-SYNC-02 — integration/t-vn → main 최종 합류
 

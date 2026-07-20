@@ -817,11 +817,22 @@ async def _accept_and_close_best_effort(
     accepted = await _accept_best_effort(websocket, subprotocol=subprotocol)
     if not accepted:
         return
-    # Uvicorn websockets-sansio는 같은 event-loop turn의 HTTP 101과 close frame을
-    # 한 transport flush로 합칠 수 있다. proxy가 handshake에서 tunnel로 전환할
-    # 기회를 준 뒤 close를 보내 browser-observable application code를 보존한다.
-    await asyncio.sleep(0)
-    await _close_best_effort(websocket, code=code, reason=reason)
+
+    async def _yield_then_close() -> None:
+        # ASGI에는 transport drain acknowledgement가 없다. close를 다음 loop turn에
+        # 예약해 Uvicorn sansio의 101/close coalescing을 best effort로 줄이고, exact
+        # proxy+Chromium live gate에서 최종 전달 계약을 검증한다.
+        await asyncio.sleep(0)
+        await _close_best_effort(websocket, code=code, reason=reason)
+
+    close_task = asyncio.create_task(_yield_then_close())
+    try:
+        await asyncio.shield(close_task)
+    except asyncio.CancelledError:
+        # 이미 accept한 연결은 outer cancellation에도 close를 한 번 끝낸 뒤 취소를
+        # 재전파한다. _close_best_effort 자체의 1초 timeout은 그대로 상한이다.
+        await close_task
+        raise
 
 
 async def _rollback_and_accept_close(
