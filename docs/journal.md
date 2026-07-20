@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex) — T-VN-H11 ops-live 인증 close proxy flush 분석
+
+- issue #809로 #806의 잔여 production 경계를 분리했다. 같은 n150 API 컨테이너에 LAN 직결한
+  실제 Chromium은 ticket 없음과 변조 candidate를 모두 `4401`, data frame 0건으로 관측해
+  인증 검증·DB rollback·Starlette endpoint 자체를 원인에서 제외했다.
+- 운영 설치 버전은 FastAPI 0.139.2, Starlette 0.52.1, Uvicorn 0.51.0, websockets 16.1.1이며
+  Uvicorn 기본 `auto`는 `websockets-sansio`를 선택한다. 이 구현은 101을 쓴 직후 close frame을
+  쓰고 transport를 닫는다.
+- 로컬 TCP tap에서 즉시 accept/close는 101과 close frame이 같은 backend read에 합쳐졌고,
+  accept 뒤 `asyncio.sleep(0)`을 두면 두 read로 분리됐다. deprecated legacy WebSocket 엔진
+  고정보다 protocol 독립적인 event-loop yield를 최소 수정으로 선택한다.
+- CodeGraph 영향도는 `_accept_and_close_best_effort`의 caller가
+  `_rollback_and_accept_close` 하나이고 callee가 accept/close helper 둘뿐임을 확인했다.
+- 이 커밋은 문서-first 단계이며 테스트·lint는 실행하지 않았다.
+
 ## 2026-07-20 (codex) — Chromium ops live 4401 관측 복구 구현
 
 - C7 strict 실행이 운영 쓰기 테스트 전에 두 번 동일하게 중단됐다. 두 실패 실행은 각각 exact

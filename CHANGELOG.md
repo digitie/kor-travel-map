@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### Ops live proxy close flush 분리 (2026-07-20, T-VN-H11 #809)
+
+- **FIXED**: 인증 거절 WebSocket의 HTTP 101 handshake와 `4401` close frame 사이에 명시적
+  event-loop yield를 둬 TLS reverse proxy가 둘을 서로 다른 transport flush로 전달할 수 있게
+  한다. ticket 없음·변조는 계속 data frame 없이 닫히며 인증과 nonce 계약은 바뀌지 않는다.
+- **RELIABILITY**: handshake accept가 실패하면 application close를 추가 전송하지 않는다.
+
 ### Ops live 브라우저 인증 거절 close 복구 (2026-07-20, T-ADM-C7W #806)
 
 - **FIXED**: 변조된 signed WebSocket subprotocol을 제시한 Chromium도 handshake 실패 `1006`
