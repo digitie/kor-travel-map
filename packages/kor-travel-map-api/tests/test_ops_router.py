@@ -47,22 +47,16 @@ def _live_subprotocol(
         "v": 1,
     }
     payload.update(payload_overrides or {})
-    payload_part = (
-        base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode())
-        .decode()
-        .rstrip("=")
-    )
-    signature = (
-        base64.urlsafe_b64encode(
-            hmac.new(
-                secret.encode(),
-                payload_part.encode(),
-                hashlib.sha256,
-            ).digest()
-        )
-        .decode()
-        .rstrip("=")
-    )
+    payload_part = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+    signature = base64.urlsafe_b64encode(
+        hmac.new(
+            secret.encode(),
+            payload_part.encode(),
+            hashlib.sha256,
+        ).digest()
+    ).decode().rstrip("=")
     return f"ktm.ops-live.v1.{payload_part}.{signature}"
 
 
@@ -162,7 +156,6 @@ def test_remaining_ops_routes_mounted_in_openapi(client: TestClient) -> None:
     } <= set(spec["paths"])
     assert "OpsMetricsResponse" in spec["components"]["schemas"]
 
-
 @pytest.mark.unit
 def test_ops_live_websocket_rejects_logged_out_connection(
     live_client: TestClient,
@@ -214,13 +207,10 @@ def test_ops_live_websocket_rejects_expired_ticket(
         expires_in_seconds=60,
     )
 
-    with (
-        live_client.websocket_connect(
-            "/v1/ops/live",
-            subprotocols=[protocol],
-        ) as websocket,
-        pytest.raises(WebSocketDisconnect) as exc_info,
-    ):
+    with live_client.websocket_connect(
+        "/v1/ops/live",
+        subprotocols=[protocol],
+    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
         websocket.receive_json()
 
     assert exc_info.value.code == 4408
@@ -280,7 +270,15 @@ def test_ops_live_ticket_verifier_rejects_invalid_contract(
         (f"ktm.ops-live.v1.{'A' * 2_048}.A", None),
         ("ktm.ops-live.v1.not-a-ticket", None),
     ],
-    ids=["none", "empty", "unrelated", "single", "multiple", "too-long", "malformed"],
+    ids=[
+        "none",
+        "empty",
+        "unrelated",
+        "single",
+        "multiple",
+        "too-long",
+        "malformed",
+    ],
 )
 def test_select_ops_live_subprotocol_requires_one_bounded_formatted_candidate(
     requested_protocols: str | None,
@@ -303,13 +301,10 @@ def test_ops_live_websocket_rejects_replayed_ticket(
         return False
 
     monkeypatch.setattr(live_mod, "claim_ops_live_ticket", _already_claimed)
-    with (
-        live_client.websocket_connect(
-            "/v1/ops/live",
-            subprotocols=[_live_subprotocol()],
-        ) as websocket,
-        pytest.raises(WebSocketDisconnect) as exc_info,
-    ):
+    with live_client.websocket_connect(
+        "/v1/ops/live",
+        subprotocols=[_live_subprotocol()],
+    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
         websocket.receive_json()
 
     assert exc_info.value.code == 4401
@@ -363,13 +358,10 @@ def test_ops_live_ticket_claim_timeout_rolls_back_and_closes_expired(
     monkeypatch.setattr(live_mod, "claim_ops_live_ticket", _wait_for_pool)
     monkeypatch.setattr(live_mod, "_remaining_lease_seconds", lambda _expires: 0.001)
 
-    with (
-        live_client.websocket_connect(
-            "/v1/ops/live",
-            subprotocols=[_live_subprotocol()],
-        ) as websocket,
-        pytest.raises(WebSocketDisconnect) as exc_info,
-    ):
+    with live_client.websocket_connect(
+        "/v1/ops/live",
+        subprotocols=[_live_subprotocol()],
+    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
         websocket.receive_json()
 
     assert exc_info.value.code == 4408
@@ -397,13 +389,10 @@ def test_ops_live_ticket_claim_timeout_bounds_rollback_before_expired_close(
     monkeypatch.setattr(live_mod, "_ROLLBACK_TIMEOUT_SECONDS", 0.001)
     monkeypatch.setattr(session, "rollback", _rollback_never_finishes)
 
-    with (
-        live_client.websocket_connect(
-            "/v1/ops/live",
-            subprotocols=[_live_subprotocol()],
-        ) as websocket,
-        pytest.raises(WebSocketDisconnect) as exc_info,
-    ):
+    with live_client.websocket_connect(
+        "/v1/ops/live",
+        subprotocols=[_live_subprotocol()],
+    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
         websocket.receive_json()
 
     assert exc_info.value.code == 4408
@@ -429,13 +418,10 @@ def test_ops_live_ticket_claim_failure_rolls_back_and_retries_later(
 
     monkeypatch.setattr(live_mod, "claim_ops_live_ticket", _fail_claim)
 
-    with (
-        live_client.websocket_connect(
-            "/v1/ops/live",
-            subprotocols=[_live_subprotocol()],
-        ) as websocket,
-        pytest.raises(WebSocketDisconnect) as exc_info,
-    ):
+    with live_client.websocket_connect(
+        "/v1/ops/live",
+        subprotocols=[_live_subprotocol()],
+    ) as websocket, pytest.raises(WebSocketDisconnect) as exc_info:
         websocket.receive_json()
 
     assert exc_info.value.code == 1013
@@ -924,8 +910,13 @@ def test_ops_live_sql_excludes_quarantined_import_jobs() -> None:
     assert "ops.provider_refresh_policies" in live_mod._PROVIDER_SYNC_LIVE_SQL
     assert "dataset_projection" in live_mod._DATASET_PROJECTION_LIVE_SQL
     assert "ops.dagster_schedule_overrides" in live_mod._DAGSTER_SCHEDULES_LIVE_SQL
-    assert "ops.dagster_schedule_audit_events" in live_mod._DAGSTER_SCHEDULES_LIVE_SQL
-    assert "ops.dagster_schedule_claim_resolutions" in live_mod._DAGSTER_SCHEDULES_LIVE_SQL
+    assert (
+        "ops.dagster_schedule_audit_events" in live_mod._DAGSTER_SCHEDULES_LIVE_SQL
+    )
+    assert (
+        "ops.dagster_schedule_claim_resolutions"
+        in live_mod._DAGSTER_SCHEDULES_LIVE_SQL
+    )
     assert "to_regclass" not in live_mod._DAGSTER_SCHEDULES_LIVE_SQL
     assert ops_live_auth._CLAIM_RETENTION_GRACE_SECONDS >= 60
     assert "retention_grace_seconds" in ops_live_auth._CLAIM_SQL
@@ -945,20 +936,34 @@ def test_ops_live_snapshot_sql_uses_total_ordering() -> None:
     dagster_run_sql = normalized(live_mod._DAGSTER_RUN_LIVE_SQL)
     request_sql = normalized(live_mod._FEATURE_UPDATE_REQUEST_LIVE_SQL)
 
-    assert "jsonb_agg(to_jsonb(j) ORDER BY j.created_at DESC, j.job_id DESC)" in import_jobs_sql
+    assert (
+        "jsonb_agg(to_jsonb(j) ORDER BY j.created_at DESC, j.job_id DESC)"
+        in import_jobs_sql
+    )
     assert "ORDER BY created_at DESC, job_id DESC LIMIT 20" in import_jobs_sql
-    assert "ORDER BY r.priority DESC, r.created_at ASC, r.request_id ASC" in requests_sql
+    assert (
+        "ORDER BY r.priority DESC, r.created_at ASC, r.request_id ASC"
+        in requests_sql
+    )
     assert (
         "ORDER BY request.priority DESC, request.created_at ASC, "
-        "request.request_id ASC LIMIT 20" in requests_sql
+        "request.request_id ASC LIMIT 20"
+        in requests_sql
     )
-    assert "jsonb_agg(to_jsonb(u) ORDER BY u.updated_at DESC, u.upload_id DESC)" in uploads_sql
+    assert (
+        "jsonb_agg(to_jsonb(u) ORDER BY u.updated_at DESC, u.upload_id DESC)"
+        in uploads_sql
+    )
     assert "ORDER BY updated_at DESC, upload_id DESC LIMIT 20" in uploads_sql
     assert (
         "jsonb_agg(DISTINCT j.run_id ORDER BY j.run_id) "
-        "FILTER (WHERE j.run_id IS NOT NULL)" in dagster_runs_sql
+        "FILTER (WHERE j.run_id IS NOT NULL)"
+        in dagster_runs_sql
     )
-    assert "jsonb_agg(to_jsonb(j) ORDER BY j.created_at DESC, j.job_id DESC)" in dagster_run_sql
+    assert (
+        "jsonb_agg(to_jsonb(j) ORDER BY j.created_at DESC, j.job_id DESC)"
+        in dagster_run_sql
+    )
     assert "ORDER BY created_at DESC, job_id DESC LIMIT 20" in dagster_run_sql
     assert "request.generation" in request_sql
     assert "request.matched_scope" in request_sql
@@ -1074,14 +1079,18 @@ def test_ops_live_rejects_non_uuid_resource_topic() -> None:
         live_mod._topics_from_value(["import_job:not-a-uuid"])
 
     with pytest.raises(ValueError, match="canonical UUID"):
-        live_mod._topics_from_value(["import_job:11111111111111111111111111111111"])
+        live_mod._topics_from_value(
+            ["import_job:11111111111111111111111111111111"]
+        )
 
 
 @pytest.mark.unit
 def test_ops_live_accepts_canonical_opaque_dagster_run_topic() -> None:
     from kortravelmap.api.routers import ops_live as live_mod
 
-    assert live_mod._topics_from_value(["dagster_run:  실행:지역/2026 run  "]) == {
+    assert live_mod._topics_from_value(
+        ["dagster_run:  실행:지역/2026 run  "]
+    ) == {
         "dagster_run:실행:지역/2026 run"
     }
 

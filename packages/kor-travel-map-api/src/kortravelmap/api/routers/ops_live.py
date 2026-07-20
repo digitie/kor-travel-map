@@ -716,7 +716,9 @@ async def _dagster_schedules_snapshot(session: AsyncSession) -> dict[str, Any]:
     row = await _row_mapping(session, _DAGSTER_SCHEDULES_LIVE_SQL)
     return {
         "audit_revision": int(row.get("audit_revision") or 0),
-        "claim_resolution_revision": int(row.get("claim_resolution_revision") or 0),
+        "claim_resolution_revision": int(
+            row.get("claim_resolution_revision") or 0
+        ),
         "override_count": int(row.get("override_count") or 0),
         "override_updated_at": _iso(row.get("override_updated_at")),
         "live_revision": int(row.get("live_revision") or 0),
@@ -1056,7 +1058,10 @@ async def ops_live(
         async with claim_timeout:
             claimed = await claim_ops_live_ticket(session, auth_context)
     except TimeoutError:
-        if claim_timeout.expired() or _remaining_lease_seconds(auth_context.expires_at) <= 0:
+        if (
+            claim_timeout.expired()
+            or _remaining_lease_seconds(auth_context.expires_at) <= 0
+        ):
             await _rollback_and_accept_close(
                 websocket,
                 session,
@@ -1158,7 +1163,9 @@ async def ops_live(
                     reason="ops live ticket expired",
                 )
                 return
-            remaining_lease_seconds = (auth_context.expires_at - now).total_seconds()
+            remaining_lease_seconds = (
+                auth_context.expires_at - now
+            ).total_seconds()
             try:
                 command = await _receive_command(
                     websocket,
