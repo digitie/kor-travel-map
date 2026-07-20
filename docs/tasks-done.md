@@ -3,6 +3,16 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## vNext 독립 하드닝 — ops-live 인증 close proxy 경계 (2026-07-20, `T-VN-H11`)
+
+- [x] **T-VN-H11 ops-live 인증 close의 proxy 전달 경계 분리** (#809, PR #807·#810) — 운영
+  Uvicorn `websockets-sansio`가 `websocket.accept`의 HTTP 101과 직후 application close frame을
+  같은 backend read에 coalesce해 공개 TLS proxy 경계에서 `4401` 대신 `1006`으로 끝나던 경로를
+  분리했다. accept 성공 뒤 bounded settle window로 close를 정확히 한 번 flush하고(#810 handshake
+  후 flush 보강), accept 실패는 Uvicorn pre-handshake HTTP 500 fallback에 맡긴다. accept~close를
+  하나의 bounded child task로 보호해 handoff 취소·반복 취소에도 성공한 accept의 close를 정확히
+  한 번 끝낸 뒤 취소를 재전파하며, data frame 0건과 기존 인증·nonce·rollback 계약을 유지한다.
+
 ## vNext 독립 하드닝 — public API key header 전환 (2026-07-20, `T-VN-H01`, integration/t-vn)
 
 - [x] **T-VN-H01 public API key를 URL query에서 header로 이동** (#794) — 공개 REST API key를

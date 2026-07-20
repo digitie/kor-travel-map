@@ -33,7 +33,6 @@
     (agent B, draft PR #792; 단일 적대 리뷰·gate·n150 live·issue close 대기)
   - [ ] `T-VN-H03R` — **route wiring startup gate·public CORS exact preflight 완결**
     (#798, T-VN-H03 적대 리뷰 후속)
-  - [ ] `T-VN-H11` — **ops-live 인증 close의 proxy 전달 경계 분리** (#809)
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
     `T-VN-16` weather batch와 부모 404.
@@ -167,19 +166,6 @@ ADR-066~075다. **`T-VN-00`은 별도 task가 아니라 `T-ADM-C6c`의 별칭**�
 PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin/main`에 rebase한다.
 각 코드 PR은 테스트 전에 적대적 리뷰어 1명의 리뷰를 반영한다. 문서 전용·rebase-only·단순
 변수명/import 정렬 변경은 추가 적대적 재리뷰 대상이 아니다.
-
-#### T-VN-H11 — ops-live 인증 close의 proxy 전달 경계 분리 (#809)
-
-운영 Uvicorn `websockets-sansio`는 `websocket.accept`의 HTTP 101과 직후 application
-close frame을 같은 backend read에 실을 수 있다. API 직결 Chromium은 `4401`을 보지만 공개
-TLS proxy 경계에서는 `1006`으로 끝났으므로 이 coalescing을 선행 가설로 둔다. ASGI에는
-transport drain 확인 계약이 없으므로 accept 성공 뒤 10ms의 bounded settle window를 두는 것은
-배포 조합에 한정된 best-effort 완화이며, 실제 Uvicorn TCP 반복 회귀와 n150 공개 Chromium 반복
-strict 결과를 최종 인수 기준으로 삼는다. accept 실패는 application close를 보내지 않고
-Uvicorn의 pre-handshake HTTP 500 fallback에 맡긴다. accept부터 close까지 하나의 bounded
-child task로 보호해 handoff 중 취소와 반복 취소에도 성공한 accept의 close를 정확히 한 번
-끝낸 뒤 취소를 재전파하며, data frame 0건과 기존 인증·nonce·rollback 계약은
-유지한다. 단일 적대 리뷰, API 게이트와 CI까지 통과한 뒤 완료한다.
 
 #### T-VN-SYNC-02 — integration/t-vn → main 최종 합류
 
