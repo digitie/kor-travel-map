@@ -12,13 +12,10 @@
 > **ADR-054 적용 완료**: public 배포명은 `kor-travel-map`, Python import root는
 > `kortravelmap`이다. 구 import root용 호환 shim은 없다.
 
-> **2026-07-18 계약 차단(PR #730 재검증에서 확정)**: KTM PR #724가 legacy admin ops API를
-> 삭제했지만 PinVi
-> `origin/main@48085afb`의 admin server는 삭제된 경로를 계속 호출한다. KTM 최신 main과 같은
-> 버전으로 배포하면 provider-sync proxy는 upstream 404를 반환하고 ETL summary는 degraded/down으로
-> 축약된다. 새 canonical ops는 frontend BFF gate라 경로만 교체해도 403이다. `T-ADM-C6c`에서
-> PinVi caller·contract test와 명시적 service/operator principal을 먼저 복구하기 전
-> `T-ADM-C7` 배포를 진행하지 않는다.
+> **2026-07-20 현재 계약**: KTM PR #724의 legacy admin ops clean-cut 뒤 PinVi caller는
+> `/v1/ops/datasets`·`/v1/ops/pipeline`으로 전환됐고, cross-repo 호출은 frontend BFF secret이
+> 아니라 route·method에 결박된 service/operator principal을 사용한다. 삭제된 경로는 alias로
+> 복원하지 않는다. 코드 병합과 production 활성화·live 검증은 별도 gate로 추적한다.
 
 ## 1. 시스템·포트
 
@@ -46,7 +43,7 @@
                                   │                     + /weather/* forecast/history)
                                   │                  ◀──(admin: /v1/admin/features*
                           [PinVi web :9022]          — 사용자 제안 승인 반영, ADR-051;
-                                                       ops caller는 T-ADM-C6c 전환 대기)
+                                                       ops: canonical datasets/pipeline)
 
 [kor-travel-docker-manager] ═══ 인프라 계층(별도 데이터 흐름 없음): PostGIS(5432)·RustFS(12101) 구동/관리
 [kor-travel-docker-manager Prometheus :12401] ┄┄(목표: Authorization Bearer metrics token으로
@@ -55,10 +52,10 @@
 ```
 
 - PinVi ↔ kor-travel-map: **HTTP만**(라이브러리 import·공유 DB 없음, ADR-045/PinVi ADR-026).
-- PinVi admin ops: 목표 계약은 `/v1/ops/datasets`·`/v1/ops/pipeline`이다. 삭제된
+- PinVi admin ops의 현재 계약은 `/v1/ops/datasets`·`/v1/ops/pipeline`이다. 삭제된
   `/v1/ops/dagster/summary`·`/v1/ops/providers*`·`/v1/ops/import-jobs*`는 alias로 부활시키지
-  않고 PinVi caller를 전환한다. KTM frontend 전용 BFF secret·trusted CIDR을 PinVi에 공유하거나
-  넓히지 않으며 server-to-server용 최소 service/operator principal을 별도로 둔다.
+  않는다. KTM frontend 전용 BFF secret·trusted CIDR을 PinVi에 공유하거나 넓히지 않으며
+  server-to-server용 최소 service/operator principal을 별도로 둔다.
 - service principal은 `X-Kor-Travel-Map-Ops-Token`과 권한 설명용
   `X-Kor-Travel-Map-Ops-Scope`를 함께 보낸다. read secret은 canonical datasets/pipeline의
   `GET` + `ops:read`, cancel secret은
@@ -100,9 +97,9 @@
   만든 기존 cursor를 즉시 무효화하므로 배포 창의 허용 동작으로 기록하며, local-dev의
   process-local fallback은 재시작·multi-worker 간 cursor 연속성을 보장하지 않는다.
 
-| PinVi 현재 용도 | 삭제된 KTM 호출 | canonical 전환 대상 | 필수 의미 변환 |
+| PinVi 용도 | 폐기된 KTM 호출 | 현재 canonical 호출 | 적용된 의미 변환 |
 |---|---|---|---|
-| ETL/Dagster summary | `GET /v1/ops/dagster/summary` | `GET /v1/ops/pipeline/overview` | 새 overview DTO로 PinVi summary 재조립; `/v1/ops/metrics`는 잔여 무게이트를 닫기 전 별도 취급 |
+| ETL/Dagster summary | `GET /v1/ops/dagster/summary` | `GET /v1/ops/pipeline/overview` | 새 overview DTO로 PinVi summary 재조립; 관측 metrics는 별도 `ops:read` 인증 표면 |
 | provider/dataset 상태 | `GET /v1/ops/providers*` | `GET /v1/ops/datasets`, `GET /v1/ops/datasets/detail` | provider-only 행을 provider×dataset×exact-scope projection으로 교체 |
 | import job 목록 | `GET /v1/ops/import-jobs` | `GET /v1/ops/pipeline/executions?kind=import_job` | legacy job envelope를 root execution timeline·cursor 계약으로 교체 |
 | import job 취소 | `POST /v1/ops/import-jobs/{id}/cancel` | `POST /v1/ops/pipeline/executions/import_job/{id}/cancel` | body operator 제거, 인증 principal actor + reason만 전달 |
@@ -122,22 +119,25 @@
 
 | 표면 | 현재 인증 경계 | 성공 envelope | 에러 |
 |---|---|---|---|
-| kor-travel-map 공용 read (`/v1/features*` GET 등) | `public_api_key_required=true`일 때 public key. 현재 기본은 opt-out이며 일부 curated read는 dependency가 다르다 | `{data, meta}` — `meta.page.next_cursor` | RFC7807 `problem+json`(top-level `code`) |
+| kor-travel-map 공용 read (`RoutePolicy.PUBLIC_KEYED`) | production에서 `X-Kor-Travel-Map-Api-Key` 또는 `X-Kor-Travel-Map-Service-Token`. URL `key` query는 폐기됐고 full/user OpenAPI는 route policy에서 같은 OR 계약을 생성한다 | `{data, meta}` — `meta.page.next_cursor` | RFC7807 `problem+json`(top-level `code`) |
 | kor-travel-map service read (`POST /v1/features/batch`) | 설정 시 `X-Kor-Travel-Map-Service-Token`; 미설정은 현재 하위호환 통과(목표는 production fail-closed) | 〃 (`data={found{},missing[]}`) | 〃 |
 | kor-travel-map admin + canonical ops (`/v1/admin/*`·`/v1/ops/{datasets,pipeline}*`) | same-origin Next.js BFF의 proxy secret + actor + trusted peer CIDR. Docker는 secret 필수·frontend 단일 `/32` | 〃 | 〃 |
 | kor-travel-map ops live WebSocket | BFF가 발급한 짧은 수명 HMAC subprotocol ticket + DB nonce 단일 소비 + bounded lease | WebSocket event frame | 인증/만료는 data frame 없이 close 4401/4408 |
-| kor-travel-map Prometheus `/metrics` | `KOR_TRAVEL_MAP_API_METRICS_TOKEN` 설정 시 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) — production은 token 필수. **목표**: docker-manager Prometheus가 인증 헤더로 12701 scrape(현재 그 job 없음 — 배포 시 `authorization`(Bearer)와 함께 신규 추가, scrape config→token 순서) | Prometheus exposition | 비-Bearer/불일치 401 |
-| kor-travel-map 관측/debug 잔여 (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep}`, `/v1/debug/mois-license/*`) | **T-VN-03 목표**: ops는 AdminBFF 또는 `OpsToken+OpsScope(ops:read)`, MOIS raw는 production unmount + local-dev AdminBFF/operator gate. PinVi issue #392/PR #393 소비자 선전환과 동일 cutover 전까지 현행 무의존 route 노출 금지 | 표면별 기존 envelope | RFC7807 `problem+json` |
+| kor-travel-map Prometheus `/metrics` | production 필수 `KOR_TRAVEL_MAP_API_METRICS_TOKEN`의 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) | Prometheus exposition | 비-Bearer/불일치 401 |
+| kor-travel-map 관측 ops (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep}`) | AdminBFF 또는 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:read` | 표면별 기존 envelope | RFC7807 `problem+json` |
+| kor-travel-map raw debug (`/v1/debug/mois-license/*`) | production에서는 route 자체를 mount하지 않는다. local-dev에서만 mount하며 AdminBFF 인증을 요구한다 | 표면별 기존 envelope | RFC7807 `problem+json` |
 | kor-travel-concierge export (`/api/v1/features/*`) | DB `read` scope `X-API-Key` | **무-envelope** `{items, next_cursor, has_more}` (내부 export 단순 계약) | HTTP status |
 | PinVi 자체 API (`:9021`) | 쿠키 세션/OAuth | PinVi 자체 `Envelope` | PinVi 자체 |
 
 좌표는 전 구간 WGS84 평면 `lon`/`lat`(lon-first), bbox는 분리 4-float
 `min_lon/min_lat/max_lon/max_lat`(ADR-048 #10 — cross-repo 정본).
 
-### 3.1 vNext PinVi 조건부 cutover
+### 3.1 vNext PinVi 단계적 cutover
 
-ADR-073 목표 REST는 문서에 채택됐지만 아직 현재 OpenAPI/운영 계약이 아니다. PinVi 변경은 다음
-compatible pair가 모두 준비된 뒤에만 활성화한다.
+ADR-073의 공개 조회·검색 계약과 canonical ops principal 등 Wave 0~1 일부는 현재 OpenAPI와
+코드에 반영됐다. service batch·weather·cache target 등 미완 항목은 각 T-VN task와 PinVi
+consumer가 함께 준비된 compatible pair에서만 활성화한다. 어느 항목이 현재 계약인지는 항상
+배포 source와 함께 고정한 OpenAPI SHA를 기준으로 판단한다.
 
 Production C6c compatible-pair manifest의 정본은 docker-manager의 version 4다.
 active/rollback 각 pair는 Map API·UI·Dagster web·Dagster daemon image ID 네 개,

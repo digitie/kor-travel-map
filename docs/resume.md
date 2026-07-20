@@ -21,6 +21,21 @@
 - **다음 한 작업**: CI green을 확인하고 n150 공개 Chromium strict C7을 반복해 ticket 없음·변조
   모두 `4401`·data frame 0건을 최종 검증한다.
 
+## 2026-07-20 (codex) — PR #732 설계 정본·active backlog 동기화
+
+- PR #790 이후 current contract를 문서 전반에 반영했다. public API key는
+  `X-Kor-Travel-Map-Api-Key` header-only이고, canonical ops caller는 datasets/pipeline과
+  route·method 결박 principal을 사용한다. 관측 ops 인증과 production debug unmount도 현재
+  route policy에 맞췄다.
+- 구현 완료 task 7건(`T-VN-SYNC-02`·`T-VN-57`·`T-VN-59`·`T-VN-H02R`·`T-VN-H03R`·
+  `T-VN-H08`·`T-VN-H09`)을 `tasks-done.md`로 옮겼다. issue #805는 non-blocking
+  `T-VN-H10`으로 active backlog에 추가했다.
+- 이 문서 정리는 n150 live 성공을 주장하지 않는다. `T-ADM-C6c`·`T-ADM-C7*`,
+  `T-VN-03`·`T-VN-04A`·`T-VN-15`·`T-VN-58`·`T-VN-LIVE-01`은 exact compatible-pair와
+  production live 증거가 확보될 때까지 열린 상태다.
+- **다음 한 작업**: 별도 운영 lane에서 exact attestation을 다시 만들고 n150 strict·targeted
+  live gate를 실행한다. 성공 증거를 확보한 뒤에만 대응 task와 issue를 닫는다.
+
 ## 2026-07-20 (codex) — T-ADM-C7W browser 4401 수정 검증
 
 - C7 strict의 두 실패는 운영 쓰기 이전 auth probe 경계였고, 실패 증거를 보존한 복구와 residue

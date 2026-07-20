@@ -3,6 +3,7 @@
 - 상태: accepted
 - 날짜: 2026-06-23
 - 개정: ADR-066 — production fail-closed route policy와 principal-only actor
+- 개정: T-VN-H01/PR #794 — public API key를 header-only로 clean-cut
 
 ## 맥락
 
@@ -54,3 +55,14 @@ Next API proxy, backend trusted-proxy header, VWorld 호환 public API key로 �
 다만 production에서 secret 미설정 통과는 폐기하고, 모든 route를 policy matrix로 분류하며,
 감사 actor는 검증된 proxy principal에서만 파생한다. body actor와 production opt-out은 더 이상
 계약이 아니다.
+
+## 개정 (2026-07-20, T-VN-H01/PR #794)
+
+결정 6의 public REST `key` query parameter는 폐기한다. `RoutePolicy.PUBLIC_KEYED` operation은
+`X-Kor-Travel-Map-Api-Key` header 또는 `X-Kor-Travel-Map-Service-Token`만 받으며, URL query
+호환 경로는 두지 않는다. OpenAPI `PublicApiKey` security scheme도 `in: header`와 같은 header
+이름을 사용한다. 이 변경은 access log·browser history·Referer에 credential이 남는 경로를
+제거한다.
+
+결정 7은 kor-travel-map이 외부 `kor-travel-geo` API를 호출할 때 따르는 별도 공급자 계약이므로
+이 개정의 대상이 아니다.

@@ -13,26 +13,20 @@
   - [ ] `T-ADM-C7F` — **prod PostGIS topology 객체의 Alembic check 오탐 제거**
   - [ ] `T-ADM-C7W` — **Chromium ops live 인증 거절 close code 복구** (#806)
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
-- **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
-  - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
-  - [ ] `T-VN-57` — **public route policy·OpenAPI security·user surface 단일 정본** (#784)
-  - [ ] `T-VN-59` — **public weather·curation raw lineage 계약 분리**
-    (#786, T-VN-SYNC-02 적대적 리뷰 blocker)
+- **진행 중 — vNext 재설계**
   - [ ] `T-VN-03` — **잔여 운영 read·debug·public-key gate**
     ([설계](reports/t-vn-03-route-gate-cutover-2026-07-19.md), PinVi issue
     [#392](https://github.com/digitie/pinvi/issues/392)). curated GET 4개는 public key,
     ops 관측 GET 6개는 operator, MOIS raw debug는 local-dev mount+operator로 clean-cut한다.
-    PR #782는 integration, PinVi PR #393과 docker-manager PR #64는 각 main에 병합됐으며,
-    exact pair activation과 n150 live 전까지 active로 유지한다.
+    구현은 PR #790으로 main에 합류했고 PinVi PR #393과 docker-manager PR #64도 각 main에
+    병합됐으며, exact pair activation과 n150 live 전까지 active로 유지한다.
   - [ ] `T-VN-04A` — **admin 비공개 feature 공간 조회·카드 표면 복원**
-    (#741, PR #779 integration 병합·n150 live 대기)
+    (#741, PR #790 main 합류·n150 live 대기)
   - [ ] `T-VN-15` — **search total과 HMAC cursor fingerprint**
-    (PR #780 integration 병합·n150 live 대기)
+    (PR #790 main 합류·n150 live 대기)
   - [ ] `T-VN-58` — **correction 편집 기준 ETag 고정** (#785)
   - [ ] `T-VN-LIVE-01` — **#741/#785/T-VN-15 targeted production 인수**
-    (agent B, draft PR #792; 단일 적대 리뷰·gate·n150 live·issue close 대기)
-  - [ ] `T-VN-H03R` — **route wiring startup gate·public CORS exact preflight 완결**
-    (#798, T-VN-H03 적대 리뷰 후속)
+    (PR #792 main 병합; n150 live·issue close 대기)
   - [ ] `T-VN-H11` — **ops-live 인증 close의 proxy 전달 경계 분리** (#809)
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
@@ -57,8 +51,7 @@
   - [ ] `T-VN-56` — **대규모 fixture 실행 주기 측정**
   - [ ] `T-VN-H06` — **admin 목록 keyset 전환**
   - [ ] `T-VN-H07` — **PinVi field-level contract와 OpenAPI SHA 검증**
-  - [ ] `T-VN-H08` — **Tier-2 p95 nearest-rank 산식 정확화** (#799)
-  - [ ] `T-VN-H09` — **weather semantic upsert collected_at 단조성** (#797)
+  - [ ] `T-VN-H10` — **C7 origin IPv6 bracket·default-port canonicalization** (#805)
 - **보류/결정 대기**
   - [ ] `T-101` — **Materialized View 도입 검토**
 
@@ -166,7 +159,8 @@ ADR-066~075다. **`T-VN-00`은 별도 task가 아니라 `T-ADM-C6c`의 별칭**�
 중복 생성하지 않는다. 같은 wave에서 의존성이 없는 task는 agent A/B가 병렬 수행하되
 PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin/main`에 rebase한다.
 각 코드 PR은 테스트 전에 적대적 리뷰어 1명의 리뷰를 반영한다. 문서 전용·rebase-only·단순
-변수명/import 정렬 변경은 추가 적대적 재리뷰 대상이 아니다.
+변수명/import 정렬 변경은 추가 적대적 재리뷰 대상이 아니다. `integration/t-vn`의 최종
+합류는 PR #790으로 끝났으므로 후속 task PR은 `main`을 base로 한다.
 
 #### T-VN-H11 — ops-live 인증 close의 proxy 전달 경계 분리 (#809)
 
@@ -180,45 +174,6 @@ Uvicorn의 pre-handshake HTTP 500 fallback에 맡긴다. accept부터 close까�
 child task로 보호해 handoff 중 취소와 반복 취소에도 성공한 accept의 close를 정확히 한 번
 끝낸 뒤 취소를 재전파하며, data frame 0건과 기존 인증·nonce·rollback 계약은
 유지한다. 단일 적대 리뷰, API 게이트와 CI까지 통과한 뒤 완료한다.
-
-#### T-VN-SYNC-02 — integration/t-vn → main 최종 합류
-
-`T-VN-03` PR #782와 이 문서 추적 PR까지 `integration/t-vn`에 병합한 exact head를 `main`으로
-합류시키는 독립 PR이다. 공유 integration branch는 rebase하지 않고 GitHub PR의
-`base=main`, `head=integration/t-vn`로 전체 ancestry를 보존한다.
-
-- [ ] PR 생성 직전에 `origin/main`을 integration에 merge해 conflict를 해소하고,
-  `T-VN-03`·`T-VN-04A`·`T-VN-15` 코드와 문서가 같은 tree에 있는지 확인한다.
-- [ ] Alembic `0058 → 0059 → 0060 → 0061 → 0062` 단일 head, admin/user OpenAPI drift 0건,
-  unit·PostGIS integration·fixture replay·Python 3버전·frontend type/build를 CI 8개 green으로
-  증명한다.
-- [ ] 코드 통합 diff는 단일 적대 리뷰어 승인을 받고, exact source revision을 고정한 merge
-  commit으로 main에 합류한다. 문서 전용 후속은 추가 적대 재리뷰를 요구하지 않는다.
-- [ ] `T-VN-57`이 runtime route policy와 full/user OpenAPI security·user operation을
-  양방향 전수 대조한 뒤에만 최종 합류한다.
-- [ ] main 합류 뒤 PinVi PR #393과 docker-manager PR #64의 exact revision을 포함한 C6c
-  compatible-pair v4를 capture하고, n150 C7 live E2E 전에는 `T-VN-03`·`T-VN-04A`·
-  `T-VN-15`를 완료 아카이브하지 않는다.
-
-#### T-VN-57 — public route policy·OpenAPI security·user surface 단일 정본 (#784)
-
-T-VN-SYNC-02 적대적 통합 리뷰에서 production runtime의 public-key gate와 기계 계약 사이의
-구조적 drift를 확인했다. `RoutePolicy.PUBLIC_KEYED` 29개 GET은 runtime에서
-`require_public_api_key`를 적용하지만 full OpenAPI는 curated 4개만
-`PublicApiKey OR ServiceToken`을 선언해 25개가 무인증으로 기술된다. user OpenAPI도 노출한
-public-keyed 27개 중 같은 4개만 선언해 23개가 누락된다.
-
-- [ ] `ROUTE_POLICIES`와 조립된 route metadata를 runtime·full OpenAPI security·user surface의
-  단일 정본으로 사용하고 `_PUBLIC_CURATED_PATHS`·`USER_OPERATIONS` 수기 path 정본을 제거한다.
-- [ ] 모든 `PUBLIC_KEYED` operation은 `PublicApiKey OR ServiceToken`,
-  `PUBLIC_UNAUTHENTICATED`는 무인증, `SERVICE`는 service scheme으로 정확히 선언한다. trusted
-  Admin BFF의 내부 우회는 public consumer 계약에 노출하지 않는다.
-- [ ] runtime policy ↔ full spec ↔ user spec을 양방향 전수 비교해 path 누락·과포함·method drift와
-  잘못된 security를 CI에서 거부한다. full/user OpenAPI와 admin/user 생성 TypeScript도 같은
-  정본에서 재생성한다.
-- [ ] DB schema·REST path·DTO·runtime 인증 의미는 바꾸지 않는다. exact 구현 diff는 단일 적대
-  리뷰어가 승인한 뒤에만 test/lint/build/OpenAPI/frontend gate를 실행하고, 완료 전
-  T-VN-SYNC-02를 병합하지 않는다.
 
 #### Lane 분배 (2026-07-19, issue #738)
 
@@ -236,32 +191,6 @@ migration 정본은 `0058 → 0059 → 0060 → 0061 → 0062` 단일 chain이�
 PR 직전 `0062` 단일 head를 재확인한 뒤 번호를 배정한다. Wave 2(T-VN-31~40)는 열린 lane을
 소화한 뒤 재분배한다. 같은 파일 충돌 시 먼저 머지된 쪽이 우선하고 나중 PR이 rebase한다.
 
-**통합 브랜치 규율**: `T-ADM-C7` 종결 전까지 모든 T-VN task PR(a·b lane 공통)의 base는
-main이 아니라 **`integration/t-vn`**이다. task branch → `integration/t-vn` PR(CI green 후
-머지)로 쌓고, main의 변경은 주기적으로 `integration/t-vn`에 merge해 동기화한다
-(공유 브랜치이므로 rebase 금지). C7 종결 후 `integration/t-vn` → main PR 1건으로 합류하며,
-그 전에는 T-VN 변경이 main에 직접 들어가지 않는다. CI workflow 4종은
-`integration/t-vn` 대상 push/PR에도 동일하게 실행된다.
-
-#### T-VN-59 — public weather·curation raw lineage 계약 분리 (#786)
-
-T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 feature detail에만
-적용되고 public weather·curation reachable schema에는 적용되지 않은 것이 확인됐다.
-호환 alias 없이 공개 DTO와 operator DTO를 분리한다.
-
-- [ ] public forecast row에서 `source_record_key`를 제거한다. 기상특보 public row는 도메인
-  필드와 발표·유효 시각만 반환하고 `source_record_key`, provider 원문 `payload`,
-  `fetched_at`·`imported_at`·`last_seen_at`을 반환하지 않는다.
-- [ ] 특보 raw lineage는 admin BFF가 인증하는 operator endpoint에서 별도 raw DTO로 제공한다.
-  forecast lineage는 기존 feature source/observation operator 표면으로 추적한다.
-- [ ] public curation item은 `source_record_key`와 자유형 `metadata`를 반환하지 않는다.
-  admin collection/item DTO는 두 필드를 보존하며 public DTO를 상속하지 않는다.
-- [ ] `openapi.user.json`의 각 operation response에서 재귀적으로 도달 가능한 schema를 순회해
-  `source_record_key`, `raw_data`, `raw_payload_hash`, raw `payload`, curation item `metadata`,
-  ingestion timestamp가 공개 경계로 다시 들어오면 실패하는 계약 테스트를 둔다.
-- [ ] full/user OpenAPI, admin/user 생성 TypeScript와 수기 public curation client를 같은
-  변경에서 갱신한다. DB 저장 구조는 바꾸지 않는다.
-
 ### Wave 0 — P0, 즉시 가역
 
 - [ ] T-VN-03 — **잔여 운영 read·debug·public-key gate**
@@ -270,11 +199,11 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
   public-keyed로 옮긴다. 삭제 route는 복원하지 않는다.
 
   - [x] Map route gate와 user OpenAPI/생성 client를 단일 적대 리뷰와 CI 8개 green 뒤 PR #782로
-    `integration/t-vn@226f81c2`에 병합했다.
+    `integration/t-vn@226f81c2`에 병합하고 PR #790으로 main에 합류했다.
   - [x] PinVi principal caller PR #393과 docker-manager production env PR #64를 각각 main에
     병합해 배포 source 조합을 준비했다.
-  - [ ] T-VN-SYNC-02로 Map main에 합류하고 exact compatible-pair v4 activation과 n150 live에서
-    public/operator/debug 경계와 principal 성공·401/403을 검증한 뒤 issue #392와 task를 닫는다.
+  - [ ] exact compatible-pair v4 activation과 n150 live에서 public/operator/debug 경계와
+    principal 성공·401/403을 검증한 뒤 issue #392와 task를 닫는다.
 
 - [ ] T-VN-04A — **admin 비공개 feature 공간 조회·카드 표면 복원** (#741)
 
@@ -461,29 +390,6 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
 
 ### 독립 하드닝 — 각 항목 PR 1개
 
-- [ ] T-VN-H02R — **standalone destructive fail-close·backup principal 감사 완결** (#796)
-
-  공식 `docker-compose.yml`은 host env가 없으면
-  `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=false`를 해석해야 한다. 파괴적 운용이 승인된
-  Docker Manager production 형상만 literal `true`를 주입하며, Map standalone의 명시적
-  `true` override는 shell/root project interpolation 환경에서만 허용한다(package API
-  `env_file`은 service `environment`보다 우선하지 않는다). backup create/delete/restore/swap의
-  registry actor는 요청
-  body나 고정 문자열이 아니라 `AdminProxyContext.actor`만 사용한다. 미사용
-  `RestoreSwapRequest.operator`를 제거하고 full/user OpenAPI·생성 타입을 clean-cut한다.
-  서로 다른 인증 principal의 delete/restore/swap 이벤트와 resolved-compose default false /
-  explicit true를 회귀 검증한다. 현재 registry event schema가 이미 actor를 정규화해 저장하므로
-  DB migration은 추가하지 않는다. Manager 쪽 enablement exact 검증은 companion PR #68이 소유한다.
-
-- [ ] T-VN-H03R — **route wiring startup gate·public CORS exact preflight 완결**
-
-  조립된 앱이 route 분류뿐 아니라 실제 enforcing dependency 배선까지 startup에서 검증하도록
-  `assert_route_policy_wiring()`을 실행한다. public CORS는 route policy matrix의 실제 method와
-  고정 request-header allowlist(`X-Kor-Travel-Map-Api-Key` + CORS safelist)만 광고한다. 허용
-  preflight는 성공하고 route에 없는 method나 비공개 trust header는 400이면서
-  `Access-Control-Allow-Origin`을 내보내지 않아야 한다. service/operator/metrics/debug 표면의
-  CORS 비노출과 빈 wiring exception ledger를 함께 회귀 고정한다. DB/OpenAPI schema 변경은 없다.
-
 - [ ] T-VN-H06 — **admin 목록 keyset 전환**
 
   OFFSET 기반 admin 목록을 stable total-order keyset과 fingerprint cursor로 바꾸고 page 경계
@@ -494,18 +400,13 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
   양 저장소 contract test를 required/type/enum 필드까지 강화하고 배포 compatible pair에 pinned
   OpenAPI SHA manifest를 요구한다.
 
-- [ ] T-VN-H08 — **Tier-2 p95 nearest-rank 산식 정확화** (#799)
+- [ ] T-VN-H10 — **C7 origin IPv6 bracket·default-port canonicalization** (#805)
 
-  release harness의 실행시간과 shared read blocks p95를 표본 오름차순 정렬 뒤
-  `ceil(0.95 × n) - 1`의 0-based index로 고른다. 두 지표는 공용 helper만 사용하고,
-  `n=1/20/30/100` fixture가 index와 값을 고정한 뒤 release evidence를 다시 생성한다.
-
-- [ ] T-VN-H09 — **weather semantic upsert collected_at 단조성** (#797)
-
-  ADR-072와 migration 0060의 semantic tuple dedup 승자 규칙에 runtime upsert를 맞춘다.
-  fact-history 전환과 current-row 조건부 upsert를 비교해 더 단순하고 정본 의미에 맞는 구조를
-  선택하고, `collected_at`의 NULL·동률·no-op 정책을 문서화한다. 동일 tuple의 T1→T2,
-  T2→T1, 동률과 provider backfill 회귀를 integration test로 고정한다.
+  C7 host attestation의 public origin canonicalization을 DNS·IPv4·IPv6에 동일하게 적용한다.
+  IPv6 literal은 RFC 형식의 대괄호를 보존하고, default port 명시·생략의 동등성 정책을 고정한다.
+  zone-id와 loopback/link-local은 거부하며 UI/API WebSocket/Dagster GraphQL hash가 같은 helper를
+  사용하도록 host attestation fixture와 runner 계약 테스트를 갱신한다. 현재 DNS 기반 n150 C7의
+  blocker는 아니므로 독립 hardening PR로 진행한다.
 
 ## T-101 — Materialized View 도입 검토
 

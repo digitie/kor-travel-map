@@ -3,6 +3,37 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## vNext 최종 main 합류·공개 계약 완결 (2026-07-20, `T-VN-SYNC-02`·`T-VN-57`·`T-VN-59`)
+
+- [x] **T-VN-57 public security 계약 단일 정본** (#784, PR #787) — `ROUTE_POLICIES`와
+  조립된 route metadata에서 runtime dependency, full/user OpenAPI operation과 security를
+  파생한다. 모든 `PUBLIC_KEYED` operation의 `PublicApiKey OR ServiceToken` 선언과
+  `PUBLIC_UNAUTHENTICATED`·`SERVICE` 분류를 양방향 전수 gate로 고정했다.
+- [x] **T-VN-59 public weather·curation raw lineage 분리** (#786, PR #788) — public weather와
+  curation DTO에서 source identity·provider payload·ingestion timestamp를 제거하고, 필요한 raw
+  lineage는 admin/operator DTO로 분리했다. user operation response의 도달 가능 schema를 재귀
+  검사해 raw 필드 재유입을 차단한다.
+- [x] **T-VN-SYNC-02 integration/t-vn → main 최종 합류** (PR #790) — Wave 0~1 구현,
+  Alembic `0058 → 0062` 단일 head, full/user OpenAPI와 생성 client를 하나의 source tree로
+  합류했다. PR #790의 CI 8개가 green인 merge commit `d93cb16e`가 main 정본이다. production
+  compatible-pair 활성화와 live 인수는 별도 열린 C6c/C7 task가 담당한다.
+
+## vNext 독립 하드닝 완결 (2026-07-20, `T-VN-H02R`·`T-VN-H03R`·`T-VN-H08`·`T-VN-H09`)
+
+- [x] **T-VN-H02R standalone destructive fail-close·backup principal 감사** (#796, PR #804) —
+  standalone compose는 미설정 destructive 작업을 false로 닫고 승인된 Manager production만
+  명시적으로 true를 주입한다. backup registry actor를 인증 principal에서 파생하고 미사용
+  restore/swap body operator를 clean-cut했다.
+- [x] **T-VN-H03R route wiring startup·CORS exact preflight** (#798, PR #803) — 조립된 route의
+  enforcing dependency를 startup에서 검증하고, public CORS를 실제 route method와 고정 request
+  header allowlist로 제한했다. service/operator/metrics/debug 표면은 CORS를 광고하지 않는다.
+- [x] **T-VN-H08 Tier-2 p95 nearest-rank 정확화** (#799, PR #801) — 실행시간과 shared read
+  blocks의 percentile을 정렬 표본의 `ceil(p × n) - 1` 공용 helper로 단일화하고
+  `n=1/20/30/100` 경계를 회귀 고정했다.
+- [x] **T-VN-H09 weather semantic upsert `collected_at` 단조성** (#797, PR #802) — migration
+  0060의 semantic tuple 승자 규칙을 runtime 조건부 upsert에 맞췄다. 오래된 backfill은 no-op,
+  동률의 실제 correction은 후속 write 승리, 동일 replay는 물리 no-op으로 고정했다.
+
 ## vNext 독립 하드닝 — public API key header 전환 (2026-07-20, `T-VN-H01`, integration/t-vn)
 
 - [x] **T-VN-H01 public API key를 URL query에서 header로 이동** (#794) — 공개 REST API key를
@@ -47,7 +78,7 @@
   frontend type-check/build의 CI 8개를 모두 통과했다.
 - [x] **PR #781 병합 완료.** PR head `aa976f13ae747d75fe67318d9c41fb2bddfddb04`를 merge commit
   `a45bc3ac401e5675811f1031a4592991498d899f`로 `integration/t-vn`에 반영했다. 이후 최종
-  integration→main 합류는 열린 `T-VN-SYNC-02`가 담당한다.
+  integration→main 합류는 PR #790의 `T-VN-SYNC-02`로 완료됐다.
 
 ## C7 prod runner attestation·복구 경계 (2026-07-19, `T-ADM-C7H`)
 

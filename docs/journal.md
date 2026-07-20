@@ -28,6 +28,19 @@
   전체 762개, CI와 같은 전체 Ruff, API strict mypy 56개 파일이 통과했다. 공개 Chromium
   반복 `4401`·data frame 0건은 최종 production 인수로 남긴다.
 
+## 2026-07-20 (codex) — PR #732 설계 결정·완료 task 문서 정합화
+
+- PR #790으로 main에 합류한 vNext 부분 구현을 기준으로 integration-map과 REST 정본을
+  갱신했다. 삭제된 legacy ops caller 차단 경고를 현재 canonical datasets/pipeline principal
+  계약으로 바꾸고, `PUBLIC_KEYED`를 `X-Kor-Travel-Map-Api-Key` header-only로 정렬했다.
+- 관측 ops는 AdminBFF 또는 `OpsToken+ops:read`, MOIS raw debug는 production unmount와
+  local-dev AdminBFF로 기록했다. ADR-060에는 PR #794/T-VN-H01이 public `key` query 결정을
+  supersede한다는 amendment를 추가했다.
+- 이미 구현·병합된 `T-VN-SYNC-02`·`T-VN-57`·`T-VN-59`·`T-VN-H02R`·`T-VN-H03R`·
+  `T-VN-H08`·`T-VN-H09`를 완료 이력으로 옮기고, issue #805를 `T-VN-H10` 활성 hardening으로
+  등록했다. C6c/C7과 targeted production 인수 항목은 live 증거가 아직 없으므로 활성 상태를
+  유지했다.
+
 ## 2026-07-20 (codex) — Chromium ops live 4401 관측 복구 구현
 
 - C7 strict 실행이 운영 쓰기 테스트 전에 두 번 동일하게 중단됐다. 두 실패 실행은 각각 exact
