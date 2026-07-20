@@ -13,6 +13,14 @@
 - **CHANGED**: current-row의 `collected_at`은 non-null `TIMESTAMPTZ` latest-wins 계약이다.
   DB schema와 OpenAPI는 바뀌지 않는다.
 
+### Destructive 배포·backup actor 경계 완결 (2026-07-20, T-VN-H02R #796)
+
+- **SECURITY (breaking)**: 공식 standalone Docker compose도 destructive 기본값을 `false`로
+  해석한다. 파괴적 조작은 명시적 `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=true`가 있어야 한다.
+- **SECURITY**: backup create/delete/restore/swap의 managed-file event actor를 고정
+  `api:admin` 대신 인증된 `AdminProxyContext.actor`로 기록한다.
+- **API (breaking)**: 사용되지 않던 `RestoreSwapRequest.operator` 입력을 제거한다.
+
 ### Route wiring startup·public CORS exact preflight (2026-07-20, T-VN-H03R #798)
 
 - **SECURITY**: `create_app()`이 route 분류와 실제 dependency wiring을 함께 검증한다. public-keyed/
@@ -30,8 +38,8 @@
   않으면 403을 반환한다.
 - **FIXED**: 문서화된 env 이름 `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED`가 실제로 필드에
   바인딩되도록 `validation_alias`를 추가했다. 기존에는 env prefix 규칙상 무시되던 이름이었다.
-- **DEPLOY (breaking)**: Docker compose는 컨테이너 기본 `true`를 주입해 기존 배포 동작을 유지한다.
-  n150 prod 등 파괴적 작업이 필요한 배포는 host env로 이 값을 유지해야 한다.
+- **DEPLOY (breaking)**: PR #793 단계의 compose 기본 `true` 예외는 T-VN-H02R(#796)이
+  clean-cut했다. 코드와 standalone compose 모두 기본 `false`이며 승인된 배포만 `true`를 명시한다.
 
 ### Public weather·curation raw lineage clean-cut (2026-07-20, T-VN-59)
 

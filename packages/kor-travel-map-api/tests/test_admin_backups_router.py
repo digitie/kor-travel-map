@@ -3,14 +3,31 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from kortravelmap.api.app import create_app
+from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
+from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
+
+
+class _Tx:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+class _FakeSession:
+    def begin(self) -> _Tx:
+        return _Tx()
 
 
 def _write_artifact(root: Path, backup_id: str = "backup-1") -> None:
@@ -66,6 +83,9 @@ def test_admin_backup_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/restore/{backup_id}" in spec["paths"]
     assert "/v1/admin/restore/{backup_id}/swap" in spec["paths"]
     assert "/v1/admin/backups/restore/{backup_id}" not in spec["paths"]
+    assert "operator" not in spec["components"]["schemas"]["RestoreSwapRequest"][
+        "properties"
+    ]
 
 
 @pytest.mark.unit
@@ -285,3 +305,119 @@ def test_execute_restore_swap_uses_command_runner(
     assert body["data"]["stdout"] == "swapped"
     assert seen["plan"].env["KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY"] == "1"
     assert seen["plan"].env["KOR_TRAVEL_MAP_RESTORE_SWAP_SKIP_VERIFY"] == "1"
+
+
+@pytest.mark.unit
+def test_restore_swap_rejects_removed_operator_field(client: TestClient) -> None:
+    response = client.post(
+        "/v1/admin/restore/backup-1/swap",
+        json={"operator": "spoofed-principal"},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_backup_registry_events_use_each_authenticated_principal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_backups as router_mod
+
+    for backup_id in ("manual", "delete-me", "restore-me", "swap-me"):
+        _write_artifact(tmp_path, backup_id)
+
+    session = _FakeSession()
+    current_actor = {"value": "create-principal"}
+    app = create_app(
+        ApiSettings(
+            admin_destructive_enabled=True,
+            admin_proxy_secret=None,
+            backup_root=tmp_path,
+            backup_project_root=tmp_path,
+            backup_command_enabled=True,
+        )
+    )
+
+    async def _fake_session() -> AsyncIterator[_FakeSession]:
+        yield session
+
+    app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[require_admin_frontend] = lambda: AdminProxyContext(
+        actor=current_actor["value"]
+    )
+
+    calls: list[tuple[str, str, str | None]] = []
+
+    async def _fake_run(plan: Any, *, timeout_seconds: float) -> Any:
+        del plan, timeout_seconds
+        return router_mod._CommandResult(returncode=0, stdout="ok", stderr="")
+
+    async def _fake_upsert(
+        session: Any,
+        artifact: Any,
+        *,
+        actor: str,
+        event_kind: str | None,
+    ) -> Any:
+        del session
+        calls.append(("upsert", actor, event_kind))
+        return SimpleNamespace(file_id=f"file:{artifact.backup_id}")
+
+    async def _fake_mark_deleted(
+        session: Any,
+        *,
+        file_id: str,
+        actor: str,
+    ) -> None:
+        del session, file_id
+        calls.append(("deleted", actor, None))
+
+    async def _fake_touch_loaded(session: Any, **kwargs: Any) -> bool:
+        del session
+        calls.append(("restored", kwargs["actor"], kwargs["event_kind"]))
+        return True
+
+    async def _fake_register_file(session: Any, **kwargs: Any) -> Any:
+        del session
+        calls.append(("swap", kwargs["actor"], kwargs.get("event_kind")))
+        return SimpleNamespace(file_id="file:swap")
+
+    monkeypatch.setattr(router_mod, "_run_command", _fake_run)
+    monkeypatch.setattr(router_mod, "_registry_upsert_backup", _fake_upsert)
+    monkeypatch.setattr(router_mod.file_registry, "mark_deleted", _fake_mark_deleted)
+    monkeypatch.setattr(router_mod.file_registry, "touch_loaded", _fake_touch_loaded)
+    monkeypatch.setattr(router_mod.file_registry, "register_file", _fake_register_file)
+
+    with TestClient(app) as principal_client:
+        create = principal_client.post(
+            "/v1/admin/backups",
+            json={"backup_id": "manual", "execute": True},
+        )
+        assert create.status_code == 200
+
+        current_actor["value"] = "delete-principal"
+        delete = principal_client.delete("/v1/admin/backups/delete-me")
+        assert delete.status_code == 200
+
+        current_actor["value"] = "restore-principal"
+        restore = principal_client.post(
+            "/v1/admin/restore/restore-me",
+            json={"execute": True},
+        )
+        assert restore.status_code == 200
+
+        current_actor["value"] = "swap-principal"
+        swap = principal_client.post(
+            "/v1/admin/restore/swap-me/swap",
+            json={"execute": True},
+        )
+        assert swap.status_code == 200
+
+    assert calls == [
+        ("upsert", "create-principal", "downloaded"),
+        ("upsert", "delete-principal", None),
+        ("deleted", "delete-principal", None),
+        ("restored", "restore-principal", "restored"),
+        ("swap", "swap-principal", None),
+    ]

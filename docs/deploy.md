@@ -172,6 +172,12 @@ systemd `EnvironmentFile`, 또는 Docker secret로 관리한다. git에는 각 `
 `scripts/load-env.sh`/`docker-compose.yml`이 Dagster 실행용 이름으로 매핑한다. API auth,
 route, backup, CORS, metrics 설정은 API 전용 파일에만 둔다. 이 파일이 없으면 Compose는
 인증 기본값으로 기동하지 않고 실패한다.
+공식 standalone compose에서 `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED` 미설정 값은 `false`다.
+파괴적 조작이 필요한 standalone Compose는 shell 또는 root project `.env`의 interpolation
+입력으로 `true`를 명시한다. package API `.env`의 같은 값은 service `environment`에 의해
+덮이므로 Compose opt-in 근거가 아니다. Docker Manager가 소유하는 승인된 production 형상은
+canonical API service에 literal `true`를 주입한 뒤 raw/resolved/runtime 검증으로 이를 증명한다.
+라이브 조작의 actor는 admin BFF 인증 principal로 별도 감사된다.
 PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`가 소유한
 공유 PostgreSQL/PostGIS 서버 인스턴스다. `KOR_TRAVEL_MAP_PG_DSN`을 명시하지 않으면
 `scripts/load-env.sh`가 `127.0.0.1:5432/kor_travel_map` DSN을 채운다.

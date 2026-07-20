@@ -19,6 +19,8 @@
   `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED`가 실제로 바인딩되도록 `validation_alias`를 추가했다.
   Docker compose는 컨테이너 기본 true를 주입해 기존 배포를 유지한다(배포 전제: 파괴적 작업이
   필요한 배포는 host env로 이 값을 유지). PR #793.
+  이후 standalone compose까지 default false로 닫는 `T-VN-H02R`(#796)이 이 배포 예외를
+  clean-cut으로 대체한다.
 
 ## surface별 CORS 분리 (2026-07-20, `T-VN-H03`)
 

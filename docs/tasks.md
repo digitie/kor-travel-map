@@ -438,6 +438,20 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
 
 ### 독립 하드닝 — 각 항목 PR 1개
 
+- [ ] T-VN-H02R — **standalone destructive fail-close·backup principal 감사 완결** (#796)
+
+  공식 `docker-compose.yml`은 host env가 없으면
+  `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=false`를 해석해야 한다. 파괴적 운용이 승인된
+  Docker Manager production 형상만 literal `true`를 주입하며, Map standalone의 명시적
+  `true` override는 shell/root project interpolation 환경에서만 허용한다(package API
+  `env_file`은 service `environment`보다 우선하지 않는다). backup create/delete/restore/swap의
+  registry actor는 요청
+  body나 고정 문자열이 아니라 `AdminProxyContext.actor`만 사용한다. 미사용
+  `RestoreSwapRequest.operator`를 제거하고 full/user OpenAPI·생성 타입을 clean-cut한다.
+  서로 다른 인증 principal의 delete/restore/swap 이벤트와 resolved-compose default false /
+  explicit true를 회귀 검증한다. 현재 registry event schema가 이미 actor를 정규화해 저장하므로
+  DB migration은 추가하지 않는다. Manager 쪽 enablement exact 검증은 companion PR #68이 소유한다.
+
 - [ ] T-VN-H03R — **route wiring startup gate·public CORS exact preflight 완결**
 
   조립된 앱이 route 분류뿐 아니라 실제 enforcing dependency 배선까지 startup에서 검증하도록

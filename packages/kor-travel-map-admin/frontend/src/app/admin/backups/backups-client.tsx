@@ -290,7 +290,6 @@ export function BackupsClient() {
           apply: applySwap,
           execute: executeSwap,
           skip_verify: false,
-          operator: null,
           note: null,
         },
       },

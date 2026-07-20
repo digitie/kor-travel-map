@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tomllib
@@ -181,8 +182,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_PROFILE",
         "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
         "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
-        # T-VN-H02 — destructive kill-switch 기본값 fail-closed(False);
-        # compose가 컨테이너 기본 true를 주입해 기존 배포 동작을 유지한다.
+        # T-VN-H02R — standalone compose도 미설정 시 fail-closed(False)다.
         "KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED",
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
         "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
@@ -200,6 +200,9 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     )
     assert "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET is required" in str(
         api["environment"]["KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"]
+    )
+    assert api["environment"]["KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED"] == (
+        "${KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED:-false}"
     )
 
     root_api_keys = _assigned_env_keys(_script(".env.example"), prefix="KOR_TRAVEL_MAP_API_")
@@ -300,6 +303,60 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     ):
         assert removed_key in entrypoint
     assert "removed provider runtime key must not enter API container" in entrypoint
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("explicit_value", "expected"),
+    [(None, "false"), ("true", "true")],
+)
+def test_docker_compose_resolves_destructive_opt_in_exactly(
+    tmp_path: Path,
+    explicit_value: str | None,
+    expected: str,
+) -> None:
+    """공식 compose의 raw interpolation을 실제 Compose resolver로 검증한다."""
+
+    raw_value = _compose()["services"]["api"]["environment"][
+        "KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED"
+    ]
+    compose_file = tmp_path / "compose.yml"
+    compose_file.write_text(
+        yaml.safe_dump(
+            {
+                "services": {
+                    "api": {
+                        "image": "scratch",
+                        "environment": {
+                            "KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED": raw_value,
+                        },
+                    }
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    env = {
+        "PATH": os.environ["PATH"],
+        "COMPOSE_DISABLE_ENV_FILE": "1",
+    }
+    if explicit_value is not None:
+        env["KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED"] = explicit_value
+    result = subprocess.run(
+        ["docker", "compose", "-f", str(compose_file), "config", "--format", "json"],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    resolved = json.loads(result.stdout)
+    assert resolved["services"]["api"]["environment"] == {
+        "KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED": expected
+    }
 
 
 @pytest.mark.unit

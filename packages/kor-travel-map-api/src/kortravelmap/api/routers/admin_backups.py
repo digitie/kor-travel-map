@@ -29,7 +29,11 @@ from kortravelmap.infra.backup import (
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.auth import require_admin_destructive_enabled
+from kortravelmap.api.auth import (
+    AdminProxyContext,
+    require_admin_destructive_enabled,
+    require_admin_frontend,
+)
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.settings import ApiSettings
@@ -74,6 +78,7 @@ async def _registry_upsert_backup(
     session: AsyncSession,
     artifact: BackupArtifact,
     *,
+    actor: str,
     event_kind: str | None,
 ) -> file_registry.ManagedFile:
     """백업 artifact를 registry에 upsert(백업 hook 공통부)."""
@@ -87,7 +92,7 @@ async def _registry_upsert_backup(
         is_directory=True,
         byte_size=artifact.byte_size,
         downloaded_at=artifact.created_at_utc,
-        actor="api:admin",
+        actor=actor,
         event_kind=event_kind,
         meta=_artifact_meta(artifact),
     )
@@ -199,7 +204,6 @@ class RestoreSwapRequest(BaseModel):
     apply: bool = False
     skip_verify: bool = False
     execute: bool = False
-    operator: str | None = Field(default=None, min_length=1)
     note: str | None = None
 
 
@@ -441,6 +445,7 @@ async def delete_backup(
     request: Request,
     backup_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> BackupDeleteResponse:
     """Delete one backup artifact directory."""
     started_at = perf_counter()
@@ -460,8 +465,17 @@ async def delete_backup(
         raise _delete_failed(exc) from exc
     # 파일 registry hook (H2) — rmtree 확정 후 deleted 기록, 실패 무해.
     async with file_registry.registry_guard("backup:delete"), session.begin():
-        registered = await _registry_upsert_backup(session, artifact, event_kind=None)
-        await file_registry.mark_deleted(session, file_id=registered.file_id, actor="api:admin")
+        registered = await _registry_upsert_backup(
+            session,
+            artifact,
+            actor=context.actor,
+            event_kind=None,
+        )
+        await file_registry.mark_deleted(
+            session,
+            file_id=registered.file_id,
+            actor=context.actor,
+        )
     return BackupDeleteResponse(
         data=BackupDeleteData(deleted=True, item=deleted_item),
         meta=make_meta(started_at=started_at),
@@ -472,6 +486,7 @@ async def delete_backup(
 async def create_backup(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     body: BackupRunRequest | None = None,
 ) -> BackupOperationResponse:
     """Plan or run a cold backup command."""
@@ -527,7 +542,12 @@ async def create_backup(
     # 파일 registry hook (H1) — 백업 성공 + artifact 파싱 성공 시 등록, 실패 무해.
     if artifact_raw is not None:
         async with file_registry.registry_guard("backup:create"), session.begin():
-            await _registry_upsert_backup(session, artifact_raw, event_kind="downloaded")
+            await _registry_upsert_backup(
+                session,
+                artifact_raw,
+                actor=context.actor,
+                event_kind="downloaded",
+            )
     return BackupOperationResponse(
         data=BackupOperationData(
             operation="backup",
@@ -562,6 +582,7 @@ async def restore_backup(
     request: Request,
     backup_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     body: RestoreRunRequest | None = None,
 ) -> BackupOperationResponse:
     """Plan or run a staging restore command."""
@@ -637,7 +658,7 @@ async def restore_backup(
             location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
             path=safe_id,
             event_kind="restored",
-            actor="api:admin",
+            actor=context.actor,
             detail={"targets": targets.model_dump()},
         )
         if not touched:
@@ -647,7 +668,12 @@ async def restore_backup(
             except BackupArtifactError:
                 raw = None
             if raw is not None:
-                await _registry_upsert_backup(session, raw, event_kind="restored")
+                await _registry_upsert_backup(
+                    session,
+                    raw,
+                    actor=context.actor,
+                    event_kind="restored",
+                )
     return BackupOperationResponse(
         data=BackupOperationData(
             operation="restore",
@@ -669,6 +695,7 @@ async def plan_restore_swap(
     request: Request,
     backup_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     body: RestoreSwapRequest | None = None,
 ) -> BackupOperationResponse:
     """Plan or run the restore hot-swap env switch."""
@@ -745,7 +772,7 @@ async def plan_restore_swap(
             location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
             path=Path(env_file).name,
             kind="temp",
-            actor="api:admin",
+            actor=context.actor,
             downloaded_at=datetime.now(UTC),
             meta={
                 "physical": {"path": env_file},
