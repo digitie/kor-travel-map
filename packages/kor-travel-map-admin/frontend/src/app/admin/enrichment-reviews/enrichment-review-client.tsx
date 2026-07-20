@@ -26,7 +26,7 @@ import {
   MultiFilterCombobox,
   uniqueSorted,
 } from "@/components/multi-filter-combobox";
-import { OffsetPager } from "@/components/pagination-bar";
+import { CursorPager } from "@/components/pagination-bar";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -392,6 +392,7 @@ export function EnrichmentReviewClient() {
   const [pageSize, setPageSize] =
     useState<(typeof PAGE_SIZE_OPTIONS)[number]>(50);
   const [pageIndex, setPageIndex] = useState(1);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [detailReviewId, setDetailReviewId] = useState<string | null>(null);
   const [selectedDetailSource, setSelectedDetailSource] =
     useState<EnrichmentDetailSource | null>(null);
@@ -406,14 +407,14 @@ export function EnrichmentReviewClient() {
       max_score: bounds.max,
       q: deferredQ.length > 0 ? deferredQ : undefined,
       page_size: pageSize,
-      page: pageIndex,
+      cursor: cursor ?? undefined,
     }),
     [
       bounds.max,
       bounds.min,
+      cursor,
       deferredProviders,
       deferredQ,
-      pageIndex,
       pageSize,
       status,
     ],
@@ -435,15 +436,11 @@ export function EnrichmentReviewClient() {
     [items, providers],
   );
   const totalItems = reviews.data?.meta.page?.total ?? null;
-  const totalPages =
-    typeof totalItems === "number"
-      ? Math.max(1, Math.ceil(totalItems / pageSize))
-      : null;
-  const hasNextPage = totalPages !== null && pageIndex < totalPages;
-  const hasPreviousPage = pageIndex > 1;
+  const nextCursor = reviews.data?.meta.page?.next_cursor ?? null;
 
   const resetPage = () => {
-    setPageIndex(1); // 필터 바뀌면 1페이지로.
+    setCursor(null); // 필터 바뀌면 1페이지로.
+    setPageIndex(1);
     setDetailReviewId(null);
     setSelectedDetailSource(null);
   };
@@ -451,13 +448,14 @@ export function EnrichmentReviewClient() {
     setStatus(value);
     resetPage();
   };
-  // 페이지 이동 시 상세/소스 선택을 함께 초기화한다(기존 go* 동작 유지).
-  const goToPage = (nextPage: number) => {
-    const clamped =
-      totalPages === null
-        ? Math.max(1, nextPage)
-        : Math.min(Math.max(1, nextPage), totalPages);
-    setPageIndex(clamped);
+  // keyset 페이지 이동 시 상세/소스 선택을 함께 초기화한다.
+  const goFirstPage = () => {
+    resetPage();
+  };
+  const goNextPage = () => {
+    if (!nextCursor) return;
+    setCursor(nextCursor);
+    setPageIndex((page) => page + 1);
     setDetailReviewId(null);
     setSelectedDetailSource(null);
   };
@@ -483,17 +481,22 @@ export function EnrichmentReviewClient() {
   };
 
   const renderPagination = (placement: "top" | "bottom") => (
-    <OffsetPager
-      currentCount={items.length}
-      hasNextPage={hasNextPage}
-      hasPreviousPage={hasPreviousPage}
+    <CursorPager
+      hasNext={Boolean(nextCursor)}
       isFetching={reviews.isFetching}
-      navAriaPrefix="enrichment"
-      page={pageIndex}
+      isFirst={cursor === null}
       placement={placement}
-      totalCount={totalItems}
-      totalPages={totalPages}
-      onPageChange={goToPage}
+      summary={
+        <>
+          page {pageIndex.toLocaleString("ko-KR")}
+          {totalItems !== null ? (
+            <> · 총 {totalItems.toLocaleString("ko-KR")}건</>
+          ) : null}{" "}
+          · 이 페이지 {items.length.toLocaleString("ko-KR")}개
+        </>
+      }
+      onFirst={goFirstPage}
+      onNext={goNextPage}
     />
   );
   type ReviewRow = NonNullable<typeof reviews.data>["data"]["items"][number];

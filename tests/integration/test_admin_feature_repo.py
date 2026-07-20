@@ -547,7 +547,7 @@ async def test_merge_dedup_review_explicit_master_locks_review_row(
                 )
 
 
-async def test_list_dedup_reviews_page_walks_same_score_without_gaps(
+async def test_list_dedup_reviews_keyset_walk_stable_under_mutation(
     migrated_session: AsyncSession,
 ) -> None:
     session = migrated_session
@@ -556,6 +556,7 @@ async def test_list_dedup_reviews_page_walks_same_score_without_gaps(
         "feature-admin-page-b",
         "feature-admin-page-c",
         "feature-admin-page-d",
+        "feature-admin-page-e",
     ):
         session.add(_feature_row(feature_id, name=feature_id))
     await session.flush()
@@ -591,23 +592,104 @@ async def test_list_dedup_reviews_page_walks_same_score_without_gaps(
     session.add_all(reviews)
     await session.flush()
 
+    # 동일 total_score에서 (total_score DESC, review_id DESC) total order를 keyset이
+    # page_size=1로 정확히 walk한다.
     seen: list[str] = []
-    for page_number in range(1, 4):
-        page = await list_dedup_reviews(
-            session, page_size=1, page=page_number
-        )
+    cursor: str | None = None
+    for _ in range(3):
+        page = await list_dedup_reviews(session, page_size=1, cursor=cursor)
         assert len(page.items) == 1
         assert page.total_count == 3
         seen.append(page.items[0].review_id)
-
+        cursor = page.next_cursor
     assert seen == [
         "00000000-0000-0000-0000-000000000003",
         "00000000-0000-0000-0000-000000000002",
         "00000000-0000-0000-0000-000000000001",
     ]
+    assert cursor is None  # 마지막 페이지 뒤 next_cursor는 None
 
-    page_2 = await list_dedup_reviews(session, page_size=2, page=2)
-    assert page_2.total_count == 3
-    assert [item.review_id for item in page_2.items] == [
-        "00000000-0000-0000-0000-000000000001"
+    # 페이지 경계 mutation 회귀: page1 뒤 커서보다 앞(더 높은 점수) 행을 삽입해도 keyset은
+    # 남은 행만 중복·누락 없이 이어간다. OFFSET이라면 삽입이 뒤 페이지를 한 칸 밀어 앞
+    # 페이지 행을 재노출한다.
+    page1 = await list_dedup_reviews(session, page_size=1, cursor=None)
+    assert [item.review_id for item in page1.items] == [
+        "00000000-0000-0000-0000-000000000003"
+    ]
+    session.add(
+        DedupReviewQueueRow(
+            review_id="00000000-0000-0000-0000-000000000009",
+            feature_id_a="feature-admin-page-a",
+            feature_id_b="feature-admin-page-e",
+            total_score=Decimal("99.99"),  # page1 커서보다 상위 순위
+            name_score=99,
+            spatial_score=80,
+            category_score=100,
+        )
+    )
+    await session.flush()
+
+    walked: list[str] = [page1.items[0].review_id]
+    cursor = page1.next_cursor
+    while cursor is not None:
+        page = await list_dedup_reviews(session, page_size=1, cursor=cursor)
+        assert len(page.items) <= 1
+        walked.extend(item.review_id for item in page.items)
+        cursor = page.next_cursor
+
+    # 삽입한 상위 점수 009는 커서 앞이라 이 walk에 나타나지 않고, 003 재노출 없이 002·001을
+    # 각각 정확히 한 번 본다(중복·누락 0).
+    assert walked == [
+        "00000000-0000-0000-0000-000000000003",
+        "00000000-0000-0000-0000-000000000002",
+        "00000000-0000-0000-0000-000000000001",
+    ]
+    assert len(walked) == len(set(walked))
+
+
+async def test_list_dedup_reviews_cursor_rejects_filter_change(
+    migrated_session: AsyncSession,
+) -> None:
+    session = migrated_session
+    for feature_id in ("feature-fp-a", "feature-fp-b", "feature-fp-c"):
+        session.add(_feature_row(feature_id, name=feature_id))
+    await session.flush()
+    session.add_all(
+        [
+            DedupReviewQueueRow(
+                review_id="00000000-0000-0000-0000-0000000000a2",
+                feature_id_a="feature-fp-a",
+                feature_id_b="feature-fp-b",
+                total_score=Decimal("60.00"),
+                name_score=60,
+                spatial_score=60,
+                category_score=60,
+            ),
+            DedupReviewQueueRow(
+                review_id="00000000-0000-0000-0000-0000000000a1",
+                feature_id_a="feature-fp-a",
+                feature_id_b="feature-fp-c",
+                total_score=Decimal("55.00"),
+                name_score=55,
+                spatial_score=55,
+                category_score=55,
+            ),
+        ]
+    )
+    await session.flush()
+
+    page = await list_dedup_reviews(session, page_size=1, min_score=10)
+    assert page.next_cursor is not None
+
+    # 같은 커서를 다른 필터(min_score 변경)로 재사용하면 fingerprint 불일치로 거부한다.
+    with pytest.raises(ValueError, match="invalid dedup_review cursor"):
+        await list_dedup_reviews(
+            session, page_size=1, min_score=20, cursor=page.next_cursor
+        )
+    # 같은 필터면 keyset을 정상적으로 이어간다.
+    page2 = await list_dedup_reviews(
+        session, page_size=1, min_score=10, cursor=page.next_cursor
+    )
+    assert [item.review_id for item in page2.items] == [
+        "00000000-0000-0000-0000-0000000000a1"
     ]

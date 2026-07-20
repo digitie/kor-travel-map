@@ -326,14 +326,22 @@ async def test_list_enrichment_reviews_admin_query(
     assert top.spatial_score is not None
     assert 60 < top.spatial_score <= 100
 
+    page_1 = await list_enrichment_reviews(
+        migrated_session, statuses=("pending",), page_size=1
+    )
+    assert len(page_1.items) == 1
+    assert page_1.total_count == 2
+    assert page_1.next_cursor is not None
     page_2 = await list_enrichment_reviews(
         migrated_session,
         statuses=("pending",),
         page_size=1,
-        page=2,
+        cursor=page_1.next_cursor,
     )
     assert len(page_2.items) == 1
     assert page_2.total_count == 2
+    # keyset 연속: page_1·page_2는 서로 다른 review를 본다.
+    assert page_1.items[0].review_id != page_2.items[0].review_id
 
     # provider 필터.
     filtered = await list_enrichment_reviews(

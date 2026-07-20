@@ -484,8 +484,9 @@ async def test_list_dedup_reviews_and_decision() -> None:
     params = session.calls[1]["params"]
     assert params["providers"] == ["python-mois-api"]
     assert params["min_score"] == 80
-    assert params["limit"] == 1
-    assert params["offset_rows"] == 0
+    assert params["limit_plus_one"] == 2
+    assert params["cursor_review_id"] is None
+    assert params["cursor_score"] is None
 
     changed = await repo.set_dedup_review_decision(
         _Session([_Result([{"review_id": _REVIEW_KEY_1}])]),  # type: ignore[arg-type]

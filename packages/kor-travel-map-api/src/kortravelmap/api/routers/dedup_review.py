@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
-from kortravelmap.api.response import Meta, OffsetMeta, make_meta, make_offset_meta
+from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
     "router",
@@ -107,7 +107,7 @@ class DedupReviewListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: DedupReviewListData
-    meta: OffsetMeta
+    meta: Meta
 
 
 class ReviewSourceDetailRecord(BaseModel):
@@ -351,7 +351,7 @@ async def list_reviews(
     max_score: Annotated[float | None, Query(ge=0, le=100)] = None,
     q: Annotated[str | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=500)] = 50,
-    page_number: Annotated[int, Query(alias="page", ge=1)] = 1,
+    cursor: Annotated[str | None, Query()] = None,
 ) -> DedupReviewListResponse:
     started_at = perf_counter()
     try:
@@ -366,7 +366,7 @@ async def list_reviews(
             max_score=max_score,
             q=q,
             page_size=page_size,
-            page=page_number,
+            cursor=cursor,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -374,10 +374,11 @@ async def list_reviews(
         data=DedupReviewListData(
             items=[_record(item) for item in review_page.items],
         ),
-        meta=make_offset_meta(
+        meta=make_meta(
             request,
             started_at=started_at,
             page_size=page_size,
+            next_cursor=review_page.next_cursor,
             total=review_page.total_count,
         ),
     )

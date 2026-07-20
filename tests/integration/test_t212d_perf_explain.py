@@ -470,13 +470,15 @@ async def _walk_dedup_review_ids(
     session: AsyncSession, *, page_size: int = 37
 ) -> list[str]:
     seen: list[str] = []
-    for page_number in range(1, 101):
+    cursor: str | None = None
+    for _ in range(101):
         page = await admin_feature_repo.list_dedup_reviews(
-            session, page_size=page_size, page=page_number
+            session, page_size=page_size, cursor=cursor
         )
         seen.extend(item.review_id for item in page.items)
-        if len(seen) >= page.total_count or not page.items:
+        if page.next_cursor is None:
             return seen
+        cursor = page.next_cursor
     raise AssertionError("dedup review page walk did not terminate")
 
 
@@ -484,13 +486,15 @@ async def _walk_enrichment_review_ids(
     session: AsyncSession, *, page_size: int = 37
 ) -> list[str]:
     seen: list[str] = []
-    for page_number in range(1, 101):
+    cursor: str | None = None
+    for _ in range(101):
         page = await admin_feature_repo.list_enrichment_reviews(
-            session, page_size=page_size, page=page_number
+            session, page_size=page_size, cursor=cursor
         )
         seen.extend(item.review_id for item in page.items)
-        if len(seen) >= page.total_count or not page.items:
+        if page.next_cursor is None:
             return seen
+        cursor = page.next_cursor
     raise AssertionError("enrichment review page walk did not terminate")
 
 
@@ -847,8 +851,9 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "min_score": None,
             "max_score": None,
             "q_like": None,
-            "limit": 51,
-            "offset_rows": 0,
+            "limit_plus_one": 51,
+            "cursor_review_id": None,
+            "cursor_score": None,
         },
     )
     _assert_uses_index(dedup, "idx_dedup_status_score")
@@ -874,8 +879,9 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "min_score": None,
             "max_score": None,
             "q_like": None,
-            "limit": 51,
-            "offset_rows": 0,
+            "limit_plus_one": 51,
+            "cursor_review_id": None,
+            "cursor_score": None,
         },
     )
     _assert_uses_index(enrichment, "idx_enrichment_review_status_score")
@@ -891,8 +897,9 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "min_score": None,
             "max_score": None,
             "q_like": None,
-            "limit": 51,
-            "offset_rows": 0,
+            "limit_plus_one": 51,
+            "cursor_review_id": None,
+            "cursor_score": None,
         },
     )
     _assert_uses_index(
@@ -910,8 +917,9 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "min_score": None,
             "max_score": None,
             "q_like": None,
-            "limit": 51,
-            "offset_rows": 0,
+            "limit_plus_one": 51,
+            "cursor_review_id": None,
+            "cursor_score": None,
         },
     )
     _assert_no_seq_scan_on(enrichment_multi_provider, "enrichment_review_queue")
@@ -1006,8 +1014,9 @@ async def test_t212d_page_queries_keep_uuid_tie_breakers(
         migrated_session, page_size=5
     )
     assert len(dedup_page.items) == 5
+    assert dedup_page.next_cursor is not None
     dedup_next = await admin_feature_repo.list_dedup_reviews(
-        migrated_session, page_size=5, page=2
+        migrated_session, page_size=5, cursor=dedup_page.next_cursor
     )
     assert {item.review_id for item in dedup_page.items}.isdisjoint(
         {item.review_id for item in dedup_next.items}
@@ -1017,8 +1026,9 @@ async def test_t212d_page_queries_keep_uuid_tie_breakers(
         migrated_session, page_size=5
     )
     assert len(enrichment_page.items) == 5
+    assert enrichment_page.next_cursor is not None
     enrichment_next = await admin_feature_repo.list_enrichment_reviews(
-        migrated_session, page_size=5, page=2
+        migrated_session, page_size=5, cursor=enrichment_page.next_cursor
     )
     assert {item.review_id for item in enrichment_page.items}.isdisjoint(
         {item.review_id for item in enrichment_next.items}
