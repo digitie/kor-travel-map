@@ -751,6 +751,14 @@ DB backend 종료와 bounded join 뒤에만 fresh DB를 drop한다. 기존 range
 전 `23514`, 현재 head에서 0060 아래로 향하는 downgrade는 descendant DDL 전에 schema/version/index
 무변경 fail-closed여야 한다. SQL 문자열 순서만 확인하는 테스트는 수용 증거가 아니다.
 
+### 7.4 Weather collected_at 단조 upsert 회귀 (T-VN-H09)
+
+head schema의 실제 `ON CONFLICT` writer에 같은 semantic tuple을 T1→T2와 T2→T1 순서로 각각
+적재한다. 두 순서 모두 최종 `collected_at/value`가 T2에 대응해야 하며, T2→T1 provider
+backfill은 row `ctid`도 바꾸지 않아야 한다. 같은 `collected_at`에서 값이 다른 correction은
+후속 값으로 갱신하고, 그 결과를 완전히 동일하게 재생하면 `ctid`가 유지되는 물리 no-op을
+검증한다. DTO와 DB의 non-null `TIMESTAMPTZ` 계약이 NULL 정책의 수용 증거다.
+
 ## 8. 테스트 데이터 정책
 
 - **단위 테스트 fixture**: 소량 (≤ 50 row), ext4 `tests/unit/factories.py`.

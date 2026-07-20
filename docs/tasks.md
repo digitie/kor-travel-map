@@ -58,6 +58,7 @@
   - [ ] `T-VN-H06` — **admin 목록 keyset 전환**
   - [ ] `T-VN-H07` — **PinVi field-level contract와 OpenAPI SHA 검증**
   - [ ] `T-VN-H08` — **Tier-2 p95 nearest-rank 산식 정확화** (#799)
+  - [ ] `T-VN-H09` — **weather semantic upsert collected_at 단조성** (#797)
 - **보류/결정 대기**
   - [ ] `T-101` — **Materialized View 도입 검토**
 
@@ -471,6 +472,13 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
   release harness의 실행시간과 shared read blocks p95를 표본 오름차순 정렬 뒤
   `ceil(0.95 × n) - 1`의 0-based index로 고른다. 두 지표는 공용 helper만 사용하고,
   `n=1/20/30/100` fixture가 index와 값을 고정한 뒤 release evidence를 다시 생성한다.
+
+- [ ] T-VN-H09 — **weather semantic upsert collected_at 단조성** (#797)
+
+  ADR-072와 migration 0060의 semantic tuple dedup 승자 규칙에 runtime upsert를 맞춘다.
+  fact-history 전환과 current-row 조건부 upsert를 비교해 더 단순하고 정본 의미에 맞는 구조를
+  선택하고, `collected_at`의 NULL·동률·no-op 정책을 문서화한다. 동일 tuple의 T1→T2,
+  T2→T1, 동률과 provider backfill 회귀를 integration test로 고정한다.
 
 ## T-101 — Materialized View 도입 검토
 

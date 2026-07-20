@@ -139,6 +139,11 @@ class WeatherValue(BaseModel):
 
 `identity()`가 unique key (`timeline_bucket` 제외).
 
+같은 identity의 재적재는 `collected_at` 단조성을 지킨다. 더 최신 시각은 current row를 갱신하고,
+더 오래된 provider backfill은 no-op이다. 동률에서 내용이 다르면 후속 write가 이기며, 내용도
+같으면 물리 UPDATE를 생략한다. `collected_at`은 aware datetime이자 DB `TIMESTAMPTZ NOT NULL`이라
+NULL 정책은 거부다. 이는 migration 0060의 최신 `collected_at` dedup 승자와 같은 의미다.
+
 ## 5. DB 매핑
 
 `feature.feature_weather_values`:
@@ -355,6 +360,9 @@ async def upsert_weather_values(
     # 큰 batch는 staging COPY → INSERT FROM SELECT (ADR-013)
     return await _upsert_via_copy(session, rows)
 ```
+
+현재 구현의 반환값은 실제 INSERT/UPDATE 행 수가 아니라 writer가 수용한 입력 건수다. 따라서
+오래된 backfill이나 동일 재생이 DB no-op이어도 호출자 집계에는 입력 1건으로 남는다.
 
 bulk insert는 ADR-013 (`psycopg.copy_*` 안전 마진 30k).
 
