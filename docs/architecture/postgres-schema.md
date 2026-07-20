@@ -132,7 +132,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | 인덱스 | 컬럼 | 비고 |
 |--------|------|------|
 | `idx_features_coord_gist` | GIST(coord) | partial WHERE deleted_at IS NULL |
-| `idx_features_coord_5179_gist` | GIST(coord_5179) | 반경 검색 핵심 (ADR-012) |
+| `idx_features_coord_5179_gist` | GIST(coord_5179) | 반경 검색 핵심 (ADR-012). STORED 값 PROJ drift·REINDEX: [runbook](../runbooks/coord-5179-proj-pin.md) (T-VN-H04) |
 | `idx_features_geom_gist` | GIST(geom) | route/area LINESTRING/MULTIPOLYGON |
 | `idx_features_kind_category` | (kind, category) | partial active |
 | `idx_features_status_updated` | (status, updated_at) | admin |
@@ -432,7 +432,7 @@ def run_migrations_online():
 
 1. **FK/CHECK** — 가능한 경우 `NOT VALID`로 추가하고 별도 transaction에서 `VALIDATE`한다.
 2. **UNIQUE/인덱스** — 일반 online index는 `CREATE INDEX CONCURRENTLY`로 build하고 lock
-   acquisition/보유 시간과 실패한 INVALID index를 관리한다. 그러나 기존 행 dedup과 semantic
+   acquisition/보유 시간과 실패한 INVALID index를 관리한다([탐지·drop runbook](../runbooks/invalid-index-recovery.md), T-VN-H05). 그러나 기존 행 dedup과 semantic
    UNIQUE 사이에 writer가 다시 중복을 만들 수 있는 cutover는 예외다. 호환성보다 원자성이
    우선이면 table writer lock을 먼저 잡고 dedup + non-concurrent UNIQUE를 한 transaction으로
    묶는다(0060). UNIQUE writer conflict target은 같은 배포 cutover에서 전환한다. dedup처럼

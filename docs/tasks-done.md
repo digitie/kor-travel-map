@@ -32,6 +32,11 @@
   구현했고, 경로 판정은 비-public 매칭 시 무조건 제외하는 security-safe 규칙을 쓴다. CORS는
   미들웨어라 OpenAPI spec 무관(drift 없음). PR #795.
 
+## coord_5179 PROJ pin · INVALID index 복구 runbook (2026-07-20, `T-VN-H04`·`T-VN-H05`)
+
+- [x] **T-VN-H04 — `coord_5179` PROJ 버전 고정·drift 검사·REINDEX runbook.** `docs/runbooks/coord-5179-proj-pin.md` 추가 — PROJ-bound STORED generated 컬럼의 drift 탐지 SQL(저장 `coord_5179` vs 현재 PROJ `ST_Transform(coord,5179)` 비교), `SET coord=coord` keyset batch 재계산, `REINDEX INDEX CONCURRENTLY idx_features_coord_5179_gist`. image tag `postgis/postgis:16-3.5-alpine`가 PROJ를 pin. performance.md §7.1·postgres-schema.md §4.1·runbooks README에서 링크. SQL은 postgis 16-3.5 컨테이너로 검증. PR #800.
+- [x] **T-VN-H05 — CONCURRENTLY 실패 INVALID index 탐지·drop runbook.** `docs/runbooks/invalid-index-recovery.md` 추가 — `pg_index.indisvalid=false` 탐지 SQL(pg_class/pg_namespace join으로 index·table 이름), `DROP INDEX CONCURRENTLY IF EXISTS` + 원 DDL 재실행, 0061 self-heal·0060 non-concurrent 원자성 맥락. performance.md §8.3(§6.6 dangling ref 대체)·postgres-schema.md §8.2·runbooks README에서 링크. SQL은 postgis 16-3.5 컨테이너로 검증. PR #800.
+
 ## vNext main 동기화 (2026-07-20, `T-VN-SYNC-01`)
 
 - [x] **T-VN-SYNC-01 — latest main을 integration/t-vn에 동기화.**
