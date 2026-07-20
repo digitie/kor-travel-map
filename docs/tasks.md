@@ -54,8 +54,6 @@
   - [ ] `T-VN-54` — **weather partition·hypertable·event clock 측정**
   - [ ] `T-VN-55` — **물리 listener/process 분리 측정**
   - [ ] `T-VN-56` — **대규모 fixture 실행 주기 측정**
-  - [ ] `T-VN-H04` — **PROJ pin·drift·REINDEX runbook**
-  - [ ] `T-VN-H05` — **INVALID concurrent index 복구 runbook**
   - [ ] `T-VN-H06` — **admin 목록 keyset 전환**
   - [ ] `T-VN-H07` — **PinVi field-level contract와 OpenAPI SHA 검증**
   - [ ] `T-VN-H08` — **Tier-2 p95 nearest-rank 산식 정확화** (#799)
@@ -471,16 +469,6 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
   preflight는 성공하고 route에 없는 method나 비공개 trust header는 400이면서
   `Access-Control-Allow-Origin`을 내보내지 않아야 한다. service/operator/metrics/debug 표면의
   CORS 비노출과 빈 wiring exception ledger를 함께 회귀 고정한다. DB/OpenAPI schema 변경은 없다.
-
-- [ ] T-VN-H04 — **PROJ pin·drift·REINDEX runbook**
-
-  `coord_5179` generated 값의 PROJ 버전을 고정하고 drift 검사, 재계산, 공간 index REINDEX와 검증
-  순서를 운영 runbook에 추가한다.
-
-- [ ] T-VN-H05 — **INVALID concurrent index 복구 runbook**
-
-  `CREATE INDEX CONCURRENTLY` 실패 뒤 남은 INVALID index를 탐지·검증·drop하는 자동 검사와 운영
-  절차를 추가한다.
 
 - [ ] T-VN-H06 — **admin 목록 keyset 전환**
 

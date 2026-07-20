@@ -364,6 +364,10 @@ delete 모두 parent target → feature link 순서를 지켜 교착을 피한�
 
 ### 7.1 자주 조회하는 필드는 generated column으로
 
+> **STORED generated 컬럼과 PROJ 버전**: `coord_5179`처럼 `ST_Transform`으로 만든 STORED
+> generated 컬럼 값은 PROJ 버전에 종속한다. PostGIS/PROJ image tag 상향 시 drift 검사·재계산·
+> REINDEX 절차는 [`../runbooks/coord-5179-proj-pin.md`](../runbooks/coord-5179-proj-pin.md)(T-VN-H04).
+
 ```sql
 ALTER TABLE feature.features
   ADD COLUMN bjd_code_cached CHAR(10)
@@ -474,7 +478,7 @@ index/DDL을 바꾸는 PR은 변경 **전후 write 비용·index 크기**(및 �
   index 생성/삭제(migration)는 호출자가 하고, helper는 순수 측정만 한다.
 - GiST/BRIN은 실제 predicate·시간 정렬을 지원할 때만 채택한다. GiST 6→partial 정리의 write
   **~1.6× 개선** 실측이 선례다(§13, T-VN-18 계열이 이 helper로 before/after를 첨부한다).
-- concurrent build 실패 뒤 INVALID index가 0건인지 확인한다(§6.6 관련 runbook). dedup과
+- concurrent build 실패 뒤 INVALID index가 0건인지 확인한다([`../runbooks/invalid-index-recovery.md`](../runbooks/invalid-index-recovery.md), T-VN-H05). dedup과
   UNIQUE 사이 writer race가 있는 0060은 성능보다 원자성을 우선해 table writer lock 아래
   non-concurrent build를 사용하므로 lock 대기·보유 시간과 fence 범위를 대신 기록한다.
 
