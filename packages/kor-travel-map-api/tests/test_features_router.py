@@ -583,10 +583,17 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
 
         cached = client.get(
             "/v1/features/f1",
-            headers={"If-None-Match": '"7"'},
+            headers={
+                "Origin": "http://localhost:12705",
+                "If-None-Match": '"7"',
+            },
         )
         assert cached.status_code == 304
         assert cached.headers["ETag"] == '"7"'
+        assert cached.headers["Access-Control-Allow-Origin"] == (
+            "http://localhost:12705"
+        )
+        assert "etag" in cached.headers["Access-Control-Expose-Headers"].casefold()
         assert cached.content == b""
 
         malformed = client.get(

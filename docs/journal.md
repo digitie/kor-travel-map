@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex) — #798 route wiring startup·CORS exact 계약 문서화
+
+- T-VN-H03의 surface 분리는 유지하되, `create_app()`이 정책 분류만 검증하고 실제 dependency
+  wiring assertion은 테스트에서만 실행하던 gap을 startup fail-closed로 올린다.
+- public CORS의 `allow_methods=*`, `allow_headers=*`를 제거한다. route policy matrix의 실제
+  method와 공개 API key header·CORS safelist만 preflight에 허용하고, route에 없는 method 또는
+  admin/service credential header는 400이면서 ACAO를 붙이지 않는 계약을 고정한다.
+- 이 단계는 문서-first이며 테스트·lint를 실행하지 않았다. 구현 exact head는 단일 적대 리뷰
+  승인 뒤에만 게이트를 실행한다.
+- 첫 적대 리뷰 P1에 따라 public conditional GET의 `If-None-Match` request와 browser가 읽는 `ETag`
+  response 노출을 closed allowlist에 추가했다. P2에 따라 전체 public method 합집합을 제거하고 matching
+  method 집합별 CORS middleware를 사용해 성공 ACA-Methods도 exact하게 만들었다.
+- 같은 리뷰어 재검토에서 P0~P2 없음으로 승인됐다. focused 58개, API package 전체 746개, 변경 source
+  Ruff, strict mypy 2 files, full/user OpenAPI drift를 모두 통과했다.
+
 ## 2026-07-20 (codex agent A) — Tier-2 nearest-rank percentile 정확화
 
 - issue #799를 `T-VN-H08` 단일 PR로 등록하고 Tier-2 표본 정렬, nearest-rank

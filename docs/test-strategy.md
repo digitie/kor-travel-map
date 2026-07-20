@@ -396,6 +396,14 @@ user OpenAPI도 공개 가능한 정책 집합에서 직접 파생하고 full sp
 표현하지 않으므로 Python OpenAPI 회귀가 인증 의미를 소유하고, admin/user `gen:types:check`는
 query/header/DTO shape drift를 별도로 고정한다.
 
+앱 조립 회귀는 `assert_route_policy_wiring()`을 직접 호출하는 unit gate에만 의존하지 않는다.
+PUBLIC_KEYED route를 OPERATOR로, OPERATOR route를 PUBLIC_KEYED로 바꾼 대표 miswire에서
+`create_app()` 자체가 실패해야 한다. CORS 회귀는 public route의 실제 GET과
+`X-Kor-Travel-Map-Api-Key`·`If-None-Match` preflight 성공, matching route의 exact
+`Access-Control-Allow-Methods`, 304 응답의 `ETag` browser 노출을 확인한다. 같은 route의 DELETE
+또는 비공개 trust header는 400과 ACAO 부재로 실패해야 한다. operator/service route는 계속 ACAO
+부재다.
+
 #### 5.1.3 사용자 OpenAPI reachable schema raw 경계
 
 user OpenAPI의 모든 operation response schema를 root로 삼아 local `$ref`, array `items`, object

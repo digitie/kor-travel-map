@@ -55,7 +55,7 @@ from kortravelmap.api.response import request_id as response_request_id
 from kortravelmap.api.route_policy import (
     RoutePolicy,
     RoutePolicyMatrixRow,
-    assert_routes_classified,
+    assert_route_policy_wiring,
     build_route_policy_matrix,
 )
 from kortravelmap.api.routers import (
@@ -875,10 +875,10 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
 
     application.openapi = _custom_openapi  # type: ignore[method-assign]
 
-    # ADR-066 결정 1 (T-VN-02) — 조립된 app의 모든 HTTP/WS route는 route policy
-    # matrix에 분류돼 있어야 한다. 미분류 route는 여기(앱 구성 검사)와 CI
-    # (`tests/test_route_policy.py`)에서 함께 실패한다.
-    assert_routes_classified(application)
+    # ADR-066 결정 1 (T-VN-02/H03R) — 모든 HTTP/WS route의 분류와 실제 enforcing
+    # dependency 배선을 startup에서 함께 검증한다. 미분류·miswire·stale exception은
+    # 앱을 실행하기 전에 실패한다.
+    route_policy_matrix = assert_route_policy_wiring(application)
 
     # ADR-066 T-VN-H03 — surface별 CORS 분리. route policy matrix(T-VN-02)의
     # 분류를 재사용해 browser-facing public 표면(public-unauthenticated·
@@ -889,9 +889,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     if settings.cors_allow_origins:
         application.add_middleware(
             SurfaceScopedCORSMiddleware,
-            surface_patterns=build_cors_surface_patterns(
-                build_route_policy_matrix(application)
-            ),
+            surface_patterns=build_cors_surface_patterns(route_policy_matrix),
             allow_origins=settings.cors_allow_origins,
         )
 

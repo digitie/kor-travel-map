@@ -30,6 +30,8 @@
   - [ ] `T-VN-58` — **correction 편집 기준 ETag 고정** (#785)
   - [ ] `T-VN-LIVE-01` — **#741/#785/T-VN-15 targeted production 인수**
     (agent B, draft PR #792; 단일 적대 리뷰·gate·n150 live·issue close 대기)
+  - [ ] `T-VN-H03R` — **route wiring startup gate·public CORS exact preflight 완결**
+    (#798, T-VN-H03 적대 리뷰 후속)
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
     `T-VN-16` weather batch와 부모 404.
@@ -434,6 +436,15 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
   주기를 확정한다.
 
 ### 독립 하드닝 — 각 항목 PR 1개
+
+- [ ] T-VN-H03R — **route wiring startup gate·public CORS exact preflight 완결**
+
+  조립된 앱이 route 분류뿐 아니라 실제 enforcing dependency 배선까지 startup에서 검증하도록
+  `assert_route_policy_wiring()`을 실행한다. public CORS는 route policy matrix의 실제 method와
+  고정 request-header allowlist(`X-Kor-Travel-Map-Api-Key` + CORS safelist)만 광고한다. 허용
+  preflight는 성공하고 route에 없는 method나 비공개 trust header는 400이면서
+  `Access-Control-Allow-Origin`을 내보내지 않아야 한다. service/operator/metrics/debug 표면의
+  CORS 비노출과 빈 wiring exception ledger를 함께 회귀 고정한다. DB/OpenAPI schema 변경은 없다.
 
 - [ ] T-VN-H04 — **PROJ pin·drift·REINDEX runbook**
 

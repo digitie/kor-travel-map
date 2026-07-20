@@ -213,6 +213,27 @@ def test_unlisted_wiring_gap_fails(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "wrong_policy"),
+    [
+        ("/v1/curated-themes", RoutePolicy.OPERATOR),
+        ("/v1/ops/metrics", RoutePolicy.PUBLIC_KEYED),
+    ],
+)
+def test_create_app_fails_on_public_operator_wiring_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    wrong_policy: RoutePolicy,
+) -> None:
+    """PUBLIC_KEYED/OPERATOR 오배선은 test helper 호출 전 startup에서 실패한다."""
+
+    monkeypatch.setitem(ROUTE_POLICIES, path, wrong_policy)
+
+    with pytest.raises(RoutePolicyError, match=path):
+        _representative_app()
+
+
+@pytest.mark.unit
 def test_every_ledgered_path_is_get_only() -> None:
     # ledger는 읽기 전용 gap만 면제한다 — 각 예외 경로가 실제로 GET-only인지
     # matrix에서 확인한다(무인증 MUTATION이 ledger 아래 숨는 것 방지).

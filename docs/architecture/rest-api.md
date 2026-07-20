@@ -55,6 +55,17 @@ payload 무결성을 보호한다. 다른 query 재사용은 `CURSOR_QUERY_MISMA
 MVT tile, 범용 `feature-context` batch, 물리 listener 분리는 목표 계약이 아니라
 T-VN-51~55의 실측 결과가 채택 조건을 충족할 때만 새 결정을 연다.
 
+route policy matrix는 문서·OpenAPI 분류 입력에 그치지 않는다. `create_app()`은 조립된 모든
+route의 실제 enforcing dependency가 정책과 일치하는지 startup에서 검증하며, 미분류 route,
+PUBLIC_KEYED/OPERATOR 오배선, stale exception ledger는 서버가 listen하기 전에 실패한다.
+
+브라우저 CORS는 public 표면에만 적용하고 route별 실제 HTTP method를 허용한다. request header는
+CORS safelist(`Accept`, `Accept-Language`, `Content-Language`, `Content-Type`), conditional GET의
+`If-None-Match`, `X-Kor-Travel-Map-Api-Key`만 허용한다. public conditional GET 응답은 `ETag`를
+browser JavaScript에 노출한다. 다른 method나 admin/service credential header의
+preflight는 400이며 `Access-Control-Allow-Origin`을 내보내지 않는다. service/operator/metrics/
+debug 표면은 origin이 허용 목록에 있어도 CORS를 광고하지 않는다(T-VN-H03R).
+
 ## 0. 한눈에 — #317이 한 것 vs ADR-048 delta
 
 | 영역 | #317(T-214/T-215) | ADR-048 보강 |
