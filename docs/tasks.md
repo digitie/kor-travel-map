@@ -443,7 +443,9 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
   공식 `docker-compose.yml`은 host env가 없으면
   `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=false`를 해석해야 한다. 파괴적 운용이 승인된
   Docker Manager production 형상만 literal `true`를 주입하며, Map standalone의 명시적
-  `true` override도 허용한다. backup create/delete/restore/swap의 registry actor는 요청
+  `true` override는 shell/root project interpolation 환경에서만 허용한다(package API
+  `env_file`은 service `environment`보다 우선하지 않는다). backup create/delete/restore/swap의
+  registry actor는 요청
   body나 고정 문자열이 아니라 `AdminProxyContext.actor`만 사용한다. 미사용
   `RestoreSwapRequest.operator`를 제거하고 full/user OpenAPI·생성 타입을 clean-cut한다.
   서로 다른 인증 principal의 delete/restore/swap 이벤트와 resolved-compose default false /

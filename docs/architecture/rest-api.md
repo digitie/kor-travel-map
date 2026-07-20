@@ -459,8 +459,9 @@ stale basis의 PATCH/DELETE는 `412 Precondition Failed`다. consumer는 draft�
   event actor는 router body가 아니라 admin BFF 인증에서 얻은 `AdminProxyContext.actor`만
   사용한다. `RestoreSwapRequest`는 실행 계획 필드와 `note`만 받고 `operator`/`actor`를 받지
   않으며 포함하면 `422 VALIDATION_ERROR`다. standalone compose는 destructive enablement를
-  기본 `false`로 해석하고 명시적 `true`만 허용한다. 승인된 Manager production 형상은 별도
-  canonical literal `true`와 raw/resolved/runtime attestation을 소유한다(T-VN-H02R, #796).
+  기본 `false`로 해석하고 shell/root project interpolation 환경의 명시적 `true`만 허용한다.
+  package API `env_file`은 compose opt-in 근거가 아니다. 승인된 Manager production 형상은
+  별도 canonical literal `true`와 raw/resolved/runtime attestation을 소유한다(T-VN-H02R, #796).
 - **admin 공간·카드 read**: admin 지도는 공개 `/v1/features*`를 재사용하지 않는다.
   `/v1/admin/features/in-bounds`는 `feature.features` base row에서 삭제 전 운영 상태를
   직접 조회하며, `status` 미지정 시 `draft|active|inactive|hidden|broken` 전체를 대상으로 한다.

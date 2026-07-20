@@ -56,9 +56,12 @@ Dagster/provider 실행용 환경변수로 매핑한다. REST API backend는 pro
 `KOR_TRAVEL_MAP_API_*` auth/route/backup 값을 API 전용 파일로 옮긴 다음 기동한다.
 CORS/metrics도 API 전용 파일이 정본이며 root
 `.env.example`과 `scripts/load-env.sh`는 이 runtime 설정을 더 이상 주입하지 않는다.
-`KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED`의 standalone 기본값은 `false`다. 실제 파괴적
-조작이 필요한 환경만 API 전용 env 또는 배포 관리자 정본에서 `true`를 명시한다. 설정 enablement와
-각 요청의 `AdminProxyContext.actor` 감사는 서로 대체하지 않는다.
+`KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED`의 standalone 기본값은 `false`다. Compose opt-in은
+api service의 `environment` interpolation 입력인 shell 또는 root project `.env`에서만 `true`를
+명시한다. package API `.env`(`env_file`)의 같은 값은 service `environment`보다 우선하지 않는다.
+직접 API process를 기동할 때만 package API env가 입력이다. 승인된 Docker Manager production은
+canonical service의 literal `true`를 사용한다. 설정 enablement와 각 요청의
+`AdminProxyContext.actor` 감사는 서로 대체하지 않는다.
 
 | 입력 키 예 | 실행 시 export |
 |------------|----------------|
