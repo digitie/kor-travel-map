@@ -24,7 +24,9 @@
   성공한 accept에는 close를 정확히 한 번 수행한 뒤 취소를 재전파한다. 실제 Uvicorn
   `websockets-sansio` TCP read 경계와 pre-handshake accept timeout·예외의 HTTP 500
   fallback 회귀도 추가했다.
-- 리뷰 반영 head의 동일 리뷰어 재승인 전이므로 테스트·lint는 아직 실행하지 않았다.
+- 10ms settle head는 단일 적대 리뷰에서 P0/P1/P2 0으로 승인됐다. router 회귀 56개와 API
+  전체 762개, CI와 같은 전체 Ruff, API strict mypy 56개 파일이 통과했다. 공개 Chromium
+  반복 `4401`·data frame 0건은 최종 production 인수로 남긴다.
 
 ## 2026-07-20 (codex) — Chromium ops live 4401 관측 복구 구현
 

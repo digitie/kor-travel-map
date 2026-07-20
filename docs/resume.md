@@ -16,8 +16,10 @@
   `CancelledError`를 재전파하도록 보강했다.
   실제 Uvicorn sansio TCP에서 handshake/close read 경계를 고정하고, accept timeout·예외가
   pre-handshake HTTP 500 fallback으로 끝나는 회귀도 추가했다.
-- **다음 한 작업**: 수정 head를 동일 리뷰어가 다시 승인한 뒤 API 회귀·전체 gate와 CI를 실행하고,
-  n150 공개 Chromium strict C7을 반복해 `4401`·data frame 0건을 최종 검증한다.
+- 단일 적대 리뷰 최종 판정은 P0/P1/P2 0이다. router 회귀 56개와 API 전체 762개, 전체 Ruff,
+  API strict mypy 56개 파일이 통과했다.
+- **다음 한 작업**: CI green을 확인하고 n150 공개 Chromium strict C7을 반복해 ticket 없음·변조
+  모두 `4401`·data frame 0건을 최종 검증한다.
 
 ## 2026-07-20 (codex) — T-ADM-C7W browser 4401 수정 검증
 
