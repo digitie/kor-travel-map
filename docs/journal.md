@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-20 (codex) — T-VN-H11 ops-live 인증 close 전달 보강
+
+- issue #809로 #806의 잔여 production 경계를 분리했다. 같은 n150 API 컨테이너에 LAN 직결한
+  실제 Chromium은 ticket 없음과 변조 candidate를 모두 `4401`, data frame 0건으로 관측해
+  인증 검증·DB rollback·Starlette endpoint 자체를 원인에서 제외했다.
+- 운영 설치 버전은 FastAPI 0.139.2, Starlette 0.52.1, Uvicorn 0.51.0, websockets 16.1.1이며
+  Uvicorn 기본 `auto`는 `websockets-sansio`를 선택한다. 이 구현은 101을 쓴 직후 close frame을
+  쓰고 transport를 닫는다.
+- 로컬 TCP tap에서 즉시 accept/close는 101과 close frame이 같은 backend read에 합쳐졌다.
+  첫 수동 probe에서는 accept 뒤 `asyncio.sleep(0)`으로 두 read가 분리됐지만, 자동 exact
+  Uvicorn TCP 회귀에서 다시 같은 read로 합쳐져 scheduler checkpoint의 불안정성을 확인했다.
+  10ms의 bounded settle window와 5회 반복 TCP 회귀로 보강하되, 이는 공개 proxy `1006`의
+  선행 가설이자 ASGI transport flush 보장이 아니므로 공개 Chromium 인수 검증을 함께 적용한다.
+- CodeGraph 영향도는 `_accept_and_close_best_effort`의 caller가
+  `_rollback_and_accept_close` 하나이고 callee가 accept/close helper 둘뿐임을 확인했다.
+- draft PR #810의 첫 단일 적대 리뷰에서 event-loop yield의 비보장성, accept 뒤 취소 시
+  close 유실 가능성, accept 실패 fallback의 실서버 검증 부재, 문서의 원인 단정이 지적됐다.
+  accept부터 close까지 shield된 child task로 옮겼다. 재리뷰에서 확인한 accept 내부
+  `wait_for` handoff 취소와 close 대기 중 반복 취소까지 operation의 bounded 완료를 보호하고,
+  성공한 accept에는 close를 정확히 한 번 수행한 뒤 취소를 재전파한다. 실제 Uvicorn
+  `websockets-sansio` TCP read 경계와 pre-handshake accept timeout·예외의 HTTP 500
+  fallback 회귀도 추가했다.
+- 10ms settle head는 단일 적대 리뷰에서 P0/P1/P2 0으로 승인됐다. router 회귀 56개와 API
+  전체 762개, CI와 같은 전체 Ruff, API strict mypy 56개 파일이 통과했다. 공개 Chromium
+  반복 `4401`·data frame 0건은 최종 production 인수로 남긴다.
+
 ## 2026-07-20 (codex) — Chromium ops live 4401 관측 복구 구현
 
 - C7 strict 실행이 운영 쓰기 테스트 전에 두 번 동일하게 중단됐다. 두 실패 실행은 각각 exact

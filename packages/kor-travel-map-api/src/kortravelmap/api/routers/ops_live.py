@@ -64,6 +64,7 @@ _DAGSTER_RUN_TOPIC_PREFIX: Final[str] = "dagster_run:"
 _MAX_TOPICS: Final[int] = 32
 _MAX_DAGSTER_RUN_ID_LENGTH: Final[int] = 255
 _CLOSE_TIMEOUT_SECONDS: Final[float] = 1.0
+_ACCEPT_CLOSE_SETTLE_SECONDS: Final[float] = 0.01
 _ROLLBACK_TIMEOUT_SECONDS: Final[float] = 1.0
 _RETRY_LATER_CLOSE_CODE: Final[int] = 1013
 _MIN_POLL_INTERVAL_MS: Final[int] = 1_000
@@ -814,8 +815,30 @@ async def _accept_and_close_best_effort(
     reason: str,
     subprotocol: str | None,
 ) -> None:
-    await _accept_best_effort(websocket, subprotocol=subprotocol)
-    await _close_best_effort(websocket, code=code, reason=reason)
+    async def _accept_yield_then_close() -> None:
+        accepted = await _accept_best_effort(websocket, subprotocol=subprotocol)
+        if not accepted:
+            return
+        # ASGI에는 transport drain acknowledgement가 없다. 짧은 양의 settle window로
+        # Uvicorn sansio의 101/close coalescing을 best effort로 줄이고, exact
+        # proxy+Chromium live gate에서 최종 전달 계약을 검증한다.
+        await asyncio.sleep(_ACCEPT_CLOSE_SETTLE_SECONDS)
+        await _close_best_effort(websocket, code=code, reason=reason)
+
+    operation = asyncio.create_task(_accept_yield_then_close())
+    cancellation: asyncio.CancelledError | None = None
+    while True:
+        try:
+            await asyncio.shield(operation)
+            break
+        except asyncio.CancelledError as exc:
+            if operation.done():
+                raise
+            # accept의 내부 wait_for handoff와 close 대기를 모두 outer cancellation에서
+            # 보호한다. 반복 취소도 operation의 bounded timeout을 취소하지 않는다.
+            cancellation = exc
+    if cancellation is not None:
+        raise cancellation
 
 
 async def _rollback_and_accept_close(

@@ -7,11 +7,13 @@ import base64
 import hashlib
 import hmac
 import json
+import socket
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+import uvicorn
 from fastapi.testclient import TestClient
 from kortravelmap.infra.ops_repo import (
     OpsConsistencyReport,
@@ -21,7 +23,7 @@ from kortravelmap.infra.ops_repo import (
     OpsIntegrityIssuePage,
 )
 from kortravelmap.infra.status_repo import StatusCounts
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
@@ -77,6 +79,80 @@ class _FakeSession:
 
     async def rollback(self) -> None:
         self.rollback_calls += 1
+
+
+class _RawWebSocketClient(asyncio.Protocol):
+    def __init__(self, request: bytes) -> None:
+        self._request = request
+        self.chunks: list[bytes] = []
+        self.closed = asyncio.get_running_loop().create_future()
+
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        assert isinstance(transport, asyncio.Transport)
+        transport.write(self._request)
+
+    def data_received(self, data: bytes) -> None:
+        self.chunks.append(bytes(data))
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        if not self.closed.done():
+            self.closed.set_result(exc)
+
+
+async def _capture_raw_ops_live_response(app: Any) -> list[bytes]:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    listener.setblocking(False)
+    host, port = listener.getsockname()
+    request = (
+        "GET /v1/ops/live HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        "\r\n"
+    ).encode("ascii")
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            access_log=False,
+            lifespan="off",
+            log_config=None,
+            ws="websockets-sansio",
+        )
+    )
+    server_task = asyncio.create_task(server.serve(sockets=[listener]))
+    transport: asyncio.Transport | None = None
+    try:
+        for _ in range(1_000):
+            if server.started:
+                break
+            if server_task.done():
+                await server_task
+                raise AssertionError("Uvicorn exited before startup")
+            await asyncio.sleep(0.001)
+        else:
+            raise AssertionError("Uvicorn startup timeout")
+
+        protocol = _RawWebSocketClient(request)
+        created_transport, _ = await asyncio.get_running_loop().create_connection(
+            lambda: protocol,
+            host,
+            port,
+        )
+        assert isinstance(created_transport, asyncio.Transport)
+        transport = created_transport
+        await asyncio.wait_for(protocol.closed, timeout=2)
+        return protocol.chunks
+    finally:
+        if transport is not None:
+            transport.close()
+        server.should_exit = True
+        await asyncio.wait_for(server_task, timeout=2)
+        listener.close()
 
 
 @pytest.fixture
@@ -425,6 +501,245 @@ def test_ops_live_ticket_claim_failure_rolls_back_and_retries_later(
         websocket.receive_json()
 
     assert exc_info.value.code == 1013
+    assert session.rollback_calls == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ops_live_accept_yields_before_auth_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
+    events: list[str] = []
+
+    async def _accept(
+        _websocket: Any,
+        *,
+        subprotocol: str | None,
+    ) -> bool:
+        assert subprotocol == "ktm.ops-live.v1.YQ.YQ"
+        events.append("accept")
+        asyncio.get_running_loop().call_soon(events.append, "event-loop-yield")
+        return True
+
+    async def _close(
+        _websocket: Any,
+        *,
+        code: int,
+        reason: str,
+    ) -> None:
+        assert code == 4401
+        assert reason == "authentication required"
+        events.append("close")
+
+    monkeypatch.setattr(live_mod, "_accept_best_effort", _accept)
+    monkeypatch.setattr(live_mod, "_close_best_effort", _close)
+
+    await live_mod._accept_and_close_best_effort(
+        object(),
+        code=4401,
+        reason="authentication required",
+        subprotocol="ktm.ops-live.v1.YQ.YQ",
+    )
+
+    assert events == ["accept", "event-loop-yield", "close"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ops_live_accept_failure_does_not_send_auth_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
+    async def _accept(
+        _websocket: Any,
+        *,
+        subprotocol: str | None,
+    ) -> bool:
+        assert subprotocol is None
+        return False
+
+    async def _close_must_not_run(
+        _websocket: Any,
+        *,
+        code: int,
+        reason: str,
+    ) -> None:
+        raise AssertionError(f"close must not run after failed accept: {code=} {reason=}")
+
+    monkeypatch.setattr(live_mod, "_accept_best_effort", _accept)
+    monkeypatch.setattr(live_mod, "_close_best_effort", _close_must_not_run)
+
+    await live_mod._accept_and_close_best_effort(
+        object(),
+        code=4401,
+        reason="authentication required",
+        subprotocol=None,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ops_live_cancellation_during_accept_handoff_closes_once() -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
+    close_codes: list[int] = []
+    operation: asyncio.Task[None]
+
+    class _AcceptThenCancelWebSocket:
+        async def accept(
+            self,
+            *,
+            subprotocol: str | None,
+        ) -> None:
+            assert subprotocol is None
+            asyncio.get_running_loop().call_soon(operation.cancel)
+
+        async def close(self, *, code: int, reason: str) -> None:
+            assert reason == "authentication required"
+            close_codes.append(code)
+
+    operation = asyncio.create_task(
+        live_mod._accept_and_close_best_effort(
+            _AcceptThenCancelWebSocket(),  # type: ignore[arg-type]
+            code=4401,
+            reason="authentication required",
+            subprotocol=None,
+        )
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await operation
+
+    assert close_codes == [4401]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ops_live_repeated_cancellation_during_close_closes_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
+    close_started = asyncio.Event()
+    close_release = asyncio.Event()
+    close_codes: list[int] = []
+
+    async def _accept(
+        _websocket: Any,
+        *,
+        subprotocol: str | None,
+    ) -> bool:
+        assert subprotocol is None
+        return True
+
+    async def _close(
+        _websocket: Any,
+        *,
+        code: int,
+        reason: str,
+    ) -> None:
+        assert reason == "authentication required"
+        close_codes.append(code)
+        close_started.set()
+        await close_release.wait()
+
+    monkeypatch.setattr(live_mod, "_accept_best_effort", _accept)
+    monkeypatch.setattr(live_mod, "_close_best_effort", _close)
+
+    operation = asyncio.create_task(
+        live_mod._accept_and_close_best_effort(
+            object(),
+            code=4401,
+            reason="authentication required",
+            subprotocol=None,
+        )
+    )
+    await close_started.wait()
+    operation.cancel()
+    await asyncio.sleep(0)
+    operation.cancel()
+    await asyncio.sleep(0)
+    close_release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await operation
+
+    assert close_codes == [4401]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ops_live_real_uvicorn_separates_handshake_and_auth_close() -> None:
+    app = create_app(ApiSettings(admin_proxy_secret=_LIVE_SECRET))
+    session = _FakeSession()
+
+    async def _fake_session() -> AsyncIterator[_FakeSession]:
+        yield session
+
+    app.dependency_overrides[get_session] = _fake_session
+    for attempt in range(5):
+        chunks = await _capture_raw_ops_live_response(app)
+        response = b"".join(chunks)
+        header_end = response.index(b"\r\n\r\n") + 4
+
+        offset = 0
+        for chunk in chunks:
+            offset += len(chunk)
+            if header_end <= offset:
+                assert header_end == offset, (
+                    f"coalesced response on attempt {attempt + 1}"
+                )
+                break
+        else:  # pragma: no cover - response.index가 먼저 실패한다.
+            raise AssertionError("WebSocket handshake header boundary is missing")
+
+        assert response.startswith(b"HTTP/1.1 101 Switching Protocols\r\n")
+        frame = response[header_end:]
+        assert frame[0] & 0x0F == 0x08
+        assert frame[1] & 0x80 == 0
+        payload_length = frame[1] & 0x7F
+        assert payload_length < 126
+        assert len(frame) == payload_length + 2
+        assert int.from_bytes(frame[2:4], "big") == 4401
+    assert session.rollback_calls == 5
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["timeout", "exception"])
+async def test_ops_live_real_uvicorn_owns_failed_accept_fallback(
+    failure_mode: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
+    app = create_app(ApiSettings(admin_proxy_secret=_LIVE_SECRET))
+    session = _FakeSession()
+
+    async def _fake_session() -> AsyncIterator[_FakeSession]:
+        yield session
+
+    async def _fail_accept(
+        _websocket: WebSocket,
+        subprotocol: str | None = None,
+        headers: Any = None,
+    ) -> None:
+        del subprotocol, headers
+        if failure_mode == "timeout":
+            await asyncio.sleep(60)
+        raise RuntimeError("injected accept failure")
+
+    app.dependency_overrides[get_session] = _fake_session
+    monkeypatch.setattr(WebSocket, "accept", _fail_accept)
+    monkeypatch.setattr(live_mod, "_CLOSE_TIMEOUT_SECONDS", 0.001)
+
+    response = b"".join(await _capture_raw_ops_live_response(app))
+
+    assert response.startswith(b"HTTP/1.1 500 Internal Server Error\r\n")
+    assert b"101 Switching Protocols" not in response
     assert session.rollback_calls == 1
 
 
