@@ -176,8 +176,9 @@ TLS proxy 경계에서는 `1006`으로 끝났으므로 이 coalescing을 선행 
 transport drain 확인 계약이 없으므로 accept 성공 뒤 event loop에 한 번 제어를 양보하는 것은
 배포 조합에 한정된 best-effort 완화이며, 실제 Uvicorn TCP 회귀와 n150 공개 Chromium 반복
 strict 결과를 최종 인수 기준으로 삼는다. accept 실패는 application close를 보내지 않고
-Uvicorn의 pre-handshake HTTP 500 fallback에 맡긴다. 이미 accept한 작업이 취소되면 close를
-정확히 한 번 끝낸 뒤 취소를 재전파하며, data frame 0건과 기존 인증·nonce·rollback 계약은
+Uvicorn의 pre-handshake HTTP 500 fallback에 맡긴다. accept부터 close까지 하나의 bounded
+child task로 보호해 handoff 중 취소와 반복 취소에도 성공한 accept의 close를 정확히 한 번
+끝낸 뒤 취소를 재전파하며, data frame 0건과 기존 인증·nonce·rollback 계약은
 유지한다. 단일 적대 리뷰, API 게이트와 CI까지 통과한 뒤 완료한다.
 
 #### T-VN-SYNC-02 — integration/t-vn → main 최종 합류

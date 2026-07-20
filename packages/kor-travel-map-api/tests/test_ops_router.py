@@ -582,13 +582,47 @@ async def test_ops_live_accept_failure_does_not_send_auth_close(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_ops_live_cancellation_at_accept_barrier_closes_once(
+async def test_ops_live_cancellation_during_accept_handoff_closes_once() -> None:
+    close_codes: list[int] = []
+    operation: asyncio.Task[None]
+
+    class _AcceptThenCancelWebSocket:
+        async def accept(
+            self,
+            *,
+            subprotocol: str | None,
+        ) -> None:
+            assert subprotocol is None
+            asyncio.get_running_loop().call_soon(operation.cancel)
+
+        async def close(self, *, code: int, reason: str) -> None:
+            assert reason == "authentication required"
+            close_codes.append(code)
+
+    operation = asyncio.create_task(
+        _accept_and_close_best_effort(
+            _AcceptThenCancelWebSocket(),  # type: ignore[arg-type]
+            code=4401,
+            reason="authentication required",
+            subprotocol=None,
+        )
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await operation
+
+    assert close_codes == [4401]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ops_live_repeated_cancellation_during_close_closes_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import ops_live as live_mod
 
-    barrier_started = asyncio.Event()
-    barrier_release = asyncio.Event()
+    close_started = asyncio.Event()
+    close_release = asyncio.Event()
     close_codes: list[int] = []
 
     async def _accept(
@@ -599,11 +633,6 @@ async def test_ops_live_cancellation_at_accept_barrier_closes_once(
         assert subprotocol is None
         return True
 
-    async def _barrier(delay: float) -> None:
-        assert delay == 0
-        barrier_started.set()
-        await barrier_release.wait()
-
     async def _close(
         _websocket: Any,
         *,
@@ -612,10 +641,11 @@ async def test_ops_live_cancellation_at_accept_barrier_closes_once(
     ) -> None:
         assert reason == "authentication required"
         close_codes.append(code)
+        close_started.set()
+        await close_release.wait()
 
     monkeypatch.setattr(live_mod, "_accept_best_effort", _accept)
     monkeypatch.setattr(live_mod, "_close_best_effort", _close)
-    monkeypatch.setattr(live_mod.asyncio, "sleep", _barrier)
 
     operation = asyncio.create_task(
         live_mod._accept_and_close_best_effort(
@@ -625,9 +655,12 @@ async def test_ops_live_cancellation_at_accept_barrier_closes_once(
             subprotocol=None,
         )
     )
-    await barrier_started.wait()
+    await close_started.wait()
     operation.cancel()
-    barrier_release.set()
+    await asyncio.sleep(0)
+    operation.cancel()
+    await asyncio.sleep(0)
+    close_release.set()
 
     with pytest.raises(asyncio.CancelledError):
         await operation

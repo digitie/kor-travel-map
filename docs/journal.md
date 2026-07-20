@@ -18,9 +18,11 @@
   `_rollback_and_accept_close` 하나이고 callee가 accept/close helper 둘뿐임을 확인했다.
 - draft PR #810의 첫 단일 적대 리뷰에서 event-loop yield의 비보장성, accept 뒤 취소 시
   close 유실 가능성, accept 실패 fallback의 실서버 검증 부재, 문서의 원인 단정이 지적됐다.
-  close를 shield된 child task로 옮겨 outer cancellation에도 정확히 한 번 완료한 뒤 취소를
-  재전파하고, 실제 Uvicorn `websockets-sansio` TCP read 경계와 pre-handshake accept
-  timeout·예외의 HTTP 500 fallback 회귀를 추가했다.
+  accept부터 close까지 shield된 child task로 옮겼다. 재리뷰에서 확인한 accept 내부
+  `wait_for` handoff 취소와 close 대기 중 반복 취소까지 operation의 bounded 완료를 보호하고,
+  성공한 accept에는 close를 정확히 한 번 수행한 뒤 취소를 재전파한다. 실제 Uvicorn
+  `websockets-sansio` TCP read 경계와 pre-handshake accept timeout·예외의 HTTP 500
+  fallback 회귀도 추가했다.
 - 리뷰 반영 head의 동일 리뷰어 재승인 전이므로 테스트·lint는 아직 실행하지 않았다.
 
 ## 2026-07-20 (codex) — Chromium ops live 4401 관측 복구 구현

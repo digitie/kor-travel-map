@@ -9,8 +9,10 @@
   frame이 같은 backend read에 합쳐지고, 둘 사이에 `asyncio.sleep(0)`을 두면 별도 read로
   분리됨을 확인했다. 공개 proxy의 `1006`과 이 coalescing의 인과관계는 아직 선행 가설이며,
   ASGI가 transport drain 완료를 보장하지 않으므로 event-loop yield만으로 완료를 선언하지 않는다.
-- draft PR #810의 첫 적대 리뷰(P1 2건, P2 2건)를 반영해 accept 뒤 close를 cancellation-safe
-  child task로 수행하고, 취소 시 close 정확히 1회 후 `CancelledError`를 재전파하도록 보강했다.
+- draft PR #810의 첫 적대 리뷰와 재리뷰를 반영해 accept부터 close까지 하나의
+  cancellation-safe child task로 수행한다. accept 내부 handoff나 close 대기에서 outer task가
+  반복 취소돼도 bounded operation을 끝내고, 성공한 accept에는 close 정확히 1회 후
+  `CancelledError`를 재전파하도록 보강했다.
   실제 Uvicorn sansio TCP에서 handshake/close read 경계를 고정하고, accept timeout·예외가
   pre-handshake HTTP 500 fallback으로 끝나는 회귀도 추가했다.
 - **다음 한 작업**: 수정 head를 동일 리뷰어가 다시 승인한 뒤 API 회귀·전체 gate와 CI를 실행하고,

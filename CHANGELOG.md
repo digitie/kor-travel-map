@@ -7,11 +7,13 @@
 
 ### Ops live proxy close 전달 보강 (2026-07-20, T-VN-H11 #809)
 
-- **CHANGED**: 인증 거절 WebSocket은 HTTP 101 handshake 뒤의 `4401` close를 보호된 child
-  task에서 한 event-loop turn 뒤 시도한다. ASGI transport flush 보장이 아닌 배포 조합의
-  best-effort 완화이며, 실제 Uvicorn TCP와 공개 Chromium 결과를 인수 기준으로 둔다.
-- **RELIABILITY**: accept 뒤 outer task가 취소돼도 close를 정확히 한 번 끝낸 뒤 취소를
-  재전파한다. pre-handshake accept timeout·예외에는 application close를 추가 전송하지 않고
+- **CHANGED**: 인증 거절 WebSocket은 accept부터 `4401` close까지를 보호된 child task에서
+  수행하고, close는 handshake 뒤 한 event-loop turn 후 시도한다. ASGI transport flush
+  보장이 아닌 배포 조합의 best-effort 완화이며, 실제 Uvicorn TCP와 공개 Chromium 결과를
+  인수 기준으로 둔다.
+- **RELIABILITY**: accept/close 도중 outer task가 반복 취소돼도 bounded operation을 끝낸 뒤
+  취소를 재전파한다. 성공한 accept에는 close를 정확히 한 번 수행한다. pre-handshake accept
+  timeout·예외에는 application close를 추가 전송하지 않고
   Uvicorn HTTP fallback에 맡긴다. ticket 없음·변조의 data frame 0건과 인증·nonce 계약은
   바뀌지 않는다.
 
