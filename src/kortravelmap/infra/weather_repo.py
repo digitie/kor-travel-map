@@ -163,12 +163,9 @@ _WEATHER_CONFLICT_TARGET: Final[str] = ", ".join(_WEATHER_IDENTITY_COLUMNS)
 # 같은 semantic tuple 재적재는 최신 값/payload/source로 갱신한다(weather_value_key는
 # 기존 행 값을 유지).
 #
-# 수용된 last-writer-wins(price writer와 동일 정책): known_at 가드가 없어 순서가
-# 뒤바뀐/backfill 재적재가 더 최신 값을 덮어쓸 수 있다. in-order 수집에는 무해하고
-# price도 같은 blind upsert다(parity). backfill 역행이 문제가 되면 향후
-# ``... DO UPDATE SET ... WHERE EXCLUDED.collected_at >=
-# feature_weather_values.collected_at`` 가드를 추가하는 옵션이 있으나 지금은
-# 범위 밖(price 대칭 유지).
+# 0060 dedup과 같은 latest-known-at-wins 정책: 더 오래된 collected_at은 no-op,
+# 동률에서 내용이 다르면 나중 write가 이기고 완전히 같은 재적재는 물리 UPDATE를
+# 만들지 않는다. collected_at은 DTO와 DB 양쪽에서 non-null TIMESTAMPTZ다.
 _INSERT_SQL: Final[str] = f"""
 INSERT INTO feature.feature_weather_values (
     weather_value_key, feature_id, provider, weather_domain, forecast_style,
@@ -189,6 +186,8 @@ ON CONFLICT ({_WEATHER_CONFLICT_TARGET}) DO UPDATE SET
     unit = EXCLUDED.unit,
     severity = EXCLUDED.severity,
     metric_name = EXCLUDED.metric_name,
+    source_metric_key = EXCLUDED.source_metric_key,
+    source_metric_name = EXCLUDED.source_metric_name,
     timeline_bucket = EXCLUDED.timeline_bucket,
     valid_from = EXCLUDED.valid_from,
     valid_until = EXCLUDED.valid_until,
@@ -197,6 +196,38 @@ ON CONFLICT ({_WEATHER_CONFLICT_TARGET}) DO UPDATE SET
     source_record_key = EXCLUDED.source_record_key,
     collected_at = EXCLUDED.collected_at,
     updated_at = now()
+WHERE EXCLUDED.collected_at >= feature_weather_values.collected_at
+  AND ROW(
+      EXCLUDED.value_number,
+      EXCLUDED.value_text,
+      EXCLUDED.unit,
+      EXCLUDED.severity,
+      EXCLUDED.metric_name,
+      EXCLUDED.source_metric_key,
+      EXCLUDED.source_metric_name,
+      EXCLUDED.timeline_bucket,
+      EXCLUDED.valid_from,
+      EXCLUDED.valid_until,
+      EXCLUDED.normalization_version,
+      EXCLUDED.payload,
+      EXCLUDED.source_record_key,
+      EXCLUDED.collected_at
+  ) IS DISTINCT FROM ROW(
+      feature_weather_values.value_number,
+      feature_weather_values.value_text,
+      feature_weather_values.unit,
+      feature_weather_values.severity,
+      feature_weather_values.metric_name,
+      feature_weather_values.source_metric_key,
+      feature_weather_values.source_metric_name,
+      feature_weather_values.timeline_bucket,
+      feature_weather_values.valid_from,
+      feature_weather_values.valid_until,
+      feature_weather_values.normalization_version,
+      feature_weather_values.payload,
+      feature_weather_values.source_record_key,
+      feature_weather_values.collected_at
+  )
 """
 
 _CARD_SQL: Final[str] = """
@@ -576,8 +607,9 @@ async def load_weather_values(
 ) -> int:
     """``WeatherValue`` 들을 멱등 upsert 적재한다. 적재 건수 반환 (commit은 호출자).
 
-    PK ``weather_value_key``가 identity tuple(ADR-010)이라 같은 값 재적재는 갱신.
-    weather kind ``feature``가 먼저 존재해야 한다(FK).
+    semantic tuple이 같으면 최신 ``collected_at``만 현재 row를 갱신한다. 더 오래된
+    backfill과 완전히 같은 재적재는 DB no-op이다. 반환값은 실제 UPDATE 수가 아니라
+    입력으로 수용한 건수다. weather kind ``feature``가 먼저 존재해야 한다(FK).
     """
     params = [_weather_value_params(v) for v in values]
     if not params:

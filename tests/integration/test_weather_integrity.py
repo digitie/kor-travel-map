@@ -156,33 +156,141 @@ async def test_writer_conflict_target_matches_unique_index(
     assert meta[1] is True  # NULLS NOT DISTINCT
 
 
-async def test_duplicate_semantic_tuple_absorbed_and_update_wins(
+@pytest.mark.parametrize(
+    (
+        "first_collected_at",
+        "first_value",
+        "second_collected_at",
+        "second_value",
+        "expected_collected_at",
+        "expected_value",
+        "expected_physical_update",
+    ),
+    [
+        (_T1, "20.0", _T2, "25.0", _T2, "25.0", True),
+        (_T2, "25.0", _T1, "20.0", _T2, "25.0", False),
+    ],
+    ids=("in-order-t1-to-t2", "late-backfill-t2-to-t1"),
+)
+async def test_semantic_upsert_keeps_latest_collected_at(
     migrated_session: AsyncSession,
+    first_collected_at: datetime,
+    first_value: str,
+    second_collected_at: datetime,
+    second_value: str,
+    expected_collected_at: datetime,
+    expected_value: str,
+    expected_physical_update: bool,
 ) -> None:
-    """같은 semantic tuple 재적재는 ON CONFLICT로 흡수되고 최신 값이 이긴다."""
+    """정방향 수집은 갱신하고 늦은 provider backfill은 현재값을 되돌리지 않는다."""
     await _ins_weather_feature(migrated_session, "f_wi")
+    first_source_key = f"SOURCE_{first_collected_at.hour}"
+    first_source_name = f"원천 {first_collected_at.hour}시"
+    second_source_key = f"SOURCE_{second_collected_at.hour}"
+    second_source_name = f"원천 {second_collected_at.hour}시"
     assert (
         await weather_repo.load_weather_values(
-            migrated_session, [_wv(value_number=Decimal("20.0"))]
+            migrated_session,
+            [
+                _wv(
+                    value_number=Decimal(first_value),
+                    collected_at=first_collected_at,
+                    source_metric_key=first_source_key,
+                    source_metric_name=first_source_name,
+                )
+            ],
         )
         == 1
     )
+    first_ctid = await migrated_session.scalar(
+        text(
+            "SELECT ctid::text FROM feature.feature_weather_values "
+            "WHERE feature_id = 'f_wi'"
+        )
+    )
     assert (
         await weather_repo.load_weather_values(
-            migrated_session, [_wv(value_number=Decimal("25.0"))]
+            migrated_session,
+            [
+                _wv(
+                    value_number=Decimal(second_value),
+                    collected_at=second_collected_at,
+                    source_metric_key=second_source_key,
+                    source_metric_name=second_source_name,
+                )
+            ],
         )
         == 1
     )
     row = (
         await migrated_session.execute(
             text(
-                "SELECT count(*) AS n, max(value_number) AS v "
+                "SELECT count(*) AS n, max(value_number) AS v, "
+                "max(collected_at) AS collected_at, max(ctid::text) AS ctid, "
+                "max(source_metric_key) AS source_metric_key, "
+                "max(source_metric_name) AS source_metric_name "
                 "FROM feature.feature_weather_values WHERE feature_id = 'f_wi'"
             )
         )
     ).one()
     assert row.n == 1
-    assert row.v == Decimal("25.0000")  # update-wins
+    assert row.v == Decimal(expected_value)
+    assert row.collected_at == expected_collected_at
+    assert row.source_metric_key == f"SOURCE_{expected_collected_at.hour}"
+    assert row.source_metric_name == f"원천 {expected_collected_at.hour}시"
+    assert (row.ctid != first_ctid) is expected_physical_update
+
+
+async def test_semantic_upsert_tie_updates_changed_value_but_identical_replay_is_noop(
+    migrated_session: AsyncSession,
+) -> None:
+    """동률은 뒤의 실제 변경이 이기고 완전히 같은 재적재는 heap을 갱신하지 않는다."""
+    await _ins_weather_feature(migrated_session, "f_wi")
+    original = _wv(
+        value_number=Decimal("20.0"),
+        collected_at=_T2,
+        source_metric_key="TMP_OLD",
+        source_metric_name="기온 구명칭",
+    )
+    correction = _wv(
+        value_number=Decimal("20.0"),
+        collected_at=_T2,
+        source_metric_key="TMP_NEW",
+        source_metric_name="기온 신명칭",
+    )
+
+    assert await weather_repo.load_weather_values(migrated_session, [original]) == 1
+    original_ctid = await migrated_session.scalar(
+        text(
+            "SELECT ctid::text FROM feature.feature_weather_values "
+            "WHERE feature_id = 'f_wi'"
+        )
+    )
+
+    assert await weather_repo.load_weather_values(migrated_session, [correction]) == 1
+    corrected = (
+        await migrated_session.execute(
+            text(
+                "SELECT ctid::text AS ctid, value_number, collected_at, "
+                "source_metric_key, source_metric_name "
+                "FROM feature.feature_weather_values WHERE feature_id = 'f_wi'"
+            )
+        )
+    ).one()
+    assert corrected.ctid != original_ctid
+    assert corrected.value_number == Decimal("20.0")
+    assert corrected.collected_at == _T2
+    assert corrected.source_metric_key == "TMP_NEW"
+    assert corrected.source_metric_name == "기온 신명칭"
+
+    assert await weather_repo.load_weather_values(migrated_session, [correction]) == 1
+    replay_ctid = await migrated_session.scalar(
+        text(
+            "SELECT ctid::text FROM feature.feature_weather_values "
+            "WHERE feature_id = 'f_wi'"
+        )
+    )
+    assert replay_ctid == corrected.ctid
 
 
 async def test_semantic_unique_rejects_duplicate_tuple_with_different_key(

@@ -25,6 +25,23 @@ weather row는 발표·유효·관측·수집 시각을 nullable tuple로 섞고
    검증 가능한 current summary projection으로 제공한다.
 5. `target_at`/`known_at` hot path에는 복합 B-tree를, append 시간 축에는 실측 후 BRIN을 사용한다.
 
+### 0060 current-row 단계의 단조성 결정 (#797)
+
+0060 schema는 아직 known-at별 correction fact와 별도 current summary를 만들지 않고, native
+semantic tuple마다 현재 row 한 건만 유지한다. 이 단계에서는 `collected_at`을 `known_at` proxy로
+삼아 **최신 `collected_at`이 승리**한다. 더 오래된 provider backfill은 no-op이다.
+
+- `collected_at`은 DTO와 DB 모두 non-null aware `TIMESTAMPTZ`이므로 NULL 입력을 거부한다.
+- 동률인데 저장 내용이 다르면 나중에 수용된 write가 이기고 `updated_at`을 갱신한다.
+- 동률이고 저장 내용도 같으면 물리 UPDATE를 하지 않는다. writer의 반환 건수는 실제 변경 행이
+  아니라 수용한 입력 건수다.
+
+known-at correction 이력을 모두 보존하는 fact-history 전환도 비교했으나, 현재 semantic UNIQUE를
+known-at identity로 확장하고 current summary·모든 read·backfill을 함께 전환해야 한다. correction
+시점 재현 consumer와 cutover가 아직 없는 상태에서는 #797의 역행 방지보다 변경 범위만 크게 만든다.
+따라서 이 단계는 0060 migration dedup의 `collected_at DESC NULLS LAST` 승자 의미와 runtime
+조건부 upsert를 정렬한다. 향후 full bitemporal/current-summary 전환 결정은 그대로 유지한다.
+
 ## 근거
 
 예보가 언제 유효했는지와 당시 무엇을 알고 있었는지를 분리해야 과거 재현과 최신 카드가 모두

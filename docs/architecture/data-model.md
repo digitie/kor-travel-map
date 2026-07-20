@@ -851,6 +851,13 @@ CREATE INDEX idx_weather_collected_at_brin
   쿼리 (각 metric별 최신값).
 - `provider + weather_domain + valid_at DESC` — admin 검증.
 
+0060 이후 semantic UNIQUE는 위 시간축의 NULL을 같은 값으로 취급하는 `NULLS NOT DISTINCT`다.
+같은 semantic tuple의 current row는 `collected_at`이 더 최신인 입력만 갱신한다. 더 오래된
+backfill은 no-op이며, 동률은 실제 저장 내용이 다를 때만 후속 write가 이긴다. 완전히 같은 동률
+재적재는 heap UPDATE를 만들지 않는다. `collected_at`은 non-null `TIMESTAMPTZ` 계약이다.
+known-at correction fact를 행별로 보존하는 full bitemporal 전환은 ADR-072의 별도 current summary와
+read cutover를 함께 수행할 때 적용하며, 0060 current-row writer에 부분 도입하지 않는다.
+
 ### 8.2 `feature.feature_price_values`
 
 가격 시계열은 별도 `price_points` 테이블을 두지 않고, `feature.features`

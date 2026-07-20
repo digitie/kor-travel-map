@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Weather collected_at 단조 upsert (2026-07-20, T-VN-H09 #797)
+
+- **FIXED**: 같은 weather semantic tuple에 더 오래된 provider backfill이 늦게 도착해도 최신
+  `collected_at`과 값이 과거로 되돌아가지 않는다. 동률 correction은 실제 내용이 다를 때만
+  갱신하고, 완전히 같은 재적재는 물리 UPDATE를 생략한다.
+- **CHANGED**: current-row의 `collected_at`은 non-null `TIMESTAMPTZ` latest-wins 계약이다.
+  DB schema와 OpenAPI는 바뀌지 않는다.
+
 ### Route wiring startup·public CORS exact preflight (2026-07-20, T-VN-H03R #798)
 
 - **SECURITY**: `create_app()`이 route 분류와 실제 dependency wiring을 함께 검증한다. public-keyed/

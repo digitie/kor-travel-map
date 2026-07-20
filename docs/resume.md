@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-20 (codex agent A) — T-VN-H09 weather collected_at 단조성 구현
+
+- issue #797의 current semantic row는 최신 non-null `collected_at`만 승리하도록 writer를
+  제한했다. 오래된 backfill은 no-op, 동률의 실제 변경은 후속 write 승리, 완전히 같은 동률
+  재생은 물리 no-op이다.
+- full fact-history schema는 correction 시점 재현과 current summary/read cutover가 함께 필요해
+  이번 역행 결함의 최소 정본으로 선택하지 않았다. DB migration과 OpenAPI 변경은 없다.
+- T1→T2, T2→T1, 동률 변경·동일 replay 회귀와 관련 정본 문서를 구현 diff에 포함했다.
+- **다음 한 작업**: 구현 exact diff를 단일 적대 리뷰어에게 제출한다. 승인 전에는 테스트·lint와
+  커밋을 실행하지 않는다.
+
 ## 2026-07-20 (codex) — #798 route wiring·CORS exact 후속 착수
 
 - T-VN-H03 적대 리뷰에서 확인된 두 잔여 경계를 `T-VN-H03R` 독립 PR로 분리했다. 앱 조립 시
