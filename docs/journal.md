@@ -11,7 +11,11 @@
   함께 필요하지만 현재 문제는 semantic tuple 1행의 역행이다. schema 변경 없이 0060 dedup과
   같은 latest-`collected_at` 조건부 upsert를 선택했다.
 - T1→T2, T2→T1 provider backfill, 동률 correction, 동일 replay 물리 no-op integration 회귀를
-  추가했다. 단일 적대 리뷰 전 정책에 따라 테스트·lint와 커밋은 아직 실행하지 않았다.
+  추가했다. 단일 적대 리뷰 P1에서 누락된 source metric metadata의 혼합 row 가능성을 찾아
+  UPDATE와 변경 비교 tuple을 보강했고, 재리뷰 P0~P2 없음 승인 뒤 draft PR #802를 열었다.
+- 대상 unit 24개, weather integrity 9개, weather repository 9개, 0060 stepping migration 12개,
+  Ruff, strict mypy 116개 파일, import-linter 4개 계약, diff whitespace와 prod redaction gate가
+  모두 통과했다.
 
 ## 2026-07-20 (codex) — #798 route wiring startup·CORS exact 계약 문서화
 

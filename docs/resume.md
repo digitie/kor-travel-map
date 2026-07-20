@@ -8,8 +8,10 @@
 - full fact-history schema는 correction 시점 재현과 current summary/read cutover가 함께 필요해
   이번 역행 결함의 최소 정본으로 선택하지 않았다. DB migration과 OpenAPI 변경은 없다.
 - T1→T2, T2→T1, 동률 변경·동일 replay 회귀와 관련 정본 문서를 구현 diff에 포함했다.
-- **다음 한 작업**: 구현 exact diff를 단일 적대 리뷰어에게 제출한다. 승인 전에는 테스트·lint와
-  커밋을 실행하지 않는다.
+- 첫 단일 적대 리뷰 P1의 source metric metadata 누락을 반영하고 재리뷰에서 P0~P2 없음으로
+  승인받았다. draft PR #802를 열었고 unit 24개, PostGIS integration 30개, Ruff, strict mypy,
+  import-linter와 docs/redaction gate가 통과했다.
+- **다음 한 작업**: PR 코멘트와 GitHub CI를 확인해 green 뒤 병합하고 issue #797을 닫는다.
 
 ## 2026-07-20 (codex) — #798 route wiring·CORS exact 후속 착수
 
