@@ -173,8 +173,8 @@ PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin
 운영 Uvicorn `websockets-sansio`는 `websocket.accept`의 HTTP 101과 직후 application
 close frame을 같은 backend read에 실을 수 있다. API 직결 Chromium은 `4401`을 보지만 공개
 TLS proxy 경계에서는 `1006`으로 끝났으므로 이 coalescing을 선행 가설로 둔다. ASGI에는
-transport drain 확인 계약이 없으므로 accept 성공 뒤 event loop에 한 번 제어를 양보하는 것은
-배포 조합에 한정된 best-effort 완화이며, 실제 Uvicorn TCP 회귀와 n150 공개 Chromium 반복
+transport drain 확인 계약이 없으므로 accept 성공 뒤 10ms의 bounded settle window를 두는 것은
+배포 조합에 한정된 best-effort 완화이며, 실제 Uvicorn TCP 반복 회귀와 n150 공개 Chromium 반복
 strict 결과를 최종 인수 기준으로 삼는다. accept 실패는 application close를 보내지 않고
 Uvicorn의 pre-handshake HTTP 500 fallback에 맡긴다. accept부터 close까지 하나의 bounded
 child task로 보호해 handoff 중 취소와 반복 취소에도 성공한 accept의 close를 정확히 한 번

@@ -583,6 +583,8 @@ async def test_ops_live_accept_failure_does_not_send_auth_close(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_ops_live_cancellation_during_accept_handoff_closes_once() -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
     close_codes: list[int] = []
     operation: asyncio.Task[None]
 
@@ -600,7 +602,7 @@ async def test_ops_live_cancellation_during_accept_handoff_closes_once() -> None
             close_codes.append(code)
 
     operation = asyncio.create_task(
-        _accept_and_close_best_effort(
+        live_mod._accept_and_close_best_effort(
             _AcceptThenCancelWebSocket(),  # type: ignore[arg-type]
             code=4401,
             reason="authentication required",
@@ -678,28 +680,31 @@ async def test_ops_live_real_uvicorn_separates_handshake_and_auth_close() -> Non
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
-    chunks = await _capture_raw_ops_live_response(app)
-    response = b"".join(chunks)
-    header_end = response.index(b"\r\n\r\n") + 4
+    for attempt in range(5):
+        chunks = await _capture_raw_ops_live_response(app)
+        response = b"".join(chunks)
+        header_end = response.index(b"\r\n\r\n") + 4
 
-    offset = 0
-    for chunk in chunks:
-        offset += len(chunk)
-        if header_end <= offset:
-            assert header_end == offset
-            break
-    else:  # pragma: no cover - response.index가 먼저 실패한다.
-        raise AssertionError("WebSocket handshake header boundary is missing")
+        offset = 0
+        for chunk in chunks:
+            offset += len(chunk)
+            if header_end <= offset:
+                assert header_end == offset, (
+                    f"coalesced response on attempt {attempt + 1}"
+                )
+                break
+        else:  # pragma: no cover - response.index가 먼저 실패한다.
+            raise AssertionError("WebSocket handshake header boundary is missing")
 
-    assert response.startswith(b"HTTP/1.1 101 Switching Protocols\r\n")
-    frame = response[header_end:]
-    assert frame[0] & 0x0F == 0x08
-    assert frame[1] & 0x80 == 0
-    payload_length = frame[1] & 0x7F
-    assert payload_length < 126
-    assert len(frame) == payload_length + 2
-    assert int.from_bytes(frame[2:4], "big") == 4401
-    assert session.rollback_calls == 1
+        assert response.startswith(b"HTTP/1.1 101 Switching Protocols\r\n")
+        frame = response[header_end:]
+        assert frame[0] & 0x0F == 0x08
+        assert frame[1] & 0x80 == 0
+        payload_length = frame[1] & 0x7F
+        assert payload_length < 126
+        assert len(frame) == payload_length + 2
+        assert int.from_bytes(frame[2:4], "big") == 4401
+    assert session.rollback_calls == 5
 
 
 @pytest.mark.unit

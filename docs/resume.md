@@ -6,9 +6,10 @@
   subprotocol을 모두 data frame 없이 `4401`로 닫았지만, 공개 TLS HAProxy 경계에서는 C7
   인증 거절 spec이 계속 `1006`으로 실패했다.
 - 운영과 같은 Uvicorn `websockets-sansio`에서 즉시 `accept`→`close`하면 HTTP 101과 close
-  frame이 같은 backend read에 합쳐지고, 둘 사이에 `asyncio.sleep(0)`을 두면 별도 read로
-  분리됨을 확인했다. 공개 proxy의 `1006`과 이 coalescing의 인과관계는 아직 선행 가설이며,
-  ASGI가 transport drain 완료를 보장하지 않으므로 event-loop yield만으로 완료를 선언하지 않는다.
+  frame이 같은 backend read에 합쳐졌다. 첫 exact TCP 회귀에서는 `asyncio.sleep(0)`도 다시
+  합쳐져 scheduler checkpoint만으로는 불충분함을 확인했고, 10ms의 bounded settle window와
+  5회 반복 TCP 회귀로 보강했다. 공개 proxy의 `1006`과 이 coalescing의 인과관계는 아직 선행
+  가설이며, ASGI가 transport drain 완료를 보장하지 않으므로 로컬 결과만으로 완료를 선언하지 않는다.
 - draft PR #810의 첫 적대 리뷰와 재리뷰를 반영해 accept부터 close까지 하나의
   cancellation-safe child task로 수행한다. accept 내부 handoff나 close 대기에서 outer task가
   반복 취소돼도 bounded operation을 끝내고, 성공한 accept에는 close 정확히 1회 후

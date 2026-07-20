@@ -64,6 +64,7 @@ _DAGSTER_RUN_TOPIC_PREFIX: Final[str] = "dagster_run:"
 _MAX_TOPICS: Final[int] = 32
 _MAX_DAGSTER_RUN_ID_LENGTH: Final[int] = 255
 _CLOSE_TIMEOUT_SECONDS: Final[float] = 1.0
+_ACCEPT_CLOSE_SETTLE_SECONDS: Final[float] = 0.01
 _ROLLBACK_TIMEOUT_SECONDS: Final[float] = 1.0
 _RETRY_LATER_CLOSE_CODE: Final[int] = 1013
 _MIN_POLL_INTERVAL_MS: Final[int] = 1_000
@@ -818,10 +819,10 @@ async def _accept_and_close_best_effort(
         accepted = await _accept_best_effort(websocket, subprotocol=subprotocol)
         if not accepted:
             return
-        # ASGI에는 transport drain acknowledgement가 없다. close를 다음 loop turn에
-        # 예약해 Uvicorn sansio의 101/close coalescing을 best effort로 줄이고, exact
+        # ASGI에는 transport drain acknowledgement가 없다. 짧은 양의 settle window로
+        # Uvicorn sansio의 101/close coalescing을 best effort로 줄이고, exact
         # proxy+Chromium live gate에서 최종 전달 계약을 검증한다.
-        await asyncio.sleep(0)
+        await asyncio.sleep(_ACCEPT_CLOSE_SETTLE_SECONDS)
         await _close_best_effort(websocket, code=code, reason=reason)
 
     operation = asyncio.create_task(_accept_yield_then_close())
