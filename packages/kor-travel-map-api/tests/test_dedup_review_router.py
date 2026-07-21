@@ -234,6 +234,26 @@ def test_list_dedup_reviews_passes_filters(
 
 
 @pytest.mark.unit
+def test_list_dedup_reviews_invalid_cursor_returns_422(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """손상된 cursor(잘못된 fingerprint·uuid·score)는 repo ValueError → 라우터 422."""
+    from kortravelmap.api.routers import dedup_review as router_mod
+
+    async def _list(_session: Any, **_kwargs: Any) -> DedupReviewPage:
+        raise ValueError("invalid dedup_review cursor")
+
+    monkeypatch.setattr(router_mod, "list_dedup_reviews", _list)
+
+    response = client.get(
+        "/v1/admin/features/dedup-reviews",
+        params={"cursor": "bogus-cursor"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
 def test_get_dedup_review_detail_returns_two_feature_payloads(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

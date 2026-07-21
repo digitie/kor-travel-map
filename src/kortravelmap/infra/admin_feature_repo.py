@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import unicodedata
+import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -981,10 +982,20 @@ _REVIEW_CURSOR_VERSION: Final[int] = 1
 
 
 def _review_filter_fingerprint(kind: str, filters: Mapping[str, Any]) -> str:
-    """정규화된 filter set의 canonical sha256 fingerprint."""
+    """정규화된 filter set의 canonical sha256 fingerprint.
 
+    set 성격의 list 필터(providers·kinds 등)는 정렬해 값 순서와 무관하게 같은
+    fingerprint를 낸다 — keyset order는 이 필터들과 독립이므로 multi-select 재정렬이
+    cursor를 깨선 안 된다. SQL param 배열 순서는 바꾸지 않고 fingerprint 계산에서만
+    정렬한다.
+    """
+
+    canonical_filters = {
+        key: (sorted(value) if isinstance(value, list) else value)
+        for key, value in filters.items()
+    }
     canonical = json.dumps(
-        {"kind": kind, "v": _REVIEW_CURSOR_VERSION, "filters": filters},
+        {"kind": kind, "v": _REVIEW_CURSOR_VERSION, "filters": canonical_filters},
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
@@ -1045,8 +1056,18 @@ def _review_cursor_params(
     if not isinstance(score, str) or not score:
         raise ValueError(f"invalid {kind} cursor")
     try:
-        Decimal(score)
+        score_decimal = Decimal(score)
     except (ArithmeticError, ValueError) as exc:
+        raise ValueError(f"invalid {kind} cursor") from exc
+    if not score_decimal.is_finite():
+        # Postgres numeric는 NaN/Infinity를 받아들이고 NaN이 최대로 정렬돼 keyset이
+        # 조용히 top으로 리셋되므로 명시적으로 거부한다.
+        raise ValueError(f"invalid {kind} cursor")
+    try:
+        uuid.UUID(review_id)
+    except ValueError as exc:
+        # 유효 fingerprint를 통과한 비-UUID review_id는 CAST(:cursor_review_id AS uuid)
+        # 에서 DataError(→500)로 새므로 list_admin_features처럼 Python 측에서 fail-closed.
         raise ValueError(f"invalid {kind} cursor") from exc
     params["cursor_review_id"] = review_id
     params["cursor_score"] = score

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
@@ -35,7 +36,7 @@ from kortravelmap.infra.enrichment_review_repo import (
     enqueue_review_candidates,
     pending_enrichment_reviews,
 )
-from kortravelmap.infra.models import FeatureRow
+from kortravelmap.infra.models import EnrichmentReviewQueueRow, FeatureRow
 from kortravelmap.providers.visitkorea import (
     FestivalCandidate,
     FestivalReviewCandidate,
@@ -466,3 +467,155 @@ async def test_concurrent_decide_no_accepted_link_leak(
     finally:
         async with _AsyncSession(migrated_engine) as session, session.begin():
             await session.execute(text(_RACE_TRUNCATE))
+
+
+def _enrichment_queue_row(
+    review_id: str,
+    *,
+    name_score: str,
+    source_entity_id: str,
+    source_name: str = "서울 봄꽃",
+) -> EnrichmentReviewQueueRow:
+    """keyset 회귀용 pending enrichment review 행(name_score·review_id 제어)."""
+    return EnrichmentReviewQueueRow(
+        review_id=review_id,
+        target_feature_id=_TARGET_ID,
+        source_provider="python-visitkorea-api",
+        source_dataset_key="festival",
+        source_entity_id=source_entity_id,
+        source_name=source_name,
+        target_name="서울 봄꽃 축제",
+        name_score=Decimal(name_score),
+        source_record={},
+        status="pending",
+    )
+
+
+async def test_list_enrichment_reviews_keyset_walk_stable_under_mutation(
+    migrated_session: AsyncSession,
+) -> None:
+    session = migrated_session
+    session.add(_festival_feature())
+    await session.flush()
+    session.add_all(
+        [
+            _enrichment_queue_row(
+                "00000000-0000-0000-0000-0000000000e3",
+                name_score="88.00",
+                source_entity_id="ent-e3",
+            ),
+            _enrichment_queue_row(
+                "00000000-0000-0000-0000-0000000000e2",
+                name_score="88.00",
+                source_entity_id="ent-e2",
+            ),
+            _enrichment_queue_row(
+                "00000000-0000-0000-0000-0000000000e1",
+                name_score="88.00",
+                source_entity_id="ent-e1",
+            ),
+        ]
+    )
+    await session.flush()
+
+    # (name_score DESC, review_id DESC) total order를 keyset이 page_size=1로 walk한다.
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(3):
+        page = await list_enrichment_reviews(session, page_size=1, cursor=cursor)
+        assert len(page.items) == 1
+        assert page.total_count == 3
+        seen.append(page.items[0].review_id)
+        cursor = page.next_cursor
+    assert seen == [
+        "00000000-0000-0000-0000-0000000000e3",
+        "00000000-0000-0000-0000-0000000000e2",
+        "00000000-0000-0000-0000-0000000000e1",
+    ]
+    assert cursor is None
+
+    # page 경계 mutation 회귀: page1 뒤 커서보다 상위(더 높은 점수) 행을 삽입해도 keyset은
+    # 남은 행만 중복·누락 없이 이어간다(OFFSET이면 뒤 페이지가 앞 페이지 행을 재노출).
+    page1 = await list_enrichment_reviews(session, page_size=1, cursor=None)
+    assert [item.review_id for item in page1.items] == [
+        "00000000-0000-0000-0000-0000000000e3"
+    ]
+    session.add(
+        _enrichment_queue_row(
+            "00000000-0000-0000-0000-0000000000e9",
+            name_score="99.00",
+            source_entity_id="ent-e9",
+        )
+    )
+    await session.flush()
+
+    walked: list[str] = [page1.items[0].review_id]
+    cursor = page1.next_cursor
+    while cursor is not None:
+        page = await list_enrichment_reviews(session, page_size=1, cursor=cursor)
+        assert len(page.items) <= 1
+        walked.extend(item.review_id for item in page.items)
+        cursor = page.next_cursor
+    assert walked == [
+        "00000000-0000-0000-0000-0000000000e3",
+        "00000000-0000-0000-0000-0000000000e2",
+        "00000000-0000-0000-0000-0000000000e1",
+    ]
+    assert len(walked) == len(set(walked))
+
+    # scalar(status+provider 단일) variant도 같은 keyset을 이어간다(중복 없음).
+    scalar_1 = await list_enrichment_reviews(
+        session,
+        statuses=("pending",),
+        providers=("python-visitkorea-api",),
+        page_size=1,
+    )
+    assert scalar_1.next_cursor is not None
+    scalar_2 = await list_enrichment_reviews(
+        session,
+        statuses=("pending",),
+        providers=("python-visitkorea-api",),
+        page_size=1,
+        cursor=scalar_1.next_cursor,
+    )
+    assert {i.review_id for i in scalar_1.items}.isdisjoint(
+        {i.review_id for i in scalar_2.items}
+    )
+
+
+async def test_list_enrichment_reviews_cursor_rejects_filter_change(
+    migrated_session: AsyncSession,
+) -> None:
+    session = migrated_session
+    session.add(_festival_feature())
+    await session.flush()
+    session.add_all(
+        [
+            _enrichment_queue_row(
+                "00000000-0000-0000-0000-0000000000f2",
+                name_score="70.00",
+                source_entity_id="ent-f2",
+            ),
+            _enrichment_queue_row(
+                "00000000-0000-0000-0000-0000000000f1",
+                name_score="65.00",
+                source_entity_id="ent-f1",
+            ),
+        ]
+    )
+    await session.flush()
+
+    page = await list_enrichment_reviews(session, page_size=1, min_score=10)
+    assert page.next_cursor is not None
+    # 같은 커서를 다른 필터(min_score 변경)로 재사용하면 fingerprint 불일치로 거부한다.
+    with pytest.raises(ValueError, match="invalid enrichment_review cursor"):
+        await list_enrichment_reviews(
+            session, page_size=1, min_score=20, cursor=page.next_cursor
+        )
+    # 같은 필터면 keyset을 정상적으로 이어간다.
+    page2 = await list_enrichment_reviews(
+        session, page_size=1, min_score=10, cursor=page.next_cursor
+    )
+    assert [i.review_id for i in page2.items] == [
+        "00000000-0000-0000-0000-0000000000f1"
+    ]

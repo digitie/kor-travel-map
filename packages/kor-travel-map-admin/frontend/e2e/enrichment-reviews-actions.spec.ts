@@ -1,3 +1,8 @@
+// T-VN-H06: enrichment 목록이 OFFSET→keyset cursor로 전환됨에 따라 이 spec을 cursor 계약으로
+// 재작성했다 — mock은 `cursor` 쿼리로 페이지를 넘기고 `next_cursor`를 돌려주며, 페이지네이션
+// 단언은 실제 CursorPager 라벨(첫 페이지/다음)과 요약(`page N · 총 X건 · 이 페이지 Y개`)을
+// 쓴다. 런타임 검증은 Windows Playwright에서 대기(n150 Linux 게이트·GitHub CI 머지 게이트
+// 밖) — type-check는 통과.
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
@@ -85,6 +90,7 @@ function makePageMeta(
   overrides: Partial<EnrichmentReviewPageMeta> = {},
 ): EnrichmentReviewPageMeta {
   return {
+    next_cursor: null,
     page_size: 50,
     total: null,
     ...overrides,
@@ -334,38 +340,38 @@ async function mockEnrichmentReviews(
 }
 
 /**
- * Page-number 페이지네이션 mock.
+ * keyset cursor 페이지네이션 mock.
  *
- * page=1 GET → page-1, page=2 GET → page-2(소진).
+ * cursor 없음(첫 페이지) → page-1(next_cursor 제공), cursor 있음 → page-2(소진).
  */
-async function mockPageNumberPages(
+async function mockCursorPages(
   page: Page,
   pages: { one: EnrichmentReviewRecord[]; two: EnrichmentReviewRecord[] },
 ) {
-  const listPages: number[] = [];
+  const listCursors: (string | null)[] = [];
 
   await page.route(ENRICHMENT_GLOB, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (request.method() !== "GET") {
-      throw new Error(`Unexpected method for page mock: ${request.method()}`);
+      throw new Error(`Unexpected method for cursor mock: ${request.method()}`);
     }
-    const pageIndex = Number(url.searchParams.get("page") ?? "1");
-    listPages.push(pageIndex);
-    if (pageIndex >= 2) {
+    const cursor = url.searchParams.get("cursor");
+    listCursors.push(cursor);
+    if (cursor !== null) {
       await fulfillJson(
         route,
-        listResponse(pages.two, makePageMeta({ total: 51 })),
+        listResponse(pages.two, makePageMeta({ next_cursor: null, total: 51 })),
       );
       return;
     }
     await fulfillJson(
       route,
-      listResponse(pages.one, makePageMeta({ total: 51 })),
+      listResponse(pages.one, makePageMeta({ next_cursor: "next", total: 51 })),
     );
   });
 
-  return listPages;
+  return listCursors;
 }
 
 /**
@@ -506,7 +512,7 @@ test.describe("admin/enrichment-reviews actions", () => {
     );
   });
 
-  test("page pagination advances and disables next/last when exhausted", async ({
+  test("cursor pagination advances and disables next when exhausted", async ({
     page,
   }) => {
     const page1 = makeReview({
@@ -521,42 +527,40 @@ test.describe("admin/enrichment-reviews actions", () => {
       source_name: "Page2 Source",
       source_entity_id: "vk-entity-page2",
     });
-    const listPages = await mockPageNumberPages(page, {
+    const listCursors = await mockCursorPages(page, {
       one: [page1],
       two: [page2],
     });
 
     await page.goto("/admin/features/enrichment-reviews");
 
-    // 1페이지: 상/하단 페이지바 2벌, 이전 disabled, 다음/마지막 enabled.
-    await expect(page.getByLabel("이전 페이지")).toHaveCount(2);
+    // keyset CursorPager: 첫 페이지/다음만. 1페이지는 상/하단 페이지바 2벌,
+    // 첫 페이지 disabled, 다음 enabled.
+    await expect(page.getByLabel("첫 페이지")).toHaveCount(2);
     await expect(page.getByLabel("다음 페이지")).toHaveCount(2);
-    await expect(page.getByLabel("마지막 페이지")).toHaveCount(2);
     await expect(
-      page.getByText(/페이지 1 \/ 2 · 총 51건 · 현재 1건/),
+      page.getByText(/page 1\s*·\s*총 51건\s*·\s*이 페이지 1개/),
     ).toHaveCount(2);
     await expect(page.getByRole("row", { name: /Page1 Review/ })).toBeVisible();
-    await expect(page.getByLabel("이전 페이지").first()).toBeDisabled();
+    await expect(page.getByLabel("첫 페이지").first()).toBeDisabled();
     await expect(page.getByLabel("다음 페이지").first()).toBeEnabled();
-    await expect(page.getByLabel("마지막 페이지").first()).toBeEnabled();
 
     await page.getByLabel("다음 페이지").first().click();
 
-    // 새 GET이 page=2로 실제 발사됐는지로 페이지 전진을 증명.
-    await expect.poll(() => listPages.includes(2)).toBe(true);
+    // 새 GET이 cursor로 실제 발사됐는지로 페이지 전진을 증명.
+    await expect.poll(() => listCursors.some((c) => c !== null)).toBe(true);
 
     await expect(
-      page.getByText(/페이지 2 \/ 2 · 총 51건 · 현재 1건/),
+      page.getByText(/page 2\s*·\s*총 51건\s*·\s*이 페이지 1개/),
     ).toHaveCount(2);
     await expect(page.getByRole("row", { name: /Page2 Review/ })).toBeVisible();
     await expect(page.getByLabel("다음 페이지").first()).toBeDisabled();
-    await expect(page.getByLabel("마지막 페이지").first()).toBeDisabled();
-    await expect(page.getByLabel("이전 페이지").first()).toBeEnabled();
+    await expect(page.getByLabel("첫 페이지").first()).toBeEnabled();
 
-    // 뒤로가기는 staleTime(15s) 캐시로 재요청이 없을 수 있어 UI 상태로만 단언한다.
-    await page.getByLabel("이전 페이지").first().click();
+    // 첫 페이지 복귀(cursor 제거). staleTime(15s) 캐시로 재요청이 없을 수 있어 UI로만 단언.
+    await page.getByLabel("첫 페이지").first().click();
     await expect(
-      page.getByText(/페이지 1 \/ 2 · 총 51건 · 현재 1건/),
+      page.getByText(/page 1\s*·\s*총 51건\s*·\s*이 페이지 1개/),
     ).toHaveCount(2);
     await expect(page.getByRole("row", { name: /Page1 Review/ })).toBeVisible();
   });
@@ -600,7 +604,7 @@ test.describe("admin/enrichment-reviews actions", () => {
     ]);
     expect(last?.searchParams.get("min_score")).toBe("90");
     expect(last?.searchParams.get("page_size")).toBe("25");
-    expect(last?.searchParams.get("page")).toBe("1");
+    expect(last?.searchParams.has("page")).toBe(false);
   });
 
   test("row click opens the single detail-dialog map surface", async ({ page }) => {
@@ -685,14 +689,12 @@ test.describe("admin/enrichment-reviews actions", () => {
     await page.goto("/admin/features/enrichment-reviews");
 
     await expect(page.getByText("enrichment review가 없습니다.")).toBeVisible();
-    await expect(page.getByLabel("이전 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("첫 페이지")).toHaveCount(2);
     await expect(page.getByLabel("다음 페이지")).toHaveCount(2);
-    await expect(page.getByLabel("마지막 페이지")).toHaveCount(2);
-    await expect(page.getByLabel("이전 페이지").first()).toBeDisabled();
+    await expect(page.getByLabel("첫 페이지").first()).toBeDisabled();
     await expect(page.getByLabel("다음 페이지").first()).toBeDisabled();
-    await expect(page.getByLabel("마지막 페이지").first()).toBeDisabled();
     await expect(
-      page.getByText(/페이지 1 \/ 1 · 총 0건 · 현재 0건/),
+      page.getByText(/page 1\s*·\s*총 0건\s*·\s*이 페이지 0개/),
     ).toHaveCount(2);
   });
 
