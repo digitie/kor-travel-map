@@ -629,6 +629,21 @@ class ApiSettings(BaseSettings):
         le=1.0,
         description="lease loser의 DB-only current attempt 재조회 간격(초).",
     )
+    ops_live_accept_close_settle_seconds: float = Field(
+        default=0.25,
+        ge=0.0,
+        le=5.0,
+        description=(
+            "ops live WebSocket 인증/lease 거절(4401·4408 등)에서 accept(101) 이후 "
+            "close frame 전송까지의 settle 대기(초). ASGI에는 transport drain "
+            "acknowledgement가 없어 accept와 close가 한 write로 coalesce되면 브라우저 "
+            "WebSocket API가 정확한 close code를 관측하지 못하고 1006으로 뭉갠다. "
+            "프로덕션 리버스 프록시 엣지를 경유하면 이 창이 충분히 커야 브라우저가 "
+            "4401/4408을 받는다(#810 후속 — 10ms는 엣지 delivery에 부족했다). 기본 "
+            "0.25s, 0이면 settle 없이 즉시 닫는다(loopback 전용). env "
+            "``KOR_TRAVEL_MAP_API_OPS_LIVE_ACCEPT_CLOSE_SETTLE_SECONDS``."
+        ),
+    )
     dagster_repository_name: str = Field(
         default="__repository__",
         min_length=1,
