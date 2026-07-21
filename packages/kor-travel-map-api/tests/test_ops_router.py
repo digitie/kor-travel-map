@@ -637,6 +637,40 @@ def test_resolve_accept_close_settle_reads_settings_and_falls_back() -> None:
         == 0.0
     )
 
+    class _NoneSettings:
+        ops_live_accept_close_settle_seconds = None
+
+    class _NoneState:
+        settings = _NoneSettings()
+
+    class _NoneApp:
+        state = _NoneState()
+
+    class _NoneWebSocket:
+        app = _NoneApp()
+
+    # 비정상 값(None) → 모듈 기본값 fallback.
+    assert live_mod._resolve_accept_close_settle_seconds(
+        _NoneWebSocket()  # type: ignore[arg-type]
+    ) == pytest.approx(live_mod._DEFAULT_ACCEPT_CLOSE_SETTLE_SECONDS)
+
+    class _HugeSettings:
+        ops_live_accept_close_settle_seconds = 100.0
+
+    class _HugeState:
+        settings = _HugeSettings()
+
+    class _HugeApp:
+        state = _HugeState()
+
+    class _HugeWebSocket:
+        app = _HugeApp()
+
+    # 상한 초과는 _MAX로 clamp.
+    assert live_mod._resolve_accept_close_settle_seconds(
+        _HugeWebSocket()  # type: ignore[arg-type]
+    ) == pytest.approx(live_mod._MAX_ACCEPT_CLOSE_SETTLE_SECONDS)
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio

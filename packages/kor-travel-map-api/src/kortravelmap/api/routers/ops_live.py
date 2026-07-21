@@ -70,6 +70,9 @@ _CLOSE_TIMEOUT_SECONDS: Final[float] = 1.0
 # settings가 없을 때(격리 단위 테스트)만 이 기본값으로 fallback한다. #810 후속: 10ms는
 # 프로덕션 리버스 프록시 엣지 경유 delivery에 부족해 브라우저가 close code를 1006으로 뭉갰다.
 _DEFAULT_ACCEPT_CLOSE_SETTLE_SECONDS: Final[float] = 0.25
+# 방어적 상한(초) — settings의 le=5.0과 동기 유지. 비정상 settings 객체(테스트 stub)나
+# 직접 대입이 sleep을 무한정 늘리지 못하게 resolver에서 clamp한다.
+_MAX_ACCEPT_CLOSE_SETTLE_SECONDS: Final[float] = 5.0
 _ROLLBACK_TIMEOUT_SECONDS: Final[float] = 1.0
 _RETRY_LATER_CLOSE_CODE: Final[int] = 1013
 _MIN_POLL_INTERVAL_MS: Final[int] = 1_000
@@ -817,7 +820,7 @@ def _resolve_accept_close_settle_seconds(websocket: WebSocket) -> float:
     """reject-close settle 대기(초)를 app.state.settings에서 읽는다.
 
     settings/속성이 없거나(격리 단위 테스트) 값이 비정상이면 모듈 기본값으로
-    fallback하고, 음수는 0으로 clamp한다.
+    fallback하고, 음수는 0으로·상한 초과는 _MAX로 clamp해 sleep을 bounded로 유지한다.
     """
 
     settings = getattr(
@@ -832,7 +835,7 @@ def _resolve_accept_close_settle_seconds(websocket: WebSocket) -> float:
         seconds = float(value)
     except (TypeError, ValueError):
         return _DEFAULT_ACCEPT_CLOSE_SETTLE_SECONDS
-    return max(0.0, seconds)
+    return min(_MAX_ACCEPT_CLOSE_SETTLE_SECONDS, max(0.0, seconds))
 
 
 async def _accept_and_close_best_effort(
