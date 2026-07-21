@@ -35,10 +35,6 @@ class FakeWebSocket {
   serverMessage(message: object): void {
     this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent);
   }
-
-  serverOpen(): void {
-    this.onopen?.(new Event("open"));
-  }
 }
 
 function ticketResponse(): Response {
@@ -258,12 +254,17 @@ describe("ops live transport", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("open 뒤 comma 포함 opaque topic도 replace JSON 배열로 보낸다", async () => {
+  it("hello 뒤 comma 포함 opaque topic도 replace JSON 배열로 보낸다", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ticketResponse()));
     renderHarness({ topics: ["dagster_run:run,with,comma"] });
     await flushMicrotasks();
 
-    act(() => FakeWebSocket.instances[0].serverOpen());
+    // subscribe(replace)는 open이 아니라 서버 hello 수신 후에 보낸다.
+    act(() =>
+      FakeWebSocket.instances[0].serverMessage(
+        serverFrame(1, { type: "hello" }),
+      ),
+    );
 
     expect(FakeWebSocket.instances[0].send).toHaveBeenCalledWith(
       JSON.stringify({
@@ -442,13 +443,15 @@ describe("ops live transport", () => {
     const failedSocket = FakeWebSocket.instances[0];
 
     act(() => {
-      failedSocket.serverOpen();
+      // hello 수신 후 client가 replace를 보낸다(seq: hello=1, subscribed=2, snapshot=3).
+      failedSocket.serverMessage(serverFrame(1, { type: "hello" }));
       failedSocket.serverMessage(
-        serverFrame(1, { type: "subscribed", topics: ["import_jobs"] }),
+        serverFrame(2, { type: "subscribed", topics: ["import_jobs"] }),
       );
-      failedSocket.serverMessage(snapshotFrame(2, "import_jobs"));
+      failedSocket.serverMessage(snapshotFrame(3, "import_jobs"));
+      // 비증가 sequence(=snapshot과 동일한 3)로 protocol 위반을 유발한다.
       failedSocket.serverMessage(
-        serverFrame(2, { type: "heartbeat", topics: ["import_jobs"] }),
+        serverFrame(3, { type: "heartbeat", topics: ["import_jobs"] }),
       );
     });
 
@@ -466,7 +469,9 @@ describe("ops live transport", () => {
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     await flushMicrotasks();
     const replacementSocket = FakeWebSocket.instances[1];
-    act(() => replacementSocket.serverOpen());
+    act(() =>
+      replacementSocket.serverMessage(serverFrame(1, { type: "hello" })),
+    );
     expect(replacementSocket.send).toHaveBeenCalledTimes(1);
     expect(replacementSocket.send).toHaveBeenCalledWith(
       JSON.stringify({ type: "replace", topics: ["import_jobs"] }),
@@ -474,9 +479,9 @@ describe("ops live transport", () => {
 
     act(() => {
       replacementSocket.serverMessage(
-        serverFrame(1, { type: "subscribed", topics: ["import_jobs"] }),
+        serverFrame(2, { type: "subscribed", topics: ["import_jobs"] }),
       );
-      replacementSocket.serverMessage(snapshotFrame(2, "import_jobs"));
+      replacementSocket.serverMessage(snapshotFrame(3, "import_jobs"));
     });
     expect(screen.getByTestId("state").textContent).toBe("live");
     expect(screen.getByTestId("mode").textContent).toBe("live");
@@ -492,7 +497,7 @@ describe("ops live transport", () => {
     view.rerenderTopics(["dagster_run:run,2", "provider_sync"]);
     await flushMicrotasks();
     const second = FakeWebSocket.instances[1];
-    act(() => second.serverOpen());
+    act(() => second.serverMessage(serverFrame(1, { type: "hello" })));
 
     expect(first.close).toHaveBeenCalledWith(1000);
     expect(fetchMock).toHaveBeenCalledTimes(2);
