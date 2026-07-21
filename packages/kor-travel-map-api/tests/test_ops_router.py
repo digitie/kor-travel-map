@@ -581,6 +581,144 @@ async def test_ops_live_accept_failure_does_not_send_auth_close(
 
 
 @pytest.mark.unit
+def test_ops_live_accept_close_settle_setting_default_and_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 기본값 0.25s — #810 후속: 10ms는 엣지 경유 브라우저 close-code delivery에 부족.
+    assert ApiSettings().ops_live_accept_close_settle_seconds == pytest.approx(0.25)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_API_OPS_LIVE_ACCEPT_CLOSE_SETTLE_SECONDS", "0.4"
+    )
+    assert ApiSettings().ops_live_accept_close_settle_seconds == pytest.approx(0.4)
+
+
+@pytest.mark.unit
+def test_resolve_accept_close_settle_reads_settings_and_falls_back() -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
+    # settings가 없는 bare object → 모듈 기본값 fallback.
+    assert live_mod._resolve_accept_close_settle_seconds(
+        object()  # type: ignore[arg-type]
+    ) == pytest.approx(live_mod._DEFAULT_ACCEPT_CLOSE_SETTLE_SECONDS)
+
+    class _Settings:
+        ops_live_accept_close_settle_seconds = 0.4
+
+    class _State:
+        settings = _Settings()
+
+    class _App:
+        state = _State()
+
+    class _WebSocket:
+        app = _App()
+
+    assert live_mod._resolve_accept_close_settle_seconds(
+        _WebSocket()  # type: ignore[arg-type]
+    ) == pytest.approx(0.4)
+
+    class _NegSettings:
+        ops_live_accept_close_settle_seconds = -1.0
+
+    class _NegState:
+        settings = _NegSettings()
+
+    class _NegApp:
+        state = _NegState()
+
+    class _NegWebSocket:
+        app = _NegApp()
+
+    # 음수는 0으로 clamp.
+    assert (
+        live_mod._resolve_accept_close_settle_seconds(
+            _NegWebSocket()  # type: ignore[arg-type]
+        )
+        == 0.0
+    )
+
+    class _NoneSettings:
+        ops_live_accept_close_settle_seconds = None
+
+    class _NoneState:
+        settings = _NoneSettings()
+
+    class _NoneApp:
+        state = _NoneState()
+
+    class _NoneWebSocket:
+        app = _NoneApp()
+
+    # 비정상 값(None) → 모듈 기본값 fallback.
+    assert live_mod._resolve_accept_close_settle_seconds(
+        _NoneWebSocket()  # type: ignore[arg-type]
+    ) == pytest.approx(live_mod._DEFAULT_ACCEPT_CLOSE_SETTLE_SECONDS)
+
+    class _HugeSettings:
+        ops_live_accept_close_settle_seconds = 100.0
+
+    class _HugeState:
+        settings = _HugeSettings()
+
+    class _HugeApp:
+        state = _HugeState()
+
+    class _HugeWebSocket:
+        app = _HugeApp()
+
+    # 상한 초과는 _MAX로 clamp.
+    assert live_mod._resolve_accept_close_settle_seconds(
+        _HugeWebSocket()  # type: ignore[arg-type]
+    ) == pytest.approx(live_mod._MAX_ACCEPT_CLOSE_SETTLE_SECONDS)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ops_live_reject_close_sleeps_for_configured_settle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import ops_live as live_mod
+
+    slept: list[float] = []
+
+    async def _fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    async def _accept(_websocket: Any, *, subprotocol: str | None) -> bool:
+        del subprotocol
+        return True
+
+    async def _close(_websocket: Any, *, code: int, reason: str) -> None:
+        del code, reason
+
+    monkeypatch.setattr(live_mod.asyncio, "sleep", _fake_sleep)
+    monkeypatch.setattr(live_mod, "_accept_best_effort", _accept)
+    monkeypatch.setattr(live_mod, "_close_best_effort", _close)
+
+    class _Settings:
+        ops_live_accept_close_settle_seconds = 0.5
+
+    class _State:
+        settings = _Settings()
+
+    class _App:
+        state = _State()
+
+    class _WebSocket:
+        app = _App()
+
+    await live_mod._accept_and_close_best_effort(
+        _WebSocket(),  # type: ignore[arg-type]
+        code=4408,
+        reason="ops live ticket expired",
+        subprotocol="ktm.ops-live.v1.YQ.YQ",
+    )
+
+    # reject-close는 settings에서 읽은 settle만큼 정확히 대기한다.
+    assert slept == [pytest.approx(0.5)]
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_ops_live_cancellation_during_accept_handoff_closes_once() -> None:
     from kortravelmap.api.routers import ops_live as live_mod

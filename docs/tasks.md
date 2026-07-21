@@ -17,6 +17,14 @@
     hello 수신 후로 이동 → 거절 socket을 unidirectional close로 만들어 HAProxy edge가 4408을 clean
     전달. C7 live e2e test #4 green 목표. (별건: HAProxy WS 백엔드 `timeout tunnel` 미설정 → 30s
     heartbeat race로 ops-live 끊김 운영버그, 분리 등록 예정.)
+  - [ ] `T-ADM-C7Y` — **ops-live reject-close accept↔close settle 10ms가 엣지 delivery에 부족
+    → 브라우저 1006** (#809 계열, T-VN-H11 후속). C7 live v4 read-only 진단: 만료 ticket socket이
+    핸드셰이크+10ms 뒤 `closeCode=1006 lifetimeMs=537ms`(서버는 loopback에서 clean 4408 방출,
+    `sent` 없음 = C7X 프론트fix 유효하나 #4의 근본 원인 아님). `_accept_and_close_best_effort`의
+    settle을 env-tunable `KOR_TRAVEL_MAP_API_OPS_LIVE_ACCEPT_CLOSE_SETTLE_SECONDS`(기본 0.25s)로
+    상향해 accept(101)와 close frame을 분리, 브라우저가 프로덕션 리버스 프록시 엣지 경유로 정확한
+    4401/4408을 받게 한다. 정상/heartbeat 경로 무영향. 검증: 배포 뒤 v4 read-only로 `closeCode`가
+    4408로 바뀌고 `lifetimeMs`가 settle만큼 증가하는지 확인 → C7 live e2e test #4 green.
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**

@@ -64,7 +64,15 @@ _DAGSTER_RUN_TOPIC_PREFIX: Final[str] = "dagster_run:"
 _MAX_TOPICS: Final[int] = 32
 _MAX_DAGSTER_RUN_ID_LENGTH: Final[int] = 255
 _CLOSE_TIMEOUT_SECONDS: Final[float] = 1.0
-_ACCEPT_CLOSE_SETTLE_SECONDS: Final[float] = 0.01
+# reject-close(4401/4408)에서 accept(101)와 close frame 사이 settle 대기 기본값(초).
+# 실제 값은 app.state.settings.ops_live_accept_close_settle_seconds(env-tunable,
+# KOR_TRAVEL_MAP_API_OPS_LIVE_ACCEPT_CLOSE_SETTLE_SECONDS, 기본 0.25)에서 읽고,
+# settings가 없을 때(격리 단위 테스트)만 이 기본값으로 fallback한다. #810 후속: 10ms는
+# 프로덕션 리버스 프록시 엣지 경유 delivery에 부족해 브라우저가 close code를 1006으로 뭉갰다.
+_DEFAULT_ACCEPT_CLOSE_SETTLE_SECONDS: Final[float] = 0.25
+# 방어적 상한(초) — settings의 le=5.0과 동기 유지. 비정상 settings 객체(테스트 stub)나
+# 직접 대입이 sleep을 무한정 늘리지 못하게 resolver에서 clamp한다.
+_MAX_ACCEPT_CLOSE_SETTLE_SECONDS: Final[float] = 5.0
 _ROLLBACK_TIMEOUT_SECONDS: Final[float] = 1.0
 _RETRY_LATER_CLOSE_CODE: Final[int] = 1013
 _MIN_POLL_INTERVAL_MS: Final[int] = 1_000
@@ -808,6 +816,28 @@ async def _close_best_effort(
         _LOG.exception("ops live close 전달 실패: code=%s", code)
 
 
+def _resolve_accept_close_settle_seconds(websocket: WebSocket) -> float:
+    """reject-close settle 대기(초)를 app.state.settings에서 읽는다.
+
+    settings/속성이 없거나(격리 단위 테스트) 값이 비정상이면 모듈 기본값으로
+    fallback하고, 음수는 0으로·상한 초과는 _MAX로 clamp해 sleep을 bounded로 유지한다.
+    """
+
+    settings = getattr(
+        getattr(getattr(websocket, "app", None), "state", None), "settings", None
+    )
+    value = getattr(
+        settings,
+        "ops_live_accept_close_settle_seconds",
+        _DEFAULT_ACCEPT_CLOSE_SETTLE_SECONDS,
+    )
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return _DEFAULT_ACCEPT_CLOSE_SETTLE_SECONDS
+    return min(_MAX_ACCEPT_CLOSE_SETTLE_SECONDS, max(0.0, seconds))
+
+
 async def _accept_and_close_best_effort(
     websocket: WebSocket,
     *,
@@ -819,10 +849,11 @@ async def _accept_and_close_best_effort(
         accepted = await _accept_best_effort(websocket, subprotocol=subprotocol)
         if not accepted:
             return
-        # ASGI에는 transport drain acknowledgement가 없다. 짧은 양의 settle window로
-        # Uvicorn sansio의 101/close coalescing을 best effort로 줄이고, exact
-        # proxy+Chromium live gate에서 최종 전달 계약을 검증한다.
-        await asyncio.sleep(_ACCEPT_CLOSE_SETTLE_SECONDS)
+        # ASGI에는 transport drain acknowledgement가 없다. settle window로 Uvicorn
+        # sansio의 101/close coalescing을 줄여 브라우저가 정확한 close code를 받게 하고,
+        # exact proxy+Chromium live gate가 최종 전달 계약을 검증한다. 값은 settings에서
+        # 읽어 배포 토폴로지별로 튜닝한다(#810 후속: 10ms는 엣지 경유 delivery에 부족).
+        await asyncio.sleep(_resolve_accept_close_settle_seconds(websocket))
         await _close_best_effort(websocket, code=code, reason=reason)
 
     operation = asyncio.create_task(_accept_yield_then_close())
