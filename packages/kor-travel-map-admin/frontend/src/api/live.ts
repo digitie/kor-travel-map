@@ -670,14 +670,12 @@ export function useOpsLiveInvalidation({
         "ops live handshake가 제한 시간 안에 완료되지 않았습니다.",
       );
 
-      connectedSocket.onopen = () => {
-        if (closed || socket !== connectedSocket) {
-          return;
-        }
-        connectedSocket.send(
-          JSON.stringify({ type: "replace", topics: stableTopics }),
-        );
-      };
+      // subscribe(replace) 명령은 socket open이 아니라 서버의 app-layer hello 프레임을
+      // 받은 뒤에 보낸다. onopen에서 optimistic하게 먼저 보내면, 만료 ticket처럼 서버가
+      // hello 이전에 4408로 거절하는 경우 client write가 서버 close와 동시에 in-flight가
+      // 되어(simultaneous close) reverse proxy가 커넥션을 RST로 끊어 close frame을
+      // truncate → 브라우저가 4408 대신 1006으로 관측한다. hello 이후 subscribe는 거절
+      // socket에 write를 만들지 않아 close가 단방향으로 깨끗이 전달된다(#809 4408 sibling).
       connectedSocket.onmessage = (event) => {
         if (closed || socket !== connectedSocket) {
           return;
@@ -698,6 +696,9 @@ export function useOpsLiveInvalidation({
         }
         lastServerSequence = sequence;
         if (message.type === "hello") {
+          connectedSocket.send(
+            JSON.stringify({ type: "replace", topics: stableTopics }),
+          );
           return;
         }
         if (message.type === "subscribed") {

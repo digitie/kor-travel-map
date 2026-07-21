@@ -12,6 +12,11 @@
   - [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화** (#777)
   - [ ] `T-ADM-C7F` — **prod PostGIS topology 객체의 Alembic check 오탐 제거**
   - [ ] `T-ADM-C7W` — **Chromium ops live 인증 거절 close code 복구** (#806)
+  - [ ] `T-ADM-C7X` — **ops-live client onopen-replace → 만료 ticket 4408 simultaneous-close가
+    브라우저에 1006** (#817, #809 4408 sibling). `src/api/live.ts`의 subscribe(replace)를 서버
+    hello 수신 후로 이동 → 거절 socket을 unidirectional close로 만들어 HAProxy edge가 4408을 clean
+    전달. C7 live e2e test #4 green 목표. (별건: HAProxy WS 백엔드 `timeout tunnel` 미설정 → 30s
+    heartbeat race로 ops-live 끊김 운영버그, 분리 등록 예정.)
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
