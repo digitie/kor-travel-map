@@ -36,6 +36,12 @@
     → 실제 BFF가 fresh ticket 발급 → socket[1] converge. 제품 코드 무변경. 검증: 배포 뒤 v5 재검증
     (`ticketFailed=0`·`socketCount≥2`·socket[1] dataset_projection·bffTicketRequests=2) → full rerun →
     test #4 green = C7 완료.
+  - [ ] `T-ADM-C7PV` — **kma-active-write preview provider_dataset WYSIWYG(sync_scope)** —
+    preview가 0-feature dataset(`kma_ultra_short_nowcast`)에서 `matched_scope.provider_datasets`를
+    생략해 C7 `assertExactKmaPreviewBody`가 throw + 다음 UI `toContainText(sync_scope)`도 실패.
+    `scope_repo` provider_dataset 브랜치가 요청 pair를 0-feature 포함 항상 + 요청 `sync_scope`와
+    함께 노출(executor `_provider_dataset_scopes` parity). 검증: PR CI green → main 머지 →
+    C7 8c1abcba+fix 재cut → rerun → kma-active-write green = C7 완료.
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
