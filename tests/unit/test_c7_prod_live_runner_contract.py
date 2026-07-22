@@ -279,17 +279,21 @@ def test_kma_dagster_job_and_terminal_run_identity_are_exact() -> None:
         )
 
 
-def test_route_fetch_handlers_have_settlement_barriers() -> None:
+def test_route_handlers_have_settlement_barriers() -> None:
     live_browser = _read(LIVE_DIR / "_ops-live-browser.ts")
     read_auth = _read(LIVE_DIR / "ops-c7-read-auth.live.spec.ts")
     schedule = _read(LIVE_DIR / "ops-c7-schedule-write.live.spec.ts")
 
+    # 두 복구-leg 핸들러(expired-recovery·healthy-rotation)의 재연결 leg는 route.fetch()
+    # passthrough(Playwright가 Sec-Fetch-Site 미전달 -> BFF 403) 대신 route.continue()로
+    # 실제 브라우저 요청을 그대로 전달한다(#809). settlement barrier(waitForSettlement ->
+    # unroute)는 그대로 유지되므로 각 핸들러가 unroute 전에 정착하는지 검증한다.
     cursor = 0
     for _ in range(2):
-        fetch = live_browser.index("await route.fetch()", cursor)
-        settled = live_browser.index("await waitForSettlement()", fetch)
+        route_action = live_browser.index("await route.continue()", cursor)
+        settled = live_browser.index("await waitForSettlement()", route_action)
         unroute = live_browser.index("await page.unroute", settled)
-        assert fetch < settled < unroute
+        assert route_action < settled < unroute
         cursor = unroute + 1
 
     schedule_mutation = _section(
