@@ -25,6 +25,17 @@
     상향해 accept(101)와 close frame을 분리, 브라우저가 프로덕션 리버스 프록시 엣지 경유로 정확한
     4401/4408을 받게 한다. 정상/heartbeat 경로 무영향. 검증: 배포 뒤 v4 read-only로 `closeCode`가
     4408로 바뀌고 `lifetimeMs`가 settle만큼 증가하는지 확인 → C7 live e2e test #4 green.
+  - [ ] `T-ADM-C7Z` — **C7 live e2e 복구-leg 시뮬레이션이 실제 BFF 발급을 못 해 socket[1] 미converge**
+    (#809 계열, C7Y 후속). settle fix로 close-code=4408 확정(제품 정상). 그러나 v5 read-only 진단:
+    `ticketResponses=[200,200] ticketFailed=4 socketCount=1` — e2e helper(`e2e/live/_ops-live-browser.ts`)의
+    재연결 leg가 Playwright `route.fetch()` passthrough로 티켓을 재발급하는데 브라우저-설정
+    `Sec-Fetch-Site: same-origin`을 안 실어 BFF origin guard가 403→abort→socket[1] 미개설. 이 leg는
+    전엔 close-code(1006)에서 먼저 막혀 실행 안 됐던 test-infra 결함(**제품 서버+클라 정상 확정**).
+    fix: 두 복구-leg 핸들러(expired-recovery·healthy-rotation)의 passthrough를 `route.fetch()`에서
+    **`route.continue()`**로 바꿔 실제 브라우저 요청을 그대로 전달(Sec-Fetch-Site·Origin·Cookie 보존)
+    → 실제 BFF가 fresh ticket 발급 → socket[1] converge. 제품 코드 무변경. 검증: 배포 뒤 v5 재검증
+    (`ticketFailed=0`·`socketCount≥2`·socket[1] dataset_projection·bffTicketRequests=2) → full rerun →
+    test #4 green = C7 완료.
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
