@@ -73,6 +73,7 @@ class ProviderDatasetScope:
     provider: str
     dataset_key: str
     feature_count: int
+    sync_scope: str | None = None
 
 
 def _canonical_scope_text(value: Any, *, field_name: str, max_length: int) -> str:
@@ -341,6 +342,7 @@ class ScopeResolution:
                     "provider": item.provider,
                     "dataset_key": item.dataset_key,
                     "feature_count": item.feature_count,
+                    **({"sync_scope": item.sync_scope} if item.sync_scope is not None else {}),
                 }
                 for item in self.provider_datasets
             ]
@@ -1398,16 +1400,20 @@ async def count_features_matching_scope(
             "dataset_key": str(scope["dataset_key"]),
         }
         total_count = await _count_scalar(session, _COUNT_PROVIDER_DATASET_SQL, provider_params)
+        # executor의 _provider_dataset_scopes와 동일하게, 요청한 provider/dataset pair를
+        # feature 0건이어도 matched_scope에 항상 노출한다 — preview가 실제 실행(execute)과
+        # 같은 provider_datasets 모양을 보여주도록(WYSIWYG). primary-source feature가 아직
+        # 없는 dataset(예: kma_ultra_short_nowcast)도 preview에 pair로 표시된다.
+        requested_sync_scope = scope.get("sync_scope")
         provider_datasets = (
-            (
-                ProviderDatasetScope(
-                    provider=str(provider_params["provider"]),
-                    dataset_key=str(provider_params["dataset_key"]),
-                    feature_count=total_count,
+            ProviderDatasetScope(
+                provider=str(provider_params["provider"]),
+                dataset_key=str(provider_params["dataset_key"]),
+                feature_count=total_count,
+                sync_scope=(
+                    str(requested_sync_scope) if requested_sync_scope is not None else None
                 ),
-            )
-            if total_count > 0
-            else ()
+            ),
         )
         sigungu_codes = await _sigungu_codes_from_sql(
             session, _MATCHED_SIGUNGU_PROVIDER_DATASET_SQL, provider_params

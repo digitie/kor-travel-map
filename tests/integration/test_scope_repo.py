@@ -234,9 +234,7 @@ async def test_count_center_radius_uses_limited_preview_and_full_counts(
 
     assert result.feature_count == 3
     assert len(result.feature_ids) == 1
-    assert set(result.feature_ids) <= {
-        bundle.feature.feature_id for bundle in bundles
-    }
+    assert set(result.feature_ids) <= {bundle.feature.feature_id for bundle in bundles}
     assert result.provider_datasets == (
         scope_repo.ProviderDatasetScope(
             provider=bundles[0].source_record.provider,
@@ -306,9 +304,7 @@ async def test_count_provider_dataset_uses_limited_preview_and_full_count(
 
     assert result.feature_count == 3
     assert len(result.feature_ids) == 1
-    assert set(result.feature_ids) <= {
-        bundle.feature.feature_id for bundle in bundles
-    }
+    assert set(result.feature_ids) <= {bundle.feature.feature_id for bundle in bundles}
     assert result.provider_datasets == (
         scope_repo.ProviderDatasetScope(
             provider=provider,
@@ -317,6 +313,48 @@ async def test_count_provider_dataset_uses_limited_preview_and_full_count(
         ),
     )
     assert result.matched_scope()["feature_preview_truncated"] is True
+
+
+async def test_count_provider_dataset_surfaces_requested_pair_at_zero_features(
+    migrated_session: AsyncSession,
+) -> None:
+    """primary-source feature가 0건인 provider/dataset도 preview는 요청 pair를 노출한다.
+
+    executor ``_provider_dataset_scopes``와 동일한 WYSIWYG 계약 — 아직 feature가
+    적재되지 않은 dataset(예: ``kma_ultra_short_nowcast``)을 대상으로 update request를
+    미리보기하면 ``matched_scope.provider_datasets``에 요청 pair가 ``feature_count=0`` +
+    요청 ``sync_scope``와 함께 포함되어야 한다(preview == execute; UI preview 결과가
+    execute 대상 sync_scope를 그대로 노출).
+    """
+    result = await scope_repo.count_features_matching_scope(
+        migrated_session,
+        {
+            "type": "provider_dataset",
+            "provider": "python-kma-api",
+            "dataset_key": "kma_ultra_short_nowcast",
+            "sync_scope": "external_system:e2e-preview",
+        },
+        preview_limit=5,
+    )
+
+    assert result.feature_count == 0
+    assert result.feature_ids == ()
+    assert result.provider_datasets == (
+        scope_repo.ProviderDatasetScope(
+            provider="python-kma-api",
+            dataset_key="kma_ultra_short_nowcast",
+            feature_count=0,
+            sync_scope="external_system:e2e-preview",
+        ),
+    )
+    assert result.matched_scope()["provider_datasets"] == [
+        {
+            "provider": "python-kma-api",
+            "dataset_key": "kma_ultra_short_nowcast",
+            "feature_count": 0,
+            "sync_scope": "external_system:e2e-preview",
+        }
+    ]
 
 
 async def test_resolve_sigungu_by_radius_uses_injected_kraddr_resolver(

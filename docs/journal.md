@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-22 (claude) — C7 kma-active-write preview provider_dataset WYSIWYG(sync_scope)
+
+- C7 live e2e `ops-c7-kma-active-write`의 실제 blocker는 request-dialog preview(dry-run)
+  계약 불일치였다. WS auth(#818/#821/#823)·data.go.kr 키·kor-travel-geo 키·KMA base-rollover
+  타이밍은 모두 별개 원인으로(대부분 배포 config) 해결됐으나 테스트는 request 생성 전 preview
+  단계에서 8.4s에 죽었다. `scope_repo.count_features_matching_scope`의 provider_dataset
+  브랜치가 `total_count>0`일 때만 pair를 만들어, primary-source feature가 0건인
+  `kma_ultra_short_nowcast`(실 feature는 `kma_ultra_short_grid`/`kma_short_grid`)에서
+  `matched_scope.provider_datasets`를 생략 → e2e `assertExactKmaPreviewBody`(pair 길이 1
+  요구)가 항상 throw했다.
+- executor `_provider_dataset_scopes`는 요청 pair를 0-feature여도 항상 append하므로
+  preview↔execute가 이 표면에서 불일치했다(테스트가 execute 모양을 preview에 기대).
+  (a) 제품 일관성 방향으로 preview도 요청 pair를 항상 노출하게 했다.
+- 2인 적대 리뷰: (#1) executor parity·`matched_scope` 소비자 무회귀(길이 체크는 전부 pipeline
+  DB-identity projection)·None 안전 확인. (#2) pair만 노출 시 다음 줄 UI assertion
+  `request-preview-result` `toContainText(sync_scope)`가 실패함을 선포착(preview matched_scope에
+  sync_scope 부재; executor는 emit). 진짜 parity로 pair에 요청 `sync_scope`를 실었다.
+  executor terminal assertion(`assertKmaOnlyTerminalProviderScopes`/`assertOnlyKmaProviderObjects`는
+  provider/dataset_key만 검사, provider_datasets 필드 미검사)에 무해함을 확인.
+- 변경: `ProviderDatasetScope.sync_scope: str|None=None` + `ScopeResolution.matched_scope()`
+  조건부 emission(SQL 파생 브랜치는 None→키 생략, 기존 출력 byte-identical) + provider_dataset
+  브랜치가 `scope["sync_scope"]`(요청값)를 실음. 통합 테스트 추가(0-feature+sync_scope 계약 고정).
+- 게이트: n150 CI-parity(ruff / ruff format / mypy --strict src/kortravelmap / lint-imports +
+  pytest scope_repo·feature_update). C7는 origin/main=8c1abcba + 이 fix로 재cut → rerun 예정.
+
 ## 2026-07-20 (codex) — T-VN-H11 ops-live 인증 close 전달 보강
 
 - issue #809로 #806의 잔여 production 경계를 분리했다. 같은 n150 API 컨테이너에 LAN 직결한
