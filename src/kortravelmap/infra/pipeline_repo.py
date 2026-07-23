@@ -621,43 +621,16 @@ _PIPELINE_ROOT_CTES_SCOPED_SQL: Final[str] = (
     PIPELINE_LINEAGE_CTES_SQL + ",\n" + _PIPELINE_ROOT_BODY_SCOPED_SQL
 )
 
-# --- recency-bounded 변형 (dataset detail 조회 전용) ----------------------------
-# ``load_dataset_detail``은 항상 최근 window만 필요하므로 ``all_roots``를
-# ``created_at`` 으로 제한해 roots_with_identity의 per-root 상관 서브쿼리가 도는
-# root 집합을 최근분으로 좁힌다. ``_LIST_EXECUTIONS_BODY_SQL``의 filtered_roots는
-# provider/created_from 필터를 roots_with_identity가 이미 materialize된 뒤에
-# 적용하므로 비용을 줄이지 못한다 — 최신성 경계는 반드시 ``all_roots`` 자체에
-# 둔다. 공유 ``_PIPELINE_ROOT_BODY_SQL``/``_PIPELINE_ROOT_BODY_SCOPED_SQL``은
-# 그대로 두고(다른 caller가 :root_since를 bind하지 않는다) all_roots만 교체한
-# 별도 변형을 만들어 :root_since를 항상 bind하는 detail 경로만 사용한다.
-_ALL_ROOTS_RECENT_ANCHOR: Final[str] = (
-    "all_roots AS (\n"
-    "    SELECT * FROM request_roots\n"
-    "    UNION ALL\n"
-    "    SELECT * FROM standalone_roots\n"
-    "),"
-)
-if _ALL_ROOTS_RECENT_ANCHOR not in _PIPELINE_ROOT_BODY_SQL:  # pragma: no cover
-    raise RuntimeError(
-        "pipeline_repo: recency-bounded root anchor "
-        "'all_roots AS (...)' 를 공유 body에서 찾지 못했습니다"
-    )
-_ALL_ROOTS_RECENT_REPLACEMENT: Final[str] = (
-    "all_roots AS (\n"
-    "    SELECT * FROM (\n"
-    "        SELECT * FROM request_roots\n"
-    "        UNION ALL\n"
-    "        SELECT * FROM standalone_roots\n"
-    "    ) AS _ar\n"
-    "    WHERE _ar.created_at >= CAST(:root_since AS timestamptz)\n"
-    "),"
-)
-_PIPELINE_ROOT_BODY_RECENT_SQL: Final[str] = _PIPELINE_ROOT_BODY_SQL.replace(
-    _ALL_ROOTS_RECENT_ANCHOR, _ALL_ROOTS_RECENT_REPLACEMENT, 1
-)
-_PIPELINE_ROOT_CTES_RECENT_SQL: Final[str] = (
-    PIPELINE_LINEAGE_CTES_SQL + ",\n" + _PIPELINE_ROOT_BODY_RECENT_SQL
-)
+# recency-bounded 변형(``:root_since`` all_roots 창)은 제거됐다. 최신성 시간창은
+# 고빈도·누적 dataset(예: C7 KMA)에서 여전히 수천 root를 포함해 detail 쿼리가
+# 클라이언트/서버 timeout을 넘겼고(504), window가 페이지를 못 채우면 unbounded로
+# fallback해 O(roots^2)를 그대로 되살렸다. 대신 run-history detail 경로는 위
+# ``_PIPELINE_ROOT_BODY_SCOPED_SQL``(roots_with_identity의 per-root 상관 서브쿼리를
+# 대상 (provider,dataset_key) canonical pair를 가진 root로만 좁힘)을 쓴다 — 시간창이
+# 아니라 dataset 범위로 제한하므로 누적과 무관하게 빠르고(snapshot과 동일한 빠른
+# 형태), 다른 dataset의 root에 crowding-out되지 않는다. run-history 최종 레코드는
+# 어차피 canonical (provider,dataset_key,sync_scope) pair가 있는 실행만 남기므로
+# (``ops_dataset_service._run_history_records``) scoped 결과는 unscoped와 동치다.
 
 _SCOPED_COMPONENT_SOURCE_BODY_SQL: Final[str] = """
 scoped_jobs AS (
@@ -1131,12 +1104,13 @@ _LIST_ALL_EXECUTIONS_SQL: Final[str] = (
     "WITH RECURSIVE\n" + _PIPELINE_ROOT_CTES_SQL + ",\n" + _LIST_EXECUTIONS_BODY_SQL
 )
 
-# ``_LIST_EXECUTIONS_SQL``의 recency-bounded 변형(detail run-history 전용).
-# 전역 lineage source + recency-bounded all_roots를 쓰고 provider/dataset 필터는
-# ``_LIST_EXECUTIONS_BODY_SQL``이 그대로 적용한다. :root_since를 bind하는 경로만
-# 사용한다(``_LIST_ALL_EXECUTIONS_SQL`` 조립을 그대로 미러).
-_LIST_EXECUTIONS_RECENT_SQL: Final[str] = (
-    "WITH RECURSIVE\n" + _PIPELINE_ROOT_CTES_RECENT_SQL + ",\n" + _LIST_EXECUTIONS_BODY_SQL
+# ``_LIST_EXECUTIONS_SQL``의 dataset-scoped 변형(detail run-history 전용).
+# ``_PIPELINE_ROOT_BODY_SCOPED_SQL``(roots_with_identity를 대상 (provider,dataset_key)
+# canonical pair를 가진 root로만 좁힘)을 쓰고 provider/dataset/scope/cursor 필터는
+# ``_LIST_EXECUTIONS_BODY_SQL``이 그대로 적용한다. :snapshot_provider/:snapshot_dataset_key
+# 를 bind하는 경로만 사용한다(``_LIST_ALL_EXECUTIONS_SQL`` 조립을 scoped root body로 미러).
+_LIST_EXECUTIONS_SCOPED_SQL: Final[str] = (
+    "WITH RECURSIVE\n" + _PIPELINE_ROOT_CTES_SCOPED_SQL + ",\n" + _LIST_EXECUTIONS_BODY_SQL
 )
 
 _STATUS_COUNTS_SQL: Final[str] = (
@@ -1508,15 +1482,20 @@ async def list_pipeline_executions(
     created_to: datetime | None = None,
     limit: int = 50,
     cursor: str | None = None,
-    root_since: datetime | None = None,
+    dataset_scoped: bool = False,
 ) -> PipelineExecutionPage:
     """root 실행 목록 — ``(created_at DESC, id DESC, kind DESC)`` cursor.
 
-    ``root_since``는 provider+dataset(단일 dataset) 경로 전용 성능 힌트다. 주면
-    ``all_roots``를 그 시각 이후로 제한한 recency-bounded SQL을 써 누적 실행
-    이력에 비례하는 O(roots^2) 비용을 피한다. 최근 window 밖의 root는 어차피
-    ``(created_at DESC)`` 상위 페이지에 오르지 않으므로 top-N 결과는 동일하다.
+    ``dataset_scoped``는 단일 (provider, dataset_key) detail 경로 전용 성능
+    스위치다(provider·dataset_key 둘 다 필요). 주면 roots_with_identity의 per-root
+    상관 서브쿼리를 대상 dataset의 canonical pair를 가진 root로만 좁힌 SQL을 써
+    누적 실행 이력에 비례하는 O(roots^2) 비용을 피한다. 최종 레코드는 어차피
+    canonical (provider,dataset_key,sync_scope) pair가 있는 실행만 남으므로 결과는
+    unscoped와 동치이며, 시간창이 아니라 dataset 범위로 제한하므로 고빈도·유휴
+    여부·다른 dataset의 활동량과 무관하게 빠르다.
     """
+    if dataset_scoped and (provider is None or dataset_key is None):
+        raise ValueError("dataset_scoped requires both provider and dataset_key")
     if kind is not None and kind not in PIPELINE_EXECUTION_KINDS:
         raise ValueError(f"kind must be one of {sorted(PIPELINE_EXECUTION_KINDS)}, got {kind!r}")
     if dataset_sync_scopes is not None and (provider is None or dataset_key is None):
@@ -1562,10 +1541,10 @@ async def list_pipeline_executions(
         query = _LIST_MEMBERSHIP_EXECUTIONS_SQL
     elif provider is None and dataset_key is None:
         query = _LIST_ALL_EXECUTIONS_SQL
-    elif root_since is not None:
-        # provider/dataset 단일 dataset 경로 + recency 힌트: all_roots를 좁혀
-        # O(roots^2) 비용을 피한다.
-        query = _LIST_EXECUTIONS_RECENT_SQL
+    elif dataset_scoped:
+        # 단일 (provider, dataset_key) detail 경로: roots_with_identity를 대상
+        # dataset의 canonical pair root로만 좁혀 O(roots^2) 비용을 피한다.
+        query = _LIST_EXECUTIONS_SCOPED_SQL
     else:
         query = _LIST_EXECUTIONS_SQL
     params: dict[str, Any] = {
@@ -1585,17 +1564,12 @@ async def list_pipeline_executions(
         "cursor_item_kind": cursor_item_kind,
         "page_limit": page_size + 1,
     }
-    if query is _LIST_EXECUTIONS_RECENT_SQL:
-        params["root_since"] = root_since
+    if query is _LIST_EXECUTIONS_SCOPED_SQL:
+        # scoped root body(``_PIPELINE_ROOT_BODY_SCOPED_SQL``)의 EXISTS 필터가
+        # 쓰는 bind. provider/dataset_key와 동일 값이지만 이름이 다르다.
+        params["snapshot_provider"] = provider
+        params["snapshot_dataset_key"] = dataset_key
     rows = (await session.execute(text(query), params)).all()
-    if query is _LIST_EXECUTIONS_RECENT_SQL and len(rows) < params["page_limit"]:
-        # recency window가 페이지를 못 채웠다 → window 밖(더 오래된) row가 남아
-        # 있을 수 있으므로 top-N/커서 정확도를 위해 unbounded로 재조회한다. 이
-        # fallback은 window가 sparse한 저빈도·유휴 dataset에서만 도는데, 그런
-        # dataset은 전체 root 수 자체가 적어 unbounded 조회도 빠르다(고빈도
-        # dataset은 window가 페이지를 채워 fallback을 타지 않는다).
-        params.pop("root_since", None)
-        rows = (await session.execute(text(_LIST_EXECUTIONS_SQL), params)).all()
     items = tuple(_row_to_execution(row) for row in rows[:page_size])
     next_cursor = (
         _encode_cursor(

@@ -1204,20 +1204,22 @@ async def test_scoped_dataset_execution_snapshot_matches_unscoped_filtered(
     assert target.active.execution.id == target_active_id
 
 
-async def test_recency_bounded_executions_fall_back_when_window_sparse(
+async def test_dataset_scoped_executions_match_unscoped(
     migrated_session: AsyncSession,
 ) -> None:
-    """``root_since`` window가 페이지를 못 채우면 unbounded로 fallback해 window
-    밖의 오래된 실행까지 top-N에 포함한다 — 저빈도·유휴 dataset의 run-history
-    정합성 보장(고빈도 dataset은 window가 페이지를 채워 fallback을 타지 않는다)."""
+    """``dataset_scoped=True`` detail 경로는 unscoped(provider+dataset) 경로와 동일한
+    run-history를 돌려준다 — roots_with_identity를 대상 dataset의 canonical pair root로
+    좁힐 뿐 시간창을 두지 않으므로 유휴·오래된 실행도 top-N에 그대로 남고, 다른
+    dataset의 root는 (unscoped처럼) 대상 결과에 섞이지 않는다."""
     provider = "python-kma-api"
     dataset_key = "kma_short_forecast"
+    other_dataset_key = "kma_mid_forecast"
     # 각 run은 서로 다른 sync_scope를 쓴다 — 동일 (provider, dataset, scope)에
-    # active(queued/running) job은 하나만 허용하는 unique 제약을 피하기 위함이며,
-    # list_pipeline_executions(provider+dataset)는 scope 필터 없이 셋 다 돌려준다.
+    # active job 하나만 허용하는 unique 제약을 피한다. 모든 run이 root_since 시간창
+    # 밖처럼 오래됐어도(_T0) scoped 경로는 시간창을 두지 않아 셋 다 돌려줘야 한다.
     request_ids: list[str] = []
     for index in range(3):
-        request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, f"recency-fallback-{index}"))
+        request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, f"scoped-match-{index}"))
         request_ids.append(request_id)
         await _request(
             migrated_session,
@@ -1228,30 +1230,56 @@ async def test_recency_bounded_executions_fall_back_when_window_sparse(
                 "type": "provider_dataset",
                 "provider": provider,
                 "dataset_key": dataset_key,
-                "sync_scope": f"external_system:recency-fallback-{index}",
+                "sync_scope": f"external_system:scoped-match-{index}",
             },
         )
+    # 같은 provider의 다른 dataset run — scoped/unscoped 모두 대상 결과에서 빠져야 한다.
+    other_request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, "scoped-match-other-dataset"))
+    await _request(
+        migrated_session,
+        other_request_id,
+        job_id=None,
+        created_at=_T0 + timedelta(minutes=5),
+        scope={
+            "type": "provider_dataset",
+            "provider": provider,
+            "dataset_key": other_dataset_key,
+            "sync_scope": "external_system:scoped-match-other",
+        },
+    )
 
-    # 모든 run이 root_since보다 앞(= window 밖)이므로 recency-bounded 쿼리 단독
-    # 결과는 비지만, fallback이 unbounded로 재조회해 3건을 모두 돌려준다.
-    root_since = _T0 + timedelta(days=30)
-    windowed = await list_pipeline_executions(
+    scoped = await list_pipeline_executions(
         migrated_session,
         provider=provider,
         dataset_key=dataset_key,
         limit=50,
-        root_since=root_since,
+        dataset_scoped=True,
     )
-    unbounded = await list_pipeline_executions(
+    unscoped = await list_pipeline_executions(
         migrated_session,
         provider=provider,
         dataset_key=dataset_key,
         limit=50,
     )
-    assert {item.id for item in windowed.items} == set(request_ids)
-    assert [item.id for item in windowed.items] == [
-        item.id for item in unbounded.items
-    ]
+    # scoped는 unscoped와 동일한 순서·집합을 돌려준다(시간창 regression 없음).
+    assert [item.id for item in scoped.items] == [item.id for item in unscoped.items]
+    assert {item.id for item in scoped.items} == set(request_ids)
+    # 다른 dataset의 root는 대상 결과에 섞이지 않는다.
+    assert other_request_id not in {item.id for item in scoped.items}
+
+
+async def test_dataset_scoped_requires_provider_and_dataset_key(
+    migrated_session: AsyncSession,
+) -> None:
+    """``dataset_scoped``는 scoped root body가 (provider, dataset_key) EXISTS를
+    bind하므로 둘 다 없으면 잘못된 결과 대신 즉시 실패한다."""
+    with pytest.raises(ValueError, match="dataset_scoped requires"):
+        await list_pipeline_executions(
+            migrated_session,
+            provider="python-kma-api",
+            limit=10,
+            dataset_scoped=True,
+        )
 
 
 async def test_dataset_scope_filter_is_applied_before_page_limit(
