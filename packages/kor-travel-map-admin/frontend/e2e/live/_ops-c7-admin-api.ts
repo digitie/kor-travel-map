@@ -133,7 +133,7 @@ const FORBIDDEN_PROVIDER_PATTERN = /opinet/i;
 const BROWSER_FETCH_TIMEOUT_MS = 30_000;
 // dataset detail은 per-scope 실행/이벤트 이력을 집계하므로 대량 이력 상황에서
 // 기본 timeout보다 여유가 필요하다(서버측 scoped 쿼리 최적화의 안전 마진).
-const DATASET_DETAIL_FETCH_TIMEOUT_MS = 60_000;
+export const DATASET_DETAIL_FETCH_TIMEOUT_MS = 60_000;
 const DAGSTER_GRAPHQL_TIMEOUT_MS = 15_000;
 const DAGSTER_RUN_SETTLEMENT_TIMEOUT_MS = 60_000;
 const OWNED_TARGET_PAGE_SIZE = 500;

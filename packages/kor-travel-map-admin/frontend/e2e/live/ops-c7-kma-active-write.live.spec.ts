@@ -22,6 +22,7 @@ import {
   buildPoiTargetBody,
   createCleanupState,
   createKmaRequest,
+  DATASET_DETAIL_FETCH_TIMEOUT_MS,
   destructiveGateBlocker,
   exactDatasetUiPath,
   getExactDatasetDetail,
@@ -30,9 +31,9 @@ import {
   previewBody,
   putTrackedTarget,
   rediscoverExactActiveRequest,
+  REQUEST_TERMINAL_TIMEOUT,
   requireBody,
   resolveTrackedUiKmaCreateResponse,
-  runTrackedRequestNowFromUi,
   waitForTerminal,
   withC7Cleanup,
   type BrowserFetchResult,
@@ -374,8 +375,6 @@ async function assertRunningRequestIdentityFromUi(
   page: Page,
   requestId: string,
   jobId: string,
-  syncScope: string,
-  state: ReturnType<typeof createCleanupState>,
 ): Promise<void> {
   await page.goto(`/ops/pipeline?execution=update_request:${requestId}`);
   const executionDetail = page.getByTestId("pipeline-execution-detail");
@@ -383,10 +382,15 @@ async function assertRunningRequestIdentityFromUi(
   // KMA nowcast refreshes can transition queued→running→done faster than the UI can
   // observe the transient "running" state, so requiring status==="running" here is a
   // race (fast completion → the 30s poll only ever sees "done"). Tolerate fast
-  // completion: wait until the request leaves "queued", verify the canonical identity
-  // from whichever non-queued state is observed, and only exercise the strictly-
-  // while-running run-now UI leg when the request is still observably running (its
-  // ownership barrier in runTrackedRequestNowFromUi requires status==="running").
+  // completion: wait until the request leaves "queued" and verify the canonical
+  // identity from whichever non-queued state is observed.
+  //
+  // The strictly-while-running run-now UI leg is intentionally NOT exercised here: it
+  // is race-gated best-effort (skipped on the common fast-completion path, so it
+  // guarantees no coverage) and its UI→POST ownership contract is verified
+  // deterministically by the mocked ops-pipeline spec. Driving it on the live gate
+  // only added flake surface (its ownership barrier requires the job to still be
+  // running at POST time), so it is removed from this zero-retry flow.
   await expect
     .poll(
       async () =>
@@ -402,25 +406,6 @@ async function assertRunningRequestIdentityFromUi(
   expect(observedExecution.kind).toBe("update_request");
   expect(observedExecution.id).toBe(requestId);
   expect(observedExecution.job_id).toBe(jobId);
-  if (observedExecution.status === "running") {
-    const runningRunNow = executionDetail.getByRole("button", {
-      name: "실행 중 요청 확인 (run-now)",
-      exact: true,
-    });
-    if (await runningRunNow.isVisible().catch(() => false)) {
-      await runTrackedRequestNowFromUi(
-        page,
-        state,
-        requestId,
-        jobId,
-        syncScope,
-        () => runningRunNow.click(),
-      );
-      await expect(
-        executionDetail.getByText("우선 dispatch 요청됨"),
-      ).toBeVisible();
-    }
-  }
 }
 
 async function assertDatasetTerminalHistoryUi(
@@ -428,7 +413,7 @@ async function assertDatasetTerminalHistoryUi(
   syncScope: string,
   requestId: string,
 ): Promise<void> {
-  await page.goto(exactDatasetUiPath(syncScope));
+  await gotoExactDatasetUiSettled(page, syncScope);
   const region = page.getByRole("region", {
     name: `${KMA_PROVIDER}/${KMA_DATASET_KEY} 상세`,
   });
@@ -445,7 +430,7 @@ async function assertHistoryContinuationFromUi(
   page: Page,
   syncScope: string,
 ): Promise<void> {
-  await page.goto(exactDatasetUiPath(syncScope));
+  await gotoExactDatasetUiSettled(page, syncScope);
   const region = page.getByRole("region", {
     name: `${KMA_PROVIDER}/${KMA_DATASET_KEY} 상세`,
   });
@@ -533,7 +518,7 @@ async function assertHistoryContinuationFromUi(
     0,
   );
 
-  await page.goto(exactDatasetUiPath(syncScope));
+  await gotoExactDatasetUiSettled(page, syncScope);
   const eventLink = page
     .getByRole("region", {
       name: `${KMA_PROVIDER}/${KMA_DATASET_KEY} 상세`,
@@ -627,6 +612,43 @@ function isExactHistoryPageResponse(
     [...url.searchParams.entries()].sort().toString() ===
       [...expected.entries()].sort().toString()
   );
+}
+
+function isExactDatasetDetailResponse(
+  response: import("@playwright/test").Response,
+  syncScope: string,
+): boolean {
+  // The per-run external_system sync_scope is unique to this test + dataset, so a
+  // 200 GET on the detail endpoint carrying it is unambiguously the UI's own detail
+  // fetch for this scope — robust to exact provider/dataset_key param spelling and it
+  // ignores the no-param 422 probes the page may also fire.
+  const url = new URL(response.url());
+  return (
+    response.request().method() === "GET" &&
+    url.pathname === "/api/proxy/v1/ops/datasets/detail" &&
+    url.searchParams.get("sync_scope") === syncScope &&
+    response.status() === 200
+  );
+}
+
+// The dataset-detail drawer renders in two phases: the `상세` region appears as soon
+// as the grid query resolves the selection, but the history/status panels (and the
+// "선택 범위 최근 종료 실행" header) mount only after a SEPARATE dataset-detail query
+// lands. A bare page.goto + immediate DOM assertion races that second fetch under
+// late-active load (the region is a premature "data-loaded" signal). Register a wait
+// for the UI's OWN detail GET before navigating so the following assertions run
+// against settled data — with the same 60s budget the direct probe already gets,
+// instead of the implicit 15s expect() ceiling that was flaking.
+async function gotoExactDatasetUiSettled(
+  page: Page,
+  syncScope: string,
+): Promise<void> {
+  const detailSettled = page.waitForResponse(
+    (response) => isExactDatasetDetailResponse(response, syncScope),
+    { timeout: DATASET_DETAIL_FETCH_TIMEOUT_MS },
+  );
+  await page.goto(exactDatasetUiPath(syncScope));
+  await detailSettled;
 }
 
 function responseNextCursorOrNull(value: unknown, context: string): string | null {
@@ -877,14 +899,12 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
       }
       expect(rediscovered[0].value.id).toBe(created.data.request_id);
 
-      // queued 버튼을 경쟁적으로 누르지 않는다. 서버가 실제 running을 보고한 뒤
-      // UI도 running 전용 문구를 렌더한 경우에만 동일 identity run-now를 호출한다.
+      // 서버가 보고한 non-queued 상태에서 canonical identity(kind/id/job_id)를 UI
+      // 상세로 확인한다(transient running 관측은 요구하지 않음 — 위 함수 주석 참조).
       await assertRunningRequestIdentityFromUi(
         page,
         created.data.request_id,
         created.data.job_id,
-        syncScope,
-        state,
       );
 
       // 같은 key replay는 다른 key의 active reuse와 별도 계약으로 검증한다.
@@ -1027,6 +1047,6 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
       expect(overflowDetail.data.run_history.next_cursor).not.toBeNull();
       expect(overflowDetail.data.event_history.next_cursor).not.toBeNull();
       await assertHistoryContinuationFromUi(page, syncScope);
-    });
+    }, { terminalTimeout: REQUEST_TERMINAL_TIMEOUT });
   });
 });
