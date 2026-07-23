@@ -319,6 +319,7 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
     card = await price_repo.build_price_card(
         migrated_session,
         feature_id=feature_id,
+        asof=_NOW,
     )
     map_rows = await admin_feature_repo.admin_features_in_bbox(
         migrated_session,
