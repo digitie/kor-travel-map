@@ -11,31 +11,12 @@
   - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
   - [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화** (#777)
   - [ ] `T-ADM-C7F` — **prod PostGIS topology 객체의 Alembic check 오탐 제거**
-  - [ ] `T-ADM-C7W` — **Chromium ops live 인증 거절 close code 복구** (#806)
-  - [ ] `T-ADM-C7X` — **ops-live client onopen-replace → 만료 ticket 4408 simultaneous-close가
-    브라우저에 1006** (#817, #809 4408 sibling). `src/api/live.ts`의 subscribe(replace)를 서버
-    hello 수신 후로 이동 → 거절 socket을 unidirectional close로 만들어 HAProxy edge가 4408을 clean
-    전달. C7 live e2e test #4 green 목표. (별건: HAProxy WS 백엔드 `timeout tunnel` 미설정 → 30s
-    heartbeat race로 ops-live 끊김 운영버그, 분리 등록 예정.)
-  - [ ] `T-ADM-C7Y` — **ops-live reject-close accept↔close settle 10ms가 엣지 delivery에 부족
-    → 브라우저 1006** (#809 계열, T-VN-H11 후속). C7 live v4 read-only 진단: 만료 ticket socket이
-    핸드셰이크+10ms 뒤 `closeCode=1006 lifetimeMs=537ms`(서버는 loopback에서 clean 4408 방출,
-    `sent` 없음 = C7X 프론트fix 유효하나 #4의 근본 원인 아님). `_accept_and_close_best_effort`의
-    settle을 env-tunable `KOR_TRAVEL_MAP_API_OPS_LIVE_ACCEPT_CLOSE_SETTLE_SECONDS`(기본 0.25s)로
-    상향해 accept(101)와 close frame을 분리, 브라우저가 프로덕션 리버스 프록시 엣지 경유로 정확한
-    4401/4408을 받게 한다. 정상/heartbeat 경로 무영향. 검증: 배포 뒤 v4 read-only로 `closeCode`가
-    4408로 바뀌고 `lifetimeMs`가 settle만큼 증가하는지 확인 → C7 live e2e test #4 green.
-  - [ ] `T-ADM-C7Z` — **C7 live e2e 복구-leg 시뮬레이션이 실제 BFF 발급을 못 해 socket[1] 미converge**
-    (#809 계열, C7Y 후속). settle fix로 close-code=4408 확정(제품 정상). 그러나 v5 read-only 진단:
-    `ticketResponses=[200,200] ticketFailed=4 socketCount=1` — e2e helper(`e2e/live/_ops-live-browser.ts`)의
-    재연결 leg가 Playwright `route.fetch()` passthrough로 티켓을 재발급하는데 브라우저-설정
-    `Sec-Fetch-Site: same-origin`을 안 실어 BFF origin guard가 403→abort→socket[1] 미개설. 이 leg는
-    전엔 close-code(1006)에서 먼저 막혀 실행 안 됐던 test-infra 결함(**제품 서버+클라 정상 확정**).
-    fix: 두 복구-leg 핸들러(expired-recovery·healthy-rotation)의 passthrough를 `route.fetch()`에서
-    **`route.continue()`**로 바꿔 실제 브라우저 요청을 그대로 전달(Sec-Fetch-Site·Origin·Cookie 보존)
-    → 실제 BFF가 fresh ticket 발급 → socket[1] converge. 제품 코드 무변경. 검증: 배포 뒤 v5 재검증
-    (`ticketFailed=0`·`socketCount≥2`·socket[1] dataset_projection·bffTicketRequests=2) → full rerun →
-    test #4 green = C7 완료.
+  - [x] `T-ADM-C7W` — **Chromium ops-live 인증 거절 close code 4401 복구** (#806 closed · PR #807 merged) — 완료.
+  - [x] `T-ADM-C7X` — **ops-live subscribe-after-hello로 만료 ticket 4408 clean 전달** (#817 closed · PR #818 merged) — 완료.
+  - [x] `T-ADM-C7Y` — **ops-live reject-close accept↔close settle env-tunable 0.25s** (PR #821 merged) — 완료.
+  - [x] `T-ADM-C7Z` — **C7 live e2e 복구-leg passthrough를 route.continue로 (Sec-Fetch 보존)** (PR #823 merged) — 완료.
+    (위 4개 WS auth close saga는 공식 C7 러너 `ops-c7-read-auth` 7/7 통과로 검증됨; #809 closed. 별건
+    HAProxy WS 백엔드 `timeout tunnel` 미설정 운영버그는 issue #819로 분리 등록됨.)
   - [x] `T-ADM-C7PV` — **kma-active-write preview provider_dataset WYSIWYG(sync_scope)** (PR #824 merged) —
     preview가 0-feature dataset(`kma_ultra_short_nowcast`)에서 `matched_scope.provider_datasets`를
     생략해 C7 `assertExactKmaPreviewBody`가 throw + 다음 UI `toContainText(sync_scope)`도 실패.
@@ -76,7 +57,7 @@
     (agent B, draft PR #792; 단일 적대 리뷰·gate·n150 live·issue close 대기)
   - [ ] `T-VN-H03R` — **route wiring startup gate·public CORS exact preflight 완결**
     (#798, T-VN-H03 적대 리뷰 후속)
-  - [ ] `T-VN-H11` — **ops-live 인증 close의 proxy 전달 경계 분리** (#809)
+  - [x] `T-VN-H11` — **ops-live 인증 close의 proxy 전달 경계 분리** (#809 closed) — 완료 (WS auth close saga; T-ADM-C7W/X/Y/Z와 함께 read-auth 7/7로 검증).
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
     `T-VN-16` weather batch와 부모 404.
@@ -94,7 +75,7 @@
   - [ ] `T-VN-41` — **cache-target generation·outbox 전파**
   - [ ] `T-VN-51` — **MVT tile 도입 조건 측정**
   - [ ] `T-VN-52` — **범용 feature-context batch 도입 조건 측정**
-  - [ ] `T-VN-53` — **cursor signing key rotation 운영 측정**
+  - [ ] `T-VN-53` — **cursor signing key rotation 운영 측정** (도입 여부 측정은 T-VN-15 HMAC clean-cut 채택으로 **폐기**; rotation 주기·grace window 필요성 측정만 조건부 잔존)
   - [ ] `T-VN-54` — **weather partition·hypertable·event clock 측정**
   - [ ] `T-VN-55` — **물리 listener/process 분리 측정**
   - [ ] `T-VN-56` — **대규모 fixture 실행 주기 측정**
@@ -151,7 +132,7 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   attestation을 local-only 운영 절차로 provision한다. 운영 종결이 남은 #684/#694/#712/#719는
   최종 live 증거를 첨부한 뒤 닫는다.
 
-- [ ] `T-ADM-C7W` — **Chromium ops live 인증 거절 close code 복구** (#806):
+- [x] `T-ADM-C7W` — **Chromium ops-live 인증 거절 close code 복구** (#806 closed · PR #807 merged) — 완료:
   변조된 `ktm.ops-live.v1.*` subprotocol을 제시한 실제 Chromium은 서버가 WebSocket
   subprotocol을 선택하지 않으면 application close `4401` 대신 handshake 실패 `1006`을
   관측한다. 요청 헤더에서 prefix·단일성·길이 제한을 통과한 candidate만 transport-level
