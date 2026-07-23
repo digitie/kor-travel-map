@@ -1269,7 +1269,6 @@ export function buildKmaRequest(
     },
     providers: [],
     dataset_keys: [],
-    update_policy: {},
     run_mode: runMode,
     priority: 50,
     reason,
