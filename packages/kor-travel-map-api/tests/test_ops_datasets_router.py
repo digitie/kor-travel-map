@@ -1238,6 +1238,9 @@ async def test_detail_materializes_all_catalog_target_scopes(
 
     async def _snapshots(
         _session: object,
+        *,
+        provider: str,
+        dataset_key: str,
     ) -> tuple[DatasetExecutionSnapshot, ...]:
         return (
             DatasetExecutionSnapshot(
@@ -1257,7 +1260,7 @@ async def test_detail_materializes_all_catalog_target_scopes(
 
     monkeypatch.setattr(service.sync_state_repo, "list_sync_states", _states)
     monkeypatch.setattr(service, "get_provider_refresh_policy", _none)
-    monkeypatch.setattr(service, "list_dataset_execution_snapshots", _snapshots)
+    monkeypatch.setattr(service, "list_dataset_execution_snapshots_scoped", _snapshots)
     monkeypatch.setattr(service, "list_pipeline_executions", _empty_page)
     monkeypatch.setattr(service, "list_ops_import_job_events", _empty_page)
     monkeypatch.setattr(service, "count_open_integrity_issues_by_dataset", _empty)

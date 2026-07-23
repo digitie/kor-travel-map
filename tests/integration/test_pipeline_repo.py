@@ -20,6 +20,7 @@ from kortravelmap.infra.pipeline_repo import (
     get_pipeline_execution,
     get_pipeline_status_counts,
     list_dataset_pipeline_execution_snapshots,
+    list_dataset_pipeline_execution_snapshots_scoped,
     list_latest_dataset_pipeline_executions,
     list_pipeline_executions,
 )
@@ -1111,6 +1112,96 @@ async def test_dataset_execution_snapshot_keeps_terminal_and_active_independent(
     assert snapshot.active is not None
     assert snapshot.active.execution.id == active_request_id
     assert snapshot.active.pair_status == "queued"
+
+
+async def test_scoped_dataset_execution_snapshot_matches_unscoped_filtered(
+    migrated_session: AsyncSession,
+) -> None:
+    """scoped snapshot 쿼리는 대상 (provider, dataset_key)에 대해 unscoped 결과를
+    필터한 것과 동일해야 한다(다른 dataset의 root가 존재해도 제외한다)."""
+    provider = "python-kma-api"
+    dataset_key = "kma_short_forecast"
+    other_dataset_key = "kma_ultra_short_nowcast"
+    sync_scope = "target_grids"
+
+    target_terminal_id = str(uuid5(_REQUEST_JOB_NAMESPACE, "scoped-target-terminal"))
+    target_active_id = str(uuid5(_REQUEST_JOB_NAMESPACE, "scoped-target-active"))
+    other_request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, "scoped-other-dataset"))
+
+    def _scope(ds_key: str) -> dict[str, Any]:
+        return {
+            "type": "provider_dataset",
+            "provider": provider,
+            "dataset_key": ds_key,
+            "sync_scope": sync_scope,
+        }
+
+    # 대상 dataset: 종료 실행 + 활성 실행
+    await _request(
+        migrated_session, target_terminal_id, job_id=None, created_at=_T0, scope=_scope(dataset_key)
+    )
+    started = await start_update_request(
+        migrated_session,
+        target_terminal_id,
+        dagster_run_id="scoped-target-run",
+        expected_generation=1,
+    )
+    assert started is not None
+    finished = await finish_update_request(
+        migrated_session,
+        target_terminal_id,
+        status="done",
+        owner_dagster_run_id="scoped-target-run",
+        expected_generation=1,
+    )
+    assert finished is not None
+    await _request(
+        migrated_session,
+        target_active_id,
+        job_id=None,
+        created_at=_T0 + timedelta(minutes=1),
+        scope=_scope(dataset_key),
+    )
+    # 다른 dataset의 root — scoped 결과에서 반드시 제외돼야 한다
+    await _request(
+        migrated_session,
+        other_request_id,
+        job_id=None,
+        created_at=_T0 + timedelta(minutes=2),
+        scope=_scope(other_dataset_key),
+    )
+
+    unscoped = await list_dataset_pipeline_execution_snapshots(migrated_session)
+    scoped = await list_dataset_pipeline_execution_snapshots_scoped(
+        migrated_session, provider=provider, dataset_key=dataset_key
+    )
+
+    def _identity(items: tuple[Any, ...]) -> set[tuple[Any, ...]]:
+        return {
+            (
+                s.provider,
+                s.dataset_key,
+                s.sync_scope,
+                s.latest_terminal.execution.id if s.latest_terminal else None,
+                s.active.execution.id if s.active else None,
+            )
+            for s in items
+        }
+
+    unscoped_target = tuple(
+        s for s in unscoped if (s.provider, s.dataset_key) == (provider, dataset_key)
+    )
+    # 핵심 등가 주장: scoped == unscoped를 대상 dataset으로 필터한 것
+    assert _identity(scoped) == _identity(unscoped_target)
+    # 다른 dataset은 unscoped엔 있고 scoped엔 없다
+    assert any(s.dataset_key == other_dataset_key for s in unscoped)
+    assert all(s.dataset_key == dataset_key for s in scoped)
+    # 대상 dataset의 terminal/active identity가 보존된다
+    target = next(s for s in scoped if s.sync_scope == sync_scope)
+    assert target.latest_terminal is not None
+    assert target.latest_terminal.execution.id == target_terminal_id
+    assert target.active is not None
+    assert target.active.execution.id == target_active_id
 
 
 async def test_dataset_scope_filter_is_applied_before_page_limit(
