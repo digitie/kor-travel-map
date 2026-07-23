@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-23 (claude) — C7 kma-active-write update_policy create-body 테스트 과-명세 수정
+
+- #824(preview provider_dataset WYSIWYG) 재cut 후 `ops-c7-kma-active-write`가 create 단계의
+  create-body exactness에서 실패. C7 러너의 redacted reporter가 실패를 가려, verbose-iterate
+  harness(비-redacting `--reporter=line`+trace, 로컬 editable spec, 재cut 없이 반복)로 live
+  스택(1065925b)에 직접 실행. soft-continue 계측 run(23.9분)에서 유일한 불일치가
+  `journalExactUiKmaCreateRequest`의 `exactJson(actualBody, expectedBody)` — `update_policy`
+  필드뿐이고, 그것을 넘기면 전 main flow(create→reuse→run-now→terminal→grids→fingerprint→
+  overflow×49)가 통과함을 확인.
+- 판정: **테스트 과-명세**. UI(`request-dialog.tsx`)는 create body에 `update_policy`를 아예
+  보내지 않는다(`{scope,providers,dataset_keys,run_mode,priority,reason}`만). 계약상 양쪽 optional
+  (TS `update_policy?:`, Pydantic `default_factory=FeatureUpdatePolicy` → absent≡`{}`). #824는
+  필수 응답필드라 제품수정이었지만, 이건 optional 빈 요청필드라 테스트수정이 맞다.
+- 수정: `_ops-c7-admin-api.ts` `buildKmaRequest`의 `update_policy: {},` 한 줄 삭제.
+  `previewBody`는 undefined 전달(wire drop), preview 계약 assertion은 이미 `?? {}`로 정규화 → 무영향.
+- cleanup `_ops-c7-admin-api.ts:871` fetch timeout은 별개(teardown 30s fetch, POI target은
+  이미 삭제됨) — 이 커밋과 무관, clean run에서 재관찰. C7는 1065925b + 이 fix로 재cut → rerun.
+
 ## 2026-07-22 (claude) — C7 kma-active-write preview provider_dataset WYSIWYG(sync_scope)
 
 - C7 live e2e `ops-c7-kma-active-write`의 실제 blocker는 request-dialog preview(dry-run)

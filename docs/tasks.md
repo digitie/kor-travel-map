@@ -42,6 +42,13 @@
     `scope_repo` provider_dataset 브랜치가 요청 pair를 0-feature 포함 항상 + 요청 `sync_scope`와
     함께 노출(executor `_provider_dataset_scopes` parity). 검증: PR CI green → main 머지 →
     C7 8c1abcba+fix 재cut → rerun → kma-active-write green = C7 완료.
+  - [ ] `T-ADM-C7PW` — **kma-active-write create-body update_policy 테스트 과-명세** — #824(C7PV)
+    재cut 후 create 단계에서 `journalExactUiKmaCreateRequest` exactJson(actualBody, expectedBody)이
+    `update_policy`에서 불일치. UI는 create body에 `update_policy`를 안 보내는데 테스트가 `{}`를
+    기대. 계약상 optional(absent≡{})이라 테스트 과-명세 → `_ops-c7-admin-api.ts` `buildKmaRequest`의
+    `update_policy: {},` 삭제. verbose-iterate harness로 update_policy가 유일 blocker임 확인(soft-continue
+    run 전 flow 통과). 검증: PR CI green → 머지 → C7 1065925b+fix 재cut → rerun green = C7 완료.
+    (별개: cleanup L871 fetch timeout, transient 가능 — clean run 재관찰.)
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
