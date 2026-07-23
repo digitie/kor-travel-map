@@ -1204,6 +1204,55 @@ async def test_scoped_dataset_execution_snapshot_matches_unscoped_filtered(
     assert target.active.execution.id == target_active_id
 
 
+async def test_recency_bounded_executions_fall_back_when_window_sparse(
+    migrated_session: AsyncSession,
+) -> None:
+    """``root_since`` window가 페이지를 못 채우면 unbounded로 fallback해 window
+    밖의 오래된 실행까지 top-N에 포함한다 — 저빈도·유휴 dataset의 run-history
+    정합성 보장(고빈도 dataset은 window가 페이지를 채워 fallback을 타지 않는다)."""
+    provider = "python-kma-api"
+    dataset_key = "kma_short_forecast"
+    sync_scope = "target_grids"
+    scope = {
+        "type": "provider_dataset",
+        "provider": provider,
+        "dataset_key": dataset_key,
+        "sync_scope": sync_scope,
+    }
+    request_ids: list[str] = []
+    for index in range(3):
+        request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, f"recency-fallback-{index}"))
+        request_ids.append(request_id)
+        await _request(
+            migrated_session,
+            request_id,
+            job_id=None,
+            created_at=_T0 + timedelta(minutes=index),
+            scope=scope,
+        )
+
+    # 모든 run이 root_since보다 앞(= window 밖)이므로 recency-bounded 쿼리 단독
+    # 결과는 비지만, fallback이 unbounded로 재조회해 3건을 모두 돌려준다.
+    root_since = _T0 + timedelta(days=30)
+    windowed = await list_pipeline_executions(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        limit=50,
+        root_since=root_since,
+    )
+    unbounded = await list_pipeline_executions(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        limit=50,
+    )
+    assert {item.id for item in windowed.items} == set(request_ids)
+    assert [item.id for item in windowed.items] == [
+        item.id for item in unbounded.items
+    ]
+
+
 async def test_dataset_scope_filter_is_applied_before_page_limit(
     migrated_session: AsyncSession,
 ) -> None:

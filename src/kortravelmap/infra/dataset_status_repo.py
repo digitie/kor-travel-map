@@ -209,10 +209,14 @@ async def list_dataset_execution_snapshots_scoped(
     """단일 (provider, dataset_key)로 좁힌 종료/활성 실행 snapshot.
 
     ``load_dataset_detail``처럼 한 dataset만 필요한 경로 전용. 전체 파이프라인
-    히스토리를 스캔하는 unscoped 버전의 O(roots^2) 비용을 피한다.
+    히스토리를 스캔하는 unscoped 버전의 O(roots^2) 비용을 scoped EXISTS 필터로
+    피한다. latest_terminal/active는 유휴 scope에서도 반환해야 하므로 recency
+    window는 두지 않는다.
     """
     rows = await list_dataset_pipeline_execution_snapshots_scoped(
-        session, provider=provider, dataset_key=dataset_key
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
     )
     return tuple(
         DatasetExecutionSnapshot(
