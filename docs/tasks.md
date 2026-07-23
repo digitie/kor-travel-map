@@ -47,6 +47,16 @@
     #829 코드 fix와는 **별개 test-품질 작업**) → 재cut → rerun. **재cut 메커니즘**: `/home/digitie/c7-{deploy-asdigitie,
     rebind,rerun}-<commit>.sh`(토큰 swap 미러 — deploy는 target+prev(현 active), rebind/rerun은 target;
     현 stack=9492ab2d, prev=713e31c7). v6 harness: `/home/digitie/c7-v6/`(editable mount, verbose repro).
+    **2026-07-24 갱신 — 하드닝 착수 후 게이트 재설계로 방향 전환**: 후반 flaky를 ultracode 워크플로우로
+    확정 진단 → 하드닝 3fix 구현(UI settle `gotoExactDatasetUiSettled`, cleanup terminalTimeout 90→480s,
+    run-now leg 제거; 브랜치 `fix/c7-late-scenario-hardening`, 2-reviewer clean, v6로 UI-render 통과 검증).
+    그러나 v6가 더 진행(142s, UI 통과)하며 **①detail 504**(#829 recency-fallback가 fresh per-run scope에서
+    fully-unbounded O(roots²) 재조회→server timeout — self-inflicted 누적 때문) 노출 + 리뷰가 **②spec:381
+    execution-detail 미 response-gate ③spec:894 fast-completion race ④base-rollover straddle ⑤cleanup tail**
+    까지 식별 = **후반 zero-retry flow에 독립 flake 5개 + self-degrading 누적**. whack-a-mole 비수렴 판단 →
+    **게이트 재설계 제안**: `docs/reports/c7-kma-active-write-gate-redesign-2026-07-24.md`(monolith 분할 /
+    cursor-overflow를 prod-live에서 분리 / ops detail per-dataset bound / UI response-gate / spec-level bounded
+    retry). 우선순위 B(overflow 분리)+C(per-dataset bound). 팀 결정 대기.
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤) — kma-active-write의 실질 코드 blocker(detail perf·
     running-race 포함)는 전부 해결·머지, read-auth 7/7 안정. 잔여 공식 GREEN은 `T-ADM-C7RUN`(후반 flaky UI/timing 하드닝).
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
