@@ -131,6 +131,9 @@ const POI_TARGETS_PATH = "/v1/admin/poi-cache-targets";
 const PIPELINE_REQUESTS_PATH = "/v1/ops/pipeline/requests";
 const FORBIDDEN_PROVIDER_PATTERN = /opinet/i;
 const BROWSER_FETCH_TIMEOUT_MS = 30_000;
+// dataset detail은 per-scope 실행/이벤트 이력을 집계하므로 대량 이력 상황에서
+// 기본 timeout보다 여유가 필요하다(서버측 scoped 쿼리 최적화의 안전 마진).
+const DATASET_DETAIL_FETCH_TIMEOUT_MS = 60_000;
 const DAGSTER_GRAPHQL_TIMEOUT_MS = 15_000;
 const DAGSTER_RUN_SETTLEMENT_TIMEOUT_MS = 60_000;
 const OWNED_TARGET_PAGE_SIZE = 500;
@@ -824,6 +827,7 @@ export async function browserFetch<T>(
     body?: unknown;
     headers?: Record<string, string>;
     method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    timeoutMs?: number;
   } = {},
 ): Promise<BrowserFetchResult<T>> {
   assertBootstrappedPage(page);
@@ -864,7 +868,7 @@ export async function browserFetch<T>(
         headers: options.headers ?? {},
         method: options.method ?? "GET",
         path,
-        timeoutMs: BROWSER_FETCH_TIMEOUT_MS,
+        timeoutMs: options.timeoutMs ?? BROWSER_FETCH_TIMEOUT_MS,
       },
     );
   } catch {
@@ -1956,6 +1960,7 @@ export async function getExactDatasetDetail(
   return browserFetch<OpsDatasetDetailResponse>(
     page,
     `/v1/ops/datasets/detail?${exactScopeQuery(syncScope)}`,
+    { timeoutMs: DATASET_DETAIL_FETCH_TIMEOUT_MS },
   );
 }
 

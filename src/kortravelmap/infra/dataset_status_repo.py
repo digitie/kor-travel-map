@@ -24,6 +24,7 @@ from sqlalchemy import text
 from kortravelmap.infra.pipeline_repo import (
     PipelineDatasetLatestExecution,
     list_dataset_pipeline_execution_snapshots,
+    list_dataset_pipeline_execution_snapshots_scoped,
     list_latest_dataset_pipeline_executions,
 )
 
@@ -38,6 +39,7 @@ __all__ = [
     "DatasetLatestExecution",
     "count_open_integrity_issues_by_dataset",
     "list_dataset_execution_snapshots",
+    "list_dataset_execution_snapshots_scoped",
     "list_latest_dataset_executions",
 ]
 
@@ -186,6 +188,32 @@ async def list_dataset_execution_snapshots(
 ) -> tuple[DatasetExecutionSnapshot, ...]:
     """공용 pipeline projection의 종료/활성 실행을 한 DB snapshot으로 반환한다."""
     rows = await list_dataset_pipeline_execution_snapshots(session)
+    return tuple(
+        DatasetExecutionSnapshot(
+            provider=row.provider,
+            dataset_key=row.dataset_key,
+            sync_scope=row.sync_scope,
+            latest_terminal=_dataset_execution(row.latest_terminal),
+            active=_dataset_execution(row.active),
+        )
+        for row in rows
+    )
+
+
+async def list_dataset_execution_snapshots_scoped(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+) -> tuple[DatasetExecutionSnapshot, ...]:
+    """단일 (provider, dataset_key)로 좁힌 종료/활성 실행 snapshot.
+
+    ``load_dataset_detail``처럼 한 dataset만 필요한 경로 전용. 전체 파이프라인
+    히스토리를 스캔하는 unscoped 버전의 O(roots^2) 비용을 피한다.
+    """
+    rows = await list_dataset_pipeline_execution_snapshots_scoped(
+        session, provider=provider, dataset_key=dataset_key
+    )
     return tuple(
         DatasetExecutionSnapshot(
             provider=row.provider,

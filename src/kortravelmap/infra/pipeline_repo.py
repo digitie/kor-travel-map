@@ -45,6 +45,7 @@ __all__ = [
     "get_pipeline_execution",
     "list_latest_dataset_pipeline_executions",
     "list_dataset_pipeline_execution_snapshots",
+    "list_dataset_pipeline_execution_snapshots_scoped",
     "list_pipeline_executions",
 ]
 
@@ -587,6 +588,38 @@ roots_with_identity AS (
 """
 
 _PIPELINE_ROOT_CTES_SQL: Final[str] = PIPELINE_LINEAGE_CTES_SQL + ",\n" + _PIPELINE_ROOT_BODY_SQL
+
+# --- scoped 변형 (dataset detail 조회 전용) ---------------------------------
+# ``load_dataset_detail``은 단일 (provider, dataset_key) snapshot만 필요하지만
+# unscoped ``_LIST_DATASET_EXECUTION_SNAPSHOTS_SQL``은 roots_with_identity의
+# per-root 상관 서브쿼리를 전체 파이프라인 히스토리에 대해 계산하므로 누적 실행
+# 이력에 비례해 O(roots^2)로 악화하고(높은 plan cost가 JIT까지 유발) detail
+# endpoint가 클라이언트 timeout을 넘긴다. 아래 변형은 roots_with_identity를 대상
+# (provider, dataset_key)에 속한 root로만 좁혀 동일 결과를 훨씬 적은 비용으로
+# 만든다. 공유 CTE 텍스트를 그대로 재사용하고 마지막 ``FROM all_roots`` 소스에만
+# EXISTS 필터를 덧붙인다.
+_ROOTS_WITH_IDENTITY_FROM_ANCHOR: Final[str] = "    FROM all_roots AS root\n)"
+if _ROOTS_WITH_IDENTITY_FROM_ANCHOR not in _PIPELINE_ROOT_BODY_SQL:  # pragma: no cover
+    raise RuntimeError(
+        "pipeline_repo: scoped dataset snapshot anchor "
+        "'FROM all_roots AS root' 를 찾지 못했습니다"
+    )
+_PIPELINE_ROOT_BODY_SCOPED_SQL: Final[str] = _PIPELINE_ROOT_BODY_SQL.replace(
+    _ROOTS_WITH_IDENTITY_FROM_ANCHOR,
+    "    FROM all_roots AS root\n"
+    "    WHERE EXISTS (\n"
+    "        SELECT 1\n"
+    "        FROM canonical_provider_datasets AS scoped_pair\n"
+    "        WHERE scoped_pair.root_kind = root.kind\n"
+    "          AND scoped_pair.root_id = root.id\n"
+    "          AND scoped_pair.provider = :snapshot_provider\n"
+    "          AND scoped_pair.dataset_key = :snapshot_dataset_key\n"
+    "    )\n)",
+    1,
+)
+_PIPELINE_ROOT_CTES_SCOPED_SQL: Final[str] = (
+    PIPELINE_LINEAGE_CTES_SQL + ",\n" + _PIPELINE_ROOT_BODY_SCOPED_SQL
+)
 
 _SCOPED_COMPONENT_SOURCE_BODY_SQL: Final[str] = """
 scoped_jobs AS (
@@ -1198,6 +1231,40 @@ ranked_dataset_roots AS (
     + _DATASET_EXECUTION_RESULT_SQL
 )
 
+# ``_LIST_DATASET_EXECUTION_SNAPSHOTS_SQL``의 scoped 변형. scoped root CTE와
+# 대상 (provider, dataset_key)로 좁힌 ranked_dataset_roots를 사용해 동일한
+# per-scope 최신 종료/활성 실행 결과를 만든다(단, 대상 dataset만).
+_LIST_DATASET_EXECUTION_SNAPSHOTS_SCOPED_SQL: Final[str] = (
+    "WITH RECURSIVE\n"
+    + _PIPELINE_ROOT_CTES_SCOPED_SQL
+    + """,
+ranked_dataset_roots AS (
+    SELECT
+        root.*,
+        pair.provider AS selected_provider,
+        pair.dataset_key AS selected_dataset_key,
+        pair.sync_scope AS selected_sync_scope,
+        pair.operation_member_id AS selected_operation_member_id,
+        pair.status AS selected_pair_status,
+        pair.status IN ('queued', 'running') AS selected_is_active,
+        ROW_NUMBER() OVER (
+            PARTITION BY
+                pair.provider,
+                pair.dataset_key,
+                pair.sync_scope,
+                (pair.status IN ('queued', 'running'))
+            ORDER BY root.created_at DESC, root.id DESC, root.kind DESC
+        ) AS dataset_rank
+    FROM roots_with_identity AS root
+    JOIN canonical_provider_datasets AS pair
+      ON pair.root_kind = root.kind AND pair.root_id = root.id
+    WHERE pair.provider = :snapshot_provider
+      AND pair.dataset_key = :snapshot_dataset_key
+)
+"""
+    + _DATASET_EXECUTION_RESULT_SQL
+)
+
 _GET_EXECUTION_SQL: Final[str] = (
     "WITH RECURSIVE\n"
     + _DETAIL_SCOPED_SOURCE_SQL
@@ -1513,11 +1580,11 @@ def _row_to_dataset_execution(row: Any) -> PipelineDatasetLatestExecution:
     )
 
 
-async def list_dataset_pipeline_execution_snapshots(
-    session: AsyncSession,
+def _group_dataset_execution_snapshot_rows(
+    rows: Collection[Any],
 ) -> tuple[PipelineDatasetExecutionSnapshot, ...]:
-    """exact scope별 최신 종료 실행과 활성 실행을 동일 SQL snapshot으로 반환한다."""
-    rows = (await session.execute(text(_LIST_DATASET_EXECUTION_SNAPSHOTS_SQL))).all()
+    """dataset execution snapshot row를 (provider, dataset_key, sync_scope)별
+    최신 종료/활성 실행 쌍으로 묶는다. unscoped·scoped 쿼리가 공유한다."""
     grouped: dict[
         tuple[str, str, str | None],
         dict[bool, PipelineDatasetLatestExecution],
@@ -1539,3 +1606,42 @@ async def list_dataset_pipeline_execution_snapshots(
         )
         for (provider, dataset_key, sync_scope), items in grouped.items()
     )
+
+
+async def list_dataset_pipeline_execution_snapshots(
+    session: AsyncSession,
+) -> tuple[PipelineDatasetExecutionSnapshot, ...]:
+    """exact scope별 최신 종료 실행과 활성 실행을 동일 SQL snapshot으로 반환한다."""
+    rows = (await session.execute(text(_LIST_DATASET_EXECUTION_SNAPSHOTS_SQL))).all()
+    return _group_dataset_execution_snapshot_rows(rows)
+
+
+async def list_dataset_pipeline_execution_snapshots_scoped(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+) -> tuple[PipelineDatasetExecutionSnapshot, ...]:
+    """단일 (provider, dataset_key)로 좁힌 snapshot.
+
+    ``load_dataset_detail`` 전용. unscoped 버전은 roots_with_identity per-root
+    상관 서브쿼리를 전체 파이프라인 히스토리에 대해 계산해 누적 실행 이력에
+    비례하는 O(roots^2) 비용(+높은 plan cost로 인한 JIT)을 낸다. 이 변형은 대상
+    dataset의 root로만 범위를 좁혀 동일한 per-scope 결과를 만든다.
+
+    또한 이 쿼리는 plan cost가 높아 PostgreSQL JIT가 트리거되는데, JIT 컴파일
+    자체가 실제 실행(수백 ms)의 몇 배(수 초)에 달해 순손해다. 트랜잭션 범위로만
+    (``SET LOCAL`` — 트랜잭션 종료 시 자동 복원) JIT를 꺼 순수 실행 비용만 남긴다.
+    detail 트랜잭션의 후속 쿼리들은 모두 bounded여서 JIT-off가 무해하다.
+    """
+    await session.execute(text("SET LOCAL jit = off"))
+    rows = (
+        await session.execute(
+            text(_LIST_DATASET_EXECUTION_SNAPSHOTS_SCOPED_SQL),
+            {
+                "snapshot_provider": provider,
+                "snapshot_dataset_key": dataset_key,
+            },
+        )
+    ).all()
+    return _group_dataset_execution_snapshot_rows(rows)

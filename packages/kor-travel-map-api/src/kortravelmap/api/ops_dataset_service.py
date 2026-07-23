@@ -23,6 +23,7 @@ from kortravelmap.infra.dataset_status_repo import (
     DatasetLatestExecution,
     count_open_integrity_issues_by_dataset,
     list_dataset_execution_snapshots,
+    list_dataset_execution_snapshots_scoped,
 )
 from kortravelmap.infra.ops_repo import (
     OpsImportJobEvent,
@@ -878,7 +879,12 @@ async def load_dataset_detail(
         if DATASET_WIDE_SYNC_SCOPE in history_sync_scopes
         else canonical_scope
     )
-    execution_snapshots = await list_dataset_execution_snapshots(session)
+    # detail은 단일 (provider, dataset_key)만 투영하므로 scoped snapshot을 쓴다.
+    # unscoped 버전은 전체 파이프라인 히스토리에 대해 O(roots^2) 비용을 내어
+    # 누적 실행 이력이 쌓이면 detail 응답이 클라이언트 timeout을 넘긴다.
+    execution_snapshots = await list_dataset_execution_snapshots_scoped(
+        session, provider=provider, dataset_key=dataset_key
+    )
     latest_execution, active_execution = _dataset_execution_projection(
         execution_snapshots,
         provider=provider,
