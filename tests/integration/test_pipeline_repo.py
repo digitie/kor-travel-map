@@ -1939,6 +1939,22 @@ async def test_external_system_scope_run_history_cursor_pages_past_boundary(
                 "sync_scope": sync_scope,
             },
         )
+        # 다음 동일-scope 요청을 만들기 전에 terminal로 보낸다 — active
+        # (provider,dataset_key,sync_scope) 하나만 허용하는 unique 제약을 피한다
+        # (실제 overflow도 각 요청을 done까지 몰고 다음을 만든다).
+        owner = f"c7-overflow-run-{index}"
+        started = await start_update_request(
+            migrated_session, request_id, dagster_run_id=owner, expected_generation=1
+        )
+        assert started is not None
+        finished = await finish_update_request(
+            migrated_session,
+            request_id,
+            status="done",
+            owner_dagster_run_id=owner,
+            expected_generation=1,
+        )
+        assert finished is not None
         # 같은 dataset의 다른 scope를 사이사이 넣어, scope 필터가 page-limit 뒤에
         # 적용되면 첫 페이지가 밀려나도록(= 그러면 안 됨) 압박한다.
         await _request(
