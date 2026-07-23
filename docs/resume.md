@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-24 (claude) — C7 실질 코드 blocker 완료; 다음 = 후반 flaky UI/timing 하드닝
+
+**다음 한 작업**: `T-ADM-C7RUN` — C7 `ops-c7-kma-active-write`의 **후반 active 시나리오 flaky
+UI-render/cleanup-timing 하드닝**. `assertDatasetTerminalHistoryUi`(spec:434) 등 후반 UI 어서션·
+terminalization·cleanup에 robust wait/polling 추가 → 재cut(`/home/digitie/c7-{deploy-asdigitie,rebind,rerun}-<commit>.sh`
+토큰 swap; 현 stack=9492ab2d, prev=713e31c7) → KST :41–:05 창에서 공식 rerun.
+
+- **완료(이번 세션)**: (1) detail `/v1/ops/datasets/detail` O(roots²) timeout → `all_roots` recency 창 +
+  window sparse 시 unbounded fallback, snapshot은 scoped EXISTS만(유휴 scope 보존); (2) running-race →
+  fast-completion tolerate. 둘 다 fix·2-reviewer·merged(**#829**)·`9492ab2d` 재cut·prod DB/live 검증.
+  공식 rerun 43–52s→**142s로 3배 진행**(두 fix 작동 확인). "외부 KMA 502가 유일 blocker" 진단은 **폐기**.
+- **잔여**: 후반 active 시나리오 **pre-existing flaky UI/timing**(deterministic 아님 — 백엔드는 정확,
+  직전 direct API assertion PASS). official=`cleanup_blocked`, v6=`assertDatasetTerminalHistoryUi` UI static
+  header 15s timeout. zero-retry 게이트라 ~50-step flow 중 flake 한 번도 실패 → test-robustness 하드닝
+  필요(#829 코드 fix와 별개 작업). 상세: `docs/tasks.md` T-ADM-C7RUN + `docs/journal.md` 최신.
+- 사용자 결정으로 이번 세션은 여기서 pause + write-up(실질 코드 blocker 완결 확인 후).
+
 ## 2026-07-20 (codex) — T-VN-H11 ops-live close 전달 회귀 보강 중
 
 - #806 수정 배포 뒤 n150 API 직결 Chromium은 ticket 없음과 형식이 유효한 변조

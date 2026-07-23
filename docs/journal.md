@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-24 (claude) — C7 detail perf + running-race fix 완료; 잔여 = 후반 flaky UI/timing
+
+- 이전 "외부 data.go.kr KMA 502가 유일 blocker" 진단은 **오류**였다(폐기). verbose-iterate(비-redacting
+  reporter + `browserFetch` DIAG 계측)로 masked 실패를 순차 규명해 **두 개의 실질 코드 blocker**를
+  찾아 수정·머지(**PR #829**):
+  - **detail `/v1/ops/datasets/detail` O(roots²) timeout**: `load_dataset_detail`의 CTE 쿼리(특히
+    `list_pipeline_executions`, ~9–14s)가 append-only 누적 pipeline root 전체를 순회. prune 불가
+    (`feature_update_request_idempotency`가 append-only + RESTRICT FK). → `all_roots`에 `created_at`
+    recency 창(`root_since`) pushdown; window가 페이지 못 채우면 unbounded fallback(저빈도 dataset
+    top-N 정합성). snapshot은 scoped EXISTS만 유지(유휴 scope latest 보존 위해 recency 미적용 —
+    2-reviewer가 잡은 회귀). prod DB 실측 14s→~1.3s(detail flow, snapshot의 tx-local jit-off 상속),
+    top-N 동일. recency-fallback 통합 테스트 추가.
+  - **running-race**: `assertRunningRequestIdentityFromUi`가 transient `status==="running"` 관측을
+    요구하나 빠른 KMA job이 먼저 `done`(poll이 30s 내내 "done" 관측 → timeout). → fast-completion
+    tolerate(`.not.toBe("queued")` + non-queued 상태에서 canonical identity 검증, run-now leg는
+    여전히 running일 때만). live v6로 검증(line 399 통과).
+- 스택 **9492ab2d** 재cut(deploy 4런타임 recreated+healthy, rebind self-verify OK, clear). 공식 rerun이
+  **43–52s → 142s로 3배 진행**(detail 200 OK 빠름 = recency 작동, running-race 통과 = tolerant 작동)했으나
+  여전히 fail.
+- **잔여 blocker = 후반 active 시나리오의 pre-existing flaky UI-render/cleanup-timing**(deterministic bug
+  아님): official=`cleanup_blocked`(`allRequestsTerminal:false`), v6=`assertDatasetTerminalHistoryUi`(spec:434)
+  UI static header 15s timeout — **직전 918–926 direct API assertion(`latest_execution.id===request`)은
+  PASS = 백엔드 정확**. 서로 다른 실패 지점 = flaky. zero-retry 게이트라 ~50-step flow 중 flake 한 번도 실패.
+  → `T-ADM-C7RUN`을 "후반 UI/timing test-robustness 하드닝"으로 재정의. **실질 코드 fix는 완료**, 이건
+  별개 test-품질 작업. 사용자 결정으로 pause + write-up.
+- 부수: CI를 막던 무관 time-bomb `test_admin_price_card_and_map_summary_include_nonpublic_feature`
+  (fixed `_NOW`=07-19 vs real-`now()` staleness가 07-24에 발현)에 `asof=_NOW` 핀(#829에 folded);
+  tasks-cleanup(#827).
+
 ## 2026-07-23 (claude) — C7 완료 처리 (closeout) + KMA 재실행 별도 task 분리
 
 - C7 kma-active-write의 blocker 6개가 모두 해결됐다: (1)WS auth(#818/#821/#823, read-auth 7/7),
