@@ -90,7 +90,7 @@
 | ADR-074 | Domain-owned replay, revision, outbox 쓰기 안전성 | [074-write-safety.md](074-write-safety.md) |
 | ADR-075 | 보존 우선 cutover와 DDL 규율 | [075-cutover-and-ddl-discipline.md](075-cutover-and-ddl-discipline.md) |
 | ADR-076 | C6c compatible-pair manifest v4와 Map 4-image C7 provenance 결박 | [076-c6c-manifest-v4-map-runtime-provenance.md](076-c6c-manifest-v4-map-runtime-provenance.md) |
-| ADR-077 | pipeline lineage identity를 쓰기 시 materialize (proposed) | [077-pipeline-lineage-identity-materialization.md](077-pipeline-lineage-identity-materialization.md) |
+| ADR-077 | pipeline root 멤버십을 stamp하고 read-time 재귀 lineage 제거 | [077-pipeline-lineage-identity-materialization.md](077-pipeline-lineage-identity-materialization.md) |
 
 ## 새 ADR 작성 규약
 
