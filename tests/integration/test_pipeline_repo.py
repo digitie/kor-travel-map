@@ -1212,13 +1212,9 @@ async def test_recency_bounded_executions_fall_back_when_window_sparse(
     정합성 보장(고빈도 dataset은 window가 페이지를 채워 fallback을 타지 않는다)."""
     provider = "python-kma-api"
     dataset_key = "kma_short_forecast"
-    sync_scope = "target_grids"
-    scope = {
-        "type": "provider_dataset",
-        "provider": provider,
-        "dataset_key": dataset_key,
-        "sync_scope": sync_scope,
-    }
+    # 각 run은 서로 다른 sync_scope를 쓴다 — 동일 (provider, dataset, scope)에
+    # active(queued/running) job은 하나만 허용하는 unique 제약을 피하기 위함이며,
+    # list_pipeline_executions(provider+dataset)는 scope 필터 없이 셋 다 돌려준다.
     request_ids: list[str] = []
     for index in range(3):
         request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, f"recency-fallback-{index}"))
@@ -1228,7 +1224,12 @@ async def test_recency_bounded_executions_fall_back_when_window_sparse(
             request_id,
             job_id=None,
             created_at=_T0 + timedelta(minutes=index),
-            scope=scope,
+            scope={
+                "type": "provider_dataset",
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": f"external_system:recency-fallback-{index}",
+            },
         )
 
     # 모든 run이 root_since보다 앞(= window 밖)이므로 recency-bounded 쿼리 단독
