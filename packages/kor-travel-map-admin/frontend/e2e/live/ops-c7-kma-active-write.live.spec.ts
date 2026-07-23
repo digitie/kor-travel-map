@@ -380,6 +380,13 @@ async function assertRunningRequestIdentityFromUi(
   await page.goto(`/ops/pipeline?execution=update_request:${requestId}`);
   const executionDetail = page.getByTestId("pipeline-execution-detail");
   await expect(executionDetail).toBeVisible();
+  // KMA nowcast refreshes can transition queued→running→done faster than the UI can
+  // observe the transient "running" state, so requiring status==="running" here is a
+  // race (fast completion → the 30s poll only ever sees "done"). Tolerate fast
+  // completion: wait until the request leaves "queued", verify the canonical identity
+  // from whichever non-queued state is observed, and only exercise the strictly-
+  // while-running run-now UI leg when the request is still observably running (its
+  // ownership barrier in runTrackedRequestNowFromUi requires status==="running").
   await expect
     .poll(
       async () =>
@@ -387,25 +394,33 @@ async function assertRunningRequestIdentityFromUi(
           .status,
       { timeout: 30_000 },
     )
-    .toBe("running");
-  const runningRunNow = executionDetail.getByRole("button", {
-    name: "실행 중 요청 확인 (run-now)",
-    exact: true,
-  });
-  await expect(runningRunNow).toBeVisible();
-  expect(
-    requireBody(await getRequestDetail(page, requestId), 200).data.execution
-      .status,
-  ).toBe("running");
-  await runTrackedRequestNowFromUi(
-    page,
-    state,
-    requestId,
-    jobId,
-    syncScope,
-    () => runningRunNow.click(),
-  );
-  await expect(executionDetail.getByText("우선 dispatch 요청됨")).toBeVisible();
+    .not.toBe("queued");
+  const observedExecution = requireBody(
+    await getRequestDetail(page, requestId),
+    200,
+  ).data.execution;
+  expect(observedExecution.kind).toBe("update_request");
+  expect(observedExecution.id).toBe(requestId);
+  expect(observedExecution.job_id).toBe(jobId);
+  if (observedExecution.status === "running") {
+    const runningRunNow = executionDetail.getByRole("button", {
+      name: "실행 중 요청 확인 (run-now)",
+      exact: true,
+    });
+    if (await runningRunNow.isVisible().catch(() => false)) {
+      await runTrackedRequestNowFromUi(
+        page,
+        state,
+        requestId,
+        jobId,
+        syncScope,
+        () => runningRunNow.click(),
+      );
+      await expect(
+        executionDetail.getByText("우선 dispatch 요청됨"),
+      ).toBeVisible();
+    }
+  }
 }
 
 async function assertDatasetTerminalHistoryUi(

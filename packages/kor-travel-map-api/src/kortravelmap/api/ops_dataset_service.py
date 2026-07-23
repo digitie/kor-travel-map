@@ -100,6 +100,11 @@ __all__ = [
 _NEVER_RUN_STATUS = "never_run"
 _RECENT_RUNS_LIMIT = 10
 _RECENT_EVENTS_LIMIT = 20
+# detail은 최근 실행만 보여주므로 pipeline root 스캔을 이 window로 제한한다.
+# unscoped root CTE는 누적 실행 이력에 비례해 O(roots^2)로 악화하는데, detail이
+# 필요로 하는 종료/활성 실행과 run-history top-N은 모두 이 window 안에 있어
+# 결과는 동일하고 비용만 줄인다(#828 후속 perf 수정).
+_DATASET_DETAIL_ROOT_WINDOW = timedelta(days=7)
 
 
 def _dataset_detail_url(provider: str, dataset_key: str, sync_scope: str) -> str:
@@ -881,9 +886,16 @@ async def load_dataset_detail(
     )
     # detail은 단일 (provider, dataset_key)만 투영하므로 scoped snapshot을 쓴다.
     # unscoped 버전은 전체 파이프라인 히스토리에 대해 O(roots^2) 비용을 내어
-    # 누적 실행 이력이 쌓이면 detail 응답이 클라이언트 timeout을 넘긴다.
+    # 누적 이력이 쌓이면 detail 응답이 클라이언트 timeout을 넘긴다. snapshot은
+    # scoped EXISTS 필터만으로 빠르다 — latest_terminal/active는 유휴 scope에서도
+    # 반환해야 하므로 recency window를 두지 않는다. run-history(아래)만 root_since로
+    # 최근 window를 스캔하되 window가 페이지를 못 채우면 unbounded로 fallback해
+    # 저빈도 dataset의 top-N/커서 정확도를 지킨다.
+    root_since = reference - _DATASET_DETAIL_ROOT_WINDOW
     execution_snapshots = await list_dataset_execution_snapshots_scoped(
-        session, provider=provider, dataset_key=dataset_key
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
     )
     latest_execution, active_execution = _dataset_execution_projection(
         execution_snapshots,
@@ -897,6 +909,7 @@ async def load_dataset_detail(
         dataset_key=dataset_key,
         dataset_sync_scopes=history_sync_scopes,
         limit=_RECENT_RUNS_LIMIT,
+        root_since=root_since,
     )
     events_page = await list_ops_import_job_events(
         session,
