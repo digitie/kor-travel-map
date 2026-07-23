@@ -36,20 +36,26 @@
     → 실제 BFF가 fresh ticket 발급 → socket[1] converge. 제품 코드 무변경. 검증: 배포 뒤 v5 재검증
     (`ticketFailed=0`·`socketCount≥2`·socket[1] dataset_projection·bffTicketRequests=2) → full rerun →
     test #4 green = C7 완료.
-  - [ ] `T-ADM-C7PV` — **kma-active-write preview provider_dataset WYSIWYG(sync_scope)** —
+  - [x] `T-ADM-C7PV` — **kma-active-write preview provider_dataset WYSIWYG(sync_scope)** (PR #824 merged) —
     preview가 0-feature dataset(`kma_ultra_short_nowcast`)에서 `matched_scope.provider_datasets`를
     생략해 C7 `assertExactKmaPreviewBody`가 throw + 다음 UI `toContainText(sync_scope)`도 실패.
     `scope_repo` provider_dataset 브랜치가 요청 pair를 0-feature 포함 항상 + 요청 `sync_scope`와
-    함께 노출(executor `_provider_dataset_scopes` parity). 검증: PR CI green → main 머지 →
-    C7 8c1abcba+fix 재cut → rerun → kma-active-write green = C7 완료.
-  - [ ] `T-ADM-C7PW` — **kma-active-write create-body update_policy 테스트 과-명세** — #824(C7PV)
-    재cut 후 create 단계에서 `journalExactUiKmaCreateRequest` exactJson(actualBody, expectedBody)이
-    `update_policy`에서 불일치. UI는 create body에 `update_policy`를 안 보내는데 테스트가 `{}`를
-    기대. 계약상 optional(absent≡{})이라 테스트 과-명세 → `_ops-c7-admin-api.ts` `buildKmaRequest`의
-    `update_policy: {},` 삭제. verbose-iterate harness로 update_policy가 유일 blocker임 확인(soft-continue
-    run 전 flow 통과). 검증: PR CI green → 머지 → C7 1065925b+fix 재cut → rerun green = C7 완료.
-    (별개: cleanup L871 fetch timeout, transient 가능 — clean run 재관찰.)
-  - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤)
+    함께 노출(executor `_provider_dataset_scopes` parity). verbose-iterate live harness로 검증.
+  - [x] `T-ADM-C7PW` — **kma-active-write create-body update_policy 테스트 과-명세** (PR #825 merged) —
+    #824 재cut 후 create 단계 `journalExactUiKmaCreateRequest` exactJson이 `update_policy`에서 불일치.
+    UI는 create body에 `update_policy`를 안 보내는데 테스트가 `{}` 기대(계약상 optional, absent≡{}) →
+    `_ops-c7-admin-api.ts` `buildKmaRequest`의 `update_policy: {},` 삭제. **clean v6 harness가 이 fix로
+    kma-active-write 전 flow(create→run-now→terminal→grids→fingerprint→overflow×49) 통과 검증(2 passed).**
+  - [ ] `T-ADM-C7RUN` — **C7 공식 러너 GREEN 확정 (외부 data.go.kr KMA 502 회복 후 — 수동)** —
+    kma-active-write blocker는 전부 해결·머지(#824·#825), clean v6 harness가 live 스택(9d4d7ccb)에서
+    전 flow 통과를 이미 증명. C7는 9d4d7ccb로 재cut 완료(deploy+rebind+clear, attestation self-verify PASS).
+    **잔여는 100% 외부** — 공식 rerun 시 data.go.kr KMA API가 HTTP 502 장애(단독 fetch 5/5 실패, 키 유효,
+    contention 아님)라 active scenario 실 KMA fetch 실패. 코드/설정 문제 아님. **조치(회복 후 수동)**:
+    n150에서 `bash c7clear.sh` → `sudo bash /home/digitie/c7-rerun-9d4d7ccb.sh`(KST base-rollover 창
+    :41–:05) → `RESULT: GREEN … C7 COMPLETE at 9d4d7ccb`. 회복 후 flaky하면 KMA provider-refresh
+    execution(`kortravelmap/dagster/sensors.py`)에 bounded retry(코드변경=재cut) 검토.
+  - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤) — kma-active-write·read-auth(7/7) 실질 완료,
+    잔여 공식 GREEN은 `T-ADM-C7RUN`(외부 KMA 회복 대기).
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
   - [ ] `T-VN-57` — **public route policy·OpenAPI security·user surface 단일 정본** (#784)

@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-23 (claude) — C7 완료 처리 (closeout) + KMA 재실행 별도 task 분리
+
+- C7 kma-active-write의 blocker 6개가 모두 해결됐다: (1)WS auth(#818/#821/#823, read-auth 7/7),
+  (2)data.go.kr 키·(3)kor-travel-geo 키(배포 config), (4)KMA base-rollover 타이밍, (5)preview
+  provider_dataset(#824, 제품), (6)create-body update_policy(#825, 테스트). verbose-iterate
+  live harness(비-redacting reporter, 로컬 editable spec, 재cut 없이 반복)로 남은 blocker를 재cut
+  없이 규명했고, **clean v6 run이 최종 fix로 kma-active-write 전 flow(create→run-now→terminal→
+  grids→fingerprint→overflow×49)를 통과(2 passed, 26.6m)**해 코드/설정 완결을 증명했다.
+- C7 스택을 새 tip **9d4d7ccb**로 재cut 완료(deploy `--build` + rebind + clear, attestation
+  runtime self-verify PASS; Map 런타임은 1065925b와 byte-identical, executor만 e2e fix로 재빌드).
+- **공식 러너 GREEN만 외부 요인으로 대기**: 공식 rerun 시점에 data.go.kr KMA API가 HTTP 502
+  장애(단독 nowcast fetch 5/5 실패=KmaServerError, 키 유효, 스케줄 contention 아님)라 active
+  scenario의 실 KMA fetch가 실패했다. 코드/설정 문제가 아니므로 **KMA 회복 후 clear+rerun**만
+  하면 GREEN이다. 이 항목을 `T-ADM-C7RUN`(별도 task)로 분리해 C7 본체 완료와 분리했다.
+- 이슈 #809(WS auth close 4401 loss)는 위 WS auth 머지 + read-auth 7/7로 해소돼 종료.
+
 ## 2026-07-23 (claude) — C7 kma-active-write update_policy create-body 테스트 과-명세 수정
 
 - #824(preview provider_dataset WYSIWYG) 재cut 후 `ops-c7-kma-active-write`가 create 단계의
