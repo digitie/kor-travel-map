@@ -27,16 +27,28 @@
     UI는 create body에 `update_policy`를 안 보내는데 테스트가 `{}` 기대(계약상 optional, absent≡{}) →
     `_ops-c7-admin-api.ts` `buildKmaRequest`의 `update_policy: {},` 삭제. **clean v6 harness가 이 fix로
     kma-active-write 전 flow(create→run-now→terminal→grids→fingerprint→overflow×49) 통과 검증(2 passed).**
-  - [ ] `T-ADM-C7RUN` — **C7 공식 러너 GREEN 확정 (외부 data.go.kr KMA 502 회복 후 — 수동)** —
-    kma-active-write blocker는 전부 해결·머지(#824·#825), clean v6 harness가 live 스택(9d4d7ccb)에서
-    전 flow 통과를 이미 증명. C7는 9d4d7ccb로 재cut 완료(deploy+rebind+clear, attestation self-verify PASS).
-    **잔여는 100% 외부** — 공식 rerun 시 data.go.kr KMA API가 HTTP 502 장애(단독 fetch 5/5 실패, 키 유효,
-    contention 아님)라 active scenario 실 KMA fetch 실패. 코드/설정 문제 아님. **조치(회복 후 수동)**:
-    n150에서 `bash c7clear.sh` → `sudo bash /home/digitie/c7-rerun-9d4d7ccb.sh`(KST base-rollover 창
-    :41–:05) → `RESULT: GREEN … C7 COMPLETE at 9d4d7ccb`. 회복 후 flaky하면 KMA provider-refresh
-    execution(`kortravelmap/dagster/sensors.py`)에 bounded retry(코드변경=재cut) 검토.
-  - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤) — kma-active-write·read-auth(7/7) 실질 완료,
-    잔여 공식 GREEN은 `T-ADM-C7RUN`(외부 KMA 회복 대기).
+  - [ ] `T-ADM-C7RUN` — **C7 공식 러너 GREEN 확정 — 잔여 = 후반 active 시나리오 flaky UI/timing 하드닝** —
+    (이전 "외부 data.go.kr KMA 502가 유일 blocker" 진단은 **폐기·오류**였다.) verbose-iterate(non-redacting
+    reporter + browserFetch DIAG 계측)로 masked blocker를 순차 규명·수정: (1) preview provider_dataset 노출(#824),
+    (2) create-body `update_policy` 과명세(#825), (3) **detail `/v1/ops/datasets/detail` O(roots²) timeout** —
+    `load_dataset_detail`의 CTE 쿼리(특히 `list_pipeline_executions`)가 append-only 누적 pipeline root 전체를
+    순회(prune 불가: `feature_update_request_idempotency`가 append-only). → `all_roots`에 `created_at` recency
+    창(`root_since`) pushdown + window가 페이지 못 채우면 unbounded fallback(저빈도 dataset 정합성), snapshot은
+    scoped EXISTS만 유지(유휴 scope latest 보존, recency 미적용). (4) **running-race** —
+    `assertRunningRequestIdentityFromUi`가 transient `execution.status==="running"` 관측을 요구하나 빠른 KMA
+    job이 먼저 `done` → fast-completion tolerate(`.not.toBe("queued")` + non-queued 상태에서 identity 검증,
+    run-now leg는 여전히 running일 때만). **(3)(4) 모두 fix·merged(#829)·`9492ab2d` 재cut·prod DB/live 검증 완료.**
+    공식 rerun이 43–52s → **142s로 3배 진행**(detail 200 OK 빠름 = recency 작동, running-race 통과 = tolerant 작동).
+    **잔여 blocker = 후반 active 시나리오의 pre-existing flaky UI-render/cleanup-timing**(deterministic bug 아님):
+    official=`cleanup_blocked`(`allRequestsTerminal:false`), v6=`assertDatasetTerminalHistoryUi`(spec:434) UI static
+    header 15s timeout — **직전 918–926 direct API assertion(`latest_execution.id===request`)은 PASS = 백엔드 정확**.
+    서로 다른 실패 지점 = flaky. zero-retry 게이트라 ~50-step flow 중 flake 한 번도 실패. **조치**: 후반 UI 어서션
+    (`assertDatasetTerminalHistoryUi` 등)·terminalization·cleanup에 robust wait/polling 하드닝(test-robustness,
+    #829 코드 fix와는 **별개 test-품질 작업**) → 재cut → rerun. **재cut 메커니즘**: `/home/digitie/c7-{deploy-asdigitie,
+    rebind,rerun}-<commit>.sh`(토큰 swap 미러 — deploy는 target+prev(현 active), rebind/rerun은 target;
+    현 stack=9492ab2d, prev=713e31c7). v6 harness: `/home/digitie/c7-v6/`(editable mount, verbose repro).
+  - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤) — kma-active-write의 실질 코드 blocker(detail perf·
+    running-race 포함)는 전부 해결·머지, read-auth 7/7 안정. 잔여 공식 GREEN은 `T-ADM-C7RUN`(후반 flaky UI/timing 하드닝).
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
   - [ ] `T-VN-57` — **public route policy·OpenAPI security·user surface 단일 정본** (#784)
