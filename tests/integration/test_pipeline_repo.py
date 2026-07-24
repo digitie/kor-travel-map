@@ -402,6 +402,20 @@ async def test_root_id_stamped_and_two_level_lineage_enforced(
                 parent_job_id=absent,
             )
 
+    # 양방향 lock: 자식을 이미 가진 job(root)을 다른 root로 reparent하면 3단계가
+    # 되므로 leaf guard가 거부한다(리뷰어 지적 — parent-is-root만으로는 부족).
+    other_root = "75555555-5555-4555-8555-555555555555"
+    await _job(migrated_session, other_root, created_at=_T0 + timedelta(minutes=3))
+    with pytest.raises(IntegrityError):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "UPDATE ops.import_jobs SET parent_job_id = CAST(:p AS uuid) "
+                    "WHERE job_id = CAST(:j AS uuid)"
+                ),
+                {"p": other_root, "j": root},
+            )
+
 
 async def test_duplicate_requests_on_same_anchor_are_rejected(
     migrated_session: AsyncSession,

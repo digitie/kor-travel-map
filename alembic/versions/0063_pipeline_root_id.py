@@ -59,6 +59,17 @@ BEGIN
         NEW.parent_job_id, NEW.job_id
         USING ERRCODE = 'check_violation';
     END IF;
+    -- 양방향 lock: 자식이 되는 job은 leaf여야 한다. 이미 자식을 가진 job을
+    -- (batch attach 등으로) reparent하면 3단계가 되고 손자의 root_id가 stale해진다.
+    IF EXISTS (
+      SELECT 1 FROM ops.import_jobs AS descendant
+      WHERE descendant.parent_job_id = NEW.job_id
+    ) THEN
+      RAISE EXCEPTION
+        'import job lineage must be at most 2 levels: job % has children and cannot become a child',
+        NEW.job_id
+        USING ERRCODE = 'check_violation';
+    END IF;
     NEW.root_id := parent_root_id;
     NEW.root_kind := parent_root_kind;
   END IF;
@@ -131,6 +142,33 @@ def upgrade() -> None:
         "import_jobs",
         sa.Column("root_kind", sa.Text(), nullable=True),
         schema="ops",
+    )
+
+    # 1.5 pre-flight: backfill(COALESCE(parent, self))는 ≤2단계를 가정한다. generic
+    # import_job은 과거 depth 제약이 없어 기존 데이터에 3단계·cycle이 존재할 수 있고,
+    # 그 경우 backfill이 손자를 non-root에 stamp해 read model을 조용히 깨뜨린다
+    # (phantom root/double-count). 위반(자식의 parent가 root가 아님 — 3단계 또는
+    # cycle)이 하나라도 있으면 실패시켜, 사전에 데이터를 flatten하도록 강제한다.
+    op.execute(
+        """
+        DO $$
+        DECLARE
+          violation_count int;
+        BEGIN
+          SELECT count(*) INTO violation_count
+          FROM ops.import_jobs AS child
+          JOIN ops.import_jobs AS parent
+            ON parent.job_id = child.parent_job_id
+          WHERE child.parent_job_id IS NOT NULL
+            AND parent.parent_job_id IS NOT NULL;
+          IF violation_count > 0 THEN
+            RAISE EXCEPTION
+              'ADR-077 0063: % import_jobs violate the 2-level lineage invariant '
+              '(a child whose parent is not a root — depth>=3 or a cycle). '
+              'Flatten these before migrating.', violation_count;
+          END IF;
+        END $$
+        """
     )
 
     # 2. backfill: ≤2단계라 자식의 parent가 곧 root. root_id = COALESCE(parent, self).
