@@ -42,6 +42,13 @@ import {
 } from "./_ops-c7-admin-api";
 
 const TEST_TIMEOUT = 30 * 60 * 1000;
+// 갱신 요청 생성 dialog의 preview(dry-run) 응답 상한. Playwright action timeout이
+// live config에서 0(무제한)이라, 명시하지 않으면 preview 응답을 무한 대기할 수 있다.
+const PREVIEW_RESPONSE_TIMEOUT_MS = 30_000;
+// enabled "갱신 요청 생성" 트리거가 렌더될 때까지의 상한. 이 트리거는 overview가 큐
+// sensor를 RUNNING으로 보고(queueOperational=true)할 때만 존재하므로, 이 대기가 곧
+// UI 큐 sensor 게이트 preflight다.
+const CREATE_TRIGGER_ENABLED_TIMEOUT_MS = 15_000;
 const RUN_ID = `c7-empty-${Date.now()}-${Math.random()
   .toString(36)
   .slice(2, 8)}`;
@@ -60,13 +67,32 @@ async function previewEmptyRequestFromUi(
   syncScope: string,
   reason: string,
 ): Promise<void> {
-  await page
-    .getByRole("button", { name: "갱신 요청 생성", exact: true })
-    .click();
+  // 견고화(T-ADM-C7RUN): active-write의 검증된 openAndFillKmaRequestDialog 패턴을 미러링한다.
+  // 과거엔 stale bootstrap 페이지에서 exact-name "갱신 요청 생성" 트리거를 action-timeout
+  // 없이(live config actionTimeout=0) 클릭했다. 이 트리거는 queueOperational
+  // (=/v1/ops/pipeline/overview가 큐 sensor를 RUNNING으로 보고)일 때만 렌더되고, false로
+  // 순간 깜빡이면 접근명이 다른 disabled fallback("…(큐 sensor 확인 필요)")만 남아 exact
+  // locator가 영영 불일치 → 30분 test-timeout까지 hang했다. /ops/pipeline로 재진입해 overview를
+  // 새로 가져오고(=queueOperational 신뢰 True), heading·enabled 트리거를 bounded로 gate해
+  // hang을 즉시·명확한 실패로 바꾼다(게이트 약화 없음 — enabled 트리거 존재 = 큐 sensor 게이트 통과).
+  await page.goto("/ops/pipeline");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "파이프라인" }),
+  ).toBeVisible();
+  const createTrigger = page.getByRole("button", {
+    name: "갱신 요청 생성",
+    exact: true,
+  });
+  await expect(
+    createTrigger,
+    "갱신 요청 생성 트리거(enabled)가 제한 시간 내 렌더되지 않음 — /v1/ops/pipeline/overview 큐 sensor 게이트가 non-operational (sensor 실제 RUNNING 여부와 overview read-path 확인)",
+  ).toBeVisible({ timeout: CREATE_TRIGGER_ENABLED_TIMEOUT_MS });
+  await createTrigger.click();
   const dialog = page.getByRole("dialog", {
     name: "갱신 요청 생성",
     exact: true,
   });
+  await expect(dialog).toBeVisible();
   await dialog.getByLabel("provider", { exact: true }).fill(KMA_PROVIDER);
   await dialog
     .getByLabel("dataset_key", { exact: true })
@@ -74,13 +100,16 @@ async function previewEmptyRequestFromUi(
   await dialog
     .getByLabel("sync_scope (선택)", { exact: true })
     .fill(syncScope);
-  const responsePromise = page.waitForResponse((response) => {
-    return (
-      response.request().method() === "POST" &&
-      new URL(response.url()).pathname ===
-        "/api/proxy/v1/ops/pipeline/requests/preview"
-    );
-  });
+  const responsePromise = page.waitForResponse(
+    (response) => {
+      return (
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          "/api/proxy/v1/ops/pipeline/requests/preview"
+      );
+    },
+    { timeout: PREVIEW_RESPONSE_TIMEOUT_MS },
+  );
   await dialog
     .getByRole("button", { name: "dry-run 실행", exact: true })
     .click();
