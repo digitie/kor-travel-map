@@ -2722,6 +2722,38 @@ export async function rediscoverExactActiveRequest(
   return active;
 }
 
+/**
+ * fast-completion tolerant 재탐색. queued 요청이 sensor tick 전에 done까지 가면
+ * active_execution이 null이 되어 rediscoverExactActiveRequest가 오탐(재탐색 실패)한다.
+ * active면 active identity를, 아니면 latest_execution(=방금 종료된 우리 요청)을 검증한다.
+ */
+export async function rediscoverExactActiveOrSettledRequest(
+  page: Page,
+  syncScope: string,
+  expectedRequestId: string,
+): Promise<void> {
+  const detail = requireBody(await getExactDatasetDetail(page, syncScope), 200);
+  const active = detail.data.active_execution;
+  if (active !== null) {
+    if (
+      active.kind !== "update_request" ||
+      active.sync_scope !== syncScope ||
+      active.id !== expectedRequestId
+    ) {
+      throw new Error(
+        `exact scope active request 재탐색 identity 불일치: ${syncScope}`,
+      );
+    }
+    return;
+  }
+  const latest = detail.data.latest_execution;
+  if (latest === null || latest.id !== expectedRequestId) {
+    throw new Error(
+      `exact scope active/settled request 재탐색 실패: ${syncScope}`,
+    );
+  }
+}
+
 export async function runCreateDeleteCanary(
   page: Page,
   state: CleanupState,
