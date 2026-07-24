@@ -46,10 +46,12 @@ const TEST_TIMEOUT = 30 * 60 * 1000;
 // 갱신 요청 생성 dialog의 preview(dry-run) 응답 상한. Playwright action timeout이
 // live config에서 0(무제한)이라, 명시하지 않으면 preview 응답을 무한 대기할 수 있다.
 const PREVIEW_RESPONSE_TIMEOUT_MS = 30_000;
-// enabled "갱신 요청 생성" 트리거가 렌더될 때까지의 상한. 이 트리거는 overview가 큐
-// sensor를 RUNNING으로 보고(queueOperational=true)할 때만 존재하므로, 이 대기가 곧
-// UI 큐 sensor 게이트 preflight다.
-const CREATE_TRIGGER_ENABLED_TIMEOUT_MS = 20_000;
+// enabled "갱신 요청 생성" 트리거가 actionable(enabled)이 될 때까지의 상한. 이 트리거는
+// overview가 큐 sensor를 RUNNING으로 보고(queueOperational=true)할 때만 enabled이고,
+// 직전 active-write가 sensor를 stop/restart하므로 empty-write 시작 시점엔 sensor가 아직
+// RUNNING 회복 중일 수 있다(overview refetch 주기 30s). 그 회복을 넉넉히 기다린 뒤에도
+// non-operational이면 즉시·명확히 실패시킨다.
+const CREATE_TRIGGER_ENABLED_TIMEOUT_MS = 60_000;
 const RUN_ID = `c7-empty-${Date.now()}-${Math.random()
   .toString(36)
   .slice(2, 8)}`;
@@ -80,19 +82,18 @@ async function previewEmptyRequestFromUi(
   await expect(
     page.getByRole("heading", { level: 1, name: "파이프라인", exact: true }),
   ).toBeVisible();
-  const createTrigger = page.getByRole("button", {
-    name: "갱신 요청 생성",
-    exact: true,
-  });
+  // active-write의 검증된 헬퍼처럼 NON-exact locator를 쓴다. enabled 트리거는
+  // "<PlayIcon/> 갱신 요청 생성"이고, disabled fallback은 접근명 "갱신 요청 생성
+  // (큐 sensor 확인 필요)"다 — non-exact("갱신 요청 생성")는 둘 중 렌더된 쪽을 잡고,
+  // toBeEnabled가 queueOperational=true로 DOM이 enabled 트리거로 swap될 때까지 poll한다
+  // (exact:true는 아이콘/접근명 편차나 disabled fallback에 취약해 영영 불일치할 수 있다).
+  const createTrigger = page.getByRole("button", { name: "갱신 요청 생성" });
   await expect(
     createTrigger,
-    "갱신 요청 생성 트리거(enabled)가 제한 시간 내 렌더되지 않음 — /v1/ops/pipeline/overview 큐 sensor 게이트가 non-operational (sensor 실제 RUNNING 여부와 overview read-path 확인)",
-  ).toBeVisible({ timeout: CREATE_TRIGGER_ENABLED_TIMEOUT_MS });
+    "갱신 요청 생성 트리거가 제한 시간 내 enabled 되지 않음 — /v1/ops/pipeline/overview 큐 sensor 게이트가 non-operational (직전 active-write 후 sensor RUNNING 회복 여부/overview read-path 확인)",
+  ).toBeEnabled({ timeout: CREATE_TRIGGER_ENABLED_TIMEOUT_MS });
   await createTrigger.click();
-  const dialog = page.getByRole("dialog", {
-    name: "갱신 요청 생성",
-    exact: true,
-  });
+  const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
   await expect(dialog).toBeVisible();
   await dialog.getByLabel("provider", { exact: true }).fill(KMA_PROVIDER);
   await dialog
