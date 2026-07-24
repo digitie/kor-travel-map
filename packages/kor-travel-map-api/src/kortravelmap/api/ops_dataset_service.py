@@ -903,7 +903,6 @@ async def load_dataset_detail(
         dataset_key=dataset_key,
         dataset_sync_scopes=history_sync_scopes,
         limit=_RECENT_RUNS_LIMIT,
-        dataset_scoped=True,
     )
     events_page = await list_ops_import_job_events(
         session,

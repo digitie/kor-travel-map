@@ -899,7 +899,7 @@ async def test_shared_and_multi_run_hierarchy_dispatches_once_per_run(
                     :shared_run_id, now(), now()
                 ),
                 (
-                    CAST(:grandchild_id AS uuid), CAST(:child_id AS uuid),
+                    CAST(:grandchild_id AS uuid), CAST(:root_id AS uuid),
                     'provider_load', '{}'::jsonb, 'running', 10, 'load',
                     :second_run_id, now(), now()
                 )

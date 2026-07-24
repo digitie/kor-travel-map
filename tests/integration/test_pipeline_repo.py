@@ -256,6 +256,9 @@ def _assert_bounded_selective_access(
 
 
 async def _seed_owned_hierarchy(session: AsyncSession) -> None:
+    # ADR-077: lineage는 ≤2단계(root + 자식). 과거 3단계(grandchild)는 stamp
+    # 트리거가 거부하므로 root + 자식 하나로 소유 계층을 구성한다. request root의
+    # projected winner는 (run root가 아니므로) 가장 깊은 member = 자식이다.
     await _job(
         session,
         _JOB_ROOT,
@@ -269,14 +272,6 @@ async def _seed_owned_hierarchy(session: AsyncSession) -> None:
         created_at=_T0 + timedelta(minutes=1),
         status="running",
         progress=40,
-    )
-    await _job(
-        session,
-        _JOB_GRANDCHILD,
-        parent_job_id=_JOB_CHILD,
-        created_at=_T0 + timedelta(minutes=2),
-        status="failed",
-        progress=70,
     )
     await _request(
         session,
@@ -298,13 +293,13 @@ async def test_request_anchor_collapses_descendants_and_projects_deepest_job(
     assert [(item.kind, item.id) for item in page.items] == [("update_request", _REQUEST_OWNER)]
     root = page.items[0]
     assert root.requested_job_id == _JOB_ROOT
-    assert root.linked_job_count == 3
+    assert root.linked_job_count == 2
     assert root.providers == ("stored-a", "stored-b")
     assert root.dataset_keys == ("dataset-a", "dataset-b")
     assert root.progress is None
-    assert root.projected_job.id == _JOB_GRANDCHILD
-    assert root.projected_job.depth == 2
-    assert root.projected_job.status == "failed"
+    assert root.projected_job.id == _JOB_CHILD
+    assert root.projected_job.depth == 1
+    assert root.projected_job.status == "running"
 
 
 async def test_standalone_hierarchy_ignores_audit_event_and_payload_identity(
@@ -316,7 +311,6 @@ async def test_standalone_hierarchy_ignores_audit_event_and_payload_identity(
         payload={"provider": "misleading", "dataset_key": "wrong"},
     )
     await _job(migrated_session, _JOB_CHILD, parent_job_id=_JOB_ROOT)
-    await _job(migrated_session, _JOB_GRANDCHILD, parent_job_id=_JOB_CHILD)
     await _event(
         migrated_session,
         "61111111-1111-4111-8111-111111111111",
@@ -330,12 +324,7 @@ async def test_standalone_hierarchy_ignores_audit_event_and_payload_identity(
     await _event(
         migrated_session,
         "63333333-3333-4333-8333-333333333333",
-        job_id=_JOB_GRANDCHILD,
-    )
-    await _event(
-        migrated_session,
-        "64444444-4444-4444-8444-444444444444",
-        job_id=_JOB_GRANDCHILD,
+        job_id=_JOB_CHILD,
     )
 
     page = await list_pipeline_executions(migrated_session)
@@ -343,11 +332,11 @@ async def test_standalone_hierarchy_ignores_audit_event_and_payload_identity(
     assert len(page.items) == 1
     root = page.items[0]
     assert root.id == _JOB_ROOT
-    assert root.linked_job_count == 3
+    assert root.linked_job_count == 2
     assert root.providers == ()
     assert root.dataset_keys == ()
     assert root.provider_datasets == ()
-    assert root.projected_job.id == _JOB_GRANDCHILD
+    assert root.projected_job.id == _JOB_CHILD
     assert (
         await list_pipeline_executions(
             migrated_session, provider="provider-a", dataset_key="dataset-z"
@@ -356,26 +345,76 @@ async def test_standalone_hierarchy_ignores_audit_event_and_payload_identity(
     assert (await list_pipeline_executions(migrated_session, provider="misleading")).items == ()
 
 
-async def test_missing_parent_is_self_root_and_cycle_has_one_canonical_root(
+async def test_root_id_stamped_and_two_level_lineage_enforced(
     migrated_session: AsyncSession,
 ) -> None:
-    missing = "71111111-1111-4111-8111-111111111111"
+    """ADR-077: stamp 트리거가 root_id를 부모에서 파생하고, 2단계 초과·존재하지
+    않는 parent를 거부한다(과거의 임의 depth·cycle 재귀 대신 저장·불변식)."""
+    root = "71111111-1111-4111-8111-111111111111"
+    child = "72222222-2222-4222-8222-222222222222"
+    grandchild = "73333333-3333-4333-8333-333333333333"
     absent = "7fffffff-ffff-4fff-8fff-ffffffffffff"
-    cycle_a = "81111111-1111-4111-8111-111111111111"
-    cycle_b = "82222222-2222-4222-8222-222222222222"
-    await migrated_session.execute(text("SET LOCAL session_replication_role = replica"))
-    await _job(migrated_session, missing, parent_job_id=absent)
-    await _job(migrated_session, cycle_a, parent_job_id=cycle_b)
-    await _job(migrated_session, cycle_b, parent_job_id=cycle_a)
-    await migrated_session.execute(text("SET LOCAL session_replication_role = origin"))
 
-    page = await list_pipeline_executions(migrated_session)
+    await _job(migrated_session, root, created_at=_T0)
+    await _job(
+        migrated_session, child, parent_job_id=root, created_at=_T0 + timedelta(minutes=1)
+    )
 
-    roots = {item.id: item for item in page.items}
-    assert set(roots) == {missing, cycle_a}
-    assert roots[missing].linked_job_count == 1
-    assert roots[cycle_a].linked_job_count == 2
-    assert sum(item.linked_job_count for item in roots.values()) == 3
+    root_row = (
+        await migrated_session.execute(
+            text(
+                "SELECT root_id::text AS root_id, root_kind FROM ops.import_jobs "
+                "WHERE job_id = CAST(:j AS uuid)"
+            ),
+            {"j": root},
+        )
+    ).one()
+    assert root_row.root_id == root  # parent NULL → self root
+    assert root_row.root_kind == "import_job"
+    child_row = (
+        await migrated_session.execute(
+            text(
+                "SELECT root_id::text AS root_id, root_kind FROM ops.import_jobs "
+                "WHERE job_id = CAST(:j AS uuid)"
+            ),
+            {"j": child},
+        )
+    ).one()
+    assert child_row.root_id == root  # 자식은 부모의 root 승계
+    assert child_row.root_kind == "import_job"
+
+    # 3단계(자식의 자식)는 stamp 트리거가 거부한다.
+    with pytest.raises(IntegrityError):
+        async with migrated_session.begin_nested():
+            await _job(
+                migrated_session,
+                grandchild,
+                parent_job_id=child,
+                created_at=_T0 + timedelta(minutes=2),
+            )
+
+    # 존재하지 않는 parent는 FK가 거부한다.
+    with pytest.raises(IntegrityError):
+        async with migrated_session.begin_nested():
+            await _job(
+                migrated_session,
+                "74444444-4444-4444-8444-444444444444",
+                parent_job_id=absent,
+            )
+
+    # 양방향 lock: 자식을 이미 가진 job(root)을 다른 root로 reparent하면 3단계가
+    # 되므로 leaf guard가 거부한다(리뷰어 지적 — parent-is-root만으로는 부족).
+    other_root = "75555555-5555-4555-8555-555555555555"
+    await _job(migrated_session, other_root, created_at=_T0 + timedelta(minutes=3))
+    with pytest.raises(IntegrityError):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "UPDATE ops.import_jobs SET parent_job_id = CAST(:p AS uuid) "
+                    "WHERE job_id = CAST(:j AS uuid)"
+                ),
+                {"p": other_root, "j": root},
+            )
 
 
 async def test_duplicate_requests_on_same_anchor_are_rejected(
@@ -395,7 +434,7 @@ async def test_duplicate_requests_on_same_anchor_are_rejected(
 
     assert [item.id for item in page.items] == [_REQUEST_OWNER]
     owner = page.items[0]
-    assert owner.linked_job_count == 3
+    assert owner.linked_job_count == 2
 
 
 async def test_request_cannot_anchor_to_noncanonical_child_job(
@@ -415,8 +454,8 @@ async def test_request_cannot_anchor_to_noncanonical_child_job(
     page = await list_pipeline_executions(migrated_session)
 
     assert [item.id for item in page.items] == [_REQUEST_OWNER]
-    assert page.items[0].linked_job_count == 3
-    assert page.items[0].projected_job.id == _JOB_GRANDCHILD
+    assert page.items[0].linked_job_count == 2
+    assert page.items[0].projected_job.id == _JOB_CHILD
 
 
 async def test_feature_run_projects_root_and_exposes_pair_child_status(
@@ -753,7 +792,7 @@ async def test_batch_root_keeps_two_request_branches_and_unowned_siblings_separa
     await _job(
         migrated_session,
         unowned_descendant,
-        parent_job_id=unowned_sibling,
+        parent_job_id=batch_root,
         created_at=_T0 + timedelta(minutes=2),
         provider="standalone-provider",
         dataset_key="standalone-dataset",
@@ -1202,84 +1241,6 @@ async def test_scoped_dataset_execution_snapshot_matches_unscoped_filtered(
     assert target.latest_terminal.execution.id == target_terminal_id
     assert target.active is not None
     assert target.active.execution.id == target_active_id
-
-
-async def test_dataset_scoped_executions_match_unscoped(
-    migrated_session: AsyncSession,
-) -> None:
-    """``dataset_scoped=True`` detail 경로는 unscoped(provider+dataset) 경로와 동일한
-    run-history를 돌려준다 — roots_with_identity를 대상 dataset의 canonical pair root로
-    좁힐 뿐 시간창을 두지 않으므로 유휴·오래된 실행도 top-N에 그대로 남고, 다른
-    dataset의 root는 (unscoped처럼) 대상 결과에 섞이지 않는다."""
-    provider = "python-kma-api"
-    dataset_key = "kma_short_forecast"
-    other_dataset_key = "kma_mid_forecast"
-    # 각 run은 서로 다른 sync_scope를 쓴다 — 동일 (provider, dataset, scope)에
-    # active job 하나만 허용하는 unique 제약을 피한다. 모든 run이 root_since 시간창
-    # 밖처럼 오래됐어도(_T0) scoped 경로는 시간창을 두지 않아 셋 다 돌려줘야 한다.
-    request_ids: list[str] = []
-    for index in range(3):
-        request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, f"scoped-match-{index}"))
-        request_ids.append(request_id)
-        await _request(
-            migrated_session,
-            request_id,
-            job_id=None,
-            created_at=_T0 + timedelta(minutes=index),
-            scope={
-                "type": "provider_dataset",
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "sync_scope": f"external_system:scoped-match-{index}",
-            },
-        )
-    # 같은 provider의 다른 dataset run — scoped/unscoped 모두 대상 결과에서 빠져야 한다.
-    other_request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, "scoped-match-other-dataset"))
-    await _request(
-        migrated_session,
-        other_request_id,
-        job_id=None,
-        created_at=_T0 + timedelta(minutes=5),
-        scope={
-            "type": "provider_dataset",
-            "provider": provider,
-            "dataset_key": other_dataset_key,
-            "sync_scope": "external_system:scoped-match-other",
-        },
-    )
-
-    scoped = await list_pipeline_executions(
-        migrated_session,
-        provider=provider,
-        dataset_key=dataset_key,
-        limit=50,
-        dataset_scoped=True,
-    )
-    unscoped = await list_pipeline_executions(
-        migrated_session,
-        provider=provider,
-        dataset_key=dataset_key,
-        limit=50,
-    )
-    # scoped는 unscoped와 동일한 순서·집합을 돌려준다(시간창 regression 없음).
-    assert [item.id for item in scoped.items] == [item.id for item in unscoped.items]
-    assert {item.id for item in scoped.items} == set(request_ids)
-    # 다른 dataset의 root는 대상 결과에 섞이지 않는다.
-    assert other_request_id not in {item.id for item in scoped.items}
-
-
-async def test_dataset_scoped_requires_provider_and_dataset_key(
-    migrated_session: AsyncSession,
-) -> None:
-    """``dataset_scoped``는 scoped root body가 (provider, dataset_key) EXISTS를
-    bind하므로 둘 다 없으면 잘못된 결과 대신 즉시 실패한다."""
-    with pytest.raises(ValueError, match="dataset_scoped requires"):
-        await list_pipeline_executions(
-            migrated_session,
-            provider="python-kma-api",
-            limit=10,
-            dataset_scoped=True,
-        )
 
 
 async def test_dataset_scope_filter_is_applied_before_page_limit(

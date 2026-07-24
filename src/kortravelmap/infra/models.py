@@ -1909,6 +1909,11 @@ class ImportJobRow(Base):
             postgresql_where=text("provider IS NOT NULL"),
         ),
         Index("idx_import_jobs_cancellation_id", "cancellation_id"),
+        CheckConstraint(
+            "root_kind IN ('import_job','update_request')",
+            name="ck_import_jobs_root_kind",
+        ),
+        Index("idx_import_jobs_root", "root_id", "root_kind"),
         {"schema": "ops"},
     )
 
@@ -1954,6 +1959,10 @@ class ImportJobRow(Base):
     provider: Mapped[str | None] = mapped_column(Text)
     dataset_key: Mapped[str | None] = mapped_column(Text)
     sync_scope: Mapped[str | None] = mapped_column(Text)
+    # root/component 멤버십을 stamp한다(ADR-077) — read-time 재귀 lineage 제거.
+    # DB 트리거가 parent에서 파생(자식은 부모의 root 승계, root는 자기 자신).
+    root_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    root_kind: Mapped[str] = mapped_column(Text, nullable=False)
     trigger_kind: Mapped[str | None] = mapped_column(Text)
     operation_registry_version: Mapped[str | None] = mapped_column(Text)
     dagster_run_status: Mapped[str | None] = mapped_column(Text)
