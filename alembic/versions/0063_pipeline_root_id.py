@@ -171,7 +171,16 @@ def upgrade() -> None:
         """
     )
 
-    # 2. backfill: ≤2단계라 자식의 parent가 곧 root. root_id = COALESCE(parent, self).
+    # 2. backfill. quarantine immutability 트리거(0052)는 quarantined job의 어떤
+    #    mutation도 거부하므로(런타임 tombstone 보호) root_id/root_kind backfill을
+    #    막는다. quarantine 마커 자체(quarantined_at/reason)는 건드리지 않고
+    #    root_id/root_kind만 채우므로, backfill 동안만 이 트리거를 비활성화한다.
+    #    (ops.import_jobs owner 권한으로 실행되는 migration이라 DISABLE 가능.)
+    op.execute(
+        "ALTER TABLE ops.import_jobs "
+        "DISABLE TRIGGER trg_import_jobs_quarantine_immutable"
+    )
+    # ≤2단계라 자식의 parent가 곧 root. root_id = COALESCE(parent, self).
     op.execute(
         """
         UPDATE ops.import_jobs AS j
@@ -189,6 +198,10 @@ def upgrade() -> None:
           FROM ops.import_jobs AS root
          WHERE root.job_id = j.root_id
         """
+    )
+    op.execute(
+        "ALTER TABLE ops.import_jobs "
+        "ENABLE TRIGGER trg_import_jobs_quarantine_immutable"
     )
 
     # 4. NOT NULL + CHECK + index.
