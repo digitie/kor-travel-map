@@ -15,6 +15,7 @@ import {
   stopQueueSensorAndWaitForQuiescence,
 } from "./_ops-c7-dagster-sensor";
 import {
+  DATASET_DETAIL_FETCH_TIMEOUT_MS,
   KMA_DATASET_KEY,
   KMA_PROVIDER,
   assertKmaDagsterWorkerJobDefinition,
@@ -48,7 +49,7 @@ const PREVIEW_RESPONSE_TIMEOUT_MS = 30_000;
 // enabled "갱신 요청 생성" 트리거가 렌더될 때까지의 상한. 이 트리거는 overview가 큐
 // sensor를 RUNNING으로 보고(queueOperational=true)할 때만 존재하므로, 이 대기가 곧
 // UI 큐 sensor 게이트 preflight다.
-const CREATE_TRIGGER_ENABLED_TIMEOUT_MS = 15_000;
+const CREATE_TRIGGER_ENABLED_TIMEOUT_MS = 20_000;
 const RUN_ID = `c7-empty-${Date.now()}-${Math.random()
   .toString(36)
   .slice(2, 8)}`;
@@ -77,7 +78,7 @@ async function previewEmptyRequestFromUi(
   // hang을 즉시·명확한 실패로 바꾼다(게이트 약화 없음 — enabled 트리거 존재 = 큐 sensor 게이트 통과).
   await page.goto("/ops/pipeline");
   await expect(
-    page.getByRole("heading", { level: 1, name: "파이프라인" }),
+    page.getByRole("heading", { level: 1, name: "파이프라인", exact: true }),
   ).toBeVisible();
   const createTrigger = page.getByRole("button", {
     name: "갱신 요청 생성",
@@ -158,7 +159,23 @@ async function assertQueuedRunNowBlockedFromUi(
   page: Page,
   requestId: string,
 ): Promise<void> {
+  // execution-detail 패널은 별도 execution-detail GET가 도착해야 mount된다. bare goto +
+  // 즉시 assertion은 그 fetch를 race하므로(active-write assertRunningRequestIdentityFromUi와
+  // 동일 class), UI 자신의 execution-detail GET를 response-gate한 뒤 settled 상태에서 단정한다.
+  const executionDetailSettled = page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname ===
+          `/api/proxy/v1/ops/pipeline/executions/update_request/${requestId}` &&
+        response.status() === 200
+      );
+    },
+    { timeout: DATASET_DETAIL_FETCH_TIMEOUT_MS },
+  );
   await page.goto(`/ops/pipeline?execution=update_request:${requestId}`);
+  await executionDetailSettled;
   const detail = page.getByTestId("pipeline-execution-detail");
   await expect(detail).toBeVisible();
   await expect(

@@ -202,13 +202,18 @@ async function openAndFillKmaRequestDialog(
   await dialog.getByLabel("dataset_key").fill(KMA_DATASET_KEY);
   await dialog.getByLabel("sync_scope (선택)").fill(syncScope);
 
-  const previewResponse = page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return (
-      response.request().method() === "POST" &&
-      url.pathname === "/api/proxy/v1/ops/pipeline/requests/preview"
-    );
-  });
+  const previewResponse = page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "POST" &&
+        url.pathname === "/api/proxy/v1/ops/pipeline/requests/preview"
+      );
+    },
+    // 명시 상한: live config actionTimeout(60s) 도입 전엔 무제한이었다. bare wait이
+    // 전역 default에 조용히 지배되지 않도록 이 preview 대기를 명시적으로 고정한다.
+    { timeout: DATASET_DETAIL_FETCH_TIMEOUT_MS },
+  );
   await dialog.getByRole("button", { name: "dry-run 실행" }).click();
   const expectedPreview = previewBody(
     buildKmaRequest(
