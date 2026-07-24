@@ -1865,3 +1865,97 @@ async def test_uuid_detail_plans_expand_only_selected_component(
             )
         ).scalar_one()
         _assert_bounded_selective_access(plan, expected_index=expected_index)
+
+
+async def test_external_system_scope_run_history_cursor_pages_past_boundary(
+    migrated_session: AsyncSession,
+) -> None:
+    """C7 cursor-overflow(구 live 51-req 루프)의 실질 계약을 seed로 검증한다.
+
+    단일 KMA ``external_system`` scope에 page_size+1개 root를 넣으면 첫 페이지가
+    non-null ``next_cursor``를 내고 둘째 페이지가 disjoint·정렬 연속으로 이어진다.
+    같은 dataset의 다른 scope를 interleave해 scope 필터가 page-limit **이전**에
+    적용됨(crowding-out 방지, #832 §C)도 함께 확인한다. 51회 실 KMA refresh를
+    prod-live에서 돌릴 필요가 없다 — 이 계약이 그 게이트가 실제로 지키던 것.
+    """
+    provider = "python-kma-api"
+    dataset_key = "kma_ultra_short_nowcast"
+    sync_scope = "external_system:c7-overflow-contract"
+    page_size = 50
+    total = page_size + 1
+
+    ids: list[str] = []
+    for index in range(total):
+        request_id = str(uuid5(_REQUEST_JOB_NAMESPACE, f"c7-overflow-{index}"))
+        ids.append(request_id)
+        await _request(
+            migrated_session,
+            request_id,
+            job_id=None,
+            created_at=_T0 + timedelta(minutes=index),
+            scope={
+                "type": "provider_dataset",
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
+            },
+        )
+        # 다음 동일-scope 요청을 만들기 전에 terminal로 보낸다 — active
+        # (provider,dataset_key,sync_scope) 하나만 허용하는 unique 제약을 피한다
+        # (실제 overflow도 각 요청을 done까지 몰고 다음을 만든다).
+        owner = f"c7-overflow-run-{index}"
+        started = await start_update_request(
+            migrated_session, request_id, dagster_run_id=owner, expected_generation=1
+        )
+        assert started is not None
+        finished = await finish_update_request(
+            migrated_session,
+            request_id,
+            status="done",
+            owner_dagster_run_id=owner,
+            expected_generation=1,
+        )
+        assert finished is not None
+        # 같은 dataset의 다른 scope를 사이사이 넣어, scope 필터가 page-limit 뒤에
+        # 적용되면 첫 페이지가 밀려나도록(= 그러면 안 됨) 압박한다.
+        await _request(
+            migrated_session,
+            str(uuid5(_REQUEST_JOB_NAMESPACE, f"c7-other-{index}")),
+            job_id=None,
+            created_at=_T0 + timedelta(minutes=index, seconds=30),
+            scope={
+                "type": "provider_dataset",
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": f"external_system:c7-other-{index}",
+            },
+        )
+
+    first = await list_pipeline_executions(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        dataset_sync_scopes=(sync_scope,),
+        limit=page_size,
+    )
+    assert len(first.items) == page_size
+    assert first.next_cursor is not None
+
+    second = await list_pipeline_executions(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        dataset_sync_scopes=(sync_scope,),
+        limit=page_size,
+        cursor=first.next_cursor,
+    )
+    assert len(second.items) == 1
+    assert second.next_cursor is None
+
+    paged = [item.id for item in (*first.items, *second.items)]
+    # created_at DESC 연속: 가장 최근(마지막 seed)부터 역순
+    assert paged == list(reversed(ids))
+    assert len(paged) == len(set(paged)) == total
+    assert {item.id for item in first.items}.isdisjoint(
+        {item.id for item in second.items}
+    )

@@ -585,62 +585,6 @@ def test_causal_poi_create_injects_committed_response_loss_once() -> None:
     assert "putWithCausalResponseRecovery(" not in create_step
 
 
-def test_history_cursor_pages_match_exact_ordered_dom_identity() -> None:
-    active = _read(LIVE_DIR / "ops-c7-kma-active-write.live.spec.ts")
-    data_table = _read(
-        ROOT
-        / "packages"
-        / "kor-travel-map-admin"
-        / "frontend"
-        / "src"
-        / "components"
-        / "ui"
-        / "data-table.tsx"
-    )
-    execution_timeline = _read(
-        ROOT
-        / "packages"
-        / "kor-travel-map-admin"
-        / "frontend"
-        / "src"
-        / "app"
-        / "ops"
-        / "pipeline"
-        / "execution-timeline.tsx"
-    )
-    events_panel = _read(
-        ROOT
-        / "packages"
-        / "kor-travel-map-admin"
-        / "frontend"
-        / "src"
-        / "app"
-        / "ops"
-        / "pipeline"
-        / "events-panel.tsx"
-    )
-    continuation = _section(
-        active,
-        "async function assertHistoryContinuationFromUi(",
-        "function isExactHistoryPageResponse(",
-    )
-
-    assert "data-row-identity={rowIdentity?.(row.original)}" in data_table
-    assert (
-        "JSON.stringify([row.created_at, row.id, row.kind])"
-        in execution_timeline
-    )
-    assert "JSON.stringify([row.occurred_at, row.event_id])" in events_panel
-    assert continuation.count("orderedHistoryIdentityTuples(") == 4
-    assert continuation.count("assertDisjointOrderedContinuation(") == 2
-    assert continuation.count(".map(identityKey)") == 4
-    assert ".some(" not in continuation
-    assert "innerText" not in continuation
-    assert "new Set(keys).size !== keys.length" in active
-    assert "compareOrderedIdentity(firstLast, secondFirst) !== -1" in active
-    assert 'locator("tbody tr[data-row-identity]")' in active
-
-
 def test_kma_cursor_requires_canonical_nonempty_base_datetime() -> None:
     active = _read(LIVE_DIR / "ops-c7-kma-active-write.live.spec.ts")
     cursor = _section(
