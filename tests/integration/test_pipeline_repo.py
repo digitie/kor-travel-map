@@ -778,7 +778,7 @@ async def test_batch_root_keeps_two_request_branches_and_unowned_siblings_separa
     await _job(
         migrated_session,
         unowned_descendant,
-        parent_job_id=unowned_sibling,
+        parent_job_id=batch_root,
         created_at=_T0 + timedelta(minutes=2),
         provider="standalone-provider",
         dataset_key="standalone-dataset",

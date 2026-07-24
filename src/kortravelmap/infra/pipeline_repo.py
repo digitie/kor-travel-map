@@ -632,9 +632,10 @@ pipeline_jobs AS MATERIALIZED (
         job.started_at,
         job.finished_at,
         job.created_at
-    FROM ops.import_jobs AS job
-    WHERE job.quarantined_at IS NULL
-      AND job.root_id IN (SELECT root_id FROM scoped_root_ids)
+    FROM scoped_root_ids AS sr
+    JOIN ops.import_jobs AS job
+      ON job.root_id = sr.root_id
+     AND job.quarantined_at IS NULL
 ),
 pipeline_requests AS MATERIALIZED (
     SELECT
@@ -654,11 +655,12 @@ pipeline_requests AS MATERIALIZED (
         identity_job.started_at,
         identity_job.finished_at,
         request.created_at
-    FROM ops.feature_update_requests AS request
+    FROM scoped_root_ids AS sr
+    JOIN ops.feature_update_requests AS request
+      ON request.job_id = sr.root_id
     JOIN ops.import_jobs AS identity_job
       ON identity_job.job_id = request.job_id
      AND identity_job.quarantined_at IS NULL
-    WHERE request.job_id IN (SELECT root_id FROM scoped_root_ids)
 )
 """
 
