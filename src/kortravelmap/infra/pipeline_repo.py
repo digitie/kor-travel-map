@@ -632,92 +632,21 @@ _PIPELINE_ROOT_CTES_SCOPED_SQL: Final[str] = (
 # 어차피 canonical (provider,dataset_key,sync_scope) pair가 있는 실행만 남기므로
 # (``ops_dataset_service._run_history_records``) scoped 결과는 unscoped와 동치다.
 
+# root_id 저장으로 component 재귀(scoped_jobs 부모/자식 walk)는 불필요하다. seed의
+# component = seed와 같은 root_id를 가진 모든 job. seed에서 root_id를 뽑아
+# pipeline_jobs를 그 root_id들로 좁힌다. (다운스트림 lineage body가 root_id/root_kind를
+# 쓰므로 scoped pipeline_jobs도 반드시 투영한다.)
 _SCOPED_COMPONENT_SOURCE_BODY_SQL: Final[str] = """
-scoped_jobs AS (
-    SELECT job.*
+scoped_root_ids AS MATERIALIZED (
+    SELECT job.root_id
     FROM scoped_job_seeds AS seed
-    CROSS JOIN LATERAL (
-        SELECT
-            selected.job_id,
-            selected.kind,
-            selected.load_batch_id,
-            selected.parent_job_id,
-            selected.status,
-            selected.progress,
-            selected.current_stage,
-            selected.error_message,
-            selected.dagster_run_id,
-            selected.provider,
-            selected.dataset_key,
-            selected.trigger_kind,
-            selected.operation_registry_version,
-            selected.dagster_run_status,
-            selected.started_at,
-            selected.finished_at,
-            selected.created_at
-        FROM ops.import_jobs AS selected
-        WHERE selected.job_id = seed.job_id
-          AND selected.quarantined_at IS NULL
-        OFFSET 0
-    ) AS job
-
+    JOIN ops.import_jobs AS job
+      ON job.job_id = seed.job_id
+     AND job.quarantined_at IS NULL
     UNION
-
-    SELECT related.*
-    FROM scoped_jobs AS current_job
-    CROSS JOIN LATERAL (
-        (
-            SELECT
-                parent.job_id,
-                parent.kind,
-                parent.load_batch_id,
-                parent.parent_job_id,
-                parent.status,
-                parent.progress,
-                parent.current_stage,
-                parent.error_message,
-                parent.dagster_run_id,
-                parent.provider,
-                parent.dataset_key,
-                parent.trigger_kind,
-                parent.operation_registry_version,
-                parent.dagster_run_status,
-                parent.started_at,
-                parent.finished_at,
-                parent.created_at
-            FROM ops.import_jobs AS parent
-            WHERE parent.job_id = current_job.parent_job_id
-              AND parent.quarantined_at IS NULL
-            OFFSET 0
-        )
-
-        UNION ALL
-
-        (
-            SELECT
-                child.job_id,
-                child.kind,
-                child.load_batch_id,
-                child.parent_job_id,
-                child.status,
-                child.progress,
-                child.current_stage,
-                child.error_message,
-                child.dagster_run_id,
-                child.provider,
-                child.dataset_key,
-                child.trigger_kind,
-                child.operation_registry_version,
-                child.dagster_run_status,
-                child.started_at,
-                child.finished_at,
-                child.created_at
-            FROM ops.import_jobs AS child
-            WHERE child.parent_job_id = current_job.job_id
-              AND child.quarantined_at IS NULL
-            OFFSET 0
-        )
-    ) AS related
+    SELECT seed.job_id AS root_id
+    FROM scoped_request_seeds AS seed
+    WHERE seed.job_id IS NOT NULL
 ),
 pipeline_jobs AS MATERIALIZED (
     SELECT
@@ -725,6 +654,8 @@ pipeline_jobs AS MATERIALIZED (
         job.kind,
         job.load_batch_id,
         job.parent_job_id,
+        job.root_id,
+        job.root_kind,
         job.status,
         job.progress,
         job.current_stage,
@@ -738,7 +669,9 @@ pipeline_jobs AS MATERIALIZED (
         job.started_at,
         job.finished_at,
         job.created_at
-    FROM scoped_jobs AS job
+    FROM ops.import_jobs AS job
+    WHERE job.quarantined_at IS NULL
+      AND job.root_id IN (SELECT root_id FROM scoped_root_ids)
 ),
 pipeline_requests AS MATERIALIZED (
     SELECT
@@ -758,46 +691,11 @@ pipeline_requests AS MATERIALIZED (
         identity_job.started_at,
         identity_job.finished_at,
         request.created_at
-    FROM scoped_request_seeds AS seed
-    CROSS JOIN LATERAL (
-        SELECT selected.*
-        FROM ops.feature_update_requests AS selected
-        WHERE selected.request_id = seed.request_id
-        OFFSET 0
-    ) AS request
+    FROM ops.feature_update_requests AS request
     JOIN ops.import_jobs AS identity_job
       ON identity_job.job_id = request.job_id
      AND identity_job.quarantined_at IS NULL
-
-    UNION
-
-    SELECT
-        request.request_id,
-        request.scope_type,
-        request.scope,
-        request.providers,
-        request.dataset_keys,
-        request.run_mode,
-        request.priority,
-        identity_job.status,
-        request.job_id,
-        identity_job.sync_scope AS effective_sync_scope,
-        identity_job.dagster_run_id,
-        request.operator,
-        identity_job.error_message,
-        identity_job.started_at,
-        identity_job.finished_at,
-        request.created_at
-    FROM scoped_jobs AS job
-    CROSS JOIN LATERAL (
-        SELECT selected.*
-        FROM ops.feature_update_requests AS selected
-        WHERE selected.job_id = job.job_id
-        OFFSET 0
-    ) AS request
-    JOIN ops.import_jobs AS identity_job
-      ON identity_job.job_id = request.job_id
-     AND identity_job.quarantined_at IS NULL
+    WHERE request.job_id IN (SELECT root_id FROM scoped_root_ids)
 )
 """
 
