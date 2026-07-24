@@ -589,48 +589,11 @@ roots_with_identity AS (
 
 _PIPELINE_ROOT_CTES_SQL: Final[str] = PIPELINE_LINEAGE_CTES_SQL + ",\n" + _PIPELINE_ROOT_BODY_SQL
 
-# --- scoped 변형 (dataset detail 조회 전용) ---------------------------------
-# ``load_dataset_detail``은 단일 (provider, dataset_key) snapshot만 필요하지만
-# unscoped ``_LIST_DATASET_EXECUTION_SNAPSHOTS_SQL``은 roots_with_identity의
-# per-root 상관 서브쿼리를 전체 파이프라인 히스토리에 대해 계산하므로 누적 실행
-# 이력에 비례해 O(roots^2)로 악화하고(높은 plan cost가 JIT까지 유발) detail
-# endpoint가 클라이언트 timeout을 넘긴다. 아래 변형은 roots_with_identity를 대상
-# (provider, dataset_key)에 속한 root로만 좁혀 동일 결과를 훨씬 적은 비용으로
-# 만든다. 공유 CTE 텍스트를 그대로 재사용하고 마지막 ``FROM all_roots`` 소스에만
-# EXISTS 필터를 덧붙인다.
-_ROOTS_WITH_IDENTITY_FROM_ANCHOR: Final[str] = "    FROM all_roots AS root\n)"
-if _ROOTS_WITH_IDENTITY_FROM_ANCHOR not in _PIPELINE_ROOT_BODY_SQL:  # pragma: no cover
-    raise RuntimeError(
-        "pipeline_repo: scoped dataset snapshot anchor "
-        "'FROM all_roots AS root' 를 찾지 못했습니다"
-    )
-_PIPELINE_ROOT_BODY_SCOPED_SQL: Final[str] = _PIPELINE_ROOT_BODY_SQL.replace(
-    _ROOTS_WITH_IDENTITY_FROM_ANCHOR,
-    "    FROM all_roots AS root\n"
-    "    WHERE EXISTS (\n"
-    "        SELECT 1\n"
-    "        FROM canonical_provider_datasets AS scoped_pair\n"
-    "        WHERE scoped_pair.root_kind = root.kind\n"
-    "          AND scoped_pair.root_id = root.id\n"
-    "          AND scoped_pair.provider = :snapshot_provider\n"
-    "          AND scoped_pair.dataset_key = :snapshot_dataset_key\n"
-    "    )\n)",
-    1,
-)
-_PIPELINE_ROOT_CTES_SCOPED_SQL: Final[str] = (
-    PIPELINE_LINEAGE_CTES_SQL + ",\n" + _PIPELINE_ROOT_BODY_SCOPED_SQL
-)
-
-# recency-bounded 변형(``:root_since`` all_roots 창)은 제거됐다. 최신성 시간창은
-# 고빈도·누적 dataset(예: C7 KMA)에서 여전히 수천 root를 포함해 detail 쿼리가
-# 클라이언트/서버 timeout을 넘겼고(504), window가 페이지를 못 채우면 unbounded로
-# fallback해 O(roots^2)를 그대로 되살렸다. 대신 run-history detail 경로는 위
-# ``_PIPELINE_ROOT_BODY_SCOPED_SQL``(roots_with_identity의 per-root 상관 서브쿼리를
-# 대상 (provider,dataset_key) canonical pair를 가진 root로만 좁힘)을 쓴다 — 시간창이
-# 아니라 dataset 범위로 제한하므로 누적과 무관하게 빠르고(snapshot과 동일한 빠른
-# 형태), 다른 dataset의 root에 crowding-out되지 않는다. run-history 최종 레코드는
-# 어차피 canonical (provider,dataset_key,sync_scope) pair가 있는 실행만 남기므로
-# (``ops_dataset_service._run_history_records``) scoped 결과는 unscoped와 동치다.
+# --- scoped source 변형 (identity/membership/detail 조회 전용) ----------------
+# ADR-077: detail/run-history/snapshot의 dataset 범위 제한은 root_id로 좁힌 scoped
+# source(_IDENTITY_SCOPED_SOURCE_SQL 등)가 담당한다 — pipeline_jobs를 대상 root의
+# member로 좁혀 window/pair 계산이 누적 전체가 아니라 해당 root만 돈다. #829(recency
+# 창)·#832(roots_with_identity EXISTS 변형)의 interim 패치는 제거됐다.
 
 # root_id 저장으로 component 재귀(scoped_jobs 부모/자식 walk)는 불필요하다. seed의
 # component = seed와 같은 root_id를 가진 모든 job. seed에서 root_id를 뽑아
@@ -1002,14 +965,9 @@ _LIST_ALL_EXECUTIONS_SQL: Final[str] = (
     "WITH RECURSIVE\n" + _PIPELINE_ROOT_CTES_SQL + ",\n" + _LIST_EXECUTIONS_BODY_SQL
 )
 
-# ``_LIST_EXECUTIONS_SQL``의 dataset-scoped 변형(detail run-history 전용).
-# ``_PIPELINE_ROOT_BODY_SCOPED_SQL``(roots_with_identity를 대상 (provider,dataset_key)
-# canonical pair를 가진 root로만 좁힘)을 쓰고 provider/dataset/scope/cursor 필터는
-# ``_LIST_EXECUTIONS_BODY_SQL``이 그대로 적용한다. :snapshot_provider/:snapshot_dataset_key
-# 를 bind하는 경로만 사용한다(``_LIST_ALL_EXECUTIONS_SQL`` 조립을 scoped root body로 미러).
-_LIST_EXECUTIONS_SCOPED_SQL: Final[str] = (
-    "WITH RECURSIVE\n" + _PIPELINE_ROOT_CTES_SCOPED_SQL + ",\n" + _LIST_EXECUTIONS_BODY_SQL
-)
+# detail run-history는 별도 dataset-scoped SQL이 필요 없다: provider+dataset가 주어지면
+# ``_LIST_EXECUTIONS_SQL``이 이미 identity-scoped source(root_id로 좁힘)를 쓰므로
+# 누적과 무관하게 빠르다. #832의 EXISTS 변형은 제거됐다.
 
 _STATUS_COUNTS_SQL: Final[str] = (
     "WITH RECURSIVE\n"
@@ -1149,12 +1107,17 @@ ranked_dataset_roots AS (
     + _DATASET_EXECUTION_RESULT_SQL
 )
 
-# ``_LIST_DATASET_EXECUTION_SNAPSHOTS_SQL``의 scoped 변형. scoped root CTE와
-# 대상 (provider, dataset_key)로 좁힌 ranked_dataset_roots를 사용해 동일한
-# per-scope 최신 종료/활성 실행 결과를 만든다(단, 대상 dataset만).
+# ``_LIST_DATASET_EXECUTION_SNAPSHOTS_SQL``의 scoped 변형. identity-scoped source(대상
+# (provider, dataset_key)의 root member로 root_id로 좁힘)에 대상 pair로 좁힌
+# ranked_dataset_roots를 붙여 동일한 per-scope 최신 종료/활성 실행 결과를 만든다
+# (단, 대상 dataset만). :provider/:dataset_key를 bind한다.
 _LIST_DATASET_EXECUTION_SNAPSHOTS_SCOPED_SQL: Final[str] = (
     "WITH RECURSIVE\n"
-    + _PIPELINE_ROOT_CTES_SCOPED_SQL
+    + _IDENTITY_SCOPED_SOURCE_SQL
+    + ",\n"
+    + PIPELINE_LINEAGE_BODY_SQL
+    + ",\n"
+    + _PIPELINE_ROOT_BODY_SQL
     + """,
 ranked_dataset_roots AS (
     SELECT
@@ -1176,8 +1139,8 @@ ranked_dataset_roots AS (
     FROM roots_with_identity AS root
     JOIN canonical_provider_datasets AS pair
       ON pair.root_kind = root.kind AND pair.root_id = root.id
-    WHERE pair.provider = :snapshot_provider
-      AND pair.dataset_key = :snapshot_dataset_key
+    WHERE pair.provider = :provider
+      AND pair.dataset_key = :dataset_key
 )
 """
     + _DATASET_EXECUTION_RESULT_SQL
@@ -1380,20 +1343,12 @@ async def list_pipeline_executions(
     created_to: datetime | None = None,
     limit: int = 50,
     cursor: str | None = None,
-    dataset_scoped: bool = False,
 ) -> PipelineExecutionPage:
     """root 실행 목록 — ``(created_at DESC, id DESC, kind DESC)`` cursor.
 
-    ``dataset_scoped``는 단일 (provider, dataset_key) detail 경로 전용 성능
-    스위치다(provider·dataset_key 둘 다 필요). 주면 roots_with_identity의 per-root
-    상관 서브쿼리를 대상 dataset의 canonical pair를 가진 root로만 좁힌 SQL을 써
-    누적 실행 이력에 비례하는 O(roots^2) 비용을 피한다. 최종 레코드는 어차피
-    canonical (provider,dataset_key,sync_scope) pair가 있는 실행만 남으므로 결과는
-    unscoped와 동치이며, 시간창이 아니라 dataset 범위로 제한하므로 고빈도·유휴
-    여부·다른 dataset의 활동량과 무관하게 빠르다.
+    provider+dataset_key가 주어지면 identity-scoped source(root_id로 대상 dataset의
+    root member만 스캔)를 써 누적 실행 이력과 무관하게 빠르다(ADR-077).
     """
-    if dataset_scoped and (provider is None or dataset_key is None):
-        raise ValueError("dataset_scoped requires both provider and dataset_key")
     if kind is not None and kind not in PIPELINE_EXECUTION_KINDS:
         raise ValueError(f"kind must be one of {sorted(PIPELINE_EXECUTION_KINDS)}, got {kind!r}")
     if dataset_sync_scopes is not None and (provider is None or dataset_key is None):
@@ -1439,11 +1394,9 @@ async def list_pipeline_executions(
         query = _LIST_MEMBERSHIP_EXECUTIONS_SQL
     elif provider is None and dataset_key is None:
         query = _LIST_ALL_EXECUTIONS_SQL
-    elif dataset_scoped:
-        # 단일 (provider, dataset_key) detail 경로: roots_with_identity를 대상
-        # dataset의 canonical pair root로만 좁혀 O(roots^2) 비용을 피한다.
-        query = _LIST_EXECUTIONS_SCOPED_SQL
     else:
+        # provider/dataset 단일 dataset 경로: identity-scoped source가 root_id로
+        # 좁힌다(detail 포함).
         query = _LIST_EXECUTIONS_SQL
     params: dict[str, Any] = {
         "kind": kind,
@@ -1462,11 +1415,6 @@ async def list_pipeline_executions(
         "cursor_item_kind": cursor_item_kind,
         "page_limit": page_size + 1,
     }
-    if query is _LIST_EXECUTIONS_SCOPED_SQL:
-        # scoped root body(``_PIPELINE_ROOT_BODY_SCOPED_SQL``)의 EXISTS 필터가
-        # 쓰는 bind. provider/dataset_key와 동일 값이지만 이름이 다르다.
-        params["snapshot_provider"] = provider
-        params["snapshot_dataset_key"] = dataset_key
     rows = (await session.execute(text(query), params)).all()
     items = tuple(_row_to_execution(row) for row in rows[:page_size])
     next_cursor = (
@@ -1570,16 +1518,16 @@ async def list_dataset_pipeline_execution_snapshots_scoped(
     detail 트랜잭션의 후속 쿼리들은 모두 bounded여서 JIT-off가 무해하다.
 
     recency window는 적용하지 않는다: latest_terminal/active는 마지막 실행이
-    오래된(>window) 유휴 scope에서도 반환해야 하므로 시간창으로 자르면 유휴
-    dataset의 상세가 비게 된다. scoped EXISTS 필터만으로 이미 충분히 빠르다.
+    오래된 유휴 scope에서도 반환해야 하기 때문이다. identity-scoped source가 대상
+    dataset의 root member만 root_id로 스캔하므로 이미 충분히 빠르다(ADR-077).
     """
     await session.execute(text("SET LOCAL jit = off"))
     rows = (
         await session.execute(
             text(_LIST_DATASET_EXECUTION_SNAPSHOTS_SCOPED_SQL),
             {
-                "snapshot_provider": provider,
-                "snapshot_dataset_key": dataset_key,
+                "provider": provider,
+                "dataset_key": dataset_key,
             },
         )
     ).all()
