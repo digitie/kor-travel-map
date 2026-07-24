@@ -599,13 +599,19 @@ _PIPELINE_ROOT_CTES_SQL: Final[str] = PIPELINE_LINEAGE_CTES_SQL + ",\n" + _PIPEL
 # component = seed와 같은 root_id를 가진 모든 job. seed에서 root_id를 뽑아
 # pipeline_jobs를 그 root_id들로 좁힌다. (다운스트림 lineage body가 root_id/root_kind를
 # 쓰므로 scoped pipeline_jobs도 반드시 투영한다.)
+# LATERAL + ``OFFSET 0`` fence로 seed→root, root→member 조회가 generic plan
+# (force_generic_plan)에서도 index nested-loop을 타게 한다(seq scan 방지).
 _SCOPED_COMPONENT_SOURCE_BODY_SQL: Final[str] = """
 scoped_root_ids AS MATERIALIZED (
-    SELECT job.root_id
+    SELECT root.root_id
     FROM scoped_job_seeds AS seed
-    JOIN ops.import_jobs AS job
-      ON job.job_id = seed.job_id
-     AND job.quarantined_at IS NULL
+    CROSS JOIN LATERAL (
+        SELECT job.root_id
+        FROM ops.import_jobs AS job
+        WHERE job.job_id = seed.job_id
+          AND job.quarantined_at IS NULL
+        OFFSET 0
+    ) AS root
     UNION
     SELECT seed.job_id AS root_id
     FROM scoped_request_seeds AS seed
@@ -633,9 +639,32 @@ pipeline_jobs AS MATERIALIZED (
         job.finished_at,
         job.created_at
     FROM scoped_root_ids AS sr
-    JOIN ops.import_jobs AS job
-      ON job.root_id = sr.root_id
-     AND job.quarantined_at IS NULL
+    CROSS JOIN LATERAL (
+        SELECT
+            selected.job_id,
+            selected.kind,
+            selected.load_batch_id,
+            selected.parent_job_id,
+            selected.root_id,
+            selected.root_kind,
+            selected.status,
+            selected.progress,
+            selected.current_stage,
+            selected.error_message,
+            selected.dagster_run_id,
+            selected.provider,
+            selected.dataset_key,
+            selected.trigger_kind,
+            selected.operation_registry_version,
+            selected.dagster_run_status,
+            selected.started_at,
+            selected.finished_at,
+            selected.created_at
+        FROM ops.import_jobs AS selected
+        WHERE selected.root_id = sr.root_id
+          AND selected.quarantined_at IS NULL
+        OFFSET 0
+    ) AS job
 ),
 pipeline_requests AS MATERIALIZED (
     SELECT
@@ -656,8 +685,12 @@ pipeline_requests AS MATERIALIZED (
         identity_job.finished_at,
         request.created_at
     FROM scoped_root_ids AS sr
-    JOIN ops.feature_update_requests AS request
-      ON request.job_id = sr.root_id
+    CROSS JOIN LATERAL (
+        SELECT selected.*
+        FROM ops.feature_update_requests AS selected
+        WHERE selected.job_id = sr.root_id
+        OFFSET 0
+    ) AS request
     JOIN ops.import_jobs AS identity_job
       ON identity_job.job_id = request.job_id
      AND identity_job.quarantined_at IS NULL
