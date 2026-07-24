@@ -1913,7 +1913,7 @@ class ImportJobRow(Base):
             "root_kind IN ('import_job','update_request')",
             name="ck_import_jobs_root_kind",
         ),
-        Index("idx_import_jobs_root", "root_kind", "root_id"),
+        Index("idx_import_jobs_root", "root_id", "root_kind"),
         {"schema": "ops"},
     )
 

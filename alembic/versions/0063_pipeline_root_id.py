@@ -162,8 +162,10 @@ def upgrade() -> None:
         "root_kind IN ('import_job','update_request')",
         schema="ops",
     )
+    # root_id 선두 — scoped source의 ``WHERE root_id IN (...)`` member 조회가
+    # 인덱스 스캔을 타게 한다(bounded access). root_kind는 보조.
     op.create_index(
-        "idx_import_jobs_root", "import_jobs", ["root_kind", "root_id"], schema="ops"
+        "idx_import_jobs_root", "import_jobs", ["root_id", "root_kind"], schema="ops"
     )
 
     # 5. write 시점 자동 stamp + 2단계 lock 트리거(insert + batch attach의 parent 변경).
