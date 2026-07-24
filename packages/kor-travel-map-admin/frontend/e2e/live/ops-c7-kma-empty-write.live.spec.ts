@@ -45,7 +45,11 @@ import {
 const TEST_TIMEOUT = 30 * 60 * 1000;
 // 갱신 요청 생성 dialog의 preview(dry-run) 응답 상한. Playwright action timeout이
 // live config에서 0(무제한)이라, 명시하지 않으면 preview 응답을 무한 대기할 수 있다.
-const PREVIEW_RESPONSE_TIMEOUT_MS = 30_000;
+// [C7DIAG] 진단용 distinct timeout: 실패 step을 실패 TIME으로 식별(evidence는 error를
+// redact하지만 time은 남는다). preview 20s / dialog 8s / toContainText 50s로 벌려둔다.
+const PREVIEW_RESPONSE_TIMEOUT_MS = 20_000;
+const DIALOG_VISIBLE_TIMEOUT_MS = 8_000;
+const PREVIEW_RESULT_TEXT_TIMEOUT_MS = 50_000;
 // enabled "갱신 요청 생성" 트리거가 actionable(enabled)이 될 때까지의 상한. 이 트리거는
 // overview가 큐 sensor를 RUNNING으로 보고(queueOperational=true)할 때만 enabled이고,
 // 직전 active-write가 sensor를 stop/restart하므로 empty-write 시작 시점엔 sensor가 아직
@@ -70,6 +74,9 @@ async function previewEmptyRequestFromUi(
   syncScope: string,
   reason: string,
 ): Promise<void> {
+  // [C7DIAG] 임시 진단 마커: 러너 로그에서 마지막 [C7DIAG]가 마지막으로 통과한 step.
+  // 실패 step = 그 다음. redaction 확정 후 제거 예정(T-ADM-C7RUN).
+  console.log("[C7DIAG] step=preview-fn-enter");
   // 견고화(T-ADM-C7RUN): active-write의 검증된 openAndFillKmaRequestDialog 패턴을 미러링한다.
   // 과거엔 stale bootstrap 페이지에서 exact-name "갱신 요청 생성" 트리거를 action-timeout
   // 없이(live config actionTimeout=0) 클릭했다. 이 트리거는 queueOperational
@@ -92,9 +99,12 @@ async function previewEmptyRequestFromUi(
     createTrigger,
     "갱신 요청 생성 트리거가 제한 시간 내 enabled 되지 않음 — /v1/ops/pipeline/overview 큐 sensor 게이트가 non-operational (직전 active-write 후 sensor RUNNING 회복 여부/overview read-path 확인)",
   ).toBeEnabled({ timeout: CREATE_TRIGGER_ENABLED_TIMEOUT_MS });
+  console.log("[C7DIAG] step=trigger-enabled");
   await createTrigger.click();
+  console.log("[C7DIAG] step=trigger-clicked");
   const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-  await expect(dialog).toBeVisible();
+  await expect(dialog).toBeVisible({ timeout: DIALOG_VISIBLE_TIMEOUT_MS });
+  console.log("[C7DIAG] step=dialog-visible");
   await dialog.getByLabel("provider", { exact: true }).fill(KMA_PROVIDER);
   await dialog
     .getByLabel("dataset_key", { exact: true })
@@ -102,6 +112,7 @@ async function previewEmptyRequestFromUi(
   await dialog
     .getByLabel("sync_scope (선택)", { exact: true })
     .fill(syncScope);
+  console.log("[C7DIAG] step=fills-done");
   const responsePromise = page.waitForResponse(
     (response) => {
       return (
@@ -115,6 +126,7 @@ async function previewEmptyRequestFromUi(
   await dialog
     .getByRole("button", { name: "dry-run 실행", exact: true })
     .click();
+  console.log("[C7DIAG] step=dryrun-clicked");
   await assertExactKmaPreviewResponse(
     await responsePromise,
     previewBody(
@@ -124,11 +136,15 @@ async function previewEmptyRequestFromUi(
       ),
     ),
   );
+  console.log("[C7DIAG] step=preview-response-asserted");
   await expect(dialog.getByTestId("request-preview-result")).toContainText(
     syncScope,
+    { timeout: PREVIEW_RESULT_TEXT_TIMEOUT_MS },
   );
+  console.log("[C7DIAG] step=preview-result-contains-syncscope");
   await dialog.getByRole("checkbox", { name: /dry-run/ }).uncheck();
   await dialog.getByLabel("사유", { exact: true }).fill(reason);
+  console.log("[C7DIAG] step=preview-fn-done");
 }
 
 async function createEmptyRequestWhileSensorStopped(
