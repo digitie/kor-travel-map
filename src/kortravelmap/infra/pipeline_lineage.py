@@ -1,9 +1,16 @@
 """C3b root projection과 계층형 취소가 공유하는 lineage CTE 정본.
 
+ADR-077: root/component 멤버십은 ``import_jobs.root_id``/``root_kind``로 저장된다
+(DB 트리거가 parent에서 파생, ≤2단계 lock). 따라서 과거의 재귀 ``job_ancestry``/
+component 파생은 제거하고, ``anchor_requests``/``job_components``/``job_owners``/
+``standalone_jobs``를 ``root_id`` 직접 조회로 만든다. 다운스트림(``_PIPELINE_ROOT_BODY_SQL``의
+ranked/summaries/roots/members/pairs 및 pipeline_cancellation_queries)은 이 네 CTE의
+출력 컬럼만 알므로 그대로 둔다.
+
 ``PIPELINE_LINEAGE_BODY_SQL``은 payload를 포함하지 않는 ``pipeline_jobs``와
-``pipeline_requests`` source CTE를 입력으로 받는다. 취소 경계는 전역 source를 붙인
-``PIPELINE_LINEAGE_CTES_SQL``을 계속 사용하고, 조회 경계는 선택 조건으로 좁힌 source를
-공급할 수 있다.
+``pipeline_requests`` source CTE를 입력으로 받는다. 전역 조회는 전역 source를 붙인
+``PIPELINE_LINEAGE_CTES_SQL``을, scoped 조회는 ``root_id``로 좁힌 source를 공급한다.
+scoped source의 ``pipeline_jobs``도 ``root_id``/``root_kind``를 반드시 투영해야 한다.
 """
 
 from __future__ import annotations
@@ -17,6 +24,8 @@ pipeline_jobs AS MATERIALIZED (
         kind,
         load_batch_id,
         parent_job_id,
+        root_id,
+        root_kind,
         status,
         progress,
         current_stage,
@@ -58,114 +67,45 @@ pipeline_requests AS MATERIALIZED (
 )
 """
 
+# root_id가 저장돼 있으므로 lineage는 재귀 없이 직접 조회다. depth는 ≤2단계라
+# root면 0, 자식이면 1(``job_id = root_id`` 여부). 출력 컬럼/의미는 과거 재귀 버전과
+# 동일하다(다운스트림 불변).
+#   - anchor_requests: 각 request의 anchor job이 곧 root(component_root_id = job_id).
+#   - job_components: 모든 job → 자신의 component root(= root_id).
+#   - job_owners: root_kind='update_request' job은 그 root(=anchor job)의 request가 소유.
+#   - standalone_jobs: root_kind='import_job' job(= request가 소유하지 않는 component).
 PIPELINE_LINEAGE_BODY_SQL: Final[str] = """
-job_ancestry AS (
-    SELECT
-        job_id AS leaf_job_id,
-        job_id AS ancestor_job_id,
-        parent_job_id,
-        0 AS depth,
-        ARRAY[job_id]::uuid[] AS path,
-        false AS cycle
-    FROM pipeline_jobs
-    UNION ALL
-    SELECT
-        walk.leaf_job_id,
-        parent.job_id,
-        parent.parent_job_id,
-        walk.depth + 1,
-        walk.path || parent.job_id,
-        parent.job_id = ANY(walk.path)
-    FROM job_ancestry AS walk
-    JOIN pipeline_jobs AS parent ON parent.job_id = walk.parent_job_id
-    WHERE NOT walk.cycle
-),
-cycle_roots AS (
-    SELECT DISTINCT ON (cycle_row.leaf_job_id)
-        cycle_row.leaf_job_id,
-        member AS component_root_id
-    FROM job_ancestry AS cycle_row
-    CROSS JOIN LATERAL unnest(
-        cycle_row.path[
-            array_position(cycle_row.path, cycle_row.ancestor_job_id)
-            : array_length(cycle_row.path, 1) - 1
-        ]
-    ) AS cycle_members(member)
-    WHERE cycle_row.cycle
-    ORDER BY cycle_row.leaf_job_id, member
-),
-terminal_roots AS (
-    SELECT DISTINCT ON (walk.leaf_job_id)
-        walk.leaf_job_id,
-        walk.ancestor_job_id AS component_root_id
-    FROM job_ancestry AS walk
-    LEFT JOIN pipeline_jobs AS parent ON parent.job_id = walk.parent_job_id
-    WHERE NOT walk.cycle
-      AND parent.job_id IS NULL
-    ORDER BY walk.leaf_job_id, walk.depth DESC
-),
-job_component_roots AS (
-    SELECT
-        job.job_id,
-        COALESCE(cycle.component_root_id, terminal.component_root_id, job.job_id)
-            AS component_root_id
-    FROM pipeline_jobs AS job
-    LEFT JOIN cycle_roots AS cycle ON cycle.leaf_job_id = job.job_id
-    LEFT JOIN terminal_roots AS terminal ON terminal.leaf_job_id = job.job_id
-),
-job_components AS (
-    SELECT
-        root.job_id,
-        root.component_root_id,
-        MIN(walk.depth)::integer AS depth
-    FROM job_component_roots AS root
-    JOIN job_ancestry AS walk
-      ON walk.leaf_job_id = root.job_id
-     AND walk.ancestor_job_id = root.component_root_id
-    GROUP BY root.job_id, root.component_root_id
-),
 anchor_requests AS (
     SELECT
         request.request_id,
         request.job_id AS anchor_job_id,
-        component.component_root_id,
+        request.job_id AS component_root_id,
         request.created_at
     FROM pipeline_requests AS request
-    JOIN job_components AS component ON component.job_id = request.job_id
 ),
-job_anchor_candidates AS (
+job_components AS (
     SELECT
-        walk.leaf_job_id AS job_id,
-        anchor.request_id AS owner_request_id,
-        anchor.anchor_job_id,
-        anchor.component_root_id,
-        walk.depth::integer AS anchor_depth,
-        ROW_NUMBER() OVER (
-            PARTITION BY walk.leaf_job_id
-            ORDER BY
-                walk.depth ASC,
-                anchor.created_at ASC,
-                anchor.request_id ASC
-        ) AS ownership_rank
-    FROM job_ancestry AS walk
-    JOIN anchor_requests AS anchor
-      ON anchor.anchor_job_id = walk.ancestor_job_id
+        job.job_id,
+        job.root_id AS component_root_id,
+        CASE WHEN job.job_id = job.root_id THEN 0 ELSE 1 END AS depth
+    FROM pipeline_jobs AS job
 ),
 job_owners AS (
     SELECT
-        job_id,
-        owner_request_id,
-        anchor_job_id,
-        component_root_id,
-        anchor_depth
-    FROM job_anchor_candidates
-    WHERE ownership_rank = 1
+        job.job_id,
+        request.request_id AS owner_request_id,
+        job.root_id AS anchor_job_id,
+        job.root_id AS component_root_id,
+        CASE WHEN job.job_id = job.root_id THEN 0 ELSE 1 END AS anchor_depth
+    FROM pipeline_jobs AS job
+    JOIN pipeline_requests AS request ON request.job_id = job.root_id
+    WHERE job.root_kind = 'update_request'
 ),
 standalone_jobs AS (
     SELECT
-        component.job_id,
-        component.component_root_id,
-        component.depth,
+        job.job_id,
+        job.root_id AS component_root_id,
+        CASE WHEN job.job_id = job.root_id THEN 0 ELSE 1 END AS depth,
         job.kind,
         job.status,
         job.progress,
@@ -182,10 +122,8 @@ standalone_jobs AS (
         job.dagster_run_status,
         job.load_batch_id,
         job.parent_job_id
-    FROM job_components AS component
-    JOIN pipeline_jobs AS job ON job.job_id = component.job_id
-    LEFT JOIN job_owners AS owner ON owner.job_id = component.job_id
-    WHERE owner.job_id IS NULL
+    FROM pipeline_jobs AS job
+    WHERE job.root_kind = 'import_job'
 )
 """
 

@@ -262,7 +262,9 @@ async def test_scope_matches_canonical_request_and_standalone_boundaries(
 ) -> None:
     await _job(migrated_session, _ROOT, kind="feature_update_request")
     await _job(migrated_session, _CHILD, parent_job_id=_ROOT)
-    await _job(migrated_session, _GRANDCHILD, parent_job_id=_CHILD)
+    # ADR-077: ≤2단계 — 과거 grandchild(parent=_CHILD)를 _ROOT의 sibling으로 평탄화.
+    # 동일 component(root=_ROOT)라 scope member 집합은 그대로다.
+    await _job(migrated_session, _GRANDCHILD, parent_job_id=_ROOT)
     await _request(migrated_session, _OWNER, job_id=_ROOT, created_at=_T0)
     await _job(migrated_session, _LOSER)
 
@@ -297,7 +299,7 @@ async def test_scope_matches_canonical_request_and_standalone_boundaries(
     assert [item.job_id for item in standalone.members] == [_LOSER]
 
 
-async def test_scope_and_execution_projection_share_standalone_cycle_self_root_rules(
+async def test_scope_and_execution_projection_share_standalone_self_root_rules(
     migrated_session: AsyncSession,
 ) -> None:
     await _job(migrated_session, _ROOT)
@@ -328,54 +330,6 @@ async def test_scope_and_execution_projection_share_standalone_cycle_self_root_r
     self_root_projection = next(item for item in page.items if item.id == _CHILD)
     assert self_root_projection.linked_job_count == len(self_root.members) == 1
 
-    await _job(migrated_session, _GRANDCHILD)
-    await _job(migrated_session, _LOSER)
-    await migrated_session.execute(
-        text(
-            "UPDATE ops.import_jobs SET parent_job_id = CASE "
-            "WHEN job_id = CAST(:first AS uuid) THEN CAST(:second AS uuid) "
-            "ELSE CAST(:first AS uuid) END "
-            "WHERE job_id IN (CAST(:first AS uuid), CAST(:second AS uuid))"
-        ),
-        {"first": _GRANDCHILD, "second": _LOSER},
-    )
-    cycle = await _scope(
-        migrated_session,
-        kind="import_job",
-        execution_id=_LOSER,
-    )
-    page = await list_pipeline_executions(migrated_session)
-    cycle_projection = next(item for item in page.items if item.id == _GRANDCHILD)
-    assert cycle.root_id == cycle_projection.id == _GRANDCHILD
-    assert len(cycle.members) == cycle_projection.linked_job_count == 2
-
-
-@pytest.mark.parametrize("start_id", [_GRANDCHILD, _LOSER])
-async def test_cycle_scope_has_identical_canonical_root_from_both_start_nodes(
-    migrated_session: AsyncSession,
-    start_id: str,
-) -> None:
-    await _job(migrated_session, _GRANDCHILD)
-    await _job(migrated_session, _LOSER)
-    await migrated_session.execute(
-        text(
-            "UPDATE ops.import_jobs SET parent_job_id = CASE "
-            "WHEN job_id = CAST(:first AS uuid) THEN CAST(:second AS uuid) "
-            "ELSE CAST(:first AS uuid) END "
-            "WHERE job_id IN (CAST(:first AS uuid), CAST(:second AS uuid))"
-        ),
-        {"first": _GRANDCHILD, "second": _LOSER},
-    )
-
-    cycle = await _scope(
-        migrated_session,
-        kind="import_job",
-        execution_id=start_id,
-    )
-
-    assert (cycle.root_kind, cycle.root_id) == ("import_job", _GRANDCHILD)
-    assert {member.job_id for member in cycle.members} == {_GRANDCHILD, _LOSER}
-
 
 async def test_attempt_freezes_generic_marker_and_deduplicates_runs(
     migrated_session: AsyncSession,
@@ -396,7 +350,7 @@ async def test_attempt_freezes_generic_marker_and_deduplicates_runs(
     await _job(
         migrated_session,
         _GRANDCHILD,
-        parent_job_id=_CHILD,
+        parent_job_id=_ROOT,
         status="running",
         dagster_run_id="shared-run",
     )
@@ -632,7 +586,7 @@ async def test_marked_generic_rows_reject_mutators_but_allow_events(
     await _job(
         migrated_session,
         _GRANDCHILD,
-        parent_job_id=_CHILD,
+        parent_job_id=_ROOT,
         status="running",
     )
     await create_pipeline_cancellation_attempt(
