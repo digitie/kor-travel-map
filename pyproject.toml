@@ -207,6 +207,12 @@ markers = [
 filterwarnings = [
   "error",
   "ignore::DeprecationWarning:pkg_resources.*",
+  # testcontainers 4.x가 `testcontainers.postgres` import 경로를 deprecate했고
+  # (→ community.postgres), filterwarnings=error가 이 경고를 setup 오류로 승격시켜
+  # pg_container fixture가 전부 실패한다. message로 이 한 건만 무시한다(stacklevel=2라
+  # module 필터는 caller에 붙어 안 맞음). pytest-asyncio/pytest는 pin하지 않는다 —
+  # 진짜 통합 blocker는 이 deprecation 하나였다(hook traceback은 wrapper frame).
+  "ignore:testcontainers.postgres is deprecated:DeprecationWarning",
 ]
 
 [tool.coverage.run]
