@@ -510,7 +510,14 @@ export function RequestCreateDialog({
     setSubmittingPrecheck(true);
     setFormError(null);
     try {
-      const refreshedCatalog = await catalogQuery.refetch();
+      // dry-run은 부작용이 없고 서버가 최종 검증하므로, 강제 catalog refetch로 preview POST를
+      // 직렬화하지 않고 이미 로드된 catalog(staleTime로 hot)로 client 사전검증만 한다. 실제
+      // create(부작용)만 최신 catalog를 강제 refetch한다. 무거운 /ops/pipeline에서 ops-live가
+      // ["ops-datasets"]를 계속 invalidate하면 이 refetch가 preview POST를 막던 문제 해소
+      // (C7 empty-write: dry-run POST가 제한 시간 내 미발사).
+      const refreshedCatalog = dryRun
+        ? { data: catalogQuery.data, isError: catalogQuery.isError }
+        : await catalogQuery.refetch();
       if (!isCurrentDialogSession()) {
         return;
       }
