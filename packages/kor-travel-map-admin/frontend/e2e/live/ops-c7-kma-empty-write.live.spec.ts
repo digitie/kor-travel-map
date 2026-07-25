@@ -44,7 +44,12 @@ import {
 
 const TEST_TIMEOUT = 30 * 60 * 1000;
 // preview(dry-run) 응답 상한 + preview-result 텍스트 확인 상한(명시 고정).
-const PREVIEW_RESPONSE_TIMEOUT_MS = 30_000;
+// active-write의 검증된 preview 응답 게이트와 동일하게 60s(=actionTimeout)로 맞춘다:
+// dry-run 버튼은 catalog 로딩 동안 disabled라 click이 actionTimeout(60s)까지 auto-wait
+// 하는데, 응답 대기가 그보다 짧으면 버튼이 아직 정당하게 actionable 대기 중인 구간에서
+// waitForResponse가 먼저 timeout날 수 있다(무거운 official 페이지에서 특히). 상한만
+// 늘리므로 정상 경로엔 영향이 없다(리뷰어 B 권고).
+const PREVIEW_RESPONSE_TIMEOUT_MS = 60_000;
 const PREVIEW_RESULT_TEXT_TIMEOUT_MS = 30_000;
 const RUN_ID = `c7-empty-${Date.now()}-${Math.random()
   .toString(36)
@@ -246,7 +251,6 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
     const state = createCleanupState("empty", RUN_ID);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
     await assertKmaDagsterWorkerJobDefinition();
-    await previewEmptyRequestFromUi(page, syncScope, reason);
     const controller = await createQueueSensorController();
     const sensorSnapshot = await snapshotQueueSensor(controller);
     if (sensorSnapshot.status !== "RUNNING") {
@@ -261,6 +265,15 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
     );
     try {
       await withC7Cleanup(page, testInfo, state, async () => {
+        // preview는 active-write와 동일하게 (a) 대상 external_system에 active POI
+        // target이 존재하고 (b) queue sensor가 아직 RUNNING인 상태에서 실행해야
+        // dry-run POST가 client validateCatalogSelection과 server
+        // _validate_refreshable_request를 통과해 HTTP 200을 받는다. target 등록과
+        // preview를 withC7Cleanup 안·stop 이전에 배치해 cleanup guard(잔존 target
+        // 자동 회수)를 유지한 채 두 사전조건을 만족시킨다. bare target은 request가
+        // 없으므로 RUNNING queue sensor가 dispatch하지 않는다(sensors.py peek→skip).
+        await putTrackedTarget(page, state, target, targetBody);
+        await previewEmptyRequestFromUi(page, syncScope, reason);
         await stopQueueSensorAndWaitForQuiescence(controller, sensorSnapshot);
         await assertExactNonTerminalFeatureUpdateRequests(
           page,
@@ -268,7 +281,6 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
           "queue sensor stop/quiescence 후 preflight",
         );
 
-        await putTrackedTarget(page, state, target, targetBody);
         const before = scopeStateSnapshot(
           requireBody(await getExactDatasetDetail(page, syncScope), 200),
           syncScope,

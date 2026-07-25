@@ -998,8 +998,15 @@ function sameOperationalSnapshot(
   left: QueueSensorSnapshot,
   right: QueueSensorSnapshot,
 ): boolean {
+  // canReset은 dagster가 파생하는 "status override 존재" 힌트일 뿐 sensor의
+  // 운영 상태(RUNNING/STOPPED)가 아니다. defaultStatus=RUNNING sensor를 start하면
+  // status는 즉시 RUNNING이 되지만 canReset은 (override 기록 때문에) true로 남거나
+  // false로 지연 수렴한다. canReset을 operational 비교에 넣으면 start 직후 관측된
+  // {RUNNING, canReset:true}가 intendedAfter {RUNNING, canReset:false}와도, before
+  // {STOPPED}와도 불일치해 허위 CONCURRENT_SENSOR_DRIFT가 난다(empty-write의 sensor
+  // quiescence dance가 preview 통과 후 처음 도달해 노출). restore 분기는 canReset을
+  // 직접 필드로 읽어 판단하므로, operational 비교에서는 canReset을 제외한다.
   return (
-    left.canReset === right.canReset &&
     left.defaultStatus === right.defaultStatus &&
     left.minIntervalSeconds === right.minIntervalSeconds &&
     left.selectorId === right.selectorId &&
