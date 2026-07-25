@@ -25,12 +25,7 @@ function isC7ReadAuthRun(): boolean {
   return process.argv.some((argument) => argument.includes(C7_READ_AUTH_SPEC));
 }
 
-// [C7DIAG] 임시: empty-write ~22s 실패의 실제 error/line/screenshot을 보기 위해 redaction을
-// 한 run 동안만 끈다(list reporter가 full error를 stdout→RLOG로, screenshot: only-on-failure).
-// origin-guard 단정만 skip될 뿐(barrier gate는 env var 존재에 의존해 그대로 통과). 원인 확정 후 되돌린다.
-const C7_DIAG_NOREDACT = true;
 function shouldAssertC7OriginGuard(): boolean {
-  if (C7_DIAG_NOREDACT) return false;
   return (
     isC7ReadAuthRun() ||
     process.env.E2E_C7_EXPECTED_UI_ORIGIN_SHA256 !== undefined ||

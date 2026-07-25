@@ -43,11 +43,9 @@ import {
 } from "./_ops-c7-admin-api";
 
 const TEST_TIMEOUT = 30 * 60 * 1000;
-// preview(dry-run) 응답 상한 + preview-result 텍스트 확인 상한. [C7DIAG] 진단: 두 값을
-// 다르게 둬(preview 20s / toContainText 50s) 실패 TIME으로 실패 step을 구분한다(evidence는
-// error를 redact하지만 time은 남는다). 원인 확정 후 일반 값으로 되돌린다.
-const PREVIEW_RESPONSE_TIMEOUT_MS = 20_000;
-const PREVIEW_RESULT_TEXT_TIMEOUT_MS = 50_000;
+// preview(dry-run) 응답 상한 + preview-result 텍스트 확인 상한(명시 고정).
+const PREVIEW_RESPONSE_TIMEOUT_MS = 30_000;
+const PREVIEW_RESULT_TEXT_TIMEOUT_MS = 30_000;
 const RUN_ID = `c7-empty-${Date.now()}-${Math.random()
   .toString(36)
   .slice(2, 8)}`;
@@ -78,7 +76,17 @@ async function previewEmptyRequestFromUi(
   await page.getByRole("button", { name: "갱신 요청 생성" }).click();
   const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel("provider").fill(KMA_PROVIDER);
+  // 근본원인(non-redacted 진단으로 확정): provider <input>(native onChange→setScopeProvider)를
+  // 채워도, catalog(usePipelineDatasetsCatalog) 비동기 로드 re-render와 fill이 race하면 값이
+  // 커밋 전에 리셋돼 dataset_key/sync_scope가 disabled로 남고, dry-run이 preview POST를 쏘지
+  // 못해 waitForResponse가 20s timeout된다. empty-write는 active-write 뒤 무거운 /ops/pipeline
+  // (실행 목록 다수)이라 이 race에 걸리고 active-write는 우연히 회피한다. dataset_key가
+  // enable될 때까지(=scopeProvider 확정) provider를 재입력해 고정한다.
+  // [UI follow-up 후보: catalog 도착 시 사용자 입력을 리셋하지 않도록 폼 안정화]
+  await expect(async () => {
+    await dialog.getByLabel("provider").fill(KMA_PROVIDER);
+    await expect(dialog.getByLabel("dataset_key")).toBeEnabled({ timeout: 1_500 });
+  }).toPass({ timeout: 20_000 });
   await dialog.getByLabel("dataset_key").fill(KMA_DATASET_KEY);
   await dialog.getByLabel("sync_scope (선택)").fill(syncScope);
   const responsePromise = page.waitForResponse(
