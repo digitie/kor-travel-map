@@ -83,31 +83,28 @@ async function previewEmptyRequestFromUi(
   // (실행 목록 다수)이라 이 race에 걸리고 active-write는 우연히 회피한다. dataset_key가
   // enable될 때까지(=scopeProvider 확정) provider를 재입력해 고정한다.
   // [UI follow-up 후보: catalog 도착 시 사용자 입력을 리셋하지 않도록 폼 안정화]
+  // /ops/pipeline의 폴링·데이터 로드 re-render가 dialog 폼 입력을 리셋하는 race가 있다(무거운
+  // empty-write 페이지에서 fill 직후~dry-run click 사이에 발생 → dry-run이 preview POST 미발사
+  // → waitForResponse timeout). fill 3개 + dry-run click + preview POST 도착을 하나의 toPass로
+  // 원자화해, 그 사이에 리셋되면 재시도한다(dry-run은 부작용 없는 미리보기라 재시도 안전).
+  // [UI follow-up 후보: 폼 입력을 부모 re-render에 보존(T-ADM-C7RUN)]
+  let previewResponse: Awaited<ReturnType<typeof page.waitForResponse>> | undefined;
   await expect(async () => {
     await dialog.getByLabel("provider").fill(KMA_PROVIDER);
-    await expect(dialog.getByLabel("dataset_key")).toBeEnabled({ timeout: 1_000 });
     await dialog.getByLabel("dataset_key").fill(KMA_DATASET_KEY);
-    await expect(dialog.getByLabel("sync_scope (선택)")).toBeEnabled({ timeout: 1_000 });
     await dialog.getByLabel("sync_scope (선택)").fill(syncScope);
-    // 3개 입력이 catalog 비동기 로드 re-render로 리셋되지 않고 모두 반영됐는지 값으로 확정한다
-    // (provider만 고정하면 dataset/sync_scope가 뒤이어 리셋돼 dry-run이 preview POST 미발사).
-    await expect(dialog.getByLabel("provider")).toHaveValue(KMA_PROVIDER, { timeout: 1_000 });
-    await expect(dialog.getByLabel("dataset_key")).toHaveValue(KMA_DATASET_KEY, { timeout: 1_000 });
-    await expect(dialog.getByLabel("sync_scope (선택)")).toHaveValue(syncScope, { timeout: 1_000 });
-  }).toPass({ timeout: 25_000 });
-  const responsePromise = page.waitForResponse(
-    (response) => {
-      return (
+    const pending = page.waitForResponse(
+      (response) =>
         response.request().method() === "POST" &&
         new URL(response.url()).pathname ===
-          "/api/proxy/v1/ops/pipeline/requests/preview"
-      );
-    },
-    { timeout: PREVIEW_RESPONSE_TIMEOUT_MS },
-  );
-  await dialog.getByRole("button", { name: "dry-run 실행" }).click();
+          "/api/proxy/v1/ops/pipeline/requests/preview",
+      { timeout: 3_000 },
+    );
+    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
+    previewResponse = await pending;
+  }).toPass({ timeout: PREVIEW_RESPONSE_TIMEOUT_MS });
   await assertExactKmaPreviewResponse(
-    await responsePromise,
+    previewResponse!,
     previewBody(
       buildKmaRequest(
         syncScope.slice("external_system:".length),
