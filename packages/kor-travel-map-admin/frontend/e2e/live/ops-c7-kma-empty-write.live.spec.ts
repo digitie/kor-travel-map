@@ -85,10 +85,16 @@ async function previewEmptyRequestFromUi(
   // [UI follow-up 후보: catalog 도착 시 사용자 입력을 리셋하지 않도록 폼 안정화]
   await expect(async () => {
     await dialog.getByLabel("provider").fill(KMA_PROVIDER);
-    await expect(dialog.getByLabel("dataset_key")).toBeEnabled({ timeout: 1_500 });
-  }).toPass({ timeout: 20_000 });
-  await dialog.getByLabel("dataset_key").fill(KMA_DATASET_KEY);
-  await dialog.getByLabel("sync_scope (선택)").fill(syncScope);
+    await expect(dialog.getByLabel("dataset_key")).toBeEnabled({ timeout: 1_000 });
+    await dialog.getByLabel("dataset_key").fill(KMA_DATASET_KEY);
+    await expect(dialog.getByLabel("sync_scope (선택)")).toBeEnabled({ timeout: 1_000 });
+    await dialog.getByLabel("sync_scope (선택)").fill(syncScope);
+    // 3개 입력이 catalog 비동기 로드 re-render로 리셋되지 않고 모두 반영됐는지 값으로 확정한다
+    // (provider만 고정하면 dataset/sync_scope가 뒤이어 리셋돼 dry-run이 preview POST 미발사).
+    await expect(dialog.getByLabel("provider")).toHaveValue(KMA_PROVIDER, { timeout: 1_000 });
+    await expect(dialog.getByLabel("dataset_key")).toHaveValue(KMA_DATASET_KEY, { timeout: 1_000 });
+    await expect(dialog.getByLabel("sync_scope (선택)")).toHaveValue(syncScope, { timeout: 1_000 });
+  }).toPass({ timeout: 25_000 });
   const responsePromise = page.waitForResponse(
     (response) => {
       return (
