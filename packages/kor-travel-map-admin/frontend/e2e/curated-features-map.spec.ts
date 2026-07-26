@@ -4,6 +4,7 @@ import type {
   PublicCurationCollection,
   PublicCurationItem,
 } from "../src/api/public-curations";
+import { expectDetailPanelAboveScaleControl } from "./map-control-assertions";
 
 const FEATURE_ID = "python-visitkorea-api::visitkorea_areas::palace-1";
 
@@ -198,6 +199,9 @@ test.describe("/curated-features", () => {
     await expect(membership.getByText("metadata", { exact: true })).toHaveCount(0);
     await expect(membership).not.toContainText("mcst::tourism-100::2023-palace");
     await expect(membership).not.toContainText("e2e-membership-metadata");
+    await expect(detail).not.toHaveClass(/bottom-24/);
+    await page.getByRole("tab", { name: "지도" }).click();
+    await expectDetailPanelAboveScaleControl(page, "curation-group-detail");
   });
 
   test("collection 필터 조회 실패를 빈 필터처럼 숨기지 않는다", async ({ page }) => {

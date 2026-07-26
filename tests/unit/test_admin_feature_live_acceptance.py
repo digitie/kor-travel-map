@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -32,6 +33,21 @@ _SPEC = (
 )
 _C7_RUNNER = _ROOT / "scripts" / "run-c7-prod-live-e2e.sh"
 
+_ORIGIN_EXECUTION = {
+    "api_image_id": "sha256:" + "1" * 64,
+    "compatible_pair_manifest_sha256": "2" * 64,
+    "host_attestation_sha256": "3" * 64,
+    "playwright_image_id": "sha256:" + "4" * 64,
+    "source_commit": "5" * 40,
+}
+_RECOVERY_EXECUTION = {
+    "api_image_id": "sha256:" + "6" * 64,
+    "compatible_pair_manifest_sha256": "7" * 64,
+    "host_attestation_sha256": "8" * 64,
+    "playwright_image_id": "sha256:" + "9" * 64,
+    "source_commit": "a" * 40,
+}
+
 
 def _load_script_module(name: str, path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(
@@ -50,6 +66,275 @@ _SUPERVISOR_MODULE = _load_script_module(
     "admin_feature_live_supervisor",
     _SUPERVISOR,
 )
+
+
+def _execution_args(path: Path, identity: dict[str, str]) -> SimpleNamespace:
+    return SimpleNamespace(
+        api_image_id=identity["api_image_id"],
+        compatible_pair_sha256=identity["compatible_pair_manifest_sha256"],
+        host_attestation_sha256=identity["host_attestation_sha256"],
+        path=path,
+        playwright_image_id=identity["playwright_image_id"],
+        source_commit=identity["source_commit"],
+    )
+
+
+def test_blocked_v3_records_execution_identity() -> None:
+    payload = _STATE_MODULE._blocked_payload(  # noqa: SLF001
+        "live-20260726010101-abcdef123456",
+        0,
+        "browser-running",
+        "blocked",
+        _ORIGIN_EXECUTION,
+    )
+
+    assert set(payload) == {
+        "execution",
+        "owned_feature_ids",
+        "phase",
+        "recorded_at",
+        "recovery_attempt",
+        "run_id",
+        "status",
+        "version",
+    }
+    assert payload["version"] == 3
+    assert payload["execution"] == _ORIGIN_EXECUTION
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("phase", "invalid phase"),
+        ("recorded_at", "not-a-timestamp"),
+        ("status", "complete"),
+    ],
+)
+def test_blocked_v3_rejects_malformed_control_fields(
+    field: str,
+    value: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    payload = _STATE_MODULE._blocked_payload(  # noqa: SLF001
+        "live-20260726010101-abcdef123456",
+        0,
+        "browser-running",
+        "blocked",
+        _ORIGIN_EXECUTION,
+    )
+    payload[field] = value
+    monkeypatch.setattr(_STATE_MODULE, "_read_root_json", lambda _path: payload)
+
+    with pytest.raises(ValueError, match="invalid BLOCKED state"):
+        _STATE_MODULE._validated_blocked(tmp_path / "BLOCKED.json")  # noqa: SLF001
+
+
+def test_legacy_blocked_v2_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    payload = _STATE_MODULE._blocked_payload(  # noqa: SLF001
+        "live-20260726010101-abcdef123456",
+        0,
+        "browser-running",
+        "blocked",
+        _ORIGIN_EXECUTION,
+    )
+    payload["version"] = 2
+    payload.pop("execution")
+    monkeypatch.setattr(_STATE_MODULE, "_read_root_json", lambda _path: payload)
+
+    with pytest.raises(ValueError, match="invalid BLOCKED state"):
+        _STATE_MODULE._validated_blocked(tmp_path / "BLOCKED.json")  # noqa: SLF001
+
+
+def test_write_blocked_rejects_execution_identity_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    blocked_path = tmp_path / "BLOCKED.json"
+    blocked_path.touch()
+    blocked = _STATE_MODULE._blocked_payload(  # noqa: SLF001
+        "live-20260726010101-abcdef123456",
+        2,
+        "recovery-running",
+        "blocked",
+        _ORIGIN_EXECUTION,
+    )
+    monkeypatch.setattr(_STATE_MODULE, "_validated_blocked", lambda _path: blocked)
+    args = _execution_args(blocked_path, _RECOVERY_EXECUTION)
+    args.phase = "recovery-failed"
+    args.recovery_attempt = 2
+    args.run_id = blocked["run_id"]
+    args.status = "blocked"
+
+    with pytest.raises(ValueError, match="blocked identity changed"):
+        _STATE_MODULE._write_blocked(args)  # noqa: SLF001
+
+
+def test_bash_pending_term_observes_disarmed_signal_guard() -> None:
+    subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail; RUN_ID=owned; blocked=present; "
+            "finish_signal() { [[ -z \"$RUN_ID\" ]] || blocked=recreated; }; "
+            "trap finish_signal TERM; RUN_ID=\"\"; "
+            "bash -c 'kill -TERM \"$PPID\"'; [[ \"$blocked\" == present ]]",
+        ],
+        check=True,
+    )
+
+
+def test_recovery_requires_and_preserves_exact_execution_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    blocked = _STATE_MODULE._blocked_payload(  # noqa: SLF001
+        "live-20260726010101-abcdef123456",
+        2,
+        "test-failed-restored",
+        "blocked",
+        _ORIGIN_EXECUTION,
+    )
+    written: dict[str, object] = {}
+    monkeypatch.setattr(
+        _STATE_MODULE,
+        "_validated_blocked",
+        lambda _path: blocked,
+    )
+    monkeypatch.setattr(
+        _STATE_MODULE,
+        "_atomic_write",
+        lambda path, payload: written.update(path=path, payload=payload),
+    )
+
+    _STATE_MODULE._begin_recovery(  # noqa: SLF001
+        _execution_args(tmp_path / "BLOCKED.json", _ORIGIN_EXECUTION)
+    )
+
+    assert written["path"] == tmp_path / "BLOCKED.json"
+    recovered = written["payload"]
+    assert isinstance(recovered, dict)
+    assert recovered["execution"] == _ORIGIN_EXECUTION
+    assert recovered["recovery_attempt"] == 3
+    assert recovered["phase"] == "recovery_claimed"
+
+
+def test_recovery_rejects_execution_identity_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    blocked = _STATE_MODULE._blocked_payload(  # noqa: SLF001
+        "live-20260726010101-abcdef123456",
+        2,
+        "test-failed-restored",
+        "blocked",
+        _ORIGIN_EXECUTION,
+    )
+    monkeypatch.setattr(_STATE_MODULE, "_validated_blocked", lambda _path: blocked)
+
+    with pytest.raises(ValueError, match="recovery execution identity changed"):
+        _STATE_MODULE._begin_recovery(  # noqa: SLF001
+            _execution_args(tmp_path / "BLOCKED.json", _RECOVERY_EXECUTION)
+        )
+
+
+def test_result_v3_durably_preserves_execution_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_id = "live-20260726010101-abcdef123456"
+    blocked_path = tmp_path / "BLOCKED.json"
+    blocked = _STATE_MODULE._blocked_payload(  # noqa: SLF001
+        run_id,
+        3,
+        "recovery-running",
+        "blocked",
+        _ORIGIN_EXECUTION,
+    )
+    written: dict[str, object] = {}
+    monkeypatch.setattr(
+        _STATE_MODULE,
+        "_validated_blocked",
+        lambda path: blocked if path == blocked_path else pytest.fail("wrong BLOCKED path"),
+    )
+    monkeypatch.setattr(
+        _STATE_MODULE,
+        "_atomic_write",
+        lambda path, payload: written.update(path=path, payload=payload),
+    )
+    args = _execution_args(blocked_path, _ORIGIN_EXECUTION)
+    args.blocked_path = blocked_path
+    args.path = tmp_path / "result.json"
+    args.phase = "recovered"
+    args.recovery_attempt = 3
+    args.run_id = run_id
+    args.status = "complete"
+
+    _STATE_MODULE._write_result(args)  # noqa: SLF001
+
+    assert written["path"] == tmp_path / "result.json"
+    result = written["payload"]
+    assert isinstance(result, dict)
+    assert set(result) == {
+        "compatible_pair_manifest_sha256",
+        "execution_identity_sha256",
+        "host_attestation_sha256",
+        "owned_feature_id_sha256",
+        "phase",
+        "recorded_at",
+        "recovery_attempt",
+        "run_id_sha256",
+        "status",
+        "version",
+    }
+    assert result["version"] == 3
+    assert result["execution_identity_sha256"] == (
+        _STATE_MODULE._execution_identity_sha256(_ORIGIN_EXECUTION)  # noqa: SLF001
+    )
+    assert result["compatible_pair_manifest_sha256"] == "2" * 64
+    assert result["host_attestation_sha256"] == "3" * 64
+
+
+def test_result_rejects_execution_identity_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_id = "live-20260726010101-abcdef123456"
+    blocked_path = tmp_path / "BLOCKED.json"
+    blocked = _STATE_MODULE._blocked_payload(  # noqa: SLF001
+        run_id,
+        3,
+        "recovery-running",
+        "blocked",
+        _ORIGIN_EXECUTION,
+    )
+    monkeypatch.setattr(_STATE_MODULE, "_validated_blocked", lambda _path: blocked)
+    args = _execution_args(blocked_path, _RECOVERY_EXECUTION)
+    args.blocked_path = blocked_path
+    args.path = tmp_path / "result.json"
+    args.phase = "recovered"
+    args.recovery_attempt = 3
+    args.run_id = run_id
+    args.status = "complete"
+
+    with pytest.raises(ValueError, match="result does not match BLOCKED state"):
+        _STATE_MODULE._write_result(args)  # noqa: SLF001
+
+
+def test_runner_disarms_signal_guard_before_blocked_clear() -> None:
+    runner = _RUNNER.read_text()
+    recover = runner[runner.index("recover_run() {") : runner.index("run_new() {")]
+    run_new = runner[runner.index("run_new() {") :]
+    for body in (recover, run_new):
+        assert body.index("  RUN_ID=\"\"") < body.index(
+            "  state_helper clear-blocked --path \"$BLOCKED_FILE\""
+        )
+    assert '    --blocked-path "$BLOCKED_FILE" \\' in runner
+    assert runner.count('"${EXECUTION_IDENTITY_ARGS[@]}"') == 3
+    assert _STATE.read_text().count("_add_execution_identity_arguments(") == 4
 
 
 def test_targeted_lane_is_not_part_of_strict_c7_runner() -> None:

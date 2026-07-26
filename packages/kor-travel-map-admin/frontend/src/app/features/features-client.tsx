@@ -27,6 +27,7 @@ import {
   ADMIN_FEATURE_STATUSES,
   FEATURE_CLUSTER_MAX_ZOOM,
   FEATURE_KINDS,
+  isAdminFeatureClusterZoom,
   useAdminFeatureClustersInBbox,
   useAdminFeatureDetail,
   useAdminFeaturesInBbox,
@@ -116,7 +117,7 @@ function FeatureDetailPanel({
 
   return (
     <Card
-      className="absolute right-3 top-20 z-10 max-h-[calc(100%-5.75rem)] w-[min(24rem,calc(100%-1.5rem))] overflow-auto shadow-lg"
+      className="absolute bottom-24 right-3 top-20 z-10 w-[min(24rem,calc(100%-1.5rem))] overflow-auto shadow-lg"
       data-testid="feature-detail-panel"
     >
       <CardHeader className="grid-cols-[1fr_auto]">
@@ -284,7 +285,7 @@ export function FeaturesClient() {
 
   // 저zoom(≤13)에선 개별 feature를 tile로 대량 조회하지 않고 서버측 region 클러스터를
   // 쓴다(#649). 개별 fetch와 클러스터 fetch는 zoom에 따라 상호 배타적으로 enable된다.
-  const clusterMode = viewport.zoom <= FEATURE_CLUSTER_MAX_ZOOM;
+  const clusterMode = isAdminFeatureClusterZoom(viewport.zoom);
   const featuresQuery = useAdminFeaturesInBbox(
     {
       ...(bbox ?? { min_lon: 0, min_lat: 0, max_lon: 0, max_lat: 0 }),

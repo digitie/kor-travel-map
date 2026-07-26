@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { expectDetailPanelAboveScaleControl } from "./map-control-assertions";
 import { mockOpsDatasetCatalog } from "./ops-dataset-catalog-mock";
 import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
@@ -768,6 +769,7 @@ test.describe("/features map interactions", () => {
     await page.getByRole("tab", { name: "지도" }).click();
     const panel = page.getByTestId("feature-detail-panel");
     await expect(panel).toBeVisible();
+    await expectDetailPanelAboveScaleControl(page, "feature-detail-panel");
     await expect(panel.getByText("선택 Feature")).toBeVisible();
     await expect(panel.getByText(FEATURE_ID)).toBeVisible();
 

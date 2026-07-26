@@ -10,13 +10,15 @@ import os
 import re
 import stat
 from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
 _RUN_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
 _COMMIT_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
+_IMAGE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^sha256:[0-9a-f]{64}$")
+_PHASE_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 _TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 _C7_MODULE_RELATIVE: Final[str] = "scripts/lib/c7_prod_attestation.py"
 _C7_BASE: Final[Path] = Path("/usr/local/lib/kor-travel-map/c7-runner")
@@ -59,6 +61,16 @@ def _sha256(value: str) -> str:
 
 def _recorded_at() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _is_utc_timestamp(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() == timedelta(0)
 
 
 def _fsync_directory(path: Path) -> None:
@@ -124,17 +136,80 @@ def _read_root_json(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _blocked_payload(run_id: str, attempt: int, phase: str, status: str) -> dict[str, Any]:
-    if _RUN_ID_RE.fullmatch(run_id) is None or attempt < 0:
+def _validated_execution_identity(payload: Any) -> dict[str, str]:
+    if (
+        not isinstance(payload, dict)
+        or set(payload)
+        != {
+            "api_image_id",
+            "compatible_pair_manifest_sha256",
+            "host_attestation_sha256",
+            "playwright_image_id",
+            "source_commit",
+        }
+        or not isinstance(payload.get("api_image_id"), str)
+        or _IMAGE_ID_RE.fullmatch(payload["api_image_id"]) is None
+        or not isinstance(payload.get("compatible_pair_manifest_sha256"), str)
+        or _SHA256_RE.fullmatch(payload["compatible_pair_manifest_sha256"]) is None
+        or not isinstance(payload.get("host_attestation_sha256"), str)
+        or _SHA256_RE.fullmatch(payload["host_attestation_sha256"]) is None
+        or not isinstance(payload.get("playwright_image_id"), str)
+        or _IMAGE_ID_RE.fullmatch(payload["playwright_image_id"]) is None
+        or not isinstance(payload.get("source_commit"), str)
+        or _COMMIT_RE.fullmatch(payload["source_commit"]) is None
+    ):
+        raise ValueError("invalid execution identity")
+    return {
+        "api_image_id": payload["api_image_id"],
+        "compatible_pair_manifest_sha256": payload["compatible_pair_manifest_sha256"],
+        "host_attestation_sha256": payload["host_attestation_sha256"],
+        "playwright_image_id": payload["playwright_image_id"],
+        "source_commit": payload["source_commit"],
+    }
+
+
+def _execution_identity_from_args(args: argparse.Namespace) -> dict[str, str]:
+    return _validated_execution_identity(
+        {
+            "api_image_id": args.api_image_id,
+            "compatible_pair_manifest_sha256": args.compatible_pair_sha256,
+            "host_attestation_sha256": args.host_attestation_sha256,
+            "playwright_image_id": args.playwright_image_id,
+            "source_commit": args.source_commit,
+        }
+    )
+
+
+def _execution_identity_sha256(execution: dict[str, str]) -> str:
+    canonical = json.dumps(
+        _validated_execution_identity(execution), separators=(",", ":"), sort_keys=True
+    )
+    return _sha256(canonical)
+
+
+def _blocked_payload(
+    run_id: str,
+    attempt: int,
+    phase: str,
+    status: str,
+    execution: dict[str, str],
+) -> dict[str, Any]:
+    if (
+        _RUN_ID_RE.fullmatch(run_id) is None
+        or attempt < 0
+        or _PHASE_RE.fullmatch(phase) is None
+        or status != "blocked"
+    ):
         raise ValueError("invalid blocked identity")
     return {
+        "execution": _validated_execution_identity(execution),
         "owned_feature_ids": _owned_ids(run_id),
         "phase": phase,
         "recorded_at": _recorded_at(),
         "recovery_attempt": attempt,
         "run_id": run_id,
         "status": status,
-        "version": 2,
+        "version": 3,
     }
 
 
@@ -143,6 +218,7 @@ def _validated_blocked(path: Path) -> dict[str, Any]:
     if (
         set(payload)
         != {
+            "execution",
             "owned_feature_ids",
             "phase",
             "recorded_at",
@@ -151,42 +227,64 @@ def _validated_blocked(path: Path) -> dict[str, Any]:
             "status",
             "version",
         }
-        or payload.get("version") != 2
+        or payload.get("version") != 3
         or not isinstance(payload.get("run_id"), str)
         or _RUN_ID_RE.fullmatch(payload["run_id"]) is None
         or payload.get("owned_feature_ids") != _owned_ids(payload["run_id"])
         or type(payload.get("recovery_attempt")) is not int
         or payload["recovery_attempt"] < 0
         or not isinstance(payload.get("phase"), str)
-        or not isinstance(payload.get("status"), str)
-        or not isinstance(payload.get("recorded_at"), str)
+        or _PHASE_RE.fullmatch(payload["phase"]) is None
+        or payload.get("status") != "blocked"
+        or not _is_utc_timestamp(payload.get("recorded_at"))
     ):
         raise ValueError("invalid BLOCKED state")
+    try:
+        payload["execution"] = _validated_execution_identity(payload["execution"])
+    except ValueError:
+        raise ValueError("invalid BLOCKED state") from None
     return payload
 
 
 def _write_blocked(args: argparse.Namespace) -> None:
+    execution = _execution_identity_from_args(args)
     if args.path.exists():
         current = _validated_blocked(args.path)
         if (
             current["run_id"] != args.run_id
             or current["recovery_attempt"] != args.recovery_attempt
+            or current["execution"] != execution
         ):
             raise ValueError("blocked identity changed")
     elif args.recovery_attempt != 0:
         raise ValueError("initial recovery attempt must be zero")
     _atomic_write(
         args.path,
-        _blocked_payload(args.run_id, args.recovery_attempt, args.phase, args.status),
+        _blocked_payload(
+            args.run_id,
+            args.recovery_attempt,
+            args.phase,
+            args.status,
+            execution,
+        ),
     )
 
 
 def _begin_recovery(args: argparse.Namespace) -> None:
     current = _validated_blocked(args.path)
+    execution = _execution_identity_from_args(args)
+    if current["execution"] != execution:
+        raise ValueError("recovery execution identity changed")
     attempt = int(current["recovery_attempt"]) + 1
     _atomic_write(
         args.path,
-        _blocked_payload(current["run_id"], attempt, "recovery_claimed", "blocked"),
+        _blocked_payload(
+            current["run_id"],
+            attempt,
+            "recovery_claimed",
+            "blocked",
+            execution,
+        ),
     )
     print(current["run_id"])
     print(attempt)
@@ -199,25 +297,35 @@ def _clear_blocked(args: argparse.Namespace) -> None:
 
 
 def _write_result(args: argparse.Namespace) -> None:
+    execution = _execution_identity_from_args(args)
     if (
         _RUN_ID_RE.fullmatch(args.run_id) is None
         or args.recovery_attempt < 0
-        or _SHA256_RE.fullmatch(args.compatible_pair_sha256) is None
-        or _SHA256_RE.fullmatch(args.host_attestation_sha256) is None
+        or _TOKEN_RE.fullmatch(args.phase) is None
+        or args.status != "complete"
     ):
         raise ValueError("invalid result identity")
+    blocked = _validated_blocked(args.blocked_path)
+    if (
+        blocked["run_id"] != args.run_id
+        or blocked["recovery_attempt"] != args.recovery_attempt
+        or blocked["execution"] != execution
+        or blocked["status"] != "blocked"
+    ):
+        raise ValueError("result does not match BLOCKED state")
     _atomic_write(
         args.path,
         {
-            "compatible_pair_manifest_sha256": args.compatible_pair_sha256,
-            "host_attestation_sha256": args.host_attestation_sha256,
+            "compatible_pair_manifest_sha256": execution["compatible_pair_manifest_sha256"],
+            "execution_identity_sha256": _execution_identity_sha256(execution),
+            "host_attestation_sha256": execution["host_attestation_sha256"],
             "owned_feature_id_sha256": [_sha256(value) for value in _owned_ids(args.run_id)],
             "phase": args.phase,
             "recorded_at": _recorded_at(),
             "recovery_attempt": args.recovery_attempt,
             "run_id_sha256": _sha256(args.run_id),
             "status": args.status,
-            "version": 2,
+            "version": 3,
         },
     )
 
@@ -804,6 +912,14 @@ def _path(value: str) -> Path:
     return Path(value)
 
 
+def _add_execution_identity_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--api-image-id", required=True)
+    parser.add_argument("--playwright-image-id", required=True)
+    parser.add_argument("--compatible-pair-sha256", required=True)
+    parser.add_argument("--host-attestation-sha256", required=True)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="action", required=True)
@@ -814,10 +930,12 @@ def _parser() -> argparse.ArgumentParser:
     blocked.add_argument("--recovery-attempt", type=int, required=True)
     blocked.add_argument("--phase", required=True)
     blocked.add_argument("--status", required=True)
+    _add_execution_identity_arguments(blocked)
     blocked.set_defaults(handler=_write_blocked)
 
     recovery = subparsers.add_parser("begin-recovery")
     recovery.add_argument("--path", type=_path, required=True)
+    _add_execution_identity_arguments(recovery)
     recovery.set_defaults(handler=_begin_recovery)
 
     clear = subparsers.add_parser("clear-blocked")
@@ -826,12 +944,12 @@ def _parser() -> argparse.ArgumentParser:
 
     result = subparsers.add_parser("write-result")
     result.add_argument("--path", type=_path, required=True)
+    result.add_argument("--blocked-path", type=_path, required=True)
     result.add_argument("--run-id", required=True)
     result.add_argument("--recovery-attempt", type=int, required=True)
     result.add_argument("--phase", required=True)
     result.add_argument("--status", required=True)
-    result.add_argument("--compatible-pair-sha256", required=True)
-    result.add_argument("--host-attestation-sha256", required=True)
+    _add_execution_identity_arguments(result)
     result.set_defaults(handler=_write_result)
 
     lifecycle = subparsers.add_parser("write-lifecycle")

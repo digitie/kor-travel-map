@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  adminFeaturesInBboxQueryKey,
+  adminFeatureRequestZoom,
   adminFeaturesInBoundsPath,
   buildFeatureTiles,
   deleteAdminFeature,
   fetchAdminFeatureCorrectionBasis,
   featureSearchPath,
   featureViewportQueryKey,
+  isAdminFeatureClusterZoom,
   patchAdminFeature,
   type FeaturesInBboxParams,
 } from "./features";
@@ -75,6 +78,55 @@ describe("feature map tile selection", () => {
     // items 모드에서도 zoom을 항상 전송한다(서버는 zoom>=14를 items로 해석 —
     // _resolve_admin_cluster_unit). 소비자가 요청의 zoom 문맥을 관측 가능해야 한다.
     expect(path).toContain("zoom=14");
+  });
+
+  it("items query key는 요청과 동일한 정수 zoom·raw bbox를 구분한다", () => {
+    const options = { clustered: false };
+    const zoom14Params = {
+      ...params({ zoom: 14.1 }),
+      zoom: 14.1,
+    };
+    const zoom14 = adminFeaturesInBboxQueryKey(zoom14Params, options);
+    const sameIntegerZoom = adminFeaturesInBboxQueryKey(
+      { ...zoom14Params, zoom: 14.9 },
+      options,
+    );
+    const zoom15 = adminFeaturesInBboxQueryKey(
+      { ...zoom14Params, zoom: 15 },
+      options,
+    );
+    const shiftedBbox = adminFeaturesInBboxQueryKey(
+      { ...zoom14Params, min_lon: zoom14Params.min_lon + 0.00001 },
+      options,
+    );
+
+    expect(zoom14).toEqual(sameIntegerZoom);
+    expect(zoom14).not.toEqual(zoom15);
+    expect(zoom14).not.toEqual(shiftedBbox);
+    expect(zoom14[6]).toBe(14);
+  });
+
+  it("query key는 delimiter가 포함된 filter 배열의 HTTP identity를 보존한다", () => {
+    const options = { clustered: false };
+    const baseParams = { ...params({ zoom: 14 }), zoom: 14 };
+    const singleProvider = adminFeaturesInBboxQueryKey(
+      { ...baseParams, provider: ["a,b"] },
+      options,
+    );
+    const repeatedProviders = adminFeaturesInBboxQueryKey(
+      { ...baseParams, provider: ["a", "b"] },
+      options,
+    );
+
+    expect(singleProvider).not.toEqual(repeatedProviders);
+    expect(singleProvider[8]).toEqual(["a,b"]);
+    expect(repeatedProviders[8]).toEqual(["a", "b"]);
+  });
+
+  it("13.x zoom도 서버와 동일하게 cluster 모드로 판정한다", () => {
+    expect(adminFeatureRequestZoom(13.9)).toBe(13);
+    expect(isAdminFeatureClusterZoom(13.9)).toBe(true);
+    expect(isAdminFeatureClusterZoom(14)).toBe(false);
   });
 
   it("admin cluster viewport는 zoom을 보내고 geometry payload는 요청하지 않는다", () => {

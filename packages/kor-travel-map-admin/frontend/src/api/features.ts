@@ -514,6 +514,14 @@ export interface AdminFeaturesInBoundsParams extends FeatureClustersParams {
   includeGeometry?: boolean;
 }
 
+export function adminFeatureRequestZoom(zoom: number): number {
+  return Math.floor(zoom);
+}
+
+export function isAdminFeatureClusterZoom(zoom: number): boolean {
+  return adminFeatureRequestZoom(zoom) <= FEATURE_CLUSTER_MAX_ZOOM;
+}
+
 export function adminFeaturesInBoundsPath(
   params: AdminFeaturesInBoundsParams,
   options: { clustered: boolean },
@@ -530,7 +538,7 @@ export function adminFeaturesInBoundsPath(
     // items 모드에서 zoom을 생략하면 소비자(예: live acceptance의 in-bounds
     // predicate)가 요청의 zoom 문맥을 알 수 없다 — cluster 모드에서만 보내던
     // 기존 비대칭은 #779의 잔재(리뷰 확인: 서버는 items에서도 zoom 수용).
-    zoom: Math.floor(params.zoom),
+    zoom: adminFeatureRequestZoom(params.zoom),
     max_items: 2000,
     include_geometry: options.clustered ? undefined : params.includeGeometry,
   });
@@ -547,22 +555,30 @@ async function fetchAdminFeaturesInBounds(
   );
 }
 
+export function adminFeaturesInBboxQueryKey(
+  params: AdminFeaturesInBoundsParams,
+  options: { clustered: boolean },
+) {
+  return [
+    "admin-features",
+    options.clustered ? "clusters" : "items",
+    params.min_lon,
+    params.min_lat,
+    params.max_lon,
+    params.max_lat,
+    adminFeatureRequestZoom(params.zoom),
+    params.kinds ?? [],
+    params.provider ?? [],
+    params.statuses ?? [],
+    options.clustered ? false : (params.includeGeometry ?? false),
+  ] as const;
+}
+
 export function useAdminFeaturesInBbox(
   params: AdminFeaturesInBoundsParams,
   options?: { enabled?: boolean },
 ) {
-  const key = [
-    "admin-features",
-    "items",
-    params.min_lon.toFixed(4),
-    params.min_lat.toFixed(4),
-    params.max_lon.toFixed(4),
-    params.max_lat.toFixed(4),
-    params.kinds?.join(",") ?? "",
-    params.provider?.join(",") ?? "",
-    params.statuses?.join(",") ?? "",
-    params.includeGeometry ?? false,
-  ] as const;
+  const key = adminFeaturesInBboxQueryKey(params, { clustered: false });
   return useQuery<AdminFeaturesInBoundsResponse, Error>({
     queryKey: key,
     queryFn: ({ signal }) =>
@@ -577,19 +593,7 @@ export function useAdminFeatureClustersInBbox(
   params: AdminFeaturesInBoundsParams,
   options?: { enabled?: boolean },
 ) {
-  const zoom = Math.floor(params.zoom);
-  const key = [
-    "admin-features",
-    "clusters",
-    params.min_lon.toFixed(2),
-    params.min_lat.toFixed(2),
-    params.max_lon.toFixed(2),
-    params.max_lat.toFixed(2),
-    zoom,
-    params.kinds?.join(",") ?? "",
-    params.provider?.join(",") ?? "",
-    params.statuses?.join(",") ?? "",
-  ] as const;
+  const key = adminFeaturesInBboxQueryKey(params, { clustered: true });
   return useQuery<AdminFeaturesInBoundsResponse, Error>({
     queryKey: key,
     queryFn: ({ signal }) =>
