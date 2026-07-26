@@ -586,6 +586,8 @@ export function FeaturesClient() {
                 apiKey={VWORLD_KEY}
                 center={[viewport.lon, viewport.lat]}
                 className="absolute inset-0 h-full w-full"
+                navigation
+                scale
                 testId="map-canvas-container"
                 zoom={viewport.zoom}
                 onLoad={updateViewportFromMap}
