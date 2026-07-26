@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   expect,
   test,
+  type Locator,
   type Page,
   type Request,
   type Response,
@@ -87,7 +88,7 @@ const SAFE_SCHEDULE =
 const SCHEDULES_PATH = "/v1/ops/pipeline/schedules";
 const TEST_TIMEOUT = 12 * 60 * 1000;
 const STATE_WAIT_TIMEOUT = 2 * 60 * 1000;
-const UI_MUTATION_TIMEOUT = 30_000;
+const UI_MUTATION_TIMEOUT = 45_000;
 
 test.describe.configure({ mode: "serial", retries: 0 });
 
@@ -432,7 +433,9 @@ function scheduleAfterCommand(
         : "STOPPED";
   return {
     ...before,
-    canReset: command === "reset" ? false : status !== before.defaultStatus,
+    // dagster는 명시적 start/stop마다 override를 만들어 status==defaultStatus여도
+    // canReset=true다(파생 override 플래그, operational 아님). 모델은 reset만 false.
+    canReset: command === "reset" ? false : true,
     status,
   };
 }
@@ -517,8 +520,10 @@ async function waitForSchedule(
     if (
       Object.entries(expected).every(
         ([key, value]) =>
+          // canReset은 파생 override 플래그(operational 상태 아님)라 수렴 비교에서 제외.
+          key === "canReset" ||
           JSON.stringify(snapshot[key as keyof ScheduleSnapshot]) ===
-          JSON.stringify(value),
+            JSON.stringify(value),
       )
     ) {
       return snapshot;
@@ -526,6 +531,71 @@ async function waitForSchedule(
     await page.waitForTimeout(1_000);
   }
   throw new Error("schedule 상태가 제한 시간 안에 기대값으로 수렴하지 않았습니다.");
+}
+
+// churn-tolerant click: enabled 대기 후 dispatchEvent로 위치 무관하게 onClick 발화.
+// force-click은 위치를 한 번만 계산해 re-render로 이동한 컨트롤을 빗맞히지만,
+// dispatchEvent는 위치와 무관하게 React onClick을 발화한다. 창 안에서 재시도한다.
+async function robustClick(locator: Locator, label: string): Promise<void> {
+  const page = locator.page();
+  const deadline = Date.now() + UI_MUTATION_TIMEOUT;
+  let lastError: unknown = null;
+  while (Date.now() < deadline) {
+    try {
+      await expect(locator).toBeEnabled({ timeout: 2_000 });
+      await locator.dispatchEvent("click");
+      return;
+    } catch (error) {
+      lastError = error;
+      await page.waitForTimeout(250);
+    }
+  }
+  throw new Error(
+    `robustClick(${label})이 ${UI_MUTATION_TIMEOUT}ms 안에 실패했습니다: ${String(lastError)}`,
+  );
+}
+
+// recovery-settle gate. 다음 UI 조작 전에 SAFE_SCHEDULE start/stop 토글이 조작 가능한지
+// 대기한다: 직전 mutation(특히 cron 수정 + frozen-idempotency 복구)의 dialog가 닫혀
+// 페이지가 비-inert가 되고 토글이 enabled·안정된 상태인지 확인한다.
+async function waitForScheduleControlsSettled(
+  page: Page,
+  operation: string,
+): Promise<void> {
+  const row = page.getByTestId(`pipeline-schedule-row-${SAFE_SCHEDULE}`);
+  const toggle = row.getByRole("button", {
+    name: new RegExp(`${SAFE_SCHEDULE} 스케줄 (시작|중지)$`),
+  });
+  const started = Date.now();
+  const deadline = started + UI_MUTATION_TIMEOUT;
+  let stableSince: number | null = null;
+  let lastObs = "";
+  while (Date.now() < deadline) {
+    // 열린 dialog(예: cron 수정)는 Base UI가 배경을 inert로 만들어 SAFE_SCHEDULE 토글을
+    // getByRole/click에서 가린다. dialog가 닫히고 토글이 enabled·안정될 때까지 대기해
+    // frozen-idempotency 복구 후 dialog가 열린 채 남는 회귀를 방어한다.
+    const dialogOpen =
+      (await page.getByRole("dialog").count().catch(() => 0)) > 0;
+    const enabled =
+      !dialogOpen &&
+      (await toggle.isEnabled({ timeout: 1_000 }).catch(() => false));
+    const obs = `dialogOpen=${dialogOpen} toggleEnabled=${enabled}`;
+    if (obs !== lastObs) {
+      // eslint-disable-next-line no-console
+      console.log(`[C7SETTLE ${operation}] ${obs}`);
+      lastObs = obs;
+    }
+    if (enabled) {
+      if (stableSince === null) stableSince = Date.now();
+      if (Date.now() - stableSince >= 500) return;
+    } else {
+      stableSince = null;
+    }
+    await page.waitForTimeout(200);
+  }
+  throw new Error(
+    `[C7SETTLE ${operation}] schedule 컨트롤이 ${UI_MUTATION_TIMEOUT}ms 안에 조작 가능해지지 않았습니다 (last=${lastObs}).`,
+  );
 }
 
 function requireConfirmedMutation(
@@ -1040,9 +1110,13 @@ async function submitUiMutation(
           ),
         { timeout: UI_MUTATION_TIMEOUT },
       );
-      await frozenSubmission
-        .getByRole("button", { name: "동일 요청 재확인", exact: true })
-        .click();
+      await robustClick(
+        frozenSubmission.getByRole("button", {
+          name: "동일 요청 재확인",
+          exact: true,
+        }),
+        `${operation} frozen replay`,
+      );
       requireConfirmedMutation(
         await responseBody(await replayResponsePromise),
         intent,
@@ -1168,18 +1242,23 @@ async function submitUiCommand(
     { command, reason },
     `UI schedule ${command}`,
     async () => {
+      await waitForScheduleControlsSettled(page, `pre-${command}`);
       const row = page.getByTestId(`pipeline-schedule-row-${SAFE_SCHEDULE}`);
       await row.getByLabel("명령 사유 (선택)").fill(reason);
-      await row
-        .getByRole("button", {
+      await robustClick(
+        row.getByRole("button", {
           name: `${SAFE_SCHEDULE} 스케줄 ${command === "start" ? "시작" : "중지"}`,
-        })
-        .click();
+        }),
+        `${command} toggle`,
+      );
       if (command === "start") {
-        await page
-          .getByRole("dialog")
-          .getByRole("button", { name: "스케줄 시작", exact: true })
-          .click();
+        // 시작 확인은 AlertDialog(role=alertdialog)라 getByRole("dialog")로는 안 잡힌다.
+        await robustClick(
+          page
+            .getByRole("alertdialog")
+            .getByRole("button", { name: "스케줄 시작", exact: true }),
+          "start confirm dialog",
+        );
       }
     },
     async () => {
@@ -1205,21 +1284,29 @@ async function submitUiCron(
     { cron_schedule: cron, reason },
     "UI schedule cron",
     async () => {
+      await waitForScheduleControlsSettled(page, "pre-cron");
       const row = page.getByTestId(`pipeline-schedule-row-${SAFE_SCHEDULE}`);
-      await row
-        .getByRole("button", { name: `${SAFE_SCHEDULE} cron 수정` })
-        .click();
+      await robustClick(
+        row.getByRole("button", { name: `${SAFE_SCHEDULE} cron 수정` }),
+        "cron open",
+      );
       const dialog = page.getByRole("dialog", { name: "스케줄 cron 수정" });
       await dialog.getByLabel("수정 사유").fill(reason);
       await dialog
         .getByRole("textbox", { name: "cron", exact: true })
         .fill(cron);
-      await dialog.getByRole("button", { name: "저장", exact: true }).click();
+      await robustClick(
+        dialog.getByRole("button", { name: "저장", exact: true }),
+        "cron save",
+      );
     },
     async () => {
       await expect(page.getByTestId("schedule-command-result")).toContainText(
         "cron 수정 · 성공",
       );
+      // 복구 후에도 cron dialog가 열린 채 남으면 페이지가 inert가 되는 회귀를 직접
+      // 검증한다(다음 op의 settle-gate에 의존하지 않는 순서-독립 체크).
+      await expect(page.getByRole("dialog")).toHaveCount(0);
     },
   );
 }

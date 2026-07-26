@@ -314,6 +314,24 @@ export function SchedulePanel({
     }
   }, [highlightSchedule, scheduleItems.length]);
 
+  // cron 저장의 응답이 유실돼 frozen-idempotency 복구가 필요해지면, 열린 modal cron
+  // dialog(Base UI)가 배경 전체를 inert로 만들어 복구 alert("동일 요청 재확인")와 나머지
+  // 스케줄 컨트롤을 접근 불가로 가린다. 복구가 필요해진 순간(편집 중인 스케줄의 frozen
+  // submission 또는 recovery claim 등장) dialog를 닫아 복구 UI를 조작 가능하게 하고,
+  // submitCronUpdate/submitClearOverride/frozen replay/claim resolution 모든 복구 경로에서
+  // 페이지가 inert로 남는 회귀를 한 번에 막는다(T-ADM-C7-SCHEDCHURN).
+  useEffect(() => {
+    if (!editing) {
+      return;
+    }
+    if (
+      frozenScheduleMutation?.scheduleName === editing.name ||
+      recoveryClaim?.scheduleName === editing.name
+    ) {
+      setEditing(null);
+    }
+  }, [editing, frozenScheduleMutation, recoveryClaim]);
+
   const submitCommand = async (
     schedule: PipelineSchedule,
     command: PipelineScheduleCommand,

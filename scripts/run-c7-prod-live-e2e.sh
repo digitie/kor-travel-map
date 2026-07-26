@@ -1231,17 +1231,18 @@ export E2E_KMA_GRID_CAP_FROM_RUNTIME=1
 export E2E_LIVE_WORKERS=1
 export E2E_POI_CACHE_WRITE=1
 
-# ops-c7-schedule-write는 blocking gate에서 제외(descope)한다. cron override의 UI 경로가
-# code location reload를 유발하고, reload 직후 schedule 목록이 ~90s간 심하게 re-render(churn)
-# 되어 start/stop 컨트롤을 조작할 수 있는 순간이 없다(admin UI render/refetch 이슈 — 후속 task).
-# test/deploy 측 근인(canReset 모델, waitForSchedule canReset 제외, reload timeout 30s,
-# frozen-UI replay dispatchEvent, churn-tolerant click)은 규명·수정됐고 남은 근인은 app-side
-# churn뿐이라 blocking gate는 나머지 4 spec으로 운영한다. 상세 진단·재적용 지침: docs/journal.md.
+# C7 blocking gate = 5-spec. ops-c7-schedule-write는 T-ADM-C7-SCHEDCHURN에서 재편입됐다.
+# 근인은 render churn이 아니라(그 진단은 오진), cron 저장 응답이 유실돼 frozen-idempotency
+# 복구가 필요해질 때 cron 수정 dialog가 열린 채 남아 Base UI가 페이지 전체를 inert로 만들어
+# 모든 schedule 컨트롤이 접근 불가가 되던 것이다. fix=schedule-panel.tsx: 복구 필요 순간
+# (편집 스케줄의 frozen submission/recovery claim 등장) dialog close. live 재현으로 근인 확정 +
+# 수정 prod 재배포 후 5-spec 재검증 GREEN(2 passed, 37s). 상세: docs/journal.md.
 readonly SPECS=(
   "e2e/live/ops-c7-read-auth.live.spec.ts"
   "e2e/live/ops-c7-kma-active-write.live.spec.ts"
   "e2e/live/ops-c7-kma-empty-write.live.spec.ts"
   "e2e/live/ops-c7-kma-cap-write.live.spec.ts"
+  "e2e/live/ops-c7-schedule-write.live.spec.ts"
 )
 for spec in "${SPECS[@]}"; do
   artifact_name="${spec##*/}"

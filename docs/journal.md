@@ -2,6 +2,37 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-26 (claude) — C7 schedule-write 재편입: cron 복구 dialog inert 근인 수정 (T-ADM-C7-SCHEDCHURN)
+
+**결론**: 직전 엔트리의 "app-side ~90s render churn" 진단은 **오진**. live 재현(n150 prod verbose-iterate)으로 확정한
+진짜 근인 = **cron 저장의 HTTP 응답이 유실돼 frozen-idempotency 복구("동일 요청 재확인")가 필요해질 때, cron 수정
+dialog(Base UI)가 열린 채 남아 배경 전체를 inert로 만들어 복구 alert + 모든 schedule 컨트롤이 접근 불가**가 되던 것.
+DOM 계측(C7SETTLE/DOMDIAG): pre-start에서 dialogCount=1(스케줄 cron 수정) + row inert=true, 버튼 4개는 DOM에
+있으나 inert 하위트리라 getByRole/click 불가. → schedule-write는 START step에서 90s(=timeout) 막힘.
+
+**근인 규명**: reload-churn 가설을 실증 반증 — dagster `reloadRepositoryLocation` ~4s(90s 아님), 그 동안
+`repositoriesOrError`는 37 schedule 계속 populated(빈 목록/row-unmount 없음); ops-live `dagster_schedules` revision도
+coalesce(3-frame burst 후 침묵)라 90s frame stream 아님. 즉 데이터/서버/렌더 계층은 clean. spec에 C7SETTLE 진단
+게이트 + DOMDIAG(row outerHTML/버튼 접근성)를 심어 각 step 실제 컨트롤 상태를 캡처 → pre-stop/pre-cron은
+dialogOpen=false·toggle enabled인데 pre-start만 열린 cron dialog로 inert임을 확정. cron override는 webserver reload로
+**즉시 반영 안 됨**(#613 documented; daemon reload가 반영)이라 override_effective 불일치는 별개 정상 상태였음.
+
+**fix(app)**: `schedule-panel.tsx` — 편집 중인 스케줄의 frozen submission/recovery claim 등장 시 즉시 cron 수정 dialog를
+닫는 useEffect. submitCronUpdate/submitClearOverride/frozen replay/**claim resolution 모든 복구 경로** + 실사용자
+reachability(복구 alert가 backdrop 뒤에 안 갇힘)를 한 번에 커버. 초기 one-liner(retry onSuccess만 close)는 적대 리뷰어
+finding(claim-resolution sibling + real-user reachability)으로 root-scoped useEffect로 교체.
+
+**fix(spec, ops-c7-schedule-write)**: canReset 모델(`command==="reset"?false:true`) + waitForSchedule canReset 제외,
+`robustClick`(toBeEnabled 대기 + dispatchEvent — churn/위치/backdrop 무관), `waitForScheduleControlsSettled`(dialog
+닫힘 + toggle enabled 안정 대기), cron op 후 `getByRole("dialog")` toHaveCount(0) 직접 검증, 시작 확인 locator
+`getByRole("dialog")`→`getByRole("alertdialog")`(confirm은 AlertDialog). getSchedule attestation/reload timeout은
+이미 #74로 배포됨(유지).
+
+**검증**: 적대 리뷰어 2명(app fix correctness + spec/regression) 반영 후 **91b822e2(main+fix)** prod 재배포
+(`ktdctl pinvi-pair deploy --build`, 4 map runtime recreated+healthy, login 200, rollback-guarded) → verbose-iterate
+재실행 **2 passed(37s), rc=0**; 모든 C7SETTLE pre-* `dialogOpen=false toggleEnabled=true`. weather 스케줄 매 run 정확
+복원(RESTORE_OK). **schedule-write를 blocking gate에 재편입 → C7 gate 5-spec.** [[c7-recut-and-completion-push]]
+
 ## 2026-07-26 (claude) — C7 close: schedule-write descope(app-side UI churn) + 근인 6개 규명·수정
 
 **결론**: C7 prod-live gate를 **read-auth·kma-active/empty/cap-write 4-spec**로 확정(green), **ops-c7-schedule-write는
