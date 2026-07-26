@@ -3,6 +3,17 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-27 — Lane B b0 T-VN-42 지도 control·query identity·live recovery 하드닝
+
+- [x] **T-VN-42 (#846)** — `/features`·`/curated-features` 상세 패널의 bottom-right `ScaleControl`
+  비겹침 계약(공용 Playwright bounding-box assertion), live 전역 `reducedMotion` 제거 후 MapLibre
+  `moveend`까지 클릭마다 대기하는 zoom helper, items/clusters in-bounds query key를 HTTP와 동일한
+  정수 zoom·원본 bbox·명시적 mode로 통일, 서버 정수 zoom 기준과 UI cluster/items 분기 단일 함수화.
+  #840 이후 Claude Code PR(#841~#845) 재감사로 #844 BLOCKED clear 신호 경쟁과 #845 cross-version
+  recovery 가능성을 BLOCKED v3(source commit·API/Playwright image·pair·attestation hash 기록 +
+  recovery runtime exact 대조로 mutation 전 cross-version cleanup 거부) 계약으로 차단. 상세
+  `docs/journal.md` 2026-07-26(codex).
+
 ## 2026-07-26 전면 감사 정리 — C7 종결 + vNext Wave 0/1 합류 + 독립 하드닝 + Wave 3 측정
 
 11-agent 전수 감사(2026-07-26)로 실코드 기준 완료 확정한 항목. C7 COMPLETE @ d5693269
