@@ -80,6 +80,25 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
 - **cross-lane 순서 제약**: `T-VN-H07C`(manifest v5)는 Lane A의 C6c pair capture·#392 close
   **이후** 착수(같은 docker-manager pair-capture 도구·ADR-076 정본을 두 lane이 동시에 만지는
   충돌 방지). 그 전까지 b2는 #814/pinvi#403 머지와 H07D를 진행한다.
+- **prod 격리 규율(2026-07-27 인시던트 재발 방지 —
+  [리포트](reports/incident-2026-07-27-shared-prod-db-live-container.md))**: 아래 4개는
+  두 lane 공통 필수.
+  - **R1 lane live/dev 컨테이너 prod 격리**: 어떤 lane이든 n150에서 띄우는 live/dev
+    컨테이너는 **production DB·포트와 격리**한다(전용 DB/schema 또는 폐기용 복제본).
+    **공유 prod DB에 대한 startup auto-migration 금지** — 공유 DB alembic head 전진은
+    조율된 배포 단계에서만. (인시던트: Lane B `pinvi-api-tvn08-live`가 공유 pinvi DB를
+    `0040`으로 migration → held `e60d1711` 기동 불가 → manifest trap.)
+  - **R2 prod manager 디렉토리에서 raw `docker compose` 금지**: auto-load되는
+    `docker-compose.override.yml`이 provider 키를 주입해 map-api가 fail-close된다. prod
+    런타임 변경은 **ktdctl(base compose, sanitized)**로만. 단일 서비스 재생성이
+    불가피하면 **`-f docker-compose.yml`(base만)** 명시로 override 배제.
+  - **R3 compatible-pair 함정**: 공유 DB가 held 컴포넌트 head를 넘어 migration되면 held
+    컴포넌트가 기동 불가가 되어 manifest가 trap된다. 복구 = held 컴포넌트를 runnable
+    revision으로 전진 + 재-cut. deploy 가드(리비전 정합·manifest-drift·mandatory-health)
+    임시 우회 시 **성공 직후 즉시 원복**.
+  - **R4 cross-lane 배포 조율**: 두 lane이 같은 prod 페어/공유 DB를 동시에 만질 때는
+    재-cut·live 실행 창을 겹치지 않게 하고, 한 lane의 live 컨테이너가 다른 lane의 배포
+    대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
 
 ## Lane B 상세 — b0 선행 하드닝
 

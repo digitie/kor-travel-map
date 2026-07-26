@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (claude) — 인시던트: 공유 prod DB 위 lane live 컨테이너 충돌 + 복구 + 재발방지 규율
+
+**요약**: Lane B(codex)의 n150 live 컨테이너(`pinvi-api-tvn08-live`)가 **공유 production pinvi
+DB의 alembic head를 `0040`으로 startup migration** → 배포로 고정된 pinvi `e60d1711`(~0038)이
+기동 불가 → compatible-pair manifest가 복원 불가능한 stale trap에 빠져 map 배포가 연쇄 실패했다.
+복구 중 prod manager 디렉토리의 raw `docker compose up`이 `docker-compose.override.yml`(auto-load)의
+provider 키를 map-api에 주입해 fail-close(2차 손상)까지 유발.
+
+**복구(2026-07-27)**: pinvi를 main head `6a035695`(#408 포함)로 직접 재빌드해 DB `0040`과 정합;
+map-api를 base compose만(`-f docker-compose.yml`, override 배제)으로 재생성해 sanitized·healthy 복구;
+deploy 사전점검 3종((a)리비전 정합 (b)manifest-drift는 self-inflicted drift라 검증-안전 tolerate 임시
+우회, (c)mandatory map-api health는 실제 수정으로 충족) 처리 후 **성공 직후 ktdctl 패치 전량 원복**.
+결과 pair를 **`map=b0c95672 / pinvi=6a035695`**로 정식 전진(4 map recreated+healthy, pinvi healthy,
+login 200), attestation rebind + lane snapshot 설치 완료.
+
+**재발 방지**: `docs/tasks.md` §공통 규율에 R1(lane live 컨테이너 prod DB·포트 격리 + 공유 DB
+startup auto-migration 금지)·R2(prod manager에서 raw `docker compose` 금지, ktdctl/base compose만)·
+R3(compatible-pair trap 인지·복구·가드 우회 시 즉시 원복)·R4(cross-lane 배포 창 조율)를 고정.
+상세 `docs/reports/incident-2026-07-27-shared-prod-db-live-container.md`.
+
 ## 2026-07-26 (codex) — T-VN-42 지도 control·query identity·live recovery 하드닝
 
 **결론**: `/features`와 `/curated-features`의 상세 패널이 MapLibre 우하단 `ScaleControl`을
