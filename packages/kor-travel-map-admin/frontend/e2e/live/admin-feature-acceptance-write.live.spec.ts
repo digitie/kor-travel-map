@@ -78,10 +78,13 @@ const PRICE_FEATURE = {
 // 재현으로 확정). 해시 토큰은 run-scoped 유일성은 유지하면서 다른 fixture
 // 이름과 긴 공유 substring이 없어 fuzzy 검색과 격리된다. RECOVERY_ONLY도
 // 같은 RUN_ID env에서 동일 토큰을 재파생하므로 cleanup 대칭이 유지된다.
+// 32-hex slice: 16-hex는 cross-run 조합 1.4%에서 공유 'e2esrch' 워드 트라이그램
+// 때문에 threshold 0.2를 스칠 수 있다(적대 리뷰 20k-pair 실측; 32-hex는 0%,
+// max 0.176). 잔존 fixture는 구조적으로 금지되지만 마진을 확보한다.
 const SEARCH_TOKEN = createHash("sha256")
   .update(`acceptance-search:${RUN_ID}`)
   .digest("hex")
-  .slice(0, 16);
+  .slice(0, 32);
 const SEARCH_QUERY = `e2esrch ${SEARCH_TOKEN}`;
 const SEARCH_FEATURES = ["alpha", "beta"].map((suffix, index) => ({
   featureId: `${PREFIX}::search::${suffix}`,
