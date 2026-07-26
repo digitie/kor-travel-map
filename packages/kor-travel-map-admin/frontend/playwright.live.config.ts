@@ -187,6 +187,11 @@ export default defineConfig({
     // 상한 있는 명확한 실패로 바꾼다. spec별 장시간 대기는 explicit timeout(waitForTerminal 등)이 별도로 관리한다.
     actionTimeout: 60_000,
     navigationTimeout: 60_000,
+    // 지도 컨트롤 실클릭의 결정성: maplibre는 prefers-reduced-motion을 존중해
+    // ease 애니메이션 duration을 0으로 만든다. 없으면 연속 zoom 클릭이 진행 중
+    // 애니메이션을 _stop()으로 흡수해 클릭당 ~0.3 zoom만 전진(적대 리뷰 실증)
+    // → 9클릭이 z14에 못 미쳐 acceptance lane이 FLOW_TIMEOUT으로 실패한다.
+    reducedMotion: "reduce",
     // C7 evidence에는 session cookie가 포함될 수 있는 trace ZIP을 남기지 않는다.
     trace: shouldAssertC7OriginGuard() ? "off" : "on-first-retry",
     // C7 evidence는 UI 운영 데이터가 픽셀에 남을 수 있는 screenshot도 생성하지 않는다.

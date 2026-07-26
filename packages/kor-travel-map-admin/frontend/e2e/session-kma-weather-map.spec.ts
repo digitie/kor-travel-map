@@ -209,7 +209,12 @@ async function mockFeatureRoutes(
     ) {
       await fulfillJson(
         route,
-        makeAdminFeaturesInBoundsResponse(items, url.searchParams.has("zoom")),
+        // 서버 규칙 미러: zoom<=13만 cluster (zoom은 items 모드에서도 항상 전송됨)
+        makeAdminFeaturesInBoundsResponse(
+          items,
+          url.searchParams.get("zoom") !== null &&
+            Number(url.searchParams.get("zoom")) <= 13,
+        ),
       );
       return;
     }
