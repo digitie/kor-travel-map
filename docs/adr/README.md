@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-077.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-078.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -90,6 +90,7 @@
 | ADR-074 | Domain-owned replay, revision, outbox 쓰기 안전성 | [074-write-safety.md](074-write-safety.md) |
 | ADR-075 | 보존 우선 cutover와 DDL 규율 | [075-cutover-and-ddl-discipline.md](075-cutover-and-ddl-discipline.md) |
 | ADR-076 | C6c compatible-pair manifest v4와 Map 4-image C7 provenance 결박 | [076-c6c-manifest-v4-map-runtime-provenance.md](076-c6c-manifest-v4-map-runtime-provenance.md) |
+| ADR-077 | pipeline root 멤버십을 stamp하고 read-time 재귀 lineage 제거 | [077-pipeline-lineage-identity-materialization.md](077-pipeline-lineage-identity-materialization.md) |
 
 ## 새 ADR 작성 규약
 
