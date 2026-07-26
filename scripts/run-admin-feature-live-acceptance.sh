@@ -410,6 +410,9 @@ recover_run() {
   validate_evidence recover
   write_result recovered
   state_helper clear-blocked --path "$BLOCKED_FILE" || die "BLOCKED clear failed"
+  # clear 성공 직후 INT/TERM이 오면 finish_signal이 이미 성공한 run에 대해 새
+  # BLOCKED를 재작성하는 창이 있었다(R792-4). RUN_ID를 비워 guard를 닫는다.
+  RUN_ID=""
 }
 
 run_new() {
@@ -460,6 +463,8 @@ PY
   validate_evidence normal
   write_result passed
   state_helper clear-blocked --path "$BLOCKED_FILE" || die "BLOCKED clear failed"
+  # clear 성공 직후 signal 창 봉쇄 — recover_run과 동일(R792-4).
+  RUN_ID=""
 }
 
 [[ "$MODE" == "run" || "$MODE" == "recover" ]] || die "usage: runner [run|recover]"
