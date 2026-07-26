@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-26 (claude) — C7 SCHEDCHURN 완료: schedule-write 재편입, gate 5-spec 복원
+
+**다음 한 작업**: T-VN 트랙 — `T-VN-SYNC-02`(integration/t-vn → main 최종 합류) 등, C7 종결로 unblock.
+
+- **완료(이번 세션)**: `T-ADM-C7-SCHEDCHURN` 근인 확정·수정. 직전 세션의 "app-side render churn" 진단은 **오진**.
+  진짜 근인 = cron 저장 응답 유실 후 frozen-idempotency 복구가 필요해질 때 cron 수정 dialog(Base UI)가 열린 채
+  남아 페이지 전체가 inert가 되어 모든 schedule 컨트롤이 접근 불가가 되던 것. fix=`schedule-panel.tsx`(복구 필요
+  순간 dialog close) + spec 하드닝(canReset·robustClick·settle-gate·시작 confirm alertdialog locator). 적대 리뷰어
+  2명 반영 → **91b822e2(main+fix)** prod 재배포(rollback-guarded, 4 runtime healthy) 후 verbose-iterate 재검증
+  **GREEN(2 passed, 37s)** → `scripts/run-c7-prod-live-e2e.sh` SPECS에 schedule-write 재편입(**C7 gate 5-spec**).
+  weather 스케줄 매 run 정확 복원. 상세 `docs/journal.md` 2026-07-26.
+- **C6c**: PinVi ops-caller cutover는 이미 완료·머지됨(#387/#393), 적대 리뷰어 2명 재검증(correct + fail-safe).
+  잔여는 operational activation(compatible-pair manifest-v4 exact Map+PinVi head + N150 live E2E) + #392 bookkeeping뿐.
+
 ## 2026-07-26 (claude) — C7 close: schedule-write descope + #837/#74 머지; 다음 = SchedCHURN 후속
 
 **다음 한 작업**: `T-ADM-C7-SCHEDCHURN` — admin `SchedulePanel`의 cron override 반영 후 ~90s render/refetch

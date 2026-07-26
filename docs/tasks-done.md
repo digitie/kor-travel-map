@@ -3,6 +3,63 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## C7 prod-live 게이트 확정 · schedule-write descope (2026-07-26, `T-ADM-C7`·`T-ADM-C7RUN`)
+
+- [x] **T-ADM-C7 — live e2e 재작성 + n150 prod-live 검증 완결.** C7 prod-live 게이트를
+  **read-auth·kma-active-write·kma-empty-write·kma-cap-write 4-spec**로 확정(green)하고 n150
+  production에 대해 파괴적 live로 실행했다(현 prod: cron=20, RUNNING; 실행 부수효과 2건 복구 완료).
+  WS 인증 close saga(C7W/X/Y/Z, read-auth 7/7), kma-write 계약(C7PV/C7PW), detail perf·running-race
+  (#829)까지 실 코드 blocker를 모두 해결·머지했다. `ops-c7-schedule-write`는 app-side render churn
+  때문에 blocking gate에서 **descope**했다(후속 열린 task `T-ADM-C7-SCHEDCHURN`). Map PR #837 +
+  docker-manager PR #74 squash-merge. 상세: `docs/journal.md` 2026-07-26.
+- [x] **T-ADM-C7RUN — 공식 러너 GREEN 확정 (2026-07-26 CLOSED).** "외부 data.go.kr KMA 502가 유일
+  blocker" 진단은 폐기(오류)됐고, verbose-iterate(non-redacting reporter + browserFetch DIAG 계측)로
+  masked blocker를 순차 규명·수정했다: preview provider_dataset 노출(#824), create-body `update_policy`
+  과명세(#825), detail `/v1/ops/datasets/detail` O(roots²) timeout recency-bound(#828/#829),
+  running-race fast-completion tolerate(#829), root_id lineage(#834), gate restructure(#835),
+  empty-write queue-sensor UI-gate flake 하드닝(#837). 후반 flaky UI/timing까지 통과 확정. Map PR #837
+  + docker-manager PR #74 머지.
+
+## C7 kma-write live 계약 수정 (2026-07-22~23, `T-ADM-C7PV`·`T-ADM-C7PW`)
+
+- [x] **T-ADM-C7PV — kma-active-write preview provider_dataset WYSIWYG(sync_scope)** (PR #824) —
+  preview가 0-feature dataset(`kma_ultra_short_nowcast`)에서 `matched_scope.provider_datasets`를
+  생략해 C7 `assertExactKmaPreviewBody`가 throw + 다음 UI `toContainText(sync_scope)`도 실패했다.
+  `scope_repo` provider_dataset 브랜치가 요청 pair를 0-feature 포함 항상, 요청 `sync_scope`와 함께
+  노출하도록 executor `_provider_dataset_scopes`와 parity를 맞췄다. verbose-iterate live harness로 검증.
+- [x] **T-ADM-C7PW — kma-active-write create-body update_policy 테스트 과-명세** (PR #825) —
+  UI는 create body에 `update_policy`를 안 보내는데(계약상 optional, absent≡{}) 테스트가 `{}` 기대 →
+  `_ops-c7-admin-api.ts` `buildKmaRequest`의 `update_policy: {},` 삭제. clean v6 harness가
+  kma-active-write 전 flow(create→run-now→terminal→grids→fingerprint→overflow×49) 통과 검증(2 passed).
+
+## C7 ops-live WS 인증 close saga (2026-07-20~22, `T-ADM-C7W`·`T-ADM-C7X`·`T-ADM-C7Y`·`T-ADM-C7Z`·`T-VN-H11`)
+
+- [x] **T-ADM-C7W — Chromium ops-live 인증 거절 close code 4401 복구** (#806 closed · PR #807) —
+  변조된 subprotocol을 제시한 실제 Chromium이 handshake 실패 `1006` 대신 application close `4401`을
+  관측하도록 transport-level subprotocol selector를 두고, 인증·nonce·application loop 미진입 상태로
+  data frame 없이 `4401` close. selector 없음/단일/복수/길이초과 회귀 고정.
+- [x] **T-ADM-C7X — ops-live subscribe-after-hello로 만료 ticket 4408 clean 전달** (#817 closed · PR #818).
+- [x] **T-ADM-C7Y — ops-live reject-close accept↔close settle env-tunable 0.25s** (PR #821).
+- [x] **T-ADM-C7Z — C7 live e2e 복구-leg passthrough를 route.continue로 (Sec-Fetch 보존)** (PR #823).
+- [x] **T-VN-H11 — ops-live 인증 close의 proxy 전달 경계 분리** (#809 closed · PR #807/#810) —
+  Uvicorn accept 101과 close frame coalescing에 대해 accept 성공 뒤 bounded settle window(배포 조합
+  한정 best-effort)와 accept~close 단일 bounded child task 보호를 두었다. 위 4개 WS auth saga와 함께
+  공식 러너 `ops-c7-read-auth` 7/7 통과로 검증. 별건 HAProxy WS 백엔드 `timeout tunnel` 미설정
+  운영버그는 issue #819로 분리 등록.
+
+## C7 manifest v4 provenance · PostGIS topology check 오탐 (2026-07-19, `T-ADM-C7P`·`T-ADM-C7F`)
+
+- [x] **T-ADM-C7P — C6c manifest v4·Map 4-image C7 provenance 동기화** (issue #777 · PR #778,
+  `d2104f15`) — compatible-pair manifest를 v4로 clean-cut하고 active/rollback pair에 Map API·UI·
+  Dagster web·daemon 네 immutable image ID와 하나의 Map source revision을 결박했다. C7 attestation이
+  네 Map image ID를 실제 compose runtime role과 각각 exact 비교하고, manager manifest v3는 거부한다.
+  2026-07-26 C7 prod-live 게이트 green(runtime attestation 통과)으로 활성 검증됨.
+- [x] **T-ADM-C7F — prod PostGIS topology 객체의 Alembic check 오탐 제거** (PR #791, `6fa914c2`) —
+  shared Postgres infra owner의 `postgis_topology`(`topology.layer`·`topology.topology`)를
+  `include_schemas=True` autogenerate가 삭제 대상으로 오인하던 `alembic check` 오탐을, extension-owned
+  객체만 명시 제외하고 head migration 뒤 topology extension을 설치한 production-equivalent integration
+  gate로 함께 고정했다.
+
 ## vNext 독립 하드닝 — public API key header 전환 (2026-07-20, `T-VN-H01`, integration/t-vn)
 
 - [x] **T-VN-H01 public API key를 URL query에서 header로 이동** (#794) — 공개 REST API key를

@@ -9,55 +9,12 @@
 
 - **진행 중 — admin ops 통합 재작성 (ADR-064)**
   - [ ] `T-ADM-C6c` — **PinVi legacy ops caller canonical 전환 + 인증 계약 복구**
-  - [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화** (#777)
-  - [ ] `T-ADM-C7F` — **prod PostGIS topology 객체의 Alembic check 오탐 제거**
-  - [x] `T-ADM-C7W` — **Chromium ops-live 인증 거절 close code 4401 복구** (#806 closed · PR #807 merged) — 완료.
-  - [x] `T-ADM-C7X` — **ops-live subscribe-after-hello로 만료 ticket 4408 clean 전달** (#817 closed · PR #818 merged) — 완료.
-  - [x] `T-ADM-C7Y` — **ops-live reject-close accept↔close settle env-tunable 0.25s** (PR #821 merged) — 완료.
-  - [x] `T-ADM-C7Z` — **C7 live e2e 복구-leg passthrough를 route.continue로 (Sec-Fetch 보존)** (PR #823 merged) — 완료.
-    (위 4개 WS auth close saga는 공식 C7 러너 `ops-c7-read-auth` 7/7 통과로 검증됨; #809 closed. 별건
-    HAProxy WS 백엔드 `timeout tunnel` 미설정 운영버그는 issue #819로 분리 등록됨.)
-  - [x] `T-ADM-C7PV` — **kma-active-write preview provider_dataset WYSIWYG(sync_scope)** (PR #824 merged) —
-    preview가 0-feature dataset(`kma_ultra_short_nowcast`)에서 `matched_scope.provider_datasets`를
-    생략해 C7 `assertExactKmaPreviewBody`가 throw + 다음 UI `toContainText(sync_scope)`도 실패.
-    `scope_repo` provider_dataset 브랜치가 요청 pair를 0-feature 포함 항상 + 요청 `sync_scope`와
-    함께 노출(executor `_provider_dataset_scopes` parity). verbose-iterate live harness로 검증.
-  - [x] `T-ADM-C7PW` — **kma-active-write create-body update_policy 테스트 과-명세** (PR #825 merged) —
-    #824 재cut 후 create 단계 `journalExactUiKmaCreateRequest` exactJson이 `update_policy`에서 불일치.
-    UI는 create body에 `update_policy`를 안 보내는데 테스트가 `{}` 기대(계약상 optional, absent≡{}) →
-    `_ops-c7-admin-api.ts` `buildKmaRequest`의 `update_policy: {},` 삭제. **clean v6 harness가 이 fix로
-    kma-active-write 전 flow(create→run-now→terminal→grids→fingerprint→overflow×49) 통과 검증(2 passed).**
-  - [x] `T-ADM-C7RUN` — **C7 공식 러너 GREEN 확정 (2026-07-26 CLOSED — 4-spec gate 확정, schedule-write descope)** —
-    (이전 "외부 data.go.kr KMA 502가 유일 blocker" 진단은 **폐기·오류**였다.) verbose-iterate(non-redacting
-    reporter + browserFetch DIAG 계측)로 masked blocker를 순차 규명·수정: (1) preview provider_dataset 노출(#824),
-    (2) create-body `update_policy` 과명세(#825), (3) **detail `/v1/ops/datasets/detail` O(roots²) timeout** —
-    `load_dataset_detail`의 CTE 쿼리(특히 `list_pipeline_executions`)가 append-only 누적 pipeline root 전체를
-    순회(prune 불가: `feature_update_request_idempotency`가 append-only). → `all_roots`에 `created_at` recency
-    창(`root_since`) pushdown + window가 페이지 못 채우면 unbounded fallback(저빈도 dataset 정합성), snapshot은
-    scoped EXISTS만 유지(유휴 scope latest 보존, recency 미적용). (4) **running-race** —
-    `assertRunningRequestIdentityFromUi`가 transient `execution.status==="running"` 관측을 요구하나 빠른 KMA
-    job이 먼저 `done` → fast-completion tolerate(`.not.toBe("queued")` + non-queued 상태에서 identity 검증,
-    run-now leg는 여전히 running일 때만). **(3)(4) 모두 fix·merged(#829)·`9492ab2d` 재cut·prod DB/live 검증 완료.**
-    공식 rerun이 43–52s → **142s로 3배 진행**(detail 200 OK 빠름 = recency 작동, running-race 통과 = tolerant 작동).
-    **잔여 blocker = 후반 active 시나리오의 pre-existing flaky UI-render/cleanup-timing**(deterministic bug 아님):
-    official=`cleanup_blocked`(`allRequestsTerminal:false`), v6=`assertDatasetTerminalHistoryUi`(spec:434) UI static
-    header 15s timeout — **직전 918–926 direct API assertion(`latest_execution.id===request`)은 PASS = 백엔드 정확**.
-    서로 다른 실패 지점 = flaky. zero-retry 게이트라 ~50-step flow 중 flake 한 번도 실패. **조치**: 후반 UI 어서션
-    (`assertDatasetTerminalHistoryUi` 등)·terminalization·cleanup에 robust wait/polling 하드닝(test-robustness,
-    #829 코드 fix와는 **별개 test-품질 작업**) → 재cut → rerun. **재cut 메커니즘**: `/home/digitie/c7-{deploy-asdigitie,
-    rebind,rerun}-<commit>.sh`(토큰 swap 미러 — deploy는 target+prev(현 active), rebind/rerun은 target;
-    현 stack=9492ab2d, prev=713e31c7). v6 harness: `/home/digitie/c7-v6/`(editable mount, verbose repro).
-    **[2026-07-26 CLOSED]** 후반 flaky 통과 확정 + C7 gate를 **4-spec**(read-auth·kma-active/empty/cap-write)으로
-    확정, **schedule-write만 descope**(아래 SCHEDCHURN). #837(gate descope)+#74(getSchedule+timeout) 머지.
-  - [ ] `T-ADM-C7-SCHEDCHURN` — **admin `SchedulePanel` cron override 반영 후 ~90s render/refetch churn** →
-    start/stop 컨트롤 조작 불가(dispatchEvent·retry·force 모두 그 창에서 실패; DOM 계측상 ~90s 후 버튼 정상) →
-    schedule-write가 blocking gate에서 descope됨. **조치**: `schedule-panel.tsx` render/refetch churn 규명·수정
-    + UI 재빌드/재배포 → `scripts/run-c7-prod-live-e2e.sh` SPECS에 schedule-write 재편입. spec 측 6-layer fix
-    (canReset 모델·waitForSchedule canReset 제외·frozen-UI dispatchEvent·robustClick·90s timeout;
-    getSchedule/reload-timeout은 **#74 배포됨**) 재적용 지침 `docs/journal.md` 2026-07-26. fresh 환경 재확인 권장
-    (22회 재현이 dagster DB bloat로 reload/getSchedule을 느리게 했을 가능성).
-  - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤) — kma-active-write의 실질 코드 blocker(detail perf·
-    running-race 포함)는 전부 해결·머지, read-auth 7/7 안정. 잔여 공식 GREEN은 `T-ADM-C7RUN`(후반 flaky UI/timing 하드닝).
+  - [x] `T-ADM-C7-SCHEDCHURN` — **완료(2026-07-26)**: 근인은 render churn이 아니라(오진), cron 저장 응답 유실 후
+    frozen-idempotency 복구가 필요해질 때 cron 수정 dialog(Base UI)가 열린 채 남아 페이지 전체가 inert가 되어
+    모든 schedule 컨트롤이 접근 불가가 되던 것. fix=`schedule-panel.tsx`(복구 필요 순간 dialog close) + spec 하드닝
+    (canReset·robustClick·settle-gate·시작 confirm alertdialog locator). 적대 리뷰어 2명 반영 → 91b822e2(main+fix)
+    prod 재배포 후 재검증 **GREEN(2 passed, 37s)** → schedule-write **blocking gate 재편입(C7 5-spec)**. 상세
+    `docs/journal.md` 2026-07-26.
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
   - [ ] `T-VN-57` — **public route policy·OpenAPI security·user surface 단일 정본** (#784)
@@ -78,7 +35,6 @@
     (agent B, draft PR #792; 단일 적대 리뷰·gate·n150 live·issue close 대기)
   - [ ] `T-VN-H03R` — **route wiring startup gate·public CORS exact preflight 완결**
     (#798, T-VN-H03 적대 리뷰 후속)
-  - [x] `T-VN-H11` — **ops-live 인증 close의 proxy 전달 경계 분리** (#809 closed) — 완료 (WS auth close saga; T-ADM-C7W/X/Y/Z와 함께 read-auth 7/7로 검증).
   - **PinVi 결합(codex b lane, C6c/C7 종결 뒤)**: `T-VN-08` PinVi false-broken 수정 ·
     `T-VN-11` service batch 5-state · `T-VN-12` domain-owned Idempotency-Key ·
     `T-VN-16` weather batch와 부모 404.
@@ -141,52 +97,6 @@ ADR-058의 옵션 B 채택으로 필수 진행 백로그에서 제외한다.
   코드·테스트의 삭제 경로 0건, canonical success와 principal 없음/오류 scope의 typed
   401/403/422, raw/debug/BFF 우회 0건, 배포 순서와 rollback image가 명시된 cross-repo smoke다.
 
-- [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤, 의존
-  C6b·C7A·C7B-720·AUD-686·C7B-UI·C6c·C7C): 기존 게이트
-  체계(PART A/B/C·`finally` 복원) 승계, SAFE provider(kma)·쿼터-민감 provider(OpiNet)
-  금지 목록, `/preview` 우선, per-file 저부하 실행표 + 검증 리포트. 임시 POI target을
-  생성·복원하며 `external_system:*` 생성/200 재사용/run-now identity, membership
-  fingerprint 변화와 grid cap 초과 fail-closed·scope별 durable failure를 검증한다.
-  실제 Chrome에서 없음/변조 ticket은 data frame 0건 + `CloseEvent.code===4401`,
-  signed-expired ticket은 data frame 0건 + `4408` 후 fresh ticket 재연결을 증거로
-  남긴다. n150 host runner는 `python3`를 명시적으로 요구하고, 실행 전 root-owned host/origin
-  attestation을 local-only 운영 절차로 provision한다. 운영 종결이 남은 #684/#694/#712/#719는
-  최종 live 증거를 첨부한 뒤 닫는다.
-
-- [x] `T-ADM-C7W` — **Chromium ops-live 인증 거절 close code 복구** (#806 closed · PR #807 merged) — 완료:
-  변조된 `ktm.ops-live.v1.*` subprotocol을 제시한 실제 Chromium은 서버가 WebSocket
-  subprotocol을 선택하지 않으면 application close `4401` 대신 handshake 실패 `1006`을
-  관측한다. 요청 헤더에서 prefix·단일성·길이 제한을 통과한 candidate만 transport-level
-  subprotocol로 선택하고, 인증·nonce claim·application loop에는 진입하지 않은 채 data
-  frame 없이 `4401`로 닫는다. ticket 없음은 subprotocol 없이 같은 `4401`을 유지한다.
-  selector의 없음·단일·복수·길이 초과와 missing/tampered WebSocket 회귀 테스트를 고정하고,
-  실제 Chromium C7 기대값은 완화하지 않는다. 단일 적대 리뷰와 CI, n150 strict C7 재검증을
-  통과한 뒤 이 task를 `T-ADM-C7`과 함께 아카이브한다.
-
-- [ ] `T-ADM-C7P` — **C6c manifest v4·Map 4-image C7 provenance 동기화**
-  (issue #777, docker-manager PR #61과 같은 배포 단위): compatible-pair manifest를
-  v4로 clean-cut하고 active/rollback pair에 Map API·UI·Dagster web·Dagster daemon
-  네 immutable image ID와 하나의 Map source revision을 함께 결박한다. C7
-  attestation은 manifest의 네 Map image ID를 실제 compose runtime role과 각각 exact
-  비교한다. host attestation document version 3은 유지하되, manager compatible-pair
-  manifest version 3은 거부하고 호환 shim을 두지 않는다. 완료 조건은 manager·Map
-  두 PR의 단일 적대적 리뷰 승인, 실행형 v3/v4·image mismatch 음성 계약,
-  n150의 root-owned manifest snapshot·runtime attestation 통과다.
-  병합과 활성화는 분리한다. manager·Map C7P PR은 먼저 병합하되 즉시 배포하지
-  않는다. 그 다음 latest main을 `integration/t-vn`에 병합해 C7 runner와 vNext DB/API를
-  하나의 소스 tree로 만들고, `T-VN-03`·`T-VN-15`·잔여 admin 비공개 feature
-  blocker를 닫은 뒤 integration을 main에 병합한다. 이 최종 main·PinVi·manager
-  조합으로 C6c v4 capture를 수행한 뒤에만 C7 live를 실행한다.
-
-- [ ] `T-ADM-C7F` — **prod PostGIS topology 객체의 Alembic check 오탐 제거**
-  (C7 n150 전환 중 발견): shared PostgreSQL의 infra owner가 설치한
-  `postgis_topology`는 `topology.layer`와 `topology.topology`를 소유한다. 앱 metadata가
-  이를 관리하지 않는데도 `include_schemas=True` autogenerate가 삭제 대상으로 판정해
-  `alembic current == head` 뒤 `alembic check`가 실패한다. `topology` schema의
-  extension-owned 객체만 명시 제외하고, head migration 뒤 topology extension을 설치한
-  production-equivalent integration gate로 오탐과 app schema drift 감지를 함께 고정한다.
-  단일 적대 리뷰와 CI를 통과해 main에 병합한 뒤 exact image를 다시 빌드·capture한다.
-
 병렬 wave는 다음처럼 고정한다. **Wave 1**의 C6b·C7A/0055·C7B-720,
 **Wave 2**의 AUD-686·AUD-718/0056, **Wave 3**의 C7B-API/0057,
 **Wave 4**의 C7B-UI까지 완료했다. 현재는 누락된 소비자 선전환을 C6c로 복구한 뒤
@@ -212,19 +122,6 @@ ADR-066~075다. **`T-VN-00`은 별도 task가 아니라 `T-ADM-C6c`의 별칭**�
 PR 하나가 task 하나만 소유하고 시작·PR 직전·merge 직후 `origin/main`에 rebase한다.
 각 코드 PR은 테스트 전에 적대적 리뷰어 1명의 리뷰를 반영한다. 문서 전용·rebase-only·단순
 변수명/import 정렬 변경은 추가 적대적 재리뷰 대상이 아니다.
-
-#### T-VN-H11 — ops-live 인증 close의 proxy 전달 경계 분리 (#809)
-
-운영 Uvicorn `websockets-sansio`는 `websocket.accept`의 HTTP 101과 직후 application
-close frame을 같은 backend read에 실을 수 있다. API 직결 Chromium은 `4401`을 보지만 공개
-TLS proxy 경계에서는 `1006`으로 끝났으므로 이 coalescing을 선행 가설로 둔다. ASGI에는
-transport drain 확인 계약이 없으므로 accept 성공 뒤 10ms의 bounded settle window를 두는 것은
-배포 조합에 한정된 best-effort 완화이며, 실제 Uvicorn TCP 반복 회귀와 n150 공개 Chromium 반복
-strict 결과를 최종 인수 기준으로 삼는다. accept 실패는 application close를 보내지 않고
-Uvicorn의 pre-handshake HTTP 500 fallback에 맡긴다. accept부터 close까지 하나의 bounded
-child task로 보호해 handoff 중 취소와 반복 취소에도 성공한 accept의 close를 정확히 한 번
-끝낸 뒤 취소를 재전파하며, data frame 0건과 기존 인증·nonce·rollback 계약은
-유지한다. 단일 적대 리뷰, API 게이트와 CI까지 통과한 뒤 완료한다.
 
 #### T-VN-SYNC-02 — integration/t-vn → main 최종 합류
 

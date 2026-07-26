@@ -1252,9 +1252,10 @@ async function submitUiCommand(
         `${command} toggle`,
       );
       if (command === "start") {
+        // 시작 확인은 AlertDialog(role=alertdialog)라 getByRole("dialog")로는 안 잡힌다.
         await robustClick(
           page
-            .getByRole("dialog")
+            .getByRole("alertdialog")
             .getByRole("button", { name: "스케줄 시작", exact: true }),
           "start confirm dialog",
         );
