@@ -673,11 +673,21 @@ async function assertStatusMarker(
       timeout: UI_TIMEOUT,
     },
   );
-  const placeToggle = page
-    .getByTestId("kind-filter")
-    .getByRole("button", { exact: true, name: "place" });
-  if ((await placeToggle.getAttribute("aria-pressed")) !== "true") {
-    await placeToggle.click();
+  // kind 필터를 place 하나로 격리한다. 기본 kind 필터는 place 외에 notice·weather도
+  // pressed라, 같은 run이 seed한 hidden weather/price feature(place 마커와 ~0.004° 거리)가
+  // 함께 표시되면 z14대에서 client-side supercluster로 묶여 개별 place 마커의 aria-label이
+  // 사라진다(2026-07-27 live 재현). place만 남기면 status별 place 마커 1건만 표시돼 결정적.
+  const kindGroup = page.getByTestId("kind-filter");
+  for (const toggle of await kindGroup.locator("button[aria-pressed]").all()) {
+    const name = (await toggle.textContent())?.trim();
+    const pressed = (await toggle.getAttribute("aria-pressed")) === "true";
+    if (name === "place") {
+      if (!pressed) {
+        await toggle.click();
+      }
+    } else if (pressed) {
+      await toggle.click();
+    }
   }
   await page.getByLabel("상태 필터").selectOption(fixture.status);
   const inBoundsResponsePromise = page.waitForResponse(
