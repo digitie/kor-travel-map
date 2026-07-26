@@ -483,7 +483,37 @@ index/DDL을 바꾸는 PR은 변경 **전후 write 비용·index 크기**(및 �
   non-concurrent build를 사용하므로 lock 대기·보유 시간과 fence 범위를 대신 기록한다.
 
 MVT, 범용 batch, cursor HMAC, weather partition/hypertable, 물리 listener, 대규모 fixture 주기는
-T-VN-51~56에서 먼저 채택 기준을 측정하며, "확장 가능해 보인다"는 이유만으로 구현하지 않는다.
+T-VN-51~56에서 먼저 채택 기준을 측정하며, "확장 가능해 보인다"는 이유만으로 구현하지 않는다. **측정 결과·판정 정본은 §8.4다.**
+
+### 8.4 Wave 3 도입-조건 측정 결과 (T-VN-51~56) — **본 절이 판정 정본**
+
+§8.3이 유예한 여섯 확장 후보의 채택 기준·근거·판정을 고정한다. 상세 측정 부록은
+[`docs/reports/t-vn-51-56-adoption-measurement-2026-07-21.md`](../reports/t-vn-51-56-adoption-measurement-2026-07-21.md).
+측정은 n150 CI-parity(2026-07-21) 기준이며, tier-1 소규모 gate **12 passed / ~30s**,
+tier-2 100만+ harness **수 분~수십 분(CI 아님)** 을 실측·재확인했다.
+
+| Task | 주제 | 판정 | 트리거(재측정/개방 조건) |
+|---|---|---|---|
+| T-VN-51 | MVT tile | 유예 | low-zoom 개별 point 요구 발생 + tier-2 응답 >256KiB(gzip) 또는 p95 >200 ms |
+| T-VN-52 | 범용 batch | 유예 | weather 외 2번째 per-row 왕복 실측(PinVi trace) |
+| T-VN-53 | cursor key rotation | 유예(clean-cut) | 실 rotation에서 무효화 통증이 grace window 우위 입증 |
+| T-VN-54 | weather partition/hypertable | 유예 | 활성 행 >50M, retention p95 >100 ms, 또는 T-VN-38 append 전환 |
+| T-VN-55 | 물리 listener 분리 | 유예 | read 부하 상호간섭 >20% 또는 장애 전파 인시던트 |
+| T-VN-56 | 대규모 fixture 주기 | 확정(2계층) | tier-2 전용 planner 회귀 반복 시 nightly 10만행 신설 |
+
+- **T-VN-51 MVT / T-VN-52 batch**: low-zoom 계약이 이미 cluster rollup(§9.3.2)이라 내려보내는
+  개별 point가 없고, batch는 200-id·N+1 가드(§8.3 tier-1)로 상한된다. 두 항목 모두 표의 트리거
+  전에는 구현하지 않는다.
+- **T-VN-53 cursor rotation**: T-VN-15가 versioned HMAC keyset을 clean-cut으로 채택했다. cursor는
+  단명이라 rotation 시 진행 cursor만 422→재조회(무손실)된다. 운영 절차는 "secret compromise
+  또는 정기(분기) 교체 시 단일 활성 key clean-cut 교체". grace window는 트리거 전 미구현.
+- **T-VN-54 weather 볼륨**: `feature_weather_values`는 semantic UNIQUE(0060) upsert(수렴)이지
+  시계열 append가 아니고, 대상은 `poi_cache_targets`로 상한된다. 정상상태 활성 행은 partition/
+  hypertable 임계(>50M) 아래로 추정. T-VN-38(current summary)이 이력 보존으로 바뀌면 재측정.
+- **T-VN-55 listener 분리**: API/Dagster는 이미 물리 분리돼 있고 내부 listener는 read 지배
+  비대칭이라 분리 이득이 배포 복잡성을 넘지 못한다.
+- **T-VN-56 fixture 주기**: tier-2(100만+)는 release 주기가 정확하다(비용 수십 분, 결함 검출은
+  소규모 tier-1 담당, tier-2 역할은 release budget 증거). nightly 중간 계층은 트리거 전 미신설.
 
 ## 9. 캐싱 정책 (Postgres 외)
 

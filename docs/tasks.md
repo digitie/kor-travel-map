@@ -56,12 +56,7 @@
   - [ ] `T-VN-39` — **KTM·PinVi write-fence cutover**
   - [ ] `T-VN-40` — **curation write model 단일화**
   - [ ] `T-VN-41` — **cache-target generation·outbox 전파**
-  - [ ] `T-VN-51` — **MVT tile 도입 조건 측정**
-  - [ ] `T-VN-52` — **범용 feature-context batch 도입 조건 측정**
-  - [ ] `T-VN-53` — **cursor signing key rotation 운영 측정** (도입 여부 측정은 T-VN-15 HMAC clean-cut 채택으로 **폐기**; rotation 주기·grace window 필요성 측정만 조건부 잔존)
-  - [ ] `T-VN-54` — **weather partition·hypertable·event clock 측정**
-  - [ ] `T-VN-55` — **물리 listener/process 분리 측정**
-  - [ ] `T-VN-56` — **대규모 fixture 실행 주기 측정**
+  - [x] `T-VN-51`~`T-VN-56` — Wave 3 도입-조건 **측정 완료**(모두 트리거로 유예 / T-VN-56은 현행 2계층 확정). 정본: performance.md §8.4 · [리포트](reports/t-vn-51-56-adoption-measurement-2026-07-21.md). SYNC-02에서 tasks-done 이관.
   - [ ] `T-VN-H06` — **admin 목록 keyset 전환**
   - [ ] `T-VN-H07` — **PinVi field-level contract와 OpenAPI SHA 검증**
   - [ ] `T-VN-H08` — **Tier-2 p95 nearest-rank 산식 정확화** (#799)
@@ -374,38 +369,14 @@ T-VN-SYNC-02 적대적 통합 리뷰에서 T-VN-05의 공개/operator 분리가 
   기존 external identity와 exact scope를 유지하면서 source generation/restore epoch, outbox relay,
   backfill·reconciliation을 설치하고 critical path 밖에서 enable한다.
 
-### Wave 3 — 도입 조건을 먼저 측정
+### Wave 3 — 도입 조건 측정 (완료 → performance.md §8.4)
 
-- [ ] T-VN-51 — **MVT tile 도입 조건 측정**
-
-  전국 low-zoom 응답 byte·p95와 현재 cluster 계약을 측정하고 MVT가 정한 budget을 유의미하게
-  개선할 때만 별도 구현 task를 연다.
-
-- [ ] T-VN-52 — **범용 feature-context batch 도입 조건 측정**
-
-  실제 consumer round-trip과 query count를 측정해 weather 전용 batch를 넘어선 범용 batch의
-  필요 조건·최대 크기·응답 shape를 먼저 고정한다.
-
-- [ ] T-VN-53 — **cursor signing key rotation 운영 측정**
-
-  T-VN-15가 search cursor HMAC을 clean-cut으로 채택했으므로 도입 여부 측정은 폐기한다. 실제
-  rotation 주기·진행 cursor 무효화율·다중 key grace window 필요성을 측정하고, grace window가
-  단순 clean cut보다 우월하다고 입증될 때만 별도 구현 task를 연다.
-
-- [ ] T-VN-54 — **weather partition·hypertable·event clock 측정**
-
-  3년 데이터량, ingest/update 비율, retention query를 실측해 native partition 또는 hypertable 후보와
-  event clock 직렬화의 채택 기준을 문서화한다.
-
-- [ ] T-VN-55 — **물리 listener/process 분리 측정**
-
-  단일 app의 resource contention과 장애 격리를 측정해 세 listener가 배포 복잡성보다 큰 이득을
-  줄 때만 분리 설계를 연다.
-
-- [ ] T-VN-56 — **대규모 fixture 실행 주기 측정**
-
-  100만+ fixture gate의 시간·비용과 결함 검출률을 수집해 매 PR, nightly, release 중 적절한 실행
-  주기를 확정한다.
+T-VN-51~56은 2026-07-21 측정 완료다. 여섯 항목 모두 **명시 트리거로 유예**(51~55)이거나
+**현행 2계층 정책 확정**(56)이며, "확장 가능해 보인다"만으로 구현하지 않는다는 §8.3 원칙을
+지킨다. 판정·근거·수치·트리거는 [`performance.md §8.4`](architecture/performance.md)와
+[측정 리포트](reports/t-vn-51-56-adoption-measurement-2026-07-21.md)가 정본이다. 각 트리거는
+tier-2 release harness·PinVi consumer trace·rotation 이벤트 로그로 감시하며, 관측되면 해당
+구현 task를 새로 연다. 완료 이관(tasks-done.md)은 SYNC-02에서 정리한다.
 
 ### 독립 하드닝 — 각 항목 PR 1개
 
