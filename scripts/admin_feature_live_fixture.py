@@ -18,12 +18,13 @@ from decimal import Decimal
 from typing import Final
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.dto._time import kst_now
 from kortravelmap.dto.price import PriceValue
 from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import price_repo, weather_repo
+from kortravelmap.infra.db import make_async_engine
 from kortravelmap.settings import KorTravelMapSettings
 
 _RUN_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
@@ -426,7 +427,11 @@ async def _cleanup(
 
 async def _run(action: str, run_id: str) -> dict[str, object]:
     settings = KorTravelMapSettings()
-    engine = create_async_engine(settings.pg_dsn.get_secret_value())
+    # make_async_engine은 normalize_async_dsn으로 plain `postgresql://` DSN도
+    # asyncpg dialect로 정규화한다. raw create_async_engine을 쓰면 배포 env가
+    # plain scheme일 때 컨테이너 안에서 sync psycopg2 dialect를 로드하려다
+    # 실패한다 (Codex PR #792 사후 적대 리뷰 R792-3).
+    engine = make_async_engine(settings.pg_dsn)
     try:
         async with AsyncSession(engine) as session, session.begin():
             if action == "seed":
