@@ -7,18 +7,23 @@
 
 ## 진행 중인 작업 인덱스 (2026-07-26 전면 감사 재정리)
 
-> 2026-07-26 11-agent 전수 감사로 백로그를 실코드 기준으로 재정리했다. C7·vNext Wave 0/1
-> 코드는 전부 main 합류 완료(`T-VN-SYNC-02`=PR #790, C7 COMPLETE @ d5693269). 완료 이관:
+> 2026-07-26 11-agent 전수 감사로 백로그를 실코드 기준으로 재정리했다. `integration/t-vn`에
+> 누적됐던 C7·Wave 0/1 코드는 전부 main 합류 완료(`T-VN-SYNC-02`=PR #790, C7 COMPLETE @
+> d5693269 — 단 PinVi 결합 task 08/11/12/16은 미착수로 Lane B에 잔존). 완료 이관:
 > SCHEDCHURN·POICAUSAL·SYNC-02·T-VN-57·59·H02R·H03R·H08·H09·51~56 → `tasks-done.md`
-> 2026-07-26 섹션. 감사 근거는 각 완료 항목에 기록.
+> 2026-07-26 섹션. 감사 근거는 각 완료 항목에 기록. 추적 제외 결정(T-229-buildx,
+> T-AUDIT-0616 F-01 옵션 A — ADR-058 옵션 B 채택)은 `journal.md` 2026-06-29 결정 그대로 유지.
 
 **Lane A (Claude Code)** — 순차 실행. 규율: 코드 변경 시 적대 리뷰어 2명 + n150 파괴적
-live E2E(실데이터) 후 PR·CI green·머지.
+live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실행 위주라 하위 상세 섹션
+없이 **인덱스 상주가 정본**(tasks-rule §5의 "상세 위치 하나"를 인덱스로 충족).
 
 - [ ] `T-VN-LIVE-01` — **targeted live acceptance lane n150 실행·종결**. 구현은 PR #792로
-  main 합류 완료(spec 957줄 + fixture/state/supervisor + runbook). 잔여 = WSL SSH n150
-  production **파괴적 실행**으로 cleanup/audit/container/evidence 0/완결 증명 + 증거 기록.
-  완료 시 아래 3개 task의 live 인수가 동시 종결된다(issue #741·#785 close).
+  main 합류 완료(spec 957줄 + fixture/state/supervisor + runbook:
+  [admin-feature-live-acceptance](runbooks/admin-feature-live-acceptance.md), 설계:
+  [t-vn-live-acceptance-741-785-2026-07-20](reports/t-vn-live-acceptance-741-785-2026-07-20.md)).
+  잔여 = WSL SSH n150 production **파괴적 실행**으로 cleanup/audit/container/evidence 0/완결
+  증명 + 증거 기록. 완료 시 아래 3개 task의 live 인수가 동시 종결된다(issue #741·#785 close).
   - [ ] `T-VN-04A`(#741) — 코드 main 합류 완료. 잔여 = lane 실행 내 inactive/draft/hidden
     marker·weather/price 카드·public 비누출 검증뿐(별도 작업 없음).
   - [ ] `T-VN-58`(#785) — 코드 main 합류 완료. 잔여 = lane 실행 내 competing update 후
@@ -28,27 +33,27 @@ live E2E(실데이터) 후 PR·CI green·머지.
 - [ ] `T-ADM-C6c` + `T-VN-03` — **principal 경계 smoke + pair 완결**(두 task 잔여가 동일
   실행으로 종결). 코드 양측 머지 완료(PinVi #387/#393, Map #782→#790, manager #64).
   잔여 = ① pinvi head(**hardening #408 포함** — 현 배포 e60d1711은 #408 이전) 재배포 +
-  compatible-pair v4 capture, ② n150 경계 smoke: curated 4 GET(keyless 거부/public-key·
-  service-token 허용), ops 6 GET(headerless/service-only/cancel-token 401·403 +
-  admin-BFF·ops:read 양성 — PinVi principal 실증), MOIS debug 404(unmount), ③ PinVi
-  issue #392 close. 설계 정본:
-  [t-vn-03-route-gate-cutover-2026-07-19.md](reports/t-vn-03-route-gate-cutover-2026-07-19.md) §5.4.
-  C7 게이트 read-auth는 admin-BFF만 커버하므로 대체 불가(2026-07-26 감사 확정).
+  compatible-pair capture(**현행 manifest 버전으로** — 현 v4, `T-VN-H07C`가 v5를 먼저 land하면
+  v5), ② n150 경계 smoke: curated 4 GET(keyless 거부/public-key·service-token 허용), ops 6
+  GET(headerless/service-only/cancel-token 401·403 + admin-BFF·ops:read 양성 — PinVi principal
+  실증), MOIS debug 404(unmount), ③ PinVi issue #392 close. 설계 정본:
+  [t-vn-03-route-gate-cutover-2026-07-19.md](reports/t-vn-03-route-gate-cutover-2026-07-19.md)
+  §5 항목 4 + §6 완료 조건. C7 게이트 read-auth는 admin-BFF만 커버하므로 대체 불가(2026-07-26
+  감사 확정).
 - [ ] `T-VN-H06` — **admin 목록 keyset 전환 완결**. 구현 완료 = PR #813(OPEN, CI green,
   1차 적대 리뷰 반영 커밋 포함; "C7 종결 후 진행" hold는 C7 COMPLETE로 해제). 잔여 =
   2차 적대 리뷰 → 머지 → dedup/enrichment cursor e2e 런타임 검증(Windows Playwright).
+  **Lane A 규율 명시 예외**: 파괴적 n150 live E2E 대상 아님(admin 목록 read 표면) — 런타임
+  검증은 머지 후 Windows Playwright e2e로 수행(PR #813 본문에 정의된 순서 유지).
 
 **Lane B (codex)** — 병렬 wide lane. 규율: 각 코드 PR은 테스트 전 적대 리뷰어 1명 이상 반영.
 
 - b1 (PinVi 결합, 순차): [ ] `T-VN-08` → [ ] `T-VN-11` → [ ] `T-VN-12` → [ ] `T-VN-16` →
   [ ] `T-VN-41`
-- b2 (계약·manifest): [ ] `T-VN-H07` — Map PR #814 + PinVi PR #403 머지(양측 field-level
-  contract test), `T-VN-H07C`(#812) compatible-pair **manifest v5 + pinned OpenAPI SHA**
-  (docker-manager `_PAIR_MANIFEST_VERSION=4→5` + ADR-076 v5), `T-VN-H07D`(#815) admin
-  curated detail-snapshot field-level contract.
-- b3 (Wave 2 구조 전환, 순차): [ ] `T-VN-31` → [ ] `T-VN-32` → [ ] `T-VN-33` →
-  [ ] `T-VN-34` → [ ] `T-VN-35` → [ ] `T-VN-36` → [ ] `T-VN-37` → [ ] `T-VN-38` →
-  [ ] `T-VN-40` → [ ] `T-VN-39`(cutover는 마지막)
+- b2 (계약·manifest): [ ] `T-VN-H07`(+`H07C` #812·`H07D` #815) — PinVi field-level
+  contract·pinned OpenAPI SHA manifest 완결(상세는 아래 b2 섹션).
+- b3 (Wave 2 구조 전환): [ ] `T-VN-31` 선행 → [ ] `T-VN-32`~[ ] `T-VN-38`(순서 자유·독립
+  rollback; 개별 checkbox는 아래 b3 섹션) → [ ] `T-VN-40` → [ ] `T-VN-39`(cutover 마지막)
 - 보류: [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
 
 ## 공통 규율 (2026-07-26 개정)
@@ -59,13 +64,19 @@ live E2E(실데이터) 후 PR·CI green·머지.
   (실데이터)로 검증하고 PR·CI green·머지. 작업 중 발견 항목은 tasks.md에 즉시 추가.
 - **Lane B**: 각 코드 PR은 테스트 전 적대적 리뷰어 1명 이상 반영(기존 규율 유지).
   task 완료 시 상대 lane 2일치 PR 적대 리뷰 관행 유지.
-- **우선순위(서비스 전 단계 — 사용자 지시 2026-07-26)**: 설계적 우수성 > 확장성 > 성능 >
-  불필요한 코드 반복(래퍼류) 금지. **prod 환경 보전·호환성·기존 문서 계약·최소 수정은
-  비제약** — 필요 시 DB 스키마·문서 계약 수정 가능.
+- **우선순위(서비스 전 단계 — 사용자 지시 2026-07-26)**: **정확성·보안 최우선은 불변**
+  (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
+  **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
+  계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
 - migration 정본: 단일 head 유지(현 head `0063_pipeline_root_id`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다.
 - 문서 전용·rebase-only·기계적 변경(변수명·import 정렬)은 적대 재리뷰 면제.
-- 모든 테스트는 n150 WSL SSH CI-parity 게이트로 실행(로컬 디스크 보호).
+- pytest 계열 테스트는 n150 WSL SSH CI-parity 게이트로 실행(로컬 디스크 보호).
+  **예외**: Playwright e2e는 Windows 정본(CLAUDE.md §4 dev-environment) — mocked e2e는
+  Windows에서, live e2e는 n150 파괴적 lane으로 실행.
+- **cross-lane 순서 제약**: `T-VN-H07C`(manifest v5)는 Lane A의 C6c pair capture·#392 close
+  **이후** 착수(같은 docker-manager pair-capture 도구·ADR-076 정본을 두 lane이 동시에 만지는
+  충돌 방지). 그 전까지 b2는 #814/pinvi#403 머지와 H07D를 진행한다.
 
 ## Lane B 상세 — b1 PinVi 결합
 
