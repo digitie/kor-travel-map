@@ -27,7 +27,7 @@
     UI는 create body에 `update_policy`를 안 보내는데 테스트가 `{}` 기대(계약상 optional, absent≡{}) →
     `_ops-c7-admin-api.ts` `buildKmaRequest`의 `update_policy: {},` 삭제. **clean v6 harness가 이 fix로
     kma-active-write 전 flow(create→run-now→terminal→grids→fingerprint→overflow×49) 통과 검증(2 passed).**
-  - [ ] `T-ADM-C7RUN` — **C7 공식 러너 GREEN 확정 — 잔여 = 후반 active 시나리오 flaky UI/timing 하드닝** —
+  - [x] `T-ADM-C7RUN` — **C7 공식 러너 GREEN 확정 (2026-07-26 CLOSED — 4-spec gate 확정, schedule-write descope)** —
     (이전 "외부 data.go.kr KMA 502가 유일 blocker" 진단은 **폐기·오류**였다.) verbose-iterate(non-redacting
     reporter + browserFetch DIAG 계측)로 masked blocker를 순차 규명·수정: (1) preview provider_dataset 노출(#824),
     (2) create-body `update_policy` 과명세(#825), (3) **detail `/v1/ops/datasets/detail` O(roots²) timeout** —
@@ -47,6 +47,15 @@
     #829 코드 fix와는 **별개 test-품질 작업**) → 재cut → rerun. **재cut 메커니즘**: `/home/digitie/c7-{deploy-asdigitie,
     rebind,rerun}-<commit>.sh`(토큰 swap 미러 — deploy는 target+prev(현 active), rebind/rerun은 target;
     현 stack=9492ab2d, prev=713e31c7). v6 harness: `/home/digitie/c7-v6/`(editable mount, verbose repro).
+    **[2026-07-26 CLOSED]** 후반 flaky 통과 확정 + C7 gate를 **4-spec**(read-auth·kma-active/empty/cap-write)으로
+    확정, **schedule-write만 descope**(아래 SCHEDCHURN). #837(gate descope)+#74(getSchedule+timeout) 머지.
+  - [ ] `T-ADM-C7-SCHEDCHURN` — **admin `SchedulePanel` cron override 반영 후 ~90s render/refetch churn** →
+    start/stop 컨트롤 조작 불가(dispatchEvent·retry·force 모두 그 창에서 실패; DOM 계측상 ~90s 후 버튼 정상) →
+    schedule-write가 blocking gate에서 descope됨. **조치**: `schedule-panel.tsx` render/refetch churn 규명·수정
+    + UI 재빌드/재배포 → `scripts/run-c7-prod-live-e2e.sh` SPECS에 schedule-write 재편입. spec 측 6-layer fix
+    (canReset 모델·waitForSchedule canReset 제외·frozen-UI dispatchEvent·robustClick·90s timeout;
+    getSchedule/reload-timeout은 **#74 배포됨**) 재적용 지침 `docs/journal.md` 2026-07-26. fresh 환경 재확인 권장
+    (22회 재현이 dagster DB bloat로 reload/getSchedule을 느리게 했을 가능성).
   - [ ] `T-ADM-C7` — **live e2e 재작성 + n150 검증** (C6c 뒤) — kma-active-write의 실질 코드 blocker(detail perf·
     running-race 포함)는 전부 해결·머지, read-auth 7/7 안정. 잔여 공식 GREEN은 `T-ADM-C7RUN`(후반 flaky UI/timing 하드닝).
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**

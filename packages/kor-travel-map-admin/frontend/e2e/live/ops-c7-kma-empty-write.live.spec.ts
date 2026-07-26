@@ -15,6 +15,7 @@ import {
   stopQueueSensorAndWaitForQuiescence,
 } from "./_ops-c7-dagster-sensor";
 import {
+  DATASET_DETAIL_FETCH_TIMEOUT_MS,
   KMA_DATASET_KEY,
   KMA_PROVIDER,
   assertKmaDagsterWorkerJobDefinition,
@@ -42,6 +43,14 @@ import {
 } from "./_ops-c7-admin-api";
 
 const TEST_TIMEOUT = 30 * 60 * 1000;
+// preview(dry-run) 응답 상한 + preview-result 텍스트 확인 상한(명시 고정).
+// active-write의 검증된 preview 응답 게이트와 동일하게 60s(=actionTimeout)로 맞춘다:
+// dry-run 버튼은 catalog 로딩 동안 disabled라 click이 actionTimeout(60s)까지 auto-wait
+// 하는데, 응답 대기가 그보다 짧으면 버튼이 아직 정당하게 actionable 대기 중인 구간에서
+// waitForResponse가 먼저 timeout날 수 있다(무거운 official 페이지에서 특히). 상한만
+// 늘리므로 정상 경로엔 영향이 없다(리뷰어 B 권고).
+const PREVIEW_RESPONSE_TIMEOUT_MS = 60_000;
+const PREVIEW_RESULT_TEXT_TIMEOUT_MS = 30_000;
 const RUN_ID = `c7-empty-${Date.now()}-${Math.random()
   .toString(36)
   .slice(2, 8)}`;
@@ -60,44 +69,47 @@ async function previewEmptyRequestFromUi(
   syncScope: string,
   reason: string,
 ): Promise<void> {
-  await page
-    .getByRole("button", { name: "갱신 요청 생성", exact: true })
-    .click();
-  const dialog = page.getByRole("dialog", {
-    name: "갱신 요청 생성",
-    exact: true,
-  });
-  await dialog.getByLabel("provider", { exact: true }).fill(KMA_PROVIDER);
-  await dialog
-    .getByLabel("dataset_key", { exact: true })
-    .fill(KMA_DATASET_KEY);
-  await dialog
-    .getByLabel("sync_scope (선택)", { exact: true })
-    .fill(syncScope);
-  const responsePromise = page.waitForResponse((response) => {
-    return (
+  // active-write의 검증된 openAndFillKmaRequestDialog 패턴을 그대로 따른다: /ops/pipeline
+  // 재진입(overview 새로 fetch → queueOperational 신뢰) + 전부 NON-exact locator. exact:true나
+  // 별도 toBeEnabled gate는 아이콘/접근명 편차·disabled fallback에 취약해 영영 불일치할 수 있다
+  // (empty-write ~33/22s 실패의 원인 후보). 트리거 click은 config actionTimeout(60s)으로
+  // actionable(enabled)까지 auto-wait하므로 hang이 아니라 bounded fail이다.
+  await page.goto("/ops/pipeline");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "파이프라인" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "갱신 요청 생성" }).click();
+  const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
+  await expect(dialog).toBeVisible();
+  // 근본원인(non-redacted 진단으로 확정): 이 dry-run preview POST는 submit()의 강제 catalog
+  // refetch(request-dialog.tsx) 뒤에 직렬화돼 있어, 무거운 empty-write 페이지에서 ops-live가
+  // ["ops-datasets"]를 계속 invalidate하면 refetch가 POST를 막아 waitForResponse가 timeout됐다
+  // (active-write는 가벼운 페이지 + 60s one-shot이라 회피). 앱 fix로 dry-run은 강제 refetch를
+  // skip(캐시로 사전검증)해 POST가 즉시 발사되므로, active-write처럼 fill 1회 + click 1회로
+  // 단순화한다. 폼 입력은 부모 re-render로 리셋되지 않는다(controlled input, 무 key remount).
+  await dialog.getByLabel("provider").fill(KMA_PROVIDER);
+  await dialog.getByLabel("dataset_key").fill(KMA_DATASET_KEY);
+  await dialog.getByLabel("sync_scope (선택)").fill(syncScope);
+  const responsePromise = page.waitForResponse(
+    (response) =>
       response.request().method() === "POST" &&
       new URL(response.url()).pathname ===
-        "/api/proxy/v1/ops/pipeline/requests/preview"
-    );
-  });
-  await dialog
-    .getByRole("button", { name: "dry-run 실행", exact: true })
-    .click();
+        "/api/proxy/v1/ops/pipeline/requests/preview",
+    { timeout: PREVIEW_RESPONSE_TIMEOUT_MS },
+  );
+  await dialog.getByRole("button", { name: "dry-run 실행" }).click();
   await assertExactKmaPreviewResponse(
     await responsePromise,
     previewBody(
-      buildKmaRequest(
-        syncScope.slice("external_system:".length),
-        reason,
-      ),
+      buildKmaRequest(syncScope.slice("external_system:".length), reason),
     ),
   );
   await expect(dialog.getByTestId("request-preview-result")).toContainText(
     syncScope,
+    { timeout: PREVIEW_RESULT_TEXT_TIMEOUT_MS },
   );
   await dialog.getByRole("checkbox", { name: /dry-run/ }).uncheck();
-  await dialog.getByLabel("사유", { exact: true }).fill(reason);
+  await dialog.getByLabel("사유").fill(reason);
 }
 
 async function createEmptyRequestWhileSensorStopped(
@@ -129,7 +141,23 @@ async function assertQueuedRunNowBlockedFromUi(
   page: Page,
   requestId: string,
 ): Promise<void> {
+  // execution-detail 패널은 별도 execution-detail GET가 도착해야 mount된다. bare goto +
+  // 즉시 assertion은 그 fetch를 race하므로(active-write assertRunningRequestIdentityFromUi와
+  // 동일 class), UI 자신의 execution-detail GET를 response-gate한 뒤 settled 상태에서 단정한다.
+  const executionDetailSettled = page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname ===
+          `/api/proxy/v1/ops/pipeline/executions/update_request/${requestId}` &&
+        response.status() === 200
+      );
+    },
+    { timeout: DATASET_DETAIL_FETCH_TIMEOUT_MS },
+  );
   await page.goto(`/ops/pipeline?execution=update_request:${requestId}`);
+  await executionDetailSettled;
   const detail = page.getByTestId("pipeline-execution-detail");
   await expect(detail).toBeVisible();
   await expect(
@@ -223,7 +251,6 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
     const state = createCleanupState("empty", RUN_ID);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
     await assertKmaDagsterWorkerJobDefinition();
-    await previewEmptyRequestFromUi(page, syncScope, reason);
     const controller = await createQueueSensorController();
     const sensorSnapshot = await snapshotQueueSensor(controller);
     if (sensorSnapshot.status !== "RUNNING") {
@@ -238,6 +265,15 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
     );
     try {
       await withC7Cleanup(page, testInfo, state, async () => {
+        // preview는 active-write와 동일하게 (a) 대상 external_system에 active POI
+        // target이 존재하고 (b) queue sensor가 아직 RUNNING인 상태에서 실행해야
+        // dry-run POST가 client validateCatalogSelection과 server
+        // _validate_refreshable_request를 통과해 HTTP 200을 받는다. target 등록과
+        // preview를 withC7Cleanup 안·stop 이전에 배치해 cleanup guard(잔존 target
+        // 자동 회수)를 유지한 채 두 사전조건을 만족시킨다. bare target은 request가
+        // 없으므로 RUNNING queue sensor가 dispatch하지 않는다(sensors.py peek→skip).
+        await putTrackedTarget(page, state, target, targetBody);
+        await previewEmptyRequestFromUi(page, syncScope, reason);
         await stopQueueSensorAndWaitForQuiescence(controller, sensorSnapshot);
         await assertExactNonTerminalFeatureUpdateRequests(
           page,
@@ -245,7 +281,6 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
           "queue sensor stop/quiescence 후 preflight",
         );
 
-        await putTrackedTarget(page, state, target, targetBody);
         const before = scopeStateSnapshot(
           requireBody(await getExactDatasetDetail(page, syncScope), 200),
           syncScope,

@@ -180,6 +180,13 @@ export default defineConfig({
       ],
   use: {
     baseURL,
+    // 방어선(T-ADM-C7RUN): 기본 action/navigation timeout은 0(무제한)이라, 조건부 렌더
+    // element를 기다리는 click/fill/goto가 조건이 끝내 참이 되지 않으면 spec의 30분
+    // test-timeout까지 조용히 매달린다(관측된 empty-write hang의 근본 조건). 정상 UI
+    // actionability·페이지 로드는 이보다 훨씬 빠르므로 통과 spec에 영향 없이, 무한 hang을
+    // 상한 있는 명확한 실패로 바꾼다. spec별 장시간 대기는 explicit timeout(waitForTerminal 등)이 별도로 관리한다.
+    actionTimeout: 60_000,
+    navigationTimeout: 60_000,
     // C7 evidence에는 session cookie가 포함될 수 있는 trace ZIP을 남기지 않는다.
     trace: shouldAssertC7OriginGuard() ? "off" : "on-first-retry",
     // C7 evidence는 UI 운영 데이터가 픽셀에 남을 수 있는 screenshot도 생성하지 않는다.

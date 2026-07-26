@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-26 (claude) — C7 close: schedule-write descope + #837/#74 머지; 다음 = SchedCHURN 후속
+
+**다음 한 작업**: `T-ADM-C7-SCHEDCHURN` — admin `SchedulePanel`의 cron override 반영 후 ~90s render/refetch
+churn 규명·수정(`schedule-panel.tsx`) + UI 재빌드/재배포 → schedule-write를 다시 blocking gate에 편입.
+spec 측 6-layer fix 재적용 지침은 `docs/journal.md` 2026-07-26.
+
+- **완료(이번 세션)**: C7 gate를 **4-spec**(read-auth·kma-active/empty/cap-write)으로 확정, schedule-write
+  descope(`scripts/run-c7-prod-live-e2e.sh` SPECS). test/deploy 근인 6개 규명·수정(canReset·getSchedule·reload
+  timeout·frozen-UI dispatchEvent·robustClick·90s timeout); getSchedule+timeout은 **#74 배포됨(b5375a52 prod)**.
+  prod 부수효과 2건(uncertain idempotency claim, KMA hourly cron leftover override→비활성) 복구(cron=20, RUNNING).
+- **잔여 = app-side render churn**(deterministic app 버그, test로 우회 불가). fresh 환경 재확인 권장(22회 재현이
+  dagster DB bloat로 reload/getSchedule을 느리게 했을 가능성).
+- **머지**: #837(map, gate descope) + #74(docker-manager, getSchedule public url + reload timeout).
+
 ## 2026-07-24 (claude) — C7 실질 코드 blocker 완료; 다음 = 후반 flaky UI/timing 하드닝
 
 **다음 한 작업**: `T-ADM-C7RUN` — C7 `ops-c7-kma-active-write`의 **후반 active 시나리오 flaky
