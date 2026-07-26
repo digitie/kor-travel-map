@@ -25,8 +25,12 @@
 - **검증**: 두 fix 후 c7-v6 causal-스코프 **GREEN (2 passed, 7.5s, rc=0)** — heading을 통과해 causal 소켓 assertion까지
   도달·통과. prod 부수효과 없음: active e2e target 0(soft-deleted 2건은 create→delete 라운드트립의 설계상 잔여),
   kma journal `phase=restored`/`target_refs=[]`, weather 정상.
-- **잔여**: PR 머지 → 신규 main 커밋으로 C7 executor 이미지 재-cut(rebind, 스펙 baked-in) → 공식 게이트 재실행해
-  6-spec(read-auth·kma×3·schedule-write + poi @c7-causal) 전부 green 확정.
+- **완결(재-cut + 공식 게이트)**: #839 머지(main `d5693269`) → deploy(e22b751e→d5693269, 4 map runtime
+  recreated+healthy, login 200) → rebind(executor 재빌드 @ d5693269 + snapshot 4-file byte-identical pins +
+  attestation `repository_commit=d5693269` self-verify PASS) → 공식 게이트(KST 19:41 window) **full GREEN**:
+  `status=0 orchestrator_verified=True repo=d5693269ac3e`, 6 spec 전부 passed(kma-active 2/2·kma-cap 2/2·
+  kma-empty 2/2·read-auth 7/7·schedule-write 2/2·**poi-cache-causal 2/2**), no BLOCKED. 사후 prod 클린(active
+  e2e target 0, weather 복원). **C7 COMPLETE at d5693269.**
 
 ## 2026-07-26 (claude) — C7 schedule-write 재편입: cron 복구 dialog inert 근인 수정 (T-ADM-C7-SCHEDCHURN)
 

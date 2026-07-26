@@ -15,13 +15,12 @@
     (canReset·robustClick·settle-gate·시작 confirm alertdialog locator). 적대 리뷰어 2명 반영 → 91b822e2(main+fix)
     prod 재배포 후 재검증 **GREEN(2 passed, 37s)** → schedule-write **blocking gate 재편입(C7 5-spec)**. 상세
     `docs/journal.md` 2026-07-26.
-  - [x] `T-ADM-C7-POICAUSAL` — **수정 완료·머지/재-cut 대기(2026-07-26)**: C7 게이트가 항상 poi-cache
-    `@c7-causal`에서 red였던 원인은 backend가 아니라 **test-side 2중 버그**: (1) `POI_HEADING` 영문 상수가 개편
-    B(`d8818994`) 한국어 h1 통일 이후 stale → `gotoPoiTargets` 15s timeout; (2)
-    `expectCausalDatasetProjectionUpdate`의 `page.evaluate` 콜백이 `connectionId` destructure 누락 → 상시
-    `ReferenceError`(cbe133c2 이래, heading 버그가 가림). 비-redacting c7-v6 causal-스코프로 live prod 재현·수정
-    → **GREEN(2 passed, 7.5s)**. PR `fix/c7-poi-cache-causal-heading-connectionid` → 머지 → rebind → 공식 게이트
-    6-spec green 확정이 잔여. 상세 `docs/journal.md` 2026-07-26.
+  - [x] `T-ADM-C7-POICAUSAL` — **완료(2026-07-26)**: C7 게이트가 항상 poi-cache `@c7-causal`에서 red였던 원인은
+    backend가 아니라 **test-side 2중 버그**: (1) `POI_HEADING` 영문 상수가 개편 B(`d8818994`) 한국어 h1 통일 이후
+    stale → `gotoPoiTargets` 15s timeout; (2) `expectCausalDatasetProjectionUpdate`의 `page.evaluate` 콜백이
+    `connectionId` destructure 누락 → 상시 `ReferenceError`(cbe133c2 이래, heading 버그가 가림). #839 머지(main
+    `d5693269`) → 재-cut(deploy+rebind) → 공식 게이트 **full GREEN**(6 spec 전부 passed, poi-cache-causal 2/2,
+    orchestrator_verified=true). **→ C7 COMPLETE at d5693269.** 상세 `docs/journal.md` 2026-07-26.
 - **진행 중 — vNext 재설계 (integration/t-vn 브랜치, C7 종결 전까지 통합 브랜치에 누적)**
   - [ ] `T-VN-SYNC-02` — **integration/t-vn → main 최종 합류**
   - [ ] `T-VN-57` — **public route policy·OpenAPI security·user surface 단일 정본** (#784)
