@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-26 (claude) — 백로그 전면 감사 + A/B lane 재분배 (codex 7~8 : claude 2~3)
+
+**다음 한 작업**: **Lane A `T-VN-LIVE-01`** — merged targeted live acceptance lane(#792)을 n150
+production에 파괴적 실행(WSL SSH, 실데이터), cleanup/audit/evidence 0/완결 증명 →
+`T-VN-04A`(#741)·`T-VN-58`(#785)·`T-VN-15` live 인수 일괄 종결 + issue #741/#785 close.
+
+- **감사(11-agent 전수)**: 열린 task 전부를 실코드·GitHub·PinVi/manager 상태와 대조. 완료 확정
+  이관: SYNC-02(#790)·T-VN-57(#784)·59(#786)·H02R(#796 close 2026-07-26)·H03R(#798)·H08(#799)·
+  H09(#797)·51~56(#816 rebase 후 머지) + SCHEDCHURN·POICAUSAL → `tasks-done.md` 2026-07-26 섹션.
+- **C6c 확인(사용자 지시)**: 코드 cutover는 완료(#387/#393, legacy 경로 0건)나 **미완** —
+  배포 pinvi(e60d1711)가 hardening #408 미포함, issue #392 open, principal 경계 smoke 미실행
+  (C7 read-auth는 admin-BFF만 커버). 잔여를 `T-VN-03`과 통합해 Lane A에 배정.
+- **Lane 재분배(2026-07-26, codex:claude≈7:3)**: **A(Claude)** = LIVE-01 실행·종결 →
+  C6c/T-VN-03 principal smoke·종결 → H06(#813) 2차 리뷰·머지·검증. **B(codex)** = b1 PinVi 결합
+  (08→11→12→16→41) · b2 H07 완결(#814+pinvi#403 머지, H07C #812 manifest v5, H07D #815) ·
+  b3 Wave 2 구조 전환(31→…→40→39) · 보류 T-101. 규율: A는 적대 리뷰어 2명+파괴적 live E2E,
+  설계 우수성·확장성·성능 우선(prod 보전·호환성·최소수정 비제약 — 서비스 전).
+
 ## 2026-07-26 (claude) — 🎯 C7 COMPLETE: 공식 6-spec prod 게이트 full GREEN @ d5693269
 
 **다음 한 작업**: **T-VN 트랙** — `T-VN-SYNC-02`(integration/t-vn → main 최종 합류) 등, C7 종결로 unblock.

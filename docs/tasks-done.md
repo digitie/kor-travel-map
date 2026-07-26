@@ -3,6 +3,61 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-26 전면 감사 정리 — C7 종결 + vNext Wave 0/1 합류 + 독립 하드닝 + Wave 3 측정
+
+11-agent 전수 감사(2026-07-26)로 실코드 기준 완료 확정한 항목. C7 COMPLETE @ d5693269
+(공식 6-spec prod gate full GREEN, `docs/journal.md` 2026-07-26).
+
+- [x] **T-ADM-C7-SCHEDCHURN** — 근인은 render churn이 아니라(오진), cron 저장 응답 유실 후
+  frozen-idempotency 복구가 필요해질 때 cron 수정 dialog(Base UI)가 열린 채 남아 페이지 전체가
+  inert가 되어 모든 schedule 컨트롤이 접근 불가가 되던 것. fix=`schedule-panel.tsx`(복구 필요
+  순간 dialog close) + spec 하드닝(canReset·robustClick·settle-gate·시작 confirm alertdialog
+  locator). 적대 리뷰어 2명 반영 → prod 재배포 후 재검증 GREEN → schedule-write blocking gate
+  재편입. PR #838. 상세 `docs/journal.md` 2026-07-26.
+- [x] **T-ADM-C7-POICAUSAL** — C7 게이트가 항상 poi-cache `@c7-causal`에서 red였던 원인은
+  backend가 아니라 test-side 2중 버그: (1) `POI_HEADING` 영문 상수가 개편 B(`d8818994`) 한국어
+  h1 통일 이후 stale → `gotoPoiTargets` 15s timeout; (2) `expectCausalDatasetProjectionUpdate`의
+  `page.evaluate` 콜백 `connectionId` destructure 누락 → 상시 `ReferenceError`(cbe133c2 이래,
+  heading 버그가 가림). PR #839(main d5693269) → 재-cut → 공식 게이트 full GREEN(6 spec 전부
+  passed). **C7 COMPLETE at d5693269.**
+- [x] **T-VN-SYNC-02 — integration/t-vn → main 최종 합류** — PR #790(2026-07-19, merge commit
+  d93cb16e, base=main/head=integration/t-vn ancestry 보존, CI 8-check green). T-VN-57(#787) 선행
+  머지 gate 준수. compatible-pair v4 activation은 2026-07-26 C7 재-cut으로 완결(map=d5693269 /
+  pinvi=e60d1711, attestation self-verify PASS, 공식 6-spec gate GREEN). `integration/t-vn`
+  통합 브랜치 규율은 본 합류로 폐지(이후 base=main).
+- [x] **T-VN-57 — public route policy·OpenAPI security·user surface 단일 정본** (#784 closed) —
+  PR #787: `_PUBLIC_CURATED_PATHS`/`USER_OPERATIONS` 수기 정본 제거, `build_route_policy_matrix`
+  단일 정본화, runtime↔full↔user 양방향 전수 대조 CI(`test_export_openapi.py` — drift는
+  ValueError로 거부), PUBLIC_KEYED=[PublicApiKey,ServiceToken]/PUBLIC_UNAUTHENTICATED=[]/
+  SERVICE=[ServiceToken] 정확 선언, user-client TS 재생성.
+- [x] **T-VN-59 — public weather·curation raw lineage 계약 분리** (#786 closed) — PR #788:
+  public/operator DTO 분리(`PublicWeatherAlertHistoryItem` vs `AdminWeatherAlertHistoryItem`,
+  `PublicCurationItemView` vs `AdminCurationItemView` — 상속 없음), user OpenAPI 재귀
+  reachable-schema 금지 게이트(`USER_RESPONSE_FORBIDDEN_PROPERTIES` fail-closed, cycle/allOf/
+  oneOf negative 테스트 포함), 수기 public curation client 동시 갱신.
+- [x] **T-VN-H02R — standalone destructive fail-close·backup principal 감사 완결** (#796
+  closed 2026-07-26) — PR #804 + companion docker-manager #68: compose 기본
+  `KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED:-false`, backup create/delete/restore/swap actor =
+  `AdminProxyContext.actor`만, `RestoreSwapRequest.operator` 제거(+422 회귀), principal별
+  registry 이벤트·resolved-compose default false/explicit true 회귀. migration 없음(요구대로).
+- [x] **T-VN-H03R — route wiring startup gate·public CORS exact preflight 완결** (#798 closed) —
+  PR #803: `create_app()`에서 `assert_route_policy_wiring()` fail-closed, `PUBLIC_CORS_REQUEST_HEADERS`
+  닫힌 allowlist(CORS safelist + If-None-Match + X-Kor-Travel-Map-Api-Key), route별 exact-method
+  CORS, 비허용 preflight 400 + ACAO 미방출, `KNOWN_WIRING_EXCEPTIONS == ()` 회귀.
+- [x] **T-VN-H08 — Tier-2 p95 nearest-rank 산식 정확화** (#799 closed) — PR #801:
+  `_nearest_rank_percentile` = `sorted(values)[ceil(p×n)-1]` 공용 helper(실행시간·shared read
+  blocks 공용), n=1/20/30/100 fixture로 index·값 고정. release evidence 재생성은 이전 evidence가
+  존재하지 않아 vacuous — 실제 1M+ 실분포 측정은 cutover(T-VN-39) 시 release 리포트로 수행.
+- [x] **T-VN-H09 — weather semantic upsert collected_at 단조성** (#797 closed) — PR #802:
+  `weather_repo.py` upsert `WHERE EXCLUDED.collected_at >= … AND ROW(…) IS DISTINCT FROM ROW(…)`
+  (ADR-072 0060 승자 규칙 정합), current-row 선택 근거 ADR-072에 기록, NULL(비허용)/동률(내용
+  다르면 later-write wins)/no-op(동일 replay 물리 UPDATE 없음) 정책 문서화, T1→T2/T2→T1/동률/
+  backfill 통합 회귀.
+- [x] **T-VN-51~56 — Wave 3 도입-조건 측정** — PR #816: 여섯 확장 후보(MVT/범용 batch/cursor
+  rotation/weather partition·hypertable/물리 listener/대규모 fixture 주기) 전부 측정·판정 완료.
+  T-VN-51~55는 명시 트리거로 유예, T-VN-56은 현행 2계층(per-PR tier-1 + release tier-2) 확정.
+  정본 `performance.md` §8.4 + `reports/t-vn-51-56-adoption-measurement-2026-07-21.md`.
+
 ## C7 prod-live 게이트 확정 · schedule-write descope (2026-07-26, `T-ADM-C7`·`T-ADM-C7RUN`)
 
 - [x] **T-ADM-C7 — live e2e 재작성 + n150 prod-live 검증 완결.** C7 prod-live 게이트를
