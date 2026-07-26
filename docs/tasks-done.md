@@ -7,6 +7,12 @@
 
 11-agent 전수 감사(2026-07-26)로 실코드 기준 완료 확정한 항목. C7 COMPLETE @ d5693269
 (공식 6-spec prod gate full GREEN, `docs/journal.md` 2026-07-26).
+- [x] **T-VN-08 — PinVi false-broken 수정** — PinVi PR #409(merge `423a8a3`): 외부 Feature
+  해석을 `found|missing|unverified|not_linked`로 분리하고 transport·typed Map 실패는 마지막 snapshot을
+  유지하는 `unverified`로 처리했다. opaque feature ID를 그대로 strict batch 계약에 전달해 구분자
+  parsing을 제거했다. n150 실데이터 파괴적 live UI E2E는 web Map popup의 연결 장애→복구를
+  검증했고, mobile 소비자는 TypeScript/type-check로 계약을 검증했다. 적대 리뷰어 2명 P0/P1/P2
+  없음, CI 6-check green 후 squash merge. 5-state producer 계약은 별도 `T-VN-11`로 계속한다.
 
 - [x] **T-ADM-C7-SCHEDCHURN** — 근인은 render churn이 아니라(오진), cron 저장 응답 유실 후
   frozen-idempotency 복구가 필요해질 때 cron 수정 dialog(Base UI)가 열린 채 남아 페이지 전체가

@@ -47,6 +47,7 @@ import {
   VWorldMapView,
 } from "@/components/vworld-map-view";
 import { shortId } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import { DEFAULT_VIEWPORT, type FeatureViewMode, type MapViewport } from "@/state/map";
 
@@ -205,14 +206,19 @@ function MembershipCard({ item }: { item: PublicCurationItem }) {
 
 function CurationGroupDetailPanel({
   group,
+  avoidMapControls,
   onClose,
 }: {
   group: PublicCurationGroup;
+  avoidMapControls: boolean;
   onClose: () => void;
 }) {
   return (
     <Card
-      className="absolute right-3 top-20 z-10 max-h-[calc(100%-5.75rem)] w-[min(28rem,calc(100%-1.5rem))] overflow-auto shadow-lg"
+      className={cn(
+        "absolute right-3 top-20 z-10 w-[min(28rem,calc(100%-1.5rem))] overflow-auto shadow-lg",
+        avoidMapControls ? "bottom-24" : "max-h-[calc(100%-5.75rem)]",
+      )}
       data-testid="curation-group-detail"
     >
       <CardHeader className="grid-cols-[1fr_auto]">
@@ -566,6 +572,7 @@ export function CuratedFeatureMapClient() {
               {selectedGroup ? (
                 <CurationGroupDetailPanel
                   group={selectedGroup}
+                  avoidMapControls
                   onClose={() => setSelectedFeatureId(null)}
                 />
               ) : null}
@@ -603,6 +610,7 @@ export function CuratedFeatureMapClient() {
               {selectedGroup ? (
                 <CurationGroupDetailPanel
                   group={selectedGroup}
+                  avoidMapControls={false}
                   onClose={() => setSelectedFeatureId(null)}
                 />
               ) : null}

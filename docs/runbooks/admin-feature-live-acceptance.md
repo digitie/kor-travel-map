@@ -166,7 +166,17 @@ Docker daemon 상태를 조사한 뒤 daemon restart 또는 host reboot로 late 
 
 ## 6. recovery
 
-같은 배포 env와 commit snapshot으로 실행한다.
+v3 snapshot 배치 전 고정 state root에 `BLOCKED.json`이 없는지 확인한다. v2 BLOCKED가 남아 있으면
+v3 helper로 변환하거나 삭제하지 않는다. v2에는 실행 identity가 없어 자동 호환성 판정이 불가능하므로,
+생성 당시 설치 snapshot과 배포 기록을 운영자가 확정해 그 snapshot의 recovery를 먼저 완료한다.
+생성 snapshot을 확정할 수 없으면 §5의 ACTIVE/container/DB 소유권을 수동 감사하고 fail-closed 상태를
+유지한다. BLOCKED가 완전히 종결된 뒤에만 v3 snapshot을 활성화한다.
+
+같은 배포 env와 commit snapshot으로 실행한다. 최초 실행은 BLOCKED v3에 source commit,
+API·Playwright image ID, compatible-pair manifest와 host attestation hash의 exact execution
+identity를 기록한다. recovery는 현재 runtime attestation에서 다시 얻은 identity가 BLOCKED와
+완전히 같을 때만 attempt를 증가시키며, 하나라도 다르면 mutation 전에 fail-closed한다. 성공 result
+v3에는 exact identity의 canonical SHA256과 pair/attestation hash만 남기고 원문은 남기지 않는다.
 
 ```bash
 sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_COMPATIBLE_PAIR_MANIFEST,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE \

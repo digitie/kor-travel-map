@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### Admin 지도 control·query identity 하드닝 (2026-07-26, T-VN-42)
+
+- **FIXED**: `/features`와 `/curated-features`의 우측 상세 패널이 MapLibre 우하단
+  `ScaleControl`을 덮지 않는다. mocked·live 브라우저 검증은 실제 bounding box 비겹침을
+  공용 계약으로 확인한다.
+- **FIXED**: admin in-bounds items/clusters cache identity가 HTTP 요청과 같은 원본 bbox·정수 zoom·
+  mode·filter를 사용한다. 13.x zoom에서 items UI가 server cluster 응답을 받는 경계 오류와
+  반올림 bbox key 충돌을 제거했다.
+- **RELIABILITY**: admin feature live recovery는 source commit·API/Playwright image·compatible-pair·
+  host attestation으로 고정한 exact execution identity가 다르면 cleanup mutation 전에 거부한다.
+  성공 결과에는 canonical identity SHA256과 pair/attestation hash만 남긴다.
+
 ### Ops live proxy close 전달 보강 (2026-07-20, T-VN-H11 #809)
 
 - **CHANGED**: 인증 거절 WebSocket은 accept부터 `4401` close까지를 보호된 child task에서

@@ -9,8 +9,8 @@
 
 > 2026-07-26 11-agent 전수 감사로 백로그를 실코드 기준으로 재정리했다. `integration/t-vn`에
 > 누적됐던 C7·Wave 0/1 코드는 전부 main 합류 완료(`T-VN-SYNC-02`=PR #790, C7 COMPLETE @
-> d5693269 — 단 PinVi 결합 task 08/11/12/16은 미착수로 Lane B에 잔존). 완료 이관:
-> SCHEDCHURN·POICAUSAL·SYNC-02·T-VN-57·59·H02R·H03R·H08·H09·51~56 → `tasks-done.md`
+> d5693269 — PinVi 결합 task 중 08은 PinVi PR #409로 완료, 11/12/16은 Lane B에 잔존). 완료 이관:
+> T-VN-08·SCHEDCHURN·POICAUSAL·SYNC-02·T-VN-57·59·H02R·H03R·H08·H09·51~56 → `tasks-done.md`
 > 2026-07-26 섹션. 감사 근거는 각 완료 항목에 기록. 추적 제외 결정(T-229-buildx,
 > T-AUDIT-0616 F-01 옵션 A — ADR-058 옵션 B 채택)은 `journal.md` 2026-06-29 결정 그대로 유지.
 
@@ -42,13 +42,16 @@ live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실�
   감사 확정).
 - [ ] `T-VN-H06` — **admin 목록 keyset 전환 완결**. 구현 완료 = PR #813(OPEN, CI green,
   1차 적대 리뷰 반영 커밋 포함; "C7 종결 후 진행" hold는 C7 COMPLETE로 해제). 잔여 =
-  2차 적대 리뷰 → 머지 → dedup/enrichment cursor e2e 런타임 검증(Windows Playwright).
+  2차 적대 리뷰 → 머지 → dedup/enrichment cursor e2e 런타임 검증(n150 Linux Playwright).
   **Lane A 규율 명시 예외**: 파괴적 n150 live E2E 대상 아님(admin 목록 read 표면) — 런타임
-  검증은 머지 후 Windows Playwright e2e로 수행(PR #813 본문에 정의된 순서 유지).
+  검증은 머지 후 n150 Linux Playwright e2e로 수행(PR #813 본문의 시나리오 순서 유지).
 
-**Lane B (codex)** — 병렬 wide lane. 규율: 각 코드 PR은 테스트 전 적대 리뷰어 1명 이상 반영.
+**Lane B (codex)** — 병렬 wide lane. 규율: 각 코드 PR은 테스트 전 적대 리뷰어 2명 반영 후
+n150 실데이터 파괴적 Live UI E2E를 통과한다.
 
-- b1 (PinVi 결합, 순차): [ ] `T-VN-08` → [ ] `T-VN-11` → [ ] `T-VN-12` → [ ] `T-VN-16` →
+- b0 (선행 하드닝, 순차): [ ] `T-VN-42` → [ ] `T-VN-43`(npm 보안) →
+  [ ] `T-VN-44`(frontend lint baseline) → [ ] `T-VN-45`(live endpoint·cache drift)
+- b1 (PinVi 결합, 순차): [ ] `T-VN-11` → [ ] `T-VN-12` → [ ] `T-VN-16` →
   [ ] `T-VN-41`
 - b2 (계약·manifest): [ ] `T-VN-H07`(+`H07C` #812·`H07D` #815) — PinVi field-level
   contract·pinned OpenAPI SHA manifest 완결(상세는 아래 b2 섹션).
@@ -62,8 +65,8 @@ live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실�
   `origin/main` rebase. PR 하나는 task 하나만 소유.
 - **Lane A**: 각 코드 task는 적대적 리뷰어 **2명** 반영 후 n150 **파괴적 live E2E**
   (실데이터)로 검증하고 PR·CI green·머지. 작업 중 발견 항목은 tasks.md에 즉시 추가.
-- **Lane B**: 각 코드 PR은 테스트 전 적대적 리뷰어 1명 이상 반영(기존 규율 유지).
-  task 완료 시 상대 lane 2일치 PR 적대 리뷰 관행 유지.
+- **Lane B**: 각 코드 task는 적대적 리뷰어 **2명** 반영 후 n150 **실데이터 파괴적 Live UI
+  E2E**를 통과하고 PR·CI green·머지한다. task 완료 시 상대 lane 2일치 PR 적대 리뷰 관행 유지.
 - **우선순위(서비스 전 단계 — 사용자 지시 2026-07-26)**: **정확성·보안 최우선은 불변**
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
@@ -71,20 +74,52 @@ live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실�
 - migration 정본: 단일 head 유지(현 head `0063_pipeline_root_id`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다.
 - 문서 전용·rebase-only·기계적 변경(변수명·import 정렬)은 적대 재리뷰 면제.
-- pytest 계열 테스트는 n150 WSL SSH CI-parity 게이트로 실행(로컬 디스크 보호).
-  **예외**: Playwright e2e는 Windows 정본(CLAUDE.md §4 dev-environment) — mocked e2e는
-  Windows에서, live e2e는 n150 파괴적 lane으로 실행.
+- pytest와 Playwright를 포함한 모든 검증은 n150 WSL SSH에서 실행한다. mocked e2e도 n150
+  Linux가 정본이며, n150에서 실행할 수 없는 브라우저 제약이 확인될 때만 Windows를 fallback으로
+  사용한다. live e2e는 항상 n150 파괴적 lane으로 실행한다.
 - **cross-lane 순서 제약**: `T-VN-H07C`(manifest v5)는 Lane A의 C6c pair capture·#392 close
   **이후** 착수(같은 docker-manager pair-capture 도구·ADR-076 정본을 두 lane이 동시에 만지는
   충돌 방지). 그 전까지 b2는 #814/pinvi#403 머지와 H07D를 진행한다.
 
+## Lane B 상세 — b0 선행 하드닝
+
+- [ ] T-VN-42 — **지도 상세 패널·실모션 zoom·items query key 하드닝**
+
+  PR #843 이후 전문 적대 리뷰에서 확인된 잔여를 한 번에 해소한다. `/features`와
+  `/curated-features`의 우측 상세 패널이 bottom-right `ScaleControl`을 덮지 않도록 고정 하단
+  여백을 계약화하고 mocked·실데이터 E2E에서 실제 bounding box 비겹침을 검증한다. live 전역
+  `reducedMotion: "reduce"` 의존을 제거하고 MapLibre의 실제 `moveend`까지 클릭마다 기다리는 zoom
+  helper로 전환한다. items/clusters in-bounds query key는 HTTP 요청과 동일한 정수 zoom과 원본 bbox,
+  명시적 mode를 사용하고, 서버의 정수 zoom 기준과 UI cluster/items 분기를 하나의 함수로 통일한다.
+  PR 전 #840 이후 Claude Code PR(닫힌 PR 포함) 재감사에서 발견한 #844의 BLOCKED clear 신호 경쟁
+  조건과 #845의 복구 실행 identity 증거 누락도 같은 변경에 반영한다. BLOCKED v3는 최초 실행의
+  source commit·API/Playwright image ID·compatible-pair manifest·host attestation hash를 기록하고,
+  recovery runtime과 exact 대조해 cross-version cleanup을 mutation 전에 거부한다. 성공 result v3에는
+  canonical identity SHA256과 pair/attestation hash만 영속화한다.
+
+- [ ] T-VN-43 — **admin frontend npm 보안 취약점 0-high 전환**
+
+  n150 clean `npm ci`의 `npm audit` 기준 16건(low 2, moderate 7, high 7)을 해소한다. 직접 의존
+  `next` high와 `shadcn` moderate, transitive `sharp`/`hono`/`js-yaml`/`fast-uri` 등을 runtime·tooling
+  도달성으로 분류하되 서비스 전 단계에서는 high 0을 필수 계약으로 둔다. lockfile을 의도적으로
+  갱신하고 type-check·build·mocked 및 실데이터 파괴적 Live UI E2E로 cutover를 검증한다.
+
+- [ ] T-VN-44 — **admin frontend full ESLint baseline green**
+
+  현재 `npm run lint`의 1 error/8 warnings를 suppression 없이 제거한다. 우선 blocker는
+  `schedule-panel.tsx` recovery dialog의 effect 내부 동기 `setEditing(null)`이며, recovery claim을
+  렌더 파생 상태 또는 command 경계로 재설계해 cascading render를 없앤다. 나머지 unused·hook
+  dependency·incompatible-library 경고는 실동작과 React Compiler 경계를 보존하면서 각각 근인으로
+  해소하고 full lint 0 problem을 회귀 게이트로 둔다.
+
+- [ ] T-VN-45 — **features map 실데이터 input-roundtrip endpoint·cache 대기 drift 제거**
+
+  T-VN-42 live 중 `features-map-input-roundtrip.live.spec.ts`의 점 마커 시나리오가 UI가 이미
+  `/v1/admin/features/in-bounds`로 전환된 뒤에도 public `/v1/features` bbox 응답만 기다려 5분
+  timeout하는 drift를 확인했다. admin items/clusters 응답을 정본으로 추적하고 React Query cache hit로
+  새 HTTP 응답이 없는 경우에도 map idle+실제 marker 상태로 수렴하도록 고쳐 false-red를 제거한다.
+
 ## Lane B 상세 — b1 PinVi 결합
-
-- [ ] T-VN-08 — **PinVi false-broken 수정**
-
-  transport 실패와 authoritative missing을 분리해 실패 시 stale snapshot을 유지하고 brittle ID
-  parsing을 제거한다(`trip_view_builder.py`의 `except Exception`→broken 마킹과
-  `feature_id.split("@", 1)` 제거). 5-state 계약 소비 준비까지 PinVi consumer task로 mirror한다.
 
 - [ ] T-VN-11 — **service batch 5-state 계약**
 

@@ -7,6 +7,7 @@ import {
 } from "@playwright/test";
 import { createHash } from "node:crypto";
 
+import { expectDetailPanelAboveScaleControl } from "../map-control-assertions";
 import type { components } from "../../src/api/types";
 
 type ChangeResponse = components["schemas"]["AdminFeatureChangeResponse"];
@@ -606,6 +607,62 @@ async function assertAdminInBoundsIncludes(
   );
 }
 
+type LiveMapState = { moving: boolean; zoom: number };
+
+async function readLiveMapState(page: Page): Promise<LiveMapState | null> {
+  return page.getByTestId("map-canvas-container").evaluate((node) => {
+    const map = (
+      node as HTMLDivElement & {
+        _maplibreMap?: { getZoom(): number; isMoving(): boolean };
+      }
+    )._maplibreMap;
+    return map === undefined
+      ? null
+      : { moving: map.isMoving(), zoom: map.getZoom() };
+  });
+}
+
+async function zoomMapTo(page: Page, targetZoom: number): Promise<void> {
+  const zoomIn = page.locator(".maplibregl-ctrl-zoom-in");
+  await expect(zoomIn).toBeVisible({ timeout: UI_TIMEOUT });
+  await expect
+    .poll(
+      async () => {
+        const state = await readLiveMapState(page);
+        return state === null ? "missing" : state.moving ? "moving" : "idle";
+      },
+      { timeout: UI_TIMEOUT },
+    )
+    .toBe("idle");
+
+  for (let click = 0; click < 12; click += 1) {
+    const before = (await readLiveMapState(page))?.zoom;
+    if (before === undefined) {
+      throw new Error("MapLibre 테스트 핸들을 찾을 수 없습니다.");
+    }
+    if (before >= targetZoom) break;
+
+    await zoomIn.click();
+    await expect
+      .poll(
+        async () => {
+          const state = await readLiveMapState(page);
+          return state !== null && !state.moving && state.zoom > before;
+        },
+        { timeout: UI_TIMEOUT },
+      )
+      .toBe(true);
+  }
+
+  await expect
+    .poll(
+      async () =>
+        (await readLiveMapState(page))?.zoom ?? Number.NEGATIVE_INFINITY,
+      { timeout: UI_TIMEOUT },
+    )
+    .toBeGreaterThanOrEqual(targetZoom);
+}
+
 async function assertStatusMarker(
   page: Page,
   fixture: (typeof STATUS_FEATURES)[number],
@@ -623,8 +680,6 @@ async function assertStatusMarker(
     await placeToggle.click();
   }
   await page.getByLabel("상태 필터").selectOption(fixture.status);
-  const zoomIn = page.locator(".maplibregl-ctrl-zoom-in");
-  await expect(zoomIn).toBeVisible({ timeout: UI_TIMEOUT });
   const inBoundsResponsePromise = page.waitForResponse(
     async (response) => {
       if (
@@ -648,9 +703,7 @@ async function assertStatusMarker(
     },
     { timeout: FLOW_TIMEOUT },
   );
-  for (let index = 0; index < 9; index += 1) {
-    await zoomIn.click();
-  }
+  await zoomMapTo(page, 14);
   const inBoundsResponse = await inBoundsResponsePromise;
   expect(inBoundsResponse.status()).toBe(200);
 
@@ -666,6 +719,7 @@ async function assertStatusMarker(
         ? "비활성"
         : "숨김",
   );
+  await expectDetailPanelAboveScaleControl(page, "feature-detail-panel");
 
   expect(
     (await browserFetch(page, publicFeaturePath(fixture.featureId))).status,

@@ -32,6 +32,7 @@ API_IMAGE_ID=""
 COMPATIBLE_PAIR_SHA256=""
 HOST_ATTESTATION_SHA256=""
 BARRIER_FD=""
+declare -a EXECUTION_IDENTITY_ARGS=()
 
 die() {
   printf 'admin feature live acceptance failed: %s (values redacted)\n' "$1" >&2
@@ -67,18 +68,19 @@ write_blocked() {
     --run-id "$RUN_ID" \
     --recovery-attempt "$ATTEMPT" \
     --phase "$1" \
-    --status blocked
+    --status blocked \
+    "${EXECUTION_IDENTITY_ARGS[@]}"
 }
 
 write_result() {
   state_helper write-result \
     --path "$RUNTIME_DIR/result.json" \
+    --blocked-path "$BLOCKED_FILE" \
     --run-id "$RUN_ID" \
     --recovery-attempt "$ATTEMPT" \
     --phase "$1" \
     --status complete \
-    --compatible-pair-sha256 "$COMPATIBLE_PAIR_SHA256" \
-    --host-attestation-sha256 "$HOST_ATTESTATION_SHA256"
+    "${EXECUTION_IDENTITY_ARGS[@]}"
 }
 
 set_run_key() {
@@ -173,6 +175,14 @@ validate_runtime() {
   API_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$API_CONTAINER_ID" 2>/dev/null)" ||
     die "Map API image lookup failed"
   [[ "$API_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || die "Map API image identity is invalid"
+
+  EXECUTION_IDENTITY_ARGS=(
+    --source-commit "$E2E_C7_EXPECTED_GIT_COMMIT"
+    --api-image-id "$API_IMAGE_ID"
+    --playwright-image-id "$E2E_C7_PLAYWRIGHT_IMAGE"
+    --compatible-pair-sha256 "$COMPATIBLE_PAIR_SHA256"
+    --host-attestation-sha256 "$HOST_ATTESTATION_SHA256"
+  )
 }
 
 initialize_state() {
@@ -378,7 +388,8 @@ recover_run() {
   ACTOR="recovery"
   local -a recovery_identity=()
   mapfile -t recovery_identity < <(
-    state_helper begin-recovery --path "$BLOCKED_FILE"
+    state_helper begin-recovery --path "$BLOCKED_FILE" \
+      "${EXECUTION_IDENTITY_ARGS[@]}"
   ) || die "BLOCKED state is invalid"
   (( ${#recovery_identity[@]} == 2 )) || die "recovery identity output is invalid"
   RUN_ID="${recovery_identity[0]}"
@@ -409,10 +420,10 @@ recover_run() {
   fi
   validate_evidence recover
   write_result recovered
-  state_helper clear-blocked --path "$BLOCKED_FILE" || die "BLOCKED clear failed"
-  # clear 성공 직후 INT/TERM이 오면 finish_signal이 이미 성공한 run에 대해 새
-  # BLOCKED를 재작성하는 창이 있었다(R792-4). RUN_ID를 비워 guard를 닫는다.
+  # 외부 clear 명령 대기 중 signal trap이 다음 shell 명령 전에 실행되므로 guard를 먼저 닫는다.
+  # clear가 실패하거나 signal로 중단되면 기존 BLOCKED가 남고, 성공 뒤에는 재작성되지 않는다.
   RUN_ID=""
+  state_helper clear-blocked --path "$BLOCKED_FILE" || die "BLOCKED clear failed"
 }
 
 run_new() {
@@ -462,9 +473,9 @@ PY
   fi
   validate_evidence normal
   write_result passed
-  state_helper clear-blocked --path "$BLOCKED_FILE" || die "BLOCKED clear failed"
-  # clear 성공 직후 signal 창 봉쇄 — recover_run과 동일(R792-4).
+  # recover_run과 동일하게 외부 clear 명령보다 signal guard를 먼저 닫는다(R792-4).
   RUN_ID=""
+  state_helper clear-blocked --path "$BLOCKED_FILE" || die "BLOCKED clear failed"
 }
 
 [[ "$MODE" == "run" || "$MODE" == "recover" ]] || die "usage: runner [run|recover]"

@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import path from "node:path";
 
+import { expectDetailPanelAboveScaleControl } from "../map-control-assertions";
+
 type Collection = {
   collection_id: string;
   collection_key: string;
@@ -242,6 +244,7 @@ test.describe("공식 큐레이션 collection live", () => {
     const mapDetail = page.getByTestId("curation-group-detail");
     await expect(mapDetail.getByText("2023-2024", { exact: true })).toBeVisible();
     await expect(mapDetail.getByText("2025-2026", { exact: true })).toBeVisible();
+    await expectDetailPanelAboveScaleControl(page, "curation-group-detail");
 
     await page.getByRole("tab", { name: "테이블" }).click();
     const table = page.getByRole("table", { name: "큐레이션 Feature 그룹" });

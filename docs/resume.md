@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-26 (codex) — T-VN-42 구현·실데이터 파괴적 live 검증 완료
+
+**다음 한 작업**: T-VN-42의 최종 2인 적대 리뷰와 CI green·실제 GitHub approval·머지를 끝낸 뒤
+Lane B b0의 `T-VN-43`(admin frontend npm 보안 취약점 0-high)로 진행한다.
+
+- 두 지도 상세 패널의 MapLibre control-safe 여백과 실제 bounding-box 비겹침 assertion을 공용화하고,
+  live 전역 reduced-motion 우회를 제거해 실제 zoom click·motion 종료를 검증했다.
+- admin in-bounds query key와 HTTP identity를 원본 bbox·정수 zoom·items/clusters mode로 일치시키고,
+  UI/server cluster 경계를 공용 함수로 단일화했다.
+- #840 이후 Claude Code PR #841~#845 전문 감사 결과를 반영해 BLOCKED/result v3 exact execution
+  identity와 recovery pre-mutation fail-close, clear 신호 경쟁 방지를 구현했다.
+- n150 실제 데이터에서 feature panel↔scale 20px 비겹침을 확인했고 공식 CSV 5종을 preview·commit한
+  파괴적 live UI E2E가 4/4 통과했다(19 collections·486 memberships·지도 상세 재검증).
+- 작업 중 발견한 `T-VN-43`(npm audit), `T-VN-44`(full ESLint), `T-VN-45`(live endpoint/cache drift)를
+  백로그에 추가했다.
+
 ## 2026-07-26 (claude) — 백로그 전면 감사 + A/B lane 재분배 (codex 7~8 : claude 2~3)
 
 **다음 한 작업**: **Lane A `T-VN-LIVE-01`** — merged targeted live acceptance lane(#792)을 n150
@@ -13,9 +29,11 @@ production에 파괴적 실행(WSL SSH, 실데이터), cleanup/audit/evidence 0/
   배포 pinvi(e60d1711)가 hardening #408 미포함, issue #392 open, principal 경계 smoke 미실행
   (C7 read-auth는 admin-BFF만 커버). 잔여를 `T-VN-03`과 통합해 Lane A에 배정.
 - **Lane 재분배(2026-07-26, codex:claude≈7:3)**: **A(Claude)** = LIVE-01 실행·종결 →
-  C6c/T-VN-03 principal smoke·종결 → H06(#813) 2차 리뷰·머지·검증. **B(codex)** = b1 PinVi 결합
-  (08→11→12→16→41) · b2 H07 완결(#814+pinvi#403 머지, H07C #812 manifest v5, H07D #815) ·
-  b3 Wave 2 구조 전환(31→…→40→39) · 보류 T-101. 규율: A는 적대 리뷰어 2명+파괴적 live E2E,
+  C6c/T-VN-03 principal smoke·종결 → H06(#813) 2차 리뷰·머지·검증. **B(codex)** = b0 선행
+  하드닝(42→43→44→45) · b1 PinVi 결합(11→12→16→41; 08은 PinVi #409로 완료) · b2 H07
+  완결(#814+pinvi#403 머지,
+  H07C #812 manifest v5, H07D #815) · b3 Wave 2 구조 전환(31→…→40→39) · 보류 T-101.
+  규율: A는 적대 리뷰어 2명+파괴적 live E2E,
   설계 우수성·확장성·성능 우선(prod 보전·호환성·최소수정 비제약 — 서비스 전).
 
 ## 2026-07-26 (claude) — 🎯 C7 COMPLETE: 공식 6-spec prod 게이트 full GREEN @ d5693269

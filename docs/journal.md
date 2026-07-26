@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-26 (codex) — T-VN-42 지도 control·query identity·live recovery 하드닝
+
+**결론**: `/features`와 `/curated-features`의 상세 패널이 MapLibre 우하단 `ScaleControl`을
+가리던 배치, 정수 zoom 경계에서 UI mode와 서버 응답이 어긋나던 query identity, 실제 motion을
+우회하던 live 설정을 함께 고쳤다. #840 이후 Claude Code 작성 PR #841~#845(닫힌 PR 포함)도
+전문 적대 감사해 #844의 BLOCKED clear 신호 경쟁과 #845의 cross-version recovery 가능성을 같은
+실행 identity 계약으로 차단했다.
+
+- **지도 계약**: 두 상세 패널에 control-safe 하단 여백을 두고 공용 Playwright assertion이 패널과
+  scale의 실제 bounding box 비겹침을 검증한다. live의 전역 `reducedMotion` 강제를 제거하고 실제
+  zoom button click 뒤 MapLibre motion 종료와 zoom 증가를 기다린다.
+- **query identity**: items/clusters key는 HTTP와 같은 원본 bbox·정수 zoom·명시적 mode·filter를
+  사용한다. UI 분기와 server cluster 판정을 공용 함수로 묶어 13.x zoom에서 items UI가 cluster
+  응답을 받던 경계를 제거하고, 반올림 bbox key 충돌도 없앴다.
+- **recovery identity**: BLOCKED v3가 source commit·API/Playwright image ID·compatible-pair
+  manifest·host attestation hash를 한 실행 identity로 고정한다. recovery는 attempt 증가나 cleanup
+  mutation 전에 현재 runtime과 exact 대조하며, result v3에는 canonical identity SHA256과
+  pair/attestation hash만 기록한다. 외부 `clear-blocked` 전에 runner signal trap의 `RUN_ID`를
+  비워 종료 신호가 이미 정리된 run을 다시 BLOCKED로 쓰는 경쟁도 제거했다.
+- **실데이터 검증**: n150의 branch production build를 실제 Map/Dagster 데이터에 연결해 실제 zoom
+  motion과 feature 상세를 검증했고 패널↔scale 간격 20px를 확인했다. 이어 공식 CSV 5종을 preview 후
+  실제 커밋하는 파괴적 live UI E2E가 4/4 통과했으며 REST·관리자 상세·지도에서 19 collections와
+  486 memberships를 재검증했다. 임시 UI·브라우저·산출물은 종료·삭제했다.
+- **추가 발견**: clean npm audit, full ESLint baseline, stale live endpoint/cache 대기를 각각
+  `T-VN-43`·`T-VN-44`·`T-VN-45`로 등록했다.
+
 ## 2026-07-26 (claude) — C7 gate poi-cache @c7-causal 결정적 실패 규명·수정 (test-side 2중 버그)
 
 **결론**: C7 prod 게이트가 항상 poi-cache `@c7-causal`에서 red였던 원인은 backend/causal projection이 아니라
