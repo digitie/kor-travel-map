@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-26 (claude) — C7 gate poi-cache @c7-causal 결정적 실패 수정 (test-side 2중 버그)
+
+**다음 한 작업**: `fix/c7-poi-cache-causal-heading-connectionid` PR → CI green → 머지 → 신규 main에서 C7
+executor 재-cut(rebind, 스펙 baked-in) → 공식 게이트 재실행해 6-spec 전부 green 확정. 그 후 T-VN 트랙 unblock.
+
+- **완료(이번 세션)**: C7 게이트가 항상 poi-cache `@c7-causal`에서 red였던 원인 규명. backend/causal projection이
+  아니라 **test-side 2중 버그**: (1) `POI_HEADING` 영문 상수가 개편 B(`d8818994`) 한국어 h1 통일("POI 캐시 대상")
+  이후 stale → `gotoPoiTargets` 15s timeout; (2) `expectCausalDatasetProjectionUpdate`의 `page.evaluate`가
+  `connectionId`를 destructure 안 해 `ReferenceError`(cbe133c2 이래 상시 실패, heading 버그가 가림). 비-redacting
+  c7-v6 causal-스코프로 live prod 재현·수정 → **GREEN(2 passed, 7.5s)**. projection-lag 가설은 오진. 상세
+  `docs/journal.md` 2026-07-26.
+
 ## 2026-07-26 (claude) — C7 SCHEDCHURN 완료: schedule-write 재편입, gate 5-spec 복원
 
 **다음 한 작업**: T-VN 트랙 — `T-VN-SYNC-02`(integration/t-vn → main 최종 합류) 등, C7 종결로 unblock.

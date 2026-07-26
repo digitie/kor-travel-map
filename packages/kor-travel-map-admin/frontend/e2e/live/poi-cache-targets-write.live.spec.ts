@@ -49,7 +49,9 @@ const EXECUTE_POI_CACHE_WRITE =
 const LIVE_API_BASE =
   process.env.NEXT_PUBLIC_KOR_TRAVEL_MAP_API ?? "http://127.0.0.1:12701";
 
-const POI_HEADING = "POI cache targets";
+// 개편 B(d8818994, "헤딩 정본")에서 admin h1이 한국어 정본으로 통일됐다.
+// page.tsx metadata의 영문 <title>과는 별개다 — 실제 <h1>은 "POI 캐시 대상".
+const POI_HEADING = "POI 캐시 대상";
 
 type PoiMutationJournal = {
   entity_tag: string | null;
@@ -733,7 +735,7 @@ async function expectCausalDatasetProjectionUpdate(
   await expect
     .poll(
       () =>
-        page.evaluate(({ frameCursor, receipt }) => {
+        page.evaluate(({ connectionId, frameCursor, receipt }) => {
           const state = globalThis as typeof globalThis & {
             __c7cLive?: {
               closed: boolean;
