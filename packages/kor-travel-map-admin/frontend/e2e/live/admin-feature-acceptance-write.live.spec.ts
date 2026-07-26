@@ -71,7 +71,18 @@ const PRICE_FEATURE = {
   lon: LON - 0.002,
   name: `E2E hidden price ${RUN_ID}`,
 };
-const SEARCH_QUERY = `E2E search ${RUN_ID}`;
+// 검색 fixture 전용 토큰은 RUN_ID의 해시 파생값을 쓴다: /v1/features/search는
+// pg_trgm similarity(threshold 0.2) 기반이라, 쿼리에 RUN_ID 원문(수십 자)을
+// 넣으면 같은 run의 다른 active fixture(correction baseline — 이름에 동일
+// RUN_ID 포함)까지 trigram 매칭돼 total=2 단언이 3으로 깨진다(1f34586e live
+// 재현으로 확정). 해시 토큰은 run-scoped 유일성은 유지하면서 다른 fixture
+// 이름과 긴 공유 substring이 없어 fuzzy 검색과 격리된다. RECOVERY_ONLY도
+// 같은 RUN_ID env에서 동일 토큰을 재파생하므로 cleanup 대칭이 유지된다.
+const SEARCH_TOKEN = createHash("sha256")
+  .update(`acceptance-search:${RUN_ID}`)
+  .digest("hex")
+  .slice(0, 16);
+const SEARCH_QUERY = `e2esrch ${SEARCH_TOKEN}`;
 const SEARCH_FEATURES = ["alpha", "beta"].map((suffix, index) => ({
   featureId: `${PREFIX}::search::${suffix}`,
   lat: LAT + 0.004 + index * 0.001,
