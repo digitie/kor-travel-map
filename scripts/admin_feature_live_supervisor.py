@@ -258,6 +258,12 @@ class Supervisor:
         # create한다. loopback DB 도달성이 API runtime과 정확히 일치하고
         # post-create attachment 창 자체가 없어진다. host mode에서 Networks가
         # {"host"} 외의 조합이면 clone 대상이 아니므로 fail-closed한다.
+        #
+        # 비-host runtime도 create 시 첫 network에 직접 붙인다: 기존
+        # none+connect 흐름은 docker가 none(private) 모드 컨테이너에 어떤
+        # network connect도 거부하므로 도달 불가능한 죽은 경로였다(적대 리뷰
+        # 실증). 첫 network로 create한 stopped 컨테이너에 나머지 network를
+        # connect하는 것은 지원된다.
         host_networked = network_mode == "host"
         if host_networked:
             if not isinstance(networks, dict) or set(networks) != {"host"}:
@@ -268,6 +274,7 @@ class Supervisor:
             or not all(_NETWORK_RE.fullmatch(value) for value in networks)
         ):
             raise RuntimeError("API runtime clone inputs are unsafe")
+        ordered_networks = [] if host_networked else sorted(networks)
         runtime_environment = _unique_environment(environment)
         process_environment = dict(os.environ)
         process_environment.update(runtime_environment)
@@ -284,7 +291,7 @@ class Supervisor:
             self.args.container_name,
             *self.labels(),
             "--network",
-            "host" if host_networked else "none",
+            "host" if host_networked else ordered_networks[0],
             "--read-only",
             "--security-opt",
             "no-new-privileges",
@@ -311,7 +318,7 @@ class Supervisor:
             process_environment=process_environment,
         )
         if not host_networked:
-            for network in sorted(networks):
+            for network in ordered_networks[1:]:
                 if (
                     _run(
                         ["docker", "network", "connect", "--", network, self.container_id]

@@ -144,7 +144,7 @@ def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue
     assert "process_environment.update(runtime_environment)" in supervisor
     assert 'for value in ("--env", name)' in supervisor
     assert "process_environment=process_environment" in supervisor
-    assert '"host" if host_networked else "none"' in supervisor
+    assert '"host" if host_networked else ordered_networks[0]' in supervisor
     assert '"docker", "network", "connect"' in supervisor
     assert "io.kortravelmap.admin-feature-acceptance.run-key" in supervisor
     assert "io.kortravelmap.admin-feature-acceptance.operation" in supervisor
@@ -164,10 +164,16 @@ def test_helper_clones_host_network_mode_without_post_create_attachment() -> Non
     assert 'network_mode = record.get("HostConfig", {}).get("NetworkMode")' in supervisor
     assert 'host_networked = network_mode == "host"' in supervisor
     assert 'set(networks) != {"host"}' in supervisor
-    assert '"host" if host_networked else "none"' in supervisor
-    attachment = supervisor.index('"docker", "network", "connect"')
-    guard = supervisor.index("if not host_networked:")
-    assert guard < attachment
+    # 비-host runtime은 첫 network로 직접 create한다: none+connect는 docker가
+    # none(private) 모드 컨테이너에 network connect를 거부해 죽은 경로였다.
+    assert 'ordered_networks = [] if host_networked else sorted(networks)' in supervisor
+    assert '"host" if host_networked else ordered_networks[0]' in supervisor
+    # connect 루프는 host 가드 아래 "나머지" network에만 — 인접 substring으로
+    # nesting 자체를 고정한다(순서 비교만으로는 dedent mutation을 못 잡는다).
+    assert (
+        "if not host_networked:\n            for network in ordered_networks[1:]:"
+        in supervisor
+    )
     # cursor probe는 API network mode와 무관하게 항상 networkless로 남는다.
     probe_body = supervisor[supervisor.index("def probe(") :]
     assert '"--network",\n            "none"' in probe_body
