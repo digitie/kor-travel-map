@@ -344,7 +344,11 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
       url.pathname === "/v1/admin/features/in-bounds" ||
       url.pathname === "/api/proxy/v1/admin/features/in-bounds"
     ) {
-      const clustered = url.searchParams.has("zoom");
+      // 서버 규칙 미러(_resolve_admin_cluster_unit): zoom 부재 또는 >=14 → items,
+      // zoom<=13 → cluster. (client가 zoom을 items 모드에서도 항상 보내므로
+      // 존재 여부만으로는 더 이상 구분할 수 없다.)
+      const zoomParam = url.searchParams.get("zoom");
+      const clustered = zoomParam !== null && Number(zoomParam) <= 13;
       if (clustered) {
         requests.cluster += 1;
         requests.clusterKinds.push(url.searchParams.getAll("kind"));

@@ -116,7 +116,7 @@ function FeatureDetailPanel({
 
   return (
     <Card
-      className="absolute right-3 top-3 z-10 max-h-[calc(100%-1.5rem)] w-[min(24rem,calc(100%-1.5rem))] overflow-auto shadow-lg"
+      className="absolute right-3 top-20 z-10 max-h-[calc(100%-5.75rem)] w-[min(24rem,calc(100%-1.5rem))] overflow-auto shadow-lg"
       data-testid="feature-detail-panel"
     >
       <CardHeader className="grid-cols-[1fr_auto]">
@@ -586,6 +586,8 @@ export function FeaturesClient() {
                 apiKey={VWORLD_KEY}
                 center={[viewport.lon, viewport.lat]}
                 className="absolute inset-0 h-full w-full"
+                navigation
+                scale
                 testId="map-canvas-container"
                 zoom={viewport.zoom}
                 onLoad={updateViewportFromMap}

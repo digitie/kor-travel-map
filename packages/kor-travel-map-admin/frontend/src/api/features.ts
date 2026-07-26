@@ -526,7 +526,11 @@ export function adminFeaturesInBoundsPath(
     kind: params.kinds,
     provider: params.provider,
     status: params.statuses,
-    zoom: options.clustered ? Math.floor(params.zoom) : undefined,
+    // zoom은 cluster/items 모드 공통으로 항상 전송한다(계약 대칭 + 서버 관측).
+    // items 모드에서 zoom을 생략하면 소비자(예: live acceptance의 in-bounds
+    // predicate)가 요청의 zoom 문맥을 알 수 없다 — cluster 모드에서만 보내던
+    // 기존 비대칭은 #779의 잔재(리뷰 확인: 서버는 items에서도 zoom 수용).
+    zoom: Math.floor(params.zoom),
     max_items: 2000,
     include_geometry: options.clustered ? undefined : params.includeGeometry,
   });

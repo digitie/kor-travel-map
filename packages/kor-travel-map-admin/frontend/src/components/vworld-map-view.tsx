@@ -47,6 +47,9 @@ interface VWorldMapViewProps {
   layerType?: VWorldLayerType;
   maxZoom?: number;
   minZoom?: number;
+  // navigation/scale은 mount-time 전용이다: map 생성 effect(deps=[]) 안에서만
+  // 읽으므로 mount 이후 값 변경은 무시된다. 동적 토글이 필요해지면 [map,
+  // navigation, scale] 의존 별도 effect로 addControl/removeControl을 옮길 것.
   navigation?: boolean;
   scale?: boolean;
   className?: string;

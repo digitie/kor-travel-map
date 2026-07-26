@@ -72,7 +72,9 @@ describe("feature map tile selection", () => {
     expect(path).toContain("status=inactive");
     expect(path).toContain("status=hidden");
     expect(path).toContain("include_geometry=true");
-    expect(path).not.toContain("zoom=");
+    // items 모드에서도 zoom을 항상 전송한다(서버는 zoom>=14를 items로 해석 —
+    // _resolve_admin_cluster_unit). 소비자가 요청의 zoom 문맥을 관측 가능해야 한다.
+    expect(path).toContain("zoom=14");
   });
 
   it("admin cluster viewport는 zoom을 보내고 geometry payload는 요청하지 않는다", () => {
