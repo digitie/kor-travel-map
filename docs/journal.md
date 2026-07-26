@@ -2,6 +2,42 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-26 (claude) — C7 close: schedule-write descope(app-side UI churn) + 근인 6개 규명·수정
+
+**결론**: C7 prod-live gate를 **read-auth·kma-active/empty/cap-write 4-spec**로 확정(green), **ops-c7-schedule-write는
+blocking gate에서 descope**. test/deploy 측 근인은 모두 규명·수정했고, 남은 건 cron override UI 경로가 유발하는
+admin schedule 목록의 **~90s render churn(app-side)** 하나뿐. 사용자 결정(descope+머지).
+
+**규명·수정한 근인 6개**(verbose-iterate + n150 prod 재현 ×22):
+1. **canReset 모델 오예측** — `waitForSchedule` 확정이 dagster canReset을 test 모델(`status !== defaultStatus`)로
+   기대했으나, dagster는 명시적 start/stop마다 override를 만들어 status==defaultStatus여도 canReset=true.
+   → 모델을 `command === "reset" ? false : true`로, `waitForSchedule` 비교에서 canReset 제외(파생 override 플래그,
+   operational 아님). [spec — 재적용 대상]
+2. **getSchedule attestation** — 배포 API가 내부 `http://127.0.0.1:12702/graphql`(canonicalGraphqlSha256 https 강제에
+   걸림) 반환. → **#74**: docker-manager compose 공개 `KOR_TRAVEL_MAP_API_DAGSTER_GRAPHQL_URL` + allowed_hosts에 공개
+   host. **배포됨(b5375a52 prod)**.
+3. **reload timeout** — `reloadRepositoryLocation`(cron override 반영 시)은 ~4s인데 기본 3s dagster_request_timeout이
+   1s 차로 놓쳐 503. → **#74**: `KOR_TRAVEL_MAP_API_DAGSTER_REQUEST_TIMEOUT_SECONDS=30`. **배포됨**(cron reload 200).
+4. **cron frozen-UI replay 미발화** — post-commit response-loss가 초기 patch를 route.abort하면 reload churn으로 재확인
+   버튼이 sub-second로 위치 이동 → `click({force})`가 빗맞혀 onClick 무발화(replay route-hit 없음). → `dispatchEvent`로
+   위치 무관 발화. [spec — 재적용 대상]
+5. **command/cron 버튼 클릭 churn** — 동일 churn을 모든 start/stop/reset/cron/save 클릭에 `robustClick`(enabled 대기 +
+   dispatchEvent 재시도)로 적용. [spec — 재적용 대상]
+6. **UI_MUTATION_TIMEOUT 30s→90s** — cron replay reload 수용. [spec — 재적용 대상]
+
+**남은 근인(descope 사유) = app-side render churn**: cron override 반영 후 `SchedulePanel` 목록이 **~90s간 심한
+re-render**(button attach/detach + `scheduleControlsDisabled` 깜빡임)로 start/stop 컨트롤을 조작할 순간이 전혀 없다
+(dispatchEvent·retry·force 모두 그 창에서 실패; DOM 계측상 ~90s 후 버튼은 enabled·정상). test로는 조작 불가 →
+**`schedule-panel.tsx` render/refetch churn 규명·수정 + UI 재빌드/재배포**가 필요한 별개 app 작업(후속 `T-ADM-C7-SCHEDCHURN`).
+22회 재현이 dagster DB를 bloat해 reload/getSchedule을 느리게 한 환경 아티팩트 가능성도 있음 — fresh 환경 재확인 권장.
+
+**진행/부수**: 6개 fix로 stop✓ → cron(replay)✓ → START 직전까지 도달(5-step 중 3). prod 부수효과 2건 복구 완료 —
+(a) 실패 run들이 남긴 uncertain idempotency claim(`ops.dagster_schedule_active_claims`, CHECK상 resolution 후에만 삭제
+가능) → 감사이력 동반 resolve+delete; (b) KMA hourly cron이 leftover temp override(`17 3 15 1 *`, 연 1회)로 사실상
+비활성화 → `ops.dagster_schedule_overrides` 정리 + dagster reload로 `20 * * * *` 복원. 현 prod: cron=20, RUNNING.
+**descope 방법**: `scripts/run-c7-prod-live-e2e.sh` SPECS에서 schedule-write 제외(spec 파일·contract test content 계약은
+유지). spec은 b5375a52 배포본 유지(WIP fix는 위 6개로 문서화 — 재적용 시 참조). **머지**: #837(gate descope) + #74.
+
 ## 2026-07-24 (claude) — C7 detail perf + running-race fix 완료; 잔여 = 후반 flaky UI/timing
 
 - 이전 "외부 data.go.kr KMA 502가 유일 blocker" 진단은 **오류**였다(폐기). verbose-iterate(비-redacting
