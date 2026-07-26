@@ -251,8 +251,18 @@ class Supervisor:
         record = records[0]
         config = record.get("Config")
         networks = record.get("NetworkSettings", {}).get("Networks")
+        network_mode = record.get("HostConfig", {}).get("NetworkMode")
         environment = config.get("Env") if isinstance(config, dict) else None
-        if (
+        # host-network API runtime(n150 production compose): docker는
+        # `network connect host`를 거부하므로 helper를 host network로 직접
+        # create한다. loopback DB 도달성이 API runtime과 정확히 일치하고
+        # post-create attachment 창 자체가 없어진다. host mode에서 Networks가
+        # {"host"} 외의 조합이면 clone 대상이 아니므로 fail-closed한다.
+        host_networked = network_mode == "host"
+        if host_networked:
+            if not isinstance(networks, dict) or set(networks) != {"host"}:
+                raise RuntimeError("API runtime clone inputs are unsafe")
+        elif (
             not isinstance(networks, dict)
             or not networks
             or not all(_NETWORK_RE.fullmatch(value) for value in networks)
@@ -274,7 +284,7 @@ class Supervisor:
             self.args.container_name,
             *self.labels(),
             "--network",
-            "none",
+            "host" if host_networked else "none",
             "--read-only",
             "--security-opt",
             "no-new-privileges",
@@ -300,12 +310,15 @@ class Supervisor:
             "helper",
             process_environment=process_environment,
         )
-        for network in sorted(networks):
-            if (
-                _run(["docker", "network", "connect", "--", network, self.container_id]).returncode
-                != 0
-            ):
-                raise RuntimeError("helper network attachment failed")
+        if not host_networked:
+            for network in sorted(networks):
+                if (
+                    _run(
+                        ["docker", "network", "connect", "--", network, self.container_id]
+                    ).returncode
+                    != 0
+                ):
+                    raise RuntimeError("helper network attachment failed")
         self.lifecycle("prepared", "helper")
         self.active("prepared", "active")
         status = self.start_wait("helper")

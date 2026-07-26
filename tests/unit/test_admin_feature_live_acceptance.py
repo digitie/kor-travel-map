@@ -144,7 +144,7 @@ def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue
     assert "process_environment.update(runtime_environment)" in supervisor
     assert 'for value in ("--env", name)' in supervisor
     assert "process_environment=process_environment" in supervisor
-    assert '"--network",\n            "none"' in supervisor
+    assert '"host" if host_networked else "none"' in supervisor
     assert '"docker", "network", "connect"' in supervisor
     assert "io.kortravelmap.admin-feature-acceptance.run-key" in supervisor
     assert "io.kortravelmap.admin-feature-acceptance.operation" in supervisor
@@ -153,6 +153,24 @@ def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue
     assert "owned Docker container residue remains" in runner
     assert "deterministic Docker container name residue remains" in runner
     assert "recovery mode cannot seed fixtures" in runner
+
+
+def test_helper_clones_host_network_mode_without_post_create_attachment() -> None:
+    supervisor = _SUPERVISOR.read_text()
+    # n150 production compose는 API runtime을 network_mode=host로 돌린다. docker는
+    # `network connect host`를 거부하므로 helper는 host network로 직접 create해야
+    # 하고(loopback DB 도달성이 API runtime과 일치), post-create attachment를
+    # 시도해서는 안 된다. host mode에서 Networks가 {"host"} 외 조합이면 fail-closed.
+    assert 'network_mode = record.get("HostConfig", {}).get("NetworkMode")' in supervisor
+    assert 'host_networked = network_mode == "host"' in supervisor
+    assert 'set(networks) != {"host"}' in supervisor
+    assert '"host" if host_networked else "none"' in supervisor
+    attachment = supervisor.index('"docker", "network", "connect"')
+    guard = supervisor.index("if not host_networked:")
+    assert guard < attachment
+    # cursor probe는 API network mode와 무관하게 항상 networkless로 남는다.
+    probe_body = supervisor[supervisor.index("def probe(") :]
+    assert '"--network",\n            "none"' in probe_body
 
 
 def test_helper_environment_parser_preserves_values_without_disk_copy() -> None:
