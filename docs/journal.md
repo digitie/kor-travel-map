@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-26 (claude) — C7 gate poi-cache @c7-causal 결정적 실패 규명·수정 (test-side 2중 버그)
+
+**결론**: C7 prod 게이트가 항상 poi-cache `@c7-causal`에서 red였던 원인은 backend/causal projection이 아니라
+**test-side 2중 버그가 겹쳐 있던 것**. 이전 세션의 "projection lag/timing/materialization" 가설은 오진 —
+`dataset_projection` causal 소켓 전달은 정상 동작한다.
+
+**규명 방법**: 공식 runner는 redacted라 실패 지점이 가려짐. 비-redacting **c7-v6 harness**(`e2e-edit` bind-mount,
+재-cut 불필요) + 공식 게이트와 동일하게 `--grep @c7-causal`로 스코프한 wrapper(`c7-v6-run-causal.sh`)로 live prod에서
+정확한 실패 지점을 재현.
+
+- **버그 1 — stale heading 상수**: `POI_HEADING = "POI cache targets"`(영문)이 `gotoPoiTargets` 첫 assertion에서
+  15s timeout. 개편 B(`d8818994`, "헤딩 정본")에서 admin h1이 한국어 정본 **"POI 캐시 대상"**으로 통일됐는데
+  spec 상수는 갱신되지 않음. 영문 문자열은 `page.tsx` metadata `<title>`에만 남아 있었다. → 상수를 `"POI 캐시 대상"`으로.
+  이 상수는 13개 poi-cache 테스트가 공유하는 `gotoPoiTargets`가 사용.
+- **버그 2 — page.evaluate destructure 누락(진짜 결함)**: heading 수정 후 드러난 2차 실패
+  `ReferenceError: connectionId is not defined` @ `expectCausalDatasetProjectionUpdate`. 콜백이
+  `({ frameCursor, receipt })`만 destructure하고 line 748에서 `connectionId`를 참조 — payload 객체엔
+  `{ connectionId, frameCursor, receipt }`로 넘겼으나 브라우저 컨텍스트엔 Node 클로저가 캡처되지 않아 항상 throw.
+  `cbe133c2`(POI mutation causal화)에서 helper 도입 이래 **줄곧 실패**했으나 버그 1(heading)이 이를 가려왔다.
+  → 콜백 param을 `({ connectionId, frameCursor, receipt })`로.
+- **검증**: 두 fix 후 c7-v6 causal-스코프 **GREEN (2 passed, 7.5s, rc=0)** — heading을 통과해 causal 소켓 assertion까지
+  도달·통과. prod 부수효과 없음: active e2e target 0(soft-deleted 2건은 create→delete 라운드트립의 설계상 잔여),
+  kma journal `phase=restored`/`target_refs=[]`, weather 정상.
+- **잔여**: PR 머지 → 신규 main 커밋으로 C7 executor 이미지 재-cut(rebind, 스펙 baked-in) → 공식 게이트 재실행해
+  6-spec(read-auth·kma×3·schedule-write + poi @c7-causal) 전부 green 확정.
+
 ## 2026-07-26 (claude) — C7 schedule-write 재편입: cron 복구 dialog inert 근인 수정 (T-ADM-C7-SCHEDCHURN)
 
 **결론**: 직전 엔트리의 "app-side ~90s render churn" 진단은 **오진**. live 재현(n150 prod verbose-iterate)으로 확정한
