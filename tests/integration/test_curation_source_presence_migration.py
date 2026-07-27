@@ -489,6 +489,11 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                                 FILTER (
                                     WHERE legacy.display_title =
                                         'migration status-only archive'
+                                ),
+                            bool_and(legacy.selection_origin = 'admin')
+                                FILTER (
+                                    WHERE legacy.display_title =
+                                        'migration status-only archive'
                                 )
                         FROM feature.curated_features AS legacy
                         WHERE legacy.display_title IN (
@@ -499,7 +504,7 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     )
                 )
             ).one()
-            assert migrated_legacy == (2, 0, 1, True)
+            assert migrated_legacy == (2, 0, 1, True, True)
             migrated_canonical = (
                 await connection.execute(
                     text(

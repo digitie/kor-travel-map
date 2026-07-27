@@ -66,6 +66,19 @@ BEGIN
                'merge_projection_detached',
                true
            )
+           AND to_jsonb(NEW) - ARRAY[
+               'feature_id',
+               'curation_status',
+               'metadata',
+               'archived_at',
+               'updated_at'
+           ] = to_jsonb(OLD) - ARRAY[
+               'feature_id',
+               'curation_status',
+               'metadata',
+               'archived_at',
+               'updated_at'
+           ]
            AND NOT EXISTS (
                SELECT 1
                FROM feature.curation_items AS direct_item
@@ -79,6 +92,9 @@ BEGIN
                      NEW.curated_feature_id
                  AND master_legacy.theme_id = NEW.theme_id
                  AND master_legacy.feature_id = NEW.feature_id
+                 AND master_legacy.archived_at IS NULL
+                 AND NOT master_legacy.metadata @>
+                     '{"merge_projection_detached": true}'::jsonb
            )
         THEN
             RETURN NEW;
@@ -848,6 +864,7 @@ def upgrade() -> None:
               AND reconciled.archived_at IS NOT NULL
               AND (
                   legacy.curation_status,
+                  legacy.selection_origin,
                   legacy.curation_relation,
                   legacy.reuse_policy,
                   legacy.operator_updated_by,
@@ -855,6 +872,11 @@ def upgrade() -> None:
                   legacy.archived_at
               ) IS DISTINCT FROM (
                   'archived',
+                  CASE
+                      WHEN reconciled.operator_updated_at IS NOT NULL
+                      THEN 'admin'
+                      ELSE legacy.selection_origin
+                  END,
                   reconciled.curation_relation,
                   reconciled.reuse_policy,
                   reconciled.operator_updated_by,

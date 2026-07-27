@@ -476,6 +476,123 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
         assert override[3] == "op-1"
 
 
+async def test_merge_moves_legacy_projection_into_canonical_only_master_identity(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        canonical_item_id = str(
+            (
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO feature.curation_items (
+                            collection_id, feature_id, source_record_key,
+                            external_item_id, place_name, status
+                        )
+                        SELECT
+                            item.collection_id,
+                            'f_master',
+                            item.source_record_key,
+                            item.external_item_id,
+                            'canonical-only master',
+                            'included'
+                        FROM feature.curation_items AS item
+                        JOIN feature.curated_features AS legacy
+                          ON legacy.curated_feature_id = item.curation_item_id
+                        WHERE legacy.display_title = 'legacy 단독 loser'
+                        RETURNING curation_item_id::text
+                        """
+                    )
+                )
+            ).scalar_one()
+        )
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        await merge_from_review(session, seeded, merged_by="op-1", reason="dup")
+
+    async with AsyncSession(migrated_engine) as session:
+        legacy = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                        feature_id,
+                        archived_at IS NOT NULL,
+                        metadata @> '{"merge_projection_detached": true}'::jsonb
+                    FROM feature.curated_features
+                    WHERE display_title = 'legacy 단독 loser'
+                    """
+                )
+            )
+        ).one()
+        canonical = (
+            await session.execute(
+                text(
+                    """
+                    SELECT feature_id, archived_at IS NULL, source_present
+                    FROM feature.curation_items
+                    WHERE curation_item_id = CAST(:canonical_item_id AS uuid)
+                    """
+                ),
+                {"canonical_item_id": canonical_item_id},
+            )
+        ).one()
+
+    assert legacy == ("f_master", False, False)
+    assert canonical == ("f_master", True, True)
+
+
+async def test_reserved_detach_transition_rejects_unrelated_field_mutation(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        loser_legacy_id = str(
+            (
+                await session.execute(
+                    text(
+                        """
+                        SELECT curated_feature_id::text
+                        FROM feature.curated_features
+                        WHERE display_title = 'legacy 충돌 loser'
+                        """
+                    )
+                )
+            ).scalar_one()
+        )
+        await session.execute(
+            text(
+                """
+                DELETE FROM feature.curation_items
+                WHERE curation_item_id = CAST(:legacy_id AS uuid)
+                """
+            ),
+            {"legacy_id": loser_legacy_id},
+        )
+
+    with pytest.raises(DBAPIError, match="reserved"):
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            await session.execute(
+                text(
+                    """
+                    UPDATE feature.curated_features
+                    SET feature_id = 'f_master',
+                        curation_status = 'archived',
+                        display_summary = 'unauthorized mutation',
+                        metadata = metadata || jsonb_build_object(
+                            'merge_projection_detached',
+                            true
+                        ),
+                        archived_at = now(),
+                        updated_at = clock_timestamp()
+                    WHERE curated_feature_id = CAST(:legacy_id AS uuid)
+                    """
+                ),
+                {"legacy_id": loser_legacy_id},
+            )
+
+
 @pytest.mark.parametrize(
     ("master_present", "loser_present", "expected_place"),
     [

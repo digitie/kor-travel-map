@@ -426,9 +426,9 @@ WHERE loser_curated.curated_feature_id = item.curation_item_id
 RETURNING loser_curated.curated_feature_id
 """
 
-# UUID가 분리됐거나 duplicate curation item이 이미 drop된 active legacy row는
-# partial unique(theme_id, feature_id)를 피하기 위해 archive한다. trigger가 만드는
-# archived mirror와 UUID를 분리한 active item이 함께 남아 richer 계약을 잃지 않는다.
+# UUID가 분리됐거나 duplicate curation item이 이미 drop된 active legacy row 중
+# 같은 theme의 master legacy projection과 충돌하는 행만 archive한다. canonical-only
+# stable identity와 충돌한 행은 아래 MOVE가 기존 canonical item에 동기화해야 한다.
 _ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL: Final[str] = """
 UPDATE feature.curated_features AS loser_curated
 SET feature_id = :master,
@@ -446,6 +446,13 @@ WHERE loser_curated.feature_id = :loser
       FROM feature.curation_items AS item
       WHERE item.curation_item_id = loser_curated.curated_feature_id
         AND item.archived_at IS NULL
+  )
+  AND EXISTS (
+      SELECT 1
+      FROM feature.curated_features AS master_curated
+      WHERE master_curated.feature_id = :master
+        AND master_curated.theme_id = loser_curated.theme_id
+        AND master_curated.archived_at IS NULL
   )
 RETURNING loser_curated.curated_feature_id
 """
