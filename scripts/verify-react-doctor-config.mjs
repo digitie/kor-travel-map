@@ -1,10 +1,32 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 
-const CONFIG_PATH = new URL("../doctor.config.json", import.meta.url);
-const FRONTEND_PACKAGE_PATH = new URL(
-  "../packages/kor-travel-map-admin/frontend/package.json",
+const REPOSITORY_ROOT = new URL("../", import.meta.url);
+const FRONTEND_ROOT = new URL(
+  "../packages/kor-travel-map-admin/frontend/",
   import.meta.url,
 );
+const CONFIG_PATH = new URL("doctor.config.json", FRONTEND_ROOT);
+const ROOT_PACKAGE_PATH = new URL("package.json", REPOSITORY_ROOT);
+const FRONTEND_PACKAGE_PATH = new URL(
+  "package.json",
+  FRONTEND_ROOT,
+);
+const CONFIG_FILENAMES = [
+  "doctor.config.ts",
+  "doctor.config.mts",
+  "doctor.config.cts",
+  "doctor.config.js",
+  "doctor.config.mjs",
+  "doctor.config.cjs",
+  "doctor.config.json",
+  "doctor.config.jsonc",
+  "react-doctor.config.json",
+];
+const SUPPRESSION_FILENAMES = [
+  ".oxlintignore",
+  ".eslintignore",
+  ".prettierignore",
+];
 const EXPECTED_DOCTOR_COMMAND =
   "react-doctor --scope full --no-score --no-telemetry --no-respect-inline-disables --blocking warning .";
 const EXPECTED_CONFIG = {
@@ -37,11 +59,39 @@ const EXPECTED_CONFIG = {
   },
 };
 
-const [config, frontendPackage] = await Promise.all(
-  [CONFIG_PATH, FRONTEND_PACKAGE_PATH].map(async (path) =>
+const [config, rootPackage, frontendPackage] = await Promise.all(
+  [CONFIG_PATH, ROOT_PACKAGE_PATH, FRONTEND_PACKAGE_PATH].map(async (path) =>
     JSON.parse(await readFile(path, "utf8")),
   ),
 );
+
+const forbiddenPaths = [
+  ...CONFIG_FILENAMES.map((name) => new URL(name, REPOSITORY_ROOT)),
+  ...CONFIG_FILENAMES.filter((name) => name !== "doctor.config.json").map(
+    (name) => new URL(name, FRONTEND_ROOT),
+  ),
+  ...SUPPRESSION_FILENAMES.flatMap((name) => [
+    new URL(name, REPOSITORY_ROOT),
+    new URL(name, FRONTEND_ROOT),
+  ]),
+];
+const existingForbiddenPaths = [];
+for (const path of forbiddenPaths) {
+  try {
+    await access(path);
+    existingForbiddenPaths.push(path.pathname);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+
+if (existingForbiddenPaths.length > 0) {
+  console.error(
+    "React Doctor canonical 설정을 가리거나 우회하는 추가 설정 파일은 허용하지 않습니다.",
+  );
+  console.error("forbidden:", JSON.stringify(existingForbiddenPaths));
+  process.exit(1);
+}
 
 if (JSON.stringify(config) !== JSON.stringify(EXPECTED_CONFIG)) {
   console.error(
@@ -49,6 +99,11 @@ if (JSON.stringify(config) !== JSON.stringify(EXPECTED_CONFIG)) {
   );
   console.error("expected:", JSON.stringify(EXPECTED_CONFIG));
   console.error("actual:", JSON.stringify(config));
+  process.exit(1);
+}
+
+if (rootPackage.reactDoctor !== undefined || frontendPackage.reactDoctor !== undefined) {
+  console.error("package.json#reactDoctor 설정은 canonical config를 가릴 수 없습니다.");
   process.exit(1);
 }
 
