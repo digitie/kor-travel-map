@@ -481,32 +481,46 @@ async def test_merge_moves_legacy_projection_into_canonical_only_master_identity
     migrated_engine: AsyncEngine,
 ) -> None:
     async with AsyncSession(migrated_engine) as session, session.begin():
-        canonical_item_id = str(
-            (
-                await session.execute(
-                    text(
-                        """
-                        INSERT INTO feature.curation_items (
-                            collection_id, feature_id, source_record_key,
-                            external_item_id, place_name, status
-                        )
-                        SELECT
-                            item.collection_id,
-                            'f_master',
-                            item.source_record_key,
-                            item.external_item_id,
-                            'canonical-only master',
-                            'included'
-                        FROM feature.curation_items AS item
-                        JOIN feature.curated_features AS legacy
-                          ON legacy.curated_feature_id = item.curation_item_id
-                        WHERE legacy.display_title = 'legacy 단독 loser'
-                        RETURNING curation_item_id::text
-                        """
-                    )
-                )
-            ).scalar_one()
+        await session.execute(
+            text(
+                """
+                UPDATE feature.curation_items AS item
+                SET source_updated_at = now() - interval '2 hours'
+                FROM feature.curated_features AS legacy
+                WHERE legacy.curated_feature_id = item.curation_item_id
+                  AND legacy.display_title = 'legacy 단독 loser'
+                """
+            )
         )
+        canonical_item_id, canonical_source_updated_at = (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curation_items (
+                        collection_id, feature_id, source_record_key,
+                        external_item_id, place_name, status,
+                        item_summary, metadata, source_updated_at
+                    )
+                    SELECT
+                        item.collection_id,
+                        'f_master',
+                        item.source_record_key,
+                        item.external_item_id,
+                        'canonical-only master',
+                        'included',
+                        'canonical winner summary',
+                        '{"winner": "master"}'::jsonb,
+                        now() - interval '1 hour'
+                    FROM feature.curation_items AS item
+                    JOIN feature.curated_features AS legacy
+                      ON legacy.curated_feature_id = item.curation_item_id
+                    WHERE legacy.display_title = 'legacy 단독 loser'
+                    RETURNING curation_item_id::text, source_updated_at
+                    """
+                )
+            )
+        ).one()
+        canonical_item_id = str(canonical_item_id)
 
     async with AsyncSession(migrated_engine) as session, session.begin():
         await merge_from_review(session, seeded, merged_by="op-1", reason="dup")
@@ -530,7 +544,14 @@ async def test_merge_moves_legacy_projection_into_canonical_only_master_identity
             await session.execute(
                 text(
                     """
-                    SELECT feature_id, archived_at IS NULL, source_present
+                    SELECT
+                        feature_id,
+                        archived_at IS NULL,
+                        source_present,
+                        place_name,
+                        item_summary,
+                        metadata,
+                        source_updated_at
                     FROM feature.curation_items
                     WHERE curation_item_id = CAST(:canonical_item_id AS uuid)
                     """
@@ -539,8 +560,16 @@ async def test_merge_moves_legacy_projection_into_canonical_only_master_identity
             )
         ).one()
 
-    assert legacy == ("f_master", False, False)
-    assert canonical == ("f_master", True, True)
+    assert legacy == ("f_master", True, True)
+    assert canonical == (
+        "f_master",
+        True,
+        True,
+        "canonical-only master",
+        "canonical winner summary",
+        {"winner": "master"},
+        canonical_source_updated_at,
+    )
 
 
 async def test_reserved_detach_transition_rejects_unrelated_field_mutation(

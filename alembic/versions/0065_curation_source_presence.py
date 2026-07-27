@@ -56,9 +56,9 @@ BEGIN
        AND pg_trigger_depth() = 1
     THEN
         -- Merge가 허용받는 유일한 top-level 전이는 canonical UUID mirror가
-        -- 이미 사라졌고 같은 theme의 master legacy projection이 존재하는
-        -- loser를 그대로 archive하는 경우다. 호출자 토큰/GUC가 아니라
-        -- transaction 안의 물리 불변식으로 권한을 판정한다.
+        -- 이미 사라졌고 같은 theme의 master legacy 또는 exact canonical
+        -- survivor가 존재하는 loser를 archive하는 경우다. 호출자 토큰/GUC가
+        -- 아니라 transaction 안의 물리 불변식으로 권한을 판정한다.
         IF NEW.feature_id IS DISTINCT FROM OLD.feature_id
            AND NEW.curation_status = 'archived'
            AND NEW.archived_at IS NOT NULL
@@ -85,16 +85,43 @@ BEGIN
                WHERE direct_item.curation_item_id = NEW.curated_feature_id
                  AND direct_item.archived_at IS NULL
            )
-           AND EXISTS (
-               SELECT 1
-               FROM feature.curated_features AS master_legacy
-               WHERE master_legacy.curated_feature_id <>
-                     NEW.curated_feature_id
-                 AND master_legacy.theme_id = NEW.theme_id
-                 AND master_legacy.feature_id = NEW.feature_id
-                 AND master_legacy.archived_at IS NULL
-                 AND NOT master_legacy.metadata @>
-                     '{"merge_projection_detached": true}'::jsonb
+           AND (
+               EXISTS (
+                   SELECT 1
+                   FROM feature.curated_features AS master_legacy
+                   WHERE master_legacy.curated_feature_id <>
+                         NEW.curated_feature_id
+                     AND master_legacy.theme_id = NEW.theme_id
+                     AND master_legacy.feature_id = NEW.feature_id
+                     AND master_legacy.archived_at IS NULL
+                     AND NOT master_legacy.metadata @>
+                         '{"merge_projection_detached": true}'::jsonb
+               )
+               OR EXISTS (
+                   SELECT 1
+                   FROM feature.curation_items AS master_item
+                   JOIN feature.curation_collections AS collection
+                     ON collection.collection_id = master_item.collection_id
+                   JOIN feature.curated_themes AS theme
+                     ON theme.theme_id = OLD.theme_id
+                   JOIN feature.curated_sources AS source
+                     ON source.source_id = OLD.source_id
+                   WHERE master_item.feature_id = NEW.feature_id
+                     AND master_item.external_item_id = COALESCE(
+                         OLD.source_record_key,
+                         OLD.curated_feature_id::text
+                     )
+                     AND collection.theme_id = OLD.theme_id
+                     AND collection.source_id IS NOT DISTINCT FROM OLD.source_id
+                     AND collection.collection_key =
+                         'legacy:' || theme.theme_slug || ':' || substr(md5(
+                             OLD.source_id::text || ':' ||
+                             COALESCE(
+                                 NULLIF(btrim(OLD.display_title), ''),
+                                 source.source_name
+                             )
+                         ), 1, 20)
+               )
            )
         THEN
             RETURN NEW;

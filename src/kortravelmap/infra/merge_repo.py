@@ -427,8 +427,9 @@ RETURNING loser_curated.curated_feature_id
 """
 
 # UUID가 분리됐거나 duplicate curation item이 이미 drop된 active legacy row 중
-# 같은 theme의 master legacy projection과 충돌하는 행만 archive한다. canonical-only
-# stable identity와 충돌한 행은 아래 MOVE가 기존 canonical item에 동기화해야 한다.
+# 같은 theme의 master legacy projection 또는 exact canonical stable identity와
+# 충돌하는 행을 archive한다. Canonical survivor의 reconciled provider revision을
+# legacy MOVE trigger가 오래된 projection으로 덮어쓰지 않게 한다.
 _ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL: Final[str] = """
 UPDATE feature.curated_features AS loser_curated
 SET feature_id = :master,
@@ -447,12 +448,41 @@ WHERE loser_curated.feature_id = :loser
       WHERE item.curation_item_id = loser_curated.curated_feature_id
         AND item.archived_at IS NULL
   )
-  AND EXISTS (
-      SELECT 1
-      FROM feature.curated_features AS master_curated
-      WHERE master_curated.feature_id = :master
-        AND master_curated.theme_id = loser_curated.theme_id
-        AND master_curated.archived_at IS NULL
+  AND (
+      EXISTS (
+          SELECT 1
+          FROM feature.curated_features AS master_curated
+          WHERE master_curated.feature_id = :master
+            AND master_curated.theme_id = loser_curated.theme_id
+            AND master_curated.archived_at IS NULL
+            AND NOT master_curated.metadata @>
+                '{"merge_projection_detached": true}'::jsonb
+      )
+      OR EXISTS (
+          SELECT 1
+          FROM feature.curation_items AS master_item
+          JOIN feature.curation_collections AS collection
+            ON collection.collection_id = master_item.collection_id
+          JOIN feature.curated_themes AS theme
+            ON theme.theme_id = loser_curated.theme_id
+          JOIN feature.curated_sources AS source
+            ON source.source_id = loser_curated.source_id
+          WHERE master_item.feature_id = :master
+            AND master_item.external_item_id = COALESCE(
+                loser_curated.source_record_key,
+                loser_curated.curated_feature_id::text
+            )
+            AND collection.theme_id = loser_curated.theme_id
+            AND collection.source_id IS NOT DISTINCT FROM loser_curated.source_id
+            AND collection.collection_key =
+                'legacy:' || theme.theme_slug || ':' || substr(md5(
+                    loser_curated.source_id::text || ':' ||
+                    COALESCE(
+                        NULLIF(btrim(loser_curated.display_title), ''),
+                        source.source_name
+                    )
+                ), 1, 20)
+      )
   )
 RETURNING loser_curated.curated_feature_id
 """
