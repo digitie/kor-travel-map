@@ -1715,7 +1715,7 @@ async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
                     ) VALUES (
                         CAST(:theme_id AS uuid), :feature_id,
                         CAST(:source_id AS uuid), :source_record_key,
-                        'curated', 'source_rule', 'stable reinsert'
+                        'curated', 'source_rule', 'stable reinsert renamed'
                     )
                     RETURNING curated_feature_id::text
                     """
@@ -1753,6 +1753,30 @@ async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
         )
     ).one()
     assert identity == (legacy_id, "archived", True)
+    durable_identity_count = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM feature.curation_items AS item
+                JOIN feature.curation_collections AS collection
+                  ON collection.collection_id = item.collection_id
+                WHERE collection.theme_id = CAST(:theme_id AS uuid)
+                  AND collection.source_id = CAST(:source_id AS uuid)
+                  AND collection.metadata @>
+                      '{"migrated_from": "feature.curated_features"}'::jsonb
+                  AND item.external_item_id = 'curation-reinsert-record'
+                  AND item.feature_id = :feature_id
+                """
+            ),
+            {
+                "theme_id": theme_id,
+                "source_id": source_id,
+                "feature_id": _FEATURE_ID,
+            },
+        )
+    ).scalar_one()
+    assert durable_identity_count == 1
     assert (
         await curated_repo.list_curated_features(
             migrated_session,

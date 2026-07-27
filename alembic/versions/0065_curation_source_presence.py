@@ -37,6 +37,7 @@ DECLARE
     mapped_theme_id uuid;
     mapped_source_id uuid;
     mapped_title text;
+    mapped_archived boolean;
     target_external_item_id text;
     operator_change boolean;
     source_change boolean;
@@ -215,6 +216,9 @@ BEGIN
             AND NEW.archived_at IS DISTINCT FROM OLD.archived_at;
     END IF;
 
+    target_external_item_id :=
+        COALESCE(NEW.source_record_key, NEW.curated_feature_id::text);
+
     SELECT COALESCE(NULLIF(btrim(NEW.display_title), ''), s.source_name)
     INTO target_title
     FROM feature.curated_themes AS t
@@ -234,34 +238,76 @@ BEGIN
         item.collection_id,
         collection.theme_id,
         collection.source_id,
-        collection.title
-    INTO mapped_collection_id, mapped_theme_id, mapped_source_id, mapped_title
+        collection.title,
+        item.archived_at IS NOT NULL
+    INTO
+        mapped_collection_id,
+        mapped_theme_id,
+        mapped_source_id,
+        mapped_title,
+        mapped_archived
     FROM feature.curation_items AS item
     JOIN feature.curation_collections AS collection
       ON collection.collection_id = item.collection_id
-    WHERE item.legacy_projection_id = NEW.curated_feature_id
+    WHERE (
+            item.legacy_projection_id = NEW.curated_feature_id
+            OR (
+                item.legacy_projection_id IS NULL
+                AND item.curation_item_id = NEW.curated_feature_id
+            )
+        )
        OR (
-           item.legacy_projection_id IS NULL
-           AND item.curation_item_id = NEW.curated_feature_id
-       )
-    ORDER BY (item.legacy_projection_id = NEW.curated_feature_id) DESC
+            collection.theme_id = NEW.theme_id
+            AND collection.source_id IS NOT DISTINCT FROM NEW.source_id
+            AND collection.metadata @>
+                '{"migrated_from": "feature.curated_features"}'::jsonb
+            AND item.external_item_id = target_external_item_id
+            AND item.feature_id IS NOT DISTINCT FROM NEW.feature_id
+        )
+    ORDER BY
+        (item.legacy_projection_id = NEW.curated_feature_id) DESC NULLS LAST,
+        (item.archived_at IS NOT NULL) DESC,
+        item.operator_updated_at DESC NULLS LAST,
+        item.source_updated_at DESC,
+        item.curation_item_id DESC
     LIMIT 1;
 
     IF mapped_collection_id IS NOT NULL
        AND mapped_theme_id = NEW.theme_id
        AND mapped_source_id IS NOT DISTINCT FROM NEW.source_id
-       AND mapped_title = target_title
+       AND (mapped_title = target_title OR mapped_archived)
     THEN
         UPDATE feature.curation_collections AS collection
-        SET title = target_title,
-            description = NEW.display_summary,
-            status = 'published',
+        SET title = CASE
+                WHEN mapped_title = target_title
+                THEN target_title
+                ELSE collection.title
+            END,
+            description = CASE
+                WHEN mapped_title = target_title
+                THEN NEW.display_summary
+                ELSE collection.description
+            END,
+            status = CASE
+                WHEN mapped_title = target_title
+                THEN 'published'
+                ELSE collection.status
+            END,
             visibility = CASE
+                WHEN mapped_title <> target_title THEN collection.visibility
                 WHEN theme.visibility = 'public' THEN 'public'
                 ELSE 'admin_only'
             END,
-            updated_at = NEW.updated_at,
-            archived_at = NULL
+            updated_at = CASE
+                WHEN mapped_title = target_title
+                THEN NEW.updated_at
+                ELSE collection.updated_at
+            END,
+            archived_at = CASE
+                WHEN mapped_title = target_title
+                THEN NULL
+                ELSE collection.archived_at
+            END
         FROM feature.curated_themes AS theme
         WHERE collection.collection_id = mapped_collection_id
           AND collection.theme_id = NEW.theme_id
@@ -299,6 +345,8 @@ BEGIN
         WHERE feature.curation_collections.theme_id = EXCLUDED.theme_id
           AND feature.curation_collections.source_id
               IS NOT DISTINCT FROM EXCLUDED.source_id
+          AND feature.curation_collections.metadata @>
+              '{"migrated_from": "feature.curated_features"}'::jsonb
         RETURNING collection_id INTO target_collection_id;
     END IF;
 
@@ -310,9 +358,6 @@ BEGIN
             USING ERRCODE = '23505';
     END IF;
 
-    target_external_item_id :=
-        COALESCE(NEW.source_record_key, NEW.curated_feature_id::text);
-
     -- UUID mirror와 stable identity target을 먼저 하나씩 잠근 뒤 갱신 대상을
     -- 단일화한다. 두 identity가 서로 다른 row를 가리키면 target owner를
     -- 덮지 않고 기존 mirror만 source-absent로 내린 뒤 legacy projection을
@@ -320,12 +365,29 @@ BEGIN
     SELECT item.curation_item_id
     INTO direct_item_id
     FROM feature.curation_items AS item
-    WHERE item.legacy_projection_id = NEW.curated_feature_id
+    JOIN feature.curation_collections AS collection
+      ON collection.collection_id = item.collection_id
+    WHERE (
+            item.legacy_projection_id = NEW.curated_feature_id
+            OR (
+                item.legacy_projection_id IS NULL
+                AND item.curation_item_id = NEW.curated_feature_id
+            )
+        )
        OR (
-           item.legacy_projection_id IS NULL
-           AND item.curation_item_id = NEW.curated_feature_id
-       )
-    ORDER BY (item.legacy_projection_id = NEW.curated_feature_id) DESC
+            collection.theme_id = NEW.theme_id
+            AND collection.source_id IS NOT DISTINCT FROM NEW.source_id
+            AND collection.metadata @>
+                '{"migrated_from": "feature.curated_features"}'::jsonb
+            AND item.external_item_id = target_external_item_id
+            AND item.feature_id IS NOT DISTINCT FROM NEW.feature_id
+        )
+    ORDER BY
+        (item.legacy_projection_id = NEW.curated_feature_id) DESC NULLS LAST,
+        (item.archived_at IS NOT NULL) DESC,
+        item.operator_updated_at DESC NULLS LAST,
+        item.source_updated_at DESC,
+        item.curation_item_id DESC
     LIMIT 1
     FOR UPDATE;
 
@@ -384,10 +446,7 @@ BEGIN
     -- UUID/stable identity 경로는 같은 projection UPDATE를 공유하며 archived
     -- tombstone은 WHERE에서 제외해 계속 우선한다.
     UPDATE feature.curation_items AS item
-    SET collection_id = CASE
-            WHEN source_change THEN target_collection_id
-            ELSE item.collection_id
-        END,
+    SET collection_id = target_collection_id,
         feature_id = CASE
             WHEN source_change THEN NEW.feature_id
             ELSE item.feature_id
@@ -803,18 +862,56 @@ def upgrade() -> None:
         "DISABLE TRIGGER trg_sync_curated_feature_collection"
     )
     # 0045의 legacy key는 mutable theme_slug를 포함해 rename 후 slug 재사용 시
-    # 다른 theme가 collection 소유권을 탈취할 수 있었다. 0065부터 immutable
-    # theme/source UUID와 최초 grouping title로 key를 정규화하고, 이후 연결된
-    # projection은 curation_items.collection_id 자체를 identity로 사용한다.
+    # 다른 theme가 collection 소유권을 탈취할 수 있었다. 먼저 모든 legacy key를
+    # collection UUID 기반 staging 값으로 옮겨 semantic key 공간을 비운다.
     op.execute(
         """
         UPDATE feature.curation_collections
-        SET collection_key =
-            'legacy:' || theme_id::text || ':' || source_id::text || ':' ||
-            md5(title)
+        SET collection_key = 'legacy:0065-stage:' || collection_id::text
         WHERE source_id IS NOT NULL
           AND metadata @>
               '{"migrated_from": "feature.curated_features"}'::jsonb
+        """
+    )
+    # 0064의 slug rename 또는 지원되는 collection title PATCH는 동일
+    # (theme/source/title) group을 여러 collection_id로 만들 수 있다. 이를 억지로
+    # 합치면 operator state를 잃으므로 가장 최근 non-empty collection을 base key로
+    # 고르고 나머지는 명시적 ``:split:<collection_id>`` identity로 보존한다.
+    op.execute(
+        """
+        WITH ranked AS (
+            SELECT
+                collection.collection_id,
+                'legacy:' || collection.theme_id::text || ':' ||
+                    collection.source_id::text || ':' ||
+                    md5(collection.title) AS base_key,
+                row_number() OVER (
+                    PARTITION BY
+                        collection.theme_id,
+                        collection.source_id,
+                        collection.title
+                    ORDER BY
+                        EXISTS (
+                            SELECT 1
+                            FROM feature.curation_items AS item
+                            WHERE item.collection_id =
+                                  collection.collection_id
+                        ) DESC,
+                        collection.updated_at DESC,
+                        collection.collection_id
+                ) AS group_ordinal
+            FROM feature.curation_collections AS collection
+            WHERE collection.source_id IS NOT NULL
+              AND collection.metadata @>
+                  '{"migrated_from": "feature.curated_features"}'::jsonb
+        )
+        UPDATE feature.curation_collections AS collection
+        SET collection_key = ranked.base_key || CASE
+                WHEN ranked.group_ordinal = 1 THEN ''
+                ELSE ':split:' || collection.collection_id::text
+            END
+        FROM ranked
+        WHERE ranked.collection_id = collection.collection_id
         """
     )
     op.execute(
@@ -1091,6 +1188,23 @@ def upgrade() -> None:
         "ALTER TABLE feature.curated_features "
         "ENABLE TRIGGER trg_sync_curated_feature_collection"
     )
+    # 0064의 slug 재사용 ON CONFLICT가 collection owner를 덮은 과거 상태를
+    # 명시적 legacy_projection_id 정본으로 복구한다. Trigger는 올바른 semantic
+    # collection을 찾거나 만들고, item을 collection lock 뒤에 재배치한다.
+    op.execute(
+        """
+        UPDATE feature.curated_features AS legacy
+        SET updated_at = clock_timestamp()
+        FROM feature.curation_items AS item
+        JOIN feature.curation_collections AS collection
+          ON collection.collection_id = item.collection_id
+        WHERE item.legacy_projection_id = legacy.curated_feature_id
+          AND (
+              collection.theme_id <> legacy.theme_id
+              OR collection.source_id IS DISTINCT FROM legacy.source_id
+          )
+        """
+    )
 
 
 def downgrade() -> None:
@@ -1125,20 +1239,56 @@ def downgrade() -> None:
         $$
         """
     )
-    # 0064 trigger가 기대하는 legacy key 표현으로 되돌린다. 현재 theme_slug는
-    # unique이고 title/source 조합이 0045 grouping 정본이므로 표현 가능한 상태다.
+    # 0064 key 공간도 먼저 비운다. 같은 slug/source/title collection이 여러 개면
+    # base 하나와 명시적 split key로 보존해 지원되는 title PATCH 상태의 downgrade를
+    # unique violation 없이 완료한다.
     op.execute(
         """
-        UPDATE feature.curation_collections AS collection
-        SET collection_key =
-            'legacy:' || theme.theme_slug || ':' || substr(md5(
-                collection.source_id::text || ':' || collection.title
-            ), 1, 20)
-        FROM feature.curated_themes AS theme
-        WHERE theme.theme_id = collection.theme_id
-          AND collection.source_id IS NOT NULL
-          AND collection.metadata @>
+        UPDATE feature.curation_collections
+        SET collection_key = 'legacy:0065-downgrade-stage:' ||
+            collection_id::text
+        WHERE source_id IS NOT NULL
+          AND metadata @>
               '{"migrated_from": "feature.curated_features"}'::jsonb
+        """
+    )
+    op.execute(
+        """
+        WITH ranked AS (
+            SELECT
+                collection.collection_id,
+                'legacy:' || theme.theme_slug || ':' || substr(md5(
+                    collection.source_id::text || ':' || collection.title
+                ), 1, 20) AS base_key,
+                row_number() OVER (
+                    PARTITION BY
+                        theme.theme_slug,
+                        collection.source_id,
+                        collection.title
+                    ORDER BY
+                        EXISTS (
+                            SELECT 1
+                            FROM feature.curation_items AS item
+                            WHERE item.collection_id =
+                                  collection.collection_id
+                        ) DESC,
+                        collection.updated_at DESC,
+                        collection.collection_id
+                ) AS group_ordinal
+            FROM feature.curation_collections AS collection
+            JOIN feature.curated_themes AS theme
+              ON theme.theme_id = collection.theme_id
+            WHERE collection.source_id IS NOT NULL
+              AND collection.metadata @>
+                  '{"migrated_from": "feature.curated_features"}'::jsonb
+        )
+        UPDATE feature.curation_collections AS collection
+        SET collection_key = ranked.base_key || CASE
+                WHEN ranked.group_ordinal = 1 THEN ''
+                ELSE ':split:' || collection.collection_id::text
+            END
+        FROM ranked
+        WHERE ranked.collection_id = collection.collection_id
         """
     )
     op.execute(_SYNC_FUNCTION_0064)
