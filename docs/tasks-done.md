@@ -3,6 +3,15 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-27 — T-VN-H19 public API key 양성 production runtime 실증 (C2 갭 종결)
+
+- [x] **T-VN-H19** — #854에서 "등가 충족"으로 처리했던 C2(public-key→curated 200)의 DB lookup+hash
+  compare 양성 분기를 n150 production(map=c8ed6164)에서 credential-safe 직접 실증. admin-BFF
+  `POST /v1/admin/public-api-keys`로 임시 key 발급(평문 1회, 값 비출력) → **valid key 200 PASS**,
+  wrong key **401 PASS**, `POST .../{id}/revoke` **200**, 폐기 후 same key **401 PASS**(revoke lifecycle).
+  key 값은 출력·기록 안 하고 key_id·status만 증거. → **경계 매트릭스 14/14, T-VN-03+T-ADM-C6c 전체
+  완료**("C2 전까지 완료 금지" 조건 해소). 증거: reports/t-vn-03-c6c-boundary-smoke-2026-07-27.md §1 C2.
+
 ## 2026-07-27 — T-VN-H12 live acceptance status marker 좌표 run-unique jitter (live 검증 완료)
 
 - [x] **T-VN-H12** — `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표를 `sha256(RUN_ID)`
