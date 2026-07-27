@@ -38,6 +38,43 @@ def test_orchestrator_snapshot_covers_every_root_executed_file() -> None:
     )
 
 
+def test_public_origin_brackets_ipv6_and_rejects_scope() -> None:
+    """#805: IPv6 origin은 netloc에서 bracket + canonical로 재구성하고 zone-id는 거부한다."""
+    origin = ATTESTATION._public_origin
+    err = ATTESTATION.AttestationError
+
+    # IPv6 리터럴은 bracket으로 감싸 `:port`와 모호하지 않게 재구성한다.
+    assert origin("https://[2001:db8::1]:8443/") == "https://[2001:db8::1]:8443"
+    assert origin("https://[2001:db8::1]/") == "https://[2001:db8::1]"
+    # 동등한 확장 IPv6 표기는 압축 canonical 형으로 정규화된다(동일 origin으로 해시).
+    assert (
+        origin("https://[2001:0db8:0000:0000:0000:0000:0000:0001]:443/")
+        == "https://[2001:db8::1]:443"
+    )
+    # websocket 스킴도 동일하게 bracket.
+    assert (
+        origin("https://[2001:db8::1]:9443/", websocket=True)
+        == "wss://[2001:db8::1]:9443"
+    )
+
+    # IPv6 zone-id(scope)는 로컬 스코프라 거부한다. 2001:db8::1은 link-local이 아닌
+    # 전역 주소라 unsafe-address 검사를 통과하므로, "%" guard가 ip_address() 파싱보다
+    # 먼저 실행돼야 함을 검증한다(guard 순서가 load-bearing).
+    with pytest.raises(err, match="scoped address"):
+        origin("https://[2001:db8::1%25eth0]/")
+    # loopback/link-local/unspecified IPv6은 여전히 unsafe.
+    with pytest.raises(err, match="unsafe address"):
+        origin("https://[::1]/")
+    with pytest.raises(err, match="unsafe address"):
+        origin("https://[fe80::1]/")
+    with pytest.raises(err, match="unsafe address"):
+        origin("https://[::]/")
+
+    # domain/IPv4 origin은 bracket 없이 무변경(기존 attestation 해시 영향 없음).
+    assert origin("https://map.example.org:443/") == "https://map.example.org:443"
+    assert origin("https://192.0.2.10:8443/") == "https://192.0.2.10:8443"
+
+
 def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 

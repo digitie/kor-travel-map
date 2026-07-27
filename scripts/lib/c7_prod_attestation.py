@@ -238,6 +238,9 @@ def _public_origin(
     host = parsed.hostname.rstrip(".").lower()
     if host == "localhost" or host.endswith(".localhost"):
         raise AttestationError("local origin")
+    if "%" in host:
+        # IPv6 zone-id(scope)는 로컬 인터페이스 스코프라 public origin에 유효하지 않다.
+        raise AttestationError("scoped address")
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
@@ -247,7 +250,16 @@ def _public_origin(
     ):
         raise AttestationError("unsafe address")
     port = f":{parsed.port}" if parsed.port is not None else ""
-    return urlunsplit(("wss" if websocket else "https", f"{host}{port}", "", "", ""))
+    # IPv6 리터럴 host는 netloc 재구성 시 bracket으로 감싸야 `:port`와 모호하지 않다
+    # (예: `2001:db8::1` + `:443` → `[2001:db8::1]:443`). 압축 canonical 형으로 정규화해
+    # 동등한 IPv6 표기가 같은 origin으로 해시되게 한다. domain/IPv4는 무변경.
+    if isinstance(address, ipaddress.IPv6Address):
+        netloc_host = f"[{address.compressed}]"
+    else:
+        netloc_host = host
+    return urlunsplit(
+        ("wss" if websocket else "https", f"{netloc_host}{port}", "", "", "")
+    )
 
 
 def _canonical_graphql(raw: str) -> str:

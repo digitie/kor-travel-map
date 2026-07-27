@@ -734,6 +734,7 @@ verify_trusted_runtime_attestation() {
 canonical_dagster_graphql_sha256() {
   python3 - <<'PY'
 import hashlib
+import ipaddress
 import os
 from urllib.parse import urlsplit, urlunsplit
 
@@ -748,10 +749,27 @@ if (
 ):
     raise SystemExit(2)
 host = parsed.hostname.rstrip(".").lower()
+# c7_prod_attestation.py::_public_origin과 동일한 netloc 정규화를 미러링해(#805),
+# IPv6 Dagster URL에서 생성 해시와 verifier 해시가 divergence하지 않게 한다.
+if host == "localhost" or host.endswith(".localhost") or "%" in host:
+    raise SystemExit(2)
+try:
+    address = ipaddress.ip_address(host)
+except ValueError:
+    address = None
+if address is not None and (
+    address.is_loopback or address.is_link_local or address.is_unspecified
+):
+    raise SystemExit(2)
 port = f":{parsed.port}" if parsed.port is not None else ""
+netloc_host = (
+    f"[{address.compressed}]"
+    if isinstance(address, ipaddress.IPv6Address)
+    else host
+)
 pathname = parsed.path.rstrip("/")
 pathname = pathname if pathname.endswith("/graphql") else f"{pathname}/graphql"
-canonical = urlunsplit(("https", f"{host}{port}", pathname, "", ""))
+canonical = urlunsplit(("https", f"{netloc_host}{port}", pathname, "", ""))
 print(hashlib.sha256(canonical.encode()).hexdigest())
 PY
 }
