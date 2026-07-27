@@ -426,10 +426,9 @@ WHERE loser_curated.curated_feature_id = item.curation_item_id
 RETURNING loser_curated.curated_feature_id
 """
 
-# UUID가 분리됐거나 duplicate curation item이 이미 drop된 active legacy row 중
-# 같은 theme의 master legacy projection 또는 exact canonical stable identity와
-# 충돌하는 행을 archive한다. Canonical survivor의 reconciled provider revision을
-# legacy MOVE trigger가 오래된 projection으로 덮어쓰지 않게 한다.
+# UUID가 분리된 same-theme legacy conflict 또는 아직 이동하지 않은 loser UUID item과
+# 같은 stored collection/external identity의 master canonical pair만 archive한다.
+# Mutable slug/title로 collection key를 재계산하거나 MOVE 뒤 feature_id를 증거로 쓰지 않는다.
 _ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL: Final[str] = """
 UPDATE feature.curated_features AS loser_curated
 SET feature_id = :master,
@@ -442,46 +441,36 @@ SET feature_id = :master,
     updated_at = now()
 WHERE loser_curated.feature_id = :loser
   AND loser_curated.archived_at IS NULL
-  AND NOT EXISTS (
-      SELECT 1
-      FROM feature.curation_items AS item
-      WHERE item.curation_item_id = loser_curated.curated_feature_id
-        AND item.archived_at IS NULL
-  )
   AND (
-      EXISTS (
-          SELECT 1
-          FROM feature.curated_features AS master_curated
-          WHERE master_curated.feature_id = :master
-            AND master_curated.theme_id = loser_curated.theme_id
-            AND master_curated.archived_at IS NULL
-            AND NOT master_curated.metadata @>
-                '{"merge_projection_detached": true}'::jsonb
+      (
+          NOT EXISTS (
+              SELECT 1
+              FROM feature.curation_items AS direct_item
+              WHERE direct_item.curation_item_id =
+                    loser_curated.curated_feature_id
+                AND direct_item.archived_at IS NULL
+          )
+          AND EXISTS (
+              SELECT 1
+              FROM feature.curated_features AS master_curated
+              WHERE master_curated.feature_id = :master
+                AND master_curated.theme_id = loser_curated.theme_id
+                AND master_curated.archived_at IS NULL
+                AND NOT master_curated.metadata @>
+                    '{"merge_projection_detached": true}'::jsonb
+          )
       )
       OR EXISTS (
           SELECT 1
-          FROM feature.curation_items AS master_item
-          JOIN feature.curation_collections AS collection
-            ON collection.collection_id = master_item.collection_id
-          JOIN feature.curated_themes AS theme
-            ON theme.theme_id = loser_curated.theme_id
-          JOIN feature.curated_sources AS source
-            ON source.source_id = loser_curated.source_id
+          FROM feature.curation_items AS loser_item
+          JOIN feature.curation_items AS master_item
+            ON master_item.collection_id = loser_item.collection_id
+           AND master_item.external_item_id = loser_item.external_item_id
           WHERE master_item.feature_id = :master
-            AND master_item.external_item_id = COALESCE(
-                loser_curated.source_record_key,
-                loser_curated.curated_feature_id::text
-            )
-            AND collection.theme_id = loser_curated.theme_id
-            AND collection.source_id IS NOT DISTINCT FROM loser_curated.source_id
-            AND collection.collection_key =
-                'legacy:' || theme.theme_slug || ':' || substr(md5(
-                    loser_curated.source_id::text || ':' ||
-                    COALESCE(
-                        NULLIF(btrim(loser_curated.display_title), ''),
-                        source.source_name
-                    )
-                ), 1, 20)
+            AND loser_item.curation_item_id =
+                loser_curated.curated_feature_id
+            AND master_item.curation_item_id <>
+                loser_item.curation_item_id
       )
   )
 RETURNING loser_curated.curated_feature_id
@@ -615,6 +604,14 @@ async def apply_feature_merge(
         (await session.execute(text(_DROP_LEFTOVER_LINKS_SQL), {"loser": loser_id})).fetchall()
     )
     await session.execute(
+        text(_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL),
+        {"master": master_id, "loser": loser_id},
+    )
+    await session.execute(
+        text(_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL),
+        {"master": master_id, "loser": loser_id},
+    )
+    await session.execute(
         text(_MERGE_DUPLICATE_CURATION_ITEMS_SQL),
         {"master": master_id, "loser": loser_id},
     )
@@ -625,14 +622,6 @@ async def apply_feature_merge(
     await session.execute(
         text(_SYNC_MASTER_LEGACY_PROJECTIONS_SQL),
         {"master": master_id},
-    )
-    await session.execute(
-        text(_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL),
-        {"master": master_id, "loser": loser_id},
-    )
-    await session.execute(
-        text(_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL),
-        {"master": master_id, "loser": loser_id},
     )
     await session.execute(
         text(_MOVE_LEGACY_CURATED_FEATURES_SQL),
