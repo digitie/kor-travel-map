@@ -673,11 +673,25 @@ async function assertStatusMarker(
       timeout: UI_TIMEOUT,
     },
   );
-  const placeToggle = page
-    .getByTestId("kind-filter")
-    .getByRole("button", { exact: true, name: "place" });
-  if ((await placeToggle.getAttribute("aria-pressed")) !== "true") {
-    await placeToggle.click();
+  // kind 필터를 place 하나로 격리한다. 기본 kind 필터는 weather·notice가 pressed이고
+  // place는 미press(DEFAULT_FEATURE_MAP_KINDS=["weather","notice"])다. 수정 전 코드는
+  // place를 켜기만 하고 기본 weather를 끄지 않아, 같은 run이 seed한 hidden weather
+  // feature(place 마커와 ~0.004° 거리)가 함께 렌더되고 z14대에서 client-side
+  // supercluster로 묶여 개별 place 마커의 aria-label이 사라졌다(2026-07-27 live 재현).
+  // place만 남기면 이 cross-kind 충돌이 사라진다. (단, 동일 status·동일 좌표의
+  // cross-run leftover는 어떤 줌으로도 decluster 불가 — run별 cleanup + 좌표 고정에
+  // 의존하며, run-unique 좌표 하드닝은 T-VN-H12 후속으로 추적한다.)
+  const kindGroup = page.getByTestId("kind-filter");
+  for (const toggle of await kindGroup.locator("button[aria-pressed]").all()) {
+    const name = (await toggle.textContent())?.trim();
+    const pressed = (await toggle.getAttribute("aria-pressed")) === "true";
+    if (name === "place") {
+      if (!pressed) {
+        await toggle.click();
+      }
+    } else if (pressed) {
+      await toggle.click();
+    }
   }
   await page.getByLabel("상태 필터").selectOption(fixture.status);
   const inBoundsResponsePromise = page.waitForResponse(
