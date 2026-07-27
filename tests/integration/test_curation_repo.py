@@ -1123,8 +1123,17 @@ async def test_legacy_identity_move_does_not_overwrite_occupied_target(
         )
     await migrated_session.flush()
 
-    with pytest.raises(DBAPIError, match="reserved"):
+    async def inject_reserved_marker_with_fake_capability() -> None:
         async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "SELECT set_config("
+                    "'kortravelmap.curation_sync_mode',"
+                    "'merge_explicit',"
+                    "true"
+                    ")"
+                )
+            )
             await migrated_session.execute(
                 text(
                     """
@@ -1145,6 +1154,9 @@ async def test_legacy_identity_move_does_not_overwrite_occupied_target(
                     "feature_id": _FEATURE_ID,
                 },
             )
+
+    with pytest.raises(DBAPIError, match="reserved"):
+        await inject_reserved_marker_with_fake_capability()
 
     legacy_id = str(
         (

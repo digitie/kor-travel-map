@@ -314,25 +314,6 @@ WHERE feature_id = :loser
 RETURNING curation_item_id
 """
 
-# Feature merge는 canonical item을 먼저 명시적으로 reconcile한다. 이어지는 legacy
-# projection 이동이 0065 양방향 trigger를 다시 실행하면 이미 reconcile한 survivor를
-# source-absent로 되돌릴 수 있으므로, 같은 transaction의 legacy 구간만 동기화를 끈다.
-_SET_EXPLICIT_CURATION_SYNC_SQL: Final[str] = """
-SELECT set_config(
-    'kortravelmap.curation_sync_mode',
-    'merge_explicit',
-    true
-)
-"""
-
-_RESET_EXPLICIT_CURATION_SYNC_SQL: Final[str] = """
-SELECT set_config(
-    'kortravelmap.curation_sync_mode',
-    '',
-    true
-)
-"""
-
 # Duplicate reconcile가 loser의 최신 operator state/tombstone을 master canonical
 # survivor에 반영했으면 master legacy projection도 같은 transaction에서 맞춘다.
 _SYNC_MASTER_LEGACY_PROJECTIONS_SQL: Final[str] = """
@@ -604,7 +585,6 @@ async def apply_feature_merge(
         text(_MOVE_CURATION_ITEMS_SQL),
         {"master": master_id, "loser": loser_id},
     )
-    await session.execute(text(_SET_EXPLICIT_CURATION_SYNC_SQL))
     await session.execute(
         text(_SYNC_MASTER_LEGACY_PROJECTIONS_SQL),
         {"master": master_id},
@@ -621,7 +601,6 @@ async def apply_feature_merge(
         text(_MOVE_LEGACY_CURATED_FEATURES_SQL),
         {"master": master_id, "loser": loser_id},
     )
-    await session.execute(text(_RESET_EXPLICIT_CURATION_SYNC_SQL))
     soft_deleted = (
         (await session.execute(text(_SOFT_DELETE_LOSER_SQL), {"loser": loser_id}))
         .mappings()

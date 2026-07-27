@@ -19,8 +19,10 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.infra import curated_repo
 from kortravelmap.infra.curation_repo import (
     ResolvedCurationImportRow,
+    add_curation_item,
     import_curation_rows,
     update_curation_item,
 )
@@ -226,6 +228,31 @@ async def _feature_status(engine: AsyncEngine, feature_id: str) -> tuple[str, bo
             )
         ).one()
         return (row[0], row[1] is not None)
+
+
+async def _wait_for_application_lock(
+    observer: AsyncSession,
+    *,
+    application_name: str,
+) -> None:
+    for _ in range(50):
+        await observer.execute(text("SELECT pg_stat_clear_snapshot()"))
+        waiting = (
+            await observer.execute(
+                text(
+                    "SELECT EXISTS ("
+                    "SELECT 1 FROM pg_stat_activity "
+                    "WHERE application_name = :application_name "
+                    "AND wait_event_type = 'Lock'"
+                    ")"
+                ),
+                {"application_name": application_name},
+            )
+        ).scalar_one()
+        if waiting:
+            return
+        await asyncio.sleep(0.02)
+    pytest.fail(f"{application_name} did not wait on a lock")
 
 
 async def _merge_from_review_with_short_lock_timeout(session: AsyncSession, review_id: str) -> None:
@@ -1167,6 +1194,390 @@ async def test_import_first_merge_moves_newly_committed_membership(
                     "WHERE provider = :provider AND dataset_key = 'race'"
                 ),
                 {"provider": provider},
+            )
+
+
+@pytest.mark.parametrize("writer_kind", ["add", "feature_link", "legacy_create"])
+async def test_merge_first_rechecks_all_membership_writer_feature_lifecycles(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+    writer_kind: str,
+) -> None:
+    suffix = uuid4().hex
+    theme_slug = f"merge-writer-race-{suffix}"
+    unresolved_item_id: str | None = None
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        collection_id = str(
+            (
+                await setup.execute(
+                    text(
+                        "SELECT collection_id::text "
+                        "FROM feature.curation_collections "
+                        "WHERE collection_key = 'merge-test:2026'"
+                    )
+                )
+            ).scalar_one()
+        )
+        source_id = str(
+            (
+                await setup.execute(
+                    text(
+                        "SELECT source_id::text "
+                        "FROM feature.curated_sources "
+                        "WHERE provider = 'merge-test-provider' "
+                        "AND dataset_key = 'legacy-curation'"
+                    )
+                )
+            ).scalar_one()
+        )
+        theme_id = str(
+            (
+                await setup.execute(
+                    text(
+                        "INSERT INTO feature.curated_themes ("
+                        "theme_slug, theme_name, theme_group"
+                        ") VALUES (:theme_slug, 'merge writer race', 'test') "
+                        "RETURNING theme_id::text"
+                    ),
+                    {"theme_slug": theme_slug},
+                )
+            ).scalar_one()
+        )
+        if writer_kind == "feature_link":
+            unresolved, inserted = await add_curation_item(
+                setup,
+                collection_id=collection_id,
+                feature_id=None,
+                external_item_id=f"feature-link-{suffix}",
+                place_name="미연결 merge race",
+                actor="race-setup",
+            )
+            assert inserted is True
+            unresolved_item_id = unresolved.curation_item_id
+
+    async def run_merge() -> None:
+        async with AsyncSession(migrated_engine) as merger, merger.begin():
+            await merger.execute(
+                text("SET LOCAL application_name = 'membership-writer-merge'")
+            )
+            await merge_from_review(
+                merger,
+                seeded,
+                merged_by="membership-writer-race",
+            )
+
+    async def run_writer() -> None:
+        async with AsyncSession(migrated_engine) as writer, writer.begin():
+            await writer.execute(
+                text("SET LOCAL application_name = 'membership-writer-contender'")
+            )
+            if writer_kind == "add":
+                await add_curation_item(
+                    writer,
+                    collection_id=collection_id,
+                    feature_id="f_loser",
+                    external_item_id=f"canonical-add-{suffix}",
+                    actor="race-writer",
+                )
+            elif writer_kind == "feature_link":
+                assert unresolved_item_id is not None
+                await update_curation_item(
+                    writer,
+                    collection_id=collection_id,
+                    curation_item_id=unresolved_item_id,
+                    updates={"feature_id": "f_loser"},
+                    actor="race-writer",
+                )
+            else:
+                await curated_repo.create_curated_feature(
+                    writer,
+                    theme_id=theme_id,
+                    feature_id="f_loser",
+                    source_id=source_id,
+                    actor="race-writer",
+                )
+
+    merge_task: asyncio.Task[None] | None = None
+    writer_task: asyncio.Task[None] | None = None
+    try:
+        async with AsyncSession(migrated_engine) as holder, holder.begin():
+            await holder.execute(
+                text(
+                    "SELECT collection_id "
+                    "FROM feature.curation_collections "
+                    "WHERE collection_id = CAST(:collection_id AS uuid) "
+                    "FOR UPDATE"
+                ),
+                {"collection_id": collection_id},
+            )
+            merge_task = asyncio.create_task(run_merge())
+            await _wait_for_application_lock(
+                holder,
+                application_name="membership-writer-merge",
+            )
+            writer_task = asyncio.create_task(run_writer())
+            await _wait_for_application_lock(
+                holder,
+                application_name="membership-writer-contender",
+            )
+            blocked_by_merge = (
+                await holder.execute(
+                    text(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM pg_stat_activity AS writer
+                            JOIN pg_stat_activity AS merger
+                              ON merger.pid = ANY(
+                                  pg_blocking_pids(writer.pid)
+                              )
+                            WHERE writer.application_name =
+                                  'membership-writer-contender'
+                              AND merger.application_name =
+                                  'membership-writer-merge'
+                        )
+                        """
+                    )
+                )
+            ).scalar_one()
+            assert blocked_by_merge is True
+
+        assert merge_task is not None
+        await asyncio.wait_for(merge_task, timeout=5)
+        assert writer_task is not None
+        with pytest.raises(ValueError, match="active Feature|Feature가 없습니다"):
+            await asyncio.wait_for(writer_task, timeout=5)
+    finally:
+        for task in (writer_task, merge_task):
+            if task is not None and not task.done():
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_features "
+                    "WHERE theme_id = CAST(:theme_id AS uuid)"
+                ),
+                {"theme_id": theme_id},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curation_collections "
+                    "WHERE theme_id = CAST(:theme_id AS uuid)"
+                ),
+                {"theme_id": theme_id},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_themes "
+                    "WHERE theme_id = CAST(:theme_id AS uuid)"
+                ),
+                {"theme_id": theme_id},
+            )
+
+
+async def test_membership_writer_first_is_seen_and_moved_by_merge(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    suffix = uuid4().hex
+    external_item_id = f"writer-first-{suffix}"
+    merge_task: asyncio.Task[None] | None = None
+
+    async def run_merge() -> None:
+        async with AsyncSession(migrated_engine) as merger, merger.begin():
+            await merger.execute(
+                text("SET LOCAL application_name = 'writer-first-merge'")
+            )
+            await merge_from_review(
+                merger,
+                seeded,
+                merged_by="writer-first-race",
+            )
+
+    async with AsyncSession(migrated_engine) as writer, writer.begin():
+        collection_id = str(
+            (
+                await writer.execute(
+                    text(
+                        "SELECT collection_id::text "
+                        "FROM feature.curation_collections "
+                        "WHERE collection_key = 'merge-test:2026'"
+                    )
+                )
+            ).scalar_one()
+        )
+        await add_curation_item(
+            writer,
+            collection_id=collection_id,
+            feature_id="f_loser",
+            external_item_id=external_item_id,
+            actor="writer-first",
+        )
+        merge_task = asyncio.create_task(run_merge())
+        await _wait_for_application_lock(
+            writer,
+            application_name="writer-first-merge",
+        )
+
+    assert merge_task is not None
+    await asyncio.wait_for(merge_task, timeout=5)
+    async with AsyncSession(migrated_engine) as session:
+        state = (
+            await session.execute(
+                text(
+                    "SELECT feature_id, source_present "
+                    "FROM feature.curation_items "
+                    "WHERE external_item_id = :external_item_id"
+                ),
+                {"external_item_id": external_item_id},
+            )
+        ).one()
+    assert state == ("f_master", True)
+
+
+async def test_rule_apply_rechecks_feature_after_waiting_for_merge(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    suffix = uuid4().hex
+    theme_slug = f"merge-rule-race-{suffix}"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        rule_id = str(
+            (
+                await setup.execute(
+                    text(
+                        """
+                        WITH theme AS (
+                            INSERT INTO feature.curated_themes (
+                                theme_slug, theme_name, theme_group
+                            ) VALUES (
+                                :theme_slug, 'merge rule race', 'test'
+                            )
+                            RETURNING theme_id
+                        ), source AS (
+                            INSERT INTO feature.curated_sources (
+                                provider, dataset_key, source_name,
+                                source_kind, update_cycle,
+                                provider_status, metadata
+                            ) VALUES (
+                                'python-visitkorea-api', 'd',
+                                'merge rule race', 'openapi', 'unknown',
+                                'implemented', '{}'::jsonb
+                            )
+                            RETURNING source_id
+                        )
+                        INSERT INTO feature.curated_source_rules (
+                            theme_id, source_id, dataset_key, default_action,
+                            enabled, priority
+                        )
+                        SELECT
+                            theme_id, source_id, 'd', 'candidate', true, 1
+                        FROM theme CROSS JOIN source
+                        RETURNING rule_id::text
+                        """
+                    ),
+                    {"theme_slug": theme_slug},
+                )
+            ).scalar_one()
+        )
+        collection_id = str(
+            (
+                await setup.execute(
+                    text(
+                        "SELECT collection_id::text "
+                        "FROM feature.curation_collections "
+                        "WHERE collection_key = 'merge-test:2026'"
+                    )
+                )
+            ).scalar_one()
+        )
+
+    async def run_merge() -> None:
+        async with AsyncSession(migrated_engine) as merger, merger.begin():
+            await merger.execute(
+                text("SET LOCAL application_name = 'rule-race-merge'")
+            )
+            await merge_from_review(merger, seeded, merged_by="rule-race")
+
+    async def run_rule() -> int:
+        async with AsyncSession(migrated_engine) as writer, writer.begin():
+            await writer.execute(
+                text("SET LOCAL application_name = 'rule-race-writer'")
+            )
+            result = await curated_repo.apply_curated_source_rule(
+                writer,
+                rule_id=rule_id,
+            )
+            return result.inserted_or_updated
+
+    merge_task: asyncio.Task[None] | None = None
+    rule_task: asyncio.Task[int] | None = None
+    try:
+        async with AsyncSession(migrated_engine) as holder, holder.begin():
+            await holder.execute(
+                text(
+                    "SELECT collection_id "
+                    "FROM feature.curation_collections "
+                    "WHERE collection_id = CAST(:collection_id AS uuid) "
+                    "FOR UPDATE"
+                ),
+                {"collection_id": collection_id},
+            )
+            merge_task = asyncio.create_task(run_merge())
+            await _wait_for_application_lock(
+                holder,
+                application_name="rule-race-merge",
+            )
+            rule_task = asyncio.create_task(run_rule())
+            await _wait_for_application_lock(
+                holder,
+                application_name="rule-race-writer",
+            )
+
+        assert merge_task is not None
+        await asyncio.wait_for(merge_task, timeout=5)
+        assert rule_task is not None
+        assert await asyncio.wait_for(rule_task, timeout=5) == 0
+    finally:
+        for task in (rule_task, merge_task):
+            if task is not None and not task.done():
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curation_collections "
+                    "WHERE theme_id IN ("
+                    "SELECT theme_id FROM feature.curated_themes "
+                    "WHERE theme_slug = :theme_slug"
+                    ")"
+                ),
+                {"theme_slug": theme_slug},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_source_rules "
+                    "WHERE rule_id = CAST(:rule_id AS uuid)"
+                ),
+                {"rule_id": rule_id},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_sources "
+                    "WHERE provider = 'python-visitkorea-api' "
+                    "AND dataset_key = 'd' "
+                    "AND source_name = 'merge rule race'"
+                )
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_themes "
+                    "WHERE theme_slug = :theme_slug"
+                ),
+                {"theme_slug": theme_slug},
             )
 
 

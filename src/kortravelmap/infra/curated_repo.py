@@ -649,74 +649,20 @@ WITH rule AS (
       AND r.enabled
       AND r.default_action IN ('candidate','curated')
 ),
-upserted AS (
-    INSERT INTO feature.curated_features (
-        theme_id, feature_id, source_id, source_record_key, curation_status,
-        selection_origin, selected_at, rank_score, display_title,
-        curation_relation, reuse_policy, metadata, updated_at
-    )
+candidates AS MATERIALIZED (
     SELECT DISTINCT ON (f.feature_id)
+        rule.rule_id,
         rule.theme_id,
-        f.feature_id,
         rule.source_id,
-        sr.source_record_key,
         rule.default_action,
-        'source_rule',
-        CASE WHEN rule.default_action = 'curated' THEN now() ELSE NULL END,
         rule.priority,
-        CASE
-            WHEN s.provider = 'kor-travel-concierge-youtube'
-             AND s.dataset_key = 'youtube_place_candidates'
-            THEN NULLIF(BTRIM(COALESCE(
-                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,source_title}', ''),
-                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,playlist_title}', ''),
-                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,channel_title}', ''),
-                NULLIF(
-                    f.detail #>> '{payload,kor_travel_concierge,youtube,source_search_query}',
-                    ''
-                ),
-                NULLIF(
-                    f.detail #>> '{payload,kor_travel_concierge,youtube,corrected_search_query}',
-                    ''
-                ),
-                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,search_query}', ''),
-                NULLIF(f.detail #>> '{facility_info,youtube_playlist_title}', ''),
-                NULLIF(f.detail #>> '{facility_info,youtube_channel_title}', '')
-            )), '')
-            WHEN s.provider IN (
-                'data.go.kr-standard',
-                'python-airkorea-api',
-                'python-datagokr-api',
-                'python-kasi-api',
-                'python-khoa-api',
-                'python-kma-api',
-                'python-knps-api',
-                'python-krairport-api',
-                'python-krex-api',
-                'python-krforest-api',
-                'python-krheritage-api',
-                'python-mcst-api',
-                'python-mois-api',
-                'python-opinet-api',
-                'python-visitkorea-api'
-            ) THEN s.provider
-            ELSE NULL
-        END,
-        CASE
-            WHEN rule.relation IN (
-                'primary_stop','food_stop','cafe_stop','bookstore_stop',
-                'nearby_option','accessibility_support','pet_support',
-                'family_support','theme_area_anchor'
-            ) THEN rule.relation
-            ELSE 'nearby_option'
-        END,
-        CASE
-            WHEN rule.reuse_policy IN ('allowed','blocked','manual_review')
-            THEN rule.reuse_policy
-            ELSE 'manual_review'
-        END,
-        jsonb_build_object('rule_id', rule.rule_id::text, 'applied_by', 'source_rule'),
-        now()
+        rule.relation,
+        rule.reuse_policy,
+        f.feature_id,
+        f.detail AS feature_detail,
+        s.provider,
+        s.dataset_key,
+        sr.source_record_key
     FROM rule
     JOIN feature.curated_sources AS s ON s.source_id = rule.source_id
     JOIN provider_sync.source_entities AS se
@@ -745,8 +691,6 @@ upserted AS (
            OR f.sigungu_code = rule.region_scope ->> 'sigungu_code')
         )
       )
-      -- detail_selector: 단일 source를 detail JSON 값으로 분할(예: concierge youtube
-      -- channel/playlist 그룹핑). path(jsonb 배열)로 지정한 detail 값이 value와 일치.
       AND (
         rule.detail_selector IS NULL
         OR f.detail #>> ARRAY(
@@ -761,6 +705,117 @@ upserted AS (
           AND old_cf.curation_status IN ('rejected','archived')
       )
     ORDER BY f.feature_id, sl.is_primary_source DESC, sr.imported_at DESC
+),
+locked_candidates AS MATERIALIZED (
+    SELECT candidate.*
+    FROM candidates AS candidate
+    JOIN feature.features AS locked_feature
+      ON locked_feature.feature_id = candidate.feature_id
+    WHERE locked_feature.deleted_at IS NULL
+      AND locked_feature.status = 'active'
+    ORDER BY candidate.feature_id
+    FOR KEY SHARE OF locked_feature
+),
+upserted AS (
+    INSERT INTO feature.curated_features (
+        theme_id, feature_id, source_id, source_record_key, curation_status,
+        selection_origin, selected_at, rank_score, display_title,
+        curation_relation, reuse_policy, metadata, updated_at
+    )
+    SELECT
+        candidate.theme_id,
+        candidate.feature_id,
+        candidate.source_id,
+        candidate.source_record_key,
+        candidate.default_action,
+        'source_rule',
+        CASE WHEN candidate.default_action = 'curated' THEN now() ELSE NULL END,
+        candidate.priority,
+        CASE
+            WHEN candidate.provider = 'kor-travel-concierge-youtube'
+             AND candidate.dataset_key = 'youtube_place_candidates'
+            THEN NULLIF(BTRIM(COALESCE(
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,source_title}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,playlist_title}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,channel_title}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,source_search_query}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,corrected_search_query}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,search_query}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{facility_info,youtube_playlist_title}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{facility_info,youtube_channel_title}',
+                    ''
+                )
+            )), '')
+            WHEN candidate.provider IN (
+                'data.go.kr-standard',
+                'python-airkorea-api',
+                'python-datagokr-api',
+                'python-kasi-api',
+                'python-khoa-api',
+                'python-kma-api',
+                'python-knps-api',
+                'python-krairport-api',
+                'python-krex-api',
+                'python-krforest-api',
+                'python-krheritage-api',
+                'python-mcst-api',
+                'python-mois-api',
+                'python-opinet-api',
+                'python-visitkorea-api'
+            ) THEN candidate.provider
+            ELSE NULL
+        END,
+        CASE
+            WHEN candidate.relation IN (
+                'primary_stop','food_stop','cafe_stop','bookstore_stop',
+                'nearby_option','accessibility_support','pet_support',
+                'family_support','theme_area_anchor'
+            ) THEN candidate.relation
+            ELSE 'nearby_option'
+        END,
+        CASE
+            WHEN candidate.reuse_policy IN ('allowed','blocked','manual_review')
+            THEN candidate.reuse_policy
+            ELSE 'manual_review'
+        END,
+        jsonb_build_object(
+            'rule_id',
+            candidate.rule_id::text,
+            'applied_by',
+            'source_rule'
+        ),
+        now()
+    FROM locked_candidates AS candidate
     ON CONFLICT (theme_id, feature_id) WHERE archived_at IS NULL
     DO UPDATE SET
         source_id = EXCLUDED.source_id,
@@ -1547,6 +1602,20 @@ async def create_curated_feature(
     _validate_choice(selection_origin, _SELECTION_ORIGINS, "selection_origin")
     _validate_choice(curation_relation, _CURATION_RELATIONS, "curation_relation")
     _validate_choice(reuse_policy, _REUSE_POLICIES, "reuse_policy")
+    active_feature = (
+        await session.execute(
+            text(
+                "SELECT feature_id FROM feature.features "
+                "WHERE feature_id = :feature_id "
+                "AND deleted_at IS NULL "
+                "AND status NOT IN ('deleted','hidden') "
+                "FOR KEY SHARE"
+            ),
+            {"feature_id": feature_id},
+        )
+    ).first()
+    if active_feature is None:
+        raise ValueError("feature_id must reference an active Feature")
     row = (
         await session.execute(
             text(_CREATE_FEATURE_SQL),
@@ -1640,11 +1709,14 @@ async def update_curated_feature(
             set_parts.append(f"{key} = :{key}")
             params[key] = value
     if not set_parts:
-        return await get_curated_feature(
+        current = await get_curated_feature(
             session,
             curated_feature_id=curated_feature_id,
             include_archived=True,
         )
+        if current is not None and current.metadata.get("merge_projection_detached") is True:
+            return None
+        return current
     operator_owned_changed = bool(
         {"curation_status", "curation_relation", "reuse_policy"} & updates.keys()
     )

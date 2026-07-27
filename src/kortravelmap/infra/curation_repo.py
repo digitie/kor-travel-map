@@ -1611,8 +1611,6 @@ async def add_curation_item(
         raise ValueError("invalid curation item policy")
     if not 0 <= sort_order <= _POSTGRES_INTEGER_MAX or not external_item_id.strip():
         raise ValueError("invalid curation item identity")
-    if not await _lock_collection(session, collection_id):
-        raise LookupError("curation collection 없음")
     resolved_place_name = place_name.strip() if place_name else ""
     if feature_id is not None:
         feature_name = (
@@ -1620,7 +1618,8 @@ async def add_curation_item(
                 text(
                     "SELECT name FROM feature.features "
                     "WHERE feature_id = :id AND deleted_at IS NULL "
-                    "AND status NOT IN ('deleted','hidden')"
+                    "AND status NOT IN ('deleted','hidden') "
+                    "FOR KEY SHARE"
                 ),
                 {"id": feature_id},
             )
@@ -1629,6 +1628,8 @@ async def add_curation_item(
             raise ValueError("feature_id must reference an active Feature")
         if not resolved_place_name:
             resolved_place_name = str(feature_name)
+    if not await _lock_collection(session, collection_id):
+        raise LookupError("curation collection 없음")
     if not resolved_place_name:
         raise ValueError("place_name or an existing feature_id is required")
     archived_identity_exists = (
@@ -1800,6 +1801,22 @@ async def update_curation_item(
         }
         & normalized.keys()
     )
+    target_feature_id = normalized.get("feature_id")
+    if target_feature_id is not None:
+        target_is_active = (
+            await session.execute(
+                text(
+                    "SELECT 1 FROM feature.features "
+                    "WHERE feature_id = :feature_id AND deleted_at IS NULL "
+                    "AND status NOT IN ('deleted','hidden') "
+                    "FOR KEY SHARE"
+                ),
+                {"feature_id": target_feature_id},
+            )
+        ).scalar_one_or_none()
+        if target_is_active is None:
+            raise ValueError("feature_id에 해당하는 Feature가 없습니다.")
+
     legacy_backed = await _lock_legacy_projections_for_item(
         session,
         collection_id=collection_id,
@@ -1822,20 +1839,6 @@ async def update_curation_item(
         return None
 
     feature_id = normalized.get("feature_id", current.feature_id)
-    if "feature_id" in normalized and feature_id is not None:
-        exists = (
-            await session.execute(
-                text(
-                    "SELECT 1 FROM feature.features "
-                    "WHERE feature_id = :feature_id AND deleted_at IS NULL "
-                    "AND status NOT IN ('deleted','hidden')"
-                ),
-                {"feature_id": feature_id},
-            )
-        ).scalar_one_or_none()
-        if exists is None:
-            raise ValueError("feature_id에 해당하는 Feature가 없습니다.")
-
     if "feature_id" in normalized or "external_item_id" in normalized:
         target_external_item_id = str(
             normalized.get("external_item_id", current.external_item_id)

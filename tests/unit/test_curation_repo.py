@@ -856,6 +856,7 @@ async def test_update_item_noop_update_miss_and_full_success(
         actor="admin",
     )
     assert updated == final_item
+    assert "FOR KEY SHARE" in success.calls[0][0]
     sql, params = success.calls[3]
     assert "archived_at = now()" in sql
     assert params["external_item_id"] == "changed"

@@ -41,16 +41,6 @@ DECLARE
     target_identity_item_id uuid;
     target_item_id uuid;
 BEGIN
-    IF COALESCE(
-        current_setting('kortravelmap.curation_sync_mode', true),
-        ''
-    ) = 'merge_explicit' THEN
-        IF TG_OP = 'DELETE' THEN
-            RETURN OLD;
-        END IF;
-        RETURN NEW;
-    END IF;
-
     -- detach marker는 merge/trigger 내부 상태다. 일반 INSERT 또는 top-level
     -- UPDATE로 주입해 canonical sync와 공개 projection을 우회할 수 없다.
     IF TG_OP = 'INSERT'
@@ -65,6 +55,34 @@ BEGIN
        AND NEW.metadata @> '{"merge_projection_detached": true}'::jsonb
        AND pg_trigger_depth() = 1
     THEN
+        -- Merge가 허용받는 유일한 top-level 전이는 canonical UUID mirror가
+        -- 이미 사라졌고 같은 theme의 master legacy projection이 존재하는
+        -- loser를 그대로 archive하는 경우다. 호출자 토큰/GUC가 아니라
+        -- transaction 안의 물리 불변식으로 권한을 판정한다.
+        IF NEW.feature_id IS DISTINCT FROM OLD.feature_id
+           AND NEW.curation_status = 'archived'
+           AND NEW.archived_at IS NOT NULL
+           AND NEW.metadata = OLD.metadata || jsonb_build_object(
+               'merge_projection_detached',
+               true
+           )
+           AND NOT EXISTS (
+               SELECT 1
+               FROM feature.curation_items AS direct_item
+               WHERE direct_item.curation_item_id = NEW.curated_feature_id
+                 AND direct_item.archived_at IS NULL
+           )
+           AND EXISTS (
+               SELECT 1
+               FROM feature.curated_features AS master_legacy
+               WHERE master_legacy.curated_feature_id <>
+                     NEW.curated_feature_id
+                 AND master_legacy.theme_id = NEW.theme_id
+                 AND master_legacy.feature_id = NEW.feature_id
+           )
+        THEN
+            RETURN NEW;
+        END IF;
         RAISE EXCEPTION
             'merge_projection_detached metadata is reserved'
             USING ERRCODE = '23514';
@@ -795,7 +813,12 @@ def upgrade() -> None:
                 survivor.collection_id,
                 survivor.external_item_id,
                 survivor.feature_id,
-                survivor.curation_item_id
+                survivor.curation_item_id,
+                survivor.curation_relation,
+                survivor.reuse_policy,
+                survivor.operator_updated_by,
+                survivor.operator_updated_at,
+                survivor.archived_at
         ), duplicate_ids AS MATERIALIZED (
             SELECT duplicate.curation_item_id
             FROM feature.curation_items AS duplicate
@@ -804,6 +827,41 @@ def upgrade() -> None:
              AND duplicate.external_item_id = reconciled.external_item_id
              AND duplicate.feature_id IS NOT DISTINCT FROM reconciled.feature_id
             WHERE duplicate.curation_item_id <> reconciled.curation_item_id
+        ), archived_survivor_legacy AS (
+            UPDATE feature.curated_features AS legacy
+            SET curation_status = 'archived',
+                selection_origin = CASE
+                    WHEN reconciled.operator_updated_at IS NOT NULL
+                    THEN 'admin'
+                    ELSE legacy.selection_origin
+                END,
+                curation_relation = reconciled.curation_relation,
+                reuse_policy = reconciled.reuse_policy,
+                operator_updated_by = reconciled.operator_updated_by,
+                operator_updated_at = reconciled.operator_updated_at,
+                archived_at = reconciled.archived_at,
+                updated_at = clock_timestamp(),
+                content_version = legacy.content_version + 1
+            FROM reconciled
+            WHERE legacy.curated_feature_id =
+                  reconciled.curation_item_id
+              AND reconciled.archived_at IS NOT NULL
+              AND (
+                  legacy.curation_status,
+                  legacy.curation_relation,
+                  legacy.reuse_policy,
+                  legacy.operator_updated_by,
+                  legacy.operator_updated_at,
+                  legacy.archived_at
+              ) IS DISTINCT FROM (
+                  'archived',
+                  reconciled.curation_relation,
+                  reconciled.reuse_policy,
+                  reconciled.operator_updated_by,
+                  reconciled.operator_updated_at,
+                  reconciled.archived_at
+              )
+            RETURNING legacy.curated_feature_id
         ), detached_legacy AS (
             UPDATE feature.curated_features AS legacy
             SET curation_status = 'archived',

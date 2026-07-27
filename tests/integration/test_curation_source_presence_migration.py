@@ -276,6 +276,21 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
             text(
                 """
                 UPDATE feature.curation_items AS item
+                SET status = 'archived',
+                    archived_at = now(),
+                    updated_by = 'canonical-tombstone-drift',
+                    updated_at = clock_timestamp()
+                FROM feature.curated_features AS legacy
+                WHERE legacy.display_title = 'migration legacy duplicate'
+                  AND legacy.curation_status = 'curated'
+                  AND item.curation_item_id = legacy.curated_feature_id
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curation_items AS item
                 SET status = 'rejected',
                     curation_relation = 'primary_stop',
                     reuse_policy = 'blocked',
@@ -556,18 +571,9 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                 target_dsn,
                 _PRE_REVISION,
                 downgrade=True,
-            )
+        )
         target_engine = make_async_engine(target_dsn)
         async with target_engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "SELECT set_config("
-                    "'kortravelmap.curation_sync_mode',"
-                    "'merge_explicit',"
-                    "true"
-                    ")"
-                )
-            )
             await connection.execute(
                 text(
                     "UPDATE feature.curation_items "
@@ -577,12 +583,27 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
             await connection.execute(
                 text(
                     "UPDATE feature.curated_features "
-                    "SET operator_updated_by = NULL, operator_updated_at = NULL, "
-                    "metadata = CASE "
-                    "WHEN display_title = 'migration legacy override' "
-                    "THEN metadata || "
-                    "'{\"merge_projection_detached\": true}'::jsonb "
-                    "ELSE metadata END"
+                    "SET operator_updated_by = NULL, operator_updated_at = NULL"
+                )
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curation_items AS item "
+                    "USING feature.curated_features AS legacy "
+                    "WHERE legacy.display_title = 'migration legacy override' "
+                    "AND item.curation_item_id = legacy.curated_feature_id"
+                )
+            )
+            await connection.execute(
+                text(
+                    "UPDATE feature.curated_features "
+                    "SET feature_id = 'feature:migration-external-api', "
+                    "curation_status = 'archived', "
+                    "metadata = metadata || "
+                    "'{\"merge_projection_detached\": true}'::jsonb, "
+                    "archived_at = now(), "
+                    "updated_at = clock_timestamp() "
+                    "WHERE display_title = 'migration legacy override'"
                 )
             )
         await target_engine.dispose()
