@@ -18,14 +18,16 @@
 live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실행 위주라 하위 상세 섹션
 없이 **인덱스 상주가 정본**(tasks-rule §5의 "상세 위치 하나"를 인덱스로 충족).
 
-- [ ] `T-VN-H12` — **live acceptance fixture 좌표 run-unique화** (T-VN-LIVE-01 kind-격리 후속)
+- [ ] `T-VN-H12` — **live acceptance fixture 좌표 run-unique화** (T-VN-LIVE-01 kind-격리 후속).
+  **구현·정적검증 완료 (PR 대기/머지)**, 잔여 = **live-lane 실증**뿐.
 
-  `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표가 고정(LON=127.5/LAT=36.5 +
-  index*0.001)이라, 이전 run이 cleanup 전에 죽으면 동일 status·동일 좌표의 leftover place feature가
-  현재 run과 0.000° 거리로 supercluster에 묶여 개별 marker aria-label이 사라진다(적대 리뷰 P2). run별
-  cleanup은 RUN_ID-scoped라 이 cross-run 충돌을 못 막는다. 좌표를 `hash(RUN_ID)`로 run-unique하게
-  jitter하고(SEARCH_TOKEN 패턴) marker 단계에서 map을 fixture로 pan(또는 fitBounds)해 viewport 이탈도
-  차단한다. 또는 marker 직전 place 렌더 count==1(cluster 0) 단언을 추가한다. Lane A 소유(live lane).
+  `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표가 고정(LON=127.5/LAT=36.5)이라
+  죽은 run의 leftover place가 현재 run과 0.000° 거리로 supercluster 병합돼 marker aria-label 소실(적대
+  리뷰 P2). 수정: base 좌표를 `sha256(RUN_ID)` ±0.25° jitter(한국 본토 bbox 중심부) + `recenterMapTo`
+  헬퍼로 marker 단계에서 map을 fixture 좌표로 jumpTo(jitter로 fixture가 DEFAULT_VIEWPORT center를 벗어나
+  viewport 이탈하는 것을 차단). offset/bbox/cleanup/RECOVERY_ONLY는 좌표 무관이라 무수정. e2e type-check
+  통과 + 4개 각도 적대 정적검증 통과(collision-efficacy/recenter-mechanics/validity-determinism/
+  missed-viewport-deps). **잔여**: 다음 live acceptance lane run에서 n150 실증(Lane A live lane).
 
 - [ ] `T-VN-H16` — **LIVE-01 후속 OPEN 이슈 재검증·종결**. LIVE-01과 #741/#785는
   완료·종결됐지만 map #712·#719·#694·#777·#684와 docker-manager #63·#70은 2026-07-27 조회 기준

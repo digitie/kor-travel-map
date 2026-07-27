@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (claude) — T-VN-H12 live fixture 좌표 run-unique jitter 구현·정적검증
+
+**결론**: live acceptance spec의 status marker 좌표 고정(127.5/36.5)으로 죽은 run의 leftover place가
+현재 run과 supercluster 병합돼 marker aria-label이 사라지던 P2를, base 좌표 `sha256(RUN_ID)` jitter +
+map recenter로 해소. 구현 + e2e type-check + 4각도 적대 정적검증 통과. 잔여는 live-lane 실증.
+
+**수정**(`admin-feature-acceptance-write.live.spec.ts`, +57/-5):
+- `LON/LAT`를 상수→`sha256("acceptance-coord:"+RUN_ID)` 기반 ±0.25° jitter(`coordJitter`, SEARCH_TOKEN과
+  동일 결정론 패턴). 진폭은 한국 본토 bbox [124,132]×[33,39.5](ADR-012) 중심부 유지로 create 검증·viewport
+  마진 확보, cross-run 충돌 확률 ≲1e-4.
+- `recenterMapTo(page,lon,lat)` 헬퍼 신설: 노출된 `_maplibreMap` 핸들(vworld-map-view.tsx e2e 훅)에
+  `jumpTo({center})`. `assertStatusMarker`에서 zoomMapTo 직전 호출 — jitter로 fixture가
+  DEFAULT_VIEWPORT(127.5/36.5) center를 벗어나 z14 viewport 밖으로 나가는 것을 차단.
+- offset 상수·bbox 헬퍼·cleanup·RECOVERY_ONLY·SEARCH_TOKEN 무수정(좌표 무관/base-relative). 기존
+  T-VN-H12 후속 추적 주석(assertStatusMarker) 갱신.
+
+**검증**:
+- e2e type-check(`tsc -p e2e/tsconfig.json`) exit 0.
+- 적대 정적검증 워크플로우(4각도) 전부 blocker 없음: ①collision-efficacy(clusterMaxZoom=14이나 z14는
+  개별 렌더 FEATURE_CLUSTER_MAX_ZOOM=13, status 단일선택이라 self-cluster 불가) ②recenter-mechanics
+  (jumpTo zoom 보존·store→map 역sync 없음, zoom-in center-anchored, 저zoom 요청은 zoom<14로 waiter가
+  body 전 거부, jumpTo 동기라 idle) ③validity-determinism(envelope LON[127.248,127.755]·
+  LAT[36.248,36.755] bbox 내, readUInt32BE 오프셋 유효) ④missed-viewport-deps(assertStatusMarker만
+  viewport 의존, 나머지 좌표 상대).
+- **잔여**: 다음 live acceptance lane run에서 n150 파괴적 실증(Lane A live lane).
+
 ## 2026-07-27 (claude) — T-ADM-C6c + T-VN-03 principal 경계 cutover n150 실증 (#392 종결)
 
 **결론**: curated public-key gate + ops operator gate + MOIS raw production unmount + PinVi ops:read
