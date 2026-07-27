@@ -616,6 +616,28 @@ async def test_rejected_curated_feature_is_not_revived_by_rule_apply(
     ).items
     assert candidate.feature_id == feature_id
 
+    manually_classified = await curated_repo.update_curated_feature(
+        migrated_session,
+        curated_feature_id=candidate.curated_feature_id,
+        updates={
+            "curation_relation": "bookstore_stop",
+            "reuse_policy": "blocked",
+        },
+    )
+    assert manually_classified is not None
+    await curated_repo.apply_curated_source_rule(
+        migrated_session,
+        rule_id=rule.rule_id,
+    )
+    after_provider_refresh = await curated_repo.get_curated_feature(
+        migrated_session,
+        curated_feature_id=candidate.curated_feature_id,
+        include_archived=True,
+    )
+    assert after_provider_refresh is not None
+    assert after_provider_refresh.curation_relation == "bookstore_stop"
+    assert after_provider_refresh.reuse_policy == "blocked"
+
     rejected = await curated_repo.set_curated_feature_status(
         migrated_session,
         curated_feature_id=candidate.curated_feature_id,

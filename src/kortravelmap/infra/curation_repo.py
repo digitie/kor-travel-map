@@ -627,15 +627,16 @@ _UPSERT_ITEM_SQL: Final[str] = """
 WITH written AS (
     INSERT INTO feature.curation_items (
         collection_id, feature_id, source_record_key, external_item_id,
-        place_name, address_hint, source_present, status,
+        place_name, address_hint, source_present, source_updated_at, status,
         sort_order, item_title, item_summary, curation_relation, reuse_policy,
-        metadata, created_by, updated_by, updated_at
+        metadata, created_by, updated_by, operator_updated_by,
+        operator_updated_at, updated_at
     ) VALUES (
         CAST(:collection_id AS uuid), :feature_id, :source_record_key,
-        :external_item_id, :place_name, :address_hint, true,
+        :external_item_id, :place_name, :address_hint, true, now(),
         :status, :sort_order, :item_title, :item_summary,
         :curation_relation, :reuse_policy, CAST(:metadata AS jsonb),
-        :actor, :actor, now()
+        :actor, :actor, :actor, clock_timestamp(), now()
     )
     ON CONFLICT (
         collection_id, external_item_id, feature_id
@@ -648,6 +649,7 @@ WITH written AS (
         place_name = EXCLUDED.place_name,
         address_hint = EXCLUDED.address_hint,
         source_present = true,
+        source_updated_at = now(),
         status = EXCLUDED.status,
         sort_order = EXCLUDED.sort_order,
         item_title = EXCLUDED.item_title,
@@ -656,6 +658,8 @@ WITH written AS (
         reuse_policy = EXCLUDED.reuse_policy,
         metadata = EXCLUDED.metadata,
         updated_by = EXCLUDED.updated_by,
+        operator_updated_by = EXCLUDED.operator_updated_by,
+        operator_updated_at = clock_timestamp(),
         updated_at = now()
     WHERE (
         feature.curation_items.source_record_key,
@@ -727,6 +731,7 @@ WITH incoming AS (
 ), marked AS (
     UPDATE feature.curation_items AS existing
     SET source_present = false,
+        source_updated_at = now(),
         updated_by = :actor,
         updated_at = now()
     FROM candidates
@@ -763,14 +768,14 @@ WITH incoming AS (
 ), written AS (
     INSERT INTO feature.curation_items (
         collection_id, feature_id, external_item_id, place_name, address_hint,
-        source_present, status, sort_order,
+        source_present, source_updated_at, status, sort_order,
         item_title, item_summary, curation_relation, reuse_policy,
         metadata, created_by, updated_by, updated_at
     )
     SELECT
         CAST(incoming.collection_id AS uuid), incoming.feature_id,
         incoming.external_item_id, incoming.place_name, incoming.address_hint,
-        true, 'included', incoming.sort_order,
+        true, now(), 'included', incoming.sort_order,
         incoming.item_title, incoming.item_summary, 'nearby_option',
         'manual_review', incoming.metadata, :actor, :actor, now()
     FROM incoming
@@ -795,6 +800,7 @@ WITH incoming AS (
         place_name = EXCLUDED.place_name,
         address_hint = EXCLUDED.address_hint,
         source_present = true,
+        source_updated_at = now(),
         sort_order = EXCLUDED.sort_order,
         item_title = EXCLUDED.item_title,
         item_summary = EXCLUDED.item_summary,
@@ -1803,6 +1809,32 @@ async def update_curation_item(
         else:
             clauses.append(f"{key} = :{key}")
         params[key] = value
+    operator_owned_changed = bool(
+        {"status", "curation_relation", "reuse_policy"} & normalized.keys()
+    )
+    source_owned_changed = bool(
+        {
+            "feature_id",
+            "source_record_key",
+            "external_item_id",
+            "place_name",
+            "address_hint",
+            "sort_order",
+            "item_title",
+            "item_summary",
+            "metadata",
+        }
+        & normalized.keys()
+    )
+    if source_owned_changed:
+        clauses.append("source_updated_at = now()")
+    if operator_owned_changed:
+        clauses.extend(
+            [
+                "operator_updated_by = :actor",
+                "operator_updated_at = clock_timestamp()",
+            ]
+        )
     clauses.extend(["updated_by = :actor", "updated_at = now()"])
     if normalized.get("status") == "archived":
         clauses.append("archived_at = now()")
@@ -1823,6 +1855,84 @@ async def update_curation_item(
     ).first()
     if row is None:
         return None
+    if operator_owned_changed:
+        target_status = str(normalized.get("status", current.status))
+        target_relation = str(
+            normalized.get("curation_relation", current.curation_relation)
+        )
+        target_reuse_policy = str(
+            normalized.get("reuse_policy", current.reuse_policy)
+        )
+        await session.execute(
+            text(
+                """
+                UPDATE feature.curated_features AS legacy
+                SET curation_status = :legacy_status,
+                    selection_origin = 'admin',
+                    selected_by = CASE
+                        WHEN :legacy_status = 'curated' THEN :actor
+                        ELSE selected_by
+                    END,
+                    selected_at = CASE
+                        WHEN :legacy_status = 'curated' THEN now()
+                        ELSE selected_at
+                    END,
+                    rejected_by = CASE
+                        WHEN :legacy_status = 'rejected' THEN :actor
+                        WHEN :legacy_status IN ('curated', 'candidate') THEN NULL
+                        ELSE rejected_by
+                    END,
+                    rejected_at = CASE
+                        WHEN :legacy_status = 'rejected' THEN now()
+                        WHEN :legacy_status IN ('curated', 'candidate') THEN NULL
+                        ELSE rejected_at
+                    END,
+                    rejection_reason = CASE
+                        WHEN :legacy_status IN ('curated', 'candidate') THEN NULL
+                        ELSE rejection_reason
+                    END,
+                    curation_relation = :curation_relation,
+                    reuse_policy = :reuse_policy,
+                    operator_updated_by = :actor,
+                    operator_updated_at = clock_timestamp(),
+                    archived_at = CASE
+                        WHEN :legacy_status = 'archived' THEN now()
+                        ELSE NULL
+                    END,
+                    updated_at = now(),
+                    content_version = content_version + 1
+                FROM feature.curation_collections AS collection
+                WHERE collection.collection_id = CAST(:collection_id AS uuid)
+                  AND legacy.theme_id = collection.theme_id
+                  AND legacy.source_id IS NOT DISTINCT FROM collection.source_id
+                  AND legacy.feature_id IS NOT DISTINCT FROM :feature_id
+                  AND legacy.archived_at IS NULL
+                  AND (
+                      legacy.curated_feature_id =
+                          CAST(:curation_item_id AS uuid)
+                      OR (
+                          CAST(:source_record_key AS text) IS NOT NULL
+                          AND legacy.source_record_key =
+                              CAST(:source_record_key AS text)
+                      )
+                  )
+                """
+            ),
+            {
+                "curation_item_id": curation_item_id,
+                "collection_id": collection_id,
+                "feature_id": feature_id,
+                "source_record_key": normalized.get(
+                    "source_record_key", current.source_record_key
+                ),
+                "legacy_status": (
+                    "curated" if target_status == "included" else target_status
+                ),
+                "curation_relation": target_relation,
+                "reuse_policy": target_reuse_policy,
+                "actor": actor,
+            },
+        )
     await _touch_collection(session, collection_id=collection_id, actor=actor)
     return await get_curation_item(
         session,

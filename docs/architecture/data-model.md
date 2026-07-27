@@ -324,6 +324,7 @@ CREATE TABLE feature.curation_items (
   place_name TEXT NOT NULL,
   address_hint TEXT,
   source_present BOOLEAN NOT NULL DEFAULT true,
+  source_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   status TEXT NOT NULL DEFAULT 'candidate',
   sort_order INTEGER NOT NULL DEFAULT 0,
   item_title TEXT,
@@ -333,6 +334,8 @@ CREATE TABLE feature.curation_items (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_by TEXT,
   updated_by TEXT,
+  operator_updated_by TEXT,
+  operator_updated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   archived_at TIMESTAMPTZ,
@@ -385,6 +388,11 @@ collection과 item의 `created_by`/`updated_by`는 인증된 admin proxy actor�
 item만 반환한다. admin collection/item projection은 actor 필드를 포함하고 collection
 상세에서는 미연결·비공개·보관 item까지 조회할 수 있다.
 
+membership에는 서로 독립인 두 revision 축을 둔다. `source_updated_at`은 source presence와
+제공자 파생 필드가 바뀐 시각이고, `operator_updated_at`/`operator_updated_by`는
+`status`·`curation_relation`·`reuse_policy`를 마지막으로 바꾼 운영자 의도다. 일반
+`updated_at`은 행 감사 시각일 뿐 merge winner 판정에 사용하지 않는다.
+
 CSV commit은 파일이 언급한 collection을 한 transaction에서 authoritative replace한다.
 incoming 안정키에 없는 기존 item은 물리 삭제하지 않고 `source_present=false`로 표시한다.
 재등장하면 `source_present=true`와 제공자 파생 필드만 갱신하고, 운영자가 조정한
@@ -402,14 +410,20 @@ source에서 빠져 기본 projection에서 제외되는 건수다. 동일 파�
 동시 authoritative replace는
 `pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0))`으로 직렬화한다.
 여러 대상 collection row는 UUID 정렬 순서로 `FOR UPDATE`하고, 수동 item write도 parent
-collection을 먼저 잠가 import와 충돌하지 않게 한다. 기존 `curated_features` writer는 0045
-trigger가 같은 ID의 collection item으로 동기화해 전환 중 두 정본이 갈라지지 않게 한다.
-0065 이후 legacy writer의 UPDATE/DELETE도 물리 DELETE/INSERT를 하지 않는다. source presence와
-제공자 파생 필드만 갱신하고 operator 상태·relation·reuse override와 tombstone을 보존한다.
+collection을 먼저 잠가 import와 충돌하지 않게 한다. Feature merge도 영향 collection을 UUID
+순서로 먼저 잠근 뒤 item을 잠가 모든 writer가 parent→child 순서를 공유한다. 기존
+`curated_features` writer는 0045 trigger가 collection item으로 동기화해 전환 중 두 표면이
+갈라지지 않게 한다. 0065 이후 legacy writer의 UPDATE/DELETE도 물리 DELETE/INSERT를 하지
+않는다. source presence와 제공자 파생 필드는 source revision만 전진시키고 operator
+상태·relation·reuse는 별도 provenance가 전진한 경우에만 반영한다. canonical item의 운영자
+수정도 같은 transaction에서 legacy row로 역동기화한다. legacy row가 DELETE 후 새 UUID로
+재생성돼도 안정적인 `source_record_key` exact identity가 기존 source-absent membership을
+복원하며 archived tombstone은 되살리지 않는다.
 
-0065 downgrade는 `source_present=false` 행이 하나라도 있으면 `P0001`로 중단한다. 이전
-스키마는 source 누락과 durable membership을 함께 표현할 수 없어 자동 삭제하면 override를
-조용히 잃기 때문이다. 0045 downgrade도 구 `curated_features`에서 완전히 재구성할 수 있는 legacy 행만 허용한다.
+0065 downgrade는 `source_present=false` 또는 operator provenance가 하나라도 있으면
+`P0001`로 중단한다. 이전 스키마는 source 누락과 독립 revision을 함께 표현할 수 없어 자동
+삭제하면 override를 조용히 잃기 때문이다. 0045 downgrade도 구 `curated_features`에서
+완전히 재구성할 수 있는 legacy 행만 허용한다.
 신규 collection/item, 수동 변경, collection actor 또는 legacy `selected_by`와 일치하지 않는
 item actor처럼 표현력이 더 큰 데이터가 있으면 PostgreSQL `P0001` 예외로 transaction 전체를
 중단한다. 먼저 export 또는 명시적 정리하지 않은 데이터를 조용히 삭제하지 않는다.

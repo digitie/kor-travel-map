@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+### React Doctor·durable curation (2026-07-27, T-VN-47·T-VN-H13)
+
+- **RELIABILITY**: admin frontend React Doctor full scan을 270개 파일·진단 0건으로 만들었다.
+  canonical config와 CI verifier가 shadow config/ignore, 검사 command·범위 축소 및 package-level
+  우회를 거부한다.
+- **FIXED**: authoritative curation source에서 일시 누락된 item을 삭제하지 않고 비공개
+  `source_present=false` membership으로 보존한다. 재등장 시 source 필드만 복원하며 운영자
+  status·relation·reuse와 archived tombstone은 유지한다.
+- **DATABASE (breaking)**: curation identity를 archived/NULL까지 포함한 exact unique로 바꾸고
+  source/operator revision을 분리했다. legacy와 canonical operator intent는 양방향 동기화되며,
+  stable source identity의 DELETE→새 UUID 재등장은 기존 membership을 복원한다.
+- **CONCURRENCY**: Feature merge가 provider/operator 필드군을 독립 revision으로 reconcile하고
+  curation collection을 item보다 먼저 잠가 import/admin writer와의 교착 가능성을 제거한다.
+
 ### Admin frontend lint·schedule recovery·가격 series identity (2026-07-27, T-VN-44)
 
 - **FIXED**: 유효한 admin session으로 `/login`에 재진입할 때 Next `ReadonlyHeaders`의 내부

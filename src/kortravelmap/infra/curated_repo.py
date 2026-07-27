@@ -596,7 +596,8 @@ INSERT INTO feature.curated_features (
     theme_id, feature_id, source_id, source_record_key, curation_status,
     selection_origin, selected_by, selected_at, rejected_by, rejected_at,
     rejection_reason, rank_score, display_title, display_summary,
-    curation_relation, reuse_policy, metadata, updated_at
+    curation_relation, reuse_policy, metadata,
+    operator_updated_by, operator_updated_at, updated_at
 ) VALUES (
     CAST(:theme_id AS uuid), :feature_id, CAST(:source_id AS uuid),
     CAST(:source_record_key AS text), :curation_status, :selection_origin,
@@ -606,7 +607,9 @@ INSERT INTO feature.curated_features (
     CASE WHEN CAST(:rejected_now AS boolean) THEN now() ELSE NULL END,
     :rejection_reason,
     :rank_score, :display_title, :display_summary, :curation_relation,
-    :reuse_policy, CAST(:metadata_json AS jsonb), now()
+    :reuse_policy, CAST(:metadata_json AS jsonb), :operator_updated_by,
+    CASE WHEN CAST(:operator_updated AS boolean) THEN clock_timestamp() ELSE NULL END,
+    now()
 )
 RETURNING curated_feature_id::text
 """
@@ -765,8 +768,9 @@ upserted AS (
             feature.curated_features.display_title,
             EXCLUDED.display_title
         ),
-        curation_relation = EXCLUDED.curation_relation,
-        reuse_policy = EXCLUDED.reuse_policy,
+        -- curation_relation/reuse_policy는 운영자 소유 필드다. source rule 재적재가
+        -- 이를 덮으면 canonical collection의 durable override와 양방향 동기화할
+        -- 때 provider refresh를 운영자 수정으로 오인하게 된다.
         metadata = feature.curated_features.metadata || EXCLUDED.metadata,
         updated_at = now(),
         content_version = feature.curated_features.content_version + 1
@@ -1554,6 +1558,12 @@ async def create_curated_feature(
                 "curation_relation": curation_relation,
                 "reuse_policy": reuse_policy,
                 "metadata_json": _json_dumps(metadata),
+                "operator_updated_by": (
+                    rejected_by or selected_by
+                    if selection_origin in {"admin", "external_api"}
+                    else None
+                ),
+                "operator_updated": selection_origin in {"admin", "external_api"},
             },
         )
     ).mappings().one()
@@ -1603,6 +1613,13 @@ async def update_curated_feature(
         else:
             set_parts.append(f"{key} = :{key}")
             params[key] = value
+    if {"curation_status", "curation_relation", "reuse_policy"} & updates.keys():
+        set_parts.extend(
+            [
+                "selection_origin = 'admin'",
+                "operator_updated_at = clock_timestamp()",
+            ]
+        )
     if not set_parts:
         return await get_curated_feature(
             session,
@@ -1649,7 +1666,15 @@ async def set_curated_feature_status(
         else:
             set_parts.append(f"{key} = :{key}")
             params[key] = value
-    set_parts.extend(["updated_at = now()", "content_version = content_version + 1"])
+    set_parts.extend(
+        [
+            "operator_updated_by = :operator_updated_by",
+            "operator_updated_at = clock_timestamp()",
+            "updated_at = now()",
+            "content_version = content_version + 1",
+        ]
+    )
+    params["operator_updated_by"] = actor
     row = (
         await session.execute(
             text(_UPDATE_FEATURE_BASE_SQL.format(set_clause=", ".join(set_parts))),

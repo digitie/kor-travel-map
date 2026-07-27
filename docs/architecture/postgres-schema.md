@@ -81,7 +81,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `feature_weather_values` | `weather_value_key` | UNIQUE (feature_id, provider, weather_domain, forecast_style, metric_key, issued_at, valid_at, observed_at) |
 | `feature_price_values` | `price_value_key` | feature_id FK; provider/price_domain/product_key/observed_at/value_number/unit; UNIQUE (feature_id,provider,price_domain,product_key,observed_at) |
 | `curation_collections` | `collection_id UUID` | UNIQUE collection_key; theme/source/title/edition/status/visibility; created_by/updated_by; 공식 회차·캠페인 묶음 |
-| `curation_items` | `curation_item_id UUID` | collection FK; nullable feature_id; external_item_id/place_name/address_hint/source_present/status/sort_order; created_by/updated_by; source 누락·재등장과 운영자 tombstone을 포함한 공식 membership 이력 보존 |
+| `curation_items` | `curation_item_id UUID` | collection FK; nullable feature_id; external_item_id/place_name/address_hint/source_present/source_updated_at/status/sort_order; operator_updated_by/at; source 누락·재등장과 운영자 tombstone을 포함한 공식 membership 이력 보존 |
 
 0045 큐레이션 write는 다음 불변식을 지킨다.
 
@@ -95,6 +95,13 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
   유지한다. 운영자가 보관한 exact identity tombstone은 자동 재생성하지 않는다. dry-run은
   쓰기 없이 source 누락 예정 item까지 계산하며, 동일 CSV를 다시 반영하면 모든 변경 수가
   0이고 관련 `updated_at`도 바뀌지 않는다.
+- source 파생 변경은 `source_updated_at`, 운영자 상태·relation·reuse 변경은
+  `operator_updated_at`/`operator_updated_by`로 독립 기록한다. Feature merge는 이 두
+  revision으로 각 필드군 승자를 따로 정하고, 먼저 영향 collection을 UUID 순서로 잠가
+  import/admin writer와 같은 parent→child lock order를 지킨다.
+- 전환기 legacy `curated_features`도 operator provenance를 소유한다. legacy↔canonical
+  동기화는 provenance가 전진한 필드군만 반영하고, 안정적인 source identity의 DELETE→새 UUID
+  재삽입은 기존 source-absent membership을 복원한다. archived tombstone은 항상 우선한다.
 - 0045 downgrade는 구 flat overlay로 재구성할 수 없는 신규·수정 데이터나 감사값이 있으면
   `P0001`로 중단한다. export 또는 명시적 정리 없이 풍부한 데이터를 삭제하지 않는다.
 - 0044 downgrade는 연결된 source entity에 immutable record가 둘 이상이면 구 record별

@@ -158,6 +158,31 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
         target_engine = make_async_engine(target_dsn)
         upgraded_column, upgraded_indexes = await _schema_state(target_engine)
         assert upgraded_column == ("NO", "true")
+        async with target_engine.connect() as connection:
+            provenance_columns = {
+                (str(table_name), str(column_name))
+                for table_name, column_name in (
+                    await connection.execute(
+                        text(
+                            "SELECT table_name, column_name "
+                            "FROM information_schema.columns "
+                            "WHERE table_schema = 'feature' "
+                            "AND table_name IN ('curated_features','curation_items') "
+                            "AND column_name IN ("
+                            "'source_updated_at',"
+                            "'operator_updated_by','operator_updated_at'"
+                            ")"
+                        )
+                    )
+                ).all()
+            }
+        assert provenance_columns == {
+            ("curated_features", "operator_updated_by"),
+            ("curated_features", "operator_updated_at"),
+            ("curation_items", "source_updated_at"),
+            ("curation_items", "operator_updated_by"),
+            ("curation_items", "operator_updated_at"),
+        }
         assert "collection_id, source_present, status, sort_order" in (
             upgraded_indexes["idx_curation_items_collection_status_order"]
         )
@@ -199,7 +224,7 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
             )
 
         await target_engine.dispose()
-        with pytest.raises(Exception, match="source-absent curation items exist"):
+        with pytest.raises(Exception, match="durable curation state exists"):
             await asyncio.to_thread(
                 _run_alembic,
                 target_dsn,
@@ -224,6 +249,28 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                 )
             )
         await target_engine.dispose()
+        with pytest.raises(Exception, match="durable curation state exists"):
+            await asyncio.to_thread(
+                _run_alembic,
+                target_dsn,
+                _PRE_REVISION,
+                downgrade=True,
+            )
+        target_engine = make_async_engine(target_dsn)
+        async with target_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE feature.curation_items "
+                    "SET operator_updated_by = NULL, operator_updated_at = NULL"
+                )
+            )
+            await connection.execute(
+                text(
+                    "UPDATE feature.curated_features "
+                    "SET operator_updated_by = NULL, operator_updated_at = NULL"
+                )
+            )
+        await target_engine.dispose()
         await asyncio.to_thread(
             _run_alembic,
             target_dsn,
@@ -233,6 +280,22 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
         target_engine = make_async_engine(target_dsn)
         downgraded_column, downgraded_indexes = await _schema_state(target_engine)
         assert downgraded_column is None
+        async with target_engine.connect() as connection:
+            remaining_provenance_columns = (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) "
+                        "FROM information_schema.columns "
+                        "WHERE table_schema = 'feature' "
+                        "AND table_name IN ('curated_features','curation_items') "
+                        "AND column_name IN ("
+                        "'source_updated_at',"
+                        "'operator_updated_by','operator_updated_at'"
+                        ")"
+                    )
+                )
+            ).scalar_one()
+        assert remaining_provenance_columns == 0
         assert "source_present" not in (
             downgraded_indexes["idx_curation_items_collection_status_order"]
         )

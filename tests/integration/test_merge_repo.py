@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -393,6 +394,7 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
     [
         (False, True, "loser provider"),
         (True, False, "master provider"),
+        (True, True, "loser provider"),
     ],
 )
 async def test_merge_reconciles_source_presence_and_latest_operator_override(
@@ -412,7 +414,11 @@ async def test_merge_reconciles_source_presence_and_latest_operator_override(
                     status = 'included',
                     curation_relation = 'nearby_option',
                     reuse_policy = 'manual_review',
-                    updated_at = now() - interval '2 hours'
+                    updated_by = 'master-provider-refresh',
+                    source_updated_at = now() - interval '2 hours',
+                    operator_updated_by = 'master-operator',
+                    operator_updated_at = now() - interval '2 hours',
+                    updated_at = now()
                 WHERE feature_id = 'f_master'
                   AND external_item_id = 'shared'
                 """
@@ -428,8 +434,11 @@ async def test_merge_reconciles_source_presence_and_latest_operator_override(
                     status = 'rejected',
                     curation_relation = 'primary_stop',
                     reuse_policy = 'blocked',
-                    updated_by = 'latest-operator',
-                    updated_at = now() - interval '1 hour'
+                    updated_by = 'loser-provider-refresh',
+                    source_updated_at = now() - interval '1 hour',
+                    operator_updated_by = 'latest-operator',
+                    operator_updated_at = now() - interval '1 hour',
+                    updated_at = now() - interval '3 hours'
                 WHERE feature_id = 'f_loser'
                   AND external_item_id = 'shared'
                 """
@@ -445,7 +454,7 @@ async def test_merge_reconciles_source_presence_and_latest_operator_override(
                     """
                     SELECT
                         feature_id, source_present, place_name, status,
-                        curation_relation, reuse_policy, updated_by
+                        curation_relation, reuse_policy, operator_updated_by
                     FROM feature.curation_items
                     WHERE feature_id = 'f_master'
                       AND external_item_id = 'shared'
@@ -476,6 +485,8 @@ async def test_merge_tombstone_wins_over_visible_duplicate(
                 SET status = 'archived',
                     archived_at = now(),
                     updated_by = 'archive-operator',
+                    operator_updated_by = 'archive-operator',
+                    operator_updated_at = now(),
                     updated_at = now()
                 WHERE feature_id = 'f_loser'
                   AND external_item_id = 'shared'
@@ -497,6 +508,82 @@ async def test_merge_tombstone_wins_over_visible_duplicate(
             )
         ).all()
     assert rows == [("f_master", "archived", True)]
+
+
+async def test_merge_locks_curation_collection_before_items(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    merge_task: asyncio.Task[None] | None = None
+
+    async def run_merge() -> None:
+        async with AsyncSession(migrated_engine) as contender, contender.begin():
+            await contender.execute(
+                text("SET LOCAL application_name = 'merge-lock-order-contender'")
+            )
+            await apply_feature_merge(
+                contender,
+                master_id="f_master",
+                loser_id="f_loser",
+                review_id=seeded,
+                merged_by="lock-test",
+            )
+
+    async with AsyncSession(migrated_engine) as holder, holder.begin():
+        collection_id = str(
+            (
+                await holder.execute(
+                    text(
+                        "SELECT collection_id::text "
+                        "FROM feature.curation_items "
+                        "WHERE feature_id = 'f_master' "
+                        "AND external_item_id = 'shared'"
+                    )
+                )
+            ).scalar_one()
+        )
+        await holder.execute(
+            text(
+                "SELECT collection_id "
+                "FROM feature.curation_collections "
+                "WHERE collection_id = CAST(:collection_id AS uuid) "
+                "FOR UPDATE"
+            ),
+            {"collection_id": collection_id},
+        )
+        merge_task = asyncio.create_task(run_merge())
+        for _ in range(50):
+            waiting = (
+                await holder.execute(
+                    text(
+                        "SELECT EXISTS ("
+                        "SELECT 1 FROM pg_stat_activity "
+                        "WHERE application_name = 'merge-lock-order-contender' "
+                        "AND wait_event_type = 'Lock'"
+                        ")"
+                    )
+                )
+            ).scalar_one()
+            if waiting:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail("merge가 collection parent lock에서 대기하지 않았습니다.")
+
+        # parent-first면 contender는 아직 item을 잡지 않았다. 기존 item-first 구현은
+        # 여기서 LockNotAvailable이 발생해 역순 잠금을 재현한다.
+        await holder.execute(
+            text(
+                "SELECT curation_item_id "
+                "FROM feature.curation_items "
+                "WHERE feature_id = 'f_master' "
+                "AND external_item_id = 'shared' "
+                "FOR UPDATE NOWAIT"
+            )
+        )
+
+    assert merge_task is not None
+    await asyncio.wait_for(merge_task, timeout=5)
 
 
 async def test_merge_from_review_unknown_key_raises(

@@ -131,10 +131,26 @@ DELETE FROM provider_sync.source_links WHERE feature_id = :loser
 RETURNING source_entity_key
 """
 
+# 모든 curation writer는 collection(parent) → item(child) 순서로 잠근다. merge도
+# 영향 collection을 UUID 순서로 먼저 잠가 import/admin writer와의 교착을 막는다.
+_LOCK_CURATION_COLLECTIONS_SQL: Final[str] = """
+SELECT collection.collection_id
+FROM feature.curation_collections AS collection
+WHERE EXISTS (
+    SELECT 1
+    FROM feature.curation_items AS item
+    WHERE item.collection_id = collection.collection_id
+      AND item.feature_id IN (:master, :loser)
+)
+ORDER BY collection.collection_id
+FOR UPDATE OF collection
+"""
+
 # 한 collection 안의 동일 official item을 Feature merge할 때 durable source/tombstone과
 # operator override를 잃지 않는다. provider 파생 필드는 source-present row(동률이면 최신),
-# operator 필드는 최신 updated_at row가 이기며, 어느 한쪽이라도 tombstone이면 tombstone이
-# 최우선이다. master UUID를 survivor로 유지한 뒤 loser duplicate만 제거한다.
+# operator 필드는 전용 operator_updated_at이 최신인 row가 이기며, 어느 한쪽이라도
+# tombstone이면 tombstone이 최우선이다. master UUID를 survivor로 유지한 뒤 loser
+# duplicate만 제거한다.
 _MERGE_DUPLICATE_CURATION_ITEMS_SQL: Final[str] = """
 WITH pairs AS MATERIALIZED (
     SELECT
@@ -144,10 +160,16 @@ WITH pairs AS MATERIALIZED (
             (loser_item.source_present AND NOT master_item.source_present)
             OR (
                 loser_item.source_present = master_item.source_present
-                AND loser_item.updated_at > master_item.updated_at
+                AND loser_item.source_updated_at > master_item.source_updated_at
             )
         ) AS loser_provider_wins,
-        loser_item.updated_at > master_item.updated_at AS loser_override_wins,
+        (
+            loser_item.operator_updated_at IS NOT NULL
+            AND (
+                master_item.operator_updated_at IS NULL
+                OR loser_item.operator_updated_at > master_item.operator_updated_at
+            )
+        ) AS loser_override_wins,
         master_item.archived_at IS NOT NULL
             OR loser_item.archived_at IS NOT NULL AS tombstone_wins
     FROM feature.curation_items AS loser_item
@@ -172,6 +194,10 @@ WITH pairs AS MATERIALIZED (
             ELSE survivor.address_hint
         END,
         source_present = survivor.source_present OR loser_item.source_present,
+        source_updated_at = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.source_updated_at
+            ELSE survivor.source_updated_at
+        END,
         status = CASE
             WHEN pairs.tombstone_wins THEN 'archived'
             WHEN pairs.loser_override_wins THEN loser_item.status
@@ -204,6 +230,14 @@ WITH pairs AS MATERIALIZED (
         updated_by = CASE
             WHEN pairs.loser_override_wins THEN loser_item.updated_by
             ELSE survivor.updated_by
+        END,
+        operator_updated_by = CASE
+            WHEN pairs.loser_override_wins THEN loser_item.operator_updated_by
+            ELSE survivor.operator_updated_by
+        END,
+        operator_updated_at = CASE
+            WHEN pairs.loser_override_wins THEN loser_item.operator_updated_at
+            ELSE survivor.operator_updated_at
         END,
         updated_at = now(),
         archived_at = CASE
@@ -373,6 +407,12 @@ async def apply_feature_merge(
     if master_id == loser_id:
         raise MergeConflictError(f"master와 loser가 같음 — {master_id!r}")
 
+    (
+        await session.execute(
+            text(_LOCK_CURATION_COLLECTIONS_SQL),
+            {"master": master_id, "loser": loser_id},
+        )
+    ).fetchall()
     moved = len(
         (
             await session.execute(text(_MOVE_LINKS_SQL), {"master": master_id, "loser": loser_id})

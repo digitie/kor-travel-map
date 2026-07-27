@@ -809,6 +809,7 @@ async def test_update_item_noop_update_miss_and_full_success(
         _FakeResult(scalar=None),
         _FakeResult(scalar=None),
         _FakeResult(first=(_CURATION_ITEM_ID,)),
+        _FakeResult(),
     )
     updated = await repo.update_curation_item(
         success,
@@ -851,7 +852,10 @@ async def test_update_item_allows_source_absent_but_rejects_archived_current(
     touch = AsyncMock()
     monkeypatch.setattr(repo, "_touch_collection", touch)
 
-    session = _FakeSession(_FakeResult(first=(_CURATION_ITEM_ID,)))
+    session = _FakeSession(
+        _FakeResult(first=(_CURATION_ITEM_ID,)),
+        _FakeResult(),
+    )
     result = await repo.update_curation_item(
         session,
         collection_id=_COLLECTION_ID,

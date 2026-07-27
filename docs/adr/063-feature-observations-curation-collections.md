@@ -192,6 +192,12 @@ authoritative source 누락과 operator archive를 분리한다. CSV에서 빠�
 한 행만 허용해 tombstone과 공개 active row의 공존을 원천 차단한다.
 
 전환기 `curated_features` trigger도 물리 DELETE/INSERT 대신 같은 보존 규칙을 따른다.
-Feature merge는 source presence를 OR하고 provider 필드와 최신 operator override를 명시적으로
-reconcile하며 tombstone을 최우선한다. `source_present=false`는 구 스키마가 표현할 수 없으므로
-0065 downgrade는 해당 행이 있으면 `P0001`로 중단한다.
+legacy와 canonical 양쪽에 operator provenance를 두고, canonical 운영자 수정은 legacy 공개
+표면에도 같은 transaction에서 역동기화한다. legacy DELETE 뒤 같은 `source_record_key`가 새
+UUID로 재등장하면 기존 source-absent membership을 복원하되 archived tombstone은 보존한다.
+
+Feature merge는 source presence를 OR하고 `source_updated_at`과 `operator_updated_at`을 각각
+provider 필드와 operator override의 독립 revision으로 사용하며 tombstone을 최우선한다. merge,
+import, admin write는 모두 collection→item 잠금 순서를 지킨다. `source_present=false` 또는
+독립 operator provenance는 구 스키마가 표현할 수 없으므로 0065 downgrade는 해당 durable
+state가 있으면 `P0001`로 중단한다.

@@ -1071,6 +1071,8 @@ class CuratedFeatureRow(Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
+    operator_updated_by: Mapped[str | None] = mapped_column(Text)
+    operator_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -1233,6 +1235,9 @@ class CurationItemRow(Base):
     source_present: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
+    source_updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'candidate'"))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     item_title: Mapped[str | None] = mapped_column(Text)
@@ -1248,6 +1253,8 @@ class CurationItemRow(Base):
     )
     created_by: Mapped[str | None] = mapped_column(Text)
     updated_by: Mapped[str | None] = mapped_column(Text)
+    operator_updated_by: Mapped[str | None] = mapped_column(Text)
+    operator_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
