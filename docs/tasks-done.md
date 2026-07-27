@@ -3,6 +3,18 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-27 — T-VN-H17 map#684 조건 #8 검증범위 축소 후 종결 (LIVE-01 후속 7/7 close)
+
+- [x] **T-VN-H17** — H16에서 keep-open된 map#684를 **조건 #8 검증범위 명시 축소**로 종결(사용자 결정:
+  조건 축소). #684 조건 1~7 + owner 후속은 코드+mock+live로 충족. 조건 #8("mock e2e와 n150 live e2e에서
+  검증")을 다음으로 확정: **live(n150)** = read/freshness/URL-복원/invalid-fail-closed(`ops-c7-read-auth
+  .live.spec.ts`) + datasets **write 계약**(effective-scope refresh POST·active projection·
+  reused_active_request, `ops-c7-kma-active-write.live.spec.ts`, T-ADM-C7 GREEN); **mock** = write-path
+  **UI 엣지 전이 2건**(refresh done-terminal freshness invalidation `ops-datasets.spec.ts:1817`,
+  polling 404/503 재시도 `:2440`). 근거: 반복 done-terminal은 prod Dagster refresh quota 소모 파괴적,
+  404/503은 prod 인위 유발 곤란한 client-state 엣지 — write **계약**은 이미 C7 live 실증이라 UI 엣지는
+  mock 적정. map#684 close. → **LIVE-01 후속 OPEN 7건 전부 종결**.
+
 ## 2026-07-27 — T-VN-H16 LIVE-01 후속 OPEN 이슈 7건 재검증 → 6 close / 1 keep
 
 - [x] **T-VN-H16** — LIVE-01 후속 OPEN 7건의 독립 완료조건을 현재 main/배포·smoke 증거로 재검증

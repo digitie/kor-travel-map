@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (claude) — T-VN-H17 map#684 조건 축소 후 종결 (LIVE-01 후속 7/7 close)
+
+**결론**: H16에서 keep-open된 map#684를, 사용자 결정(조건 축소)에 따라 조건 #8 검증범위를 명시 축소하여
+종결. LIVE-01 후속 OPEN 7건 전부 close 완료.
+
+- 조건 1~7 + owner 후속: 코드+mock+live 충족(H16 재검증).
+- 조건 #8 확정: **live** = read/freshness/URL/invalid-fail-closed(`ops-c7-read-auth.live.spec.ts`) +
+  datasets write **계약**(`ops-c7-kma-active-write.live.spec.ts`, T-ADM-C7 GREEN); **mock** = write-path
+  UI 엣지 2건(done-terminal freshness invalidation `ops-datasets.spec.ts:1817`, polling 404/503 재시도
+  `:2440`). 근거: 반복 done-terminal은 prod refresh quota 소모 파괴적·404/503은 prod 인위유발 곤란한
+  client 엣지 — write 계약은 이미 C7 live라 UI 엣지는 mock 적정. map#684 close 코멘트에 명시.
+
 ## 2026-07-27 (claude) — T-VN-H16 LIVE-01 후속 OPEN 이슈 7건 재검증 (6 close / 1 keep)
 
 **결론**: LIVE-01 후속 OPEN 7건을 이슈당 1 에이전트 병렬 재검증(회의적 기본값, 각 이슈 본문의 독립
