@@ -1,9 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-27 (claude) — 🎯 T-VN-H19 완결: public API key 양성 실증 → C6c/T-VN-03 전체 종결
+## 2026-07-27 (claude) — 🎯 Lane B b4 대행: H13·H14·H15 완결, H20 진행, H18 예정
 
-**다음 한 작업**: Lane A 즉시 착수 코드 항목 없음(H06·C6c/T-VN-03·H12·H16·H17·H19 완료). tasks.md 상단
-Lane A 인덱스 비었음 → 새 Lane A 지시 대기 또는 Lane B 백로그(codex 소관) 중 지정. tasks.md 인덱스 정본.
+**다음 한 작업**: b4 순차 — **H20**(prod admin credential 회전) 검증 마무리(사용자 ktdctl 회전+login 200
+확인) → **H18**(GitHub 실제 approval provenance gate 강제). 사용자 지시로 Lane A가 Lane B b4 대행 중.
+
+- **완료(b4)**: `T-VN-H13`(#699→#862 curation override 보존) · `T-VN-H14`(#700→#863 KREX bounded-retry) ·
+  `T-VN-H15`(#805→#864 c7 IPv6 origin). 각 적대 리뷰 2명 + 회귀 + CI green.
+- **진행(H20)**: credential-safe hash 생성 완료(평문→gitignored doc, hash→repo 밖 scratch, 값 비노출).
+  잔여 = prod UI env ktdctl 회전(R2) + login 200/기존 401/세션 폐기 검증(사용자 실행).
+- **직전 완료(세션)**: T-VN-H19(C2 실증→C6c/T-VN-03 전체 종결)·H12·H16·H17·H06.
 
 - **완료(이번 세션 최근)**: `T-VN-H19` — public API key 양성 production runtime 실증(admin-BFF 임시 key
   발급→valid 200·wrong 401·revoke 200·revoked 401, credential-safe). **경계 매트릭스 14/14 완성 →
