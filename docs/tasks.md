@@ -26,11 +26,6 @@ live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실�
   unmount) 실증과 PinVi issue #392 close뿐이다. 설계 정본:
   [t-vn-03-route-gate-cutover-2026-07-19.md](reports/t-vn-03-route-gate-cutover-2026-07-19.md)
   §5 항목 4 + §6 완료 조건. C7 read-auth는 admin-BFF만 커버하므로 대체 불가.
-- [ ] `T-VN-H06` — **admin 목록 keyset 전환 완결**. 구현·2차 적대 리뷰·CI·머지는
-  PR #813(merge `9d29606e`)으로 완료됐다. 잔여는 dedup/enrichment cursor e2e 런타임 검증
-  (n150 Linux Playwright)뿐이다. **Lane A 규율 명시 예외**: 파괴적 n150 live E2E 대상 아님
-  (admin 목록 read 표면) — PR #813 본문의 시나리오 순서로 merged main을 검증한다.
-
 - [ ] `T-VN-H12` — **live acceptance fixture 좌표 run-unique화** (T-VN-LIVE-01 kind-격리 후속)
 
   `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표가 고정(LON=127.5/LAT=36.5 +

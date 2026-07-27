@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-27 (claude) — 🎯 T-VN-H06 완결: keyset cursor 전환 backend #813 + e2e 검증 #852
+
+**다음 한 작업**: Lane A **`T-ADM-C6c` + `T-VN-03`** — pinvi head(#408 포함, 현 배포 6a035695로
+이미 반영) principal 경계 smoke(curated 4 GET·ops 6 GET·MOIS 404)를 n150 production에서 실증하고
+PinVi #392 close. (map=c8ed6164/pinvi=6a035695 정식 전진 상태 그대로 사용.)
+
+- **완료(이번 세션)**: `T-VN-H06`(admin 목록 keyset+fingerprint cursor 전환). backend #813(merge
+  `9d29606e`, 2차 리뷰 P3 반영·pytest integration green) + e2e 검증 #852(merge `3ce99d75`).
+- **e2e 검증**: dedup/enrichment mocked Playwright 14 fail → spec-only 수정으로 **24 GREEN**.
+  근인 전부 spec drift(client 무변경): reviewed_by 과다기대 제거 · MultiFilterCombobox Enter 커밋 ·
+  deferred provider poll. 상세는 tasks-done.md / journal.md 2026-07-27.
+- **검증 환경 주의**: 이 cursor e2e는 mocked·CI 미실행이라 CLAUDE.md 정본 Windows Playwright로 확인.
+  task 노트의 "n150 Linux" 편차는 mocked·OS-agnostic이라 채택(tasks-done.md에 명시).
+- **머지 게이트**: #851(T-VN-43)·#813 선행 머지 확인 후 #852 CI CLEAN → squash 머지.
+
 ## 2026-07-27 (codex) — T-VN-43 구현·실데이터 파괴적 live 검증 완료
 
 **다음 한 작업**: T-VN-43 PR의 CI green·실제 GitHub approval·머지를 완료한 뒤 Lane B b0의

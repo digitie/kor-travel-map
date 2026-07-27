@@ -3,6 +3,25 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-27 — T-VN-H06 admin 목록 keyset+fingerprint cursor 전환 완결
+
+- [x] **T-VN-H06** — admin dedup/enrichment 목록을 OFFSET → keyset+fingerprint cursor로 전환.
+  - **backend**(#813, merge `9d29606e`): `admin_feature_repo.py` keyset 술어
+    `(total_score, review_id) < (:cursor_score::numeric, :cursor_review_id::uuid)`,
+    `_REVIEW_CURSOR_VERSION` fingerprint, composite index `idx_dedup_status_score`/
+    `idx_enrichment_review_status_score`. 2차 적대 리뷰 P3 반영(가변 score 재스캔 재정렬 tradeoff
+    docstring + active-cursor EXPLAIN 케이스 `test_t212d_perf_explain.py`, seq-scan 회귀 가드).
+    CI `pytest integration (PostGIS)` green.
+  - **e2e 검증**(#852, merge `3ce99d75`): dedup/enrichment mocked Playwright e2e 14건 실패 →
+    현행 UI에 맞춘 spec-only 수정으로 **24 passed(0 fail)**. 근인 3종 전부 spec drift(client 무변경):
+    (1) decision PATCH `reviewed_by` 과다 기대 6곳 제거 — 서버가 인증 principal(T-VN-03 경계)에서 파생,
+    (2) `MultiFilterCombobox` 필터(provider/dataset/category)에 `.press("Enter")` 토큰 커밋 추가,
+    (3) deferred provider param 직접 단언 → `expect.poll(lastListUrl)` 전환.
+  - **검증 환경 주의**: 이 dedup/enrichment cursor e2e는 network-mocked(실백엔드·DB·디스크 의존 없음)이며
+    CI(frontend.yml)에서 실행되지 않는다. task 노트는 "n150 Linux Playwright"를 명시했으나 mocked·
+    OS-agnostic 특성상 CLAUDE.md 정본인 **Windows Playwright e2e**로 실행한 24 GREEN을 검증으로 채택.
+    keyset 실백엔드 동작은 #813의 pytest integration(PostGIS) EXPLAIN 가드가 커버.
+
 ## 2026-07-27 — T-VN-LIVE-01 targeted live acceptance lane n150 PASSED (04A/58/15 종결)
 
 - [x] **T-VN-LIVE-01 (+T-VN-04A #741·T-VN-58 #785·T-VN-15)** — targeted admin-feature live
