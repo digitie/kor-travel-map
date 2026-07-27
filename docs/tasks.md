@@ -19,15 +19,15 @@ live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실�
 없이 **인덱스 상주가 정본**(tasks-rule §5의 "상세 위치 하나"를 인덱스로 충족).
 
 - [ ] `T-VN-H12` — **live acceptance fixture 좌표 run-unique화** (T-VN-LIVE-01 kind-격리 후속).
-  **#855/main 머지 완료**, 잔여 = **live-lane 실증**뿐.
+  **구현·정적검증·n150 live 검증 완료**, 잔여 = **fix PR #859 머지**뿐(#858 뒤 rebase 머지 예정).
 
-  `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표가 고정(LON=127.5/LAT=36.5)이라
-  죽은 run의 leftover place가 현재 run과 0.000° 거리로 supercluster 병합돼 marker aria-label 소실(적대
-  리뷰 P2). 수정: base 좌표를 `sha256(RUN_ID)` ±0.25° jitter(한국 본토 bbox 중심부) + `recenterMapTo`
-  헬퍼로 marker 단계에서 map을 fixture 좌표로 jumpTo(jitter로 fixture가 DEFAULT_VIEWPORT center를 벗어나
-  viewport 이탈하는 것을 차단). offset/bbox/cleanup/RECOVERY_ONLY는 좌표 무관이라 무수정. e2e type-check
-  통과 + 4개 각도 적대 정적검증 통과(collision-efficacy/recenter-mechanics/validity-determinism/
-  missed-viewport-deps). **잔여**: 다음 live acceptance lane run에서 n150 실증(Lane A live lane).
+  `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표 고정으로 죽은 run leftover가
+  supercluster 병합돼 marker aria-label 소실(P2). 수정: **status marker 좌표만** `sha256(RUN_ID)` ±0.25°
+  jitter(`STATUS_MARKER_LON/LAT`) + `recenterMapTo`로 marker 단계 map을 fixture로 jumpTo. base LON/LAT는
+  127.5/36.5 고정(weather/price/correction/search는 seeding helper·API 단언과 좌표 동기 필요).
+  **n150 c7-v6 live 검증**(map=c8ed6164): status marker 단계 통과. 최초 #855는 shared base를 jitter해
+  weather seeding과 desync(공식 runner latent bug) → **#859에서 status-only로 국한 수정**. weather/price는
+  고정 base = LIVE-01 baseline이라 무변경. e2e type-check + 4각도 정적검증 + live status-marker 통과.
 
 - [ ] `T-VN-H19` — **public API key 양성 production runtime 경계 실증**.
   PR #854의 T-VN-03/C6c smoke는 keyless·service·admin principal과 unit test를 근거로 C2

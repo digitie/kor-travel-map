@@ -36,16 +36,23 @@ const RUN_ID = process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID ?? "";
 const EXECUTE = process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE === "1";
 const RECOVERY_ONLY =
   process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RECOVERY_ONLY === "1";
-// status marker 좌표는 RUN_ID 해시로 run-unique하게 jitter한다: 이전 run이 cleanup
-// 전에 죽으면 동일 status·동일 좌표의 leftover place feature가 현재 run과 0.000° 거리로
-// client-side supercluster에 묶여 개별 marker aria-label이 사라진다(적대 리뷰 P2,
-// T-VN-H12). run별 cleanup은 RUN_ID-scoped라 이 cross-run 충돌을 못 막으므로 좌표
-// 자체를 분리한다. 파생은 결정론적(sha256(RUN_ID), SEARCH_TOKEN과 동일 패턴)이라
-// RECOVERY_ONLY 재파생과 일관되며, cleanup은 featureId/토큰 기반이라 좌표 jitter에
-// 영향받지 않고 항상 대칭이다. 진폭 ±0.25°는 base(대전 근처)를 한국 본토 bbox
-// [124,132]×[33,39.5](ADR-012, src/state/map.ts) 중심부에 유지해 create 좌표 검증과
-// marker recenter viewport 마진을 확보하면서 cross-run 좌표 충돌 확률을 무시할 수준
-// (양축 supercluster 반경 내 ≲1e-4)으로 낮춘다.
+// base 좌표는 고정한다. weather/price/correction/search fixture는 이 base에서 파생되고,
+// weather/price는 orchestrator의 seeding helper(scripts/admin_feature_live_fixture.py의
+// `_LON=127.5`/`_LAT=36.5` 고정)가 물리 seed하며 spec은 API in-bounds/search로 featureId·
+// query 기반 단언한다. 따라서 이들 좌표를 옮기면 helper seed 위치와 desync돼 in-bounds가
+// 빈 결과가 된다(2026-07-27 c7-v6 live 재현). base 고정으로 helper·API 단언과 동기를 유지한다.
+const LON = 127.5;
+const LAT = 36.5;
+// **status marker 좌표만** RUN_ID 해시로 run-unique jitter한다: 이전 run이 cleanup 전에
+// 죽으면 동일 status·동일 좌표의 leftover place feature가 현재 run과 0.000° 거리로 client-side
+// supercluster에 묶여 개별 marker aria-label이 사라진다(적대 리뷰 P2, T-VN-H12). run별
+// cleanup은 RUN_ID-scoped라 이 cross-run 충돌을 못 막으므로 좌표를 분리한다. status marker만
+// map marker로 렌더·클릭 단언되므로(assertStatusMarker) jitter를 STATUS_FEATURES에 국한한다 —
+// weather/price/correction/search는 marker 클릭이 아니라 featureId/query 단언이라 supercluster
+// 문제가 없고 base 동기가 우선이다. 파생은 결정론적(sha256(RUN_ID), SEARCH_TOKEN과 동일 패턴)이라
+// RECOVERY_ONLY 재파생과 일관되며 cleanup은 featureId 기반이라 좌표 무관. 진폭 ±0.25°는
+// base(대전 근처)를 한국 본토 bbox [124,132]×[33,39.5](ADR-012) 중심부에 유지해 create 좌표
+// 검증·recenter viewport 마진을 확보하면서 cross-run 충돌 확률을 무시할 수준(≲1e-4)으로 낮춘다.
 const COORD_JITTER_SEED = createHash("sha256")
   .update(`acceptance-coord:${RUN_ID}`)
   .digest();
@@ -54,8 +61,8 @@ function coordJitter(byteOffset: number): number {
   const unit = COORD_JITTER_SEED.readUInt32BE(byteOffset) / 0xffffffff;
   return (unit * 2 - 1) * COORD_JITTER_DEG;
 }
-const LON = 127.5 + coordJitter(0);
-const LAT = 36.5 + coordJitter(4);
+const STATUS_MARKER_LON = LON + coordJitter(0);
+const STATUS_MARKER_LAT = LAT + coordJitter(4);
 
 if (EXECUTE && !RUN_ID_PATTERN.test(RUN_ID)) {
   throw new Error(
@@ -67,8 +74,8 @@ const PREFIX = `e2e_live_acceptance::${RUN_ID}`;
 const STATUS_FIXTURES = ["draft", "inactive", "hidden"] as const;
 const STATUS_FEATURES = STATUS_FIXTURES.map((status, index) => ({
   featureId: `${PREFIX}::marker::${status}`,
-  lat: LAT + index * 0.001,
-  lon: LON + index * 0.001,
+  lat: STATUS_MARKER_LAT + index * 0.001,
+  lon: STATUS_MARKER_LON + index * 0.001,
   name: `E2E ${status} marker ${RUN_ID}`,
   status,
 }));
@@ -729,9 +736,9 @@ async function assertStatusMarker(
   // feature(place 마커와 ~0.004° 거리)가 함께 렌더되고 z14대에서 client-side
   // supercluster로 묶여 개별 place 마커의 aria-label이 사라졌다(2026-07-27 live 재현).
   // place만 남기면 이 cross-kind 충돌이 사라진다. 동일 status·동일 좌표의 cross-run
-  // leftover(죽은 run 잔여)는 어떤 줌으로도 decluster 불가하므로, base 좌표를 RUN_ID
-  // 해시로 run-unique jitter(COORD_JITTER_SEED)하고 아래 recenterMapTo로 map을 fixture
-  // 좌표에 맞춰 공간 충돌 자체를 제거한다(T-VN-H12).
+  // leftover(죽은 run 잔여)는 어떤 줌으로도 decluster 불가하므로, status marker 좌표를 RUN_ID
+  // 해시로 run-unique jitter(STATUS_MARKER_LON/LAT)하고 아래 recenterMapTo로 map을 fixture
+  // 좌표에 맞춰 공간 충돌 자체를 제거한다(T-VN-H12). jitter는 status marker에만 국한한다.
   const kindGroup = page.getByTestId("kind-filter");
   for (const toggle of await kindGroup.locator("button[aria-pressed]").all()) {
     const name = (await toggle.textContent())?.trim();
