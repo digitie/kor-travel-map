@@ -29,10 +29,15 @@ live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실�
   통과 + 4개 각도 적대 정적검증 통과(collision-efficacy/recenter-mechanics/validity-determinism/
   missed-viewport-deps). **잔여**: 다음 live acceptance lane run에서 n150 실증(Lane A live lane).
 
-- [ ] `T-VN-H16` — **LIVE-01 후속 OPEN 이슈 재검증·종결**. LIVE-01과 #741/#785는
-  완료·종결됐지만 map #712·#719·#694·#777·#684와 docker-manager #63·#70은 2026-07-27 조회 기준
-  OPEN이다. LIVE-01 landing과 결합하지 말고 각 이슈의 독립 완료 조건·현재 main/prod 증거를 재검증해
-  충족된 이슈만 닫고, 미충족이면 실제 잔여를 별도 task로 구체화한다. live lane 후속이므로 Lane A 소유.
+- [ ] `T-VN-H17` — **admin datasets UI 계약: write-path live 전이 실증**(map #684 잔여, H16 파생).
+  #684 조건 1~7 + owner 후속은 코드+mock으로 전부 충족됐으나, 조건 #8의 **write-path 상태 전이 2건이
+  n150 live lane에서 미구동**: (a) `/ops/datasets` '지금 갱신' → done terminal 전이 시 grid/detail 신선도
+  invalidation, (b) execution detail polling 404/503 → 명시 오류·'다시 확인' 재시도 UI. 현재 이 전이는
+  mock e2e(`ops-datasets.spec.ts:1817,2440`)에만 있고 n150 live(`ops-c7-read-auth.live.spec.ts`)는
+  read/freshness/URL-복원/invalid-fail-closed만 검증. **선택지**: (1) 프로덕션 quota 보호하는 env-gated
+  write lane(`admin-feature-acceptance-write` 패턴)으로 targeted refresh done-terminal + execution-error
+  재시도 전이를 n150 실증, 또는 (2) #684 조건 #8을 "write/error 엣지는 mock, read/URL/freshness는 live"로
+  명시 축소 후 종결. Lane A 소유(live lane). 근거: H16 재검증(#684 keep-open).
 
 **Lane B (codex)** — 병렬 wide lane. 규율: 각 코드 PR은 테스트 전 적대 리뷰어 2명 반영 후
 n150 실데이터 파괴적 Live UI E2E를 통과한다.
@@ -171,7 +176,8 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
 ## 이슈 종결 추적
 
 > landing task와 완료 조건이 동일한 열린 이슈만 함께 닫는다. LIVE-01 후속 OPEN 7건은 Lane A
-> `T-VN-H16`에서 독립 재검증한다.
+> `T-VN-H16`에서 독립 재검증 완료(2026-07-27): 6건 close(dm#63·#70·map#712·#719·#777·#694),
+> map#684만 keep-open → 잔여를 `T-VN-H17`로 구체화.
 
 - **T-ADM-C6c + T-VN-03 landing 시**: PinVi #392 (관측 API ops read principal 실증).
 - **추적/관측(코드 미확정)**: map #738(lane 분배 hub)·#673(validation rule 재검토)·#819(HAProxy

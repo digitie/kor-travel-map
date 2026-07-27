@@ -3,6 +3,19 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-27 — T-VN-H16 LIVE-01 후속 OPEN 이슈 7건 재검증 → 6 close / 1 keep
+
+- [x] **T-VN-H16** — LIVE-01 후속 OPEN 7건의 독립 완료조건을 현재 main/배포·smoke 증거로 재검증
+  (이슈당 1 에이전트 병렬 + 회의적 기본값). **6건 close, 1건 keep-open**:
+  - **close**: `dm#70`(features routes 플래그 compose 명시, C6c smoke 교차확인) · `dm#63`(prod API env
+    결선 PR #64, creds SET) · `map#777`(C7 attestation manifest v4 exact 강제 `c7_prod_attestation.py:423`) ·
+    `map#712`(datasets fail-closed S2 active projection + 회귀 테스트 + C7 n150 live) · `map#719`(exact-scope
+    이력 PR #728 filter-before-limit + continuation) · `map#694`(live E2E 의미 단언, PR #724 결함 surface 제거).
+    각 이슈에 근거(file:line/PR/smoke) 포함 종결 코멘트 게재.
+  - **keep-open**: `map#684` — 조건 1~7 충족이나 조건 #8의 write-path **live** 전이 2건(refresh done-terminal
+    freshness invalidation·execution polling 404/503 재시도 UI)이 mock e2e에만 존재, n150 live lane 미구동
+    → `T-VN-H17`로 잔여 구체화.
+
 ## 2026-07-27 — T-ADM-C6c + T-VN-03 principal 경계 cutover n150 실증 완료 (#392 종결)
 
 - [x] **T-ADM-C6c + T-VN-03** — curated public-key gate + ops operator gate + MOIS raw production
