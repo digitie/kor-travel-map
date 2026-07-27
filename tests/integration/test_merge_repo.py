@@ -319,7 +319,7 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
             await session.execute(
                 text(
                     """
-                    SELECT c.title, i.feature_id
+                    SELECT c.title, i.feature_id, i.source_present
                     FROM feature.curation_items AS i
                     JOIN feature.curation_collections AS c
                       ON c.collection_id = i.collection_id
@@ -336,9 +336,9 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
             )
         ).scalar_one()
     assert active_legacy_items == [
-        ("legacy 단독 loser", "f_master"),
-        ("legacy 충돌 loser", "f_master"),
-        ("legacy 충돌 master", "f_master"),
+        ("legacy 단독 loser", "f_master", True),
+        ("legacy 충돌 loser", "f_master", True),
+        ("legacy 충돌 master", "f_master", True),
     ]
     assert loser_memberships == 0
     # loser soft-delete.

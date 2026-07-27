@@ -98,10 +98,13 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 - source 파생 변경은 `source_updated_at`, 운영자 상태·relation·reuse 변경은
   `operator_updated_at`/`operator_updated_by`로 독립 기록한다. Feature merge는 이 두
   revision으로 각 필드군 승자를 따로 정하고, 먼저 영향 collection을 UUID 순서로 잠가
-  import/admin writer와 같은 parent→child lock order를 지킨다.
+  import/admin writer와 같은 parent→child lock order를 지킨다. 운영 중 revision은 실제 쓰기
+  순서를 보존하도록 `clock_timestamp()`로 기록한다.
 - 전환기 legacy `curated_features`도 operator provenance를 소유한다. legacy↔canonical
   동기화는 provenance가 전진한 필드군만 반영하고, 안정적인 source identity의 DELETE→새 UUID
   재삽입은 기존 source-absent membership을 복원한다. archived tombstone은 항상 우선한다.
+  Feature merge가 충돌 해소용으로 archive한 detached legacy projection은 이후 trigger source가
+  될 수 없다.
 - 0045 downgrade는 구 flat overlay로 재구성할 수 없는 신규·수정 데이터나 감사값이 있으면
   `P0001`로 중단한다. export 또는 명시적 정리 없이 풍부한 데이터를 삭제하지 않는다.
 - 0044 downgrade는 연결된 source entity에 immutable record가 둘 이상이면 구 record별

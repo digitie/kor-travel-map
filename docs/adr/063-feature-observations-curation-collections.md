@@ -200,4 +200,7 @@ Feature merge는 source presence를 OR하고 `source_updated_at`과 `operator_up
 provider 필드와 operator override의 독립 revision으로 사용하며 tombstone을 최우선한다. merge,
 import, admin write는 모두 collection→item 잠금 순서를 지킨다. `source_present=false` 또는
 독립 operator provenance는 구 스키마가 표현할 수 없으므로 0065 downgrade는 해당 durable
-state가 있으면 `P0001`로 중단한다.
+state가 있으면 `P0001`로 중단한다. 운영 중 revision write는 실제 쓰기 순서를 보존하기 위해
+`clock_timestamp()`를 사용한다. merge가 충돌 해소용으로 archive한 legacy projection은 detached
+marker로 canonical source에서 영구 분리하고, legacy admin actor는 요청 body가 아니라 인증
+principal에서만 받는다.

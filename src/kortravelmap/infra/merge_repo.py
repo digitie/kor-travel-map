@@ -264,6 +264,25 @@ WHERE feature_id = :loser
 RETURNING curation_item_id
 """
 
+# Feature merge는 canonical item을 먼저 명시적으로 reconcile한다. 이어지는 legacy
+# projection 이동이 0065 양방향 trigger를 다시 실행하면 이미 reconcile한 survivor를
+# source-absent로 되돌릴 수 있으므로, 같은 transaction의 legacy 구간만 동기화를 끈다.
+_SET_EXPLICIT_CURATION_SYNC_SQL: Final[str] = """
+SELECT set_config(
+    'kortravelmap.curation_sync_mode',
+    'merge_explicit',
+    true
+)
+"""
+
+_RESET_EXPLICIT_CURATION_SYNC_SQL: Final[str] = """
+SELECT set_config(
+    'kortravelmap.curation_sync_mode',
+    '',
+    true
+)
+"""
+
 # 0045 전환 trigger는 legacy curated_feature UUID와 같은 curation_item UUID를 다시
 # 만든다. master에도 같은 theme의 active legacy row가 있으면 loser legacy row를
 # active 상태로 옮길 수 없으므로, 먼저 해당 item의 UUID를 분리해 richer membership을
@@ -293,6 +312,10 @@ _ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL: Final[str] = """
 UPDATE feature.curated_features AS loser_curated
 SET feature_id = :master,
     curation_status = 'archived',
+    metadata = loser_curated.metadata || jsonb_build_object(
+        'merge_projection_detached',
+        true
+    ),
     archived_at = now(),
     updated_at = now()
 WHERE loser_curated.feature_id = :loser
@@ -429,6 +452,7 @@ async def apply_feature_merge(
         text(_MOVE_CURATION_ITEMS_SQL),
         {"master": master_id, "loser": loser_id},
     )
+    await session.execute(text(_SET_EXPLICIT_CURATION_SYNC_SQL))
     await session.execute(
         text(_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL),
         {"master": master_id, "loser": loser_id},
@@ -441,6 +465,7 @@ async def apply_feature_merge(
         text(_MOVE_LEGACY_CURATED_FEATURES_SQL),
         {"master": master_id, "loser": loser_id},
     )
+    await session.execute(text(_RESET_EXPLICIT_CURATION_SYNC_SQL))
     soft_deleted = (
         (await session.execute(text(_SOFT_DELETE_LOSER_SQL), {"loser": loser_id}))
         .mappings()

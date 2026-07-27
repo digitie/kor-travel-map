@@ -830,6 +830,8 @@ WITH archived AS (
     UPDATE feature.curated_features AS cf
     SET
         curation_status = 'archived',
+        operator_updated_by = 'status-sweep',
+        operator_updated_at = clock_timestamp(),
         archived_at = COALESCE(cf.archived_at, now()),
         updated_at = now(),
         content_version = cf.content_version + 1,
@@ -1530,6 +1532,7 @@ async def create_curated_feature(
     curation_relation: str = "nearby_option",
     reuse_policy: str = "manual_review",
     metadata: Mapping[str, Any] | None = None,
+    actor: str | None = None,
 ) -> CuratedFeature:
     """curated feature overlay 1건을 생성한다. commit은 호출자 책임."""
 
@@ -1559,7 +1562,7 @@ async def create_curated_feature(
                 "reuse_policy": reuse_policy,
                 "metadata_json": _json_dumps(metadata),
                 "operator_updated_by": (
-                    rejected_by or selected_by
+                    actor or rejected_by or selected_by
                     if selection_origin in {"admin", "external_api"}
                     else None
                 ),
@@ -1582,6 +1585,7 @@ async def update_curated_feature(
     *,
     curated_feature_id: str,
     updates: Mapping[str, Any],
+    actor: str | None = None,
 ) -> CuratedFeature | None:
     """curated feature overlay를 부분 수정한다."""
 
@@ -1613,20 +1617,22 @@ async def update_curated_feature(
         else:
             set_parts.append(f"{key} = :{key}")
             params[key] = value
-    if {"curation_status", "curation_relation", "reuse_policy"} & updates.keys():
-        set_parts.extend(
-            [
-                "selection_origin = 'admin'",
-                "operator_updated_at = clock_timestamp()",
-            ]
-        )
     if not set_parts:
         return await get_curated_feature(
             session,
             curated_feature_id=curated_feature_id,
             include_archived=True,
         )
-    set_parts.extend(["updated_at = now()", "content_version = content_version + 1"])
+    set_parts.extend(
+        [
+            "selection_origin = 'admin'",
+            "operator_updated_by = COALESCE(:actor, operator_updated_by)",
+            "operator_updated_at = clock_timestamp()",
+            "updated_at = now()",
+            "content_version = content_version + 1",
+        ]
+    )
+    params["actor"] = actor
     row = (
         await session.execute(
             text(_UPDATE_FEATURE_BASE_SQL.format(set_clause=", ".join(set_parts))),

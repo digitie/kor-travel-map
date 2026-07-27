@@ -629,3 +629,108 @@ def test_curated_select_rejects_removed_actor_field(client: TestClient) -> None:
         json={"actor": "attacker", "reason": "x"},
     )
     assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_curated_legacy_admin_writes_record_authenticated_principal(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import curated as module
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def _create(_session: object, **kwargs: Any) -> None:
+        calls.append(("create", kwargs))
+        raise ValueError("captured")
+
+    async def _update(_session: object, **kwargs: Any) -> None:
+        calls.append(("update", kwargs))
+        raise ValueError("captured")
+
+    async def _archive(_session: object, **kwargs: Any) -> None:
+        calls.append(("archive", kwargs))
+
+    monkeypatch.setattr(module.curated_repo, "create_curated_feature", _create)
+    monkeypatch.setattr(module.curated_repo, "update_curated_feature", _update)
+    monkeypatch.setattr(module.curated_repo, "archive_curated_feature", _archive)
+
+    create_response = client.post(
+        "/v1/admin/features/curated",
+        json={
+            "theme_id": "11111111-1111-4111-8111-111111111111",
+            "feature_id": "feature:principal",
+            "source_id": "22222222-2222-4222-8222-222222222222",
+            "curation_status": "curated",
+        },
+    )
+    patch_response = client.patch(
+        "/v1/admin/features/curated/cf-1",
+        json={"curation_relation": "primary_stop"},
+    )
+    delete_response = client.delete("/v1/admin/features/curated/cf-1")
+
+    assert create_response.status_code == 422
+    assert patch_response.status_code == 422
+    assert delete_response.status_code == 404
+    assert calls == [
+        (
+            "create",
+            {
+                "theme_id": "11111111-1111-4111-8111-111111111111",
+                "feature_id": "feature:principal",
+                "source_id": "22222222-2222-4222-8222-222222222222",
+                "source_record_key": None,
+                "curation_status": "curated",
+                "rejection_reason": None,
+                "rank_score": 0.0,
+                "display_title": None,
+                "display_summary": None,
+                "curation_relation": "nearby_option",
+                "reuse_policy": "manual_review",
+                "metadata": {},
+                "selection_origin": "admin",
+                "selected_by": "local-dev",
+                "rejected_by": None,
+                "actor": "local-dev",
+            },
+        ),
+        (
+            "update",
+            {
+                "curated_feature_id": "cf-1",
+                "updates": {"curation_relation": "primary_stop"},
+                "actor": "local-dev",
+            },
+        ),
+        (
+            "archive",
+            {
+                "curated_feature_id": "cf-1",
+                "actor": "local-dev",
+            },
+        ),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("selection_origin", "external_api"),
+        ("selected_by", "attacker"),
+        ("rejected_by", "attacker"),
+    ],
+)
+def test_curated_create_rejects_spoofable_provenance_fields(
+    client: TestClient, field: str, value: str
+) -> None:
+    response = client.post(
+        "/v1/admin/features/curated",
+        json={
+            "theme_id": "11111111-1111-4111-8111-111111111111",
+            "feature_id": "feature:spoof",
+            "source_id": "22222222-2222-4222-8222-222222222222",
+            field: value,
+        },
+    )
+    assert response.status_code == 422

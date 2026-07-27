@@ -1571,6 +1571,15 @@ profile에만 둔다.
 - `GET /v1/curated-features/{curated_feature_id}`
 - `GET /v1/curated-features/{curated_feature_id}/pinvi-copy`
 
+### 8.3 legacy curated admin write provenance
+
+전환기 legacy overlay write인 `POST /v1/admin/features/curated`,
+`PATCH /v1/admin/features/curated/{curated_feature_id}`,
+`DELETE /v1/admin/features/curated/{curated_feature_id}`는 admin proxy가 인증한 principal을
+`operator_updated_by`에 기록한다. actor/provenance는 요청 body 계약이 아니며 create body의
+`selection_origin`·`selected_by`·`rejected_by`는 `extra="forbid"` 검증으로 거부한다.
+status가 `curated`/`rejected`이면 같은 principal을 각각 `selected_by`/`rejected_by`에도 기록한다.
+
 ## 9. Frontend stack 계약
 
 Admin frontend 표준:

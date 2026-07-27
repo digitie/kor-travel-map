@@ -4041,8 +4041,6 @@ export interface components {
              * @default 0
              */
             rank_score: number;
-            /** Rejected By */
-            rejected_by?: string | null;
             /** Rejection Reason */
             rejection_reason?: string | null;
             /**
@@ -4051,14 +4049,6 @@ export interface components {
              * @enum {string}
              */
             reuse_policy: "allowed" | "blocked" | "manual_review";
-            /** Selected By */
-            selected_by?: string | null;
-            /**
-             * Selection Origin
-             * @default admin
-             * @enum {string}
-             */
-            selection_origin: "source_rule" | "admin" | "external_api";
             /** Source Id */
             source_id: string;
             /** Source Record Key */

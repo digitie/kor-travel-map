@@ -5325,17 +5325,6 @@
             "title": "Rank Score",
             "type": "number"
           },
-          "rejected_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rejected By"
-          },
           "rejection_reason": {
             "anyOf": [
               {
@@ -5355,27 +5344,6 @@
               "manual_review"
             ],
             "title": "Reuse Policy",
-            "type": "string"
-          },
-          "selected_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Selected By"
-          },
-          "selection_origin": {
-            "default": "admin",
-            "enum": [
-              "source_rule",
-              "admin",
-              "external_api"
-            ],
-            "title": "Selection Origin",
             "type": "string"
           },
           "source_id": {

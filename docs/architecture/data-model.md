@@ -391,7 +391,9 @@ item만 반환한다. admin collection/item projection은 actor 필드를 포함
 membership에는 서로 독립인 두 revision 축을 둔다. `source_updated_at`은 source presence와
 제공자 파생 필드가 바뀐 시각이고, `operator_updated_at`/`operator_updated_by`는
 `status`·`curation_relation`·`reuse_policy`를 마지막으로 바꾼 운영자 의도다. 일반
-`updated_at`은 행 감사 시각일 뿐 merge winner 판정에 사용하지 않는다.
+`updated_at`은 행 감사 시각일 뿐 merge winner 판정에 사용하지 않는다. 두 revision의
+운영 중 쓰기는 PostgreSQL transaction 시작 시각인 `now()`가 아니라 실제 쓰기 순서를 나타내는
+`clock_timestamp()`를 사용한다. migration backfill만 기존 행의 역사적 `updated_at`을 보존한다.
 
 CSV commit은 파일이 언급한 collection을 한 transaction에서 authoritative replace한다.
 incoming 안정키에 없는 기존 item은 물리 삭제하지 않고 `source_present=false`로 표시한다.
@@ -418,7 +420,9 @@ collection을 먼저 잠가 import와 충돌하지 않게 한다. Feature merge�
 상태·relation·reuse는 별도 provenance가 전진한 경우에만 반영한다. canonical item의 운영자
 수정도 같은 transaction에서 legacy row로 역동기화한다. legacy row가 DELETE 후 새 UUID로
 재생성돼도 안정적인 `source_record_key` exact identity가 기존 source-absent membership을
-복원하며 archived tombstone은 되살리지 않는다.
+복원하며 archived tombstone은 되살리지 않는다. Feature merge가 충돌 해소를 위해 archive한
+legacy projection은 detached metadata를 남기고 canonical source에서 영구 분리한다. merge의
+명시적 legacy 이동 구간은 transaction-local sync mode로 trigger 재진입을 차단한다.
 
 0065 downgrade는 `source_present=false` 또는 operator provenance가 하나라도 있으면
 `P0001`로 중단한다. 이전 스키마는 source 누락과 독립 revision을 함께 표현할 수 없어 자동

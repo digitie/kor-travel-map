@@ -72,6 +72,19 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
         await connection.execute(
             text(
                 """
+                INSERT INTO feature.features (
+                    feature_id, kind, name, category, detail, status
+                ) VALUES (
+                    'feature:migration-external-api', 'place',
+                    'migration external api fixture',
+                    '01070100', '{}'::jsonb, 'active'
+                )
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
                 WITH theme AS (
                     INSERT INTO feature.curated_themes (
                         theme_slug, theme_name, theme_group
@@ -128,6 +141,61 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                 """
             )
         )
+        await connection.execute(
+            text(
+                """
+                WITH source AS (
+                    INSERT INTO feature.curated_sources (
+                        provider, dataset_key, source_name, source_kind,
+                        update_cycle, provider_status, metadata
+                    ) VALUES (
+                        'migration-provider', 'migration-dataset',
+                        'migration source', 'manual', 'unknown',
+                        'manual_only', '{}'::jsonb
+                    )
+                    RETURNING source_id
+                ), theme AS (
+                    SELECT theme_id
+                    FROM feature.curated_themes
+                    WHERE theme_slug = 'migration-presence'
+                )
+                INSERT INTO feature.curated_features (
+                    theme_id, feature_id, source_id, curation_status,
+                    selection_origin, selected_by, display_title,
+                    curation_relation, reuse_policy
+                )
+                SELECT
+                    theme.theme_id, 'feature:migration-presence',
+                    source.source_id, 'curated', 'external_api',
+                    'external-principal', 'migration legacy override',
+                    'nearby_option', 'manual_review'
+                FROM theme CROSS JOIN source
+                UNION ALL
+                SELECT
+                    theme.theme_id, 'feature:migration-external-api',
+                    source.source_id, 'curated', 'external_api',
+                    'external-principal', 'migration external provenance',
+                    'nearby_option', 'manual_review'
+                FROM theme CROSS JOIN source
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curation_items AS item
+                SET status = 'rejected',
+                    curation_relation = 'primary_stop',
+                    reuse_policy = 'blocked',
+                    updated_by = 'canonical-operator',
+                    updated_at = clock_timestamp()
+                FROM feature.curated_features AS legacy
+                WHERE legacy.feature_id = 'feature:migration-presence'
+                  AND legacy.display_title = 'migration legacy override'
+                  AND item.curation_item_id = legacy.curated_feature_id
+                """
+            )
+        )
 
 
 async def test_source_presence_upgrade_downgrade_forward_recovery(
@@ -176,6 +244,32 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     )
                 ).all()
             }
+            legacy_provenance = (
+                await connection.execute(
+                    text(
+                        "SELECT display_title, operator_updated_by, "
+                        "operator_updated_at IS NOT NULL "
+                        "FROM feature.curated_features "
+                        "WHERE display_title LIKE 'migration %' "
+                        "ORDER BY display_title"
+                    )
+                )
+            ).all()
+            canonical_provenance = (
+                await connection.execute(
+                    text(
+                        "SELECT feature_id, status, curation_relation, "
+                        "reuse_policy, operator_updated_by, "
+                        "operator_updated_at IS NOT NULL "
+                        "FROM feature.curation_items "
+                        "WHERE feature_id IN ("
+                        "'feature:migration-presence',"
+                        "'feature:migration-external-api'"
+                        ") AND metadata ->> 'legacy_selection_origin' = 'external_api' "
+                        "ORDER BY feature_id"
+                    )
+                )
+            ).all()
         assert provenance_columns == {
             ("curated_features", "operator_updated_by"),
             ("curated_features", "operator_updated_at"),
@@ -183,6 +277,28 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
             ("curation_items", "operator_updated_by"),
             ("curation_items", "operator_updated_at"),
         }
+        assert legacy_provenance == [
+            ("migration external provenance", "external-principal", True),
+            ("migration legacy override", "external-principal", True),
+        ]
+        assert canonical_provenance == [
+            (
+                "feature:migration-external-api",
+                "included",
+                "nearby_option",
+                "manual_review",
+                "external-principal",
+                True,
+            ),
+            (
+                "feature:migration-presence",
+                "rejected",
+                "primary_stop",
+                "blocked",
+                "canonical-operator",
+                True,
+            ),
+        ]
         assert "collection_id, source_present, status, sort_order" in (
             upgraded_indexes["idx_curation_items_collection_status_order"]
         )

@@ -933,6 +933,15 @@ async def test_legacy_writer_preserves_operator_override_and_tombstone(
         curation_status="curated",
         actor="legacy-operator",
     )
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.curation_items "
+            "SET item_summary = 'canonical newer source', sort_order = 77, "
+            "source_updated_at = clock_timestamp() "
+            "WHERE curation_item_id = CAST(:legacy_id AS uuid)"
+        ),
+        {"legacy_id": legacy_id},
+    )
     await curated_repo.update_curated_feature(
         migrated_session,
         curated_feature_id=legacy_id,
@@ -940,6 +949,7 @@ async def test_legacy_writer_preserves_operator_override_and_tombstone(
             "curation_relation": "food_stop",
             "reuse_policy": "allowed",
         },
+        actor="legacy-patch-operator",
     )
     canonical_after_legacy = await get_curation_item(
         migrated_session,
@@ -950,6 +960,18 @@ async def test_legacy_writer_preserves_operator_override_and_tombstone(
     assert canonical_after_legacy.status == "included"
     assert canonical_after_legacy.curation_relation == "food_stop"
     assert canonical_after_legacy.reuse_policy == "allowed"
+    assert canonical_after_legacy.item_summary == "canonical newer source"
+    assert canonical_after_legacy.sort_order == 77
+    assert (
+        await migrated_session.execute(
+            text(
+                "SELECT operator_updated_by "
+                "FROM feature.curation_items "
+                "WHERE curation_item_id = CAST(:legacy_id AS uuid)"
+            ),
+            {"legacy_id": legacy_id},
+        )
+    ).scalar_one() == "legacy-patch-operator"
 
     await update_curation_item(
         migrated_session,
@@ -1154,6 +1176,29 @@ async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
         ).scalar_one()
     )
     assert replacement_id != legacy_id
+    replacement_projection = (
+        await migrated_session.execute(
+            text(
+                "SELECT curation_status, curation_relation, reuse_policy, "
+                "operator_updated_by "
+                "FROM feature.curated_features "
+                "WHERE curated_feature_id = CAST(:replacement_id AS uuid)"
+            ),
+            {"replacement_id": replacement_id},
+        )
+    ).one()
+    assert replacement_projection == (
+        "rejected",
+        "primary_stop",
+        "blocked",
+        "operator",
+    )
+    assert (
+        await curated_repo.list_curated_features(
+            migrated_session,
+            theme_id=theme_id,
+        )
+    ).items == ()
     restored = await get_curation_item(
         migrated_session,
         collection_id=collection_id,
@@ -1205,6 +1250,124 @@ async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
         )
     ).scalars().all()
     assert identity_rows == [legacy_id]
+    await migrated_session.execute(
+        text(
+            "DELETE FROM feature.curated_features "
+            "WHERE curated_feature_id = CAST(:replacement_id AS uuid)"
+        ),
+        {"replacement_id": replacement_id},
+    )
+    deleted_again = await get_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=legacy_id,
+        include_archived=True,
+    )
+    assert deleted_again is not None
+    assert deleted_again.source_present is False
+    assert (
+        await get_curation_item(
+            migrated_session,
+            collection_id=collection_id,
+            curation_item_id=legacy_id,
+        )
+        is None
+    )
+
+    tombstone_source_id = str(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_features (
+                        theme_id, feature_id, source_id, source_record_key,
+                        curation_status, selection_origin, display_title
+                    ) VALUES (
+                        CAST(:theme_id AS uuid), :feature_id,
+                        CAST(:source_id AS uuid), :source_record_key,
+                        'curated', 'source_rule', 'stable reinsert'
+                    )
+                    RETURNING curated_feature_id::text
+                    """
+                ),
+                {
+                    "theme_id": theme_id,
+                    "source_id": source_id,
+                    "feature_id": _FEATURE_ID,
+                    "source_record_key": "curation-reinsert-record",
+                },
+            )
+        ).scalar_one()
+    )
+    archived = await archive_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=legacy_id,
+        actor="archive-operator",
+    )
+    assert archived is not None
+    await migrated_session.execute(
+        text(
+            "DELETE FROM feature.curated_features "
+            "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
+        ),
+        {"legacy_id": tombstone_source_id},
+    )
+    tombstone_replacement_id = str(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_features (
+                        theme_id, feature_id, source_id, source_record_key,
+                        curation_status, selection_origin, display_title
+                    ) VALUES (
+                        CAST(:theme_id AS uuid), :feature_id,
+                        CAST(:source_id AS uuid), :source_record_key,
+                        'curated', 'source_rule', 'stable reinsert'
+                    )
+                    RETURNING curated_feature_id::text
+                    """
+                ),
+                {
+                    "theme_id": theme_id,
+                    "source_id": source_id,
+                    "feature_id": _FEATURE_ID,
+                    "source_record_key": "curation-reinsert-record",
+                },
+            )
+        ).scalar_one()
+    )
+    tombstone_projection = (
+        await migrated_session.execute(
+            text(
+                "SELECT curation_status, archived_at IS NOT NULL "
+                "FROM feature.curated_features "
+                "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
+            ),
+            {"legacy_id": tombstone_replacement_id},
+        )
+    ).one()
+    assert tombstone_projection == ("archived", True)
+    identity = (
+        await migrated_session.execute(
+            text(
+                "SELECT curation_item_id::text, status, archived_at IS NOT NULL "
+                "FROM feature.curation_items "
+                "WHERE collection_id = CAST(:collection_id AS uuid) "
+                "AND external_item_id = 'curation-reinsert-record' "
+                "AND feature_id = :feature_id"
+            ),
+            {"collection_id": collection_id, "feature_id": _FEATURE_ID},
+        )
+    ).one()
+    assert identity == (legacy_id, "archived", True)
+    assert (
+        await curated_repo.list_curated_features(
+            migrated_session,
+            theme_id=theme_id,
+        )
+    ).items == ()
 
 
 async def test_authoritative_reimport_does_not_resurrect_unresolved_archive(

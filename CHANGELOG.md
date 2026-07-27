@@ -16,8 +16,12 @@
 - **DATABASE (breaking)**: curation identity를 archived/NULL까지 포함한 exact unique로 바꾸고
   source/operator revision을 분리했다. legacy와 canonical operator intent는 양방향 동기화되며,
   stable source identity의 DELETE→새 UUID 재등장은 기존 membership을 복원한다.
+- **API (breaking)**: legacy curated admin create body에서 `selection_origin`·`selected_by`·
+  `rejected_by`를 제거했다. POST/PATCH/DELETE provenance는 admin proxy 인증 principal만 기록한다.
 - **CONCURRENCY**: Feature merge가 provider/operator 필드군을 독립 revision으로 reconcile하고
   curation collection을 item보다 먼저 잠가 import/admin writer와의 교착 가능성을 제거한다.
+  source revision은 실제 쓰기 시각으로 비교하며, merge가 분리한 legacy projection은 이후
+  canonical source membership을 되감을 수 없다.
 
 ### Admin frontend lint·schedule recovery·가격 series identity (2026-07-27, T-VN-44)
 

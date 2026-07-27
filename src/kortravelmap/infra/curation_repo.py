@@ -633,7 +633,7 @@ WITH written AS (
         operator_updated_at, updated_at
     ) VALUES (
         CAST(:collection_id AS uuid), :feature_id, :source_record_key,
-        :external_item_id, :place_name, :address_hint, true, now(),
+        :external_item_id, :place_name, :address_hint, true, clock_timestamp(),
         :status, :sort_order, :item_title, :item_summary,
         :curation_relation, :reuse_policy, CAST(:metadata AS jsonb),
         :actor, :actor, :actor, clock_timestamp(), now()
@@ -649,7 +649,7 @@ WITH written AS (
         place_name = EXCLUDED.place_name,
         address_hint = EXCLUDED.address_hint,
         source_present = true,
-        source_updated_at = now(),
+        source_updated_at = clock_timestamp(),
         status = EXCLUDED.status,
         sort_order = EXCLUDED.sort_order,
         item_title = EXCLUDED.item_title,
@@ -731,7 +731,7 @@ WITH incoming AS (
 ), marked AS (
     UPDATE feature.curation_items AS existing
     SET source_present = false,
-        source_updated_at = now(),
+        source_updated_at = clock_timestamp(),
         updated_by = :actor,
         updated_at = now()
     FROM candidates
@@ -775,7 +775,7 @@ WITH incoming AS (
     SELECT
         CAST(incoming.collection_id AS uuid), incoming.feature_id,
         incoming.external_item_id, incoming.place_name, incoming.address_hint,
-        true, now(), 'included', incoming.sort_order,
+        true, clock_timestamp(), 'included', incoming.sort_order,
         incoming.item_title, incoming.item_summary, 'nearby_option',
         'manual_review', incoming.metadata, :actor, :actor, now()
     FROM incoming
@@ -800,7 +800,7 @@ WITH incoming AS (
         place_name = EXCLUDED.place_name,
         address_hint = EXCLUDED.address_hint,
         source_present = true,
-        source_updated_at = now(),
+        source_updated_at = clock_timestamp(),
         sort_order = EXCLUDED.sort_order,
         item_title = EXCLUDED.item_title,
         item_summary = EXCLUDED.item_summary,
@@ -1827,7 +1827,7 @@ async def update_curation_item(
         & normalized.keys()
     )
     if source_owned_changed:
-        clauses.append("source_updated_at = now()")
+        clauses.append("source_updated_at = clock_timestamp()")
     if operator_owned_changed:
         clauses.extend(
             [
