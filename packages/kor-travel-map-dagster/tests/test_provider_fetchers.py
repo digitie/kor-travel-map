@@ -19,6 +19,7 @@ from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,
 )
 from kortravelmap.dagster.provider_fetchers import (
+    KrexTrafficNoticeSnapshotUnstable,
     ProviderCredentialMissing,
     fetch_airkorea_air_quality,
     fetch_airkorea_stations,
@@ -851,56 +852,142 @@ def test_krex_traffic_notices_fetch_rejects_page_boundary_overlap(
     assert client.closed is True
 
 
-def test_krex_traffic_notices_fetch_rejects_nonoverlap_replacement_between_passes(
+class _SequencedIncidentService:
+    """호출(=full pass)마다 지정된 사건 index 집합을 순서대로 반환한다.
+
+    각 pass는 index 수 = total_count인 1 page이므로 호출 1회 = pass 1회다(page_no=1).
+    지정된 pass를 모두 소진하면 마지막 집합을 반복한다.
+    """
+
+    def __init__(self, pass_index_sets: list[tuple[int, ...]]) -> None:
+        self._passes = pass_index_sets
+        self.calls: list[tuple[int, int]] = []
+
+    def incident(
+        self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
+    ) -> _FakePage:
+        # pass=call 매핑은 각 pass가 1 page(total_count=index 수)임에 의존한다.
+        # 누군가 multi-page pass를 추가하면 매핑이 조용히 깨지므로 명시적으로 막는다.
+        assert page_no == 1, "_SequencedIncidentService는 pass당 단일 page만 지원한다"
+        self.calls.append((num_of_rows, page_no))
+        pass_no = len(self.calls) - 1
+        indexes = self._passes[min(pass_no, len(self._passes) - 1)]
+        items = tuple(_fake_incident(index) for index in indexes)
+        return _FakePage(
+            items=items,
+            total_count=len(indexes),
+            page_no=page_no,
+            num_of_rows=len(indexes),
+            raw={
+                "count": len(indexes),
+                "pageNo": page_no,
+                "numOfRows": len(indexes),
+                "realTimeSMSList": [item.raw for item in items],
+            },
+        )
+
+
+class _SequencedTrafficClient:
+    instances: list[_SequencedTrafficClient] = []
+    passes: list[tuple[int, ...]] = []
+
+    def __init__(self, *, ex_api_key: str | None = None, **_kwargs: Any) -> None:
+        self.ex_api_key = ex_api_key
+        self.closed = False
+        self.close_calls = 0
+        self.traffic = _SequencedIncidentService(list(type(self).passes))
+        _SequencedTrafficClient.instances.append(self)
+
+    def close(self) -> None:
+        self.close_calls += 1
+        self.closed = True
+
+
+def _install_sequenced_krex_traffic(
+    monkeypatch: pytest.MonkeyPatch, passes: list[tuple[int, ...]]
+) -> type[_SequencedTrafficClient]:
+    _SequencedTrafficClient.instances = []
+    _SequencedTrafficClient.passes = passes
+    module = ModuleType("krex")
+    module.__dict__["KrexClient"] = _SequencedTrafficClient
+    monkeypatch.setitem(sys.modules, "krex", module)
+    # 재시도 간 delay를 0으로 만들어 테스트를 즉시 실행한다(실효성은 실환경 값 유지).
+    monkeypatch.setattr(provider_fetchers, "_KREX_NOTICE_RETRY_DELAY_SECONDS", 0.0)
+    return _SequencedTrafficClient
+
+
+def test_krex_traffic_notices_retries_transient_mismatch_until_stable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """두 pass 모두 count/unique가 정상이어도 A,B → D,E 교체면 거부한다."""
+    """휘발성 feed의 일시 불일치는 sliding bounded-retry로 self-heal한다(#700).
 
-    class _ReplacingIncidentService:
-        def __init__(self) -> None:
-            self.calls: list[tuple[int, int]] = []
-
-        def incident(
-            self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
-        ) -> _FakePage:
-            self.calls.append((num_of_rows, page_no))
-            indexes = (1, 2) if len(self.calls) == 1 else (4, 5)
-            items = tuple(_fake_incident(index) for index in indexes)
-            return _FakePage(
-                items=items,
-                total_count=2,
-                page_no=page_no,
-                num_of_rows=2,
-                raw={
-                    "count": 2,
-                    "pageNo": page_no,
-                    "numOfRows": 2,
-                    "realTimeSMSList": [item.raw for item in items],
-                },
-            )
-
-    class _ReplacingClient:
-        instances: list[_ReplacingClient] = []
-
-        def __init__(self, *, ex_api_key: str | None = None, **_kwargs: Any) -> None:
-            self.ex_api_key = ex_api_key
-            self.close_calls = 0
-            self.traffic = _ReplacingIncidentService()
-            _ReplacingClient.instances.append(self)
-
-        def close(self) -> None:
-            self.close_calls += 1
-
-    module = ModuleType("krex")
-    module.__dict__["KrexClient"] = _ReplacingClient
-    monkeypatch.setitem(sys.modules, "krex", module)
+    pass1={1,2}, pass2={1,3}(≠pass1), pass3={1,3}(==pass2) → 세 번째 pass에서 직전과
+    안정 pair를 확인 → 안정된 최신 집합을 yield하고 즉시 실패하지 않는다.
+    """
+    _install_sequenced_krex_traffic(monkeypatch, passes=[(1, 2), (1, 3), (1, 3)])
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
-    with pytest.raises(RuntimeError, match="연속 snapshot의 사건 집합이 다르다"):
+    records = list(fetch_krex_traffic_notices(settings))
+
+    assert sorted(record.series_no for record in records) == [1, 3]
+    [client] = _SequencedTrafficClient.instances
+    # 초기 1 + 재시도 2 = snapshot 3회(각 pass는 page_no=1 1 page)
+    assert client.traffic.calls == [(1000, 1)] * 3
+    assert client.closed is True
+    assert client.close_calls == 1
+
+
+def test_krex_traffic_notices_raises_typed_when_never_stable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """상한 내 안정 pair를 못 잡으면 typed KrexTrafficNoticeSnapshotUnstable(#700).
+
+    매 pass마다 사건 집합이 달라 어떤 연속 pair도 일치하지 않으면, 초기 1 + 상한
+    ``_KREX_NOTICE_STABILITY_RETRIES``회 snapshot 뒤 typed 실패한다(무한 재시도 금지,
+    불완전 snapshot yield 금지). generator finally에서 client는 닫힌다.
+    """
+    ever_changing = [
+        (index, index + 1)
+        for index in range(provider_fetchers._KREX_NOTICE_STABILITY_RETRIES + 1)
+    ]
+    _install_sequenced_krex_traffic(monkeypatch, passes=ever_changing)
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    with pytest.raises(KrexTrafficNoticeSnapshotUnstable, match="안정되지 않았다"):
         list(fetch_krex_traffic_notices(settings))
 
-    [client] = _ReplacingClient.instances
-    assert client.traffic.calls == [(1000, 1), (1000, 1)]
+    [client] = _SequencedTrafficClient.instances
+    assert (
+        len(client.traffic.calls)
+        == provider_fetchers._KREX_NOTICE_STABILITY_RETRIES + 1
+    )
+    assert client.closed is True
+    assert client.close_calls == 1
+
+
+def test_krex_traffic_notices_stabilizes_on_last_permitted_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """마지막 허용 재시도(상한 번째 snapshot)에서 안정되면 raise가 아니라 yield한다.
+
+    상한 경계 off-by-one 회귀 방지: snapshot 1..4가 모두 상이하고 마지막 pair
+    (snapshot4==snapshot5)만 일치해도 안정으로 인정해 그 집합을 yield하며, 정확히
+    초기 1 + _KREX_NOTICE_STABILITY_RETRIES회 = 상한+1 snapshot을 뜬다.
+    """
+    passes = [(1, 2), (3, 4), (5, 6), (7, 8), (7, 8)]
+    assert len(passes) == provider_fetchers._KREX_NOTICE_STABILITY_RETRIES + 1
+    _install_sequenced_krex_traffic(monkeypatch, passes=passes)
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    records = list(fetch_krex_traffic_notices(settings))
+
+    assert sorted(record.series_no for record in records) == [7, 8]
+    [client] = _SequencedTrafficClient.instances
+    assert (
+        len(client.traffic.calls)
+        == provider_fetchers._KREX_NOTICE_STABILITY_RETRIES + 1
+    )
+    assert client.closed is True
     assert client.close_calls == 1
 
 
