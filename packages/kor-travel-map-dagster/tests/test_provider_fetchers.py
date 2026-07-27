@@ -888,8 +888,8 @@ class _SequencedIncidentService:
 
 
 class _SequencedTrafficClient:
-    instances: "list[_SequencedTrafficClient]" = []
-    passes: "list[tuple[int, ...]]" = []
+    instances: list[_SequencedTrafficClient] = []
+    passes: list[tuple[int, ...]] = []
 
     def __init__(self, *, ex_api_key: str | None = None, **_kwargs: Any) -> None:
         self.ex_api_key = ex_api_key
