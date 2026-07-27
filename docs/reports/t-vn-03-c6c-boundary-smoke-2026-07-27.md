@@ -19,7 +19,7 @@
 > revision label이 `c8ed6164`임을 실측 확인했다(b0c95672는 c8ed6164의 조상, 둘 다 route gate 포함 —
 > 차이는 docs-only). 따라서 정본은 **`map=c8ed6164 / pinvi=6a035695`**이며 resume.md/tasks.md 기록이 맞다.
 
-## 1. 경계 매트릭스 (실행 13건 PASS, 필수 C2 1건 미검증)
+## 1. 경계 매트릭스 (14/14 PASS — 실행 13건 + C2 양성 T-VN-H19)
 
 호출은 n150 host에서 curl(negatives·token positives), admin-frontend/pinvi 경로는 각 컨테이너에서 실행.
 credential 값은 map 컨테이너 env에서 조달해 변수로만 사용, 응답 body·헤더는 기록하지 않음.
@@ -33,11 +33,11 @@ credential 값은 map 컨테이너 env에서 조달해 변수로만 사용, 응�
 | C4 | admin-bff (actor+secret) | `GET /v1/curated-features` | 200 | 200 | PASS |
 | C4n | admin secret, actor 누락 | `GET /v1/curated-features` | 401 | 401 `UNAUTHORIZED` | PASS |
 
-- **C2 (public-key → 200)**: 런타임 직접 미검증. 운영에서 public API key는 `public_api_keys` DB
-  테이블에 **해시 저장**되고 env `vworld_api_key` fallback은 (올바르게) 미설정이라 평문 key 조회 불가.
-  C1의 keyless 거부와 C3/C4의 별도 principal 허용, unit test(`test_auth.py:957-963`)는 public-key DB
-  lookup·hash compare 양성 분기의 production runtime 증거가 아니다. 따라서 C2는 **미검증**이며,
-  credential-safe 임시 key 발급·즉시 폐기 절차를 갖춘 후속 `T-VN-H19`에서 200을 직접 실증한다.
+- **C2 (public-key → 200)**: **`T-VN-H19`에서 production runtime 직접 실증 완료**(2026-07-27,
+  map=c8ed6164). credential-safe 절차로 admin-BFF `POST /v1/admin/public-api-keys`로 임시 key 발급(평문
+  1회, 값 비출력) → `GET /v1/curated-features`에 valid key **200 PASS**(DB lookup+hash compare 양성 분기),
+  wrong key **401 PASS**, `POST .../{id}/revoke` **200**, 폐기 후 same key **401 PASS**(revoke lifecycle).
+  key 값은 출력·기록하지 않고 key_id·status만 증거로 남김. 이로써 C2 미검증 갭이 닫혔다.
 
 ### ops 관측 6경로 (`require_ops_operator`, OPERATOR)
 
@@ -88,13 +88,14 @@ manifest는 정적 판독 불가 — 위 live smoke가 해소). 요지:
 ## 3. §6 완료 조건 대조
 
 - [x] route policy exception 0건·삭제 route 복원 0건·shim 0건 (정적 감사)
-- [ ] public-keyed 대표 경로 public-key 허용(C2) — production runtime 직접 실증 필요(`T-VN-H19`)
+- [x] public-keyed 대표 경로 public-key 허용(C2) — **`T-VN-H19`에서 production runtime 직접 실증 완료**
+  (2026-07-27, valid key 200·wrong 401·revoke 200·revoked 401)
 - [x] public-keyed 대표 경로 keyless 거부(C1) + service/admin 허용(C3/C4)
 - [x] ops 6경로 headerless/service-only/cancel-token 거부(O1/O2/O3) + BFF/read-token 허용(O4/O5) + invalid 거부(O6)
 - [x] MOIS raw production unmount(M1)
 - [x] full/user OpenAPI·생성 TypeScript 계약 일치 (정적 감사)
 - [x] PinVi #393 head·Map head가 C6c pair(map c8ed6164 / pinvi 6a035695)에 결박 (rev label 실측)
-- [x] n150 production live smoke 실행 13건 통과(C2는 실행 집합에 포함되지 않음)
+- [x] n150 production live smoke 실행 13건 통과 + C2 양성(T-VN-H19) = 14/14
 
-→ **PinVi #392의 관측 read principal 종결 조건은 충족했다. T-VN-03/T-ADM-C6c 전체 완료는 C2
-양성 runtime 실증 전까지 보류한다.**
+→ **T-VN-03 + T-ADM-C6c 전체 완료.** 경계 매트릭스 14/14(13 + C2), PinVi #392 종결, C2 양성 runtime
+실증(T-VN-H19)까지 충족. 완료 보류 조건 해소.

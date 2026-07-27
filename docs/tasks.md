@@ -18,13 +18,6 @@
 live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실행 위주라 하위 상세 섹션
 없이 **인덱스 상주가 정본**(tasks-rule §5의 "상세 위치 하나"를 인덱스로 충족).
 
-- [ ] `T-VN-H19` — **public API key 양성 production runtime 경계 실증**.
-  PR #854의 T-VN-03/C6c smoke는 keyless·service·admin principal과 unit test를 근거로 C2
-  (public-key→200)를 “등가 충족” 처리했으나, DB lookup·hash compare의 별도 양성 분기를 실증하지
-  못했다. credential-safe 임시 public key를 발급하고 값 비출력·status-only 원칙으로 curated 대표
-  경로 200, 오키·폐기 key 401을 확인한 뒤 즉시 폐기한다. prod mutation이 불가하면 production과 동일한
-  설정·실데이터 복제본에서 실행하되 그 차이를 증거에 명시한다. C2 전까지 T-VN-03/C6c 전체 완료 금지.
-
 **Lane B (codex)** — 병렬 wide lane. 규율: 각 코드 PR은 테스트 전 적대 리뷰어 2명 반영 후
 n150 실데이터 파괴적 Live UI E2E를 통과한다.
 

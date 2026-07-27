@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (claude) — T-VN-H19 public API key 양성 runtime 실증 (C2 갭 종결)
+
+**결론**: #854에서 "등가 충족"으로 남겨둔 C2(public-key→200)를 n150 production(map=c8ed6164)에서
+credential-safe로 직접 실증. 경계 매트릭스 14/14 완성, T-VN-03+T-ADM-C6c 전체 완료.
+
+- 사용자 credential 발급 허용 하에 admin-BFF `POST /v1/admin/public-api-keys`로 임시 key 발급(평문 1회,
+  값 비출력) → **valid key → curated 200**(DB lookup+hash compare 양성), **wrong key → 401**,
+  **revoke → 200**, **폐기 후 same key → 401**(revoke lifecycle). 값 비출력·status-only, 임시 key는
+  revoke(inert)로 정리.
+- 이로써 "C2 전까지 T-VN-03/C6c 전체 완료 금지" 보류 조건 해소. 리포트 §1 C2·§3 완료조건 갱신.
+
 ## 2026-07-27 (claude) — T-VN-H12 n150 live 검증: latent weather/price desync 규명·수정
 
 **결론**: H12 좌표 jitter를 n150 c7-v6 live harness로 검증하다 **공식 runner의 latent 회귀**를 발견·수정.
