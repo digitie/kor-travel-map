@@ -52,6 +52,14 @@ const eslintConfig = defineConfig([
     },
   },
   reactHooks.configs.flat["recommended-latest"],
+  {
+    files: ["src/components/ui/data-table.tsx"],
+    rules: {
+      // TanStack Table/Virtual은 함수형 객체를 반환한다. 두 hook을 소유한 공용 경계만
+      // React Compiler opt-out하며 scripts/verify-frontend-eslint-config.mjs가 범위를 고정한다.
+      "react-hooks/incompatible-library": "off",
+    },
+  },
   nextPlugin.configs.recommended,
   nextPlugin.configs["core-web-vitals"],
   globalIgnores([

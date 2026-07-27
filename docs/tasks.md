@@ -19,7 +19,7 @@ live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실�
 없이 **인덱스 상주가 정본**(tasks-rule §5의 "상세 위치 하나"를 인덱스로 충족).
 
 - [ ] `T-VN-H12` — **live acceptance fixture 좌표 run-unique화** (T-VN-LIVE-01 kind-격리 후속).
-  **구현·정적검증 완료 (PR 대기/머지)**, 잔여 = **live-lane 실증**뿐.
+  **#855/main 머지 완료**, 잔여 = **live-lane 실증**뿐.
 
   `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표가 고정(LON=127.5/LAT=36.5)이라
   죽은 run의 leftover place가 현재 run과 0.000° 거리로 supercluster 병합돼 marker aria-label 소실(적대
@@ -29,15 +29,24 @@ live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실�
   통과 + 4개 각도 적대 정적검증 통과(collision-efficacy/recenter-mechanics/validity-determinism/
   missed-viewport-deps). **잔여**: 다음 live acceptance lane run에서 n150 실증(Lane A live lane).
 
+- [ ] `T-VN-H19` — **public API key 양성 production runtime 경계 실증**.
+  PR #854의 T-VN-03/C6c smoke는 keyless·service·admin principal과 unit test를 근거로 C2
+  (public-key→200)를 “등가 충족” 처리했으나, DB lookup·hash compare의 별도 양성 분기를 실증하지
+  못했다. credential-safe 임시 public key를 발급하고 값 비출력·status-only 원칙으로 curated 대표
+  경로 200, 오키·폐기 key 401을 확인한 뒤 즉시 폐기한다. prod mutation이 불가하면 production과 동일한
+  설정·실데이터 복제본에서 실행하되 그 차이를 증거에 명시한다. C2 전까지 T-VN-03/C6c 전체 완료 금지.
+
 **Lane B (codex)** — 병렬 wide lane. 규율: 각 코드 PR은 테스트 전 적대 리뷰어 2명 반영 후
 n150 실데이터 파괴적 Live UI E2E를 통과한다.
 
-- b0 (선행 하드닝, 순차): [ ] `T-VN-43`(npm 보안) →
-  [ ] `T-VN-44`(frontend lint baseline) → [ ] `T-VN-47`(React Doctor) →
+- b0 (선행 하드닝, 순차): [ ] `T-VN-44`(frontend lint baseline) →
+  [ ] `T-VN-47`(React Doctor) →
   [ ] `T-VN-45`(live endpoint·cache drift) → [ ] `T-VN-46`(npm optional tree) →
   [ ] `T-VN-48`(mocked E2E drift)
-- b4 (열린 이슈 버그·하드닝, 2026-07-27 추가): [ ] `T-VN-H13`(#699 curation upsert) →
-  [ ] `T-VN-H14`(#700 KREX retry) → [ ] `T-VN-H15`(#805 IPv6 origin) (상세는 아래 b4 섹션)
+- b4 (열린 이슈·운영 버그 하드닝, 2026-07-27 추가): [ ] `T-VN-H13`(#699 curation upsert) →
+  [ ] `T-VN-H14`(#700 KREX retry) → [ ] `T-VN-H15`(#805 IPv6 origin) →
+  [ ] `T-VN-H20`(prod admin credential 정본) → [ ] `T-VN-H18`(GitHub 실제 approval gate)
+  (상세는 아래 b4 섹션)
 - b1 (PinVi 결합, 순차): [ ] `T-VN-11` → [ ] `T-VN-12` → [ ] `T-VN-16` →
   [ ] `T-VN-41`
 - b2 (계약·manifest): [ ] `T-VN-H07`(+`H07C` #812·`H07D` #815) — PinVi field-level
@@ -58,7 +67,7 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(현 head `0063_pipeline_root_id`). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(현 head `0064_price_series_identity`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다.
 - 문서 전용·rebase-only·기계적 변경(변수명·import 정렬)은 적대 재리뷰 면제.
 - pytest와 Playwright를 포함한 모든 검증은 n150 WSL SSH에서 실행한다. mocked e2e도 n150
@@ -89,24 +98,20 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
 
 ## Lane B 상세 — b0 선행 하드닝
 
-- [ ] T-VN-43 — **admin frontend npm 보안 취약점 0-high 전환**
-
-  n150 clean `npm ci`의 `npm audit` 기준 16건(low 2, moderate 7, high 7)을 해소한다. 직접 의존
-  `next` high와 `shadcn` moderate, transitive `sharp`/`hono`/`js-yaml`/`fast-uri` 등을 runtime·tooling
-  도달성으로 분류하되 서비스 전 단계에서는 high 0을 필수 계약으로 둔다. 사용하지 않는 폼 의존성을
-  제거하고, npm 10이 `extraneous`로 분류하는 exact Sharp WASM optional 6개 외 문제를 거부하는 integrity
-  gate를 둔다. lockfile을 의도적으로 갱신하고 type-check·build·실제 Next/Sharp optimizer·대표 mocked
-  및 실데이터 파괴적 Live UI E2E로 cutover를 검증한다.
-
 - [ ] T-VN-44 — **admin frontend full ESLint baseline green**
 
   T-VN-43에서 modern React-X/React-DOM 권장 규칙을 직접 구성한 뒤 `npm run lint`가 보고하는
-  1 error/30 warnings를 suppression 없이 제거한다. canonical React Hooks와 겹치는 분석기는 중복
-  실행하지 않는다. 우선 blocker는
-  `schedule-panel.tsx` recovery dialog의 effect 내부 동기 `setEditing(null)`이며, recovery claim을
-  렌더 파생 상태 또는 command 경계로 재설계해 cascading render를 없앤다. 나머지 unused·hook
-  dependency·incompatible-library 경고는 실동작과 React Compiler 경계를 보존하면서 각각 근인으로
-  해소하고 full lint 0 problem을 회귀 게이트로 둔다.
+  1 error/30 warnings를 근인별로 제거한다. canonical React Hooks와 겹치는 분석기는 중복 실행하지
+  않는다. `schedule-panel.tsx` recovery dialog의 effect 내부 동기 `setEditing(null)`은 mutation
+  경계에서 dialog를 닫고 frozen claim을 파생하는 구조로 바꾼다. unused·hook dependency·key 경고는
+  suppression 없이 해소한다. TanStack `useReactTable`의 compiler 비호환 경계만 정확한 단일 파일
+  allowlist와 `"use no memo"`로 고정하고, inline disable·범위 확대·호출 수 drift를 verifier가
+  fail-close한다. Claude Code PR #841~#857 후속 감사에서 확인한 price identity 누락도 함께
+  바로잡는다. DB/API/map/chart의 가격 series를 `provider + price_domain + product_key`로 통일하고,
+  0064 online index 교체·ADR-078·OpenAPI를 같은 변경으로 맞춘다. full lint 0 problem과
+  `--max-warnings 0`, price current/history EXPLAIN, public/admin bbox 두 SQL 경로를 CI 회귀 게이트로
+  둔다. backend/migration 확장 뒤에는 선행 UI-only live 근거를 재사용하지 않고 R1 격리 DB/API/UI
+  실데이터 Live E2E를 다시 실행한다. PR CI green·실제 GitHub approval·main 머지 전까지 열린다.
 
 - [ ] T-VN-47 — **admin frontend React Doctor 진단 근인 해소**
 
@@ -163,14 +168,30 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   거부를 안 한다. IPv6 host bracket 정규화 + zone-id 거부로 origin 계약을 정확화(이슈 자체가 C7
   blocker 아닌 후속 하드닝으로 명시).
 
+- [ ] T-VN-H20 — **prod admin credential 정본 복구·회전**
+
+  T-VN-44 live preflight에서 gitignored `docs/prod-access.local.md`의 admin password가 현재 prod UI
+  `KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH`와 불일치함을 PBKDF2 직접 대조로 확인했다. 서비스 UI를
+  변경하지 않고 branch 격리 UI에 run-unique auth를 주입해 당일 live는 완료했다. 후속으로 강한 새
+  password/hash를 생성해 R2의 ktdctl/base-compose 경계로 prod UI만 회전하고, 세 agent worktree의
+  local-only 정본을 동기화한다. 배포된 UI에서 login POST 200 + Set-Cookie와 hash env 길이, 기존 세션
+  폐기를 확인하며 비밀 평문·hash는 tracked 파일이나 PR/로그에 남기지 않는다.
+
+- [ ] T-VN-H18 — **GitHub 실제 approval provenance gate 강제**
+
+  Claude Code가 작성한 PR #841~#845·#847~#850·#852~#857을 전문 적대 감사한 결과 15건 모두
+  GitHub `reviews: []` 상태로 머지돼 AGENTS의 "1 review approval" 계약을 충족하지 못했다. 과거
+  approval provenance는 복구할 수 없으므로 후속 PR부터 branch protection 또는 merge 전 verifier가
+  최신 head SHA에 대한 `APPROVED` review 1건 이상을 강제하도록 한다. bot/self-review를 실제 독립
+  approval로 오인하지 않고, required check·관리자 우회 경로까지 회귀 테스트한다.
+
 ## 이슈 종결 추적
 
 > landing task와 완료 조건이 동일한 열린 이슈만 함께 닫는다. LIVE-01 후속 OPEN 7건은 Lane A
-> `T-VN-H16`/`T-VN-H17`에서 독립 재검증 완료(2026-07-27): **7건 전부 close**. 6건은 H16
-> (dm#63·#70·map#712·#719·#777·#694), map#684는 H17에서 조건 #8을 "write/error UI 엣지는 mock,
-> read·URL·freshness + write 계약은 live"로 명시 축소 후 close.
+> `T-VN-H16`/`T-VN-H17`에서 독립 재검증해 **7건 전부 close**했다. 6건은 H16
+> (dm#63·#70·map#712·#719·#777·#694), map#684는 H17에서 조건 #8을 "write/error UI 엣지는
+> mock, read·URL·freshness + write 계약은 live"로 명시 축소한 뒤 close했다.
 
-- **T-ADM-C6c + T-VN-03 landing 시**: PinVi #392 (관측 API ops read principal 실증).
 - **추적/관측(코드 미확정)**: map #738(lane 분배 hub)·#673(validation rule 재검토)·#819(HAProxy
   timeout tunnel 적용) · PinVi #215(post-review cleanup 잔여 — ADR-045 VWorld opaque-token hard-gate 등).
 

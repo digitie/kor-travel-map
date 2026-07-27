@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { formatDateTime, shortId } from "@/lib/format";
+import { withOccurrenceKeys } from "@/lib/occurrence-key";
 
 const LEVEL_OPTIONS: Array<JobEventLevel | "all"> = [
   "all",
@@ -327,11 +328,10 @@ function DagsterRunDetail({ runId }: { runId: string }) {
             </Alert>
           ) : null}
           <ul className="space-y-1">
-            {(data.events ?? []).map((event, index) => (
-              <li
-                className="flex flex-wrap items-center gap-2"
-                key={`${runId}-${index}`}
-              >
+            {withOccurrenceKeys(data.events ?? [], (event) =>
+              JSON.stringify([runId, event]),
+            ).map(({ key, value: event }) => (
+              <li className="flex flex-wrap items-center gap-2" key={key}>
                 <span className="font-mono text-xs text-muted-foreground">
                   {event.level ?? event.event_type}
                 </span>

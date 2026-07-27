@@ -116,7 +116,7 @@ def _search_cursor_http_error(exc: FeatureSearchCursorError) -> HTTPException:
 
 
 class PricePointOut(BaseModel):
-    """제품별 가격 1건."""
+    """provider/price_domain/product series의 가격 관측 1건."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -173,7 +173,7 @@ class FeatureSummary(BaseModel):
     )
     price_summary: list[PricePointOut] | None = Field(
         default=None,
-        description="kind=price일 때 제품별 최신 가격 요약.",
+        description="kind=price일 때 provider/domain/product series별 최신 가격 요약.",
     )
     weather_summary: WeatherSummaryOut | None = Field(
         default=None,
@@ -388,8 +388,12 @@ class PriceCardData(BaseModel):
 
     feature_id: str
     asof: datetime | None = None
-    current: list[PricePointOut]
-    history: list[PricePointOut]
+    current: list[PricePointOut] = Field(
+        description="provider/price_domain/product series별 최신 관측 1건."
+    )
+    history: list[PricePointOut] = Field(
+        description="series를 합쳐 observed_at 내림차순으로 자른 최근 관측."
+    )
     latest_at: datetime | None = None
     is_stale: bool
 
@@ -1422,7 +1426,7 @@ async def get_area_contained_features(
 @router.get(
     "/{feature_id}/price",
     response_model=FeaturePriceResponse,
-    summary="feature price card (제품별 최신 가격 + 최근 이력)",
+    summary="feature price card (provider/domain/product series별 최신 가격 + 최근 이력)",
     responses={404: {"description": "공개 feature 없음"}},
 )
 async def get_feature_price(

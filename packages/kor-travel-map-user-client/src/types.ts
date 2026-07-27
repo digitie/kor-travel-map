@@ -364,7 +364,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** feature price card (제품별 최신 가격 + 최근 이력) */
+        /** feature price card (provider/domain/product series별 최신 가격 + 최근 이력) */
         get: operations["get_feature_price_v1_features__feature_id__price_get"];
         put?: never;
         post?: never;
@@ -1138,7 +1138,7 @@ export interface components {
             name: string;
             /**
              * Price Summary
-             * @description kind=price일 때 제품별 최신 가격 요약.
+             * @description kind=price일 때 provider/domain/product series별 최신 가격 요약.
              */
             price_summary?: components["schemas"]["PricePointOut"][] | null;
             /** Status */
@@ -1383,11 +1383,17 @@ export interface components {
         PriceCardData: {
             /** Asof */
             asof?: string | null;
-            /** Current */
+            /**
+             * Current
+             * @description provider/price_domain/product series별 최신 관측 1건.
+             */
             current: components["schemas"]["PricePointOut"][];
             /** Feature Id */
             feature_id: string;
-            /** History */
+            /**
+             * History
+             * @description series를 합쳐 observed_at 내림차순으로 자른 최근 관측.
+             */
             history: components["schemas"]["PricePointOut"][];
             /** Is Stale */
             is_stale: boolean;
@@ -1396,7 +1402,7 @@ export interface components {
         };
         /**
          * PricePointOut
-         * @description 제품별 가격 1건.
+         * @description provider/price_domain/product series의 가격 관측 1건.
          */
         PricePointOut: {
             /**

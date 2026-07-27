@@ -551,7 +551,7 @@ export function FeatureCreateClient() {
     }
   };
 
-  const useMapCenter = () => {
+  const applyMapCenter = () => {
     const center = mapRef.current?.getCenter();
     if (!center) return;
     updateCoord(center.lng, center.lat);
@@ -664,7 +664,7 @@ export function FeatureCreateClient() {
             title={form.name || "new feature"}
             actions={
               <>
-                <Button type="button" variant="outline" onClick={useMapCenter}>
+                <Button type="button" variant="outline" onClick={applyMapCenter}>
                   <LocateFixedIcon data-icon="inline-start" />
                   중심 사용
                 </Button>

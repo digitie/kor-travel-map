@@ -19,7 +19,7 @@
 > revision label이 `c8ed6164`임을 실측 확인했다(b0c95672는 c8ed6164의 조상, 둘 다 route gate 포함 —
 > 차이는 docs-only). 따라서 정본은 **`map=c8ed6164 / pinvi=6a035695`**이며 resume.md/tasks.md 기록이 맞다.
 
-## 1. 경계 매트릭스 (13/13 PASS)
+## 1. 경계 매트릭스 (실행 13건 PASS, 필수 C2 1건 미검증)
 
 호출은 n150 host에서 curl(negatives·token positives), admin-frontend/pinvi 경로는 각 컨테이너에서 실행.
 credential 값은 map 컨테이너 env에서 조달해 변수로만 사용, 응답 body·헤더는 기록하지 않음.
@@ -35,9 +35,9 @@ credential 값은 map 컨테이너 env에서 조달해 변수로만 사용, 응�
 
 - **C2 (public-key → 200)**: 런타임 직접 미검증. 운영에서 public API key는 `public_api_keys` DB
   테이블에 **해시 저장**되고 env `vworld_api_key` fallback은 (올바르게) 미설정이라 평문 key 조회 불가.
-  동일 `require_public_api_key` dependency가 C1(거부)+C3+C4(허용)로 live-enforcing 입증됐고 public-key
-  accept 분기는 unit test(`test_auth.py:957-963`) 커버 — **등가 증거로 충족**. prod에 key를 생성
-  (mutation)하지 않음.
+  C1의 keyless 거부와 C3/C4의 별도 principal 허용, unit test(`test_auth.py:957-963`)는 public-key DB
+  lookup·hash compare 양성 분기의 production runtime 증거가 아니다. 따라서 C2는 **미검증**이며,
+  credential-safe 임시 key 발급·즉시 폐기 절차를 갖춘 후속 `T-VN-H19`에서 200을 직접 실증한다.
 
 ### ops 관측 6경로 (`require_ops_operator`, OPERATOR)
 
@@ -88,11 +88,13 @@ manifest는 정적 판독 불가 — 위 live smoke가 해소). 요지:
 ## 3. §6 완료 조건 대조
 
 - [x] route policy exception 0건·삭제 route 복원 0건·shim 0건 (정적 감사)
-- [x] public-keyed 대표 경로 keyless 거부(C1) + service/admin 허용(C3/C4); public 허용은 등가 충족
+- [ ] public-keyed 대표 경로 public-key 허용(C2) — production runtime 직접 실증 필요(`T-VN-H19`)
+- [x] public-keyed 대표 경로 keyless 거부(C1) + service/admin 허용(C3/C4)
 - [x] ops 6경로 headerless/service-only/cancel-token 거부(O1/O2/O3) + BFF/read-token 허용(O4/O5) + invalid 거부(O6)
 - [x] MOIS raw production unmount(M1)
 - [x] full/user OpenAPI·생성 TypeScript 계약 일치 (정적 감사)
 - [x] PinVi #393 head·Map head가 C6c pair(map c8ed6164 / pinvi 6a035695)에 결박 (rev label 실측)
-- [x] n150 production live smoke 통과 (본 문서 13/13 PASS)
+- [x] n150 production live smoke 실행 13건 통과(C2는 실행 집합에 포함되지 않음)
 
-→ **T-VN-03 + T-ADM-C6c 완료. PinVi #392 종결 조건 충족.**
+→ **PinVi #392의 관측 read principal 종결 조건은 충족했다. T-VN-03/T-ADM-C6c 전체 완료는 C2
+양성 runtime 실증 전까지 보류한다.**

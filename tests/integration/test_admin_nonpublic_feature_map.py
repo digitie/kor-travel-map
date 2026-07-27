@@ -311,6 +311,22 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
                 payload={},
                 collected_at=_NOW,
                 source_record_key=None,
+            ),
+            PriceValue(
+                feature_id=feature_id,
+                provider="python-krex-api",
+                price_domain=PriceDomain.REST_AREA_FUEL,
+                product_key="gasoline",
+                product_name="휘발유",
+                source_product_key="B027",
+                source_product_name="휘발유",
+                observed_at=_NOW,
+                value_number=Decimal("1799"),
+                unit="KRW/L",
+                normalization_version="test-v1",
+                payload={},
+                collected_at=_NOW,
+                source_record_key=None,
             )
         ],
     )
@@ -328,7 +344,25 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
         kinds=["price"],
     )
 
-    assert [(point.product_key, point.value_number) for point in card.current] == [
-        ("gasoline", Decimal("1789"))
-    ]
-    assert map_rows[0]["price_summary"][0]["product_key"] == "gasoline"
+    expected = {
+        ("python-krex-api", "rest_area_fuel", "gasoline", Decimal("1799")),
+        (
+            "python-opinet-api",
+            "opinet_gas_station",
+            "gasoline",
+            Decimal("1789"),
+        ),
+    }
+    assert {
+        (point.provider, point.price_domain, point.product_key, point.value_number)
+        for point in card.current
+    } == expected
+    assert {
+        (
+            point["provider"],
+            point["price_domain"],
+            point["product_key"],
+            point["value_number"],
+        )
+        for point in map_rows[0]["price_summary"]
+    } == expected

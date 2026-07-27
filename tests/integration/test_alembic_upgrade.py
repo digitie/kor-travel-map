@@ -197,7 +197,7 @@ _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
     ("feature", "feature_price_values"): {
         "feature_price_values_pkey",
         "uq_price_value_identity",
-        "idx_price_values_feature_product_observed",
+        "idx_price_values_feature_observed_identity",
         "idx_price_values_domain_product_observed",
         "idx_price_values_source_record",
         "idx_price_values_observed_at_brin",
@@ -533,7 +533,7 @@ async def test_alembic_creates_feature_price_values_table(
     ):
         assert required in columns
     assert {
-        "idx_price_values_feature_product_observed",
+        "idx_price_values_feature_observed_identity",
         "idx_price_values_observed_at_brin",
     } <= indexes
 

@@ -1,10 +1,40 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-27 (codex) — T-VN-44 구현·적대 리뷰 진행 중
+
+**다음 한 작업**: 최종 전체 gate와 최신 exact diff 3인 재리뷰를 마친 뒤 PR·CI green·GitHub
+approval·자체 머지를 완료하고 Lane B b0 `T-VN-47`로 진행한다. 0064를 적용한 R1 격리 실데이터
+DB/API/UI 파괴적 Live E2E는 완료했다.
+
+- frontend full ESLint 기준선 1 error/30 warnings를 0 problem으로 내리고 `npm run lint`와 CI를
+  `--max-warnings 0`으로 고정했다. TanStack compiler 경계는 `data-table.tsx` 한 파일·두 함수만
+  허용하고 verifier가 module/function directive·legacy `use no forget`·inline disable·
+  `.mts`/`.cts`를 포함한 실제 lint 파일 집합 drift를 fail-close한다.
+- schedule cron 수정은 effect 내부 동기 state 변경과 render당 sessionStorage scan을 제거했다. mutation
+  경계에서 dialog를 닫고 storage scan 완료 전 fail-closed 잠금을 유지한다. PATCH 응답 유실·409·terminal
+  audit 실패 후 같은 idempotency key/body 복구와 reload 첫 frame 비활성 상태를 mocked E2E로
+  고정했다. 최신 B 목록 scan 뒤 과거 A mutation이 늦게 settle되는 순서도 최신 refresh ref와 B scan 완료 barrier를 둔 controlled-response Chromium 회귀로 잠금 고착을 막았다.
+- 가격 identity를 DB·repository·REST/OpenAPI·지도·chart 전체에서
+  `provider + price_domain + product_key`로 통일했다. migration 0064는 concurrent DDL 부분 성공 뒤
+  Alembic stamp만 실패해 재실행돼도 이미 유일한 유효 index를 먼저 지우지 않는 대칭 복구를 제공한다.
+- #840 이후 Claude PR 전문 감사 범위를 #841~#857의 Claude 작성 15건으로 확장했다. #854의
+  public-key C2 “등가 충족”은 서로 다른 auth branch를 혼동한 완료 오판이라 되돌리고, credential-safe 직접 실증을 `T-VN-H19`로 열었다.
+  #853의 H06 증거는 n150 Linux 24/24로 대체했고 #855 H12 live 잔여와 #856/#857 H16/H17 완료를
+  보존했다. 최신 main에 재유입된 C2 전체 완료 오기는 같은 정정으로 제거했다.
+- **R1 최종 파괴적 live**: 운영 스키마와 실제 가격 feature 1건·관측 20건을 별도 PostGIS 컨테이너로
+  읽기 복사하고 실제 관측 1건을 복제본에서 변경했다. branch API가 0063→0064를 적용한 뒤 run-unique
+  API/UI/auth에서 로그인 GET/POST 200+cookie, 공식 admin feature acceptance 2/2를 통과했다. 같은
+  product의 provider/domain 두 series는 REST current 2/history 4, 상세 chart 2선·4점, 지도 marker 두
+  identity로 실제 Chromium에서 확인했다. 운영 DB fixture 0·head 불변·health 200을 재확인하고 전용
+  port/container/network/image/C7 runtime 잔여를 0으로 정리했다.
+- local-only prod password와 배포 hash 불일치는 별도 `T-VN-H20`로 등록했다. 비밀값은 tracked 문서에
+  기록하지 않았다. T-VN-43은 #851로, H06은 #813+#852 후속 검증으로 완료 이관했다. T-VN-44는
+  PR 승인·CI·main 머지 전까지 `tasks.md`에 열린 상태로 유지한다.
+
 ## 2026-07-27 (claude) — 🎯 T-VN-H12 landing + T-VN-H16/H17 이슈 재검증(LIVE-01 후속 7/7 close)
 
-**다음 한 작업**: Lane A 즉시 착수 항목은 `T-VN-H12` **live-lane 실증**(다음 live 사이클로 지연 결정됨)
-뿐 — 나머지 tasks.md 열린 항목은 대부분 Lane B(codex). 새 Lane A 지시 대기 또는 H12 live 사이클 착수 여부
-확인 필요. tasks.md 인덱스가 정본.
+**Lane A 다음 작업**: `T-VN-H12` live-lane 실증과 `T-VN-H19` public-key 양성 runtime 실증.
+`T-VN-H16`/`T-VN-H17`은 #856/#857로 완료했다. tasks.md 인덱스가 정본.
 
 - **완료(이번 세션)**:
   - `T-VN-H12` — live acceptance fixture 좌표 `sha256(RUN_ID)` jitter + `recenterMapTo`. e2e type-check +
@@ -12,23 +42,25 @@
   - `T-VN-H16` — LIVE-01 후속 OPEN 7건 재검증 → 6 close(dm#63·#70·map#712·#719·#777·#694, 근거 코멘트).
   - `T-VN-H17` — map#684를 조건 #8 검증범위 축소(write/error UI 엣지=mock, read·URL·freshness+write
     계약=live)로 close. → **LIVE-01 후속 OPEN 7건 전부 종결**.
-- **직전 완료**: T-ADM-C6c+T-VN-03(경계 n150 13/13 PASS, #392 close), T-VN-H06(keyset cursor).
+- **직전 실행**: principal 경계 smoke 13건 PASS와 #392 close. public-key C2는 `T-VN-H19`까지
+  미검증이므로 T-ADM-C6c/T-VN-03 전체 완료는 보류한다. T-VN-H06은 완료.
 
-## 2026-07-27 (claude) — 🎯 T-ADM-C6c + T-VN-03 완결: principal 경계 n150 실증 (#392 종결)
+## 2026-07-27 (claude, Codex 정정) — principal 경계 부분 실증 + #392 종결
 
-**다음 한 작업**: Lane A `T-VN-H12`(live acceptance fixture 좌표 run-unique화 — LIVE-01 kind-격리
-후속, 적대 리뷰 P2) 또는 `T-VN-H16`(LIVE-01 후속 OPEN 이슈 재검증·종결). tasks.md 인덱스가 정본.
+**Lane A 다음 작업**: `T-VN-H12` live 실증·`T-VN-H16` 이슈 재검증과 함께 `T-VN-H19`의
+public-key C2 양성 runtime 실증을 진행한다. tasks.md 인덱스가 정본이다.
 
-- **완료(이번 세션)**: `T-ADM-C6c` + `T-VN-03` principal 경계 cutover를 n150 production에서 실증.
-  배포=**map c8ed6164 / pinvi 6a035695**(둘 다 healthy, production). **13/13 PASS** —
+- **부분 실증**: n150 production에서 실행한 13건은 모두 PASS했다. 배포=**map c8ed6164 /
+  pinvi 6a035695**(둘 다 healthy, production) —
   curated(C1 401·C3/C4 200·C4n 401) · ops 6(O1/O2 401·O3/O6 403·O4/O5 200) · MOIS(M1 404) ·
   PinVi #392(P-R1 ops:read 200·P-R2 no-token 401).
 - **접근**: 배포 전 정적 감사 워크플로우(`tvn03-c6c-readiness-audit`, 6차원 병렬+적대 반증) →
   go-with-caveats → credential-safe smoke(값 비출력, status만) → #392 실증.
-- **C2(public-key 200)**: DB 해시관리 key라 런타임 미검증 — 동일 dep C1+C3+C4 live + unit test로 등가 충족.
+- **C2(public-key 200)**: DB lookup·hash compare 양성 runtime 분기는 미검증이다. C1/C3/C4와 unit test는
+  서로 다른 auth branch라 등가 증거가 아니며, `T-VN-H19` 전까지 T-VN-03/C6c 전체 완료를 보류한다.
 - **문서 모순 해소**: 배포 image rev label이 `c8ed6164`임을 실측(incident md의 `b0c95672`는 조상·
   docs-only 차이라 런타임 동일). 증거: reports/t-vn-03-c6c-boundary-smoke-2026-07-27.md.
-- **잔여 액션**: PinVi issue #392 close(코멘트 포함).
+- **완료 범위**: PinVi issue #392 observation-read principal 종결.
 
 ## 2026-07-27 (claude) — 🎯 T-VN-H06 완결: keyset cursor 전환 backend #813 + e2e 검증 #852
 

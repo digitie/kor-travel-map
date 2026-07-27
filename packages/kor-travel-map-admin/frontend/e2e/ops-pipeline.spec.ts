@@ -361,8 +361,7 @@ function makeRoots(): PipelineExecutionRootRecord[] {
 function makeOverflowExecution(index: number): PipelineExecutionRootRecord {
   const identitySequence = 12 - index;
   const id =
-    `70000000-0000-4000-8000-` +
-    String(identitySequence).padStart(12, "0");
+    `70000000-0000-4000-8000-` + String(identitySequence).padStart(12, "0");
   const createdAt =
     `2026-07-14T11:` +
     `${String(59 - Math.floor(index / 2)).padStart(2, "0")}:00.000Z`;
@@ -395,11 +394,9 @@ function makeOverflowExecution(index: number): PipelineExecutionRootRecord {
 function makeOverflowEvent(index: number): PipelineJobEventRecord {
   const identitySequence = 12 - index;
   const eventId =
-    `80000000-0000-4000-8000-` +
-    String(identitySequence).padStart(12, "0");
+    `80000000-0000-4000-8000-` + String(identitySequence).padStart(12, "0");
   const jobId =
-    `90000000-0000-4000-8000-` +
-    String(identitySequence).padStart(12, "0");
+    `90000000-0000-4000-8000-` + String(identitySequence).padStart(12, "0");
   const occurredAt =
     `2026-07-14T10:` +
     `${String(59 - Math.floor(index / 2)).padStart(2, "0")}:00.000Z`;
@@ -778,11 +775,14 @@ interface MockOptions {
   overview?: PipelineOverviewResponse;
   scheduleCommandStatus?: "ok" | "error";
   schedulePatchStatus?: "ok" | "error";
+  schedulePatchConflict?: boolean;
+  schedulePatchResponseLossOnce?: boolean;
   scheduleActionStatus?: "ok" | "error";
   scheduleActionStatuses?: Array<"ok" | "error">;
   scheduleActionConflict?: boolean;
   scheduleActionConflictActiveCommandId?: string | null;
   scheduleActionResponseLossOnce?: boolean;
+  scheduleActionResponseGate?: Promise<void>;
   scheduleUncertainOutcome?: boolean;
   scheduleAuditStatus?: "recorded" | "terminal_record_failed";
   scheduleResponseDelayMs?: number;
@@ -792,6 +792,8 @@ interface MockOptions {
   previewResponseDelaysMs?: number[];
   previewFeatureCounts?: number[];
   schedulesResponse?: PipelineSchedulesResponse;
+  schedulesResponses?: PipelineSchedulesResponse[];
+  schedulesResponseDelaysMs?: number[];
   reusedActiveRequest?: boolean;
   requestCreate?: {
     status?: number;
@@ -822,6 +824,7 @@ interface MockCounters {
   patchBodies: unknown[];
   commandBodies: unknown[];
   scheduleKeys: string[];
+  scheduleQueries: number;
   claimResolutionBodies: unknown[];
   claimResolutionPaths: string[];
   claimResolutionRows: Array<{
@@ -856,6 +859,7 @@ async function installPipelineMocks(
     patchBodies: [],
     commandBodies: [],
     scheduleKeys: [],
+    scheduleQueries: 0,
     claimResolutionBodies: [],
     claimResolutionPaths: [],
     claimResolutionRows: [],
@@ -1120,7 +1124,29 @@ async function installPipelineMocks(
       return;
     }
     if (pathname.endsWith("/v1/ops/pipeline/schedules")) {
-      await fulfillJson(route, options.schedulesResponse ?? makeSchedules());
+      const responseIndex = Math.min(
+        counters.scheduleQueries,
+        (options.schedulesResponses?.length ?? 1) - 1,
+      );
+      const response =
+        options.schedulesResponses?.[responseIndex] ??
+        options.schedulesResponse ??
+        makeSchedules();
+      const scheduleResponseDelays = options.schedulesResponseDelaysMs;
+      const responseDelayMs =
+        scheduleResponseDelays && scheduleResponseDelays.length > 0
+          ? scheduleResponseDelays[
+              Math.min(
+                counters.scheduleQueries,
+                scheduleResponseDelays.length - 1,
+              )
+            ]
+          : 0;
+      counters.scheduleQueries += 1;
+      if (responseDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, responseDelayMs));
+      }
+      await fulfillJson(route, response);
       return;
     }
     if (
@@ -1146,7 +1172,8 @@ async function installPipelineMocks(
             type: "https://kor-travel-map/errors/dagster-schedule-idempotency-conflict",
             title: "Idempotency conflict",
             status: 409,
-            detail: "같은 schedule claim에 다른 확인 결과를 기록할 수 없습니다.",
+            detail:
+              "같은 schedule claim에 다른 확인 결과를 기록할 수 없습니다.",
             code: "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
             request_id: "e2e-pipeline",
             errors: [],
@@ -1210,6 +1237,32 @@ async function installPipelineMocks(
       counters.patchBodies.push(request.postDataJSON());
       counters.scheduleKeys.push(request.headers()["idempotency-key"] ?? "");
       const body = request.postDataJSON() as { cron_schedule: string | null };
+      if (
+        options.schedulePatchResponseLossOnce &&
+        counters.patchBodies.length === 1
+      ) {
+        await route.abort("connectionreset");
+        return;
+      }
+      if (options.schedulePatchConflict) {
+        await fulfillJson(
+          route,
+          {
+            type: "https://kor-travel-map/errors/dagster-schedule-idempotency-conflict",
+            title: "이전 cron 변경 결과 확인 필요",
+            status: 409,
+            detail: "이 schedule 변경은 결과 확인이 필요합니다.",
+            code: "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
+            request_id: "e2e-pipeline",
+            errors: [],
+            details: {
+              active_command_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            },
+          },
+          409,
+        );
+        return;
+      }
       if (options.scheduleResponseDelayMs) {
         await new Promise((resolve) =>
           setTimeout(resolve, options.scheduleResponseDelayMs),
@@ -1320,7 +1373,9 @@ async function installPipelineMocks(
           : undefined) ??
         options.scheduleActionStatus ??
         options.scheduleCommandStatus;
-      if (options.scheduleResponseDelayMs) {
+      if (options.scheduleActionResponseGate) {
+        await options.scheduleActionResponseGate;
+      } else if (options.scheduleResponseDelayMs) {
         await new Promise((resolve) =>
           setTimeout(resolve, options.scheduleResponseDelayMs),
         );
@@ -1837,13 +1892,15 @@ test.describe("/ops/pipeline", () => {
     await expect(page.getByText(/page 1/)).toBeVisible();
     await expect
       .poll(() =>
-        counters.eventQueries.slice(beforeInvalidTuple).some(
-          (query) =>
-            query.get("provider") === "python-kma-api" &&
-            !query.has("dataset_key") &&
-            !query.has("sync_scope") &&
-            !query.has("cursor"),
-        ),
+        counters.eventQueries
+          .slice(beforeInvalidTuple)
+          .some(
+            (query) =>
+              query.get("provider") === "python-kma-api" &&
+              !query.has("dataset_key") &&
+              !query.has("sync_scope") &&
+              !query.has("cursor"),
+          ),
       )
       .toBe(true);
 
@@ -1898,7 +1955,7 @@ test.describe("/ops/pipeline", () => {
     const renderedIdentities = async (ariaLabel: string) =>
       page
         .getByRole("table", { name: ariaLabel })
-        .locator('tbody tr[data-row-identity]')
+        .locator("tbody tr[data-row-identity]")
         .evaluateAll((rows) =>
           rows.map((row) => row.getAttribute("data-row-identity")),
         );
@@ -1943,7 +2000,11 @@ test.describe("/ops/pipeline", () => {
     ).toBeDisabled();
     await expect
       .poll(() =>
-        [...new Set(counters.executionQueries.map((query) => query.get("cursor")))]
+        [
+          ...new Set(
+            counters.executionQueries.map((query) => query.get("cursor")),
+          ),
+        ]
           .map((cursor) => cursor ?? "first-page")
           .toSorted(),
       )
@@ -1953,10 +2014,9 @@ test.describe("/ops/pipeline", () => {
         secondExecutionIdentities.includes(identity),
       ),
     ).toEqual([]);
-    expect([
-      ...firstExecutionIdentities,
-      ...secondExecutionIdentities,
-    ]).toEqual(executions.map(executionIdentity));
+    expect([...firstExecutionIdentities, ...secondExecutionIdentities]).toEqual(
+      executions.map(executionIdentity),
+    );
     // fixture 순서 자체가 수용 계약을 만족해야 DOM==fixture 단언도 product의
     // total-order 회귀를 전달하므로, 실행·event 주입 데이터의 전제도 별도로 고정한다.
     const executionTuples = executions.map((item) => [
@@ -2231,7 +2291,7 @@ test.describe("/ops/pipeline", () => {
     await panel.getByLabel("취소 사유").fill("A only reason");
     await panel.getByRole("button", { name: "취소 요청" }).click();
     await page
-      .getByRole("dialog")
+      .getByRole("alertdialog")
       .getByRole("button", { name: "취소 요청", exact: true })
       .click();
 
@@ -2496,8 +2556,7 @@ test.describe("/ops/pipeline", () => {
         return counters.executionQueries
           .slice(beforeFilterChange)
           .some(
-            (query) =>
-              query.get("status") === "failed" && !query.has("cursor"),
+            (query) => query.get("status") === "failed" && !query.has("cursor"),
           );
       })
       .toBe(true);
@@ -2713,8 +2772,20 @@ test.describe("/ops/pipeline", () => {
       page.getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` }),
     ).toBeDisabled();
 
+    await page.addInitScript(() => {
+      const requestAnimationFrame = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (callback) =>
+        window.setTimeout(() => requestAnimationFrame(callback), 500);
+    });
     await page.reload();
-    await expect(frozenSubmission).toContainText("동일 요청만");
+    const reloadedStopButton = page.getByRole("button", {
+      name: `${SCHEDULE_NAME} 스케줄 중지`,
+    });
+    await reloadedStopButton.waitFor({ state: "visible" });
+    expect(await reloadedStopButton.isDisabled()).toBe(true);
+    await expect(frozenSubmission).toContainText(
+      "이 요청만 같은 Idempotency-Key로 재확인",
+    );
     await frozenSubmission
       .getByRole("button", { name: "동일 요청 재확인" })
       .click();
@@ -2735,7 +2806,7 @@ test.describe("/ops/pipeline", () => {
       .fill("응답 유실 뒤 Dagster에서 미반영 확인");
     await recovery.getByRole("button", { name: "claim 해제" }).click();
     await page
-      .getByRole("dialog")
+      .getByRole("alertdialog")
       .getByRole("button", { name: "확인 결과 기록 후 해제" })
       .click();
 
@@ -2747,6 +2818,124 @@ test.describe("/ops/pipeline", () => {
       scheduleName: SCHEDULE_NAME,
       commandId: counters.scheduleKeys[0],
     });
+  });
+
+  test("schedule 목록 signature 재스캔 전에는 이전 frozen 요청을 재전송하지 않는다", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const requestAnimationFrame = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (callback) => {
+        const delay = (
+          window as typeof window & { delayScheduleStateScan?: boolean }
+        ).delayScheduleStateScan
+          ? 5_000
+          : 0;
+        if (delay === 0) {
+          return requestAnimationFrame(callback);
+        }
+        return window.setTimeout(() => requestAnimationFrame(callback), delay);
+      };
+    });
+    const replacementName = "replacement_schedule";
+    const replacementSchedules = makeSchedules();
+    replacementSchedules.data.schedules = (
+      replacementSchedules.data.schedules ?? []
+    ).map((schedule) => ({
+      ...schedule,
+      name: replacementName,
+    }));
+    const counters = await installPipelineMocks(page, {
+      scheduleActionResponseLossOnce: true,
+      schedulesResponses: [makeSchedules(), replacementSchedules],
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+    const stopButton = page.getByRole("button", {
+      name: `${SCHEDULE_NAME} 스케줄 중지`,
+    });
+    await expect(stopButton).toBeEnabled();
+    await page.evaluate(() => {
+      (
+        window as typeof window & { delayScheduleStateScan?: boolean }
+      ).delayScheduleStateScan = true;
+    });
+    await stopButton.click();
+
+    await expect(
+      page.getByTestId(`pipeline-schedule-row-${replacementName}`),
+    ).toBeVisible();
+    const retryButton = page
+      .getByTestId("schedule-frozen-submission")
+      .getByRole("button", { name: "동일 요청 재확인" });
+    await expect(retryButton).toBeDisabled();
+    await retryButton.dispatchEvent("click");
+    await expect.poll(() => counters.scheduleKeys.length).toBe(1);
+  });
+
+  test("최신 schedule scan 뒤 이전 mutation settle이 상태를 재잠그지 않는다", async ({
+    page,
+  }) => {
+    const replacementName = "replacement_schedule";
+    const replacementSchedules = makeSchedules();
+    replacementSchedules.data.schedules = (
+      replacementSchedules.data.schedules ?? []
+    ).map((schedule) => ({
+      ...schedule,
+      name: replacementName,
+    }));
+    let releaseScheduleResponse: () => void = () => {
+      throw new Error("schedule response gate가 초기화되지 않았습니다.");
+    };
+    const scheduleActionResponseGate = new Promise<void>((resolve) => {
+      releaseScheduleResponse = resolve;
+    });
+    const counters = await installPipelineMocks(page, {
+      scheduleActionResponseGate,
+      schedulesResponses: [
+        makeSchedules(),
+        replacementSchedules,
+        replacementSchedules,
+      ],
+      schedulesResponseDelaysMs: [0, 0, 5_000],
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+    const stopButton = page.getByRole("button", {
+      name: `${SCHEDULE_NAME} 스케줄 중지`,
+    });
+    await expect(stopButton).toBeEnabled();
+    await stopButton.click();
+    await expect.poll(() => counters.commandBodies.length).toBe(1);
+
+    // schedules query(staleTime=10s)를 network reconnect로 독립 갱신해 B scan을
+    // 끝낸 뒤, A render에서 시작한 mutation이 나중에 settle되는 순서를 만든다.
+    await page.waitForTimeout(10_100);
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("offline"));
+      window.dispatchEvent(new Event("online"));
+    });
+    await expect
+      .poll(() => counters.scheduleQueries, { timeout: 3_000 })
+      .toBeGreaterThanOrEqual(2);
+    await expect(
+      page.getByTestId(`pipeline-schedule-row-${replacementName}`),
+    ).toBeVisible();
+    await expect(page.getByTestId("pipeline-schedule-panel")).toHaveAttribute(
+      "data-schedule-state-scanned",
+      "true",
+    );
+    releaseScheduleResponse();
+
+    await expect(page.getByTestId("schedule-command-result")).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect
+      .poll(() => counters.scheduleQueries)
+      .toBeGreaterThanOrEqual(3);
+    await expect(
+      page.getByRole("button", {
+        name: `${replacementName} 스케줄 중지`,
+      }),
+    ).toBeEnabled({ timeout: 1_000 });
   });
 
   test("스케줄 409에 active command ID가 없으면 recovery를 노출하지 않는다", async ({
@@ -2874,7 +3063,7 @@ test.describe("/ops/pipeline", () => {
     await expect(reason).toHaveValue("");
   });
 
-  test("cron terminal audit 실패 후 patch UI와 다른 명령을 잠근다", async ({
+  test("cron terminal audit 실패 후 dialog를 닫고 복구 UI를 노출한다", async ({
     page,
   }) => {
     const counters = await installPipelineMocks(page, {
@@ -2892,23 +3081,71 @@ test.describe("/ops/pipeline", () => {
     await reason.fill("감사 결과 확인 필요");
     await dialog.getByRole("button", { name: "저장", exact: true }).click();
 
-    await expect(dialog).toBeVisible();
-    await expect(reason).toHaveValue("감사 결과 확인 필요");
+    await expect(dialog).toHaveCount(0);
     await expect(page.getByTestId("schedule-command-result")).toContainText(
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     );
-    await expect(
-      dialog.getByRole("textbox", { name: "cron", exact: true }),
-    ).toBeDisabled();
-    await expect(reason).toBeDisabled();
-    await expect(
-      dialog.getByRole("button", { name: "기본값으로 되돌리기" }),
-    ).toBeDisabled();
-    await expect(
-      dialog.getByRole("button", { name: "저장", exact: true }),
-    ).toBeDisabled();
+    await expect(page.getByTestId("schedule-claim-recovery")).toBeVisible();
+    await expectScheduleControlsDisabled(page);
     expect(counters.scheduleKeys).toHaveLength(1);
     expect(counters.patchBodies).toHaveLength(1);
+  });
+
+  test("cron PATCH 응답 유실은 dialog를 닫고 같은 요청으로 복구한다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      schedulePatchResponseLossOnce: true,
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} cron 수정` })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "스케줄 cron 수정" });
+    await dialog
+      .getByRole("textbox", { name: "cron", exact: true })
+      .fill("35 5 * * *");
+    await dialog.getByLabel("수정 사유").fill("응답 유실 복구 검증");
+    await dialog.getByRole("button", { name: "저장", exact: true }).click();
+
+    await expect(dialog).toHaveCount(0);
+    const frozen = page.getByTestId("schedule-frozen-submission");
+    await expect(frozen).toBeVisible();
+    await expect(page.getByTestId("schedule-claim-recovery")).toHaveCount(0);
+    await expectScheduleControlsDisabled(page);
+    await frozen.getByRole("button", { name: "동일 요청 재확인" }).click();
+
+    await expect(frozen).toHaveCount(0);
+    await expect(page.getByTestId("schedule-command-result")).toContainText(
+      "cron 수정 · 성공",
+    );
+    expect(counters.patchBodies).toHaveLength(2);
+    expect(counters.patchBodies[1]).toEqual(counters.patchBodies[0]);
+    expect(counters.scheduleKeys[1]).toBe(counters.scheduleKeys[0]);
+  });
+
+  test("cron PATCH 409는 dialog를 닫고 claim 복구를 노출한다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page, {
+      schedulePatchConflict: true,
+    });
+    await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
+    await page
+      .getByRole("button", { name: `${SCHEDULE_NAME} cron 수정` })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "스케줄 cron 수정" });
+    await dialog.getByRole("button", { name: "저장", exact: true }).click();
+
+    await expect(dialog).toHaveCount(0);
+    const recovery = page.getByTestId("schedule-claim-recovery");
+    await expect(recovery).toBeVisible();
+    await expect(recovery).toContainText(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    );
+    await expectScheduleControlsDisabled(page);
+    expect(counters.patchBodies).toHaveLength(1);
+    expect(counters.scheduleKeys).toHaveLength(1);
   });
 
   test("terminal audit 실패 claim이 남으면 모든 schedule 조작을 잠근다", async ({
@@ -2963,7 +3200,7 @@ test.describe("/ops/pipeline", () => {
       .fill("Dagster run 목록에 해당 실행이 없음을 확인");
     await recovery.getByRole("button", { name: "claim 해제" }).click();
     await page
-      .getByRole("dialog")
+      .getByRole("alertdialog")
       .getByRole("button", { name: "확인 결과 기록 후 해제" })
       .click();
 
@@ -2985,7 +3222,7 @@ test.describe("/ops/pipeline", () => {
       .getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` })
       .click();
     await page
-      .getByRole("dialog")
+      .getByRole("alertdialog")
       .getByRole("button", { name: "즉시 실행", exact: true })
       .click();
     await expect.poll(() => counters.scheduleKeys.length).toBe(2);
@@ -3017,7 +3254,7 @@ test.describe("/ops/pipeline", () => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await recovery.getByRole("button", { name: "claim 해제" }).click();
       await page
-        .getByRole("dialog")
+        .getByRole("alertdialog")
         .getByRole("button", { name: "확인 결과 기록 후 해제" })
         .click();
       if (attempt === 0) {
@@ -3090,7 +3327,7 @@ test.describe("/ops/pipeline", () => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await recovery.getByRole("button", { name: "claim 해제" }).click();
       await page
-        .getByRole("dialog")
+        .getByRole("alertdialog")
         .getByRole("button", { name: "확인 결과 기록 후 해제" })
         .click();
       if (attempt === 0) {
@@ -3144,7 +3381,7 @@ test.describe("/ops/pipeline", () => {
     await reason.fill("수정 전 사유");
     await recovery.getByRole("button", { name: "claim 해제" }).click();
     await page
-      .getByRole("dialog")
+      .getByRole("alertdialog")
       .getByRole("button", { name: "확인 결과 기록 후 해제" })
       .click();
 
@@ -3157,7 +3394,7 @@ test.describe("/ops/pipeline", () => {
     await reason.fill("수정한 확인 사유");
     await recovery.getByRole("button", { name: "claim 해제" }).click();
     await page
-      .getByRole("dialog")
+      .getByRole("alertdialog")
       .getByRole("button", { name: "확인 결과 기록 후 해제" })
       .click();
 
@@ -3206,7 +3443,8 @@ test.describe("/ops/pipeline", () => {
       scope: { type: "provider_dataset", provider: "python-mois-api" },
     });
     expect(
-      (counters.previewBodies.at(0) as { scope: Record<string, unknown> }).scope,
+      (counters.previewBodies.at(0) as { scope: Record<string, unknown> })
+        .scope,
     ).not.toHaveProperty("sync_scope");
     expect(counters.requestBodies).toHaveLength(0);
   });
@@ -3478,11 +3716,7 @@ test.describe("/ops/pipeline", () => {
         {
           status: 200,
           body: makeCatalogResponse([
-            makeCatalogRow(
-              "python-mois-api",
-              "mois_licenses",
-              "dataset_wide",
-            ),
+            makeCatalogRow("python-mois-api", "mois_licenses", "dataset_wide"),
           ]),
         },
       ],

@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   checkLoginRateLimit,
   clearLoginFailures,
+  createSessionCookieValue,
   hashAdminPasswordForEnv,
   recordLoginFailure,
   requestHasSameOrigin,
   verifyAdminLogin,
+  verifySessionCookieValue,
 } from "./auth";
 
 type AuthRequest = Parameters<typeof checkLoginRateLimit>[0];
@@ -79,6 +81,26 @@ describe("admin auth helpers", () => {
     await expect(
       verifyAdminLogin({ username: "not-admin", password: "ad.min" }, env),
     ).resolves.toBe("invalid");
+  });
+
+  it("direct HeaderReader의 headers 필드를 RequestLike 경계로 오인하지 않는다", async () => {
+    const env = {
+      KOR_TRAVEL_MAP_UI_ADMIN_USERNAME: "admin",
+      KOR_TRAVEL_MAP_UI_SESSION_SECRET: "session-secret".repeat(3),
+    };
+    const source = {
+      headers: { internal: true },
+      get(name: string) {
+        return name.toLowerCase() === "user-agent" ? "next-readonly-headers" : null;
+      },
+    };
+    const now = 1_800_000_000_000;
+
+    const cookie = await createSessionCookieValue(source, env, now);
+
+    await expect(
+      verifySessionCookieValue(cookie, env, now, source),
+    ).resolves.toBe(true);
   });
 });
 

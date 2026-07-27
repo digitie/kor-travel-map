@@ -420,6 +420,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       decision: "accepted",
       selected_detail_source: "visitkorea",
     } satisfies Partial<EnrichmentReviewDecisionRequest>);
+    expect(requests.patchBodies[0]).not.toHaveProperty("reviewed_by");
   });
 
   test("accept fires PATCH decision and row flips to 완료", async ({ page }) => {
@@ -448,6 +449,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       decision: "accepted",
       decision_reason: "admin-ui accepted",
     } satisfies EnrichmentReviewDecisionRequest);
+    expect(requests.patchBodies[0]).not.toHaveProperty("reviewed_by");
     expect(requests.patchPathnames[0]).toBe(
       `/v1/admin/features/enrichment-reviews/${encodeURIComponent("enrich-accept-1")}`,
     );
@@ -491,6 +493,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       decision: "rejected",
       decision_reason: "admin-ui rejected",
     } satisfies EnrichmentReviewDecisionRequest);
+    expect(requests.patchBodies[0]).not.toHaveProperty("reviewed_by");
     // 다음 버튼은 첫 mutation이 settle된 뒤(행이 '완료'로 전환된 뒤) 누른다.
     // 모든 결정 버튼이 decision.isPending 동안 disabled라 transient-disable race를 피한다.
     await expect(rejectRow.getByText("완료")).toBeVisible();
@@ -501,6 +504,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       decision: "ignored",
       decision_reason: "admin-ui ignored",
     } satisfies EnrichmentReviewDecisionRequest);
+    expect(requests.patchBodies[1]).not.toHaveProperty("reviewed_by");
     await expect(ignoreRow.getByText("완료")).toBeVisible();
 
     // 각 PATCH가 자기 review_id를 URL path에 담는다.
@@ -597,15 +601,25 @@ test.describe("admin/enrichment-reviews actions", () => {
     await expect(page.getByRole("row", { name: /Filter Target/ })).toBeVisible();
     await expect(page.getByRole("row", { name: /Other Target/ })).toHaveCount(0);
     await expect
-      .poll(() => requests.listUrls.at(-1)?.searchParams.get("q"))
-      .toBe("Filter");
-    await expect
-      .poll(() => requests.listUrls.at(-1)?.searchParams.getAll("provider"))
-      .toEqual(["python-visitkorea-api"]);
-    const last = requests.listUrls.at(-1);
-    expect(last?.searchParams.get("min_score")).toBe("90");
-    expect(last?.searchParams.get("page_size")).toBe("25");
-    expect(last?.searchParams.has("page")).toBe(false);
+      .poll(() => {
+        const params = requests.listUrls.at(-1)?.searchParams;
+        return params
+          ? {
+              hasLegacyPage: params.has("page"),
+              minScore: params.get("min_score"),
+              pageSize: params.get("page_size"),
+              provider: params.getAll("provider"),
+              q: params.get("q"),
+            }
+          : null;
+      })
+      .toEqual({
+        hasLegacyPage: false,
+        minScore: "90",
+        pageSize: "25",
+        provider: ["python-visitkorea-api"],
+        q: "Filter",
+      });
   });
 
   test("row click opens the single detail-dialog map surface", async ({ page }) => {

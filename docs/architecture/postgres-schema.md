@@ -212,7 +212,8 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `idx_weather_valid_at_brin` | BRIN(valid_at) | 시계열 |
 | `idx_weather_collected_at_brin` | BRIN(collected_at) | 시계열 |
 | `idx_price_values_observed_at_brin` | BRIN(observed_at) | 시계열 |
-| `idx_price_values_feature_product_observed` | (feature_id, price_domain, product_key, observed_at DESC) | feature별 제품 최신/추세 |
+| `uq_price_value_identity` | UNIQUE(feature_id, provider, price_domain, product_key, observed_at) | 자연키 + all-DESC 역방향 current scan |
+| `idx_price_values_feature_observed_identity` | (feature_id, observed_at DESC, provider, price_domain, product_key) | feature별 전체 series history |
 | `idx_price_values_domain_product_observed` | (provider, price_domain, product_key, observed_at DESC) | provider/domain별 운영 검증 |
 | `idx_price_values_source_record` | (source_record_key) partial NOT NULL | raw 역추적 |
 

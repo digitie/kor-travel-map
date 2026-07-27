@@ -7,8 +7,8 @@
 
 - [x] **T-VN-H17** — H16에서 keep-open된 map#684를 **조건 #8 검증범위 명시 축소**로 종결(사용자 결정:
   조건 축소). #684 조건 1~7 + owner 후속은 코드+mock+live로 충족. 조건 #8("mock e2e와 n150 live e2e에서
-  검증")을 다음으로 확정: **live(n150)** = read/freshness/URL-복원/invalid-fail-closed(`ops-c7-read-auth
-  .live.spec.ts`) + datasets **write 계약**(effective-scope refresh POST·active projection·
+  검증")을 다음으로 확정: **live(n150)** = read/freshness/URL-복원/invalid-fail-closed
+  (`ops-c7-read-auth.live.spec.ts`) + datasets **write 계약**(effective-scope refresh POST·active projection·
   reused_active_request, `ops-c7-kma-active-write.live.spec.ts`, T-ADM-C7 GREEN); **mock** = write-path
   **UI 엣지 전이 2건**(refresh done-terminal freshness invalidation `ops-datasets.spec.ts:1817`,
   polling 404/503 재시도 `:2440`). 근거: 반복 done-terminal은 prod Dagster refresh quota 소모 파괴적,
@@ -28,26 +28,34 @@
     freshness invalidation·execution polling 404/503 재시도 UI)이 mock e2e에만 존재, n150 live lane 미구동
     → `T-VN-H17`로 잔여 구체화.
 
-## 2026-07-27 — T-ADM-C6c + T-VN-03 principal 경계 cutover n150 실증 완료 (#392 종결)
+## 2026-07-27 — principal 경계 부분 실증 + PinVi #392 종결
 
-- [x] **T-ADM-C6c + T-VN-03** — curated public-key gate + ops operator gate + MOIS raw production
-  unmount의 n150 production live 경계 smoke를 실증. 배포=**map c8ed6164 / pinvi 6a035695**(둘 다
-  healthy, production profile). **13/13 PASS**:
+- [x] **PinVi #392 observation-read principal** — PinVi 관측 caller가 ops:read로 200에 도달하고
+  no-token은 401로 거부됨을 production에서 직접 실증했다. 배포=**map c8ed6164 / pinvi 6a035695**
+  (둘 다 healthy, production profile).
+- **부분 증거(T-VN-03/T-ADM-C6c 전체 완료 아님)**: 실행한 경계 smoke 13건은 모두 PASS했다.
   - curated: C1 keyless→401 · C3 service→200 · C4 admin-bff→200 · C4n secret-no-actor→401.
-    (C2 public-key 200은 DB 해시관리 key라 런타임 미검증 — 동일 dep가 C1+C3+C4로 live 입증 + unit
-    test 커버로 등가 충족.)
+    C2 public-key→200은 DB lookup·hash compare 양성 runtime 분기를 직접 실행하지 않았으므로 미검증이다.
   - ops 6: O1 keyless→401 · O2 service-only→401 · O3 cancel-token→403 · O4 admin-bff→200 ·
     O5 ops:read→200 · O6 invalid→403.
   - MOIS: M1 production unmount→404.
-  - PinVi(#392): P-R1 pinvi ops:read→200 · P-R2 no-token→401 — PinVi 관측 read가 ops:read로
-    live gate 도달, 토큰 없으면 거부. #393(6a035695) 배포로 관측 caller ops:read 완결 실증.
   - 배포 전 정적 감사(워크플로우 `tvn03-c6c-readiness-audit`, 6차원 병렬+적대 반증): route policy
     exception 0, curated/ops/MOIS wiring, OpenAPI full/user 계약 일치 확인.
   - 증거: [t-vn-03-c6c-boundary-smoke-2026-07-27.md](reports/t-vn-03-c6c-boundary-smoke-2026-07-27.md).
-  - **문서 모순 해소**: 배포 image revision label이 `c8ed6164`임을 실측(incident md의 b0c95672는
-    조상·docs-only 차이라 런타임 동일). PinVi issue #392 close.
+  - C2는 열린 `T-VN-H19`에서 credential-safe 임시 key로 직접 실증한다. 그 전까지
+    T-VN-03/T-ADM-C6c를 완료로 이관하지 않는다.
 
-## 2026-07-27 — T-VN-H06 admin 목록 keyset+fingerprint cursor 전환 완결
+## 2026-07-27 — Lane B b0 T-VN-43 admin frontend npm 보안 0건 전환
+
+- [x] **T-VN-43 (#851, merge `d0e7077ffb0cee4139997b8143371b1418bfd784`)** — clean npm audit의
+  low 2·moderate 7·high 7을 모두 제거하고 Node/npm·Next/PostCSS/Sharp·Playwright를 exact pin했다.
+  사용하지 않는 shadcn CLI/MCP·form graph를 제거하고 npm tree/effective ESLint/Redocly patch/실제
+  Next-Sharp optimizer를 fail-close gate로 고정했다. Python 2,355 tests와 frontend type/build/Vitest,
+  격리 Docker mocked 24/24, 운영 API에 연결한 공식 CSV 5종 파괴적 Live UI 4/4를 n150에서 통과했다.
+  #840 이후 Claude PR 전문 감사 1명과 독립 적대 리뷰어 2명의 최종 finding은 P0~P3 0건이었다. 상세
+  `docs/journal.md` 2026-07-27(codex).
+
+## 2026-07-27 — T-VN-H06 admin 목록 keyset 런타임 검증 완결
 
 - [x] **T-VN-H06** — admin dedup/enrichment 목록을 OFFSET → keyset+fingerprint cursor로 전환.
   - **backend**(#813, merge `9d29606e`): `admin_feature_repo.py` keyset 술어
@@ -56,15 +64,11 @@
     `idx_enrichment_review_status_score`. 2차 적대 리뷰 P3 반영(가변 score 재스캔 재정렬 tradeoff
     docstring + active-cursor EXPLAIN 케이스 `test_t212d_perf_explain.py`, seq-scan 회귀 가드).
     CI `pytest integration (PostGIS)` green.
-  - **e2e 검증**(#852, merge `3ce99d75`): dedup/enrichment mocked Playwright e2e 14건 실패 →
-    현행 UI에 맞춘 spec-only 수정으로 **24 passed(0 fail)**. 근인 3종 전부 spec drift(client 무변경):
-    (1) decision PATCH `reviewed_by` 과다 기대 6곳 제거 — 서버가 인증 principal(T-VN-03 경계)에서 파생,
-    (2) `MultiFilterCombobox` 필터(provider/dataset/category)에 `.press("Enter")` 토큰 커밋 추가,
-    (3) deferred provider param 직접 단언 → `expect.poll(lastListUrl)` 전환.
-  - **검증 환경 주의**: 이 dedup/enrichment cursor e2e는 network-mocked(실백엔드·DB·디스크 의존 없음)이며
-    CI(frontend.yml)에서 실행되지 않는다. task 노트는 "n150 Linux Playwright"를 명시했으나 mocked·
-    OS-agnostic 특성상 CLAUDE.md 정본인 **Windows Playwright e2e**로 실행한 24 GREEN을 검증으로 채택.
-    keyset 실백엔드 동작은 #813의 pytest integration(PostGIS) EXPLAIN 가드가 커버.
+  - **e2e 검증**(#852 + 후속 Codex 보강): 현행 UI에 맞춘 spec drift 수정에 더해 네 deferred filter의
+    원자적 수렴과 decision PATCH의 `reviewed_by` 비전송을 전 경로에서 음성 단언했다. n150 Linux
+    Playwright에서 dedup 14 + enrichment 9 + auth setup 1, 합계 **24/24**를 통과해 기존 Windows-only
+    증거를 대체했다. network-mocked 목록 검증이라 task의 파괴적 live 예외를 적용하며, keyset 실백엔드
+    동작은 #813의 pytest integration(PostGIS) EXPLAIN 가드가 커버한다.
 
 ## 2026-07-27 — T-VN-LIVE-01 targeted live acceptance lane n150 PASSED (04A/58/15 종결)
 

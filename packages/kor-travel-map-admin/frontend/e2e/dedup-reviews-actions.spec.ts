@@ -477,6 +477,7 @@ test.describe("admin/dedup-reviews actions", () => {
       decision: "accepted",
       decision_reason: "admin-ui accepted",
     });
+    expect(handle.requests.bodies[0]).not.toHaveProperty("reviewed_by");
 
     // onSuccess invalidate → refetch가 status='accepted'를 반영, actions 셀이 '완료'로 collapse.
     await expect(row.getByText("완료")).toBeVisible();
@@ -502,6 +503,7 @@ test.describe("admin/dedup-reviews actions", () => {
       decision: "rejected",
       decision_reason: "admin-ui rejected",
     });
+    expect(handle.requests.bodies[0]).not.toHaveProperty("reviewed_by");
     // reject 본문에는 master_feature_id 키가 없다(merge만 전송).
     expect(handle.requests.bodies[0].master_feature_id).toBeUndefined();
 
@@ -523,6 +525,7 @@ test.describe("admin/dedup-reviews actions", () => {
       decision: "ignored",
       decision_reason: "admin-ui ignored",
     });
+    expect(handle.requests.bodies[0]).not.toHaveProperty("reviewed_by");
   });
 
   test("merge with explicit master (B) sends master_feature_id=feature_b", async ({
@@ -556,6 +559,7 @@ test.describe("admin/dedup-reviews actions", () => {
       master_feature_id: FEATURE_B_ID,
       decision_reason: "admin-ui merge (master 수동 선택)",
     });
+    expect(handle.requests.bodies[0]).not.toHaveProperty("reviewed_by");
 
     // onSettled → setMergeKey(null), refetch는 status='merged' → '완료', 패널 사라짐.
     await expect(row.getByText("완료")).toBeVisible();
@@ -581,6 +585,7 @@ test.describe("admin/dedup-reviews actions", () => {
       decision: "merged",
       decision_reason: "admin-ui merge (master 자동 선정)",
     });
+    expect(handle.requests.bodies[0]).not.toHaveProperty("reviewed_by");
     // 자동 경로는 masterFeatureId === undefined → JSON.stringify가 키를 drop.
     expect(handle.requests.bodies[0].master_feature_id).toBeUndefined();
   });
@@ -746,17 +751,29 @@ test.describe("admin/dedup-reviews actions", () => {
     await expect(page.getByRole("row", { name: /DEDUP_A_other/ })).toHaveCount(0);
 
     await expect
-      .poll(() => handle.requests.lastListUrl?.searchParams.get("q"))
-      .toBe("filter");
-    await expect
-      .poll(() => handle.requests.lastListUrl?.searchParams.getAll("provider"))
-      .toEqual(["python-mois-api"]);
-    const last = handle.requests.lastListUrl;
-    expect(last?.searchParams.getAll("kind")).toEqual(["place"]);
-    expect(last?.searchParams.getAll("dataset_key")).toEqual(["mois_license"]);
-    expect(last?.searchParams.getAll("category")).toEqual(["02020101"]);
-    expect(last?.searchParams.get("min_score")).toBe("90");
-    expect(last?.searchParams.get("page_size")).toBe("25");
+      .poll(() => {
+        const params = handle.requests.lastListUrl?.searchParams;
+        return params
+          ? {
+              category: params.getAll("category"),
+              datasetKey: params.getAll("dataset_key"),
+              kind: params.getAll("kind"),
+              minScore: params.get("min_score"),
+              pageSize: params.get("page_size"),
+              provider: params.getAll("provider"),
+              q: params.get("q"),
+            }
+          : null;
+      })
+      .toEqual({
+        category: ["02020101"],
+        datasetKey: ["mois_license"],
+        kind: ["place"],
+        minScore: "90",
+        pageSize: "25",
+        provider: ["python-mois-api"],
+        q: "filter",
+      });
   });
 
   test("page-size select drives cursor pagination controls", async ({ page }) => {
@@ -908,6 +925,7 @@ test.describe("admin/dedup-reviews actions", () => {
         decision: "accepted",
         decision_reason: "admin-ui accepted",
       });
+      expect(body).not.toHaveProperty("reviewed_by");
     }
     // invalidation refetch 후 setRowSelection({}) → toolbar 사라짐.
     await expect(page.getByText(/개 선택됨/)).toHaveCount(0);

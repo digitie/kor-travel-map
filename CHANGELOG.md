@@ -5,6 +5,30 @@
 
 ## [Unreleased]
 
+### Admin frontend lint·schedule recovery·가격 series identity (2026-07-27, T-VN-44)
+
+- **FIXED**: 유효한 admin session으로 `/login`에 재진입할 때 Next `ReadonlyHeaders`의 내부
+  `headers` 필드를 request wrapper로 오인해 500을 내던 인증 판정을 direct `get()` 우선으로 고쳤다.
+- **FIXED**: schedule cron PATCH 응답 유실·409·terminal audit 실패 때 열린 dialog가 페이지를 inert로
+  두지 않는다. 편집 dialog를 닫고 관련 control을 잠근 뒤 동일 idempotency claim으로 복구할 수 있다.
+  reload/hydration 중 storage 복구가 끝나기 전뿐 아니라 schedule 목록 identity가 바뀌는 scan·confirm
+  경계에서도 과거 claim 조작을 fail-closed하고, 최신 목록 scan 뒤 도착한 과거 mutation settle이 상태를
+  다시 잠그지 않는다.
+- **API (breaking)**: price card `current`와 public/admin 지도 `price_summary`의 cardinality를 제품당
+  1건에서 `provider + price_domain + product_key` series당 최신 1건으로 바꿨다. 동일 제품의 여러
+  공급원을 버리지 않으며 marker는 중복 제품에 provider/domain을 표시한다.
+- **FIXED**: 가격 이력 chart가 같은 product key의 서로 다른 provider·price domain을 별도 색상 series로
+  표시한다. exact duplicate list row도 안정적인 occurrence key로 구분한다.
+- **PERFORMANCE**: migration 0064가 provider를 누락한 구 index를 concurrent 교체한다. current는 기존 natural-key
+  unique index의 역방향 scan을 재사용하고, 전체 series history만 관측순 index 하나로 지원한다. 새
+  인덱스를 먼저 만든 뒤 구 인덱스를 제거해 online DDL 동안 적어도 하나의 access path를 유지한다.
+  PostgreSQL catalog의 column 순서·정렬·predicate·INCLUDE·valid/ready/live 상태를 검증해 stamp 유실 후
+  재실행과 잘못된 동명 index도 안전하게 복구한다.
+- **RELIABILITY**: admin frontend full ESLint를 0 warning gate로 고정했다. TanStack compiler 비호환은
+  단일 파일·정확한 hook 호출만 허용한다. verifier는 실제 frontend/e2e의 JS·TS 계열 전체 파일 집합과
+  모든 function-like AST를 대조해 global/file ignore, module·nested·anonymous directive, legacy directive,
+  inline disable, allowlist 확대를 거부한다.
+
 ### Admin frontend npm audit 0 전환 (2026-07-27, T-VN-43)
 
 - **SECURITY**: clean admin frontend install의 npm 취약점을 low/moderate/high 합계 16건에서 0건으로

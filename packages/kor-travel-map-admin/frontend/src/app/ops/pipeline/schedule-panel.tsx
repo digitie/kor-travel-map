@@ -1,7 +1,13 @@
 "use client";
 
 import { PencilIcon, PlayIcon, RotateCcwIcon, SquareIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { ApiClientError } from "@/api/client";
 import {
@@ -45,6 +51,7 @@ import { shouldRetainClaimResolutionSubmission } from "./claim-resolution-retry"
 import { describeCron } from "./pipeline-shared";
 
 const MAX_CLAIM_RESOLUTION_REASON_LENGTH = 500;
+const EMPTY_SCHEDULES: PipelineSchedule[] = [];
 
 const COMMAND_LABELS: Record<PipelineScheduleCommand, string> = {
   run: "즉시 실행",
@@ -236,31 +243,56 @@ export function SchedulePanel({
   const [claimResolutionReason, setClaimResolutionReason] = useState("");
   const [claimResolutionSubmission, setClaimResolutionSubmission] =
     useState<ScheduleClaimResolutionSubmission | null>(null);
+  const [frozenState, setFrozenState] = useState<{
+    claimResolutionSubmission: ScheduleClaimResolutionSubmission | null;
+    mutation: ReturnType<typeof readPipelineFrozenScheduleMutation>;
+    scannedScheduleKey: string | null;
+  }>({
+    claimResolutionSubmission: null,
+    mutation: null,
+    scannedScheduleKey: null,
+  });
   const highlightRef = useRef<HTMLDivElement | null>(null);
 
   const data = schedules.data?.data;
-  const scheduleItems = useMemo(() => data?.schedules ?? [], [data]);
-  const frozenScheduleMutation = useMemo(() => {
-    return (
-      scheduleItems
-        .map((schedule) => readPipelineFrozenScheduleMutation(schedule.name))
-        .find((submission) => submission !== null) ?? null
-    );
-  }, [
-    commandSchedule.status,
-    patchSchedule.status,
-    resolveClaim.status,
-    scheduleItems,
-  ]);
-  const storedClaimResolutionSubmission = useMemo(() => {
-    return (
-      scheduleItems
-        .map((schedule) =>
-          readPipelineFrozenScheduleClaimResolution(schedule.name),
-        )
-        .find((submission) => submission !== null)?.submission ?? null
-    );
-  }, [resolveClaim.status, scheduleItems]);
+  const scheduleItems = data?.schedules ?? EMPTY_SCHEDULES;
+  const scheduleScanKey = data
+    ? JSON.stringify(scheduleItems.map((schedule) => schedule.name).sort())
+    : null;
+  const refreshFrozenState = useCallback(() => {
+    let mutation: ReturnType<typeof readPipelineFrozenScheduleMutation> = null;
+    let claim: ReturnType<typeof readPipelineFrozenScheduleClaimResolution> =
+      null;
+    for (const schedule of scheduleItems) {
+      mutation ??= readPipelineFrozenScheduleMutation(schedule.name);
+      claim ??= readPipelineFrozenScheduleClaimResolution(schedule.name);
+      if (mutation && claim) {
+        break;
+      }
+    }
+    setFrozenState({
+      claimResolutionSubmission: claim?.submission ?? null,
+      mutation,
+      scannedScheduleKey: scheduleScanKey,
+    });
+  }, [scheduleItems, scheduleScanKey]);
+  const latestRefreshFrozenStateRef = useRef(refreshFrozenState);
+  useLayoutEffect(() => {
+    latestRefreshFrozenStateRef.current = refreshFrozenState;
+  }, [refreshFrozenState]);
+  const refreshLatestFrozenState = useCallback(() => {
+    latestRefreshFrozenStateRef.current();
+  }, []);
+
+  useEffect(() => {
+    if (scheduleScanKey === null) return;
+    const animationFrame = window.requestAnimationFrame(refreshFrozenState);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [refreshFrozenState, scheduleScanKey]);
+  const frozenScheduleMutation = frozenState.mutation;
+  const storedClaimResolutionSubmission = frozenState.claimResolutionSubmission;
   const effectiveClaimResolutionSubmission =
     claimResolutionSubmission ?? storedClaimResolutionSubmission;
   const sensors = data?.sensors ?? [];
@@ -295,15 +327,36 @@ export function SchedulePanel({
     effectiveClaimResolutionSubmission.commandId === recoveryClaim.commandId
       ? effectiveClaimResolutionSubmission
       : null;
+  const scheduleStateScanned =
+    scheduleScanKey !== null &&
+    frozenState.scannedScheduleKey === scheduleScanKey;
+  const scheduleStateScannedRef = useRef(false);
+  const recoveryClaimScheduleName = recoveryClaim?.scheduleName ?? null;
+  const recoveryClaimCommandId = recoveryClaim?.commandId ?? null;
+  const recoveryClaimRef = useRef<{
+    scheduleName: string;
+    commandId: string;
+  } | null>(null);
+  useLayoutEffect(() => {
+    scheduleStateScannedRef.current = scheduleStateScanned;
+    recoveryClaimRef.current =
+      recoveryClaimScheduleName !== null && recoveryClaimCommandId !== null
+        ? {
+            scheduleName: recoveryClaimScheduleName,
+            commandId: recoveryClaimCommandId,
+          }
+        : null;
+  }, [recoveryClaimCommandId, recoveryClaimScheduleName, scheduleStateScanned]);
+
   const scheduleRecoveryLocked = Boolean(
+    !scheduleStateScanned ||
     recoveryClaim ||
-      effectiveClaimResolutionSubmission ||
-      frozenScheduleMutation,
+    effectiveClaimResolutionSubmission ||
+    frozenScheduleMutation,
   );
   const scheduleControlsDisabled =
     scheduleMutationPending || scheduleRecoveryLocked;
-  const scheduleControlsGuardRef = useRef(false);
-
+  const scheduleControlsGuardRef = useRef(true);
   useEffect(() => {
     scheduleControlsGuardRef.current = scheduleControlsDisabled;
   }, [scheduleControlsDisabled]);
@@ -313,24 +366,6 @@ export function SchedulePanel({
       highlightRef.current.scrollIntoView({ block: "center" });
     }
   }, [highlightSchedule, scheduleItems.length]);
-
-  // cron 저장의 응답이 유실돼 frozen-idempotency 복구가 필요해지면, 열린 modal cron
-  // dialog(Base UI)가 배경 전체를 inert로 만들어 복구 alert("동일 요청 재확인")와 나머지
-  // 스케줄 컨트롤을 접근 불가로 가린다. 복구가 필요해진 순간(편집 중인 스케줄의 frozen
-  // submission 또는 recovery claim 등장) dialog를 닫아 복구 UI를 조작 가능하게 하고,
-  // submitCronUpdate/submitClearOverride/frozen replay/claim resolution 모든 복구 경로에서
-  // 페이지가 inert로 남는 회귀를 한 번에 막는다(T-ADM-C7-SCHEDCHURN).
-  useEffect(() => {
-    if (!editing) {
-      return;
-    }
-    if (
-      frozenScheduleMutation?.scheduleName === editing.name ||
-      recoveryClaim?.scheduleName === editing.name
-    ) {
-      setEditing(null);
-    }
-  }, [editing, frozenScheduleMutation, recoveryClaim]);
 
   const submitCommand = async (
     schedule: PipelineSchedule,
@@ -379,6 +414,7 @@ export function SchedulePanel({
             }));
           }
         },
+        onSettled: refreshLatestFrozenState,
       },
     );
   };
@@ -398,10 +434,11 @@ export function SchedulePanel({
     setEditReason("");
   };
 
-  const submitCronUpdate = () => {
+  const submitCronPatch = (cronSchedule: string | null) => {
     if (!editing || scheduleControlsGuardRef.current) {
       return;
     }
+    const editedScheduleName = editing.name;
     patchSchedule.reset();
     commandSchedule.reset();
     resolveClaim.reset();
@@ -409,9 +446,9 @@ export function SchedulePanel({
     scheduleControlsGuardRef.current = true;
     patchSchedule.mutate(
       {
-        scheduleName: editing.name,
+        scheduleName: editedScheduleName,
         body: {
-          cron_schedule: cronDraft.trim(),
+          cron_schedule: cronSchedule,
           reason: editReason.trim() || null,
         },
       },
@@ -425,34 +462,16 @@ export function SchedulePanel({
             setEditing(null);
           }
         },
-      },
-    );
-  };
-
-  const submitClearOverride = () => {
-    if (!editing || scheduleControlsGuardRef.current) {
-      return;
-    }
-    patchSchedule.reset();
-    commandSchedule.reset();
-    resolveClaim.reset();
-    setLastResult(null);
-    scheduleControlsGuardRef.current = true;
-    patchSchedule.mutate(
-      {
-        scheduleName: editing.name,
-        body: {
-          cron_schedule: null,
-          reason: editReason.trim() || null,
-        },
-      },
-      {
-        onSuccess: (response) => {
-          setLastResult(response.data);
+        onSettled: (response, error) => {
+          refreshLatestFrozenState();
+          const result = response?.data ?? commandResultFromError(error);
           if (
-            response.data.status === "ok" &&
-            response.data.audit_status === "recorded"
+            claimRecoveryFromResult(result) ||
+            claimRecoveryFromConflict(error, editedScheduleName) ||
+            readPipelineFrozenScheduleMutation(editedScheduleName)
           ) {
+            // Base UI dialog는 배경을 inert로 만든다. 결과 불명 복구 UI가 생기면
+            // mutation 경계에서 즉시 닫아 동일 요청 재확인/claim 해제를 노출한다.
             setEditing(null);
           }
         },
@@ -461,7 +480,7 @@ export function SchedulePanel({
   };
 
   const submitClaimResolution = async () => {
-    if (!recoveryClaim) {
+    if (!recoveryClaim || !scheduleStateScanned) {
       return;
     }
     const submission: ScheduleClaimResolutionSubmission =
@@ -486,7 +505,13 @@ export function SchedulePanel({
       confirmLabel: "확인 결과 기록 후 해제",
       destructive: true,
     });
-    if (!confirmed) {
+    const latestRecoveryClaim = recoveryClaimRef.current;
+    if (
+      !confirmed ||
+      !scheduleStateScannedRef.current ||
+      latestRecoveryClaim?.scheduleName !== submission.scheduleName ||
+      latestRecoveryClaim?.commandId !== submission.commandId
+    ) {
       return;
     }
     setClaimResolutionSubmission(submission);
@@ -509,12 +534,14 @@ export function SchedulePanel({
             setClaimResolutionSubmission(null);
           }
         },
+        onSettled: refreshLatestFrozenState,
       },
     );
   };
 
   const retryFrozenScheduleMutation = () => {
     if (
+      !scheduleStateScanned ||
       !frozenScheduleMutation ||
       recoveryClaim ||
       patchSchedule.isPending ||
@@ -536,7 +563,7 @@ export function SchedulePanel({
           scheduleName: frozenScheduleMutation.scheduleName,
           body: frozenScheduleMutation.submission.body,
         },
-        { onSuccess },
+        { onSettled: refreshLatestFrozenState, onSuccess },
       );
       return;
     }
@@ -545,12 +572,16 @@ export function SchedulePanel({
         scheduleName: frozenScheduleMutation.scheduleName,
         body: frozenScheduleMutation.submission.body,
       },
-      { onSuccess },
+      { onSettled: refreshLatestFrozenState, onSuccess },
     );
   };
 
   return (
-    <div className="space-y-4">
+    <div
+      className="space-y-4"
+      data-schedule-state-scanned={scheduleStateScanned ? "true" : "false"}
+      data-testid="pipeline-schedule-panel"
+    >
       {schedules.isError ? (
         <Alert variant="destructive">
           <AlertTitle>스케줄 목록 호출 실패</AlertTitle>
@@ -586,10 +617,7 @@ export function SchedulePanel({
         </Alert>
       ) : null}
       {frozenScheduleMutation ? (
-        <Alert
-          data-testid="schedule-frozen-submission"
-          variant="destructive"
-        >
+        <Alert data-testid="schedule-frozen-submission" variant="destructive">
           <AlertTitle>결과 확인 전 schedule 요청 고정됨</AlertTitle>
           <AlertDescription className="space-y-3">
             <p>
@@ -605,7 +633,9 @@ export function SchedulePanel({
               {" · "}
               {frozenScheduleMutation.submission.kind === "patch"
                 ? "cron 변경"
-                : COMMAND_LABELS[frozenScheduleMutation.submission.body.command]}
+                : COMMAND_LABELS[
+                    frozenScheduleMutation.submission.body.command
+                  ]}
               {" · key "}
               <span className="font-mono">
                 {frozenScheduleMutation.idempotencyKey}
@@ -616,7 +646,9 @@ export function SchedulePanel({
             ) : (
               <Button
                 disabled={
-                  patchSchedule.isPending || commandSchedule.isPending
+                  !scheduleStateScanned ||
+                  patchSchedule.isPending ||
+                  commandSchedule.isPending
                 }
                 type="button"
                 variant="destructive"
@@ -685,6 +717,7 @@ export function SchedulePanel({
               />
               <Button
                 disabled={
+                  !scheduleStateScanned ||
                   resolveClaim.isPending ||
                   !(
                     frozenClaimResolution?.body.reason ??
@@ -838,9 +871,7 @@ export function SchedulePanel({
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   <Button
                     aria-label={`${schedule.name} 즉시 실행`}
-                    disabled={
-                      scheduleControlsDisabled || !schedule.can_run_now
-                    }
+                    disabled={scheduleControlsDisabled || !schedule.can_run_now}
                     size="sm"
                     type="button"
                     variant="outline"
@@ -877,9 +908,7 @@ export function SchedulePanel({
                   )}
                   <Button
                     aria-label={`${schedule.name} 상태 기본값 복귀`}
-                    disabled={
-                      scheduleControlsDisabled || !schedule.can_reset
-                    }
+                    disabled={scheduleControlsDisabled || !schedule.can_reset}
                     size="sm"
                     type="button"
                     variant="outline"
@@ -968,7 +997,7 @@ export function SchedulePanel({
               disabled={scheduleControlsDisabled}
               type="button"
               variant="outline"
-              onClick={submitClearOverride}
+              onClick={() => submitCronPatch(null)}
             >
               <RotateCcwIcon data-icon="inline-start" />
               기본값으로 되돌리기
@@ -976,7 +1005,7 @@ export function SchedulePanel({
             <Button
               disabled={scheduleControlsDisabled || !cronDraft.trim()}
               type="button"
-              onClick={submitCronUpdate}
+              onClick={() => submitCronPatch(cronDraft.trim())}
             >
               저장
             </Button>

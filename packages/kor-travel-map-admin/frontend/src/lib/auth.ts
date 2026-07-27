@@ -474,7 +474,14 @@ function headersFrom(source: HeaderReader | RequestLike | null): HeaderReader | 
   if (!source) {
     return null;
   }
-  return "headers" in source ? source.headers : source;
+  const directGet = (source as Partial<HeaderReader>).get;
+  if (typeof directGet === "function") {
+    return source as HeaderReader;
+  }
+  const requestHeaders = (source as Partial<RequestLike>).headers;
+  return requestHeaders && typeof requestHeaders.get === "function"
+    ? requestHeaders
+    : null;
 }
 
 function firstForwardedValue(value: string | null): string | null {

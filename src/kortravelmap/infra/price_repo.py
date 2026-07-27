@@ -53,7 +53,7 @@ DEFAULT_PRICE_FRESHNESS_SECONDS: Final[int] = (
 
 @dataclass(frozen=True)
 class PricePoint:
-    """feature price card의 제품별 가격 1건."""
+    """feature price card의 provider/domain/product series 관측 1건."""
 
     provider: str
     price_domain: str
@@ -68,7 +68,7 @@ class PricePoint:
 
 @dataclass(frozen=True)
 class PriceCard:
-    """feature 1건의 price card — 최신 제품 가격 + 최근 이력."""
+    """feature 1건의 price card — series별 최신 가격 + 최근 이력."""
 
     feature_id: str
     asof: datetime | None
@@ -131,7 +131,7 @@ _PRODUCT_ORDER: Final[dict[str, int]] = {
 
 _CURRENT_SQL: Final[str] = """
 WITH latest AS (
-    SELECT DISTINCT ON (product_key)
+    SELECT DISTINCT ON (provider, price_domain, product_key)
         provider, price_domain, product_key, product_name,
         source_product_key, source_product_name,
         value_number, unit, observed_at
@@ -146,7 +146,7 @@ WITH latest AS (
         OR CAST(:stale_hide_days AS integer) IS NULL
         OR observed_at >= now() - make_interval(days => CAST(:stale_hide_days AS integer))
       )
-    ORDER BY product_key, observed_at DESC
+    ORDER BY provider DESC, price_domain DESC, product_key DESC, observed_at DESC
 )
 SELECT *
 FROM latest
@@ -159,7 +159,9 @@ ORDER BY
       ELSE 100
     END,
     product_name NULLS LAST,
-    product_key
+    product_key,
+    provider,
+    price_domain
 """
 
 _HISTORY_SQL: Final[str] = """
@@ -173,7 +175,7 @@ WHERE feature_id = :feature_id
     CAST(:asof AS timestamptz) IS NULL
     OR observed_at <= CAST(:asof AS timestamptz)
   )
-ORDER BY observed_at DESC, product_key
+ORDER BY observed_at DESC, provider, price_domain, product_key
 LIMIT :limit
 """
 
@@ -243,6 +245,8 @@ def _sort_current(points: list[PricePoint]) -> list[PricePoint]:
             _PRODUCT_ORDER.get(point.product_key, 100),
             point.product_name or "",
             point.product_key,
+            point.provider,
+            point.price_domain,
         ),
     )
 
@@ -256,11 +260,12 @@ async def build_price_card(
     freshness_seconds: int = DEFAULT_PRICE_FRESHNESS_SECONDS,
     stale_hide_days: int | None = DEFAULT_PRICE_STALE_HIDE_DAYS,
 ) -> PriceCard:
-    """feature의 price card — 제품별 최신값과 최근 이력.
+    """feature의 price card — series별 최신값과 최근 이력.
 
-    각 ``product_key``에서 ``observed_at`` 최신 1건을 현재 가격으로 고르고,
-    history는 최신 관측순으로 제한한다. card 자체는 feature 존재 여부를 판정하지
-    않는다. 호출 라우터가 필요하면 feature 상세 조회와 조합한다.
+    각 ``provider + price_domain + product_key`` series에서 ``observed_at`` 최신
+    1건을 현재 가격으로 고르고, history는 최신 관측순으로 제한한다. card 자체는
+    feature 존재 여부를 판정하지 않는다. 호출 라우터가 필요하면 feature 상세
+    조회와 조합한다.
 
     ``stale_hide_days``보다 오래된 관측은 **current에서 제외**한다(이력은 유지) —
     로테이션 주기 밖으로 밀린 주유소가 옛 가격을 현재가처럼 보이지 않게 한다.
