@@ -858,6 +858,29 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
     )
     _assert_uses_index(dedup, "idx_dedup_status_score")
 
+    # 적대 리뷰 P3-2: null cursor는 keyset 술어가 constant-TRUE로 short-circuit돼
+    # no-cursor plan과 동일하다. active(비-null) cursor로도 (status,score,id) 복합
+    # 인덱스 range를 실제로 타는지(seq scan 없이) 증명한다.
+    dedup_cursor = await _explain_json(
+        migrated_session,
+        _DEDUP_REVIEW_SQL,
+        {
+            "statuses": ["pending"],
+            "providers": None,
+            "dataset_keys": None,
+            "kinds": None,
+            "categories": None,
+            "min_score": None,
+            "max_score": None,
+            "q_like": None,
+            "limit_plus_one": 51,
+            "cursor_review_id": "00000000-0000-0000-0000-000000000001",
+            "cursor_score": "0.5",
+        },
+    )
+    _assert_uses_index(dedup_cursor, "idx_dedup_status_score")
+    _assert_no_seq_scan_on(dedup_cursor, "dedup_review_queue")
+
     dedup_count = await _explain_json(
         migrated_session,
         admin_feature_repo._DEDUP_REVIEW_FAST_COUNT_SQL,  # noqa: PLC2701
@@ -885,6 +908,24 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
         },
     )
     _assert_uses_index(enrichment, "idx_enrichment_review_status_score")
+
+    # 적대 리뷰 P3-2: active(비-null) cursor로도 index range 사용을 증명(enrichment).
+    enrichment_cursor = await _explain_json(
+        migrated_session,
+        _ENRICHMENT_REVIEW_STATUS_SQL,
+        {
+            "statuses": ["pending"],
+            "providers": None,
+            "min_score": None,
+            "max_score": None,
+            "q_like": None,
+            "limit_plus_one": 51,
+            "cursor_review_id": "00000000-0000-0000-0000-000000000001",
+            "cursor_score": "0.5",
+        },
+    )
+    _assert_uses_index(enrichment_cursor, "idx_enrichment_review_status_score")
+    _assert_no_seq_scan_on(enrichment_cursor, "enrichment_review_queue")
 
     enrichment_provider = await _explain_json(
         migrated_session,

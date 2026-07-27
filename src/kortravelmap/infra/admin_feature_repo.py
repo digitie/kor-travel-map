@@ -978,6 +978,14 @@ def _keyset_condition(*, sort: str, order: str) -> str:
 # 트래픽에는 불필요하고, 3개 admin 목록 중 2개만 서명하면 표면 일관성이 깨진다). cursor에
 # 전체 filter set의 sha256 fingerprint를 실어 필터가 바뀐 stale cursor를 거부하며, keyset은
 # (score DESC, review_id DESC) total order다.
+#
+# 주의(적대 리뷰 P3-1): 정렬 키 score는 insert/delete/status 변경에는 안정적이나 **불변은
+# 아니다** — 재스캔 job이 pending row의 total_score/name_score를 upsert(ON CONFLICT DO UPDATE)
+# 하므로, 운영자가 페이지를 넘기는 도중 재스캔이 돌면 score가 cursor 경계를 넘어 이동해 드물게
+# 한 row가 건너뛰어지거나 두 번 보일 수 있다. 결정 endpoint는 멱등(WHERE status='pending' 가드 +
+# merge advisory lock)이라 이중 병합은 불가능하고 새로고침으로 복구되므로 data corruption은
+# 없다. 엄격한 no-skip이 필요해지면 불변 tuple(created_at, review_id) 정렬로 바꾸거나 pending
+# 스냅샷을 쓴다 — 교체 대상인 OFFSET은 매 insert/delete마다 skip/dup했으므로 여전히 엄격히 우월.
 _REVIEW_CURSOR_VERSION: Final[int] = 1
 
 
