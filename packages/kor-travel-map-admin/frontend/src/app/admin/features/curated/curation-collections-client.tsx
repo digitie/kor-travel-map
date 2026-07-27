@@ -48,6 +48,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
+import { withOccurrenceKeys } from "@/lib/occurrence-key";
 import { cn } from "@/lib/utils";
 
 interface CollectionFormState {
@@ -1096,8 +1097,15 @@ function ImportReport({ report }: { report: CurationImportResponse }) {
           <AlertTitle>파일 오류</AlertTitle>
           <AlertDescription>
             <ul className="list-disc space-y-1 pl-4">
-              {data.issues.map((issue, index) => (
-                <li key={`${issue.code}-${issue.row_number ?? "file"}-${index}`}>
+              {withOccurrenceKeys(data.issues, (issue) =>
+                JSON.stringify([
+                  issue.code,
+                  issue.row_number ?? "file",
+                  issue.column,
+                  issue.message,
+                ]),
+              ).map(({ key, value: issue }) => (
+                <li key={key}>
                   {issue.row_number ? `${issue.row_number}행 · ` : ""}
                   {issue.column ? `${issue.column} · ` : ""}
                   {issue.message}
@@ -1158,8 +1166,10 @@ function ImportReport({ report }: { report: CurationImportResponse }) {
               </TableCell>
               <TableCell>
                 <ul className="max-w-72 space-y-1 whitespace-normal text-xs text-destructive">
-                  {row.issues.map((issue, index) => (
-                    <li key={`${issue.code}-${index}`}>
+                  {withOccurrenceKeys(row.issues, (issue) =>
+                    JSON.stringify([issue.code, issue.column, issue.message]),
+                  ).map(({ key, value: issue }) => (
+                    <li key={key}>
                       {issue.column ? `${issue.column}: ` : ""}
                       {issue.message}
                     </li>

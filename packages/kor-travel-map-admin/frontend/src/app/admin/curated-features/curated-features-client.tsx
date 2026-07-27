@@ -91,6 +91,7 @@ import {
   withCurrentOption,
 } from "@/lib/feature-form-options";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import { withOccurrenceKeys } from "@/lib/occurrence-key";
 import {
   integerString,
   jsonObject,
@@ -464,11 +465,10 @@ export function CuratedPlaceSearchPanel({
               </div>
             ) : (
               <div className="divide-y">
-                {hits.map((hit, index) => (
-                  <div
-                    className="flex flex-col gap-2 px-3 py-3"
-                    key={`${provider}-${index}`}
-                  >
+                {withOccurrenceKeys(hits, (hit) =>
+                  JSON.stringify([provider, hit]),
+                ).map(({ key, value: hit }) => (
+                  <div className="flex flex-col gap-2 px-3 py-3" key={key}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="font-medium">{hit.name ?? "-"}</div>
@@ -873,10 +873,10 @@ function RuleEditor({
   const [priority, setPriority] = useState(String(rule?.priority ?? 0));
   const [placeKind, setPlaceKind] = useState(rule?.place_kind ?? "");
   const [category, setCategory] = useState(rule?.category ?? "");
-  const [regionScopeJson, setRegionScopeJson] = useState(
+  const [regionScopeJson, setRegionScopeJson] = useState(() =>
     stringifyJson(rule?.region_scope ?? {}),
   );
-  const [metadataJson, setMetadataJson] = useState(
+  const [metadataJson, setMetadataJson] = useState(() =>
     stringifyJson(rule?.metadata ?? {}),
   );
   const [jsonError, setJsonError] = useState<string | null>(null);

@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PricePoint } from "@/api/features";
 
 import { PriceHistoryChart } from "./feature-price-panel";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 function point(overrides: Partial<PricePoint> = {}): PricePoint {
   return {
@@ -68,5 +71,58 @@ describe("PriceHistoryChart", () => {
     const graph = screen.getByRole("img", { name: "price history graph" });
     expect(graph.querySelectorAll("circle")).toHaveLength(2);
     expect(graph.querySelectorAll("polyline")).toHaveLength(1);
+  });
+
+  it("같은 product라도 provider·price domain이 다르면 별도 series로 그린다", () => {
+    render(
+      <PriceHistoryChart
+        history={[
+          point({ observed_at: "2026-07-12T06:00:00.000Z" }),
+          point({ observed_at: "2026-07-13T06:00:00.000Z" }),
+          point({
+            provider: "manual-admin",
+            price_domain: "curated_price",
+            observed_at: "2026-07-12T06:00:00.000Z",
+            value_number: 1_810,
+          }),
+          point({
+            provider: "manual-admin",
+            price_domain: "curated_price",
+            observed_at: "2026-07-13T06:00:00.000Z",
+            value_number: 1_830,
+          }),
+        ]}
+      />,
+    );
+
+    const graph = screen.getByRole("img", { name: "price history graph" });
+    expect(graph.querySelectorAll("circle")).toHaveLength(4);
+    expect(graph.querySelectorAll("polyline")).toHaveLength(2);
+    expect(graph.querySelectorAll(":scope > g")).toHaveLength(2);
+    expect(
+      new Set(
+        Array.from(graph.querySelectorAll("polyline"), (line) =>
+          line.getAttribute("stroke"),
+        ),
+      ).size,
+    ).toBe(2);
+    expect(
+      new Set(
+        Array.from(graph.querySelectorAll("circle"), (circle) =>
+          circle.getAttribute("fill"),
+        ),
+      ).size,
+    ).toBe(2);
+  });
+
+  it("동일 series·시각의 중복 관측도 고유 React key로 표시한다", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    render(<PriceHistoryChart history={[point(), point()]} />);
+
+    const graph = screen.getByRole("img", { name: "price history graph" });
+    expect(graph.querySelectorAll("circle")).toHaveLength(2);
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain(
+      "Encountered two children with the same key",
+    );
   });
 });

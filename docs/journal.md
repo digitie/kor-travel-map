@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (codex) — T-VN-44 full lint·schedule recovery·가격 identity 하드닝
+
+**결론**: frontend ESLint를 0 warning gate로 만들고 schedule response-loss 복구와 가격 series
+identity를 전 계층에서 닫았다. PR 승인·CI·main 머지 전이라 T-VN-44는 열린 상태다.
+
+**변경**:
+- React 19 hook/key 근인을 suppression 없이 해소하고 TanStack 두 함수만 compiler opt-out으로 허용했다.
+  verifier는 `.mts`·`.cts`를 포함한 실제 lint 파일 집합과 module/function의
+  `use no memo|use no forget`을 전수 대조한다.
+- schedule storage scan 전 모든 조작을 fail-close하고 PATCH/command/claim의 동일 idempotency replay,
+  409·terminal audit·confirm 중 signature 변경을 안전하게 복구한다. 최신 B 목록 scan 뒤 과거 A mutation이
+  settle되는 순서도 최신 refresh ref로 복구해 조작 잠금이 고착되지 않는다.
+- 가격 series identity를 `provider + price_domain + product_key`로 DB/repository/API/OpenAPI/UI에 통일하고
+  migration 0064를 online·부분 성공 재실행 안전하게 구성했다.
+- #840 이후 Claude PR #841~#857을 전문 감사했다. #854의 public-key C2 등가 완료 오판은 되돌려
+  `T-VN-H19`로 열고, #853 H06은 n150 Linux 24/24로 대체했으며 #855 H12 live 잔여는 유지했다.
+  #856/#857의 H16/H17 완료는 보존하되, 구 #854 베이스에서 재유입된 C2 전체 완료 표기는
+  같은 branch 정정으로 제거했다.
+
+**검증**:
+- Python 2,362 tests(geo live 5건 포함)와 정적 gate, frontend lint/type/Vitest/build, schedule·H06 targeted E2E를
+  통과했다. 적대 리뷰가 찾은 stale settle race는 B scan 완료 뒤 해제하는 controlled mutation과 독립 reconnect refetch로 재현한 Chromium 회귀도 통과했다.
+- R1 격리 실데이터 clone에서 0064 migration, 실제 가격 관측 파괴 변경, 공식 Live acceptance 2/2와
+  REST current/history·chart·map의 provider/domain 두 series를 확인했다. prod DB/head/health는 불변이고
+  전용 runtime·port·C7 잔여는 0이다.
+
 ## 2026-07-27 (claude) — T-VN-H17 map#684 조건 축소 후 종결 (LIVE-01 후속 7/7 close)
 
 **결론**: H16에서 keep-open된 map#684를, 사용자 결정(조건 축소)에 따라 조건 #8 검증범위를 명시 축소하여
@@ -54,11 +80,12 @@ map recenter로 해소. 구현 + e2e type-check + 4각도 적대 정적검증 �
   viewport 의존, 나머지 좌표 상대).
 - **잔여**: 다음 live acceptance lane run에서 n150 파괴적 실증(Lane A live lane).
 
-## 2026-07-27 (claude) — T-ADM-C6c + T-VN-03 principal 경계 cutover n150 실증 (#392 종결)
+## 2026-07-27 (claude, Codex 정정) — principal 경계 부분 실증 + #392 종결
 
 **결론**: curated public-key gate + ops operator gate + MOIS raw production unmount + PinVi ops:read
-principal을 n150 production(map=**c8ed6164**/pinvi=**6a035695**, 둘 다 healthy)에서 **13/13 PASS**로
-실증. T-ADM-C6c·T-VN-03 완료, PinVi #392 종결 조건 충족.
+principal 중 실행한 13건을 n150 production(map=**c8ed6164**/pinvi=**6a035695**, 둘 다 healthy)에서
+PASS했다. PinVi #392는 종결했지만 public-key C2 양성 runtime은 미검증이라 T-ADM-C6c·T-VN-03
+전체 완료를 보류한다.
 
 **접근**(설계 §5: 승인 전 정적 검사 → 승인 후 live):
 - **정적 감사 워크플로우**(`tvn03-c6c-readiness-audit`, 6차원 병렬 + 독립 적대 반증): route_policy
@@ -79,7 +106,8 @@ principal을 n150 production(map=**c8ed6164**/pinvi=**6a035695**, 둘 다 health
 - **env alias 함정**: `admin_proxy_secret` validation_alias=`KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET`(prefix
   `_API_` 없음). 첫 probe가 `_API_` 붙여 조회해 false UNSET → 정정 후 admin-BFF C4/O4 200 확인.
 - **C2(public-key 200)**: env `vworld_api_key` fallback은 운영에서 미설정이 정상(public key는
-  `public_api_keys` DB에 해시 저장). 동일 dep C1+C3+C4 live + unit test로 등가 충족, prod key 미생성.
+  `public_api_keys` DB에 해시 저장). C1/C3/C4와 unit test는 DB lookup·hash compare 양성 분기의
+  production runtime 증거가 아니므로 미검증이다. credential-safe 직접 실증을 `T-VN-H19`로 열었다.
 - **문서 모순**(map rev): incident md는 복구를 `b0c95672`로 기록했으나 배포 image rev label은
   `c8ed6164`(b0c95672의 후손, 차이 docs-only). 정본은 c8ed6164/6a035695. incident md에 주석.
 

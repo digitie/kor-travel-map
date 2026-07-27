@@ -908,8 +908,8 @@ CREATE TABLE feature.feature_price_values (
 
 CREATE INDEX idx_price_values_observed_at_brin
   ON feature.feature_price_values USING BRIN (observed_at);
-CREATE INDEX idx_price_values_feature_product_observed
-  ON feature.feature_price_values (feature_id, price_domain, product_key, observed_at DESC);
+CREATE INDEX idx_price_values_feature_observed_identity
+  ON feature.feature_price_values (feature_id, observed_at DESC, provider, price_domain, product_key);
 CREATE INDEX idx_price_values_domain_product_observed
   ON feature.feature_price_values (provider, price_domain, product_key, observed_at DESC);
 CREATE INDEX idx_price_values_source_record
@@ -919,12 +919,22 @@ CREATE INDEX idx_price_values_source_record
 
 **인덱스 설계**:
 - `idx_price_values_observed_at_brin` — 장기 누적 시계열의 기간 조건.
-- `idx_price_values_feature_product_observed` — 특정 가격 feature의 제품별 최신/추세 조회.
+- `uq_price_value_identity` — `(feature_id, provider, price_domain, product_key,
+  observed_at)` 자연키를 보장하고, all-DESC 역방향 스캔으로 series별 current 조회도
+  담당한다. 동일 선두 컬럼 current index를 중복 생성하지 않는다.
+- `idx_price_values_feature_observed_identity` — 특정 가격 feature의 전체 series history를
+  최신 관측순으로 읽는다.
 - `idx_price_values_domain_product_observed` — provider/domain/product별 운영 검증과
   최신 snapshot 확인.
 - `idx_price_values_source_record` — provider raw 역추적.
 
+
+가격 series 식별자는 `feature_id + provider + price_domain + product_key`다. `current`와
+지도/admin `price_summary`는 이 series마다 `observed_at` 최신 1건을 유지한다. 같은
+`product_key`라도 provider/domain이 다르면 별도 값이며, history는 모든 series를 합쳐
+최신 관측순으로 제한한다. 인덱스 교체와 API cardinality 결정은 ADR-078을 따른다.
 ## 9. 운영 보조 (`ops` schema)
+
 
 ### 9.1 `ops.import_jobs` (ADR-011)
 

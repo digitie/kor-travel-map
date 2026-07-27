@@ -25,9 +25,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { withOccurrenceKeys } from "@/lib/occurrence-key";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -308,22 +309,24 @@ export function AdminShell({
                 {breadcrumbs && breadcrumbs.length > 0 ? (
                   <Breadcrumb>
                     <BreadcrumbList>
-                      {breadcrumbs.flatMap((crumb, index) => [
-                        ...(index > 0
-                          ? [<BreadcrumbSeparator key={`sep-${index}`} />]
-                          : []),
-                        <BreadcrumbItem key={`${crumb.label}-${index}`}>
-                          {crumb.href ? (
-                            <BreadcrumbLink href={crumb.href}>
-                              {crumb.label}
-                            </BreadcrumbLink>
-                          ) : index === breadcrumbs.length - 1 ? (
-                            <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
-                          ) : (
-                            <span>{crumb.label}</span>
-                          )}
-                        </BreadcrumbItem>,
-                      ])}
+                      {withOccurrenceKeys(breadcrumbs, (crumb) =>
+                        JSON.stringify([crumb.href ?? null, crumb.label]),
+                      ).map(({ key, value: crumb }, index) => (
+                        <Fragment key={key}>
+                          {index > 0 ? <BreadcrumbSeparator /> : null}
+                          <BreadcrumbItem>
+                            {crumb.href ? (
+                              <BreadcrumbLink href={crumb.href}>
+                                {crumb.label}
+                              </BreadcrumbLink>
+                            ) : index === breadcrumbs.length - 1 ? (
+                              <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                            ) : (
+                              <span>{crumb.label}</span>
+                            )}
+                          </BreadcrumbItem>
+                        </Fragment>
+                      ))}
                     </BreadcrumbList>
                   </Breadcrumb>
                 ) : null}

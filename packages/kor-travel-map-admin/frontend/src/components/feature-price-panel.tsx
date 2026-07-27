@@ -10,6 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/ui/data-table";
 import { formatDateTime } from "@/lib/format";
+import { withOccurrenceKeys } from "@/lib/occurrence-key";
 
 const priceFormatter = new Intl.NumberFormat("ko-KR", {
   maximumFractionDigits: 1,
@@ -19,38 +20,40 @@ const chartPriceFormatter = new Intl.NumberFormat("ko-KR", {
   maximumFractionDigits: 0,
 });
 
-const PRODUCT_COLORS: Record<string, string> = {
-  gasoline: "#2563eb",
-  diesel: "#16a34a",
-  premium_gasoline: "#dc2626",
-  lpg: "#9333ea",
-};
-
 function productLabel(point: PricePoint): string {
   return point.product_name ?? point.product_key;
+}
+
+function priceSeriesIdentity(point: PricePoint): string {
+  return JSON.stringify([point.provider, point.price_domain, point.product_key]);
 }
 
 function priceLabel(point: PricePoint): string {
   return `${priceFormatter.format(point.value_number)}${point.unit ? ` ${point.unit}` : ""}`;
 }
 
-function productColor(productKey: string): string {
-  return PRODUCT_COLORS[productKey] ?? "#475569";
+function seriesColor(index: number): string {
+  const goldenAngle = 137.508;
+  return `hsl(${(index * goldenAngle) % 360} 72% 42%)`;
 }
 
 export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
   const series = useMemo(() => {
-    const groups = new Map<string, PricePoint[]>();
+    const groups = new Map<string, { label: string; points: PricePoint[] }>();
     for (const point of history) {
-      const bucket = groups.get(point.product_key) ?? [];
-      bucket.push(point);
-      groups.set(point.product_key, bucket);
+      const seriesKey = priceSeriesIdentity(point);
+      const group = groups.get(seriesKey) ?? {
+        label: `${productLabel(point)} · ${point.provider}/${point.price_domain}`,
+        points: [],
+      };
+      group.points.push(point);
+      groups.set(seriesKey, group);
     }
     return Array.from(groups.entries())
-      .map(([productKey, points]) => ({
-        productKey,
-        label: productLabel(points[0] as PricePoint),
-        points: points
+      .map(([seriesKey, group]) => ({
+        ...group,
+        seriesKey,
+        points: group.points
           .map((point) => ({
             ...point,
             timestamp: new Date(point.observed_at).getTime(),
@@ -58,7 +61,12 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
           .filter((point) => Number.isFinite(point.timestamp))
           .sort((a, b) => a.timestamp - b.timestamp),
       }))
-      .filter((item) => item.points.length > 0);
+      .filter((item) => item.points.length > 0)
+      .sort((a, b) => a.seriesKey.localeCompare(b.seriesKey))
+      .map((item, index) => ({
+        ...item,
+        color: seriesColor(index),
+      }));
   }, [history]);
 
   const allPoints = series.flatMap((item) => item.points);
@@ -122,25 +130,28 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
           {chartPriceFormatter.format(minPrice)}
         </text>
         {series.map((item) => (
-          <g key={item.productKey}>
+          <g key={item.seriesKey}>
             {item.points.length >= 2 ? (
               <polyline
                 fill="none"
                 points={item.points
                   .map((point) => `${x(point.timestamp)},${y(point.value_number)}`)
                   .join(" ")}
-                stroke={productColor(item.productKey)}
+                stroke={item.color}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth="2"
               />
             ) : null}
-            {item.points.map((point, index) => (
+            {withOccurrenceKeys(
+              item.points,
+              (point) => point.observed_at,
+            ).map(({ key, value: point }) => (
               <circle
                 cx={x(point.timestamp)}
                 cy={y(point.value_number)}
-                fill={productColor(item.productKey)}
-                key={`${point.observed_at}:${index}`}
+                fill={item.color}
+                key={key}
                 r="3"
                 stroke="#ffffff"
                 strokeWidth="1"
@@ -155,10 +166,10 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
       </svg>
       <div className="mt-2 flex flex-wrap gap-2 text-xs">
         {series.map((item) => (
-          <span className="inline-flex items-center gap-1" key={item.productKey}>
+          <span className="inline-flex items-center gap-1" key={item.seriesKey}>
             <span
               className="size-2 rounded-full"
-              style={{ backgroundColor: productColor(item.productKey) }}
+              style={{ backgroundColor: item.color }}
             />
             {item.label}
           </span>
@@ -228,6 +239,14 @@ export function FeaturePricePanel({
           <Badge variant="outline">{row.original.provider}</Badge>
         ),
       });
+      cols.push({
+        id: "price_domain",
+        header: "domain",
+        accessorKey: "price_domain",
+        cell: ({ row }) => (
+          <Badge variant="outline">{row.original.price_domain}</Badge>
+        ),
+      });
     }
 
     return cols;
@@ -242,7 +261,7 @@ export function FeaturePricePanel({
             Price
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
-            제품별 최신 가격과 최근 이력
+            provider/domain/product series별 최신 가격과 최근 이력
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -270,11 +289,14 @@ export function FeaturePricePanel({
               <dt className="text-muted-foreground">current</dt>
               <dd className="flex flex-wrap gap-2">
                 {current.length > 0
-                  ? current.map((point) => (
-                      <Badge key={point.product_key} variant="outline">
-                        {productLabel(point)} {priceFormatter.format(point.value_number)}
-                      </Badge>
-                    ))
+                  ? withOccurrenceKeys(current, priceSeriesIdentity).map(
+                      ({ key, value: point }) => (
+                        <Badge key={key} variant="outline">
+                          {productLabel(point)} · {point.provider}/{point.price_domain}{" "}
+                          {priceFormatter.format(point.value_number)}
+                        </Badge>
+                      ),
+                    )
                   : "-"}
               </dd>
             </dl>
@@ -297,7 +319,12 @@ export function FeaturePricePanel({
               columns={historyColumns}
               data={history}
               getRowId={(point) =>
-                `${point.provider}:${point.product_key}:${point.observed_at}`
+                JSON.stringify([
+                  point.provider,
+                  point.price_domain,
+                  point.product_key,
+                  point.observed_at,
+                ])
               }
               isLoading={price.isLoading}
               emptyMessage="price history가 없습니다."

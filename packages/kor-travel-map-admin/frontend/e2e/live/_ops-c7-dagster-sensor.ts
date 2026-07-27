@@ -979,7 +979,8 @@ function requireTypename(
 }
 
 function withoutTicks(observation: SensorObservation): QueueSensorSnapshot {
-  const { startedTickCount: _startedTickCount, ...snapshot } = observation;
+  const snapshot = { ...observation };
+  Reflect.deleteProperty(snapshot, "startedTickCount");
   return snapshot;
 }
 

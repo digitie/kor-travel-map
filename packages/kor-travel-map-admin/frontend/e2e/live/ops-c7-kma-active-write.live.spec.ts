@@ -48,8 +48,6 @@ const ROUTE_TIMEOUT = 30_000;
 // 51-req overflow 루프를 제거하고 3-request 시나리오만 남겼으므로 base rollover
 // 안전 창을 30분 → 5분으로 축소한다(과거 30분은 51회 루프가 요구하던 값).
 const MINIMUM_START_WINDOW_MS = 5 * 60 * 1000;
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LOWERCASE_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const KMA_BASE_DATETIME_PATTERN = /^([0-9]{4})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})$/;
 const RUN_ID = `c7-active-${Date.now()}-${Math.random()

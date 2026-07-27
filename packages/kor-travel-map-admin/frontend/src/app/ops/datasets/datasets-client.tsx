@@ -16,7 +16,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   createContext,
   useCallback,
-  useContext,
+  use,
   useEffect,
   useMemo,
   useRef,
@@ -133,7 +133,7 @@ const DatasetGridActionContext =
 function DatasetDetailToggleCell({
   row,
 }: CellContext<OpsDatasetGridRow, unknown>) {
-  const actions = useContext(DatasetGridActionContext);
+  const actions = use(DatasetGridActionContext);
   if (!actions) {
     throw new Error("DatasetDetailToggleCell requires DatasetGridActionContext");
   }
@@ -2372,7 +2372,7 @@ export function DatasetsClient({
         </FilterBar>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(30rem,0.9fr)]">
-          <DatasetGridActionContext.Provider value={gridActions}>
+          <DatasetGridActionContext value={gridActions}>
             <DataTable
               ariaLabel="데이터셋 그리드"
               columns={columns}
@@ -2387,7 +2387,7 @@ export function DatasetsClient({
               manualSorting={false}
               containerClassName="overflow-auto rounded-lg border bg-background"
             />
-          </DatasetGridActionContext.Provider>
+          </DatasetGridActionContext>
 
           <div
             className={`flex min-w-0 flex-col gap-4 ${

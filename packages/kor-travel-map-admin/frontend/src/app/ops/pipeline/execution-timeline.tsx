@@ -142,8 +142,8 @@ export function ExecutionTimeline({
   ]);
   const [paginationSignature, setPaginationSignature] =
     useState(filterSignature);
-  const [storedCursorStack, setCursorStack] = useState<string[]>([]);
-  const [storedBaselineTop, setBaselineTop] = useState<{
+  const [storedCursorStack, setStoredCursorStack] = useState<string[]>([]);
+  const [storedBaselineTop, setStoredBaselineTop] = useState<{
     createdAt: string;
     kind: ExecutionKind;
     id: string;
@@ -153,8 +153,8 @@ export function ExecutionTimeline({
   const baselineTop = paginationIsCurrent ? storedBaselineTop : null;
   if (paginationSignature !== filterSignature) {
     setPaginationSignature(filterSignature);
-    setCursorStack([]);
-    setBaselineTop(null);
+    setStoredCursorStack([]);
+    setStoredBaselineTop(null);
   }
 
   const cursor = cursorStack.at(-1) ?? null;
@@ -218,8 +218,8 @@ export function ExecutionTimeline({
   const nextCursor = executions.data?.meta.page?.next_cursor ?? null;
 
   const resetToFirstPage = () => {
-    setCursorStack([]);
-    setBaselineTop(null);
+    setStoredCursorStack([]);
+    setStoredBaselineTop(null);
     void executions.refetch();
   };
 
@@ -230,14 +230,14 @@ export function ExecutionTimeline({
     if (cursorStack.length === 0) {
       const top = items[0];
       if (top) {
-        setBaselineTop({
+        setStoredBaselineTop({
           createdAt: top.created_at,
           kind: top.kind,
           id: top.id,
         });
       }
     }
-    setCursorStack((stack) => [...stack, nextCursor]);
+    setStoredCursorStack((stack) => [...stack, nextCursor]);
   };
 
   const columns = useMemo<ColumnDef<PipelineExecutionRootRecord, unknown>[]>(
@@ -414,8 +414,8 @@ export function ExecutionTimeline({
               value={kind}
               onChange={(event) => {
                 const value = event.target.value as ExecutionKind | "all";
-                setCursorStack([]);
-                setBaselineTop(null);
+                setStoredCursorStack([]);
+                setStoredBaselineTop(null);
                 onUrlChange({ kind: value === "all" ? null : value });
               }}
             >
@@ -432,8 +432,8 @@ export function ExecutionTimeline({
               value={status}
               onChange={(event) => {
                 const value = event.target.value as ExecutionStatus | "all";
-                setCursorStack([]);
-                setBaselineTop(null);
+                setStoredCursorStack([]);
+                setStoredBaselineTop(null);
                 onUrlChange({ status: value === "all" ? null : value });
               }}
             >
@@ -450,8 +450,8 @@ export function ExecutionTimeline({
               placeholder="예: python-kma-api"
               value={provider}
               onChange={(event) => {
-                setCursorStack([]);
-                setBaselineTop(null);
+                setStoredCursorStack([]);
+                setStoredBaselineTop(null);
                 onUrlChange(
                   { provider: event.target.value.trim() || null },
                   "replace",
@@ -467,8 +467,8 @@ export function ExecutionTimeline({
               placeholder="예: kma_short_forecast"
               value={datasetKey}
               onChange={(event) => {
-                setCursorStack([]);
-                setBaselineTop(null);
+                setStoredCursorStack([]);
+                setStoredBaselineTop(null);
                 onUrlChange(
                   { dataset_key: event.target.value.trim() || null },
                   "replace",
@@ -493,8 +493,8 @@ export function ExecutionTimeline({
               placeholder="예: target_grids"
               value={syncScope}
               onChange={(event) => {
-                setCursorStack([]);
-                setBaselineTop(null);
+                setStoredCursorStack([]);
+                setStoredBaselineTop(null);
                 onUrlChange(
                   { sync_scope: event.target.value.trim() || null },
                   "replace",
@@ -513,8 +513,8 @@ export function ExecutionTimeline({
               type="datetime-local"
               value={createdFrom}
               onChange={(event) => {
-                setCursorStack([]);
-                setBaselineTop(null);
+                setStoredCursorStack([]);
+                setStoredBaselineTop(null);
                 onUrlChange(
                   { created_from: event.target.value || null },
                   "replace",
@@ -528,8 +528,8 @@ export function ExecutionTimeline({
               type="datetime-local"
               value={createdTo}
               onChange={(event) => {
-                setCursorStack([]);
-                setBaselineTop(null);
+                setStoredCursorStack([]);
+                setStoredBaselineTop(null);
                 onUrlChange(
                   { created_to: event.target.value || null },
                   "replace",

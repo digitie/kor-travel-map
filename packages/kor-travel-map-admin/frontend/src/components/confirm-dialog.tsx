@@ -52,7 +52,7 @@ function ConfirmDialogProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <ConfirmContext.Provider value={confirm}>
+    <ConfirmContext value={confirm}>
       {children}
       <AlertDialog
         open={pending !== null}
@@ -85,12 +85,12 @@ function ConfirmDialogProvider({ children }: { children: React.ReactNode }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </ConfirmContext.Provider>
+    </ConfirmContext>
   );
 }
 
 function useConfirm(): ConfirmFn {
-  const confirm = React.useContext(ConfirmContext);
+  const confirm = React.use(ConfirmContext);
   if (confirm === null) {
     throw new Error("useConfirm은 ConfirmDialogProvider 아래에서만 사용할 수 있습니다.");
   }

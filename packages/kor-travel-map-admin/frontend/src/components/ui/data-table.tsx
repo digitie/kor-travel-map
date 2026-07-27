@@ -120,6 +120,25 @@ function ariaSort(sorted: false | "asc" | "desc"): "ascending" | "descending" | 
   return "none"
 }
 
+function renderHeadCellContent<TData>(
+  header: Header<TData, unknown>,
+  sorted: false | "asc" | "desc",
+  canSort: boolean,
+) {
+  if (header.isPlaceholder) return null
+  if (typeof header.column.columnDef.header === "string") {
+    return (
+      <DataTableColumnHeader
+        title={header.column.columnDef.header}
+        sorted={sorted}
+        canSort={canSort}
+        onToggle={header.column.getToggleSortingHandler()}
+      />
+    )
+  }
+  return flexRender(header.column.columnDef.header, header.getContext())
+}
+
 function handleClickableRowKeyDown<TData>(
   event: React.KeyboardEvent<HTMLTableRowElement>,
   row: TData,
@@ -181,6 +200,8 @@ export function DataTable<TData>({
   containerClassName,
   ariaLabel,
 }: DataTableProps<TData>) {
+  "use no memo"
+
   const [internalSorting, setInternalSorting] = React.useState<SortingState>([])
   const [internalSelection, setInternalSelection] = React.useState<RowSelectionState>({})
 
@@ -189,6 +210,7 @@ export function DataTable<TData>({
     [columns, enableRowSelection],
   )
 
+  // TanStack Table은 함수형 객체를 반환하므로 이 컴포넌트는 React Compiler 대상이 아니다.
   const table = useReactTable({
     data,
     columns: resolvedColumns,
@@ -249,9 +271,18 @@ export function DataTable<TData>({
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <PlainHeadCell key={header.id} header={header} />
-                  ))}
+                  {headerGroup.headers.map((header) => {
+                    const sorted = header.column.getIsSorted()
+                    const canSort = header.column.getCanSort()
+                    return (
+                      <TableHead
+                        aria-sort={canSort ? ariaSort(sorted) : undefined}
+                        key={header.id}
+                      >
+                        {renderHeadCellContent(header, sorted, canSort)}
+                      </TableHead>
+                    )
+                  })}
                 </TableRow>
               ))}
             </TableHeader>
@@ -307,32 +338,27 @@ export function DataTable<TData>({
   )
 }
 
-function PlainHeadCell<TData>({ header }: { header: Header<TData, unknown> }) {
-  const sorted = header.column.getIsSorted()
-  const canSort = header.column.getCanSort()
-  return (
-    <TableHead aria-sort={canSort ? ariaSort(sorted) : undefined}>
-      {header.isPlaceholder ? null : typeof header.column.columnDef.header === "string" ? (
-        <DataTableColumnHeader
-          title={header.column.columnDef.header}
-          sorted={sorted}
-          canSort={canSort}
-          onToggle={header.column.getToggleSortingHandler()}
-        />
-      ) : (
-        flexRender(header.column.columnDef.header, header.getContext())
-      )}
-    </TableHead>
-  )
-}
+const SKELETON_ROW_KEYS = [
+  "skeleton-row-1",
+  "skeleton-row-2",
+  "skeleton-row-3",
+  "skeleton-row-4",
+  "skeleton-row-5",
+  "skeleton-row-6",
+  "skeleton-row-7",
+  "skeleton-row-8",
+] as const
 
 function SkeletonRows({ colCount }: { colCount: number }) {
+  const columnKeys = [...Array.from({ length: colCount }).keys()].map(
+    (columnNumber) => `skeleton-column-${columnNumber + 1}`,
+  )
   return (
     <>
-      {Array.from({ length: 8 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: colCount }).map((__, colIndex) => (
-            <TableCell key={colIndex}>
+      {SKELETON_ROW_KEYS.map((rowKey) => (
+        <TableRow key={rowKey}>
+          {columnKeys.map((columnKey) => (
+            <TableCell key={`${rowKey}-${columnKey}`}>
               <Skeleton className="h-4 w-full" />
             </TableCell>
           ))}
@@ -369,7 +395,10 @@ function VirtualizedTable<TData>({
   containerClassName?: string
   ariaLabel?: string
 }) {
+  "use no memo"
+
   const containerRef = React.useRef<HTMLDivElement>(null)
+  // TanStack Virtual도 동일한 함수형 객체 계약을 가지므로 명시적으로 compiler 경계를 둔다.
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => containerRef.current,
@@ -422,18 +451,7 @@ function VirtualizedTable<TData>({
                     style={{ width: header.getSize() }}
                     className="flex h-10 items-center px-3 text-left align-middle text-[12px] font-bold tracking-[0.05em] text-text-secondary uppercase"
                   >
-                    {header.isPlaceholder
-                      ? null
-                      : typeof header.column.columnDef.header === "string"
-                        ? (
-                          <DataTableColumnHeader
-                            title={header.column.columnDef.header}
-                            sorted={sorted}
-                            canSort={canSort}
-                            onToggle={header.column.getToggleSortingHandler()}
-                          />
-                        )
-                        : flexRender(header.column.columnDef.header, header.getContext())}
+                    {renderHeadCellContent(header, sorted, canSort)}
                   </th>
                 )
               })}

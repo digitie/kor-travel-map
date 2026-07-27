@@ -864,10 +864,12 @@ LEFT JOIN LATERAL (
               ELSE 100
             END,
             product_name NULLS LAST,
-            product_key
+            product_key,
+            provider,
+            price_domain
     ) AS price_summary
     FROM (
-        SELECT DISTINCT ON (product_key)
+        SELECT DISTINCT ON (provider, price_domain, product_key)
             provider, price_domain, product_key, product_name,
             source_product_key, source_product_name,
             value_number, unit, observed_at
@@ -879,7 +881,7 @@ LEFT JOIN LATERAL (
             OR pv.observed_at >= now()
                  - make_interval(days => CAST(:price_stale_hide_days AS integer))
           )
-        ORDER BY product_key, observed_at DESC
+        ORDER BY provider DESC, price_domain DESC, product_key DESC, observed_at DESC
     ) AS latest_price
 ) AS ps ON f.kind = 'price'
 LEFT JOIN LATERAL (
@@ -999,10 +1001,12 @@ LEFT JOIN LATERAL (
               ELSE 100
             END,
             product_name NULLS LAST,
-            product_key
+            product_key,
+            provider,
+            price_domain
     ) AS price_summary
     FROM (
-        SELECT DISTINCT ON (product_key)
+        SELECT DISTINCT ON (provider, price_domain, product_key)
             provider, price_domain, product_key, product_name,
             source_product_key, source_product_name,
             value_number, unit, observed_at
@@ -1014,7 +1018,7 @@ LEFT JOIN LATERAL (
             OR pv.observed_at >= now()
                  - make_interval(days => CAST(:price_stale_hide_days AS integer))
           )
-        ORDER BY product_key, observed_at DESC
+        ORDER BY provider DESC, price_domain DESC, product_key DESC, observed_at DESC
     ) AS latest_price
 ) AS ps ON f.kind = 'price'
 LEFT JOIN LATERAL (

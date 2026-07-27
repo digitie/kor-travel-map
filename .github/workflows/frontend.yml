@@ -46,6 +46,9 @@ jobs:
       - name: frontend ESLint effective config
         run: npx --yes npm@10.9.4 run verify:frontend-eslint
 
+      - name: frontend ESLint full lint (0 warnings)
+        run: npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run lint
+
       - name: Next/Sharp optimizer ABI smoke
         run: npx --yes npm@10.9.4 run verify:next-sharp
 

@@ -11,7 +11,7 @@ import maplibregl, {
 } from "maplibre-gl";
 import {
   createContext,
-  useContext,
+  use,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -312,7 +312,7 @@ export function VWorldMapView({
   }, [apiKey, layerType]);
 
   return (
-    <VWorldMapContext.Provider value={map}>
+    <VWorldMapContext value={map}>
       <div
         ref={containerRef}
         className={className}
@@ -323,7 +323,7 @@ export function VWorldMapView({
         }}
       />
       {loaded ? children : null}
-    </VWorldMapContext.Provider>
+    </VWorldMapContext>
   );
 }
 
@@ -346,7 +346,7 @@ export function VWorldMarker({
   title,
   onClick,
 }: VWorldMarkerProps) {
-  const map = useContext(VWorldMapContext);
+  const map = use(VWorldMapContext);
   const markerRef = useRef<MapLibreMarker | null>(null);
   const elementRef = useRef<ReturnType<typeof createMarkerElement> | null>(null);
   const onClickRef = useRef(onClick);
@@ -461,8 +461,9 @@ export interface ClusterFeatureInput {
   weather_summary?: ClusterWeatherSummaryPoint | null;
 }
 
-interface ClusterPriceSummaryPoint {
+export interface ClusterPriceSummaryPoint {
   provider: string;
+  price_domain: string;
   product_key: string;
   product_name?: string | null;
   value_number: number;
@@ -561,21 +562,37 @@ function fuelShortLabel(productKey: string, productName: string | null | undefin
   return productName ?? productKey;
 }
 
-function priceMarkerLabel(
+export function priceMarkerLabel(
   summary: readonly ClusterPriceSummaryPoint[] | null | undefined,
 ): string | null {
   const points = (summary ?? [])
     .filter((point) => FUEL_PRICE_ORDER.includes(
       point.product_key as (typeof FUEL_PRICE_ORDER)[number],
     ))
-    .sort((a, b) => fuelPriceOrder(a.product_key) - fuelPriceOrder(b.product_key));
+    .sort(
+      (a, b) =>
+        fuelPriceOrder(a.product_key) - fuelPriceOrder(b.product_key) ||
+        a.provider.localeCompare(b.provider) ||
+        a.price_domain.localeCompare(b.price_domain),
+    );
   if (points.length === 0) return null;
+  const countByProduct = new Map<string, number>();
+  for (const point of points) {
+    countByProduct.set(
+      point.product_key,
+      (countByProduct.get(point.product_key) ?? 0) + 1,
+    );
+  }
   return points
     .map((point) => {
+      const identity =
+        (countByProduct.get(point.product_key) ?? 0) > 1
+          ? ` ${point.provider}/${point.price_domain}`
+          : "";
       const price = `${fuelShortLabel(
         point.product_key,
         point.product_name,
-      )} ${priceFormatter.format(point.value_number)}`;
+      )}${identity} ${priceFormatter.format(point.value_number)}`;
       const pastLabel = opinetPastPriceLabel([point]);
       return pastLabel ? `${price} · ${pastLabel}` : price;
     })
@@ -922,7 +939,7 @@ export function VWorldServerClusters({
   clusters: ReadonlyArray<ServerClusterInput>;
   zoomStep?: number;
 }) {
-  const map = useContext(VWorldMapContext);
+  const map = use(VWorldMapContext);
   const markersRef = useRef(new Map<string, MapLibreMarker>());
 
   useEffect(() => {
@@ -1013,7 +1030,7 @@ export function VWorldFeatureClusters({
   clusterRadius?: number;
   clusterMaxZoom?: number;
 }) {
-  const map = useContext(VWorldMapContext);
+  const map = use(VWorldMapContext);
   const onSelectRef = useRef(onSelectFeature);
   const selectedFeatureIdRef = useRef<string | null>(selectedFeatureId);
   const priceSummariesRef = useRef(

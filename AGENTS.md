@@ -110,7 +110,7 @@ REST/OpenAPI backend는 별도 Python 패키지 `kor-travel-map-api`, admin UI�
 | Category 모듈 출처 | `kortravelmap.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
 | Address DTO + 행정코드 utility | `kortravelmap.dto.Address` + `kortravelmap.core.address` (구 `kraddr.base`에서 흡수, ADR-041 — `PlaceCoordinate`는 제외, 좌표는 `Coordinate`로 단일화) |
 | Provider 라이브러리 git URL/sha 핀 status | `docs/architecture/provider-contract.md` §12 표 (Sprint별 그룹화, kma/datagokr는 Protocol 박힘) |
-| ADR 현황 | ADR-001~076의 상태·색인은 `docs/adr/README.md`. 다음 후보 번호 = ADR-077. |
+| ADR 현황 | ADR-001~078의 상태·색인은 `docs/adr/README.md`. 다음 후보 번호 = ADR-079. |
 | Sprint plan | `docs/sprints/SPRINT-1.md` ~ `SPRINT-5.md` |
 | Provider 구현 순서 (ADR-034) | 축제→날씨→유가→휴게소→국립공원/트래킹→국가유산→**MOIS**→휴양림/수목원→박물관/미술관 |
 

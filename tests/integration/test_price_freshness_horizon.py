@@ -17,11 +17,13 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
+from sqlalchemy import text
 
 from kortravelmap.dto._enums import FeatureKind, PriceDomain
 from kortravelmap.dto.price import PriceValue
 from kortravelmap.infra import feature_repo, price_repo
 from kortravelmap.providers.krex import rest_areas_to_bundles
+from tests.integration.perf_gate import assert_uses_index, explain_plan
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,12 +34,18 @@ _KST = timezone(timedelta(hours=9))
 
 
 def _price_value(
-    feature_id: str, *, product_key: str, observed_at: datetime, price: int
+    feature_id: str,
+    *,
+    product_key: str,
+    observed_at: datetime,
+    price: int,
+    provider: str = "python-opinet-api",
+    price_domain: PriceDomain = PriceDomain.OPINET_GAS_STATION,
 ) -> PriceValue:
     return PriceValue(
         feature_id=feature_id,
-        provider="python-opinet-api",
-        price_domain=PriceDomain.OPINET_GAS_STATION,
+        provider=provider,
+        price_domain=price_domain,
         product_key=product_key,
         product_name=None,
         source_product_key=None,
@@ -111,6 +119,56 @@ async def test_stale_price_hidden_from_current_but_kept_in_history(
     assert [p.product_key for p in card_asof.current] == ["diesel"]
 
 
+async def test_price_card_series_queries_use_identity_indexes(
+    migrated_session: AsyncSession,
+) -> None:
+    """current/history index가 각 series 정렬 access path에 적격인지 고정한다."""
+    now = datetime.now(tz=_KST)
+    bundles = await rest_areas_to_bundles([_RestArea()], fetched_at=now)
+    await feature_repo.load_bundles(migrated_session, bundles)
+    feature_id = bundles[0].feature.feature_id
+    await price_repo.load_price_values(
+        migrated_session,
+        [
+            _price_value(
+                feature_id,
+                product_key="gasoline",
+                observed_at=now - timedelta(minutes=minute),
+                price=1700 + minute,
+            )
+            for minute in range(1, 61)
+        ],
+    )
+    await migrated_session.flush()
+    await migrated_session.execute(
+        text("ANALYZE feature.feature_price_values")
+    )
+
+    current_plan = await explain_plan(
+        migrated_session,
+        price_repo._CURRENT_SQL,  # noqa: SLF001
+        {
+            "feature_id": feature_id,
+            "asof": None,
+            "stale_hide_days": None,
+        },
+        planner_default=False,
+        pre_statements=("SET LOCAL enable_sort = off",),
+    )
+    assert_uses_index(current_plan, "uq_price_value_identity")
+
+    history_plan = await explain_plan(
+        migrated_session,
+        price_repo._HISTORY_SQL,  # noqa: SLF001
+        {"feature_id": feature_id, "asof": None, "limit": 100},
+        planner_default=False,
+    )
+    assert_uses_index(
+        history_plan,
+        "idx_price_values_feature_observed_identity",
+    )
+
+
 async def test_stale_only_feature_is_stale_and_current_empty(
     migrated_session: AsyncSession,
 ) -> None:
@@ -176,6 +234,14 @@ async def test_stale_price_excluded_from_bbox_price_summary(
             ),
             _price_value(
                 price_feature.feature_id,
+                product_key="gasoline",
+                observed_at=now - timedelta(minutes=30),
+                price=1710,
+                provider="python-krex-api",
+                price_domain=PriceDomain.REST_AREA_FUEL,
+            ),
+            _price_value(
+                price_feature.feature_id,
                 product_key="diesel",
                 observed_at=now - timedelta(days=10),
                 price=1500,
@@ -192,18 +258,44 @@ async def test_stale_price_excluded_from_bbox_price_summary(
         "max_lat": lat + 0.05,
     }
 
-    rows = await feature_repo.features_in_bbox(
-        migrated_session, kinds=["price"], **bbox
+    card = await price_repo.build_price_card(
+        migrated_session, feature_id=price_feature.feature_id
     )
-    hit = next(r for r in rows if r["feature_id"] == price_feature.feature_id)
-    products = [p["product_key"] for p in (hit["price_summary"] or [])]
-    assert products == ["gasoline"]  # 10일 묵은 diesel은 마커 라벨에서 제외.
+    expected_fresh_identities = {
+        ("python-krex-api", "rest_area_fuel", "gasoline"),
+        ("python-opinet-api", "opinet_gas_station", "gasoline"),
+    }
+    assert {
+        (point.provider, point.price_domain, point.product_key)
+        for point in card.current
+    } == expected_fresh_identities
 
-    rows_all = await feature_repo.features_in_bbox(
-        migrated_session, kinds=["price"], price_stale_hide_days=None, **bbox
-    )
-    hit_all = next(
-        r for r in rows_all if r["feature_id"] == price_feature.feature_id
-    )
-    products_all = [p["product_key"] for p in (hit_all["price_summary"] or [])]
-    assert products_all == ["gasoline", "diesel"]
+    for include_geometry in (False, True):
+        rows = await feature_repo.features_in_bbox(
+            migrated_session,
+            kinds=["price"],
+            include_geometry=include_geometry,
+            **bbox,
+        )
+        hit = next(r for r in rows if r["feature_id"] == price_feature.feature_id)
+        assert {
+            (point["provider"], point["price_domain"], point["product_key"])
+            for point in (hit["price_summary"] or [])
+        } == expected_fresh_identities  # 10일 묵은 diesel은 마커 라벨에서 제외.
+
+        rows_all = await feature_repo.features_in_bbox(
+            migrated_session,
+            kinds=["price"],
+            include_geometry=include_geometry,
+            price_stale_hide_days=None,
+            **bbox,
+        )
+        hit_all = next(
+            r for r in rows_all if r["feature_id"] == price_feature.feature_id
+        )
+        assert {
+            (point["provider"], point["price_domain"], point["product_key"])
+            for point in (hit_all["price_summary"] or [])
+        } == expected_fresh_identities | {
+            ("python-opinet-api", "opinet_gas_station", "diesel")
+        }

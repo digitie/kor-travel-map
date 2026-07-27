@@ -581,7 +581,6 @@ async function waitForScheduleControlsSettled(
       (await toggle.isEnabled({ timeout: 1_000 }).catch(() => false));
     const obs = `dialogOpen=${dialogOpen} toggleEnabled=${enabled}`;
     if (obs !== lastObs) {
-      // eslint-disable-next-line no-console
       console.log(`[C7SETTLE ${operation}] ${obs}`);
       lastObs = obs;
     }
