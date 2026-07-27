@@ -432,10 +432,10 @@ test.describe("admin/dedup-reviews actions", () => {
 
     await row.click();
 
-    const dialog = page.getByRole("dialog", { name: "dedup review detail" });
+    const dialog = page.getByRole("dialog", { name: "중복 상세 비교" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("Feature A")).toBeVisible();
-    await expect(dialog.getByText("Feature B")).toBeVisible();
+    await expect(dialog.getByText("후보 A")).toBeVisible();
+    await expect(dialog.getByText("후보 B")).toBeVisible();
     await expect(dialog).toContainText("DEDUP_A_detail detail");
     await expect(dialog).toContainText("DEDUP_B_detail detail");
     await expect(page.getByTestId("dedup-detail-map")).toBeVisible();
@@ -476,7 +476,6 @@ test.describe("admin/dedup-reviews actions", () => {
     expect(handle.requests.bodies[0]).toMatchObject({
       decision: "accepted",
       decision_reason: "admin-ui accepted",
-      reviewed_by: "local-admin",
     });
 
     // onSuccess invalidate → refetch가 status='accepted'를 반영, actions 셀이 '완료'로 collapse.
@@ -502,7 +501,6 @@ test.describe("admin/dedup-reviews actions", () => {
     expect(handle.requests.bodies[0]).toMatchObject({
       decision: "rejected",
       decision_reason: "admin-ui rejected",
-      reviewed_by: "local-admin",
     });
     // reject 본문에는 master_feature_id 키가 없다(merge만 전송).
     expect(handle.requests.bodies[0].master_feature_id).toBeUndefined();
@@ -524,7 +522,6 @@ test.describe("admin/dedup-reviews actions", () => {
     expect(handle.requests.bodies[0]).toMatchObject({
       decision: "ignored",
       decision_reason: "admin-ui ignored",
-      reviewed_by: "local-admin",
     });
   });
 
@@ -558,7 +555,6 @@ test.describe("admin/dedup-reviews actions", () => {
       decision: "merged",
       master_feature_id: FEATURE_B_ID,
       decision_reason: "admin-ui merge (master 수동 선택)",
-      reviewed_by: "local-admin",
     });
 
     // onSettled → setMergeKey(null), refetch는 status='merged' → '완료', 패널 사라짐.
@@ -584,7 +580,6 @@ test.describe("admin/dedup-reviews actions", () => {
     expect(handle.requests.bodies[0]).toMatchObject({
       decision: "merged",
       decision_reason: "admin-ui merge (master 자동 선정)",
-      reviewed_by: "local-admin",
     });
     // 자동 경로는 masterFeatureId === undefined → JSON.stringify가 키를 drop.
     expect(handle.requests.bodies[0].master_feature_id).toBeUndefined();
@@ -686,7 +681,7 @@ test.describe("admin/dedup-reviews actions", () => {
     await page.goto("/admin/features/dedup-reviews");
     await expect(page.getByRole("row", { name: /DEDUP_A_alpha/ })).toBeVisible();
     await expect(
-      page.getByRole("columnheader", { name: "feature A" }),
+      page.getByRole("columnheader", { name: "후보 A" }),
     ).toBeVisible();
 
     // 'merged' 선택 → queryKey 변경 → 마지막 GET의 status=['merged'].
@@ -739,8 +734,11 @@ test.describe("admin/dedup-reviews actions", () => {
     await page.getByLabel("dedup search").fill("filter");
     await page.getByLabel("dedup kind").selectOption("place");
     await page.getByLabel("dedup provider").fill("python-mois-api");
+    await page.getByLabel("dedup provider").press("Enter");
     await page.getByLabel("dedup dataset").fill("mois_license");
+    await page.getByLabel("dedup dataset").press("Enter");
     await page.getByLabel("dedup category").fill("02020101");
+    await page.getByLabel("dedup category").press("Enter");
     await page.getByLabel("dedup score filter").selectOption("high");
     await page.getByLabel("dedup page size").selectOption("25");
 
@@ -750,13 +748,13 @@ test.describe("admin/dedup-reviews actions", () => {
     await expect
       .poll(() => handle.requests.lastListUrl?.searchParams.get("q"))
       .toBe("filter");
+    await expect
+      .poll(() => handle.requests.lastListUrl?.searchParams.getAll("provider"))
+      .toEqual(["python-mois-api"]);
     const last = handle.requests.lastListUrl;
     expect(last?.searchParams.getAll("kind")).toEqual(["place"]);
-    expect(last?.searchParams.getAll("provider")).toEqual(["python-mois-api"]);
     expect(last?.searchParams.getAll("dataset_key")).toEqual(["mois_license"]);
-    await expect
-      .poll(() => handle.requests.lastListUrl?.searchParams.getAll("category"))
-      .toEqual(["02020101"]);
+    expect(last?.searchParams.getAll("category")).toEqual(["02020101"]);
     expect(last?.searchParams.get("min_score")).toBe("90");
     expect(last?.searchParams.get("page_size")).toBe("25");
   });
@@ -799,12 +797,17 @@ test.describe("admin/dedup-reviews actions", () => {
     await expect(page.getByLabel("dedup 첫 페이지").first()).toBeEnabled();
 
     await page.getByLabel("dedup 첫 페이지").first().click();
-    await expect
-      .poll(() => handle.requests.lastListUrl?.searchParams.has("cursor"))
-      .toBe(false);
+    // 첫 페이지 복귀 시 client는 cursor를 비우지만(goFirstPage→setCursor(null)),
+    // [cursor=null, pageSize=25] 조합은 초기 로드에서 이미 페치돼 React Query 캐시에서
+    // 서빙되므로 새 HTTP 요청이 없다(lastListUrl는 page-2 cursor=25로 stale). 따라서
+    // lastListUrl HTTP 단언 대신 렌더 상태(page-1 데이터·요약)로 복귀를 검증한다.
+    await expect(page.getByText(/page 1\s*·\s*총 26건\s*·\s*이 페이지 25개/)).toHaveCount(
+      2,
+    );
     await expect(
-      page.getByText(/page 1\s*·\s*총 26건\s*·\s*이 페이지 25개/),
-    ).toHaveCount(2);
+      page.getByRole("row", { name: /DEDUP_A_page_0(?!\d)/ }),
+    ).toBeVisible();
+    await expect(page.getByRole("row", { name: /DEDUP_A_page_25/ })).toHaveCount(0);
   });
 
   test("empty list renders the dedup empty message", async ({ page }) => {
@@ -823,7 +826,7 @@ test.describe("admin/dedup-reviews actions", () => {
     await expect(
       page.getByText(/page 1\s*·\s*총 0건\s*·\s*이 페이지 0개/),
     ).toHaveCount(2);
-    for (const column of ["review", "score", "feature A", "feature B", "actions"]) {
+    for (const column of ["리뷰", "점수", "후보 A", "후보 B", "작업"]) {
       await expect(
         page.getByRole("columnheader", { name: column }),
       ).toBeVisible();
@@ -904,7 +907,6 @@ test.describe("admin/dedup-reviews actions", () => {
       expect(body).toMatchObject({
         decision: "accepted",
         decision_reason: "admin-ui accepted",
-        reviewed_by: "local-admin",
       });
     }
     // invalidation refetch 후 setRowSelection({}) → toolbar 사라짐.

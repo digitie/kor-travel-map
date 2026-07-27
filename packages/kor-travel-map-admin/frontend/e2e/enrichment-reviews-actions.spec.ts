@@ -400,7 +400,7 @@ test.describe("admin/enrichment-reviews actions", () => {
     await row.click();
 
     const dialog = page.getByRole("dialog", {
-      name: "enrichment review detail",
+      name: "보강 상세 비교",
     });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("1차 datagokr")).toBeVisible();
@@ -590,6 +590,7 @@ test.describe("admin/enrichment-reviews actions", () => {
     await page.goto("/admin/features/enrichment-reviews");
     await page.getByLabel("enrichment search").fill("Filter");
     await page.getByLabel("enrichment provider").fill("python-visitkorea-api");
+    await page.getByLabel("enrichment provider").press("Enter");
     await page.getByLabel("enrichment score filter").selectOption("high");
     await page.getByLabel("enrichment page size").selectOption("25");
 
@@ -598,10 +599,10 @@ test.describe("admin/enrichment-reviews actions", () => {
     await expect
       .poll(() => requests.listUrls.at(-1)?.searchParams.get("q"))
       .toBe("Filter");
+    await expect
+      .poll(() => requests.listUrls.at(-1)?.searchParams.getAll("provider"))
+      .toEqual(["python-visitkorea-api"]);
     const last = requests.listUrls.at(-1);
-    expect(last?.searchParams.getAll("provider")).toEqual([
-      "python-visitkorea-api",
-    ]);
     expect(last?.searchParams.get("min_score")).toBe("90");
     expect(last?.searchParams.get("page_size")).toBe("25");
     expect(last?.searchParams.has("page")).toBe(false);
@@ -628,7 +629,7 @@ test.describe("admin/enrichment-reviews actions", () => {
     await row.click();
 
     const dialog = page.getByRole("dialog", {
-      name: "enrichment review detail",
+      name: "보강 상세 비교",
     });
     await expect(dialog).toBeVisible();
     await expect(

@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (claude) — T-VN-H06 mocked e2e spec drift 수정 → dedup/enrichment 24 GREEN
+
+**결론**: #813(keyset+fingerprint cursor 전환) 머지 후 dedup/enrichment mocked Playwright e2e가
+14건 실패 → **현행 UI에 맞춰 spec-only 수정**으로 24 passed 확보. client 코드는 정상, 실패는 전부
+spec drift였음.
+
+**근인 3종**:
+- **decision PATCH `reviewed_by` 과다 기대**(6곳): client PATCH body는 `{decision, decision_reason}`
+  만 전송하고 `reviewed_by`는 서버가 인증 principal(T-VN-03 경계)에서 파생 → 테스트가 client 미전송
+  `reviewed_by: "local-admin"`을 기대해 toMatchObject 실패. 기대 제거.
+- **MultiFilterCombobox 토큰 미커밋**: provider/dataset/category 필터는 `MultiFilterCombobox`
+  (입력 후 Enter로 토큰 커밋)인데 테스트가 `.fill()`만 해서 `providers` state 미갱신 → provider param
+  미전송. 각 `.fill()` 뒤 `.press("Enter")` 추가.
+- **deferred param 직접 단언**: provider는 `useDeferredValue` 경유라 마지막 요청에 지연 반영 →
+  직접 `expect(last?...)`를 `expect.poll(() => lastListUrl?...)`로 전환(kind/dataset/category는
+  settle된 요청에서 재판독).
+
+DEFAULT_FEATURE_MAP_KINDS·후보 A/B·다이얼로그 한글명 등 이전 드리프트 수정과 합쳐 dedup 12 +
+enrichment 12 = 24 GREEN. 검증은 Windows Playwright(mocked), keyset EXPLAIN/perf는 #813에 포함.
+
 ## 2026-07-27 (claude) — T-VN-LIVE-01 완료: targeted live acceptance lane n150 PASSED
 
 **결론**: admin-feature targeted live acceptance lane(#792)을 n150 production
