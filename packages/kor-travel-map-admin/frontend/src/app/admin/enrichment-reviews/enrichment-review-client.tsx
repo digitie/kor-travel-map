@@ -22,12 +22,11 @@ import {
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
 import { JsonViewer } from "@/components/json-viewer";
-import {
-  MultiFilterCombobox,
-  uniqueSorted,
-} from "@/components/multi-filter-combobox";
+import { MultiFilterCombobox } from "@/components/multi-filter-combobox";
+import { uniqueSorted } from "@/lib/string-list";
 import { CursorPager } from "@/components/pagination-bar";
-import { StatusBadge, statusLabel } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";

@@ -27,7 +27,8 @@ import {
 import { AdminShell } from "@/components/admin-shell";
 import { CursorPager } from "@/components/pagination-bar";
 import { EntityLink } from "@/components/entity-link";
-import { StatusBadge, statusLabel } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

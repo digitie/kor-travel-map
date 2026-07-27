@@ -1,6 +1,15 @@
 {
   "ignore": {
     "files": ["dist/**", "dev/**"],
+    "overrides": [
+      {
+        "files": ["src/api/live.ts"],
+        "rules": [
+          "react-doctor/effect-needs-cleanup",
+          "react-doctor/no-fetch-in-effect"
+        ]
+      }
+    ],
     "rules": [
       "deslop/unused-file",
       "deslop/unused-dev-dependency",

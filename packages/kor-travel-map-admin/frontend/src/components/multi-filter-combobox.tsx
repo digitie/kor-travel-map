@@ -7,6 +7,7 @@ import { XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { uniqueSorted } from "@/lib/string-list";
 import { cn } from "@/lib/utils";
 
 interface MultiFilterComboboxProps {
@@ -18,11 +19,6 @@ interface MultiFilterComboboxProps {
   values: string[];
 }
 
-function uniqueSorted(values: string[]): string[] {
-  return Array.from(
-    new Set(values.map((value) => value.trim()).filter(Boolean)),
-  ).sort((left, right) => left.localeCompare(right));
-}
 
 function MultiFilterCombobox({
   ariaLabel,
@@ -36,20 +32,21 @@ function MultiFilterCombobox({
   const [open, setOpen] = useState(false);
   const normalizedQuery = query.trim().toLowerCase();
   const selected = useMemo(() => uniqueSorted(values), [values]);
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
   const selectableOptions = useMemo(
     () =>
       uniqueSorted([...options, ...selected]).filter(
         (option) =>
-          !selected.includes(option) &&
+          !selectedSet.has(option) &&
           (normalizedQuery.length === 0 ||
             option.toLowerCase().includes(normalizedQuery)),
       ),
-    [normalizedQuery, options, selected],
+    [normalizedQuery, options, selected, selectedSet],
   );
 
   const addValue = (value: string) => {
     const next = value.trim();
-    if (!next || selected.includes(next)) return;
+    if (!next || selectedSet.has(next)) return;
     onChange(uniqueSorted([...selected, next]));
     setQuery("");
     setOpen(false);
@@ -111,7 +108,7 @@ function MultiFilterCombobox({
       {open && (query.trim().length > 0 || selectableOptions.length > 0) ? (
         <div className="absolute top-full right-0 left-0 z-20 mt-1 max-h-56 overflow-auto rounded-md border bg-popover p-1 shadow-md">
           {query.trim().length > 0 &&
-          !selected.includes(query.trim()) &&
+          !selectedSet.has(query.trim()) &&
           !selectableOptions.includes(query.trim()) ? (
             <button
               className="w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
@@ -142,4 +139,4 @@ function MultiFilterCombobox({
   );
 }
 
-export { MultiFilterCombobox, uniqueSorted };
+export { MultiFilterCombobox };

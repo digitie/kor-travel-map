@@ -49,6 +49,12 @@ jobs:
       - name: frontend ESLint full lint (0 warnings)
         run: npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run lint
 
+      - name: React Doctor 좁은 예외 범위 검증
+        run: npx --yes npm@10.9.4 run verify:react-doctor-config
+
+      - name: React Doctor full scan (0 diagnostics)
+        run: npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run doctor
+
       - name: Next/Sharp optimizer ABI smoke
         run: npx --yes npm@10.9.4 run verify:next-sharp
 

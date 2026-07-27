@@ -5,21 +5,14 @@ import type { components, paths } from "./types";
 
 type CuratedSchemas = components["schemas"];
 
-type AdminCuratedFeaturesQuery = NonNullable<
-  paths["/v1/admin/features/curated"]["get"]["parameters"]["query"]
->;
 type AdminCuratedSourcesQuery = NonNullable<
   paths["/v1/admin/curated-sources"]["get"]["parameters"]["query"]
->;
-type AdminCuratedSourceRulesQuery = NonNullable<
-  paths["/v1/admin/curated-source-rules"]["get"]["parameters"]["query"]
 >;
 type AdminCuratedThemesQuery = NonNullable<
   paths["/v1/admin/curated-themes"]["get"]["parameters"]["query"]
 >;
 
 export type CuratedFeature = CuratedSchemas["CuratedFeatureView"];
-export type CuratedFeaturesResponse = CuratedSchemas["CuratedFeaturesResponse"];
 export type CuratedFeaturePatchRequest =
   CuratedSchemas["CuratedFeaturePatchRequest"];
 export type CuratedFeatureResponse = CuratedSchemas["CuratedFeatureResponse"];
@@ -27,16 +20,8 @@ export type CuratedFeatureStatusRequest =
   CuratedSchemas["CuratedFeatureStatusRequest"];
 export type CuratedSource = CuratedSchemas["CuratedSourceView"];
 export type CuratedSourcesResponse = CuratedSchemas["CuratedSourcesResponse"];
-export type CuratedSourceRule = CuratedSchemas["CuratedSourceRuleView"];
-export type CuratedSourceRulesResponse =
-  CuratedSchemas["CuratedSourceRulesResponse"];
-export type CuratedSourceRulePatchRequest =
-  CuratedSchemas["CuratedSourceRulePatchRequest"];
-export type CuratedSourceRuleResponse =
-  CuratedSchemas["CuratedSourceRuleResponse"];
 export type CuratedTheme = CuratedSchemas["CuratedThemeView"];
 export type CuratedThemesResponse = CuratedSchemas["CuratedThemesResponse"];
-export type RuleApplyResponse = CuratedSchemas["RuleApplyResponse"];
 export type CuratedFeatureDetailSnapshot =
   CuratedSchemas["CuratedFeatureDetailSnapshotView"];
 export type CuratedFeatureDetailSnapshotResponse =
@@ -45,10 +30,6 @@ export type CuratedPlaceSearchHit = CuratedSchemas["PlaceSearchHitView"];
 export type CuratedPlaceSearchResponse =
   CuratedSchemas["CuratedPlaceSearchResponse"];
 
-export type CuratedFeatureStatus = Exclude<
-  AdminCuratedFeaturesQuery["curation_status"],
-  null | undefined
->;
 export type CuratedReusePolicy = Exclude<
   CuratedFeaturePatchRequest["reuse_policy"],
   null | undefined
@@ -57,25 +38,7 @@ export type CuratedCurationRelation = Exclude<
   CuratedFeaturePatchRequest["curation_relation"],
   null | undefined
 >;
-export type CuratedRuleAction = Exclude<
-  CuratedSourceRulePatchRequest["default_action"],
-  null | undefined
->;
-
-export type AdminCuratedFeaturesParams = AdminCuratedFeaturesQuery & {
-  region_code?: string | null;
-  sido_code?: string | null;
-  sigungu_code?: string | null;
-  min_lon?: number | null;
-  min_lat?: number | null;
-  max_lon?: number | null;
-  max_lat?: number | null;
-  q?: string | null;
-  feature_name?: string | null;
-  display_title?: string | null;
-};
 export type AdminCuratedSourcesParams = AdminCuratedSourcesQuery;
-export type AdminCuratedSourceRulesParams = AdminCuratedSourceRulesQuery;
 export type AdminCuratedThemesParams = AdminCuratedThemesQuery;
 
 function invalidateCurated(queryClient: ReturnType<typeof useQueryClient>) {
@@ -87,45 +50,6 @@ function invalidateCurated(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: ["curated-themes"] });
 }
 
-async function fetchAdminCuratedFeatures(
-  params: AdminCuratedFeaturesParams,
-  signal?: AbortSignal,
-): Promise<CuratedFeaturesResponse> {
-  return getJson<CuratedFeaturesResponse>(
-    pathWithQuery("/v1/admin/features/curated", {
-      theme_id: params.theme_id,
-      theme_slug: params.theme_slug,
-      source_id: params.source_id,
-      provider: params.provider,
-      dataset_key: params.dataset_key,
-      curation_status: params.curation_status,
-      region_code: params.region_code,
-      sido_code: params.sido_code,
-      sigungu_code: params.sigungu_code,
-      min_lon: params.min_lon,
-      min_lat: params.min_lat,
-      max_lon: params.max_lon,
-      max_lat: params.max_lat,
-      q: params.q,
-      feature_name: params.feature_name,
-      display_title: params.display_title,
-      display_titles: params.display_titles,
-      include_archived: params.include_archived,
-      page_size: params.page_size,
-      cursor: params.cursor,
-      distinct_by_feature: params.distinct_by_feature,
-    }),
-    { signal },
-  );
-}
-
-export function useAdminCuratedFeatures(params: AdminCuratedFeaturesParams) {
-  return useQuery<CuratedFeaturesResponse, Error>({
-    queryKey: ["curated-features", params] as const,
-    queryFn: ({ signal }) => fetchAdminCuratedFeatures(params, signal),
-    staleTime: 30_000,
-  });
-}
 
 async function fetchAdminCuratedFeature(
   curatedFeatureId: string,
@@ -146,7 +70,6 @@ export function useAdminCuratedFeature(curatedFeatureId: string | null) {
     staleTime: 30_000,
   });
 }
-
 async function fetchAdminCuratedSources(
   params: AdminCuratedSourcesParams,
   signal?: AbortSignal,
@@ -172,33 +95,6 @@ export function useAdminCuratedSources(
   });
 }
 
-async function fetchAdminCuratedSourceRules(
-  params: AdminCuratedSourceRulesParams,
-  signal?: AbortSignal,
-): Promise<CuratedSourceRulesResponse> {
-  return getJson<CuratedSourceRulesResponse>(
-    pathWithQuery("/v1/admin/curated-source-rules", {
-      theme_id: params.theme_id,
-      theme_slug: params.theme_slug,
-      source_id: params.source_id,
-      provider: params.provider,
-      dataset_key: params.dataset_key,
-      enabled: params.enabled,
-      limit: params.limit,
-    }),
-    { signal },
-  );
-}
-
-export function useAdminCuratedSourceRules(
-  params: AdminCuratedSourceRulesParams,
-) {
-  return useQuery<CuratedSourceRulesResponse, Error>({
-    queryKey: ["curated-source-rules", params] as const,
-    queryFn: ({ signal }) => fetchAdminCuratedSourceRules(params, signal),
-    staleTime: 30_000,
-  });
-}
 
 async function fetchAdminCuratedThemes(
   params: AdminCuratedThemesParams,
@@ -343,33 +239,6 @@ export function usePatchCuratedFeatureMutation() {
       patchJson<CuratedFeatureResponse>(
         `/v1/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`,
         body,
-      ),
-    onSuccess: () => invalidateCurated(queryClient),
-  });
-}
-
-export function usePatchCuratedSourceRuleMutation() {
-  const queryClient = useQueryClient();
-  return useMutation<
-    CuratedSourceRuleResponse,
-    Error,
-    { ruleId: string; body: CuratedSourceRulePatchRequest }
-  >({
-    mutationFn: ({ ruleId, body }) =>
-      patchJson<CuratedSourceRuleResponse>(
-        `/v1/admin/curated-source-rules/${encodeURIComponent(ruleId)}`,
-        body,
-      ),
-    onSuccess: () => invalidateCurated(queryClient),
-  });
-}
-
-export function useApplyCuratedSourceRuleMutation() {
-  const queryClient = useQueryClient();
-  return useMutation<RuleApplyResponse, Error, { ruleId: string }>({
-    mutationFn: ({ ruleId }) =>
-      postJson<RuleApplyResponse>(
-        `/v1/admin/curated-source-rules/${encodeURIComponent(ruleId)}/apply`,
       ),
     onSuccess: () => invalidateCurated(queryClient),
   });

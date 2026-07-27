@@ -3,7 +3,7 @@
 import { CircleHelpIcon } from "lucide-react";
 import { useState } from "react";
 
-import { statusLabel } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

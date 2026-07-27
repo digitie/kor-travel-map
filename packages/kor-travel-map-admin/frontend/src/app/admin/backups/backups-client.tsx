@@ -20,7 +20,8 @@ import {
   useRestoreSwapMutation,
 } from "@/api/backups";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge, statusLabel } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

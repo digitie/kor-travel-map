@@ -50,6 +50,7 @@ import { FormField } from "@/components/ui/form-field-input";
 import { FormSelect } from "@/components/ui/form-select";
 import { DataTable } from "@/components/ui/data-table";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
+import { validateAddressCodes } from "@/lib/feature-address-validation";
 import {
   MARKER_COLOR_OPTIONS,
   MARKER_ICON_OPTIONS,
@@ -78,7 +79,6 @@ import {
   FeatureBasicInfoSection,
   FeatureDetailSection,
   FeatureLocationPreviewSection,
-  validateAddressCodes,
 } from "../feature-form-sections";
 
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
@@ -380,6 +380,7 @@ function korTravelGeoCandidateAddressText(
 
 export function FeatureCreateClient() {
   const mapRef = useRef<MapLibreMap | null>(null);
+  const submitCreateInFlightRef = useRef(false);
 
   const [form, setForm] = useState<FeatureCreateFormState>(() => initialForm());
   const [formError, setFormError] = useState<string | null>(null);
@@ -569,6 +570,7 @@ export function FeatureCreateClient() {
 
   const submitCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitCreateInFlightRef.current) return;
     setFormError(null);
     setFieldErrors({});
     // §4: 필드 규칙을 제출 전에 일괄 검증해 인라인 에러로 보여준다 —
@@ -593,6 +595,7 @@ export function FeatureCreateClient() {
       setFieldErrors(result.errors);
       return;
     }
+    submitCreateInFlightRef.current = true;
     try {
       validateCreateTextFields(form, categoryItems);
       const payload = buildCreatePayload(form);
@@ -601,6 +604,8 @@ export function FeatureCreateClient() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFormError(message);
+    } finally {
+      submitCreateInFlightRef.current = false;
     }
   };
 

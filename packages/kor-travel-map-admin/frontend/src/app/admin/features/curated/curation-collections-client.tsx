@@ -11,7 +11,7 @@ import {
   Trash2Icon,
   UploadCloudIcon,
 } from "lucide-react";
-import { useState, type FormEvent, type MouseEvent } from "react";
+import { useRef, useState, type FormEvent, type MouseEvent } from "react";
 
 import { useAdminCuratedSources, useAdminCuratedThemes } from "@/api/curated";
 import {
@@ -143,6 +143,8 @@ export function CurationCollectionsClient() {
   const patchItem = usePatchCurationItemMutation();
   const archiveItem = useArchiveCurationItemMutation();
   const importCsv = useImportCurationCsvMutation();
+  const submitCollectionInFlightRef = useRef(false);
+  const submitItemInFlightRef = useRef(false);
 
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(
     null,
@@ -175,6 +177,7 @@ export function CurationCollectionsClient() {
 
   const submitCollection = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitCollectionInFlightRef.current) return;
     setLocalError(null);
     setMessage(null);
     const collectionKey = collectionForm.collectionKey.trim();
@@ -190,6 +193,7 @@ export function CurationCollectionsClient() {
       );
       return;
     }
+    submitCollectionInFlightRef.current = true;
     try {
       const response = await createCollection.mutateAsync({
         collection_key: collectionKey,
@@ -210,11 +214,14 @@ export function CurationCollectionsClient() {
       setMessage(`컬렉션 “${response.data.collection.title}”을 만들었습니다.`);
     } catch {
       // mutationError에서 API 응답을 표시한다.
+    } finally {
+      submitCollectionInFlightRef.current = false;
     }
   };
 
   const submitItem = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitItemInFlightRef.current) return;
     setLocalError(null);
     setMessage(null);
     if (!activeCollectionId) {
@@ -233,6 +240,7 @@ export function CurationCollectionsClient() {
       setLocalError("정렬 순서는 0 이상의 정수여야 합니다.");
       return;
     }
+    submitItemInFlightRef.current = true;
     try {
       const response = await addItem.mutateAsync({
         collectionId: activeCollectionId,
@@ -256,6 +264,8 @@ export function CurationCollectionsClient() {
       );
     } catch {
       // mutationError에서 API 응답을 표시한다.
+    } finally {
+      submitItemInFlightRef.current = false;
     }
   };
 

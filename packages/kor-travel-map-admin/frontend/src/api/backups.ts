@@ -4,14 +4,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { deleteJson, getJson, postJson } from "./client";
+import { getJson, postJson } from "./client";
 import type { components } from "./types";
 
 type BackupSchemas = components["schemas"];
 
 export type BackupRecord = BackupSchemas["BackupRecord"];
 export type BackupListResponse = BackupSchemas["BackupListResponse"];
-export type BackupDeleteResponse = BackupSchemas["BackupDeleteResponse"];
 export type BackupOperationResponse = BackupSchemas["BackupOperationResponse"];
 export type BackupRunRequest = BackupSchemas["BackupRunRequest"];
 export type RestoreRunRequest = BackupSchemas["RestoreRunRequest"];
@@ -25,11 +24,6 @@ function createBackup(body: BackupRunRequest): Promise<BackupOperationResponse> 
   return postJson<BackupOperationResponse>("/v1/admin/backups", body);
 }
 
-function deleteBackup(backupId: string): Promise<BackupDeleteResponse> {
-  return deleteJson<BackupDeleteResponse>(
-    `/v1/admin/backups/${encodeURIComponent(backupId)}`,
-  );
-}
 
 function restoreBackup({
   backupId,
@@ -75,32 +69,31 @@ export function useCreateBackupMutation() {
   });
 }
 
-export function useDeleteBackupMutation() {
-  const queryClient = useQueryClient();
-  return useMutation<BackupDeleteResponse, Error, string>({
-    mutationFn: deleteBackup,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["admin", "backups"] });
-    },
-  });
-}
 
 export function useRestoreBackupMutation() {
+  const queryClient = useQueryClient();
   return useMutation<
     BackupOperationResponse,
     Error,
     { backupId: string; body: RestoreRunRequest }
   >({
     mutationFn: restoreBackup,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "backups"] });
+    },
   });
 }
 
 export function useRestoreSwapMutation() {
+  const queryClient = useQueryClient();
   return useMutation<
     BackupOperationResponse,
     Error,
     { backupId: string; body: RestoreSwapRequest }
   >({
     mutationFn: planRestoreSwap,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "backups"] });
+    },
   });
 }

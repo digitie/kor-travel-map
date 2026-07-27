@@ -5,9 +5,6 @@ import type { StyleSpecification } from "maplibre-gl";
 // 끌어오지 않고, VWorld URL/style 생성 규칙은 이 파일에서 단일화한다.
 const VWORLD_ATTRIBUTION = "공간정보 오픈플랫폼 브이월드";
 const VWORLD_WMTS_PATH = /(\/req\/wmts\/1\.0\.0\/)([^/?#]+)(\/)/;
-const TRANSIENT_TILE_ERROR_STATUSES = new Set([
-  404, 408, 429, 500, 502, 503, 504,
-]);
 
 type VWorldMapType = "base" | "satellite" | "hybrid" | "gray" | "midnight";
 
@@ -17,13 +14,6 @@ export type VWorldLayerType =
   | "midnight"
   | "Hybrid"
   | "Satellite";
-
-export interface VWorldErrorLike {
-  message?: string;
-  sourceId?: string;
-  status?: number;
-  url?: string;
-}
 
 const LAYER_TYPE_TO_MAP_TYPE: Record<VWorldLayerType, VWorldMapType> = {
   Base: "base",
@@ -106,17 +96,6 @@ export function redactVWorldUrl(url: string | undefined): string | undefined {
   return url?.replace(VWORLD_WMTS_PATH, "$1***$3");
 }
 
-export function isVWorldTileError(error: VWorldErrorLike | undefined): boolean {
-  const message = error?.message?.toLowerCase() ?? "";
-  return (
-    (typeof error?.sourceId === "string" &&
-      error.sourceId.startsWith("vworld")) ||
-    (error?.url?.includes("/req/wmts/") ?? false) ||
-    message.includes("tile") ||
-    message.includes("failed to fetch") ||
-    TRANSIENT_TILE_ERROR_STATUSES.has(error?.status ?? 0)
-  );
-}
 
 function getClientVWorldStyle(
   apiKey: string,

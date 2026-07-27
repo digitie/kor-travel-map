@@ -88,7 +88,7 @@ export interface DataTableProps<TData> {
 }
 
 /** 정렬 가능한 헤더 버튼 — 접근성 이름은 title 그대로 보존(글리프 aria-hidden), th에 aria-sort. */
-export function DataTableColumnHeader({
+function DataTableColumnHeader({
   title,
   sorted,
   canSort,
@@ -423,19 +423,16 @@ function VirtualizedTable<TData>({
       )}
     >
       <table
-        role="table"
         aria-label={ariaLabel}
         aria-rowcount={rows.length + headerRowCount}
         aria-colcount={colCount}
         className="grid w-full caption-bottom text-sm"
       >
         <thead
-          role="rowgroup"
           className="sticky top-0 z-10 grid bg-surface-subtle [&_tr]:border-b"
         >
           {table.getHeaderGroups().map((headerGroup, headerGroupIndex) => (
             <tr
-              role="row"
               key={headerGroup.id}
               aria-rowindex={headerGroupIndex + 1}
               className="flex w-full border-b"
@@ -445,7 +442,6 @@ function VirtualizedTable<TData>({
                 const canSort = header.column.getCanSort()
                 return (
                   <th
-                    role="columnheader"
                     key={header.id}
                     aria-sort={canSort ? ariaSort(sorted) : undefined}
                     style={{ width: header.getSize() }}
@@ -459,14 +455,12 @@ function VirtualizedTable<TData>({
           ))}
         </thead>
         <tbody
-          role="rowgroup"
           className="relative grid"
           style={{ height: `${virtualizer.getTotalSize()}px` }}
         >
           {isLoading ? null : rows.length === 0 ? (
-            <tr role="row" className="flex">
+            <tr className="flex">
               <td
-                role="cell"
                 className="flex h-32 w-full items-center justify-center text-muted-foreground"
               >
                 {emptyMessage}
@@ -477,7 +471,6 @@ function VirtualizedTable<TData>({
               const row = rows[virtualRow.index]
               return (
                 <tr
-                  role="row"
                   key={row.id}
                   data-index={virtualRow.index}
                   aria-rowindex={virtualRow.index + headerRowCount + 1}
@@ -501,7 +494,6 @@ function VirtualizedTable<TData>({
                 >
                   {row.getVisibleCells().map((cell: Cell<TData, unknown>) => (
                     <td
-                      role="cell"
                       key={cell.id}
                       style={{ width: cell.column.getSize() }}
                       className="flex items-center px-3 py-2.5 align-middle text-text-primary"

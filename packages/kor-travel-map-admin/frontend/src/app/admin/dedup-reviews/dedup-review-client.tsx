@@ -28,12 +28,11 @@ import {
 } from "@/api/dedup";
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
-import {
-  MultiFilterCombobox,
-  uniqueSorted,
-} from "@/components/multi-filter-combobox";
+import { MultiFilterCombobox } from "@/components/multi-filter-combobox";
+import { uniqueSorted } from "@/lib/string-list";
 import { CursorPager } from "@/components/pagination-bar";
-import { StatusBadge, statusLabel } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
@@ -875,9 +874,11 @@ export function DedupReviewClient() {
             // pending review만 일괄 결정한다(완료된 review 재결정 방지 — 선택 자체도
             // enableRowSelection predicate로 막지만 방어적으로 한 번 더 거른다).
             const decideBulk = (value: DedupDecision) => {
-              rows
-                .filter((row) => row.original.status === "pending")
-                .forEach((row) => decide(row.original.review_id, value));
+              for (const row of rows) {
+                if (row.original.status === "pending") {
+                  decide(row.original.review_id, value);
+                }
+              }
               setRowSelection({});
             };
             return (

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   priceMarkerLabel,
   type ClusterPriceSummaryPoint,
-} from "./vworld-map-view";
+} from "@/lib/price-marker-label";
 
 function point(
   overrides: Partial<ClusterPriceSummaryPoint> = {},

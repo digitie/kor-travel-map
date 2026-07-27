@@ -39,7 +39,7 @@ import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
 import { FeatureAssociations } from "@/components/feature-associations";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
-import { statusLabel } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

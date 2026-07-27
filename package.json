@@ -27,6 +27,7 @@
     "audit:high": "npx --yes npm@10.9.4 audit --audit-level=high",
     "verify:npm-tree": "node scripts/verify-npm-tree.mjs",
     "verify:frontend-eslint": "node scripts/verify-frontend-eslint-config.mjs",
+    "verify:react-doctor-config": "node scripts/verify-react-doctor-config.mjs",
     "verify:next-sharp": "node scripts/verify-next-sharp.mjs",
     "postinstall": "node scripts/patch-redocly-openapi-core.mjs"
   },

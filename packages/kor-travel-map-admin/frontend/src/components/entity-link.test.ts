@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { hrefFor } from "./entity-link";
+import { hrefFor } from "@/lib/entity-href";
 
 describe("hrefFor", () => {
   it.each([

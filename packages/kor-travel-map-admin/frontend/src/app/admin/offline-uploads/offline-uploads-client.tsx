@@ -31,7 +31,8 @@ import {
 } from "@/api/datasets";
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
-import { StatusBadge, statusLabel } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

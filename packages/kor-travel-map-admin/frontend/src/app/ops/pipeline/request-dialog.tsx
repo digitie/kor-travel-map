@@ -16,7 +16,7 @@ import {
   usePipelineDatasetsCatalog,
   usePreviewUpdateRequestMutation,
 } from "@/api/pipeline";
-import { statusLabel } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ComboboxMultiple } from "@/components/ui/combobox-multiple";
@@ -87,12 +87,79 @@ function selectedMoisProvider(
   if (scope.type === "provider_dataset") {
     candidates.push(scope.provider);
   }
+  const datasetKeySet = new Set(datasetKeys);
   for (const row of rows) {
-    if (datasetKeys.includes(row.dataset_key) && isMoisProvider(row.provider)) {
+    if (datasetKeySet.has(row.dataset_key) && isMoisProvider(row.provider)) {
       candidates.push(row.provider);
     }
   }
   return candidates.find(isMoisProvider) ?? null;
+}
+
+function catalogPair(
+  rows: CatalogRow[],
+  provider: string,
+  datasetKey: string,
+): CatalogRow[] {
+  return rows.filter(
+    (row) => row.provider === provider && row.dataset_key === datasetKey,
+  );
+}
+
+function validateCatalogSelection(
+  scope: FeatureUpdateScope,
+  effectiveProviders: string[],
+  effectiveDatasetKeys: string[],
+  rows: CatalogRow[],
+): string | null {
+  if (scope.type === "provider_dataset") {
+    const pairRows = catalogPair(rows, scope.provider, scope.dataset_key);
+    const requestedSyncScope = scope.sync_scope;
+    if (pairRows.length === 0) {
+      return "현재 canonical catalog에 없는 provider/dataset 조합입니다.";
+    }
+    if (
+      requestedSyncScope &&
+      !pairRows.some((row) => {
+        const capability = row.catalog?.scope_refresh;
+        return Boolean(
+          capability?.effect === "sync_scope" &&
+            capability.supported &&
+            capability.selector !== "none" &&
+            capability.allowed_sync_scopes.some(
+              (value) => value === requestedSyncScope,
+            ),
+        );
+      })
+    ) {
+      return pairRows.some(
+        (row) => row.catalog?.scope_refresh.effect === "dataset_wide",
+      )
+        ? "dataset-wide 갱신은 sync_scope를 비워 서버가 범위를 정규화하게 해야 합니다."
+        : "현재 catalog capability가 허용하지 않는 sync_scope입니다.";
+    }
+    return null;
+  }
+  for (const provider of effectiveProviders) {
+    if (!rows.some((row) => row.provider === provider)) {
+      return `현재 canonical catalog에 없는 provider입니다: ${provider}`;
+    }
+  }
+  for (const datasetKey of effectiveDatasetKeys) {
+    if (!rows.some((row) => row.dataset_key === datasetKey)) {
+      return `현재 canonical catalog에 없는 dataset입니다: ${datasetKey}`;
+    }
+  }
+  if (effectiveProviders.length > 0 && effectiveDatasetKeys.length > 0) {
+    for (const provider of effectiveProviders) {
+      for (const datasetKey of effectiveDatasetKeys) {
+        if (catalogPair(rows, provider, datasetKey).length === 0) {
+          return `canonical catalog에 없는 exact pair입니다: ${provider}/${datasetKey}`;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function activeConflictRequestId(error: Error | null): string | null {
@@ -158,6 +225,7 @@ export function RequestCreateDialog({
   const [open, setOpen] = useState(false);
   const dialogSessionRef = useRef(0);
   const createPendingRef = useRef(false);
+  const submitPendingSessionRef = useRef<number | null>(null);
   const [scopeType, setScopeType] = useState<ScopeType>("provider_dataset");
   // provider_dataset scope
   const [scopeProvider, setScopeProvider] = useState("");
@@ -188,9 +256,10 @@ export function RequestCreateDialog({
   const [dryRun, setDryRun] = useState(true);
   const [reason, setReason] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
-  const [submittingPrecheck, setSubmittingPrecheck] = useState(false);
+  const [submittingSession, setSubmittingSession] = useState<number | null>(null);
   const [previewInputKey, setPreviewInputKey] = useState<string | null>(null);
   const [createInputKey, setCreateInputKey] = useState<string | null>(null);
+  const submittingPrecheck = submittingSession !== null;
 
   const catalogQuery = usePipelineDatasetsCatalog();
   const catalogRows = useMemo(
@@ -204,17 +273,14 @@ export function RequestCreateDialog({
         .map((provider) => ({ value: provider, label: provider })),
     [catalogRows],
   );
-  const providerDatasetOptions = useMemo(
-    () =>
-      [
-        ...new Set(
-          catalogRows
-            .filter((row) => row.provider === scopeProvider.trim())
-            .map((row) => row.dataset_key),
-        ),
-      ].sort(),
-    [catalogRows, scopeProvider],
-  );
+  const providerDatasetOptions = useMemo(() => {
+    const selectedProvider = scopeProvider.trim();
+    const options = new Set<string>();
+    for (const row of catalogRows) {
+      if (row.provider === selectedProvider) options.add(row.dataset_key);
+    }
+    return [...options].sort();
+  }, [catalogRows, scopeProvider]);
   const selectedScopeCapability = useMemo(
     () =>
       catalogRows.find(
@@ -270,7 +336,7 @@ export function RequestCreateDialog({
     setPreviewInputKey(null);
     setCreateInputKey(null);
     setFormError(null);
-    setSubmittingPrecheck(false);
+    setSubmittingSession(null);
   };
 
   const openDialog = () => {
@@ -301,15 +367,13 @@ export function RequestCreateDialog({
     if (scopeType === "provider_dataset" && scopeProvider.trim()) {
       candidates.push(scopeProvider.trim());
     }
-    const selectedDatasets =
+    const selectedDatasets = new Set(
       scopeType === "provider_dataset"
         ? [scopeDataset.trim()]
-        : splitList(datasetKeys);
+        : splitList(datasetKeys),
+    );
     for (const row of catalogRows) {
-      if (
-        selectedDatasets.includes(row.dataset_key) &&
-        isMoisProvider(row.provider)
-      ) {
+      if (selectedDatasets.has(row.dataset_key) && isMoisProvider(row.provider)) {
         candidates.push(row.provider);
       }
     }
@@ -323,70 +387,6 @@ export function RequestCreateDialog({
     scopeType,
   ]);
   const moisPrecheck = useMoisSourceSyncPrecheck(moisSelected !== null);
-  const catalogPair = (
-    rows: CatalogRow[],
-    provider: string,
-    datasetKey: string,
-  ) =>
-    rows.filter(
-      (row) => row.provider === provider && row.dataset_key === datasetKey,
-    );
-
-  const validateCatalogSelection = (
-    scope: FeatureUpdateScope,
-    effectiveProviders: string[],
-    effectiveDatasetKeys: string[],
-    rows: CatalogRow[],
-  ): string | null => {
-    if (scope.type === "provider_dataset") {
-      const pairRows = catalogPair(rows, scope.provider, scope.dataset_key);
-      const requestedSyncScope = scope.sync_scope;
-      if (pairRows.length === 0) {
-        return "현재 canonical catalog에 없는 provider/dataset 조합입니다.";
-      }
-      if (
-        requestedSyncScope &&
-        !pairRows.some(
-          (row) => {
-            const capability = row.catalog?.scope_refresh;
-            return Boolean(
-              capability?.effect === "sync_scope" &&
-                capability.supported &&
-                capability.selector !== "none" &&
-                capability.allowed_sync_scopes.includes(requestedSyncScope),
-            );
-          },
-        )
-      ) {
-        return pairRows.some(
-          (row) => row.catalog?.scope_refresh.effect === "dataset_wide",
-        )
-          ? "dataset-wide 갱신은 sync_scope를 비워 서버가 범위를 정규화하게 해야 합니다."
-          : "현재 catalog capability가 허용하지 않는 sync_scope입니다.";
-      }
-      return null;
-    }
-    for (const provider of effectiveProviders) {
-      if (!rows.some((row) => row.provider === provider)) {
-        return `현재 canonical catalog에 없는 provider입니다: ${provider}`;
-      }
-    }
-    for (const datasetKey of effectiveDatasetKeys) {
-      if (!rows.some((row) => row.dataset_key === datasetKey)) {
-        return `현재 canonical catalog에 없는 dataset입니다: ${datasetKey}`;
-      }
-    }
-    if (effectiveProviders.length > 0 && effectiveDatasetKeys.length > 0) {
-      for (const provider of effectiveProviders) {
-        for (const datasetKey of effectiveDatasetKeys) {
-          if (catalogPair(rows, provider, datasetKey).length === 0) {
-            return `canonical catalog에 없는 exact pair입니다: ${provider}/${datasetKey}`;
-          }
-        }
-      }
-    }
-    return null;
-  };
 
   const buildScope = (): FeatureUpdateScope | string => {
     if (scopeType === "provider_dataset") {
@@ -468,6 +468,7 @@ export function RequestCreateDialog({
 
   const submit = async () => {
     const dialogSession = dialogSessionRef.current;
+    if (submitPendingSessionRef.current === dialogSession) return;
     const isCurrentDialogSession = () =>
       dialogSessionRef.current === dialogSession;
     previewRequest.reset();
@@ -507,7 +508,8 @@ export function RequestCreateDialog({
       );
       return;
     }
-    setSubmittingPrecheck(true);
+    submitPendingSessionRef.current = dialogSession;
+    setSubmittingSession(dialogSession);
     setFormError(null);
     try {
       const refreshedCatalog = await catalogQuery.refetch();
@@ -601,9 +603,12 @@ export function RequestCreateDialog({
         setCreateInputKey(formInputKey);
       }
     } finally {
-      if (isCurrentDialogSession()) {
-        setSubmittingPrecheck(false);
+      if (submitPendingSessionRef.current === dialogSession) {
+        submitPendingSessionRef.current = null;
       }
+      setSubmittingSession((current) =>
+        current === dialogSession ? null : current,
+      );
     }
   };
 
