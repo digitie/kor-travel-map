@@ -367,7 +367,7 @@ async def seeded(pg_container: object, migrated_engine: AsyncEngine) -> object:
             "WHERE feature_id_a IN ('f_master', 'f_loser') "
             "OR feature_id_b IN ('f_master', 'f_loser')",
             "DELETE FROM feature.curated_features "
-            "WHERE feature_id IN ('f_master', 'f_loser')",
+            "WHERE feature_id IN ('f_master', 'f_loser', 'f_theme_reuse')",
             "DELETE FROM feature.curation_collections "
             "WHERE theme_id IN ("
             "SELECT theme_id FROM feature.curated_themes "
@@ -395,7 +395,7 @@ async def seeded(pg_container: object, migrated_engine: AsyncEngine) -> object:
             "DELETE FROM provider_sync.source_entities "
             "WHERE source_entity_key IN ('SE1', 'SE2')",
             "DELETE FROM feature.features "
-            "WHERE feature_id IN ('f_master', 'f_loser')",
+            "WHERE feature_id IN ('f_master', 'f_loser', 'f_theme_reuse')",
         ):
             await session.execute(text(statement))
 
@@ -507,7 +507,11 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
                     FROM feature.curation_items AS i
                     JOIN feature.curation_collections AS c
                       ON c.collection_id = i.collection_id
-                    WHERE c.collection_key LIKE 'legacy:legacy-merge-%'
+                    WHERE c.title IN (
+                        'legacy 단독 loser',
+                        'legacy 충돌 loser',
+                        'legacy 충돌 master'
+                    )
                       AND i.archived_at IS NULL
                     ORDER BY c.title
                     """
@@ -589,7 +593,11 @@ async def test_merge_moves_legacy_projection_into_canonical_only_master_identity
                 """
             )
         )
-        canonical_item_id, canonical_source_updated_at = (
+        (
+            canonical_item_id,
+            canonical_source_updated_at,
+            original_collection_id,
+        ) = (
             await session.execute(
                 text(
                     """
@@ -607,12 +615,15 @@ async def test_merge_moves_legacy_projection_into_canonical_only_master_identity
                         'included',
                         'canonical winner summary',
                         '{"winner": "master"}'::jsonb,
-                        now() - interval '1 hour'
+                        now() + interval '1 hour'
                     FROM feature.curation_items AS item
                     JOIN feature.curated_features AS legacy
                       ON legacy.curated_feature_id = item.curation_item_id
                     WHERE legacy.display_title = 'legacy 단독 loser'
-                    RETURNING curation_item_id::text, source_updated_at
+                    RETURNING
+                        curation_item_id::text,
+                        source_updated_at,
+                        collection_id::text
                     """
                 )
             )
@@ -628,6 +639,33 @@ async def test_merge_moves_legacy_projection_into_canonical_only_master_identity
                 """
             )
         )
+        await session.execute(
+            text(
+                """
+                UPDATE feature.curated_features
+                SET display_summary = 'rename 뒤 provider 갱신',
+                    updated_at = clock_timestamp()
+                WHERE display_title = 'legacy 단독 loser'
+                """
+            )
+        )
+        mapped_collection_id = str(
+            (
+                await session.execute(
+                    text(
+                        """
+                        SELECT item.collection_id::text
+                        FROM feature.curation_items AS item
+                        JOIN feature.curated_features AS legacy
+                          ON legacy.curated_feature_id =
+                             item.legacy_projection_id
+                        WHERE legacy.display_title = 'legacy 단독 loser'
+                        """
+                    )
+                )
+            ).scalar_one()
+        )
+        assert mapped_collection_id == original_collection_id
 
     async with AsyncSession(migrated_engine) as session, session.begin():
         await merge_from_review(session, seeded, merged_by="op-1", reason="dup")
@@ -677,6 +715,140 @@ async def test_merge_moves_legacy_projection_into_canonical_only_master_identity
         {"winner": "master"},
         canonical_source_updated_at,
     )
+
+
+async def test_theme_slug_reuse_cannot_take_legacy_collection(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        original = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                        legacy.theme_id::text,
+                        legacy.source_id::text,
+                        item.collection_id::text,
+                        collection.collection_key
+                    FROM feature.curated_features AS legacy
+                    JOIN feature.curation_items AS item
+                      ON item.legacy_projection_id =
+                         legacy.curated_feature_id
+                    JOIN feature.curation_collections AS collection
+                      ON collection.collection_id = item.collection_id
+                    WHERE legacy.display_title = 'legacy 단독 loser'
+                    """
+                )
+            )
+        ).one()
+        await session.execute(
+            text(
+                """
+                UPDATE feature.curated_themes
+                SET theme_slug = 'legacy-merge-loser-only-renamed',
+                    updated_at = clock_timestamp()
+                WHERE theme_id = CAST(:theme_id AS uuid)
+                """
+            ),
+            {"theme_id": original.theme_id},
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO feature.features (
+                    feature_id, kind, name, category, detail, status
+                ) VALUES (
+                    'f_theme_reuse', 'place', 'slug 재사용 장소',
+                    '01070100', '{}'::jsonb, 'active'
+                )
+                """
+            )
+        )
+        reused_theme_id = str(
+            (
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO feature.curated_themes (
+                            theme_slug, theme_name, theme_group, visibility
+                        ) VALUES (
+                            'legacy-merge-loser-only',
+                            'slug 재사용 theme',
+                            'test',
+                            'public'
+                        )
+                        RETURNING theme_id::text
+                        """
+                    )
+                )
+            ).scalar_one()
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO feature.curated_features (
+                    theme_id, feature_id, source_id,
+                    curation_status, selection_origin, display_title
+                ) VALUES (
+                    CAST(:theme_id AS uuid),
+                    'f_theme_reuse',
+                    CAST(:source_id AS uuid),
+                    'curated',
+                    'source_rule',
+                    'legacy 단독 loser'
+                )
+                """
+            ),
+            {
+                "theme_id": reused_theme_id,
+                "source_id": original.source_id,
+            },
+        )
+
+    async with AsyncSession(migrated_engine) as session:
+        original_owner = (
+            await session.execute(
+                text(
+                    """
+                    SELECT theme_id::text, source_id::text, collection_key
+                    FROM feature.curation_collections
+                    WHERE collection_id = CAST(:collection_id AS uuid)
+                    """
+                ),
+                {"collection_id": original.collection_id},
+            )
+        ).one()
+        reused = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                        collection.collection_id::text,
+                        collection.theme_id::text,
+                        collection.source_id::text,
+                        collection.collection_key
+                    FROM feature.curated_features AS legacy
+                    JOIN feature.curation_items AS item
+                      ON item.legacy_projection_id =
+                         legacy.curated_feature_id
+                    JOIN feature.curation_collections AS collection
+                      ON collection.collection_id = item.collection_id
+                    WHERE legacy.feature_id = 'f_theme_reuse'
+                    """
+                )
+            )
+        ).one()
+
+    assert original_owner == (
+        original.theme_id,
+        original.source_id,
+        original.collection_key,
+    )
+    assert reused.collection_id != original.collection_id
+    assert reused.theme_id == reused_theme_id
+    assert reused.source_id == original.source_id
+    assert reused.collection_key != original.collection_key
 
 
 async def test_merge_keeps_reinserted_nonconflicting_legacy_projection_active(

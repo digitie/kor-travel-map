@@ -406,6 +406,23 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     )
                 )
             ).scalar_one()
+            unstable_legacy_collection_count = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.curation_collections
+                        WHERE source_id IS NOT NULL
+                          AND metadata @>
+                              '{"migrated_from": "feature.curated_features"}'::jsonb
+                          AND collection_key IS DISTINCT FROM (
+                              'legacy:' || theme_id::text || ':' ||
+                              source_id::text || ':' || md5(title)
+                          )
+                        """
+                    )
+                )
+            ).scalar_one()
         assert provenance_columns == {
             ("curated_features", "operator_updated_by"),
             ("curated_features", "operator_updated_at"),
@@ -416,6 +433,7 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
         }
         assert projection_fk == (True, True)
         assert mapped_projection_count > 0
+        assert unstable_legacy_collection_count == 0
         assert legacy_provenance == [
             ("migration external provenance", "external-principal", True),
             ("migration legacy override", "external-principal", True),
@@ -724,7 +742,30 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     )
                 )
             ).scalar_one()
+            old_key_mismatch_count = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.curation_collections AS collection
+                        JOIN feature.curated_themes AS theme
+                          ON theme.theme_id = collection.theme_id
+                        WHERE collection.source_id IS NOT NULL
+                          AND collection.metadata @>
+                              '{"migrated_from": "feature.curated_features"}'::jsonb
+                          AND collection.collection_key IS DISTINCT FROM (
+                              'legacy:' || theme.theme_slug || ':' ||
+                              substr(md5(
+                                  collection.source_id::text || ':' ||
+                                  collection.title
+                              ), 1, 20)
+                          )
+                        """
+                    )
+                )
+            ).scalar_one()
         assert remaining_provenance_columns == 0
+        assert old_key_mismatch_count == 0
         assert "source_present" not in (
             downgraded_indexes["idx_curation_items_collection_status_order"]
         )
@@ -747,6 +788,25 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
         )
         assert "uq_curation_items_identity" in recovered_indexes
         assert "uq_curation_items_legacy_projection_id" in recovered_indexes
+        async with target_engine.connect() as connection:
+            recovered_key_mismatch_count = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.curation_collections
+                        WHERE source_id IS NOT NULL
+                          AND metadata @>
+                              '{"migrated_from": "feature.curated_features"}'::jsonb
+                          AND collection_key IS DISTINCT FROM (
+                              'legacy:' || theme_id::text || ':' ||
+                              source_id::text || ':' || md5(title)
+                          )
+                        """
+                    )
+                )
+            ).scalar_one()
+        assert recovered_key_mismatch_count == 0
     finally:
         await target_engine.dispose()
         async with admin_engine.connect() as connection:
