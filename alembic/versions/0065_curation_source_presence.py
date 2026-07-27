@@ -1028,6 +1028,13 @@ def upgrade() -> None:
             WHERE collection.source_id IS NOT NULL
               AND collection.metadata @>
                   '{"migrated_from": "feature.curated_features"}'::jsonb
+              AND NOT (
+                  collection.collection_key ~
+                      '^legacy:quarantine:[0-9a-f]{8}-[0-9a-f]{4}-'
+                      '[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-'
+                      '[0-9a-f]{12}$'
+                  AND collection.created_by = 'migration:0065'
+              )
         ), ranked AS (
             SELECT
                 legacy_keys.*,
@@ -1154,46 +1161,6 @@ def upgrade() -> None:
         SET legacy_projection_id = legacy.curated_feature_id
         FROM feature.curated_features AS legacy
         WHERE item.curation_item_id = legacy.curated_feature_id
-        """
-    )
-    # 0064 slug 재사용으로 collection owner가 덮인 경우, projection과 같은 stored
-    # external identity의 canonical merge pair뿐 아니라 owner 교체 전에 생성된
-    # canonical-only item도 원래 논리 group에 속한다. 현재 owner projection의
-    # 최초 created_at을 경계로 보존해 projection 이동 뒤에도 안전하게 분리한다.
-    op.execute(
-        """
-        CREATE TEMP TABLE curation_owner_repairs_0065
-        ON COMMIT DROP
-        AS
-        SELECT
-            legacy.curated_feature_id AS legacy_projection_id,
-            item.collection_id AS old_collection_id,
-            item.external_item_id,
-            COALESCE(
-                (
-                    SELECT min(current_item.created_at)
-                    FROM feature.curation_items AS current_item
-                    JOIN feature.curated_features AS current_legacy
-                      ON current_legacy.curated_feature_id =
-                         current_item.legacy_projection_id
-                    WHERE current_item.collection_id = item.collection_id
-                      AND current_legacy.theme_id = collection.theme_id
-                      AND current_legacy.source_id
-                          IS NOT DISTINCT FROM collection.source_id
-                ),
-                (
-                    SELECT owner_theme.created_at
-                    FROM feature.curated_themes AS owner_theme
-                    WHERE owner_theme.theme_id = collection.theme_id
-                )
-            ) AS owner_changed_at
-        FROM feature.curated_features AS legacy
-        JOIN feature.curation_items AS item
-          ON item.legacy_projection_id = legacy.curated_feature_id
-        JOIN feature.curation_collections AS collection
-          ON collection.collection_id = item.collection_id
-        WHERE collection.theme_id <> legacy.theme_id
-           OR collection.source_id IS DISTINCT FROM legacy.source_id
         """
     )
     # 0064까지 partial unique가 허용한 tombstone+active resurrection 및 중복
@@ -1437,119 +1404,39 @@ def upgrade() -> None:
           )
         """
     )
-    op.execute(
-        """
-        WITH pair_targets AS (
-            SELECT
-                repair.old_collection_id,
-                repair.external_item_id,
-                min(mapped.collection_id::text)::uuid AS target_collection_id
-            FROM curation_owner_repairs_0065 AS repair
-            JOIN feature.curation_items AS mapped
-              ON mapped.legacy_projection_id =
-                 repair.legacy_projection_id
-            GROUP BY
-                repair.old_collection_id,
-                repair.external_item_id
-            HAVING count(DISTINCT mapped.collection_id) = 1
-        )
-        UPDATE feature.curation_items AS companion
-        SET collection_id = target.target_collection_id,
-            updated_at = clock_timestamp()
-        FROM pair_targets AS target
-        WHERE companion.collection_id = target.old_collection_id
-          AND companion.legacy_projection_id IS NULL
-          AND companion.external_item_id = target.external_item_id
-          AND companion.collection_id <> target.target_collection_id
-          AND NOT EXISTS (
-              SELECT 1
-              FROM feature.curation_items AS occupied
-              WHERE occupied.collection_id =
-                    target.target_collection_id
-                AND occupied.external_item_id =
-                    companion.external_item_id
-                AND occupied.feature_id IS NOT DISTINCT FROM
-                    companion.feature_id
-                AND occupied.curation_item_id <>
-                    companion.curation_item_id
-          )
-        """
-    )
-    op.execute(
-        """
-        WITH single_owner_targets AS (
-            SELECT
-                repair.old_collection_id,
-                min(repair.owner_changed_at) AS owner_changed_at,
-                min(mapped.collection_id::text)::uuid AS target_collection_id
-            FROM curation_owner_repairs_0065 AS repair
-            JOIN feature.curation_items AS mapped
-              ON mapped.legacy_projection_id =
-                 repair.legacy_projection_id
-            GROUP BY repair.old_collection_id
-            HAVING count(DISTINCT mapped.collection_id) = 1
-        )
-        UPDATE feature.curation_items AS companion
-        SET collection_id = target.target_collection_id,
-            updated_at = clock_timestamp()
-        FROM single_owner_targets AS target
-        WHERE companion.collection_id = target.old_collection_id
-          AND companion.legacy_projection_id IS NULL
-          AND target.owner_changed_at IS NOT NULL
-          AND companion.created_at < target.owner_changed_at
-          AND companion.collection_id <> target.target_collection_id
-          AND NOT EXISTS (
-              SELECT 1
-              FROM feature.curation_items AS occupied
-              WHERE occupied.collection_id =
-                    target.target_collection_id
-                AND occupied.external_item_id =
-                    companion.external_item_id
-                AND occupied.feature_id IS NOT DISTINCT FROM
-                    companion.feature_id
-                AND occupied.curation_item_id <>
-                    companion.curation_item_id
-          )
-        """
-    )
-    # 구 스키마는 같은 transaction 안의 owner 교체 전후 canonical-only item이나
-    # 3회 이상 slug 재사용 이력을 완전히 표현하지 못한다. 확정할 수 없는 item을
-    # 임의 owner의 public collection에 노출하지 않고 원 payload 그대로 admin-only
-    # quarantine으로 옮겨 명시적 재분류 대상으로 보존한다.
+    # 구 스키마는 owner 교체 시점과 canonical-only item의 원 owner를 표현하지
+    # 못한다. external identity 일치도 여러 theme가 같은 provider record를 쓸 수
+    # 있어 durable owner 증거가 아니다. 모든 legacy-marker collection의
+    # canonical-only item을 원 payload 그대로 admin-only quarantine으로 옮겨
+    # 명시적 재분류 대상으로 보존한다.
     op.execute(
         """
         CREATE TEMP TABLE curation_owner_quarantines_0065
         ON COMMIT DROP
         AS
-        WITH repair_summary AS (
-            SELECT
-                repair.old_collection_id,
-                min(repair.owner_changed_at) AS owner_changed_at
-            FROM curation_owner_repairs_0065 AS repair
-            GROUP BY repair.old_collection_id
-        )
         SELECT
-            summary.old_collection_id,
+            candidate.collection_id AS old_collection_id,
             x_extension.gen_random_uuid() AS quarantine_collection_id
-        FROM repair_summary AS summary
-        WHERE EXISTS (
-            SELECT 1
-            FROM feature.curation_items AS companion
-            WHERE companion.collection_id = summary.old_collection_id
-              AND companion.legacy_projection_id IS NULL
-              AND (
-                  summary.owner_changed_at IS NULL
-                  OR companion.created_at <= summary.owner_changed_at
-                  OR EXISTS (
-                      SELECT 1
-                      FROM curation_owner_repairs_0065 AS paired
-                      WHERE paired.old_collection_id =
-                            summary.old_collection_id
-                        AND paired.external_item_id =
-                            companion.external_item_id
-                  )
-              )
-        )
+        FROM feature.curation_collections AS candidate
+        WHERE (
+              candidate.metadata ->> 'migrated_from' =
+                  'feature.curated_features'
+              OR candidate.collection_key LIKE 'legacy:%'
+          )
+          AND NOT (
+              candidate.collection_key ~
+                  '^legacy:quarantine:[0-9a-f]{8}-[0-9a-f]{4}-'
+                  '[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-'
+                  '[0-9a-f]{12}$'
+              AND candidate.created_by = 'migration:0065'
+          )
+          AND EXISTS (
+              SELECT 1
+              FROM feature.curation_items AS companion
+              WHERE companion.collection_id = candidate.collection_id
+                AND companion.legacy_projection_id IS NULL
+          )
+        GROUP BY candidate.collection_id
         """
     )
     op.execute(
@@ -1598,39 +1485,16 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        WITH repair_summary AS (
-            SELECT
-                repair.old_collection_id,
-                min(repair.owner_changed_at) AS owner_changed_at
-            FROM curation_owner_repairs_0065 AS repair
-            GROUP BY repair.old_collection_id
-        )
         UPDATE feature.curation_items AS companion
         SET collection_id = quarantine.quarantine_collection_id,
             updated_at = clock_timestamp()
         FROM curation_owner_quarantines_0065 AS quarantine
-        JOIN repair_summary AS summary
-          ON summary.old_collection_id =
-             quarantine.old_collection_id
         WHERE companion.collection_id =
               quarantine.old_collection_id
           AND companion.legacy_projection_id IS NULL
-          AND (
-              summary.owner_changed_at IS NULL
-              OR companion.created_at <= summary.owner_changed_at
-              OR EXISTS (
-                  SELECT 1
-                  FROM curation_owner_repairs_0065 AS paired
-                  WHERE paired.old_collection_id =
-                        summary.old_collection_id
-                    AND paired.external_item_id =
-                        companion.external_item_id
-              )
-          )
         """
     )
     op.execute("DROP TABLE curation_owner_quarantines_0065")
-    op.execute("DROP TABLE curation_owner_repairs_0065")
 
 
 def downgrade() -> None:
@@ -1694,6 +1558,13 @@ def downgrade() -> None:
             WHERE collection.source_id IS NOT NULL
               AND collection.metadata @>
                   '{"migrated_from": "feature.curated_features"}'::jsonb
+              AND NOT (
+                  collection.collection_key ~
+                      '^legacy:quarantine:[0-9a-f]{8}-[0-9a-f]{4}-'
+                      '[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-'
+                      '[0-9a-f]{12}$'
+                  AND collection.created_by = 'migration:0065'
+              )
         ), ranked AS (
             SELECT
                 legacy_keys.*,

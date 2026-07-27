@@ -86,6 +86,11 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                         '01070100', '{}'::jsonb, 'active'
                     ),
                     (
+                        'feature:migration-theft-a-collision', 'place',
+                        'migration theft A identity collision fixture',
+                        '01070100', '{}'::jsonb, 'active'
+                    ),
+                    (
                         'feature:migration-theft-b', 'place',
                         'migration theft B fixture',
                         '01070100', '{}'::jsonb, 'active'
@@ -93,6 +98,26 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                     (
                         'feature:migration-theft-c', 'place',
                         'migration theft C fixture',
+                        '01070100', '{}'::jsonb, 'active'
+                    ),
+                    (
+                        'feature:migration-theft-c-safe', 'place',
+                        'migration theft C safe fixture',
+                        '01070100', '{}'::jsonb, 'active'
+                    ),
+                    (
+                        'feature:migration-deleted-theft-a', 'place',
+                        'migration deleted theft A fixture',
+                        '01070100', '{}'::jsonb, 'active'
+                    ),
+                    (
+                        'feature:migration-deleted-theft-c', 'place',
+                        'migration deleted theft C fixture',
+                        '01070100', '{}'::jsonb, 'active'
+                    ),
+                    (
+                        'feature:migration-quarantine-prefix', 'place',
+                        'migration quarantine prefix fixture',
                         '01070100', '{}'::jsonb, 'active'
                     ),
                     (
@@ -427,6 +452,24 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                     'source_rule',
                     'migration theft title'
                 FROM theme CROSS JOIN source
+                UNION ALL
+                SELECT
+                    theme.theme_id,
+                    'feature:migration-theft-a-collision',
+                    source.source_id,
+                    'curated',
+                    'source_rule',
+                    'migration theft title'
+                FROM theme CROSS JOIN source
+                UNION ALL
+                SELECT
+                    theme.theme_id,
+                    'feature:migration-deleted-theft-a',
+                    source.source_id,
+                    'curated',
+                    'source_rule',
+                    'migration deleted theft title'
+                FROM theme CROSS JOIN source
                 """
             )
         )
@@ -458,6 +501,23 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                       'migration theft title'
                   AND legacy.feature_id =
                       'feature:migration-theft-a'
+                UNION ALL
+                SELECT
+                    item.collection_id,
+                    'feature:migration-theft-master',
+                    NULL,
+                    'migration-deleted-theft-orphan',
+                    'migration deleted theft orphan',
+                    'included',
+                    now() - interval '1 day'
+                FROM feature.curation_items AS item
+                JOIN feature.curated_features AS legacy
+                  ON legacy.curated_feature_id =
+                     item.curation_item_id
+                WHERE legacy.display_title =
+                      'migration deleted theft title'
+                  AND legacy.feature_id =
+                      'feature:migration-deleted-theft-a'
                 UNION ALL
                 SELECT
                     item.collection_id,
@@ -596,8 +656,9 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                 """
             )
         )
-        # 같은 legacy key를 세 번째 theme가 다시 사용하면 old collection 하나에
-        # A/B/C projection과 canonical companion이 함께 섞인다.
+        # C projection은 owner 탈취보다 오래전에 다른 slug로 만들어 둔다.
+        # projection.created_at을 탈취 경계로 쓰면 이후 B에 추가된 ambiguous item이
+        # C의 public collection에 남으므로 이 순서가 회귀를 재현한다.
         await connection.execute(
             text(
                 """
@@ -621,8 +682,136 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                     INSERT INTO feature.curated_themes (
                         theme_slug, theme_name, theme_group, visibility
                     ) VALUES (
-                        'migration-owner-a',
+                        'migration-owner-c-initial',
                         'migration owner C',
+                        'test',
+                        'public'
+                    )
+                    RETURNING theme_id
+                )
+                INSERT INTO feature.curated_features (
+                    theme_id, feature_id, source_id,
+                    curation_status, selection_origin, display_title,
+                    created_at, updated_at
+                )
+                SELECT
+                    theme.theme_id,
+                    'feature:migration-theft-c',
+                    source.source_id,
+                    'curated',
+                    'source_rule',
+                    'migration theft title',
+                    now() - interval '2 days',
+                    now() - interval '2 days'
+                FROM theme CROSS JOIN source
+                UNION ALL
+                SELECT
+                    theme.theme_id,
+                    'feature:migration-theft-c-safe',
+                    source.source_id,
+                    'curated',
+                    'source_rule',
+                    'migration theft title',
+                    now() - interval '2 days',
+                    now() - interval '2 days'
+                FROM theme CROSS JOIN source
+                UNION ALL
+                SELECT
+                    theme.theme_id,
+                    'feature:migration-deleted-theft-c',
+                    source.source_id,
+                    'curated',
+                    'source_rule',
+                    'migration deleted theft title',
+                    now() - interval '2 days',
+                    now() - interval '2 days'
+                FROM theme CROSS JOIN source
+                """
+            )
+        )
+        # 같은 legacy key를 세 번째 theme가 다시 사용하면 0064 trigger가 old
+        # collection owner를 C로 덮고 A/B/C projection과 companion을 한데 섞는다.
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curated_themes
+                SET theme_slug = 'migration-owner-a',
+                    updated_at = clock_timestamp()
+                WHERE theme_slug = 'migration-owner-c-initial'
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curated_features
+                SET display_summary = '기존 C projection의 owner 탈취',
+                    updated_at = now() + interval '12 hours'
+                WHERE feature_id IN (
+                      'feature:migration-theft-c',
+                      'feature:migration-theft-c-safe',
+                      'feature:migration-deleted-theft-c'
+                  )
+                """
+            )
+        )
+        # old projection이 upgrade 전에 삭제돼 repair map 증거가 사라져도
+        # legacy-marker collection의 canonical-only orphan은 공개하지 않는다.
+        await connection.execute(
+            text(
+                """
+                DELETE FROM feature.curated_features
+                WHERE feature_id = 'feature:migration-deleted-theft-a'
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curation_items AS orphan
+                SET external_item_id = current_projection.external_item_id
+                FROM feature.curation_items AS current_projection
+                JOIN feature.curated_features AS current_legacy
+                  ON current_legacy.curated_feature_id =
+                     current_projection.curation_item_id
+                WHERE orphan.place_name =
+                      'migration deleted theft orphan'
+                  AND current_legacy.feature_id =
+                      'feature:migration-deleted-theft-c'
+                """
+            )
+        )
+        # 0064 marker는 admin collection metadata whole-object PATCH로 지울 수
+        # 있었다. immutable legacy key namespace도 함께 봐야 격리를 우회하지
+        # 못한다.
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curation_collections
+                SET metadata = '{}'::jsonb,
+                    updated_by = 'migration-admin-metadata-patch',
+                    updated_at = clock_timestamp()
+                WHERE title = 'migration deleted theft title'
+                """
+            )
+        )
+        # `quarantine:`는 0064 theme_slug에서 예약되지 않았다. prefix만으로
+        # migration-generated quarantine을 제외하면 정상 legacy collection이
+        # 격리를 우회한다.
+        await connection.execute(
+            text(
+                """
+                WITH source AS (
+                    SELECT source_id
+                    FROM feature.curated_sources
+                    WHERE provider = 'migration-provider'
+                      AND dataset_key = 'migration-dataset'
+                ), theme AS (
+                    INSERT INTO feature.curated_themes (
+                        theme_slug, theme_name, theme_group, visibility
+                    ) VALUES (
+                        'quarantine:operator-theme',
+                        'migration quarantine prefix theme',
                         'test',
                         'public'
                     )
@@ -634,12 +823,66 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                 )
                 SELECT
                     theme.theme_id,
-                    'feature:migration-theft-c',
+                    'feature:migration-quarantine-prefix',
                     source.source_id,
                     'curated',
                     'source_rule',
-                    'migration theft title'
+                    'migration quarantine prefix title'
                 FROM theme CROSS JOIN source
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
+                INSERT INTO feature.curation_items (
+                    collection_id,
+                    feature_id,
+                    external_item_id,
+                    place_name,
+                    status
+                )
+                SELECT
+                    projection.collection_id,
+                    'feature:migration-theft-master',
+                    'migration-quarantine-prefix-canonical',
+                    'migration quarantine prefix canonical',
+                    'included'
+                FROM feature.curation_items AS projection
+                JOIN feature.curated_features AS legacy
+                  ON legacy.curated_feature_id =
+                     projection.curation_item_id
+                WHERE legacy.feature_id =
+                      'feature:migration-quarantine-prefix'
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curation_collections
+                SET metadata = '{}'::jsonb,
+                    updated_by = 'migration-admin-metadata-patch',
+                    updated_at = clock_timestamp()
+                WHERE title = 'migration quarantine prefix title'
+                """
+            )
+        )
+        # 서로 다른 old/current theme가 같은 provider external identity를 가질 수
+        # 있다. 이때 current pair를 old repair target으로 이동하지 않고
+        # ambiguity quarantine으로 보내야 한다.
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curation_items AS item
+                SET external_item_id = 'migration-shared-owner-external'
+                FROM feature.curated_features AS legacy
+                WHERE item.curation_item_id =
+                      legacy.curated_feature_id
+                  AND legacy.feature_id IN (
+                      'feature:migration-theft-a-collision',
+                      'feature:migration-theft-c'
+                  )
                 """
             )
         )
@@ -669,6 +912,38 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                       'migration theft title'
                   AND legacy.feature_id =
                       'feature:migration-theft-c'
+                UNION ALL
+                SELECT
+                    item.collection_id,
+                    'feature:migration-theft-master',
+                    item.external_item_id,
+                    'migration theft C ambiguous canonical pair',
+                    'included',
+                    now() + interval '1 day'
+                FROM feature.curation_items AS item
+                JOIN feature.curated_features AS legacy
+                  ON legacy.curated_feature_id =
+                     item.curation_item_id
+                WHERE legacy.display_title =
+                      'migration theft title'
+                  AND legacy.feature_id =
+                      'feature:migration-theft-c'
+                UNION ALL
+                SELECT
+                    item.collection_id,
+                    'feature:migration-theft-master',
+                    item.external_item_id,
+                    'migration theft C safe canonical pair',
+                    'included',
+                    now() + interval '1 day'
+                FROM feature.curation_items AS item
+                JOIN feature.curated_features AS legacy
+                  ON legacy.curated_feature_id =
+                     item.curation_item_id
+                WHERE legacy.display_title =
+                      'migration theft title'
+                  AND legacy.feature_id =
+                      'feature:migration-theft-c-safe'
                 """
             )
         )
@@ -892,7 +1167,7 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     )
                 )
             ).scalar_one()
-            companion_owner_mismatch_count = (
+            quarantined_canonical_only_count = (
                 await connection.execute(
                     text(
                         """
@@ -901,61 +1176,16 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                         JOIN feature.curation_collections AS collection
                           ON collection.collection_id =
                              companion.collection_id
-                        JOIN feature.curated_features AS source_projection
-                          ON source_projection.feature_id =
-                             'feature:migration-theft-a'
-                        WHERE companion.place_name =
-                              'migration theft canonical master'
-                          AND (
-                              collection.theme_id <>
-                                  source_projection.theme_id
-                              OR collection.source_id IS DISTINCT FROM
-                                  source_projection.source_id
-                              OR collection.status <> 'published'
-                              OR collection.visibility <> 'public'
-                          )
-                        """
-                    )
-                )
-            ).scalar_one()
-            second_owner_pair_mismatch_count = (
-                await connection.execute(
-                    text(
-                        """
-                        SELECT count(*)
-                        FROM feature.curation_items AS companion
-                        JOIN feature.curation_collections AS collection
-                          ON collection.collection_id =
-                             companion.collection_id
-                        JOIN feature.curated_features AS source_projection
-                          ON source_projection.feature_id =
-                             'feature:migration-theft-b'
-                        WHERE companion.place_name =
-                              'migration theft B canonical pair'
-                          AND (
-                              collection.theme_id <>
-                                  source_projection.theme_id
-                              OR collection.source_id IS DISTINCT FROM
-                                  source_projection.source_id
-                              OR collection.status <> 'published'
-                              OR collection.visibility <> 'public'
-                          )
-                        """
-                    )
-                )
-            ).scalar_one()
-            ambiguous_companion_quarantine_count = (
-                await connection.execute(
-                    text(
-                        """
-                        SELECT count(*)
-                        FROM feature.curation_items AS companion
-                        JOIN feature.curation_collections AS collection
-                          ON collection.collection_id =
-                             companion.collection_id
-                        WHERE companion.external_item_id IN (
-                              'migration-theft-pre-owner-other',
-                              'migration-theft-ambiguous-owner'
+                        WHERE companion.place_name IN (
+                              'migration theft canonical master',
+                              'migration theft pre-owner other',
+                              'migration theft B canonical pair',
+                              'migration theft ambiguous owner',
+                              'migration theft post-owner',
+                              'migration theft C ambiguous canonical pair',
+                              'migration theft C safe canonical pair',
+                              'migration deleted theft orphan',
+                              'migration quarantine prefix canonical'
                           )
                           AND collection.status = 'draft'
                           AND collection.visibility = 'admin_only'
@@ -965,32 +1195,35 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     )
                 )
             ).scalar_one()
-            post_theft_companion_owner_mismatch_count = (
+            quarantine_roundtrip_state = (
                 await connection.execute(
                     text(
                         """
-                        SELECT count(*)
-                        FROM feature.curation_items AS companion
-                        JOIN feature.curation_collections AS collection
-                          ON collection.collection_id =
-                             companion.collection_id
-                        JOIN feature.curated_features AS source_projection
-                          ON source_projection.feature_id =
-                             'feature:migration-theft-c'
-                        WHERE companion.external_item_id =
-                              'migration-theft-post-owner'
-                          AND (
-                              collection.theme_id <>
-                                  source_projection.theme_id
-                              OR collection.source_id IS DISTINCT FROM
-                                  source_projection.source_id
-                              OR collection.status <> 'published'
-                              OR collection.visibility <> 'public'
-                          )
+                        SELECT
+                            collection.collection_id::text,
+                            collection.collection_key,
+                            collection.metadata ->>
+                                'original_collection_id',
+                            array_agg(
+                                item.curation_item_id::text
+                                ORDER BY item.curation_item_id
+                            ) FILTER (
+                                WHERE item.curation_item_id IS NOT NULL
+                            )
+                        FROM feature.curation_collections AS collection
+                        LEFT JOIN feature.curation_items AS item
+                          ON item.collection_id =
+                             collection.collection_id
+                        WHERE collection.collection_key LIKE
+                              'legacy:quarantine:%'
+                          AND collection.metadata @>
+                              '{"migration_quarantine": "0065"}'::jsonb
+                        GROUP BY collection.collection_id
+                        ORDER BY collection.collection_id
                         """
                     )
                 )
-            ).scalar_one()
+            ).all()
             manual_collision_keys_preserved = (
                 await connection.execute(
                     text(
@@ -1044,10 +1277,8 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
         assert unstable_legacy_collection_count == 0
         assert split_collection_state == (2, 1, 1)
         assert stolen_owner_mismatch_count == 0
-        assert companion_owner_mismatch_count == 0
-        assert second_owner_pair_mismatch_count == 0
-        assert post_theft_companion_owner_mismatch_count == 0
-        assert ambiguous_companion_quarantine_count == 2
+        assert quarantined_canonical_only_count == 9
+        assert quarantine_roundtrip_state
         assert manual_collision_keys_preserved == 3
         assert stable_group_collection_state == (1, True)
         assert legacy_provenance == [
@@ -1352,6 +1583,19 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     """
                 )
             )
+            await connection.execute(
+                text(
+                    """
+                    UPDATE feature.curation_collections
+                    SET metadata = metadata ||
+                        '{"migrated_from": "feature.curated_features"}'::jsonb,
+                        updated_by = 'migration-admin-metadata-patch',
+                        updated_at = clock_timestamp()
+                    WHERE collection_key LIKE 'legacy:quarantine:%'
+                      AND created_by = 'migration:0065'
+                    """
+                )
+            )
         await target_engine.dispose()
         await asyncio.to_thread(
             _run_alembic,
@@ -1389,6 +1633,14 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                         WHERE collection.source_id IS NOT NULL
                           AND collection.metadata @>
                               '{"migrated_from": "feature.curated_features"}'::jsonb
+                          AND NOT (
+                              collection.collection_key ~
+                                  '^legacy:quarantine:[0-9a-f]{8}-[0-9a-f]{4}-'
+                                  '[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-'
+                                  '[0-9a-f]{12}$'
+                              AND collection.created_by =
+                                  'migration:0065'
+                          )
                           AND collection.collection_key IS DISTINCT FROM (
                               'legacy:' || theme.theme_slug || ':' ||
                               substr(md5(
@@ -1463,6 +1715,13 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                         WHERE source_id IS NOT NULL
                           AND metadata @>
                               '{"migrated_from": "feature.curated_features"}'::jsonb
+                          AND NOT (
+                              collection_key ~
+                                  '^legacy:quarantine:[0-9a-f]{8}-[0-9a-f]{4}-'
+                                  '[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-'
+                                  '[0-9a-f]{12}$'
+                              AND created_by = 'migration:0065'
+                          )
                           AND collection_key IS DISTINCT FROM (
                               'legacy:' || theme_id::text || ':' ||
                               source_id::text || ':' || md5(title)
@@ -1481,7 +1740,37 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     )
                 )
             ).scalar_one()
+            recovered_quarantine_roundtrip_state = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            collection.collection_id::text,
+                            collection.collection_key,
+                            collection.metadata ->>
+                                'original_collection_id',
+                            array_agg(
+                                item.curation_item_id::text
+                                ORDER BY item.curation_item_id
+                            ) FILTER (
+                                WHERE item.curation_item_id IS NOT NULL
+                            )
+                        FROM feature.curation_collections AS collection
+                        LEFT JOIN feature.curation_items AS item
+                          ON item.collection_id =
+                             collection.collection_id
+                        WHERE collection.collection_key LIKE
+                              'legacy:quarantine:%'
+                          AND collection.metadata @>
+                              '{"migration_quarantine": "0065"}'::jsonb
+                        GROUP BY collection.collection_id
+                        ORDER BY collection.collection_id
+                        """
+                    )
+                )
+            ).all()
         assert recovered_key_mismatch_count == 0
+        assert recovered_quarantine_roundtrip_state == quarantine_roundtrip_state
     finally:
         await target_engine.dispose()
         async with admin_engine.connect() as connection:
