@@ -67,6 +67,7 @@ import { integerString, ordered, validateForm } from "@/lib/form-validation";
 
 import {
   datasetGridOpenIssueCount,
+  datasetIssueSeveritySummary,
   datasetRowHasOpenIssue,
   datasetRowOpenIssueCount,
 } from "./dataset-issues";
@@ -1580,14 +1581,6 @@ function HistoryPanel({
 
 // ── 행 상세 drawer ─────────────────────────────────────────────────────
 
-function severitySummary(counts: Record<string, number>): string {
-  const parts: string[] = [];
-  for (const [severity, count] of Object.entries(counts)) {
-    if (count > 0) parts.push(`${severity} ${count}`);
-  }
-  return parts.length > 0 ? ` (${parts.join(" · ")}` : "";
-}
-
 function DatasetDrawer({
   selection,
   detail,
@@ -1685,7 +1678,9 @@ function DatasetDrawer({
                 }
               >
                 데이터셋 이슈 {formatCount(detail.dataset_issues.open_count)}건
-                {severitySummary(detail.dataset_issues.severity_counts)}
+                {datasetIssueSeveritySummary(
+                  detail.dataset_issues.severity_counts,
+                )}
               </Link>
             ) : null}
             {detail && detail.provider_issues.open_count > 0 ? (
@@ -1694,7 +1689,9 @@ function DatasetDrawer({
                 href={`/admin/issues?provider=${encodeURIComponent(selection.provider)}`}
               >
                 제공자 이슈 {formatCount(detail.provider_issues.open_count)}건
-                {severitySummary(detail.provider_issues.severity_counts)}
+                {datasetIssueSeveritySummary(
+                  detail.provider_issues.severity_counts,
+                )}
               </Link>
             ) : null}
           </div>
@@ -2229,7 +2226,7 @@ export function DatasetsClient({
           <span className="flex flex-wrap items-center gap-1">
             {row.original.dataset_issues.open_count > 0 ? (
               <Badge
-                title={`데이터셋 이슈${severitySummary(row.original.dataset_issues.severity_counts)}`}
+                title={`데이터셋 이슈${datasetIssueSeveritySummary(row.original.dataset_issues.severity_counts)}`}
                 variant="destructive"
               >
                 {formatCount(row.original.dataset_issues.open_count)}
@@ -2237,7 +2234,7 @@ export function DatasetsClient({
             ) : null}
             {row.original.provider_issues.open_count > 0 ? (
               <Badge
-                title={`제공자 이슈${severitySummary(row.original.provider_issues.severity_counts)}`}
+                title={`제공자 이슈${datasetIssueSeveritySummary(row.original.provider_issues.severity_counts)}`}
                 variant="warning"
               >
                 P{formatCount(row.original.provider_issues.open_count)}
