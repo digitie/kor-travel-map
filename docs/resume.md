@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-27 (claude) — 🎯 T-ADM-C6c + T-VN-03 완결: principal 경계 n150 실증 (#392 종결)
+
+**다음 한 작업**: Lane A `T-VN-H12`(live acceptance fixture 좌표 run-unique화 — LIVE-01 kind-격리
+후속, 적대 리뷰 P2) 또는 `T-VN-H16`(LIVE-01 후속 OPEN 이슈 재검증·종결). tasks.md 인덱스가 정본.
+
+- **완료(이번 세션)**: `T-ADM-C6c` + `T-VN-03` principal 경계 cutover를 n150 production에서 실증.
+  배포=**map c8ed6164 / pinvi 6a035695**(둘 다 healthy, production). **13/13 PASS** —
+  curated(C1 401·C3/C4 200·C4n 401) · ops 6(O1/O2 401·O3/O6 403·O4/O5 200) · MOIS(M1 404) ·
+  PinVi #392(P-R1 ops:read 200·P-R2 no-token 401).
+- **접근**: 배포 전 정적 감사 워크플로우(`tvn03-c6c-readiness-audit`, 6차원 병렬+적대 반증) →
+  go-with-caveats → credential-safe smoke(값 비출력, status만) → #392 실증.
+- **C2(public-key 200)**: DB 해시관리 key라 런타임 미검증 — 동일 dep C1+C3+C4 live + unit test로 등가 충족.
+- **문서 모순 해소**: 배포 image rev label이 `c8ed6164`임을 실측(incident md의 `b0c95672`는 조상·
+  docs-only 차이라 런타임 동일). 증거: reports/t-vn-03-c6c-boundary-smoke-2026-07-27.md.
+- **잔여 액션**: PinVi issue #392 close(코멘트 포함).
+
 ## 2026-07-27 (claude) — 🎯 T-VN-H06 완결: keyset cursor 전환 backend #813 + e2e 검증 #852
 
 **다음 한 작업**: Lane A **`T-ADM-C6c` + `T-VN-03`** — pinvi head(#408 포함, 현 배포 6a035695로

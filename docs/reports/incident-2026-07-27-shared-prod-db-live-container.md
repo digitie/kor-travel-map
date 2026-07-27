@@ -52,6 +52,12 @@
 - 결과: pair를 **`map=b0c95672 / pinvi=6a035695`**로 정식 전진(4 map runtime
   recreated+healthy, pinvi healthy, admin login 200, manifest 갱신).
 
+  > **정정(2026-07-27, T-ADM-C6c/T-VN-03 smoke)**: 이후 배포된 map-api image의 revision label은
+  > **`c8ed6164`**(b0c95672의 후손, 차이 docs-only라 route gate 런타임 동일)로 실측됐다. 현 배포
+  > 정본은 **`map=c8ed6164 / pinvi=6a035695`**다. 위 b0c95672는 복구 시점 중간 상태로,
+  > 후속 docs-backlog 커밋(c8ed6164) 재배포로 대체됐다. 근거:
+  > `reports/t-vn-03-c6c-boundary-smoke-2026-07-27.md` §0.
+
 ## 4. 재발 방지 규율 (정본: `docs/tasks.md` §공통 규율)
 
 - **R1 — lane live/dev 컨테이너의 prod 격리(필수)**: 어떤 lane이든 n150에서

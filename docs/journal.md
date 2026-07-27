@@ -2,6 +2,37 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (claude) — T-ADM-C6c + T-VN-03 principal 경계 cutover n150 실증 (#392 종결)
+
+**결론**: curated public-key gate + ops operator gate + MOIS raw production unmount + PinVi ops:read
+principal을 n150 production(map=**c8ed6164**/pinvi=**6a035695**, 둘 다 healthy)에서 **13/13 PASS**로
+실증. T-ADM-C6c·T-VN-03 완료, PinVi #392 종결 조건 충족.
+
+**접근**(설계 §5: 승인 전 정적 검사 → 승인 후 live):
+- **정적 감사 워크플로우**(`tvn03-c6c-readiness-audit`, 6차원 병렬 + 독립 적대 반증): route_policy
+  exception 0건(`KNOWN_WIRING_EXCEPTIONS=()`), curated 4→PUBLIC_KEYED / ops 6→OPERATOR / MOIS→
+  operator wiring, OpenAPI full/user 계약 일치. 5/6 PASS(반증 생존), pinvi-manifest만 UNCERTAIN
+  (런타임 manifest 정적 판독 불가) → go-with-caveats.
+- **credential-safe live smoke**: credential 값은 map 컨테이너 env에서 조달해 변수로만 사용, HTTP
+  status + ops error code만 증거로 기록(§5-5). map=host-network라 trusted_cidr=127.0.0.1/32.
+
+**결과**:
+- curated: C1 keyless→401 · C3 service→200 · C4 admin-bff→200 · C4n secret-no-actor→401.
+- ops 6(대표 metrics/health-deep): O1 401 · O2 401 · O3 403(SCOPE) · O4 200 · O5 200 · O6 403(INVALID).
+- MOIS: M1 production unmount→404.
+- PinVi #392: P-R1 ops:read→200 · P-R2 no-token→401 (pinvi가 자신의 base URL로 관측 read에 ops:read
+  도달, 토큰 없으면 거부 — require_ops_operator는 peer-trust 무검사라 ops:read 필수).
+
+**규명**:
+- **env alias 함정**: `admin_proxy_secret` validation_alias=`KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET`(prefix
+  `_API_` 없음). 첫 probe가 `_API_` 붙여 조회해 false UNSET → 정정 후 admin-BFF C4/O4 200 확인.
+- **C2(public-key 200)**: env `vworld_api_key` fallback은 운영에서 미설정이 정상(public key는
+  `public_api_keys` DB에 해시 저장). 동일 dep C1+C3+C4 live + unit test로 등가 충족, prod key 미생성.
+- **문서 모순**(map rev): incident md는 복구를 `b0c95672`로 기록했으나 배포 image rev label은
+  `c8ed6164`(b0c95672의 후손, 차이 docs-only). 정본은 c8ed6164/6a035695. incident md에 주석.
+
+증거: `docs/reports/t-vn-03-c6c-boundary-smoke-2026-07-27.md`.
+
 ## 2026-07-27 (claude) — T-VN-H06 mocked e2e spec drift 수정 → dedup/enrichment 24 GREEN
 
 **결론**: #813(keyset+fingerprint cursor 전환) 머지 후 dedup/enrichment mocked Playwright e2e가
