@@ -88,6 +88,62 @@ def test_settings_reads_shared_admin_proxy_secret_name(
 
 
 @pytest.mark.unit
+def test_settings_reads_legacy_api_admin_proxy_secret_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", raising=False)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET",
+        "legacy-api-secret",
+    )
+    settings = ApiSettings(_env_file=None)
+    assert settings.admin_proxy_secret is not None
+    assert settings.admin_proxy_secret.get_secret_value() == "legacy-api-secret"
+
+
+@pytest.mark.unit
+def test_settings_prefers_shared_admin_proxy_secret_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", "shared-secret")
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET",
+        "legacy-api-secret",
+    )
+    settings = ApiSettings(_env_file=None)
+    assert settings.admin_proxy_secret is not None
+    assert settings.admin_proxy_secret.get_secret_value() == "shared-secret"
+
+
+@pytest.mark.unit
+def test_settings_keeps_admin_proxy_secret_unset_without_either_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", raising=False)
+    monkeypatch.delenv("KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET", raising=False)
+    settings = ApiSettings(_env_file=None)
+    assert settings.admin_proxy_secret is None
+
+
+@pytest.mark.unit
+def test_shared_admin_proxy_secret_keeps_wrong_header_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", "shared-secret")
+    monkeypatch.delenv("KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET", raising=False)
+    settings = ApiSettings(_env_file=None)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={ADMIN_ACTOR_HEADER: "admin"},
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        require_admin_frontend(request, proxy_secret="wrong")
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.unit
 def test_settings_reads_server_only_ops_principal_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
