@@ -1195,6 +1195,7 @@ class CurationItemRow(Base):
         Index(
             "idx_curation_items_collection_status_order",
             "collection_id",
+            "source_present",
             "status",
             "sort_order",
             "curation_item_id",
@@ -1202,6 +1203,7 @@ class CurationItemRow(Base):
         Index(
             "idx_curation_items_feature_status_collection",
             "feature_id",
+            "source_present",
             "status",
             "collection_id",
         ),
@@ -1229,6 +1231,9 @@ class CurationItemRow(Base):
     external_item_id: Mapped[str] = mapped_column(Text, nullable=False)
     place_name: Mapped[str] = mapped_column(Text, nullable=False)
     address_hint: Mapped[str | None] = mapped_column(Text)
+    source_present: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'candidate'"))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     item_title: Mapped[str | None] = mapped_column(Text)

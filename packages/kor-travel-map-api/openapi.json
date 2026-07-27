@@ -807,6 +807,10 @@
             ],
             "title": "Source Name"
           },
+          "source_present": {
+            "title": "Source Present",
+            "type": "boolean"
+          },
           "source_record_key": {
             "anyOf": [
               {
@@ -896,6 +900,7 @@
           "external_item_id",
           "place_name",
           "address_hint",
+          "source_present",
           "status",
           "sort_order",
           "item_title",

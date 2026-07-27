@@ -168,6 +168,7 @@ class AdminCurationItemView(BaseModel):
     external_item_id: str
     place_name: str
     address_hint: str | None
+    source_present: bool
     status: ItemStatus
     sort_order: int
     item_title: str | None

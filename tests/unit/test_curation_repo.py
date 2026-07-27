@@ -135,6 +135,7 @@ def _item_row(**overrides: Any) -> dict[str, Any]:
         "external_item_id": "official:one",
         "place_name": "테스트 장소",
         "address_hint": "서울",
+        "source_present": True,
         "status": "included",
         "sort_order": 1,
         "item_title": "추천 장소",
@@ -595,6 +596,7 @@ async def test_add_item_rejects_hidden_feature_and_opposite_identity(
 
     unresolved_exists = _FakeSession(
         _FakeResult(scalar="Feature 이름"),
+        _FakeResult(scalar=None),
         _FakeResult(scalar=1),
     )
     with pytest.raises(ValueError, match="미연결 항목이 이미 존재"):
@@ -605,10 +607,23 @@ async def test_add_item_rejects_hidden_feature_and_opposite_identity(
             external_item_id="external",
         )
 
-    resolved_exists = _FakeSession(_FakeResult(scalar=1))
+    resolved_exists = _FakeSession(
+        _FakeResult(scalar=None),
+        _FakeResult(scalar=1),
+    )
     with pytest.raises(ValueError, match="Feature 연결 항목이 이미 존재"):
         await repo.add_curation_item(
             resolved_exists,
+            collection_id=_COLLECTION_ID,
+            feature_id=None,
+            external_item_id="external",
+            place_name="장소",
+        )
+
+    archived_identity = _FakeSession(_FakeResult(scalar=1))
+    with pytest.raises(ValueError, match="archive된"):
+        await repo.add_curation_item(
+            archived_identity,
             collection_id=_COLLECTION_ID,
             feature_id=None,
             external_item_id="external",
@@ -629,9 +644,13 @@ async def test_add_item_success_normalizes_and_touches_collection(
     touch = AsyncMock()
     monkeypatch.setattr(repo, "_touch_collection", touch)
     prefix = (
-        [_FakeResult(scalar="DB Feature 이름"), _FakeResult(scalar=None)]
+        [
+            _FakeResult(scalar="DB Feature 이름"),
+            _FakeResult(scalar=None),
+            _FakeResult(scalar=None),
+        ]
         if feature_id is not None
-        else [_FakeResult(scalar=None)]
+        else [_FakeResult(scalar=None), _FakeResult(scalar=None)]
     )
     session = _FakeSession(
         *prefix,

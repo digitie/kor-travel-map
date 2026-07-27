@@ -177,6 +177,7 @@ function makeAdminCuration(
     reuse_policy: "manual_review",
     sort_order: 9,
     source_name: "Admin map source",
+    source_present: true,
     source_record_key: "admin-provider::admin-dataset::admin-map-record",
     source_url: "https://example.test/admin-map-source",
     status: "candidate",

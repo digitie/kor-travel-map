@@ -184,6 +184,7 @@ function makeCuration(
     reuse_policy: "manual_review",
     sort_order: 7,
     source_name: "Admin source",
+    source_present: true,
     source_record_key: "admin-provider::admin-dataset::admin-record-1",
     source_url: "https://example.test/admin-source",
     status: "candidate",

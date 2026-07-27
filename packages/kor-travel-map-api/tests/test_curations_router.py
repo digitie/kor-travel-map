@@ -93,6 +93,7 @@ def _item(*, item_id: str, edition: str) -> CurationItem:
         external_item_id=f"official-{edition}",
         place_name="겹치는 관광지",
         address_hint="서울특별시",
+        source_present=True,
         status="included",
         sort_order=1,
         item_title="겹치는 관광지",

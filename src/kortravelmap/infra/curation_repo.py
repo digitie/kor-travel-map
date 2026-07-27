@@ -131,6 +131,7 @@ class CurationItem:
     external_item_id: str
     place_name: str
     address_hint: str | None
+    source_present: bool
     status: str
     sort_order: int
     item_title: str | None
@@ -261,6 +262,7 @@ SELECT
         FROM feature.curation_items AS count_item
         WHERE count_item.collection_id = c.collection_id
           AND count_item.archived_at IS NULL
+          AND count_item.source_present
           AND (
               NOT CAST(:public_only AS boolean)
               OR count_item.feature_id IS NULL
@@ -277,6 +279,7 @@ SELECT
         FROM feature.curation_items AS public_count_item
         WHERE public_count_item.collection_id = c.collection_id
           AND public_count_item.archived_at IS NULL
+          AND public_count_item.source_present
           AND public_count_item.status = 'included'
           AND (
               NOT CAST(:public_only AS boolean)
@@ -329,6 +332,7 @@ _ITEM_SELECT_FIELDS: Final[str] = f"""
     i.external_item_id,
     i.place_name,
     i.address_hint,
+    i.source_present,
     i.status,
     i.sort_order,
     i.item_title,
@@ -440,7 +444,10 @@ _LIST_COLLECTION_ITEMS_SQL: Final[str] = (
     _ITEM_SELECT
     + f"""
 WHERE i.collection_id = CAST(:collection_id AS uuid)
-  AND (:include_archived OR i.archived_at IS NULL)
+  AND (
+      :include_archived
+      OR (i.archived_at IS NULL AND i.source_present)
+  )
   AND (
       NOT CAST(:public_only AS boolean)
       OR i.feature_id IS NULL
@@ -460,7 +467,10 @@ _GET_COLLECTION_ITEM_SQL: Final[str] = (
     + """
 WHERE i.collection_id = CAST(:collection_id AS uuid)
   AND i.curation_item_id = CAST(:curation_item_id AS uuid)
-  AND (:include_archived OR i.archived_at IS NULL)
+  AND (
+      :include_archived
+      OR (i.archived_at IS NULL AND i.source_present)
+  )
 """
 )
 
@@ -469,6 +479,7 @@ _LIST_FEATURE_ITEMS_SQL: Final[str] = (
     + """
 WHERE i.feature_id = :feature_id
   AND i.archived_at IS NULL
+  AND i.source_present
   AND c.archived_at IS NULL
   AND (
       :public_only = false
@@ -488,6 +499,7 @@ _LIST_FEATURE_ITEMS_BATCH_SQL: Final[str] = (
     + """
 WHERE i.feature_id = ANY(CAST(:feature_ids AS text[]))
   AND i.archived_at IS NULL
+  AND i.source_present
   AND c.archived_at IS NULL
   AND (
       :public_only = false
@@ -530,6 +542,7 @@ WHERE (
         ON matched_source.source_id = matched_collection.source_id
       WHERE matched_item.feature_id = f.feature_id
         AND matched_item.archived_at IS NULL
+        AND matched_item.source_present
         AND matched_collection.archived_at IS NULL
         AND (
             NOT CAST(:public_only AS boolean)
@@ -614,12 +627,12 @@ _UPSERT_ITEM_SQL: Final[str] = """
 WITH written AS (
     INSERT INTO feature.curation_items (
         collection_id, feature_id, source_record_key, external_item_id,
-        place_name, address_hint, status,
+        place_name, address_hint, source_present, status,
         sort_order, item_title, item_summary, curation_relation, reuse_policy,
         metadata, created_by, updated_by, updated_at
     ) VALUES (
         CAST(:collection_id AS uuid), :feature_id, :source_record_key,
-        :external_item_id, :place_name, :address_hint,
+        :external_item_id, :place_name, :address_hint, true,
         :status, :sort_order, :item_title, :item_summary,
         :curation_relation, :reuse_policy, CAST(:metadata AS jsonb),
         :actor, :actor, now()
@@ -634,6 +647,7 @@ WITH written AS (
         ),
         place_name = EXCLUDED.place_name,
         address_hint = EXCLUDED.address_hint,
+        source_present = true,
         status = EXCLUDED.status,
         sort_order = EXCLUDED.sort_order,
         item_title = EXCLUDED.item_title,
@@ -647,6 +661,7 @@ WITH written AS (
         feature.curation_items.source_record_key,
         feature.curation_items.place_name,
         feature.curation_items.address_hint,
+        feature.curation_items.source_present,
         feature.curation_items.status,
         feature.curation_items.sort_order,
         feature.curation_items.item_title,
@@ -659,6 +674,7 @@ WITH written AS (
                  feature.curation_items.source_record_key),
         EXCLUDED.place_name,
         EXCLUDED.address_hint,
+        true,
         EXCLUDED.status,
         EXCLUDED.sort_order,
         EXCLUDED.item_title,
@@ -681,7 +697,7 @@ WHERE existing.collection_id = CAST(:collection_id AS uuid)
 LIMIT 1
 """
 
-_DELETE_IMPORT_REMOVALS_SQL: Final[str] = (
+_MARK_IMPORT_REMOVALS_SQL: Final[str] = (
     """
 WITH incoming AS (
     SELECT *
@@ -693,11 +709,13 @@ WITH incoming AS (
 ), affected_collections AS (
     SELECT DISTINCT CAST(collection_id AS uuid) AS collection_id
     FROM incoming
-), deleted AS (
-    DELETE FROM feature.curation_items AS existing
-    USING affected_collections
-    WHERE existing.collection_id = affected_collections.collection_id
-      AND existing.archived_at IS NULL
+), candidates AS MATERIALIZED (
+    SELECT existing.*
+    FROM feature.curation_items AS existing
+    JOIN affected_collections
+      ON affected_collections.collection_id = existing.collection_id
+    WHERE existing.archived_at IS NULL
+      AND existing.source_present
       AND NOT EXISTS (
           SELECT 1
           FROM incoming
@@ -705,13 +723,21 @@ WITH incoming AS (
             AND incoming.external_item_id = existing.external_item_id
             AND incoming.feature_id IS NOT DISTINCT FROM existing.feature_id
       )
-    RETURNING existing.*
+    FOR UPDATE OF existing
+), marked AS (
+    UPDATE feature.curation_items AS existing
+    SET source_present = false,
+        updated_by = :actor,
+        updated_at = now()
+    FROM candidates
+    WHERE existing.curation_item_id = candidates.curation_item_id
+    RETURNING candidates.*
 )
 SELECT
 """
     + _ITEM_SELECT_FIELDS
     + """
-FROM deleted AS i
+FROM marked AS i
 JOIN feature.curation_collections AS c ON c.collection_id = i.collection_id
 JOIN feature.curated_themes AS t ON t.theme_id = c.theme_id
 LEFT JOIN feature.curated_sources AS s ON s.source_id = c.source_id
@@ -737,16 +763,25 @@ WITH incoming AS (
 ), written AS (
     INSERT INTO feature.curation_items (
         collection_id, feature_id, external_item_id, place_name, address_hint,
-        status, sort_order,
+        source_present, status, sort_order,
         item_title, item_summary, curation_relation, reuse_policy,
         metadata, created_by, updated_by, updated_at
     )
     SELECT
-        CAST(collection_id AS uuid), feature_id, external_item_id,
-        place_name, address_hint, 'included', sort_order,
-        item_title, item_summary, 'nearby_option',
-        'manual_review', metadata, :actor, :actor, now()
+        CAST(incoming.collection_id AS uuid), incoming.feature_id,
+        incoming.external_item_id, incoming.place_name, incoming.address_hint,
+        true, 'included', incoming.sort_order,
+        incoming.item_title, incoming.item_summary, 'nearby_option',
+        'manual_review', incoming.metadata, :actor, :actor, now()
     FROM incoming
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM feature.curation_items AS tombstone
+        WHERE tombstone.collection_id = CAST(incoming.collection_id AS uuid)
+          AND tombstone.external_item_id = incoming.external_item_id
+          AND tombstone.feature_id IS NOT DISTINCT FROM incoming.feature_id
+          AND tombstone.archived_at IS NOT NULL
+    )
     ON CONFLICT (
         collection_id, external_item_id, feature_id
     ) WHERE archived_at IS NULL
@@ -759,6 +794,7 @@ WITH incoming AS (
     DO UPDATE SET
         place_name = EXCLUDED.place_name,
         address_hint = EXCLUDED.address_hint,
+        source_present = true,
         sort_order = EXCLUDED.sort_order,
         item_title = EXCLUDED.item_title,
         item_summary = EXCLUDED.item_summary,
@@ -766,6 +802,7 @@ WITH incoming AS (
         updated_by = EXCLUDED.updated_by,
         updated_at = now()
     WHERE (
+        feature.curation_items.source_present,
         feature.curation_items.place_name,
         feature.curation_items.address_hint,
         feature.curation_items.sort_order,
@@ -773,6 +810,7 @@ WITH incoming AS (
         feature.curation_items.item_summary,
         feature.curation_items.metadata
     ) IS DISTINCT FROM (
+        true,
         EXCLUDED.place_name,
         EXCLUDED.address_hint,
         EXCLUDED.sort_order,
@@ -804,25 +842,38 @@ WITH incoming AS (
     )
 ), classified AS (
     SELECT
-        existing.curation_item_id IS NOT NULL AS already_exists,
+        (
+            existing.curation_item_id IS NOT NULL
+            OR EXISTS (
+                SELECT 1
+                FROM feature.curation_items AS tombstone
+                WHERE tombstone.collection_id = collection.collection_id
+                  AND tombstone.external_item_id = incoming.external_item_id
+                  AND tombstone.feature_id IS NOT DISTINCT FROM incoming.feature_id
+                  AND tombstone.archived_at IS NOT NULL
+            )
+        ) AS already_exists,
         existing.curation_item_id IS NOT NULL
         -- 실제 upsert가 CONFLICT에서 status/curation_relation/reuse_policy를 보존하므로
         -- (#699) dry-run preview도 이 3개를 needs_update 비교에서 제외해 "updated" 카운트를
         -- 실제 동작과 일치시킨다(운영자 편집만 다른 행을 updated로 오표시하지 않음).
         AND (
-            existing.place_name,
-            existing.address_hint,
-            existing.sort_order,
-            existing.item_title,
-            existing.item_summary,
-            existing.metadata
-        ) IS DISTINCT FROM (
-            incoming.place_name,
-            incoming.address_hint,
-            incoming.sort_order,
-            incoming.item_title,
-            incoming.item_summary,
-            incoming.metadata
+            NOT existing.source_present
+            OR (
+                existing.place_name,
+                existing.address_hint,
+                existing.sort_order,
+                existing.item_title,
+                existing.item_summary,
+                existing.metadata
+            ) IS DISTINCT FROM (
+                incoming.place_name,
+                incoming.address_hint,
+                incoming.sort_order,
+                incoming.item_title,
+                incoming.item_summary,
+                incoming.metadata
+            )
         ) AS needs_update
     FROM incoming
     LEFT JOIN feature.curation_collections AS collection
@@ -843,6 +894,7 @@ _PREVIEW_IMPORT_REMOVALS_SQL: Final[str] = (
     _ITEM_SELECT
     + """
 WHERE i.archived_at IS NULL
+  AND i.source_present
   AND EXISTS (
       SELECT 1
       FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS incoming(
@@ -1135,6 +1187,7 @@ def _item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
         external_item_id=str(row["external_item_id"]),
         place_name=str(row["place_name"]),
         address_hint=row["address_hint"],
+        source_present=bool(row["source_present"]),
         status=str(row["status"]),
         sort_order=int(row["sort_order"]),
         item_title=row["item_title"],
@@ -1515,6 +1568,24 @@ async def add_curation_item(
             resolved_place_name = str(feature_name)
     if not resolved_place_name:
         raise ValueError("place_name or an existing feature_id is required")
+    archived_identity_exists = (
+        await session.execute(
+            text(
+                "SELECT 1 FROM feature.curation_items "
+                "WHERE collection_id = CAST(:collection_id AS uuid) "
+                "AND external_item_id = :external_item_id "
+                "AND feature_id IS NOT DISTINCT FROM CAST(:feature_id AS text) "
+                "AND archived_at IS NOT NULL"
+            ),
+            {
+                "collection_id": collection_id,
+                "external_item_id": external_item_id.strip(),
+                "feature_id": feature_id,
+            },
+        )
+    ).scalar_one_or_none()
+    if archived_identity_exists is not None:
+        raise ValueError("archive된 curation item identity는 재사용할 수 없습니다.")
     if feature_id is not None:
         unresolved_exists = (
             await session.execute(
@@ -2163,7 +2234,12 @@ async def import_curation_rows(
         )
         items_payload = json.dumps(item_values, ensure_ascii=False)
         removed_rows = (
-            (await session.execute(text(_DELETE_IMPORT_REMOVALS_SQL), {"items": items_payload}))
+            (
+                await session.execute(
+                    text(_MARK_IMPORT_REMOVALS_SQL),
+                    {"items": items_payload, "actor": actor},
+                )
+            )
             .mappings()
             .all()
         )

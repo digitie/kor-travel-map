@@ -2481,6 +2481,8 @@ export interface components {
             sort_order: number;
             /** Source Name */
             source_name: string | null;
+            /** Source Present */
+            source_present: boolean;
             /** Source Record Key */
             source_record_key: string | null;
             /** Source Url */

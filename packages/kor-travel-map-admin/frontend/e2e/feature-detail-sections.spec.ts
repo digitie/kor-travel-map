@@ -143,6 +143,7 @@ function makeCuration(
     reuse_policy: "manual_review",
     sort_order: 12,
     source_name: "문화체육관광부",
+    source_present: true,
     source_record_key: "mcst::tourism-100::yeouido",
     source_url: "https://example.test/tourism-100",
     status: "included",

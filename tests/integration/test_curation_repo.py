@@ -379,17 +379,18 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         "removed": 2,
         "removals": replacement_plan.removals,
     }
-    count = (
+    counts = (
         await migrated_session.execute(
             text(
-                "SELECT count(*) FROM feature.curation_items AS i "
+                "SELECT count(*) FILTER (WHERE i.source_present) AS present, "
+                "count(*) AS total FROM feature.curation_items AS i "
                 "JOIN feature.curation_collections AS c "
                 "ON c.collection_id = i.collection_id "
                 "WHERE c.collection_key = 'csv-import:2026'"
             )
         )
-    ).scalar_one()
-    assert count == 2
+    ).one()
+    assert counts == (2, 4)
     unresolved = (
         await migrated_session.execute(
             text("SELECT place_name FROM feature.curation_items WHERE feature_id IS NULL")
@@ -398,7 +399,10 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
     assert unresolved == "DB 미해결 공식 장소"
     rematched = (
         await migrated_session.execute(
-            text("SELECT feature_id FROM feature.curation_items WHERE external_item_id = 'item-a'")
+            text(
+                "SELECT feature_id FROM feature.curation_items "
+                "WHERE external_item_id = 'item-a' AND source_present"
+            )
         )
     ).scalar_one()
     assert rematched == "feature:import-b"
@@ -530,6 +534,214 @@ async def test_authoritative_reimport_preserves_operator_curation_overrides(
     assert after.reuse_policy == "blocked"
     assert changed_plan.updated == 1
     assert changed["updated"] == 1
+
+    # 5) authoritative source에서 일시 누락되면 membership/override는 남고 공개만 빠진다.
+    sibling_rows = [
+        ResolvedCurationImportRow(
+            row_number=3,
+            source_item_key="reimport-b",
+            feature_id=None,
+            sort_order=2,
+            metadata={"ordinal": 2},
+            **{**common, "place_name": "두 번째 장소"},
+        ),
+    ]
+    removal_plan = await preview_curation_import(migrated_session, rows=sibling_rows)
+    omitted = await import_curation_rows(
+        migrated_session,
+        rows=sibling_rows,
+        actor="importer",
+    )
+    assert [item.curation_item_id for item in removal_plan.removals] == [item_id]
+    assert omitted["removed"] == 1
+    assert omitted["removals"][0].source_present is True
+    assert (
+        await get_curation_item(
+            migrated_session,
+            collection_id=collection_id,
+            curation_item_id=item_id,
+        )
+        is None
+    )
+    missing = await get_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=item_id,
+        include_archived=True,
+    )
+    assert missing is not None
+    assert missing.source_present is False
+    assert missing.status == "rejected"
+    assert missing.curation_relation == "primary_stop"
+    assert missing.reuse_policy == "blocked"
+    current_collection = await get_curation_collection(
+        migrated_session,
+        collection_id=collection_id,
+    )
+    assert current_collection is not None
+    assert current_collection[0].item_count == 1
+    assert [item.external_item_id for item in current_collection[1]] == ["reimport-b"]
+    audit_collection = await get_curation_collection(
+        migrated_session,
+        collection_id=collection_id,
+        include_archived=True,
+    )
+    assert audit_collection is not None
+    assert {item.external_item_id for item in audit_collection[1]} == {
+        "reimport-a",
+        "reimport-b",
+    }
+
+    # 6) 재등장은 source presence와 provider 파생 필드만 복원한다.
+    reappearing_rows = [*changed_rows, *sibling_rows]
+    reappearance_plan = await preview_curation_import(
+        migrated_session,
+        rows=reappearing_rows,
+    )
+    reappeared = await import_curation_rows(
+        migrated_session,
+        rows=reappearing_rows,
+        actor="importer",
+    )
+    restored = await get_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=item_id,
+    )
+    assert reappearance_plan.updated == 1
+    assert reappeared["updated"] == 1
+    assert restored is not None
+    assert restored.source_present is True
+    assert restored.status == "rejected"
+    assert restored.curation_relation == "primary_stop"
+    assert restored.reuse_policy == "blocked"
+
+    # 7) operator archive tombstone은 같은 authoritative identity가 다시 와도 부활하지 않는다.
+    archived = await archive_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=item_id,
+        actor="operator",
+    )
+    assert archived is not None
+    archived_plan = await preview_curation_import(
+        migrated_session,
+        rows=reappearing_rows,
+    )
+    after_archive = await import_curation_rows(
+        migrated_session,
+        rows=reappearing_rows,
+        actor="importer",
+    )
+    assert archived_plan.inserted == 0
+    assert archived_plan.updated == 0
+    assert after_archive["inserted"] == 0
+    assert after_archive["updated"] == 0
+    active_count = (
+        await migrated_session.execute(
+            text(
+                "SELECT count(*) FROM feature.curation_items "
+                "WHERE collection_id = CAST(:collection_id AS uuid) "
+                "AND external_item_id = 'reimport-a' "
+                "AND archived_at IS NULL"
+            ),
+            {"collection_id": collection_id},
+        )
+    ).scalar_one()
+    assert active_count == 0
+    tombstone = await get_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=item_id,
+        include_archived=True,
+    )
+    assert tombstone is not None
+    assert tombstone.status == "archived"
+
+
+async def test_authoritative_reimport_does_not_resurrect_unresolved_archive(
+    migrated_session: AsyncSession,
+) -> None:
+    """feature_id NULL identity도 provider 필드 변경으로 tombstone을 우회하지 못한다."""
+    common = {
+        "collection_key": "csv-archive-null:2026",
+        "theme_slug": "csv-archive-null",
+        "theme_name": "CSV archive NULL 테스트",
+        "theme_group": "test",
+        "title": "CSV archive NULL 테스트",
+        "edition_key": "2026",
+        "provider": "csv-archive-provider",
+        "dataset_key": "csv-archive-dataset",
+        "source_name": "CSV archive 출처",
+        "source_url": None,
+        "source_item_key": "unresolved-a",
+        "feature_id": None,
+        "address_hint": None,
+        "sort_order": 1,
+        "item_title": None,
+        "item_summary": None,
+    }
+    original_rows = [
+        ResolvedCurationImportRow(
+            row_number=2,
+            place_name="미해결 장소",
+            metadata={"revision": 1},
+            **common,
+        )
+    ]
+    await import_curation_rows(migrated_session, rows=original_rows, actor="importer")
+    ids = (
+        await migrated_session.execute(
+            text(
+                "SELECT i.collection_id::text AS collection_id, "
+                "i.curation_item_id::text AS curation_item_id "
+                "FROM feature.curation_items AS i "
+                "JOIN feature.curation_collections AS c "
+                "ON c.collection_id = i.collection_id "
+                "WHERE c.collection_key = 'csv-archive-null:2026'"
+            )
+        )
+    ).mappings().one()
+    archived = await archive_curation_item(
+        migrated_session,
+        collection_id=ids["collection_id"],
+        curation_item_id=ids["curation_item_id"],
+        actor="operator",
+    )
+    assert archived is not None
+
+    changed_rows = [
+        ResolvedCurationImportRow(
+            row_number=2,
+            place_name="변경된 미해결 장소",
+            metadata={"revision": 2},
+            **common,
+        )
+    ]
+    plan = await preview_curation_import(migrated_session, rows=changed_rows)
+    result = await import_curation_rows(
+        migrated_session,
+        rows=changed_rows,
+        actor="importer",
+    )
+    assert plan.inserted == 0
+    assert plan.updated == 0
+    assert result["inserted"] == 0
+    assert result["updated"] == 0
+    row = (
+        await migrated_session.execute(
+            text(
+                "SELECT place_name, metadata, status, archived_at IS NOT NULL AS archived "
+                "FROM feature.curation_items "
+                "WHERE curation_item_id = CAST(:curation_item_id AS uuid)"
+            ),
+            {"curation_item_id": ids["curation_item_id"]},
+        )
+    ).mappings().one()
+    assert row["place_name"] == "미해결 장소"
+    assert row["metadata"] == {"revision": 1}
+    assert row["status"] == "archived"
+    assert row["archived"] is True
 
 
 async def test_theme_upsert_fallback_sees_concurrent_identical_insert(
