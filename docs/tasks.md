@@ -18,14 +18,6 @@
 live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실행 위주라 하위 상세 섹션
 없이 **인덱스 상주가 정본**(tasks-rule §5의 "상세 위치 하나"를 인덱스로 충족).
 
-- [ ] `T-ADM-C6c` + `T-VN-03` — **principal 경계 smoke + issue 종결**(두 task 잔여가
-  동일 실행으로 종결). 코드 양측 머지(PinVi #387/#393, Map #782→#790, manager #64), PinVi
-  hardening #408 포함 `6a035695` 배포와 `map=c8ed6164 / pinvi=6a035695` compatible-pair 전진은
-  완료됐다. 잔여는 n150 경계 smoke 11건(curated 4 GET: keyless 거부/public-key·service-token 허용;
-  ops 6 GET: headerless/service-only/cancel-token 401·403 + admin-BFF·ops:read 양성; MOIS debug 404
-  unmount) 실증과 PinVi issue #392 close뿐이다. 설계 정본:
-  [t-vn-03-route-gate-cutover-2026-07-19.md](reports/t-vn-03-route-gate-cutover-2026-07-19.md)
-  §5 항목 4 + §6 완료 조건. C7 read-auth는 admin-BFF만 커버하므로 대체 불가.
 - [ ] `T-VN-H12` — **live acceptance fixture 좌표 run-unique화** (T-VN-LIVE-01 kind-격리 후속)
 
   `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표가 고정(LON=127.5/LAT=36.5 +

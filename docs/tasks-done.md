@@ -3,6 +3,25 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-27 — T-ADM-C6c + T-VN-03 principal 경계 cutover n150 실증 완료 (#392 종결)
+
+- [x] **T-ADM-C6c + T-VN-03** — curated public-key gate + ops operator gate + MOIS raw production
+  unmount의 n150 production live 경계 smoke를 실증. 배포=**map c8ed6164 / pinvi 6a035695**(둘 다
+  healthy, production profile). **13/13 PASS**:
+  - curated: C1 keyless→401 · C3 service→200 · C4 admin-bff→200 · C4n secret-no-actor→401.
+    (C2 public-key 200은 DB 해시관리 key라 런타임 미검증 — 동일 dep가 C1+C3+C4로 live 입증 + unit
+    test 커버로 등가 충족.)
+  - ops 6: O1 keyless→401 · O2 service-only→401 · O3 cancel-token→403 · O4 admin-bff→200 ·
+    O5 ops:read→200 · O6 invalid→403.
+  - MOIS: M1 production unmount→404.
+  - PinVi(#392): P-R1 pinvi ops:read→200 · P-R2 no-token→401 — PinVi 관측 read가 ops:read로
+    live gate 도달, 토큰 없으면 거부. #393(6a035695) 배포로 관측 caller ops:read 완결 실증.
+  - 배포 전 정적 감사(워크플로우 `tvn03-c6c-readiness-audit`, 6차원 병렬+적대 반증): route policy
+    exception 0, curated/ops/MOIS wiring, OpenAPI full/user 계약 일치 확인.
+  - 증거: [t-vn-03-c6c-boundary-smoke-2026-07-27.md](reports/t-vn-03-c6c-boundary-smoke-2026-07-27.md).
+  - **문서 모순 해소**: 배포 image revision label이 `c8ed6164`임을 실측(incident md의 b0c95672는
+    조상·docs-only 차이라 런타임 동일). PinVi issue #392 close.
+
 ## 2026-07-27 — T-VN-H06 admin 목록 keyset+fingerprint cursor 전환 완결
 
 - [x] **T-VN-H06** — admin dedup/enrichment 목록을 OFFSET → keyset+fingerprint cursor로 전환.
