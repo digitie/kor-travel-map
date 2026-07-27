@@ -1,11 +1,9 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-27 (codex) — T-VN-43 3차 P3 반영·재리뷰 중
+## 2026-07-27 (codex) — T-VN-43 구현·실데이터 파괴적 live 검증 완료
 
-**다음 한 작업**: 3차 리뷰 P3인 accepted ADR-045 form 계약 drift를 반영한 새 exact staged diff를
-전문 감사 1명과 독립 적대 리뷰어 2명에게 재확인시킨다. finding 0을 확인한 뒤 전체 frontend/Python/Docker gate와
-PR #847의 lane 격리 규칙을 지킨 n150 UI-only 실데이터 파괴적 Live UI E2E를 통과하고
-PR·CI green·approval·머지를 완료한다.
+**다음 한 작업**: T-VN-43 PR의 CI green·실제 GitHub approval·머지를 완료한 뒤 Lane B b0의
+`T-VN-44`(admin frontend full ESLint baseline green)를 진행한다.
 
 - clean `npm ci` 기준 16건(low 2, moderate 7, high 7)을 0건으로 내렸다. Next 16.2.12와
   PostCSS 8.5.23·Sharp 0.35.3을 고정하고 CI에 high gate를 추가했다.
@@ -28,12 +26,23 @@ PR·CI green·approval·머지를 완료한다.
 - 전체 mocked Playwright 진단은 기존 accessible-name/actor/API route drift 52건을 165번째 spec까지
   재현해 중단했다. T-VN-48로 분리했고, T-VN-43의 CSS·폼·지도·업로드 대표 mocked spec은
   격리 UI/C7 container·workers=1에서 24/24 통과했다.
+- #840 이후 Claude Code PR #841~#850(닫힌 PR 포함) 전문 감사 1명과 독립 적대 리뷰어 2명이
+  최종 exact diff를 재검토했다. #849/#850 재감사에서 완료 task의 열린 백로그 중복·H12 인덱스/owner
+  drift·완료 LIVE-01 future tracker(P3)와 C6c의 이미 끝난 배포/pair 잔여 표기(P2)를 찾아 바로잡았다.
+  실제 OPEN 7건은 Lane A `T-VN-H16`으로 분리했고, 반영 뒤 P0~P3 finding 0건을 확인했다.
+- 전체 Python gate는 2,355 tests·Ruff·strict mypy·4개 import contract가 모두 통과했다. frontend는
+  clean install·audit 0·tree/effective-config/Sharp smoke·OpenAPI/admin/user drift·type-check·227 Vitest·
+  production build를 통과했고, exact Docker image에서 대표 mocked E2E 24/24가 통과했다.
+- PR #847 R1~R4에 따라 branch API/Dagster/DB migration 없이 UI만 host loopback `12715`에 격리했다.
+  실제 관리자 UI로 공식 CSV 5종을 preview·commit하는 파괴적 live E2E 4/4가 통과했고 REST·관리자
+  상세·지도에서 19 collections·486 memberships를 확인했다. 전용 UI/browser container 제거 뒤
+  C7 active process/lock/journal/runtime 잔여는 모두 0, 운영 UI/API는 healthy다.
 
 ## 2026-07-27 (claude) — 🎯 T-VN-LIVE-01 완료: live acceptance lane n150 PASSED @ c8ed6164
 
 **다음 한 작업**: **Lane A `T-ADM-C6c` + `T-VN-03`** — pinvi head(#408 포함, 현 배포는 6a035695로
 이미 반영됨) principal 경계 smoke(curated 4 GET·ops 6 GET·MOIS 404) n150 실증 + PinVi #392 close.
-그 다음 `T-VN-H06`(#813 2차 리뷰·머지·검증).
+그 다음 `T-VN-H06`(#813 merge `9d29606e` 반영 완료, n150 Linux cursor runtime 검증 잔여).
 
 - **완료(이번 세션)**: `T-VN-LIVE-01`(+04A #741·58 #785·15) targeted live acceptance lane을 n150
   production(map=c8ed6164/pinvi=6a035695)에서 파괴적 실행 → **PASSED**(rc=0, phase=passed,

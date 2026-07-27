@@ -84,14 +84,26 @@ upstream 보안 release 지연만 좁은 override와 fail-close vendor patch로 
   (C7 script 누락, Playwright drift, React lint 계약 축소, Sharp ABI 미검증, unused dependency,
   npm toolchain 비고정, CSS compound token 누락, tree false-green, 활성 문서 Node/npm drift)을 반영했다.
   3차 리뷰에서는 accepted ADR-045의 제거된 form dependency 계약 1건(P3)을 찾아 admin 범위만
-  controlled state + `form-validation.ts`로 개정하고 PinVi D-4 범위는 보존했다. #848 포함 최신
-  main(`14eef521`)에서 exact 재리뷰와 PR #847 R1~R4를 지킨 live 검증이 다음 단계다.
+  controlled state + `form-validation.ts`로 개정하고 PinVi D-4 범위는 보존했다. 이어 #849/#850
+  재감사에서 완료된 LIVE-01/T-VN-42의 열린 백로그 중복·H12 인덱스/owner drift·완료 LIVE future
+  tracker(P3)와 C6c의 이미 끝난 배포/pair 잔여 표기(P2)를 찾아 바로잡았다. 실제 OPEN 7건은 Lane A
+  `T-VN-H16`으로 분리했다. #841~#850 반영 최신 main 기준 최종 exact diff 재리뷰는 세 리뷰어
+  모두 P0~P3 finding 0건이다.
 - **React 진단**: React Doctor 0.9.1 full scan은 기존 코드에서 오류 9건·경고 69건이다. T-VN-47에서
   lifecycle/purity/security finding을 근인으로 해소한다.
 - **mocked E2E 진단**: 전체 269 spec 중 165번째까지 기존 UI/test 계약 drift 52건을 재현했다. 현재
   한국어 accessible name·실제 actor/API route와 stale spec 기대를 맞추는 T-VN-48로 분리하고,
   T-VN-43의 CSS·폼·지도·업로드 대표 mocked spec은 격리 UI/C7 container·workers=1에서 24/24
-  통과했으며, 다음으로 실데이터 파괴적 live를 검증한다.
+  통과했다.
+- **전체 gate**: Python 2,355 tests·Ruff·strict mypy·4개 import contract와 frontend clean
+  install·audit 0·npm tree/effective ESLint/Next-Sharp smoke·OpenAPI/admin/user drift·type-check·
+  227 Vitest·production build를 모두 통과했다. exact frontend/C7 Docker image에서도 install 보안
+  gate와 대표 mocked E2E 24/24를 재확인했다.
+- **실데이터 파괴적 live**: PR #847 R1~R4에 따라 branch API/Dagster/DB migration 없이 UI만 host
+  loopback `12715`에 격리해 운영 API를 호출했다. 관리자 UI에서 공식 CSV 5종 preview·commit,
+  REST·관리자 상세·지도 검증을 포함한 live E2E 4/4가 통과했고 19 collections·486 memberships를
+  확인했다. 전용 UI/browser container를 제거한 뒤 C7 active process/lock/journal/runtime 잔여는
+  모두 0이고 운영 UI/API는 healthy다.
 
 ## 2026-07-26 (codex) — T-VN-42 지도 control·query identity·live recovery 하드닝
 

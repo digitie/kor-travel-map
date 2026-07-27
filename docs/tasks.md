@@ -18,33 +18,37 @@
 live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실행 위주라 하위 상세 섹션
 없이 **인덱스 상주가 정본**(tasks-rule §5의 "상세 위치 하나"를 인덱스로 충족).
 
-- [x] `T-VN-LIVE-01` (+`T-VN-04A`#741·`T-VN-58`#785·`T-VN-15`) — **완료(2026-07-27)**:
-  targeted live acceptance lane을 n150 production(map=c8ed6164/pinvi=6a035695)에서 파괴적 실행 →
-  **PASSED**(rc=0, phase=passed, recovery_attempt=0, BLOCKED/ACTIVE 없음, active leftover 0). marker×3
-  (inactive/draft/hidden) + weather/price 카드 + T-VN-15 검색 total/cursor/변조 422 + #785 stale
-  If-Match 412 전구간 통과. 규명·수정 이력: kind 필터 미격리+seed weather cross-kind cluster(#848
-  kind=place 격리) · 검색 pg_trgm 격리(#845) · connectionId/heading(#839 계열). issue #741·#785
-  close. `tasks-done.md` 이관. 상세 `docs/journal.md` 2026-07-27.
-- [ ] `T-ADM-C6c` + `T-VN-03` — **principal 경계 smoke + pair 완결**(두 task 잔여가 동일
-  실행으로 종결). 코드 양측 머지 완료(PinVi #387/#393, Map #782→#790, manager #64).
-  잔여 = ① pinvi head(**hardening #408 포함** — 현 배포 e60d1711은 #408 이전) 재배포 +
-  compatible-pair capture(**현행 manifest 버전으로** — 현 v4, `T-VN-H07C`가 v5를 먼저 land하면
-  v5), ② n150 경계 smoke: curated 4 GET(keyless 거부/public-key·service-token 허용), ops 6
-  GET(headerless/service-only/cancel-token 401·403 + admin-BFF·ops:read 양성 — PinVi principal
-  실증), MOIS debug 404(unmount), ③ PinVi issue #392 close. 설계 정본:
+- [ ] `T-ADM-C6c` + `T-VN-03` — **principal 경계 smoke + issue 종결**(두 task 잔여가
+  동일 실행으로 종결). 코드 양측 머지(PinVi #387/#393, Map #782→#790, manager #64), PinVi
+  hardening #408 포함 `6a035695` 배포와 `map=c8ed6164 / pinvi=6a035695` compatible-pair 전진은
+  완료됐다. 잔여는 n150 경계 smoke 11건(curated 4 GET: keyless 거부/public-key·service-token 허용;
+  ops 6 GET: headerless/service-only/cancel-token 401·403 + admin-BFF·ops:read 양성; MOIS debug 404
+  unmount) 실증과 PinVi issue #392 close뿐이다. 설계 정본:
   [t-vn-03-route-gate-cutover-2026-07-19.md](reports/t-vn-03-route-gate-cutover-2026-07-19.md)
-  §5 항목 4 + §6 완료 조건. C7 게이트 read-auth는 admin-BFF만 커버하므로 대체 불가(2026-07-26
-  감사 확정).
-- [ ] `T-VN-H06` — **admin 목록 keyset 전환 완결**. 구현 완료 = PR #813(OPEN, CI green,
-  1차 적대 리뷰 반영 커밋 포함; "C7 종결 후 진행" hold는 C7 COMPLETE로 해제). 잔여 =
-  2차 적대 리뷰 → 머지 → dedup/enrichment cursor e2e 런타임 검증(n150 Linux Playwright).
-  **Lane A 규율 명시 예외**: 파괴적 n150 live E2E 대상 아님(admin 목록 read 표면) — 런타임
-  검증은 머지 후 n150 Linux Playwright e2e로 수행(PR #813 본문의 시나리오 순서 유지).
+  §5 항목 4 + §6 완료 조건. C7 read-auth는 admin-BFF만 커버하므로 대체 불가.
+- [ ] `T-VN-H06` — **admin 목록 keyset 전환 완결**. 구현·2차 적대 리뷰·CI·머지는
+  PR #813(merge `9d29606e`)으로 완료됐다. 잔여는 dedup/enrichment cursor e2e 런타임 검증
+  (n150 Linux Playwright)뿐이다. **Lane A 규율 명시 예외**: 파괴적 n150 live E2E 대상 아님
+  (admin 목록 read 표면) — PR #813 본문의 시나리오 순서로 merged main을 검증한다.
+
+- [ ] `T-VN-H12` — **live acceptance fixture 좌표 run-unique화** (T-VN-LIVE-01 kind-격리 후속)
+
+  `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표가 고정(LON=127.5/LAT=36.5 +
+  index*0.001)이라, 이전 run이 cleanup 전에 죽으면 동일 status·동일 좌표의 leftover place feature가
+  현재 run과 0.000° 거리로 supercluster에 묶여 개별 marker aria-label이 사라진다(적대 리뷰 P2). run별
+  cleanup은 RUN_ID-scoped라 이 cross-run 충돌을 못 막는다. 좌표를 `hash(RUN_ID)`로 run-unique하게
+  jitter하고(SEARCH_TOKEN 패턴) marker 단계에서 map을 fixture로 pan(또는 fitBounds)해 viewport 이탈도
+  차단한다. 또는 marker 직전 place 렌더 count==1(cluster 0) 단언을 추가한다. Lane A 소유(live lane).
+
+- [ ] `T-VN-H16` — **LIVE-01 후속 OPEN 이슈 재검증·종결**. LIVE-01과 #741/#785는
+  완료·종결됐지만 map #712·#719·#694·#777·#684와 docker-manager #63·#70은 2026-07-27 조회 기준
+  OPEN이다. LIVE-01 landing과 결합하지 말고 각 이슈의 독립 완료 조건·현재 main/prod 증거를 재검증해
+  충족된 이슈만 닫고, 미충족이면 실제 잔여를 별도 task로 구체화한다. live lane 후속이므로 Lane A 소유.
 
 **Lane B (codex)** — 병렬 wide lane. 규율: 각 코드 PR은 테스트 전 적대 리뷰어 2명 반영 후
 n150 실데이터 파괴적 Live UI E2E를 통과한다.
 
-- b0 (선행 하드닝, 순차): [x] `T-VN-42`(#846 완료) → [ ] `T-VN-43`(npm 보안) →
+- b0 (선행 하드닝, 순차): [ ] `T-VN-43`(npm 보안) →
   [ ] `T-VN-44`(frontend lint baseline) → [ ] `T-VN-47`(React Doctor) →
   [ ] `T-VN-45`(live endpoint·cache drift) → [ ] `T-VN-46`(npm optional tree) →
   [ ] `T-VN-48`(mocked E2E drift)
@@ -101,11 +105,6 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
 
 ## Lane B 상세 — b0 선행 하드닝
 
-- [x] T-VN-42 — **지도 상세 패널·실모션 zoom·items query key 하드닝** — **완료(#846)**.
-  detail 패널 control-safe 하단 여백 + bounding box 비겹침 assertion, live `reducedMotion` 제거 후
-  `moveend`까지 대기하는 zoom helper, items/clusters query key 정수 zoom 통일, BLOCKED v3
-  (source commit·image·pair·attestation hash 기록 + cross-version cleanup 거부) 반영. tasks-done 이관.
-
 - [ ] T-VN-43 — **admin frontend npm 보안 취약점 0-high 전환**
 
   n150 clean `npm ci`의 `npm audit` 기준 16건(low 2, moderate 7, high 7)을 해소한다. 직접 의존
@@ -124,6 +123,15 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   렌더 파생 상태 또는 command 경계로 재설계해 cascading render를 없앤다. 나머지 unused·hook
   dependency·incompatible-library 경고는 실동작과 React Compiler 경계를 보존하면서 각각 근인으로
   해소하고 full lint 0 problem을 회귀 게이트로 둔다.
+
+- [ ] T-VN-47 — **admin frontend React Doctor 진단 근인 해소**
+
+  T-VN-43에서 React Doctor 0.9.1로 갱신한 full scan은 262개 파일에서 78건(오류 9, 경고 69)을
+  보고한다. WebSocket effect cleanup 3건과 nested state updater side effect 5건은 실제 lifecycle·
+  purity 위반 여부를 재현해 근인으로 해소하고, GET proxy의 `Headers.set()` 보안 진단은 요청 부수효과가
+  아닌 응답 구성임을 코드 흐름·upstream rule과 대조해 오탐이면 좁은 근거 기반 설정으로 표현한다.
+  성능·접근성·유지보수 경고도 generated UI 여부와 runtime 도달성을 분류하되 blanket suppression 없이
+  full scan green 또는 명시적 검증 예외만 허용하며, CI 회귀 게이트를 추가한다.
 
 - [ ] T-VN-45 — **features map 실데이터 input-roundtrip endpoint·cache 대기 drift 제거**
 
@@ -154,15 +162,6 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
 > 2026-07-27 open-PR·이슈 전수 확인에서 main에 잔존하는 미수정 버그/하드닝을 백로그화.
 > 각 항목은 GitHub 이슈에 tasks.md 백로그 링크를 함께 기록한다.
 
-- [ ] T-VN-H12 — **live acceptance fixture 좌표 run-unique화** (T-VN-LIVE-01 kind-격리 후속)
-
-  `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표가 고정(LON=127.5/LAT=36.5 +
-  index*0.001)이라, 이전 run이 cleanup 전에 죽으면 동일 status·동일 좌표의 leftover place feature가
-  현재 run과 0.000° 거리로 supercluster에 묶여 개별 marker aria-label이 사라진다(적대 리뷰 P2). run별
-  cleanup은 RUN_ID-scoped라 이 cross-run 충돌을 못 막는다. 좌표를 `hash(RUN_ID)`로 run-unique하게
-  jitter하고(SEARCH_TOKEN 패턴) marker 단계에서 map을 fixture로 pan(또는 fitBounds)해 viewport 이탈도
-  차단한다. 또는 marker 직전 place 렌더 count==1(cluster 0) 단언을 추가한다. Lane A 소유(live lane).
-
 - [ ] T-VN-H13 — **curation upsert ON CONFLICT 조건부 덮어쓰기** (#699)
 
   `curation_repo.py`의 ON CONFLICT가 `status`/`curation_relation`/`reuse_policy = EXCLUDED.*`를
@@ -180,13 +179,11 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   거부를 안 한다. IPv6 host bracket 정규화 + zone-id 거부로 origin 계약을 정확화(이슈 자체가 C7
   blocker 아닌 후속 하드닝으로 명시).
 
-## 이슈 종결 추적 (landing task 완료 시 close)
+## 이슈 종결 추적
 
-> 아래 이슈들은 코드가 이미 main에 있고 **live 인수/배포 landing** 시점에 닫힌다. 별도 코드 작업
-> 없이 해당 landing task가 종결하면 함께 close한다.
+> landing task와 완료 조건이 동일한 열린 이슈만 함께 닫는다. LIVE-01 후속 OPEN 7건은 Lane A
+> `T-VN-H16`에서 독립 재검증한다.
 
-- **T-VN-LIVE-01 landing 시**: map #741·#785 (04A/58/15 live 인수) + live-gated 재감사 대상
-  #712·#719·#694·#777(reopened)·#684 종결 검토 + docker-manager #63·#70(compatible-pair v4 exact).
 - **T-ADM-C6c + T-VN-03 landing 시**: PinVi #392 (관측 API ops read principal 실증).
 - **추적/관측(코드 미확정)**: map #738(lane 분배 hub)·#673(validation rule 재검토)·#819(HAProxy
   timeout tunnel 적용) · PinVi #215(post-review cleanup 잔여 — ADR-045 VWorld opaque-token hard-gate 등).
