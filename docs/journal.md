@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (claude) — Lane B b4 하드닝 3건 완결 (H13·H14·H15) + H20 진행
+
+**결론**: 사용자 지시로 Lane A가 Lane B b4를 순차 대행. **H13·H14·H15**를 각 적대 리뷰어 2명(blocker 0)
++ 회귀 테스트 + CI green 후 머지. **H20**(prod admin credential 회전)은 credential-safe 생성 완료, prod
+ktdctl 회전·검증은 사용자 실행 중.
+
+- **H13**(#699→#862): curation `_BULK_UPSERT_ITEMS_SQL` ON CONFLICT가 status/curation_relation/
+  reuse_policy를 EXCLUDED default로 무조건 덮어써 운영자 편집 리셋 → 3필드를 SET/WHERE/preview 비교에서
+  제거해 보존, provider 파생 필드만 갱신.
+- **H14**(#700→#863): KREX traffic notice 연속 snapshot 완전일치 즉시-실패 → sliding bounded-retry
+  (상한 4, inter-retry delay) + typed `KrexTrafficNoticeSnapshotUnstable`. 휘발 feed self-heal.
+- **H15**(#805→#864): `_public_origin` IPv6 host를 `[address.compressed]` bracket+canonical, `"%"`
+  zone-id 거부. `run-c7-prod-live-e2e.sh` 병렬 canonicalizer도 미러링해 divergence 방지.
+- **H20**(진행): pbkdf2_sha256(310k iter, 256bit) hash를 auth.ts와 동일 파생으로 생성하는 credential-safe
+  스크립트로 새 password 발급 — 평문→gitignored `docs/prod-access.local.md`, hash→repo 밖 scratch,
+  stdout엔 경로·길이만(값 비노출). prod UI env ktdctl 회전 + login 검증은 사용자 실행.
+
+**교훈 재확인**: 각 b4 코드 fix에 대해 적대 리뷰가 실질 개선을 잡음(H13 removed 카운트, H14 exact-boundary
+테스트·inter-retry delay, H15 shell twin divergence). H20은 secret이 로그/tracked에 남지 않도록 파일→파일
+choreography.
+
 ## 2026-07-27 (claude) — T-VN-H19 public API key 양성 runtime 실증 (C2 갭 종결)
 
 **결론**: #854에서 "등가 충족"으로 남겨둔 C2(public-key→200)를 n150 production(map=c8ed6164)에서

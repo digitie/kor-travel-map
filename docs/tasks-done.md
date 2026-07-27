@@ -3,6 +3,25 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-27 — Lane B b4 하드닝 3건 완결 (H13·H14·H15)
+
+각 항목 적대 리뷰어 2명(blocker 0) + 회귀 테스트 + CI green(pytest/dagster/PostGIS) 후 머지.
+(Lane A가 Lane B b4를 사용자 지시로 순차 대행.)
+
+- [x] **T-VN-H13** — curation authoritative 재적재가 운영자 override 보존 (#699 → PR #862).
+  `_BULK_UPSERT_ITEMS_SQL` ON CONFLICT DO UPDATE·WHERE + `_PREVIEW_IMPORT_COUNTS_SQL` 비교에서
+  status/curation_relation/reuse_policy 제거 → CSV 재적재가 운영자 admin PATCH 편집을 리셋하지 않고
+  provider 파생 필드만 갱신. 회귀 테스트(편집 보존 + provider 갱신 + preview/removed 카운트).
+- [x] **T-VN-H14** — KREX traffic notice snapshot bounded retry self-heal (#700 → PR #863).
+  연속 2 snapshot 완전일치 즉시-실패 → sliding bounded-retry(상한 4, 총 최대 5 snapshot, inter-retry
+  delay 0.5s) + typed `KrexTrafficNoticeSnapshotUnstable`. 휘발성 feed 일시 불일치를 self-heal해 run
+  반복 실패·notice 신선도 정체 완화. 안정 feed는 2 snapshot 즉시 yield(무변경). 테스트 3종(transient/
+  persistent/exact-boundary).
+- [x] **T-VN-H15** — c7 attestation IPv6 public origin bracket 정규화 + zone-id 거부 (#805 → PR #864).
+  `_public_origin`이 IPv6 host를 bracket 없이 `f"{host}{port}"`로 재구성(모호)하고 zone-id 미거부하던
+  것을 `[address.compressed]` bracket+canonical + `"%"` scope 거부로 수정. `run-c7-prod-live-e2e.sh`의
+  병렬 canonicalizer도 동일 미러링(divergence 방지). domain/IPv4 무변경(기존 해시 보존).
+
 ## 2026-07-27 — T-VN-H19 public API key 양성 production runtime 실증 (C2 갭 종결)
 
 - [x] **T-VN-H19** — #854에서 "등가 충족"으로 처리했던 C2(public-key→curated 200)의 DB lookup+hash

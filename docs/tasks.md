@@ -25,8 +25,8 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   [ ] `T-VN-47`(React Doctor) →
   [ ] `T-VN-45`(live endpoint·cache drift) → [ ] `T-VN-46`(npm optional tree) →
   [ ] `T-VN-48`(mocked E2E drift)
-- b4 (열린 이슈·운영 버그 하드닝, 2026-07-27 추가): [ ] `T-VN-H13`(#699 curation upsert) →
-  [ ] `T-VN-H14`(#700 KREX retry) → [ ] `T-VN-H15`(#805 IPv6 origin) →
+- b4 (열린 이슈·운영 버그 하드닝, 2026-07-27 추가): [x] `T-VN-H13`(#699→#862) →
+  [x] `T-VN-H14`(#700→#863) → [x] `T-VN-H15`(#805→#864) →
   [ ] `T-VN-H20`(prod admin credential 정본) → [ ] `T-VN-H18`(GitHub 실제 approval gate)
   (상세는 아래 b4 섹션)
 - b1 (PinVi 결합, 순차): [ ] `T-VN-11` → [ ] `T-VN-12` → [ ] `T-VN-16` →
@@ -133,18 +133,18 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
 > 2026-07-27 open-PR·이슈 전수 확인에서 main에 잔존하는 미수정 버그/하드닝을 백로그화.
 > 각 항목은 GitHub 이슈에 tasks.md 백로그 링크를 함께 기록한다.
 
-- [ ] T-VN-H13 — **curation upsert ON CONFLICT 조건부 덮어쓰기** (#699)
+- [x] T-VN-H13 — **curation upsert ON CONFLICT 조건부 덮어쓰기** (#699 → PR #862 merged)
 
   `curation_repo.py`의 ON CONFLICT가 `status`/`curation_relation`/`reuse_policy = EXCLUDED.*`를
   무조건 덮어써, 운영자가 조정한 상태를 재수집이 되돌린다. 조건부 갱신(제공자 파생 필드만, 운영자
   override 보존) 또는 명시적 병합 규칙으로 재설계하고 회귀 테스트를 둔다.
 
-- [ ] T-VN-H14 — **KREX snapshot set-mismatch retry 상한** (#700)
+- [x] T-VN-H14 — **KREX snapshot set-mismatch retry 상한** (#700 → PR #863 merged)
 
   `provider_fetchers.py` KREX가 snapshot set 불일치에서 retry cap 없이 `RuntimeError`를 raise한다.
   bounded retry + 명확한 typed 실패로 전환해 일시 불일치가 파이프라인을 중단시키지 않게 한다.
 
-- [ ] T-VN-H15 — **c7 attestation IPv6 public origin 정규화** (#805)
+- [x] T-VN-H15 — **c7 attestation IPv6 public origin 정규화** (#805 → PR #864 merged)
 
   `scripts/lib/c7_prod_attestation.py:_public_origin`가 `f"{host}{port}"`로 IPv6 bracket 복원/zone-id
   거부를 안 한다. IPv6 host bracket 정규화 + zone-id 거부로 origin 계약을 정확화(이슈 자체가 C7
