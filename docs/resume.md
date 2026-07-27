@@ -37,8 +37,9 @@ DB/API/UI 파괴적 Live E2E는 완료했다.
 `T-VN-H16`/`T-VN-H17`은 #856/#857로 완료했다. tasks.md 인덱스가 정본.
 
 - **완료(이번 세션)**:
-  - `T-VN-H12` — live acceptance fixture 좌표 `sha256(RUN_ID)` jitter + `recenterMapTo`. e2e type-check +
-    4각도 적대 정적검증 통과, PR #855 머지(`1809c9ad`). **잔여=live-lane 실증은 다음 사이클**(사용자 결정).
+  - `T-VN-H12` — status marker 좌표 `sha256(RUN_ID)` jitter + `recenterMapTo`. PR #855 머지 후
+    **n150 c7-v6 live 검증**에서 status marker 통과 + shared-base jitter의 weather/price seeding desync
+    (공식 runner latent bug) 발견 → **status-only jitter로 수정(PR #859)**. #859는 #858 머지 뒤 rebase 머지.
   - `T-VN-H16` — LIVE-01 후속 OPEN 7건 재검증 → 6 close(dm#63·#70·map#712·#719·#777·#694, 근거 코멘트).
   - `T-VN-H17` — map#684를 조건 #8 검증범위 축소(write/error UI 엣지=mock, read·URL·freshness+write
     계약=live)로 close. → **LIVE-01 후속 OPEN 7건 전부 종결**.

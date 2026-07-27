@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (claude) — T-VN-H12 n150 live 검증: latent weather/price desync 규명·수정
+
+**결론**: H12 좌표 jitter를 n150 c7-v6 live harness로 검증하다 **공식 runner의 latent 회귀**를 발견·수정.
+status marker(H12 핵심)는 live 통과했고, shared base jitter가 weather/price seeding과 desync하던 것을
+**status-only jitter로 국한**해 해결(PR #859). live 검증이 정적검증이 놓친 버그를 잡은 사례.
+
+- **live 재현**(c7-v6, map=c8ed6164/pinvi=6a035695): `assertNonpublicKindCards` weather in-bounds가
+  `[]`(line 623). status marker 단계(recenter 포함)는 그 앞에서 **통과** → 실패는 weather 문제.
+- **근인**: weather/price는 spec이 생성하지 않고 orchestrator seeding helper
+  (`scripts/admin_feature_live_fixture.py`, `_LON=127.5`/`_LAT=36.5` 고정)가 물리 seed. #855 H12가
+  shared base `LON`/`LAT`를 jitter해 spec 조회 좌표가 helper seed 위치와 어긋남. (c7-v6는 helper를
+  안 돌려 weather/price가 아예 미seed였고, 공식 runner에선 desync로 나타날 latent bug.)
+- **수정**(#859): jitter를 `STATUS_FEATURES`에만 국한(`STATUS_MARKER_LON`/`_LAT`), base 좌표는
+  127.5/36.5 고정 복귀. status marker만 map marker 클릭 단언이라 P2가 이들에 국한.
+- **검증**: status marker 좌표는 수학적으로 동일(`36.5+coordJitter+index`)이라 통과한 live run과 같음;
+  weather/price/correction/search는 고정 base = LIVE-01 통과 baseline. e2e type-check exit 0. cleanup은
+  좌표 무관(featureId 기반)이라 leftover 0 확인(cleanupError=null).
+- **교훈**: 4각도 정적 적대검증이 이 회귀를 놓친 이유 = 외부 Python seeding helper의 좌표 계약을 정적
+  모델에 못 넣음. cross-process 좌표 계약은 live 검증 필요.
+
 ## 2026-07-27 (codex) — T-VN-44 full lint·schedule recovery·가격 identity 하드닝
 
 **결론**: frontend ESLint를 0 warning gate로 만들고 schedule response-loss 복구와 가격 series
