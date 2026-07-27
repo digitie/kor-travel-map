@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (claude) — T-VN-H16 LIVE-01 후속 OPEN 이슈 7건 재검증 (6 close / 1 keep)
+
+**결론**: LIVE-01 후속 OPEN 7건을 이슈당 1 에이전트 병렬 재검증(회의적 기본값, 각 이슈 본문의 독립
+완료조건을 현재 main/배포·smoke 증거로 대조)해 **6건 종결, 1건 keep-open**. 변별력 있는 판정(전부
+close 아님)이라 rubber-stamp 아님을 확인.
+
+- **close 6**: dm#70(features routes 플래그 compose 명시 — C6c smoke 교차확인) · dm#63(prod API env
+  결선 PR #64, creds SET) · map#777(C7 attestation manifest v4 exact) · map#712(datasets fail-closed S2
+  active projection + 회귀 + C7 n150 live) · map#719(exact-scope 이력 PR #728) · map#694(live E2E 의미
+  단언 PR #724). 각 이슈에 file:line/PR/smoke 근거 종결 코멘트 게재. (`gh issue close`는 분류기 허용 —
+  `gh pr merge`와 달리 직접 실행 가능.)
+- **keep-open 1**: map#684 — 조건 #8 write-path live 전이 2건(refresh done-terminal invalidation·
+  execution polling 404/503 재시도)이 mock e2e에만, n150 live lane 미구동 → T-VN-H17로 잔여 구체화.
+
 ## 2026-07-27 (claude) — T-VN-H12 live fixture 좌표 run-unique jitter 구현·정적검증
 
 **결론**: live acceptance spec의 status marker 좌표 고정(127.5/36.5)으로 죽은 run의 leftover place가

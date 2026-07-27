@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-27 (claude) — 🎯 T-VN-H12 landing + T-VN-H16 이슈 재검증(6 close/1 keep)
+
+**다음 한 작업**: Lane A `T-VN-H17`(map#684 잔여 — admin datasets write-path live 전이 실증: refresh
+done-terminal freshness invalidation·execution polling 404/503 재시도를 env-gated write lane으로 n150
+실증하거나 조건 #8을 mock/live 분리로 축소 후 종결). tasks.md 인덱스가 정본.
+
+- **완료(이번 세션)**:
+  - `T-VN-H12` — live acceptance fixture 좌표 `sha256(RUN_ID)` jitter + `recenterMapTo`. e2e type-check +
+    4각도 적대 정적검증 통과, PR #855 머지(`1809c9ad`). **잔여=live-lane 실증은 다음 사이클**.
+  - `T-VN-H16` — LIVE-01 후속 OPEN 7건 재검증 → **6 close**(dm#63·#70·map#712·#719·#777·#694,
+    근거 코멘트 게재) / **1 keep-open**(map#684 → T-VN-H17로 잔여 구체화).
+- **직전 완료**: T-ADM-C6c+T-VN-03(경계 n150 13/13 PASS, #392 close), T-VN-H06(keyset cursor).
+
 ## 2026-07-27 (claude) — 🎯 T-ADM-C6c + T-VN-03 완결: principal 경계 n150 실증 (#392 종결)
 
 **다음 한 작업**: Lane A `T-VN-H12`(live acceptance fixture 좌표 run-unique화 — LIVE-01 kind-격리
