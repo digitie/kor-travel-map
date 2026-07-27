@@ -1580,8 +1580,8 @@ Admin frontend 표준:
 - TypeScript.
 - TanStack Query: 서버 상태와 mutation.
 - Zustand: map viewport, view mode, filter draft, selected feature 같은 UI 상태.
-- Zod: API response parsing, form schema, 좌표/bbox 검증.
-- React Hook Form: form 상태와 validation 연결.
+- generated OpenAPI type + explicit response normalization: API 응답 경계.
+- controlled React state + `src/lib/form-validation.ts`: form 상태와 좌표/bbox 검증.
 - TanStack React Table + React Virtual: 운영 목록/검토 화면의 정렬, 선택, row model,
   큰 목록 가상화. 공용 `DataTable`이 기본 표면이다.
 - shadcn/ui: Button, Input, Select, Dialog, Sheet, Tabs, Table, Badge, Toast,
@@ -1593,8 +1593,8 @@ Admin frontend 표준:
 
 규칙:
 
-- API module은 OpenAPI 타입 또는 Zod schema를 기준으로 작성한다.
-- form은 React Hook Form + Zod resolver를 기본으로 한다.
+- API module은 generated OpenAPI 타입과 명시적 response normalization을 기준으로 작성한다.
+- form은 controlled React state와 framework-independent field validator를 기본으로 한다.
 - 원격 데이터는 Zustand에 복제하지 않는다. TanStack Query cache가 source of truth다.
 - shadcn/ui 컴포넌트는 프로젝트 registry 기준으로 추가하고, 임의 UI primitive를
   중복 구현하지 않는다.

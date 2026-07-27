@@ -52,6 +52,59 @@ startup auto-migration 금지)·R2(prod manager에서 raw `docker compose` 금�
 R3(compatible-pair trap 인지·복구·가드 우회 시 즉시 원복)·R4(cross-lane 배포 창 조율)를 고정.
 상세 `docs/reports/incident-2026-07-27-shared-prod-db-live-container.md`.
 
+## 2026-07-27 (codex) — T-VN-43 admin frontend 의존 보안 0건 전환
+
+**결론**: n150 clean npm graph의 16개 취약점을 직접/전이·runtime/tooling 도달성으로 추적했다.
+사용하지 않는 shadcn CLI/MCP·폼 graph와 취약 legacy Next ESLint preset을 제거하고, Next/Redocly의
+upstream 보안 release 지연만 좁은 override와 fail-close vendor patch로 닫아 `npm audit` 0건을
+달성했다.
+
+- **runtime**: Next 16.2.12 자체 advisory를 해소하고 exact PostCSS 8.5.23·Sharp 0.35.3을
+  override했다. version 문자열만 보지 않고 Next private optimizer가 2×2 SVG를 WebP로 변환하는 smoke로
+  Sharp ABI·실제 image path를 검증한다.
+- **UI source 경계**: `shadcn/tailwind.css` 전체를 위해 CLI/MCP server graph를 설치하던 구조를
+  제거했다. 실제 사용은 `data-checked|active|horizontal|vertical` variant뿐이라 프로젝트 CSS가
+  네 정의를 소유한다. source import가 없던 React Hook Form/resolver/Zod도 제거해 lock graph를
+  약 1,100 package에서 742 package로 줄였다.
+- **npm tree integrity**: exact npm 10.9.4는 Sharp WASM fallback optional graph 6개를
+  `extraneous`로 보고하면서 exit 0을 반환한다. 별도 verifier가 JSON `problems`를 읽어 exact
+  package/version allowlist 밖 항목을 거부하고, 허용된 optional graph는 실제 native optimizer smoke와
+  함께 검증한다. allowlist 제거는 upstream/npm 근인 해소 task T-VN-46으로 유지한다.
+- **tooling**: ESLint 10·typescript-eslint 8.65·React Hooks·React-X/React-DOM·Next·import-x·
+  jsx-a11y-x flat config로 실제 규칙을 직접 구성했다. effective config verifier가 canonical React Hooks
+  활성, 중복 React-X analyzer 비활성, missing-key/anonymous-export severity를 계산한다. 더 넓어진 기준선
+  1 error/30 warnings는 T-VN-44에서 suppression 없이 근인으로 제거한다.
+- **OpenAPI codegen**: Redocly 1.34.17에 js-yaml 4.3.0/minimatch 10.2.5를 주입하고
+  function→named export 변화 한 곳만 version·before/after count exact 검사 후 바꾸는 postinstall을
+  사용한다.
+- **재현 가능한 container**: frontend는 Node 22.23.1 digest와 npm 10.9.4를 exact pin한다. C7
+  Playwright browser image/client는 모두 1.60.0으로 맞췄고, 두 Docker context가 Redocly patch·npm tree
+  integrity·Next/Sharp smoke script를 install 전에 복사해 context drift를 fail-close한다.
+- **적대 리뷰 반영**: #840 이후 Claude Code PR 전문 감사 1명과 독립 적대 리뷰어 2명의 1·2차 finding
+  (C7 script 누락, Playwright drift, React lint 계약 축소, Sharp ABI 미검증, unused dependency,
+  npm toolchain 비고정, CSS compound token 누락, tree false-green, 활성 문서 Node/npm drift)을 반영했다.
+  3차 리뷰에서는 accepted ADR-045의 제거된 form dependency 계약 1건(P3)을 찾아 admin 범위만
+  controlled state + `form-validation.ts`로 개정하고 PinVi D-4 범위는 보존했다. 이어 #849/#850
+  재감사에서 완료된 LIVE-01/T-VN-42의 열린 백로그 중복·H12 인덱스/owner drift·완료 LIVE future
+  tracker(P3)와 C6c의 이미 끝난 배포/pair 잔여 표기(P2)를 찾아 바로잡았다. 실제 OPEN 7건은 Lane A
+  `T-VN-H16`으로 분리했다. #841~#850 반영 최신 main 기준 최종 exact diff 재리뷰는 세 리뷰어
+  모두 P0~P3 finding 0건이다.
+- **React 진단**: React Doctor 0.9.1 full scan은 기존 코드에서 오류 9건·경고 69건이다. T-VN-47에서
+  lifecycle/purity/security finding을 근인으로 해소한다.
+- **mocked E2E 진단**: 전체 269 spec 중 165번째까지 기존 UI/test 계약 drift 52건을 재현했다. 현재
+  한국어 accessible name·실제 actor/API route와 stale spec 기대를 맞추는 T-VN-48로 분리하고,
+  T-VN-43의 CSS·폼·지도·업로드 대표 mocked spec은 격리 UI/C7 container·workers=1에서 24/24
+  통과했다.
+- **전체 gate**: Python 2,355 tests·Ruff·strict mypy·4개 import contract와 frontend clean
+  install·audit 0·npm tree/effective ESLint/Next-Sharp smoke·OpenAPI/admin/user drift·type-check·
+  227 Vitest·production build를 모두 통과했다. exact frontend/C7 Docker image에서도 install 보안
+  gate와 대표 mocked E2E 24/24를 재확인했다.
+- **실데이터 파괴적 live**: PR #847 R1~R4에 따라 branch API/Dagster/DB migration 없이 UI만 host
+  loopback `12715`에 격리해 운영 API를 호출했다. 관리자 UI에서 공식 CSV 5종 preview·commit,
+  REST·관리자 상세·지도 검증을 포함한 live E2E 4/4가 통과했고 19 collections·486 memberships를
+  확인했다. 전용 UI/browser container를 제거한 뒤 C7 active process/lock/journal/runtime 잔여는
+  모두 0이고 운영 UI/API는 healthy다.
+
 ## 2026-07-26 (codex) — T-VN-42 지도 control·query identity·live recovery 하드닝
 
 **결론**: `/features`와 `/curated-features`의 상세 패널이 MapLibre 우하단 `ScaleControl`을

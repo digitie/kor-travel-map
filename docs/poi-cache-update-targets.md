@@ -549,7 +549,7 @@ DB 규칙:
   linked feature count, last_refreshed_at, next_eligible_refresh_at.
 - Cache target 상세: 지도, 주변 feature, provider별 refresh policy, 최근 update
   request/job.
-- 등록/upsert form: React Hook Form + Zod.
+- 등록/upsert form: controlled React state + `src/lib/form-validation.ts`.
 - 삭제 action: soft delete 확인 모달.
 - Dry-run 버튼: target key 목록 또는 현재 target 기준 update scope 미리보기.
 - Provider refresh policy 화면: provider/dataset별 source_kind, targeted_policy,

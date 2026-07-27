@@ -225,7 +225,7 @@
   ```bash
   export NVM_DIR="$HOME/.nvm"
   . "$NVM_DIR/nvm.sh"
-  nvm use 20.20.2
+  nvm use 22.23.1
   hash -r
   command -v node npm
   ```
@@ -241,9 +241,9 @@
   ```bash
   export NVM_DIR="$HOME/.nvm"
   . "$NVM_DIR/nvm.sh"
-  nvm use 20.20.2
-  npm install -w packages/kor-travel-map-admin/frontend --include=optional
-  npm -w packages/kor-travel-map-admin/frontend run build
+  nvm use 22.23.1
+  npx --yes npm@10.9.4 ci --workspaces --include=optional
+  npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run build
   ```
   그래도 native package가 계속 꼬이면 ignored artifact인 `node_modules/`를 WSL에서
   지우고 WSL npm으로 다시 설치한다. Windows npm으로 frontend 서버를 실행하지 않는다.
@@ -277,7 +277,7 @@
     cd "$REPO/packages/kor-travel-map-admin/frontend"
     export NVM_DIR="$HOME/.nvm"
     . "$NVM_DIR/nvm.sh"
-    nvm use 20.20.2 >/dev/null
+    nvm use 22.23.1 >/dev/null
     exec npx next dev --port 12705 --hostname 0.0.0.0
   ' > "$REPO/.codex_tmp/kor-travel-map-admin-frontend.log" 2>&1
   ```

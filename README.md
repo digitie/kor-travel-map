@@ -84,11 +84,15 @@ npm run admin:stack
 Admin frontend는 WSL Node/npm으로 실행한다. Windows Node/npm은 사용하지 않는다.
 
 ```bash
-cd /mnt/f/dev/kor-travel-map-codex/packages/kor-travel-map-admin/frontend
+cd /mnt/f/dev/kor-travel-map-codex
+source ~/.nvm/nvm.sh && nvm use 22.23.1
 which node npm              # /home/.../.nvm/... 경로여야 함
-cp .env.example .env.local  # NEXT_PUBLIC_VWORLD_API_KEY 설정
-npm install
-npm run dev                 # http://127.0.0.1:12705
+npx --yes npm@10.9.4 ci --workspaces --include=optional
+npx --yes npm@10.9.4 run verify:npm-tree
+cp packages/kor-travel-map-admin/frontend/.env.example \
+  packages/kor-travel-map-admin/frontend/.env.local
+# .env.local에 NEXT_PUBLIC_VWORLD_API_KEY 설정
+npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run dev
 ```
 
 Playwright e2e는 n150 Linux 환경에서 우선 실행한다. n150에서 실행할 수 없을 때만

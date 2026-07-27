@@ -5,9 +5,9 @@ name: frontend
 # 빌드가 깨졌으나 frontend가 한 번도 컴파일된 적 없어 잠복했다. 본 게이트는
 # 그런 잠복 syntax/타입 오류를 PR 머지 전에 차단한다.
 #
-# T-203 이후 모든 PR에서 check를 생성한다. branch protection에서
-# `type-check + next build (Node 20)`을 required로 승격해도 문서/백엔드 PR이
-# missing check 때문에 막히지 않게 하기 위함이다.
+# T-203 이후 모든 PR에서 check를 생성한다. required check의 legacy identity인
+# `type-check + next build (Node 20)` 이름은 branch protection 전환 전까지 유지하지만,
+# 실제 toolchain 계약과 실행은 Node 22.23.1이다.
 
 on:
   push:
@@ -26,33 +26,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node 20
+      - name: Set up Node 22.23.1
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22.23.1"
 
-      - name: npm install (workspace 루트 — map-marker-react + frontend)
+      - name: npm ci (workspace 루트 — map-marker-react + frontend)
         # 루트 package.json의 npm workspaces 로 두 패키지 한 번에 설치.
         # admin frontend는 maplibre-gl + in-repo VWorld 스타일 빌더 사용 — 외부 git
         # dep 없음 (maplibre-vworld git dep는 #476에서 제거).
-        run: npm install --no-audit --no-fund
+        run: npx --yes npm@10.9.4 ci --workspaces --include=optional --no-audit --no-fund
+
+      - name: npm high 취약점 gate
+        run: npx --yes npm@10.9.4 run audit:high
+
+      - name: npm dependency tree integrity
+        run: npx --yes npm@10.9.4 run verify:npm-tree
+
+      - name: frontend ESLint effective config
+        run: npx --yes npm@10.9.4 run verify:frontend-eslint
+
+      - name: Next/Sharp optimizer ABI smoke
+        run: npx --yes npm@10.9.4 run verify:next-sharp
 
       - name: openapi-typescript drift check
         # T-RV-30: admin frontend가 사용하는 generated OpenAPI 타입 산출물이
         # packages/kor-travel-map-api/openapi.json과 drift 나지 않게 고정한다.
-        run: npm -w packages/kor-travel-map-admin/frontend run gen:types:check
+        run: npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run gen:types:check
 
       - name: user-client types drift + surface assertions (T-210e)
         # downstream(TripMate) 소비용 user spec 타입 산출물 고정 + ADR-048 표면
         # 불변식(batch found / meta.page / 평면 lon,lat / /v1 경로) 컴파일 단언.
         run: |
-          npm -w packages/kor-travel-map-user-client run gen:types:check
-          npm -w packages/kor-travel-map-user-client run type-check
+          npx --yes npm@10.9.4 -w packages/kor-travel-map-user-client run gen:types:check
+          npx --yes npm@10.9.4 -w packages/kor-travel-map-user-client run type-check
 
       - name: tsc --noEmit (frontend type-check)
         # 빠른 1차 게이트. JSDoc 주석 안의 `*/`(comment terminator) 같은 잠복
         # syntax 오류도 검출 (PR#92 회고).
-        run: npm -w packages/kor-travel-map-admin/frontend run type-check
+        run: npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run type-check
 
       - name: next build (production compile)
         # ADR-025 — swc/turbo의 syntax + 모듈 해석을 production 경로까지 확인.
@@ -61,4 +73,4 @@ jobs:
           NEXT_PUBLIC_KOR_TRAVEL_MAP_API: http://127.0.0.1:8087
           NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: http://127.0.0.1:12302
           NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: http://127.0.0.1:12201
-        run: npm -w packages/kor-travel-map-admin/frontend run build
+        run: npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run build

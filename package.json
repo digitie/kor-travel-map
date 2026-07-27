@@ -2,6 +2,11 @@
   "name": "kor-travel-map-monorepo",
   "version": "0.0.0",
   "private": true,
+  "packageManager": "npm@10.9.4",
+  "engines": {
+    "node": ">=22",
+    "npm": "10.9.4"
+  },
   "description": "npm workspace root for the frontend packages of kor-travel-map (debug UI + shared map-marker-react). 본 저장소의 1차 산출물은 Python 라이브러리(pyproject.toml)이며, 본 package.json은 frontend workspace 해석 전용 (ADR-025/029/043 — @kor-travel-map/map-marker-react는 모노레포 내부 share, registry 게시 X).",
   "workspaces": [
     "packages/map-marker-react",
@@ -18,11 +23,21 @@
     "docker:buildx": "bash scripts/docker-buildx.sh",
     "docker:up": "bash scripts/docker-up.sh",
     "ports:preflight": "bash scripts/preflight-ports.sh",
-    "ports:stop": "bash scripts/stop-fixed-ports.sh"
+    "ports:stop": "bash scripts/stop-fixed-ports.sh",
+    "audit:high": "npx --yes npm@10.9.4 audit --audit-level=high",
+    "verify:npm-tree": "node scripts/verify-npm-tree.mjs",
+    "verify:frontend-eslint": "node scripts/verify-frontend-eslint-config.mjs",
+    "verify:next-sharp": "node scripts/verify-next-sharp.mjs",
+    "postinstall": "node scripts/patch-redocly-openapi-core.mjs"
   },
   "overrides": {
     "next": {
-      "postcss": "^8.5.15"
+      "postcss": "8.5.23",
+      "sharp": "0.35.3"
+    },
+    "@redocly/openapi-core": {
+      "js-yaml": "4.3.0",
+      "minimatch": "10.2.5"
     }
   }
 }

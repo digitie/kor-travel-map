@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS deps
+FROM node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS deps
 
 ENV PUPPETEER_SKIP_DOWNLOAD=1 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -13,10 +13,15 @@ COPY package.json ./
 COPY package-lock.json ./
 COPY packages/map-marker-react/package.json ./packages/map-marker-react/package.json
 COPY packages/kor-travel-map-admin/frontend/package.json ./packages/kor-travel-map-admin/frontend/package.json
+COPY scripts/patch-redocly-openapi-core.mjs ./scripts/patch-redocly-openapi-core.mjs
+COPY scripts/verify-next-sharp.mjs ./scripts/verify-next-sharp.mjs
+COPY scripts/verify-npm-tree.mjs ./scripts/verify-npm-tree.mjs
 
-RUN npm ci --workspaces --include=optional
+RUN npx --yes npm@10.9.4 ci --workspaces --include=optional \
+    && npx --yes npm@10.9.4 run verify:npm-tree \
+    && npx --yes npm@10.9.4 run verify:next-sharp
 
-FROM node:22-bookworm-slim AS builder
+FROM node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS builder
 
 ENV PUPPETEER_SKIP_DOWNLOAD=1 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -46,9 +51,9 @@ ENV NEXT_PUBLIC_KOR_TRAVEL_MAP_API=$NEXT_PUBLIC_KOR_TRAVEL_MAP_API \
     NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY=$NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY \
     NEXT_TELEMETRY_DISABLED=1
 
-RUN npm -w packages/kor-travel-map-admin/frontend run build
+RUN npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run build
 
-FROM node:22-bookworm-slim AS runner
+FROM node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS runner
 
 ARG KOR_TRAVEL_MAP_GIT_COMMIT=development
 

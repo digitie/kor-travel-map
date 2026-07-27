@@ -363,7 +363,9 @@ sudo 권한은 실행 직전 `sudo -n true`로 다시 확인한다. 접속 자�
    `~/.nvm/nvm.sh`를 source하고 WSL Node를 활성화한다.
 2. Linux optional dependency 확인:
    ```bash
-   npm install -w packages/kor-travel-map-admin/frontend --include=optional
+   npx --yes npm@10.9.4 ci --workspaces --include=optional
+   npx --yes npm@10.9.4 run verify:npm-tree
+   npx --yes npm@10.9.4 run verify:next-sharp
    ```
 3. Next lockfile 권한 에러가 있으면 `.next`를 지운다:
    ```bash

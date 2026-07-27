@@ -23,11 +23,11 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
   MapLibre style을 직접 만든다. `features` 지도는 `maplibre-vworld-react`
   참조 모델의 `VWorldMapView`/React marker 구조를 admin 내부 컴포넌트로 얇게
   이식한다.
-- **zod** ^4.4.3 — form/API 입력 검증.
-- **React Hook Form** — 수동 feature 추가, provider 실행, offline upload,
-  feature update request form 상태
-- **shadcn/ui** — admin UI primitive(Button/Input/Select/Dialog/Sheet/Tabs/Table/
-  Badge/Toast/Form/DropdownMenu 등)
+- **controlled React state + `src/lib/form-validation.ts`** — runtime form framework 없이
+  제출 경계에서 typed field 검증·첫 오류 focus를 처리한다.
+- **shadcn/ui generated source + Base UI** — admin UI primitive(Button/Input/Select/Dialog/
+  Sheet/Tabs/Table/Badge/Toast/Form/DropdownMenu 등). shadcn CLI/MCP npm package는 설치하지 않고,
+  실제 component source와 사용 중인 Tailwind variant 4개를 저장소가 직접 소유한다.
 - **@tanstack/react-query** — 서버 데이터 페칭/캐시 (ADR-037)
 - **zustand** — UI 클라이언트 상태(map viewport / filter / 선택된 feature
   등). ADR-037 (PR#36에 처음 추가)
@@ -87,19 +87,33 @@ fallback 용도로만 사용한다. `which node`/`which npm`이 `/mnt/c/Program 
 가리키면 Windows Node가 섞인 상태이므로 WSL nvm Node를 먼저 활성화한다.
 
 ```bash
-# WSL 셸에서 실행
+# 저장소 루트의 Linux/WSL 셸에서 실행(Node >=22, npm 10.9.4)
+which node npm              # /home/.../.nvm/... 등 Linux 경로여야 함
+npx --yes npm@10.9.4 ci --workspaces --include=optional
+npx --yes npm@10.9.4 run audit:high
 cd packages/kor-travel-map-admin/frontend
-which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함
 cp .env.example .env.local
 $EDITOR .env.local
-npm install
-npm run gen:types           # ../../kor-travel-map-api/openapi.json -> src/api/types.ts
-npm run dev                  # http://127.0.0.1:12705
+npx --yes npm@10.9.4 run gen:types  # ../../kor-travel-map-api/openapi.json -> src/api/types.ts
+npx --yes npm@10.9.4 run dev        # http://127.0.0.1:12705
 ```
 
 `src/api/types.ts`는 `openapi-typescript` 자동 생성 파일이다. 라우터/DTO 변경으로
 `../../kor-travel-map-api/openapi.json`을 갱신했다면 `npm run gen:types`를 함께 실행하고,
 `npm run gen:types:check`로 drift가 없는지 확인한다.
+
+
+### npm 보안·OpenAPI codegen 경계
+
+root install은 선언된 npm 10.9.4로만 실행하고
+`scripts/patch-redocly-openapi-core.mjs`를 postinstall로 실행한다. `openapi-typescript` 7이 아직
+Redocly 1 API를 사용하므로 js-yaml/minimatch만 안전한 exact version으로 올리고, minimatch의
+named export 변경 한 곳을 Redocly 1.34.17 원문에 exact 적용한다. 설치 version이나 대상 줄 수가
+다르면 실패한다. Next가 아직 선언하지 않은 Sharp 0.35 ABI는
+`scripts/verify-next-sharp.mjs`가 실제 SVG→WebP 변환과 크기를 검증한다. CI와 frontend/C7 Docker
+build는 clean install 직후 이 smoke를 실행한다. Playwright client는 immutable C7 browser image와
+같은 1.60.0으로 고정한다. patch를 우회하는 `--ignore-scripts` install 결과로 build·codegen을
+검증하지 않는다.
 
 `next dev`의 기본 포트는 3000이지만, PinVi `apps/web` 개발 충돌 회피를
 위해 `--port 12705`을 강제한다 (`package.json` scripts).
@@ -112,7 +126,7 @@ npm run dev                  # http://127.0.0.1:12705
    가 나오면 WSL nvm Node를 활성화한다.
 2. Windows npm으로 설치한 흔적이 있으면 WSL Node로 optional dependency를 보강한다.
    ```bash
-   npm install -w packages/kor-travel-map-admin/frontend --include=optional
+   npx --yes npm@10.9.4 ci --workspaces --include=optional
    ```
 3. `Cannot find module '../lightningcss.linux-x64-gnu.node'` 또는 `@next/swc` native
    binary 누락은 2번 문제다. Windows npm으로 다시 실행하지 않는다.
@@ -126,7 +140,7 @@ npm run dev                  # http://127.0.0.1:12705
    ```bash
    npx next dev --port 12705 --hostname 0.0.0.0
    ```
-6. background 실행은 `setsid -f bash -lc 'source ~/.nvm/nvm.sh; nvm use 20.20.2;
+6. background 실행은 `setsid -f bash -lc 'source ~/.nvm/nvm.sh; nvm use 22.23.1;
    exec npx next dev ...'` 형태를 쓴다. `env PATH=...$PATH`는 Windows 경로의 공백
    때문에 깨질 수 있다.
 7. 성공 여부는 로그가 아니라 listener와 HTTP 응답으로 확인한다.
@@ -184,7 +198,7 @@ npm run doctor
 
 # 2) n150 Linux에서 Playwright 실행
 cd packages/kor-travel-map-admin/frontend
-npm install              # 최초 1회 (workspace deps)
+npx --yes npm@10.9.4 ci --workspaces --include=optional  # 최초 1회
 npm run e2e:install      # chromium 설치 (최초 1회)
 npm run e2e              # playwright test (servers는 WSL에 떠 있어야 함)
 npm run e2e:ui           # --ui 모드
@@ -271,8 +285,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 ## 라이선스
 
 GPL-3.0-or-later (메인 패키지와 동일). 외부 의존성: `next` (MIT),
-`maplibre-gl` (BSD-3), `zod` (MIT), React/TanStack
-(MIT) — 모두 호환.
+`maplibre-gl` (BSD-3), React/TanStack (MIT) — 모두 호환.
 
 ## 비책임
 

@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### Admin frontend npm audit 0 전환 (2026-07-27, T-VN-43)
+
+- **SECURITY**: clean admin frontend install의 npm 취약점을 low/moderate/high 합계 16건에서 0건으로
+  내렸다. Next 16.2.12, PostCSS 8.5.23, Sharp 0.35.3과 안전한 YAML/glob 전이를 lockfile에 고정하고
+  CI가 high 이상 취약점 재유입을 거부한다.
+- **CHANGED**: 빌드에 필요하지 않은 shadcn CLI/MCP·React Hook Form/resolver/Zod와 취약 legacy
+  Next ESLint preset을 제거했다. generated UI source가 쓰는 Tailwind variant 4개만 프로젝트 CSS가
+  소유하며, React Hooks·React-X/React-DOM·Next/import/a11y flat config가 현대 React 계약을 직접
+  검사한다.
+- **RELIABILITY**: Node 22.23.1/npm 10.9.4와 C7 Playwright 1.60.0을 exact pin했다. Redocly patch는
+  frontend/C7 Docker build 모두에서 version·원문 drift를 fail-close하고, 실제 Next image optimizer
+  smoke가 Sharp ABI와 SVG→WebP 변환을 검증한다.
+- **RELIABILITY**: `npm ls`의 성공 종료코드와 별도로 JSON `problems`를 검사해 Sharp 0.35.3의
+  선택적 WASM fallback 6개만 exact allowlist로 허용한다. frontend ESLint gate도 파일 문자열이 아니라
+  계산된 effective config에서 canonical React Hooks와 중복 analyzer·severity 계약을 검증한다.
+
 ### Admin 지도 control·query identity 하드닝 (2026-07-26, T-VN-42)
 
 - **FIXED**: `/features`와 `/curated-features`의 우측 상세 패널이 MapLibre 우하단
