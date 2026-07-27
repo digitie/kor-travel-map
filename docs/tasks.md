@@ -18,18 +18,13 @@
 live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실행 위주라 하위 상세 섹션
 없이 **인덱스 상주가 정본**(tasks-rule §5의 "상세 위치 하나"를 인덱스로 충족).
 
-- [ ] `T-VN-LIVE-01` — **targeted live acceptance lane n150 실행·종결**. 구현은 PR #792로
-  main 합류 완료(spec 957줄 + fixture/state/supervisor + runbook:
-  [admin-feature-live-acceptance](runbooks/admin-feature-live-acceptance.md), 설계:
-  [t-vn-live-acceptance-741-785-2026-07-20](reports/t-vn-live-acceptance-741-785-2026-07-20.md)).
-  잔여 = WSL SSH n150 production **파괴적 실행**으로 cleanup/audit/container/evidence 0/완결
-  증명 + 증거 기록. 완료 시 아래 3개 task의 live 인수가 동시 종결된다(issue #741·#785 close).
-  - [ ] `T-VN-04A`(#741) — 코드 main 합류 완료. 잔여 = lane 실행 내 inactive/draft/hidden
-    marker·weather/price 카드·public 비누출 검증뿐(별도 작업 없음).
-  - [ ] `T-VN-58`(#785) — 코드 main 합류 완료. 잔여 = lane 실행 내 competing update 후
-    최초 raw `If-Match` 412·dirty draft 보존·명시적 reload 검증뿐(별도 작업 없음).
-  - [ ] `T-VN-15` — 코드 main 합류 완료. 잔여 = lane 실행 내 signing secret fail-closed
-    기동·정상 continuation·변조/query-mismatch 422 검증뿐(별도 작업 없음).
+- [x] `T-VN-LIVE-01` (+`T-VN-04A`#741·`T-VN-58`#785·`T-VN-15`) — **완료(2026-07-27)**:
+  targeted live acceptance lane을 n150 production(map=c8ed6164/pinvi=6a035695)에서 파괴적 실행 →
+  **PASSED**(rc=0, phase=passed, recovery_attempt=0, BLOCKED/ACTIVE 없음, active leftover 0). marker×3
+  (inactive/draft/hidden) + weather/price 카드 + T-VN-15 검색 total/cursor/변조 422 + #785 stale
+  If-Match 412 전구간 통과. 규명·수정 이력: kind 필터 미격리+seed weather cross-kind cluster(#848
+  kind=place 격리) · 검색 pg_trgm 격리(#845) · connectionId/heading(#839 계열). issue #741·#785
+  close. `tasks-done.md` 이관. 상세 `docs/journal.md` 2026-07-27.
 - [ ] `T-ADM-C6c` + `T-VN-03` — **principal 경계 smoke + pair 완결**(두 task 잔여가 동일
   실행으로 종결). 코드 양측 머지 완료(PinVi #387/#393, Map #782→#790, manager #64).
   잔여 = ① pinvi head(**hardening #408 포함** — 현 배포 e60d1711은 #408 이전) 재배포 +
