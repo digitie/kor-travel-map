@@ -750,37 +750,34 @@ WITH incoming AS (
     ON CONFLICT (
         collection_id, external_item_id, feature_id
     ) WHERE archived_at IS NULL
+    -- status/curation_relation/reuse_policy는 CSV에 없는 하드코딩 default이며
+    -- 운영자가 admin PATCH로 조정하는 override 필드다. authoritative 재적재가 이를
+    -- 무조건 EXCLUDED default로 되돌리면 수동 큐레이션이 리셋되므로(#699), CONFLICT
+    -- 경로에서는 이 3개를 갱신·비교에서 제외해 기존(운영자) 값을 보존한다.
+    -- 반대로 제공자 파생 필드(place_name/address_hint/sort_order/item_title/item_summary/
+    -- metadata)는 CSV가 정본이므로 운영자가 PATCH로 편집했더라도 재적재로 덮어쓴다(의도된 경계).
     DO UPDATE SET
-        status = EXCLUDED.status,
         place_name = EXCLUDED.place_name,
         address_hint = EXCLUDED.address_hint,
         sort_order = EXCLUDED.sort_order,
         item_title = EXCLUDED.item_title,
         item_summary = EXCLUDED.item_summary,
-        curation_relation = EXCLUDED.curation_relation,
-        reuse_policy = EXCLUDED.reuse_policy,
         metadata = EXCLUDED.metadata,
         updated_by = EXCLUDED.updated_by,
         updated_at = now()
     WHERE (
         feature.curation_items.place_name,
         feature.curation_items.address_hint,
-        feature.curation_items.status,
         feature.curation_items.sort_order,
         feature.curation_items.item_title,
         feature.curation_items.item_summary,
-        feature.curation_items.curation_relation,
-        feature.curation_items.reuse_policy,
         feature.curation_items.metadata
     ) IS DISTINCT FROM (
         EXCLUDED.place_name,
         EXCLUDED.address_hint,
-        EXCLUDED.status,
         EXCLUDED.sort_order,
         EXCLUDED.item_title,
         EXCLUDED.item_summary,
-        EXCLUDED.curation_relation,
-        EXCLUDED.reuse_policy,
         EXCLUDED.metadata
     )
     RETURNING (xmax = 0) AS inserted
@@ -809,25 +806,22 @@ WITH incoming AS (
     SELECT
         existing.curation_item_id IS NOT NULL AS already_exists,
         existing.curation_item_id IS NOT NULL
+        -- 실제 upsert가 CONFLICT에서 status/curation_relation/reuse_policy를 보존하므로
+        -- (#699) dry-run preview도 이 3개를 needs_update 비교에서 제외해 "updated" 카운트를
+        -- 실제 동작과 일치시킨다(운영자 편집만 다른 행을 updated로 오표시하지 않음).
         AND (
             existing.place_name,
             existing.address_hint,
-            existing.status,
             existing.sort_order,
             existing.item_title,
             existing.item_summary,
-            existing.curation_relation,
-            existing.reuse_policy,
             existing.metadata
         ) IS DISTINCT FROM (
             incoming.place_name,
             incoming.address_hint,
-            'included'::text,
             incoming.sort_order,
             incoming.item_title,
             incoming.item_summary,
-            'nearby_option'::text,
-            'manual_review'::text,
             incoming.metadata
         ) AS needs_update
     FROM incoming
