@@ -18,17 +18,6 @@
 live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실행 위주라 하위 상세 섹션
 없이 **인덱스 상주가 정본**(tasks-rule §5의 "상세 위치 하나"를 인덱스로 충족).
 
-- [ ] `T-VN-H12` — **live acceptance fixture 좌표 run-unique화** (T-VN-LIVE-01 kind-격리 후속).
-  **구현·정적검증·n150 live 검증 완료**, 잔여 = **fix PR #859 머지**뿐(#858 뒤 rebase 머지 예정).
-
-  `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표 고정으로 죽은 run leftover가
-  supercluster 병합돼 marker aria-label 소실(P2). 수정: **status marker 좌표만** `sha256(RUN_ID)` ±0.25°
-  jitter(`STATUS_MARKER_LON/LAT`) + `recenterMapTo`로 marker 단계 map을 fixture로 jumpTo. base LON/LAT는
-  127.5/36.5 고정(weather/price/correction/search는 seeding helper·API 단언과 좌표 동기 필요).
-  **n150 c7-v6 live 검증**(map=c8ed6164): status marker 단계 통과. 최초 #855는 shared base를 jitter해
-  weather seeding과 desync(공식 runner latent bug) → **#859에서 status-only로 국한 수정**. weather/price는
-  고정 base = LIVE-01 baseline이라 무변경. e2e type-check + 4각도 정적검증 + live status-marker 통과.
-
 - [ ] `T-VN-H19` — **public API key 양성 production runtime 경계 실증**.
   PR #854의 T-VN-03/C6c smoke는 keyless·service·admin principal과 unit test를 근거로 C2
   (public-key→200)를 “등가 충족” 처리했으나, DB lookup·hash compare의 별도 양성 분기를 실증하지
