@@ -553,6 +553,7 @@ async def test_merge_locks_curation_collection_before_items(
         )
         merge_task = asyncio.create_task(run_merge())
         for _ in range(50):
+            await holder.execute(text("SELECT pg_stat_clear_snapshot()"))
             waiting = (
                 await holder.execute(
                     text(
