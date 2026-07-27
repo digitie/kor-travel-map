@@ -2,6 +2,36 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (claude) — T-VN-LIVE-01 완료: targeted live acceptance lane n150 PASSED
+
+**결론**: admin-feature targeted live acceptance lane(#792)을 n150 production
+(map=c8ed6164/pinvi=6a035695)에서 파괴적 실행해 **PASSED**(rc=0, phase=passed, recovery_attempt=0,
+BLOCKED/ACTIVE 없음, 사후 active leftover 0). marker×3(inactive/draft/hidden) + hidden weather/price
+카드 + public 비누출 + T-VN-15 search total/continuation/변조 422 + #785 stale If-Match 412 전구간
+통과. issue #741·#785 close.
+
+**규명·수정 연쇄**(공식 runner가 redacted라 비-redact c7-v6 harness로 각 실패 재현):
+- helper 컨테이너가 host-network API runtime에 `docker network connect`(none+connect 죽은 경로) →
+  host-network 직접 create(#842).
+- `/features` 지도에 navigation control 없어 zoom 클릭 불가 + items zoom param 미전송 + zoomMapTo
+  애니메이션 간섭 + panel이 control 가림 → nav/scale 추가·zoom always-send·settle-poll·panel 하강(#843).
+- Codex 작성 PR(#792 등) 사후 리뷰: fixture DSN 정규화 우회·clear-blocked 후 signal 창(#844).
+- 검색 쿼리가 RUN_ID 원문이라 correction fixture가 pg_trgm 매칭 → sha256 32-hex 토큰 격리(#845).
+- kind 필터가 place만 켜고 기본 weather를 안 꺼 seed hidden weather가 place 마커와 client-cluster →
+  kind=place 격리(#848). 적대 리뷰어 2명: P3(기본 kind 사실) 정정·P2(cross-run same-coord leftover)
+  T-VN-H12 추적.
+
+**인시던트+복구**(별도 상세 `reports/incident-2026-07-27-...md`, 규율 #847): Lane B(codex)
+`pinvi-api-tvn08-live`가 공유 prod pinvi DB를 0040으로 startup migration → held e60d1711 기동 불가 →
+compatible-pair manifest trap → map 배포 연쇄 실패. 복구 중 raw `docker compose up`이 override의
+provider 키를 map-api에 주입해 fail-close(2차 손상). pinvi를 6a035695(#408)로 직접 재빌드(DB 0040
+정합) + map-api를 base compose(`-f docker-compose.yml`, override 배제)로 sanitized 재생성 + deploy
+사전점검 3종(리비전 정합·manifest-drift·mandatory-health) 처리(2 검증-안전 tolerate 임시 우회 + 1
+실제 수정) 후 **패치 전량 원복** → pair를 c8ed6164/6a035695로 정식 전진.
+
+**부수 정리**: T-VN-42(#846) 완료 이관, open PR 정리(#833 머지·#831/#811 닫음), 백로그 재작성
+(b4 신설: H12/H13#699/H14#700/H15#805 + 이슈 종결 추적, #849), 11개 이슈에 백로그 코멘트.
+
 ## 2026-07-27 (claude) — 인시던트: 공유 prod DB 위 lane live 컨테이너 충돌 + 복구 + 재발방지 규율
 
 **요약**: Lane B(codex)의 n150 live 컨테이너(`pinvi-api-tvn08-live`)가 **공유 production pinvi

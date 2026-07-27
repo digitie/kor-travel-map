@@ -3,6 +3,19 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-27 — T-VN-LIVE-01 targeted live acceptance lane n150 PASSED (04A/58/15 종결)
+
+- [x] **T-VN-LIVE-01 (+T-VN-04A #741·T-VN-58 #785·T-VN-15)** — targeted admin-feature live
+  acceptance lane(#792 구현)을 n150 production(map=c8ed6164/pinvi=6a035695)에서 파괴적 실행 →
+  **PASSED**(rc=0, phase=passed, recovery_attempt=0, BLOCKED/ACTIVE 없음, active leftover 0).
+  검증 범위: inactive/draft/hidden marker + hidden weather/price 카드 + public 비누출 + T-VN-15
+  search total/continuation/CURSOR_QUERY_MISMATCH·FEATURE_SEARCH_CURSOR_TAMPERED 422 + #785 stale
+  raw If-Match 412·dirty draft 보존·명시적 reload. **규명·수정 연쇄**(비-redact c7-v6 재현):
+  helper host-network(#842) · map nav/zoom-contract·panel(#843) · Codex PR 리뷰 DSN/signal(#844) ·
+  검색 pg_trgm 격리 32-hex(#845) · kind=place 격리(#848, cross-kind seed weather cluster). 인시던트
+  복구(공유 pinvi DB migration → manifest trap) 후 c8ed6164로 재-cut. issue #741·#785 closed.
+  적대 리뷰어 2명 반영(#848 P3 정정·P2→T-VN-H12 추적). 상세 `docs/journal.md` 2026-07-27.
+
 ## 2026-07-27 — Lane B b0 T-VN-42 지도 control·query identity·live recovery 하드닝
 
 - [x] **T-VN-42 (#846)** — `/features`·`/curated-features` 상세 패널의 bottom-right `ScaleControl`

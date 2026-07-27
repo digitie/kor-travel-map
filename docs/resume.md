@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-27 (claude) — 🎯 T-VN-LIVE-01 완료: live acceptance lane n150 PASSED @ c8ed6164
+
+**다음 한 작업**: **Lane A `T-ADM-C6c` + `T-VN-03`** — pinvi head(#408 포함, 현 배포는 6a035695로
+이미 반영됨) principal 경계 smoke(curated 4 GET·ops 6 GET·MOIS 404) n150 실증 + PinVi #392 close.
+그 다음 `T-VN-H06`(#813 2차 리뷰·머지·검증).
+
+- **완료(이번 세션)**: `T-VN-LIVE-01`(+04A #741·58 #785·15) targeted live acceptance lane을 n150
+  production(map=c8ed6164/pinvi=6a035695)에서 파괴적 실행 → **PASSED**(rc=0, phase=passed,
+  recovery_attempt=0, leftover 0). #741·#785 closed, tasks-done 이관.
+- **규명·수정 연쇄**: helper host-network(#842)·map nav/zoom-contract(#843)·Codex PR 리뷰
+  DSN/signal(#844)·검색 pg_trgm 격리(#845)·kind=place 격리(#848). 적대 리뷰어 2명 반영, P2는
+  T-VN-H12(run-unique 좌표)로 추적.
+- **인시던트+복구**: Codex live 컨테이너가 공유 prod pinvi DB를 0040으로 migration → held e60d1711
+  기동 불가 → manifest trap. pinvi를 6a035695(#408)로 재빌드 + map-api base-compose 재생성 +
+  deploy 가드 임시 우회(성공 후 원복)로 c8ed6164/6a035695 정식 전진. 재발방지 규율 R1~R4(#847).
+- **백로그·이슈 정리**: T-VN-42(#846) done, b4 신설(H12/H13#699/H14#700/H15#805), 이슈 종결 추적(#849);
+  11개 이슈에 백로그 코멘트. open PR: #833 머지·#831/#811 닫음.
+
 ## 2026-07-26 (codex) — T-VN-42 구현·실데이터 파괴적 live 검증 완료
 
 **다음 한 작업**: T-VN-42의 최종 2인 적대 리뷰와 CI green·실제 GitHub approval·머지를 끝낸 뒤
