@@ -167,8 +167,8 @@ Admin UI는 `packages/kor-travel-map-admin/frontend/`의 별도 Next.js 패키�
 - Next.js 16 App Router + React 19 + TypeScript.
 - 서버 상태와 mutation은 TanStack Query가 source of truth다. 원격 응답을
   Zustand에 복제하지 않는다.
-- 클라이언트 UI 상태는 Zustand, form 상태와 검증은 React Hook Form + Zod resolver로
-  처리한다.
+- 클라이언트 UI 상태는 Zustand가 맡고, form은 controlled React state와 framework-independent
+  `src/lib/form-validation.ts`로 제출 경계에서 검증한다.
 - 운영 목록/검토 화면의 데이터 테이블은 공용 `DataTable`을 쓴다.
   `DataTable`은 `@tanstack/react-table` v8 + `@tanstack/react-virtual` v3
   기반이며, shadcn `Table` primitive는 의미론적/시각적 table 렌더링에만 쓴다.

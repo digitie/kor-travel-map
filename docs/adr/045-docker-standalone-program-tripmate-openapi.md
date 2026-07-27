@@ -5,6 +5,7 @@
 - **결정자**: 사용자
 - **supersedes**: ADR-003의 함수 직접 호출 운영 모델, ADR-035의 "debug-ui"
   범위 표현 일부
+- **개정**: 2026-07-27 T-VN-43 — admin form dependency 계약을 실제 source 경계로 정렬
 
 ### 컨텍스트
 
@@ -81,12 +82,16 @@
      - `dry_run=true`: 대상 feature/provider count와 예상 작업만 계산하고 실행하지 않음.
 
 7. **Frontend stack**
-   - admin frontend는 Next.js, React, TypeScript, TanStack Query, Zustand, Zod,
-     React Hook Form, TanStack React Table, TanStack React Virtual, shadcn/ui,
-     MapLibre GL + VWorld style builder, `@kor-travel-map/map-marker-react`를 표준 stack으로
-     쓴다.
-   - 서버 상태는 TanStack Query, 클라이언트 UI 상태는 Zustand, form 검증은
-     React Hook Form + Zod resolver, 공통 UI primitive는 shadcn/ui를 사용한다.
+   - **2026-07-27 T-VN-43 개정**: 이 항목의 기존 React Hook Form + Zod resolver 표준은
+     실제 admin source 경계와 불일치해 폐기한다. admin frontend는 Next.js, React, TypeScript,
+     TanStack Query, Zustand, TanStack React Table, TanStack React Virtual, shadcn/ui generated
+     source + Base UI, MapLibre GL + VWorld style builder,
+     `@kor-travel-map/map-marker-react`를 표준 stack으로 쓴다.
+   - 서버 상태는 TanStack Query, 클라이언트 UI 상태는 Zustand가 소유한다. form은 controlled
+     React state와 framework-independent `src/lib/form-validation.ts`로 제출 경계에서 검증한다.
+     source import가 없는 React Hook Form·resolver·Zod package를 재도입하지 않는다.
+   - 이 개정은 kor-travel-map admin에만 적용한다. PinVi frontend의 별도 D-4 Zod mirror 결정은
+     범위 밖이며 변경하지 않는다.
    - admin 지도는 `maplibre-vworld-js`/`maplibre-vworld` npm dependency를 두지 않고,
      `maplibre-vworld-react`의 web/core 모델을 내부 포팅한 MapLibre/VWorld 구현을 쓴다.
    - frontend 작업 후에는 React Doctor를 실행하고 결과를 검토·개선해야 한다.

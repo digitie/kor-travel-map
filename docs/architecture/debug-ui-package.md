@@ -115,7 +115,7 @@ packages/kor-travel-map-admin/
 │       │   └── debug/
 │       │       ├── explain/page.tsx — SQL EXPLAIN viewer
 │       │       └── fixtures/page.tsx
-│       ├── api/               — openapi-typescript 생성 + 수동 zod mirror
+│       ├── api/               — openapi-typescript 생성 계약 + typed client
 │       ├── components/
 │       │   ├── VWorldMapView.tsx    — maplibre-vworld-react web 모델 기반 지도
 │       │   ├── FeatureMakiMarker.tsx — @kor-travel-map/map-marker-react 사용 (ADR-029)
@@ -348,13 +348,13 @@ type drift 부채 0).
 |------|----|
 | Framework | **Next.js 16 (App Router)** — `kor-travel-geo-ui` / PinVi `apps/web`와 동일 stack (ADR-025 2차 보강 2026-05-25, 2026-05-31 최신화) |
 | 지도 모델 | `digitie/maplibre-vworld-react`의 `vworld-map-core`/`vworld-map-web` 경계 기반. 외부 모노레포 전체를 dependency로 설치하지 않고 admin에 필요한 `VWorldMapView`/style builder만 내부 포팅(T-MAP-VWORLD-04). |
-| 의존 | `maplibre-gl` ^5.24.0 (BSD-3), React 19, `@tanstack/react-query`, `@tanstack/react-table` v8, `@tanstack/react-virtual` v3, `zod` ^4.4.3 |
+| 의존 | `maplibre-gl` ^5.24.0 (BSD-3), React 19, `@tanstack/react-query`, `@tanstack/react-table` v8, `@tanstack/react-virtual` v3 |
 | 공통 마커 | `@kor-travel-map/map-marker-react` (workspace, ADR-029) |
-| Form | React Hook Form + Zod resolver |
+| Form | controlled React state + framework-independent `src/lib/form-validation.ts` |
 | Data table | 공용 `DataTable` 기반. TanStack React Table이 정렬/선택/row model을 맡고, TanStack React Virtual이 큰 목록 가상화를 맡는다. shadcn `Table` primitive는 의미론적/시각적 렌더링에만 쓴다. |
-| UI primitive | shadcn/ui / Base UI |
+| UI primitive | shadcn/ui generated source / Base UI. shadcn CLI·MCP npm package는 설치하지 않고, 사용 variant를 project CSS가 소유한다. |
 | 언어 | TypeScript |
-| 라이선스 | MIT (`next`) + BSD-3 (`maplibre-gl`) + MIT (`zod`) + GPL-3.0 (본 저장소) — 호환 |
+| 라이선스 | MIT (`next`) + BSD-3 (`maplibre-gl`) + GPL-3.0 (본 저장소) — 호환 |
 | 디렉토리 | `packages/kor-travel-map-admin/frontend/` |
 | 개발 포트 | `12705` (`next dev --port 12705`, PinVi `apps/web` dev 3000 충돌 회피) |
 
@@ -414,8 +414,8 @@ cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
 npm run admin:stack
 
 # 3. frontend (Next.js dev) 기동
+npx --yes npm@10.9.4 ci --workspaces --include=optional
 cd packages/kor-travel-map-admin/frontend
-npm ci
 cp .env.example .env.local
 $EDITOR .env.local           # VWorld API key
 npm run dev                  # http://127.0.0.1:12705
@@ -534,7 +534,9 @@ npm run doctor
 ADR-045의 **독립 OpenAPI/admin 프로그램 표면** 제공이다. 메인 라이브러리를 import할
 때 FastAPI/Uvicorn/React가 딸려 들어오면 안 된다. 운영 배포는 Docker를 기본으로 하고,
 개발에서는 별도로 `pip install -e packages/kor-travel-map-api` +
-`cd frontend && npm ci && npm run build`로 실행한다.
+frontend workspace는 Node 22 이상과 exact npm 10.9.4의 clean install 뒤 `npm run build`로
+실행한다. Redocly patch postinstall과 Next/Sharp optimizer smoke를 우회하는 `--ignore-scripts` 결과는
+검증으로 인정하지 않는다.
 
 이 분리는 ADR-020에 박혀 있고, `import-linter` 계약(`pyproject.toml`)이 메인
 패키지의 FastAPI import를 차단한다. 지도 frontend는 ADR-025 이후 VWorld/MapLibre
@@ -553,8 +555,8 @@ upstream 저장소(`digitie/maplibre-vworld-react`) 기준으로 정렬한다.
 `(구 ADR-NNN)`을 남긴다.
 
 - **디버그/admin frontend = MapLibre GL + VWorld 지도** — Kakao Maps SDK
-  대신 MapLibre GL JS + VWorld tile style builder + `zod`를 채택했다. 국토교통부 공식
-  VWorld 지도로 한국 행정구역·도로명주소 레이어와 정합하고, WebGL로 10만+ feature
+  대신 MapLibre GL JS + VWorld tile style builder + generated OpenAPI typed boundary를 채택했다.
+  국토교통부 공식 VWorld 지도로 한국 행정구역·도로명주소 레이어와 정합하고, WebGL로 10만+ feature
   (MOIS 인허가·국가유산·주유소 등)를 60fps 렌더링하며, 선언형 React/TypeScript라
   openapi-typescript로 backend REST 타입과 동기 가능하다는 게 근거다. 빌드는
   Next.js (App Router)로 통일해 형제 `kor-travel-geo-ui`와 학습 비용을 없앴다.

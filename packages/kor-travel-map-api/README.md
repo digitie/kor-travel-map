@@ -54,21 +54,23 @@ Frontend 서버는 **항상 WSL 셸에서 실행**한다. Windows 호스트는 P
 검증 때 Chromium을 실행하는 용도로만 사용한다.
 
 ```bash
-# WSL ext4 작업 디렉토리에서
-cd packages/kor-travel-map-admin/frontend
-which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함 (/mnt/c/... 금지)
-cp .env.example .env.local
-$EDITOR .env.local           # NEXT_PUBLIC_VWORLD_API_KEY 설정
-npm install
-npm run dev                  # http://127.0.0.1:12705 (next dev)
+# 저장소 루트의 Linux/WSL 셸에서
+source ~/.nvm/nvm.sh && nvm use 22.23.1
+which node npm              # /home/.../.nvm/... 등 Linux 경로여야 함 (/mnt/c/... 금지)
+npx --yes npm@10.9.4 ci --workspaces --include=optional
+npx --yes npm@10.9.4 run verify:npm-tree
+cp packages/kor-travel-map-admin/frontend/.env.example \
+  packages/kor-travel-map-admin/frontend/.env.local
+$EDITOR packages/kor-travel-map-admin/frontend/.env.local
+npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run dev
 ```
 
 `node`/`npm`이 `/mnt/c/Program Files/nodejs/...`를 가리키면 Windows Node가 섞인
 상태다. WSL nvm Node를 활성화한 뒤 설치/실행한다.
 
 VWorld 지도 (Kakao Maps SDK 미사용). Next.js App Router + `maplibre-gl` +
-`maplibre-vworld` + TanStack Query + Zustand + `zod` + React Hook Form +
-shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
+`maplibre-vworld` + TanStack Query + Zustand + controlled React state/form validation +
+shadcn/ui generated source + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 `../../docs/architecture/debug-ui-package.md` §14.
 
 운영 배포 (옵션 3가지 — `docs/architecture/debug-ui-package.md §14.3` 참조):

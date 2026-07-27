@@ -1,5 +1,34 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-27 (codex) — T-VN-43 3차 P3 반영·재리뷰 중
+
+**다음 한 작업**: 3차 리뷰 P3인 accepted ADR-045 form 계약 drift를 반영한 새 exact staged diff를
+전문 감사 1명과 독립 적대 리뷰어 2명에게 재확인시킨다. finding 0을 확인한 뒤 전체 frontend/Python/Docker gate와
+PR #847의 lane 격리 규칙을 지킨 n150 UI-only 실데이터 파괴적 Live UI E2E를 통과하고
+PR·CI green·approval·머지를 완료한다.
+
+- clean `npm ci` 기준 16건(low 2, moderate 7, high 7)을 0건으로 내렸다. Next 16.2.12와
+  PostCSS 8.5.23·Sharp 0.35.3을 고정하고 CI에 high gate를 추가했다.
+- shadcn CLI/MCP와 사용하지 않던 React Hook Form/resolver/Zod를 제거했다. generated UI source가 쓰는
+  Tailwind variant 4개만 프로젝트 CSS가 직접 소유하며, lock graph는 약 1,100 package에서 742 package로
+  축소됐다.
+- exact npm 10.9.4는 Sharp WASM fallback optional 6개를 `extraneous`로 보고하면서 exit 0을 반환한다.
+  T-VN-43은 JSON `problems`의 exact package/version allowlist 밖 문제를 fail-close하고 실제 native
+  optimizer를 검증한다. upstream/npm 근인을 없애 allowlist 자체를 제거하는 작업은 T-VN-46으로 유지한다.
+- 취약 legacy Next ESLint preset을 제거하고 ESLint 10·typescript-eslint 8.65·React Hooks·React-X/
+  React-DOM·Next·import-x·jsx-a11y-x flat config를 직접 구성했다. effective config gate가 canonical
+  React Hooks 활성·중복 React-X analyzer 비활성·missing-key/anonymous-export severity를 실제로 계산한다.
+  강화된 T-VN-44 기준선은 1 error/30 warnings다.
+- `openapi-typescript`의 Redocly 1 제약은 안전한 js-yaml/minimatch로 override하고, 바뀐 minimatch
+  API 한 곳을 exact version/content 검사 후 적용하는 fail-close postinstall로 보정한다. frontend와
+  C7 Docker context 모두 patch·tree-integrity·Sharp smoke script를 install 전에 포함한다.
+- frontend Node 22.23.1/npm 10.9.4를 exact pin하고 C7 browser/client Playwright를 1.60.0으로 맞췄다.
+  Next private optimizer를 실제 호출하는 2×2 SVG→WebP smoke로 Sharp ABI까지 검증한다.
+- React Doctor 0.9.1 full scan은 262개 파일에서 오류 9건·경고 69건이며 T-VN-47에서 근인으로 해소한다.
+- 전체 mocked Playwright 진단은 기존 accessible-name/actor/API route drift 52건을 165번째 spec까지
+  재현해 중단했다. T-VN-48로 분리했고, T-VN-43의 CSS·폼·지도·업로드 대표 mocked spec은
+  격리 UI/C7 container·workers=1에서 24/24 통과했다.
+
 ## 2026-07-27 (claude) — 🎯 T-VN-LIVE-01 완료: live acceptance lane n150 PASSED @ c8ed6164
 
 **다음 한 작업**: **Lane A `T-ADM-C6c` + `T-VN-03`** — pinvi head(#408 포함, 현 배포는 6a035695로

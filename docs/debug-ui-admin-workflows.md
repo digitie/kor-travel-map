@@ -99,9 +99,9 @@ Frontend 표준 stack:
 - TanStack Query: `/features`, `/admin`, `/ops`, `/debug` 서버 상태와 mutation.
 - Zustand: map viewport, 지도/테이블 view mode, filter draft, selected feature,
   offline upload wizard 같은 클라이언트 상태.
-- Zod: API 응답 parsing, 좌표/bbox, form schema 검증.
-- React Hook Form: 수동 feature 추가, provider 실행, offline upload, issue resolve
-  같은 form 상태.
+- generated OpenAPI type + explicit normalization: API 응답 경계.
+- controlled React state + `src/lib/form-validation.ts`: 수동 feature 추가, provider 실행,
+  offline upload, issue resolve form 상태와 제출 검증.
 - TanStack React Table + React Virtual: 운영 목록/검토 화면의 정렬, 선택, row model,
   큰 목록 가상화. 공용 `DataTable`이 기본 표면이다.
 - shadcn/ui: Button, Input, Select, Dialog, Sheet, Tabs, Table, Badge, Toast,

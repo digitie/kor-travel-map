@@ -202,9 +202,18 @@ npm run docker:build
 ```
 
 frontend 이미지는 루트 `package-lock.json`을 build context에 포함하고
-`npm ci --workspaces --include=optional`로 의존성을 설치한다. `package.json` 또는
-workspace `package.json`을 바꾼 PR은 WSL Node/npm으로 lockfile을 함께 갱신한 뒤
-Docker 빌드를 검증한다.
+exact npm 10.9.4의 `npm ci --workspaces --include=optional`로 의존성을 설치한다. install 전에
+`scripts/patch-redocly-openapi-core.mjs`를 복사하며 postinstall이 Redocly exact version·원문을
+검사해 안전 minimatch API를 적용한다. `--ignore-scripts` 결과는 배포 검증으로 인정하지 않는다.
+install 직후 `scripts/verify-next-sharp.mjs`가 Next image optimizer의 실제 SVG→WebP 변환으로
+Sharp ABI를 확인한다. `scripts/verify-npm-tree.mjs`는 `npm ls --all --json`의 종료코드뿐 아니라
+`problems`를 검사한다. npm 10.9.4가 Sharp 0.35.3 WASM fallback의 선택적 graph 6개를
+`extraneous`로 보고하는 현재 upstream 예외만 exact package/version allowlist로 허용하고, 다른
+항목이나 버전 drift는 거부한다. 이 allowlist 자체는 T-VN-46에서 upstream 근인과 함께 제거한다.
+C7 Playwright image도 세 검증 script와 같은 lockfile을 사용하며 browser/client Playwright
+1.60.0을 맞춘다. `package.json` 또는 workspace `package.json`을 바꾼 PR은 Linux에서 exact npm
+10.9.4 clean install, audit high, tree-integrity verifier, optimizer smoke, lockfile 갱신과 frontend/C7
+Docker 빌드를 함께 검증한다.
 
 runtime 이미지는 root로 실행하지 않는다. `api`와 `dagster` 이미지는 builder stage에서
 Python 패키지를 설치하고 runtime stage에서 `appuser`로 실행한다. `frontend` 이미지는

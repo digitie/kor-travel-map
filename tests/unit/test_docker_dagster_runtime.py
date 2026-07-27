@@ -1412,9 +1412,13 @@ def test_runtime_docker_images_are_multistage_and_non_root() -> None:
     assert 'ENTRYPOINT ["dagster-entrypoint.sh"]' in dagster
     assert "-e ." not in dagster
 
-    assert "FROM node:22-bookworm-slim AS deps" in frontend
-    assert "FROM node:22-bookworm-slim AS builder" in frontend
-    assert "FROM node:22-bookworm-slim AS runner" in frontend
+    node_base = (
+        "node:22.23.1-bookworm-slim@sha256:"
+        "6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3"
+    )
+    assert f"FROM {node_base} AS deps" in frontend
+    assert f"FROM {node_base} AS builder" in frontend
+    assert f"FROM {node_base} AS runner" in frontend
     assert "COPY --from=deps /app/package.json ./package.json" in frontend
     assert "USER nextjs" in frontend
 

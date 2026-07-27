@@ -7,9 +7,11 @@
 ## 실행
 
 ```bash
-cd packages/kor-travel-map-admin/frontend
-npm install
-npm run dev
+# 저장소 루트의 Linux/WSL 셸에서
+source ~/.nvm/nvm.sh && nvm use 22.23.1
+npx --yes npm@10.9.4 ci --workspaces --include=optional
+npx --yes npm@10.9.4 run verify:npm-tree
+npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run dev
 ```
 
 기본 포트는 `12705`다. backend API는 기본 `http://127.0.0.1:12701`이며,
@@ -20,6 +22,6 @@ frontend는 `NEXT_PUBLIC_KOR_TRAVEL_MAP_API`로 API base URL을 받는다.
 OpenAPI 기계 정본은 `packages/kor-travel-map-api/openapi.json`이다.
 
 ```bash
-npm -w packages/kor-travel-map-admin/frontend run gen:types
-npm -w packages/kor-travel-map-admin/frontend run gen:types:check
+npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run gen:types
+npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run gen:types:check
 ```

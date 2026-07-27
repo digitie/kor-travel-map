@@ -45,7 +45,9 @@ live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실�
 n150 실데이터 파괴적 Live UI E2E를 통과한다.
 
 - b0 (선행 하드닝, 순차): [x] `T-VN-42`(#846 완료) → [ ] `T-VN-43`(npm 보안) →
-  [ ] `T-VN-44`(frontend lint baseline) → [ ] `T-VN-45`(live endpoint·cache drift)
+  [ ] `T-VN-44`(frontend lint baseline) → [ ] `T-VN-47`(React Doctor) →
+  [ ] `T-VN-45`(live endpoint·cache drift) → [ ] `T-VN-46`(npm optional tree) →
+  [ ] `T-VN-48`(mocked E2E drift)
 - b4 (열린 이슈 버그·하드닝, 2026-07-27 추가): [ ] `T-VN-H13`(#699 curation upsert) →
   [ ] `T-VN-H14`(#700 KREX retry) → [ ] `T-VN-H15`(#805 IPv6 origin) (상세는 아래 b4 섹션)
 - b1 (PinVi 결합, 순차): [ ] `T-VN-11` → [ ] `T-VN-12` → [ ] `T-VN-16` →
@@ -108,12 +110,16 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
 
   n150 clean `npm ci`의 `npm audit` 기준 16건(low 2, moderate 7, high 7)을 해소한다. 직접 의존
   `next` high와 `shadcn` moderate, transitive `sharp`/`hono`/`js-yaml`/`fast-uri` 등을 runtime·tooling
-  도달성으로 분류하되 서비스 전 단계에서는 high 0을 필수 계약으로 둔다. lockfile을 의도적으로
-  갱신하고 type-check·build·mocked 및 실데이터 파괴적 Live UI E2E로 cutover를 검증한다.
+  도달성으로 분류하되 서비스 전 단계에서는 high 0을 필수 계약으로 둔다. 사용하지 않는 폼 의존성을
+  제거하고, npm 10이 `extraneous`로 분류하는 exact Sharp WASM optional 6개 외 문제를 거부하는 integrity
+  gate를 둔다. lockfile을 의도적으로 갱신하고 type-check·build·실제 Next/Sharp optimizer·대표 mocked
+  및 실데이터 파괴적 Live UI E2E로 cutover를 검증한다.
 
 - [ ] T-VN-44 — **admin frontend full ESLint baseline green**
 
-  현재 `npm run lint`의 1 error/8 warnings를 suppression 없이 제거한다. 우선 blocker는
+  T-VN-43에서 modern React-X/React-DOM 권장 규칙을 직접 구성한 뒤 `npm run lint`가 보고하는
+  1 error/30 warnings를 suppression 없이 제거한다. canonical React Hooks와 겹치는 분석기는 중복
+  실행하지 않는다. 우선 blocker는
   `schedule-panel.tsx` recovery dialog의 effect 내부 동기 `setEditing(null)`이며, recovery claim을
   렌더 파생 상태 또는 command 경계로 재설계해 cascading render를 없앤다. 나머지 unused·hook
   dependency·incompatible-library 경고는 실동작과 React Compiler 경계를 보존하면서 각각 근인으로
@@ -125,6 +131,23 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   `/v1/admin/features/in-bounds`로 전환된 뒤에도 public `/v1/features` bbox 응답만 기다려 5분
   timeout하는 drift를 확인했다. admin items/clusters 응답을 정본으로 추적하고 React Query cache hit로
   새 HTTP 응답이 없는 경우에도 map idle+실제 marker 상태로 수렴하도록 고쳐 false-red를 제거한다.
+
+- [ ] T-VN-46 — **admin frontend npm optional tree 무결성 완결**
+
+  T-VN-43의 exact npm 10.9.4 clean install은 audit 0과 exit 0이지만 `npm ls --all --json`의
+  `problems`에 Sharp 0.35.3 WASM fallback optional graph 6개(`@emnapi/*`, `@img/sharp-wasm32`,
+  `@napi-rs/wasm-runtime`, `@tybys/wasm-util`)를 `extraneous`로 남긴다. T-VN-43은 exact allowlist 밖
+  문제를 fail-close하고 실제 native optimizer를 검증한다. 후속에서는 npm Arborist/Sharp upstream
+  원인을 해결해 allowlist 자체를 제거하며, 쓰지 않는 direct dependency를 추가해 숨기지 않는다.
+
+- [ ] T-VN-48 — **admin mocked Playwright UI 계약 drift 정리**
+
+  T-VN-43 gate에서 전체 269 mocked spec 중 165번째까지 52건의 기존 drift를 재현했다. 현재 UI가
+  `후보 A/B`·한국어 dialog accessible name·실제 로그인 actor를 쓰는데 spec은 `feature A/B`·영문
+  accessible name·`local-admin`을 기다리는 사례와 `/ops/datasets` route mock drift가 누적됐다.
+  main 기준으로 실패 집합을 freeze하고 accessible-name/actor/API route 계약을 현재 UI와 맞춘 뒤,
+  전체 suite를 Linux C7 image·workers=1/병렬 모드 모두 green으로 만든다.
+
 
 ## Lane B 상세 — b4 열린 이슈 버그·하드닝 (2026-07-27 추가)
 

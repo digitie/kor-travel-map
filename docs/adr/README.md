@@ -58,7 +58,7 @@
 | ADR-042 | 전국관광지정보/전국문화축제 표준데이터를 place/event 1차 source로 채택 (datagokr 경유) | → 이관 [etl/standard-data-feature-etl.md](../etl/standard-data-feature-etl.md) |
 | ADR-043 | @kor-travel-map/map-marker-react npm 게시 보류 — 모노레포 내부 share로만 | → 이관 [architecture/debug-ui-package.md](../architecture/debug-ui-package.md) |
 | ADR-044 | 관련 라이브러리 로컬(F:\\dev\\) 우선 조회 + 데이터 정합성 책임은 각 라이브러리 | → 이관 [agent-guide.md](../agent-guide.md) |
-| ADR-045 | kor-travel-map은 Docker 독립 프로그램으로 운영하고 외부 경계는 OpenAPI | [045-docker-standalone-program-tripmate-openapi.md](045-docker-standalone-program-tripmate-openapi.md) |
+| ADR-045 | kor-travel-map은 Docker 독립 프로그램으로 운영하고 외부 경계는 OpenAPI (2026-07-27 admin form 계약 개정) | [045-docker-standalone-program-tripmate-openapi.md](045-docker-standalone-program-tripmate-openapi.md) |
 | ADR-046 | 정본 방향 전환은 호환 shim 없이 하고 주소는 kor-travel-geo REST v2로 통일 | [046-no-compat-shim-geo-rest-v2.md](046-no-compat-shim-geo-rest-v2.md) |
 | ADR-047 | kor-travel-map 로컬 포트를 API 12701, admin UI 12705, Dagster 12702로 고정 (+.env 키 매핑/stop-fixed-ports) | → 이관 [deploy.md](../deploy.md) |
 | ADR-048 | REST API versioning을 admin/ops까지 확장하고 envelope·pagination·parameter·response 정합성 표준을 고정한다 (T-214/T-215 위에 보강) | [048-rest-api-versioning-envelope-pagination.md](048-rest-api-versioning-envelope-pagination.md) |
