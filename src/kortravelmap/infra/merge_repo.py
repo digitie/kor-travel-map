@@ -356,33 +356,11 @@ SET curation_status = CASE item.status
     updated_at = clock_timestamp(),
     content_version = legacy.content_version + 1
 FROM feature.curation_items AS item
-JOIN feature.curation_collections AS collection
-  ON collection.collection_id = item.collection_id,
-     feature.curated_themes AS theme,
-     feature.curated_sources AS source
 WHERE item.feature_id = :master
   AND legacy.feature_id = :master
   AND legacy.archived_at IS NULL
   AND NOT legacy.metadata @> '{"merge_projection_detached": true}'::jsonb
-  AND legacy.theme_id = collection.theme_id
-  AND legacy.source_id IS NOT DISTINCT FROM collection.source_id
-  AND theme.theme_id = legacy.theme_id
-  AND source.source_id = legacy.source_id
-  AND collection.collection_key =
-      'legacy:' || theme.theme_slug || ':' || substr(md5(
-          legacy.source_id::text || ':' ||
-          COALESCE(
-              NULLIF(btrim(legacy.display_title), ''),
-              source.source_name
-          )
-      ), 1, 20)
-  AND (
-      legacy.curated_feature_id = item.curation_item_id
-      OR (
-          item.source_record_key IS NOT NULL
-          AND legacy.source_record_key = item.source_record_key
-      )
-  )
+  AND item.legacy_projection_id = legacy.curated_feature_id
   AND (
       legacy.curation_status,
       legacy.curation_relation,
@@ -410,9 +388,11 @@ RETURNING legacy.curated_feature_id
 # 보존한 뒤 legacy row만 archive한다.
 _DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL: Final[str] = """
 UPDATE feature.curation_items AS item
-SET curation_item_id = x_extension.gen_random_uuid(), updated_at = now()
+SET curation_item_id = x_extension.gen_random_uuid(),
+    legacy_projection_id = NULL,
+    updated_at = now()
 FROM feature.curated_features AS loser_curated
-WHERE loser_curated.curated_feature_id = item.curation_item_id
+WHERE loser_curated.curated_feature_id = item.legacy_projection_id
   AND loser_curated.feature_id = :loser
   AND loser_curated.archived_at IS NULL
   AND item.archived_at IS NULL
@@ -446,7 +426,7 @@ WHERE loser_curated.feature_id = :loser
           NOT EXISTS (
               SELECT 1
               FROM feature.curation_items AS direct_item
-              WHERE direct_item.curation_item_id =
+              WHERE direct_item.legacy_projection_id =
                     loser_curated.curated_feature_id
                 AND direct_item.archived_at IS NULL
           )
@@ -467,7 +447,7 @@ WHERE loser_curated.feature_id = :loser
             ON master_item.collection_id = loser_item.collection_id
            AND master_item.external_item_id = loser_item.external_item_id
           WHERE master_item.feature_id = :master
-            AND loser_item.curation_item_id =
+            AND loser_item.legacy_projection_id =
                 loser_curated.curated_feature_id
             AND master_item.curation_item_id <>
                 loser_item.curation_item_id

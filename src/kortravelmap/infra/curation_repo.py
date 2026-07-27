@@ -1411,33 +1411,10 @@ async def _lock_legacy_projections_for_item(
                 """
                 SELECT legacy.curated_feature_id
                 FROM feature.curation_items AS item
-                JOIN feature.curation_collections AS collection
-                  ON collection.collection_id = item.collection_id
                 JOIN feature.curated_features AS legacy
-                  ON legacy.theme_id = collection.theme_id
-                 AND legacy.source_id IS NOT DISTINCT FROM collection.source_id
-                 AND (
-                      legacy.curated_feature_id = item.curation_item_id
-                      OR (
-                          item.source_record_key IS NOT NULL
-                          AND legacy.source_record_key = item.source_record_key
-                          AND legacy.feature_id IS NOT DISTINCT FROM item.feature_id
-                      )
-                 )
-                JOIN feature.curated_themes AS theme
-                  ON theme.theme_id = legacy.theme_id
-                JOIN feature.curated_sources AS source
-                  ON source.source_id = legacy.source_id
+                  ON legacy.curated_feature_id = item.legacy_projection_id
                 WHERE item.collection_id = CAST(:collection_id AS uuid)
                   AND item.curation_item_id = CAST(:curation_item_id AS uuid)
-                  AND collection.collection_key =
-                      'legacy:' || theme.theme_slug || ':' || substr(md5(
-                          legacy.source_id::text || ':' ||
-                          COALESCE(
-                              NULLIF(btrim(legacy.display_title), ''),
-                              source.source_name
-                          )
-                      ), 1, 20)
                   AND legacy.archived_at IS NULL
                   AND NOT legacy.metadata
                       @> '{"merge_projection_detached": true}'::jsonb
@@ -1979,42 +1956,18 @@ async def update_curation_item(
                     END,
                     updated_at = now(),
                     content_version = content_version + 1
-                FROM feature.curation_collections AS collection,
-                     feature.curated_themes AS theme,
-                     feature.curated_sources AS source
-                WHERE collection.collection_id = CAST(:collection_id AS uuid)
-                  AND legacy.theme_id = collection.theme_id
-                  AND legacy.source_id IS NOT DISTINCT FROM collection.source_id
-                  AND theme.theme_id = legacy.theme_id
-                  AND source.source_id = legacy.source_id
-                  AND collection.collection_key =
-                      'legacy:' || theme.theme_slug || ':' || substr(md5(
-                          legacy.source_id::text || ':' ||
-                          COALESCE(
-                              NULLIF(btrim(legacy.display_title), ''),
-                              source.source_name
-                          )
-                      ), 1, 20)
-                  AND legacy.feature_id IS NOT DISTINCT FROM :feature_id
+                FROM feature.curation_items AS item
+                WHERE item.collection_id = CAST(:collection_id AS uuid)
+                  AND item.curation_item_id =
+                      CAST(:curation_item_id AS uuid)
+                  AND item.legacy_projection_id =
+                      legacy.curated_feature_id
                   AND legacy.archived_at IS NULL
-                  AND (
-                      legacy.curated_feature_id =
-                          CAST(:curation_item_id AS uuid)
-                      OR (
-                          CAST(:source_record_key AS text) IS NOT NULL
-                          AND legacy.source_record_key =
-                              CAST(:source_record_key AS text)
-                      )
-                  )
                 """
             ),
             {
                 "curation_item_id": curation_item_id,
                 "collection_id": collection_id,
-                "feature_id": feature_id,
-                "source_record_key": normalized.get(
-                    "source_record_key", current.source_record_key
-                ),
                 "legacy_status": (
                     "curated" if target_status == "included" else target_status
                 ),

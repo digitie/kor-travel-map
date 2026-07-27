@@ -1194,6 +1194,12 @@ class CurationItemRow(Base):
             postgresql_nulls_not_distinct=True,
         ),
         Index(
+            "uq_curation_items_legacy_projection_id",
+            "legacy_projection_id",
+            unique=True,
+            postgresql_where=text("legacy_projection_id IS NOT NULL"),
+        ),
+        Index(
             "idx_curation_items_collection_status_order",
             "collection_id",
             "source_present",
@@ -1228,6 +1234,15 @@ class CurationItemRow(Base):
     source_record_key: Mapped[str | None] = mapped_column(
         Text,
         ForeignKey("provider_sync.source_records.source_record_key", ondelete="SET NULL"),
+    )
+    legacy_projection_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "feature.curated_features.curated_feature_id",
+            ondelete="NO ACTION",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
     )
     external_item_id: Mapped[str] = mapped_column(Text, nullable=False)
     place_name: Mapped[str] = mapped_column(Text, nullable=False)

@@ -1548,6 +1548,16 @@ async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
     assert restored.status == "rejected"
     assert restored.curation_relation == "primary_stop"
     assert restored.reuse_policy == "blocked"
+    assert (
+        await migrated_session.execute(
+            text(
+                "SELECT legacy_projection_id::text "
+                "FROM feature.curation_items "
+                "WHERE curation_item_id = CAST(:legacy_id AS uuid)"
+            ),
+            {"legacy_id": legacy_id},
+        )
+    ).scalar_one() == replacement_id
     await update_curation_item(
         migrated_session,
         collection_id=collection_id,

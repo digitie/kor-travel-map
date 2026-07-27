@@ -345,6 +345,7 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                             "AND table_name IN ('curated_features','curation_items') "
                             "AND column_name IN ("
                             "'source_updated_at',"
+                            "'legacy_projection_id',"
                             "'operator_updated_by','operator_updated_at'"
                             ")"
                         )
@@ -380,13 +381,41 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     )
                 )
             ).all()
+            projection_fk = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT condeferrable, condeferred
+                        FROM pg_constraint
+                        WHERE conname =
+                            'fk_curation_items_legacy_projection_id_curated_features'
+                        """
+                    )
+                )
+            ).one()
+            mapped_projection_count = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.curation_items AS item
+                        JOIN feature.curated_features AS legacy
+                          ON legacy.curated_feature_id =
+                             item.legacy_projection_id
+                        """
+                    )
+                )
+            ).scalar_one()
         assert provenance_columns == {
             ("curated_features", "operator_updated_by"),
             ("curated_features", "operator_updated_at"),
+            ("curation_items", "legacy_projection_id"),
             ("curation_items", "source_updated_at"),
             ("curation_items", "operator_updated_by"),
             ("curation_items", "operator_updated_at"),
         }
+        assert projection_fk == (True, True)
+        assert mapped_projection_count > 0
         assert legacy_provenance == [
             ("migration external provenance", "external-principal", True),
             ("migration legacy override", "external-principal", True),
@@ -419,6 +448,10 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
         assert "UNIQUE" in upgraded_indexes["uq_curation_items_identity"]
         assert "NULLS NOT DISTINCT" in upgraded_indexes["uq_curation_items_identity"]
         assert " WHERE " not in upgraded_indexes["uq_curation_items_identity"]
+        assert "UNIQUE" in upgraded_indexes["uq_curation_items_legacy_projection_id"]
+        assert "legacy_projection_id IS NOT NULL" in (
+            upgraded_indexes["uq_curation_items_legacy_projection_id"]
+        )
         async with target_engine.begin() as connection:
             normalized = (
                 await connection.execute(
@@ -648,6 +681,7 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                         "AND table_name IN ('curated_features','curation_items') "
                         "AND column_name IN ("
                         "'source_updated_at',"
+                        "'legacy_projection_id',"
                         "'operator_updated_by','operator_updated_at'"
                         ")"
                     )
@@ -661,6 +695,7 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
             downgraded_indexes["idx_curation_items_feature_status_collection"]
         )
         assert "uq_curation_items_identity" not in downgraded_indexes
+        assert "uq_curation_items_legacy_projection_id" not in downgraded_indexes
         assert " WHERE (archived_at IS NULL)" in (
             downgraded_indexes["uq_curation_items_active_identity"]
         )
@@ -674,6 +709,7 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
             recovered_indexes["idx_curation_items_collection_status_order"]
         )
         assert "uq_curation_items_identity" in recovered_indexes
+        assert "uq_curation_items_legacy_projection_id" in recovered_indexes
     finally:
         await target_engine.dispose()
         async with admin_engine.connect() as connection:

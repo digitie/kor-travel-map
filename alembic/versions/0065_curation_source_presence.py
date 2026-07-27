@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -39,6 +40,7 @@ DECLARE
     item_matched boolean;
     direct_item_id uuid;
     target_identity_item_id uuid;
+    target_projection_id uuid;
     target_item_id uuid;
 BEGIN
     -- detach marker는 merge/trigger 내부 상태다. 일반 INSERT 또는 top-level
@@ -84,8 +86,15 @@ BEGIN
                    NOT EXISTS (
                        SELECT 1
                        FROM feature.curation_items AS direct_item
-                       WHERE direct_item.curation_item_id =
-                             NEW.curated_feature_id
+                       WHERE (
+                               direct_item.legacy_projection_id =
+                               NEW.curated_feature_id
+                               OR (
+                                   direct_item.legacy_projection_id IS NULL
+                                   AND direct_item.curation_item_id =
+                                       NEW.curated_feature_id
+                               )
+                           )
                          AND direct_item.archived_at IS NULL
                    )
                    AND EXISTS (
@@ -108,7 +117,7 @@ BEGIN
                     AND master_item.external_item_id =
                         loser_item.external_item_id
                    WHERE master_item.feature_id = NEW.feature_id
-                     AND loser_item.curation_item_id =
+                     AND loser_item.legacy_projection_id =
                          NEW.curated_feature_id
                      AND master_item.curation_item_id <>
                          loser_item.curation_item_id
@@ -161,32 +170,20 @@ BEGIN
     END IF;
 
     IF TG_OP = 'DELETE' THEN
-        SELECT
-            'legacy:' || t.theme_slug || ':' || substr(md5(
-                OLD.source_id::text || ':' ||
-                COALESCE(NULLIF(btrim(OLD.display_title), ''), s.source_name)
-            ), 1, 20)
-        INTO target_collection_key
-        FROM feature.curated_themes AS t
-        JOIN feature.curated_sources AS s ON s.source_id = OLD.source_id
-        WHERE t.theme_id = OLD.theme_id;
-
         UPDATE feature.curation_items AS item
         SET source_present = false,
-            source_updated_at = clock_timestamp(),
+            source_updated_at = CASE
+                WHEN item.source_present THEN clock_timestamp()
+                ELSE item.source_updated_at
+            END,
+            legacy_projection_id = NULL,
             updated_by = COALESCE(OLD.rejected_by, OLD.selected_by),
             updated_at = now()
-        FROM feature.curation_collections AS collection
-        WHERE item.collection_id = collection.collection_id
-          AND item.archived_at IS NULL
-          AND item.source_present
-          AND (
-              item.curation_item_id = OLD.curated_feature_id
+        WHERE (
+              item.legacy_projection_id = OLD.curated_feature_id
               OR (
-                  OLD.source_record_key IS NOT NULL
-                  AND collection.collection_key = target_collection_key
-                  AND item.external_item_id = OLD.source_record_key
-                  AND item.feature_id IS NOT DISTINCT FROM OLD.feature_id
+                  item.legacy_projection_id IS NULL
+                  AND item.curation_item_id = OLD.curated_feature_id
               )
           );
         RETURN OLD;
@@ -266,29 +263,43 @@ BEGIN
     SELECT item.curation_item_id
     INTO direct_item_id
     FROM feature.curation_items AS item
-    WHERE item.curation_item_id = NEW.curated_feature_id
+    WHERE item.legacy_projection_id = NEW.curated_feature_id
+       OR (
+           item.legacy_projection_id IS NULL
+           AND item.curation_item_id = NEW.curated_feature_id
+       )
+    ORDER BY (item.legacy_projection_id = NEW.curated_feature_id) DESC
+    LIMIT 1
     FOR UPDATE;
 
-    SELECT item.curation_item_id
-    INTO target_identity_item_id
+    SELECT item.curation_item_id, item.legacy_projection_id
+    INTO target_identity_item_id, target_projection_id
     FROM feature.curation_items AS item
     WHERE item.collection_id = target_collection_id
       AND item.external_item_id = target_external_item_id
       AND item.feature_id IS NOT DISTINCT FROM NEW.feature_id
     FOR UPDATE;
 
-    IF direct_item_id IS NOT NULL
-       AND target_identity_item_id IS NOT NULL
-       AND direct_item_id <> target_identity_item_id
+    IF (
+           direct_item_id IS NOT NULL
+           AND target_identity_item_id IS NOT NULL
+           AND direct_item_id <> target_identity_item_id
+       )
+       OR (
+           target_projection_id IS NOT NULL
+           AND target_projection_id <> NEW.curated_feature_id
+       )
     THEN
         UPDATE feature.curation_items
         SET source_present = false,
-            source_updated_at = clock_timestamp(),
+            source_updated_at = CASE
+                WHEN source_present THEN clock_timestamp()
+                ELSE source_updated_at
+            END,
+            legacy_projection_id = NULL,
             updated_by = COALESCE(NEW.rejected_by, NEW.selected_by),
             updated_at = NEW.updated_at
-        WHERE curation_item_id = direct_item_id
-          AND archived_at IS NULL
-          AND source_present;
+        WHERE curation_item_id = direct_item_id;
 
         UPDATE feature.curated_features
         SET curation_status = 'archived',
@@ -303,6 +314,14 @@ BEGIN
     END IF;
 
     target_item_id := COALESCE(direct_item_id, target_identity_item_id);
+
+    UPDATE feature.curation_items AS item
+    SET legacy_projection_id = NEW.curated_feature_id
+    WHERE item.curation_item_id = target_item_id
+      AND (
+          item.legacy_projection_id IS NULL
+          OR item.legacy_projection_id = NEW.curated_feature_id
+      );
 
     -- Legacy writer가 제공자 파생 필드를 갱신해도 operator-owned 상태는 보존한다.
     -- UUID/stable identity 경로는 같은 projection UPDATE를 공유하며 archived
@@ -392,7 +411,8 @@ BEGIN
         archived_at = CASE
             WHEN operator_change THEN NEW.archived_at
             ELSE item.archived_at
-        END
+        END,
+        legacy_projection_id = NEW.curated_feature_id
     FROM feature.features AS feature_row
     WHERE item.curation_item_id = target_item_id
       AND item.archived_at IS NULL
@@ -438,14 +458,7 @@ BEGIN
             updated_at = clock_timestamp()
         FROM feature.curation_items AS item
         WHERE legacy.curated_feature_id = NEW.curated_feature_id
-          AND (
-              item.curation_item_id = NEW.curated_feature_id
-              OR (
-                  item.collection_id = target_collection_id
-                  AND item.external_item_id = target_external_item_id
-                  AND item.feature_id IS NOT DISTINCT FROM NEW.feature_id
-              )
-          )
+          AND item.legacy_projection_id = NEW.curated_feature_id
           AND (
               legacy.curation_status,
               legacy.curation_relation,
@@ -482,9 +495,16 @@ BEGIN
             WHEN source_change OR source_presence_change THEN clock_timestamp()
             ELSE item.source_updated_at
         END,
+        legacy_projection_id = NULL,
         updated_by = COALESCE(NEW.rejected_by, NEW.selected_by),
         updated_at = NEW.updated_at
-    WHERE item.curation_item_id = NEW.curated_feature_id
+    WHERE (
+            item.legacy_projection_id = NEW.curated_feature_id
+            OR (
+                item.legacy_projection_id IS NULL
+                AND item.curation_item_id = NEW.curated_feature_id
+            )
+        )
       AND item.archived_at IS NULL
       AND item.source_present;
 
@@ -498,6 +518,7 @@ BEGIN
 
     INSERT INTO feature.curation_items (
         curation_item_id, collection_id, feature_id, source_record_key,
+        legacy_projection_id,
         external_item_id, place_name, address_hint, source_present,
         source_updated_at,
         status, sort_order, item_title, item_summary,
@@ -510,6 +531,7 @@ BEGIN
         target_collection_id,
         NEW.feature_id,
         NEW.source_record_key,
+        NEW.curated_feature_id,
         target_external_item_id,
         feature_row.name,
         COALESCE(feature_row.address ->> 'road', feature_row.address ->> 'legal'),
@@ -704,6 +726,15 @@ def upgrade() -> None:
         sa.Column("operator_updated_at", sa.DateTime(timezone=True), nullable=True),
         schema="feature",
     )
+    op.add_column(
+        "curation_items",
+        sa.Column(
+            "legacy_projection_id",
+            postgresql.UUID(as_uuid=False),
+            nullable=True,
+        ),
+        schema="feature",
+    )
     # 0065 이전에는 provider refresh와 운영자 수정을 같은 updated_at에 기록했다.
     # 명시적 operator origin/override로 식별 가능한 행만 보수적으로 이관한다.
     # 0064 trigger는 legacy UPDATE마다 canonical item을 DELETE+INSERT한다. 새
@@ -754,6 +785,14 @@ def upgrade() -> None:
            OR curation_relation <> 'nearby_option'
            OR reuse_policy <> 'manual_review'
            OR metadata ->> 'legacy_selection_origin' IN ('admin', 'external_api')
+        """
+    )
+    op.execute(
+        """
+        UPDATE feature.curation_items AS item
+        SET legacy_projection_id = legacy.curated_feature_id
+        FROM feature.curated_features AS legacy
+        WHERE item.curation_item_id = legacy.curated_feature_id
         """
     )
     # 0064까지 partial unique가 허용한 tombstone+active resurrection 및 중복
@@ -933,6 +972,26 @@ def upgrade() -> None:
         postgresql_nulls_not_distinct=True,
         schema="feature",
     )
+    op.create_foreign_key(
+        "fk_curation_items_legacy_projection_id_curated_features",
+        "curation_items",
+        "curated_features",
+        ["legacy_projection_id"],
+        ["curated_feature_id"],
+        source_schema="feature",
+        referent_schema="feature",
+        ondelete="NO ACTION",
+        deferrable=True,
+        initially="DEFERRED",
+    )
+    op.create_index(
+        "uq_curation_items_legacy_projection_id",
+        "curation_items",
+        ["legacy_projection_id"],
+        unique=True,
+        postgresql_where=sa.text("legacy_projection_id IS NOT NULL"),
+        schema="feature",
+    )
     op.drop_index(
         "idx_curation_items_collection_status_order",
         table_name="curation_items",
@@ -1027,6 +1086,18 @@ def downgrade() -> None:
         postgresql_nulls_not_distinct=True,
         schema="feature",
     )
+    op.drop_index(
+        "uq_curation_items_legacy_projection_id",
+        table_name="curation_items",
+        schema="feature",
+    )
+    op.drop_constraint(
+        "fk_curation_items_legacy_projection_id_curated_features",
+        "curation_items",
+        schema="feature",
+        type_="foreignkey",
+    )
+    op.drop_column("curation_items", "legacy_projection_id", schema="feature")
     op.drop_column("curation_items", "operator_updated_at", schema="feature")
     op.drop_column("curation_items", "operator_updated_by", schema="feature")
     op.drop_column("curation_items", "source_updated_at", schema="feature")
