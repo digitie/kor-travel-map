@@ -661,6 +661,43 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     "'{\"merge_projection_detached\": true}'::jsonb"
                 )
             )
+            non_direct_relations = (
+                await connection.execute(
+                    text(
+                        """
+                        UPDATE feature.curation_items AS item
+                        SET curation_item_id = x_extension.gen_random_uuid()
+                        FROM feature.curated_features AS legacy
+                        WHERE legacy.display_title =
+                              'migration external provenance'
+                          AND item.legacy_projection_id =
+                              legacy.curated_feature_id
+                        RETURNING item.curation_item_id
+                        """
+                    )
+                )
+            ).all()
+            assert len(non_direct_relations) == 1
+        await target_engine.dispose()
+        with pytest.raises(Exception, match="durable curation state exists"):
+            await asyncio.to_thread(
+                _run_alembic,
+                target_dsn,
+                _PRE_REVISION,
+                downgrade=True,
+            )
+        target_engine = make_async_engine(target_dsn)
+        async with target_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    UPDATE feature.curation_items
+                    SET curation_item_id = legacy_projection_id
+                    WHERE legacy_projection_id IS NOT NULL
+                      AND legacy_projection_id <> curation_item_id
+                    """
+                )
+            )
         await target_engine.dispose()
         await asyncio.to_thread(
             _run_alembic,

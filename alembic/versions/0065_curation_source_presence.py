@@ -1034,6 +1034,10 @@ def downgrade() -> None:
                 WHERE NOT source_present
                    OR operator_updated_by IS NOT NULL
                    OR operator_updated_at IS NOT NULL
+                   OR (
+                       legacy_projection_id IS NOT NULL
+                       AND legacy_projection_id <> curation_item_id
+                   )
             ) OR EXISTS (
                 SELECT 1
                 FROM feature.curated_features
