@@ -40,6 +40,7 @@ function membership(
     lat: 37.5796,
     address: { road_address: "서울 종로구 사직로 161" },
     external_item_id: "tourism-100-2023-palace",
+    external_component_id: "primary",
     place_name: "경복궁",
     address_hint: "서울 종로구",
     status: "included",
@@ -70,6 +71,7 @@ async function mockPublicCurationRoutes(
       edition_key: "2025-2026",
       source_url: "https://example.test/mcst/2025",
       external_item_id: "tourism-100-2025-palace",
+      external_component_id: "primary",
       item_summary: "2025~2026 재선정지",
     }),
   ];

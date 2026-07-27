@@ -1163,6 +1163,11 @@ class CurationItemRow(Base):
     __tablename__ = "curation_items"
     __table_args__ = (
         CheckConstraint("btrim(external_item_id) <> ''", name="external_id"),
+        CheckConstraint(
+            "external_component_id <> '' "
+            "AND external_component_id = btrim(external_component_id)",
+            name="external_component_id_canonical",
+        ),
         CheckConstraint("btrim(place_name) <> ''", name="place_name"),
         CheckConstraint(
             "status IN ('candidate','included','rejected','archived')",
@@ -1185,13 +1190,21 @@ class CurationItemRow(Base):
             "jsonb_typeof(metadata) = 'object'",
             name="metadata",
         ),
+        UniqueConstraint(
+            "collection_id",
+            "external_item_id",
+            "external_component_id",
+            name="uq_curation_items_component_identity",
+        ),
         Index(
-            "uq_curation_items_identity",
+            "uq_curation_items_active_source_feature",
             "collection_id",
             "external_item_id",
             "feature_id",
             unique=True,
-            postgresql_nulls_not_distinct=True,
+            postgresql_where=text(
+                "source_present AND archived_at IS NULL AND feature_id IS NOT NULL"
+            ),
         ),
         Index(
             "uq_curation_items_legacy_projection_id",
@@ -1245,6 +1258,11 @@ class CurationItemRow(Base):
         ),
     )
     external_item_id: Mapped[str] = mapped_column(Text, nullable=False)
+    external_component_id: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'primary'"),
+    )
     place_name: Mapped[str] = mapped_column(Text, nullable=False)
     address_hint: Mapped[str | None] = mapped_column(Text)
     source_present: Mapped[bool] = mapped_column(

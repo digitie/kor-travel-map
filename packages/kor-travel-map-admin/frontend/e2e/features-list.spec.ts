@@ -170,6 +170,7 @@ function makeCuration(
     dataset_key: "admin-dataset",
     edition_key: "2026",
     external_item_id: "admin-official-item",
+    external_component_id: "primary",
     feature_category: feature.category,
     feature_id: feature.feature_id,
     feature_kind: feature.kind,

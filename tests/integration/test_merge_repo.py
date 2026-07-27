@@ -139,15 +139,22 @@ async def _seed_pair(engine: AsyncEngine) -> str:
                     RETURNING collection_id
                 )
                 INSERT INTO feature.curation_items (
-                    collection_id, feature_id, external_item_id, place_name, status
+                    collection_id, feature_id, external_item_id,
+                    external_component_id, place_name, status
                 )
-                SELECT collection_id, 'f_master', 'shared', '마스터 장소', 'included'
+                SELECT
+                    collection_id, 'f_master', 'shared', 'component-01',
+                    '마스터 장소', 'included'
                 FROM collection
                 UNION ALL
-                SELECT collection_id, 'f_loser', 'shared', '병합 대상 장소', 'included'
+                SELECT
+                    collection_id, 'f_loser', 'shared', 'component-02',
+                    '병합 대상 장소', 'included'
                 FROM collection
                 UNION ALL
-                SELECT collection_id, 'f_loser', 'loser-only', '병합 대상 장소', 'included'
+                SELECT
+                    collection_id, 'f_loser', 'loser-only', 'primary',
+                    '병합 대상 장소', 'included'
                 FROM collection
                 """
             )
@@ -603,7 +610,8 @@ async def test_merge_moves_legacy_projection_into_canonical_only_master_identity
                     """
                     INSERT INTO feature.curation_items (
                         collection_id, feature_id, source_record_key,
-                        external_item_id, place_name, status,
+                        external_item_id, external_component_id,
+                        place_name, status,
                         item_summary, metadata, source_updated_at
                     )
                     SELECT
@@ -611,6 +619,7 @@ async def test_merge_moves_legacy_projection_into_canonical_only_master_identity
                         'f_master',
                         item.source_record_key,
                         item.external_item_id,
+                        'canonical-master',
                         'canonical-only master',
                         'included',
                         'canonical winner summary',
@@ -923,7 +932,8 @@ async def test_merge_preserves_winner_for_reinserted_legacy_canonical_conflict(
                     """
                     INSERT INTO feature.curation_items (
                         collection_id, feature_id, source_record_key,
-                        external_item_id, place_name, status,
+                        external_item_id, external_component_id,
+                        place_name, status,
                         item_summary, metadata, source_updated_at
                     )
                     SELECT
@@ -931,6 +941,7 @@ async def test_merge_preserves_winner_for_reinserted_legacy_canonical_conflict(
                         'f_master',
                         source_record_key,
                         external_item_id,
+                        'canonical-master',
                         'reinsert canonical winner',
                         'included',
                         'reinsert winner summary',

@@ -163,6 +163,7 @@ function makeAdminCuration(
     dataset_key: "admin-dataset",
     edition_key: "2026",
     external_item_id: "admin-map-official-item",
+    external_component_id: "primary",
     feature_category: "01070300",
     feature_id: FEATURE_ID,
     feature_kind: "place",

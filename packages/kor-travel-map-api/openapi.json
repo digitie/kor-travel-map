@@ -671,6 +671,10 @@
             "title": "Edition Key",
             "type": "string"
           },
+          "external_component_id": {
+            "title": "External Component Id",
+            "type": "string"
+          },
           "external_item_id": {
             "title": "External Item Id",
             "type": "string"
@@ -898,6 +902,7 @@
           "address",
           "source_record_key",
           "external_item_id",
+          "external_component_id",
           "place_name",
           "address_hint",
           "source_present",
@@ -7795,6 +7800,10 @@
             "title": "Row Number",
             "type": "integer"
           },
+          "source_component_key": {
+            "title": "Source Component Key",
+            "type": "string"
+          },
           "source_item_key": {
             "title": "Source Item Key",
             "type": "string"
@@ -7831,6 +7840,7 @@
           "requested_feature_id",
           "resolved_feature_id",
           "source_item_key",
+          "source_component_key",
           "candidates",
           "issues"
         ],
@@ -7866,6 +7876,13 @@
               "theme_area_anchor"
             ],
             "title": "Curation Relation",
+            "type": "string"
+          },
+          "external_component_id": {
+            "default": "primary",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "External Component Id",
             "type": "string"
           },
           "external_item_id": {
@@ -7999,6 +8016,12 @@
               "theme_area_anchor"
             ],
             "title": "Curation Relation",
+            "type": "string"
+          },
+          "external_component_id": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "External Component Id",
             "type": "string"
           },
           "external_item_id": {
@@ -22652,6 +22675,10 @@
             "title": "Edition Key",
             "type": "string"
           },
+          "external_component_id": {
+            "title": "External Component Id",
+            "type": "string"
+          },
           "external_item_id": {
             "title": "External Item Id",
             "type": "string"
@@ -22847,6 +22874,7 @@
           "lat",
           "address",
           "external_item_id",
+          "external_component_id",
           "place_name",
           "address_hint",
           "status",

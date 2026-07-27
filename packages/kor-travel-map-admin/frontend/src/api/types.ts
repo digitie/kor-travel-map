@@ -2446,6 +2446,8 @@ export interface components {
             dataset_key: string | null;
             /** Edition Key */
             edition_key: string;
+            /** External Component Id */
+            external_component_id: string;
             /** External Item Id */
             external_item_id: string;
             /** Feature Category */
@@ -4831,6 +4833,8 @@ export interface components {
             resolved_feature_id: string | null;
             /** Row Number */
             row_number: number;
+            /** Source Component Key */
+            source_component_key: string;
             /** Source Item Key */
             source_item_key: string;
             /**
@@ -4853,6 +4857,11 @@ export interface components {
              * @enum {string}
              */
             curation_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+            /**
+             * External Component Id
+             * @default primary
+             */
+            external_component_id: string;
             /** External Item Id */
             external_item_id: string;
             /** Feature Id */
@@ -4896,6 +4905,8 @@ export interface components {
              * @enum {string}
              */
             curation_relation?: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+            /** External Component Id */
+            external_component_id?: string;
             /** External Item Id */
             external_item_id?: string;
             /** Feature Id */
@@ -10003,6 +10014,8 @@ export interface components {
             dataset_key: string | null;
             /** Edition Key */
             edition_key: string;
+            /** External Component Id */
+            external_component_id: string;
             /** External Item Id */
             external_item_id: string;
             /** Feature Category */

@@ -17,7 +17,8 @@
 
 ## 열 규칙
 
-`collection_key`, `theme_slug`, `edition_key`, `source_item_key`는 기계 식별자다.
+`collection_key`, `theme_slug`, `edition_key`, `source_item_key`,
+`source_component_key`는 기계 식별자다.
 `title`과 `place_name`은 공식 표기를 보존한다. `feature_id`는 2026-07-13 prod DB를
 읽기 전용으로 조회해 동일 장소라고 안전하게 확정한 경우에만 채웠다.
 `address_hint`도 공식 목록에서 개별 주소를 확정하지 않은 경우 비워 둔다.
@@ -31,6 +32,10 @@ DB에 미연결 공식 item으로 저장되므로 목록 원문은 손실되지 
 
 한국관광 100선에서 `&`로 결합된 선정지는 공식적으로 한 항목이다. 기존 DB에서 여러
 구성 장소를 확인한 경우 같은 `source_item_key`를 유지한 채 Feature별 행으로 펼친다.
+`source_component_key`는 이때 각 membership을 Feature 연결과 독립적으로 식별한다.
+단일 membership은 `primary`, 복수 membership은 기존 공식 순서에 따라
+`component-01`, `component-02`처럼 부여한다. 따라서 Feature가 아직 없거나 나중에
+다른 Feature로 재연결되어도 같은 component의 운영 상태와 감사 이력이 유지된다.
 국가유산 방문 캠페인은 다른 길 또는 하위 코스에 중복되는 membership을 제거하지 않는다.
 등대 스탬프투어에는 국립수산과학관, 국립해양생물자원관, 국립해양박물관이 stamp point로 포함된다.
 등대 시설 항목의 `metadata_json.suggested_category`는 새 place 카테고리

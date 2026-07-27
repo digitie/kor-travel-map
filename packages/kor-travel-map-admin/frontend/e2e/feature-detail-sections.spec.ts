@@ -129,6 +129,7 @@ function makeCuration(
     dataset_key: "tourism-100",
     edition_key: "2025-2026",
     external_item_id: "tourism-100-yeouido",
+    external_component_id: "primary",
     feature_category: "01070300",
     feature_id: FEATURE_ID,
     feature_kind: "place",

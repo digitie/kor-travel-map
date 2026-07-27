@@ -15,6 +15,12 @@ type Curation = {
   title: string;
 };
 
+type AdminCurationItem = {
+  external_component_id: string;
+  external_item_id: string;
+  feature_id: string | null;
+};
+
 type CurationGroup = {
   feature: { feature_id: string; name: string };
   curations: Curation[];
@@ -194,7 +200,25 @@ test.describe("공식 큐레이션 collection live", () => {
     });
     expect(template.status).toBe(200);
     expect(template.disposition).toMatch(/attachment;.*\.csv/i);
-    expect(template.text.split(/\r?\n/, 1)[0]).toContain("collection_key,theme_slug");
+    expect(template.text.split(/\r?\n/, 1)[0]).toContain(
+      "source_item_key,source_component_key",
+    );
+
+    const tourismCollection = byKey.get("korean-tourism-100:2023-2024");
+    expect(tourismCollection).toBeDefined();
+    const tourismDetail = await browserJson<
+      Envelope<{ collection: Collection; items: AdminCurationItem[] }>
+    >(
+      page,
+      `/v1/admin/curations/${encodeURIComponent(
+        (tourismCollection as Collection).collection_id,
+      )}`,
+    );
+    const palaceComponents = tourismDetail.data.items
+      .filter((item) => item.external_item_id === "kt100-2023-2024-001")
+      .map((item) => item.external_component_id)
+      .sort();
+    expect(palaceComponents).toEqual(["component-01", "component-02"]);
 
     const list = page.getByTestId("curation-collection-list");
     const lighthouseButton = list.getByRole("button", {

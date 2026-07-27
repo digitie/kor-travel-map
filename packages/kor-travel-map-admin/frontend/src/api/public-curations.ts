@@ -42,6 +42,7 @@ export interface PublicCurationItem {
   lat: number | null;
   address: Record<string, unknown>;
   external_item_id: string;
+  external_component_id: string;
   place_name: string;
   address_hint: string | null;
   status: CurationItemStatus;

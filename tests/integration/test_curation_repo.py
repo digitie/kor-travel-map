@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -370,18 +371,17 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
     assert no_op_plan.inserted == 0
     assert no_op_plan.updated == 0
     assert no_op_plan.removals == ()
-    assert replacement_plan.inserted == 1
-    assert replacement_plan.updated == 0
+    assert replacement_plan.inserted == 0
+    assert replacement_plan.updated == 1
     assert {item.external_item_id for item in replacement_plan.removals} == {
-        "item-a",
         "item-b",
     }
     assert replaced == {
         "rows": 2,
         "collections": 1,
-        "inserted": 1,
-        "updated": 0,
-        "removed": 2,
+        "inserted": 0,
+        "updated": 1,
+        "removed": 1,
         "removals": replacement_plan.removals,
     }
     counts = (
@@ -395,7 +395,7 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
             )
         )
     ).one()
-    assert counts == (2, 4)
+    assert counts == (2, 3)
     unresolved = (
         await migrated_session.execute(
             text("SELECT place_name FROM feature.curation_items WHERE feature_id IS NULL")
@@ -2659,6 +2659,150 @@ async def test_concurrent_import_returns_the_items_actually_removed(
             )
 
 
+async def test_new_collection_create_add_does_not_deadlock_import(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """미커밋 collection도 logical key lock을 Feature lock보다 먼저 잡는다."""
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    suffix = uuid4().hex
+    feature_id = f"feature:collection-key-lock:{suffix}"
+    collection_key = f"collection-key-lock:{suffix}"
+    theme_slug = f"collection-key-lock-{suffix}"
+    provider = f"collection-key-lock-{suffix}"
+    setup = AsyncSession(migrated_engine, expire_on_commit=False)
+    creator = AsyncSession(migrated_engine, expire_on_commit=False)
+    importer = AsyncSession(migrated_engine, expire_on_commit=False)
+    import_task: asyncio.Task[CurationImportResult] | None = None
+    try:
+        await setup.execute(
+            text(
+                """
+                INSERT INTO feature.features (
+                    feature_id, kind, name, category, marker_icon, marker_color
+                ) VALUES (
+                    :feature_id, 'place', 'collection key lock 장소',
+                    '01070100', 'place', 'P-01'
+                )
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+        source_id = str(
+            (
+                await setup.execute(
+                    text(
+                        """
+                        INSERT INTO feature.curated_sources (
+                            provider, dataset_key, source_name, source_kind,
+                            update_cycle, provider_status, metadata
+                        ) VALUES (
+                            :provider, 'dataset', 'collection key lock 출처',
+                            'manual', 'unknown', 'manual_only', '{}'::jsonb
+                        )
+                        RETURNING source_id::text
+                        """
+                    ),
+                    {"provider": provider},
+                )
+            ).scalar_one()
+        )
+        await setup.commit()
+
+        theme_id = await upsert_curation_theme(
+            creator,
+            theme_slug=theme_slug,
+            theme_name="collection key lock 테마",
+            theme_group="test",
+        )
+        import_row = ResolvedCurationImportRow(
+            row_number=2,
+            collection_key=collection_key,
+            theme_slug=theme_slug,
+            theme_name="collection key lock 테마",
+            theme_group="test",
+            title="공식 import collection",
+            edition_key="2026",
+            provider=provider,
+            dataset_key="dataset",
+            source_name="collection key lock 출처",
+            source_url=None,
+            source_item_key="official-item",
+            source_component_key="primary",
+            feature_id=feature_id,
+            place_name="collection key lock 장소",
+            address_hint=None,
+            sort_order=1,
+            item_title=None,
+            item_summary=None,
+            metadata={},
+        )
+        import_task = asyncio.create_task(
+            import_curation_rows(
+                importer,
+                rows=(import_row,),
+                actor="importer",
+            )
+        )
+        await asyncio.sleep(0.2)
+        assert not import_task.done()
+
+        collection = await create_curation_collection(
+            creator,
+            collection_key=collection_key,
+            theme_id=theme_id,
+            source_id=source_id,
+            title="미커밋 collection",
+            actor="creator",
+        )
+        _, inserted = await add_curation_item(
+            creator,
+            collection_id=collection.collection_id,
+            feature_id=feature_id,
+            external_item_id="manual-item",
+            place_name="collection key lock 장소",
+            actor="creator",
+        )
+        assert inserted is True
+        await creator.commit()
+        result = await asyncio.wait_for(import_task, timeout=5)
+        await importer.commit()
+        assert result["inserted"] == 1
+        assert result["removed"] == 1
+    finally:
+        if import_task is not None and not import_task.done():
+            import_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await import_task
+        await setup.close()
+        await creator.close()
+        await importer.close()
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curation_collections "
+                    "WHERE collection_key = :collection_key"
+                ),
+                {"collection_key": collection_key},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_sources "
+                    "WHERE provider = :provider AND dataset_key = 'dataset'"
+                ),
+                {"provider": provider},
+            )
+            await connection.execute(
+                text("DELETE FROM feature.curated_themes WHERE theme_slug = :theme_slug"),
+                {"theme_slug": theme_slug},
+            )
+            await connection.execute(
+                text("DELETE FROM feature.features WHERE feature_id = :feature_id"),
+                {"feature_id": feature_id},
+            )
+
+
 async def test_admin_can_resolve_and_archive_unmatched_item_with_actor_audit(
     migrated_session: AsyncSession,
 ) -> None:
@@ -2681,14 +2825,6 @@ async def test_admin_can_resolve_and_archive_unmatched_item_with_actor_audit(
         actor="item-creator",
     )
 
-    with pytest.raises(ValueError, match="미연결 항목이 이미 존재"):
-        await add_curation_item(
-            migrated_session,
-            collection_id=collection.collection_id,
-            feature_id=_FEATURE_ID,
-            external_item_id="unmatched-lighthouse",
-            actor="invalid-resolver",
-        )
     still_unresolved = await get_curation_item(
         migrated_session,
         collection_id=collection.collection_id,
@@ -2714,14 +2850,24 @@ async def test_admin_can_resolve_and_archive_unmatched_item_with_actor_audit(
     assert resolved.created_by == "item-creator"
     assert resolved.updated_by == "item-resolver"
     assert resolved.curation_relation == "primary_stop"
-    with pytest.raises(ValueError, match="Feature 연결 항목이 이미 존재"):
-        await add_curation_item(
+    sibling, sibling_inserted = await add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=None,
+        external_item_id="unmatched-lighthouse",
+        external_component_id="component-02",
+        place_name="두 번째 미연결 등대",
+        actor="component-writer",
+    )
+    assert sibling_inserted
+    assert sibling.feature_id is None
+    with pytest.raises(ValueError, match="다른 component가 이미"):
+        await update_curation_item(
             migrated_session,
             collection_id=collection.collection_id,
-            feature_id=None,
-            external_item_id="unmatched-lighthouse",
-            place_name="중복 미연결 등대",
-            actor="invalid-writer",
+            curation_item_id=sibling.curation_item_id,
+            updates={"feature_id": _FEATURE_ID},
+            actor="invalid-resolver",
         )
 
     await migrated_session.execute(
@@ -2757,6 +2903,745 @@ async def test_admin_can_resolve_and_archive_unmatched_item_with_actor_audit(
         )
     ).scalar_one()
     assert collection_actor == "item-archiver"
+
+
+async def test_import_retargets_stable_component_without_losing_operator_state(
+    migrated_session: AsyncSession,
+) -> None:
+    await _seed_foundations(migrated_session)
+    common = {
+        "collection_key": "component-retarget:2026",
+        "theme_slug": "component-retarget",
+        "theme_name": "복합 항목 재연결",
+        "theme_group": "test",
+        "title": "복합 항목 재연결",
+        "edition_key": "2026",
+        "provider": "migration-test",
+        "dataset_key": "component-retarget",
+        "source_name": "migration test",
+        "source_url": None,
+        "source_item_key": "compound-item",
+        "place_name": "미연결 구성 장소",
+        "address_hint": None,
+        "sort_order": 1,
+        "item_title": None,
+        "item_summary": None,
+        "metadata": {"provider_revision": 1},
+    }
+    unresolved_rows = (
+        ResolvedCurationImportRow(
+            row_number=2,
+            source_component_key="component-01",
+            feature_id=None,
+            **common,
+        ),
+        ResolvedCurationImportRow(
+            row_number=3,
+            source_component_key="component-02",
+            feature_id=None,
+            **{**common, "sort_order": 2},
+        ),
+    )
+    first = await import_curation_rows(
+        migrated_session,
+        rows=unresolved_rows,
+        actor="importer",
+    )
+    assert first["inserted"] == 2
+    identities = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT
+                        item.external_component_id,
+                        item.curation_item_id::text
+                    FROM feature.curation_items AS item
+                    JOIN feature.curation_collections AS collection
+                      ON collection.collection_id = item.collection_id
+                    WHERE collection.collection_key = 'component-retarget:2026'
+                    ORDER BY item.external_component_id
+                    """
+                )
+            )
+        )
+        .tuples()
+        .all()
+    )
+    item_ids = dict(identities)
+    collection_id = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT collection_id::text
+                FROM feature.curation_collections
+                WHERE collection_key = 'component-retarget:2026'
+                """
+            )
+        )
+    ).scalar_one()
+    updated = await update_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=item_ids["component-01"],
+        updates={
+            "status": "rejected",
+            "curation_relation": "primary_stop",
+            "reuse_policy": "blocked",
+        },
+        actor="operator",
+    )
+    assert updated is not None
+
+    rematched_rows = (
+        ResolvedCurationImportRow(
+            row_number=2,
+            source_component_key="component-01",
+            feature_id=_FEATURE_ID,
+            **{
+                **common,
+                "place_name": "겹치는 관광지",
+                "metadata": {"provider_revision": 2},
+            },
+        ),
+        unresolved_rows[1],
+    )
+    second = await import_curation_rows(
+        migrated_session,
+        rows=rematched_rows,
+        actor="importer",
+    )
+    assert second["inserted"] == 0
+    assert second["updated"] == 1
+    after = await get_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=item_ids["component-01"],
+    )
+    assert after is not None
+    assert after.curation_item_id == item_ids["component-01"]
+    assert after.external_component_id == "component-01"
+    assert after.feature_id == _FEATURE_ID
+    assert after.status == "rejected"
+    assert after.curation_relation == "primary_stop"
+    assert after.reuse_policy == "blocked"
+    assert after.metadata == {"provider_revision": 2}
+
+
+async def test_import_adopts_migrated_legacy_components_without_losing_state(
+    migrated_session: AsyncSession,
+) -> None:
+    await _seed_foundations(migrated_session)
+    second_feature_id = "feature:curation-component-second"
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, marker_icon, marker_color
+            ) VALUES (
+                :feature_id, 'place', '두 번째 구성 장소', '01070100',
+                'place', 'P-01'
+            )
+            """
+        ),
+        {"feature_id": second_feature_id},
+    )
+    common = {
+        "collection_key": "component-adoption:2026",
+        "theme_slug": "component-adoption",
+        "theme_name": "복합 항목 identity 승계",
+        "theme_group": "test",
+        "title": "복합 항목 identity 승계",
+        "edition_key": "2026",
+        "provider": "migration-test",
+        "dataset_key": "component-adoption",
+        "source_name": "migration test",
+        "source_url": None,
+        "source_item_key": "official-compound-item",
+        "address_hint": None,
+        "item_title": None,
+        "item_summary": None,
+        "metadata": {"provider_revision": 1},
+    }
+    rows = (
+        ResolvedCurationImportRow(
+            row_number=2,
+            source_component_key="component-01",
+            feature_id=_FEATURE_ID,
+            place_name="겹치는 관광지",
+            sort_order=1,
+            **common,
+        ),
+        ResolvedCurationImportRow(
+            row_number=3,
+            source_component_key="component-02",
+            feature_id=second_feature_id,
+            place_name="두 번째 구성 장소",
+            sort_order=1,
+            **common,
+        ),
+    )
+    first = await import_curation_rows(migrated_session, rows=rows, actor="importer")
+    assert first["inserted"] == 2
+    collection_id = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT collection_id::text
+                FROM feature.curation_collections
+                WHERE collection_key = 'component-adoption:2026'
+                """
+            )
+        )
+    ).scalar_one()
+    original = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT feature_id, curation_item_id::text
+                    FROM feature.curation_items
+                    WHERE collection_id = CAST(:collection_id AS uuid)
+                    ORDER BY feature_id
+                    """
+                ),
+                {"collection_id": collection_id},
+            )
+        )
+        .tuples()
+        .all()
+    )
+    original_ids = dict(original)
+    operator_item_id = original_ids[_FEATURE_ID]
+    await update_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=operator_item_id,
+        updates={
+            "status": "rejected",
+            "curation_relation": "primary_stop",
+            "reuse_policy": "blocked",
+        },
+        actor="operator",
+    )
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curation_items
+            SET external_component_id = 'legacy:' || curation_item_id::text,
+                source_present = feature_id <> :source_absent_feature_id
+            WHERE collection_id = CAST(:collection_id AS uuid)
+            """
+        ),
+        {
+            "collection_id": collection_id,
+            "source_absent_feature_id": _FEATURE_ID,
+        },
+    )
+
+    preview = await preview_curation_import(migrated_session, rows=rows)
+    assert preview.inserted == 0
+    assert preview.updated == 2
+    assert preview.removals == ()
+    adopted = await import_curation_rows(
+        migrated_session,
+        rows=rows,
+        actor="official-reimport",
+    )
+    assert adopted == {
+        "rows": 2,
+        "collections": 1,
+        "inserted": 0,
+        "updated": 2,
+        "removed": 0,
+        "removals": (),
+    }
+    after_rows = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT
+                        feature_id,
+                        curation_item_id::text,
+                        external_component_id,
+                        source_present,
+                        status,
+                        curation_relation,
+                        reuse_policy,
+                        operator_updated_by
+                    FROM feature.curation_items
+                    WHERE collection_id = CAST(:collection_id AS uuid)
+                    ORDER BY feature_id
+                    """
+                ),
+                {"collection_id": collection_id},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    assert {row["feature_id"]: row["curation_item_id"] for row in after_rows} == (
+        original_ids
+    )
+    assert {row["external_component_id"] for row in after_rows} == {
+        "component-01",
+        "component-02",
+    }
+    assert all(row["source_present"] for row in after_rows)
+    operator_row = next(
+        row for row in after_rows if row["curation_item_id"] == operator_item_id
+    )
+    assert operator_row["status"] == "rejected"
+    assert operator_row["curation_relation"] == "primary_stop"
+    assert operator_row["reuse_policy"] == "blocked"
+    assert operator_row["operator_updated_by"] == "operator"
+
+
+async def test_import_adopts_source_absent_legacy_projection_to_primary(
+    migrated_session: AsyncSession,
+) -> None:
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    projection_id = str(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_features (
+                        theme_id, feature_id, source_id, curation_status,
+                        selection_origin, display_title, display_summary
+                    ) VALUES (
+                        CAST(:theme_id AS uuid),
+                        :feature_id,
+                        CAST(:source_id AS uuid),
+                        'curated',
+                        'admin',
+                        'legacy projection collection',
+                        'legacy projection summary'
+                    )
+                    RETURNING curated_feature_id::text
+                    """
+                ),
+                {
+                    "theme_id": theme_id,
+                    "feature_id": _FEATURE_ID,
+                    "source_id": source_id,
+                },
+            )
+        ).scalar_one()
+    )
+    projection_item = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT
+                        item.curation_item_id::text,
+                        item.collection_id::text,
+                        item.external_component_id,
+                        collection.collection_key,
+                        collection.title
+                    FROM feature.curation_items AS item
+                    JOIN feature.curation_collections AS collection
+                      ON collection.collection_id = item.collection_id
+                    WHERE item.legacy_projection_id =
+                          CAST(:projection_id AS uuid)
+                    """
+                ),
+                {"projection_id": projection_id},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    item_id = str(projection_item["curation_item_id"])
+    collection_id = str(projection_item["collection_id"])
+    assert projection_item["external_component_id"] == f"legacy:{projection_id}"
+    updated = await update_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=item_id,
+        updates={
+            "status": "rejected",
+            "curation_relation": "primary_stop",
+            "reuse_policy": "blocked",
+        },
+        actor="projection-operator",
+    )
+    assert updated is not None
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curation_items
+            SET source_present = false
+            WHERE curation_item_id = CAST(:item_id AS uuid)
+            """
+        ),
+        {"item_id": item_id},
+    )
+    row = ResolvedCurationImportRow(
+        row_number=2,
+        collection_key=str(projection_item["collection_key"]),
+        theme_slug="tourism-100-test",
+        theme_name="한국관광 100선",
+        theme_group="official",
+        title=str(projection_item["title"]),
+        edition_key="",
+        provider="python-mcst-api",
+        dataset_key="tourism-100-test",
+        source_name="문화체육관광부",
+        source_url=None,
+        source_item_key=projection_id,
+        source_component_key="primary",
+        feature_id=_FEATURE_ID,
+        place_name="겹치는 관광지",
+        address_hint=None,
+        sort_order=0,
+        item_title=None,
+        item_summary="authoritative summary",
+        metadata={"provider_revision": 2},
+    )
+
+    preview = await preview_curation_import(migrated_session, rows=(row,))
+    assert preview.inserted == 0
+    assert preview.updated == 1
+    assert preview.removals == ()
+    adopted = await import_curation_rows(
+        migrated_session,
+        rows=(row,),
+        actor="official-reimport",
+    )
+    assert adopted["inserted"] == 0
+    assert adopted["updated"] == 1
+    assert adopted["removed"] == 0
+    after = await get_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=item_id,
+    )
+    assert after is not None
+    assert after.external_component_id == "primary"
+    assert after.source_present is True
+    assert after.status == "rejected"
+    assert after.curation_relation == "primary_stop"
+    assert after.reuse_policy == "blocked"
+    operator_updated_by = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT operator_updated_by
+                FROM feature.curation_items
+                WHERE curation_item_id = CAST(:item_id AS uuid)
+                """
+            ),
+            {"item_id": item_id},
+        )
+    ).scalar_one()
+    assert operator_updated_by == "projection-operator"
+
+
+async def test_import_adopts_archived_legacy_identity_without_resurrection(
+    migrated_session: AsyncSession,
+) -> None:
+    await _seed_foundations(migrated_session)
+    row = ResolvedCurationImportRow(
+        row_number=2,
+        collection_key="archived-component-adoption:2026",
+        theme_slug="archived-component-adoption",
+        theme_name="보관 component identity 승계",
+        theme_group="test",
+        title="보관 component identity 승계",
+        edition_key="2026",
+        provider="migration-test",
+        dataset_key="archived-component-adoption",
+        source_name="migration test",
+        source_url=None,
+        source_item_key="archived-official-item",
+        source_component_key="component-01",
+        feature_id=_FEATURE_ID,
+        place_name="겹치는 관광지",
+        address_hint=None,
+        sort_order=1,
+        item_title=None,
+        item_summary="original summary",
+        metadata={"provider_revision": 1},
+    )
+    first = await import_curation_rows(
+        migrated_session,
+        rows=(row,),
+        actor="initial-import",
+    )
+    assert first["inserted"] == 1
+    item = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT
+                        item.curation_item_id::text,
+                        item.collection_id::text
+                    FROM feature.curation_items AS item
+                    JOIN feature.curation_collections AS collection
+                      ON collection.collection_id = item.collection_id
+                    WHERE collection.collection_key =
+                          'archived-component-adoption:2026'
+                    """
+                )
+            )
+        )
+        .mappings()
+        .one()
+    )
+    item_id = str(item["curation_item_id"])
+    collection_id = str(item["collection_id"])
+    archived = await archive_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=item_id,
+        actor="archive-operator",
+    )
+    assert archived is not None
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curation_items
+            SET external_component_id = 'legacy:' || curation_item_id::text
+            WHERE curation_item_id = CAST(:item_id AS uuid)
+            """
+        ),
+        {"item_id": item_id},
+    )
+
+    preview = await preview_curation_import(migrated_session, rows=(row,))
+    assert preview.inserted == 0
+    assert preview.updated == 1
+    assert preview.removals == ()
+    adopted = await import_curation_rows(
+        migrated_session,
+        rows=(row,),
+        actor="official-reimport",
+    )
+    assert adopted["inserted"] == 0
+    assert adopted["updated"] == 1
+    assert adopted["removed"] == 0
+    after = await get_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=item_id,
+        include_archived=True,
+    )
+    assert after is not None
+    assert after.curation_item_id == item_id
+    assert after.external_component_id == "component-01"
+    assert after.status == "archived"
+    assert after.archived_at is not None
+    assert after.item_summary == "original summary"
+    assert after.metadata == {"provider_revision": 1}
+    audit = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT count(*)::integer, max(operator_updated_by)
+                    FROM feature.curation_items
+                    WHERE collection_id = CAST(:collection_id AS uuid)
+                      AND external_item_id = 'archived-official-item'
+                    """
+                ),
+                {"collection_id": collection_id},
+            )
+        )
+        .tuples()
+        .one()
+    )
+    assert audit == (1, "archive-operator")
+
+
+async def test_import_rejects_ambiguous_legacy_adoption_without_mutation(
+    migrated_session: AsyncSession,
+) -> None:
+    await _seed_foundations(migrated_session)
+    row = ResolvedCurationImportRow(
+        row_number=2,
+        collection_key="ambiguous-component-adoption:2026",
+        theme_slug="ambiguous-component-adoption",
+        theme_name="모호한 component identity 승계",
+        theme_group="test",
+        title="모호한 component identity 승계",
+        edition_key="2026",
+        provider="migration-test",
+        dataset_key="ambiguous-component-adoption",
+        source_name="migration test",
+        source_url=None,
+        source_item_key="ambiguous-official-item",
+        source_component_key="component-01",
+        feature_id=_FEATURE_ID,
+        place_name="겹치는 관광지",
+        address_hint=None,
+        sort_order=1,
+        item_title=None,
+        item_summary="official summary",
+        metadata={"provider_revision": 1},
+    )
+    first = await import_curation_rows(
+        migrated_session,
+        rows=(row,),
+        actor="initial-import",
+    )
+    assert first["inserted"] == 1
+    original = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT
+                        item.curation_item_id::text,
+                        item.collection_id::text
+                    FROM feature.curation_items AS item
+                    JOIN feature.curation_collections AS collection
+                      ON collection.collection_id = item.collection_id
+                    WHERE collection.collection_key =
+                          'ambiguous-component-adoption:2026'
+                    """
+                )
+            )
+        )
+        .mappings()
+        .one()
+    )
+    archived_item_id = str(original["curation_item_id"])
+    collection_id = str(original["collection_id"])
+    archived = await archive_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=archived_item_id,
+        actor="archive-operator",
+    )
+    assert archived is not None
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curation_items
+            SET external_component_id = 'legacy:' || curation_item_id::text
+            WHERE curation_item_id = CAST(:item_id AS uuid)
+            """
+        ),
+        {"item_id": archived_item_id},
+    )
+    active, inserted = await add_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        external_item_id=row.source_item_key,
+        external_component_id="legacy:active-candidate",
+        feature_id=_FEATURE_ID,
+        place_name=row.place_name,
+        actor="active-writer",
+    )
+    assert inserted is True
+    assert active.archived_at is None
+
+    async def snapshot() -> list[dict[str, object]]:
+        return [
+            dict(item)
+            for item in (
+                (
+                    await migrated_session.execute(
+                        text(
+                            """
+                            SELECT
+                                curation_item_id::text,
+                                external_component_id,
+                                source_present,
+                                status,
+                                operator_updated_by,
+                                archived_at
+                            FROM feature.curation_items
+                            WHERE collection_id = CAST(:collection_id AS uuid)
+                              AND external_item_id = :external_item_id
+                            ORDER BY curation_item_id
+                            """
+                        ),
+                        {
+                            "collection_id": collection_id,
+                            "external_item_id": row.source_item_key,
+                        },
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        ]
+
+    before = await snapshot()
+    assert len(before) == 2
+    foundation_before = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT
+                        theme.theme_name,
+                        source.source_name,
+                        source.source_url,
+                        collection.title
+                    FROM feature.curation_collections AS collection
+                    JOIN feature.curated_themes AS theme
+                      ON theme.theme_id = collection.theme_id
+                    JOIN feature.curated_sources AS source
+                      ON source.source_id = collection.source_id
+                    WHERE collection.collection_id =
+                          CAST(:collection_id AS uuid)
+                    """
+                ),
+                {"collection_id": collection_id},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    conflicting_row = replace(
+        row,
+        theme_name="반영되면 안 되는 테마",
+        source_name="반영되면 안 되는 출처",
+        source_url="https://invalid.example.test/rejected-import",
+        title="반영되면 안 되는 collection 제목",
+    )
+    with pytest.raises(ValueError, match="승계 후보가 모호합니다"):
+        await preview_curation_import(migrated_session, rows=(conflicting_row,))
+    assert await snapshot() == before
+    with pytest.raises(ValueError, match="승계 후보가 모호합니다"):
+        await import_curation_rows(
+            migrated_session,
+            rows=(conflicting_row,),
+            actor="official-reimport",
+        )
+    assert await snapshot() == before
+    foundation_after = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT
+                        theme.theme_name,
+                        source.source_name,
+                        source.source_url,
+                        collection.title
+                    FROM feature.curation_collections AS collection
+                    JOIN feature.curated_themes AS theme
+                      ON theme.theme_id = collection.theme_id
+                    JOIN feature.curated_sources AS source
+                      ON source.source_id = collection.source_id
+                    WHERE collection.collection_id =
+                          CAST(:collection_id AS uuid)
+                    """
+                ),
+                {"collection_id": collection_id},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert dict(foundation_after) == dict(foundation_before)
 
 
 async def test_feature_curation_lookup_uses_membership_index(

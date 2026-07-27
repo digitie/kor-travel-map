@@ -21,6 +21,7 @@ CURATION_CSV_HEADERS: Final[tuple[str, ...]] = (
     "source_name",
     "source_url",
     "source_item_key",
+    "source_component_key",
     "official_ordinal",
     "place_name",
     "address_hint",
@@ -45,6 +46,7 @@ _REQUIRED_VALUES: Final[tuple[str, ...]] = (
     "dataset_key",
     "source_name",
     "source_item_key",
+    "source_component_key",
 )
 _INTEGER_COLUMNS: Final[tuple[str, ...]] = ("official_ordinal", "sort_order")
 
@@ -77,6 +79,7 @@ class CurationImportRow:
     source_name: str
     source_url: str
     source_item_key: str
+    source_component_key: str
     official_ordinal: int | None
     place_name: str
     address_hint: str
@@ -303,6 +306,7 @@ def _parse_row(
         source_name=values["source_name"],
         source_url=values["source_url"],
         source_item_key=values["source_item_key"],
+        source_component_key=values["source_component_key"],
         official_ordinal=integers["official_ordinal"],
         place_name=values["place_name"],
         address_hint=values["address_hint"],
@@ -365,11 +369,7 @@ def _validate_collection_consistency(
 
     signatures: dict[str, tuple[str, ...]] = {}
     item_identities: set[tuple[str, str, str]] = set()
-    resolution_modes: dict[tuple[str, str], set[bool]] = {}
-    for row in rows:
-        resolution_modes.setdefault((row.collection_key, row.source_item_key), set()).add(
-            bool(row.feature_id)
-        )
+    resolved_targets: set[tuple[str, str, str]] = set()
     validated: list[CurationImportRow] = []
     for row in rows:
         signature = (
@@ -396,33 +396,39 @@ def _validate_collection_consistency(
                     column="collection_key",
                 )
             )
-        feature_reference = row.feature_id or "__unresolved__"
         item_identity = (
             row.collection_key,
             row.source_item_key,
-            feature_reference,
+            row.source_component_key,
         )
         if item_identity in item_identities:
             issues.append(
                 CurationImportIssue(
                     code="duplicate_item",
-                    message="같은 collection/item/Feature 행이 파일 안에 중복되었습니다.",
+                    message="같은 collection/item/component 행이 파일 안에 중복되었습니다.",
                     row_number=row.row_number,
-                    column="source_item_key",
+                    column="source_component_key",
                 )
             )
         item_identities.add(item_identity)
-        if len(resolution_modes[(row.collection_key, row.source_item_key)]) > 1:
+        resolved_target = (
+            row.collection_key,
+            row.source_item_key,
+            row.feature_id,
+        )
+        if row.feature_id and resolved_target in resolved_targets:
             issues.append(
                 CurationImportIssue(
-                    code="mixed_resolved_unresolved_item",
+                    code="duplicate_feature_target",
                     message=(
-                        "같은 collection/item에 Feature 연결 행과 미연결 행을 함께 둘 수 없습니다."
+                        "같은 collection/item의 component가 동일 Feature를 중복 참조합니다."
                     ),
                     row_number=row.row_number,
                     column="feature_id",
                 )
             )
+        if row.feature_id:
+            resolved_targets.add(resolved_target)
         validated.append(
             replace(
                 row,

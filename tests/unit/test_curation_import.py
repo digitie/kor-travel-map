@@ -119,6 +119,7 @@ def test_parse_curation_csv_rejects_too_many_rows() -> None:
         "dataset_key",
         "source_name",
         "source_item_key",
+        "source_component_key",
     ],
 )
 def test_parse_curation_csv_rejects_empty_required_value(missing: str) -> None:
@@ -191,26 +192,53 @@ def test_parse_curation_csv_rejects_duplicate_item_identity() -> None:
     assert preview.rows[1].issues[-1].code == "duplicate_item"
 
 
-def test_parse_curation_csv_rejects_duplicate_unresolved_item_with_other_name() -> None:
-    preview = parse_curation_csv(_csv_bytes(_valid_row(), _valid_row(place_name="다른 공식 표기")))
-
-    assert preview.invalid_rows == 1
-    assert "duplicate_item" in {issue.code for issue in preview.rows[1].issues}
-
-
-def test_parse_curation_csv_rejects_mixed_linked_and_unresolved_item() -> None:
+def test_parse_curation_csv_accepts_distinct_unresolved_components() -> None:
     preview = parse_curation_csv(
         _csv_bytes(
-            _valid_row(),
-            _valid_row(feature_id="feature:linked", place_name=""),
+            _valid_row(source_component_key="component-01"),
+            _valid_row(
+                source_component_key="component-02",
+                place_name="다른 공식 표기",
+            ),
         )
     )
 
-    assert preview.invalid_rows == 2
-    assert all(
-        "mixed_resolved_unresolved_item" in {issue.code for issue in row.issues}
-        for row in preview.rows
+    assert preview.invalid_rows == 0
+
+
+def test_parse_curation_csv_accepts_mixed_linked_and_unresolved_components() -> None:
+    preview = parse_curation_csv(
+        _csv_bytes(
+            _valid_row(source_component_key="component-01"),
+            _valid_row(
+                source_component_key="component-02",
+                feature_id="feature:linked",
+                place_name="",
+            ),
+        )
     )
+
+    assert preview.invalid_rows == 0
+
+
+def test_parse_curation_csv_rejects_duplicate_feature_target_across_components() -> None:
+    preview = parse_curation_csv(
+        _csv_bytes(
+            _valid_row(
+                source_component_key="component-01",
+                feature_id="feature:linked",
+            ),
+            _valid_row(
+                source_component_key="component-02",
+                feature_id="feature:linked",
+            ),
+        )
+    )
+
+    assert preview.invalid_rows == 1
+    assert "duplicate_feature_target" in {
+        issue.code for issue in preview.rows[1].issues
+    }
 
 
 def _valid_row(**overrides: str) -> dict[str, str]:
@@ -226,6 +254,7 @@ def _valid_row(**overrides: str) -> dict[str, str]:
             "dataset_key": "visit_korea_100",
             "source_name": "한국관광공사",
             "source_item_key": "2025-2026:1",
+            "source_component_key": "primary",
             "place_name": "창덕궁",
         }
     )

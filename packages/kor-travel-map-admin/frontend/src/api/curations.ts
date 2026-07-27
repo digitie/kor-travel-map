@@ -85,6 +85,7 @@ export interface CurationItem {
   address: Record<string, unknown>;
   source_record_key: string | null;
   external_item_id: string;
+  external_component_id: string;
   place_name: string;
   address_hint: string | null;
   source_present: boolean;
@@ -120,6 +121,7 @@ export interface CurationCollectionCreateRequest {
 export interface CurationItemCreateRequest {
   feature_id?: string | null;
   external_item_id: string;
+  external_component_id?: string;
   place_name?: string | null;
   address_hint?: string | null;
   source_record_key?: string | null;
@@ -135,6 +137,7 @@ export interface CurationItemCreateRequest {
 export interface CurationItemPatchRequest {
   feature_id?: string | null;
   external_item_id?: string;
+  external_component_id?: string;
   place_name?: string;
   address_hint?: string | null;
   source_record_key?: string | null;
@@ -174,6 +177,7 @@ export interface CurationImportRow {
   requested_feature_id: string;
   resolved_feature_id: string | null;
   source_item_key: string;
+  source_component_key: string;
   candidates: CurationImportCandidate[];
   issues: CurationImportIssue[];
 }

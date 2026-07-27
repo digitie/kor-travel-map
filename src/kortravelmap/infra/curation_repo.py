@@ -129,6 +129,7 @@ class CurationItem:
     address: dict[str, Any]
     source_record_key: str | None
     external_item_id: str
+    external_component_id: str
     place_name: str
     address_hint: str | None
     source_present: bool
@@ -197,6 +198,7 @@ class ResolvedCurationImportRow:
     item_title: str | None
     item_summary: str | None
     metadata: dict[str, Any]
+    source_component_key: str = "primary"
 
 
 @dataclass(frozen=True)
@@ -330,6 +332,7 @@ _ITEM_SELECT_FIELDS: Final[str] = f"""
     ) AS linked_feature_is_public,
     i.source_record_key,
     i.external_item_id,
+    i.external_component_id,
     i.place_name,
     i.address_hint,
     i.source_present,
@@ -627,21 +630,24 @@ _UPSERT_ITEM_SQL: Final[str] = """
 WITH written AS (
     INSERT INTO feature.curation_items (
         collection_id, feature_id, source_record_key, external_item_id,
+        external_component_id,
         place_name, address_hint, source_present, source_updated_at, status,
         sort_order, item_title, item_summary, curation_relation, reuse_policy,
         metadata, created_by, updated_by, operator_updated_by,
         operator_updated_at, updated_at
     ) VALUES (
         CAST(:collection_id AS uuid), :feature_id, :source_record_key,
-        :external_item_id, :place_name, :address_hint, true, clock_timestamp(),
+        :external_item_id, :external_component_id,
+        :place_name, :address_hint, true, clock_timestamp(),
         :status, :sort_order, :item_title, :item_summary,
         :curation_relation, :reuse_policy, CAST(:metadata AS jsonb),
         :actor, :actor, :actor, clock_timestamp(), now()
     )
     ON CONFLICT (
-        collection_id, external_item_id, feature_id
+        collection_id, external_item_id, external_component_id
     )
     DO UPDATE SET
+        feature_id = EXCLUDED.feature_id,
         source_record_key = COALESCE(
             EXCLUDED.source_record_key,
             feature.curation_items.source_record_key
@@ -662,6 +668,7 @@ WITH written AS (
         operator_updated_at = clock_timestamp(),
         updated_at = now()
     WHERE (
+        feature.curation_items.feature_id,
         feature.curation_items.source_record_key,
         feature.curation_items.place_name,
         feature.curation_items.address_hint,
@@ -674,6 +681,7 @@ WITH written AS (
         feature.curation_items.reuse_policy,
         feature.curation_items.metadata
     ) IS DISTINCT FROM (
+        EXCLUDED.feature_id,
         COALESCE(EXCLUDED.source_record_key,
                  feature.curation_items.source_record_key),
         EXCLUDED.place_name,
@@ -695,7 +703,7 @@ SELECT existing.curation_item_id::text, false
 FROM feature.curation_items AS existing
 WHERE existing.collection_id = CAST(:collection_id AS uuid)
   AND existing.external_item_id = :external_item_id
-  AND existing.feature_id IS NOT DISTINCT FROM :feature_id
+  AND existing.external_component_id = :external_component_id
   AND existing.archived_at IS NULL
   AND NOT EXISTS (SELECT 1 FROM written)
 LIMIT 1
@@ -708,7 +716,8 @@ WITH incoming AS (
     FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS value(
         collection_id text,
         feature_id text,
-        external_item_id text
+        external_item_id text,
+        external_component_id text
     )
 ), affected_collections AS (
     SELECT DISTINCT CAST(collection_id AS uuid) AS collection_id
@@ -725,7 +734,24 @@ WITH incoming AS (
           FROM incoming
           WHERE CAST(incoming.collection_id AS uuid) = existing.collection_id
             AND incoming.external_item_id = existing.external_item_id
-            AND incoming.feature_id IS NOT DISTINCT FROM existing.feature_id
+            AND (
+                incoming.external_component_id = existing.external_component_id
+                OR (
+                    incoming.feature_id IS NOT NULL
+                    AND existing.feature_id = incoming.feature_id
+                    AND existing.external_component_id LIKE 'legacy:%'
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM feature.curation_items AS exact_identity
+                        WHERE exact_identity.collection_id =
+                            existing.collection_id
+                          AND exact_identity.external_item_id =
+                              incoming.external_item_id
+                          AND exact_identity.external_component_id =
+                              incoming.external_component_id
+                    )
+                )
+            )
       )
     FOR UPDATE OF existing
 ), marked AS (
@@ -751,6 +777,161 @@ ORDER BY c.collection_key, i.sort_order, i.curation_item_id
 """
 )
 
+_LEGACY_IMPORT_ADOPTION_CONFLICTS_SQL: Final[str] = """
+WITH incoming AS (
+    SELECT *
+    FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS value(
+        collection_key text,
+        feature_id text,
+        external_item_id text,
+        external_component_id text
+    )
+), conflicts AS (
+    SELECT
+        incoming.collection_key,
+        incoming.external_item_id,
+        incoming.external_component_id,
+        incoming.feature_id,
+        array_agg(
+            legacy.curation_item_id::text || ':' ||
+            legacy.external_component_id || ':' ||
+            CASE
+                WHEN legacy.archived_at IS NULL THEN 'active'
+                ELSE 'archived'
+            END
+            ORDER BY
+                legacy.archived_at DESC NULLS LAST,
+                legacy.curation_item_id
+        ) AS candidates
+    FROM incoming
+    JOIN feature.curation_collections AS collection
+      ON collection.collection_key = incoming.collection_key
+    JOIN feature.curation_items AS legacy
+      ON legacy.collection_id = collection.collection_id
+     AND legacy.external_item_id = incoming.external_item_id
+     AND legacy.feature_id = incoming.feature_id
+     AND legacy.external_component_id LIKE 'legacy:%'
+    WHERE incoming.feature_id IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1
+          FROM feature.curation_items AS exact_identity
+          WHERE exact_identity.collection_id = legacy.collection_id
+            AND exact_identity.external_item_id = legacy.external_item_id
+            AND exact_identity.external_component_id =
+                incoming.external_component_id
+      )
+    GROUP BY
+        incoming.collection_key,
+        incoming.external_item_id,
+        incoming.external_component_id,
+        incoming.feature_id
+    HAVING count(*) > 1
+)
+SELECT *
+FROM conflicts
+ORDER BY
+    collection_key,
+    external_item_id,
+    external_component_id,
+    feature_id
+LIMIT 1
+"""
+
+_ADOPT_LEGACY_IMPORT_IDENTITIES_SQL: Final[str] = """
+WITH incoming AS (
+    SELECT *
+    FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS value(
+        collection_id text,
+        feature_id text,
+        external_item_id text,
+        external_component_id text,
+        place_name text,
+        address_hint text,
+        sort_order integer,
+        item_title text,
+        item_summary text,
+        metadata jsonb
+    )
+), matched AS MATERIALIZED (
+    SELECT
+        legacy.curation_item_id,
+        incoming.external_component_id,
+        incoming.place_name,
+        incoming.address_hint,
+        incoming.sort_order,
+        incoming.item_title,
+        incoming.item_summary,
+        incoming.metadata,
+        legacy.archived_at
+    FROM incoming
+    JOIN feature.curation_items AS legacy
+      ON legacy.collection_id = CAST(incoming.collection_id AS uuid)
+     AND legacy.external_item_id = incoming.external_item_id
+     AND legacy.feature_id = incoming.feature_id
+     AND legacy.external_component_id LIKE 'legacy:%'
+    WHERE incoming.feature_id IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1
+          FROM feature.curation_items AS exact_identity
+          WHERE exact_identity.collection_id = legacy.collection_id
+            AND exact_identity.external_item_id = legacy.external_item_id
+            AND exact_identity.external_component_id =
+                incoming.external_component_id
+      )
+    FOR UPDATE OF legacy
+), written AS (
+    UPDATE feature.curation_items AS legacy
+    SET external_component_id = matched.external_component_id,
+        place_name = CASE
+            WHEN matched.archived_at IS NULL
+            THEN matched.place_name
+            ELSE legacy.place_name
+        END,
+        address_hint = CASE
+            WHEN matched.archived_at IS NULL
+            THEN matched.address_hint
+            ELSE legacy.address_hint
+        END,
+        source_present = CASE
+            WHEN matched.archived_at IS NULL
+            THEN true
+            ELSE legacy.source_present
+        END,
+        source_updated_at = CASE
+            WHEN matched.archived_at IS NULL
+            THEN clock_timestamp()
+            ELSE legacy.source_updated_at
+        END,
+        sort_order = CASE
+            WHEN matched.archived_at IS NULL
+            THEN matched.sort_order
+            ELSE legacy.sort_order
+        END,
+        item_title = CASE
+            WHEN matched.archived_at IS NULL
+            THEN matched.item_title
+            ELSE legacy.item_title
+        END,
+        item_summary = CASE
+            WHEN matched.archived_at IS NULL
+            THEN matched.item_summary
+            ELSE legacy.item_summary
+        END,
+        metadata = CASE
+            WHEN matched.archived_at IS NULL
+            THEN matched.metadata
+            ELSE legacy.metadata
+        END,
+        updated_by = :actor,
+        updated_at = now()
+    FROM matched
+    WHERE legacy.curation_item_id = matched.curation_item_id
+    RETURNING legacy.curation_item_id
+)
+SELECT count(*)::integer AS updated
+FROM written
+"""
+
 _BULK_UPSERT_ITEMS_SQL: Final[str] = """
 WITH incoming AS (
     SELECT *
@@ -758,6 +939,7 @@ WITH incoming AS (
         collection_id text,
         feature_id text,
         external_item_id text,
+        external_component_id text,
         place_name text,
         address_hint text,
         sort_order integer,
@@ -767,14 +949,16 @@ WITH incoming AS (
     )
 ), written AS (
     INSERT INTO feature.curation_items (
-        collection_id, feature_id, external_item_id, place_name, address_hint,
+        collection_id, feature_id, external_item_id, external_component_id,
+        place_name, address_hint,
         source_present, source_updated_at, status, sort_order,
         item_title, item_summary, curation_relation, reuse_policy,
         metadata, created_by, updated_by, updated_at
     )
     SELECT
         CAST(incoming.collection_id AS uuid), incoming.feature_id,
-        incoming.external_item_id, incoming.place_name, incoming.address_hint,
+        incoming.external_item_id, incoming.external_component_id,
+        incoming.place_name, incoming.address_hint,
         true, clock_timestamp(), 'included', incoming.sort_order,
         incoming.item_title, incoming.item_summary, 'nearby_option',
         'manual_review', incoming.metadata, :actor, :actor, now()
@@ -784,11 +968,11 @@ WITH incoming AS (
         FROM feature.curation_items AS tombstone
         WHERE tombstone.collection_id = CAST(incoming.collection_id AS uuid)
           AND tombstone.external_item_id = incoming.external_item_id
-          AND tombstone.feature_id IS NOT DISTINCT FROM incoming.feature_id
+          AND tombstone.external_component_id = incoming.external_component_id
           AND tombstone.archived_at IS NOT NULL
     )
     ON CONFLICT (
-        collection_id, external_item_id, feature_id
+        collection_id, external_item_id, external_component_id
     )
     -- status/curation_relation/reuse_policy는 CSV에 없는 하드코딩 default이며
     -- 운영자가 admin PATCH로 조정하는 override 필드다. authoritative 재적재가 이를
@@ -797,6 +981,7 @@ WITH incoming AS (
     -- 반대로 제공자 파생 필드(place_name/address_hint/sort_order/item_title/item_summary/
     -- metadata)는 CSV가 정본이므로 운영자가 PATCH로 편집했더라도 재적재로 덮어쓴다(의도된 경계).
     DO UPDATE SET
+        feature_id = EXCLUDED.feature_id,
         place_name = EXCLUDED.place_name,
         address_hint = EXCLUDED.address_hint,
         source_present = true,
@@ -808,6 +993,7 @@ WITH incoming AS (
         updated_by = EXCLUDED.updated_by,
         updated_at = now()
     WHERE (
+        feature.curation_items.feature_id,
         feature.curation_items.source_present,
         feature.curation_items.place_name,
         feature.curation_items.address_hint,
@@ -816,6 +1002,7 @@ WITH incoming AS (
         feature.curation_items.item_summary,
         feature.curation_items.metadata
     ) IS DISTINCT FROM (
+        EXCLUDED.feature_id,
         true,
         EXCLUDED.place_name,
         EXCLUDED.address_hint,
@@ -839,6 +1026,7 @@ WITH incoming AS (
         collection_key text,
         feature_id text,
         external_item_id text,
+        external_component_id text,
         place_name text,
         address_hint text,
         sort_order integer,
@@ -855,7 +1043,8 @@ WITH incoming AS (
                 FROM feature.curation_items AS tombstone
                 WHERE tombstone.collection_id = collection.collection_id
                   AND tombstone.external_item_id = incoming.external_item_id
-                  AND tombstone.feature_id IS NOT DISTINCT FROM incoming.feature_id
+                  AND tombstone.external_component_id =
+                      incoming.external_component_id
                   AND tombstone.archived_at IS NOT NULL
             )
         ) AS already_exists,
@@ -864,7 +1053,10 @@ WITH incoming AS (
         -- (#699) dry-run preview도 이 3개를 needs_update 비교에서 제외해 "updated" 카운트를
         -- 실제 동작과 일치시킨다(운영자 편집만 다른 행을 updated로 오표시하지 않음).
         AND (
-            NOT existing.source_present
+            existing.external_component_id IS DISTINCT FROM
+                incoming.external_component_id
+            OR existing.feature_id IS DISTINCT FROM incoming.feature_id
+            OR NOT existing.source_present
             OR (
                 existing.place_name,
                 existing.address_hint,
@@ -884,11 +1076,40 @@ WITH incoming AS (
     FROM incoming
     LEFT JOIN feature.curation_collections AS collection
       ON collection.collection_key = incoming.collection_key
-    LEFT JOIN feature.curation_items AS existing
-      ON existing.collection_id = collection.collection_id
-     AND existing.external_item_id = incoming.external_item_id
-     AND existing.feature_id IS NOT DISTINCT FROM incoming.feature_id
-     AND existing.archived_at IS NULL
+    LEFT JOIN LATERAL (
+        SELECT candidate.*
+        FROM feature.curation_items AS candidate
+        WHERE candidate.collection_id = collection.collection_id
+          AND candidate.external_item_id = incoming.external_item_id
+          AND (
+              (
+                  candidate.external_component_id =
+                      incoming.external_component_id
+                  AND candidate.archived_at IS NULL
+              )
+              OR (
+                  incoming.feature_id IS NOT NULL
+                  AND candidate.feature_id = incoming.feature_id
+                  AND candidate.external_component_id LIKE 'legacy:%'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM feature.curation_items AS exact_identity
+                      WHERE exact_identity.collection_id =
+                          collection.collection_id
+                        AND exact_identity.external_item_id =
+                            incoming.external_item_id
+                        AND exact_identity.external_component_id =
+                            incoming.external_component_id
+                  )
+              )
+          )
+        ORDER BY
+            (
+                candidate.external_component_id =
+                incoming.external_component_id
+            ) DESC
+        LIMIT 1
+    ) AS existing ON true
 )
 SELECT
     count(*) FILTER (WHERE NOT already_exists)::integer AS inserted,
@@ -906,7 +1127,8 @@ WHERE i.archived_at IS NULL
       FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS incoming(
           collection_key text,
           feature_id text,
-          external_item_id text
+          external_item_id text,
+          external_component_id text
       )
       WHERE incoming.collection_key = c.collection_key
   )
@@ -915,11 +1137,28 @@ WHERE i.archived_at IS NULL
       FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS incoming(
           collection_key text,
           feature_id text,
-          external_item_id text
+          external_item_id text,
+          external_component_id text
       )
       WHERE incoming.collection_key = c.collection_key
         AND incoming.external_item_id = i.external_item_id
-        AND incoming.feature_id IS NOT DISTINCT FROM i.feature_id
+        AND (
+            incoming.external_component_id = i.external_component_id
+            OR (
+                incoming.feature_id IS NOT NULL
+                AND i.feature_id = incoming.feature_id
+                AND i.external_component_id LIKE 'legacy:%'
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM feature.curation_items AS exact_identity
+                    WHERE exact_identity.collection_id = i.collection_id
+                      AND exact_identity.external_item_id =
+                          incoming.external_item_id
+                      AND exact_identity.external_component_id =
+                          incoming.external_component_id
+                )
+            )
+        )
   )
 ORDER BY c.collection_key, i.sort_order, i.curation_item_id
 """
@@ -1191,6 +1430,7 @@ def _item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
         address=_object(row["address"]),
         source_record_key=row["source_record_key"],
         external_item_id=str(row["external_item_id"]),
+        external_component_id=str(row["external_component_id"]),
         place_name=str(row["place_name"]),
         address_hint=row["address_hint"],
         source_present=bool(row["source_present"]),
@@ -1384,6 +1624,44 @@ async def get_curation_item(
     return _item(row) if row is not None else None
 
 
+async def _lock_collection_keys(
+    session: AsyncSession,
+    collection_keys: Sequence[str],
+) -> None:
+    """아직 생성되지 않은 collection까지 stable key 순서로 직렬화한다."""
+
+    normalized_keys = sorted(set(collection_keys))
+    if not normalized_keys:
+        return
+    await session.execute(
+        text(
+            """
+            SELECT pg_advisory_xact_lock(
+                hashtextextended(
+                    'kortravelmap:curation-collection:' || collection_key,
+                    0
+                )
+            )
+            FROM unnest(CAST(:collection_keys AS text[]))
+                AS requested(collection_key)
+            ORDER BY collection_key
+            """
+        ),
+        {"collection_keys": normalized_keys},
+    )
+
+
+async def _lock_curation_write_boundary(session: AsyncSession) -> None:
+    """Theme·collection·Feature 순서가 다른 공식/수동 writer를 직렬화한다."""
+
+    await session.execute(
+        text(
+            "SELECT pg_advisory_xact_lock("
+            "hashtextextended('kortravelmap:curation-import', 0))"
+        )
+    )
+
+
 async def _lock_collection(session: AsyncSession, collection_id: str) -> bool:
     row = (
         await session.execute(
@@ -1462,12 +1740,15 @@ async def create_curation_collection(
         raise ValueError("invalid curation collection state")
     if not collection_key.strip() or not title.strip():
         raise ValueError("collection_key and title are required")
+    normalized_collection_key = collection_key.strip()
+    await _lock_curation_write_boundary(session)
+    await _lock_collection_keys(session, (normalized_collection_key,))
     collection_id = str(
         (
             await session.execute(
                 text(_CREATE_COLLECTION_SQL),
                 {
-                    "collection_key": collection_key.strip(),
+                    "collection_key": normalized_collection_key,
                     "theme_id": theme_id,
                     "source_id": source_id,
                     "title": title.strip(),
@@ -1570,6 +1851,7 @@ async def add_curation_item(
     collection_id: str,
     feature_id: str | None,
     external_item_id: str,
+    external_component_id: str = "primary",
     place_name: str | None = None,
     address_hint: str | None = None,
     source_record_key: str | None = None,
@@ -1586,7 +1868,11 @@ async def add_curation_item(
         raise ValueError("invalid curation item status")
     if curation_relation not in _RELATIONS or reuse_policy not in _REUSE_POLICIES:
         raise ValueError("invalid curation item policy")
-    if not 0 <= sort_order <= _POSTGRES_INTEGER_MAX or not external_item_id.strip():
+    if (
+        not 0 <= sort_order <= _POSTGRES_INTEGER_MAX
+        or not external_item_id.strip()
+        or not external_component_id.strip()
+    ):
         raise ValueError("invalid curation item identity")
     resolved_place_name = place_name.strip() if place_name else ""
     if feature_id is not None:
@@ -1615,54 +1901,42 @@ async def add_curation_item(
                 "SELECT 1 FROM feature.curation_items "
                 "WHERE collection_id = CAST(:collection_id AS uuid) "
                 "AND external_item_id = :external_item_id "
-                "AND feature_id IS NOT DISTINCT FROM CAST(:feature_id AS text) "
+                "AND external_component_id = :external_component_id "
                 "AND archived_at IS NOT NULL"
             ),
             {
                 "collection_id": collection_id,
                 "external_item_id": external_item_id.strip(),
-                "feature_id": feature_id,
+                "external_component_id": external_component_id.strip(),
             },
         )
     ).scalar_one_or_none()
     if archived_identity_exists is not None:
         raise ValueError("archive된 curation item identity는 재사용할 수 없습니다.")
     if feature_id is not None:
-        unresolved_exists = (
+        duplicate_feature_exists = (
             await session.execute(
                 text(
                     "SELECT 1 FROM feature.curation_items "
                     "WHERE collection_id = CAST(:collection_id AS uuid) "
                     "AND external_item_id = :external_item_id "
-                    "AND feature_id IS NULL AND archived_at IS NULL"
+                    "AND external_component_id <> :external_component_id "
+                    "AND feature_id = :feature_id "
+                    "AND source_present "
+                    "AND archived_at IS NULL"
                 ),
                 {
                     "collection_id": collection_id,
                     "external_item_id": external_item_id.strip(),
+                    "external_component_id": external_component_id.strip(),
+                    "feature_id": feature_id,
                 },
             )
         ).scalar_one_or_none()
-        if unresolved_exists is not None:
+        if duplicate_feature_exists is not None:
             raise ValueError(
-                "같은 외부 항목 ID의 미연결 항목이 이미 존재합니다. PATCH로 Feature를 연결하세요."
+                "같은 외부 항목의 다른 component가 이미 이 Feature를 참조합니다."
             )
-    else:
-        resolved_exists = (
-            await session.execute(
-                text(
-                    "SELECT 1 FROM feature.curation_items "
-                    "WHERE collection_id = CAST(:collection_id AS uuid) "
-                    "AND external_item_id = :external_item_id "
-                    "AND feature_id IS NOT NULL AND archived_at IS NULL"
-                ),
-                {
-                    "collection_id": collection_id,
-                    "external_item_id": external_item_id.strip(),
-                },
-            )
-        ).scalar_one_or_none()
-        if resolved_exists is not None:
-            raise ValueError("같은 외부 항목 ID의 Feature 연결 항목이 이미 존재합니다.")
     row = (
         (
             await session.execute(
@@ -1672,6 +1946,7 @@ async def add_curation_item(
                     "feature_id": feature_id,
                     "source_record_key": source_record_key,
                     "external_item_id": external_item_id.strip(),
+                    "external_component_id": external_component_id.strip(),
                     "place_name": resolved_place_name,
                     "address_hint": address_hint.strip() if address_hint else None,
                     "status": status,
@@ -1717,6 +1992,7 @@ async def update_curation_item(
         "feature_id",
         "source_record_key",
         "external_item_id",
+        "external_component_id",
         "place_name",
         "address_hint",
         "status",
@@ -1741,7 +2017,7 @@ async def update_curation_item(
             not isinstance(value, int) or not 0 <= value <= _POSTGRES_INTEGER_MAX
         ):
             raise ValueError("invalid curation item sort order")
-        if key in {"external_item_id", "place_name"}:
+        if key in {"external_item_id", "external_component_id", "place_name"}:
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{key} must not be empty")
             value = value.strip()
@@ -1769,6 +2045,7 @@ async def update_curation_item(
             "feature_id",
             "source_record_key",
             "external_item_id",
+            "external_component_id",
             "place_name",
             "address_hint",
             "sort_order",
@@ -1816,9 +2093,19 @@ async def update_curation_item(
         return None
 
     feature_id = normalized.get("feature_id", current.feature_id)
-    if "feature_id" in normalized or "external_item_id" in normalized:
+    if {
+        "feature_id",
+        "external_item_id",
+        "external_component_id",
+    } & normalized.keys():
         target_external_item_id = str(
             normalized.get("external_item_id", current.external_item_id)
+        )
+        target_external_component_id = str(
+            normalized.get(
+                "external_component_id",
+                current.external_component_id,
+            )
         )
         archived_identity_exists = (
             await session.execute(
@@ -1827,45 +2114,44 @@ async def update_curation_item(
                     "WHERE collection_id = CAST(:collection_id AS uuid) "
                     "AND curation_item_id <> CAST(:curation_item_id AS uuid) "
                     "AND external_item_id = :external_item_id "
-                    "AND feature_id IS NOT DISTINCT FROM CAST(:feature_id AS text) "
+                    "AND external_component_id = :external_component_id "
                     "AND archived_at IS NOT NULL"
                 ),
                 {
                     "collection_id": collection_id,
                     "curation_item_id": curation_item_id,
                     "external_item_id": target_external_item_id,
-                    "feature_id": feature_id,
+                    "external_component_id": target_external_component_id,
                 },
             )
         ).scalar_one_or_none()
         if archived_identity_exists is not None:
             raise ValueError("archive된 curation item identity는 재사용할 수 없습니다.")
 
-        opposite_exists = (
-            await session.execute(
-                text(
-                    "SELECT 1 FROM feature.curation_items "
-                    "WHERE collection_id = CAST(:collection_id AS uuid) "
-                    "AND curation_item_id <> CAST(:curation_item_id AS uuid) "
-                    "AND external_item_id = :external_item_id "
-                    "AND archived_at IS NULL "
-                    "AND ((CAST(:feature_id AS text) IS NULL "
-                    "AND feature_id IS NOT NULL) "
-                    "OR (CAST(:feature_id AS text) IS NOT NULL "
-                    "AND feature_id IS NULL))"
-                ),
-                {
-                    "collection_id": collection_id,
-                    "curation_item_id": curation_item_id,
-                    "external_item_id": target_external_item_id,
-                    "feature_id": feature_id,
-                },
-            )
-        ).scalar_one_or_none()
-        if opposite_exists is not None:
-            raise ValueError(
-                "같은 외부 항목 ID에 Feature 연결/미연결 항목을 함께 둘 수 없습니다."
-            )
+        if current.source_present and feature_id is not None:
+            duplicate_feature_exists = (
+                await session.execute(
+                    text(
+                        "SELECT 1 FROM feature.curation_items "
+                        "WHERE collection_id = CAST(:collection_id AS uuid) "
+                        "AND curation_item_id <> CAST(:curation_item_id AS uuid) "
+                        "AND external_item_id = :external_item_id "
+                        "AND feature_id = :feature_id "
+                        "AND source_present "
+                        "AND archived_at IS NULL"
+                    ),
+                    {
+                        "collection_id": collection_id,
+                        "curation_item_id": curation_item_id,
+                        "external_item_id": target_external_item_id,
+                        "feature_id": feature_id,
+                    },
+                )
+            ).scalar_one_or_none()
+            if duplicate_feature_exists is not None:
+                raise ValueError(
+                    "같은 외부 항목의 다른 component가 이미 이 Feature를 참조합니다."
+                )
     clauses: list[str] = []
     params: dict[str, Any] = {
         "collection_id": collection_id,
@@ -2218,6 +2504,7 @@ async def upsert_curation_theme(
 
     if not theme_slug.strip() or not theme_name.strip() or not theme_group.strip():
         raise ValueError("theme_slug, theme_name and theme_group are required")
+    await _lock_curation_write_boundary(session)
     params = {
         "theme_slug": theme_slug.strip(),
         "theme_name": theme_name.strip(),
@@ -2235,39 +2522,43 @@ async def upsert_curation_theme(
 def validate_resolved_curation_identities(
     rows: Sequence[ResolvedCurationImportRow],
 ) -> tuple[ResolvedCurationIdentityIssue, ...]:
-    """실제 Feature 해소 결과의 혼합·중복 item identity를 찾는다."""
+    """실제 Feature 해소 결과의 component·target identity 충돌을 찾는다."""
 
-    by_source_item: dict[tuple[str, str], list[ResolvedCurationImportRow]] = {}
-    by_membership: dict[tuple[str, str, str | None], list[ResolvedCurationImportRow]] = {}
+    by_component: dict[tuple[str, str, str], list[ResolvedCurationImportRow]] = {}
+    by_feature: dict[tuple[str, str, str], list[ResolvedCurationImportRow]] = {}
     for row in rows:
-        by_source_item.setdefault((row.collection_key, row.source_item_key), []).append(row)
-        by_membership.setdefault(
-            (row.collection_key, row.source_item_key, row.feature_id), []
+        by_component.setdefault(
+            (row.collection_key, row.source_item_key, row.source_component_key),
+            [],
         ).append(row)
+        if row.feature_id is not None:
+            by_feature.setdefault(
+                (row.collection_key, row.source_item_key, row.feature_id),
+                [],
+            ).append(row)
 
     issues: dict[tuple[int, str], ResolvedCurationIdentityIssue] = {}
-    for grouped_rows in by_source_item.values():
-        modes = {row.feature_id is None for row in grouped_rows}
-        if len(modes) > 1:
-            for row in grouped_rows:
-                issue = ResolvedCurationIdentityIssue(
-                    row_number=row.row_number,
-                    code="mixed_resolved_identity",
-                    message=(
-                        "Feature 해소 후 같은 source_item_key에 연결 항목과 "
-                        "미연결 항목이 함께 남습니다."
-                    ),
-                )
-                issues[(issue.row_number, issue.code)] = issue
-    for grouped_rows in by_membership.values():
+    for grouped_rows in by_component.values():
         if len(grouped_rows) > 1:
             for row in grouped_rows:
                 issue = ResolvedCurationIdentityIssue(
                     row_number=row.row_number,
-                    code="duplicate_resolved_identity",
+                    code="duplicate_component_identity",
                     message=(
-                        "Feature 해소 후 collection/source_item_key/feature_id "
-                        "membership이 중복됩니다."
+                        "Feature 해소 후 collection/source_item_key/"
+                        "source_component_key identity가 중복됩니다."
+                    ),
+                )
+                issues[(issue.row_number, issue.code)] = issue
+    for grouped_rows in by_feature.values():
+        if len(grouped_rows) > 1:
+            for row in grouped_rows:
+                issue = ResolvedCurationIdentityIssue(
+                    row_number=row.row_number,
+                    code="duplicate_resolved_feature",
+                    message=(
+                        "같은 collection/source_item_key의 component가 "
+                        "동일 Feature를 중복 참조합니다."
                     ),
                 )
                 issues[(issue.row_number, issue.code)] = issue
@@ -2282,6 +2573,32 @@ def _ensure_resolved_curation_identities(
     issues = validate_resolved_curation_identities(rows)
     if issues:
         raise ValueError(issues[0].message)
+
+
+async def _ensure_unambiguous_legacy_import_adoptions(
+    session: AsyncSession,
+    *,
+    payload: str,
+) -> None:
+    conflict = (
+        (
+            await session.execute(
+                text(_LEGACY_IMPORT_ADOPTION_CONFLICTS_SQL),
+                {"items": payload},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if conflict is not None:
+        raise ValueError(
+            "legacy component identity 승계 후보가 모호합니다: "
+            f"collection={conflict['collection_key']}, "
+            f"item={conflict['external_item_id']}, "
+            f"component={conflict['external_component_id']}, "
+            f"feature={conflict['feature_id']}, "
+            f"candidates={list(conflict['candidates'])!r}"
+        )
 
 
 async def preview_curation_import(
@@ -2299,6 +2616,7 @@ async def preview_curation_import(
             "collection_key": row.collection_key,
             "feature_id": row.feature_id,
             "external_item_id": row.source_item_key,
+            "external_component_id": row.source_component_key,
             "place_name": row.place_name,
             "address_hint": row.address_hint,
             "sort_order": row.sort_order,
@@ -2309,6 +2627,7 @@ async def preview_curation_import(
         for row in rows
     ]
     payload = json.dumps(values, ensure_ascii=False)
+    await _ensure_unambiguous_legacy_import_adoptions(session, payload=payload)
     counts = (
         (await session.execute(text(_PREVIEW_IMPORT_COUNTS_SQL), {"items": payload}))
         .mappings()
@@ -2340,11 +2659,9 @@ async def import_curation_rows(
     if rows:
         # 서로 다른 CSV가 theme/source/collection lock을 역순으로 잡는 deadlock과
         # 같은 collection의 authoritative replace 경합을 하나의 write 경계로 직렬화한다.
-        await session.execute(
-            text(
-                "SELECT pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0))"
-            )
-        )
+        await _lock_curation_write_boundary(session)
+        collection_keys = sorted({row.collection_key for row in rows})
+        await _lock_collection_keys(session, collection_keys)
         feature_ids = sorted(
             {str(row.feature_id) for row in rows if row.feature_id is not None}
         )
@@ -2369,6 +2686,30 @@ async def import_curation_rows(
                 raise ValueError(
                     "큐레이션 반영 중 Feature lifecycle이 변경되었습니다. 다시 preview하세요."
                 )
+        await session.execute(
+            text(
+                "SELECT collection_id FROM feature.curation_collections "
+                "WHERE collection_key = ANY(CAST(:collection_keys AS text[])) "
+                "ORDER BY collection_id FOR UPDATE"
+            ),
+            {"collection_keys": collection_keys},
+        )
+        legacy_adoption_payload = json.dumps(
+            [
+                {
+                    "collection_key": row.collection_key,
+                    "feature_id": row.feature_id,
+                    "external_item_id": row.source_item_key,
+                    "external_component_id": row.source_component_key,
+                }
+                for row in rows
+            ],
+            ensure_ascii=False,
+        )
+        await _ensure_unambiguous_legacy_import_adoptions(
+            session,
+            payload=legacy_adoption_payload,
+        )
 
     representatives: dict[str, ResolvedCurationImportRow] = {}
     for row in rows:
@@ -2416,6 +2757,7 @@ async def import_curation_rows(
                 "collection_key": row.collection_key,
                 "feature_id": row.feature_id,
                 "external_item_id": row.source_item_key,
+                "external_component_id": row.source_component_key,
                 "place_name": row.place_name,
                 "address_hint": row.address_hint,
                 "sort_order": row.sort_order,
@@ -2448,6 +2790,14 @@ async def import_curation_rows(
             .all()
         )
         removals = tuple(_item(row) for row in removed_rows)
+        adopted = int(
+            (
+                await session.execute(
+                    text(_ADOPT_LEGACY_IMPORT_IDENTITIES_SQL),
+                    {"items": items_payload, "actor": actor},
+                )
+            ).scalar_one()
+        )
         count_row = (
             (
                 await session.execute(
@@ -2463,7 +2813,7 @@ async def import_curation_rows(
         )
         counts = {
             "inserted": int(count_row["inserted"] or 0),
-            "updated": int(count_row["updated"] or 0),
+            "updated": adopted + int(count_row["updated"] or 0),
             "removed": len(removals),
         }
         if any(counts.values()):
