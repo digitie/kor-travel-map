@@ -194,8 +194,8 @@ def _lock_feature_update_identity_writers() -> None:
     raise AssertionError("unreachable identity lock retry state")
 
 
-def _fail_on_active_scope_ambiguity() -> None:
-    """active 중복은 임의 취소하지 않고 운영 정리를 요구한다."""
+def _fail_on_multiple_running_scope_ambiguity() -> None:
+    """동시에 실행 중인 동일 scope가 둘 이상이면 자동 종료하지 않는다."""
     effective_scope = _legacy_effective_scope_case(job_alias="job")
     rows = (
         op.get_bind()
@@ -206,22 +206,14 @@ def _fail_on_active_scope_ambiguity() -> None:
                   job.provider,
                   job.dataset_key,
                   {effective_scope} AS sync_scope,
-                  array_agg(job.job_id::text ORDER BY
-                    (job.status = 'running') DESC,
-                    request.created_at,
-                    job.job_id
-                  ) AS job_ids,
-                  array_agg(job.status ORDER BY
-                    (job.status = 'running') DESC,
-                    request.created_at,
-                    job.job_id
-                  ) AS statuses
+                  array_agg(job.job_id::text ORDER BY request.created_at, job.job_id)
+                    AS job_ids
                 FROM ops.import_jobs AS job
                 JOIN ops.feature_update_requests AS request
                   ON request.job_id = job.job_id
                 WHERE job.kind = 'feature_update_request'
                   AND job.quarantined_at IS NULL
-                  AND job.status IN ('queued', 'running')
+                  AND job.status = 'running'
                   AND request.scope_type = 'provider_dataset'
                 GROUP BY
                   job.provider,
@@ -243,14 +235,117 @@ def _fail_on_active_scope_ambiguity() -> None:
                 "dataset_key": row["dataset_key"],
                 "sync_scope": row["sync_scope"],
                 "job_ids": list(row["job_ids"]),
-                "statuses": list(row["statuses"]),
             }
             for row in rows
         ]
         raise RuntimeError(
-            "0053 cannot choose a winner for active or running feature update scope "
+            "0053 cannot choose a winner for multiple running feature update scope "
             f"duplicates; resolve the operations before migration: {details!r}"
         )
+
+
+def _fail_on_cancellation_marked_scope_ambiguity() -> None:
+    """취소 coordinator가 소유한 active 중복은 감사 상태를 건드리지 않는다."""
+    effective_scope = _legacy_effective_scope_case(job_alias="job")
+    rows = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                f"""
+                SELECT
+                  job.provider,
+                  job.dataset_key,
+                  {effective_scope} AS sync_scope,
+                  array_agg(job.job_id::text ORDER BY request.created_at, job.job_id)
+                    AS job_ids,
+                  array_agg(job.cancellation_id::text ORDER BY request.created_at, job.job_id)
+                    FILTER (WHERE job.cancellation_id IS NOT NULL)
+                    AS cancellation_ids
+                FROM ops.import_jobs AS job
+                JOIN ops.feature_update_requests AS request
+                  ON request.job_id = job.job_id
+                WHERE job.kind = 'feature_update_request'
+                  AND job.quarantined_at IS NULL
+                  AND job.status IN ('queued', 'running')
+                  AND request.scope_type = 'provider_dataset'
+                GROUP BY
+                  job.provider,
+                  job.dataset_key,
+                  {effective_scope}
+                HAVING COUNT(*) > 1
+                   AND bool_or(job.cancellation_id IS NOT NULL)
+                ORDER BY job.provider, job.dataset_key, sync_scope
+                LIMIT 20
+                """
+            )
+        )
+        .mappings()
+        .all()
+    )
+    if rows:
+        details = [
+            {
+                "provider": row["provider"],
+                "dataset_key": row["dataset_key"],
+                "sync_scope": row["sync_scope"],
+                "job_ids": list(row["job_ids"]),
+                "cancellation_ids": list(row["cancellation_ids"]),
+            }
+            for row in rows
+        ]
+        raise RuntimeError(
+            "0053 cannot reconcile cancellation-marked active feature update scope "
+            "duplicates; finish or recover pipeline cancellation before migration: "
+            f"{details!r}"
+        )
+
+
+def _cancel_superseded_queued_scope_duplicates() -> None:
+    """안전한 queued 중복은 post-migration dispatch 순서로 하나만 보존한다."""
+    effective_scope = _legacy_effective_scope_case(job_alias="job")
+    op.get_bind().execute(
+        sa.text(
+            f"""
+            WITH ranked AS MATERIALIZED (
+              SELECT
+                job.job_id,
+                first_value(job.job_id) OVER scope_order AS winner_job_id,
+                row_number() OVER scope_order AS scope_rank
+              FROM ops.import_jobs AS job
+              JOIN ops.feature_update_requests AS request
+                ON request.job_id = job.job_id
+              WHERE job.kind = 'feature_update_request'
+                AND job.quarantined_at IS NULL
+                AND job.cancellation_id IS NULL
+                AND job.status IN ('queued', 'running')
+                AND request.scope_type = 'provider_dataset'
+              WINDOW scope_order AS (
+                PARTITION BY job.provider, job.dataset_key, {effective_scope}
+                ORDER BY
+                  (job.status = 'running') DESC,
+                  (request.run_mode = 'now') DESC,
+                  request.priority DESC NULLS LAST,
+                  request.created_at,
+                  request.request_id,
+                  job.job_id
+              )
+            )
+            UPDATE ops.import_jobs AS job
+               SET status = 'cancelled',
+                   finished_at = COALESCE(job.finished_at, clock_timestamp()),
+                   error_message = concat_ws(
+                     '; ',
+                     NULLIF(job.error_message, ''),
+                     'migration 0053 superseded duplicate active scope; winner_job_id='
+                       || ranked.winner_job_id::text
+                   )
+              FROM ranked
+             WHERE job.job_id = ranked.job_id
+               AND ranked.scope_rank > 1
+               AND job.status = 'queued'
+            """
+        )
+    )
 
 
 def _fail_on_invalid_poi_external_systems() -> None:
@@ -440,7 +535,9 @@ def upgrade() -> None:
     _lock_feature_update_identity_writers()
     _fail_on_invalid_poi_external_systems()
     _fail_on_invalid_feature_scope_external_systems()
-    _fail_on_active_scope_ambiguity()
+    _fail_on_cancellation_marked_scope_ambiguity()
+    _fail_on_multiple_running_scope_ambiguity()
+    _cancel_superseded_queued_scope_duplicates()
     _upgrade_feature_scope_validator()
 
     op.add_column(
