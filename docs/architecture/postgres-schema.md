@@ -81,7 +81,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `feature_weather_values` | `weather_value_key` | UNIQUE (feature_id, provider, weather_domain, forecast_style, metric_key, issued_at, valid_at, observed_at) |
 | `feature_price_values` | `price_value_key` | feature_id FK; provider/price_domain/product_key/observed_at/value_number/unit; UNIQUE (feature_id,provider,price_domain,product_key,observed_at) |
 | `curation_collections` | `collection_id UUID` | UNIQUE collection_key; theme/source/title/edition/status/visibility; created_by/updated_by; 공식 회차·캠페인 묶음 |
-| `curation_items` | `curation_item_id UUID` | collection FK; nullable feature_id; external_item_id/place_name/address_hint/status/sort_order; created_by/updated_by; 공식 membership과 미연결 항목 모두 보존 |
+| `curation_items` | `curation_item_id UUID` | collection FK; nullable feature_id; external_item_id/place_name/address_hint/source_present/status/sort_order; created_by/updated_by; source 누락·재등장과 운영자 tombstone을 포함한 공식 membership 이력 보존 |
 
 0045 큐레이션 write는 다음 불변식을 지킨다.
 
@@ -90,8 +90,11 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 - 수동 item 추가·수정·보관은 parent collection row를 먼저 잠그고 collection의
   `updated_by`/`updated_at`도 함께 갱신한다.
 - CSV authoritative replace는 transaction advisory lock으로 직렬화한 뒤 대상 collection을
-  UUID 순서로 `FOR UPDATE`한다. dry-run은 쓰기 없이 삭제 예정 item까지 계산하며, 동일 CSV를
-  다시 반영하면 모든 변경 수가 0이고 관련 `updated_at`도 바뀌지 않는다.
+  UUID 순서로 `FOR UPDATE`한다. source에서 빠진 item은 삭제 대신 `source_present=false`로
+  보존하고, 재등장 시 제공자 파생 필드만 갱신해 운영자 `status`·relation·reuse override를
+  유지한다. 운영자가 보관한 exact identity tombstone은 자동 재생성하지 않는다. dry-run은
+  쓰기 없이 source 누락 예정 item까지 계산하며, 동일 CSV를 다시 반영하면 모든 변경 수가
+  0이고 관련 `updated_at`도 바뀌지 않는다.
 - 0045 downgrade는 구 flat overlay로 재구성할 수 없는 신규·수정 데이터나 감사값이 있으면
   `P0001`로 중단한다. export 또는 명시적 정리 없이 풍부한 데이터를 삭제하지 않는다.
 - 0044 downgrade는 연결된 source entity에 immutable record가 둘 이상이면 구 record별
@@ -159,9 +162,9 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 |--------|------|------|
 | `idx_curation_collections_theme_status_edition` | (theme_id, status, edition_key, collection_id) | 테마·공개 회차 목록 |
 | `idx_curation_collections_source_status` | (source_id, status, collection_id) | 출처별 collection 목록 |
-| `uq_curation_items_active_identity` | UNIQUE (collection_id, external_item_id, feature_id) NULLS NOT DISTINCT | active membership 및 미연결 공식 항목 중복 방지 |
-| `idx_curation_items_collection_status_order` | (collection_id, status, sort_order, curation_item_id) | collection 상세 정렬 |
-| `idx_curation_items_feature_status_collection` | (feature_id, status, collection_id) | Feature별 모든 큐레이션 조회 |
+| `uq_curation_items_identity` | UNIQUE (collection_id, external_item_id, feature_id) NULLS NOT DISTINCT | active·source 누락·archived tombstone을 통틀어 exact identity 1행 강제 |
+| `idx_curation_items_collection_status_order` | (collection_id, source_present, status, sort_order, curation_item_id) | source에 존재하는 collection 상세 정렬 |
+| `idx_curation_items_feature_status_collection` | (feature_id, source_present, status, collection_id) | source에 존재하는 Feature별 큐레이션 조회 |
 
 collection 목록 API는 `updated_at DESC, collection_id DESC` keyset cursor를 사용하고
 `page_size`를 최대 500으로 제한한다. Feature group 목록은 먼저 `feature_id` key를 page한 뒤
@@ -278,7 +281,7 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `curation_items` | `ck_curation_items_sort_order` | ≥ 0 |
 | `curation_items` | `ck_curation_items_relation` | primary_stop/food_stop/cafe_stop/bookstore_stop/nearby_option/accessibility_support/pet_support/family_support/theme_area_anchor |
 | `curation_items` | `ck_curation_items_reuse_policy` | allowed/blocked/manual_review |
-| `curation_items` | `uq_curation_items_active_identity` | active `(collection_id, external_item_id, feature_id)` 중복 금지, NULL도 동일값 취급 |
+| `curation_items` | `uq_curation_items_identity` | `(collection_id, external_item_id, feature_id)` exact identity 중복 금지, archived와 NULL도 동일값 취급 |
 | `feature_files` | `ck_feature_files_file_type` | image/video/audio/document/file |
 | `feature_files` | `ck_feature_files_display_order` | ≥ 0 |
 | `feature_files` | `ck_feature_files_byte_size` | NULL or ≥ 0 |

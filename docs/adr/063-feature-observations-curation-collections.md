@@ -182,3 +182,16 @@ collection actor 또는 legacy `selected_by`와 일치하지 않는 item actor�
 immutable entity/record 분리와 collection/item 결정은 유지한다. provider×dataset identity를 각
 entity/record에 문자열로 반복하던 부분은 ADR-069의 DB-owned `provider_datasets` FK로 정규화하고,
 record는 부모 entity의 identity를 중복 저장하지 않는다. curation lifecycle은 이 개정의 범위 밖이다.
+
+## 개정 (2026-07-27, T-VN-H13b)
+
+authoritative source 누락과 operator archive를 분리한다. CSV에서 빠진 item은 삭제하지 않고
+`source_present=false`로 보존하며 재등장 때 제공자 파생 필드만 갱신한다.
+`status`·`curation_relation`·`reuse_policy`와 archived tombstone은 operator-owned 상태다.
+`collection_id + external_item_id + feature_id` exact identity는 archived/NULL까지 포함한 DB unique로
+한 행만 허용해 tombstone과 공개 active row의 공존을 원천 차단한다.
+
+전환기 `curated_features` trigger도 물리 DELETE/INSERT 대신 같은 보존 규칙을 따른다.
+Feature merge는 source presence를 OR하고 provider 필드와 최신 operator override를 명시적으로
+reconcile하며 tombstone을 최우선한다. `source_present=false`는 구 스키마가 표현할 수 없으므로
+0065 downgrade는 해당 행이 있으면 `P0001`로 중단한다.

@@ -131,17 +131,95 @@ DELETE FROM provider_sync.source_links WHERE feature_id = :loser
 RETURNING source_entity_key
 """
 
-# 한 collection 안에서 동일 official item이 master에도 이미 연결된 경우 먼저
-# loser 중복만 제거한다. 나머지 항목(다른 edition/subcourse)은 전부 master로 이동한다.
-_DROP_DUPLICATE_CURATION_ITEMS_SQL: Final[str] = """
+# 한 collection 안의 동일 official item을 Feature merge할 때 durable source/tombstone과
+# operator override를 잃지 않는다. provider 파생 필드는 source-present row(동률이면 최신),
+# operator 필드는 최신 updated_at row가 이기며, 어느 한쪽이라도 tombstone이면 tombstone이
+# 최우선이다. master UUID를 survivor로 유지한 뒤 loser duplicate만 제거한다.
+_MERGE_DUPLICATE_CURATION_ITEMS_SQL: Final[str] = """
+WITH pairs AS MATERIALIZED (
+    SELECT
+        master_item.curation_item_id AS master_item_id,
+        loser_item.curation_item_id AS loser_item_id,
+        (
+            (loser_item.source_present AND NOT master_item.source_present)
+            OR (
+                loser_item.source_present = master_item.source_present
+                AND loser_item.updated_at > master_item.updated_at
+            )
+        ) AS loser_provider_wins,
+        loser_item.updated_at > master_item.updated_at AS loser_override_wins,
+        master_item.archived_at IS NOT NULL
+            OR loser_item.archived_at IS NOT NULL AS tombstone_wins
+    FROM feature.curation_items AS loser_item
+    JOIN feature.curation_items AS master_item
+      ON master_item.feature_id = :master
+     AND loser_item.collection_id = master_item.collection_id
+     AND loser_item.external_item_id = master_item.external_item_id
+    WHERE loser_item.feature_id = :loser
+    FOR UPDATE OF master_item, loser_item
+), reconciled AS (
+    UPDATE feature.curation_items AS survivor
+    SET source_record_key = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.source_record_key
+            ELSE survivor.source_record_key
+        END,
+        place_name = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.place_name
+            ELSE survivor.place_name
+        END,
+        address_hint = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.address_hint
+            ELSE survivor.address_hint
+        END,
+        source_present = survivor.source_present OR loser_item.source_present,
+        status = CASE
+            WHEN pairs.tombstone_wins THEN 'archived'
+            WHEN pairs.loser_override_wins THEN loser_item.status
+            ELSE survivor.status
+        END,
+        sort_order = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.sort_order
+            ELSE survivor.sort_order
+        END,
+        item_title = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.item_title
+            ELSE survivor.item_title
+        END,
+        item_summary = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.item_summary
+            ELSE survivor.item_summary
+        END,
+        curation_relation = CASE
+            WHEN pairs.loser_override_wins THEN loser_item.curation_relation
+            ELSE survivor.curation_relation
+        END,
+        reuse_policy = CASE
+            WHEN pairs.loser_override_wins THEN loser_item.reuse_policy
+            ELSE survivor.reuse_policy
+        END,
+        metadata = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.metadata
+            ELSE survivor.metadata
+        END,
+        updated_by = CASE
+            WHEN pairs.loser_override_wins THEN loser_item.updated_by
+            ELSE survivor.updated_by
+        END,
+        updated_at = now(),
+        archived_at = CASE
+            WHEN pairs.tombstone_wins
+            THEN GREATEST(survivor.archived_at, loser_item.archived_at)
+            ELSE NULL
+        END
+    FROM pairs
+    JOIN feature.curation_items AS loser_item
+      ON loser_item.curation_item_id = pairs.loser_item_id
+    WHERE survivor.curation_item_id = pairs.master_item_id
+    RETURNING pairs.loser_item_id
+)
 DELETE FROM feature.curation_items AS loser_item
-USING feature.curation_items AS master_item
-WHERE loser_item.feature_id = :loser
-  AND master_item.feature_id = :master
-  AND loser_item.collection_id = master_item.collection_id
-  AND loser_item.external_item_id = master_item.external_item_id
-  AND loser_item.archived_at IS NULL
-  AND master_item.archived_at IS NULL
+USING reconciled
+WHERE loser_item.curation_item_id = reconciled.loser_item_id
 RETURNING loser_item.curation_item_id
 """
 
@@ -304,7 +382,7 @@ async def apply_feature_merge(
         (await session.execute(text(_DROP_LEFTOVER_LINKS_SQL), {"loser": loser_id})).fetchall()
     )
     await session.execute(
-        text(_DROP_DUPLICATE_CURATION_ITEMS_SQL),
+        text(_MERGE_DUPLICATE_CURATION_ITEMS_SQL),
         {"master": master_id, "loser": loser_id},
     )
     await session.execute(

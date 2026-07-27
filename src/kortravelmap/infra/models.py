@@ -1184,12 +1184,11 @@ class CurationItemRow(Base):
             name="metadata",
         ),
         Index(
-            "uq_curation_items_active_identity",
+            "uq_curation_items_identity",
             "collection_id",
             "external_item_id",
             "feature_id",
             unique=True,
-            postgresql_where=text("archived_at IS NULL"),
             postgresql_nulls_not_distinct=True,
         ),
         Index(

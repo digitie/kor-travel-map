@@ -639,7 +639,7 @@ WITH written AS (
     )
     ON CONFLICT (
         collection_id, external_item_id, feature_id
-    ) WHERE archived_at IS NULL
+    )
     DO UPDATE SET
         source_record_key = COALESCE(
             EXCLUDED.source_record_key,
@@ -784,7 +784,7 @@ WITH incoming AS (
     )
     ON CONFLICT (
         collection_id, external_item_id, feature_id
-    ) WHERE archived_at IS NULL
+    )
     -- status/curation_relation/reuse_policy는 CSV에 없는 하드코딩 default이며
     -- 운영자가 admin PATCH로 조정하는 override 필드다. authoritative 재적재가 이를
     -- 무조건 EXCLUDED default로 되돌리면 수동 큐레이션이 리셋되므로(#699), CONFLICT
@@ -1678,8 +1678,9 @@ async def update_curation_item(
         session,
         collection_id=collection_id,
         curation_item_id=curation_item_id,
+        include_archived=True,
     )
-    if current is None:
+    if current is None or current.archived_at is not None:
         return None
 
     allowed = {
@@ -1722,6 +1723,9 @@ async def update_curation_item(
             value = json.dumps(dict(value))
         normalized[key] = value
 
+    if not normalized:
+        return current
+
     feature_id = normalized.get("feature_id", current.feature_id)
     if "feature_id" in normalized and feature_id is not None:
         exists = (
@@ -1737,33 +1741,56 @@ async def update_curation_item(
         if exists is None:
             raise ValueError("feature_id에 해당하는 Feature가 없습니다.")
 
-    target_external_item_id = str(normalized.get("external_item_id", current.external_item_id))
-    opposite_exists = (
-        await session.execute(
-            text(
-                "SELECT 1 FROM feature.curation_items "
-                "WHERE collection_id = CAST(:collection_id AS uuid) "
-                "AND curation_item_id <> CAST(:curation_item_id AS uuid) "
-                "AND external_item_id = :external_item_id "
-                "AND archived_at IS NULL "
-                "AND ((CAST(:feature_id AS text) IS NULL "
-                "AND feature_id IS NOT NULL) "
-                "OR (CAST(:feature_id AS text) IS NOT NULL "
-                "AND feature_id IS NULL))"
-            ),
-            {
-                "collection_id": collection_id,
-                "curation_item_id": curation_item_id,
-                "external_item_id": target_external_item_id,
-                "feature_id": feature_id,
-            },
+    if "feature_id" in normalized or "external_item_id" in normalized:
+        target_external_item_id = str(
+            normalized.get("external_item_id", current.external_item_id)
         )
-    ).scalar_one_or_none()
-    if opposite_exists is not None:
-        raise ValueError("같은 외부 항목 ID에 Feature 연결/미연결 항목을 함께 둘 수 없습니다.")
+        archived_identity_exists = (
+            await session.execute(
+                text(
+                    "SELECT 1 FROM feature.curation_items "
+                    "WHERE collection_id = CAST(:collection_id AS uuid) "
+                    "AND curation_item_id <> CAST(:curation_item_id AS uuid) "
+                    "AND external_item_id = :external_item_id "
+                    "AND feature_id IS NOT DISTINCT FROM CAST(:feature_id AS text) "
+                    "AND archived_at IS NOT NULL"
+                ),
+                {
+                    "collection_id": collection_id,
+                    "curation_item_id": curation_item_id,
+                    "external_item_id": target_external_item_id,
+                    "feature_id": feature_id,
+                },
+            )
+        ).scalar_one_or_none()
+        if archived_identity_exists is not None:
+            raise ValueError("archive된 curation item identity는 재사용할 수 없습니다.")
 
-    if not normalized:
-        return current
+        opposite_exists = (
+            await session.execute(
+                text(
+                    "SELECT 1 FROM feature.curation_items "
+                    "WHERE collection_id = CAST(:collection_id AS uuid) "
+                    "AND curation_item_id <> CAST(:curation_item_id AS uuid) "
+                    "AND external_item_id = :external_item_id "
+                    "AND archived_at IS NULL "
+                    "AND ((CAST(:feature_id AS text) IS NULL "
+                    "AND feature_id IS NOT NULL) "
+                    "OR (CAST(:feature_id AS text) IS NOT NULL "
+                    "AND feature_id IS NULL))"
+                ),
+                {
+                    "collection_id": collection_id,
+                    "curation_item_id": curation_item_id,
+                    "external_item_id": target_external_item_id,
+                    "feature_id": feature_id,
+                },
+            )
+        ).scalar_one_or_none()
+        if opposite_exists is not None:
+            raise ValueError(
+                "같은 외부 항목 ID에 Feature 연결/미연결 항목을 함께 둘 수 없습니다."
+            )
     clauses: list[str] = []
     params: dict[str, Any] = {
         "collection_id": collection_id,

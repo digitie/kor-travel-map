@@ -972,6 +972,9 @@ export function CurationCollectionsClient() {
                               <Badge variant={statusVariant(item.status)}>
                                 {item.status}
                               </Badge>
+                              {item.source_present ? null : (
+                                <Badge variant="outline">원천 누락</Badge>
+                              )}
                               <span className="text-xs text-text-secondary">
                                 {item.curation_relation}
                               </span>

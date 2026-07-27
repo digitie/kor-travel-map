@@ -388,6 +388,117 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
         assert override[3] == "op-1"
 
 
+@pytest.mark.parametrize(
+    ("master_present", "loser_present", "expected_place"),
+    [
+        (False, True, "loser provider"),
+        (True, False, "master provider"),
+    ],
+)
+async def test_merge_reconciles_source_presence_and_latest_operator_override(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+    master_present: bool,
+    loser_present: bool,
+    expected_place: str,
+) -> None:
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        await session.execute(
+            text(
+                """
+                UPDATE feature.curation_items
+                SET source_present = :master_present,
+                    place_name = 'master provider',
+                    status = 'included',
+                    curation_relation = 'nearby_option',
+                    reuse_policy = 'manual_review',
+                    updated_at = now() - interval '2 hours'
+                WHERE feature_id = 'f_master'
+                  AND external_item_id = 'shared'
+                """
+            ),
+            {"master_present": master_present},
+        )
+        await session.execute(
+            text(
+                """
+                UPDATE feature.curation_items
+                SET source_present = :loser_present,
+                    place_name = 'loser provider',
+                    status = 'rejected',
+                    curation_relation = 'primary_stop',
+                    reuse_policy = 'blocked',
+                    updated_by = 'latest-operator',
+                    updated_at = now() - interval '1 hour'
+                WHERE feature_id = 'f_loser'
+                  AND external_item_id = 'shared'
+                """
+            ),
+            {"loser_present": loser_present},
+        )
+        await merge_from_review(session, seeded, merged_by="merge-operator")
+
+    async with AsyncSession(migrated_engine) as session:
+        survivor = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                        feature_id, source_present, place_name, status,
+                        curation_relation, reuse_policy, updated_by
+                    FROM feature.curation_items
+                    WHERE feature_id = 'f_master'
+                      AND external_item_id = 'shared'
+                    """
+                )
+            )
+        ).one()
+    assert survivor == (
+        "f_master",
+        True,
+        expected_place,
+        "rejected",
+        "primary_stop",
+        "blocked",
+        "latest-operator",
+    )
+
+
+async def test_merge_tombstone_wins_over_visible_duplicate(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        await session.execute(
+            text(
+                """
+                UPDATE feature.curation_items
+                SET status = 'archived',
+                    archived_at = now(),
+                    updated_by = 'archive-operator',
+                    updated_at = now()
+                WHERE feature_id = 'f_loser'
+                  AND external_item_id = 'shared'
+                """
+            )
+        )
+        await merge_from_review(session, seeded, merged_by="merge-operator")
+
+    async with AsyncSession(migrated_engine) as session:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT feature_id, status, archived_at IS NOT NULL
+                    FROM feature.curation_items
+                    WHERE external_item_id = 'shared'
+                    """
+                )
+            )
+        ).all()
+    assert rows == [("f_master", "archived", True)]
+
+
 async def test_merge_from_review_unknown_key_raises(
     seeded: str, migrated_engine: AsyncEngine
 ) -> None:

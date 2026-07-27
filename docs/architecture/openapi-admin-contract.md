@@ -1613,13 +1613,16 @@ npm run build
 npm run doctor
 ```
 
-아직 `doctor` script가 없다면 첫 frontend PR에서 repo 표준 script를 추가한다.
-`react-doctor.config.json`은 저장소 루트 설정을 사용한다.
+`doctor` script의 정본 명령은
+`react-doctor --scope full --no-score --no-telemetry --no-respect-inline-disables --blocking warning .`이며,
+정본 설정은 frontend root의 `doctor.config.json` 하나다.
+`scripts/verify-react-doctor-config.mjs`는 명령과 설정 전체를 exact 비교하고 저장소/frontend
+root의 shadow config, package manifest 안의 별도 설정, lint/format ignore 파일을 거부한다.
 
 완료 기준:
 
 - React Doctor 결과를 읽고 실제 위험 항목을 개선한다.
-- 의도적으로 무시하는 항목은 PR 설명 또는 `docs/journal.md`에 근거를 남긴다.
+- 의도적으로 제외하는 진단은 정본 `doctor.config.json`에 최소 범위와 근거를 남긴다.
 - React Doctor를 실행하지 못했으면 사유와 대체 검증을 기록한다.
 - 단순 실행만 하고 결과를 방치하지 않는다. "실행 후 검토 및 개선"이 필수다.
 

@@ -759,6 +759,13 @@ async def test_update_item_rejects_missing_feature_and_opposite_identity(
         await _update_item_with_current(
             monkeypatch,
             updates={"feature_id": None},
+            results=(_FakeResult(scalar=None), _FakeResult(scalar=1)),
+        )
+
+    with pytest.raises(ValueError, match="identity는 재사용"):
+        await _update_item_with_current(
+            monkeypatch,
+            updates={"external_item_id": "archived"},
             results=(_FakeResult(scalar=1),),
         )
 
@@ -800,6 +807,7 @@ async def test_update_item_noop_update_miss_and_full_success(
     success = _FakeSession(
         _FakeResult(scalar=1),
         _FakeResult(scalar=None),
+        _FakeResult(scalar=None),
         _FakeResult(first=(_CURATION_ITEM_ID,)),
     )
     updated = await repo.update_curation_item(
@@ -823,13 +831,46 @@ async def test_update_item_noop_update_miss_and_full_success(
         actor="admin",
     )
     assert updated == final_item
-    sql, params = success.calls[2]
+    sql, params = success.calls[3]
     assert "archived_at = now()" in sql
     assert params["external_item_id"] == "changed"
     assert params["place_name"] == "변경 장소"
     assert params["address_hint"] == "부산"
     assert json.loads(params["metadata"]) == {"changed": True}
     touch.assert_awaited_once()
+
+
+async def test_update_item_allows_source_absent_but_rejects_archived_current(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(repo, "_lock_collection", AsyncMock(return_value=True))
+    source_absent = _item(source_present=False)
+    archived = _item(status="archived", archived_at=_NOW)
+    get_item = AsyncMock(side_effect=[source_absent, archived, archived])
+    monkeypatch.setattr(repo, "get_curation_item", get_item)
+    touch = AsyncMock()
+    monkeypatch.setattr(repo, "_touch_collection", touch)
+
+    session = _FakeSession(_FakeResult(first=(_CURATION_ITEM_ID,)))
+    result = await repo.update_curation_item(
+        session,
+        collection_id=_COLLECTION_ID,
+        curation_item_id=_CURATION_ITEM_ID,
+        updates={"status": "archived"},
+    )
+    assert result == archived
+    assert get_item.await_args_list[0].kwargs["include_archived"] is True
+    touch.assert_awaited_once()
+
+    assert (
+        await repo.update_curation_item(
+            _FakeSession(),
+            collection_id=_COLLECTION_ID,
+            curation_item_id=_CURATION_ITEM_ID,
+            updates={"status": "included"},
+        )
+        is None
+    )
 
 
 async def test_archive_item_delegates(monkeypatch: pytest.MonkeyPatch) -> None:

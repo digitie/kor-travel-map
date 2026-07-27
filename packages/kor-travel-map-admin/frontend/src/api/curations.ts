@@ -87,6 +87,7 @@ export interface CurationItem {
   external_item_id: string;
   place_name: string;
   address_hint: string | null;
+  source_present: boolean;
   status: CurationItemStatus;
   sort_order: number;
   item_title: string | null;

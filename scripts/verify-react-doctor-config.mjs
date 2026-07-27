@@ -11,6 +11,8 @@ const FRONTEND_PACKAGE_PATH = new URL(
   "package.json",
   FRONTEND_ROOT,
 );
+const ROOT_GITATTRIBUTES_PATH = new URL(".gitattributes", REPOSITORY_ROOT);
+const FRONTEND_GITIGNORE_PATH = new URL(".gitignore", FRONTEND_ROOT);
 const CONFIG_FILENAMES = [
   "doctor.config.ts",
   "doctor.config.mts",
@@ -26,6 +28,8 @@ const SUPPRESSION_FILENAMES = [
   ".oxlintignore",
   ".eslintignore",
   ".prettierignore",
+  "knip.json",
+  "knip.jsonc",
 ];
 const EXPECTED_DOCTOR_COMMAND =
   "react-doctor --scope full --no-score --no-telemetry --no-respect-inline-disables --blocking warning .";
@@ -58,12 +62,78 @@ const EXPECTED_CONFIG = {
     ],
   },
 };
+const EXPECTED_ROOT_GITATTRIBUTES = `* text=auto eol=lf
 
-const [config, rootPackage, frontendPackage] = await Promise.all(
-  [CONFIG_PATH, ROOT_PACKAGE_PATH, FRONTEND_PACKAGE_PATH].map(async (path) =>
+# Binary
+*.docx binary
+*.xlsx binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.sqlite binary
+*.db binary
+
+# Force LF for shell/sql
+*.sh text eol=lf
+*.sql text eol=lf
+*.py text eol=lf
+`;
+const EXPECTED_FRONTEND_GITIGNORE = `node_modules/
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+
+# tsc --noEmit incremental build cache (CI gate, PR#93)
+*.tsbuildinfo
+
+# editor
+.vscode/
+.idea/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# typegen drift snapshot
+src/api/types.ts.bak
+
+# turbo / build cache
+.turbo/
+
+# playwright e2e (#117)
+test-results/
+playwright-report/
+playwright/.cache/
+blob-report/
+`;
+
+const [
+  config,
+  rootPackage,
+  frontendPackage,
+  rootGitattributes,
+  frontendGitignore,
+] = await Promise.all([
+  ...[CONFIG_PATH, ROOT_PACKAGE_PATH, FRONTEND_PACKAGE_PATH].map(async (path) =>
     JSON.parse(await readFile(path, "utf8")),
   ),
-);
+  readFile(ROOT_GITATTRIBUTES_PATH, "utf8"),
+  readFile(FRONTEND_GITIGNORE_PATH, "utf8"),
+]);
 
 const forbiddenPaths = [
   ...CONFIG_FILENAMES.map((name) => new URL(name, REPOSITORY_ROOT)),
@@ -74,6 +144,7 @@ const forbiddenPaths = [
     new URL(name, REPOSITORY_ROOT),
     new URL(name, FRONTEND_ROOT),
   ]),
+  new URL(".gitattributes", FRONTEND_ROOT),
 ];
 const existingForbiddenPaths = [];
 for (const path of forbiddenPaths) {
@@ -102,8 +173,25 @@ if (JSON.stringify(config) !== JSON.stringify(EXPECTED_CONFIG)) {
   process.exit(1);
 }
 
-if (rootPackage.reactDoctor !== undefined || frontendPackage.reactDoctor !== undefined) {
-  console.error("package.json#reactDoctor 설정은 canonical config를 가릴 수 없습니다.");
+if (
+  rootPackage.reactDoctor !== undefined ||
+  frontendPackage.reactDoctor !== undefined ||
+  rootPackage.knip !== undefined ||
+  frontendPackage.knip !== undefined
+) {
+  console.error(
+    "package.json#reactDoctor/knip 설정은 canonical 분석 범위를 가릴 수 없습니다.",
+  );
+  process.exit(1);
+}
+
+if (
+  rootGitattributes !== EXPECTED_ROOT_GITATTRIBUTES ||
+  frontendGitignore !== EXPECTED_FRONTEND_GITIGNORE
+) {
+  console.error(
+    "React Doctor가 읽는 .gitattributes/.gitignore는 검증된 exact 내용이어야 합니다.",
+  );
   process.exit(1);
 }
 

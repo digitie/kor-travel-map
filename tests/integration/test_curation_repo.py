@@ -31,6 +31,7 @@ from kortravelmap.infra.curation_repo import (
     get_feature_curation_group,
     import_curation_rows,
     list_curation_collections,
+    list_curation_items_by_feature_ids,
     list_feature_curation_groups,
     preview_curation_import,
     resolve_feature_matches,
@@ -657,6 +658,303 @@ async def test_authoritative_reimport_preserves_operator_curation_overrides(
     )
     assert tombstone is not None
     assert tombstone.status == "archived"
+
+
+async def test_source_absent_included_item_is_hidden_and_can_be_archived(
+    migrated_session: AsyncSession,
+) -> None:
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, marker_icon, marker_color
+            ) VALUES (
+                'feature:source-absent', 'place', '원천 누락 장소',
+                '01070100', 'place', 'P-01'
+            )
+            """
+        )
+    )
+    common = {
+        "collection_key": "source-absent:2026",
+        "theme_slug": "source-absent",
+        "theme_name": "원천 누락 테스트",
+        "theme_group": "test",
+        "title": "원천 누락 테스트",
+        "edition_key": "2026",
+        "provider": "source-absent-provider",
+        "dataset_key": "source-absent-dataset",
+        "source_name": "원천 누락 출처",
+        "source_url": None,
+        "item_title": None,
+        "item_summary": None,
+        "address_hint": None,
+    }
+    present_row = ResolvedCurationImportRow(
+        row_number=2,
+        source_item_key="source-absent-a",
+        feature_id="feature:source-absent",
+        sort_order=1,
+        metadata={},
+        place_name="원천 누락 장소",
+        **common,
+    )
+    sibling_row = ResolvedCurationImportRow(
+        row_number=3,
+        source_item_key="source-absent-b",
+        feature_id=None,
+        sort_order=2,
+        metadata={},
+        place_name="남은 장소",
+        **common,
+    )
+    await import_curation_rows(
+        migrated_session,
+        rows=[present_row, sibling_row],
+        actor="importer",
+    )
+    identity = (
+        await migrated_session.execute(
+            text(
+                "SELECT i.collection_id::text, i.curation_item_id::text "
+                "FROM feature.curation_items AS i "
+                "JOIN feature.curation_collections AS c "
+                "ON c.collection_id = i.collection_id "
+                "WHERE c.collection_key = 'source-absent:2026' "
+                "AND i.external_item_id = 'source-absent-a'"
+            )
+        )
+    ).one()
+
+    omitted = await import_curation_rows(
+        migrated_session,
+        rows=[sibling_row],
+        actor="importer",
+    )
+    assert omitted["removed"] == 1
+    public_collection = await get_curation_collection(
+        migrated_session,
+        collection_id=identity[0],
+        public_only=True,
+    )
+    assert public_collection is not None
+    assert [item.external_item_id for item in public_collection[1]] == [
+        "source-absent-b"
+    ]
+    assert await get_feature_curation_group(
+        migrated_session,
+        feature_id="feature:source-absent",
+        public_only=True,
+    ) is None
+    assert await list_curation_items_by_feature_ids(
+        migrated_session,
+        feature_ids=["feature:source-absent"],
+        public_only=True,
+    ) == {}
+    groups, cursor = await list_feature_curation_groups(
+        migrated_session,
+        public_only=True,
+        page_size=100,
+    )
+    assert all(group.feature_id != "feature:source-absent" for group in groups)
+    assert cursor is None
+
+    archived = await archive_curation_item(
+        migrated_session,
+        collection_id=identity[0],
+        curation_item_id=identity[1],
+        actor="operator",
+    )
+    assert archived is not None
+    assert archived.source_present is False
+    assert archived.status == "archived"
+    replay = await import_curation_rows(
+        migrated_session,
+        rows=[present_row, sibling_row],
+        actor="importer",
+    )
+    assert replay["inserted"] == 0
+    assert replay["updated"] == 0
+    assert (
+        await get_curation_item(
+            migrated_session,
+            collection_id=identity[0],
+            curation_item_id=identity[1],
+            include_archived=True,
+        )
+    ) == archived
+
+
+async def test_item_identity_patch_cannot_cross_resolved_or_unresolved_tombstone(
+    migrated_session: AsyncSession,
+) -> None:
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    collection = await create_curation_collection(
+        migrated_session,
+        collection_key="patch-tombstone:2026",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="PATCH tombstone 테스트",
+    )
+    resolved_tombstone, _ = await add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=_FEATURE_ID,
+        external_item_id="resolved-tombstone",
+    )
+    await archive_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        curation_item_id=resolved_tombstone.curation_item_id,
+    )
+    resolved_active, _ = await add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=_FEATURE_ID,
+        external_item_id="resolved-active",
+    )
+    with pytest.raises(ValueError, match="identity는 재사용"):
+        await update_curation_item(
+            migrated_session,
+            collection_id=collection.collection_id,
+            curation_item_id=resolved_active.curation_item_id,
+            updates={"external_item_id": "resolved-tombstone"},
+        )
+
+    unresolved_tombstone, _ = await add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=None,
+        external_item_id="unresolved-tombstone",
+        place_name="미연결 tombstone",
+    )
+    await archive_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        curation_item_id=unresolved_tombstone.curation_item_id,
+    )
+    unresolved_active, _ = await add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=None,
+        external_item_id="unresolved-active",
+        place_name="미연결 active",
+    )
+    with pytest.raises(ValueError, match="identity는 재사용"):
+        await update_curation_item(
+            migrated_session,
+            collection_id=collection.collection_id,
+            curation_item_id=unresolved_active.curation_item_id,
+            updates={"external_item_id": "unresolved-tombstone", "feature_id": None},
+        )
+
+
+async def test_legacy_writer_preserves_operator_override_and_tombstone(
+    migrated_session: AsyncSession,
+) -> None:
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    legacy_id = str(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_features (
+                        theme_id, feature_id, source_id, curation_status,
+                        selection_origin, display_title, display_summary,
+                        curation_relation, reuse_policy
+                    ) VALUES (
+                        CAST(:theme_id AS uuid), :feature_id,
+                        CAST(:source_id AS uuid), 'curated', 'source_rule',
+                        'legacy trigger', 'provider summary',
+                        'nearby_option', 'manual_review'
+                    )
+                    RETURNING curated_feature_id::text
+                    """
+                ),
+                {
+                    "theme_id": theme_id,
+                    "source_id": source_id,
+                    "feature_id": _FEATURE_ID,
+                },
+            )
+        ).scalar_one()
+    )
+    legacy_item = (
+        await migrated_session.execute(
+            text(
+                "SELECT collection_id::text, curation_item_id::text "
+                "FROM feature.curation_items "
+                "WHERE curation_item_id = CAST(:legacy_id AS uuid)"
+            ),
+            {"legacy_id": legacy_id},
+        )
+    ).one()
+    await update_curation_item(
+        migrated_session,
+        collection_id=legacy_item[0],
+        curation_item_id=legacy_item[1],
+        updates={
+            "status": "rejected",
+            "curation_relation": "primary_stop",
+            "reuse_policy": "blocked",
+        },
+        actor="operator",
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.curated_features "
+            "SET display_summary = 'provider changed', rank_score = 42, "
+            "curation_relation = 'food_stop', reuse_policy = 'allowed', "
+            "updated_at = clock_timestamp() "
+            "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
+        ),
+        {"legacy_id": legacy_id},
+    )
+    preserved = await get_curation_item(
+        migrated_session,
+        collection_id=legacy_item[0],
+        curation_item_id=legacy_item[1],
+    )
+    assert preserved is not None
+    assert preserved.source_present is True
+    assert preserved.status == "rejected"
+    assert preserved.curation_relation == "primary_stop"
+    assert preserved.reuse_policy == "blocked"
+    assert preserved.item_summary == "provider changed"
+    assert preserved.sort_order == 42
+
+    archived = await archive_curation_item(
+        migrated_session,
+        collection_id=legacy_item[0],
+        curation_item_id=legacy_item[1],
+        actor="operator",
+    )
+    assert archived is not None
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.curated_features "
+            "SET display_summary = 'must not resurrect', "
+            "updated_at = clock_timestamp() "
+            "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
+        ),
+        {"legacy_id": legacy_id},
+    )
+    await migrated_session.execute(
+        text(
+            "DELETE FROM feature.curated_features "
+            "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
+        ),
+        {"legacy_id": legacy_id},
+    )
+    tombstone = await get_curation_item(
+        migrated_session,
+        collection_id=legacy_item[0],
+        curation_item_id=legacy_item[1],
+        include_archived=True,
+    )
+    assert tombstone is not None
+    assert tombstone.status == "archived"
+    assert tombstone.item_summary == "provider changed"
 
 
 async def test_authoritative_reimport_does_not_resurrect_unresolved_archive(

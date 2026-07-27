@@ -514,9 +514,11 @@ npm run build
 npm run doctor
 ```
 
-`doctor` script가 아직 없으면 첫 frontend PR에서 추가한다. React Doctor 결과를
-실행 로그로만 남기지 말고, 실제 위험 항목을 개선한다. false positive 또는 의도적으로
-남기는 항목은 PR 설명이나 `docs/journal.md`에 근거를 적는다.
+`doctor` script는 full scope·warning blocking·inline disable 무시 금지·telemetry 비활성
+계약을 사용한다. frontend root의 `doctor.config.json`만 정본이며 verifier가 명령/설정 전체와
+shadow config·ignore 파일 부재를 exact 검증한다. React Doctor 결과를 실행 로그로만 남기지
+말고 실제 위험 항목을 개선한다. false positive는 정본 설정의 최소 범위 예외와
+`docs/journal.md` 근거를 함께 남긴다.
 
 ### 14.9 외부 노출 안전
 

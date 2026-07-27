@@ -323,6 +323,7 @@ CREATE TABLE feature.curation_items (
   external_item_id TEXT NOT NULL,
   place_name TEXT NOT NULL,
   address_hint TEXT,
+  source_present BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'candidate',
   sort_order INTEGER NOT NULL DEFAULT 0,
   item_title TEXT,
@@ -352,17 +353,19 @@ CREATE TABLE feature.curation_items (
   CONSTRAINT ck_curation_items_metadata CHECK (jsonb_typeof(metadata) = 'object')
 );
 
-CREATE UNIQUE INDEX uq_curation_items_active_identity
+CREATE UNIQUE INDEX uq_curation_items_identity
   ON feature.curation_items (collection_id, external_item_id, feature_id)
-  NULLS NOT DISTINCT WHERE archived_at IS NULL;
+  NULLS NOT DISTINCT;
 CREATE INDEX idx_curation_collections_theme_status_edition
   ON feature.curation_collections (theme_id, status, edition_key, collection_id);
 CREATE INDEX idx_curation_collections_source_status
   ON feature.curation_collections (source_id, status, collection_id);
 CREATE INDEX idx_curation_items_collection_status_order
-  ON feature.curation_items (collection_id, status, sort_order, curation_item_id);
+  ON feature.curation_items
+    (collection_id, source_present, status, sort_order, curation_item_id);
 CREATE INDEX idx_curation_items_feature_status_collection
-  ON feature.curation_items (feature_id, status, collection_id);
+  ON feature.curation_items
+    (feature_id, source_present, status, collection_id);
 ```
 
 `feature_id`는 의도적으로 nullable이다. CSV의 공식 항목을 기존 Feature와 안전하게
@@ -373,6 +376,8 @@ CREATE INDEX idx_curation_items_feature_status_collection
 미연결 공식 항목이 중복 생성되는 것을 막는다. repository는 parent collection row lock 아래
 같은 `external_item_id`의 연결 행과 미연결 행이 동시에 active인 상태도 금지한다. 여러
 Feature에 연결한 복합 공식 장소는 모두 non-null `feature_id`이므로 그대로 허용한다.
+exact identity는 archived tombstone까지 포함해 DB unique로 한 행만 허용하므로, application
+guard가 빠져도 보관된 membership과 공개 active membership이 공존할 수 없다.
 
 collection과 item의 `created_by`/`updated_by`는 인증된 admin proxy actor만 기록한다.
 수동 item 추가·수정·보관은 item과 parent collection의 `updated_by`/`updated_at`을 함께
@@ -381,18 +386,30 @@ item만 반환한다. admin collection/item projection은 actor 필드를 포함
 상세에서는 미연결·비공개·보관 item까지 조회할 수 있다.
 
 CSV commit은 파일이 언급한 collection을 한 transaction에서 authoritative replace한다.
-incoming 안정키에 없는 기존 item을 삭제한 뒤 들어온 연결·미연결 membership을 upsert하므로
-삭제, A→B, 연결↔미연결 변경이 잔존 행 없이 반영된다. dry-run은 동일한 필드 비교 규칙으로
-`inserted`/`updated`/`removed`와 삭제 예정 item 전체를 미리 반환한다. 동일 파일 재업로드는
-변경 수가 모두 0이며 theme/source/collection/item의 `updated_at`도 바꾸지 않는다.
+incoming 안정키에 없는 기존 item은 물리 삭제하지 않고 `source_present=false`로 표시한다.
+재등장하면 `source_present=true`와 제공자 파생 필드만 갱신하고, 운영자가 조정한
+`status`·`curation_relation`·`reuse_policy`는 보존한다. 운영자가 보관한 정확한
+`collection_id + external_item_id + feature_id` identity는 tombstone으로 남아 같은 CSV가
+재등장해도 자동 복원되지 않는다. 기본 admin/public 조회와 collection count는
+`source_present=true`인 item만 포함하며, admin의 명시적 `include_archived` 조회는 source에서
+사라진 행도 감사 목적으로 반환한다.
+
+dry-run은 동일한 필드 비교 규칙으로 `inserted`/`updated`/`removed`와 source에서 사라질 item
+전체를 미리 반환한다. API의 `removed` 의미는 물리 삭제 건수가 아니라 이번 authoritative
+source에서 빠져 기본 projection에서 제외되는 건수다. 동일 파일 재업로드는 변경 수가 모두
+0이며 theme/source/collection/item의 `updated_at`도 바꾸지 않는다.
 
 동시 authoritative replace는
 `pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0))`으로 직렬화한다.
 여러 대상 collection row는 UUID 정렬 순서로 `FOR UPDATE`하고, 수동 item write도 parent
 collection을 먼저 잠가 import와 충돌하지 않게 한다. 기존 `curated_features` writer는 0045
 trigger가 같은 ID의 collection item으로 동기화해 전환 중 두 정본이 갈라지지 않게 한다.
+0065 이후 legacy writer의 UPDATE/DELETE도 물리 DELETE/INSERT를 하지 않는다. source presence와
+제공자 파생 필드만 갱신하고 operator 상태·relation·reuse override와 tombstone을 보존한다.
 
-0045 downgrade는 구 `curated_features`에서 완전히 재구성할 수 있는 legacy 행만 허용한다.
+0065 downgrade는 `source_present=false` 행이 하나라도 있으면 `P0001`로 중단한다. 이전
+스키마는 source 누락과 durable membership을 함께 표현할 수 없어 자동 삭제하면 override를
+조용히 잃기 때문이다. 0045 downgrade도 구 `curated_features`에서 완전히 재구성할 수 있는 legacy 행만 허용한다.
 신규 collection/item, 수동 변경, collection actor 또는 legacy `selected_by`와 일치하지 않는
 item actor처럼 표현력이 더 큰 데이터가 있으면 PostgreSQL `P0001` 예외로 transaction 전체를
 중단한다. 먼저 export 또는 명시적 정리하지 않은 데이터를 조용히 삭제하지 않는다.
