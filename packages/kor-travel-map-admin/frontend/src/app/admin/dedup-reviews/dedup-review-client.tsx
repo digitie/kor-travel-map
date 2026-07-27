@@ -32,7 +32,7 @@ import {
   MultiFilterCombobox,
   uniqueSorted,
 } from "@/components/multi-filter-combobox";
-import { OffsetPager } from "@/components/pagination-bar";
+import { CursorPager } from "@/components/pagination-bar";
 import { StatusBadge, statusLabel } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -340,6 +340,7 @@ export function DedupReviewClient() {
   const [detailReviewId, setDetailReviewId] = useState<string | null>(null);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [pageIndex, setPageIndex] = useState(1);
+  const [cursor, setCursor] = useState<string | null>(null);
   const deferredQ = useDeferredValue(q.trim());
   const deferredProviders = useDeferredValue(providers);
   const deferredDatasetKeys = useDeferredValue(datasetKeys);
@@ -357,17 +358,17 @@ export function DedupReviewClient() {
       max_score: bounds.max,
       q: deferredQ.length > 0 ? deferredQ : undefined,
       page_size: pageSize,
-      page: pageIndex,
+      cursor: cursor ?? undefined,
     }),
     [
       bounds.max,
       bounds.min,
+      cursor,
       deferredCategories,
       deferredDatasetKeys,
       deferredProviders,
       deferredQ,
       kind,
-      pageIndex,
       pageSize,
       status,
     ],
@@ -413,26 +414,23 @@ export function DedupReviewClient() {
     [categories, items],
   );
   const totalItems = reviews.data?.meta.page?.total ?? null;
-  const totalPages =
-    typeof totalItems === "number"
-      ? Math.max(1, Math.ceil(totalItems / pageSize))
-      : null;
-  const hasNextPage = totalPages !== null && pageIndex < totalPages;
-  const hasPreviousPage = pageIndex > 1;
+  const nextCursor = reviews.data?.meta.page?.next_cursor ?? null;
 
+  // keyset 페이지 이동 시 병합 선택/상세/행 선택을 함께 초기화한다.
   const resetPage = () => {
+    setCursor(null);
     setPageIndex(1);
     setMergeKey(null);
     setDetailReviewId(null);
     setRowSelection({});
   };
-  // 페이지 이동 시 병합 선택/상세/행 선택을 함께 초기화한다(기존 go* 동작 유지).
-  const goToPage = (nextPage: number) => {
-    const clamped =
-      totalPages === null
-        ? Math.max(1, nextPage)
-        : Math.min(Math.max(1, nextPage), totalPages);
-    setPageIndex(clamped);
+  const goFirstPage = () => {
+    resetPage();
+  };
+  const goNextPage = () => {
+    if (!nextCursor) return;
+    setCursor(nextCursor);
+    setPageIndex((page) => page + 1);
     setMergeKey(null);
     setDetailReviewId(null);
     setRowSelection({});
@@ -474,17 +472,23 @@ export function DedupReviewClient() {
   }, []);
 
   const renderPagination = (placement: "top" | "bottom") => (
-    <OffsetPager
+    <CursorPager
       ariaPrefix="dedup"
-      currentCount={items.length}
-      hasNextPage={hasNextPage}
-      hasPreviousPage={hasPreviousPage}
+      hasNext={Boolean(nextCursor)}
       isFetching={reviews.isFetching}
-      page={pageIndex}
+      isFirst={cursor === null}
       placement={placement}
-      totalCount={totalItems}
-      totalPages={totalPages}
-      onPageChange={goToPage}
+      summary={
+        <>
+          page {pageIndex.toLocaleString("ko-KR")}
+          {totalItems !== null ? (
+            <> · 총 {totalItems.toLocaleString("ko-KR")}건</>
+          ) : null}{" "}
+          · 이 페이지 {items.length.toLocaleString("ko-KR")}개
+        </>
+      }
+      onFirst={goFirstPage}
+      onNext={goNextPage}
     />
   );
   const columns = useMemo<ColumnDef<DedupReviewRecord, unknown>[]>(

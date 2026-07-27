@@ -7,9 +7,11 @@ ORM 모델에는 비즈니스 로직을 두지 않고, 본 모듈의 raw SQL로 
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import unicodedata
+import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -422,10 +424,11 @@ class DedupReviewRow:
 
 @dataclass(frozen=True)
 class DedupReviewPage:
-    """Dedup review page."""
+    """Dedup review keyset page."""
 
     items: tuple[DedupReviewRow, ...]
     total_count: int
+    next_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -966,6 +969,117 @@ def _keyset_condition(*, sort: str, order: str) -> str:
         f"({column}, feature_id) {op} "
         "(CAST(:cursor_int AS integer), CAST(:cursor_feature_id AS text)))"
     )
+
+
+# ── review 목록 keyset cursor (T-VN-H06) ──────────────────────────────────
+# dedup/enrichment admin 목록의 stable total-order keyset + filter fingerprint cursor.
+# 운영자 전용 표면이므로 list_admin_features와 같은 unsigned base64 방식이다(공개 search의
+# HMAC 서명은 hostile client의 cursor 위조 방어용 — T-VN-15 — 이라 same-origin operator
+# 트래픽에는 불필요하고, 3개 admin 목록 중 2개만 서명하면 표면 일관성이 깨진다). cursor에
+# 전체 filter set의 sha256 fingerprint를 실어 필터가 바뀐 stale cursor를 거부하며, keyset은
+# (score DESC, review_id DESC) total order다.
+#
+# 주의(적대 리뷰 P3-1): 정렬 키 score는 insert/delete/status 변경에는 안정적이나 **불변은
+# 아니다** — 재스캔 job이 pending row의 total_score/name_score를 upsert(ON CONFLICT DO UPDATE)
+# 하므로, 운영자가 페이지를 넘기는 도중 재스캔이 돌면 score가 cursor 경계를 넘어 이동해 드물게
+# 한 row가 건너뛰어지거나 두 번 보일 수 있다. 결정 endpoint는 멱등(WHERE status='pending' 가드 +
+# merge advisory lock)이라 이중 병합은 불가능하고 새로고침으로 복구되므로 data corruption은
+# 없다. 엄격한 no-skip이 필요해지면 불변 tuple(created_at, review_id) 정렬로 바꾸거나 pending
+# 스냅샷을 쓴다 — 교체 대상인 OFFSET은 매 insert/delete마다 skip/dup했으므로 여전히 엄격히 우월.
+_REVIEW_CURSOR_VERSION: Final[int] = 1
+
+
+def _review_filter_fingerprint(kind: str, filters: Mapping[str, Any]) -> str:
+    """정규화된 filter set의 canonical sha256 fingerprint.
+
+    set 성격의 list 필터(providers·kinds 등)는 정렬해 값 순서와 무관하게 같은
+    fingerprint를 낸다 — keyset order는 이 필터들과 독립이므로 multi-select 재정렬이
+    cursor를 깨선 안 된다. SQL param 배열 순서는 바꾸지 않고 fingerprint 계산에서만
+    정렬한다.
+    """
+
+    canonical_filters = {
+        key: (sorted(value) if isinstance(value, list) else value)
+        for key, value in filters.items()
+    }
+    canonical = json.dumps(
+        {"kind": kind, "v": _REVIEW_CURSOR_VERSION, "filters": canonical_filters},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _encode_review_cursor(
+    *, kind: str, fingerprint: str, review_id: str, score: str
+) -> str:
+    raw = json.dumps(
+        {
+            "v": _REVIEW_CURSOR_VERSION,
+            "kind": kind,
+            "fp": fingerprint,
+            "keyset": {"review_id": review_id, "score": score},
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _review_cursor_params(
+    cursor: str | None, *, kind: str, fingerprint: str
+) -> dict[str, Any]:
+    """cursor를 검증해 keyset SQL 파라미터로 변환한다.
+
+    fingerprint 불일치(필터 변경)·형식 오류는 모두 ``ValueError``로 fail-closed한다
+    (``_cursor_payload``와 동일한 단일 예외 계약). 실제 uuid/numeric 유효성은 DB CAST가
+    최종 검증하지만 명백한 형식 오류는 선제 차단한다.
+    """
+
+    params: dict[str, Any] = {"cursor_review_id": None, "cursor_score": None}
+    if cursor is None:
+        return params
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid {kind} cursor") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("v") != _REVIEW_CURSOR_VERSION
+        or payload.get("kind") != kind
+        or payload.get("fp") != fingerprint
+    ):
+        raise ValueError(f"invalid {kind} cursor")
+    keyset = payload.get("keyset")
+    if not isinstance(keyset, dict):
+        raise ValueError(f"invalid {kind} cursor")
+    review_id = keyset.get("review_id")
+    score = keyset.get("score")
+    if not isinstance(review_id, str) or not review_id:
+        raise ValueError(f"invalid {kind} cursor")
+    if not isinstance(score, str) or not score:
+        raise ValueError(f"invalid {kind} cursor")
+    try:
+        score_decimal = Decimal(score)
+    except (ArithmeticError, ValueError) as exc:
+        raise ValueError(f"invalid {kind} cursor") from exc
+    if not score_decimal.is_finite():
+        # Postgres numeric는 NaN/Infinity를 받아들이고 NaN이 최대로 정렬돼 keyset이
+        # 조용히 top으로 리셋되므로 명시적으로 거부한다.
+        raise ValueError(f"invalid {kind} cursor")
+    try:
+        uuid.UUID(review_id)
+    except ValueError as exc:
+        # 유효 fingerprint를 통과한 비-UUID review_id는 CAST(:cursor_review_id AS uuid)
+        # 에서 DataError(→500)로 새므로 list_admin_features처럼 Python 측에서 fail-closed.
+        raise ValueError(f"invalid {kind} cursor") from exc
+    params["cursor_review_id"] = review_id
+    params["cursor_score"] = score
+    return params
 
 
 # 완전한 feature_id fast-path: PK 등가로 ILIKE 전체 스캔 + source_records EXISTS를 건너뛴다.
@@ -2663,6 +2777,11 @@ WITH reviews AS MATERIALIZED (
         CAST(:max_score AS numeric) IS NULL
         OR q.total_score <= CAST(:max_score AS numeric)
       )
+      AND (
+        CAST(:cursor_review_id AS uuid) IS NULL
+        OR (q.total_score, q.review_id)
+           < (CAST(:cursor_score AS numeric), CAST(:cursor_review_id AS uuid))
+      )
     ORDER BY q.total_score DESC, q.review_id DESC
 ),
 expanded AS (
@@ -2746,8 +2865,7 @@ WHERE (
     OR category_b = ANY(CAST(:categories AS text[]))
   )
 ORDER BY total_score DESC, review_id DESC
-LIMIT :limit
-OFFSET :offset_rows
+LIMIT :limit_plus_one
 """
 
 
@@ -2943,13 +3061,17 @@ async def list_dedup_reviews(
     max_score: float | None = None,
     q: str | None = None,
     page_size: int = 50,
-    page: int = 1,
+    cursor: str | None = None,
 ) -> DedupReviewPage:
-    """Dedup review 목록을 점수 내림차순으로 조회한다."""
+    """Dedup review 목록을 점수 내림차순 keyset cursor로 조회한다.
+
+    OFFSET이 아니라 ``(total_score DESC, review_id DESC)`` keyset으로 페이지 경계를
+    고정해 페이지 사이 삽입·삭제에도 중복·누락이 없다. cursor는 필터 fingerprint를 실어
+    필터가 바뀌면 거부한다(``_review_cursor_params``). ``total_count``는 페이지네이션과
+    독립인 전체 필터 집합의 건수다.
+    """
     if page_size <= 0:
         raise ValueError("page_size must be greater than 0")
-    if page <= 0:
-        raise ValueError("page must be greater than 0")
     effective_limit = min(page_size, 500)
     normalized_q = _normalize_query(q)
     params: dict[str, Any] = {
@@ -2962,6 +3084,23 @@ async def list_dedup_reviews(
         "max_score": max_score,
         "q_like": f"%{normalized_q}%" if normalized_q is not None else None,
     }
+    fingerprint = _review_filter_fingerprint(
+        "dedup_review",
+        {
+            "statuses": params["statuses"],
+            "providers": params["providers"],
+            "dataset_keys": params["dataset_keys"],
+            "kinds": params["kinds"],
+            "categories": params["categories"],
+            "min_score": None if min_score is None else str(min_score),
+            "max_score": None if max_score is None else str(max_score),
+            "q": normalized_q,
+            "page_size": effective_limit,
+        },
+    )
+    cursor_params = _review_cursor_params(
+        cursor, kind="dedup_review", fingerprint=fingerprint
+    )
     total_count = int(
         (
             await session.execute(
@@ -2970,21 +3109,33 @@ async def list_dedup_reviews(
             )
         ).scalar_one()
     )
-    offset_rows = (page - 1) * effective_limit
     rows = (
         await session.execute(
             text(_DEDUP_REVIEW_SQL),
             {
                 **params,
-                "limit": effective_limit,
-                "offset_rows": offset_rows,
+                **cursor_params,
+                "limit_plus_one": effective_limit + 1,
             },
         )
     ).mappings().all()
-    items = tuple(_dedup_review_row(row) for row in rows)
+    has_more = len(rows) > effective_limit
+    page_rows = rows[:effective_limit]
+    items = tuple(_dedup_review_row(row) for row in page_rows)
+    next_cursor = (
+        _encode_review_cursor(
+            kind="dedup_review",
+            fingerprint=fingerprint,
+            review_id=str(page_rows[-1]["review_id"]),
+            score=str(page_rows[-1]["total_score"]),
+        )
+        if has_more and page_rows
+        else None
+    )
     return DedupReviewPage(
         items=items,
         total_count=total_count,
+        next_cursor=next_cursor,
     )
 
 
@@ -3148,10 +3299,11 @@ class EnrichmentReviewRow:
 
 @dataclass(frozen=True)
 class EnrichmentReviewPage:
-    """Enrichment review page."""
+    """Enrichment review keyset page."""
 
     items: tuple[EnrichmentReviewRow, ...]
     total_count: int
+    next_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -3247,9 +3399,13 @@ WITH reviews AS MATERIALIZED (
         OR q.source_name ILIKE CAST(:q_like AS text)
         OR q.source_entity_id ILIKE CAST(:q_like AS text)
       )
+      AND (
+        CAST(:cursor_review_id AS uuid) IS NULL
+        OR (q.name_score, q.review_id)
+           < (CAST(:cursor_score AS numeric), CAST(:cursor_review_id AS uuid))
+      )
     ORDER BY q.name_score DESC, q.review_id DESC
-    LIMIT :limit
-    OFFSET :offset_rows
+    LIMIT :limit_plus_one
 )
 SELECT
     q.review_id,
@@ -3350,7 +3506,7 @@ LEFT JOIN LATERAL (
         END AS distance_m
 ) AS dist ON TRUE
 ORDER BY q.name_score DESC, q.review_id DESC
-LIMIT :limit
+LIMIT :limit_plus_one
 """
 
 
@@ -3576,13 +3732,16 @@ async def list_enrichment_reviews(
     max_score: float | None = None,
     q: str | None = None,
     page_size: int = 50,
-    page: int = 1,
+    cursor: str | None = None,
 ) -> EnrichmentReviewPage:
-    """축제 enrichment review 목록을 name_score 내림차순으로 조회한다."""
+    """축제 enrichment review 목록을 name_score 내림차순 keyset cursor로 조회한다.
+
+    ``(name_score DESC, review_id DESC)`` keyset으로 페이지 경계를 고정한다(OFFSET 미사용).
+    cursor는 필터 fingerprint를 실어 필터가 바뀌면 거부한다. SQL variant 선택은 내부
+    최적화일 뿐 fingerprint는 논리 필터 집합으로만 계산해 variant와 무관하게 안정적이다.
+    """
     if page_size <= 0:
         raise ValueError("page_size must be greater than 0")
-    if page <= 0:
-        raise ValueError("page must be greater than 0")
     effective_limit = min(page_size, 500)
     normalized_q = _normalize_query(q)
     status_values = _normalize_values(statuses)
@@ -3616,6 +3775,20 @@ async def list_enrichment_reviews(
         "max_score": max_score,
         "q_like": f"%{normalized_q}%" if normalized_q is not None else None,
     }
+    fingerprint = _review_filter_fingerprint(
+        "enrichment_review",
+        {
+            "statuses": status_values,
+            "providers": provider_values,
+            "min_score": None if min_score is None else str(min_score),
+            "max_score": None if max_score is None else str(max_score),
+            "q": normalized_q,
+            "page_size": effective_limit,
+        },
+    )
+    cursor_params = _review_cursor_params(
+        cursor, kind="enrichment_review", fingerprint=fingerprint
+    )
     total_count = int(
         (
             await session.execute(
@@ -3624,21 +3797,33 @@ async def list_enrichment_reviews(
             )
         ).scalar_one()
     )
-    offset_rows = (page - 1) * effective_limit
     rows = (
         await session.execute(
             text(review_sql),
             {
                 **params,
-                "limit": effective_limit,
-                "offset_rows": offset_rows,
+                **cursor_params,
+                "limit_plus_one": effective_limit + 1,
             },
         )
     ).mappings().all()
-    items = tuple(_enrichment_review_row(row) for row in rows)
+    has_more = len(rows) > effective_limit
+    page_rows = rows[:effective_limit]
+    items = tuple(_enrichment_review_row(row) for row in page_rows)
+    next_cursor = (
+        _encode_review_cursor(
+            kind="enrichment_review",
+            fingerprint=fingerprint,
+            review_id=str(page_rows[-1]["review_id"]),
+            score=str(page_rows[-1]["name_score"]),
+        )
+        if has_more and page_rows
+        else None
+    )
     return EnrichmentReviewPage(
         items=items,
         total_count=total_count,
+        next_cursor=next_cursor,
     )
 
 

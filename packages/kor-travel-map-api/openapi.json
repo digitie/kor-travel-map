@@ -9281,7 +9281,7 @@
             "$ref": "#/components/schemas/DedupReviewListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/OffsetMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -9767,7 +9767,7 @@
             "$ref": "#/components/schemas/EnrichmentReviewListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/OffsetMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -13715,63 +13715,6 @@
           "meta"
         ],
         "title": "OfflineUploadWriteResponse",
-        "type": "object"
-      },
-      "OffsetMeta": {
-        "additionalProperties": false,
-        "description": "Cursor가 없는 page-number 목록용 성공 응답 metadata.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          },
-          "page": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OffsetPageMeta"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "request_id": {
-            "default": "",
-            "description": "X-Request-ID와 같은 요청 ID.",
-            "title": "Request Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "OffsetMeta",
-        "type": "object"
-      },
-      "OffsetPageMeta": {
-        "additionalProperties": false,
-        "description": "Page-number/offset pagination metadata.\n\nCursor를 쓰지 않는 목록은 cursor 필드를 노출하지 않는다.",
-        "properties": {
-          "page_size": {
-            "title": "Page Size",
-            "type": "integer"
-          },
-          "total": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total"
-          }
-        },
-        "required": [
-          "page_size"
-        ],
-        "title": "OffsetPageMeta",
         "type": "object"
       },
       "OpsConsistencyReportRecord": {
@@ -28603,13 +28546,18 @@
           },
           {
             "in": "query",
-            "name": "page",
+            "name": "cursor",
             "required": false,
             "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           }
         ],
@@ -28924,13 +28872,18 @@
           },
           {
             "in": "query",
-            "name": "page",
+            "name": "cursor",
             "required": false,
             "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           }
         ],

@@ -484,8 +484,9 @@ async def test_list_dedup_reviews_and_decision() -> None:
     params = session.calls[1]["params"]
     assert params["providers"] == ["python-mois-api"]
     assert params["min_score"] == 80
-    assert params["limit"] == 1
-    assert params["offset_rows"] == 0
+    assert params["limit_plus_one"] == 2
+    assert params["cursor_review_id"] is None
+    assert params["cursor_score"] is None
 
     changed = await repo.set_dedup_review_decision(
         _Session([_Result([{"review_id": _REVIEW_KEY_1}])]),  # type: ignore[arg-type]
@@ -579,3 +580,66 @@ async def test_merge_dedup_review_auto_and_explicit_master(
             _REVIEW_KEY_1,
             master_feature_id="other",
         )
+
+
+def test_review_cursor_rejects_bad_uuid_and_non_finite_score() -> None:
+    """유효 fingerprint를 통과해도 비-UUID review_id·비유한 score cursor는 ValueError.
+
+    이 값들이 SQL의 CAST(... AS uuid)/numeric까지 새면 DataError(→500)이거나 NaN이
+    최대로 정렬돼 keyset이 top으로 조용히 리셋되므로 Python 측에서 fail-closed한다.
+    라우터는 이 ValueError를 422로 매핑한다(500 아님).
+    """
+    fingerprint = repo._review_filter_fingerprint(
+        "dedup_review", {"statuses": ["pending"]}
+    )
+    bad_uuid = repo._encode_review_cursor(
+        kind="dedup_review",
+        fingerprint=fingerprint,
+        review_id="not-a-uuid",
+        score="1.0",
+    )
+    with pytest.raises(ValueError, match="invalid dedup_review cursor"):
+        repo._review_cursor_params(
+            bad_uuid, kind="dedup_review", fingerprint=fingerprint
+        )
+    for bad_score in ("NaN", "Infinity", "-Infinity"):
+        cursor = repo._encode_review_cursor(
+            kind="dedup_review",
+            fingerprint=fingerprint,
+            review_id="00000000-0000-0000-0000-000000000001",
+            score=bad_score,
+        )
+        with pytest.raises(ValueError, match="invalid dedup_review cursor"):
+            repo._review_cursor_params(
+                cursor, kind="dedup_review", fingerprint=fingerprint
+            )
+    # 정상 cursor는 그대로 keyset 파라미터로 통과한다.
+    good = repo._encode_review_cursor(
+        kind="dedup_review",
+        fingerprint=fingerprint,
+        review_id="00000000-0000-0000-0000-000000000001",
+        score="90.5",
+    )
+    params = repo._review_cursor_params(
+        good, kind="dedup_review", fingerprint=fingerprint
+    )
+    assert params["cursor_review_id"] == "00000000-0000-0000-0000-000000000001"
+    assert params["cursor_score"] == "90.5"
+
+
+def test_review_fingerprint_is_multiselect_order_independent() -> None:
+    """multi-select 필터 값 순서가 바뀌어도 같은 fingerprint여야 cursor가 유지된다."""
+    forward = repo._review_filter_fingerprint(
+        "dedup_review",
+        {"providers": ["python-mois-api", "python-visitkorea-api"]},
+    )
+    reversed_ = repo._review_filter_fingerprint(
+        "dedup_review",
+        {"providers": ["python-visitkorea-api", "python-mois-api"]},
+    )
+    assert forward == reversed_
+    # 값 집합 자체가 달라지면 fingerprint도 달라진다.
+    subset = repo._review_filter_fingerprint(
+        "dedup_review", {"providers": ["python-mois-api"]}
+    )
+    assert forward != subset

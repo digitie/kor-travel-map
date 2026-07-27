@@ -190,9 +190,8 @@ def test_enrichment_review_routes_mounted_in_openapi(client: TestClient) -> None
         ]["const"]
         == "audit_only"
     )
-    assert "next_cursor" not in spec["components"]["schemas"]["OffsetPageMeta"][
-        "properties"
-    ]
+    # T-VN-H06: keyset cursor 목록이므로 meta는 next_cursor를 노출하는 PageMeta다.
+    assert "next_cursor" in spec["components"]["schemas"]["PageMeta"]["properties"]
 
 
 @pytest.mark.unit
@@ -207,11 +206,12 @@ def test_list_enrichment_reviews_passes_filters(
         assert kwargs["providers"] == ["python-visitkorea-api"]
         assert kwargs["min_score"] == 70
         assert kwargs["page_size"] == 25
-        assert kwargs["page"] == 3
-        assert "cursor" not in kwargs
+        assert kwargs["cursor"] == "opaque-cursor-xyz"
+        assert "page" not in kwargs
         return EnrichmentReviewPage(
             items=(_review_row(),),
             total_count=42,
+            next_cursor="next-abc",
         )
 
     monkeypatch.setattr(router_mod, "list_enrichment_reviews", _list)
@@ -223,7 +223,7 @@ def test_list_enrichment_reviews_passes_filters(
             "provider": "python-visitkorea-api",
             "min_score": "70",
             "page_size": "25",
-            "page": "3",
+            "cursor": "opaque-cursor-xyz",
         },
     )
 
@@ -237,6 +237,7 @@ def test_list_enrichment_reviews_passes_filters(
     assert body["data"]["items"][0]["source_start_date"] == "20260405"
     assert body["meta"]["page"] == {
         "page_size": 25,
+        "next_cursor": "next-abc",
         "total": 42,
     }
 

@@ -186,9 +186,8 @@ def test_dedup_review_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/dedup-reviews/{review_id}" not in spec["paths"]
     assert "DedupReviewRecord" in spec["components"]["schemas"]
     assert "DedupReviewDetailResponse" in spec["components"]["schemas"]
-    assert "next_cursor" not in spec["components"]["schemas"]["OffsetPageMeta"][
-        "properties"
-    ]
+    # T-VN-H06: keyset cursor 목록이므로 meta는 next_cursor를 노출하는 PageMeta다.
+    assert "next_cursor" in spec["components"]["schemas"]["PageMeta"]["properties"]
 
 
 @pytest.mark.unit
@@ -203,11 +202,12 @@ def test_list_dedup_reviews_passes_filters(
         assert kwargs["providers"] == ["python-mois-api"]
         assert kwargs["min_score"] == 80
         assert kwargs["page_size"] == 25
-        assert kwargs["page"] == 2
-        assert "cursor" not in kwargs
+        assert kwargs["cursor"] == "opaque-cursor-xyz"
+        assert "page" not in kwargs
         return DedupReviewPage(
             items=(_review_row(),),
             total_count=37,
+            next_cursor="next-abc",
         )
 
     monkeypatch.setattr(router_mod, "list_dedup_reviews", _list)
@@ -219,7 +219,7 @@ def test_list_dedup_reviews_passes_filters(
             "provider": "python-mois-api",
             "min_score": "80",
             "page_size": "25",
-            "page": "2",
+            "cursor": "opaque-cursor-xyz",
         },
     )
 
@@ -228,8 +228,29 @@ def test_list_dedup_reviews_passes_filters(
     assert body["data"]["items"][0]["review_id"] == "review-1"
     assert body["meta"]["page"] == {
         "page_size": 25,
+        "next_cursor": "next-abc",
         "total": 37,
     }
+
+
+@pytest.mark.unit
+def test_list_dedup_reviews_invalid_cursor_returns_422(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """손상된 cursor(잘못된 fingerprint·uuid·score)는 repo ValueError → 라우터 422."""
+    from kortravelmap.api.routers import dedup_review as router_mod
+
+    async def _list(_session: Any, **_kwargs: Any) -> DedupReviewPage:
+        raise ValueError("invalid dedup_review cursor")
+
+    monkeypatch.setattr(router_mod, "list_dedup_reviews", _list)
+
+    response = client.get(
+        "/v1/admin/features/dedup-reviews",
+        params={"cursor": "bogus-cursor"},
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.unit

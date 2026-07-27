@@ -1,3 +1,8 @@
+// T-VN-H06: dedup 목록이 OFFSET→keyset cursor로 전환됨에 따라 이 spec을 cursor 계약으로
+// 재작성했다 — mock은 `cursor` 쿼리로 slice하고 `next_cursor`를 돌려주며, 페이지네이션
+// 단언은 실제 CursorPager 라벨(첫 페이지/다음)과 요약(`page N · 총 X건 · 이 페이지 Y개`)을
+// 쓴다. 런타임 검증은 Windows Playwright에서 대기(n150 Linux 게이트·GitHub CI 머지
+// 게이트 밖) — type-check는 통과.
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
@@ -90,11 +95,12 @@ function makeDedupReview(
 
 function listResponse(
   items: DedupReviewRecord[],
-  options: { pageSize?: number; total?: number } = {},
+  options: { pageSize?: number; total?: number; nextCursor?: string | null } = {},
 ): DedupReviewListResponse {
   const meta: DedupReviewListMeta = {
     duration_ms: 1,
     page: {
+      next_cursor: options.nextCursor ?? null,
       page_size: options.pageSize ?? 100,
       total: options.total ?? items.length,
     },
@@ -329,11 +335,16 @@ async function mockDedupReviews(
       handle.requests.listUrls.push(url);
       const pageSize = Number(url.searchParams.get("page_size") ?? 100);
       const rows = filteredRows(url);
-      const pageIndex = Math.max(1, Number(url.searchParams.get("page") ?? 1));
-      const start = (pageIndex - 1) * pageSize;
+      // keyset cursor 목록: cursor는 offset을 인코딩(첫 페이지=cursor 없음),
+      // next_cursor는 다음 시작 offset(끝이면 null). 실제 서버 계약과 동형.
+      const cursorParam = url.searchParams.get("cursor");
+      const start = cursorParam === null ? 0 : Math.max(0, Number(cursorParam));
+      const nextStart = start + pageSize;
+      const nextCursor = nextStart < rows.length ? String(nextStart) : null;
       await fulfillJson(
         route,
         listResponse(rows.slice(start, start + pageSize), {
+          nextCursor,
           pageSize,
           total: rows.length,
         }),
@@ -444,10 +455,10 @@ test.describe("admin/dedup-reviews actions", () => {
       page.getByRole("row", { name: /DEDUP_A_alpha/ }),
     ).toBeVisible();
 
-    // 기본 목록 쿼리: page_size=100, page=1, cursor 없음, status='pending'.
+    // 기본 목록 쿼리: page_size=100, 첫 페이지라 page·cursor 모두 없음, status='pending'.
     const firstList = handle.requests.lastListUrl;
     expect(firstList?.searchParams.get("page_size")).toBe("100");
-    expect(firstList?.searchParams.get("page")).toBe("1");
+    expect(firstList?.searchParams.has("page")).toBe(false);
     expect(firstList?.searchParams.has("cursor")).toBe(false);
     expect(firstList?.searchParams.getAll("status")).toEqual(["pending"]);
 
@@ -750,7 +761,7 @@ test.describe("admin/dedup-reviews actions", () => {
     expect(last?.searchParams.get("page_size")).toBe("25");
   });
 
-  test("page-size select drives page pagination controls", async ({ page }) => {
+  test("page-size select drives cursor pagination controls", async ({ page }) => {
     const rows = Array.from({ length: 26 }, (_value, index) =>
       makeDedupReview({
         feature_a: makeDedupFeature({
@@ -767,31 +778,32 @@ test.describe("admin/dedup-reviews actions", () => {
     await page.goto("/admin/features/dedup-reviews");
     await page.getByLabel("dedup page size").selectOption("25");
 
+    // keyset CursorPager: 첫 페이지/다음만, 요약은 `page N · 총 X건 · 이 페이지 Y개`.
     await expect(
-      page.getByText(/페이지 1 \/ 2 · 총 26건 · 현재 25건/),
+      page.getByText(/page 1\s*·\s*총 26건\s*·\s*이 페이지 25개/),
     ).toHaveCount(2);
-    await expect(page.getByLabel("dedup 이전 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("dedup 첫 페이지")).toHaveCount(2);
     await expect(page.getByLabel("dedup 다음 페이지")).toHaveCount(2);
-    await expect(page.getByLabel("dedup 마지막 페이지")).toHaveCount(2);
-    await expect(page.getByLabel("dedup 이전 페이지").first()).toBeDisabled();
+    await expect(page.getByLabel("dedup 첫 페이지").first()).toBeDisabled();
     await expect(page.getByLabel("dedup 다음 페이지").first()).toBeEnabled();
-    await expect(page.getByLabel("dedup 마지막 페이지").first()).toBeEnabled();
 
     await page.getByLabel("dedup 다음 페이지").first().click();
     await expect
-      .poll(() => handle.requests.lastListUrl?.searchParams.get("page"))
-      .toBe("2");
+      .poll(() => handle.requests.lastListUrl?.searchParams.get("cursor"))
+      .toBe("25");
     await expect(
-      page.getByText(/페이지 2 \/ 2 · 총 26건 · 현재 1건/),
+      page.getByText(/page 2\s*·\s*총 26건\s*·\s*이 페이지 1개/),
     ).toHaveCount(2);
     await expect(page.getByRole("row", { name: /DEDUP_A_page_25/ })).toBeVisible();
     await expect(page.getByLabel("dedup 다음 페이지").first()).toBeDisabled();
-    await expect(page.getByLabel("dedup 마지막 페이지").first()).toBeDisabled();
-    await expect(page.getByLabel("dedup 이전 페이지").first()).toBeEnabled();
+    await expect(page.getByLabel("dedup 첫 페이지").first()).toBeEnabled();
 
     await page.getByLabel("dedup 첫 페이지").first().click();
+    await expect
+      .poll(() => handle.requests.lastListUrl?.searchParams.has("cursor"))
+      .toBe(false);
     await expect(
-      page.getByText(/페이지 1 \/ 2 · 총 26건 · 현재 25건/),
+      page.getByText(/page 1\s*·\s*총 26건\s*·\s*이 페이지 25개/),
     ).toHaveCount(2);
   });
 
@@ -804,14 +816,12 @@ test.describe("admin/dedup-reviews actions", () => {
       page.getByRole("heading", { level: 1, name: "중복 검토" }),
     ).toBeVisible();
     await expect(page.getByText("dedup review가 없습니다.")).toBeVisible();
-    await expect(page.getByLabel("dedup 이전 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("dedup 첫 페이지")).toHaveCount(2);
     await expect(page.getByLabel("dedup 다음 페이지")).toHaveCount(2);
-    await expect(page.getByLabel("dedup 마지막 페이지")).toHaveCount(2);
-    await expect(page.getByLabel("dedup 이전 페이지").first()).toBeDisabled();
+    await expect(page.getByLabel("dedup 첫 페이지").first()).toBeDisabled();
     await expect(page.getByLabel("dedup 다음 페이지").first()).toBeDisabled();
-    await expect(page.getByLabel("dedup 마지막 페이지").first()).toBeDisabled();
     await expect(
-      page.getByText(/페이지 1 \/ 1 · 총 0건 · 현재 0건/),
+      page.getByText(/page 1\s*·\s*총 0건\s*·\s*이 페이지 0개/),
     ).toHaveCount(2);
     for (const column of ["review", "score", "feature A", "feature B", "actions"]) {
       await expect(
