@@ -209,6 +209,72 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
         await connection.execute(
             text(
                 """
+                WITH source AS (
+                    SELECT source_id
+                    FROM feature.curated_sources
+                    WHERE provider = 'migration-provider'
+                      AND dataset_key = 'migration-dataset'
+                ), themes AS (
+                    INSERT INTO feature.curated_themes (
+                        theme_slug, theme_name, theme_group, visibility
+                    ) VALUES
+                        (
+                            'migration-legacy-duplicate',
+                            'migration legacy duplicate',
+                            'test',
+                            'public'
+                        ),
+                        (
+                            'migration-status-only-archive',
+                            'migration status-only archive',
+                            'test',
+                            'public'
+                        )
+                    RETURNING theme_id, theme_slug
+                )
+                INSERT INTO feature.curated_features (
+                    theme_id, feature_id, source_id, curation_status,
+                    selection_origin, display_title, archived_at, updated_at
+                )
+                SELECT
+                    themes.theme_id, 'feature:migration-presence',
+                    source.source_id, 'archived', 'source_rule',
+                    'migration legacy duplicate',
+                    now() - interval '2 hours',
+                    now() - interval '2 hours'
+                FROM themes CROSS JOIN source
+                WHERE themes.theme_slug = 'migration-legacy-duplicate'
+                UNION ALL
+                SELECT
+                    themes.theme_id, 'feature:migration-presence',
+                    source.source_id, 'curated', 'source_rule',
+                    'migration legacy duplicate', NULL, now()
+                FROM themes CROSS JOIN source
+                WHERE themes.theme_slug = 'migration-legacy-duplicate'
+                UNION ALL
+                SELECT
+                    themes.theme_id, 'feature:migration-presence',
+                    source.source_id, 'archived', 'source_rule',
+                    'migration status-only archive', NULL, now()
+                FROM themes CROSS JOIN source
+                WHERE themes.theme_slug = 'migration-status-only-archive'
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curation_items AS item
+                SET external_item_id = 'migration-legacy-duplicate'
+                FROM feature.curated_features AS legacy
+                WHERE legacy.display_title = 'migration legacy duplicate'
+                  AND item.curation_item_id = legacy.curated_feature_id
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
                 UPDATE feature.curation_items AS item
                 SET status = 'rejected',
                     curation_relation = 'primary_stop',
@@ -276,7 +342,10 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                         "SELECT display_title, operator_updated_by, "
                         "operator_updated_at IS NOT NULL "
                         "FROM feature.curated_features "
-                        "WHERE display_title LIKE 'migration %' "
+                        "WHERE display_title IN ("
+                        "'migration external provenance',"
+                        "'migration legacy override'"
+                        ") "
                         "ORDER BY display_title"
                     )
                 )
@@ -381,6 +450,68 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     {"provider_revision": "latest"},
                 ),
             ]
+            migrated_legacy = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            count(*) FILTER (
+                                WHERE legacy.display_title =
+                                    'migration legacy duplicate'
+                            ),
+                            count(*) FILTER (
+                                WHERE legacy.display_title =
+                                    'migration legacy duplicate'
+                                  AND legacy.archived_at IS NULL
+                            ),
+                            count(*) FILTER (
+                                WHERE legacy.display_title =
+                                    'migration legacy duplicate'
+                                  AND legacy.metadata @>
+                                      '{"merge_projection_detached": true}'::jsonb
+                            ),
+                            bool_and(legacy.archived_at IS NOT NULL)
+                                FILTER (
+                                    WHERE legacy.display_title =
+                                        'migration status-only archive'
+                                )
+                        FROM feature.curated_features AS legacy
+                        WHERE legacy.display_title IN (
+                            'migration legacy duplicate',
+                            'migration status-only archive'
+                        )
+                        """
+                    )
+                )
+            ).one()
+            assert migrated_legacy == (2, 0, 1, True)
+            migrated_canonical = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            count(*) FILTER (
+                                WHERE item.external_item_id =
+                                    'migration-legacy-duplicate'
+                            ),
+                            bool_and(
+                                item.status = 'archived'
+                                AND item.archived_at IS NOT NULL
+                            )
+                        FROM feature.curation_items AS item
+                        LEFT JOIN feature.curated_features AS legacy
+                          ON legacy.curated_feature_id =
+                             item.curation_item_id
+                        WHERE item.external_item_id =
+                                'migration-legacy-duplicate'
+                           OR legacy.display_title =
+                                'migration status-only archive'
+                        """
+                    )
+                )
+            ).one()
+            assert migrated_canonical[0] == 1
+            assert migrated_canonical[1] is True
             await connection.execute(
                 text(
                     "INSERT INTO feature.curation_items ("
@@ -428,6 +559,15 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
             )
         target_engine = make_async_engine(target_dsn)
         async with target_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "SELECT set_config("
+                    "'kortravelmap.curation_sync_mode',"
+                    "'merge_explicit',"
+                    "true"
+                    ")"
+                )
+            )
             await connection.execute(
                 text(
                     "UPDATE feature.curation_items "

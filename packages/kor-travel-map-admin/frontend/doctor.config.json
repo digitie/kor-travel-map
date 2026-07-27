@@ -1,6 +1,6 @@
 {
   "ignore": {
-    "files": ["dist/**", "dev/**"],
+    "files": ["dist/**"],
     "overrides": [
       {
         "files": ["src/api/live.ts"],

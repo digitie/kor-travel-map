@@ -14,7 +14,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from kortravelmap.infra import curated_repo
 from kortravelmap.settings import KorTravelMapSettings
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -457,6 +457,13 @@ class CuratedFeatureCreateRequest(BaseModel):
     reuse_policy: ReusePolicy = "manual_review"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("metadata")
+    @classmethod
+    def reject_reserved_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if "merge_projection_detached" in value:
+            raise ValueError("merge_projection_detached metadata는 내부 전용입니다.")
+        return value
+
 
 class CuratedFeaturePatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -470,6 +477,16 @@ class CuratedFeaturePatchRequest(BaseModel):
     curation_relation: CurationRelation | None = None
     reuse_policy: ReusePolicy | None = None
     metadata: dict[str, Any] | None = None
+
+    @field_validator("metadata")
+    @classmethod
+    def reject_reserved_metadata(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is not None and "merge_projection_detached" in value:
+            raise ValueError("merge_projection_detached metadata는 내부 전용입니다.")
+        return value
 
 
 class CuratedFeatureStatusRequest(BaseModel):

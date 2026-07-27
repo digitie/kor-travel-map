@@ -801,6 +801,17 @@ async def test_update_item_noop_update_miss_and_full_success(
         )
         == current
     )
+    get_item.return_value = _item(status="archived", archived_at=_NOW)
+    assert (
+        await repo.update_curation_item(
+            _FakeSession(),
+            collection_id=_COLLECTION_ID,
+            curation_item_id=_CURATION_ITEM_ID,
+            updates={},
+        )
+        is None
+    )
+    get_item.return_value = current
 
     update_miss = _FakeSession(_FakeResult(scalar=None), _FakeResult(first=None))
     assert (
@@ -1136,8 +1147,8 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     monkeypatch.setattr(repo, "_upsert_id_with_fallback", foundations)
     changed = _FakeSession(
         _FakeResult(),
-        _FakeResult(),
         _FakeResult(rows=["feature:one"]),
+        _FakeResult(),
         _FakeResult(rows=[_item_row()]),
         _FakeResult(rows=[{"inserted": 2, "updated": 1}]),
         _FakeResult(),
@@ -1162,8 +1173,8 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     foundations.side_effect = [_SOURCE_ID, "00000000-0000-4000-8000-000000000012"]
     unchanged = _FakeSession(
         _FakeResult(),
-        _FakeResult(),
         _FakeResult(rows=["feature:one"]),
+        _FakeResult(),
         _FakeResult(rows=[]),
         _FakeResult(rows=[{"inserted": 0, "updated": 0}]),
     )

@@ -172,23 +172,23 @@ async def _seed_pair(engine: AsyncEngine) -> str:
                     RETURNING theme_id, theme_slug
                 )
                 INSERT INTO feature.curated_features (
-                    theme_id, feature_id, source_id, curation_status,
+                    theme_id, feature_id, source_id, source_record_key, curation_status,
                     selection_origin, display_title, display_summary
                 )
                 SELECT
-                    themes.theme_id, 'f_master', source.source_id, 'curated',
+                    themes.theme_id, 'f_master', source.source_id, 'SR1', 'curated',
                     'admin', 'legacy 충돌 master', '병합 전 master'
                 FROM themes CROSS JOIN source
                 WHERE themes.theme_slug = 'legacy-merge-conflict'
                 UNION ALL
                 SELECT
-                    themes.theme_id, 'f_loser', source.source_id, 'curated',
+                    themes.theme_id, 'f_loser', source.source_id, 'SR1', 'curated',
                     'admin', 'legacy 충돌 loser', '병합 전 loser'
                 FROM themes CROSS JOIN source
                 WHERE themes.theme_slug = 'legacy-merge-conflict'
                 UNION ALL
                 SELECT
-                    themes.theme_id, 'f_loser', source.source_id, 'curated',
+                    themes.theme_id, 'f_loser', source.source_id, 'SR2', 'curated',
                     'admin', 'legacy 단독 loser', '병합 전 loser'
                 FROM themes CROSS JOIN source
                 WHERE themes.theme_slug = 'legacy-merge-loser-only'
@@ -547,6 +547,40 @@ async def test_merge_syncs_reconciled_operator_state_to_master_legacy_projection
         await session.execute(
             text(
                 """
+                WITH legacy_identity AS (
+                    SELECT theme_id, source_id
+                    FROM feature.curated_features
+                    WHERE display_title = 'legacy 충돌 master'
+                ), manual_collection AS (
+                    INSERT INTO feature.curation_collections (
+                        collection_key, theme_id, source_id, title
+                    )
+                    SELECT
+                        'manual-cross-collection',
+                        theme_id,
+                        source_id,
+                        '동일 출처 수동 컬렉션'
+                    FROM legacy_identity
+                    RETURNING collection_id
+                )
+                INSERT INTO feature.curation_items (
+                    collection_id, feature_id, source_record_key,
+                    external_item_id, place_name, status,
+                    curation_relation, reuse_policy,
+                    operator_updated_by, operator_updated_at
+                )
+                SELECT
+                    collection_id, 'f_master', 'SR1',
+                    'SR1', '수동 컬렉션 장소', 'included',
+                    'food_stop', 'allowed',
+                    'manual-collection-operator', now() + interval '1 day'
+                FROM manual_collection
+                """
+            )
+        )
+        await session.execute(
+            text(
+                """
                 UPDATE feature.curated_features
                 SET display_title = 'legacy 충돌 master',
                     updated_at = clock_timestamp()
@@ -573,8 +607,7 @@ async def test_merge_syncs_reconciled_operator_state_to_master_legacy_projection
             text(
                 """
                 UPDATE feature.curation_items
-                SET external_item_id = :master_id,
-                    status = :loser_status,
+                SET status = :loser_status,
                     curation_relation = 'primary_stop',
                     reuse_policy = 'blocked',
                     operator_updated_by = 'loser-operator',
@@ -588,7 +621,6 @@ async def test_merge_syncs_reconciled_operator_state_to_master_legacy_projection
                 """
             ),
             {
-                "master_id": projection_ids.master_id,
                 "loser_id": projection_ids.loser_id,
                 "loser_status": loser_status,
             },
@@ -616,7 +648,12 @@ async def test_merge_syncs_reconciled_operator_state_to_master_legacy_projection
                     """
                     SELECT count(*)
                     FROM feature.curated_features
-                    WHERE curated_feature_id = CAST(:master_id AS uuid)
+                    WHERE theme_id = (
+                            SELECT theme_id
+                            FROM feature.curated_features
+                            WHERE curated_feature_id = CAST(:master_id AS uuid)
+                        )
+                      AND feature_id = 'f_master'
                       AND curation_status = 'curated'
                       AND archived_at IS NULL
                     """
@@ -624,6 +661,20 @@ async def test_merge_syncs_reconciled_operator_state_to_master_legacy_projection
                 {"master_id": projection_ids.master_id},
             )
         ).scalar_one()
+        manual_projection = (
+            await session.execute(
+                text(
+                    """
+                    SELECT item.status, item.curation_relation, item.reuse_policy,
+                           item.operator_updated_by
+                    FROM feature.curation_items AS item
+                    JOIN feature.curation_collections AS collection
+                      ON collection.collection_id = item.collection_id
+                    WHERE collection.collection_key = 'manual-cross-collection'
+                    """
+                )
+            )
+        ).one()
     assert master_projection == (
         loser_status,
         expected_archived,
@@ -632,6 +683,12 @@ async def test_merge_syncs_reconciled_operator_state_to_master_legacy_projection
         "loser-operator",
     )
     assert public_count == 0
+    assert manual_projection == (
+        "included",
+        "food_stop",
+        "allowed",
+        "manual-collection-operator",
+    )
 
 
 async def test_merge_tombstone_wins_over_visible_duplicate(
@@ -784,15 +841,14 @@ async def test_legacy_and_canonical_writers_share_lock_order(
     await asyncio.wait_for(task, timeout=5)
 
 
-async def test_import_rejects_feature_deleted_while_waiting_for_collection_lock(
-    seeded: str,
-    migrated_engine: AsyncEngine,
-) -> None:
+async def _seed_import_race_collection(
+    engine: AsyncEngine,
+) -> tuple[ResolvedCurationImportRow, str, str, str]:
     suffix = uuid4().hex
     collection_key = f"merge-import-race:{suffix}"
     theme_slug = f"merge-import-race-{suffix}"
     provider = f"merge-import-race-{suffix}"
-    async with migrated_engine.begin() as connection:
+    async with engine.begin() as connection:
         await connection.execute(
             text(
                 """
@@ -824,7 +880,6 @@ async def test_import_rejects_feature_deleted_while_waiting_for_collection_lock(
                 "collection_key": collection_key,
             },
         )
-
     row = ResolvedCurationImportRow(
         row_number=2,
         collection_key=collection_key,
@@ -846,15 +901,158 @@ async def test_import_rejects_feature_deleted_while_waiting_for_collection_lock(
         item_summary=None,
         metadata={},
     )
+    return row, collection_key, theme_slug, provider
+
+
+async def test_merge_first_serializes_import_against_feature_lifecycle(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    row, collection_key, theme_slug, provider = await _seed_import_race_collection(
+        migrated_engine
+    )
 
     async def run_import() -> None:
         async with AsyncSession(migrated_engine) as importer, importer.begin():
             await importer.execute(
-                text("SET LOCAL application_name = 'merge-import-race-contender'")
+                text("SET LOCAL application_name = 'merge-first-import-contender'")
             )
             await import_curation_rows(importer, rows=(row,), actor="import-race")
 
-    task: asyncio.Task[None] | None = None
+    async def run_merge() -> None:
+        async with AsyncSession(migrated_engine) as merger, merger.begin():
+            await merger.execute(
+                text("SET LOCAL application_name = 'merge-first-merge-contender'")
+            )
+            await merge_from_review(
+                merger,
+                seeded,
+                merged_by="merge-import-race",
+            )
+
+    import_task: asyncio.Task[None] | None = None
+    merge_task: asyncio.Task[None] | None = None
+    try:
+        async with AsyncSession(migrated_engine) as holder, holder.begin():
+            await holder.execute(
+                text(
+                    "SELECT collection.collection_id "
+                    "FROM feature.curation_collections AS collection "
+                    "JOIN feature.curation_items AS item "
+                    "ON item.collection_id = collection.collection_id "
+                    "WHERE item.feature_id = 'f_master' "
+                    "AND item.external_item_id = 'shared' "
+                    "FOR UPDATE"
+                )
+            )
+            merge_task = asyncio.create_task(run_merge())
+            for _ in range(50):
+                await holder.execute(text("SELECT pg_stat_clear_snapshot()"))
+                waiting = (
+                    await holder.execute(
+                        text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_stat_activity
+                                WHERE application_name =
+                                    'merge-first-merge-contender'
+                                  AND wait_event_type = 'Lock'
+                            )
+                            """
+                        )
+                    )
+                ).scalar_one()
+                if waiting:
+                    break
+                await asyncio.sleep(0.02)
+            assert waiting is True
+            import_task = asyncio.create_task(run_import())
+            for _ in range(50):
+                await holder.execute(text("SELECT pg_stat_clear_snapshot()"))
+                waiting = (
+                    await holder.execute(
+                        text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_stat_activity
+                                WHERE application_name =
+                                    'merge-first-import-contender'
+                                  AND wait_event_type = 'Lock'
+                            )
+                            """
+                        )
+                    )
+                ).scalar_one()
+                if waiting:
+                    break
+                await asyncio.sleep(0.02)
+            assert waiting is True
+
+        assert merge_task is not None
+        await asyncio.wait_for(merge_task, timeout=5)
+        assert import_task is not None
+        with pytest.raises(ValueError, match="lifecycle"):
+            await asyncio.wait_for(import_task, timeout=5)
+    finally:
+        for task in (import_task, merge_task):
+            if task is not None and not task.done():
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curation_collections "
+                    "WHERE collection_key = :collection_key"
+                ),
+                {"collection_key": collection_key},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_themes "
+                    "WHERE theme_slug = :theme_slug"
+                ),
+                {"theme_slug": theme_slug},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_sources "
+                    "WHERE provider = :provider AND dataset_key = 'race'"
+                ),
+                {"provider": provider},
+            )
+
+
+async def test_import_first_merge_moves_newly_committed_membership(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    row, collection_key, theme_slug, provider = await _seed_import_race_collection(
+        migrated_engine
+    )
+
+    async def run_import() -> None:
+        async with AsyncSession(migrated_engine) as importer, importer.begin():
+            await importer.execute(
+                text("SET LOCAL application_name = 'import-first-import-contender'")
+            )
+            await import_curation_rows(importer, rows=(row,), actor="import-race")
+
+    async def run_merge() -> None:
+        async with AsyncSession(migrated_engine) as merger, merger.begin():
+            await merger.execute(
+                text("SET LOCAL application_name = 'import-first-merge-contender'")
+            )
+            await merge_from_review(
+                merger,
+                seeded,
+                merged_by="merge-import-race",
+            )
+
+    import_task: asyncio.Task[None] | None = None
+    merge_task: asyncio.Task[None] | None = None
     try:
         async with AsyncSession(migrated_engine) as holder, holder.begin():
             await holder.execute(
@@ -866,10 +1064,10 @@ async def test_import_rejects_feature_deleted_while_waiting_for_collection_lock(
                 ),
                 {"collection_key": collection_key},
             )
-            task = asyncio.create_task(run_import())
+            import_task = asyncio.create_task(run_import())
             for _ in range(50):
                 await holder.execute(text("SELECT pg_stat_clear_snapshot()"))
-                waiting = (
+                import_waiting = (
                     await holder.execute(
                         text(
                             """
@@ -877,32 +1075,77 @@ async def test_import_rejects_feature_deleted_while_waiting_for_collection_lock(
                                 SELECT 1
                                 FROM pg_stat_activity
                                 WHERE application_name =
-                                    'merge-import-race-contender'
+                                    'import-first-import-contender'
                                   AND wait_event_type = 'Lock'
                             )
                             """
                         )
                     )
                 ).scalar_one()
-                if waiting:
+                if import_waiting:
                     break
                 await asyncio.sleep(0.02)
-            assert waiting is True
-            async with AsyncSession(migrated_engine) as merger, merger.begin():
-                await merge_from_review(
-                    merger,
-                    seeded,
-                    merged_by="merge-import-race",
-                )
+            assert import_waiting is True
 
-        assert task is not None
-        with pytest.raises(ValueError, match="lifecycle"):
-            await asyncio.wait_for(task, timeout=5)
+            merge_task = asyncio.create_task(run_merge())
+            for _ in range(50):
+                await holder.execute(text("SELECT pg_stat_clear_snapshot()"))
+                merge_waiting = (
+                    await holder.execute(
+                        text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_stat_activity
+                                WHERE application_name =
+                                    'import-first-merge-contender'
+                                  AND wait_event_type = 'Lock'
+                            )
+                            """
+                        )
+                    )
+                ).scalar_one()
+                if merge_waiting:
+                    break
+                await asyncio.sleep(0.02)
+            assert merge_waiting is True
+
+        assert import_task is not None
+        await asyncio.wait_for(import_task, timeout=5)
+        assert merge_task is not None
+        await asyncio.wait_for(merge_task, timeout=5)
+        async with AsyncSession(migrated_engine) as session:
+            state = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT item.feature_id, item.source_present
+                        FROM feature.curation_items AS item
+                        JOIN feature.curation_collections AS collection
+                          ON collection.collection_id = item.collection_id
+                        WHERE collection.collection_key = :collection_key
+                          AND item.external_item_id = 'loser-item'
+                        """
+                    ),
+                    {"collection_key": collection_key},
+                )
+            ).one()
+            loser_count = (
+                await session.execute(
+                    text(
+                        "SELECT count(*) FROM feature.curation_items "
+                        "WHERE feature_id = 'f_loser'"
+                    )
+                )
+            ).scalar_one()
+        assert state == ("f_master", True)
+        assert loser_count == 0
     finally:
-        if task is not None and not task.done():
-            task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await task
+        for task in (import_task, merge_task):
+            if task is not None and not task.done():
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
         async with migrated_engine.begin() as connection:
             await connection.execute(
                 text(

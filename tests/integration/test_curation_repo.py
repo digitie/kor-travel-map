@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.infra import curated_repo
 from kortravelmap.infra.curation_repo import (
@@ -1122,6 +1123,29 @@ async def test_legacy_identity_move_does_not_overwrite_occupied_target(
         )
     await migrated_session.flush()
 
+    with pytest.raises(DBAPIError, match="reserved"):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_features (
+                        theme_id, feature_id, source_id, curation_status,
+                        selection_origin, display_title, metadata
+                    ) VALUES (
+                        CAST(:theme_id AS uuid), :feature_id,
+                        CAST(:source_id AS uuid), 'curated', 'source_rule',
+                        'reserved marker injection',
+                        '{"merge_projection_detached": true}'::jsonb
+                    )
+                    """
+                ),
+                {
+                    "theme_id": theme_id,
+                    "source_id": source_id,
+                    "feature_id": _FEATURE_ID,
+                },
+            )
+
     legacy_id = str(
         (
             await migrated_session.execute(
@@ -1213,12 +1237,31 @@ async def test_legacy_identity_move_does_not_overwrite_occupied_target(
         )
     ).one()
     assert state == (False, True, "food_stop", "allowed", True)
+    assert (
+        await curated_repo.list_curated_features(
+            migrated_session,
+            theme_id=theme_id,
+            public_only=True,
+        )
+    ).items == ()
+
+    blocked = await curated_repo.update_curated_feature(
+        migrated_session,
+        curated_feature_id=legacy_id,
+        updates={
+            "curation_status": "curated",
+            "metadata": {},
+        },
+        actor="detached-attacker",
+    )
+    assert blocked is None
 
     await migrated_session.execute(
         text(
             """
             UPDATE feature.curated_features
-            SET curation_status = 'rejected',
+            SET curation_status = 'curated',
+                archived_at = NULL,
                 metadata = '{}'::jsonb,
                 updated_at = clock_timestamp()
             WHERE curated_feature_id = CAST(:legacy_id AS uuid)
@@ -1226,19 +1269,20 @@ async def test_legacy_identity_move_does_not_overwrite_occupied_target(
         ),
         {"legacy_id": legacy_id},
     )
-    marker = (
+    detached_projection = (
         await migrated_session.execute(
             text(
                 """
-                SELECT metadata @> '{"merge_projection_detached": true}'::jsonb
+                SELECT curation_status, archived_at IS NOT NULL,
+                       metadata @> '{"merge_projection_detached": true}'::jsonb
                 FROM feature.curated_features
                 WHERE curated_feature_id = CAST(:legacy_id AS uuid)
                 """
             ),
             {"legacy_id": legacy_id},
         )
-    ).scalar_one()
-    assert marker is True
+    ).one()
+    assert detached_projection == ("archived", True, True)
     await migrated_session.execute(
         text(
             "DELETE FROM feature.curated_features "
@@ -1516,6 +1560,48 @@ async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
         "blocked",
         "post-reinsert-operator",
     )
+    manual_collection = await create_curation_collection(
+        migrated_session,
+        collection_key="manual-cross-collection",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="동일 theme/source의 수동 컬렉션",
+    )
+    manual_item, inserted = await add_curation_item(
+        migrated_session,
+        collection_id=manual_collection.collection_id,
+        feature_id=_FEATURE_ID,
+        source_record_key="curation-reinsert-record",
+        external_item_id="curation-reinsert-record",
+        place_name="수동 컬렉션 장소",
+        actor="manual-collection-writer",
+    )
+    assert inserted is True
+    changed_manual = await update_curation_item(
+        migrated_session,
+        collection_id=manual_collection.collection_id,
+        curation_item_id=manual_item.curation_item_id,
+        updates={
+            "item_title": "수동 컬렉션에서만 수정",
+            "curation_relation": "food_stop",
+        },
+        actor="manual-collection-operator",
+    )
+    assert changed_manual is not None
+    assert changed_manual.item_title == "수동 컬렉션에서만 수정"
+    assert changed_manual.curation_relation == "food_stop"
+    unchanged_legacy = (
+        await migrated_session.execute(
+            text(
+                "SELECT curation_status, curation_relation, reuse_policy, "
+                "operator_updated_by "
+                "FROM feature.curated_features "
+                "WHERE curated_feature_id = CAST(:replacement_id AS uuid)"
+            ),
+            {"replacement_id": replacement_id},
+        )
+    ).one()
+    assert unchanged_legacy == replacement_legacy
     identity_rows = (
         await migrated_session.execute(
             text(

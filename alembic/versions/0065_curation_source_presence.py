@@ -51,6 +51,25 @@ BEGIN
         RETURN NEW;
     END IF;
 
+    -- detach marker는 merge/trigger 내부 상태다. 일반 INSERT 또는 top-level
+    -- UPDATE로 주입해 canonical sync와 공개 projection을 우회할 수 없다.
+    IF TG_OP = 'INSERT'
+       AND NEW.metadata @> '{"merge_projection_detached": true}'::jsonb
+    THEN
+        RAISE EXCEPTION
+            'merge_projection_detached metadata is reserved'
+            USING ERRCODE = '23514';
+    END IF;
+    IF TG_OP = 'UPDATE'
+       AND NOT OLD.metadata @> '{"merge_projection_detached": true}'::jsonb
+       AND NEW.metadata @> '{"merge_projection_detached": true}'::jsonb
+       AND pg_trigger_depth() = 1
+    THEN
+        RAISE EXCEPTION
+            'merge_projection_detached metadata is reserved'
+            USING ERRCODE = '23514';
+    END IF;
+
     -- Feature merge가 충돌 해소용으로 archive한 legacy projection은 더 이상
     -- canonical membership의 source가 아니다. 이후 운영 도구가 이 projection의
     -- 설명 등을 수정하거나 삭제해도 survivor를 되감지 않는다.
@@ -65,11 +84,20 @@ BEGIN
             -- ``metadata`` PATCH가 내부 detach marker를 제거해도 즉시 복원한다.
             -- 이 UPDATE의 재진입은 NEW marker 분기에서 끝나므로 canonical에는
             -- 어떤 source/operator revision도 전파하지 않는다.
-            IF NOT NEW.metadata @> '{"merge_projection_detached": true}'::jsonb THEN
+            IF NOT NEW.metadata @> '{"merge_projection_detached": true}'::jsonb
+               OR NEW.curation_status <> 'archived'
+               OR NEW.archived_at IS NULL
+            THEN
                 UPDATE feature.curated_features
-                SET metadata = NEW.metadata || jsonb_build_object(
+                SET curation_status = 'archived',
+                    metadata = NEW.metadata || jsonb_build_object(
                         'merge_projection_detached',
                         true
+                    ),
+                    archived_at = COALESCE(
+                        NEW.archived_at,
+                        OLD.archived_at,
+                        clock_timestamp()
                     )
                 WHERE curated_feature_id = NEW.curated_feature_id;
             END IF;
@@ -211,10 +239,13 @@ BEGIN
           AND source_present;
 
         UPDATE feature.curated_features
-        SET metadata = metadata || jsonb_build_object(
-                'merge_projection_detached',
-                true
-            )
+        SET curation_status = 'archived',
+            metadata = metadata || jsonb_build_object(
+                    'merge_projection_detached',
+                    true
+                ),
+            archived_at = COALESCE(archived_at, clock_timestamp()),
+            updated_at = clock_timestamp()
         WHERE curated_feature_id = NEW.curated_feature_id;
         RETURN NEW;
     END IF;
@@ -634,19 +665,32 @@ def upgrade() -> None:
     op.execute(
         """
         UPDATE feature.curated_features
-        SET operator_updated_by = COALESCE(rejected_by, selected_by),
-            operator_updated_at = COALESCE(rejected_at, selected_at, updated_at)
-        WHERE selection_origin IN ('admin', 'external_api')
+        SET archived_at = COALESCE(archived_at, updated_at, now())
+        WHERE curation_status = 'archived'
+          AND archived_at IS NULL
         """
     )
     op.execute(
-        "ALTER TABLE feature.curated_features "
-        "ENABLE TRIGGER trg_sync_curated_feature_collection"
+        """
+        UPDATE feature.curated_features
+        SET operator_updated_by = COALESCE(rejected_by, selected_by),
+            operator_updated_at = COALESCE(rejected_at, selected_at, updated_at)
+        WHERE selection_origin IN ('admin', 'external_api')
+           OR curation_status = 'archived'
+        """
     )
     op.execute(
         """
         UPDATE feature.curation_items
         SET source_updated_at = updated_at
+        """
+    )
+    op.execute(
+        """
+        UPDATE feature.curation_items
+        SET archived_at = COALESCE(archived_at, updated_at, now())
+        WHERE status = 'archived'
+          AND archived_at IS NULL
         """
     )
     op.execute(
@@ -752,13 +796,30 @@ def upgrade() -> None:
                 survivor.external_item_id,
                 survivor.feature_id,
                 survivor.curation_item_id
+        ), duplicate_ids AS MATERIALIZED (
+            SELECT duplicate.curation_item_id
+            FROM feature.curation_items AS duplicate
+            JOIN reconciled
+              ON duplicate.collection_id = reconciled.collection_id
+             AND duplicate.external_item_id = reconciled.external_item_id
+             AND duplicate.feature_id IS NOT DISTINCT FROM reconciled.feature_id
+            WHERE duplicate.curation_item_id <> reconciled.curation_item_id
+        ), detached_legacy AS (
+            UPDATE feature.curated_features AS legacy
+            SET curation_status = 'archived',
+                metadata = legacy.metadata || jsonb_build_object(
+                    'merge_projection_detached',
+                    true
+                ),
+                archived_at = COALESCE(legacy.archived_at, clock_timestamp()),
+                updated_at = clock_timestamp()
+            FROM duplicate_ids
+            WHERE legacy.curated_feature_id = duplicate_ids.curation_item_id
+            RETURNING legacy.curated_feature_id
         )
         DELETE FROM feature.curation_items AS duplicate
-        USING reconciled
-        WHERE duplicate.collection_id = reconciled.collection_id
-          AND duplicate.external_item_id = reconciled.external_item_id
-          AND duplicate.feature_id IS NOT DISTINCT FROM reconciled.feature_id
-          AND duplicate.curation_item_id <> reconciled.curation_item_id
+        USING duplicate_ids
+        WHERE duplicate.curation_item_id = duplicate_ids.curation_item_id
         """
     )
     op.drop_index(
@@ -797,6 +858,10 @@ def upgrade() -> None:
         schema="feature",
     )
     op.execute(_SYNC_FUNCTION_0065)
+    op.execute(
+        "ALTER TABLE feature.curated_features "
+        "ENABLE TRIGGER trg_sync_curated_feature_collection"
+    )
 
 
 def downgrade() -> None:

@@ -1424,8 +1424,20 @@ async def _lock_legacy_projections_for_item(
                           AND legacy.feature_id IS NOT DISTINCT FROM item.feature_id
                       )
                  )
+                JOIN feature.curated_themes AS theme
+                  ON theme.theme_id = legacy.theme_id
+                JOIN feature.curated_sources AS source
+                  ON source.source_id = legacy.source_id
                 WHERE item.collection_id = CAST(:collection_id AS uuid)
                   AND item.curation_item_id = CAST(:curation_item_id AS uuid)
+                  AND collection.collection_key =
+                      'legacy:' || theme.theme_slug || ':' || substr(md5(
+                          legacy.source_id::text || ':' ||
+                          COALESCE(
+                              NULLIF(btrim(legacy.display_title), ''),
+                              source.source_name
+                          )
+                      ), 1, 20)
                   AND legacy.archived_at IS NULL
                   AND NOT legacy.metadata
                       @> '{"merge_projection_detached": true}'::jsonb
@@ -1766,12 +1778,13 @@ async def update_curation_item(
     if not normalized:
         if not await _lock_collection(session, collection_id):
             return None
-        return await get_curation_item(
+        current = await get_curation_item(
             session,
             collection_id=collection_id,
             curation_item_id=curation_item_id,
             include_archived=True,
         )
+        return current if current is not None and current.archived_at is None else None
 
     source_owned_changed = bool(
         {
@@ -1963,10 +1976,22 @@ async def update_curation_item(
                     END,
                     updated_at = now(),
                     content_version = content_version + 1
-                FROM feature.curation_collections AS collection
+                FROM feature.curation_collections AS collection,
+                     feature.curated_themes AS theme,
+                     feature.curated_sources AS source
                 WHERE collection.collection_id = CAST(:collection_id AS uuid)
                   AND legacy.theme_id = collection.theme_id
                   AND legacy.source_id IS NOT DISTINCT FROM collection.source_id
+                  AND theme.theme_id = legacy.theme_id
+                  AND source.source_id = legacy.source_id
+                  AND collection.collection_key =
+                      'legacy:' || theme.theme_slug || ':' || substr(md5(
+                          legacy.source_id::text || ':' ||
+                          COALESCE(
+                              NULLIF(btrim(legacy.display_title), ''),
+                              source.source_name
+                          )
+                      ), 1, 20)
                   AND legacy.feature_id IS NOT DISTINCT FROM :feature_id
                   AND legacy.archived_at IS NULL
                   AND (
@@ -2364,6 +2389,30 @@ async def import_curation_rows(
                 "SELECT pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0))"
             )
         )
+        feature_ids = sorted(
+            {str(row.feature_id) for row in rows if row.feature_id is not None}
+        )
+        if feature_ids:
+            active_feature_ids = set(
+                (
+                    await session.execute(
+                        text(
+                            "SELECT feature_id FROM feature.features "
+                            "WHERE feature_id = ANY(CAST(:feature_ids AS text[])) "
+                            "AND deleted_at IS NULL "
+                            "AND status NOT IN ('deleted', 'hidden') "
+                            "ORDER BY feature_id FOR UPDATE"
+                        ),
+                        {"feature_ids": feature_ids},
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if active_feature_ids != set(feature_ids):
+                raise ValueError(
+                    "큐레이션 반영 중 Feature lifecycle이 변경되었습니다. 다시 preview하세요."
+                )
 
     representatives: dict[str, ResolvedCurationImportRow] = {}
     for row in rows:
@@ -2431,34 +2480,6 @@ async def import_curation_rows(
             ),
             {"collection_ids": collection_ids},
         )
-        feature_ids = sorted(
-            {
-                str(item["feature_id"])
-                for item in item_values
-                if item["feature_id"] is not None
-            }
-        )
-        if feature_ids:
-            active_feature_ids = set(
-                (
-                    await session.execute(
-                        text(
-                            "SELECT feature_id FROM feature.features "
-                            "WHERE feature_id = ANY(CAST(:feature_ids AS text[])) "
-                            "AND deleted_at IS NULL "
-                            "AND status NOT IN ('deleted', 'hidden') "
-                            "ORDER BY feature_id FOR UPDATE"
-                        ),
-                        {"feature_ids": feature_ids},
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            if active_feature_ids != set(feature_ids):
-                raise ValueError(
-                    "큐레이션 반영 중 Feature lifecycle이 변경되었습니다. 다시 preview하세요."
-                )
         items_payload = json.dumps(item_values, ensure_ascii=False)
         removed_rows = (
             (

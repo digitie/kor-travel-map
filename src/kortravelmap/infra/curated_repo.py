@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -19,8 +20,6 @@ from sqlalchemy import text
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -411,6 +410,7 @@ _PUBLIC_FEATURE_FILTERS_SQL: Final[str] = (
   AND t.visibility = 'public'
   AND cf.curation_status = 'curated'
   AND cf.archived_at IS NULL
+  AND NOT cf.metadata @> '{"merge_projection_detached": true}'::jsonb
 """
     + public_active_notice_filter_sql("f")
 )
@@ -619,6 +619,7 @@ _UPDATE_FEATURE_BASE_SQL: Final[str] = """
 UPDATE feature.curated_features
 SET {set_clause}
 WHERE curated_feature_id = CAST(:curated_feature_id AS uuid)
+  AND NOT metadata @> '{{"merge_projection_detached": true}}'::jsonb
 RETURNING curated_feature_id::text
 """
 
@@ -1540,6 +1541,8 @@ async def create_curated_feature(
 ) -> CuratedFeature:
     """curated feature overlay 1건을 생성한다. commit은 호출자 책임."""
 
+    if metadata is not None and "merge_projection_detached" in metadata:
+        raise ValueError("merge_projection_detached metadata는 내부 전용입니다.")
     _validate_choice(curation_status, _CURATION_STATUSES, "curation_status")
     _validate_choice(selection_origin, _SELECTION_ORIGINS, "selection_origin")
     _validate_choice(curation_relation, _CURATION_RELATIONS, "curation_relation")
@@ -1627,6 +1630,10 @@ async def update_curated_feature(
         if key == "reuse_policy":
             _validate_choice(str(value), _REUSE_POLICIES, key)
         if key == "metadata":
+            if not isinstance(value, Mapping):
+                raise ValueError("curated feature metadata must be an object")
+            if "merge_projection_detached" in value:
+                raise ValueError("merge_projection_detached metadata는 내부 전용입니다.")
             set_parts.append("metadata = CAST(:metadata_json AS jsonb)")
             params["metadata_json"] = _json_dumps(value)
         else:

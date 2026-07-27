@@ -492,6 +492,24 @@ def test_admin_can_patch_and_archive_single_curation_item(
 
 
 @pytest.mark.unit
+def test_admin_empty_patch_does_not_expose_archived_curation_item(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    async def _archived_noop(_session: object, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(module.curation_repo, "update_curation_item", _archived_noop)
+    response = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        json={},
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.unit
 def test_admin_item_post_is_create_only(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -733,4 +751,35 @@ def test_curated_create_rejects_spoofable_provenance_fields(
             field: value,
         },
     )
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        (
+            "post",
+            "/v1/admin/features/curated",
+            {
+                "theme_id": "11111111-1111-4111-8111-111111111111",
+                "feature_id": "feature:reserved-metadata",
+                "source_id": "22222222-2222-4222-8222-222222222222",
+                "metadata": {"merge_projection_detached": True},
+            },
+        ),
+        (
+            "patch",
+            "/v1/admin/features/curated/cf-1",
+            {"metadata": {"merge_projection_detached": False}},
+        ),
+    ],
+)
+def test_curated_write_rejects_reserved_detach_marker(
+    client: TestClient,
+    method: str,
+    path: str,
+    payload: dict[str, Any],
+) -> None:
+    response = client.request(method, path, json=payload)
     assert response.status_code == 422

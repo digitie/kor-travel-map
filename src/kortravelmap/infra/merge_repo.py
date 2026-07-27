@@ -131,8 +131,17 @@ DELETE FROM provider_sync.source_links WHERE feature_id = :loser
 RETURNING source_entity_key
 """
 
-# Legacy DML은 row lock을 잡은 뒤 collection/item trigger로 들어온다. Merge도
-# 같은 legacy→collection→item 순서를 사용해 양방향 sync와 교착하지 않는다.
+_LOCK_FEATURES_SQL: Final[str] = """
+SELECT feature_id
+FROM feature.features
+WHERE feature_id IN (:master, :loser)
+ORDER BY feature_id
+FOR UPDATE
+"""
+
+# Merge는 Feature lifecycle을 먼저 고정한 뒤 legacy→collection→item 순서로
+# 잠근다. Legacy DML의 row→collection→item 순서와 import의 Feature→collection
+# 순서를 모두 확장하므로 양방향 sync/import와 교착하지 않는다.
 _LOCK_CURATION_LEGACY_PROJECTIONS_SQL: Final[str] = """
 SELECT legacy.curated_feature_id
 FROM feature.curated_features AS legacy
@@ -142,9 +151,9 @@ ORDER BY legacy.curated_feature_id
 FOR UPDATE OF legacy
 """
 
-# Legacy-backed writer와 merge는 legacy row를 먼저 잠근 뒤 collection(parent) →
-# item(child) 순서로 들어간다. 영향 collection은 UUID 순서로 잠가 import/admin
-# writer와의 교착을 막는다.
+# Feature를 선잠근 merge와 legacy-backed writer는 legacy row를 거쳐
+# collection(parent)→item(child) 순서로 들어간다. 영향 collection은 UUID
+# 순서로 잠가 import/admin writer와의 교착을 막는다.
 _LOCK_CURATION_COLLECTIONS_SQL: Final[str] = """
 SELECT collection.collection_id
 FROM feature.curation_collections AS collection
@@ -367,13 +376,25 @@ SET curation_status = CASE item.status
     content_version = legacy.content_version + 1
 FROM feature.curation_items AS item
 JOIN feature.curation_collections AS collection
-  ON collection.collection_id = item.collection_id
+  ON collection.collection_id = item.collection_id,
+     feature.curated_themes AS theme,
+     feature.curated_sources AS source
 WHERE item.feature_id = :master
   AND legacy.feature_id = :master
   AND legacy.archived_at IS NULL
   AND NOT legacy.metadata @> '{"merge_projection_detached": true}'::jsonb
   AND legacy.theme_id = collection.theme_id
   AND legacy.source_id IS NOT DISTINCT FROM collection.source_id
+  AND theme.theme_id = legacy.theme_id
+  AND source.source_id = legacy.source_id
+  AND collection.collection_key =
+      'legacy:' || theme.theme_slug || ':' || substr(md5(
+          legacy.source_id::text || ':' ||
+          COALESCE(
+              NULLIF(btrim(legacy.display_title), ''),
+              source.source_name
+          )
+      ), 1, 20)
   AND (
       legacy.curated_feature_id = item.curation_item_id
       OR (
@@ -549,6 +570,12 @@ async def apply_feature_merge(
     if master_id == loser_id:
         raise MergeConflictError(f"master와 loser가 같음 — {master_id!r}")
 
+    (
+        await session.execute(
+            text(_LOCK_FEATURES_SQL),
+            {"master": master_id, "loser": loser_id},
+        )
+    ).fetchall()
     (
         await session.execute(
             text(_LOCK_CURATION_LEGACY_PROJECTIONS_SQL),
