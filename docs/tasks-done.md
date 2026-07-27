@@ -3,6 +3,23 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-27 — T-VN-H12 live acceptance status marker 좌표 run-unique jitter (live 검증 완료)
+
+- [x] **T-VN-H12** — `admin-feature-acceptance-write.live.spec.ts`의 status marker 좌표를 `sha256(RUN_ID)`
+  ±0.25° run-unique jitter(`STATUS_MARKER_LON/LAT`) + `recenterMapTo`로 전환해 죽은 run leftover의
+  supercluster 병합(marker aria-label 소실, P2)을 제거. base `LON`/`LAT`는 127.5/36.5 고정 유지
+  (weather/price/correction/search는 seeding helper `admin_feature_live_fixture.py` `_LON`/`_LAT` 고정과
+  좌표 동기 필요 — featureId/query 단언이라 supercluster 무관).
+  - **경과**: #855(shared base jitter, merged) → **n150 c7-v6 live 검증에서 weather/price seeding desync
+    발견**(공식 runner latent bug: helper 고정 seed vs spec jitter 조회) → #859에서 **status-only jitter로
+    국한 수정**(rebase over #858, merged `baa04c08`).
+  - **검증**: n150 c7-v6 live(map=c8ed6164/pinvi=6a035695) status marker 단계 통과(recenter 실증) +
+    e2e type-check + 4각도 적대 정적검증. weather/price는 고정 base = LIVE-01 통과 baseline이라 무변경
+    (full official-lane 재검증 불필요 — behavioral 변경은 status marker에 국한). cleanup featureId 기반이라
+    leftover 0.
+  - **교훈**(journal 2026-07-27): 정적 적대검증이 이 회귀를 놓친 이유 = 외부 Python seeding helper의 좌표
+    계약을 정적 모델에 못 넣음. cross-process 좌표 계약은 live 검증 필요.
+
 ## 2026-07-27 — T-VN-H17 map#684 조건 #8 검증범위 축소 후 종결 (LIVE-01 후속 7/7 close)
 
 - [x] **T-VN-H17** — H16에서 keep-open된 map#684를 **조건 #8 검증범위 명시 축소**로 종결(사용자 결정:

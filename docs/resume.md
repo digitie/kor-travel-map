@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-27 (claude) — 🎯 T-VN-H12 완결: status marker 좌표 jitter n150 live 검증
+
+**다음 한 작업**: Lane A `T-VN-H19`(public API key 양성 production runtime 경계 실증 — #854 C2 등가처리
+되돌린 항목: credential-safe 임시 public key로 curated 대표 경로 200·오키/폐기 401 status-only 실증 후
+즉시 폐기). tasks.md 인덱스 정본.
+
+- **완료(이번 세션)**: `T-VN-H12` — status marker 좌표만 `sha256(RUN_ID)` jitter(`STATUS_MARKER_LON/LAT`) +
+  `recenterMapTo`. **n150 c7-v6 live 검증**(map=c8ed6164)에서 status marker 통과. #855(shared base jitter)의
+  weather/price seeding desync를 live가 잡아 **#859에서 status-only로 국한 수정**(#858 뒤 rebase, merged
+  `baa04c08`). weather/price는 고정 base = LIVE-01 baseline이라 무변경. 상세 journal/tasks-done 2026-07-27.
+- **교훈**: 정적 적대검증이 외부 Python seeding helper 좌표 계약을 못 모델링 → cross-process 좌표는 live 필요.
+- **직전 완료(세션)**: T-VN-H06·T-ADM-C6c+T-VN-03(#392 close)·T-VN-H16/H17(LIVE-01 후속 7/7 close).
+
 ## 2026-07-27 (codex) — T-VN-44 구현·적대 리뷰 진행 중
 
 **다음 한 작업**: 최종 전체 gate와 최신 exact diff 3인 재리뷰를 마친 뒤 PR·CI green·GitHub
