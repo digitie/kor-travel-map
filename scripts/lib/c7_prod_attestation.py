@@ -253,10 +253,11 @@ def _public_origin(
     # IPv6 리터럴 host는 netloc 재구성 시 bracket으로 감싸야 `:port`와 모호하지 않다
     # (예: `2001:db8::1` + `:443` → `[2001:db8::1]:443`). 압축 canonical 형으로 정규화해
     # 동등한 IPv6 표기가 같은 origin으로 해시되게 한다. domain/IPv4는 무변경.
-    if isinstance(address, ipaddress.IPv6Address):
-        netloc_host = f"[{address.compressed}]"
-    else:
-        netloc_host = host
+    netloc_host = (
+        f"[{address.compressed}]"
+        if isinstance(address, ipaddress.IPv6Address)
+        else host
+    )
     return urlunsplit(
         ("wss" if websocket else "https", f"{netloc_host}{port}", "", "", "")
     )
