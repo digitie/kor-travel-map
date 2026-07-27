@@ -89,6 +89,21 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                         'feature:migration-theft-b', 'place',
                         'migration theft B fixture',
                         '01070100', '{}'::jsonb, 'active'
+                    ),
+                    (
+                        'feature:migration-theft-c', 'place',
+                        'migration theft C fixture',
+                        '01070100', '{}'::jsonb, 'active'
+                    ),
+                    (
+                        'feature:migration-theft-master', 'place',
+                        'migration theft canonical master fixture',
+                        '01070100', '{}'::jsonb, 'active'
+                    ),
+                    (
+                        'feature:migration-stable-group-new', 'place',
+                        'migration stable group new fixture',
+                        '01070100', '{}'::jsonb, 'active'
                     )
                 """
             )
@@ -227,6 +242,51 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                     'external-principal', 'migration external provenance',
                     'nearby_option', 'manual_review'
                 FROM theme CROSS JOIN source
+                """
+            )
+        )
+        # collection_key는 admin이 임의 지정할 수 있다. 0065의 최종 stable base,
+        # split key와 과거 staging namespace를 모두 선점해도 migration이 수동
+        # collection을 덮거나 unique violation으로 중단하면 안 된다.
+        await connection.execute(
+            text(
+                """
+                WITH legacy_collection AS (
+                    SELECT
+                        collection.collection_id,
+                        collection.theme_id,
+                        'legacy:' || collection.theme_id::text || ':' ||
+                            collection.source_id::text || ':' ||
+                            md5(collection.title) AS base_key
+                    FROM feature.curated_features AS legacy
+                    JOIN feature.curation_items AS item
+                      ON item.curation_item_id =
+                         legacy.curated_feature_id
+                    JOIN feature.curation_collections AS collection
+                      ON collection.collection_id = item.collection_id
+                    WHERE legacy.display_title =
+                          'migration legacy override'
+                )
+                INSERT INTO feature.curation_collections (
+                    collection_key, theme_id, title
+                )
+                SELECT
+                    base_key,
+                    theme_id,
+                    'manual stable base collision'
+                FROM legacy_collection
+                UNION ALL
+                SELECT
+                    base_key || ':split:' || collection_id::text,
+                    theme_id,
+                    'manual stable split collision'
+                FROM legacy_collection
+                UNION ALL
+                SELECT
+                    'legacy:0065-stage:' || collection_id::text,
+                    theme_id,
+                    'manual upgrade staging collision'
+                FROM legacy_collection
                 """
             )
         )
@@ -373,6 +433,69 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
         await connection.execute(
             text(
                 """
+                INSERT INTO feature.curation_items (
+                    collection_id,
+                    feature_id,
+                    source_record_key,
+                    external_item_id,
+                    place_name,
+                    status,
+                    created_at
+                )
+                SELECT
+                    item.collection_id,
+                    'feature:migration-theft-master',
+                    item.source_record_key,
+                    item.external_item_id,
+                    'migration theft canonical master',
+                    'included',
+                    item.created_at
+                FROM feature.curation_items AS item
+                JOIN feature.curated_features AS legacy
+                  ON legacy.curated_feature_id =
+                     item.curation_item_id
+                WHERE legacy.display_title =
+                      'migration theft title'
+                  AND legacy.feature_id =
+                      'feature:migration-theft-a'
+                UNION ALL
+                SELECT
+                    item.collection_id,
+                    'feature:migration-theft-master',
+                    NULL,
+                    'migration-theft-pre-owner-other',
+                    'migration theft pre-owner other',
+                    'included',
+                    now() - interval '1 day'
+                FROM feature.curation_items AS item
+                JOIN feature.curated_features AS legacy
+                  ON legacy.curated_feature_id =
+                     item.curation_item_id
+                WHERE legacy.display_title =
+                      'migration theft title'
+                  AND legacy.feature_id =
+                      'feature:migration-theft-a'
+                """
+            )
+        )
+        # owner 탈취 당시 projection이 이미 operator tombstone이어도 0065 복구가
+        # canonical-only companion과 함께 원 theme collection으로 이동해야 한다.
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curated_features
+                SET curation_status = 'archived',
+                    selection_origin = 'admin',
+                    archived_at = now(),
+                    updated_at = clock_timestamp()
+                WHERE display_title = 'migration theft title'
+                  AND feature_id = 'feature:migration-theft-a'
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
                 UPDATE feature.curated_themes
                 SET theme_slug = 'migration-owner-a-renamed',
                     updated_at = clock_timestamp()
@@ -428,6 +551,127 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
                 """
             )
         )
+        await connection.execute(
+            text(
+                """
+                INSERT INTO feature.curation_items (
+                    collection_id,
+                    feature_id,
+                    external_item_id,
+                    place_name,
+                    status,
+                    created_at
+                )
+                SELECT
+                    item.collection_id,
+                    'feature:migration-theft-master',
+                    item.external_item_id,
+                    'migration theft B canonical pair',
+                    'included',
+                    item.created_at
+                FROM feature.curation_items AS item
+                JOIN feature.curated_features AS legacy
+                  ON legacy.curated_feature_id =
+                     item.curation_item_id
+                WHERE legacy.display_title =
+                      'migration theft title'
+                  AND legacy.feature_id =
+                      'feature:migration-theft-b'
+                UNION ALL
+                SELECT
+                    item.collection_id,
+                    'feature:migration-theft-master',
+                    'migration-theft-ambiguous-owner',
+                    'migration theft ambiguous owner',
+                    'included',
+                    now()
+                FROM feature.curation_items AS item
+                JOIN feature.curated_features AS legacy
+                  ON legacy.curated_feature_id =
+                     item.curation_item_id
+                WHERE legacy.display_title =
+                      'migration theft title'
+                  AND legacy.feature_id =
+                      'feature:migration-theft-b'
+                """
+            )
+        )
+        # 같은 legacy key를 세 번째 theme가 다시 사용하면 old collection 하나에
+        # A/B/C projection과 canonical companion이 함께 섞인다.
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curated_themes
+                SET theme_slug = 'migration-owner-b-renamed',
+                    updated_at = clock_timestamp()
+                WHERE theme_slug = 'migration-owner-a'
+                  AND theme_name = 'migration owner B'
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
+                WITH source AS (
+                    SELECT source_id
+                    FROM feature.curated_sources
+                    WHERE provider = 'migration-provider'
+                      AND dataset_key = 'migration-dataset'
+                ), theme AS (
+                    INSERT INTO feature.curated_themes (
+                        theme_slug, theme_name, theme_group, visibility
+                    ) VALUES (
+                        'migration-owner-a',
+                        'migration owner C',
+                        'test',
+                        'public'
+                    )
+                    RETURNING theme_id
+                )
+                INSERT INTO feature.curated_features (
+                    theme_id, feature_id, source_id,
+                    curation_status, selection_origin, display_title
+                )
+                SELECT
+                    theme.theme_id,
+                    'feature:migration-theft-c',
+                    source.source_id,
+                    'curated',
+                    'source_rule',
+                    'migration theft title'
+                FROM theme CROSS JOIN source
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
+                INSERT INTO feature.curation_items (
+                    collection_id,
+                    feature_id,
+                    external_item_id,
+                    place_name,
+                    status,
+                    created_at
+                )
+                SELECT
+                    item.collection_id,
+                    'feature:migration-theft-master',
+                    'migration-theft-post-owner',
+                    'migration theft post-owner',
+                    'included',
+                    now() + interval '1 day'
+                FROM feature.curation_items AS item
+                JOIN feature.curated_features AS legacy
+                  ON legacy.curated_feature_id =
+                     item.curation_item_id
+                WHERE legacy.display_title =
+                      'migration theft title'
+                  AND legacy.feature_id =
+                      'feature:migration-theft-c'
+                """
+            )
+        )
 
 
 async def test_source_presence_upgrade_downgrade_forward_recovery(
@@ -458,6 +702,51 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
         target_engine = make_async_engine(target_dsn)
         upgraded_column, upgraded_indexes = await _schema_state(target_engine)
         assert upgraded_column == ("NO", "true")
+        async with target_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    UPDATE feature.curation_collections AS collection
+                    SET status = 'archived',
+                        visibility = 'admin_only',
+                        updated_by = 'migration-collection-operator',
+                        archived_at = now(),
+                        updated_at = clock_timestamp()
+                    FROM feature.curated_features AS legacy
+                    JOIN feature.curation_items AS item
+                      ON item.legacy_projection_id =
+                         legacy.curated_feature_id
+                    WHERE legacy.display_title =
+                          'migration legacy override'
+                      AND collection.collection_id =
+                          item.collection_id
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_features (
+                        theme_id,
+                        feature_id,
+                        source_id,
+                        curation_status,
+                        selection_origin,
+                        display_title
+                    )
+                    SELECT
+                        legacy.theme_id,
+                        'feature:migration-stable-group-new',
+                        legacy.source_id,
+                        'curated',
+                        'source_rule',
+                        legacy.display_title
+                    FROM feature.curated_features AS legacy
+                    WHERE legacy.display_title =
+                          'migration legacy override'
+                    """
+                )
+            )
         async with target_engine.connect() as connection:
             provenance_columns = {
                 (str(table_name), str(column_name))
@@ -484,9 +773,9 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                         "operator_updated_at IS NOT NULL "
                         "FROM feature.curated_features "
                         "WHERE display_title IN ("
-                        "'migration external provenance',"
-                        "'migration legacy override'"
-                        ") "
+                            "'migration external provenance',"
+                            "'migration legacy override'"
+                            ") AND operator_updated_by IS NOT NULL "
                         "ORDER BY display_title"
                     )
                 )
@@ -544,10 +833,15 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                               'legacy:' || theme_id::text || ':' ||
                               source_id::text || ':' || md5(title)
                           )
-                          AND collection_key IS DISTINCT FROM (
+                          AND collection_key NOT LIKE (
                               'legacy:' || theme_id::text || ':' ||
                               source_id::text || ':' || md5(title) ||
-                              ':split:' || collection_id::text
+                              ':split:legacy%'
+                          )
+                          AND collection_key NOT LIKE (
+                              'legacy:' || theme_id::text || ':' ||
+                              source_id::text || ':' || md5(title) ||
+                              ':split:' || collection_id::text || '%'
                           )
                         """
                     )
@@ -598,6 +892,145 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     )
                 )
             ).scalar_one()
+            companion_owner_mismatch_count = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.curation_items AS companion
+                        JOIN feature.curation_collections AS collection
+                          ON collection.collection_id =
+                             companion.collection_id
+                        JOIN feature.curated_features AS source_projection
+                          ON source_projection.feature_id =
+                             'feature:migration-theft-a'
+                        WHERE companion.place_name =
+                              'migration theft canonical master'
+                          AND (
+                              collection.theme_id <>
+                                  source_projection.theme_id
+                              OR collection.source_id IS DISTINCT FROM
+                                  source_projection.source_id
+                              OR collection.status <> 'published'
+                              OR collection.visibility <> 'public'
+                          )
+                        """
+                    )
+                )
+            ).scalar_one()
+            second_owner_pair_mismatch_count = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.curation_items AS companion
+                        JOIN feature.curation_collections AS collection
+                          ON collection.collection_id =
+                             companion.collection_id
+                        JOIN feature.curated_features AS source_projection
+                          ON source_projection.feature_id =
+                             'feature:migration-theft-b'
+                        WHERE companion.place_name =
+                              'migration theft B canonical pair'
+                          AND (
+                              collection.theme_id <>
+                                  source_projection.theme_id
+                              OR collection.source_id IS DISTINCT FROM
+                                  source_projection.source_id
+                              OR collection.status <> 'published'
+                              OR collection.visibility <> 'public'
+                          )
+                        """
+                    )
+                )
+            ).scalar_one()
+            ambiguous_companion_quarantine_count = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.curation_items AS companion
+                        JOIN feature.curation_collections AS collection
+                          ON collection.collection_id =
+                             companion.collection_id
+                        WHERE companion.external_item_id IN (
+                              'migration-theft-pre-owner-other',
+                              'migration-theft-ambiguous-owner'
+                          )
+                          AND collection.status = 'draft'
+                          AND collection.visibility = 'admin_only'
+                          AND collection.metadata @>
+                              '{"migration_quarantine": "0065"}'::jsonb
+                        """
+                    )
+                )
+            ).scalar_one()
+            post_theft_companion_owner_mismatch_count = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.curation_items AS companion
+                        JOIN feature.curation_collections AS collection
+                          ON collection.collection_id =
+                             companion.collection_id
+                        JOIN feature.curated_features AS source_projection
+                          ON source_projection.feature_id =
+                             'feature:migration-theft-c'
+                        WHERE companion.external_item_id =
+                              'migration-theft-post-owner'
+                          AND (
+                              collection.theme_id <>
+                                  source_projection.theme_id
+                              OR collection.source_id IS DISTINCT FROM
+                                  source_projection.source_id
+                              OR collection.status <> 'published'
+                              OR collection.visibility <> 'public'
+                          )
+                        """
+                    )
+                )
+            ).scalar_one()
+            manual_collision_keys_preserved = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.curation_collections
+                        WHERE title IN (
+                            'manual stable base collision',
+                            'manual stable split collision',
+                            'manual upgrade staging collision'
+                        )
+                        """
+                    )
+                )
+            ).scalar_one()
+            stable_group_collection_state = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT
+                            count(DISTINCT item.collection_id),
+                            bool_and(
+                                collection.status = 'archived'
+                                AND collection.visibility = 'admin_only'
+                                AND collection.updated_by =
+                                    'migration-collection-operator'
+                            )
+                        FROM feature.curated_features AS legacy
+                        JOIN feature.curation_items AS item
+                          ON item.legacy_projection_id =
+                             legacy.curated_feature_id
+                        JOIN feature.curation_collections AS collection
+                          ON collection.collection_id =
+                             item.collection_id
+                        WHERE legacy.display_title =
+                              'migration legacy override'
+                        """
+                    )
+                )
+            ).one()
         assert provenance_columns == {
             ("curated_features", "operator_updated_by"),
             ("curated_features", "operator_updated_at"),
@@ -611,6 +1044,12 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
         assert unstable_legacy_collection_count == 0
         assert split_collection_state == (2, 1, 1)
         assert stolen_owner_mismatch_count == 0
+        assert companion_owner_mismatch_count == 0
+        assert second_owner_pair_mismatch_count == 0
+        assert post_theft_companion_owner_mismatch_count == 0
+        assert ambiguous_companion_quarantine_count == 2
+        assert manual_collision_keys_preserved == 3
+        assert stable_group_collection_state == (1, True)
         assert legacy_provenance == [
             ("migration external provenance", "external-principal", True),
             ("migration legacy override", "external-principal", True),
@@ -893,6 +1332,26 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     """
                 )
             )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO feature.curation_collections (
+                        collection_key, theme_id, title
+                    )
+                    SELECT
+                        'legacy:0065-downgrade-stage:' ||
+                            collection.collection_id::text,
+                        collection.theme_id,
+                        'manual downgrade staging collision'
+                    FROM feature.curation_collections AS collection
+                    WHERE collection.source_id IS NOT NULL
+                      AND collection.metadata @>
+                          '{"migrated_from": "feature.curated_features"}'::jsonb
+                    ORDER BY collection.collection_id
+                    LIMIT 1
+                    """
+                )
+            )
         await target_engine.dispose()
         await asyncio.to_thread(
             _run_alembic,
@@ -937,20 +1396,41 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                                   collection.title
                               ), 1, 20)
                           )
-                          AND collection.collection_key IS DISTINCT FROM (
+                          AND collection.collection_key NOT LIKE (
+                              'legacy:' || theme.theme_slug || ':' ||
+                              substr(md5(
+                                  collection.source_id::text || ':' ||
+                                  collection.title
+                              ), 1, 20) || ':split:legacy%'
+                          )
+                          AND collection.collection_key NOT LIKE (
                               'legacy:' || theme.theme_slug || ':' ||
                               substr(md5(
                                   collection.source_id::text || ':' ||
                                   collection.title
                               ), 1, 20) || ':split:' ||
-                              collection.collection_id::text
+                              collection.collection_id::text || '%'
                           )
+                        """
+                    )
+                )
+            ).scalar_one()
+            manual_downgrade_key_preserved = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.curation_collections
+                        WHERE title = 'manual downgrade staging collision'
+                          AND collection_key LIKE
+                              'legacy:0065-downgrade-stage:%'
                         """
                     )
                 )
             ).scalar_one()
         assert remaining_provenance_columns == 0
         assert old_key_mismatch_count == 0
+        assert manual_downgrade_key_preserved == 1
         assert "source_present" not in (
             downgraded_indexes["idx_curation_items_collection_status_order"]
         )
@@ -987,10 +1467,15 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                               'legacy:' || theme_id::text || ':' ||
                               source_id::text || ':' || md5(title)
                           )
-                          AND collection_key IS DISTINCT FROM (
+                          AND collection_key NOT LIKE (
                               'legacy:' || theme_id::text || ':' ||
                               source_id::text || ':' || md5(title) ||
-                              ':split:' || collection_id::text
+                              ':split:legacy%'
+                          )
+                          AND collection_key NOT LIKE (
+                              'legacy:' || theme_id::text || ':' ||
+                              source_id::text || ':' || md5(title) ||
+                              ':split:' || collection_id::text || '%'
                           )
                         """
                     )

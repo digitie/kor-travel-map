@@ -1327,6 +1327,153 @@ async def test_legacy_identity_move_does_not_overwrite_occupied_target(
     assert final_state == (False, "included", "food_stop")
 
 
+async def test_manual_collection_keys_cannot_block_legacy_projection_creation(
+    migrated_session: AsyncSession,
+) -> None:
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    legacy_id = str(uuid4())
+    second_legacy_id = str(uuid4())
+    second_feature_id = f"feature:manual-key-collision-{uuid4().hex}"
+    title = "manual key collision"
+    base_key = str(
+        (
+            await migrated_session.execute(
+                text(
+                    "SELECT 'legacy:' || CAST(:theme_id AS uuid)::text || ':' || "
+                    "CAST(:source_id AS uuid)::text || ':' || md5(:title)"
+                ),
+                {
+                    "theme_id": theme_id,
+                    "source_id": source_id,
+                    "title": title,
+                },
+            )
+        ).scalar_one()
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, detail, status
+            ) VALUES (
+                :feature_id, 'place', 'manual key collision second feature',
+                '01070100', '{}'::jsonb, 'active'
+            )
+            """
+        ),
+        {"feature_id": second_feature_id},
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.curation_collections (
+                collection_key, theme_id, title
+            ) VALUES
+                (
+                    :base_key,
+                    CAST(:theme_id AS uuid),
+                    'manual runtime base collision'
+                ),
+                (
+                    :split_key,
+                    CAST(:theme_id AS uuid),
+                    'manual runtime split collision'
+                )
+            """
+        ),
+        {
+            "base_key": base_key,
+            "split_key": f"{base_key}:split:legacy",
+            "theme_id": theme_id,
+        },
+    )
+
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.curated_features (
+                curated_feature_id, theme_id, feature_id, source_id,
+                curation_status, selection_origin, display_title
+            ) VALUES
+                (
+                    CAST(:legacy_id AS uuid),
+                    CAST(:theme_id AS uuid),
+                    :feature_id,
+                    CAST(:source_id AS uuid),
+                    'curated',
+                    'source_rule',
+                    :title
+                ),
+                (
+                    CAST(:second_legacy_id AS uuid),
+                    CAST(:theme_id AS uuid),
+                    :second_feature_id,
+                    CAST(:source_id AS uuid),
+                    'curated',
+                    'source_rule',
+                    :title
+                )
+            """
+        ),
+        {
+            "legacy_id": legacy_id,
+            "second_legacy_id": second_legacy_id,
+            "theme_id": theme_id,
+            "feature_id": _FEATURE_ID,
+            "second_feature_id": second_feature_id,
+            "source_id": source_id,
+            "title": title,
+        },
+    )
+
+    keys = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT collection.collection_key, collection.title
+                FROM feature.curation_collections AS collection
+                WHERE collection.collection_key IN (
+                        :base_key,
+                        :split_key,
+                        :resolved_key
+                    )
+                ORDER BY collection.collection_key
+                """
+            ),
+            {
+                "base_key": base_key,
+                "split_key": f"{base_key}:split:legacy",
+                "resolved_key": f"{base_key}:split:legacy:conflict:1",
+            },
+        )
+    ).all()
+    assert keys == [
+        (base_key, "manual runtime base collision"),
+        (
+            f"{base_key}:split:legacy",
+            "manual runtime split collision",
+        ),
+        (
+            f"{base_key}:split:legacy:conflict:1",
+            title,
+        ),
+    ]
+    assert (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM feature.curation_items AS item
+                JOIN feature.curation_collections AS collection
+                  ON collection.collection_id = item.collection_id
+                WHERE collection.collection_key = :resolved_key
+                """
+            ),
+            {"resolved_key": f"{base_key}:split:legacy:conflict:1"},
+        )
+    ).scalar_one() == 2
+
+
 async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
     migrated_session: AsyncSession,
 ) -> None:
@@ -1785,6 +1932,146 @@ async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
     ).items == ()
 
 
+async def test_legacy_reinsert_without_source_record_keeps_operator_tombstone(
+    migrated_session: AsyncSession,
+) -> None:
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    legacy_id = str(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_features (
+                        theme_id, feature_id, source_id,
+                        curation_status, selection_origin, display_title
+                    ) VALUES (
+                        CAST(:theme_id AS uuid),
+                        :feature_id,
+                        CAST(:source_id AS uuid),
+                        'curated',
+                        'source_rule',
+                        'source record 없는 목록'
+                    )
+                    RETURNING curated_feature_id::text
+                    """
+                ),
+                {
+                    "theme_id": theme_id,
+                    "source_id": source_id,
+                    "feature_id": _FEATURE_ID,
+                },
+            )
+        ).scalar_one()
+    )
+    item_identity = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT
+                    curation_item_id::text,
+                    collection_id::text,
+                    external_item_id
+                FROM feature.curation_items
+                WHERE legacy_projection_id = CAST(:legacy_id AS uuid)
+                """
+            ),
+            {"legacy_id": legacy_id},
+        )
+    ).one()
+    archived = await archive_curation_item(
+        migrated_session,
+        collection_id=item_identity.collection_id,
+        curation_item_id=item_identity.curation_item_id,
+        actor="null-source-tombstone-operator",
+    )
+    assert archived is not None
+    await migrated_session.execute(
+        text(
+            """
+            DELETE FROM feature.curated_features
+            WHERE curated_feature_id = CAST(:legacy_id AS uuid)
+            """
+        ),
+        {"legacy_id": legacy_id},
+    )
+    replacement_id = str(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_features (
+                        theme_id, feature_id, source_id,
+                        curation_status, selection_origin, display_title
+                    ) VALUES (
+                        CAST(:theme_id AS uuid),
+                        :feature_id,
+                        CAST(:source_id AS uuid),
+                        'curated',
+                        'source_rule',
+                        'source record 없는 목록 변경'
+                    )
+                    RETURNING curated_feature_id::text
+                    """
+                ),
+                {
+                    "theme_id": theme_id,
+                    "source_id": source_id,
+                    "feature_id": _FEATURE_ID,
+                },
+            )
+        ).scalar_one()
+    )
+    projection = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT curation_status, archived_at IS NOT NULL
+                FROM feature.curated_features
+                WHERE curated_feature_id = CAST(:replacement_id AS uuid)
+                """
+            ),
+            {"replacement_id": replacement_id},
+        )
+    ).one()
+    durable_items = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT
+                    item.curation_item_id::text,
+                    item.external_item_id,
+                    item.status,
+                    item.source_present,
+                    item.legacy_projection_id::text
+                FROM feature.curation_items AS item
+                JOIN feature.curation_collections AS collection
+                  ON collection.collection_id = item.collection_id
+                WHERE collection.theme_id = CAST(:theme_id AS uuid)
+                  AND collection.source_id = CAST(:source_id AS uuid)
+                  AND collection.metadata @>
+                      '{"migrated_from": "feature.curated_features"}'::jsonb
+                  AND item.feature_id = :feature_id
+                """
+            ),
+            {
+                "theme_id": theme_id,
+                "source_id": source_id,
+                "feature_id": _FEATURE_ID,
+            },
+        )
+    ).all()
+    assert projection == ("archived", True)
+    assert durable_items == [
+        (
+            item_identity.curation_item_id,
+            item_identity.external_item_id,
+            "archived",
+            False,
+            replacement_id,
+        )
+    ]
+
+
 async def test_authoritative_reimport_does_not_resurrect_unresolved_archive(
     migrated_session: AsyncSession,
 ) -> None:
@@ -1911,6 +2198,228 @@ async def test_theme_upsert_fallback_sees_concurrent_identical_insert(
             await connection.execute(
                 text("DELETE FROM feature.curated_themes WHERE theme_slug = :theme_slug"),
                 {"theme_slug": theme_slug},
+            )
+
+
+async def test_cross_title_legacy_moves_do_not_lock_source_collections_in_reverse(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """A→B/B→A 이동은 target collection 뒤 source parent를 역순 잠그지 않는다."""
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    suffix = uuid4().hex
+    feature_a = f"feature:cross-title-a-{suffix}"
+    feature_b = f"feature:cross-title-b-{suffix}"
+    theme_slug = f"cross-title-{suffix}"
+    provider = f"cross-title-provider-{suffix}"
+
+    setup = AsyncSession(migrated_engine, expire_on_commit=False)
+    try:
+        async with setup.begin():
+            await setup.execute(
+                text(
+                    """
+                    INSERT INTO feature.features (
+                        feature_id, kind, name, category, detail, status
+                    ) VALUES
+                        (:feature_a, 'place', '교차 이동 A',
+                         '01070100', '{}'::jsonb, 'active'),
+                        (:feature_b, 'place', '교차 이동 B',
+                         '01070100', '{}'::jsonb, 'active')
+                    """
+                ),
+                {"feature_a": feature_a, "feature_b": feature_b},
+            )
+            theme_id = str(
+                (
+                    await setup.execute(
+                        text(
+                            """
+                            INSERT INTO feature.curated_themes (
+                                theme_slug, theme_name, theme_group
+                            ) VALUES (:theme_slug, '교차 이동', 'test')
+                            RETURNING theme_id::text
+                            """
+                        ),
+                        {"theme_slug": theme_slug},
+                    )
+                ).scalar_one()
+            )
+            source_id = str(
+                (
+                    await setup.execute(
+                        text(
+                            """
+                            INSERT INTO feature.curated_sources (
+                                provider, dataset_key, source_name, source_kind,
+                                update_cycle, provider_status, metadata
+                            ) VALUES (
+                                :provider, 'dataset', '교차 이동 source',
+                                'manual', 'unknown', 'manual_only', '{}'::jsonb
+                            )
+                            RETURNING source_id::text
+                            """
+                        ),
+                        {"provider": provider},
+                    )
+                ).scalar_one()
+            )
+            rows = (
+                await setup.execute(
+                    text(
+                        """
+                        INSERT INTO feature.curated_features (
+                            theme_id, feature_id, source_id,
+                            curation_status, selection_origin, display_title
+                        ) VALUES
+                            (
+                                CAST(:theme_id AS uuid), :feature_a,
+                                CAST(:source_id AS uuid),
+                                'curated', 'source_rule', '교차 제목 A'
+                            ),
+                            (
+                                CAST(:theme_id AS uuid), :feature_b,
+                                CAST(:source_id AS uuid),
+                                'curated', 'source_rule', '교차 제목 B'
+                            )
+                        RETURNING curated_feature_id::text, display_title
+                        """
+                    ),
+                    {
+                        "theme_id": theme_id,
+                        "source_id": source_id,
+                        "feature_a": feature_a,
+                        "feature_b": feature_b,
+                    },
+                )
+            ).all()
+            legacy_ids = {str(title): str(legacy_id) for legacy_id, title in rows}
+            collection_rows = (
+                await setup.execute(
+                    text(
+                        """
+                        SELECT collection.collection_id::text, collection.title
+                        FROM feature.curation_collections AS collection
+                        WHERE collection.theme_id = CAST(:theme_id AS uuid)
+                          AND collection.source_id = CAST(:source_id AS uuid)
+                        """
+                    ),
+                    {"theme_id": theme_id, "source_id": source_id},
+                )
+            ).all()
+            collection_ids = {
+                str(title): str(collection_id)
+                for collection_id, title in collection_rows
+            }
+    finally:
+        await setup.close()
+
+    first = AsyncSession(migrated_engine, expire_on_commit=False)
+    second = AsyncSession(migrated_engine, expire_on_commit=False)
+    try:
+        await first.begin()
+        await second.begin()
+        for session in (first, second):
+            await session.execute(text("SET LOCAL deadlock_timeout = '100ms'"))
+            await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+        await first.execute(
+            text(
+                "SELECT collection_id FROM feature.curation_collections "
+                "WHERE collection_id = CAST(:collection_id AS uuid) FOR UPDATE"
+            ),
+            {"collection_id": collection_ids["교차 제목 B"]},
+        )
+        await second.execute(
+            text(
+                "SELECT collection_id FROM feature.curation_collections "
+                "WHERE collection_id = CAST(:collection_id AS uuid) FOR UPDATE"
+            ),
+            {"collection_id": collection_ids["교차 제목 A"]},
+        )
+
+        async def move(
+            session: AsyncSession,
+            *,
+            legacy_id: str,
+            title: str,
+        ) -> None:
+            await session.execute(
+                text(
+                    """
+                    UPDATE feature.curated_features
+                    SET display_title = :title,
+                        updated_at = clock_timestamp()
+                    WHERE curated_feature_id = CAST(:legacy_id AS uuid)
+                    """
+                ),
+                {"legacy_id": legacy_id, "title": title},
+            )
+
+        await asyncio.wait_for(
+            asyncio.gather(
+                move(
+                    first,
+                    legacy_id=legacy_ids["교차 제목 A"],
+                    title="교차 제목 B",
+                ),
+                move(
+                    second,
+                    legacy_id=legacy_ids["교차 제목 B"],
+                    title="교차 제목 A",
+                ),
+            ),
+            timeout=4,
+        )
+        await first.commit()
+        await second.commit()
+    finally:
+        await first.close()
+        await second.close()
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_features "
+                    "WHERE theme_id = CAST(:theme_id AS uuid)"
+                ),
+                {"theme_id": theme_id},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curation_items "
+                    "WHERE collection_id IN ("
+                    "SELECT collection_id FROM feature.curation_collections "
+                    "WHERE theme_id = CAST(:theme_id AS uuid))"
+                ),
+                {"theme_id": theme_id},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curation_collections "
+                    "WHERE theme_id = CAST(:theme_id AS uuid)"
+                ),
+                {"theme_id": theme_id},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_sources "
+                    "WHERE source_id = CAST(:source_id AS uuid)"
+                ),
+                {"source_id": source_id},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_themes "
+                    "WHERE theme_id = CAST(:theme_id AS uuid)"
+                ),
+                {"theme_id": theme_id},
+            )
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.features "
+                    "WHERE feature_id IN (:feature_a, :feature_b)"
+                ),
+                {"feature_a": feature_a, "feature_b": feature_b},
             )
 
 
