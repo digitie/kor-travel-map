@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (claude) — T-VN-H20 prod admin credential 회전 완료 (인시던트+복구)
+
+**결론**: prod admin password/hash 회전을 credential-safe로 실행·검증(새 pw login 200). 회전 중
+docker-compose `$` interpolation 버그로 admin UI를 일시 잠갔다가 즉시 복구(투명 보고).
+
+- **정상 흐름**: auth.ts와 동일 pbkdf2_sha256(310k/256bit) 파생으로 새 password 생성(평문→gitignored
+  doc, hash→repo 밖, 값 비노출) → prod `.env` UI hash를 base-compose로 UI만 recreate(R2) → login 200/401·
+  배포 hash 87자 검증.
+- **인시던트+복구**: 최초 회전이 hash를 `.env`에 raw로 써서 compose가 `$<salt>`/`$<hash>`를 변수
+  interpolation→소거(배포 20자)→UI 로그인 불가. python diag(.env 87 vs container 20 MISMATCH)로 규명 →
+  `$`→`$$` escape 재작성 → recreate → 87자 복원 → 200. 매 단계 .env 백업.
+- **교훈**: docker-compose `.env`의 `$` 포함 secret은 `$$` escape 필수(classic gotcha). prod secret 회전은
+  값이 로그/tracked에 남지 않도록 파일→파일 + 배포 후 실측 검증(길이/login status) 필수.
+- b4 = **H13·H14·H15·H20 완료**, H18 보류(governance).
+
 ## 2026-07-27 (claude) — Lane B b4 하드닝 3건 완결 (H13·H14·H15) + H20 진행
 
 **결론**: 사용자 지시로 Lane A가 Lane B b4를 순차 대행. **H13·H14·H15**를 각 적대 리뷰어 2명(blocker 0)

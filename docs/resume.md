@@ -2,9 +2,12 @@
 
 ## 2026-07-27 (claude) — 🎯 Lane B b4 대행: H13·H14·H15 완결, H20 진행, H18 예정
 
-**다음 한 작업**: **H20** prod ktdctl 회전+login 200 검증 마무리(사용자 실행 중) → b4 잔여는 **H18 보류**
-(governance 결정 — approval 필수화가 self-merge 즉시 차단, repo 소유자가 시점 결정). 코드 b4(H13/H14/H15)
-완료, H20 생성 완료. 사용자 지시로 Lane A가 Lane B b4 대행.
+**다음 한 작업**: b4 = **H13·H14·H15·H20 완료**, **H18만 보류**(governance — approval 필수화가 self-merge
+즉시 차단, repo 소유자가 시점 결정). H18 착수 또는 다른 지시 대기. 사용자 지시로 Lane A가 Lane B b4 대행 완료.
+
+- **H20 완료**: prod admin password/hash 회전 + login 200 검증. 회전 중 compose `$` interpolation으로 UI
+  일시 잠김→`$$` escape로 복구(투명). 잔여(사용자): local doc stale 섹션 삭제·session secret 미회전·n150
+  .env 백업 정리. 상세 journal/tasks-done 2026-07-27.
 
 - **완료(b4)**: `T-VN-H13`(#699→#862 curation override 보존) · `T-VN-H14`(#700→#863 KREX bounded-retry) ·
   `T-VN-H15`(#805→#864 c7 IPv6 origin). 각 적대 리뷰 2명 + 회귀 + CI green.

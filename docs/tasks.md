@@ -27,7 +27,7 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   [ ] `T-VN-48`(mocked E2E drift)
 - b4 (열린 이슈·운영 버그 하드닝, 2026-07-27 추가): [x] `T-VN-H13`(#699→#862) →
   [x] `T-VN-H14`(#700→#863) → [x] `T-VN-H15`(#805→#864) →
-  [ ] `T-VN-H20`(prod admin credential 정본 — 생성 완료·prod 회전 사용자 진행) →
+  [x] `T-VN-H20`(prod admin credential 회전 완료·login 200 검증) →
   [ ] `T-VN-H18`(GitHub approval gate — **보류: governance 결정**)
   (상세는 아래 b4 섹션)
 - b1 (PinVi 결합, 순차): [ ] `T-VN-11` → [ ] `T-VN-12` → [ ] `T-VN-16` →
@@ -151,7 +151,13 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   거부를 안 한다. IPv6 host bracket 정규화 + zone-id 거부로 origin 계약을 정확화(이슈 자체가 C7
   blocker 아닌 후속 하드닝으로 명시).
 
-- [ ] T-VN-H20 — **prod admin credential 정본 복구·회전**
+- [x] T-VN-H20 — **prod admin credential 정본 복구·회전** — **완료(2026-07-27)**: credential-safe
+  스크립트로 새 강한 password/pbkdf2_sha256 hash 생성(auth.ts 동일 파생, 평문→gitignored doc·hash→repo
+  밖, 값 비노출), prod `.env` UI hash를 base-compose recreate(R2, UI만 --no-deps --force-recreate)로 회전,
+  login 200(새 pw)/401(오키)·배포 hash 87자 검증. **주의**: 최초 회전 시 hash의 `$`를 docker-compose가
+  interpolation해 hash 손상(배포 20자)→admin UI 일시 잠김→`$`→`$$` escape로 재작성·복구(diag: .env 87 vs
+  container 20 MISMATCH로 규명, 매 단계 .env 백업). 잔여(사용자): local doc stale 섹션 삭제, session secret
+  미회전(기존 세션 만료까지 유효), n150 .env 백업 정리.
 
   T-VN-44 live preflight에서 gitignored `docs/prod-access.local.md`의 admin password가 현재 prod UI
   `KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH`와 불일치함을 PBKDF2 직접 대조로 확인했다. 서비스 UI를
