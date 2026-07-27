@@ -144,6 +144,32 @@ async def _seed_pre_0065_identity_conflicts(engine: Any) -> None:
         await connection.execute(
             text(
                 """
+                UPDATE feature.curation_items
+                SET curation_relation = 'primary_stop',
+                    reuse_policy = 'blocked',
+                    updated_by = 'migration-tombstone-operator'
+                WHERE place_name IN (
+                    'resolved tombstone newest',
+                    'unresolved tombstone'
+                )
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.curation_items
+                SET metadata = '{"provider_revision": "latest"}'::jsonb
+                WHERE place_name IN (
+                    'resolved resurrected',
+                    'unresolved resurrected'
+                )
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
                 WITH source AS (
                     INSERT INTO feature.curated_sources (
                         provider, dataset_key, source_name, source_kind,
@@ -323,9 +349,37 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
                     )
                 )
             ).all()
+            reconciled_axes = (
+                await connection.execute(
+                    text(
+                        "SELECT external_item_id, curation_relation, "
+                        "reuse_policy, operator_updated_by, metadata "
+                        "FROM feature.curation_items "
+                        "WHERE external_item_id IN "
+                        "('resolved-conflict','unresolved-conflict') "
+                        "ORDER BY external_item_id"
+                    )
+                )
+            ).all()
             assert normalized == [
-                ("resolved-conflict", 1, 0, "resolved tombstone newest"),
-                ("unresolved-conflict", 1, 0, "unresolved tombstone"),
+                ("resolved-conflict", 1, 0, "resolved resurrected"),
+                ("unresolved-conflict", 1, 0, "unresolved resurrected"),
+            ]
+            assert reconciled_axes == [
+                (
+                    "resolved-conflict",
+                    "primary_stop",
+                    "blocked",
+                    "migration-tombstone-operator",
+                    {"provider_revision": "latest"},
+                ),
+                (
+                    "unresolved-conflict",
+                    "primary_stop",
+                    "blocked",
+                    "migration-tombstone-operator",
+                    {"provider_revision": "latest"},
+                ),
             ]
             await connection.execute(
                 text(
@@ -383,7 +437,29 @@ async def test_source_presence_upgrade_downgrade_forward_recovery(
             await connection.execute(
                 text(
                     "UPDATE feature.curated_features "
-                    "SET operator_updated_by = NULL, operator_updated_at = NULL"
+                    "SET operator_updated_by = NULL, operator_updated_at = NULL, "
+                    "metadata = CASE "
+                    "WHEN display_title = 'migration legacy override' "
+                    "THEN metadata || "
+                    "'{\"merge_projection_detached\": true}'::jsonb "
+                    "ELSE metadata END"
+                )
+            )
+        await target_engine.dispose()
+        with pytest.raises(Exception, match="durable curation state exists"):
+            await asyncio.to_thread(
+                _run_alembic,
+                target_dsn,
+                _PRE_REVISION,
+                downgrade=True,
+            )
+        target_engine = make_async_engine(target_dsn)
+        async with target_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM feature.curated_features "
+                    "WHERE metadata @> "
+                    "'{\"merge_projection_detached\": true}'::jsonb"
                 )
             )
         await target_engine.dispose()

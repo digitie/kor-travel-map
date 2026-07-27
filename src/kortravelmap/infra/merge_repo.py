@@ -131,8 +131,20 @@ DELETE FROM provider_sync.source_links WHERE feature_id = :loser
 RETURNING source_entity_key
 """
 
-# 모든 curation writer는 collection(parent) → item(child) 순서로 잠근다. merge도
-# 영향 collection을 UUID 순서로 먼저 잠가 import/admin writer와의 교착을 막는다.
+# Legacy DML은 row lock을 잡은 뒤 collection/item trigger로 들어온다. Merge도
+# 같은 legacy→collection→item 순서를 사용해 양방향 sync와 교착하지 않는다.
+_LOCK_CURATION_LEGACY_PROJECTIONS_SQL: Final[str] = """
+SELECT legacy.curated_feature_id
+FROM feature.curated_features AS legacy
+WHERE legacy.feature_id IN (:master, :loser)
+  AND NOT legacy.metadata @> '{"merge_projection_detached": true}'::jsonb
+ORDER BY legacy.curated_feature_id
+FOR UPDATE OF legacy
+"""
+
+# Legacy-backed writer와 merge는 legacy row를 먼저 잠근 뒤 collection(parent) →
+# item(child) 순서로 들어간다. 영향 collection은 UUID 순서로 잠가 import/admin
+# writer와의 교착을 막는다.
 _LOCK_CURATION_COLLECTIONS_SQL: Final[str] = """
 SELECT collection.collection_id
 FROM feature.curation_collections AS collection
@@ -171,7 +183,18 @@ WITH pairs AS MATERIALIZED (
             )
         ) AS loser_override_wins,
         master_item.archived_at IS NOT NULL
-            OR loser_item.archived_at IS NOT NULL AS tombstone_wins
+            OR loser_item.archived_at IS NOT NULL AS tombstone_wins,
+        loser_item.archived_at IS NOT NULL
+            AND (
+                master_item.archived_at IS NULL
+                OR COALESCE(
+                    loser_item.operator_updated_at,
+                    loser_item.archived_at
+                ) > COALESCE(
+                    master_item.operator_updated_at,
+                    master_item.archived_at
+                )
+            ) AS loser_tombstone_wins
     FROM feature.curation_items AS loser_item
     JOIN feature.curation_items AS master_item
       ON master_item.feature_id = :master
@@ -216,10 +239,16 @@ WITH pairs AS MATERIALIZED (
             ELSE survivor.item_summary
         END,
         curation_relation = CASE
+            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
+            THEN loser_item.curation_relation
+            WHEN pairs.tombstone_wins THEN survivor.curation_relation
             WHEN pairs.loser_override_wins THEN loser_item.curation_relation
             ELSE survivor.curation_relation
         END,
         reuse_policy = CASE
+            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
+            THEN loser_item.reuse_policy
+            WHEN pairs.tombstone_wins THEN survivor.reuse_policy
             WHEN pairs.loser_override_wins THEN loser_item.reuse_policy
             ELSE survivor.reuse_policy
         END,
@@ -228,21 +257,33 @@ WITH pairs AS MATERIALIZED (
             ELSE survivor.metadata
         END,
         updated_by = CASE
+            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
+            THEN loser_item.updated_by
+            WHEN pairs.tombstone_wins THEN survivor.updated_by
             WHEN pairs.loser_override_wins THEN loser_item.updated_by
             ELSE survivor.updated_by
         END,
         operator_updated_by = CASE
+            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
+            THEN loser_item.operator_updated_by
+            WHEN pairs.tombstone_wins THEN survivor.operator_updated_by
             WHEN pairs.loser_override_wins THEN loser_item.operator_updated_by
             ELSE survivor.operator_updated_by
         END,
         operator_updated_at = CASE
+            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
+            THEN loser_item.operator_updated_at
+            WHEN pairs.tombstone_wins THEN survivor.operator_updated_at
             WHEN pairs.loser_override_wins THEN loser_item.operator_updated_at
             ELSE survivor.operator_updated_at
         END,
         updated_at = now(),
         archived_at = CASE
             WHEN pairs.tombstone_wins
-            THEN GREATEST(survivor.archived_at, loser_item.archived_at)
+            THEN CASE
+                WHEN pairs.loser_tombstone_wins THEN loser_item.archived_at
+                ELSE survivor.archived_at
+            END
             ELSE NULL
         END
     FROM pairs
@@ -281,6 +322,84 @@ SELECT set_config(
     '',
     true
 )
+"""
+
+# Duplicate reconcile가 loser의 최신 operator state/tombstone을 master canonical
+# survivor에 반영했으면 master legacy projection도 같은 transaction에서 맞춘다.
+_SYNC_MASTER_LEGACY_PROJECTIONS_SQL: Final[str] = """
+UPDATE feature.curated_features AS legacy
+SET curation_status = CASE item.status
+        WHEN 'included' THEN 'curated'
+        ELSE item.status
+    END,
+    selection_origin = CASE
+        WHEN item.operator_updated_at IS NOT NULL THEN 'admin'
+        ELSE legacy.selection_origin
+    END,
+    selected_by = CASE
+        WHEN item.status = 'included' THEN item.operator_updated_by
+        ELSE legacy.selected_by
+    END,
+    selected_at = CASE
+        WHEN item.status = 'included' THEN item.operator_updated_at
+        ELSE legacy.selected_at
+    END,
+    rejected_by = CASE
+        WHEN item.status = 'rejected' THEN item.operator_updated_by
+        WHEN item.status IN ('included', 'candidate') THEN NULL
+        ELSE legacy.rejected_by
+    END,
+    rejected_at = CASE
+        WHEN item.status = 'rejected' THEN item.operator_updated_at
+        WHEN item.status IN ('included', 'candidate') THEN NULL
+        ELSE legacy.rejected_at
+    END,
+    rejection_reason = CASE
+        WHEN item.status IN ('included', 'candidate') THEN NULL
+        ELSE legacy.rejection_reason
+    END,
+    curation_relation = item.curation_relation,
+    reuse_policy = item.reuse_policy,
+    operator_updated_by = item.operator_updated_by,
+    operator_updated_at = item.operator_updated_at,
+    archived_at = item.archived_at,
+    updated_at = clock_timestamp(),
+    content_version = legacy.content_version + 1
+FROM feature.curation_items AS item
+JOIN feature.curation_collections AS collection
+  ON collection.collection_id = item.collection_id
+WHERE item.feature_id = :master
+  AND legacy.feature_id = :master
+  AND legacy.archived_at IS NULL
+  AND NOT legacy.metadata @> '{"merge_projection_detached": true}'::jsonb
+  AND legacy.theme_id = collection.theme_id
+  AND legacy.source_id IS NOT DISTINCT FROM collection.source_id
+  AND (
+      legacy.curated_feature_id = item.curation_item_id
+      OR (
+          item.source_record_key IS NOT NULL
+          AND legacy.source_record_key = item.source_record_key
+      )
+  )
+  AND (
+      legacy.curation_status,
+      legacy.curation_relation,
+      legacy.reuse_policy,
+      legacy.operator_updated_by,
+      legacy.operator_updated_at,
+      legacy.archived_at
+  ) IS DISTINCT FROM (
+      CASE item.status
+          WHEN 'included' THEN 'curated'
+          ELSE item.status
+      END,
+      item.curation_relation,
+      item.reuse_policy,
+      item.operator_updated_by,
+      item.operator_updated_at,
+      item.archived_at
+  )
+RETURNING legacy.curated_feature_id
 """
 
 # 0045 전환 trigger는 legacy curated_feature UUID와 같은 curation_item UUID를 다시
@@ -432,6 +551,12 @@ async def apply_feature_merge(
 
     (
         await session.execute(
+            text(_LOCK_CURATION_LEGACY_PROJECTIONS_SQL),
+            {"master": master_id, "loser": loser_id},
+        )
+    ).fetchall()
+    (
+        await session.execute(
             text(_LOCK_CURATION_COLLECTIONS_SQL),
             {"master": master_id, "loser": loser_id},
         )
@@ -453,6 +578,10 @@ async def apply_feature_merge(
         {"master": master_id, "loser": loser_id},
     )
     await session.execute(text(_SET_EXPLICIT_CURATION_SYNC_SQL))
+    await session.execute(
+        text(_SYNC_MASTER_LEGACY_PROJECTIONS_SQL),
+        {"master": master_id},
+    )
     await session.execute(
         text(_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL),
         {"master": master_id, "loser": loser_id},

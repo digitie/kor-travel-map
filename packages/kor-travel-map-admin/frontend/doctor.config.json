@@ -8,22 +8,43 @@
           "react-doctor/effect-needs-cleanup",
           "react-doctor/no-fetch-in-effect"
         ]
+      },
+      {
+        "files": [
+          "src/app/admin/dedup-reviews/dedup-review-client.tsx",
+          "src/app/admin/enrichment-reviews/enrichment-review-client.tsx",
+          "src/app/admin/features/admin-features-client.tsx",
+          "src/app/admin/features/change-requests/feature-change-requests-client.tsx",
+          "src/app/admin/features/curated/curation-collections-client.tsx",
+          "src/app/admin/features/new/feature-create-client.tsx",
+          "src/app/admin/files/files-client.tsx",
+          "src/app/admin/issues/admin-issues-client.tsx",
+          "src/app/admin/offline-uploads/offline-uploads-client.tsx",
+          "src/app/admin/poi-cache-targets/poi-cache-targets-client.tsx",
+          "src/app/curated-features/curated-feature-map-client.tsx",
+          "src/app/features/features-client.tsx",
+          "src/app/home-client.tsx",
+          "src/app/ops/datasets/datasets-client.tsx",
+          "src/app/ops/logs/logs-client.tsx",
+          "src/app/ops/pipeline/execution-detail-panel.tsx",
+          "src/app/ops/pipeline/execution-timeline.tsx",
+          "src/app/ops/pipeline/request-dialog.tsx",
+          "src/app/ops/pipeline/schedule-panel.tsx"
+        ],
+        "rules": ["react-doctor/no-giant-component"]
+      },
+      {
+        "files": [
+          "src/app/admin/dedup-reviews/dedup-review-client.tsx",
+          "src/app/admin/features/new/feature-create-client.tsx",
+          "src/app/admin/issues/admin-issues-client.tsx"
+        ],
+        "rules": ["react-doctor/prefer-useReducer"]
+      },
+      {
+        "files": ["src/app/ops/datasets/datasets-client.tsx"],
+        "rules": ["react-doctor/no-event-handler"]
       }
-    ],
-    "rules": [
-      "deslop/unused-file",
-      "deslop/unused-dev-dependency",
-      "react-doctor/exhaustive-deps",
-      "react-doctor/no-event-handler",
-      "react-doctor/advanced-event-handler-refs",
-      "react-doctor/no-cascading-set-state",
-      "react-doctor/rerender-state-only-in-handlers",
-      "react-doctor/prefer-useReducer",
-      "react-doctor/no-giant-component",
-      "react-doctor/no-z-index-9999",
-      "react-doctor/no-long-transition-duration",
-      "react-doctor/no-render-in-render",
-      "react-doctor/prefer-tag-over-role"
     ]
   }
 }

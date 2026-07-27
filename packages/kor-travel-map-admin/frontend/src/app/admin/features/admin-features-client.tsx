@@ -16,7 +16,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 
 import {
   FEATURE_KINDS,
@@ -319,23 +319,26 @@ export function AdminFeaturesClient({
     void features.refetch();
   };
 
-  const deactivateFeature = async (feature: AdminFeatureRecord) => {
-    if (feature.status === "deleted") return;
-    const ok = await confirm({
-      title: `${feature.name} feature를 비활성화할까요?`,
-      description: "provider 재적재로 다시 활성화되지 않도록 잠급니다.",
-      confirmLabel: "비활성화",
-      destructive: true,
-    });
-    if (!ok) return;
-    deactivate.mutate({
-      featureId: feature.feature_id,
-      body: {
-        prevent_provider_reactivation: true,
-        reason: "admin-ui deactivate",
-      },
-    });
-  };
+  const deactivateFeature = useCallback(
+    async (feature: AdminFeatureRecord) => {
+      if (feature.status === "deleted") return;
+      const ok = await confirm({
+        title: `${feature.name} feature를 비활성화할까요?`,
+        description: "provider 재적재로 다시 활성화되지 않도록 잠급니다.",
+        confirmLabel: "비활성화",
+        destructive: true,
+      });
+      if (!ok) return;
+      deactivate.mutate({
+        featureId: feature.feature_id,
+        body: {
+          prevent_provider_reactivation: true,
+          reason: "admin-ui deactivate",
+        },
+      });
+    },
+    [confirm, deactivate],
+  );
 
   // 서버 정렬(keyset cursor)이므로 sort/order state를 react-table SortingState로
   // 양방향 미러링한다. 기존 sort NativeSelect + asc/desc Button과 동일 state를 공유한다.
@@ -522,8 +525,7 @@ export function AdminFeaturesClient({
         },
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deactivate.isPending],
+    [deactivate.isPending, deactivateFeature],
   );
 
   return (

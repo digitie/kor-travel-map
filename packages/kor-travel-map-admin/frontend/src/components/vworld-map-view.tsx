@@ -94,6 +94,16 @@ export function VWorldMapView({
 }: VWorldMapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const initialMapOptionsRef = useRef({
+    apiKey,
+    center,
+    zoom,
+    layerType,
+    maxZoom,
+    minZoom,
+    navigation,
+    scale,
+  });
   const appliedStyleRef = useRef({ apiKey, layerType });
   const onClickRef = useRef(onClick);
   const onContextMenuRef = useRef(onContextMenu);
@@ -115,18 +125,25 @@ export function VWorldMapView({
 
   useEffect(() => {
     if (containerRef.current === null) return;
+    const initial = initialMapOptionsRef.current;
 
     const nextMap = new maplibregl.Map({
       container: containerRef.current,
-      style: buildVWorldStyle(apiKey, layerType),
-      center,
-      zoom,
-      minZoom,
-      maxZoom: Math.min(maxZoom, getVWorldMaxZoom(layerType)),
+      style: buildVWorldStyle(initial.apiKey, initial.layerType),
+      center: initial.center,
+      zoom: initial.zoom,
+      minZoom: initial.minZoom,
+      maxZoom: Math.min(
+        initial.maxZoom,
+        getVWorldMaxZoom(initial.layerType),
+      ),
       attributionControl: { compact: true },
     });
     mapRef.current = nextMap;
-    appliedStyleRef.current = { apiKey, layerType };
+    appliedStyleRef.current = {
+      apiKey: initial.apiKey,
+      layerType: initial.layerType,
+    };
     setMap(nextMap);
 
     // e2e 훅: 컨테이너 DOM 노드에 map 인스턴스를 매달아 Playwright가
@@ -254,14 +271,14 @@ export function VWorldMapView({
     }
 
     const controls: Array<maplibregl.IControl> = [];
-    if (navigation) {
+    if (initial.navigation) {
       const control = new maplibregl.NavigationControl({
         showCompass: false,
       });
       nextMap.addControl(control, "top-right");
       controls.push(control);
     }
-    if (scale) {
+    if (initial.scale) {
       const control = new maplibregl.ScaleControl({
         maxWidth: 150,
         unit: "metric",
@@ -300,7 +317,6 @@ export function VWorldMapView({
       setMap(null);
     };
     // 지도 인스턴스는 mount 1회만 만들고, 이후 camera는 사용자 조작 결과를 store에 동기화한다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -357,9 +373,11 @@ export function VWorldMarker({
   const onClickRef = useRef(onClick);
   const clickable = onClick !== undefined;
   const [lng, lat] = lngLat;
+  const positionRef = useRef<[number, number]>([lng, lat]);
 
   useLayoutEffect(() => {
     onClickRef.current = onClick;
+    positionRef.current = [lng, lat];
   });
 
   // 마커 DOM은 map 또는 시각 속성(icon/color/size/title)이 바뀔 때만 재생성한다.
@@ -382,7 +400,7 @@ export function VWorldMarker({
     elementRef.current = element;
 
     const marker = new maplibregl.Marker({ element })
-      .setLngLat([lng, lat])
+      .setLngLat(positionRef.current)
       .addTo(map);
     markerRef.current = marker;
 
@@ -391,8 +409,6 @@ export function VWorldMarker({
       markerRef.current = null;
       elementRef.current = null;
     };
-    // lng/lat·selected는 별도 효과로 갱신하므로 deps에서 의도적으로 제외한다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clickable, map, markerIcon, markerColor, size, title]);
 
   // 위치 이동은 마커 재생성 없이 setLngLat로만 반영.
@@ -1211,6 +1227,18 @@ export function VWorldFeatureClusters({
     }),
     [dedupedFeatures],
   );
+  const clusterSourceConfigRef = useRef({
+    data,
+    clusterRadius,
+    clusterMaxZoom,
+  });
+  useLayoutEffect(() => {
+    clusterSourceConfigRef.current = {
+      data,
+      clusterRadius,
+      clusterMaxZoom,
+    };
+  }, [data, clusterRadius, clusterMaxZoom]);
   const geometryData = useMemo<
     FeatureGeometryCollection
   >(
@@ -1322,12 +1350,13 @@ export function VWorldFeatureClusters({
 
     const ensureSource = () => {
       if (map.getSource(SRC)) return;
+      const initial = clusterSourceConfigRef.current;
       map.addSource(SRC, {
         type: "geojson",
-        data,
+        data: initial.data,
         cluster: true,
-        clusterRadius,
-        clusterMaxZoom,
+        clusterRadius: initial.clusterRadius,
+        clusterMaxZoom: initial.clusterMaxZoom,
       });
       // querySourceFeatures가 렌더된 feature를 돌려주도록 투명 circle 레이어를 둔다.
       map.addLayer({
@@ -1761,7 +1790,6 @@ export function VWorldFeatureClusters({
       }
     };
     // features 변경은 위 setData effect로 반영하므로 deps는 map 생애만.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map]);
 
   // 선택 변경 시 마커 풀/레이어를 건드리지 않고, 현재 떠 있는 point/label element의

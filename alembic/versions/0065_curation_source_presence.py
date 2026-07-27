@@ -37,6 +37,9 @@ DECLARE
     source_change boolean;
     source_presence_change boolean;
     item_matched boolean;
+    direct_item_id uuid;
+    target_identity_item_id uuid;
+    target_item_id uuid;
 BEGIN
     IF COALESCE(
         current_setting('kortravelmap.curation_sync_mode', true),
@@ -55,8 +58,26 @@ BEGIN
         IF OLD.metadata @> '{"merge_projection_detached": true}'::jsonb THEN
             RETURN OLD;
         END IF;
-    ELSIF NEW.metadata @> '{"merge_projection_detached": true}'::jsonb THEN
-        RETURN NEW;
+    ELSE
+        IF TG_OP = 'UPDATE'
+           AND OLD.metadata @> '{"merge_projection_detached": true}'::jsonb
+        THEN
+            -- ``metadata`` PATCH가 내부 detach marker를 제거해도 즉시 복원한다.
+            -- 이 UPDATE의 재진입은 NEW marker 분기에서 끝나므로 canonical에는
+            -- 어떤 source/operator revision도 전파하지 않는다.
+            IF NOT NEW.metadata @> '{"merge_projection_detached": true}'::jsonb THEN
+                UPDATE feature.curated_features
+                SET metadata = NEW.metadata || jsonb_build_object(
+                        'merge_projection_detached',
+                        true
+                    )
+                WHERE curated_feature_id = NEW.curated_feature_id;
+            END IF;
+            RETURN NEW;
+        END IF;
+        IF NEW.metadata @> '{"merge_projection_detached": true}'::jsonb THEN
+            RETURN NEW;
+        END IF;
     END IF;
 
     IF TG_OP = 'DELETE' THEN
@@ -158,9 +179,51 @@ BEGIN
     target_external_item_id :=
         COALESCE(NEW.source_record_key, NEW.curated_feature_id::text);
 
+    -- UUID mirror와 stable identity target을 먼저 하나씩 잠근 뒤 갱신 대상을
+    -- 단일화한다. 두 identity가 서로 다른 row를 가리키면 target owner를
+    -- 덮지 않고 기존 mirror만 source-absent로 내린 뒤 legacy projection을
+    -- 영구 detach한다.
+    SELECT item.curation_item_id
+    INTO direct_item_id
+    FROM feature.curation_items AS item
+    WHERE item.curation_item_id = NEW.curated_feature_id
+    FOR UPDATE;
+
+    SELECT item.curation_item_id
+    INTO target_identity_item_id
+    FROM feature.curation_items AS item
+    WHERE item.collection_id = target_collection_id
+      AND item.external_item_id = target_external_item_id
+      AND item.feature_id IS NOT DISTINCT FROM NEW.feature_id
+    FOR UPDATE;
+
+    IF direct_item_id IS NOT NULL
+       AND target_identity_item_id IS NOT NULL
+       AND direct_item_id <> target_identity_item_id
+    THEN
+        UPDATE feature.curation_items
+        SET source_present = false,
+            source_updated_at = clock_timestamp(),
+            updated_by = COALESCE(NEW.rejected_by, NEW.selected_by),
+            updated_at = NEW.updated_at
+        WHERE curation_item_id = direct_item_id
+          AND archived_at IS NULL
+          AND source_present;
+
+        UPDATE feature.curated_features
+        SET metadata = metadata || jsonb_build_object(
+                'merge_projection_detached',
+                true
+            )
+        WHERE curated_feature_id = NEW.curated_feature_id;
+        RETURN NEW;
+    END IF;
+
+    target_item_id := COALESCE(direct_item_id, target_identity_item_id);
+
     -- Legacy writer가 제공자 파생 필드를 갱신해도 operator-owned 상태는 보존한다.
-    -- exact identity tombstone 또는 다른 active row가 target을 소유하면 현재 legacy
-    -- mirror만 source-absent로 내리고 해당 identity를 되살리지 않는다.
+    -- UUID/stable identity 경로는 같은 projection UPDATE를 공유하며 archived
+    -- tombstone은 WHERE에서 제외해 계속 우선한다.
     UPDATE feature.curation_items AS item
     SET collection_id = CASE
             WHEN source_change THEN target_collection_id
@@ -248,106 +311,11 @@ BEGIN
             ELSE item.archived_at
         END
     FROM feature.features AS feature_row
-    WHERE item.curation_item_id = NEW.curated_feature_id
+    WHERE item.curation_item_id = target_item_id
       AND item.archived_at IS NULL
-      AND feature_row.feature_id = NEW.feature_id
-      AND NOT EXISTS (
-          SELECT 1
-          FROM feature.curation_items AS occupied
-          WHERE occupied.curation_item_id <> item.curation_item_id
-            AND occupied.collection_id = target_collection_id
-            AND occupied.external_item_id = target_external_item_id
-            AND occupied.feature_id IS NOT DISTINCT FROM NEW.feature_id
-      );
+      AND feature_row.feature_id = NEW.feature_id;
 
     item_matched := FOUND;
-
-    -- Legacy row가 DELETE 후 새 UUID로 재생성돼도 stable exact identity의
-    -- source-absent mirror를 되살린다. operator override/provenance는 건드리지
-    -- 않고 archived tombstone은 WHERE에서 제외해 계속 우선한다.
-    IF NOT item_matched THEN
-        UPDATE feature.curation_items AS item
-        SET source_record_key = CASE
-            WHEN source_change THEN NEW.source_record_key
-            ELSE item.source_record_key
-        END,
-        place_name = CASE
-            WHEN source_change THEN feature_row.name
-            ELSE item.place_name
-        END,
-        address_hint = CASE
-            WHEN source_change THEN COALESCE(
-                feature_row.address ->> 'road',
-                feature_row.address ->> 'legal'
-            )
-            ELSE item.address_hint
-        END,
-        source_present = CASE
-            WHEN source_change OR source_presence_change
-            THEN NEW.archived_at IS NULL
-            ELSE item.source_present
-        END,
-        source_updated_at = CASE
-            WHEN source_change OR source_presence_change THEN clock_timestamp()
-            ELSE item.source_updated_at
-        END,
-        sort_order = CASE
-            WHEN source_change THEN GREATEST(0, round(NEW.rank_score)::integer)
-            ELSE item.sort_order
-        END,
-        item_summary = CASE
-            WHEN source_change THEN NEW.display_summary
-            ELSE item.item_summary
-        END,
-        status = CASE
-            WHEN operator_change THEN CASE NEW.curation_status
-                WHEN 'curated' THEN 'included'
-                ELSE NEW.curation_status
-            END
-            ELSE item.status
-        END,
-        curation_relation = CASE
-            WHEN operator_change THEN NEW.curation_relation
-            ELSE item.curation_relation
-        END,
-        reuse_policy = CASE
-            WHEN operator_change THEN NEW.reuse_policy
-            ELSE item.reuse_policy
-        END,
-        metadata = CASE
-            WHEN source_change THEN NEW.metadata || jsonb_build_object(
-                'legacy_selection_origin', NEW.selection_origin,
-                'legacy_content_version', NEW.content_version
-            )
-            ELSE item.metadata
-        END,
-        updated_by = COALESCE(NEW.rejected_by, NEW.selected_by),
-        updated_at = NEW.updated_at,
-        operator_updated_by = CASE
-            WHEN operator_change
-            THEN COALESCE(
-                NEW.operator_updated_by,
-                item.operator_updated_by
-            )
-            ELSE item.operator_updated_by
-        END,
-        operator_updated_at = CASE
-            WHEN operator_change
-            THEN NEW.operator_updated_at
-            ELSE item.operator_updated_at
-        END,
-        archived_at = CASE
-            WHEN operator_change THEN NEW.archived_at
-            ELSE item.archived_at
-        END
-        FROM feature.features AS feature_row
-        WHERE item.collection_id = target_collection_id
-          AND item.external_item_id = target_external_item_id
-          AND item.feature_id IS NOT DISTINCT FROM NEW.feature_id
-          AND item.archived_at IS NULL
-          AND feature_row.feature_id = NEW.feature_id;
-        item_matched := FOUND;
-    END IF;
 
     -- stable identity가 기존 operator state/tombstone을 보존했다면 새 legacy
     -- UUID의 공개 projection도 같은 상태로 교정한다. depth 1에서만 역동기화하고
@@ -358,7 +326,10 @@ BEGIN
                 WHEN 'included' THEN 'curated'
                 ELSE item.status
             END,
-            selection_origin = 'admin',
+            selection_origin = CASE
+                WHEN item.operator_updated_at IS NOT NULL THEN 'admin'
+                ELSE legacy.selection_origin
+            END,
             selected_by = CASE
                 WHEN item.status = 'included' THEN item.operator_updated_by
                 ELSE legacy.selected_by
@@ -384,12 +355,13 @@ BEGIN
             updated_at = clock_timestamp()
         FROM feature.curation_items AS item
         WHERE legacy.curated_feature_id = NEW.curated_feature_id
-          AND item.collection_id = target_collection_id
-          AND item.external_item_id = target_external_item_id
-          AND item.feature_id IS NOT DISTINCT FROM NEW.feature_id
           AND (
-              item.operator_updated_at IS NOT NULL
-              OR item.archived_at IS NOT NULL
+              item.curation_item_id = NEW.curated_feature_id
+              OR (
+                  item.collection_id = target_collection_id
+                  AND item.external_item_id = target_external_item_id
+                  AND item.feature_id IS NOT DISTINCT FROM NEW.feature_id
+              )
           )
           AND (
               legacy.curation_status,
@@ -689,34 +661,104 @@ def upgrade() -> None:
         """
     )
     # 0064까지 partial unique가 허용한 tombstone+active resurrection 및 중복
-    # tombstone을 operator tombstone 우선으로 정규화한다.
+    # tombstone을 단일 survivor로 합친다. Tombstone status/provenance는 우선하되
+    # provider 파생 필드는 source revision이 가장 최신인 row에서 보존한다.
     op.execute(
         """
-        DELETE FROM feature.curation_items AS active
-        USING feature.curation_items AS tombstone
-        WHERE active.archived_at IS NULL
-          AND tombstone.archived_at IS NOT NULL
-          AND active.collection_id = tombstone.collection_id
-          AND active.external_item_id = tombstone.external_item_id
-          AND active.feature_id IS NOT DISTINCT FROM tombstone.feature_id
-        """
-    )
-    op.execute(
-        """
-        WITH ranked AS (
-            SELECT
+        WITH tombstone_winners AS MATERIALIZED (
+            SELECT DISTINCT ON (
+                collection_id,
+                external_item_id,
+                feature_id
+            )
+                collection_id,
+                external_item_id,
+                feature_id,
                 curation_item_id,
-                row_number() OVER (
-                    PARTITION BY collection_id, external_item_id, feature_id
-                    ORDER BY archived_at DESC, updated_at DESC, curation_item_id DESC
-                ) AS ordinal
+                status,
+                curation_relation,
+                reuse_policy,
+                updated_by,
+                operator_updated_by,
+                operator_updated_at,
+                updated_at,
+                archived_at
             FROM feature.curation_items
             WHERE archived_at IS NOT NULL
+            ORDER BY
+                collection_id,
+                external_item_id,
+                feature_id,
+                COALESCE(operator_updated_at, archived_at, updated_at) DESC,
+                curation_item_id DESC
+        ), source_winners AS MATERIALIZED (
+            SELECT DISTINCT ON (
+                item.collection_id,
+                item.external_item_id,
+                item.feature_id
+            )
+                item.collection_id,
+                item.external_item_id,
+                item.feature_id,
+                item.source_record_key,
+                item.place_name,
+                item.address_hint,
+                item.source_present,
+                item.source_updated_at,
+                item.sort_order,
+                item.item_title,
+                item.item_summary,
+                item.metadata,
+                item.updated_at
+            FROM feature.curation_items AS item
+            JOIN tombstone_winners AS tombstone
+              ON tombstone.collection_id = item.collection_id
+             AND tombstone.external_item_id = item.external_item_id
+             AND tombstone.feature_id IS NOT DISTINCT FROM item.feature_id
+            ORDER BY
+                item.collection_id,
+                item.external_item_id,
+                item.feature_id,
+                item.source_updated_at DESC,
+                item.updated_at DESC,
+                item.curation_item_id DESC
+        ), reconciled AS (
+            UPDATE feature.curation_items AS survivor
+            SET source_record_key = source.source_record_key,
+                place_name = source.place_name,
+                address_hint = source.address_hint,
+                source_present = source.source_present,
+                source_updated_at = source.source_updated_at,
+                status = 'archived',
+                sort_order = source.sort_order,
+                item_title = source.item_title,
+                item_summary = source.item_summary,
+                curation_relation = tombstone.curation_relation,
+                reuse_policy = tombstone.reuse_policy,
+                metadata = source.metadata,
+                updated_by = tombstone.updated_by,
+                operator_updated_by = tombstone.operator_updated_by,
+                operator_updated_at = tombstone.operator_updated_at,
+                updated_at = GREATEST(source.updated_at, tombstone.updated_at),
+                archived_at = tombstone.archived_at
+            FROM tombstone_winners AS tombstone
+            JOIN source_winners AS source
+              ON source.collection_id = tombstone.collection_id
+             AND source.external_item_id = tombstone.external_item_id
+             AND source.feature_id IS NOT DISTINCT FROM tombstone.feature_id
+            WHERE survivor.curation_item_id = tombstone.curation_item_id
+            RETURNING
+                survivor.collection_id,
+                survivor.external_item_id,
+                survivor.feature_id,
+                survivor.curation_item_id
         )
         DELETE FROM feature.curation_items AS duplicate
-        USING ranked
-        WHERE duplicate.curation_item_id = ranked.curation_item_id
-          AND ranked.ordinal > 1
+        USING reconciled
+        WHERE duplicate.collection_id = reconciled.collection_id
+          AND duplicate.external_item_id = reconciled.external_item_id
+          AND duplicate.feature_id IS NOT DISTINCT FROM reconciled.feature_id
+          AND duplicate.curation_item_id <> reconciled.curation_item_id
         """
     )
     op.drop_index(
@@ -775,6 +817,7 @@ def downgrade() -> None:
                 FROM feature.curated_features
                 WHERE operator_updated_by IS NOT NULL
                    OR operator_updated_at IS NOT NULL
+                   OR metadata @> '{"merge_projection_detached": true}'::jsonb
             ) THEN
                 RAISE EXCEPTION
                     '0065 downgrade blocked: durable curation state exists'

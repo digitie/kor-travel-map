@@ -1397,6 +1397,51 @@ async def _lock_collection(session: AsyncSession, collection_id: str) -> bool:
     return row is not None
 
 
+async def _lock_legacy_projections_for_item(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    curation_item_id: str,
+) -> bool:
+    """Legacy-backed item은 legacy→collection→item 순서로 직렬화한다."""
+
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT legacy.curated_feature_id
+                FROM feature.curation_items AS item
+                JOIN feature.curation_collections AS collection
+                  ON collection.collection_id = item.collection_id
+                JOIN feature.curated_features AS legacy
+                  ON legacy.theme_id = collection.theme_id
+                 AND legacy.source_id IS NOT DISTINCT FROM collection.source_id
+                 AND (
+                      legacy.curated_feature_id = item.curation_item_id
+                      OR (
+                          item.source_record_key IS NOT NULL
+                          AND legacy.source_record_key = item.source_record_key
+                          AND legacy.feature_id IS NOT DISTINCT FROM item.feature_id
+                      )
+                 )
+                WHERE item.collection_id = CAST(:collection_id AS uuid)
+                  AND item.curation_item_id = CAST(:curation_item_id AS uuid)
+                  AND legacy.archived_at IS NULL
+                  AND NOT legacy.metadata
+                      @> '{"merge_projection_detached": true}'::jsonb
+                ORDER BY legacy.curated_feature_id
+                FOR UPDATE OF legacy
+                """
+            ),
+            {
+                "collection_id": collection_id,
+                "curation_item_id": curation_item_id,
+            },
+        )
+    ).all()
+    return bool(rows)
+
+
 async def _touch_collection(
     session: AsyncSession, *, collection_id: str, actor: str | None
 ) -> None:
@@ -1678,17 +1723,6 @@ async def update_curation_item(
 ) -> CurationItem | None:
     """단일 membership을 부분 수정한다. 명시적 ``feature_id=null``도 보존한다."""
 
-    if not await _lock_collection(session, collection_id):
-        return None
-    current = await get_curation_item(
-        session,
-        collection_id=collection_id,
-        curation_item_id=curation_item_id,
-        include_archived=True,
-    )
-    if current is None or current.archived_at is not None:
-        return None
-
     allowed = {
         "feature_id",
         "source_record_key",
@@ -1730,7 +1764,49 @@ async def update_curation_item(
         normalized[key] = value
 
     if not normalized:
-        return current
+        if not await _lock_collection(session, collection_id):
+            return None
+        return await get_curation_item(
+            session,
+            collection_id=collection_id,
+            curation_item_id=curation_item_id,
+            include_archived=True,
+        )
+
+    source_owned_changed = bool(
+        {
+            "feature_id",
+            "source_record_key",
+            "external_item_id",
+            "place_name",
+            "address_hint",
+            "sort_order",
+            "item_title",
+            "item_summary",
+            "metadata",
+        }
+        & normalized.keys()
+    )
+    legacy_backed = await _lock_legacy_projections_for_item(
+        session,
+        collection_id=collection_id,
+        curation_item_id=curation_item_id,
+    )
+    if legacy_backed and source_owned_changed:
+        raise ValueError(
+            "legacy projection 기반 curation item의 source 필드는 "
+            "legacy writer에서 수정해야 합니다."
+        )
+    if not await _lock_collection(session, collection_id):
+        return None
+    current = await get_curation_item(
+        session,
+        collection_id=collection_id,
+        curation_item_id=curation_item_id,
+        include_archived=True,
+    )
+    if current is None or current.archived_at is not None:
+        return None
 
     feature_id = normalized.get("feature_id", current.feature_id)
     if "feature_id" in normalized and feature_id is not None:
@@ -1811,20 +1887,6 @@ async def update_curation_item(
         params[key] = value
     operator_owned_changed = bool(
         {"status", "curation_relation", "reuse_policy"} & normalized.keys()
-    )
-    source_owned_changed = bool(
-        {
-            "feature_id",
-            "source_record_key",
-            "external_item_id",
-            "place_name",
-            "address_hint",
-            "sort_order",
-            "item_title",
-            "item_summary",
-            "metadata",
-        }
-        & normalized.keys()
     )
     if source_owned_changed:
         clauses.append("source_updated_at = clock_timestamp()")
@@ -2369,6 +2431,34 @@ async def import_curation_rows(
             ),
             {"collection_ids": collection_ids},
         )
+        feature_ids = sorted(
+            {
+                str(item["feature_id"])
+                for item in item_values
+                if item["feature_id"] is not None
+            }
+        )
+        if feature_ids:
+            active_feature_ids = set(
+                (
+                    await session.execute(
+                        text(
+                            "SELECT feature_id FROM feature.features "
+                            "WHERE feature_id = ANY(CAST(:feature_ids AS text[])) "
+                            "AND deleted_at IS NULL "
+                            "AND status NOT IN ('deleted', 'hidden') "
+                            "ORDER BY feature_id FOR UPDATE"
+                        ),
+                        {"feature_ids": feature_ids},
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if active_feature_ids != set(feature_ids):
+                raise ValueError(
+                    "큐레이션 반영 중 Feature lifecycle이 변경되었습니다. 다시 preview하세요."
+                )
         items_payload = json.dumps(item_values, ensure_ascii=False)
         removed_rows = (
             (

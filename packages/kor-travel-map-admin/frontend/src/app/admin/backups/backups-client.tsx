@@ -8,7 +8,7 @@ import {
   RefreshCwIcon,
   RotateCcwIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 
 import {
@@ -175,6 +175,49 @@ export function BackupsClient() {
     void backups.refetch();
   };
 
+  const submitRestore = useCallback(
+    (backup: BackupRecord) => {
+      restoreBackup.mutate(
+        {
+          backupId: backup.backup_id,
+          body: {
+            app_db: null,
+            dagster_db: null,
+            rustfs_volume: null,
+            recreate: recreateRestore,
+            skip_checksum: false,
+            skip_rustfs: false,
+            execute: executeRestore,
+          },
+        },
+        { onSuccess: setLastResult },
+      );
+    },
+    [executeRestore, recreateRestore, restoreBackup],
+  );
+
+  const submitSwap = useCallback(
+    (backup: BackupRecord) => {
+      swapRestore.mutate(
+        {
+          backupId: backup.backup_id,
+          body: {
+            app_db: null,
+            dagster_db: null,
+            rustfs_volume: null,
+            env_file: null,
+            apply: applySwap,
+            execute: executeSwap,
+            skip_verify: false,
+            note: null,
+          },
+        },
+        { onSuccess: setLastResult },
+      );
+    },
+    [applySwap, executeSwap, swapRestore],
+  );
+
   type BackupRow = NonNullable<typeof backups.data>["data"]["items"][number];
   const columns = useMemo<ColumnDef<BackupRow, unknown>[]>(
     () => [
@@ -245,9 +288,7 @@ export function BackupsClient() {
     // 행의 Restore/Swap 버튼 onClick은 submitRestore/submitSwap을 통해 execute/recreate/
     // apply 체크박스 state를 읽는다. 이 state들이 바뀔 때 컬럼을 재생성하지 않으면 onClick이
     // 최초 렌더의 stale closure를 잡아 항상 execute:false를 보낸다(실행 옵션 무효 버그).
-    // 해당 state들을 deps에 넣어 토글 시 onClick이 최신 값을 읽도록 한다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [executeRestore, recreateRestore, executeSwap, applySwap],
+    [submitRestore, submitSwap],
   );
 
   const submitBackup = () => {
@@ -256,43 +297,6 @@ export function BackupsClient() {
         backup_id: backupId.trim() || null,
         allow_running: false,
         execute: executeBackup,
-      },
-      { onSuccess: setLastResult },
-    );
-  };
-
-  const submitRestore = (backup: BackupRecord) => {
-    restoreBackup.mutate(
-      {
-        backupId: backup.backup_id,
-        body: {
-          app_db: null,
-          dagster_db: null,
-          rustfs_volume: null,
-          recreate: recreateRestore,
-          skip_checksum: false,
-          skip_rustfs: false,
-          execute: executeRestore,
-        },
-      },
-      { onSuccess: setLastResult },
-    );
-  };
-
-  const submitSwap = (backup: BackupRecord) => {
-    swapRestore.mutate(
-      {
-        backupId: backup.backup_id,
-        body: {
-          app_db: null,
-          dagster_db: null,
-          rustfs_volume: null,
-          env_file: null,
-          apply: applySwap,
-          execute: executeSwap,
-          skip_verify: false,
-          note: null,
-        },
       },
       { onSuccess: setLastResult },
     );

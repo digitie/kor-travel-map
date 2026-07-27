@@ -597,7 +597,7 @@ INSERT INTO feature.curated_features (
     selection_origin, selected_by, selected_at, rejected_by, rejected_at,
     rejection_reason, rank_score, display_title, display_summary,
     curation_relation, reuse_policy, metadata,
-    operator_updated_by, operator_updated_at, updated_at
+    operator_updated_by, operator_updated_at, updated_at, archived_at
 ) VALUES (
     CAST(:theme_id AS uuid), :feature_id, CAST(:source_id AS uuid),
     CAST(:source_record_key AS text), :curation_status, :selection_origin,
@@ -609,7 +609,8 @@ INSERT INTO feature.curated_features (
     :rank_score, :display_title, :display_summary, :curation_relation,
     :reuse_policy, CAST(:metadata_json AS jsonb), :operator_updated_by,
     CASE WHEN CAST(:operator_updated AS boolean) THEN clock_timestamp() ELSE NULL END,
-    now()
+    now(),
+    CASE WHEN :curation_status = 'archived' THEN now() ELSE NULL END
 )
 RETURNING curated_feature_id::text
 """
@@ -1488,6 +1489,7 @@ def _selected_fields_for_status(
             "rejected_by": None,
             "rejected_at": None,
             "rejection_reason": None,
+            "archived_at": None,
         }
     if curation_status == "rejected":
         return {
@@ -1496,6 +1498,7 @@ def _selected_fields_for_status(
             "rejected_by": actor,
             "rejected_at": now_expr,
             "rejection_reason": reason,
+            "archived_at": None,
         }
     if curation_status == "candidate":
         return {
@@ -1504,6 +1507,7 @@ def _selected_fields_for_status(
             "rejected_by": None,
             "rejected_at": None,
             "rejection_reason": None,
+            "archived_at": None,
         }
     if curation_status == "archived":
         return {
@@ -1607,6 +1611,17 @@ async def update_curated_feature(
             raise ValueError(f"unsupported curated_feature update field: {key}")
         if key == "curation_status":
             _validate_choice(str(value), _CURATION_STATUSES, key)
+            for status_key, status_value in _selected_fields_for_status(
+                curation_status=str(value),
+                actor=actor,
+                reason=None,
+            ).items():
+                if status_value == "__NOW__":
+                    set_parts.append(f"{status_key} = now()")
+                else:
+                    set_parts.append(f"{status_key} = :{status_key}")
+                    params[status_key] = status_value
+            continue
         if key == "curation_relation":
             _validate_choice(str(value), _CURATION_RELATIONS, key)
         if key == "reuse_policy":
@@ -1623,11 +1638,20 @@ async def update_curated_feature(
             curated_feature_id=curated_feature_id,
             include_archived=True,
         )
+    operator_owned_changed = bool(
+        {"curation_status", "curation_relation", "reuse_policy"} & updates.keys()
+    )
+    if operator_owned_changed:
+        if "curation_status" not in updates:
+            set_parts.append("selection_origin = 'admin'")
+        set_parts.extend(
+            [
+                "operator_updated_by = COALESCE(:actor, operator_updated_by)",
+                "operator_updated_at = clock_timestamp()",
+            ]
+        )
     set_parts.extend(
         [
-            "selection_origin = 'admin'",
-            "operator_updated_by = COALESCE(:actor, operator_updated_by)",
-            "operator_updated_at = clock_timestamp()",
             "updated_at = now()",
             "content_version = content_version + 1",
         ]

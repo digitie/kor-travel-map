@@ -9,7 +9,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { type Map as MapLibreMap } from "maplibre-gl";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 
 import {
   type EnrichmentDecision,
@@ -459,20 +459,23 @@ export function EnrichmentReviewClient() {
     setSelectedDetailSource(null);
   };
 
-  const decide = (
-    reviewId: string,
-    value: EnrichmentDecision,
-    detailSource?: EnrichmentDetailSource | null,
-  ) => {
-    decision.mutate({
-      reviewKey: reviewId,
-      body: {
-        decision: value,
-        decision_reason: `admin-ui ${value}`,
-        selected_detail_source: detailSource ?? undefined,
-      },
-    });
-  };
+  const decide = useCallback(
+    (
+      reviewId: string,
+      value: EnrichmentDecision,
+      detailSource?: EnrichmentDetailSource | null,
+    ) => {
+      decision.mutate({
+        reviewKey: reviewId,
+        body: {
+          decision: value,
+          decision_reason: `admin-ui ${value}`,
+          selected_detail_source: detailSource ?? undefined,
+        },
+      });
+    },
+    [decision],
+  );
 
   const openDetail = (reviewId: string) => {
     setDetailReviewId(reviewId);
@@ -668,8 +671,7 @@ export function EnrichmentReviewClient() {
         },
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [decision.isPending],
+    [decide, decision.isPending],
   );
 
   return (

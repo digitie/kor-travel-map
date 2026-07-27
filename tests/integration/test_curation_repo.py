@@ -972,6 +972,40 @@ async def test_legacy_writer_preserves_operator_override_and_tombstone(
             {"legacy_id": legacy_id},
         )
     ).scalar_one() == "legacy-patch-operator"
+    operator_revision = (
+        await migrated_session.execute(
+            text(
+                "SELECT operator_updated_by, operator_updated_at "
+                "FROM feature.curated_features "
+                "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
+            ),
+            {"legacy_id": legacy_id},
+        )
+    ).one()
+    await curated_repo.update_curated_feature(
+        migrated_session,
+        curated_feature_id=legacy_id,
+        updates={"display_summary": "source-only legacy patch"},
+        actor="source-only-admin",
+    )
+    assert (
+        await migrated_session.execute(
+            text(
+                "SELECT operator_updated_by, operator_updated_at "
+                "FROM feature.curated_features "
+                "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
+            ),
+            {"legacy_id": legacy_id},
+        )
+    ).one() == operator_revision
+    with pytest.raises(ValueError, match="legacy writer"):
+        await update_curation_item(
+            migrated_session,
+            collection_id=legacy_item[0],
+            curation_item_id=legacy_item[1],
+            updates={"item_summary": "canonical source drift"},
+            actor="canonical-source-admin",
+        )
 
     await update_curation_item(
         migrated_session,
@@ -1052,6 +1086,191 @@ async def test_legacy_writer_preserves_operator_override_and_tombstone(
     assert tombstone.item_summary == "provider changed"
 
 
+async def test_legacy_identity_move_does_not_overwrite_occupied_target(
+    migrated_session: AsyncSession,
+) -> None:
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    fetched_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+    entity = SourceEntityRow(
+        source_entity_key="curation-occupied-entity",
+        provider="python-mcst-api",
+        dataset_key="tourism-100-test",
+        source_entity_type="place",
+        source_entity_id="curation-occupied",
+        current_source_record_key=None,
+        first_seen_at=fetched_at,
+        last_seen_at=fetched_at,
+    )
+    migrated_session.add(entity)
+    await migrated_session.flush()
+    for key, payload_hash in (
+        ("curation-occupied-original", "curation-occupied-original-hash"),
+        ("curation-occupied-target", "curation-occupied-target-hash"),
+    ):
+        migrated_session.add(
+            SourceRecordRow(
+                source_record_key=key,
+                source_entity_key=entity.source_entity_key,
+                provider=entity.provider,
+                dataset_key=entity.dataset_key,
+                source_entity_type=entity.source_entity_type,
+                source_entity_id=entity.source_entity_id,
+                raw_payload_hash=payload_hash,
+                raw_data={},
+                fetched_at=fetched_at,
+            )
+        )
+    await migrated_session.flush()
+
+    legacy_id = str(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_features (
+                        theme_id, feature_id, source_id, source_record_key,
+                        curation_status, selection_origin, display_title
+                    ) VALUES (
+                        CAST(:theme_id AS uuid), :feature_id,
+                        CAST(:source_id AS uuid), 'curation-occupied-original',
+                        'curated', 'source_rule', 'occupied identity'
+                    )
+                    RETURNING curated_feature_id::text
+                    """
+                ),
+                {
+                    "theme_id": theme_id,
+                    "source_id": source_id,
+                    "feature_id": _FEATURE_ID,
+                },
+            )
+        ).scalar_one()
+    )
+    collection_id = str(
+        (
+            await migrated_session.execute(
+                text(
+                    "SELECT collection_id::text "
+                    "FROM feature.curation_items "
+                    "WHERE curation_item_id = CAST(:legacy_id AS uuid)"
+                ),
+                {"legacy_id": legacy_id},
+            )
+        ).scalar_one()
+    )
+    occupied, inserted = await add_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        feature_id=_FEATURE_ID,
+        source_record_key="curation-occupied-target",
+        external_item_id="curation-occupied-target",
+        status="included",
+        curation_relation="food_stop",
+        reuse_policy="allowed",
+        actor="occupied-owner",
+    )
+    assert inserted is True
+
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curated_features
+            SET source_record_key = 'curation-occupied-target',
+                display_summary = 'provider moved identity',
+                updated_at = clock_timestamp()
+            WHERE curated_feature_id = CAST(:legacy_id AS uuid)
+            """
+        ),
+        {"legacy_id": legacy_id},
+    )
+    state = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT
+                    (SELECT source_present
+                     FROM feature.curation_items
+                     WHERE curation_item_id = CAST(:legacy_id AS uuid)),
+                    (SELECT source_present
+                     FROM feature.curation_items
+                     WHERE curation_item_id = CAST(:occupied_id AS uuid)),
+                    (SELECT curation_relation
+                     FROM feature.curation_items
+                     WHERE curation_item_id = CAST(:occupied_id AS uuid)),
+                    (SELECT reuse_policy
+                     FROM feature.curation_items
+                     WHERE curation_item_id = CAST(:occupied_id AS uuid)),
+                    (SELECT metadata
+                        @> '{"merge_projection_detached": true}'::jsonb
+                     FROM feature.curated_features
+                     WHERE curated_feature_id = CAST(:legacy_id AS uuid))
+                """
+            ),
+            {
+                "legacy_id": legacy_id,
+                "occupied_id": occupied.curation_item_id,
+            },
+        )
+    ).one()
+    assert state == (False, True, "food_stop", "allowed", True)
+
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curated_features
+            SET curation_status = 'rejected',
+                metadata = '{}'::jsonb,
+                updated_at = clock_timestamp()
+            WHERE curated_feature_id = CAST(:legacy_id AS uuid)
+            """
+        ),
+        {"legacy_id": legacy_id},
+    )
+    marker = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT metadata @> '{"merge_projection_detached": true}'::jsonb
+                FROM feature.curated_features
+                WHERE curated_feature_id = CAST(:legacy_id AS uuid)
+                """
+            ),
+            {"legacy_id": legacy_id},
+        )
+    ).scalar_one()
+    assert marker is True
+    await migrated_session.execute(
+        text(
+            "DELETE FROM feature.curated_features "
+            "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
+        ),
+        {"legacy_id": legacy_id},
+    )
+    final_state = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT
+                    (SELECT source_present
+                     FROM feature.curation_items
+                     WHERE curation_item_id = CAST(:legacy_id AS uuid)),
+                    (SELECT status
+                     FROM feature.curation_items
+                     WHERE curation_item_id = CAST(:occupied_id AS uuid)),
+                    (SELECT curation_relation
+                     FROM feature.curation_items
+                     WHERE curation_item_id = CAST(:occupied_id AS uuid))
+                """
+            ),
+            {
+                "legacy_id": legacy_id,
+                "occupied_id": occupied.curation_item_id,
+            },
+        )
+    ).one()
+    assert final_state == (False, "included", "food_stop")
+
+
 async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
     migrated_session: AsyncSession,
 ) -> None:
@@ -1122,6 +1341,70 @@ async def test_legacy_reinsert_restores_stable_source_identity_without_new_uuid(
                 {"legacy_id": legacy_id},
             )
         ).scalar_one()
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.curation_items "
+            "SET status = 'candidate', operator_updated_by = NULL, "
+            "operator_updated_at = NULL "
+            "WHERE curation_item_id = CAST(:legacy_id AS uuid)"
+        ),
+        {"legacy_id": legacy_id},
+    )
+    await migrated_session.execute(
+        text(
+            "DELETE FROM feature.curated_features "
+            "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
+        ),
+        {"legacy_id": legacy_id},
+    )
+    candidate_replacement_id = str(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_features (
+                        theme_id, feature_id, source_id, source_record_key,
+                        curation_status, selection_origin, display_title
+                    ) VALUES (
+                        CAST(:theme_id AS uuid), :feature_id,
+                        CAST(:source_id AS uuid), :source_record_key,
+                        'curated', 'source_rule', 'stable reinsert'
+                    )
+                    RETURNING curated_feature_id::text
+                    """
+                ),
+                {
+                    "theme_id": theme_id,
+                    "source_id": source_id,
+                    "feature_id": _FEATURE_ID,
+                    "source_record_key": "curation-reinsert-record",
+                },
+            )
+        ).scalar_one()
+    )
+    assert (
+        await migrated_session.execute(
+            text(
+                "SELECT curation_status, operator_updated_at IS NULL "
+                "FROM feature.curated_features "
+                "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
+            ),
+            {"legacy_id": candidate_replacement_id},
+        )
+    ).one() == ("candidate", True)
+    assert (
+        await curated_repo.list_curated_features(
+            migrated_session,
+            theme_id=theme_id,
+        )
+    ).items == ()
+    await migrated_session.execute(
+        text(
+            "DELETE FROM feature.curated_features "
+            "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
+        ),
+        {"legacy_id": candidate_replacement_id},
     )
     await update_curation_item(
         migrated_session,

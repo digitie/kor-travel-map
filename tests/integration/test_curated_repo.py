@@ -354,14 +354,36 @@ async def test_manual_create_patch_and_archive_curated_feature(
     assert patched.display_summary == "수동 추천 책방"
     assert patched.content_version == 2
 
-    archived = await curated_repo.archive_curated_feature(
+    archived = await curated_repo.update_curated_feature(
         migrated_session,
         curated_feature_id=created.curated_feature_id,
+        updates={"curation_status": "archived"},
         actor="pytest",
     )
     assert archived is not None
     assert archived.curation_status == "archived"
     assert archived.archived_at is not None
+
+    retained_tombstone = await curated_repo.update_curated_feature(
+        migrated_session,
+        curated_feature_id=created.curated_feature_id,
+        updates={"curation_status": "curated"},
+        actor="pytest",
+    )
+    assert retained_tombstone is not None
+    assert retained_tombstone.curation_status == "archived"
+    assert retained_tombstone.archived_at is not None
+
+    created_archived = await curated_repo.create_curated_feature(
+        migrated_session,
+        theme_id=theme.theme_id,
+        feature_id=feature_id,
+        source_id=source.source_id,
+        curation_status="archived",
+        actor="pytest",
+    )
+    assert created_archived.curation_status == "archived"
+    assert created_archived.archived_at is not None
 
 
 async def test_list_curated_features_distinct_by_feature_dedups_cross_theme(

@@ -37,6 +37,9 @@ class _FakeResult:
     def mappings(self) -> _FakeResult:
         return self
 
+    def scalars(self) -> _FakeResult:
+        return self
+
     def all(self) -> list[Any]:
         return self._rows
 
@@ -684,6 +687,11 @@ async def _update_item_with_current(
     actor: str | None = None,
 ) -> repo.CurationItem | None:
     monkeypatch.setattr(repo, "_lock_collection", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        repo,
+        "_lock_legacy_projections_for_item",
+        AsyncMock(return_value=False),
+    )
     monkeypatch.setattr(repo, "get_curation_item", AsyncMock(return_value=_item()))
     return await repo.update_curation_item(
         _FakeSession(*results),
@@ -775,6 +783,11 @@ async def test_update_item_noop_update_miss_and_full_success(
 ) -> None:
     current = _item()
     monkeypatch.setattr(repo, "_lock_collection", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        repo,
+        "_lock_legacy_projections_for_item",
+        AsyncMock(return_value=False),
+    )
     get_item = AsyncMock(return_value=current)
     monkeypatch.setattr(repo, "get_curation_item", get_item)
 
@@ -845,6 +858,11 @@ async def test_update_item_allows_source_absent_but_rejects_archived_current(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(repo, "_lock_collection", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        repo,
+        "_lock_legacy_projections_for_item",
+        AsyncMock(return_value=False),
+    )
     source_absent = _item(source_present=False)
     archived = _item(status="archived", archived_at=_NOW)
     get_item = AsyncMock(side_effect=[source_absent, archived, archived])
@@ -1119,6 +1137,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     changed = _FakeSession(
         _FakeResult(),
         _FakeResult(),
+        _FakeResult(rows=["feature:one"]),
         _FakeResult(rows=[_item_row()]),
         _FakeResult(rows=[{"inserted": 2, "updated": 1}]),
         _FakeResult(),
@@ -1144,9 +1163,10 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     unchanged = _FakeSession(
         _FakeResult(),
         _FakeResult(),
+        _FakeResult(rows=["feature:one"]),
         _FakeResult(rows=[]),
         _FakeResult(rows=[{"inserted": 0, "updated": 0}]),
     )
     no_change = await repo.import_curation_rows(unchanged, rows=(rows[0],))
     assert no_change["inserted"] == no_change["updated"] == no_change["removed"] == 0
-    assert len(unchanged.calls) == 4
+    assert len(unchanged.calls) == 5
