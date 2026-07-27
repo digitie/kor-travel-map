@@ -3,6 +3,20 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-27 — T-VN-H20 prod admin credential 회전 완료 (login 200 검증)
+
+- [x] **T-VN-H20** — prod admin password/hash 회전. credential-safe 스크립트(auth.ts와 동일 pbkdf2_sha256
+  310k iter/256bit 파생)로 새 강한 password 생성 — 평문→gitignored `docs/prod-access.local.md`, hash→repo
+  밖 scratch, stdout엔 경로·길이만(값 비노출). prod `.env`의 `KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH`를
+  base-compose로 UI만 recreate(R2: `-f docker-compose.yml --no-deps --force-recreate`, override 배제)해
+  회전. **검증**: 새 pw→login 200 + 오키/기존→401, 배포 컨테이너 hash 87자, UI healthy.
+  - **인시던트+복구(투명)**: 최초 회전에서 hash를 `.env`에 raw로 써서 docker-compose가 `$310000$salt$hash`의
+    `$<salt>`/`$<hash>`를 변수 interpolation→salt/hash 소거(배포 20자)→admin UI 일시 로그인 불가.
+    python diag(.env 87 vs container 20 MISMATCH)로 규명→`$`→`$$` escape 재작성→recreate→87자 복원→200 확인.
+    매 단계 `.env` 타임스탬프 백업(롤백 가능). **교훈**: compose `.env`의 `$` 포함 값은 `$$` escape 필수.
+  - 잔여(사용자 판단): local doc stale 섹션(초기 미배포 gen) 삭제, session secret 미회전(기존 세션 만료까지
+    유효 — 완전 폐기 시 별도 회전), n150 `.env.h20-*bak.*` 롤백 백업 정리.
+
 ## 2026-07-27 — Lane B b4 하드닝 3건 완결 (H13·H14·H15)
 
 각 항목 적대 리뷰어 2명(blocker 0) + 회귀 테스트 + CI green(pytest/dagster/PostGIS) 후 머지.
