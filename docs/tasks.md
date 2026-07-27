@@ -27,7 +27,8 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   [ ] `T-VN-48`(mocked E2E drift)
 - b4 (열린 이슈·운영 버그 하드닝, 2026-07-27 추가): [x] `T-VN-H13`(#699→#862) →
   [x] `T-VN-H14`(#700→#863) → [x] `T-VN-H15`(#805→#864) →
-  [ ] `T-VN-H20`(prod admin credential 정본) → [ ] `T-VN-H18`(GitHub 실제 approval gate)
+  [ ] `T-VN-H20`(prod admin credential 정본 — 생성 완료·prod 회전 사용자 진행) →
+  [ ] `T-VN-H18`(GitHub approval gate — **보류: governance 결정**)
   (상세는 아래 b4 섹션)
 - b1 (PinVi 결합, 순차): [ ] `T-VN-11` → [ ] `T-VN-12` → [ ] `T-VN-16` →
   [ ] `T-VN-41`
@@ -159,7 +160,11 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   local-only 정본을 동기화한다. 배포된 UI에서 login POST 200 + Set-Cookie와 hash env 길이, 기존 세션
   폐기를 확인하며 비밀 평문·hash는 tracked 파일이나 PR/로그에 남기지 않는다.
 
-- [ ] T-VN-H18 — **GitHub 실제 approval provenance gate 강제**
+- [ ] T-VN-H18 — **GitHub 실제 approval provenance gate 강제** — **보류(governance 결정, 2026-07-27)**:
+  approval 필수화는 이후 모든 PR(진행 중 세션 포함)의 self-merge를 즉시 차단하므로, repo 소유자가
+  워크플로우 전환 시점을 정해 착수한다. 현황: main branch protection 없음 확인, gh admin 권한 있음.
+  구현 옵션 = branch protection(approval 1·last-push-approval·dismiss-stale·CI checks required) 또는
+  merge-전 CI verifier(head SHA APPROVED≥1, bot/self 제외 + 회귀 테스트).
 
   Claude Code가 작성한 PR #841~#845·#847~#850·#852~#857을 전문 적대 감사한 결과 15건 모두
   GitHub `reviews: []` 상태로 머지돼 AGENTS의 "1 review approval" 계약을 충족하지 못했다. 과거

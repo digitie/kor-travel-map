@@ -2,8 +2,9 @@
 
 ## 2026-07-27 (claude) — 🎯 Lane B b4 대행: H13·H14·H15 완결, H20 진행, H18 예정
 
-**다음 한 작업**: b4 순차 — **H20**(prod admin credential 회전) 검증 마무리(사용자 ktdctl 회전+login 200
-확인) → **H18**(GitHub 실제 approval provenance gate 강제). 사용자 지시로 Lane A가 Lane B b4 대행 중.
+**다음 한 작업**: **H20** prod ktdctl 회전+login 200 검증 마무리(사용자 실행 중) → b4 잔여는 **H18 보류**
+(governance 결정 — approval 필수화가 self-merge 즉시 차단, repo 소유자가 시점 결정). 코드 b4(H13/H14/H15)
+완료, H20 생성 완료. 사용자 지시로 Lane A가 Lane B b4 대행.
 
 - **완료(b4)**: `T-VN-H13`(#699→#862 curation override 보존) · `T-VN-H14`(#700→#863 KREX bounded-retry) ·
   `T-VN-H15`(#805→#864 c7 IPv6 origin). 각 적대 리뷰 2명 + 회귀 + CI green.
