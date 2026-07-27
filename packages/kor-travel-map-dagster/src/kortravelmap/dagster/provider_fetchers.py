@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib
 import math
 import pathlib
+import time
 from collections.abc import AsyncIterator, Iterable, Iterator
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
 
 __all__ = [
+    "KrexTrafficNoticeSnapshotUnstable",
     "ProviderCredentialMissing",
     "fetch_airkorea_air_quality",
     "fetch_airkorea_stations",
@@ -68,6 +70,26 @@ __all__ = [
 
 class ProviderCredentialMissing(RuntimeError):
     """provider live fetch에 필요한 credential이 설정되지 않았을 때."""
+
+
+class KrexTrafficNoticeSnapshotUnstable(RuntimeError):
+    """KREX 돌발 feed가 bounded retry 내에 안정 snapshot을 확보하지 못했을 때.
+
+    휘발성(사건 appear/disappear) feed에서 연속 snapshot이 상한 내 한 번도
+    일치하지 않은 경우다. ``RuntimeError`` 하위형이라 기존 예외 처리와 호환되면서,
+    caller가 '일시 불일치가 아니라 지속적 불안정'을 특정해 구분할 수 있게 typed다.
+    """
+
+
+# 연속 snapshot 사건 집합 일치를 요구하되(불완전 pagination이 notice 종료를 오판하지
+# 않도록), 휘발성 feed의 일시 불일치를 sliding 재시도로 self-heal하기 위한 상한.
+# 초기 1회 + 최대 이 횟수만큼 추가 snapshot을 떠 직전과 비교한다(총 최대 상한+1 snapshot).
+_KREX_NOTICE_STABILITY_RETRIES: Final[int] = 4
+# 재시도 snapshot 사이의 간격(초). back-to-back으로 뜨면 같은 휘발 window를 관측해
+# self-heal이 무력화될 수 있으므로 휘발 사건이 정착할 시간을 준다(#700). 최초 pair
+# (initial vs 첫 재시도)는 full pagination의 자연 지연이 있으므로 delay를 넣지 않는다.
+# 테스트는 이 값을 0으로 monkeypatch해 즉시 실행한다.
+_KREX_NOTICE_RETRY_DELAY_SECONDS: Final[float] = 0.5
 
 
 async def fetch_kor_travel_concierge_youtube_features(
@@ -375,9 +397,13 @@ def fetch_krex_traffic_notices(
     성공으로 인정한다. HTTP 200의 ``{}``, message-only, count-only 응답은 실패시켜
     asset reconcile이 실행되지 않게 한다. page 사이 동일 사건 identity가 다시
     나타나는 snapshot도 page boundary 이동으로 한 사건이 중복되고 다른 사건이
-    누락된 불완전 응답일 수 있으므로 거부한다. 완전 pagination을 연속 2회 수행해
-    record 수와 사건 identity set이 같을 때만 두 번째 pass를 yield한다. generator
-    소비 종료(또는 close)시 ``finally``에서 ``client.close()``.
+    누락된 불완전 응답일 수 있으므로 거부한다. 완전 pagination을 수행하되, 휘발성
+    feed에서 연속 두 snapshot의 record 수·사건 identity set이 일치할 때까지
+    ``_KREX_NOTICE_STABILITY_RETRIES`` 상한 내에서 매 pass를 직전과 비교하는 sliding
+    재시도로 확인하고, 안정된 최신 pass만 yield한다. 상한 내 안정 pair를 못 잡으면
+    ``KrexTrafficNoticeSnapshotUnstable``(typed)로 실패한다(#700 — 일시 불일치가
+    run을 반복 중단시켜 notice 신선도를 정체시키던 문제). generator 소비 종료(또는
+    close)시 ``finally``에서 ``client.close()``.
     """
     secret = settings.krex_ex_api_key
     if secret is None:
@@ -395,25 +421,42 @@ def fetch_krex_traffic_notices(
     client = krex.KrexClient(ex_api_key=api_key)
     num_of_rows = 1000
     try:
-        first_records, first_identities = _fetch_krex_traffic_notice_snapshot(
+        # 휘발성 feed에서 연속 2 snapshot이 한 번에 일치하지 않을 수 있으므로, 매 pass를
+        # 직전 pass와 비교하는 sliding 방식으로 상한(_KREX_NOTICE_STABILITY_RETRIES) 내
+        # 재시도해 일시 불일치를 self-heal한다. 상한 내 안정 pair를 못 잡으면 typed 실패로
+        # 명확히 신호한다(무한 재시도/불완전 snapshot yield 금지 — 완전 pagination 2회-일치
+        # 안전성은 유지). 안정 pair 확정 전에는 한 건도 yield하지 않아 destructive reconcile과 격리.
+        previous_records, previous_identities = _fetch_krex_traffic_notice_snapshot(
             client,
             num_of_rows=num_of_rows,
         )
-        second_records, second_identities = _fetch_krex_traffic_notice_snapshot(
-            client,
-            num_of_rows=num_of_rows,
-        )
-        if (
-            len(first_records) != len(second_records)
-            or first_identities != second_identities
-        ):
-            raise RuntimeError(
-                "KREX traffic_notices 연속 snapshot의 사건 집합이 다르다: "
-                f"first_count={len(first_records)}, second_count={len(second_records)}"
+        stable_records: list[Any] | None = None
+        for attempt in range(_KREX_NOTICE_STABILITY_RETRIES):
+            # 첫 재시도(attempt 0)는 initial snapshot과 full pagination 자연 지연으로
+            # 이미 떨어져 있으므로 delay 없이 비교하고, 이후 재시도만 사건 정착 시간을 준다.
+            if attempt > 0 and _KREX_NOTICE_RETRY_DELAY_SECONDS > 0:
+                time.sleep(_KREX_NOTICE_RETRY_DELAY_SECONDS)
+            current_records, current_identities = _fetch_krex_traffic_notice_snapshot(
+                client,
+                num_of_rows=num_of_rows,
             )
-        # 두 번째 pass가 동일 사건 집합을 확인한 가장 최신 payload다. 검증이 끝나기
-        # 전에는 한 건도 yield하지 않아 asset의 destructive reconcile과 격리한다.
-        yield from second_records
+            if (
+                len(previous_records) == len(current_records)
+                and previous_identities == current_identities
+            ):
+                stable_records = current_records
+                break
+            previous_records, previous_identities = (
+                current_records,
+                current_identities,
+            )
+        if stable_records is None:
+            raise KrexTrafficNoticeSnapshotUnstable(
+                "KREX traffic_notices 연속 snapshot이 "
+                f"{_KREX_NOTICE_STABILITY_RETRIES}회 재시도 내 안정되지 않았다: "
+                f"last_count={len(previous_records)}"
+            )
+        yield from stable_records
     finally:
         client.close()
 
