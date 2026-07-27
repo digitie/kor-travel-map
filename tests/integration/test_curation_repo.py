@@ -404,6 +404,134 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
     assert rematched == "feature:import-b"
 
 
+async def test_authoritative_reimport_preserves_operator_curation_overrides(
+    migrated_session: AsyncSession,
+) -> None:
+    """#699 회귀: authoritative CSV 재적재가 운영자 편집(status/curation_relation/
+    reuse_policy)을 보존하고, provider 파생 필드만 갱신한다."""
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, marker_icon, marker_color
+            ) VALUES
+                ('feature:reimport-a', 'place', '재적재 장소 A', '01070100',
+                 'place', 'P-01')
+            """
+        )
+    )
+    common = {
+        "collection_key": "csv-reimport:2026",
+        "theme_slug": "csv-reimport-test",
+        "theme_name": "CSV 재적재 테스트",
+        "theme_group": "test",
+        "title": "재적재 테스트",
+        "edition_key": "2026",
+        "provider": "csv-reimport-provider",
+        "dataset_key": "csv-reimport-dataset",
+        "source_name": "재적재 출처",
+        "source_url": None,
+        "item_title": None,
+        "item_summary": None,
+        "place_name": "원본 장소명",
+        "address_hint": None,
+    }
+    rows = [
+        ResolvedCurationImportRow(
+            row_number=2,
+            source_item_key="reimport-a",
+            feature_id="feature:reimport-a",
+            sort_order=1,
+            metadata={"ordinal": 1},
+            **common,
+        ),
+    ]
+
+    # 1) 최초 적재 → default status='included'/relation='nearby_option'/reuse='manual_review'
+    first = await import_curation_rows(migrated_session, rows=rows, actor="importer")
+    assert first["inserted"] == 1
+
+    ids = (
+        await migrated_session.execute(
+            text(
+                "SELECT i.curation_item_id::text AS iid, i.collection_id::text AS cid "
+                "FROM feature.curation_items AS i "
+                "JOIN feature.curation_collections AS c "
+                "ON c.collection_id = i.collection_id "
+                "WHERE c.collection_key = :ck AND i.external_item_id = :eid "
+                "AND i.archived_at IS NULL"
+            ),
+            {"ck": "csv-reimport:2026", "eid": "reimport-a"},
+        )
+    ).mappings().one()
+    item_id = ids["iid"]
+    collection_id = ids["cid"]
+
+    created = await get_curation_item(
+        migrated_session, collection_id=collection_id, curation_item_id=item_id
+    )
+    assert created is not None
+    assert created.status == "included"
+    assert created.curation_relation == "nearby_option"
+    assert created.reuse_policy == "manual_review"
+
+    # 2) 운영자 편집: 오매칭 숨김 + 대표 코스 + 재사용 차단
+    await update_curation_item(
+        migrated_session,
+        collection_id=collection_id,
+        curation_item_id=item_id,
+        updates={
+            "status": "rejected",
+            "curation_relation": "primary_stop",
+            "reuse_policy": "blocked",
+        },
+        actor="operator",
+    )
+
+    # 3) 동일 authoritative CSV 재적재 → 운영자 override 3필드 보존, 무변경으로 집계
+    reimport_plan = await preview_curation_import(migrated_session, rows=rows)
+    reimport = await import_curation_rows(migrated_session, rows=rows, actor="importer")
+    preserved = await get_curation_item(
+        migrated_session, collection_id=collection_id, curation_item_id=item_id
+    )
+    assert preserved is not None
+    assert preserved.status == "rejected"
+    assert preserved.curation_relation == "primary_stop"
+    assert preserved.reuse_policy == "blocked"
+    assert reimport_plan.updated == 0
+    assert reimport["updated"] == 0
+    assert reimport["inserted"] == 0
+    # authoritative replace의 DELETE-removals 경로가 operator-edited 행을 잘못 제거하지 않는다
+    assert reimport["removed"] == 0
+
+    # 4) provider 파생 필드(place_name)는 CSV authoritative라 재적재로 갱신되고,
+    #    운영자 override 3필드는 여전히 보존된다.
+    changed_rows = [
+        ResolvedCurationImportRow(
+            row_number=2,
+            source_item_key="reimport-a",
+            feature_id="feature:reimport-a",
+            sort_order=1,
+            metadata={"ordinal": 1},
+            **{**common, "place_name": "갱신된 장소명"},
+        ),
+    ]
+    changed_plan = await preview_curation_import(migrated_session, rows=changed_rows)
+    changed = await import_curation_rows(
+        migrated_session, rows=changed_rows, actor="importer"
+    )
+    after = await get_curation_item(
+        migrated_session, collection_id=collection_id, curation_item_id=item_id
+    )
+    assert after is not None
+    assert after.place_name == "갱신된 장소명"
+    assert after.status == "rejected"
+    assert after.curation_relation == "primary_stop"
+    assert after.reuse_policy == "blocked"
+    assert changed_plan.updated == 1
+    assert changed["updated"] == 1
+
+
 async def test_theme_upsert_fallback_sees_concurrent_identical_insert(
     migrated_engine: AsyncEngine,
 ) -> None:
