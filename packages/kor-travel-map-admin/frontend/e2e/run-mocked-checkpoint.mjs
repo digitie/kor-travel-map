@@ -19,6 +19,42 @@ if (!revision || !/^[0-9a-f]{40}$/.test(revision)) {
   process.exit(2);
 }
 
+const headResult = spawnSync("git", ["rev-parse", "HEAD"], {
+  cwd: process.cwd(),
+  encoding: "utf8",
+});
+const headRevision = headResult.stdout?.trim();
+if (
+  headResult.status !== 0 ||
+  !headRevision ||
+  !/^[0-9a-f]{40}$/.test(headRevision)
+) {
+  console.error(
+    "checkpoint 실행 worktree의 exact Git HEAD를 확인할 수 없습니다.",
+  );
+  process.exit(2);
+}
+if (revision !== headRevision) {
+  console.error(
+    `checkpoint revision이 Git HEAD와 다릅니다: declared=${revision}, head=${headRevision}`,
+  );
+  process.exit(2);
+}
+const statusResult = spawnSync(
+  "git",
+  ["status", "--porcelain", "--untracked-files=normal"],
+  {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  },
+);
+if (statusResult.status !== 0 || statusResult.stdout.trim()) {
+  console.error(
+    "checkpoint는 tracked/untracked 변경이 없는 exact Git worktree에서만 실행할 수 있습니다.",
+  );
+  process.exit(2);
+}
+
 const require = createRequire(import.meta.url);
 const playwrightCli = require.resolve("@playwright/test/cli");
 const result = spawnSync(
@@ -34,6 +70,7 @@ const result = spawnSync(
       ...process.env,
       MOCKED_E2E_CHECKPOINT: checkpoint,
       MOCKED_E2E_REVISION: revision,
+      MOCKED_E2E_VERIFIED_REVISION: headRevision,
     },
     stdio: "inherit",
   },

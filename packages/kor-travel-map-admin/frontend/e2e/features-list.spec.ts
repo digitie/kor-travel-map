@@ -15,8 +15,7 @@ import { mockOpsDatasetCatalog } from "./ops-dataset-catalog-mock";
 type Meta = components["schemas"]["Meta"];
 type PageMeta = components["schemas"]["PageMeta"];
 type AdminFeatureRecord = components["schemas"]["AdminFeatureRecord"];
-type AdminFeatureIssueRecord =
-  components["schemas"]["AdminFeatureIssueRecord"];
+type AdminFeatureIssueRecord = components["schemas"]["AdminFeatureIssueRecord"];
 type AdminFeaturesListResponse =
   components["schemas"]["AdminFeaturesListResponse"];
 type AdminFeatureDeactivateData =
@@ -232,7 +231,11 @@ function makeAdminFeatureDetailResponse(
       versions: [],
       ...overrides,
     },
-    meta: { duration_ms: 1, page: null, request_id: "e2e-admin-feature-detail" },
+    meta: {
+      duration_ms: 1,
+      page: null,
+      request_id: "e2e-admin-feature-detail",
+    },
   };
 }
 
@@ -265,14 +268,18 @@ async function mockFeaturesList(
       deactivateUrls.push(pathname);
       deactivateBodies.push(request.postDataJSON() as Record<string, unknown>);
       const featureId = decodeURIComponent(
-        pathname.replace(/^\/v1\/admin\/features\//, "").replace(
-          /\/deactivate$/,
-          "",
+        pathname
+          .replace(/^\/v1\/admin\/features\//, "")
+          .replace(/\/deactivate$/, ""),
+      );
+      await fulfillJson(
+        route,
+        makeDeactivateResponse(
+          makeAdminFeature({
+            feature_id: featureId,
+          }),
         ),
       );
-      await fulfillJson(route, makeDeactivateResponse(makeAdminFeature({
-        feature_id: featureId,
-      })));
       return;
     }
 
@@ -314,16 +321,12 @@ test.describe("admin/features list depth", () => {
     await expect(page.getByText("Hongdae mock feature")).toBeVisible();
 
     // 초기(active) 목록이 정착하면 q 파라미터는 없어야 한다(빈 q => undefined).
-    await expect
-      .poll(() => mocks.lastSearch()?.has("q") ?? true)
-      .toBe(false);
+    await expect.poll(() => mocks.lastSearch()?.has("q") ?? true).toBe(false);
 
     await page.getByLabel("feature search").fill("hongdae");
 
     // useDeferredValue로 q가 한 틱 늦게 쿼리에 도달하므로 expect.poll로 대기.
-    await expect
-      .poll(() => mocks.lastSearch()?.get("q"))
-      .toBe("hongdae");
+    await expect.poll(() => mocks.lastSearch()?.get("q")).toBe("hongdae");
 
     const last = mocks.lastSearch();
     expect(last?.has("cursor")).toBe(false); // resetCursor()로 cursor 제거.
@@ -352,35 +355,27 @@ test.describe("admin/features list depth", () => {
     // 기본 상태: sort=name, order=asc. asc 버튼이 default variant(bg-brand).
     await expect(sortSelect).toHaveValue("name");
     await expect(ascButton).toHaveClass(/bg-brand/);
-    await expect
-      .poll(() => mocks.lastSearch()?.get("sort"))
-      .toBe("name");
+    await expect.poll(() => mocks.lastSearch()?.get("sort")).toBe("name");
     expect(mocks.lastSearch()?.get("order")).toBe("asc");
 
     // dropdown으로 updated_at 선택 → setSort("updated_at") + resetCursor().
     // order(asc) 상태는 보존된다.
     await sortSelect.selectOption("updated_at");
     await expect(sortSelect).toHaveValue("updated_at");
-    await expect
-      .poll(() => mocks.lastSearch()?.get("sort"))
-      .toBe("updated_at");
+    await expect.poll(() => mocks.lastSearch()?.get("sort")).toBe("updated_at");
     expect(mocks.lastSearch()?.get("order")).toBe("asc");
     expect(mocks.lastSearch()?.has("cursor")).toBe(false); // resetCursor().
 
     // desc 버튼 클릭 → setOrder("desc") + resetCursor(). sort(updated_at) 보존.
     await descButton.click();
     await expect(descButton).toHaveClass(/bg-brand/);
-    await expect
-      .poll(() => mocks.lastSearch()?.get("order"))
-      .toBe("desc");
+    await expect.poll(() => mocks.lastSearch()?.get("order")).toBe("desc");
     expect(mocks.lastSearch()?.get("sort")).toBe("updated_at");
 
     // dropdown으로 provider 선택 → order 상태(desc) 보존 + sort=provider.
     await sortSelect.selectOption("provider");
     await expect(sortSelect).toHaveValue("provider");
-    await expect
-      .poll(() => mocks.lastSearch()?.get("sort"))
-      .toBe("provider");
+    await expect.poll(() => mocks.lastSearch()?.get("sort")).toBe("provider");
     expect(mocks.lastSearch()?.get("order")).toBe("desc");
   });
 
@@ -392,18 +387,22 @@ test.describe("admin/features list depth", () => {
         const cursor = url.searchParams.get("cursor");
         if (cursor === "cursor-page-2") {
           return listResponse(
-            [makeAdminFeature({
-              feature_id: "mock::page::2",
-              name: "Feature page 2",
-            })],
+            [
+              makeAdminFeature({
+                feature_id: "mock::page::2",
+                name: "Feature page 2",
+              }),
+            ],
             makePageMeta({ next_cursor: null }),
           );
         }
         return listResponse(
-          [makeAdminFeature({
-            feature_id: "mock::page::1",
-            name: "Feature page 1",
-          })],
+          [
+            makeAdminFeature({
+              feature_id: "mock::page::1",
+              name: "Feature page 1",
+            }),
+          ],
           makePageMeta({ next_cursor: "cursor-page-2" }),
         );
       },
@@ -443,7 +442,9 @@ test.describe("admin/features list depth", () => {
     await expect(page.getByText("0 rows")).toBeVisible();
     await expect(page.getByText("table에서 feature를 선택하면")).toBeVisible();
     await expect(page.getByRole("button", { name: "다음" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "첫 페이지" })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "첫 페이지" }),
+    ).toBeDisabled();
   });
 
   test("list error renders destructive alert (problem+json)", async ({
@@ -454,10 +455,7 @@ test.describe("admin/features list depth", () => {
     await page.route("**/v1/admin/features**", async (route) => {
       const url = new URL(route.request().url());
       const pathname = apiPath(url);
-      if (
-        route.request().method() === "GET" &&
-        pathname === LIST_PATH
-      ) {
+      if (route.request().method() === "GET" && pathname === LIST_PATH) {
         await fulfillJson(
           route,
           {
@@ -506,7 +504,9 @@ test.describe("admin/features list depth", () => {
     await expect(activeRow).toBeVisible();
 
     // 음성 가드: inactive row의 deactivate 버튼은 비활성.
-    const inactiveRow = page.getByRole("row", { name: /Mock inactive feature/ });
+    const inactiveRow = page.getByRole("row", {
+      name: /Mock inactive feature/,
+    });
     await expect(
       inactiveRow.getByRole("button", { name: "deactivate" }),
     ).toBeDisabled();
@@ -523,6 +523,7 @@ test.describe("admin/features list depth", () => {
       prevent_provider_reactivation: true,
       reason: "admin-ui deactivate",
     });
+    expect(mocks.deactivateBodies[0]).not.toHaveProperty("operator");
     expect(mocks.deactivateUrls[0]).toBe(
       `/v1/admin/features/${encodeURIComponent(activeFeature.feature_id)}/deactivate`,
     );
@@ -555,7 +556,9 @@ test.describe("admin/features list depth", () => {
     const associations = page.getByTestId("feature-associations");
     await expect(associations).toBeVisible();
     await expect(associations.getByText("Admin-only collection")).toBeVisible();
-    await expect(associations.getByText("admin-provider").first()).toBeVisible();
+    await expect(
+      associations.getByText("admin-provider").first(),
+    ).toBeVisible();
     await associations.getByText("membership 전체 정보").click();
     await expect(associations.getByText("admin-only-collection")).toBeVisible();
     await expect(page.getByRole("link", { name: "전체 상세" })).toHaveCount(0);
@@ -608,12 +611,12 @@ test.describe("admin/features list depth", () => {
     // has_issue=yes 분기가 end-to-end로 연결됐는지 — issue count + violation 라인.
     const issueRow = page.getByRole("row", { name: /Issue feature/ });
     await expect(issueRow.getByText("2", { exact: true })).toBeVisible();
-    await expect(issueRow.getByText(/missing_address · 주소 누락/)).toBeVisible();
+    await expect(
+      issueRow.getByText(/missing_address · 주소 누락/),
+    ).toBeVisible();
 
     await hasIssueSelect.selectOption("no"); // "no" => has_issue=false.
-    await expect
-      .poll(() => mocks.lastSearch()?.get("has_issue"))
-      .toBe("false");
+    await expect.poll(() => mocks.lastSearch()?.get("has_issue")).toBe("false");
 
     await hasIssueSelect.selectOption("all");
     // "all"은 초기 쿼리 키와 동일 → staleTime 캐시 적중으로 새 GET이 없을 수 있어

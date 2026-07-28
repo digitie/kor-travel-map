@@ -11,11 +11,13 @@ import { installInertOpsLiveWebSocket } from "./ws-isolation";
 type Meta = components["schemas"]["Meta"];
 type OpsDatasetCatalogInfo = components["schemas"]["OpsDatasetCatalogInfo"];
 type OpsDatasetDetailData = components["schemas"]["OpsDatasetDetailData"];
-type OpsDatasetDetailResponse = components["schemas"]["OpsDatasetDetailResponse"];
+type OpsDatasetDetailResponse =
+  components["schemas"]["OpsDatasetDetailResponse"];
 type OpsDatasetGridRow = components["schemas"]["OpsDatasetGridRow"];
 type OpsDatasetEventHistory = components["schemas"]["OpsDatasetEventHistory"];
 type OpsDatasetRunHistory = components["schemas"]["OpsDatasetRunHistory"];
-type OpsDatasetPreviewResponse = components["schemas"]["OpsDatasetPreviewResponse"];
+type OpsDatasetPreviewResponse =
+  components["schemas"]["OpsDatasetPreviewResponse"];
 type OpsDatasetRefreshPolicyResponse =
   components["schemas"]["OpsDatasetRefreshPolicyResponse"];
 type OpsDatasetExecution = components["schemas"]["OpsDatasetExecution"];
@@ -26,7 +28,8 @@ type FeatureUpdateRequestCreateResponse =
   components["schemas"]["FeatureUpdateRequestCreateResponse"];
 type FeatureUpdateRequestCreatedRecord =
   components["schemas"]["FeatureUpdateRequestCreatedRecord"];
-type FeatureUpdateRequestRecord = components["schemas"]["FeatureUpdateRequestRecord"];
+type FeatureUpdateRequestRecord =
+  components["schemas"]["FeatureUpdateRequestRecord"];
 type ProviderRefreshPolicyRecord =
   components["schemas"]["ProviderRefreshPolicyRecord"];
 type ProviderRefreshPolicyUpsertRequest =
@@ -93,7 +96,9 @@ function makeScheduleSummary(
     source: "dagster_graphql",
     basis: "dagster_definition_tags",
     schedule_names: ["feature_weather_kma_short_forecast_hourly_schedule"],
-    active_schedule_names: ["feature_weather_kma_short_forecast_hourly_schedule"],
+    active_schedule_names: [
+      "feature_weather_kma_short_forecast_hourly_schedule",
+    ],
     next_scheduled_at: "2026-07-15T01:20:00.000Z",
     status: "RUNNING",
     ...overrides,
@@ -130,7 +135,9 @@ function makeCatalog(
   };
 }
 
-function makeGridRow(overrides: Partial<OpsDatasetGridRow> = {}): OpsDatasetGridRow {
+function makeGridRow(
+  overrides: Partial<OpsDatasetGridRow> = {},
+): OpsDatasetGridRow {
   const provider = overrides.provider ?? KMA_PROVIDER;
   const datasetKey = overrides.dataset_key ?? KMA_DATASET;
   const syncScope = overrides.sync_scope ?? KMA_SCOPE;
@@ -375,7 +382,9 @@ function makeGridResponse(
   };
 }
 
-function makeDetailResponse(detail: OpsDatasetDetailData): OpsDatasetDetailResponse {
+function makeDetailResponse(
+  detail: OpsDatasetDetailData,
+): OpsDatasetDetailResponse {
   return { data: detail, meta: makeMeta("e2e-ops-dataset-detail") };
 }
 
@@ -409,8 +418,7 @@ function makeCreatedRequest(
     effective_sync_scope: KMA_SCOPE,
     dispatch_requested_at: FRESH_AT,
     generation: 1,
-    status_url:
-      `/v1/ops/pipeline/executions/update_request/${NEW_REQUEST_ID}`,
+    status_url: `/v1/ops/pipeline/executions/update_request/${NEW_REQUEST_ID}`,
     result_kind: "request",
     ...overrides,
   };
@@ -471,7 +479,8 @@ async function mockOpsDatasets(
       | OpsDatasetDetailData
       | ((detailCount: number, syncScope: string) => OpsDatasetDetailData)
     >;
-    detailDelayMs?: number | ((detailCount: number, syncScope: string) => number);
+    detailDelayMs?:
+      number | ((detailCount: number, syncScope: string) => number);
     allowInvalidDetailContract?: boolean;
     previewStatus?: number;
     policyConflictCode?:
@@ -483,8 +492,10 @@ async function mockOpsDatasets(
   },
 ) {
   const counts = { list: 0, detail: 0, preview: 0 };
-  const policyPuts: { path: string; body: ProviderRefreshPolicyUpsertRequest }[] =
-    [];
+  const policyPuts: {
+    path: string;
+    body: ProviderRefreshPolicyUpsertRequest;
+  }[] = [];
   const previewPosts: { path: string; source: string | null }[] = [];
 
   await page.route("**/api/proxy/v1/ops/datasets**", async (route) => {
@@ -561,13 +572,19 @@ async function mockOpsDatasets(
       await fulfillJson(route, response);
       return;
     }
-    if (pathname === "/v1/ops/datasets/preview" && request.method() === "POST") {
+    if (
+      pathname === "/v1/ops/datasets/preview" &&
+      request.method() === "POST"
+    ) {
       counts.preview += 1;
       const previewBody = (request.postDataJSON() ?? {}) as {
         source?: string;
         max_items?: number;
       };
-      previewPosts.push({ path: pathname + url.search, source: previewBody.source ?? null });
+      previewPosts.push({
+        path: pathname + url.search,
+        source: previewBody.source ?? null,
+      });
       const status = options.previewStatus ?? 200;
       if (status === 403) {
         await fulfillJson(
@@ -608,7 +625,9 @@ async function mockOpsDatasets(
       return;
     }
     if (pathname !== "/v1/ops/datasets/detail" || request.method() !== "GET") {
-      throw new Error(`Unexpected datasets call: ${request.method()} ${pathname}`);
+      throw new Error(
+        `Unexpected datasets call: ${request.method()} ${pathname}`,
+      );
     }
     counts.detail += 1;
     const provider = url.searchParams.get("provider") ?? "";
@@ -700,7 +719,10 @@ async function mockPipelineRequests(
   await page.route("**/api/proxy/v1/ops/pipeline/**", async (route) => {
     const request = route.request();
     const pathname = apiPathname(new URL(request.url()));
-    if (pathname === "/v1/ops/pipeline/requests" && request.method() === "POST") {
+    if (
+      pathname === "/v1/ops/pipeline/requests" &&
+      request.method() === "POST"
+    ) {
       const idempotencyKey = request.headers()["idempotency-key"] ?? "";
       if (!UUID_PATTERN.test(idempotencyKey)) {
         throw new Error(
@@ -731,8 +753,7 @@ async function mockPipelineRequests(
                 : {
                     request_id: REQUEST_ID,
                     status: "running",
-                    detail_url:
-                      `/v1/ops/pipeline/executions/update_request/${REQUEST_ID}`,
+                    detail_url: `/v1/ops/pipeline/executions/update_request/${REQUEST_ID}`,
                   },
             request_id: "e2e-refresh-409",
             errors: [],
@@ -760,10 +781,10 @@ async function mockPipelineRequests(
           );
           return;
         }
-        await fulfillJson(
-          route,
-          { ...existing.response, idempotent_replay: true },
-        );
+        await fulfillJson(route, {
+          ...existing.response,
+          idempotent_replay: true,
+        });
         return;
       }
       const response: FeatureUpdateRequestCreateResponse = {
@@ -785,7 +806,11 @@ async function mockPipelineRequests(
         await route.abort("connectionreset");
         return;
       }
-      await fulfillJson(route, response, options.reusedActiveRequest ? 200 : 201);
+      await fulfillJson(
+        route,
+        response,
+        options.reusedActiveRequest ? 200 : 201,
+      );
       return;
     }
     if (
@@ -883,8 +908,7 @@ async function mockPipelineRequests(
             scope_type: "provider_dataset",
             trigger_kind: "manual",
             operation_registry_version: "provider_operation_registry.v1",
-            detail_url:
-              `/v1/ops/pipeline/executions/update_request/${queriedRequestId}`,
+            detail_url: `/v1/ops/pipeline/executions/update_request/${queriedRequestId}`,
             cancellation: null,
             projected_job: {
               id: JOB_ID,
@@ -912,7 +936,9 @@ async function mockPipelineRequests(
       await fulfillJson(route, response);
       return;
     }
-    throw new Error(`Unexpected pipeline call: ${request.method()} ${pathname}`);
+    throw new Error(
+      `Unexpected pipeline call: ${request.method()} ${pathname}`,
+    );
   });
 
   return {
@@ -1155,7 +1181,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const kmaRow = grid.getByRole("row", { name: /kma_short_forecast/ });
     await expect(kmaRow).toContainText(KMA_SCOPE);
     // never_run 행은 "미실행" 상태 배지.
-    const moisRow = grid.getByRole("row", { name: /mois_license_features_bulk/ });
+    const moisRow = grid.getByRole("row", {
+      name: /mois_license_features_bulk/,
+    });
     await expect(moisRow).toContainText("미실행");
     // 이슈/실패/오래됨 배지 + 정책 요약.
     const krexRow = grid.getByRole("row", { name: /krex_rest_areas/ });
@@ -1216,21 +1244,31 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     await page.goto("/ops/datasets");
     const grid = page.getByRole("table", { name: "데이터셋 그리드" });
-    await expect(grid.getByRole("row", { name: /kma_short_forecast/ })).toBeVisible();
+    await expect(
+      grid.getByRole("row", { name: /kma_short_forecast/ }),
+    ).toBeVisible();
 
     await page.getByLabel("검색").fill("krex");
-    await expect(grid.getByRole("row", { name: /krex_rest_areas/ })).toBeVisible();
-    await expect(grid.getByRole("row", { name: /kma_short_forecast/ })).toHaveCount(0);
+    await expect(
+      grid.getByRole("row", { name: /krex_rest_areas/ }),
+    ).toBeVisible();
+    await expect(
+      grid.getByRole("row", { name: /kma_short_forecast/ }),
+    ).toHaveCount(0);
 
     await page.getByLabel("검색").fill("");
     await page.locator("#datasets-status").selectOption("never_run");
     await expect(
       grid.getByRole("row", { name: /mois_license_features_bulk/ }),
     ).toBeVisible();
-    await expect(grid.getByRole("row", { name: /krex_rest_areas/ })).toHaveCount(0);
+    await expect(
+      grid.getByRole("row", { name: /krex_rest_areas/ }),
+    ).toHaveCount(0);
 
     await page.locator("#datasets-status").selectOption("issues");
-    await expect(grid.getByRole("row", { name: /krex_rest_areas/ })).toBeVisible();
+    await expect(
+      grid.getByRole("row", { name: /krex_rest_areas/ }),
+    ).toBeVisible();
     await expect(
       grid.getByRole("row", { name: /mois_license_features_bulk/ }),
     ).toHaveCount(0);
@@ -1311,7 +1349,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(
       scopeTable.getByRole("columnheader", { name: "마지막 실패" }),
     ).toBeVisible();
-    await expect(scopeTable.getByRole("row", { name: /target_grids/ })).toBeVisible();
+    await expect(
+      scopeTable.getByRole("row", { name: /target_grids/ }),
+    ).toBeVisible();
     await expect(page.getByText(/"base_date": "20260714"/)).toBeVisible();
 
     // 최근 실행 — 페이지 ① 실행 상세 딥링크(`execution={kind}:{id}`).
@@ -1320,7 +1360,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       name: new RegExp(REQUEST_ID.slice(0, 12)),
     });
     await expect(runRow).toBeVisible();
-    await expect(runRow.getByRole("link", { name: "실행 상세" })).toHaveAttribute(
+    await expect(
+      runRow.getByRole("link", { name: "실행 상세" }),
+    ).toHaveAttribute(
       "href",
       `/ops/pipeline?execution=update_request:${REQUEST_ID}`,
     );
@@ -1372,9 +1414,13 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(page.getByText("데이터셋 상세")).toBeVisible();
 
     await page.getByRole("tab", { name: "갱신 정책" }).click();
-    await expect(page.getByText("갱신 정책", { exact: true }).first()).toBeVisible();
+    await expect(
+      page.getByText("갱신 정책", { exact: true }).first(),
+    ).toBeVisible();
 
-    await page.getByLabel("타깃 갱신 정책", { exact: true }).selectOption("allow_targeted");
+    await page
+      .getByLabel("타깃 갱신 정책", { exact: true })
+      .selectOption("allow_targeted");
     const saveButton = page.getByRole("button", { name: "저장" });
     await saveButton.click();
 
@@ -1417,7 +1463,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await page.getByLabel("시간당 요청 수", { exact: true }).fill("0");
     await page.getByRole("button", { name: "저장" }).click();
 
-    await expect(page.getByText("양의 정수를 입력하세요.").first()).toBeVisible();
+    await expect(
+      page.getByText("양의 정수를 입력하세요.").first(),
+    ).toBeVisible();
     await expect.poll(() => mocks.policyPuts.length).toBe(0);
   });
 
@@ -1490,11 +1538,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
               targeted_policy: "follow_system",
             }),
             scopes,
-            run_history: makeRunHistory(
-              KMA_PROVIDER,
-              KMA_DATASET,
-              syncScope,
-            ),
+            run_history: makeRunHistory(KMA_PROVIDER, KMA_DATASET, syncScope),
             event_history: makeEventHistory(
               KMA_PROVIDER,
               KMA_DATASET,
@@ -1508,10 +1552,14 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
     const targetedPolicy = page.getByLabel("타깃 갱신 정책", { exact: true });
     await targetedPolicy.selectOption("allow_targeted");
+    await expect(targetedPolicy).toHaveValue("allow_targeted");
+    await expect(page.getByRole("button", { name: "저장" })).toBeEnabled();
 
-    await page.getByRole("button", {
-      name: `${KMA_PROVIDER} ${KMA_DATASET} ${ACTIVE_EXTERNAL_SCOPE} 상세 열기`,
-    }).click();
+    await page
+      .getByRole("button", {
+        name: `${KMA_PROVIDER} ${KMA_DATASET} ${ACTIVE_EXTERNAL_SCOPE} 상세 열기`,
+      })
+      .click();
     await expect(page).toHaveURL(
       new RegExp(`sync_scope=${encodeURIComponent(ACTIVE_EXTERNAL_SCOPE)}`),
     );
@@ -1577,9 +1625,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(page.getByText("정책 저장 충돌")).toBeVisible();
     await expect(targetedPolicy).toHaveValue("allow_targeted");
 
-    await page
-      .getByRole("button", { name: "서버 기준으로 초안 조정" })
-      .click();
+    await page.getByRole("button", { name: "서버 기준으로 초안 조정" }).click();
     await expect(page.getByText("초안 조정 완료")).toBeVisible();
     await expect(page.getByText("정책 저장 실패")).toHaveCount(0);
     await expect(targetedPolicy).toHaveValue("allow_targeted");
@@ -1664,9 +1710,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(sourceKind).toHaveValue("manual");
     expect(mocks.policyPuts[0].body.expected_revision).toBeNull();
     expect(mocks.policyPuts[0].body.source_kind).toBe("openapi");
-    await page
-      .getByRole("button", { name: "서버 기준으로 초안 조정" })
-      .click();
+    await page.getByRole("button", { name: "서버 기준으로 초안 조정" }).click();
     await page.getByRole("button", { name: "저장" }).click();
 
     await expect.poll(() => mocks.policyPuts.length).toBe(2);
@@ -1809,7 +1853,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       `/ops/datasets?provider=${MOIS_PROVIDER}&dataset=${MOIS_DATASET}` +
         "&sync_scope=dataset_wide&panel=preview",
     );
-    await expect(page.getByRole("button", { name: "live 실행" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "live 실행" })).toHaveCount(
+      0,
+    );
     await expect(
       page.getByRole("button", { name: "fixture 실행" }),
     ).toBeDisabled();
@@ -1854,7 +1900,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // 실행 상세 GET으로 상태 추적 → terminal 어휘 "done"을 성공으로 인식해야
     // 한다(리뷰 S2 — 백엔드 _TERMINAL_STATES에 "succeeded"는 없다): 상태 배지
     // "완료"(statusLabel("done")) + 완료 alert + 페이지 ① 링크.
-    await expect.poll(() => pipeline.executionGets.length).toBeGreaterThanOrEqual(1);
+    await expect
+      .poll(() => pipeline.executionGets.length)
+      .toBeGreaterThanOrEqual(1);
     await expect(page.getByText("완료", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("갱신 완료")).toBeVisible();
     await expect(page.getByRole("link", { name: "자세히" })).toHaveAttribute(
@@ -1956,7 +2004,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       `/ops/pipeline?execution=update_request:${REQUEST_ID}`,
     );
     await expect(page.getByTestId("active-local-request")).toBeVisible();
-    await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(
+      0,
+    );
   });
 
   test("지금 갱신 — 생성한 active 요청은 projection 반영 전 재POST를 막고 terminal 뒤 해제한다", async ({
@@ -1973,7 +2023,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await page.getByRole("button", { name: "지금 갱신" }).click();
 
     await expect(page.getByTestId("active-local-request")).toBeVisible();
-    await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(
+      0,
+    );
     await expect.poll(() => pipeline.posts.length).toBe(1);
     await expect
       .poll(() => pipeline.executionGets.length, { timeout: 6_000 })
@@ -2023,13 +2075,17 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const active = page.getByTestId("active-execution");
     await expect(active).toBeVisible();
     await expect(active).toContainText("실행중");
-    await expect(active.getByRole("link", { name: /실행 .* 보기/ })).toHaveAttribute(
+    await expect(
+      active.getByRole("link", { name: /실행 .* 보기/ }),
+    ).toHaveAttribute(
       "href",
       `/ops/pipeline?execution=update_request:${REQUEST_ID}`,
     );
     await expect(page.getByText("선택 범위 최근 종료 실행")).toBeVisible();
     await expect(page.getByText(/update_request:44444444-444/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(
+      0,
+    );
     await expect.poll(() => pipeline.posts.length).toBe(0);
   });
 
@@ -2065,7 +2121,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await page.goto(KMA_DEEP_LINK);
     await expect(page.getByTestId("active-execution")).toBeVisible();
 
-    await expect.poll(() => datasets.counts.list, { timeout: 6_000 }).toBeGreaterThan(1);
+    await expect
+      .poll(() => datasets.counts.list, { timeout: 6_000 })
+      .toBeGreaterThan(1);
     await expect
       .poll(() => datasets.counts.detail, { timeout: 6_000 })
       .toBeGreaterThan(1);
@@ -2110,7 +2168,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
       await page.goto(KMA_DEEP_LINK);
 
-      await expect(page.getByRole("button", { name: "지금 갱신" })).toBeDisabled();
+      await expect(
+        page.getByRole("button", { name: "지금 갱신" }),
+      ).toBeDisabled();
       await expect(page.getByText(policyCase.reason)).toBeVisible();
       await expect.poll(() => pipeline.posts.length).toBe(0);
     });
@@ -2225,8 +2285,12 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         `&sync_scope=${encodeURIComponent(ACTIVE_EXTERNAL_SCOPE)}`,
     );
 
-    await expect(page.getByRole("button", { name: "지금 갱신" })).toBeDisabled();
-    await expect(page.getByText(/exact sync scope가 상세 응답에 없어/)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "지금 갱신" }),
+    ).toBeDisabled();
+    await expect(
+      page.getByText(/exact sync scope가 상세 응답에 없어/),
+    ).toBeVisible();
     await expect.poll(() => pipeline.posts.length).toBe(0);
   });
 
@@ -2348,7 +2412,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       `/ops/datasets?provider=${KMA_PROVIDER}&dataset=${KMA_DATASET}` +
         `&sync_scope=${encodeURIComponent(STALE_EXTERNAL_SCOPE)}`,
     );
-    await expect(page.getByRole("button", { name: "지금 갱신" })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "지금 갱신" }),
+    ).toBeDisabled();
     await expect(
       page.getByText(/현재 활성 POI target에 없는 잔존 external scope/),
     ).toBeVisible();
@@ -2454,7 +2520,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       `/ops/datasets?provider=${MOIS_PROVIDER}&dataset=${MOIS_DATASET}` +
         `&sync_scope=${staleScope}`,
     );
-    await expect(page.getByRole("button", { name: "지금 갱신" })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "지금 갱신" }),
+    ).toBeDisabled();
     await expect(page.getByText(/잔존 비기본 scope/)).toBeVisible();
   });
 
@@ -2480,7 +2548,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       errorAlert.getByRole("button", { name: "다시 확인" }),
     ).toBeVisible();
     await expect(page.getByTestId("active-local-request")).toBeVisible();
-    await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(
+      0,
+    );
     await expect.poll(() => pipeline.posts.length).toBe(1);
     // 오류 중에는 마지막 상태 배지를 진실처럼 표시하지 않는다.
     await expect(page.getByText("갱신 완료")).toHaveCount(0);
@@ -2532,7 +2602,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await page.goBack();
 
     await expect(page).not.toHaveURL(/provider=/);
-    await expect(page.getByText("선택된 데이터셋 행이 없습니다.")).toBeVisible();
+    await expect(
+      page.getByText("선택된 데이터셋 행이 없습니다."),
+    ).toBeVisible();
     await expect(rowButton).toBeFocused();
   });
 
@@ -2594,7 +2666,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     await expect(page.getByTestId("invalid-dataset-deep-link")).toBeVisible();
     await expect(page.getByText("데이터셋 상세")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "지금 갱신" })).toHaveCount(
+      0,
+    );
     await expect(page).toHaveURL(/external_system%3Amissing/);
   });
 
@@ -2635,7 +2709,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // 않는다 — 리뷰 S2 회귀 가드).
     await page.getByRole("button", { name: "데이터셋 상세 닫기" }).click();
     await expect(page).not.toHaveURL(/provider=/);
-    await expect(page.getByText("선택된 데이터셋 행이 없습니다.")).toBeVisible();
+    await expect(
+      page.getByText("선택된 데이터셋 행이 없습니다."),
+    ).toBeVisible();
     await expect(page.getByText("데이터셋 상세")).toHaveCount(0);
     await expect(
       page.getByRole("button", {
@@ -2653,7 +2729,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     // 비딥링크 진입은 빈 상태에서 시작(자동 row0 없음).
     await page.goto("/ops/datasets");
-    await expect(page.getByText("선택된 데이터셋 행이 없습니다.")).toBeVisible();
+    await expect(
+      page.getByText("선택된 데이터셋 행이 없습니다."),
+    ).toBeVisible();
 
     // 행 선택 → 상세 → Escape로 닫힘 → 다시 빈 상태(딥링크와 일관).
     await page
@@ -2662,13 +2740,17 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       })
       .click();
     await expect(page.getByText("데이터셋 상세")).toBeVisible();
-    const closeButton = page.getByRole("button", { name: "데이터셋 상세 닫기" });
+    const closeButton = page.getByRole("button", {
+      name: "데이터셋 상세 닫기",
+    });
     await closeButton.focus();
     await expect(closeButton).toBeFocused();
 
     await page.keyboard.press("Escape");
     await expect(page).not.toHaveURL(/provider=/);
-    await expect(page.getByText("선택된 데이터셋 행이 없습니다.")).toBeVisible();
+    await expect(
+      page.getByText("선택된 데이터셋 행이 없습니다."),
+    ).toBeVisible();
     await expect(
       page.getByRole("button", {
         name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} 상세 열기`,
@@ -2693,7 +2775,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(search).toBeFocused();
   });
 
-  test("Dagster 스케줄 소스 degrade가 배너/컬럼에 노출된다", async ({ page }) => {
+  test("Dagster 스케줄 소스 degrade가 배너/컬럼에 노출된다", async ({
+    page,
+  }) => {
     const { items, details } = defaultGrid();
     // GraphQL degrade 시 backend는 행 schedule.basis를 unknown으로 내린다.
     const degradedItems = items.map((row) => ({
@@ -2721,7 +2805,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // 그리드 "다음 스케줄" 컬럼은 basis=unknown이면 "확인 불가"로 degrade 표시.
     const grid = page.getByRole("table", { name: "데이터셋 그리드" });
     await expect(
-      grid.getByRole("row", { name: /kma_short_forecast/ }).getByText("확인 불가"),
+      grid
+        .getByRole("row", { name: /kma_short_forecast/ })
+        .getByText("확인 불가"),
     ).toBeVisible();
   });
 
@@ -2744,7 +2830,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const policyTab = page.getByRole("tab", { name: "갱신 정책" });
     await expect(policyTab).toHaveAttribute("aria-selected", "true");
     // 기존 정책 값이 draft에 프리필된다.
-    await expect(page.getByLabel("타깃 갱신 정책", { exact: true })).toHaveValue("allow_targeted");
+    await expect(
+      page.getByLabel("타깃 갱신 정책", { exact: true }),
+    ).toHaveValue("allow_targeted");
   });
 
   test("빈 그리드 — empty 문구 + placeholder", async ({ page }) => {
@@ -2756,7 +2844,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(
       page.getByText("조건에 맞는 데이터셋 행이 없습니다."),
     ).toBeVisible();
-    await expect(page.getByText("선택된 데이터셋 행이 없습니다.")).toBeVisible();
+    await expect(
+      page.getByText("선택된 데이터셋 행이 없습니다."),
+    ).toBeVisible();
   });
 
   test("그리드 조회 실패 — destructive alert", async ({ page }) => {
@@ -2781,7 +2871,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "데이터셋" }),
     ).toBeVisible();
-    const alert = page.getByRole("alert").filter({ hasText: "데이터셋 조회 실패" });
+    const alert = page
+      .getByRole("alert")
+      .filter({ hasText: "데이터셋 조회 실패" });
     await expect(alert).toBeVisible();
     await expect(alert).toContainText(/HTTP 500/);
   });

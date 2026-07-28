@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "baselineMainRevision": "6bf4c10f99742a5c563d1c648f71ab6f5444b1e9",
   "baselineRevision": "31edfe0cab1213be57dce7a5bddd4a3108adffb3",
   "discoveredTests": 273,
@@ -15,6 +15,7 @@
       "fixedIn": "B",
       "firstFailureStage": "render.assertion",
       "difference": "accessible-name",
+      "errorPattern": "change operator",
       "determinism": "deterministic",
       "tests": [
         {
@@ -28,6 +29,7 @@
       "fixedIn": "B",
       "firstFailureStage": "request.assertion",
       "difference": "actor",
+      "errorPattern": "operator",
       "determinism": "deterministic",
       "tests": [
         {
@@ -41,6 +43,7 @@
       "fixedIn": "B",
       "firstFailureStage": "render.assertion",
       "difference": "pagination",
+      "errorPattern": "다음 페이지",
       "determinism": "deterministic",
       "tests": [
         {
@@ -54,6 +57,7 @@
       "fixedIn": "D",
       "firstFailureStage": "render.assertion",
       "difference": "accessible-name",
+      "errorPattern": "provider|dataset key|sync scope|created by|offline upload status|provider filter|dataset filter",
       "determinism": "deterministic",
       "tests": [
         {
@@ -67,6 +71,7 @@
       "fixedIn": "B",
       "firstFailureStage": "request.assertion",
       "difference": "actor",
+      "errorPattern": "operator",
       "determinism": "deterministic",
       "tests": [
         {
@@ -80,6 +85,7 @@
       "fixedIn": "C",
       "firstFailureStage": "render.assertion",
       "difference": "copy",
+      "errorPattern": "critical|none|severity",
       "determinism": "deterministic",
       "tests": [
         {
@@ -97,6 +103,7 @@
       "fixedIn": "B",
       "firstFailureStage": "request.assertion",
       "difference": "actor",
+      "errorPattern": "operator",
       "determinism": "deterministic",
       "tests": [
         {
@@ -110,6 +117,7 @@
       "fixedIn": "B",
       "firstFailureStage": "render.assertion",
       "difference": "copy",
+      "errorPattern": "휘발유 1,820",
       "determinism": "deterministic",
       "tests": [
         {
@@ -123,6 +131,7 @@
       "fixedIn": "B",
       "firstFailureStage": "request.assertion",
       "difference": "actor",
+      "errorPattern": "operator",
       "determinism": "deterministic",
       "tests": [
         {
@@ -136,6 +145,7 @@
       "fixedIn": "B",
       "firstFailureStage": "render.assertion",
       "difference": "accessible-name",
+      "errorPattern": "New feature",
       "determinism": "deterministic",
       "tests": [
         {
@@ -149,6 +159,7 @@
       "fixedIn": "B",
       "firstFailureStage": "render.assertion",
       "difference": "feature-kind",
+      "errorPattern": "getByLabel\\('kind'|kind",
       "determinism": "deterministic",
       "tests": [
         {
@@ -162,6 +173,7 @@
       "fixedIn": "B",
       "firstFailureStage": "render.assertion",
       "difference": "validation-copy",
+      "errorPattern": "feature 작성 실패",
       "determinism": "deterministic",
       "tests": [
         {
@@ -175,6 +187,7 @@
       "fixedIn": "B",
       "firstFailureStage": "interaction",
       "difference": "accessible-name",
+      "errorPattern": "getByLabel\\('(name|reason|lon|lat)'|좌표는 한국 본토",
       "determinism": "deterministic",
       "tests": [
         {
@@ -188,6 +201,7 @@
       "fixedIn": "B",
       "firstFailureStage": "render.assertion",
       "difference": "status-copy",
+      "errorPattern": "feature 로딩 중|feature 호출 실패",
       "determinism": "deterministic",
       "tests": [
         {
@@ -205,6 +219,7 @@
       "fixedIn": "B",
       "firstFailureStage": "request.assertion",
       "difference": "actor",
+      "errorPattern": "operator",
       "determinism": "deterministic",
       "tests": [
         {
@@ -218,6 +233,7 @@
       "fixedIn": "C",
       "firstFailureStage": "render.assertion",
       "difference": "dataset-response",
+      "errorPattern": "8:30:00",
       "determinism": "deterministic",
       "tests": [
         {
@@ -231,6 +247,7 @@
       "fixedIn": "C",
       "firstFailureStage": "render.assertion",
       "difference": "bigint",
+      "errorPattern": "9223372036854775807",
       "determinism": "deterministic",
       "tests": [
         {
@@ -244,6 +261,7 @@
       "fixedIn": "C",
       "firstFailureStage": "mock.install",
       "difference": "stale-scope",
+      "errorPattern": "canonical_url|legacy_scope",
       "determinism": "deterministic",
       "tests": [
         {
@@ -257,6 +275,7 @@
       "fixedIn": "D",
       "firstFailureStage": "beforeEach.auth",
       "difference": "auth-session",
+      "errorPattern": "#admin-username",
       "determinism": "deterministic",
       "tests": [
         {
@@ -538,6 +557,7 @@
       "fixedIn": "B",
       "firstFailureStage": "render.assertion",
       "difference": "accessible-name",
+      "errorPattern": "시군구",
       "determinism": "deterministic",
       "tests": [
         {

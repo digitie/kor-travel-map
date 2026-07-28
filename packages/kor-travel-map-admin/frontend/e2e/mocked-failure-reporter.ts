@@ -19,6 +19,7 @@ interface ManifestTest {
 interface ManifestGroup {
   difference: string;
   determinism: "deterministic" | "flaky";
+  errorPattern: string;
   firstFailureStage: string;
   fixedIn: Exclude<Checkpoint, "A">;
   spec: string;
@@ -34,7 +35,7 @@ interface FailureManifest {
   baselineRevision: string;
   discoveredTests: number;
   groups: ManifestGroup[];
-  schemaVersion: 1;
+  schemaVersion: 2;
 }
 
 interface TestIdentity {
@@ -82,7 +83,7 @@ function parseCheckpoint(value: string | undefined): Checkpoint {
 }
 
 function validateManifest(manifest: FailureManifest): void {
-  if (manifest.schemaVersion !== 1) {
+  if (manifest.schemaVersion !== 2) {
     throw new Error(
       `지원하지 않는 failure manifest schema: ${manifest.schemaVersion}`,
     );
@@ -105,10 +106,17 @@ function validateManifest(manifest: FailureManifest): void {
     if (
       !group.spec.startsWith("e2e/") ||
       !group.spec.endsWith(".spec.ts") ||
-      !(group.fixedIn === "B" || group.fixedIn === "C" || group.fixedIn === "D") ||
-      !(group.determinism === "deterministic" || group.determinism === "flaky") ||
+      !(
+        group.fixedIn === "B" ||
+        group.fixedIn === "C" ||
+        group.fixedIn === "D"
+      ) ||
+      !(
+        group.determinism === "deterministic" || group.determinism === "flaky"
+      ) ||
       !group.firstFailureStage ||
       !group.difference ||
+      !group.errorPattern ||
       group.tests.length === 0
     ) {
       throw new Error(`잘못된 failure group: ${group.spec}`);
@@ -118,7 +126,20 @@ function validateManifest(manifest: FailureManifest): void {
         throw new Error(`잘못된 failure test: ${group.spec}`);
       }
     }
+    try {
+      new RegExp(group.errorPattern, "u");
+    } catch {
+      throw new Error(`잘못된 failure errorPattern: ${group.spec}`);
+    }
   }
+}
+
+function failureText(test: TestCase): string {
+  return test.results
+    .flatMap((result) => result.errors)
+    .flatMap((error) => [error.message, error.stack, error.snippet])
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
 }
 
 class MockedFailureReporter implements Reporter {
@@ -133,19 +154,21 @@ class MockedFailureReporter implements Reporter {
     this.globalErrors += 1;
   }
 
-  async onEnd(
-    result: FullResult,
-  ): Promise<{ status?: FullResult["status"] }> {
+  async onEnd(result: FullResult): Promise<{ status?: FullResult["status"] }> {
     let gatePassed = false;
     try {
-      const checkpoint = parseCheckpoint(
-        process.env.MOCKED_E2E_CHECKPOINT,
-      );
+      const checkpoint = parseCheckpoint(process.env.MOCKED_E2E_CHECKPOINT);
       const observedRevision =
         process.env.MOCKED_E2E_REVISION ?? process.env.GITHUB_SHA;
       if (!observedRevision || !/^[0-9a-f]{40}$/.test(observedRevision)) {
         throw new Error(
           "MOCKED_E2E_REVISION 또는 GITHUB_SHA에 exact 40자 SHA가 필요합니다.",
+        );
+      }
+      const verifiedRevision = process.env.MOCKED_E2E_VERIFIED_REVISION;
+      if (verifiedRevision !== observedRevision) {
+        throw new Error(
+          "runner가 검증한 Git HEAD와 observed revision이 일치해야 합니다.",
         );
       }
 
@@ -169,12 +192,17 @@ class MockedFailureReporter implements Reporter {
         group.tests.map((test) => ({
           key: identityKey(group.spec, test.title),
           determinism: group.determinism,
+          difference: group.difference,
+          errorPattern: group.errorPattern,
           fixedIn: group.fixedIn,
+          firstFailureStage: group.firstFailureStage,
         })),
       );
       const manifestKeys = new Set(manifestTests.map(({ key }) => key));
       if (manifestKeys.size !== manifestTests.length) {
-        throw new Error("failure manifest에 중복 spec/title identity가 있습니다.");
+        throw new Error(
+          "failure manifest에 중복 spec/title identity가 있습니다.",
+        );
       }
 
       const missingManifestTests = sortedDifference(manifestKeys, discovered);
@@ -216,9 +244,27 @@ class MockedFailureReporter implements Reporter {
           identityKey(spec, title),
         ),
       );
+      const testByIdentity = new Map(
+        this.tests.map((test) => [testIdentity(test).key, test]),
+      );
+      const mismatchedExpectedFailureCauses = manifestTests
+        .filter(({ key }) => expectedFailures.has(key))
+        .filter(({ errorPattern, key }) => {
+          const test = testByIdentity.get(key);
+          return (
+            test === undefined ||
+            !new RegExp(errorPattern, "u").test(failureText(test))
+          );
+        })
+        .map(({ difference, firstFailureStage, key }) => ({
+          difference,
+          firstFailureStage,
+          key,
+        }))
+        .sort((left, right) => left.key.localeCompare(right.key));
 
       const report = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         checkpoint,
         observedRevision,
         baselineMainRevision: manifest.baselineMainRevision,
@@ -242,17 +288,14 @@ class MockedFailureReporter implements Reporter {
         missingManifestTests,
         missingAllowedSkipped: sortedDifference(allowedSkipped, skippedTests),
         newSkippedTests: sortedDifference(skippedTests, allowedSkipped),
+        mismatchedExpectedFailureCauses,
         globalErrors: this.globalErrors,
         originalStatus: result.status,
       };
 
       const artifactRoot =
         process.env.PLAYWRIGHT_ARTIFACT_ROOT ??
-        path.join(
-          os.tmpdir(),
-          "kor-travel-map-playwright",
-          "admin-frontend",
-        );
+        path.join(os.tmpdir(), "kor-travel-map-playwright", "admin-frontend");
       const outputPath =
         process.env.MOCKED_E2E_FAILURE_OUTPUT ??
         path.join(artifactRoot, "mocked-failure-report.json");
@@ -271,6 +314,7 @@ class MockedFailureReporter implements Reporter {
         report.missingManifestTests.length === 0 &&
         report.missingAllowedSkipped.length === 0 &&
         report.newSkippedTests.length === 0 &&
+        report.mismatchedExpectedFailureCauses.length === 0 &&
         report.globalErrors === 0;
 
       const summary = gatePassed ? "일치" : "불일치";

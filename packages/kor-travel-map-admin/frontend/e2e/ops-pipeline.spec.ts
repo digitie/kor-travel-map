@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 /**
@@ -706,8 +707,7 @@ async function fulfillJson(
 }
 
 function observedApiContract(request: { method(): string; url(): string }) {
-  const pathname = new URL(request.url()).pathname.replace(/^\/api\/proxy/, "");
-  return `${request.method()} ${pathname}`;
+  return `${request.method()} ${bffApiPath(request.url())}`;
 }
 
 type ExactPagedScope = {
@@ -1608,12 +1608,21 @@ async function installPipelineMocks(
       );
       return;
     }
-    await route.continue();
+    throw new Error(
+      `Unhandled pipeline route: ${request.method()} ${bffApiPath(request.url())}`,
+    );
   });
 
   // 요청 dialog는 C4와 같은 canonical ops datasets catalog만 사용한다.
   await page.route("**/v1/ops/datasets", async (route) => {
-    counters.observedApiContracts.push(observedApiContract(route.request()));
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== "/v1/ops/datasets") {
+      throw new Error(
+        `Unhandled dataset catalog route: ${request.method()} ${apiPath}`,
+      );
+    }
+    counters.observedApiContracts.push(observedApiContract(request));
     const sequenceResponse =
       options.catalogResponses?.[
         Math.min(counters.catalogCalls, options.catalogResponses.length - 1)

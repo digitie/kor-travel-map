@@ -14,14 +14,12 @@ import { bffApiPath } from "./bff-api-path";
 type AdminIssueRecord = components["schemas"]["AdminIssueRecord"];
 type AdminIssueFeatureSnapshot =
   components["schemas"]["AdminIssueFeatureSnapshot"];
-type AdminIssueListResponse =
-  components["schemas"]["AdminIssueListResponse"];
+type AdminIssueListResponse = components["schemas"]["AdminIssueListResponse"];
 type AdminIssueDetailResponse =
   components["schemas"]["AdminIssueDetailResponse"];
 type AdminIssueActionResponse =
   components["schemas"]["AdminIssueActionResponse"];
-type AdminIssuePatchRequest =
-  components["schemas"]["AdminIssuePatchRequest"];
+type AdminIssuePatchRequest = components["schemas"]["AdminIssuePatchRequest"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const ISSUE_ID = "issue-0000-1111-2222-3333-444455556666";
@@ -35,7 +33,9 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   });
 }
 
-function makeIssue(overrides: Partial<AdminIssueRecord> = {}): AdminIssueRecord {
+function makeIssue(
+  overrides: Partial<AdminIssueRecord> = {},
+): AdminIssueRecord {
   return {
     dataset_key: "kma_weather_values",
     detected_at: MOCK_NOW,
@@ -119,8 +119,10 @@ test.describe("admin/issues actions + pagination + errors", () => {
   }) => {
     const issue = makeIssue({ violation_type: "missing_address" });
     const feature = makeFeatureSnapshot();
-    const patchBodies: Array<{ issueId: string; body: AdminIssuePatchRequest }> =
-      [];
+    const patchBodies: Array<{
+      issueId: string;
+      body: AdminIssuePatchRequest;
+    }> = [];
 
     // glob `**/v1/admin/issues**`는 목록(`/v1/admin/issues`)과
     // 상세/PATCH(`/v1/admin/issues/<id>`)를 모두 잡는다 → method + pathname으로
@@ -165,6 +167,7 @@ test.describe("admin/issues actions + pagination + errors", () => {
       prevent_provider_reactivation: true,
       reason: "admin-ui resolve",
     });
+    expect(patchBodies[0].body).not.toHaveProperty("operator");
 
     await row.getByRole("button", { name: "ignore" }).click();
     await expect.poll(() => patchBodies.length).toBe(2);
@@ -172,6 +175,7 @@ test.describe("admin/issues actions + pagination + errors", () => {
       action: "ignore",
       reason: "admin-ui ignore",
     });
+    expect(patchBodies[1].body).not.toHaveProperty("operator");
 
     // DETAIL actions — row 클릭 → detail 쿼리가 끝나 'Issue detail'이 뜬 뒤
     // detail-only 버튼(reopen/retry geocode/retry reverse/apply kraddr)만 사용한다.
@@ -194,6 +198,7 @@ test.describe("admin/issues actions + pagination + errors", () => {
         prevent_provider_reactivation: true,
         reason: `admin-ui ${action}`,
       });
+      expect(patchBodies[expected - 1].body).not.toHaveProperty("operator");
     }
   });
 
@@ -258,7 +263,9 @@ test.describe("admin/issues actions + pagination + errors", () => {
     await expect(nextBtn).toBeEnabled();
   });
 
-  test("list-query 500 surfaces the top destructive alert", async ({ page }) => {
+  test("list-query 500 surfaces the top destructive alert", async ({
+    page,
+  }) => {
     await page.route("**/v1/admin/issues**", async (route) => {
       const request = route.request();
       const apiPath = bffApiPath(request.url());
@@ -336,7 +343,10 @@ test.describe("admin/issues actions + pagination + errors", () => {
       if (request.method() === "GET" && isListPath(apiPath)) {
         // status=open이 기본값이라 두 행 모두 open이어야 목록에 남는다.
         const pageSize = Number(url.searchParams.get("page_size") ?? 100);
-        await fulfillJson(route, listResponse([critical, info], null, pageSize));
+        await fulfillJson(
+          route,
+          listResponse([critical, info], null, pageSize),
+        );
         return;
       }
       if (request.method() === "GET" && isDetailPath(apiPath)) {
@@ -385,7 +395,9 @@ test.describe("admin/issues actions + pagination + errors", () => {
     // feature_id 없는 이슈: 지도 link 없음 + snapshot 블록 없음.
     await infoRow.getByText("token_b", { exact: true }).click();
     await expect(page.getByText("이슈 상세")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Feature 상세" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Feature 상세" })).toHaveCount(
+      0,
+    );
     await expect(page.getByText("Feature 스냅샷")).toHaveCount(0);
   });
 
@@ -408,7 +420,11 @@ test.describe("admin/issues actions + pagination + errors", () => {
           route,
           detailResponse(
             issue,
-            makeFeatureSnapshot({ lat: 37.5665, lon: 126.978, status: "active" }),
+            makeFeatureSnapshot({
+              lat: 37.5665,
+              lon: 126.978,
+              status: "active",
+            }),
           ),
         );
         return;
@@ -422,7 +438,9 @@ test.describe("admin/issues actions + pagination + errors", () => {
     await row.getByText("coord_token", { exact: true }).click();
 
     await expect(page.getByText("이슈 상세")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Feature 상세" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Feature 상세" }),
+    ).toBeVisible();
     // coord는 toFixed(5)로 표시(line 303).
     await expect(page.getByText("126.97800, 37.56650")).toBeVisible();
   });
