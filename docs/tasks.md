@@ -21,7 +21,7 @@ barrier로 직렬화한다.
 - **Lane A — cross-repo 계약·운영·데이터 품질**
   - a0: [x] `T-VN-H07B`(PinVi #403 재감사·landing) →
     [x] `T-VN-H07D`(#815 admin snapshot/freshness) →
-    [ ] `T-VN-H07C`(#812 manifest v5)
+    [x] `T-VN-H07C`(#812 — v5 승격 기각, ADR-079)
   - a1: [ ] `T-VN-H29`(PinVi 검색 좌표 null 복구 — H07D 파생) →
     [ ] `T-VN-H27`(#819 HAProxy tunnel) →
     [ ] `T-VN-H21`(geo live 인증 preflight·5건 재실증) →
@@ -111,9 +111,11 @@ barrier로 직렬화한다.
   누락되지 않게 한다. Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
   T-VN-40은 양 lane의 T-VN-32~38 하위 task가 모두 끝난 join barrier 뒤에 시작하며,
   최종 T-VN-39는 T-VN-32~38·40의 모든 하위 task가 끝난 뒤에만 시작한다.
-- **OpenAPI compatible-pair gate**: H07C 이후 admin/user OpenAPI를 바꾸는 모든 task는
-  per-surface digest 갱신, docker-manager compatible-pair 재-capture, C7 attestation을 같은
-  완료 조건으로 갖는다. stale manifest 상태로 다음 task나 배포를 시작하지 않는다.
+- **OpenAPI 계약 변경 규율(2026-07-29 개정 — ADR-079)**: admin/user OpenAPI를 바꾸는 task는
+  **per-surface digest 갱신(`openapi-sha256.json`)과 소비자 vendored 스냅샷 재-vendor**를 같은
+  완료 조건으로 갖는다(PinVi `contract-pin-consistency`). compatible-pair 재-capture·C7
+  attestation은 **해당 없음** — v5 승격은 ADR-079로 기각됐고, 배포 페어의 계약은
+  `map_source_revision`과 배포 이미지 OCI revision 라벨이 이미 결박한다.
 - **prod 격리 규율(2026-07-27 인시던트 재발 방지 —
   [리포트](reports/incident-2026-07-27-shared-prod-db-live-container.md))**: 아래 4개는
   두 lane 공통 필수.
@@ -402,11 +404,15 @@ H07A의 실제 user OpenAPI SHA와 대조한 residual consumer contract만 남�
   `services/kasi.py::extract_feature_coordinates`는 top-level에서 정상 해석한다 —
   `_snapshot_coord`가 같은 추출기를 재사용하도록 고치고 회귀 테스트를 둔다(PinVi 저장소 작업).
 
-- [ ] T-VN-H07C — **#812 compatible-pair manifest v5**
+- [x] T-VN-H07C — **#812 compatible-pair manifest v5 → 기각(ADR-079)**
 
-  docker-manager compatible-pair에 Map per-surface OpenAPI digest manifest의 SHA를 추가하고
-  capture·validate·deploy를 모두 v5로 전환한다. Map export drift와 C7 attestation을 같은 digest에
-  연결하고 ADR-076을 개정한다.
+  v5 승격을 실제로 구현한 뒤 적대 리뷰 2명이 (1) 추가 탐지력 0 — 제안 필드는
+  `map_source_revision`의 순수 함수인데 그 revision은 attestation이 이미 배포 이미지 OCI
+  라벨까지 결박한다, (2) 실재하는 운영 마이그레이션 막다름 — v5 전환 즉시 rollback이 무력화되고
+  기존 프로덕션 이미지 revision에는 digest 파일 blob이 없어 capture가 불가능하다 —
+  를 실증해 **기각**했다. manifest는 v4를 유지한다. Map per-surface digest manifest
+  (`openapi-sha256.json`)는 **소비자 freshness 용도로 유지**되며 PinVi가 독립 사본과
+  대조한다(H07B/H07D). 근거·교훈은 ADR-079.
 
 ## Wave 2 상세 — 구조 전환
 

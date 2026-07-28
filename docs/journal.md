@@ -17,6 +17,32 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-29 (claude) — Lane A a0 T-VN-H07C: v5 승격을 **구현 후 기각** (ADR-079), a0 종료
+
+**결론**: #812의 ③(배포 compatible-pair에 pinned OpenAPI SHA)을 양 저장소에 실제로 구현하고
+테스트를 baseline까지 맞춘 뒤, 적대 리뷰 2명의 실증으로 **기각**했다. manifest는 v4를 유지한다.
+Map의 per-surface digest manifest는 **소비자 freshness 용도로 유지**한다(이미 머지, `207a6364`).
+
+- **기각 근거 1 — 추가 탐지력 0**: 제안 필드 `map_openapi_sha256`은 `map_source_revision`의
+  순수 함수(그 커밋 blob의 sha256)다. 그런데 attestation은 이미 그 revision을 운영자 제시
+  commit과 **배포된 모든 이미지의 OCI revision 라벨**에 결박한다. OpenAPI가 바뀌면 커밋이
+  바뀌고 그건 이미 게이트된다. 어떤 소비자도 이 digest를 독립 유도값과 대조하지 않아(형식 검사뿐)
+  내가 ADR 초안에 쓴 "재-capture 없이는 통과 불가"는 **공허한 주장**이었다.
+- **기각 근거 2 — 운영 마이그레이션 막다름**: v5는 canonical 파일명에 버전이 박혀 있어, ktdctl
+  업그레이드 즉시 rollback이 무력화되고(존재하지 않는 v5 파일), capture는 v4 sibling으로
+  fail-close, v4를 지우면 digest 계산이 실패한다 — `openapi-sha256.json` blob이 **기존
+  프로덕션 이미지 revision에는 없기 때문**(어제 처음 생긴 파일). 즉 기존 pair는 v5로 capture
+  자체가 불가능하고 운영자는 manifest 없는 상태에 갇힌다.
+- **정정한 내 오류**: ADR 초안의 "코드 머지는 배포 상태를 바꾸지 않는다"도 틀렸다 — Map 절반
+  (attestation version==5)은 머지 즉시 C7 게이트를 red로 만든다. 리뷰어가 지적했다.
+- **유지·폐기**: `openapi-sha256.json` + `export_openapi.py` 생성/검증은 유지(PinVi가 **독립
+  사본**과 대조하므로 그쪽에서는 실질 탐지력이 있다). docker-manager v5 브랜치와 Map attestation
+  v5 브랜치는 폐기한다. 운영 문서·런북은 손대지 않으므로 v4 서술이 그대로 유효하다.
+- **규율 정정**: tasks.md의 "OpenAPI compatible-pair gate"를 "per-surface digest 갱신 + 소비자
+  스냅샷 재-vendor"로 바꾸고 재-capture/attestation 조건을 제거했다.
+- **교훈(ADR-079에 기록)**: 계약에 새 필드를 넣을 때는 **독립적으로 유도된 값과 대조되는지**를
+  먼저 확인한다. 대조 상대가 없으면 형식 검사만 남고, 그건 탐지력이 아니라 스키마 비용이다.
+
 ## 2026-07-28 (claude) — Lane A a0 T-VN-H07D ②: PinVi consumer 계약 + freshness 게이트 실효화
 
 **결론**: PinVi half(PR #416, squash `8ea83358`)를 landing해 T-VN-H07D를 완료하고 #815를 닫았다.
