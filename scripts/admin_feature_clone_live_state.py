@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Final
 
@@ -15,15 +16,50 @@ _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
 _RUN_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
 _IMAGE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^sha256:[0-9a-f]{64}$")
+_NETWORK_RE: Final[re.Pattern[str]] = re.compile(r"^ktm-afcla-[0-9a-f]{12}-net$")
 _REPORT_FILES: Final[set[str]] = {
     "c7-results.xml",
     "c7-summary.html",
     "c7-summary.json",
 }
+_EXPECTED_TESTS: Final[tuple[str, str]] = (
+    "auth.setup.ts",
+    "admin-feature-acceptance-write.live.spec.ts",
+)
+_SNAPSHOT_KEYS: Final[set[str]] = {
+    "active_owned_features",
+    "clone_container_sha256",
+    "clone_system_identifier_sha256",
+    "content_sha256",
+    "feature_non_deleted",
+    "feature_total",
+    "host_port",
+    "migration_head",
+    "nonterminal_owned_change_requests",
+    "relation_count",
+    "schema_sha256",
+    "version",
+}
+_HTML_REPORT_RE: Final[re.Pattern[str]] = re.compile(
+    r'<!doctype html><html lang="ko"><meta charset="utf-8">'
+    r"<title>C7 redacted result</title><body><h1>C7 redacted result</h1>"
+    r"<p>result=passed planned=2 observed=2</p><table><thead><tr>"
+    r"<th>#</th><th>spec</th><th>status</th><th>duration_ms</th>"
+    r"</tr></thead><tbody>"
+    r"<tr><td>1</td><td>auth\.setup\.ts</td><td>passed</td>"
+    r"<td>([0-9]+)</td></tr>"
+    r"<tr><td>2</td><td>admin-feature-acceptance-write\.live\.spec\.ts</td>"
+    r"<td>passed</td><td>([0-9]+)</td></tr>"
+    r"</tbody></table></body></html>\n?"
+)
 
 
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _canonical_sha256(value: dict[str, Any]) -> str:
+    return _sha256(json.dumps(value, sort_keys=True, separators=(",", ":")))
 
 
 def _load_object(path: Path) -> dict[str, Any]:
@@ -76,8 +112,16 @@ def _identity(args: argparse.Namespace) -> dict[str, str]:
         "api_image_id": _require_pattern(
             args.api_image_id, _IMAGE_ID_RE, "API image ID"
         ),
+        "clone_checkpoint_sha256": _require_pattern(
+            args.clone_checkpoint_sha256,
+            _SHA256_RE,
+            "clone checkpoint SHA256",
+        ),
         "clone_identity_sha256": _require_pattern(
             args.clone_identity_sha256, _SHA256_RE, "clone identity SHA256"
+        ),
+        "network_name": _require_pattern(
+            args.network_name, _NETWORK_RE, "candidate network name"
         ),
         "playwright_image_id": _require_pattern(
             args.playwright_image_id, _IMAGE_ID_RE, "Playwright image ID"
@@ -95,7 +139,9 @@ def _validated_blocked_identity(blocked: dict[str, Any]) -> dict[str, str]:
         raise RuntimeError("BLOCKED execution identity가 없습니다")
     patterns = {
         "api_image_id": (_IMAGE_ID_RE, "API image ID"),
+        "clone_checkpoint_sha256": (_SHA256_RE, "clone checkpoint SHA256"),
         "clone_identity_sha256": (_SHA256_RE, "clone identity SHA256"),
+        "network_name": (_NETWORK_RE, "candidate network name"),
         "playwright_image_id": (_IMAGE_ID_RE, "Playwright image ID"),
         "source_commit": (_COMMIT_RE, "source commit"),
         "ui_image_id": (_IMAGE_ID_RE, "UI image ID"),
@@ -111,6 +157,46 @@ def _validated_blocked_identity(blocked: dict[str, Any]) -> dict[str, str]:
     return validated
 
 
+def _validated_snapshot_object(
+    snapshot: object,
+    *,
+    label: str,
+) -> dict[str, Any]:
+    if not isinstance(snapshot, dict):
+        raise RuntimeError(f"DB snapshot object가 아닙니다: {label}")
+    if set(snapshot) != _SNAPSHOT_KEYS or snapshot.get("version") != 2:
+        raise RuntimeError(f"DB snapshot field/version이 예상과 다릅니다: {label}")
+    for field in ("clone_container_sha256", "clone_system_identifier_sha256"):
+        value = snapshot[field]
+        if not isinstance(value, str):
+            raise RuntimeError(f"DB snapshot identity가 없습니다: {label}")
+        _require_pattern(value, _SHA256_RE, field)
+    for field in ("schema_sha256", "content_sha256"):
+        value = snapshot[field]
+        if not isinstance(value, str):
+            raise RuntimeError(f"DB snapshot digest가 없습니다: {label}")
+        _require_pattern(value, _SHA256_RE, field)
+    for field in (
+        "active_owned_features",
+        "feature_non_deleted",
+        "feature_total",
+        "host_port",
+        "nonterminal_owned_change_requests",
+        "relation_count",
+    ):
+        value = snapshot[field]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise RuntimeError(f"DB snapshot count가 올바르지 않습니다: {label}")
+    migration_head = snapshot["migration_head"]
+    if not isinstance(migration_head, str) or not migration_head:
+        raise RuntimeError(f"DB snapshot migration head가 없습니다: {label}")
+    return snapshot
+
+
+def _validated_snapshot(path: Path) -> dict[str, Any]:
+    return _validated_snapshot_object(_load_object(path), label=path.name)
+
+
 def write_blocked(args: argparse.Namespace) -> None:
     path = Path(args.path)
     if path.exists() or path.is_symlink():
@@ -122,10 +208,11 @@ def write_blocked(args: argparse.Namespace) -> None:
         {
             "identity": _identity(args),
             "phase": args.phase,
+            "phase_history": [args.phase],
             "run_id": run_id,
             "run_key": run_key,
             "status": "blocked",
-            "version": 1,
+            "version": 2,
         },
     )
 
@@ -133,15 +220,21 @@ def write_blocked(args: argparse.Namespace) -> None:
 def update_blocked(args: argparse.Namespace) -> None:
     path = Path(args.path)
     blocked = _load_object(path)
-    if blocked.get("status") != "blocked" or blocked.get("version") != 1:
+    if blocked.get("status") != "blocked" or blocked.get("version") != 2:
         raise RuntimeError("BLOCKED state 계약이 올바르지 않습니다")
+    history = blocked.get("phase_history")
+    if not isinstance(history, list) or not all(
+        isinstance(item, str) and item for item in history
+    ):
+        raise RuntimeError("BLOCKED phase history가 올바르지 않습니다")
     blocked["phase"] = args.phase
+    history.append(args.phase)
     _atomic_json(path, blocked)
 
 
 def read_blocked(args: argparse.Namespace) -> None:
     blocked = _load_object(Path(args.path))
-    if blocked.get("status") != "blocked" or blocked.get("version") != 1:
+    if blocked.get("status") != "blocked" or blocked.get("version") != 2:
         raise RuntimeError("BLOCKED state 계약이 올바르지 않습니다")
     field = args.field
     value: object
@@ -151,6 +244,10 @@ def read_blocked(args: argparse.Namespace) -> None:
         value = _validated_blocked_identity(blocked).get(field)
     if not isinstance(value, str) or not value:
         raise RuntimeError("BLOCKED field가 올바르지 않습니다")
+    if field == "run_id":
+        _require_pattern(value, _RUN_ID_RE, "run ID")
+    elif field == "run_key":
+        _require_pattern(value, _SHA256_RE, "run key")
     print(value)
 
 
@@ -169,12 +266,133 @@ def write_snapshot(args: argparse.Namespace) -> None:
                 _SHA256_RE,
                 "clone system identifier SHA256",
             ),
+            "content_sha256": _require_pattern(
+                args.content_sha256, _SHA256_RE, "content SHA256"
+            ),
             "feature_non_deleted": args.feature_non_deleted,
             "feature_total": args.feature_total,
             "host_port": args.host_port,
             "migration_head": args.migration_head,
             "nonterminal_owned_change_requests": args.nonterminal_owned_change_requests,
             "relation_count": args.relation_count,
+            "schema_sha256": _require_pattern(
+                args.schema_sha256, _SHA256_RE, "schema SHA256"
+            ),
+            "version": 2,
+        },
+    )
+
+
+def write_checkpoint(args: argparse.Namespace) -> None:
+    snapshot = _validated_snapshot(Path(args.snapshot))
+    dump_sha256 = _require_pattern(args.dump_sha256, _SHA256_RE, "dump SHA256")
+    if args.dump_size < 1:
+        raise RuntimeError("dump size가 올바르지 않습니다")
+    payload: dict[str, Any] = {
+        "baseline": snapshot,
+        "dump": {"sha256": dump_sha256, "size": args.dump_size},
+        "version": 1,
+    }
+    payload["checkpoint_sha256"] = _canonical_sha256(payload)
+    _atomic_json(Path(args.path), payload)
+
+
+def _validated_checkpoint(path: Path) -> dict[str, Any]:
+    checkpoint = _load_object(path)
+    if set(checkpoint) != {"baseline", "checkpoint_sha256", "dump", "version"}:
+        raise RuntimeError("clone checkpoint field가 예상과 다릅니다")
+    if checkpoint.get("version") != 1:
+        raise RuntimeError("clone checkpoint version이 올바르지 않습니다")
+    digest = checkpoint.get("checkpoint_sha256")
+    if not isinstance(digest, str):
+        raise RuntimeError("clone checkpoint digest가 없습니다")
+    _require_pattern(digest, _SHA256_RE, "clone checkpoint SHA256")
+    unsigned = {key: value for key, value in checkpoint.items() if key != "checkpoint_sha256"}
+    if digest != _canonical_sha256(unsigned):
+        raise RuntimeError("clone checkpoint digest가 일치하지 않습니다")
+    dump = checkpoint.get("dump")
+    if not isinstance(dump, dict) or set(dump) != {"sha256", "size"}:
+        raise RuntimeError("clone checkpoint dump provenance가 없습니다")
+    dump_digest = dump.get("sha256")
+    dump_size = dump.get("size")
+    if not isinstance(dump_digest, str):
+        raise RuntimeError("clone checkpoint dump digest가 없습니다")
+    _require_pattern(dump_digest, _SHA256_RE, "dump SHA256")
+    if not isinstance(dump_size, int) or isinstance(dump_size, bool) or dump_size < 1:
+        raise RuntimeError("clone checkpoint dump size가 올바르지 않습니다")
+    _validated_snapshot_object(checkpoint.get("baseline"), label="checkpoint baseline")
+    return checkpoint
+
+
+def verify_checkpoint(args: argparse.Namespace) -> None:
+    checkpoint = _validated_checkpoint(Path(args.checkpoint))
+    snapshot = _validated_snapshot(Path(args.snapshot))
+    baseline = checkpoint["baseline"]
+    if args.allow_owned_drift:
+        stable_keys = {
+            "clone_container_sha256",
+            "clone_system_identifier_sha256",
+            "content_sha256",
+            "host_port",
+            "migration_head",
+            "relation_count",
+            "schema_sha256",
+            "version",
+        }
+        matches = {key: baseline[key] for key in stable_keys} == {
+            key: snapshot[key] for key in stable_keys
+        }
+    else:
+        matches = baseline == snapshot
+    if not matches:
+        raise RuntimeError("현재 clone DB가 trusted checkpoint와 다릅니다")
+    print(checkpoint["checkpoint_sha256"])
+
+
+def write_image_evidence(args: argparse.Namespace) -> None:
+    source_commit = _require_pattern(args.source_commit, _COMMIT_RE, "source commit")
+    _atomic_json(
+        Path(args.path),
+        {
+            "api": {
+                "image_id": _require_pattern(
+                    args.api_image_id, _IMAGE_ID_RE, "API image ID"
+                ),
+                "revision": source_commit,
+            },
+            "playwright": {
+                "image_id": _require_pattern(
+                    args.playwright_image_id, _IMAGE_ID_RE, "Playwright image ID"
+                ),
+                "revision": source_commit,
+            },
+            "source_commit": source_commit,
+            "ui": {
+                "image_id": _require_pattern(
+                    args.ui_image_id, _IMAGE_ID_RE, "UI image ID"
+                ),
+                "revision": source_commit,
+            },
+            "version": 1,
+        },
+    )
+
+
+def write_resource_state(args: argparse.Namespace) -> None:
+    for value in (
+        args.owned_containers,
+        args.owned_images,
+        args.owned_networks,
+    ):
+        if value < 0:
+            raise RuntimeError("resource count가 올바르지 않습니다")
+    _atomic_json(
+        Path(args.path),
+        {
+            "clone_network_attached": args.clone_network_attached,
+            "owned_containers": args.owned_containers,
+            "owned_images": args.owned_images,
+            "owned_networks": args.owned_networks,
             "version": 1,
         },
     )
@@ -205,8 +423,10 @@ def _fixture_counts(
 def _report_counts(path: Path) -> dict[str, int]:
     if path.is_symlink() or not path.is_dir():
         raise RuntimeError(f"Playwright evidence directory가 아닙니다: {path.name}")
-    entries = {item.name for item in path.iterdir()}
-    if entries != _REPORT_FILES or any(item.is_symlink() for item in path.iterdir()):
+    items = tuple(path.iterdir())
+    if {item.name for item in items} != _REPORT_FILES or any(
+        item.is_symlink() for item in items
+    ):
         raise RuntimeError(f"Playwright evidence exact file set이 아닙니다: {path.name}")
     summary = _load_object(path / "c7-summary.json")
     if (
@@ -215,45 +435,151 @@ def _report_counts(path: Path) -> dict[str, int]:
         or summary.get("testsObserved") != 2
         or summary.get("testsPlanned") != 2
         or summary.get("counts") != {"passed": 2}
+        or set(summary)
+        != {"counts", "result", "testsObserved", "testsPlanned", "version"}
     ):
         raise RuntimeError(f"Playwright summary가 예상과 다릅니다: {path.name}")
+
+    xml_root = ET.fromstring((path / "c7-results.xml").read_text(encoding="utf-8"))
+    if xml_root.tag != "testsuite" or xml_root.attrib != {"tests": "2"}:
+        raise RuntimeError(f"Playwright XML suite가 예상과 다릅니다: {path.name}")
+    cases = list(xml_root)
+    if len(cases) != 2:
+        raise RuntimeError(f"Playwright XML test 수가 예상과 다릅니다: {path.name}")
+    xml_durations: list[int] = []
+    for index, (case, expected_spec) in enumerate(
+        zip(cases, _EXPECTED_TESTS, strict=True), start=1
+    ):
+        if (
+            case.tag != "testcase"
+            or case.attrib.get("classname") != "c7-redacted"
+            or case.attrib.get("name") != f"{expected_spec}#{index}"
+            or set(case.attrib) != {"classname", "name", "time"}
+            or list(case)
+            or (case.text not in {None, ""})
+        ):
+            raise RuntimeError(f"Playwright XML test identity가 다릅니다: {path.name}")
+        try:
+            duration_ms = round(float(case.attrib["time"]) * 1000)
+        except (KeyError, ValueError, OverflowError) as error:
+            raise RuntimeError(
+                f"Playwright XML duration이 올바르지 않습니다: {path.name}"
+            ) from error
+        if duration_ms < 0:
+            raise RuntimeError(f"Playwright XML duration이 음수입니다: {path.name}")
+        xml_durations.append(duration_ms)
+
+    html = (path / "c7-summary.html").read_text(encoding="utf-8")
+    html_match = _HTML_REPORT_RE.fullmatch(html)
+    if html_match is None:
+        raise RuntimeError(f"Playwright HTML summary가 예상과 다릅니다: {path.name}")
+    html_durations = [int(value) for value in html_match.groups()]
+    if html_durations != xml_durations:
+        raise RuntimeError(f"Playwright XML/HTML duration이 다릅니다: {path.name}")
     return {"passed": 2}
 
 
-def _same_startup_identity(before: dict[str, Any], after: dict[str, Any]) -> bool:
-    keys = {
-        "clone_container_sha256",
-        "clone_system_identifier_sha256",
-        "active_owned_features",
-        "feature_non_deleted",
-        "feature_total",
-        "host_port",
-        "migration_head",
-        "nonterminal_owned_change_requests",
-        "relation_count",
-        "version",
-    }
-    return {key: before.get(key) for key in keys} == {
-        key: after.get(key) for key in keys
+def _same_snapshot(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return {key: left.get(key) for key in _SNAPSHOT_KEYS} == {
+        key: right.get(key) for key in _SNAPSHOT_KEYS
     }
 
 
-def complete(args: argparse.Namespace) -> None:
+def _validate_image_evidence(
+    path: Path,
+    identity: dict[str, str],
+) -> None:
+    evidence = _load_object(path)
+    expected = {
+        "api": {
+            "image_id": identity["api_image_id"],
+            "revision": identity["source_commit"],
+        },
+        "playwright": {
+            "image_id": identity["playwright_image_id"],
+            "revision": identity["source_commit"],
+        },
+        "source_commit": identity["source_commit"],
+        "ui": {
+            "image_id": identity["ui_image_id"],
+            "revision": identity["source_commit"],
+        },
+        "version": 1,
+    }
+    if evidence != expected:
+        raise RuntimeError("candidate image evidence가 BLOCKED identity와 다릅니다")
+
+
+def _validate_resources(path: Path) -> None:
+    resources = _load_object(path)
+    if resources != {
+        "clone_network_attached": False,
+        "owned_containers": 0,
+        "owned_images": 0,
+        "owned_networks": 0,
+        "version": 1,
+    }:
+        raise RuntimeError("candidate resource cleanup이 완결되지 않았습니다")
+
+
+def _build_result(
+    args: argparse.Namespace,
+    *,
+    require_resource_cleanup: bool,
+) -> dict[str, Any]:
     runtime = Path(args.runtime)
-    blocked_path = Path(args.blocked_path)
-    blocked = _load_object(blocked_path)
-    if blocked.get("status") != "blocked" or blocked.get("version") != 1:
+    blocked = _load_object(Path(args.blocked_path))
+    if blocked.get("status") != "blocked" or blocked.get("version") != 2:
         raise RuntimeError("BLOCKED state 계약이 올바르지 않습니다")
     identity = _validated_blocked_identity(blocked)
 
-    startup_before = _load_object(runtime / "clone-startup-before.json")
-    startup_after = _load_object(runtime / "clone-startup-after.json")
-    final = _load_object(runtime / "clone-final.json")
+    checkpoint = _validated_checkpoint(runtime / "clone-checkpoint.json")
+    if checkpoint["checkpoint_sha256"] != identity["clone_checkpoint_sha256"]:
+        raise RuntimeError("BLOCKED clone checkpoint가 runtime checkpoint와 다릅니다")
+    startup_before = _validated_snapshot(runtime / "clone-startup-before.json")
+    startup_after = _validated_snapshot(runtime / "clone-startup-after.json")
+    final = _validated_snapshot(runtime / "clone-final.json")
+    if checkpoint["baseline"] != startup_before:
+        raise RuntimeError("startup clone DB가 trusted checkpoint와 다릅니다")
+    if not _same_snapshot(startup_before, startup_after):
+        raise RuntimeError("candidate startup이 clone DB identity/schema/data를 변경했습니다")
+    clone_identity = (
+        f"{startup_before['clone_container_sha256']}\n"
+        f"{startup_before['clone_system_identifier_sha256']}\n"
+        f"{startup_before['host_port']}\n"
+        f"{startup_before['migration_head']}\n"
+        f"{startup_before['schema_sha256']}\n"
+        f"{startup_before['content_sha256']}\n"
+    )
+    if identity["clone_identity_sha256"] != _sha256(clone_identity):
+        raise RuntimeError("BLOCKED clone identity가 DB snapshot과 다릅니다")
+    for key in (
+        "clone_container_sha256",
+        "clone_system_identifier_sha256",
+        "content_sha256",
+        "host_port",
+        "migration_head",
+        "relation_count",
+        "schema_sha256",
+        "version",
+    ):
+        if final[key] != startup_before[key]:
+            raise RuntimeError("최종 clone DB identity/schema/content가 시작 기준과 다릅니다")
+    if final["feature_non_deleted"] != startup_before["feature_non_deleted"]:
+        raise RuntimeError("최종 non-deleted Feature 수가 시작 기준과 다릅니다")
+    if final["feature_total"] != startup_before["feature_total"] + 6:
+        raise RuntimeError("최종 soft-delete 감사 Feature 6건이 예상과 다릅니다")
+    if (
+        final["active_owned_features"] != 0
+        or final["nonterminal_owned_change_requests"] != 0
+    ):
+        raise RuntimeError("최종 API-owned Feature/change request residue가 있습니다")
+
     if args.phase == "recovered":
         if args.current_snapshot is None or args.recovery_tool_source_commit is None:
             raise RuntimeError("recovery 완료에는 현재 snapshot/tool commit이 필요합니다")
-        current = _load_object(Path(args.current_snapshot))
-        if not _same_startup_identity(final, current):
+        current = _validated_snapshot(Path(args.current_snapshot))
+        if not _same_snapshot(final, current):
             raise RuntimeError("recovery 현재 clone DB가 실패 당시 최종 snapshot과 다릅니다")
         recovery_tool_source_commit: str | None = _require_pattern(
             args.recovery_tool_source_commit,
@@ -264,35 +590,6 @@ def complete(args: argparse.Namespace) -> None:
         if args.current_snapshot is not None or args.recovery_tool_source_commit is not None:
             raise RuntimeError("일반 완료에는 recovery 전용 인자를 사용할 수 없습니다")
         recovery_tool_source_commit = None
-    if not _same_startup_identity(startup_before, startup_after):
-        raise RuntimeError("candidate startup이 clone DB identity/schema/data를 변경했습니다")
-    clone_identity = (
-        f"{startup_before.get('clone_container_sha256')}\n"
-        f"{startup_before.get('clone_system_identifier_sha256')}\n"
-        f"{startup_before.get('host_port')}\n"
-        f"{startup_before.get('migration_head')}\n"
-    )
-    if identity["clone_identity_sha256"] != _sha256(clone_identity):
-        raise RuntimeError("BLOCKED clone identity가 DB snapshot과 다릅니다")
-    for key in (
-        "clone_container_sha256",
-        "clone_system_identifier_sha256",
-        "host_port",
-        "migration_head",
-        "relation_count",
-        "version",
-    ):
-        if final.get(key) != startup_before.get(key):
-            raise RuntimeError("최종 clone DB identity/schema가 시작 기준과 다릅니다")
-    if final.get("feature_non_deleted") != startup_before.get("feature_non_deleted"):
-        raise RuntimeError("최종 non-deleted Feature 수가 시작 기준과 다릅니다")
-    if final.get("feature_total") != startup_before.get("feature_total", 0) + 6:
-        raise RuntimeError("최종 soft-delete 감사 Feature 6건이 예상과 다릅니다")
-    if (
-        final.get("active_owned_features") != 0
-        or final.get("nonterminal_owned_change_requests") != 0
-    ):
-        raise RuntimeError("최종 API-owned Feature/change request residue가 있습니다")
 
     _fixture_counts(
         runtime / "direct-seed.json",
@@ -316,8 +613,12 @@ def complete(args: argparse.Namespace) -> None:
         "main": _report_counts(runtime / "playwright-main"),
         "recovery": _report_counts(runtime / "playwright-recovery"),
     }
+    _validate_image_evidence(runtime / "image-evidence.json", identity)
+    if require_resource_cleanup:
+        _validate_resources(runtime / "resource-final.json")
+
     canonical_identity = json.dumps(identity, sort_keys=True, separators=(",", ":"))
-    result = {
+    return {
         "cleanup": {
             "foreign_key_references": cleanup["foreign_key_references"],
             "owned_features": cleanup["counts"]["features"],
@@ -329,21 +630,33 @@ def complete(args: argparse.Namespace) -> None:
         },
         "execution_identity_sha256": _sha256(canonical_identity),
         "isolation": {
+            "clone_checkpoint_sha256": identity["clone_checkpoint_sha256"],
             "clone_container_sha256": startup_before["clone_container_sha256"],
             "clone_system_identifier_sha256": startup_before[
                 "clone_system_identifier_sha256"
             ],
+            "content_sha256": startup_before["content_sha256"],
             "host_port": startup_before["host_port"],
             "production_compose_project_excluded": True,
+            "schema_sha256": startup_before["schema_sha256"],
             "startup_migration_unchanged": True,
         },
         "phase": args.phase,
         "recovery_tool_source_commit": recovery_tool_source_commit,
-        "source_commit": identity.get("source_commit"),
+        "source_commit": identity["source_commit"],
         "status": "complete",
         "tests": tests,
-        "version": 1,
+        "version": 2,
     }
+
+
+def validate_evidence(args: argparse.Namespace) -> None:
+    _build_result(args, require_resource_cleanup=False)
+
+
+def complete(args: argparse.Namespace) -> None:
+    blocked_path = Path(args.blocked_path)
+    result = _build_result(args, require_resource_cleanup=True)
     _atomic_json(Path(args.result_path), result)
     blocked_path.unlink()
     directory = os.open(
@@ -357,10 +670,20 @@ def complete(args: argparse.Namespace) -> None:
 
 def _add_identity_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--api-image-id", required=True)
+    parser.add_argument("--clone-checkpoint-sha256", required=True)
     parser.add_argument("--clone-identity-sha256", required=True)
+    parser.add_argument("--network-name", required=True)
     parser.add_argument("--playwright-image-id", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--ui-image-id", required=True)
+
+
+def _add_completion_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--blocked-path", required=True)
+    parser.add_argument("--current-snapshot")
+    parser.add_argument("--phase", choices=("passed", "recovered"), required=True)
+    parser.add_argument("--recovery-tool-source-commit")
+    parser.add_argument("--runtime", required=True)
 
 
 def main() -> None:
@@ -386,7 +709,9 @@ def main() -> None:
         "--field",
         choices=(
             "api_image_id",
+            "clone_checkpoint_sha256",
             "clone_identity_sha256",
+            "network_name",
             "phase",
             "playwright_image_id",
             "run_id",
@@ -403,6 +728,7 @@ def main() -> None:
     snapshot.add_argument("--active-owned-features", required=True, type=int)
     snapshot.add_argument("--clone-container-sha256", required=True)
     snapshot.add_argument("--clone-system-identifier-sha256", required=True)
+    snapshot.add_argument("--content-sha256", required=True)
     snapshot.add_argument("--feature-non-deleted", required=True, type=int)
     snapshot.add_argument("--feature-total", required=True, type=int)
     snapshot.add_argument("--host-port", required=True, type=int)
@@ -411,15 +737,49 @@ def main() -> None:
         "--nonterminal-owned-change-requests", required=True, type=int
     )
     snapshot.add_argument("--relation-count", required=True, type=int)
+    snapshot.add_argument("--schema-sha256", required=True)
     snapshot.set_defaults(handler=write_snapshot)
 
+    checkpoint = subparsers.add_parser("write-checkpoint")
+    checkpoint.add_argument("--dump-sha256", required=True)
+    checkpoint.add_argument("--dump-size", required=True, type=int)
+    checkpoint.add_argument("--path", required=True)
+    checkpoint.add_argument("--snapshot", required=True)
+    checkpoint.set_defaults(handler=write_checkpoint)
+
+    checkpoint_verify = subparsers.add_parser("verify-checkpoint")
+    checkpoint_verify.add_argument("--allow-owned-drift", action="store_true")
+    checkpoint_verify.add_argument("--checkpoint", required=True)
+    checkpoint_verify.add_argument("--snapshot", required=True)
+    checkpoint_verify.set_defaults(handler=verify_checkpoint)
+
+    image_evidence = subparsers.add_parser("write-image-evidence")
+    image_evidence.add_argument("--api-image-id", required=True)
+    image_evidence.add_argument("--path", required=True)
+    image_evidence.add_argument("--playwright-image-id", required=True)
+    image_evidence.add_argument("--source-commit", required=True)
+    image_evidence.add_argument("--ui-image-id", required=True)
+    image_evidence.set_defaults(handler=write_image_evidence)
+
+    resource_state = subparsers.add_parser("write-resource-state")
+    resource_state.add_argument(
+        "--clone-network-attached",
+        action=argparse.BooleanOptionalAction,
+        required=True,
+    )
+    resource_state.add_argument("--owned-containers", required=True, type=int)
+    resource_state.add_argument("--owned-images", required=True, type=int)
+    resource_state.add_argument("--owned-networks", required=True, type=int)
+    resource_state.add_argument("--path", required=True)
+    resource_state.set_defaults(handler=write_resource_state)
+
+    validate = subparsers.add_parser("validate-evidence")
+    _add_completion_arguments(validate)
+    validate.set_defaults(handler=validate_evidence)
+
     finish = subparsers.add_parser("complete")
-    finish.add_argument("--blocked-path", required=True)
-    finish.add_argument("--phase", choices=("passed", "recovered"), required=True)
-    finish.add_argument("--current-snapshot")
-    finish.add_argument("--recovery-tool-source-commit")
+    _add_completion_arguments(finish)
     finish.add_argument("--result-path", required=True)
-    finish.add_argument("--runtime", required=True)
     finish.set_defaults(handler=complete)
 
     args = parser.parse_args()

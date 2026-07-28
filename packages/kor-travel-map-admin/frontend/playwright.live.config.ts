@@ -17,8 +17,11 @@ const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const C7_READ_AUTH_SPEC = "ops-c7-read-auth.live.spec";
 const ISOLATED_EVIDENCE_ENV = "E2E_ISOLATED_LIVE_EVIDENCE";
+const ISOLATED_DOCKER_NETWORK_ENV = "E2E_ISOLATED_LIVE_DOCKER_NETWORK";
 const isolatedEvidenceRaw = process.env[ISOLATED_EVIDENCE_ENV];
 const isolatedEvidence = isolatedEvidenceRaw === "1";
+const isolatedDockerNetworkRaw = process.env[ISOLATED_DOCKER_NETWORK_ENV];
+const isolatedDockerNetwork = isolatedDockerNetworkRaw === "1";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -81,6 +84,19 @@ function isLocalHost(hostname: string): boolean {
   );
 }
 
+function isTrustedIsolatedDockerOrigin(url: URL): boolean {
+  return (
+    isolatedDockerNetwork &&
+    url.protocol === "http:" &&
+    url.hostname === "candidate-ui" &&
+    url.username === "" &&
+    url.password === "" &&
+    url.pathname === "/" &&
+    url.search === "" &&
+    url.hash === ""
+  );
+}
+
 (function assertNotProdUnlessOptedIn() {
   let parsed: URL;
   try {
@@ -95,12 +111,27 @@ function isLocalHost(hostname: string): boolean {
       `[playwright.live] ${ISOLATED_EVIDENCE_ENV}=1만 허용합니다 (value redacted)`,
     );
   }
-  if (isolatedEvidence && !isLocalHost(parsed.hostname)) {
+  if (
+    isolatedDockerNetworkRaw !== undefined &&
+    isolatedDockerNetworkRaw !== "1"
+  ) {
     throw new Error(
-      `[playwright.live] ${ISOLATED_EVIDENCE_ENV}=1은 로컬 격리 대상만 허용합니다`,
+      `[playwright.live] ${ISOLATED_DOCKER_NETWORK_ENV}=1만 허용합니다 (value redacted)`,
     );
   }
-  if (!isLocalHost(parsed.hostname) && process.env.E2E_LIVE_ALLOW_PROD !== "1") {
+  if (isolatedDockerNetwork && !isolatedEvidence) {
+    throw new Error(
+      `[playwright.live] ${ISOLATED_DOCKER_NETWORK_ENV}=1은 ${ISOLATED_EVIDENCE_ENV}=1이 필요합니다`,
+    );
+  }
+  const isolatedTarget =
+    isLocalHost(parsed.hostname) || isTrustedIsolatedDockerOrigin(parsed);
+  if (isolatedEvidence && !isolatedTarget) {
+    throw new Error(
+      `[playwright.live] ${ISOLATED_EVIDENCE_ENV}=1은 검증된 격리 대상만 허용합니다`,
+    );
+  }
+  if (!isolatedTarget && process.env.E2E_LIVE_ALLOW_PROD !== "1") {
     throw new Error(
       "[playwright.live] E2E_BASE_URL이 비-로컬(prod 등)입니다 (value redacted). " +
         "의도한 실행이면 E2E_LIVE_ALLOW_PROD=1을 설정하세요.",

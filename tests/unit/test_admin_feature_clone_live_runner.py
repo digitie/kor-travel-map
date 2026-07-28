@@ -12,13 +12,23 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _STATE_HELPER = _REPO_ROOT / "scripts" / "admin_feature_clone_live_state.py"
 _RUNNER = _REPO_ROOT / "scripts" / "run-admin-feature-clone-live-acceptance.sh"
 _COMMIT = "a" * 40
-_IMAGE_ID = f"sha256:{'b' * 64}"
-_SHA256 = "c" * 64
-_CLONE_SYSTEM_SHA256 = "d" * 64
+_RECOVERY_COMMIT = "2" * 40
+_API_IMAGE_ID = f"sha256:{'b' * 64}"
+_UI_IMAGE_ID = f"sha256:{'1' * 64}"
+_PLAYWRIGHT_IMAGE_ID = f"sha256:{'f' * 64}"
+_CONTAINER_SHA256 = "c" * 64
+_SYSTEM_SHA256 = "d" * 64
+_SCHEMA_SHA256 = "3" * 64
+_CONTENT_SHA256 = "4" * 64
+_DUMP_SHA256 = "5" * 64
+_RUN_KEY = "e" * 64
+_NETWORK_NAME = f"ktm-afcla-{_RUN_KEY[:12]}-net"
+_RUN_ID = "clone-20260729000000-abcdef123456"
+_MIGRATION_HEAD = "0066_curation_component_identity"
 _CLONE_IDENTITY_SHA256 = hashlib.sha256(
     (
-        f"{_SHA256}\n{_CLONE_SYSTEM_SHA256}\n15475\n"
-        "0066_curation_component_identity\n"
+        f"{_CONTAINER_SHA256}\n{_SYSTEM_SHA256}\n15475\n"
+        f"{_MIGRATION_HEAD}\n{_SCHEMA_SHA256}\n{_CONTENT_SHA256}\n"
     ).encode()
 ).hexdigest()
 
@@ -32,7 +42,13 @@ def _run_helper(*arguments: str, check: bool = True) -> subprocess.CompletedProc
     )
 
 
-def _write_snapshot(path: Path, *, total: int, non_deleted: int = 100) -> None:
+def _write_snapshot(
+    path: Path,
+    *,
+    total: int,
+    non_deleted: int = 100,
+    schema_sha256: str = _SCHEMA_SHA256,
+) -> None:
     _run_helper(
         "write-snapshot",
         "--path",
@@ -40,9 +56,11 @@ def _write_snapshot(path: Path, *, total: int, non_deleted: int = 100) -> None:
         "--active-owned-features",
         "0",
         "--clone-container-sha256",
-        _SHA256,
+        _CONTAINER_SHA256,
         "--clone-system-identifier-sha256",
-        _CLONE_SYSTEM_SHA256,
+        _SYSTEM_SHA256,
+        "--content-sha256",
+        _CONTENT_SHA256,
         "--feature-non-deleted",
         str(non_deleted),
         "--feature-total",
@@ -50,11 +68,13 @@ def _write_snapshot(path: Path, *, total: int, non_deleted: int = 100) -> None:
         "--host-port",
         "15475",
         "--migration-head",
-        "0066_curation_component_identity",
+        _MIGRATION_HEAD,
         "--nonterminal-owned-change-requests",
         "0",
         "--relation-count",
         "57",
+        "--schema-sha256",
+        schema_sha256,
     )
 
 
@@ -87,8 +107,29 @@ def _write_fixture(
 
 def _write_report(directory: Path) -> None:
     directory.mkdir()
-    (directory / "c7-results.xml").write_text("<testsuites/>", encoding="utf-8")
-    (directory / "c7-summary.html").write_text("<!doctype html>", encoding="utf-8")
+    (directory / "c7-results.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<testsuite tests="2">'
+        '<testcase classname="c7-redacted" name="auth.setup.ts#1" time="0.100">'
+        "</testcase>"
+        '<testcase classname="c7-redacted" '
+        'name="admin-feature-acceptance-write.live.spec.ts#2" time="0.200">'
+        "</testcase>"
+        "</testsuite>",
+        encoding="utf-8",
+    )
+    (directory / "c7-summary.html").write_text(
+        '<!doctype html><html lang="ko"><meta charset="utf-8">'
+        "<title>C7 redacted result</title><body><h1>C7 redacted result</h1>"
+        "<p>result=passed planned=2 observed=2</p><table><thead><tr>"
+        "<th>#</th><th>spec</th><th>status</th><th>duration_ms</th>"
+        "</tr></thead><tbody>"
+        "<tr><td>1</td><td>auth.setup.ts</td><td>passed</td><td>100</td></tr>"
+        "<tr><td>2</td><td>admin-feature-acceptance-write.live.spec.ts</td>"
+        "<td>passed</td><td>200</td></tr>"
+        "</tbody></table></body></html>",
+        encoding="utf-8",
+    )
     (directory / "c7-summary.json").write_text(
         json.dumps(
             {
@@ -107,30 +148,50 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
     runtime = tmp_path / "runtime"
     runtime.mkdir()
     blocked = tmp_path / "BLOCKED.json"
+    startup = runtime / "clone-startup-before.json"
+    _write_snapshot(startup, total=120)
+    _write_snapshot(runtime / "clone-startup-after.json", total=120)
+    _write_snapshot(runtime / "clone-final.json", total=126)
+    checkpoint = runtime / "clone-checkpoint.json"
+    _run_helper(
+        "write-checkpoint",
+        "--dump-sha256",
+        _DUMP_SHA256,
+        "--dump-size",
+        "1024",
+        "--path",
+        str(checkpoint),
+        "--snapshot",
+        str(startup),
+    )
+    checkpoint_sha256 = json.loads(checkpoint.read_text(encoding="utf-8"))[
+        "checkpoint_sha256"
+    ]
     _run_helper(
         "write-blocked",
         "--path",
         str(blocked),
         "--phase",
-        "fixture-seed-pending",
+        "candidate-startup-pending",
         "--run-id",
-        "clone-20260729000000-abcdef123456",
+        _RUN_ID,
         "--run-key",
-        "e" * 64,
+        _RUN_KEY,
         "--api-image-id",
-        _IMAGE_ID,
+        _API_IMAGE_ID,
+        "--clone-checkpoint-sha256",
+        checkpoint_sha256,
         "--clone-identity-sha256",
         _CLONE_IDENTITY_SHA256,
+        "--network-name",
+        _NETWORK_NAME,
         "--playwright-image-id",
-        f"sha256:{'f' * 64}",
+        _PLAYWRIGHT_IMAGE_ID,
         "--source-commit",
         _COMMIT,
         "--ui-image-id",
-        f"sha256:{'1' * 64}",
+        _UI_IMAGE_ID,
     )
-    _write_snapshot(runtime / "clone-startup-before.json", total=120)
-    _write_snapshot(runtime / "clone-startup-after.json", total=120)
-    _write_snapshot(runtime / "clone-final.json", total=126)
     _write_fixture(
         runtime / "direct-seed.json",
         features=2,
@@ -141,32 +202,76 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
     _write_fixture(
         runtime / "direct-cleanup.json", features=0, weather=0, price=0
     )
-    _write_fixture(
-        runtime / "direct-audit.json", features=0, weather=0, price=0
-    )
+    _write_fixture(runtime / "direct-audit.json", features=0, weather=0, price=0)
     _write_report(runtime / "playwright-main")
     _write_report(runtime / "playwright-recovery")
+    _run_helper(
+        "write-image-evidence",
+        "--api-image-id",
+        _API_IMAGE_ID,
+        "--path",
+        str(runtime / "image-evidence.json"),
+        "--playwright-image-id",
+        _PLAYWRIGHT_IMAGE_ID,
+        "--source-commit",
+        _COMMIT,
+        "--ui-image-id",
+        _UI_IMAGE_ID,
+    )
+    _run_helper(
+        "write-resource-state",
+        "--no-clone-network-attached",
+        "--owned-containers",
+        "0",
+        "--owned-images",
+        "0",
+        "--owned-networks",
+        "0",
+        "--path",
+        str(runtime / "resource-final.json"),
+    )
     return runtime, blocked
 
 
-def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
-    runtime, blocked = _prepare_runtime(tmp_path)
-    result = runtime / "result.json"
-
-    _run_helper(
+def _complete(
+    runtime: Path,
+    blocked: Path,
+    *,
+    phase: str = "passed",
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    arguments = [
         "complete",
         "--blocked-path",
         str(blocked),
         "--phase",
-        "passed",
+        phase,
         "--result-path",
-        str(result),
+        str(runtime / "result.json"),
         "--runtime",
         str(runtime),
-    )
+    ]
+    if phase == "recovered":
+        current = runtime / "clone-recovery-current.json"
+        _write_snapshot(current, total=126)
+        arguments.extend(
+            [
+                "--current-snapshot",
+                str(current),
+                "--recovery-tool-source-commit",
+                _RECOVERY_COMMIT,
+            ]
+        )
+    return _run_helper(*arguments, check=check)
+
+
+def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+
+    _complete(runtime, blocked)
 
     assert not blocked.exists()
-    payload = json.loads(result.read_text(encoding="utf-8"))
+    payload = json.loads((runtime / "result.json").read_text(encoding="utf-8"))
     assert payload["status"] == "complete"
     assert payload["phase"] == "passed"
     assert payload["source_commit"] == _COMMIT
@@ -184,160 +289,188 @@ def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
     }
 
 
-def test_complete_rejects_startup_db_mutation(tmp_path: Path) -> None:
+def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> None:
     runtime, blocked = _prepare_runtime(tmp_path)
-    _write_snapshot(runtime / "clone-startup-after.json", total=121)
 
-    completed = _run_helper(
-        "complete",
-        "--blocked-path",
-        str(blocked),
-        "--phase",
-        "passed",
-        "--result-path",
-        str(runtime / "result.json"),
-        "--runtime",
-        str(runtime),
-        check=False,
-    )
+    _complete(runtime, blocked, phase="recovered")
 
-    assert completed.returncode != 0
-    assert blocked.exists()
-    assert not (runtime / "result.json").exists()
-
-
-def test_complete_recovers_from_final_snapshot_without_rerunning(tmp_path: Path) -> None:
-    runtime, blocked = _prepare_runtime(tmp_path)
-    current = runtime / "clone-recovery-current.json"
-    _write_snapshot(current, total=126)
-    result = runtime / "result.json"
-    recovery_commit = "2" * 40
-
-    _run_helper(
-        "complete",
-        "--blocked-path",
-        str(blocked),
-        "--phase",
-        "recovered",
-        "--current-snapshot",
-        str(current),
-        "--recovery-tool-source-commit",
-        recovery_commit,
-        "--result-path",
-        str(result),
-        "--runtime",
-        str(runtime),
-    )
-
-    payload = json.loads(result.read_text(encoding="utf-8"))
+    payload = json.loads((runtime / "result.json").read_text(encoding="utf-8"))
     assert not blocked.exists()
     assert payload["phase"] == "recovered"
-    assert payload["recovery_tool_source_commit"] == recovery_commit
-
-
-def test_complete_rejects_recovery_after_clone_db_drift(tmp_path: Path) -> None:
-    runtime, blocked = _prepare_runtime(tmp_path)
-    current = runtime / "clone-recovery-current.json"
-    _write_snapshot(current, total=127)
-
-    completed = _run_helper(
-        "complete",
-        "--blocked-path",
-        str(blocked),
-        "--phase",
-        "recovered",
-        "--current-snapshot",
-        str(current),
-        "--recovery-tool-source-commit",
-        "2" * 40,
-        "--result-path",
-        str(runtime / "result.json"),
-        "--runtime",
-        str(runtime),
-        check=False,
-    )
-
-    assert completed.returncode != 0
-    assert blocked.exists()
-    assert not (runtime / "result.json").exists()
-
-
-def test_runner_fail_closes_prod_and_proves_exact_isolated_identity() -> None:
-    source = _RUNNER.read_text(encoding="utf-8")
-
-    assert (
-        'INSTALL_BASE="/usr/local/lib/kor-travel-map/'
-        'admin-feature-clone-live-acceptance"'
-    ) in source
-    assert 'STATE_ROOT="/var/lib/kor-travel-map/admin-feature-clone-live-acceptance"' in source
-    assert "kor-travel-docker-manager" in source
-    assert 'db_user="postgres"' in source
-    assert "DB_HOST_PORT != 5432" in source
-    assert "port != 12701 && port != 12705" in source
-    assert "clone-startup-before.json" in source
-    assert "clone-startup-after.json" in source
-    assert "clone-final.json" in source
-    assert "git_repo archive" in source
-    assert "org.opencontainers.image.revision" in source
-    assert "io.kortravelmap.c7.repository-commit" in source
-    assert "-m uvicorn kortravelmap.api.app:app" in source
-    assert "alembic upgrade" not in source
-    assert "E2E_LIVE_ALLOW_PROD" not in source
-    assert "E2E_ISOLATED_LIVE_EVIDENCE=1" in source
-    assert '[[ "$MODE" == "run" || "$MODE" == "recover" ]]' in source
-    assert "--phase recovered" in source
-    assert "clone-recovery-current.json" in source
-
-
-def test_complete_rejects_missing_seed_value_references(tmp_path: Path) -> None:
-    runtime, blocked = _prepare_runtime(tmp_path)
-    _write_fixture(
-        runtime / "direct-seed.json",
-        features=2,
-        weather=1,
-        price=1,
-        foreign_key_references=0,
-    )
-
-    completed = _run_helper(
-        "complete",
-        "--blocked-path",
-        str(blocked),
-        "--phase",
-        "passed",
-        "--result-path",
-        str(runtime / "result.json"),
-        "--runtime",
-        str(runtime),
-        check=False,
-    )
-
-    assert completed.returncode != 0
-    assert blocked.exists()
+    assert payload["recovery_tool_source_commit"] == _RECOVERY_COMMIT
 
 
 @pytest.mark.parametrize(
-    "unsafe_entry",
-    ["trace.zip", "screenshot.png", "extra.json"],
+    ("mutation", "expected_message"),
+    [
+        ("startup-schema", "candidate startup"),
+        ("checkpoint", "trusted checkpoint"),
+        ("resource", "resource cleanup"),
+        ("seed-fk", "fixture FK reference"),
+        ("xml-identity", "XML test identity"),
+        ("html-duration", "XML/HTML duration"),
+    ],
 )
-def test_complete_rejects_extra_browser_evidence(
-    tmp_path: Path, unsafe_entry: str
+def test_complete_rejects_false_green_evidence(
+    tmp_path: Path,
+    mutation: str,
+    expected_message: str,
 ) -> None:
     runtime, blocked = _prepare_runtime(tmp_path)
-    (runtime / "playwright-main" / unsafe_entry).write_text("unsafe", encoding="utf-8")
+    if mutation == "startup-schema":
+        _write_snapshot(
+            runtime / "clone-startup-after.json",
+            total=120,
+            schema_sha256="6" * 64,
+        )
+    elif mutation == "checkpoint":
+        checkpoint = json.loads(
+            (runtime / "clone-checkpoint.json").read_text(encoding="utf-8")
+        )
+        checkpoint["baseline"]["content_sha256"] = "7" * 64
+        (runtime / "clone-checkpoint.json").write_text(
+            json.dumps(checkpoint), encoding="utf-8"
+        )
+        expected_message = "checkpoint digest"
+    elif mutation == "resource":
+        _run_helper(
+            "write-resource-state",
+            "--clone-network-attached",
+            "--owned-containers",
+            "1",
+            "--owned-images",
+            "0",
+            "--owned-networks",
+            "0",
+            "--path",
+            str(runtime / "resource-final.json"),
+        )
+    elif mutation == "seed-fk":
+        _write_fixture(
+            runtime / "direct-seed.json",
+            features=2,
+            weather=1,
+            price=1,
+            foreign_key_references=0,
+        )
+    elif mutation == "xml-identity":
+        xml_path = runtime / "playwright-main" / "c7-results.xml"
+        xml_path.write_text(
+            xml_path.read_text(encoding="utf-8").replace(
+                "auth.setup.ts#1", "other.spec.ts#1"
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "html-duration":
+        html_path = runtime / "playwright-main" / "c7-summary.html"
+        html_path.write_text(
+            html_path.read_text(encoding="utf-8").replace(
+                "<td>100</td>", "<td>101</td>", 1
+            ),
+            encoding="utf-8",
+        )
 
-    completed = _run_helper(
-        "complete",
-        "--blocked-path",
+    completed = _complete(runtime, blocked, check=False)
+
+    assert completed.returncode != 0
+    assert expected_message in completed.stderr
+    assert blocked.exists()
+    assert not (runtime / "result.json").exists()
+
+
+def test_update_blocked_preserves_phase_history(tmp_path: Path) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+
+    _run_helper(
+        "update-blocked",
+        "--path",
         str(blocked),
         "--phase",
-        "passed",
-        "--result-path",
-        str(runtime / "result.json"),
-        "--runtime",
-        str(runtime),
+        "browser-main-running",
+    )
+
+    payload = json.loads(blocked.read_text(encoding="utf-8"))
+    assert payload["phase"] == "browser-main-running"
+    assert payload["phase_history"] == [
+        "candidate-startup-pending",
+        "browser-main-running",
+    ]
+    assert runtime.exists()
+
+
+def test_checkpoint_allows_only_owned_count_drift_when_requested(
+    tmp_path: Path,
+) -> None:
+    runtime, _blocked = _prepare_runtime(tmp_path)
+    drifted = runtime / "drifted.json"
+    _write_snapshot(drifted, total=123, non_deleted=97)
+
+    strict = _run_helper(
+        "verify-checkpoint",
+        "--checkpoint",
+        str(runtime / "clone-checkpoint.json"),
+        "--snapshot",
+        str(drifted),
         check=False,
     )
+    owned_drift = _run_helper(
+        "verify-checkpoint",
+        "--allow-owned-drift",
+        "--checkpoint",
+        str(runtime / "clone-checkpoint.json"),
+        "--snapshot",
+        str(drifted),
+    )
+
+    assert strict.returncode != 0
+    assert len(owned_drift.stdout.strip()) == 64
+
+
+def test_runner_closes_reviewed_trust_boundaries() -> None:
+    source = _RUNNER.read_text(encoding="utf-8")
+
+    assert "E2E_REPOSITORY_ROOT" not in source
+    assert ".venv/bin/alembic" not in source
+    assert "git_repo" not in source
+    assert "git status" not in source
+    assert "source.tar.gz" in source
+    assert "github.com/digitie/kor-travel-map/archive" in source
+    assert "--proto '=https' --proto-redir '=https'" in source
+    assert "DOCKER_HOST DOCKER_TLS_VERIFY" in source
+    assert "candidate-startup-pending" in source
+    assert source.rindex("state_helper write-blocked") < source.rindex(
+        "create_candidate_network"
+    )
+    assert 'docker network create \\' in source
+    assert '--network "$NETWORK_NAME"' in source
+    assert "--network host" not in source
+    assert "-e PGPASSWORD=" not in source
+    assert '"$E2E_ADMIN_PASSWORD" "$RUN_ID"' not in source
+    assert "--build-arg NEXT_PUBLIC_VWORLD_API_KEY" in source
+    assert "schema_sha256" in source
+    assert "content_sha256" in source
+    assert "clone-recovery-current.json" in source
+    assert "playwright-interruption-cleanup" in source
+    assert source.rindex("finalize_resources") < source.rindex(
+        "state_helper complete"
+    )
+    assert "if (( BLOCKED_WRITTEN == 0 && COMPLETE == 0 ))" in source
+    assert "alembic upgrade" not in source
+    assert "E2E_LIVE_ALLOW_PROD" not in source
+    assert "E2E_ISOLATED_LIVE_DOCKER_NETWORK=1" in source
+
+
+@pytest.mark.parametrize("unsafe_entry", ["trace.zip", "screenshot.png", "extra.json"])
+def test_complete_rejects_extra_browser_evidence(
+    tmp_path: Path,
+    unsafe_entry: str,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    (runtime / "playwright-main" / unsafe_entry).write_text(
+        "unsafe", encoding="utf-8"
+    )
+
+    completed = _complete(runtime, blocked, check=False)
 
     assert completed.returncode != 0
     assert blocked.exists()

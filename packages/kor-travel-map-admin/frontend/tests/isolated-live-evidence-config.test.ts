@@ -4,6 +4,7 @@ const ENV_NAMES = [
   "E2E_BASE_URL",
   "E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256",
   "E2E_C7_EXPECTED_UI_ORIGIN_SHA256",
+  "E2E_ISOLATED_LIVE_DOCKER_NETWORK",
   "E2E_ISOLATED_LIVE_EVIDENCE",
 ] as const;
 
@@ -39,7 +40,7 @@ describe("isolated Live evidence config", () => {
     process.env.E2E_BASE_URL = "https://non-local.invalid";
     process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
 
-    await expect(loadConfig()).rejects.toThrow("로컬 격리 대상만 허용");
+    await expect(loadConfig()).rejects.toThrow("검증된 격리 대상만 허용");
   });
 
   it("격리 evidence opt-in은 exact 1만 허용한다", async () => {
@@ -48,6 +49,34 @@ describe("isolated Live evidence config", () => {
 
     await expect(loadConfig()).rejects.toThrow(
       "E2E_ISOLATED_LIVE_EVIDENCE=1만 허용",
+    );
+  });
+
+  it("trusted runner의 exact Docker service origin만 허용한다", async () => {
+    process.env.E2E_BASE_URL = "http://candidate-ui:18705";
+    process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
+    process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
+
+    const config = await loadConfig();
+
+    expect(config.use?.baseURL).toBe("http://candidate-ui:18705");
+    expect(config.use?.trace).toBe("off");
+  });
+
+  it("Docker 격리 opt-in으로 임의 hostname을 허용하지 않는다", async () => {
+    process.env.E2E_BASE_URL = "http://candidate-ui.invalid:18705";
+    process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
+    process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
+
+    await expect(loadConfig()).rejects.toThrow("검증된 격리 대상만 허용");
+  });
+
+  it("Docker 격리 opt-in은 evidence mode 없이 사용할 수 없다", async () => {
+    process.env.E2E_BASE_URL = "http://candidate-ui:18705";
+    process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
+
+    await expect(loadConfig()).rejects.toThrow(
+      "E2E_ISOLATED_LIVE_EVIDENCE=1이 필요",
     );
   });
 });
