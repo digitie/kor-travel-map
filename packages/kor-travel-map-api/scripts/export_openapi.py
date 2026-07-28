@@ -201,20 +201,14 @@ def _user_operations(
     if mounted_operations != full_operations:
         missing = sorted(mounted_operations - full_operations)
         extra = sorted(full_operations - mounted_operations)
-        raise ValueError(
-            "route/OpenAPI operation drift: "
-            f"missing={missing!r}; extra={extra!r}"
-        )
+        raise ValueError(f"route/OpenAPI operation drift: missing={missing!r}; extra={extra!r}")
 
     selected: dict[str, set[str]] = {}
     for path, method in full_operations:
         policy = route_policies[path]
         if policy in USER_ROUTE_POLICIES:
             selected.setdefault(path, set()).add(method)
-    return {
-        path: frozenset(methods)
-        for path, methods in sorted(selected.items())
-    }
+    return {path: frozenset(methods) for path, methods in sorted(selected.items())}
 
 
 def _response_schema_roots(operation: dict[str, Any]) -> list[dict[str, Any]]:
@@ -436,9 +430,9 @@ def check(output: Path, *, profile: OpenApiProfile = "admin") -> int:
 def _digest_manifest(surfaces: dict[str, Path]) -> str:
     """표면별 spec 파일의 sha256을 담은 결정적 manifest JSON.
 
-    key는 파일 basename(`openapi.json`/`openapi.user.json`)이라 경로 인자를 바꿔도 manifest
-    내용은 안정적이다. 값은 **저장된 파일 바이트**의 sha256이므로, `--check`가 spec↔app 일치를
-    먼저 확인한 뒤 이 manifest를 검증하면 manifest가 살아 있는 계약을 transitively pin한다.
+    key는 논리 표면(`admin`/`user`)이라 출력 경로·basename이 같아도 충돌하지 않는다.
+    값은 **저장된 파일 바이트**의 sha256이므로, `--check`가 spec↔app 일치를 먼저 확인한 뒤
+    이 manifest를 검증하면 manifest가 살아 있는 계약을 transitively pin한다.
     """
     digests = {
         name: hashlib.sha256(path.read_bytes()).hexdigest()
@@ -459,8 +453,8 @@ def check_digest_manifest(manifest_path: Path, surfaces: dict[str, Path]) -> int
         print("hint: run without --check to generate first.", file=sys.stderr)
         return 1
     expected = _digest_manifest(surfaces)
-    saved = manifest_path.read_text(encoding="utf-8")
-    if saved.strip() == expected.strip():
+    saved = manifest_path.read_bytes()
+    if saved == expected.encode("utf-8"):
         return 0
     print(
         f"OpenAPI digest manifest drift detected in {manifest_path}.\n"
@@ -473,8 +467,8 @@ def check_digest_manifest(manifest_path: Path, surfaces: dict[str, Path]) -> int
 def _surfaces(args: argparse.Namespace) -> dict[str, Path]:
     """digest manifest 대상 — 두 표면 모두. profile과 무관하게 같은 집합을 덮는다."""
     return {
-        cast(Path, args.output).name: cast(Path, args.output),
-        cast(Path, args.user_output).name: cast(Path, args.user_output),
+        "admin": cast(Path, args.output),
+        "user": cast(Path, args.user_output),
     }
 
 
@@ -518,9 +512,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     profiles: tuple[OpenApiProfile, ...] = (
-        ("admin", "user")
-        if args.profile == "all"
-        else (cast(OpenApiProfile, args.profile),)
+        ("admin", "user") if args.profile == "all" else (cast(OpenApiProfile, args.profile),)
     )
     # digest manifest는 두 표면을 함께 덮으므로 `--profile all`에서만 다룬다. CI(openapi.yml)가
     # `--profile all --check`로 돌기 때문에 별도 CI 단계 없이 같은 명령이 자동으로 게이트한다.
@@ -529,10 +521,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         failed = False
         for profile in profiles:
-            failed = (
-                bool(check(_output_for_profile(args, profile), profile=profile))
-                or failed
-            )
+            failed = bool(check(_output_for_profile(args, profile), profile=profile)) or failed
         if manifest_scope and not failed:
             # spec↔app 일치를 확인한 뒤에만 manifest를 검사한다 — spec이 이미 drift면
             # manifest 불일치는 파생 증상이라 원인 메시지를 가리지 않게 한다.

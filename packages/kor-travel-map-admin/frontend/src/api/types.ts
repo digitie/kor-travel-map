@@ -4068,14 +4068,20 @@ export interface components {
         CuratedFeatureDetailContentView: {
             /** Category */
             category: string;
-            /** Curation Status */
-            curation_status: string;
+            /**
+             * Curation Status
+             * @enum {string}
+             */
+            curation_status: "candidate" | "curated" | "rejected" | "archived";
             /** Destination Name */
             destination_name: string | null;
             /** Region Code */
             region_code: string | null;
-            /** Reuse Policy */
-            reuse_policy: string;
+            /**
+             * Reuse Policy
+             * @enum {string}
+             */
+            reuse_policy: "allowed" | "blocked" | "manual_review";
             /** Summary */
             summary: string | null;
             /** Title */
@@ -4136,8 +4142,11 @@ export interface components {
             feature_snapshot: components["schemas"]["CuratedFeatureDetailFeatureSnapshotView"];
             /** Memo */
             memo: string | null;
-            /** Relation */
-            relation: string;
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
             /** Sort Order */
             sort_order: number;
             /** Source Record Key */

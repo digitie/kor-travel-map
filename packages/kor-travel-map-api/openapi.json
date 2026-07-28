@@ -5388,6 +5388,12 @@
             "type": "string"
           },
           "curation_status": {
+            "enum": [
+              "candidate",
+              "curated",
+              "rejected",
+              "archived"
+            ],
             "title": "Curation Status",
             "type": "string"
           },
@@ -5414,6 +5420,11 @@
             "title": "Region Code"
           },
           "reuse_policy": {
+            "enum": [
+              "allowed",
+              "blocked",
+              "manual_review"
+            ],
             "title": "Reuse Policy",
             "type": "string"
           },
@@ -5585,6 +5596,17 @@
             "title": "Memo"
           },
           "relation": {
+            "enum": [
+              "primary_stop",
+              "food_stop",
+              "cafe_stop",
+              "bookstore_stop",
+              "nearby_option",
+              "accessibility_support",
+              "pet_support",
+              "family_support",
+              "theme_area_anchor"
+            ],
             "title": "Relation",
             "type": "string"
           },

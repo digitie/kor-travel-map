@@ -66,8 +66,18 @@ _SCHEMA_CONTRACTS: dict[str, dict[str, dict[str, Any]]] = {
         "destination_name": {"type": "string", "required": True, "nullable": True},
         "region_code": {"type": "string", "required": True, "nullable": True},
         "category": {"type": "string", "required": True, "nullable": False},
-        "curation_status": {"type": "string", "required": True, "nullable": False},
-        "reuse_policy": {"type": "string", "required": True, "nullable": False},
+        "curation_status": {
+            "type": "string",
+            "required": True,
+            "nullable": False,
+            "enum": ["candidate", "curated", "rejected", "archived"],
+        },
+        "reuse_policy": {
+            "type": "string",
+            "required": True,
+            "nullable": False,
+            "enum": ["allowed", "blocked", "manual_review"],
+        },
     },
     "CuratedFeatureDetailSourceView": {
         "provider": {"type": "string", "required": True, "nullable": False},
@@ -78,7 +88,22 @@ _SCHEMA_CONTRACTS: dict[str, dict[str, dict[str, Any]]] = {
     "CuratedFeatureDetailItemView": {
         "curated_feature_item_id": {"type": "string", "required": True, "nullable": False},
         "feature_id": {"type": "string", "required": True, "nullable": False},
-        "relation": {"type": "string", "required": True, "nullable": False},
+        "relation": {
+            "type": "string",
+            "required": True,
+            "nullable": False,
+            "enum": [
+                "primary_stop",
+                "food_stop",
+                "cafe_stop",
+                "bookstore_stop",
+                "nearby_option",
+                "accessibility_support",
+                "pet_support",
+                "family_support",
+                "theme_area_anchor",
+            ],
+        },
         "sort_order": {"type": "integer", "required": True, "nullable": False},
         "day_index": {"type": "integer", "required": True, "nullable": True},
         "memo": {"type": "string", "required": True, "nullable": True},
@@ -174,6 +199,12 @@ def _assert_field(
             "format",
             resolved.get("format"),
         )
+    if "enum" in expected:
+        assert resolved.get("enum") == expected["enum"], (
+            where,
+            "enum",
+            resolved.get("enum"),
+        )
 
 
 def test_admin_detail_snapshot_schemas_pin_required_types_and_nullability() -> None:
@@ -203,9 +234,7 @@ def test_admin_detail_snapshot_container_binds_typed_payload_views() -> None:
     spec = _full_spec()
     schema = spec["components"]["schemas"]["CuratedFeatureDetailSnapshotView"]
     assert schema.get("additionalProperties") is False
-    assert set(schema["properties"]) == (
-        set(_SNAPSHOT_SCALARS) | set(_SNAPSHOT_REFS) | {"items"}
-    )
+    assert set(schema["properties"]) == (set(_SNAPSHOT_SCALARS) | set(_SNAPSHOT_REFS) | {"items"})
     for field, expected in _SNAPSHOT_SCALARS.items():
         _assert_field(spec, "CuratedFeatureDetailSnapshotView", field, expected)
     for field, target in _SNAPSHOT_REFS.items():
@@ -241,9 +270,7 @@ def test_pinvi_compatibility_alias_route_stays_registered() -> None:
     app = create_app(ApiSettings())
     # FastAPI 0.136+는 include_router 결과를 lazy `_IncludedRouter`로 감싸 `app.routes`에
     # 구체 route가 바로 보이지 않는다. route_policy가 쓰는 것과 같은 해석 helper를 재사용한다.
-    paths = {
-        _resolve_route(entry)[0] for entry in _iter_flattened_routes(app)
-    }
+    paths = {_resolve_route(entry)[0] for entry in _iter_flattened_routes(app)}
     assert _SNAPSHOT_PATH in paths, "문서화된 detail-snapshot 경로가 사라졌다"
     assert _PINVI_ALIAS_PATH in paths, (
         "PinVi 호환 alias 경로가 사라졌다 — PinVi curated import가 404가 된다"
@@ -333,9 +360,7 @@ def test_detail_snapshot_endpoint_serves_typed_payload(
     assert set(data["theme"]) == _PRODUCER_KEYS["theme"]
     assert set(data["content"]) == _PRODUCER_KEYS["content"]
     assert set(data["source"]) == _PRODUCER_KEYS["source"]
-    assert set(data) == (
-        set(_SNAPSHOT_SCALARS) | set(_SNAPSHOT_REFS) | {"items"}
-    )
+    assert set(data) == (set(_SNAPSHOT_SCALARS) | set(_SNAPSHOT_REFS) | {"items"})
     assert set(data["items"][0]) == (
         set(_SCHEMA_CONTRACTS["CuratedFeatureDetailItemView"]) | set(_ITEM_REFS)
     )
