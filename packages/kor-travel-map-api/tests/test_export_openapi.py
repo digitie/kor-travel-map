@@ -550,3 +550,504 @@ def test_problem_augmenter_does_not_preserve_non_problem_error_ref() -> None:
         "application/problem+json"
     ]["schema"]
     assert schema == {"$ref": "#/components/schemas/ProblemDetail"}
+
+
+# --- T-VN-H07: PinVi 소비 curated surface의 필드 단위(required/type/enum) 계약 ---
+#
+# 아래 helper·상수·테스트는 PinVi가 REST로 읽는 공개 curated 응답 schema를
+# "경로/property 존재"가 아니라 required 집합·JSON type·enum(및 discriminator
+# const)까지 생성 OpenAPI 기준으로 고정한다. Map 저장소 측 contract test를
+# required/type/enum 필드까지 강화하는 T-VN-H07 Map half이다.
+
+
+def _property_json_type(prop: dict[str, Any]) -> str:
+    """생성 OpenAPI property의 primitive JSON type을 돌려준다.
+
+    ``X | None`` 필드가 만드는 ``anyOf: [<schema>, {"type": "null"}]`` nullable
+    shape를 벗겨내고, component 참조는 ``"$ref"``로 보고해 호출자가 필드별 JSON
+    type을 정확히 고정할 수 있게 한다.
+    """
+    if "$ref" in prop:
+        return "$ref"
+    if "type" in prop:
+        return str(prop["type"])
+    branches = prop.get("anyOf")
+    if isinstance(branches, list):
+        non_null = [
+            branch
+            for branch in branches
+            if isinstance(branch, dict) and branch.get("type") != "null"
+        ]
+        if len(non_null) == 1:
+            only = non_null[0]
+            if "$ref" in only:
+                return "$ref"
+            if "type" in only:
+                return str(only["type"])
+    raise AssertionError(f"cannot resolve JSON type for property: {prop!r}")
+
+
+def _property_ref(prop: dict[str, Any]) -> str | None:
+    """(nullable 포함) ``$ref`` property가 가리키는 schema 이름."""
+    ref = prop.get("$ref")
+    if not isinstance(ref, str):
+        for branch in prop.get("anyOf", []):
+            if isinstance(branch, dict) and isinstance(branch.get("$ref"), str):
+                ref = branch["$ref"]
+                break
+    return ref.rsplit("/", 1)[-1] if isinstance(ref, str) else None
+
+
+def _property_format(prop: dict[str, Any]) -> str | None:
+    """(nullable 포함) property의 선언된 ``format``."""
+    if "format" in prop:
+        return str(prop["format"])
+    for branch in prop.get("anyOf", []):
+        if (
+            isinstance(branch, dict)
+            and branch.get("type") != "null"
+            and "format" in branch
+        ):
+            return str(branch["format"])
+    return None
+
+
+def _assert_object_schema_contract(
+    spec: dict[str, Any],
+    name: str,
+    *,
+    required: set[str],
+    types: dict[str, str],
+    formats: dict[str, str] | None = None,
+    enums: dict[str, set[str]] | None = None,
+    consts: dict[str, str] | None = None,
+    refs: dict[str, str] | None = None,
+) -> None:
+    """생성 object schema 하나의 필드 단위 계약을 검증한다.
+
+    exact property 집합, exact ``required`` 집합, 필드별 JSON type, ``format``,
+    enum 값 집합, discriminator ``const``, ``$ref`` 대상을 모두 고정한다
+    (T-VN-H07 Map contract 강화).
+    """
+    schema = spec["components"]["schemas"][name]
+    assert schema.get("type") == "object", name
+    assert schema.get("additionalProperties") is False, name
+    properties = schema["properties"]
+    assert isinstance(properties, dict)
+    assert set(properties) == set(types), (name, set(properties) ^ set(types))
+    observed_required = set(schema.get("required", []))
+    assert observed_required == required, (name, observed_required ^ required)
+    for field, expected in types.items():
+        assert _property_json_type(properties[field]) == expected, (
+            name,
+            field,
+            _property_json_type(properties[field]),
+        )
+    for field, fmt in (formats or {}).items():
+        assert _property_format(properties[field]) == fmt, (name, field)
+    for field, values in (enums or {}).items():
+        enum = properties[field].get("enum")
+        assert isinstance(enum, list), (name, field, enum)
+        assert set(enum) == values, (name, field, enum)
+    for field, value in (consts or {}).items():
+        assert properties[field].get("const") == value, (name, field)
+    for field, target in (refs or {}).items():
+        assert _property_ref(properties[field]) == target, (name, field)
+
+
+# PinVi curated_features union variant가 공유하는 base 필드 계약.
+_CURATED_FEATURE_BASE_TYPES: dict[str, str] = {
+    "curated_feature_id": "string",
+    "theme_slug": "string",
+    "theme_name": "string",
+    "theme_group": "string",
+    "feature_id": "string",
+    "feature_name": "string",
+    "feature_category": "string",
+    "lon": "number",
+    "lat": "number",
+    "sido_code": "string",
+    "sigungu_code": "string",
+    "legal_dong_code": "string",
+    "address": "$ref",
+    "source_name": "string",
+    "source_url": "string",
+    "display_title": "string",
+    "display_summary": "string",
+    "curation_relation": "string",
+    "reuse_policy": "string",
+    "content_version": "integer",
+    "updated_at": "string",
+}
+_CURATED_FEATURE_BASE_REQUIRED: set[str] = {
+    "curated_feature_id",
+    "theme_slug",
+    "theme_name",
+    "theme_group",
+    "feature_id",
+    "feature_name",
+    "feature_category",
+    "address",
+    "source_name",
+    "curation_relation",
+    "reuse_policy",
+    "content_version",
+    "updated_at",
+}
+_CURATED_FEATURE_BASE_FORMATS: dict[str, str] = {
+    "updated_at": "date-time",
+    "source_url": "uri",
+}
+# feature_kind 판별값 → (variant schema, detail schema | None)
+_CURATED_FEATURE_VARIANTS: dict[str, tuple[str, str | None]] = {
+    "place": ("PublicCuratedPlaceFeatureView", "PublicCuratedPlaceDetail"),
+    "event": ("PublicCuratedEventFeatureView", "PublicCuratedEventDetail"),
+    "notice": ("PublicCuratedNoticeFeatureView", "PublicCuratedNoticeDetail"),
+    "area": ("PublicCuratedAreaFeatureView", "PublicCuratedAreaDetail"),
+    "route": ("PublicCuratedRouteFeatureView", "PublicCuratedRouteDetail"),
+    "price": ("PublicCuratedPriceFeatureView", None),
+    "weather": ("PublicCuratedWeatherFeatureView", None),
+}
+_CURATED_DETAIL_CONTRACTS: dict[str, dict[str, Any]] = {
+    "PublicCuratedPlaceDetail": {
+        "required": {"feature_id"},
+        "types": {
+            "feature_id": "string",
+            "place_kind": "string",
+            "phones": "array",
+            "reviews_link": "$ref",
+            "business_hours": "$ref",
+            "facility_info": "$ref",
+            "license_date": "string",
+            "biz_number": "string",
+        },
+        "formats": {"license_date": "date"},
+        "refs": {
+            "reviews_link": "PublicCuratedReviewLinks",
+            "business_hours": "PublicCuratedOpeningHours",
+            "facility_info": "PublicCuratedPlaceFacilityInfo",
+        },
+    },
+    "PublicCuratedEventDetail": {
+        "required": {"feature_id"},
+        "types": {
+            "feature_id": "string",
+            "event_kind": "string",
+            "starts_on": "string",
+            "ends_on": "string",
+            "timezone": "string",
+            "opening_hours": "$ref",
+            "venue_name": "string",
+            "tel": "string",
+            "content_id": "string",
+            "content_type_id": "string",
+            "area_code": "string",
+            "sigungu_code": "string",
+        },
+        "formats": {"starts_on": "date", "ends_on": "date"},
+        "refs": {"opening_hours": "PublicCuratedOpeningHours"},
+    },
+    "PublicCuratedNoticeDetail": {
+        "required": {"feature_id", "notice_type"},
+        "types": {
+            "feature_id": "string",
+            "notice_type": "string",
+            "severity": "integer",
+            "valid_start_time": "string",
+            "valid_end_time": "string",
+            "source_agency": "string",
+            "officer_name": "string",
+        },
+        "formats": {
+            "valid_start_time": "date-time",
+            "valid_end_time": "date-time",
+        },
+    },
+    "PublicCuratedAreaDetail": {
+        "required": {"feature_id"},
+        "types": {
+            "feature_id": "string",
+            "area_kind": "string",
+            "area_square_meters": "number",
+            "boundary_source": "string",
+            "regulation_scope": "string",
+            "administrative_office": "string",
+            "description": "string",
+        },
+    },
+    "PublicCuratedRouteDetail": {
+        "required": {"feature_id"},
+        "types": {
+            "feature_id": "string",
+            "route_type": "string",
+            "geometry_source": "string",
+            "geometry_status": "string",
+            "total_distance_meters": "number",
+            "expected_duration_minutes": "integer",
+            "difficulty": "string",
+            "begin_name": "string",
+            "begin_address": "string",
+            "end_name": "string",
+            "end_address": "string",
+        },
+    },
+}
+
+
+@pytest.mark.unit
+def test_public_curated_feature_schemas_pin_required_types_and_enums() -> None:
+    """PinVi가 소비하는 curated feature union을 required/type/const(kind) 단위로 고정."""
+    module = _load_script_module()
+    app = create_app(ApiSettings())
+    user = module.user_openapi_spec(app.openapi(), app=app)
+
+    for kind, (variant, detail) in _CURATED_FEATURE_VARIANTS.items():
+        types = {**_CURATED_FEATURE_BASE_TYPES, "feature_kind": "string"}
+        required = _CURATED_FEATURE_BASE_REQUIRED | {"feature_kind"}
+        refs = {"address": "PublicCuratedAddress"}
+        if detail is None:
+            types["detail"] = "null"
+        else:
+            types["detail"] = "$ref"
+            required = required | {"detail"}
+            refs["detail"] = detail
+        _assert_object_schema_contract(
+            user,
+            variant,
+            required=required,
+            types=types,
+            formats=_CURATED_FEATURE_BASE_FORMATS,
+            consts={"feature_kind": kind},
+            refs=refs,
+        )
+
+    for detail_name, contract in _CURATED_DETAIL_CONTRACTS.items():
+        _assert_object_schema_contract(
+            user,
+            detail_name,
+            required=contract["required"],
+            types=contract["types"],
+            formats=contract.get("formats"),
+            refs=contract.get("refs"),
+        )
+
+    # PublicCuratedAddress는 7개 curated feature variant 모두의 address ref
+    # 대상이므로(PinVi 주 소비 표면) 그 필드 shape도 field-level로 고정한다.
+    _assert_object_schema_contract(
+        user,
+        "PublicCuratedAddress",
+        required=set(),
+        types={
+            "road": "string",
+            "legal": "string",
+            "admin": "string",
+            "zipcode": "string",
+            "sido_name": "string",
+            "sigungu_name": "string",
+        },
+    )
+
+
+@pytest.mark.unit
+def test_public_curation_collection_item_group_pin_required_types_and_enums() -> None:
+    """공개 curation collection/item/feature-group schema를 required/type/enum 고정."""
+    module = _load_script_module()
+    app = create_app(ApiSettings())
+    user = module.user_openapi_spec(app.openapi(), app=app)
+
+    _assert_object_schema_contract(
+        user,
+        "PublicCurationCollectionView",
+        required={
+            "collection_id",
+            "collection_key",
+            "theme_id",
+            "theme_slug",
+            "theme_name",
+            "theme_group",
+            "source_id",
+            "provider",
+            "dataset_key",
+            "source_name",
+            "source_url",
+            "title",
+            "edition_key",
+            "description",
+            "status",
+            "visibility",
+            "item_count",
+            "created_at",
+            "updated_at",
+            "archived_at",
+        },
+        types={
+            "collection_id": "string",
+            "collection_key": "string",
+            "theme_id": "string",
+            "theme_slug": "string",
+            "theme_name": "string",
+            "theme_group": "string",
+            "source_id": "string",
+            "provider": "string",
+            "dataset_key": "string",
+            "source_name": "string",
+            "source_url": "string",
+            "title": "string",
+            "edition_key": "string",
+            "description": "string",
+            "status": "string",
+            "visibility": "string",
+            "item_count": "integer",
+            "created_at": "string",
+            "updated_at": "string",
+            "archived_at": "string",
+        },
+        formats={
+            "collection_id": "uuid",
+            "theme_id": "uuid",
+            "source_id": "uuid",
+            "created_at": "date-time",
+            "updated_at": "date-time",
+            "archived_at": "date-time",
+        },
+        enums={
+            "status": {"draft", "published", "archived"},
+            "visibility": {"admin_only", "public"},
+        },
+    )
+
+    _assert_object_schema_contract(
+        user,
+        "PublicCurationItemView",
+        required={
+            "curation_item_id",
+            "collection_id",
+            "collection_key",
+            "title",
+            "edition_key",
+            "theme_slug",
+            "theme_name",
+            "theme_group",
+            "provider",
+            "dataset_key",
+            "source_name",
+            "source_url",
+            "feature_id",
+            "feature_name",
+            "feature_kind",
+            "feature_category",
+            "lon",
+            "lat",
+            "address",
+            "external_item_id",
+            "place_name",
+            "address_hint",
+            "status",
+            "sort_order",
+            "item_title",
+            "item_summary",
+            "curation_relation",
+            "reuse_policy",
+            "created_at",
+            "updated_at",
+            "archived_at",
+        },
+        types={
+            "curation_item_id": "string",
+            "collection_id": "string",
+            "collection_key": "string",
+            "title": "string",
+            "edition_key": "string",
+            "theme_slug": "string",
+            "theme_name": "string",
+            "theme_group": "string",
+            "provider": "string",
+            "dataset_key": "string",
+            "source_name": "string",
+            "source_url": "string",
+            "feature_id": "string",
+            "feature_name": "string",
+            "feature_kind": "string",
+            "feature_category": "string",
+            "lon": "number",
+            "lat": "number",
+            "address": "object",
+            "external_item_id": "string",
+            "place_name": "string",
+            "address_hint": "string",
+            "status": "string",
+            "sort_order": "integer",
+            "item_title": "string",
+            "item_summary": "string",
+            "curation_relation": "string",
+            "reuse_policy": "string",
+            "created_at": "string",
+            "updated_at": "string",
+            "archived_at": "string",
+        },
+        formats={
+            "curation_item_id": "uuid",
+            "collection_id": "uuid",
+            "created_at": "date-time",
+            "updated_at": "date-time",
+            "archived_at": "date-time",
+        },
+        enums={
+            "status": {"candidate", "included", "rejected", "archived"},
+            "curation_relation": {
+                "primary_stop",
+                "food_stop",
+                "cafe_stop",
+                "bookstore_stop",
+                "nearby_option",
+                "accessibility_support",
+                "pet_support",
+                "family_support",
+                "theme_area_anchor",
+            },
+            "reuse_policy": {"allowed", "blocked", "manual_review"},
+        },
+    )
+
+    _assert_object_schema_contract(
+        user,
+        "CurationFeatureView",
+        required={
+            "feature_id",
+            "name",
+            "kind",
+            "category",
+            "lon",
+            "lat",
+            "address",
+            "status",
+        },
+        types={
+            "feature_id": "string",
+            "name": "string",
+            "kind": "string",
+            "category": "string",
+            "lon": "number",
+            "lat": "number",
+            "address": "object",
+            "status": "string",
+        },
+    )
+
+    _assert_object_schema_contract(
+        user,
+        "FeatureCurationGroupView",
+        required={"feature", "curations", "curation_count"},
+        types={
+            "feature": "$ref",
+            "curations": "array",
+            "curation_count": "integer",
+        },
+        refs={"feature": "CurationFeatureView"},
+    )
+    group_curations = user["components"]["schemas"]["FeatureCurationGroupView"][
+        "properties"
+    ]["curations"]["items"]
+    assert group_curations == {
+        "$ref": "#/components/schemas/PublicCurationItemView"
+    }
