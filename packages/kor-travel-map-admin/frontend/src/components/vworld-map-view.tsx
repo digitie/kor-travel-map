@@ -1009,6 +1009,7 @@ function createServerClusterMarker(
   label: string,
 ): ServerClusterMarkerEntry {
   const element = createClusterElement(cluster.feature_count, label);
+  element.dataset.clusterKey = cluster.cluster_key;
   element.dataset.lon = String(cluster.lon);
   element.dataset.lat = String(cluster.lat);
   element.dataset.zoomStep = String(zoomStep);
@@ -1080,6 +1081,7 @@ export function VWorldServerClusters({
       } else {
         entry.marker.setLngLat(coords);
         const element = entry.marker.getElement();
+        element.dataset.clusterKey = cluster.cluster_key;
         element.dataset.lon = String(cluster.lon);
         element.dataset.lat = String(cluster.lat);
         element.dataset.zoomStep = String(zoomStep);
@@ -1422,6 +1424,7 @@ export function VWorldFeatureClusters({
         const color = coincidentEntryColor(f);
         const row = document.createElement("button");
         row.type = "button";
+        row.dataset.featureId = f.feature_id;
         row.style.display = "flex";
         row.style.alignItems = "center";
         row.style.gap = "8px";
@@ -1720,6 +1723,7 @@ export function VWorldFeatureClusters({
           }
           // selection outline은 마커 풀을 건드리지 않고 element에만 토글(#500 (c)).
           const element = marker.getElement();
+          element.dataset.featureId = featureId;
           pointElements.set(featureId, element);
           setSelectedOutline(element, selectedId === featureId);
           next.add(id);

@@ -64,8 +64,16 @@ cd /mnt/f/dev/kor-travel-map-<agent>
 - 대용량 migration·실데이터 clone·image build·fixture 준비·Live E2E는 단계별 checkpoint,
   exact code SHA, DB migration head와 fixture identity를 로그에 남긴다. 실패 시 선행 산출물의
   무결성을 확인할 수 있으면 실패 지점부터 재개한다. 재사용 상태를 증명할 수 없거나 수정이
-  선행 단계 결과를 바꾸는 경우에만 처음부터 다시 실행한다. 재개용 격리 DB·artifact는 최종
-  성공 뒤 정리한다([failure-patterns §F12](./agent-failure-patterns.md)).
+  선행 단계 결과를 바꾸는 경우에만 처음부터 다시 실행한다([failure-patterns §F12](./agent-failure-patterns.md)).
+  재개용 격리 DB·dump와 명시적으로 허용한 **redacted immutable checkpoint**는 PR 성공만으로
+  즉시 정리하지 않는다. 허용 checkpoint는 migration head·checksum·row count·fixture identity처럼
+  session/실데이터가 없는 요약뿐이다. Playwright `storageState`(`admin-state.json` 포함), cookie,
+  raw trace, 실데이터 screenshot, 민감 로그, 임시 env·session secret은 재사용 후보가 아니며
+  성공·실패와 무관하게 실행 직후 안전하게 폐기한다. PR 머지 후 다음 task 착수 전에 DB migration
+  head·schema/fixture 계약·파괴적 실행 잔여물·코드/API 호환성·디스크 여유를 확인해 재사용 가능
+  여부를 판정한다. 재사용 가능하면 이름·head·fixture identity를 `docs/resume.md`/
+  `docs/journal.md`에 남겨 그대로 이어 쓰고, 불가능할 때만 정확한 격리 resource를 정리한 뒤
+  새 checkpoint를 만든다.
 - curation Live E2E의 clean fixture 기본값은 공개 membership `486`, 아름다운 등대 미연결
   `15`다. prod clone에서 operator override·최신 Feature 매칭을 의도적으로 보존할 때만
   `E2E_EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS`와
@@ -121,6 +129,12 @@ git -C <worktree> push origin sandbox/<agent>
 
 - WSL 미러가 main보다 뒤처져 보이면 `git reset --hard origin/main`
   ([failure-patterns §B2](./agent-failure-patterns.md)).
+- 다음 task를 시작하기 전에 직전 PR의 격리 DB·dump·redacted checkpoint 재사용 가능성을 먼저
+  판정한다.
+  migration/schema/fixture가 호환되고 파괴적 Live 잔여물이 다음 검증을 오염시키지 않으면
+  재사용하며, 판정 근거와 유지·정리한 resource 이름을 `resume`/`journal`에 기록한다.
+  인증 상태·cookie·raw trace·실데이터 screenshot·민감 로그·임시 secret은 이 판정까지
+  보존하지 않고 Live 종료 직후 폐기한다.
 
 ## 8. 1-PR 체크리스트
 
@@ -128,6 +142,9 @@ git -C <worktree> push origin sandbox/<agent>
 - [ ] 4 게이트 WSL에서 실제 실행, 전부 green (DTO/admin/frontend 변경이면 OpenAPI/frontend도)
 - [ ] Playwright e2e는 WSL이 아니라 n150에서 실행(불가 시 Windows fallback 사유 기록)
 - [ ] 장시간 Live/migration 실패 시 checkpoint 무결성 확인 후 가능한 실패 지점부터 재개
+- [ ] Live 종료 직후 인증 상태·raw trace/screenshot·민감 로그·임시 secret 폐기
+- [ ] PR 머지 후 다음 task 전에 격리 DB·dump·redacted checkpoint 재사용 가능성 판정 및
+      resume/journal 기록
 - [ ] 결정·기록 5종 중 관련 문서 갱신 (CHANGELOG는 사용자 가시 변경 시)
 - [ ] 무관 파일(claude.json 등) 스테이징 제외
 - [ ] PR 본문에 실측 게이트 수치

@@ -1,5 +1,35 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-28 (codex) — Lane B T-VN-45 구현·파괴적 Live 완료
+
+**다음 한 작업**: PR #871 exact head를 적대적 리뷰어 2명이 재검토하고 전체 gate·GitHub
+Actions green 뒤 셀프 머지한다. 머지 후 다음 Lane B task `T-VN-46` 착수 전에
+`ktm-tvn45-db`·dump·redacted checkpoint의 migration/schema/fixture·파괴적 잔여물·
+코드/API 호환성·디스크 여유를 판정해 재사용 또는 정확한 정리를 기록한다.
+
+- 지도 Live spec은 `/v1/admin/features/in-bounds`의 모든 요청 URL과
+  `items`/`clusters` 응답을 검증한다. cache hit는 map idle 뒤 마지막 성공 응답의 전체 point
+  `feature_id` 집합과 server cluster key/count/centroid가 실제 DOM과 exact 일치할 때만
+  통과한다. marker 식별자 누락, 취소 요청의 URL drift, 다른 feature 상세 응답, 같은 합계의
+  ID 상쇄를 모두 false-green으로 허용하지 않는다.
+- 실패했던 상세 클릭만 재개해 인증 포함 **2/2**를 통과했다. 이어 실데이터 write workflow가
+  add 승인→update 승인→update 거절→비활성화→delete 승인을 모두 수행해 인증 포함
+  **2/2, 48.3초**를 통과했다. 최신 합성 Feature는 `deleted`이며 전체 합성 감사 범위의
+  non-deleted Feature와 pending change request는 각각 **0건**이다.
+- 파괴적 Live 중 드러난 기존 spec drift도 같은 실패 지점에서 복구했다. ADR-066 이후 제거된
+  `operator` 입력, 접힌 고급 JSON 필드, 현행 create/review/preview 접근성 이름과 한국어 상태,
+  admin 목록의 exact `feature_id` 최종 응답 대기를 반영했다.
+- 재개용 clone `ktm-tvn45-db`는 migration head `0063_pipeline_root_id`, Feature
+  **1,030,469건**, POI cache target **90건**이며 health가 정상이다. 적대 리뷰의 update nested
+  필드·비기본 `marker_icon=park` 보존과 inactive exact 목록 P2를 반영한 뒤 지도 상세는 인증
+  포함 **2/2, 11.1초**, 파괴적 write는 위 수치로 다시 통과했다. API/UI container와
+  Playwright 인증 상태/cookie·raw trace·실데이터 screenshot·민감 로그·임시 env/session
+  secret은 최종 검증 직후 폐기했다. `PGPASSWORD` metadata가 남아 있던 중지 상태의 clone
+  repair/restore/dump transient container 8개도 제거했다. DB·dump와 위 수치만 담은 redacted
+  checkpoint만 머지 후 재사용 판정 전까지 보존한다.
+- `T-VN-H18`은 어떤 Agent A/B 실행 lane에도 속하지 않는 거버넌스 결정 대기 보류 항목이다.
+  repo 소유자가 approval enforcement 전환 시점을 정하기 전에는 착수하지 않는다.
+
 ## 2026-07-28 (codex) — PR #869 머지 후 task 전면 재감사
 
 **다음 한 작업**: 문서 PR #870은 적대적 리뷰어 2명의 잔여 P0/P1/P2 0건 확인을 마쳤다.
