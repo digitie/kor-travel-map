@@ -49,8 +49,9 @@ Map/PinVi/docker-manager/geo의 열린 PR·이슈를 대조했다. 큰 task를 �
   open/done 분리, `git diff --check` 통과를 확인했다.
 - **실행 규율**: 첫 reviewable checkpoint에서 PR #870을 열고 변경을 작은 커밋으로 push했다.
   실패 시 검증된 checkpoint부터 재개하며, PR #870부터 문서 전용 변경도 적대적 리뷰어 2명을
-  사용한다. 전체 diff 2명 검토 뒤의 국소 리뷰 반영·완료 기록·기계적 문서 갱신처럼 runtime/
-  계약/DB/보안 동작을 바꾸지 않는 작은 델타는 원 리뷰어 1명 재검토로 마친다. CI 대기와
+  사용한다. 두 리뷰어가 함께 검토한 마지막 exact SHA 뒤의 누적 delta 전체가 국소 리뷰 반영·
+  완료 사실 기록·표기/기계적 문서 갱신뿐일 때만 원 리뷰어 1명 재검토로 마친다. runtime·계약·
+  DB·보안 또는 task/CI/deploy/runbook 운영 의미가 바뀌면 다시 2명이 검토한다. CI 대기와
   파괴적 Live UI를 생략하는 것은 사용자 지정 PR #870 일회성 예외이며, 후속 문서 PR에는
   자동 적용하지 않는다.
 

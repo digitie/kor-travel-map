@@ -85,10 +85,11 @@ barrier로 직렬화한다.
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
 - **리뷰어 수 전환(사용자 지시 2026-07-27)**: 현재 PR #869는 기존 지시대로 1명으로
   완결한다. 그다음 PR부터 문서 전용·rebase-only·기계적 변경을 포함해 적대적 리뷰어
-  2명을 운용한다. 다만 두 리뷰어가 본 변경의 전체 diff를 검토한 뒤 생긴 작은 후속 델타가
-  기존 지적의 국소 반영, 완료 기록 또는 기계적 문서 갱신뿐이고 runtime·API 계약·DB schema·
-  migration·보안 동작을 바꾸지 않으면 원 리뷰어 1명의 재검토로 마친다. 범위가 애매하거나
-  새 동작이 섞이면 다시 2명이 검토한다.
+  2명을 운용한다. 다만 두 리뷰어가 본 변경의 전체 diff를 함께 검토한 마지막 exact SHA 이후
+  누적 후속 delta 전체가 기존 지적의 국소 반영, 완료 사실 기록 또는 표기·기계적 문서 갱신뿐이면
+  원 리뷰어 1명의 재검토로 마친다. runtime·API 계약·DB schema·migration·보안 동작뿐 아니라
+  task 범위·순서·완료 조건과 CI·deploy·runbook 운영 의미를 바꾸거나 범위가 애매한 변경이 누적
+  delta에 하나라도 섞이면 다시 2명이 전체 누적 delta를 검토하고 기준 SHA를 갱신한다.
 - pytest와 Playwright를 포함한 모든 검증은 n150 WSL SSH에서 실행한다. mocked e2e도 n150
   Linux가 정본이며, n150에서 실행할 수 없는 브라우저 제약이 확인될 때만 Windows를 fallback으로
   사용한다. live e2e는 항상 n150 파괴적 lane으로 실행한다.
