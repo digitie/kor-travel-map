@@ -1480,3 +1480,45 @@ def test_cached_reverse_geocoder_caches_none() -> None:
 
     asyncio.run(_run())
     assert calls == 1
+
+
+# --- T-VN-H21: kor-travel-geo 인증 결선 preflight ---
+#
+# geo PR#399 이후 `/v2/*`는 VWorld 호환 `key` query를 요구한다. key가 비면 서버가 route 처리
+# **전에** `400 E0100 query.key: Field required`로 막는데, 그 응답만 보면 좌표/payload 문제로
+# 오진하기 쉽다(실제로 그렇게 오진된 이력이 있어 이 preflight를 도입했다).
+
+
+def test_geo_rest_client_preflight_rejects_missing_api_key() -> None:
+    from kortravelmap.geocoding import KorTravelGeoRestClient
+
+    http = httpx.AsyncClient(base_url="http://127.0.0.1:12501")
+    try:
+        for missing in (None, "", "   "):
+            client = KorTravelGeoRestClient(http, api_key=missing)
+            with pytest.raises(ValueError) as excinfo:
+                client.preflight()
+            message = str(excinfo.value)
+            # 원인을 그대로 지목하고, 결선할 env 이름을 알려준다.
+            assert "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY" in message
+            assert "E0100" in message
+    finally:
+        asyncio.run(http.aclose())
+
+
+def test_geo_rest_client_preflight_passes_with_api_key_and_leaks_nothing() -> None:
+    from kortravelmap.geocoding import KorTravelGeoRestClient
+
+    secret = "super-secret-geo-key-value"
+    http = httpx.AsyncClient(base_url="http://127.0.0.1:12501")
+    try:
+        client = KorTravelGeoRestClient(http, api_key=secret)
+        client.preflight()  # 예외 없음
+
+        # 결선 누락 메시지는 비밀을 담지 않는다(값 노출 회귀 방지).
+        empty = KorTravelGeoRestClient(http, api_key=None)
+        with pytest.raises(ValueError) as excinfo:
+            empty.preflight()
+        assert secret not in str(excinfo.value)
+    finally:
+        asyncio.run(http.aclose())

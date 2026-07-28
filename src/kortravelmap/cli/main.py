@@ -401,6 +401,10 @@ async def _geocoders_for(
             http,
             api_key=settings.kor_travel_geo_api_key_value,
         )
+        # T-VN-H21: 실 geo를 때리는 경로이므로 결선 누락을 여기서 원인 그대로 드러낸다.
+        # (키가 없으면 서버는 route 처리 전에 400 E0100 query.key로 막고, 그 응답만 보면
+        #  좌표/payload 문제로 오진하기 쉽다.)
+        client.preflight()
         yield (
             kor_travel_geo_reverse_geocoder(client),
             kor_travel_geo_address_resolver(client, fallback="api"),

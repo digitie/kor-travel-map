@@ -793,6 +793,24 @@ class KorTravelGeoRestClient:
         self._base = base_path.rstrip("/")
         self._api_key = api_key.strip() if api_key is not None else None
 
+    def preflight(self) -> None:
+        """호출 전에 인증 결선을 확인한다 (T-VN-H21).
+
+        geo PR#399 이후 `/v2/*`는 VWorld 호환 ``key`` query를 요구한다. key가 비어 있으면
+        서버가 route 처리 **전에** ``400 E0100 query.key: Field required``로 막는데, 그 응답만
+        보면 좌표/payload 문제로 오인하기 쉽다(실제로 그렇게 오진된 이력이 있다). 여기서
+        결선 누락을 원인 그대로 먼저 드러낸다.
+
+        비밀은 메시지에 넣지 않는다 — 결선 여부만 말한다.
+        """
+        if not self._api_key:
+            raise ValueError(
+                "kor-travel-geo REST v2 requires an API key but none is configured; "
+                "set KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY "
+                "(운영은 VWorld API key와 같은 값을 사용한다). "
+                "미설정 시 서버가 route 처리 전에 400 E0100 query.key로 막는다."
+            )
+
     def _query_params(self) -> dict[str, str] | None:
         if not self._api_key:
             return None
