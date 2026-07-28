@@ -34,7 +34,8 @@
   transaction 교차 이동을 포함한 관련 unit/integration/API 회귀와 외부 geo live 5건을 제외한
   최종 backend 전체 **2,405건**, static·frontend 전체 gate가 통과했다. 격리 실데이터 destructive
   Live UI 결과는 `journal.md`의 같은 날짜 항목을 정본으로 한다. curation exact code `7e2920aa`는 reviewer
-  신규 P0–P2 0건·PostgreSQL 46/46이다.
+  신규 P0–P2 0건·PostgreSQL 46/46이다. Live 기대값 환경화의 빈/공백 입력·exact match·
+  중복 identity·runbook checkpoint P2까지 반영한 최종 `f6a50866`에서도 잔여 P0–P2는 0건이다.
 - 전체 clone에서 0053이 동일 KMA target-grid legacy queued job 3건을 무차별 거부하는 blocker를
   발견해 `T-VN-H23`으로 등록하고 같은 PR에서 완결했다. queued winner는 runtime dispatch 정렬로
   결정하고 나머지는 감사 가능한 cancelled terminal로 전환한다. running 둘 이상과 cancellation

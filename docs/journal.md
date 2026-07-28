@@ -80,7 +80,11 @@ canonical 환경변수 누락(#868)도 같은 PR에서 완결했다.
   찾아 원자 fail-close와 회귀를 추가했고, exact code `ca313d32`에서 최종 잔여 P0–P2 0건을
   확인했다. 0066 연속 transaction 보강은 exact code `baf40a04`에서 다시 검토해 P0–P2 0건이며,
   #868 변경은 명시적으로 검토 범위에서 제외했다. 사용자 최신 지시에 따라 현재 PR #869까지만
-  1명으로 완결하고, 다음 문서 PR부터 적대적 리뷰어 2명을 운용한다.
+  1명으로 완결하고, 다음 문서 PR부터 적대적 리뷰어 2명을 운용한다. Live 실데이터 기대값
+  환경화 후속 리뷰에서는 빈/공백 count 허용, exact source→Feature identity 부재, 중복 Feature
+  허용과 runbook checkpoint 누락 P2를 순차 발견했다. 비어 있지 않은 safe decimal integer,
+  exact `source_item_key=feature_id` 목록과 source/Feature 각각의 유일성, 현재 prod checkpoint를
+  반영했으며 최종 exact `f6a50866`에서 잔여 P0–P2 0건을 확인했다.
 - **검증**: 관련 unit/integration/API 집중 묶음 144/144, reviewer PostgreSQL 46/46,
   외부 geo live 5건을 제외한 최종 backend 전체 **2,405건**을 통과했다. H23 migration 5/5와 관련
   migration/repository 64/64도 통과했다. ruff, main/API/Dagster mypy
