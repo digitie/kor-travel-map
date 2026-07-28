@@ -284,90 +284,269 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
 ## Lane B 상세 — b1 PinVi 결합
 
-- [ ] T-VN-11 — **service batch 5-state 계약**
+### T-VN-11 — service batch 5-state 계약
 
-  `found|retired|suppressed|missing|unchanged`와 revision을 반환하고 transport 실패를 503으로
-  분리한다(`features.py` batch가 현재 2-state found/missing — in-code TODO가 본 task를 지목).
-  PinVi typed consumer contract test를 같은 cutover 산출물로 둔다.
+현재 `features.py` batch는 `found/missing` 2-state이고 코드 주석도 5-state를 후속으로
+명시한다. producer 계약과 consumer cutover를 분리한다.
 
-- [ ] T-VN-12 — **domain-owned Idempotency-Key 전개**
+- [ ] T-VN-11A — **Map 5-state batch projection**
 
-  기존 pipeline/schedule ledger를 회귀 기준선으로 두고 남은 retryable command에 body fingerprint,
-  result replay, key reuse 409를 domain별로 구현한다(admin_features의 natural_key는 ledger 계약이
-  아님 — 대상 조사부터).
+  `found|retired|suppressed|missing|unchanged` item과 row revision을 한 set-based query snapshot에서
+  반환한다. 공개 projection과 tombstone/visibility 판정을 분리하고 upstream transport 실패를
+  `503`으로 모델링한다.
 
-- [ ] T-VN-16 — **weather batch와 부모 404**
+- [ ] T-VN-11B — **PinVi typed consumer cutover**
 
-  set-based weather batch와 `target_at`/`known_at` parameter를 제공해 PinVi N+1을 없애고 존재하지
-  않는 parent feature를 빈 결과가 아닌 404로 구분한다(현재 단건 GET만 존재).
+  PinVi가 5-state/revision을 exhaustively 처리하고 이전 2-state 추측을 제거한다. vendored
+  OpenAPI/consumer contract와 실제 compatible pair live를 같은 cutover에서 고정한다.
 
-- [ ] T-VN-41 — **cache-target generation·outbox 전파**
+### T-VN-16 — weather batch와 부모 404
 
-  기존 external identity와 exact scope를 유지하면서 source generation/restore epoch, outbox relay,
-  backfill·reconciliation을 설치하고 critical path 밖에서 enable한다.
+현재 단건 forecast만 존재한다. Map set-based API와 PinVi 소비를 분리한다.
 
-## Lane B 상세 — b2 T-VN-H07 완결
+- [ ] T-VN-16A — **Map set-based weather batch**
 
-- [ ] T-VN-H07 — **PinVi field-level contract와 OpenAPI SHA 검증**
+  feature ID 집합과 `target_at`/`known_at`을 받아 한 snapshot에서 timeline/current를 반환한다.
+  존재하지 않는 parent를 빈 weather 결과와 구분하고 단건도 같은 parent existence 판정을 재사용한다.
 
-  양 저장소 contract test를 required/type/enum 필드까지 강화하고 배포 compatible pair에 pinned
-  OpenAPI SHA manifest를 요구한다. 진행 상태: Map측 PR #814·PinVi측 PR #403 모두 OPEN(머지 필요).
-  - [ ] `T-VN-H07C`(#812) — docker-manager compatible-pair **manifest v5**: pinned OpenAPI SHA
-    enforcement(`c6c_deployment.py` `_PAIR_MANIFEST_VERSION=4→5`) + ADR-076 v5 개정.
-  - [ ] `T-VN-H07D`(#815) — admin curated detail-snapshot field-level contract(PinVi runtime 표면).
+- [ ] T-VN-16B — **PinVi weather batch 소비 cutover**
 
-## Lane B 상세 — b3 Wave 2 구조 전환
+  PinVi의 단건 N+1을 batch 호출로 교체하고 parent 404·weather 없음·transport 실패를 각각 처리한다.
+  query count와 field-level contract를 회귀 테스트로 고정한다.
 
-> 실행 순서는 31(freeze) → 32~38(shadow 병렬 가능·독립 rollback) → 40 → 39(cutover 마지막).
-> ADR-066~075가 목표 스펙 정본. 서비스 전 단계이므로 drop/recreate 자유(ADR-075의 보존
-> ceremony는 실데이터 보호 필요 범위로 최소화).
+### T-VN-12 — domain-owned Idempotency-Key 전개
 
-- [ ] T-VN-31 — **vNext target freeze**
+기존 feature-update·pipeline/schedule ledger를 기준 구현으로 두고, 모든 write endpoint가 아니라
+네트워크 재시도 가능한 command만 대상으로 한다.
 
-  ADR-066~075(존재)·목표 OpenAPI diff·목표 DDL·제약 테스트를 실행 전 고정한다. ADR 문서는
-  #736으로 존재하나 freeze 산출물(목표 DDL/OpenAPI diff artifact + 제약 테스트)은 미생성.
-  이 task는 구현 변경을 섞지 않고 소비자·복구 preflight의 입력을 확정한다.
+- [ ] T-VN-12A — **retryable command inventory·계약 freeze**
 
-- [ ] T-VN-32 — **UUID identity shadow 전환**
+  OpenAPI write operation을 domain/actor/transaction/advisory-lock/현재 dedupe 의미로 분류하고
+  idempotency 적용·비적용 근거를 고정한다. `admin_features`의 `natural_key` 같은 body surrogate를
+  ledger로 오인하지 않는다.
 
-  UUID column과 legacy alias를 backfill하고 FK·notice lineage·PinVi alias-map의 consumer-first
-  전환을 준비한다. legacy ID 제거는 soak 뒤 별도 단계다.
+- [ ] T-VN-12B — **Feature·curation·review command ledger**
 
-- [ ] T-VN-33 — **provider dataset 정본 전환**
+  T-VN-12A에서 retryable로 분류된 Feature/curation/review command에 actor-scoped key,
+  canonical body fingerprint, terminal result replay, 다른 body 재사용 `409`를 구현한다.
 
-  `provider_datasets`를 신설하고 참조 table을 FK화하며 source record denormalization을 제거한다.
-  전환기에는 composite FK로 entity-record identity 불일치를 먼저 막는다.
+- [ ] T-VN-12C — **import·offline·backup/restore command ledger**
 
-- [ ] T-VN-34 — **직교 상태 모델 전환**
+  write mutex가 있는 import/offline/backup/restore command의 기존 advisory lock과 같은 transaction
+  경계에 ledger를 결합한다. 응답 유실과 process 재시작 뒤에도 결과를 재생하고 destructive command가
+  두 번 실행되지 않음을 증명한다.
 
-  lifecycle/publication/quality 3축과 결합 CHECK를 backfill하고 `public_features` view
-  (0059는 CREATE VIEW만 — partial index는 본 task)를 새 정본으로 전환한다.
+- [ ] T-VN-12D — **consumer cutover·surrogate 제거**
 
-- [ ] T-VN-35 — **typed subtype 분해**
+  UI/CLI가 명시적 `Idempotency-Key`를 생성·재사용하도록 전환하고 body natural-key나 client-side
+  dedupe 중복을 제거한다. 적용 대상 전체의 key reuse/replay matrix를 n150에서 검증한다.
 
-  core와 point/event/notice/route/area subtype을 typed table·geometry/category 제약으로 분리한다.
-  subtype별 독립 shadow 전환과 rollback을 증명한다.
+### T-VN-41 — cache-target generation·outbox 전파
 
-- [ ] T-VN-36 — **field override 단일화**
+- [ ] T-VN-41A — **source generation·restore epoch**
 
-  whole-row freeze를 field override로 이관하고 effective projection을 대조한 뒤 provider upsert의
-  중복 `CASE`를 제거한다. T-VN-35와 독립 rollback 가능해야 한다.
+  existing external identity/exact scope를 유지하면서 source generation과 restore epoch를 schema에
+  도입하고 restore/backfill 시 단조성·중복 억제를 고정한다.
 
-- [ ] T-VN-37 — **typed notice state**
+- [ ] T-VN-41B — **transaction-coupled outbox writer**
 
-  notice 유효 기간을 typed range와 DB 제약으로 재설계하고 공개 hot path의 cast·lineage anti-join을
-  제거한다(T-VN-06 방어 cast는 잠정 — typed 재설계는 본 task 소유).
+  target/link/update 결과와 같은 transaction에서 generation-bearing outbox event를 기록한다.
+  critical write path는 relay I/O를 기다리지 않고 commit/rollback 원자성만 보장한다.
 
-- [ ] T-VN-38 — **weather·price current summary**
+- [ ] T-VN-41C — **relay·reconciliation·consumer enable**
 
-  원본 이력을 보존하는 current summary projection을 만들고 bbox/detail의 per-row LATERAL 조회를
-  set-based join으로 바꾼다.
+  lease/retry/dead-letter/replay가 있는 relay와 DB 대조 reconciliation을 추가한다. backfill checksum
+  뒤 critical path 밖에서 PinVi 소비를 enable하고 누락·중복·restore epoch 전환을 live로 증명한다.
 
-- [ ] T-VN-40 — **curation write model 단일화**
+## Lane A 상세 — T-VN-H07 cross-repo 계약 완결
 
-  `curation_collections/items`만 write 정본으로 남기고 legacy table·trigger·route
-  (`curated_features` overlay 일체)를 제거한다. 자동 후보는 `theme_feature_candidates`처럼 별도
-  lifecycle로 분리한다.
+Map #814와 PinVi #403은 각각 최신 main보다 85/13 commits 뒤처졌고, Map main에는 이후
+T-VN-05R 계열의 유사 schema assertion이 추가됐다. 오래된 task 문서 commit을 그대로 재생하지
+않고 residual contract만 남긴다.
+
+- [ ] T-VN-H07A — **Map #814 residual contract 재감사·landing**
+
+  최신 main에 rebase해 stale `tasks.md` commit과 이미 존재하는 union/additionalProperties
+  assertion을 제거한다. 남는 required/type/enum/exact property 검사가 non-tautological인지
+  적대 리뷰어 2명이 다시 확인한 뒤 #814를 갱신·머지한다.
+
+- [ ] T-VN-H07B — **PinVi #403 residual contract 재감사·landing**
+
+  최신 PinVi main에 rebase하고 H07A의 실제 user OpenAPI SHA와 대조한다. 이미 흡수된 assertion을
+  제거하고 PinVi가 읽는 필드만 typed consumer contract로 남겨 #403을 갱신·머지한다.
+
+- [ ] T-VN-H07D — **#815 admin detail-snapshot field-level contract·freshness**
+
+  PinVi 런타임이 실제 소비하는 admin detail-snapshot의 plan/item required/type/enum을 Map full
+  OpenAPI와 PinVi vendored snapshot 양쪽에서 고정한다. admin/user snapshot freshness를 CI에서
+  실제 비교해 skip으로 green이 되는 경로를 제거한다.
+
+- [ ] T-VN-H07C — **#812 compatible-pair manifest v5**
+
+  docker-manager compatible-pair에 Map per-surface OpenAPI digest manifest의 SHA를 추가하고
+  capture·validate·deploy를 모두 v5로 전환한다. Map export drift와 C7 attestation을 같은 digest에
+  연결하고 ADR-076을 개정한다.
+
+## Wave 2 상세 — 구조 전환
+
+> 실행 순서는 31A~C(freeze) → 32~38(shadow, 두 lane 병렬) → 40 → 39(cutover 마지막)다.
+> ADR-066~075가 목표 스펙 정본이다. 각 migration task는 forward-only 격리 clone에서 검증하고,
+> 명시적 downgrade 수용 조건이 없는 한 전진 뒤 rollback하지 않는다.
+
+### T-VN-31 — vNext target freeze
+
+ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다. 구현과 freeze를 분리한다.
+
+- [ ] T-VN-31A — **목표 DDL·데이터 불변식 freeze**
+
+  schema/table/column/type/FK/CHECK/index/view/trigger와 backfill 전후 불변식을 실행 가능한 SQL
+  artifact로 고정한다. migration 번호와 구현 SQL은 아직 넣지 않는다.
+
+- [ ] T-VN-31B — **목표 OpenAPI·consumer diff freeze**
+
+  admin/user/PinVi surface별 추가·삭제·rename·enum/status/error 변화를 machine-readable diff로
+  고정하고 consumer-first 배포 순서와 호환을 버릴 시점을 명시한다.
+
+- [ ] T-VN-31C — **제약 test·복구 preflight freeze**
+
+  목표 DDL/OpenAPI를 위반하는 fixture와 shadow checksum, forward recovery, write-fence preflight를
+  executable contract로 만든다. 31A/B artifact drift를 CI에서 fail-close한다.
+
+### T-VN-32 — UUID identity shadow 전환 (Lane A)
+
+- [ ] T-VN-32A — **UUID schema·deterministic backfill**
+
+  UUID identity와 legacy alias table을 추가하고 같은 snapshot에서 deterministic backfill·UNIQUE/FK
+  불변식을 고정한다. 기존 문자열 ID는 아직 제거하지 않는다.
+
+- [ ] T-VN-32B — **Map consumer-first dual read/write**
+
+  repository/API/notice lineage를 UUID 정본으로 읽고 alias를 경계에서만 해석한다. 신규 write는 UUID와
+  alias를 원자 생성하고 legacy-only 신규 행을 차단한다.
+
+- [ ] T-VN-32C — **PinVi alias-map cutover·legacy write fence**
+
+  PinVi consumer를 UUID+alias contract로 전환하고 양 저장소 checksum을 맞춘다. legacy write를
+  fence하되 legacy ID 제거는 T-VN-39 soak 뒤로 남긴다.
+
+### T-VN-33 — provider dataset 정본 전환 (Lane B)
+
+- [ ] T-VN-33A — **provider_datasets schema·backfill**
+
+  provider/dataset 정본 row와 composite identity를 만들고 현재 policy/source/operation 참조를
+  중복·orphan 없이 backfill한다.
+
+- [ ] T-VN-33B — **writer·reader FK cutover**
+
+  참조 table과 writer를 canonical dataset FK로 전환하고 전환 중 entity-record identity 불일치를
+  composite FK로 차단한다.
+
+- [ ] T-VN-33C — **denormalization 제거·query/index 정리**
+
+  source record와 ops 표면의 중복 provider/dataset column·분기·index를 제거하고 EXPLAIN gate로
+  조회 성능과 exact-scope 의미를 고정한다.
+
+### T-VN-34 — 직교 상태 모델 전환 (Lane B)
+
+- [ ] T-VN-34A — **3축 상태 schema·backfill**
+
+  lifecycle/publication/quality를 별도 typed column으로 추가하고 기존 status를 무손실 매핑한다.
+  허용되지 않는 결합을 DB CHECK로 거부한다.
+
+- [ ] T-VN-34B — **public projection·partial index cutover**
+
+  `public_features` view를 3축 predicate 정본으로 바꾸고 실제 hot predicate와 일치하는 partial
+  index를 추가한다.
+
+- [ ] T-VN-34C — **writer/API/UI cutover·legacy status 제거**
+
+  provider/admin writer와 admin/user DTO/UI를 3축으로 전환하고 old status 조건·문서·index를 제거한다.
+
+### T-VN-35 — typed subtype 분해 (Lane A)
+
+- [ ] T-VN-35A — **feature core·point subtype**
+
+  공통 core와 point geometry/category 제약을 분리하고 기존 place/price/weather point row를
+  shadow backfill한다.
+
+- [ ] T-VN-35B — **event·notice subtype**
+
+  event/notice 전용 column과 시간/lineage 불변식을 typed table로 옮기고 혼합 kind row를 거부한다.
+
+- [ ] T-VN-35C — **route·area subtype**
+
+  route/area geometry type·SRID·category 제약과 parent/sibling 관계를 typed table로 옮긴다.
+
+- [ ] T-VN-35D — **repository/API projection cutover**
+
+  kind별 repository/read model을 subtype join으로 전환하고 nullable mega-row 분기를 제거한다.
+  subtype별 checksum·query plan을 독립 검증한다.
+
+### T-VN-36 — field override 단일화 (Lane B)
+
+- [ ] T-VN-36A — **override schema·whole-row freeze backfill**
+
+  field별 value/provenance/revision/tombstone을 저장하는 정본을 만들고 기존 whole-row freeze를
+  동일 effective projection으로 backfill한다.
+
+- [ ] T-VN-36B — **provider/admin writer cutover**
+
+  provider upsert와 admin patch가 field override를 같은 transaction에서 갱신하도록 전환하고
+  concurrency/merge precedence를 DB 제약과 회귀 테스트로 고정한다.
+
+- [ ] T-VN-36C — **effective projection 단일화·CASE 제거**
+
+  read model을 한 effective projection으로 통일하고 repository별 중복 `CASE`와 whole-row freeze
+  column/trigger를 제거한다.
+
+### T-VN-37 — typed notice state (Lane A)
+
+- [ ] T-VN-37A — **notice range schema·backfill**
+
+  유효 기간과 lineage/current state를 typed range/FK/CHECK로 표현하고 오염 timestamp를 격리한다.
+
+- [ ] T-VN-37B — **notice writer/read query cutover**
+
+  notice provider writer와 public/admin history/current query를 range/index 기반으로 전환한다.
+
+- [ ] T-VN-37C — **방어 cast·lineage anti-join 제거**
+
+  T-VN-06의 잠정 cast와 공개 hot path anti-join을 제거하고 동등 결과·EXPLAIN·오염 입력 거부를
+  검증한다.
+
+### T-VN-38 — weather·price current summary (Lane B)
+
+- [ ] T-VN-38A — **weather current summary**
+
+  bitemporal 원본 이력을 보존하면서 identity당 current weather를 원자 유지하는 summary와
+  reconciliation을 추가한다.
+
+- [ ] T-VN-38B — **price current summary**
+
+  `provider + price_domain + product_key` identity당 current price summary와 reconciliation을
+  추가하고 restore/backfill generation을 구분한다.
+
+- [ ] T-VN-38C — **bbox/detail set-based cutover**
+
+  per-row LATERAL을 weather/price summary set join으로 바꾸고 old query/index를 제거한다.
+  cardinality·freshness·EXPLAIN을 실데이터로 고정한다.
+
+### T-VN-40 — curation write model 단일화 (Lane B)
+
+- [ ] T-VN-40A — **legacy writer inventory·write fence**
+
+  `curated_features` overlay를 쓰는 route/job/trigger/repository를 전수 고정하고 신규 legacy write를
+  차단한다. canonical curation과 effective projection checksum을 만든다.
+
+- [ ] T-VN-40B — **candidate lifecycle 분리·consumer cutover**
+
+  자동 후보를 `theme_feature_candidates` lifecycle로 분리하고 admin/public/PinVi consumer가
+  `curation_collections/items` 정본만 읽도록 전환한다.
+
+- [ ] T-VN-40C — **legacy route/trigger/table 제거**
+
+  checksum과 consumer cutover 뒤 overlay route/repository/trigger/table을 clean-cut 삭제하고
+  호환 shim을 만들지 않는다.
 
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 
