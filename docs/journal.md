@@ -43,6 +43,10 @@ Map/PinVi/docker-manager/geo의 열린 PR·이슈를 대조했다. 큰 task를 �
   T-VN-40 join barrier 누락을 P1/P2로 찾았다. PR #870 일회성 CI/live 예외, 현재 PR inventory,
   H21 첫 blocker 표현, migration forward-recovery 규율과 external tracker 단일 위치도 함께
   정정했다. 물리 삭제는 T-VN-39만 소유하고 H22B는 idempotency를 처음부터 포함하도록 바꿨다.
+- **적대 리뷰 2명 최종**: exact head `801c37d2`에서 T-VN-38C의 old query만 normal path에서
+  비활성화하고 rollback shadow index는 유지하며, ADR-075 soak 뒤 T-VN-39만 이를 물리 삭제하도록
+  정정한 전체 diff를 재검토했다. 두 리뷰어 모두 잔여 P0/P1/P2 0건과 task index/detail 66/66,
+  open/done 분리, `git diff --check` 통과를 확인했다.
 - **실행 규율**: 첫 reviewable checkpoint에서 PR #870을 열고 변경을 작은 커밋으로 push했다.
   실패 시 검증된 checkpoint부터 재개하며, PR #870부터 문서 전용 변경도 적대적 리뷰어 2명을
   사용한다. CI 대기와 파괴적 Live UI를 생략하는 것은 사용자 지정 PR #870 일회성 예외이며,
