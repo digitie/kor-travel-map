@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-28 (claude) — Lane A a0 T-VN-H07B 완료: PinVi consumer contract landing
+
+**다음 한 작업**: Lane A a0 다음 항목 **`T-VN-H07D`(#815)** — PinVi 런타임이 실제 소비하는 admin
+detail-snapshot의 plan/item required/type/enum을 Map full OpenAPI와 PinVi vendored snapshot 양쪽에
+고정하고, admin/user snapshot freshness를 CI에서 실제 비교해 skip으로 green이 되는 경로를 제거한다.
+(H07B에서 user 스냅샷은 Map main `8880c29b`로 재동기화됨 — admin 스냅샷도 같은 대조 필요.)
+이후 `T-VN-H07C`(#812 manifest v5).
+
+- **완료(이번 세션)**: `T-VN-H07A`(Map #814 → `259a9ec5`) · `T-VN-H07B`(PinVi #415, #403 대체).
+- **H07B 요지**: #403이 고정하던 공개 curated 표면은 PinVi가 호출하지 않는 경로였다(admin
+  detail-snapshot = H07D 소유, producer exact = H07A 소유) → 전량 제거하고 **실제 소비 필드**의
+  typed consumer contract 21 schema로 대체. stale 스냅샷(174 commits 뒤) 재동기화. 경로→컨테이너
+  →item·map value·envelope meta·model 결합까지 사슬 전체 고정. 변이 30건 전부 검출.
+- **교훈**: consumer 계약에 producer의 exact property 집합을 복사하면 무해한 additive 변경마다
+  false-red가 난다(Map 0066 `external_component_id`가 실제 사례). consumer는 "읽는 필드의 shape"만
+  고정하고, 대신 경로→필드 사슬을 끝까지 닫는 편이 옳다.
+- **주의**: 최종 확인이 제 오기를 잡았다 — `data.get("cluster_unit")`을 "항상 None"으로 단정했으나
+  client가 `meta.cluster.cluster_unit`을 의도적으로 re-projection한다. 정적 추론으로 "버그"를
+  단정하기 전에 client/테스트를 함께 읽을 것.
+
 ## 2026-07-28 (codex) — T-VN-46 파괴적 Live·task 완료
 
 **다음 한 작업**: T-VN-46 최종 문서와 Claude Code PR #874 사후 감사 결과를 원격 branch에

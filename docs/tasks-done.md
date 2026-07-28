@@ -3,6 +3,35 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-28 — Lane A a0 T-VN-H07B: PinVi consumer contract landing
+
+- [x] **T-VN-H07B** — 오래 열린 PinVi #403(base 13 commits 뒤)을 재감사해 residual만 남기고
+  **PinVi PR #415**로 landing했다(#403은 대체·종결). 재감사 핵심: #403은 Map producer 테스트를
+  복사해 **공개 curated 표면**을 고정했으나 PinVi user client는 그 경로를 호출하지 않는다
+  (`_CLIENT_PATHS`에 curated 없음, ADR-049/Map PR #533이 public `*-copy` 폐지, 큐레이션 런타임
+  표면은 admin `/v1/admin/curated-features/{id}/detail-snapshot` = H07D 소유, producer exact
+  고정은 H07A 소유). curated pin을 전량 제거하고 **PinVi가 실제로 읽는 필드**의 typed consumer
+  contract(21 schema)로 대체했다.
+  - **스냅샷 재동기화**: H07A의 실제 user OpenAPI SHA와 대조해 vendored 핀이 stale임을 확인
+    (`91b30f40`@`cf1f0bba`, Map main보다 174 commits 뒤) → Map main `8880c29b`(H07A `259a9ec5`
+    포함)/`0a7f1684`로 갱신. 실제 drift는 구조 1건(`external_component_id`, Map 0066) + 설명
+    3건뿐이고 PinVi 소비 스키마는 구조 변화 0건.
+  - **사슬 전체 고정**: 경로→컨테이너(`_ENDPOINT_DATA_SCHEMAS` 13경로 + `_CLIENT_PATHS` 일치
+    가드) → 컨테이너→item(`items.$ref`)·map value(`found`→`FeatureDetailResponse`) → 필드
+    type/format/enum/required/nullable. envelope `meta`(`Meta`/`ClusterMeta`/`PageMeta`)도
+    client가 `data`로 re-projection해 소비하므로 함께 고정. `/v1/public/*`는 `model_validate`로
+    객체 전체를 검증해 `app/schemas/public.py` `model_fields` ⊆ 계약을 강제(자기참조 검사 제거).
+    `_SCHEMA_FIELDS`는 계약 표에서 파생. **exact property 집합은 의도적으로 비고정**(consumer가
+    producer의 additive 변경에 false-red 나면 안 됨 — 0066이 실제 사례).
+  - **검증**: n150 CI-parity clean clone `74b199d` — ruff/ruff format(343)/mypy --strict(196)
+    green, 계약 11 passed, 전체 unit **665 passed**(base 661 대비 +4; 실패 20건은 base
+    `417da20`에서 동일 실증된 기존 docker 의존 실패). **변이 테스트 30건 전부 검출**.
+  - **리뷰**: 적대 2명 → 재리뷰 → 최종 확인(block) → 해제 확인(cleared). 최종 확인이 잡은 오기
+    (`data.get("cluster_unit")`을 "항상 None인 잠재 버그"로 기록)를 정정 — client가
+    `meta.cluster.cluster_unit`을 의도적으로 re-projection하며 기존 green 테스트가 non-None을
+    단언한다. 같은 오독으로 빠졌던 meta 필드도 함께 고정했다.
+  - PinVi 문서(`docs/integrations/kor-travel-map-rest-api.md` §8)는 같은 PR에 포함.
+
 ## 2026-07-28 — Lane B T-VN-46 npm optional tree 무결성 완결
 
 - [x] **T-VN-46** — npm 10.9.4가 제외된 FreeBSD/WASM optional parent의 자식 6개를

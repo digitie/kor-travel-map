@@ -2,6 +2,48 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-28 (claude) — Lane A a0 T-VN-H07B: PinVi #403 재감사 → consumer contract로 대체 landing
+
+**결론**: 오래 열린 PinVi #403을 재감사한 결과 **고정 대상 자체가 틀렸다**. #403은 Map producer
+테스트를 복사해 공개 curated 표면(`PublicCurated*`/`PublicCuration*`)을 field-level로 고정했지만,
+PinVi user client는 그 경로를 호출하지 않는다. 전량 제거하고 PinVi가 실제로 읽는 필드의 typed
+consumer contract로 대체해 **PinVi PR #415**로 landing했다(#403 대체).
+
+- **근거(4중 확인)**: `_CLIENT_PATHS`에 curated 경로 없음(주석이 ADR-049·Map PR #533의 public
+  `*-copy` 폐지를 명시) · `apps/` 전체 grep에서 curated 소비 코드 0건 ·
+  `GET /v1/features/{id}`의 `curations` 필드도 `_detail_from_kor_travel_map`이 읽지 않음 ·
+  큐레이션은 `kor_travel_map_admin.get_curated_detail_snapshot`(admin 표면 = H07D/#815 소유).
+  producer exact 고정은 H07A(Map #814)가 이미 소유하므로 커버리지 손실 없음.
+- **스냅샷 재동기화**: "H07A의 실제 user OpenAPI SHA와 대조"를 실행해 vendored 핀이 stale임을
+  확인(`91b30f40`@`cf1f0bba` — Map main보다 174 commits 뒤) → Map main `8880c29b`/`0a7f1684`로
+  갱신. 실제 drift는 구조 1건(`external_component_id`, Map 0066) + price 문구 3건뿐이며 PinVi
+  소비 스키마는 구조 변화 0건이라 client/매핑 영향 없음.
+- **설계 결정**: consumer는 **exact property 집합을 고정하지 않는다**. producer의 무해한 additive
+  변경마다 false-red가 나기 때문이며, 실제로 0066의 `external_component_id` 추가가 #403의 pin을
+  깨뜨렸다. 대신 "읽는 필드의 shape"을 고정하고 **경로→필드 사슬**을 끝까지 닫았다:
+  `_ENDPOINT_DATA_SCHEMAS`(경로→컨테이너, 13경로 + `_CLIENT_PATHS` 일치 가드) → `items.$ref`/
+  `additionalProperties.$ref`(컨테이너→item/map value) → 필드 type/format/enum/required/nullable.
+  envelope `meta`(`Meta`→`ClusterMeta`/`PageMeta`)도 client가 `data`로 re-projection해 소비하므로
+  같은 방식으로 고정했다.
+- **비-tautological 보장**: 초안의 drift guard가 같은 파일의 손수 만든 두 표를 비교하는
+  자기참조라 매핑 드리프트를 못 잡는다는 지적을 받아, `_SCHEMA_FIELDS`를 계약 표에서 **파생**시켜
+  불일치 가능성을 제거하고, `model_validate`로 객체 전체를 검증하는 `/v1/public/*`는
+  `app/schemas/public.py`의 `model_fields` ⊆ 계약을 강제해 **실제 소비 모델에 결합**했다.
+- **리뷰 4라운드**: 적대 2명(land-with-fixes) → 재리뷰(커버리지 누락·컨테이너 dangling 지적) →
+  최종 확인(**block**) → 해제 확인(**cleared**). 최종 확인이 잡은 **내 오기**를 정정했다:
+  `data.get("cluster_unit")`을 "항상 None인 Pinvi 잠재 버그"로 기록했으나, client
+  `features_in_bounds`가 `meta.cluster.cluster_unit`을 의도적으로 re-projection하며
+  `test_kor_travel_map_client.py`·`test_features_api.py`가 non-None을 단언한다. 잘못된 주석은
+  정상 설계를 "고치도록" 유도하므로 삭제하고, 같은 오독으로 빠져 있던 meta 필드를 함께 고정했다.
+- **검증**: n150 CI-parity clean clone `74b199d` — `ruff check`/`ruff format --check`(343)/
+  `mypy --strict app`(196) green, 계약 테스트 11 passed/1 skipped, 전체 `pytest tests/unit`
+  **665 passed**(base `417da20` 661 대비 +4). 실패 20건은 base에서 동일하게 재현한 기존 실패
+  (`test_api_image_provenance.py`, 컨테이너에 docker CLI 부재)로 이번 변경과 무관함을 실증했다.
+  **변이 테스트 30건 전부 검출**(enum 축소·타입 변경·format 제거·required 변경·nullable 확장·
+  union 확장·필드 제거·`items.$ref` 교체·map value 축소·경로 repoint·meta 사슬 repoint 등).
+- **문서**: PinVi `docs/integrations/kor-travel-map-rest-api.md` §8(드리프트 게이트)의 stale 핀과
+  삭제된 메커니즘 설명을 정정해 같은 PR에 포함했다. Map 저장소 문서는 repo가 달라 별도 PR.
+
 ## 2026-07-28 (codex) — T-VN-46 파괴적 Live·실패 지점 재개 완료
 
 **결론**: npm 12.0.1 clean optional tree 구현 head `378c6524`를 적대 리뷰어 2명이
