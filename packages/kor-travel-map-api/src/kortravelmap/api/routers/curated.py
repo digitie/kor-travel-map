@@ -269,8 +269,37 @@ class CuratedFeatureResponse(BaseModel):
     meta: Meta
 
 
+class CuratedFeatureDetailFeatureSnapshotView(BaseModel):
+    """detail-snapshot item의 feature 투영 (T-VN-H07D).
+
+    소비자 PinVi가 이 안에서 `name`/`lon`/`lat`/`address`를 직접 읽는다
+    (`services/admin_pois.py` label/coord/address 추출기, `api/v1/search.py`의
+    `feature_snapshot["name"]` SQL 술어). 생성부가 고정 key로 만들므로 typed view로 고정한다.
+    `address`/`detail`은 provider 원본 투영이라 free-form으로 남긴다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    name: str
+    category: str
+    kind: str
+    lon: float | None
+    lat: float | None
+    sido_code: str | None
+    sigungu_code: str | None
+    legal_dong_code: str | None
+    address: dict[str, Any]
+    detail: dict[str, Any]
+
+
 class CuratedFeatureDetailItemView(BaseModel):
-    """curated feature detail item."""
+    """curated feature detail item.
+
+    T-VN-H07D: `day_index`/`memo`/`source_record_key`는 생성부가 **항상** 내보내는 key인데
+    default 때문에 스펙상 optional로 표기됐다. snapshot view와 같은 규약(모든 key는 항상 존재,
+    값만 nullable)으로 맞춰 default를 제거한다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -278,14 +307,59 @@ class CuratedFeatureDetailItemView(BaseModel):
     feature_id: str
     relation: str
     sort_order: int
-    day_index: int | None = None
-    memo: str | None = None
-    feature_snapshot: dict[str, Any]
-    source_record_key: str | None = None
+    day_index: int | None
+    memo: str | None
+    feature_snapshot: CuratedFeatureDetailFeatureSnapshotView
+    source_record_key: str | None
+
+
+class CuratedFeatureDetailThemeView(BaseModel):
+    """detail-snapshot theme payload (T-VN-H07D — 소비자 PinVi가 category fallback으로 읽는다)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    theme_slug: str
+    theme_name: str
+
+
+class CuratedFeatureDetailContentView(BaseModel):
+    """detail-snapshot plan-level payload (T-VN-H07D).
+
+    PinVi curated import(`services/notice_plan.py`)가 plan title/category/summary/destination을
+    여기서 읽는다. 모든 key는 항상 존재하며(생성부가 고정 key로 만든다) 값만 nullable이다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    summary: str | None
+    destination_name: str | None
+    region_code: str | None
+    category: str
+    curation_status: str
+    reuse_policy: str
+
+
+class CuratedFeatureDetailSourceView(BaseModel):
+    """detail-snapshot source payload (T-VN-H07D)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    dataset_key: str
+    source_name: str
+    source_url: str | None
 
 
 class CuratedFeatureDetailSnapshotView(BaseModel):
-    """curated feature detail snapshot."""
+    """curated feature detail snapshot.
+
+    T-VN-H07D: `theme`/`content`/`source`는 과거 free-form ``dict[str, Any]``이라 OpenAPI에
+    `{"type": "object"}`로만 노출됐고, 소비자(PinVi)가 실제로 의존하는 plan-level 필드를 계약으로
+    고정할 방법이 없었다. 생성부가 고정 key로 만드는 값이므로 typed view로 전환한다.
+    ``items[].feature_snapshot``도 소비자가 내부 key(`name`/`lon`/`lat`/`address`)를 실제로
+    읽으므로 함께 typed view로 고정한다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -293,9 +367,9 @@ class CuratedFeatureDetailSnapshotView(BaseModel):
     version: int
     etag: str
     updated_at: datetime
-    theme: dict[str, Any]
-    content: dict[str, Any]
-    source: dict[str, Any]
+    theme: CuratedFeatureDetailThemeView
+    content: CuratedFeatureDetailContentView
+    source: CuratedFeatureDetailSourceView
     items: list[CuratedFeatureDetailItemView]
 
 
@@ -530,9 +604,12 @@ def _snapshot_view(
         version=row.version,
         etag=row.etag,
         updated_at=row.updated_at,
-        theme=row.theme,
-        content=row.content,
-        source=row.source,
+        # T-VN-H07D: 생성부(`curated_repo._feature_detail_snapshot`)가 고정 key로 만든 payload를
+        # typed view로 검증한다. key가 어긋나면 여기서 fail-closed된다(etag 계산 대상인 repo
+        # payload dict 자체는 바꾸지 않아 기존 etag/캐시 계약은 그대로다).
+        theme=CuratedFeatureDetailThemeView(**row.theme),
+        content=CuratedFeatureDetailContentView(**row.content),
+        source=CuratedFeatureDetailSourceView(**row.source),
         items=[CuratedFeatureDetailItemView(**item.__dict__) for item in row.items],
     )
 

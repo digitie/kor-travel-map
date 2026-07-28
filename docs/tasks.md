@@ -385,6 +385,8 @@ H07A의 실제 user OpenAPI SHA와 대조한 residual consumer contract만 남�
   고정. 상세는 tasks-done 2026-07-28.
 
 - [ ] T-VN-H07D — **#815 admin detail-snapshot field-level contract·freshness**
+  (① Map half **완료** — payload 타입화 + 계약 게이트. ② PinVi half(vendor·소비자 계약·freshness
+  CI) 남음. cross-repo 2 PR이라 둘 다 landing해야 완료.)
 
   PinVi 런타임이 실제 소비하는 admin detail-snapshot의 plan/item required/type/enum을 Map full
   OpenAPI와 PinVi vendored snapshot 양쪽에서 고정한다. admin/user snapshot freshness를 CI에서

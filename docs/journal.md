@@ -17,6 +17,37 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-28 (claude) — Lane A a0 T-VN-H07D ①: admin detail-snapshot payload 타입화 (Map half)
+
+**결론**: #815의 전제가 조사로 확인됐다 — PinVi가 실제로 소비하는 admin detail-snapshot의
+**계약이 OpenAPI로 표현조차 되지 않는** 상태였다. Map 절반(타입화 + 계약 게이트)을 먼저 landing한다.
+PinVi 절반(vendor + 소비자 계약 + freshness CI)은 후속이며, 그때까지 `tasks.md` H07D는 열어 둔다.
+
+- **발견 1 — 경로 불가시성**: PinVi가 호출하는 `/v1/admin/curated-features/{id}/detail-snapshot`은
+  `include_in_schema=False` 숨은 alias다(문서 경로는 `/v1/admin/features/curated/...`). 런타임은
+  정상이지만 **스펙 기반 게이트가 볼 수 없어** alias를 지워도 아무 테스트도 깨지지 않았다.
+- **발견 2 — 계약 표현 불가**: PinVi가 읽는 plan-level 필드(title/category/summary/
+  destination_name/region_code, source_name/provider, theme_slug)가 전부 free-form
+  `dict[str, Any]`(`theme`/`content`/`source`) 안이라 스펙에 `{"type": "object"}`로만 나왔다.
+- **조치**: 생성부가 **고정 key로** 만드는 값이므로(content 7 / theme 2 / source 4) typed view로
+  전환했다. **etag는 repo payload dict에서 계산되므로 그 dict은 손대지 않고 API view만** 타입화해
+  기존 etag·캐시 계약을 불변으로 유지했다.
+- **적대 리뷰 2명(land-with-fixes) 반영**:
+  - **오기 정정(중요)**: "PinVi가 `feature_snapshot`을 통째로 저장만 하고 내부를 읽지 않는다"는
+    사실이 아니었다. PinVi는 `admin_pois`의 label/coord/address 추출기와 `search.py`의
+    `feature_snapshot["name"]` SQL 술어로 내부 key를 직접 읽는다 → 네 번째 typed view로 함께 고정.
+  - **머지 blocker**: `openapi.json`만 재생성하고 `frontend/src/api/types.ts`를 빠뜨려 frontend CI
+    `gen:types:check`가 drift로 실패할 상태였다 → 두 산출물을 함께 재생성.
+  - endpoint HTTP 테스트 추가(문서 경로·alias × populated·all-null 4조합), item view의
+    `day_index`/`memo`/`source_record_key` default 제거(항상 내보내는 key라 required+nullable),
+    생성부 key 단언을 view 대신 독립 리터럴로 교체(항상 참이던 tautological 검사 제거),
+    round-trip을 nullable 분기까지 parametrize, 불필요한 `sys.path` 조작 제거.
+- **검증(n150 CI-parity, clean clone)**: ruff ✓ · `mypy --strict` ✓(56) · **OpenAPI drift ✓** ·
+  **types.ts `--check` exit 0** · 신규 계약 테스트 9 passed · api 패키지 **790 passed** ·
+  curated unit 25 passed. 재생성 후 diff 0(커밋 산출물이 생성 결과와 일치).
+- **리뷰어 실증**: 리뷰어 1이 TestClient로 두 경로 × all-null override를 직접 태워 200을 확인하고,
+  단일 생성 경로·etag 불변·materialize 캐시가 이 endpoint로 흐르지 않음을 grep으로 증명했다.
+
 ## 2026-07-28 (claude) — Lane A a0 T-VN-H07B: PinVi #403 재감사 → consumer contract로 대체 landing
 
 **결론**: 오래 열린 PinVi #403을 재감사한 결과 **고정 대상 자체가 틀렸다**. #403은 Map producer
