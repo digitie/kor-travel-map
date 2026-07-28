@@ -898,7 +898,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
         );
         expect(approveResponse.data.request.status).toBe("applied");
         addApproved = true;
-        await expect(detail).toContainText(/applied|적용/);
+        await expect(detail).toContainText("반영됨");
 
         await expect
           .poll(async () => {
@@ -935,7 +935,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
 
         const row = rowContaining(page, CREATE_NAME);
         await expect(row).toBeVisible(T);
-        await expect(row).toContainText(/active|활성/);
+        await expect(row).toContainText("활성");
         await expect(row).toContainText("place");
         await expect(row).toContainText("01070300");
 
@@ -975,10 +975,15 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await page.getByLabel("change lat").fill("37.56718");
         await page.getByLabel("change marker color").selectOption("P-02");
         await page
-          .getByLabel("change detail JSON")
+          .getByLabel("change detail JSON", { exact: true })
+          .locator("xpath=ancestor::details")
+          .locator("summary")
+          .click();
+        await page
+          .getByLabel("change detail JSON", { exact: true })
           .fill(JSON.stringify({ e2e_phase: "update", run_id: RUN_ID }));
         await page
-          .getByLabel("change urls JSON")
+          .getByLabel("change urls JSON", { exact: true })
           .fill(JSON.stringify({ homepage: "https://example.invalid/updated" }));
 
         const responsePromise = waitForApiResponse(
@@ -1079,9 +1084,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
           q: FEATURE_ID,
           status: "rejected",
         });
-        const rejectedRow = rowContaining(page, "rejected");
+        const rejectedRow = rowContaining(page, REJECTED_NAME);
         await expect(rejectedRow).toBeVisible(T);
-        await expect(rejectedRow).toContainText(/rejected|반려/);
+        await expect(rejectedRow).toContainText("거절됨");
 
         const adminDetail = await expectAdminFeature(page, FEATURE_ID);
         expect(adminDetail.data.feature.name).toBe(UPDATED_NAME);
@@ -1125,7 +1130,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await page.getByLabel("feature status").selectOption("inactive");
         const inactiveRow = rowContaining(page, UPDATED_NAME);
         await expect(inactiveRow).toBeVisible(T);
-        await expect(inactiveRow).toContainText(/inactive|비활성/);
+        await expect(inactiveRow).toContainText("비활성");
       });
 
       await test.step("delete change request를 생성, 승인하고 public 상세에서 제거를 확인한다", async () => {
@@ -1203,7 +1208,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
         });
         const appliedDeleteRow = rowContaining(page, `${BASE_REASON} delete`);
         await expect(appliedDeleteRow).toBeVisible(T);
-        await expect(appliedDeleteRow).toContainText(/applied|적용|반영됨/);
+        await expect(appliedDeleteRow).toContainText("반영됨");
       });
     } finally {
       if (!addApproved && addRequestId) {
