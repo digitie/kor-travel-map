@@ -249,7 +249,10 @@ export function PipelineClient() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const urlStateRef = useRef(searchParams.toString());
+  const urlStateRef = useRef<string | null>(null);
+  if (urlStateRef.current === null) {
+    urlStateRef.current = searchParams.toString();
+  }
   const focusReturnExecutionIdRef = useRef<string | null>(null);
   const focusAfterCloseRef = useRef(false);
   const urlSchedule = searchParams.get("schedule");
@@ -286,7 +289,7 @@ export function PipelineClient() {
       updates: Record<string, string | null>,
       mode: "push" | "replace" = "push",
     ) => {
-      const previous = new URLSearchParams(urlStateRef.current);
+      const previous = new URLSearchParams(urlStateRef.current ?? "");
       const next = new URLSearchParams(previous);
       for (const [key, value] of Object.entries(updates)) {
         if (value === null || value === "") {
@@ -319,7 +322,7 @@ export function PipelineClient() {
       }
       const query = next.toString();
       const href = query ? `${pathname}?${query}` : pathname;
-      const currentQuery = urlStateRef.current;
+      const currentQuery = urlStateRef.current ?? "";
       const current = currentQuery ? `${pathname}?${currentQuery}` : pathname;
       if (href === current) {
         return;
