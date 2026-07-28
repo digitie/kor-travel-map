@@ -558,11 +558,15 @@ async function expectedCoincidentFeatureIds(
 }
 
 async function readCoincidentPopupFeatureIds(page: Page): Promise<string[]> {
-  return page.locator(".maplibregl-popup button").evaluateAll((elements) =>
-    elements
-      .map((element) => (element as HTMLElement).dataset.featureId ?? "")
-      .sort(),
-  );
+  return page
+    .locator(
+      ".maplibregl-popup button:not(.maplibregl-popup-close-button)",
+    )
+    .evaluateAll((elements) =>
+      elements
+        .map((element) => (element as HTMLElement).dataset.featureId ?? "")
+        .sort(),
+    );
 }
 
 async function readMapBounds(
