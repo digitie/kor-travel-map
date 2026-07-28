@@ -2,51 +2,69 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ARCHIVE_ROOT = _REPO_ROOT / "docs" / "archive"
-_INLINE_LINK = re.compile(r"!?\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+[\"'][^)]*[\"'])?\)")
-_REFERENCE_LINK = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*(?:<([^>]+)>|(\S+))")
-_INLINE_CODE = re.compile(r"`+[^`]*`+")
+_MAX_ARCHIVE_BYTES = 220 * 1024
+_MARKDOWN = MarkdownIt("commonmark")
 
 
 def _markdown_destinations(document: Path) -> list[tuple[int, str]]:
     destinations: list[tuple[int, str]] = []
-    fence: str | None = None
 
-    for line_number, raw_line in enumerate(
-        document.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        stripped = raw_line.lstrip()
-        fence_match = re.match(r"(`{3,}|~{3,})", stripped)
-        if fence_match is not None:
-            marker = fence_match.group(1)
-            if fence is None:
-                fence = marker[0]
-            elif marker[0] == fence:
-                fence = None
-            continue
-        if fence is not None:
-            continue
+    def visit(tokens: list[Token], parent_line: int = 1) -> None:
+        for token in tokens:
+            line_number = token.map[0] + 1 if token.map is not None else parent_line
+            attribute = "href" if token.type == "link_open" else "src"
+            if token.type in {"link_open", "image"}:
+                destination = token.attrGet(attribute)
+                if destination is not None:
+                    destinations.append((line_number, destination))
+            if token.children:
+                visit(token.children, line_number)
 
-        line = _INLINE_CODE.sub("", raw_line)
-        for match in _INLINE_LINK.finditer(line):
-            destinations.append((line_number, match.group(1) or match.group(2)))
-        reference = _REFERENCE_LINK.match(line)
-        if reference is not None:
-            destinations.append((line_number, reference.group(1) or reference.group(2)))
+    visit(_MARKDOWN.parse(document.read_text(encoding="utf-8")))
 
     return destinations
 
 
 def _local_target(document: Path, destination: str) -> Path | None:
-    parsed = urlsplit(destination)
+    try:
+        parsed = urlsplit(destination)
+    except ValueError:
+        return None
     if parsed.scheme or parsed.netloc or not parsed.path or parsed.path.startswith("/"):
         return None
     return (document.parent / unquote(parsed.path)).resolve()
+
+
+def test_markdown_parser_covers_commonmark_link_edges(tmp_path: Path) -> None:
+    document = tmp_path / "links.md"
+    document.write_text(
+        """
+[escaped \\] label](../balanced(1).md)
+[reference link][reference]
+
+[reference]:
+  ../multiline.md
+
+````
+[ignored](../inside-fence.md)
+```
+````
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert [destination for _, destination in _markdown_destinations(document)] == [
+        "../balanced(1).md",
+        "../multiline.md",
+    ]
 
 
 def test_archive_markdown_relative_links_resolve() -> None:
@@ -62,3 +80,14 @@ def test_archive_markdown_relative_links_resolve() -> None:
                 )
 
     assert not failures, "깨진 archive Markdown 상대 링크:\n" + "\n".join(failures)
+
+
+def test_archive_markdown_files_stay_within_readable_limit() -> None:
+    oversized = [
+        f"{document.relative_to(_REPO_ROOT)}: {document.stat().st_size:,} bytes"
+        for document in sorted(_ARCHIVE_ROOT.glob("*.md"))
+        if document.stat().st_size > _MAX_ARCHIVE_BYTES
+    ]
+    assert not oversized, (
+        f"archive Markdown은 {_MAX_ARCHIVE_BYTES:,} bytes 이하여야 함:\n" + "\n".join(oversized)
+    )

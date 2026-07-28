@@ -10,6 +10,12 @@ import os from "node:os";
 import path from "node:path";
 
 type Checkpoint = "A" | "B" | "C" | "D";
+type FailureStage =
+  | "beforeEach.auth"
+  | "interaction"
+  | "mock.install"
+  | "render.assertion"
+  | "request.assertion";
 
 interface ManifestTest {
   line: number;
@@ -20,7 +26,7 @@ interface ManifestGroup {
   difference: string;
   determinism: "deterministic" | "flaky";
   errorPattern: string;
-  firstFailureStage: string;
+  firstFailureStage: FailureStage;
   fixedIn: Exclude<Checkpoint, "A">;
   spec: string;
   tests: ManifestTest[];
@@ -114,7 +120,13 @@ function validateManifest(manifest: FailureManifest): void {
       !(
         group.determinism === "deterministic" || group.determinism === "flaky"
       ) ||
-      !group.firstFailureStage ||
+      ![
+        "beforeEach.auth",
+        "interaction",
+        "mock.install",
+        "render.assertion",
+        "request.assertion",
+      ].includes(group.firstFailureStage) ||
       !group.difference ||
       !group.errorPattern ||
       group.tests.length === 0
@@ -134,12 +146,45 @@ function validateManifest(manifest: FailureManifest): void {
   }
 }
 
-function failureText(test: TestCase): string {
-  return test.results
+function firstFailureText(test: TestCase): string {
+  const firstFailure = test.results
+    .filter(
+      (result) => result.status !== "passed" && result.status !== "skipped",
+    )
     .flatMap((result) => result.errors)
-    .flatMap((error) => [error.message, error.stack, error.snippet])
+    .at(0);
+  return [firstFailure?.message, firstFailure?.stack]
     .filter((value): value is string => Boolean(value))
     .join("\n");
+}
+
+function firstFailureStageMatches(
+  stage: FailureStage,
+  evidence: string,
+): boolean {
+  if (!evidence) {
+    return false;
+  }
+  const locatorAssertion =
+    /Locator:|expect\(locator\)|toBeVisible|toHave(?:Attribute|Count|Text|Value)/u;
+  switch (stage) {
+    case "beforeEach.auth":
+      return /#admin-username|admin-username|authenticate admin/u.test(
+        evidence,
+      );
+    case "interaction":
+      return (
+        /locator\.(?:click|fill|press|selectOption)|getByLabel\('(name|reason|lon|lat)'/u.test(
+          evidence,
+        ) && !locatorAssertion.test(evidence)
+      );
+    case "mock.install":
+      return /canonical_url|legacy_scope/u.test(evidence);
+    case "render.assertion":
+      return locatorAssertion.test(evidence);
+    case "request.assertion":
+      return /operator/u.test(evidence) && !locatorAssertion.test(evidence);
+  }
 }
 
 class MockedFailureReporter implements Reporter {
@@ -249,18 +294,20 @@ class MockedFailureReporter implements Reporter {
       );
       const mismatchedExpectedFailureCauses = manifestTests
         .filter(({ key }) => expectedFailures.has(key))
-        .filter(({ errorPattern, key }) => {
+        .map(({ difference, errorPattern, firstFailureStage, key }) => {
           const test = testByIdentity.get(key);
-          return (
-            test === undefined ||
-            !new RegExp(errorPattern, "u").test(failureText(test))
-          );
+          const evidence = test === undefined ? "" : firstFailureText(test);
+          return {
+            causeMatched: new RegExp(errorPattern, "u").test(evidence),
+            difference,
+            firstFailureStage,
+            key,
+            stageMatched: firstFailureStageMatches(firstFailureStage, evidence),
+          };
         })
-        .map(({ difference, firstFailureStage, key }) => ({
-          difference,
-          firstFailureStage,
-          key,
-        }))
+        .filter(
+          ({ causeMatched, stageMatched }) => !causeMatched || !stageMatched,
+        )
         .sort((left, right) => left.key.localeCompare(right.key));
 
       const report = {

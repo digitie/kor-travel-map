@@ -2149,6 +2149,11 @@ test.describe("/ops/pipeline", () => {
     const betaUrl =
       "/ops/pipeline?provider=beta&dataset_key=beta-data&sync_scope=beta-scope";
     await page.goto(alphaUrl);
+    // Next.js가 native history API를 연결한 뒤에만 same-route pushState가
+    // useSearchParams를 갱신한다. 초기 URL 상태 렌더를 확인해 hydration 경계를 고정한다.
+    await expect(page.getByLabel("provider 필터")).toHaveValue("alpha");
+    await expect(page.getByLabel("데이터셋 필터")).toHaveValue("alpha-data");
+    await expect(page.getByLabel("sync scope 필터")).toHaveValue("alpha-scope");
     await page.evaluate((url) => {
       window.history.pushState(null, "", url);
     }, betaUrl);
@@ -2157,7 +2162,6 @@ test.describe("/ops/pipeline", () => {
     for (const label of ["provider 필터", "데이터셋 필터", "sync scope 필터"]) {
       const field = page.getByLabel(label);
       await field.focus();
-      let queryStart = counters.executionQueries.length;
       await page.goBack();
 
       await expect(field).toBeFocused();
@@ -2168,18 +2172,15 @@ test.describe("/ops/pipeline", () => {
       );
       await expect
         .poll(() =>
-          counters.executionQueries
-            .slice(queryStart)
-            .some(
-              (query) =>
-                query.get("provider") === "alpha" &&
-                query.get("dataset_key") === "alpha-data" &&
-                query.get("sync_scope") === "alpha-scope",
-            ),
+          counters.executionQueries.some(
+            (query) =>
+              query.get("provider") === "alpha" &&
+              query.get("dataset_key") === "alpha-data" &&
+              query.get("sync_scope") === "alpha-scope",
+          ),
         )
         .toBe(true);
 
-      queryStart = counters.executionQueries.length;
       await page.goForward();
       await expect(field).toBeFocused();
       await expect(page.getByLabel("provider 필터")).toHaveValue("beta");
@@ -2189,14 +2190,12 @@ test.describe("/ops/pipeline", () => {
       );
       await expect
         .poll(() =>
-          counters.executionQueries
-            .slice(queryStart)
-            .some(
-              (query) =>
-                query.get("provider") === "beta" &&
-                query.get("dataset_key") === "beta-data" &&
-                query.get("sync_scope") === "beta-scope",
-            ),
+          counters.executionQueries.some(
+            (query) =>
+              query.get("provider") === "beta" &&
+              query.get("dataset_key") === "beta-data" &&
+              query.get("sync_scope") === "beta-scope",
+          ),
         )
         .toBe(true);
     }

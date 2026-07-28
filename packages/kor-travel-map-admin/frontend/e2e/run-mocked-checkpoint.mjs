@@ -6,7 +6,17 @@ const [checkpoint, ...playwrightArgs] = process.argv.slice(2);
 
 if (!checkpoint || !checkpoints.has(checkpoint)) {
   console.error(
-    "사용법: npm run e2e:mocked:checkpoint -- <A|B|C|D> [Playwright 인자]",
+    "사용법: npm run e2e:mocked:checkpoint -- <A|B|C|D> [--workers=<양의 정수>]",
+  );
+  process.exit(2);
+}
+
+const unsafeArgs = playwrightArgs.filter(
+  (argument) => !/^--workers=[1-9][0-9]*$/.test(argument),
+);
+if (unsafeArgs.length > 0) {
+  console.error(
+    "checkpoint는 전체 suite를 보존하는 --workers=<양의 정수> 외 Playwright 인자를 허용하지 않습니다.",
   );
   process.exit(2);
 }
@@ -62,8 +72,8 @@ const result = spawnSync(
   [
     playwrightCli,
     "test",
-    "--reporter=list,./e2e/mocked-failure-reporter.ts",
     ...playwrightArgs,
+    "--reporter=list,./e2e/mocked-failure-reporter.ts",
   ],
   {
     env: {

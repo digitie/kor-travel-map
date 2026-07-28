@@ -27,7 +27,7 @@ test.describe("home page (/)", () => {
     // 바인딩해 검증하므로, 여기서는 navigation 목적지까지 모든 BFF REST와
     // ops-live WebSocket을 차단해 mocked suite가 실 backend에 닿지 않게 한다.
     await installInertOpsLiveWebSocket(page);
-    await page.route("**/v1/**", async (route) => {
+    await page.route("**/api/proxy/**", async (route) => {
       const request = route.request();
       const apiPath = bffApiPath(request.url());
       if (request.method() !== "GET") {

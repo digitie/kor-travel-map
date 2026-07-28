@@ -196,9 +196,6 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/backups/{backup_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curated-features": RoutePolicy.OPERATOR,
     "/v1/admin/curated-features/{curated_feature_id}": RoutePolicy.OPERATOR,
-    "/v1/admin/curated-features/{curated_feature_id}/detail-snapshot": (
-        RoutePolicy.OPERATOR
-    ),
     "/v1/admin/curated-features/{curated_feature_id}/place-search": (
         RoutePolicy.OPERATOR
     ),
