@@ -17,6 +17,36 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-28 (claude) — Lane A a0 T-VN-H07D ②: PinVi consumer 계약 + freshness 게이트 실효화
+
+**결론**: PinVi half(PR #416, squash `8ea83358`)를 landing해 T-VN-H07D를 완료하고 #815를 닫았다.
+
+- **vendor 방식**: Map full 스펙 1.1 MB 대신 detail-snapshot 경로·응답 스키마의 **전이적 폐포 +
+  operation이 요구하는 securityScheme**만 결정적으로 추출한 19 KB subset. 정렬 key·고정 indent라
+  같은 입력이면 같은 바이트가 나오고, 그래서 CI가 **재추출 후 byte 비교**로 검증할 수 있다.
+- **소비자 계약**: `notice_plan`/`admin_pois`/`kasi`/`search.py`가 실제로 읽는 필드만
+  type/nullable/required + 경로→200→`data` 결합 + admin 인증 헤더 header-only를 고정. exact
+  property 집합은 producer(Map) 소유라 중복 고정하지 않는다(H07B와 같은 consumer 원칙).
+- **freshness 역할 분리**: `contract-pin-consistency`(차단)는 Map을 **핀 커밋**으로 체크아웃해
+  실제 비교 — 과거 sibling 부재로 skip되어 항상 green이던 경로를 없앤다. 증명 대상은 핀↔vendored
+  **자기정합**이다. 핀 자체의 뒤처짐은 구조상 알 수 없어 예약·비차단 `contract-staleness`가
+  Map main과 비교해 알린다(H07B의 174-commit 뒤처짐이 그 종류).
+- **적대 리뷰 2명이 잡은 핵심**: 내가 "차단 게이트"라고 만든 job이 **required check 목록에 없어
+  red여도 머지를 막지 못했다** — 없애려던 "항상 green" 맹점과 동일한 강도였다. `aggregate-ci.yml`의
+  apps/api 술어 블록에 등록해 실효화했다. 그 밖에 job 이름 과장 정정(freshness→pin-consistency),
+  `continue-on-error`가 예약 실패 알림 경로를 죽이던 문제 제거, concurrency group 충돌
+  (schedule/push 상호 취소) 수정, subset의 securityScheme 누락으로 admin 인증 헤더 계약이 게이트
+  밖이던 것 보완.
+- **리뷰어 2**: 23개 핀을 독립 재검증(불일치 0)했고, 내 소비자 귀속 오기를 **세 번째로** 정정했다
+  (`search.py`는 `name`만 읽고 lon/lat은 `admin_pois`/`kasi`가 top-level에서 읽는다). 아울러 이
+  소비자의 **유일한 e2e fixture가 새 계약상 불가능한 payload**를 쓰고 있던 것을 찾아, 실제 shape로
+  고치고 testcontainers로 실행해 통과를 확인했다.
+- **파생 발견**: `search.py::_snapshot_coord`가 `feature_snapshot["coord"]`만 읽는데 Map view는
+  `extra="forbid"` + `coord` 미보유라 **구조적으로 항상 None** — map-import POI가 통합 검색에서
+  좌표 null이다. 런타임 수정은 계약 PR 범위 밖이라 `T-VN-H29`로 등록했다.
+- **검증**: n150 CI-parity(ruff/format/mypy/unit 675 passed) + freshness 양쪽 실증 +
+  integration testcontainers 실행 1 passed + 실제 CI에서 신규 게이트 pass(9s)·staleness skip 확인.
+
 ## 2026-07-28 (claude) — Lane A a0 T-VN-H07D ①: admin detail-snapshot payload 타입화 (Map half)
 
 **결론**: #815의 전제가 조사로 확인됐다 — PinVi가 실제로 소비하는 admin detail-snapshot의
