@@ -1720,6 +1720,7 @@ export function VWorldFeatureClusters({
           }
           // selection outline은 마커 풀을 건드리지 않고 element에만 토글(#500 (c)).
           const element = marker.getElement();
+          element.dataset.featureId = featureId;
           pointElements.set(featureId, element);
           setSelectedOutline(element, selectedId === featureId);
           next.add(id);
