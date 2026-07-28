@@ -303,9 +303,13 @@ async function captureFeatureCollectionResponsesDuring(
     await Promise.all(
       observed.map(async (request) => {
         const response = await request.response();
-        if (response !== null) return response;
+        const finishError =
+          response === null ? null : await response.finished();
+        const failureText =
+          request.failure()?.errorText ?? finishError?.message ?? "";
+        if (failureText.length === 0 && response !== null) return response;
         expect(
-          request.failure()?.errorText ?? "",
+          failureText,
           `취소 사유 없는 feature collection GET: ${request.url()}`,
         ).toMatch(/abort|cancel/i);
         return null;
