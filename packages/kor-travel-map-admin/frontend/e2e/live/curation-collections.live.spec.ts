@@ -38,6 +38,9 @@ const EXECUTE_IMPORT = process.env.E2E_CURATION_IMPORT_WRITE === "1";
 const EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS = Number(
   process.env.E2E_EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS ?? "486",
 );
+const EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES = Number(
+  process.env.E2E_EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES ?? "15",
+);
 const MULTI_OBSERVATION_FEATURE_ID = "f_4127310100_e_227e045425edb459";
 const RESOURCE_ROOT =
   process.env.E2E_CURATION_RESOURCE_ROOT ??
@@ -229,7 +232,9 @@ test.describe("공식 큐레이션 collection live", () => {
     });
     await lighthouseButton.click();
     const detail = page.getByTestId("curation-collection-detail");
-    await expect(detail.getByText("Feature 미연결", { exact: true })).toHaveCount(15);
+    await expect(detail.getByText("Feature 미연결", { exact: true })).toHaveCount(
+      EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES,
+    );
   });
 
   test("지도 marker·목록·Feature 상세·REST가 두 회차와 복수 관측을 모두 표시한다", async ({
