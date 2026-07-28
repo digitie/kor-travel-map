@@ -35,8 +35,10 @@
   JSON 섹션, 구 create/review/preview 접근성 이름과 번역 상태, 동시 필터 변경의 비결정적
   이름 검색을 현행 UI 계약에 맞췄다. admin 목록은 필터·정렬을 먼저 확정한 뒤 exact
   `feature_id` PK 검색 응답 본문과 row를 함께 단언한다.
-- **재개용 resource**: clone `ktm-tvn45-db`, dump와 Live artifact는 PR 머지 뒤 다음 task
-  착수 전 재사용 판정을 위해 보존했다. clone migration head는
+- **재개용 resource**: clone `ktm-tvn45-db`, dump와 redacted checkpoint는 PR 머지 뒤 다음
+  task 착수 전 재사용 판정을 위해 보존했다. Playwright 인증 상태/cookie·raw trace·실데이터
+  screenshot·민감 로그·임시 env/session secret은 재사용하지 않고 Live 종료 직후 폐기한다.
+  clone migration head는
   `0063_pipeline_root_id`, Feature **1,030,461건**, POI cache target **90건**이며 파괴적
   실행 후 clone health는 정상이다. 호환성·오염·디스크 판정 결과는 다음
   `resume.md`/`journal.md` 갱신에 기록한다.

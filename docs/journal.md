@@ -31,9 +31,11 @@ add/update/reject/deactivate/delete 파괴적 UI workflow를 n150 격리 prod cl
   non-deleted Feature와 pending request는 모두 0건이라 active 검증을 오염시키지 않는다.
   production container/DB는 변경하지 않았고 clone health는 정상이다.
 - **재사용 checkpoint**: `ktm-tvn45-db`는 head `0063_pipeline_root_id`, Feature
-  1,030,461건, POI cache target 90건이다. dump와 Live artifact를 PR 성공만으로 지우지 않고
-  머지 후 다음 task 전에 schema/fixture·파괴적 잔여물·코드/API 호환성·약 18GB DB의 디스크
-  비용을 평가한다. 재사용/정리 결과는 다음 resume/journal에 resource 이름과 함께 기록한다.
+  1,030,461건, POI cache target 90건이다. dump와 이 수치만 담은 redacted checkpoint를 PR
+  성공만으로 지우지 않고 머지 후 다음 task 전에 schema/fixture·파괴적 잔여물·코드/API
+  호환성·약 18GB DB의 디스크 비용을 평가한다. Playwright 인증 상태/cookie·raw trace·
+  실데이터 screenshot·민감 로그·임시 env/session secret은 재사용 대상에서 제외하고 Live
+  종료 직후 폐기한다. 재사용/정리 결과는 다음 resume/journal에 resource 이름과 함께 기록한다.
 - **문서 규율**: `agent-workflow.md`, `agent-failure-patterns.md`, `tasks.md`의 즉시 정리
   문구를 같은 post-merge 재사용 판정 규율로 통일했다. 현재 다음 Lane B 작업은
   `T-VN-46`, `T-VN-H18`은 실행 lane 밖 거버넌스 보류다.

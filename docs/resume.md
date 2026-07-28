@@ -4,8 +4,8 @@
 
 **다음 한 작업**: PR #871 exact head를 적대적 리뷰어 2명이 재검토하고 전체 gate·GitHub
 Actions green 뒤 셀프 머지한다. 머지 후 다음 Lane B task `T-VN-46` 착수 전에
-`ktm-tvn45-db`·dump·artifact의 migration/schema/fixture·파괴적 잔여물·코드/API 호환성·
-디스크 여유를 판정해 재사용 또는 정확한 정리를 기록한다.
+`ktm-tvn45-db`·dump·redacted checkpoint의 migration/schema/fixture·파괴적 잔여물·
+코드/API 호환성·디스크 여유를 판정해 재사용 또는 정확한 정리를 기록한다.
 
 - 지도 Live spec은 `/v1/admin/features/in-bounds`의 모든 요청 URL과
   `items`/`clusters` 응답을 검증한다. cache hit는 map idle 뒤 마지막 성공 응답의 전체 point
@@ -21,8 +21,9 @@ Actions green 뒤 셀프 머지한다. 머지 후 다음 Lane B task `T-VN-46` �
   admin 목록의 exact `feature_id` 최종 응답 대기를 반영했다.
 - 재개용 clone `ktm-tvn45-db`는 migration head `0063_pipeline_root_id`, Feature
   **1,030,461건**, POI cache target **90건**이며 health가 정상이다. API/UI process와
-  민감한 임시 env는 최종 검증 뒤 정지·폐기하되 DB·dump·검증 artifact는 머지 후 재사용 판정
-  전까지 보존한다.
+  Playwright 인증 상태/cookie·raw trace·실데이터 screenshot·민감 로그·임시 env/session
+  secret은 최종 검증 직후 폐기한다. DB·dump와 위 수치만 담은 redacted checkpoint만 머지 후
+  재사용 판정 전까지 보존한다.
 - `T-VN-H18`은 어떤 Agent A/B 실행 lane에도 속하지 않는 거버넌스 결정 대기 보류 항목이다.
   repo 소유자가 approval enforcement 전환 시점을 정하기 전에는 착수하지 않는다.
 

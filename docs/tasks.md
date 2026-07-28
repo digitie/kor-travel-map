@@ -96,10 +96,13 @@ barrier로 직렬화한다.
   checkpoint와 exact code/data identity를 기록한다. 실패한 단계 이전 산출물의 무결성을
   증명할 수 있으면 처음부터 반복하지 않고 실패 지점부터 재개한다. 무결성을 증명할 수 없거나
   선행 단계가 실패 원인에 영향받았을 때만 처음부터 실행한다. 최종 성공 뒤 API/UI process는
-  정지하되 격리 DB·dump·immutable artifact는 PR 성공만으로 즉시 삭제하지 않는다. PR 머지 후
-  다음 task 착수 전에 migration head·schema/fixture 계약·파괴적 실행 잔여물·코드/API 호환성·
-  디스크 여유를 확인해 재사용 가능하면 이름·head·fixture identity와 근거를
-  `resume.md`/`journal.md`에 기록하고, 불가능할 때만 해당 격리 resource를 정확히 정리한다.
+  정지하되 격리 DB·dump와 migration head·checksum·row count·fixture identity처럼 명시적으로
+  허용한 redacted immutable checkpoint는 PR 성공만으로 즉시 삭제하지 않는다. Playwright
+  `storageState`/cookie, raw trace, 실데이터 screenshot, 민감 로그, 임시 env·session secret은
+  재사용하지 않고 성공·실패와 무관하게 실행 직후 안전하게 폐기한다. PR 머지 후 다음 task
+  착수 전에 migration head·schema/fixture 계약·파괴적 실행 잔여물·코드/API 호환성·디스크
+  여유를 확인해 재사용 가능하면 이름·head·fixture identity와 근거를 `resume.md`/
+  `journal.md`에 기록하고, 불가능할 때만 해당 격리 resource를 정확히 정리한다.
 - **cross-lane 순서 제약**: C6c pair capture와 #392는 이미 완료됐다. H07은 오래 열린
   #814/#403을 최신 main에 재배치하고 중복 assertion을 제거한 뒤 H07D→H07C 순서로 진행한다.
   H22C는 같은 curation frontend를 만지는 T-VN-48B·49B 뒤에 시작한다. T-VN-12A의 command
