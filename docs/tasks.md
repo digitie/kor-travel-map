@@ -22,8 +22,7 @@ barrier로 직렬화한다.
   - a0: [x] `T-VN-H07B`(PinVi #403 재감사·landing) →
     [x] `T-VN-H07D`(#815 admin snapshot/freshness) →
     [x] `T-VN-H07C`(#812 — v5 승격 기각, ADR-079)
-  - a1: [ ] `T-VN-H29`(PinVi 검색 좌표 null 복구 — H07D 파생) →
-    [ ] `T-VN-H27`(#819 HAProxy tunnel) →
+  - a1: [x] `T-VN-H29`(PinVi 검색 좌표 null 복구 — H07D 파생) →
     [ ] `T-VN-H21`(geo live 인증 preflight·5건 재실증) →
     [ ] `T-VN-H28A`(#673 실데이터 오탐 분류) →
     [ ] `T-VN-H28B`(#673 검증 규칙·회복 경로) →
@@ -55,6 +54,11 @@ barrier로 직렬화한다.
     [ ] `T-VN-40C`
   - 최종 단일 cutover: [ ] `T-VN-39`
 - **보류/외부 추적**
+  - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
+    사용자 지시 2026-07-29). 프록시는 **OPNsense 라우터의 HAProxy**이고 저장소에 config가 없다
+    (docker-manager `*haproxy*` 0건, n150은 haproxy inactive·`/etc/haproxy/` 없음). 설정 적용도
+    proxy metric 확인도 라우터 접근이 필요해 에이전트가 실행할 수 없다. 라우터에
+    `timeout tunnel` 적용 후 quiet 2주기 실증 → #819 close.
   - [ ] `T-VN-H18` — GitHub approval provenance gate(보류: GitHub 자기 PR 승인 불가와
     required-review 운영 주체 결정 필요)
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
@@ -212,7 +216,14 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
 > 2026-07-27 open-PR·이슈 전수 확인에서 main에 잔존하는 미수정 버그/하드닝을 백로그화.
 > 각 항목은 GitHub 이슈에 tasks.md 백로그 링크를 함께 기록한다.
 
-- [ ] T-VN-H27 — **#819 HAProxy WebSocket tunnel timeout 적용·실증**
+- [ ] T-VN-H27 — **#819 HAProxy WebSocket tunnel timeout 적용·실증** — **보류(2026-07-29)**
+
+  조사 결과 프록시는 **OPNsense 라우터의 HAProxy**다. docker-manager에 HAProxy config가 없고
+  (`*haproxy*` 파일 0건, `timeout tunnel` 언급 0건), n150에서도 haproxy는 inactive이며
+  `/etc/haproxy/`가 없다. 즉 tasks가 전제한 "docker-manager 공개 base config"는 존재하지 않고,
+  설정 적용과 proxy metric 확인 모두 **라우터 접근**이 필요해 에이전트가 수행할 수 없다.
+  사용자 지시로 보류한다 — 운영자가 라우터에 `timeout tunnel`을 적용한 뒤 quiet 2주기 실증으로
+  #819를 닫는다.
 
   docker-manager의 공개 가능한 base config에 `timeout tunnel`을 명시하고 local prod 값은
   gitignored runbook에서 결선한다. quiet 상태를 heartbeat 두 주기 이상 유지해 같은 ops-live
@@ -395,7 +406,7 @@ H07A의 실제 user OpenAPI SHA와 대조한 residual consumer contract만 남�
   OpenAPI와 PinVi vendored snapshot 양쪽에서 고정한다. admin/user snapshot freshness를 CI에서
   실제 비교해 skip으로 green이 되는 경로를 제거한다.
 
-- [ ] T-VN-H29 — **PinVi 통합검색 map-import POI 좌표 null 복구** (T-VN-H07D 파생, 2026-07-28)
+- [x] T-VN-H29 — **PinVi 통합검색 map-import POI 좌표 null 복구** (PinVi PR #418, 2026-07-29)
 
   `pinvi apps/api/app/api/v1/search.py::_snapshot_coord`가 `feature_snapshot["coord"]`만 읽는데,
   Map `CuratedFeatureDetailFeatureSnapshotView`는 `extra="forbid"`이고 `coord` property가 없다

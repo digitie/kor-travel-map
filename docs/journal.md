@@ -17,6 +17,30 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-29 (claude) — Lane A a1: T-VN-H29 완료 + T-VN-H27 보류
+
+**결론**: H07D 적대 리뷰가 찾아낸 실제 사용자 가시 버그를 PinVi PR #418로 고쳤다. H27은 조사 결과
+에이전트 실행이 불가능해 사용자 지시로 보류했다.
+
+- **T-VN-H29**: map-curated import POI가 `GET /search`에서만 좌표 null. 근인은
+  `_snapshot_coord`가 중첩 `feature_snapshot["coord"]`만 읽은 것 — Map 생성부 view는
+  `extra="forbid"`이고 `coord` property가 **아예 없어**(H07D typed view) 좌표는 top-level
+  `lon`/`lat`으로 온다. 즉 그 read는 **구조적으로 항상 None**이었다. 다섯 번째 추출기를 만들지 않고
+  정본 `extract_feature_coord`에 위임했다(기존 동작의 상위집합).
+  - 리뷰어 2명이 전제를 데이터 흐름으로 실증(Map 생성부 → `CuratedPlanPoi` → `TripDayPoi` → 검색)
+    하고 회귀 위험도 배제했다 — 비-map snapshot은 전부 중첩 `coord`, top-level
+    `x`/`y`/`geometry`/`location` payload는 0건, 응답 계약은 기존 `_coord`/`_float`가 이미 처리.
+  - 리뷰 지적으로 **내가 남겼던 "알려진 열화" 서술 2곳**(계약 게이트 주석·통합 문서)이 이 PR로
+    거짓이 되는 것을 해소 기록으로 정정했고, 커버리지를 배선(`PlaceSearchResult.coord`)·
+    nullable `lon`/`lat`·0.0 좌표 보존까지 넓혔다.
+- **T-VN-H27 보류**: 프록시는 **OPNsense 라우터의 HAProxy**다. docker-manager에 HAProxy config가
+  없고(`*haproxy*` 0건) n150도 haproxy inactive·`/etc/haproxy/` 부재라, tasks가 전제한
+  "docker-manager 공개 base config"가 존재하지 않는다. 설정 적용도 proxy metric 확인도 라우터
+  접근이 필요해 에이전트가 수행할 수 없어 사용자 지시로 보류했다.
+- **교훈**: 계약을 typed로 좁히면 소비자 쪽의 잘못된 read가 **구조적으로 죽은 코드**가 된다.
+  계약 작업 시 소비자 read를 함께 훑으면 이런 잠재 버그가 드러난다 — H07D의 소비자 전수 감사가
+  실제로 그 역할을 했다.
+
 ## 2026-07-29 (claude) — Lane A a0 T-VN-H07C: v5 승격을 **구현 후 기각** (ADR-079), a0 종료
 
 **결론**: #812의 ③(배포 compatible-pair에 pinned OpenAPI SHA)을 양 저장소에 실제로 구현하고
