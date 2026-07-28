@@ -1,5 +1,18 @@
 import { expect, test } from "@playwright/test";
 
+import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
+
+type CategoriesResponse = components["schemas"]["CategoriesResponse"];
+
+const EMPTY_CATEGORIES: CategoriesResponse = {
+  data: { include_counts: false, items: [] },
+  meta: {
+    duration_ms: 0,
+    request_id: "e2e-features-new-categories",
+  },
+};
+
 /**
  * `/admin/features/new` (1097줄 수동 생성 폼) — ZERO 커버 페이지 spec
  * (T-AUDIT-0616, `docs/reports/e2e-scenario-coverage-2026-06-16.md` §1.2).
@@ -17,13 +30,17 @@ import { expect, test } from "@playwright/test";
 test.describe("/admin/features/new", () => {
   test.beforeEach(async ({ page }) => {
     await page.route("**/v1/categories**", async (route) => {
+      const request = route.request();
+      const apiPath = bffApiPath(request.url());
+      if (request.method() !== "GET" || apiPath !== "/v1/categories") {
+        throw new Error(
+          `Unhandled category route: ${request.method()} ${apiPath}`,
+        );
+      }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          data: { items: [] },
-          meta: {},
-        }),
+        body: JSON.stringify(EMPTY_CATEGORIES),
       });
     });
   });
@@ -35,16 +52,23 @@ test.describe("/admin/features/new", () => {
       page.getByRole("heading", { level: 1, name: "새 Feature" }),
     ).toBeVisible();
 
-    for (const section of ["좌표", "kor-travel-geo", "중복 후보", "기본 정보", "주소", "상세"]) {
+    for (const section of [
+      "좌표",
+      "kor-travel-geo",
+      "중복 후보",
+      "기본 정보",
+      "주소",
+      "상세",
+    ]) {
       await expect(
         page.getByRole("heading", { level: 2, name: section }),
       ).toBeVisible();
     }
 
     await expect(page.getByLabel("create name", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("create category", { exact: true })).toHaveValue(
-      "01070300",
-    );
+    await expect(
+      page.getByLabel("create category", { exact: true }),
+    ).toHaveValue("01070300");
     await expect(
       page.getByRole("textbox", { name: "경도", exact: true }),
     ).toBeVisible();

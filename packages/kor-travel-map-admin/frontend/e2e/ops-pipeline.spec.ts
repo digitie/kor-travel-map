@@ -1664,10 +1664,9 @@ test.describe("/ops/pipeline", () => {
       requestRow.getByText("kma_short_forecast", { exact: true }),
     ).toBeVisible();
     await expect(
-      requestRow.getByText(
-        "python-kma-api/kma_short_forecast · target_grids",
-        { exact: true },
-      ),
+      requestRow.getByText("python-kma-api/kma_short_forecast · target_grids", {
+        exact: true,
+      }),
     ).toBeVisible();
     // C3b (c): request 상태와 projected_job 진행률·단계 분리 표시.
     await expect(requestRow.getByText("40% · loading")).toBeVisible();
@@ -2063,6 +2062,135 @@ test.describe("/ops/pipeline", () => {
     await expect(provider).toBeFocused();
     await expect(provider).toHaveValue("python-kma-api");
     await expect(page).toHaveURL(/provider=python-kma-api/);
+  });
+
+  test("focus 중 programmatic history 변경은 세 타임라인 draft와 REST scope를 함께 교체한다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page);
+    await page.goto(
+      "/ops/pipeline?provider=alpha&dataset_key=alpha-data&sync_scope=alpha-scope",
+    );
+
+    const transitions = [
+      {
+        label: "provider 필터",
+        provider: "beta",
+        datasetKey: "beta-data",
+        syncScope: "beta-scope",
+      },
+      {
+        label: "데이터셋 필터",
+        provider: "gamma",
+        datasetKey: "gamma-data",
+        syncScope: "gamma-scope",
+      },
+      {
+        label: "sync scope 필터",
+        provider: "delta",
+        datasetKey: "delta-data",
+        syncScope: "delta-scope",
+      },
+    ] as const;
+
+    for (const transition of transitions) {
+      const field = page.getByLabel(transition.label);
+      await field.focus();
+      const queryStart = counters.executionQueries.length;
+      await page.evaluate(({ provider, datasetKey, syncScope }) => {
+        const query = new URLSearchParams({
+          provider,
+          dataset_key: datasetKey,
+          sync_scope: syncScope,
+        });
+        window.history.pushState(null, "", `/ops/pipeline?${query}`);
+      }, transition);
+
+      await expect(field).toBeFocused();
+      await expect(page.getByLabel("provider 필터")).toHaveValue(
+        transition.provider,
+      );
+      await expect(page.getByLabel("데이터셋 필터")).toHaveValue(
+        transition.datasetKey,
+      );
+      await expect(page.getByLabel("sync scope 필터")).toHaveValue(
+        transition.syncScope,
+      );
+      await expect
+        .poll(() =>
+          counters.executionQueries
+            .slice(queryStart)
+            .some(
+              (query) =>
+                query.get("provider") === transition.provider &&
+                query.get("dataset_key") === transition.datasetKey &&
+                query.get("sync_scope") === transition.syncScope,
+            ),
+        )
+        .toBe(true);
+    }
+  });
+
+  test("focus 중 Back/Forward는 세 타임라인 draft와 REST scope를 함께 복원한다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page);
+    const alphaUrl =
+      "/ops/pipeline?provider=alpha&dataset_key=alpha-data&sync_scope=alpha-scope";
+    const betaUrl =
+      "/ops/pipeline?provider=beta&dataset_key=beta-data&sync_scope=beta-scope";
+    await page.goto(alphaUrl);
+    await page.evaluate((url) => {
+      window.history.pushState(null, "", url);
+    }, betaUrl);
+    await expect(page.getByLabel("provider 필터")).toHaveValue("beta");
+
+    for (const label of ["provider 필터", "데이터셋 필터", "sync scope 필터"]) {
+      const field = page.getByLabel(label);
+      await field.focus();
+      let queryStart = counters.executionQueries.length;
+      await page.goBack();
+
+      await expect(field).toBeFocused();
+      await expect(page.getByLabel("provider 필터")).toHaveValue("alpha");
+      await expect(page.getByLabel("데이터셋 필터")).toHaveValue("alpha-data");
+      await expect(page.getByLabel("sync scope 필터")).toHaveValue(
+        "alpha-scope",
+      );
+      await expect
+        .poll(() =>
+          counters.executionQueries
+            .slice(queryStart)
+            .some(
+              (query) =>
+                query.get("provider") === "alpha" &&
+                query.get("dataset_key") === "alpha-data" &&
+                query.get("sync_scope") === "alpha-scope",
+            ),
+        )
+        .toBe(true);
+
+      queryStart = counters.executionQueries.length;
+      await page.goForward();
+      await expect(field).toBeFocused();
+      await expect(page.getByLabel("provider 필터")).toHaveValue("beta");
+      await expect(page.getByLabel("데이터셋 필터")).toHaveValue("beta-data");
+      await expect(page.getByLabel("sync scope 필터")).toHaveValue(
+        "beta-scope",
+      );
+      await expect
+        .poll(() =>
+          counters.executionQueries
+            .slice(queryStart)
+            .some(
+              (query) =>
+                query.get("provider") === "beta" &&
+                query.get("dataset_key") === "beta-data" &&
+                query.get("sync_scope") === "beta-scope",
+            ),
+        )
+        .toBe(true);
+    }
   });
 
   test("필터·탭 URL을 초기 복원하고 back/forward로 조사 상태를 재현", async ({
@@ -2926,9 +3054,7 @@ test.describe("/ops/pipeline", () => {
     await expect(page.getByTestId("schedule-command-result")).toBeVisible({
       timeout: 5_000,
     });
-    await expect
-      .poll(() => counters.scheduleQueries)
-      .toBeGreaterThanOrEqual(3);
+    await expect.poll(() => counters.scheduleQueries).toBeGreaterThanOrEqual(3);
     await expect(
       page.getByRole("button", {
         name: `${replacementName} 스케줄 중지`,

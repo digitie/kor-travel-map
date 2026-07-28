@@ -64,6 +64,13 @@ export interface TimelineFilters {
 
 type TimelineUrlUpdates = Record<string, string | null>;
 
+interface TimelineDrafts {
+  datasetKey: string | null;
+  provider: string | null;
+  syncScope: string | null;
+  urlSignature: string;
+}
+
 function padDatePart(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -118,18 +125,36 @@ export function ExecutionTimeline({
 }) {
   const kind = initialFilters.kind ?? "all";
   const status = initialFilters.status ?? "all";
-  const [providerDraft, setProviderDraft] = useState<string | null>(null);
-  const [datasetKeyDraft, setDatasetKeyDraft] = useState<string | null>(null);
-  const [syncScopeDraft, setSyncScopeDraft] = useState<string | null>(null);
-  const provider = providerDraft ?? initialFilters.provider ?? "";
-  const datasetKey = datasetKeyDraft ?? initialFilters.datasetKey ?? "";
-  const syncScope = syncScopeDraft ?? initialFilters.syncScope ?? "";
+  const urlDraftSignature = JSON.stringify([
+    initialFilters.provider ?? "",
+    initialFilters.datasetKey ?? "",
+    initialFilters.syncScope ?? "",
+  ]);
+  const [drafts, setDrafts] = useState<TimelineDrafts>({
+    datasetKey: null,
+    provider: null,
+    syncScope: null,
+    urlSignature: urlDraftSignature,
+  });
+  if (drafts.urlSignature !== urlDraftSignature) {
+    setDrafts({
+      datasetKey: null,
+      provider: null,
+      syncScope: null,
+      urlSignature: urlDraftSignature,
+    });
+  }
+  const provider = drafts.provider ?? initialFilters.provider ?? "";
+  const datasetKey = drafts.datasetKey ?? initialFilters.datasetKey ?? "";
+  const syncScope = drafts.syncScope ?? initialFilters.syncScope ?? "";
   const createdFrom = datetimeLocalValue(initialFilters.createdFrom);
   const createdTo = datetimeLocalValue(initialFilters.createdTo);
   const loadBatchId = initialLoadBatchId ?? "";
   const parentJobId = initialParentJobId ?? "";
   const providerFilter = provider.trim() || undefined;
-  const datasetFilter = providerFilter ? datasetKey.trim() || undefined : undefined;
+  const datasetFilter = providerFilter
+    ? datasetKey.trim() || undefined
+    : undefined;
   const syncScopeFilter =
     providerFilter && datasetFilter ? syncScope.trim() || undefined : undefined;
   const filterSignature = JSON.stringify([
@@ -452,42 +477,47 @@ export function ExecutionTimeline({
               aria-label="provider 필터"
               placeholder="예: python-kma-api"
               value={provider}
-              onBlur={() => setProviderDraft(null)}
+              onBlur={() =>
+                setDrafts((current) => ({ ...current, provider: null }))
+              }
               onChange={(event) => {
                 const value = event.target.value;
-                setProviderDraft(value);
+                setDrafts((current) => ({ ...current, provider: value }));
                 setStoredCursorStack([]);
                 setStoredBaselineTop(null);
-                onUrlChange(
-                  { provider: value.trim() || null },
-                  "replace",
-                );
+                onUrlChange({ provider: value.trim() || null }, "replace");
               }}
-              onFocus={() => setProviderDraft(provider)}
+              onFocus={() => setDrafts((current) => ({ ...current, provider }))}
             />
           </FilterField>
           <FilterField label="데이터셋">
             <Input
-              aria-describedby={!providerFilter ? "timeline-dataset-prerequisite" : undefined}
+              aria-describedby={
+                !providerFilter ? "timeline-dataset-prerequisite" : undefined
+              }
               aria-label="데이터셋 필터"
               disabled={!providerFilter}
               placeholder="예: kma_short_forecast"
               value={datasetKey}
-              onBlur={() => setDatasetKeyDraft(null)}
+              onBlur={() =>
+                setDrafts((current) => ({ ...current, datasetKey: null }))
+              }
               onChange={(event) => {
                 const value = event.target.value;
-                setDatasetKeyDraft(value);
+                setDrafts((current) => ({ ...current, datasetKey: value }));
                 setStoredCursorStack([]);
                 setStoredBaselineTop(null);
-                onUrlChange(
-                  { dataset_key: value.trim() || null },
-                  "replace",
-                );
+                onUrlChange({ dataset_key: value.trim() || null }, "replace");
               }}
-              onFocus={() => setDatasetKeyDraft(datasetKey)}
+              onFocus={() =>
+                setDrafts((current) => ({ ...current, datasetKey }))
+              }
             />
             {!providerFilter ? (
-              <p className="text-xs text-text-tertiary" id="timeline-dataset-prerequisite">
+              <p
+                className="text-xs text-text-tertiary"
+                id="timeline-dataset-prerequisite"
+              >
                 provider를 먼저 입력하세요.
               </p>
             ) : null}
@@ -503,21 +533,25 @@ export function ExecutionTimeline({
               disabled={!providerFilter || !datasetFilter}
               placeholder="예: target_grids"
               value={syncScope}
-              onBlur={() => setSyncScopeDraft(null)}
+              onBlur={() =>
+                setDrafts((current) => ({ ...current, syncScope: null }))
+              }
               onChange={(event) => {
                 const value = event.target.value;
-                setSyncScopeDraft(value);
+                setDrafts((current) => ({ ...current, syncScope: value }));
                 setStoredCursorStack([]);
                 setStoredBaselineTop(null);
-                onUrlChange(
-                  { sync_scope: value.trim() || null },
-                  "replace",
-                );
+                onUrlChange({ sync_scope: value.trim() || null }, "replace");
               }}
-              onFocus={() => setSyncScopeDraft(syncScope)}
+              onFocus={() =>
+                setDrafts((current) => ({ ...current, syncScope }))
+              }
             />
             {!providerFilter || !datasetFilter ? (
-              <p className="text-xs text-text-tertiary" id="timeline-scope-prerequisite">
+              <p
+                className="text-xs text-text-tertiary"
+                id="timeline-scope-prerequisite"
+              >
                 provider와 데이터셋을 먼저 입력하세요.
               </p>
             ) : null}

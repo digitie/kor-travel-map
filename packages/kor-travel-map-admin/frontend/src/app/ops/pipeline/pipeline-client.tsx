@@ -5,10 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import {
-  opsLiveConnectionLabel,
-  useOpsLiveInvalidation,
-} from "@/api/live";
+import { opsLiveConnectionLabel, useOpsLiveInvalidation } from "@/api/live";
 import {
   type ExecutionKind,
   type PipelineOverviewResponse,
@@ -317,7 +314,10 @@ export function PipelineClient() {
       } else if (providerChanged && !datasetExplicitlyUpdated) {
         next.delete("dataset_key");
         next.delete("sync_scope");
-      } else if (!datasetKey || ((providerChanged || datasetChanged) && !scopeExplicitlyUpdated)) {
+      } else if (
+        !datasetKey ||
+        ((providerChanged || datasetChanged) && !scopeExplicitlyUpdated)
+      ) {
         next.delete("sync_scope");
       }
       const query = next.toString();
@@ -354,13 +354,7 @@ export function PipelineClient() {
     } else if (urlSyncScope && !hasExactScopeTuple) {
       updateUrl({ sync_scope: null }, "replace");
     }
-  }, [
-    hasExactScopeTuple,
-    updateUrl,
-    urlDatasetKey,
-    urlProvider,
-    urlSyncScope,
-  ]);
+  }, [hasExactScopeTuple, updateUrl, urlDatasetKey, urlProvider, urlSyncScope]);
 
   const selectExecution = (
     kind: ExecutionKind,
@@ -387,7 +381,13 @@ export function PipelineClient() {
         createdFrom: searchParams.get("created_from") ?? undefined,
         createdTo: searchParams.get("created_to") ?? undefined,
       }),
-    [hasExactScopeTuple, searchParams, urlDatasetKey, urlProvider, urlSyncScope],
+    [
+      hasExactScopeTuple,
+      searchParams,
+      urlDatasetKey,
+      urlProvider,
+      urlSyncScope,
+    ],
   );
   const timelineLoadBatchId = searchParams.get("load_batch_id") ?? undefined;
   const timelineParentJobId = searchParams.get("parent_job_id") ?? undefined;
