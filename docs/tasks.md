@@ -34,9 +34,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [x] `T-VN-48A` → [x] `T-VN-48B` → [x] `T-VN-48C` →
-    [ ] `T-VN-48D`(mocked E2E drift, **A→D 단일 PR**) →
-    [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
+  - b0: [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
     [ ] `T-VN-49D`(React 구조 debt)
   - b1: [ ] `T-VN-11A` → [ ] `T-VN-11B`(service batch) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
@@ -113,7 +111,8 @@ barrier로 직렬화한다.
 - **cross-lane 순서 제약**: C6c pair capture와 #392, H07A의 Map #814 landing
   (`259a9ec5`)은 이미 완료됐다. H07B는 오래 열린 PinVi #403을 최신 main에 재배치하고 중복
   assertion을 제거한 뒤 H07D→H07C 순서로 진행한다.
-  H22C는 같은 curation frontend를 만지는 T-VN-48B·49B 뒤에 시작한다. T-VN-12A의 command
+  H22C는 완료된 T-VN-48B에 이어 같은 curation frontend를 만지는 T-VN-49B가 머지된 뒤
+  시작한다. T-VN-12A의 command
   inventory freeze는 H22B의 reclassification command가 머지된 뒤 시작해 curation idempotency가
   누락되지 않게 한다. Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
   T-VN-40은 양 lane의 T-VN-32~38 하위 task가 모두 끝난 join barrier 뒤에 시작하며,
@@ -144,33 +143,6 @@ barrier로 직렬화한다.
     대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
 
 ## Lane B 상세 — b0 선행 하드닝
-
-### T-VN-48 — mocked Playwright drift 단계별 제거
-
-T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drift를 재현했다. 사용자
-지시에 따라 A→B→C→D를 **하나의 branch/PR**에서 수행하되, failure manifest를 먼저 고정하고
-기능 경계별 checkpoint commit으로 줄여 각 단계의 원인·회귀 범위를 잃지 않는다.
-
-- [x] T-VN-48A — **실패 manifest·runner 고정**
-
-  exact main SHA, spec/test title, 최초 실패 단계, request/accessible-name/actor 차이를
-  machine-readable artifact로 고정한다. retry로 사라지는 flake와 deterministic contract drift를
-  분리하고 같은 PR의 각 후속 checkpoint가 자기 소유 실패만 줄였는지 fail-close한다.
-
-- [x] T-VN-48B — **Feature·큐레이션·검토 mocked 계약 정렬**
-
-  `후보 A/B` 대 `feature A/B`, 한국어 dialog name, 실제 principal actor와 Feature/curation
-  API route·payload drift를 현행 UI 계약에 맞춘다.
-
-- [x] T-VN-48C — **ops datasets·pipeline mocked 계약 정렬**
-
-  `/v1/ops/datasets` list/detail/preview와 pipeline continuation·schedule recovery route mock을
-  현행 canonical URL·principal 계약에 맞추고, stale legacy route가 다시 등록되면 실패시킨다.
-
-- [ ] T-VN-48D — **나머지 shell/auth/files 계약과 전체 병렬 gate**
-
-  앞 단계 소유 밖의 navigation/auth/files/offline drift를 정리한다. 전체 mocked suite를 n150
-  Linux에서 workers=1과 CI 병렬 모드 모두 green으로 만들고 manifest 잔여를 0으로 닫는다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 
