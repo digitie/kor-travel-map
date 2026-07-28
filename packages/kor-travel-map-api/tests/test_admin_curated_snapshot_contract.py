@@ -22,6 +22,16 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+# 저장소 루트의 `tests/unit/test_curated_repo.py` fixture(_FakeSession/_feature_row)를 재사용해
+# 실제 생성 payload로 view 정합을 검증한다(같은 생성부를 두 번 구현하지 않는다).
+# 루트 `pyproject.toml`의 `pythonpath = ["."]`가 이미 저장소 루트를 올려주므로 별도
+# `sys.path` 조작은 필요 없다. 이 세 심볼은 API 패키지 suite도 함께 쓰는 공유 fixture다.
+from tests.unit.test_curated_repo import (
+    _CURATED_ID,
+    _FakeSession,
+    _feature_row,
+)
+
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
 from kortravelmap.api.route_policy import _iter_flattened_routes, _resolve_route
@@ -33,16 +43,6 @@ from kortravelmap.api.routers.curated import (
     _snapshot_view,
 )
 from kortravelmap.api.settings import ApiSettings
-
-# 저장소 루트의 `tests/unit/test_curated_repo.py` fixture(_FakeSession/_feature_row)를 재사용해
-# 실제 생성 payload로 view 정합을 검증한다(같은 생성부를 두 번 구현하지 않는다).
-# 루트 `pyproject.toml`의 `pythonpath = ["."]`가 이미 저장소 루트를 올려주므로 별도
-# `sys.path` 조작은 필요 없다. 이 세 심볼은 API 패키지 suite도 함께 쓰는 공유 fixture다.
-from tests.unit.test_curated_repo import (
-    _CURATED_ID,
-    _FakeSession,
-    _feature_row,
-)
 
 pytestmark = pytest.mark.unit
 
