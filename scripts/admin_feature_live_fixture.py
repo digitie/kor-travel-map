@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
+import math
 import re
 from datetime import timedelta
 from decimal import Decimal
@@ -35,6 +37,48 @@ _LAT: Final[float] = 36.5
 def _feature_ids(run_id: str) -> tuple[str, str]:
     prefix = f"e2e_live_acceptance::{run_id}"
     return f"{prefix}::weather", f"{prefix}::price"
+
+
+def _api_feature_fingerprints(
+    run_id: str,
+) -> dict[str, tuple[float, float, frozenset[str]]]:
+    prefix = f"e2e_live_acceptance::{run_id}"
+    jitter = hashlib.sha256(f"acceptance-coord:{run_id}".encode()).digest()
+
+    def coord_jitter(offset: int) -> float:
+        return (
+            int.from_bytes(jitter[offset : offset + 4], "big") / 0xFFFFFFFF * 2 - 1
+        ) * 0.25
+
+    marker_lon = _LON + coord_jitter(0)
+    marker_lat = _LAT + coord_jitter(4)
+    expected: dict[str, tuple[float, float, frozenset[str]]] = {}
+    for index, status in enumerate(("draft", "inactive", "hidden")):
+        expected[f"{prefix}::marker::{status}"] = (
+            marker_lon + index * 0.001,
+            marker_lat + index * 0.001,
+            frozenset({f"E2E {status} marker {run_id}"}),
+        )
+    expected[f"{prefix}::correction"] = (
+        _LON,
+        _LAT - 0.002,
+        frozenset(
+            {
+                f"E2E correction baseline {run_id}",
+                f"E2E approved competing update {run_id}",
+            }
+        ),
+    )
+    search_token = hashlib.sha256(
+        f"acceptance-search:{run_id}".encode()
+    ).hexdigest()[:32]
+    for index, suffix in enumerate(("alpha", "beta")):
+        expected[f"{prefix}::search::{suffix}"] = (
+            _LON + 0.004 + index * 0.001,
+            _LAT + 0.004 + index * 0.001,
+            frozenset({f"e2esrch {search_token} {suffix}"}),
+        )
+    return expected
 
 
 async def _counts(session: AsyncSession, feature_ids: tuple[str, str]) -> dict[str, int]:
@@ -141,7 +185,7 @@ def _quote_identifier(value: str) -> str:
 
 async def _foreign_key_reference_counts(
     session: AsyncSession,
-    feature_ids: tuple[str, str],
+    feature_ids: tuple[str, ...],
 ) -> dict[str, int]:
     constraints = (
         await session.execute(
@@ -425,6 +469,158 @@ async def _cleanup(
     return observed, foreign_keys
 
 
+async def _purge_api_owned(
+    session: AsyncSession,
+    run_id: str,
+) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
+    expected = _api_feature_fingerprints(run_id)
+    feature_ids = tuple(expected)
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  feature_id, kind, name, category, status,
+                  marker_icon, marker_color, data_origin,
+                  x_extension.ST_X(coord) AS lon,
+                  x_extension.ST_Y(coord) AS lat
+                FROM feature.features
+                WHERE feature_id LIKE :prefix ESCAPE '\\'
+                ORDER BY feature_id
+                FOR UPDATE
+                """
+            ),
+            {"prefix": f"e2e_live_acceptance::{run_id}::%"},
+        )
+    ).mappings().all()
+    for row in rows:
+        feature_id = str(row["feature_id"])
+        fingerprint = expected.get(feature_id)
+        if fingerprint is None:
+            raise RuntimeError("purge 대상 prefix에 예상하지 않은 Feature가 있습니다")
+        expected_lon, expected_lat, expected_names = fingerprint
+        if (
+            row["kind"] != "place"
+            or row["category"] != "01070300"
+            or row["status"] != "deleted"
+            or row["marker_icon"] != "marker"
+            or row["marker_color"] != "P-02"
+            or row["data_origin"] != "user_request"
+            or row["name"] not in expected_names
+            or not math.isclose(
+                float(row["lon"]),
+                expected_lon,
+                rel_tol=0,
+                abs_tol=1e-9,
+            )
+            or not math.isclose(
+                float(row["lat"]),
+                expected_lat,
+                rel_tol=0,
+                abs_tol=1e-9,
+            )
+        ):
+            raise RuntimeError("purge 대상 API Feature fingerprint가 다릅니다")
+
+    request_rows = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  feature_id, action, state, review_mode, reason,
+                  requested_by, reviewed_by
+                FROM ops.feature_change_requests
+                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                ORDER BY created_at, request_id
+                FOR UPDATE
+                """
+            ),
+            {"feature_ids": list(feature_ids)},
+        )
+    ).mappings().all()
+    reason_prefix = f"admin feature live acceptance {run_id} "
+    for request in request_rows:
+        if (
+            request["feature_id"] not in expected
+            or request["action"] not in {"add", "update", "delete"}
+            or request["state"] not in {"applied", "rejected"}
+            or request["review_mode"] != "require_review"
+            or not isinstance(request["reason"], str)
+            or not request["reason"].startswith(reason_prefix)
+            or request["requested_by"] != "admin"
+            or request["reviewed_by"] != "admin"
+        ):
+            raise RuntimeError("purge 대상 change request fingerprint가 다릅니다")
+
+    foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
+    unexpected_references = {
+        key: value
+        for key, value in foreign_keys.items()
+        if value and key != "feature.feature_versions.feature_id"
+    }
+    if unexpected_references:
+        raise RuntimeError("purge 대상 Feature에 예상하지 않은 FK reference가 있습니다")
+
+    await session.execute(
+        text(
+            """
+            DELETE FROM ops.feature_change_requests
+            WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+            """
+        ),
+        {"feature_ids": list(feature_ids)},
+    )
+    await session.execute(
+        text(
+            """
+            DELETE FROM feature.features
+            WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+            """
+        ),
+        {"feature_ids": list(feature_ids)},
+    )
+    remaining_features = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*) FROM feature.features
+                    WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                    """
+                ),
+                {"feature_ids": list(feature_ids)},
+            )
+        )
+        .scalars()
+        .one()
+    )
+    remaining_requests = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*) FROM ops.feature_change_requests
+                    WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                    """
+                ),
+                {"feature_ids": list(feature_ids)},
+            )
+        )
+        .scalars()
+        .one()
+    )
+    if remaining_features or remaining_requests:
+        raise RuntimeError("API-owned purge가 완결되지 않았습니다")
+    return (
+        {"features": 0, "price_values": 0, "weather_values": 0},
+        foreign_keys,
+        {
+            "change_requests": len(request_rows),
+            "features": len(rows),
+        },
+    )
+
+
 async def _run(action: str, run_id: str) -> dict[str, object]:
     settings = KorTravelMapSettings()
     # make_async_engine은 normalize_async_dsn으로 plain `postgresql://` DSN도
@@ -438,6 +634,11 @@ async def _run(action: str, run_id: str) -> dict[str, object]:
                 counts, foreign_keys = await _seed(session, run_id)
             elif action == "cleanup":
                 counts, foreign_keys = await _cleanup(session, run_id)
+            elif action == "purge":
+                counts, foreign_keys, purged = await _purge_api_owned(
+                    session,
+                    run_id,
+                )
             else:
                 counts, foreign_keys = await _assert_owned_state(
                     session,
@@ -446,18 +647,23 @@ async def _run(action: str, run_id: str) -> dict[str, object]:
                 )
     finally:
         await engine.dispose()
-    return {
+    result: dict[str, object] = {
         "action": action,
         "counts": counts,
         "foreign_key_constraints_checked": len(foreign_keys),
-        "foreign_key_references": sum(foreign_keys.values()),
+        "foreign_key_references": (
+            0 if action == "purge" else sum(foreign_keys.values())
+        ),
         "version": 1,
     }
+    if action == "purge":
+        result["purged"] = purged
+    return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("seed", "cleanup", "audit"))
+    parser.add_argument("action", choices=("seed", "cleanup", "audit", "purge"))
     parser.add_argument("--run-id", required=True)
     args = parser.parse_args()
     if _RUN_ID_RE.fullmatch(args.run_id) is None:

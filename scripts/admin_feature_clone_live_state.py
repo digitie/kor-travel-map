@@ -17,6 +17,12 @@ _COMMIT_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
 _RUN_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
 _IMAGE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^sha256:[0-9a-f]{64}$")
 _NETWORK_RE: Final[re.Pattern[str]] = re.compile(r"^ktm-afcla-[0-9a-f]{12}-net$")
+_CHECKPOINT_DUMP_RE: Final[re.Pattern[str]] = re.compile(
+    r"^clone-checkpoint-[0-9a-f]{64}\.dump$"
+)
+_UTC_TIMESTAMP_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$"
+)
 _REPORT_FILES: Final[set[str]] = {
     "c7-results.xml",
     "c7-summary.html",
@@ -30,6 +36,7 @@ _SNAPSHOT_KEYS: Final[set[str]] = {
     "active_owned_features",
     "clone_container_sha256",
     "clone_system_identifier_sha256",
+    "content_cutoff",
     "content_sha256",
     "feature_non_deleted",
     "feature_total",
@@ -176,6 +183,10 @@ def _validated_snapshot_object(
         if not isinstance(value, str):
             raise RuntimeError(f"DB snapshot digest가 없습니다: {label}")
         _require_pattern(value, _SHA256_RE, field)
+    content_cutoff = snapshot["content_cutoff"]
+    if not isinstance(content_cutoff, str):
+        raise RuntimeError(f"DB snapshot content cutoff이 없습니다: {label}")
+    _require_pattern(content_cutoff, _UTC_TIMESTAMP_RE, "content cutoff")
     for field in (
         "active_owned_features",
         "feature_non_deleted",
@@ -266,6 +277,9 @@ def write_snapshot(args: argparse.Namespace) -> None:
                 _SHA256_RE,
                 "clone system identifier SHA256",
             ),
+            "content_cutoff": _require_pattern(
+                args.content_cutoff, _UTC_TIMESTAMP_RE, "content cutoff"
+            ),
             "content_sha256": _require_pattern(
                 args.content_sha256, _SHA256_RE, "content SHA256"
             ),
@@ -290,7 +304,15 @@ def write_checkpoint(args: argparse.Namespace) -> None:
         raise RuntimeError("dump size가 올바르지 않습니다")
     payload: dict[str, Any] = {
         "baseline": snapshot,
-        "dump": {"sha256": dump_sha256, "size": args.dump_size},
+        "dump": {
+            "filename": _require_pattern(
+                args.dump_filename,
+                _CHECKPOINT_DUMP_RE,
+                "checkpoint dump filename",
+            ),
+            "sha256": dump_sha256,
+            "size": args.dump_size,
+        },
         "version": 1,
     }
     payload["checkpoint_sha256"] = _canonical_sha256(payload)
@@ -311,10 +333,18 @@ def _validated_checkpoint(path: Path) -> dict[str, Any]:
     if digest != _canonical_sha256(unsigned):
         raise RuntimeError("clone checkpoint digest가 일치하지 않습니다")
     dump = checkpoint.get("dump")
-    if not isinstance(dump, dict) or set(dump) != {"sha256", "size"}:
+    if not isinstance(dump, dict) or set(dump) != {"filename", "sha256", "size"}:
         raise RuntimeError("clone checkpoint dump provenance가 없습니다")
+    dump_filename = dump.get("filename")
     dump_digest = dump.get("sha256")
     dump_size = dump.get("size")
+    if not isinstance(dump_filename, str):
+        raise RuntimeError("clone checkpoint dump filename이 없습니다")
+    _require_pattern(
+        dump_filename,
+        _CHECKPOINT_DUMP_RE,
+        "checkpoint dump filename",
+    )
     if not isinstance(dump_digest, str):
         raise RuntimeError("clone checkpoint dump digest가 없습니다")
     _require_pattern(dump_digest, _SHA256_RE, "dump SHA256")
@@ -322,6 +352,18 @@ def _validated_checkpoint(path: Path) -> dict[str, Any]:
         raise RuntimeError("clone checkpoint dump size가 올바르지 않습니다")
     _validated_snapshot_object(checkpoint.get("baseline"), label="checkpoint baseline")
     return checkpoint
+
+
+def read_checkpoint(args: argparse.Namespace) -> None:
+    checkpoint = _validated_checkpoint(Path(args.checkpoint))
+    if args.field == "content_cutoff":
+        print(checkpoint["baseline"]["content_cutoff"])
+    elif args.field == "dump_filename":
+        print(checkpoint["dump"]["filename"])
+    elif args.field == "dump_sha256":
+        print(checkpoint["dump"]["sha256"])
+    else:
+        print(checkpoint["dump"]["size"])
 
 
 def verify_checkpoint(args: argparse.Namespace) -> None:
@@ -420,6 +462,38 @@ def _fixture_counts(
     return evidence
 
 
+def _purge_counts(path: Path) -> dict[str, int]:
+    evidence = _load_object(path)
+    purged = evidence.get("purged")
+    if (
+        set(evidence)
+        != {
+            "action",
+            "counts",
+            "foreign_key_constraints_checked",
+            "foreign_key_references",
+            "purged",
+            "version",
+        }
+        or evidence.get("version") != 1
+        or evidence.get("action") != "purge"
+        or evidence.get("counts")
+        != {"features": 0, "price_values": 0, "weather_values": 0}
+        or evidence.get("foreign_key_references") != 0
+        or not isinstance(evidence.get("foreign_key_constraints_checked"), int)
+        or evidence["foreign_key_constraints_checked"] < 1
+        or not isinstance(purged, dict)
+        or set(purged) != {"change_requests", "features"}
+        or not all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in purged.values()
+        )
+        or purged["features"] > 6
+    ):
+        raise RuntimeError("recovery purge evidence가 예상과 다릅니다")
+    return purged
+
+
 def _report_counts(path: Path) -> dict[str, int]:
     if path.is_symlink() or not path.is_dir():
         raise RuntimeError(f"Playwright evidence directory가 아닙니다: {path.name}")
@@ -441,7 +515,12 @@ def _report_counts(path: Path) -> dict[str, int]:
         raise RuntimeError(f"Playwright summary가 예상과 다릅니다: {path.name}")
 
     xml_root = ET.fromstring((path / "c7-results.xml").read_text(encoding="utf-8"))
-    if xml_root.tag != "testsuite" or xml_root.attrib != {"tests": "2"}:
+    if (
+        xml_root.tag != "testsuite"
+        or xml_root.attrib != {"tests": "2"}
+        or xml_root.text not in {None, ""}
+        or xml_root.tail not in {None, ""}
+    ):
         raise RuntimeError(f"Playwright XML suite가 예상과 다릅니다: {path.name}")
     cases = list(xml_root)
     if len(cases) != 2:
@@ -457,6 +536,7 @@ def _report_counts(path: Path) -> dict[str, int]:
             or set(case.attrib) != {"classname", "name", "time"}
             or list(case)
             or (case.text not in {None, ""})
+            or (case.tail not in {None, ""})
         ):
             raise RuntimeError(f"Playwright XML test identity가 다릅니다: {path.name}")
         try:
@@ -532,6 +612,14 @@ def _build_result(
     if blocked.get("status") != "blocked" or blocked.get("version") != 2:
         raise RuntimeError("BLOCKED state 계약이 올바르지 않습니다")
     identity = _validated_blocked_identity(blocked)
+    phase_history = blocked.get("phase_history")
+    if (
+        not isinstance(phase_history, list)
+        or not phase_history
+        or not all(isinstance(item, str) and item for item in phase_history)
+        or phase_history[-1] != blocked.get("phase")
+    ):
+        raise RuntimeError("BLOCKED phase history가 올바르지 않습니다")
 
     checkpoint = _validated_checkpoint(runtime / "clone-checkpoint.json")
     if checkpoint["checkpoint_sha256"] != identity["clone_checkpoint_sha256"]:
@@ -609,6 +697,9 @@ def _build_result(
         {"features": 0, "price_values": 0, "weather_values": 0},
         expected_foreign_key_references=0,
     )
+    purge = {"change_requests": 0, "features": 0}
+    if "recovery-hard-purge-running" in phase_history:
+        purge = _purge_counts(runtime / "direct-purge-interrupted.json")
     tests = {
         "main": _report_counts(runtime / "playwright-main"),
         "recovery": _report_counts(runtime / "playwright-recovery"),
@@ -622,6 +713,8 @@ def _build_result(
         "cleanup": {
             "foreign_key_references": cleanup["foreign_key_references"],
             "owned_features": cleanup["counts"]["features"],
+            "recovery_purged_change_requests": purge["change_requests"],
+            "recovery_purged_features": purge["features"],
             "api_owned_active_features": final["active_owned_features"],
             "api_owned_nonterminal_change_requests": final[
                 "nonterminal_owned_change_requests"
@@ -642,6 +735,7 @@ def _build_result(
             "startup_migration_unchanged": True,
         },
         "phase": args.phase,
+        "phase_history": phase_history,
         "recovery_tool_source_commit": recovery_tool_source_commit,
         "source_commit": identity["source_commit"],
         "status": "complete",
@@ -728,6 +822,7 @@ def main() -> None:
     snapshot.add_argument("--active-owned-features", required=True, type=int)
     snapshot.add_argument("--clone-container-sha256", required=True)
     snapshot.add_argument("--clone-system-identifier-sha256", required=True)
+    snapshot.add_argument("--content-cutoff", required=True)
     snapshot.add_argument("--content-sha256", required=True)
     snapshot.add_argument("--feature-non-deleted", required=True, type=int)
     snapshot.add_argument("--feature-total", required=True, type=int)
@@ -741,11 +836,26 @@ def main() -> None:
     snapshot.set_defaults(handler=write_snapshot)
 
     checkpoint = subparsers.add_parser("write-checkpoint")
+    checkpoint.add_argument("--dump-filename", required=True)
     checkpoint.add_argument("--dump-sha256", required=True)
     checkpoint.add_argument("--dump-size", required=True, type=int)
     checkpoint.add_argument("--path", required=True)
     checkpoint.add_argument("--snapshot", required=True)
     checkpoint.set_defaults(handler=write_checkpoint)
+
+    checkpoint_read = subparsers.add_parser("read-checkpoint")
+    checkpoint_read.add_argument("--checkpoint", required=True)
+    checkpoint_read.add_argument(
+        "--field",
+        choices=(
+            "content_cutoff",
+            "dump_filename",
+            "dump_sha256",
+            "dump_size",
+        ),
+        required=True,
+    )
+    checkpoint_read.set_defaults(handler=read_checkpoint)
 
     checkpoint_verify = subparsers.add_parser("verify-checkpoint")
     checkpoint_verify.add_argument("--allow-owned-drift", action="store_true")

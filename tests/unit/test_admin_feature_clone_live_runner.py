@@ -21,6 +21,8 @@ _SYSTEM_SHA256 = "d" * 64
 _SCHEMA_SHA256 = "3" * 64
 _CONTENT_SHA256 = "4" * 64
 _DUMP_SHA256 = "5" * 64
+_DUMP_FILENAME = f"clone-checkpoint-{'6' * 64}.dump"
+_CONTENT_CUTOFF = "2026-07-29T00:00:00.000000Z"
 _RUN_KEY = "e" * 64
 _NETWORK_NAME = f"ktm-afcla-{_RUN_KEY[:12]}-net"
 _RUN_ID = "clone-20260729000000-abcdef123456"
@@ -59,6 +61,8 @@ def _write_snapshot(
         _CONTAINER_SHA256,
         "--clone-system-identifier-sha256",
         _SYSTEM_SHA256,
+        "--content-cutoff",
+        _CONTENT_CUTOFF,
         "--content-sha256",
         _CONTENT_SHA256,
         "--feature-non-deleted",
@@ -155,6 +159,8 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
     checkpoint = runtime / "clone-checkpoint.json"
     _run_helper(
         "write-checkpoint",
+        "--dump-filename",
+        _DUMP_FILENAME,
         "--dump-sha256",
         _DUMP_SHA256,
         "--dump-size",
@@ -280,12 +286,15 @@ def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
         "main": {"passed": 2},
         "recovery": {"passed": 2},
     }
+    assert payload["phase_history"] == ["candidate-startup-pending"]
     assert payload["cleanup"] == {
         "api_owned_active_features": 0,
         "api_owned_nonterminal_change_requests": 0,
         "foreign_key_references": 0,
         "owned_features": 0,
         "post_cleanup_audit_features": 0,
+        "recovery_purged_change_requests": 0,
+        "recovery_purged_features": 0,
     }
 
 
@@ -300,6 +309,44 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
     assert payload["recovery_tool_source_commit"] == _RECOVERY_COMMIT
 
 
+def test_recovered_result_preserves_hard_purge_evidence(tmp_path: Path) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    _run_helper(
+        "update-blocked",
+        "--path",
+        str(blocked),
+        "--phase",
+        "recovery-hard-purge-running",
+    )
+    (runtime / "direct-purge-interrupted.json").write_text(
+        json.dumps(
+            {
+                "action": "purge",
+                "counts": {
+                    "features": 0,
+                    "price_values": 0,
+                    "weather_values": 0,
+                },
+                "foreign_key_constraints_checked": 12,
+                "foreign_key_references": 0,
+                "purged": {"change_requests": 9, "features": 4},
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _complete(runtime, blocked, phase="recovered")
+
+    payload = json.loads((runtime / "result.json").read_text(encoding="utf-8"))
+    assert payload["phase_history"] == [
+        "candidate-startup-pending",
+        "recovery-hard-purge-running",
+    ]
+    assert payload["cleanup"]["recovery_purged_features"] == 4
+    assert payload["cleanup"]["recovery_purged_change_requests"] == 9
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected_message"),
     [
@@ -308,6 +355,7 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
         ("resource", "resource cleanup"),
         ("seed-fk", "fixture FK reference"),
         ("xml-identity", "XML test identity"),
+        ("xml-tail", "XML test identity"),
         ("html-duration", "XML/HTML duration"),
     ],
 )
@@ -358,6 +406,14 @@ def test_complete_rejects_false_green_evidence(
         xml_path.write_text(
             xml_path.read_text(encoding="utf-8").replace(
                 "auth.setup.ts#1", "other.spec.ts#1"
+            ),
+            encoding="utf-8",
+        )
+    elif mutation == "xml-tail":
+        xml_path = runtime / "playwright-main" / "c7-results.xml"
+        xml_path.write_text(
+            xml_path.read_text(encoding="utf-8").replace(
+                "</testcase><testcase", "</testcase>UNEXPECTED-TAIL<testcase", 1
             ),
             encoding="utf-8",
         )
@@ -428,6 +484,9 @@ def test_checkpoint_allows_only_owned_count_drift_when_requested(
 
 def test_runner_closes_reviewed_trust_boundaries() -> None:
     source = _RUNNER.read_text(encoding="utf-8")
+    recovery_source = source.split(
+        'if [[ "$MODE" == "recover" ]]; then', maxsplit=1
+    )[1].split('[[ ! -e "$BLOCKED_FILE"', maxsplit=1)[0]
 
     assert "E2E_REPOSITORY_ROOT" not in source
     assert ".venv/bin/alembic" not in source
@@ -441,7 +500,7 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert source.rindex("state_helper write-blocked") < source.rindex(
         "create_candidate_network"
     )
-    assert 'docker network create \\' in source
+    assert 'docker network create --internal \\' in source
     assert '--network "$NETWORK_NAME"' in source
     assert "--network host" not in source
     assert "-e PGPASSWORD=" not in source
@@ -449,8 +508,25 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "--build-arg NEXT_PUBLIC_VWORLD_API_KEY" in source
     assert "schema_sha256" in source
     assert "content_sha256" in source
+    assert "hash_record_extended" in source
+    assert "pg_get_functiondef" in source
+    assert "pg_get_viewdef" in source
+    assert "pg_catalog.pg_policy" in source
+    assert "pg_dump --format=custom" in source
+    assert "verify_checkpoint_dump" in source
+    assert "docker network create --internal" in source
+    assert "'{{.Internal}}'" in source
     assert "clone-recovery-current.json" in source
     assert "playwright-interruption-cleanup" in source
+    assert "recovery-hard-purge-running" in source
+    assert 'run_helper purge "$RUNTIME_DIR/direct-purge-interrupted.json"' in source
+    assert recovery_source.index("BLOCKED_WRITTEN=1") < recovery_source.index(
+        "load_blocked"
+    )
+    assert recovery_source.index(
+        "if state_helper validate-evidence"
+    ) < recovery_source.index('for image in "$API_IMAGE_ID"')
+    assert 'docker image inspect "$image"' in source
     assert source.rindex("finalize_resources") < source.rindex(
         "state_helper complete"
     )

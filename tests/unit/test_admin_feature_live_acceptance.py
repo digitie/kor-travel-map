@@ -62,10 +62,30 @@ def _load_script_module(name: str, path: Path) -> ModuleType:
 
 
 _STATE_MODULE = _load_script_module("admin_feature_live_state", _STATE)
+_FIXTURE_MODULE = _load_script_module("admin_feature_live_fixture", _FIXTURE)
 _SUPERVISOR_MODULE = _load_script_module(
     "admin_feature_live_supervisor",
     _SUPERVISOR,
 )
+
+
+def test_clone_recovery_purge_uses_exact_api_owned_fingerprints() -> None:
+    run_id = "clone-20260729000000-abcdef123456"
+
+    fingerprints = _FIXTURE_MODULE._api_feature_fingerprints(run_id)  # noqa: SLF001
+
+    assert set(fingerprints) == {
+        f"e2e_live_acceptance::{run_id}::marker::draft",
+        f"e2e_live_acceptance::{run_id}::marker::inactive",
+        f"e2e_live_acceptance::{run_id}::marker::hidden",
+        f"e2e_live_acceptance::{run_id}::correction",
+        f"e2e_live_acceptance::{run_id}::search::alpha",
+        f"e2e_live_acceptance::{run_id}::search::beta",
+    }
+    assert fingerprints[f"e2e_live_acceptance::{run_id}::correction"][2] == {
+        f"E2E correction baseline {run_id}",
+        f"E2E approved competing update {run_id}",
+    }
 
 
 def _execution_args(path: Path, identity: dict[str, str]) -> SimpleNamespace:
@@ -503,7 +523,16 @@ def test_runner_requires_exact_root_source_snapshot() -> None:
 
 def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None:
     fixture = _FIXTURE.read_text()
-    cleanup = fixture[fixture.index("async def _cleanup(") : fixture.index("async def _run(")]
+    cleanup = fixture[
+        fixture.index("async def _cleanup(") : fixture.index(
+            "async def _purge_api_owned("
+        )
+    ]
+    purge = fixture[
+        fixture.index("async def _purge_api_owned(") : fixture.index(
+            "async def _run("
+        )
+    ]
     owned_values = fixture[
         fixture.index("async def _assert_owned_values(") : fixture.index(
             "async def _assert_owned_state("
@@ -522,7 +551,9 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert "owned fixture ID의 소유권 fingerprint가 다릅니다" in fixture
     assert "owned weather value fingerprint가 다릅니다" in fixture
     assert "owned price value fingerprint가 다릅니다" in fixture
-    assert fixture.count("DELETE FROM feature.features") == 1
+    assert cleanup.count("DELETE FROM feature.features") == 1
+    assert purge.count("DELETE FROM feature.features") == 1
+    assert "DELETE FROM ops.feature_change_requests" in purge
 
 
 def test_browser_lane_covers_nonpublic_bbox_and_stale_raw_etag() -> None:
@@ -636,6 +667,7 @@ def test_c7_raw_playwright_output_is_outside_evidence_bind() -> None:
         'path.join(\n  "/tmp",\n  `kor-travel-map-c7-test-results-${process.pid}`'
         in config
     )
-    assert "outputDir: shouldAssertC7OriginGuard()" in config
+    assert "const redactedEvidence = shouldAssertC7OriginGuard() || isolatedEvidence" in config
+    assert "outputDir: redactedEvidence" in config
     assert "? c7RawOutputDir" in config
     assert ': path.join(artifactRoot, "test-results")' in config

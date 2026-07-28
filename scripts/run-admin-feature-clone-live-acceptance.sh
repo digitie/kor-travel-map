@@ -20,7 +20,6 @@ readonly MODE="${1-run}"
 readonly SOURCE_COMMIT="${E2E_SOURCE_COMMIT-}"
 readonly DB_CONTAINER="${E2E_CLONE_DB_CONTAINER-}"
 readonly DB_HOST_PORT="${E2E_CLONE_DB_PORT-}"
-readonly CLONE_DUMP_PATH="${E2E_CLONE_DUMP_PATH-}"
 readonly API_PORT="${E2E_CLONE_API_PORT:-18701}"
 readonly UI_PORT="${E2E_CLONE_UI_PORT:-18705}"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -167,9 +166,7 @@ for port in "$API_PORT" "$UI_PORT"; do
     die "candidate port overlaps production/default"
 done
 [[ "$API_PORT" != "$UI_PORT" ]] || die "candidate ports overlap"
-if [[ "$MODE" == "checkpoint" ]]; then
-  require_env E2E_CLONE_DUMP_PATH
-else
+if [[ "$MODE" != "checkpoint" ]]; then
   require_env E2E_ADMIN_PASSWORD
   require_env E2E_VWORLD_API_KEY
   [[ "${E2E_ADMIN_PASSWORD}" != *$'\n'* && "${E2E_ADMIN_PASSWORD}" != *$'\r'* ]] ||
@@ -207,6 +204,9 @@ docker container inspect "$DB_CONTAINER" >/dev/null 2>&1 ||
   die "clone DB container is missing"
 readonly BASE_CLONE_CONTAINER_ID="$(
   docker inspect --format '{{.Id}}' "$DB_CONTAINER"
+)"
+readonly BASE_CLONE_IMAGE_ID="$(
+  docker inspect --format '{{.Image}}' "$DB_CONTAINER"
 )"
 
 verify_clone_container() {
@@ -250,6 +250,11 @@ psql_query() {
   local query="$1"
   PGPASSWORD="$db_password" docker exec -e PGPASSWORD "$DB_CONTAINER" \
     psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$db_name" -c "$query"
+}
+
+psql_stream() {
+  PGPASSWORD="$db_password" docker exec -i -e PGPASSWORD "$DB_CONTAINER" \
+    psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$db_name"
 }
 
 psql_value() {
@@ -308,6 +313,28 @@ COPY (
       AND NOT attribute.attisdropped
     UNION ALL
     SELECT
+      'relation', namespace.nspname, relation.relname,
+      concat_ws(
+        ':',
+        relation.relkind,
+        relation.relrowsecurity,
+        relation.relforcerowsecurity,
+        COALESCE(
+          pg_catalog.pg_get_expr(
+            relation.relpartbound,
+            relation.oid,
+            true
+          ),
+          ''
+        )
+      )
+    FROM pg_catalog.pg_class AS relation
+    JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
+      AND relation.relkind IN ('r', 'p', 'v', 'm', 'S')
+    UNION ALL
+    SELECT
       'constraint', namespace.nspname, relation.relname,
       constraint_row.conname || ':' ||
       pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
@@ -334,6 +361,104 @@ COPY (
     JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
     WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
       AND NOT trigger_row.tgisinternal
+    UNION ALL
+    SELECT
+      'view', namespace.nspname, relation.relname,
+      pg_catalog.pg_get_viewdef(relation.oid, true)
+    FROM pg_catalog.pg_class AS relation
+    JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
+      AND relation.relkind IN ('v', 'm')
+    UNION ALL
+    SELECT
+      'routine',
+      namespace.nspname,
+      routine.proname || ':' ||
+        pg_catalog.pg_get_function_identity_arguments(routine.oid),
+      pg_catalog.pg_get_functiondef(routine.oid)
+    FROM pg_catalog.pg_proc AS routine
+    JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = routine.pronamespace
+    WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
+    UNION ALL
+    SELECT
+      'type',
+      namespace.nspname,
+      type_row.typname,
+      concat_ws(
+        ':',
+        type_row.typtype,
+        type_row.typcategory,
+        type_row.typnotnull,
+        type_row.typbasetype::regtype::text,
+        type_row.typtypmod,
+        COALESCE(enum_values.labels, '')
+      )
+    FROM pg_catalog.pg_type AS type_row
+    JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = type_row.typnamespace
+    LEFT JOIN LATERAL (
+      SELECT string_agg(enum_row.enumlabel, ',' ORDER BY enum_row.enumsortorder)
+        AS labels
+      FROM pg_catalog.pg_enum AS enum_row
+      WHERE enum_row.enumtypid = type_row.oid
+    ) AS enum_values ON true
+    WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
+      AND type_row.typrelid = 0
+      AND type_row.typisdefined
+    UNION ALL
+    SELECT
+      'domain_constraint',
+      namespace.nspname,
+      type_row.typname,
+      constraint_row.conname || ':' ||
+        pg_catalog.pg_get_constraintdef(constraint_row.oid, true)
+    FROM pg_catalog.pg_constraint AS constraint_row
+    JOIN pg_catalog.pg_type AS type_row
+      ON type_row.oid = constraint_row.contypid
+    JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = type_row.typnamespace
+    WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
+    UNION ALL
+    SELECT
+      'policy',
+      namespace.nspname,
+      relation.relname,
+      policy.polname || ':' || policy.polcmd || ':' ||
+        policy.polroles::text || ':' ||
+        COALESCE(
+          pg_catalog.pg_get_expr(policy.polqual, policy.polrelid, true),
+          ''
+        ) || ':' ||
+        COALESCE(
+          pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid, true),
+          ''
+        )
+    FROM pg_catalog.pg_policy AS policy
+    JOIN pg_catalog.pg_class AS relation ON relation.oid = policy.polrelid
+    JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
+    UNION ALL
+    SELECT
+      'sequence',
+      namespace.nspname,
+      relation.relname,
+      concat_ws(
+        ':',
+        sequence.seqstart,
+        sequence.seqincrement,
+        sequence.seqmax,
+        sequence.seqmin,
+        sequence.seqcache,
+        sequence.seqcycle
+      )
+    FROM pg_catalog.pg_sequence AS sequence
+    JOIN pg_catalog.pg_class AS relation ON relation.oid = sequence.seqrelid
+    JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
   )
   SELECT concat_ws(chr(31), kind, schema_name, object_name, definition)
   FROM objects
@@ -345,22 +470,67 @@ SQL
 }
 
 content_sha256() {
-  local query
-  query="$(cat <<'SQL'
-COPY (
-  SELECT feature_id || chr(31) || md5(to_jsonb(feature_row)::text)
-  FROM feature.features AS feature_row
-  WHERE feature_id NOT LIKE 'e2e\_live\_acceptance::%' ESCAPE '\'
-  ORDER BY feature_id
-) TO STDOUT
+  local run_id="$1"
+  [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
+    die "content digest run ID is invalid"
+  [[ "$CONTENT_CUTOFF" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
+    die "content digest cutoff is invalid"
+  local statement_query statements
+  statement_query="$(cat <<SQL
+SELECT format(
+  'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
+  'COALESCE(bit_xor(hash_record_extended(row_value, 0))::text, ''null'') || ' ||
+  'chr(31) || COALESCE(bit_xor(hash_record_extended(' ||
+  'row_value, 9223372036854775807))::text, ''null'') ' ||
+  'FROM %I.%I AS row_value%s;',
+  namespace.nspname || '.' || relation.relname,
+  namespace.nspname,
+  relation.relname,
+  CASE
+    WHEN EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_attribute AS attribute
+      WHERE attribute.attrelid = relation.oid
+        AND attribute.attname = 'feature_id'
+        AND attribute.attnum > 0
+        AND NOT attribute.attisdropped
+    ) THEN format(
+      ' WHERE row_value.feature_id NOT LIKE %L ESCAPE %L',
+      'e2e_live_acceptance::${run_id}::%',
+      '\\'
+    )
+    WHEN namespace.nspname = 'ops'
+      AND relation.relname IN ('admin_auth_events', 'api_call_log')
+    THEN format(
+      ' WHERE row_value.created_at < %L::timestamptz',
+      '${CONTENT_CUTOFF}'
+    )
+    ELSE ''
+  END
+)
+FROM pg_catalog.pg_class AS relation
+JOIN pg_catalog.pg_namespace AS namespace
+  ON namespace.oid = relation.relnamespace
+WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
+  AND relation.relkind IN ('r', 'p', 'm', 'S')
+  AND NOT relation.relispartition
+ORDER BY namespace.nspname, relation.relname
 SQL
 )"
-  psql_query "$query" | sha256sum | awk '{print $1}'
+  statements="$(psql_query "$statement_query")"
+  [[ -n "$statements" ]] || die "durable content table set is empty"
+  {
+    printf '%s\n' \
+      "SET statement_timeout = '20min';" \
+      "SET max_parallel_workers_per_gather = 4;"
+    printf '%s\n' "$statements"
+  } | psql_stream | LC_ALL=C sort | sha256sum | awk '{print $1}'
 }
 
 EXPECTED_MIGRATION_HEAD=""
 BASE_CLONE_CONTAINER_SHA256=""
 BASE_CLONE_SYSTEM_SHA256=""
+CONTENT_CUTOFF=""
 
 read_image_migration_head() {
   local image_id="$1"
@@ -404,7 +574,7 @@ write_snapshot() {
   active_owned="$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e\\_live\\_acceptance::${run_id}::%' ESCAPE '\\' AND status <> 'deleted'")"
   nonterminal_owned="$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::${run_id}::%' ESCAPE '\\' AND state = 'pending'")"
   schema_digest="$(schema_sha256)"
-  content_digest="$(content_sha256)"
+  content_digest="$(content_sha256 "$run_id")"
   verify_clone_container
   [[ "$(docker inspect --format '{{.Id}}' "$DB_CONTAINER")" == "$before_id" ]] ||
     die "clone DB container changed during snapshot"
@@ -425,6 +595,7 @@ write_snapshot() {
     --active-owned-features "$active_owned" \
     --clone-container-sha256 "$container_sha" \
     --clone-system-identifier-sha256 "$system_sha" \
+    --content-cutoff "$CONTENT_CUTOFF" \
     --content-sha256 "$content_digest" \
     --feature-non-deleted "$feature_non_deleted" \
     --feature-total "$feature_total" \
@@ -450,6 +621,7 @@ PLAYWRIGHT_IMAGE_TAG=""
 API_CONTAINER=""
 UI_CONTAINER=""
 FIXTURE_HELPER="$SCRIPT_DIR/admin_feature_live_fixture.py"
+NEW_CHECKPOINT_DUMP=""
 BLOCKED_WRITTEN=0
 COMPLETE=0
 
@@ -565,7 +737,9 @@ remove_owned_images() {
   local -a images=()
   local image
   for image in "$API_IMAGE_ID" "$UI_IMAGE_ID" "$PLAYWRIGHT_IMAGE_ID"; do
-    [[ -n "$image" ]] && images+=("$image")
+    if [[ -n "$image" ]] && docker image inspect "$image" >/dev/null 2>&1; then
+      images+=("$image")
+    fi
   done
   (( ${#images[@]} == 0 )) || docker image rm --force "${images[@]}" >/dev/null
 }
@@ -590,6 +764,58 @@ owned_networks() {
     wc -l
 }
 
+foreign_db_sessions() {
+  psql_value "
+    SELECT count(*)
+    FROM pg_catalog.pg_stat_activity
+    WHERE datname = current_database()
+      AND pid <> pg_backend_pid()
+      AND backend_type = 'client backend'
+  "
+}
+
+verify_dump_archive() {
+  local dump_path="$1"
+  docker run --rm \
+    --network none \
+    --read-only \
+    --security-opt no-new-privileges \
+    --cap-drop ALL \
+    --mount "type=bind,src=$dump_path,dst=/checkpoint.dump,readonly" \
+    --entrypoint pg_restore \
+    "$BASE_CLONE_IMAGE_ID" \
+    --list /checkpoint.dump >/dev/null
+}
+
+verify_checkpoint_dump() {
+  local checkpoint_path="$1"
+  local filename expected_sha expected_size dump_path
+  filename="$(
+    state_helper read-checkpoint \
+      --checkpoint "$checkpoint_path" --field dump_filename
+  )"
+  expected_sha="$(
+    state_helper read-checkpoint \
+      --checkpoint "$checkpoint_path" --field dump_sha256
+  )"
+  expected_size="$(
+    state_helper read-checkpoint \
+      --checkpoint "$checkpoint_path" --field dump_size
+  )"
+  dump_path="$STATE_ROOT/$filename"
+  [[ "$dump_path" == "$STATE_ROOT"/clone-checkpoint-*.dump ]] ||
+    die "checkpoint dump path is unsafe"
+  [[ -f "$dump_path" && ! -L "$dump_path" ]] ||
+    die "checkpoint dump is missing"
+  [[ "$(stat -c '%u:%g:%a' -- "$dump_path")" == "0:0:600" ]] ||
+    die "checkpoint dump metadata is unsafe"
+  [[ "$(stat -Lc '%s' -- "$dump_path")" == "$expected_size" ]] ||
+    die "checkpoint dump size differs from signed provenance"
+  [[ "$(sha256sum -- "$dump_path" | awk '{print $1}')" == "$expected_sha" ]] ||
+    die "checkpoint dump digest differs from signed provenance"
+  verify_dump_archive "$dump_path"
+}
+
 cleanup_on_exit() {
   local status=$?
   trap - EXIT INT TERM
@@ -606,6 +832,12 @@ cleanup_on_exit() {
     [[ -n "$RUNTIME_DIR" && -d "$RUNTIME_DIR" ]]; then
     rm -rf -- "$RUNTIME_DIR"
   fi
+  if (( COMPLETE == 0 )) &&
+    [[ -n "$NEW_CHECKPOINT_DUMP" &&
+       "$NEW_CHECKPOINT_DUMP" == "$STATE_ROOT"/clone-checkpoint-*.dump &&
+       -f "$NEW_CHECKPOINT_DUMP" && ! -L "$NEW_CHECKPOINT_DUMP" ]]; then
+    rm -f -- "$NEW_CHECKPOINT_DUMP"
+  fi
   exit "$status"
 }
 trap cleanup_on_exit EXIT
@@ -615,8 +847,6 @@ trap 'exit 143' TERM
 if [[ "$MODE" == "checkpoint" ]]; then
   [[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
     die "BLOCKED state must be recovered before checkpoint"
-  [[ -f "$CLONE_DUMP_PATH" && ! -L "$CLONE_DUMP_PATH" ]] ||
-    die "clone dump path is unsafe"
   RUN_ID="checkpoint-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 6)"
   RUN_KEY="$(printf '%s' "$RUN_ID" | sha256sum | awk '{print $1}')"
   API_IMAGE_TAG="kor-travel-map-clone-live-api:${SOURCE_COMMIT:0:12}-checkpoint"
@@ -630,18 +860,37 @@ if [[ "$MODE" == "checkpoint" ]]; then
     printf '%s' "$(psql_value "SELECT system_identifier::text FROM pg_control_system()")" |
       sha256sum | awk '{print $1}'
   )"
+  CONTENT_CUTOFF="$(
+    psql_value \
+      "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')"
+  )"
+  [[ "$(foreign_db_sessions)" == "0" ]] ||
+    die "clone DB has a foreign client session before checkpoint dump"
+  NEW_CHECKPOINT_DUMP="$STATE_ROOT/clone-checkpoint-$RUN_KEY.dump"
+  [[ ! -e "$NEW_CHECKPOINT_DUMP" && ! -L "$NEW_CHECKPOINT_DUMP" ]] ||
+    die "checkpoint dump target already exists"
+  PGPASSWORD="$db_password" docker exec -e PGPASSWORD "$DB_CONTAINER" \
+    pg_dump --format=custom --no-owner --no-privileges \
+    --serializable-deferrable -U "$db_user" -d "$db_name" \
+    >"$NEW_CHECKPOINT_DUMP"
+  chown root:root -- "$NEW_CHECKPOINT_DUMP"
+  chmod 0600 -- "$NEW_CHECKPOINT_DUMP"
+  [[ "$(foreign_db_sessions)" == "0" ]] ||
+    die "clone DB has a foreign client session after checkpoint dump"
+  verify_dump_archive "$NEW_CHECKPOINT_DUMP"
   checkpoint_snapshot="$STATE_ROOT/.clone-checkpoint-snapshot-$$.json"
   write_snapshot "$checkpoint_snapshot" "$RUN_ID"
   [[ "$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND status <> 'deleted'")" == "0" ]] ||
     die "clone checkpoint has active acceptance Feature residue"
   [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND state = 'pending'")" == "0" ]] ||
     die "clone checkpoint has pending acceptance change request residue"
-  dump_before="$(stat -Lc '%d:%i:%s:%Y' -- "$CLONE_DUMP_PATH")"
-  dump_size="$(stat -Lc '%s' -- "$CLONE_DUMP_PATH")"
-  dump_sha256="$(sha256sum -- "$CLONE_DUMP_PATH" | awk '{print $1}')"
-  [[ "$(stat -Lc '%d:%i:%s:%Y' -- "$CLONE_DUMP_PATH")" == "$dump_before" ]] ||
+  dump_before="$(stat -Lc '%d:%i:%s:%Y' -- "$NEW_CHECKPOINT_DUMP")"
+  dump_size="$(stat -Lc '%s' -- "$NEW_CHECKPOINT_DUMP")"
+  dump_sha256="$(sha256sum -- "$NEW_CHECKPOINT_DUMP" | awk '{print $1}')"
+  [[ "$(stat -Lc '%d:%i:%s:%Y' -- "$NEW_CHECKPOINT_DUMP")" == "$dump_before" ]] ||
     die "clone dump changed during checkpoint hashing"
   state_helper write-checkpoint \
+    --dump-filename "$(basename -- "$NEW_CHECKPOINT_DUMP")" \
     --dump-sha256 "$dump_sha256" \
     --dump-size "$dump_size" \
     --path "$CHECKPOINT_FILE" \
@@ -677,9 +926,11 @@ print(f"pbkdf2_sha256$310000${encode(salt)}${encode(digest)}")
 }
 
 create_candidate_network() {
-  docker network create \
+  docker network create --internal \
     --label "io.kortravelmap.admin-feature-clone-acceptance.run-key=$RUN_KEY" \
     "$NETWORK_NAME" >/dev/null
+  [[ "$(docker network inspect --format '{{.Internal}}' "$NETWORK_NAME")" == "true" ]] ||
+    die "candidate network is not internal"
   docker network connect --alias clone-db "$NETWORK_NAME" "$DB_CONTAINER"
   NETWORK_CIDR="$(
     docker network inspect --format '{{(index .IPAM.Config 0).Subnet}}' "$NETWORK_NAME"
@@ -948,27 +1199,17 @@ if [[ "$MODE" == "recover" ]]; then
     die "recoverable BLOCKED state is missing"
   [[ "$(stat -c '%u:%g:%a' -- "$BLOCKED_FILE")" == "0:0:600" ]] ||
     die "BLOCKED state metadata is unsafe"
+  BLOCKED_WRITTEN=1
   load_blocked
   blocked_source="$(state_helper read-blocked --path "$BLOCKED_FILE" --field source_commit)"
   validate_snapshot "$blocked_source" "$INSTALL_BASE/$blocked_source"
   FIXTURE_HELPER="$INSTALL_BASE/$blocked_source/admin_feature_live_fixture.py"
-  for image in "$API_IMAGE_ID" "$UI_IMAGE_ID" "$PLAYWRIGHT_IMAGE_ID"; do
-    docker image inspect "$image" >/dev/null 2>&1 || die "BLOCKED image is missing"
-  done
-  [[ "$(
-    docker image inspect --format \
-      '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$API_IMAGE_ID"
-  )" == "$blocked_source" ]] || die "BLOCKED API image revision mismatch"
-  [[ "$(
-    docker image inspect --format \
-      '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$UI_IMAGE_ID"
-  )" == "$blocked_source" ]] || die "BLOCKED UI image revision mismatch"
-  [[ "$(
-    docker image inspect --format \
-      '{{index .Config.Labels "io.kortravelmap.c7.repository-commit"}}' \
-      "$PLAYWRIGHT_IMAGE_ID"
-  )" == "$blocked_source" ]] || die "BLOCKED Playwright image revision mismatch"
-  EXPECTED_MIGRATION_HEAD="$(read_image_migration_head "$API_IMAGE_ID")"
+  CONTENT_CUTOFF="$(
+    state_helper read-checkpoint \
+      --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
+      --field content_cutoff
+  )"
+  verify_checkpoint_dump "$RUNTIME_DIR/clone-checkpoint.json"
   BASE_CLONE_CONTAINER_SHA256="$(
     printf '%s' "$BASE_CLONE_CONTAINER_ID" | sha256sum | awk '{print $1}'
   )"
@@ -994,6 +1235,23 @@ if [[ "$MODE" == "recover" ]]; then
     exit 0
   fi
 
+  for image in "$API_IMAGE_ID" "$UI_IMAGE_ID" "$PLAYWRIGHT_IMAGE_ID"; do
+    docker image inspect "$image" >/dev/null 2>&1 || die "BLOCKED image is missing"
+  done
+  [[ "$(
+    docker image inspect --format \
+      '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$API_IMAGE_ID"
+  )" == "$blocked_source" ]] || die "BLOCKED API image revision mismatch"
+  [[ "$(
+    docker image inspect --format \
+      '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$UI_IMAGE_ID"
+  )" == "$blocked_source" ]] || die "BLOCKED UI image revision mismatch"
+  [[ "$(
+    docker image inspect --format \
+      '{{index .Config.Labels "io.kortravelmap.c7.repository-commit"}}' \
+      "$PLAYWRIGHT_IMAGE_ID"
+  )" == "$blocked_source" ]] || die "BLOCKED Playwright image revision mismatch"
+  EXPECTED_MIGRATION_HEAD="$(read_image_migration_head "$API_IMAGE_ID")"
   state_helper update-blocked --path "$BLOCKED_FILE" --phase recovery-interruption-cleanup
   remove_owned_containers
   remove_owned_network
@@ -1009,6 +1267,8 @@ if [[ "$MODE" == "recover" ]]; then
     "$interruption_dir" 1
   run_helper cleanup "$RUNTIME_DIR/direct-cleanup-interrupted.json"
   run_helper audit "$RUNTIME_DIR/direct-audit-interrupted.json"
+  state_helper update-blocked --path "$BLOCKED_FILE" --phase recovery-hard-purge-running
+  run_helper purge "$RUNTIME_DIR/direct-purge-interrupted.json"
   for path in \
     "$RUNTIME_DIR/direct-seed.json" \
     "$RUNTIME_DIR/direct-cleanup.json" \
@@ -1039,6 +1299,11 @@ fi
   die "trusted clone checkpoint is missing"
 [[ "$(stat -c '%u:%g:%a' -- "$CHECKPOINT_FILE")" == "0:0:600" ]] ||
   die "trusted clone checkpoint metadata is unsafe"
+CONTENT_CUTOFF="$(
+  state_helper read-checkpoint \
+    --checkpoint "$CHECKPOINT_FILE" --field content_cutoff
+)"
+verify_checkpoint_dump "$CHECKPOINT_FILE"
 
 RUN_ID="clone-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 6)"
 RUN_KEY="$(printf '%s' "$RUN_ID" | sha256sum | awk '{print $1}')"
