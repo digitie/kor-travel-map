@@ -487,7 +487,7 @@ async function longPressAtCenter(page: Page, locator: Locator): Promise<void> {
 }
 
 function changeRequestDetail(page: Page): Locator {
-  return page.locator("aside").filter({ hasText: "Request detail" });
+  return page.getByRole("complementary").filter({ hasText: "요청 상세" });
 }
 
 async function approveVisibleRequest(
@@ -500,7 +500,7 @@ async function approveVisibleRequest(
     "POST",
     decodeURIComponent(changeApprovePath(requestId)),
   );
-  await row.getByRole("button", { name: "approve" }).click();
+  await row.getByRole("button", { name: "승인" }).click();
   return readChangeResponse(await responsePromise);
 }
 
@@ -514,7 +514,7 @@ async function rejectVisibleRequest(
     "POST",
     decodeURIComponent(changeRejectPath(requestId)),
   );
-  await row.getByRole("button", { name: "reject" }).click();
+  await row.getByRole("button", { name: "반려" }).click();
   return readChangeResponse(await responsePromise);
 }
 
