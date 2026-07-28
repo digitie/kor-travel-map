@@ -10,6 +10,21 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-29 (claude) — Lane A a1: T-VN-H29 완료, H27 보류 → 다음은 T-VN-H21
+
+**다음 한 작업**: Lane A a1 `T-VN-H21`(`kor-travel-geo` live 인증 preflight·dedup 5건 재실증).
+이후 `T-VN-H28A/B`(#673) → `T-VN-H25A/B` → `T-VN-H22A/B/C`.
+
+- **완료**: `T-VN-H29`(PinVi PR #418) — map-import POI가 통합검색에서만 좌표 null이던 실제 버그.
+  근인은 `_snapshot_coord`가 중첩 `coord`만 읽은 것(Map view는 `extra="forbid"` + `coord` 미보유라
+  **구조적으로 항상 None**). 정본 `extract_feature_coord`에 위임해 해소하고 회귀 10건을 추가했다.
+- **보류(사용자 지시)**: `T-VN-H27`(#819 HAProxy tunnel). 프록시가 **OPNsense 라우터**에 있어
+  저장소에 config가 없고(n150도 haproxy inactive) 설정·검증 모두 라우터 접근이 필요하다.
+  에이전트 실행 불가 — 운영자가 적용 후 실증한다.
+- **교훈**: H07D 리뷰의 "소비자 전수 감사"가 이 버그를 찾아냈다. 계약을 typed로 좁히면 그
+  **소비자 쪽 잘못된 read가 구조적으로 죽은 코드**가 되는데, 계약 작업 시 소비자 read를 함께 훑으면
+  이런 잠재 버그가 드러난다.
+
 ## 2026-07-29 (claude) — Lane A **a0 종료** (H07C를 ADR-079로 기각), 다음은 a1
 
 **다음 한 작업**: Lane A **a1** 첫 항목 `T-VN-H29`(PinVi 통합검색의 map-import POI 좌표 null 복구

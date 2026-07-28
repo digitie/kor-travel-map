@@ -3,6 +3,23 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-29 — Lane A a1 T-VN-H29: 통합검색 map-import POI 좌표 null 복구
+
+- [x] **T-VN-H29** (PinVi PR #418) — kor-travel-map curated import POI가 GET /search에서만 좌표
+  null이던 실제 사용자 가시 버그를 고쳤다. 발견 경위는 T-VN-H07D 적대 리뷰의 소비자 전수 감사.
+  - 근인: search.py::_snapshot_coord가 중첩 feature_snapshot["coord"]만 읽었는데, Map
+    CuratedFeatureDetailFeatureSnapshotView는 extra=forbid이고 coord property가 아예 없어
+    (H07D typed view) 좌표는 top-level lon/lat으로 온다 → 구조적으로 항상 None.
+  - 비대칭이 힌트: 같은 payload를 admin_pois/kasi는 정상 해석해, admin·일출입 화면은 좌표가
+    보이는데 통합검색만 null이었다.
+  - 수정: 다섯 번째 추출기를 만들지 않고 정본 extract_feature_coord에 위임(기존 동작의 상위집합).
+  - 회귀 위험 실증(리뷰어 2명): 비-map snapshot은 전부 중첩 coord이고 top-level
+    x/y/geometry/location payload는 0건. 응답 계약도 기존 _coord/_float가 이미 처리. 같은 컬럼에
+    admin/trips.py가 이미 같은 추출기를 써 표면 간 해석이 오히려 일치하게 됐다.
+  - 리뷰 반영: 계약 게이트 주석·통합 문서의 "알려진 열화" 서술이 이 PR로 거짓이 되어 해소 기록으로
+    정정. 커버리지도 배선(결과 dict→PlaceSearchResult.coord)·nullable lon/lat·0.0 좌표 보존까지 확장.
+  - 검증: n150 CI-parity green(ruff/format/mypy), 신규 회귀 10 passed, 전체 unit 685 passed.
+
 ## 2026-07-29 — Lane A a0 T-VN-H07C: v5 승격 기각으로 종결 (a0 완료)
 
 - [x] **T-VN-H07C** (#812) — 배포 compatible-pair에 pinned OpenAPI SHA를 넣는 v5 승격을 양
