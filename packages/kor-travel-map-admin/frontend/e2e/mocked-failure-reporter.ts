@@ -4,13 +4,14 @@ import type {
   Reporter,
   Suite,
   TestCase,
+  TestStep,
 } from "@playwright/test/reporter";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 type Checkpoint = "A" | "B" | "C" | "D";
-type FailureStage =
+export type FailureStage =
   | "beforeEach.auth"
   | "interaction"
   | "mock.install"
@@ -146,44 +147,92 @@ function validateManifest(manifest: FailureManifest): void {
   }
 }
 
-function firstFailureText(test: TestCase): string {
-  const firstFailure = test.results
-    .filter(
-      (result) => result.status !== "passed" && result.status !== "skipped",
-    )
-    .flatMap((result) => result.errors)
-    .at(0);
-  return [firstFailure?.message, firstFailure?.stack]
-    .filter((value): value is string => Boolean(value))
-    .join("\n");
+interface FirstFailureEvidence {
+  stepPath: TestStep[];
+  text: string;
 }
 
-function firstFailureStageMatches(
-  stage: FailureStage,
-  evidence: string,
-): boolean {
-  if (!evidence) {
-    return false;
+function firstFailedStepPath(
+  steps: TestStep[],
+  parents: TestStep[] = [],
+): TestStep[] {
+  for (const step of steps) {
+    if (!step.error) continue;
+    const currentPath = [...parents, step];
+    const childPath = firstFailedStepPath(step.steps, currentPath);
+    return childPath.length > 0 ? childPath : currentPath;
   }
-  const locatorAssertion =
-    /Locator:|expect\(locator\)|toBeVisible|toHave(?:Attribute|Count|Text|Value)/u;
+  return [];
+}
+
+function firstFailureEvidence(test: TestCase): FirstFailureEvidence {
+  const firstFailureResult = test.results.find(
+    (result) => result.status !== "passed" && result.status !== "skipped",
+  );
+  const stepPath = firstFailureResult
+    ? firstFailedStepPath(firstFailureResult.steps)
+    : [];
+  const firstFailure =
+    stepPath.at(-1)?.error ?? firstFailureResult?.errors.at(0);
+  return {
+    stepPath,
+    text: [firstFailure?.message, firstFailure?.stack]
+      .filter((value): value is string => Boolean(value))
+      .join("\n"),
+  };
+}
+
+function isHookStep(step: TestStep): boolean {
+  return step.category === "hook";
+}
+
+function isRequestAssertionStep(step: TestStep): boolean {
+  return (
+    step.category === "expect" &&
+    /^Expect "(?:toMatchObject|poll toBeGreaterThanOrEqual)"/u.test(step.title)
+  );
+}
+
+function serializedStepPath(stepPath: TestStep[]) {
+  return stepPath.map((step) => ({
+    category: step.category,
+    location: step.location
+      ? {
+          file: path.basename(step.location.file),
+          line: step.location.line,
+        }
+      : null,
+    title: step.title,
+  }));
+}
+
+export function firstFailureStageMatches(
+  stage: FailureStage,
+  stepPath: TestStep[],
+): boolean {
+  const leaf = stepPath.at(-1);
+  const hasHook = stepPath.some(isHookStep);
   switch (stage) {
     case "beforeEach.auth":
-      return /#admin-username|admin-username|authenticate admin/u.test(
-        evidence,
+      return (
+        stepPath.at(0)?.category === "hook" &&
+        stepPath.at(0)?.title === "Before Hooks" &&
+        stepPath.at(1)?.category === "hook" &&
+        stepPath.at(1)?.title === "beforeEach hook" &&
+        leaf?.category === "pw:api"
       );
     case "interaction":
-      return (
-        /locator\.(?:click|fill|press|selectOption)|getByLabel\('(name|reason|lon|lat)'/u.test(
-          evidence,
-        ) && !locatorAssertion.test(evidence)
-      );
+      return !hasHook && leaf?.category === "pw:api";
     case "mock.install":
-      return /canonical_url|legacy_scope/u.test(evidence);
+      return stepPath.length === 0;
     case "render.assertion":
-      return locatorAssertion.test(evidence);
+      return (
+        !hasHook &&
+        leaf?.category === "expect" &&
+        !stepPath.some(isRequestAssertionStep)
+      );
     case "request.assertion":
-      return /operator/u.test(evidence) && !locatorAssertion.test(evidence);
+      return !hasHook && stepPath.some(isRequestAssertionStep);
   }
 }
 
@@ -214,6 +263,13 @@ class MockedFailureReporter implements Reporter {
       if (verifiedRevision !== observedRevision) {
         throw new Error(
           "runner가 검증한 Git HEAD와 observed revision이 일치해야 합니다.",
+        );
+      }
+      const verifiedFrontendRevision =
+        process.env.MOCKED_E2E_VERIFIED_FRONTEND_REVISION;
+      if (verifiedFrontendRevision !== observedRevision) {
+        throw new Error(
+          "runner가 검증한 실제 frontend와 observed revision이 일치해야 합니다.",
         );
       }
 
@@ -296,13 +352,20 @@ class MockedFailureReporter implements Reporter {
         .filter(({ key }) => expectedFailures.has(key))
         .map(({ difference, errorPattern, firstFailureStage, key }) => {
           const test = testByIdentity.get(key);
-          const evidence = test === undefined ? "" : firstFailureText(test);
+          const evidence =
+            test === undefined
+              ? { stepPath: [], text: "" }
+              : firstFailureEvidence(test);
           return {
-            causeMatched: new RegExp(errorPattern, "u").test(evidence),
+            causeMatched: new RegExp(errorPattern, "u").test(evidence.text),
             difference,
+            firstFailureStepPath: serializedStepPath(evidence.stepPath),
             firstFailureStage,
             key,
-            stageMatched: firstFailureStageMatches(firstFailureStage, evidence),
+            stageMatched: firstFailureStageMatches(
+              firstFailureStage,
+              evidence.stepPath,
+            ),
           };
         })
         .filter(

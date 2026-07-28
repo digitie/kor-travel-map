@@ -171,9 +171,9 @@
     {
       "spec": "e2e/features-new.spec.ts",
       "fixedIn": "B",
-      "firstFailureStage": "render.assertion",
-      "difference": "validation-copy",
-      "errorPattern": "feature 작성 실패",
+      "firstFailureStage": "interaction",
+      "difference": "accessible-name",
+      "errorPattern": "요청 생성",
       "determinism": "deterministic",
       "tests": [
         {

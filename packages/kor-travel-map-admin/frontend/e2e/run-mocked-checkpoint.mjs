@@ -65,6 +65,39 @@ if (statusResult.status !== 0 || statusResult.stdout.trim()) {
   process.exit(2);
 }
 
+const frontendBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
+let frontendRevision;
+try {
+  const response = await fetch(new URL("/api/build-info", frontendBaseUrl), {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  frontendRevision =
+    typeof payload === "object" &&
+    payload !== null &&
+    "revision" in payload &&
+    typeof payload.revision === "string"
+      ? payload.revision
+      : undefined;
+} catch (error) {
+  console.error(
+    `실제 frontend build revision을 확인할 수 없습니다: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+  );
+  process.exit(2);
+}
+if (frontendRevision !== revision) {
+  console.error(
+    `실제 frontend revision이 checkpoint와 다릅니다: declared=${revision}, frontend=${frontendRevision ?? "unknown"}`,
+  );
+  process.exit(2);
+}
+
 const require = createRequire(import.meta.url);
 const playwrightCli = require.resolve("@playwright/test/cli");
 const result = spawnSync(
@@ -81,6 +114,7 @@ const result = spawnSync(
       MOCKED_E2E_CHECKPOINT: checkpoint,
       MOCKED_E2E_REVISION: revision,
       MOCKED_E2E_VERIFIED_REVISION: headRevision,
+      MOCKED_E2E_VERIFIED_FRONTEND_REVISION: frontendRevision,
     },
     stdio: "inherit",
   },
