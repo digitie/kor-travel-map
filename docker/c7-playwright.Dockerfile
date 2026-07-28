@@ -5,6 +5,7 @@ ARG C7_REPOSITORY_COMMIT
 WORKDIR /work
 
 COPY package.json package-lock.json ./
+COPY .npmrc ./
 COPY packages/map-marker-react/package.json ./packages/map-marker-react/package.json
 COPY packages/kor-travel-map-admin/frontend/package.json ./packages/kor-travel-map-admin/frontend/package.json
 COPY packages/kor-travel-map-user-client/package.json ./packages/kor-travel-map-user-client/package.json
@@ -14,9 +15,9 @@ COPY scripts/verify-npm-tree.mjs ./scripts/verify-npm-tree.mjs
 
 RUN node -e 'if (!/^[0-9a-f]{40}$/.test(process.argv[1] ?? "")) process.exit(1)' \
       "$C7_REPOSITORY_COMMIT" \
-    && npx --yes npm@10.9.4 ci --workspaces --include=optional \
-    && npx --yes npm@10.9.4 run verify:npm-tree \
-    && npx --yes npm@10.9.4 run verify:next-sharp
+    && npx --yes npm@12.0.1 ci --workspaces --include=optional \
+    && npx --yes npm@12.0.1 run verify:npm-tree \
+    && npx --yes npm@12.0.1 run verify:next-sharp
 
 COPY packages/map-marker-react ./packages/map-marker-react
 COPY packages/kor-travel-map-admin/frontend ./packages/kor-travel-map-admin/frontend

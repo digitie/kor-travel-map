@@ -71,7 +71,7 @@ type-check + next build (Node 20)
 
 `openapi-drift`와 `type-check + next build (Node 20)`은 path filter를 제거해 모든 PR에서
 생성된다. frontend check 이름의 `Node 20`은 branch protection의 legacy identity일 뿐이며 실제
-workflow와 toolchain 계약은 exact Node 22.23.1/npm 10.9.4다. DTO/admin router/frontend 변경이
+workflow와 toolchain 계약은 exact Node 22.23.1/npm 12.0.1이다. DTO/admin router/frontend 변경이
 없는 PR에서도 check가 실행되므로,
 branch protection의 required check로 승격해도 missing check 때문에 merge가 막히지
 않는다.

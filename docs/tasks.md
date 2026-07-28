@@ -19,8 +19,7 @@
 barrier로 직렬화한다.
 
 - **Lane A — cross-repo 계약·운영·데이터 품질**
-  - a0: [x] `T-VN-H07A`(Map #814 재감사·landing) →
-    [ ] `T-VN-H07B`(PinVi #403 재감사·landing) →
+  - a0: [ ] `T-VN-H07B`(PinVi #403 재감사·landing) →
     [ ] `T-VN-H07D`(#815 admin snapshot/freshness) →
     [ ] `T-VN-H07C`(#812 manifest v5)
   - a1: [ ] `T-VN-H27`(#819 HAProxy tunnel) →
@@ -33,8 +32,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [ ] `T-VN-46`(npm optional tree) →
-    [ ] `T-VN-48A` → [ ] `T-VN-48B` → [ ] `T-VN-48C` →
+  - b0: [ ] `T-VN-48A` → [ ] `T-VN-48B` → [ ] `T-VN-48C` →
     [ ] `T-VN-48D`(mocked E2E drift) →
     [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
     [ ] `T-VN-49D`(React 구조 debt)
@@ -65,8 +63,9 @@ barrier로 직렬화한다.
 
 - base는 **main**(`integration/t-vn`은 PR #790 합류로 폐지). 시작·PR 직전·머지 직후
   `origin/main` rebase. PR 하나는 task 하나만 소유.
-- 첫 reviewable checkpoint를 바로 push해 PR을 먼저 열고, 구현·리뷰 반영·실데이터 검증을
-  작은 의미 단위로 자주 커밋한다. 실패하면 검증된 직전 checkpoint부터 재개한다.
+- 첫 reviewable checkpoint부터 원격 feature branch에 작은 의미 단위로 자주 커밋·push하되,
+  PR은 구현·적대 리뷰 반영·실데이터 검증·최종 main rebase를 모두 마친 뒤 **머지 직전**에만
+  연다. 실패하면 검증된 직전 checkpoint부터 재개한다.
 - **Lane A**: PR #869 다음 PR부터 적대적 리뷰어 **2명** 반영 후 n150 **파괴적 live E2E**
   (실데이터)로 검증하고 PR·CI green·머지. 작업 중 발견 항목은 tasks.md에 즉시 추가.
 - **Lane B**: PR #869 다음 PR부터 적대적 리뷰어 **2명** 반영 후 n150 **실데이터 파괴적 Live UI
@@ -103,8 +102,9 @@ barrier로 직렬화한다.
   착수 전에 migration head·schema/fixture 계약·파괴적 실행 잔여물·코드/API 호환성·디스크
   여유를 확인해 재사용 가능하면 이름·head·fixture identity와 근거를 `resume.md`/
   `journal.md`에 기록하고, 불가능할 때만 해당 격리 resource를 정확히 정리한다.
-- **cross-lane 순서 제약**: C6c pair capture와 #392는 이미 완료됐다. H07은 오래 열린
-  #814/#403을 최신 main에 재배치하고 중복 assertion을 제거한 뒤 H07D→H07C 순서로 진행한다.
+- **cross-lane 순서 제약**: C6c pair capture와 #392, H07A의 Map #814 landing
+  (`259a9ec5`)은 이미 완료됐다. H07B는 오래 열린 PinVi #403을 최신 main에 재배치하고 중복
+  assertion을 제거한 뒤 H07D→H07C 순서로 진행한다.
   H22C는 같은 curation frontend를 만지는 T-VN-48B·49B 뒤에 시작한다. T-VN-12A의 command
   inventory freeze는 H22B의 reclassification command가 머지된 뒤 시작해 curation idempotency가
   누락되지 않게 한다. Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
@@ -134,16 +134,6 @@ barrier로 직렬화한다.
     대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
 
 ## Lane B 상세 — b0 선행 하드닝
-
-- [ ] T-VN-46 — **admin frontend npm optional tree 무결성 완결**
-
-  T-VN-43의 exact npm 10.9.4 clean install은 audit 0과 exit 0이지만 `npm ls --all --json`의
-  `problems`에 Sharp 0.35.3 WASM fallback optional graph 6개(`@emnapi/*`, `@img/sharp-wasm32`,
-  `@napi-rs/wasm-runtime`, `@tybys/wasm-util`)를 `extraneous`로 남긴다. T-VN-43은 exact allowlist 밖
-  문제를 fail-close하고 실제 native optimizer를 검증한다. 2026-07-28 실측 최신 npm은 12.0.1,
-  Sharp 최신은 이미 사용 중인 0.35.3이다. pinned/latest npm의 동일 lockfile clean-install
-  최소 재현으로 Arborist/Sharp 소유 경계를 확정하고 allowlist 자체를 제거한다. 쓰지 않는 direct
-  dependency를 추가하거나 `npm ls` 출력을 숨기는 방식은 금지한다.
 
 ### T-VN-48 — mocked Playwright drift 단계별 제거
 
@@ -380,17 +370,9 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
 ## Lane A 상세 — T-VN-H07 cross-repo 계약 완결
 
-Map #814와 PinVi #403은 각각 최신 main보다 85/13 commits 뒤처졌고, Map main에는 이후
-T-VN-05R 계열의 유사 schema assertion이 추가됐다. 오래된 task 문서 commit을 그대로 재생하지
-않고 residual contract만 남긴다.
-
-- [x] T-VN-H07A — **Map #814 residual contract 재감사·landing** (PR #814 merged @ 259a9ec5)
-
-  최신 main에 rebase해 stale `tasks.md` commit과 이미 존재하는 union/additionalProperties
-  assertion을 제거했다. 남는 field-level(required/type/enum/format/const/exact property/$ref)
-  검사가 non-tautological·non-redundant인지 적대 리뷰어 2명이 실제 pydantic 생성 스키마·
-  `openapi.user.json`과 대조해 land 판정한 뒤 #814를 갱신·머지했다. n150 CI-parity가 base
-  drift(0066 `external_component_id` required)를 검출해 현행 계약으로 재조정. tasks-done 참조.
+Map #814 residual은 `259a9ec5`로 landing해 `tasks-done.md`에 보존했다. 남은 PinVi #403은
+재감사 기준 시점 최신 main보다 13 commits 뒤처졌고, 오래된 task 문서 commit을 재생하지 않고
+H07A의 실제 user OpenAPI SHA와 대조한 residual consumer contract만 남긴다.
 
 - [ ] T-VN-H07B — **PinVi #403 residual contract 재감사·landing**
 

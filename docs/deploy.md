@@ -94,9 +94,9 @@ npm run docker:up
 > `docs/dev-environment.md` §0). **prod는 `kor-travel-docker-manager`로 기동하고 공식
 > 도메인(reverse proxy, 아래 §프로덕션 도메인)을 적용한다.** 별도 지시가 없으면 dev를
 > 의미한다. host 모드를 끄려면 `KOR_TRAVEL_MAP_DOCKER_NETWORK=bridge`.
-frontend 이미지는 루트 `package-lock.json`과 exact npm 10.9.4의 clean `npm ci`로 재현 가능한
-workspace 의존성 설치를 사용한다. install은 Redocly patch, Sharp WASM optional 6개만 허용하는
-`npm ls --all --json` tree-integrity verifier, 실제 Next/Sharp optimizer smoke까지 통과해야 한다.
+frontend 이미지는 루트 `package-lock.json`과 exact npm 12.0.1의 clean `npm ci`로 재현 가능한
+workspace 의존성 설치를 사용한다. install은 Redocly patch, `npm ls --all --json`
+0-problem tree-integrity verifier, 실제 Next/Sharp optimizer smoke까지 통과해야 한다.
 
 ## T-108: 양 노드 배포 자동화
 

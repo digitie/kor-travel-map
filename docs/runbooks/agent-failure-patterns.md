@@ -242,8 +242,8 @@
   export NVM_DIR="$HOME/.nvm"
   . "$NVM_DIR/nvm.sh"
   nvm use 22.23.1
-  npx --yes npm@10.9.4 ci --workspaces --include=optional
-  npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run build
+  npx --yes npm@12.0.1 ci --workspaces --include=optional
+  npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run build
   ```
   그래도 native package가 계속 꼬이면 ignored artifact인 `node_modules/`를 WSL에서
   지우고 WSL npm으로 다시 설치한다. Windows npm으로 frontend 서버를 실행하지 않는다.
@@ -434,3 +434,18 @@
     `docs/resume.md`/`docs/journal.md`에 기록해 보존한다. 호환되지 않거나 오염·용량 위험이
     있으면 그때 정확한 격리 DB·dump·process/container·redacted checkpoint만 명시적으로 정리한다.
   - 어느 경우든 prod 기준선·health가 변하지 않았음을 다시 확인한다.
+
+### F13 — prod-derived env가 candidate API 대신 이전 endpoint를 가리킴
+
+- **증상**: 격리 clone과 candidate API/UI를 띄웠는데 로그인은 성공하고 첫 admin API가
+  `403`이 되거나, UI BFF 요청이 candidate API access log에 나타나지 않는다.
+- **원인**: prod env를 복제하면서 UI의 `KOR_TRAVEL_MAP_API_INTERNAL_URL` 또는 API의 DB/port
+  override를 빠뜨렸다. UI 로그인은 자체 인증이라 upstream 오결선을 검출하지 못한다.
+- **회피/복구**:
+  - 파괴적 요청 전에 컨테이너의 실제 env를 **값 비노출 boolean 비교**로 검사해 UI internal
+    URL이 candidate API의 exact loopback port를, API DSN이 격리 clone port를 가리키는지
+    확인한다.
+  - API production profile의 fail-close 설정과 공유 admin proxy secret의 양쪽 존재·동일성,
+    trusted proxy CIDR, UI 로그인 `200 + Set-Cookie`를 먼저 검증한다.
+  - 오결선이면 write를 진행하지 않고 잘못 뜬 UI/API와 브라우저 artifact를 폐기한 뒤 해당
+    컨테이너 설정 단계부터 재개한다. 로그·env·cookie의 실제 값은 출력하거나 보존하지 않는다.

@@ -87,15 +87,15 @@ fallback 용도로만 사용한다. `which node`/`which npm`이 `/mnt/c/Program 
 가리키면 Windows Node가 섞인 상태이므로 WSL nvm Node를 먼저 활성화한다.
 
 ```bash
-# 저장소 루트의 Linux/WSL 셸에서 실행(Node >=22, npm 10.9.4)
+# 저장소 루트의 Linux/WSL 셸에서 실행(Node 22.22.2+/24.15.0+/26+, npm 12.0.1)
 which node npm              # /home/.../.nvm/... 등 Linux 경로여야 함
-npx --yes npm@10.9.4 ci --workspaces --include=optional
-npx --yes npm@10.9.4 run audit:high
+npx --yes npm@12.0.1 ci --workspaces --include=optional
+npx --yes npm@12.0.1 run audit:high
 cd packages/kor-travel-map-admin/frontend
 cp .env.example .env.local
 $EDITOR .env.local
-npx --yes npm@10.9.4 run gen:types  # ../../kor-travel-map-api/openapi.json -> src/api/types.ts
-npx --yes npm@10.9.4 run dev        # http://127.0.0.1:12705
+npx --yes npm@12.0.1 run gen:types  # ../../kor-travel-map-api/openapi.json -> src/api/types.ts
+npx --yes npm@12.0.1 run dev        # http://127.0.0.1:12705
 ```
 
 `src/api/types.ts`는 `openapi-typescript` 자동 생성 파일이다. 라우터/DTO 변경으로
@@ -105,11 +105,15 @@ npx --yes npm@10.9.4 run dev        # http://127.0.0.1:12705
 
 ### npm 보안·OpenAPI codegen 경계
 
-root install은 선언된 npm 10.9.4로만 실행하고
+root install은 선언된 npm 12.0.1로만 실행하고
 `scripts/patch-redocly-openapi-core.mjs`를 postinstall로 실행한다. `openapi-typescript` 7이 아직
 Redocly 1 API를 사용하므로 js-yaml/minimatch만 안전한 exact version으로 올리고, minimatch의
 named export 변경 한 곳을 Redocly 1.34.17 원문에 exact 적용한다. 설치 version이나 대상 줄 수가
-다르면 실패한다. Next가 아직 선언하지 않은 Sharp 0.35 ABI는
+다르면 실패한다. dependency install script는 root `allowScripts`에서 검토한
+`esbuild@0.28.1`과 `unrs-resolver@1.12.2`만 허용하고, package version이나 새 script가
+바뀌면 `.npmrc`의 `strict-allow-scripts`가 clean install을 중단한다. `verify:npm-tree`는
+`npm ls --all --json`의 `problems`가 0개인지 검사한다.
+Next가 아직 선언하지 않은 Sharp 0.35 ABI는
 `scripts/verify-next-sharp.mjs`가 실제 SVG→WebP 변환과 크기를 검증한다. CI와 frontend/C7 Docker
 build는 clean install 직후 이 smoke를 실행한다. Playwright client는 immutable C7 browser image와
 같은 1.60.0으로 고정한다. patch를 우회하는 `--ignore-scripts` install 결과로 build·codegen을
@@ -126,7 +130,7 @@ build는 clean install 직후 이 smoke를 실행한다. Playwright client는 im
    가 나오면 WSL nvm Node를 활성화한다.
 2. Windows npm으로 설치한 흔적이 있으면 WSL Node로 optional dependency를 보강한다.
    ```bash
-   npx --yes npm@10.9.4 ci --workspaces --include=optional
+   npx --yes npm@12.0.1 ci --workspaces --include=optional
    ```
 3. `Cannot find module '../lightningcss.linux-x64-gnu.node'` 또는 `@next/swc` native
    binary 누락은 2번 문제다. Windows npm으로 다시 실행하지 않는다.
@@ -198,7 +202,7 @@ npm run doctor
 
 # 2) n150 Linux에서 Playwright 실행
 cd packages/kor-travel-map-admin/frontend
-npx --yes npm@10.9.4 ci --workspaces --include=optional  # 최초 1회
+npx --yes npm@12.0.1 ci --workspaces --include=optional  # 최초 1회
 npm run e2e:install      # chromium 설치 (최초 1회)
 npm run e2e              # playwright test (servers는 WSL에 떠 있어야 함)
 npm run e2e:ui           # --ui 모드

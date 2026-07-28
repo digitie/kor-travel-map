@@ -87,15 +87,19 @@ cd /mnt/f/dev/kor-travel-map-<agent>
 - 로컬 green을 맹신하지 말 것 — WSL venv가 누락된 `[dev]` extra를 가릴 수 있다
   ([failure-patterns §A1](./agent-failure-patterns.md)).
 
-## 5. 커밋 + PR
+## 5. 원격 커밋 + 머지 직전 PR
 
 ```
 git -C <worktree> add <관련 파일만>     # claude.json 등 무관 파일 제외
 git -C <worktree> commit -m "<type(scope): summary>" -m "<본문: 무엇/왜/게이트 결과>"
 git -C <worktree> push -u origin feat/<topic>
+# 구현·리뷰·Live·최종 rebase를 마칠 때까지 작은 checkpoint를 commit/push
 gh pr create --base main --head feat/<topic> --title ... --body ...
 ```
 
+- 첫 checkpoint부터 원격 feature branch에는 자주 push하되 PR을 조기에 열지 않는다.
+  구현, 필요한 적대 리뷰와 수정, 실데이터 Live, 최종 `origin/main` rebase와 push 전
+  보안 감사를 마친 뒤 머지 직전에 PR을 생성한다.
 - 커밋/PR 본문에는 **실제 게이트 결과**(예: `ruff clean / mypy N files / import-linter
   4 kept / M passed`)를 적되, **반드시 실행해서 본 수치만**. 안 돌린 결과를 적지
   않는다([failure-patterns §A2](./agent-failure-patterns.md)).

@@ -33,11 +33,20 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     lock_packages = _json(ROOT / "package-lock.json")["packages"]
     eslint_config = (FRONTEND / "eslint.config.mjs").read_text(encoding="utf-8")
 
-    assert root_package["packageManager"] == "npm@10.9.4"
-    assert root_package["engines"] == {"node": ">=22", "npm": "10.9.4"}
+    expected_engines = {
+        "node": "^22.22.2 || ^24.15.0 || >=26.0.0",
+        "npm": "12.0.1",
+    }
+    assert root_package["packageManager"] == "npm@12.0.1"
+    assert root_package["engines"] == expected_engines
+    assert frontend_package["engines"] == expected_engines
     assert root_package["scripts"]["audit:high"] == (
-        "npx --yes npm@10.9.4 audit --audit-level=high"
+        "npx --yes npm@12.0.1 audit --audit-level=high"
     )
+    assert root_package["allowScripts"] == {
+        "esbuild@0.28.1": True,
+        "unrs-resolver@1.12.2": True,
+    }
     assert root_package["scripts"]["verify:npm-tree"] == (
         "node scripts/verify-npm-tree.mjs"
     )
@@ -76,6 +85,17 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     )
     assert lock_packages["node_modules/minimatch"]["version"] == "10.2.5"
     assert lock_packages["node_modules/js-yaml"]["version"] == "4.3.0"
+    assert lock_packages[""]["engines"] == expected_engines
+    assert lock_packages[str(FRONTEND.relative_to(ROOT))]["engines"] == (
+        expected_engines
+    )
+    for package_name, version in (
+        ("esbuild", "0.28.1"),
+        ("unrs-resolver", "1.12.2"),
+    ):
+        package = lock_packages[f"node_modules/{package_name}"]
+        assert package["version"] == version
+        assert package["hasInstallScript"] is True
 
 
 @pytest.mark.unit
@@ -103,6 +123,7 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
     workflow = (ROOT / ".github" / "workflows" / "frontend.yml").read_text(
         encoding="utf-8"
     )
+    npmrc = (ROOT / ".npmrc").read_text(encoding="utf-8").splitlines()
 
     assert root_package["scripts"]["postinstall"] == (
         "node scripts/patch-redocly-openapi-core.mjs"
@@ -115,8 +136,9 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
     assert 'const expectedSharpVersion = "0.35.3";' in sharp_smoke
     assert "optimizeImage" in sharp_smoke
     assert 'contentType: "image/webp"' in sharp_smoke
-    assert "const expectedProblems = [" in npm_tree_verifier
+    assert "const expectedProblems = [" not in npm_tree_verifier
     assert "tree.problems ?? []" in npm_tree_verifier
+    assert "tree.problems ?? [],\n  []," in npm_tree_verifier
     assert '[npmExecPath, "--version"]' in npm_tree_verifier
     assert "assert.deepEqual(" in npm_tree_verifier
     assert 'severity("react-hooks/rules-of-hooks")' in eslint_verifier
@@ -131,16 +153,19 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
         "COPY scripts/verify-next-sharp.mjs ./scripts/verify-next-sharp.mjs"
     )
     tree_copy = "COPY scripts/verify-npm-tree.mjs ./scripts/verify-npm-tree.mjs"
-    install_token = "npx --yes npm@10.9.4 ci --workspaces --include=optional"
-    tree_token = "npx --yes npm@10.9.4 run verify:npm-tree"
-    verify_token = "npx --yes npm@10.9.4 run verify:next-sharp"
+    npmrc_copy = "COPY .npmrc ./"
+    install_token = "npx --yes npm@12.0.1 ci --workspaces --include=optional"
+    tree_token = "npx --yes npm@12.0.1 run verify:npm-tree"
+    verify_token = "npx --yes npm@12.0.1 run verify:next-sharp"
     for dockerfile in dockerfiles.values():
+        assert npmrc_copy in dockerfile
         assert patch_copy in dockerfile
         assert sharp_copy in dockerfile
         assert tree_copy in dockerfile
         assert install_token in dockerfile
         assert tree_token in dockerfile
         assert verify_token in dockerfile
+        assert dockerfile.index(npmrc_copy) < dockerfile.index(install_token)
         assert dockerfile.index(patch_copy) < dockerfile.index(install_token)
         assert dockerfile.index(sharp_copy) < dockerfile.index(install_token)
         assert dockerfile.index(tree_copy) < dockerfile.index(install_token)
@@ -150,8 +175,9 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
     assert 'node-version: "22.23.1"' in workflow
     assert install_token in workflow
     assert tree_token in workflow
-    assert "npx --yes npm@10.9.4 run verify:frontend-eslint" in workflow
+    assert "npx --yes npm@12.0.1 run verify:frontend-eslint" in workflow
     assert verify_token in workflow
+    assert npmrc == ["engine-strict=true", "strict-allow-scripts=true"]
     assert "mcr.microsoft.com/playwright:v1.60.0-noble@sha256:" in (
         dockerfiles["c7-playwright.Dockerfile"]
     )

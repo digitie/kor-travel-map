@@ -11,15 +11,16 @@ RUN apt-get update \
 
 COPY package.json ./
 COPY package-lock.json ./
+COPY .npmrc ./
 COPY packages/map-marker-react/package.json ./packages/map-marker-react/package.json
 COPY packages/kor-travel-map-admin/frontend/package.json ./packages/kor-travel-map-admin/frontend/package.json
 COPY scripts/patch-redocly-openapi-core.mjs ./scripts/patch-redocly-openapi-core.mjs
 COPY scripts/verify-next-sharp.mjs ./scripts/verify-next-sharp.mjs
 COPY scripts/verify-npm-tree.mjs ./scripts/verify-npm-tree.mjs
 
-RUN npx --yes npm@10.9.4 ci --workspaces --include=optional \
-    && npx --yes npm@10.9.4 run verify:npm-tree \
-    && npx --yes npm@10.9.4 run verify:next-sharp
+RUN npx --yes npm@12.0.1 ci --workspaces --include=optional \
+    && npx --yes npm@12.0.1 run verify:npm-tree \
+    && npx --yes npm@12.0.1 run verify:next-sharp
 
 FROM node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS builder
 
@@ -51,7 +52,7 @@ ENV NEXT_PUBLIC_KOR_TRAVEL_MAP_API=$NEXT_PUBLIC_KOR_TRAVEL_MAP_API \
     NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY=$NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY \
     NEXT_TELEMETRY_DISABLED=1
 
-RUN npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run build
+RUN npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run build
 
 FROM node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS runner
 

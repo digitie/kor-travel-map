@@ -35,45 +35,45 @@ jobs:
         # 루트 package.json의 npm workspaces 로 두 패키지 한 번에 설치.
         # admin frontend는 maplibre-gl + in-repo VWorld 스타일 빌더 사용 — 외부 git
         # dep 없음 (maplibre-vworld git dep는 #476에서 제거).
-        run: npx --yes npm@10.9.4 ci --workspaces --include=optional --no-audit --no-fund
+        run: npx --yes npm@12.0.1 ci --workspaces --include=optional --no-audit --no-fund
 
       - name: npm high 취약점 gate
-        run: npx --yes npm@10.9.4 run audit:high
+        run: npx --yes npm@12.0.1 run audit:high
 
       - name: npm dependency tree integrity
-        run: npx --yes npm@10.9.4 run verify:npm-tree
+        run: npx --yes npm@12.0.1 run verify:npm-tree
 
       - name: frontend ESLint effective config
-        run: npx --yes npm@10.9.4 run verify:frontend-eslint
+        run: npx --yes npm@12.0.1 run verify:frontend-eslint
 
       - name: frontend ESLint full lint (0 warnings)
-        run: npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run lint
+        run: npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run lint
 
       - name: React Doctor 예외 전체 범위 검증
-        run: npx --yes npm@10.9.4 run verify:react-doctor-config
+        run: npx --yes npm@12.0.1 run verify:react-doctor-config
 
       - name: React Doctor full scan (0 diagnostics)
-        run: npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run doctor
+        run: npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run doctor
 
       - name: Next/Sharp optimizer ABI smoke
-        run: npx --yes npm@10.9.4 run verify:next-sharp
+        run: npx --yes npm@12.0.1 run verify:next-sharp
 
       - name: openapi-typescript drift check
         # T-RV-30: admin frontend가 사용하는 generated OpenAPI 타입 산출물이
         # packages/kor-travel-map-api/openapi.json과 drift 나지 않게 고정한다.
-        run: npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run gen:types:check
+        run: npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run gen:types:check
 
       - name: user-client types drift + surface assertions (T-210e)
         # downstream(TripMate) 소비용 user spec 타입 산출물 고정 + ADR-048 표면
         # 불변식(batch found / meta.page / 평면 lon,lat / /v1 경로) 컴파일 단언.
         run: |
-          npx --yes npm@10.9.4 -w packages/kor-travel-map-user-client run gen:types:check
-          npx --yes npm@10.9.4 -w packages/kor-travel-map-user-client run type-check
+          npx --yes npm@12.0.1 -w packages/kor-travel-map-user-client run gen:types:check
+          npx --yes npm@12.0.1 -w packages/kor-travel-map-user-client run type-check
 
       - name: tsc --noEmit (frontend type-check)
         # 빠른 1차 게이트. JSDoc 주석 안의 `*/`(comment terminator) 같은 잠복
         # syntax 오류도 검출 (PR#92 회고).
-        run: npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run type-check
+        run: npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run type-check
 
       - name: next build (production compile)
         # ADR-025 — swc/turbo의 syntax + 모듈 해석을 production 경로까지 확인.
@@ -82,4 +82,4 @@ jobs:
           NEXT_PUBLIC_KOR_TRAVEL_MAP_API: http://127.0.0.1:8087
           NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: http://127.0.0.1:12302
           NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: http://127.0.0.1:12201
-        run: npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run build
+        run: npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run build

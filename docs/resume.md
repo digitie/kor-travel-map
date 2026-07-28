@@ -1,5 +1,31 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-28 (codex) — T-VN-46 파괴적 Live·task 완료
+
+**다음 한 작업**: T-VN-46 최종 문서와 Claude Code PR #874 사후 감사 결과를 원격 branch에
+commit/push하고 최신 `origin/main`에 rebase한다. 머지 직전에만 새 PR을 열어 CI green 뒤
+셀프 머지한다. 머지 후 `ktm-tvn45-db`·dump의 T-VN-48A 재사용 가능성을 먼저 판정한다.
+
+- exact 구현 head `378c6524`는 적대 리뷰어 2명의 최종 P0/P1/P2 0건 확인을 받았다.
+  지원 Node 22.22.2/npm 12.0.1 clean install의 audit·unreviewed script·npm tree가 모두
+  0이고, ESLint·React Doctor·Sharp ABI·OpenAPI codegen drift·type-check·production build를
+  통과했다.
+- `ktm-tvn45-db`를 rollback 없이 `0066_curation_component_identity` 그대로 재사용했다.
+  candidate API/UI/C7 image의 revision을 exact head로 확인하고 파괴적
+  `admin-feature-acceptance-write.live.spec.ts`를 인증 setup 포함 **2/2, 37.9초** 통과했다.
+- 첫 실행은 API production profile의 공개 API key gate 누락을 해당 API container 설정
+  단계에서 복구했다. 이어 prod-derived UI env의 internal URL override 누락으로 candidate
+  아닌 endpoint가 첫 admin cleanup을 `403`으로 거부했으며, write 전 실패를 확인한 뒤 UI와
+  브라우저 artifact를 폐기하고 candidate loopback URL로 다시 띄워 실패한 spec부터 재개했다.
+- 최종 감사는 API-owned non-deleted Feature **0건**, pending change request **0건**,
+  weather/price fixture **0건**이다. clone의 non-deleted Feature는 **1,025,428건**, health는
+  정상이다. 인증 상태/cookie·raw trace·screenshot·민감 로그·임시 env/session secret과
+  candidate container는 모두 폐기했고 DB·dump와 redacted immutable 수치만 유지한다.
+- Claude Code PR #874 사후 감사 이슈 #875는 #814 구현·landing 근거와 후속 11개 테스트 green을
+  확인했지만, 완료된 H07A가 active `tasks.md`에 중복된 P2와 #870 전용 CI 대기 생략 예외를
+  #874가 재사용한 P2를 찾았다. H07A는 `tasks-done.md`만 정본으로 남겼고, #874의 사후 CI green은
+  보상 근거일 뿐 후속 문서 PR의 예외로 승계하지 않는다.
+
 ## 2026-07-28 (claude) — Lane A a0 T-VN-H07A 완료: Map #814 residual contract landing
 
 **다음 한 작업**: Lane A a0 다음 항목 `T-VN-H07B`(PinVi #403 재감사·landing) — 최신 PinVi main에
@@ -13,6 +39,48 @@ typed consumer contract로 남겨 #403 갱신·머지. 이어 H07D(#815) → H07
   tasks.md(구 b-lane only 구조)를 읽고 Lane B를 건드릴 뻔했다. origin/main sync 후 a0/a1 Lane A
   구조가 정본. 작업 중 codex 병렬 진행분(+32 commits)을 origin/main rebase로 최신 유지.
 - **워크플로우**: PR은 머지 직전에만 열고 그 전엔 리모트 브랜치에 자주 커밋(사용자 지시).
+
+## 2026-07-28 (codex) — T-VN-46 npm optional tree 0-problem 전환
+
+**다음 한 작업**: 원격 branch `feat/t-vn-46-npm-optional-tree`의 구현 head를 적대적 리뷰하고,
+#870 이후 closed 포함 Claude Code PR을 재감사한다. 이어 재사용 DB에서 파괴적 Live UI를
+통과시킨 뒤 task 문서를 완료 처리하고 머지 직전에 PR을 연다.
+
+- 동일 lockfile clean install에서 npm 10.9.4는 Linux에서 제외된 `os=freebsd`·`cpu=wasm32`
+  optional 부모의 자식 6개를 root에 설치한 뒤 `npm ls`에서 `extraneous`로 판정했다. `nested`
+  install과 `npm prune`도 같은 6개를 남겼다.
+- 지원 Node 22.22.2에서 최신 npm 12.0.1 clean install은 direct dependency 추가나
+  `npm ls` 출력 필터 없이 `problems` **0개**다. exact npm을 12.0.1로 올리고
+  `verify:npm-tree`의 기존 허용 목록을 빈 문제 집합 단언으로 교체했다.
+- npm 12의 install-script 경계는 검토한 `esbuild@0.28.1`과
+  `unrs-resolver@1.12.2`만 root `allowScripts`로 허용하고, version drift와 신규 script는
+  `.npmrc`의 `strict-allow-scripts=true`로 fail-close한다. Node engine도 npm 12가 지원하는
+  exact union `^22.22.2 || ^24.15.0 || >=26.0.0`으로 제한했다.
+- 격리 clean install에서 audit **0**, unreviewed install script **0**, npm tree
+  **0 problems**, ESLint·React Doctor **0 diagnostics**, Sharp SVG→WebP ABI, admin/user
+  codegen drift, 두 type-check와 production build를 모두 통과했다. npm 12가 정규화한
+  lockfile은 재실행 drift도 0이다.
+- T-VN 작업에는 issue를 만들지 않는다는 사용자 정정에 따라 #872는 `not planned`로 닫았다.
+  조기 draft PR #873도 닫았고, 원격 branch에 자주 커밋한 뒤 검증 완료 시점에 새 PR을 연다.
+
+## 2026-07-28 (codex) — PR #871 머지 후 T-VN-46 재사용 checkpoint
+
+**다음 한 작업**: Lane B `T-VN-46`에서 npm 10.9.4와 최신 npm의 동일
+lockfile clean-install을 최소 재현하고 Sharp 0.35.3 optional graph의 Arborist 소유 경계를
+확정한다. 작업 중 main을 주기적으로 rebase하고, 적대 리뷰 단계에 #870 이후 closed 포함
+Claude Code 신규 PR을 다시 조회해 있으면 전문 서브에이전트 1명의 리뷰·수정을 이 PR에 합친다.
+
+- PR #871은 exact head `944b2563`의 8개 CI가 모두 green인 뒤 merge commit `64c158c5`로
+  main에 반영됐다.
+- 보존 clone은 main head와의 차이 `0063→0064→0065→0066`을 rollback 없이 forward upgrade했다.
+  현재 `0066_curation_component_identity`, Feature **1,030,469건**, 합성 Feature **22/22
+  deleted**, incomplete tombstone **0건**, change request **80건/pending 0건**, POI cache target
+  **90건**, DB **17GB**, health 정상이다.
+- main schema와 호환되고 T-VN-46이 frontend dependency/gate 작업이라 기존 합성 tombstone이
+  검증을 오염시키지 않으며 가용 공간도 **85GB**다. 따라서 `ktm-tvn45-db`와
+  1,175,043,355-byte dump/redacted checkpoint를 T-VN-46 Live에 재사용한다.
+- #870 이후 closed 포함 PR은 현재 #871뿐이며 신규 Claude Code PR은 없다. 당시 생성한
+  issue #872는 후속 사용자 정정에 따라 `not planned`로 닫았다.
 
 ## 2026-07-28 (codex) — Lane B T-VN-45 구현·파괴적 Live 완료
 
