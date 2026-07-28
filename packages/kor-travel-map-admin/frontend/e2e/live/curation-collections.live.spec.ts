@@ -35,11 +35,14 @@ type Envelope<T> = { data: T; meta?: Record<string, unknown> };
 
 const FLOW_TIMEOUT = 120_000;
 const EXECUTE_IMPORT = process.env.E2E_CURATION_IMPORT_WRITE === "1";
-const EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS = Number(
-  process.env.E2E_EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS ?? "486",
+const EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS = expectedLiveCount(
+  "E2E_EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS",
+  486,
 );
-const EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES = Number(
-  process.env.E2E_EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES ?? "15",
+const EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES = expectedLiveCount(
+  "E2E_EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES",
+  15,
+  15,
 );
 const MULTI_OBSERVATION_FEATURE_ID = "f_4127310100_e_227e045425edb459";
 const RESOURCE_ROOT =
@@ -77,6 +80,20 @@ const OFFICIAL_COLLECTION_KEYS = [
 ] as const;
 
 test.describe.configure({ mode: "serial" });
+
+function expectedLiveCount(name: string, fallback: number, maximum?: number): number {
+  const raw = process.env[name];
+  const value = raw === undefined ? fallback : Number(raw);
+  if (
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    (maximum !== undefined && value > maximum)
+  ) {
+    const range = maximum === undefined ? "non-negative" : `between 0 and ${maximum}`;
+    throw new Error(`${name} must be a ${range} safe integer; received ${raw}`);
+  }
+  return value;
+}
 
 async function browserJson<T>(page: Page, pathName: string): Promise<T> {
   return page.evaluate(async (pathValue) => {
@@ -231,6 +248,28 @@ test.describe("공식 큐레이션 collection live", () => {
       name: /아름다운 등대 · 등대 스탬프투어/,
     });
     await lighthouseButton.click();
+    const lighthouseCollection = byKey.get(
+      "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+    );
+    expect(lighthouseCollection).toBeDefined();
+    const lighthouseDetail = await browserJson<
+      Envelope<{ collection: Collection; items: AdminCurationItem[] }>
+    >(
+      page,
+      `/v1/admin/curations/${encodeURIComponent(
+        (lighthouseCollection as Collection).collection_id,
+      )}`,
+    );
+    const linkedLighthouses = lighthouseDetail.data.items.filter(
+      (item) => item.feature_id !== null,
+    );
+    expect(lighthouseDetail.data.items).toHaveLength(15);
+    expect(linkedLighthouses).toHaveLength(
+      15 - EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES,
+    );
+    expect(new Set(linkedLighthouses.map((item) => item.feature_id)).size).toBe(
+      linkedLighthouses.length,
+    );
     const detail = page.getByTestId("curation-collection-detail");
     await expect(detail.getByText("Feature 미연결", { exact: true })).toHaveCount(
       EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES,
