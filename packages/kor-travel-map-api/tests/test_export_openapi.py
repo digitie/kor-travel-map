@@ -831,6 +831,12 @@ def test_public_curated_feature_schemas_pin_required_types_and_enums() -> None:
             refs=contract.get("refs"),
         )
 
+    # phones는 PinVi가 소비하는 array element이므로 item type까지 고정한다
+    # (list[PublicPhone] = Annotated[str] → items.type == "string"). element가 object로
+    # 바뀌면 items가 $ref가 되어 "type"이 사라지므로 element shape 변경을 검출한다.
+    place_detail = user["components"]["schemas"]["PublicCuratedPlaceDetail"]
+    assert place_detail["properties"]["phones"]["items"]["type"] == "string"
+
     # PublicCuratedAddress는 7개 curated feature variant 모두의 address ref
     # 대상이므로(PinVi 주 소비 표면) 그 필드 shape도 field-level로 고정한다.
     _assert_object_schema_contract(
