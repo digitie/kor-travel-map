@@ -28,18 +28,19 @@
 - **파괴적 Live UI**: n150 격리 prod clone에서 지도 저배율 cluster·서울/부산 items·kind
   필터·상세 클릭을 실패 지점별로 재개해 통과했다. 별도 write workflow는 실제 add 승인,
   update 승인, update 거절, 비활성화, delete 승인을 모두 수행해 인증 setup 포함 **2/2**
-  (**43.5초**)를 통과했다. 최신 합성 Feature는 `deleted`이고 `deleted_at`/
+  (**44.5초**)를 통과했다. 최신 합성 Feature는 `deleted`이고 `deleted_at`/
   `user_deleted_at`가 모두 채워졌으며, 전체 합성 감사 범위는 non-deleted Feature **0건**,
   pending change request **0건**이다.
 - **Live spec 동반 복구**: 파괴적 검증 중 확인한 ADR-066 이전 `operator` 입력, 접힌 고급
   JSON 섹션, 구 create/review/preview 접근성 이름과 번역 상태, 동시 필터 변경의 비결정적
   이름 검색을 현행 UI 계약에 맞췄다. admin 목록은 필터·정렬을 먼저 확정한 뒤 exact
-  `feature_id` PK 검색 응답 본문과 row를 함께 단언한다.
+  `feature_id` PK 검색 응답 본문과 row를 함께 단언한다. 적대 리뷰 뒤 update nested field
+  보존과 inactive exact 목록 요청/응답까지 추가로 고정했다.
 - **재개용 resource**: clone `ktm-tvn45-db`, dump와 redacted checkpoint는 PR 머지 뒤 다음
   task 착수 전 재사용 판정을 위해 보존했다. Playwright 인증 상태/cookie·raw trace·실데이터
   screenshot·민감 로그·임시 env/session secret은 재사용하지 않고 Live 종료 직후 폐기한다.
   clone migration head는
-  `0063_pipeline_root_id`, Feature **1,030,467건**, POI cache target **90건**이며 파괴적
+  `0063_pipeline_root_id`, Feature **1,030,468건**, POI cache target **90건**이며 파괴적
   실행 후 clone health는 정상이다. 호환성·오염·디스크 판정 결과는 다음
   `resume.md`/`journal.md` 갱신에 기록한다.
 
