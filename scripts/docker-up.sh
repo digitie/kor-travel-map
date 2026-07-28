@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=load-env.sh
 source "$ROOT_DIR/scripts/load-env.sh"
 
+export KOR_TRAVEL_MAP_GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+
 # 외부(공유) 객체 저장소 모드 (#372, ADR-052 amendment):
 # kor-travel-docker-manager 소유 RustFS를 쓸 때는 자체 rustfs 계열을 기동하지 않고,
 # 공유 인스턴스 포트(12101/12105)를 stop 대상에 넣지 않는다 — 넣으면

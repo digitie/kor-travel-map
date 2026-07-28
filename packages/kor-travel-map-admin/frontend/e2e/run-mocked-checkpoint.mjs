@@ -67,6 +67,7 @@ if (statusResult.status !== 0 || statusResult.stdout.trim()) {
 
 const frontendBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
 let frontendRevision;
+let frontendSourceDigest;
 try {
   const response = await fetch(new URL("/api/build-info", frontendBaseUrl), {
     headers: { accept: "application/json" },
@@ -83,6 +84,13 @@ try {
     typeof payload.revision === "string"
       ? payload.revision
       : undefined;
+  frontendSourceDigest =
+    typeof payload === "object" &&
+    payload !== null &&
+    "source_digest" in payload &&
+    typeof payload.source_digest === "string"
+      ? payload.source_digest
+      : undefined;
 } catch (error) {
   console.error(
     `실제 frontend build revision을 확인할 수 없습니다: ${
@@ -94,6 +102,29 @@ try {
 if (frontendRevision !== revision) {
   console.error(
     `실제 frontend revision이 checkpoint와 다릅니다: declared=${revision}, frontend=${frontendRevision ?? "unknown"}`,
+  );
+  process.exit(2);
+}
+const sourceDigestResult = spawnSync(
+  process.execPath,
+  [path.resolve(process.cwd(), "../../../scripts/frontend-source-digest.mjs")],
+  {
+    cwd: path.resolve(process.cwd(), "../../.."),
+    encoding: "utf8",
+  },
+);
+const sourceDigest = sourceDigestResult.stdout?.trim();
+if (
+  sourceDigestResult.status !== 0 ||
+  !sourceDigest ||
+  !/^[0-9a-f]{64}$/.test(sourceDigest)
+) {
+  console.error("현재 frontend source digest를 계산할 수 없습니다.");
+  process.exit(2);
+}
+if (frontendSourceDigest !== sourceDigest) {
+  console.error(
+    `실제 frontend source digest가 checkpoint worktree와 다릅니다: expected=${sourceDigest}, frontend=${frontendSourceDigest ?? "unknown"}`,
   );
   process.exit(2);
 }
@@ -115,6 +146,7 @@ const result = spawnSync(
       MOCKED_E2E_REVISION: revision,
       MOCKED_E2E_VERIFIED_REVISION: headRevision,
       MOCKED_E2E_VERIFIED_FRONTEND_REVISION: frontendRevision,
+      MOCKED_E2E_VERIFIED_FRONTEND_SOURCE_DIGEST: frontendSourceDigest,
     },
     stdio: "inherit",
   },

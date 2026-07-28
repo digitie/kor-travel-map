@@ -272,6 +272,16 @@ class MockedFailureReporter implements Reporter {
           "runner가 검증한 실제 frontend와 observed revision이 일치해야 합니다.",
         );
       }
+      const verifiedFrontendSourceDigest =
+        process.env.MOCKED_E2E_VERIFIED_FRONTEND_SOURCE_DIGEST;
+      if (
+        !verifiedFrontendSourceDigest ||
+        !/^[0-9a-f]{64}$/.test(verifiedFrontendSourceDigest)
+      ) {
+        throw new Error(
+          "runner가 검증한 실제 frontend source digest가 필요합니다.",
+        );
+      }
 
       const manifestPath = path.join(
         process.cwd(),
@@ -377,6 +387,7 @@ class MockedFailureReporter implements Reporter {
         schemaVersion: 2,
         checkpoint,
         observedRevision,
+        observedFrontendSourceDigest: verifiedFrontendSourceDigest,
         baselineMainRevision: manifest.baselineMainRevision,
         baselineRevision: manifest.baselineRevision,
         discoveredTests: identities.length,

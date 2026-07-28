@@ -237,6 +237,11 @@ N150 16GB(x86_64)와 Odroid M1S(ARM64) 양쪽 배포용 이미지는 buildx로 �
 KOR_TRAVEL_MAP_IMAGE_TAG="$(git rev-parse --short=12 HEAD)" npm run docker:buildx
 ```
 
+`docker-buildx.sh`는 실행 worktree의 exact 40자 `HEAD`를 frontend build arg와 OCI
+`org.opencontainers.image.revision` label에 함께 박는다. admin UI의 `/api/build-info`는
+같은 빌드 SHA와 실제 frontend build 입력의 결정적 SHA-256을 반환한다. E2E runner는 clean
+worktree에서 digest를 독립 계산하므로 tag/SHA만 같고 실제 코드가 다른 이미지는 통과할 수 없다.
+
 기본 image:
 
 - `ghcr.io/digitie/kor-travel-map-api:<tag>`

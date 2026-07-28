@@ -31,12 +31,18 @@ WORKDIR /app
 
 COPY --from=deps /app/package.json ./package.json
 COPY --from=deps /app/package-lock.json ./package-lock.json
+COPY --from=deps /app/.npmrc ./.npmrc
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages/map-marker-react/package.json ./packages/map-marker-react/package.json
 COPY --from=deps /app/packages/kor-travel-map-admin/frontend/package.json ./packages/kor-travel-map-admin/frontend/package.json
 
 COPY packages/map-marker-react ./packages/map-marker-react
 COPY packages/kor-travel-map-admin/frontend ./packages/kor-travel-map-admin/frontend
+COPY docker/frontend.Dockerfile ./docker/frontend.Dockerfile
+COPY scripts/frontend-source-digest.mjs ./scripts/frontend-source-digest.mjs
+COPY scripts/patch-redocly-openapi-core.mjs ./scripts/patch-redocly-openapi-core.mjs
+COPY scripts/verify-next-sharp.mjs ./scripts/verify-next-sharp.mjs
+COPY scripts/verify-npm-tree.mjs ./scripts/verify-npm-tree.mjs
 
 ARG NEXT_PUBLIC_KOR_TRAVEL_MAP_API=http://127.0.0.1:12701
 ARG NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=http://127.0.0.1:12702
@@ -53,6 +59,9 @@ ENV NEXT_PUBLIC_KOR_TRAVEL_MAP_API=$NEXT_PUBLIC_KOR_TRAVEL_MAP_API \
     NEXT_PUBLIC_VWORLD_API_KEY=$NEXT_PUBLIC_VWORLD_API_KEY \
     NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY=$NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY \
     NEXT_TELEMETRY_DISABLED=1
+
+RUN node scripts/frontend-source-digest.mjs \
+    --write packages/kor-travel-map-admin/frontend/src/generated/frontend-build-info.ts
 
 RUN npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run build
 
