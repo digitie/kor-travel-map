@@ -1,9 +1,11 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { pbkdf2Sync, randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+
+import { frontendBuildInputs } from "../../../../scripts/frontend-build-inputs.mjs";
 
 const checkpoints = new Set(["A", "B", "C", "D"]);
 const [checkpoint, ...playwrightArgs] = process.argv.slice(2);
@@ -95,38 +97,6 @@ if (
   );
   process.exit(2);
 }
-const frontendImage = process.env.MOCKED_E2E_FRONTEND_IMAGE;
-if (!frontendImage || !/^[a-zA-Z0-9][a-zA-Z0-9_./:@-]*$/.test(frontendImage)) {
-  console.error(
-    "MOCKED_E2E_FRONTEND_IMAGE에 검증할 frontend image 참조가 필요합니다.",
-  );
-  process.exit(2);
-}
-const imageInspectResult = spawnSync(
-  "docker",
-  ["image", "inspect", frontendImage],
-  { encoding: "utf8" },
-);
-let imageInspect;
-try {
-  const parsed = JSON.parse(imageInspectResult.stdout);
-  imageInspect = Array.isArray(parsed) ? parsed.at(0) : undefined;
-} catch {
-  imageInspect = undefined;
-}
-if (
-  imageInspectResult.status !== 0 ||
-  !imageInspect ||
-  typeof imageInspect.Id !== "string" ||
-  !/^sha256:[0-9a-f]{64}$/.test(imageInspect.Id) ||
-  imageInspect.Config?.Labels?.["org.opencontainers.image.revision"] !==
-    revision
-) {
-  console.error(
-    "frontend immutable image ID/revision label이 checkpoint와 다릅니다.",
-  );
-  process.exit(2);
-}
 const sourceDigestResult = spawnSync(
   process.execPath,
   [path.resolve(process.cwd(), "../../../scripts/frontend-source-digest.mjs")],
@@ -172,24 +142,17 @@ const passwordHash = pbkdf2Sync(
 const runtimeDirectory = mkdtempSync(
   path.join(os.tmpdir(), "ktm-mocked-checkpoint-"),
 );
+const buildContextDirectory = path.join(runtimeDirectory, "build-context");
+const buildContextArchive = path.join(runtimeDirectory, "build-context.tar");
+const imageIdPath = path.join(runtimeDirectory, "frontend-image.id");
 const runtimeEnvPath = path.join(runtimeDirectory, "frontend.env");
-writeFileSync(
-  runtimeEnvPath,
-  [
-    `PORT=${basePort}`,
-    `KOR_TRAVEL_MAP_UI_ADMIN_USERNAME=${adminUsername}`,
-    `KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH=pbkdf2_sha256$310000$${base64Url(passwordSalt)}$${base64Url(passwordHash)}`,
-    `KOR_TRAVEL_MAP_UI_SESSION_SECRET=${base64Url(randomBytes(32))}`,
-    `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=${base64Url(randomBytes(32))}`,
-    "KOR_TRAVEL_MAP_API_INTERNAL_URL=http://127.0.0.1:9",
-    "",
-  ].join("\n"),
-  { encoding: "utf8", mode: 0o600 },
-);
 
 const ownedContainerName = `ktm-mocked-e2e-${process.pid}-${randomBytes(6).toString("hex")}`;
 let ownedContainerId;
+let imageInspect;
+let activeChild;
 let cleaned = false;
+let terminating = false;
 function cleanup() {
   if (cleaned) return;
   cleaned = true;
@@ -207,8 +170,56 @@ const signalExitCodes = new Map([
 ]);
 for (const [signal, exitCode] of signalExitCodes) {
   process.once(signal, () => {
+    if (terminating) return;
+    terminating = true;
+    if (!activeChild?.pid) {
+      cleanup();
+      process.exit(exitCode);
+    }
+    const terminateChildGroup = (childSignal) => {
+      try {
+        if (process.platform === "win32") {
+          activeChild.kill(childSignal);
+        } else {
+          process.kill(-activeChild.pid, childSignal);
+        }
+      } catch {
+        // 이미 종료된 child/process group은 cleanup 완료로 간주한다.
+      }
+    };
+    terminateChildGroup(signal);
     cleanup();
-    process.exit(exitCode);
+    const forceTimer = setTimeout(() => {
+      terminateChildGroup("SIGKILL");
+      process.exit(exitCode);
+    }, 5_000);
+    forceTimer.unref();
+    activeChild.once("exit", () => {
+      clearTimeout(forceTimer);
+      process.exit(exitCode);
+    });
+  });
+}
+
+function runManagedChild(command, args, options = {}) {
+  return new Promise((resolve) => {
+    activeChild = spawn(command, args, {
+      ...options,
+      detached: process.platform !== "win32",
+    });
+    let settled = false;
+    activeChild.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      activeChild = undefined;
+      resolve({ error, status: 1 });
+    });
+    activeChild.once("exit", (status, signal) => {
+      if (settled) return;
+      settled = true;
+      activeChild = undefined;
+      resolve({ signal, status: status ?? 1 });
+    });
   });
 }
 
@@ -286,6 +297,91 @@ async function readBuildInfo(timeoutMs) {
 
 let exitCode = 2;
 try {
+  const archiveResult = spawnSync(
+    "git",
+    ["archive", "--format=tar", `--output=${buildContextArchive}`, "HEAD"],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  if (archiveResult.status !== 0) {
+    throw new Error("exact HEAD build context archive를 만들 수 없습니다.");
+  }
+  const mkdirResult = spawnSync("mkdir", ["-p", buildContextDirectory], {
+    encoding: "utf8",
+  });
+  const extractResult = spawnSync(
+    "tar",
+    ["-xf", buildContextArchive, "-C", buildContextDirectory],
+    { encoding: "utf8" },
+  );
+  if (mkdirResult.status !== 0 || extractResult.status !== 0) {
+    throw new Error("exact HEAD build context archive를 펼칠 수 없습니다.");
+  }
+  const ownedImageTag = `kor-travel-map-mocked-e2e:${revision.slice(0, 12)}`;
+  const publicBuildArgs = frontendBuildInputs().flatMap(([name, value]) => [
+    "--build-arg",
+    `${name}=${value}`,
+  ]);
+  const buildResult = await runManagedChild(
+    "docker",
+    [
+      "build",
+      "--iidfile",
+      imageIdPath,
+      "--build-arg",
+      `KOR_TRAVEL_MAP_GIT_COMMIT=${revision}`,
+      ...publicBuildArgs,
+      "-f",
+      path.join(buildContextDirectory, "docker/frontend.Dockerfile"),
+      "-t",
+      ownedImageTag,
+      buildContextDirectory,
+    ],
+    { stdio: "inherit" },
+  );
+  if (buildResult.error || buildResult.status !== 0) {
+    throw new Error("exact HEAD frontend image를 빌드할 수 없습니다.");
+  }
+  const builtImageId = readFileSync(imageIdPath, "utf8").trim();
+  if (!/^sha256:[0-9a-f]{64}$/.test(builtImageId)) {
+    throw new Error(
+      "빌드한 frontend image의 immutable ID를 확인할 수 없습니다.",
+    );
+  }
+  const imageInspectResult = spawnSync(
+    "docker",
+    ["image", "inspect", builtImageId],
+    { encoding: "utf8" },
+  );
+  try {
+    const parsed = JSON.parse(imageInspectResult.stdout);
+    imageInspect = Array.isArray(parsed) ? parsed.at(0) : undefined;
+  } catch {
+    imageInspect = undefined;
+  }
+  if (
+    imageInspectResult.status !== 0 ||
+    !imageInspect ||
+    imageInspect.Id !== builtImageId ||
+    imageInspect.Config?.Labels?.["org.opencontainers.image.revision"] !==
+      revision
+  ) {
+    throw new Error(
+      "self-built frontend immutable image ID/revision label이 checkpoint와 다릅니다.",
+    );
+  }
+  writeFileSync(
+    runtimeEnvPath,
+    [
+      `PORT=${basePort}`,
+      `KOR_TRAVEL_MAP_UI_ADMIN_USERNAME=${adminUsername}`,
+      `KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH=pbkdf2_sha256$310000$${base64Url(passwordSalt)}$${base64Url(passwordHash)}`,
+      `KOR_TRAVEL_MAP_UI_SESSION_SECRET=${base64Url(randomBytes(32))}`,
+      `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=${base64Url(randomBytes(32))}`,
+      "KOR_TRAVEL_MAP_API_INTERNAL_URL=http://127.0.0.1:9",
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o600 },
+  );
   const createResult = spawnSync(
     "docker",
     [
@@ -336,7 +432,7 @@ try {
 
   const require = createRequire(import.meta.url);
   const playwrightCli = require.resolve("@playwright/test/cli");
-  const result = spawnSync(
+  const result = await runManagedChild(
     process.execPath,
     [
       playwrightCli,
@@ -359,6 +455,40 @@ try {
       stdio: "inherit",
     },
   );
+  const postHeadResult = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  const postStatusResult = spawnSync(
+    "git",
+    ["status", "--porcelain", "--untracked-files=normal"],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  const postSourceDigestResult = spawnSync(
+    process.execPath,
+    [
+      path.resolve(
+        process.cwd(),
+        "../../../scripts/frontend-source-digest.mjs",
+      ),
+    ],
+    {
+      cwd: path.resolve(process.cwd(), "../../.."),
+      encoding: "utf8",
+    },
+  );
+  if (
+    postHeadResult.status !== 0 ||
+    postHeadResult.stdout.trim() !== headRevision ||
+    postStatusResult.status !== 0 ||
+    postStatusResult.stdout.trim() ||
+    postSourceDigestResult.status !== 0 ||
+    postSourceDigestResult.stdout.trim() !== sourceDigest
+  ) {
+    throw new Error(
+      "mocked E2E 실행 전후 worktree HEAD/status/source digest가 달라졌습니다.",
+    );
+  }
   const postContainerInspect = inspectOwnedContainer();
   const postBuildInfo = await readBuildInfo(5_000);
   if (

@@ -100,7 +100,7 @@ def test_mocked_checkpoint_runner_owns_exact_frontend_container() -> None:
         "packages/kor-travel-map-admin/frontend/e2e/mocked-failure-reporter.ts"
     )
 
-    assert "MOCKED_E2E_FRONTEND_IMAGE" in script
+    assert "MOCKED_E2E_FRONTEND_IMAGE" not in script
     assert "MOCKED_E2E_FRONTEND_CONTAINER" not in script
     assert 'parsedBaseUrl.hostname !== "127.0.0.1"' in script
     assert '"create",' in script
@@ -110,10 +110,18 @@ def test_mocked_checkpoint_runner_owns_exact_frontend_container() -> None:
     assert '"no-new-privileges:true",' in script
     assert '"--env-file",' in script
     assert '"--entrypoint"' not in script
+    assert '"archive",' in script
+    assert '"--iidfile",' in script
+    assert "const result = await runManagedChild(" in script
+    assert 'detached: process.platform !== "win32"' in script
+    assert "process.kill(-activeChild.pid, childSignal)" in script
     assert "const postContainerInspect = inspectOwnedContainer()" in script
     assert "const postBuildInfo = await readBuildInfo(5_000)" in script
     assert 'spawnSync("docker", ["rm", "-f", ownedContainerId]' in script
-    assert '(checkpoint !== "D" || result.status === "passed")' in reporter
+    assert (
+        'result.status === (checkpoint === "D" ? "passed" : "failed")'
+        in reporter
+    )
 
 
 @pytest.mark.unit
@@ -125,6 +133,7 @@ def test_frontend_docker_context_and_digest_exclusions_are_aligned() -> None:
     assert "**/.env.*" in dockerignore
     assert "!**/.env.example" in dockerignore
     assert "**/.cache/" in dockerignore
+    assert '".dockerignore",' in digest
     assert 'fileName.startsWith(".env.")' in digest
     assert '".cache",' in digest
 
@@ -133,6 +142,7 @@ def test_frontend_docker_context_and_digest_exclusions_are_aligned() -> None:
 def test_frontend_source_digest_includes_public_build_inputs() -> None:
     digest = _read("scripts/frontend-source-digest.mjs")
     dockerfile = _read("docker/frontend.Dockerfile")
+    build_input_contract = _read("scripts/frontend-build-inputs.mjs")
     build_inputs = (
         "NEXT_PUBLIC_KOR_TRAVEL_MAP_API",
         "NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL",
@@ -142,8 +152,12 @@ def test_frontend_source_digest_includes_public_build_inputs() -> None:
     )
 
     for name in build_inputs:
-        assert name in digest
+        assert name in build_input_contract
         assert f"ARG {name}" in dockerfile
+    assert "function envOrDefault(environment, name, fallback)" in (
+        build_input_contract
+    )
+    assert "frontendBuildInputs" in digest
     assert 'hash.update("build-arg")' in digest
 
 

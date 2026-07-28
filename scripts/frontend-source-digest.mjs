@@ -10,15 +10,19 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { frontendBuildInputs } from "./frontend-build-inputs.mjs";
+
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
 const inputs = [
+  ".dockerignore",
   ".npmrc",
   "package.json",
   "package-lock.json",
   "docker/frontend.Dockerfile",
+  "scripts/frontend-build-inputs.mjs",
   "scripts/frontend-source-digest.mjs",
   "scripts/patch-redocly-openapi-core.mjs",
   "scripts/verify-next-sharp.mjs",
@@ -26,28 +30,7 @@ const inputs = [
   "packages/map-marker-react",
   "packages/kor-travel-map-admin/frontend",
 ];
-const buildInputs = [
-  [
-    "NEXT_PUBLIC_KOR_TRAVEL_MAP_API",
-    process.env.NEXT_PUBLIC_KOR_TRAVEL_MAP_API ?? "http://127.0.0.1:12701",
-  ],
-  [
-    "NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL",
-    process.env.NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL ??
-      "http://127.0.0.1:12702",
-  ],
-  [
-    "NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL",
-    process.env.NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL ?? "http://127.0.0.1:12501",
-  ],
-  ["NEXT_PUBLIC_VWORLD_API_KEY", process.env.NEXT_PUBLIC_VWORLD_API_KEY ?? ""],
-  [
-    "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY",
-    process.env.NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY ??
-      process.env.NEXT_PUBLIC_VWORLD_API_KEY ??
-      "",
-  ],
-];
+const buildInputs = frontendBuildInputs();
 const excludedDirectories = new Set([
   ".cache",
   ".idea",
