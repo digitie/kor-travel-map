@@ -201,10 +201,7 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   별도 규칙 예외로 남긴다.
 
 
-## Lane A 상세 — 열린 이슈·데이터 품질 하드닝
-
-> 2026-07-27 open-PR·이슈 전수 확인에서 main에 잔존하는 미수정 버그/하드닝을 백로그화.
-> 각 항목은 GitHub 이슈에 tasks.md 백로그 링크를 함께 기록한다.
+## 보류 — 실행 lane 외 거버넌스 결정 대기
 
 - [ ] T-VN-H18 — **GitHub 실제 approval provenance gate 강제** — **보류(governance 결정, 2026-07-27)**:
   approval 필수화는 이후 모든 PR의 merge 경로를 바꾸므로 repo 소유자가 워크플로우 전환 시점을
@@ -218,6 +215,11 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   최신 head SHA에 대한 `APPROVED` review 1건 이상을 강제하도록 한다. 사용자 지시에 따라 self-review도
   GitHub가 `APPROVED`로 기록하면 유효하게 인정하되, 일반 comment나 bot status를 approval로 오인하지
   않고 required check·관리자 우회 경로까지 회귀 테스트한다.
+
+## Lane A 상세 — 열린 이슈·데이터 품질 하드닝
+
+> 2026-07-27 open-PR·이슈 전수 확인에서 main에 잔존하는 미수정 버그/하드닝을 백로그화.
+> 각 항목은 GitHub 이슈에 tasks.md 백로그 링크를 함께 기록한다.
 
 - [ ] T-VN-H27 — **#819 HAProxy WebSocket tunnel timeout 적용·실증**
 

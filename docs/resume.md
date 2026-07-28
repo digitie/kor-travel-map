@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-28 (codex) — Lane B T-VN-45 진행
+
+**다음 한 작업**: draft PR #871에서 `/features` live spec의 admin in-bounds endpoint와
+React Query cache-hit 수렴을 완결하고, n150 격리 실데이터 파괴적 Live UI·적대적 리뷰어
+2명·전체 gate·CI green 뒤 셀프 머지한다.
+
+- PR #870은 merge commit `01db9cdf`로 main에 반영됐다.
+- `T-VN-45` 첫 checkpoint에서 고배율 items와 저배율 clusters 대기를 실제 UI 정본인
+  `/v1/admin/features/in-bounds`로 전환했고, 새 HTTP 응답이 없는 cache hit는 map idle과
+  실제 point marker identity로 수렴하도록 구현 중이다.
+- `T-VN-H18`은 어떤 Agent A/B 실행 lane에도 속하지 않는 거버넌스 결정 대기 보류 항목으로
+  이동했다. repo 소유자가 approval enforcement 전환 시점을 정하기 전에는 착수하지 않는다.
+
 ## 2026-07-28 (codex) — PR #869 머지 후 task 전면 재감사
 
 **다음 한 작업**: 문서 PR #870은 적대적 리뷰어 2명의 잔여 P0/P1/P2 0건 확인을 마쳤다.
