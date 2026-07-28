@@ -5379,6 +5379,72 @@
         "title": "CuratedFeatureCreateRequest",
         "type": "object"
       },
+      "CuratedFeatureDetailContentView": {
+        "additionalProperties": false,
+        "description": "detail-snapshot plan-level payload (T-VN-H07D).\n\nPinVi curated import(`services/notice_plan.py`)가 plan title/category/summary/destination을\n여기서 읽는다. 모든 key는 항상 존재하며(생성부가 고정 key로 만든다) 값만 nullable이다.",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "curation_status": {
+            "title": "Curation Status",
+            "type": "string"
+          },
+          "destination_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Name"
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code"
+          },
+          "reuse_policy": {
+            "title": "Reuse Policy",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "summary",
+          "destination_name",
+          "region_code",
+          "category",
+          "curation_status",
+          "reuse_policy"
+        ],
+        "title": "CuratedFeatureDetailContentView",
+        "type": "object"
+      },
       "CuratedFeatureDetailItemView": {
         "additionalProperties": false,
         "description": "curated feature detail item.",
@@ -5467,12 +5533,10 @@
       },
       "CuratedFeatureDetailSnapshotView": {
         "additionalProperties": false,
-        "description": "curated feature detail snapshot.",
+        "description": "curated feature detail snapshot.\n\nT-VN-H07D: `theme`/`content`/`source`는 과거 free-form ``dict[str, Any]``이라 OpenAPI에\n`{\"type\": \"object\"}`로만 노출됐고, 소비자(PinVi)가 실제로 의존하는 plan-level 필드를 계약으로\n고정할 방법이 없었다. 생성부가 고정 key로 만드는 값이므로 typed view로 전환한다.\n``items[].feature_snapshot``은 소비자가 통째로 저장만 하고 내부를 읽지 않으므로 opaque\n``dict``로 유지한다.",
         "properties": {
           "content": {
-            "additionalProperties": true,
-            "title": "Content",
-            "type": "object"
+            "$ref": "#/components/schemas/CuratedFeatureDetailContentView"
           },
           "curated_feature_id": {
             "title": "Curated Feature Id",
@@ -5490,14 +5554,10 @@
             "type": "array"
           },
           "source": {
-            "additionalProperties": true,
-            "title": "Source",
-            "type": "object"
+            "$ref": "#/components/schemas/CuratedFeatureDetailSourceView"
           },
           "theme": {
-            "additionalProperties": true,
-            "title": "Theme",
-            "type": "object"
+            "$ref": "#/components/schemas/CuratedFeatureDetailThemeView"
           },
           "updated_at": {
             "format": "date-time",
@@ -5520,6 +5580,63 @@
           "items"
         ],
         "title": "CuratedFeatureDetailSnapshotView",
+        "type": "object"
+      },
+      "CuratedFeatureDetailSourceView": {
+        "additionalProperties": false,
+        "description": "detail-snapshot source payload (T-VN-H07D).",
+        "properties": {
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset_key",
+          "source_name",
+          "source_url"
+        ],
+        "title": "CuratedFeatureDetailSourceView",
+        "type": "object"
+      },
+      "CuratedFeatureDetailThemeView": {
+        "additionalProperties": false,
+        "description": "detail-snapshot theme payload (T-VN-H07D — 소비자 PinVi가 category fallback으로 읽는다).",
+        "properties": {
+          "theme_name": {
+            "title": "Theme Name",
+            "type": "string"
+          },
+          "theme_slug": {
+            "title": "Theme Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "theme_slug",
+          "theme_name"
+        ],
+        "title": "CuratedFeatureDetailThemeView",
         "type": "object"
       },
       "CuratedFeaturePatchRequest": {
