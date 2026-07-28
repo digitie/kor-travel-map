@@ -119,6 +119,9 @@ def test_mocked_checkpoint_runner_owns_exact_frontend_container() -> None:
     assert "const postBuildInfo = await readBuildInfo(5_000)" in script
     assert 'spawnSync("docker", ["rm", "-f", ownedContainerId]' in script
     assert (
+        'spawnSync("docker", ["image", "rm", "-f", ownedImageTag]' in script
+    )
+    assert (
         'result.status === (checkpoint === "D" ? "passed" : "failed")'
         in reporter
     )

@@ -150,6 +150,7 @@ const runtimeEnvPath = path.join(runtimeDirectory, "frontend.env");
 
 const ownedContainerName = `ktm-mocked-e2e-${process.pid}-${randomBytes(6).toString("hex")}`;
 let ownedContainerId;
+let ownedImageTag;
 let imageInspect;
 let activeChild;
 let cleaned = false;
@@ -159,6 +160,11 @@ function cleanup() {
   cleaned = true;
   if (ownedContainerId) {
     spawnSync("docker", ["rm", "-f", ownedContainerId], {
+      stdio: "ignore",
+    });
+  }
+  if (ownedImageTag) {
+    spawnSync("docker", ["image", "rm", "-f", ownedImageTag], {
       stdio: "ignore",
     });
   }
@@ -317,7 +323,9 @@ try {
   if (mkdirResult.status !== 0 || extractResult.status !== 0) {
     throw new Error("exact HEAD build context archive를 펼칠 수 없습니다.");
   }
-  const ownedImageTag = `kor-travel-map-mocked-e2e:${revision.slice(0, 12)}`;
+  ownedImageTag =
+    `kor-travel-map-mocked-e2e:${revision.slice(0, 12)}-` +
+    `${process.pid}-${randomBytes(6).toString("hex")}`;
   const publicBuildArgs = frontendBuildInputs().flatMap(([name, value]) => [
     "--build-arg",
     `${name}=${value}`,
