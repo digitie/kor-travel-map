@@ -284,8 +284,53 @@ class CuratedFeatureDetailItemView(BaseModel):
     source_record_key: str | None = None
 
 
+class CuratedFeatureDetailThemeView(BaseModel):
+    """detail-snapshot theme payload (T-VN-H07D — 소비자 PinVi가 category fallback으로 읽는다)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    theme_slug: str
+    theme_name: str
+
+
+class CuratedFeatureDetailContentView(BaseModel):
+    """detail-snapshot plan-level payload (T-VN-H07D).
+
+    PinVi curated import(`services/notice_plan.py`)가 plan title/category/summary/destination을
+    여기서 읽는다. 모든 key는 항상 존재하며(생성부가 고정 key로 만든다) 값만 nullable이다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    summary: str | None
+    destination_name: str | None
+    region_code: str | None
+    category: str
+    curation_status: str
+    reuse_policy: str
+
+
+class CuratedFeatureDetailSourceView(BaseModel):
+    """detail-snapshot source payload (T-VN-H07D)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    dataset_key: str
+    source_name: str
+    source_url: str | None
+
+
 class CuratedFeatureDetailSnapshotView(BaseModel):
-    """curated feature detail snapshot."""
+    """curated feature detail snapshot.
+
+    T-VN-H07D: `theme`/`content`/`source`는 과거 free-form ``dict[str, Any]``이라 OpenAPI에
+    `{"type": "object"}`로만 노출됐고, 소비자(PinVi)가 실제로 의존하는 plan-level 필드를 계약으로
+    고정할 방법이 없었다. 생성부가 고정 key로 만드는 값이므로 typed view로 전환한다.
+    ``items[].feature_snapshot``은 소비자가 통째로 저장만 하고 내부를 읽지 않으므로 opaque
+    ``dict``로 유지한다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -293,9 +338,9 @@ class CuratedFeatureDetailSnapshotView(BaseModel):
     version: int
     etag: str
     updated_at: datetime
-    theme: dict[str, Any]
-    content: dict[str, Any]
-    source: dict[str, Any]
+    theme: CuratedFeatureDetailThemeView
+    content: CuratedFeatureDetailContentView
+    source: CuratedFeatureDetailSourceView
     items: list[CuratedFeatureDetailItemView]
 
 
@@ -530,9 +575,12 @@ def _snapshot_view(
         version=row.version,
         etag=row.etag,
         updated_at=row.updated_at,
-        theme=row.theme,
-        content=row.content,
-        source=row.source,
+        # T-VN-H07D: 생성부(`curated_repo._feature_detail_snapshot`)가 고정 key로 만든 payload를
+        # typed view로 검증한다. key가 어긋나면 여기서 fail-closed된다(etag 계산 대상인 repo
+        # payload dict 자체는 바꾸지 않아 기존 etag/캐시 계약은 그대로다).
+        theme=CuratedFeatureDetailThemeView(**row.theme),
+        content=CuratedFeatureDetailContentView(**row.content),
+        source=CuratedFeatureDetailSourceView(**row.source),
         items=[CuratedFeatureDetailItemView(**item.__dict__) for item in row.items],
     )
 
