@@ -19,8 +19,7 @@
 barrier로 직렬화한다.
 
 - **Lane A — cross-repo 계약·운영·데이터 품질**
-  - a0: [x] `T-VN-H07A`(Map #814 재감사·landing) →
-    [ ] `T-VN-H07B`(PinVi #403 재감사·landing) →
+  - a0: [ ] `T-VN-H07B`(PinVi #403 재감사·landing) →
     [ ] `T-VN-H07D`(#815 admin snapshot/freshness) →
     [ ] `T-VN-H07C`(#812 manifest v5)
   - a1: [ ] `T-VN-H27`(#819 HAProxy tunnel) →
@@ -104,8 +103,9 @@ barrier로 직렬화한다.
   착수 전에 migration head·schema/fixture 계약·파괴적 실행 잔여물·코드/API 호환성·디스크
   여유를 확인해 재사용 가능하면 이름·head·fixture identity와 근거를 `resume.md`/
   `journal.md`에 기록하고, 불가능할 때만 해당 격리 resource를 정확히 정리한다.
-- **cross-lane 순서 제약**: C6c pair capture와 #392는 이미 완료됐다. H07은 오래 열린
-  #814/#403을 최신 main에 재배치하고 중복 assertion을 제거한 뒤 H07D→H07C 순서로 진행한다.
+- **cross-lane 순서 제약**: C6c pair capture와 #392, H07A의 Map #814 landing
+  (`259a9ec5`)은 이미 완료됐다. H07B는 오래 열린 PinVi #403을 최신 main에 재배치하고 중복
+  assertion을 제거한 뒤 H07D→H07C 순서로 진행한다.
   H22C는 같은 curation frontend를 만지는 T-VN-48B·49B 뒤에 시작한다. T-VN-12A의 command
   inventory freeze는 H22B의 reclassification command가 머지된 뒤 시작해 curation idempotency가
   누락되지 않게 한다. Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
@@ -371,17 +371,9 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
 ## Lane A 상세 — T-VN-H07 cross-repo 계약 완결
 
-Map #814와 PinVi #403은 각각 최신 main보다 85/13 commits 뒤처졌고, Map main에는 이후
-T-VN-05R 계열의 유사 schema assertion이 추가됐다. 오래된 task 문서 commit을 그대로 재생하지
-않고 residual contract만 남긴다.
-
-- [x] T-VN-H07A — **Map #814 residual contract 재감사·landing** (PR #814 merged @ 259a9ec5)
-
-  최신 main에 rebase해 stale `tasks.md` commit과 이미 존재하는 union/additionalProperties
-  assertion을 제거했다. 남는 field-level(required/type/enum/format/const/exact property/$ref)
-  검사가 non-tautological·non-redundant인지 적대 리뷰어 2명이 실제 pydantic 생성 스키마·
-  `openapi.user.json`과 대조해 land 판정한 뒤 #814를 갱신·머지했다. n150 CI-parity가 base
-  drift(0066 `external_component_id` required)를 검출해 현행 계약으로 재조정. tasks-done 참조.
+Map #814 residual은 `259a9ec5`로 landing해 `tasks-done.md`에 보존했다. 남은 PinVi #403은
+재감사 기준 시점 최신 main보다 13 commits 뒤처졌고, 오래된 task 문서 commit을 재생하지 않고
+H07A의 실제 user OpenAPI SHA와 대조한 residual consumer contract만 남긴다.
 
 - [ ] T-VN-H07B — **PinVi #403 residual contract 재감사·landing**
 

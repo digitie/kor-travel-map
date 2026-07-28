@@ -26,6 +26,13 @@ P0/P1/P2 0건으로 승인했고, 재사용 실데이터 clone의 파괴적 admi
 - **재발 방지**: `agent-workflow.md`에는 원격 branch frequent checkpoint와 머지 직전 PR
   규칙을, `agent-failure-patterns.md` F13에는 prod-derived env의 candidate API/DB exact
   preflight와 값 비노출 비교를 추가했다.
+- **Claude Code PR 감사(#875)**: PR #874와 연결된 #814를 전문 서브에이전트가 사후
+  검증했다. #814 squash/base·4 commits/95 behind, exact schema 범위, 0066
+  `external_component_id`, `phones.items`와 targeted 11 green은 주장과 일치했다. 다만 완료된
+  H07A를 active backlog에 중복 보존한 P2를 제거했고, #874가 #870에만 명시된 CI 대기 생략
+  예외를 재사용한 P2를 process finding으로 남긴다. #874 checks가 나중에 모두 green이 된 것은
+  보상 증거이지 향후 문서 PR 예외가 아니며, 새 사용자 예외가 없으면 모든 후속 PR은 CI green 뒤
+  머지한다.
 
 ## 2026-07-28 (claude) — Lane A a0 T-VN-H07A: Map #814 residual contract 재감사·landing
 

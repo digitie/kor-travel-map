@@ -21,6 +21,10 @@ commit/push하고 최신 `origin/main`에 rebase한다. 머지 직전에만 새 
   weather/price fixture **0건**이다. clone의 non-deleted Feature는 **1,025,428건**, health는
   정상이다. 인증 상태/cookie·raw trace·screenshot·민감 로그·임시 env/session secret과
   candidate container는 모두 폐기했고 DB·dump와 redacted immutable 수치만 유지한다.
+- Claude Code PR #874 사후 감사 이슈 #875는 #814 구현·landing 근거와 후속 11개 테스트 green을
+  확인했지만, 완료된 H07A가 active `tasks.md`에 중복된 P2와 #870 전용 CI 대기 생략 예외를
+  #874가 재사용한 P2를 찾았다. H07A는 `tasks-done.md`만 정본으로 남겼고, #874의 사후 CI green은
+  보상 근거일 뿐 후속 문서 PR의 예외로 승계하지 않는다.
 
 ## 2026-07-28 (claude) — Lane A a0 T-VN-H07A 완료: Map #814 residual contract landing
 
