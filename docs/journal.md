@@ -43,8 +43,10 @@ add/update/reject/deactivate/delete 파괴적 UI workflow를 n150 격리 prod cl
   성공만으로 지우지 않고 머지 후 다음 task 전에 schema/fixture·파괴적 잔여물·코드/API
   호환성·17GB DB·가용 85GB의 디스크 비용을 평가한다. Playwright 인증 상태/cookie·raw trace·
   실데이터 screenshot·민감 로그·임시 env/session secret은 재사용 대상에서 제외하고 Live
-  종료 직후 안전하게 폐기하고 API/UI container도 제거했다. 재사용/정리 결과는 다음
-  resume/journal에 resource 이름과 함께 기록한다.
+  종료 직후 안전하게 폐기하고 API/UI container도 제거했다. `PGPASSWORD` metadata가 남아 있던
+  중지 상태의 clone repair/restore/dump transient container 8개도 제거해 현재 `ktm-tvn45-*`
+  container는 healthy DB 하나뿐이다. 재사용/정리 결과는 다음 resume/journal에 resource
+  이름과 함께 기록한다.
 - **문서 규율**: `agent-workflow.md`, `agent-failure-patterns.md`, `tasks.md`의 즉시 정리
   문구를 같은 post-merge 재사용 판정 규율로 통일했다. 현재 다음 Lane B 작업은
   `T-VN-46`, `T-VN-H18`은 실행 lane 밖 거버넌스 보류다.

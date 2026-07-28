@@ -39,7 +39,8 @@
   요청/응답까지 추가로 고정했다.
 - **재개용 resource**: clone `ktm-tvn45-db`, dump와 redacted checkpoint는 PR 머지 뒤 다음
   task 착수 전 재사용 판정을 위해 보존했다. Playwright 인증 상태/cookie·raw trace·실데이터
-  screenshot·민감 로그·임시 env/session secret은 재사용하지 않고 Live 종료 직후 폐기한다.
+  screenshot·민감 로그·임시 env/session secret은 재사용하지 않고 Live 종료 직후 폐기했다.
+  `PGPASSWORD` metadata가 남아 있던 중지 상태의 clone transient container 8개도 제거했다.
   clone migration head는
   `0063_pipeline_root_id`, Feature **1,030,469건**, POI cache target **90건**이며 파괴적
   실행 후 clone health는 정상이다. 호환성·오염·디스크 판정 결과는 다음

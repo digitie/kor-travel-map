@@ -24,8 +24,9 @@ Actions green 뒤 셀프 머지한다. 머지 후 다음 Lane B task `T-VN-46` �
   필드·비기본 `marker_icon=park` 보존과 inactive exact 목록 P2를 반영한 뒤 지도 상세는 인증
   포함 **2/2, 11.1초**, 파괴적 write는 위 수치로 다시 통과했다. API/UI container와
   Playwright 인증 상태/cookie·raw trace·실데이터 screenshot·민감 로그·임시 env/session
-  secret은 최종 검증 직후 폐기했다. DB·dump와 위 수치만 담은 redacted checkpoint만 머지 후
-  재사용 판정 전까지 보존한다.
+  secret은 최종 검증 직후 폐기했다. `PGPASSWORD` metadata가 남아 있던 중지 상태의 clone
+  repair/restore/dump transient container 8개도 제거했다. DB·dump와 위 수치만 담은 redacted
+  checkpoint만 머지 후 재사용 판정 전까지 보존한다.
 - `T-VN-H18`은 어떤 Agent A/B 실행 lane에도 속하지 않는 거버넌스 결정 대기 보류 항목이다.
   repo 소유자가 approval enforcement 전환 시점을 정하기 전에는 착수하지 않는다.
 
