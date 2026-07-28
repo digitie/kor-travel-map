@@ -286,7 +286,7 @@ function isFeatureCollectionRequest(request: Request): boolean {
 async function captureFeatureCollectionResponsesDuring(
   page: Page,
   action: () => Promise<void>,
-): Promise<Response[]> {
+): Promise<{ requests: Request[]; responses: Response[] }> {
   const observed: Request[] = [];
   const onRequest = (request: Request) => {
     if (isFeatureCollectionRequest(request)) observed.push(request);
@@ -299,16 +299,26 @@ async function captureFeatureCollectionResponsesDuring(
   } finally {
     page.off("request", onRequest);
   }
-  return Promise.all(
-    observed.map(async (request) => {
-      const response = await request.response();
-      expect(
-        response,
-        `응답 없는 feature collection GET: ${request.url()}`,
-      ).not.toBeNull();
-      return response!;
-    }),
-  );
+  const responses = (
+    await Promise.all(
+      observed.map(async (request) => {
+        const response = await request.response();
+        if (response !== null) return response;
+        expect(
+          request.failure()?.errorText ?? "",
+          `취소 사유 없는 feature collection GET: ${request.url()}`,
+        ).toMatch(/abort|cancel/i);
+        return null;
+      }),
+    )
+  ).filter((response): response is Response => response !== null);
+  if (observed.length > 0) {
+    expect(
+      responses.length,
+      "refetch가 발생했으면 취소 요청 뒤 최종 성공 응답이 있어야 함",
+    ).toBeGreaterThan(0);
+  }
+  return { requests: observed, responses };
 }
 
 function serverClusterSignature(cluster: AdminFeatureMapCluster): string {
@@ -634,7 +644,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     await waitForExactServerClusters(page, placeBody.data.clusters);
     await expect(reset).toBeEnabled(T);
 
-    const resetResponses = await captureFeatureCollectionResponsesDuring(
+    const resetCapture = await captureFeatureCollectionResponsesDuring(
       page,
       async () => {
         await reset.click();
@@ -645,22 +655,28 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         await waitForMapIdle(page);
       },
     );
+    for (const request of resetCapture.requests) {
+      expect(apiPathFromUrl(request.url())).toBe(
+        ADMIN_FEATURES_IN_BOUNDS_PATH,
+      );
+      const bbox = inBoundsBboxFromUrl(request.url());
+      expect(bbox.zoom).not.toBeNull();
+      expect(bbox.zoom as number).toBeLessThanOrEqual(13);
+      expect(bbox.kinds.join(",")).toBe("weather,notice");
+    }
     let resetBody = initialBody;
-    for (const response of resetResponses) {
-      expect(isAdminFeaturesInBounds(response)).toBe(true);
-      if (!isAdminFeaturesInBounds(response)) continue;
+    for (const response of resetCapture.responses) {
       expect(response.status()).toBe(200);
-      const request = inBoundsBbox(response);
-      expect(request.zoom).not.toBeNull();
-      expect(request.zoom as number).toBeLessThanOrEqual(13);
-      expect(request.kinds.join(",")).toBe("weather,notice");
       resetBody = (await response.json()) as AdminFeaturesInBoundsResponse;
       expect(resetBody.data.mode).toBe("clusters");
     }
     const resetBounds = await readMapBounds(page);
     expect(resetBounds).not.toBeNull();
-    for (const response of resetResponses.filter(isAdminFeaturesInBounds)) {
-      expectRequestBoundsToMatchMap(inBoundsBbox(response), resetBounds!);
+    for (const request of resetCapture.requests) {
+      expectRequestBoundsToMatchMap(
+        inBoundsBboxFromUrl(request.url()),
+        resetBounds!,
+      );
     }
     await waitForExactServerClusters(page, resetBody.data.clusters);
   });
@@ -828,7 +844,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       ).not.toEqual(expectedPointFeatureIds(defaultBody.data.items));
 
       // cache hit이면 HTTP 없이, stale/ops-live invalidation이면 refetch 뒤 수렴해야 한다.
-      const resetResponses = await captureFeatureCollectionResponsesDuring(
+      const resetCapture = await captureFeatureCollectionResponsesDuring(
         page,
         async () => {
           await filter.getByRole("button", { name: "초기화" }).click();
@@ -841,15 +857,18 @@ test.describe("/features live — map input round-trip (read-only)", () => {
           await waitForMapIdle(page);
         },
       );
+      for (const request of resetCapture.requests) {
+        expect(apiPathFromUrl(request.url())).toBe(
+          ADMIN_FEATURES_IN_BOUNDS_PATH,
+        );
+        const bbox = inBoundsBboxFromUrl(request.url());
+        expect(bbox.zoom).not.toBeNull();
+        expect(bbox.zoom as number).toBeGreaterThan(13);
+        expect(bbox.kinds.join(",")).toBe("weather,notice");
+      }
       let resetBody = defaultBody;
-      for (const response of resetResponses) {
-        expect(isAdminFeaturesInBounds(response)).toBe(true);
-        if (!isAdminFeaturesInBounds(response)) continue;
+      for (const response of resetCapture.responses) {
         expect(response.status()).toBe(200);
-        const request = inBoundsBbox(response);
-        expect(request.zoom).not.toBeNull();
-        expect(request.zoom as number).toBeGreaterThan(13);
-        expect(request.kinds.join(",")).toBe("weather,notice");
         resetBody = (await response.json()) as AdminFeaturesInBoundsResponse;
         expect(resetBody.data.mode).toBe("items");
       }
@@ -863,8 +882,11 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       expect(bounds).not.toBeNull();
       expectRequestBoundsToMatchMap(inBoundsBbox(defaultResponse), bounds!);
       expectRequestBoundsToMatchMap(inBoundsBbox(combinedResponse), bounds!);
-      for (const response of resetResponses.filter(isAdminFeaturesInBounds)) {
-        expectRequestBoundsToMatchMap(inBoundsBbox(response), bounds!);
+      for (const request of resetCapture.requests) {
+        expectRequestBoundsToMatchMap(
+          inBoundsBboxFromUrl(request.url()),
+          bounds!,
+        );
       }
       const placeOnly = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
