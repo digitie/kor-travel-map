@@ -10,6 +10,25 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-28 (claude) — Lane A a0 T-VN-H07D ① Map half landing (payload 타입화)
+
+**다음 한 작업**: **T-VN-H07D ② PinVi half** — Map admin OpenAPI의 detail-snapshot 스키마를 PinVi에
+vendor하고 PinVi가 읽는 필드로 소비자 계약을 고정한 뒤, **snapshot freshness를 CI에서 실제로
+비교**해 skip으로 green이 되는 경로를 제거한다(두 저장소 모두 PUBLIC이라 live-compare 가능).
+그 뒤 `T-VN-H07C`(#812 manifest v5).
+
+- **H07D는 cross-repo 2 PR**이다. Map half만 landing했으므로 `tasks.md` a0 `T-VN-H07D`는
+  **열린 상태 유지** — PinVi half까지 끝나야 완료다.
+- **Map half 요지**: PinVi가 읽는 필드가 전부 free-form `dict[str, Any]` 안이라 계약을 고정할
+  방법이 없었다 → `theme`/`content`/`source`/`feature_snapshot`을 typed view로 전환.
+  **etag는 repo payload dict 기준이라 그 dict을 손대지 않아 etag/캐시 계약 불변.**
+  PinVi가 호출하는 경로는 `include_in_schema=False` 숨은 alias라 라우트 등록 자체를 테스트로 고정.
+- **교훈(2회 연속 같은 실수)**: 소비자 코드를 끝까지 읽지 않고 "PinVi는 이 값을 안 읽는다"고
+  단정했다가 리뷰에서 뒤집혔다(H07B `cluster_unit`, H07D `feature_snapshot`). **소비 여부는
+  추측하지 말고 소비자 저장소를 grep으로 확인할 것.**
+- **재발 방지**: OpenAPI를 바꾸면 `openapi.json` + `openapi.user.json` + **frontend
+  `src/api/types.ts`** 세 산출물을 함께 재생성해야 한다(types.ts 누락 시 frontend CI drift로 머지 불가).
+
 ## 2026-07-28 (claude) — Lane A a0 T-VN-H07B 완료: PinVi consumer contract landing
 
 **다음 한 작업**: Lane A a0 다음 항목 **`T-VN-H07D`(#815)** — PinVi 런타임이 실제 소비하는 admin
