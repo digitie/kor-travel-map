@@ -38,6 +38,7 @@ COPY --from=deps /app/packages/kor-travel-map-admin/frontend/package.json ./pack
 
 COPY packages/map-marker-react ./packages/map-marker-react
 COPY packages/kor-travel-map-admin/frontend ./packages/kor-travel-map-admin/frontend
+COPY .dockerignore ./.dockerignore
 COPY docker/frontend.Dockerfile ./docker/frontend.Dockerfile
 COPY scripts/frontend-build-inputs.mjs ./scripts/frontend-build-inputs.mjs
 COPY scripts/frontend-source-digest.mjs ./scripts/frontend-source-digest.mjs
