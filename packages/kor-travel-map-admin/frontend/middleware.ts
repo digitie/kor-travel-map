@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requestHasValidSession, sanitizeLocalPath } from "@/lib/auth";
 
 const PUBLIC_PATH_PREFIXES = ["/api/auth/", "/_next/", "/favicon.ico"];
+const PUBLIC_EXACT_PATHS = new Set(["/login", "/api/build-info"]);
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -13,7 +14,9 @@ export async function middleware(request: NextRequest) {
   const validSession = await requestHasValidSession(request);
   if (validSession) {
     if (pathname === "/login") {
-      const redirectPath = sanitizeLocalPath(request.nextUrl.searchParams.get("next"));
+      const redirectPath = sanitizeLocalPath(
+        request.nextUrl.searchParams.get("next"),
+      );
       return NextResponse.redirect(new URL(redirectPath, request.url));
     }
     return NextResponse.next();
@@ -31,7 +34,7 @@ export async function middleware(request: NextRequest) {
 
 function isPublicPath(pathname: string): boolean {
   return (
-    pathname === "/login" ||
+    PUBLIC_EXACT_PATHS.has(pathname) ||
     PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   );
 }
