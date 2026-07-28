@@ -245,11 +245,11 @@ function OverviewStrip({
   );
 }
 
-export function PipelineClient({ initialQuery }: { initialQuery: string }) {
+export function PipelineClient() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const urlStateRef = useRef(initialQuery);
+  const urlStateRef = useRef(searchParams.toString());
   const focusReturnExecutionIdRef = useRef<string | null>(null);
   const focusAfterCloseRef = useRef(false);
   const urlSchedule = searchParams.get("schedule");
