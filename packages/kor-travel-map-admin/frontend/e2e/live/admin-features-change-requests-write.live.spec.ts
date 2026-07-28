@@ -1441,7 +1441,19 @@ test.describe("/admin/features + feature change requests live write workflow", (
           }, T)
           .toBe("inactive");
 
+        const inactiveListResponsePromise = page.waitForResponse(
+          (response) =>
+            isAdminFeatureListResponse(response, FEATURE_ID, "inactive"),
+          { timeout: FLOW_TIMEOUT },
+        );
         await page.getByLabel("feature status").selectOption("inactive");
+        const inactiveListResponse = await inactiveListResponsePromise;
+        expect(inactiveListResponse.status()).toBe(200);
+        const inactiveListBody =
+          (await inactiveListResponse.json()) as AdminFeaturesListResponse;
+        expect(
+          inactiveListBody.data.items.map((item) => item.feature_id),
+        ).toEqual([FEATURE_ID]);
         const inactiveRow = rowContaining(page, UPDATED_NAME);
         await expect(inactiveRow).toBeVisible(T);
         await expect(inactiveRow).toContainText("비활성");
