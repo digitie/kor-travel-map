@@ -27,12 +27,19 @@ const inputs = [
   "packages/kor-travel-map-admin/frontend",
 ];
 const excludedDirectories = new Set([
+  ".cache",
+  ".idea",
   ".next",
+  ".turbo",
+  ".vscode",
+  "blob-report",
   "coverage",
   "node_modules",
+  "out",
   "playwright-report",
   "test-results",
 ]);
+const excludedFileNames = new Set([".DS_Store", "next-env.d.ts"]);
 const generatedBuildInfo =
   "packages/kor-travel-map-admin/frontend/src/generated/frontend-build-info.ts";
 
@@ -48,6 +55,16 @@ async function collect(relativePath, files) {
     return;
   }
   if (relativePath === generatedBuildInfo) return;
+  const fileName = path.basename(relativePath);
+  if (
+    excludedFileNames.has(fileName) ||
+    fileName.endsWith(".local.md") ||
+    fileName.endsWith(".tmp") ||
+    fileName.endsWith(".tsbuildinfo") ||
+    fileName === "types.ts.bak"
+  ) {
+    return;
+  }
   if (!stat.isFile() && !stat.isSymbolicLink()) {
     throw new Error(`지원하지 않는 frontend digest 입력: ${relativePath}`);
   }
