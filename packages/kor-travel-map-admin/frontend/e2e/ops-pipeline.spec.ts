@@ -2080,6 +2080,10 @@ test.describe("/ops/pipeline", () => {
     await page.goto(
       "/ops/pipeline?provider=alpha&dataset_key=alpha-data&sync_scope=alpha-scope",
     );
+    // same-route native history가 useSearchParams에 연결된 hydration 완료를 먼저 고정한다.
+    await expect(page.getByLabel("provider 필터")).toHaveValue("alpha");
+    await expect(page.getByLabel("데이터셋 필터")).toHaveValue("alpha-data");
+    await expect(page.getByLabel("sync scope 필터")).toHaveValue("alpha-scope");
 
     const transitions = [
       {
@@ -2143,7 +2147,11 @@ test.describe("/ops/pipeline", () => {
   test("focus 중 Back/Forward는 세 타임라인 draft와 REST scope를 함께 복원한다", async ({
     page,
   }) => {
-    const counters = await installPipelineMocks(page);
+    const [alphaExecution, betaExecution] = makeRoots();
+    await installPipelineMocks(page, {
+      executionsForQuery: (query) =>
+        query.get("provider") === "beta" ? [betaExecution!] : [alphaExecution!],
+    });
     const alphaUrl =
       "/ops/pipeline?provider=alpha&dataset_key=alpha-data&sync_scope=alpha-scope";
     const betaUrl =
@@ -2154,10 +2162,22 @@ test.describe("/ops/pipeline", () => {
     await expect(page.getByLabel("provider 필터")).toHaveValue("alpha");
     await expect(page.getByLabel("데이터셋 필터")).toHaveValue("alpha-data");
     await expect(page.getByLabel("sync scope 필터")).toHaveValue("alpha-scope");
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${alphaExecution!.id}`),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${betaExecution!.id}`),
+    ).toHaveCount(0);
     await page.evaluate((url) => {
       window.history.pushState(null, "", url);
     }, betaUrl);
     await expect(page.getByLabel("provider 필터")).toHaveValue("beta");
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${betaExecution!.id}`),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${alphaExecution!.id}`),
+    ).toHaveCount(0);
 
     for (const label of ["provider 필터", "데이터셋 필터", "sync scope 필터"]) {
       const field = page.getByLabel(label);
@@ -2170,16 +2190,12 @@ test.describe("/ops/pipeline", () => {
       await expect(page.getByLabel("sync scope 필터")).toHaveValue(
         "alpha-scope",
       );
-      await expect
-        .poll(() =>
-          counters.executionQueries.some(
-            (query) =>
-              query.get("provider") === "alpha" &&
-              query.get("dataset_key") === "alpha-data" &&
-              query.get("sync_scope") === "alpha-scope",
-          ),
-        )
-        .toBe(true);
+      await expect(
+        page.getByTestId(`pipeline-execution-row-${alphaExecution!.id}`),
+      ).toBeVisible();
+      await expect(
+        page.getByTestId(`pipeline-execution-row-${betaExecution!.id}`),
+      ).toHaveCount(0);
 
       await page.goForward();
       await expect(field).toBeFocused();
@@ -2188,16 +2204,12 @@ test.describe("/ops/pipeline", () => {
       await expect(page.getByLabel("sync scope 필터")).toHaveValue(
         "beta-scope",
       );
-      await expect
-        .poll(() =>
-          counters.executionQueries.some(
-            (query) =>
-              query.get("provider") === "beta" &&
-              query.get("dataset_key") === "beta-data" &&
-              query.get("sync_scope") === "beta-scope",
-          ),
-        )
-        .toBe(true);
+      await expect(
+        page.getByTestId(`pipeline-execution-row-${betaExecution!.id}`),
+      ).toBeVisible();
+      await expect(
+        page.getByTestId(`pipeline-execution-row-${alphaExecution!.id}`),
+      ).toHaveCount(0);
     }
   });
 
