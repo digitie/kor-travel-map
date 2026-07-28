@@ -124,6 +124,14 @@ function expectedLiveMatches(name: string, expectedCount: number): string[] {
   if (new Set(pairs).size !== pairs.length) {
     throw new Error(`${name} must not contain duplicate source=feature pairs`);
   }
+  const sourceKeys = pairs.map((pair) => pair.slice(0, pair.indexOf("=")));
+  const featureIds = pairs.map((pair) => pair.slice(pair.indexOf("=") + 1));
+  if (
+    new Set(sourceKeys).size !== pairs.length ||
+    new Set(featureIds).size !== pairs.length
+  ) {
+    throw new Error(`${name} must contain unique source keys and feature IDs`);
+  }
   return pairs.sort();
 }
 
