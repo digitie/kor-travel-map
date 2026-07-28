@@ -343,12 +343,15 @@ async function serverClustersMatchRenderedState(
   clusters: readonly AdminFeatureMapCluster[],
 ): Promise<boolean> {
   return page.evaluate(
-    ({ clusters, mapSelector, markerSelector }) => {
+    ({ clusters, mapSelector, markerSelector, pointMarkerSelector }) => {
       const container = document.querySelector(mapSelector) as
         | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
         | null;
       const map = container?._maplibreMap;
       if (!container || !map) return false;
+      if (document.querySelectorAll(pointMarkerSelector).length !== 0) {
+        return false;
+      }
 
       const elements = Array.from(
         document.querySelectorAll<HTMLElement>(markerSelector),
@@ -397,6 +400,7 @@ async function serverClustersMatchRenderedState(
       clusters,
       mapSelector: MAP_CONTAINER,
       markerSelector: SERVER_CLUSTER_MARKER,
+      pointMarkerSelector: POINT_MARKER,
     },
   );
 }
@@ -445,8 +449,17 @@ async function waitForExactPointMarkers(
 ): Promise<void> {
   const expected = expectedPointFeatureIds(items);
   await expect
-    .poll(async () => readPointMarkerFeatureIds(page), { timeout: 30_000 })
-    .toEqual(expected);
+    .poll(
+      async () => ({
+        pointFeatureIds: await readPointMarkerFeatureIds(page),
+        serverClusterCount: await page.locator(SERVER_CLUSTER_MARKER).count(),
+      }),
+      { timeout: 30_000 },
+    )
+    .toEqual({
+      pointFeatureIds: expected,
+      serverClusterCount: 0,
+    });
 }
 
 async function pointMarkerForFeatureId(
@@ -483,6 +496,73 @@ async function coincidentPopupRowForFeatureId(
   }, featureId);
   expect(indexes).toHaveLength(1);
   return rows.nth(indexes[0]);
+}
+
+async function expectedCoincidentFeatureIds(
+  page: Page,
+  items: readonly AdminFeatureMapItem[],
+  targetFeatureId: string,
+): Promise<string[]> {
+  return page.evaluate(
+    ({ items, mapSelector, targetFeatureId }) => {
+      const container = document.querySelector(mapSelector) as
+        | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
+        | null;
+      const map = container?._maplibreMap;
+      if (!map) return [];
+
+      const target = items.find(
+        (item) =>
+          item.feature_id === targetFeatureId &&
+          typeof item.lon === "number" &&
+          typeof item.lat === "number",
+      );
+      if (
+        !target ||
+        typeof target.lon !== "number" ||
+        typeof target.lat !== "number"
+      ) {
+        return [];
+      }
+
+      const targetPoint = map.project([target.lon, target.lat]);
+      const targetCell = `${Math.round(targetPoint.x / 24)}:${Math.round(
+        targetPoint.y / 24,
+      )}`;
+      return Array.from(
+        new Set(
+          items
+            .filter((item) => {
+              if (
+                typeof item.lon !== "number" ||
+                typeof item.lat !== "number"
+              ) {
+                return false;
+              }
+              const point = map.project([item.lon, item.lat]);
+              return (
+                `${Math.round(point.x / 24)}:${Math.round(point.y / 24)}` ===
+                targetCell
+              );
+            })
+            .map((item) => item.feature_id),
+        ),
+      ).sort();
+    },
+    {
+      items,
+      mapSelector: MAP_CONTAINER,
+      targetFeatureId,
+    },
+  );
+}
+
+async function readCoincidentPopupFeatureIds(page: Page): Promise<string[]> {
+  return page.locator(".maplibregl-popup button").evaluateAll((elements) =>
+    elements
+      .map((element) => (element as HTMLElement).dataset.featureId ?? "")
+      .sort(),
+  );
 }
 
 async function readMapBounds(
@@ -999,6 +1079,12 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         adminTarget,
         "public seed와 같은 admin map item이 있어야 함",
       ).toBeTruthy();
+      const coincidentFeatureIds = await expectedCoincidentFeatureIds(
+        page,
+        direct.body!.data.items,
+        adminTarget!.feature_id,
+      );
+      expect(coincidentFeatureIds).toContain(adminTarget!.feature_id);
       const pointMarker = await pointMarkerForFeatureId(
         page,
         adminTarget!.feature_id,
@@ -1012,23 +1098,10 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         { timeout: FLOW_TIMEOUT },
       );
       await pointMarker.click();
-      const popupOpened = await Promise.race([
-        detailPromise.then(() => false),
-        page
-          .waitForFunction(
-            (featureId) =>
-              Array.from(
-                document.querySelectorAll<HTMLElement>(
-                  ".maplibregl-popup button",
-                ),
-              ).some((element) => element.dataset.featureId === featureId),
-            adminTarget!.feature_id,
-            { timeout: 5_000 },
-          )
-          .then(() => true)
-          .catch(() => false),
-      ]);
-      if (popupOpened) {
+      if (coincidentFeatureIds.length > 1) {
+        await expect
+          .poll(async () => readCoincidentPopupFeatureIds(page), T)
+          .toEqual(coincidentFeatureIds);
         const popupRow = await coincidentPopupRowForFeatureId(
           page,
           adminTarget!.feature_id,
@@ -1054,9 +1127,12 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         panel.getByText(picked.kind, { exact: true }).first(),
       ).toBeVisible(T);
       // status 배지는 한글로 렌더(`statusLabel(detail.status)`) — 같은 매핑으로 단언.
-      await expect(
-        panel.getByText(statusLabel(picked.status), { exact: true }).first(),
-      ).toBeVisible(T);
+      const expectedStatusLabel = statusLabel(picked.status);
+      const statusBadge = panel
+        .locator('[data-slot="badge"]')
+        .filter({ hasText: expectedStatusLabel });
+      await expect(statusBadge).toHaveCount(1);
+      await expect(statusBadge).toHaveText(expectedStatusLabel);
 
       // (2) 백엔드 라운드트립: 패널이 가리키는 feature_id를 직접 조회 → 동일 feature.
       const confirm = await browserFetch<AdminFeatureDetailResponse>(

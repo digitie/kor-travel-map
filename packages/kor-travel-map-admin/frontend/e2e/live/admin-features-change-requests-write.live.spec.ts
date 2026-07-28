@@ -5,6 +5,8 @@ import * as F from "./_fixtures";
 
 type AdminFeatureChangeResponse =
   components["schemas"]["AdminFeatureChangeResponse"];
+type AdminFeatureChangeListResponse =
+  components["schemas"]["AdminFeatureChangeListResponse"];
 type AdminFeatureDeactivateResponse =
   components["schemas"]["AdminFeatureDeactivateResponse"];
 type AdminFeatureDetailResponse =
@@ -94,7 +96,20 @@ function isAdminFeatureListResponse(
 ): boolean {
   if (!isApiResponse(response, "GET", "/v1/admin/features")) return false;
   const params = new URL(response.url()).searchParams;
-  return params.get("q") === q && params.getAll("status").includes(status);
+  const kinds = params.getAll("kind");
+  const statuses = params.getAll("status");
+  return (
+    params.get("q") === q &&
+    kinds.length === 1 &&
+    kinds[0] === "place" &&
+    statuses.length === 1 &&
+    statuses[0] === status &&
+    params.get("sort") === "updated_at" &&
+    params.get("order") === "desc" &&
+    params.get("page_size") === "50" &&
+    !params.has("cursor") &&
+    !params.has("has_issue")
+  );
 }
 
 function adminFeaturePath(featureId: string): string {
@@ -119,6 +134,15 @@ function changeRejectPath(requestId: string): string {
   return `/v1/admin/features/change-requests/${encodeURIComponent(
     requestId,
   )}/reject`;
+}
+
+function pendingChangeRequestsPath(featureId: string): string {
+  const params = new URLSearchParams({
+    page_size: "100",
+    q: featureId,
+    status: "pending",
+  });
+  return `/v1/admin/features/change-requests?${params.toString()}`;
 }
 
 async function waitForApiResponse(
@@ -534,7 +558,7 @@ async function rejectChangeRequestByApi(
   page: Page,
   requestId: string,
 ): Promise<void> {
-  await browserFetch<AdminFeatureChangeResponse>(
+  const response = await browserFetch<AdminFeatureChangeResponse>(
     page,
     changeRejectPath(requestId),
     {
@@ -542,13 +566,22 @@ async function rejectChangeRequestByApi(
       method: "POST",
     },
   );
+  if (
+    response.status !== 200 ||
+    response.body?.data.request.request_id !== requestId ||
+    response.body.data.request.status !== "rejected"
+  ) {
+    throw new Error(
+      `cleanup reject 실패: request=${requestId} HTTP ${response.status} ${response.text}`,
+    );
+  }
 }
 
 async function approveChangeRequestByApi(
   page: Page,
   requestId: string,
 ): Promise<void> {
-  await browserFetch<AdminFeatureChangeResponse>(
+  const response = await browserFetch<AdminFeatureChangeResponse>(
     page,
     changeApprovePath(requestId),
     {
@@ -556,19 +589,95 @@ async function approveChangeRequestByApi(
       method: "POST",
     },
   );
+  if (
+    response.status !== 200 ||
+    response.body?.data.request.request_id !== requestId ||
+    response.body.data.request.status !== "applied"
+  ) {
+    throw new Error(
+      `cleanup approve 실패: request=${requestId} HTTP ${response.status} ${response.text}`,
+    );
+  }
+}
+
+async function expectDeletedFeatureState(
+  page: Page,
+  featureId: string,
+): Promise<void> {
+  await expect
+    .poll(async () => {
+      const detail = await fetchAdminFeature(page, featureId);
+      if (detail.status !== 200 || detail.body === null) {
+        return `http:${detail.status}`;
+      }
+      const feature = detail.body.data.feature;
+      return [
+        feature.status,
+        feature.deleted_at === null || feature.deleted_at === undefined
+          ? "deleted_at:missing"
+          : "deleted_at:set",
+        feature.user_deleted_at === null ||
+        feature.user_deleted_at === undefined
+          ? "user_deleted_at:missing"
+          : "user_deleted_at:set",
+      ].join("|");
+    }, T)
+    .toBe("deleted|deleted_at:set|user_deleted_at:set");
+
+  await expect
+    .poll(async () => (await fetchPublicFeature(page, featureId)).status, T)
+    .toBe(404);
+}
+
+async function expectNoPendingChangeRequests(
+  page: Page,
+  featureId: string,
+): Promise<void> {
+  await expect
+    .poll(async () => {
+      const response = await browserFetch<AdminFeatureChangeListResponse>(
+        page,
+        pendingChangeRequestsPath(featureId),
+      );
+      if (response.status !== 200 || response.body === null) {
+        return [`http:${response.status}`];
+      }
+      return response.body.data.items.map((item) => ({
+        featureId: item.feature_id,
+        requestId: item.request_id,
+        status: item.status,
+      }));
+    }, T)
+    .toEqual([]);
 }
 
 async function cleanupFeatureByApi(
   page: Page,
   featureId: string,
   deleteRequestId: string | null,
+  deleteApplied: boolean,
 ): Promise<void> {
+  const current = await fetchAdminFeature(page, featureId);
+  if (current.status === 404) {
+    return;
+  }
+  if (current.status !== 200 || current.body === null) {
+    throw new Error(
+      `cleanup detail 조회 실패: HTTP ${current.status} ${current.text}`,
+    );
+  }
+  if (current.body.data.feature.status === "deleted") {
+    await expectDeletedFeatureState(page, featureId);
+    return;
+  }
+  if (deleteApplied) {
+    throw new Error(
+      `delete request가 applied인데 ${featureId} 상태가 ${current.body.data.feature.status}입니다.`,
+    );
+  }
   if (deleteRequestId) {
     await approveChangeRequestByApi(page, deleteRequestId);
-  }
-
-  const current = await fetchAdminFeature(page, featureId);
-  if (current.status !== 200 || current.body?.data.feature.status === "deleted") {
+    await expectDeletedFeatureState(page, featureId);
     return;
   }
 
@@ -597,9 +706,14 @@ async function cleanupFeatureByApi(
     );
   }
   const request = deleteResponse.body?.data.request;
-  if (deleteResponse.status === 200 && request?.status === "pending") {
+  if (request?.status === "pending") {
     await approveChangeRequestByApi(page, request.request_id);
+  } else if (request?.status !== "applied") {
+    throw new Error(
+      `cleanup DELETE terminal 상태 오류: ${request?.status ?? "missing"}`,
+    );
   }
+  await expectDeletedFeatureState(page, featureId);
 }
 
 test.describe("/admin/features + feature change requests live write workflow", () => {
@@ -748,9 +862,11 @@ test.describe("/admin/features + feature change requests live write workflow", (
     let addRequestId: string | null = null;
     let addApproved = false;
     let updateRequestId: string | null = null;
+    let updateApproved = false;
     let rejectedUpdateRequestId: string | null = null;
+    let rejectedUpdateResolved = false;
     let deleteRequestId: string | null = null;
-    let deleted = false;
+    let deleteApplied = false;
 
     try {
       await test.step("change request 화면의 읽기/필터/폼 표면을 확인한다", async () => {
@@ -873,10 +989,34 @@ test.describe("/admin/features + feature change requests live write workflow", (
           status: "pending",
         });
         expect(createResponse.data.request.payload).toMatchObject({
+          address: {
+            admin: "서울특별시 중구 명동",
+            legal: "서울특별시 중구 태평로1가",
+            road: "서울특별시 중구 세종대로 110",
+          },
           category: "01070300",
+          coord: {
+            lat: 37.56668,
+            lon: 126.97841,
+          },
+          detail: {
+            e2e_phase: "create",
+            phone: "02-0000-0000",
+            place_kind: "place",
+            run_id: RUN_ID,
+          },
           kind: "place",
+          marker_color: "P-01",
+          marker_icon: "marker",
           name: CREATE_NAME,
+          sido_code: "11",
+          sigungu_code: "11140",
           status: "active",
+          urls: {
+            homepage: "https://example.invalid/e2e",
+            source: "https://example.invalid/source",
+            ticket: "https://example.invalid/ticket",
+          },
         });
 
         const successAlert = page
@@ -921,19 +1061,64 @@ test.describe("/admin/features + feature change requests live write workflow", (
 
         const adminDetail = await expectAdminFeature(page, FEATURE_ID);
         expect(adminDetail.data.feature).toMatchObject({
+          address: {
+            admin: "서울특별시 중구 명동",
+            legal: "서울특별시 중구 태평로1가",
+            road: "서울특별시 중구 세종대로 110",
+          },
           category: "01070300",
+          detail: {
+            e2e_phase: "create",
+            phone: "02-0000-0000",
+            place_kind: "place",
+            run_id: RUN_ID,
+          },
           feature_id: FEATURE_ID,
           kind: "place",
+          marker_color: "P-01",
+          marker_icon: "marker",
           name: CREATE_NAME,
+          sido_code: "11",
+          sigungu_code: "11140",
           status: "active",
+          urls: {
+            homepage: "https://example.invalid/e2e",
+            source: "https://example.invalid/source",
+            ticket: "https://example.invalid/ticket",
+          },
         });
+        expect(adminDetail.data.feature.lon).toBeCloseTo(126.97841, 5);
+        expect(adminDetail.data.feature.lat).toBeCloseTo(37.56668, 5);
 
         const publicDetail = await expectPublicFeature(page, FEATURE_ID);
         expect(publicDetail.data).toMatchObject({
+          address: {
+            admin: "서울특별시 중구 명동",
+            legal: "서울특별시 중구 태평로1가",
+            road: "서울특별시 중구 세종대로 110",
+          },
+          category: "01070300",
+          detail: {
+            e2e_phase: "create",
+            phone: "02-0000-0000",
+            place_kind: "place",
+            run_id: RUN_ID,
+          },
           feature_id: FEATURE_ID,
+          marker_color: "P-01",
+          marker_icon: "marker",
           name: CREATE_NAME,
+          sido_code: "11",
+          sigungu_code: "11140",
           status: "active",
+          urls: {
+            homepage: "https://example.invalid/e2e",
+            source: "https://example.invalid/source",
+            ticket: "https://example.invalid/ticket",
+          },
         });
+        expect(publicDetail.data.lon).toBeCloseTo(126.97841, 5);
+        expect(publicDetail.data.lat).toBeCloseTo(37.56668, 5);
       });
 
       await test.step("admin features 목록에서 검색, 필터, preview, detail 링크를 확인한다", async () => {
@@ -955,7 +1140,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
           (await listResponse.json()) as AdminFeaturesListResponse;
         expect(
           listBody.data.items.map((item) => item.feature_id),
-        ).toContain(FEATURE_ID);
+        ).toEqual([FEATURE_ID]);
 
         const row = rowContaining(page, CREATE_NAME);
         await expect(row).toBeVisible(T);
@@ -1028,6 +1213,22 @@ test.describe("/admin/features + feature change requests live write workflow", (
         expect(updateResponse.data.request).toMatchObject({
           action: "update",
           feature_id: FEATURE_ID,
+          payload: {
+            category: "01070400",
+            coord: {
+              lat: 37.56718,
+              lon: 126.97891,
+            },
+            detail: {
+              e2e_phase: "update",
+              run_id: RUN_ID,
+            },
+            marker_color: "P-02",
+            name: UPDATED_NAME,
+            urls: {
+              homepage: "https://example.invalid/updated",
+            },
+          },
           status: "pending",
         });
 
@@ -1045,6 +1246,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
           updateRequestId,
         );
         expect(approveResponse.data.request.status).toBe("applied");
+        updateApproved = true;
 
         await expect
           .poll(async () => {
@@ -1059,7 +1261,12 @@ test.describe("/admin/features + feature change requests live write workflow", (
           marker_color: "P-02",
           name: UPDATED_NAME,
           status: "active",
+          urls: {
+            homepage: "https://example.invalid/updated",
+          },
         });
+        expect(adminDetail.data.feature.lon).toBeCloseTo(126.97891, 5);
+        expect(adminDetail.data.feature.lat).toBeCloseTo(37.56718, 5);
         expect(adminDetail.data.feature.detail).toMatchObject({
           e2e_phase: "update",
           run_id: RUN_ID,
@@ -1068,9 +1275,19 @@ test.describe("/admin/features + feature change requests live write workflow", (
         const publicDetail = await expectPublicFeature(page, FEATURE_ID);
         expect(publicDetail.data).toMatchObject({
           category: "01070400",
+          detail: {
+            e2e_phase: "update",
+            run_id: RUN_ID,
+          },
+          marker_color: "P-02",
           name: UPDATED_NAME,
           status: "active",
+          urls: {
+            homepage: "https://example.invalid/updated",
+          },
         });
+        expect(publicDetail.data.lon).toBeCloseTo(126.97891, 5);
+        expect(publicDetail.data.lat).toBeCloseTo(37.56718, 5);
       });
 
       await test.step("update change request를 거절하면 실제 feature 값은 바뀌지 않는다", async () => {
@@ -1105,6 +1322,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
           rejectedUpdateRequestId,
         );
         expect(rejectResponse.data.request.status).toBe("rejected");
+        rejectedUpdateResolved = true;
 
         await setChangeFilters(page, {
           action: "update",
@@ -1122,7 +1340,11 @@ test.describe("/admin/features + feature change requests live write workflow", (
 
       await test.step("admin features 목록 deactivate 버튼이 실제 inactive 상태를 만든다", async () => {
         await gotoAdminFeatures(page);
+        await page.getByLabel("feature kind").selectOption("place");
         await page.getByLabel("feature status").selectOption("active");
+        await page.getByLabel("has issue").selectOption("all");
+        await page.getByLabel("feature sort").selectOption("updated_at");
+        await page.getByRole("button", { name: "desc" }).click();
         const listResponsePromise = page.waitForResponse(
           (response) =>
             isAdminFeatureListResponse(response, FEATURE_ID, "active"),
@@ -1135,7 +1357,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
           (await listResponse.json()) as AdminFeaturesListResponse;
         expect(
           listBody.data.items.map((item) => item.feature_id),
-        ).toContain(FEATURE_ID);
+        ).toEqual([FEATURE_ID]);
 
         const row = rowContaining(page, UPDATED_NAME);
         await expect(row).toBeVisible(T);
@@ -1220,7 +1442,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
           deleteRequestId,
         );
         expect(approveResponse.data.request.status).toBe("applied");
-        deleted = true;
+        deleteApplied = true;
 
         await expect
           .poll(async () => {
@@ -1250,17 +1472,49 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await expect(appliedDeleteRow).toContainText("반영됨");
       });
     } finally {
+      const cleanupErrors: string[] = [];
+      const attemptCleanup = async (
+        label: string,
+        action: () => Promise<void>,
+      ): Promise<void> => {
+        try {
+          await action();
+        } catch (error) {
+          cleanupErrors.push(
+            `${label}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      };
+
       if (!addApproved && addRequestId) {
-        await rejectChangeRequestByApi(page, addRequestId);
+        await attemptCleanup("add request reject", () =>
+          rejectChangeRequestByApi(page, addRequestId as string),
+        );
       }
-      if (updateRequestId) {
-        await rejectChangeRequestByApi(page, updateRequestId);
+      if (!updateApproved && updateRequestId) {
+        await attemptCleanup("update request reject", () =>
+          rejectChangeRequestByApi(page, updateRequestId as string),
+        );
       }
-      if (rejectedUpdateRequestId) {
-        await rejectChangeRequestByApi(page, rejectedUpdateRequestId);
+      if (!rejectedUpdateResolved && rejectedUpdateRequestId) {
+        await attemptCleanup("rejected update request reject", () =>
+          rejectChangeRequestByApi(page, rejectedUpdateRequestId as string),
+        );
       }
-      if (!deleted) {
-        await cleanupFeatureByApi(page, FEATURE_ID, deleteRequestId);
+      await attemptCleanup("feature tombstone", () =>
+        cleanupFeatureByApi(
+          page,
+          FEATURE_ID,
+          deleteRequestId,
+          deleteApplied,
+        ),
+      );
+      await attemptCleanup("pending request audit", () =>
+        expectNoPendingChangeRequests(page, FEATURE_ID),
+      );
+
+      if (cleanupErrors.length > 0) {
+        throw new Error(`Live cleanup 실패:\n${cleanupErrors.join("\n")}`);
       }
     }
   });
