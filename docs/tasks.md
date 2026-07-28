@@ -33,7 +33,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [ ] `T-VN-46`(npm optional tree) →
+  - b0: [x] `T-VN-46`(npm optional tree) →
     [ ] `T-VN-48A` → [ ] `T-VN-48B` → [ ] `T-VN-48C` →
     [ ] `T-VN-48D`(mocked E2E drift) →
     [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
@@ -65,8 +65,9 @@ barrier로 직렬화한다.
 
 - base는 **main**(`integration/t-vn`은 PR #790 합류로 폐지). 시작·PR 직전·머지 직후
   `origin/main` rebase. PR 하나는 task 하나만 소유.
-- 첫 reviewable checkpoint를 바로 push해 PR을 먼저 열고, 구현·리뷰 반영·실데이터 검증을
-  작은 의미 단위로 자주 커밋한다. 실패하면 검증된 직전 checkpoint부터 재개한다.
+- 첫 reviewable checkpoint부터 원격 feature branch에 작은 의미 단위로 자주 커밋·push하되,
+  PR은 구현·적대 리뷰 반영·실데이터 검증·최종 main rebase를 모두 마친 뒤 **머지 직전**에만
+  연다. 실패하면 검증된 직전 checkpoint부터 재개한다.
 - **Lane A**: PR #869 다음 PR부터 적대적 리뷰어 **2명** 반영 후 n150 **파괴적 live E2E**
   (실데이터)로 검증하고 PR·CI green·머지. 작업 중 발견 항목은 tasks.md에 즉시 추가.
 - **Lane B**: PR #869 다음 PR부터 적대적 리뷰어 **2명** 반영 후 n150 **실데이터 파괴적 Live UI
@@ -134,16 +135,6 @@ barrier로 직렬화한다.
     대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
 
 ## Lane B 상세 — b0 선행 하드닝
-
-- [ ] T-VN-46 — **admin frontend npm optional tree 무결성 완결**
-
-  T-VN-43의 exact npm 10.9.4 clean install은 audit 0과 exit 0이지만 `npm ls --all --json`의
-  `problems`에 Sharp 0.35.3 WASM fallback optional graph 6개(`@emnapi/*`, `@img/sharp-wasm32`,
-  `@napi-rs/wasm-runtime`, `@tybys/wasm-util`)를 `extraneous`로 남긴다. T-VN-43은 exact allowlist 밖
-  문제를 fail-close하고 실제 native optimizer를 검증한다. 2026-07-28 실측 최신 npm은 12.0.1,
-  Sharp 최신은 이미 사용 중인 0.35.3이다. pinned/latest npm의 동일 lockfile clean-install
-  최소 재현으로 Arborist/Sharp 소유 경계를 확정하고 allowlist 자체를 제거한다. 쓰지 않는 direct
-  dependency를 추가하거나 `npm ls` 출력을 숨기는 방식은 금지한다.
 
 ### T-VN-48 — mocked Playwright drift 단계별 제거
 

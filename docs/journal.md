@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-28 (codex) — T-VN-46 파괴적 Live·실패 지점 재개 완료
+
+**결론**: npm 12.0.1 clean optional tree 구현 head `378c6524`를 적대 리뷰어 2명이
+P0/P1/P2 0건으로 승인했고, 재사용 실데이터 clone의 파괴적 admin Feature acceptance를
+인증 setup 포함 2/2로 통과했다.
+
+- **Live identity**: API와 Live frontend image의 OCI revision은 exact head
+  `378c652486613df73b2fa59de5cfacc459479c83`다. C7 image도 같은 source head에서
+  clean build했고 API/UI는 격리 loopback port, DB는 health 정상인 `ktm-tvn45-db`
+  (`0066_curation_component_identity`)를 사용했다.
+- **실패 지점 복구**: API startup은 production profile의
+  `KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED=true`가 빠져 fail-close했고 API container
+  설정 단계만 보완했다. 첫 Playwright는 인증 setup을 통과했지만 prod-derived UI env의
+  `KOR_TRAVEL_MAP_API_INTERNAL_URL`이 candidate API로 override되지 않아 첫 admin cleanup이
+  write 전에 `403`이었다. 실패 runner artifact를 폐기하고 UI만 candidate loopback URL로
+  다시 띄운 뒤 실패 spec부터 재개해 **2/2, 37.9초**로 통과했다.
+- **잔여물 감사**: API-owned non-deleted Feature 0건, pending change request 0건,
+  weather/price fixture 0건이다. clone의 non-deleted Feature는 1,025,428건이고 health는
+  정상이다. runner/API/UI container, Playwright storageState/cookie·trace·screenshot,
+  민감 로그·임시 env/session secret을 모두 폐기했다. DB·dump와 redacted immutable 수치만
+  다음 task 재사용 판정 전까지 보존한다.
+- **재발 방지**: `agent-workflow.md`에는 원격 branch frequent checkpoint와 머지 직전 PR
+  규칙을, `agent-failure-patterns.md` F13에는 prod-derived env의 candidate API/DB exact
+  preflight와 값 비노출 비교를 추가했다.
+
 ## 2026-07-28 (claude) — Lane A a0 T-VN-H07A: Map #814 residual contract 재감사·landing
 
 **결론**: 오래 열린 Map PR #814(4 commits, base 95 commits behind)를 최신 main 위 residual
@@ -43,13 +68,10 @@ dependency나 출력 필터 없이 `npm ls --all --json`의 `problems`가 0개�
 - **해결**: root package manager와 CI 명령을 npm 12.0.1로, Node 하한을 22.22.2로 전환했다.
   기존 exact 6-package 허용 목록은 제거하고 문제 배열이 비었는지 직접 단언한다. Sharp
   0.35.3과 Next 16.2.12의 실제 SVG→WebP optimizer 검증은 그대로 유지한다.
-- **install script 정책**: npm 12에서 실행이 필요한 `esbuild@0.28.1`과
-  `unrs-resolver@1.12.2`만 `allowScripts`에 version-pin했다.
-  `strict-allow-scripts=true`라 새 dependency script나 version drift는 검토 없이 실행되지 않고
-  clean install이 실패한다. 현재 `npm install-scripts ls` 결과는 unreviewed package 0개다.
-- **Node 계약**: npm 12.0.1의 published engine과 동일한
-  `^22.22.2 || ^24.15.0 || >=26.0.0`을 root/workspace/lockfile에 고정한다. frontend/CI의
-  Node 22.23.1과 C7의 Node 24.15.0은 이 지원 집합 안에 있다.
+- **install script 정책**: npm 12에서 실행이 필요한 `esbuild`와 `unrs-resolver`만
+  `allowScripts`에 명시했다. `strict-allow-scripts=true`라 새 dependency script는 검토 없이
+  실행되지 않고 clean install이 실패한다. 현재 `npm install-scripts ls` 결과는 unreviewed
+  package 0개다.
 - **검증**: 지원 Node 22.22.2 격리 환경의 exact clean install에서 audit 0, npm tree
   0 problems, ESLint 0 warnings, React Doctor 270 files/0 diagnostics, Sharp ABI,
   admin/user OpenAPI codegen drift, 두 type-check와 production build를 통과했다. npm 12

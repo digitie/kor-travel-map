@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-28 (codex) — T-VN-46 파괴적 Live·task 완료
+
+**다음 한 작업**: T-VN-46 최종 문서와 Claude Code PR #874 사후 감사 결과를 원격 branch에
+commit/push하고 최신 `origin/main`에 rebase한다. 머지 직전에만 새 PR을 열어 CI green 뒤
+셀프 머지한다. 머지 후 `ktm-tvn45-db`·dump의 T-VN-48A 재사용 가능성을 먼저 판정한다.
+
+- exact 구현 head `378c6524`는 적대 리뷰어 2명의 최종 P0/P1/P2 0건 확인을 받았다.
+  지원 Node 22.22.2/npm 12.0.1 clean install의 audit·unreviewed script·npm tree가 모두
+  0이고, ESLint·React Doctor·Sharp ABI·OpenAPI codegen drift·type-check·production build를
+  통과했다.
+- `ktm-tvn45-db`를 rollback 없이 `0066_curation_component_identity` 그대로 재사용했다.
+  candidate API/UI/C7 image의 revision을 exact head로 확인하고 파괴적
+  `admin-feature-acceptance-write.live.spec.ts`를 인증 setup 포함 **2/2, 37.9초** 통과했다.
+- 첫 실행은 API production profile의 공개 API key gate 누락을 해당 API container 설정
+  단계에서 복구했다. 이어 prod-derived UI env의 internal URL override 누락으로 candidate
+  아닌 endpoint가 첫 admin cleanup을 `403`으로 거부했으며, write 전 실패를 확인한 뒤 UI와
+  브라우저 artifact를 폐기하고 candidate loopback URL로 다시 띄워 실패한 spec부터 재개했다.
+- 최종 감사는 API-owned non-deleted Feature **0건**, pending change request **0건**,
+  weather/price fixture **0건**이다. clone의 non-deleted Feature는 **1,025,428건**, health는
+  정상이다. 인증 상태/cookie·raw trace·screenshot·민감 로그·임시 env/session secret과
+  candidate container는 모두 폐기했고 DB·dump와 redacted immutable 수치만 유지한다.
+
 ## 2026-07-28 (claude) — Lane A a0 T-VN-H07A 완료: Map #814 residual contract landing
 
 **다음 한 작업**: Lane A a0 다음 항목 `T-VN-H07B`(PinVi #403 재감사·landing) — 최신 PinVi main에
@@ -26,10 +48,9 @@ typed consumer contract로 남겨 #403 갱신·머지. 이어 H07D(#815) → H07
 - 지원 Node 22.22.2에서 최신 npm 12.0.1 clean install은 direct dependency 추가나
   `npm ls` 출력 필터 없이 `problems` **0개**다. exact npm을 12.0.1로 올리고
   `verify:npm-tree`의 기존 허용 목록을 빈 문제 집합 단언으로 교체했다.
-- npm 12의 install-script 경계는 검토한 `esbuild@0.28.1`과
-  `unrs-resolver@1.12.2`만 root `allowScripts`로 허용하고 `.npmrc`의
-  `strict-allow-scripts=true`로 package/version drift를 fail-close한다. Node 계약은 npm 12가
-  실제 지원하는 `^22.22.2 || ^24.15.0 || >=26.0.0`으로 좁혔다.
+- npm 12의 install-script 경계는 검토한 `esbuild`와 `unrs-resolver`만 root
+  `allowScripts`로 허용하고 `.npmrc`의 `strict-allow-scripts=true`로 신규 script를
+  fail-close한다. Node 최저 버전도 npm 12가 지원하는 22.22.2로 올렸다.
 - 격리 clean install에서 audit **0**, unreviewed install script **0**, npm tree
   **0 problems**, ESLint·React Doctor **0 diagnostics**, Sharp SVG→WebP ABI, admin/user
   codegen drift, 두 type-check와 production build를 모두 통과했다. npm 12가 정규화한

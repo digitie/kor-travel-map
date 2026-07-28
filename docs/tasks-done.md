@@ -3,6 +3,28 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-28 — Lane B T-VN-46 npm optional tree 무결성 완결
+
+- [x] **T-VN-46** — npm 10.9.4가 제외된 FreeBSD/WASM optional parent의 자식 6개를
+  root `extraneous`로 남기는 Arborist 현상을 동일 lockfile에서 재현했다. npm 12.0.1과
+  지원 Node 하한 22.22.2로 전환해 direct dependency 추가나 `npm ls` 출력 필터 없이
+  `problems` 0건으로 만들고 기존 6-package allowlist를 제거했다.
+- root `allowScripts`는 실제 install script가 필요한 `esbuild@0.28.1`과
+  `unrs-resolver@1.12.2`만 exact version으로 허용한다. `.npmrc`의
+  `strict-allow-scripts=true`와 `engine-strict=true`가 신규 script와 미지원 Node/npm을
+  fail-close한다. workflow와 frontend/C7 Docker image도 같은 npm 12.0.1 계약을 사용한다.
+- n150 clean install에서 audit 0, unreviewed install script 0, npm tree 0 problems,
+  ESLint·React Doctor 0 diagnostics, Sharp SVG→WebP, admin/user OpenAPI codegen drift,
+  두 type-check와 production build를 통과했다. npm 12 package-lock-only 재실행 drift도 0이다.
+- 적대 리뷰어 2명이 exact 구현 head `378c6524`를 검토해 stale unit/doc, bare
+  `allowScripts`, 과도하게 넓은 Node engine을 보강했고 최종 P0/P1/P2 0건을 확인했다.
+- 재사용 실데이터 clone에서 candidate API/UI/C7 image로 파괴적 admin Feature acceptance를
+  인증 setup 포함 **2/2, 37.9초** 통과했다. API-owned non-deleted Feature와 pending change
+  request, weather/price fixture는 모두 0건이다. clone은
+  `0066_curation_component_identity`, health 정상이고 다음 task 재사용 판정 전까지 보존한다.
+  Playwright 상태/cookie·raw trace·screenshot·민감 로그·임시 env/session secret과 candidate
+  container는 실행 직후 폐기했다.
+
 ## 2026-07-28 — Lane A a0 T-VN-H07A: Map #814 residual contract landing
 
 - [x] **T-VN-H07A** — 오래 열린 Map #814(base 95 commits behind)를 최신 main 위 residual로
