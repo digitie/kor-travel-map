@@ -133,10 +133,7 @@ export function VWorldMapView({
       center: initial.center,
       zoom: initial.zoom,
       minZoom: initial.minZoom,
-      maxZoom: Math.min(
-        initial.maxZoom,
-        getVWorldMaxZoom(initial.layerType),
-      ),
+      maxZoom: Math.min(initial.maxZoom, getVWorldMaxZoom(initial.layerType)),
       attributionControl: { compact: true },
     });
     mapRef.current = nextMap;
@@ -150,8 +147,7 @@ export function VWorldMapView({
     // page.evaluate로 getLayer/querySourceFeatures 같은 GL 렌더 상태를 단언할 수
     // 있게 한다(전역 오염 없이 testId로 스코프됨). teardown 시 해제.
     const containerNode = containerRef.current as
-      | (HTMLDivElement & { _maplibreMap?: MapLibreMap })
-      | null;
+      (HTMLDivElement & { _maplibreMap?: MapLibreMap }) | null;
     if (containerNode) containerNode._maplibreMap = nextMap;
 
     let didNotifyLoad = false;
@@ -179,9 +175,9 @@ export function VWorldMapView({
         onErrorRef.current(event);
         return;
       }
-      const error = event.error as { message?: string; url?: string } | undefined;
-      const url =
-        error?.url ?? (event as { url?: string | undefined }).url;
+      const error = event.error as
+        { message?: string; url?: string } | undefined;
+      const url = error?.url ?? (event as { url?: string | undefined }).url;
       console.warn(
         "[VWorldMapView]",
         error?.message ?? "unknown map error",
@@ -201,9 +197,12 @@ export function VWorldMapView({
 
     let resizeFrame = 0;
     let longPressTimer = 0;
-    let longPressPointer:
-      | { id: number; startX: number; startY: number; currentEvent: PointerEvent }
-      | null = null;
+    let longPressPointer: {
+      id: number;
+      startX: number;
+      startY: number;
+      currentEvent: PointerEvent;
+    } | null = null;
     const clearLongPress = () => {
       if (longPressTimer !== 0) {
         window.clearTimeout(longPressTimer);
@@ -369,7 +368,9 @@ export function VWorldMarker({
 }: VWorldMarkerProps) {
   const map = use(VWorldMapContext);
   const markerRef = useRef<MapLibreMarker | null>(null);
-  const elementRef = useRef<ReturnType<typeof createMarkerElement> | null>(null);
+  const elementRef = useRef<ReturnType<typeof createMarkerElement> | null>(
+    null,
+  );
   const onClickRef = useRef(onClick);
   const clickable = onClick !== undefined;
   const [lng, lat] = lngLat;
@@ -443,7 +444,10 @@ function setSelectedOutline(element: HTMLElement, selected: boolean): void {
   }
 }
 
-function createClusterElement(pointCount: number, label: string): HTMLDivElement {
+function createClusterElement(
+  pointCount: number,
+  label: string,
+): HTMLDivElement {
   const el = document.createElement("div");
   const size = pointCount < 100 ? 36 : pointCount < 1000 ? 46 : 58;
   el.style.width = `${size}px`;
@@ -481,7 +485,6 @@ export interface ClusterFeatureInput {
   price_summary?: readonly ClusterPriceSummaryPoint[] | null;
   weather_summary?: ClusterWeatherSummaryPoint | null;
 }
-
 
 interface ClusterWeatherSummaryPoint {
   provider?: string | null;
@@ -547,7 +550,8 @@ function shouldClusterAsPoint(feature: ClusterFeatureInput): boolean {
 
 function markerIconForFeature(feature: ClusterFeatureInput): string | null {
   if (feature.kind === "weather") {
-    if (feature.weather_summary?.provider === "python-kma-api") return "weather";
+    if (feature.weather_summary?.provider === "python-kma-api")
+      return "weather";
     if (feature.weather_summary?.provider === "python-airkorea-api") {
       return "air-quality";
     }
@@ -558,7 +562,6 @@ function markerIconForFeature(feature: ClusterFeatureInput): string | null {
 const temperatureFormatter = new Intl.NumberFormat("ko-KR", {
   maximumFractionDigits: 1,
 });
-
 
 function weatherMarkerLabel(
   summary: ClusterWeatherSummaryPoint | null | undefined,
@@ -591,7 +594,9 @@ function weatherMarkerLabel(
     return `${metricLabel}${temperatureFormatter.format(summary.value_number)}°`;
   }
   if (summary.value_text) {
-    return summary.metric_key === "SKY" ? `예보 ${summary.value_text}` : summary.value_text;
+    return summary.metric_key === "SKY"
+      ? `예보 ${summary.value_text}`
+      : summary.value_text;
   }
   return null;
 }
@@ -723,7 +728,11 @@ function createFeatureMarkerElement({
       });
     }
     if (badgeCount && badgeCount > 1) {
-      appendCountBadge(icon, badgeCount, resolveMarkerColor(markerColor ?? null));
+      appendCountBadge(
+        icon,
+        badgeCount,
+        resolveMarkerColor(markerColor ?? null),
+      );
     }
     return icon;
   }
@@ -782,7 +791,10 @@ function createFeatureMarkerElement({
 }
 
 function areaLabel(areaSquareMeters: number | null | undefined): string | null {
-  if (typeof areaSquareMeters !== "number" || !Number.isFinite(areaSquareMeters)) {
+  if (
+    typeof areaSquareMeters !== "number" ||
+    !Number.isFinite(areaSquareMeters)
+  ) {
     return null;
   }
   if (areaSquareMeters >= 1_000_000) {
@@ -868,15 +880,7 @@ function installGeometryLayerLifecycle(
         paint: {
           "line-color": ["get", "color"],
           "line-opacity": 0.9,
-          "line-width": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            8,
-            1.2,
-            14,
-            2.8,
-          ],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 14, 2.8],
         },
       });
     }
@@ -893,15 +897,7 @@ function installGeometryLayerLifecycle(
         paint: {
           "line-color": ["get", "color"],
           "line-opacity": 0.92,
-          "line-width": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            8,
-            2,
-            14,
-            4.5,
-          ],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 14, 4.5],
         },
       });
     }
@@ -1010,7 +1006,6 @@ function createServerClusterMarker(
 ): ServerClusterMarkerEntry {
   const element = createClusterElement(cluster.feature_count, label);
   element.dataset.clusterKey = cluster.cluster_key;
-  element.dataset.featureCount = String(cluster.feature_count);
   element.dataset.lon = String(cluster.lon);
   element.dataset.lat = String(cluster.lat);
   element.dataset.zoomStep = String(zoomStep);
@@ -1026,7 +1021,8 @@ function createServerClusterMarker(
       center: target,
       zoom: Math.min(
         map.getMaxZoom(),
-        map.getZoom() + (Number.isFinite(currentZoomStep) ? currentZoomStep : 3),
+        map.getZoom() +
+          (Number.isFinite(currentZoomStep) ? currentZoomStep : 3),
       ),
     });
   };
@@ -1083,7 +1079,6 @@ export function VWorldServerClusters({
         entry.marker.setLngLat(coords);
         const element = entry.marker.getElement();
         element.dataset.clusterKey = cluster.cluster_key;
-        element.dataset.featureCount = String(cluster.feature_count);
         element.dataset.lon = String(cluster.lon);
         element.dataset.lat = String(cluster.lat);
         element.dataset.zoomStep = String(zoomStep);
@@ -1243,9 +1238,7 @@ export function VWorldFeatureClusters({
       clusterMaxZoom,
     };
   }, [data, clusterRadius, clusterMaxZoom]);
-  const geometryData = useMemo<
-    FeatureGeometryCollection
-  >(
+  const geometryData = useMemo<FeatureGeometryCollection>(
     () => ({
       type: "FeatureCollection",
       features: dedupedFeatures.flatMap((feature) => {
@@ -1264,8 +1257,7 @@ export function VWorldFeatureClusters({
   useEffect(() => {
     if (map === null) return;
     const source = map.getSource(CLUSTER_SOURCE_ID) as
-      | maplibregl.GeoJSONSource
-      | undefined;
+      maplibregl.GeoJSONSource | undefined;
     source?.setData(data);
     schedulePointMarkerUpdateRef.current?.();
   }, [map, data]);
@@ -1274,8 +1266,7 @@ export function VWorldFeatureClusters({
     if (map === null) return;
     geometryDataRef.current = geometryData;
     const source = map.getSource(GEOMETRY_SOURCE_ID) as
-      | maplibregl.GeoJSONSource
-      | undefined;
+      maplibregl.GeoJSONSource | undefined;
     source?.setData(geometryData);
   }, [map, geometryData]);
 
@@ -1305,7 +1296,10 @@ export function VWorldFeatureClusters({
       next.add(id);
       let marker = pool.get(id);
       if (marker === undefined) {
-        const element = createGeometryLabelElement(feature, onSelectRef.current);
+        const element = createGeometryLabelElement(
+          feature,
+          onSelectRef.current,
+        );
         marker = new maplibregl.Marker({ anchor: "center", element })
           .setLngLat([lon, lat])
           .addTo(map);
@@ -1426,6 +1420,7 @@ export function VWorldFeatureClusters({
         const color = coincidentEntryColor(f);
         const row = document.createElement("button");
         row.type = "button";
+        row.dataset.featureId = f.feature_id;
         row.style.display = "flex";
         row.style.alignItems = "center";
         row.style.gap = "8px";
@@ -1440,7 +1435,8 @@ export function VWorldFeatureClusters({
         row.style.textAlign = "left";
         row.style.font = "inherit";
         row.style.color = "inherit";
-        row.style.transition = "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease";
+        row.style.transition =
+          "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease";
         row.setAttribute("aria-label", `${featureKindLabel(f.kind)} ${f.name}`);
         row.addEventListener("mouseenter", () => {
           row.style.background = "#f8fafc";
@@ -1660,7 +1656,8 @@ export function VWorldFeatureClusters({
           const id = `pt-${featureId}`;
           const title = `${String(props.name)} (${String(props.kind)})`;
           const markerIcon = (props.marker_icon as string | null) ?? undefined;
-          const markerColor = (props.marker_color as string | null) ?? undefined;
+          const markerColor =
+            (props.marker_color as string | null) ?? undefined;
           const priceLabel = priceMarkerLabel(
             priceSummariesRef.current.get(featureId),
           );
@@ -1716,7 +1713,7 @@ export function VWorldFeatureClusters({
               ? `${title} ${priceLabel.replace(/\n/g, " ")}`
               : weatherLabel
                 ? `${title} ${weatherLabel.replace(/\n/g, " ")}`
-              : title;
+                : title;
             if (element.getAttribute("aria-label") !== ariaLabel) {
               element.title = ariaLabel;
               element.setAttribute("aria-label", ariaLabel);

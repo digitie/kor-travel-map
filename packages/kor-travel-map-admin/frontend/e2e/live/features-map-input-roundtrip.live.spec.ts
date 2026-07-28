@@ -32,7 +32,7 @@ import { MAP_VIEWS } from "./_fixtures";
 
 type FeaturesInBboxResponse = components["schemas"]["FeaturesInBboxResponse"];
 type AdminFeatureMapItem = components["schemas"]["AdminFeatureMapItem"];
-type AdminFeatureMapCluster = components["schemas"]["ClusterSummary"];
+type AdminFeatureMapCluster = components["schemas"]["AdminFeatureCluster"];
 type AdminFeaturesInBoundsResponse =
   components["schemas"]["AdminFeaturesInBoundsResponse"];
 type FeatureDetailEnvelopeResponse =
@@ -65,25 +65,80 @@ const ANCHOR = { lon: 126.531, lat: 33.499, zoom: 11 } as const;
 // (component를 직접 import하지 않는 이유: Playwright 런타임이 `@/` 별칭을 풀지 않아
 //  status-badge.tsx의 `@/lib/utils` import가 깨진다. 그래서 순수 매핑만 미러링한다.)
 const STATUS_LABELS: Record<string, string> = {
-  ok: "정상", normal: "정상", success: "성공", succeeded: "성공", done: "완료",
-  completed: "완료", active: "활성", accepted: "수락됨", merged: "병합됨",
-  resolved: "해결됨", started: "시작됨", applied: "반영됨", curated: "큐레이션됨",
-  validated: "검증됨", loaded: "적재됨", implemented: "구현됨", fresh: "최신",
-  queued: "대기", pending: "대기", loading: "로딩중", running: "실행중",
-  starting: "시작중", dry_run: "모의실행", validating: "검증중", in_progress: "진행중",
-  materializing: "구체화중", scheduled: "예정됨", planned: "예정됨", ongoing: "진행중",
-  managed: "관리됨", acknowledged: "확인됨", open: "열림", candidate: "후보",
-  uploaded: "업로드됨", canceling: "취소중", paused: "일시정지", connecting: "연결중",
-  reconnecting: "재연결중", error: "오류", failed: "실패", failure: "실패",
-  cancelled: "취소됨", canceled: "취소됨", unavailable: "사용불가", critical: "심각",
-  rejected: "거절됨", denied: "거부됨", inactive: "비활성", deleted: "삭제됨",
-  disabled: "비활성화", expired: "만료됨", archived: "보관됨", deprecated: "지원중단",
-  revoked: "폐기됨", skipped: "건너뜀", validation_failed: "검증실패",
-  load_failed: "적재실패", not_found: "없음", degraded: "저하됨",
-  manual_required: "수동 필요", provider_needed: "공급자 필요", manual_only: "수동 전용",
-  ended: "종료됨", stopped: "중지됨", ignored: "무시됨", hidden: "숨김",
-  not_started: "시작 전", stale: "오래됨", draft: "초안", unknown: "알수없음",
-  none: "없음", info: "정보", warning: "경고", debug: "디버그",
+  ok: "정상",
+  normal: "정상",
+  success: "성공",
+  succeeded: "성공",
+  done: "완료",
+  completed: "완료",
+  active: "활성",
+  accepted: "수락됨",
+  merged: "병합됨",
+  resolved: "해결됨",
+  started: "시작됨",
+  applied: "반영됨",
+  curated: "큐레이션됨",
+  validated: "검증됨",
+  loaded: "적재됨",
+  implemented: "구현됨",
+  fresh: "최신",
+  queued: "대기",
+  pending: "대기",
+  loading: "로딩중",
+  running: "실행중",
+  starting: "시작중",
+  dry_run: "모의실행",
+  validating: "검증중",
+  in_progress: "진행중",
+  materializing: "구체화중",
+  scheduled: "예정됨",
+  planned: "예정됨",
+  ongoing: "진행중",
+  managed: "관리됨",
+  acknowledged: "확인됨",
+  open: "열림",
+  candidate: "후보",
+  uploaded: "업로드됨",
+  canceling: "취소중",
+  paused: "일시정지",
+  connecting: "연결중",
+  reconnecting: "재연결중",
+  error: "오류",
+  failed: "실패",
+  failure: "실패",
+  cancelled: "취소됨",
+  canceled: "취소됨",
+  unavailable: "사용불가",
+  critical: "심각",
+  rejected: "거절됨",
+  denied: "거부됨",
+  inactive: "비활성",
+  deleted: "삭제됨",
+  disabled: "비활성화",
+  expired: "만료됨",
+  archived: "보관됨",
+  deprecated: "지원중단",
+  revoked: "폐기됨",
+  skipped: "건너뜀",
+  validation_failed: "검증실패",
+  load_failed: "적재실패",
+  not_found: "없음",
+  degraded: "저하됨",
+  manual_required: "수동 필요",
+  provider_needed: "공급자 필요",
+  manual_only: "수동 전용",
+  ended: "종료됨",
+  stopped: "중지됨",
+  ignored: "무시됨",
+  hidden: "숨김",
+  not_started: "시작 전",
+  stale: "오래됨",
+  draft: "초안",
+  unknown: "알수없음",
+  none: "없음",
+  info: "정보",
+  warning: "경고",
+  debug: "디버그",
 };
 
 /** status-badge.tsx statusLabel 미러: 영어 enum → 한글(미지정은 원문 fallback). */
@@ -110,7 +165,10 @@ function apiPath(response: Response): string {
 async function browserFetch<T>(
   page: Page,
   path: string,
-  options: { body?: unknown; method?: "GET" | "POST" | "PATCH" | "DELETE" } = {},
+  options: {
+    body?: unknown;
+    method?: "GET" | "POST" | "PATCH" | "DELETE";
+  } = {},
 ): Promise<BrowserFetchResult<T>> {
   return page.evaluate(
     async ({ body, method, path }) => {
@@ -237,8 +295,7 @@ async function jumpMap(
   await page.evaluate(
     ({ lon, lat, sel, zoom }) => {
       const container = document.querySelector(sel) as
-        | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
-        | null;
+        (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
       container?._maplibreMap?.jumpTo({ center: [lon, lat], zoom });
     },
     { lon, lat, sel: MAP_CONTAINER, zoom },
@@ -249,8 +306,7 @@ async function jumpMap(
 async function waitForMapIdle(page: Page): Promise<void> {
   await page.evaluate(async (sel) => {
     const container = document.querySelector(sel) as
-      | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
-      | null;
+      (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
     const map = container?._maplibreMap;
     if (!map) throw new Error("MapLibre instance is not attached");
 
@@ -267,32 +323,49 @@ async function waitForMapIdle(page: Page): Promise<void> {
   }, MAP_CONTAINER);
 }
 
-/** 동일 query key cache hit 동안 어떤 feature collection request도 없는지 fail-close한다. */
-async function expectNoFeatureCollectionRequestDuring(
+function isFeatureCollectionRequest(request: Request): boolean {
+  if (request.method() !== "GET") return false;
+  const path = apiPathFromUrl(request.url());
+  return (
+    path === ADMIN_FEATURES_IN_BOUNDS_PATH ||
+    path === "/v1/admin/features" ||
+    path === "/v1/features" ||
+    path === "/v1/features/in-bounds"
+  );
+}
+
+/**
+ * reset은 cache hit이면 HTTP가 없고, stale/ops-live invalidation이면 refetch한다.
+ * 두 경로를 모두 허용하되 reset이 촉발한 collection request가 있다면 응답까지 회수해
+ * 호출 계약과 최종 DOM을 그 응답에 맞춰 검증할 수 있게 한다.
+ */
+async function captureFeatureCollectionResponsesDuring(
   page: Page,
   action: () => Promise<void>,
-): Promise<void> {
-  const observed: string[] = [];
+): Promise<Response[]> {
+  const observed: Request[] = [];
   const onRequest = (request: Request) => {
-    if (request.method() !== "GET") return;
-    const path = apiPathFromUrl(request.url());
-    if (
-      path === ADMIN_FEATURES_IN_BOUNDS_PATH ||
-      path === "/v1/admin/features" ||
-      path === "/v1/features" ||
-      path === "/v1/features/in-bounds"
-    ) {
-      observed.push(request.url());
-    }
+    if (isFeatureCollectionRequest(request)) observed.push(request);
   };
   page.on("request", onRequest);
   try {
     await action();
+    // React Query의 stale/background refetch effect가 reset render 직후 예약될 수 있다.
     await page.waitForTimeout(1_000);
   } finally {
     page.off("request", onRequest);
   }
-  expect(observed).toEqual([]);
+  const responses = await Promise.all(
+    observed.map(async (request) => {
+      const response = await request.response();
+      expect(
+        response,
+        `응답 없는 feature collection GET: ${request.url()}`,
+      ).not.toBeNull();
+      return response!;
+    }),
+  );
+  return responses;
 }
 
 function serverClusterSignature(cluster: AdminFeatureMapCluster): string {
@@ -304,19 +377,64 @@ function serverClusterSignature(cluster: AdminFeatureMapCluster): string {
   ]);
 }
 
-async function readServerClusterSignatures(page: Page): Promise<string[]> {
-  return page.locator(SERVER_CLUSTER_MARKER).evaluateAll((elements) =>
-    elements
-      .map((element) => {
-        const dataset = (element as HTMLElement).dataset;
-        return JSON.stringify([
-          dataset.clusterKey ?? "",
-          dataset.featureCount ?? "",
-          dataset.lon ?? "",
-          dataset.lat ?? "",
-        ]);
-      })
-      .sort(),
+async function serverClustersMatchRenderedState(
+  page: Page,
+  clusters: readonly AdminFeatureMapCluster[],
+): Promise<boolean> {
+  return page.evaluate(
+    ({ clusters, mapSelector, markerSelector }) => {
+      const container = document.querySelector(mapSelector) as
+        (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+      const map = container?._maplibreMap;
+      if (!container || !map) return false;
+
+      const elements = Array.from(
+        document.querySelectorAll<HTMLElement>(markerSelector),
+      );
+      if (elements.length !== clusters.length) return false;
+      const byKey = new Map<string, HTMLElement>();
+      for (const element of elements) {
+        const key = element.dataset.clusterKey;
+        if (!key || byKey.has(key)) return false;
+        byKey.set(key, element);
+      }
+
+      const containerRect = container.getBoundingClientRect();
+      for (const cluster of clusters) {
+        const element = byKey.get(cluster.cluster_key);
+        if (!element) return false;
+        if (
+          element.getAttribute("aria-label") !==
+            `feature 클러스터 ${cluster.feature_count}건` ||
+          element.textContent !==
+            (cluster.feature_count >= 1_000_000
+              ? `${(cluster.feature_count / 1_000_000).toFixed(1)}M`
+              : cluster.feature_count >= 10_000
+                ? `${Math.round(cluster.feature_count / 1000)}k`
+                : cluster.feature_count >= 1000
+                  ? `${(cluster.feature_count / 1000).toFixed(1)}k`
+                  : String(cluster.feature_count))
+        ) {
+          return false;
+        }
+        const expected = map.project([cluster.lon, cluster.lat]);
+        const rect = element.getBoundingClientRect();
+        const actualX = rect.left + rect.width / 2 - containerRect.left;
+        const actualY = rect.top + rect.height / 2 - containerRect.top;
+        if (
+          Math.abs(actualX - expected.x) > 1.5 ||
+          Math.abs(actualY - expected.y) > 1.5
+        ) {
+          return false;
+        }
+      }
+      return true;
+    },
+    {
+      clusters,
+      mapSelector: MAP_CONTAINER,
+      markerSelector: SERVER_CLUSTER_MARKER,
+    },
   );
 }
 
@@ -325,11 +443,12 @@ async function waitForExactServerClusters(
   page: Page,
   clusters: readonly AdminFeatureMapCluster[],
 ): Promise<void> {
-  const expected = clusters.map(serverClusterSignature).sort();
-  expect(expected.length).toBeGreaterThan(0);
+  expect(clusters.length).toBeGreaterThan(0);
   await expect
-    .poll(async () => readServerClusterSignatures(page), { timeout: 30_000 })
-    .toEqual(expected);
+    .poll(async () => serverClustersMatchRenderedState(page, clusters), {
+      timeout: 30_000,
+    })
+    .toBe(true);
 }
 
 function expectedPointFeatureIds(
@@ -386,13 +505,30 @@ async function pointMarkerForFeatureId(
   return markers.nth(indexes[0]);
 }
 
+async function coincidentPopupRowForFeatureId(
+  page: Page,
+  featureId: string,
+): Promise<Locator> {
+  const rows = page.locator(".maplibregl-popup button");
+  const indexes = await rows.evaluateAll((elements, expectedId) => {
+    const matches: number[] = [];
+    for (const [index, element] of elements.entries()) {
+      if ((element as HTMLElement).dataset.featureId === expectedId) {
+        matches.push(index);
+      }
+    }
+    return matches;
+  }, featureId);
+  expect(indexes).toHaveLength(1);
+  return rows.nth(indexes[0]);
+}
+
 async function readMapBounds(
   page: Page,
 ): Promise<{ e: number; n: number; s: number; w: number } | null> {
   return page.evaluate((sel) => {
     const container = document.querySelector(sel) as
-      | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
-      | null;
+      (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
     const map = container?._maplibreMap;
     if (!map) return null;
     const bounds = map.getBounds();
@@ -409,18 +545,10 @@ function expectRequestBoundsToMatchMap(
   requested: InBoundsBbox,
   bounds: { e: number; n: number; s: number; w: number },
 ): void {
-  expect(Math.abs(requested.minLon - bounds.w)).toBeLessThan(
-    REQUEST_BBOX_EPS,
-  );
-  expect(Math.abs(requested.minLat - bounds.s)).toBeLessThan(
-    REQUEST_BBOX_EPS,
-  );
-  expect(Math.abs(requested.maxLon - bounds.e)).toBeLessThan(
-    REQUEST_BBOX_EPS,
-  );
-  expect(Math.abs(requested.maxLat - bounds.n)).toBeLessThan(
-    REQUEST_BBOX_EPS,
-  );
+  expect(Math.abs(requested.minLon - bounds.w)).toBeLessThan(REQUEST_BBOX_EPS);
+  expect(Math.abs(requested.minLat - bounds.s)).toBeLessThan(REQUEST_BBOX_EPS);
+  expect(Math.abs(requested.maxLon - bounds.e)).toBeLessThan(REQUEST_BBOX_EPS);
+  expect(Math.abs(requested.maxLat - bounds.n)).toBeLessThan(REQUEST_BBOX_EPS);
 }
 
 /** DOM의 "center {lon}, {lat} · z {zoom}"에서 viewport를 읽는다(Zustand가 렌더). */
@@ -541,19 +669,43 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     const placeBody =
       (await placeResponse.json()) as AdminFeaturesInBoundsResponse;
     expect(placeBody.data.mode).toBe("clusters");
+    expect(
+      placeBody.data.clusters.map(serverClusterSignature).sort(),
+      "place 추가 전후 server cluster 집합이 달라야 reset 수렴을 검증할 수 있음",
+    ).not.toEqual(initialBody.data.clusters.map(serverClusterSignature).sort());
     await waitForMapIdle(page);
     await waitForExactServerClusters(page, placeBody.data.clusters);
     await expect(reset).toBeEnabled(T);
 
-    await expectNoFeatureCollectionRequestDuring(page, async () => {
-      await reset.click();
-      await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
-      await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
-      await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
-      await expect(reset).toBeDisabled(T);
-      await waitForMapIdle(page);
-      await waitForExactServerClusters(page, initialBody.data.clusters);
-    });
+    const resetResponses = await captureFeatureCollectionResponsesDuring(
+      page,
+      async () => {
+        await reset.click();
+        await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
+        await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
+        await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
+        await expect(reset).toBeDisabled(T);
+        await waitForMapIdle(page);
+      },
+    );
+    let resetBody = initialBody;
+    for (const response of resetResponses) {
+      expect(isAdminFeaturesInBounds(response)).toBe(true);
+      if (!isAdminFeaturesInBounds(response)) continue;
+      expect(response.status()).toBe(200);
+      const request = inBoundsBbox(response);
+      expect(request.zoom).not.toBeNull();
+      expect(request.zoom as number).toBeLessThanOrEqual(13);
+      expect(request.kinds.join(",")).toBe("weather,notice");
+      resetBody = (await response.json()) as AdminFeaturesInBoundsResponse;
+      expect(resetBody.data.mode).toBe("clusters");
+    }
+    const resetBounds = await readMapBounds(page);
+    expect(resetBounds).not.toBeNull();
+    for (const response of resetResponses.filter(isAdminFeaturesInBounds)) {
+      expectRequestBoundsToMatchMap(inBoundsBbox(response), resetBounds!);
+    }
+    await waitForExactServerClusters(page, resetBody.data.clusters);
   });
 
   for (const [name, lon, lat, zoom] of A_VIEWS) {
@@ -691,8 +843,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
           isAdminFeaturesInBounds(response) &&
           inBoundsBbox(response).zoom !== null &&
           (inBoundsBbox(response).zoom as number) > 13 &&
-          inBoundsBbox(response).kinds.join(",") ===
-            "weather,notice,place",
+          inBoundsBbox(response).kinds.join(",") === "weather,notice,place",
         { timeout: FLOW_TIMEOUT },
       );
       await placeChip.click();
@@ -713,10 +864,13 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       await expect(filter.getByRole("button", { name: "초기화" })).toBeEnabled(
         T,
       );
+      expect(
+        expectedPointFeatureIds(combinedBody.data.items),
+        "place 추가 전후 point Feature ID 집합이 달라야 reset 수렴을 검증할 수 있음",
+      ).not.toEqual(expectedPointFeatureIds(defaultBody.data.items));
 
-      // 방금 채운 default query key로 reset하면 staleTime 안 cache hit여야 한다. 새 request가
-      // 없어도 전체 marker ID 집합이 combined→default로 exact 교체돼야 한다.
-      await expectNoFeatureCollectionRequestDuring(
+      // cache hit이면 HTTP 없이, stale/ops-live invalidation이면 refetch 뒤 수렴해야 한다.
+      const resetResponses = await captureFeatureCollectionResponsesDuring(
         page,
         async () => {
           await filter.getByRole("button", { name: "초기화" }).click();
@@ -727,18 +881,33 @@ test.describe("/features live — map input round-trip (read-only)", () => {
             filter.getByRole("button", { name: "초기화" }),
           ).toBeDisabled(T);
           await waitForMapIdle(page);
-          await waitForExactPointMarkers(page, defaultBody.data.items);
-          await expect
-            .poll(async () => readFeatureCount(page), T)
-            .toBe(defaultBody.data.items.length);
         },
       );
+      let resetBody = defaultBody;
+      for (const response of resetResponses) {
+        expect(isAdminFeaturesInBounds(response)).toBe(true);
+        if (!isAdminFeaturesInBounds(response)) continue;
+        expect(response.status()).toBe(200);
+        const request = inBoundsBbox(response);
+        expect(request.zoom).not.toBeNull();
+        expect(request.zoom as number).toBeGreaterThan(13);
+        expect(request.kinds.join(",")).toBe("weather,notice");
+        resetBody = (await response.json()) as AdminFeaturesInBoundsResponse;
+        expect(resetBody.data.mode).toBe("items");
+      }
+      await waitForExactPointMarkers(page, resetBody.data.items);
+      await expect
+        .poll(async () => readFeatureCount(page), T)
+        .toBe(resetBody.data.items.length);
 
       // 백엔드 라운드트립: UI와 같은 bounds에서 place-only/combined/all 비교.
       const bounds = await readMapBounds(page);
       expect(bounds).not.toBeNull();
       expectRequestBoundsToMatchMap(inBoundsBbox(defaultResponse), bounds!);
       expectRequestBoundsToMatchMap(inBoundsBbox(combinedResponse), bounds!);
+      for (const response of resetResponses.filter(isAdminFeaturesInBounds)) {
+        expectRequestBoundsToMatchMap(inBoundsBbox(response), bounds!);
+      }
       const placeOnly = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
         adminInBoundsPath(bounds!, SEOUL.zoom, ["place"]),
@@ -819,7 +988,9 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         (await mapResponse.json()) as AdminFeaturesInBoundsResponse;
       expect(mapBody.data.mode).toBe("items");
       expect(
-        mapBody.data.items.some((item) => item.feature_id === target!.feature_id),
+        mapBody.data.items.some(
+          (item) => item.feature_id === target!.feature_id,
+        ),
       ).toBe(true);
       await waitForMapIdle(page);
       await waitForExactPointMarkers(page, mapBody.data.items);
@@ -855,6 +1026,29 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         timeout: FLOW_TIMEOUT,
       });
       await pointMarker.click();
+      const popupOpened = await Promise.race([
+        detailPromise.then(() => false),
+        page
+          .waitForFunction(
+            (featureId) =>
+              Array.from(
+                document.querySelectorAll<HTMLElement>(
+                  ".maplibregl-popup button",
+                ),
+              ).some((element) => element.dataset.featureId === featureId),
+            adminTarget!.feature_id,
+            { timeout: 5_000 },
+          )
+          .then(() => true)
+          .catch(() => false),
+      ]);
+      if (popupOpened) {
+        const popupRow = await coincidentPopupRowForFeatureId(
+          page,
+          adminTarget!.feature_id,
+        );
+        await popupRow.click();
+      }
       const detailResponse = await detailPromise;
       expect(detailResponse.status()).toBe(200);
       const detail =
