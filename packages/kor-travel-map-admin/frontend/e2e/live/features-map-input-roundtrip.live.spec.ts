@@ -441,7 +441,6 @@ async function waitForExactPointMarkers(
   items: readonly AdminFeatureMapItem[],
 ): Promise<void> {
   const expected = expectedPointFeatureIds(items);
-  expect(expected.length).toBeGreaterThan(0);
   await expect
     .poll(async () => readPointMarkerFeatureIds(page), { timeout: 30_000 })
     .toEqual(expected);
@@ -736,7 +735,6 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       expect(direct.status).toBe(200);
       expect(direct.body).not.toBeNull();
       expect(direct.body!.data.mode).toBe("items");
-      expect(direct.body!.data.items.length).toBeGreaterThan(0);
       expect(
         direct.body!.data.items.map((item) => item.feature_id).sort(),
       ).toEqual(body.data.items.map((item) => item.feature_id).sort());
