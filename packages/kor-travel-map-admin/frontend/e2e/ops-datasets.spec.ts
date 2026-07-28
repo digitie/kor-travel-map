@@ -30,6 +30,10 @@ type FeatureUpdateRequestCreatedRecord =
   components["schemas"]["FeatureUpdateRequestCreatedRecord"];
 type FeatureUpdateRequestRecord =
   components["schemas"]["FeatureUpdateRequestRecord"];
+type PipelineOverviewResponse =
+  components["schemas"]["PipelineOverviewResponse"];
+type PipelineExecutionsListResponse =
+  components["schemas"]["PipelineExecutionsListResponse"];
 type ProviderRefreshPolicyRecord =
   components["schemas"]["ProviderRefreshPolicyRecord"];
 type ProviderRefreshPolicyUpsertRequest =
@@ -62,6 +66,30 @@ const FRESH_AT = new Date().toISOString();
 
 function makeMeta(requestId: string): Meta {
   return { duration_ms: 1, request_id: requestId };
+}
+
+function makePipelineOverviewResponse(): PipelineOverviewResponse {
+  return {
+    data: {
+      checked_at: "2026-07-14T10:00:00.000Z",
+      dagster: {
+        status: "ok",
+        dagster_url: "http://dagster.example:12702",
+        graphql_url: "http://dagster.example:12702/graphql",
+        version: "1.13.7",
+        run_counts: {},
+        recent_runs: [],
+        schedule_count: 0,
+        sensor_count: 0,
+        sensors: [],
+        errors: [],
+      },
+      operations_by_status: {},
+      active_operations: 0,
+      failed_operations_24h: 0,
+    },
+    meta: makeMeta("e2e-pipeline-prefetch"),
+  };
 }
 
 type OpsDatasetFreshness = components["schemas"]["OpsDatasetFreshness"];
@@ -719,6 +747,36 @@ async function mockPipelineRequests(
   await page.route("**/api/proxy/v1/ops/pipeline/**", async (route) => {
     const request = route.request();
     const pathname = apiPathname(new URL(request.url()));
+    if (
+      pathname === "/v1/ops/pipeline/overview" &&
+      request.method() === "GET"
+    ) {
+      // production Next.js는 shell의 pipeline 링크를 background prefetch한다.
+      // 이 조회는 dataset 조작 계약과 무관하지만 backend 격리 범위에는 포함한다.
+      await fulfillJson(route, makePipelineOverviewResponse());
+      return;
+    }
+    if (
+      pathname === "/v1/ops/pipeline/executions" &&
+      request.method() === "GET"
+    ) {
+      const response: PipelineExecutionsListResponse = {
+        data: {
+          canonical_url: pathname,
+          items: [],
+        },
+        meta: {
+          ...makeMeta("e2e-pipeline-executions-prefetch"),
+          page: {
+            page_size: 50,
+            next_cursor: null,
+            total: null,
+          },
+        },
+      };
+      await fulfillJson(route, response);
+      return;
+    }
     if (
       pathname === "/v1/ops/pipeline/requests" &&
       request.method() === "POST"

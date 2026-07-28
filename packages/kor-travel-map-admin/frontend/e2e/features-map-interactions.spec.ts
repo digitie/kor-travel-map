@@ -509,6 +509,22 @@ test.describe("/features map interactions", () => {
     await expect(
       page.getByRole("button", { name: new RegExp(MOCK_NAME) }),
     ).toBeVisible();
+    // production build의 VWorld raster worker는 feature marker가 보인 뒤에도 타일을
+    // 마저 읽을 수 있다. 이때 늦은 map idle updater가 아래 인위적 sourcedata 계측
+    // 창에 섞이지 않도록 실제 tile 안정화를 기다린다.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const container = document.querySelector(
+            '[data-testid="map-canvas-container"]',
+          ) as (HTMLElement & {
+            _maplibreMap?: import("maplibre-gl").Map;
+          }) | null;
+          const map = container?._maplibreMap;
+          return Boolean(map?.areTilesLoaded() && !map.isMoving());
+        }),
+      )
+      .toBe(true);
 
     const calls = await page.evaluate(async (id) => {
       const container = document.querySelector(
