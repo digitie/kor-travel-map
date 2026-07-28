@@ -964,8 +964,11 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await expect(row).toContainText("01070300");
 
         await row.getByRole("button", { name: "preview" }).click();
-        await expect(page.getByText("Feature 상세").last()).toBeVisible(T);
+        await expect(
+          page.getByText(FEATURE_ID, { exact: true }),
+        ).toBeVisible(T);
         await expect(page.getByText(CREATE_NAME).last()).toBeVisible(T);
+        await expect(page.getByRole("link", { name: "편집" })).toBeVisible(T);
 
         await row.getByRole("link", { name: "detail" }).click();
         await expect(page).toHaveURL(
