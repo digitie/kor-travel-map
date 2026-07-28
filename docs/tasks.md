@@ -34,7 +34,8 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
+  - b0: [ ] `T-VN-48D`(Live 증거 경계·최종 리뷰) →
+    [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
     [ ] `T-VN-49D`(React 구조 debt)
   - b1: [ ] `T-VN-11A` → [ ] `T-VN-11B`(service batch) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
@@ -147,6 +148,21 @@ barrier로 직렬화한다.
     대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
 
 ## Lane B 상세 — b0 선행 하드닝
+
+### T-VN-48 — mocked Playwright drift 제거
+
+- [x] T-VN-48A~C — 최초 273-test baseline의 deterministic drift 89건을
+  Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별로 제거했다.
+- [ ] T-VN-48D — 구현과 exact `45e2161d` mocked serial/CI-parallel gate는 각각
+  **274/274 passed, expected failure/flake/skip 0건**으로 끝났다. 다음 두 gate가 남았다.
+  - 보존 실데이터 clone의 exact candidate preflight는 본 acceptance 2/2와 recovery-only 2/2,
+    owned residue 0을 확인했지만 ad-hoc 출력이라 durable evidence가 아니다.
+  - production 전용 `run-admin-feature-live-acceptance.sh`는 shared prod DB를 mutation하므로
+    아래 R1과 충돌한다. prod mutation 전에 격리 clone용 trusted evidence runner를 마련하거나,
+    random-owned fixture·startup migration 없음·완전 cleanup을 강제하는 제한 예외를 명시적으로
+    확정해 모순을 먼저 해소한다.
+  - Live durable evidence, 적대 리뷰 2명 P0/P1/P2 0건, 최신 main rebase·Claude PR 사후 감사,
+    PR/CI green/merge까지 끝난 뒤에만 `tasks-done.md`로 옮긴다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 
