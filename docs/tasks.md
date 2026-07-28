@@ -19,7 +19,7 @@
 barrier로 직렬화한다.
 
 - **Lane A — cross-repo 계약·운영·데이터 품질**
-  - a0: [ ] `T-VN-H07A`(Map #814 재감사·landing) →
+  - a0: [x] `T-VN-H07A`(Map #814 재감사·landing) →
     [ ] `T-VN-H07B`(PinVi #403 재감사·landing) →
     [ ] `T-VN-H07D`(#815 admin snapshot/freshness) →
     [ ] `T-VN-H07C`(#812 manifest v5)
@@ -384,11 +384,13 @@ Map #814와 PinVi #403은 각각 최신 main보다 85/13 commits 뒤처졌고, M
 T-VN-05R 계열의 유사 schema assertion이 추가됐다. 오래된 task 문서 commit을 그대로 재생하지
 않고 residual contract만 남긴다.
 
-- [ ] T-VN-H07A — **Map #814 residual contract 재감사·landing**
+- [x] T-VN-H07A — **Map #814 residual contract 재감사·landing** (PR #814 merged @ 259a9ec5)
 
   최신 main에 rebase해 stale `tasks.md` commit과 이미 존재하는 union/additionalProperties
-  assertion을 제거한다. 남는 required/type/enum/exact property 검사가 non-tautological인지
-  적대 리뷰어 2명이 다시 확인한 뒤 #814를 갱신·머지한다.
+  assertion을 제거했다. 남는 field-level(required/type/enum/format/const/exact property/$ref)
+  검사가 non-tautological·non-redundant인지 적대 리뷰어 2명이 실제 pydantic 생성 스키마·
+  `openapi.user.json`과 대조해 land 판정한 뒤 #814를 갱신·머지했다. n150 CI-parity가 base
+  drift(0066 `external_component_id` required)를 검출해 현행 계약으로 재조정. tasks-done 참조.
 
 - [ ] T-VN-H07B — **PinVi #403 residual contract 재감사·landing**
 

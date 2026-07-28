@@ -2,6 +2,33 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-28 (claude) — Lane A a0 T-VN-H07A: Map #814 residual contract 재감사·landing
+
+**결론**: 오래 열린 Map PR #814(4 commits, base 95 commits behind)를 최신 main 위 residual
+contract test로 재감사·landing했다(squash @ 259a9ec5). 착수 시 worktree main이 origin/main보다
+46 commits 뒤처져 stale tasks.md(구 b-lane only 구조)를 읽었고, origin/main sync 후 정본
+Lane A a0=T-VN-H07A를 확인했다.
+
+- **재감사(제거)**: stale `docs/tasks.md` commit 2건, main T-VN-05R가 이미 소유한 union
+  discriminator/mapping/oneOf 구조 assertion. per-variant `feature_kind` const로 동등 이상
+  커버해 구조 검사 제거가 안전함을 확인.
+- **남긴 잔여(비-tautological)**: curated feature variant 7·detail 5·PublicCuratedAddress·
+  Collection/Item/CurationFeature/FeatureCurationGroup의 exact property/required 집합 +
+  필드별 type/format/enum/const/$ref. main은 subset·disjoint·structural만 갖고 field-level 부재.
+- **base drift 재조정**: n150 CI-parity pytest가 `PublicCurationItemView`에 migration 0066
+  (curation component identity)로 required `external_component_id: str`이 추가된 것을 검출 →
+  현행 생성 OpenAPI 기준으로 고정.
+- **적대 리뷰어 2명**: tautology·redundancy 렌즈 + contract-fidelity 렌즈. 둘 다 전 schema를
+  실제 pydantic 스키마·checked-in `openapi.user.json`과 대조해 land 판정. 지적 2건(low):
+  (1) helper의 additionalProperties==False가 13개 schema에서 T-VN-05R와 중복이나 4개 curation
+  view에 대해선 신규 커버라 구조상 불가피 → 유지. (2) phones가 array 레벨만 고정 →
+  `phones.items.type=="string"` 추가 반영.
+- **검증**: n150 CI-parity(ruff/pytest) 11 green(rebase 후 재확인). GitHub CI lint/mypy/
+  lint-imports·openapi-drift·fixture-replay·frontend·pytest matrix·integration PostGIS green.
+  codex 병렬 +32 commits를 origin/main rebase로 반영(api source 무변경 확인 → 재drift 없음). PR #814.
+- **live 표면 주기**: test-only OpenAPI 계약 변경으로 admin-UI 표면이 없어, 실제 live 검증은
+  n150 게이트가 실제 생성 OpenAPI에 대해 계약을 실행하는 것으로 갈음(파괴적 UI e2e 해당 없음).
+
 ## 2026-07-28 (codex) — T-VN-45 features map Live 라운드트립·파괴적 write 복구
 
 **결론**: PR #871에서 `/features` 실데이터 spec을 실제 admin in-bounds/detail 계약과

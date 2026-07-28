@@ -3,6 +3,22 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-28 — Lane A a0 T-VN-H07A: Map #814 residual contract landing
+
+- [x] **T-VN-H07A** — 오래 열린 Map #814(base 95 commits behind)를 최신 main 위 residual로
+  재감사·landing했다(squash @ 259a9ec5). stale `docs/tasks.md` commit 2건과 main T-VN-05R가
+  이미 소유한 union discriminator/mapping/oneOf 구조 assertion을 제거하고, main에 없는
+  field-level 잔여만 남겼다: PinVi가 REST로 소비하는 curated feature variant 7·detail 5·
+  PublicCuratedAddress·PublicCurationCollection/Item/CurationFeature/FeatureCurationGroup
+  schema의 exact property/required 집합, 필드별 JSON type/format/enum/discriminator const/$ref
+  대상을 생성 OpenAPI 기준으로 고정. n150 CI-parity가 base drift(migration 0066
+  `external_component_id` required 추가)를 검출해 현행 계약으로 재조정했다. 적대적 리뷰어 2명
+  (tautology·redundancy / contract-fidelity)이 전 schema를 실제 pydantic 생성 스키마·
+  `openapi.user.json`과 대조해 land 판정했고, phones array element type 고정(nit)을 반영했다.
+  n150 pytest 11 green + GitHub CI(lint/mypy/lint-imports·openapi-drift·pytest matrix·
+  integration PostGIS) green. test-only OpenAPI 계약이라 admin-UI 표면 없음 — live 검증은 n150
+  게이트가 실제 생성 OpenAPI에 대해 계약을 실행하는 것으로 갈음. PR #814.
+
 ## 2026-07-28 — PR #869 후 task 전면 재감사
 
 - [x] **T-VN-REAUDIT-0728** — `tasks.md`·완료 이력·실코드와 Map/PinVi/

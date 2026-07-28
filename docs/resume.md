@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-28 (claude) — Lane A a0 T-VN-H07A 완료: Map #814 residual contract landing
+
+**다음 한 작업**: Lane A a0 다음 항목 `T-VN-H07B`(PinVi #403 재감사·landing) — 최신 PinVi main에
+rebase하고 H07A의 실제 user OpenAPI SHA와 대조해 이미 흡수된 assertion 제거, PinVi가 읽는 필드만
+typed consumer contract로 남겨 #403 갱신·머지. 이어 H07D(#815) → H07C(#812).
+
+- **완료(이번 세션)**: `T-VN-H07A` — #814를 최신 main(259a9ec5) 위 residual로 재감사·landing.
+  중복(union 구조·stale tasks.md) 제거, field-level 잔여만 유지. 적대 리뷰어 2명 land, n150
+  CI-parity 11 green(0066 external_component_id drift 재조정 포함), GitHub CI green. PR #814.
+- **주의(재발 방지)**: 착수 시 worktree main이 origin/main보다 46 commits 뒤처져 stale
+  tasks.md(구 b-lane only 구조)를 읽고 Lane B를 건드릴 뻔했다. origin/main sync 후 a0/a1 Lane A
+  구조가 정본. 작업 중 codex 병렬 진행분(+32 commits)을 origin/main rebase로 최신 유지.
+- **워크플로우**: PR은 머지 직전에만 열고 그 전엔 리모트 브랜치에 자주 커밋(사용자 지시).
+
 ## 2026-07-28 (codex) — Lane B T-VN-45 구현·파괴적 Live 완료
 
 **다음 한 작업**: PR #871 exact head를 적대적 리뷰어 2명이 재검토하고 전체 gate·GitHub
