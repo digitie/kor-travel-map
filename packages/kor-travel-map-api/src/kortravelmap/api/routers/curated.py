@@ -269,8 +269,37 @@ class CuratedFeatureResponse(BaseModel):
     meta: Meta
 
 
+class CuratedFeatureDetailFeatureSnapshotView(BaseModel):
+    """detail-snapshot item의 feature 투영 (T-VN-H07D).
+
+    소비자 PinVi가 이 안에서 `name`/`lon`/`lat`/`address`를 직접 읽는다
+    (`services/admin_pois.py` label/coord/address 추출기, `api/v1/search.py`의
+    `feature_snapshot["name"]` SQL 술어). 생성부가 고정 key로 만들므로 typed view로 고정한다.
+    `address`/`detail`은 provider 원본 투영이라 free-form으로 남긴다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    name: str
+    category: str
+    kind: str
+    lon: float | None
+    lat: float | None
+    sido_code: str | None
+    sigungu_code: str | None
+    legal_dong_code: str | None
+    address: dict[str, Any]
+    detail: dict[str, Any]
+
+
 class CuratedFeatureDetailItemView(BaseModel):
-    """curated feature detail item."""
+    """curated feature detail item.
+
+    T-VN-H07D: `day_index`/`memo`/`source_record_key`는 생성부가 **항상** 내보내는 key인데
+    default 때문에 스펙상 optional로 표기됐다. snapshot view와 같은 규약(모든 key는 항상 존재,
+    값만 nullable)으로 맞춰 default를 제거한다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -278,10 +307,10 @@ class CuratedFeatureDetailItemView(BaseModel):
     feature_id: str
     relation: str
     sort_order: int
-    day_index: int | None = None
-    memo: str | None = None
-    feature_snapshot: dict[str, Any]
-    source_record_key: str | None = None
+    day_index: int | None
+    memo: str | None
+    feature_snapshot: CuratedFeatureDetailFeatureSnapshotView
+    source_record_key: str | None
 
 
 class CuratedFeatureDetailThemeView(BaseModel):
@@ -328,8 +357,8 @@ class CuratedFeatureDetailSnapshotView(BaseModel):
     T-VN-H07D: `theme`/`content`/`source`는 과거 free-form ``dict[str, Any]``이라 OpenAPI에
     `{"type": "object"}`로만 노출됐고, 소비자(PinVi)가 실제로 의존하는 plan-level 필드를 계약으로
     고정할 방법이 없었다. 생성부가 고정 key로 만드는 값이므로 typed view로 전환한다.
-    ``items[].feature_snapshot``은 소비자가 통째로 저장만 하고 내부를 읽지 않으므로 opaque
-    ``dict``로 유지한다.
+    ``items[].feature_snapshot``도 소비자가 내부 key(`name`/`lon`/`lat`/`address`)를 실제로
+    읽으므로 함께 typed view로 고정한다.
     """
 
     model_config = ConfigDict(extra="forbid")

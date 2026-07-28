@@ -16,13 +16,14 @@ PinVi 런타임(`apps/api/app/services/notice_plan.py` curated import)이 실제
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
 from kortravelmap.api.app import create_app
+from kortravelmap.api.deps import get_session
 from kortravelmap.api.route_policy import _iter_flattened_routes, _resolve_route
 from kortravelmap.api.routers.curated import (
     CuratedFeatureDetailContentView,
@@ -35,11 +36,9 @@ from kortravelmap.api.settings import ApiSettings
 
 # 저장소 루트의 `tests/unit/test_curated_repo.py` fixture(_FakeSession/_feature_row)를 재사용해
 # 실제 생성 payload로 view 정합을 검증한다(같은 생성부를 두 번 구현하지 않는다).
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-from tests.unit.test_curated_repo import (  # noqa: E402
+# 루트 `pyproject.toml`의 `pythonpath = ["."]`가 이미 저장소 루트를 올려주므로 별도
+# `sys.path` 조작은 필요 없다. 이 세 심볼은 API 패키지 suite도 함께 쓰는 공유 fixture다.
+from tests.unit.test_curated_repo import (
     _CURATED_ID,
     _FakeSession,
     _feature_row,
@@ -81,12 +80,46 @@ _SCHEMA_CONTRACTS: dict[str, dict[str, dict[str, Any]]] = {
         "feature_id": {"type": "string", "required": True, "nullable": False},
         "relation": {"type": "string", "required": True, "nullable": False},
         "sort_order": {"type": "integer", "required": True, "nullable": False},
-        "day_index": {"type": "integer", "required": False, "nullable": True},
-        "memo": {"type": "string", "required": False, "nullable": True},
-        # 소비자가 통째로 저장만 하고 내부를 읽지 않으므로 opaque object로 유지한다.
-        "feature_snapshot": {"type": "object", "required": True, "nullable": False},
-        "source_record_key": {"type": "string", "required": False, "nullable": True},
+        "day_index": {"type": "integer", "required": True, "nullable": True},
+        "memo": {"type": "string", "required": True, "nullable": True},
+        "source_record_key": {"type": "string", "required": True, "nullable": True},
+        # feature_snapshot은 `$ref`라 아래 _ITEM_REFS가 대상 view를 고정한다.
     },
+    # PinVi가 name/lon/lat/address를 직접 읽는다(admin_pois 추출기 + search.py SQL 술어).
+    "CuratedFeatureDetailFeatureSnapshotView": {
+        "feature_id": {"type": "string", "required": True, "nullable": False},
+        "name": {"type": "string", "required": True, "nullable": False},
+        "category": {"type": "string", "required": True, "nullable": False},
+        "kind": {"type": "string", "required": True, "nullable": False},
+        "lon": {"type": "number", "required": True, "nullable": True},
+        "lat": {"type": "number", "required": True, "nullable": True},
+        "sido_code": {"type": "string", "required": True, "nullable": True},
+        "sigungu_code": {"type": "string", "required": True, "nullable": True},
+        "legal_dong_code": {"type": "string", "required": True, "nullable": True},
+        # provider 원본 투영이라 free-form을 유지한다.
+        "address": {"type": "object", "required": True, "nullable": False},
+        "detail": {"type": "object", "required": True, "nullable": False},
+    },
+}
+
+_ITEM_REFS: dict[str, str] = {
+    "feature_snapshot": "CuratedFeatureDetailFeatureSnapshotView",
+}
+
+# 생성부(`curated_repo._feature_detail_snapshot`)가 만드는 key 집합 — view 정의와 독립적으로
+# 고정해 "생성부가 바뀌었는데 view도 같이 바뀌어 통과"하는 경로를 막는다.
+_PRODUCER_KEYS: dict[str, set[str]] = {
+    "theme": {"theme_slug", "theme_name"},
+    "content": {
+        "title",
+        "summary",
+        "destination_name",
+        "region_code",
+        "category",
+        "curation_status",
+        "reuse_policy",
+    },
+    "source": {"provider", "dataset_key", "source_name", "source_url"},
 }
 
 # snapshot 컨테이너: 스칼라 + 하위 view `$ref` 결합까지 고정한다.
@@ -181,6 +214,19 @@ def test_admin_detail_snapshot_container_binds_typed_payload_views() -> None:
     assert items.get("type") == "array"
     assert str(items["items"].get("$ref", "")).rsplit("/", 1)[-1] == "CuratedFeatureDetailItemView"
 
+    # item → feature_snapshot 도 typed view로 물려 있어야 한다(다시 free-form이 되면 실패).
+    item_schema = spec["components"]["schemas"]["CuratedFeatureDetailItemView"]
+    assert set(item_schema["properties"]) == (
+        set(_SCHEMA_CONTRACTS["CuratedFeatureDetailItemView"]) | set(_ITEM_REFS)
+    )
+    for field, target in _ITEM_REFS.items():
+        resolved, nullable = _resolve(
+            item_schema["properties"][field], f"CuratedFeatureDetailItemView.{field}"
+        )
+        assert str(resolved.get("$ref", "")).rsplit("/", 1)[-1] == target, (field, target)
+        assert nullable is False, field
+        assert field in set(item_schema.get("required", [])), field
+
 
 def test_pinvi_compatibility_alias_route_stays_registered() -> None:
     """PinVi가 호출하는 alias 경로를 라우트 등록 수준에서 고정한다.
@@ -204,18 +250,36 @@ def test_pinvi_compatibility_alias_route_stays_registered() -> None:
     assert _PINVI_ALIAS_PATH not in spec["paths"]
 
 
+# nullable 분기를 모두 태우는 override — 기본 fixture는 모든 nullable 필드가 채워져 있어
+# `summary`/`destination_name`/`region_code`/`source_url`/좌표 None 경로가 검증되지 않는다.
+_ALL_NULL_OVERRIDES: dict[str, Any] = {
+    "display_title": None,
+    "display_summary": None,
+    "metadata": {},
+    "source_url": None,
+    "sido_code": None,
+    "sigungu_code": None,
+    "legal_dong_code": None,
+    "lon": None,
+    "lat": None,
+    "address": {},
+}
+
+
 @pytest.mark.asyncio
-async def test_snapshot_view_accepts_repository_payload() -> None:
+@pytest.mark.parametrize("overrides", [{}, _ALL_NULL_OVERRIDES], ids=["populated", "all-null"])
+async def test_snapshot_view_accepts_repository_payload(overrides: dict[str, Any]) -> None:
     """생성부가 만든 실제 payload가 typed view를 그대로 통과하는지 확인한다.
 
     typed view는 `extra="forbid"`라 생성부가 key를 바꾸면 응답이 500으로 죽는다. 실제 생성
     경로(`curated_repo.get_curated_feature_detail_snapshot`)의 결과를 그대로 통과시켜
-    생성부↔view drift를 fail-closed 이전에 잡는다.
+    생성부↔view drift를 fail-closed 이전에 잡는다. nullable 분기까지 태워, non-null로 잘못
+    좁힌 필드가 운영 500이 되기 전에 잡는다.
     """
     from kortravelmap.infra import curated_repo
 
     snapshot = await curated_repo.get_curated_feature_detail_snapshot(
-        _FakeSession([_feature_row()]),
+        _FakeSession([_feature_row(**overrides)]),
         curated_feature_id=_CURATED_ID,
     )
     assert snapshot is not None
@@ -226,7 +290,52 @@ async def test_snapshot_view_accepts_repository_payload() -> None:
     assert isinstance(view.theme, CuratedFeatureDetailThemeView)
     assert isinstance(view.content, CuratedFeatureDetailContentView)
     assert isinstance(view.source, CuratedFeatureDetailSourceView)
-    # 생성부 dict key 집합 == view 필드 집합 (한쪽만 늘어나면 실패)
-    assert set(snapshot.theme) == set(CuratedFeatureDetailThemeView.model_fields)
-    assert set(snapshot.content) == set(CuratedFeatureDetailContentView.model_fields)
-    assert set(snapshot.source) == set(CuratedFeatureDetailSourceView.model_fields)
+    # 생성부 key 집합을 **view와 독립적인 리터럴**로 고정한다. view와 비교하면
+    # `_snapshot_view()` 호출이 이미 같은 것을 보장해 항상 참인 검사가 된다.
+    assert set(snapshot.theme) == _PRODUCER_KEYS["theme"]
+    assert set(snapshot.content) == _PRODUCER_KEYS["content"]
+    assert set(snapshot.source) == _PRODUCER_KEYS["source"]
+
+
+@pytest.mark.parametrize("path", [_SNAPSHOT_PATH, _PINVI_ALIAS_PATH], ids=["documented", "alias"])
+@pytest.mark.parametrize("overrides", [{}, _ALL_NULL_OVERRIDES], ids=["populated", "all-null"])
+def test_detail_snapshot_endpoint_serves_typed_payload(
+    path: str, overrides: dict[str, Any]
+) -> None:
+    """실제 endpoint를 태워 응답 직렬화까지 검증한다(문서 경로 + PinVi alias 둘 다).
+
+    스키마 핀과 생성부 정합만으로는 FastAPI `response_model` 재검증·envelope 직렬화 경로가
+    검증되지 않는다. 이 PR이 바로 그 response model을 바꿨으므로 HTTP 수준에서 고정한다.
+    """
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            public_api_key_required=False,
+            vworld_api_key=None,
+        )
+    )
+
+    async def _session() -> AsyncIterator[object]:
+        yield _FakeSession([_feature_row(**overrides)])
+
+    app.dependency_overrides[get_session] = _session
+    client = TestClient(app)
+
+    response = client.get(path.replace("{curated_feature_id}", _CURATED_ID))
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    data = body["data"]
+    assert set(data["theme"]) == _PRODUCER_KEYS["theme"]
+    assert set(data["content"]) == _PRODUCER_KEYS["content"]
+    assert set(data["source"]) == _PRODUCER_KEYS["source"]
+    assert set(data) == (
+        set(_SNAPSHOT_SCALARS) | set(_SNAPSHOT_REFS) | {"items"}
+    )
+    assert set(data["items"][0]) == (
+        set(_SCHEMA_CONTRACTS["CuratedFeatureDetailItemView"]) | set(_ITEM_REFS)
+    )
+    assert set(data["items"][0]["feature_snapshot"]) == set(
+        _SCHEMA_CONTRACTS["CuratedFeatureDetailFeatureSnapshotView"]
+    )
+    assert "meta" in body

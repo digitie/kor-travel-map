@@ -1,4 +1,9 @@
-"""``curated_repo`` 단위 테스트."""
+"""``curated_repo`` 단위 테스트.
+
+주의: `_FakeSession`/`_feature_row`/`_CURATED_ID`는 API 패키지 suite
+(`packages/kor-travel-map-api/tests/test_admin_curated_snapshot_contract.py`, T-VN-H07D)도
+공유한다 — 생성부 payload를 두 번 구현하지 않기 위함이다. 이름/시그니처 변경 시 그쪽도 함께 고친다.
+"""
 
 from __future__ import annotations
 
