@@ -161,7 +161,7 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   `후보 A/B` 대 `feature A/B`, 한국어 dialog name, 실제 principal actor와 Feature/curation
   API route·payload drift를 현행 UI 계약에 맞춘다.
 
-- [ ] T-VN-48C — **ops datasets·pipeline mocked 계약 정렬**
+- [x] T-VN-48C — **ops datasets·pipeline mocked 계약 정렬**
 
   `/v1/ops/datasets` list/detail/preview와 pipeline continuation·schedule recovery route mock을
   현행 canonical URL·principal 계약에 맞추고, stale legacy route가 다시 등록되면 실패시킨다.
