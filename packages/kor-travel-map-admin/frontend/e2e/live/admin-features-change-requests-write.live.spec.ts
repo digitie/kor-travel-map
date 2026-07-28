@@ -767,6 +767,16 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await expect(page.getByLabel("change place kind", { exact: true })).toBeVisible(T);
         await expect(page.getByLabel("change homepage url", { exact: true })).toBeVisible(T);
         await expect(page.getByLabel("change source url", { exact: true })).toBeVisible(T);
+        await page
+          .getByLabel("change detail JSON", { exact: true })
+          .locator("xpath=ancestor::details")
+          .locator("summary")
+          .click();
+        await page
+          .getByLabel("change address JSON", { exact: true })
+          .locator("xpath=ancestor::details")
+          .locator("summary")
+          .click();
         await expect(page.getByLabel("change detail JSON", { exact: true })).toBeVisible(T);
         await expect(page.getByLabel("change urls JSON", { exact: true })).toBeVisible(T);
         await expect(page.getByLabel("change address JSON", { exact: true })).toBeVisible(T);
@@ -805,6 +815,11 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await page.getByLabel("전화").fill("02-0000-0000");
         await page.getByLabel("홈페이지").fill("https://example.invalid/e2e");
         await page.getByLabel("소스").fill("https://example.invalid/source");
+        await page
+          .getByLabel("detail extra JSON")
+          .locator("xpath=ancestor::details")
+          .locator("summary")
+          .click();
         await page
           .getByLabel("detail extra JSON")
           .fill(JSON.stringify({ e2e_phase: "create", run_id: RUN_ID }));
