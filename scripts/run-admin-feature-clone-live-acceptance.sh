@@ -302,6 +302,7 @@ COPY (
       attribute.attnotnull::text || ':' ||
       attribute.attidentity::text || ':' ||
       attribute.attgenerated::text || ':' ||
+      COALESCE(attribute.attacl::text, '') || ':' ||
       COALESCE(pg_catalog.pg_get_expr(default_row.adbin, default_row.adrelid), '')
         AS definition
     FROM pg_catalog.pg_attribute AS attribute
@@ -320,6 +321,8 @@ COPY (
       concat_ws(
         ':',
         relation.relkind,
+        relation.relowner::regrole::text,
+        COALESCE(relation.relacl::text, ''),
         relation.relrowsecurity,
         relation.relforcerowsecurity,
         COALESCE(
@@ -380,7 +383,9 @@ COPY (
       namespace.nspname,
       routine.proname || ':' ||
         pg_catalog.pg_get_function_identity_arguments(routine.oid),
-      pg_catalog.pg_get_functiondef(routine.oid)
+      routine.proowner::regrole::text || ':' ||
+        COALESCE(routine.proacl::text, '') || ':' ||
+        pg_catalog.pg_get_functiondef(routine.oid)
     FROM pg_catalog.pg_proc AS routine
     JOIN pg_catalog.pg_namespace AS namespace
       ON namespace.oid = routine.pronamespace
@@ -397,6 +402,8 @@ COPY (
         type_row.typnotnull,
         type_row.typbasetype::regtype::text,
         type_row.typtypmod,
+        type_row.typowner::regrole::text,
+        COALESCE(type_row.typacl::text, ''),
         COALESCE(enum_values.labels, '')
       )
     FROM pg_catalog.pg_type AS type_row
@@ -463,6 +470,27 @@ COPY (
     JOIN pg_catalog.pg_namespace AS namespace
       ON namespace.oid = relation.relnamespace
     WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
+    UNION ALL
+    SELECT
+      'namespace',
+      namespace.nspname,
+      namespace.nspname,
+      namespace.nspowner::regrole::text || ':' ||
+        COALESCE(namespace.nspacl::text, '')
+    FROM pg_catalog.pg_namespace AS namespace
+    WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
+    UNION ALL
+    SELECT
+      'default_acl',
+      COALESCE(namespace.nspname, '<global>'),
+      default_acl.defaclrole::regrole::text || ':' ||
+        default_acl.defaclobjtype::text,
+      COALESCE(default_acl.defaclacl::text, '')
+    FROM pg_catalog.pg_default_acl AS default_acl
+    LEFT JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = default_acl.defaclnamespace
+    WHERE default_acl.defaclnamespace = 0
+       OR namespace.nspname IN ('feature', 'ops', 'provider_sync')
   )
   SELECT concat_ws(chr(31), kind, schema_name, object_name, definition)
   FROM objects
@@ -471,6 +499,78 @@ COPY (
 SQL
 )"
   psql_query "$query" | sha256sum | awk '{print $1}'
+}
+
+database_sha256() {
+  local query
+  query="$(cat <<'SQL'
+COPY (
+  WITH objects AS (
+    SELECT
+      'database'::text AS kind,
+      '<current>'::text AS object_name,
+      concat_ws(
+        ':',
+        database.encoding,
+        database.datlocprovider,
+        database.datistemplate,
+        database.datallowconn,
+        database.datconnlimit,
+        database.dattablespace,
+        database.datcollate,
+        database.datctype,
+        COALESCE(database.daticulocale, ''),
+        COALESCE(database.daticurules, ''),
+        COALESCE(database.datcollversion, ''),
+        database.datdba::regrole::text,
+        COALESCE(database.datacl::text, '')
+      ) AS definition
+    FROM pg_catalog.pg_database AS database
+    WHERE database.datname = current_database()
+    UNION ALL
+    SELECT
+      'database_setting',
+      CASE
+        WHEN setting.setrole = 0 THEN '<database>'
+        ELSE setting.setrole::regrole::text
+      END,
+      configuration.value
+    FROM pg_catalog.pg_db_role_setting AS setting
+    CROSS JOIN LATERAL unnest(setting.setconfig) AS configuration(value)
+    WHERE setting.setdatabase = (
+      SELECT oid
+      FROM pg_catalog.pg_database
+      WHERE datname = current_database()
+    )
+  )
+  SELECT concat_ws(chr(31), kind, object_name, definition)
+  FROM objects
+  ORDER BY kind, object_name, definition
+) TO STDOUT
+SQL
+)"
+  psql_query "$query" | sha256sum | awk '{print $1}'
+}
+
+extension_sha256() {
+  psql_query "
+    COPY (
+      SELECT concat_ws(
+        chr(31),
+        extension.extname,
+        extension.extowner::regrole::text,
+        namespace.nspname,
+        extension.extrelocatable,
+        extension.extversion,
+        COALESCE(extension.extconfig::text, ''),
+        COALESCE(extension.extcondition::text, '')
+      )
+      FROM pg_catalog.pg_extension AS extension
+      JOIN pg_catalog.pg_namespace AS namespace
+        ON namespace.oid = extension.extnamespace
+      ORDER BY extension.extname
+    ) TO STDOUT
+  " | sha256sum | awk '{print $1}'
 }
 
 content_sha256() {
@@ -491,8 +591,8 @@ SELECT CASE
   )
   ELSE format(
     'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
-    'COALESCE(bit_xor(hashtextextended(to_jsonb(row_value)::text, 0))::text, ''null'') || ' ||
-    'chr(31) || COALESCE(bit_xor(hashtextextended(to_jsonb(row_value)::text, ' ||
+    'COALESCE(bit_xor(hashtextextended(row_value::text, 0))::text, ''null'') || ' ||
+    'chr(31) || COALESCE(bit_xor(hashtextextended(row_value::text, ' ||
     '9223372036854775807))::text, ''null'') ' ||
     'FROM %I.%I AS row_value%s;',
     namespace.nspname || '.' || relation.relname,
@@ -510,6 +610,14 @@ SELECT CASE
         ' WHERE row_value.feature_id NOT LIKE %L ESCAPE %L',
         'e2e_live_acceptance::${run_id}::%',
         chr(92)
+      )
+      WHEN namespace.nspname = 'ops'
+        AND relation.relname = 'admin_auth_events'
+      THEN format(
+        ' WHERE row_value.request_id IS DISTINCT FROM %L' ||
+        ' AND row_value.request_id IS DISTINCT FROM %L',
+        'e2e_live_acceptance::${run_id}::auth::main',
+        'e2e_live_acceptance::${run_id}::auth::recovery'
       )
       ELSE ''
     END
@@ -570,6 +678,7 @@ write_snapshot() {
   local container_sha system_identifier system_sha
   local migration_head relation_count feature_total feature_non_deleted
   local active_owned nonterminal_owned schema_digest content_digest
+  local database_digest extension_digest
   container_sha="$(printf '%s' "$before_id" | sha256sum | awk '{print $1}')"
   system_identifier="$(psql_value "SELECT system_identifier::text FROM pg_control_system()")"
   system_sha="$(printf '%s' "$system_identifier" | sha256sum | awk '{print $1}')"
@@ -581,6 +690,8 @@ write_snapshot() {
   active_owned="$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e\\_live\\_acceptance::${run_id}::%' ESCAPE '\\' AND status <> 'deleted'")"
   nonterminal_owned="$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::${run_id}::%' ESCAPE '\\' AND state = 'pending'")"
   schema_digest="$(schema_sha256)"
+  database_digest="$(database_sha256)"
+  extension_digest="$(extension_sha256)"
   content_digest="$(content_sha256 "$run_id")"
   verify_clone_container
   [[ "$(docker inspect --format '{{.Id}}' "$DB_CONTAINER")" == "$before_id" ]] ||
@@ -604,6 +715,8 @@ write_snapshot() {
     --clone-system-identifier-sha256 "$system_sha" \
     --content-cutoff "$CONTENT_CUTOFF" \
     --content-sha256 "$content_digest" \
+    --database-sha256 "$database_digest" \
+    --extension-sha256 "$extension_digest" \
     --feature-non-deleted "$feature_non_deleted" \
     --feature-total "$feature_total" \
     --host-port "$DB_HOST_PORT" \
@@ -633,6 +746,8 @@ CHECKPOINT_SNAPSHOT=""
 RESTORED_CHECKPOINT_SNAPSHOT=""
 OLD_CHECKPOINT_DUMP=""
 VERIFICATION_DB=""
+VERIFICATION_DB_OWNED=0
+readonly VERIFICATION_STATE="$STATE_ROOT/checkpoint-scratch.json"
 BLOCKED_WRITTEN=0
 COMPLETE=0
 
@@ -819,25 +934,118 @@ finally:
 }
 
 drop_verification_database() {
-  [[ -n "$VERIFICATION_DB" ]] || return 0
-  [[ "$VERIFICATION_DB" =~ ^ktm_checkpoint_[0-9a-f]{12}$ ]] ||
+  (( VERIFICATION_DB_OWNED == 1 )) || return 0
+  [[ "$VERIFICATION_DB" == "ktm_checkpoint_verify" ]] ||
     die "checkpoint verification DB name is unsafe"
+  [[ "$(
+    state_helper read-scratch \
+      --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+      --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+      --path "$VERIFICATION_STATE"
+  )" == "$VERIFICATION_DB" ]] ||
+    die "checkpoint verification DB ownership state is invalid"
   db_name="$ORIGINAL_DB_NAME"
   PGPASSWORD="$db_password" docker exec -e PGPASSWORD "$DB_CONTAINER" \
     dropdb --if-exists --force -U "$db_user" "$VERIFICATION_DB"
+  state_helper clear-scratch \
+    --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+    --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+    --path "$VERIFICATION_STATE"
   VERIFICATION_DB=""
+  VERIFICATION_DB_OWNED=0
+}
+
+recover_verification_database() {
+  local database_exists
+  database_exists="$(
+    psql_value \
+      "SELECT count(*) FROM pg_database WHERE datname = 'ktm_checkpoint_verify'"
+  )"
+  if [[ -f "$VERIFICATION_STATE" && ! -L "$VERIFICATION_STATE" ]]; then
+    VERIFICATION_DB="$(
+      state_helper read-scratch \
+        --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+        --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+        --path "$VERIFICATION_STATE"
+    )"
+    VERIFICATION_DB_OWNED=1
+    if [[ "$database_exists" == "1" ]]; then
+      drop_verification_database
+    else
+      [[ "$database_exists" == "0" ]] ||
+        die "checkpoint verification DB cardinality is invalid"
+      state_helper clear-scratch \
+        --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+        --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+        --path "$VERIFICATION_STATE"
+      VERIFICATION_DB=""
+      VERIFICATION_DB_OWNED=0
+    fi
+  else
+    [[ "$database_exists" == "0" ]] ||
+      die "unowned checkpoint verification DB exists"
+  fi
+  [[ "$(
+    psql_value \
+      "SELECT count(*) FROM pg_database WHERE datname LIKE 'ktm_checkpoint_%'"
+  )" == "0" ]] ||
+    die "unexpected checkpoint verification DB exists"
+}
+
+copy_database_settings_to_verification() {
+  local statements
+  statements="$(
+    psql_query "
+      SELECT CASE
+        WHEN setting.setrole = 0 THEN format(
+          'ALTER DATABASE %I SET %I = %s;',
+          'ktm_checkpoint_verify',
+          split_part(configuration.value, '=', 1),
+          substring(
+            configuration.value
+            FROM length(split_part(configuration.value, '=', 1)) + 2
+          )
+        )
+        ELSE format(
+          'ALTER ROLE %I IN DATABASE %I SET %I = %s;',
+          setting.setrole::regrole::text,
+          'ktm_checkpoint_verify',
+          split_part(configuration.value, '=', 1),
+          substring(
+            configuration.value
+            FROM length(split_part(configuration.value, '=', 1)) + 2
+          )
+        )
+      END
+      FROM pg_catalog.pg_db_role_setting AS setting
+      CROSS JOIN LATERAL unnest(setting.setconfig) AS configuration(value)
+      WHERE setting.setdatabase = (
+        SELECT oid
+        FROM pg_catalog.pg_database
+        WHERE datname = current_database()
+      )
+      ORDER BY setting.setrole, configuration.value
+    "
+  )"
+  [[ -z "$statements" ]] || printf '%s\n' "$statements" | psql_stream >/dev/null
 }
 
 verify_dump_restore() {
   local dump_path="$1"
   local restored_snapshot="$2"
-  VERIFICATION_DB="ktm_checkpoint_${RUN_KEY:0:12}"
-  [[ "$(psql_value "SELECT count(*) FROM pg_database WHERE datname = '$VERIFICATION_DB'")" == "0" ]] ||
+  [[ "$(psql_value "SELECT count(*) FROM pg_database WHERE datname = 'ktm_checkpoint_verify'")" == "0" ]] ||
     die "checkpoint verification DB already exists"
+  state_helper write-scratch \
+    --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+    --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+    --path "$VERIFICATION_STATE"
   PGPASSWORD="$db_password" docker exec -e PGPASSWORD "$DB_CONTAINER" \
-    createdb -U "$db_user" --template=template0 "$VERIFICATION_DB"
+    createdb -U "$db_user" --template=template0 ktm_checkpoint_verify
+  VERIFICATION_DB="ktm_checkpoint_verify"
+  VERIFICATION_DB_OWNED=1
+  copy_database_settings_to_verification
   PGPASSWORD="$db_password" docker exec -i -e PGPASSWORD "$DB_CONTAINER" \
-    pg_restore --exit-on-error --single-transaction --no-owner --no-privileges \
+    pg_restore --exit-on-error --single-transaction \
     -U "$db_user" -d "$VERIFICATION_DB" <"$dump_path"
   db_name="$VERIFICATION_DB"
   write_snapshot "$restored_snapshot" "$RUN_ID"
@@ -961,6 +1169,7 @@ if [[ "$MODE" == "checkpoint" ]]; then
     printf '%s' "$(psql_value "SELECT system_identifier::text FROM pg_control_system()")" |
       sha256sum | awk '{print $1}'
   )"
+  recover_verification_database
   CONTENT_CUTOFF="$(
     psql_value \
       "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')"
@@ -978,7 +1187,7 @@ if [[ "$MODE" == "checkpoint" ]]; then
   [[ ! -e "$NEW_CHECKPOINT_DUMP" && ! -L "$NEW_CHECKPOINT_DUMP" ]] ||
     die "checkpoint dump target already exists"
   PGPASSWORD="$db_password" docker exec -e PGPASSWORD "$DB_CONTAINER" \
-    pg_dump --format=custom --no-owner --no-privileges \
+    pg_dump --format=custom \
     --serializable-deferrable -U "$db_user" -d "$db_name" \
     >"$NEW_CHECKPOINT_DUMP"
   chown root:root -- "$NEW_CHECKPOINT_DUMP"
@@ -1182,9 +1391,6 @@ run_helper() {
   local -a helper_args=(
     /opt/admin-feature-live-fixture.py "$action" --run-id "$RUN_ID"
   )
-  if [[ "$action" == "audit-cleanup" ]]; then
-    helper_args+=(--content-cutoff "$CONTENT_CUTOFF")
-  fi
   docker run --rm \
     --name "$name" \
     --label "io.kortravelmap.admin-feature-clone-acceptance.run-key=$RUN_KEY" \
@@ -1301,9 +1507,8 @@ run_acceptance_from_fixture() {
   state_helper update-blocked --path "$BLOCKED_FILE" --phase direct-cleanup-running
   run_helper cleanup "$RUNTIME_DIR/direct-cleanup.json"
   run_helper audit "$RUNTIME_DIR/direct-audit.json"
-  state_helper update-blocked \
-    --path "$BLOCKED_FILE" --phase operational-audit-cleanup-running
-  run_helper audit-cleanup "$RUNTIME_DIR/operational-audit-cleanup.json"
+  run_helper api-audit "$RUNTIME_DIR/api-owned-audit.json"
+  run_helper auth-verify "$RUNTIME_DIR/auth-audit.json"
   write_snapshot "$RUNTIME_DIR/clone-final.json" "$RUN_ID"
   (( main_status == 0 && recovery_status == 0 )) || {
     state_helper update-blocked --path "$BLOCKED_FILE" --phase test-failed-restored
@@ -1401,10 +1606,14 @@ if [[ "$MODE" == "recover" ]]; then
   run_helper audit "$RUNTIME_DIR/direct-audit-interrupted.json"
   state_helper update-blocked --path "$BLOCKED_FILE" --phase recovery-hard-purge-running
   run_helper purge "$RUNTIME_DIR/direct-purge-interrupted.json"
+  state_helper update-blocked --path "$BLOCKED_FILE" --phase recovery-auth-reset-running
+  run_helper auth-reset "$RUNTIME_DIR/auth-audit-reset.json"
   for path in \
     "$RUNTIME_DIR/direct-seed.json" \
     "$RUNTIME_DIR/direct-cleanup.json" \
     "$RUNTIME_DIR/direct-audit.json" \
+    "$RUNTIME_DIR/api-owned-audit.json" \
+    "$RUNTIME_DIR/auth-audit.json" \
     "$RUNTIME_DIR/clone-final.json" \
     "$RUNTIME_DIR/playwright-main" \
     "$RUNTIME_DIR/playwright-recovery"; do
@@ -1476,10 +1685,21 @@ startup_content="$(
     'import json,sys; print(json.load(open(sys.argv[1]))["content_sha256"])' \
     "$RUNTIME_DIR/clone-startup-before.json"
 )"
+startup_database="$(
+  python3 -I -B -c \
+    'import json,sys; print(json.load(open(sys.argv[1]))["database_sha256"])' \
+    "$RUNTIME_DIR/clone-startup-before.json"
+)"
+startup_extension="$(
+  python3 -I -B -c \
+    'import json,sys; print(json.load(open(sys.argv[1]))["extension_sha256"])' \
+    "$RUNTIME_DIR/clone-startup-before.json"
+)"
 clone_identity_sha256="$(
-  printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
     "$BASE_CLONE_CONTAINER_SHA256" "$BASE_CLONE_SYSTEM_SHA256" "$DB_HOST_PORT" \
-    "$EXPECTED_MIGRATION_HEAD" "$startup_schema" "$startup_content" |
+    "$EXPECTED_MIGRATION_HEAD" "$startup_database" "$startup_extension" \
+    "$startup_schema" "$startup_content" |
     sha256sum | awk '{print $1}'
 )"
 state_helper write-image-evidence \

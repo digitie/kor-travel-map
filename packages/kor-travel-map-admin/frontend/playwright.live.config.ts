@@ -18,6 +18,10 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const C7_READ_AUTH_SPEC = "ops-c7-read-auth.live.spec";
 const ISOLATED_EVIDENCE_ENV = "E2E_ISOLATED_LIVE_EVIDENCE";
 const ISOLATED_DOCKER_NETWORK_ENV = "E2E_ISOLATED_LIVE_DOCKER_NETWORK";
+const ADMIN_FEATURE_RUN_ID_ENV = "E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID";
+const ADMIN_FEATURE_RECOVERY_ENV =
+  "E2E_ADMIN_FEATURE_ACCEPTANCE_RECOVERY_ONLY";
+const ADMIN_FEATURE_RUN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{15,79}$/;
 const isolatedEvidenceRaw = process.env[ISOLATED_EVIDENCE_ENV];
 const isolatedEvidence = isolatedEvidenceRaw === "1";
 const isolatedDockerNetworkRaw = process.env[ISOLATED_DOCKER_NETWORK_ENV];
@@ -47,6 +51,32 @@ function expectedSha256(envName: string): string {
     );
   }
   return value;
+}
+
+function isolatedAuthRequestHeaders(): Record<string, string> {
+  const runId = process.env[ADMIN_FEATURE_RUN_ID_ENV];
+  if (runId === undefined) {
+    return {};
+  }
+  if (
+    !isolatedEvidence ||
+    !isolatedDockerNetwork ||
+    !ADMIN_FEATURE_RUN_ID_PATTERN.test(runId)
+  ) {
+    throw new Error(
+      `[playwright.live] ${ADMIN_FEATURE_RUN_ID_ENV}은 검증된 격리 실행의 run ID여야 합니다`,
+    );
+  }
+  const recoveryRaw = process.env[ADMIN_FEATURE_RECOVERY_ENV];
+  if (recoveryRaw !== undefined && recoveryRaw !== "1") {
+    throw new Error(
+      `[playwright.live] ${ADMIN_FEATURE_RECOVERY_ENV}=1만 허용합니다`,
+    );
+  }
+  const phase = recoveryRaw === "1" ? "recovery" : "main";
+  return {
+    "x-request-id": `e2e_live_acceptance::${runId}::auth::${phase}`,
+  };
 }
 
 /**
@@ -165,6 +195,7 @@ function isTrustedIsolatedDockerOrigin(url: URL): boolean {
 })();
 
 const redactedEvidence = shouldAssertC7OriginGuard() || isolatedEvidence;
+const authRequestHeaders = isolatedAuthRequestHeaders();
 
 /**
  * Playwright e2e — **LIVE(비-mock) 시나리오 전용** config (`e2e/live/**`).
@@ -246,7 +277,10 @@ export default defineConfig({
     {
       name: "setup",
       testMatch: /auth\.setup\.ts/,
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        extraHTTPHeaders: authRequestHeaders,
+      },
     },
     {
       name: "chromium",

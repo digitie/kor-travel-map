@@ -20,6 +20,7 @@ _NETWORK_RE: Final[re.Pattern[str]] = re.compile(r"^ktm-afcla-[0-9a-f]{12}-net$"
 _CHECKPOINT_DUMP_RE: Final[re.Pattern[str]] = re.compile(
     r"^clone-checkpoint-[0-9a-f]{64}\.dump$"
 )
+_SCRATCH_DATABASE: Final[str] = "ktm_checkpoint_verify"
 _UTC_TIMESTAMP_RE: Final[re.Pattern[str]] = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$"
 )
@@ -38,6 +39,8 @@ _SNAPSHOT_KEYS: Final[set[str]] = {
     "clone_system_identifier_sha256",
     "content_cutoff",
     "content_sha256",
+    "database_sha256",
+    "extension_sha256",
     "feature_non_deleted",
     "feature_total",
     "host_port",
@@ -178,7 +181,12 @@ def _validated_snapshot_object(
         if not isinstance(value, str):
             raise RuntimeError(f"DB snapshot identity가 없습니다: {label}")
         _require_pattern(value, _SHA256_RE, field)
-    for field in ("schema_sha256", "content_sha256"):
+    for field in (
+        "content_sha256",
+        "database_sha256",
+        "extension_sha256",
+        "schema_sha256",
+    ):
         value = snapshot[field]
         if not isinstance(value, str):
             raise RuntimeError(f"DB snapshot digest가 없습니다: {label}")
@@ -283,6 +291,12 @@ def write_snapshot(args: argparse.Namespace) -> None:
             "content_sha256": _require_pattern(
                 args.content_sha256, _SHA256_RE, "content SHA256"
             ),
+            "database_sha256": _require_pattern(
+                args.database_sha256, _SHA256_RE, "database SHA256"
+            ),
+            "extension_sha256": _require_pattern(
+                args.extension_sha256, _SHA256_RE, "extension SHA256"
+            ),
             "feature_non_deleted": args.feature_non_deleted,
             "feature_total": args.feature_total,
             "host_port": args.host_port,
@@ -324,6 +338,65 @@ def write_checkpoint(args: argparse.Namespace) -> None:
     }
     payload["checkpoint_sha256"] = _canonical_sha256(payload)
     _atomic_json(Path(args.path), payload)
+
+
+def _validated_scratch(args: argparse.Namespace) -> dict[str, Any]:
+    scratch = _load_object(Path(args.path))
+    expected = {
+        "clone_container_sha256": _require_pattern(
+            args.clone_container_sha256,
+            _SHA256_RE,
+            "scratch clone container SHA256",
+        ),
+        "clone_system_identifier_sha256": _require_pattern(
+            args.clone_system_identifier_sha256,
+            _SHA256_RE,
+            "scratch clone system identifier SHA256",
+        ),
+        "database": _SCRATCH_DATABASE,
+        "version": 1,
+    }
+    if scratch != expected:
+        raise RuntimeError("checkpoint scratch DB ownership state가 다릅니다")
+    return scratch
+
+
+def write_scratch(args: argparse.Namespace) -> None:
+    path = Path(args.path)
+    if path.exists() or path.is_symlink():
+        raise RuntimeError("기존 checkpoint scratch DB ownership state가 있습니다")
+    _atomic_json(
+        path,
+        {
+            "clone_container_sha256": _require_pattern(
+                args.clone_container_sha256,
+                _SHA256_RE,
+                "scratch clone container SHA256",
+            ),
+            "clone_system_identifier_sha256": _require_pattern(
+                args.clone_system_identifier_sha256,
+                _SHA256_RE,
+                "scratch clone system identifier SHA256",
+            ),
+            "database": _SCRATCH_DATABASE,
+            "version": 1,
+        },
+    )
+
+
+def read_scratch(args: argparse.Namespace) -> None:
+    print(_validated_scratch(args)["database"])
+
+
+def clear_scratch(args: argparse.Namespace) -> None:
+    _validated_scratch(args)
+    path = Path(args.path)
+    path.unlink()
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def _validated_checkpoint(path: Path) -> dict[str, Any]:
@@ -425,7 +498,8 @@ def read_replaced_checkpoint_dump(args: argparse.Namespace) -> None:
     _require_pattern(dump_digest, _SHA256_RE, "dump SHA256")
     if not isinstance(dump_size, int) or isinstance(dump_size, bool) or dump_size < 1:
         raise RuntimeError("교체 대상 clone checkpoint dump size가 올바르지 않습니다")
-    _validated_snapshot_object(checkpoint.get("baseline"), label="legacy baseline")
+    if not isinstance(checkpoint.get("baseline"), dict):
+        raise RuntimeError("교체 대상 clone checkpoint baseline이 없습니다")
     print(filename)
 
 
@@ -438,6 +512,8 @@ def verify_checkpoint(args: argparse.Namespace) -> None:
             "clone_container_sha256",
             "clone_system_identifier_sha256",
             "content_sha256",
+            "database_sha256",
+            "extension_sha256",
             "host_port",
             "migration_head",
             "relation_count",
@@ -558,24 +634,52 @@ def _purge_counts(path: Path) -> dict[str, int]:
     return purged
 
 
-def _audit_cleanup_counts(path: Path) -> dict[str, int]:
+def _api_owned_audit_counts(path: Path) -> dict[str, int]:
     evidence = _load_object(path)
-    deleted = evidence.get("deleted")
+    counts = evidence.get("counts")
     if (
-        set(evidence) != {"action", "deleted", "version"}
+        set(evidence)
+        != {
+            "action",
+            "counts",
+            "foreign_key_constraints_checked",
+            "foreign_key_references",
+            "version",
+        }
         or evidence.get("version") != 1
-        or evidence.get("action") != "audit-cleanup"
-        or not isinstance(deleted, dict)
-        or set(deleted) != {"admin_auth_events", "api_call_log"}
+        or evidence.get("action") != "api-audit"
+        or counts
+        != {"change_requests": 14, "feature_versions": 13, "features": 6}
+        or evidence.get("foreign_key_references") != 13
+        or not isinstance(evidence.get("foreign_key_constraints_checked"), int)
+        or evidence["foreign_key_constraints_checked"] < 1
+    ):
+        raise RuntimeError("API-owned 완료 감사 evidence가 예상과 다릅니다")
+    return {
+        "change_requests": int(counts["change_requests"]),
+        "feature_versions": int(counts["feature_versions"]),
+        "features": int(counts["features"]),
+    }
+
+
+def _auth_audit_counts(path: Path, action: str) -> dict[str, int]:
+    evidence = _load_object(path)
+    counts = evidence.get("counts")
+    if (
+        set(evidence) != {"action", "counts", "version"}
+        or evidence.get("version") != 1
+        or evidence.get("action") != action
+        or not isinstance(counts, dict)
+        or set(counts) != {"main", "recovery"}
         or not all(
             isinstance(value, int) and not isinstance(value, bool) and value >= 0
-            for value in deleted.values()
+            for value in counts.values()
         )
-        or deleted["admin_auth_events"] > 16
-        or deleted["api_call_log"] != 0
     ):
-        raise RuntimeError("operational audit cleanup evidence가 예상과 다릅니다")
-    return deleted
+        raise RuntimeError(f"run-bound 인증 감사 evidence가 예상과 다릅니다: {action}")
+    if action == "auth-verify" and counts != {"main": 1, "recovery": 1}:
+        raise RuntimeError("run-bound 인증 감사 완료 수가 예상과 다릅니다")
+    return counts
 
 
 def _report_counts(path: Path) -> dict[str, int]:
@@ -720,6 +824,8 @@ def _build_result(
         f"{startup_before['clone_system_identifier_sha256']}\n"
         f"{startup_before['host_port']}\n"
         f"{startup_before['migration_head']}\n"
+        f"{startup_before['database_sha256']}\n"
+        f"{startup_before['extension_sha256']}\n"
         f"{startup_before['schema_sha256']}\n"
         f"{startup_before['content_sha256']}\n"
     )
@@ -729,6 +835,8 @@ def _build_result(
         "clone_container_sha256",
         "clone_system_identifier_sha256",
         "content_sha256",
+        "database_sha256",
+        "extension_sha256",
         "host_port",
         "migration_head",
         "relation_count",
@@ -781,12 +889,17 @@ def _build_result(
         {"features": 0, "price_values": 0, "weather_values": 0},
         expected_foreign_key_references=0,
     )
-    audit_cleanup = _audit_cleanup_counts(
-        runtime / "operational-audit-cleanup.json"
-    )
+    api_owned_audit = _api_owned_audit_counts(runtime / "api-owned-audit.json")
+    auth_audit = _auth_audit_counts(runtime / "auth-audit.json", "auth-verify")
     purge = {"change_requests": 0, "feature_versions": 0, "features": 0}
     if "recovery-hard-purge-running" in phase_history:
         purge = _purge_counts(runtime / "direct-purge-interrupted.json")
+    auth_reset = {"main": 0, "recovery": 0}
+    if "recovery-auth-reset-running" in phase_history:
+        auth_reset = _auth_audit_counts(
+            runtime / "auth-audit-reset.json",
+            "auth-reset",
+        )
     tests = {
         "main": _report_counts(runtime / "playwright-main"),
         "recovery": _report_counts(runtime / "playwright-recovery"),
@@ -800,10 +913,13 @@ def _build_result(
         "cleanup": {
             "foreign_key_references": cleanup["foreign_key_references"],
             "owned_features": cleanup["counts"]["features"],
-            "operational_auth_events_deleted": audit_cleanup[
-                "admin_auth_events"
-            ],
-            "operational_api_call_logs_deleted": audit_cleanup["api_call_log"],
+            "api_owned_change_requests": api_owned_audit["change_requests"],
+            "api_owned_features": api_owned_audit["features"],
+            "api_owned_feature_versions": api_owned_audit["feature_versions"],
+            "auth_audit_main": auth_audit["main"],
+            "auth_audit_recovery": auth_audit["recovery"],
+            "recovery_auth_reset_main": auth_reset["main"],
+            "recovery_auth_reset_recovery": auth_reset["recovery"],
             "recovery_purged_change_requests": purge["change_requests"],
             "recovery_purged_feature_versions": purge["feature_versions"],
             "recovery_purged_features": purge["features"],
@@ -820,6 +936,8 @@ def _build_result(
             "clone_system_identifier_sha256": startup_before[
                 "clone_system_identifier_sha256"
             ],
+            "database_sha256": startup_before["database_sha256"],
+            "extension_sha256": startup_before["extension_sha256"],
             "content_sha256": startup_before["content_sha256"],
             "host_port": startup_before["host_port"],
             "production_compose_project_excluded": True,
@@ -916,6 +1034,8 @@ def main() -> None:
     snapshot.add_argument("--clone-system-identifier-sha256", required=True)
     snapshot.add_argument("--content-cutoff", required=True)
     snapshot.add_argument("--content-sha256", required=True)
+    snapshot.add_argument("--database-sha256", required=True)
+    snapshot.add_argument("--extension-sha256", required=True)
     snapshot.add_argument("--feature-non-deleted", required=True, type=int)
     snapshot.add_argument("--feature-total", required=True, type=int)
     snapshot.add_argument("--host-port", required=True, type=int)
@@ -935,6 +1055,17 @@ def main() -> None:
     checkpoint.add_argument("--restored-snapshot", required=True)
     checkpoint.add_argument("--snapshot", required=True)
     checkpoint.set_defaults(handler=write_checkpoint)
+
+    for command, handler in (
+        ("write-scratch", write_scratch),
+        ("read-scratch", read_scratch),
+        ("clear-scratch", clear_scratch),
+    ):
+        scratch = subparsers.add_parser(command)
+        scratch.add_argument("--clone-container-sha256", required=True)
+        scratch.add_argument("--clone-system-identifier-sha256", required=True)
+        scratch.add_argument("--path", required=True)
+        scratch.set_defaults(handler=handler)
 
     checkpoint_read = subparsers.add_parser("read-checkpoint")
     checkpoint_read.add_argument("--checkpoint", required=True)

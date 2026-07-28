@@ -4,6 +4,8 @@ const ENV_NAMES = [
   "E2E_BASE_URL",
   "E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256",
   "E2E_C7_EXPECTED_UI_ORIGIN_SHA256",
+  "E2E_ADMIN_FEATURE_ACCEPTANCE_RECOVERY_ONLY",
+  "E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID",
   "E2E_ISOLATED_LIVE_DOCKER_NETWORK",
   "E2E_ISOLATED_LIVE_EVIDENCE",
 ] as const;
@@ -78,5 +80,29 @@ describe("isolated Live evidence config", () => {
     await expect(loadConfig()).rejects.toThrow(
       "E2E_ISOLATED_LIVE_EVIDENCE=1이 필요",
     );
+  });
+
+  it("격리 Admin Feature 인증 감사를 run과 phase에 결합한다", async () => {
+    const runId = "clone-20260729000000-abcdef123456";
+    process.env.E2E_BASE_URL = "http://candidate-ui:18705";
+    process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
+    process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
+    process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID = runId;
+    process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RECOVERY_ONLY = "1";
+
+    const config = await loadConfig();
+    const setup = config.projects?.find((project) => project.name === "setup");
+
+    expect(setup?.use?.extraHTTPHeaders).toEqual({
+      "x-request-id": `e2e_live_acceptance::${runId}::auth::recovery`,
+    });
+  });
+
+  it("Admin Feature run ID는 일반 Live에서 사용할 수 없다", async () => {
+    process.env.E2E_BASE_URL = "http://127.0.0.1:18705";
+    process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID =
+      "clone-20260729000000-abcdef123456";
+
+    await expect(loadConfig()).rejects.toThrow("검증된 격리 실행의 run ID");
   });
 });

@@ -20,6 +20,8 @@ _CONTAINER_SHA256 = "c" * 64
 _SYSTEM_SHA256 = "d" * 64
 _SCHEMA_SHA256 = "3" * 64
 _CONTENT_SHA256 = "4" * 64
+_DATABASE_SHA256 = "8" * 64
+_EXTENSION_SHA256 = "9" * 64
 _DUMP_SHA256 = "5" * 64
 _DUMP_FILENAME = f"clone-checkpoint-{'6' * 64}.dump"
 _CONTENT_CUTOFF = "2026-07-29T00:00:00.000000Z"
@@ -30,7 +32,8 @@ _MIGRATION_HEAD = "0066_curation_component_identity"
 _CLONE_IDENTITY_SHA256 = hashlib.sha256(
     (
         f"{_CONTAINER_SHA256}\n{_SYSTEM_SHA256}\n15475\n"
-        f"{_MIGRATION_HEAD}\n{_SCHEMA_SHA256}\n{_CONTENT_SHA256}\n"
+        f"{_MIGRATION_HEAD}\n{_DATABASE_SHA256}\n{_EXTENSION_SHA256}\n"
+        f"{_SCHEMA_SHA256}\n{_CONTENT_SHA256}\n"
     ).encode()
 ).hexdigest()
 
@@ -65,6 +68,10 @@ def _write_snapshot(
         _CONTENT_CUTOFF,
         "--content-sha256",
         _CONTENT_SHA256,
+        "--database-sha256",
+        _DATABASE_SHA256,
+        "--extension-sha256",
+        _EXTENSION_SHA256,
         "--feature-non-deleted",
         str(non_deleted),
         "--feature-total",
@@ -211,11 +218,27 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
         runtime / "direct-cleanup.json", features=0, weather=0, price=0
     )
     _write_fixture(runtime / "direct-audit.json", features=0, weather=0, price=0)
-    (runtime / "operational-audit-cleanup.json").write_text(
+    (runtime / "api-owned-audit.json").write_text(
         json.dumps(
             {
-                "action": "audit-cleanup",
-                "deleted": {"admin_auth_events": 2, "api_call_log": 0},
+                "action": "api-audit",
+                "counts": {
+                    "change_requests": 14,
+                    "feature_versions": 13,
+                    "features": 6,
+                },
+                "foreign_key_constraints_checked": 12,
+                "foreign_key_references": 13,
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (runtime / "auth-audit.json").write_text(
+        json.dumps(
+            {
+                "action": "auth-verify",
+                "counts": {"main": 1, "recovery": 1},
                 "version": 1,
             }
         ),
@@ -301,12 +324,17 @@ def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
     assert payload["phase_history"] == ["candidate-startup-pending"]
     assert payload["cleanup"] == {
         "api_owned_active_features": 0,
+        "api_owned_change_requests": 14,
+        "api_owned_features": 6,
+        "api_owned_feature_versions": 13,
         "api_owned_nonterminal_change_requests": 0,
+        "auth_audit_main": 1,
+        "auth_audit_recovery": 1,
         "foreign_key_references": 0,
-        "operational_api_call_logs_deleted": 0,
-        "operational_auth_events_deleted": 2,
         "owned_features": 0,
         "post_cleanup_audit_features": 0,
+        "recovery_auth_reset_main": 0,
+        "recovery_auth_reset_recovery": 0,
         "recovery_purged_change_requests": 0,
         "recovery_purged_feature_versions": 0,
         "recovery_purged_features": 0,
@@ -529,6 +557,38 @@ def test_checkpoint_rejects_dump_restore_snapshot_drift(tmp_path: Path) -> None:
     assert "복원 검증 snapshot" in completed.stderr
 
 
+def test_checkpoint_scratch_ownership_is_durable_and_identity_bound(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "scratch.json"
+    identity_args = (
+        "--clone-container-sha256",
+        _CONTAINER_SHA256,
+        "--clone-system-identifier-sha256",
+        _SYSTEM_SHA256,
+        "--path",
+        str(state),
+    )
+    _run_helper("write-scratch", *identity_args)
+
+    observed = _run_helper("read-scratch", *identity_args)
+    rejected = _run_helper(
+        "read-scratch",
+        "--clone-container-sha256",
+        "0" * 64,
+        "--clone-system-identifier-sha256",
+        _SYSTEM_SHA256,
+        "--path",
+        str(state),
+        check=False,
+    )
+    _run_helper("clear-scratch", *identity_args)
+
+    assert observed.stdout.strip() == "ktm_checkpoint_verify"
+    assert rejected.returncode != 0
+    assert not state.exists()
+
+
 def test_runner_closes_reviewed_trust_boundaries() -> None:
     source = _RUNNER.read_text(encoding="utf-8")
     recovery_source = source.split(
@@ -555,16 +615,22 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "--build-arg NEXT_PUBLIC_VWORLD_API_KEY" in source
     assert "schema_sha256" in source
     assert "content_sha256" in source
-    assert "hashtextextended(to_jsonb(row_value)::text" in source
+    assert "hashtextextended(row_value::text" in source
     assert "attribute.attidentity" in source
     assert "attribute.attgenerated" in source
     assert "trigger_row.tgenabled" in source
+    assert "relation.relowner::regrole::text" in source
+    assert "pg_catalog.pg_default_acl" in source
+    assert "database_sha256" in source
+    assert "extension_sha256" in source
     assert "pg_get_functiondef" in source
     assert "pg_get_viewdef" in source
     assert "pg_catalog.pg_policy" in source
     assert "pg_dump --format=custom" in source
     assert "pg_restore --exit-on-error --single-transaction" in source
     assert "--restored-snapshot" in source
+    assert "state_helper write-scratch" in source
+    assert "recover_verification_database" in source
     assert "fsync_file_and_directory" in source
     assert "verify_checkpoint_dump" in source
     assert "docker network create --internal" in source
@@ -573,6 +639,7 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "playwright-interruption-cleanup" in source
     assert "recovery-hard-purge-running" in source
     assert 'run_helper purge "$RUNTIME_DIR/direct-purge-interrupted.json"' in source
+    assert 'run_helper auth-reset "$RUNTIME_DIR/auth-audit-reset.json"' in source
     assert recovery_source.index("BLOCKED_WRITTEN=1") < recovery_source.index(
         "load_blocked"
     )
