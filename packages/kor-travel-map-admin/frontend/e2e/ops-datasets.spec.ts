@@ -478,7 +478,10 @@ async function mockOpsDatasets(
     const request = route.request();
     const url = new URL(request.url());
     const pathname = apiPathname(url);
-    if (pathname === "/v1/ops/datasets") {
+    if (
+      pathname === "/v1/ops/datasets" &&
+      request.method() === "GET"
+    ) {
       counts.list += 1;
       const items =
         typeof options.items === "function"
@@ -2838,6 +2841,14 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
   test("그리드 조회 실패 — destructive alert", async ({ page }) => {
     await page.route("**/api/proxy/v1/ops/datasets**", async (route) => {
+      const request = route.request();
+      if (
+        request.method() !== "GET" ||
+        apiPathname(new URL(request.url())) !== "/v1/ops/datasets"
+      ) {
+        await route.fallback();
+        return;
+      }
       await fulfillJson(
         route,
         {
