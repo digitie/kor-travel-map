@@ -282,6 +282,20 @@ class MockedFailureReporter implements Reporter {
           "runner가 검증한 실제 frontend source digest가 필요합니다.",
         );
       }
+      const verifiedFrontendImageId =
+        process.env.MOCKED_E2E_VERIFIED_FRONTEND_IMAGE_ID;
+      const verifiedFrontendContainerId =
+        process.env.MOCKED_E2E_VERIFIED_FRONTEND_CONTAINER_ID;
+      if (
+        !verifiedFrontendImageId ||
+        !/^sha256:[0-9a-f]{64}$/.test(verifiedFrontendImageId) ||
+        !verifiedFrontendContainerId ||
+        !/^[0-9a-f]{64}$/.test(verifiedFrontendContainerId)
+      ) {
+        throw new Error(
+          "runner가 검증한 immutable frontend image/container identity가 필요합니다.",
+        );
+      }
 
       const manifestPath = path.join(
         process.cwd(),
@@ -388,6 +402,8 @@ class MockedFailureReporter implements Reporter {
         checkpoint,
         observedRevision,
         observedFrontendSourceDigest: verifiedFrontendSourceDigest,
+        observedFrontendImageId: verifiedFrontendImageId,
+        observedFrontendContainerId: verifiedFrontendContainerId,
         baselineMainRevision: manifest.baselineMainRevision,
         baselineRevision: manifest.baselineRevision,
         discoveredTests: identities.length,

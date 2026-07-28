@@ -67,6 +67,104 @@ if (statusResult.status !== 0 || statusResult.stdout.trim()) {
 }
 
 const frontendBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
+const frontendContainer = process.env.MOCKED_E2E_FRONTEND_CONTAINER;
+if (
+  !frontendContainer ||
+  !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(frontendContainer)
+) {
+  console.error(
+    "MOCKED_E2E_FRONTEND_CONTAINER에 실제 frontend container 이름이 필요합니다.",
+  );
+  process.exit(2);
+}
+const containerInspectResult = spawnSync(
+  "docker",
+  ["inspect", frontendContainer],
+  { encoding: "utf8" },
+);
+let containerInspect;
+try {
+  const parsed = JSON.parse(containerInspectResult.stdout);
+  containerInspect = Array.isArray(parsed) ? parsed.at(0) : undefined;
+} catch {
+  containerInspect = undefined;
+}
+if (
+  containerInspectResult.status !== 0 ||
+  !containerInspect ||
+  typeof containerInspect.Id !== "string" ||
+  !/^[0-9a-f]{64}$/.test(containerInspect.Id) ||
+  typeof containerInspect.Image !== "string" ||
+  !/^sha256:[0-9a-f]{64}$/.test(containerInspect.Image) ||
+  containerInspect.State?.Running !== true
+) {
+  console.error("실행 중인 frontend container identity를 확인할 수 없습니다.");
+  process.exit(2);
+}
+const imageInspectResult = spawnSync(
+  "docker",
+  ["image", "inspect", containerInspect.Image],
+  { encoding: "utf8" },
+);
+let imageInspect;
+try {
+  const parsed = JSON.parse(imageInspectResult.stdout);
+  imageInspect = Array.isArray(parsed) ? parsed.at(0) : undefined;
+} catch {
+  imageInspect = undefined;
+}
+if (
+  imageInspectResult.status !== 0 ||
+  !imageInspect ||
+  imageInspect.Id !== containerInspect.Image ||
+  imageInspect.Config?.Labels?.["org.opencontainers.image.revision"] !==
+    revision
+) {
+  console.error(
+    "frontend container의 immutable image ID/revision label이 checkpoint와 다릅니다.",
+  );
+  process.exit(2);
+}
+const parsedBaseUrl = new URL(frontendBaseUrl);
+const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const basePort = Number(
+  parsedBaseUrl.port || (parsedBaseUrl.protocol === "https:" ? "443" : "80"),
+);
+const configuredPort = Number(
+  containerInspect.Config?.Env?.find((entry) => entry.startsWith("PORT="))
+    ?.split("=", 2)
+    .at(1) ?? "12705",
+);
+const networkMode = containerInspect.HostConfig?.NetworkMode;
+let containerOwnsBaseUrl = false;
+if (
+  parsedBaseUrl.protocol === "http:" &&
+  parsedBaseUrl.pathname === "/" &&
+  loopbackHosts.has(parsedBaseUrl.hostname) &&
+  Number.isInteger(configuredPort) &&
+  configuredPort > 0 &&
+  configuredPort <= 65_535
+) {
+  if (networkMode === "host") {
+    containerOwnsBaseUrl = basePort === configuredPort;
+  } else {
+    const bindings =
+      containerInspect.NetworkSettings?.Ports?.[`${configuredPort}/tcp`];
+    containerOwnsBaseUrl =
+      Array.isArray(bindings) &&
+      bindings.some(
+        (binding) =>
+          Number(binding.HostPort) === basePort &&
+          ["0.0.0.0", "::", "127.0.0.1", "::1"].includes(binding.HostIp),
+      );
+  }
+}
+if (!containerOwnsBaseUrl) {
+  console.error(
+    "E2E_BASE_URL이 지정한 frontend container의 실제 host port에 결박되지 않았습니다.",
+  );
+  process.exit(2);
+}
 let frontendRevision;
 let frontendSourceDigest;
 try {
@@ -148,6 +246,8 @@ const result = spawnSync(
       MOCKED_E2E_VERIFIED_REVISION: headRevision,
       MOCKED_E2E_VERIFIED_FRONTEND_REVISION: frontendRevision,
       MOCKED_E2E_VERIFIED_FRONTEND_SOURCE_DIGEST: frontendSourceDigest,
+      MOCKED_E2E_VERIFIED_FRONTEND_IMAGE_ID: imageInspect.Id,
+      MOCKED_E2E_VERIFIED_FRONTEND_CONTAINER_ID: containerInspect.Id,
     },
     stdio: "inherit",
   },

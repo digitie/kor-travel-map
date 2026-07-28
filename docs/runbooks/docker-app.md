@@ -241,6 +241,9 @@ KOR_TRAVEL_MAP_IMAGE_TAG="$(git rev-parse --short=12 HEAD)" npm run docker:build
 `org.opencontainers.image.revision` label에 함께 박는다. admin UI의 `/api/build-info`는
 같은 빌드 SHA와 실제 frontend build 입력의 결정적 SHA-256을 반환한다. E2E runner는 clean
 worktree에서 digest를 독립 계산하므로 tag/SHA만 같고 실제 코드가 다른 이미지는 통과할 수 없다.
+mocked checkpoint runner는 여기에 더해 `MOCKED_E2E_FRONTEND_CONTAINER`의 실행 중
+immutable image ID·revision label과 `E2E_BASE_URL` host port 소유권을 Docker inspect로
+확인한다. 공개 build-info 응답만 복제한 proxy/fake server는 테스트를 시작할 수 없다.
 
 기본 image:
 
