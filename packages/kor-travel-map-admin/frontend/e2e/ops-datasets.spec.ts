@@ -1163,7 +1163,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(krexRow).toContainText("오래됨");
     await expect(krexRow.getByText("2", { exact: true })).toBeVisible();
     await expect(krexRow.getByText("3", { exact: true })).toBeVisible();
-    await expect(krexRow).toContainText(/26\. 7\. 15\. (?:오전|AM) 8:30:00/);
+    await expect(krexRow).toContainText(/26\. 7\. 15\. (?:오전|AM) 1:20:00/);
   });
 
   test("상태 요약은 표의 page-global 오염 문자열을 projection 증거로 쓰지 않는다", async ({
@@ -1621,7 +1621,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await saveButton.click();
 
     await expect(page.getByText("정책 revision 소진")).toBeVisible();
-    await expect(page.getByText(/9223372036854775807/)).toBeVisible();
+    await expect(
+      page.getByText("9223372036854775807", { exact: true }),
+    ).toBeVisible();
     await expect(saveButton).toBeDisabled();
     await expect(
       page.getByRole("button", { name: "서버 기준으로 초안 조정" }),
@@ -2402,13 +2404,14 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     page,
   }) => {
     const { items, details } = defaultGrid();
+    const staleScope = "legacy_scope";
     const mois = items.find((row) => row.provider === MOIS_PROVIDER);
     if (!mois) {
       throw new Error("MOIS fixture row missing");
     }
     const staleRow = makeGridRow({
       ...mois,
-      sync_scope: "legacy_scope",
+      sync_scope: staleScope,
     });
     const moisDetail = details[`${MOIS_PROVIDER}/${MOIS_DATASET}`];
     await mockOpsDatasets(page, {
@@ -2420,10 +2423,28 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
             ...moisDetail.scopes,
             {
               ...moisDetail.scopes[0],
-              sync_scope: "legacy_scope",
+              sync_scope: staleScope,
               status: "active",
             },
           ],
+          run_history: {
+            ...moisDetail.run_history,
+            canonical_url: exactScopeHistoryUrl(
+              "executions",
+              MOIS_PROVIDER,
+              MOIS_DATASET,
+              staleScope,
+            ),
+          },
+          event_history: {
+            ...moisDetail.event_history,
+            canonical_url: exactScopeHistoryUrl(
+              "events",
+              MOIS_PROVIDER,
+              MOIS_DATASET,
+              staleScope,
+            ),
+          },
         },
       },
     });
@@ -2431,7 +2452,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     await page.goto(
       `/ops/datasets?provider=${MOIS_PROVIDER}&dataset=${MOIS_DATASET}` +
-        "&sync_scope=legacy_scope",
+        `&sync_scope=${staleScope}`,
     );
     await expect(page.getByRole("button", { name: "지금 갱신" })).toBeDisabled();
     await expect(page.getByText(/잔존 비기본 scope/)).toBeVisible();
