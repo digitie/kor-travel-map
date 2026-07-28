@@ -474,6 +474,7 @@ async def _sigungu_resolver_for_scope(
             http,
             api_key=settings.kor_travel_geo_api_key_value,
         )
+        client.preflight()  # T-VN-H21: 결선 누락을 opaque 400 대신 원인 그대로.
 
         async def resolver(
             *,

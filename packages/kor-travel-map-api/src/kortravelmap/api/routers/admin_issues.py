@@ -262,6 +262,7 @@ async def _forward_geocode(address: str) -> dict[str, Any] | None:
     base_url = _kor_travel_geo_base_url()
     async with httpx.AsyncClient(base_url=base_url) as http:
         client = KorTravelGeoRestClient(http, api_key=_kor_travel_geo_api_key())
+        client.preflight()  # T-VN-H21: 결선 누락을 opaque 400 대신 원인 그대로.
         response = await client.geocode(address)
     coordinate = geocode_response_to_coordinate(response)
     addr = geocode_response_to_address(response)
@@ -289,6 +290,7 @@ async def _reverse_geocode(lon: float, lat: float) -> dict[str, Any] | None:
     base_url = _kor_travel_geo_base_url()
     async with httpx.AsyncClient(base_url=base_url) as http:
         client = KorTravelGeoRestClient(http, api_key=_kor_travel_geo_api_key())
+        client.preflight()  # T-VN-H21: 결선 누락을 opaque 400 대신 원인 그대로.
         response = await client.reverse(x=lon, y=lat)
     addr = reverse_response_to_address(response)
     if addr is None:

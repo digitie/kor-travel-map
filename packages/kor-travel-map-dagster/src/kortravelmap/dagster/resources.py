@@ -1135,11 +1135,13 @@ def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
         timeout=settings.kor_travel_geo_timeout_seconds,
     )
     try:
+        client = KorTravelGeoRestClient(
+            http,
+            api_key=settings.kor_travel_geo_api_key_value,
+        )
+        client.preflight()  # T-VN-H21: 결선 누락을 opaque 400 대신 원인 그대로.
         yield kor_travel_geo_reverse_geocoder(
-            KorTravelGeoRestClient(
-                http,
-                api_key=settings.kor_travel_geo_api_key_value,
-            ),
+            client,
             region_fallback_radius_km=0.1,
         )
     finally:

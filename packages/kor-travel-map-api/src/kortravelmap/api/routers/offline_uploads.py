@@ -1136,6 +1136,7 @@ async def validate_offline_upload_request(
                     http,
                     api_key=settings.kor_travel_geo_api_key_value,
                 )
+                kraddr.preflight()  # T-VN-H21: 결선 누락을 opaque 400 대신 원인 그대로.
                 async with session.begin():
                     row = await get_offline_upload(session, upload_id)
                     if row is None:
