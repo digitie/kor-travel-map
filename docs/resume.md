@@ -52,9 +52,10 @@ typed consumer contract로 남겨 #403 갱신·머지. 이어 H07D(#815) → H07
 - 지원 Node 22.22.2에서 최신 npm 12.0.1 clean install은 direct dependency 추가나
   `npm ls` 출력 필터 없이 `problems` **0개**다. exact npm을 12.0.1로 올리고
   `verify:npm-tree`의 기존 허용 목록을 빈 문제 집합 단언으로 교체했다.
-- npm 12의 install-script 경계는 검토한 `esbuild`와 `unrs-resolver`만 root
-  `allowScripts`로 허용하고 `.npmrc`의 `strict-allow-scripts=true`로 신규 script를
-  fail-close한다. Node 최저 버전도 npm 12가 지원하는 22.22.2로 올렸다.
+- npm 12의 install-script 경계는 검토한 `esbuild@0.28.1`과
+  `unrs-resolver@1.12.2`만 root `allowScripts`로 허용하고, version drift와 신규 script는
+  `.npmrc`의 `strict-allow-scripts=true`로 fail-close한다. Node engine도 npm 12가 지원하는
+  exact union `^22.22.2 || ^24.15.0 || >=26.0.0`으로 제한했다.
 - 격리 clean install에서 audit **0**, unreviewed install script **0**, npm tree
   **0 problems**, ESLint·React Doctor **0 diagnostics**, Sharp SVG→WebP ABI, admin/user
   codegen drift, 두 type-check와 production build를 모두 통과했다. npm 12가 정규화한

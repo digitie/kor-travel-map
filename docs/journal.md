@@ -75,10 +75,11 @@ dependency나 출력 필터 없이 `npm ls --all --json`의 `problems`가 0개�
 - **해결**: root package manager와 CI 명령을 npm 12.0.1로, Node 하한을 22.22.2로 전환했다.
   기존 exact 6-package 허용 목록은 제거하고 문제 배열이 비었는지 직접 단언한다. Sharp
   0.35.3과 Next 16.2.12의 실제 SVG→WebP optimizer 검증은 그대로 유지한다.
-- **install script 정책**: npm 12에서 실행이 필요한 `esbuild`와 `unrs-resolver`만
-  `allowScripts`에 명시했다. `strict-allow-scripts=true`라 새 dependency script는 검토 없이
-  실행되지 않고 clean install이 실패한다. 현재 `npm install-scripts ls` 결과는 unreviewed
-  package 0개다.
+- **install script 정책**: npm 12에서 실행이 필요한 `esbuild@0.28.1`과
+  `unrs-resolver@1.12.2`만 `allowScripts`에 exact version으로 명시했다. version drift와 새
+  dependency script는 `strict-allow-scripts=true` 때문에 검토 없이 실행되지 않고 clean
+  install이 실패한다. Node engine도 `^22.22.2 || ^24.15.0 || >=26.0.0`으로 제한했고,
+  현재 `npm install-scripts ls` 결과는 unreviewed package 0개다.
 - **검증**: 지원 Node 22.22.2 격리 환경의 exact clean install에서 audit 0, npm tree
   0 problems, ESLint 0 warnings, React Doctor 270 files/0 diagnostics, Sharp ABI,
   admin/user OpenAPI codegen drift, 두 type-check와 production build를 통과했다. npm 12

@@ -32,8 +32,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [x] `T-VN-46`(npm optional tree) →
-    [ ] `T-VN-48A` → [ ] `T-VN-48B` → [ ] `T-VN-48C` →
+  - b0: [ ] `T-VN-48A` → [ ] `T-VN-48B` → [ ] `T-VN-48C` →
     [ ] `T-VN-48D`(mocked E2E drift) →
     [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
     [ ] `T-VN-49D`(React 구조 debt)
