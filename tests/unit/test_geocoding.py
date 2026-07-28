@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 import pytest
 
+from kortravelmap.core.exceptions import GeoRequestError
 from kortravelmap.dto import Address, Coordinate
 from kortravelmap.geocoding import (
     KorTravelGeoRestClient,
@@ -35,6 +36,11 @@ from kortravelmap.geocoding import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _geo_client(http: httpx.AsyncClient, **kwargs: Any) -> KorTravelGeoRestClient:
+    """mock transport 테스트용 client — 실 geo를 때리지 않으므로 결선 검증을 opt-out한다."""
+    return KorTravelGeoRestClient(http, require_api_key=False, **kwargs)
 
 # -- kor-travel-geo REST v2 응답 fake (structural Protocol 만족) -------------------
 
@@ -516,7 +522,7 @@ def test_rest_reverse_geocoder_hits_endpoint() -> None:
     async def _run() -> None:
         async with _mock_client(handler) as http:
             reverse = kor_travel_geo_reverse_geocoder(
-                KorTravelGeoRestClient(http, require_api_key=False), radius_m=100
+                _geo_client(http), radius_m=100
             )
             addr = await reverse(
                 Coordinate(lon=Decimal("126.924"), lat=Decimal("37.526"))
@@ -560,7 +566,7 @@ def test_rest_reverse_geocoder_accepts_lon_lat_point_aliases() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            reverse = kor_travel_geo_reverse_geocoder(KorTravelGeoRestClient(http, require_api_key=False))
+            reverse = kor_travel_geo_reverse_geocoder(_geo_client(http))
             addr = await reverse(
                 Coordinate(lon=Decimal("126.9777"), lat=Decimal("37.5662"))
             )
@@ -593,7 +599,7 @@ def test_rest_address_geocoder_hits_endpoint() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            geocode = kor_travel_geo_address_geocoder(KorTravelGeoRestClient(http, require_api_key=False))
+            geocode = kor_travel_geo_address_geocoder(_geo_client(http))
             coord = await geocode(
                 Address(
                     road="서울특별시 영등포구 여의공원로 120", bjd_code="1156010100"
@@ -630,7 +636,7 @@ def test_rest_address_geocoder_accepts_lon_lat_point_aliases() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            geocode = kor_travel_geo_address_geocoder(KorTravelGeoRestClient(http, require_api_key=False))
+            geocode = kor_travel_geo_address_geocoder(_geo_client(http))
             coord = await geocode(Address(road="서울특별시 영등포구 여의공원로 120"))
             assert coord == Coordinate(lon=Decimal("127.1"), lat=Decimal("37.4"))
 
@@ -657,7 +663,7 @@ def test_rest_address_geocoder_accepts_legacy_xy_point() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            geocode = kor_travel_geo_address_geocoder(KorTravelGeoRestClient(http, require_api_key=False))
+            geocode = kor_travel_geo_address_geocoder(_geo_client(http))
             coord = await geocode(Address(road="서울특별시 영등포구 여의공원로 120"))
             assert coord is not None
             assert coord.lon == Decimal("127.1")
@@ -687,7 +693,7 @@ def test_rest_address_geocoder_uses_parcel_when_no_road() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            geocode = kor_travel_geo_address_geocoder(KorTravelGeoRestClient(http, require_api_key=False))
+            geocode = kor_travel_geo_address_geocoder(_geo_client(http))
             coord = await geocode(Address(legal="서울특별시 영등포구 여의도동 8"))
             assert coord is not None
 
@@ -703,7 +709,7 @@ def test_address_geocoder_returns_none_without_query() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            geocode = kor_travel_geo_address_geocoder(KorTravelGeoRestClient(http, require_api_key=False))
+            geocode = kor_travel_geo_address_geocoder(_geo_client(http))
             assert await geocode(Address()) is None
 
     asyncio.run(_run())
@@ -715,7 +721,7 @@ def test_rest_geocoder_returns_none_on_not_found() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             reverse = kor_travel_geo_reverse_geocoder(client)
             geocode = kor_travel_geo_address_geocoder(client)
             rev = await reverse(
@@ -744,7 +750,7 @@ def test_rest_client_base_path_trailing_slash_stripped() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False, base_path="/v2/")
+            client = _geo_client(http, base_path="/v2/")
             await client.reverse(127.0, 37.0)
             await client.geocode("서울특별시 중구 세종대로 110")
 
@@ -762,7 +768,7 @@ def test_rest_client_custom_base_path() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False, base_path="/api/v2")
+            client = _geo_client(http, base_path="/api/v2")
             await client.reverse(127.0, 37.0)
 
     asyncio.run(_run())
@@ -811,7 +817,7 @@ def test_rest_client_reverse_radius_m_none_omits_key() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             await client.reverse(127.0, 37.0)  # radius_m 미지정.
 
     asyncio.run(_run())
@@ -828,7 +834,7 @@ def test_rest_client_reverse_include_flags_default_true() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             await client.reverse(127.0, 37.0)
 
     asyncio.run(_run())
@@ -847,7 +853,7 @@ def test_rest_client_reverse_include_flags_false() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             await client.reverse(
                 127.0, 37.0, include_region=False, include_zipcode=False
             )
@@ -878,7 +884,7 @@ def test_rest_client_geocode_type_selects_body_key(type_: str, key: str) -> None
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             await client.geocode("addr", type_=type_)  # type: ignore[arg-type]
 
     asyncio.run(_run())
@@ -902,7 +908,7 @@ def test_rest_client_geocode_fallback_passes_through(fallback: str) -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             await client.geocode("addr", fallback=fallback)  # type: ignore[arg-type]
 
     asyncio.run(_run())
@@ -910,15 +916,15 @@ def test_rest_client_geocode_fallback_passes_through(fallback: str) -> None:
 
 
 def test_rest_client_reverse_raises_on_http_500() -> None:
-    """upstream 500 → httpx.HTTPStatusError 전파 (raise_for_status)."""
+    """upstream 500 → GeoRequestError 전파 (비밀 제거된 raise_for_status)."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"detail": "upstream broken"})
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
-            with pytest.raises(httpx.HTTPStatusError):
+            client = _geo_client(http)
+            with pytest.raises(GeoRequestError):
                 await client.reverse(127.0, 37.0)
 
     asyncio.run(_run())
@@ -932,8 +938,8 @@ def test_rest_client_geocode_raises_on_http_502() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
-            with pytest.raises(httpx.HTTPStatusError):
+            client = _geo_client(http)
+            with pytest.raises(GeoRequestError):
                 await client.geocode("addr")
 
     asyncio.run(_run())
@@ -963,7 +969,7 @@ def test_rest_client_regions_within_radius_hits_endpoint() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             response = await client.regions_within_radius(
                 lon=126.978,
                 lat=37.5665,
@@ -1005,7 +1011,7 @@ def test_rest_client_regions_within_radius_default_levels() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            await KorTravelGeoRestClient(http, require_api_key=False).regions_within_radius(
+            await _geo_client(http).regions_within_radius(
                 lon=126.978,
                 lat=37.5665,
             )
@@ -1032,7 +1038,7 @@ def test_rest_client_regions_within_radius_center_xy_fallback_and_malformed_item
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            response = await KorTravelGeoRestClient(http, require_api_key=False).regions_within_radius(
+            response = await _geo_client(http).regions_within_radius(
                 lon=126.978,
                 lat=37.5665,
                 radius_km=3.0,
@@ -1062,7 +1068,7 @@ def test_rest_client_regions_within_radius_invalid_response_raises(
     async def _run() -> None:
         async with _mock_client(handler) as http:
             with pytest.raises(ValueError, match="kor-travel-geo regions response"):
-                await KorTravelGeoRestClient(http, require_api_key=False).regions_within_radius(
+                await _geo_client(http).regions_within_radius(
                     lon=126.978,
                     lat=37.5665,
                 )
@@ -1076,8 +1082,8 @@ def test_rest_client_regions_within_radius_raises_on_http_error() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            with pytest.raises(httpx.HTTPStatusError):
-                await KorTravelGeoRestClient(http, require_api_key=False).regions_within_radius(
+            with pytest.raises(GeoRequestError):
+                await _geo_client(http).regions_within_radius(
                     lon=126.978,
                     lat=37.5665,
                 )
@@ -1105,7 +1111,7 @@ def test_resolve_sigungu_by_radius_requests_sigungu_only() -> None:
     async def _run() -> None:
         async with _mock_client(handler) as http:
             codes = await resolve_sigungu_by_radius(
-                KorTravelGeoRestClient(http, require_api_key=False),
+                _geo_client(http),
                 lon=126.978,
                 lat=37.5665,
                 radius_km=3.0,
@@ -1135,7 +1141,7 @@ def test_resolve_regions_within_radius_passthrough() -> None:
     async def _run() -> None:
         async with _mock_client(handler) as http:
             response = await resolve_regions_within_radius(
-                KorTravelGeoRestClient(http, require_api_key=False),
+                _geo_client(http),
                 lon=126.978,
                 lat=37.5665,
                 radius_km=5.0,
@@ -1171,7 +1177,7 @@ def test_kor_travel_geo_reverse_geocoder_max_distance_filters() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             # 100m 안쪽만 받아들임 — 800m 결과는 drop.
             reverse = kor_travel_geo_reverse_geocoder(client, max_distance_m=100.0)
             dropped = await reverse(
@@ -1218,7 +1224,7 @@ def test_kor_travel_geo_reverse_geocoder_region_fallback_when_reverse_not_found(
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             reverse = kor_travel_geo_reverse_geocoder(
                 client,
                 region_fallback_radius_km=0.1,
@@ -1293,7 +1299,7 @@ def test_kor_travel_geo_reverse_geocoder_region_fallback_when_bjd_missing() -> N
     async def _run() -> None:
         async with _mock_client(handler) as http:
             reverse = kor_travel_geo_reverse_geocoder(
-                KorTravelGeoRestClient(http, require_api_key=False),
+                _geo_client(http),
                 region_fallback_radius_km=0.1,
             )
             addr = await reverse(
@@ -1328,7 +1334,7 @@ def test_kor_travel_geo_address_geocoder_min_confidence_via_wrapper() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             strict = kor_travel_geo_address_geocoder(client, min_confidence=0.8)
             assert await strict(Address(road="아무 도로 1")) is None
             relaxed = kor_travel_geo_address_geocoder(client, min_confidence=0.1)
@@ -1355,7 +1361,7 @@ def test_kor_travel_geo_address_geocoder_fallback_passed() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             geocode = kor_travel_geo_address_geocoder(client, fallback="api")
             await geocode(Address(road="아무 도로 1"))
 
@@ -1397,7 +1403,7 @@ def test_kor_travel_geo_address_resolver_falls_back_to_parcel() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, require_api_key=False)
+            client = _geo_client(http)
             resolver = kor_travel_geo_address_resolver(client, fallback="api")
             resolved = await resolver(
                 Address(
@@ -1537,7 +1543,7 @@ def test_geo_rest_client_opt_out_allows_keyless_construction() -> None:
 
     http = httpx.AsyncClient(base_url="http://127.0.0.1:12501")
     try:
-        client = KorTravelGeoRestClient(http, require_api_key=False)
+        client = _geo_client(http)
         assert client._query_params() is None  # 키가 없으면 query도 붙지 않는다.
     finally:
         asyncio.run(http.aclose())

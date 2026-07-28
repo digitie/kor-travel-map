@@ -75,14 +75,19 @@ def _raise_for_status_sanitized(resp: httpx.Response) -> None:
     """
     import httpx as _httpx
 
+    sanitized: GeoRequestError | None = None
     try:
         resp.raise_for_status()
     except _httpx.HTTPStatusError as exc:
         safe_url = exc.request.url.copy_with(query=None)
-        raise GeoRequestError(
+        sanitized = GeoRequestError(
             f"kor-travel-geo 호출 실패: {exc.response.status_code} "
             f"{exc.response.reason_phrase} for {safe_url}"
-        ) from None
+        )
+    # except 블록 **밖에서** 던진다. 안에서 던지면 ``from None``으로도 ``__context__``에
+    # 원본(=key가 든 URL 문자열)이 남아, ``__context__``를 따라가는 로거·리포터로 샌다.
+    if sanitized is not None:
+        raise sanitized
 
 
 __all__ = [
