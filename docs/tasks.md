@@ -42,9 +42,9 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
 
 - base는 **main**(`integration/t-vn`은 PR #790 합류로 폐지). 시작·PR 직전·머지 직후
   `origin/main` rebase. PR 하나는 task 하나만 소유.
-- **Lane A**: 각 코드 task는 적대적 리뷰어 **1명** 반영 후 n150 **파괴적 live E2E**
+- **Lane A**: PR #869 다음 PR부터 적대적 리뷰어 **2명** 반영 후 n150 **파괴적 live E2E**
   (실데이터)로 검증하고 PR·CI green·머지. 작업 중 발견 항목은 tasks.md에 즉시 추가.
-- **Lane B**: 각 코드 task는 적대적 리뷰어 **1명** 반영 후 n150 **실데이터 파괴적 Live UI
+- **Lane B**: PR #869 다음 PR부터 적대적 리뷰어 **2명** 반영 후 n150 **실데이터 파괴적 Live UI
   E2E**를 통과하고 PR·CI green·머지한다. task 완료 시 상대 lane 2일치 PR 적대 리뷰 관행 유지.
 - **우선순위(서비스 전 단계 — 사용자 지시 2026-07-26)**: **정확성·보안 최우선은 불변**
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
@@ -52,7 +52,9 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
 - migration 정본: 단일 head 유지(현 head `0066_curation_component_identity`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다.
-- 문서 전용·rebase-only·기계적 변경(변수명·import 정렬)은 적대 재리뷰 면제.
+- **리뷰어 수 전환(사용자 지시 2026-07-27)**: 현재 PR #869는 기존 지시대로 1명으로
+  완결한다. 그다음 PR부터 문서 전용·rebase-only·기계적 변경을 포함해 적대적 리뷰어
+  2명을 운용한다.
 - pytest와 Playwright를 포함한 모든 검증은 n150 WSL SSH에서 실행한다. mocked e2e도 n150
   Linux가 정본이며, n150에서 실행할 수 없는 브라우저 제약이 확인될 때만 Windows를 fallback으로
   사용한다. live e2e는 항상 n150 파괴적 lane으로 실행한다.

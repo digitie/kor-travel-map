@@ -4,8 +4,8 @@
 
 **다음 한 작업**: 본 PR의 CI green·셀프 merge 뒤 전체 열린 task와 실코드·열린 이슈를
 재감사한다. 더 작은 실행 단위로 분해하고 의존성 기준으로 Lane A/B 병렬 범위를 다시 배치한
-문서 전용 PR을 CI 대기 없이 머지한 뒤, 갱신된 Lane B 순서로 진행한다. `T-VN-45`는 그 재감사
-전까지 미착수 상태로 유지한다.
+문서 전용 PR을 CI 대기 없이 머지한 뒤, 갱신된 Lane B 순서로 진행한다. 사용자 최신 지시에 따라
+그 문서 PR부터 적대적 리뷰어 2명을 운용한다. `T-VN-45`는 그 재감사 전까지 미착수 상태로 유지한다.
 
 - React Doctor full scan은 269개 파일·actionable 진단 0건이다. canonical config와 exact verifier가
   shadow config, command·scope 축소와 package-level 우회를 fail-close한다. runtime correctness
