@@ -55,7 +55,6 @@ async def load_offline_upload_op(context: OpExecutionContext) -> dict[str, objec
                 http,
                 api_key=settings.kor_travel_geo_api_key_value,
             )
-            kraddr.preflight()  # T-VN-H21: 결선 누락을 opaque 400 대신 원인 그대로.
             result = await client.run_offline_upload_load_job(
                 upload_id,
                 store=store,
