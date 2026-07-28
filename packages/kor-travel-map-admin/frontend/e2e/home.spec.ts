@@ -6,6 +6,33 @@ import { expect, test } from "@playwright/test";
  * 렌더되어야 한다.
  */
 test.describe("home page (/)", () => {
+  test.beforeEach(async ({ page }) => {
+    // 이 smoke의 계약은 운영 summary 실패와 무관한 shell/navigation 렌더다.
+    // 실 backend 지연에 기대지 않고, metric skeleton을 결정적으로 해제하는 두
+    // summary endpoint를 실패시킨다. happy/error payload 자체는 home-nav.spec.ts가
+    // 생성 OpenAPI 타입에 바인딩해 별도로 검증한다.
+    for (const pathname of [
+      "/v1/ops/metrics",
+      "/v1/ops/pipeline/overview",
+    ]) {
+      await page.route(`**${pathname}**`, async (route) => {
+        const request = route.request();
+        if (
+          request.method() !== "GET" ||
+          !new URL(request.url()).pathname.endsWith(pathname)
+        ) {
+          await route.continue();
+          return;
+        }
+        await route.fulfill({
+          body: JSON.stringify({ detail: "mocked summary unavailable" }),
+          contentType: "application/json",
+          status: 503,
+        });
+      });
+    }
+  });
+
   test("운영 홈 shell + 주요 운영 내비 링크 렌더", async ({ page }) => {
     await page.goto("/");
 
