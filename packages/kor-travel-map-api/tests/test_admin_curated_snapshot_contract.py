@@ -183,9 +183,13 @@ def test_admin_detail_snapshot_schemas_pin_required_types_and_nullability() -> N
         schema = spec["components"]["schemas"][schema_name]
         assert schema.get("additionalProperties") is False, schema_name
         # exact property 집합 — producer 쪽이므로 무단 노출·삭제를 모두 막는다.
-        assert set(schema["properties"]) == set(fields), (
+        # `$ref` property(item의 feature_snapshot)는 아래 컨테이너 테스트가 대상까지 고정한다.
+        expected_properties = set(fields) | (
+            set(_ITEM_REFS) if schema_name == "CuratedFeatureDetailItemView" else set()
+        )
+        assert set(schema["properties"]) == expected_properties, (
             schema_name,
-            set(schema["properties"]) ^ set(fields),
+            set(schema["properties"]) ^ expected_properties,
         )
         for field, expected in fields.items():
             _assert_field(spec, schema_name, field, expected)
