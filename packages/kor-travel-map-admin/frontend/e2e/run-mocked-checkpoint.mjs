@@ -9,6 +9,7 @@ import { frontendBuildInputs } from "../../../../scripts/frontend-build-inputs.m
 
 const checkpoints = new Set(["A", "B", "C", "D"]);
 const [checkpoint, ...playwrightArgs] = process.argv.slice(2);
+const repoRoot = path.resolve(process.cwd(), "../../..");
 
 if (!checkpoint || !checkpoints.has(checkpoint)) {
   console.error(
@@ -36,7 +37,7 @@ if (!revision || !/^[0-9a-f]{40}$/.test(revision)) {
 }
 
 const headResult = spawnSync("git", ["rev-parse", "HEAD"], {
-  cwd: process.cwd(),
+  cwd: repoRoot,
   encoding: "utf8",
 });
 const headRevision = headResult.stdout?.trim();
@@ -60,7 +61,7 @@ const statusResult = spawnSync(
   "git",
   ["status", "--porcelain", "--untracked-files=normal"],
   {
-    cwd: process.cwd(),
+    cwd: repoRoot,
     encoding: "utf8",
   },
 );
@@ -99,9 +100,9 @@ if (
 }
 const sourceDigestResult = spawnSync(
   process.execPath,
-  [path.resolve(process.cwd(), "../../../scripts/frontend-source-digest.mjs")],
+  [path.join(repoRoot, "scripts/frontend-source-digest.mjs")],
   {
-    cwd: path.resolve(process.cwd(), "../../.."),
+    cwd: repoRoot,
     encoding: "utf8",
   },
 );
@@ -300,7 +301,7 @@ try {
   const archiveResult = spawnSync(
     "git",
     ["archive", "--format=tar", `--output=${buildContextArchive}`, "HEAD"],
-    { cwd: process.cwd(), encoding: "utf8" },
+    { cwd: repoRoot, encoding: "utf8" },
   );
   if (archiveResult.status !== 0) {
     throw new Error("exact HEAD build context archive를 만들 수 없습니다.");
@@ -456,24 +457,19 @@ try {
     },
   );
   const postHeadResult = spawnSync("git", ["rev-parse", "HEAD"], {
-    cwd: process.cwd(),
+    cwd: repoRoot,
     encoding: "utf8",
   });
   const postStatusResult = spawnSync(
     "git",
     ["status", "--porcelain", "--untracked-files=normal"],
-    { cwd: process.cwd(), encoding: "utf8" },
+    { cwd: repoRoot, encoding: "utf8" },
   );
   const postSourceDigestResult = spawnSync(
     process.execPath,
-    [
-      path.resolve(
-        process.cwd(),
-        "../../../scripts/frontend-source-digest.mjs",
-      ),
-    ],
+    [path.join(repoRoot, "scripts/frontend-source-digest.mjs")],
     {
-      cwd: path.resolve(process.cwd(), "../../.."),
+      cwd: repoRoot,
       encoding: "utf8",
     },
   );
