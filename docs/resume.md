@@ -636,4 +636,3 @@ spec 측 6-layer fix 재적용 지침은 `docs/journal.md` 2026-07-26.
 - **잔여 = app-side render churn**(deterministic app 버그, test로 우회 불가). fresh 환경 재확인 권장(22회 재현이
   dagster DB bloat로 reload/getSchedule을 느리게 했을 가능성).
 - **머지**: #837(map, gate descope) + #74(docker-manager, getSchedule public url + reload timeout).
-

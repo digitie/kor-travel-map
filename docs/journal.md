@@ -9,8 +9,8 @@
 
 | 파일 | 기간 | 엔트리 | 크기 |
 | --- | --- | --- | --- |
-| [`journal-2026-07a.md`](archive/journal-2026-07a.md) | 2026-07-12 ~ 2026-07-24 | 116건 | 220 KB |
-| [`journal-2026-07b.md`](archive/journal-2026-07b.md) | 2026-07-01 ~ 2026-07-12 | 27건 | 44 KB |
+| [`journal-2026-07a.md`](archive/journal-2026-07a.md) | 2026-07-13 ~ 2026-07-24 | 115건 | 219 KB |
+| [`journal-2026-07b.md`](archive/journal-2026-07b.md) | 2026-07-01 ~ 2026-07-12 | 28건 | 45 KB |
 | [`journal-2026-06a.md`](archive/journal-2026-06a.md) | 2026-06-10 ~ 2026-06-30 | 172건 | 219 KB |
 | [`journal-2026-06b.md`](archive/journal-2026-06b.md) | 2026-06-02 ~ 2026-06-10 | 179건 | 220 KB |
 | [`journal-2026-06c.md`](archive/journal-2026-06c.md) | 2026-06-01 ~ 2026-06-02 | 36건 | 53 KB |
@@ -1124,4 +1124,3 @@ re-render**(button attach/detach + `scheduleControlsDisabled` 깜빡임)로 star
 비활성화 → `ops.dagster_schedule_overrides` 정리 + dagster reload로 `20 * * * *` 복원. 현 prod: cron=20, RUNNING.
 **descope 방법**: `scripts/run-c7-prod-live-e2e.sh` SPECS에서 schedule-write 제외(spec 파일·contract test content 계약은
 유지). spec은 b5375a52 배포본 유지(WIP fix는 위 6개로 문서화 — 재적용 시 참조). **머지**: #837(gate descope) + #74.
-

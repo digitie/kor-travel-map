@@ -4,6 +4,19 @@
 > [`docs/journal.md`](../journal.md)이며, 전체 아카이브 목록도 거기에 있다.
 > 이 파일은 읽기 전용 이력이다 — 새 엔트리는 `docs/journal.md` 상단에 추가한다.
 
+## 2026-07-12 (codex) — Feature 목록/상세 polish와 큐레이션 지도 필터 보정
+
+- **Feature 목록**: rows/page/page size/duration 요약을 필터줄에서 표 헤더의 "Feature 목록" 옆으로
+  옮기고, 같은 영역 안의 cursor pagination은 테두리 없는 형태로 표시해 중복 테두리를 줄였다.
+- **Feature 상세 패널**: 우측 preview의 별도 "Feature 상세" 헤더 row를 제거하고, feature 이름 행에
+  편집 버튼과 전체 feature_id를 함께 표시하도록 정리했다.
+- **큐레이션 지도**: PC 화면에서 검색/필터 영역이 두 줄로 깨지지 않도록 한 줄 가로 스크롤 컨트롤바로
+  재배치하고 title 다중 선택 label은 접근성 label만 남겼다.
+- **검수 500 확인**: n150 `/v1/admin/features/change-requests?status=pending&page_size=100` 직접 호출과
+  live 검수 화면에서 500이 재현되지 않고 200/정상 빈 목록으로 표시됨을 확인했다.
+- **검증(로컬)**: admin frontend `type-check` 통과, `lint` 0 error(기존 warning 3),
+  `NEXT_PUBLIC_KOR_TRAVEL_MAP_*` 로컬값 주입 production build 통과.
+
 ## 2026-07-12 (codex) — admin 큐레이션/Feature/이슈 화면 밀도 정리
 
 - **큐레이션 UI**: 큐레이션 상세·관리의 위치 지도 높이를 키우고 동일 좌표 정규화 경로로 마커를 표시하도록
@@ -527,4 +540,3 @@ Feature 관련 운영 UI와 API 경로를 `/admin/features/...` namespace로 모
 - **live e2e**: Windows Playwright live targeted run에서 Feature 지도 마커 렌더와 클러스터 클릭 zoom
   증가가 3 passed(인증 setup 포함)로 통과했다. 실제 점 마커 클릭 상세 패널 round-trip 테스트는 운영
   타일/응답 대기에서 5분 timeout이 나 별도 후속 검증 대상으로 남겼다.
-
