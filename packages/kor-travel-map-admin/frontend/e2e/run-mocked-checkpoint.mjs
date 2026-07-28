@@ -165,18 +165,23 @@ function cleanupFilesystem() {
 
 function runCleanupCommand(args) {
   return new Promise((resolve) => {
-    const child = spawn("docker", args, { stdio: "ignore" });
+    const child = spawn("docker", args, {
+      detached: process.platform !== "win32",
+      stdio: "ignore",
+    });
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(forceTimer);
+      resolve();
+    };
     const forceTimer = setTimeout(() => {
-      child.kill("SIGKILL");
+      terminateChildGroup(child, "SIGKILL");
+      finish();
     }, 1_000);
-    child.once("error", () => {
-      clearTimeout(forceTimer);
-      resolve();
-    });
-    child.once("exit", () => {
-      clearTimeout(forceTimer);
-      resolve();
-    });
+    child.once("error", finish);
+    child.once("exit", finish);
   });
 }
 

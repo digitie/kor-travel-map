@@ -119,6 +119,7 @@ def test_mocked_checkpoint_runner_owns_exact_frontend_container() -> None:
     assert "const postBuildInfo = await readBuildInfo(5_000)" in script
     assert 'runCleanupCommand(["rm", "-f", ownedContainerName])' in script
     assert 'runCleanupCommand(["image", "rm", "-f", ownedImageTag])' in script
+    assert 'terminateChildGroup(child, "SIGKILL")' in script
     assert 'spawnSync("docker"' not in script
     assert (
         'result.status === (checkpoint === "D" ? "passed" : "failed")'
