@@ -931,7 +931,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
           .selectOption("01070300");
         await page.getByLabel("경도", { exact: true }).fill("126.97841");
         await page.getByLabel("위도", { exact: true }).fill("37.56668");
-        await page.getByLabel("마커 아이콘").selectOption("marker");
+        await page.getByLabel("마커 아이콘").selectOption("park");
         await page.getByLabel("마커 색상").selectOption("P-01");
         await page.getByLabel("사유", { exact: true }).fill(`${BASE_REASON} add`);
         await page.getByLabel("Feature ID").fill(FEATURE_ID);
@@ -1007,7 +1007,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
           },
           kind: "place",
           marker_color: "P-01",
-          marker_icon: "marker",
+          marker_icon: "park",
           name: CREATE_NAME,
           sido_code: "11",
           sigungu_code: "11140",
@@ -1076,7 +1076,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
           feature_id: FEATURE_ID,
           kind: "place",
           marker_color: "P-01",
-          marker_icon: "marker",
+          marker_icon: "park",
           name: CREATE_NAME,
           sido_code: "11",
           sigungu_code: "11140",
@@ -1106,7 +1106,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
           },
           feature_id: FEATURE_ID,
           marker_color: "P-01",
-          marker_icon: "marker",
+          marker_icon: "park",
           name: CREATE_NAME,
           sido_code: "11",
           sigungu_code: "11140",
@@ -1250,6 +1250,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
           homepage: "https://example.invalid/updated",
           source: "https://example.invalid/source",
         });
+        expect(updateResponse.data.request.payload).not.toHaveProperty(
+          "marker_icon",
+        );
 
         await gotoChangeReviews(page);
         await setChangeFilters(page, {
@@ -1291,7 +1294,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
             run_id: RUN_ID,
           },
           marker_color: "P-02",
-          marker_icon: "marker",
+          marker_icon: "park",
           name: UPDATED_NAME,
           sido_code: "11",
           sigungu_code: "11140",
@@ -1325,7 +1328,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
             run_id: RUN_ID,
           },
           marker_color: "P-02",
-          marker_icon: "marker",
+          marker_icon: "park",
           name: UPDATED_NAME,
           sido_code: "11",
           sigungu_code: "11140",
