@@ -55,10 +55,40 @@ from kortravelmap.core.address import (
     normalize_bjd_code,
     normalize_korean_text,
 )
+from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.dto import Address, Coordinate
 
 if TYPE_CHECKING:
     import httpx
+
+# geo public_api_key의 query.key max_length. 초과 시 미설정과 같은 400 E0100이 돌아온다.
+_MAX_API_KEY_LENGTH: Final = 128
+
+
+def _raise_for_status_sanitized(resp: httpx.Response) -> None:
+    """``resp.raise_for_status()``를 하되 비밀이 든 메시지를 새로 만들지 않는다 (T-VN-H21).
+
+    ``str(httpx.HTTPStatusError)``는 request URL을 그대로 담고, 그 URL query에는
+    ``key=<SECRET>``가 들어 있다. 이 문자열은 상위 boundary에서 **502 응답 body와 로그로
+    그대로 흘러간다**(키가 비어 있던 동안만 무해했다). query string을 제거한 URL만 남기고,
+    ``from None``으로 원본을 연결하지 않아 traceback chain으로도 새지 않게 한다.
+    """
+    import httpx as _httpx
+
+    sanitized: GeoRequestError | None = None
+    try:
+        resp.raise_for_status()
+    except _httpx.HTTPStatusError as exc:
+        safe_url = exc.request.url.copy_with(query=None)
+        sanitized = GeoRequestError(
+            f"kor-travel-geo 호출 실패: {exc.response.status_code} "
+            f"{exc.response.reason_phrase} for {safe_url}"
+        )
+    # except 블록 **밖에서** 던진다. 안에서 던지면 ``from None``으로도 ``__context__``에
+    # 원본(=key가 든 URL 문자열)이 남아, ``__context__``를 따라가는 로거·리포터로 샌다.
+    if sanitized is not None:
+        raise sanitized
+
 
 __all__ = [
     # 비동기 콜러블 계약 (docs/architecture/address-geocoding.md §2)
@@ -788,10 +818,49 @@ class KorTravelGeoRestClient:
         *,
         base_path: str = "/v2",
         api_key: str | None = None,
+        require_api_key: bool = True,
     ) -> None:
+        """T-VN-H21: ``require_api_key``는 기본 ``True``다.
+
+        결선 검증을 **생성 시점**에 두어, 새 live 호출 지점이 추가돼도 별도 조치 없이
+        자동으로 보호된다(호출 지점마다 수동으로 guard를 붙이는 방식은 한 곳만 빠뜨려도
+        조용히 무력화된다 — 실제로 최초 구현이 그랬다).
+
+        mock transport로만 도는 테스트처럼 key가 필요 없는 경우에만 명시적으로
+        ``require_api_key=False``로 opt-out한다.
+        """
         self._http = http_client
         self._base = base_path.rstrip("/")
         self._api_key = api_key.strip() if api_key is not None else None
+        if require_api_key:
+            self.preflight()
+
+    def preflight(self) -> None:
+        """인증 결선을 확인한다 (T-VN-H21).
+
+        geo PR#399 이후 `/v2/*`는 **외부/비신뢰 호출에** VWorld 호환 ``key`` query를 요구한다
+        (trusted admin proxy·service-token 경로는 우회 — ADR-060). key가 비어 있으면 서버가
+        **handler 실행 전에** ``400 E0100 query.key: Field required``로 막는데, 그 응답만 보면
+        좌표/payload 문제로 오인하기 쉽다(실제 오진 이력: ADR-060). 결선 누락을 원인 그대로
+        먼저 드러낸다.
+
+        비밀은 메시지에 넣지 않는다 — 결선 여부와 길이 위반 여부만 말한다.
+        """
+        if not self._api_key:
+            raise GeoAuthNotConfiguredError(
+                "kor-travel-geo REST v2 requires an API key but none is configured; "
+                "set KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY "
+                "(운영은 VWorld API key와 같은 값을 사용한다). "
+                "미설정 시 서버가 handler 실행 전에 400 E0100 query.key로 막는다."
+            )
+        # geo public_api_key는 128자 초과를 query.key string_too_long으로 되돌려보내
+        # 미설정과 동일한 E0100/400 envelope가 된다. 값은 노출하지 않고 길이만 알린다.
+        if len(self._api_key) > _MAX_API_KEY_LENGTH:
+            raise GeoAuthNotConfiguredError(
+                "kor-travel-geo REST v2 API key is too long "
+                f"({len(self._api_key)} > {_MAX_API_KEY_LENGTH} chars); "
+                "서버가 query.key string_too_long으로 400 E0100을 돌려준다."
+            )
 
     def _query_params(self) -> dict[str, str] | None:
         if not self._api_key:
@@ -825,7 +894,7 @@ class KorTravelGeoRestClient:
             json=body,
             params=self._query_params(),
         )
-        resp.raise_for_status()
+        _raise_for_status_sanitized(resp)
         return _parse_reverse_response(resp.json())
 
     async def geocode(
@@ -850,7 +919,7 @@ class KorTravelGeoRestClient:
             json=body,
             params=self._query_params(),
         )
-        resp.raise_for_status()
+        _raise_for_status_sanitized(resp)
         return _parse_geocode_response(resp.json())
 
     async def regions_within_radius(
@@ -873,7 +942,7 @@ class KorTravelGeoRestClient:
             json=body,
             params=self._query_params(),
         )
-        resp.raise_for_status()
+        _raise_for_status_sanitized(resp)
         return _parse_regions_within_radius_response(resp.json())
 
 

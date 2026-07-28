@@ -47,6 +47,10 @@ Next API proxy, backend trusted-proxy header, VWorld 호환 public API key로 �
 - 기존 로컬/테스트 하위호환을 위해 `admin_proxy_secret`이 없는 설정에서는 admin gate를 강제하지
   않는다. 실제 운용 `.env`에는 secret을 넣어 프론트 프록시 경계를 활성화한다.
 - `kor-travel-geo` 호출 경로(CLI/API/Dagster/live test)는 같은 settings key 추출 규칙을 공유한다.
+  **결선 검증 위치는 T-VN-H21(2026-07-29)에서 호출 지점이 아니라 `KorTravelGeoRestClient`
+  생성 시점으로 확정했다** — 경로별로 guard를 붙이는 방식은 한 곳만 빠뜨려도 조용히 무력화되고,
+  그 회귀를 막으려던 정적 스캐너 자체가 우회 가능함이 적대적 리뷰에서 시연됐다. 위 4개 경로는
+  이제 별도 조치 없이 같은 규칙을 공유하며, 미결선은 `GeoAuthNotConfiguredError` → HTTP 503이다.
 
 ## 개정 (2026-07-18, ADR-066)
 

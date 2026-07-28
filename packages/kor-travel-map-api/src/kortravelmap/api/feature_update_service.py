@@ -15,6 +15,7 @@ from typing import Any, NoReturn
 from uuid import UUID
 
 import httpx
+from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.geocoding import KorTravelGeoRestClient, resolve_sigungu_by_radius
 from kortravelmap.infra.feature_update_active_repo import (
@@ -491,9 +492,13 @@ def _enqueue_error(exc: Exception) -> FeatureUpdateServiceError:
         return FeatureUpdateLockConflict(exc)
     if isinstance(exc, SigunguResolverUnavailable):
         return exc
+    if isinstance(exc, GeoAuthNotConfiguredError):
+        # T-VN-H21: key 미결선은 base_url 미설정(SigunguResolverUnavailable → 503)과
+        # 같은 등급의 서버측 설정 결함이다. ValueError보다 먼저 분기해야 422로 새지 않는다.
+        return SigunguResolverUnavailable(str(exc))
     if isinstance(exc, ValueError):
         return FeatureUpdateValidationError(str(exc))
-    if isinstance(exc, httpx.HTTPError):
+    if isinstance(exc, httpx.HTTPError | GeoRequestError):
         return FeatureUpdateResolverError(f"kor-travel-geo 호출 실패: {exc}")
     return FeatureUpdateEnqueueError("feature update request enqueue failed")
 

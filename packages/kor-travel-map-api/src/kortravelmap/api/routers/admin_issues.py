@@ -18,6 +18,7 @@ from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.geocoding import (
     KorTravelGeoRestClient,
     geocode_response_to_address,
@@ -482,12 +483,14 @@ async def patch_admin_issue(
             actor=context.actor,
             started_at=started_at,
         )
-    except _KorTravelGeoUnavailable as exc:
+    except (_KorTravelGeoUnavailable, GeoAuthNotConfiguredError) as exc:
+        # T-VN-H21: key 미결선은 base_url 미설정과 같은 **서버측 설정 결함**이다.
+        # 호출자 입력 오류(422)로 보고하면 좌표 문제로 오진하게 된다.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, GeoRequestError) as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"kor-travel-geo 호출 실패: {exc}",

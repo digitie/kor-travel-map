@@ -52,6 +52,7 @@ from kortravelmap.cli.mutex import dedup_merge_lock_key, try_mutex_lock
 from kortravelmap.cli.records import iter_mois_license_records
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core import kst_now
+from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
 from kortravelmap.infra.consistency import (
     DEDUP_PENDING_WARN_THRESHOLD,
     DEDUP_SCORE_REGRESSION_WARN_POINTS,
@@ -401,6 +402,7 @@ async def _geocoders_for(
             http,
             api_key=settings.kor_travel_geo_api_key_value,
         )
+        # T-VN-H21: 결선 검증은 생성 시점(require_api_key 기본 True)에서 이뤄진다.
         yield (
             kor_travel_geo_reverse_geocoder(client),
             kor_travel_geo_address_resolver(client, fallback="api"),
@@ -522,6 +524,11 @@ async def _cmd_import_mois(args: argparse.Namespace) -> int:
             )
         print(_format_bulk_result(result))
         return 0 if result.acquired else _EXIT_LOCK_SKIPPED
+    except GeoAuthNotConfiguredError as exc:
+        # T-VN-H21: geo 결선 누락은 재시도해도 무의미한 설정 오류다. traceback(exit 1)
+        # 대신 이 CLI의 관용구(stderr + _EXIT_INVALID)로 원인을 그대로 말한다.
+        print(f"import: {exc}", file=sys.stderr)
+        return _EXIT_INVALID
     finally:
         await engine.dispose()
 

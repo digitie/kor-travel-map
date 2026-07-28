@@ -24,6 +24,8 @@ HTTP 매핑 (``docs/architecture/debug-ui-package.md §6.4``)
 | ``ImportJobConflictError`` | 409 | ``JOB_CONFLICT`` |
 | ``ProviderError`` | 502 | ``PROVIDER_ERROR`` |
 | ``FileStoreError`` | 502 | ``FILE_STORE_ERROR`` |
+| ``GeoAuthNotConfiguredError`` | 503 | ``GEO_AUTH_NOT_CONFIGURED`` |
+| ``GeoRequestError`` | 502 | ``PROVIDER_ERROR`` |
 """
 
 from __future__ import annotations
@@ -37,6 +39,8 @@ __all__ = [
     "ImportJobConflictError",
     "ProviderError",
     "FileStoreError",
+    "GeoAuthNotConfiguredError",
+    "GeoRequestError",
     "FeatureSearchCursorError",
     "FeatureSearchCursorInvalidError",
     "FeatureSearchCursorVersionUnsupportedError",
@@ -121,6 +125,30 @@ class FileStoreError(KorTravelMapError):
 
     ``upload_feature_files()``의 multipart upload 실패, signed URL 생성 실패,
     bucket 존재하지 않음 등을 wrap한다 (``docs/architecture/feature-files-rustfs.md`` 참조).
+
+    HTTP 502 매핑.
+    """
+
+
+class GeoAuthNotConfiguredError(KorTravelMapError):
+    """kor-travel-geo REST v2 호출에 필요한 API key가 결선되지 않았다 (T-VN-H21).
+
+    key가 없으면 geo 서버는 handler 실행 전에 ``400 E0100 query.key: Field required``로
+    막는데, 그 응답만 보면 좌표/payload 문제로 오인하기 쉽다(실제 오진 이력: ADR-060).
+    **서버측 설정 결함**이므로 호출자 입력 오류(422)나 상태 충돌(409)이 아니라
+    ``ValidationError`` 계열과 분리한다.
+
+    HTTP 503 매핑 — ``base_url`` 미설정(``SigunguResolverUnavailable`` /
+    ``_KorTravelGeoUnavailable``)과 같은 등급으로 다룬다.
+    """
+
+
+class GeoRequestError(KorTravelMapError):
+    """kor-travel-geo 호출이 HTTP 오류로 실패했다 (비밀 제거된 메시지).
+
+    raw ``httpx`` 오류 문자열에는 ``?key=<SECRET>``가 포함된 request URL이 들어가고,
+    그 문자열이 API 응답 body와 로그로 그대로 흘러간다. 본 예외는 query string을 제거한
+    URL만 담는다 (T-VN-H21, SKILL.md §4 비밀 비출력).
 
     HTTP 502 매핑.
     """
