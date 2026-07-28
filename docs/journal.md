@@ -2,6 +2,45 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-28 (codex) — PR #869 후 task·코드·열린 이슈 재감사
+
+**결론**: PR #869를 CI green 뒤 셀프 머지하고, 최신 main의 backlog·완료 이력·실코드와
+Map/PinVi/docker-manager/geo의 열린 PR·이슈를 대조했다. 큰 task를 독립 PR·검증 단위로
+분해하고 Agent A/B가 실제로 병렬 진행할 수 있도록 소유 경계와 barrier를 다시 정했다.
+
+- **#869 머지**: head `c0cd4979`의 lint, OpenAPI, frontend, Python 3.11/3.12/3.13,
+  fixture replay, PostGIS 통합 8개 GitHub Actions가 모두 성공했다. PR #869는
+  merge commit `25e9304b`로 main에 반영됐다.
+- **열린 항목 대조**: Map open issue는 #673·#812·#815·#819, open PR은 #814 한 건이다.
+  PinVi 관련 open PR은 #403, 외부 follow-up은 #215다. docker-manager와 geo에는 open
+  PR/issue가 없다. 닫힌 #738은 lane 정본을 `tasks.md`로 이관한 planning hub라 완료 상태가 맞다.
+- **오래 열린 H07**: GitHub compare 기준 Map #814는 main보다 85 commits, PinVi #403은
+  13 commits 뒤처졌다. Map main의 `test_export_openapi.py`에는 T-VN-05R이 추가한
+  discriminator/additionalProperties 계열 검사가 이미 있어 old branch를 그대로 합치면 중복된다.
+  H07A/B를 rebase→중복 제거→residual required/type/enum 재감사→landing으로 분리하고,
+  실제 admin runtime surface H07D 뒤 compatible-pair manifest H07C를 진행한다.
+- **H21 근인 정정**: 배포된 geo `/v1/openapi.json`의 `POST /v2/reverse`는 `lon`/`lat`를
+  요구하며 Map client body와 일치한다. 실제 무인증 요청의 400은
+  `E0100 query.key: Field required`였다. endpoint health만 확인한 live fixture가 보호
+  operation credential readiness를 검사하지 않아 5건을 계약 drift로 오분류했다. 민감값 비노출
+  key preflight와 실서비스 dedup 5건 재실증이 새 완료 조건이다.
+- **열린 이슈 승격**: #819는 docker-manager HAProxy tunnel config와 heartbeat 두 주기 이상
+  same-socket live 검증인 H27로, #673은 현재 실데이터 evidence 재기준화 H28A와 provider-neutral
+  rule/replay recovery H28B로 승격했다. PinVi #215는 Map lane이 소유하지 않는 외부 추적으로 남겼다.
+- **task 분해**: mocked E2E는 failure manifest→Feature/curation→ops→나머지/전체 병렬 gate,
+  React 구조 debt는 admin Feature→admin data-ops→public map/home→ops 순으로 나눴다.
+  service/weather batch는 Map producer와 PinVi consumer, idempotency는 inventory와 domain별
+  ledger/consumer, cache generation은 epoch→transaction outbox→relay로 분리했다.
+  H25는 evidence와 mutation, H22는 read/preview→transaction command→UI/live로 분리했다.
+  Wave 2는 freeze 3건과 schema/read-write/cleanup 단계로 세분화하고 T-VN-39를 최종 barrier로 뒀다.
+- **lane 배치**: Agent A는 H07→H27/H21/H28/H25/H22와 이후 UUID/subtype/notice를,
+  Agent B는 T-VN-45부터 frontend→service/weather/idempotency/outbox와 이후
+  dataset/summary/state/override/curation을 소유한다. migration-bearing PR은 번호 예약부터
+  머지까지 직렬화하고, forward migration 뒤 명시적 필요가 없으면 rollback하지 않는다.
+- **실행 규율**: 첫 reviewable checkpoint에서 PR #870을 열고 변경을 작은 커밋으로 push했다.
+  실패 시 검증된 checkpoint부터 재개하며, PR #870부터 문서 전용 변경도 적대적 리뷰어 2명을
+  사용한다. 문서 PR은 사용자 지시에 따라 CI 결과를 기다리지 않고 리뷰·문서 검증 뒤 머지한다.
+
 ## 2026-07-27 (codex) — T-VN-47 React Doctor + durable curation + #868 완결
 
 **결론**: React Doctor runtime 진단을 근인으로 해소하고, #862의 조건부 curation upsert를

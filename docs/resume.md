@@ -1,5 +1,29 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-28 (codex) — PR #869 머지 후 task 전면 재감사
+
+**다음 한 작업**: 문서 PR #870의 적대적 리뷰어 2명 검토를 반영하고 문서 검증·보안 감사를
+통과시킨 뒤, 사용자 지시에 따라 CI를 기다리지 않고 셀프 머지한다. 이어서 갱신된 Lane B의
+첫 작업 `T-VN-45`를 시작한다.
+
+- PR #869는 exact head `c0cd4979`의 GitHub Actions 8개가 모두 green인 뒤 merge commit
+  `25e9304b`로 main에 반영됐다.
+- Map의 열린 이슈는 #673·#812·#815·#819, 열린 PR은 #814다. PinVi 관련 열린 PR은 #403,
+  외부 추적 이슈는 #215이며 docker-manager/geo에는 열린 PR·이슈가 없다.
+- Map #814는 main보다 85 commits, PinVi #403은 13 commits 뒤처졌다. Map main에는 유사
+  user schema assertion이 이미 있으므로 H07A/B는 rebase 후 중복을 제거하고 residual contract만
+  다시 검토하는 landing task로 바꿨다.
+- `T-VN-H21`의 실제 `/v2/reverse` 400 body는
+  `E0100 query.key: Field required`였다. `lon`/`lat` request schema는 배포 OpenAPI와 일치하므로
+  payload drift가 아니라 live test의 credential preflight 누락으로 재분류했다.
+- #673과 #819를 각각 `T-VN-H28A/B`, `T-VN-H27`로 승격했다. 큰 frontend/API/curation/Wave 2
+  task는 독립 검증 가능한 child task로 분해했다.
+- Agent A는 H07 cross-repo 계약→edge/geo/data-quality queue, Agent B는 T-VN-45부터 frontend
+  hardening→PinVi 소비 API queue를 순차 소유한다. 두 lane은 병렬 실행하되 migration 번호,
+  OpenAPI 정본, compatible pair와 Wave 2 freeze barrier에서만 직렬화한다.
+- 이 PR은 문서 전용이므로 destructive Live UI 대상이 아니다. `git diff --check`, task index/detail
+  정합, prod redaction과 staged 민감정보 scan을 검증하며 코드/DB/API에는 변경이 없다.
+
 ## 2026-07-27 (codex) — T-VN-47 + durable curation + #868 완결
 
 **다음 한 작업**: 본 PR의 CI green·셀프 merge 뒤 전체 열린 task와 실코드·열린 이슈를
