@@ -44,6 +44,10 @@ const EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES = expectedLiveCount(
   15,
   15,
 );
+const EXPECTED_BEAUTIFUL_LIGHTHOUSE_MATCHES = expectedLiveMatches(
+  "E2E_EXPECTED_BEAUTIFUL_LIGHTHOUSE_MATCHES",
+  15 - EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES,
+);
 const MULTI_OBSERVATION_FEATURE_ID = "f_4127310100_e_227e045425edb459";
 const RESOURCE_ROOT =
   process.env.E2E_CURATION_RESOURCE_ROOT ??
@@ -83,6 +87,11 @@ test.describe.configure({ mode: "serial" });
 
 function expectedLiveCount(name: string, fallback: number, maximum?: number): number {
   const raw = process.env[name];
+  if (raw !== undefined && !/^(0|[1-9]\d*)$/.test(raw)) {
+    throw new Error(
+      `${name} must be a non-empty decimal integer; received ${JSON.stringify(raw)}`,
+    );
+  }
   const value = raw === undefined ? fallback : Number(raw);
   if (
     !Number.isSafeInteger(value) ||
@@ -90,9 +99,32 @@ function expectedLiveCount(name: string, fallback: number, maximum?: number): nu
     (maximum !== undefined && value > maximum)
   ) {
     const range = maximum === undefined ? "non-negative" : `between 0 and ${maximum}`;
-    throw new Error(`${name} must be a ${range} safe integer; received ${raw}`);
+    throw new Error(
+      `${name} must be a ${range} safe integer; received ${JSON.stringify(raw)}`,
+    );
   }
   return value;
+}
+
+function expectedLiveMatches(name: string, expectedCount: number): string[] {
+  const raw = process.env[name];
+  if (raw === undefined && expectedCount === 0) return [];
+  if (raw === undefined || raw.length === 0 || raw.trim() !== raw) {
+    throw new Error(`${name} must declare ${expectedCount} source=feature pair(s)`);
+  }
+  const pairs = raw.split(",");
+  if (
+    pairs.length !== expectedCount ||
+    pairs.some((pair) => !/^[^=,\s]+=[^=,\s]+$/.test(pair))
+  ) {
+    throw new Error(
+      `${name} must contain ${expectedCount} comma-separated source=feature pair(s)`,
+    );
+  }
+  if (new Set(pairs).size !== pairs.length) {
+    throw new Error(`${name} must not contain duplicate source=feature pairs`);
+  }
+  return pairs.sort();
 }
 
 async function browserJson<T>(page: Page, pathName: string): Promise<T> {
@@ -267,9 +299,11 @@ test.describe("공식 큐레이션 collection live", () => {
     expect(linkedLighthouses).toHaveLength(
       15 - EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES,
     );
-    expect(new Set(linkedLighthouses.map((item) => item.feature_id)).size).toBe(
-      linkedLighthouses.length,
-    );
+    expect(
+      linkedLighthouses
+        .map((item) => `${item.external_item_id}=${item.feature_id}`)
+        .sort(),
+    ).toEqual(EXPECTED_BEAUTIFUL_LIGHTHOUSE_MATCHES);
     const detail = page.getByTestId("curation-collection-detail");
     await expect(detail.getByText("Feature 미연결", { exact: true })).toHaveCount(
       EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES,
