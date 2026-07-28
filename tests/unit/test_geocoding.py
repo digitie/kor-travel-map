@@ -1496,7 +1496,9 @@ def test_geo_rest_client_preflight_rejects_missing_api_key() -> None:
     try:
         for missing in (None, "", "   "):
             client = KorTravelGeoRestClient(http, api_key=missing)
-            with pytest.raises(ValueError) as excinfo:
+            with pytest.raises(
+                ValueError, match="KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY"
+            ) as excinfo:
                 client.preflight()
             message = str(excinfo.value)
             # 원인을 그대로 지목하고, 결선할 env 이름을 알려준다.
@@ -1517,7 +1519,7 @@ def test_geo_rest_client_preflight_passes_with_api_key_and_leaks_nothing() -> No
 
         # 결선 누락 메시지는 비밀을 담지 않는다(값 노출 회귀 방지).
         empty = KorTravelGeoRestClient(http, api_key=None)
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(ValueError, match="E0100") as excinfo:
             empty.preflight()
         assert secret not in str(excinfo.value)
     finally:
