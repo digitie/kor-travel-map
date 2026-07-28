@@ -53,7 +53,11 @@
   전파하고 legacy UUID·operator/source/archive 이력을 첫 authoritative import에서 같은 행으로
   승계한다. 모호한 legacy 후보와 같은 source item의 active Feature 중복은 mutation 전에
   fail-close한다. 0064→0066 연속 업그레이드는 0065의 지연 FK·trigger event를 0066 첫 DDL 전에
-  명시적으로 검사·소진해 단일 Alembic transaction에서도 안전하게 전진한다.
+  명시적으로 검사·소진해 단일 Alembic transaction에서도 안전하게 전진한다. n150 prod 격리
+  clone에서 0036→0066 forward migration, 실제 UI CSV preview/commit과 REST/admin/지도 검증,
+  공식 19 collections·486 source-present memberships, component 2/2, operator adoption 2,
+  duplicate target 0, prod 불변을 확인했다. 실패 시 clone/build/import checkpoint를 보존해
+  처음부터 반복하지 않고 실패 단계부터 재개했으며 성공 뒤 clone을 삭제했다.
 - [x] **T-VN-H26 / #868** — main에 이미 반영된 c6c canonical
   `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` direct alias와 회귀를 재확인했다. 남은 수용 조건인 기존
   `KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET` fallback을 추가했다. 두 값이 함께 있으면 canonical이

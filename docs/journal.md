@@ -64,6 +64,11 @@ canonical 환경변수 누락(#868)도 같은 PR에서 완결했다.
   dump를 모두 정리해 seed 단계 재개가 불가능했다. 이후 하네스는 실패 시 격리 clone을 보존하고
   최종 성공 시에만 삭제하도록 바꿨다. 공용 runbook/tasks에는 exact SHA·migration head·fixture
   identity checkpoint를 남기고 무결성이 증명되면 실패 지점부터 재개하는 규율을 추가했다.
+  최종 clone에서는 약 1시간이 걸린 0036→0066 migration을 한 번만 수행하고, UI 실행 경로·fixture
+  visibility·실데이터 기대값·최종 집계 범위 오류마다 같은 clone과 성공한 build/import를 보존해
+  실패 단계부터 재개했다. clean fixture 기본값(공개 membership 486, 미연결 등대 15)은 유지하면서
+  operator `rejected` 보존과 현재 실데이터 매칭을 각각 485·14로 명시 주입해 실데이터 drift가
+  제품 회귀를 가장하지 않게 했다.
 - **리뷰**: 사용자 지시에 따라 적대 리뷰어는 1명만 운용했다. 단독 전문 리뷰어가 PR840 이후
   Claude Code 작성 PR #841~#845·#847~#850·#852~#857·#859~#864와 이번 exact code를 함께
   감사했다. 발견한 archived owner repair, canonical-only owner 증거 부재, null-source tombstone,
@@ -80,11 +85,16 @@ canonical 환경변수 누락(#868)도 같은 PR에서 완결했다.
   migration/repository 64/64도 통과했다. ruff, main/API/Dagster mypy
   strict(116/56/23), import 계약 4건, OpenAPI drift가 모두 green이다. frontend는 root verifier,
   생성 type drift, ESLint, type-check, React Doctor 269파일·진단 0건, Vitest 29파일·229건,
-  production build 31 route를 통과했다. #868 API auth는 84/84다. R1 격리 실데이터
-  destructive Live UI는 첫 clone의 0036→0066 연속 migration과 H23 reconcile을 통과했고,
-  stale Feature 고정 seed를 현재 존재하는 여수 복합 항목으로 교체한 최종 재실행이 진행 중이다.
-  최종 수치는 후속 checkpoint 커밋으로 이 항목에 추가한다. 실 `kor-travel-geo` reverse
-  400으로 분리되는 외부 계약 5건은
+  production build 31 route를 통과했다. #868 API auth는 84/84다.
+- **실데이터 destructive Live UI**: prod baseline
+  `0036_merge_price_merge_aliases`·Feature 1,099,359건·curation collection 미존재에서 격리
+  clone만 0066까지 전진했다. H23은 winner `queued`·loser `cancelled` 2건·audit 2건,
+  #868 canonical-only gate는 wrong `403`·correct `200`이었다. 현재 존재하는 여수 복합 항목으로
+  legacy membership 2건을 심고 공식 CSV preview/commit, REST/admin 상세, 지도·Feature 상세를
+  브라우저로 통과했다. 최종 exact SHA `e8d167c5`에서 clone 전체 50 collections·87,524 items 중
+  공식 범위 **19/486**, seed component **2/2**, operator adoption **2**, duplicate target **0**을
+  확인했다. prod head·Feature 수·collection 부재와 API/UI health는 끝까지 불변이며 성공 뒤
+  clone을 삭제했다. 실 `kor-travel-geo` reverse 400으로 분리되는 외부 계약 5건은
   `T-VN-H21`, quarantine admin 재분류는 `T-VN-H22`, React 구조 debt는 `T-VN-49`로 추적한다.
 
 ## 2026-07-27 (claude) — T-VN-H20 prod admin credential 회전 완료 (인시던트+복구)

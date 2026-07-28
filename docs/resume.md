@@ -46,7 +46,11 @@
   모호한 후보와 active Feature 중복은 preview/commit 전에 fail-close한다. 0064→0066 연속
   Alembic transaction은 0065의 지연 FK·trigger event를 0066 DDL 전에 검사·소진한다. 단독
   적대 리뷰어는 exact code `baf40a04`에서 P0–P2 0건을 확인했다. 실제 prod clone의
-  0036→0066 연속 migration도 첫 Live에서 완료돼 이전 pending trigger 오류가 해소됐다.
+  0036→0066 연속 migration도 완료돼 이전 pending trigger 오류가 해소됐다. 같은 clone에서
+  성공한 migration·build·destructive import를 보존해 실패 단계부터 재개했고, 최종
+  `e8d167c5` 기준 공식 collection/item 19/486, component 2/2, operator adoption 2,
+  duplicate target 0을 확인했다. prod head `0036`, Feature 1,099,359건, collection 미존재와
+  API/UI health는 불변이며 성공 뒤 clone을 삭제했다.
 - 작업 중 추가된 `T-VN-H26`/GitHub #868은 main에 이미 있던 canonical
   `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` direct alias를 재확인하고, 남은 수용 조건인 기존
   API-prefixed 이름 fallback을 추가했다. canonical-only/legacy-only/미설정/동시 설정 우선순위와

@@ -54,6 +54,11 @@
 - **MIGRATION**: 0064→0066을 한 Alembic transaction에서 연속 적용할 때 0065가 남긴 지연
   FK·trigger event를 0066 backfill 직후 검사·소진한 뒤 DDL을 수행한다. pending trigger event로
   `ALTER TABLE`이 중단되던 실데이터 clone 경로를 회귀 테스트로 고정했다.
+- **TESTED**: n150 prod 격리 clone을 0036→0066으로 전진하고 실제 admin UI에서 공식 CSV를
+  preview/commit했다. 공식 collection/item 19/486, component 2/2, operator adoption 2,
+  duplicate target 0과 prod 불변을 확인했다. clean fixture 기본 기대값은 유지하되 실제
+  operator override와 최신 Feature 매칭으로 달라지는 공개 membership·미연결 수는 Live env로
+  명시해 실데이터 변화가 회귀를 가장하지 않게 했다.
 - **SECURITY (#868)**: 기존 c6c 정본 `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` direct alias를 우선
   유지하면서 `KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET`를 fallback으로 수용한다. canonical-only
   배포의 gate와 잘못된 proxy header `403`, legacy-only·미설정·동시 설정 우선순위를 회귀로 고정했다.
