@@ -794,37 +794,49 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await test.step("/admin/features/new에서 실제 add change request를 생성한다", async () => {
         await page.goto("/admin/features/new");
         await expect(
-          page.getByRole("heading", { level: 1, name: "새 피처" }),
+          page.getByRole("heading", { level: 1, name: "새 Feature" }),
         ).toBeVisible(T);
 
-        await page.getByLabel("이름", { exact: true }).fill(CREATE_NAME);
-        await page.getByLabel("카테고리", { exact: true }).fill("01070300");
+        await page.getByLabel("create name", { exact: true }).fill(CREATE_NAME);
+        await page
+          .getByLabel("create category", { exact: true })
+          .selectOption("01070300");
         await page.getByLabel("경도", { exact: true }).fill("126.97841");
         await page.getByLabel("위도", { exact: true }).fill("37.56668");
-        await page.getByLabel("marker_icon").fill("marker");
-        await page.getByLabel("marker_color").fill("P-01");
+        await page.getByLabel("마커 아이콘").selectOption("marker");
+        await page.getByLabel("마커 색상").selectOption("P-01");
         await page.getByLabel("사유", { exact: true }).fill(`${BASE_REASON} add`);
-        await page.getByLabel("feature_id").fill(FEATURE_ID);
-        await page.getByLabel("idempotency_key").fill(`${RUN_ID}-add`);
-        await page.getByLabel("도로", { exact: true }).fill("서울특별시 중구 세종대로 110");
-        await page.getByLabel("legal", { exact: true }).fill("서울특별시 중구 태평로1가");
-        await page.getByLabel("관리자", { exact: true }).fill("서울특별시 중구 명동");
-        await page.getByLabel("sigungu_code").fill("11140");
-        await page.getByLabel("sido_code").fill("11");
-        await page.getByLabel("place_kind").fill("e2e-place");
-        await page.getByLabel("전화").fill("02-0000-0000");
-        await page.getByLabel("홈페이지").fill("https://example.invalid/e2e");
-        await page.getByLabel("소스").fill("https://example.invalid/source");
+        await page.getByLabel("Feature ID").fill(FEATURE_ID);
+        await page.getByLabel("중복 방지 키").fill(`${RUN_ID}-add`);
         await page
-          .getByLabel("detail extra JSON")
+          .getByLabel("create road address")
+          .fill("서울특별시 중구 세종대로 110");
+        await page
+          .getByLabel("create legal address")
+          .fill("서울특별시 중구 태평로1가");
+        await page
+          .getByLabel("create admin address")
+          .fill("서울특별시 중구 명동");
+        await page.getByLabel("create sigungu code").fill("11140");
+        await page.getByLabel("create sido code").fill("11");
+        await page.getByLabel("create place kind").selectOption("place");
+        await page.getByLabel("create phone").fill("02-0000-0000");
+        await page
+          .getByLabel("create homepage url")
+          .fill("https://example.invalid/e2e");
+        await page
+          .getByLabel("create source url")
+          .fill("https://example.invalid/source");
+        await page
+          .getByLabel("create detail JSON")
           .locator("xpath=ancestor::details")
           .locator("summary")
           .click();
         await page
-          .getByLabel("detail extra JSON")
+          .getByLabel("create detail JSON")
           .fill(JSON.stringify({ e2e_phase: "create", run_id: RUN_ID }));
         await page
-          .getByLabel("urls extra JSON")
+          .getByLabel("create urls JSON")
           .fill(JSON.stringify({ ticket: "https://example.invalid/ticket" }));
 
         const responsePromise = waitForApiResponse(
