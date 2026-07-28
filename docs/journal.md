@@ -192,6 +192,29 @@ ledger 테이블·오프라인 기하 감사·타 provider `AdminEvidence` 채�
 **검증**. n150 CI-parity — ruff / mypy --strict(core 117 · dagster 23) / dagster 494 passed +
 1 skipped / 관련 unit 179 passed. 신규 회귀 25건(오탐 재발 방지 · 단계별 탐지 · 정밀도 규칙 ·
 커버리지 집계 · allowlist 불변).
+## 2026-07-29 (codex) — T-VN-48D durable clone Live·중단 지점 복구
+
+**결론**: production DB를 건드리지 않는 보존 실데이터 clone 전용 trusted runner로
+파괴적 Admin Feature Live evidence를 확정했다. 최초 실행의 최종 판정 버그는 build나
+Playwright를 반복하지 않고 보존한 BLOCKED/final snapshot에서 복구했다.
+
+- **격리·출처**: root-owned immutable git snapshot에서 exact `fe0c956e` API/UI/Playwright
+  image를 만들고 image revision, clone container/system identity, loopback DB/API/UI 포트,
+  non-production compose project를 결속했다. API는 `uvicorn`을 직접 실행해 Alembic
+  startup mutation이 없음을 시작 전후 snapshot으로 증명했다.
+- **파괴적 결과**: 본 acceptance **2/2**, recovery-only **2/2**. random-owned direct
+  fixture는 Feature 2건과 weather/price 각 1건을 만들었고, UI create/delete 6건은
+  soft-delete 감사 이력으로 남았다. final total 1,030,487건, non-deleted 1,030,387건이며
+  migration `0066_curation_component_identity`, relation 49는 불변이다. cleanup/audit의
+  owned Feature·weather·price·FK·pending change request는 모두 0이다.
+- **실패 지점 재개**: 최초 `complete`가 seed의 정상 child→Feature FK 2건을 cleanup
+  residue로 오판했다. `abc1de8b`에서 seed 기대 2/cleanup·audit 기대 0을 분리하고,
+  old immutable source와 세 image revision, clone identity, 실패 당시 final과 현재 DB
+  snapshot의 exact equality를 요구하는 `recover`를 추가했다. 그 검증만 실행해 완료했으며
+  test/build/fixture/browser는 재실행하지 않았다.
+- **종료 상태**: result는 `complete/recovered`, main·recovery 각 2 passed다. BLOCKED와
+  후보 container/image/listener는 0이고 민감 browser raw artifact는 남지 않았다.
+  다음 exact revision 재검증과 post-merge 재사용 판정을 위해 clone DB만 보존한다.
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H21 geo 인증 결선 검증·비밀 유출 차단
 

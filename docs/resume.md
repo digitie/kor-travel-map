@@ -81,6 +81,32 @@
   있어 비교 근거가 못 된다는 점, (b) MOIS는 payload에 bjd가 있으면 reverse를 아예 부르지 않아
   두 축이 동시에 존재하지 않는다는 점, (c) 단건 `ValidationError`가 batch 전체를 죽인다는 점을
   찾아냈다. 셋 다 코드를 읽어야만 알 수 있고 실데이터만으로는 드러나지 않았다.
+## 2026-07-29 (codex) — T-VN-48D 격리 clone Live 증거·실패 지점 복구
+
+**방금**: R1을 지키는 보존 실데이터 clone 전용 trusted runner를 추가했다. root-owned
+immutable source snapshot과 BLOCKED/result를 두고 exact candidate API/UI/Playwright image,
+clone container/system identity, loopback 전용 포트, migration head와 시작 전후 row count를
+결속한다. API는 entrypoint migration을 우회해 직접 기동하며 production compose project·
+기본 prod 포트를 fail-close한다.
+
+exact candidate `fe0c956e`의 본 acceptance **2/2**와 recovery-only **2/2**는 모두
+통과했다. direct cleanup/audit 뒤 active owned Feature·weather·price·FK reference와
+nonterminal change request가 모두 0이고, startup 전후 migration
+`0066_curation_component_identity`·relation 49·Feature count는 동일했다. UI create/delete
+감사 이력 6건만 soft-delete로 늘어 final total은 1,030,487건, non-deleted는 시작과 같은
+1,030,387건이다.
+
+최초 완료 판정은 seed의 정상 weather/price FK 2건을 residue로 잘못 보아 BLOCKED 상태에서
+중단됐다. `abc1de8b`에서 seed 기대 FK 2와 cleanup/audit 기대 0을 분리하고 `recover`를
+추가했다. 보존 evidence, 실패 당시 final snapshot과 현재 clone snapshot, old source
+snapshot, 세 image revision, clone identity가 모두 정확히 같을 때만 완료하도록 한 뒤
+build·fixture·브라우저를 반복하지 않고 실패 지점부터 복구했다. 결과는 `phase=recovered`,
+BLOCKED·후보 container/image/listener 0이며 clone DB는 그대로 보존했다.
+
+**다음 한 작업**: 리베이스된 exact revision의 적대 리뷰 2명 지적을 반영하고
+mocked serial/CI-parallel 및 격리 clone Live를 다시 확정한다. Claude Code PR 사후 감사까지
+마친 뒤 PR을 생성해 CI green·self-approval·직접 머지하고, clone 재사용 가능성을 읽기
+전용으로 재확인한 다음 별도 지시까지 대기한다.
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H21 완료 → 다음은 T-VN-H28A
 

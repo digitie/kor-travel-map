@@ -154,15 +154,17 @@ barrier로 직렬화한다.
 - [x] T-VN-48A~C — 최초 273-test baseline의 deterministic drift 89건을
   Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별로 제거했다.
 - [ ] T-VN-48D — 구현과 exact `45e2161d` mocked serial/CI-parallel gate는 각각
-  **274/274 passed, expected failure/flake/skip 0건**으로 끝났다. 다음 두 gate가 남았다.
-  - 보존 실데이터 clone의 exact candidate preflight는 본 acceptance 2/2와 recovery-only 2/2,
-    owned residue 0을 확인했지만 ad-hoc 출력이라 durable evidence가 아니다.
-  - production 전용 `run-admin-feature-live-acceptance.sh`는 shared prod DB를 mutation하므로
-    아래 R1과 충돌한다. prod mutation 전에 격리 clone용 trusted evidence runner를 마련하거나,
-    random-owned fixture·startup migration 없음·완전 cleanup을 강제하는 제한 예외를 명시적으로
-    확정해 모순을 먼저 해소한다.
-  - Live durable evidence, 적대 리뷰 2명 P0/P1/P2 0건, 최신 main rebase·Claude PR 사후 감사,
-    PR/CI green/merge까지 끝난 뒤에만 `tasks-done.md`로 옮긴다.
+  **274/274 passed, expected failure/flake/skip 0건**으로 끝났다.
+  - R1과 양립하는 격리 clone 전용 trusted runner를 추가했다. exact candidate `fe0c956e`의
+    본 acceptance 2/2와 recovery-only 2/2, startup migration 없음, cleanup/audit owned
+    Feature·weather·price·FK·pending change request 0을 root-owned evidence로 확정했다.
+  - 최초 완료 판정은 seed의 정상 FK 2건을 residue로 오판해 BLOCKED를 남겼다. `abc1de8b`의
+    복구 경로가 실패 당시 최종 snapshot과 현재 clone DB·source/image identity가 정확히
+    같은지 확인한 뒤 테스트/build/fixture를 반복하지 않고 완료했다. BLOCKED·후보
+    container/image/listener는 0이다.
+  - 적대 리뷰 2명 반영, 최신 main rebase 뒤 최종 exact revision의 mocked serial/CI-parallel과
+    clone Live 재검증, Claude PR 사후 감사, PR/CI green/merge까지 끝난 뒤에만
+    `tasks-done.md`로 옮긴다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 
