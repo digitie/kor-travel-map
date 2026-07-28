@@ -3,6 +3,32 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-29 — Lane A a1 T-VN-H21: geo 인증 결선 검증·비밀 유출 차단
+
+- [x] **T-VN-H21** — kor-travel-geo live 인증 결선을 검증 가능하게 만들고, 그 과정에서 드러난
+  API key 유출 경로를 막았다. dedup 5건은 **브랜치 코드로** 실서비스에서 재통과(5 passed).
+  - 열린 질문이었던 "인증 뒤 runtime drift"는 **없음**으로 종결: 실 geo에 대해 reverse
+    (status=OK, cand=11)·geocode(status=OK, conf=1.000) 응답이 기존 Pydantic 모델로 무손실
+    파싱됐고, 배포된 Map api 컨테이너의 key가 geo 컨테이너 `KTG_VWORLD_API_KEY`와 동일함을 확인했다.
+    → 원래 blocker는 배포 결선 결함이 아니라 **ad-hoc/CLI 실행 환경에 값이 없던 것**이었다.
+  - **설계 전환(적대 리뷰 2명 합치)**: 호출 지점마다 preflight를 붙이는 최초 구현은 7곳 중 1곳만
+    보호해 사실상 장식이었고, 이를 막으려 둔 AST 스캐너조차 같은 모듈 내 동명 변수 mutation으로
+    우회됨이 **실제로 시연**됐다. `require_api_key` 기본 `True`로 **생성 시점** 검증에 옮겨
+    CLI/API/Dagster/live test 4경로가 별도 조치 없이 보호된다(ADR-060 결과 절에 반영).
+  - **오분류 수정**: 결선 누락을 `ValueError`로 던지면 기존 `except ValueError` 사다리에 걸려
+    `/admin/issues`는 422, offline-upload는 409, feature-update는 422로 나갔다 — 없애려던
+    좌표-vs-결선 오진을 API 안에서 재생산하는 상태였다. `GeoAuthNotConfiguredError` → 503
+    (base_url 미설정과 동일 등급)으로 정정.
+  - **비밀 유출 차단**: `str(httpx.HTTPStatusError)`가 `?key=<SECRET>` URL을 담고 그 문자열이
+    502 detail·로그로 나갔다. query 제거한 `GeoRequestError`로 wrap. 회귀 테스트가 곧바로
+    2차 결함을 잡아냄 — `from None`은 `__cause__`만 지우고 `__context__`에 원본이 남는다.
+    except 블록 **밖에서** 던져 chaining 자체를 만들지 않게 고쳤고, 실 401 응답으로 확인했다.
+  - 그 밖에: 128자 초과 key 사전 차단, CLI는 traceback(exit 1) 대신 stderr + `_EXIT_INVALID`(2),
+    과장된 주석("요구한다" 무조건 / "route 처리 전에") 정정.
+  - 검증: n150 CI-parity green — ruff / mypy --strict ×3(core·api·dagster) / lint-imports 4 kept,
+    unit 1675 passed(잔여 3건은 main과 동일한 docker 바이너리 부재), api 792 passed,
+    dagster 477 passed. live: 결선 차단·정상 좌표·오류 좌표·잘못된 키 4분기 + dedup 5 passed.
+
 ## 2026-07-29 — Lane A a1 T-VN-H29: 통합검색 map-import POI 좌표 null 복구
 
 - [x] **T-VN-H29** (PinVi PR #418) — kor-travel-map curated import POI가 GET /search에서만 좌표

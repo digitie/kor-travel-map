@@ -23,7 +23,7 @@ barrier로 직렬화한다.
     [x] `T-VN-H07D`(#815 admin snapshot/freshness) →
     [x] `T-VN-H07C`(#812 — v5 승격 기각, ADR-079)
   - a1: [x] `T-VN-H29`(PinVi 검색 좌표 null 복구 — H07D 파생) →
-    [ ] `T-VN-H21`(geo live 인증 preflight·5건 재실증) →
+    [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
     [ ] `T-VN-H28A`(#673 실데이터 오탐 분류) →
     [ ] `T-VN-H28B`(#673 검증 규칙·회복 경로) →
     [ ] `T-VN-H25A`(stale reference 증거 manifest) →
@@ -228,15 +228,6 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   docker-manager의 공개 가능한 base config에 `timeout tunnel`을 명시하고 local prod 값은
   gitignored runbook에서 결선한다. quiet 상태를 heartbeat 두 주기 이상 유지해 같은 ops-live
   socket이 재연결 없이 유지되는지 브라우저와 proxy metric 양쪽에서 확인한 뒤 #819를 닫는다.
-
-- [ ] T-VN-H21 — **`kor-travel-geo` live 인증 preflight·dedup 5건 재실증**
-
-  2026-07-28 실서비스 OpenAPI와 실제 400 body를 대조한 결과 Map client의 `lon`/`lat` payload는
-  정합하고 첫 400 blocker는 `E0100 query.key: Field required`였다. test 코드는 settings key를
-  client에 전달하지만 실행 환경에 값이 없어 route 처리 전에 막혔으므로, 인증 뒤 runtime 계약에
-  추가 drift가 있는지는 아직 알 수 없다. 비밀을 출력·커밋하지 않는 key 결선과 preflight를
-  추가하고 정상/오류 좌표 및 map dedup 5건을 실제 서비스에서 통과시킨다. 첫 blocker만으로
-  downstream 정상까지 추정하거나 wrapper/fallback으로 우회하지 않는다.
 
 - [ ] T-VN-H28A — **#673 concierge 주소 불일치 실데이터 재분류**
 

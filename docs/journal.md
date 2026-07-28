@@ -17,6 +17,53 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-29 (claude) — Lane A a1: T-VN-H21 geo 인증 결선 검증·비밀 유출 차단
+
+**배경**. T-VN-H21의 열린 질문은 "첫 400 blocker(`E0100 query.key`)를 넘긴 뒤 runtime 계약에
+추가 drift가 있는가"였다. 실행 환경에 key 값이 없어 확인 자체가 불가능했다.
+
+**live 실증 (n150, 값 비출력)**. geo 컨테이너의 `KTG_VWORLD_API_KEY`를 그대로 써서 확인했다.
+- 배포된 Map api 컨테이너의 `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`는 geo 컨테이너 값과 **동일**.
+  즉 원래 blocker는 배포 결선 결함이 아니라 **ad-hoc/CLI 실행 환경에 값이 없던 것**이었다.
+- reverse(status=OK, cand=11, address·region 존재) / geocode(status=OK, conf=1.000, point 파싱)가
+  기존 Pydantic 모델로 무손실 파싱 → **post-auth drift 없음**으로 열린 질문 종결.
+- 브랜치 코드로 dedup live **5 passed**. 결선 차단·정상 좌표·오류 좌표·잘못된 키 4분기 확인.
+- 도중에 내 probe payload(`address`)가 400을 받아 "drift 발견"으로 오인할 뻔했다. 실제 client는
+  `road_address`/`jibun_address`+`fallback`을 보낸다 — **소비자 payload를 추측하지 말고 코드를
+  읽으라는 교훈의 재확인**.
+
+**최초 구현과 그 기각**. 호출 지점에 `preflight()`를 붙였는데, 리뷰 전 자체 점검에서 live 생성
+지점이 7곳(CLI 1 + API 4 + Dagster 2)임이 드러나 6곳을 추가하고 AST 스캐너로 회귀를 고정했다.
+적대 리뷰 2명이 **둘 다** 이 접근 자체를 기각했고 근거가 결정적이었다.
+- 스캐너의 `_preflighted_names`가 모듈 전역이라, `admin_issues.py`처럼 같은 이름(`client`)의
+  생성이 둘 있으면 **한쪽 guard를 지워도 통과**함이 실제 mutation으로 시연됐다.
+- acceptance가 지목한 live 경로(`test_dedup_with_kraddr_geo_live.py`)는 "테스트는 mock이라
+  키가 필요 없다"는 **사실과 다른** 전제로 스캔에서 제외돼 있었다.
+→ `require_api_key` 기본 `True`로 **생성 시점** 검증에 옮겼다. 7곳의 수동 guard와 스캐너를 모두
+지우고, 4경로가 별도 조치 없이 같은 규칙을 공유한다(mock transport 테스트만 명시적 opt-out).
+
+**진단성을 고치려다 악화시킨 부분**. 결선 누락을 `ValueError`로 던지니 기존 `except ValueError`
+사다리에 걸려 `/admin/issues` 422, offline-upload 409, feature-update 422, 그리고 admin 경로는
+메시지가 스트립된 500까지 갔다. 없애려던 좌표-vs-결선 오진을 **우리 API 안에서 재생산**한 셈.
+`GeoAuthNotConfiguredError`를 두고 base_url 미설정과 같은 **503**으로 매핑했다.
+
+**비밀 유출 차단(가장 무거운 발견)**. `str(httpx.HTTPStatusError)`는 request URL 전체를 담고
+거기에 `?key=<SECRET>`가 있다. 이 문자열은 세 boundary에서 **502 응답 body와 로그로 그대로**
+나갔다. 키가 비어 있던 동안에만 무해했으므로, 이 task가 하려던 "key 결선" 자체가 유출을
+활성화하는 상태였다. query를 제거한 `GeoRequestError`로 감쌌고, 회귀 테스트가 곧바로 2차
+결함을 잡았다 — `from None`은 `__cause__`만 지우고 `__context__`엔 원본이 남는다. except 블록
+**밖에서** 던져 chaining을 만들지 않게 고쳤고 실 401 응답으로 확인했다.
+
+**그 밖의 리뷰 반영**. 128자 초과 key 사전 차단(같은 400이 된다), CLI는 traceback(exit 1) 대신
+stderr + `_EXIT_INVALID`(2), 첫 유출 테스트가 **키를 받은 적 없는 객체**로 단언해 유출 구현도
+통과시키던 공허함 제거(실 wire에 키가 실렸는지부터 확인), 과장된 주석("`/v2/*`는 key를
+요구한다" 무조건 / "route 처리 전에") 정정 — ADR-060은 trusted proxy 우회를 명시하고, query
+검증은 라우팅 **후** handler 실행 **전**이다.
+
+**검증**. n150 CI-parity green — ruff / mypy --strict ×3(core 116·api 56·dagster 23) /
+lint-imports 4 kept 0 broken / unit 1675 passed(잔여 3건은 main과 동일한 docker 바이너리 부재) /
+api 792 passed / dagster 477 passed + 1 skipped.
+
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H29 완료 + T-VN-H27 보류
 
 **결론**: H07D 적대 리뷰가 찾아낸 실제 사용자 가시 버그를 PinVi PR #418로 고쳤다. H27은 조사 결과
