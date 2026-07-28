@@ -3,6 +3,15 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-28 — PR #869 후 task 전면 재감사
+
+- [x] **T-VN-REAUDIT-0728** — `tasks.md`·완료 이력·실코드와 Map/PinVi/
+  docker-manager/geo의 열린 PR·이슈를 대조하고, 큰 task를 독립 PR·검증 단위로 분해했다.
+  Agent A/B 소유 경계, migration·OpenAPI·frontend 충돌 barrier, Wave 2 freeze/join/final
+  cutover 순서와 실패 지점 재개 규율을 고정했다. 적대적 리뷰어 2명이 legacy 조기 물리 삭제,
+  compatible-pair 재-capture, idempotency·frontend ordering, H21 첫 blocker 표현과 문서 예외
+  범위를 바로잡은 뒤 잔여 P0/P1/P2 0건을 확인했다.
+
 ## 2026-07-27 — Lane B T-VN-47 React Doctor + durable curation 완결
 
 - [x] **T-VN-47** — React Doctor full scan을 269개 파일·actionable 진단 0건으로 만들었다.
