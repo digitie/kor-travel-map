@@ -30,6 +30,7 @@ from kortravelmap.api.routers.curated import (
     CuratedFeatureDetailThemeView,
     _snapshot_view,
 )
+from kortravelmap.api.route_policy import _iter_flattened_routes, _resolve_route
 from kortravelmap.api.settings import ApiSettings
 
 # 저장소 루트의 `tests/unit/test_curated_repo.py` fixture(_FakeSession/_feature_row)를 재사용해
@@ -122,7 +123,9 @@ def _resolve(prop: dict[str, Any], where: str) -> tuple[dict[str, Any], bool]:
     return prop, False
 
 
-def _assert_field(spec: dict[str, Any], schema_name: str, field: str, expected: dict[str, Any]) -> None:
+def _assert_field(
+    spec: dict[str, Any], schema_name: str, field: str, expected: dict[str, Any]
+) -> None:
     schema = spec["components"]["schemas"][schema_name]
     where = f"{schema_name}.{field}"
     properties = schema["properties"]
@@ -133,7 +136,11 @@ def _assert_field(spec: dict[str, Any], schema_name: str, field: str, expected: 
     is_required = field in set(schema.get("required", []))
     assert is_required is expected["required"], (where, "required", is_required)
     if "format" in expected:
-        assert resolved.get("format") == expected["format"], (where, "format", resolved.get("format"))
+        assert resolved.get("format") == expected["format"], (
+            where,
+            "format",
+            resolved.get("format"),
+        )
 
 
 def test_admin_detail_snapshot_schemas_pin_required_types_and_nullability() -> None:
@@ -182,7 +189,11 @@ def test_pinvi_compatibility_alias_route_stays_registered() -> None:
     alias가 삭제돼도 잡히지 않고, 삭제되면 PinVi curated import가 404로 죽는다.
     """
     app = create_app(ApiSettings())
-    paths = {getattr(route, "path", None) for route in app.routes}
+    # FastAPI 0.136+는 include_router 결과를 lazy `_IncludedRouter`로 감싸 `app.routes`에
+    # 구체 route가 바로 보이지 않는다. route_policy가 쓰는 것과 같은 해석 helper를 재사용한다.
+    paths = {
+        _resolve_route(entry)[0] for entry in _iter_flattened_routes(app)
+    }
     assert _SNAPSHOT_PATH in paths, "문서화된 detail-snapshot 경로가 사라졌다"
     assert _PINVI_ALIAS_PATH in paths, (
         "PinVi 호환 alias 경로가 사라졌다 — PinVi curated import가 404가 된다"
