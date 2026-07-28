@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -13,6 +14,13 @@ _RUNNER = _REPO_ROOT / "scripts" / "run-admin-feature-clone-live-acceptance.sh"
 _COMMIT = "a" * 40
 _IMAGE_ID = f"sha256:{'b' * 64}"
 _SHA256 = "c" * 64
+_CLONE_SYSTEM_SHA256 = "d" * 64
+_CLONE_IDENTITY_SHA256 = hashlib.sha256(
+    (
+        f"{_SHA256}\n{_CLONE_SYSTEM_SHA256}\n15475\n"
+        "0066_curation_component_identity\n"
+    ).encode()
+).hexdigest()
 
 
 def _run_helper(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -34,7 +42,7 @@ def _write_snapshot(path: Path, *, total: int, non_deleted: int = 100) -> None:
         "--clone-container-sha256",
         _SHA256,
         "--clone-system-identifier-sha256",
-        "d" * 64,
+        _CLONE_SYSTEM_SHA256,
         "--feature-non-deleted",
         str(non_deleted),
         "--feature-total",
@@ -50,7 +58,14 @@ def _write_snapshot(path: Path, *, total: int, non_deleted: int = 100) -> None:
     )
 
 
-def _write_fixture(path: Path, *, features: int, weather: int, price: int) -> None:
+def _write_fixture(
+    path: Path,
+    *,
+    features: int,
+    weather: int,
+    price: int,
+    foreign_key_references: int = 0,
+) -> None:
     action = path.stem.removeprefix("direct-")
     path.write_text(
         json.dumps(
@@ -62,7 +77,7 @@ def _write_fixture(path: Path, *, features: int, weather: int, price: int) -> No
                     "weather_values": weather,
                 },
                 "foreign_key_constraints_checked": 12,
-                "foreign_key_references": 0,
+                "foreign_key_references": foreign_key_references,
                 "version": 1,
             }
         ),
@@ -105,7 +120,7 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
         "--api-image-id",
         _IMAGE_ID,
         "--clone-identity-sha256",
-        _SHA256,
+        _CLONE_IDENTITY_SHA256,
         "--playwright-image-id",
         f"sha256:{'f' * 64}",
         "--source-commit",
@@ -117,7 +132,11 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
     _write_snapshot(runtime / "clone-startup-after.json", total=120)
     _write_snapshot(runtime / "clone-final.json", total=126)
     _write_fixture(
-        runtime / "direct-seed.json", features=2, weather=1, price=1
+        runtime / "direct-seed.json",
+        features=2,
+        weather=1,
+        price=1,
+        foreign_key_references=2,
     )
     _write_fixture(
         runtime / "direct-cleanup.json", features=0, weather=0, price=0
@@ -151,6 +170,7 @@ def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
     assert payload["status"] == "complete"
     assert payload["phase"] == "passed"
     assert payload["source_commit"] == _COMMIT
+    assert payload["recovery_tool_source_commit"] is None
     assert payload["tests"] == {
         "main": {"passed": 2},
         "recovery": {"passed": 2},
@@ -186,6 +206,62 @@ def test_complete_rejects_startup_db_mutation(tmp_path: Path) -> None:
     assert not (runtime / "result.json").exists()
 
 
+def test_complete_recovers_from_final_snapshot_without_rerunning(tmp_path: Path) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    current = runtime / "clone-recovery-current.json"
+    _write_snapshot(current, total=126)
+    result = runtime / "result.json"
+    recovery_commit = "2" * 40
+
+    _run_helper(
+        "complete",
+        "--blocked-path",
+        str(blocked),
+        "--phase",
+        "recovered",
+        "--current-snapshot",
+        str(current),
+        "--recovery-tool-source-commit",
+        recovery_commit,
+        "--result-path",
+        str(result),
+        "--runtime",
+        str(runtime),
+    )
+
+    payload = json.loads(result.read_text(encoding="utf-8"))
+    assert not blocked.exists()
+    assert payload["phase"] == "recovered"
+    assert payload["recovery_tool_source_commit"] == recovery_commit
+
+
+def test_complete_rejects_recovery_after_clone_db_drift(tmp_path: Path) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    current = runtime / "clone-recovery-current.json"
+    _write_snapshot(current, total=127)
+
+    completed = _run_helper(
+        "complete",
+        "--blocked-path",
+        str(blocked),
+        "--phase",
+        "recovered",
+        "--current-snapshot",
+        str(current),
+        "--recovery-tool-source-commit",
+        "2" * 40,
+        "--result-path",
+        str(runtime / "result.json"),
+        "--runtime",
+        str(runtime),
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert blocked.exists()
+    assert not (runtime / "result.json").exists()
+
+
 def test_runner_fail_closes_prod_and_proves_exact_isolated_identity() -> None:
     source = _RUNNER.read_text(encoding="utf-8")
 
@@ -208,6 +284,36 @@ def test_runner_fail_closes_prod_and_proves_exact_isolated_identity() -> None:
     assert "alembic upgrade" not in source
     assert "E2E_LIVE_ALLOW_PROD" not in source
     assert "E2E_ISOLATED_LIVE_EVIDENCE=1" in source
+    assert '[[ "$MODE" == "run" || "$MODE" == "recover" ]]' in source
+    assert "--phase recovered" in source
+    assert "clone-recovery-current.json" in source
+
+
+def test_complete_rejects_missing_seed_value_references(tmp_path: Path) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    _write_fixture(
+        runtime / "direct-seed.json",
+        features=2,
+        weather=1,
+        price=1,
+        foreign_key_references=0,
+    )
+
+    completed = _run_helper(
+        "complete",
+        "--blocked-path",
+        str(blocked),
+        "--phase",
+        "passed",
+        "--result-path",
+        str(runtime / "result.json"),
+        "--runtime",
+        str(runtime),
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert blocked.exists()
 
 
 @pytest.mark.parametrize(

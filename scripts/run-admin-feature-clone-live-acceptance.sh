@@ -120,8 +120,10 @@ PY
 }
 
 validate_snapshot() {
-  local expected_root="$INSTALL_BASE/$SOURCE_COMMIT"
-  python3 -I -B - "$SCRIPT_DIR" "$expected_root" "$SOURCE_COMMIT" <<'PY'
+  local snapshot_commit="${1:-$SOURCE_COMMIT}"
+  local snapshot_root="${2:-$SCRIPT_DIR}"
+  local expected_root="$INSTALL_BASE/$snapshot_commit"
+  python3 -I -B - "$snapshot_root" "$expected_root" "$snapshot_commit" <<'PY'
 import hashlib
 import json
 import os
@@ -179,62 +181,83 @@ if [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] &&
   install_snapshot
 fi
 
-[[ "$MODE" == "run" ]] || die "usage: runner run"
-require_command curl
+[[ "$MODE" == "run" || "$MODE" == "recover" ]] ||
+  die "usage: runner run|recover"
 require_command docker
 require_command flock
 require_command git
-require_command openssl
 require_command python3
 require_command sha256sum
-require_command ss
 require_command tar
 require_env E2E_SOURCE_COMMIT
 require_env E2E_REPOSITORY_ROOT
 require_env E2E_CLONE_DB_CONTAINER
 require_env E2E_CLONE_DB_PORT
-require_env E2E_ADMIN_PASSWORD
-require_env E2E_VWORLD_API_KEY
 (( EUID == 0 )) || die "fixed clone evidence state requires root"
 [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "source commit is invalid"
 [[ "$DB_CONTAINER" =~ ^ktm-[a-z0-9-]+-db$ ]] || die "clone DB container name is invalid"
 [[ "$DB_HOST_PORT" =~ ^[0-9]+$ ]] || die "clone DB host port is invalid"
 (( DB_HOST_PORT >= 1024 && DB_HOST_PORT <= 65535 && DB_HOST_PORT != 5432 )) ||
   die "clone DB host port is unsafe"
-for port in "$API_PORT" "$UI_PORT"; do
-  [[ "$port" =~ ^[0-9]+$ ]] || die "candidate port is invalid"
-  (( port >= 1024 && port <= 65535 && port != 12701 && port != 12705 )) ||
-    die "candidate port overlaps production/default"
-done
-[[ "$API_PORT" != "$UI_PORT" ]] || die "candidate ports overlap"
-[[ "$API_PORT" != "$DB_HOST_PORT" ]] || die "candidate ports overlap"
-[[ "$UI_PORT" != "$DB_HOST_PORT" ]] || die "candidate ports overlap"
-[[ "${E2E_ADMIN_PASSWORD}" != *$'\n'* && "${E2E_ADMIN_PASSWORD}" != *$'\r'* ]] ||
-  die "admin password contains a newline"
-[[ "${E2E_VWORLD_API_KEY}" != *$'\n'* && "${E2E_VWORLD_API_KEY}" != *$'\r'* ]] ||
-  die "VWorld key contains a newline"
+if [[ "$MODE" == "run" ]]; then
+  require_command curl
+  require_command openssl
+  require_command ss
+  require_env E2E_ADMIN_PASSWORD
+  require_env E2E_VWORLD_API_KEY
+  for port in "$API_PORT" "$UI_PORT"; do
+    [[ "$port" =~ ^[0-9]+$ ]] || die "candidate port is invalid"
+    (( port >= 1024 && port <= 65535 && port != 12701 && port != 12705 )) ||
+      die "candidate port overlaps production/default"
+  done
+  [[ "$API_PORT" != "$UI_PORT" ]] || die "candidate ports overlap"
+  [[ "$API_PORT" != "$DB_HOST_PORT" ]] || die "candidate ports overlap"
+  [[ "$UI_PORT" != "$DB_HOST_PORT" ]] || die "candidate ports overlap"
+  [[ "${E2E_ADMIN_PASSWORD}" != *$'\n'* && "${E2E_ADMIN_PASSWORD}" != *$'\r'* ]] ||
+    die "admin password contains a newline"
+  [[ "${E2E_VWORLD_API_KEY}" != *$'\n'* && "${E2E_VWORLD_API_KEY}" != *$'\r'* ]] ||
+    die "VWorld key contains a newline"
+fi
 validate_snapshot
 [[ "$(git_repo rev-parse HEAD)" == "$SOURCE_COMMIT" ]] ||
   die "repository HEAD differs from source commit"
 [[ -z "$(git_repo status --porcelain)" ]] ||
   die "repository worktree is not clean"
 
-mkdir -p -- "$STATE_ROOT"
-chown root:root -- "$STATE_ROOT"
-chmod 0700 -- "$STATE_ROOT"
+if [[ -e "$STATE_ROOT" || -L "$STATE_ROOT" ]]; then
+  [[ -d "$STATE_ROOT" && ! -L "$STATE_ROOT" ]] ||
+    die "state root is unsafe"
+else
+  [[ "$MODE" == "run" ]] || die "recoverable state root is missing"
+  mkdir -- "$STATE_ROOT"
+  chown root:root -- "$STATE_ROOT"
+  chmod 0700 -- "$STATE_ROOT"
+fi
 [[ "$(stat -c '%u:%g:%a' -- "$STATE_ROOT")" == "0:0:700" ]] ||
   die "state root metadata is unsafe"
-exec 9>"$LOCK_FILE"
-chown root:root -- "$LOCK_FILE"
-chmod 0600 -- "$LOCK_FILE"
+if [[ -e "$LOCK_FILE" || -L "$LOCK_FILE" ]]; then
+  [[ -f "$LOCK_FILE" && ! -L "$LOCK_FILE" ]] ||
+    die "orchestrator lock is unsafe"
+  [[ "$(stat -c '%u:%g:%a' -- "$LOCK_FILE")" == "0:0:600" ]] ||
+    die "orchestrator lock metadata is unsafe"
+else
+  install -o root -g root -m 0600 /dev/null "$LOCK_FILE"
+fi
+exec 9<>"$LOCK_FILE"
 flock -n 9 || die "another clone acceptance runner owns the lock"
-[[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
-  die "prior BLOCKED state requires operator recovery"
-
-for port in "$API_PORT" "$UI_PORT"; do
-  ! ss -ltnH | awk '{print $4}' | grep -Eq "(^|:)$port$" ||
-    die "candidate port is already occupied"
-done
+if [[ "$MODE" == "run" ]]; then
+  [[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
+    die "prior BLOCKED state requires operator recovery"
+  for port in "$API_PORT" "$UI_PORT"; do
+    ! ss -ltnH | awk '{print $4}' | grep -Eq "(^|:)$port$" ||
+      die "candidate port is already occupied"
+  done
+else
+  [[ -f "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
+    die "recoverable BLOCKED state is missing"
+  [[ "$(stat -c '%u:%g:%a' -- "$BLOCKED_FILE")" == "0:0:600" ]] ||
+    die "BLOCKED state metadata is unsafe"
+fi
 docker container inspect "$DB_CONTAINER" >/dev/null 2>&1 ||
   die "clone DB container is missing"
 [[ "$(docker inspect --format '{{.State.Running}}' "$DB_CONTAINER")" == "true" ]] ||
@@ -302,8 +325,6 @@ clone_migration_head="$(
 [[ "$clone_migration_head" == "$EXPECTED_MIGRATION_HEAD" ]] ||
   die "clone DB migration head differs from source"
 
-readonly RUN_ID="clone-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 6)"
-readonly RUN_KEY="$(printf '%s' "$RUN_ID" | sha256sum | awk '{print $1}')"
 readonly CLONE_CONTAINER_ID="$(docker inspect --format '{{.Id}}' "$DB_CONTAINER")"
 readonly CLONE_CONTAINER_SHA256="$(printf '%s' "$CLONE_CONTAINER_ID" | sha256sum | awk '{print $1}')"
 clone_system_identifier="$(psql_value "SELECT system_identifier::text FROM pg_control_system()")"
@@ -314,6 +335,106 @@ readonly CLONE_IDENTITY_SHA256="$(
     "$CLONE_CONTAINER_SHA256" "$CLONE_SYSTEM_SHA256" "$DB_HOST_PORT" \
     "$EXPECTED_MIGRATION_HEAD" | sha256sum | awk '{print $1}'
 )"
+
+write_snapshot() {
+  local path="$1"
+  local run_id="$2"
+  local migration_head relation_count feature_total feature_non_deleted
+  local active_owned nonterminal_owned
+  [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
+    die "snapshot run ID is invalid"
+  migration_head="$(psql_value "SELECT string_agg(version_num, ',' ORDER BY version_num) FROM alembic_version")"
+  relation_count="$(psql_value "SELECT count(*) FROM pg_class WHERE relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname IN ('feature','ops','provider_sync')) AND relkind IN ('r','p','v','m')")"
+  feature_total="$(psql_value "SELECT count(*) FROM feature.features")"
+  feature_non_deleted="$(psql_value "SELECT count(*) FROM feature.features WHERE status <> 'deleted'")"
+  active_owned="$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e_live_acceptance::${run_id}::%' AND status <> 'deleted'")"
+  nonterminal_owned="$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e_live_acceptance::${run_id}::%' AND state = 'pending'")"
+  python3 -I -B "$SCRIPT_DIR/admin_feature_clone_live_state.py" write-snapshot \
+    --path "$path" \
+    --active-owned-features "$active_owned" \
+    --clone-container-sha256 "$CLONE_CONTAINER_SHA256" \
+    --clone-system-identifier-sha256 "$CLONE_SYSTEM_SHA256" \
+    --feature-non-deleted "$feature_non_deleted" \
+    --feature-total "$feature_total" \
+    --host-port "$DB_HOST_PORT" \
+    --migration-head "$migration_head" \
+    --nonterminal-owned-change-requests "$nonterminal_owned" \
+    --relation-count "$relation_count"
+}
+
+if [[ "$MODE" == "recover" ]]; then
+  state_helper=(python3 -I -B "$SCRIPT_DIR/admin_feature_clone_live_state.py")
+  blocked_source="$("${state_helper[@]}" read-blocked --path "$BLOCKED_FILE" --field source_commit)"
+  blocked_run_id="$("${state_helper[@]}" read-blocked --path "$BLOCKED_FILE" --field run_id)"
+  blocked_run_key="$("${state_helper[@]}" read-blocked --path "$BLOCKED_FILE" --field run_key)"
+  blocked_clone_identity="$("${state_helper[@]}" read-blocked --path "$BLOCKED_FILE" --field clone_identity_sha256)"
+  blocked_api_image="$("${state_helper[@]}" read-blocked --path "$BLOCKED_FILE" --field api_image_id)"
+  blocked_ui_image="$("${state_helper[@]}" read-blocked --path "$BLOCKED_FILE" --field ui_image_id)"
+  blocked_playwright_image="$("${state_helper[@]}" read-blocked --path "$BLOCKED_FILE" --field playwright_image_id)"
+  [[ "$blocked_source" =~ ^[0-9a-f]{40}$ ]] ||
+    die "BLOCKED source commit is invalid"
+  [[ "$blocked_run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
+    die "BLOCKED run ID is invalid"
+  [[ "$blocked_run_key" =~ ^[0-9a-f]{64}$ ]] ||
+    die "BLOCKED run key is invalid"
+  [[ "$blocked_clone_identity" == "$CLONE_IDENTITY_SHA256" ]] ||
+    die "clone DB identity changed after failure"
+  validate_snapshot "$blocked_source" "$INSTALL_BASE/$blocked_source"
+
+  readonly RECOVERY_RUNTIME="$STATE_ROOT/run-$blocked_run_key"
+  [[ -d "$RECOVERY_RUNTIME" && ! -L "$RECOVERY_RUNTIME" ]] ||
+    die "BLOCKED runtime directory is unsafe"
+  [[ "$(stat -c '%u:%g:%a' -- "$RECOVERY_RUNTIME")" == "0:0:700" ]] ||
+    die "BLOCKED runtime metadata is unsafe"
+  [[ -z "$(
+    docker ps -aq --no-trunc \
+      --filter "label=io.kortravelmap.admin-feature-clone-acceptance.run-key=$blocked_run_key"
+  )" ]] || die "BLOCKED execution still owns containers"
+
+  for image in "$blocked_api_image" "$blocked_ui_image" "$blocked_playwright_image"; do
+    docker image inspect "$image" >/dev/null 2>&1 ||
+      die "BLOCKED execution image is missing"
+  done
+  [[ "$(
+    docker image inspect --format \
+      '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+      "$blocked_api_image"
+  )" == "$blocked_source" ]] || die "BLOCKED API image revision mismatch"
+  [[ "$(
+    docker image inspect --format \
+      '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+      "$blocked_ui_image"
+  )" == "$blocked_source" ]] || die "BLOCKED UI image revision mismatch"
+  [[ "$(
+    docker image inspect --format \
+      '{{index .Config.Labels "io.kortravelmap.c7.repository-commit"}}' \
+      "$blocked_playwright_image"
+  )" == "$blocked_source" ]] || die "BLOCKED Playwright image revision mismatch"
+
+  "${state_helper[@]}" update-blocked \
+    --path "$BLOCKED_FILE" --phase recovery-validating
+  recovery_snapshot="$RECOVERY_RUNTIME/clone-recovery-current.json"
+  write_snapshot "$recovery_snapshot" "$blocked_run_id"
+  find "$RECOVERY_RUNTIME" -type d -exec chown root:root {} +
+  find "$RECOVERY_RUNTIME" -type f -exec chown root:root {} +
+  find "$RECOVERY_RUNTIME" -type d -exec chmod 0700 {} +
+  find "$RECOVERY_RUNTIME" -type f -exec chmod 0600 {} +
+  "${state_helper[@]}" complete \
+    --blocked-path "$BLOCKED_FILE" \
+    --phase recovered \
+    --current-snapshot "$recovery_snapshot" \
+    --recovery-tool-source-commit "$SOURCE_COMMIT" \
+    --result-path "$RECOVERY_RUNTIME/result.json" \
+    --runtime "$RECOVERY_RUNTIME"
+  docker image rm --force \
+    "$blocked_api_image" "$blocked_ui_image" "$blocked_playwright_image" >/dev/null
+  printf 'admin feature clone live acceptance recovered: source=%s result=%s\n' \
+    "$blocked_source" "$RECOVERY_RUNTIME/result.json"
+  exit 0
+fi
+
+readonly RUN_ID="clone-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 6)"
+readonly RUN_KEY="$(printf '%s' "$RUN_ID" | sha256sum | awk '{print $1}')"
 readonly RUNTIME_DIR="$STATE_ROOT/run-$RUN_KEY"
 mkdir -- "$RUNTIME_DIR"
 chown root:root -- "$RUNTIME_DIR"
@@ -437,30 +558,7 @@ playwright_image_revision="$(
 [[ "$playwright_image_revision" == "$SOURCE_COMMIT" ]] ||
   die "Playwright image source revision mismatch"
 
-write_snapshot() {
-  local path="$1"
-  local migration_head relation_count feature_total feature_non_deleted
-  local active_owned nonterminal_owned
-  migration_head="$(psql_value "SELECT string_agg(version_num, ',' ORDER BY version_num) FROM alembic_version")"
-  relation_count="$(psql_value "SELECT count(*) FROM pg_class WHERE relnamespace IN (SELECT oid FROM pg_namespace WHERE nspname IN ('feature','ops','provider_sync')) AND relkind IN ('r','p','v','m')")"
-  feature_total="$(psql_value "SELECT count(*) FROM feature.features")"
-  feature_non_deleted="$(psql_value "SELECT count(*) FROM feature.features WHERE status <> 'deleted'")"
-  active_owned="$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e_live_acceptance::${RUN_ID}::%' AND status <> 'deleted'")"
-  nonterminal_owned="$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e_live_acceptance::${RUN_ID}::%' AND state = 'pending'")"
-  python3 -I -B "$SCRIPT_DIR/admin_feature_clone_live_state.py" write-snapshot \
-    --path "$path" \
-    --active-owned-features "$active_owned" \
-    --clone-container-sha256 "$CLONE_CONTAINER_SHA256" \
-    --clone-system-identifier-sha256 "$CLONE_SYSTEM_SHA256" \
-    --feature-non-deleted "$feature_non_deleted" \
-    --feature-total "$feature_total" \
-    --host-port "$DB_HOST_PORT" \
-    --migration-head "$migration_head" \
-    --nonterminal-owned-change-requests "$nonterminal_owned" \
-    --relation-count "$relation_count"
-}
-
-write_snapshot "$RUNTIME_DIR/clone-startup-before.json"
+write_snapshot "$RUNTIME_DIR/clone-startup-before.json" "$RUN_ID"
 
 admin_secret="$(printf '%s' "$RUN_ID:admin" | sha256sum | awk '{print $1}')"
 service_token="$(printf '%s' "$RUN_ID:service" | sha256sum | awk '{print $1}')"
@@ -522,7 +620,7 @@ for _ in $(seq 1 90); do
 done
 curl --fail --silent --show-error "http://127.0.0.1:$API_PORT/health" >/dev/null ||
   die "candidate API health check failed"
-write_snapshot "$RUNTIME_DIR/clone-startup-after.json"
+write_snapshot "$RUNTIME_DIR/clone-startup-after.json" "$RUN_ID"
 
 UI_CONTAINER="ktm-afcla-${RUN_KEY:0:12}-ui"
 export KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH="$password_hash"
@@ -628,7 +726,7 @@ run_executor \
 run_helper cleanup "$RUNTIME_DIR/direct-cleanup.json"
 SEEDED=0
 run_helper audit "$RUNTIME_DIR/direct-audit.json"
-write_snapshot "$RUNTIME_DIR/clone-final.json"
+write_snapshot "$RUNTIME_DIR/clone-final.json" "$RUN_ID"
 remove_owned_containers || die "owned container cleanup failed"
 (( main_status == 0 && recovery_status == 0 )) || {
   python3 -I -B "$SCRIPT_DIR/admin_feature_clone_live_state.py" update-blocked \

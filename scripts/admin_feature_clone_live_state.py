@@ -89,6 +89,28 @@ def _identity(args: argparse.Namespace) -> dict[str, str]:
     }
 
 
+def _validated_blocked_identity(blocked: dict[str, Any]) -> dict[str, str]:
+    identity = blocked.get("identity")
+    if not isinstance(identity, dict):
+        raise RuntimeError("BLOCKED execution identity가 없습니다")
+    patterns = {
+        "api_image_id": (_IMAGE_ID_RE, "API image ID"),
+        "clone_identity_sha256": (_SHA256_RE, "clone identity SHA256"),
+        "playwright_image_id": (_IMAGE_ID_RE, "Playwright image ID"),
+        "source_commit": (_COMMIT_RE, "source commit"),
+        "ui_image_id": (_IMAGE_ID_RE, "UI image ID"),
+    }
+    if set(identity) != set(patterns):
+        raise RuntimeError("BLOCKED execution identity field가 예상과 다릅니다")
+    validated: dict[str, str] = {}
+    for field, (pattern, label) in patterns.items():
+        value = identity[field]
+        if not isinstance(value, str):
+            raise RuntimeError(f"{label} 형식이 올바르지 않습니다")
+        validated[field] = _require_pattern(value, pattern, label)
+    return validated
+
+
 def write_blocked(args: argparse.Namespace) -> None:
     path = Path(args.path)
     if path.exists() or path.is_symlink():
@@ -126,8 +148,7 @@ def read_blocked(args: argparse.Namespace) -> None:
     if field in {"run_id", "run_key", "phase"}:
         value = blocked.get(field)
     else:
-        identity = blocked.get("identity")
-        value = identity.get(field) if isinstance(identity, dict) else None
+        value = _validated_blocked_identity(blocked).get(field)
     if not isinstance(value, str) or not value:
         raise RuntimeError("BLOCKED field가 올바르지 않습니다")
     print(value)
@@ -160,7 +181,11 @@ def write_snapshot(args: argparse.Namespace) -> None:
 
 
 def _fixture_counts(
-    path: Path, expected_action: str, expected: dict[str, int]
+    path: Path,
+    expected_action: str,
+    expected: dict[str, int],
+    *,
+    expected_foreign_key_references: int,
 ) -> dict[str, Any]:
     evidence = _load_object(path)
     if (
@@ -169,8 +194,8 @@ def _fixture_counts(
         or evidence.get("counts") != expected
     ):
         raise RuntimeError(f"fixture evidence가 예상과 다릅니다: {path.name}")
-    if evidence.get("foreign_key_references") != 0:
-        raise RuntimeError(f"fixture FK residue가 있습니다: {path.name}")
+    if evidence.get("foreign_key_references") != expected_foreign_key_references:
+        raise RuntimeError(f"fixture FK reference가 예상과 다릅니다: {path.name}")
     checked = evidence.get("foreign_key_constraints_checked")
     if not isinstance(checked, int) or checked < 1:
         raise RuntimeError(f"fixture FK audit가 없습니다: {path.name}")
@@ -219,12 +244,36 @@ def complete(args: argparse.Namespace) -> None:
     blocked = _load_object(blocked_path)
     if blocked.get("status") != "blocked" or blocked.get("version") != 1:
         raise RuntimeError("BLOCKED state 계약이 올바르지 않습니다")
+    identity = _validated_blocked_identity(blocked)
 
     startup_before = _load_object(runtime / "clone-startup-before.json")
     startup_after = _load_object(runtime / "clone-startup-after.json")
     final = _load_object(runtime / "clone-final.json")
+    if args.phase == "recovered":
+        if args.current_snapshot is None or args.recovery_tool_source_commit is None:
+            raise RuntimeError("recovery 완료에는 현재 snapshot/tool commit이 필요합니다")
+        current = _load_object(Path(args.current_snapshot))
+        if not _same_startup_identity(final, current):
+            raise RuntimeError("recovery 현재 clone DB가 실패 당시 최종 snapshot과 다릅니다")
+        recovery_tool_source_commit: str | None = _require_pattern(
+            args.recovery_tool_source_commit,
+            _COMMIT_RE,
+            "recovery tool source commit",
+        )
+    else:
+        if args.current_snapshot is not None or args.recovery_tool_source_commit is not None:
+            raise RuntimeError("일반 완료에는 recovery 전용 인자를 사용할 수 없습니다")
+        recovery_tool_source_commit = None
     if not _same_startup_identity(startup_before, startup_after):
         raise RuntimeError("candidate startup이 clone DB identity/schema/data를 변경했습니다")
+    clone_identity = (
+        f"{startup_before.get('clone_container_sha256')}\n"
+        f"{startup_before.get('clone_system_identifier_sha256')}\n"
+        f"{startup_before.get('host_port')}\n"
+        f"{startup_before.get('migration_head')}\n"
+    )
+    if identity["clone_identity_sha256"] != _sha256(clone_identity):
+        raise RuntimeError("BLOCKED clone identity가 DB snapshot과 다릅니다")
     for key in (
         "clone_container_sha256",
         "clone_system_identifier_sha256",
@@ -249,24 +298,24 @@ def complete(args: argparse.Namespace) -> None:
         runtime / "direct-seed.json",
         "seed",
         {"features": 2, "price_values": 1, "weather_values": 1},
+        expected_foreign_key_references=2,
     )
     cleanup = _fixture_counts(
         runtime / "direct-cleanup.json",
         "cleanup",
         {"features": 0, "price_values": 0, "weather_values": 0},
+        expected_foreign_key_references=0,
     )
     audit = _fixture_counts(
         runtime / "direct-audit.json",
         "audit",
         {"features": 0, "price_values": 0, "weather_values": 0},
+        expected_foreign_key_references=0,
     )
     tests = {
         "main": _report_counts(runtime / "playwright-main"),
         "recovery": _report_counts(runtime / "playwright-recovery"),
     }
-    identity = blocked.get("identity")
-    if not isinstance(identity, dict):
-        raise RuntimeError("BLOCKED execution identity가 없습니다")
     canonical_identity = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     result = {
         "cleanup": {
@@ -289,6 +338,7 @@ def complete(args: argparse.Namespace) -> None:
             "startup_migration_unchanged": True,
         },
         "phase": args.phase,
+        "recovery_tool_source_commit": recovery_tool_source_commit,
         "source_commit": identity.get("source_commit"),
         "status": "complete",
         "tests": tests,
@@ -366,6 +416,8 @@ def main() -> None:
     finish = subparsers.add_parser("complete")
     finish.add_argument("--blocked-path", required=True)
     finish.add_argument("--phase", choices=("passed", "recovered"), required=True)
+    finish.add_argument("--current-snapshot")
+    finish.add_argument("--recovery-tool-source-commit")
     finish.add_argument("--result-path", required=True)
     finish.add_argument("--runtime", required=True)
     finish.set_defaults(handler=complete)
