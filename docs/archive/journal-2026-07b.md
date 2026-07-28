@@ -540,3 +540,4 @@ Feature 관련 운영 UI와 API 경로를 `/admin/features/...` namespace로 모
 - **live e2e**: Windows Playwright live targeted run에서 Feature 지도 마커 렌더와 클러스터 클릭 zoom
   증가가 3 passed(인증 setup 포함)로 통과했다. 실제 점 마커 클릭 상세 패널 round-trip 테스트는 운영
   타일/응답 대기에서 5분 timeout이 나 별도 후속 검증 대상으로 남겼다.
+

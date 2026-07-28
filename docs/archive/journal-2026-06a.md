@@ -3001,3 +3001,4 @@ admin UI 상세 구현·e2e 점검 task를 만들어 문서 정리.
   (ADR-051 보강), D-12(a)→inactive feature는 `found`+status 노출(ADR-050 보강),
   D-13 확인→TripMate 자체 ETL은 KASI류 고유 잡만(중복 없음, T-210c 양립).
   **의사결정 전 항목 종결**. TripMate repo에도 직접 문서 반영 + PR (머지는 사용자).
+

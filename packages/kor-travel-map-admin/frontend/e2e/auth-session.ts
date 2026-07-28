@@ -12,8 +12,13 @@ export async function authenticateAdmin(
   const password = process.env.E2E_ADMIN_PASSWORD;
   const username = process.env.E2E_ADMIN_USERNAME ?? "admin";
   const storageStateDirectory = path.dirname(storageState);
-  fs.mkdirSync(storageStateDirectory, { mode: 0o700, recursive: true });
-  fs.chmodSync(storageStateDirectory, 0o700);
+  const createdStorageStateDirectory = fs.mkdirSync(storageStateDirectory, {
+    mode: 0o700,
+    recursive: true,
+  });
+  if (createdStorageStateDirectory !== undefined) {
+    fs.chmodSync(storageStateDirectory, 0o700);
+  }
 
   if (!password) {
     await page.context().storageState({ path: storageState });

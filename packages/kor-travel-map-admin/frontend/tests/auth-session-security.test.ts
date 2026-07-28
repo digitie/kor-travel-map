@@ -43,7 +43,7 @@ describe("Playwright admin storage state security", () => {
     expect(statSync(storageState).mode & 0o777).toBe(0o600);
   });
 
-  it("기존의 넓은 directory 권한을 축소하고 teardown은 state만 제거한다", async () => {
+  it("기존 directory 권한은 건드리지 않고 teardown은 state만 제거한다", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "ktm-auth-state-test-"));
     temporaryRoots.push(root);
     const directory = path.join(root, "existing");
@@ -62,7 +62,7 @@ describe("Playwright admin storage state security", () => {
     await authenticateAdmin(page, storageState);
     removeStorageState(storageState);
 
-    expect(statSync(directory).mode & 0o777).toBe(0o700);
+    expect(statSync(directory).mode & 0o777).toBe(0o775);
     expect(() => statSync(storageState)).toThrow();
   });
 });
