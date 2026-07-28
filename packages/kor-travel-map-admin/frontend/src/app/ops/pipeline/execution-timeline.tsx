@@ -118,9 +118,12 @@ export function ExecutionTimeline({
 }) {
   const kind = initialFilters.kind ?? "all";
   const status = initialFilters.status ?? "all";
-  const provider = initialFilters.provider ?? "";
-  const datasetKey = initialFilters.datasetKey ?? "";
-  const syncScope = initialFilters.syncScope ?? "";
+  const [providerDraft, setProviderDraft] = useState<string | null>(null);
+  const [datasetKeyDraft, setDatasetKeyDraft] = useState<string | null>(null);
+  const [syncScopeDraft, setSyncScopeDraft] = useState<string | null>(null);
+  const provider = providerDraft ?? initialFilters.provider ?? "";
+  const datasetKey = datasetKeyDraft ?? initialFilters.datasetKey ?? "";
+  const syncScope = syncScopeDraft ?? initialFilters.syncScope ?? "";
   const createdFrom = datetimeLocalValue(initialFilters.createdFrom);
   const createdTo = datetimeLocalValue(initialFilters.createdTo);
   const loadBatchId = initialLoadBatchId ?? "";
@@ -449,14 +452,18 @@ export function ExecutionTimeline({
               aria-label="provider 필터"
               placeholder="예: python-kma-api"
               value={provider}
+              onBlur={() => setProviderDraft(null)}
               onChange={(event) => {
+                const value = event.target.value;
+                setProviderDraft(value);
                 setStoredCursorStack([]);
                 setStoredBaselineTop(null);
                 onUrlChange(
-                  { provider: event.target.value.trim() || null },
+                  { provider: value.trim() || null },
                   "replace",
                 );
               }}
+              onFocus={() => setProviderDraft(provider)}
             />
           </FilterField>
           <FilterField label="데이터셋">
@@ -466,14 +473,18 @@ export function ExecutionTimeline({
               disabled={!providerFilter}
               placeholder="예: kma_short_forecast"
               value={datasetKey}
+              onBlur={() => setDatasetKeyDraft(null)}
               onChange={(event) => {
+                const value = event.target.value;
+                setDatasetKeyDraft(value);
                 setStoredCursorStack([]);
                 setStoredBaselineTop(null);
                 onUrlChange(
-                  { dataset_key: event.target.value.trim() || null },
+                  { dataset_key: value.trim() || null },
                   "replace",
                 );
               }}
+              onFocus={() => setDatasetKeyDraft(datasetKey)}
             />
             {!providerFilter ? (
               <p className="text-xs text-text-tertiary" id="timeline-dataset-prerequisite">
@@ -492,14 +503,18 @@ export function ExecutionTimeline({
               disabled={!providerFilter || !datasetFilter}
               placeholder="예: target_grids"
               value={syncScope}
+              onBlur={() => setSyncScopeDraft(null)}
               onChange={(event) => {
+                const value = event.target.value;
+                setSyncScopeDraft(value);
                 setStoredCursorStack([]);
                 setStoredBaselineTop(null);
                 onUrlChange(
-                  { sync_scope: event.target.value.trim() || null },
+                  { sync_scope: value.trim() || null },
                   "replace",
                 );
               }}
+              onFocus={() => setSyncScopeDraft(syncScope)}
             />
             {!providerFilter || !datasetFilter ? (
               <p className="text-xs text-text-tertiary" id="timeline-scope-prerequisite">

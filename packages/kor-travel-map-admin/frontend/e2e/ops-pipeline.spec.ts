@@ -2058,7 +2058,7 @@ test.describe("/ops/pipeline", () => {
     await page.goto("/ops/pipeline");
     const provider = page.getByLabel("provider 필터");
 
-    await provider.pressSequentially("python-kma-api", { delay: 25 });
+    await provider.pressSequentially("python-kma-api");
 
     await expect(provider).toBeFocused();
     await expect(provider).toHaveValue("python-kma-api");
