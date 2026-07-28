@@ -910,7 +910,10 @@ test.describe("/features map interactions", () => {
     await expect(
       panel
         .getByTestId("feature-price-panel")
-        .getByText("휘발유 1,820", { exact: true }),
+        .getByText(
+          "휘발유 · python-opinet-api/opinet_gas_station 1,820",
+          { exact: true },
+        ),
     ).toBeVisible();
     await expect(panel.getByText("History")).toBeVisible();
     const graph = panel.getByRole("img", { name: "price history graph" });

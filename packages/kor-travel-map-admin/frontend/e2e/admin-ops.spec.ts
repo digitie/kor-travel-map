@@ -1032,7 +1032,6 @@ test.describe("admin/ops pages", () => {
       "change action",
       "change feature id",
       "change reason",
-      "change operator",
       "change kind",
       "change feature status",
       "change name",
@@ -1132,7 +1131,6 @@ test.describe("admin/ops pages", () => {
 
     await expect.poll(() => requests.approve).toBe(1);
     expect(requests.reviewBodies[0]).toMatchObject({
-      operator: "local-admin",
       reason: "admin-ui approve",
     });
     await expect(pendingRow.getByText("반영됨")).toBeVisible();
@@ -1594,10 +1592,9 @@ test.describe("admin/ops pages", () => {
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
-    // 상/하단 페이지네이션 컨트롤.
-    await expect(page.getByLabel("이전 페이지")).toHaveCount(2);
-    await expect(page.getByLabel("다음 페이지")).toHaveCount(2);
-    await expect(page.getByLabel("마지막 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("이전 페이지")).toHaveCount(1);
+    await expect(page.getByLabel("다음 페이지")).toHaveCount(1);
+    await expect(page.getByLabel("마지막 페이지")).toHaveCount(1);
   });
 
   test("/v1/admin/poi-cache-targets", async ({ page }) => {

@@ -19,7 +19,7 @@ test.describe("/admin/features/new", () => {
     await page.goto("/admin/features/new");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "New feature" }),
+      page.getByRole("heading", { level: 1, name: "새 Feature" }),
     ).toBeVisible();
 
     for (const section of ["좌표", "kor-travel-geo", "중복 후보", "기본 정보", "주소", "상세"]) {
@@ -28,24 +28,30 @@ test.describe("/admin/features/new", () => {
       ).toBeVisible();
     }
 
-    await expect(page.getByLabel("name", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("category", { exact: true })).toHaveValue(
+    await expect(page.getByLabel("create name", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("create category", { exact: true })).toHaveValue(
       "01070300",
     );
-    await expect(page.getByLabel("lon", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("lat", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "경도", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "위도", exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "요청 생성" })).toBeVisible();
   });
 
   test("kind 옵션은 place/event 2종", async ({ page }) => {
     await page.goto("/admin/features/new");
 
-    const kind = page.getByLabel("kind", { exact: true });
+    const kind = page.getByLabel("create kind", { exact: true });
     await expect(kind).toHaveValue("place");
     await kind.selectOption("event");
     await expect(kind).toHaveValue("event");
     // event 전환 시 detail 폼에 starts_at 노출.
-    await expect(page.getByLabel("starts_at", { exact: true })).toBeVisible();
+    await expect(
+      page.getByLabel("create event start", { exact: true }),
+    ).toBeVisible();
   });
 
   test("검증 — name 비우고 제출하면 필수 에러", async ({ page }) => {
@@ -54,17 +60,17 @@ test.describe("/admin/features/new", () => {
     // 기본값: name 빈값, reason 빈값. 그대로 제출 → name 필수에서 throw.
     await page.getByRole("button", { name: "요청 생성" }).click();
 
-    await expect(page.getByText("feature 작성 실패")).toBeVisible();
+    await expect(page.getByText("Feature 작성 실패")).toBeVisible();
     await expect(page.getByText("name은 필수입니다.").first()).toBeVisible();
   });
 
   test("검증 — 한국 본토 밖 좌표는 범위 에러", async ({ page }) => {
     await page.goto("/admin/features/new");
 
-    await page.getByLabel("name", { exact: true }).fill("범위밖 테스트");
-    await page.getByLabel("reason", { exact: true }).fill("e2e");
-    await page.getByLabel("lon", { exact: true }).fill("200");
-    await page.getByLabel("lat", { exact: true }).fill("10");
+    await page.getByLabel("create name", { exact: true }).fill("범위밖 테스트");
+    await page.getByRole("textbox", { name: "사유", exact: true }).fill("e2e");
+    await page.getByRole("textbox", { name: "경도", exact: true }).fill("200");
+    await page.getByRole("textbox", { name: "위도", exact: true }).fill("10");
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect(

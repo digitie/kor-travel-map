@@ -162,7 +162,6 @@ test.describe("admin/issues actions + pagination + errors", () => {
     expect(patchBodies[0].issueId).toBe(ISSUE_ID);
     expect(patchBodies[0].body).toMatchObject({
       action: "resolve",
-      operator: "local-admin",
       prevent_provider_reactivation: true,
       reason: "admin-ui resolve",
     });
@@ -192,7 +191,6 @@ test.describe("admin/issues actions + pagination + errors", () => {
       await expect.poll(() => patchBodies.length).toBe(expected);
       expect(patchBodies[expected - 1].body).toMatchObject({
         action,
-        operator: "local-admin",
         prevent_provider_reactivation: true,
         reason: `admin-ui ${action}`,
       });

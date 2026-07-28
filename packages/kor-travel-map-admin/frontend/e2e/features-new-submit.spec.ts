@@ -32,6 +32,7 @@ type AdminFeatureChangeResponse =
   components["schemas"]["AdminFeatureChangeResponse"];
 type AdminFeatureCreateRequest =
   components["schemas"]["AdminFeatureCreateRequest"];
+type CategoriesResponse = components["schemas"]["CategoriesResponse"];
 type FeaturesNearbyResponse = components["schemas"]["FeaturesNearbyResponse"];
 type NearbyFeatureSummary = components["schemas"]["NearbyFeatureSummary"];
 type NearbyOriginSummary = components["schemas"]["NearbyOriginSummary"];
@@ -211,10 +212,27 @@ async function fillCoord(page: Page, lon = "126.978", lat = "37.5665") {
 }
 
 test.describe("/admin/features/new (mocked routes)", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/v1/categories**", async (route) => {
+      const request = route.request();
+      const apiPath = bffApiPath(request.url());
+      if (request.method() !== "GET" || apiPath !== "/v1/categories") {
+        throw new Error(
+          `Unhandled categories route: ${request.method()} ${apiPath}`,
+        );
+      }
+      const response: CategoriesResponse = {
+        data: { include_counts: false, items: [] },
+        meta: { duration_ms: 1, request_id: "e2e-feature-create-categories" },
+      };
+      await fulfillJson(route, response);
+    });
+  });
+
   test("제출 성공 — POST /v1/admin/features → 변경 요청 생성 알림 + 생성 요청 섹션", async ({
     page,
   }) => {
-    const nearby = await mockNearbyRoute(page, () => makeNearbyResponse([]));
+    await mockNearbyRoute(page, () => makeNearbyResponse([]));
     const create = await mockCreateRoute(page, async (route, body) => {
       await fulfillJson(
         route,
@@ -236,9 +254,8 @@ test.describe("/admin/features/new (mocked routes)", () => {
 
     await page.getByRole("textbox", { name: "create name", exact: true }).fill("새 장소");
     await page.getByRole("textbox", { name: "사유", exact: true }).fill("e2e 수동 생성");
-    // category 기본값 '01070300' 그대로 유효. 유효 좌표 입력 → nearby 자동 발화.
+    // category 기본값 '01070300' 그대로 유효. nearby 동작은 아래 전용 시나리오가 소유한다.
     await fillCoord(page);
-    await expect.poll(() => nearby.count).toBeGreaterThanOrEqual(1);
 
     await page.getByRole("button", { name: "요청 생성" }).click();
 
@@ -252,7 +269,6 @@ test.describe("/admin/features/new (mocked routes)", () => {
       status: "active",
       marker_icon: "marker",
       marker_color: "P-01",
-      operator: "local-admin",
     });
 
     // 성공 Alert(role=status) + 라벨 텍스트.

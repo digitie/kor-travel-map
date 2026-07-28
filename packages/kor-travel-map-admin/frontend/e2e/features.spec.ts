@@ -19,9 +19,10 @@ test.describe("/features", () => {
     await expect(page.getByRole("link", { name: /홈/ })).toBeVisible();
     // 로딩→데이터 또는 에러 어느 쪽이든 상태 텍스트가 렌더돼야 함.
     await expect(
-      page.locator(
-        "text=/지도 로딩 중|클러스터 로딩 중|feature 로딩 중|개 지역|건 표시|클러스터 호출 실패|feature 호출 실패/",
-      ),
+      page.locator('[data-slot="badge"]').filter({
+        hasText:
+          /^(지도 로딩 중|클러스터 로딩 중|feature 로딩 중|\d+개 지역 · [\d,]+건 집계(?: · 갱신 중)?|\d+건 표시(?: · 갱신 중)?|클러스터 호출 실패|feature 호출 실패)$/,
+      }),
     ).toBeVisible();
   });
 
@@ -42,9 +43,10 @@ test.describe("/features", () => {
     const filter = page.getByTestId("kind-filter");
     await expect(filter).toBeVisible();
     await expect(
-      page.locator(
-        "text=/지도 로딩 중|클러스터 로딩 중|feature 로딩 중|개 지역|건 표시|클러스터 호출 실패|feature 호출 실패/",
-      ),
+      page.locator('[data-slot="badge"]').filter({
+        hasText:
+          /^(지도 로딩 중|클러스터 로딩 중|feature 로딩 중|\d+개 지역 · [\d,]+건 집계(?: · 갱신 중)?|\d+건 표시(?: · 갱신 중)?|클러스터 호출 실패|feature 호출 실패)$/,
+      }),
     ).toBeVisible();
     for (const k of ["place", "event", "notice", "price", "weather", "route", "area"]) {
       await expect(filter.getByRole("button", { name: k, exact: true })).toBeVisible();

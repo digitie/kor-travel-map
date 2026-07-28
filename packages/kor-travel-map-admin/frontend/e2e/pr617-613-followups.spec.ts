@@ -33,7 +33,9 @@ test.describe("PR #617/#613 후속 UI", () => {
   test("신규 Feature 작성 — 시군구 코드 자동검색 필드(#617)", async ({ page }) => {
     await page.goto("/admin/features/new");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await expect(page.getByLabel(/시군구/).first()).toBeVisible();
+    await expect(
+      page.getByLabel("create sigungu code", { exact: true }),
+    ).toBeVisible();
   });
 
   test("파이프라인 — 실행 타임라인 렌더", async ({ page }) => {

@@ -305,7 +305,6 @@ test.describe("admin feature change-requests lifecycle", () => {
 
     await expect.poll(() => requests.reject).toBe(1);
     expect(requests.reviewBodies[0]).toMatchObject({
-      operator: "local-admin",
       reason: "admin-ui reject",
     });
 

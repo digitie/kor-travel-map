@@ -520,7 +520,6 @@ test.describe("admin/features list depth", () => {
 
     await expect.poll(() => mocks.deactivateBodies.length).toBe(1);
     expect(mocks.deactivateBodies[0]).toMatchObject({
-      operator: "local-admin",
       prevent_provider_reactivation: true,
       reason: "admin-ui deactivate",
     });
