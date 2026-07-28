@@ -19,7 +19,7 @@
 barrier로 직렬화한다.
 
 - **Lane A — cross-repo 계약·운영·데이터 품질**
-  - a0: [ ] `T-VN-H07B`(PinVi #403 재감사·landing) →
+  - a0: [x] `T-VN-H07B`(PinVi #403 재감사·landing) →
     [ ] `T-VN-H07D`(#815 admin snapshot/freshness) →
     [ ] `T-VN-H07C`(#812 manifest v5)
   - a1: [ ] `T-VN-H27`(#819 HAProxy tunnel) →
@@ -374,10 +374,15 @@ Map #814 residual은 `259a9ec5`로 landing해 `tasks-done.md`에 보존했다. �
 재감사 기준 시점 최신 main보다 13 commits 뒤처졌고, 오래된 task 문서 commit을 재생하지 않고
 H07A의 실제 user OpenAPI SHA와 대조한 residual consumer contract만 남긴다.
 
-- [ ] T-VN-H07B — **PinVi #403 residual contract 재감사·landing**
+- [x] T-VN-H07B — **PinVi #403 residual contract 재감사·landing** (PinVi PR #415, #403 대체)
 
-  최신 PinVi main에 rebase하고 H07A의 실제 user OpenAPI SHA와 대조한다. 이미 흡수된 assertion을
-  제거하고 PinVi가 읽는 필드만 typed consumer contract로 남겨 #403을 갱신·머지한다.
+  재감사 결과 #403의 pin 대상(공개 curated 표면)은 PinVi가 **호출하지 않는** 경로였다 —
+  `_CLIENT_PATHS`에 curated 없음, 큐레이션 런타임 표면은 admin detail-snapshot(H07D 소유),
+  producer exact 고정은 H07A 소유. curated pin 전량 제거 후 **PinVi가 실제로 읽는 필드**의
+  typed consumer contract(21 schema)로 대체했다. H07A의 실제 user OpenAPI SHA와 대조해 stale
+  스냅샷(`91b30f40`@`cf1f0bba`, 174 commits 뒤)을 Map main `8880c29b`/`0a7f1684`로 재동기화.
+  경로→컨테이너→item·map value·envelope `meta` 사슬과 `model_validate` 표면의 model 결합까지
+  고정. 상세는 tasks-done 2026-07-28.
 
 - [ ] T-VN-H07D — **#815 admin detail-snapshot field-level contract·freshness**
 

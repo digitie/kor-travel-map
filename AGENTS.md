@@ -292,8 +292,10 @@ CLI `codegraph callers`/`impact`/`callees`. 신규 파일만 추가하고 기존
 - [ ] `ruff check .` / `mypy --strict` / `lint-imports` 통과
 - [ ] **GitHub Actions CI green 통과 후 머지** (ADR-038, 2026-05-27 재활성화) —
       `.github/workflows/{ci,lint,openapi}.yml` 모두 통과 + 1 review approval.
-- [ ] `docs/journal.md`에 작업 항목 추가 (역시간순)
-- [ ] `docs/resume.md`의 진척도 갱신
+- [ ] `docs/journal.md`에 작업 항목 추가 (역시간순 — 항상 **상단**)
+- [ ] `docs/resume.md`의 진척도 갱신 (항상 **상단**)
+      ↳ 두 문서는 2026-07-26 이후만 담는다. 과거 기록은 `docs/archive/`(읽기 전용)로 분리했으며
+        분리 경계·파일명·크기 상한·재분리 규약은 `docs/tasks-rule.md` §8이 정본이다.
 - [ ] 의사결정이 있었다면 `docs/adr/README.md`에 ADR 추가
 - [ ] 사용자 가시 변경이면 `CHANGELOG.md` 갱신
 - [ ] DTO/스키마 변경이면 `packages/kor-travel-map-api/scripts/export_openapi.py` 재실행

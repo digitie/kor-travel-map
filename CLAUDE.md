@@ -55,6 +55,9 @@ identity table은 `AGENTS.md` §식별자가 정본이다.
 4. `docs/architecture/architecture.md` — 의존 방향
 5. `docs/resume.md` — 다음 한 작업
 6. `docs/journal.md` 최신 3건
+   (5·6은 2026-07-26 전면 감사 이후만 담는다. 그 이전 기록은 `docs/archive/`로 분리했고
+   각 파일 상단 "과거 기록 아카이브" 표가 인덱스다 — 과거 검색은 `rg <패턴> docs/archive/`.
+   분리·재분리 규약은 `docs/tasks-rule.md` §8.)
 7. 관련 ADR (`docs/adr/README.md`)
 8. cross-repo 연동(PinVi/kor-travel-concierge/kor-travel-docker-manager) 작업 시
    `docs/integration-map.md` — 포트·연동 방향·인증·계약 정본 위치 1장 정본
