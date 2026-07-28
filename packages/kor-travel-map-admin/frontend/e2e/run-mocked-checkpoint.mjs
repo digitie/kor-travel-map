@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import path from "node:path";
 
 const checkpoints = new Set(["A", "B", "C", "D"]);
 const [checkpoint, ...playwrightArgs] = process.argv.slice(2);
