@@ -69,6 +69,10 @@ barrier로 직렬화한다.
 
 - base는 **main**(`integration/t-vn`은 PR #790 합류로 폐지). 시작·PR 직전·머지 직후
   `origin/main` rebase. PR 하나는 task 하나만 소유.
+- **사용자 명시 동반 감사 예외**: 각 T-VN task의 최종 PR에는 사용자 지시대로 직전 Claude
+  Code PR 사후 감사에서 발견한 수정과 그 감사 issue를 함께 넣는다. 이는 새 실행 lane task가
+  아니라 현재 task의 필수 PR 전 gate다. T-VN-48 PR에는 issue #881의 hidden alias 제거와
+  PR #877 아카이브 복구를 이 예외로 함께 반영한다.
 - 첫 reviewable checkpoint부터 원격 feature branch에 작은 의미 단위로 자주 커밋·push하되,
   PR은 구현·적대 리뷰 반영·실데이터 검증·최종 main rebase를 모두 마친 뒤 **머지 직전**에만
   연다. 실패하면 검증된 직전 checkpoint부터 재개한다.
