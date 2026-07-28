@@ -9,6 +9,8 @@ type AdminFeatureDeactivateResponse =
   components["schemas"]["AdminFeatureDeactivateResponse"];
 type AdminFeatureDetailResponse =
   components["schemas"]["AdminFeatureDetailResponse"];
+type AdminFeaturesListResponse =
+  components["schemas"]["AdminFeaturesListResponse"];
 type AdminFeatureRevisionResponse =
   components["schemas"]["AdminFeatureRevisionResponse"];
 type FeatureDetailEnvelopeResponse =
@@ -83,6 +85,16 @@ function isApiResponse(
   path: string,
 ): boolean {
   return response.request().method() === method && apiPath(response) === path;
+}
+
+function isAdminFeatureListResponse(
+  response: Response,
+  q: string,
+  status: string,
+): boolean {
+  if (!isApiResponse(response, "GET", "/v1/admin/features")) return false;
+  const params = new URL(response.url()).searchParams;
+  return params.get("q") === q && params.getAll("status").includes(status);
 }
 
 function adminFeaturePath(featureId: string): string {
@@ -926,12 +938,24 @@ test.describe("/admin/features + feature change requests live write workflow", (
 
       await test.step("admin features 목록에서 검색, 필터, preview, detail 링크를 확인한다", async () => {
         await gotoAdminFeatures(page);
-        await page.getByLabel("feature search").fill(CREATE_NAME);
         await page.getByLabel("feature kind").selectOption("place");
         await page.getByLabel("feature status").selectOption("active");
         await page.getByLabel("has issue").selectOption("all");
         await page.getByLabel("feature sort").selectOption("updated_at");
         await page.getByRole("button", { name: "desc" }).click();
+        const listResponsePromise = page.waitForResponse(
+          (response) =>
+            isAdminFeatureListResponse(response, FEATURE_ID, "active"),
+          { timeout: FLOW_TIMEOUT },
+        );
+        await page.getByLabel("feature search").fill(FEATURE_ID);
+        const listResponse = await listResponsePromise;
+        expect(listResponse.status()).toBe(200);
+        const listBody =
+          (await listResponse.json()) as AdminFeaturesListResponse;
+        expect(
+          listBody.data.items.map((item) => item.feature_id),
+        ).toContain(FEATURE_ID);
 
         const row = rowContaining(page, CREATE_NAME);
         await expect(row).toBeVisible(T);
@@ -1095,8 +1119,20 @@ test.describe("/admin/features + feature change requests live write workflow", (
 
       await test.step("admin features 목록 deactivate 버튼이 실제 inactive 상태를 만든다", async () => {
         await gotoAdminFeatures(page);
-        await page.getByLabel("feature search").fill(UPDATED_NAME);
         await page.getByLabel("feature status").selectOption("active");
+        const listResponsePromise = page.waitForResponse(
+          (response) =>
+            isAdminFeatureListResponse(response, FEATURE_ID, "active"),
+          { timeout: FLOW_TIMEOUT },
+        );
+        await page.getByLabel("feature search").fill(FEATURE_ID);
+        const listResponse = await listResponsePromise;
+        expect(listResponse.status()).toBe(200);
+        const listBody =
+          (await listResponse.json()) as AdminFeaturesListResponse;
+        expect(
+          listBody.data.items.map((item) => item.feature_id),
+        ).toContain(FEATURE_ID);
 
         const row = rowContaining(page, UPDATED_NAME);
         await expect(row).toBeVisible(T);
