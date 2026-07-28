@@ -43,8 +43,13 @@ OpenApiProfile = Literal["admin", "user"]
 
 API_OPENAPI_PATH = Path("packages/kor-travel-map-api/openapi.json")
 USER_OPENAPI_PATH = Path("packages/kor-travel-map-api/openapi.user.json")
-# T-VN-H07C(#812): per-surface digest manifest. 배포 compatible-pair(ADR-076 v5)는 이 파일
-# **하나의** sha256만 핀하고, 이 파일이 각 표면 spec의 sha256을 담아 전체를 transitively pin한다.
+# T-VN-H07C(#812): per-surface OpenAPI digest manifest — 각 표면 spec 파일의 sha256을 한 곳에
+# 모은다. 소비자(PinVi)가 vendored 스냅샷의 freshness/무결성을 파일 하나로 대조하는 데 쓴다
+# (T-VN-H07B/H07D의 `contract-pin-consistency` 게이트).
+#
+# 주의: 배포 compatible-pair manifest에 이 digest를 핀하는 방안은 **채택하지 않았다**(ADR-079).
+# 그 값은 `map_source_revision`의 순수 함수라 이미 게이트되는 정보를 중복할 뿐이고, manifest
+# 버전을 올리는 대가로 운영 마이그레이션 비용만 발생한다. 근거는 ADR-079 참조.
 OPENAPI_DIGEST_PATH = Path("packages/kor-travel-map-api/openapi-sha256.json")
 
 # ADR-048/T-216g: 현재 pre-1.0 단계의 기계 정본은 ``/v1`` 경로를 in-place로

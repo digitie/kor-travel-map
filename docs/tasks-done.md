@@ -3,6 +3,21 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-29 — Lane A a0 T-VN-H07C: v5 승격 기각으로 종결 (a0 완료)
+
+- [x] **T-VN-H07C** (#812) — 배포 compatible-pair에 pinned OpenAPI SHA를 넣는 v5 승격을 양
+  저장소에 구현하고 테스트를 baseline까지 맞춘 뒤, 적대 리뷰 2명의 실증으로 **기각**했다
+  (ADR-079). manifest는 v4 유지.
+  - 근거 1: 제안 필드는 map_source_revision의 순수 함수라 추가 탐지력이 0이다. attestation은
+    이미 그 revision을 운영자 제시 commit과 배포 이미지 OCI revision 라벨에 결박한다.
+  - 근거 2: v5 전환 즉시 rollback이 무력화되고, 기존 프로덕션 이미지 revision에는 digest 파일
+    blob이 없어 capture 자체가 불가능하다 — 운영자가 manifest 없는 상태에 갇힌다.
+  - 유지: Map per-surface digest manifest(map#880, 207a6364)는 소비자 freshness 용도로 남는다.
+    PinVi가 독립 사본과 대조하므로 그쪽에서는 실질 탐지력이 있다(H07B/H07D).
+  - 폐기: docker-manager v5 브랜치, Map attestation v5 브랜치. 운영 문서·런북 무변경.
+  - 규율 정정: OpenAPI 변경 완료 조건에서 재-capture/attestation 제거, per-surface digest 갱신 +
+    소비자 스냅샷 재-vendor로 대체.
+
 ## 2026-07-28 — Lane A a0 T-VN-H07D: admin detail-snapshot 계약 + freshness 게이트 실효화
 
 - [x] **T-VN-H07D** (#815 close) — cross-repo 2 PR. **① Map** PR #878(`5c0e0cae`), **② PinVi**

@@ -10,6 +10,26 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-29 (claude) — Lane A **a0 종료** (H07C를 ADR-079로 기각), 다음은 a1
+
+**다음 한 작업**: Lane A **a1** 첫 항목 `T-VN-H29`(PinVi 통합검색의 map-import POI 좌표 null 복구
+— `search.py::_snapshot_coord`가 `feature_snapshot["coord"]`만 읽는데 Map view에 `coord`가 없어
+구조적으로 항상 None; 좌표는 top-level `lon`/`lat`에 있고 `admin_pois`/`kasi`는 정상 해석).
+이어서 `T-VN-H27`(#819 HAProxy tunnel) → `T-VN-H21` → `T-VN-H28A/B` → H25 → H22.
+
+- **a0 완료**: `T-VN-H07A`(#814) · `T-VN-H07B`(PinVi #415) · `T-VN-H07D`(Map #878 + PinVi #416) ·
+  `T-VN-H07C`(**기각** — ADR-079).
+- **H07C 기각 요지**: 제안 필드는 `map_source_revision`의 순수 함수라 **탐지력이 0**이고
+  (그 revision은 attestation이 배포 이미지 OCI 라벨까지 이미 결박), v5 승격은 **실재하는 운영
+  막다름**(rollback 무력화 + 기존 이미지 revision에 digest blob 부재로 capture 불가)을 만든다.
+  구현·테스트를 마친 상태에서 적대 리뷰 2명이 실증해 되돌렸다.
+- **유지**: `openapi-sha256.json`은 소비자 freshness 용도로 남는다 — PinVi가 **독립 사본**과
+  대조하므로 그쪽에서는 실질 탐지력이 있다(H07B/H07D).
+- **규율 정정**: OpenAPI 변경 task의 완료 조건에서 compatible-pair 재-capture·C7 attestation을
+  빼고, per-surface digest 갱신 + 소비자 스냅샷 재-vendor로 바꿨다.
+- **교훈**: 계약에 새 필드를 넣을 때 **독립 유도값과 대조되는지**를 먼저 본다. 대조 상대가 없으면
+  형식 검사만 남고 그건 탐지력이 아니라 스키마 비용이다.
+
 ## 2026-07-28 (claude) — Lane A a0 T-VN-H07D 완료 (Map #878 + PinVi #416, #815 close)
 
 **다음 한 작업**: Lane A a0 마지막 항목 **`T-VN-H07C`(#812 compatible-pair manifest v5)** —
