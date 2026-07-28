@@ -30,10 +30,6 @@ type FeatureUpdateRequestCreatedRecord =
   components["schemas"]["FeatureUpdateRequestCreatedRecord"];
 type FeatureUpdateRequestRecord =
   components["schemas"]["FeatureUpdateRequestRecord"];
-type PipelineOverviewResponse =
-  components["schemas"]["PipelineOverviewResponse"];
-type PipelineExecutionsListResponse =
-  components["schemas"]["PipelineExecutionsListResponse"];
 type ProviderRefreshPolicyRecord =
   components["schemas"]["ProviderRefreshPolicyRecord"];
 type ProviderRefreshPolicyUpsertRequest =
@@ -66,30 +62,6 @@ const FRESH_AT = new Date().toISOString();
 
 function makeMeta(requestId: string): Meta {
   return { duration_ms: 1, request_id: requestId };
-}
-
-function makePipelineOverviewResponse(): PipelineOverviewResponse {
-  return {
-    data: {
-      checked_at: "2026-07-14T10:00:00.000Z",
-      dagster: {
-        status: "ok",
-        dagster_url: "http://dagster.example:12702",
-        graphql_url: "http://dagster.example:12702/graphql",
-        version: "1.13.7",
-        run_counts: {},
-        recent_runs: [],
-        schedule_count: 0,
-        sensor_count: 0,
-        sensors: [],
-        errors: [],
-      },
-      operations_by_status: {},
-      active_operations: 0,
-      failed_operations_24h: 0,
-    },
-    meta: makeMeta("e2e-pipeline-prefetch"),
-  };
 }
 
 type OpsDatasetFreshness = components["schemas"]["OpsDatasetFreshness"];
@@ -462,30 +434,6 @@ function apiPathname(url: URL): string {
   return url.pathname.replace(/^\/api\/proxy/, "");
 }
 
-/**
- * 로그인 게이트(#520) 대응 — live suite의 `E2E_ADMIN_PASSWORD` 관례를 따른다.
- *
- * 미들웨어가 admin 세션 없는 내비게이션을 `/login`으로 돌려보내므로, mock
- * suite도 서버에 UI 인증이 구성돼 있으면(`E2E_ADMIN_PASSWORD` 설정) 각 테스트
- * 시작 시 UI 로그인으로 세션을 만든다. 미설정이면 게이트 없는 서버로 간주한다.
- */
-async function loginIfGateEnabled(page: Page) {
-  const password = process.env.E2E_ADMIN_PASSWORD;
-  if (!password) {
-    return;
-  }
-  const username = process.env.E2E_ADMIN_USERNAME ?? "admin";
-  await page.goto("/login");
-  // 이미 유효 세션이면 미들웨어가 홈으로 되돌린다.
-  if (!new URL(page.url()).pathname.startsWith("/login")) {
-    return;
-  }
-  await page.locator("#admin-username").fill(username);
-  await page.locator("#admin-password").fill(password);
-  await page.getByRole("button", { name: "로그인" }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-}
-
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
     body: JSON.stringify(body),
@@ -747,36 +695,6 @@ async function mockPipelineRequests(
   await page.route("**/api/proxy/v1/ops/pipeline/**", async (route) => {
     const request = route.request();
     const pathname = apiPathname(new URL(request.url()));
-    if (
-      pathname === "/v1/ops/pipeline/overview" &&
-      request.method() === "GET"
-    ) {
-      // production Next.js는 shell의 pipeline 링크를 background prefetch한다.
-      // 이 조회는 dataset 조작 계약과 무관하지만 backend 격리 범위에는 포함한다.
-      await fulfillJson(route, makePipelineOverviewResponse());
-      return;
-    }
-    if (
-      pathname === "/v1/ops/pipeline/executions" &&
-      request.method() === "GET"
-    ) {
-      const response: PipelineExecutionsListResponse = {
-        data: {
-          canonical_url: pathname,
-          items: [],
-        },
-        meta: {
-          ...makeMeta("e2e-pipeline-executions-prefetch"),
-          page: {
-            page_size: 50,
-            next_cursor: null,
-            total: null,
-          },
-        },
-      };
-      await fulfillJson(route, response);
-      return;
-    }
     if (
       pathname === "/v1/ops/pipeline/requests" &&
       request.method() === "POST"
@@ -1197,9 +1115,20 @@ function defaultGrid(): {
 
 test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
   test.beforeEach(async ({ page }) => {
+    // 인증은 setup project가 저장한 storageState를 쓴다. 여기서 `/login`을 다시
+    // 열면 유효 세션이 홈으로 redirect되어 route mock 설치 전에 REST가 누출된다.
     // mocked suite에서 ops-live WS를 inert로 — 지금 갱신 폐루프는 폴링 fallback 경로.
     await installInertOpsLiveWebSocket(page);
-    await loginIfGateEnabled(page);
+    // 각 테스트가 뒤에서 등록한 구체 route가 우선한다. 거기서 처리하지 않은 REST는
+    // 이 최후 guard가 잡아 mocked suite의 backend 독립성을 강제한다.
+    await page.route("**/api/proxy/v1/**", (route) => {
+      const request = route.request();
+      throw new Error(
+        `Unmocked ops/datasets REST call: ${request.method()} ${apiPathname(
+          new URL(request.url()),
+        )}`,
+      );
+    });
   });
 
   test("그리드 로드 — 3원 행, never_run 배지, 이슈 배지, 요약 배지", async ({
