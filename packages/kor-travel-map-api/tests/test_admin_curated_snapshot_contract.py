@@ -1,15 +1,15 @@
 """admin curated detail-snapshot 계약 게이트 (T-VN-H07D, #815).
 
 PinVi 런타임(`apps/api/app/services/notice_plan.py` curated import)이 실제로 소비하는 표면은
-공개 curated 표면이 아니라 admin `GET /v1/admin/curated-features/{id}/detail-snapshot`이다.
+공개 curated 표면이 아니라 canonical admin
+`GET /v1/admin/features/curated/{id}/detail-snapshot`이다.
 이 파일은 그 표면의 **세 가지 계약**을 고정한다.
 
 1. **필드 계약** — `theme`/`content`/`source`는 과거 free-form ``dict[str, Any]``이라 OpenAPI에
    `{"type": "object"}`로만 노출됐다. typed view 전환 후 required/type/nullable을 생성 스펙
    기준으로 고정한다(소비자 PinVi가 읽는 plan-level 필드가 여기 들어 있다).
-2. **PinVi 호환 alias 경로** — PinVi가 호출하는 경로는 `include_in_schema=False`라 스펙에
-   나타나지 않는다. 스펙 기반 검사로는 alias가 사라져도 잡히지 않으므로 **라우트 등록 자체**를
-   고정한다.
+2. **canonical 단일 경로** — OpenAPI 경로가 실제 라우트에 등록되고, 제거한 hidden alias가
+   다시 생기지 않도록 고정한다.
 3. **생성부↔view 정합** — typed view는 `extra="forbid"`이므로 생성부가 key를 하나라도 바꾸면
    응답이 500이 된다. 실제 생성 payload를 view에 통과시켜 fail-closed 회귀를 막는다.
 """
@@ -47,8 +47,7 @@ from kortravelmap.api.settings import ApiSettings
 pytestmark = pytest.mark.unit
 
 _SNAPSHOT_PATH = "/v1/admin/features/curated/{curated_feature_id}/detail-snapshot"
-# PinVi `clients/kor_travel_map_admin.py::get_curated_detail_snapshot`가 호출하는 실제 경로.
-_PINVI_ALIAS_PATH = "/v1/admin/curated-features/{curated_feature_id}/detail-snapshot"
+_REMOVED_ALIAS_PATH = "/v1/admin/curated-features/{curated_feature_id}/detail-snapshot"
 
 # 소비자(PinVi)가 읽는 필드 → `services/notice_plan.py`
 #   content: title/category/summary/destination_name/region_code
@@ -261,24 +260,17 @@ def test_admin_detail_snapshot_container_binds_typed_payload_views() -> None:
         assert field in set(item_schema.get("required", [])), field
 
 
-def test_pinvi_compatibility_alias_route_stays_registered() -> None:
-    """PinVi가 호출하는 alias 경로를 라우트 등록 수준에서 고정한다.
-
-    alias는 `include_in_schema=False`라 OpenAPI에 나타나지 않는다. 스펙 기반 검사만으로는
-    alias가 삭제돼도 잡히지 않고, 삭제되면 PinVi curated import가 404로 죽는다.
-    """
+def test_admin_detail_snapshot_exposes_only_canonical_route() -> None:
+    """detail-snapshot은 OpenAPI canonical 경로 하나만 등록한다."""
     app = create_app(ApiSettings())
     # FastAPI 0.136+는 include_router 결과를 lazy `_IncludedRouter`로 감싸 `app.routes`에
     # 구체 route가 바로 보이지 않는다. route_policy가 쓰는 것과 같은 해석 helper를 재사용한다.
     paths = {_resolve_route(entry)[0] for entry in _iter_flattened_routes(app)}
     assert _SNAPSHOT_PATH in paths, "문서화된 detail-snapshot 경로가 사라졌다"
-    assert _PINVI_ALIAS_PATH in paths, (
-        "PinVi 호환 alias 경로가 사라졌다 — PinVi curated import가 404가 된다"
-    )
+    assert _REMOVED_ALIAS_PATH not in paths
     spec = _full_spec()
     assert _SNAPSHOT_PATH in spec["paths"]
-    # alias는 의도적으로 스펙에서 감춘다(문서 표면 이중화를 피한다).
-    assert _PINVI_ALIAS_PATH not in spec["paths"]
+    assert _REMOVED_ALIAS_PATH not in spec["paths"]
 
 
 # nullable 분기를 모두 태우는 override — 기본 fixture는 모든 nullable 필드가 채워져 있어
@@ -328,12 +320,9 @@ async def test_snapshot_view_accepts_repository_payload(overrides: dict[str, Any
     assert set(snapshot.source) == _PRODUCER_KEYS["source"]
 
 
-@pytest.mark.parametrize("path", [_SNAPSHOT_PATH, _PINVI_ALIAS_PATH], ids=["documented", "alias"])
 @pytest.mark.parametrize("overrides", [{}, _ALL_NULL_OVERRIDES], ids=["populated", "all-null"])
-def test_detail_snapshot_endpoint_serves_typed_payload(
-    path: str, overrides: dict[str, Any]
-) -> None:
-    """실제 endpoint를 태워 응답 직렬화까지 검증한다(문서 경로 + PinVi alias 둘 다).
+def test_detail_snapshot_endpoint_serves_typed_payload(overrides: dict[str, Any]) -> None:
+    """실제 canonical endpoint를 태워 응답 직렬화까지 검증한다.
 
     스키마 핀과 생성부 정합만으로는 FastAPI `response_model` 재검증·envelope 직렬화 경로가
     검증되지 않는다. 이 PR이 바로 그 response model을 바꿨으므로 HTTP 수준에서 고정한다.
@@ -352,7 +341,7 @@ def test_detail_snapshot_endpoint_serves_typed_payload(
     app.dependency_overrides[get_session] = _session
     client = TestClient(app)
 
-    response = client.get(path.replace("{curated_feature_id}", _CURATED_ID))
+    response = client.get(_SNAPSHOT_PATH.replace("{curated_feature_id}", _CURATED_ID))
 
     assert response.status_code == 200, response.text
     body = response.json()

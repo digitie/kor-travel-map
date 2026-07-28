@@ -1102,11 +1102,6 @@ async def get_admin_curated_feature_route(
     "/features/curated/{curated_feature_id}/detail-snapshot",
     response_model=CuratedFeatureDetailSnapshotResponse,
 )
-@admin_router.get(
-    "/curated-features/{curated_feature_id}/detail-snapshot",
-    response_model=CuratedFeatureDetailSnapshotResponse,
-    include_in_schema=False,
-)
 async def get_admin_curated_feature_detail_snapshot_route(
     curated_feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
