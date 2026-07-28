@@ -1197,6 +1197,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await page
           .getByLabel("change urls JSON", { exact: true })
           .fill(JSON.stringify({ homepage: "https://example.invalid/updated" }));
+        await page
+          .getByLabel("change homepage url", { exact: true })
+          .fill("https://example.invalid/updated");
 
         const responsePromise = waitForApiResponse(
           page,
