@@ -26,6 +26,28 @@ const inputs = [
   "packages/map-marker-react",
   "packages/kor-travel-map-admin/frontend",
 ];
+const buildInputs = [
+  [
+    "NEXT_PUBLIC_KOR_TRAVEL_MAP_API",
+    process.env.NEXT_PUBLIC_KOR_TRAVEL_MAP_API ?? "http://127.0.0.1:12701",
+  ],
+  [
+    "NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL",
+    process.env.NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL ??
+      "http://127.0.0.1:12702",
+  ],
+  [
+    "NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL",
+    process.env.NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL ?? "http://127.0.0.1:12501",
+  ],
+  ["NEXT_PUBLIC_VWORLD_API_KEY", process.env.NEXT_PUBLIC_VWORLD_API_KEY ?? ""],
+  [
+    "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY",
+    process.env.NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY ??
+      process.env.NEXT_PUBLIC_VWORLD_API_KEY ??
+      "",
+  ],
+];
 const excludedDirectories = new Set([
   ".cache",
   ".idea",
@@ -58,6 +80,8 @@ async function collect(relativePath, files) {
   const fileName = path.basename(relativePath);
   if (
     excludedFileNames.has(fileName) ||
+    ((fileName === ".env" || fileName.startsWith(".env.")) &&
+      fileName !== ".env.example") ||
     fileName.endsWith(".local.md") ||
     fileName.endsWith(".tmp") ||
     fileName.endsWith(".tsbuildinfo") ||
@@ -81,6 +105,16 @@ async function sourceDigest() {
   );
 
   const hash = createHash("sha256");
+  for (const [name, value] of buildInputs) {
+    hash.update("build-arg");
+    hash.update("\0");
+    hash.update(name);
+    hash.update("\0");
+    hash.update(String(Buffer.byteLength(value)));
+    hash.update("\0");
+    hash.update(value);
+    hash.update("\0");
+  }
   for (const { relativePath, symbolicLink } of files) {
     const normalizedPath = relativePath.split(path.sep).join("/");
     const content = symbolicLink

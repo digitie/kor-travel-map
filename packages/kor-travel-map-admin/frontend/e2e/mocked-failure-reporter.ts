@@ -444,6 +444,7 @@ class MockedFailureReporter implements Reporter {
 
       gatePassed =
         identities.length === manifest.discoveredTests &&
+        (checkpoint !== "D" || result.status === "passed") &&
         report.missingExpectedFailures.length === 0 &&
         report.newUnexpectedFailures.length === 0 &&
         report.missingExpectedFlakes.length === 0 &&

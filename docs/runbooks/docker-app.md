@@ -63,11 +63,11 @@ api service의 `environment` interpolation 입력인 shell 또는 root project `
 canonical service의 literal `true`를 사용한다. 설정 enablement와 각 요청의
 `AdminProxyContext.actor` 감사는 서로 대체하지 않는다.
 
-| 입력 키 예 | 실행 시 export |
-|------------|----------------|
-| `DATA_GO_KR_SERVICE_KEY`, `KMA_API_KEY` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` |
-| `OPINET_API_KEY` | `KOR_TRAVEL_MAP_OPINET_API_KEY` |
-| `KEX_GO_API_KEY`, `KREX_API_KEY` | `KOR_TRAVEL_MAP_KREX_EX_API_KEY`, `KOR_TRAVEL_MAP_KREX_GO_API_KEY` |
+| 입력 키 예                                        | 실행 시 export                                                                                              |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `DATA_GO_KR_SERVICE_KEY`, `KMA_API_KEY`           | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY`                                                                     |
+| `OPINET_API_KEY`                                  | `KOR_TRAVEL_MAP_OPINET_API_KEY`                                                                             |
+| `KEX_GO_API_KEY`, `KREX_API_KEY`                  | `KOR_TRAVEL_MAP_KREX_EX_API_KEY`, `KOR_TRAVEL_MAP_KREX_GO_API_KEY`                                          |
 | `KOR_TRAVEL_GEO_VWORLD_API_KEY`, `VWORLD_API_KEY` | `NEXT_PUBLIC_VWORLD_API_KEY`, `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`, `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` |
 
 객체 저장소는 `KOR_TRAVEL_MAP_OBJECT_STORE_*`를 사용한다. Docker 내부 endpoint는
@@ -241,9 +241,15 @@ KOR_TRAVEL_MAP_IMAGE_TAG="$(git rev-parse --short=12 HEAD)" npm run docker:build
 `org.opencontainers.image.revision` label에 함께 박는다. admin UI의 `/api/build-info`는
 같은 빌드 SHA와 실제 frontend build 입력의 결정적 SHA-256을 반환한다. E2E runner는 clean
 worktree에서 digest를 독립 계산하므로 tag/SHA만 같고 실제 코드가 다른 이미지는 통과할 수 없다.
-mocked checkpoint runner는 여기에 더해 `MOCKED_E2E_FRONTEND_CONTAINER`의 실행 중
-immutable image ID·revision label과 `E2E_BASE_URL` host port 소유권을 Docker inspect로
-확인한다. 공개 build-info 응답만 복제한 proxy/fake server는 테스트를 시작할 수 없다.
+mocked checkpoint runner는 `MOCKED_E2E_FRONTEND_IMAGE`의 immutable image ID·revision
+label을 Docker inspect로 확인한 뒤 그 ID에서 검증용 container를 직접 생성·기동한다.
+외부 container의 entrypoint/CMD·mount를 신뢰하지 않으며, 검증용 container는 loopback
+host network의 정확한 IPv4 `127.0.0.1` `E2E_BASE_URL` port에서
+read-only·cap-drop·no-new-privileges로 실행하고 성공·실패·종료 신호에 정리한다.
+실행 전후 동일 container/image/build-info도 재검증한다. source digest에는 실제
+`NEXT_PUBLIC_*` build arg가 포함되며, nested `.env*`와 `.cache`는 Docker context와
+digest 양쪽에서 제외한다. 공개 build-info 응답을 복제하거나 exact image의 entrypoint를
+바꾼 fake server는 테스트를 시작할 수 없다.
 
 기본 image:
 
@@ -615,10 +621,10 @@ T-108의 양 노드 운영은 같은 image tag를 N150 16GB(x86_64)와 Odroid M1
 
 권장 배치:
 
-| 노드 | 역할 | platform |
-|------|------|----------|
+| 노드                                | 역할      | platform      |
+| ----------------------------------- | --------- | ------------- |
 | N150 16GB / NVMe 1TB / Ubuntu 26.04 | 운영 후보 | `linux/amd64` |
-| Odroid M1S | 운영 후보 | `linux/arm64` |
+| Odroid M1S                          | 운영 후보 | `linux/arm64` |
 
 두 노드는 같은 registry tag를 pull한다. 어느 노드를 실제 active host로 둘지는 외부
 운영 runbook에서 결정한다. Postgres streaming replication, 자동 failover, VIP/DNS 전환,

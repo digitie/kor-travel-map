@@ -6,6 +6,9 @@
 .env
 .env.*
 !.env.example
+**/.env
+**/.env.*
+!**/.env.example
 .git/
 .github/
 .import_linter_cache/
@@ -24,7 +27,7 @@ packages/**/coverage/
 packages/**/playwright-report/
 packages/**/test-results/
 packages/**/blob-report/
-packages/**/playwright/.cache/
+**/.cache/
 packages/**/.turbo/
 packages/**/out/
 **/*.tsbuildinfo

@@ -92,6 +92,62 @@ def test_local_compose_build_paths_export_exact_git_revision() -> None:
 
 
 @pytest.mark.unit
+def test_mocked_checkpoint_runner_owns_exact_frontend_container() -> None:
+    script = _read(
+        "packages/kor-travel-map-admin/frontend/e2e/run-mocked-checkpoint.mjs"
+    )
+    reporter = _read(
+        "packages/kor-travel-map-admin/frontend/e2e/mocked-failure-reporter.ts"
+    )
+
+    assert "MOCKED_E2E_FRONTEND_IMAGE" in script
+    assert "MOCKED_E2E_FRONTEND_CONTAINER" not in script
+    assert 'parsedBaseUrl.hostname !== "127.0.0.1"' in script
+    assert '"create",' in script
+    assert "imageInspect.Id" in script
+    assert '"--read-only",' in script
+    assert '"--cap-drop",' in script
+    assert '"no-new-privileges:true",' in script
+    assert '"--env-file",' in script
+    assert '"--entrypoint"' not in script
+    assert "const postContainerInspect = inspectOwnedContainer()" in script
+    assert "const postBuildInfo = await readBuildInfo(5_000)" in script
+    assert 'spawnSync("docker", ["rm", "-f", ownedContainerId]' in script
+    assert '(checkpoint !== "D" || result.status === "passed")' in reporter
+
+
+@pytest.mark.unit
+def test_frontend_docker_context_and_digest_exclusions_are_aligned() -> None:
+    dockerignore = _read(".dockerignore")
+    digest = _read("scripts/frontend-source-digest.mjs")
+
+    assert "**/.env" in dockerignore
+    assert "**/.env.*" in dockerignore
+    assert "!**/.env.example" in dockerignore
+    assert "**/.cache/" in dockerignore
+    assert 'fileName.startsWith(".env.")' in digest
+    assert '".cache",' in digest
+
+
+@pytest.mark.unit
+def test_frontend_source_digest_includes_public_build_inputs() -> None:
+    digest = _read("scripts/frontend-source-digest.mjs")
+    dockerfile = _read("docker/frontend.Dockerfile")
+    build_inputs = (
+        "NEXT_PUBLIC_KOR_TRAVEL_MAP_API",
+        "NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL",
+        "NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL",
+        "NEXT_PUBLIC_VWORLD_API_KEY",
+        "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY",
+    )
+
+    for name in build_inputs:
+        assert name in digest
+        assert f"ARG {name}" in dockerfile
+    assert 'hash.update("build-arg")' in digest
+
+
+@pytest.mark.unit
 def test_deploy_docs_cover_odroid_n150_and_exclude_streaming_replication() -> None:
     deploy = _read("docs/deploy.md")
     runbook = _read("docs/runbooks/docker-app.md")
