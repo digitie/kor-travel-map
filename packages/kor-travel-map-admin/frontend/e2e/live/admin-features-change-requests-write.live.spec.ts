@@ -809,34 +809,40 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await page.getByLabel("Feature ID").fill(FEATURE_ID);
         await page.getByLabel("중복 방지 키").fill(`${RUN_ID}-add`);
         await page
-          .getByLabel("create road address")
+          .getByLabel("create road address", { exact: true })
           .fill("서울특별시 중구 세종대로 110");
         await page
-          .getByLabel("create legal address")
+          .getByLabel("create legal address", { exact: true })
           .fill("서울특별시 중구 태평로1가");
         await page
-          .getByLabel("create admin address")
+          .getByLabel("create admin address", { exact: true })
           .fill("서울특별시 중구 명동");
-        await page.getByLabel("create sigungu code").fill("11140");
-        await page.getByLabel("create sido code").fill("11");
-        await page.getByLabel("create place kind").selectOption("place");
-        await page.getByLabel("create phone").fill("02-0000-0000");
         await page
-          .getByLabel("create homepage url")
+          .getByLabel("create sigungu code", { exact: true })
+          .fill("11140");
+        await page.getByLabel("create sido code", { exact: true }).fill("11");
+        await page
+          .getByLabel("create place kind", { exact: true })
+          .selectOption("place");
+        await page
+          .getByLabel("create phone", { exact: true })
+          .fill("02-0000-0000");
+        await page
+          .getByLabel("create homepage url", { exact: true })
           .fill("https://example.invalid/e2e");
         await page
-          .getByLabel("create source url")
+          .getByLabel("create source url", { exact: true })
           .fill("https://example.invalid/source");
         await page
-          .getByLabel("create detail JSON")
+          .getByLabel("create detail JSON", { exact: true })
           .locator("xpath=ancestor::details")
           .locator("summary")
           .click();
         await page
-          .getByLabel("create detail JSON")
+          .getByLabel("create detail JSON", { exact: true })
           .fill(JSON.stringify({ e2e_phase: "create", run_id: RUN_ID }));
         await page
-          .getByLabel("create urls JSON")
+          .getByLabel("create urls JSON", { exact: true })
           .fill(JSON.stringify({ ticket: "https://example.invalid/ticket" }));
 
         const responsePromise = waitForApiResponse(
