@@ -87,7 +87,7 @@ fallback 용도로만 사용한다. `which node`/`which npm`이 `/mnt/c/Program 
 가리키면 Windows Node가 섞인 상태이므로 WSL nvm Node를 먼저 활성화한다.
 
 ```bash
-# 저장소 루트의 Linux/WSL 셸에서 실행(Node >=22.22.2, npm 12.0.1)
+# 저장소 루트의 Linux/WSL 셸에서 실행(Node 22.22.2+/24.15.0+/26+, npm 12.0.1)
 which node npm              # /home/.../.nvm/... 등 Linux 경로여야 함
 npx --yes npm@12.0.1 ci --workspaces --include=optional
 npx --yes npm@12.0.1 run audit:high
@@ -109,9 +109,10 @@ root install은 선언된 npm 12.0.1로만 실행하고
 `scripts/patch-redocly-openapi-core.mjs`를 postinstall로 실행한다. `openapi-typescript` 7이 아직
 Redocly 1 API를 사용하므로 js-yaml/minimatch만 안전한 exact version으로 올리고, minimatch의
 named export 변경 한 곳을 Redocly 1.34.17 원문에 exact 적용한다. 설치 version이나 대상 줄 수가
-다르면 실패한다. dependency install script는 root `allowScripts`에서 검토한 `esbuild`와
-`unrs-resolver`만 허용하고, 새 script가 들어오면 `.npmrc`의 `strict-allow-scripts`가 clean
-install을 중단한다. `verify:npm-tree`는 `npm ls --all --json`의 `problems`가 0개인지 검사한다.
+다르면 실패한다. dependency install script는 root `allowScripts`에서 검토한
+`esbuild@0.28.1`과 `unrs-resolver@1.12.2`만 허용하고, package version이나 새 script가
+바뀌면 `.npmrc`의 `strict-allow-scripts`가 clean install을 중단한다. `verify:npm-tree`는
+`npm ls --all --json`의 `problems`가 0개인지 검사한다.
 Next가 아직 선언하지 않은 Sharp 0.35 ABI는
 `scripts/verify-next-sharp.mjs`가 실제 SVG→WebP 변환과 크기를 검증한다. CI와 frontend/C7 Docker
 build는 clean install 직후 이 smoke를 실행한다. Playwright client는 immutable C7 browser image와

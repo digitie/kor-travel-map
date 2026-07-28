@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "npm@12.0.1",
   "engines": {
-    "node": ">=22.22.2",
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0",
     "npm": "12.0.1"
   },
   "description": "npm workspace root for the frontend packages of kor-travel-map (debug UI + shared map-marker-react). 본 저장소의 1차 산출물은 Python 라이브러리(pyproject.toml)이며, 본 package.json은 frontend workspace 해석 전용 (ADR-025/029/043 — @kor-travel-map/map-marker-react는 모노레포 내부 share, registry 게시 X).",
@@ -42,7 +42,7 @@
     }
   },
   "allowScripts": {
-    "esbuild": true,
-    "unrs-resolver": true
+    "esbuild@0.28.1": true,
+    "unrs-resolver@1.12.2": true
   }
 }
