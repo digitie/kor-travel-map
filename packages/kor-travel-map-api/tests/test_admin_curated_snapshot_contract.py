@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from kortravelmap.api.app import create_app
+from kortravelmap.api.route_policy import _iter_flattened_routes, _resolve_route
 from kortravelmap.api.routers.curated import (
     CuratedFeatureDetailContentView,
     CuratedFeatureDetailSnapshotView,
@@ -30,7 +31,6 @@ from kortravelmap.api.routers.curated import (
     CuratedFeatureDetailThemeView,
     _snapshot_view,
 )
-from kortravelmap.api.route_policy import _iter_flattened_routes, _resolve_route
 from kortravelmap.api.settings import ApiSettings
 
 # 저장소 루트의 `tests/unit/test_curated_repo.py` fixture(_FakeSession/_feature_row)를 재사용해
