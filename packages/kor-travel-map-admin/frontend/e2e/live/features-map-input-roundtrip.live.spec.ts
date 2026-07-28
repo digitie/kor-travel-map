@@ -1,4 +1,10 @@
-import { expect, test, type Page, type Response } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Response,
+} from "@playwright/test";
 
 import type { components } from "../../src/api/types";
 import { MAP_VIEWS } from "./_fixtures";
@@ -24,10 +30,9 @@ import { MAP_VIEWS } from "./_fixtures";
  */
 
 type FeaturesInBboxResponse = components["schemas"]["FeaturesInBboxResponse"];
+type AdminFeatureMapItem = components["schemas"]["AdminFeatureMapItem"];
 type AdminFeaturesInBoundsResponse =
   components["schemas"]["AdminFeaturesInBoundsResponse"];
-type FeaturesInBoundsResponse =
-  components["schemas"]["FeaturesInBoundsResponse"];
 type FeatureDetailEnvelopeResponse =
   components["schemas"]["FeatureDetailEnvelopeResponse"];
 
@@ -41,9 +46,10 @@ const UI_TIMEOUT = 15_000;
 const FLOW_TIMEOUT = 5 * 60 * 1000;
 const T = { timeout: UI_TIMEOUT } as const;
 
-const FEATURES_IN_BOUNDS_PATH = "/v1/features/in-bounds";
 const ADMIN_FEATURES_IN_BOUNDS_PATH = "/v1/admin/features/in-bounds";
 const MAP_CONTAINER = '[data-testid="map-canvas-container"]';
+const POINT_MARKER =
+  '.maplibregl-marker[role="button"]:not([aria-label^="feature 클러스터"])';
 // 멀리 떨어진 사전 점프 기준점(제주). 초기 뷰가 우연히 타깃과 같아 moveend가 안 떠
 // refetch가 누락되는 경우를 막는다. 본 spec의 어떤 타깃(서울/부산/전국)과도 겹치지 않는다.
 const ANCHOR = { lon: 126.531, lat: 33.499, zoom: 11 } as const;
@@ -138,18 +144,28 @@ interface InBoundsBbox {
   zoom: number | null;
 }
 
-function isFeaturesInBounds(response: Response): boolean {
-  return (
-    response.request().method() === "GET" &&
-    apiPath(response) === FEATURES_IN_BOUNDS_PATH
-  );
-}
-
 function isAdminFeaturesInBounds(response: Response): boolean {
   return (
     response.request().method() === "GET" &&
     apiPath(response) === ADMIN_FEATURES_IN_BOUNDS_PATH
   );
+}
+
+function adminInBoundsPath(
+  bounds: { e: number; n: number; s: number; w: number },
+  zoom: number,
+  kinds: readonly string[],
+): string {
+  const query = new URLSearchParams({
+    max_items: "2000",
+    max_lat: String(bounds.n),
+    max_lon: String(bounds.e),
+    min_lat: String(bounds.s),
+    min_lon: String(bounds.w),
+    zoom: String(Math.floor(zoom)),
+  });
+  for (const kind of kinds) query.append("kind", kind);
+  return `${ADMIN_FEATURES_IN_BOUNDS_PATH}?${query.toString()}`;
 }
 
 function inBoundsBbox(response: Response): InBoundsBbox {
@@ -214,6 +230,93 @@ async function jumpMap(
     },
     { lon, lat, sel: MAP_CONTAINER, zoom },
   );
+}
+
+/** jump/query cache hit 모두에서 MapLibre source→DOM marker 동기화가 끝날 때까지 기다린다. */
+async function waitForMapIdle(page: Page): Promise<void> {
+  await page.evaluate(async (sel) => {
+    const container = document.querySelector(sel) as
+      | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
+      | null;
+    const map = container?._maplibreMap;
+    if (!map) throw new Error("MapLibre instance is not attached");
+
+    await new Promise<void>((resolve) => {
+      const settleAfterPaint = () => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      };
+      if (map.loaded() && !map.isMoving()) {
+        settleAfterPaint();
+        return;
+      }
+      map.once("idle", settleAfterPaint);
+    });
+  }, MAP_CONTAINER);
+}
+
+/**
+ * action 중 생긴 admin in-bounds 응답을 관찰한다. React Query cache hit이면 null이며,
+ * action 자체의 map idle/실제 marker 수렴을 성공 조건으로 사용한다.
+ */
+async function captureAdminResponseDuring(
+  page: Page,
+  predicate: (response: Response) => boolean,
+  action: () => Promise<void>,
+): Promise<Response | null> {
+  let observed: Response | null = null;
+  const onResponse = (response: Response) => {
+    if (observed === null && predicate(response)) observed = response;
+  };
+  page.on("response", onResponse);
+  try {
+    await action();
+    await page.waitForTimeout(0);
+    return observed;
+  } finally {
+    page.off("response", onResponse);
+  }
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** 실제 admin 응답 item과 name/kind identity가 일치하는 화면 point marker를 찾는다. */
+async function waitForMatchingPointMarker(
+  page: Page,
+  items: readonly AdminFeatureMapItem[],
+): Promise<{ item: AdminFeatureMapItem; marker: Locator }> {
+  let matchedIndex = -1;
+  const markers = page.locator(POINT_MARKER);
+  await expect
+    .poll(
+      async () => {
+        const labels = await markers.evaluateAll((elements) =>
+          elements.map((element) => element.getAttribute("aria-label") ?? ""),
+        );
+        matchedIndex = items.findIndex((item) => {
+          const prefix = `${item.name} (${item.kind})`;
+          return labels.some(
+            (label) => label === prefix || label.startsWith(`${prefix} `),
+          );
+        });
+        return matchedIndex;
+      },
+      { timeout: 30_000 },
+    )
+    .toBeGreaterThanOrEqual(0);
+
+  const item = items[matchedIndex];
+  const accessibleName = new RegExp(
+    `^${escapeRegex(item.name)} \\(${escapeRegex(item.kind)}\\)(?: |$)`,
+  );
+  return {
+    item,
+    marker: page
+      .getByRole("button", { name: accessibleName })
+      .and(markers)
+      .first(),
+  };
 }
 
 async function readMapBounds(
@@ -290,7 +393,9 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     test.setTimeout(FLOW_TIMEOUT);
     const initialCluster = page.waitForResponse(
       (response) =>
-        isFeaturesInBounds(response) &&
+        isAdminFeaturesInBounds(response) &&
+        inBoundsBbox(response).zoom !== null &&
+        (inBoundsBbox(response).zoom as number) <= 13 &&
         inBoundsBbox(response).kinds.join(",") === "weather,notice",
       { timeout: FLOW_TIMEOUT },
     );
@@ -310,7 +415,8 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     expect(initialRequest.maxItems as number).toBeGreaterThan(0);
 
     const initialBody =
-      (await initialResponse.json()) as FeaturesInBoundsResponse;
+      (await initialResponse.json()) as AdminFeaturesInBoundsResponse;
+    expect(initialBody.data.mode).toBe("clusters");
     expect(Array.isArray(initialBody.data.clusters)).toBe(true);
     expect(initialBody.data.clusters.length).toBeGreaterThan(0);
 
@@ -323,7 +429,10 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       name: "notice",
       exact: true,
     });
-    const placeChip = filter.getByRole("button", { name: "place", exact: true });
+    const placeChip = filter.getByRole("button", {
+      name: "place",
+      exact: true,
+    });
     const reset = filter.getByRole("button", { name: "초기화" });
     await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
     await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
@@ -332,7 +441,9 @@ test.describe("/features live — map input round-trip (read-only)", () => {
 
     const placeCluster = page.waitForResponse(
       (response) =>
-        isFeaturesInBounds(response) &&
+        isAdminFeaturesInBounds(response) &&
+        inBoundsBbox(response).zoom !== null &&
+        (inBoundsBbox(response).zoom as number) <= 13 &&
         inBoundsBbox(response).kinds.join(",") === "weather,notice,place",
       { timeout: FLOW_TIMEOUT },
     );
@@ -350,7 +461,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
   });
 
   for (const [name, lon, lat, zoom] of A_VIEWS) {
-    test(`뷰포트를 ${name}로 이동 → bbox API가 새 좌표 파라미터로 호출되고 카운트/마커가 반영`, async ({
+    test(`뷰포트를 ${name}로 이동 → admin bbox 요청/cache hit가 카운트/마커에 반영`, async ({
       page,
     }) => {
       test.setTimeout(FLOW_TIMEOUT);
@@ -362,50 +473,59 @@ test.describe("/features live — map input round-trip (read-only)", () => {
 
       // 멀리 떨어진 기준점으로 먼저 점프(초기 뷰가 타깃과 같아 moveend 누락되는 경우 방지).
       await jumpMap(page, ANCHOR.lon, ANCHOR.lat, ANCHOR.zoom);
+      await waitForMapIdle(page);
 
-      // 타깃 좌표를 bbox로 감싸는 admin item 요청을 기다린다(입력 → API 파라미터).
-      const responsePromise = page.waitForResponse(
+      // 새 HTTP 응답이 있으면 관찰하되 React Query cache hit도 정상이다. 성공 조건은
+      // target moveend→idle 뒤 실제 point marker가 렌더된 상태다.
+      const response = await captureAdminResponseDuring(
+        page,
         (response) => adminItemsContains(response, targetLon, targetLat),
-        { timeout: FLOW_TIMEOUT },
+        async () => {
+          await jumpMap(page, targetLon, targetLat, targetZoom);
+          await waitForMapIdle(page);
+          await expect(page.locator(POINT_MARKER).first()).toBeVisible({
+            timeout: 30_000,
+          });
+        },
       );
-      await jumpMap(page, targetLon, targetLat, targetZoom);
-      const response = await responsePromise;
 
-      // (1) API 파라미터: bbox 4개 + zoom/max_items가 실리고 타깃을 bracket.
-      expect(response.status()).toBe(200);
-      const requested = inBoundsBbox(response);
-      expect(requested.minLon).toBeLessThanOrEqual(targetLon);
-      expect(requested.maxLon).toBeGreaterThanOrEqual(targetLon);
-      expect(requested.minLat).toBeLessThanOrEqual(targetLat);
-      expect(requested.maxLat).toBeGreaterThanOrEqual(targetLat);
-      expect(requested.zoom).not.toBeNull();
-      expect(requested.zoom as number).toBeGreaterThan(13);
-      expect(requested.maxItems).not.toBeNull();
-      expect(requested.maxItems as number).toBeGreaterThan(0);
-      expect(requested.maxItems as number).toBeLessThanOrEqual(2000);
+      // 네트워크 miss 경로에서는 UI가 보낸 exact endpoint/파라미터/응답도 검증한다.
+      if (response !== null) {
+        expect(response.status()).toBe(200);
+        const requested = inBoundsBbox(response);
+        expect(requested.minLon).toBeLessThanOrEqual(targetLon);
+        expect(requested.maxLon).toBeGreaterThanOrEqual(targetLon);
+        expect(requested.minLat).toBeLessThanOrEqual(targetLat);
+        expect(requested.maxLat).toBeGreaterThanOrEqual(targetLat);
+        expect(requested.zoom).not.toBeNull();
+        expect(requested.zoom as number).toBeGreaterThan(13);
+        expect(requested.maxItems).not.toBeNull();
+        expect(requested.maxItems as number).toBeGreaterThan(0);
+        expect(requested.maxItems as number).toBeLessThanOrEqual(2000);
 
-      // (2) API 응답 본문 = 요청 bbox 안 feature만(서버 공간 필터 계약, ADR-012).
-      const body = (await response.json()) as AdminFeaturesInBoundsResponse;
-      expect(body.data.mode).toBe("items");
-      expect(Array.isArray(body.data.items)).toBe(true);
-      for (const item of body.data.items) {
-        if (typeof item.lon === "number" && typeof item.lat === "number") {
-          expect(item.lon).toBeGreaterThanOrEqual(requested.minLon - EPS);
-          expect(item.lon).toBeLessThanOrEqual(requested.maxLon + EPS);
-          expect(item.lat).toBeGreaterThanOrEqual(requested.minLat - EPS);
-          expect(item.lat).toBeLessThanOrEqual(requested.maxLat + EPS);
+        const body = (await response.json()) as AdminFeaturesInBoundsResponse;
+        expect(body.data.mode).toBe("items");
+        expect(Array.isArray(body.data.items)).toBe(true);
+        for (const item of body.data.items) {
+          if (typeof item.lon === "number" && typeof item.lat === "number") {
+            expect(item.lon).toBeGreaterThanOrEqual(requested.minLon - EPS);
+            expect(item.lon).toBeLessThanOrEqual(requested.maxLon + EPS);
+            expect(item.lat).toBeGreaterThanOrEqual(requested.minLat - EPS);
+            expect(item.lat).toBeLessThanOrEqual(requested.maxLat + EPS);
+          }
         }
       }
 
-      // (3) 백엔드 read 라운드트립: 현재 지도 bounds로 직접 조회 → 같은 지역에 feature 존재.
+      // 백엔드 read 라운드트립: UI와 같은 admin items 계약을 현재 bounds로 직접 조회.
       const bounds = await readMapBounds(page);
       expect(bounds).not.toBeNull();
-      const direct = await browserFetch<FeaturesInBboxResponse>(
+      const direct = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
-        `/v1/features?min_lon=${bounds!.w}&min_lat=${bounds!.s}&max_lon=${bounds!.e}&max_lat=${bounds!.n}&page_size=500`,
+        adminInBoundsPath(bounds!, targetZoom, ["weather", "notice"]),
       );
       expect(direct.status).toBe(200);
       expect(direct.body).not.toBeNull();
+      expect(direct.body!.data.mode).toBe("items");
       expect(direct.body!.data.items.length).toBeGreaterThan(0);
       for (const item of direct.body!.data.items) {
         if (typeof item.lon === "number" && typeof item.lat === "number") {
@@ -416,7 +536,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         }
       }
 
-      // (4) UI 반영: DOM viewport 텍스트가 타깃 center/zoom으로 갱신(moveend → Zustand).
+      // UI 반영: DOM viewport, 카운트와 실제 marker identity가 direct admin 응답에 수렴.
       await expect
         .poll(async () => {
           const view = await readViewport(page);
@@ -429,16 +549,15 @@ test.describe("/features live — map input round-trip (read-only)", () => {
           return view ? Math.abs(view.zoom - targetZoom) : 999;
         }, T)
         .toBeLessThan(0.5);
-
-      // (5) UI 반영: 헤더 카운트 배지 "{N}건 표시"가 반환 feature 집합 크기를 표시.
       await expect(page.getByText(/\d+건 표시/).first()).toBeVisible(T);
-      await expect.poll(async () => readFeatureCount(page), T).toBeGreaterThan(0);
-
-      // (6) UI 반영: 지도에 마커(점/클러스터)가 렌더.
-      await expect(page.locator(".maplibregl-marker").first()).toBeVisible({
-        timeout: 30_000,
-      });
-      expect(await page.locator(".maplibregl-marker").count()).toBeGreaterThan(0);
+      await expect
+        .poll(async () => readFeatureCount(page), T)
+        .toBe(direct.body!.data.items.length);
+      const matching = await waitForMatchingPointMarker(
+        page,
+        direct.body!.data.items,
+      );
+      await expect(matching.marker).toBeVisible(T);
     });
   }
 
@@ -458,66 +577,88 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       name: "notice",
       exact: true,
     });
-    const placeChip = filter.getByRole("button", { name: "place", exact: true });
+    const placeChip = filter.getByRole("button", {
+      name: "place",
+      exact: true,
+    });
 
     try {
       // place feature가 풍부한 서울로 이동(초기 데이터 확보).
       await jumpMap(page, ANCHOR.lon, ANCHOR.lat, ANCHOR.zoom);
-      const seoulLoad = page.waitForResponse(
+      await waitForMapIdle(page);
+      await captureAdminResponseDuring(
+        page,
         (response) => adminItemsContains(response, SEOUL.lon, SEOUL.lat),
-        { timeout: FLOW_TIMEOUT },
+        async () => {
+          await jumpMap(page, SEOUL.lon, SEOUL.lat, SEOUL.zoom);
+          await waitForMapIdle(page);
+          await expect(page.locator(POINT_MARKER).first()).toBeVisible({
+            timeout: 30_000,
+          });
+        },
       );
-      await jumpMap(page, SEOUL.lon, SEOUL.lat, SEOUL.zoom);
-      await seoulLoad;
 
       await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
       await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
       await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
 
-      // kind=place가 실린 admin item 요청을 기다린다(토글 → queryKey 변경 → refetch).
-      const kindResponsePromise = page.waitForResponse(
+      // 토글 뒤 새 응답이 없더라도(cache hit) map idle + 실제 place marker로 수렴한다.
+      const response = await captureAdminResponseDuring(
+        page,
         (response) =>
           isAdminFeaturesInBounds(response) &&
           inBoundsBbox(response).zoom !== null &&
           (inBoundsBbox(response).zoom as number) > 13 &&
           inBoundsBbox(response).kinds.includes("place"),
-        { timeout: FLOW_TIMEOUT },
+        async () => {
+          await placeChip.click();
+          await expect(placeChip).toHaveAttribute("aria-pressed", "true", T);
+          await waitForMapIdle(page);
+          await expect(page.locator(POINT_MARKER).first()).toBeVisible({
+            timeout: 30_000,
+          });
+        },
       );
-      await placeChip.click();
-      await expect(placeChip).toHaveAttribute("aria-pressed", "true", T);
-      const response = await kindResponsePromise;
 
-      // (1) API 파라미터: 요청에 기본 weather/notice + 추가 place.
-      expect(response.status()).toBe(200);
-      expect(inBoundsBbox(response).kinds).toEqual([
-        "weather",
-        "notice",
-        "place",
-      ]);
-      const body = (await response.json()) as AdminFeaturesInBoundsResponse;
-      expect(body.data.mode).toBe("items");
-      for (const item of body.data.items) {
-        expect(["weather", "notice", "place"]).toContain(item.kind);
+      // 네트워크 miss 경로에서는 UI의 exact kind request를 검증한다.
+      if (response !== null) {
+        expect(response.status()).toBe(200);
+        expect(inBoundsBbox(response).kinds).toEqual([
+          "weather",
+          "notice",
+          "place",
+        ]);
+        const body = (await response.json()) as AdminFeaturesInBoundsResponse;
+        expect(body.data.mode).toBe("items");
+        for (const item of body.data.items) {
+          expect(["weather", "notice", "place"]).toContain(item.kind);
+        }
       }
 
-      // (2) 백엔드 라운드트립: 같은 bounds에 kind=place 직접 조회 → place만, 1건 이상.
+      // 백엔드 라운드트립: UI와 같은 admin endpoint에서 place-only/combined/all 비교.
       const bounds = await readMapBounds(page);
       expect(bounds).not.toBeNull();
-      const bbox = `min_lon=${bounds!.w}&min_lat=${bounds!.s}&max_lon=${bounds!.e}&max_lat=${bounds!.n}&page_size=500`;
-      const placeOnly = await browserFetch<FeaturesInBboxResponse>(
+      const placeOnly = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
-        `/v1/features?${bbox}&kind=place`,
+        adminInBoundsPath(bounds!, SEOUL.zoom, ["place"]),
       );
       expect(placeOnly.status).toBe(200);
       expect(placeOnly.body).not.toBeNull();
+      expect(placeOnly.body!.data.mode).toBe("items");
       expect(placeOnly.body!.data.items.length).toBeGreaterThan(0);
       for (const item of placeOnly.body!.data.items) {
         expect(item.kind).toBe("place");
       }
-      // 필터 없는 조회는 place-필터 결과의 상위집합(>=) — kind 파라미터가 결과를 좁힘.
-      const unfiltered = await browserFetch<FeaturesInBboxResponse>(
+      const combined = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
-        `/v1/features?${bbox}`,
+        adminInBoundsPath(bounds!, SEOUL.zoom, ["weather", "notice", "place"]),
+      );
+      expect(combined.status).toBe(200);
+      expect(combined.body).not.toBeNull();
+      expect(combined.body!.data.mode).toBe("items");
+      const unfiltered = await browserFetch<AdminFeaturesInBoundsResponse>(
+        page,
+        adminInBoundsPath(bounds!, SEOUL.zoom, []),
       );
       expect(unfiltered.status).toBe(200);
       expect(unfiltered.body).not.toBeNull();
@@ -525,12 +666,18 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         placeOnly.body!.data.items.length,
       );
 
-      // (3) UI 반영: 초기화 버튼 활성화(기본값과 다를 때) + 카운트 배지(>0) + 마커 존재.
-      await expect(filter.getByRole("button", { name: "초기화" })).toBeEnabled(T);
-      await expect.poll(async () => readFeatureCount(page), T).toBeGreaterThan(0);
-      await expect(page.locator(".maplibregl-marker").first()).toBeVisible({
-        timeout: 30_000,
-      });
+      // UI 반영: exact combined count와 실제 place marker identity가 응답에 수렴.
+      await expect(filter.getByRole("button", { name: "초기화" })).toBeEnabled(
+        T,
+      );
+      await expect
+        .poll(async () => readFeatureCount(page), T)
+        .toBe(combined.body!.data.items.length);
+      const matching = await waitForMatchingPointMarker(
+        page,
+        placeOnly.body!.data.items,
+      );
+      await expect(matching.marker).toBeVisible(T);
     } finally {
       // 읽기 전용 — 백엔드 변경 없음. UI 필터만 초기화해 깨끗한 상태로 둔다.
       // 초기화 버튼은 항상 렌더되므로(disabled로 제어), enabled일 때만 클릭한다
@@ -546,7 +693,23 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
     await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
     await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
-    await expect(filter.getByRole("button", { name: "초기화" })).toBeDisabled(T);
+    await expect(filter.getByRole("button", { name: "초기화" })).toBeDisabled(
+      T,
+    );
+    await waitForMapIdle(page);
+    const resetBounds = await readMapBounds(page);
+    expect(resetBounds).not.toBeNull();
+    const resetDirect = await browserFetch<AdminFeaturesInBoundsResponse>(
+      page,
+      adminInBoundsPath(resetBounds!, SEOUL.zoom, ["weather", "notice"]),
+    );
+    expect(resetDirect.status).toBe(200);
+    expect(resetDirect.body).not.toBeNull();
+    expect(resetDirect.body!.data.mode).toBe("items");
+    await expect
+      .poll(async () => readFeatureCount(page), T)
+      .toBe(resetDirect.body!.data.items.length);
+    await waitForMatchingPointMarker(page, resetDirect.body!.data.items);
   });
 
   test("점 마커 클릭 → 상세 패널이 실제 backend feature를 반영", async ({
@@ -574,29 +737,64 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       const targetLon = target!.lon as number;
       const targetLat = target!.lat as number;
 
-      // 타깃 좌표로 고배율(zoom 16 > clusterMaxZoom 14) 점프 → 클러스터 없이 점 마커만 렌더.
+      // 타깃 좌표로 고배율 점프. network miss/cache hit 어느 쪽이든 idle 뒤 실제 point marker가
+      // 렌더되면 수렴한 것으로 본다.
       await jumpMap(page, ANCHOR.lon, ANCHOR.lat, ANCHOR.zoom);
-      const tileLoad = page.waitForResponse(
+      await waitForMapIdle(page);
+      const mapResponse = await captureAdminResponseDuring(
+        page,
         (response) => adminItemsContains(response, targetLon, targetLat),
-        { timeout: FLOW_TIMEOUT },
+        async () => {
+          await jumpMap(page, targetLon, targetLat, 16);
+          await waitForMapIdle(page);
+          await expect(page.locator(POINT_MARKER).first()).toBeVisible({
+            timeout: 30_000,
+          });
+        },
       );
-      await jumpMap(page, targetLon, targetLat, 16);
-      await tileLoad;
 
-      // 점 마커(role=button, 클러스터 aria-label 제외) 렌더 대기.
-      const pointMarker = page.locator(
-        '.maplibregl-marker[role="button"]:not([aria-label^="feature 클러스터"])',
+      if (mapResponse !== null) {
+        expect(mapResponse.status()).toBe(200);
+        const mapBody =
+          (await mapResponse.json()) as AdminFeaturesInBoundsResponse;
+        expect(mapBody.data.mode).toBe("items");
+        expect(
+          mapBody.data.items.some(
+            (item) => item.feature_id === target!.feature_id,
+          ),
+        ).toBe(true);
+      }
+
+      // 현재 bounds를 같은 admin items 계약으로 직접 읽고 public seed와 동일한 marker를 찾는다.
+      const bounds = await readMapBounds(page);
+      expect(bounds).not.toBeNull();
+      const direct = await browserFetch<AdminFeaturesInBoundsResponse>(
+        page,
+        adminInBoundsPath(bounds!, 16, ["weather", "notice"]),
       );
-      await expect(pointMarker.first()).toBeVisible({ timeout: 30_000 });
+      expect(direct.status).toBe(200);
+      expect(direct.body).not.toBeNull();
+      expect(direct.body!.data.mode).toBe("items");
+      const adminTarget = direct.body!.data.items.find(
+        (item) => item.feature_id === target!.feature_id,
+      );
+      expect(
+        adminTarget,
+        "public seed와 같은 admin map item이 있어야 함",
+      ).toBeTruthy();
+      const pointMarker = await waitForMatchingPointMarker(page, [
+        adminTarget!,
+      ]);
 
       // 마커 클릭 → useFeatureDetail이 GET /v1/features/{id} 호출. 응답 대기 설정 후 클릭.
       const detailPromise = page.waitForResponse(isFeatureDetail, {
         timeout: FLOW_TIMEOUT,
       });
-      await pointMarker.first().click();
+      await pointMarker.marker.click();
       const detailResponse = await detailPromise;
       expect(detailResponse.status()).toBe(200);
-      const detail = (await detailResponse.json()) as FeatureDetailEnvelopeResponse;
+      const detail =
+        (await detailResponse.json()) as FeatureDetailEnvelopeResponse;
       const picked = detail.data;
 
       // (1) UI 반영: 상세 패널 노출 + 선택 feature_id/이름/badge가 응답과 일치.
