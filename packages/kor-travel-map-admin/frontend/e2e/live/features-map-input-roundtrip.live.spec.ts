@@ -20,7 +20,7 @@ import { MAP_VIEWS } from "./_fixtures";
  *   A. 지도 뷰포트 이동(MAP_VIEWS) → `GET /v1/admin/features/in-bounds`가 새 bbox 파라미터로 호출 →
  *      응답 본문이 요청 bbox 안 feature만 → DOM viewport 텍스트/카운트/마커가 반영.
  *   B. kind 칩 토글 → 요청에 `kind=` 파라미터 → 서버가 해당 kind만 반환 → 카운트/마커 반영.
- *   C. 점 마커 클릭 → `GET /v1/features/{id}` → 상세 패널이 실제 backend feature를 반영.
+ *   C. 점 마커 클릭 → `GET /v1/admin/features/{id}` → 상세 패널이 실제 backend feature를 반영.
  *
  * 셀렉터/파라미터는 소스에서 검증한 것만 사용한다:
  *   - bbox 파라미터 이름: src/api/features.ts adminFeaturesInBoundsPath (min_lon/min_lat/
@@ -35,8 +35,8 @@ type AdminFeatureMapItem = components["schemas"]["AdminFeatureMapItem"];
 type AdminFeatureMapCluster = components["schemas"]["AdminFeatureCluster"];
 type AdminFeaturesInBoundsResponse =
   components["schemas"]["AdminFeaturesInBoundsResponse"];
-type FeatureDetailEnvelopeResponse =
-  components["schemas"]["FeatureDetailEnvelopeResponse"];
+type AdminFeatureDetailResponse =
+  components["schemas"]["AdminFeatureDetailResponse"];
 
 type BrowserFetchResult<T> = {
   body: T | null;
@@ -218,12 +218,16 @@ function adminItemsContains(
   );
 }
 
-// `/v1/features/{id}` 단건 상세만(목록/검색/주변/배치/하위카드는 제외).
-const DETAIL_NON_IDS = new Set(["nearby", "search", "in-bounds", "batch"]);
-function isFeatureDetail(response: Response): boolean {
-  if (response.request().method() !== "GET") return false;
-  const match = /^\/v1\/features\/([^/]+)$/.exec(apiPath(response));
-  return match !== null && !DETAIL_NON_IDS.has(match[1]);
+// 선택한 feature의 admin 단건 상세만 허용한다. weather/revision 등 하위 요청이나
+// 다른 feature의 상세 응답이 먼저 와도 잘못 통과하지 않는다.
+function isAdminFeatureDetail(
+  response: Response,
+  featureId: string,
+): boolean {
+  return (
+    response.request().method() === "GET" &&
+    apiPath(response) === `/v1/admin/features/${featureId}`
+  );
 }
 
 // ── 지도 인스턴스 제어/판독(컨테이너 DOM에 매달린 _maplibreMap 훅) ──────────
@@ -430,7 +434,6 @@ async function readPointMarkerFeatureIds(page: Page): Promise<string[]> {
   return page.locator(POINT_MARKER).evaluateAll((elements) =>
     elements
       .map((element) => (element as HTMLElement).dataset.featureId ?? "")
-      .filter((featureId) => featureId.length > 0)
       .sort(),
   );
 }
@@ -1001,10 +1004,13 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         adminTarget!.feature_id,
       );
 
-      // 마커 클릭 → useFeatureDetail이 GET /v1/features/{id} 호출. 응답 대기 설정 후 클릭.
-      const detailPromise = page.waitForResponse(isFeatureDetail, {
-        timeout: FLOW_TIMEOUT,
-      });
+      // 마커 클릭 → useAdminFeatureDetail이 정확한 admin 단건 상세를 호출.
+      // 응답 대기 설정 후 클릭해 빠른 응답도 놓치지 않는다.
+      const detailPromise = page.waitForResponse(
+        (response) =>
+          isAdminFeatureDetail(response, adminTarget!.feature_id),
+        { timeout: FLOW_TIMEOUT },
+      );
       await pointMarker.click();
       const popupOpened = await Promise.race([
         detailPromise.then(() => false),
@@ -1032,8 +1038,8 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       const detailResponse = await detailPromise;
       expect(detailResponse.status()).toBe(200);
       const detail =
-        (await detailResponse.json()) as FeatureDetailEnvelopeResponse;
-      const picked = detail.data;
+        (await detailResponse.json()) as AdminFeatureDetailResponse;
+      const picked = detail.data.feature;
       expect(picked.feature_id).toBe(adminTarget!.feature_id);
 
       // (1) UI 반영: 상세 패널 노출 + 선택 feature_id/이름/badge가 응답과 일치.
@@ -1053,15 +1059,15 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       ).toBeVisible(T);
 
       // (2) 백엔드 라운드트립: 패널이 가리키는 feature_id를 직접 조회 → 동일 feature.
-      const confirm = await browserFetch<FeatureDetailEnvelopeResponse>(
+      const confirm = await browserFetch<AdminFeatureDetailResponse>(
         page,
-        `/v1/features/${encodeURIComponent(picked.feature_id)}`,
+        `/v1/admin/features/${encodeURIComponent(picked.feature_id)}`,
       );
       expect(confirm.status).toBe(200);
       expect(confirm.body).not.toBeNull();
-      expect(confirm.body!.data.feature_id).toBe(picked.feature_id);
-      expect(confirm.body!.data.name).toBe(picked.name);
-      expect(confirm.body!.data.kind).toBe(picked.kind);
+      expect(confirm.body!.data.feature.feature_id).toBe(picked.feature_id);
+      expect(confirm.body!.data.feature.name).toBe(picked.name);
+      expect(confirm.body!.data.feature.kind).toBe(picked.kind);
 
       // (3) 닫기 → 패널 숨김(선택 해제).
       await panel.getByRole("button", { name: "닫기" }).click();

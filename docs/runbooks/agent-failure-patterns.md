@@ -419,5 +419,12 @@
 - **처음부터 다시 해야 하는 경우**: clone/artifact가 이미 삭제됐거나, code/data SHA가
   달라졌거나, 선행 migration·seed 자체가 실패 원인의 영향을 받았거나, 상태 무결성을
   증명할 수 없는 경우다. 추측으로 재사용하지 않는다.
-- **정리**: 최종 성공 뒤 보존한 격리 DB·dump·PID/log artifact를 명시적으로 정리하고 prod
-  기준선·health가 변하지 않았음을 다시 확인한다.
+- **종료·재사용 판정**:
+  - 최종 Live 성공 뒤 API/UI process처럼 재기동 가능한 실행 자원은 정지하되, 격리 DB·dump·
+    immutable artifact는 PR 성공만으로 즉시 삭제하지 않는다.
+  - PR 머지 후 다음 task 착수 전에 migration head, schema/fixture 계약, 파괴적 실행 잔여물,
+    code/API 호환성, 디스크 여유를 확인한다.
+  - 다음 task가 안전하게 이어 쓸 수 있으면 resource 이름·head·fixture identity와 판정 근거를
+    `docs/resume.md`/`docs/journal.md`에 기록해 보존한다. 호환되지 않거나 오염·용량 위험이
+    있으면 그때 정확한 격리 DB·dump·PID/log artifact만 명시적으로 정리한다.
+  - 어느 경우든 prod 기준선·health가 변하지 않았음을 다시 확인한다.
