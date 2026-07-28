@@ -3,6 +3,37 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-28 — Lane A a0 T-VN-H07D: admin detail-snapshot 계약 + freshness 게이트 실효화
+
+- [x] **T-VN-H07D** (#815 close) — cross-repo 2 PR. **① Map** PR #878(`5c0e0cae`), **② PinVi**
+  PR #416(`8ea83358`).
+  - **문제**: PinVi 큐레이션 import 런타임이 소비하는 admin detail-snapshot의 계약이 **OpenAPI로
+    표현조차 되지 않았다**. PinVi가 읽는 plan-level 필드가 전부 free-form `dict[str, Any]`
+    (`theme`/`content`/`source`/`feature_snapshot`) 안이라 스펙에 `{"type":"object"}`로만 나왔고,
+    PinVi가 호출하는 경로는 `include_in_schema=False` 숨은 alias라 스펙 기반 게이트가 볼 수 없었다.
+  - **① Map**: 생성부가 고정 key로 만드는 payload를 **typed view 4종**으로 전환.
+    **etag는 repo payload dict 기준이라 그 dict을 손대지 않아 etag·캐시 계약 불변.**
+    계약 게이트 9건(필드 핀 / 컨테이너 `$ref` 결합 / **alias 라우트 등록** / 생성부↔view 정합
+    populated·all-null / **endpoint HTTP** 문서경로·alias × populated·all-null).
+    `openapi.json` + frontend `types.ts` 동시 재생성.
+  - **② PinVi**: 경로·응답 스키마의 **전이적 폐포 + securityScheme**만 결정적으로 추출한 subset
+    (19 KB, full 1.1 MB 대비)을 vendor하고, 실제 소비 필드의 consumer 계약과 admin 인증 헤더
+    header-only 계약을 고정. exact property 집합은 producer 소유라 중복 고정하지 않는다.
+  - **freshness(핵심)**: 기존 live-compare는 sibling 체크아웃 부재로 skip되어 CI에서 항상
+    green이었다. `contract-pin-consistency`(차단, `aggregate-ci.yml` required check 등록)가 Map을
+    **핀 커밋**으로 체크아웃해 user는 byte, admin은 재추출로 **실제 비교**한다. 핀 자체의 뒤처짐은
+    매일 도는 비차단 `contract-staleness`가 Map main과 비교해 알린다(H07B의 174-commit 사례).
+  - **적대 리뷰 각 2명**. Map: 재생성 산출물 `types.ts` 누락(머지 blocker)과 `feature_snapshot`
+    소비 여부 오판을 잡아 네 번째 typed view로 확장. PinVi: **"차단"이라던 job이 required check에
+    없어 실제로는 아무것도 막지 못하던 것**을 잡아 실효화하고, job 이름을 증명 대상에 맞게
+    `contract-pin-consistency`로 정정, `continue-on-error`가 죽이던 예약 알림 경로 복구,
+    subset의 securityScheme 누락 보완, 계약상 불가능해진 e2e fixture 교정.
+  - **검증**: 양쪽 n150 CI-parity green(Map api 790 passed / PinVi unit 675 passed),
+    freshness 양쪽 실증, PinVi integration을 testcontainers로 실제 실행(1 passed),
+    실제 CI에서 신규 게이트 pass(9s) 확인.
+  - **파생 등록**: `T-VN-H29`(PinVi 통합검색의 map-import POI 좌표 null — `_snapshot_coord`가
+    `coord`만 읽는데 Map view에 `coord`가 없어 구조적으로 항상 None).
+
 ## 2026-07-28 — Lane A a0 T-VN-H07B: PinVi consumer contract landing
 
 - [x] **T-VN-H07B** — 오래 열린 PinVi #403(base 13 commits 뒤)을 재감사해 residual만 남기고

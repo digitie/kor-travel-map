@@ -10,6 +10,26 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-28 (claude) — Lane A a0 T-VN-H07D 완료 (Map #878 + PinVi #416, #815 close)
+
+**다음 한 작업**: Lane A a0 마지막 항목 **`T-VN-H07C`(#812 compatible-pair manifest v5)** —
+docker-manager compatible-pair에 Map per-surface OpenAPI digest manifest SHA를 추가하고
+capture·validate·deploy를 v5로 전환, Map export drift와 C7 attestation을 같은 digest에 연결,
+ADR-076 개정. 이후 a1(`T-VN-H29` → `T-VN-H27` → …).
+
+- **완료(이번 세션)**: `T-VN-H07A`(#814) · `T-VN-H07B`(PinVi #415) · **`T-VN-H07D`**(Map #878
+  `5c0e0cae` + PinVi #416 `8ea83358`). a0에서 H07C만 남았다.
+- **H07D 요지**: PinVi가 소비하는 admin detail-snapshot의 계약이 OpenAPI로 **표현조차 안 되던**
+  상태(free-form dict + 숨은 alias 경로)를 typed view 4종 + 라우트 등록 테스트로 해소하고,
+  PinVi 쪽에 전이적 폐포 subset(19 KB)을 vendor해 소비자 계약을 고정했다.
+  freshness는 `contract-pin-consistency`(차단·required check 등록)와 `contract-staleness`
+  (예약·비차단)로 역할을 나눴다.
+- **주의(반복된 실패 패턴)**: "게이트를 만들었다"와 "게이트가 실제로 막는다"는 다르다. PinVi에서
+  차단이라고 만든 job이 required check 목록에 없어 **아무것도 막지 못하는 상태**였고 리뷰어가 잡았다.
+  게이트를 추가할 때는 **required check/merge gate에 실제로 연결됐는지**까지 확인할 것.
+- **주의(3회 반복)**: 소비자가 어떤 필드를 읽는지 추측으로 단정하지 말 것(H07B `cluster_unit`,
+  H07D `feature_snapshot`, H07D `search.py` 귀속). 매번 리뷰어가 소비자 저장소 grep으로 뒤집었다.
+
 ## 2026-07-28 (claude) — Lane A a0 T-VN-H07D ① Map half landing (payload 타입화)
 
 **다음 한 작업**: **T-VN-H07D ② PinVi half** — Map admin OpenAPI의 detail-snapshot 스키마를 PinVi에

@@ -20,9 +20,10 @@ barrier로 직렬화한다.
 
 - **Lane A — cross-repo 계약·운영·데이터 품질**
   - a0: [x] `T-VN-H07B`(PinVi #403 재감사·landing) →
-    [ ] `T-VN-H07D`(#815 admin snapshot/freshness) →
+    [x] `T-VN-H07D`(#815 admin snapshot/freshness) →
     [ ] `T-VN-H07C`(#812 manifest v5)
-  - a1: [ ] `T-VN-H27`(#819 HAProxy tunnel) →
+  - a1: [ ] `T-VN-H29`(PinVi 검색 좌표 null 복구 — H07D 파생) →
+    [ ] `T-VN-H27`(#819 HAProxy tunnel) →
     [ ] `T-VN-H21`(geo live 인증 preflight·5건 재실증) →
     [ ] `T-VN-H28A`(#673 실데이터 오탐 분류) →
     [ ] `T-VN-H28B`(#673 검증 규칙·회복 경로) →
@@ -384,13 +385,22 @@ H07A의 실제 user OpenAPI SHA와 대조한 residual consumer contract만 남�
   경로→컨테이너→item·map value·envelope `meta` 사슬과 `model_validate` 표면의 model 결합까지
   고정. 상세는 tasks-done 2026-07-28.
 
-- [ ] T-VN-H07D — **#815 admin detail-snapshot field-level contract·freshness**
-  (① Map half **완료** — payload 타입화 + 계약 게이트. ② PinVi half(vendor·소비자 계약·freshness
-  CI) 남음. cross-repo 2 PR이라 둘 다 landing해야 완료.)
+- [x] T-VN-H07D — **#815 admin detail-snapshot field-level contract·freshness** (완료 — #815 close)
+  ① Map PR #878(`5c0e0cae`) payload 타입화 + 계약 게이트 · ② PinVi PR #416(`8ea83358`) subset
+  vendor + 소비자 계약 + freshness CI. 상세는 tasks-done 2026-07-28.
 
   PinVi 런타임이 실제 소비하는 admin detail-snapshot의 plan/item required/type/enum을 Map full
   OpenAPI와 PinVi vendored snapshot 양쪽에서 고정한다. admin/user snapshot freshness를 CI에서
   실제 비교해 skip으로 green이 되는 경로를 제거한다.
+
+- [ ] T-VN-H29 — **PinVi 통합검색 map-import POI 좌표 null 복구** (T-VN-H07D 파생, 2026-07-28)
+
+  `pinvi apps/api/app/api/v1/search.py::_snapshot_coord`가 `feature_snapshot["coord"]`만 읽는데,
+  Map `CuratedFeatureDetailFeatureSnapshotView`는 `extra="forbid"`이고 `coord` property가 없다
+  (좌표는 **top-level** `lon`/`lat`). 따라서 이 read는 구조적으로 항상 None이고 map-curated import로
+  들어온 POI는 통합 검색에서 좌표가 null이다. 같은 payload를 `services/admin_pois.py::extract_feature_coord`와
+  `services/kasi.py::extract_feature_coordinates`는 top-level에서 정상 해석한다 —
+  `_snapshot_coord`가 같은 추출기를 재사용하도록 고치고 회귀 테스트를 둔다(PinVi 저장소 작업).
 
 - [ ] T-VN-H07C — **#812 compatible-pair manifest v5**
 
