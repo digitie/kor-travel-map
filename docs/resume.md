@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-28 (codex) — PR #871 머지 후 T-VN-46 재사용 checkpoint
+
+**다음 한 작업**: issue #872 / Lane B `T-VN-46`에서 npm 10.9.4와 최신 npm의 동일
+lockfile clean-install을 최소 재현하고 Sharp 0.35.3 optional graph의 Arborist 소유 경계를
+확정한다. 작업 중 main을 주기적으로 rebase하고, 적대 리뷰 단계에 #870 이후 closed 포함
+Claude Code 신규 PR을 다시 조회해 있으면 전문 서브에이전트 1명의 리뷰·수정을 이 PR에 합친다.
+
+- PR #871은 exact head `944b2563`의 8개 CI가 모두 green인 뒤 merge commit `64c158c5`로
+  main에 반영됐다.
+- 보존 clone은 main head와의 차이 `0063→0064→0065→0066`을 rollback 없이 forward upgrade했다.
+  현재 `0066_curation_component_identity`, Feature **1,030,469건**, 합성 Feature **22/22
+  deleted**, incomplete tombstone **0건**, change request **80건/pending 0건**, POI cache target
+  **90건**, DB **17GB**, health 정상이다.
+- main schema와 호환되고 T-VN-46이 frontend dependency/gate 작업이라 기존 합성 tombstone이
+  검증을 오염시키지 않으며 가용 공간도 **85GB**다. 따라서 `ktm-tvn45-db`와
+  1,175,043,355-byte dump/redacted checkpoint를 T-VN-46 Live에 재사용한다.
+- #870 이후 closed 포함 PR은 현재 #871뿐이며 신규 Claude Code PR은 없다. issue #872를
+  작업 전에 생성했다.
+
 ## 2026-07-28 (codex) — Lane B T-VN-45 구현·파괴적 Live 완료
 
 **다음 한 작업**: PR #871 exact head를 적대적 리뷰어 2명이 재검토하고 전체 gate·GitHub
