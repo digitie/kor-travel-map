@@ -29,6 +29,25 @@ Lane A a0=T-VN-H07A를 확인했다.
 - **live 표면 주기**: test-only OpenAPI 계약 변경으로 admin-UI 표면이 없어, 실제 live 검증은
   n150 게이트가 실제 생성 OpenAPI에 대해 계약을 실행하는 것으로 갈음(파괴적 UI e2e 해당 없음).
 
+## 2026-07-28 (codex) — PR #871 머지·T-VN-46 clone 재사용 판정
+
+**결론**: PR #871을 8개 CI green 뒤 merge commit `64c158c5`로 머지했다. 다음 Lane B
+`T-VN-46`용 issue #872를 만들고, 보존한 clone을 main schema에 forward upgrade해 재사용
+가능으로 판정했다.
+
+- **schema 호환성**: clone `ktm-tvn45-db`를 rollback 없이
+  `0063_pipeline_root_id→0064_price_series_identity→0065_curation_source_presence→
+  0066_curation_component_identity`로 올렸다. main Alembic head와 일치하고 DB health가 정상이다.
+- **오염·용량**: Feature 1,030,469건, 합성 Feature 22/22 deleted, incomplete tombstone 0,
+  change request 80건/pending 0, POI cache target 90건이다. DB 17GB, 가용 85GB이며
+  T-VN-46은 frontend dependency/gate 작업이라 기존 tombstone은 Live를 오염시키지 않는다.
+- **보존 결정**: `ktm-tvn45-db`, 1,175,043,355-byte dump, checksum/repair list만 유지한다.
+  API/UI·repair/restore/dump transient container, 인증 상태, raw browser artifact와 임시
+  credential metadata는 남아 있지 않다.
+- **병행 작업 규율**: 작업 전 main을 재동기화했다. 적대 리뷰 시점에 #870 이후 closed 포함
+  PR을 다시 조회하고, 신규 Claude Code PR이 있으면 전문 서브에이전트 1명의 리뷰와 수정 반영을
+  T-VN-46 PR에 합친다. 현재 조회 결과는 #871뿐이라 신규 대상이 없다.
+
 ## 2026-07-28 (codex) — T-VN-45 features map Live 라운드트립·파괴적 write 복구
 
 **결론**: PR #871에서 `/features` 실데이터 spec을 실제 admin in-bounds/detail 계약과
