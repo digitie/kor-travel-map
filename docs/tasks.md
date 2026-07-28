@@ -34,7 +34,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [x] `T-VN-48A` → [ ] `T-VN-48B` → [ ] `T-VN-48C` →
+  - b0: [x] `T-VN-48A` → [x] `T-VN-48B` → [x] `T-VN-48C` →
     [ ] `T-VN-48D`(mocked E2E drift, **A→D 단일 PR**) →
     [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
     [ ] `T-VN-49D`(React 구조 debt)
@@ -65,6 +65,7 @@ barrier로 직렬화한다.
     required-review 운영 주체 결정 필요)
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
   - [ ] `T-VN-EXT-PINVI-215` — PinVi #215 외부 추적(Map Agent A/B queue 밖)
+  - [ ] `T-VN-H29` — PinVi 검색 좌표 null 복구(Map Agent A/B queue 밖)
 
 ## 공통 규율 (2026-07-28 개정)
 
@@ -417,6 +418,14 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
   post-review cleanup 잔여(ADR-045 VWorld 불투명 자격증명 hard-gate 등)는 PinVi 저장소가
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
+
+- [ ] T-VN-H29 — **PinVi 통합검색 map-import POI 좌표 null 복구** (외부 추적)
+
+  `pinvi apps/api/app/api/v1/search.py::_snapshot_coord`가 `feature_snapshot["coord"]`만 읽는데,
+  Map `CuratedFeatureDetailFeatureSnapshotView`는 `extra="forbid"`이고 `coord` property가 없다
+  (좌표는 **top-level** `lon`/`lat`). 따라서 map-curated import POI가 통합 검색에서 좌표
+  `null`이 된다. PinVi 저장소가 `_snapshot_coord`를 기존 top-level 추출기와 정렬하고 회귀를
+  추가해야 하므로 Map Agent A/B 실행 lane에서는 제외하고 상태만 동기화한다.
 
 ## Lane B 상세 — b1 PinVi 결합
 
