@@ -10,20 +10,22 @@ import { MAP_VIEWS } from "./_fixtures";
  * features-map-interactions.spec.ts(route-mock 깊이)가 다루지 않는 **실 API 계약
  * 라운드트립**만 더한다 — 전부 READ-ONLY(GET only, 백엔드 변경 없음)이므로 게이팅하지
  * 않는다(읽기 전용 input 라운드트립은 비게이트 규약):
- *   A. 지도 뷰포트 이동(MAP_VIEWS) → `GET /v1/features`가 새 bbox 파라미터로 호출 →
+ *   A. 지도 뷰포트 이동(MAP_VIEWS) → `GET /v1/admin/features/in-bounds`가 새 bbox 파라미터로 호출 →
  *      응답 본문이 요청 bbox 안 feature만 → DOM viewport 텍스트/카운트/마커가 반영.
  *   B. kind 칩 토글 → 요청에 `kind=` 파라미터 → 서버가 해당 kind만 반환 → 카운트/마커 반영.
  *   C. 점 마커 클릭 → `GET /v1/features/{id}` → 상세 패널이 실제 backend feature를 반영.
  *
  * 셀렉터/파라미터는 소스에서 검증한 것만 사용한다:
- *   - bbox 파라미터 이름: src/api/features.ts fetchFeaturesInBbox (min_lon/min_lat/
- *     max_lon/max_lat/page_size/kind/include_geometry). zoom은 전송하지 않는다.
+ *   - bbox 파라미터 이름: src/api/features.ts adminFeaturesInBoundsPath (min_lon/min_lat/
+ *     max_lon/max_lat/max_items/kind/include_geometry/zoom).
  *   - 지도 인스턴스 e2e 훅: components/vworld-map-view.tsx (`container._maplibreMap`).
  *   - 클러스터/점 마커 aria-label·role=button, 상세 패널 testId/닫기: 동 컴포넌트 +
  *     app/features/features-client.tsx FeatureDetailPanel.
  */
 
 type FeaturesInBboxResponse = components["schemas"]["FeaturesInBboxResponse"];
+type AdminFeaturesInBoundsResponse =
+  components["schemas"]["AdminFeaturesInBoundsResponse"];
 type FeaturesInBoundsResponse =
   components["schemas"]["FeaturesInBoundsResponse"];
 type FeatureDetailEnvelopeResponse =
@@ -39,8 +41,8 @@ const UI_TIMEOUT = 15_000;
 const FLOW_TIMEOUT = 5 * 60 * 1000;
 const T = { timeout: UI_TIMEOUT } as const;
 
-const FEATURES_LIST_PATH = "/v1/features";
 const FEATURES_IN_BOUNDS_PATH = "/v1/features/in-bounds";
+const ADMIN_FEATURES_IN_BOUNDS_PATH = "/v1/admin/features/in-bounds";
 const MAP_CONTAINER = '[data-testid="map-canvas-container"]';
 // 멀리 떨어진 사전 점프 기준점(제주). 초기 뷰가 우연히 타깃과 같아 moveend가 안 떠
 // refetch가 누락되는 경우를 막는다. 본 spec의 어떤 타깃(서울/부산/전국)과도 겹치지 않는다.
@@ -126,15 +128,6 @@ async function browserFetch<T>(
 
 // ── features bbox/detail 쿼리 인식(파라미터-aware 술어) ─────────────────────
 
-interface ListBbox {
-  minLon: number;
-  minLat: number;
-  maxLon: number;
-  maxLat: number;
-  pageSize: number | null;
-  kinds: string[];
-}
-
 interface InBoundsBbox {
   maxItems: number | null;
   minLon: number;
@@ -145,13 +138,6 @@ interface InBoundsBbox {
   zoom: number | null;
 }
 
-function isFeaturesList(response: Response): boolean {
-  return (
-    response.request().method() === "GET" &&
-    apiPath(response) === FEATURES_LIST_PATH
-  );
-}
-
 function isFeaturesInBounds(response: Response): boolean {
   return (
     response.request().method() === "GET" &&
@@ -159,17 +145,11 @@ function isFeaturesInBounds(response: Response): boolean {
   );
 }
 
-function listBbox(response: Response): ListBbox {
-  const sp = new URL(response.url()).searchParams;
-  const pageSizeRaw = sp.get("page_size");
-  return {
-    minLon: Number(sp.get("min_lon")),
-    minLat: Number(sp.get("min_lat")),
-    maxLon: Number(sp.get("max_lon")),
-    maxLat: Number(sp.get("max_lat")),
-    pageSize: pageSizeRaw === null ? null : Number(pageSizeRaw),
-    kinds: sp.getAll("kind"),
-  };
+function isAdminFeaturesInBounds(response: Response): boolean {
+  return (
+    response.request().method() === "GET" &&
+    apiPath(response) === ADMIN_FEATURES_IN_BOUNDS_PATH
+  );
 }
 
 function inBoundsBbox(response: Response): InBoundsBbox {
@@ -187,12 +167,20 @@ function inBoundsBbox(response: Response): InBoundsBbox {
   };
 }
 
-/** 응답이 `(lon,lat)`를 bbox로 감싸는 `/v1/features` tile 호출인가. */
-function tileContains(response: Response, lon: number, lat: number): boolean {
-  if (!isFeaturesList(response)) return false;
-  const b = listBbox(response);
+/** 응답이 `(lon,lat)`를 bbox로 감싸는 admin 개별-item 호출인가. */
+function adminItemsContains(
+  response: Response,
+  lon: number,
+  lat: number,
+): boolean {
+  if (!isAdminFeaturesInBounds(response)) return false;
+  const b = inBoundsBbox(response);
   if (
-    [b.minLon, b.minLat, b.maxLon, b.maxLat].some((value) => Number.isNaN(value))
+    b.zoom === null ||
+    b.zoom <= 13 ||
+    [b.minLon, b.minLat, b.maxLon, b.maxLat].some((value) =>
+      Number.isNaN(value),
+    )
   ) {
     return false;
   }
@@ -375,27 +363,30 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       // 멀리 떨어진 기준점으로 먼저 점프(초기 뷰가 타깃과 같아 moveend 누락되는 경우 방지).
       await jumpMap(page, ANCHOR.lon, ANCHOR.lat, ANCHOR.zoom);
 
-      // 타깃 좌표를 bbox로 감싸는 tile의 GET /v1/features를 기다린다(입력 → API 파라미터).
+      // 타깃 좌표를 bbox로 감싸는 admin item 요청을 기다린다(입력 → API 파라미터).
       const responsePromise = page.waitForResponse(
-        (response) => tileContains(response, targetLon, targetLat),
+        (response) => adminItemsContains(response, targetLon, targetLat),
         { timeout: FLOW_TIMEOUT },
       );
       await jumpMap(page, targetLon, targetLat, targetZoom);
       const response = await responsePromise;
 
-      // (1) API 파라미터: 요청 URL에 bbox 4개 + page_size(1..500)가 실리고 타깃을 bracket.
+      // (1) API 파라미터: bbox 4개 + zoom/max_items가 실리고 타깃을 bracket.
       expect(response.status()).toBe(200);
-      const requested = listBbox(response);
+      const requested = inBoundsBbox(response);
       expect(requested.minLon).toBeLessThanOrEqual(targetLon);
       expect(requested.maxLon).toBeGreaterThanOrEqual(targetLon);
       expect(requested.minLat).toBeLessThanOrEqual(targetLat);
       expect(requested.maxLat).toBeGreaterThanOrEqual(targetLat);
-      expect(requested.pageSize).not.toBeNull();
-      expect(requested.pageSize as number).toBeGreaterThan(0);
-      expect(requested.pageSize as number).toBeLessThanOrEqual(500);
+      expect(requested.zoom).not.toBeNull();
+      expect(requested.zoom as number).toBeGreaterThan(13);
+      expect(requested.maxItems).not.toBeNull();
+      expect(requested.maxItems as number).toBeGreaterThan(0);
+      expect(requested.maxItems as number).toBeLessThanOrEqual(2000);
 
       // (2) API 응답 본문 = 요청 bbox 안 feature만(서버 공간 필터 계약, ADR-012).
-      const body = (await response.json()) as FeaturesInBboxResponse;
+      const body = (await response.json()) as AdminFeaturesInBoundsResponse;
+      expect(body.data.mode).toBe("items");
       expect(Array.isArray(body.data.items)).toBe(true);
       for (const item of body.data.items) {
         if (typeof item.lon === "number" && typeof item.lat === "number") {
@@ -473,7 +464,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       // place feature가 풍부한 서울로 이동(초기 데이터 확보).
       await jumpMap(page, ANCHOR.lon, ANCHOR.lat, ANCHOR.zoom);
       const seoulLoad = page.waitForResponse(
-        (response) => tileContains(response, SEOUL.lon, SEOUL.lat),
+        (response) => adminItemsContains(response, SEOUL.lon, SEOUL.lat),
         { timeout: FLOW_TIMEOUT },
       );
       await jumpMap(page, SEOUL.lon, SEOUL.lat, SEOUL.zoom);
@@ -483,10 +474,13 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
       await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
 
-      // kind=place가 실린 GET /v1/features를 기다린다(토글 → queryKey 변경 → refetch).
+      // kind=place가 실린 admin item 요청을 기다린다(토글 → queryKey 변경 → refetch).
       const kindResponsePromise = page.waitForResponse(
         (response) =>
-          isFeaturesList(response) && listBbox(response).kinds.includes("place"),
+          isAdminFeaturesInBounds(response) &&
+          inBoundsBbox(response).zoom !== null &&
+          (inBoundsBbox(response).zoom as number) > 13 &&
+          inBoundsBbox(response).kinds.includes("place"),
         { timeout: FLOW_TIMEOUT },
       );
       await placeChip.click();
@@ -495,8 +489,13 @@ test.describe("/features live — map input round-trip (read-only)", () => {
 
       // (1) API 파라미터: 요청에 기본 weather/notice + 추가 place.
       expect(response.status()).toBe(200);
-      expect(listBbox(response).kinds).toEqual(["weather", "notice", "place"]);
-      const body = (await response.json()) as FeaturesInBboxResponse;
+      expect(inBoundsBbox(response).kinds).toEqual([
+        "weather",
+        "notice",
+        "place",
+      ]);
+      const body = (await response.json()) as AdminFeaturesInBoundsResponse;
+      expect(body.data.mode).toBe("items");
       for (const item of body.data.items) {
         expect(["weather", "notice", "place"]).toContain(item.kind);
       }
@@ -578,7 +577,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       // 타깃 좌표로 고배율(zoom 16 > clusterMaxZoom 14) 점프 → 클러스터 없이 점 마커만 렌더.
       await jumpMap(page, ANCHOR.lon, ANCHOR.lat, ANCHOR.zoom);
       const tileLoad = page.waitForResponse(
-        (response) => tileContains(response, targetLon, targetLat),
+        (response) => adminItemsContains(response, targetLon, targetLat),
         { timeout: FLOW_TIMEOUT },
       );
       await jumpMap(page, targetLon, targetLat, 16);
