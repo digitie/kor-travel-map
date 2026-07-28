@@ -156,7 +156,7 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   machine-readable artifact로 고정한다. retry로 사라지는 flake와 deterministic contract drift를
   분리하고 같은 PR의 각 후속 checkpoint가 자기 소유 실패만 줄였는지 fail-close한다.
 
-- [ ] T-VN-48B — **Feature·큐레이션·검토 mocked 계약 정렬**
+- [x] T-VN-48B — **Feature·큐레이션·검토 mocked 계약 정렬**
 
   `후보 A/B` 대 `feature A/B`, 한국어 dialog name, 실제 principal actor와 Feature/curation
   API route·payload drift를 현행 UI 계약에 맞춘다.
