@@ -25,17 +25,20 @@ add/update/reject/deactivate/delete 파괴적 UI workflow를 n150 격리 prod cl
   구 create/review/preview 접근성 이름과 상태 번역을 요구해 write 이전 또는 중간에서
   순차 실패했다. 각 실패 뒤 `finally` cleanup과 DB 상태를 확인하고 같은 case만 재개했다.
   최종 spec은 필터·정렬 확정 뒤 exact `feature_id` 목록 응답 본문을 기다리며 실제
-  add 승인→update 승인→update 거절→비활성화→delete 승인을 **2/2, 49.2초**에 통과했다.
+  add 승인→update 승인→update 거절→비활성화→delete 승인을 **2/2, 43.5초**에 통과했다.
 - **잔여물·격리**: 최신 합성 Feature는 `deleted`, `deleted_at`과 `user_deleted_at`가 모두
-  설정됐다. clone의 전체 합성 감사 이력은 deleted Feature 18건·change request 65건이지만
+  설정됐다. clone의 전체 합성 감사 이력은 deleted Feature 20건·change request 72건이지만
   non-deleted Feature와 pending request는 모두 0건이라 active 검증을 오염시키지 않는다.
   production container/DB는 변경하지 않았고 clone health는 정상이다.
 - **재사용 checkpoint**: `ktm-tvn45-db`는 head `0063_pipeline_root_id`, Feature
-  1,030,461건, POI cache target 90건이다. dump와 이 수치만 담은 redacted checkpoint를 PR
+  1,030,467건, POI cache target 90건이다. 적대 리뷰 반영 뒤 지도 상세는 인증 포함
+  **2/2, 11.1초**, 파괴적 write는 위 수치로 재검증했다. dump와 이 수치만 담은 redacted
+  checkpoint를 PR
   성공만으로 지우지 않고 머지 후 다음 task 전에 schema/fixture·파괴적 잔여물·코드/API
-  호환성·약 18GB DB의 디스크 비용을 평가한다. Playwright 인증 상태/cookie·raw trace·
+  호환성·17GB DB·가용 85GB의 디스크 비용을 평가한다. Playwright 인증 상태/cookie·raw trace·
   실데이터 screenshot·민감 로그·임시 env/session secret은 재사용 대상에서 제외하고 Live
-  종료 직후 폐기한다. 재사용/정리 결과는 다음 resume/journal에 resource 이름과 함께 기록한다.
+  종료 직후 안전하게 폐기하고 API/UI container도 제거했다. 재사용/정리 결과는 다음
+  resume/journal에 resource 이름과 함께 기록한다.
 - **문서 규율**: `agent-workflow.md`, `agent-failure-patterns.md`, `tasks.md`의 즉시 정리
   문구를 같은 post-merge 재사용 판정 규율로 통일했다. 현재 다음 Lane B 작업은
   `T-VN-46`, `T-VN-H18`은 실행 lane 밖 거버넌스 보류다.
