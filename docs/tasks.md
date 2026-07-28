@@ -547,7 +547,8 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
 
 - [ ] T-VN-38C — **bbox/detail set-based cutover**
 
-  per-row LATERAL을 weather/price summary set join으로 바꾸고 old query/index를 제거한다.
+  per-row LATERAL을 weather/price summary set join으로 바꾸고 old query를 normal path에서
+  비활성화한다. rollback shadow index는 보존해 T-VN-39 removal manifest로 넘기고,
   cardinality·freshness·EXPLAIN을 실데이터로 고정한다.
 
 ### T-VN-40 — curation write model 단일화 (Lane B)
@@ -572,8 +573,9 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
 
   보존 분류, restore/PITR 또는 journal 검증, shadow checksum, consumer-first 배포, write fence,
   순차 전환과 soak를 ADR-075 절차대로 수행한다. held component rollback 창이 닫힌 뒤
-  T-VN-33C·34C·36C·40C removal manifest의 legacy column/index/route/repository/trigger/table을
-  이 task에서만 물리 삭제한다. T-VN-32~38·40 완료 뒤 마지막이다.
+  T-VN-33C·34C·36C·38C·40C removal manifest의 legacy column/index/route/repository/trigger/table과
+  T-VN-38C의 rollback shadow index를 이 task에서만 물리 삭제한다. T-VN-32~38·40 완료 뒤
+  마지막이다.
 
 ## T-101 — Materialized View 도입 검토 (보류)
 
