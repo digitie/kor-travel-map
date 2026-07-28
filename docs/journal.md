@@ -29,11 +29,38 @@ Lane A a0=T-VN-H07A를 확인했다.
 - **live 표면 주기**: test-only OpenAPI 계약 변경으로 admin-UI 표면이 없어, 실제 live 검증은
   n150 게이트가 실제 생성 OpenAPI에 대해 계약을 실행하는 것으로 갈음(파괴적 UI e2e 해당 없음).
 
+## 2026-07-28 (codex) — T-VN-46 npm 12 clean tree 구현 checkpoint
+
+**결론**: npm 10.9.4 Arborist가 현재 플랫폼에서 제외한 optional 부모의 WASM 자식을 root에
+남기는 현상을 동일 lockfile로 재현했다. 최신 npm 12.0.1로 toolchain을 올리자 별도 direct
+dependency나 출력 필터 없이 `npm ls --all --json`의 `problems`가 0개가 됐다.
+
+- **소유 경계**: `@img/sharp-freebsd-wasm32(os=freebsd)`와
+  `@img/sharp-webcontainers-wasm32(cpu=wasm32)`가 빠진 뒤 `@img/sharp-wasm32` 계열이
+  orphan이 된다. OXC·Rolldown·Tailwind·unrs의 `cpu=wasm32` optional binding도 빠지면서
+  같은 root `@emnapi/*`, `@napi-rs/wasm-runtime`, `@tybys/wasm-util`을 orphan으로 남긴다.
+  npm 10.9.4의 `nested` install과 `npm prune`도 6개를 제거하지 못했다.
+- **해결**: root package manager와 CI 명령을 npm 12.0.1로, Node 하한을 22.22.2로 전환했다.
+  기존 exact 6-package 허용 목록은 제거하고 문제 배열이 비었는지 직접 단언한다. Sharp
+  0.35.3과 Next 16.2.12의 실제 SVG→WebP optimizer 검증은 그대로 유지한다.
+- **install script 정책**: npm 12에서 실행이 필요한 `esbuild`와 `unrs-resolver`만
+  `allowScripts`에 명시했다. `strict-allow-scripts=true`라 새 dependency script는 검토 없이
+  실행되지 않고 clean install이 실패한다. 현재 `npm install-scripts ls` 결과는 unreviewed
+  package 0개다.
+- **검증**: 지원 Node 22.22.2 격리 환경의 exact clean install에서 audit 0, npm tree
+  0 problems, ESLint 0 warnings, React Doctor 270 files/0 diagnostics, Sharp ABI,
+  admin/user OpenAPI codegen drift, 두 type-check와 production build를 통과했다. npm 12
+  package-lock 정규화 후 `--package-lock-only` 재실행 drift도 0이다.
+- **흐름 정정**: T-VN 작업에는 issue를 만들지 않으므로 #872를 `not planned`로 닫았다.
+  조기 draft PR #873도 닫고 원격 feature branch에 구현 checkpoint를 push했다. 적대 리뷰와
+  파괴적 Live·task 문서 완료 후 머지 직전에 새 PR을 연다.
+
 ## 2026-07-28 (codex) — PR #871 머지·T-VN-46 clone 재사용 판정
 
 **결론**: PR #871을 8개 CI green 뒤 merge commit `64c158c5`로 머지했다. 다음 Lane B
-`T-VN-46`용 issue #872를 만들고, 보존한 clone을 main schema에 forward upgrade해 재사용
-가능으로 판정했다.
+`T-VN-46`에 보존한 clone을 main schema로 forward upgrade해 재사용 가능으로 판정했다.
+당시 만든 issue #872는 T-VN 작업에는 issue를 만들지 않는다는 후속 지침에 따라
+`not planned`로 닫았다.
 
 - **schema 호환성**: clone `ktm-tvn45-db`를 rollback 없이
   `0063_pipeline_root_id→0064_price_series_identity→0065_curation_source_presence→

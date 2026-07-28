@@ -14,9 +14,31 @@ typed consumer contract로 남겨 #403 갱신·머지. 이어 H07D(#815) → H07
   구조가 정본. 작업 중 codex 병렬 진행분(+32 commits)을 origin/main rebase로 최신 유지.
 - **워크플로우**: PR은 머지 직전에만 열고 그 전엔 리모트 브랜치에 자주 커밋(사용자 지시).
 
+## 2026-07-28 (codex) — T-VN-46 npm optional tree 0-problem 전환
+
+**다음 한 작업**: 원격 branch `feat/t-vn-46-npm-optional-tree`의 구현 head를 적대적 리뷰하고,
+#870 이후 closed 포함 Claude Code PR을 재감사한다. 이어 재사용 DB에서 파괴적 Live UI를
+통과시킨 뒤 task 문서를 완료 처리하고 머지 직전에 PR을 연다.
+
+- 동일 lockfile clean install에서 npm 10.9.4는 Linux에서 제외된 `os=freebsd`·`cpu=wasm32`
+  optional 부모의 자식 6개를 root에 설치한 뒤 `npm ls`에서 `extraneous`로 판정했다. `nested`
+  install과 `npm prune`도 같은 6개를 남겼다.
+- 지원 Node 22.22.2에서 최신 npm 12.0.1 clean install은 direct dependency 추가나
+  `npm ls` 출력 필터 없이 `problems` **0개**다. exact npm을 12.0.1로 올리고
+  `verify:npm-tree`의 기존 허용 목록을 빈 문제 집합 단언으로 교체했다.
+- npm 12의 install-script 경계는 검토한 `esbuild`와 `unrs-resolver`만 root
+  `allowScripts`로 허용하고 `.npmrc`의 `strict-allow-scripts=true`로 신규 script를
+  fail-close한다. Node 최저 버전도 npm 12가 지원하는 22.22.2로 올렸다.
+- 격리 clean install에서 audit **0**, unreviewed install script **0**, npm tree
+  **0 problems**, ESLint·React Doctor **0 diagnostics**, Sharp SVG→WebP ABI, admin/user
+  codegen drift, 두 type-check와 production build를 모두 통과했다. npm 12가 정규화한
+  lockfile은 재실행 drift도 0이다.
+- T-VN 작업에는 issue를 만들지 않는다는 사용자 정정에 따라 #872는 `not planned`로 닫았다.
+  조기 draft PR #873도 닫았고, 원격 branch에 자주 커밋한 뒤 검증 완료 시점에 새 PR을 연다.
+
 ## 2026-07-28 (codex) — PR #871 머지 후 T-VN-46 재사용 checkpoint
 
-**다음 한 작업**: issue #872 / Lane B `T-VN-46`에서 npm 10.9.4와 최신 npm의 동일
+**다음 한 작업**: Lane B `T-VN-46`에서 npm 10.9.4와 최신 npm의 동일
 lockfile clean-install을 최소 재현하고 Sharp 0.35.3 optional graph의 Arborist 소유 경계를
 확정한다. 작업 중 main을 주기적으로 rebase하고, 적대 리뷰 단계에 #870 이후 closed 포함
 Claude Code 신규 PR을 다시 조회해 있으면 전문 서브에이전트 1명의 리뷰·수정을 이 PR에 합친다.
@@ -30,8 +52,8 @@ Claude Code 신규 PR을 다시 조회해 있으면 전문 서브에이전트 1�
 - main schema와 호환되고 T-VN-46이 frontend dependency/gate 작업이라 기존 합성 tombstone이
   검증을 오염시키지 않으며 가용 공간도 **85GB**다. 따라서 `ktm-tvn45-db`와
   1,175,043,355-byte dump/redacted checkpoint를 T-VN-46 Live에 재사용한다.
-- #870 이후 closed 포함 PR은 현재 #871뿐이며 신규 Claude Code PR은 없다. issue #872를
-  작업 전에 생성했다.
+- #870 이후 closed 포함 PR은 현재 #871뿐이며 신규 Claude Code PR은 없다. 당시 생성한
+  issue #872는 후속 사용자 정정에 따라 `not planned`로 닫았다.
 
 ## 2026-07-28 (codex) — Lane B T-VN-45 구현·파괴적 Live 완료
 
