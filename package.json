@@ -2,10 +2,10 @@
   "name": "kor-travel-map-monorepo",
   "version": "0.0.0",
   "private": true,
-  "packageManager": "npm@10.9.4",
+  "packageManager": "npm@12.0.1",
   "engines": {
-    "node": ">=22",
-    "npm": "10.9.4"
+    "node": ">=22.22.2",
+    "npm": "12.0.1"
   },
   "description": "npm workspace root for the frontend packages of kor-travel-map (debug UI + shared map-marker-react). 본 저장소의 1차 산출물은 Python 라이브러리(pyproject.toml)이며, 본 package.json은 frontend workspace 해석 전용 (ADR-025/029/043 — @kor-travel-map/map-marker-react는 모노레포 내부 share, registry 게시 X).",
   "workspaces": [
@@ -24,7 +24,7 @@
     "docker:up": "bash scripts/docker-up.sh",
     "ports:preflight": "bash scripts/preflight-ports.sh",
     "ports:stop": "bash scripts/stop-fixed-ports.sh",
-    "audit:high": "npx --yes npm@10.9.4 audit --audit-level=high",
+    "audit:high": "npx --yes npm@12.0.1 audit --audit-level=high",
     "verify:npm-tree": "node scripts/verify-npm-tree.mjs",
     "verify:frontend-eslint": "node scripts/verify-frontend-eslint-config.mjs",
     "verify:react-doctor-config": "node scripts/verify-react-doctor-config.mjs",
@@ -40,5 +40,9 @@
       "js-yaml": "4.3.0",
       "minimatch": "10.2.5"
     }
+  },
+  "allowScripts": {
+    "esbuild": true,
+    "unrs-resolver": true
   }
 }

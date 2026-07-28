@@ -242,8 +242,8 @@
   export NVM_DIR="$HOME/.nvm"
   . "$NVM_DIR/nvm.sh"
   nvm use 22.23.1
-  npx --yes npm@10.9.4 ci --workspaces --include=optional
-  npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run build
+  npx --yes npm@12.0.1 ci --workspaces --include=optional
+  npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run build
   ```
   그래도 native package가 계속 꼬이면 ignored artifact인 `node_modules/`를 WSL에서
   지우고 WSL npm으로 다시 설치한다. Windows npm으로 frontend 서버를 실행하지 않는다.

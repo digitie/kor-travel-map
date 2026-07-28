@@ -1,15 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 
-const expectedNpmVersion = "10.9.4";
-const expectedProblems = [
-  "extraneous: @emnapi/core@1.11.2",
-  "extraneous: @emnapi/runtime@1.11.2",
-  "extraneous: @emnapi/wasi-threads@1.2.2",
-  "extraneous: @img/sharp-wasm32@0.35.3",
-  "extraneous: @napi-rs/wasm-runtime@1.1.6",
-  "extraneous: @tybys/wasm-util@0.10.3",
-];
+const expectedNpmVersion = "12.0.1";
 
 const npmExecPath = process.env.npm_execpath;
 assert.ok(
@@ -49,20 +41,10 @@ assert.equal(
 );
 
 const tree = JSON.parse(result.stdout);
-const pathPrefix = ` ${process.cwd()}/node_modules/`;
-const actualProblems = (tree.problems ?? [])
-  .map((problem) => {
-    const prefixIndex = problem.indexOf(pathPrefix);
-    return prefixIndex === -1 ? problem : problem.slice(0, prefixIndex);
-  })
-  .sort();
-
 assert.deepEqual(
-  actualProblems,
-  expectedProblems,
-  "npm dependency tree 문제가 exact Sharp WASM optional 허용 목록과 다릅니다.",
+  tree.problems ?? [],
+  [],
+  "npm dependency tree에 허용되지 않은 문제가 있습니다.",
 );
 
-console.log(
-  "npm tree integrity 통과: Sharp WASM optional extraneous 6개만 exact 허용",
-);
+console.log("npm tree integrity 통과: problems 0개");
