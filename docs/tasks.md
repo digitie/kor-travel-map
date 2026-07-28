@@ -34,8 +34,8 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [ ] `T-VN-48A` → [ ] `T-VN-48B` → [ ] `T-VN-48C` →
-    [ ] `T-VN-48D`(mocked E2E drift) →
+  - b0: [x] `T-VN-48A` → [ ] `T-VN-48B` → [ ] `T-VN-48C` →
+    [ ] `T-VN-48D`(mocked E2E drift, **A→D 단일 PR**) →
     [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
     [ ] `T-VN-49D`(React 구조 debt)
   - b1: [ ] `T-VN-11A` → [ ] `T-VN-11B`(service batch) →
@@ -146,14 +146,15 @@ barrier로 직렬화한다.
 
 ### T-VN-48 — mocked Playwright drift 단계별 제거
 
-T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drift를 재현했다. 한 PR에서
-전체 contract를 동시에 바꾸지 않고 실패 목록을 고정한 뒤 기능 경계별로 줄인다.
+T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drift를 재현했다. 사용자
+지시에 따라 A→B→C→D를 **하나의 branch/PR**에서 수행하되, failure manifest를 먼저 고정하고
+기능 경계별 checkpoint commit으로 줄여 각 단계의 원인·회귀 범위를 잃지 않는다.
 
-- [ ] T-VN-48A — **실패 manifest·runner 고정**
+- [x] T-VN-48A — **실패 manifest·runner 고정**
 
   exact main SHA, spec/test title, 최초 실패 단계, request/accessible-name/actor 차이를
   machine-readable artifact로 고정한다. retry로 사라지는 flake와 deterministic contract drift를
-  분리하고 각 후속 PR이 자기 소유 실패만 줄였는지 fail-close한다.
+  분리하고 같은 PR의 각 후속 checkpoint가 자기 소유 실패만 줄였는지 fail-close한다.
 
 - [ ] T-VN-48B — **Feature·큐레이션·검토 mocked 계약 정렬**
 
