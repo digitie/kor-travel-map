@@ -1592,9 +1592,10 @@ test.describe("admin/ops pages", () => {
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
-    await expect(page.getByLabel("이전 페이지")).toHaveCount(1);
-    await expect(page.getByLabel("다음 페이지")).toHaveCount(1);
-    await expect(page.getByLabel("마지막 페이지")).toHaveCount(1);
+    // cursor 기반 목록은 상/하단에 "다음"만 노출한다.
+    await expect(page.getByLabel("이전 페이지")).toHaveCount(0);
+    await expect(page.getByLabel("다음 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("마지막 페이지")).toHaveCount(0);
   });
 
   test("/v1/admin/poi-cache-targets", async ({ page }) => {

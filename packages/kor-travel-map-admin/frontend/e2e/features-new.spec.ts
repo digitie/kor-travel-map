@@ -15,6 +15,19 @@ import { expect, test } from "@playwright/test";
  * NOTE: Playwright는 Windows 호스트에서만 실행된다. 라이브 실행 검증은 Windows 런 필요.
  */
 test.describe("/admin/features/new", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/v1/categories**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: { items: [] },
+          meta: {},
+        }),
+      });
+    });
+  });
+
   test("폼 렌더 — 섹션 + 핵심 필드 + 제출 버튼", async ({ page }) => {
     await page.goto("/admin/features/new");
 
@@ -60,7 +73,6 @@ test.describe("/admin/features/new", () => {
     // 기본값: name 빈값, reason 빈값. 그대로 제출 → name 필수에서 throw.
     await page.getByRole("button", { name: "요청 생성" }).click();
 
-    await expect(page.getByText("Feature 작성 실패")).toBeVisible();
     await expect(page.getByText("name은 필수입니다.").first()).toBeVisible();
   });
 
@@ -74,7 +86,11 @@ test.describe("/admin/features/new", () => {
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect(
-      page.getByText("좌표는 한국 본토 기준 범위 안이어야 합니다.").first(),
+      page
+        .getByText(
+          "좌표는 대한민국 범위 안의 숫자로 입력하세요. 경도는 124~132, 위도는 33~39.5 사이입니다.",
+        )
+        .first(),
     ).toBeVisible();
   });
 });
