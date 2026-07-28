@@ -153,87 +153,130 @@ let ownedContainerId;
 let ownedImageTag;
 let imageInspect;
 let activeChild;
-let cleaned = false;
+let filesystemCleaned = false;
+let cleanupPromise;
 let terminating = false;
-function cleanup() {
-  if (cleaned) return;
-  cleaned = true;
-  if (ownedContainerId) {
-    spawnSync("docker", ["rm", "-f", ownedContainerId], {
-      stdio: "ignore",
-    });
-  }
-  if (ownedImageTag) {
-    spawnSync("docker", ["image", "rm", "-f", ownedImageTag], {
-      stdio: "ignore",
-    });
-  }
+
+function cleanupFilesystem() {
+  if (filesystemCleaned) return;
+  filesystemCleaned = true;
   rmSync(runtimeDirectory, { force: true, recursive: true });
 }
+
+function runCleanupCommand(args) {
+  return new Promise((resolve) => {
+    const child = spawn("docker", args, { stdio: "ignore" });
+    const forceTimer = setTimeout(() => {
+      child.kill("SIGKILL");
+    }, 1_000);
+    child.once("error", () => {
+      clearTimeout(forceTimer);
+      resolve();
+    });
+    child.once("exit", () => {
+      clearTimeout(forceTimer);
+      resolve();
+    });
+  });
+}
+
+function cleanup() {
+  cleanupFilesystem();
+  cleanupPromise ??= (async () => {
+    await runCleanupCommand(["rm", "-f", ownedContainerName]);
+    if (ownedImageTag) {
+      await runCleanupCommand(["image", "rm", "-f", ownedImageTag]);
+    }
+  })();
+  return cleanupPromise;
+}
+
+function terminateChildGroup(child, signal) {
+  try {
+    if (process.platform === "win32") {
+      child.kill(signal);
+    } else {
+      process.kill(-child.pid, signal);
+    }
+  } catch {
+    // 이미 종료된 child/process group은 cleanup 완료로 간주한다.
+  }
+}
+
+async function handleSignal(signal, exitCode) {
+  if (terminating) return;
+  terminating = true;
+  cleanupFilesystem();
+  const child = activeChild;
+  if (child?.pid) {
+    const childExited = new Promise((resolve) => child.once("exit", resolve));
+    terminateChildGroup(child, signal);
+    const exited = await Promise.race([
+      childExited.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 750)),
+    ]);
+    if (!exited) {
+      terminateChildGroup(child, "SIGKILL");
+    }
+  }
+  await cleanup();
+  process.exit(exitCode);
+}
+
 const signalExitCodes = new Map([
   ["SIGHUP", 129],
   ["SIGINT", 130],
   ["SIGTERM", 143],
 ]);
 for (const [signal, exitCode] of signalExitCodes) {
-  process.once(signal, () => {
-    if (terminating) return;
-    terminating = true;
-    if (!activeChild?.pid) {
-      cleanup();
-      process.exit(exitCode);
-    }
-    const terminateChildGroup = (childSignal) => {
-      try {
-        if (process.platform === "win32") {
-          activeChild.kill(childSignal);
-        } else {
-          process.kill(-activeChild.pid, childSignal);
-        }
-      } catch {
-        // 이미 종료된 child/process group은 cleanup 완료로 간주한다.
-      }
-    };
-    terminateChildGroup(signal);
-    cleanup();
-    const forceTimer = setTimeout(() => {
-      terminateChildGroup("SIGKILL");
-      process.exit(exitCode);
-    }, 5_000);
-    forceTimer.unref();
-    activeChild.once("exit", () => {
-      clearTimeout(forceTimer);
-      process.exit(exitCode);
-    });
+  process.on(signal, () => {
+    void handleSignal(signal, exitCode);
   });
 }
 
 function runManagedChild(command, args, options = {}) {
   return new Promise((resolve) => {
-    activeChild = spawn(command, args, {
-      ...options,
+    const { captureOutput = false, ...spawnOptions } = options;
+    const child = spawn(command, args, {
+      ...spawnOptions,
       detached: process.platform !== "win32",
+      stdio: captureOutput ? ["ignore", "pipe", "pipe"] : spawnOptions.stdio,
     });
+    activeChild = child;
+    let stdout = "";
+    let stderr = "";
+    if (captureOutput) {
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+    }
     let settled = false;
-    activeChild.once("error", (error) => {
+    child.once("error", (error) => {
       if (settled) return;
       settled = true;
-      activeChild = undefined;
-      resolve({ error, status: 1 });
+      if (activeChild === child) activeChild = undefined;
+      resolve({ error, status: 1, stderr, stdout });
     });
-    activeChild.once("exit", (status, signal) => {
+    child.once("exit", (status, signal) => {
       if (settled) return;
       settled = true;
-      activeChild = undefined;
-      resolve({ signal, status: status ?? 1 });
+      if (activeChild === child) activeChild = undefined;
+      resolve({ signal, status: status ?? 1, stderr, stdout });
     });
   });
 }
 
-function inspectOwnedContainer() {
-  const inspectResult = spawnSync("docker", ["inspect", ownedContainerId], {
-    encoding: "utf8",
-  });
+async function inspectOwnedContainer() {
+  const inspectResult = await runManagedChild(
+    "docker",
+    ["inspect", ownedContainerId],
+    { captureOutput: true },
+  );
   let inspected;
   try {
     const parsed = JSON.parse(inspectResult.stdout);
@@ -250,6 +293,32 @@ function inspectOwnedContainer() {
   ) {
     throw new Error(
       "runner가 생성한 frontend container의 실행 identity를 확인할 수 없습니다.",
+    );
+  }
+  return inspected;
+}
+
+async function inspectBuiltImage(builtImageId) {
+  const inspectResult = await runManagedChild(
+    "docker",
+    ["image", "inspect", builtImageId],
+    { captureOutput: true },
+  );
+  let inspected;
+  try {
+    const parsed = JSON.parse(inspectResult.stdout);
+    inspected = Array.isArray(parsed) ? parsed.at(0) : undefined;
+  } catch {
+    inspected = undefined;
+  }
+  if (
+    inspectResult.status !== 0 ||
+    !inspected ||
+    inspected.Id !== builtImageId ||
+    inspected.Config?.Labels?.["org.opencontainers.image.revision"] !== revision
+  ) {
+    throw new Error(
+      "self-built frontend immutable image ID/revision label이 checkpoint와 다릅니다.",
     );
   }
   return inspected;
@@ -356,28 +425,7 @@ try {
       "빌드한 frontend image의 immutable ID를 확인할 수 없습니다.",
     );
   }
-  const imageInspectResult = spawnSync(
-    "docker",
-    ["image", "inspect", builtImageId],
-    { encoding: "utf8" },
-  );
-  try {
-    const parsed = JSON.parse(imageInspectResult.stdout);
-    imageInspect = Array.isArray(parsed) ? parsed.at(0) : undefined;
-  } catch {
-    imageInspect = undefined;
-  }
-  if (
-    imageInspectResult.status !== 0 ||
-    !imageInspect ||
-    imageInspect.Id !== builtImageId ||
-    imageInspect.Config?.Labels?.["org.opencontainers.image.revision"] !==
-      revision
-  ) {
-    throw new Error(
-      "self-built frontend immutable image ID/revision label이 checkpoint와 다릅니다.",
-    );
-  }
+  imageInspect = await inspectBuiltImage(builtImageId);
   writeFileSync(
     runtimeEnvPath,
     [
@@ -391,7 +439,7 @@ try {
     ].join("\n"),
     { encoding: "utf8", mode: 0o600 },
   );
-  const createResult = spawnSync(
+  const createResult = await runManagedChild(
     "docker",
     [
       "create",
@@ -410,8 +458,9 @@ try {
       runtimeEnvPath,
       imageInspect.Id,
     ],
-    { encoding: "utf8" },
+    { captureOutput: true },
   );
+  rmSync(runtimeEnvPath, { force: true });
   ownedContainerId = createResult.stdout?.trim();
   if (
     createResult.status !== 0 ||
@@ -420,13 +469,15 @@ try {
   ) {
     throw new Error("self-owned frontend container를 생성할 수 없습니다.");
   }
-  const startResult = spawnSync("docker", ["start", ownedContainerId], {
-    encoding: "utf8",
-  });
+  const startResult = await runManagedChild(
+    "docker",
+    ["start", ownedContainerId],
+    { captureOutput: true },
+  );
   if (startResult.status !== 0) {
     throw new Error("self-owned frontend container를 시작할 수 없습니다.");
   }
-  const containerInspect = inspectOwnedContainer();
+  const containerInspect = await inspectOwnedContainer();
   const frontendBuildInfo = await readBuildInfo(30_000);
   if (frontendBuildInfo.revision !== revision) {
     throw new Error(
@@ -493,7 +544,7 @@ try {
       "mocked E2E 실행 전후 worktree HEAD/status/source digest가 달라졌습니다.",
     );
   }
-  const postContainerInspect = inspectOwnedContainer();
+  const postContainerInspect = await inspectOwnedContainer();
   const postBuildInfo = await readBuildInfo(5_000);
   if (
     postContainerInspect.Id !== containerInspect.Id ||
@@ -514,6 +565,6 @@ try {
   console.error(error instanceof Error ? error.message : String(error));
   exitCode = 2;
 } finally {
-  cleanup();
+  await cleanup();
 }
 process.exit(exitCode);

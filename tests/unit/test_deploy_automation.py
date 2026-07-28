@@ -114,13 +114,12 @@ def test_mocked_checkpoint_runner_owns_exact_frontend_container() -> None:
     assert '"--iidfile",' in script
     assert "const result = await runManagedChild(" in script
     assert 'detached: process.platform !== "win32"' in script
-    assert "process.kill(-activeChild.pid, childSignal)" in script
-    assert "const postContainerInspect = inspectOwnedContainer()" in script
+    assert "process.kill(-child.pid, signal)" in script
+    assert "const postContainerInspect = await inspectOwnedContainer()" in script
     assert "const postBuildInfo = await readBuildInfo(5_000)" in script
-    assert 'spawnSync("docker", ["rm", "-f", ownedContainerId]' in script
-    assert (
-        'spawnSync("docker", ["image", "rm", "-f", ownedImageTag]' in script
-    )
+    assert 'runCleanupCommand(["rm", "-f", ownedContainerName])' in script
+    assert 'runCleanupCommand(["image", "rm", "-f", ownedImageTag])' in script
+    assert 'spawnSync("docker"' not in script
     assert (
         'result.status === (checkpoint === "D" ? "passed" : "failed")'
         in reporter

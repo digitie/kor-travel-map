@@ -247,9 +247,10 @@ immutable image ID에서 검증용 container를 직접 생성·기동한다. 외
 entrypoint/CMD·mount를 신뢰하지 않으며, 검증용 container는 loopback host network의
 정확한 IPv4 `127.0.0.1` `E2E_BASE_URL` port에서
 read-only·cap-drop·no-new-privileges로 실행하고 성공·실패·종료 신호에 정리한다.
-장시간 Playwright child는 별도 process group으로 비동기 실행해 parent 종료 신호를 즉시
-전파한 뒤 container와 runner별 임시 image tag, mode-600 env/build context를 정리한다.
-BuildKit layer cache는 재실행 성능을 위해 유지한다. 실행 전후 동일
+Docker build와 모든 container lifecycle, 장시간 Playwright child는 별도 process
+group의 비동기 managed child로 실행한다. parent 종료 신호가 오면 mode-600 env/build
+context를 먼저 unlink하고 child를 bounded 종료한 뒤 container와 runner별 임시 image
+tag를 정리한다. BuildKit layer cache는 재실행 성능을 위해 유지한다. 실행 전후 동일
 worktree HEAD/status/source digest와 container/image/build-info를 재검증한다. source
 digest에는 `.dockerignore`와 실제
 `NEXT_PUBLIC_*` build arg가 포함되며, empty 값의 fallback도 build wrapper와 동일하다.
