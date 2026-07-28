@@ -1217,6 +1217,13 @@ test.describe("/admin/features + feature change requests live write workflow", (
           action: "update",
           feature_id: FEATURE_ID,
           payload: {
+            address: {
+              admin: "서울특별시 중구 명동",
+              legal: "서울특별시 중구 태평로1가",
+              road: "서울특별시 중구 세종대로 110",
+              sido_code: "11",
+              sigungu_code: "11140",
+            },
             category: "01070400",
             coord: {
               lat: 37.56718,
@@ -1224,15 +1231,24 @@ test.describe("/admin/features + feature change requests live write workflow", (
             },
             detail: {
               e2e_phase: "update",
+              phone: "02-0000-0000",
+              place_kind: "place",
               run_id: RUN_ID,
             },
             marker_color: "P-02",
             name: UPDATED_NAME,
+            sido_code: "11",
+            sigungu_code: "11140",
             urls: {
               homepage: "https://example.invalid/updated",
+              source: "https://example.invalid/source",
             },
           },
           status: "pending",
+        });
+        expect(updateResponse.data.request.payload.urls).toEqual({
+          homepage: "https://example.invalid/updated",
+          source: "https://example.invalid/source",
         });
 
         await gotoChangeReviews(page);
@@ -1260,37 +1276,71 @@ test.describe("/admin/features + feature change requests live write workflow", (
 
         const adminDetail = await expectAdminFeature(page, FEATURE_ID);
         expect(adminDetail.data.feature).toMatchObject({
+          address: {
+            admin: "서울특별시 중구 명동",
+            legal: "서울특별시 중구 태평로1가",
+            road: "서울특별시 중구 세종대로 110",
+            sido_code: "11",
+            sigungu_code: "11140",
+          },
           category: "01070400",
+          detail: {
+            e2e_phase: "update",
+            phone: "02-0000-0000",
+            place_kind: "place",
+            run_id: RUN_ID,
+          },
           marker_color: "P-02",
+          marker_icon: "marker",
           name: UPDATED_NAME,
+          sido_code: "11",
+          sigungu_code: "11140",
           status: "active",
           urls: {
             homepage: "https://example.invalid/updated",
+            source: "https://example.invalid/source",
           },
         });
         expect(adminDetail.data.feature.lon).toBeCloseTo(126.97891, 5);
         expect(adminDetail.data.feature.lat).toBeCloseTo(37.56718, 5);
-        expect(adminDetail.data.feature.detail).toMatchObject({
-          e2e_phase: "update",
-          run_id: RUN_ID,
+        expect(adminDetail.data.feature.urls).toEqual({
+          homepage: "https://example.invalid/updated",
+          source: "https://example.invalid/source",
         });
 
         const publicDetail = await expectPublicFeature(page, FEATURE_ID);
         expect(publicDetail.data).toMatchObject({
+          address: {
+            admin: "서울특별시 중구 명동",
+            legal: "서울특별시 중구 태평로1가",
+            road: "서울특별시 중구 세종대로 110",
+            sido_code: "11",
+            sigungu_code: "11140",
+          },
           category: "01070400",
           detail: {
             e2e_phase: "update",
+            phone: "02-0000-0000",
+            place_kind: "place",
             run_id: RUN_ID,
           },
           marker_color: "P-02",
+          marker_icon: "marker",
           name: UPDATED_NAME,
+          sido_code: "11",
+          sigungu_code: "11140",
           status: "active",
           urls: {
             homepage: "https://example.invalid/updated",
+            source: "https://example.invalid/source",
           },
         });
         expect(publicDetail.data.lon).toBeCloseTo(126.97891, 5);
         expect(publicDetail.data.lat).toBeCloseTo(37.56718, 5);
+        expect(publicDetail.data.urls).toEqual({
+          homepage: "https://example.invalid/updated",
+          source: "https://example.invalid/source",
+        });
       });
 
       await test.step("update change request를 거절하면 실제 feature 값은 바뀌지 않는다", async () => {
