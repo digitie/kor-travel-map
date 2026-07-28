@@ -33,8 +33,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [ ] `T-VN-45`(live endpoint/cache drift) →
-    [ ] `T-VN-46`(npm optional tree) →
+  - b0: [ ] `T-VN-46`(npm optional tree) →
     [ ] `T-VN-48A` → [ ] `T-VN-48B` → [ ] `T-VN-48C` →
     [ ] `T-VN-48D`(mocked E2E drift) →
     [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
@@ -96,8 +95,11 @@ barrier로 직렬화한다.
 - **실패 지점 재개**: 대용량 migration·실데이터 clone·build·fixture·Live E2E는 안전한
   checkpoint와 exact code/data identity를 기록한다. 실패한 단계 이전 산출물의 무결성을
   증명할 수 있으면 처음부터 반복하지 않고 실패 지점부터 재개한다. 무결성을 증명할 수 없거나
-  선행 단계가 실패 원인에 영향받았을 때만 처음부터 실행하며, 보존한 격리 자원은 최종 성공 뒤
-  정리한다.
+  선행 단계가 실패 원인에 영향받았을 때만 처음부터 실행한다. 최종 성공 뒤 API/UI process는
+  정지하되 격리 DB·dump·immutable artifact는 PR 성공만으로 즉시 삭제하지 않는다. PR 머지 후
+  다음 task 착수 전에 migration head·schema/fixture 계약·파괴적 실행 잔여물·코드/API 호환성·
+  디스크 여유를 확인해 재사용 가능하면 이름·head·fixture identity와 근거를
+  `resume.md`/`journal.md`에 기록하고, 불가능할 때만 해당 격리 resource를 정확히 정리한다.
 - **cross-lane 순서 제약**: C6c pair capture와 #392는 이미 완료됐다. H07은 오래 열린
   #814/#403을 최신 main에 재배치하고 중복 assertion을 제거한 뒤 H07D→H07C 순서로 진행한다.
   H22C는 같은 curation frontend를 만지는 T-VN-48B·49B 뒤에 시작한다. T-VN-12A의 command
@@ -129,13 +131,6 @@ barrier로 직렬화한다.
     대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
 
 ## Lane B 상세 — b0 선행 하드닝
-
-- [ ] T-VN-45 — **features map 실데이터 input-roundtrip endpoint·cache 대기 drift 제거**
-
-  T-VN-42 live 중 `features-map-input-roundtrip.live.spec.ts`의 점 마커 시나리오가 UI가 이미
-  `/v1/admin/features/in-bounds`로 전환된 뒤에도 public `/v1/features` bbox 응답만 기다려 5분
-  timeout하는 drift를 확인했다. admin items/clusters 응답을 정본으로 추적하고 React Query cache hit로
-  새 HTTP 응답이 없는 경우에도 map idle+실제 marker 상태로 수렴하도록 고쳐 false-red를 제거한다.
 
 - [ ] T-VN-46 — **admin frontend npm optional tree 무결성 완결**
 

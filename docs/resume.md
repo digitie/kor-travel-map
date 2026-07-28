@@ -1,17 +1,30 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-07-28 (codex) — Lane B T-VN-45 진행
+## 2026-07-28 (codex) — Lane B T-VN-45 구현·파괴적 Live 완료
 
-**다음 한 작업**: draft PR #871에서 `/features` live spec의 admin in-bounds endpoint와
-React Query cache-hit 수렴을 완결하고, n150 격리 실데이터 파괴적 Live UI·적대적 리뷰어
-2명·전체 gate·CI green 뒤 셀프 머지한다.
+**다음 한 작업**: PR #871 exact head를 적대적 리뷰어 2명이 재검토하고 전체 gate·GitHub
+Actions green 뒤 셀프 머지한다. 머지 후 다음 Lane B task `T-VN-46` 착수 전에
+`ktm-tvn45-db`·dump·artifact의 migration/schema/fixture·파괴적 잔여물·코드/API 호환성·
+디스크 여유를 판정해 재사용 또는 정확한 정리를 기록한다.
 
-- PR #870은 merge commit `01db9cdf`로 main에 반영됐다.
-- `T-VN-45` 첫 checkpoint에서 고배율 items와 저배율 clusters 대기를 실제 UI 정본인
-  `/v1/admin/features/in-bounds`로 전환했고, 새 HTTP 응답이 없는 cache hit는 map idle과
-  실제 point marker identity로 수렴하도록 구현 중이다.
-- `T-VN-H18`은 어떤 Agent A/B 실행 lane에도 속하지 않는 거버넌스 결정 대기 보류 항목으로
-  이동했다. repo 소유자가 approval enforcement 전환 시점을 정하기 전에는 착수하지 않는다.
+- 지도 Live spec은 `/v1/admin/features/in-bounds`의 모든 요청 URL과
+  `items`/`clusters` 응답을 검증한다. cache hit는 map idle 뒤 마지막 성공 응답의 전체 point
+  `feature_id` 집합과 server cluster key/count/centroid가 실제 DOM과 exact 일치할 때만
+  통과한다. marker 식별자 누락, 취소 요청의 URL drift, 다른 feature 상세 응답, 같은 합계의
+  ID 상쇄를 모두 false-green으로 허용하지 않는다.
+- 실패했던 상세 클릭만 재개해 인증 포함 **2/2**를 통과했다. 이어 실데이터 write workflow가
+  add 승인→update 승인→update 거절→비활성화→delete 승인을 모두 수행해 인증 포함
+  **2/2, 49.2초**를 통과했다. 최신 합성 Feature는 `deleted`이며 전체 합성 감사 범위의
+  non-deleted Feature와 pending change request는 각각 **0건**이다.
+- 파괴적 Live 중 드러난 기존 spec drift도 같은 실패 지점에서 복구했다. ADR-066 이후 제거된
+  `operator` 입력, 접힌 고급 JSON 필드, 현행 create/review/preview 접근성 이름과 한국어 상태,
+  admin 목록의 exact `feature_id` 최종 응답 대기를 반영했다.
+- 재개용 clone `ktm-tvn45-db`는 migration head `0063_pipeline_root_id`, Feature
+  **1,030,461건**, POI cache target **90건**이며 health가 정상이다. API/UI process와
+  민감한 임시 env는 최종 검증 뒤 정지·폐기하되 DB·dump·검증 artifact는 머지 후 재사용 판정
+  전까지 보존한다.
+- `T-VN-H18`은 어떤 Agent A/B 실행 lane에도 속하지 않는 거버넌스 결정 대기 보류 항목이다.
+  repo 소유자가 approval enforcement 전환 시점을 정하기 전에는 착수하지 않는다.
 
 ## 2026-07-28 (codex) — PR #869 머지 후 task 전면 재감사
 
