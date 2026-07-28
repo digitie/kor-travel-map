@@ -3,6 +3,17 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-28 — PR #869 후 task·lane 전면 재감사
+
+- [x] **T-VN-REAUDIT-0728** — PR #869 merge `25e9304b` 기준으로 열린 backlog·완료 이력·
+  실코드와 Map/PinVi/docker-manager/geo의 열린 PR·이슈를 다시 대조했다. Map #814와 PinVi
+  #403의 장기 branch drift·main 중복 검사를 landing task로 분리하고, H21의 400 근인을
+  geo payload가 아니라 live credential preflight 누락으로 정정했다.
+- [x] **task 세분화·Lane A/B 재배치** — #673/#819를 실행 task로 승격하고 frontend,
+  PinVi batch/idempotency/outbox, curation data quality와 Wave 2를 독립 PR·검증 단위로
+  세분화했다. Agent A와 B는 병렬 진행하되 migration/OpenAPI/compatible-pair/Wave 2 freeze
+  barrier만 직렬화한다. 갱신된 실행 정본은 `tasks.md`의 2026-07-28 인덱스다.
+
 ## 2026-07-27 — Lane B T-VN-47 React Doctor + durable curation 완결
 
 - [x] **T-VN-47** — React Doctor full scan을 269개 파일·actionable 진단 0건으로 만들었다.

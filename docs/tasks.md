@@ -45,14 +45,14 @@ barrier로 직렬화한다.
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [ ] `T-VN-31A` → [ ] `T-VN-31B` → [ ] `T-VN-31C`
-  - Lane A: [ ] `T-VN-32A`~[ ] `T-VN-32C` →
-    [ ] `T-VN-35A`~[ ] `T-VN-35D` →
-    [ ] `T-VN-37A`~[ ] `T-VN-37C`
-  - Lane B: [ ] `T-VN-33A`~[ ] `T-VN-33C` →
-    [ ] `T-VN-38A`~[ ] `T-VN-38C` →
-    [ ] `T-VN-34A`~[ ] `T-VN-34C` →
-    [ ] `T-VN-36A`~[ ] `T-VN-36C` →
-    [ ] `T-VN-40A`~[ ] `T-VN-40C`
+  - Lane A: [ ] `T-VN-32A` → [ ] `T-VN-32B` → [ ] `T-VN-32C` →
+    [ ] `T-VN-35A` → [ ] `T-VN-35B` → [ ] `T-VN-35C` → [ ] `T-VN-35D` →
+    [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
+  - Lane B: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
+    [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
+    [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
+    [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C` →
+    [ ] `T-VN-40A` → [ ] `T-VN-40B` → [ ] `T-VN-40C`
   - 최종 단일 cutover: [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-VN-H18` — GitHub approval provenance gate(보류: GitHub 자기 PR 승인 불가와
