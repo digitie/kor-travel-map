@@ -70,9 +70,12 @@ cd /mnt/f/dev/kor-travel-map-<agent>
   `15`다. prod clone에서 operator override·최신 Feature 매칭을 의도적으로 보존할 때만
   `E2E_EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS`와
   `E2E_EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES`를 실측값으로 지정한다
-  (2026-07-27 검증 baseline `485`/`14`). override는 음이 아닌 safe integer여야 하고,
-  원천 총 15건·연결 건수와 identity 유일성·operator 상태를 별도 단언해 같은 합계의 상쇄
-  오류를 막는다.
+  (2026-07-27 검증 baseline `485`/`14`). 연결 건수가 1건 이상이면
+  `E2E_EXPECTED_BEAUTIFUL_LIGHTHOUSE_MATCHES`도 쉼표 구분
+  `source_item_key=feature_id` 목록으로 지정한다(동 baseline
+  `beautiful12=f_3117010300_p_1d6b9e79e9e1163b`). count override는 비어 있지 않은 음이 아닌
+  safe decimal integer여야 하고, 원천 총 15건·정확한 연결 identity·operator 상태를 별도
+  단언해 같은 합계의 상쇄 오류를 막는다.
 - 로컬 green을 맹신하지 말 것 — WSL venv가 누락된 `[dev]` extra를 가릴 수 있다
   ([failure-patterns §A1](./agent-failure-patterns.md)).
 
