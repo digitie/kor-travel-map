@@ -526,7 +526,7 @@ async function rejectChangeRequestByApi(
     page,
     changeRejectPath(requestId),
     {
-      body: { operator: "local-admin", reason: `${BASE_REASON} cleanup reject` },
+      body: { reason: `${BASE_REASON} cleanup reject` },
       method: "POST",
     },
   );
@@ -540,7 +540,7 @@ async function approveChangeRequestByApi(
     page,
     changeApprovePath(requestId),
     {
-      body: { operator: "local-admin", reason: `${BASE_REASON} cleanup approve` },
+      body: { reason: `${BASE_REASON} cleanup approve` },
       method: "POST",
     },
   );
@@ -574,7 +574,7 @@ async function cleanupFeatureByApi(
     page,
     adminFeaturePath(featureId),
     {
-      body: { operator: "local-admin", reason: `${BASE_REASON} cleanup delete` },
+      body: { reason: `${BASE_REASON} cleanup delete` },
       headers: { "If-Match": revision.entityTag },
       method: "DELETE",
     },
@@ -746,7 +746,6 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await expect(page.getByLabel("change action", { exact: true })).toBeVisible(T);
         await expect(page.getByLabel("change feature id", { exact: true })).toBeVisible(T);
         await expect(page.getByLabel("change reason", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change operator", { exact: true })).toBeVisible(T);
         await expect(page.getByLabel("change name", { exact: true })).toBeVisible(T);
         await expect(page.getByLabel("change category", { exact: true })).toBeVisible(T);
         await expect(page.getByLabel("change lon", { exact: true })).toBeVisible(T);
@@ -795,7 +794,6 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await page.getByLabel("marker_icon").fill("marker");
         await page.getByLabel("marker_color").fill("P-01");
         await page.getByLabel("사유", { exact: true }).fill(`${BASE_REASON} add`);
-        await page.getByLabel("운영자").fill("local-admin");
         await page.getByLabel("feature_id").fill(FEATURE_ID);
         await page.getByLabel("idempotency_key").fill(`${RUN_ID}-add`);
         await page.getByLabel("도로", { exact: true }).fill("서울특별시 중구 세종대로 110");
