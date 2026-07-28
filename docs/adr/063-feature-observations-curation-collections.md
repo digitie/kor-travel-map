@@ -61,15 +61,17 @@ payload는 별도 cursor pagination 이력 API에서 반환한다. 같은 payloa
 `feature.curation_items`는 collection의 공식 item과 기존 Feature의 선택적 연결을
 소유한다.
 
-- `UNIQUE (collection_id, external_item_id, feature_id)` active 제약
-- 원천 item 안정키, source record provenance, 순서, 표시 제목·요약
+- `UNIQUE (collection_id, external_item_id, external_component_id)` exact 제약
+- 원천 item과 component 안정키, source record provenance, 순서, 표시 제목·요약
 - 선정 상태, 관계, 재사용 정책, metadata
 - collection과 item 각각 신뢰된 admin actor의 `created_by`, `updated_by`
 - 공식 항목 자체는 항상 저장하며 기존 Feature를 확정하지 못한 경우 `feature_id`는
   null이다. 이 행은 공식 장소명과 주소 hint를 보존한다.
 
 이에 따라 같은 Feature는 서로 다른 collection에 제한 없이 포함될 수 있고, 한 공식
-선정 항목이 복합 장소라면 같은 `external_item_id`를 여러 Feature에 연결할 수 있다.
+선정 항목이 복합 장소라면 같은 `external_item_id` 아래 서로 다른
+`external_component_id`를 여러 Feature에 연결할 수 있다. Feature는 component identity가
+아니라 바뀔 수 있는 target이다.
 같은 Feature가 한 collection의 서로 다른 하위 코스에 속할 때는 코스별 원천 item
 안정키를 보존한다.
 
@@ -99,7 +101,7 @@ payload는 별도 cursor pagination 이력 API에서 반환한다. 같은 payloa
 
 - 범용 offline Feature upload와 분리한다. 큐레이션 import는 Feature를 만들거나
   위치를 수정하지 않는다.
-- CSV template에는 collection/theme/title/edition/source/item 안정키와 기존
+- CSV template에는 collection/theme/title/edition/source/item/component 안정키와 기존
   `feature_id` 또는 이름·주소 매칭 hint를 둔다. 좌표는 identity로 사용하지 않는다.
 - 매칭 우선순위는 `feature_id` 정확 일치 → 정규화 이름+주소 유일 일치다.
 - 0건 또는 2건 이상 후보는 `unmatched`/`ambiguous`로 반환하고 공식 항목은 미연결
@@ -115,10 +117,11 @@ payload는 별도 cursor pagination 이력 API에서 반환한다. 같은 payloa
   A→B 연결 변경, 연결↔미연결 변경을 함께 반영하고 `inserted`/`updated`/`removed`를
   반환한다. 같은 파일 재업로드는 세 값이 모두 0이고 관련 `updated_at`도 바꾸지 않는
   완전한 no-op이다.
-- 한 파일 안의 동일 미연결 안정키 또는 연결·미연결 혼합 identity는 commit 전에
-  거절한다. 한 공식 복합 장소를 여러 Feature에 연결한 행은 허용한다.
-- Feature 후보 해소 뒤 실제 identity도 다시 검사한다. 해소 결과가 연결·미연결로 섞이거나
-  같은 membership으로 중복되면 dry-run에 행 오류를 반환하고 commit 전체를 막는다.
+- 한 파일 안의 동일 `(collection_key, source_item_key, source_component_key)`는
+  commit 전에 거절한다. 한 공식 복합 장소의 component가 연결·미연결 상태로 섞이는 것은
+  허용한다.
+- Feature 후보 해소 뒤 실제 identity도 다시 검사한다. 같은 source item의 서로 다른
+  component가 동일 Feature를 중복 참조하면 dry-run에 행 오류를 반환하고 commit 전체를 막는다.
 - 여러 collection의 authoritative replace가 경합하지 않도록 import transaction은
   전용 advisory lock으로 직렬화한다. 대상 collection row lock은 UUID 정렬 순서로
   획득하고, 수동 item 추가·수정·보관도 해당 collection row를 먼저 잠근다. commit
@@ -188,19 +191,84 @@ record는 부모 entity의 identity를 중복 저장하지 않는다. curation l
 authoritative source 누락과 operator archive를 분리한다. CSV에서 빠진 item은 삭제하지 않고
 `source_present=false`로 보존하며 재등장 때 제공자 파생 필드만 갱신한다.
 `status`·`curation_relation`·`reuse_policy`와 archived tombstone은 operator-owned 상태다.
-`collection_id + external_item_id + feature_id` exact identity는 archived/NULL까지 포함한 DB unique로
+0065 시점의 `collection_id + external_item_id + feature_id` exact identity는
+archived/NULL까지 포함한 DB unique로
 한 행만 허용해 tombstone과 공개 active row의 공존을 원천 차단한다.
 
 전환기 `curated_features` trigger도 물리 DELETE/INSERT 대신 같은 보존 규칙을 따른다.
 legacy와 canonical 양쪽에 operator provenance를 두고, canonical 운영자 수정은 legacy 공개
 표면에도 같은 transaction에서 역동기화한다. legacy DELETE 뒤 같은 `source_record_key`가 새
 UUID로 재등장하면 기존 source-absent membership을 복원하되 archived tombstone은 보존한다.
+source record가 없는 projection도 theme/source/feature의 durable external identity를 재사용한다.
+`legacy_projection_id` deferrable FK와 partial unique가 projection과 item 관계를 명시하며,
+Feature merge로 item UUID를 분리해도 관계를 잃지 않는다.
 
 Feature merge는 source presence를 OR하고 `source_updated_at`과 `operator_updated_at`을 각각
-provider 필드와 operator override의 독립 revision으로 사용하며 tombstone을 최우선한다. merge,
-import, admin write는 모두 collection→item 잠금 순서를 지킨다. `source_present=false` 또는
-독립 operator provenance는 구 스키마가 표현할 수 없으므로 0065 downgrade는 해당 durable
-state가 있으면 `P0001`로 중단한다. 운영 중 revision write는 실제 쓰기 순서를 보존하기 위해
-`clock_timestamp()`를 사용한다. merge가 충돌 해소용으로 archive한 legacy projection은 detached
-marker로 canonical source에서 영구 분리하고, legacy admin actor는 요청 body가 아니라 인증
-principal에서만 받는다.
+provider 필드와 operator override의 독립 revision으로 사용하며 tombstone을 최우선한다.
+import는 advisory→Feature→collection→item, merge는 정렬한 master/loser
+Feature→legacy→collection→item 순서로 진행한다. legacy cross-title 조회는 target collection 뒤
+source collection parent를 잠그지 않고 item만 잠근다. `source_present=false`, 독립 operator
+provenance, non-direct legacy mapping 또는 detached marker는 구 스키마가 표현할 수 없으므로
+0065 downgrade는 해당 durable state가 있으면 `P0001`로 중단한다. 운영 중 revision write는 실제
+쓰기 순서를 보존하기 위해 `clock_timestamp()`를 사용한다.
+
+legacy collection key는 mutable `theme_slug` 대신
+`legacy:<theme UUID>:<source UUID>:<md5(title)>`를 사용한다. 동일 key group의 복수 collection은
+`:split:<collection_id>`로 operator state를 각각 보존한다. migration은 임의 admin key와 겹칠 수
+있는 staging namespace를 만들지 않고 충돌 없는 최종 key를 직접 배정한다. runtime base key가
+수동 collection에 선점되면 projection UUID별 key가 아니라 group-shared `:split:legacy` fallback을
+사용한다. 0064 slug 재사용이 탈취한 active/archived projection은 명시적
+`legacy_projection_id`로 원 theme/source에 복구한다. 반면 구 스키마에는 canonical-only item과
+원 projection 사이의 durable owner link가 없다. external identity도 여러 theme가 같은 provider
+record를 사용할 수 있어 owner 증거가 아니며 timestamp도 실제 owner 교체 시각이 아니다. 따라서
+모든 legacy-marker collection의 canonical-only item은 owner를 추정하지 않고 원 payload 그대로
+`draft/admin_only` migration quarantine에 보존한다. 이전 projection이 0065 전에 삭제된 경우도
+같은 규칙이 적용된다. `metadata.migrated_from`은 admin PATCH로 지울 수 있었으므로 migration은
+marker와 immutable `legacy:` collection key namespace의 합집합을 보수적 provenance로 사용한다.
+`quarantine:`은 과거 theme slug에서 예약되지 않았으므로 broad prefix는 제외 근거가 아니다.
+migration이 생성한 exact `legacy:quarantine:<UUID>` key와 immutable
+`created_by='migration:0065'`가 모두 일치할 때만 재격리 후보에서 제외해
+upgrade→downgrade→re-upgrade에서도 collection UUID·직접 원본 provenance·item 위치를 유지한다.
+admin PATCH가 quarantine metadata에 `migrated_from`을 추가해도 upgrade·downgrade 양쪽 stable-key
+rewrite가 같은 결합 증거를 제외해 key를 바꾸지 않는다.
+
+merge가 충돌 해소용으로 archive한 legacy projection은 detached marker로 canonical source에서
+영구 분리하고, legacy admin actor는 요청 body가 아니라 인증 principal에서만 받는다.
+trigger-wide session flag는 두지 않으며 marker 생성은 canonical UUID mirror 부재·same-theme
+master 존재·exact archive 전이를 DB가 직접 확인한 경우에만 허용한다.
+
+## 개정 (2026-07-27, T-VN-H24)
+
+0066부터 공식 source item과 펼쳐진 membership component를 분리한다. durable identity는
+`collection_id + external_item_id + external_component_id`이고 `feature_id`는 nullable·mutable
+target이다. 한 source item의 component가 연결·미연결로 섞이거나 나중에 다른 Feature로
+재연결되어도 같은 `curation_item_id`, source absence와 operator 상태·감사 이력을 유지한다.
+source에 현재 존재하는 active component 둘이 같은 non-null Feature를 참조하는 것은
+`uq_curation_items_active_source_feature` partial unique로 거부한다.
+
+CSV/API는 `source_component_key`/`external_component_id`를 명시한다. 단일 component의 기본값은
+`primary`이고 복합 공식 항목은 `component-01`처럼 source 내에서 안정된 키를 사용한다.
+0065 기존 canonical 단일 item은 `primary`, legacy projection 및 같은 source item의 다중 행은
+UUID 기반 `legacy:<UUID>`로 무손실 백필한다. 첫 authoritative reimport는 동일 source
+item·Feature target을 근거로 source에 현재 존재하거나 과거 누락된
+`legacy:<UUID>` 행 자체를 새 component key로 승계해 UUID와 operator 상태·감사 이력을
+유지한다. source에서 빠진 legacy 행은 `source_present=false`로 남으므로 새 current
+component의 Feature target을 점유하지 않는다. 전환기 `curated_features` trigger가 만드는
+신규 projection membership도 INSERT 시 projection UUID 기반 `legacy:<UUID>`를 사용해 같은 source record의
+다중 Feature를 component unique와 충돌 없이 표현한다. 0065로의 downgrade는 여러 component가 구
+feature-target identity에서
+충돌하면 mutation 전에 중단한다.
+
+operator가 보관한 `legacy:<UUID>` tombstone도 incoming component identity만 같은 행에
+승계한다. source/provider 필드와 archive/operator 상태는 바꾸지 않으며, 승계된 exact tombstone이
+같은 component의 자동 재삽입을 차단한다. 같은 source item·Feature target에 승계 가능한
+`legacy:<UUID>` 행이 둘 이상이면 임의의 UUID나 operator 이력을 선택하지 않는다. preview와
+commit은 동일한 명시적 오류로 mutation 전에 fail-close한다. 아직 commit되지 않아 row lock으로
+보이지 않는 신규 collection도 theme upsert·create·import가 같은 transaction write-boundary
+advisory lock에 먼저 진입한다. 그 안에서 여러 collection import는 key 정렬 순서로 잠근 뒤
+Feature를 잠가 theme→key 또는 key→theme 역전과 create+add 교착을 함께 막는다.
+
+Alembic은 여러 revision을 한 transaction에서 연속 실행할 수 있다. 0066은 component backfill 뒤
+`SET CONSTRAINTS ALL IMMEDIATE`로 0065의 `INITIALLY DEFERRED` FK와 sync trigger event를 먼저
+검사·소진하고 나서 `NOT NULL`·unique DDL을 수행한다. event 검증이 실패하면 같은 migration
+transaction 전체가 원자적으로 중단되며 부분 전진하지 않는다.

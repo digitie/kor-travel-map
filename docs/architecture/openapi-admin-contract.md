@@ -761,6 +761,9 @@ direct job의 `(provider,dataset_key,sync_scope)`에는 partial unique index가 
 DB에서 최종 방어한다. request JSON은 requested scope, typed job column은 effective scope다.
 명시 requested scope가 있으면 둘은 같아야 하지만 생략된 KMA target request는 typed job에
 `target_grids`를 저장할 수 있다.
+0053의 legacy backfill에서 동일 active identity가 생기면 running 하나 또는 runtime dispatch
+정렬상 queued winner 하나만 보존하고 queued loser는 감사 가능한 cancelled terminal로
+정규화한다. multiple-running과 cancellation audit marker 중복은 mutation 전에 fail-close한다.
 
 구현 상태: Alembic `0008_feature_update_requests`, `0052_pipeline_projection_access`,
 `0053_update_scope_dispatch`,
@@ -1580,6 +1583,18 @@ profile에만 둔다.
 `selection_origin`·`selected_by`·`rejected_by`는 `extra="forbid"` 검증으로 거부한다.
 status가 `curated`/`rejected`이면 같은 principal을 각각 `selected_by`/`rejected_by`에도 기록한다.
 
+### 8.4 curation component identity
+
+`CurationItemCreateRequest`/`CurationItemPatchRequest`와 admin/public item 응답은
+`external_component_id`를 사용한다. 단일 membership의 create 기본값은 `primary`다.
+CSV template·preview 응답은 대응하는 `source_component_key`를 필수 열/필드로 제공한다.
+
+durable item identity는 `collection + external_item_id + external_component_id`다.
+`feature_id`는 nullable·mutable target이므로 복합 source item의 연결·미연결 component가
+공존할 수 있고, 재연결은 같은 item UUID와 operator 상태를 유지한다. 같은 source item의
+component가 동일 non-null Feature를 중복 참조하면 preview는 행 identity 오류를 반환하고
+commit 전체를 거부한다.
+
 ## 9. Frontend stack 계약
 
 Admin frontend 표준:
@@ -1627,6 +1642,9 @@ npm run doctor
 정본 설정은 frontend root의 `doctor.config.json` 하나다.
 `scripts/verify-react-doctor-config.mjs`는 명령과 설정 전체를 exact 비교하고 저장소/frontend
 root의 shadow config, package manifest 안의 별도 설정, lint/format ignore 파일을 거부한다.
+T-VN-47 기준 구조 debt 예외는 `no-giant-component` 19개·`prefer-useReducer` 3개 exact 파일이며
+`T-VN-49`가 제거를 소유한다. transport lifecycle과 external event effect의 규칙별 false-positive
+예외를 포함해 파일·규칙 범위 추가는 verifier 갱신과 task 근거 없이는 허용하지 않는다.
 
 완료 기준:
 

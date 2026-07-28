@@ -3,6 +3,69 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-27 — Lane B T-VN-47 React Doctor + durable curation 완결
+
+- [x] **T-VN-47** — React Doctor full scan을 269개 파일·actionable 진단 0건으로 만들었다.
+  WebSocket cleanup·nested updater 부수효과·반복 helper·상태 파생·접근성 진단을 근인으로
+  정리했다. frontend root의 `doctor.config.json`과 exact verifier가 shadow config·ignore,
+  command/scope 축소와 package-level 우회를 거부한다. giant component 19개·reducer 후보 3개는
+  별도 구조 설계가 필요해 exact scoped debt `T-VN-49`로 이관했다.
+- [x] **T-VN-H13 후속 완결** — #862의 조건부 upsert를 source 누락·삭제→재등장·Feature merge까지
+  확장했다. migration 0065가 `source_present`/`source_updated_at`과
+  `operator_updated_by`/`operator_updated_at`을 분리하고 archived/NULL까지 포함한 exact identity
+  unique를 강제한다. legacy projection은 `legacy_projection_id`로 durable item과 연결하며, stable
+  collection key는 mutable slug 대신 theme/source UUID와 title hash를 사용한다. 중복 semantic
+  collection은 `:split:<collection_id>`로 보존하고 임의 admin key 충돌도 migration 양방향에서
+  덮어쓰지 않는다.
+- **과거 drift 복구**: 0064 theme slug 재사용으로 collection owner가 탈취된 active/archived
+  projection은 명시적 `legacy_projection_id`로 원 theme에 복구한다. canonical-only item은 원
+  projection durable link가 없고 external identity도 theme 간 공유될 수 있으므로 자동 owner
+  복구를 하지 않는다. upgrade 전 old projection 삭제 여부와 관계없이 모든 legacy-marker
+  collection에서 `draft/admin_only` quarantine에 보존한다. admin PATCH로 mutable marker가 지워진
+  이력도 immutable `legacy:` key namespace로 판별한다. exact `legacy:quarantine:<UUID>` key와
+  immutable migration creator가 모두 일치하는 산출물만 재격리하지 않아 정상 `quarantine:` theme
+  slug와 migration 왕복 identity를 함께 보존한다. mutable quarantine metadata에
+  `migrated_from`이 추가돼도 upgrade·downgrade key rewrite에서 같은 결합을 제외한다.
+  `source_record_key IS NULL`인 DELETE→새 UUID 재삽입도 기존 external identity와 operator
+  tombstone을 재사용한다. legacy cross-title 이동은 target collection 뒤 source parent를
+  잠그지 않고 item만 잠가 A→B/B→A 교착을 제거한다.
+- **리뷰·검증**: 사용자 지시에 따라 단독 적대 리뷰어 1명이 PR840 이후 Claude Code 작성 PR
+  #841~#845·#847~#850·#852~#857·#859~#864와 이번 exact code를 함께 감사했다. migration
+  upgrade→downgrade→re-upgrade, 수동 base/split/staging key 선점, archived owner repair,
+  canonical-only owner 증거 부재, 오래된 projection의 후속 owner 탈취, owner 간 동일 external identity,
+  upgrade 전 old projection 삭제, metadata marker 제거, 정상 `quarantine:` theme slug,
+  mutable quarantine metadata와 왕복 identity, null-source tombstone, 실제 두
+  transaction 교차 이동을 포함한 관련 unit/integration/API 144건과 외부 geo live 5건을 제외한
+  backend 전체 2,392건이 통과했다. static·frontend 전체 gate와 격리 실데이터 destructive Live UI
+  근거는 같은 날짜 `journal.md` 항목을 정본으로 한다. curation exact code `7e2920aa`의 최종
+  리뷰는 신규 P0–P2 0건·reviewer PostgreSQL 46/46이다.
+- [x] **T-VN-H23** — T-VN-47 전체 실데이터 clone에서 발견한 0053 legacy active scope 중복
+  blocker를 같은 PR에서 해결했다. 동일 scope의 queued job은 실제 dispatch 정렬로 winner 하나를
+  보존하고 나머지를 기존 오류 문맥과 winner ID가 남는 `cancelled` terminal 상태로 전환한다.
+  running 하나는 우선 보존하되 running 둘 이상 또는 cancellation audit marker가 걸린 중복은
+  mutation 전에 fail-close한다. 실데이터와 같은 queued/now/now, running+queued, multiple-running,
+  cancellation attempt/member 원자 보존과 downgrade/re-upgrade를 PostgreSQL 회귀로 고정했다.
+  같은 단독 적대 리뷰어가 cancellation audit 훼손 가능성을 찾아 보강했으며 exact code
+  `ca313d32`에서 잔여 P0–P2 0건을 확인했다.
+- [x] **T-VN-H24** — 복합 공식 source item의 durable identity를 Feature target과 분리했다.
+  `(collection_id, external_item_id, external_component_id)`가 membership을 식별하고
+  `feature_id`는 nullable·mutable target으로만 둔다. CSV/API/UI/OpenAPI에 component key를
+  전파하고 legacy UUID·operator/source/archive 이력을 첫 authoritative import에서 같은 행으로
+  승계한다. 모호한 legacy 후보와 같은 source item의 active Feature 중복은 mutation 전에
+  fail-close한다. 0064→0066 연속 업그레이드는 0065의 지연 FK·trigger event를 0066 첫 DDL 전에
+  명시적으로 검사·소진해 단일 Alembic transaction에서도 안전하게 전진한다.
+- [x] **T-VN-H26 / #868** — main에 이미 반영된 c6c canonical
+  `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` direct alias와 회귀를 재확인했다. 남은 수용 조건인 기존
+  `KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET` fallback을 추가했다. 두 값이 함께 있으면 canonical이
+  우선하며, 어느 값도 없으면 `None`, canonical로 로드된 secret에 잘못된 admin 헤더는 `403`이다.
+  사용자 지시에 따라 이 추가 작업만 적대적 리뷰 예외로 처리했다.
+
+## 2026-07-27 — Lane B T-VN-44 frontend lint·schedule recovery·가격 identity
+
+- [x] **T-VN-44 (#858)** — frontend full ESLint를 0 warning gate로 고정하고 schedule 응답 유실
+  복구, 가격 series identity `provider + price_domain + product_key`, migration 0064와 격리
+  실데이터 Live UI를 완료했다. 세부 구현·검증은 같은 날짜 `journal.md` 항목과 CHANGELOG를 따른다.
+
 ## 2026-07-27 — T-VN-H20 prod admin credential 회전 완료 (login 200 검증)
 
 - [x] **T-VN-H20** — prod admin password/hash 회전. credential-safe 스크립트(auth.ts와 동일 pbkdf2_sha256

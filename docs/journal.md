@@ -2,6 +2,91 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-07-27 (codex) — T-VN-47 React Doctor + durable curation + #868 완결
+
+**결론**: React Doctor runtime 진단을 근인으로 해소하고, #862의 조건부 curation upsert를
+source absence·operator tombstone·legacy 재삽입·Feature merge·과거 owner drift까지 포괄하는
+durable identity로 확장했다. 복합 공식 source item의 component identity와 c6c admin proxy
+canonical 환경변수 누락(#868)도 같은 PR에서 완결했다.
+
+- **React Doctor**: full scan 269개 파일에서 actionable 진단 0건. WebSocket cleanup, nested
+  updater 부수효과, 반복 helper, 파생 state와 접근성 문제를 수정했다. 정본
+  `doctor.config.json`과 verifier가 shadow config/ignore, command·scope 축소와 package-level
+  우회를 거부한다. giant component 19개·reducer 후보 3개는 `T-VN-49`로 이관했다.
+- **schema 0065**: `source_present`·`source_updated_at`과
+  `operator_updated_by`·`operator_updated_at`을 분리했다. exact
+  `(collection_id, external_item_id, feature_id) NULLS NOT DISTINCT` unique가 archived/NULL까지
+  한 행만 허용한다. `legacy_projection_id` deferrable FK/partial unique가 transition projection과
+  durable item의 관계를 UUID 우연 일치 대신 명시한다.
+- **stable identity**: collection key를 mutable slug에서
+  `legacy:<theme UUID>:<source UUID>:<md5(title)>`로 바꿨다. 같은 semantic group의 복수
+  collection은 operator state를 합치지 않고 `:split:<collection_id>`로 보존한다. admin key는
+  임의 문자열이므로 staging namespace를 예약하지 않는다. migration transaction에서 unique
+  constraint를 잠시 제거하고 수동 base/split 충돌을 피해 최종 key를 직접 배정한 뒤 즉시 복원한다.
+- **과거 상태 복구**: 0064 slug rename/reuse가 collection owner를 바꾼 경우 active/archived
+  projection은 명시적 `legacy_projection_id`로 각 owner collection에 옮긴다. canonical-only item은
+  원 projection durable link가 없고 external identity도 theme 간 공유될 수 있으므로 exact pair처럼
+  보여도 자동 owner 복구를 하지 않는다. 모든 legacy-marker collection에서 payload를 유지한 채
+  `draft/admin_only` migration quarantine으로 이동한다. upgrade 전에 old projection이 삭제돼
+  mismatch 증거가 사라진 경우도 같다. archived tombstone projection도 collection owner를 반드시
+  복구해 잘못된 public theme 노출과 stable lookup 우회를 차단한다. admin whole-object PATCH로
+  mutable metadata marker가 지워진 이력은 immutable `legacy:` key namespace를 함께 검사한다.
+  `quarantine:`은 과거 theme slug에서 예약되지 않았으므로 broad prefix로 제외하지 않는다.
+  exact `legacy:quarantine:<UUID>` key와 immutable `created_by='migration:0065'` 결합만
+  재격리하지 않는다. quarantine metadata에 admin PATCH로 `migrated_from`을 추가한 경우도
+  upgrade·downgrade key rewrite에서 같은 결합을 제외해 migration 왕복 UUID·직접 원본
+  provenance·item 위치가 고정된다.
+- **재등장·동시성**: source record가 없는 legacy도 theme/source/feature의 durable item에서
+  external identity를 재사용하므로 DELETE→새 UUID·title 변경 뒤 tombstone이 되살아나지 않는다.
+  cross-title 이동의 broad identity 조회는 `FOR UPDATE OF item`만 사용한다. 반대 target
+  collection을 각각 선점한 두 transaction의 A→B/B→A 실제 회귀가 deadlock 없이 완료된다.
+- **0053 실데이터 blocker**: 전체 clone migration에서
+  `python-kma-api / kma_ultra_short_nowcast / target_grids` legacy queued job 3건이 같은
+  canonical scope로 합쳐져 0053이 중단되는 문제를 발견해 `T-VN-H23`으로 등록하고 같은 PR에서
+  해결했다. access-exclusive lock 안에서 실제 dispatch 정렬로 queued winner 하나를 보존하고
+  loser는 기존 오류 문맥과 winner ID를 남긴 `cancelled` terminal로 전환한다. running 하나는
+  우선 보존하며 running 둘 이상 또는 cancellation attempt/member marker가 걸린 중복은 어떤
+  mutation도 하기 전에 fail-close한다.
+- **0066 component identity**: `collection + external_item_id + external_component_id`를
+  membership 정본으로 두고 nullable·mutable `feature_id`를 target으로 분리했다.
+  CSV/API/UI/OpenAPI가 source component key를 명시하며, 첫 authoritative import는 정확한
+  legacy source item·Feature 후보의 UUID와 operator/source/archive 이력을 같은 행으로 승계한다.
+  모호한 후보와 동일 source item의 active Feature 중복은 mutation 전에 fail-close한다.
+  0064→0066 연속 upgrade는 0065가 남긴 지연 FK·sync trigger event를 0066 backfill 직후
+  `SET CONSTRAINTS ALL IMMEDIATE`로 검사·소진한 뒤 DDL을 수행한다.
+- **#868 / T-VN-H26**: main에 이미 존재한 c6c 정본
+  `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` direct alias와 canonical-only 회귀를 재확인했다. 남은
+  수용 조건인 `KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET` fallback을 추가하고 canonical-only,
+  legacy-only, 미설정, 둘 다 설정한 우선순위와 잘못된 proxy header `403`을 고정했다.
+  사용자 지시에 따라 이 추가 작업만 적대적 리뷰 예외로 처리했다.
+- **Live 재개 규율**: 첫 실데이터 clone은 0036→0066 migration과 H23 검증을 통과한 뒤
+  현재 DB에 없는 stale palace Feature를 고정 seed하다 실패했다. 당시 하네스가 실패 시 clone과
+  dump를 모두 정리해 seed 단계 재개가 불가능했다. 이후 하네스는 실패 시 격리 clone을 보존하고
+  최종 성공 시에만 삭제하도록 바꿨다. 공용 runbook/tasks에는 exact SHA·migration head·fixture
+  identity checkpoint를 남기고 무결성이 증명되면 실패 지점부터 재개하는 규율을 추가했다.
+- **리뷰**: 사용자 지시에 따라 적대 리뷰어는 1명만 운용했다. 단독 전문 리뷰어가 PR840 이후
+  Claude Code 작성 PR #841~#845·#847~#850·#852~#857·#859~#864와 이번 exact code를 함께
+  감사했다. 발견한 archived owner repair, canonical-only owner 증거 부재, null-source tombstone,
+  cross-title deadlock, upgrade/downgrade arbitrary key collision과 오래된 projection의 후속 owner
+  탈취, old/current owner의 동일 external identity 충돌, upgrade 전 old projection 삭제와 metadata
+  marker 제거, 정상 `quarantine:` theme slug, mutable quarantine metadata와 왕복 누적을 코드와
+  실 PostgreSQL 회귀에 모두 반영했다. curation exact code `7e2920aa`에서 신규 P0–P2 0건과
+  reviewer PostgreSQL 46/46을 확인했다. 같은 리뷰어가 H23의 cancellation audit 훼손 가능성을
+  찾아 원자 fail-close와 회귀를 추가했고, exact code `ca313d32`에서 최종 잔여 P0–P2 0건을
+  확인했다. 0066 연속 transaction 보강은 exact code `baf40a04`에서 다시 검토해 P0–P2 0건이며,
+  #868 변경은 명시적으로 검토 범위에서 제외했다.
+- **검증**: 관련 unit/integration/API 집중 묶음 144/144, reviewer PostgreSQL 46/46,
+  외부 geo live 5건을 제외한 최종 backend 전체 **2,405건**을 통과했다. H23 migration 5/5와 관련
+  migration/repository 64/64도 통과했다. ruff, main/API/Dagster mypy
+  strict(116/56/23), import 계약 4건, OpenAPI drift가 모두 green이다. frontend는 root verifier,
+  생성 type drift, ESLint, type-check, React Doctor 269파일·진단 0건, Vitest 29파일·229건,
+  production build 31 route를 통과했다. #868 API auth는 84/84다. R1 격리 실데이터
+  destructive Live UI는 첫 clone의 0036→0066 연속 migration과 H23 reconcile을 통과했고,
+  stale Feature 고정 seed를 현재 존재하는 여수 복합 항목으로 교체한 최종 재실행이 진행 중이다.
+  최종 수치는 후속 checkpoint 커밋으로 이 항목에 추가한다. 실 `kor-travel-geo` reverse
+  400으로 분리되는 외부 계약 5건은
+  `T-VN-H21`, quarantine admin 재분류는 `T-VN-H22`, React 구조 debt는 `T-VN-49`로 추적한다.
+
 ## 2026-07-27 (claude) — T-VN-H20 prod admin credential 회전 완료 (인시던트+복구)
 
 **결론**: prod admin password/hash 회전을 credential-safe로 실행·검증(새 pw login 200). 회전 중

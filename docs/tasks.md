@@ -14,21 +14,21 @@
 > 2026-07-26 섹션. 감사 근거는 각 완료 항목에 기록. 추적 제외 결정(T-229-buildx,
 > T-AUDIT-0616 F-01 옵션 A — ADR-058 옵션 B 채택)은 `journal.md` 2026-06-29 결정 그대로 유지.
 
-**Lane A (Claude Code)** — 순차 실행. 규율: 코드 변경 시 적대 리뷰어 2명 + n150 파괴적
+**Lane A (Claude Code)** — 순차 실행. 규율: 코드 변경 시 적대 리뷰어 1명 + n150 파괴적
 live E2E(실데이터) 후 PR·CI green·머지. Lane A 항목은 잔여가 실행 위주라 하위 상세 섹션
 없이 **인덱스 상주가 정본**(tasks-rule §5의 "상세 위치 하나"를 인덱스로 충족).
 
-**Lane B (codex)** — 병렬 wide lane. 규율: 각 코드 PR은 테스트 전 적대 리뷰어 2명 반영 후
+**Lane B (codex)** — 병렬 wide lane. 규율: 각 코드 PR은 테스트 전 적대 리뷰어 1명 반영 후
 n150 실데이터 파괴적 Live UI E2E를 통과한다.
 
-- b0 (선행 하드닝, 순차): [ ] `T-VN-44`(frontend lint baseline) →
-  [ ] `T-VN-47`(React Doctor) →
-  [ ] `T-VN-45`(live endpoint·cache drift) → [ ] `T-VN-46`(npm optional tree) →
-  [ ] `T-VN-48`(mocked E2E drift)
-- b4 (열린 이슈·운영 버그 하드닝, 2026-07-27 추가): [x] `T-VN-H13`(#699→#862) →
-  [x] `T-VN-H14`(#700→#863) → [x] `T-VN-H15`(#805→#864) →
-  [x] `T-VN-H20`(prod admin credential 회전 완료·login 200 검증) →
-  [ ] `T-VN-H18`(GitHub approval gate — **보류: governance 결정**)
+- b0 (선행 하드닝, 순차): [ ] `T-VN-45`(live endpoint·cache drift) →
+  [ ] `T-VN-46`(npm optional tree) → [ ] `T-VN-48`(mocked E2E drift) →
+  [ ] `T-VN-49`(React maintainability debt)
+- b4 (열린 이슈·운영 버그 하드닝, 2026-07-27 추가):
+  [ ] `T-VN-H18`(GitHub approval gate — **보류: governance 결정**) →
+  [ ] `T-VN-H21`(`kor-travel-geo` reverse live 계약 drift) →
+  [ ] `T-VN-H22`(0065 curation quarantine 재분류) →
+  [ ] `T-VN-H25`(공식 curation stale Feature reference 재해소)
   (상세는 아래 b4 섹션)
 - b1 (PinVi 결합, 순차): [ ] `T-VN-11` → [ ] `T-VN-12` → [ ] `T-VN-16` →
   [ ] `T-VN-41`
@@ -42,20 +42,25 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
 
 - base는 **main**(`integration/t-vn`은 PR #790 합류로 폐지). 시작·PR 직전·머지 직후
   `origin/main` rebase. PR 하나는 task 하나만 소유.
-- **Lane A**: 각 코드 task는 적대적 리뷰어 **2명** 반영 후 n150 **파괴적 live E2E**
+- **Lane A**: 각 코드 task는 적대적 리뷰어 **1명** 반영 후 n150 **파괴적 live E2E**
   (실데이터)로 검증하고 PR·CI green·머지. 작업 중 발견 항목은 tasks.md에 즉시 추가.
-- **Lane B**: 각 코드 task는 적대적 리뷰어 **2명** 반영 후 n150 **실데이터 파괴적 Live UI
+- **Lane B**: 각 코드 task는 적대적 리뷰어 **1명** 반영 후 n150 **실데이터 파괴적 Live UI
   E2E**를 통과하고 PR·CI green·머지한다. task 완료 시 상대 lane 2일치 PR 적대 리뷰 관행 유지.
 - **우선순위(서비스 전 단계 — 사용자 지시 2026-07-26)**: **정확성·보안 최우선은 불변**
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(현 head `0064_price_series_identity`). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(현 head `0066_curation_component_identity`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다.
 - 문서 전용·rebase-only·기계적 변경(변수명·import 정렬)은 적대 재리뷰 면제.
 - pytest와 Playwright를 포함한 모든 검증은 n150 WSL SSH에서 실행한다. mocked e2e도 n150
   Linux가 정본이며, n150에서 실행할 수 없는 브라우저 제약이 확인될 때만 Windows를 fallback으로
   사용한다. live e2e는 항상 n150 파괴적 lane으로 실행한다.
+- **실패 지점 재개**: 대용량 migration·실데이터 clone·build·fixture·Live E2E는 안전한
+  checkpoint와 exact code/data identity를 기록한다. 실패한 단계 이전 산출물의 무결성을
+  증명할 수 있으면 처음부터 반복하지 않고 실패 지점부터 재개한다. 무결성을 증명할 수 없거나
+  선행 단계가 실패 원인에 영향받았을 때만 처음부터 실행하며, 보존한 격리 자원은 최종 성공 뒤
+  정리한다.
 - **cross-lane 순서 제약**: `T-VN-H07C`(manifest v5)는 Lane A의 C6c pair capture·#392 close
   **이후** 착수(같은 docker-manager pair-capture 도구·ADR-076 정본을 두 lane이 동시에 만지는
   충돌 방지). 그 전까지 b2는 #814/pinvi#403 머지와 H07D를 진행한다.
@@ -81,30 +86,6 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
 
 ## Lane B 상세 — b0 선행 하드닝
 
-- [ ] T-VN-44 — **admin frontend full ESLint baseline green**
-
-  T-VN-43에서 modern React-X/React-DOM 권장 규칙을 직접 구성한 뒤 `npm run lint`가 보고하는
-  1 error/30 warnings를 근인별로 제거한다. canonical React Hooks와 겹치는 분석기는 중복 실행하지
-  않는다. `schedule-panel.tsx` recovery dialog의 effect 내부 동기 `setEditing(null)`은 mutation
-  경계에서 dialog를 닫고 frozen claim을 파생하는 구조로 바꾼다. unused·hook dependency·key 경고는
-  suppression 없이 해소한다. TanStack `useReactTable`의 compiler 비호환 경계만 정확한 단일 파일
-  allowlist와 `"use no memo"`로 고정하고, inline disable·범위 확대·호출 수 drift를 verifier가
-  fail-close한다. Claude Code PR #841~#857 후속 감사에서 확인한 price identity 누락도 함께
-  바로잡는다. DB/API/map/chart의 가격 series를 `provider + price_domain + product_key`로 통일하고,
-  0064 online index 교체·ADR-078·OpenAPI를 같은 변경으로 맞춘다. full lint 0 problem과
-  `--max-warnings 0`, price current/history EXPLAIN, public/admin bbox 두 SQL 경로를 CI 회귀 게이트로
-  둔다. backend/migration 확장 뒤에는 선행 UI-only live 근거를 재사용하지 않고 R1 격리 DB/API/UI
-  실데이터 Live E2E를 다시 실행한다. PR CI green·실제 GitHub approval·main 머지 전까지 열린다.
-
-- [ ] T-VN-47 — **admin frontend React Doctor 진단 근인 해소**
-
-  T-VN-43에서 React Doctor 0.9.1로 갱신한 full scan은 262개 파일에서 78건(오류 9, 경고 69)을
-  보고한다. WebSocket effect cleanup 3건과 nested state updater side effect 5건은 실제 lifecycle·
-  purity 위반 여부를 재현해 근인으로 해소하고, GET proxy의 `Headers.set()` 보안 진단은 요청 부수효과가
-  아닌 응답 구성임을 코드 흐름·upstream rule과 대조해 오탐이면 좁은 근거 기반 설정으로 표현한다.
-  성능·접근성·유지보수 경고도 generated UI 여부와 runtime 도달성을 분류하되 blanket suppression 없이
-  full scan green 또는 명시적 검증 예외만 허용하며, CI 회귀 게이트를 추가한다.
-
 - [ ] T-VN-45 — **features map 실데이터 input-roundtrip endpoint·cache 대기 drift 제거**
 
   T-VN-42 live 중 `features-map-input-roundtrip.live.spec.ts`의 점 마커 시나리오가 UI가 이미
@@ -128,55 +109,60 @@ n150 실데이터 파괴적 Live UI E2E를 통과한다.
   main 기준으로 실패 집합을 freeze하고 accessible-name/actor/API route 계약을 현재 UI와 맞춘 뒤,
   전체 suite를 Linux C7 image·workers=1/병렬 모드 모두 green으로 만든다.
 
+- [ ] T-VN-49 — **React Doctor scoped maintainability debt 제거**
+
+  T-VN-47에서 runtime correctness 진단은 근인 수정했지만, 기존 giant component 19개와
+  다중 state가 얽힌 component 3개는 기능별 분해·reducer 상태기계 전환이 별도 설계를 요구해
+  exact 파일 예외로 격리했다. `doctor.config.json`의 `no-giant-component` 19개와
+  `prefer-useReducer` 3개 예외를 실제 책임 경계·상태 전이 기준으로 제거하고 verifier의 exact
+  allowlist를 0개로 축소한다. `live.ts` transport lifecycle과 datasets external event effect의
+  규칙별 최소 예외는 false-positive 재현이 유지되는 동안 본 task 범위에서 제외한다.
+
 
 ## Lane B 상세 — b4 열린 이슈 버그·하드닝 (2026-07-27 추가)
 
 > 2026-07-27 open-PR·이슈 전수 확인에서 main에 잔존하는 미수정 버그/하드닝을 백로그화.
 > 각 항목은 GitHub 이슈에 tasks.md 백로그 링크를 함께 기록한다.
 
-- [x] T-VN-H13 — **curation upsert ON CONFLICT 조건부 덮어쓰기** (#699 → PR #862 merged)
-
-  `curation_repo.py`의 ON CONFLICT가 `status`/`curation_relation`/`reuse_policy = EXCLUDED.*`를
-  무조건 덮어써, 운영자가 조정한 상태를 재수집이 되돌린다. 조건부 갱신(제공자 파생 필드만, 운영자
-  override 보존) 또는 명시적 병합 규칙으로 재설계하고 회귀 테스트를 둔다.
-
-- [x] T-VN-H14 — **KREX snapshot set-mismatch retry 상한** (#700 → PR #863 merged)
-
-  `provider_fetchers.py` KREX가 snapshot set 불일치에서 retry cap 없이 `RuntimeError`를 raise한다.
-  bounded retry + 명확한 typed 실패로 전환해 일시 불일치가 파이프라인을 중단시키지 않게 한다.
-
-- [x] T-VN-H15 — **c7 attestation IPv6 public origin 정규화** (#805 → PR #864 merged)
-
-  `scripts/lib/c7_prod_attestation.py:_public_origin`가 `f"{host}{port}"`로 IPv6 bracket 복원/zone-id
-  거부를 안 한다. IPv6 host bracket 정규화 + zone-id 거부로 origin 계약을 정확화(이슈 자체가 C7
-  blocker 아닌 후속 하드닝으로 명시).
-
-- [x] T-VN-H20 — **prod admin credential 정본 복구·회전** — **완료(2026-07-27)**: credential-safe
-  스크립트로 새 강한 password/pbkdf2_sha256 hash 생성(auth.ts 동일 파생, 평문→gitignored doc·hash→repo
-  밖, 값 비노출), prod `.env` UI hash를 base-compose recreate(R2, UI만 --no-deps --force-recreate)로 회전,
-  login 200(새 pw)/401(오키)·배포 hash 87자 검증. **주의**: 최초 회전 시 hash의 `$`를 docker-compose가
-  interpolation해 hash 손상(배포 20자)→admin UI 일시 잠김→`$`→`$$` escape로 재작성·복구(diag: .env 87 vs
-  container 20 MISMATCH로 규명, 매 단계 .env 백업). 잔여(사용자): local doc stale 섹션 삭제, session secret
-  미회전(기존 세션 만료까지 유효), n150 .env 백업 정리.
-
-  T-VN-44 live preflight에서 gitignored `docs/prod-access.local.md`의 admin password가 현재 prod UI
-  `KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH`와 불일치함을 PBKDF2 직접 대조로 확인했다. 서비스 UI를
-  변경하지 않고 branch 격리 UI에 run-unique auth를 주입해 당일 live는 완료했다. 후속으로 강한 새
-  password/hash를 생성해 R2의 ktdctl/base-compose 경계로 prod UI만 회전하고, 세 agent worktree의
-  local-only 정본을 동기화한다. 배포된 UI에서 login POST 200 + Set-Cookie와 hash env 길이, 기존 세션
-  폐기를 확인하며 비밀 평문·hash는 tracked 파일이나 PR/로그에 남기지 않는다.
-
 - [ ] T-VN-H18 — **GitHub 실제 approval provenance gate 강제** — **보류(governance 결정, 2026-07-27)**:
-  approval 필수화는 이후 모든 PR(진행 중 세션 포함)의 self-merge를 즉시 차단하므로, repo 소유자가
-  워크플로우 전환 시점을 정해 착수한다. 현황: main branch protection 없음 확인, gh admin 권한 있음.
+  approval 필수화는 이후 모든 PR의 merge 경로를 바꾸므로 repo 소유자가 워크플로우 전환 시점을
+  정해 착수한다. 현황: main branch protection 없음 확인, gh admin 권한 있음.
   구현 옵션 = branch protection(approval 1·last-push-approval·dismiss-stale·CI checks required) 또는
-  merge-전 CI verifier(head SHA APPROVED≥1, bot/self 제외 + 회귀 테스트).
+  merge 전 CI verifier(head SHA APPROVED≥1 + 회귀 테스트).
 
-  Claude Code가 작성한 PR #841~#845·#847~#850·#852~#857을 전문 적대 감사한 결과 15건 모두
+  Claude Code가 작성한 PR #841~#845·#847~#850·#852~#857·#859~#864를 전문 적대 감사한 결과 21건 모두
   GitHub `reviews: []` 상태로 머지돼 AGENTS의 "1 review approval" 계약을 충족하지 못했다. 과거
   approval provenance는 복구할 수 없으므로 후속 PR부터 branch protection 또는 merge 전 verifier가
-  최신 head SHA에 대한 `APPROVED` review 1건 이상을 강제하도록 한다. bot/self-review를 실제 독립
-  approval로 오인하지 않고, required check·관리자 우회 경로까지 회귀 테스트한다.
+  최신 head SHA에 대한 `APPROVED` review 1건 이상을 강제하도록 한다. 사용자 지시에 따라 self-review도
+  GitHub가 `APPROVED`로 기록하면 유효하게 인정하되, 일반 comment나 bot status를 approval로 오인하지
+  않고 required check·관리자 우회 경로까지 회귀 테스트한다.
+
+- [ ] T-VN-H21 — **`kor-travel-geo` real reverse-geocoder 계약 drift 제거**
+
+  T-VN-47 n150 전체 pytest에서 `tests/integration/test_dedup_with_kraddr_geo_live.py` 5건이 현재
+  실서비스 `http://127.0.0.1:12501/v2/reverse`의 400 응답으로 일괄 실패했다. 요청 payload와 배포된
+  `kor-travel-geo` OpenAPI를 대조해 어느 저장소의 계약 drift인지 확정하고 authoritative 저장소에서
+  수정한다. 정상 좌표 양성 응답·잘못된 좌표 음성 응답과 map dedup 5건을 실서비스 경계에서 고정하며
+  임시 wrapper·fallback은 만들지 않는다.
+
+- [ ] T-VN-H22 — **0065 curation owner quarantine 재분류 workflow**
+
+  migration 0065는 legacy schema에 원 projection durable link가 없는 canonical-only item을
+  external identity나 timestamp로 추정하지 않고 payload 그대로 `draft/admin_only` quarantine
+  collection에 보존한다. Admin API/UI에서 원본 collection·후보 theme/source와 격리 근거를 조회하고,
+  운영자가 target collection으로 item을 원자적으로 이동하거나 별도 collection으로 확정하는
+  reclassification command를 제공한다. parent collection→item lock, exact identity conflict preview,
+  actor/revision 감사와 빈 quarantine 정리를 한 transaction에서 보장하며 자동 추정·wrapper는 금지한다.
+
+- [ ] T-VN-H25 — **공식 curation stale Feature reference 재해소**
+
+  T-VN-47 격리 실데이터 clone에서 공식 CSV의 고유 `feature_id` 158개 중 54개가 현재
+  `feature.features`에 존재하지 않음을 확인했다. H24가 이 행을 stable component 기반 미연결
+  membership으로 무손실 보존하므로 추정 매칭으로 PR을 막지는 않는다. 후속에서 현재 provider
+  provenance·이름·주소와 Feature lifecycle/merge history를 대조해 high-confidence target만
+  `feature_id`를 갱신하고, 불확실한 component는 미연결 상태와 근거를 유지한다. 5개 공식 CSV의
+  linked/unresolved manifest 수치와 실데이터 preview를 동일 시점 기준으로 재산출하며 좌표
+  근접만으로 자동 연결하거나 일회성 wrapper를 만들지 않는다.
 
 ## 이슈 종결 추적
 

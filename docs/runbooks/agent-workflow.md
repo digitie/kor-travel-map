@@ -61,6 +61,11 @@ cd /mnt/f/dev/kor-travel-map-<agent>
 - **Playwright e2e**는 WSL에서 실행하지 않는다. n150 Linux에서 우선 실행하고, n150에서
   실행할 수 없을 때만 Windows host Chromium fallback을 사용한다. fallback 때도 서버
   (backend `:12701` + frontend `:12705`)는 WSL에서 실행한다. `docs/dev-environment.md` §8.1.
+- 대용량 migration·실데이터 clone·image build·fixture 준비·Live E2E는 단계별 checkpoint,
+  exact code SHA, DB migration head와 fixture identity를 로그에 남긴다. 실패 시 선행 산출물의
+  무결성을 확인할 수 있으면 실패 지점부터 재개한다. 재사용 상태를 증명할 수 없거나 수정이
+  선행 단계 결과를 바꾸는 경우에만 처음부터 다시 실행한다. 재개용 격리 DB·artifact는 최종
+  성공 뒤 정리한다([failure-patterns §F12](./agent-failure-patterns.md)).
 - 로컬 green을 맹신하지 말 것 — WSL venv가 누락된 `[dev]` extra를 가릴 수 있다
   ([failure-patterns §A1](./agent-failure-patterns.md)).
 
@@ -112,6 +117,7 @@ git -C <worktree> push origin sandbox/<agent>
 - [ ] feature 브랜치(`sandbox/*` 아님)에서 작업
 - [ ] 4 게이트 WSL에서 실제 실행, 전부 green (DTO/admin/frontend 변경이면 OpenAPI/frontend도)
 - [ ] Playwright e2e는 WSL이 아니라 n150에서 실행(불가 시 Windows fallback 사유 기록)
+- [ ] 장시간 Live/migration 실패 시 checkpoint 무결성 확인 후 가능한 실패 지점부터 재개
 - [ ] 결정·기록 5종 중 관련 문서 갱신 (CHANGELOG는 사용자 가시 변경 시)
 - [ ] 무관 파일(claude.json 등) 스테이징 제외
 - [ ] PR 본문에 실측 게이트 수치
