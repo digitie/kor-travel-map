@@ -16,6 +16,9 @@ const c7RawOutputDir = path.join(
 const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const C7_READ_AUTH_SPEC = "ops-c7-read-auth.live.spec";
+const ISOLATED_EVIDENCE_ENV = "E2E_ISOLATED_LIVE_EVIDENCE";
+const isolatedEvidenceRaw = process.env[ISOLATED_EVIDENCE_ENV];
+const isolatedEvidence = isolatedEvidenceRaw === "1";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -87,6 +90,16 @@ function isLocalHost(hostname: string): boolean {
       "[playwright.live] E2E_BASE_URL이 유효한 URL이 아닙니다 (value redacted)",
     );
   }
+  if (isolatedEvidenceRaw !== undefined && isolatedEvidenceRaw !== "1") {
+    throw new Error(
+      `[playwright.live] ${ISOLATED_EVIDENCE_ENV}=1만 허용합니다 (value redacted)`,
+    );
+  }
+  if (isolatedEvidence && !isLocalHost(parsed.hostname)) {
+    throw new Error(
+      `[playwright.live] ${ISOLATED_EVIDENCE_ENV}=1은 로컬 격리 대상만 허용합니다`,
+    );
+  }
   if (!isLocalHost(parsed.hostname) && process.env.E2E_LIVE_ALLOW_PROD !== "1") {
     throw new Error(
       "[playwright.live] E2E_BASE_URL이 비-로컬(prod 등)입니다 (value redacted). " +
@@ -119,6 +132,8 @@ function isLocalHost(hostname: string): boolean {
     }
   }
 })();
+
+const redactedEvidence = shouldAssertC7OriginGuard() || isolatedEvidence;
 
 /**
  * Playwright e2e — **LIVE(비-mock) 시나리오 전용** config (`e2e/live/**`).
@@ -158,7 +173,7 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 15_000 },
   // C7의 raw attachment/error output은 evidence bind 밖 container tmpfs에만 둔다.
-  outputDir: shouldAssertC7OriginGuard()
+  outputDir: redactedEvidence
     ? c7RawOutputDir
     : path.join(artifactRoot, "test-results"),
   fullyParallel: true,
@@ -167,7 +182,7 @@ export default defineConfig({
   workers: liveWorkers(),
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: shouldAssertC7OriginGuard()
+  reporter: redactedEvidence
     ? [["./e2e/c7-redacted-reporter.ts", { outputFolder: artifactRoot }]]
     : [
         ["list"],
@@ -189,9 +204,9 @@ export default defineConfig({
     actionTimeout: 60_000,
     navigationTimeout: 60_000,
     // C7 evidence에는 session cookie가 포함될 수 있는 trace ZIP을 남기지 않는다.
-    trace: shouldAssertC7OriginGuard() ? "off" : "on-first-retry",
+    trace: redactedEvidence ? "off" : "on-first-retry",
     // C7 evidence는 UI 운영 데이터가 픽셀에 남을 수 있는 screenshot도 생성하지 않는다.
-    screenshot: shouldAssertC7OriginGuard() ? "off" : "only-on-failure",
+    screenshot: redactedEvidence ? "off" : "only-on-failure",
   },
   projects: [
     // #520 인증 게이트 대응: chromium 전에 로그인 세션을 1회 만들어 STORAGE_STATE에 저장.
