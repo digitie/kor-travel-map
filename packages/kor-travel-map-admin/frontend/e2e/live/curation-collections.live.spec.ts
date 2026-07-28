@@ -35,6 +35,9 @@ type Envelope<T> = { data: T; meta?: Record<string, unknown> };
 
 const FLOW_TIMEOUT = 120_000;
 const EXECUTE_IMPORT = process.env.E2E_CURATION_IMPORT_WRITE === "1";
+const EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS = Number(
+  process.env.E2E_EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS ?? "486",
+);
 const MULTI_OBSERVATION_FEATURE_ID = "f_4127310100_e_227e045425edb459";
 const RESOURCE_ROOT =
   process.env.E2E_CURATION_RESOURCE_ROOT ??
@@ -155,7 +158,7 @@ test.describe("공식 큐레이션 collection live", () => {
     }
   });
 
-  test("REST와 관리자 상세에 19개 collection·486개 membership·미연결 등대를 보존한다", async ({
+  test("REST와 관리자 상세에 19개 공식 collection·membership·미연결 등대를 보존한다", async ({
     page,
   }) => {
     await page.goto("/admin/features/curated");
@@ -185,7 +188,7 @@ test.describe("공식 큐레이션 collection live", () => {
         (total, key) => total + (byKey.get(key)?.item_count ?? 0),
         0,
       ),
-    ).toBe(486);
+    ).toBe(EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS);
 
     const template = await page.evaluate(async () => {
       const response = await fetch("/api/proxy/v1/admin/curations/import-template.csv", {
