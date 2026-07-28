@@ -9,9 +9,10 @@
 
 > PR #869 merge `25e9304b` 직후 `tasks.md`·`tasks-done.md`·실코드·Map/PinVi/
 > docker-manager/geo의 열린 PR·이슈를 다시 대조했다. Map의 열린 이슈는 #673·#812·#815·#819,
-> 열린 PR은 #814 한 건이며, PinVi의 관련 열린 PR은 #403이다. `T-VN-H21`의 실서비스 400은
-> reverse payload drift가 아니라 보호 endpoint에 `key`가 결선되지 않은 test preflight 오류로
-> 재분류했다. 큰 task는 독립 검증·독립 rollback이 가능한 실행 단위로 아래처럼 분해한다.
+> 본 감사 PR #870을 제외한 기존 열린 PR은 #814 한 건이며, PinVi의 관련 열린 PR은 #403이다.
+> `T-VN-H21`의 실서비스 400에서 보호 endpoint `key` 결선 누락을 첫 blocker로 확인했다.
+> 인증 뒤 downstream drift 존재 여부는 아직 미검증이다. 큰 task는 독립 검증·forward recovery가
+> 가능한 실행 단위로 아래처럼 분해한다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
@@ -48,17 +49,18 @@ barrier로 직렬화한다.
   - Lane A: [ ] `T-VN-32A` → [ ] `T-VN-32B` → [ ] `T-VN-32C` →
     [ ] `T-VN-35A` → [ ] `T-VN-35B` → [ ] `T-VN-35C` → [ ] `T-VN-35D` →
     [ ] `T-VN-37A` → [ ] `T-VN-37B` → [ ] `T-VN-37C`
-  - Lane B: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
+  - Lane B shadow: [ ] `T-VN-33A` → [ ] `T-VN-33B` → [ ] `T-VN-33C` →
     [ ] `T-VN-38A` → [ ] `T-VN-38B` → [ ] `T-VN-38C` →
     [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
-    [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C` →
-    [ ] `T-VN-40A` → [ ] `T-VN-40B` → [ ] `T-VN-40C`
+    [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
+  - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
+    [ ] `T-VN-40C`
   - 최종 단일 cutover: [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-VN-H18` — GitHub approval provenance gate(보류: GitHub 자기 PR 승인 불가와
     required-review 운영 주체 결정 필요)
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
-  - PinVi #215는 PinVi 저장소 소유의 외부 추적이며 Map Agent A/B 실행 queue에 넣지 않는다.
+  - [ ] `T-VN-EXT-PINVI-215` — PinVi #215 외부 추적(Map Agent A/B queue 밖)
 
 ## 공통 규율 (2026-07-28 개정)
 
@@ -70,6 +72,9 @@ barrier로 직렬화한다.
   (실데이터)로 검증하고 PR·CI green·머지. 작업 중 발견 항목은 tasks.md에 즉시 추가.
 - **Lane B**: PR #869 다음 PR부터 적대적 리뷰어 **2명** 반영 후 n150 **실데이터 파괴적 Live UI
   E2E**를 통과하고 PR·CI green·머지한다. task 완료 시 상대 lane 2일치 PR 적대 리뷰 관행 유지.
+- **일회성 문서 예외**: 사용자 지시에 따라 PR #870은 코드·DB·runtime 변경이 없는 task 재배치
+  문서 PR이므로 적대적 리뷰어 2명과 문서/보안 gate는 유지하되 파괴적 Live UI를 실행하지 않고
+  CI 결과를 기다리지 않고 머지한다. 이 예외는 후속 문서 PR에 자동 승계되지 않는다.
 - **우선순위(서비스 전 단계 — 사용자 지시 2026-07-26)**: **정확성·보안 최우선은 불변**
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
@@ -91,8 +96,14 @@ barrier로 직렬화한다.
   정리한다.
 - **cross-lane 순서 제약**: C6c pair capture와 #392는 이미 완료됐다. H07은 오래 열린
   #814/#403을 최신 main에 재배치하고 중복 assertion을 제거한 뒤 H07D→H07C 순서로 진행한다.
-  Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않으며, 최종 T-VN-39는
-  T-VN-32~38·40의 모든 하위 task가 끝난 뒤에만 시작한다.
+  H22C는 같은 curation frontend를 만지는 T-VN-48B·49B 뒤에 시작한다. T-VN-12A의 command
+  inventory freeze는 H22B의 reclassification command가 머지된 뒤 시작해 curation idempotency가
+  누락되지 않게 한다. Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
+  T-VN-40은 양 lane의 T-VN-32~38 하위 task가 모두 끝난 join barrier 뒤에 시작하며,
+  최종 T-VN-39는 T-VN-32~38·40의 모든 하위 task가 끝난 뒤에만 시작한다.
+- **OpenAPI compatible-pair gate**: H07C 이후 admin/user OpenAPI를 바꾸는 모든 task는
+  per-surface digest 갱신, docker-manager compatible-pair 재-capture, C7 attestation을 같은
+  완료 조건으로 갖는다. stale manifest 상태로 다음 task나 배포를 시작하지 않는다.
 - **prod 격리 규율(2026-07-27 인시던트 재발 방지 —
   [리포트](reports/incident-2026-07-27-shared-prod-db-live-container.md))**: 아래 4개는
   두 lane 공통 필수.
@@ -213,10 +224,11 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
 - [ ] T-VN-H21 — **`kor-travel-geo` live 인증 preflight·dedup 5건 재실증**
 
   2026-07-28 실서비스 OpenAPI와 실제 400 body를 대조한 결과 Map client의 `lon`/`lat` payload는
-  정합하고 실패 원인은 `E0100 query.key: Field required`였다. live test가 endpoint reachability만
-  보고 보호 endpoint credential readiness를 검사하지 않은 것이 근인이다. 비밀을 출력·커밋하지
-  않는 key 결선과 preflight를 추가하고 정상/오류 좌표 및 map dedup 5건을 실제 서비스에서
-  통과시킨다. 인증 실패를 계약 drift로 오분류하거나 wrapper/fallback으로 우회하지 않는다.
+  정합하고 첫 400 blocker는 `E0100 query.key: Field required`였다. test 코드는 settings key를
+  client에 전달하지만 실행 환경에 값이 없어 route 처리 전에 막혔으므로, 인증 뒤 runtime 계약에
+  추가 drift가 있는지는 아직 알 수 없다. 비밀을 출력·커밋하지 않는 key 결선과 preflight를
+  추가하고 정상/오류 좌표 및 map dedup 5건을 실제 서비스에서 통과시킨다. 첫 blocker만으로
+  downstream 정상까지 추정하거나 wrapper/fallback으로 우회하지 않는다.
 
 - [ ] T-VN-H28A — **#673 concierge 주소 불일치 실데이터 재분류**
 
@@ -262,12 +274,14 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
   운영자가 target collection 이동 또는 별도 collection 확정을 선택하는 command를 구현한다.
   parent collection→item lock, revision/actor 감사, conflict fail-close, 빈 quarantine 정리를
-  한 transaction에서 보장한다.
+  한 transaction에서 보장한다. actor-scoped `Idempotency-Key`, body fingerprint와 terminal
+  result replay를 처음부터 포함하고 T-VN-12A가 이 계약을 inventory 기준선으로 승계한다.
 
 - [ ] T-VN-H22C — **Admin UI·실데이터 파괴적 수용**
 
   H22A/B 계약만 소비하는 검토 UI를 만들고 격리 clone에서 충돌 preview·이동·별도 확정·빈
-  collection 정리를 파괴적으로 검증한다.
+  collection 정리를 파괴적으로 검증한다. 같은 `curation-collections-client.tsx`와 mocked spec을
+  만지는 T-VN-48B·49B가 모두 머지된 뒤 최신 구조 위에서 시작한다.
 
 ## 이슈 종결 추적
 
@@ -279,8 +293,10 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 - **task로 승격**: map #673=`T-VN-H28A/B`, map #819=`T-VN-H27`,
   map #812/#815=`T-VN-H07C/D`.
 - **종결**: map #738은 lane 분배 정본을 본 문서로 이관해 닫혔다.
-- **외부 추적**: PinVi #215(post-review cleanup 잔여 — ADR-045 VWorld 불투명 자격증명
-  hard-gate 등).
+- [ ] T-VN-EXT-PINVI-215 — **PinVi #215 외부 follow-up 추적**
+
+  post-review cleanup 잔여(ADR-045 VWorld 불투명 자격증명 hard-gate 등)는 PinVi 저장소가
+  소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
 
 ## Lane B 상세 — b1 PinVi 결합
 
@@ -441,10 +457,11 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   참조 table과 writer를 canonical dataset FK로 전환하고 전환 중 entity-record identity 불일치를
   composite FK로 차단한다.
 
-- [ ] T-VN-33C — **denormalization 제거·query/index 정리**
+- [ ] T-VN-33C — **canonical query cutover·legacy 제거 manifest**
 
-  source record와 ops 표면의 중복 provider/dataset column·분기·index를 제거하고 EXPLAIN gate로
-  조회 성능과 exact-scope 의미를 고정한다.
+  read/query를 canonical dataset FK로 전환하고 중복 column을 read-only로 fence한다. EXPLAIN과
+  checksum을 고정하되 column/index의 물리 삭제는 soak 뒤 T-VN-39가 수행하도록 removal manifest에
+  남긴다.
 
 ### T-VN-34 — 직교 상태 모델 전환 (Lane B)
 
@@ -458,9 +475,10 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   `public_features` view를 3축 predicate 정본으로 바꾸고 실제 hot predicate와 일치하는 partial
   index를 추가한다.
 
-- [ ] T-VN-34C — **writer/API/UI cutover·legacy status 제거**
+- [ ] T-VN-34C — **writer/API/UI cutover·legacy status fence**
 
-  provider/admin writer와 admin/user DTO/UI를 3축으로 전환하고 old status 조건·문서·index를 제거한다.
+  provider/admin writer와 admin/user DTO/UI를 3축으로 전환하고 old status 신규 write를 차단한다.
+  legacy column/index는 held component rollback을 위해 유지하고 T-VN-39 removal manifest에 넣는다.
 
 ### T-VN-35 — typed subtype 분해 (Lane A)
 
@@ -494,10 +512,11 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   provider upsert와 admin patch가 field override를 같은 transaction에서 갱신하도록 전환하고
   concurrency/merge precedence를 DB 제약과 회귀 테스트로 고정한다.
 
-- [ ] T-VN-36C — **effective projection 단일화·CASE 제거**
+- [ ] T-VN-36C — **effective projection 단일화·legacy freeze fence**
 
-  read model을 한 effective projection으로 통일하고 repository별 중복 `CASE`와 whole-row freeze
-  column/trigger를 제거한다.
+  read model을 한 effective projection으로 통일하고 repository별 중복 `CASE` write/read 분기를
+  비활성화한다. whole-row freeze column/trigger는 rollback shadow로 유지하고 물리 삭제 목록을
+  T-VN-39에 넘긴다.
 
 ### T-VN-37 — typed notice state (Lane A)
 
@@ -543,15 +562,18 @@ ADR은 존재하지만 목표 DDL/OpenAPI diff/실행 제약 artifact는 없다.
   자동 후보를 `theme_feature_candidates` lifecycle로 분리하고 admin/public/PinVi consumer가
   `curation_collections/items` 정본만 읽도록 전환한다.
 
-- [ ] T-VN-40C — **legacy route/trigger/table 제거**
+- [ ] T-VN-40C — **legacy surface fence·removal manifest**
 
-  checksum과 consumer cutover 뒤 overlay route/repository/trigger/table을 clean-cut 삭제하고
-  호환 shim을 만들지 않는다.
+  checksum과 consumer cutover 뒤 overlay 신규 write와 normal routing을 차단한다. held component
+  rollback에 필요한 repository/trigger/table은 soak 동안 보존하고 exact removal manifest를
+  T-VN-39에 넘긴다. 신규 호환 shim은 만들지 않는다.
 
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 
   보존 분류, restore/PITR 또는 journal 검증, shadow checksum, consumer-first 배포, write fence,
-  순차 전환, soak, legacy 제거를 ADR-075 절차대로 수행한다. T-VN-32~38·40 완료 뒤 마지막.
+  순차 전환과 soak를 ADR-075 절차대로 수행한다. held component rollback 창이 닫힌 뒤
+  T-VN-33C·34C·36C·40C removal manifest의 legacy column/index/route/repository/trigger/table을
+  이 task에서만 물리 삭제한다. T-VN-32~38·40 완료 뒤 마지막이다.
 
 ## T-101 — Materialized View 도입 검토 (보류)
 

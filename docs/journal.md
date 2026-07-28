@@ -11,19 +11,20 @@ Map/PinVi/docker-manager/geo의 열린 PR·이슈를 대조했다. 큰 task를 �
 - **#869 머지**: head `c0cd4979`의 lint, OpenAPI, frontend, Python 3.11/3.12/3.13,
   fixture replay, PostGIS 통합 8개 GitHub Actions가 모두 성공했다. PR #869는
   merge commit `25e9304b`로 main에 반영됐다.
-- **열린 항목 대조**: Map open issue는 #673·#812·#815·#819, open PR은 #814 한 건이다.
-  PinVi 관련 open PR은 #403, 외부 follow-up은 #215다. docker-manager와 geo에는 open
-  PR/issue가 없다. 닫힌 #738은 lane 정본을 `tasks.md`로 이관한 planning hub라 완료 상태가 맞다.
+- **열린 항목 대조**: Map open issue는 #673·#812·#815·#819이며, 현재 문서 PR #870을
+  제외한 기존 open PR은 #814 한 건이다. PinVi 관련 open PR은 #403, 외부 follow-up은 #215다.
+  docker-manager와 geo에는 open PR/issue가 없다. 닫힌 #738은 lane 정본을 `tasks.md`로 이관한
+  planning hub라 완료 상태가 맞다.
 - **오래 열린 H07**: GitHub compare 기준 Map #814는 main보다 85 commits, PinVi #403은
   13 commits 뒤처졌다. Map main의 `test_export_openapi.py`에는 T-VN-05R이 추가한
   discriminator/additionalProperties 계열 검사가 이미 있어 old branch를 그대로 합치면 중복된다.
   H07A/B를 rebase→중복 제거→residual required/type/enum 재감사→landing으로 분리하고,
   실제 admin runtime surface H07D 뒤 compatible-pair manifest H07C를 진행한다.
-- **H21 근인 정정**: 배포된 geo `/v1/openapi.json`의 `POST /v2/reverse`는 `lon`/`lat`를
-  요구하며 Map client body와 일치한다. 실제 무인증 요청의 400은
-  `E0100 query.key: Field required`였다. endpoint health만 확인한 live fixture가 보호
-  operation credential readiness를 검사하지 않아 5건을 계약 drift로 오분류했다. 민감값 비노출
-  key preflight와 실서비스 dedup 5건 재실증이 새 완료 조건이다.
+- **H21 첫 blocker 정정**: 배포된 geo `/v1/openapi.json`의 `POST /v2/reverse`는
+  `lon`/`lat`를 요구하며 Map client body와 일치한다. 실제 무인증 요청의 첫 400은
+  `E0100 query.key: Field required`였다. test 코드는 settings key를 client에 전달하지만
+  실행 환경 값이 비어 route 처리 전에 막힌 것으로 보인다. 인증 뒤 downstream drift는
+  미확정이므로 민감값 비노출 key preflight와 실서비스 dedup 5건 재실증을 완료 조건으로 둔다.
 - **열린 이슈 승격**: #819는 docker-manager HAProxy tunnel config와 heartbeat 두 주기 이상
   same-socket live 검증인 H27로, #673은 현재 실데이터 evidence 재기준화 H28A와 provider-neutral
   rule/replay recovery H28B로 승격했다. PinVi #215는 Map lane이 소유하지 않는 외부 추적으로 남겼다.
@@ -37,9 +38,15 @@ Map/PinVi/docker-manager/geo의 열린 PR·이슈를 대조했다. 큰 task를 �
   Agent B는 T-VN-45부터 frontend→service/weather/idempotency/outbox와 이후
   dataset/summary/state/override/curation을 소유한다. migration-bearing PR은 번호 예약부터
   머지까지 직렬화하고, forward migration 뒤 명시적 필요가 없으면 rollback하지 않는다.
+- **적대 리뷰 2명 1차**: exact head `32908380`에서 legacy 물리 삭제가 T-VN-39보다 앞선
+  문제, H07C 이후 OpenAPI 재-cut 누락, H22/T-VN-12 idempotency와 H22C/frontend 파일 충돌,
+  T-VN-40 join barrier 누락을 P1/P2로 찾았다. PR #870 일회성 CI/live 예외, 현재 PR inventory,
+  H21 첫 blocker 표현, migration forward-recovery 규율과 external tracker 단일 위치도 함께
+  정정했다. 물리 삭제는 T-VN-39만 소유하고 H22B는 idempotency를 처음부터 포함하도록 바꿨다.
 - **실행 규율**: 첫 reviewable checkpoint에서 PR #870을 열고 변경을 작은 커밋으로 push했다.
   실패 시 검증된 checkpoint부터 재개하며, PR #870부터 문서 전용 변경도 적대적 리뷰어 2명을
-  사용한다. 문서 PR은 사용자 지시에 따라 CI 결과를 기다리지 않고 리뷰·문서 검증 뒤 머지한다.
+  사용한다. CI 대기와 파괴적 Live UI를 생략하는 것은 사용자 지정 PR #870 일회성 예외이며,
+  후속 문서 PR에는 자동 적용하지 않는다.
 
 ## 2026-07-27 (codex) — T-VN-47 React Doctor + durable curation + #868 완결
 
