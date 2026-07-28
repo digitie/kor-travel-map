@@ -1543,7 +1543,8 @@ def test_geo_rest_client_opt_out_allows_keyless_construction() -> None:
 
     http = httpx.AsyncClient(base_url="http://127.0.0.1:12501")
     try:
-        client = _geo_client(http)
+        # 헬퍼가 아니라 opt-out 인자 자체를 직접 검증한다.
+        client = KorTravelGeoRestClient(http, require_api_key=False)
         assert client._query_params() is None  # 키가 없으면 query도 붙지 않는다.
     finally:
         asyncio.run(http.aclose())
