@@ -1,15 +1,46 @@
 import { expect, test } from "@playwright/test";
 
-/**
- * codex PR #617(세션 UI 재반영) + #613 리뷰 fix(#618) 후속의 새/변경 UI live e2e.
- *
- * 기본은 read-only(페이지가 새 요소를 렌더하는지). 컨트롤 클릭이 필요한 시나리오는
- * `E2E_ADMIN_WRITE=1`로 게이트하되, 확인 다이얼로그를 dismiss(취소)해 실제 mutate는
- * 하지 않는다. 실행은 별도 에이전트가 n150 live에서 수행한다(여기선 작성만).
- */
-const ADMIN_WRITE = process.env.E2E_ADMIN_WRITE === "1";
+import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
+import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
+type ProblemDetail = components["schemas"]["ProblemDetail"];
+
+const BACKEND_UNAVAILABLE: ProblemDetail = {
+  code: "SERVICE_UNAVAILABLE",
+  detail: "mocked backend unavailable",
+  request_id: "e2e-pr617-shell-backend-unavailable",
+  status: 503,
+  title: "mocked backend unavailable",
+  type: "https://kor-travel-map/errors/service-unavailable",
+};
+
+/**
+ * codex PR #617(세션 UI 재반영) + #613 리뷰 fix(#618) 후속의 mocked shell e2e.
+ *
+ * API payload depth는 각 전용 spec이 담당한다. 여기서는 모든 BFF GET을 명시적 503으로
+ * 격리해 backend 장애 중에도 변경된 shell/control이 렌더되는지만 검증한다.
+ * 쓰기 확인 다이얼로그는 live 전용 spec으로 분리한다.
+ */
 test.describe("PR #617/#613 후속 UI", () => {
+  test.beforeEach(async ({ page }) => {
+    await installInertOpsLiveWebSocket(page);
+    await page.route("**/api/proxy/**", async (route) => {
+      const request = route.request();
+      const apiPath = bffApiPath(request.url());
+      if (request.method() !== "GET") {
+        throw new Error(
+          `PR #617/#613 shell에서 예상하지 않은 BFF 요청: ${request.method()} ${apiPath}`,
+        );
+      }
+      await route.fulfill({
+        body: JSON.stringify(BACKEND_UNAVAILABLE),
+        contentType: "application/problem+json",
+        status: 503,
+      });
+    });
+  });
+
   test("운영 로그 — system/API 두 canonical stream만 노출", async ({ page }) => {
     await page.goto("/ops/logs");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -48,27 +79,4 @@ test.describe("PR #617/#613 후속 UI", () => {
     await expect(page.getByRole("heading", { name: "스케줄" })).toBeVisible();
   });
 
-  test.describe("쓰기 게이트(E2E_ADMIN_WRITE=1)", () => {
-    test.skip(
-      !ADMIN_WRITE,
-      "E2E_ADMIN_WRITE=1일 때만 — 스케줄 컨트롤 확인 다이얼로그(#613 가드)",
-    );
-
-    test("스케줄 시작/즉시 실행은 확인 다이얼로그를 띄운다(즉시 mutate 금지)", async ({
-      page,
-    }) => {
-      await page.goto("/ops/pipeline?tab=schedules");
-      const control = page
-        .getByRole("button", { name: /시작|즉시 실행/ })
-        .first();
-      if ((await control.count()) > 0 && (await control.isEnabled())) {
-        await control.click();
-        // #613 가드: 확인 단계(AlertDialog) 없이 바로 mutate되면 안 된다.
-        const dialog = page.getByRole("alertdialog");
-        await expect(dialog).toBeVisible();
-        // 실제 실행하지 않도록 취소.
-        await dialog.getByRole("button", { name: "취소" }).click();
-      }
-    });
-  });
 });

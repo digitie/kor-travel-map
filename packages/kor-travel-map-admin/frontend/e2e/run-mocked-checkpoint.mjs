@@ -147,6 +147,8 @@ const buildContextDirectory = path.join(runtimeDirectory, "build-context");
 const buildContextArchive = path.join(runtimeDirectory, "build-context.tar");
 const imageIdPath = path.join(runtimeDirectory, "frontend-image.id");
 const runtimeEnvPath = path.join(runtimeDirectory, "frontend.env");
+const storageStatePath = path.join(runtimeDirectory, "admin-state.json");
+const playwrightArtifactRoot = path.join(runtimeDirectory, "playwright");
 
 const ownedContainerName = `ktm-mocked-e2e-${process.pid}-${randomBytes(6).toString("hex")}`;
 let ownedContainerId;
@@ -378,21 +380,27 @@ async function readBuildInfo(timeoutMs) {
 
 let exitCode = 2;
 try {
-  const archiveResult = spawnSync(
+  const archiveResult = await runManagedChild(
     "git",
     ["archive", "--format=tar", `--output=${buildContextArchive}`, "HEAD"],
-    { cwd: repoRoot, encoding: "utf8" },
+    { captureOutput: true, cwd: repoRoot },
   );
   if (archiveResult.status !== 0) {
     throw new Error("exact HEAD build context archive를 만들 수 없습니다.");
   }
-  const mkdirResult = spawnSync("mkdir", ["-p", buildContextDirectory], {
-    encoding: "utf8",
-  });
-  const extractResult = spawnSync(
+  const mkdirResult = await runManagedChild(
+    "mkdir",
+    ["-p", buildContextDirectory],
+    {
+      captureOutput: true,
+    },
+  );
+  const extractResult = await runManagedChild(
     "tar",
     ["-xf", buildContextArchive, "-C", buildContextDirectory],
-    { encoding: "utf8" },
+    {
+      captureOutput: true,
+    },
   );
   if (mkdirResult.status !== 0 || extractResult.status !== 0) {
     throw new Error("exact HEAD build context archive를 펼칠 수 없습니다.");
@@ -440,6 +448,7 @@ try {
       `KOR_TRAVEL_MAP_UI_SESSION_SECRET=${base64Url(randomBytes(32))}`,
       `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=${base64Url(randomBytes(32))}`,
       "KOR_TRAVEL_MAP_API_INTERNAL_URL=http://127.0.0.1:9",
+      "HOSTNAME=127.0.0.1",
       "",
     ].join("\n"),
     { encoding: "utf8", mode: 0o600 },
@@ -516,25 +525,28 @@ try {
           frontendBuildInfo.sourceDigest,
         MOCKED_E2E_VERIFIED_FRONTEND_IMAGE_ID: imageInspect.Id,
         MOCKED_E2E_VERIFIED_FRONTEND_CONTAINER_ID: containerInspect.Id,
+        E2E_STORAGE_STATE: storageStatePath,
+        PLAYWRIGHT_ARTIFACT_ROOT: playwrightArtifactRoot,
       },
       stdio: "inherit",
     },
   );
-  const postHeadResult = spawnSync("git", ["rev-parse", "HEAD"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
-  const postStatusResult = spawnSync(
+  const postHeadResult = await runManagedChild(
+    "git",
+    ["rev-parse", "HEAD"],
+    { captureOutput: true, cwd: repoRoot },
+  );
+  const postStatusResult = await runManagedChild(
     "git",
     ["status", "--porcelain", "--untracked-files=normal"],
-    { cwd: repoRoot, encoding: "utf8" },
+    { captureOutput: true, cwd: repoRoot },
   );
-  const postSourceDigestResult = spawnSync(
+  const postSourceDigestResult = await runManagedChild(
     process.execPath,
     [path.join(repoRoot, "scripts/frontend-source-digest.mjs")],
     {
+      captureOutput: true,
       cwd: repoRoot,
-      encoding: "utf8",
     },
   );
   if (

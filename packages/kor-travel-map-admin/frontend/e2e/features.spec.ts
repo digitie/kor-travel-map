@@ -1,4 +1,74 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Route, test } from "@playwright/test";
+
+import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
+import { mockOpsDatasetCatalog } from "./ops-dataset-catalog-mock";
+import { installInertOpsLiveWebSocket } from "./ws-isolation";
+
+type AdminFeatureMapItem = components["schemas"]["AdminFeatureMapItem"];
+type AdminFeaturesInBoundsResponse =
+  components["schemas"]["AdminFeaturesInBoundsResponse"];
+type Meta = components["schemas"]["Meta"];
+type ProblemDetail = components["schemas"]["ProblemDetail"];
+
+const FEATURE: AdminFeatureMapItem = {
+  category: "01070300",
+  feature_id: "mock-provider::mock-dataset::features-smoke",
+  kind: "place",
+  lat: 37.5665,
+  lon: 126.978,
+  marker_color: "P-01",
+  marker_icon: "marker",
+  name: "Feature smoke",
+  status: "active",
+};
+const META: Meta = {
+  cluster: null,
+  duration_ms: 1,
+  page: null,
+  request_id: "e2e-features-smoke",
+};
+const BACKEND_UNAVAILABLE: ProblemDetail = {
+  code: "SERVICE_UNAVAILABLE",
+  detail: "mocked backend unavailable",
+  request_id: "e2e-features-shell-backend-unavailable",
+  status: 503,
+  title: "mocked backend unavailable",
+  type: "https://kor-travel-map/errors/service-unavailable",
+};
+
+async function fulfillJson(route: Route, body: unknown, status = 200) {
+  await route.fulfill({
+    body: JSON.stringify(body),
+    contentType: "application/json",
+    status,
+  });
+}
+
+function featuresResponse(clustered: boolean): AdminFeaturesInBoundsResponse {
+  return {
+    data: {
+      clusters: clustered
+        ? [
+            {
+              cluster_key: "1100000000",
+              feature_count: 1,
+              lat: 37.5665,
+              lon: 126.978,
+            },
+          ]
+        : [],
+      coverage: { limit: 2000, returned: 1 },
+      items: clustered ? [] : [FEATURE],
+      mode: clustered ? "clusters" : "items",
+      truncated: false,
+    },
+    meta: {
+      ...META,
+      cluster: { cluster_unit: "sido", drill_down_unit: "sigungu" },
+    },
+  };
+}
 
 /**
  * `/features` — 지도 페이지 smoke. backend `/features` 호출은 DB가 비어 있어도
@@ -6,6 +76,41 @@ import { expect, test } from "@playwright/test";
  * 검증한다. 실 마커 렌더는 DB에 feature가 적재된 환경에서 별도 검증.
  */
 test.describe("/features", () => {
+  test.beforeEach(async ({ page }) => {
+    await installInertOpsLiveWebSocket(page);
+    // 구체 mock보다 먼저 등록해 Playwright 역등록 우선순위에서 마지막 fail-close가 된다.
+    await page.route("**/api/proxy/**", async (route) => {
+      const request = route.request();
+      if (request.method() !== "GET") {
+        throw new Error(
+          `features smoke에서 예상하지 않은 BFF 요청: ${request.method()} ${bffApiPath(
+            request.url(),
+          )}`,
+        );
+      }
+      await route.fulfill({
+        body: JSON.stringify(BACKEND_UNAVAILABLE),
+        contentType: "application/problem+json",
+        status: 503,
+      });
+    });
+    await mockOpsDatasetCatalog(page);
+    await page.route("**/v1/admin/features/in-bounds**", async (route) => {
+      const request = route.request();
+      const apiPath = bffApiPath(request.url());
+      if (
+        request.method() !== "GET" ||
+        apiPath !== "/v1/admin/features/in-bounds"
+      ) {
+        throw new Error(
+          `features smoke route 불일치: ${request.method()} ${apiPath}`,
+        );
+      }
+      const zoom = Number(new URL(request.url()).searchParams.get("zoom"));
+      await fulfillJson(route, featuresResponse(Number.isFinite(zoom) && zoom <= 13));
+    });
+  });
+
   test("페이지 렌더 + 지도 컨테이너 + 헤더 상태", async ({ page }) => {
     await page.goto("/features");
     await expect(
@@ -17,11 +122,11 @@ test.describe("/features", () => {
       "true",
     );
     await expect(page.getByRole("link", { name: /홈/ })).toBeVisible();
-    // 로딩→데이터 또는 에러 어느 쪽이든 상태 텍스트가 렌더돼야 함.
+    // exact in-bounds mock의 성공 상태까지 도달해야 한다.
     await expect(
       page.locator('[data-slot="badge"]').filter({
         hasText:
-          /^(지도 로딩 중|클러스터 로딩 중|feature 로딩 중|\d+개 지역 · [\d,]+건 집계(?: · 갱신 중)?|\d+건 표시(?: · 갱신 중)?|클러스터 호출 실패|feature 호출 실패)$/,
+          /^(\d+개 지역 · [\d,]+건 집계(?: · 갱신 중)?|\d+건 표시(?: · 갱신 중)?)$/,
       }),
     ).toBeVisible();
   });
@@ -45,7 +150,7 @@ test.describe("/features", () => {
     await expect(
       page.locator('[data-slot="badge"]').filter({
         hasText:
-          /^(지도 로딩 중|클러스터 로딩 중|feature 로딩 중|\d+개 지역 · [\d,]+건 집계(?: · 갱신 중)?|\d+건 표시(?: · 갱신 중)?|클러스터 호출 실패|feature 호출 실패)$/,
+          /^(\d+개 지역 · [\d,]+건 집계(?: · 갱신 중)?|\d+건 표시(?: · 갱신 중)?)$/,
       }),
     ).toBeVisible();
     for (const k of ["place", "event", "notice", "price", "weather", "route", "area"]) {

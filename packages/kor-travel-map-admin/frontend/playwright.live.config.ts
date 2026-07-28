@@ -154,6 +154,7 @@ function isLocalHost(hostname: string): boolean {
  */
 export default defineConfig({
   testDir: "./e2e/live",
+  globalTeardown: "./e2e/live/global-teardown.ts",
   timeout: 30_000,
   expect: { timeout: 15_000 },
   // C7의 raw attachment/error output은 evidence bind 밖 container tmpfs에만 둔다.

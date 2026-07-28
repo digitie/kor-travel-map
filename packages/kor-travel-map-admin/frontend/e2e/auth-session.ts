@@ -11,10 +11,13 @@ export async function authenticateAdmin(
 ): Promise<void> {
   const password = process.env.E2E_ADMIN_PASSWORD;
   const username = process.env.E2E_ADMIN_USERNAME ?? "admin";
-  fs.mkdirSync(path.dirname(storageState), { recursive: true });
+  const storageStateDirectory = path.dirname(storageState);
+  fs.mkdirSync(storageStateDirectory, { mode: 0o700, recursive: true });
+  fs.chmodSync(storageStateDirectory, 0o700);
 
   if (!password) {
     await page.context().storageState({ path: storageState });
+    fs.chmodSync(storageState, 0o600);
     return;
   }
 
@@ -46,5 +49,8 @@ export async function authenticateAdmin(
       cookie.sameSite = "Lax";
     }
   }
-  fs.writeFileSync(storageState, JSON.stringify(state, null, 2));
+  fs.writeFileSync(storageState, JSON.stringify(state, null, 2), {
+    mode: 0o600,
+  });
+  fs.chmodSync(storageState, 0o600);
 }

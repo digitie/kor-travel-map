@@ -33,6 +33,7 @@ const artifactRoot =
  */
 export default defineConfig({
   testDir: "./e2e",
+  globalTeardown: "./e2e/global-teardown.ts",
   // `e2e/live/**`는 prod 실데이터 스냅샷(feature id 등)에 의존하는 라이브 전용
   // 시나리오라 기본(mock) suite에서 제외한다. 라이브 실행은 `npm run e2e:live`
   // (playwright.live.config.ts, E2E_BASE_URL=배포 URL) 참조.

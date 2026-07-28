@@ -1,4 +1,5 @@
 import type { TestStep } from "@playwright/test/reporter";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { firstFailureStageMatches } from "../e2e/mocked-failure-reporter";
@@ -44,5 +45,33 @@ describe("mocked failure stage provenance", () => {
         step("pw:api", "Navigate to /ops/datasets"),
       ]),
     ).toBe(false);
+  });
+});
+
+describe("mocked checkpoint isolation", () => {
+  const runnerSource = readFileSync(
+    new URL("../e2e/run-mocked-checkpoint.mjs", import.meta.url),
+    "utf8",
+  );
+  const ownedResourcePhase = runnerSource.slice(
+    runnerSource.indexOf("let exitCode = 2;"),
+  );
+
+  it("소유 resource 생성 뒤에는 signal handler를 우회하는 spawnSync를 쓰지 않는다", () => {
+    expect(ownedResourcePhase).not.toContain("spawnSync(");
+    expect(ownedResourcePhase).toContain(
+      "const archiveResult = await runManagedChild(",
+    );
+    expect(ownedResourcePhase).toContain(
+      "const postStatusResult = await runManagedChild(",
+    );
+  });
+
+  it("self-owned UI와 session artifact를 loopback/private runtime으로 제한한다", () => {
+    expect(runnerSource).toContain('"HOSTNAME=127.0.0.1"');
+    expect(runnerSource).toContain("E2E_STORAGE_STATE: storageStatePath");
+    expect(runnerSource).toContain(
+      "PLAYWRIGHT_ARTIFACT_ROOT: playwrightArtifactRoot",
+    );
   });
 });

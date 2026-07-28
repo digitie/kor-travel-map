@@ -2,13 +2,8 @@
   "schemaVersion": 2,
   "baselineMainRevision": "6bf4c10f99742a5c563d1c648f71ab6f5444b1e9",
   "baselineRevision": "31edfe0cab1213be57dce7a5bddd4a3108adffb3",
-  "discoveredTests": 275,
-  "allowedSkipped": [
-    {
-      "spec": "e2e/pr617-613-followups.spec.ts",
-      "title": "PR #617/#613 후속 UI › 쓰기 게이트(E2E_ADMIN_WRITE=1) › 스케줄 시작/즉시 실행은 확인 다이얼로그를 띄운다(즉시 mutate 금지)"
-    }
-  ],
+  "discoveredTests": 274,
+  "allowedSkipped": [],
   "groups": [
     {
       "spec": "e2e/admin-ops.spec.ts",
