@@ -414,7 +414,7 @@ cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
 npm run admin:stack
 
 # 3. frontend (Next.js dev) 기동
-npx --yes npm@10.9.4 ci --workspaces --include=optional
+npx --yes npm@12.0.1 ci --workspaces --include=optional
 cd packages/kor-travel-map-admin/frontend
 cp .env.example .env.local
 $EDITOR .env.local           # VWorld API key
@@ -542,9 +542,10 @@ false-positive 예외를 포함한 모든 범위는 verifier가 exact 비교하�
 ADR-045의 **독립 OpenAPI/admin 프로그램 표면** 제공이다. 메인 라이브러리를 import할
 때 FastAPI/Uvicorn/React가 딸려 들어오면 안 된다. 운영 배포는 Docker를 기본으로 하고,
 개발에서는 별도로 `pip install -e packages/kor-travel-map-api` +
-frontend workspace는 Node 22 이상과 exact npm 10.9.4의 clean install 뒤 `npm run build`로
-실행한다. Redocly patch postinstall과 Next/Sharp optimizer smoke를 우회하는 `--ignore-scripts` 결과는
-검증으로 인정하지 않는다.
+frontend workspace는 npm 12.0.1이 지원하는 Node
+`^22.22.2 || ^24.15.0 || >=26.0.0`과 exact npm 12.0.1의 clean install 뒤
+`npm run build`로 실행한다. Redocly patch postinstall과 Next/Sharp optimizer smoke를
+우회하는 `--ignore-scripts` 결과는 검증으로 인정하지 않는다.
 
 이 분리는 ADR-020에 박혀 있고, `import-linter` 계약(`pyproject.toml`)이 메인
 패키지의 FastAPI import를 차단한다. 지도 frontend는 ADR-025 이후 VWorld/MapLibre

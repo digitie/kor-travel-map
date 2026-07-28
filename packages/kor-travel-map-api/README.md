@@ -57,12 +57,12 @@ Frontend 서버는 **항상 WSL 셸에서 실행**한다. Windows 호스트는 P
 # 저장소 루트의 Linux/WSL 셸에서
 source ~/.nvm/nvm.sh && nvm use 22.23.1
 which node npm              # /home/.../.nvm/... 등 Linux 경로여야 함 (/mnt/c/... 금지)
-npx --yes npm@10.9.4 ci --workspaces --include=optional
-npx --yes npm@10.9.4 run verify:npm-tree
+npx --yes npm@12.0.1 ci --workspaces --include=optional
+npx --yes npm@12.0.1 run verify:npm-tree
 cp packages/kor-travel-map-admin/frontend/.env.example \
   packages/kor-travel-map-admin/frontend/.env.local
 $EDITOR packages/kor-travel-map-admin/frontend/.env.local
-npx --yes npm@10.9.4 -w packages/kor-travel-map-admin/frontend run dev
+npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run dev
 ```
 
 `node`/`npm`이 `/mnt/c/Program Files/nodejs/...`를 가리키면 Windows Node가 섞인
