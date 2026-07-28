@@ -32,6 +32,7 @@ import { MAP_VIEWS } from "./_fixtures";
 
 type FeaturesInBboxResponse = components["schemas"]["FeaturesInBboxResponse"];
 type AdminFeatureMapItem = components["schemas"]["AdminFeatureMapItem"];
+type AdminFeatureMapCluster = components["schemas"]["ClusterSummary"];
 type AdminFeaturesInBoundsResponse =
   components["schemas"]["AdminFeaturesInBoundsResponse"];
 type FeatureDetailEnvelopeResponse =
@@ -52,6 +53,8 @@ const ADMIN_FEATURES_IN_BOUNDS_PATH = "/v1/admin/features/in-bounds";
 const MAP_CONTAINER = '[data-testid="map-canvas-container"]';
 const POINT_MARKER =
   '.maplibregl-marker[role="button"]:not([aria-label^="feature 클러스터"])';
+const SERVER_CLUSTER_MARKER =
+  '.maplibregl-marker[role="button"][aria-label^="feature 클러스터"]';
 // 멀리 떨어진 사전 점프 기준점(제주). 초기 뷰가 우연히 타깃과 같아 moveend가 안 떠
 // refetch가 누락되는 경우를 막는다. 본 spec의 어떤 타깃(서울/부산/전국)과도 겹치지 않는다.
 const ANCHOR = { lon: 126.531, lat: 33.499, zoom: 11 } as const;
@@ -154,13 +157,6 @@ function isAdminFeaturesInBounds(response: Response): boolean {
   return (
     response.request().method() === "GET" &&
     apiPath(response) === ADMIN_FEATURES_IN_BOUNDS_PATH
-  );
-}
-
-function isAdminFeaturesInBoundsRequest(request: Request): boolean {
-  return (
-    request.method() === "GET" &&
-    apiPathFromUrl(request.url()) === ADMIN_FEATURES_IN_BOUNDS_PATH
   );
 }
 
@@ -271,15 +267,23 @@ async function waitForMapIdle(page: Page): Promise<void> {
   }, MAP_CONTAINER);
 }
 
-/** 동일 query key cache hit 경로가 새 HTTP request를 만들지 않는지 검증한다. */
-async function expectNoAdminRequestDuring(
+/** 동일 query key cache hit 동안 어떤 feature collection request도 없는지 fail-close한다. */
+async function expectNoFeatureCollectionRequestDuring(
   page: Page,
-  predicate: (request: Request) => boolean,
   action: () => Promise<void>,
 ): Promise<void> {
   const observed: string[] = [];
   const onRequest = (request: Request) => {
-    if (predicate(request)) observed.push(request.url());
+    if (request.method() !== "GET") return;
+    const path = apiPathFromUrl(request.url());
+    if (
+      path === ADMIN_FEATURES_IN_BOUNDS_PATH ||
+      path === "/v1/admin/features" ||
+      path === "/v1/features" ||
+      path === "/v1/features/in-bounds"
+    ) {
+      observed.push(request.url());
+    }
   };
   page.on("request", onRequest);
   try {
@@ -289,6 +293,43 @@ async function expectNoAdminRequestDuring(
     page.off("request", onRequest);
   }
   expect(observed).toEqual([]);
+}
+
+function serverClusterSignature(cluster: AdminFeatureMapCluster): string {
+  return JSON.stringify([
+    cluster.cluster_key,
+    String(cluster.feature_count),
+    String(cluster.lon),
+    String(cluster.lat),
+  ]);
+}
+
+async function readServerClusterSignatures(page: Page): Promise<string[]> {
+  return page.locator(SERVER_CLUSTER_MARKER).evaluateAll((elements) =>
+    elements
+      .map((element) => {
+        const dataset = (element as HTMLElement).dataset;
+        return JSON.stringify([
+          dataset.clusterKey ?? "",
+          dataset.featureCount ?? "",
+          dataset.lon ?? "",
+          dataset.lat ?? "",
+        ]);
+      })
+      .sort(),
+  );
+}
+
+/** 서버 cluster 응답의 key/count/centroid 전체와 DOM marker 집합을 exact 비교한다. */
+async function waitForExactServerClusters(
+  page: Page,
+  clusters: readonly AdminFeatureMapCluster[],
+): Promise<void> {
+  const expected = clusters.map(serverClusterSignature).sort();
+  expect(expected.length).toBeGreaterThan(0);
+  await expect
+    .poll(async () => readServerClusterSignatures(page), { timeout: 30_000 })
+    .toEqual(expected);
 }
 
 function expectedPointFeatureIds(
@@ -463,6 +504,8 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     expect(initialBody.data.mode).toBe("clusters");
     expect(Array.isArray(initialBody.data.clusters)).toBe(true);
     expect(initialBody.data.clusters.length).toBeGreaterThan(0);
+    await waitForMapIdle(page);
+    await waitForExactServerClusters(page, initialBody.data.clusters);
 
     const filter = page.getByTestId("kind-filter");
     const weatherChip = filter.getByRole("button", {
@@ -495,13 +538,22 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     await expect(placeChip).toHaveAttribute("aria-pressed", "true", T);
     const placeResponse = await placeCluster;
     expect(placeResponse.status()).toBe(200);
+    const placeBody =
+      (await placeResponse.json()) as AdminFeaturesInBoundsResponse;
+    expect(placeBody.data.mode).toBe("clusters");
+    await waitForMapIdle(page);
+    await waitForExactServerClusters(page, placeBody.data.clusters);
     await expect(reset).toBeEnabled(T);
 
-    await reset.click();
-    await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
-    await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
-    await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
-    await expect(reset).toBeDisabled(T);
+    await expectNoFeatureCollectionRequestDuring(page, async () => {
+      await reset.click();
+      await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
+      await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
+      await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
+      await expect(reset).toBeDisabled(T);
+      await waitForMapIdle(page);
+      await waitForExactServerClusters(page, initialBody.data.clusters);
+    });
   });
 
   for (const [name, lon, lat, zoom] of A_VIEWS) {
@@ -664,17 +716,8 @@ test.describe("/features live — map input round-trip (read-only)", () => {
 
       // 방금 채운 default query key로 reset하면 staleTime 안 cache hit여야 한다. 새 request가
       // 없어도 전체 marker ID 집합이 combined→default로 exact 교체돼야 한다.
-      await expectNoAdminRequestDuring(
+      await expectNoFeatureCollectionRequestDuring(
         page,
-        (request) => {
-          if (!isAdminFeaturesInBoundsRequest(request)) return false;
-          const requestBbox = inBoundsBboxFromUrl(request.url());
-          return (
-            requestBbox.zoom !== null &&
-            requestBbox.zoom > 13 &&
-            requestBbox.kinds.join(",") === "weather,notice"
-          );
-        },
         async () => {
           await filter.getByRole("button", { name: "초기화" }).click();
           await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);

@@ -1009,6 +1009,8 @@ function createServerClusterMarker(
   label: string,
 ): ServerClusterMarkerEntry {
   const element = createClusterElement(cluster.feature_count, label);
+  element.dataset.clusterKey = cluster.cluster_key;
+  element.dataset.featureCount = String(cluster.feature_count);
   element.dataset.lon = String(cluster.lon);
   element.dataset.lat = String(cluster.lat);
   element.dataset.zoomStep = String(zoomStep);
@@ -1080,6 +1082,8 @@ export function VWorldServerClusters({
       } else {
         entry.marker.setLngLat(coords);
         const element = entry.marker.getElement();
+        element.dataset.clusterKey = cluster.cluster_key;
+        element.dataset.featureCount = String(cluster.feature_count);
         element.dataset.lon = String(cluster.lon);
         element.dataset.lat = String(cluster.lat);
         element.dataset.zoomStep = String(zoomStep);
