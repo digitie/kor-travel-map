@@ -299,6 +299,9 @@ def write_snapshot(args: argparse.Namespace) -> None:
 
 def write_checkpoint(args: argparse.Namespace) -> None:
     snapshot = _validated_snapshot(Path(args.snapshot))
+    restored_snapshot = _validated_snapshot(Path(args.restored_snapshot))
+    if restored_snapshot != snapshot:
+        raise RuntimeError("복원 검증 snapshot이 checkpoint baseline과 다릅니다")
     dump_sha256 = _require_pattern(args.dump_sha256, _SHA256_RE, "dump SHA256")
     if args.dump_size < 1:
         raise RuntimeError("dump size가 올바르지 않습니다")
@@ -313,7 +316,11 @@ def write_checkpoint(args: argparse.Namespace) -> None:
             "sha256": dump_sha256,
             "size": args.dump_size,
         },
-        "version": 1,
+        "restore_verification": {
+            "snapshot_sha256": _canonical_sha256(restored_snapshot),
+            "verified": True,
+        },
+        "version": 2,
     }
     payload["checkpoint_sha256"] = _canonical_sha256(payload)
     _atomic_json(Path(args.path), payload)
@@ -321,9 +328,15 @@ def write_checkpoint(args: argparse.Namespace) -> None:
 
 def _validated_checkpoint(path: Path) -> dict[str, Any]:
     checkpoint = _load_object(path)
-    if set(checkpoint) != {"baseline", "checkpoint_sha256", "dump", "version"}:
+    if set(checkpoint) != {
+        "baseline",
+        "checkpoint_sha256",
+        "dump",
+        "restore_verification",
+        "version",
+    }:
         raise RuntimeError("clone checkpoint field가 예상과 다릅니다")
-    if checkpoint.get("version") != 1:
+    if checkpoint.get("version") != 2:
         raise RuntimeError("clone checkpoint version이 올바르지 않습니다")
     digest = checkpoint.get("checkpoint_sha256")
     if not isinstance(digest, str):
@@ -350,7 +363,18 @@ def _validated_checkpoint(path: Path) -> dict[str, Any]:
     _require_pattern(dump_digest, _SHA256_RE, "dump SHA256")
     if not isinstance(dump_size, int) or isinstance(dump_size, bool) or dump_size < 1:
         raise RuntimeError("clone checkpoint dump size가 올바르지 않습니다")
-    _validated_snapshot_object(checkpoint.get("baseline"), label="checkpoint baseline")
+    baseline = _validated_snapshot_object(
+        checkpoint.get("baseline"), label="checkpoint baseline"
+    )
+    restore_verification = checkpoint.get("restore_verification")
+    if (
+        not isinstance(restore_verification, dict)
+        or restore_verification.get("verified") is not True
+        or set(restore_verification) != {"snapshot_sha256", "verified"}
+        or restore_verification.get("snapshot_sha256")
+        != _canonical_sha256(baseline)
+    ):
+        raise RuntimeError("clone checkpoint 복원 검증 provenance가 없습니다")
     return checkpoint
 
 
@@ -364,6 +388,45 @@ def read_checkpoint(args: argparse.Namespace) -> None:
         print(checkpoint["dump"]["sha256"])
     else:
         print(checkpoint["dump"]["size"])
+
+
+def read_replaced_checkpoint_dump(args: argparse.Namespace) -> None:
+    path = Path(args.checkpoint)
+    checkpoint = _load_object(path)
+    version = checkpoint.get("version")
+    if version == 2:
+        print(_validated_checkpoint(path)["dump"]["filename"])
+        return
+    if version != 1 or set(checkpoint) != {
+        "baseline",
+        "checkpoint_sha256",
+        "dump",
+        "version",
+    }:
+        raise RuntimeError("교체 대상 clone checkpoint 계약이 올바르지 않습니다")
+    digest = checkpoint.get("checkpoint_sha256")
+    if not isinstance(digest, str):
+        raise RuntimeError("교체 대상 clone checkpoint digest가 없습니다")
+    _require_pattern(digest, _SHA256_RE, "clone checkpoint SHA256")
+    unsigned = {
+        key: value for key, value in checkpoint.items() if key != "checkpoint_sha256"
+    }
+    if digest != _canonical_sha256(unsigned):
+        raise RuntimeError("교체 대상 clone checkpoint digest가 일치하지 않습니다")
+    dump = checkpoint.get("dump")
+    if not isinstance(dump, dict) or set(dump) != {"filename", "sha256", "size"}:
+        raise RuntimeError("교체 대상 clone checkpoint dump provenance가 없습니다")
+    filename = dump.get("filename")
+    dump_digest = dump.get("sha256")
+    dump_size = dump.get("size")
+    if not isinstance(filename, str) or not isinstance(dump_digest, str):
+        raise RuntimeError("교체 대상 clone checkpoint dump 값이 없습니다")
+    _require_pattern(filename, _CHECKPOINT_DUMP_RE, "checkpoint dump filename")
+    _require_pattern(dump_digest, _SHA256_RE, "dump SHA256")
+    if not isinstance(dump_size, int) or isinstance(dump_size, bool) or dump_size < 1:
+        raise RuntimeError("교체 대상 clone checkpoint dump size가 올바르지 않습니다")
+    _validated_snapshot_object(checkpoint.get("baseline"), label="legacy baseline")
+    print(filename)
 
 
 def verify_checkpoint(args: argparse.Namespace) -> None:
@@ -483,15 +546,36 @@ def _purge_counts(path: Path) -> dict[str, int]:
         or not isinstance(evidence.get("foreign_key_constraints_checked"), int)
         or evidence["foreign_key_constraints_checked"] < 1
         or not isinstance(purged, dict)
-        or set(purged) != {"change_requests", "features"}
+        or set(purged) != {"change_requests", "feature_versions", "features"}
         or not all(
             isinstance(value, int) and not isinstance(value, bool) and value >= 0
             for value in purged.values()
         )
         or purged["features"] > 6
+        or purged["feature_versions"] > 13
     ):
         raise RuntimeError("recovery purge evidence가 예상과 다릅니다")
     return purged
+
+
+def _audit_cleanup_counts(path: Path) -> dict[str, int]:
+    evidence = _load_object(path)
+    deleted = evidence.get("deleted")
+    if (
+        set(evidence) != {"action", "deleted", "version"}
+        or evidence.get("version") != 1
+        or evidence.get("action") != "audit-cleanup"
+        or not isinstance(deleted, dict)
+        or set(deleted) != {"admin_auth_events", "api_call_log"}
+        or not all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in deleted.values()
+        )
+        or deleted["admin_auth_events"] > 16
+        or deleted["api_call_log"] != 0
+    ):
+        raise RuntimeError("operational audit cleanup evidence가 예상과 다릅니다")
+    return deleted
 
 
 def _report_counts(path: Path) -> dict[str, int]:
@@ -697,7 +781,10 @@ def _build_result(
         {"features": 0, "price_values": 0, "weather_values": 0},
         expected_foreign_key_references=0,
     )
-    purge = {"change_requests": 0, "features": 0}
+    audit_cleanup = _audit_cleanup_counts(
+        runtime / "operational-audit-cleanup.json"
+    )
+    purge = {"change_requests": 0, "feature_versions": 0, "features": 0}
     if "recovery-hard-purge-running" in phase_history:
         purge = _purge_counts(runtime / "direct-purge-interrupted.json")
     tests = {
@@ -713,7 +800,12 @@ def _build_result(
         "cleanup": {
             "foreign_key_references": cleanup["foreign_key_references"],
             "owned_features": cleanup["counts"]["features"],
+            "operational_auth_events_deleted": audit_cleanup[
+                "admin_auth_events"
+            ],
+            "operational_api_call_logs_deleted": audit_cleanup["api_call_log"],
             "recovery_purged_change_requests": purge["change_requests"],
+            "recovery_purged_feature_versions": purge["feature_versions"],
             "recovery_purged_features": purge["features"],
             "api_owned_active_features": final["active_owned_features"],
             "api_owned_nonterminal_change_requests": final[
@@ -840,6 +932,7 @@ def main() -> None:
     checkpoint.add_argument("--dump-sha256", required=True)
     checkpoint.add_argument("--dump-size", required=True, type=int)
     checkpoint.add_argument("--path", required=True)
+    checkpoint.add_argument("--restored-snapshot", required=True)
     checkpoint.add_argument("--snapshot", required=True)
     checkpoint.set_defaults(handler=write_checkpoint)
 
@@ -856,6 +949,10 @@ def main() -> None:
         required=True,
     )
     checkpoint_read.set_defaults(handler=read_checkpoint)
+
+    replaced_checkpoint = subparsers.add_parser("read-replaced-checkpoint-dump")
+    replaced_checkpoint.add_argument("--checkpoint", required=True)
+    replaced_checkpoint.set_defaults(handler=read_replaced_checkpoint_dump)
 
     checkpoint_verify = subparsers.add_parser("verify-checkpoint")
     checkpoint_verify.add_argument("--allow-owned-drift", action="store_true")

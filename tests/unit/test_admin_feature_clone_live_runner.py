@@ -167,6 +167,8 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
         "1024",
         "--path",
         str(checkpoint),
+        "--restored-snapshot",
+        str(startup),
         "--snapshot",
         str(startup),
     )
@@ -209,6 +211,16 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
         runtime / "direct-cleanup.json", features=0, weather=0, price=0
     )
     _write_fixture(runtime / "direct-audit.json", features=0, weather=0, price=0)
+    (runtime / "operational-audit-cleanup.json").write_text(
+        json.dumps(
+            {
+                "action": "audit-cleanup",
+                "deleted": {"admin_auth_events": 2, "api_call_log": 0},
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
     _write_report(runtime / "playwright-main")
     _write_report(runtime / "playwright-recovery")
     _run_helper(
@@ -291,9 +303,12 @@ def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
         "api_owned_active_features": 0,
         "api_owned_nonterminal_change_requests": 0,
         "foreign_key_references": 0,
+        "operational_api_call_logs_deleted": 0,
+        "operational_auth_events_deleted": 2,
         "owned_features": 0,
         "post_cleanup_audit_features": 0,
         "recovery_purged_change_requests": 0,
+        "recovery_purged_feature_versions": 0,
         "recovery_purged_features": 0,
     }
 
@@ -329,7 +344,11 @@ def test_recovered_result_preserves_hard_purge_evidence(tmp_path: Path) -> None:
                 },
                 "foreign_key_constraints_checked": 12,
                 "foreign_key_references": 0,
-                "purged": {"change_requests": 9, "features": 4},
+                "purged": {
+                    "change_requests": 9,
+                    "feature_versions": 8,
+                    "features": 4,
+                },
                 "version": 1,
             }
         ),
@@ -345,6 +364,7 @@ def test_recovered_result_preserves_hard_purge_evidence(tmp_path: Path) -> None:
     ]
     assert payload["cleanup"]["recovery_purged_features"] == 4
     assert payload["cleanup"]["recovery_purged_change_requests"] == 9
+    assert payload["cleanup"]["recovery_purged_feature_versions"] == 8
 
 
 @pytest.mark.parametrize(
@@ -482,6 +502,33 @@ def test_checkpoint_allows_only_owned_count_drift_when_requested(
     assert len(owned_drift.stdout.strip()) == 64
 
 
+def test_checkpoint_rejects_dump_restore_snapshot_drift(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline.json"
+    restored = tmp_path / "restored.json"
+    _write_snapshot(baseline, total=120)
+    _write_snapshot(restored, total=121)
+
+    completed = _run_helper(
+        "write-checkpoint",
+        "--dump-filename",
+        _DUMP_FILENAME,
+        "--dump-sha256",
+        _DUMP_SHA256,
+        "--dump-size",
+        "1024",
+        "--path",
+        str(tmp_path / "checkpoint.json"),
+        "--restored-snapshot",
+        str(restored),
+        "--snapshot",
+        str(baseline),
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert "복원 검증 snapshot" in completed.stderr
+
+
 def test_runner_closes_reviewed_trust_boundaries() -> None:
     source = _RUNNER.read_text(encoding="utf-8")
     recovery_source = source.split(
@@ -508,11 +555,17 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "--build-arg NEXT_PUBLIC_VWORLD_API_KEY" in source
     assert "schema_sha256" in source
     assert "content_sha256" in source
-    assert "hash_record_extended" in source
+    assert "hashtextextended(to_jsonb(row_value)::text" in source
+    assert "attribute.attidentity" in source
+    assert "attribute.attgenerated" in source
+    assert "trigger_row.tgenabled" in source
     assert "pg_get_functiondef" in source
     assert "pg_get_viewdef" in source
     assert "pg_catalog.pg_policy" in source
     assert "pg_dump --format=custom" in source
+    assert "pg_restore --exit-on-error --single-transaction" in source
+    assert "--restored-snapshot" in source
+    assert "fsync_file_and_directory" in source
     assert "verify_checkpoint_dump" in source
     assert "docker network create --internal" in source
     assert "'{{.Internal}}'" in source

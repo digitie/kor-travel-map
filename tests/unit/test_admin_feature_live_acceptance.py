@@ -554,6 +554,9 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert cleanup.count("DELETE FROM feature.features") == 1
     assert purge.count("DELETE FROM feature.features") == 1
     assert "DELETE FROM ops.feature_change_requests" in purge
+    assert "FROM feature.feature_versions" in purge
+    assert "purge 대상 Feature version payload가 다릅니다" in purge
+    assert '"feature_versions": len(version_rows)' in purge
 
 
 def test_browser_lane_covers_nonpublic_bbox_and_stale_raw_etag() -> None:

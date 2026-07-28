@@ -245,6 +245,7 @@ done < <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$D
 [[ "$db_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "clone DB name is invalid"
 [[ -n "$db_password" && "$db_password" != *$'\n'* && "$db_password" != *$'\r'* ]] ||
   die "clone DB password is invalid"
+readonly ORIGINAL_DB_NAME="$db_name"
 
 psql_query() {
   local query="$1"
@@ -299,6 +300,8 @@ COPY (
       attribute.attnum::text || ':' || attribute.attname || ':' ||
       pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) || ':' ||
       attribute.attnotnull::text || ':' ||
+      attribute.attidentity::text || ':' ||
+      attribute.attgenerated::text || ':' ||
       COALESCE(pg_catalog.pg_get_expr(default_row.adbin, default_row.adrelid), '')
         AS definition
     FROM pg_catalog.pg_attribute AS attribute
@@ -355,6 +358,7 @@ COPY (
     SELECT
       'trigger', namespace.nspname, relation.relname,
       trigger_row.tgname || ':' ||
+      trigger_row.tgenabled::text || ':' ||
       pg_catalog.pg_get_triggerdef(trigger_row.oid, true)
     FROM pg_catalog.pg_trigger AS trigger_row
     JOIN pg_catalog.pg_class AS relation ON relation.oid = trigger_row.tgrelid
@@ -425,7 +429,7 @@ COPY (
       'policy',
       namespace.nspname,
       relation.relname,
-      policy.polname || ':' || policy.polcmd || ':' ||
+      policy.polname || ':' || policy.polcmd::text || ':' ||
         policy.polroles::text || ':' ||
         COALESCE(
           pg_catalog.pg_get_expr(policy.polqual, policy.polrelid, true),
@@ -477,37 +481,40 @@ content_sha256() {
     die "content digest cutoff is invalid"
   local statement_query statements
   statement_query="$(cat <<SQL
-SELECT format(
-  'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
-  'COALESCE(bit_xor(hash_record_extended(row_value, 0))::text, ''null'') || ' ||
-  'chr(31) || COALESCE(bit_xor(hash_record_extended(' ||
-  'row_value, 9223372036854775807))::text, ''null'') ' ||
-  'FROM %I.%I AS row_value%s;',
-  namespace.nspname || '.' || relation.relname,
-  namespace.nspname,
-  relation.relname,
-  CASE
-    WHEN EXISTS (
-      SELECT 1
-      FROM pg_catalog.pg_attribute AS attribute
-      WHERE attribute.attrelid = relation.oid
-        AND attribute.attname = 'feature_id'
-        AND attribute.attnum > 0
-        AND NOT attribute.attisdropped
-    ) THEN format(
-      ' WHERE row_value.feature_id NOT LIKE %L ESCAPE %L',
-      'e2e_live_acceptance::${run_id}::%',
-      '\\'
-    )
-    WHEN namespace.nspname = 'ops'
-      AND relation.relname IN ('admin_auth_events', 'api_call_log')
-    THEN format(
-      ' WHERE row_value.created_at < %L::timestamptz',
-      '${CONTENT_CUTOFF}'
-    )
-    ELSE ''
-  END
-)
+SELECT CASE
+  WHEN relation.relkind = 'S' THEN format(
+    'SELECT %L || chr(31) || ''1'' || chr(31) || last_value::text || ' ||
+    'chr(31) || is_called::text FROM %I.%I;',
+    namespace.nspname || '.' || relation.relname,
+    namespace.nspname,
+    relation.relname
+  )
+  ELSE format(
+    'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
+    'COALESCE(bit_xor(hashtextextended(to_jsonb(row_value)::text, 0))::text, ''null'') || ' ||
+    'chr(31) || COALESCE(bit_xor(hashtextextended(to_jsonb(row_value)::text, ' ||
+    '9223372036854775807))::text, ''null'') ' ||
+    'FROM %I.%I AS row_value%s;',
+    namespace.nspname || '.' || relation.relname,
+    namespace.nspname,
+    relation.relname,
+    CASE
+      WHEN EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_attribute AS attribute
+        WHERE attribute.attrelid = relation.oid
+          AND attribute.attname = 'feature_id'
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped
+      ) THEN format(
+        ' WHERE row_value.feature_id NOT LIKE %L ESCAPE %L',
+        'e2e_live_acceptance::${run_id}::%',
+        chr(92)
+      )
+      ELSE ''
+    END
+  )
+END
 FROM pg_catalog.pg_class AS relation
 JOIN pg_catalog.pg_namespace AS namespace
   ON namespace.oid = relation.relnamespace
@@ -622,6 +629,10 @@ API_CONTAINER=""
 UI_CONTAINER=""
 FIXTURE_HELPER="$SCRIPT_DIR/admin_feature_live_fixture.py"
 NEW_CHECKPOINT_DUMP=""
+CHECKPOINT_SNAPSHOT=""
+RESTORED_CHECKPOINT_SNAPSHOT=""
+OLD_CHECKPOINT_DUMP=""
+VERIFICATION_DB=""
 BLOCKED_WRITTEN=0
 COMPLETE=0
 
@@ -787,6 +798,81 @@ verify_dump_archive() {
     --list /checkpoint.dump >/dev/null
 }
 
+fsync_file_and_directory() {
+  local path="$1"
+  KTM_FSYNC_PATH="$path" python3 -I -B -c '
+import os
+from pathlib import Path
+
+path = Path(os.environ["KTM_FSYNC_PATH"])
+descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+'
+}
+
+drop_verification_database() {
+  [[ -n "$VERIFICATION_DB" ]] || return 0
+  [[ "$VERIFICATION_DB" =~ ^ktm_checkpoint_[0-9a-f]{12}$ ]] ||
+    die "checkpoint verification DB name is unsafe"
+  db_name="$ORIGINAL_DB_NAME"
+  PGPASSWORD="$db_password" docker exec -e PGPASSWORD "$DB_CONTAINER" \
+    dropdb --if-exists --force -U "$db_user" "$VERIFICATION_DB"
+  VERIFICATION_DB=""
+}
+
+verify_dump_restore() {
+  local dump_path="$1"
+  local restored_snapshot="$2"
+  VERIFICATION_DB="ktm_checkpoint_${RUN_KEY:0:12}"
+  [[ "$(psql_value "SELECT count(*) FROM pg_database WHERE datname = '$VERIFICATION_DB'")" == "0" ]] ||
+    die "checkpoint verification DB already exists"
+  PGPASSWORD="$db_password" docker exec -e PGPASSWORD "$DB_CONTAINER" \
+    createdb -U "$db_user" --template=template0 "$VERIFICATION_DB"
+  PGPASSWORD="$db_password" docker exec -i -e PGPASSWORD "$DB_CONTAINER" \
+    pg_restore --exit-on-error --single-transaction --no-owner --no-privileges \
+    -U "$db_user" -d "$VERIFICATION_DB" <"$dump_path"
+  db_name="$VERIFICATION_DB"
+  write_snapshot "$restored_snapshot" "$RUN_ID"
+  db_name="$ORIGINAL_DB_NAME"
+  drop_verification_database
+}
+
+checkpoint_references_dump() {
+  local dump_path="$1"
+  local filename
+  [[ -f "$CHECKPOINT_FILE" && ! -L "$CHECKPOINT_FILE" ]] || return 1
+  filename="$(
+    state_helper read-checkpoint \
+      --checkpoint "$CHECKPOINT_FILE" --field dump_filename 2>/dev/null
+  )" || return 1
+  [[ "$STATE_ROOT/$filename" == "$dump_path" ]]
+}
+
+remove_unreferenced_checkpoint_dumps() {
+  local dump_path
+  while IFS= read -r -d '' dump_path; do
+    [[ "$dump_path" == "$NEW_CHECKPOINT_DUMP" ]] && continue
+    [[ "$dump_path" =~ ^${STATE_ROOT}/clone-checkpoint-[0-9a-f]{64}\.dump$ &&
+       -f "$dump_path" && ! -L "$dump_path" ]] ||
+      die "unreferenced checkpoint dump path is unsafe"
+    [[ "$(stat -c '%u:%g:%a' -- "$dump_path")" == "0:0:600" ]] ||
+      die "unreferenced checkpoint dump metadata is unsafe"
+    rm -- "$dump_path"
+  done < <(
+    find "$STATE_ROOT" -maxdepth 1 -type f \
+      -name 'clone-checkpoint-????????????????????????????????????????????????????????????????.dump' \
+      -print0
+  )
+}
+
 verify_checkpoint_dump() {
   local checkpoint_path="$1"
   local filename expected_sha expected_size dump_path
@@ -828,6 +914,7 @@ cleanup_on_exit() {
   if [[ -n "$TEMPORARY" && -d "$TEMPORARY" ]]; then
     safe_remove_temporary "$TEMPORARY"
   fi
+  drop_verification_database
   if (( BLOCKED_WRITTEN == 0 && COMPLETE == 0 )) &&
     [[ -n "$RUNTIME_DIR" && -d "$RUNTIME_DIR" ]]; then
     rm -rf -- "$RUNTIME_DIR"
@@ -835,8 +922,22 @@ cleanup_on_exit() {
   if (( COMPLETE == 0 )) &&
     [[ -n "$NEW_CHECKPOINT_DUMP" &&
        "$NEW_CHECKPOINT_DUMP" == "$STATE_ROOT"/clone-checkpoint-*.dump &&
-       -f "$NEW_CHECKPOINT_DUMP" && ! -L "$NEW_CHECKPOINT_DUMP" ]]; then
+       -f "$NEW_CHECKPOINT_DUMP" && ! -L "$NEW_CHECKPOINT_DUMP" ]] &&
+    ! checkpoint_references_dump "$NEW_CHECKPOINT_DUMP"; then
     rm -f -- "$NEW_CHECKPOINT_DUMP"
+  fi
+  if (( COMPLETE == 0 )) &&
+    [[ -n "$CHECKPOINT_SNAPSHOT" &&
+       "$CHECKPOINT_SNAPSHOT" == "$STATE_ROOT"/.clone-checkpoint-snapshot-*.json &&
+       -f "$CHECKPOINT_SNAPSHOT" && ! -L "$CHECKPOINT_SNAPSHOT" ]]; then
+    rm -f -- "$CHECKPOINT_SNAPSHOT"
+  fi
+  if (( COMPLETE == 0 )) &&
+    [[ -n "$RESTORED_CHECKPOINT_SNAPSHOT" &&
+       "$RESTORED_CHECKPOINT_SNAPSHOT" == "$STATE_ROOT"/.clone-checkpoint-restored-*.json &&
+       -f "$RESTORED_CHECKPOINT_SNAPSHOT" &&
+       ! -L "$RESTORED_CHECKPOINT_SNAPSHOT" ]]; then
+    rm -f -- "$RESTORED_CHECKPOINT_SNAPSHOT"
   fi
   exit "$status"
 }
@@ -864,6 +965,13 @@ if [[ "$MODE" == "checkpoint" ]]; then
     psql_value \
       "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')"
   )"
+  CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-snapshot-$$.json"
+  RESTORED_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-restored-$$.json"
+  write_snapshot "$CHECKPOINT_SNAPSHOT" "$RUN_ID"
+  [[ "$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND status <> 'deleted'")" == "0" ]] ||
+    die "clone checkpoint has active acceptance Feature residue"
+  [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND state = 'pending'")" == "0" ]] ||
+    die "clone checkpoint has pending acceptance change request residue"
   [[ "$(foreign_db_sessions)" == "0" ]] ||
     die "clone DB has a foreign client session before checkpoint dump"
   NEW_CHECKPOINT_DUMP="$STATE_ROOT/clone-checkpoint-$RUN_KEY.dump"
@@ -875,29 +983,44 @@ if [[ "$MODE" == "checkpoint" ]]; then
     >"$NEW_CHECKPOINT_DUMP"
   chown root:root -- "$NEW_CHECKPOINT_DUMP"
   chmod 0600 -- "$NEW_CHECKPOINT_DUMP"
+  fsync_file_and_directory "$NEW_CHECKPOINT_DUMP"
   [[ "$(foreign_db_sessions)" == "0" ]] ||
     die "clone DB has a foreign client session after checkpoint dump"
   verify_dump_archive "$NEW_CHECKPOINT_DUMP"
-  checkpoint_snapshot="$STATE_ROOT/.clone-checkpoint-snapshot-$$.json"
-  write_snapshot "$checkpoint_snapshot" "$RUN_ID"
-  [[ "$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND status <> 'deleted'")" == "0" ]] ||
-    die "clone checkpoint has active acceptance Feature residue"
-  [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND state = 'pending'")" == "0" ]] ||
-    die "clone checkpoint has pending acceptance change request residue"
   dump_before="$(stat -Lc '%d:%i:%s:%Y' -- "$NEW_CHECKPOINT_DUMP")"
   dump_size="$(stat -Lc '%s' -- "$NEW_CHECKPOINT_DUMP")"
   dump_sha256="$(sha256sum -- "$NEW_CHECKPOINT_DUMP" | awk '{print $1}')"
   [[ "$(stat -Lc '%d:%i:%s:%Y' -- "$NEW_CHECKPOINT_DUMP")" == "$dump_before" ]] ||
     die "clone dump changed during checkpoint hashing"
+  verify_dump_restore "$NEW_CHECKPOINT_DUMP" "$RESTORED_CHECKPOINT_SNAPSHOT"
+  [[ "$(stat -Lc '%d:%i:%s:%Y' -- "$NEW_CHECKPOINT_DUMP")" == "$dump_before" ]] ||
+    die "clone dump changed during restore verification"
+  [[ "$(sha256sum -- "$NEW_CHECKPOINT_DUMP" | awk '{print $1}')" == "$dump_sha256" ]] ||
+    die "clone dump digest changed during restore verification"
+  if [[ -f "$CHECKPOINT_FILE" && ! -L "$CHECKPOINT_FILE" ]]; then
+    old_dump_filename="$(
+      state_helper read-replaced-checkpoint-dump --checkpoint "$CHECKPOINT_FILE"
+    )"
+    OLD_CHECKPOINT_DUMP="$STATE_ROOT/$old_dump_filename"
+    [[ "$OLD_CHECKPOINT_DUMP" == "$STATE_ROOT"/clone-checkpoint-*.dump ]] ||
+      die "replaced checkpoint dump path is unsafe"
+  fi
   state_helper write-checkpoint \
     --dump-filename "$(basename -- "$NEW_CHECKPOINT_DUMP")" \
     --dump-sha256 "$dump_sha256" \
     --dump-size "$dump_size" \
     --path "$CHECKPOINT_FILE" \
-    --snapshot "$checkpoint_snapshot"
-  rm -- "$checkpoint_snapshot"
-  remove_owned_images
+    --restored-snapshot "$RESTORED_CHECKPOINT_SNAPSHOT" \
+    --snapshot "$CHECKPOINT_SNAPSHOT"
   COMPLETE=1
+  rm -- "$CHECKPOINT_SNAPSHOT" "$RESTORED_CHECKPOINT_SNAPSHOT"
+  if [[ -n "$OLD_CHECKPOINT_DUMP" &&
+        "$OLD_CHECKPOINT_DUMP" != "$NEW_CHECKPOINT_DUMP" &&
+        -f "$OLD_CHECKPOINT_DUMP" && ! -L "$OLD_CHECKPOINT_DUMP" ]]; then
+    rm -- "$OLD_CHECKPOINT_DUMP"
+  fi
+  remove_unreferenced_checkpoint_dumps
+  remove_owned_images
   printf 'admin feature clone live checkpoint complete: source=%s checkpoint=%s\n' \
     "$SOURCE_COMMIT" "$CHECKPOINT_FILE"
   exit 0
@@ -1056,6 +1179,12 @@ run_helper() {
   local action="$1"
   local output="$2"
   local name="ktm-afcla-${RUN_KEY:0:12}-helper-$action"
+  local -a helper_args=(
+    /opt/admin-feature-live-fixture.py "$action" --run-id "$RUN_ID"
+  )
+  if [[ "$action" == "audit-cleanup" ]]; then
+    helper_args+=(--content-cutoff "$CONTENT_CUTOFF")
+  fi
   docker run --rm \
     --name "$name" \
     --label "io.kortravelmap.admin-feature-clone-acceptance.run-key=$RUN_KEY" \
@@ -1068,7 +1197,7 @@ run_helper() {
     --mount "type=bind,src=$FIXTURE_HELPER,dst=/opt/admin-feature-live-fixture.py,readonly" \
     --entrypoint python \
     "$API_IMAGE_ID" \
-    /opt/admin-feature-live-fixture.py "$action" --run-id "$RUN_ID" >"$output"
+    "${helper_args[@]}" >"$output"
   chmod 0600 -- "$output"
 }
 
@@ -1172,6 +1301,9 @@ run_acceptance_from_fixture() {
   state_helper update-blocked --path "$BLOCKED_FILE" --phase direct-cleanup-running
   run_helper cleanup "$RUNTIME_DIR/direct-cleanup.json"
   run_helper audit "$RUNTIME_DIR/direct-audit.json"
+  state_helper update-blocked \
+    --path "$BLOCKED_FILE" --phase operational-audit-cleanup-running
+  run_helper audit-cleanup "$RUNTIME_DIR/operational-audit-cleanup.json"
   write_snapshot "$RUNTIME_DIR/clone-final.json" "$RUN_ID"
   (( main_status == 0 && recovery_status == 0 )) || {
     state_helper update-blocked --path "$BLOCKED_FILE" --phase test-failed-restored

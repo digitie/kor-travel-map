@@ -15,7 +15,7 @@ import hashlib
 import json
 import math
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Final
 
@@ -30,6 +30,9 @@ from kortravelmap.infra.db import make_async_engine
 from kortravelmap.settings import KorTravelMapSettings
 
 _RUN_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
+_UTC_TIMESTAMP_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$"
+)
 _LON: Final[float] = 127.5
 _LAT: Final[float] = 36.5
 
@@ -527,7 +530,7 @@ async def _purge_api_owned(
             text(
                 """
                 SELECT
-                  feature_id, action, state, review_mode, reason,
+                  request_id, feature_id, action, state, review_mode, reason,
                   requested_by, reviewed_by
                 FROM ops.feature_change_requests
                 WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
@@ -539,6 +542,7 @@ async def _purge_api_owned(
         )
     ).mappings().all()
     reason_prefix = f"admin feature live acceptance {run_id} "
+    requests_by_id: dict[str, tuple[str, str, str]] = {}
     for request in request_rows:
         if (
             request["feature_id"] not in expected
@@ -551,6 +555,91 @@ async def _purge_api_owned(
             or request["reviewed_by"] != "admin"
         ):
             raise RuntimeError("purge 대상 change request fingerprint가 다릅니다")
+        request_id = str(request["request_id"])
+        if request_id in requests_by_id:
+            raise RuntimeError("purge 대상 change request ID가 중복됩니다")
+        requests_by_id[request_id] = (
+            str(request["feature_id"]),
+            str(request["action"]),
+            str(request["state"]),
+        )
+
+    version_rows = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  feature_id, version, origin, change_kind, payload,
+                  request_id, created_by
+                FROM feature.feature_versions
+                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                ORDER BY feature_id, version
+                FOR UPDATE
+                """
+            ),
+            {"feature_ids": list(feature_ids)},
+        )
+    ).mappings().all()
+    changes_by_feature: dict[str, list[str]] = {}
+    for version_row in version_rows:
+        feature_id = str(version_row["feature_id"])
+        fingerprint = expected.get(feature_id)
+        payload = version_row["payload"]
+        version = int(version_row["version"])
+        change_kind = str(version_row["change_kind"])
+        linked_request = requests_by_id.get(str(version_row["request_id"]))
+        if (
+            fingerprint is None
+            or not isinstance(payload, dict)
+            or version < 1
+            or version_row["origin"] != "user_request"
+            or change_kind not in {"add", "update", "delete"}
+            or version_row["created_by"] != "admin"
+            or linked_request != (feature_id, change_kind, "applied")
+        ):
+            raise RuntimeError("purge 대상 Feature version 소유권이 다릅니다")
+        expected_lon, expected_lat, expected_names = fingerprint
+        if (
+            payload.get("feature_id") != feature_id
+            or payload.get("kind") != "place"
+            or payload.get("category") != "01070300"
+            or payload.get("data_origin") != "user_request"
+            or payload.get("marker_icon") != "marker"
+            or payload.get("marker_color") != "P-02"
+            or payload.get("coord_precision_digits") != 6
+            or payload.get("data_version") != version
+            or payload.get("user_change_kind") != change_kind
+            or payload.get("user_change_status") != "applied"
+            or payload.get("name") not in expected_names
+            or payload.get("status")
+            != ("deleted" if change_kind == "delete" else "active")
+            or not isinstance(payload.get("lon"), (int, float))
+            or not isinstance(payload.get("lat"), (int, float))
+            or not math.isclose(
+                float(payload["lon"]), expected_lon, rel_tol=0, abs_tol=1e-9
+            )
+            or not math.isclose(
+                float(payload["lat"]), expected_lat, rel_tol=0, abs_tol=1e-9
+            )
+        ):
+            raise RuntimeError("purge 대상 Feature version payload가 다릅니다")
+        changes_by_feature.setdefault(feature_id, []).append(change_kind)
+
+    for feature_id, changes in changes_by_feature.items():
+        expected_sequence = ["add", "delete"]
+        if feature_id.endswith("::correction") and "update" in changes:
+            expected_sequence = ["add", "update", "delete"]
+        versions = [
+            int(row["version"])
+            for row in version_rows
+            if str(row["feature_id"]) == feature_id
+        ]
+        if changes != expected_sequence or versions != list(
+            range(1, len(changes) + 1)
+        ):
+            raise RuntimeError("purge 대상 Feature version 이력이 예상과 다릅니다")
+    if set(changes_by_feature) != {str(row["feature_id"]) for row in rows}:
+        raise RuntimeError("purge 대상 Feature와 version 이력이 일치하지 않습니다")
 
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     unexpected_references = {
@@ -560,6 +649,10 @@ async def _purge_api_owned(
     }
     if unexpected_references:
         raise RuntimeError("purge 대상 Feature에 예상하지 않은 FK reference가 있습니다")
+    if foreign_keys.get("feature.feature_versions.feature_id", 0) != len(
+        version_rows
+    ):
+        raise RuntimeError("purge 대상 Feature version FK 수가 다릅니다")
 
     await session.execute(
         text(
@@ -611,17 +704,115 @@ async def _purge_api_owned(
     )
     if remaining_features or remaining_requests:
         raise RuntimeError("API-owned purge가 완결되지 않았습니다")
+    remaining_foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
+    if any(remaining_foreign_keys.values()):
+        raise RuntimeError("API-owned purge 뒤 FK reference가 남았습니다")
     return (
         {"features": 0, "price_values": 0, "weather_values": 0},
-        foreign_keys,
+        remaining_foreign_keys,
         {
             "change_requests": len(request_rows),
+            "feature_versions": len(version_rows),
             "features": len(rows),
         },
     )
 
 
-async def _run(action: str, run_id: str) -> dict[str, object]:
+async def _cleanup_operational_audit(
+    session: AsyncSession,
+    content_cutoff: datetime,
+) -> dict[str, int]:
+    auth_rows = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  auth_event_id, event_type, outcome, attempted_username,
+                  actor, reason, next_path, client_ip, user_agent, request_id
+                FROM ops.admin_auth_events
+                WHERE created_at >= :content_cutoff
+                ORDER BY created_at, auth_event_id
+                FOR UPDATE
+                """
+            ),
+            {"content_cutoff": content_cutoff},
+        )
+    ).mappings().all()
+    if len(auth_rows) > 16:
+        raise RuntimeError("인수 이후 admin 인증 감사행이 예상 상한을 넘었습니다")
+    for row in auth_rows:
+        if (
+            row["event_type"] != "login"
+            or row["outcome"] != "succeeded"
+            or row["attempted_username"] != "admin"
+            or row["actor"] != "ui-auth"
+            or row["reason"] != "authenticated"
+            or row["next_path"] != "/"
+            or row["client_ip"] is not None
+            or row["request_id"] is not None
+            or not isinstance(row["user_agent"], str)
+            or not row["user_agent"].startswith("Mozilla/5.0 ")
+        ):
+            raise RuntimeError("인수 이후 admin 인증 감사행 소유권이 다릅니다")
+
+    api_call_count = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM ops.api_call_log
+                    WHERE created_at >= :content_cutoff
+                    """
+                ),
+                {"content_cutoff": content_cutoff},
+            )
+        )
+        .scalars()
+        .one()
+    )
+    if api_call_count:
+        raise RuntimeError("인수 이후 예상하지 않은 API 호출 감사행이 있습니다")
+
+    if auth_rows:
+        await session.execute(
+            text(
+                """
+                DELETE FROM ops.admin_auth_events
+                WHERE auth_event_id = ANY(CAST(:auth_event_ids AS uuid[]))
+                """
+            ),
+            {"auth_event_ids": [str(row["auth_event_id"]) for row in auth_rows]},
+        )
+    remaining = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM ops.admin_auth_events
+                    WHERE created_at >= :content_cutoff
+                    """
+                ),
+                {"content_cutoff": content_cutoff},
+            )
+        )
+        .scalars()
+        .one()
+    )
+    if remaining:
+        raise RuntimeError("인수 admin 인증 감사행 cleanup이 완결되지 않았습니다")
+    return {
+        "admin_auth_events": len(auth_rows),
+        "api_call_log": api_call_count,
+    }
+
+
+async def _run(
+    action: str,
+    run_id: str,
+    content_cutoff: datetime | None,
+) -> dict[str, object]:
     settings = KorTravelMapSettings()
     # make_async_engine은 normalize_async_dsn으로 plain `postgresql://` DSN도
     # asyncpg dialect로 정규화한다. raw create_async_engine을 쓰면 배포 env가
@@ -639,6 +830,13 @@ async def _run(action: str, run_id: str) -> dict[str, object]:
                     session,
                     run_id,
                 )
+            elif action == "audit-cleanup":
+                if content_cutoff is None:
+                    raise RuntimeError("audit cleanup에는 content cutoff이 필요합니다")
+                audit_deleted = await _cleanup_operational_audit(
+                    session,
+                    content_cutoff,
+                )
             else:
                 counts, foreign_keys = await _assert_owned_state(
                     session,
@@ -647,13 +845,17 @@ async def _run(action: str, run_id: str) -> dict[str, object]:
                 )
     finally:
         await engine.dispose()
+    if action == "audit-cleanup":
+        return {
+            "action": action,
+            "deleted": audit_deleted,
+            "version": 1,
+        }
     result: dict[str, object] = {
         "action": action,
         "counts": counts,
         "foreign_key_constraints_checked": len(foreign_keys),
-        "foreign_key_references": (
-            0 if action == "purge" else sum(foreign_keys.values())
-        ),
+        "foreign_key_references": sum(foreign_keys.values()),
         "version": 1,
     }
     if action == "purge":
@@ -663,12 +865,30 @@ async def _run(action: str, run_id: str) -> dict[str, object]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("seed", "cleanup", "audit", "purge"))
+    parser.add_argument(
+        "action",
+        choices=("seed", "cleanup", "audit", "purge", "audit-cleanup"),
+    )
+    parser.add_argument("--content-cutoff")
     parser.add_argument("--run-id", required=True)
     args = parser.parse_args()
     if _RUN_ID_RE.fullmatch(args.run_id) is None:
         raise SystemExit("run-id 형식이 올바르지 않습니다")
-    print(json.dumps(asyncio.run(_run(args.action, args.run_id)), sort_keys=True))
+    content_cutoff: datetime | None = None
+    if args.content_cutoff is not None:
+        if _UTC_TIMESTAMP_RE.fullmatch(args.content_cutoff) is None:
+            raise SystemExit("content-cutoff 형식이 올바르지 않습니다")
+        content_cutoff = datetime.fromisoformat(
+            args.content_cutoff.replace("Z", "+00:00")
+        )
+    if (args.action == "audit-cleanup") != (content_cutoff is not None):
+        raise SystemExit("content-cutoff은 audit-cleanup에서만 필요합니다")
+    print(
+        json.dumps(
+            asyncio.run(_run(args.action, args.run_id, content_cutoff)),
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":
