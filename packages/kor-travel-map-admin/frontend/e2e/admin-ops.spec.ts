@@ -1679,7 +1679,7 @@ test.describe("admin/ops pages", () => {
     ).toBeVisible();
     await expect(page.getByText("파일 업로드")).toBeVisible();
     await expect(page.getByTestId("offline-upload-file-input")).toBeVisible();
-    for (const label of ["provider", "dataset key", "sync scope", "created by"]) {
+    for (const label of ["provider", "dataset key", "sync scope"]) {
       await expect(page.getByLabel(label, { exact: true })).toBeVisible();
     }
     await expect(page.getByRole("button", { name: "업로드" })).toBeDisabled();

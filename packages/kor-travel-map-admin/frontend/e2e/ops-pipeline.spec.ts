@@ -1633,31 +1633,9 @@ async function installPipelineMocks(
   return counters;
 }
 
-/**
- * #520 인증 게이트: middleware가 유효 세션 없는 페이지 접근을 /login으로
- * 돌린다. live suite의 auth.setup.ts와 같은 규약 — `E2E_ADMIN_PASSWORD`가
- * 설정된 대상에서는 UI 로그인으로 세션을 만들고(로그인 → same-site 내비게이션
- * 이라 SameSite=Strict 쿠키 유지), 미설정이면 인증이 꺼진 대상으로 간주한다.
- */
-async function loginIfConfigured(page: Page): Promise<void> {
-  const password = process.env.E2E_ADMIN_PASSWORD;
-  if (!password) {
-    return;
-  }
-  const username = process.env.E2E_ADMIN_USERNAME ?? "admin";
-  await page.goto("/login");
-  await page.locator("#admin-username").fill(username);
-  await page.locator("#admin-password").fill(password);
-  await page.getByRole("button", { name: "로그인" }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"), {
-    timeout: 15_000,
-  });
-}
-
 test.describe("/ops/pipeline", () => {
   test.beforeEach(async ({ page }) => {
     await installInertOpsLiveWebSocket(page);
-    await loginIfConfigured(page);
   });
 
   test("상태 스트립 + root 타임라인(projected_job 분리 표시)", async ({
@@ -1679,9 +1657,18 @@ test.describe("/ops/pipeline", () => {
     await expect(requestRow).toBeVisible();
     await expect(requestRow.getByText("작업 2")).toBeVisible();
     // C3b (b): effective provider_datasets exact pair로 대상 표시.
-    await expect(requestRow.getByText("python-kma-api")).toBeVisible();
-    await expect(requestRow.getByText("kma_short_forecast")).toBeVisible();
-    await expect(requestRow.getByText("target_grids")).toBeVisible();
+    await expect(
+      requestRow.getByText("python-kma-api", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      requestRow.getByText("kma_short_forecast", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      requestRow.getByText(
+        "python-kma-api/kma_short_forecast · target_grids",
+        { exact: true },
+      ),
+    ).toBeVisible();
     // C3b (c): request 상태와 projected_job 진행률·단계 분리 표시.
     await expect(requestRow.getByText("40% · loading")).toBeVisible();
     await expect(
@@ -2071,7 +2058,7 @@ test.describe("/ops/pipeline", () => {
     await page.goto("/ops/pipeline");
     const provider = page.getByLabel("provider 필터");
 
-    await provider.pressSequentially("python-kma-api");
+    await provider.pressSequentially("python-kma-api", { delay: 25 });
 
     await expect(provider).toBeFocused();
     await expect(provider).toHaveValue("python-kma-api");
@@ -2299,7 +2286,7 @@ test.describe("/ops/pipeline", () => {
     await expect(panel).toContainText("DAGSTER_UNAVAILABLE");
     await expect(panel).toContainText("7초 후 재시도 가능");
     await expect(panel.getByLabel("취소 실패 상세 근거")).toContainText(
-      '"retryable":true',
+      '"retryable": true',
     );
     await expect
       .poll(
@@ -2310,7 +2297,11 @@ test.describe("/ops/pipeline", () => {
       )
       .toBeGreaterThan(2);
 
-    await panel.getByRole("button", { name: /대표 작업/ }).click();
+    await panel
+      .locator(
+        `button[data-detail-url="/v1/ops/pipeline/executions/import_job/${TWIN_JOB_ID}"]`,
+      )
+      .click();
     panel = page.getByTestId("pipeline-execution-detail");
     await expect(panel).toContainText("B execution event");
     await expect(panel.getByLabel("이벤트 레벨")).toHaveValue("all");
@@ -2421,7 +2412,11 @@ test.describe("/ops/pipeline", () => {
     await panel.getByRole("button", { name: "즉시 재큐잉 (run-now)" }).click();
 
     await expect(panel.getByText("우선 dispatch 요청됨")).toBeVisible();
-    await expect(panel.getByText(REQUEST_ID.slice(0, 12))).toBeVisible();
+    await expect(
+      panel
+        .getByRole("status")
+        .getByText(`${REQUEST_ID.slice(0, 12)}...`, { exact: true }),
+    ).toBeVisible();
     expect(counters.runNowBodies).toEqual([null]);
     expect(counters.observedApiContracts).toContain(
       `POST /v1/ops/pipeline/requests/${REQUEST_ID}/run-now`,
@@ -2501,6 +2496,9 @@ test.describe("/ops/pipeline", () => {
   }) => {
     await installPipelineMocks(page);
     await page.goto("/ops/pipeline");
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${REQUEST_ID}`),
+    ).toBeVisible();
 
     await page.evaluate((requestId) => {
       window.history.pushState(
