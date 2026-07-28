@@ -23,7 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.deps import get_session
+from kortravelmap.api.db import get_session
 from kortravelmap.api.route_policy import _iter_flattened_routes, _resolve_route
 from kortravelmap.api.routers.curated import (
     CuratedFeatureDetailContentView,

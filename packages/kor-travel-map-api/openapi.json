@@ -5445,9 +5445,111 @@
         "title": "CuratedFeatureDetailContentView",
         "type": "object"
       },
+      "CuratedFeatureDetailFeatureSnapshotView": {
+        "additionalProperties": false,
+        "description": "detail-snapshot item의 feature 투영 (T-VN-H07D).\n\n소비자 PinVi가 이 안에서 `name`/`lon`/`lat`/`address`를 직접 읽는다\n(`services/admin_pois.py` label/coord/address 추출기, `api/v1/search.py`의\n`feature_snapshot[\"name\"]` SQL 술어). 생성부가 고정 key로 만들므로 typed view로 고정한다.\n`address`/`detail`은 provider 원본 투영이라 free-form으로 남긴다.",
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "legal_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Dong Code"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Code"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Code"
+          }
+        },
+        "required": [
+          "feature_id",
+          "name",
+          "category",
+          "kind",
+          "lon",
+          "lat",
+          "sido_code",
+          "sigungu_code",
+          "legal_dong_code",
+          "address",
+          "detail"
+        ],
+        "title": "CuratedFeatureDetailFeatureSnapshotView",
+        "type": "object"
+      },
       "CuratedFeatureDetailItemView": {
         "additionalProperties": false,
-        "description": "curated feature detail item.",
+        "description": "curated feature detail item.\n\nT-VN-H07D: `day_index`/`memo`/`source_record_key`는 생성부가 **항상** 내보내는 key인데\ndefault 때문에 스펙상 optional로 표기됐다. snapshot view와 같은 규약(모든 key는 항상 존재,\n값만 nullable)으로 맞춰 default를 제거한다.",
         "properties": {
           "curated_feature_item_id": {
             "title": "Curated Feature Item Id",
@@ -5469,9 +5571,7 @@
             "type": "string"
           },
           "feature_snapshot": {
-            "additionalProperties": true,
-            "title": "Feature Snapshot",
-            "type": "object"
+            "$ref": "#/components/schemas/CuratedFeatureDetailFeatureSnapshotView"
           },
           "memo": {
             "anyOf": [
@@ -5509,7 +5609,10 @@
           "feature_id",
           "relation",
           "sort_order",
-          "feature_snapshot"
+          "day_index",
+          "memo",
+          "feature_snapshot",
+          "source_record_key"
         ],
         "title": "CuratedFeatureDetailItemView",
         "type": "object"
@@ -5533,7 +5636,7 @@
       },
       "CuratedFeatureDetailSnapshotView": {
         "additionalProperties": false,
-        "description": "curated feature detail snapshot.\n\nT-VN-H07D: `theme`/`content`/`source`는 과거 free-form ``dict[str, Any]``이라 OpenAPI에\n`{\"type\": \"object\"}`로만 노출됐고, 소비자(PinVi)가 실제로 의존하는 plan-level 필드를 계약으로\n고정할 방법이 없었다. 생성부가 고정 key로 만드는 값이므로 typed view로 전환한다.\n``items[].feature_snapshot``은 소비자가 통째로 저장만 하고 내부를 읽지 않으므로 opaque\n``dict``로 유지한다.",
+        "description": "curated feature detail snapshot.\n\nT-VN-H07D: `theme`/`content`/`source`는 과거 free-form ``dict[str, Any]``이라 OpenAPI에\n`{\"type\": \"object\"}`로만 노출됐고, 소비자(PinVi)가 실제로 의존하는 plan-level 필드를 계약으로\n고정할 방법이 없었다. 생성부가 고정 key로 만드는 값이므로 typed view로 전환한다.\n``items[].feature_snapshot``도 소비자가 내부 key(`name`/`lon`/`lat`/`address`)를 실제로\n읽으므로 함께 typed view로 고정한다.",
         "properties": {
           "content": {
             "$ref": "#/components/schemas/CuratedFeatureDetailContentView"

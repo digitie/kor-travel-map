@@ -4059,28 +4059,89 @@ export interface components {
             theme_id: string;
         };
         /**
+         * CuratedFeatureDetailContentView
+         * @description detail-snapshot plan-level payload (T-VN-H07D).
+         *
+         *     PinVi curated import(`services/notice_plan.py`)가 plan title/category/summary/destination을
+         *     여기서 읽는다. 모든 key는 항상 존재하며(생성부가 고정 key로 만든다) 값만 nullable이다.
+         */
+        CuratedFeatureDetailContentView: {
+            /** Category */
+            category: string;
+            /** Curation Status */
+            curation_status: string;
+            /** Destination Name */
+            destination_name: string | null;
+            /** Region Code */
+            region_code: string | null;
+            /** Reuse Policy */
+            reuse_policy: string;
+            /** Summary */
+            summary: string | null;
+            /** Title */
+            title: string;
+        };
+        /**
+         * CuratedFeatureDetailFeatureSnapshotView
+         * @description detail-snapshot item의 feature 투영 (T-VN-H07D).
+         *
+         *     소비자 PinVi가 이 안에서 `name`/`lon`/`lat`/`address`를 직접 읽는다
+         *     (`services/admin_pois.py` label/coord/address 추출기, `api/v1/search.py`의
+         *     `feature_snapshot["name"]` SQL 술어). 생성부가 고정 key로 만들므로 typed view로 고정한다.
+         *     `address`/`detail`은 provider 원본 투영이라 free-form으로 남긴다.
+         */
+        CuratedFeatureDetailFeatureSnapshotView: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Category */
+            category: string;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Feature Id */
+            feature_id: string;
+            /** Kind */
+            kind: string;
+            /** Lat */
+            lat: number | null;
+            /** Legal Dong Code */
+            legal_dong_code: string | null;
+            /** Lon */
+            lon: number | null;
+            /** Name */
+            name: string;
+            /** Sido Code */
+            sido_code: string | null;
+            /** Sigungu Code */
+            sigungu_code: string | null;
+        };
+        /**
          * CuratedFeatureDetailItemView
          * @description curated feature detail item.
+         *
+         *     T-VN-H07D: `day_index`/`memo`/`source_record_key`는 생성부가 **항상** 내보내는 key인데
+         *     default 때문에 스펙상 optional로 표기됐다. snapshot view와 같은 규약(모든 key는 항상 존재,
+         *     값만 nullable)으로 맞춰 default를 제거한다.
          */
         CuratedFeatureDetailItemView: {
             /** Curated Feature Item Id */
             curated_feature_item_id: string;
             /** Day Index */
-            day_index?: number | null;
+            day_index: number | null;
             /** Feature Id */
             feature_id: string;
-            /** Feature Snapshot */
-            feature_snapshot: {
-                [key: string]: unknown;
-            };
+            feature_snapshot: components["schemas"]["CuratedFeatureDetailFeatureSnapshotView"];
             /** Memo */
-            memo?: string | null;
+            memo: string | null;
             /** Relation */
             relation: string;
             /** Sort Order */
             sort_order: number;
             /** Source Record Key */
-            source_record_key?: string | null;
+            source_record_key: string | null;
         };
         /** CuratedFeatureDetailSnapshotResponse */
         CuratedFeatureDetailSnapshotResponse: {
@@ -4090,26 +4151,23 @@ export interface components {
         /**
          * CuratedFeatureDetailSnapshotView
          * @description curated feature detail snapshot.
+         *
+         *     T-VN-H07D: `theme`/`content`/`source`는 과거 free-form ``dict[str, Any]``이라 OpenAPI에
+         *     `{"type": "object"}`로만 노출됐고, 소비자(PinVi)가 실제로 의존하는 plan-level 필드를 계약으로
+         *     고정할 방법이 없었다. 생성부가 고정 key로 만드는 값이므로 typed view로 전환한다.
+         *     ``items[].feature_snapshot``도 소비자가 내부 key(`name`/`lon`/`lat`/`address`)를 실제로
+         *     읽으므로 함께 typed view로 고정한다.
          */
         CuratedFeatureDetailSnapshotView: {
-            /** Content */
-            content: {
-                [key: string]: unknown;
-            };
+            content: components["schemas"]["CuratedFeatureDetailContentView"];
             /** Curated Feature Id */
             curated_feature_id: string;
             /** Etag */
             etag: string;
             /** Items */
             items: components["schemas"]["CuratedFeatureDetailItemView"][];
-            /** Source */
-            source: {
-                [key: string]: unknown;
-            };
-            /** Theme */
-            theme: {
-                [key: string]: unknown;
-            };
+            source: components["schemas"]["CuratedFeatureDetailSourceView"];
+            theme: components["schemas"]["CuratedFeatureDetailThemeView"];
             /**
              * Updated At
              * Format: date-time
@@ -4117,6 +4175,30 @@ export interface components {
             updated_at: string;
             /** Version */
             version: number;
+        };
+        /**
+         * CuratedFeatureDetailSourceView
+         * @description detail-snapshot source payload (T-VN-H07D).
+         */
+        CuratedFeatureDetailSourceView: {
+            /** Dataset Key */
+            dataset_key: string;
+            /** Provider */
+            provider: string;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url: string | null;
+        };
+        /**
+         * CuratedFeatureDetailThemeView
+         * @description detail-snapshot theme payload (T-VN-H07D — 소비자 PinVi가 category fallback으로 읽는다).
+         */
+        CuratedFeatureDetailThemeView: {
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
         };
         /** CuratedFeaturePatchRequest */
         CuratedFeaturePatchRequest: {
