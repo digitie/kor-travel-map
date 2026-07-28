@@ -20,11 +20,11 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-
 import {
-  opinetPastPriceLabel,
-  scheduleKstMidnightTicks,
-} from "@/lib/price-freshness";
+  priceMarkerLabel,
+  type ClusterPriceSummaryPoint,
+} from "@/lib/price-marker-label";
+import { scheduleKstMidnightTicks } from "@/lib/price-freshness";
 import {
   buildVWorldStyle,
   getVWorldMaxZoom,
@@ -39,6 +39,11 @@ const GEOMETRY_SOURCE_ID = "kor-feature-geometries";
 const AREA_FILL_LAYER_ID = `${GEOMETRY_SOURCE_ID}-area-fill`;
 const AREA_OUTLINE_LAYER_ID = `${GEOMETRY_SOURCE_ID}-area-outline`;
 const ROUTE_LINE_LAYER_ID = `${GEOMETRY_SOURCE_ID}-route-line`;
+const GEOMETRY_LAYER_IDS = [
+  AREA_FILL_LAYER_ID,
+  AREA_OUTLINE_LAYER_ID,
+  ROUTE_LINE_LAYER_ID,
+] as const;
 
 interface VWorldMapViewProps {
   apiKey: string | undefined;
@@ -89,6 +94,16 @@ export function VWorldMapView({
 }: VWorldMapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const initialMapOptionsRef = useRef({
+    apiKey,
+    center,
+    zoom,
+    layerType,
+    maxZoom,
+    minZoom,
+    navigation,
+    scale,
+  });
   const appliedStyleRef = useRef({ apiKey, layerType });
   const onClickRef = useRef(onClick);
   const onContextMenuRef = useRef(onContextMenu);
@@ -110,18 +125,25 @@ export function VWorldMapView({
 
   useEffect(() => {
     if (containerRef.current === null) return;
+    const initial = initialMapOptionsRef.current;
 
     const nextMap = new maplibregl.Map({
       container: containerRef.current,
-      style: buildVWorldStyle(apiKey, layerType),
-      center,
-      zoom,
-      minZoom,
-      maxZoom: Math.min(maxZoom, getVWorldMaxZoom(layerType)),
+      style: buildVWorldStyle(initial.apiKey, initial.layerType),
+      center: initial.center,
+      zoom: initial.zoom,
+      minZoom: initial.minZoom,
+      maxZoom: Math.min(
+        initial.maxZoom,
+        getVWorldMaxZoom(initial.layerType),
+      ),
       attributionControl: { compact: true },
     });
     mapRef.current = nextMap;
-    appliedStyleRef.current = { apiKey, layerType };
+    appliedStyleRef.current = {
+      apiKey: initial.apiKey,
+      layerType: initial.layerType,
+    };
     setMap(nextMap);
 
     // e2e 훅: 컨테이너 DOM 노드에 map 인스턴스를 매달아 Playwright가
@@ -249,14 +271,14 @@ export function VWorldMapView({
     }
 
     const controls: Array<maplibregl.IControl> = [];
-    if (navigation) {
+    if (initial.navigation) {
       const control = new maplibregl.NavigationControl({
         showCompass: false,
       });
       nextMap.addControl(control, "top-right");
       controls.push(control);
     }
-    if (scale) {
+    if (initial.scale) {
       const control = new maplibregl.ScaleControl({
         maxWidth: 150,
         unit: "metric",
@@ -295,7 +317,6 @@ export function VWorldMapView({
       setMap(null);
     };
     // 지도 인스턴스는 mount 1회만 만들고, 이후 camera는 사용자 조작 결과를 store에 동기화한다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -352,9 +373,11 @@ export function VWorldMarker({
   const onClickRef = useRef(onClick);
   const clickable = onClick !== undefined;
   const [lng, lat] = lngLat;
+  const positionRef = useRef<[number, number]>([lng, lat]);
 
   useLayoutEffect(() => {
     onClickRef.current = onClick;
+    positionRef.current = [lng, lat];
   });
 
   // 마커 DOM은 map 또는 시각 속성(icon/color/size/title)이 바뀔 때만 재생성한다.
@@ -377,7 +400,7 @@ export function VWorldMarker({
     elementRef.current = element;
 
     const marker = new maplibregl.Marker({ element })
-      .setLngLat([lng, lat])
+      .setLngLat(positionRef.current)
       .addTo(map);
     markerRef.current = marker;
 
@@ -386,8 +409,6 @@ export function VWorldMarker({
       markerRef.current = null;
       elementRef.current = null;
     };
-    // lng/lat·selected는 별도 효과로 갱신하므로 deps에서 의도적으로 제외한다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clickable, map, markerIcon, markerColor, size, title]);
 
   // 위치 이동은 마커 재생성 없이 setLngLat로만 반영.
@@ -461,15 +482,6 @@ export interface ClusterFeatureInput {
   weather_summary?: ClusterWeatherSummaryPoint | null;
 }
 
-export interface ClusterPriceSummaryPoint {
-  provider: string;
-  price_domain: string;
-  product_key: string;
-  product_name?: string | null;
-  value_number: number;
-  unit: string;
-  observed_at: string;
-}
 
 interface ClusterWeatherSummaryPoint {
   provider?: string | null;
@@ -506,6 +518,10 @@ type FeatureGeometryFeature = GeoJSON.Feature<
   FeatureMapGeometry,
   FeatureGeometryProperties
 >;
+type FeatureGeometryCollection = GeoJSON.FeatureCollection<
+  FeatureMapGeometry,
+  FeatureGeometryProperties
+>;
 
 function isFeatureMapGeometry(value: unknown): value is FeatureMapGeometry {
   if (typeof value !== "object" || value === null) return false;
@@ -539,65 +555,10 @@ function markerIconForFeature(feature: ClusterFeatureInput): string | null {
   return feature.marker_icon ?? null;
 }
 
-const priceFormatter = new Intl.NumberFormat("ko-KR", {
-  maximumFractionDigits: 0,
-});
 const temperatureFormatter = new Intl.NumberFormat("ko-KR", {
   maximumFractionDigits: 1,
 });
 
-const FUEL_PRICE_ORDER = ["gasoline", "diesel", "premium_gasoline"] as const;
-
-function fuelPriceOrder(productKey: string): number {
-  const index = FUEL_PRICE_ORDER.indexOf(
-    productKey as (typeof FUEL_PRICE_ORDER)[number],
-  );
-  return index === -1 ? 99 : index;
-}
-
-function fuelShortLabel(productKey: string, productName: string | null | undefined) {
-  if (productKey === "gasoline") return "휘";
-  if (productKey === "diesel") return "경";
-  if (productKey === "premium_gasoline") return "고";
-  return productName ?? productKey;
-}
-
-export function priceMarkerLabel(
-  summary: readonly ClusterPriceSummaryPoint[] | null | undefined,
-): string | null {
-  const points = (summary ?? [])
-    .filter((point) => FUEL_PRICE_ORDER.includes(
-      point.product_key as (typeof FUEL_PRICE_ORDER)[number],
-    ))
-    .sort(
-      (a, b) =>
-        fuelPriceOrder(a.product_key) - fuelPriceOrder(b.product_key) ||
-        a.provider.localeCompare(b.provider) ||
-        a.price_domain.localeCompare(b.price_domain),
-    );
-  if (points.length === 0) return null;
-  const countByProduct = new Map<string, number>();
-  for (const point of points) {
-    countByProduct.set(
-      point.product_key,
-      (countByProduct.get(point.product_key) ?? 0) + 1,
-    );
-  }
-  return points
-    .map((point) => {
-      const identity =
-        (countByProduct.get(point.product_key) ?? 0) > 1
-          ? ` ${point.provider}/${point.price_domain}`
-          : "";
-      const price = `${fuelShortLabel(
-        point.product_key,
-        point.product_name,
-      )}${identity} ${priceFormatter.format(point.value_number)}`;
-      const pastLabel = opinetPastPriceLabel([point]);
-      return pastLabel ? `${price} · ${pastLabel}` : price;
-    })
-    .join("\n");
-}
 
 function weatherMarkerLabel(
   summary: ClusterWeatherSummaryPoint | null | undefined,
@@ -874,6 +835,117 @@ function geometryFeature(
   };
 }
 
+function installGeometryLayerLifecycle(
+  map: MapLibreMap,
+  getGeometryData: () => FeatureGeometryCollection,
+  onSelectFeature: (featureId: string) => void,
+): () => void {
+  const ensureGeometryLayers = () => {
+    if (!map.getSource(GEOMETRY_SOURCE_ID)) {
+      map.addSource(GEOMETRY_SOURCE_ID, {
+        type: "geojson",
+        data: getGeometryData(),
+      });
+    }
+    if (!map.getLayer(AREA_FILL_LAYER_ID)) {
+      map.addLayer({
+        id: AREA_FILL_LAYER_ID,
+        type: "fill",
+        source: GEOMETRY_SOURCE_ID,
+        filter: ["==", ["get", "kind"], "area"],
+        paint: {
+          "fill-color": ["get", "color"],
+          "fill-opacity": 0.22,
+        },
+      });
+    }
+    if (!map.getLayer(AREA_OUTLINE_LAYER_ID)) {
+      map.addLayer({
+        id: AREA_OUTLINE_LAYER_ID,
+        type: "line",
+        source: GEOMETRY_SOURCE_ID,
+        filter: ["==", ["get", "kind"], "area"],
+        paint: {
+          "line-color": ["get", "color"],
+          "line-opacity": 0.9,
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8,
+            1.2,
+            14,
+            2.8,
+          ],
+        },
+      });
+    }
+    if (!map.getLayer(ROUTE_LINE_LAYER_ID)) {
+      map.addLayer({
+        id: ROUTE_LINE_LAYER_ID,
+        type: "line",
+        source: GEOMETRY_SOURCE_ID,
+        filter: ["==", ["get", "kind"], "route"],
+        layout: {
+          "line-cap": "round",
+          "line-join": "round",
+        },
+        paint: {
+          "line-color": ["get", "color"],
+          "line-opacity": 0.92,
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8,
+            2,
+            14,
+            4.5,
+          ],
+        },
+      });
+    }
+  };
+  const handleGeometryClick = (event: maplibregl.MapLayerMouseEvent) => {
+    const featureId = event.features?.[0]?.properties?.feature_id;
+    if (typeof featureId === "string") onSelectFeature(featureId);
+  };
+  const handleMouseEnter = () => {
+    map.getCanvas().style.cursor = "pointer";
+  };
+  const handleMouseLeave = () => {
+    map.getCanvas().style.cursor = "";
+  };
+
+  ensureGeometryLayers();
+  for (const layerId of GEOMETRY_LAYER_IDS) {
+    map.on("click", layerId, handleGeometryClick);
+    map.on("mouseenter", layerId, handleMouseEnter);
+    map.on("mouseleave", layerId, handleMouseLeave);
+  }
+  map.on("styledata", ensureGeometryLayers);
+
+  return () => {
+    map.off("styledata", ensureGeometryLayers);
+    for (const layerId of GEOMETRY_LAYER_IDS) {
+      map.off("click", layerId, handleGeometryClick);
+      map.off("mouseenter", layerId, handleMouseEnter);
+      map.off("mouseleave", layerId, handleMouseLeave);
+    }
+    map.getCanvas().style.cursor = "";
+    try {
+      for (const layerId of [...GEOMETRY_LAYER_IDS].reverse()) {
+        if (map.getLayer(layerId)) map.removeLayer(layerId);
+      }
+      if (map.getSource(GEOMETRY_SOURCE_ID)) {
+        map.removeSource(GEOMETRY_SOURCE_ID);
+      }
+    } catch {
+      // 지도가 teardown 중일 수 있다.
+    }
+  };
+}
+
 function createGeometryLabelElement(
   feature: FeatureGeometryFeature,
   onSelectFeature: ((featureId: string) => void) | undefined,
@@ -925,6 +997,52 @@ function abbreviateCount(n: number): string {
   return String(n);
 }
 
+interface ServerClusterMarkerEntry {
+  disposeClick: () => void;
+  marker: MapLibreMarker;
+}
+
+function createServerClusterMarker(
+  map: MapLibreMap,
+  cluster: ServerClusterInput,
+  zoomStep: number,
+  label: string,
+): ServerClusterMarkerEntry {
+  const element = createClusterElement(cluster.feature_count, label);
+  element.dataset.lon = String(cluster.lon);
+  element.dataset.lat = String(cluster.lat);
+  element.dataset.zoomStep = String(zoomStep);
+  const handleClick = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const target: [number, number] = [
+      Number(element.dataset.lon),
+      Number(element.dataset.lat),
+    ];
+    const currentZoomStep = Number(element.dataset.zoomStep);
+    map.easeTo({
+      center: target,
+      zoom: Math.min(
+        map.getMaxZoom(),
+        map.getZoom() + (Number.isFinite(currentZoomStep) ? currentZoomStep : 3),
+      ),
+    });
+  };
+  element.addEventListener("click", handleClick);
+  const marker = new maplibregl.Marker({ element, anchor: "center" })
+    .setLngLat([cluster.lon, cluster.lat])
+    .addTo(map);
+  return {
+    marker,
+    disposeClick: () => element.removeEventListener("click", handleClick),
+  };
+}
+
+function removeServerClusterMarker(entry: ServerClusterMarkerEntry): void {
+  entry.disposeClick();
+  entry.marker.remove();
+}
+
 /**
  * 저zoom 서버측 region 클러스터 렌더(#649). 서버가 행정구역 단위로 rollup한
  * `{cluster_key, feature_count, lon, lat}`를 그대로 DOM 마커(원+카운트)로 그린다.
@@ -940,7 +1058,7 @@ export function VWorldServerClusters({
   zoomStep?: number;
 }) {
   const map = use(VWorldMapContext);
-  const markersRef = useRef(new Map<string, MapLibreMarker>());
+  const markersRef = useRef(new Map<string, ServerClusterMarkerEntry>());
 
   useEffect(() => {
     if (map === null) return;
@@ -953,34 +1071,18 @@ export function VWorldServerClusters({
       next.add(cluster.cluster_key);
       const label = abbreviateCount(cluster.feature_count);
       const coords: [number, number] = [cluster.lon, cluster.lat];
-      let marker = pool.get(cluster.cluster_key);
-      if (marker === undefined) {
-        const element = createClusterElement(cluster.feature_count, label);
-        // 클릭 시 stale closure 회피: 현재 좌표를 dataset에서 읽는다(풀 재사용 대비).
-        element.dataset.lon = String(cluster.lon);
-        element.dataset.lat = String(cluster.lat);
-        element.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const target: [number, number] = [
-            Number(element.dataset.lon),
-            Number(element.dataset.lat),
-          ];
-          map.easeTo({
-            center: target,
-            zoom: Math.min(map.getMaxZoom(), map.getZoom() + zoomStep),
-          });
-        });
-        marker = new maplibregl.Marker({ element, anchor: "center" }).setLngLat(
-          coords,
+      const entry = pool.get(cluster.cluster_key);
+      if (entry === undefined) {
+        pool.set(
+          cluster.cluster_key,
+          createServerClusterMarker(map, cluster, zoomStep, label),
         );
-        marker.addTo(map);
-        pool.set(cluster.cluster_key, marker);
       } else {
-        marker.setLngLat(coords);
-        const element = marker.getElement();
+        entry.marker.setLngLat(coords);
+        const element = entry.marker.getElement();
         element.dataset.lon = String(cluster.lon);
         element.dataset.lat = String(cluster.lat);
+        element.dataset.zoomStep = String(zoomStep);
         if (element.textContent !== label) element.textContent = label;
         const aria = `feature 클러스터 ${cluster.feature_count}건`;
         if (element.getAttribute("aria-label") !== aria) {
@@ -988,9 +1090,9 @@ export function VWorldServerClusters({
         }
       }
     }
-    for (const [key, marker] of pool) {
+    for (const [key, entry] of pool) {
       if (!next.has(key)) {
-        marker.remove();
+        removeServerClusterMarker(entry);
         pool.delete(key);
       }
     }
@@ -1000,7 +1102,7 @@ export function VWorldServerClusters({
   useEffect(() => {
     const pool = markersRef.current;
     return () => {
-      for (const marker of pool.values()) marker.remove();
+      for (const entry of pool.values()) removeServerClusterMarker(entry);
       pool.clear();
     };
   }, []);
@@ -1125,8 +1227,20 @@ export function VWorldFeatureClusters({
     }),
     [dedupedFeatures],
   );
+  const clusterSourceConfigRef = useRef({
+    data,
+    clusterRadius,
+    clusterMaxZoom,
+  });
+  useLayoutEffect(() => {
+    clusterSourceConfigRef.current = {
+      data,
+      clusterRadius,
+      clusterMaxZoom,
+    };
+  }, [data, clusterRadius, clusterMaxZoom]);
   const geometryData = useMemo<
-    GeoJSON.FeatureCollection<FeatureMapGeometry, FeatureGeometryProperties>
+    FeatureGeometryCollection
   >(
     () => ({
       type: "FeatureCollection",
@@ -1140,6 +1254,7 @@ export function VWorldFeatureClusters({
     }),
     [dedupedFeatures, selectedFeatureId, showAreaGeometry],
   );
+  const geometryDataRef = useRef(geometryData);
 
   // source data 갱신 (features prop 변경 시).
   useEffect(() => {
@@ -1153,6 +1268,7 @@ export function VWorldFeatureClusters({
 
   useEffect(() => {
     if (map === null) return;
+    geometryDataRef.current = geometryData;
     const source = map.getSource(GEOMETRY_SOURCE_ID) as
       | maplibregl.GeoJSONSource
       | undefined;
@@ -1161,126 +1277,11 @@ export function VWorldFeatureClusters({
 
   useEffect(() => {
     if (map === null) return;
-
-    const ensureGeometryLayers = () => {
-      if (!map.getSource(GEOMETRY_SOURCE_ID)) {
-        map.addSource(GEOMETRY_SOURCE_ID, {
-          type: "geojson",
-          data: geometryData,
-        });
-      }
-      if (!map.getLayer(AREA_FILL_LAYER_ID)) {
-        map.addLayer({
-          id: AREA_FILL_LAYER_ID,
-          type: "fill",
-          source: GEOMETRY_SOURCE_ID,
-          filter: ["==", ["get", "kind"], "area"],
-          paint: {
-            "fill-color": ["get", "color"],
-            "fill-opacity": 0.22,
-          },
-        });
-      }
-      if (!map.getLayer(AREA_OUTLINE_LAYER_ID)) {
-        map.addLayer({
-          id: AREA_OUTLINE_LAYER_ID,
-          type: "line",
-          source: GEOMETRY_SOURCE_ID,
-          filter: ["==", ["get", "kind"], "area"],
-          paint: {
-            "line-color": ["get", "color"],
-            "line-opacity": 0.9,
-            "line-width": [
-              "interpolate",
-              ["linear"],
-              ["zoom"],
-              8,
-              1.2,
-              14,
-              2.8,
-            ],
-          },
-        });
-      }
-      if (!map.getLayer(ROUTE_LINE_LAYER_ID)) {
-        map.addLayer({
-          id: ROUTE_LINE_LAYER_ID,
-          type: "line",
-          source: GEOMETRY_SOURCE_ID,
-          filter: ["==", ["get", "kind"], "route"],
-          layout: {
-            "line-cap": "round",
-            "line-join": "round",
-          },
-          paint: {
-            "line-color": ["get", "color"],
-            "line-opacity": 0.92,
-            "line-width": [
-              "interpolate",
-              ["linear"],
-              ["zoom"],
-              8,
-              2,
-              14,
-              4.5,
-            ],
-          },
-        });
-      }
-    };
-
-    const handleGeometryClick = (event: maplibregl.MapLayerMouseEvent) => {
-      const featureId = event.features?.[0]?.properties?.feature_id;
-      if (typeof featureId === "string") {
-        onSelectRef.current?.(featureId);
-      }
-    };
-    const handleMouseEnter = () => {
-      map.getCanvas().style.cursor = "pointer";
-    };
-    const handleMouseLeave = () => {
-      map.getCanvas().style.cursor = "";
-    };
-    const handleStyleData = () => {
-      ensureGeometryLayers();
-    };
-
-    ensureGeometryLayers();
-    for (const layerId of [
-      AREA_FILL_LAYER_ID,
-      AREA_OUTLINE_LAYER_ID,
-      ROUTE_LINE_LAYER_ID,
-    ]) {
-      map.on("click", layerId, handleGeometryClick);
-      map.on("mouseenter", layerId, handleMouseEnter);
-      map.on("mouseleave", layerId, handleMouseLeave);
-    }
-    map.on("styledata", handleStyleData);
-
-    return () => {
-      map.off("styledata", handleStyleData);
-      for (const layerId of [
-        AREA_FILL_LAYER_ID,
-        AREA_OUTLINE_LAYER_ID,
-        ROUTE_LINE_LAYER_ID,
-      ]) {
-        map.off("click", layerId, handleGeometryClick);
-        map.off("mouseenter", layerId, handleMouseEnter);
-        map.off("mouseleave", layerId, handleMouseLeave);
-      }
-      try {
-        if (map.getLayer(ROUTE_LINE_LAYER_ID)) map.removeLayer(ROUTE_LINE_LAYER_ID);
-        if (map.getLayer(AREA_OUTLINE_LAYER_ID)) {
-          map.removeLayer(AREA_OUTLINE_LAYER_ID);
-        }
-        if (map.getLayer(AREA_FILL_LAYER_ID)) map.removeLayer(AREA_FILL_LAYER_ID);
-        if (map.getSource(GEOMETRY_SOURCE_ID)) map.removeSource(GEOMETRY_SOURCE_ID);
-      } catch {
-        // 지도가 teardown 중일 수 있다.
-      }
-    };
-    // geometryData 변경은 위 setData effect로 반영한다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return installGeometryLayerLifecycle(
+      map,
+      () => geometryDataRef.current,
+      (featureId) => onSelectRef.current?.(featureId),
+    );
   }, [map]);
 
   // geometry LABEL 마커를 feature_id로 풀링한다(#500 (d)). geometryData가 바뀌어도
@@ -1349,12 +1350,13 @@ export function VWorldFeatureClusters({
 
     const ensureSource = () => {
       if (map.getSource(SRC)) return;
+      const initial = clusterSourceConfigRef.current;
       map.addSource(SRC, {
         type: "geojson",
-        data,
+        data: initial.data,
         cluster: true,
-        clusterRadius,
-        clusterMaxZoom,
+        clusterRadius: initial.clusterRadius,
+        clusterMaxZoom: initial.clusterMaxZoom,
       });
       // querySourceFeatures가 렌더된 feature를 돌려주도록 투명 circle 레이어를 둔다.
       map.addLayer({
@@ -1788,7 +1790,6 @@ export function VWorldFeatureClusters({
       }
     };
     // features 변경은 위 setData effect로 반영하므로 deps는 map 생애만.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map]);
 
   // 선택 변경 시 마커 풀/레이어를 건드리지 않고, 현재 떠 있는 point/label element의

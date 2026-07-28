@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 import { PipelineClient } from "./pipeline-client";
 
@@ -31,6 +32,8 @@ export default async function OpsPipelinePage({
     }
   }
   return (
-    <PipelineClient initialQuery={initialQuery.toString()} />
+    <Suspense fallback={<div className="p-6">파이프라인 불러오는 중...</div>}>
+      <PipelineClient initialQuery={initialQuery.toString()} />
+    </Suspense>
   );
 }

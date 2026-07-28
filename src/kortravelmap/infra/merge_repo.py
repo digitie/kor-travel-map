@@ -131,17 +131,179 @@ DELETE FROM provider_sync.source_links WHERE feature_id = :loser
 RETURNING source_entity_key
 """
 
-# 한 collection 안에서 동일 official item이 master에도 이미 연결된 경우 먼저
-# loser 중복만 제거한다. 나머지 항목(다른 edition/subcourse)은 전부 master로 이동한다.
-_DROP_DUPLICATE_CURATION_ITEMS_SQL: Final[str] = """
+_LOCK_FEATURES_SQL: Final[str] = """
+SELECT feature_id
+FROM feature.features
+WHERE feature_id IN (:master, :loser)
+ORDER BY feature_id
+FOR UPDATE
+"""
+
+# Merge는 Feature lifecycle을 먼저 고정한 뒤 legacy→collection→item 순서로
+# 잠근다. Legacy DML의 row→collection→item 순서와 import의 Feature→collection
+# 순서를 모두 확장하므로 양방향 sync/import와 교착하지 않는다.
+_LOCK_CURATION_LEGACY_PROJECTIONS_SQL: Final[str] = """
+SELECT legacy.curated_feature_id
+FROM feature.curated_features AS legacy
+WHERE legacy.feature_id IN (:master, :loser)
+  AND NOT legacy.metadata @> '{"merge_projection_detached": true}'::jsonb
+ORDER BY legacy.curated_feature_id
+FOR UPDATE OF legacy
+"""
+
+# Feature를 선잠근 merge와 legacy-backed writer는 legacy row를 거쳐
+# collection(parent)→item(child) 순서로 들어간다. 영향 collection은 UUID
+# 순서로 잠가 import/admin writer와의 교착을 막는다.
+_LOCK_CURATION_COLLECTIONS_SQL: Final[str] = """
+SELECT collection.collection_id
+FROM feature.curation_collections AS collection
+WHERE EXISTS (
+    SELECT 1
+    FROM feature.curation_items AS item
+    WHERE item.collection_id = collection.collection_id
+      AND item.feature_id IN (:master, :loser)
+)
+ORDER BY collection.collection_id
+FOR UPDATE OF collection
+"""
+
+# 한 collection 안의 동일 official item을 Feature merge할 때 durable source/tombstone과
+# operator override를 잃지 않는다. provider 파생 필드는 source-present row(동률이면 최신),
+# operator 필드는 전용 operator_updated_at이 최신인 row가 이기며, 어느 한쪽이라도
+# tombstone이면 tombstone이 최우선이다. master UUID를 survivor로 유지한 뒤 loser
+# duplicate만 제거한다.
+_MERGE_DUPLICATE_CURATION_ITEMS_SQL: Final[str] = """
+WITH pairs AS MATERIALIZED (
+    SELECT
+        master_item.curation_item_id AS master_item_id,
+        loser_item.curation_item_id AS loser_item_id,
+        (
+            (loser_item.source_present AND NOT master_item.source_present)
+            OR (
+                loser_item.source_present = master_item.source_present
+                AND loser_item.source_updated_at > master_item.source_updated_at
+            )
+        ) AS loser_provider_wins,
+        (
+            loser_item.operator_updated_at IS NOT NULL
+            AND (
+                master_item.operator_updated_at IS NULL
+                OR loser_item.operator_updated_at > master_item.operator_updated_at
+            )
+        ) AS loser_override_wins,
+        master_item.archived_at IS NOT NULL
+            OR loser_item.archived_at IS NOT NULL AS tombstone_wins,
+        loser_item.archived_at IS NOT NULL
+            AND (
+                master_item.archived_at IS NULL
+                OR COALESCE(
+                    loser_item.operator_updated_at,
+                    loser_item.archived_at
+                ) > COALESCE(
+                    master_item.operator_updated_at,
+                    master_item.archived_at
+                )
+            ) AS loser_tombstone_wins
+    FROM feature.curation_items AS loser_item
+    JOIN feature.curation_items AS master_item
+      ON master_item.feature_id = :master
+     AND loser_item.collection_id = master_item.collection_id
+     AND loser_item.external_item_id = master_item.external_item_id
+    WHERE loser_item.feature_id = :loser
+    FOR UPDATE OF master_item, loser_item
+), reconciled AS (
+    UPDATE feature.curation_items AS survivor
+    SET source_record_key = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.source_record_key
+            ELSE survivor.source_record_key
+        END,
+        place_name = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.place_name
+            ELSE survivor.place_name
+        END,
+        address_hint = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.address_hint
+            ELSE survivor.address_hint
+        END,
+        source_present = survivor.source_present OR loser_item.source_present,
+        source_updated_at = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.source_updated_at
+            ELSE survivor.source_updated_at
+        END,
+        status = CASE
+            WHEN pairs.tombstone_wins THEN 'archived'
+            WHEN pairs.loser_override_wins THEN loser_item.status
+            ELSE survivor.status
+        END,
+        sort_order = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.sort_order
+            ELSE survivor.sort_order
+        END,
+        item_title = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.item_title
+            ELSE survivor.item_title
+        END,
+        item_summary = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.item_summary
+            ELSE survivor.item_summary
+        END,
+        curation_relation = CASE
+            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
+            THEN loser_item.curation_relation
+            WHEN pairs.tombstone_wins THEN survivor.curation_relation
+            WHEN pairs.loser_override_wins THEN loser_item.curation_relation
+            ELSE survivor.curation_relation
+        END,
+        reuse_policy = CASE
+            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
+            THEN loser_item.reuse_policy
+            WHEN pairs.tombstone_wins THEN survivor.reuse_policy
+            WHEN pairs.loser_override_wins THEN loser_item.reuse_policy
+            ELSE survivor.reuse_policy
+        END,
+        metadata = CASE
+            WHEN pairs.loser_provider_wins THEN loser_item.metadata
+            ELSE survivor.metadata
+        END,
+        updated_by = CASE
+            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
+            THEN loser_item.updated_by
+            WHEN pairs.tombstone_wins THEN survivor.updated_by
+            WHEN pairs.loser_override_wins THEN loser_item.updated_by
+            ELSE survivor.updated_by
+        END,
+        operator_updated_by = CASE
+            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
+            THEN loser_item.operator_updated_by
+            WHEN pairs.tombstone_wins THEN survivor.operator_updated_by
+            WHEN pairs.loser_override_wins THEN loser_item.operator_updated_by
+            ELSE survivor.operator_updated_by
+        END,
+        operator_updated_at = CASE
+            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
+            THEN loser_item.operator_updated_at
+            WHEN pairs.tombstone_wins THEN survivor.operator_updated_at
+            WHEN pairs.loser_override_wins THEN loser_item.operator_updated_at
+            ELSE survivor.operator_updated_at
+        END,
+        updated_at = now(),
+        archived_at = CASE
+            WHEN pairs.tombstone_wins
+            THEN CASE
+                WHEN pairs.loser_tombstone_wins THEN loser_item.archived_at
+                ELSE survivor.archived_at
+            END
+            ELSE NULL
+        END
+    FROM pairs
+    JOIN feature.curation_items AS loser_item
+      ON loser_item.curation_item_id = pairs.loser_item_id
+    WHERE survivor.curation_item_id = pairs.master_item_id
+    RETURNING pairs.loser_item_id
+)
 DELETE FROM feature.curation_items AS loser_item
-USING feature.curation_items AS master_item
-WHERE loser_item.feature_id = :loser
-  AND master_item.feature_id = :master
-  AND loser_item.collection_id = master_item.collection_id
-  AND loser_item.external_item_id = master_item.external_item_id
-  AND loser_item.archived_at IS NULL
-  AND master_item.archived_at IS NULL
+USING reconciled
+WHERE loser_item.curation_item_id = reconciled.loser_item_id
 RETURNING loser_item.curation_item_id
 """
 
@@ -152,15 +314,85 @@ WHERE feature_id = :loser
 RETURNING curation_item_id
 """
 
+# Duplicate reconcile가 loser의 최신 operator state/tombstone을 master canonical
+# survivor에 반영했으면 master legacy projection도 같은 transaction에서 맞춘다.
+_SYNC_MASTER_LEGACY_PROJECTIONS_SQL: Final[str] = """
+UPDATE feature.curated_features AS legacy
+SET curation_status = CASE item.status
+        WHEN 'included' THEN 'curated'
+        ELSE item.status
+    END,
+    selection_origin = CASE
+        WHEN item.operator_updated_at IS NOT NULL THEN 'admin'
+        ELSE legacy.selection_origin
+    END,
+    selected_by = CASE
+        WHEN item.status = 'included' THEN item.operator_updated_by
+        ELSE legacy.selected_by
+    END,
+    selected_at = CASE
+        WHEN item.status = 'included' THEN item.operator_updated_at
+        ELSE legacy.selected_at
+    END,
+    rejected_by = CASE
+        WHEN item.status = 'rejected' THEN item.operator_updated_by
+        WHEN item.status IN ('included', 'candidate') THEN NULL
+        ELSE legacy.rejected_by
+    END,
+    rejected_at = CASE
+        WHEN item.status = 'rejected' THEN item.operator_updated_at
+        WHEN item.status IN ('included', 'candidate') THEN NULL
+        ELSE legacy.rejected_at
+    END,
+    rejection_reason = CASE
+        WHEN item.status IN ('included', 'candidate') THEN NULL
+        ELSE legacy.rejection_reason
+    END,
+    curation_relation = item.curation_relation,
+    reuse_policy = item.reuse_policy,
+    operator_updated_by = item.operator_updated_by,
+    operator_updated_at = item.operator_updated_at,
+    archived_at = item.archived_at,
+    updated_at = clock_timestamp(),
+    content_version = legacy.content_version + 1
+FROM feature.curation_items AS item
+WHERE item.feature_id = :master
+  AND legacy.feature_id = :master
+  AND legacy.archived_at IS NULL
+  AND NOT legacy.metadata @> '{"merge_projection_detached": true}'::jsonb
+  AND item.legacy_projection_id = legacy.curated_feature_id
+  AND (
+      legacy.curation_status,
+      legacy.curation_relation,
+      legacy.reuse_policy,
+      legacy.operator_updated_by,
+      legacy.operator_updated_at,
+      legacy.archived_at
+  ) IS DISTINCT FROM (
+      CASE item.status
+          WHEN 'included' THEN 'curated'
+          ELSE item.status
+      END,
+      item.curation_relation,
+      item.reuse_policy,
+      item.operator_updated_by,
+      item.operator_updated_at,
+      item.archived_at
+  )
+RETURNING legacy.curated_feature_id
+"""
+
 # 0045 전환 trigger는 legacy curated_feature UUID와 같은 curation_item UUID를 다시
 # 만든다. master에도 같은 theme의 active legacy row가 있으면 loser legacy row를
 # active 상태로 옮길 수 없으므로, 먼저 해당 item의 UUID를 분리해 richer membership을
 # 보존한 뒤 legacy row만 archive한다.
 _DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL: Final[str] = """
 UPDATE feature.curation_items AS item
-SET curation_item_id = x_extension.gen_random_uuid(), updated_at = now()
+SET curation_item_id = x_extension.gen_random_uuid(),
+    legacy_projection_id = NULL,
+    updated_at = now()
 FROM feature.curated_features AS loser_curated
-WHERE loser_curated.curated_feature_id = item.curation_item_id
+WHERE loser_curated.curated_feature_id = item.legacy_projection_id
   AND loser_curated.feature_id = :loser
   AND loser_curated.archived_at IS NULL
   AND item.archived_at IS NULL
@@ -174,22 +406,52 @@ WHERE loser_curated.curated_feature_id = item.curation_item_id
 RETURNING loser_curated.curated_feature_id
 """
 
-# UUID가 분리됐거나 duplicate curation item이 이미 drop된 active legacy row는
-# partial unique(theme_id, feature_id)를 피하기 위해 archive한다. trigger가 만드는
-# archived mirror와 UUID를 분리한 active item이 함께 남아 richer 계약을 잃지 않는다.
+# UUID가 분리된 same-theme legacy conflict 또는 아직 이동하지 않은 loser UUID item과
+# 같은 stored collection/external identity의 master canonical pair만 archive한다.
+# Mutable slug/title로 collection key를 재계산하거나 MOVE 뒤 feature_id를 증거로 쓰지 않는다.
 _ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL: Final[str] = """
 UPDATE feature.curated_features AS loser_curated
 SET feature_id = :master,
     curation_status = 'archived',
+    metadata = loser_curated.metadata || jsonb_build_object(
+        'merge_projection_detached',
+        true
+    ),
     archived_at = now(),
     updated_at = now()
 WHERE loser_curated.feature_id = :loser
   AND loser_curated.archived_at IS NULL
-  AND NOT EXISTS (
-      SELECT 1
-      FROM feature.curation_items AS item
-      WHERE item.curation_item_id = loser_curated.curated_feature_id
-        AND item.archived_at IS NULL
+  AND (
+      (
+          NOT EXISTS (
+              SELECT 1
+              FROM feature.curation_items AS direct_item
+              WHERE direct_item.legacy_projection_id =
+                    loser_curated.curated_feature_id
+                AND direct_item.archived_at IS NULL
+          )
+          AND EXISTS (
+              SELECT 1
+              FROM feature.curated_features AS master_curated
+              WHERE master_curated.feature_id = :master
+                AND master_curated.theme_id = loser_curated.theme_id
+                AND master_curated.archived_at IS NULL
+                AND NOT master_curated.metadata @>
+                    '{"merge_projection_detached": true}'::jsonb
+          )
+      )
+      OR EXISTS (
+          SELECT 1
+          FROM feature.curation_items AS loser_item
+          JOIN feature.curation_items AS master_item
+            ON master_item.collection_id = loser_item.collection_id
+           AND master_item.external_item_id = loser_item.external_item_id
+          WHERE master_item.feature_id = :master
+            AND loser_item.legacy_projection_id =
+                loser_curated.curated_feature_id
+            AND master_item.curation_item_id <>
+                loser_item.curation_item_id
+      )
   )
 RETURNING loser_curated.curated_feature_id
 """
@@ -295,6 +557,24 @@ async def apply_feature_merge(
     if master_id == loser_id:
         raise MergeConflictError(f"master와 loser가 같음 — {master_id!r}")
 
+    (
+        await session.execute(
+            text(_LOCK_FEATURES_SQL),
+            {"master": master_id, "loser": loser_id},
+        )
+    ).fetchall()
+    (
+        await session.execute(
+            text(_LOCK_CURATION_LEGACY_PROJECTIONS_SQL),
+            {"master": master_id, "loser": loser_id},
+        )
+    ).fetchall()
+    (
+        await session.execute(
+            text(_LOCK_CURATION_COLLECTIONS_SQL),
+            {"master": master_id, "loser": loser_id},
+        )
+    ).fetchall()
     moved = len(
         (
             await session.execute(text(_MOVE_LINKS_SQL), {"master": master_id, "loser": loser_id})
@@ -304,7 +584,15 @@ async def apply_feature_merge(
         (await session.execute(text(_DROP_LEFTOVER_LINKS_SQL), {"loser": loser_id})).fetchall()
     )
     await session.execute(
-        text(_DROP_DUPLICATE_CURATION_ITEMS_SQL),
+        text(_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL),
+        {"master": master_id, "loser": loser_id},
+    )
+    await session.execute(
+        text(_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL),
+        {"master": master_id, "loser": loser_id},
+    )
+    await session.execute(
+        text(_MERGE_DUPLICATE_CURATION_ITEMS_SQL),
         {"master": master_id, "loser": loser_id},
     )
     await session.execute(
@@ -312,12 +600,8 @@ async def apply_feature_merge(
         {"master": master_id, "loser": loser_id},
     )
     await session.execute(
-        text(_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL),
-        {"master": master_id, "loser": loser_id},
-    )
-    await session.execute(
-        text(_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL),
-        {"master": master_id, "loser": loser_id},
+        text(_SYNC_MASTER_LEGACY_PROJECTIONS_SQL),
+        {"master": master_id},
     )
     await session.execute(
         text(_MOVE_LEGACY_CURATED_FEATURES_SQL),

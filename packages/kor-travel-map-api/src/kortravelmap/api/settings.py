@@ -7,7 +7,7 @@ import secrets
 from collections.abc import Mapping
 from pathlib import Path
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = ["ApiSettings"]
@@ -266,7 +266,10 @@ class ApiSettings(BaseSettings):
     )
     admin_proxy_secret: SecretStr | None = Field(
         default=None,
-        validation_alias="KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+        validation_alias=AliasChoices(
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+            "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET",
+        ),
         description=(
             "Next.js admin frontend proxy가 FastAPI admin API 호출 시 넣는 server-only "
             "secret. 설정되면 ``/v1/admin/*`` 요청은 허용된 peer CIDR + "

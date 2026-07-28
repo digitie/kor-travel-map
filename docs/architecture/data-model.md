@@ -279,11 +279,17 @@ cache를 추가했다.
 PinVi는 REST snapshot을 읽어 `app.curated_trip_plans` /
 `app.curated_plan_pois`로 복사하며, kor-travel-map DB에 직접 접근하지 않는다.
 
-### 1.3 `feature.curation_collections` / `feature.curation_items` (ADR-063, alembic 0045)
+### 1.3 `feature.curation_collections` / `feature.curation_items` (ADR-063, alembic 0045·0065·0066)
 
 공식 목록·회차·캠페인처럼 하나의 Feature가 여러 큐레이션 사실을 동시에 가질 수 있는
 데이터는 collection과 membership을 분리한다. 기존 `feature.curated_features`의 source-rule
 자동 후보화 표면은 유지하지만, 신규 공식·수동 큐레이션의 정본은 아래 두 테이블이다.
+0065 이후 legacy projection용 collection key는
+`legacy:<theme UUID>:<source UUID>:<md5(title)>`이며 mutable `theme_slug`를 identity로 쓰지 않는다.
+같은 semantic group의 복수 collection은 상태를 강제 병합하지 않고
+`:split:<collection_id>` suffix로 각각 보존한다. 수동 collection이 base key를 선점한 runtime
+신규 projection은 projection UUID별로 분절하지 않고 group-shared `:split:legacy` fallback을
+사용하며, 그 key도 선점됐으면 충돌 없는 `:conflict:<n>`을 선택한다.
 
 ```sql
 CREATE TABLE feature.curation_collections (
@@ -320,9 +326,15 @@ CREATE TABLE feature.curation_items (
   feature_id TEXT REFERENCES feature.features(feature_id) ON DELETE SET NULL,
   source_record_key TEXT
     REFERENCES provider_sync.source_records(source_record_key) ON DELETE SET NULL,
+  legacy_projection_id UUID
+    REFERENCES feature.curated_features(curated_feature_id)
+    DEFERRABLE INITIALLY DEFERRED,
   external_item_id TEXT NOT NULL,
+  external_component_id TEXT NOT NULL DEFAULT 'primary',
   place_name TEXT NOT NULL,
   address_hint TEXT,
+  source_present BOOLEAN NOT NULL DEFAULT true,
+  source_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   status TEXT NOT NULL DEFAULT 'candidate',
   sort_order INTEGER NOT NULL DEFAULT 0,
   item_title TEXT,
@@ -332,11 +344,17 @@ CREATE TABLE feature.curation_items (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_by TEXT,
   updated_by TEXT,
+  operator_updated_by TEXT,
+  operator_updated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   archived_at TIMESTAMPTZ,
 
   CONSTRAINT ck_curation_items_external_id CHECK (btrim(external_item_id) <> ''),
+  CONSTRAINT ck_curation_items_external_component_id_canonical CHECK (
+    external_component_id <> ''
+    AND external_component_id = btrim(external_component_id)
+  ),
   CONSTRAINT ck_curation_items_place_name CHECK (btrim(place_name) <> ''),
   CONSTRAINT ck_curation_items_status
     CHECK (status IN ('candidate','included','rejected','archived')),
@@ -352,27 +370,53 @@ CREATE TABLE feature.curation_items (
   CONSTRAINT ck_curation_items_metadata CHECK (jsonb_typeof(metadata) = 'object')
 );
 
-CREATE UNIQUE INDEX uq_curation_items_active_identity
+ALTER TABLE feature.curation_items
+  ADD CONSTRAINT uq_curation_items_component_identity
+  UNIQUE (collection_id, external_item_id, external_component_id);
+CREATE UNIQUE INDEX uq_curation_items_active_source_feature
   ON feature.curation_items (collection_id, external_item_id, feature_id)
-  NULLS NOT DISTINCT WHERE archived_at IS NULL;
+  WHERE source_present AND archived_at IS NULL AND feature_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_curation_items_legacy_projection_id
+  ON feature.curation_items (legacy_projection_id)
+  WHERE legacy_projection_id IS NOT NULL;
 CREATE INDEX idx_curation_collections_theme_status_edition
   ON feature.curation_collections (theme_id, status, edition_key, collection_id);
 CREATE INDEX idx_curation_collections_source_status
   ON feature.curation_collections (source_id, status, collection_id);
 CREATE INDEX idx_curation_items_collection_status_order
-  ON feature.curation_items (collection_id, status, sort_order, curation_item_id);
+  ON feature.curation_items
+    (collection_id, source_present, status, sort_order, curation_item_id);
 CREATE INDEX idx_curation_items_feature_status_collection
-  ON feature.curation_items (feature_id, status, collection_id);
+  ON feature.curation_items
+    (feature_id, source_present, status, collection_id);
 ```
 
 `feature_id`는 의도적으로 nullable이다. CSV의 공식 항목을 기존 Feature와 안전하게
 확정하지 못해도 `place_name`·`address_hint`·원천 안정키를 보존하고, 이후 정확한 Feature가
-확인되면 미연결 행을 연결 행으로 대체한다. 좌표는 기존 `feature.features`에서만 읽으며
+확인되면 같은 component 행의 `feature_id`를 갱신한다. 좌표는 기존 `feature.features`에서만 읽으며
 큐레이션 item이 별도 좌표를 소유하지 않는다. 같은 공식 복합 장소를 여러 Feature에 연결할
-때는 `external_item_id`를 공유한다. `NULLS NOT DISTINCT`는 한 collection 안에 같은
-미연결 공식 항목이 중복 생성되는 것을 막는다. repository는 parent collection row lock 아래
-같은 `external_item_id`의 연결 행과 미연결 행이 동시에 active인 상태도 금지한다. 여러
-Feature에 연결한 복합 공식 장소는 모두 non-null `feature_id`이므로 그대로 허용한다.
+때는 `external_item_id`를 공유하고 각 membership에 안정된 `external_component_id`를 둔다.
+component exact identity는 archived tombstone까지 포함해 DB unique로 한 행만 허용한다.
+`feature_id`는 identity가 아니므로 null→연결·A→B 재연결에도 `curation_item_id`와 운영자
+상태가 유지된다. 동일 source item의 active component가 같은 non-null Feature를 중복 참조하는
+것은 source에 현재 존재할 때 partial unique가 막는다. source에서 빠진 이력 행은 동일
+Feature를 참조하는 새 current component를 막지 않는다. 연결 component와 미연결 component의 공존은 복합 장소를
+무손실로 나타내므로 허용한다.
+`legacy_projection_id`는 전환기 `curated_features`와 durable item 관계의 정본이다.
+`curation_item_id`가 우연히 legacy UUID와 같은지 추론하지 않으며, Feature merge로 canonical-only
+item과 projection UUID를 분리해도 관계를 잃지 않는다.
+0064의 mutable slug가 재사용된 collection에서 migration은 `legacy_projection_id`가 명시하는
+projection owner만 자동 복구한다. canonical-only item은 원 projection durable link가 없고 external
+identity도 theme 간 공유될 수 있으므로 exact pair처럼 보여도 owner를 추정하지 않는다. 모든
+legacy-marker collection에서 원 payload와 identity를 유지한 `draft/admin_only` quarantine
+collection으로 옮겨 명시적 재분류 대상으로 보존한다. 이전 projection 삭제로 mismatch row가 남지
+않은 경우도 같다. 과거 admin PATCH가 mutable metadata marker를 지울 수 있었으므로 immutable
+`legacy:` collection key namespace도 후보 판정에 함께 사용한다.
+`quarantine:`은 과거 theme slug에서 예약되지 않았으므로 broad prefix는 제외하지 않는다.
+exact `legacy:quarantine:<UUID>` key와 immutable `created_by='migration:0065'`가 모두 일치하는
+migration 산출물만 제외해 왕복 때 빈 quarantine을 누적하거나 `original_collection_id`를 한
+단계씩 밀지 않는다. mutable metadata에 `migrated_from`이 추가돼도 upgrade·downgrade key
+rewrite가 같은 결합 증거를 제외한다.
 
 collection과 item의 `created_by`/`updated_by`는 인증된 admin proxy actor만 기록한다.
 수동 item 추가·수정·보관은 item과 parent collection의 `updated_by`/`updated_at`을 함께
@@ -380,19 +424,69 @@ collection과 item의 `created_by`/`updated_by`는 인증된 admin proxy actor�
 item만 반환한다. admin collection/item projection은 actor 필드를 포함하고 collection
 상세에서는 미연결·비공개·보관 item까지 조회할 수 있다.
 
+membership에는 서로 독립인 두 revision 축을 둔다. `source_updated_at`은 source presence와
+제공자 파생 필드가 바뀐 시각이고, `operator_updated_at`/`operator_updated_by`는
+`status`·`curation_relation`·`reuse_policy`를 마지막으로 바꾼 운영자 의도다. 일반
+`updated_at`은 행 감사 시각일 뿐 merge winner 판정에 사용하지 않는다. 두 revision의
+운영 중 쓰기는 PostgreSQL transaction 시작 시각인 `now()`가 아니라 실제 쓰기 순서를 나타내는
+`clock_timestamp()`를 사용한다. migration backfill만 기존 행의 역사적 `updated_at`을 보존한다.
+
 CSV commit은 파일이 언급한 collection을 한 transaction에서 authoritative replace한다.
-incoming 안정키에 없는 기존 item을 삭제한 뒤 들어온 연결·미연결 membership을 upsert하므로
-삭제, A→B, 연결↔미연결 변경이 잔존 행 없이 반영된다. dry-run은 동일한 필드 비교 규칙으로
-`inserted`/`updated`/`removed`와 삭제 예정 item 전체를 미리 반환한다. 동일 파일 재업로드는
-변경 수가 모두 0이며 theme/source/collection/item의 `updated_at`도 바꾸지 않는다.
+0066 전 다중 membership의 `legacy:<UUID>` component는 source 누락 상태까지 포함해 첫 import에서 동일 source item·
+동일 non-null Feature target의 incoming component로 원자적으로 identity를 승계한다.
+이 경로도 UUID와 operator 필드·감사 이력을 보존하며 dry-run은 insert/removal이 아니라
+update로 예고한다. `legacy_projection_id`를 가진 전환기 projection membership은 DB
+BEFORE INSERT trigger가 신규 projection에만 projection UUID 기반 component를 부여하므로
+authoritative import의 명시적 component 승계를 되감지 않는다. 구 flat writer가 같은 source
+record를 여러 Feature에 투영해도 component identity를 공유하지 않는다.
+보관된 legacy tombstone은 component key만 승계하고 provider/source/operator/archive 필드는
+그대로 둔다. 따라서 preview와 commit 모두 신규 insert가 아니라 identity update로 보고하며
+exact tombstone 재사용 금지 계약을 유지한다. 같은 source item·Feature target에 active·archived
+legacy 후보가 둘 이상이면 어느 행의 UUID나 operator 이력을 승계할지 추정하지 않는다.
+preview와 commit 모두 후보를 명시한 오류로 중단하며 membership을 변경하지 않는다.
+theme upsert·collection create·authoritative import는 공통 transaction write-boundary advisory
+lock을 가장 먼저 공유한다. 그 안에서 row 존재 전 stable collection key lock을 사용하고,
+import는 여러 key를 정렬해 모두 확보한 뒤 Feature를 잠근다. 따라서 admin create의 theme→key,
+import의 key→theme 역전이나 미커밋 create+add의 Feature↔collection 잠금 순환이 생기지 않는다.
+incoming 안정키에 없는 기존 item은 물리 삭제하지 않고 `source_present=false`로 표시한다.
+재등장하면 `source_present=true`와 제공자 파생 필드만 갱신하고, 운영자가 조정한
+`status`·`curation_relation`·`reuse_policy`는 보존한다. 운영자가 보관한 정확한
+`collection_id + external_item_id + external_component_id` identity는 tombstone으로 남아 같은 CSV가
+재등장해도 자동 복원되지 않는다. 기본 admin/public 조회와 collection count는
+`source_present=true`인 item만 포함하며, admin의 명시적 `include_archived` 조회는 source에서
+사라진 행도 감사 목적으로 반환한다.
+
+dry-run은 동일한 필드 비교 규칙으로 `inserted`/`updated`/`removed`와 source에서 사라질 item
+전체를 미리 반환한다. API의 `removed` 의미는 물리 삭제 건수가 아니라 이번 authoritative
+source에서 빠져 기본 projection에서 제외되는 건수다. 동일 파일 재업로드는 변경 수가 모두
+0이며 theme/source/collection/item의 `updated_at`도 바꾸지 않는다.
 
 동시 authoritative replace는
 `pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0))`으로 직렬화한다.
-여러 대상 collection row는 UUID 정렬 순서로 `FOR UPDATE`하고, 수동 item write도 parent
-collection을 먼저 잠가 import와 충돌하지 않게 한다. 기존 `curated_features` writer는 0045
-trigger가 같은 ID의 collection item으로 동기화해 전환 중 두 정본이 갈라지지 않게 한다.
+그 직후 참조 active Feature를 정렬 잠근 다음 theme/source/collection을 만들거나 잠그고 item을
+쓴다. 여러 대상 collection row도 UUID 정렬 순서로 `FOR UPDATE`하며, 수동 item write는 parent
+collection을 먼저 잠가 import와 충돌하지 않게 한다. Feature merge는 master/loser Feature를
+정렬 잠근 뒤 legacy→collection→item으로 진행한다. legacy trigger의 cross-title identity 조회는
+target collection 뒤 source collection parent를 역순 잠그지 않고 item만 잠근다. 기존
+`curated_features` writer는 0045 trigger가 collection item으로 동기화해 전환 중 두 표면이
+갈라지지 않게 한다. 0065 이후 legacy writer의 UPDATE/DELETE도 물리 DELETE/INSERT를 하지
+않는다. source presence와 제공자 파생 필드는 source revision만 전진시키고 operator
+상태·relation·reuse는 별도 provenance가 전진한 경우에만 반영한다. canonical item의 운영자
+수정도 같은 transaction에서 legacy row로 역동기화한다. legacy row가 DELETE 후 새 UUID로
+재생성돼도 안정적인 `source_record_key` exact identity가 기존 source-absent membership을
+복원한다. source record가 없는 projection도 theme/source/feature의 durable external identity를
+재사용하며 archived tombstone은 되살리지 않는다. Feature merge가 충돌 해소를 위해 archive한
+legacy projection은 제거할 수 없는 detached metadata를 남기고 canonical source에서 영구
+분리한다. trigger-wide session bypass는 없으며 canonical UUID mirror 부재·same-theme master
+존재·exact archive 전이를 DB가 확인한 경우에만 marker를 허용한다.
 
-0045 downgrade는 구 `curated_features`에서 완전히 재구성할 수 있는 legacy 행만 허용한다.
+0065 downgrade는 `source_present=false`, operator provenance, non-direct legacy mapping 또는
+detached marker가 하나라도 있으면 `P0001`로 중단한다. 이전 스키마는 source 누락·독립 revision·
+분리 projection을 함께 표현할 수 없어 자동 삭제하면 override를 조용히 잃기 때문이다.
+0066 downgrade는 같은 source item의 여러 component가 구
+`collection_id + external_item_id + feature_id` identity로 충돌하면 mutation 전에 중단한다.
+0045 downgrade도 구 `curated_features`에서
+완전히 재구성할 수 있는 legacy 행만 허용한다.
 신규 collection/item, 수동 변경, collection actor 또는 legacy `selected_by`와 일치하지 않는
 item actor처럼 표현력이 더 큰 데이터가 있으면 PostgreSQL `P0001` 예외로 transaction 전체를
 중단한다. 먼저 export 또는 명시적 정리하지 않은 데이터를 조용히 삭제하지 않는다.
@@ -1393,8 +1487,11 @@ running은 같은 request를 반환하고 terminal/cancellation-requested는 dis
 0053 migration은 feature update request/job writer를 같은 `ACCESS EXCLUSIVE NOWAIT` 문장으로 잠근다.
 기존 direct row는 raw requested 문자열을 identity로 승격하지 않는다.
 `python-kma-api`의 short/ultra-short nowcast/ultra-short forecast 3종은 `target_grids`,
-나머지 direct dataset은 `dataset_wide`로 일괄 backfill하며 active duplicate나 running
-ambiguity를 이 canonical 매핑 후 임의 취소하지 않고 진단과 함께 중단한다.
+나머지 direct dataset은 `dataset_wide`로 일괄 backfill한다. canonical 매핑 뒤 같은 active
+identity가 생기면 running 하나를 queued보다 우선 보존하고, running이 없으면 실제 queue dispatch
+정렬(`run_mode=now`, priority 내림차순, 생성 시각, request/job ID)로 queued winner 하나를
+보존한다. queued loser는 기존 오류 문맥과 winner ID를 남긴 `cancelled` terminal로 전환한다.
+running 둘 이상 또는 cancellation audit marker가 걸린 중복은 mutation 전에 진단과 함께 중단한다.
 `run_mode=now`의 dispatch 이력은 direct 여부와 관계없이 분리 backfill한다. job sync
 scope와 request/job pair identity는 trigger로 불변이며 raw requested scope는 감사
 JSON으로만 보존한다. migration이 보존한 legacy raw alias는 typed identity로

@@ -37,6 +37,9 @@ class _FakeResult:
     def mappings(self) -> _FakeResult:
         return self
 
+    def scalars(self) -> _FakeResult:
+        return self
+
     def all(self) -> list[Any]:
         return self._rows
 
@@ -133,8 +136,10 @@ def _item_row(**overrides: Any) -> dict[str, Any]:
         "linked_feature_is_public": True,
         "source_record_key": "source-record:one",
         "external_item_id": "official:one",
+        "external_component_id": "primary",
         "place_name": "테스트 장소",
         "address_hint": "서울",
+        "source_present": True,
         "status": "included",
         "sort_order": 1,
         "item_title": "추천 장소",
@@ -181,6 +186,7 @@ def _resolved_row(**overrides: Any) -> repo.ResolvedCurationImportRow:
         "source_name": "문화체육관광부",
         "source_url": "https://example.test/source",
         "source_item_key": "official:one",
+        "source_component_key": "primary",
         "feature_id": "feature:one",
         "place_name": "테스트 장소",
         "address_hint": "서울",
@@ -426,7 +432,11 @@ async def test_create_collection_validates_state_and_required_text(kwargs: dict[
 async def test_create_collection_normalizes_and_returns_created(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session = _FakeSession(_FakeResult(scalar=_COLLECTION_ID))
+    session = _FakeSession(
+        _FakeResult(),
+        _FakeResult(),
+        _FakeResult(scalar=_COLLECTION_ID),
+    )
     get_collection = AsyncMock(return_value=(_collection(), ()))
     monkeypatch.setattr(repo, "get_curation_collection", get_collection)
 
@@ -441,7 +451,10 @@ async def test_create_collection_normalizes_and_returns_created(
         actor="admin",
     )
     assert created.collection_id == _COLLECTION_ID
-    params = session.calls[0][1]
+    assert "pg_advisory_xact_lock" in session.calls[0][0]
+    assert "curation-import" in session.calls[0][0]
+    assert session.calls[1][1] == {"collection_keys": ["collection:key"]}
+    params = session.calls[2][1]
     assert params["collection_key"] == "collection:key"
     assert params["title"] == "제목"
     assert params["edition_key"] == "2026"
@@ -542,6 +555,7 @@ async def test_archive_collection_delegates(monkeypatch: pytest.MonkeyPatch) -> 
         {"sort_order": -1},
         {"sort_order": 2_147_483_648},
         {"external_item_id": " "},
+        {"external_component_id": " "},
     ],
 )
 async def test_add_item_rejects_invalid_input(kwargs: dict[str, Any]) -> None:
@@ -580,7 +594,7 @@ async def test_add_item_rejects_missing_collection_and_place(
         )
 
 
-async def test_add_item_rejects_hidden_feature_and_opposite_identity(
+async def test_add_item_rejects_hidden_feature_duplicate_target_and_archived_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(repo, "_lock_collection", AsyncMock(return_value=True))
@@ -593,22 +607,24 @@ async def test_add_item_rejects_hidden_feature_and_opposite_identity(
             external_item_id="external",
         )
 
-    unresolved_exists = _FakeSession(
+    duplicate_target = _FakeSession(
         _FakeResult(scalar="Feature 이름"),
+        _FakeResult(scalar=None),
         _FakeResult(scalar=1),
     )
-    with pytest.raises(ValueError, match="미연결 항목이 이미 존재"):
+    with pytest.raises(ValueError, match="다른 component가 이미"):
         await repo.add_curation_item(
-            unresolved_exists,
+            duplicate_target,
             collection_id=_COLLECTION_ID,
             feature_id="feature:one",
             external_item_id="external",
+            external_component_id="component-02",
         )
 
-    resolved_exists = _FakeSession(_FakeResult(scalar=1))
-    with pytest.raises(ValueError, match="Feature 연결 항목이 이미 존재"):
+    archived_identity = _FakeSession(_FakeResult(scalar=1))
+    with pytest.raises(ValueError, match="archive된"):
         await repo.add_curation_item(
-            resolved_exists,
+            archived_identity,
             collection_id=_COLLECTION_ID,
             feature_id=None,
             external_item_id="external",
@@ -629,7 +645,11 @@ async def test_add_item_success_normalizes_and_touches_collection(
     touch = AsyncMock()
     monkeypatch.setattr(repo, "_touch_collection", touch)
     prefix = (
-        [_FakeResult(scalar="DB Feature 이름"), _FakeResult(scalar=None)]
+        [
+            _FakeResult(scalar="DB Feature 이름"),
+            _FakeResult(scalar=None),
+            _FakeResult(scalar=None),
+        ]
         if feature_id is not None
         else [_FakeResult(scalar=None)]
     )
@@ -643,6 +663,7 @@ async def test_add_item_success_normalizes_and_touches_collection(
         collection_id=_COLLECTION_ID,
         feature_id=feature_id,
         external_item_id="  external  ",
+        external_component_id="  component-01  ",
         place_name=None if feature_id else "  직접 장소  ",
         address_hint="  서울  ",
         metadata={"x": 1},
@@ -652,6 +673,7 @@ async def test_add_item_success_normalizes_and_touches_collection(
     assert item.curation_item_id == _CURATION_ITEM_ID
     upsert_params = session.calls[-2][1]
     assert upsert_params["external_item_id"] == "external"
+    assert upsert_params["external_component_id"] == "component-01"
     assert upsert_params["place_name"] == ("DB Feature 이름" if feature_id else "직접 장소")
     assert upsert_params["address_hint"] == "서울"
     touch.assert_awaited_once()
@@ -665,6 +687,11 @@ async def _update_item_with_current(
     actor: str | None = None,
 ) -> repo.CurationItem | None:
     monkeypatch.setattr(repo, "_lock_collection", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        repo,
+        "_lock_legacy_projections_for_item",
+        AsyncMock(return_value=False),
+    )
     monkeypatch.setattr(repo, "get_curation_item", AsyncMock(return_value=_item()))
     return await repo.update_curation_item(
         _FakeSession(*results),
@@ -713,6 +740,7 @@ async def test_update_item_returns_none_for_missing_collection_or_item(
         ({"sort_order": 2_147_483_648}, "sort order"),
         ({"sort_order": "1"}, "sort order"),
         ({"external_item_id": " "}, "external_item_id"),
+        ({"external_component_id": " "}, "external_component_id"),
         ({"place_name": None}, "place_name"),
         ({"metadata": []}, "metadata"),
     ],
@@ -726,7 +754,7 @@ async def test_update_item_rejects_invalid_fields(
         await _update_item_with_current(monkeypatch, updates=updates)
 
 
-async def test_update_item_rejects_missing_feature_and_opposite_identity(
+async def test_update_item_rejects_missing_feature_duplicate_target_and_archived_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with pytest.raises(ValueError, match="Feature가 없습니다"):
@@ -736,10 +764,17 @@ async def test_update_item_rejects_missing_feature_and_opposite_identity(
             results=(_FakeResult(scalar=None),),
         )
 
-    with pytest.raises(ValueError, match="함께 둘 수 없습니다"):
+    with pytest.raises(ValueError, match="다른 component가 이미"):
         await _update_item_with_current(
             monkeypatch,
-            updates={"feature_id": None},
+            updates={"external_component_id": "component-02"},
+            results=(_FakeResult(scalar=None), _FakeResult(scalar=1)),
+        )
+
+    with pytest.raises(ValueError, match="identity는 재사용"):
+        await _update_item_with_current(
+            monkeypatch,
+            updates={"external_item_id": "archived"},
             results=(_FakeResult(scalar=1),),
         )
 
@@ -749,6 +784,11 @@ async def test_update_item_noop_update_miss_and_full_success(
 ) -> None:
     current = _item()
     monkeypatch.setattr(repo, "_lock_collection", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        repo,
+        "_lock_legacy_projections_for_item",
+        AsyncMock(return_value=False),
+    )
     get_item = AsyncMock(return_value=current)
     monkeypatch.setattr(repo, "get_curation_item", get_item)
 
@@ -762,6 +802,17 @@ async def test_update_item_noop_update_miss_and_full_success(
         )
         == current
     )
+    get_item.return_value = _item(status="archived", archived_at=_NOW)
+    assert (
+        await repo.update_curation_item(
+            _FakeSession(),
+            collection_id=_COLLECTION_ID,
+            curation_item_id=_CURATION_ITEM_ID,
+            updates={},
+        )
+        is None
+    )
+    get_item.return_value = current
 
     update_miss = _FakeSession(_FakeResult(scalar=None), _FakeResult(first=None))
     assert (
@@ -781,7 +832,9 @@ async def test_update_item_noop_update_miss_and_full_success(
     success = _FakeSession(
         _FakeResult(scalar=1),
         _FakeResult(scalar=None),
+        _FakeResult(scalar=None),
         _FakeResult(first=(_CURATION_ITEM_ID,)),
+        _FakeResult(),
     )
     updated = await repo.update_curation_item(
         success,
@@ -804,13 +857,55 @@ async def test_update_item_noop_update_miss_and_full_success(
         actor="admin",
     )
     assert updated == final_item
-    sql, params = success.calls[2]
+    assert "FOR KEY SHARE" in success.calls[0][0]
+    sql, params = success.calls[3]
     assert "archived_at = now()" in sql
     assert params["external_item_id"] == "changed"
     assert params["place_name"] == "변경 장소"
     assert params["address_hint"] == "부산"
     assert json.loads(params["metadata"]) == {"changed": True}
     touch.assert_awaited_once()
+
+
+async def test_update_item_allows_source_absent_but_rejects_archived_current(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(repo, "_lock_collection", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        repo,
+        "_lock_legacy_projections_for_item",
+        AsyncMock(return_value=False),
+    )
+    source_absent = _item(source_present=False)
+    archived = _item(status="archived", archived_at=_NOW)
+    get_item = AsyncMock(side_effect=[source_absent, archived, archived])
+    monkeypatch.setattr(repo, "get_curation_item", get_item)
+    touch = AsyncMock()
+    monkeypatch.setattr(repo, "_touch_collection", touch)
+
+    session = _FakeSession(
+        _FakeResult(first=(_CURATION_ITEM_ID,)),
+        _FakeResult(),
+    )
+    result = await repo.update_curation_item(
+        session,
+        collection_id=_COLLECTION_ID,
+        curation_item_id=_CURATION_ITEM_ID,
+        updates={"status": "archived"},
+    )
+    assert result == archived
+    assert get_item.await_args_list[0].kwargs["include_archived"] is True
+    touch.assert_awaited_once()
+
+    assert (
+        await repo.update_curation_item(
+            _FakeSession(),
+            collection_id=_COLLECTION_ID,
+            curation_item_id=_CURATION_ITEM_ID,
+            updates={"status": "included"},
+        )
+        is None
+    )
 
 
 async def test_archive_item_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -955,9 +1050,10 @@ async def test_upsert_theme_validates_and_delegates(monkeypatch: pytest.MonkeyPa
 
     upsert = AsyncMock(return_value=_THEME_ID)
     monkeypatch.setattr(repo, "_upsert_id_with_fallback", upsert)
+    session = _FakeSession(_FakeResult())
     assert (
         await repo.upsert_curation_theme(
-            _FakeSession(),
+            session,
             theme_slug="  slug  ",
             theme_name="  이름  ",
             theme_group="  그룹  ",
@@ -969,27 +1065,41 @@ async def test_upsert_theme_validates_and_delegates(monkeypatch: pytest.MonkeyPa
         "theme_name": "이름",
         "theme_group": "그룹",
     }
+    assert "curation-import" in session.calls[0][0]
 
 
-def test_resolved_identity_validation_reports_mixed_duplicate_and_valid() -> None:
+def test_resolved_identity_validation_reports_component_and_feature_duplicates() -> None:
     valid = (_resolved_row(), _resolved_row(row_number=3, source_item_key="official:two"))
     assert repo.validate_resolved_curation_identities(valid) == ()
 
-    mixed = (
-        _resolved_row(row_number=4),
-        _resolved_row(row_number=2, feature_id=None),
-        _resolved_row(row_number=3, feature_id=None),
+    mixed_is_valid = (
+        _resolved_row(
+            row_number=2,
+            source_component_key="component-01",
+            feature_id=None,
+        ),
+        _resolved_row(
+            row_number=3,
+            source_component_key="component-02",
+        ),
     )
-    issues = repo.validate_resolved_curation_identities(mixed)
+    assert repo.validate_resolved_curation_identities(mixed_is_valid) == ()
+
+    duplicates = (
+        _resolved_row(row_number=2, source_component_key="component-01"),
+        _resolved_row(row_number=3, source_component_key="component-01"),
+        _resolved_row(row_number=4, source_component_key="component-02"),
+    )
+    issues = repo.validate_resolved_curation_identities(duplicates)
     assert [(issue.row_number, issue.code) for issue in issues] == [
-        (2, "duplicate_resolved_identity"),
-        (2, "mixed_resolved_identity"),
-        (3, "duplicate_resolved_identity"),
-        (3, "mixed_resolved_identity"),
-        (4, "mixed_resolved_identity"),
+        (2, "duplicate_component_identity"),
+        (2, "duplicate_resolved_feature"),
+        (3, "duplicate_component_identity"),
+        (3, "duplicate_resolved_feature"),
+        (4, "duplicate_resolved_feature"),
     ]
     with pytest.raises(ValueError, match="Feature 해소 후"):
-        repo._ensure_resolved_curation_identities(mixed)
+        repo._ensure_resolved_curation_identities(duplicates)
     with pytest.raises(ValueError, match="PostgreSQL integer"):
         repo._ensure_resolved_curation_identities((_resolved_row(sort_order=2_147_483_648),))
 
@@ -1009,6 +1119,7 @@ async def test_preview_import_empty_counts_updates_and_removals() -> None:
         ),
     )
     session = _FakeSession(
+        _FakeResult(),
         _FakeResult(rows=[{"inserted": 1, "updated": 1}]),
         _FakeResult(rows=[_item_row()]),
     )
@@ -1055,7 +1166,12 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     changed = _FakeSession(
         _FakeResult(),
         _FakeResult(),
+        _FakeResult(rows=["feature:one"]),
+        _FakeResult(),
+        _FakeResult(),
+        _FakeResult(),
         _FakeResult(rows=[_item_row()]),
+        _FakeResult(scalar=0),
         _FakeResult(rows=[{"inserted": 2, "updated": 1}]),
         _FakeResult(),
     )
@@ -1080,9 +1196,14 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     unchanged = _FakeSession(
         _FakeResult(),
         _FakeResult(),
+        _FakeResult(rows=["feature:one"]),
+        _FakeResult(),
+        _FakeResult(),
+        _FakeResult(),
         _FakeResult(rows=[]),
+        _FakeResult(scalar=0),
         _FakeResult(rows=[{"inserted": 0, "updated": 0}]),
     )
     no_change = await repo.import_curation_rows(unchanged, rows=(rows[0],))
     assert no_change["inserted"] == no_change["updated"] == no_change["removed"] == 0
-    assert len(unchanged.calls) == 4
+    assert len(unchanged.calls) == 9

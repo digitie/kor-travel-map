@@ -2337,6 +2337,8 @@ export interface components {
             dataset_key: string | null;
             /** Edition Key */
             edition_key: string;
+            /** External Component Id */
+            external_component_id: string;
             /** External Item Id */
             external_item_id: string;
             /** Feature Category */

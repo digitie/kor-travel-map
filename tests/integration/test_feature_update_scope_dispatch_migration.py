@@ -384,7 +384,166 @@ async def test_0053_backfills_scope_dispatch_and_installs_typed_invariants(
         await _drop_database(pg_container, dsn)
 
 
-async def test_0053_fails_closed_on_active_running_scope_ambiguity(
+async def test_0053_reconciles_queued_scope_duplicates_deterministically(
+    pg_container: Any,
+) -> None:
+    dsn, engine = await _create_database(pg_container, "scope_dispatch_reconcile")
+    try:
+        await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION)
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.import_jobs (
+                      job_id, kind, payload, status, provider, dataset_key,
+                      trigger_kind, dagster_run_id, error_message
+                    ) VALUES
+                    ('53000000-1000-4000-8000-000000000001',
+                     'feature_update_request', '{}'::jsonb, 'queued',
+                     'provider-a', 'dataset-a', 'update_request', NULL,
+                     'prior retry context'),
+                    ('53000000-1000-4000-8000-000000000002',
+                     'feature_update_request', '{}'::jsonb, 'queued',
+                     'provider-a', 'dataset-a', 'update_request', NULL, NULL),
+                    ('53000000-1000-4000-8000-000000000003',
+                     'feature_update_request', '{}'::jsonb, 'queued',
+                     'provider-a', 'dataset-a', 'update_request', NULL, NULL),
+                    ('53000000-1000-4000-8000-000000000004',
+                     'feature_update_request', '{}'::jsonb, 'running',
+                     'provider-b', 'dataset-b', 'update_request', 'run-b', NULL),
+                    ('53000000-1000-4000-8000-000000000005',
+                     'feature_update_request', '{}'::jsonb, 'queued',
+                     'provider-b', 'dataset-b', 'update_request', NULL, NULL)
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.feature_update_requests (
+                      request_id, scope_type, scope, run_mode, priority, job_id,
+                      created_at
+                    ) VALUES
+                    ('53000000-1000-4000-8000-000000000011',
+                     'provider_dataset',
+                     '{"type":"provider_dataset","provider":"provider-a",'
+                     '"dataset_key":"dataset-a","sync_scope":"foo"}'::jsonb,
+                     'queued', 75, '53000000-1000-4000-8000-000000000001',
+                     '2026-07-17T00:00:00+00'::timestamptz),
+                    ('53000000-1000-4000-8000-000000000012',
+                     'provider_dataset',
+                     '{"type":"provider_dataset","provider":"provider-a",'
+                     '"dataset_key":"dataset-a","sync_scope":"bar"}'::jsonb,
+                     'now', 75, '53000000-1000-4000-8000-000000000002',
+                     '2026-07-17T00:01:00+00'::timestamptz),
+                    ('53000000-1000-4000-8000-000000000013',
+                     'provider_dataset',
+                     '{"type":"provider_dataset","provider":"provider-a",'
+                     '"dataset_key":"dataset-a","sync_scope":"baz"}'::jsonb,
+                     'now', 75, '53000000-1000-4000-8000-000000000003',
+                     '2026-07-17T00:02:00+00'::timestamptz),
+                    ('53000000-1000-4000-8000-000000000014',
+                     'provider_dataset',
+                     '{"type":"provider_dataset","provider":"provider-b",'
+                     '"dataset_key":"dataset-b"}'::jsonb,
+                     'queued', 0, '53000000-1000-4000-8000-000000000004',
+                     '2026-07-17T00:03:00+00'::timestamptz),
+                    ('53000000-1000-4000-8000-000000000015',
+                     'provider_dataset',
+                     '{"type":"provider_dataset","provider":"provider-b",'
+                     '"dataset_key":"dataset-b"}'::jsonb,
+                     'now', 100, '53000000-1000-4000-8000-000000000005',
+                     '2026-07-17T00:04:00+00'::timestamptz)
+                    """
+                )
+            )
+
+        await engine.dispose()
+        await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+
+        engine = make_async_engine(dsn)
+        async with engine.connect() as connection:
+            rows = {
+                str(row.job_id): row
+                for row in await connection.execute(
+                    text(
+                        "SELECT job_id, status, finished_at, error_message, sync_scope "
+                        "FROM ops.import_jobs ORDER BY job_id"
+                    )
+                )
+            }
+            revision = (
+                await connection.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar_one()
+
+        queued_winner = rows["53000000-1000-4000-8000-000000000002"]
+        assert queued_winner.status == "queued"
+        assert queued_winner.finished_at is None
+        assert queued_winner.error_message is None
+        assert queued_winner.sync_scope == "dataset_wide"
+
+        first_loser = rows["53000000-1000-4000-8000-000000000001"]
+        assert first_loser.status == "cancelled"
+        assert first_loser.finished_at is not None
+        assert first_loser.error_message == (
+            "prior retry context; migration 0053 superseded duplicate active scope; "
+            "winner_job_id=53000000-1000-4000-8000-000000000002"
+        )
+        later_loser = rows["53000000-1000-4000-8000-000000000003"]
+        assert later_loser.status == "cancelled"
+        assert later_loser.finished_at is not None
+        assert later_loser.error_message == (
+            "migration 0053 superseded duplicate active scope; "
+            "winner_job_id=53000000-1000-4000-8000-000000000002"
+        )
+
+        running_winner = rows["53000000-1000-4000-8000-000000000004"]
+        assert running_winner.status == "running"
+        mixed_loser = rows["53000000-1000-4000-8000-000000000005"]
+        assert mixed_loser.status == "cancelled"
+        assert mixed_loser.finished_at is not None
+        assert mixed_loser.error_message == (
+            "migration 0053 superseded duplicate active scope; "
+            "winner_job_id=53000000-1000-4000-8000-000000000004"
+        )
+        assert revision == _TARGET_REVISION
+
+        await engine.dispose()
+        await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION, downgrade=True)
+        await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+        engine = make_async_engine(dsn)
+        async with engine.connect() as connection:
+            roundtrip_rows = {
+                str(row.job_id): row
+                for row in await connection.execute(
+                    text(
+                        "SELECT job_id, status, error_message "
+                        "FROM ops.import_jobs ORDER BY job_id"
+                    )
+                )
+            }
+            roundtrip_revision = (
+                await connection.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar_one()
+        assert (
+            roundtrip_rows["53000000-1000-4000-8000-000000000002"].status
+            == "queued"
+        )
+        assert (
+            roundtrip_rows["53000000-1000-4000-8000-000000000001"].error_message
+            == first_loser.error_message
+        )
+        assert (
+            roundtrip_rows["53000000-1000-4000-8000-000000000003"].error_message
+            == later_loser.error_message
+        )
+        assert roundtrip_revision == _TARGET_REVISION
+    finally:
+        await engine.dispose()
+        await _drop_database(pg_container, dsn)
+
+
+async def test_0053_fails_closed_on_multiple_running_scope_ambiguity(
     pg_container: Any,
 ) -> None:
     dsn, engine = await _create_database(pg_container, "scope_dispatch_conflict")
@@ -398,12 +557,12 @@ async def test_0053_fails_closed_on_active_running_scope_ambiguity(
                       job_id, kind, payload, status, provider, dataset_key,
                       trigger_kind, dagster_run_id
                     ) VALUES
-                    ('53000000-1000-4000-8000-000000000001',
+                    ('53000000-2000-4000-8000-000000000001',
                      'feature_update_request', '{}'::jsonb, 'running',
                      'provider-a', 'dataset-a', 'update_request', 'run-a'),
-                    ('53000000-1000-4000-8000-000000000002',
-                     'feature_update_request', '{}'::jsonb, 'queued',
-                     'provider-a', 'dataset-a', 'update_request', NULL)
+                    ('53000000-2000-4000-8000-000000000002',
+                     'feature_update_request', '{}'::jsonb, 'running',
+                     'provider-a', 'dataset-a', 'update_request', 'run-b')
                     """
                 )
             )
@@ -413,22 +572,22 @@ async def test_0053_fails_closed_on_active_running_scope_ambiguity(
                     INSERT INTO ops.feature_update_requests (
                       request_id, scope_type, scope, run_mode, job_id
                     ) VALUES
-                    ('53000000-1000-4000-8000-000000000011',
+                    ('53000000-2000-4000-8000-000000000011',
                      'provider_dataset',
                      '{"type":"provider_dataset","provider":"provider-a",'
-                     '"dataset_key":"dataset-a","sync_scope":"foo"}'::jsonb,
-                     'queued', '53000000-1000-4000-8000-000000000001'),
-                    ('53000000-1000-4000-8000-000000000012',
+                     '"dataset_key":"dataset-a"}'::jsonb,
+                     'queued', '53000000-2000-4000-8000-000000000001'),
+                    ('53000000-2000-4000-8000-000000000012',
                      'provider_dataset',
                      '{"type":"provider_dataset","provider":"provider-a",'
-                     '"dataset_key":"dataset-a","sync_scope":"bar"}'::jsonb,
-                     'queued', '53000000-1000-4000-8000-000000000002')
+                     '"dataset_key":"dataset-a"}'::jsonb,
+                     'queued', '53000000-2000-4000-8000-000000000002')
                     """
                 )
             )
 
         await engine.dispose()
-        with pytest.raises(RuntimeError, match="cannot choose a winner"):
+        with pytest.raises(RuntimeError, match="multiple running"):
             await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
 
         engine = make_async_engine(dsn)
@@ -446,6 +605,151 @@ async def test_0053_fails_closed_on_active_running_scope_ambiguity(
                 )
             ).one_or_none()
         assert revision == _PRE_REVISION
+        assert scope_column is None
+    finally:
+        await engine.dispose()
+        await _drop_database(pg_container, dsn)
+
+
+async def test_0053_fails_closed_on_cancellation_marked_scope_duplicate(
+    pg_container: Any,
+) -> None:
+    dsn, engine = await _create_database(pg_container, "scope_dispatch_cancelling")
+    try:
+        await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION)
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.import_jobs (
+                      job_id, kind, payload, status, provider, dataset_key,
+                      trigger_kind, dagster_run_id
+                    ) VALUES
+                    ('53000000-3000-4000-8000-000000000001',
+                     'feature_update_request', '{}'::jsonb, 'queued',
+                     'provider-c', 'dataset-c', 'update_request', NULL),
+                    ('53000000-3000-4000-8000-000000000002',
+                     'feature_update_request', '{}'::jsonb, 'queued',
+                     'provider-c', 'dataset-c', 'update_request', NULL)
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.feature_update_requests (
+                      request_id, scope_type, scope, run_mode, priority, job_id,
+                      created_at
+                    ) VALUES
+                    ('53000000-3000-4000-8000-000000000011',
+                     'provider_dataset',
+                     '{"type":"provider_dataset","provider":"provider-c",'
+                     '"dataset_key":"dataset-c"}'::jsonb,
+                     'now', 100, '53000000-3000-4000-8000-000000000001',
+                     '2026-07-17T00:00:00+00'::timestamptz),
+                    ('53000000-3000-4000-8000-000000000012',
+                     'provider_dataset',
+                     '{"type":"provider_dataset","provider":"provider-c",'
+                     '"dataset_key":"dataset-c"}'::jsonb,
+                     'queued', 50, '53000000-3000-4000-8000-000000000002',
+                     '2026-07-17T00:01:00+00'::timestamptz)
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.pipeline_cancellations (
+                      cancellation_id, root_kind, root_id, status, requested_by
+                    ) VALUES (
+                      '53000000-3000-4000-8000-000000000021',
+                      'import_job',
+                      '53000000-3000-4000-8000-000000000001',
+                      'in_progress',
+                      'migration-test'
+                    )
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.pipeline_cancellation_members (
+                      cancellation_id, job_id, operation_kind, initial_status,
+                      requires_run_termination
+                    ) VALUES (
+                      '53000000-3000-4000-8000-000000000021',
+                      '53000000-3000-4000-8000-000000000001',
+                      'feature_update_request',
+                      'queued',
+                      false
+                    )
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    UPDATE ops.import_jobs
+                       SET cancellation_id = '53000000-3000-4000-8000-000000000021',
+                           cancellation_requested_at = now(),
+                           cancellation_requested_by = 'migration-test'
+                     WHERE job_id = '53000000-3000-4000-8000-000000000001'
+                    """
+                )
+            )
+
+        await engine.dispose()
+        with pytest.raises(RuntimeError, match="cancellation-marked"):
+            await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+
+        engine = make_async_engine(dsn)
+        async with engine.connect() as connection:
+            revision = (
+                await connection.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar_one()
+            statuses = (
+                await connection.execute(
+                    text(
+                        "SELECT status FROM ops.import_jobs "
+                        "WHERE job_id IN ("
+                        "'53000000-3000-4000-8000-000000000001',"
+                        "'53000000-3000-4000-8000-000000000002'"
+                        ") ORDER BY job_id"
+                    )
+                )
+            ).scalars().all()
+            member_result = (
+                await connection.execute(
+                    text(
+                        "SELECT result FROM ops.pipeline_cancellation_members "
+                        "WHERE cancellation_id = "
+                        "'53000000-3000-4000-8000-000000000021'"
+                    )
+                )
+            ).scalar_one()
+            attempt_status = (
+                await connection.execute(
+                    text(
+                        "SELECT status FROM ops.pipeline_cancellations "
+                        "WHERE cancellation_id = "
+                        "'53000000-3000-4000-8000-000000000021'"
+                    )
+                )
+            ).scalar_one()
+            scope_column = (
+                await connection.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = 'ops' AND table_name = 'import_jobs' "
+                        "AND column_name = 'sync_scope'"
+                    )
+                )
+            ).one_or_none()
+        assert revision == _PRE_REVISION
+        assert statuses == ["queued", "queued"]
+        assert member_result == "pending"
+        assert attempt_status == "in_progress"
         assert scope_column is None
     finally:
         await engine.dispose()

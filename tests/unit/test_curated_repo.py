@@ -243,6 +243,7 @@ async def test_curated_repo_read_paths_with_fake_session() -> None:
 @pytest.mark.asyncio
 async def test_curated_repo_write_paths_with_fake_session() -> None:
     session = _FakeSession(
+        [{"feature_id": _FEATURE_ID}],
         [{"curated_feature_id": _CURATED_ID}],
         [_feature_row()],
         [_feature_row()],
@@ -285,9 +286,12 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         curation_relation="bookstore_stop",
         reuse_policy="allowed",
         metadata={"manual": True},
+        actor="principal",
     )
     assert created.curated_feature_id == _CURATED_ID
-    assert session.calls[0][1]["selected_now"] is True
+    assert "FOR KEY SHARE" in session.calls[0][0]
+    assert session.calls[1][1]["selected_now"] is True
+    assert session.calls[1][1]["operator_updated_by"] == "principal"
 
     same = await curated_repo.update_curated_feature(
         session,
@@ -305,12 +309,17 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
             "metadata": {"patched": True},
             "curation_relation": "bookstore_stop",
         },
+        actor="patch-principal",
     )
     assert patched is not None
-    assert "content_version = content_version + 1" in session.calls[3][0]
+    assert "content_version = content_version + 1" in session.calls[4][0]
     assert (
-        session.calls[3][1]["theme_id"]
+        session.calls[4][1]["theme_id"]
         == "99999999-9999-9999-9999-999999999999"
+    )
+    assert session.calls[4][1]["actor"] == "patch-principal"
+    assert "operator_updated_by = COALESCE(:actor, operator_updated_by)" in (
+        session.calls[4][0]
     )
 
     for status_name in ("curated", "rejected", "candidate"):
@@ -538,6 +547,13 @@ async def test_curated_repo_validation_and_empty_paths() -> None:
             source_id=_SOURCE_ID,
             selection_origin="bad",
         )
+    with pytest.raises(ValueError, match="active Feature"):
+        await curated_repo.create_curated_feature(
+            _FakeSession([]),
+            theme_id=_THEME_ID,
+            feature_id=_FEATURE_ID,
+            source_id=_SOURCE_ID,
+        )
     with pytest.raises(ValueError, match="unsupported curated_feature update field"):
         await curated_repo.update_curated_feature(
             _FakeSession(),
@@ -556,6 +572,17 @@ async def test_curated_repo_validation_and_empty_paths() -> None:
             curated_feature_id=_CURATED_ID,
             curation_status="bad",
         )
+    detached = _FakeSession(
+        [_feature_row(metadata={"merge_projection_detached": True})]
+    )
+    assert (
+        await curated_repo.update_curated_feature(
+            detached,
+            curated_feature_id=_CURATED_ID,
+            updates={},
+        )
+        is None
+    )
 
     missing_session = _FakeSession([], [])
     assert (

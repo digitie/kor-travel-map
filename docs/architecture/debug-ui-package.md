@@ -499,6 +499,9 @@ CI에서 drift 검증 (kor-travel-geo ADR-015 패턴 미러). 자세한 절차�
 - backend는 testcontainers PostGIS (Python 측, §9).
 - frontend는 Playwright (e2e) + Vitest (단위) 로 테스트 (코드 작성 단계,
   Next.js 공식 가이드 미러).
+- curation import UI는 `source_item_key/source_component_key`를 함께 표시한다. 수동 item
+  생성도 `external_item_id/external_component_id`를 별도 입력해 복합 source item을
+  Feature target과 독립적으로 관리한다.
 - 통합 e2e (frontend + backend + PostGIS)는 Sprint 5 진입 직전 (T-200 계열).
 
 ### 14.8 React Doctor
@@ -514,9 +517,14 @@ npm run build
 npm run doctor
 ```
 
-`doctor` script가 아직 없으면 첫 frontend PR에서 추가한다. React Doctor 결과를
-실행 로그로만 남기지 말고, 실제 위험 항목을 개선한다. false positive 또는 의도적으로
-남기는 항목은 PR 설명이나 `docs/journal.md`에 근거를 적는다.
+`doctor` script는 full scope·warning blocking·inline disable 무시 금지·telemetry 비활성
+계약을 사용한다. frontend root의 `doctor.config.json`만 정본이며 verifier가 명령/설정 전체와
+shadow config·ignore 파일 부재를 exact 검증한다. React Doctor 결과를 실행 로그로만 남기지
+말고 실제 위험 항목을 개선한다. false positive는 정본 설정의 최소 범위 예외와
+`docs/journal.md` 근거를 함께 남긴다.
+T-VN-47에서 남긴 `no-giant-component` 19개·`prefer-useReducer` 3개 exact 파일 예외는
+`T-VN-49`에서 책임 경계와 상태기계 단위로 제거한다. transport/external event의 규칙별
+false-positive 예외를 포함한 모든 범위는 verifier가 exact 비교하며 근거 없는 확대를 실패시킨다.
 
 ### 14.9 외부 노출 안전
 

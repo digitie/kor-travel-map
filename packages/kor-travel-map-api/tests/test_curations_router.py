@@ -91,8 +91,10 @@ def _item(*, item_id: str, edition: str) -> CurationItem:
         address={"road": "서울특별시"},
         source_record_key=f"source::{edition}",
         external_item_id=f"official-{edition}",
+        external_component_id="primary",
         place_name="겹치는 관광지",
         address_hint="서울특별시",
+        source_present=True,
         status="included",
         sort_order=1,
         item_title="겹치는 관광지",
@@ -159,6 +161,7 @@ def _csv_content(
             "dataset_key": "lighthouse-stamp-tour",
             "source_name": "국립등대박물관",
             "source_item_key": "healing:ganjeolgot",
+            "source_component_key": "primary",
             "place_name": "간절곶등대" if valid else "",
             "official_ordinal": official_ordinal,
             "sort_order": sort_order,
@@ -171,6 +174,9 @@ def _csv_content(
         values["feature_id"] = feature_id
         if distinct_source_items:
             values["source_item_key"] = f"healing:ganjeolgot:{index}"
+            values["source_component_key"] = "primary"
+        elif len(feature_ids) > 1:
+            values["source_component_key"] = f"component-{index:02d}"
         writer.writerow(values)
     return output.getvalue().encode()
 
@@ -255,6 +261,39 @@ def test_csv_commit_rejects_whole_file_on_format_error(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_csv_import_maps_legacy_adoption_conflict_to_422(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    dry_run: bool,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    async def _matches(_session: object, **_kwargs: Any) -> dict[int, tuple[Any, ...]]:
+        return {2: ()}
+
+    async def _preview(_session: object, **_kwargs: Any) -> CurationImportPlan:
+        raise ValueError("legacy component identity 승계 후보가 모호합니다")
+
+    async def _unexpected_import(_session: object, **_kwargs: Any) -> CurationImportResult:
+        raise AssertionError("preview 충돌 뒤 import를 실행하면 안 됩니다.")
+
+    monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
+    monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
+    monkeypatch.setattr(module.curation_repo, "import_curation_rows", _unexpected_import)
+
+    response = client.post(
+        "/v1/admin/curations/import",
+        params={"dry_run": str(dry_run).lower()},
+        files={"file": ("ambiguous.csv", _csv_content(), "text/csv")},
+    )
+
+    assert response.status_code == 422
+    assert "승계 후보가 모호합니다" in response.json()["detail"]
+
+
+@pytest.mark.unit
 def test_csv_zero_official_ordinal_is_preserved_as_sort_order(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -288,7 +327,7 @@ def test_csv_zero_official_ordinal_is_preserved_as_sort_order(
 
 
 @pytest.mark.unit
-def test_csv_rejects_identity_that_becomes_mixed_after_feature_resolution(
+def test_csv_accepts_mixed_component_resolution(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from kortravelmap.api.routers import curations as module
@@ -307,12 +346,36 @@ def test_csv_rejects_identity_that_becomes_mixed_after_feature_resolution(
             3: (),
         }
 
-    async def _unexpected_write(_session: object, **_kwargs: Any) -> Any:
-        raise AssertionError("해소 후 identity 오류는 preview/write를 호출하면 안 됩니다.")
+    async def _preview(
+        _session: object, *, rows: tuple[Any, ...]
+    ) -> CurationImportPlan:
+        assert [row.source_component_key for row in rows] == [
+            "component-01",
+            "component-02",
+        ]
+        return CurationImportPlan(
+            collections=1,
+            inserted=2,
+            updated=0,
+            removals=(),
+        )
+
+    async def _import(
+        _session: object, *, rows: tuple[Any, ...], actor: str
+    ) -> CurationImportResult:
+        assert actor == "local-dev"
+        return {
+            "rows": len(rows),
+            "collections": 1,
+            "inserted": 2,
+            "updated": 0,
+            "removed": 0,
+            "removals": (),
+        }
 
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
-    monkeypatch.setattr(module.curation_repo, "preview_curation_import", _unexpected_write)
-    monkeypatch.setattr(module.curation_repo, "import_curation_rows", _unexpected_write)
+    monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
+    monkeypatch.setattr(module.curation_repo, "import_curation_rows", _import)
     files = {
         "file": (
             "mixed.csv",
@@ -325,11 +388,9 @@ def test_csv_rejects_identity_that_becomes_mixed_after_feature_resolution(
     commit = client.post("/v1/admin/curations/import", params={"dry_run": "false"}, files=files)
 
     assert preview.status_code == 200
-    assert preview.json()["data"]["invalid_rows"] == 2
-    assert {issue["code"] for issue in preview.json()["data"]["issues"]} == {
-        "mixed_resolved_identity"
-    }
-    assert commit.status_code == 422
+    assert preview.json()["data"]["invalid_rows"] == 0
+    assert preview.json()["data"]["unresolved_rows"] == 1
+    assert commit.status_code == 200
 
 
 @pytest.mark.unit
@@ -491,6 +552,24 @@ def test_admin_can_patch_and_archive_single_curation_item(
 
 
 @pytest.mark.unit
+def test_admin_empty_patch_does_not_expose_archived_curation_item(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    async def _archived_noop(_session: object, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(module.curation_repo, "update_curation_item", _archived_noop)
+    response = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        json={},
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.unit
 def test_admin_item_post_is_create_only(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -627,4 +706,140 @@ def test_curated_select_rejects_removed_actor_field(client: TestClient) -> None:
         "/v1/admin/features/curated/cf-1/select",
         json={"actor": "attacker", "reason": "x"},
     )
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_curated_legacy_admin_writes_record_authenticated_principal(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import curated as module
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def _create(_session: object, **kwargs: Any) -> None:
+        calls.append(("create", kwargs))
+        raise ValueError("captured")
+
+    async def _update(_session: object, **kwargs: Any) -> None:
+        calls.append(("update", kwargs))
+        raise ValueError("captured")
+
+    async def _archive(_session: object, **kwargs: Any) -> None:
+        calls.append(("archive", kwargs))
+
+    monkeypatch.setattr(module.curated_repo, "create_curated_feature", _create)
+    monkeypatch.setattr(module.curated_repo, "update_curated_feature", _update)
+    monkeypatch.setattr(module.curated_repo, "archive_curated_feature", _archive)
+
+    create_response = client.post(
+        "/v1/admin/features/curated",
+        json={
+            "theme_id": "11111111-1111-4111-8111-111111111111",
+            "feature_id": "feature:principal",
+            "source_id": "22222222-2222-4222-8222-222222222222",
+            "curation_status": "curated",
+        },
+    )
+    patch_response = client.patch(
+        "/v1/admin/features/curated/cf-1",
+        json={"curation_relation": "primary_stop"},
+    )
+    delete_response = client.delete("/v1/admin/features/curated/cf-1")
+
+    assert create_response.status_code == 422
+    assert patch_response.status_code == 422
+    assert delete_response.status_code == 404
+    assert calls == [
+        (
+            "create",
+            {
+                "theme_id": "11111111-1111-4111-8111-111111111111",
+                "feature_id": "feature:principal",
+                "source_id": "22222222-2222-4222-8222-222222222222",
+                "source_record_key": None,
+                "curation_status": "curated",
+                "rejection_reason": None,
+                "rank_score": 0.0,
+                "display_title": None,
+                "display_summary": None,
+                "curation_relation": "nearby_option",
+                "reuse_policy": "manual_review",
+                "metadata": {},
+                "selection_origin": "admin",
+                "selected_by": "local-dev",
+                "rejected_by": None,
+                "actor": "local-dev",
+            },
+        ),
+        (
+            "update",
+            {
+                "curated_feature_id": "cf-1",
+                "updates": {"curation_relation": "primary_stop"},
+                "actor": "local-dev",
+            },
+        ),
+        (
+            "archive",
+            {
+                "curated_feature_id": "cf-1",
+                "actor": "local-dev",
+            },
+        ),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("selection_origin", "external_api"),
+        ("selected_by", "attacker"),
+        ("rejected_by", "attacker"),
+    ],
+)
+def test_curated_create_rejects_spoofable_provenance_fields(
+    client: TestClient, field: str, value: str
+) -> None:
+    response = client.post(
+        "/v1/admin/features/curated",
+        json={
+            "theme_id": "11111111-1111-4111-8111-111111111111",
+            "feature_id": "feature:spoof",
+            "source_id": "22222222-2222-4222-8222-222222222222",
+            field: value,
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        (
+            "post",
+            "/v1/admin/features/curated",
+            {
+                "theme_id": "11111111-1111-4111-8111-111111111111",
+                "feature_id": "feature:reserved-metadata",
+                "source_id": "22222222-2222-4222-8222-222222222222",
+                "metadata": {"merge_projection_detached": True},
+            },
+        ),
+        (
+            "patch",
+            "/v1/admin/features/curated/cf-1",
+            {"metadata": {"merge_projection_detached": False}},
+        ),
+    ],
+)
+def test_curated_write_rejects_reserved_detach_marker(
+    client: TestClient,
+    method: str,
+    path: str,
+    payload: dict[str, Any],
+) -> None:
+    response = client.request(method, path, json=payload)
     assert response.status_code == 422

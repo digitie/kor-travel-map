@@ -80,8 +80,8 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `feature_special_days` | `(feature_id, special_date)` | is_closed, periods JSONB |
 | `feature_weather_values` | `weather_value_key` | UNIQUE (feature_id, provider, weather_domain, forecast_style, metric_key, issued_at, valid_at, observed_at) |
 | `feature_price_values` | `price_value_key` | feature_id FK; provider/price_domain/product_key/observed_at/value_number/unit; UNIQUE (feature_id,provider,price_domain,product_key,observed_at) |
-| `curation_collections` | `collection_id UUID` | UNIQUE collection_key; theme/source/title/edition/status/visibility; created_by/updated_by; 공식 회차·캠페인 묶음 |
-| `curation_items` | `curation_item_id UUID` | collection FK; nullable feature_id; external_item_id/place_name/address_hint/status/sort_order; created_by/updated_by; 공식 membership과 미연결 항목 모두 보존 |
+| `curation_collections` | `collection_id UUID` | UNIQUE collection_key; theme/source/title/edition/status/visibility; legacy key는 theme/source UUID+title hash, 중복 group은 split identity; created_by/updated_by |
+| `curation_items` | `curation_item_id UUID` | collection FK; nullable·mutable feature_id; source_record_key; legacy_projection_id deferrable FK/partial UNIQUE; external_item_id + external_component_id stable identity; place_name/address_hint/source_present/source_updated_at/status/sort_order; operator_updated_by/at; source 누락·재등장과 운영자 tombstone 이력 |
 
 0045 큐레이션 write는 다음 불변식을 지킨다.
 
@@ -90,8 +90,40 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 - 수동 item 추가·수정·보관은 parent collection row를 먼저 잠그고 collection의
   `updated_by`/`updated_at`도 함께 갱신한다.
 - CSV authoritative replace는 transaction advisory lock으로 직렬화한 뒤 대상 collection을
-  UUID 순서로 `FOR UPDATE`한다. dry-run은 쓰기 없이 삭제 예정 item까지 계산하며, 동일 CSV를
-  다시 반영하면 모든 변경 수가 0이고 관련 `updated_at`도 바뀌지 않는다.
+  UUID 순서로 `FOR UPDATE`한다. source에서 빠진 item은 삭제 대신 `source_present=false`로
+  보존하고, 재등장 시 제공자 파생 필드만 갱신해 운영자 `status`·relation·reuse override를
+  유지한다. 운영자가 보관한 exact identity tombstone은 자동 재생성하지 않는다. dry-run은
+  쓰기 없이 source 누락 예정 item까지 계산하며, 동일 CSV를 다시 반영하면 모든 변경 수가
+  0이고 관련 `updated_at`도 바뀌지 않는다.
+- source item과 펼쳐진 membership component를 분리한다. exact identity는
+  `(collection_id, external_item_id, external_component_id)`이고 Feature 연결은 변경 가능한
+  target이다. 같은 source item의 연결·미연결 component 공존은 허용하되, active component가
+  동일 non-null Feature를 중복 참조하는 것은 partial unique로 차단한다.
+- 0064→0066 연속 migration은 0065의 지연 FK·sync trigger event를 0066 backfill 직후
+  `SET CONSTRAINTS ALL IMMEDIATE`로 검사·소진한 뒤 DDL을 수행한다. 실패하면 같은 Alembic
+  transaction 전체가 원자적으로 중단된다.
+- source 파생 변경은 `source_updated_at`, 운영자 상태·relation·reuse 변경은
+  `operator_updated_at`/`operator_updated_by`로 독립 기록한다. Feature merge는 이 두
+  revision으로 각 필드군 승자를 따로 정하고, 먼저 영향 collection을 UUID 순서로 잠가
+  import/admin writer와 같은 parent→child lock order를 지킨다. 운영 중 revision은 실제 쓰기
+  순서를 보존하도록 `clock_timestamp()`로 기록한다.
+- 전환기 legacy `curated_features`도 operator provenance를 소유한다. legacy↔canonical
+  동기화는 provenance가 전진한 필드군만 반영하고, 안정적인 source identity의 DELETE→새 UUID
+  재삽입은 기존 source-absent membership을 복원한다. source record가 없어도 durable external
+  identity를 재사용하며 archived tombstone은 항상 우선한다.
+  Feature merge가 충돌 해소용으로 archive한 detached legacy projection은 이후 trigger source가
+  될 수 없다.
+- legacy cross-title 이동은 target collection을 잡은 뒤 source parent를 역순 잠그지 않고
+  `curation_items` row만 잠근다. migration 0065는 과거 mutable slug 재사용으로 탈취된
+  active/archived projection을 명시적 `legacy_projection_id`로 자동 복구한다. durable owner link가
+  없는 canonical-only item은 external identity가 일치해도 추정하지 않고 모든 legacy-marker
+  collection에서 `draft/admin_only` quarantine에 보존한다. upgrade 전 old projection이 삭제된
+  경우도 같은 규칙을 적용한다. mutable metadata marker가 지워진 이력은 immutable `legacy:`
+  collection key namespace를 함께 검사해 우회를 막는다.
+  migration 생성 exact `legacy:quarantine:<UUID>` key와 immutable
+  `created_by='migration:0065'` 결합만 재격리 대상에서 제외해 왕복 identity를 보존한다. 과거
+  `quarantine:` theme slug가 만든 정상 legacy key는 제외하지 않는다. quarantine metadata에
+  `migrated_from`이 추가돼도 upgrade·downgrade stable-key rewrite는 generated 결합만 제외한다.
 - 0045 downgrade는 구 flat overlay로 재구성할 수 없는 신규·수정 데이터나 감사값이 있으면
   `P0001`로 중단한다. export 또는 명시적 정리 없이 풍부한 데이터를 삭제하지 않는다.
 - 0044 downgrade는 연결된 source entity에 immutable record가 둘 이상이면 구 record별
@@ -159,9 +191,10 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 |--------|------|------|
 | `idx_curation_collections_theme_status_edition` | (theme_id, status, edition_key, collection_id) | 테마·공개 회차 목록 |
 | `idx_curation_collections_source_status` | (source_id, status, collection_id) | 출처별 collection 목록 |
-| `uq_curation_items_active_identity` | UNIQUE (collection_id, external_item_id, feature_id) NULLS NOT DISTINCT | active membership 및 미연결 공식 항목 중복 방지 |
-| `idx_curation_items_collection_status_order` | (collection_id, status, sort_order, curation_item_id) | collection 상세 정렬 |
-| `idx_curation_items_feature_status_collection` | (feature_id, status, collection_id) | Feature별 모든 큐레이션 조회 |
+| `uq_curation_items_component_identity` | UNIQUE (collection_id, external_item_id, external_component_id) | active·source 누락·archived tombstone을 통틀어 stable component 1행 강제 |
+| `uq_curation_items_active_source_feature` | UNIQUE (collection_id, external_item_id, feature_id) WHERE source_present AND archived_at IS NULL AND feature_id IS NOT NULL | 한 source item의 current active component가 동일 Feature를 중복 참조하지 못하게 함 |
+| `idx_curation_items_collection_status_order` | (collection_id, source_present, status, sort_order, curation_item_id) | source에 존재하는 collection 상세 정렬 |
+| `idx_curation_items_feature_status_collection` | (feature_id, source_present, status, collection_id) | source에 존재하는 Feature별 큐레이션 조회 |
 
 collection 목록 API는 `updated_at DESC, collection_id DESC` keyset cursor를 사용하고
 `page_size`를 최대 500으로 제한한다. Feature group 목록은 먼저 `feature_id` key를 page한 뒤
@@ -278,7 +311,9 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `curation_items` | `ck_curation_items_sort_order` | ≥ 0 |
 | `curation_items` | `ck_curation_items_relation` | primary_stop/food_stop/cafe_stop/bookstore_stop/nearby_option/accessibility_support/pet_support/family_support/theme_area_anchor |
 | `curation_items` | `ck_curation_items_reuse_policy` | allowed/blocked/manual_review |
-| `curation_items` | `uq_curation_items_active_identity` | active `(collection_id, external_item_id, feature_id)` 중복 금지, NULL도 동일값 취급 |
+| `curation_items` | `ck_curation_items_external_component_id_canonical` | component key는 trimmed non-empty |
+| `curation_items` | `uq_curation_items_component_identity` | `(collection_id, external_item_id, external_component_id)` exact identity 중복 금지 |
+| `curation_items` | `uq_curation_items_active_source_feature` | active non-null Feature target 중복 금지 |
 | `feature_files` | `ck_feature_files_file_type` | image/video/audio/document/file |
 | `feature_files` | `ck_feature_files_display_order` | ≥ 0 |
 | `feature_files` | `ck_feature_files_byte_size` | NULL or ≥ 0 |

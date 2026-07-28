@@ -209,5 +209,3 @@ function textOrUndefined(value: string | null | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
-
-export { KOR_TRAVEL_GEO_PROXY_BASE as KOR_TRAVEL_GEO_BASE_URL };

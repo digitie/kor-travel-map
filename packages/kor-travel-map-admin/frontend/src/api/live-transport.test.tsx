@@ -558,6 +558,31 @@ describe("ops live transport", () => {
     expect(socket.close).toHaveBeenCalledWith(1000);
   });
 
+  it("unmount하면 진행 중인 ticket 요청을 abort한다", async () => {
+    const ticketRequest: { signal: AbortSignal | null } = { signal: null };
+    const fetchMock = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          ticketRequest.signal = init?.signal ?? null;
+          ticketRequest.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = renderHarness();
+    await flushMicrotasks();
+    expect(ticketRequest.signal?.aborted).toBe(false);
+
+    view.unmount();
+
+    expect(ticketRequest.signal?.aborted).toBe(true);
+    expect(FakeWebSocket.instances).toHaveLength(0);
+  });
+
   it("unmount하면 예약된 backoff timer를 정리한다", async () => {
     const fetchMock = vi.fn(async () => ticketResponse());
     vi.stubGlobal("fetch", fetchMock);

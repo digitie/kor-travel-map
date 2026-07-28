@@ -2446,6 +2446,8 @@ export interface components {
             dataset_key: string | null;
             /** Edition Key */
             edition_key: string;
+            /** External Component Id */
+            external_component_id: string;
             /** External Item Id */
             external_item_id: string;
             /** Feature Category */
@@ -2481,6 +2483,8 @@ export interface components {
             sort_order: number;
             /** Source Name */
             source_name: string | null;
+            /** Source Present */
+            source_present: boolean;
             /** Source Record Key */
             source_record_key: string | null;
             /** Source Url */
@@ -4039,8 +4043,6 @@ export interface components {
              * @default 0
              */
             rank_score: number;
-            /** Rejected By */
-            rejected_by?: string | null;
             /** Rejection Reason */
             rejection_reason?: string | null;
             /**
@@ -4049,14 +4051,6 @@ export interface components {
              * @enum {string}
              */
             reuse_policy: "allowed" | "blocked" | "manual_review";
-            /** Selected By */
-            selected_by?: string | null;
-            /**
-             * Selection Origin
-             * @default admin
-             * @enum {string}
-             */
-            selection_origin: "source_rule" | "admin" | "external_api";
             /** Source Id */
             source_id: string;
             /** Source Record Key */
@@ -4839,6 +4833,8 @@ export interface components {
             resolved_feature_id: string | null;
             /** Row Number */
             row_number: number;
+            /** Source Component Key */
+            source_component_key: string;
             /** Source Item Key */
             source_item_key: string;
             /**
@@ -4861,6 +4857,11 @@ export interface components {
              * @enum {string}
              */
             curation_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+            /**
+             * External Component Id
+             * @default primary
+             */
+            external_component_id: string;
             /** External Item Id */
             external_item_id: string;
             /** Feature Id */
@@ -4904,6 +4905,8 @@ export interface components {
              * @enum {string}
              */
             curation_relation?: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+            /** External Component Id */
+            external_component_id?: string;
             /** External Item Id */
             external_item_id?: string;
             /** Feature Id */
@@ -10011,6 +10014,8 @@ export interface components {
             dataset_key: string | null;
             /** Edition Key */
             edition_key: string;
+            /** External Component Id */
+            external_component_id: string;
             /** External Item Id */
             external_item_id: string;
             /** Feature Category */

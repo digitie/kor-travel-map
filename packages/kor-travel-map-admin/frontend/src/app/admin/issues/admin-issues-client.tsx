@@ -12,7 +12,13 @@ import {
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useDeferredValue, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   useAdminIssueActionMutation,
@@ -27,7 +33,8 @@ import {
 import { AdminShell } from "@/components/admin-shell";
 import { CursorPager } from "@/components/pagination-bar";
 import { EntityLink } from "@/components/entity-link";
-import { StatusBadge, statusLabel } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -454,15 +461,15 @@ export function AdminIssuesClient({
   const nextCursor = issues.data?.meta.page?.next_cursor ?? null;
 
   const resetCursor = () => setCursor(null);
-  const quickAction = (
-    issueId: string,
-    actionName: AdminIssueAction,
-  ) => {
-    action.mutate({
-      issueId,
-      body: buildActionBody(actionName),
-    });
-  };
+  const quickAction = useCallback(
+    (issueId: string, actionName: AdminIssueAction) => {
+      action.mutate({
+        issueId,
+        body: buildActionBody(actionName),
+      });
+    },
+    [action],
+  );
 
   const columns = useMemo<ColumnDef<AdminIssueRecord, unknown>[]>(
     () => [
@@ -596,8 +603,7 @@ export function AdminIssuesClient({
         },
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [action.isPending],
+    [action.isPending, quickAction],
   );
 
   return (

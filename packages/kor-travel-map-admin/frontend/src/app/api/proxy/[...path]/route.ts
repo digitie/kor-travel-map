@@ -16,15 +16,16 @@ const FORWARDED_RESPONSE_HEADERS = [
   "retry-after",
 ] as const;
 
-function forwardedResponseHeaders(source: Headers): Headers {
-  const headers = new Headers();
-  for (const name of FORWARDED_RESPONSE_HEADERS) {
-    const value = source.get(name);
-    if (value !== null) {
-      headers.set(name, value);
-    }
-  }
-  return headers;
+function forwardedResponseHeaders(source: Headers): Array<[string, string]> {
+  const headers = FORWARDED_RESPONSE_HEADERS.flatMap(
+    (name): Array<[string, string]> => {
+      const value = source.get(name);
+      return value === null ? [] : [[name, value]];
+    },
+  );
+  return source.has("content-type")
+    ? headers
+    : [...headers, ["content-type", "application/json"]];
 }
 
 async function proxy(
@@ -48,13 +49,9 @@ async function proxy(
         request.signal,
       ),
     });
-    const responseHeaders = forwardedResponseHeaders(response.headers);
-    if (!responseHeaders.has("content-type")) {
-      responseHeaders.set("content-type", "application/json");
-    }
     return new Response(response.body, {
       status: response.status,
-      headers: responseHeaders,
+      headers: forwardedResponseHeaders(response.headers),
     });
   } catch (error) {
     if (request.signal.aborted) {

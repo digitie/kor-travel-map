@@ -428,11 +428,6 @@ export function CuratedFeatureMapClient() {
       : `${count}곳 · ${pages}페이지 전체 반영`;
   }, [bbox, groups, groupsQuery]);
 
-  const clearSelectionAnd = (action: () => void) => {
-    action();
-    setSelectedFeatureId(null);
-  };
-
   return (
     <AdminShell
       actions={
@@ -465,17 +460,19 @@ export function CuratedFeatureMapClient() {
               className="w-64 shrink-0"
               placeholder="POI명, 제목, 테마 검색"
               value={search}
-              onChange={(event) =>
-                clearSelectionAnd(() => setSearch(event.target.value))
-              }
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setSelectedFeatureId(null);
+              }}
             />
             <NativeSelect
               aria-label="테마 필터"
               className="w-52 shrink-0"
               value={themeSlug}
-              onChange={(event) =>
-                clearSelectionAnd(() => setThemeSlug(event.target.value))
-              }
+              onChange={(event) => {
+                setThemeSlug(event.target.value);
+                setSelectedFeatureId(null);
+              }}
             >
               <NativeSelectOption value="">테마 전체</NativeSelectOption>
               {filterOptions.themes.map((theme) => (
@@ -488,9 +485,10 @@ export function CuratedFeatureMapClient() {
               aria-label="연도 필터"
               className="w-44 shrink-0"
               value={editionKey}
-              onChange={(event) =>
-                clearSelectionAnd(() => setEditionKey(event.target.value))
-              }
+              onChange={(event) => {
+                setEditionKey(event.target.value);
+                setSelectedFeatureId(null);
+              }}
             >
               <NativeSelectOption value="">연도 전체</NativeSelectOption>
               {filterOptions.editions.map((edition) => (
@@ -501,9 +499,10 @@ export function CuratedFeatureMapClient() {
               aria-label="제공자 필터"
               className="w-44 shrink-0"
               value={provider}
-              onChange={(event) =>
-                clearSelectionAnd(() => setProvider(event.target.value))
-              }
+              onChange={(event) => {
+                setProvider(event.target.value);
+                setSelectedFeatureId(null);
+              }}
             >
               <NativeSelectOption value="">제공자 전체</NativeSelectOption>
               {filterOptions.providers.map((value) => (

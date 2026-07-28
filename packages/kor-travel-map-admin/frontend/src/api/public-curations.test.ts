@@ -49,6 +49,7 @@ function group(
       curation_relation: "primary_stop",
       dataset_key: "dataset-key",
       edition_key: "2025-2026",
+      external_component_id: "primary",
       external_item_id: curationItemId,
       feature_category: "attraction",
       feature_id: featureId,

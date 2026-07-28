@@ -129,6 +129,7 @@ class PublicCurationItemView(BaseModel):
     lat: float | None
     address: dict[str, Any]
     external_item_id: str
+    external_component_id: str
     place_name: str
     address_hint: str | None
     status: ItemStatus
@@ -166,8 +167,10 @@ class AdminCurationItemView(BaseModel):
     address: dict[str, Any]
     source_record_key: str | None
     external_item_id: str
+    external_component_id: str
     place_name: str
     address_hint: str | None
+    source_present: bool
     status: ItemStatus
     sort_order: int
     item_title: str | None
@@ -335,6 +338,9 @@ class CurationItemCreateRequest(BaseModel):
 
     feature_id: str | None = Field(default=None, min_length=1)
     external_item_id: str = Field(min_length=1, max_length=300)
+    external_component_id: str = Field(
+        default="primary", min_length=1, max_length=300
+    )
     place_name: str | None = Field(default=None, min_length=1, max_length=500)
     address_hint: str | None = Field(default=None, max_length=1000)
     source_record_key: str | None = None
@@ -358,6 +364,9 @@ class CurationItemPatchRequest(BaseModel):
 
     feature_id: str | None = Field(default=None, min_length=1)
     external_item_id: str = Field(default=None, min_length=1, max_length=300)  # type: ignore[assignment]
+    external_component_id: str = Field(  # type: ignore[assignment]
+        default=None, min_length=1, max_length=300
+    )
     place_name: str = Field(default=None, min_length=1, max_length=500)  # type: ignore[assignment]
     address_hint: str | None = Field(default=None, max_length=1000)
     source_record_key: str | None = None
@@ -408,6 +417,7 @@ class CurationImportRowView(BaseModel):
     requested_feature_id: str
     resolved_feature_id: str | None
     source_item_key: str
+    source_component_key: str
     candidates: list[CurationImportFeatureCandidateView]
     issues: list[CurationImportIssueView]
 
@@ -571,6 +581,7 @@ async def import_admin_curations(
                     requested_feature_id=row.feature_id,
                     resolved_feature_id=None,
                     source_item_key=row.source_item_key,
+                    source_component_key=row.source_component_key,
                     candidates=[],
                     issues=[_issue_view(issue) for issue in row.issues],
                 )
@@ -611,6 +622,7 @@ async def import_admin_curations(
                 source_name=row.source_name,
                 source_url=row.source_url or None,
                 source_item_key=row.source_item_key,
+                source_component_key=row.source_component_key,
                 feature_id=match.feature_id if match is not None else None,
                 place_name=(
                     row.place_name or (match.name if match is not None else row.feature_id)
@@ -643,6 +655,7 @@ async def import_admin_curations(
                 requested_feature_id=row.feature_id,
                 resolved_feature_id=match.feature_id if match is not None else None,
                 source_item_key=row.source_item_key,
+                source_component_key=row.source_component_key,
                 candidates=[_candidate_view(candidate) for candidate in matches],
                 issues=row_issues,
             )
@@ -681,28 +694,31 @@ async def import_admin_curations(
     change_plan = curation_repo.CurationImportPlan(
         collections=0, inserted=0, updated=0, removals=()
     )
-    if not has_errors:
-        change_plan = await curation_repo.preview_curation_import(session, rows=resolved_rows)
-    result: curation_repo.CurationImportResult = {
-        "rows": len(resolved_rows),
-        "inserted": change_plan.inserted,
-        "updated": change_plan.updated,
-        "removed": len(change_plan.removals),
-        "collections": change_plan.collections,
-        "removals": change_plan.removals,
-    }
-    if not dry_run:
-        try:
+    try:
+        if not has_errors:
+            change_plan = await curation_repo.preview_curation_import(
+                session,
+                rows=resolved_rows,
+            )
+        result: curation_repo.CurationImportResult = {
+            "rows": len(resolved_rows),
+            "inserted": change_plan.inserted,
+            "updated": change_plan.updated,
+            "removed": len(change_plan.removals),
+            "collections": change_plan.collections,
+            "removals": change_plan.removals,
+        }
+        if not dry_run:
             result = await curation_repo.import_curation_rows(
                 session, rows=resolved_rows, actor=context.actor
             )
             await session.commit()
-        except IntegrityError as exc:
-            await session.rollback()
-            raise _conflict(exc) from exc
-        except ValueError as exc:
-            await session.rollback()
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        await session.rollback()
+        raise _conflict(exc) from exc
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     invalid_rows = sum(item.status == "invalid" for item in item_views)
     valid_rows = sum(item.status != "invalid" for item in item_views)

@@ -24,12 +24,10 @@ function kstDateParts(value: Date | string): KstDateParts | null {
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) return null;
 
-  const parts = new Map(
-    kstDateFormatter
-      .formatToParts(date)
-      .filter((part) => part.type !== "literal")
-      .map((part): [string, number] => [part.type, Number(part.value)]),
-  );
+  const parts = new Map<string, number>();
+  for (const part of kstDateFormatter.formatToParts(date)) {
+    if (part.type !== "literal") parts.set(part.type, Number(part.value));
+  }
   const year = parts.get("year");
   const month = parts.get("month");
   const day = parts.get("day");
@@ -84,15 +82,18 @@ export function opinetPastPriceLabel(
   points: readonly PriceObservation[],
   now: Date = new Date(),
 ): string | null {
-  const oldPoints = points
-    .filter((point) => point.provider === OPINET_PROVIDER)
-    .map((point) => ({ point, date: new Date(point.observed_at) }))
-    .filter(
-      ({ date, point }) =>
-        Number.isFinite(date.getTime()) &&
-        !isSameKstCalendarDate(point.observed_at, now),
-    )
-    .sort((left, right) => right.date.getTime() - left.date.getTime());
+  const oldPoints: Array<{ point: PriceObservation; date: Date }> = [];
+  for (const point of points) {
+    if (point.provider !== OPINET_PROVIDER) continue;
+    const date = new Date(point.observed_at);
+    if (
+      Number.isFinite(date.getTime()) &&
+      !isSameKstCalendarDate(point.observed_at, now)
+    ) {
+      oldPoints.push({ point, date });
+    }
+  }
+  oldPoints.sort((left, right) => right.date.getTime() - left.date.getTime());
   const latestOld = oldPoints[0];
   if (!latestOld) return null;
   const parts = kstDateParts(latestOld.date);

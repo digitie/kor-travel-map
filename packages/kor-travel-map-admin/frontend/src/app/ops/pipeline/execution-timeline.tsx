@@ -68,7 +68,7 @@ function padDatePart(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-export function datetimeLocalValue(value: string | undefined): string {
+function datetimeLocalValue(value: string | undefined): string {
   if (!value) {
     return "";
   }
@@ -89,7 +89,7 @@ export function datetimeLocalValue(value: string | undefined): string {
   ].join("");
 }
 
-export function datetimeLocalIsoValue(value: string): string | undefined {
+function datetimeLocalIsoValue(value: string): string | undefined {
   if (!value) {
     return undefined;
   }

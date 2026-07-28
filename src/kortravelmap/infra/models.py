@@ -1071,6 +1071,8 @@ class CuratedFeatureRow(Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
+    operator_updated_by: Mapped[str | None] = mapped_column(Text)
+    operator_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -1161,6 +1163,11 @@ class CurationItemRow(Base):
     __tablename__ = "curation_items"
     __table_args__ = (
         CheckConstraint("btrim(external_item_id) <> ''", name="external_id"),
+        CheckConstraint(
+            "external_component_id <> '' "
+            "AND external_component_id = btrim(external_component_id)",
+            name="external_component_id_canonical",
+        ),
         CheckConstraint("btrim(place_name) <> ''", name="place_name"),
         CheckConstraint(
             "status IN ('candidate','included','rejected','archived')",
@@ -1183,18 +1190,32 @@ class CurationItemRow(Base):
             "jsonb_typeof(metadata) = 'object'",
             name="metadata",
         ),
+        UniqueConstraint(
+            "collection_id",
+            "external_item_id",
+            "external_component_id",
+            name="uq_curation_items_component_identity",
+        ),
         Index(
-            "uq_curation_items_active_identity",
+            "uq_curation_items_active_source_feature",
             "collection_id",
             "external_item_id",
             "feature_id",
             unique=True,
-            postgresql_where=text("archived_at IS NULL"),
-            postgresql_nulls_not_distinct=True,
+            postgresql_where=text(
+                "source_present AND archived_at IS NULL AND feature_id IS NOT NULL"
+            ),
+        ),
+        Index(
+            "uq_curation_items_legacy_projection_id",
+            "legacy_projection_id",
+            unique=True,
+            postgresql_where=text("legacy_projection_id IS NOT NULL"),
         ),
         Index(
             "idx_curation_items_collection_status_order",
             "collection_id",
+            "source_present",
             "status",
             "sort_order",
             "curation_item_id",
@@ -1202,6 +1223,7 @@ class CurationItemRow(Base):
         Index(
             "idx_curation_items_feature_status_collection",
             "feature_id",
+            "source_present",
             "status",
             "collection_id",
         ),
@@ -1226,9 +1248,29 @@ class CurationItemRow(Base):
         Text,
         ForeignKey("provider_sync.source_records.source_record_key", ondelete="SET NULL"),
     )
+    legacy_projection_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "feature.curated_features.curated_feature_id",
+            ondelete="NO ACTION",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
     external_item_id: Mapped[str] = mapped_column(Text, nullable=False)
+    external_component_id: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'primary'"),
+    )
     place_name: Mapped[str] = mapped_column(Text, nullable=False)
     address_hint: Mapped[str | None] = mapped_column(Text)
+    source_present: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    source_updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'candidate'"))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     item_title: Mapped[str | None] = mapped_column(Text)
@@ -1244,6 +1286,8 @@ class CurationItemRow(Base):
     )
     created_by: Mapped[str | None] = mapped_column(Text)
     updated_by: Mapped[str | None] = mapped_column(Text)
+    operator_updated_by: Mapped[str | None] = mapped_column(Text)
+    operator_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

@@ -14,7 +14,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from kortravelmap.infra import curated_repo
 from kortravelmap.settings import KorTravelMapSettings
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,7 +35,6 @@ router = APIRouter(tags=["curated"])
 admin_router = APIRouter(prefix="/admin", tags=["admin-curated"])
 
 CurationStatus = Literal["candidate", "curated", "rejected", "archived"]
-SelectionOrigin = Literal["source_rule", "admin", "external_api"]
 CurationRelation = Literal[
     "primary_stop",
     "food_stop",
@@ -450,9 +449,6 @@ class CuratedFeatureCreateRequest(BaseModel):
     source_id: str
     source_record_key: str | None = None
     curation_status: CurationStatus = "candidate"
-    selection_origin: SelectionOrigin = "admin"
-    selected_by: str | None = None
-    rejected_by: str | None = None
     rejection_reason: str | None = None
     rank_score: float = 0.0
     display_title: str | None = None
@@ -460,6 +456,13 @@ class CuratedFeatureCreateRequest(BaseModel):
     curation_relation: CurationRelation = "nearby_option"
     reuse_policy: ReusePolicy = "manual_review"
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("metadata")
+    @classmethod
+    def reject_reserved_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if "merge_projection_detached" in value:
+            raise ValueError("merge_projection_detached metadata는 내부 전용입니다.")
+        return value
 
 
 class CuratedFeaturePatchRequest(BaseModel):
@@ -474,6 +477,16 @@ class CuratedFeaturePatchRequest(BaseModel):
     curation_relation: CurationRelation | None = None
     reuse_policy: ReusePolicy | None = None
     metadata: dict[str, Any] | None = None
+
+    @field_validator("metadata")
+    @classmethod
+    def reject_reserved_metadata(
+        cls,
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is not None and "merge_projection_detached" in value:
+            raise ValueError("merge_projection_detached metadata는 내부 전용입니다.")
+        return value
 
 
 class CuratedFeatureStatusRequest(BaseModel):
@@ -1081,13 +1094,20 @@ async def search_admin_curated_feature_places_route(
 async def create_admin_curated_feature_route(
     body: CuratedFeatureCreateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
+    payload = body.model_dump()
+    curation_status = payload["curation_status"]
     try:
         async with session.begin():
             row = await curated_repo.create_curated_feature(
                 session,
-                **body.model_dump(),
+                **payload,
+                selection_origin="admin",
+                selected_by=context.actor if curation_status == "curated" else None,
+                rejected_by=context.actor if curation_status == "rejected" else None,
+                actor=context.actor,
             )
     except IntegrityError as exc:
         raise _integrity_error(exc) from exc
@@ -1112,6 +1132,7 @@ async def patch_admin_curated_feature_route(
     curated_feature_id: str,
     body: CuratedFeaturePatchRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
     try:
@@ -1120,6 +1141,7 @@ async def patch_admin_curated_feature_route(
                 session,
                 curated_feature_id=curated_feature_id,
                 updates=body.model_dump(exclude_unset=True),
+                actor=context.actor,
             )
     except IntegrityError as exc:
         raise _integrity_error(exc) from exc
@@ -1145,12 +1167,14 @@ async def patch_admin_curated_feature_route(
 async def delete_admin_curated_feature_route(
     curated_feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
     async with session.begin():
         row = await curated_repo.archive_curated_feature(
             session,
             curated_feature_id=curated_feature_id,
+            actor=context.actor,
         )
     if row is None:
         raise HTTPException(status_code=404, detail="curated feature 없음")

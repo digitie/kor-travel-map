@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   datasetGridOpenIssueCount,
+  datasetIssueSeveritySummary,
   datasetRowHasOpenIssue,
   datasetRowOpenIssueCount,
   type OpsDatasetIssueRow,
@@ -65,5 +66,12 @@ describe("ops datasets open issue projection", () => {
         issueRow({ dataset: 1, provider: "other-provider", providerIssue: 2 }),
       ]),
     ).toBe(12);
+  });
+
+  it("severity 요약은 0건을 빼고 괄호를 닫는다", () => {
+    expect(
+      datasetIssueSeveritySummary({ critical: 1, info: 0, warning: 2 }),
+    ).toBe(" (critical 1 · warning 2)");
+    expect(datasetIssueSeveritySummary({ info: 0 })).toBe("");
   });
 });

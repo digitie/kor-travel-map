@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -19,8 +20,6 @@ from sqlalchemy import text
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -411,6 +410,7 @@ _PUBLIC_FEATURE_FILTERS_SQL: Final[str] = (
   AND t.visibility = 'public'
   AND cf.curation_status = 'curated'
   AND cf.archived_at IS NULL
+  AND NOT cf.metadata @> '{"merge_projection_detached": true}'::jsonb
 """
     + public_active_notice_filter_sql("f")
 )
@@ -596,7 +596,8 @@ INSERT INTO feature.curated_features (
     theme_id, feature_id, source_id, source_record_key, curation_status,
     selection_origin, selected_by, selected_at, rejected_by, rejected_at,
     rejection_reason, rank_score, display_title, display_summary,
-    curation_relation, reuse_policy, metadata, updated_at
+    curation_relation, reuse_policy, metadata,
+    operator_updated_by, operator_updated_at, updated_at, archived_at
 ) VALUES (
     CAST(:theme_id AS uuid), :feature_id, CAST(:source_id AS uuid),
     CAST(:source_record_key AS text), :curation_status, :selection_origin,
@@ -606,7 +607,10 @@ INSERT INTO feature.curated_features (
     CASE WHEN CAST(:rejected_now AS boolean) THEN now() ELSE NULL END,
     :rejection_reason,
     :rank_score, :display_title, :display_summary, :curation_relation,
-    :reuse_policy, CAST(:metadata_json AS jsonb), now()
+    :reuse_policy, CAST(:metadata_json AS jsonb), :operator_updated_by,
+    CASE WHEN CAST(:operator_updated AS boolean) THEN clock_timestamp() ELSE NULL END,
+    now(),
+    CASE WHEN :curation_status = 'archived' THEN now() ELSE NULL END
 )
 RETURNING curated_feature_id::text
 """
@@ -615,6 +619,7 @@ _UPDATE_FEATURE_BASE_SQL: Final[str] = """
 UPDATE feature.curated_features
 SET {set_clause}
 WHERE curated_feature_id = CAST(:curated_feature_id AS uuid)
+  AND NOT metadata @> '{{"merge_projection_detached": true}}'::jsonb
 RETURNING curated_feature_id::text
 """
 
@@ -644,74 +649,20 @@ WITH rule AS (
       AND r.enabled
       AND r.default_action IN ('candidate','curated')
 ),
-upserted AS (
-    INSERT INTO feature.curated_features (
-        theme_id, feature_id, source_id, source_record_key, curation_status,
-        selection_origin, selected_at, rank_score, display_title,
-        curation_relation, reuse_policy, metadata, updated_at
-    )
+candidates AS MATERIALIZED (
     SELECT DISTINCT ON (f.feature_id)
+        rule.rule_id,
         rule.theme_id,
-        f.feature_id,
         rule.source_id,
-        sr.source_record_key,
         rule.default_action,
-        'source_rule',
-        CASE WHEN rule.default_action = 'curated' THEN now() ELSE NULL END,
         rule.priority,
-        CASE
-            WHEN s.provider = 'kor-travel-concierge-youtube'
-             AND s.dataset_key = 'youtube_place_candidates'
-            THEN NULLIF(BTRIM(COALESCE(
-                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,source_title}', ''),
-                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,playlist_title}', ''),
-                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,channel_title}', ''),
-                NULLIF(
-                    f.detail #>> '{payload,kor_travel_concierge,youtube,source_search_query}',
-                    ''
-                ),
-                NULLIF(
-                    f.detail #>> '{payload,kor_travel_concierge,youtube,corrected_search_query}',
-                    ''
-                ),
-                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,search_query}', ''),
-                NULLIF(f.detail #>> '{facility_info,youtube_playlist_title}', ''),
-                NULLIF(f.detail #>> '{facility_info,youtube_channel_title}', '')
-            )), '')
-            WHEN s.provider IN (
-                'data.go.kr-standard',
-                'python-airkorea-api',
-                'python-datagokr-api',
-                'python-kasi-api',
-                'python-khoa-api',
-                'python-kma-api',
-                'python-knps-api',
-                'python-krairport-api',
-                'python-krex-api',
-                'python-krforest-api',
-                'python-krheritage-api',
-                'python-mcst-api',
-                'python-mois-api',
-                'python-opinet-api',
-                'python-visitkorea-api'
-            ) THEN s.provider
-            ELSE NULL
-        END,
-        CASE
-            WHEN rule.relation IN (
-                'primary_stop','food_stop','cafe_stop','bookstore_stop',
-                'nearby_option','accessibility_support','pet_support',
-                'family_support','theme_area_anchor'
-            ) THEN rule.relation
-            ELSE 'nearby_option'
-        END,
-        CASE
-            WHEN rule.reuse_policy IN ('allowed','blocked','manual_review')
-            THEN rule.reuse_policy
-            ELSE 'manual_review'
-        END,
-        jsonb_build_object('rule_id', rule.rule_id::text, 'applied_by', 'source_rule'),
-        now()
+        rule.relation,
+        rule.reuse_policy,
+        f.feature_id,
+        f.detail AS feature_detail,
+        s.provider,
+        s.dataset_key,
+        sr.source_record_key
     FROM rule
     JOIN feature.curated_sources AS s ON s.source_id = rule.source_id
     JOIN provider_sync.source_entities AS se
@@ -740,8 +691,6 @@ upserted AS (
            OR f.sigungu_code = rule.region_scope ->> 'sigungu_code')
         )
       )
-      -- detail_selector: 단일 source를 detail JSON 값으로 분할(예: concierge youtube
-      -- channel/playlist 그룹핑). path(jsonb 배열)로 지정한 detail 값이 value와 일치.
       AND (
         rule.detail_selector IS NULL
         OR f.detail #>> ARRAY(
@@ -756,6 +705,117 @@ upserted AS (
           AND old_cf.curation_status IN ('rejected','archived')
       )
     ORDER BY f.feature_id, sl.is_primary_source DESC, sr.imported_at DESC
+),
+locked_candidates AS MATERIALIZED (
+    SELECT candidate.*
+    FROM candidates AS candidate
+    JOIN feature.features AS locked_feature
+      ON locked_feature.feature_id = candidate.feature_id
+    WHERE locked_feature.deleted_at IS NULL
+      AND locked_feature.status = 'active'
+    ORDER BY candidate.feature_id
+    FOR KEY SHARE OF locked_feature
+),
+upserted AS (
+    INSERT INTO feature.curated_features (
+        theme_id, feature_id, source_id, source_record_key, curation_status,
+        selection_origin, selected_at, rank_score, display_title,
+        curation_relation, reuse_policy, metadata, updated_at
+    )
+    SELECT
+        candidate.theme_id,
+        candidate.feature_id,
+        candidate.source_id,
+        candidate.source_record_key,
+        candidate.default_action,
+        'source_rule',
+        CASE WHEN candidate.default_action = 'curated' THEN now() ELSE NULL END,
+        candidate.priority,
+        CASE
+            WHEN candidate.provider = 'kor-travel-concierge-youtube'
+             AND candidate.dataset_key = 'youtube_place_candidates'
+            THEN NULLIF(BTRIM(COALESCE(
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,source_title}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,playlist_title}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,channel_title}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,source_search_query}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,corrected_search_query}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{payload,kor_travel_concierge,youtube,search_query}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{facility_info,youtube_playlist_title}',
+                    ''
+                ),
+                NULLIF(
+                    candidate.feature_detail #>>
+                        '{facility_info,youtube_channel_title}',
+                    ''
+                )
+            )), '')
+            WHEN candidate.provider IN (
+                'data.go.kr-standard',
+                'python-airkorea-api',
+                'python-datagokr-api',
+                'python-kasi-api',
+                'python-khoa-api',
+                'python-kma-api',
+                'python-knps-api',
+                'python-krairport-api',
+                'python-krex-api',
+                'python-krforest-api',
+                'python-krheritage-api',
+                'python-mcst-api',
+                'python-mois-api',
+                'python-opinet-api',
+                'python-visitkorea-api'
+            ) THEN candidate.provider
+            ELSE NULL
+        END,
+        CASE
+            WHEN candidate.relation IN (
+                'primary_stop','food_stop','cafe_stop','bookstore_stop',
+                'nearby_option','accessibility_support','pet_support',
+                'family_support','theme_area_anchor'
+            ) THEN candidate.relation
+            ELSE 'nearby_option'
+        END,
+        CASE
+            WHEN candidate.reuse_policy IN ('allowed','blocked','manual_review')
+            THEN candidate.reuse_policy
+            ELSE 'manual_review'
+        END,
+        jsonb_build_object(
+            'rule_id',
+            candidate.rule_id::text,
+            'applied_by',
+            'source_rule'
+        ),
+        now()
+    FROM locked_candidates AS candidate
     ON CONFLICT (theme_id, feature_id) WHERE archived_at IS NULL
     DO UPDATE SET
         source_id = EXCLUDED.source_id,
@@ -765,8 +825,9 @@ upserted AS (
             feature.curated_features.display_title,
             EXCLUDED.display_title
         ),
-        curation_relation = EXCLUDED.curation_relation,
-        reuse_policy = EXCLUDED.reuse_policy,
+        -- curation_relation/reuse_policy는 운영자 소유 필드다. source rule 재적재가
+        -- 이를 덮으면 canonical collection의 durable override와 양방향 동기화할
+        -- 때 provider refresh를 운영자 수정으로 오인하게 된다.
         metadata = feature.curated_features.metadata || EXCLUDED.metadata,
         updated_at = now(),
         content_version = feature.curated_features.content_version + 1
@@ -826,6 +887,8 @@ WITH archived AS (
     UPDATE feature.curated_features AS cf
     SET
         curation_status = 'archived',
+        operator_updated_by = 'status-sweep',
+        operator_updated_at = clock_timestamp(),
         archived_at = COALESCE(cf.archived_at, now()),
         updated_at = now(),
         content_version = cf.content_version + 1,
@@ -1482,6 +1545,7 @@ def _selected_fields_for_status(
             "rejected_by": None,
             "rejected_at": None,
             "rejection_reason": None,
+            "archived_at": None,
         }
     if curation_status == "rejected":
         return {
@@ -1490,6 +1554,7 @@ def _selected_fields_for_status(
             "rejected_by": actor,
             "rejected_at": now_expr,
             "rejection_reason": reason,
+            "archived_at": None,
         }
     if curation_status == "candidate":
         return {
@@ -1498,6 +1563,7 @@ def _selected_fields_for_status(
             "rejected_by": None,
             "rejected_at": None,
             "rejection_reason": None,
+            "archived_at": None,
         }
     if curation_status == "archived":
         return {
@@ -1526,13 +1592,30 @@ async def create_curated_feature(
     curation_relation: str = "nearby_option",
     reuse_policy: str = "manual_review",
     metadata: Mapping[str, Any] | None = None,
+    actor: str | None = None,
 ) -> CuratedFeature:
     """curated feature overlay 1건을 생성한다. commit은 호출자 책임."""
 
+    if metadata is not None and "merge_projection_detached" in metadata:
+        raise ValueError("merge_projection_detached metadata는 내부 전용입니다.")
     _validate_choice(curation_status, _CURATION_STATUSES, "curation_status")
     _validate_choice(selection_origin, _SELECTION_ORIGINS, "selection_origin")
     _validate_choice(curation_relation, _CURATION_RELATIONS, "curation_relation")
     _validate_choice(reuse_policy, _REUSE_POLICIES, "reuse_policy")
+    active_feature = (
+        await session.execute(
+            text(
+                "SELECT feature_id FROM feature.features "
+                "WHERE feature_id = :feature_id "
+                "AND deleted_at IS NULL "
+                "AND status NOT IN ('deleted','hidden') "
+                "FOR KEY SHARE"
+            ),
+            {"feature_id": feature_id},
+        )
+    ).first()
+    if active_feature is None:
+        raise ValueError("feature_id must reference an active Feature")
     row = (
         await session.execute(
             text(_CREATE_FEATURE_SQL),
@@ -1554,6 +1637,12 @@ async def create_curated_feature(
                 "curation_relation": curation_relation,
                 "reuse_policy": reuse_policy,
                 "metadata_json": _json_dumps(metadata),
+                "operator_updated_by": (
+                    actor or rejected_by or selected_by
+                    if selection_origin in {"admin", "external_api"}
+                    else None
+                ),
+                "operator_updated": selection_origin in {"admin", "external_api"},
             },
         )
     ).mappings().one()
@@ -1572,6 +1661,7 @@ async def update_curated_feature(
     *,
     curated_feature_id: str,
     updates: Mapping[str, Any],
+    actor: str | None = None,
 ) -> CuratedFeature | None:
     """curated feature overlay를 부분 수정한다."""
 
@@ -1593,23 +1683,59 @@ async def update_curated_feature(
             raise ValueError(f"unsupported curated_feature update field: {key}")
         if key == "curation_status":
             _validate_choice(str(value), _CURATION_STATUSES, key)
+            for status_key, status_value in _selected_fields_for_status(
+                curation_status=str(value),
+                actor=actor,
+                reason=None,
+            ).items():
+                if status_value == "__NOW__":
+                    set_parts.append(f"{status_key} = now()")
+                else:
+                    set_parts.append(f"{status_key} = :{status_key}")
+                    params[status_key] = status_value
+            continue
         if key == "curation_relation":
             _validate_choice(str(value), _CURATION_RELATIONS, key)
         if key == "reuse_policy":
             _validate_choice(str(value), _REUSE_POLICIES, key)
         if key == "metadata":
+            if not isinstance(value, Mapping):
+                raise ValueError("curated feature metadata must be an object")
+            if "merge_projection_detached" in value:
+                raise ValueError("merge_projection_detached metadata는 내부 전용입니다.")
             set_parts.append("metadata = CAST(:metadata_json AS jsonb)")
             params["metadata_json"] = _json_dumps(value)
         else:
             set_parts.append(f"{key} = :{key}")
             params[key] = value
     if not set_parts:
-        return await get_curated_feature(
+        current = await get_curated_feature(
             session,
             curated_feature_id=curated_feature_id,
             include_archived=True,
         )
-    set_parts.extend(["updated_at = now()", "content_version = content_version + 1"])
+        if current is not None and current.metadata.get("merge_projection_detached") is True:
+            return None
+        return current
+    operator_owned_changed = bool(
+        {"curation_status", "curation_relation", "reuse_policy"} & updates.keys()
+    )
+    if operator_owned_changed:
+        if "curation_status" not in updates:
+            set_parts.append("selection_origin = 'admin'")
+        set_parts.extend(
+            [
+                "operator_updated_by = COALESCE(:actor, operator_updated_by)",
+                "operator_updated_at = clock_timestamp()",
+            ]
+        )
+    set_parts.extend(
+        [
+            "updated_at = now()",
+            "content_version = content_version + 1",
+        ]
+    )
+    params["actor"] = actor
     row = (
         await session.execute(
             text(_UPDATE_FEATURE_BASE_SQL.format(set_clause=", ".join(set_parts))),
@@ -1649,7 +1775,15 @@ async def set_curated_feature_status(
         else:
             set_parts.append(f"{key} = :{key}")
             params[key] = value
-    set_parts.extend(["updated_at = now()", "content_version = content_version + 1"])
+    set_parts.extend(
+        [
+            "operator_updated_by = :operator_updated_by",
+            "operator_updated_at = clock_timestamp()",
+            "updated_at = now()",
+            "content_version = content_version + 1",
+        ]
+    )
+    params["operator_updated_by"] = actor
     row = (
         await session.execute(
             text(_UPDATE_FEATURE_BASE_SQL.format(set_clause=", ".join(set_parts))),

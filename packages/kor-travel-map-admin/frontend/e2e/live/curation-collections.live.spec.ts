@@ -15,6 +15,12 @@ type Curation = {
   title: string;
 };
 
+type AdminCurationItem = {
+  external_component_id: string;
+  external_item_id: string;
+  feature_id: string | null;
+};
+
 type CurationGroup = {
   feature: { feature_id: string; name: string };
   curations: Curation[];
@@ -29,6 +35,19 @@ type Envelope<T> = { data: T; meta?: Record<string, unknown> };
 
 const FLOW_TIMEOUT = 120_000;
 const EXECUTE_IMPORT = process.env.E2E_CURATION_IMPORT_WRITE === "1";
+const EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS = expectedLiveCount(
+  "E2E_EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS",
+  486,
+);
+const EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES = expectedLiveCount(
+  "E2E_EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES",
+  15,
+  15,
+);
+const EXPECTED_BEAUTIFUL_LIGHTHOUSE_MATCHES = expectedLiveMatches(
+  "E2E_EXPECTED_BEAUTIFUL_LIGHTHOUSE_MATCHES",
+  15 - EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES,
+);
 const MULTI_OBSERVATION_FEATURE_ID = "f_4127310100_e_227e045425edb459";
 const RESOURCE_ROOT =
   process.env.E2E_CURATION_RESOURCE_ROOT ??
@@ -65,6 +84,56 @@ const OFFICIAL_COLLECTION_KEYS = [
 ] as const;
 
 test.describe.configure({ mode: "serial" });
+
+function expectedLiveCount(name: string, fallback: number, maximum?: number): number {
+  const raw = process.env[name];
+  if (raw !== undefined && !/^(0|[1-9]\d*)$/.test(raw)) {
+    throw new Error(
+      `${name} must be a non-empty decimal integer; received ${JSON.stringify(raw)}`,
+    );
+  }
+  const value = raw === undefined ? fallback : Number(raw);
+  if (
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    (maximum !== undefined && value > maximum)
+  ) {
+    const range = maximum === undefined ? "non-negative" : `between 0 and ${maximum}`;
+    throw new Error(
+      `${name} must be a ${range} safe integer; received ${JSON.stringify(raw)}`,
+    );
+  }
+  return value;
+}
+
+function expectedLiveMatches(name: string, expectedCount: number): string[] {
+  const raw = process.env[name];
+  if (raw === undefined && expectedCount === 0) return [];
+  if (raw === undefined || raw.length === 0 || raw.trim() !== raw) {
+    throw new Error(`${name} must declare ${expectedCount} source=feature pair(s)`);
+  }
+  const pairs = raw.split(",");
+  if (
+    pairs.length !== expectedCount ||
+    pairs.some((pair) => !/^[^=,\s]+=[^=,\s]+$/.test(pair))
+  ) {
+    throw new Error(
+      `${name} must contain ${expectedCount} comma-separated source=feature pair(s)`,
+    );
+  }
+  if (new Set(pairs).size !== pairs.length) {
+    throw new Error(`${name} must not contain duplicate source=feature pairs`);
+  }
+  const sourceKeys = pairs.map((pair) => pair.slice(0, pair.indexOf("=")));
+  const featureIds = pairs.map((pair) => pair.slice(pair.indexOf("=") + 1));
+  if (
+    new Set(sourceKeys).size !== pairs.length ||
+    new Set(featureIds).size !== pairs.length
+  ) {
+    throw new Error(`${name} must contain unique source keys and feature IDs`);
+  }
+  return pairs.sort();
+}
 
 async function browserJson<T>(page: Page, pathName: string): Promise<T> {
   return page.evaluate(async (pathValue) => {
@@ -149,7 +218,7 @@ test.describe("공식 큐레이션 collection live", () => {
     }
   });
 
-  test("REST와 관리자 상세에 19개 collection·486개 membership·미연결 등대를 보존한다", async ({
+  test("REST와 관리자 상세에 19개 공식 collection·membership·미연결 등대를 보존한다", async ({
     page,
   }) => {
     await page.goto("/admin/features/curated");
@@ -179,7 +248,7 @@ test.describe("공식 큐레이션 collection live", () => {
         (total, key) => total + (byKey.get(key)?.item_count ?? 0),
         0,
       ),
-    ).toBe(486);
+    ).toBe(EXPECTED_OFFICIAL_PUBLIC_MEMBERSHIPS);
 
     const template = await page.evaluate(async () => {
       const response = await fetch("/api/proxy/v1/admin/curations/import-template.csv", {
@@ -194,15 +263,59 @@ test.describe("공식 큐레이션 collection live", () => {
     });
     expect(template.status).toBe(200);
     expect(template.disposition).toMatch(/attachment;.*\.csv/i);
-    expect(template.text.split(/\r?\n/, 1)[0]).toContain("collection_key,theme_slug");
+    expect(template.text.split(/\r?\n/, 1)[0]).toContain(
+      "source_item_key,source_component_key",
+    );
+
+    const tourismCollection = byKey.get("korean-tourism-100:2023-2024");
+    expect(tourismCollection).toBeDefined();
+    const tourismDetail = await browserJson<
+      Envelope<{ collection: Collection; items: AdminCurationItem[] }>
+    >(
+      page,
+      `/v1/admin/curations/${encodeURIComponent(
+        (tourismCollection as Collection).collection_id,
+      )}`,
+    );
+    const palaceComponents = tourismDetail.data.items
+      .filter((item) => item.external_item_id === "kt100-2023-2024-001")
+      .map((item) => item.external_component_id)
+      .sort();
+    expect(palaceComponents).toEqual(["component-01", "component-02"]);
 
     const list = page.getByTestId("curation-collection-list");
     const lighthouseButton = list.getByRole("button", {
       name: /아름다운 등대 · 등대 스탬프투어/,
     });
     await lighthouseButton.click();
+    const lighthouseCollection = byKey.get(
+      "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+    );
+    expect(lighthouseCollection).toBeDefined();
+    const lighthouseDetail = await browserJson<
+      Envelope<{ collection: Collection; items: AdminCurationItem[] }>
+    >(
+      page,
+      `/v1/admin/curations/${encodeURIComponent(
+        (lighthouseCollection as Collection).collection_id,
+      )}`,
+    );
+    const linkedLighthouses = lighthouseDetail.data.items.filter(
+      (item) => item.feature_id !== null,
+    );
+    expect(lighthouseDetail.data.items).toHaveLength(15);
+    expect(linkedLighthouses).toHaveLength(
+      15 - EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES,
+    );
+    expect(
+      linkedLighthouses
+        .map((item) => `${item.external_item_id}=${item.feature_id}`)
+        .sort(),
+    ).toEqual(EXPECTED_BEAUTIFUL_LIGHTHOUSE_MATCHES);
     const detail = page.getByTestId("curation-collection-detail");
-    await expect(detail.getByText("Feature 미연결", { exact: true })).toHaveCount(15);
+    await expect(detail.getByText("Feature 미연결", { exact: true })).toHaveCount(
+      EXPECTED_UNLINKED_BEAUTIFUL_LIGHTHOUSES,
+    );
   });
 
   test("지도 marker·목록·Feature 상세·REST가 두 회차와 복수 관측을 모두 표시한다", async ({

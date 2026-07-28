@@ -49,24 +49,28 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
       group.points.push(point);
       groups.set(seriesKey, group);
     }
-    return Array.from(groups.entries())
-      .map(([seriesKey, group]) => ({
-        ...group,
-        seriesKey,
-        points: group.points
-          .map((point) => ({
-            ...point,
-            timestamp: new Date(point.observed_at).getTime(),
-          }))
-          .filter((point) => Number.isFinite(point.timestamp))
-          .sort((a, b) => a.timestamp - b.timestamp),
-      }))
-      .filter((item) => item.points.length > 0)
-      .sort((a, b) => a.seriesKey.localeCompare(b.seriesKey))
-      .map((item, index) => ({
-        ...item,
-        color: seriesColor(index),
-      }));
+
+    const result: Array<{
+      color: string;
+      label: string;
+      points: Array<PricePoint & { timestamp: number }>;
+      seriesKey: string;
+    }> = [];
+    for (const [seriesKey, group] of groups) {
+      const points: Array<PricePoint & { timestamp: number }> = [];
+      for (const point of group.points) {
+        const timestamp = new Date(point.observed_at).getTime();
+        if (Number.isFinite(timestamp)) points.push({ ...point, timestamp });
+      }
+      if (points.length === 0) continue;
+      points.sort((left, right) => left.timestamp - right.timestamp);
+      result.push({ color: "", label: group.label, points, seriesKey });
+    }
+    result.sort((left, right) => left.seriesKey.localeCompare(right.seriesKey));
+    for (const [index, item] of result.entries()) {
+      item.color = seriesColor(index);
+    }
+    return result;
   }, [history]);
 
   const allPoints = series.flatMap((item) => item.points);

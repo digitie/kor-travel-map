@@ -5308,6 +5308,10 @@
             "title": "Edition Key",
             "type": "string"
           },
+          "external_component_id": {
+            "title": "External Component Id",
+            "type": "string"
+          },
           "external_item_id": {
             "title": "External Item Id",
             "type": "string"
@@ -5503,6 +5507,7 @@
           "lat",
           "address",
           "external_item_id",
+          "external_component_id",
           "place_name",
           "address_hint",
           "status",

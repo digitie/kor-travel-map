@@ -1,5 +1,67 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-07-27 (codex) — T-VN-47 + durable curation + #868 완결
+
+**다음 한 작업**: 본 PR의 CI green·셀프 merge 뒤 전체 열린 task와 실코드·열린 이슈를
+재감사한다. 더 작은 실행 단위로 분해하고 의존성 기준으로 Lane A/B 병렬 범위를 다시 배치한
+문서 전용 PR을 CI 대기 없이 머지한 뒤, 갱신된 Lane B 순서로 진행한다. 사용자 최신 지시에 따라
+그 문서 PR부터 적대적 리뷰어 2명을 운용한다. `T-VN-45`는 그 재감사 전까지 미착수 상태로 유지한다.
+
+- React Doctor full scan은 269개 파일·actionable 진단 0건이다. canonical config와 exact verifier가
+  shadow config, command·scope 축소와 package-level 우회를 fail-close한다. runtime correctness
+  진단은 근인 수정했고 giant component 19개·reducer 후보 3개는 `T-VN-49`로 이관했다.
+- #862의 H13 조건부 upsert를 적대 리뷰한 결과 source 누락 삭제, archived identity 재생성,
+  legacy/canonical 단방향 상태, Feature merge의 provider/operator clock 혼합과 parent/item lock
+  inversion을 확인했다. migration 0065에서 source/operator revision을 분리하고 archived/NULL
+  exact identity를 한 행으로 강제했다.
+- `legacy_projection_id`가 projection과 durable item을 명시적으로 연결한다. stable collection key는
+  mutable theme slug 대신 theme/source UUID와 title hash를 사용하고 semantic duplicate는
+  `:split:<collection_id>`로 보존한다. 0064 slug 재사용으로 탈취된 active/archived projection과
+  원 owner 관계는 명시적 `legacy_projection_id`로 복구한다. canonical-only item은 원 projection
+  durable link가 없고 external identity도 theme 간 공유될 수 있으므로 자동 owner 복구를 하지
+  않는다. upgrade 전 old projection 삭제 여부와 관계없이 모든 legacy-marker collection에서
+  `draft/admin_only` quarantine에 보존한다. mutable metadata marker가 지워진 이력은 immutable
+  `legacy:` key namespace를 함께 검사한다. exact `legacy:quarantine:<UUID>` key와 immutable
+  migration creator가 모두 일치하는 산출물만 재격리하지 않아 정상 `quarantine:` theme slug와
+  migration 왕복 identity를 함께 보존한다. mutable quarantine metadata에 `migrated_from`이
+  추가돼도 upgrade·downgrade key rewrite에서 같은 결합을 제외한다. 임의 admin key가 base/split/과거 staging
+  namespace를 선점해도 upgrade/downgrade가 중단되거나 수동 key를 덮지 않는다.
+- `source_record_key IS NULL`인 legacy DELETE→새 UUID 재삽입도 기존 external identity와 operator
+  tombstone을 복원한다. cross-title A→B/B→A 동시 이동은 target collection 뒤 source parent를
+  잠그지 않고 item만 잠가 교착을 제거했다.
+- 단독 적대 리뷰어가 #840 이후 Claude Code 작성 PR 21건과 최신 code SHA를 함께 검토했다.
+  migration 왕복·owner repair·오래된 projection의 후속 owner 탈취·null-source tombstone·실제 두
+  transaction 교차 이동을 포함한 관련 unit/integration/API 회귀와 외부 geo live 5건을 제외한
+  최종 backend 전체 **2,405건**, static·frontend 전체 gate가 통과했다. 격리 실데이터 destructive
+  Live UI 결과는 `journal.md`의 같은 날짜 항목을 정본으로 한다. curation exact code `7e2920aa`는 reviewer
+  신규 P0–P2 0건·PostgreSQL 46/46이다. Live 기대값 환경화의 빈/공백 입력·exact match·
+  중복 identity·runbook checkpoint P2까지 반영한 최종 `f6a50866`에서도 잔여 P0–P2는 0건이다.
+- 전체 clone에서 0053이 동일 KMA target-grid legacy queued job 3건을 무차별 거부하는 blocker를
+  발견해 `T-VN-H23`으로 등록하고 같은 PR에서 완결했다. queued winner는 runtime dispatch 정렬로
+  결정하고 나머지는 감사 가능한 cancelled terminal로 전환한다. running 둘 이상과 cancellation
+  marker 중복은 mutation 전에 중단한다. 단독 리뷰어가 cancellation audit 훼손 가능성을 찾아
+  보강했으며 exact code `ca313d32`에서 잔여 P0–P2 0건, migration 회귀 5/5·관련 묶음 64/64다.
+- `T-VN-H24`는 source item과 펼쳐진 membership component를 분리했다. durable identity는
+  `collection + external_item_id + external_component_id`이고 Feature는 nullable·mutable target이다.
+  legacy UUID/operator/source/archive 이력을 첫 authoritative import에서 같은 행으로 승계하고,
+  모호한 후보와 active Feature 중복은 preview/commit 전에 fail-close한다. 0064→0066 연속
+  Alembic transaction은 0065의 지연 FK·trigger event를 0066 DDL 전에 검사·소진한다. 단독
+  적대 리뷰어는 exact code `baf40a04`에서 P0–P2 0건을 확인했다. 실제 prod clone의
+  0036→0066 연속 migration도 완료돼 이전 pending trigger 오류가 해소됐다. 같은 clone에서
+  성공한 migration·build·destructive import를 보존해 실패 단계부터 재개했고, 최종
+  `e8d167c5` 기준 공식 collection/item 19/486, component 2/2, operator adoption 2,
+  duplicate target 0을 확인했다. prod head `0036`, Feature 1,099,359건, collection 미존재와
+  API/UI health는 불변이며 성공 뒤 clone을 삭제했다.
+- 작업 중 추가된 `T-VN-H26`/GitHub #868은 main에 이미 있던 canonical
+  `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` direct alias를 재확인하고, 남은 수용 조건인 기존
+  API-prefixed 이름 fallback을 추가했다. canonical-only/legacy-only/미설정/동시 설정 우선순위와
+  잘못된 admin header `403`을 API auth **84건**으로 고정했다. 사용자 지시에 따라 이 변경만
+  적대적 리뷰에서 제외했다.
+- 작업 중 발견한 giant/reducer 구조 debt는 `T-VN-49`, 실 `kor-travel-geo /v2/reverse` 400
+  계약 drift 5건은 `T-VN-H21`, migration quarantine의 admin 재분류 workflow는
+  `T-VN-H22`로 등록했다. `T-VN-H23`은 이 PR에서 바로 완료했다. migration head는
+  `0066_curation_component_identity`다.
+
 ## 2026-07-27 (claude) — 🎯 Lane B b4 대행: H13·H14·H15 완결, H20 진행, H18 예정
 
 **다음 한 작업**: b4 = **H13·H14·H15·H20 완료**, **H18만 보류**(governance — approval 필수화가 self-merge
@@ -25,11 +87,10 @@
 - **교훈**: 정적 적대검증이 외부 Python seeding helper 좌표 계약을 못 모델링 → cross-process 좌표는 live 필요.
 - **직전 완료(세션)**: T-VN-H06·T-ADM-C6c+T-VN-03(#392 close)·T-VN-H16/H17(LIVE-01 후속 7/7 close).
 
-## 2026-07-27 (codex) — T-VN-44 구현·적대 리뷰 진행 중
+## 2026-07-27 (codex) — T-VN-44 완료 (#858)
 
-**다음 한 작업**: 최종 전체 gate와 최신 exact diff 3인 재리뷰를 마친 뒤 PR·CI green·GitHub
-approval·자체 머지를 완료하고 Lane B b0 `T-VN-47`로 진행한다. 0064를 적용한 R1 격리 실데이터
-DB/API/UI 파괴적 Live E2E는 완료했다.
+T-VN-44는 frontend lint·schedule recovery·가격 identity와 R1 격리 실데이터 Live UI를
+완료해 #858로 main에 반영했다.
 
 - frontend full ESLint 기준선 1 error/30 warnings를 0 problem으로 내리고 `npm run lint`와 CI를
   `--max-warnings 0`으로 고정했다. TanStack compiler 경계는 `data-table.tsx` 한 파일·두 함수만
@@ -53,8 +114,7 @@ DB/API/UI 파괴적 Live E2E는 완료했다.
   identity로 실제 Chromium에서 확인했다. 운영 DB fixture 0·head 불변·health 200을 재확인하고 전용
   port/container/network/image/C7 runtime 잔여를 0으로 정리했다.
 - local-only prod password와 배포 hash 불일치는 별도 `T-VN-H20`로 등록했다. 비밀값은 tracked 문서에
-  기록하지 않았다. T-VN-43은 #851로, H06은 #813+#852 후속 검증으로 완료 이관했다. T-VN-44는
-  PR 승인·CI·main 머지 전까지 `tasks.md`에 열린 상태로 유지한다.
+  기록하지 않았다. T-VN-43은 #851로, H06은 #813+#852 후속 검증으로 완료 이관했다.
 
 ## 2026-07-27 (claude) — 🎯 T-VN-H12 landing + T-VN-H16/H17 이슈 재검증(LIVE-01 후속 7/7 close)
 

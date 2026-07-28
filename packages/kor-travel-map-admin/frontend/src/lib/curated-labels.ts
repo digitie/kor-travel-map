@@ -30,11 +30,6 @@ export const CURATION_RELATION_LABELS: Record<string, string> = {
   theme_area_anchor: "테마 거리 앵커",
 };
 
-export const RULE_ACTION_LABELS: Record<string, string> = {
-  candidate: "후보 등록",
-  curated: "즉시 공개(검토 생략)",
-  ignore: "무시",
-};
 
 /** 상태별 결과(consequence) 한 줄 — 라이프사이클 스트립·detail에서 공유. */
 export const STATUS_CONSEQUENCES: Record<string, string> = {
@@ -52,9 +47,6 @@ export function curationRelationLabel(value: string): string {
   return CURATION_RELATION_LABELS[value] ?? value;
 }
 
-export function ruleActionLabel(value: string): string {
-  return RULE_ACTION_LABELS[value] ?? value;
-}
 
 /** select option 표시 텍스트 — "재사용 허용 (allowed)" 형식. */
 export function enumOption(label: string, raw: string): string {

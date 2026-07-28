@@ -46,7 +46,7 @@ import { cn } from "@/lib/utils";
  * 작업 지향 nav 그룹 (§1) — nav·섹션 배지·브레드크럼 라벨의 단일 정본.
  * 그룹 헤더는 비링크이며 href 18개는 존치하는 canonical 화면만 가리킨다.
  */
-export const NAV_GROUPS = [
+const NAV_GROUPS = [
   {
     group: null,
     badge: "개요",
@@ -173,12 +173,15 @@ export function AdminShell({
     });
   }, [activeHref]);
 
+  useEffect(() => {
+    window.localStorage.setItem(
+      SIDEBAR_COLLAPSED_KEY,
+      sidebarCollapsed ? "1" : "0",
+    );
+  }, [sidebarCollapsed]);
+
   const toggleSidebar = () => {
-    setSidebarCollapsed((current) => {
-      const next = !current;
-      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
-      return next;
-    });
+    setSidebarCollapsed((current) => !current);
   };
 
   return (

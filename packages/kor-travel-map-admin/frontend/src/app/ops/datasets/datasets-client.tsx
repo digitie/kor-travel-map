@@ -12,12 +12,13 @@ import {
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   createContext,
   useCallback,
   use,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -66,6 +67,7 @@ import { integerString, ordered, validateForm } from "@/lib/form-validation";
 
 import {
   datasetGridOpenIssueCount,
+  datasetIssueSeveritySummary,
   datasetRowHasOpenIssue,
   datasetRowOpenIssueCount,
 } from "./dataset-issues";
@@ -1579,13 +1581,6 @@ function HistoryPanel({
 
 // ── 행 상세 drawer ─────────────────────────────────────────────────────
 
-function severitySummary(counts: Record<string, number>): string {
-  const parts = Object.entries(counts)
-    .filter(([, count]) => count > 0)
-    .map(([severity, count]) => `${severity} ${count}`);
-  return parts.length > 0 ? ` (${parts.join(" · ")})` : "";
-}
-
 function DatasetDrawer({
   selection,
   detail,
@@ -1683,7 +1678,9 @@ function DatasetDrawer({
                 }
               >
                 데이터셋 이슈 {formatCount(detail.dataset_issues.open_count)}건
-                {severitySummary(detail.dataset_issues.severity_counts)}
+                {datasetIssueSeveritySummary(
+                  detail.dataset_issues.severity_counts,
+                )}
               </Link>
             ) : null}
             {detail && detail.provider_issues.open_count > 0 ? (
@@ -1692,7 +1689,9 @@ function DatasetDrawer({
                 href={`/admin/issues?provider=${encodeURIComponent(selection.provider)}`}
               >
                 제공자 이슈 {formatCount(detail.provider_issues.open_count)}건
-                {severitySummary(detail.provider_issues.severity_counts)}
+                {datasetIssueSeveritySummary(
+                  detail.provider_issues.severity_counts,
+                )}
               </Link>
             ) : null}
           </div>
@@ -1809,7 +1808,6 @@ export function DatasetsClient({
   const items = useMemo(() => datasets.data?.data.items ?? [], [datasets.data]);
 
   // 행 선택·panel은 URL query가 정본이다(#684) — 뒤로/앞으로 가기로 복원된다.
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   // initial* prop은 **첫 렌더 시드로만** 쓴다 — 마운트 시 1회 URL에 반영한 뒤로는
@@ -1835,10 +1833,12 @@ export function DatasetsClient({
     const params = new URLSearchParams(searchParams.toString());
     params.delete("sync_scope");
     const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, {
-      scroll: false,
-    });
-  }, [pathname, router, searchParams, urlDataset, urlProvider, urlSyncScope]);
+    window.history.replaceState(
+      null,
+      "",
+      query ? `${pathname}?${query}` : pathname,
+    );
+  }, [pathname, searchParams, urlDataset, urlProvider, urlSyncScope]);
 
   // 마운트 1회: URL에 선택이 없고 initial* 딥링크 prop이 있으면 URL에 seed한다
   // (replace — history 추가 없이). 이후 선택 상태는 오직 URL query가 정본.
@@ -1863,16 +1863,17 @@ export function DatasetsClient({
       params.set("panel", initialPanel);
     }
     const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, {
-      scroll: false,
-    });
+    window.history.replaceState(
+      null,
+      "",
+      query ? `${pathname}?${query}` : pathname,
+    );
   }, [
     initialDataset,
     initialPanel,
     initialProvider,
     initialSyncScope,
     pathname,
-    router,
     searchParams,
   ]);
 
@@ -1941,11 +1942,10 @@ export function DatasetsClient({
     params.set("provider", resolvedSelection.provider);
     params.set("dataset", resolvedSelection.datasetKey);
     params.set("sync_scope", resolvedSelection.syncScope);
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
   }, [
     pathname,
     resolvedSelection,
-    router,
     searchParams,
     selectionResolution.canonicalize,
   ]);
@@ -1996,6 +1996,7 @@ export function DatasetsClient({
     applySelection(null);
   }, [activeSelection, applySelection]);
 
+  const closeDetailOnEscape = useEffectEvent(closeDetail);
   // X/Escape뿐 아니라 browser Back(popstate)로 drawer가 닫혀도 직전 행을
   // focus 복귀 대상으로 기록한다.
   useEffect(() => {
@@ -2045,12 +2046,12 @@ export function DatasetsClient({
     }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        closeDetail();
+        closeDetailOnEscape();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeSelection, closeDetail]);
+  }, [activeSelection]);
 
   const detail = useOpsDataset(
     activeSelection
@@ -2225,7 +2226,7 @@ export function DatasetsClient({
           <span className="flex flex-wrap items-center gap-1">
             {row.original.dataset_issues.open_count > 0 ? (
               <Badge
-                title={`데이터셋 이슈${severitySummary(row.original.dataset_issues.severity_counts)}`}
+                title={`데이터셋 이슈${datasetIssueSeveritySummary(row.original.dataset_issues.severity_counts)}`}
                 variant="destructive"
               >
                 {formatCount(row.original.dataset_issues.open_count)}
@@ -2233,7 +2234,7 @@ export function DatasetsClient({
             ) : null}
             {row.original.provider_issues.open_count > 0 ? (
               <Badge
-                title={`제공자 이슈${severitySummary(row.original.provider_issues.severity_counts)}`}
+                title={`제공자 이슈${datasetIssueSeveritySummary(row.original.provider_issues.severity_counts)}`}
                 variant="warning"
               >
                 P{formatCount(row.original.provider_issues.open_count)}

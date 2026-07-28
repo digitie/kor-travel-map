@@ -23,7 +23,7 @@ import {
 import { AdminShell } from "@/components/admin-shell";
 import { useConfirm } from "@/components/confirm-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { statusLabel } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";

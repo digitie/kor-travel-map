@@ -5,6 +5,64 @@
 
 ## [Unreleased]
 
+### React Doctor·durable curation (2026-07-27, T-VN-47·T-VN-H13·H24)
+
+- **RELIABILITY**: admin frontend React Doctor full scan을 269개 파일·actionable 진단 0건으로 만들었다.
+  canonical config와 CI verifier가 shadow config/ignore, 검사 command·범위 축소 및 package-level
+  우회를 거부한다.
+- **FIXED**: authoritative curation source에서 일시 누락된 item을 삭제하지 않고 비공개
+  `source_present=false` membership으로 보존한다. 재등장 시 source 필드만 복원하며 운영자
+  status·relation·reuse와 archived tombstone은 유지한다.
+- **DATABASE (breaking)**: curation identity를 archived/NULL까지 포함한 exact unique로 바꾸고
+  source/operator revision을 분리했다. legacy와 canonical operator intent는 양방향 동기화되며,
+  source record가 없는 DELETE→새 UUID 재등장도 기존 membership과 tombstone을 복원한다.
+  mutable theme slug 기반 collection key를 theme/source UUID 기반으로 바꾸고, 과거 slug 재사용으로
+  탈취된 archived projection owner를 명시적 `legacy_projection_id`로 migration에서 복구한다.
+  durable owner link가 없는 canonical-only item은 external identity가 일치해도 추정해 공개하지
+  않고 모든 legacy-marker collection에서 `draft/admin_only` quarantine에 보존한다. mutable
+  metadata marker가 지워진 이력도 immutable `legacy:` key namespace로 판별한다. reserved
+  prefix가 아니라 exact `legacy:quarantine:<UUID>` key와 immutable migration creator 결합만
+  재격리하지 않아 정상 `quarantine:` theme slug와 migration 왕복 identity를 함께 유지한다.
+  quarantine metadata에 `migrated_from`이 추가돼도 upgrade·downgrade key rewrite는 이를 보존한다.
+- **API (breaking)**: legacy curated admin create body에서 `selection_origin`·`selected_by`·
+  `rejected_by`를 제거했다. POST/PATCH/DELETE provenance는 admin proxy 인증 principal만 기록한다.
+- **CONCURRENCY**: Feature merge가 provider/operator 필드군을 독립 revision으로 reconcile하고
+  curation collection을 item보다 먼저 잠가 import/admin writer와의 교착 가능성을 제거한다.
+  legacy cross-title identity 조회는 source collection parent를 역순 잠그지 않고 item만 잠근다.
+  source revision은 실제 쓰기 시각으로 비교하며, merge가 분리한 legacy projection은 이후
+  canonical source membership을 되감을 수 없다.
+- **DATABASE**: 0053 migration이 동일 effective scope의 legacy queued feature-update job을
+  runtime dispatch 정렬로 하나만 보존하고 나머지를 감사 가능한 `cancelled` terminal로
+  정규화한다. running 둘 이상과 cancellation audit marker가 있는 중복은 mutation 전에
+  fail-close한다.
+- **DATABASE (breaking)**: curation durable identity를 Feature target과 분리한
+  `(collection_id, external_item_id, external_component_id)`로 전환했다. null→연결·A→B
+  재연결에도 같은 membership UUID와 operator 상태를 보존하며, 같은 source item의 active
+  current component가 동일 Feature를 중복 참조하면 DB partial unique가 거부한다. migration의
+  `legacy:<UUID>` 다중 membership은 첫 공식 재적재에서 동일 Feature target의 새 component
+  identity로 행 자체를 승계해 source 누락 여부와 무관하게 UUID·operator 상태·감사 이력을
+  유지한다. 전환기 legacy projection writer의 신규 INSERT도 projection UUID 기반 component를
+  부여하되 이후 authoritative identity 승계는 되감지 않는다. archived legacy tombstone은
+  identity만 승계해 신규 active UUID 생성을 차단하고 operator/archive 이력을 보존한다.
+  같은 source item·Feature에 legacy 승계 후보가 둘 이상이면 preview/commit이 같은 오류로
+  fail-close해 임의의 UUID·operator 이력을 선택하지 않는다. theme upsert·collection
+  create/import는 공통 write-boundary와 row 생성 전 stable key advisory lock을 공유하고,
+  import가 key 정렬 후 Feature를 잠가 theme/key 역전과 미커밋 create+add 교착을 차단한다.
+- **API/UI (breaking)**: curation item에 `external_component_id`, CSV template·preview에
+  필수 `source_component_key`를 추가했다. 공식 복합 항목은 `component-01` 형식의 안정키로
+  펼치고 admin UI가 item/component identity를 함께 표시한다.
+- **MIGRATION**: 0064→0066을 한 Alembic transaction에서 연속 적용할 때 0065가 남긴 지연
+  FK·trigger event를 0066 backfill 직후 검사·소진한 뒤 DDL을 수행한다. pending trigger event로
+  `ALTER TABLE`이 중단되던 실데이터 clone 경로를 회귀 테스트로 고정했다.
+- **TESTED**: n150 prod 격리 clone을 0036→0066으로 전진하고 실제 admin UI에서 공식 CSV를
+  preview/commit했다. 공식 collection/item 19/486, component 2/2, operator adoption 2,
+  duplicate target 0과 prod 불변을 확인했다. clean fixture 기본 기대값은 유지하되 실제
+  operator override와 최신 Feature 매칭으로 달라지는 공개 membership·미연결 수는 Live env로
+  명시해 실데이터 변화가 회귀를 가장하지 않게 했다.
+- **SECURITY (#868)**: 기존 c6c 정본 `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` direct alias를 우선
+  유지하면서 `KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET`를 fallback으로 수용한다. canonical-only
+  배포의 gate와 잘못된 proxy header `403`, legacy-only·미설정·동시 설정 우선순위를 회귀로 고정했다.
+
 ### Admin frontend lint·schedule recovery·가격 series identity (2026-07-27, T-VN-44)
 
 - **FIXED**: 유효한 admin session으로 `/login`에 재진입할 때 Next `ReadonlyHeaders`의 내부

@@ -11,7 +11,7 @@ import {
   Trash2Icon,
   UploadCloudIcon,
 } from "lucide-react";
-import { useState, type FormEvent, type MouseEvent } from "react";
+import { useRef, useState, type FormEvent, type MouseEvent } from "react";
 
 import { useAdminCuratedSources, useAdminCuratedThemes } from "@/api/curated";
 import {
@@ -70,6 +70,7 @@ interface ItemFormState {
   placeName: string;
   addressHint: string;
   externalItemId: string;
+  externalComponentId: string;
   sortOrder: string;
   itemTitle: string;
   itemSummary: string;
@@ -94,6 +95,7 @@ const INITIAL_ITEM_FORM: ItemFormState = {
   placeName: "",
   addressHint: "",
   externalItemId: "",
+  externalComponentId: "primary",
   sortOrder: "0",
   itemTitle: "",
   itemSummary: "",
@@ -143,6 +145,8 @@ export function CurationCollectionsClient() {
   const patchItem = usePatchCurationItemMutation();
   const archiveItem = useArchiveCurationItemMutation();
   const importCsv = useImportCurationCsvMutation();
+  const submitCollectionInFlightRef = useRef(false);
+  const submitItemInFlightRef = useRef(false);
 
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(
     null,
@@ -175,6 +179,7 @@ export function CurationCollectionsClient() {
 
   const submitCollection = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitCollectionInFlightRef.current) return;
     setLocalError(null);
     setMessage(null);
     const collectionKey = collectionForm.collectionKey.trim();
@@ -190,6 +195,7 @@ export function CurationCollectionsClient() {
       );
       return;
     }
+    submitCollectionInFlightRef.current = true;
     try {
       const response = await createCollection.mutateAsync({
         collection_key: collectionKey,
@@ -210,11 +216,14 @@ export function CurationCollectionsClient() {
       setMessage(`컬렉션 “${response.data.collection.title}”을 만들었습니다.`);
     } catch {
       // mutationError에서 API 응답을 표시한다.
+    } finally {
+      submitCollectionInFlightRef.current = false;
     }
   };
 
   const submitItem = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitItemInFlightRef.current) return;
     setLocalError(null);
     setMessage(null);
     if (!activeCollectionId) {
@@ -224,15 +233,19 @@ export function CurationCollectionsClient() {
     const featureId = itemForm.featureId.trim();
     const placeName = itemForm.placeName.trim();
     const externalItemId = itemForm.externalItemId.trim();
+    const externalComponentId = itemForm.externalComponentId.trim();
     const sortOrder = Number(itemForm.sortOrder);
-    if ((!featureId && !placeName) || !externalItemId) {
-      setLocalError("Feature ID 또는 장소명과 외부 항목 ID는 필수입니다.");
+    if ((!featureId && !placeName) || !externalItemId || !externalComponentId) {
+      setLocalError(
+        "Feature ID 또는 장소명과 외부 항목 ID·구성요소 ID는 필수입니다.",
+      );
       return;
     }
     if (!Number.isInteger(sortOrder) || sortOrder < 0) {
       setLocalError("정렬 순서는 0 이상의 정수여야 합니다.");
       return;
     }
+    submitItemInFlightRef.current = true;
     try {
       const response = await addItem.mutateAsync({
         collectionId: activeCollectionId,
@@ -241,6 +254,7 @@ export function CurationCollectionsClient() {
           place_name: placeName || null,
           address_hint: itemForm.addressHint.trim() || null,
           external_item_id: externalItemId,
+          external_component_id: externalComponentId,
           status: "included",
           sort_order: sortOrder,
           item_title: itemForm.itemTitle.trim() || null,
@@ -256,6 +270,8 @@ export function CurationCollectionsClient() {
       );
     } catch {
       // mutationError에서 API 응답을 표시한다.
+    } finally {
+      submitItemInFlightRef.current = false;
     }
   };
 
@@ -825,6 +841,18 @@ export function CurationCollectionsClient() {
                     }
                   />
                   <FormField
+                    required
+                    label="외부 구성요소 ID"
+                    placeholder="primary 또는 component-01"
+                    value={itemForm.externalComponentId}
+                    onChange={(event) =>
+                      setItemForm((current) => ({
+                        ...current,
+                        externalComponentId: event.target.value,
+                      }))
+                    }
+                  />
+                  <FormField
                     label="표시 제목"
                     value={itemForm.itemTitle}
                     onChange={(event) =>
@@ -935,7 +963,9 @@ export function CurationCollectionsClient() {
                           </TableCell>
                           <TableCell>
                             <div className="max-w-64 space-y-1 whitespace-normal text-xs">
-                              <div className="font-mono">{item.external_item_id}</div>
+                              <div className="font-mono">
+                                {item.external_item_id}/{item.external_component_id}
+                              </div>
                               <div>
                                 {item.source_name ?? "수동 입력"} · {item.provider ?? "-"}/
                                 {item.dataset_key ?? "-"}
@@ -962,6 +992,9 @@ export function CurationCollectionsClient() {
                               <Badge variant={statusVariant(item.status)}>
                                 {item.status}
                               </Badge>
+                              {item.source_present ? null : (
+                                <Badge variant="outline">원천 누락</Badge>
+                              )}
                               <span className="text-xs text-text-secondary">
                                 {item.curation_relation}
                               </span>
@@ -1081,6 +1114,9 @@ function ImportReport({ report }: { report: CurationImportResponse }) {
                   <span className="font-medium">{item.title}</span> · {item.place_name}
                   {" · "}
                   <span className="font-mono text-xs">{item.external_item_id}</span>
+                  <span className="font-mono text-xs">
+                    /{item.external_component_id}
+                  </span>
                   {item.feature_id ? (
                     <span className="font-mono text-xs"> · {item.feature_id}</span>
                   ) : (
@@ -1127,7 +1163,9 @@ function ImportReport({ report }: { report: CurationImportResponse }) {
         </TableHeader>
         <TableBody>
           {data.items.map((row) => (
-            <TableRow key={`${row.row_number}-${row.source_item_key}`}>
+            <TableRow
+              key={`${row.row_number}-${row.source_item_key}-${row.source_component_key}`}
+            >
               <TableCell>{row.row_number}</TableCell>
               <TableCell>
                 <Badge variant={statusVariant(row.status)}>
@@ -1139,6 +1177,9 @@ function ImportReport({ report }: { report: CurationImportResponse }) {
                   <div className="font-medium">{row.title}</div>
                   <div className="text-xs text-text-secondary">
                     {row.collection_key} · {row.place_name || row.source_item_key}
+                  </div>
+                  <div className="font-mono text-xs text-text-secondary">
+                    {row.source_item_key}/{row.source_component_key}
                   </div>
                 </div>
               </TableCell>

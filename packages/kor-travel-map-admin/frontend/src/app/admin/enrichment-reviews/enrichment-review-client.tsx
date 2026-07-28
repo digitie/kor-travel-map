@@ -9,7 +9,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { type Map as MapLibreMap } from "maplibre-gl";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 
 import {
   type EnrichmentDecision,
@@ -22,12 +22,11 @@ import {
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
 import { JsonViewer } from "@/components/json-viewer";
-import {
-  MultiFilterCombobox,
-  uniqueSorted,
-} from "@/components/multi-filter-combobox";
+import { MultiFilterCombobox } from "@/components/multi-filter-combobox";
+import { uniqueSorted } from "@/lib/string-list";
 import { CursorPager } from "@/components/pagination-bar";
-import { StatusBadge, statusLabel } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/ui/data-table";
@@ -460,20 +459,23 @@ export function EnrichmentReviewClient() {
     setSelectedDetailSource(null);
   };
 
-  const decide = (
-    reviewId: string,
-    value: EnrichmentDecision,
-    detailSource?: EnrichmentDetailSource | null,
-  ) => {
-    decision.mutate({
-      reviewKey: reviewId,
-      body: {
-        decision: value,
-        decision_reason: `admin-ui ${value}`,
-        selected_detail_source: detailSource ?? undefined,
-      },
-    });
-  };
+  const decide = useCallback(
+    (
+      reviewId: string,
+      value: EnrichmentDecision,
+      detailSource?: EnrichmentDetailSource | null,
+    ) => {
+      decision.mutate({
+        reviewKey: reviewId,
+        body: {
+          decision: value,
+          decision_reason: `admin-ui ${value}`,
+          selected_detail_source: detailSource ?? undefined,
+        },
+      });
+    },
+    [decision],
+  );
 
   const openDetail = (reviewId: string) => {
     setDetailReviewId(reviewId);
@@ -669,8 +671,7 @@ export function EnrichmentReviewClient() {
         },
       },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [decision.isPending],
+    [decide, decision.isPending],
   );
 
   return (

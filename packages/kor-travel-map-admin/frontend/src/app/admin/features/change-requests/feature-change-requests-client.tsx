@@ -50,18 +50,27 @@ import {
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
 import { AdminRegionAutoSearch } from "@/components/admin-region-autosearch";
-import { StatusBadge, statusLabel } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
+import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { DataTable } from "@/components/ui/data-table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { FormField } from "@/components/ui/form-field-input";
 import { FormSelect } from "@/components/ui/form-select";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
+import { addressCodeError, validateAddressCodes } from "@/lib/feature-address-validation";
 import {
   FEATURE_CHANGE_ACTION_OPTIONS,
   FEATURE_KIND_OPTIONS,
@@ -88,8 +97,6 @@ import {
   FeatureBasicInfoSection,
   FeatureDetailSection,
   FeatureLocationPreviewSection,
-  addressCodeError,
-  validateAddressCodes,
 } from "../feature-form-sections";
 
 const CHANGE_STATUSES: Array<AdminFeatureChangeStatus | "all"> = [
@@ -860,23 +867,21 @@ function LocationEditDialog({
   };
 
   return (
-    <div
-      aria-labelledby="change-location-dialog-title"
-      aria-modal="true"
-      className="fixed inset-0 z-50 overflow-hidden bg-black/45 p-2 sm:p-4"
-      role="dialog"
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
     >
-      <div className="mx-auto flex h-[calc(100dvh-1rem)] max-w-6xl flex-col overflow-hidden rounded-lg border bg-background shadow-xl sm:h-[min(48rem,calc(100dvh-2rem))]">
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+      <DialogContent className="flex h-[calc(100dvh-1rem)] max-w-6xl flex-col overflow-hidden p-0 sm:h-[min(48rem,calc(100dvh-2rem))]">
+        <DialogHeader className="shrink-0 items-center">
           <div className="min-w-0">
-            <div className="font-medium" id="change-location-dialog-title">
-              위치/마커 편집
-            </div>
-            <div className="break-all font-mono text-xs text-muted-foreground">
+            <DialogTitle className="font-medium">위치/마커 편집</DialogTitle>
+            <DialogDescription className="break-all font-mono text-xs">
               {coord
                 ? `${coord.lon.toFixed(6)}, ${coord.lat.toFixed(6)}`
                 : "좌표 없음"}
-            </div>
+            </DialogDescription>
           </div>
           <Button
             aria-label="위치 편집 닫기"
@@ -887,7 +892,7 @@ function LocationEditDialog({
           >
             <XIcon data-icon="inline-start" />
           </Button>
-        </div>
+        </DialogHeader>
         <div className="grid min-h-0 flex-1 grid-rows-[minmax(16rem,42dvh)_minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_22rem] lg:grid-rows-1">
           <div className="relative min-h-0">
             <VWorldMapView
@@ -1013,8 +1018,8 @@ function LocationEditDialog({
             적용
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1042,6 +1047,7 @@ export function FeatureChangeRequestsClient({
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const appliedQueryPrefillRef = useRef<string | null>(null);
   const appliedFeaturePrefillRef = useRef<string | null>(null);
+  const submitChangeInFlightRef = useRef(false);
   const editDraftDirtyFieldsRef = useRef<Set<keyof FeatureChangeFormState>>(
     new Set(),
   );
@@ -1270,6 +1276,8 @@ export function FeatureChangeRequestsClient({
 
   const submitChange = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitChangeInFlightRef.current) return;
+    submitChangeInFlightRef.current = true;
     setFormError(null);
     try {
       if (correctionConflict) {
@@ -1330,6 +1338,8 @@ export function FeatureChangeRequestsClient({
             ? error.message
             : String(error),
       );
+    } finally {
+      submitChangeInFlightRef.current = false;
     }
   };
 

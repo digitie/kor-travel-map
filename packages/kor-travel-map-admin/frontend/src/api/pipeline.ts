@@ -126,24 +126,6 @@ export type ExecutionStatus = Exclude<
 export type JobEventLevel = Exclude<EventsQuery["level"], null | undefined>;
 export type PipelineScheduleCommand = PipelineScheduleCommandRequest["command"];
 
-export const EXECUTION_KINDS: readonly ExecutionKind[] = [
-  "import_job",
-  "update_request",
-];
-export const EXECUTION_STATUSES: readonly ExecutionStatus[] = [
-  "queued",
-  "running",
-  "done",
-  "failed",
-  "cancelled",
-];
-export const JOB_EVENT_LEVELS: readonly JobEventLevel[] = [
-  "debug",
-  "info",
-  "warning",
-  "error",
-  "critical",
-];
 
 export interface PipelineExecutionsParams {
   kind?: ExecutionKind;

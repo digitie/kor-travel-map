@@ -489,6 +489,10 @@ export function useOpsLiveInvalidation({
     adapterRef.current = invalidationAdapter;
   }, [invalidationAdapter]);
 
+  // Ticket fetch와 WebSocket lease는 하나의 재연결 lifecycle이다. 일반 query로
+  // 분리하면 ticket/socket 교체가 경쟁하므로 effect가 둘을 함께 소유한다.
+  // 반환 cleanup은 fetch abort, timer, logout 구독, socket을 모두 해제하며
+  // live-transport.test.tsx가 활성/대기/요청 중 unmount를 각각 검증한다.
   useEffect(() => {
     if (!effectiveEnabled || stableTopics.length === 0) {
       return undefined;

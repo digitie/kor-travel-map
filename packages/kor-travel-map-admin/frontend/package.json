@@ -10,7 +10,7 @@
     "lint": "eslint . --max-warnings 0",
     "type-check": "tsc --noEmit && tsc -p e2e/tsconfig.json --noEmit",
     "type-check:e2e": "tsc -p e2e/tsconfig.json --noEmit",
-    "doctor": "react-doctor --scope full --no-score --no-telemetry .",
+    "doctor": "react-doctor --scope full --no-score --no-telemetry --no-respect-inline-disables --blocking warning .",
     "gen:types": "openapi-typescript ../../kor-travel-map-api/openapi.json -o src/api/types.ts",
     "gen:types:check": "openapi-typescript ../../kor-travel-map-api/openapi.json -o src/api/types.ts --check",
     "test": "vitest run --exclude \"e2e/**\" --passWithNoTests",

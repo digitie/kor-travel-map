@@ -401,3 +401,23 @@
     브라우저 캐시/서비스워커/탭 상태를 의심하되, 먼저 같은 URL에서 hard reload 또는 새 시크릿 창으로 재확인한다.
   - “최신”이라고 보고할 때는 `image_created_utc`, `image_created_kst`, `container_started_utc`,
     `container_started_kst`, 확인한 marker, 확인한 route를 함께 남긴다.
+
+### F12 — 장시간 Live 실패 뒤 무조건 처음부터 재실행
+
+- **증상**: 실데이터 clone·수십 개 Alembic revision·image build를 이미 통과했는데 UI seed나
+  단일 assertion 실패만으로 전체 과정을 다시 실행해 시간과 n150 I/O를 반복 소모한다.
+- **원인**: 하네스가 `EXIT`에서 성공·실패를 구분하지 않고 격리 DB/artifact를 즉시 삭제하거나,
+  단계별 exact SHA·migration head·fixture identity를 기록하지 않아 재사용 가능성을 증명할
+  수 없다.
+- **회피**:
+  - 각 단계 완료 시 exact code SHA, source DB 기준선, clone 이름, migration head, fixture
+    identity와 checksum/row count를 기록한다.
+  - 실패 시 API/UI process처럼 재기동 가능한 자원만 정리하고, 재개에 필요한 격리 DB와
+    immutable artifact는 보존한다. prod DB를 checkpoint나 재개 대상으로 사용하지 않는다.
+  - 실패 원인 수정이 선행 단계 결과에 영향을 주지 않고 보존 상태의 무결성이 확인되면
+    실패한 단계부터 재개한다.
+- **처음부터 다시 해야 하는 경우**: clone/artifact가 이미 삭제됐거나, code/data SHA가
+  달라졌거나, 선행 migration·seed 자체가 실패 원인의 영향을 받았거나, 상태 무결성을
+  증명할 수 없는 경우다. 추측으로 재사용하지 않는다.
+- **정리**: 최종 성공 뒤 보존한 격리 DB·dump·PID/log artifact를 명시적으로 정리하고 prod
+  기준선·health가 변하지 않았음을 다시 확인한다.
