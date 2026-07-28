@@ -195,6 +195,7 @@ def test_runner_fail_closes_prod_and_proves_exact_isolated_identity() -> None:
     ) in source
     assert 'STATE_ROOT="/var/lib/kor-travel-map/admin-feature-clone-live-acceptance"' in source
     assert "kor-travel-docker-manager" in source
+    assert 'db_user="postgres"' in source
     assert "DB_HOST_PORT != 5432" in source
     assert "port != 12701 && port != 12705" in source
     assert "clone-startup-before.json" in source

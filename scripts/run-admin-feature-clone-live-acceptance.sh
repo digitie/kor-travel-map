@@ -97,10 +97,12 @@ descriptor = os.open(
     0o444,
 )
 try:
-    os.write(
-        descriptor,
-        (json.dumps(payload, sort_keys=True) + "\n").encode("utf-8"),
+    view = memoryview(
+        (json.dumps(payload, sort_keys=True) + "\n").encode("utf-8")
     )
+    while view:
+        written = os.write(descriptor, view)
+        view = view[written:]
     os.fchmod(descriptor, 0o444)
     os.fsync(descriptor)
 finally:
@@ -251,7 +253,7 @@ clone_compose_project="$(
 [[ "$(docker port "$DB_CONTAINER" 5432/tcp)" == "127.0.0.1:$DB_HOST_PORT" ]] ||
   die "clone DB loopback port binding mismatch"
 
-db_user=""
+db_user="postgres"
 db_name=""
 db_password=""
 while IFS= read -r entry; do
