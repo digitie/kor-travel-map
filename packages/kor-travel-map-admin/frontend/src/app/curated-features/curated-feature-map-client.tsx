@@ -277,7 +277,7 @@ function CurationGroupDetailPanel({
   );
 }
 
-export function CuratedFeatureMapClient() {
+function useCuratedFeatureMapClientController() {
   const [viewport, setViewport] = useState<MapViewport>(DEFAULT_VIEWPORT);
   const [bbox, setBbox] = useState<Bbox | null>(null);
   const [viewMode, setViewMode] = useState<FeatureViewMode>("map");
@@ -428,6 +428,60 @@ export function CuratedFeatureMapClient() {
       : `${count}곳 · ${pages}페이지 전체 반영`;
   }, [bbox, groups, groupsQuery]);
 
+  return {
+    clusterItems,
+    collectionsQuery,
+    columns,
+    editionKey,
+    filterOptions,
+    groups,
+    groupsQuery,
+    provider,
+    search,
+    selectedFeatureId,
+    selectedGroup,
+    setEditionKey,
+    setProvider,
+    setSearch,
+    setSelectedFeatureId,
+    setTableSorting,
+    setThemeSlug,
+    setViewMode,
+    status,
+    tableSorting,
+    themeSlug,
+    updateViewportFromMap,
+    viewMode,
+    viewport,
+  };
+}
+
+function CuratedFeatureMapClientView({
+  clusterItems,
+  collectionsQuery,
+  columns,
+  editionKey,
+  filterOptions,
+  groups,
+  groupsQuery,
+  provider,
+  search,
+  selectedFeatureId,
+  selectedGroup,
+  setEditionKey,
+  setProvider,
+  setSearch,
+  setSelectedFeatureId,
+  setTableSorting,
+  setThemeSlug,
+  setViewMode,
+  status,
+  tableSorting,
+  themeSlug,
+  updateViewportFromMap,
+  viewMode,
+  viewport,
+}: ReturnType<typeof useCuratedFeatureMapClientController>) {
   return (
     <AdminShell
       actions={
@@ -629,4 +683,9 @@ export function CuratedFeatureMapClient() {
       </div>
     </AdminShell>
   );
+}
+
+export function CuratedFeatureMapClient() {
+  const controller = useCuratedFeatureMapClientController();
+  return <CuratedFeatureMapClientView {...controller} />;
 }

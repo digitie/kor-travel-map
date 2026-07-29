@@ -37,7 +37,7 @@ const LEVELS: Array<SystemLogLevel | "all"> = [
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 type LogTab = "system" | "api";
 
-export function LogsClient({
+function useLogsClientController({
   initialTab,
   initialLevel,
 }: {
@@ -234,6 +234,70 @@ export function LogsClient({
     [],
   );
 
+  return {
+    activeLogTab,
+    apiColumns,
+    apiItems,
+    apiLogs,
+    apiMethod,
+    apiMinStatus,
+    apiPageIndex,
+    apiPath,
+    nextApiPage,
+    nextSystemPage,
+    pageSize,
+    refreshAll,
+    resetApiPage,
+    resetSystemPage,
+    setActiveLogTab,
+    setApiMethod,
+    setApiMinStatus,
+    setApiPath,
+    setPageSize,
+    setSystemLevel,
+    setSystemQ,
+    setSystemSource,
+    systemColumns,
+    systemItems,
+    systemLevel,
+    systemLogs,
+    systemPageIndex,
+    systemQ,
+    systemSource,
+  };
+}
+
+function LogsClientView({
+  activeLogTab,
+  apiColumns,
+  apiItems,
+  apiLogs,
+  apiMethod,
+  apiMinStatus,
+  apiPageIndex,
+  apiPath,
+  nextApiPage,
+  nextSystemPage,
+  pageSize,
+  refreshAll,
+  resetApiPage,
+  resetSystemPage,
+  setActiveLogTab,
+  setApiMethod,
+  setApiMinStatus,
+  setApiPath,
+  setPageSize,
+  setSystemLevel,
+  setSystemQ,
+  setSystemSource,
+  systemColumns,
+  systemItems,
+  systemLevel,
+  systemLogs,
+  systemPageIndex,
+  systemQ,
+  systemSource,
+}: ReturnType<typeof useLogsClientController>) {
   return (
     <AdminShell
       actions={
@@ -412,4 +476,15 @@ export function LogsClient({
       </div>
     </AdminShell>
   );
+}
+
+export function LogsClient({
+  initialTab,
+  initialLevel,
+}: {
+  initialTab?: string;
+  initialLevel?: string;
+} = {}) {
+  const controller = useLogsClientController({ initialTab, initialLevel });
+  return <LogsClientView {...controller} />;
 }

@@ -2,8 +2,8 @@
   "schemaVersion": 3,
   "baselineMainRevision": "6bf4c10f99742a5c563d1c648f71ab6f5444b1e9",
   "baselineRevision": "31edfe0cab1213be57dce7a5bddd4a3108adffb3",
-  "discoveredTests": 274,
-  "testInventorySha256": "d28cfef36051bfe999faa483b7ca67133d0d62519a4506641baccf16b22f6dd6",
+  "discoveredTests": 275,
+  "testInventorySha256": "592e514b6a82dd17d9180dbf74f49f2ae9dd0d2e0130a9c486732190625c5427",
   "allowedSkipped": [],
   "groups": [
     {

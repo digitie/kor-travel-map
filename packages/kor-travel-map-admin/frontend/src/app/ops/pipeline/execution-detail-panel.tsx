@@ -44,7 +44,7 @@ const EVENT_LEVELS: Array<JobEventLevel | "all"> = [
   "debug",
 ];
 
-export function ExecutionDetailPanel({
+function useExecutionDetailPanelController({
   kind,
   executionId,
   queueOperational,
@@ -144,37 +144,54 @@ export function ExecutionDetailPanel({
     });
   };
 
+  return {
+    canCancel,
+    canRunNow,
+    cancelExecution,
+    cancelProblem,
+    cancelProblemDetails,
+    cancelReason,
+    cancellation,
+    cancellationFailures,
+    cancellationInProgress,
+    cursorStack,
+    detail,
+    events,
+    eventsNextCursor,
+    execution,
+    executionId,
+    hasCancellationFailures,
+    importJob,
+    kind,
+    level,
+    onClose,
+    onSelectExecution,
+    queueOperational,
+    root,
+    runNow,
+    setCancelReason,
+    setCursorStack,
+    setLevel,
+    submitCancel,
+    submitRunNow,
+    updateRequest,
+  };
+}
+
+function ExecutionRunSummary({
+  cancellation,
+  cancellationFailures,
+  detail,
+  execution,
+  hasCancellationFailures,
+  importJob,
+  onSelectExecution,
+  root,
+  updateRequest,
+}: Pick<ReturnType<typeof useExecutionDetailPanelController>, "cancellation" | "cancellationFailures" | "detail" | "execution" | "hasCancellationFailures" | "importJob" | "onSelectExecution" | "root" | "updateRequest">) {
   return (
-    <Card aria-label="실행 상세" data-testid="pipeline-execution-detail">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <CardTitle className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">
-                {execution
-                  ? executionKindLabel(execution.kind)
-                  : executionKindLabel(kind)}
-              </Badge>
-              <span className="font-mono text-sm">{shortId(executionId)}</span>
-              {execution ? <StatusBadge status={execution.status} /> : null}
-            </CardTitle>
-            <CardDescription>
-              실행 상세 — 이벤트 로그·연결 개체·요청 payload
-            </CardDescription>
-          </div>
-          <Button
-            aria-label="실행 상세 닫기"
-            size="icon"
-            type="button"
-            variant="ghost"
-            onClick={onClose}
-          >
-            <XIcon />
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {detail.isLoading ? (
+    <>
+{detail.isLoading ? (
           <p className="text-sm text-muted-foreground">상세를 불러오는 중…</p>
         ) : null}
         {detail.isError ? (
@@ -417,8 +434,22 @@ export function ExecutionDetailPanel({
             />
           </section>
         ) : null}
+    </>
+  );
+}
 
-        <section aria-label="이벤트 로그" className="space-y-2">
+function ExecutionClaimResolution({
+  cursorStack,
+  detail,
+  events,
+  eventsNextCursor,
+  level,
+  setCursorStack,
+  setLevel,
+}: Pick<ReturnType<typeof useExecutionDetailPanelController>, "cursorStack" | "detail" | "events" | "eventsNextCursor" | "level" | "setCursorStack" | "setLevel">) {
+  return (
+    <>
+<section aria-label="이벤트 로그" className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-bold tracking-[0.05em] text-muted-foreground uppercase">
               이벤트 로그
@@ -493,8 +524,30 @@ export function ExecutionDetailPanel({
             </Button>
           </div>
         </section>
+    </>
+  );
+}
 
-        <section aria-label="실행 조작" className="space-y-2">
+function ExecutionRunLogs({
+  canCancel,
+  canRunNow,
+  cancelExecution,
+  cancelProblem,
+  cancelProblemDetails,
+  cancelReason,
+  cancellation,
+  cancellationInProgress,
+  execution,
+  onSelectExecution,
+  queueOperational,
+  runNow,
+  setCancelReason,
+  submitCancel,
+  submitRunNow,
+}: Pick<ReturnType<typeof useExecutionDetailPanelController>, "canCancel" | "canRunNow" | "cancelExecution" | "cancelProblem" | "cancelProblemDetails" | "cancelReason" | "cancellation" | "cancellationInProgress" | "execution" | "onSelectExecution" | "queueOperational" | "runNow" | "setCancelReason" | "submitCancel" | "submitRunNow">) {
+  return (
+    <>
+<section aria-label="실행 조작" className="space-y-2">
           <h3 className="text-xs font-bold tracking-[0.05em] text-muted-foreground uppercase">
             조작
           </h3>
@@ -619,7 +672,95 @@ export function ExecutionDetailPanel({
             </Alert>
           ) : null}
         </section>
+    </>
+  );
+}
+
+function ExecutionDetailPanelView({
+  canCancel,
+  canRunNow,
+  cancelExecution,
+  cancelProblem,
+  cancelProblemDetails,
+  cancelReason,
+  cancellation,
+  cancellationFailures,
+  cancellationInProgress,
+  cursorStack,
+  detail,
+  events,
+  eventsNextCursor,
+  execution,
+  executionId,
+  hasCancellationFailures,
+  importJob,
+  kind,
+  level,
+  onClose,
+  onSelectExecution,
+  queueOperational,
+  root,
+  runNow,
+  setCancelReason,
+  setCursorStack,
+  setLevel,
+  submitCancel,
+  submitRunNow,
+  updateRequest,
+}: ReturnType<typeof useExecutionDetailPanelController>) {
+  return (
+    <Card aria-label="실행 상세" data-testid="pipeline-execution-detail">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <CardTitle className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">
+                {execution
+                  ? executionKindLabel(execution.kind)
+                  : executionKindLabel(kind)}
+              </Badge>
+              <span className="font-mono text-sm">{shortId(executionId)}</span>
+              {execution ? <StatusBadge status={execution.status} /> : null}
+            </CardTitle>
+            <CardDescription>
+              실행 상세 — 이벤트 로그·연결 개체·요청 payload
+            </CardDescription>
+          </div>
+          <Button
+            aria-label="실행 상세 닫기"
+            size="icon"
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+          >
+            <XIcon />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <ExecutionRunSummary cancellation={cancellation} cancellationFailures={cancellationFailures} detail={detail} execution={execution} hasCancellationFailures={hasCancellationFailures} importJob={importJob} onSelectExecution={onSelectExecution} root={root} updateRequest={updateRequest} />
+
+        <ExecutionClaimResolution cursorStack={cursorStack} detail={detail} events={events} eventsNextCursor={eventsNextCursor} level={level} setCursorStack={setCursorStack} setLevel={setLevel} />
+
+        <ExecutionRunLogs canCancel={canCancel} canRunNow={canRunNow} cancelExecution={cancelExecution} cancelProblem={cancelProblem} cancelProblemDetails={cancelProblemDetails} cancelReason={cancelReason} cancellation={cancellation} cancellationInProgress={cancellationInProgress} execution={execution} onSelectExecution={onSelectExecution} queueOperational={queueOperational} runNow={runNow} setCancelReason={setCancelReason} submitCancel={submitCancel} submitRunNow={submitRunNow} />
       </CardContent>
     </Card>
   );
+}
+
+export function ExecutionDetailPanel({
+  kind,
+  executionId,
+  queueOperational,
+  onClose,
+  onSelectExecution,
+}: {
+  kind: ExecutionKind;
+  executionId: string;
+  queueOperational: boolean;
+  onClose: () => void;
+  onSelectExecution: (kind: ExecutionKind, id: string) => void;
+}) {
+  const controller = useExecutionDetailPanelController({ kind, executionId, queueOperational, onClose, onSelectExecution });
+  return <ExecutionDetailPanelView {...controller} />;
 }

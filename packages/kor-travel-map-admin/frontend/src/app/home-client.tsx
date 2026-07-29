@@ -132,7 +132,7 @@ function MetricCardSkeleton() {
   );
 }
 
-export function HomePageClient() {
+function useHomePageClientController() {
   const health = useHealth();
   const version = useVersion();
   const metrics = useOpsMetrics();
@@ -232,6 +232,50 @@ export function HomePageClient() {
     void dedup.refetch();
   };
 
+  return {
+    activeFeatureRatio,
+    activeFeatures,
+    activeOperations,
+    dagsterData,
+    dedup,
+    dedupQueueTotal,
+    health,
+    metrics,
+    metricsData,
+    openIssueCount,
+    operationTotal,
+    pendingDedupCount,
+    pipeline,
+    pipelineExecutionColumns,
+    pipelineExecutionItems,
+    pipelineExecutions,
+    refreshAll,
+    totalFeatures,
+    version,
+  };
+}
+
+function HomePageClientView({
+  activeFeatureRatio,
+  activeFeatures,
+  activeOperations,
+  dagsterData,
+  dedup,
+  dedupQueueTotal,
+  health,
+  metrics,
+  metricsData,
+  openIssueCount,
+  operationTotal,
+  pendingDedupCount,
+  pipeline,
+  pipelineExecutionColumns,
+  pipelineExecutionItems,
+  pipelineExecutions,
+  refreshAll,
+  totalFeatures,
+  version,
+}: ReturnType<typeof useHomePageClientController>) {
   return (
     <AdminShell
       actions={
@@ -467,4 +511,9 @@ export function HomePageClient() {
       </div>
     </AdminShell>
   );
+}
+
+export function HomePageClient() {
+  const controller = useHomePageClientController();
+  return <HomePageClientView {...controller} />;
 }

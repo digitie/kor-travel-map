@@ -229,7 +229,7 @@ function FeatureDetailPanel({
   );
 }
 
-export function FeaturesClient() {
+function useFeaturesClientController() {
   useOpsLiveInvalidation({ topics: ["feature_update_requests"] });
 
   const viewport = useMapStore((state) => state.viewport);
@@ -397,59 +397,55 @@ export function FeaturesClient() {
     ? (clustersQuery.data?.data.truncated ?? false)
     : (featuresQuery.data?.data.truncated ?? false);
 
+  return {
+    activeFeatureKinds,
+    clusterItems,
+    clusterMode,
+    clustersQuery,
+    effectiveProvider,
+    featureColumns,
+    featureItems,
+    featureViewMode,
+    featuresQuery,
+    isDefaultKindFilter,
+    providerOptions,
+    resetFeatureKinds,
+    selectedFeatureId,
+    setFeatureViewMode,
+    setProviderFilter,
+    setSelectedFeatureId,
+    setStatusFilter,
+    setTableSorting,
+    showAreaGeometry,
+    status,
+    statusFilter,
+    tableSorting,
+    toggleFeatureKind,
+    truncated,
+    updateViewportFromMap,
+    viewport,
+  };
+}
+
+function FeatureMapToolbar({
+  activeFeatureKinds,
+  clusterMode,
+  clustersQuery,
+  effectiveProvider,
+  featuresQuery,
+  isDefaultKindFilter,
+  providerOptions,
+  resetFeatureKinds,
+  setProviderFilter,
+  setStatusFilter,
+  status,
+  statusFilter,
+  toggleFeatureKind,
+  truncated,
+}: Pick<ReturnType<typeof useFeaturesClientController>, "activeFeatureKinds" | "clusterMode" | "clustersQuery" | "effectiveProvider" | "featuresQuery" | "isDefaultKindFilter" | "providerOptions" | "resetFeatureKinds" | "setProviderFilter" | "setStatusFilter" | "status" | "statusFilter" | "toggleFeatureKind" | "truncated">) {
   return (
-    <AdminShell
-      actions={
-        <>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/curated-features"
-          >
-            <MapPinnedIcon data-icon="inline-start" />
-            큐레이션 지도
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/ops/pipeline?kind=import_job"
-          >
-            <ListChecksIcon data-icon="inline-start" />
-            Jobs
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/ops/pipeline?kind=update_request"
-          >
-            <RefreshCwIcon data-icon="inline-start" />
-            Update
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/poi-cache-targets"
-          >
-            <RouteIcon data-icon="inline-start" />
-            POI 캐시 대상
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/features/dedup-reviews"
-          >
-            <GitCompareArrowsIcon data-icon="inline-start" />
-            중복 검토
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/ops/pipeline?tab=schedules"
-          >
-            <WorkflowIcon data-icon="inline-start" />
-            작업 자동화
-          </Link>
-        </>
-      }
-      description={status}
-      title="Feature 지도"
-    >
-      <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">
-        <div className="flex flex-col gap-3 border-b bg-background px-4 py-3 md:flex-row md:items-center md:justify-between">
+    <>
+<div className="flex flex-col gap-3 border-b bg-background px-4 py-3 md:flex-row md:items-center md:justify-between">
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">Feature 지도</Badge>
@@ -549,8 +545,29 @@ export function FeaturesClient() {
           <AlertDescription>{clustersQuery.error.message}</AlertDescription>
         </Alert>
       ) : null}
+    </>
+  );
+}
 
-      <Tabs
+function FeatureMapWorkspace({
+  clusterItems,
+  clusterMode,
+  featureColumns,
+  featureItems,
+  featureViewMode,
+  featuresQuery,
+  selectedFeatureId,
+  setFeatureViewMode,
+  setSelectedFeatureId,
+  setTableSorting,
+  showAreaGeometry,
+  tableSorting,
+  updateViewportFromMap,
+  viewport,
+}: Pick<ReturnType<typeof useFeaturesClientController>, "clusterItems" | "clusterMode" | "featureColumns" | "featureItems" | "featureViewMode" | "featuresQuery" | "selectedFeatureId" | "setFeatureViewMode" | "setSelectedFeatureId" | "setTableSorting" | "showAreaGeometry" | "tableSorting" | "updateViewportFromMap" | "viewport">) {
+  return (
+    <>
+<Tabs
         className="min-h-0 flex-1 p-4"
         value={featureViewMode}
         onValueChange={(value) => setFeatureViewMode(value as FeatureViewMode)}
@@ -669,7 +686,99 @@ export function FeaturesClient() {
           </AlertDescription>
         </Alert>
       ) : null}
+    </>
+  );
+}
+
+function FeaturesClientView({
+  activeFeatureKinds,
+  clusterItems,
+  clusterMode,
+  clustersQuery,
+  effectiveProvider,
+  featureColumns,
+  featureItems,
+  featureViewMode,
+  featuresQuery,
+  isDefaultKindFilter,
+  providerOptions,
+  resetFeatureKinds,
+  selectedFeatureId,
+  setFeatureViewMode,
+  setProviderFilter,
+  setSelectedFeatureId,
+  setStatusFilter,
+  setTableSorting,
+  showAreaGeometry,
+  status,
+  statusFilter,
+  tableSorting,
+  toggleFeatureKind,
+  truncated,
+  updateViewportFromMap,
+  viewport,
+}: ReturnType<typeof useFeaturesClientController>) {
+  return (
+    <AdminShell
+      actions={
+        <>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/curated-features"
+          >
+            <MapPinnedIcon data-icon="inline-start" />
+            큐레이션 지도
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/ops/pipeline?kind=import_job"
+          >
+            <ListChecksIcon data-icon="inline-start" />
+            Jobs
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/ops/pipeline?kind=update_request"
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            Update
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/admin/poi-cache-targets"
+          >
+            <RouteIcon data-icon="inline-start" />
+            POI 캐시 대상
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/admin/features/dedup-reviews"
+          >
+            <GitCompareArrowsIcon data-icon="inline-start" />
+            중복 검토
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/ops/pipeline?tab=schedules"
+          >
+            <WorkflowIcon data-icon="inline-start" />
+            작업 자동화
+          </Link>
+        </>
+      }
+      description={status}
+      title="Feature 지도"
+    >
+      <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">
+        <FeatureMapToolbar activeFeatureKinds={activeFeatureKinds} clusterMode={clusterMode} clustersQuery={clustersQuery} effectiveProvider={effectiveProvider} featuresQuery={featuresQuery} isDefaultKindFilter={isDefaultKindFilter} providerOptions={providerOptions} resetFeatureKinds={resetFeatureKinds} setProviderFilter={setProviderFilter} setStatusFilter={setStatusFilter} status={status} statusFilter={statusFilter} toggleFeatureKind={toggleFeatureKind} truncated={truncated} />
+
+      <FeatureMapWorkspace clusterItems={clusterItems} clusterMode={clusterMode} featureColumns={featureColumns} featureItems={featureItems} featureViewMode={featureViewMode} featuresQuery={featuresQuery} selectedFeatureId={selectedFeatureId} setFeatureViewMode={setFeatureViewMode} setSelectedFeatureId={setSelectedFeatureId} setTableSorting={setTableSorting} showAreaGeometry={showAreaGeometry} tableSorting={tableSorting} updateViewportFromMap={updateViewportFromMap} viewport={viewport} />
       </div>
     </AdminShell>
   );
+}
+
+export function FeaturesClient() {
+  const controller = useFeaturesClientController();
+  return <FeaturesClientView {...controller} />;
 }

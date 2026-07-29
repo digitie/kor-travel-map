@@ -36,8 +36,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
-    [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
-    [ ] `T-VN-49D`(React 구조 debt)
+    [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
   - b1: [ ] `T-VN-11A` → [ ] `T-VN-11B`(service batch) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
     [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
@@ -65,6 +64,9 @@ barrier로 직렬화한다.
     required-review 운영 주체 결정 필요)
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
   - [ ] `T-VN-EXT-PINVI-215` — PinVi #215 외부 추적(Map Agent A/B queue 밖)
+
+> T-VN-49의 `[x]` 이관은 H49 코드와 같은 merge commit으로만 `main`에 들어간다. 따라서
+> `main`에서 구현보다 완료 표시가 먼저 보이거나 H22C barrier만 먼저 풀리는 구간은 없다.
 
 ## 공통 규율 (2026-07-28 개정)
 
@@ -123,8 +125,9 @@ barrier로 직렬화한다.
   revision 변경만으로 전체 복원을 반복하지 않는다. 일반 repository/query 변경은 관련 통합
   테스트, frontend/mocked/docs-only 변경은 해당 비DB gate만 수행한다.
 - **cross-lane 순서 제약**: C6c pair capture와 #392, H07A~D는 완료됐다.
-  H22C는 완료된 T-VN-48B에 이어 같은 curation frontend를 만지는 T-VN-49B가 머지된 뒤
-  시작한다. T-VN-12A의 command
+  H22C의 curation frontend 선행 작업 T-VN-48B·T-VN-49B는 모두 완료됐다. H22A/B가
+  끝나면 최신 구조에서 H22C를 시작한다. T-VN-49B 코드와 이 barrier 해제는 같은 merge
+  commit으로 landing한다. T-VN-12A의 command
   inventory freeze는 H22B의 reclassification command가 머지된 뒤 시작해 curation idempotency가
   누락되지 않게 한다. Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
   T-VN-40은 양 lane의 T-VN-32~38 하위 task가 모두 끝난 join barrier 뒤에 시작하며,
@@ -153,35 +156,6 @@ barrier로 직렬화한다.
   - **R4 cross-lane 배포 조율**: 두 lane이 같은 prod 페어/공유 DB를 동시에 만질 때는
     재-cut·live 실행 창을 겹치지 않게 하고, 한 lane의 live 컨테이너가 다른 lane의 배포
     대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
-
-## Lane B 상세 — b0 선행 하드닝
-
-### T-VN-49 — React Doctor 구조 debt 단계별 제거
-
-`doctor.config.json`의 `no-giant-component` 19개와 `prefer-useReducer` 3개를 책임 경계별로 줄인다.
-각 PR은 자기 파일의 예외를 같은 커밋에서 제거하고 기존 UI 계약을 보존한다.
-
-- [ ] T-VN-49A — **Feature·review admin 상태기계 분해**
-
-  dedup/enrichment/admin features/change requests/new feature 5개 giant component를
-  query/mutation/form/panel 책임으로 분해하고 dedup/new feature의 reducer 후보를 상태기계로 옮긴다.
-
-- [ ] T-VN-49B — **admin data-ops 상태기계 분해**
-
-  curation collections/files/issues/offline uploads/POI cache targets 5개 giant component를
-  분해하고 issues reducer 후보를 함께 제거한다.
-
-- [ ] T-VN-49C — **public map·home 분해**
-
-  curated feature map/features map/home 3개 giant component에서 지도 adapter가 아닌
-  domain hook·표현 component 경계를 추출한다.
-
-- [ ] T-VN-49D — **ops pipeline·datasets 분해와 예외 0**
-
-  datasets/logs/execution detail/timeline/request/schedule 6개 giant component를 분해한다.
-  완료 시 giant/reducer exact allowlist를 0개로 만들되 `live.ts` transport lifecycle과
-  datasets external-event effect의 규칙별 최소 예외는 실제 false-positive 재현이 유지되는 동안
-  별도 규칙 예외로 남긴다.
 
 ## 보류 — 실행 lane 외 거버넌스 결정 대기
 
@@ -496,8 +470,9 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 - [ ] T-VN-H22C — **Admin UI·실데이터 파괴적 수용**
 
   H22A/B 계약만 소비하는 검토 UI를 만들고 격리 clone에서 충돌 preview·이동·별도 확정·빈
-  collection 정리를 파괴적으로 검증한다. 같은 `curation-collections-client.tsx`와 mocked spec을
-  만지는 T-VN-48B·49B가 모두 머지된 뒤 최신 구조 위에서 시작한다.
+  collection 정리를 파괴적으로 검증한다. 같은 `curation-collections-client.tsx`와 mocked spec의
+  선행 작업 T-VN-48B·49B는 모두 완료됐으므로 H22A/B 뒤 최신 구조 위에서 시작한다. 49B 코드와
+  이 선행 조건 해제는 같은 merge commit으로 `main`에 반영한다.
 
 ## 이슈 종결 추적
 

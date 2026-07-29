@@ -14,6 +14,7 @@ import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import {
   type EnrichmentDecision,
   type EnrichmentReviewDetailResponse,
+  type EnrichmentReviewRecord,
   type EnrichmentStatus,
   useEnrichmentDecisionMutation,
   useEnrichmentReviewDetail,
@@ -383,6 +384,205 @@ function EnrichmentDetailDialog({
   );
 }
 
+function EnrichmentReviewTable({
+  detailReviewId,
+  isLoading,
+  isPending,
+  items,
+  onDecide,
+  onOpenDetail,
+}: {
+  detailReviewId: string | null;
+  isLoading: boolean;
+  isPending: boolean;
+  items: EnrichmentReviewRecord[];
+  onDecide: (reviewId: string, decision: EnrichmentDecision) => void;
+  onOpenDetail: (reviewId: string) => void;
+}) {
+  const columns = useMemo<ColumnDef<EnrichmentReviewRecord, unknown>[]>(
+    () => [
+      {
+        id: "review",
+        header: "리뷰",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {shortId(row.original.review_id)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "name_score",
+        header: "점수",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="space-y-1 font-mono text-xs">
+            <div>name {formatScore(row.original.name_score)}</div>
+            <div>distance {formatScore(row.original.spatial_score)}</div>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "distance_m",
+        header: "거리",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono">
+            {formatDistance(row.original.distance_m)}
+          </span>
+        ),
+      },
+      {
+        id: "target",
+        header: "1차 (datagokr)",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <>
+            <div className="font-medium">{row.original.target_name}</div>
+            <div className="text-xs text-muted-foreground">
+              {row.original.target_category ?? "-"} ·{" "}
+              <span onClick={(event) => event.stopPropagation()}>
+                <EntityLink
+                  className="text-xs"
+                  id={row.original.target_feature_id}
+                  kind="feature"
+                  newTab
+                >
+                  {shortId(row.original.target_feature_id)}
+                </EntityLink>
+              </span>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {formatPeriod(
+                row.original.target_start_date,
+                row.original.target_end_date,
+              )}
+            </div>
+          </>
+        ),
+      },
+      {
+        id: "source",
+        header: "2차 (visitkorea)",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <>
+            <div className="font-medium">{row.original.source_name}</div>
+            <div className="text-xs text-muted-foreground">
+              {row.original.source_provider} · {row.original.source_entity_id}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {formatPeriod(
+                row.original.source_start_date,
+                row.original.source_end_date,
+              )}
+            </div>
+          </>
+        ),
+      },
+      {
+        accessorKey: "status",
+        header: "상태",
+        enableSorting: false,
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        accessorKey: "created_at",
+        header: "생성",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.created_at)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "작업",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const item = row.original;
+          return item.status === "pending" ? (
+            <div
+              className="flex flex-wrap gap-1"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => onOpenDetail(item.review_id)}
+              >
+                <EyeIcon data-icon="inline-start" />
+                detail
+              </Button>
+              <Button
+                disabled={isPending}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => onDecide(item.review_id, "accepted")}
+              >
+                <CheckIcon data-icon="inline-start" />
+                accept
+              </Button>
+              <Button
+                disabled={isPending}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => onDecide(item.review_id, "rejected")}
+              >
+                <XIcon data-icon="inline-start" />
+                reject
+              </Button>
+              <Button
+                disabled={isPending}
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={() => onDecide(item.review_id, "ignored")}
+              >
+                ignore
+              </Button>
+            </div>
+          ) : (
+            <div
+              className="flex flex-wrap items-center gap-1"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => onOpenDetail(item.review_id)}
+              >
+                <EyeIcon data-icon="inline-start" />
+                detail
+              </Button>
+              <span className="text-sm text-muted-foreground">완료</span>
+            </div>
+          );
+        },
+      },
+    ],
+    [isPending, onDecide, onOpenDetail],
+  );
+
+  return (
+    <DataTable
+      columns={columns}
+      data={items}
+      getRowId={(row) => row.review_id}
+      isLoading={isLoading}
+      emptyMessage="enrichment review가 없습니다."
+      containerClassName="overflow-auto rounded-lg border bg-background"
+      onRowClick={(row) => onOpenDetail(row.review_id)}
+      isRowActive={(row) => row.review_id === detailReviewId}
+    />
+  );
+}
+
 export function EnrichmentReviewClient() {
   const [q, setQ] = useState("");
   const [providers, setProviders] = useState<string[]>([]);
@@ -477,10 +677,10 @@ export function EnrichmentReviewClient() {
     [decision],
   );
 
-  const openDetail = (reviewId: string) => {
+  const openDetail = useCallback((reviewId: string) => {
     setDetailReviewId(reviewId);
     setSelectedDetailSource(null);
-  };
+  }, []);
 
   const renderPagination = (placement: "top" | "bottom") => (
     <CursorPager
@@ -501,179 +701,6 @@ export function EnrichmentReviewClient() {
       onNext={goNextPage}
     />
   );
-  type ReviewRow = NonNullable<typeof reviews.data>["data"]["items"][number];
-  const columns = useMemo<ColumnDef<ReviewRow, unknown>[]>(
-    () => [
-      {
-        id: "review",
-        header: "리뷰",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            {shortId(row.original.review_id)}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "name_score",
-        header: "점수",
-        // 서버 page 목록 — 서버 정렬 유지, client 정렬 끔(#502).
-        enableSorting: false,
-        cell: ({ row }) => (
-          <div className="space-y-1 font-mono text-xs">
-            <div>name {formatScore(row.original.name_score)}</div>
-            <div>distance {formatScore(row.original.spatial_score)}</div>
-          </div>
-        ),
-      },
-      {
-        accessorKey: "distance_m",
-        header: "거리",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono">
-            {formatDistance(row.original.distance_m)}
-          </span>
-        ),
-      },
-      {
-        id: "target",
-        header: "1차 (datagokr)",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <>
-            <div className="font-medium">{row.original.target_name}</div>
-            <div className="text-xs text-muted-foreground">
-              {row.original.target_category ?? "-"} ·{" "}
-              {/* 행 클릭(상세 열기)과 분리 — 링크 클릭은 전파를 막는다. */}
-              <span onClick={(event) => event.stopPropagation()}>
-                <EntityLink
-                  className="text-xs"
-                  id={row.original.target_feature_id}
-                  kind="feature"
-                  newTab
-                >
-                  {shortId(row.original.target_feature_id)}
-                </EntityLink>
-              </span>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {formatPeriod(
-                row.original.target_start_date,
-                row.original.target_end_date,
-              )}
-            </div>
-          </>
-        ),
-      },
-      {
-        id: "source",
-        header: "2차 (visitkorea)",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <>
-            <div className="font-medium">{row.original.source_name}</div>
-            <div className="text-xs text-muted-foreground">
-              {row.original.source_provider} · {row.original.source_entity_id}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {formatPeriod(
-                row.original.source_start_date,
-                row.original.source_end_date,
-              )}
-            </div>
-          </>
-        ),
-      },
-      {
-        accessorKey: "status",
-        header: "상태",
-        enableSorting: false,
-        cell: ({ row }) => <StatusBadge status={row.original.status} />,
-      },
-      {
-        accessorKey: "created_at",
-        header: "생성",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">
-            {formatDateTime(row.original.created_at)}
-          </span>
-        ),
-      },
-      {
-        id: "actions",
-        header: "작업",
-        enableSorting: false,
-        cell: ({ row }) => {
-          const item = row.original;
-          return item.status === "pending" ? (
-            <div
-              className="flex flex-wrap gap-1"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <Button
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => openDetail(item.review_id)}
-              >
-                <EyeIcon data-icon="inline-start" />
-                detail
-              </Button>
-              <Button
-                disabled={decision.isPending}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => decide(item.review_id, "accepted")}
-              >
-                <CheckIcon data-icon="inline-start" />
-                accept
-              </Button>
-              <Button
-                disabled={decision.isPending}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => decide(item.review_id, "rejected")}
-              >
-                <XIcon data-icon="inline-start" />
-                reject
-              </Button>
-              <Button
-                disabled={decision.isPending}
-                size="sm"
-                type="button"
-                variant="ghost"
-                onClick={() => decide(item.review_id, "ignored")}
-              >
-                ignore
-              </Button>
-            </div>
-          ) : (
-            <div
-              className="flex flex-wrap items-center gap-1"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <Button
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => openDetail(item.review_id)}
-              >
-                <EyeIcon data-icon="inline-start" />
-                detail
-              </Button>
-              <span className="text-sm text-muted-foreground">완료</span>
-            </div>
-          );
-        },
-      },
-    ],
-    [decide, decision.isPending],
-  );
-
   return (
     <AdminShell
       actions={
@@ -795,15 +822,13 @@ export function EnrichmentReviewClient() {
 
         {renderPagination("top")}
 
-        <DataTable
-          columns={columns}
-          data={items}
-          getRowId={(row) => row.review_id}
+        <EnrichmentReviewTable
+          detailReviewId={detailReviewId}
           isLoading={reviews.isLoading}
-          emptyMessage="enrichment review가 없습니다."
-          containerClassName="overflow-auto rounded-lg border bg-background"
-          onRowClick={(row) => openDetail(row.review_id)}
-          isRowActive={(row) => row.review_id === detailReviewId}
+          isPending={decision.isPending}
+          items={items}
+          onDecide={decide}
+          onOpenDetail={openDetail}
         />
 
         {renderPagination("bottom")}

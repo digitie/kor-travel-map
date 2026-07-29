@@ -543,31 +543,16 @@ function ValidationPanel({
   );
 }
 
-export function OfflineUploadsClient() {
+function UploadFormPanel({
+  onCreated,
+}: {
+  onCreated: (uploadId: string) => void;
+}) {
   const [file, setFile] = useState<File | null>(null);
   const [provider, setProvider] = useState("offline-test-provider");
   const [datasetKey, setDatasetKey] = useState("offline_csv");
   const [syncScope, setSyncScope] = useState("default");
-  const [status, setStatus] = useState<OfflineUploadStatus | "all">("uploaded");
-  const [providerFilter, setProviderFilter] = useState("");
-  const [datasetFilter, setDatasetFilter] = useState("");
-  const [selectedUploadId, setSelectedUploadId] = useState<string | null>(null);
-  const [mapping, setMapping] =
-    useState<OfflineUploadColumnMapping>(defaultColumnMapping);
-
-  const uploadsParams = useMemo(
-    () => ({
-      status: status === "all" ? undefined : status,
-      provider: providerFilter.trim() || undefined,
-      dataset_key: datasetFilter.trim() || undefined,
-      page_size: 100,
-    }),
-    [datasetFilter, providerFilter, status],
-  );
-  const uploads = useOfflineUploads(uploadsParams);
-  const selectedUpload = useOfflineUpload(selectedUploadId);
   const createUpload = useCreateOfflineUploadMutation();
-  // §4: provider/dataset 입력 어시스트 — 등록된 provider×dataset에서 후보 제공.
   const datasetsQuery = useOpsDatasetCatalog();
   const catalogOptions = useMemo(
     () => opsDatasetCatalogOptions(datasetsQuery.data?.data.items ?? []),
@@ -587,13 +572,121 @@ export function OfflineUploadsClient() {
           ).sort(),
     [catalogOptions, provider],
   );
-  // §4: disabled 제출 버튼의 이유를 표시한다.
   const uploadMissingFields = [
     file === null ? "파일" : null,
     provider.trim().length === 0 ? "provider" : null,
     datasetKey.trim().length === 0 ? "dataset key" : null,
     syncScope.trim().length === 0 ? "sync scope" : null,
   ].filter((item): item is string => item !== null);
+
+  const submitUpload = () => {
+    if (file === null) return;
+    createUpload.mutate(
+      { file, provider, datasetKey, syncScope },
+      { onSuccess: (data) => onCreated(data.data.upload_id) },
+    );
+  };
+
+  return (
+    <div className="rounded-lg border bg-background p-4">
+      <div className="mb-4">
+        <div className="font-medium">파일 업로드</div>
+        <div className="text-sm text-muted-foreground">
+          JSON/JSONL FeatureBundle, CSV/TSV tabular 원본
+        </div>
+      </div>
+      <div className="flex flex-col gap-3">
+        <FormField
+          data-testid="offline-upload-file-input"
+          label="파일"
+          type="file"
+          accept=".json,.jsonl,.ndjson,.csv,.tsv,application/json,application/x-ndjson,text/csv,text/tab-separated-values"
+          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+        />
+        <FormField
+          label="provider"
+          list="offline-upload-provider-options"
+          placeholder="provider"
+          value={provider}
+          onChange={(event) => setProvider(event.target.value)}
+        />
+        <datalist id="offline-upload-provider-options">
+          {providerOptions.map((item) => (
+            <option key={item} value={item} />
+          ))}
+        </datalist>
+        <FormField
+          label="dataset key"
+          list="offline-upload-dataset-options"
+          placeholder="dataset_key"
+          value={datasetKey}
+          onChange={(event) => setDatasetKey(event.target.value)}
+        />
+        <datalist id="offline-upload-dataset-options">
+          {datasetOptions.map((item) => (
+            <option key={item} value={item} />
+          ))}
+        </datalist>
+        <FormField
+          label="sync scope"
+          placeholder="sync_scope"
+          value={syncScope}
+          onChange={(event) => setSyncScope(event.target.value)}
+        />
+        <Button
+          data-testid="offline-upload-submit"
+          disabled={createUpload.isPending || uploadMissingFields.length > 0}
+          type="button"
+          onClick={submitUpload}
+        >
+          <UploadCloudIcon data-icon="inline-start" />
+          업로드
+        </Button>
+        {uploadMissingFields.length > 0 ? (
+          <span className="text-xs text-muted-foreground">
+            입력 필요: {uploadMissingFields.join(", ")}
+          </span>
+        ) : null}
+        {createUpload.data ? (
+          <Alert>
+            <AlertTitle>업로드 완료</AlertTitle>
+            <AlertDescription>
+              {shortId(createUpload.data.data.upload_id, 18)} ·{" "}
+              {statusLabel(createUpload.data.data.status)} ·{" "}
+              {formatBytes(createUpload.data.data.byte_size)}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {createUpload.isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>업로드 실패</AlertTitle>
+            <AlertDescription>{createUpload.error.message}</AlertDescription>
+          </Alert>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function useOfflineUploadListController() {
+  const [status, setStatus] = useState<OfflineUploadStatus | "all">("uploaded");
+  const [providerFilter, setProviderFilter] = useState("");
+  const [datasetFilter, setDatasetFilter] = useState("");
+  const [selectedUploadId, setSelectedUploadId] = useState<string | null>(null);
+  const [mapping, setMapping] =
+    useState<OfflineUploadColumnMapping>(defaultColumnMapping);
+
+  const uploadsParams = useMemo(
+    () => ({
+      status: status === "all" ? undefined : status,
+      provider: providerFilter.trim() || undefined,
+      dataset_key: datasetFilter.trim() || undefined,
+      page_size: 100,
+    }),
+    [datasetFilter, providerFilter, status],
+  );
+  const uploads = useOfflineUploads(uploadsParams);
+  const selectedUpload = useOfflineUpload(selectedUploadId);
   const launchLoad = useLaunchOfflineUploadLoadMutation();
   const deleteUpload = useDeleteOfflineUploadMutation();
 
@@ -734,25 +827,47 @@ export function OfflineUploadsClient() {
     [launchLoad, deleteUpload, selectedUploadId],
   );
 
-  const submitUpload = () => {
-    if (file === null) {
-      return;
-    }
-    createUpload.mutate(
-      {
-        file,
-        provider,
-        datasetKey,
-        syncScope,
-      },
-      {
-        onSuccess: (data) => {
-          setSelectedUploadId(data.data.upload_id);
-        },
-      },
-    );
+  return {
+    datasetFilter,
+    deleteUpload,
+    launchLoad,
+    mapping,
+    providerFilter,
+    selected,
+    selectedUpload,
+    selectedUploadId,
+    setDatasetFilter,
+    setMapping,
+    setProviderFilter,
+    setSelectedUploadId,
+    setStatus,
+    status,
+    uploadColumns,
+    uploadItems,
+    uploads,
   };
+}
 
+export function OfflineUploadsClient() {
+  const {
+  datasetFilter,
+  deleteUpload,
+  launchLoad,
+  mapping,
+  providerFilter,
+  selected,
+  selectedUpload,
+  selectedUploadId,
+  setDatasetFilter,
+  setMapping,
+  setProviderFilter,
+  setSelectedUploadId,
+  setStatus,
+  status,
+  uploadColumns,
+  uploadItems,
+  uploads,
+  } = useOfflineUploadListController();
   return (
     <AdminShell
       actions={
@@ -771,89 +886,7 @@ export function OfflineUploadsClient() {
     >
       <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
         <div className="flex flex-col gap-4">
-          <div className="rounded-lg border bg-background p-4">
-            <div className="mb-4">
-              <div className="font-medium">파일 업로드</div>
-              <div className="text-sm text-muted-foreground">
-                JSON/JSONL FeatureBundle, CSV/TSV tabular 원본
-              </div>
-            </div>
-            <div className="flex flex-col gap-3">
-              <FormField
-                data-testid="offline-upload-file-input"
-                label="파일"
-                type="file"
-                accept=".json,.jsonl,.ndjson,.csv,.tsv,application/json,application/x-ndjson,text/csv,text/tab-separated-values"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-              />
-              <FormField
-                label="provider"
-                list="offline-upload-provider-options"
-                placeholder="provider"
-                value={provider}
-                onChange={(event) => setProvider(event.target.value)}
-              />
-              <datalist id="offline-upload-provider-options">
-                {providerOptions.map((item) => (
-                  <option key={item} value={item} />
-                ))}
-              </datalist>
-              <FormField
-                label="dataset key"
-                list="offline-upload-dataset-options"
-                placeholder="dataset_key"
-                value={datasetKey}
-                onChange={(event) => setDatasetKey(event.target.value)}
-              />
-              <datalist id="offline-upload-dataset-options">
-                {datasetOptions.map((item) => (
-                  <option key={item} value={item} />
-                ))}
-              </datalist>
-              <FormField
-                label="sync scope"
-                placeholder="sync_scope"
-                value={syncScope}
-                onChange={(event) => setSyncScope(event.target.value)}
-              />
-              <Button
-                data-testid="offline-upload-submit"
-                disabled={
-                  createUpload.isPending ||
-                  file === null ||
-                  provider.trim().length === 0 ||
-                  datasetKey.trim().length === 0 ||
-                  syncScope.trim().length === 0
-                }
-                type="button"
-                onClick={submitUpload}
-              >
-                <UploadCloudIcon data-icon="inline-start" />
-                업로드
-              </Button>
-              {uploadMissingFields.length > 0 ? (
-                <span className="text-xs text-muted-foreground">
-                  입력 필요: {uploadMissingFields.join(", ")}
-                </span>
-              ) : null}
-              {createUpload.data ? (
-                <Alert>
-                  <AlertTitle>업로드 완료</AlertTitle>
-                  <AlertDescription>
-                    {shortId(createUpload.data.data.upload_id, 18)} ·{" "}
-                    {statusLabel(createUpload.data.data.status)} ·{" "}
-                    {formatBytes(createUpload.data.data.byte_size)}
-                  </AlertDescription>
-                </Alert>
-              ) : null}
-              {createUpload.isError ? (
-                <Alert variant="destructive">
-                  <AlertTitle>업로드 실패</AlertTitle>
-                  <AlertDescription>{createUpload.error.message}</AlertDescription>
-                </Alert>
-              ) : null}
-            </div>
-          </div>
+          <UploadFormPanel onCreated={setSelectedUploadId} />
 
           <UploadDetail upload={selected} />
         </div>

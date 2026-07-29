@@ -136,7 +136,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function CurationCollectionsClient() {
+function useCurationCollectionsClientController() {
   const collectionsQuery = useAdminCurationCollections({ page_size: 500 });
   const themesQuery = useAdminCuratedThemes({ limit: 500 });
   const sourcesQuery = useAdminCuratedSources({ limit: 500 });
@@ -402,24 +402,68 @@ export function CurationCollectionsClient() {
     }
   };
 
+  return {
+    activeCollectionId,
+    addItem,
+    archiveItem,
+    collectionForm,
+    collectionQuery,
+    collections,
+    collectionsQuery,
+    commitCsv,
+    createCollection,
+    csvFile,
+    detail,
+    downloadTemplate,
+    importCsv,
+    importReport,
+    itemForm,
+    localError,
+    message,
+    mutationError,
+    patchItem,
+    previewCsv,
+    removeItem,
+    resolveFeatureIds,
+    resolveItem,
+    setCollectionForm,
+    setCsvFile,
+    setImportReport,
+    setItemForm,
+    setLocalError,
+    setMessage,
+    setResolveFeatureIds,
+    setSelectedCollectionId,
+    sourcesQuery,
+    submitCollection,
+    submitItem,
+    themesQuery,
+  };
+}
+
+function CurationCollectionCommands({
+  collectionForm,
+  commitCsv,
+  createCollection,
+  csvFile,
+  importCsv,
+  importReport,
+  localError,
+  message,
+  mutationError,
+  previewCsv,
+  setCollectionForm,
+  setCsvFile,
+  setImportReport,
+  setLocalError,
+  setMessage,
+  sourcesQuery,
+  submitCollection,
+  themesQuery,
+}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "collectionForm" | "commitCsv" | "createCollection" | "csvFile" | "importCsv" | "importReport" | "localError" | "message" | "mutationError" | "previewCsv" | "setCollectionForm" | "setCsvFile" | "setImportReport" | "setLocalError" | "setMessage" | "sourcesQuery" | "submitCollection" | "themesQuery">) {
   return (
-    <AdminShell
-      actions={
-        <a
-          className={buttonVariants({ variant: "outline" })}
-          download
-          href={CURATION_IMPORT_TEMPLATE_URL}
-          onClick={(event) => void downloadTemplate(event)}
-        >
-          <DownloadIcon data-icon="inline-start" />
-          CSV 양식 다운로드
-        </a>
-      }
-      description="테마·회차별 컬렉션을 만들고 기존 Feature에 여러 큐레이션 정보를 연결합니다."
-      title="큐레이션 관리"
-    >
-      <div className="space-y-6">
-        {localError || mutationError ? (
+    <>
+{localError || mutationError ? (
           <Alert variant="destructive">
             <AlertTitle>작업 실패</AlertTitle>
             <AlertDescription>
@@ -637,9 +681,19 @@ export function CurationCollectionsClient() {
             {importReport ? <ImportReport report={importReport} /> : null}
           </SectionCard>
         </div>
+    </>
+  );
+}
 
-        <div className="grid gap-6 xl:grid-cols-[24rem_minmax(0,1fr)]">
-          <SectionCard
+function CurationSourceCatalog({
+  activeCollectionId,
+  collections,
+  collectionsQuery,
+  setSelectedCollectionId,
+}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "activeCollectionId" | "collections" | "collectionsQuery" | "setSelectedCollectionId">) {
+  return (
+    <>
+<SectionCard
             actions={
               <Button
                 aria-label="컬렉션 목록 새로고침"
@@ -700,23 +754,25 @@ export function CurationCollectionsClient() {
               </div>
             )}
           </SectionCard>
+    </>
+  );
+}
 
-          <SectionCard
-            description={
-              detail
-                ? `${detail.collection.collection_key} · 갱신 ${formatDateTime(detail.collection.updated_at)}`
-                : "왼쪽에서 컬렉션을 선택하세요."
-            }
-            title={detail?.collection.title ?? "컬렉션 상세"}
-          >
-            {collectionQuery.isError ? (
-              <Alert variant="destructive">
-                <AlertTitle>상세 조회 실패</AlertTitle>
-                <AlertDescription>{collectionQuery.error.message}</AlertDescription>
-              </Alert>
-            ) : detail ? (
-              <div className="space-y-6" data-testid="curation-collection-detail">
-                <div className="flex flex-wrap gap-2">
+type CurationCollectionsController = ReturnType<
+  typeof useCurationCollectionsClientController
+>;
+type SelectedCurationCollection = NonNullable<
+  CurationCollectionsController["detail"]
+>;
+
+function CurationCollectionSummary({
+  detail,
+}: {
+  detail: SelectedCurationCollection;
+}) {
+  return (
+    <>
+<div className="flex flex-wrap gap-2">
                   <Badge variant={statusVariant(detail.collection.status)}>
                     {detail.collection.status}
                   </Badge>
@@ -786,7 +842,19 @@ export function CurationCollectionsClient() {
                     </dd>
                   </div>
                 </dl>
-                <form
+    </>
+  );
+}
+
+function CurationCollectionEditor({
+  addItem,
+  itemForm,
+  setItemForm,
+  submitItem,
+}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "addItem" | "itemForm" | "setItemForm" | "submitItem">) {
+  return (
+    <>
+<form
                   className="grid gap-4 rounded-xl border p-4 md:grid-cols-2"
                   onSubmit={submitItem}
                 >
@@ -893,8 +961,36 @@ export function CurationCollectionsClient() {
                     </Button>
                   </div>
                 </form>
+    </>
+  );
+}
 
-                {detail.items.length === 0 ? (
+function CurationCollectionTable({
+  archiveItem,
+  detail,
+  patchItem,
+  removeItem,
+  resolveFeatureIds,
+  resolveItem,
+  setResolveFeatureIds,
+}: Omit<
+  Pick<
+    CurationCollectionsController,
+    | "archiveItem"
+    | "detail"
+    | "patchItem"
+    | "removeItem"
+    | "resolveFeatureIds"
+    | "resolveItem"
+    | "setResolveFeatureIds"
+  >,
+  "detail"
+> & {
+  detail: SelectedCurationCollection;
+}) {
+  return (
+    <>
+{detail.items.length === 0 ? (
                   <EmptyState
                     description="위 폼이나 CSV 업로드로 기존 Feature를 연결하세요."
                     title="항목이 없습니다"
@@ -1065,15 +1161,148 @@ export function CurationCollectionsClient() {
                     </TableBody>
                   </Table>
                 )}
+    </>
+  );
+}
+
+function CurationCollectionWorkspace({
+  addItem,
+  archiveItem,
+  collectionQuery,
+  detail,
+  itemForm,
+  patchItem,
+  removeItem,
+  resolveFeatureIds,
+  resolveItem,
+  setItemForm,
+  setResolveFeatureIds,
+  submitItem,
+}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "addItem" | "archiveItem" | "collectionQuery" | "detail" | "itemForm" | "patchItem" | "removeItem" | "resolveFeatureIds" | "resolveItem" | "setItemForm" | "setResolveFeatureIds" | "submitItem">) {
+  return (
+    <>
+<SectionCard
+            description={
+              detail
+                ? `${detail.collection.collection_key} · 갱신 ${formatDateTime(detail.collection.updated_at)}`
+                : "왼쪽에서 컬렉션을 선택하세요."
+            }
+            title={detail?.collection.title ?? "컬렉션 상세"}
+          >
+            {collectionQuery.isError ? (
+              <Alert variant="destructive">
+                <AlertTitle>상세 조회 실패</AlertTitle>
+                <AlertDescription>{collectionQuery.error.message}</AlertDescription>
+              </Alert>
+            ) : detail ? (
+              <div className="space-y-6" data-testid="curation-collection-detail">
+                <CurationCollectionSummary detail={detail} />
+                <CurationCollectionEditor addItem={addItem} itemForm={itemForm} setItemForm={setItemForm} submitItem={submitItem} />
+
+                <CurationCollectionTable archiveItem={archiveItem} detail={detail} patchItem={patchItem} removeItem={removeItem} resolveFeatureIds={resolveFeatureIds} resolveItem={resolveItem} setResolveFeatureIds={setResolveFeatureIds} />
               </div>
             ) : (
               <EmptyState title="컬렉션을 선택하세요" />
             )}
           </SectionCard>
+    </>
+  );
+}
+
+function CurationCollectionCatalog({
+  activeCollectionId,
+  addItem,
+  archiveItem,
+  collectionQuery,
+  collections,
+  collectionsQuery,
+  detail,
+  itemForm,
+  patchItem,
+  removeItem,
+  resolveFeatureIds,
+  resolveItem,
+  setItemForm,
+  setResolveFeatureIds,
+  setSelectedCollectionId,
+  submitItem,
+}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "activeCollectionId" | "addItem" | "archiveItem" | "collectionQuery" | "collections" | "collectionsQuery" | "detail" | "itemForm" | "patchItem" | "removeItem" | "resolveFeatureIds" | "resolveItem" | "setItemForm" | "setResolveFeatureIds" | "setSelectedCollectionId" | "submitItem">) {
+  return (
+    <>
+<div className="grid gap-6 xl:grid-cols-[24rem_minmax(0,1fr)]">
+          <CurationSourceCatalog activeCollectionId={activeCollectionId} collections={collections} collectionsQuery={collectionsQuery} setSelectedCollectionId={setSelectedCollectionId} />
+
+          <CurationCollectionWorkspace addItem={addItem} archiveItem={archiveItem} collectionQuery={collectionQuery} detail={detail} itemForm={itemForm} patchItem={patchItem} removeItem={removeItem} resolveFeatureIds={resolveFeatureIds} resolveItem={resolveItem} setItemForm={setItemForm} setResolveFeatureIds={setResolveFeatureIds} submitItem={submitItem} />
         </div>
+    </>
+  );
+}
+
+function CurationCollectionsClientView({
+  activeCollectionId,
+  addItem,
+  archiveItem,
+  collectionForm,
+  collectionQuery,
+  collections,
+  collectionsQuery,
+  commitCsv,
+  createCollection,
+  csvFile,
+  detail,
+  downloadTemplate,
+  importCsv,
+  importReport,
+  itemForm,
+  localError,
+  message,
+  mutationError,
+  patchItem,
+  previewCsv,
+  removeItem,
+  resolveFeatureIds,
+  resolveItem,
+  setCollectionForm,
+  setCsvFile,
+  setImportReport,
+  setItemForm,
+  setLocalError,
+  setMessage,
+  setResolveFeatureIds,
+  setSelectedCollectionId,
+  sourcesQuery,
+  submitCollection,
+  submitItem,
+  themesQuery,
+}: ReturnType<typeof useCurationCollectionsClientController>) {
+  return (
+    <AdminShell
+      actions={
+        <a
+          className={buttonVariants({ variant: "outline" })}
+          download
+          href={CURATION_IMPORT_TEMPLATE_URL}
+          onClick={(event) => void downloadTemplate(event)}
+        >
+          <DownloadIcon data-icon="inline-start" />
+          CSV 양식 다운로드
+        </a>
+      }
+      description="테마·회차별 컬렉션을 만들고 기존 Feature에 여러 큐레이션 정보를 연결합니다."
+      title="큐레이션 관리"
+    >
+      <div className="space-y-6">
+        <CurationCollectionCommands collectionForm={collectionForm} commitCsv={commitCsv} createCollection={createCollection} csvFile={csvFile} importCsv={importCsv} importReport={importReport} localError={localError} message={message} mutationError={mutationError} previewCsv={previewCsv} setCollectionForm={setCollectionForm} setCsvFile={setCsvFile} setImportReport={setImportReport} setLocalError={setLocalError} setMessage={setMessage} sourcesQuery={sourcesQuery} submitCollection={submitCollection} themesQuery={themesQuery} />
+
+        <CurationCollectionCatalog activeCollectionId={activeCollectionId} addItem={addItem} archiveItem={archiveItem} collectionQuery={collectionQuery} collections={collections} collectionsQuery={collectionsQuery} detail={detail} itemForm={itemForm} patchItem={patchItem} removeItem={removeItem} resolveFeatureIds={resolveFeatureIds} resolveItem={resolveItem} setItemForm={setItemForm} setResolveFeatureIds={setResolveFeatureIds} setSelectedCollectionId={setSelectedCollectionId} submitItem={submitItem} />
       </div>
     </AdminShell>
   );
+}
+
+export function CurationCollectionsClient() {
+  const controller = useCurationCollectionsClientController();
+  return <CurationCollectionsClientView {...controller} />;
 }
 
 function ImportReport({ report }: { report: CurationImportResponse }) {
