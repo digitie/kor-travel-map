@@ -209,6 +209,8 @@ curation에 링크돼 있지 않다**. 초안은 두 가지를 뭉갰다.
 | **기존 ledger에 finding 방출** | **권고** |
 
 결정적 수치: DB 링크 **3,269건 중 `metadata.region` 보유는 112건(3%)** 뿐이다.
+(**이 값은 T-VN-H33 해제 *전* 스냅샷이다.** 해제 후 현재는 3,266건 중 109건 —
+끊은 3행이 모집단에서 빠졌다. 결론은 그대로다.)
 (근거 산출물 [`h33-mislink-2026-07-29.json`](h33-mislink-2026-07-29.json)의 `summary` —
 `db_linked_rows` / `db_region_codeable` / `db_sido_mismatch`. `scripts/h33_mislink_detect.py`로
 prod에서 재현된다. CSV 쪽 불일치는 0건인데, 오링크 3건을 역반영에서 뺐기 때문이다.)

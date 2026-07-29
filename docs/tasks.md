@@ -408,11 +408,32 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   아래 "철회" 참조. 근본 수정은 `T-VN-H36`.
 
   `scripts/h33_unlink_mislinks.py` (dry-run 기본, `--apply`로 쓰기).
-  - **공개 노출 실증** — `/v1/curations/features/{feature_id}`는 public 라우터다.
-    해제 전 남이섬 feature(서울 중구 사무소)에 한국관광100선 **2건**, 청남대 feature
-    (전남 영암)에 **1건**이 붙어 공개 응답에 나왔다. 해제 후 **0건**.
-  - **탐지기 재실행** — DB 링크 시도 불일치 **3건 → 0건**
-    ([after 산출물](reports/h33-mislink-after-2026-07-29.json)).
+  - **노출 실증** — 해제 전 남이섬 feature(서울 중구 사무소)에 한국관광100선 **2건**,
+    청남대 feature(전남 영암)에 **1건**이 붙어 응답에 나왔다.
+    표면은 `/v1/curations/*`이며 **익명 공개가 아니라 `RoutePolicy.PUBLIC_KEYED`** —
+    public API key 보유자에게 열린 표면이라는 한정 아래 읽어야 한다.
+
+    > **🔴 철회 — "해제 후 0건"의 근거가 반증 불가능했다.**
+    > 초안 확인 스크립트는 `/v1/curations/features/{feature_id}`만 호출했는데, 이 엔드포인트는
+    > curation이 없으면 200+빈 배열이 아니라 **404**를 낸다. 스크립트가 `curl -s`로 status를
+    > 버리고 에러 본문을 파싱해 "0건"을 출력했으므로, **존재하지 않는 feature_id를 넣어도
+    > 같은 출력이 나온다**(리뷰 실측). 오타·삭제·401이 전부 "해소됨"으로 읽혔다.
+    > 이 세션에서 반복된 "측정 도구의 산물을 데이터의 성질로 읽기"와 같은 형태다.
+    >
+    > 대체 증거는 `scripts/h33_verify_public_exposure.py`다 — negative control(없는 id)과
+    > 구별되지 않으면 **스스로 경고**하고, 반증 가능한 표면을 근거로 쓴다:
+    > 컬렉션 상세가 200으로 item 110·114건을 돌려주고 그 안의 대상 3건이 `feature_id=null`,
+    > `q=남이섬` 검색은 5 group을 내놓는 **양성 대조**를 가지며 그 안에 오링크 feature가 없다.
+    > 즉 **item은 공개 응답에 그대로 있고 feature 링크만 끊겼다** — 해제이지 삭제가 아니다.
+    > 부수로 e2e 기대값도 확인된다: 공식 19개 컬렉션 public membership 합계 **486 유지**
+    > (`item_count`가 미연결 item도 세므로 unlink가 기대값을 깨지 않는다).
+  - **탐지기 재실행** ([after 산출물](reports/h33-mislink-after-2026-07-29.json)) —
+    `db_linked_rows` **3269→3266**, `db_region_codeable` **112→109**, `db_sido_mismatch` 3→0.
+
+    > **"3→0"만 인용하면 안 된다.** 탐지기 모집단은 `ci.feature_id is not null` inner join이라
+    > **링크를 끊으면 그 행이 모집단에서 빠진다** — 0은 관측이 아니라 정의다(리뷰 지적).
+    > 엉뚱한 행을 끊었어도, item을 지웠어도 0이 나온다. 정보를 가진 숫자는 오히려
+    > `3269→3266`·`112→109`, 즉 **정확히 대상 3행만 빠졌다**는 사실이다.
   - **ledger 방출** — `ops.data_integrity_violations`에 `curation_feature_region_mismatch`
     3건. **`open`이다**(초안은 `resolved`였으나 철회 — 아래). `feature_id` 컬럼은 비우고
     payload에만 남긴다: 이 FK가 `ON DELETE CASCADE`라 문제의 feature를 지우면 "잘못
@@ -438,6 +459,15 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > 지금 당장 되살아나지는 않는다 — prod가 `0063`이라 HEAD의 import SQL이 참조하는 컬럼이
   > 없어 import 자체가 실패한다. **`T-VN-H35`가 마이그레이션을 적용하는 순간 되살아나므로
   > H36이 H35보다 먼저여야 한다.**
+  >
+  > **덧붙인 정정 — 나는 배포되지 않은 코드로 prod 동작을 주장했다.** 위 인용
+  > (`feature_id = EXCLUDED.feature_id`)은 **브랜치 코드**다. 배포 중인 이미지
+  > (`kor-travel-map-api-latest`, revision `c8ed6164`, 2026-07-27)의 `_UPSERT_ITEM_SQL`은
+  > `ON CONFLICT (collection_id, external_item_id, feature_id) WHERE archived_at IS NULL`이고
+  > **SET 절에 `feature_id`가 아예 없다** — 그 코드에서는 재링크가 안 일어난다.
+  > 즉 "지금 prod는 안전하다"는 맞지만 **내가 댄 이유는 prod에 존재하지 않는 코드였다.**
+  > 같은 커밋에서 "머지 ≠ 배포"를 교훈으로 적어 놓고 마이그레이션에만 적용하고
+  > **코드 주장에는 적용하지 않았다**(리뷰 지적).
 
   > **부수 발견 — prod가 마이그레이션 4개 뒤처져 있다.** ledger 방출을 붙이다가
   > `ON CONFLICT`가 두 번 실패했다. 원인은 코드가 아니라 **prod alembic head가
@@ -462,12 +492,24 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0067)**
 
-  prod alembic head `0063_pipeline_root_id` vs 저장소 head. H30A(`0067` dedupe 부분
-  유니크 인덱스)를 포함해 **머지된 마이그레이션이 prod에 반영되지 않았다**. H30A가 주장한
+  prod alembic head `0063_pipeline_root_id` vs 저장소 head `0067_integrity_dedupe_key`
+  (0063→0064→0065→0066→0067 단일 체인, 분기 없음). H30A(`0067` dedupe 부분 유니크 인덱스)를
+  포함해 **머지된 마이그레이션이 prod에 반영되지 않았다**. H30A가 주장한
   dedupe·`/admin/issues` 접기는 현재 prod에서 성립하지 않는다.
-  할 일: 0064~0067 각각의 내용·위험 평가 → 적용 순서 확정 → 적용 → dedupe 인덱스 실측 확인.
+
+  > **⚠ 마이그레이션만 올리면 안 된다 — 이미지도 함께 올려야 한다.**
+  > prod는 "DB만 뒤처진 불일치"가 아니라 **코드·스키마가 일관되게 0063에 고정된 상태**다
+  > (배포 이미지 revision `c8ed6164`). 벌어진 간극은 DB↔코드가 아니라 **저장소↔배포**다.
+  > 특히 `0065`는 `uq_curation_items_active_identity`(partial, `WHERE archived_at IS NULL`)를
+  > drop하고 partial이 아닌 `uq_curation_items_identity`를 만드는데, **지금 도는 이미지의
+  > upsert는 `ON CONFLICT (…) WHERE archived_at IS NULL`을 명시**하므로 이미지를 둔 채
+  > 마이그레이션만 적용하면 arbiter 추론이 실패해 curation import·admin item 쓰기가 깨진다.
+  > `0065`에는 중복 정리용 `DELETE FROM feature.curation_items`도 들어 있다.
+
+  할 일: 0064~0067 각각의 내용·위험 평가 → **마이그레이션과 이미지 배포의 순서·원자성 확정**
+  → 적용 → dedupe 인덱스 실측 확인.
   **머지 = 배포가 아니라는 점을 문서에도 반영한다** — H30A 완료 기록이 prod 상태를
-  주장하는 것으로 읽히지 않게.
+  주장하는 것으로 읽히지 않게. (H36이 이 task보다 **먼저**다.)
 
   <details><summary>원래 정의 (완료 전)</summary>
 
@@ -498,10 +540,15 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   </details>
 
-  **남는 커버리지 한계**(고친 3건이 전부라는 뜻이 아니다): `region`이 있는 링크만 본다
-  (3,269건 중 112건, 3%). `sido_code`가 NULL이면 건너뛰고, `features`와 inner join이라
-  **존재하지 않는 feature를 가리키는 링크는 세지 않는다**. 시도는 맞고 시군구만 다른
-  오링크도 이 축으로는 안 잡힌다. "0건"은 부재의 증명이 아니다.
+  **남는 커버리지 한계**(고친 3건이 전부라는 뜻이 아니다): `region`이 있는 링크만 본다 —
+  해제 후 기준 **3,266건 중 109건(3.3%)**. 즉 **96.7%인 3,157행은 이 축으로 아예 검사되지
+  않는다.** 시도는 맞고 시군구만 다른 오링크도 안 잡히고, `sido_code`가 NULL인 2건은
+  건너뛴다. "0건"은 부재의 증명이 아니다.
+
+  > 초안은 여기에 "존재하지 않는 feature를 가리키는 링크는 세지 않는다"도 한계로 적었으나
+  > **뺐다** — `curation_items_feature_id_fkey`가 `ON DELETE SET NULL`이라 그런 행은 애초에
+  > 생길 수 없고 prod 실측도 0건이다(리뷰 지적). 존재할 수 없는 위험을 한계 목록에 얹으면
+  > 불확실성의 모양이 실제와 달라진다.
 
 - [ ] T-VN-H31 — **등대 공급원 부재 해소 (H25A 파생, 전제 재확인됨)**
 
