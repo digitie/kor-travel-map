@@ -369,7 +369,9 @@ async def upsert_integrity_finding(
     )
     if not dedupe_key.strip():
         raise ValueError("dedupe_key는 비어 있을 수 없다.")
-    merged = {**(payload or {}), "dedupe_key": dedupe_key}
+    # 첫 삽입에도 occurrence_count를 둔다. 없으면 1회차 행만 이 키가 비어 있어
+    # 소비자가 "없음"과 "1회"를 구분하지 못한다(ON CONFLICT 쪽 COALESCE와 대칭).
+    merged = {**(payload or {}), "dedupe_key": dedupe_key, "occurrence_count": 1}
     row = (
         await session.execute(
             text(_UPSERT_FINDING_SQL),

@@ -26,7 +26,7 @@ barrier로 직렬화한다.
     [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
     [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
     [x] `T-VN-H25A`(미연결 membership 증거·전제 정정) →
-    [ ] `T-VN-H30A/B/C`(H28 후속 — 관측 durable화·실적재 검증·타 provider 확대) →
+    [x] `T-VN-H30A/B/C`(관측 durable화·실적재 검증·MOIS 무장 — 한 PR) →
     [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
@@ -83,7 +83,7 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(현 head `0066_curation_component_identity`). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(현 head `0067_integrity_dedupe_key`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
@@ -230,36 +230,29 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   gitignored runbook에서 결선한다. quiet 상태를 heartbeat 두 주기 이상 유지해 같은 ops-live
   socket이 재연결 없이 유지되는지 브라우저와 proxy metric 양쪽에서 확인한 뒤 #819를 닫는다.
 
-### T-VN-H30 — 주소 검증 관측 durable화·회복 실적재 검증 (H28 후속)
+### T-VN-H30 — 주소 검증 관측 durable화·회복 실적재 검증 (H28 후속, 완료)
 
-T-VN-H28A/B(#673)에서 규칙 교체와 영구 손실 차단은 끝났으나, 적대 리뷰 2명이 지적한
-관측·검증 항목 세 가지는 범위 밖으로 분리했다(사용자 지시 2026-07-29). H28 브랜치의
-근거는 `docs/reports/concierge-address-mismatch-evidence-2026-07-29.md`.
+- [x] T-VN-H30A — **검증 finding을 `ops.data_integrity_violations`에 durable 기록**
 
-- [ ] T-VN-H30A — **주소 검증 issue를 `ops.data_integrity_violations`에 durable 기록**
+  migration `0067_integrity_dedupe_key`(열린 이슈 한정 부분 unique index) +
+  `upsert_integrity_finding()` + `record_address_validation_findings()`.
+  `feature_id`/`source_record_key`는 FK라 **적재된 대상에만** 연결하고 drop된 행은 payload로만
+  나른다. 격리 clone 실증: finding 106건 기록, 재실행에도 106 유지(dedupe 동작).
+  `/admin/issues`는 `violation_type`에 allowlist가 없어 신규 type이 그대로 노출된다(확인함).
 
-  현재 검증 결과는 Dagster run metadata에만 남아 run이 사라지면 증거도 사라진다.
-  `docs/architecture/data-model.md`는 `provider_address_*`/`admin_code_stale_*`를 이미
-  해당 테이블 row type으로 광고하지만 dagster 패키지에서 `integrity_violation_repo`를
-  호출하는 경로가 **0건**이다. dedupe key로 중복 누적을 막는 upsert 경로와 alembic
-  migration을 추가하고 `/admin/issues`에서 보이는지까지 확인한다. 기존 metadata 키는
-  이름을 바꾸지 않는다.
+- [x] T-VN-H30B — **회복을 실제 적재로 검증**
 
-- [ ] T-VN-H30B — **회복을 실제 적재로 검증**
+  `load_feature_bundles_for_dagster`를 격리 clone에 실제로 태웠다 — bundles 1,477,
+  `source_records` 2000→2458, 2회차 insert 0(멱등). 배포 컨테이너 2곳의
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_CURSOR`가 **미설정**임을 확인해 H28의
+  "자동 회복" 논거(기본값 근거였던 것)를 배포값으로 실증했다.
 
-  H28의 "1,477건 전량 적재"는 `load_feature_bundles_for_dagster`를 거치지 않은 validation
-  summary 산술이다. 격리 DB에 실제로 적재해 before/after row count로 회복을 확인한다.
-  동시에 배포 환경의 `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_CURSOR`가 실제로
-  비어 있는지 확인한다 — H28의 "자동 회복" 논거는 기본값이 `None`이라는 코드 근거이지
-  배포값 확인이 아니다.
+- [x] T-VN-H30C — **MOIS `AdminEvidence` 무장**
 
-- [ ] T-VN-H30C — **타 provider `AdminEvidence` 채움 + staleness 축 확대**
-
-  독립 축(provider 텍스트)은 `Address.sigungu_name` 기반이라 이미 15개 provider 전부에
-  적용되지만, staleness 축(`AdminEvidence`)은 kor-travel-concierge만 채운다. payload에
-  법정동 계열 코드를 싣는 provider를 조사해 확대하고, 채우지 않은 provider가 `unarmed`로
-  집계되는 현 상태가 의도된 것임을 문서로 고정한다. provider 고유 코드(VisitKorea
-  `areaCode` 등)는 넣지 않는다.
+  MOIS는 payload에 `legal_dong_code`가 있으면 역지오코딩을 호출하지 않아 staleness 대조가
+  성립하지 않는다. 그 사실을 `claim_only`로 드러내 `unarmed`(미계측)와 구분한다 — 977k
+  레코드에 reverse를 강제하지 않는다. 나머지 provider는 payload 법정동코드가 없어 무장 대상이
+  아니며, 독립 축(provider 텍스트)은 이미 `Address.sigungu_name` 기반으로 전 provider 적용된다.
 
 ### T-VN-H25 — 공식 curation 미연결 membership 해소
 
