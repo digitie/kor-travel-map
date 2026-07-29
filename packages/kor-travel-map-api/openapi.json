@@ -3730,6 +3730,11 @@
             "title": "Issue Id",
             "type": "string"
           },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -3793,7 +3798,8 @@
           "message",
           "payload",
           "status",
-          "detected_at"
+          "detected_at",
+          "last_seen_at"
         ],
         "title": "AdminIssueRecord",
         "type": "object"
@@ -15694,6 +15700,11 @@
             "title": "Issue Id",
             "type": "string"
           },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -15757,7 +15768,8 @@
           "message",
           "payload",
           "status",
-          "detected_at"
+          "detected_at",
+          "last_seen_at"
         ],
         "title": "OpsIntegrityIssueRecord",
         "type": "object"
