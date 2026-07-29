@@ -41,6 +41,7 @@ function makeIssue(
     detected_at: MOCK_NOW,
     feature_id: FEATURE_ID,
     issue_id: ISSUE_ID,
+    last_seen_at: MOCK_NOW,
     message: "주소를 확인할 수 없습니다.",
     payload: { rule: "address-required" },
     provider: "python-kma-api",

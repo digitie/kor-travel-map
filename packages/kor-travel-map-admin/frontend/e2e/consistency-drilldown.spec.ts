@@ -103,6 +103,7 @@ function makeIntegrityIssue(
     detected_at: MOCK_NOW,
     feature_id: null,
     issue_id: "issue-aaaaaaaa-0001",
+    last_seen_at: MOCK_NOW,
     message: "default issue message",
     payload: {},
     provider: null,

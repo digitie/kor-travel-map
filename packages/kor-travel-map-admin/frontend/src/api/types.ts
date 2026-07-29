@@ -3468,6 +3468,11 @@ export interface components {
             feature_id?: string | null;
             /** Issue Id */
             issue_id: string;
+            /**
+             * Last Seen At
+             * Format: date-time
+             */
+            last_seen_at: string;
             /** Message */
             message: string;
             /** Payload */
@@ -7686,6 +7691,11 @@ export interface components {
             feature_id?: string | null;
             /** Issue Id */
             issue_id: string;
+            /**
+             * Last Seen At
+             * Format: date-time
+             */
+            last_seen_at: string;
             /** Message */
             message: string;
             /** Payload */
