@@ -11,6 +11,25 @@ import { frontendBuildInputs } from "../../../../scripts/frontend-build-inputs.m
 const checkpoints = new Set(["A", "B", "C", "D"]);
 const [checkpoint, ...playwrightArgs] = process.argv.slice(2);
 const repoRoot = path.resolve(process.cwd(), "../../..");
+const playwrightEnvironment = {};
+for (const name of [
+  "CI",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LOGNAME",
+  "PATH",
+  "PLAYWRIGHT_BROWSERS_PATH",
+  "SHELL",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "TZ",
+  "USER",
+]) {
+  const value = process.env[name];
+  if (value !== undefined) playwrightEnvironment[name] = value;
+}
 
 if (!checkpoint || !checkpoints.has(checkpoint)) {
   console.error(
@@ -599,7 +618,7 @@ try {
     ],
     {
       env: {
-        ...process.env,
+        ...playwrightEnvironment,
         MOCKED_E2E_CHECKPOINT: checkpoint,
         MOCKED_E2E_REVISION: revision,
         MOCKED_E2E_VERIFIED_REVISION: headRevision,

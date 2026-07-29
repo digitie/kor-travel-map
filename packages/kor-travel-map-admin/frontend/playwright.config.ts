@@ -32,7 +32,7 @@ function mockedProxy() {
     server: proxyUrl.origin,
     // Chromium proxy bypass는 host:port를 지원한다. self-owned frontend의 exact
     // loopback port만 직접 허용하고 다른 local/external HTTP·WS는 deny proxy로 보낸다.
-    bypass: allowedUrl.host,
+    bypass: `<-loopback>,${allowedUrl.host}`,
   };
 }
 

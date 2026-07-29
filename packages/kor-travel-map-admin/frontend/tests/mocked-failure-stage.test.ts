@@ -88,7 +88,13 @@ describe("mocked checkpoint isolation", () => {
     expect(runnerSource).toContain("frontendBuildInputs(isolatedBuildEnvironment)");
     expect(runnerSource).toContain("const denyProxyUrl = await startDenyProxy()");
     expect(runnerSource).toContain("if (deniedNetworkAttempts !== 0)");
+    expect(runnerSource).not.toContain("...process.env");
+    expect(runnerSource).not.toContain(
+      "PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK",
+    );
     expect(configSource).toContain("proxy: mockedProxy()");
-    expect(configSource).toContain("bypass: allowedUrl.host");
+    expect(configSource).toContain(
+      "bypass: `<-loopback>,${allowedUrl.host}`",
+    );
   });
 });

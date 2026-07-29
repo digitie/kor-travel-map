@@ -592,6 +592,69 @@ def test_checkpoint_rejects_source_drift_after_restore(tmp_path: Path) -> None:
     assert "원본 clone snapshot" in completed.stderr
 
 
+def test_legacy_v2_checkpoint_is_validated_and_promoted_to_v3(
+    tmp_path: Path,
+) -> None:
+    snapshot = tmp_path / "snapshot.json"
+    checkpoint = tmp_path / "checkpoint.json"
+    _write_snapshot(snapshot, total=120)
+    _run_helper(
+        "write-checkpoint",
+        "--dump-filename",
+        _DUMP_FILENAME,
+        "--dump-sha256",
+        _DUMP_SHA256,
+        "--dump-size",
+        "1024",
+        "--final-snapshot",
+        str(snapshot),
+        "--path",
+        str(checkpoint),
+        "--restored-snapshot",
+        str(snapshot),
+        "--snapshot",
+        str(snapshot),
+    )
+    payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+    payload.pop("source_stability")
+    payload.pop("write_quiescence")
+    payload["version"] = 2
+    unsigned = {
+        key: value for key, value in payload.items() if key != "checkpoint_sha256"
+    }
+    payload["checkpoint_sha256"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    checkpoint.write_text(json.dumps(payload), encoding="utf-8")
+
+    version_before = _run_helper(
+        "read-checkpoint",
+        "--checkpoint",
+        str(checkpoint),
+        "--field",
+        "version",
+    )
+    _run_helper(
+        "promote-checkpoint",
+        "--checkpoint",
+        str(checkpoint),
+        "--final-snapshot",
+        str(snapshot),
+        "--path",
+        str(checkpoint),
+    )
+    promoted = json.loads(checkpoint.read_text(encoding="utf-8"))
+
+    assert version_before.stdout.strip() == "2"
+    assert promoted["version"] == 3
+    assert promoted["source_stability"]["verified"] is True
+    assert promoted["write_quiescence"] == {
+        "database_default_read_only": True,
+        "relation_share_locks": True,
+        "verified": True,
+    }
+
+
 def test_checkpoint_scratch_ownership_is_durable_and_identity_bound(
     tmp_path: Path,
 ) -> None:
@@ -605,6 +668,7 @@ def test_checkpoint_scratch_ownership_is_durable_and_identity_bound(
         str(state),
     )
     database = f"ktm_checkpoint_{'7' * 24}"
+    owner_role = f"ktm_checkpoint_owner_{'9' * 24}"
     ownership_token = "8" * 64
     _run_helper(
         "write-scratch",
@@ -613,6 +677,8 @@ def test_checkpoint_scratch_ownership_is_durable_and_identity_bound(
         database,
         "--ownership-token",
         ownership_token,
+        "--owner-role",
+        owner_role,
     )
 
     intent_version = _run_helper(
@@ -625,7 +691,14 @@ def test_checkpoint_scratch_ownership_is_durable_and_identity_bound(
         "database_oid",
         check=False,
     )
-    _run_helper("claim-scratch", *identity_args, "--database-oid", "16384")
+    _run_helper(
+        "claim-scratch",
+        *identity_args,
+        "--database-oid",
+        "16384",
+        "--owner-role-oid",
+        "16385",
+    )
     observed_database = _run_helper(
         "read-scratch", *identity_args, "--field", "database"
     )
@@ -634,6 +707,15 @@ def test_checkpoint_scratch_ownership_is_durable_and_identity_bound(
     )
     observed_oid = _run_helper(
         "read-scratch", *identity_args, "--field", "database_oid"
+    )
+    observed_role = _run_helper(
+        "read-scratch", *identity_args, "--field", "owner_role"
+    )
+    observed_role_oid = _run_helper(
+        "read-scratch", *identity_args, "--field", "owner_role_oid"
+    )
+    claimed_version = _run_helper(
+        "read-scratch", *identity_args, "--field", "version"
     )
     rejected = _run_helper(
         "read-scratch",
@@ -649,11 +731,58 @@ def test_checkpoint_scratch_ownership_is_durable_and_identity_bound(
     )
     _run_helper("clear-scratch", *identity_args)
 
-    assert intent_version.stdout.strip() == "2"
+    assert intent_version.stdout.strip() == "4"
     assert unclaimed_oid.returncode != 0
     assert observed_database.stdout.strip() == database
     assert observed_token.stdout.strip() == ownership_token
     assert observed_oid.stdout.strip() == "16384"
+    assert observed_role.stdout.strip() == owner_role
+    assert observed_role_oid.stdout.strip() == "16385"
+    assert claimed_version.stdout.strip() == "5"
+    assert rejected.returncode != 0
+    assert not state.exists()
+
+
+def test_checkpoint_quiescence_state_is_durable_and_identity_bound(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "quiescence.json"
+    identity_args = (
+        "--clone-container-sha256",
+        _CONTAINER_SHA256,
+        "--clone-system-identifier-sha256",
+        _SYSTEM_SHA256,
+        "--path",
+        str(state),
+    )
+    _run_helper(
+        "write-quiescence",
+        *identity_args,
+        "--database",
+        "kor_travel_map_clone",
+    )
+    database = _run_helper(
+        "read-quiescence", *identity_args, "--field", "database"
+    )
+    setting = _run_helper(
+        "read-quiescence", *identity_args, "--field", "setting"
+    )
+    rejected = _run_helper(
+        "read-quiescence",
+        "--clone-container-sha256",
+        "0" * 64,
+        "--clone-system-identifier-sha256",
+        _SYSTEM_SHA256,
+        "--path",
+        str(state),
+        "--field",
+        "database",
+        check=False,
+    )
+    _run_helper("clear-quiescence", *identity_args)
+
+    assert database.stdout.strip() == "kor_travel_map_clone"
+    assert setting.stdout.strip() == "default_transaction_read_only=on"
     assert rejected.returncode != 0
     assert not state.exists()
 
@@ -701,8 +830,13 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "--final-snapshot" in source
     assert "start_checkpoint_quiescence" in source
     assert "LOCK TABLE %I.%I IN SHARE MODE" in source
+    assert "default_transaction_read_only = on" in source
+    assert "state_helper write-quiescence" in source
+    assert "state_helper promote-checkpoint" in source
     assert "state_helper write-scratch" in source
     assert "state_helper claim-scratch" in source
+    assert 'CREATE ROLE \\"$VERIFICATION_OWNER_ROLE\\"' in source
+    assert '--owner="$VERIFICATION_OWNER_ROLE"' in source
     assert "shobj_description" in source
     assert "recover_verification_database" in source
     assert "fsync_file_and_directory" in source

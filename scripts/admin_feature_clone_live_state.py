@@ -23,6 +23,10 @@ _CHECKPOINT_DUMP_RE: Final[re.Pattern[str]] = re.compile(
 _SCRATCH_DATABASE_RE: Final[re.Pattern[str]] = re.compile(
     r"^ktm_checkpoint_[0-9a-f]{24}$"
 )
+_SCRATCH_ROLE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^ktm_checkpoint_owner_[0-9a-f]{24}$"
+)
+_DATABASE_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _UTC_TIMESTAMP_RE: Final[re.Pattern[str]] = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$"
 )
@@ -343,7 +347,12 @@ def write_checkpoint(args: argparse.Namespace) -> None:
             "snapshot_sha256": _canonical_sha256(final_snapshot),
             "verified": True,
         },
-        "version": 2,
+        "write_quiescence": {
+            "database_default_read_only": True,
+            "relation_share_locks": True,
+            "verified": True,
+        },
+        "version": 3,
     }
     payload["checkpoint_sha256"] = _canonical_sha256(payload)
     _atomic_json(Path(args.path), payload)
@@ -380,7 +389,8 @@ def _validated_scratch(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "version": 2,
     }
-    if scratch.get("version") == 3:
+    version = scratch.get("version")
+    if version in {3, 5}:
         database_oid = scratch.get("database_oid")
         if (
             not isinstance(database_oid, int)
@@ -390,6 +400,28 @@ def _validated_scratch(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError("checkpoint scratch DB OID가 올바르지 않습니다")
         expected["database_oid"] = database_oid
         expected["version"] = 3
+    if version in {4, 5}:
+        owner_role = scratch.get("owner_role")
+        if not isinstance(owner_role, str):
+            raise RuntimeError("checkpoint scratch DB owner role이 없습니다")
+        expected["owner_role"] = _require_pattern(
+            owner_role,
+            _SCRATCH_ROLE_RE,
+            "checkpoint scratch DB owner role",
+        )
+        expected["version"] = 4
+    if version == 5:
+        owner_role_oid = scratch.get("owner_role_oid")
+        if (
+            not isinstance(owner_role_oid, int)
+            or isinstance(owner_role_oid, bool)
+            or owner_role_oid < 1
+        ):
+            raise RuntimeError("checkpoint scratch DB owner role OID가 올바르지 않습니다")
+        expected["owner_role_oid"] = owner_role_oid
+        expected["version"] = 5
+    if version not in {2, 3, 4, 5}:
+        raise RuntimeError("checkpoint scratch DB ownership version이 올바르지 않습니다")
     if scratch != expected:
         raise RuntimeError("checkpoint scratch DB ownership state가 다릅니다")
     return scratch
@@ -422,7 +454,12 @@ def write_scratch(args: argparse.Namespace) -> None:
                 _SHA256_RE,
                 "checkpoint scratch DB ownership token",
             ),
-            "version": 2,
+            "owner_role": _require_pattern(
+                args.owner_role,
+                _SCRATCH_ROLE_RE,
+                "checkpoint scratch DB owner role",
+            ),
+            "version": 4,
         },
     )
 
@@ -430,18 +467,23 @@ def write_scratch(args: argparse.Namespace) -> None:
 def claim_scratch(args: argparse.Namespace) -> None:
     path = Path(args.path)
     scratch = _validated_scratch(args)
-    if scratch["version"] != 2:
+    if scratch["version"] not in {2, 4}:
         raise RuntimeError("checkpoint scratch DB intent가 이미 claim됐습니다")
     if args.database_oid < 1:
         raise RuntimeError("checkpoint scratch DB OID가 올바르지 않습니다")
-    _atomic_json(
-        path,
-        {
-            **scratch,
-            "database_oid": args.database_oid,
-            "version": 3,
-        },
-    )
+    if scratch["version"] == 4 and (
+        args.owner_role_oid is None or args.owner_role_oid < 1
+    ):
+        raise RuntimeError("checkpoint scratch DB owner role OID가 올바르지 않습니다")
+    payload = {**scratch, "database_oid": args.database_oid}
+    if scratch["version"] == 2:
+        if args.owner_role_oid is not None:
+            raise RuntimeError("legacy checkpoint scratch DB에는 owner role이 없습니다")
+        payload["version"] = 3
+    else:
+        payload["owner_role_oid"] = args.owner_role_oid
+        payload["version"] = 5
+    _atomic_json(path, payload)
 
 
 def read_scratch(args: argparse.Namespace) -> None:
@@ -462,24 +504,112 @@ def clear_scratch(args: argparse.Namespace) -> None:
         os.close(directory)
 
 
+def _validated_quiescence(args: argparse.Namespace) -> dict[str, Any]:
+    state = _load_object(Path(args.path))
+    database = state.get("database")
+    if not isinstance(database, str):
+        raise RuntimeError("checkpoint quiescence DB 이름이 없습니다")
+    expected = {
+        "clone_container_sha256": _require_pattern(
+            args.clone_container_sha256,
+            _SHA256_RE,
+            "quiescence clone container SHA256",
+        ),
+        "clone_system_identifier_sha256": _require_pattern(
+            args.clone_system_identifier_sha256,
+            _SHA256_RE,
+            "quiescence clone system identifier SHA256",
+        ),
+        "database": _require_pattern(
+            database,
+            _DATABASE_RE,
+            "checkpoint quiescence DB 이름",
+        ),
+        "setting": "default_transaction_read_only=on",
+        "version": 1,
+    }
+    if state != expected:
+        raise RuntimeError("checkpoint quiescence state가 다릅니다")
+    return state
+
+
+def write_quiescence(args: argparse.Namespace) -> None:
+    path = Path(args.path)
+    if path.exists() or path.is_symlink():
+        raise RuntimeError("기존 checkpoint quiescence state가 있습니다")
+    _atomic_json(
+        path,
+        {
+            "clone_container_sha256": _require_pattern(
+                args.clone_container_sha256,
+                _SHA256_RE,
+                "quiescence clone container SHA256",
+            ),
+            "clone_system_identifier_sha256": _require_pattern(
+                args.clone_system_identifier_sha256,
+                _SHA256_RE,
+                "quiescence clone system identifier SHA256",
+            ),
+            "database": _require_pattern(
+                args.database,
+                _DATABASE_RE,
+                "checkpoint quiescence DB 이름",
+            ),
+            "setting": "default_transaction_read_only=on",
+            "version": 1,
+        },
+    )
+
+
+def read_quiescence(args: argparse.Namespace) -> None:
+    state = _validated_quiescence(args)
+    print(state[args.field])
+
+
+def clear_quiescence(args: argparse.Namespace) -> None:
+    _validated_quiescence(args)
+    path = Path(args.path)
+    path.unlink()
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def _validated_checkpoint(path: Path) -> dict[str, Any]:
     checkpoint = _load_object(path)
-    if set(checkpoint) != {
+    version = checkpoint.get("version")
+    common_keys = {
         "baseline",
         "checkpoint_sha256",
         "dump",
         "restore_verification",
-        "source_stability",
         "version",
-    }:
+    }
+    version_2_keys = (common_keys, common_keys | {"source_stability"})
+    version_3_keys = common_keys | {
+        "source_stability",
+        "write_quiescence",
+    }
+    fields = set(checkpoint)
+    if version == 2:
+        valid_fields = fields in version_2_keys
+    elif version == 3:
+        valid_fields = fields == version_3_keys
+    else:
+        valid_fields = False
+    if not valid_fields:
         raise RuntimeError("clone checkpoint field가 예상과 다릅니다")
-    if checkpoint.get("version") != 2:
-        raise RuntimeError("clone checkpoint version이 올바르지 않습니다")
     digest = checkpoint.get("checkpoint_sha256")
     if not isinstance(digest, str):
         raise RuntimeError("clone checkpoint digest가 없습니다")
     _require_pattern(digest, _SHA256_RE, "clone checkpoint SHA256")
-    unsigned = {key: value for key, value in checkpoint.items() if key != "checkpoint_sha256"}
+    unsigned = {
+        key: value
+        for key, value in checkpoint.items()
+        if key != "checkpoint_sha256"
+    }
     if digest != _canonical_sha256(unsigned):
         raise RuntimeError("clone checkpoint digest가 일치하지 않습니다")
     dump = checkpoint.get("dump")
@@ -513,14 +643,50 @@ def _validated_checkpoint(path: Path) -> dict[str, Any]:
     ):
         raise RuntimeError("clone checkpoint 복원 검증 provenance가 없습니다")
     source_stability = checkpoint.get("source_stability")
-    if (
-        not isinstance(source_stability, dict)
-        or source_stability.get("verified") is not True
-        or set(source_stability) != {"snapshot_sha256", "verified"}
-        or source_stability.get("snapshot_sha256") != _canonical_sha256(baseline)
-    ):
+    if source_stability is not None:
+        if (
+            not isinstance(source_stability, dict)
+            or source_stability.get("verified") is not True
+            or set(source_stability) != {"snapshot_sha256", "verified"}
+            or source_stability.get("snapshot_sha256") != _canonical_sha256(baseline)
+        ):
+            raise RuntimeError("clone checkpoint 원본 안정성 provenance가 없습니다")
+    elif version == 3:
         raise RuntimeError("clone checkpoint 원본 안정성 provenance가 없습니다")
+    if version == 3 and checkpoint.get("write_quiescence") != {
+        "database_default_read_only": True,
+        "relation_share_locks": True,
+        "verified": True,
+    }:
+        raise RuntimeError("clone checkpoint write quiescence provenance가 없습니다")
     return checkpoint
+
+
+def promote_checkpoint(args: argparse.Namespace) -> None:
+    checkpoint = _validated_checkpoint(Path(args.checkpoint))
+    if checkpoint["version"] != 2:
+        raise RuntimeError("승격 대상 clone checkpoint가 v2가 아닙니다")
+    final_snapshot = _validated_snapshot(Path(args.final_snapshot))
+    baseline = checkpoint["baseline"]
+    if final_snapshot != baseline:
+        raise RuntimeError("승격 시 원본 clone snapshot이 checkpoint baseline과 다릅니다")
+    payload = {
+        "baseline": baseline,
+        "dump": checkpoint["dump"],
+        "restore_verification": checkpoint["restore_verification"],
+        "source_stability": {
+            "snapshot_sha256": _canonical_sha256(final_snapshot),
+            "verified": True,
+        },
+        "write_quiescence": {
+            "database_default_read_only": True,
+            "relation_share_locks": True,
+            "verified": True,
+        },
+        "version": 3,
+    }
+    payload["checkpoint_sha256"] = _canonical_sha256(payload)
+    _atomic_json(Path(args.path), payload)
 
 
 def read_checkpoint(args: argparse.Namespace) -> None:
@@ -531,6 +697,8 @@ def read_checkpoint(args: argparse.Namespace) -> None:
         print(checkpoint["dump"]["filename"])
     elif args.field == "dump_sha256":
         print(checkpoint["dump"]["sha256"])
+    elif args.field == "version":
+        print(checkpoint["version"])
     else:
         print(checkpoint["dump"]["size"])
 
@@ -539,7 +707,7 @@ def read_replaced_checkpoint_dump(args: argparse.Namespace) -> None:
     path = Path(args.checkpoint)
     checkpoint = _load_object(path)
     version = checkpoint.get("version")
-    if version == 2:
+    if version in {2, 3}:
         print(_validated_checkpoint(path)["dump"]["filename"])
         return
     if version != 1 or set(checkpoint) != {
@@ -1134,6 +1302,12 @@ def main() -> None:
     checkpoint.add_argument("--snapshot", required=True)
     checkpoint.set_defaults(handler=write_checkpoint)
 
+    promote = subparsers.add_parser("promote-checkpoint")
+    promote.add_argument("--checkpoint", required=True)
+    promote.add_argument("--final-snapshot", required=True)
+    promote.add_argument("--path", required=True)
+    promote.set_defaults(handler=promote_checkpoint)
+
     for command, handler in (
         ("write-scratch", write_scratch),
         ("claim-scratch", claim_scratch),
@@ -1147,15 +1321,43 @@ def main() -> None:
         if command == "write-scratch":
             scratch.add_argument("--database", required=True)
             scratch.add_argument("--ownership-token", required=True)
+            scratch.add_argument("--owner-role", required=True)
         elif command == "claim-scratch":
             scratch.add_argument("--database-oid", required=True, type=int)
+            scratch.add_argument("--owner-role-oid", type=int)
         elif command == "read-scratch":
             scratch.add_argument(
                 "--field",
-                choices=("database", "database_oid", "ownership_token", "version"),
+                choices=(
+                    "database",
+                    "database_oid",
+                    "owner_role",
+                    "owner_role_oid",
+                    "ownership_token",
+                    "version",
+                ),
                 required=True,
             )
         scratch.set_defaults(handler=handler)
+
+    for command, handler in (
+        ("write-quiescence", write_quiescence),
+        ("read-quiescence", read_quiescence),
+        ("clear-quiescence", clear_quiescence),
+    ):
+        quiescence = subparsers.add_parser(command)
+        quiescence.add_argument("--clone-container-sha256", required=True)
+        quiescence.add_argument("--clone-system-identifier-sha256", required=True)
+        quiescence.add_argument("--path", required=True)
+        if command == "write-quiescence":
+            quiescence.add_argument("--database", required=True)
+        elif command == "read-quiescence":
+            quiescence.add_argument(
+                "--field",
+                choices=("database", "setting", "version"),
+                required=True,
+            )
+        quiescence.set_defaults(handler=handler)
 
     checkpoint_read = subparsers.add_parser("read-checkpoint")
     checkpoint_read.add_argument("--checkpoint", required=True)
@@ -1166,6 +1368,7 @@ def main() -> None:
             "dump_filename",
             "dump_sha256",
             "dump_size",
+            "version",
         ),
         required=True,
     )
