@@ -26,6 +26,7 @@ __all__ = [
     "get_data_integrity_violation",
     "list_data_integrity_violations",
     "set_data_integrity_violation_status",
+    "upsert_integrity_finding",
 ]
 
 _SEVERITIES: Final[frozenset[str]] = frozenset(
@@ -307,3 +308,81 @@ async def list_data_integrity_violations(
         )
     ).all()
     return tuple(_row_to_violation(row) for row in rows)
+
+
+_UPSERT_FINDING_SQL: Final[str] = f"""
+INSERT INTO ops.data_integrity_violations (
+    provider, dataset_key, source_record_key, feature_id, violation_type,
+    severity, message, payload
+) VALUES (
+    :provider, :dataset_key, :source_record_key, :feature_id, :violation_type,
+    :severity, :message, CAST(:payload AS jsonb)
+)
+ON CONFLICT ((payload ->> 'dedupe_key'))
+WHERE status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'
+DO UPDATE SET
+    message = EXCLUDED.message,
+    severity = EXCLUDED.severity,
+    payload = ops.data_integrity_violations.payload
+        || EXCLUDED.payload
+        || jsonb_build_object(
+            'occurrence_count',
+            COALESCE(
+                (ops.data_integrity_violations.payload ->> 'occurrence_count')::bigint,
+                1
+            ) + 1,
+            'last_seen_at', to_jsonb(now())
+        )
+RETURNING {_RETURN_COLUMNS}
+"""
+
+
+async def upsert_integrity_finding(
+    session: AsyncSession,
+    *,
+    dedupe_key: str,
+    violation_type: str,
+    severity: str,
+    message: str,
+    provider: str | None = None,
+    dataset_key: str | None = None,
+    source_record_key: str | None = None,
+    feature_id: str | None = None,
+    payload: Mapping[str, Any] | None = None,
+) -> DataIntegrityViolation:
+    """열린 이슈 1건으로 접히는 finding 기록 (T-VN-H30A). commit은 호출자 책임.
+
+    같은 ``dedupe_key``의 **열린**(open/acknowledged) 이슈가 이미 있으면 새 행을 만들지 않고
+    ``occurrence_count``와 ``last_seen_at``만 올린다. 파이프라인이 매 run 같은 export를 전량
+    재생해도 큐가 부풀지 않는다.
+
+    resolved/ignored로 닫힌 이슈는 부분 unique index 밖이라 이력이 남고, 같은 문제가 재발하면
+    새 행이 생긴다 — 닫은 뒤 재발했다는 사실 자체가 신호이기 때문이다.
+
+    ``feature_id``/``source_record_key``는 FK다. **아직 적재되지 않은 대상에는 넘기지 말고**
+    ``payload``에만 담아야 한다(적재 전 검증 단계에서 drop된 행이 그렇다).
+    """
+    _validate_violation(
+        violation_type=violation_type,
+        severity=severity,
+        message=message,
+    )
+    if not dedupe_key.strip():
+        raise ValueError("dedupe_key는 비어 있을 수 없다.")
+    merged = {**(payload or {}), "dedupe_key": dedupe_key}
+    row = (
+        await session.execute(
+            text(_UPSERT_FINDING_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_record_key": source_record_key,
+                "feature_id": feature_id,
+                "violation_type": violation_type,
+                "severity": severity,
+                "message": message,
+                "payload": json.dumps(merged, ensure_ascii=False),
+            },
+        )
+    ).one()
+    return _row_to_violation(row)

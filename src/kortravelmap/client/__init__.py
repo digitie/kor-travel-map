@@ -36,8 +36,10 @@ ADR 참조
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
@@ -58,6 +60,7 @@ from kortravelmap.enrichment import (
     find_place_phone_candidates,
 )
 from kortravelmap.infra import feature_update_repo as fur_repo
+from kortravelmap.infra.integrity_violation_repo import upsert_integrity_finding
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.batch_dag import (
     BatchDagCancellationWon,
@@ -418,6 +421,31 @@ class FestivalEnrichmentReviewRefreshResult:
             "review_updated": self.review_queue.updated,
             "review_skipped": self.review_queue.skipped,
         }
+
+
+_LOG = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class AddressValidationFinding:
+    """durable하게 남길 주소/좌표 검증 finding 1건 (T-VN-H30A).
+
+    ``linked``가 핵심이다. ``ops.data_integrity_violations``의 ``feature_id``/
+    ``source_record_key``는 **FK**인데 주소 검증은 적재 **전**에 돌아서, drop된 행은 두 대상이
+    아직(또는 영원히) DB에 없다. 그대로 넘기면 FK 위반으로 기록 자체가 실패한다.
+    적재된 대상만 ``linked=True``로 표시하고, 나머지는 id를 ``payload``로만 나른다.
+    """
+
+    dedupe_key: str
+    violation_type: str
+    severity: str
+    message: str
+    provider: str | None = None
+    dataset_key: str | None = None
+    source_record_key: str | None = None
+    feature_id: str | None = None
+    linked: bool = False
+    payload: Mapping[str, Any] = field(default_factory=dict)
 
 
 class AsyncKorTravelMapClient:
@@ -2069,3 +2097,51 @@ class AsyncKorTravelMapClient:
         """
         async with self._session_factory() as session:
             return await gather_status_counts(session)
+
+    async def record_address_validation_findings(
+        self,
+        findings: Sequence[AddressValidationFinding],
+    ) -> int:
+        """주소/좌표 검증 결과를 ``ops.data_integrity_violations``에 durable하게 남긴다.
+
+        T-VN-H30A: 지금까지 검증 결과는 Dagster run metadata에만 있어 **run이 사라지면 증거도
+        사라졌다**. ``/admin/issues``에서도 보이지 않았다. 같은 export를 매 run 전량 재생해도
+        큐가 부풀지 않도록 ``dedupe_key``로 열린 이슈 1건에 접는다.
+
+        ``feature_id``/``source_record_key``는 FK이므로 **적재된 대상에만** 넘긴다. 적재 전
+        단계에서 drop된 행은 두 대상이 DB에 없으므로 id를 payload에만 담아야 한다 — 호출자가
+        ``AddressValidationFinding.linked``로 구분해 준다.
+
+        기록 실패가 적재 결과를 되돌리지 않는다. 관측을 위해 넣은 경로가 파이프라인을 죽이면
+        안 되므로 예외를 로그로 낮추고 기록 건수만 반환한다.
+        """
+        if not findings:
+            return 0
+        recorded = 0
+        try:
+            async with self._session_factory() as session, session.begin():
+                for finding in findings:
+                    await upsert_integrity_finding(
+                        session,
+                        dedupe_key=finding.dedupe_key,
+                        violation_type=finding.violation_type,
+                        severity=finding.severity,
+                        message=finding.message,
+                        provider=finding.provider,
+                        dataset_key=finding.dataset_key,
+                        source_record_key=(
+                            finding.source_record_key if finding.linked else None
+                        ),
+                        feature_id=finding.feature_id if finding.linked else None,
+                        payload=finding.payload,
+                    )
+                    recorded += 1
+        except Exception:  # noqa: BLE001
+            _LOG.exception(
+                "주소 검증 finding 기록 실패 — 적재 결과에는 영향을 주지 않는다 "
+                "(findings=%d, recorded=%d)",
+                len(findings),
+                recorded,
+            )
+            return 0
+        return recorded

@@ -57,6 +57,7 @@ from kortravelmap.core.ids import (
 from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.dto import (
     Address,
+    AdminEvidence,
     Coordinate,
     Feature,
     FeatureBundle,
@@ -768,6 +769,19 @@ async def license_record_to_bundle(
         feature=feature,
         source_record=source_record,
         source_link=source_link,
+        # T-VN-H30C: MOIS는 payload에 legal_dong_code가 있으면 reverse를 **호출하지 않는다**
+        # (위 분기). 따라서 obs 축이 없어 staleness 대조는 성립하지 않는다 — 그 사실을
+        # ``claim_only``로 집계에 드러내는 것이 목적이다. ``unarmed``(미계측)와 구분된다.
+        # reverse를 강제로 부르지는 않는다: 977k 레코드에 대한 호출은 비용이 다른 문제다.
+        admin_evidence=AdminEvidence(
+            obs_code=geo.bjd_code if geo is not None else None,
+            reverse_attempted=geo is not None,
+            claim_code=normalize_bjd_code(record.legal_dong_code),
+            claim_kind=(
+                "bjd" if normalize_bjd_code(record.legal_dong_code) else None
+            ),
+            claim_text=record.road_address or record.lot_address or None,
+        ),
     )
 
 

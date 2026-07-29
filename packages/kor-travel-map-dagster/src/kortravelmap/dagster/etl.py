@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from dagster import Failure
+from kortravelmap.client import AddressValidationFinding
+
 from kortravelmap.dagster.validation import (
     FeatureAddressValidationSummary,
     validate_feature_bundles_address,
@@ -157,8 +159,70 @@ async def load_feature_bundles_for_dagster(
         # silent cap 금지 — drop 모드에서 격리한 row를 메타데이터로 노출한다.
         metadata["address_validation_dropped_count"] = len(dropped_feature_ids)
         metadata["address_validation_dropped_feature_ids"] = list(dropped_feature_ids)
+
+    # T-VN-H30A: run metadata는 run이 사라지면 함께 사라진다. 검증 결과를
+    # ops.data_integrity_violations에 durable하게 남겨 /admin/issues에서 보이게 한다.
+    # **적재 후에** 기록한다 — feature_id/source_record_key가 FK라 적재 전에는 대상이 없다.
+    loaded_ids = {bundle.feature.feature_id for bundle in bundles}
+    findings = _address_validation_findings(
+        validation,
+        provider=provider,
+        dataset_key=dataset_key,
+        loaded_feature_ids=loaded_ids,
+        dropped_feature_ids=frozenset(dropped_feature_ids),
+    )
+    recorded = await client.record_address_validation_findings(findings)
+    metadata["address_validation_findings_recorded"] = recorded
+    if findings and recorded != len(findings):
+        # 기록 실패를 조용히 넘기지 않는다 — 관측 경로가 죽은 것도 관측 대상이다.
+        metadata["address_validation_findings_unrecorded"] = len(findings) - recorded
+
     _add_output_metadata(context, metadata)
     return result
+
+
+def _address_validation_findings(
+    validation: FeatureAddressValidationSummary,
+    *,
+    provider: str,
+    dataset_key: str,
+    loaded_feature_ids: frozenset[str] | set[str],
+    dropped_feature_ids: frozenset[str],
+) -> list[AddressValidationFinding]:
+    """검증 issue → durable finding (T-VN-H30A).
+
+    ``dedupe_key``는 (provider, dataset_key, code, source_record_key)로 만든다 — 같은 레코드의
+    같은 문제는 run을 반복해도 한 행으로 접힌다. ``source_record_key``에 payload hash가 들어
+    있어 provider payload가 바뀌면 새 key가 되고, 그때는 새로 열리는 것이 맞다.
+    """
+    findings: list[AddressValidationFinding] = []
+    for issue in validation.issues:
+        linked = issue.feature_id in loaded_feature_ids
+        findings.append(
+            AddressValidationFinding(
+                dedupe_key=(
+                    f"address_validation:{provider}:{dataset_key}:"
+                    f"{issue.code}:{issue.source_record_key}"
+                ),
+                violation_type=issue.code,
+                severity=issue.severity,
+                message=issue.message,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_record_key=issue.source_record_key,
+                feature_id=issue.feature_id,
+                linked=linked,
+                payload={
+                    "feature_id": issue.feature_id,
+                    "source_record_key": issue.source_record_key,
+                    "provider_address": issue.provider_address,
+                    "bjd_code": issue.bjd_code,
+                    "sigungu_code": issue.sigungu_code,
+                    "dropped": issue.feature_id in dropped_feature_ids,
+                },
+            )
+        )
+    return findings
 
 
 def _merge_validation_summaries(
