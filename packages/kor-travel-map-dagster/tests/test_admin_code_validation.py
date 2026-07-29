@@ -11,6 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 
 import pytest
+from kortravelmap.core.ids import make_source_record_key
 from kortravelmap.dto import (
     Address,
     AdminEvidence,
@@ -66,6 +67,13 @@ def _bundle(
         detail=PlaceDetail(feature_id="f_place_test_0001", place_kind="attraction"),
     )
     record = SourceRecord(
+        source_record_key=make_source_record_key(
+            provider="kor-travel-concierge",
+            dataset_key="kor_travel_concierge_youtube_place_candidates",
+            source_entity_type="candidate",
+            source_entity_id="cand-1",
+            raw_payload_hash="a" * 64,
+        ),
         provider="kor-travel-concierge",
         dataset_key="kor_travel_concierge_youtube_place_candidates",
         source_entity_type="candidate",
