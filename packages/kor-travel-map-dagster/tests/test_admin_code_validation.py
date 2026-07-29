@@ -1,8 +1,18 @@
 """T-VN-H28B — 행정코드 교차검증 규칙.
 
 실측 근거: ``docs/reports/concierge-address-mismatch-evidence-2026-07-29.md``.
-이전 이름-substring 규칙은 1,477 후보 중 380건을 영구 drop했고 **380건 전부 오탐**이었다
-(payload 행정코드 == geo 행정코드, 진짜 불일치 0건).
+이전 이름-substring 규칙은 1,477 후보 중 380건을 영구 drop했다.
+
+**정정** — 초안은 여기에 *"380건 전부 오탐이었다 (payload 행정코드 == geo 행정코드,
+진짜 불일치 0건)"* 라고 적었으나 **그 근거는 무효다**. concierge payload의
+``legal_dong_code``는 **같은 좌표로 같은 geo ``/v2/reverse``를 호출해 만든 캐시**이므로
+둘의 일치는 항상 성립한다 — tautology이고, 좌표가 틀렸을 때도 일치한다.
+철회된 축을 이 테스트의 정당화로 쓰지 않는다.
+
+실제로 유효한 근거는 리포트가 독립 축(provider ``Address.sigungu_name`` 텍스트 대조 +
+정지오코딩)으로 재수립한 것이다: 기존 규칙으로 **좌표 오류가 성립한 건은 0건**이며,
+drop 380건의 분포는 짧은주소 365 / 접미사차 9 / 타시군구 5 / 기타 1이다.
+리포트 자신이 "일반적 의미의 좌표 오류 0건은 아니다"라고 한정한다.
 """
 
 from __future__ import annotations
