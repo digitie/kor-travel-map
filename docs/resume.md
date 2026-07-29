@@ -45,6 +45,16 @@ drop allowlist, token 단위 이름 warning, typed quarantine 보존과
 전환은 폐기하고 scoped `X-KTG-API-Key` 계약으로 정정했다. H28의 일반 좌표 정확도
 과장도 baseline 규칙 재현 범위로 좁혔다.
 
+PR #886 감사에서는 H25A가 current snapshot으로 과거 membership을 단정한 P1을 확인했다.
+현재 unresolved 261건의 과거 link 여부와 과거 158건의 usable 상태는 판정 불가다.
+`source_record_key`는 linked/unresolved 양쪽 모두 0이고 merge history FK는 hard-delete에
+cascade되며 upsert는 오래된 `created_at`을 보존한 채 status/deleted 상태를 바꿀 수 있다.
+합계 차이 8건도 row-level 증거가 아니므로 single repeatable-read `0063` snapshot에서
+legacy collection/item/place group·CSV component/hash·DB Feature ID를 결속한 exact
+manifest로 다시 만든다. 오류를 삼키던
+baseline과 무효 matcher는 제거한다. 재발 방지는 `T-VN-H25C` durable membership audit으로
+분리했고 등대 항목은 provider coverage를 먼저 측정한다.
+
 **다음 한 작업**: Claude PR #886 감사 결과와 exact `origin/main...HEAD` 적대 리뷰 2명을
 반영한 뒤, 같은 최종 SHA로 보존 clone의 실패 지점에서 파괴적 Live를 재개한다. 완료 문서를
 확정하고 PR·CI green·직접 머지한다. 머지 뒤 clone의 migration head·fixture identity·잔여물·

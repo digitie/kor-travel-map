@@ -3,13 +3,14 @@
 - 일시: 2026-07-29
 - 대상 DB: prod `krtour_map` (`select current_database()`로 확인, feature 1,030,508)
 - **읽기 전용** — CSV·DB를 바꾸지 않았다.
-- 재생성: `scripts/h25a_reference_baseline.py`(존재 여부) · `scripts/h25a_decisive.py`(lifecycle·범위 정합)
-  · `scripts/h25a_unlinked_manifest.py`(후보 manifest)
+- 재생성: `scripts/h25a_decisive.py`(단일 repeatable-read read-only snapshot)
+- 기계 판독 증거:
+  [`curation-membership-evidence-2026-07-29.json`](curation-membership-evidence-2026-07-29.json)
 
 > **1차 초안 정정** — 이 리포트의 첫 판은 적대 리뷰 2건에서 여러 근거가 무효로 판정돼 다시 썼다.
 > 무엇이 왜 틀렸는지는 §6에 남긴다. 아래 §1~§5는 정정 후 근거만 담는다.
 
-## 1. task 전제는 재현되지 않는다
+## 1. task 전제는 현재 snapshot에서 재현되지 않는다
 
 전제(`docs/tasks.md` T-VN-H25): *"공식 CSV의 고유 `feature_id` 158개 중 54개가 현재
 `feature.features`에 존재하지 않았다."*
@@ -22,43 +23,51 @@
 | curation이 링크 가능한(usable) 건수 | **158** — `deleted`/`hidden`/soft-delete 0건 |
 | `created_at` 범위 | **2026-06-29 ~ 2026-07-03** |
 
-`created_at`이 전부 **7월 3일 이전**이므로 "전제 측정 이후에 새로 적재돼서 지금은 보이는 것"이라는
-양립 가설도 배제된다. 158개는 측정 시점에도 이미 존재했다.
+현재 158개는 모두 usable하다. 그러나 `created_at`만으로 과거 snapshot의 존재·usable 상태를
+단정하지 않는다. Feature upsert는 `created_at`을 보존하면서 `status`와 `deleted_at`을 바꿀 수
+있다. 따라서 “뒤늦게 신규 생성됐다”는 설명은 지지되지 않지만, 과거 stale 여부는 당시
+snapshot/audit 없이 검증할 수 없다.
 
 **중요**: usable 판정은 curation 코드 경로와 같은 술어를 쓴다 —
 `curation_repo.py`의 item create/patch/commit은 `status NOT IN ('deleted','hidden')`을 요구한다.
 1차 초안은 이 필터 없이 "존재"만 봤는데, merge로 밀려난 loser는 soft-delete되어 그 질의를
 통과하면서도 curation 대상으로는 부재다 — 즉 "stale"의 정의 그 자체였다. 위 표는 좁은 술어로 다시 잰 값이다.
 
-## 2. NULL 261건은 cascade로 지워진 링크가 아니다
+## 2. NULL 261건의 과거 membership은 현재 snapshot으로 판별할 수 없다
 
 `feature.curation_items.feature_id`는 **`ON DELETE SET NULL`**이다. 따라서 "dangling 0건"은
 발견이 아니라 FK 정의의 재진술이고, `feature_id IS NULL`만으로는 *애초에 미연결*과
 *cascade로 지워진 링크*를 구분할 수 없다. 1차 초안은 이를 구분하지 않고 전자로 단정했다.
 
-lifecycle 축을 실제로 조회해 판별했다.
+2차 초안도 현재 snapshot의 세 값을 lifecycle 증거로 잘못 해석했다.
 
-| 확인 | 결과 | 의미 |
+| 확인 | 결과 | 한계 |
 | --- | --- | --- |
-| `ops.feature_merge_history` 총 행 | **0** | merge가 한 번도 기록된 적 없다 |
-| 158개 중 merge loser 이력 | **0** | 밀려난 Feature 없음 |
-| NULL 261건 중 `source_record_key` 보유 | **0** | 지워진 링크가 남길 provenance 흔적 없음 |
+| 현재 `ops.feature_merge_history` 총 행 | **0** | master/loser FK가 모두 `ON DELETE CASCADE`라 hard-delete된 loser의 이력도 함께 사라질 수 있다 |
+| 현재 CSV의 158개 ID 중 loser 이력 | **0** | NULL 261건의 과거 `feature_id`를 모르므로 다른 모집단이다 |
+| unresolved 261건 중 `source_record_key` 보유 | **0** | linked 225건도 **0**이므로 link 이력을 구분하지 못한다 |
 
-세 축 모두 음성이므로 261건은 **미연결이 맞다**. (1차 초안의 결론과 같지만, 이번에는 근거가 있다.)
+현재 확정할 수 있는 사실은 공식 collection의 **현재 unresolved가 261건**이라는 것뿐이다.
+그 261건이 처음부터 미연결이었는지, 과거 link가 삭제돼 NULL이 됐는지는 historical snapshot,
+membership audit 또는 이전 `feature_id`를 보존한 ledger 없이는 복구할 수 없다. 이 리포트는
+과거 원인을 더 이상 단정하지 않는다.
 
-## 3. 269 vs 261 — 같은 모집단이며, DB가 8건 앞서 있다
+## 3. stable identity 대조 — DB만 연결된 8건
 
-공식 collection으로 범위를 좁혀 재측정했다(1차 초안은 전 collection 합계를 CSV와 나란히 놓아
-비교 불가능한 수치를 병치했다).
+공식 collection의 합계만 비교하면 반대 방향 swap과 양립하므로 증거가 아니다.
+측정 대상 prod가 migration `0063_pipeline_root_id`여서 아직 component identity가 없다.
+따라서 legacy `collection_key + source_item_key + place_name` group의 Feature ID multiset으로
+CSV 486행과 DB 486행을 exact 대조했다. 입력 파일 SHA-256, CSV line/component, DB Feature
+ID/status와 group multiplicity를 JSON manifest에 남겼다. DB만 연결된 8행은 모두 1:1 group이다.
 
 | | linked | unresolved | 합 |
 | --- | --- | --- | --- |
 | CSV 486행 | 217 | 269 | 486 |
 | DB(공식 collection 한정) | **225** | **261** | 486 |
 
-collection별 총계가 CSV 파일별 행수와 정확히 일치한다(72 / 110 / 114 / …). 즉 **같은 모집단**이고,
-차이는 **DB에서는 링크됐지만 CSV에는 비어 있는 8건**이다. 이 8건은 H25B에서 CSV로 역반영할
-대상이다 — 현재 문서 어디에도 기록돼 있지 않다.
+exact join 결과는 CSV linked→DB unresolved **0**, 양쪽 linked target 불일치 **0**,
+CSV unresolved→DB linked **8**이다. 따라서 이 8건만 H25B CSV 역반영 대상이다. manifest의
+8행은 세 CSV에 분포하고 각 identity는 CSV/DB 모두 1건이다.
 
 ## 4. 미연결 261건의 분포 — 등대가 지배적이다
 
@@ -70,9 +79,10 @@ collection별 총계가 CSV 파일별 행수와 정확히 일치한다(72 / 110 
 | arboretum-garden-stamp-tour | 28 |
 | heritage-visit-campaign (10 route 합) | 18 |
 
-등대 6개 시즌은 **105개 중 2개만 링크**됐다. 1차 초안은 미연결을 수목원/krforest 적재 범위로
-설명했으나, 등대 103건은 krforest와 무관하며 ADR-034 9단계 provider 순서에 등대를 공급하는
-provider가 없다. 미연결의 지배적 원인은 **등대 데이터 공급원 부재**다.
+등대 6개 시즌은 **105개 중 2개만 링크**됐다. 이는 현재 unresolved의 가장 큰 collection
+분포라는 뜻이다. ADR-034에 등대 전용 provider가 없다는 사실만으로 KHOA/VisitKorea 등 기존
+provider의 공급 범위 부재를 단정할 수 없다. 원인은 H31에서 provider/API/DB coverage와 매칭
+실패를 먼저 측정한다.
 
 ## 5. 후보 등급은 CSV 자체 판정과 대조해야 한다
 
@@ -100,16 +110,22 @@ provider가 없다. 미연결의 지배적 원인은 **등대 데이터 공급�
 | "baf40a04 이전 CSV로도 158/158 → CSV 변경 배제" | 두 리비전의 `feature_id` **집합이 동일**하다. 재실행은 결과가 보장된 공허한 대조였다 |
 | "미연결 269 vs DB 261" | 전 collection 합계와 공식 CSV를 병치한 비교 불가 수치. §3에서 범위를 좁혀 해소 |
 | "none 191건은 실제 부재" | matcher가 괄호·`&` 복합명·포함 방향·`status='active'` 한정에서 실패한다. 269건 중 최소 89건이 이 형태다 |
+| "오래된 `created_at` → 과거에도 usable" | upsert가 `created_at`을 보존하면서 status/deleted 상태를 바꿀 수 있어 과거 snapshot을 증명하지 못한다 |
+| "merge history 0 + provenance 0 → 처음부터 미연결" | history FK는 hard-delete에 cascade되고 provenance는 linked/unresolved 모두 0이라 판별력이 없다 |
+| "합계 8 차이 → DB만 연결된 8건" | 반대 방향 swap과 양립한다. §3의 stable identity exact join으로 교체했다 |
 
 교훈은 T-VN-H28과 같다 — **결론을 내기 전에 그 근거가 독립적으로 유도된 값과 대조되는지,
 그리고 그 조건이 애초에 만족 가능한지를 먼저 확인한다.**
 
 ## 7. H25B로 넘기는 것
 
-1. **stale reference 해소는 대상이 없다.** 전제를 정정해야 한다(§1·§2).
+1. **현재 stale reference 해소 대상은 없다.** 현재 CSV의 고유 `feature_id` 158개는 모두
+   usable하다(§1). 과거 usable 상태와 NULL 261건의 과거 link 상태는 판정 불가다(§2).
 2. **CSV 역반영 8건** — DB에서 링크됐으나 CSV가 비어 있는 항목(§3). 즉시 실행 가능한 유일한
    확정 작업이다.
 3. **매칭 재실행** — CSV의 `feature_match_confidence`(review 183 / unmatched 86)를 기준선으로
    삼고, 괄호·복합명·포함 방향·status 범위를 고친 matcher로 대조해 **차이를 설명**한다.
    자체 수치를 기준으로 삼지 않는다.
-4. **등대 공급원 부재**(§4, 103건)는 curation 매칭이 아니라 provider 적재 범위 문제다. 별도 task.
+4. **등대 coverage 조사**(§4, 103건)는 전용 provider 부재만으로 원인을 확정하지 않는다. 별도 task.
+5. **membership 역사 보존** — link/unlink 이전 ID·행위자·사유를 durable audit로 남겨
+   다음 조사부터 current snapshot으로 과거를 추측하지 않는다. 별도 task.

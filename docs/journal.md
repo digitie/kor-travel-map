@@ -97,6 +97,21 @@ public API key를 `X-KTG-API-Key` header로만 전달한다. `E0100 key` fallbac
 않았다**는 범위로 정정했다. baseline 스크립트도 현재 validator 자기 비교가 아니라 당시
 규칙 버전을 명시적으로 재현한다.
 
+**PR #886 사후 감사 정정**. H25A의 2차 결론도 current snapshot을 역사 증거로 과장했다.
+현재 `ops.feature_merge_history=0`은 master/loser FK가 모두 `ON DELETE CASCADE`라
+“merge가 없었다”를 뜻하지 않는다. `created_at`도 upsert가 보존하면서 status/deleted 상태를
+바꿀 수 있어 과거 usable을 증명하지 않는다. 현재 CSV 158개 ID는 unresolved 261건의 과거
+ID와 다른 모집단이고, `source_record_key`는 linked 225건과 unresolved 261건이 모두 0이라
+판별력이 없다. 따라서 확정 사실은 **현재** 158개가 usable이고 261건이 unresolved라는 것뿐이다.
+과거 상태는 historical snapshot/audit 없이는 모른다.
+
+collection 합계 차이만으로도 “DB만 연결된 8건”을 증명할 수 없다. evidence generator를
+single repeatable-read read-only transaction, schema/count invariant, `0063` legacy
+`collection/item/place` exact group, CSV component·file hash와 정확한 8행 DB Feature ID를 결속하는
+fail-closed manifest로 교체했다. 오류를 삼키던 baseline과 무효 matcher 스크립트는 제거했다.
+재발 방지는 `T-VN-H25C` durable membership audit으로 분리했고, 등대 103건은 공급원 부재
+확정이 아니라 provider/API/DB coverage 조사 대상으로 좁혔다.
+
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25A 공식 curation 미연결 증거·전제 정정
 
 **결론 먼저**. task 전제 *"공식 CSV 고유 `feature_id` 158개 중 54개가 `feature.features`에
