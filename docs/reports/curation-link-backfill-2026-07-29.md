@@ -11,7 +11,8 @@ T-VN-H25A가 집계로 확인한 차이 — CSV `linked 217` vs DB `linked 225` 
 component 행이 `source_item_key`를 공유하므로 단건 조인 대신
 `(collection_key, source_item_key)` 묶음의 **feature_id 집합**을 비교했다.
 
-결과 **DB에만 있는 링크 8행**(고유 feature 6개), **CSV에만 있는 링크 0행**.
+결과 **DB에만 있는 링크 8행**(고유 feature **5개** — 국립세종수목원이 3개 CSV에, 남이섬이 2개에
+걸친다), **CSV에만 있는 링크 0행**.
 
 ## 2. H25A의 권고는 틀렸다 — 8건 중 3건이 오링크다
 
@@ -38,7 +39,14 @@ task 요구가 실제로 값을 한 지점이다.
 
 ## 3. 반영한 것 / 보류한 것
 
-**반영 5행** (`feature_id` 열만 변경):
+> **승인 근거의 강도가 균일하지 않다** — 5행 중 **청풍호 1행만** 정지오코딩이 지역을
+> 확정했다(제천 `43150` 일치). 국립세종수목원(3행)·진해보타닉뮤지엄(1행)은 **정지오코딩
+> 후보가 없어** 이름·시도 정합만으로 받았다. 이는 §2가 기각 근거로 삼은 것보다 약한 기준이다
+> — 기각은 *적극적 모순*(다른 지역을 지목)에 근거했고, 이 4행은 *모순이 없음*에 근거한다.
+> 각 행의 `metadata_json.feature_match_confidence`에 `backfilled-db-verified` /
+> `backfilled-db-review`로 구분해 남겼다.
+
+**반영 5행** (`feature_id` 열과 해당 행의 `metadata_json`만 변경):
 
 | CSV | source_item_key | feature_id |
 | --- | --- | --- |

@@ -13,7 +13,9 @@ H25A matcher의 확인된 결함을 고친다.
   4. ``status='active'`` 한정 — 로더는 ``deleted``/``hidden``만 배제한다.
 
 축은 실제로 존재하는 것만 쓴다 — ``address_hint``는 486행 전부 비어 있으므로
-``metadata_json.region``(118/269 보유)과 ``features.sigungu_code``를 쓴다.
+``metadata_json.region``(**115/264 보유**)을 쓰며, 비교는 ``features.sigungu_code`` 앞 2자리
+(시도코드)와 한다. region 문자열을 주소에 포함시켜 보면 약칭·정식명 차이로 6개 시도가
+통째로 깨진다.
 provider provenance 축은 아직 잇지 않았다 — ``curation_items.source_record_key``가
 미연결 261건에서 **전부 NULL**이라(H25A §2) 조인할 값이 없다. CSV의 ``provider``/
 ``dataset_key``/``source_item_key``는 후보 entry에 그대로 실어 둔다.
@@ -33,6 +35,7 @@ from collections import Counter
 from pathlib import Path
 
 import asyncpg
+from h33_mislink_detect import region_to_code
 
 CSV_DIR = Path(os.environ.get("CSV_DIR", "/workspace/resources/curations"))
 DSN = os.environ["DSN"].replace("+asyncpg", "")
@@ -144,11 +147,16 @@ async def candidates(
         exact = norm(c["name"]) == norm(row["place_name"]) or any(
             norm(c["name"]) == norm(v) for v in name_variants(row["place_name"])
         )
-        region_state = (
-            "unknown"
-            if not region
-            else ("match" if region in (c["address"] or "") else "mismatch")
-        )
+        # 시도는 **코드로** 비교한다. ``region in address``로 하면 약칭(``충북``)이
+        # 정식명(``충청북도``)에 포함되지 않아 충북·충남·전북·전남·경북·경남 6개 시도가
+        # 통째로 mismatch가 된다 — 그 시도에서는 어떤 exact 매칭도 high에 도달할 수 없다.
+        want = region_to_code(region)
+        if not want:
+            region_state = "unknown"
+        elif not c["sigungu_code"]:
+            region_state = "unknown"
+        else:
+            region_state = "match" if c["sigungu_code"][:2] == want else "mismatch"
         c["exact_name"] = exact
         c["region_state"] = region_state
         scored.append(c)

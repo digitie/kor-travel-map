@@ -27,7 +27,8 @@ barrier로 직렬화한다.
     [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
     [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
     [x] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제) →
-    [ ] `T-VN-H33`(curation_items 오링크 정리 — H25B 파생) →
+    [ ] `T-VN-H33`(curation_items 오링크 3건 정리 — H25B 파생) →
+    [ ] `T-VN-H34`(H25A/H25B 미충족 AC 마무리) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
@@ -326,7 +327,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   | 주소 대조 | **미충족** — `address_hint`가 486행 전부 비어 축이 없음. `region`(118/269 보유)은 미반영 | H25B ② |
   | candidate·confidence·근거 manifest 산출 | **미충족** — JSON 미커밋, 리포트 표로 대체 | H25B ② |
 
-- [ ] T-VN-H25B — **CSV 역반영 8건 + 매칭 재실행**
+- [x] T-VN-H25B — **CSV 역반영 5건 + 매칭 재실행** (미충족 AC는 아래 표)
 
   H25A 재정의 결과 실행 가능한 작업은 둘이다.
   1. **CSV 역반영 8건** — DB에서는 링크됐으나 CSV `feature_id`가 비어 있는 항목(H25A §3).
@@ -353,7 +354,32 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   - 다만 개선은 착시다 — 늘어난 후보 대부분이 무의미한 부분일치이고, 등대 103건은 전부
     상호가 `등대`인 가게에 붙었다. `T-VN-H31` 전제는 그대로 유효.
   - `high` 6건에도 오탐(`대관령` → 동명 상점) → **자동 승인 대상 0건**. 264건은 사람 검토 대상.
-  - **미완**: preview/commit·REST/UI 실데이터 검증은 하지 않았다(읽기 전용 범위 유지).
+  **미충족 AC 원장** — `[x]`는 "AC 전부 충족"이 아니라 "역반영·매칭 재실행으로 종결"이다.
+
+  | AC 항목 | 상태 | 이관 |
+  | --- | --- | --- |
+  | CSV 역반영 | 충족 (8→5, 3건은 오링크) | — |
+  | 기준선 대조 + 차이 설명 | 충족 — 교차표를 manifest `summary.baseline_vs_matcher`에 기록 | — |
+  | 주소 축 | **부분** — `region`(115/264)만 사용. `sigungu_code`는 시도코드 비교에만 쓰고 시군구 단위 대조는 미구현 | H25B-후속 |
+  | provider provenance 조인 | **미충족** — `source_record_key`가 미연결 261건에서 전부 NULL이라 조인 대상이 없다. CSV의 `provider`/`dataset_key`는 entry에 싣기만 하고 판정에 쓰지 않았다 | H25B-후속 |
+  | candidate·근거 manifest 커밋 | 충족 — 스크립트 실제 산출물, `candidates_total`로 잘린 수 공개 | — |
+  | linked/unresolved 수치 검증 | 충족 (222/264, manifest sha256 일치) | — |
+  | **preview/commit·REST/UI 실데이터 검증** | **미충족** — 읽기 전용 범위를 유지했다 | H25B-후속 |
+  | 동일 snapshot 고정 | **부분** — DB는 `current_database()`로 기록했으나 정지오코딩 세션은 미기록 | H25B-후속 |
+
+  위 4개 미충족·부분 항목은 **`T-VN-H34`**로 이관한다(아래).
+
+- [ ] T-VN-H34 — **H25A/H25B 미충족 AC 마무리**
+
+  H25A가 H25B로, H25B가 다시 여기로 넘긴 항목들이다. **어느 열린 task도 소유하지 않는 상태를
+  만들지 않기 위해** 명시적으로 모은다.
+  - **주소 축 시군구 단위 대조** — 현재는 시도코드까지만 본다.
+  - **provider provenance** — `curation_items.source_record_key`가 미연결 행에서 전부 NULL이라
+    현 스키마로는 조인 불가. CSV의 `provider`/`dataset_key`/`source_item_key`를 판정에 쓰는
+    설계를 하거나, 불가하다는 결론을 근거와 함께 확정한다.
+  - **preview/commit·REST/UI 실데이터 검증** — 역반영 5건이 실제 화면·API에 반영되는지.
+  - **정지오코딩 세션 고정** — 승인/기각 근거를 재현 가능하게 남긴다
+    (`scripts/h25b_verify_links.py` 신설; 현재는 손으로 친 상수표뿐이다).
 
 - [ ] T-VN-H33 — **curation_items 오링크 3건 정리 (H25B 파생)**
 
