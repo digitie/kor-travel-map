@@ -482,6 +482,54 @@ test.describe("/admin/features/new (mocked routes)", () => {
     await expect(page.getByText("1건")).toBeVisible();
   });
 
+  test("지연된 정지오코딩 후보는 응답 대기 중 수정한 코드를 되돌리지 않는다", async ({
+    page,
+  }) => {
+    let requestCount = 0;
+    let releaseGeocode!: () => void;
+    const geocodeReleased = new Promise<void>((resolve) => {
+      releaseGeocode = resolve;
+    });
+    const geoBody: KorTravelGeoResponse = {
+      status: "ok",
+      candidates: [
+        {
+          match_kind: "road",
+          address: {
+            road_address: "서울특별시 중구 세종대로 110",
+          },
+        },
+      ],
+    };
+    await page.route("**/v2/geocode**", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      requestCount += 1;
+      await geocodeReleased;
+      await fulfillJson(route, geoBody);
+    });
+
+    await page.goto("/admin/features/new");
+    const roadNameCode = page.getByLabel("create road name code");
+    await roadNameCode.fill("111404166007");
+    await page.getByLabel("주소 검색", { exact: true }).fill("세종대로 110");
+    await page.getByRole("button", { name: "정지오코딩" }).click();
+    await expect.poll(() => requestCount).toBe(1);
+
+    await roadNameCode.fill("111404166008");
+    releaseGeocode();
+
+    await expect(
+      page.getByRole("textbox", {
+        name: "create road address",
+        exact: true,
+      }),
+    ).toHaveValue("서울특별시 중구 세종대로 110");
+    await expect(roadNameCode).toHaveValue("111404166008");
+  });
+
   test("역지오코딩 — 유효 좌표에서 POST :12501/v2/reverse 후보 적용", async ({
     page,
   }) => {
