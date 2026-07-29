@@ -434,26 +434,42 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   0064~0068 전부 prod 데이터에서 파괴적 statement가 no-op이거나 가역이고,
   `collection_key` 재작성도 소비자를 깨뜨리지 않는다.
 
+  **배포 역학 실측(2026-07-30)** — 계획이 크게 단순해진다:
+  - **`docker/api-entrypoint.sh:216`이 `alembic upgrade head`를 재시도 루프로 직접 돌린다**
+    (uvicorn 기동 **전**). 즉 **마이그레이션과 새 코드는 이미 원자적**이다 — 새 이미지로
+    API 컨테이너를 recreate하면 그 컨테이너가 스스로 0064~0068을 올리고 나서 서비스한다.
+    내가 걱정한 "새 스키마 + 낡은 코드" 창은 compose가 old를 먼저 정지하는 한 생기지 않는다.
+  - **`docker/dagster-entrypoint.sh`는 마이그레이션을 하지 않는다**(`alembic upgrade` 0 hit).
+    dagster는 스키마를 소비만 하므로 API 뒤에 올린다.
+  - 백업 수단이 실재한다: **`scripts/docker-backup.sh`** — map DB + dagster DB를 받고
+    `KOR_TRAVEL_MAP_BACKUP_ROOT`(기본 `data/backups`)에 `BACKUP_ID`별로 쌓는다.
+    기본값이 `ALLOW_RUNNING=0`이라 정지 상태를 요구한다.
+
   남은 할 일:
-  1. **이미지 빌드** — main 최신(H36 게이트 포함)으로 API/dagster/UI 이미지를 만든다.
-     H36 게이트가 실제로 들어갔는지 **커밋 라벨만 보지 말고** 컨테이너 안에서
-     `_adopted_match` 존재를 확인한다.
-  2. **DB 백업** — `0065`/`0066`의 DML은 downgrade로 복구되지 않는다. 적용 전 필수.
-  3. **적용 순서** — 마이그레이션과 이미지를 **같은 정지 창에서** 전환한다.
-     `0065`가 현행 이미지 upsert의 arbiter partial 인덱스를 drop하므로 그 사이에
-     curation 쓰기가 들어오면 깨진다.
-  4. **적용 후 실증** — dedupe 인덱스 존재 / `last_seen_at` 컬럼 존재 /
-     `alembic_version = 0068` / curation import preview가 3건을 여전히 미연결로 두는지 /
-     concierge materialize 후 적재 1,020 → 1,477 회복.
-     검증은 **반증 가능해야 한다** — `inserted/updated/removed 0`처럼 정상 배포에서도
-     거짓인 기준을 쓰지 않는다(`0066` backfill이 `updated`를 만든다).
+  1. **백업** — `scripts/docker-backup.sh`. `0065`의 52행 재작성·3,530행 UPDATE와 `0066`
+     backfill은 downgrade로 복구되지 않으므로 **이게 유일한 복구 경로**다.
+  2. **이미지 빌드** — main 최신(H36 게이트 포함)으로 API/dagster/UI.
+  3. **H36 게이트가 이미지에 실렸는지 확인** — 커밋 라벨만 보지 말고 컨테이너 안에서
+     `_adopted_match` 존재를 직접 확인한다. 라벨은 빌드 컨텍스트를 증명하지 않는다.
+  4. **API recreate** → entrypoint가 0064~0068을 적용. 그 다음 dagster/UI.
+  5. **적용 후 실증(반증 가능해야 한다)**:
+     - `alembic_version = 0068_integrity_last_seen`
+     - `uq_violations_open_dedupe_key` 인덱스 존재 / `last_seen_at` 컬럼 존재
+       (둘 다 지금은 **없음**이 확인돼 있어 before/after가 갈린다)
+     - curation import **preview**가 오링크 3건을 여전히 미연결로 두는지
+       (H36 게이트 실효 확인. 실패했다면 `resolved_feature_id`가 채워져 값이 달라진다)
+     - concierge materialize 후 적재 **1,020 → 1,477** 회복(#673 종결 조건)
+     - `inserted/updated/removed 0`처럼 **정상 배포에서도 거짓인 기준은 쓰지 않는다**
+       (`0066` backfill이 `updated`를 만든다)
 
   > **⚠ 비가역 지점** — 사람 승인이 필요하다.
   > - `0065`의 `collection_key` 52행 재작성과 `source_updated_at` 3,530행 UPDATE,
   >   `0066`의 `external_component_id` backfill은 **downgrade로 복구되지 않는다**.
   >   백업이 유일한 복구 경로다.
   > - `0064`의 `autocommit_block()`이 트랜잭션을 커밋하므로 **부분 적용 상태가 가능하다**
-  >   (0064만 적용 + `alembic_version`은 0063).
+  >   (0064만 적용 + `alembic_version`은 0063). entrypoint가 실패 시 재시도하므로
+  >   0064 재실행은 가드로 안전하지만, 0065가 계속 실패하면 **컨테이너가 기동하지 못한다**
+  >   (`exit 1`) — 즉 실패는 조용하지 않고 API 다운으로 드러난다.
   > - 이미지 교체는 다운타임을 만든다.
   **머지 = 배포가 아니라는 점을 문서에도 반영한다** — H30A 완료 기록이 prod 상태를
   주장하는 것으로 읽히지 않게. (H36이 이 task보다 **먼저**다.)
