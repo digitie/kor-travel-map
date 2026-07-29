@@ -61,7 +61,7 @@ def _bundle(
         category="02020101",
         coord=coord,
         address=address,
-        detail=PlaceDetail(place_kind="attraction"),
+        detail=PlaceDetail(feature_id="f_place_test_0001", place_kind="attraction"),
     )
     record = SourceRecord(
         provider="kor-travel-concierge",

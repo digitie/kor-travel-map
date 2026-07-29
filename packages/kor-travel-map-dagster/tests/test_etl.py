@@ -292,7 +292,9 @@ async def test_non_allowlisted_error_never_loses_rows(
     # 세 건 모두 적재되고, 아무것도 drop되지 않는다.
     assert client.chunks == [("feature-0", "feature-1", "feature-2")]
     assert result.feature_ids == ("feature-0", "feature-1", "feature-2")
-    assert context.metadata[-1]["address_validation_dropped_count"] == 0
+    # drop이 없으면 격리 metadata 키 자체가 방출되지 않는다.
+    assert "address_validation_dropped_count" not in context.metadata[-1]
+    assert "address_validation_dropped_feature_ids" not in context.metadata[-1]
 
 
 def test_droppable_codes_are_explicit_and_minimal() -> None:
