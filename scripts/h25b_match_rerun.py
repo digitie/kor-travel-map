@@ -132,7 +132,17 @@ async def candidates(
               and length(name) >= 2
             -- 결정적 순서. ORDER BY 없이 LIMIT을 걸면 어떤 15건이 오는지가 plan에 좌우돼
             -- exact 유일성 판정(high 등급의 게이트)이 실행마다 달라진다.
-            order by length(name), feature_id
+            --
+            -- 단, `length(name)` 오름차순으로 자르면 **가장 나쁜 후보가 1등이 된다**.
+            -- 매칭이 양방향 substring이라 `스카`·`포항` 같은 2글자 feature가 그걸 포함하는
+            -- 아무 긴 이름에나 걸리는데, 짧은 순 정렬은 그 쓰레기를 top 후보로 올린다
+            -- (실측: `도째비골 스카이밸리&해랑전망대` → 홍대 `스카`). 등급은 top 후보를
+            -- 보므로 이건 정밀도가 아니라 **정렬이 만든 착시**였다.
+            --
+            -- 한쪽이 다른 쪽을 포함하므로 겹친 길이 = min(두 길이)다. 그 **겹침이 긴 순**으로
+            -- 정렬해 실제로 많이 일치한 후보를 앞에 둔다. 나머지는 결정성용 tie-break.
+            order by least(length(replace(lower(name), ' ', '')), length($1)) desc,
+                     length(name), feature_id
             limit 15
             """,
             v,

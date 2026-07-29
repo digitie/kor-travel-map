@@ -82,11 +82,22 @@ H25A에서 인수한 미충족 AC를 `scripts/h25b_match_rerun.py`로 채웠다.
 | --- | --- |
 | 미연결 (역반영 후) | 264 |
 | **기준선** (CSV `feature_match_confidence`) | review 178 / unmatched 86 |
-| 자체 matcher | high **7** / review 1 / low 255 / none 1 |
+| 자체 matcher | high **2** / review 10 / low 251 / none 1 |
 
-> 초안은 `high 6`이었다. region 비교를 문자열 포함에서 **시도코드**로 고치니 7이 됐다 —
-> 약칭(`충북`)이 정식명(`충청북도`)에 포함되지 않아 6개 시도의 exact 매칭이 통째로
-> `mismatch`로 떨어지고 있었다(리뷰 지적). 교차표는 manifest `summary.baseline_vs_matcher`에 있다.
+> 이 수치는 적대 리뷰 두 라운드를 거쳐 세 번 바뀌었다: `high` 6 → 7 → **2**.
+> - 6→7: region 비교를 문자열 포함에서 **시도코드**로 고쳤다. 약칭(`충북`)이
+>   정식명(`충청북도`)에 포함되지 않아 6개 시도의 exact 매칭이 통째로 `mismatch`였다.
+> - 7→2: **soft-delete된 feature가 후보에 섞여 있었고**(`status='inactive'` + `deleted_at`이라
+>   status만 걸면 안 걸린다 — loader는 `deleted_at IS NULL`도 본다), **후보 조회가 cap에
+>   걸린 행에서 이름 유일성을 주장**하고 있었다(`LIMIT 15`에 `ORDER BY` 없음 → 등급이
+>   실행마다 달라짐). 둘 다 고치니 `대관령` 오탐이 `high`에서 내려갔다.
+>
+> 남은 `high` 2건은 `설악산 국립공원` → `설악산국립공원`(공백 차이),
+> `발왕산(천년주목숲길)` → `천년 주목 숲길`(평창)이다. **그래도 자동 승인하지 않는다.**
+>
+> **후보 pool이 264행 중 208행(79%)에서 cap(15)에 걸렸다.** 그 행들은 이름 유일성을 판정할 수
+> 없어 `high`를 만들지 않으며, entry의 `candidate_pool_capped`로 표시된다.
+> 교차표·커버리지는 manifest `summary`에 있다.
 
 ### H25A의 "191건 실제 부재"는 matcher 산물이었다
 
