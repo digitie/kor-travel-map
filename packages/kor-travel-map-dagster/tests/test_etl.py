@@ -300,9 +300,7 @@ async def test_non_allowlisted_error_never_loses_rows(
 
 def test_droppable_codes_are_explicit_and_minimal() -> None:
     """drop 가능한 code 집합은 명시적이며, 늘리려면 이 테스트가 먼저 깨진다."""
-    assert DROPPABLE_ISSUE_CODES == frozenset(
-        {"reverse_geocode_failed", "missing_address"}
-    )
+    assert set(DROPPABLE_ISSUE_CODES) == {"reverse_geocode_failed", "missing_address"}
     # 이름 축·행정코드 축은 어떤 형태로도 영구 손실을 만들 수 없다.
     for code in (
         "provider_address_mismatch",

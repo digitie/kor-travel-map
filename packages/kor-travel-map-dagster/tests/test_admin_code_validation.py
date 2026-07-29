@@ -30,8 +30,6 @@ from kortravelmap.dagster.validation import (
     validate_feature_bundles_address,
 )
 
-pytestmark = pytest.mark.unit
-
 _FETCHED_AT = "2026-07-29T00:00:00+00:00"
 
 
