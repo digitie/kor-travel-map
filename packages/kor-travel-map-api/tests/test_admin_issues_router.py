@@ -179,6 +179,7 @@ def test_list_issues_passes_filters_and_envelope(
         "total": None,
     }
     assert body["data"]["items"][0]["issue_id"] == _VIOLATION_KEY
+    assert body["data"]["items"][0]["last_seen_at"] == "2026-06-03T00:00:00Z"
 
 
 @pytest.mark.unit

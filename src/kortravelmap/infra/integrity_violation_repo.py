@@ -387,6 +387,13 @@ async def sync_integrity_findings(
         key=lambda finding: str(finding["payload"]["dedupe_key"]),
     )
     for finding in ordered_findings:
+        dedupe_key = str(finding["payload"]["dedupe_key"])
+        if (
+            len(dedupe_key) != 68
+            or not dedupe_key.startswith("av2_")
+            or any(char not in "0123456789abcdef" for char in dedupe_key[4:])
+        ):
+            raise ValueError("finding dedupe_key는 av2_<sha256> 형식이어야 한다.")
         if finding.get("provider") != provider:
             raise ValueError("finding provider가 sync 범위와 다르다.")
         if finding.get("dataset_key") != dataset_key:

@@ -1743,6 +1743,7 @@ def test_consistency_and_issue_lists_pass_filters(
     assert issues.status_code == 200
     assert issues.json()["data"]["items"][0]["issue_id"] == _issue().issue_id
     assert issues.json()["data"]["items"][0]["message"] == "좌표 없음"
+    assert issues.json()["data"]["items"][0]["last_seen_at"] == "2026-06-04T00:00:00Z"
     assert issues.json()["meta"]["page"]["page_size"] == 5
 
 

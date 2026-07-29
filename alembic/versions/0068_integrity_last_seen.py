@@ -36,11 +36,10 @@ def upgrade() -> None:
     op.execute(
         """
         UPDATE ops.data_integrity_violations
-        SET last_seen_at = CASE
-                WHEN payload ? 'last_seen_at'
-                THEN (payload ->> 'last_seen_at')::timestamp AT TIME ZONE 'UTC'
-                ELSE detected_at
-            END,
+        SET last_seen_at = COALESCE(
+                (payload ->> 'last_seen_at')::timestamp AT TIME ZONE 'UTC',
+                detected_at
+            ),
             payload = payload - 'last_seen_at'
         """
     )

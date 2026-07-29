@@ -23,9 +23,8 @@ barrier로 직렬화한다.
     [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
     [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
     [x] `T-VN-H25A`(미연결 membership 증거·전제 정정) →
-    [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
+    [x] `T-VN-H30A`(관측 durable화) + [ ] `T-VN-H30B/C`(실적재·provider 재검증) →
     [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
-    [ ] `T-VN-H25C`(membership 변화 durable audit) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
@@ -69,9 +68,8 @@ barrier로 직렬화한다.
   `origin/main` rebase. PR 하나는 task 하나만 소유.
 - **사용자 명시 동반 감사 예외**: 각 T-VN task의 최종 PR에는 사용자 지시대로 직전 Claude
   Code PR 사후 감사에서 발견한 수정과 그 감사 issue를 함께 넣는다. 이는 새 실행 lane task가
-  아니라 현재 task의 필수 PR 전 gate다. T-VN-48 PR에는 issue #881로 추적한 PR #882~#886
-  감사를 함께 반영한다. PR #887은 사용자 지시로 docs-only rebase만 수행하고 감사에서
-  제외한다.
+  아니라 현재 task의 필수 PR 전 gate다. T-VN-48 PR에는 issue #881의 hidden alias 제거와
+  PR #877 아카이브 복구를 이 예외로 함께 반영한다.
 - 첫 reviewable checkpoint부터 원격 feature branch에 작은 의미 단위로 자주 커밋·push하되,
   PR은 구현·적대 리뷰 반영·실데이터 검증·최종 main rebase를 모두 마친 뒤 **머지 직전**에만
   연다. 실패하면 검증된 직전 checkpoint부터 재개한다.
@@ -149,7 +147,7 @@ barrier로 직렬화한다.
 
 T-VN-48A~C는 최초 273-test baseline의 deterministic drift 89건을
   Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별로 제거했다.
-- [ ] T-VN-48D — 구현과 exact `b35d7cbb` mocked serial/CI-parallel gate는 각각
+- [ ] T-VN-48D — 구현과 exact `45e2161d` mocked serial/CI-parallel gate는 각각
   **274/274 passed, expected failure/flake/skip 0건**으로 끝났다.
   - R1과 양립하는 격리 clone 전용 trusted runner를 추가했다. exact candidate `fe0c956e`의
     본 acceptance 2/2와 recovery-only 2/2, startup migration 없음, cleanup/audit owned
@@ -161,15 +159,6 @@ T-VN-48A~C는 최초 273-test baseline의 deterministic drift 89건을
   - 적대 리뷰 2명 반영, 최신 main rebase 뒤 최종 exact revision의 mocked serial/CI-parallel과
     clone Live 재검증, Claude PR 사후 감사, PR/CI green/merge까지 끝난 뒤에만
     `tasks-done.md`로 옮긴다.
-  - 최종 리뷰 추가 완료 조건: checkpoint publish까지 app table write lock과 원본 final
-    snapshot equality를 유지하고, scratch DB는 무작위 이름·server ownership token·OID가
-    모두 일치할 때만 삭제한다. image cleanup은 실행별 tag만 비강제로 해제하며, mocked
-    browser/runtime은 self-owned internal network와 non-self HTTP/WS deny gate로 격리한다.
-    host 브라우저는 container publish 없이 검증한 내부 IPv4를 loopback 전용 프록시로만
-    연결하고, source digest는 그 격리 build 환경과 같은 입력으로 계산한다.
-  - geo 호출이 `E0100 key`로 fallback하면 결선 오류 503으로, 2xx JSON/schema
-    손상은 provider 오류 502로 보존한다. 기존 v1 checkpoint 교체 실패와 실패 시 검증 dump
-    조기 삭제도 같은 D 완료 범위에서 forward recovery한다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 
@@ -232,52 +221,42 @@ T-VN-48A~C는 최초 273-test baseline의 deterministic drift 89건을
 
 - [x] T-VN-H30A — **검증 finding을 `ops.data_integrity_violations`에 durable 기록**
 
-  migration `0067_integrity_dedupe_key`(열린 이슈 한정 부분 unique index) +
-  `sync_integrity_findings()` + `record_address_validation_findings()`.
-  `feature_id`/`source_record_key`는 FK라 **적재된 대상에만** 연결하고 drop된 행은 payload로만
-  나른다. `/admin/issues`는 `violation_type`에 allowlist가 없어 신규 type이 그대로 노출된다.
+  migration `0067_integrity_dedupe_key` + `0068_integrity_last_seen`,
+  `sync_integrity_findings()`와 `record_address_validation_findings()`로 구현한다.
+  PR #888 사후 감사에서 확인된 결함까지 현재 Lane B PR에서 보강했다.
 
-  적대 리뷰가 실측으로 잡은 설계 결함 4건을 반영했다.
   - `jsonb ||`는 shallow merge라 재실행 시 `EXCLUDED`의 null이 1회차 증거를 덮어썼다
     (durable ledger 안에서 증거 소실). `jsonb_strip_nulls`로 차단.
-  - `strict`(배포 기본값)는 기록 **전에** `Failure`를 던져, 증거가 가장 필요한 run이
-    아무것도 남기지 않았다. 던지기 전에 기록한다.
-  - **dedupe가 dedupe하지 않았다** — `dedupe_key`가 `source_record_key`(=`raw_payload_hash`
-    파생)에 걸려 export의 무관한 필드 하나만 바뀌어도 새 열린 행이 생겼다. `source_entity_id`
-    기반으로 바꾸고, 이번 run이 더는 보고하지 않는 finding을 자동 resolve하는 sweep을 추가했다
-    (주소 검증이 소유하는 code에 한정, `open`만 — 운영자가 손댄 `acknowledged`는 불가침).
+  - key는 `source_record_key`나 원천 id 문자열을 직접 싣지 않는다.
+    provider/dataset/`source_entity_type`/`source_entity_id`/violation code 전체의
+    `av2_<sha256>`(68 bytes)로 고정해 payload 변경·entity type 재사용·B-tree 행 크기 한계를
+    함께 차단한다.
   - `ops.data_integrity_violations`에 statement 트리거가 있어(실측) finding당 INSERT가
     `ops_live` revision 단일 행에 배타 락을 잡고 트랜잭션 끝까지 유지했다 — admin 쓰기 차단·
-    동시 run 직렬화·데드락. `unnest` 단일 statement로 접어 트리거 1회 발화.
+    동시 run 직렬화·데드락. `dedupe_key` 정렬 후 `unnest` 단일 statement로 접어
+    트리거 1회·잠금 순서 1개로 고정한다.
+  - recurrence는 최초 `detected_at`을 보존하고 별도 `last_seen_at`을 갱신한다.
+    `/admin/issues` cursor도 최신 관측 시각을 쓴다. FK target은 최신 recurrence로 갱신하고,
+    Feature 삭제는 `ON DELETE SET NULL`이라 ledger 행을 지우지 않는다.
+  - client 결과는 `observed/unique/upserted`를 구분해 내부 중복을 미기록으로 오산하지 않는다.
+    DB 기록 실패는 typed error이며 strict 경로는 validation `Failure` 전에 fail-closed한다.
 
-  격리 clone 재실증: finding 106건 기록 → 재실행에도 106 유지, `occurrence_count` 전부 2,
-  `dedupe_key`가 entity id 기반(`…:reverse_geocode_unavailable:79`)으로 안정화됨.
+  > **자동 close는 없다** — 배치마다 sweep하면 같은 run의 다른 batch finding을 닫고,
+  > 부분 unique index 밖으로 밀린 행이 다음 run에 다시 생성되며, 빈 bundle sentinel이 큐를
+  > 전부 닫는다. `T-VN-H32`에서 run marker 기반으로 별도 설계한다.
 
-  > **이 live 실증이 보이지 못하는 것** — 두 run이 같은 finding을 보고했으므로 **sweep은
-  > 발화한 적이 없고**, payload가 바뀌지 않았으므로 **키 안정성도 이 실험으로는 확인되지
-  > 않는다**(옛 `source_record_key` 방식으로도 같은 결과가 나온다). 두 불변식은 대신
-  > 테스트로 고정했다 — sweep 5종은 `tests/integration/test_integrity_findings_sync.py`,
-  > 키 유도는 `test_etl.py::test_dedupe_key_uses_stable_entity_id_not_payload_hash`.
-  > live에서 sweep을 발화시키는 실험(한 레코드의 문제를 해소한 뒤 재실행)은 아직 남았다.
+- [ ] T-VN-H30B — **회복을 같은 격리 snapshot의 실제 적재·인증 API로 재검증**
 
-  > **H30B 수치 주의** — `source_records` 2000→2458은 **+458**이고 acceptance가 요구한
-  > `feature.features` before/after는 보고하지 않았다. 이미 존재하던 레코드의 재관측이
-  > 섞인 것으로 보이나 확인하지 않았다. "1,477 회복"의 근거로 쓰지 말 것.
+  종전 실증은 bundles 1,477와 `source_records` 2000→2458(+458), 2회차 insert 0만 남겼다.
+  acceptance가 요구한 같은 snapshot의 `feature.features` before/after를 보고하지 않았고,
+  `/admin/issues`도 코드 경로만 확인했을 뿐 인증된 실호출을 하지 않았다.
 
-  > **`/admin/issues` 노출은 코드 근거다** — `violation_type`에 allowlist·enum·CHECK가 없음을
-  > 코드로 확인했을 뿐, 인증된 `GET /v1/admin/issues?issue_type=…` 실호출은 하지 않았다.
-
-  > **자동 close는 없다** — 1차 설계의 sweep이 실측으로 기각됐다(배치마다 발화해 자기
-  > finding을 닫음 / 부분 인덱스 밖으로 밀려나 다음 run이 새 행 생성 / `bundles=[]` sentinel이
-  > 큐 전체 close). finding은 해소돼도 `open`으로 남는다 — `T-VN-H32`에서 run marker 기반으로
-  > 재설계한다.
-
-- [x] T-VN-H30B — **회복을 실제 적재로 검증**
-
-  `load_feature_bundles_for_dagster`를 격리 clone에 실제로 태웠다 — bundles 1,477,
-  `source_records` 2000→2458, 2회차 insert 0(멱등). 배포 컨테이너 2곳의
-  `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_CURSOR`가 **미설정**임을 확인해 H28의
-  "자동 회복" 논거(기본값 근거였던 것)를 배포값으로 실증했다.
+  재검증 acceptance:
+  - 같은 격리 snapshot identity와 migration head를 기록한다.
+  - 적재 직전/직후 `feature.features`의 동일 scope 수와 복구된 feature id 집합을 기록한다.
+  - 같은 run의 finding `observed/unique/upserted`, linked/unlinked 수를 함께 기록한다.
+  - 인증된 `GET /v1/admin/issues?issue_type=…` 실호출로 최신 `last_seen_at`·최신 FK target을
+    확인한다.
 
 - [ ] T-VN-H30C — **타 provider `AdminEvidence` 무장 (미완 — 재작업 필요)**
 
@@ -321,11 +300,9 @@ H30A가 durable ledger를 붙였으나 **자동 close는 일부러 넣지 않았
 > **전제 정정 (2026-07-29, T-VN-H25A)** — 기존 전제 *"공식 CSV의 고유 `feature_id` 158개 중
 > 54개가 `feature.features`에 존재하지 않았다"*는 **재현되지 않는다**. prod에서 158/158이
 > 존재하고 전부 curation 링크 가능한 상태이며 `created_at`이 2026-06-29~07-03로 측정 시점보다
-> 앞선다. 따라서 **현재 stale reference 해소 대상은 없다**. 과거 snapshot 상태는 별개다.
-> `ops.feature_merge_history` 0행은 양 FK의 `ON DELETE CASCADE` 때문에 과거 이력 부재를
-> 증명하지 못하고, `source_record_key`는 linked 225건과 unresolved 261건이 모두 0건이다.
-> 현재 unresolved 261건이 처음부터 미연결이었는지 과거 link 삭제 결과인지는 historical
-> snapshot/audit 없이는 판별할 수 없다.
+> 앞선다. `ops.feature_merge_history`는 0행이고 미연결 261건 중 `source_record_key` 보유가
+> 0건이라, `ON DELETE SET NULL` cascade로 링크가 지워진 흔적도 없다.
+> **stale reference 해소는 대상이 없다.** 실제 문제는 처음부터 연결된 적 없는 membership이다.
 > 근거: [`reports/curation-unlinked-reference-evidence-2026-07-29.md`](reports/curation-unlinked-reference-evidence-2026-07-29.md).
 
 H24가 stable component 기반 미연결 membership으로 무손실 보존하므로 데이터 손실 위험은 없다.
@@ -333,11 +310,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [x] T-VN-H25A — **미연결 membership evidence manifest** (전제 정정 포함)
 
-  prod의 단일 repeatable-read read-only snapshot에서 현재 존재 여부·공식 collection 범위
-  정합을 대조했다. 주요 산출: 현재 CSV ID 전량 usable(§1), 과거 membership 판정 불가(§2),
-  `0063` legacy snapshot에서 collection/item/place exact group 대조로 CSV 217/269 vs
-  DB 225/261 중 **DB만 연결된 8건**(§3),
-  unresolved 중 **등대 103건**(105 중 2건만 링크, §4).
+  prod 단일 snapshot에서 존재 여부·lifecycle/merge·공식 collection 범위 정합을 대조했다.
+  주요 산출: 전제 반증(§1·§2), CSV 217/269 vs DB 225/261로 **같은 모집단이며 DB가 8건 앞섬**(§3),
+  미연결의 지배 원인은 수목원이 아니라 **등대 103건**(105 중 2건만 링크, §4).
   자체 matcher는 결함이 확인돼 후보 등급 산출에는 쓰지 않는다 — CSV `metadata_json`의
   `feature_match_confidence`(review 183 / unmatched 86)가 기준선이다(§5·§6).
 
@@ -347,7 +322,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   | AC 항목 | 상태 | 이관 |
   | --- | --- | --- |
-  | lifecycle/merge history 대조 | **미충족** — current snapshot과 cascade되는 history로 과거 membership 판정 불가 | H25C |
+  | lifecycle/merge history 대조 | 충족 | — |
   | 동일 DB snapshot | 충족 (prod 단일) | — |
   | 좌표 근접만으로 자동 승인 안 함 | 충족 | — |
   | CSV/DB target 미변경 | 충족 | — |
@@ -373,20 +348,12 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   좌표 근접만으로 자동 승인하지 않는다. 불확실한 component는 미연결 상태와 근거를 유지한다.
   5개 CSV의 linked/unresolved 수치, preview/commit, REST/UI를 같은 실데이터 snapshot에서 검증한다.
 
-- [ ] T-VN-H25C — **curation membership 변화 durable audit**
-
-  `curation_items.feature_id` link/unlink·merge·삭제 때 이전/이후 Feature ID, 행위자, 사유,
-  source item/component identity를 append-only audit로 보존한다. hard-delete cascade와
-  `ON DELETE SET NULL` 뒤에도 감사 행은 남아야 하며 H25B mutation부터 이 기록을 적용한다.
-  current snapshot만으로 과거 membership을 추측하지 않고, 이후 evidence는 audit revision과
-  snapshot identity를 함께 결속한다.
-
 - [ ] T-VN-H31 — **등대 공급원 부재 해소 (H25A 파생)**
 
-  공식 curation의 현재 unresolved 261건 중 **103건이 등대**이며 105개 중 2개만 링크됐다.
-  ADR-034에 등대 전용 provider가 없다는 사실만으로 기존 KHOA/VisitKorea 등의 공급 범위
-  부재를 단정하지 않는다. provider/API/DB coverage와 매칭 실패를 먼저 측정하고, 실제
-  공급원이 없을 때만 적재 경로를 만들거나 미연결 유지 근거를 문서로 확정한다.
+  공식 curation 미연결 261건 중 **103건이 등대**이며 105개 중 2개만 링크됐다. ADR-034 9단계
+  provider 순서에 등대를 공급하는 provider가 없다 — curation 매칭으로는 해소되지 않는다.
+  공급원(해양수산부/KHOA 계열 등)을 조사해 적재 경로를 만들거나, 불가능하면 미연결 유지 근거를
+  문서로 확정한다.
 
 ### T-VN-H22 — 0065 curation owner quarantine 재분류
 

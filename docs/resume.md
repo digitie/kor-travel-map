@@ -10,13 +10,28 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
-## 2026-07-29 (claude) — Lane A a1: T-VN-H30A/B 완료, H30C 미완 → 다음은 T-VN-H25B
+## 2026-07-29 (codex) — PR #888 사후 감사 반영 중 → T-VN-48D 최종 gate
 
-**다음 한 작업**: `T-VN-H25B`(CSV 역반영 8건 + 기준선 대조 매칭 재실행).
-이후 `T-VN-H30C`(재작업) → `T-VN-H31`(등대 공급원) → `T-VN-H22A/B/C`.
+**방금**: PR #888 원본 patch 적대 감사 8건을 반영했다. 주소 finding key를 source entity
+type+id 전체의 고정 길이 SHA256으로 바꾸고, batch 잠금 순서를 key 정렬로 고정했다.
+`last_seen_at`을 정규 column+keyset 정렬축으로 추가했으며 recurrence의 FK target 갱신,
+Feature 삭제 시 ledger 보존, strict durable 기록 fail-closed,
+`observed/unique/upserted` 결과를 구현했다. 종전 sweep 문서·테스트는 제거했고 H30B는
+실제 Feature before/after와 인증 Admin API 실호출이 없어 다시 열었다.
 
-- **완료**: `T-VN-H30A/B` — 주소 검증 결과가 `ops.data_integrity_violations`에 durable하게
-  남고 `/admin/issues`에서 보인다. 실적재로 회복 검증, 배포 cursor 미설정 실증.
+**다음 한 작업**: OpenAPI·문서 계약을 확정하고 현재 branch exact delta를 적대 리뷰 2명에게
+검토시킨다. 이후 exact SHA mocked serial/workers=4와 보존 clone Live를 실패 지점부터 재개한
+뒤 PR·CI green·직접 머지한다.
+
+## 2026-07-29 (claude) — Lane A a1: T-VN-H30A 완료, H30B/C 미완
+
+**후속 정정**: PR #888 사후 감사에서 H30B acceptance가 충족되지 않았음을 확인해 다시
+열었다. `T-VN-H30B` 재실증 → `T-VN-H30C` 재작업 후 다음 Lane A task로 진행한다.
+
+- **완료**: `T-VN-H30A` — 주소 검증 결과를 `ops.data_integrity_violations`에 durable하게
+  남기는 경로와 `/admin/issues` 표면을 구현했다.
+- **미완**: `T-VN-H30B` — 실적재 수치는 source record만 보고했으며 동일 snapshot의
+  `feature.features` before/after와 인증 Admin API 실호출이 없다.
 - **미완**: `T-VN-H30C` — MOIS만 무장했는데 `obs`/`claim`이 상호배타라 **탐지 증가 0건**.
   krforest(`region_code`)·visitkorea(`l_dong_regn_cd`)가 실제 후보임을 리뷰어가 반증했다.
 - **교훈 — "dedupe를 넣었다"와 "dedupe가 된다"는 다르다**: 1차 구현의 `dedupe_key`는
@@ -44,16 +59,6 @@ drop allowlist, token 단위 이름 warning, typed quarantine 보존과
 `upserts == bundles + quarantine` 불변식을 고정했다. 이전 #881 기록의 geo trusted proxy
 전환은 폐기하고 scoped `X-KTG-API-Key` 계약으로 정정했다. H28의 일반 좌표 정확도
 과장도 baseline 규칙 재현 범위로 좁혔다.
-
-PR #886 감사에서는 H25A가 current snapshot으로 과거 membership을 단정한 P1을 확인했다.
-현재 unresolved 261건의 과거 link 여부와 과거 158건의 usable 상태는 판정 불가다.
-`source_record_key`는 linked/unresolved 양쪽 모두 0이고 merge history FK는 hard-delete에
-cascade되며 upsert는 오래된 `created_at`을 보존한 채 status/deleted 상태를 바꿀 수 있다.
-합계 차이 8건도 row-level 증거가 아니므로 single repeatable-read `0063` snapshot에서
-legacy collection/item/place group·CSV component/hash·DB Feature ID를 결속한 exact
-manifest로 다시 만든다. 오류를 삼키던
-baseline과 무효 matcher는 제거한다. 재발 방지는 `T-VN-H25C` durable membership audit으로
-분리했고 등대 항목은 provider coverage를 먼저 측정한다.
 
 **다음 한 작업**: Claude PR #886 감사 결과와 exact `origin/main...HEAD` 적대 리뷰 2명을
 반영한 뒤, 같은 최종 SHA로 보존 clone의 실패 지점에서 파괴적 Live를 재개한다. 완료 문서를

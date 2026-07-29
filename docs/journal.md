@@ -17,7 +17,29 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
-## 2026-07-29 (claude) — Lane A a1: T-VN-H30A/B 검증 결과 durable 기록
+## 2026-07-29 (codex) — PR #888 주소 finding ledger 사후 감사 정정
+
+PR #888 원본 patch를 별도 적대 감사한 결과 8건을 확인하고 현재 T-VN-48 PR에 함께
+반영했다.
+
+- 서로 반대 순서의 multi-row upsert가 같은 unique key를 잠그며 deadlock할 수 있어,
+  repository 진입점에서 `dedupe_key` 정렬 후 모든 `unnest` 배열을 만든다.
+- 구 key는 `source_entity_type`을 생략하고 원천 id를 그대로 붙여 entity type 충돌과
+  B-tree row 크기 초과가 가능했다. provider/dataset/type/id/code 전체의
+  `av2_<sha256>` 68-byte key로 교체했다.
+- recurrence가 payload만 갱신해 실제 `feature_id`/`source_record_key`는 최초 값을
+  가리키던 문제를 고쳤다. Feature FK도 `CASCADE`에서 `SET NULL`로 바꿔 대상 삭제가
+  ledger 자체를 삭제하지 않게 했다.
+- `detected_at`은 최초 탐지 시각으로 보존하고 `last_seen_at` column을 추가했다.
+  Admin/Ops 목록과 cursor·실제 query index는 최신 관측 시각을 사용한다.
+- client의 broad catch를 typed `IntegrityFindingPersistenceError`로 바꾸고 strict는
+  durable 기록 실패를 validation 실패보다 먼저 fail-closed한다.
+- 결과를 `observed/unique/upserted`로 분리해 batch 내부 중복을 미기록으로 계산하지 않는다.
+- 실제 구현에 없는 자동 close sweep을 광고하던 문서·상수·테스트를 제거했다.
+- H30B는 동일 snapshot의 Feature before/after와 인증된 Admin API 실호출이 없으므로
+  완료 표시를 취소하고 acceptance를 구체화했다.
+
+## 2026-07-29 (claude) — Lane A a1: T-VN-H30A 구현·H30B 1차 실증
 
 **목표**. 주소/좌표 검증 결과가 Dagster run metadata에만 있어 run이 사라지면 증거도 사라지고
 `/admin/issues`에서도 안 보였다. `ops.data_integrity_violations`에 남긴다.
@@ -42,25 +64,21 @@ client 메서드로 만들고 격리 clone에서 "finding 106건, 재실행에�
    `/admin/issues` 쓰기 차단·동시 run 직렬화·admin PATCH와 데드락.
 
 **재설계**. `sync_integrity_findings()`로 통합했다.
-- `unnest` 기반 **단일 INSERT** + **단일 UPDATE sweep** → 트리거 2회 발화. batch 내 중복은
-  파이썬에서 먼저 제거한다(같은 key가 한 statement에 두 번 오면 Postgres가 거부).
-- `dedupe_key`를 **`source_entity_id`** 기반으로. payload 변경과 무관하게 안정적이다.
-- **자동 resolve sweep** — 이번 run이 더는 보고하지 않는 `open` finding을 닫는다. 주소 검증이
-  소유하는 code와 해당 provider/dataset에 한정하고, 운영자가 손댄 `acknowledged`는 불가침.
-- `jsonb_strip_nulls`로 증거 소실 차단, `last_seen_at`은 UTC 고정(TimeZone GUC 의존 제거).
+- `unnest` 기반 단일 INSERT로 트리거 1회만 발화한다. batch 내 중복은 파이썬에서 제거한다.
+- `dedupe_key`를 source entity type+id 전체의 고정 길이 SHA256으로 만든다.
+- 자동 resolve sweep은 배치 경계에서 안전하지 않아 넣지 않았다(`T-VN-H32`).
+- `jsonb_strip_nulls`로 증거 소실을 차단하고 `last_seen_at`은 정규 column으로 둔다.
 - strict 경로도 던지기 전에 기록한다.
 - MOIS `obs_code`/`reverse_attempted`는 **reverse 경로 값만** 쓴다 — `geo`는 정지오코딩으로도
   채워져 obs가 `claim_text`와 같은 출처가 되는 오염이 있었다.
 
-**검증**. 통합 테스트 8건을 새로 붙였다 — 재실행 접힘·`occurrence_count` 증가·null이 증거를
-덮지 않음·sweep이 보고 안 된 것만 닫음·`acknowledged` 불가침·관리 code 한정·provider 경계·
-findings 비었을 때 전량 close, 그리고 **payload 변경에도 접힘**(`source_entity_id` 전환의
-전체 근거인데 그전까지 실증한 적이 없었다). 모델 `__table_args__`에도 0067 인덱스를 반영해
-`create_all` 스키마에서 ON CONFLICT 대상이 사라지지 않게 했다.
+**후속 검증 정정**. payload 변경에도 접힘은 유효하지만 sweep 관련 검증은 실제 코드와
+일치하지 않아 제거했다. 후속 감사가 type+id key, 고정 길이, 잠금 정렬, recurrence FK,
+`last_seen_at` cursor, strict 기록 실패를 직접 고정했다.
 
-격리 clone 실증: finding 106건 기록 → 재실행에도 106, `occurrence_count` 전부 2,
-`dedupe_key`가 entity id 기반(`…:reverse_geocode_unavailable:79`)으로 안정화.
-실적재 경로도 태워 `source_records` 2000→2458, 2회차 insert 0(멱등)을 확인했다.
+격리 clone의 106→106, `occurrence_count` 2 실증은 구 v1 key의 동일 export 재실행만
+확인했으므로 새 v2 key의 Live 근거로 사용하지 않는다. 실적재의 `source_records`
+2000→2458(+458), 2회차 insert 0도 Feature 회복량을 증명하지 않는다.
 배포 컨테이너 2곳의 concierge cursor가 미설정임을 확인해 H28의 "자동 회복" 논거를
 기본값이 아니라 **배포값**으로 실증했다.
 
@@ -96,21 +114,6 @@ public API key를 `X-KTG-API-Key` header로만 전달한다. `E0100 key` fallbac
 독립적인 일반 좌표 정확도 증거가 아니므로, **기존 규칙으로 불일치 근거가 성립하지
 않았다**는 범위로 정정했다. baseline 스크립트도 현재 validator 자기 비교가 아니라 당시
 규칙 버전을 명시적으로 재현한다.
-
-**PR #886 사후 감사 정정**. H25A의 2차 결론도 current snapshot을 역사 증거로 과장했다.
-현재 `ops.feature_merge_history=0`은 master/loser FK가 모두 `ON DELETE CASCADE`라
-“merge가 없었다”를 뜻하지 않는다. `created_at`도 upsert가 보존하면서 status/deleted 상태를
-바꿀 수 있어 과거 usable을 증명하지 않는다. 현재 CSV 158개 ID는 unresolved 261건의 과거
-ID와 다른 모집단이고, `source_record_key`는 linked 225건과 unresolved 261건이 모두 0이라
-판별력이 없다. 따라서 확정 사실은 **현재** 158개가 usable이고 261건이 unresolved라는 것뿐이다.
-과거 상태는 historical snapshot/audit 없이는 모른다.
-
-collection 합계 차이만으로도 “DB만 연결된 8건”을 증명할 수 없다. evidence generator를
-single repeatable-read read-only transaction, schema/count invariant, `0063` legacy
-`collection/item/place` exact group, CSV component·file hash와 정확한 8행 DB Feature ID를 결속하는
-fail-closed manifest로 교체했다. 오류를 삼키던 baseline과 무효 matcher 스크립트는 제거했다.
-재발 방지는 `T-VN-H25C` durable membership audit으로 분리했고, 등대 103건은 공급원 부재
-확정이 아니라 provider/API/DB coverage 조사 대상으로 좁혔다.
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25A 공식 curation 미연결 증거·전제 정정
 

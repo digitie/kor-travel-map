@@ -422,10 +422,6 @@ async def test_strict_mode_fails_closed_when_durable_recording_fails(
 
     assert client.chunks == []
     assert context.metadata[-1]["address_validation_findings_unrecorded"] == 1
-    assert (
-        context.metadata[-1]["address_validation_finding_persistence_error"]
-        == "OperationalError"
-    )
 
 
 async def test_non_allowlisted_error_is_not_permanently_dropped(

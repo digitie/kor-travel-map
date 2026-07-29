@@ -146,7 +146,6 @@ async def load_feature_bundles_for_dagster(
                     "address_validation_findings_unique": exc.unique_count,
                     "address_validation_findings_upserted": 0,
                     "address_validation_findings_unrecorded": exc.unique_count,
-                    "address_validation_finding_persistence_error": exc.error_type,
                 }
             )
             _add_output_metadata(context, failure_metadata)
@@ -246,14 +245,18 @@ async def load_feature_bundles_for_dagster(
                 "address_validation_findings_unique": exc.unique_count,
                 "address_validation_findings_upserted": 0,
                 "address_validation_findings_unrecorded": exc.unique_count,
-                "address_validation_finding_persistence_error": exc.error_type,
             }
         )
         if mode == "strict":
             _add_output_metadata(context, metadata)
             raise Failure(
                 description="Feature 주소/좌표 검증 finding durable 기록 실패",
-                metadata=metadata,
+                metadata={
+                    "address_validation_findings_observed": exc.observed_count,
+                    "address_validation_findings_unique": exc.unique_count,
+                    "address_validation_findings_upserted": 0,
+                    "address_validation_findings_unrecorded": exc.unique_count,
+                },
             ) from None
     else:
         metadata.update(
@@ -269,7 +272,14 @@ async def load_feature_bundles_for_dagster(
                 _add_output_metadata(context, metadata)
                 raise Failure(
                     description="Feature 주소/좌표 검증 finding durable 기록 불완전",
-                    metadata=metadata,
+                    metadata={
+                        "address_validation_findings_observed": sync.observed_count,
+                        "address_validation_findings_unique": sync.unique_count,
+                        "address_validation_findings_upserted": sync.upserted_count,
+                        "address_validation_findings_unrecorded": (
+                            sync.unrecorded_count
+                        ),
+                    },
                 )
 
     _add_output_metadata(context, metadata)

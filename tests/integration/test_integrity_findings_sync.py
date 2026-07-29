@@ -12,6 +12,11 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.client import (
+    AddressValidationFinding,
+    AsyncKorTravelMapClient,
+)
+from kortravelmap.core.ids import make_integrity_finding_key
 from kortravelmap.infra.integrity_violation_repo import sync_integrity_findings
 
 pytestmark = [pytest.mark.integration]
@@ -20,7 +25,12 @@ _PROVIDER = "test-provider-h30a"
 _DATASET = "test_dataset_h30a"
 
 
-def _finding(entity_id: str, code: str = "reverse_geocode_unavailable") -> dict[str, Any]:
+def _finding(
+    entity_id: str,
+    code: str = "reverse_geocode_unavailable",
+    *,
+    entity_type: str = "license",
+) -> dict[str, Any]:
     return {
         "provider": _PROVIDER,
         "dataset_key": _DATASET,
@@ -30,7 +40,13 @@ def _finding(entity_id: str, code: str = "reverse_geocode_unavailable") -> dict[
         "severity": "warning",
         "message": f"{code} for {entity_id}",
         "payload": {
-            "dedupe_key": f"address_validation:{_PROVIDER}:{_DATASET}:{code}:{entity_id}",
+            "dedupe_key": make_integrity_finding_key(
+                provider=_PROVIDER,
+                dataset_key=_DATASET,
+                source_entity_type=entity_type,
+                source_entity_id=entity_id,
+                violation_type=code,
+            ),
             "occurrence_count": 1,
             "provider_address": f"주소 {entity_id}",
         },
@@ -42,7 +58,8 @@ async def _rows(session: AsyncSession) -> list[Any]:
         text(
             "select payload->>'dedupe_key' as k, status, "
             "(payload->>'occurrence_count')::int as n, "
-            "payload->>'provider_address' as addr, violation_type "
+            "payload->>'provider_address' as addr, violation_type, "
+            "detected_at, last_seen_at, source_record_key, feature_id "
             "from ops.data_integrity_violations "
             "where provider = :p order by k"
         ),
@@ -66,6 +83,16 @@ async def test_batch_upsert_folds_reruns_and_counts_occurrences(
     rows = await _rows(migrated_session)
     assert len(rows) == 2
     assert {r["n"] for r in rows} == {1}
+    detected_at = {r["k"]: r["detected_at"] for r in rows}
+
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.data_integrity_violations "
+            "SET last_seen_at = detected_at - interval '1 day' "
+            "WHERE provider = :provider"
+        ),
+        {"provider": _PROVIDER},
+    )
 
     await sync_integrity_findings(
         migrated_session,
@@ -76,6 +103,8 @@ async def test_batch_upsert_folds_reruns_and_counts_occurrences(
     rows = await _rows(migrated_session)
     assert len(rows) == 2, "재실행이 새 행을 만들면 큐가 단조 증가한다"
     assert {r["n"] for r in rows} == {2}
+    assert all(r["detected_at"] == detected_at[r["k"]] for r in rows)
+    assert all(r["last_seen_at"] >= r["detected_at"] for r in rows)
 
 
 async def test_null_payload_field_does_not_erase_prior_evidence(
@@ -141,3 +170,62 @@ async def test_dedupe_survives_payload_change(
     assert rows[0]["n"] == 2, "같은 문제의 재발이므로 occurrence_count가 올라야 한다"
     assert rows[0]["addr"] == "새 주소", "최신 단서로 갱신돼야 한다"
     assert rows[0]["status"] == "open"
+
+
+async def test_source_entity_type_is_part_of_dedupe_identity(
+    migrated_session: AsyncSession,
+) -> None:
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[
+            _finding("shared-id", entity_type="license"),
+            _finding("shared-id", entity_type="closed_license"),
+        ],
+    )
+
+    rows = await _rows(migrated_session)
+    assert len(rows) == 2
+    assert rows[0]["k"] != rows[1]["k"]
+
+
+async def test_client_reports_observed_unique_and_upserted_counts(
+    migrated_engine: Any,
+) -> None:
+    key = make_integrity_finding_key(
+        provider="test-provider-h30a-result",
+        dataset_key="dataset",
+        source_entity_type="license",
+        source_entity_id="same",
+        violation_type="missing_address",
+    )
+    finding = AddressValidationFinding(
+        dedupe_key=key,
+        violation_type="missing_address",
+        severity="warning",
+        message="주소 없음",
+        provider="test-provider-h30a-result",
+        dataset_key="dataset",
+    )
+    client = AsyncKorTravelMapClient(migrated_engine)
+
+    try:
+        result = await client.record_address_validation_findings(
+            [finding, finding],
+            provider="test-provider-h30a-result",
+            dataset_key="dataset",
+        )
+    finally:
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM ops.data_integrity_violations "
+                    "WHERE provider = 'test-provider-h30a-result'"
+                )
+            )
+
+    assert result.observed_count == 2
+    assert result.unique_count == 1
+    assert result.upserted_count == 1
+    assert result.unrecorded_count == 0

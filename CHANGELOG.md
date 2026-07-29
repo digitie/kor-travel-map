@@ -5,19 +5,22 @@
 
 ## [Unreleased]
 
-### 주소 검증 결과 durable 기록 (2026-07-29, T-VN-H30A/B/C)
+### 주소 검증 결과 durable 기록 (2026-07-29, T-VN-H30A)
 
 - **OBSERVABILITY**: 주소/좌표 검증 결과가 `ops.data_integrity_violations`에 남아
   **run이 사라져도 증거가 보존되고 `/admin/issues`에서 조회된다**. 이전에는 Dagster run
   metadata에만 있었다. 격리 clone 실증: finding 106건 기록, 재실행에도 106 유지.
-- **DATABASE**: migration `0067_integrity_dedupe_key` — `payload->>'dedupe_key'`에 부분 unique
-  index(열린 이슈 한정). 같은 레코드의 같은 문제는 run을 반복해도 한 행으로 접히고
-  `occurrence_count`/`last_seen_at`만 올라간다. resolved/ignored로 닫힌 이슈는 제약 밖이라
-  이력이 남고, 재발하면 새 행이 생긴다.
+- **DATABASE**: migration `0067_integrity_dedupe_key` + `0068_integrity_last_seen`.
+  key는 provider/dataset/source entity type+id/violation code 전체의 고정 길이
+  `av2_<sha256>`이며 열린 이슈 한정 부분 unique index로 접힌다. `detected_at`은 최초 탐지,
+  `last_seen_at`은 최신 recurrence로 분리한다. Feature 삭제는 FK `SET NULL`이라 ledger를
+  지우지 않는다.
 - **API**: `AsyncKorTravelMapClient.record_address_validation_findings()` 추가.
   `feature_id`/`source_record_key`는 FK이므로 **적재된 대상에만** 연결하고, 적재 전 단계에서
-  drop된 행은 id를 payload로만 나른다. 기록 실패는 적재 결과를 되돌리지 않으며 미기록 건수가
-  metadata(`address_validation_findings_unrecorded`)로 드러난다.
+  drop된 행은 id를 payload로만 나른다. 결과는 `observed/unique/upserted`로 구분하고,
+  strict 경로의 기록 실패는 typed error로 fail-closed한다.
+- **ADMIN/OPS**: issue record에 `last_seen_at`을 추가하고 목록 cursor와 index를 최신 관측
+  순서로 바꿨다. recurrence는 실제 `feature_id`/`source_record_key`도 최신 target으로 갱신한다.
 - **OBSERVABILITY**: MOIS provider가 `AdminEvidence`를 채운다. MOIS는 payload에 법정동코드가
   있으면 역지오코딩을 호출하지 않아 staleness 대조가 성립하지 않는데, 그 사실이 `claim_only`로
   집계돼 `unarmed`(미계측)와 구분된다.
