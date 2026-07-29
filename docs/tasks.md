@@ -31,7 +31,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [ ] `T-VN-48D`(final exact Mocked/Live·PR) →
+  - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
     [ ] `T-VN-49D`(React 구조 debt)
   - b1: [ ] `T-VN-11A` → [ ] `T-VN-11B`(service batch) →
@@ -151,54 +151,6 @@ barrier로 직렬화한다.
     대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
 
 ## Lane B 상세 — b0 선행 하드닝
-
-### T-VN-48 — mocked Playwright drift 제거
-
-T-VN-48A~C는 최초 273-test baseline의 deterministic drift 89건을
-Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별로 제거했다.
-
-- [ ] **T-VN-48D** — 구현과 사전 exact checkpoint D의 serial/workers=4는 각각
-  **274/274 passed**, expected failure·actual failure·flake·skip 0건이다.
-  - R1과 양립하는 격리 clone trusted runner의 본 acceptance 2/2와 recovery-only 2/2,
-    startup migration 없음, owned Feature·weather·price·FK·pending change request cleanup
-    0을 root-owned redacted evidence로 검증했다.
-  - 적대 리뷰 2인과 국소 후속 리뷰에서 잔여 P0~P2 0건이다. `0068` 재시작성과
-    Live/Mocked signal·cleanup 경계까지 보강한 최종 문서 candidate에서 Mocked
-    serial/workers=4와 보존 clone 파괴적 Live를 다시 결박한 뒤 PR·CI green·merge한다.
-  - 위 gate와 merge가 끝나기 전에는 `tasks-done.md`로 옮기지 않는다.
-  - [ ] **T-VN-48D.1** — legacy v1 checkpoint를 v4로 재검증할 때 restore 전용
-    ownership role과 원본 DB owner가 달라 snapshot이 항상 불일치하는 문제를 수정한다.
-    database digest에서는 의도적인 owner 차이를 정규화하고, 원본 clone DB owner는
-    별도 invariant로 fail-closed 검증하며 mismatch field 이름을 redacted 진단에 남긴다.
-  - [ ] **T-VN-48D.2** — v4 교체 직전 fail-closed된 durable dump를 다음 checkpoint가
-    다시 `pg_dump`하지 않고 재검증하도록 한다. 기존 checkpoint가 참조한 dump는 제외하고,
-    root-owned 0600 후보가 정확히 하나일 때만 재사용하며 복수 후보는 fail-closed한다.
-  - [ ] **T-VN-48D.3** — PostGIS extension의 restore마다 달라지는 `extconfig` relation OID를
-    그대로 해시해 복원 검증이 `extension_sha256`에서 항상 불일치하는 문제를 수정한다.
-    OID 대신 순서가 보존된 schema+relation 식별자를 해시하고, real dump의 schema-only
-    복원으로 extension digest 동등성을 국소 검증해 이미 완료한 전체 데이터 restore를 반복하지
-    않는다.
-  - [ ] **T-VN-48D.4** — 파괴적 Live의 경량 baseline과 선택적 full restore certification을
-    분리한다. baseline은 clone snapshot·write fence·custom archive 구조·dump SHA256을
-    서명하되 `full_restore_verified=false`를 명시하고, migration/schema 또는 backup·restore
-    경계가 바뀌어 복구 인증 자체가 필요한 task에서만 별도 full checkpoint를 수행한다.
-  - [ ] **T-VN-48D.5** — Feature 승인 시 정상적으로 한 번 증가하는
-    `ops.ops_live_topic_revisions.dataset_projection`을 durable content 변조로 오인하지 않게
-    한다. 시작·종료 raw snapshot과 정확한 revision `+1`/시간 증가 증거를 남기고, 최종
-    content digest에서는 해당 한 행만 시작값으로 정규화한다. 시작 증거가 없던 기존 실패는
-    서명된 checkpoint dump의 행을 대입한 전체 digest가 checkpoint와 정확히 일치할 때만
-    recovery tool 새 revision으로 실패 지점부터 복구하며, 다른 topic·identity·schema·data
-    차이는 계속 fail-closed한다.
-  - [ ] **T-VN-48D.6** — recovery evidence 사전 검증 뒤 resource 정리 phase를 기록하고
-    같은 증거를 `complete`에서 재검증할 때, `direct-cleanup-running`을 이미 거친 정확한
-    `recovery-resource-finalizing` 전이만 허용한다. 이 두 phase 외의 legacy content
-    정규화는 계속 거부하고, resource 정리 뒤 실패한 실행도 브라우저를 반복하지 않고
-    같은 evidence에서 완료할 수 있게 한다.
-  - [ ] **T-VN-48D.7** — production MapLibre에서 `areTilesLoaded()`가 true가 된 직후 실제
-    `idle` event가 늦게 도착해 raster `sourcedata` 계측에 섞이는 Mocked race를 제거한다.
-    테스트가 repaint로 실제 idle cycle과 그 marker rAF를 먼저 소진한 뒤 raster/source
-    event를 계측하게 해 production의 raster 무시 계약과 test harness의 늦은 idle updater를
-    분리한다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 

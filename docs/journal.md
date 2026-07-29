@@ -17,6 +17,34 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-29 (codex) — T-VN-48D 최종 Mocked·clone Live 완료
+
+보존 clone의 파괴적 Live 본편·recovery-only는 이미 각각 2/2를 실행한 상태에서, 최종
+content equality가 정상적인 `ops_live_topic_revisions.dataset_projection` revision `+1`까지
+변조로 취급해 fail-closed했다. 전체 clone/restore나 UI를 반복하지 않고 실패 지점부터
+복구했다.
+
+- 서명된 checkpoint dump의 직전 topic 행을 현재 DB에 대입한 전체 content digest가 v5
+  baseline과 정확히 같은 경우만 허용했다. current row는 revision `+1`과 증가한 timestamp를
+  별도 root-owned 증거로 결박하고, 다른 topic·schema·identity·content 차이는 그대로
+  거부한다.
+- evidence 사전 검증 뒤 `recovery-resource-finalizing`을 기록한 상태에서 `complete`가 같은
+  증거를 다시 거부하던 전이도 수정했다. `direct-cleanup-running`을 이미 거친 이 두 단계만
+  허용하고 임의 phase는 음성 테스트로 차단했다.
+- Live result는 `complete/recovered`, main 2/2·recovery 2/2다. active acceptance Feature,
+  pending change request, direct weather/price/FK, BLOCKED/quiescence/scratch/temp DB·role,
+  runner container/network/image가 모두 0이며 clone은 healthy다. v5 custom dump는
+  `archive_verified=true`, `full_restore_verified=false`로 보존했다.
+- Mocked 첫 serial은 273/274로, `areTilesLoaded()` 뒤 늦게 도착한 실제 MapLibre `idle`이
+  raster `sourcedata` 계측에 섞이는 한 건만 실패했다. repaint로 실제 idle cycle과 marker
+  rAF를 먼저 소진한 뒤 계측하게 고쳤고, exact `823ba52b` checkpoint D를 serial과
+  workers=4에서 각각 **274/274** 통과했다. expected/actual failure·flake·skip과 종료 자원은
+  모두 0이다.
+
+국소 gate는 runner unit 35개, Ruff, shell syntax, e2e TypeScript/ESLint가 통과했다. 최종
+문서 이관 뒤 PR을 열고 CI green·직접 머지한다. Claude Code PR 사후 감사는 사용자 지시에
+따라 task PR 머지 뒤 별도 후속 단계에서 진행한다.
+
 ## 2026-07-29 (codex) — T-VN-48D 2인 적대 리뷰 하드닝
 
 T-VN-48와 현재 PR에 이미 포함된 PR #888 사후 감사 수정의 branch-authored delta만 두

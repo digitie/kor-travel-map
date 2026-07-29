@@ -10,6 +10,25 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-29 (codex) — T-VN-48D 최종 gate 완료 → PR·CI·merge
+
+**완료**: 보존 clone Live의 main/recovery 2/2 증거를 전체 restore·브라우저 재실행 없이
+실패 지점부터 복구했다. 정상적인 `dataset_projection` revision `+1`은 서명 dump 직전 행을
+대입한 전체 digest가 v5 checkpoint와 정확히 같을 때만 정규화하고, raw/normalized snapshot과
+revision/timestamp 증거를 함께 남긴다. result는 `complete/recovered`; active acceptance
+Feature·pending request·direct fixture/FK와 모든 runner 임시 자원은 0이다.
+
+Mocked 첫 serial은 늦은 실제 MapLibre `idle`이 계측에 섞여 273/274였으며, repaint+idle+rAF
+barrier로 실패 spec만 수정했다. exact `823ba52b` checkpoint D는 serial/workers=4 각각
+**274/274**, expected/actual failure·flake·skip 0이다. self-owned container/network/image와
+loopback listener도 0이다. T-VN-48D/D.1~D.7은 `tasks-done.md`로 이관했다.
+
+**다음 한 작업**: 최신 main을 최종 확인하고 보안 감사를 거쳐 PR을 연다. CI green과 승인
+조건을 확인해 직접 머지하고 issue #881을 닫는다. 머지 뒤 `ktm-tvn45-db`와 v5 dump의
+migration head·fixture identity·잔여물·디스크 여유를 읽기 전용으로 확인해 다음 task 재사용
+가능 여부를 기록한 뒤, 별도 사용자 지시까지 대기한다. 새 Claude Code PR 감사는 이 대기
+지시 때문에 자동 시작하지 않는다.
+
 ## 2026-07-29 (codex) — T-VN-48D 2인 재리뷰 하드닝 → 최종 exact gate
 
 **방금**: T-VN-48/기반 PR #888 수정 델타의 적대 리뷰 2명이 찾은 Live 세션

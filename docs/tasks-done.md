@@ -3,6 +3,38 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-29 — Lane B b0 T-VN-48 mocked drift·격리 clone Live 완료
+
+- [x] **T-VN-48A~C** — 최초 273-test baseline의 deterministic drift 89건을
+  Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별로 제거했다.
+- [x] **T-VN-48D** — checkpoint D를 exact `823ba52b`에서 serial과 workers=4로 각각
+  **274/274** 통과했다. expected/actual failure·flake·skip은 모두 0이고, 종료 뒤 self-owned
+  container/network/image와 loopback listener도 0건이다.
+  - [x] **D.1~D.3** — restore 전용 owner를 정규화하되 원본 owner invariant는 별도 검증하고,
+    fail-closed dump를 정확히 하나일 때만 재사용하며, PostGIS `extconfig` OID를 안정적인
+    schema+relation identity로 바꿨다. 실제 schema-only restore에서 extension digest
+    동등성을 확인했다.
+  - [x] **D.4** — 경량 v5 baseline과 선택적 full restore certification을 분리했다. v5는
+    custom archive 구조·dump SHA256·clone snapshot·write fence를 서명하고
+    `full_restore_verified=false`를 명시한다. 이번 최종 gate는 migration/schema/복구 계약이
+    바뀌지 않아 이미 보유한 dump와 clone을 재사용하고 전체 restore를 반복하지 않았다.
+  - [x] **D.5~D.6** — Feature 승인으로 정상 증가한
+    `ops.ops_live_topic_revisions.dataset_projection` 한 행을 시작값으로 정규화하되,
+    서명 dump의 직전 행을 대입한 전체 digest가 checkpoint와 정확히 같고 revision이 `+1`인
+    경우만 허용했다. `direct-cleanup-running → recovery-resource-finalizing`의 정확한
+    forward-recovery만 인정해 UI·fixture를 반복하지 않고 기존 evidence에서 완료했다.
+  - [x] **D.7** — production MapLibre의 늦은 실제 `idle` event가 raster `sourcedata`
+    계측에 섞이던 Mocked race를 repaint+idle+rAF barrier로 제거했다. 최초 serial은 이 한 건만
+    실패한 273/274였고, 실패 spec 수정 뒤 같은 gate를 재개해 serial/parallel 모두 통과했다.
+- [x] **파괴적 Live** — 보존 clone의 본 acceptance와 recovery-only가 각각 **2/2**다.
+  result는 `complete/recovered`, raw→normalized 전체 content 증명과 topic revision `+1`을
+  기록했다. active acceptance Feature·pending change request·direct weather/price/FK,
+  BLOCKED/quiescence/scratch/temp DB·role, runner container/network/image는 전부 0이다.
+  v5 custom dump는 다음 task 재사용 판정 대상으로 보존했다.
+- [x] **리뷰·감사** — branch-authored delta는 적대 리뷰 2인과 국소 후속 검토에서 P0~P2
+  0건이며, 규칙 변경 전에 완료한 issue #881의 Claude Code PR #888 사후 감사 수정도 같은
+  변경 집합에 포함했다.
+
 ## 2026-07-29 — Lane A a1 T-VN-H28A/B: #673 주소 검증 규칙 교체 (한 PR)
 
 > **정정 (적대 리뷰 반영)** — 아래 "payload 행정코드 == geo 행정코드이므로 전부 오탐"이라는
