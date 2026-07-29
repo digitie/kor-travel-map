@@ -29,6 +29,7 @@ barrier로 직렬화한다.
     [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
     [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
+    [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
@@ -269,6 +270,11 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   > **`/admin/issues` 노출은 코드 근거다** — `violation_type`에 allowlist·enum·CHECK가 없음을
   > 코드로 확인했을 뿐, 인증된 `GET /v1/admin/issues?issue_type=…` 실호출은 하지 않았다.
 
+  > **자동 close는 없다** — 1차 설계의 sweep이 실측으로 기각됐다(배치마다 발화해 자기
+  > finding을 닫음 / 부분 인덱스 밖으로 밀려나 다음 run이 새 행 생성 / `bundles=[]` sentinel이
+  > 큐 전체 close). finding은 해소돼도 `open`으로 남는다 — `T-VN-H32`에서 run marker 기반으로
+  > 재설계한다.
+
 - [x] T-VN-H30B — **회복을 실제 적재로 검증**
 
   `load_feature_bundles_for_dagster`를 격리 clone에 실제로 태웠다 — bundles 1,477,
@@ -293,6 +299,25 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   재작업 시: krforest·visitkorea를 조사해 무장하고, MOIS는 reverse를 강제하지 않는 한
   staleness 대조가 불가능함을 설계 문서(`docs/architecture/address-geocoding.md`,
   `dto/admin_evidence.py`)에 고정한다. provider 고유 코드(VisitKorea `areaCode` 등)는 넣지 않는다.
+
+### T-VN-H32 — 주소 검증 finding 자동 close (H30A 후속)
+
+H30A가 durable ledger를 붙였으나 **자동 close는 일부러 넣지 않았다**. 1차 설계의 sweep
+("이번 run이 보고하지 않는 finding을 닫는다")을 적대 리뷰가 실측으로 기각했다.
+
+- `_load()`는 provider에 따라 **배치마다** 호출된다(MOIS는 1000건 단위 ~977회). 배치 단위
+  sweep은 "이 배치에 없는 것"을 닫아, 한 run이 자기 finding 대부분을 스스로 resolved 처리한다.
+- sweep이 행을 부분 unique index 밖으로 밀어내 다음 run이 **새 행**을 만든다 — 막으려던
+  단조 증가를 재생산한다(3개 논리 finding → 2 run 후 6행, 실측).
+- `bundles=[]`인 `_load()`는 OpiNet 일일 스킵·MOIS 무레코드 fallback의 **제어 흐름
+  sentinel**이라, 빈 finding 집합이 큐 전체를 닫는다.
+
+- [ ] T-VN-H32 — **run marker 기반 close**
+
+  적재 run id/시각을 finding payload에 남기고 "그 run보다 오래된 것"만 닫는다. 배치 경계와
+  무관해지고 `live_keys` 배열(MOIS면 ~977k 원소)도 사라진다. 함께 확인할 것:
+  기계가 닫은 행의 `payload.resolution` 스탬프, `acknowledged` 불가침, provider 경계,
+  그리고 resolved 행의 보존 기간(현재 retention 정책이 없다).
 
 ### T-VN-H25 — 공식 curation 미연결 membership 해소
 
