@@ -24,8 +24,7 @@ barrier로 직렬화한다.
     [x] `T-VN-H07C`(#812 — v5 승격 기각, ADR-079)
   - a1: [x] `T-VN-H29`(PinVi 검색 좌표 null 복구 — H07D 파생) →
     [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
-    [ ] `T-VN-H28A`(#673 실데이터 오탐 분류) →
-    [ ] `T-VN-H28B`(#673 검증 규칙·회복 경로) →
+    [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
     [ ] `T-VN-H25A`(stale reference 증거 manifest) →
     [ ] `T-VN-H25B`(검토된 reference 적용) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
@@ -228,18 +227,6 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   docker-manager의 공개 가능한 base config에 `timeout tunnel`을 명시하고 local prod 값은
   gitignored runbook에서 결선한다. quiet 상태를 heartbeat 두 주기 이상 유지해 같은 ops-live
   socket이 재연결 없이 유지되는지 브라우저와 proxy metric 양쪽에서 확인한 뒤 #819를 닫는다.
-
-- [ ] T-VN-H28A — **#673 concierge 주소 불일치 실데이터 재분류**
-
-  H21의 인증된 reverse 경계 위에서 현재 후보 전체를 다시 실행해 과거 1,430/410 수치가 유효한지
-  재기준화한다. provider 주소/행정코드, reverse 후보·거리·경계/해상 여부, 최종 drop 원인을
-  재현 가능한 evidence manifest로 남기고 true-positive와 false-positive를 분리한다.
-
-- [ ] T-VN-H28B — **#673 검증 규칙·재적재 회복 경로**
-
-  H28A 증거를 기준으로 이름 substring 대신 authoritative 행정코드와 거리/경계 의미를 사용하는
-  provider-neutral 규칙을 설계한다. payload hash가 같아도 과거 validation drop을 재평가할 수 있는
-  replay 경로와 관측 metric을 추가하고 실제 후보 복구를 검증한 뒤 #673을 닫는다.
 
 ### T-VN-H25 — 공식 curation stale Feature reference 재해소
 

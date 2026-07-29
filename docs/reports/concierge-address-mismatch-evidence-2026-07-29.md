@@ -84,7 +84,39 @@ scp h28a_final.py n150:/home/digitie/
 `h28a_final.py`는 export 전량을 페이징 수집하고, 운영과 같은 변환·검증을 돌린 뒤 error 후보만
 독립 reverse로 재확인해 위 표를 만든다.
 
-## 6. T-VN-H28B로 넘기는 결론
+## 6. 회복 검증 (T-VN-H28B 적용 후)
+
+같은 live export를 **새 규칙 코드로** 다시 돌린 결과다.
+
+| | before (`main`) | after (branch) |
+| --- | --- | --- |
+| 후보 | 1,477 | 1,477 |
+| error(drop) | **380** | **0** |
+| warning | 701 | 0 |
+| 적재 | 1,097 | **1,477** |
+| 건별 격리 | — | 0 |
+
+- **380건 전량 회복, 손실 0.**
+- 행정코드 교차검증이 실제로 성립한 비율 **1,372/1,477 (92%)** (`evidence_grade=dual`).
+  나머지 105건은 좌표 reverse 코드가 없어 판정 불가이며 `claim_only`로 **집계된다** —
+  "통과"와 "판정 못 함"을 섞지 않는다.
+- 행정코드 불일치 **0건**. §2의 "진짜 불일치 0건"과 일치한다.
+
+### 재적재 경로 — 별도 replay 장치가 필요 없다
+
+이슈는 "payload_hash 불변이면 fast-path skip으로 회복이 막힐 수 있다"를 검토 항목으로 뒀다.
+코드로 확인한 결과 **해당하지 않는다**.
+
+1. drop은 **적재 전** 단계에서 일어나므로 dropped 후보는 `provider_sync.source_entities`에
+   행 자체가 없다(#673 본문의 관찰과 일치). 건너뛸 기존 행이 없다.
+2. concierge fetch cursor는 settings(`kor_travel_concierge_feature_cursor`, 기본 `None`)에서만
+   오고 **영속화되지 않는다**(해당 필드 description: "운영 cursor 영속화가 붙기 전"). 따라서 매
+   materialize가 cursor 없이 시작해 `changes` ledger **전량**을 재생한다(실측 1,477건).
+
+즉 규칙만 고치면 다음 materialize에서 자동 회복된다. 별도 replay 진입점을 만드는 것은 현재
+근거가 없어 만들지 않았다. cursor 영속화가 도입되면 그때 재평가해야 한다.
+
+## 7. T-VN-H28B로 넘기는 결론
 
 1. 현재 규칙의 severity를 `error`(영구 drop)로 두는 것은 **근거가 없다** — 실측 탐지력 0.
 2. 대체 규칙은 payload 행정코드와 좌표 reverse 코드를 **코드 대 코드**로 비교해야 한다.

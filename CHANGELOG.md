@@ -5,6 +5,28 @@
 
 ## [Unreleased]
 
+### 주소 검증을 행정코드 교차검증으로 교체 (2026-07-29, T-VN-H28A/B, #673)
+
+- **FIXED**: provider 후보가 주소 문자열 때문에 영구 미적재되던 문제를 해결했다. 기존 규칙은
+  좌표 역지오코딩 시군구명이 provider 주소 문자열에 부분문자열로 없으면 error → drop이었는데,
+  실측(kor-travel-concierge 1,477 후보)에서 **380건을 drop했고 380건 전부 오탐**이었다
+  (payload 행정코드와 좌표 행정코드가 전부 일치, 진짜 불일치 0건). 실패의 365/380은
+  `부산 기장 조방국밥`처럼 행정구역명이 없는 짧은 주소였다. 새 규칙 적용 후 **1,477건 전량 적재**.
+- **BEHAVIOR (breaking)**: `provider_address_mismatch` / `provider_address_partial_match`
+  issue code는 **발행 중단**됐다(기존 기록은 보존). 대신 provider 선언 행정코드와 좌표 역지오코딩
+  행정코드를 비교하는 `admin_code_conflict_{sido,sigungu,emd}`를 warning으로 방출한다.
+- **RELIABILITY**: 영구 손실(drop)·run 실패 대상이 severity가 아니라 **명시적 code
+  화이트리스트**(`DROPPABLE_ISSUE_CODES` = `reverse_geocode_failed`, `missing_address`)로
+  정해진다. 새 검증이 error를 내도 이 집합을 고치기 전에는 데이터가 사라지지 않는다.
+- **FIXED**: provider payload에 시군구코드만 있고 법정동코드가 없을 때 `Address` 코드 정합성
+  검증이 예외를 던져 **레코드 1건이 batch 전체 적재를 중단**시키던 경로를 제거했다. 법정동코드가
+  있으면 시군구·시도를 거기서만 유도하며, batch 변환에 건별 격리 옵션을 추가했다.
+- **OBSERVABILITY**: materialization metadata에 `address_validation_evidence_grades`가 추가됐다.
+  행정코드 교차검증이 실제로 성립한 건수(`dual`)와 판정하지 못한 건수를 분리해, 커버리지 부족을
+  "이상 없음"으로 오독하지 않게 한다.
+- **API**: `FeatureBundle.admin_evidence`(`AdminEvidence`) 필드가 추가됐다. 기본 `None`이며
+  기존 생성 코드는 영향받지 않는다.
+
 ### kor-travel-geo 인증 결선 검증·비밀 유출 차단 (2026-07-29, T-VN-H21)
 
 - **SECURITY**: kor-travel-geo 호출이 HTTP 오류로 실패할 때 응답 body·로그로 API key가

@@ -17,6 +17,73 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-29 (claude) — Lane A a1: T-VN-H28A/B #673 주소 검증 규칙 교체
+
+**배경**. #673은 concierge 후보 1,430건 중 410건이 `provider_address_mismatch`로 **영구
+미적재**되는 현상이다. 규칙은 좌표 reverse `sigungu_name`이 provider 주소 문자열에
+부분문자열로 없으면 error. 표본(해동용궁사)은 주소에 '기장'이 있는데도 error였다.
+
+**H28A — 실데이터 재기준화**. 운영과 **동일한 코드 경로**로 돌렸다(근사 재현 금지):
+live concierge export 전량 페이징 → `kor_travel_concierge_items_to_bundles`(실 geo reverse 주입)
+→ `validate_feature_bundles_address`. 결과 1,477 후보 / error 380 / warning 701 — 현상 유효.
+
+error 380건 각각에 대해 세 축(payload 행정코드 · 좌표 독립 reverse · 현재 규칙 판정)을 대조:
+- **380건 전부 `false_positive_code_same`**. payload 시군구코드 == geo 시군구코드, 진짜 불일치
+  **0건**. 후보 전체로 넓혀도 코드 불일치 0건(일치 1,424 / 코드 없음 53).
+- 380/380이 payload에 시군구·법정동 코드를 **모두** 보유. 권위 축이 있는데 규칙이 안 썼다.
+- reverse 최근접 거리 `<10m` 210 / `<100m` 136 / `<1km` 34. 좌표는 정확했다.
+- 실패 유형: **365/380이 행정구역명 없는 짧은 주소**(`부산 기장 조방국밥`, `부산 광안리`),
+  9건 접미사 차이(`기장` vs `기장군`), 5건은 문자열이 다른 시군구를 말함(그마저 payload 코드는
+  geo와 같았다 — **문자열 쪽이 틀렸다**).
+
+즉 규칙은 좌표-주소 일치가 아니라 **provider 주소 문자열의 완전성**을 재고 있었고, 실데이터
+전체에서 탐지력이 0인 채로 380건을 파괴하고 있었다.
+
+**중간에 자체 교정한 오류**. 1차 근사 스크립트는 `road_address`를 provider 주소로 써서 error를
+8건만 재현했다. Map의 `_provider_address`는 `raw_address`(=`Address.display()`)를 쓴다. 근사를
+버리고 실 파이프라인으로 다시 돌려 380을 얻었다. 또 geocode probe에 내가 `address` 필드를 보내
+400을 받고 "drift 발견"으로 오인할 뻔했다 — 실 client는 `road_address`/`jibun_address`를 보낸다.
+
+**H28B — 규칙 교체**. 13-에이전트 설계 워크플로(이해 5 → 설계 3 → 적대 심사 3 → 종합 → 비평)를
+돌렸고, 코드를 읽어야만 알 수 있는 세 가지가 나왔다.
+1. `_bjd_code_from_emd_code`가 region fallback 경로에서 읍면동 8자리 + `"00"`으로 법정동코드를
+   **합성**한다 → 리(8:10)는 판정 근거가 못 된다. **8자리 캡**.
+2. MOIS는 payload에 bjd가 있으면 reverse를 아예 호출하지 않는다 → 두 축이 동시에 존재하지 않는
+   provider가 있다. 커버리지를 "통과"로 세면 안 된다.
+3. `Address._check_code_consistency`는 payload에 `sigungu_code`만 있고 `legal_dong_code`가
+   없을 때 `ValidationError`를 던지는데, batch 변환에 건별 격리가 없어 **1건이 1,477건 전체를
+   죽인다**. substring 규칙보다 큰 손실 위험이었다.
+
+구현:
+- **`AdminEvidence`**(신규 DTO, `FeatureBundle`에 add-only): 판정 두 축을 `Address`로 병합하기
+  **전에** 보존한다. 근본 원인은 병합이 두 축의 독립성을 지운 것이었다.
+- **규칙**: 코드 대 코드 접두 비교(8자리 캡, claim 정밀도만큼만). 두 축이 다 있을 때만 판정하고
+  없으면 **'통과'가 아니라 '증거 없음'**(`evidence_grade_counts`). 이름 문자열 축은 판정에서
+  **제거** — 탐지력 0이 실측으로 확인됐고, warning으로 낮춰 남기면 이름 변형표를 유지하면서
+  가치 0인 경고 1,000건을 얻을 뿐이다.
+- **drop을 severity → code allowlist**(`DROPPABLE_ISSUE_CODES`). 새 error가 추가돼도 이 집합을
+  고치고 테스트를 깨기 전에는 영구 손실이 불가능하다.
+- `_address()`가 bjd 있으면 시군구/시도를 **bjd에서만** 유도 → batch 전멸 경로 구조적 제거.
+  건별 격리(`quarantine`) 옵션도 추가.
+
+**회복 검증(live)**. 같은 export를 새 코드로: **380 drop → 0, 1,477/1,477 적재, 손실 0.**
+교차검증 성립 1,372/1,477(**92%**), 행정코드 불일치 0건, 건별 격리 0건.
+
+**replay 장치는 만들지 않았다**. task 문구는 "payload hash가 같아도 재평가할 replay 경로"를
+요구했지만 코드로 확인한 결과 불필요하다 — drop은 적재 **전**이라 dropped 후보는
+`source_entities`에 행이 없고, concierge cursor는 settings에서만 오고 영속화되지 않아
+(`kor_travel_concierge_feature_cursor` description: "운영 cursor 영속화가 붙기 전") 매
+materialize가 ledger 전량을 재생한다. 근거 없는 장치를 만드는 대신 이 사실을 리포트에 기록했다.
+
+**범위**. 설계 종합은 4개 PR(관측 ledger 테이블 + alembic, 증거 채널, 규칙, 오프라인 containment
+감사)을 제안했으나 사용자 지시대로 한 PR로 묶되 **증거가 요구하는 핵심**만 담았다. durable
+ledger 테이블·오프라인 기하 감사·타 provider `AdminEvidence` 채움·error 승격 게이트는 후속으로
+남기고 리포트에 명시했다.
+
+**검증**. n150 CI-parity — ruff / mypy --strict(core 117 · dagster 23) / dagster 494 passed +
+1 skipped / 관련 unit 179 passed. 신규 회귀 25건(오탐 재발 방지 · 단계별 탐지 · 정밀도 규칙 ·
+커버리지 집계 · allowlist 불변).
+
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H21 geo 인증 결선 검증·비밀 유출 차단
 
 **배경**. T-VN-H21의 열린 질문은 "첫 400 blocker(`E0100 query.key`)를 넘긴 뒤 runtime 계약에
