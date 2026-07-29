@@ -104,7 +104,7 @@ function datetimeLocalIsoValue(value: string): string | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
-export function ExecutionTimeline({
+function useExecutionTimelineController({
   initialFilters,
   initialLoadBatchId,
   initialParentJobId,
@@ -410,6 +410,64 @@ export function ExecutionTimeline({
     [onSelectExecution],
   );
 
+  return {
+    columns,
+    createdFrom,
+    createdTo,
+    cursorStack,
+    datasetFilter,
+    datasetKey,
+    executions,
+    goNextPage,
+    kind,
+    loadBatchId,
+    newCount,
+    newCountLabel,
+    nextCursor,
+    onSelectExecution,
+    onUrlChange,
+    parentJobId,
+    provider,
+    providerFilter,
+    resetToFirstPage,
+    rows,
+    selectedExecutionId,
+    setDrafts,
+    setStoredBaselineTop,
+    setStoredCursorStack,
+    status,
+    syncScope,
+  };
+}
+
+function ExecutionTimelineView({
+  columns,
+  createdFrom,
+  createdTo,
+  cursorStack,
+  datasetFilter,
+  datasetKey,
+  executions,
+  goNextPage,
+  kind,
+  loadBatchId,
+  newCount,
+  newCountLabel,
+  nextCursor,
+  onSelectExecution,
+  onUrlChange,
+  parentJobId,
+  provider,
+  providerFilter,
+  resetToFirstPage,
+  rows,
+  selectedExecutionId,
+  setDrafts,
+  setStoredBaselineTop,
+  setStoredCursorStack,
+  status,
+  syncScope,
+}: ReturnType<typeof useExecutionTimelineController>) {
   return (
     <Card>
       <CardHeader>
@@ -665,4 +723,27 @@ export function ExecutionTimeline({
       </CardContent>
     </Card>
   );
+}
+
+export function ExecutionTimeline({
+  initialFilters,
+  initialLoadBatchId,
+  initialParentJobId,
+  selectedExecutionId,
+  onSelectExecution,
+  onUrlChange,
+}: {
+  initialFilters: TimelineFilters;
+  initialLoadBatchId?: string;
+  initialParentJobId?: string;
+  selectedExecutionId: string | null;
+  onSelectExecution: (
+    kind: ExecutionKind,
+    id: string,
+    focusExecutionId?: string,
+  ) => void;
+  onUrlChange: (updates: TimelineUrlUpdates, mode?: "push" | "replace") => void;
+}) {
+  const controller = useExecutionTimelineController({ initialFilters, initialLoadBatchId, initialParentJobId, selectedExecutionId, onSelectExecution, onUrlChange });
+  return <ExecutionTimelineView {...controller} />;
 }

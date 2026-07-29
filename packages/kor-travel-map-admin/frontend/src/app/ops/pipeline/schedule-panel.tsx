@@ -215,7 +215,7 @@ function claimRecoveryFromConflict(
   return { scheduleName, commandId: commandId.trim() };
 }
 
-export function SchedulePanel({
+function useSchedulePanelController({
   highlightSchedule,
   onHighlightSchedule,
 }: {
@@ -576,13 +576,65 @@ export function SchedulePanel({
     );
   };
 
+  return {
+    claimResolution,
+    claimResolutionReason,
+    commandReasons,
+    commandSchedule,
+    cronDraft,
+    data,
+    editReason,
+    editing,
+    failedResult,
+    frozenClaimResolution,
+    frozenScheduleMutation,
+    highlightRef,
+    highlightSchedule,
+    lastResult,
+    openEdit,
+    patchSchedule,
+    recoveryClaim,
+    resolveClaim,
+    retryFrozenScheduleMutation,
+    scheduleControlsDisabled,
+    scheduleItems,
+    scheduleStateScanned,
+    schedules,
+    sensors,
+    setClaimResolution,
+    setClaimResolutionReason,
+    setCommandReasons,
+    setCronDraft,
+    setEditReason,
+    setEditing,
+    submitClaimResolution,
+    submitCommand,
+    submitCronPatch,
+  };
+}
+
+function ScheduleEditor({
+  claimResolution,
+  claimResolutionReason,
+  commandSchedule,
+  data,
+  failedResult,
+  frozenClaimResolution,
+  frozenScheduleMutation,
+  lastResult,
+  patchSchedule,
+  recoveryClaim,
+  resolveClaim,
+  retryFrozenScheduleMutation,
+  scheduleStateScanned,
+  schedules,
+  setClaimResolution,
+  setClaimResolutionReason,
+  submitClaimResolution,
+}: Pick<ReturnType<typeof useSchedulePanelController>, "claimResolution" | "claimResolutionReason" | "commandSchedule" | "data" | "failedResult" | "frozenClaimResolution" | "frozenScheduleMutation" | "lastResult" | "patchSchedule" | "recoveryClaim" | "resolveClaim" | "retryFrozenScheduleMutation" | "scheduleStateScanned" | "schedules" | "setClaimResolution" | "setClaimResolutionReason" | "submitClaimResolution">) {
   return (
-    <div
-      className="space-y-4"
-      data-schedule-state-scanned={scheduleStateScanned ? "true" : "false"}
-      data-testid="pipeline-schedule-panel"
-    >
-      {schedules.isError ? (
+    <>
+{schedules.isError ? (
         <Alert variant="destructive">
           <AlertTitle>스케줄 목록 호출 실패</AlertTitle>
           <AlertDescription>{schedules.error.message}</AlertDescription>
@@ -758,8 +810,17 @@ export function SchedulePanel({
           <AlertDescription>{resolveClaim.error.message}</AlertDescription>
         </Alert>
       ) : null}
+    </>
+  );
+}
 
-      <Card>
+function ScheduleSummary({
+  schedules,
+  sensors,
+}: Pick<ReturnType<typeof useSchedulePanelController>, "schedules" | "sensors">) {
+  return (
+    <>
+<Card>
         <CardHeader>
           <CardTitle>센서</CardTitle>
           <CardDescription>
@@ -793,8 +854,24 @@ export function SchedulePanel({
           )}
         </CardContent>
       </Card>
+    </>
+  );
+}
 
-      <Card>
+function ScheduleTable({
+  commandReasons,
+  highlightRef,
+  highlightSchedule,
+  openEdit,
+  scheduleControlsDisabled,
+  scheduleItems,
+  schedules,
+  setCommandReasons,
+  submitCommand,
+}: Pick<ReturnType<typeof useSchedulePanelController>, "commandReasons" | "highlightRef" | "highlightSchedule" | "openEdit" | "scheduleControlsDisabled" | "scheduleItems" | "schedules" | "setCommandReasons" | "submitCommand">) {
+  return (
+    <>
+<Card>
         <CardHeader>
           <CardTitle>스케줄</CardTitle>
           <CardDescription>
@@ -934,8 +1011,23 @@ export function SchedulePanel({
           })}
         </CardContent>
       </Card>
+    </>
+  );
+}
 
-      <Dialog
+function ScheduleDeleteDialog({
+  cronDraft,
+  editReason,
+  editing,
+  scheduleControlsDisabled,
+  setCronDraft,
+  setEditReason,
+  setEditing,
+  submitCronPatch,
+}: Pick<ReturnType<typeof useSchedulePanelController>, "cronDraft" | "editReason" | "editing" | "scheduleControlsDisabled" | "setCronDraft" | "setEditReason" | "setEditing" | "submitCronPatch">) {
+  return (
+    <>
+<Dialog
         open={editing !== null}
         onOpenChange={(next) => {
           if (!next) {
@@ -1012,6 +1104,69 @@ export function SchedulePanel({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </>
+  );
+}
+
+function SchedulePanelView({
+  claimResolution,
+  claimResolutionReason,
+  commandReasons,
+  commandSchedule,
+  cronDraft,
+  data,
+  editReason,
+  editing,
+  failedResult,
+  frozenClaimResolution,
+  frozenScheduleMutation,
+  highlightRef,
+  highlightSchedule,
+  lastResult,
+  openEdit,
+  patchSchedule,
+  recoveryClaim,
+  resolveClaim,
+  retryFrozenScheduleMutation,
+  scheduleControlsDisabled,
+  scheduleItems,
+  scheduleStateScanned,
+  schedules,
+  sensors,
+  setClaimResolution,
+  setClaimResolutionReason,
+  setCommandReasons,
+  setCronDraft,
+  setEditReason,
+  setEditing,
+  submitClaimResolution,
+  submitCommand,
+  submitCronPatch,
+}: ReturnType<typeof useSchedulePanelController>) {
+  return (
+    <div
+      className="space-y-4"
+      data-schedule-state-scanned={scheduleStateScanned ? "true" : "false"}
+      data-testid="pipeline-schedule-panel"
+    >
+      <ScheduleEditor claimResolution={claimResolution} claimResolutionReason={claimResolutionReason} commandSchedule={commandSchedule} data={data} failedResult={failedResult} frozenClaimResolution={frozenClaimResolution} frozenScheduleMutation={frozenScheduleMutation} lastResult={lastResult} patchSchedule={patchSchedule} recoveryClaim={recoveryClaim} resolveClaim={resolveClaim} retryFrozenScheduleMutation={retryFrozenScheduleMutation} scheduleStateScanned={scheduleStateScanned} schedules={schedules} setClaimResolution={setClaimResolution} setClaimResolutionReason={setClaimResolutionReason} submitClaimResolution={submitClaimResolution} />
+
+      <ScheduleSummary schedules={schedules} sensors={sensors} />
+
+      <ScheduleTable commandReasons={commandReasons} highlightRef={highlightRef} highlightSchedule={highlightSchedule} openEdit={openEdit} scheduleControlsDisabled={scheduleControlsDisabled} scheduleItems={scheduleItems} schedules={schedules} setCommandReasons={setCommandReasons} submitCommand={submitCommand} />
+
+      <ScheduleDeleteDialog cronDraft={cronDraft} editReason={editReason} editing={editing} scheduleControlsDisabled={scheduleControlsDisabled} setCronDraft={setCronDraft} setEditReason={setEditReason} setEditing={setEditing} submitCronPatch={submitCronPatch} />
     </div>
   );
+}
+
+export function SchedulePanel({
+  highlightSchedule,
+  onHighlightSchedule,
+}: {
+  highlightSchedule?: string;
+  onHighlightSchedule: (scheduleName: string) => void;
+}) {
+  const controller = useSchedulePanelController({ highlightSchedule, onHighlightSchedule });
+  return <SchedulePanelView {...controller} />;
 }

@@ -7,10 +7,7 @@ const FRONTEND_ROOT = new URL(
 );
 const CONFIG_PATH = new URL("doctor.config.json", FRONTEND_ROOT);
 const ROOT_PACKAGE_PATH = new URL("package.json", REPOSITORY_ROOT);
-const FRONTEND_PACKAGE_PATH = new URL(
-  "package.json",
-  FRONTEND_ROOT,
-);
+const FRONTEND_PACKAGE_PATH = new URL("package.json", FRONTEND_ROOT);
 const ROOT_GITATTRIBUTES_PATH = new URL(".gitattributes", REPOSITORY_ROOT);
 const FRONTEND_GITIGNORE_PATH = new URL(".gitignore", FRONTEND_ROOT);
 const CONFIG_FILENAMES = [
@@ -43,38 +40,6 @@ const EXPECTED_CONFIG = {
           "react-doctor/effect-needs-cleanup",
           "react-doctor/no-fetch-in-effect",
         ],
-      },
-      {
-        files: [
-          "src/app/admin/dedup-reviews/dedup-review-client.tsx",
-          "src/app/admin/enrichment-reviews/enrichment-review-client.tsx",
-          "src/app/admin/features/admin-features-client.tsx",
-          "src/app/admin/features/change-requests/feature-change-requests-client.tsx",
-          "src/app/admin/features/curated/curation-collections-client.tsx",
-          "src/app/admin/features/new/feature-create-client.tsx",
-          "src/app/admin/files/files-client.tsx",
-          "src/app/admin/issues/admin-issues-client.tsx",
-          "src/app/admin/offline-uploads/offline-uploads-client.tsx",
-          "src/app/admin/poi-cache-targets/poi-cache-targets-client.tsx",
-          "src/app/curated-features/curated-feature-map-client.tsx",
-          "src/app/features/features-client.tsx",
-          "src/app/home-client.tsx",
-          "src/app/ops/datasets/datasets-client.tsx",
-          "src/app/ops/logs/logs-client.tsx",
-          "src/app/ops/pipeline/execution-detail-panel.tsx",
-          "src/app/ops/pipeline/execution-timeline.tsx",
-          "src/app/ops/pipeline/request-dialog.tsx",
-          "src/app/ops/pipeline/schedule-panel.tsx",
-        ],
-        rules: ["react-doctor/no-giant-component"],
-      },
-      {
-        files: [
-          "src/app/admin/dedup-reviews/dedup-review-client.tsx",
-          "src/app/admin/features/new/feature-create-client.tsx",
-          "src/app/admin/issues/admin-issues-client.tsx",
-        ],
-        rules: ["react-doctor/prefer-useReducer"],
       },
       {
         files: ["src/app/ops/datasets/datasets-client.tsx"],

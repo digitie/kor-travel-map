@@ -217,7 +217,7 @@ function MoisPrecheckNotice({
   );
 }
 
-export function RequestCreateDialog({
+function useRequestCreateDialogController({
   onCreated,
 }: {
   onCreated: (kind: ExecutionKind, id: string) => void;
@@ -629,25 +629,111 @@ export function RequestCreateDialog({
   const created = matchingCreate ? createRequest.data?.data : undefined;
   const preview = matchingPreview ? previewRequest.data?.data : undefined;
 
+  return {
+    cacheRadiusKm,
+    cacheScopeMode,
+    catalogQuery,
+    closeDialog,
+    conflictRequestId,
+    createRequest,
+    created,
+    datasetKeys,
+    dryRun,
+    explicitScopeSupported,
+    externalSystem,
+    featureIdsText,
+    formError,
+    handleOpenChange,
+    lat,
+    lon,
+    maxLat,
+    maxLon,
+    minLat,
+    minLon,
+    moisPrecheck,
+    moisSelected,
+    onCreated,
+    open,
+    openDialog,
+    preview,
+    previewRequest,
+    priority,
+    providerDatasetOptions,
+    providerOptions,
+    providers,
+    radiusKm,
+    reason,
+    requestError,
+    retryAfterSeconds,
+    runMode,
+    scopeDataset,
+    scopeProvider,
+    scopeSyncScope,
+    scopeType,
+    selectedScopeCapability,
+    setCacheRadiusKm,
+    setCacheScopeMode,
+    setDatasetKeys,
+    setDryRun,
+    setExternalSystem,
+    setFeatureIdsText,
+    setFormError,
+    setLat,
+    setLon,
+    setMaxLat,
+    setMaxLon,
+    setMinLat,
+    setMinLon,
+    setPriority,
+    setProviders,
+    setRadiusKm,
+    setReason,
+    setRunMode,
+    setScopeDataset,
+    setScopeProvider,
+    setScopeSyncScope,
+    setScopeType,
+    setTargetKeysText,
+    submit,
+    submittingPrecheck,
+    targetKeysText,
+  };
+}
+
+function RequestIdentityFields({
+  explicitScopeSupported,
+  featureIdsText,
+  lat,
+  lon,
+  maxLat,
+  maxLon,
+  minLat,
+  minLon,
+  providerDatasetOptions,
+  providerOptions,
+  radiusKm,
+  scopeDataset,
+  scopeProvider,
+  scopeSyncScope,
+  scopeType,
+  selectedScopeCapability,
+  setFeatureIdsText,
+  setFormError,
+  setLat,
+  setLon,
+  setMaxLat,
+  setMaxLon,
+  setMinLat,
+  setMinLon,
+  setRadiusKm,
+  setScopeDataset,
+  setScopeProvider,
+  setScopeSyncScope,
+  setScopeType,
+}: Pick<ReturnType<typeof useRequestCreateDialogController>, "explicitScopeSupported" | "featureIdsText" | "lat" | "lon" | "maxLat" | "maxLon" | "minLat" | "minLon" | "providerDatasetOptions" | "providerOptions" | "radiusKm" | "scopeDataset" | "scopeProvider" | "scopeSyncScope" | "scopeType" | "selectedScopeCapability" | "setFeatureIdsText" | "setFormError" | "setLat" | "setLon" | "setMaxLat" | "setMaxLon" | "setMinLat" | "setMinLon" | "setRadiusKm" | "setScopeDataset" | "setScopeProvider" | "setScopeSyncScope" | "setScopeType">) {
   return (
     <>
-      <Button type="button" onClick={openDialog}>
-        <PlayIcon data-icon="inline-start" />
-        갱신 요청 생성
-      </Button>
-      <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>갱신 요청 생성</DialogTitle>
-            <DialogDescription>
-              6종 scope 전부 선택 가능 — dry-run으로 대상 수를 먼저 확인하세요.
-            </DialogDescription>
-          </DialogHeader>
-          <fieldset
-            className="m-0 flex min-w-0 max-h-[65vh] flex-col gap-3 overflow-y-auto border-0 p-0 pr-1"
-            disabled={createRequest.isPending || submittingPrecheck}
-          >
-            <FormSelect
+<FormSelect
               label="scope 유형"
               value={scopeType}
               onChange={(event) => {
@@ -786,8 +872,38 @@ export function RequestCreateDialog({
                 />
               </label>
             ) : null}
+    </>
+  );
+}
 
-            {scopeType === "cache_target_keys" ? (
+function RequestTargetFields({
+  cacheRadiusKm,
+  cacheScopeMode,
+  catalogQuery,
+  datasetKeys,
+  dryRun,
+  externalSystem,
+  priority,
+  providerOptions,
+  providers,
+  reason,
+  runMode,
+  scopeType,
+  setCacheRadiusKm,
+  setCacheScopeMode,
+  setDatasetKeys,
+  setDryRun,
+  setExternalSystem,
+  setPriority,
+  setProviders,
+  setReason,
+  setRunMode,
+  setTargetKeysText,
+  targetKeysText,
+}: Pick<ReturnType<typeof useRequestCreateDialogController>, "cacheRadiusKm" | "cacheScopeMode" | "catalogQuery" | "datasetKeys" | "dryRun" | "externalSystem" | "priority" | "providerOptions" | "providers" | "reason" | "runMode" | "scopeType" | "setCacheRadiusKm" | "setCacheScopeMode" | "setDatasetKeys" | "setDryRun" | "setExternalSystem" | "setPriority" | "setProviders" | "setReason" | "setRunMode" | "setTargetKeysText" | "targetKeysText">) {
+  return (
+    <>
+{scopeType === "cache_target_keys" ? (
               <>
                 <FormField
                   label="external_system"
@@ -900,8 +1016,27 @@ export function RequestCreateDialog({
               />
               dry-run(행을 만들지 않고 대상 수만 확인)
             </label>
+    </>
+  );
+}
 
-            {catalogQuery.isError ? (
+function RequestExecutionFields({
+  catalogQuery,
+  closeDialog,
+  conflictRequestId,
+  createRequest,
+  created,
+  formError,
+  moisPrecheck,
+  moisSelected,
+  onCreated,
+  preview,
+  requestError,
+  retryAfterSeconds,
+}: Pick<ReturnType<typeof useRequestCreateDialogController>, "catalogQuery" | "closeDialog" | "conflictRequestId" | "createRequest" | "created" | "formError" | "moisPrecheck" | "moisSelected" | "onCreated" | "preview" | "requestError" | "retryAfterSeconds">) {
+  return (
+    <>
+{catalogQuery.isError ? (
               <Alert variant="destructive">
                 <AlertTitle>canonical catalog 조회 실패</AlertTitle>
                 <AlertDescription>
@@ -995,6 +1130,102 @@ export function RequestCreateDialog({
                 </AlertDescription>
               </Alert>
             ) : null}
+    </>
+  );
+}
+
+function RequestCreateDialogView({
+  cacheRadiusKm,
+  cacheScopeMode,
+  catalogQuery,
+  closeDialog,
+  conflictRequestId,
+  createRequest,
+  created,
+  datasetKeys,
+  dryRun,
+  explicitScopeSupported,
+  externalSystem,
+  featureIdsText,
+  formError,
+  handleOpenChange,
+  lat,
+  lon,
+  maxLat,
+  maxLon,
+  minLat,
+  minLon,
+  moisPrecheck,
+  moisSelected,
+  onCreated,
+  open,
+  openDialog,
+  preview,
+  previewRequest,
+  priority,
+  providerDatasetOptions,
+  providerOptions,
+  providers,
+  radiusKm,
+  reason,
+  requestError,
+  retryAfterSeconds,
+  runMode,
+  scopeDataset,
+  scopeProvider,
+  scopeSyncScope,
+  scopeType,
+  selectedScopeCapability,
+  setCacheRadiusKm,
+  setCacheScopeMode,
+  setDatasetKeys,
+  setDryRun,
+  setExternalSystem,
+  setFeatureIdsText,
+  setFormError,
+  setLat,
+  setLon,
+  setMaxLat,
+  setMaxLon,
+  setMinLat,
+  setMinLon,
+  setPriority,
+  setProviders,
+  setRadiusKm,
+  setReason,
+  setRunMode,
+  setScopeDataset,
+  setScopeProvider,
+  setScopeSyncScope,
+  setScopeType,
+  setTargetKeysText,
+  submit,
+  submittingPrecheck,
+  targetKeysText,
+}: ReturnType<typeof useRequestCreateDialogController>) {
+  return (
+    <>
+      <Button type="button" onClick={openDialog}>
+        <PlayIcon data-icon="inline-start" />
+        갱신 요청 생성
+      </Button>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>갱신 요청 생성</DialogTitle>
+            <DialogDescription>
+              6종 scope 전부 선택 가능 — dry-run으로 대상 수를 먼저 확인하세요.
+            </DialogDescription>
+          </DialogHeader>
+          <fieldset
+            className="m-0 flex min-w-0 max-h-[65vh] flex-col gap-3 overflow-y-auto border-0 p-0 pr-1"
+            disabled={createRequest.isPending || submittingPrecheck}
+          >
+            <RequestIdentityFields explicitScopeSupported={explicitScopeSupported} featureIdsText={featureIdsText} lat={lat} lon={lon} maxLat={maxLat} maxLon={maxLon} minLat={minLat} minLon={minLon} providerDatasetOptions={providerDatasetOptions} providerOptions={providerOptions} radiusKm={radiusKm} scopeDataset={scopeDataset} scopeProvider={scopeProvider} scopeSyncScope={scopeSyncScope} scopeType={scopeType} selectedScopeCapability={selectedScopeCapability} setFeatureIdsText={setFeatureIdsText} setFormError={setFormError} setLat={setLat} setLon={setLon} setMaxLat={setMaxLat} setMaxLon={setMaxLon} setMinLat={setMinLat} setMinLon={setMinLon} setRadiusKm={setRadiusKm} setScopeDataset={setScopeDataset} setScopeProvider={setScopeProvider} setScopeSyncScope={setScopeSyncScope} setScopeType={setScopeType} />
+
+            <RequestTargetFields cacheRadiusKm={cacheRadiusKm} cacheScopeMode={cacheScopeMode} catalogQuery={catalogQuery} datasetKeys={datasetKeys} dryRun={dryRun} externalSystem={externalSystem} priority={priority} providerOptions={providerOptions} providers={providers} reason={reason} runMode={runMode} scopeType={scopeType} setCacheRadiusKm={setCacheRadiusKm} setCacheScopeMode={setCacheScopeMode} setDatasetKeys={setDatasetKeys} setDryRun={setDryRun} setExternalSystem={setExternalSystem} setPriority={setPriority} setProviders={setProviders} setReason={setReason} setRunMode={setRunMode} setTargetKeysText={setTargetKeysText} targetKeysText={targetKeysText} />
+
+            <RequestExecutionFields catalogQuery={catalogQuery} closeDialog={closeDialog} conflictRequestId={conflictRequestId} createRequest={createRequest} created={created} formError={formError} moisPrecheck={moisPrecheck} moisSelected={moisSelected} onCreated={onCreated} preview={preview} requestError={requestError} retryAfterSeconds={retryAfterSeconds} />
           </fieldset>
           <DialogFooter>
             <Button
@@ -1023,4 +1254,13 @@ export function RequestCreateDialog({
       </Dialog>
     </>
   );
+}
+
+export function RequestCreateDialog({
+  onCreated,
+}: {
+  onCreated: (kind: ExecutionKind, id: string) => void;
+}) {
+  const controller = useRequestCreateDialogController({ onCreated });
+  return <RequestCreateDialogView {...controller} />;
 }

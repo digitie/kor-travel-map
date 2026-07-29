@@ -392,7 +392,7 @@ function policyRevisionConflict(error: Error): PolicyRevisionConflict | null {
   };
 }
 
-function PolicyEditor({
+function usePolicyEditorController({
   provider,
   datasetKey,
   policy,
@@ -596,9 +596,40 @@ function PolicyEditor({
     submitPolicyIfAllowed(saveGuard, submitAllowedPolicy);
   };
 
+  return {
+    datasetKey,
+    draft,
+    draftBaseRevision,
+    error,
+    fieldErrors,
+    hasDeferredServerPolicy,
+    lastSavedAt,
+    latestObservedPolicy,
+    latestObservedRevision,
+    mutationBlockedReason,
+    provider,
+    rebaseLocalDraftOnLatest,
+    reconcileMessage,
+    reloadLatestPolicy,
+    revisionConflict,
+    saveBlocked,
+    setField,
+    submit,
+    upsertPolicy,
+  };
+}
+
+function PolicyIdentityFields({
+  datasetKey,
+  draft,
+  fieldErrors,
+  latestObservedPolicy,
+  provider,
+  setField,
+}: Pick<ReturnType<typeof usePolicyEditorController>, "datasetKey" | "draft" | "fieldErrors" | "latestObservedPolicy" | "provider" | "setField">) {
   return (
-    <div className="rounded-xl bg-surface-subtle p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+    <>
+<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="font-medium">갱신 정책</div>
           <div className="font-mono text-xs text-text-secondary">
@@ -748,7 +779,24 @@ function PolicyEditor({
           활성화
         </label>
       </div>
-      {latestObservedPolicy ? (
+    </>
+  );
+}
+
+function PolicyScopeFields({
+  draftBaseRevision,
+  hasDeferredServerPolicy,
+  latestObservedPolicy,
+  latestObservedRevision,
+  mutationBlockedReason,
+  rebaseLocalDraftOnLatest,
+  reconcileMessage,
+  reloadLatestPolicy,
+  revisionConflict,
+}: Pick<ReturnType<typeof usePolicyEditorController>, "draftBaseRevision" | "hasDeferredServerPolicy" | "latestObservedPolicy" | "latestObservedRevision" | "mutationBlockedReason" | "rebaseLocalDraftOnLatest" | "reconcileMessage" | "reloadLatestPolicy" | "revisionConflict">) {
+  return (
+    <>
+{latestObservedPolicy ? (
         <div className="mt-4 rounded-md bg-card p-3 text-xs text-text-secondary">
           <div className="mb-1 font-medium text-text-primary">
             출처(provenance) — 서버 기록, 편집 불가
@@ -853,7 +901,21 @@ function PolicyEditor({
           <AlertDescription>{reconcileMessage}</AlertDescription>
         </Alert>
       ) : null}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+    </>
+  );
+}
+
+function PolicyEditorActions({
+  error,
+  lastSavedAt,
+  revisionConflict,
+  saveBlocked,
+  submit,
+  upsertPolicy,
+}: Pick<ReturnType<typeof usePolicyEditorController>, "error" | "lastSavedAt" | "revisionConflict" | "saveBlocked" | "submit" | "upsertPolicy">) {
+  return (
+    <>
+<div className="mt-4 flex flex-wrap items-center gap-2">
         <Button
           disabled={upsertPolicy.isPending || saveBlocked}
           type="button"
@@ -874,8 +936,53 @@ function PolicyEditor({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
+    </>
+  );
+}
+
+function PolicyEditorView({
+  datasetKey,
+  draft,
+  draftBaseRevision,
+  error,
+  fieldErrors,
+  hasDeferredServerPolicy,
+  lastSavedAt,
+  latestObservedPolicy,
+  latestObservedRevision,
+  mutationBlockedReason,
+  provider,
+  rebaseLocalDraftOnLatest,
+  reconcileMessage,
+  reloadLatestPolicy,
+  revisionConflict,
+  saveBlocked,
+  setField,
+  submit,
+  upsertPolicy,
+}: ReturnType<typeof usePolicyEditorController>) {
+  return (
+    <div className="rounded-xl bg-surface-subtle p-4">
+      <PolicyIdentityFields datasetKey={datasetKey} draft={draft} fieldErrors={fieldErrors} latestObservedPolicy={latestObservedPolicy} provider={provider} setField={setField} />
+      <PolicyScopeFields draftBaseRevision={draftBaseRevision} hasDeferredServerPolicy={hasDeferredServerPolicy} latestObservedPolicy={latestObservedPolicy} latestObservedRevision={latestObservedRevision} mutationBlockedReason={mutationBlockedReason} rebaseLocalDraftOnLatest={rebaseLocalDraftOnLatest} reconcileMessage={reconcileMessage} reloadLatestPolicy={reloadLatestPolicy} revisionConflict={revisionConflict} />
+      <PolicyEditorActions error={error} lastSavedAt={lastSavedAt} revisionConflict={revisionConflict} saveBlocked={saveBlocked} submit={submit} upsertPolicy={upsertPolicy} />
     </div>
   );
+}
+
+function PolicyEditor({
+  provider,
+  datasetKey,
+  policy,
+  mutationBlockedReason,
+}: {
+  provider: string;
+  datasetKey: string;
+  policy: ProviderRefreshPolicyRecord | null | undefined;
+  mutationBlockedReason: string | null;
+}) {
+  const controller = usePolicyEditorController({ provider, datasetKey, policy, mutationBlockedReason });
+  return <PolicyEditorView {...controller} />;
 }
 
 // ── ETL 미리보기 (POST /ops/datasets/preview?provider=&dataset_key=) ─────
@@ -1789,7 +1896,7 @@ function DatasetDrawer({
 
 type StatusFilter = "" | "failing" | "stale" | "never_run" | "issues";
 
-export function DatasetsClient({
+function useDatasetsClientController({
   initialDataset = null,
   initialPanel = null,
   initialProvider = null,
@@ -2258,6 +2365,48 @@ export function DatasetsClient({
     [activeSelection, applySelection],
   );
 
+  return {
+    activePanel,
+    activeSelection,
+    applySelection,
+    closeDetail,
+    columns,
+    datasets,
+    detail,
+    filteredItems,
+    gridActions,
+    items,
+    live,
+    q,
+    selectionCanonicalizing,
+    selectionResolution,
+    setQ,
+    setStatusFilter,
+    statusFilter,
+    summary,
+  };
+}
+
+function DatasetsClientView({
+  activePanel,
+  activeSelection,
+  applySelection,
+  closeDetail,
+  columns,
+  datasets,
+  detail,
+  filteredItems,
+  gridActions,
+  items,
+  live,
+  q,
+  selectionCanonicalizing,
+  selectionResolution,
+  setQ,
+  setStatusFilter,
+  statusFilter,
+  summary,
+}: ReturnType<typeof useDatasetsClientController>) {
   return (
     <AdminShell
       actions={
@@ -2432,4 +2581,19 @@ export function DatasetsClient({
       </div>
     </AdminShell>
   );
+}
+
+export function DatasetsClient({
+  initialDataset = null,
+  initialPanel = null,
+  initialProvider = null,
+  initialSyncScope = null,
+}: {
+  initialDataset?: string | null;
+  initialPanel?: string | null;
+  initialProvider?: string | null;
+  initialSyncScope?: string | null;
+}) {
+  const controller = useDatasetsClientController({ initialDataset, initialPanel, initialProvider, initialSyncScope });
+  return <DatasetsClientView {...controller} />;
 }
