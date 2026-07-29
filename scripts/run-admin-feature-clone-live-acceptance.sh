@@ -247,19 +247,22 @@ done < <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$D
   die "clone DB password is invalid"
 readonly ORIGINAL_DB_NAME="$db_name"
 PSQL_APP_NAME=""
+PSQL_SESSION_OPTIONS=""
 
 psql_query() {
   local query="$1"
   PGPASSWORD="$db_password" \
+    PGOPTIONS="$PSQL_SESSION_OPTIONS" \
     PGAPPNAME="$PSQL_APP_NAME" \
-    docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
+    docker exec -e PGPASSWORD -e PGOPTIONS -e PGAPPNAME "$DB_CONTAINER" \
     psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$db_name" -c "$query"
 }
 
 psql_stream() {
   PGPASSWORD="$db_password" \
+    PGOPTIONS="$PSQL_SESSION_OPTIONS" \
     PGAPPNAME="$PSQL_APP_NAME" \
-    docker exec -i -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
+    docker exec -i -e PGPASSWORD -e PGOPTIONS -e PGAPPNAME "$DB_CONTAINER" \
     psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$db_name"
 }
 
@@ -762,6 +765,7 @@ readonly VERIFICATION_STATE="$STATE_ROOT/checkpoint-scratch.json"
 readonly CHECKPOINT_QUIESCENCE_STATE="$STATE_ROOT/checkpoint-quiescence.json"
 CHECKPOINT_QUIESCENCE_APP=""
 CHECKPOINT_QUIESCENCE_PROCESS=""
+CHECKPOINT_FENCE_PASSWORD=""
 CHECKPOINT_LOGIN_FENCED=0
 CHECKPOINT_DUMP_DURABLE=0
 BLOCKED_WRITTEN=0
@@ -922,7 +926,7 @@ owned_networks() {
     wc -l
 }
 
-foreign_db_sessions() {
+foreign_cluster_sessions() {
   local quiescence_filter=""
   if [[ -n "$CHECKPOINT_QUIESCENCE_APP" ]]; then
     [[ "$CHECKPOINT_QUIESCENCE_APP" =~ ^ktm_checkpoint_[0-9a-f]{16}$ ]] ||
@@ -933,10 +937,58 @@ foreign_db_sessions() {
   psql_value "
     SELECT count(*)
     FROM pg_catalog.pg_stat_activity
-    WHERE datname = current_database()
-      AND pid <> pg_backend_pid()
+    WHERE pid <> pg_backend_pid()
       AND backend_type = 'client backend'
       $quiescence_filter
+  "
+}
+
+checkpoint_login_role_invariant() {
+  [[ "$(
+    psql_value "
+      SELECT count(*)
+      FROM pg_catalog.pg_roles
+      WHERE rolcanlogin
+    "
+  )" == "1" ]] || return 1
+  [[ "$(
+    psql_value "
+      SELECT count(*)
+      FROM pg_catalog.pg_roles
+      WHERE rolcanlogin
+        AND rolname = '$db_user'
+    "
+  )" == "1" ]]
+}
+
+checkpoint_read_only_setting_count() {
+  psql_value "
+    SELECT count(*)
+    FROM pg_catalog.pg_db_role_setting AS setting
+    CROSS JOIN LATERAL unnest(setting.setconfig) AS configuration(value)
+    WHERE setting.setdatabase = (
+      SELECT oid
+      FROM pg_catalog.pg_database
+      WHERE datname = '$ORIGINAL_DB_NAME'
+    )
+      AND setting.setrole = 0
+      AND configuration.value = 'default_transaction_read_only=on'
+  "
+}
+
+checkpoint_transaction_setting_count() {
+  psql_value "
+    SELECT count(*)
+    FROM pg_catalog.pg_db_role_setting AS setting
+    CROSS JOIN LATERAL unnest(setting.setconfig) AS configuration(value)
+    WHERE setting.setdatabase = (
+      SELECT oid
+      FROM pg_catalog.pg_database
+      WHERE datname = '$ORIGINAL_DB_NAME'
+    )
+      AND setting.setrole = 0
+      AND split_part(configuration.value, '=', 1) =
+        'default_transaction_read_only'
   "
 }
 
@@ -951,10 +1003,12 @@ set_clone_database_password() {
   local role_password="$1"
   KTM_CHECKPOINT_DB_ROLE_PASSWORD="$role_password" \
     PGPASSWORD="$db_password" \
+    PGOPTIONS="$PSQL_SESSION_OPTIONS" \
     PGAPPNAME="$PSQL_APP_NAME" \
     docker exec -i \
     -e KTM_CHECKPOINT_DB_ROLE_PASSWORD \
     -e PGPASSWORD \
+    -e PGOPTIONS \
     -e PGAPPNAME \
     "$DB_CONTAINER" \
     psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$ORIGINAL_DB_NAME" \
@@ -964,13 +1018,23 @@ ALTER ROLE "$db_user" PASSWORD :'checkpoint_role_password';
 SQL
 }
 
-clone_tcp_password_works() {
+clone_host_tcp_password_works() {
   local role_password="$1"
   PGPASSWORD="$role_password" \
-    PGAPPNAME="$PSQL_APP_NAME" \
-    docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
-    psql -X -v ON_ERROR_STOP=1 -Atq \
-    -h 127.0.0.1 -U "$db_user" -d "$ORIGINAL_DB_NAME" \
+    PGAPPNAME="ktm_checkpoint_tcp_probe" \
+    PGCONNECT_TIMEOUT=3 \
+    docker run --rm \
+    --network host \
+    --read-only \
+    --security-opt no-new-privileges \
+    --cap-drop ALL \
+    --label "io.kortravelmap.admin-feature-clone-acceptance.run-key=$RUN_KEY" \
+    -e PGPASSWORD -e PGAPPNAME -e PGCONNECT_TIMEOUT \
+    --entrypoint psql \
+    "$BASE_CLONE_IMAGE_ID" \
+    -X -v ON_ERROR_STOP=1 -Atq \
+    -h 127.0.0.1 -p "$DB_HOST_PORT" \
+    -U "$db_user" -d "$ORIGINAL_DB_NAME" \
     -c "SELECT 1" >/dev/null 2>&1
 }
 
@@ -981,26 +1045,36 @@ terminate_checkpoint_backends() {
   psql_query "
     SELECT pg_catalog.pg_terminate_backend(pid)
     FROM pg_catalog.pg_stat_activity
-    WHERE datname = '$ORIGINAL_DB_NAME'
-      AND backend_type = 'client backend'
+    WHERE backend_type = 'client backend'
       AND application_name = '$application_name'
       AND pid <> pg_backend_pid()
   " >/dev/null
 }
 
-terminate_foreign_db_sessions() {
+terminate_legacy_checkpoint_backends() {
   psql_query "
     SELECT pg_catalog.pg_terminate_backend(pid)
     FROM pg_catalog.pg_stat_activity
     WHERE datname = '$ORIGINAL_DB_NAME'
       AND backend_type = 'client backend'
+      AND application_name ~ '^ktm_checkpoint_[0-9a-f]{16}$'
+      AND pid <> pg_backend_pid()
+  " >/dev/null
+}
+
+terminate_foreign_cluster_sessions() {
+  psql_query "
+    SELECT pg_catalog.pg_terminate_backend(pid)
+    FROM pg_catalog.pg_stat_activity
+    WHERE backend_type = 'client backend'
       AND application_name <> '$CHECKPOINT_QUIESCENCE_APP'
       AND pid <> pg_backend_pid()
   " >/dev/null
 }
 
 recover_checkpoint_quiescence() {
-  local journaled_application
+  local journaled_application journaled_version setting_count
+  PSQL_SESSION_OPTIONS="-c default_transaction_read_only=off"
   PSQL_APP_NAME="ktm_checkpoint_recovery"
   if [[ -f "$CHECKPOINT_QUIESCENCE_STATE" &&
         ! -L "$CHECKPOINT_QUIESCENCE_STATE" ]]; then
@@ -1011,36 +1085,65 @@ recover_checkpoint_quiescence() {
         --path "$CHECKPOINT_QUIESCENCE_STATE"
     )" == "$ORIGINAL_DB_NAME" ]] ||
       die "checkpoint quiescence state DB differs from clone DB"
-    journaled_application="$(
+    journaled_version="$(
       state_helper read-quiescence \
         --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
         --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
-        --field application_name \
+        --field version \
         --path "$CHECKPOINT_QUIESCENCE_STATE"
     )"
-    terminate_checkpoint_backends "$journaled_application" ||
-      die "orphaned checkpoint backend termination failed"
-    set_clone_database_password "$db_password" ||
-      die "checkpoint DB login restoration failed"
-    clone_tcp_password_works "$db_password" ||
-      die "restored checkpoint DB login was not accepted"
+    if [[ "$journaled_version" == "1" ]]; then
+      setting_count="$(checkpoint_transaction_setting_count)"
+      [[ "$setting_count" == "0" || (
+        "$setting_count" == "1" &&
+        "$(checkpoint_read_only_setting_count)" == "1"
+      ) ]] || die "legacy checkpoint quiescence setting cardinality is invalid"
+      terminate_legacy_checkpoint_backends ||
+        die "legacy checkpoint backend termination failed"
+      if [[ "$setting_count" == "1" ]]; then
+        psql_query \
+          "ALTER DATABASE \"$ORIGINAL_DB_NAME\" RESET default_transaction_read_only" \
+          >/dev/null
+      fi
+    else
+      [[ "$journaled_version" == "2" || "$journaled_version" == "3" ]] ||
+        die "checkpoint quiescence version is unsupported"
+      journaled_application="$(
+        state_helper read-quiescence \
+          --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+          --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+          --field application_name \
+          --path "$CHECKPOINT_QUIESCENCE_STATE"
+      )"
+      terminate_checkpoint_backends "$journaled_application" ||
+        die "orphaned checkpoint backend termination failed"
+      set_clone_database_password "$db_password" ||
+        die "checkpoint DB login restoration failed"
+      clone_host_tcp_password_works "$db_password" ||
+        die "restored checkpoint DB login was not accepted at the host boundary"
+    fi
     clear_checkpoint_quiescence_state ||
       die "recovered checkpoint quiescence state cleanup failed"
   else
     [[ ! -e "$CHECKPOINT_QUIESCENCE_STATE" &&
        ! -L "$CHECKPOINT_QUIESCENCE_STATE" ]] ||
       die "checkpoint quiescence state is unsafe"
-    clone_tcp_password_works "$db_password" ||
-      die "clone DB login differs without an ownership journal"
+    [[ "$(checkpoint_transaction_setting_count)" == "0" ]] ||
+      die "clone DB has an unowned default_transaction_read_only setting"
+    clone_host_tcp_password_works "$db_password" ||
+      die "clone DB login differs without an ownership journal at the host boundary"
   fi
+  PSQL_SESSION_OPTIONS=""
   PSQL_APP_NAME=""
 }
 
 start_checkpoint_quiescence() {
   [[ -z "$CHECKPOINT_QUIESCENCE_PROCESS" ]] ||
     die "checkpoint quiescence is already active"
-  [[ "$(foreign_db_sessions)" == "0" ]] ||
-    die "clone DB has a foreign client session before checkpoint quiescence"
+  checkpoint_login_role_invariant ||
+    die "clone cluster must have exactly the configured LOGIN role"
+  [[ "$(foreign_cluster_sessions)" == "0" ]] ||
+    die "clone cluster has a foreign client session before checkpoint quiescence"
   CHECKPOINT_QUIESCENCE_APP="ktm_checkpoint_${RUN_KEY:0:16}"
   state_helper write-quiescence \
     --application-name "$CHECKPOINT_QUIESCENCE_APP" \
@@ -1049,14 +1152,19 @@ start_checkpoint_quiescence() {
     --database "$ORIGINAL_DB_NAME" \
     --path "$CHECKPOINT_QUIESCENCE_STATE"
   PSQL_APP_NAME="$CHECKPOINT_QUIESCENCE_APP"
-  set_clone_database_password "$(openssl rand -hex 32)"
+  CHECKPOINT_FENCE_PASSWORD="$(openssl rand -hex 32)"
+  set_clone_database_password "$CHECKPOINT_FENCE_PASSWORD"
   CHECKPOINT_LOGIN_FENCED=1
-  if clone_tcp_password_works "$db_password"; then
-    die "clone DB accepted its original password during checkpoint fence"
+  terminate_foreign_cluster_sessions
+  checkpoint_login_role_invariant ||
+    die "clone cluster LOGIN role invariant changed during checkpoint fence"
+  clone_host_tcp_password_works "$CHECKPOINT_FENCE_PASSWORD" ||
+    die "runner-owned checkpoint password was not accepted at the host boundary"
+  if clone_host_tcp_password_works "$db_password"; then
+    die "clone DB accepted its original password at the host boundary during checkpoint fence"
   fi
-  terminate_foreign_db_sessions
-  [[ "$(foreign_db_sessions)" == "0" ]] ||
-    die "clone DB retained a foreign client after login fencing"
+  [[ "$(foreign_cluster_sessions)" == "0" ]] ||
+    die "clone cluster retained a foreign client after login fencing"
   local lock_statements
   lock_statements="$(
     psql_query "
@@ -1097,8 +1205,8 @@ start_checkpoint_quiescence() {
           AND wait_event = 'PgSleep'
       "
     )" == "1" ]]; then
-      [[ "$(foreign_db_sessions)" == "0" ]] ||
-        die "clone DB gained a foreign session during checkpoint quiescence"
+      [[ "$(foreign_cluster_sessions)" == "0" ]] ||
+        die "clone cluster gained a foreign session during checkpoint quiescence"
       return
     fi
     sleep 0.1
@@ -1123,10 +1231,14 @@ assert_checkpoint_quiescence() {
         AND wait_event = 'PgSleep'
     "
   )" == "1" ]] || die "checkpoint quiescence backend is not holding locks"
-  [[ "$(foreign_db_sessions)" == "0" ]] ||
-    die "clone DB has a foreign session during checkpoint quiescence"
-  if clone_tcp_password_works "$db_password"; then
-    die "clone DB login fence disappeared during checkpoint"
+  checkpoint_login_role_invariant ||
+    die "clone cluster LOGIN role invariant changed during checkpoint"
+  [[ "$(foreign_cluster_sessions)" == "0" ]] ||
+    die "clone cluster has a foreign session during checkpoint quiescence"
+  clone_host_tcp_password_works "$CHECKPOINT_FENCE_PASSWORD" ||
+    die "runner-owned checkpoint password changed during checkpoint"
+  if clone_host_tcp_password_works "$db_password"; then
+    die "clone DB login fence disappeared at the host boundary during checkpoint"
   fi
 }
 
@@ -1154,13 +1266,19 @@ stop_checkpoint_quiescence() {
     )" == "$CHECKPOINT_QUIESCENCE_APP" ]] ||
       return 1
     set_clone_database_password "$db_password" || return 1
-    clone_tcp_password_works "$db_password" || return 1
+    clone_host_tcp_password_works "$db_password" || return 1
+    if [[ -n "$CHECKPOINT_FENCE_PASSWORD" ]] &&
+      clone_host_tcp_password_works "$CHECKPOINT_FENCE_PASSWORD"; then
+      return 1
+    fi
     clear_checkpoint_quiescence_state || return 1
   elif (( CHECKPOINT_LOGIN_FENCED == 1 )); then
     return 1
   fi
   CHECKPOINT_LOGIN_FENCED=0
+  CHECKPOINT_FENCE_PASSWORD=""
   CHECKPOINT_QUIESCENCE_APP=""
+  PSQL_SESSION_OPTIONS=""
   PSQL_APP_NAME=""
 }
 
@@ -1787,7 +1905,8 @@ print(value)
       state_helper read-replaced-checkpoint-dump \
         --checkpoint "$CHECKPOINT_FILE" >/dev/null
     elif [[ "$existing_checkpoint_version" == "2" ||
-            "$existing_checkpoint_version" == "3" ]]; then
+            "$existing_checkpoint_version" == "3" ||
+            "$existing_checkpoint_version" == "4" ]]; then
       [[ "$(state_helper read-checkpoint \
           --checkpoint "$CHECKPOINT_FILE" --field version
       )" == "$existing_checkpoint_version" ]] ||
@@ -1804,11 +1923,13 @@ print(value)
       state_helper verify-checkpoint \
         --checkpoint "$CHECKPOINT_FILE" \
         --snapshot "$FINAL_CHECKPOINT_SNAPSHOT" >/dev/null
-      if [[ "$existing_checkpoint_version" == "2" ]]; then
+      if [[ "$existing_checkpoint_version" == "2" ||
+            "$existing_checkpoint_version" == "3" ]]; then
         state_helper promote-checkpoint \
           --checkpoint "$CHECKPOINT_FILE" \
           --final-snapshot "$FINAL_CHECKPOINT_SNAPSHOT" \
           --path "$CHECKPOINT_FILE"
+        existing_checkpoint_version="4"
       fi
       assert_checkpoint_quiescence
       verify_checkpoint_dump "$CHECKPOINT_FILE"

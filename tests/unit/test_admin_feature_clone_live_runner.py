@@ -592,7 +592,7 @@ def test_checkpoint_rejects_source_drift_after_restore(tmp_path: Path) -> None:
     assert "원본 clone snapshot" in completed.stderr
 
 
-def test_legacy_v2_checkpoint_is_validated_and_promoted_to_v3(
+def test_legacy_v2_checkpoint_is_validated_and_promoted_to_v4(
     tmp_path: Path,
 ) -> None:
     snapshot = tmp_path / "snapshot.json"
@@ -646,10 +646,75 @@ def test_legacy_v2_checkpoint_is_validated_and_promoted_to_v3(
     promoted = json.loads(checkpoint.read_text(encoding="utf-8"))
 
     assert version_before.stdout.strip() == "2"
-    assert promoted["version"] == 3
+    assert promoted["version"] == 4
     assert promoted["source_stability"]["verified"] is True
     assert promoted["write_quiescence"] == {
-        "database_login_fenced": True,
+        "cluster_single_login_role_fenced": True,
+        "relation_share_locks": True,
+        "verified": True,
+    }
+
+
+def test_legacy_v3_checkpoint_is_validated_and_promoted_to_v4(
+    tmp_path: Path,
+) -> None:
+    snapshot = tmp_path / "snapshot.json"
+    checkpoint = tmp_path / "checkpoint.json"
+    _write_snapshot(snapshot, total=120)
+    _run_helper(
+        "write-checkpoint",
+        "--dump-filename",
+        _DUMP_FILENAME,
+        "--dump-sha256",
+        _DUMP_SHA256,
+        "--dump-size",
+        "1024",
+        "--final-snapshot",
+        str(snapshot),
+        "--path",
+        str(checkpoint),
+        "--restored-snapshot",
+        str(snapshot),
+        "--snapshot",
+        str(snapshot),
+    )
+    payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+    payload["version"] = 3
+    payload["write_quiescence"] = {
+        "database_default_read_only": True,
+        "relation_share_locks": True,
+        "verified": True,
+    }
+    unsigned = {
+        key: value for key, value in payload.items() if key != "checkpoint_sha256"
+    }
+    payload["checkpoint_sha256"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    checkpoint.write_text(json.dumps(payload), encoding="utf-8")
+
+    version_before = _run_helper(
+        "read-checkpoint",
+        "--checkpoint",
+        str(checkpoint),
+        "--field",
+        "version",
+    )
+    _run_helper(
+        "promote-checkpoint",
+        "--checkpoint",
+        str(checkpoint),
+        "--final-snapshot",
+        str(snapshot),
+        "--path",
+        str(checkpoint),
+    )
+    promoted = json.loads(checkpoint.read_text(encoding="utf-8"))
+
+    assert version_before.stdout.strip() == "3"
+    assert promoted["version"] == 4
+    assert promoted["write_quiescence"] == {
+        "cluster_single_login_role_fenced": True,
         "relation_share_locks": True,
         "verified": True,
     }
@@ -787,9 +852,45 @@ def test_checkpoint_quiescence_state_is_durable_and_identity_bound(
     _run_helper("clear-quiescence", *identity_args)
 
     assert database.stdout.strip() == "kor_travel_map_clone"
-    assert setting.stdout.strip() == "database_role_password_rotation"
+    assert setting.stdout.strip() == "cluster_single_login_role_password_rotation"
     assert application_name.stdout.strip() == f"ktm_checkpoint_{'a' * 16}"
     assert rejected.returncode != 0
+    assert not state.exists()
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_checkpoint_quiescence_state_remains_recoverable(
+    tmp_path: Path,
+    version: int,
+) -> None:
+    state = tmp_path / "quiescence.json"
+    payload: dict[str, object] = {
+        "clone_container_sha256": _CONTAINER_SHA256,
+        "clone_system_identifier_sha256": _SYSTEM_SHA256,
+        "database": "kor_travel_map_clone",
+        "version": version,
+    }
+    if version == 1:
+        payload["setting"] = "default_transaction_read_only=on"
+    else:
+        payload["application_name"] = f"ktm_checkpoint_{'b' * 16}"
+        payload["fence"] = "database_role_password_rotation"
+    state.write_text(json.dumps(payload), encoding="utf-8")
+    identity_args = (
+        "--clone-container-sha256",
+        _CONTAINER_SHA256,
+        "--clone-system-identifier-sha256",
+        _SYSTEM_SHA256,
+        "--path",
+        str(state),
+    )
+
+    observed = _run_helper(
+        "read-quiescence", *identity_args, "--field", "version"
+    )
+    _run_helper("clear-quiescence", *identity_args)
+
+    assert observed.stdout.strip() == str(version)
     assert not state.exists()
 
 
@@ -813,7 +914,7 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     )
     assert 'docker network create --internal \\' in source
     assert '--network "$NETWORK_NAME"' in source
-    assert "--network host" not in source
+    assert source.count("--network host") == 1
     assert "-e PGPASSWORD=" not in source
     assert '"$E2E_ADMIN_PASSWORD" "$RUN_ID"' not in source
     assert "--build-arg NEXT_PUBLIC_VWORLD_API_KEY" in source
@@ -837,7 +938,11 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "start_checkpoint_quiescence" in source
     assert "LOCK TABLE %I.%I IN SHARE MODE" in source
     assert "set_clone_database_password" in source
-    assert "clone_tcp_password_works" in source
+    assert "clone_host_tcp_password_works" in source
+    assert '-p "$DB_HOST_PORT"' in source
+    assert "checkpoint_login_role_invariant" in source
+    assert "terminate_foreign_cluster_sessions" in source
+    assert 'clone_host_tcp_password_works "$CHECKPOINT_FENCE_PASSWORD"' in source
     assert "terminate_checkpoint_backends" in source
     assert "state_helper write-quiescence" in source
     assert "state_helper promote-checkpoint" in source

@@ -351,11 +351,11 @@ def write_checkpoint(args: argparse.Namespace) -> None:
             "verified": True,
         },
         "write_quiescence": {
-            "database_login_fenced": True,
+            "cluster_single_login_role_fenced": True,
             "relation_share_locks": True,
             "verified": True,
         },
-        "version": 3,
+        "version": 4,
     }
     payload["checkpoint_sha256"] = _canonical_sha256(payload)
     _atomic_json(Path(args.path), payload)
@@ -509,18 +509,10 @@ def clear_scratch(args: argparse.Namespace) -> None:
 
 def _validated_quiescence(args: argparse.Namespace) -> dict[str, Any]:
     state = _load_object(Path(args.path))
-    application_name = state.get("application_name")
     database = state.get("database")
-    if not isinstance(application_name, str):
-        raise RuntimeError("checkpoint quiescence application name이 없습니다")
     if not isinstance(database, str):
         raise RuntimeError("checkpoint quiescence DB 이름이 없습니다")
-    expected = {
-        "application_name": _require_pattern(
-            application_name,
-            _CHECKPOINT_APP_RE,
-            "checkpoint quiescence application name",
-        ),
+    identity = {
         "clone_container_sha256": _require_pattern(
             args.clone_container_sha256,
             _SHA256_RE,
@@ -536,9 +528,34 @@ def _validated_quiescence(args: argparse.Namespace) -> dict[str, Any]:
             _DATABASE_RE,
             "checkpoint quiescence DB 이름",
         ),
-        "fence": "database_role_password_rotation",
-        "version": 2,
     }
+    version = state.get("version")
+    if version == 1:
+        expected = {
+            **identity,
+            "setting": "default_transaction_read_only=on",
+            "version": 1,
+        }
+    elif version in {2, 3}:
+        application_name = state.get("application_name")
+        if not isinstance(application_name, str):
+            raise RuntimeError("checkpoint quiescence application name이 없습니다")
+        expected = {
+            "application_name": _require_pattern(
+                application_name,
+                _CHECKPOINT_APP_RE,
+                "checkpoint quiescence application name",
+            ),
+            **identity,
+            "fence": (
+                "database_role_password_rotation"
+                if version == 2
+                else "cluster_single_login_role_password_rotation"
+            ),
+            "version": version,
+        }
+    else:
+        raise RuntimeError("checkpoint quiescence version이 지원되지 않습니다")
     if state != expected:
         raise RuntimeError("checkpoint quiescence state가 다릅니다")
     return state
@@ -571,8 +588,8 @@ def write_quiescence(args: argparse.Namespace) -> None:
                 _DATABASE_RE,
                 "checkpoint quiescence DB 이름",
             ),
-            "fence": "database_role_password_rotation",
-            "version": 2,
+            "fence": "cluster_single_login_role_password_rotation",
+            "version": 3,
         },
     )
 
@@ -604,15 +621,15 @@ def _validated_checkpoint(path: Path) -> dict[str, Any]:
         "version",
     }
     version_2_keys = (common_keys, common_keys | {"source_stability"})
-    version_3_keys = common_keys | {
+    version_3_or_4_keys = common_keys | {
         "source_stability",
         "write_quiescence",
     }
     fields = set(checkpoint)
     if version == 2:
         valid_fields = fields in version_2_keys
-    elif version == 3:
-        valid_fields = fields == version_3_keys
+    elif version in {3, 4}:
+        valid_fields = fields == version_3_or_4_keys
     else:
         valid_fields = False
     if not valid_fields:
@@ -667,10 +684,16 @@ def _validated_checkpoint(path: Path) -> dict[str, Any]:
             or source_stability.get("snapshot_sha256") != _canonical_sha256(baseline)
         ):
             raise RuntimeError("clone checkpoint 원본 안정성 provenance가 없습니다")
-    elif version == 3:
+    elif version in {3, 4}:
         raise RuntimeError("clone checkpoint 원본 안정성 provenance가 없습니다")
     if version == 3 and checkpoint.get("write_quiescence") != {
-        "database_login_fenced": True,
+        "database_default_read_only": True,
+        "relation_share_locks": True,
+        "verified": True,
+    }:
+        raise RuntimeError("clone checkpoint write quiescence provenance가 없습니다")
+    if version == 4 and checkpoint.get("write_quiescence") != {
+        "cluster_single_login_role_fenced": True,
         "relation_share_locks": True,
         "verified": True,
     }:
@@ -680,8 +703,8 @@ def _validated_checkpoint(path: Path) -> dict[str, Any]:
 
 def promote_checkpoint(args: argparse.Namespace) -> None:
     checkpoint = _validated_checkpoint(Path(args.checkpoint))
-    if checkpoint["version"] != 2:
-        raise RuntimeError("승격 대상 clone checkpoint가 v2가 아닙니다")
+    if checkpoint["version"] not in {2, 3}:
+        raise RuntimeError("승격 대상 clone checkpoint가 v2/v3가 아닙니다")
     final_snapshot = _validated_snapshot(Path(args.final_snapshot))
     baseline = checkpoint["baseline"]
     if final_snapshot != baseline:
@@ -695,11 +718,11 @@ def promote_checkpoint(args: argparse.Namespace) -> None:
             "verified": True,
         },
         "write_quiescence": {
-            "database_login_fenced": True,
+            "cluster_single_login_role_fenced": True,
             "relation_share_locks": True,
             "verified": True,
         },
-        "version": 3,
+        "version": 4,
     }
     payload["checkpoint_sha256"] = _canonical_sha256(payload)
     _atomic_json(Path(args.path), payload)
@@ -723,7 +746,7 @@ def read_replaced_checkpoint_dump(args: argparse.Namespace) -> None:
     path = Path(args.checkpoint)
     checkpoint = _load_object(path)
     version = checkpoint.get("version")
-    if version in {2, 3}:
+    if version in {2, 3, 4}:
         print(_validated_checkpoint(path)["dump"]["filename"])
         return
     if version != 1 or set(checkpoint) != {
