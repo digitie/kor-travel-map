@@ -3,6 +3,49 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-30 — Lane B b0 T-VN-49A/B/C/D React 구조 debt 완결
+
+사용자 지시에 따라 네 단계는 브랜치와 PR을 나누지 않고 한 번에 구현·검증했다.
+
+- [x] **T-VN-49A — Feature·review admin 상태기계 분해**
+
+  dedup/enrichment/admin features/change requests/new feature를 query·mutation·form·panel
+  책임으로 나눴다. dedup/new feature의 결합 상태는 reducer로 옮겼다.
+
+- [x] **T-VN-49B — admin data-ops 상태기계 분해**
+
+  curation collections/files/issues/offline uploads/POI cache targets를 분해하고 issues의
+  결합 상태를 reducer로 옮겼다. offline upload form은 파일·form·create mutation을 직접
+  소유해 상위 controller의 거대 prop 전달을 제거했다.
+
+- [x] **T-VN-49C — public map·home 분해**
+
+  curated feature map/features map/home에서 domain state와 표현 section을 분리했다.
+  지도 adapter나 단순 전달 wrapper를 새로 만들지 않았다.
+
+- [x] **T-VN-49D — ops pipeline·datasets 분해와 구조 예외 제거**
+
+  datasets/logs/execution detail/timeline/request/schedule을 분해했다. request dialog는
+  scope·target·execution form 경계와 좁은 memoized section으로 재구성했고 render 중
+  상태 변경을 파생 상태로 대체했다. `no-giant-component` 19개와
+  `prefer-useReducer` 3개 exact 예외는 모두 제거했다. 실제 transport lifecycle인
+  `live.ts`와 외부 event effect인 datasets의 규칙별 최소 예외만 남겼으며 verifier가
+  그 exact 목록을 고정한다.
+
+적대 리뷰어 2명이 authored 전체 delta를 검토했다. 늦은 geocode/reverse 응답이 최신 입력을
+덮는 문제, reset 뒤 stale 응답 재유입, request/offline-upload의 flat prop-bag 우회,
+enrichment callback identity churn을 찾아 모두 수정했고 전체 재검토 P0~P2는 0건이다.
+지연 geocode가 사용자가 나중에 바꾼 도로명 코드를 보존하는 Playwright 회귀도 추가했다.
+
+검증은 React Doctor **280 files, 0 issues**, Vitest **254 passed**, TypeScript·ESLint·production
+build green이다. Mocked checkpoint D는 serial과 workers=4에서 각각 **275/275**, expected/
+actual failure·flake·skip과 종료 자원 모두 0이다. 보존 clone을 새로 복제하거나 복원하지 않고
+`ktm-tvn45-db`를 재사용한 파괴적 Live UI는 main/recovery 각각 **2/2**, `complete/passed`다.
+active acceptance Feature·nonterminal request·FK와 runner container/network/image/listener/
+BLOCKED는 모두 0이고 clone은 healthy다. 기존 v5 checkpoint가 정상 soft-delete audit 6행
+때문에 더는 exact하지 않아 현 상태로 baseline만 다시 서명했으며 Alembic downgrade와 full
+restore는 실행하지 않았다.
+
 ## 2026-07-30 — Lane A a1 T-VN-H30A/H33/H36: curation 오링크 해소와 자동링크 금지
 
 PR #888(H30A) · PR #890(H33/H36). 세 task 모두 적대 리뷰로 **결론이 되돌아간** 이력이

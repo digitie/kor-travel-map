@@ -17,6 +17,37 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-30 (codex) — T-VN-49A/B/C/D 단일 PR 구현·최종 gate 완료
+
+H49 네 단계를 한 브랜치에서 끝냈다. 19개 giant component는 단순 View wrapper가 아니라
+domain controller/state와 실제 section 경계로 분해하고, 결합 상태 3곳은 reducer로 옮겼다.
+그 결과 `no-giant-component` 19개와 `prefer-useReducer` 3개 exact 예외가 0이 됐다.
+실제 false positive가 재현되는 `live.ts` transport lifecycle과 datasets external-event
+effect만 규칙별 최소 예외로 남기고 verifier의 exact 목록도 함께 갱신했다.
+
+두 적대 리뷰어는 branch-authored 전체 delta만 검토하고 main rebase 유입 diff는 제외했다.
+지적한 핵심은 비동기 geocode/reverse가 최신 form을 stale closure로 덮는 문제와 reset 뒤
+응답 재유입, request/offline-upload가 거대한 flat prop bag으로 구조 검사를 우회한 문제,
+enrichment callback churn이었다. 요청 identity와 존재하는 필드만 patch하는 규칙을 넣고,
+form/mutation을 실제 소유 section으로 내렸으며 callback을 안정화했다. 같은 전체 범위 재검토
+P0~P2는 0건이고 지연 geocode 입력 보존 회귀 테스트도 추가했다.
+
+React Doctor는 **280 files, 0 issues**, Vitest는 **254 passed**, TypeScript·ESLint·production
+build는 green이다. Mocked 첫 시도는 다른 agent가 소유한 12705 포트를 재사용해 로그인 화면에
+붙은 환경 충돌이어서 산출물을 폐기하고, self-owned port runner의 실패 지점부터 재개했다.
+exact authored checkpoint에서 serial/workers=4 각각 **275/275**, expected/actual failure·
+flake·skip과 소유 자원 잔존은 0이다.
+
+Live는 기존 `ktm-tvn45-db`를 재사용했다. 종전 v5 checkpoint는 그 뒤 정상 생성된 soft-delete
+audit 6행 때문에 exact하지 않아 이전 dump를 격리 보관하고 현재 clone을 새 baseline으로만
+서명했다. 새 clone·restore·Alembic downgrade는 하지 않았다. 파괴적 Live main/recovery는
+각각 **2/2**, result `complete/passed`; active acceptance Feature·nonterminal request·FK,
+BLOCKED, 전용 container/network/image와 loopback listener는 모두 0이고 clone은 healthy다.
+최종 main 34커밋 rebase도 충돌 0건이어서 authored 리뷰·Live 범위는 바뀌지 않았다.
+
+**다음**: 문서 delta 1인 재검토와 저비용 gate를 끝내고 보안 감사 후 단일 PR을 연다.
+CI green이면 셀프 머지하고 clone/checkpoint의 다음 task 재사용 가능성을 다시 판정한다.
+
 ## 2026-07-29 — T-VN-H36: 이름 단독 자동링크를 막았다. H33이 비로소 durable해졌다
 
 curation CSV import에서 `feature_id`가 빈 행이 이름만 일치하는 후보에 자동으로 붙던 경로를

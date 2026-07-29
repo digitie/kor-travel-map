@@ -10,6 +10,28 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-30 (codex) — Lane B b0 T-VN-49A/B/C/D 완료 → PR·CI·merge
+
+**완료**: H49 A/B/C/D를 한 브랜치에서 구현했다. 19개 giant component를 domain
+controller/state와 실제 section으로 분해하고 결합 상태 3곳을 reducer로 옮겨,
+`no-giant-component` 19개와 `prefer-useReducer` 3개 exact 예외를 모두 제거했다.
+적대 리뷰어 2명의 전체 재검토 P0~P2는 0건이다. stale geocode/reverse가 최신 입력을 덮거나
+reset 뒤 재유입하는 문제, request/offline-upload의 flat prop-bag 우회, enrichment callback
+churn도 반영했고 지연 geocode 입력 보존 회귀를 추가했다.
+
+React Doctor **280 files, 0 issues**, Vitest **254 passed**, TypeScript·ESLint·production build
+green이다. Mocked serial/workers=4는 각각 **275/275**이며 expected/actual failure·flake·skip과
+종료 자원은 0이다. 기존 `ktm-tvn45-db`를 새 clone/restore 없이 재사용한 파괴적 Live UI도
+main/recovery **2/2**, `complete/passed`다. active acceptance Feature·nonterminal request·FK,
+BLOCKED와 전용 container/network/image/listener는 0이고 clone은 healthy다. 정상 soft-delete
+audit 6행으로 무효가 된 종전 v5 대신 현재 clone baseline만 다시 서명했으며 Alembic downgrade와
+full restore는 실행하지 않았다. 이후 main 34커밋을 충돌 없이 rebase했다.
+
+**다음 한 작업**: 완료 문서 delta를 원 리뷰어 1명이 확인하고 저비용 gate·보안 감사를 거쳐
+H49 A/B/C/D 단일 PR을 연다. CI green이면 셀프 머지한다. 머지 뒤 clone/checkpoint의 head·
+schema/content identity·잔여물·디스크 여유를 읽기 전용으로 확인해 다음 task 재사용 여부를
+기록한 뒤, 다음 T-VN task 전에 별도 Claude Code PR 사후 감사를 진행한다.
+
 ## 2026-07-30 (claude) — Lane A a1: T-VN-H25B/H33/H36 완료 → 다음은 T-VN-H35
 
 **다음 한 작업**: `T-VN-H35`(prod 마이그레이션 0064~0067 + **이미지 동시 배포**).
