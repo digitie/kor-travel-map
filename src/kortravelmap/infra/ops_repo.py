@@ -44,6 +44,7 @@ __all__ = [
 ]
 
 _MAX_PAGE_SIZE: Final[int] = 200
+_INTEGRITY_ISSUES_CURSOR_KIND: Final[str] = "integrity_issues_last_seen_v2"
 
 
 class OpsCursorFilterMismatch(ValueError):
@@ -751,7 +752,7 @@ async def list_ops_integrity_issues(
     """
     page_size = _limit(limit)
     cursor_last_seen_at, cursor_issue_id = _decode_cursor(
-        cursor, kind="integrity_issues"
+        cursor, kind=_INTEGRITY_ISSUES_CURSOR_KIND
     )
     q_like = f"%{q}%" if q else None
     bbox_min_lon, bbox_min_lat, bbox_max_lon, bbox_max_lat = (
@@ -781,7 +782,9 @@ async def list_ops_integrity_issues(
     items = tuple(_row_to_issue(row) for row in rows[:page_size])
     next_cursor = (
         _encode_cursor(
-            "integrity_issues", at=items[-1].last_seen_at, key=items[-1].issue_id
+            _INTEGRITY_ISSUES_CURSOR_KIND,
+            at=items[-1].last_seen_at,
+            key=items[-1].issue_id,
         )
         if len(rows) > page_size and items
         else None

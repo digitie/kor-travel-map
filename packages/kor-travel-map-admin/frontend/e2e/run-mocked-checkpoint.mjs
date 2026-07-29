@@ -208,16 +208,22 @@ function runCleanupCommand(args) {
   return new Promise((resolve) => {
     const child = spawn("docker", args, {
       detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
     const stdout = [];
+    const stderr = [];
     child.stdout?.on("data", (chunk) => stdout.push(chunk));
+    child.stderr?.on("data", (chunk) => stderr.push(chunk));
     let settled = false;
     const finish = (status = 1) => {
       if (settled) return;
       settled = true;
       clearTimeout(forceTimer);
-      resolve({ status, stdout: Buffer.concat(stdout).toString("utf8") });
+      resolve({
+        status,
+        stderr: Buffer.concat(stderr).toString("utf8"),
+        stdout: Buffer.concat(stdout).toString("utf8"),
+      });
     };
     const forceTimer = setTimeout(() => {
       terminateChildGroup(child, "SIGKILL");
@@ -237,7 +243,16 @@ async function cleanupOwnedNetwork() {
     '{{.Id}} {{index .Labels "io.kortravelmap.mocked-e2e-owned"}}',
     ownedNetworkName,
   ]);
-  if (inspected.status !== 0) return;
+  if (inspected.status !== 0) {
+    if (
+      ownedNetworkId === undefined &&
+      /No such network:/i.test(inspected.stderr)
+    ) {
+      return;
+    }
+    cleanupFailed = true;
+    return;
+  }
   const [observedId, ownedLabel, ...extra] = inspected.stdout.trim().split(/\s+/);
   if (
     extra.length !== 0 ||
@@ -253,7 +268,53 @@ async function cleanupOwnedNetwork() {
     "rm",
     ownedNetworkName,
   ]);
-  if (removed.status !== 0) cleanupFailed = true;
+  const postInspect = await runCleanupCommand([
+    "network",
+    "inspect",
+    ownedNetworkName,
+  ]);
+  if (
+    removed.status !== 0 ||
+    postInspect.status === 0 ||
+    !/No such network:/i.test(postInspect.stderr)
+  ) {
+    cleanupFailed = true;
+  }
+}
+
+async function cleanupOwnedContainer() {
+  if (!ownedContainerId) return;
+  const removed = await runCleanupCommand(["rm", "-f", ownedContainerName]);
+  const inspected = await runCleanupCommand(["inspect", ownedContainerId]);
+  if (
+    removed.status !== 0 ||
+    inspected.status === 0 ||
+    !/No such object:/i.test(inspected.stderr)
+  ) {
+    cleanupFailed = true;
+  }
+}
+
+async function cleanupOwnedImage() {
+  if (!ownedImageTag) return;
+  const removed = await runCleanupCommand([
+    "image",
+    "rm",
+    "-f",
+    ownedImageTag,
+  ]);
+  const inspected = await runCleanupCommand([
+    "image",
+    "inspect",
+    ownedImageTag,
+  ]);
+  if (
+    removed.status !== 0 ||
+    inspected.status === 0 ||
+    !/No such image:/i.test(inspected.stderr)
+  ) {
+    cleanupFailed = true;
+  }
 }
 
 function closeDenyProxy() {
@@ -287,11 +348,9 @@ function cleanup() {
   cleanupPromise ??= (async () => {
     await closeDenyProxy();
     await closeFrontendProxy();
-    await runCleanupCommand(["rm", "-f", ownedContainerName]);
+    await cleanupOwnedContainer();
     await cleanupOwnedNetwork();
-    if (ownedImageTag) {
-      await runCleanupCommand(["image", "rm", "-f", ownedImageTag]);
-    }
+    await cleanupOwnedImage();
   })();
   return cleanupPromise;
 }

@@ -920,10 +920,10 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
         in source
     )
     assert "DOCKER_HOST DOCKER_TLS_VERIFY" in source
-    assert 'exec 9<>"$LOCK_FILE"' in source
-    assert "flock --exclusive --nonblock 9" in source
-    assert ">/dev/null 2>&1 9>&- &" in source
-    assert "flock --exclusive --nonblock --close" not in source
+    assert "coproc ORCHESTRATOR_LOCK_GUARD" in source
+    assert 'flock --exclusive --nonblock "$LOCK_FILE"' in source
+    assert 'exec 9<>"$LOCK_FILE"' not in source
+    assert "9>&-" not in source
     assert "candidate-startup-pending" in source
     assert source.rindex("state_helper write-blocked") < source.rindex(
         "create_candidate_network"
@@ -960,6 +960,10 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert '-p "$DB_HOST_PORT"' in source
     assert "checkpoint_login_role_invariant" in source
     assert "terminate_foreign_cluster_sessions" in source
+    assert "CHECKPOINT_QUIESCENCE_BACKEND_PID" in source
+    assert "CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH" in source
+    assert "extract(epoch FROM backend_start)" in source
+    assert "application_name <> '$CHECKPOINT_QUIESCENCE_APP'" not in source
     assert 'clone_host_tcp_password_works "$CHECKPOINT_FENCE_PASSWORD"' in source
     assert "terminate_checkpoint_backends" in source
     assert "state_helper write-quiescence" in source
@@ -1020,19 +1024,23 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "E2E_ISOLATED_LIVE_DOCKER_NETWORK=1" in source
 
 
-def test_orchestrator_lock_is_not_inherited_by_quiescence_child(
+def test_orchestrator_guardian_lock_is_not_inherited_by_external_child(
     tmp_path: Path,
 ) -> None:
-    """runner SIGKILL 뒤에도 24시간 quiescence 자식이 flock을 붙잡지 않는다."""
+    """runner SIGKILL 뒤에도 장시간 외부 자식이 guardian flock을 붙잡지 않는다."""
     harness = tmp_path / "lock-owner.sh"
     lock_path = tmp_path / "orchestrator.lock"
     harness.write_text(
         """#!/usr/bin/env bash
 set -euo pipefail
 lock_path="$1"
-exec 9<>"$lock_path"
-flock --exclusive --nonblock 9
-sleep 30 9>&- &
+coproc LOCK_GUARD {
+  flock --exclusive --nonblock "$lock_path" \
+    /bin/sh -c 'printf "locked\\n"; IFS= read -r _'
+}
+IFS= read -r lock_status <&"${LOCK_GUARD[0]}"
+[[ "$lock_status" == "locked" ]]
+sleep 30 &
 printf '%s\\n' "$!"
 wait
 """,

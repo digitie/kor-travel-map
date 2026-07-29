@@ -239,9 +239,17 @@ if [[ -e "$LOCK_FILE" || -L "$LOCK_FILE" ]]; then
 else
   install -o root -g root -m 0600 /dev/null "$LOCK_FILE"
 fi
-exec 9<>"$LOCK_FILE"
-flock --exclusive --nonblock 9 ||
+# 별도 guardian만 flock을 소유한다. coproc pipe는 외부 명령에 상속되지 않으므로
+# runner가 SIGKILL돼도 장시간 docker/build/executor 자식이 복구 lock을 붙잡지 않는다.
+coproc ORCHESTRATOR_LOCK_GUARD {
+  flock --exclusive --nonblock "$LOCK_FILE" \
+    /bin/sh -c 'printf "locked\n"; IFS= read -r _'
+}
+orchestrator_lock_status=""
+IFS= read -r orchestrator_lock_status <&"${ORCHESTRATOR_LOCK_GUARD[0]}" ||
   die "another clone acceptance runner owns the lock"
+[[ "$orchestrator_lock_status" == "locked" ]] ||
+  die "orchestrator lock guardian did not acquire the lock"
 
 readonly STATE_HELPER="$SCRIPT_DIR/admin_feature_clone_live_state.py"
 state_helper() {
@@ -820,6 +828,8 @@ readonly VERIFICATION_STATE="$STATE_ROOT/checkpoint-scratch.json"
 readonly CHECKPOINT_QUIESCENCE_STATE="$STATE_ROOT/checkpoint-quiescence.json"
 CHECKPOINT_QUIESCENCE_APP=""
 CHECKPOINT_QUIESCENCE_PROCESS=""
+CHECKPOINT_QUIESCENCE_BACKEND_PID=""
+CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH=""
 CHECKPOINT_FENCE_PASSWORD=""
 CHECKPOINT_LOGIN_FENCED=0
 CHECKPOINT_DUMP_DURABLE=0
@@ -1009,19 +1019,26 @@ owned_networks() {
 }
 
 foreign_cluster_sessions() {
-  local quiescence_filter=""
-  if [[ -n "$CHECKPOINT_QUIESCENCE_APP" ]]; then
-    [[ "$CHECKPOINT_QUIESCENCE_APP" =~ ^ktm_checkpoint_[0-9a-f]{16}$ ]] ||
-      die "checkpoint quiescence application name is invalid"
-    quiescence_filter="
-      AND application_name <> '$CHECKPOINT_QUIESCENCE_APP'"
+  local owned_backend_filter=""
+  if [[ -n "$CHECKPOINT_QUIESCENCE_BACKEND_PID" ||
+        -n "$CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH" ]]; then
+    [[ "$CHECKPOINT_QUIESCENCE_BACKEND_PID" =~ ^[1-9][0-9]*$ ]] ||
+      die "checkpoint quiescence backend PID is invalid"
+    [[ "$CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH" =~ ^[0-9]+(\.[0-9]+)?$ ]] ||
+      die "checkpoint quiescence backend start is invalid"
+    owned_backend_filter="
+      AND NOT (
+        pid = $CHECKPOINT_QUIESCENCE_BACKEND_PID
+        AND extract(epoch FROM backend_start) =
+          $CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH
+      )"
   fi
   psql_value "
     SELECT count(*)
     FROM pg_catalog.pg_stat_activity
     WHERE pid <> pg_backend_pid()
       AND backend_type = 'client backend'
-      $quiescence_filter
+      $owned_backend_filter
   "
 }
 
@@ -1124,11 +1141,23 @@ terminate_checkpoint_backends() {
   local application_name="$1"
   [[ "$application_name" =~ ^ktm_checkpoint_[0-9a-f]{16}$ ]] ||
     die "checkpoint backend application name is invalid"
+  local owner_filter="application_name = '$application_name'"
+  if [[ -n "$CHECKPOINT_QUIESCENCE_BACKEND_PID" ||
+        -n "$CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH" ]]; then
+    [[ "$CHECKPOINT_QUIESCENCE_BACKEND_PID" =~ ^[1-9][0-9]*$ ]] ||
+      die "checkpoint quiescence backend PID is invalid"
+    [[ "$CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH" =~ ^[0-9]+(\.[0-9]+)?$ ]] ||
+      die "checkpoint quiescence backend start is invalid"
+    owner_filter="
+      pid = $CHECKPOINT_QUIESCENCE_BACKEND_PID
+      AND extract(epoch FROM backend_start) =
+        $CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH"
+  fi
   psql_query "
     SELECT pg_catalog.pg_terminate_backend(pid)
     FROM pg_catalog.pg_stat_activity
     WHERE backend_type = 'client backend'
-      AND application_name = '$application_name'
+      AND $owner_filter
       AND pid <> pg_backend_pid()
   " >/dev/null
 }
@@ -1149,7 +1178,6 @@ terminate_foreign_cluster_sessions() {
     SELECT pg_catalog.pg_terminate_backend(pid)
     FROM pg_catalog.pg_stat_activity
     WHERE backend_type = 'client backend'
-      AND application_name <> '$CHECKPOINT_QUIESCENCE_APP'
       AND pid <> pg_backend_pid()
   " >/dev/null
 }
@@ -1281,24 +1309,28 @@ start_checkpoint_quiescence() {
     docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
     psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$db_name" \
     -c "BEGIN; SET LOCAL statement_timeout = 0; $lock_statements SELECT pg_sleep(86400); ROLLBACK;" \
-    >/dev/null 2>&1 9>&- &
+    >/dev/null 2>&1 &
   CHECKPOINT_QUIESCENCE_PROCESS="$!"
-  local attempt
+  local attempt backend_identity
   for attempt in $(seq 1 300); do
     kill -0 "$CHECKPOINT_QUIESCENCE_PROCESS" 2>/dev/null ||
       die "checkpoint quiescence process exited before acquiring locks"
-    if [[ "$(
+    backend_identity="$(
       psql_value "
-        SELECT count(*)
+        SELECT pid::text || '|' || extract(epoch FROM backend_start)::text
         FROM pg_catalog.pg_stat_activity
         WHERE datname = current_database()
           AND backend_type = 'client backend'
+          AND pid <> pg_backend_pid()
           AND application_name = '$CHECKPOINT_QUIESCENCE_APP'
           AND state = 'active'
           AND wait_event_type = 'Timeout'
           AND wait_event = 'PgSleep'
       "
-    )" == "1" ]]; then
+    )"
+    if [[ "$backend_identity" =~ ^([1-9][0-9]*)\|([0-9]+(\.[0-9]+)?)$ ]]; then
+      CHECKPOINT_QUIESCENCE_BACKEND_PID="${BASH_REMATCH[1]}"
+      CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH="${BASH_REMATCH[2]}"
       [[ "$(foreign_cluster_sessions)" == "0" ]] ||
         die "clone cluster gained a foreign session during checkpoint quiescence"
       return
@@ -1319,7 +1351,9 @@ assert_checkpoint_quiescence() {
       FROM pg_catalog.pg_stat_activity
       WHERE datname = current_database()
         AND backend_type = 'client backend'
-        AND application_name = '$CHECKPOINT_QUIESCENCE_APP'
+        AND pid = $CHECKPOINT_QUIESCENCE_BACKEND_PID
+        AND extract(epoch FROM backend_start) =
+          $CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH
         AND state = 'active'
         AND wait_event_type = 'Timeout'
         AND wait_event = 'PgSleep'
@@ -1352,6 +1386,8 @@ stop_checkpoint_quiescence() {
     wait "$CHECKPOINT_QUIESCENCE_PROCESS" 2>/dev/null || true
   fi
   CHECKPOINT_QUIESCENCE_PROCESS=""
+  CHECKPOINT_QUIESCENCE_BACKEND_PID=""
+  CHECKPOINT_QUIESCENCE_BACKEND_START_EPOCH=""
   if [[ -f "$CHECKPOINT_QUIESCENCE_STATE" &&
         ! -L "$CHECKPOINT_QUIESCENCE_STATE" ]]; then
     [[ "$(state_helper read-quiescence \

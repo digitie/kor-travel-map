@@ -316,28 +316,57 @@ async def list_data_integrity_violations(
 _UPSERT_FINDINGS_BATCH_SQL: Final[str] = """
 INSERT INTO ops.data_integrity_violations (
     provider, dataset_key, source_record_key, feature_id, violation_type,
-    severity, message, payload
+    severity, message, payload, last_seen_at
 )
-SELECT * FROM unnest(
-    CAST(:providers AS text[]),
-    CAST(:datasets AS text[]),
-    CAST(:source_record_keys AS text[]),
-    CAST(:feature_ids AS text[]),
-    CAST(:violation_types AS text[]),
-    CAST(:severities AS text[]),
-    CAST(:messages AS text[]),
-    CAST(:payloads AS jsonb[])
-)
+SELECT finding.*, statement_timestamp()
+FROM unnest(
+        CAST(:providers AS text[]),
+        CAST(:datasets AS text[]),
+        CAST(:source_record_keys AS text[]),
+        CAST(:feature_ids AS text[]),
+        CAST(:violation_types AS text[]),
+        CAST(:severities AS text[]),
+        CAST(:messages AS text[]),
+        CAST(:payloads AS jsonb[])
+    ) AS finding(
+        provider, dataset_key, source_record_key, feature_id, violation_type,
+        severity, message, payload
+    )
 ON CONFLICT ((payload ->> 'dedupe_key'))
 WHERE status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'
 DO UPDATE SET
-    source_record_key = EXCLUDED.source_record_key,
-    feature_id = EXCLUDED.feature_id,
-    message = EXCLUDED.message,
-    severity = EXCLUDED.severity,
-    last_seen_at = statement_timestamp(),
-    payload = ops.data_integrity_violations.payload
-        || jsonb_strip_nulls(EXCLUDED.payload)
+    source_record_key = CASE
+        WHEN EXCLUDED.last_seen_at >= ops.data_integrity_violations.last_seen_at
+        THEN EXCLUDED.source_record_key
+        ELSE ops.data_integrity_violations.source_record_key
+    END,
+    feature_id = CASE
+        WHEN EXCLUDED.last_seen_at >= ops.data_integrity_violations.last_seen_at
+        THEN EXCLUDED.feature_id
+        ELSE ops.data_integrity_violations.feature_id
+    END,
+    message = CASE
+        WHEN EXCLUDED.last_seen_at >= ops.data_integrity_violations.last_seen_at
+        THEN EXCLUDED.message
+        ELSE ops.data_integrity_violations.message
+    END,
+    severity = CASE
+        WHEN EXCLUDED.last_seen_at >= ops.data_integrity_violations.last_seen_at
+        THEN EXCLUDED.severity
+        ELSE ops.data_integrity_violations.severity
+    END,
+    last_seen_at = GREATEST(
+        ops.data_integrity_violations.last_seen_at,
+        EXCLUDED.last_seen_at
+    ),
+    payload = (
+        CASE
+            WHEN EXCLUDED.last_seen_at >= ops.data_integrity_violations.last_seen_at
+            THEN ops.data_integrity_violations.payload
+                || jsonb_strip_nulls(EXCLUDED.payload)
+            ELSE ops.data_integrity_violations.payload
+        END
+    )
         || jsonb_build_object(
             'occurrence_count',
             COALESCE(

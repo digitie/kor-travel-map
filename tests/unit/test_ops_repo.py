@@ -390,3 +390,21 @@ async def test_integrity_issues_list_and_counts() -> None:
     assert counts.by_status == {"open": 2}
     assert counts.by_severity == {"error": 2}
     assert counts.by_type == {"missing_coordinate": 2}
+
+
+@pytest.mark.unit
+async def test_integrity_issues_rejects_detected_at_cursor_contract() -> None:
+    legacy_cursor = _cursor(
+        {
+            "v": 1,
+            "kind": "integrity_issues",
+            "at": "2026-06-03T00:00:00+00:00",
+            "key": "11111111-1111-1111-1111-111111111111",
+        }
+    )
+
+    with pytest.raises(ValueError, match="invalid integrity_issues_last_seen_v2 cursor"):
+        await list_ops_integrity_issues(
+            cast(Any, _Session()),
+            cursor=legacy_cursor,
+        )

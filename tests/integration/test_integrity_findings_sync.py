@@ -59,7 +59,8 @@ async def _rows(session: AsyncSession) -> list[Any]:
             "select payload->>'dedupe_key' as k, status, "
             "(payload->>'occurrence_count')::int as n, "
             "payload->>'provider_address' as addr, violation_type, "
-            "detected_at, last_seen_at, source_record_key, feature_id "
+            "message, severity, detected_at, last_seen_at, "
+            "source_record_key, feature_id "
             "from ops.data_integrity_violations "
             "where provider = :p order by k"
         ),
@@ -128,6 +129,54 @@ async def test_null_payload_field_does_not_erase_prior_evidence(
     )
     rows = await _rows(migrated_session)
     assert rows[0]["addr"] == "주소 e1", "1회차 증거가 지워지면 durable ledger의 의미가 없다"
+
+
+async def test_older_overlapping_batch_cannot_replace_newer_evidence(
+    migrated_session: AsyncSession,
+) -> None:
+    """lock 대기 뒤 적용된 오래된 statement는 최신 payload/FK 시각을 되돌리지 않는다."""
+    current = _finding("overlap")
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[current],
+    )
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE ops.data_integrity_violations
+            SET last_seen_at = statement_timestamp() + interval '1 day',
+                message = 'newer evidence',
+                severity = 'error',
+                payload = payload || '{"provider_address":"newer address"}'::jsonb
+            WHERE provider = :provider
+              AND payload ->> 'dedupe_key' = :dedupe_key
+            """
+        ),
+        {
+            "provider": _PROVIDER,
+            "dedupe_key": current["payload"]["dedupe_key"],
+        },
+    )
+    before = (await _rows(migrated_session))[0]
+
+    stale = _finding("overlap")
+    stale["message"] = "stale evidence"
+    stale["payload"]["provider_address"] = "stale address"
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[stale],
+    )
+    after = (await _rows(migrated_session))[0]
+
+    assert after["last_seen_at"] == before["last_seen_at"]
+    assert after["message"] == "newer evidence"
+    assert after["severity"] == "error"
+    assert after["addr"] == "newer address"
+    assert after["n"] == 2
 
 
 async def test_dedupe_survives_payload_change(
