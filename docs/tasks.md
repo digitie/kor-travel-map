@@ -162,6 +162,9 @@ Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별�
     ownership role과 원본 DB owner가 달라 snapshot이 항상 불일치하는 문제를 수정한다.
     database digest에서는 의도적인 owner 차이를 정규화하고, 원본 clone DB owner는
     별도 invariant로 fail-closed 검증하며 mismatch field 이름을 redacted 진단에 남긴다.
+  - [ ] **T-VN-48D.2** — v4 교체 직전 fail-closed된 durable dump를 다음 checkpoint가
+    다시 `pg_dump`하지 않고 재검증하도록 한다. 기존 checkpoint가 참조한 dump는 제외하고,
+    root-owned 0600 후보가 정확히 하나일 때만 재사용하며 복수 후보는 fail-closed한다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 

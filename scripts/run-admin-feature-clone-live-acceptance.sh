@@ -1948,6 +1948,30 @@ remove_unreferenced_checkpoint_dumps() {
   )
 }
 
+select_reusable_checkpoint_dump() {
+  local excluded_path="$1"
+  local -a candidates=()
+  local candidate
+  while IFS= read -r -d '' candidate; do
+    [[ -z "$excluded_path" || "$candidate" != "$excluded_path" ]] || continue
+    [[ "$candidate" =~ ^${STATE_ROOT}/clone-checkpoint-[0-9a-f]{64}\.dump$ &&
+       -f "$candidate" && ! -L "$candidate" ]] ||
+      die "checkpoint dump resume path is unsafe"
+    [[ "$(stat -c '%u:%g:%a' -- "$candidate")" == "0:0:600" ]] ||
+      die "checkpoint dump resume metadata is unsafe"
+    candidates+=("$candidate")
+  done < <(
+    find "$STATE_ROOT" -maxdepth 1 -type f \
+      -name 'clone-checkpoint-????????????????????????????????????????????????????????????????.dump' \
+      -print0
+  )
+  (( ${#candidates[@]} <= 1 )) ||
+    die "checkpoint dump resume is ambiguous"
+  if (( ${#candidates[@]} == 1 )); then
+    printf '%s' "${candidates[0]}"
+  fi
+}
+
 verify_checkpoint_dump() {
   local checkpoint_path="$1"
   local filename expected_sha expected_size dump_path
@@ -2077,8 +2101,15 @@ print(value)
 '
     )"
     if [[ "$existing_checkpoint_version" == "1" ]]; then
-      state_helper read-replaced-checkpoint-dump \
-        --checkpoint "$CHECKPOINT_FILE" >/dev/null
+      old_dump_filename="$(
+        state_helper read-replaced-checkpoint-dump \
+          --checkpoint "$CHECKPOINT_FILE"
+      )"
+      if [[ -n "$old_dump_filename" ]]; then
+        OLD_CHECKPOINT_DUMP="$STATE_ROOT/$old_dump_filename"
+        [[ "$OLD_CHECKPOINT_DUMP" == "$STATE_ROOT"/clone-checkpoint-*.dump ]] ||
+          die "replaced checkpoint dump path is unsafe"
+      fi
     elif [[ "$existing_checkpoint_version" == "2" ||
             "$existing_checkpoint_version" == "3" ||
             "$existing_checkpoint_version" == "4" ]]; then
@@ -2136,19 +2167,24 @@ print(value)
   [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND state = 'pending'")" == "0" ]] ||
     die "clone checkpoint has pending acceptance change request residue"
   assert_checkpoint_quiescence
-  NEW_CHECKPOINT_DUMP="$STATE_ROOT/clone-checkpoint-$RUN_KEY.dump"
-  [[ ! -e "$NEW_CHECKPOINT_DUMP" && ! -L "$NEW_CHECKPOINT_DUMP" ]] ||
-    die "checkpoint dump target already exists"
-  PGPASSWORD="$db_password" \
-    PGAPPNAME="$PSQL_APP_NAME" \
-    docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
-    pg_dump --format=custom \
-    --serializable-deferrable -U "$db_user" -d "$db_name" \
-    >"$NEW_CHECKPOINT_DUMP"
-  chown root:root -- "$NEW_CHECKPOINT_DUMP"
-  chmod 0600 -- "$NEW_CHECKPOINT_DUMP"
-  fsync_file_and_directory "$NEW_CHECKPOINT_DUMP"
-  CHECKPOINT_DUMP_DURABLE=1
+  NEW_CHECKPOINT_DUMP="$(select_reusable_checkpoint_dump "$OLD_CHECKPOINT_DUMP")"
+  if [[ -n "$NEW_CHECKPOINT_DUMP" ]]; then
+    CHECKPOINT_DUMP_DURABLE=1
+  else
+    NEW_CHECKPOINT_DUMP="$STATE_ROOT/clone-checkpoint-$RUN_KEY.dump"
+    [[ ! -e "$NEW_CHECKPOINT_DUMP" && ! -L "$NEW_CHECKPOINT_DUMP" ]] ||
+      die "checkpoint dump target already exists"
+    PGPASSWORD="$db_password" \
+      PGAPPNAME="$PSQL_APP_NAME" \
+      docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
+      pg_dump --format=custom \
+      --serializable-deferrable -U "$db_user" -d "$db_name" \
+      >"$NEW_CHECKPOINT_DUMP"
+    chown root:root -- "$NEW_CHECKPOINT_DUMP"
+    chmod 0600 -- "$NEW_CHECKPOINT_DUMP"
+    fsync_file_and_directory "$NEW_CHECKPOINT_DUMP"
+    CHECKPOINT_DUMP_DURABLE=1
+  fi
   assert_checkpoint_quiescence
   verify_dump_archive "$NEW_CHECKPOINT_DUMP"
   dump_before="$(stat -Lc '%d:%i:%s:%Y' -- "$NEW_CHECKPOINT_DUMP")"
@@ -2164,7 +2200,8 @@ print(value)
     die "clone dump changed during restore verification"
   [[ "$(sha256sum -- "$NEW_CHECKPOINT_DUMP" | awk '{print $1}')" == "$dump_sha256" ]] ||
     die "clone dump digest changed during restore verification"
-  if [[ -f "$CHECKPOINT_FILE" && ! -L "$CHECKPOINT_FILE" ]]; then
+  if [[ -z "$OLD_CHECKPOINT_DUMP" &&
+        -f "$CHECKPOINT_FILE" && ! -L "$CHECKPOINT_FILE" ]]; then
     old_dump_filename="$(
       state_helper read-replaced-checkpoint-dump --checkpoint "$CHECKPOINT_FILE"
     )"

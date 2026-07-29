@@ -981,6 +981,8 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "fsync_file_and_directory" in source
     assert "verify_checkpoint_dump" in source
     assert "checkpoint_references_dump" in source
+    assert "select_reusable_checkpoint_dump" in source
+    assert "checkpoint dump resume is ambiguous" in source
     assert source.count("remove_unreferenced_checkpoint_dumps") >= 5
     assert "docker network create --internal" in source
     assert "'{{.Internal}}'" in source
