@@ -10,6 +10,27 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-29 (claude) — Lane A a1: T-VN-H30A/B 완료, H30C 미완 → 다음은 T-VN-H25B
+
+**다음 한 작업**: `T-VN-H25B`(CSV 역반영 8건 + 기준선 대조 매칭 재실행).
+이후 `T-VN-H30C`(재작업) → `T-VN-H31`(등대 공급원) → `T-VN-H22A/B/C`.
+
+- **완료**: `T-VN-H30A/B` — 주소 검증 결과가 `ops.data_integrity_violations`에 durable하게
+  남고 `/admin/issues`에서 보인다. 실적재로 회복 검증, 배포 cursor 미설정 실증.
+- **미완**: `T-VN-H30C` — MOIS만 무장했는데 `obs`/`claim`이 상호배타라 **탐지 증가 0건**.
+  krforest(`region_code`)·visitkorea(`l_dong_regn_cd`)가 실제 후보임을 리뷰어가 반증했다.
+- **교훈 — "dedupe를 넣었다"와 "dedupe가 된다"는 다르다**: 1차 구현의 `dedupe_key`는
+  `source_record_key`(=`raw_payload_hash` 파생)에 걸려 있어, export의 무관한 필드 하나만
+  바뀌어도 새 열린 행이 생겼다. 같은 export 재실행만 테스트해서 "106 유지"를 근거로 삼았는데,
+  **정작 중요한 케이스(payload 변경)는 테스트하지 않았다**. H21의 "게이트를 만들었다 ≠
+  게이트가 막는다"와 같은 계열.
+- **교훈 — 관측 코드가 관측 대상을 잠글 수 있다**: `ops.data_integrity_violations`에 statement
+  트리거가 있어 finding당 INSERT가 `ops_live` revision 단일 행에 배타 락을 잡았다. 관측을
+  추가하면서 `/admin/issues` 쓰기를 막고 동시 run을 직렬화할 뻔했다. **쓰기를 추가할 때는 그
+  테이블의 트리거를 먼저 본다.** `unnest` 단일 statement로 접어 해소.
+- **교훈 — `jsonb ||`는 null로 지운다**: 재실행 payload의 `null`이 1회차 증거를 덮어썼다.
+  durable ledger 안에서 증거를 잃는, 목적과 정반대 동작이었다. `jsonb_strip_nulls`로 차단.
+
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25A 완료(전제 정정) → 다음은 T-VN-H30A
 
 **다음 한 작업**: `T-VN-H30A`(주소 검증 issue를 `ops.data_integrity_violations`에 durable 기록).

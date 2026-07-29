@@ -17,6 +17,63 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-29 (claude) — Lane A a1: T-VN-H30A/B 검증 결과 durable 기록
+
+**목표**. 주소/좌표 검증 결과가 Dagster run metadata에만 있어 run이 사라지면 증거도 사라지고
+`/admin/issues`에서도 안 보였다. `ops.data_integrity_violations`에 남긴다.
+
+**1차 구현과 그 기각**. migration `0067`(열린 이슈 한정 부분 unique index) + 건별 upsert +
+client 메서드로 만들고 격리 clone에서 "finding 106건, 재실행에도 106 유지"를 근거로 삼았다.
+적대 리뷰 2명이 실제 SQL·스키마 조회로 4건을 반증했고 전부 옳았다.
+
+1. **`jsonb ||`는 shallow merge라 null이 기존 값을 덮어쓴다.** 재실행에서
+   `provider_address`/`bjd_code`가 `None`이면 1회차 증거가 지워진다 — durable ledger 안에서
+   증거를 잃는 것. 리뷰어가 n150에서 두 번 upsert해 실측으로 보였다.
+2. **strict(배포 기본값)는 기록 블록 전에 `Failure`를 던진다.** 증거가 가장 필요한 run이
+   아무것도 남기지 않았다.
+3. **dedupe가 dedupe하지 않았다.** `dedupe_key`가 `source_record_key`에 걸려 있는데 그 키는
+   `raw_payload_hash` 파생이라(`core.ids.make_source_record_key`), export에서 무관한 필드
+   하나만 바뀌어도 새 열린 행이 생기고 기존 행은 영원히 열려 있었다. sweep도 TTL도 없었다.
+   MOIS(977k) 규모에서 큐가 단조 증가한다. **내 "106 유지" 근거는 같은 export 재실행만
+   본 것이라 정작 중요한 케이스를 덮지 못했다.**
+4. **관측 코드가 관측 대상을 잠근다.** `ops.data_integrity_violations`에 statement 트리거
+   (`trg_data_integrity_violations_ops_live_revision`)가 걸려 있어(실측 확인), finding당
+   INSERT가 `ops_live` revision **단일 행**에 배타 락을 잡고 트랜잭션 끝까지 유지했다 —
+   `/admin/issues` 쓰기 차단·동시 run 직렬화·admin PATCH와 데드락.
+
+**재설계**. `sync_integrity_findings()`로 통합했다.
+- `unnest` 기반 **단일 INSERT** + **단일 UPDATE sweep** → 트리거 2회 발화. batch 내 중복은
+  파이썬에서 먼저 제거한다(같은 key가 한 statement에 두 번 오면 Postgres가 거부).
+- `dedupe_key`를 **`source_entity_id`** 기반으로. payload 변경과 무관하게 안정적이다.
+- **자동 resolve sweep** — 이번 run이 더는 보고하지 않는 `open` finding을 닫는다. 주소 검증이
+  소유하는 code와 해당 provider/dataset에 한정하고, 운영자가 손댄 `acknowledged`는 불가침.
+- `jsonb_strip_nulls`로 증거 소실 차단, `last_seen_at`은 UTC 고정(TimeZone GUC 의존 제거).
+- strict 경로도 던지기 전에 기록한다.
+- MOIS `obs_code`/`reverse_attempted`는 **reverse 경로 값만** 쓴다 — `geo`는 정지오코딩으로도
+  채워져 obs가 `claim_text`와 같은 출처가 되는 오염이 있었다.
+
+**검증**. 통합 테스트 8건을 새로 붙였다 — 재실행 접힘·`occurrence_count` 증가·null이 증거를
+덮지 않음·sweep이 보고 안 된 것만 닫음·`acknowledged` 불가침·관리 code 한정·provider 경계·
+findings 비었을 때 전량 close, 그리고 **payload 변경에도 접힘**(`source_entity_id` 전환의
+전체 근거인데 그전까지 실증한 적이 없었다). 모델 `__table_args__`에도 0067 인덱스를 반영해
+`create_all` 스키마에서 ON CONFLICT 대상이 사라지지 않게 했다.
+
+격리 clone 실증: finding 106건 기록 → 재실행에도 106, `occurrence_count` 전부 2,
+`dedupe_key`가 entity id 기반(`…:reverse_geocode_unavailable:79`)으로 안정화.
+실적재 경로도 태워 `source_records` 2000→2458, 2회차 insert 0(멱등)을 확인했다.
+배포 컨테이너 2곳의 concierge cursor가 미설정임을 확인해 H28의 "자동 회복" 논거를
+기본값이 아니라 **배포값**으로 실증했다.
+
+**H30C는 미완으로 되돌렸다**. MOIS는 payload에 `legal_dong_code`가 있으면 reverse를 아예
+호출하지 않아 `obs`/`claim`이 상호배타이고 `dual`이 구조적으로 불가능하다 — **탐지 증가 0건**,
+`unarmed`→`claim_only` 재라벨에 불과하다. 게다가 내가 backlog에 "나머지 provider는 payload
+법정동코드가 없다"고 적은 것이 **거짓**이었다(krforest `region_code`, visitkorea
+`l_dong_regn_cd`/`l_dong_signgu_cd`). 리뷰어가 원천 저장소까지 읽어 반증했다.
+
+**실적재 검증이 잡은 것**. revision id `0067_integrity_finding_dedupe_key`가 33자라
+`alembic_version varchar(32)`를 넘겨 upgrade가 실패했다. 단위 테스트로는 드러나지 않고
+clone에 실제로 걸어야만 나오는 종류다 — H30B를 "산술이 아니라 실적재로" 요구한 값이 여기 있다.
+
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25A 공식 curation 미연결 증거·전제 정정
 
 **결론 먼저**. task 전제 *"공식 CSV 고유 `feature_id` 158개 중 54개가 `feature.features`에
