@@ -56,13 +56,13 @@ async def test_batch_upsert_folds_reruns_and_counts_occurrences(
 ) -> None:
     """같은 finding을 두 번 넣어도 한 행이며 occurrence_count만 오른다."""
     findings = [_finding("e1"), _finding("e2")]
-    upserted, resolved = await sync_integrity_findings(
+    upserted = await sync_integrity_findings(
         migrated_session,
         provider=_PROVIDER,
         dataset_key=_DATASET,
         findings=findings,
     )
-    assert (upserted, resolved) == (2, 0)
+    assert upserted == 2
     rows = await _rows(migrated_session)
     assert len(rows) == 2
     assert {r["n"] for r in rows} == {1}
@@ -129,7 +129,7 @@ async def test_dedupe_survives_payload_change(
     second["source_record_key"] = None
     second["payload"]["provider_address"] = "새 주소"
     second["message"] = "같은 문제, 새 payload"
-    _, resolved = await sync_integrity_findings(
+    await sync_integrity_findings(
         migrated_session,
         provider=_PROVIDER,
         dataset_key=_DATASET,
@@ -141,4 +141,3 @@ async def test_dedupe_survives_payload_change(
     assert rows[0]["n"] == 2, "같은 문제의 재발이므로 occurrence_count가 올라야 한다"
     assert rows[0]["addr"] == "새 주소", "최신 단서로 갱신돼야 한다"
     assert rows[0]["status"] == "open"
-    assert resolved == 0, "여전히 보고 중인 finding을 닫으면 안 된다"

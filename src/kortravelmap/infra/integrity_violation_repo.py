@@ -351,9 +351,9 @@ async def sync_integrity_findings(
     dataset_key: str,
     findings: Sequence[Mapping[str, Any]],
 ) -> int:
-    """finding 집합을 **2개 statement로** 동기화한다 (T-VN-H30A). commit은 호출자 책임.
+    """finding 집합을 **단일 statement로** 기록한다 (T-VN-H30A). commit은 호출자 책임.
 
-    반환: ``(upsert된 건수, 자동 resolve된 건수)``.
+    반환: upsert한 건수.
 
     왜 batch인가 — ``ops.data_integrity_violations``에는 statement 단위 트리거
     (``trg_data_integrity_violations_ops_live_revision``)가 걸려 있어 statement마다
@@ -362,15 +362,20 @@ async def sync_integrity_findings(
     직렬화하며 admin PATCH와 데드락까지 만든다. 전체를 한 statement로 접으면 트리거는
     1회만 발화한다.
 
-    왜 resolve sweep인가 — 이번 run이 더는 보고하지 않는 finding을 닫지 않으면 큐가 단조
-    증가한다. **이번 검증이 관리하는 code**(``managed_violation_types``)에 한해, 그리고
-    ``open``만 닫는다 — 운영자가 손댄 ``acknowledged``는 건드리지 않는다.
-    """
-    if not findings:
-        live_keys: list[str] = []
-    else:
-        live_keys = [str(f["payload"]["dedupe_key"]) for f in findings]
+    **자동 close(sweep)는 일부러 없다.** 1차 설계에는 "이번 run이 보고하지 않는 finding을
+    닫는" sweep이 있었는데 적대 리뷰가 실측으로 세 가지를 재현했다.
 
+    - ``_load()``는 provider에 따라 **배치마다** 호출된다(MOIS는 1000건 단위로 ~977회).
+      배치 단위 sweep은 "이 배치에 없는 것"을 닫으므로 한 run이 자기 finding의 대부분을
+      스스로 resolved 처리한다.
+    - sweep이 행을 부분 unique index 밖으로 밀어내므로 다음 run의 INSERT가 충돌하지 않고
+      **새 행**을 만든다 — 막으려던 단조 증가를 오히려 재생산한다.
+    - ``bundles=[]``인 ``_load()``는 OpiNet 일일 스킵·MOIS 무레코드 fallback의 제어 흐름
+      sentinel이라, 빈 finding 집합이 큐 전체를 닫는다.
+
+    그래서 지금은 "닫히지 않는다"를 알려진 한계로 두고, run marker(적재 run id/시각을
+    payload에 남기고 그보다 오래된 것만 닫기) 기반 재설계를 ``T-VN-H32``로 분리했다.
+    """
     for finding in findings:
         # batch 경로에도 같은 검증을 건다. 없으면 잘못된 severity가 DB CHECK까지 가서
         # unnest statement 전체를 실패시키고, 상위의 광범위 except가 삼켜
