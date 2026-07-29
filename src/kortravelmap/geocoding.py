@@ -148,6 +148,8 @@ __all__ = [
     # 비동기 콜러블 계약 (docs/architecture/address-geocoding.md §2)
     "AddressGeocoder",
     "AddressResolver",
+    "ObservedReverseGeocoder",
+    "ReverseGeocodeObservation",
     "ReverseGeocoder",
     "cached_address_resolver",
     "cached_reverse_geocoder",
@@ -193,6 +195,23 @@ ReverseGeocoder = Callable[[Coordinate], Awaitable[Address | None]]
 """역지오코딩: ``Coordinate`` → ``Address | None`` (await)."""
 
 
+@dataclass(frozen=True)
+class ReverseGeocodeObservation:
+    """대표 주소와 reverse 후보 전체의 시군구명을 함께 보존한 관측."""
+
+    address: Address | None
+    sigungu_names: tuple[str, ...] = ()
+
+
+@runtime_checkable
+class ObservedReverseGeocoder(Protocol):
+    """대표 주소 외에 후보집합 증거도 제공하는 ``ReverseGeocoder``."""
+
+    async def __call__(self, coord: Coordinate) -> Address | None: ...
+
+    async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation: ...
+
+
 # -- 역지오코딩 결과 캐싱 (async) ---------------------------------------------
 #
 # provider 변환 함수는 모두 async이고 feature_id가 bjd_code에 의존(ADR-009)하므로,
@@ -208,22 +227,46 @@ def cached_reverse_geocoder(
     geocoder: ReverseGeocoder,
     *,
     precision: int = _DEFAULT_COORD_PRECISION,
-) -> ReverseGeocoder:
+) -> ObservedReverseGeocoder:
     """``ReverseGeocoder``를 좌표(precision 자리 양자화) 기준 메모이즈한다.
 
     반환 콜러블은 호출 수명 동안 결과(``Address | None`` 포함)를 캐싱 — batch
     변환에서 중복 좌표의 역지오코딩 round-trip을 1회로 줄인다. ``None`` 결과도
     캐싱하므로 실패 좌표를 재시도하지 않는다.
     """
-    cache: dict[tuple[str, str], Address | None] = {}
+    return _CachedObservedReverseGeocoder(geocoder, precision=precision)
 
-    async def _cached(coord: Coordinate) -> Address | None:
-        key = (f"{coord.lon:.{precision}f}", f"{coord.lat:.{precision}f}")
-        if key not in cache:
-            cache[key] = await geocoder(coord)
-        return cache[key]
 
-    return _cached
+class _CachedObservedReverseGeocoder:
+    def __init__(self, geocoder: ReverseGeocoder, *, precision: int) -> None:
+        self._geocoder = geocoder
+        self._precision = precision
+        self._cache: dict[tuple[str, str], ReverseGeocodeObservation] = {}
+
+    def _key(self, coord: Coordinate) -> tuple[str, str]:
+        return (
+            f"{coord.lon:.{self._precision}f}",
+            f"{coord.lat:.{self._precision}f}",
+        )
+
+    async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
+        key = self._key(coord)
+        if key not in self._cache:
+            if isinstance(self._geocoder, ObservedReverseGeocoder):
+                observation = await self._geocoder.observe(coord)
+            else:
+                address = await self._geocoder(coord)
+                names = (
+                    (address.sigungu_name,)
+                    if address is not None and address.sigungu_name
+                    else ()
+                )
+                observation = ReverseGeocodeObservation(address, names)
+            self._cache[key] = observation
+        return self._cache[key]
+
+    async def __call__(self, coord: Coordinate) -> Address | None:
+        return (await self.observe(coord)).address
 
 
 def cached_address_resolver(resolver: AddressResolver) -> AddressResolver:
@@ -436,6 +479,39 @@ class RegionsWithinRadiusResponse:
 # -- 순수 변환 함수 -----------------------------------------------------------
 
 
+def _usable_reverse_candidates(
+    response: KraddrReverseV2Response,
+    *,
+    max_distance_m: float | None,
+) -> tuple[KraddrCandidateV2, ...]:
+    if response.status != _STATUS_OK:
+        return ()
+    if max_distance_m is None:
+        return response.candidates
+    return tuple(
+        candidate
+        for candidate in response.candidates
+        if candidate.distance_m is None or candidate.distance_m <= max_distance_m
+    )
+
+
+def _reverse_sigungu_names(
+    response: KraddrReverseV2Response,
+    *,
+    max_distance_m: float | None,
+) -> tuple[str, ...]:
+    names: list[str] = []
+    for candidate in _usable_reverse_candidates(
+        response, max_distance_m=max_distance_m
+    ):
+        name = normalize_korean_text(
+            candidate.region.sigungu if candidate.region is not None else None
+        )
+        if name and name not in names:
+            names.append(name)
+    return tuple(names)
+
+
 def reverse_response_to_address(
     response: KraddrReverseV2Response,
     *,
@@ -466,17 +542,11 @@ def reverse_response_to_address(
     잘못된 자릿수 코드/우편번호는 ``None``으로 떨어뜨려 ``Address`` validator 거부를
     피한다 (kor-travel-geo가 비정형 코드를 돌려줘도 reverse 전체가 깨지지 않게).
     """
-    if response.status != _STATUS_OK or not response.candidates:
+    cands = _usable_reverse_candidates(
+        response, max_distance_m=max_distance_m
+    )
+    if not cands:
         return None
-    cands = response.candidates
-    if max_distance_m is not None:
-        cands = tuple(
-            c
-            for c in cands
-            if c.distance_m is None or c.distance_m <= max_distance_m
-        )
-        if not cands:
-            return None
 
     primary = _closest_candidate(cands)
     paddr = primary.address
@@ -1011,50 +1081,54 @@ class KorTravelGeoRestClient:
 # -- kor-travel-geo REST client → 콜러블 팩토리 -----------------------------------
 
 
-def kor_travel_geo_reverse_geocoder(
-    client: KorTravelGeoRestClient,
-    *,
-    radius_m: int | None = None,
-    max_distance_m: float | None = None,
-    region_fallback_radius_km: float | None = None,
-) -> ReverseGeocoder:
-    """kor-travel-geo REST client → ``ReverseGeocoder`` (좌표 → ``Address``) 콜러블.
+class _KorTravelGeoObservedReverseGeocoder:
+    def __init__(
+        self,
+        client: KorTravelGeoRestClient,
+        *,
+        radius_m: int | None,
+        max_distance_m: float | None,
+        region_fallback_radius_km: float | None,
+    ) -> None:
+        self._client = client
+        self._radius_m = radius_m
+        self._max_distance_m = max_distance_m
+        self._region_fallback_radius_km = region_fallback_radius_km
 
-    ``region_fallback_radius_km``를 지정하면 ``POST /v2/reverse``가 주소 후보를
-    찾지 못했을 때 ``POST /v2/regions/within-radius``로 중심 좌표가 포함된
-    행정구역을 조회해 bjd/sigungu/sido code만 최소 보강한다.
-
-    Examples
-    --------
-    >>> # import httpx
-    >>> # async with httpx.AsyncClient(base_url="http://127.0.0.1:12501") as http:
-    >>> #     client = KorTravelGeoRestClient(http)
-    >>> #     reverse = kor_travel_geo_reverse_geocoder(client)
-    >>> #     addr = await reverse(Coordinate(lon=Decimal("127.0"), lat=Decimal("37.5")))
-    """
-
-    async def _reverse(coord: Coordinate) -> Address | None:
-        response = await client.reverse(
-            float(coord.lon), float(coord.lat), radius_m=radius_m
+    async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
+        response = await self._client.reverse(
+            float(coord.lon), float(coord.lat), radius_m=self._radius_m
         )
         address = reverse_response_to_address(
-            response, max_distance_m=max_distance_m
+            response, max_distance_m=self._max_distance_m
+        )
+        names = list(
+            _reverse_sigungu_names(
+                response, max_distance_m=self._max_distance_m
+            )
         )
         if (
             address is not None and address.bjd_code is not None
-        ) or region_fallback_radius_km is None:
-            return address
+        ) or self._region_fallback_radius_km is None:
+            return ReverseGeocodeObservation(address, tuple(names))
 
-        regions = await client.regions_within_radius(
+        regions = await self._client.regions_within_radius(
             lon=float(coord.lon),
             lat=float(coord.lat),
-            radius_km=region_fallback_radius_km,
+            radius_km=self._region_fallback_radius_km,
             levels=("sido", "sigungu", "emd"),
         )
+        for item in regions.sigungu:
+            name = normalize_korean_text(item.name)
+            if name and name not in names:
+                names.append(name)
         region_address = _regions_within_radius_response_to_address(regions)
         if address is None or region_address is None:
-            return region_address or address
-        return address.model_copy(
+            return ReverseGeocodeObservation(
+                region_address or address,
+                tuple(names),
+            )
+        merged = address.model_copy(
             update={
                 "legal": address.legal or region_address.legal,
                 "admin": address.admin or region_address.admin,
@@ -1067,8 +1141,32 @@ def kor_travel_geo_reverse_geocoder(
                 or region_address.sigungu_name,
             }
         )
+        return ReverseGeocodeObservation(merged, tuple(names))
 
-    return _reverse
+    async def __call__(self, coord: Coordinate) -> Address | None:
+        return (await self.observe(coord)).address
+
+
+def kor_travel_geo_reverse_geocoder(
+    client: KorTravelGeoRestClient,
+    *,
+    radius_m: int | None = None,
+    max_distance_m: float | None = None,
+    region_fallback_radius_km: float | None = None,
+) -> ObservedReverseGeocoder:
+    """kor-travel-geo REST client → 대표 주소와 후보집합을 보존하는 역지오코더.
+
+    일반 ``ReverseGeocoder``처럼 호출하면 대표 ``Address``만 반환하고, ``observe``는
+    경계 좌표 검증에 필요한 reverse 후보 전체의 시군구명도 함께 반환한다.
+    ``region_fallback_radius_km``를 지정하면 주소 후보가 없을 때 중심 좌표가 포함된
+    행정구역을 조회해 최소 코드를 보강한다.
+    """
+    return _KorTravelGeoObservedReverseGeocoder(
+        client,
+        radius_m=radius_m,
+        max_distance_m=max_distance_m,
+        region_fallback_radius_km=region_fallback_radius_km,
+    )
 
 
 def kor_travel_geo_address_geocoder(

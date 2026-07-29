@@ -14,6 +14,7 @@ from kortravelmap.dagster.validation import (
     DROPPABLE_ISSUE_CODES,
     FeatureAddressIssue,
     FeatureAddressValidationSummary,
+    ensure_feature_address_valid,
 )
 
 
@@ -287,16 +288,47 @@ def _non_droppable_summary(
     )
 
 
-@pytest.mark.parametrize("mode", ["strict", "drop"])
-async def test_non_allowlisted_error_never_loses_rows(
-    monkeypatch: pytest.MonkeyPatch, mode: str
+def test_ensure_feature_address_valid_rejects_every_error(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """allowlist에 없는 error code는 drop도 run 실패도 만들지 못한다 (T-VN-H28B).
+    bundles = [_Bundle(_Feature("feature-0"))]
+    monkeypatch.setattr(
+        "kortravelmap.dagster.validation.validate_feature_bundles_address",
+        lambda items: _non_droppable_summary(items, error_feature_id="feature-0"),
+    )
 
-    이전에는 severity만 보고 격리해서, 새 error 규칙이 하나 추가될 때마다 영구 손실
-    범위가 조용히 넓어졌다 — 실제로 ``provider_address_mismatch``가 그렇게 380건을
-    파괴했고 그 380건은 전부 오탐이었다.
-    """
+    with pytest.raises(ValueError, match="some_future_rule_error"):
+        ensure_feature_address_valid(bundles)  # type: ignore[arg-type]
+
+
+async def test_non_allowlisted_error_fails_strict_without_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(3)]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: _non_droppable_summary(items, error_feature_id="feature-1"),
+    )
+
+    with pytest.raises(Failure, match="some_future_rule_error"):
+        await load_feature_bundles_for_dagster(
+            context=context,  # type: ignore[arg-type]
+            client=client,  # type: ignore[arg-type]
+            bundles=bundles,  # type: ignore[arg-type]
+            provider="demo",
+            dataset_key="places",
+            strict_address="strict",
+        )
+
+    assert client.chunks == []
+
+
+async def test_non_allowlisted_error_is_not_permanently_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """allowlist 밖 error는 drop 모드에서 영구 손실을 만들지 않는다."""
     bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(3)]
     context = _Context()
     client = _Client()
@@ -311,10 +343,9 @@ async def test_non_allowlisted_error_never_loses_rows(
         bundles=bundles,  # type: ignore[arg-type]
         provider="demo",
         dataset_key="places",
-        strict_address=mode,
+        strict_address="drop",
     )
 
-    # 세 건 모두 적재되고, 아무것도 drop되지 않는다.
     assert client.chunks == [("feature-0", "feature-1", "feature-2")]
     assert result.feature_ids == ("feature-0", "feature-1", "feature-2")
     # drop이 없으면 격리 metadata 키 자체가 방출되지 않는다.

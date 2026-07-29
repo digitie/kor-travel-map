@@ -111,9 +111,9 @@ async def load_feature_bundles_for_dagster(
     # drop 모드가 bundles를 재할당하기 **전에** 잡는다 — 그러지 않으면 drop된 레코드의
     # source_entity_id를 잃고 dedupe_key가 불안정한 source_record_key로 되돌아간다.
     entity_ids = _entity_ids(bundles)
-    # T-VN-H28B: severity가 아니라 code allowlist(DROPPABLE_ISSUE_CODES)가 손실을 정한다.
-    # 새 검증이 error를 내도 allowlist를 명시적으로 고치기 전에는 drop/실패가 불가능하다.
-    if mode == "strict" and validation.has_blocking_errors:
+    # strict는 이름 그대로 모든 error에서 run을 중단한다. 영구 손실을 제한하는
+    # DROPPABLE_ISSUE_CODES allowlist는 drop 모드에만 적용한다.
+    if mode == "strict" and validation.has_errors:
         # T-VN-H30A: **던지기 전에** 기록한다. strict는 배포 기본값이고, 여기서 죽는 run이
         # 바로 증거가 가장 필요한 run이다. 적재가 없으므로 FK 대상도 없다 — 전부 unlinked로
         # 남기고 id는 payload로만 나른다.
@@ -123,7 +123,9 @@ async def load_feature_bundles_for_dagster(
             dataset_key=dataset_key,
             loaded_feature_ids=frozenset(),
             dropped_feature_ids=frozenset(
-                issue.feature_id for issue in validation.blocking_issues
+                issue.feature_id
+                for issue in validation.issues
+                if issue.severity == "error"
             ),
             entity_ids=entity_ids,
         )
@@ -135,7 +137,9 @@ async def load_feature_bundles_for_dagster(
         failure_metadata = dict(validation.as_metadata())
         failure_metadata["address_validation_findings_recorded"] = recorded
         _add_output_metadata(context, failure_metadata)
-        codes = ", ".join(issue.code for issue in validation.blocking_issues)
+        codes = ", ".join(
+            issue.code for issue in validation.issues if issue.severity == "error"
+        )
         raise Failure(
             description=f"Feature 주소/좌표 검증 실패: {codes}",
             metadata=failure_metadata,

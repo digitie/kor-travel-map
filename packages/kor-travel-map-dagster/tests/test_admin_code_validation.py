@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
+import httpx
 import pytest
 from kortravelmap.core.ids import make_source_record_key
 from kortravelmap.dto import (
@@ -22,6 +23,10 @@ from kortravelmap.dto import (
     SourceLink,
     SourceRecord,
     SourceRole,
+)
+from kortravelmap.geocoding import KorTravelGeoRestClient, kor_travel_geo_reverse_geocoder
+from kortravelmap.providers.kor_travel_concierge import (
+    kor_travel_concierge_items_to_bundles,
 )
 
 from kortravelmap.dagster.validation import (
@@ -108,7 +113,10 @@ def test_short_provider_address_no_longer_produces_any_issue() -> None:
     """
     bundle = _bundle(
         admin_evidence=AdminEvidence(
-            obs_code="2671025300", claim_code="2671025300", claim_kind="bjd"
+            obs_code="2671025300",
+            reverse_attempted=True,
+            claim_code="2671025300",
+            claim_kind="bjd",
         )
     )
     result = validate_feature_bundle_address(bundle)
@@ -150,9 +158,112 @@ def test_boundary_candidate_set_absorbs_the_disagreement() -> None:
         admin_evidence=AdminEvidence(
             obs_code="1111017700",
             obs_sigungu_names=("종로구", "서대문구"),
+            reverse_attempted=True,
         ),
     )
     assert validate_feature_bundle_address(bundle).issues == ()
+
+
+async def test_reverse_http_candidates_reach_concierge_validation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v2/reverse"
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "candidates": [
+                    {
+                        "confidence": 1.0,
+                        "match_kind": "road",
+                        "distance_m": 20,
+                        "address": {
+                            "full": "서울특별시 종로구 통일로 251",
+                            "road_address": "서울특별시 종로구 통일로 251",
+                            "legal_dong_code": "1111017700",
+                        },
+                        "region": {
+                            "sig_cd": "11110",
+                            "bjd_cd": "1111017700",
+                            "sido": "서울특별시",
+                            "sigungu": "종로구",
+                        },
+                    },
+                    {
+                        "confidence": 0.9,
+                        "match_kind": "parcel",
+                        "distance_m": 143,
+                        "address": {
+                            "full": "서울특별시 서대문구 현저동",
+                            "parcel_address": "서울특별시 서대문구 현저동",
+                            "legal_dong_code": "1141010900",
+                        },
+                        "region": {
+                            "sig_cd": "11410",
+                            "bjd_cd": "1141010900",
+                            "sido": "서울특별시",
+                            "sigungu": "서대문구",
+                        },
+                    },
+                ],
+            },
+        )
+
+    item = {
+        "export_id": "ytpc-boundary",
+        "candidate_id": "boundary",
+        "operation": "upsert",
+        "place": {
+            "name": "경계 후보",
+            "longitude": 126.956,
+            "latitude": 37.574,
+            "address": {"road_address": "서울 서대문구 통일로 251"},
+        },
+        "source_record": {"source_entity_id": "boundary"},
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="http://geo.test",
+    ) as http:
+        geocoder = kor_travel_geo_reverse_geocoder(
+            KorTravelGeoRestClient(http, require_auth=False)
+        )
+        [bundle] = await kor_travel_concierge_items_to_bundles(
+            [item],
+            fetched_at=datetime.fromisoformat(_FETCHED_AT),
+            reverse_geocoder=geocoder,
+        )
+
+    assert bundle.admin_evidence is not None
+    assert bundle.admin_evidence.obs_sigungu_names == ("종로구", "서대문구")
+    assert "provider_address_region_disagreement" not in (
+        validate_feature_bundle_address(bundle).issue_codes
+    )
+
+
+def test_business_name_substring_cannot_hide_real_sigungu_disagreement() -> None:
+    bundle = _bundle(
+        bjd_code="1111017700",
+        sigungu_code="11110",
+        sido_code="11",
+        sigungu_name="종로구",
+        road="서울 강남구 종로김밥",
+    )
+    codes = [issue.code for issue in validate_feature_bundle_address(bundle).issues]
+    assert "provider_address_region_disagreement" in codes
+
+
+def test_non_admin_word_ending_in_si_is_not_a_region_claim() -> None:
+    bundle = _bundle(
+        bjd_code="1168010100",
+        sigungu_code="11680",
+        sido_code="11",
+        sigungu_name="강남구",
+        road="서울 종로 현대미술전시",
+    )
+    result = validate_feature_bundle_address(bundle)
+    assert "provider_address_region_disagreement" not in result.issue_codes
+    summary = validate_feature_bundles_address([bundle])
+    assert summary.name_state_counts == {"no_token": 1}
 
 
 def test_name_axis_is_armed_without_admin_evidence() -> None:
@@ -181,7 +292,12 @@ def test_stale_code_is_detected_at_the_right_level(
     obs: str, claim: str, expected_level: str
 ) -> None:
     bundle = _bundle(
-        admin_evidence=AdminEvidence(obs_code=obs, claim_code=claim, claim_kind="bjd")
+        admin_evidence=AdminEvidence(
+            obs_code=obs,
+            reverse_attempted=True,
+            claim_code=claim,
+            claim_kind="bjd",
+        )
     )
     issues = validate_feature_bundle_address(bundle).issues
     codes = [i.code for i in issues if i.code.startswith("admin_code_stale")]
@@ -192,7 +308,10 @@ def test_stale_code_is_never_an_error() -> None:
     """행정코드 불일치는 관측 대상이지 영구 손실 사유가 아니다."""
     bundle = _bundle(
         admin_evidence=AdminEvidence(
-            obs_code="1111017700", claim_code="2671025300", claim_kind="bjd"
+            obs_code="1111017700",
+            reverse_attempted=True,
+            claim_code="2671025300",
+            claim_kind="bjd",
         )
     )
     result = validate_feature_bundle_address(bundle)
@@ -209,7 +328,10 @@ def test_ri_digits_are_not_compared() -> None:
     """리(8:10)는 ``_bjd_code_from_emd_code``가 합성할 수 있어 판정 근거가 아니다."""
     bundle = _bundle(
         admin_evidence=AdminEvidence(
-            obs_code="2671025300", claim_code="2671025399", claim_kind="bjd"
+            obs_code="2671025300",
+            reverse_attempted=True,
+            claim_code="2671025399",
+            claim_kind="bjd",
         )
     )
     assert validate_feature_bundle_address(bundle).issues == ()
@@ -219,14 +341,20 @@ def test_sigungu_claim_compares_only_five_digits() -> None:
     """5자리 주장을 10자리로 부풀려 비교하지 않는다."""
     same = _bundle(
         admin_evidence=AdminEvidence(
-            obs_code="2671025300", claim_code="26710", claim_kind="sigungu"
+            obs_code="2671025300",
+            reverse_attempted=True,
+            claim_code="26710",
+            claim_kind="sigungu",
         )
     )
     assert validate_feature_bundle_address(same).issues == ()
 
     differ = _bundle(
         admin_evidence=AdminEvidence(
-            obs_code="2671025300", claim_code="26500", claim_kind="sigungu"
+            obs_code="2671025300",
+            reverse_attempted=True,
+            claim_code="26500",
+            claim_kind="sigungu",
         )
     )
     codes = [i.code for i in validate_feature_bundle_address(differ).issues]
@@ -241,7 +369,7 @@ def test_sigungu_claim_compares_only_five_digits() -> None:
     [
         None,
         AdminEvidence(),
-        AdminEvidence(obs_code="2671025300"),
+        AdminEvidence(obs_code="2671025300", reverse_attempted=True),
         AdminEvidence(claim_code="2671025300", claim_kind="bjd"),
     ],
 )
@@ -258,10 +386,17 @@ def test_summary_reports_evidence_coverage() -> None:
         [
             _bundle(
                 admin_evidence=AdminEvidence(
-                    obs_code="2671025300", claim_code="2671025300", claim_kind="bjd"
+                    obs_code="2671025300",
+                    reverse_attempted=True,
+                    claim_code="2671025300",
+                    claim_kind="bjd",
                 )
             ),
-            _bundle(admin_evidence=AdminEvidence(obs_code="2671025300")),
+            _bundle(
+                admin_evidence=AdminEvidence(
+                    obs_code="2671025300", reverse_attempted=True
+                )
+            ),
             _bundle(admin_evidence=None),
         ]
     )
@@ -271,6 +406,40 @@ def test_summary_reports_evidence_coverage() -> None:
         "obs_only": 1,
         "unarmed": 1,
     }
+    assert sum(summary.name_state_counts.values()) == 3
+    assert summary.as_metadata()["address_validation_name_states"] == (
+        summary.name_state_counts
+    )
+
+
+def test_reverse_not_attempted_is_warning_not_failure() -> None:
+    bundle = _bundle(
+        bjd_code=None,
+        sigungu_code=None,
+        sido_code=None,
+        sigungu_name=None,
+        road="서울 종로 현대미술전시",
+        admin_evidence=AdminEvidence(reverse_attempted=False),
+    )
+    result = validate_feature_bundle_address(bundle)
+    assert [(issue.code, issue.severity) for issue in result.issues] == [
+        ("reverse_geocode_not_attempted", "warning")
+    ]
+
+
+def test_reverse_attempted_without_observation_or_claim_is_error() -> None:
+    bundle = _bundle(
+        bjd_code=None,
+        sigungu_code=None,
+        sido_code=None,
+        sigungu_name=None,
+        road=None,
+        admin_evidence=AdminEvidence(reverse_attempted=True),
+    )
+    result = validate_feature_bundle_address(bundle)
+    assert ("reverse_geocode_failed", "error") in [
+        (issue.code, issue.severity) for issue in result.issues
+    ]
 
 
 def test_retired_string_codes_are_no_longer_emitted() -> None:
@@ -280,7 +449,10 @@ def test_retired_string_codes_are_no_longer_emitted() -> None:
             _bundle(
                 road="완전히 다른 문자열",
                 admin_evidence=AdminEvidence(
-                    obs_code="2671025300", claim_code="2671025300", claim_kind="bjd"
+                    obs_code="2671025300",
+                    reverse_attempted=True,
+                    claim_code="2671025300",
+                    claim_kind="bjd",
                 ),
             )
         ]
