@@ -819,6 +819,8 @@ CHECKPOINT_SNAPSHOT=""
 RESTORED_CHECKPOINT_SNAPSHOT=""
 FINAL_CHECKPOINT_SNAPSHOT=""
 OLD_CHECKPOINT_DUMP=""
+OLD_CHECKPOINT_DUMP_SHA256=""
+OLD_CHECKPOINT_DUMP_SIZE=""
 VERIFICATION_DB=""
 VERIFICATION_DB_TOKEN=""
 VERIFICATION_DB_OID=""
@@ -1942,7 +1944,7 @@ remove_unreferenced_checkpoint_dumps() {
     checkpoint_references_dump "$dump_path" && continue
     rm -- "$dump_path"
   done < <(
-    find "$STATE_ROOT" -maxdepth 1 -type f \
+    find "$STATE_ROOT" -maxdepth 1 \
       -name 'clone-checkpoint-????????????????????????????????????????????????????????????????.dump' \
       -print0
   )
@@ -1950,18 +1952,29 @@ remove_unreferenced_checkpoint_dumps() {
 
 select_reusable_checkpoint_dump() {
   local excluded_path="$1"
+  local excluded_sha256="$2"
+  local excluded_size="$3"
   local -a candidates=()
-  local candidate
+  local candidate candidate_size
+  [[ -z "$excluded_sha256" || "$excluded_sha256" =~ ^[0-9a-f]{64}$ ]] ||
+    die "excluded checkpoint dump SHA256 is unsafe"
+  [[ -z "$excluded_size" || "$excluded_size" =~ ^[1-9][0-9]*$ ]] ||
+    die "excluded checkpoint dump size is unsafe"
   while IFS= read -r -d '' candidate; do
-    [[ -z "$excluded_path" || "$candidate" != "$excluded_path" ]] || continue
     [[ "$candidate" =~ ^${STATE_ROOT}/clone-checkpoint-[0-9a-f]{64}\.dump$ &&
        -f "$candidate" && ! -L "$candidate" ]] ||
       die "checkpoint dump resume path is unsafe"
     [[ "$(stat -c '%u:%g:%a' -- "$candidate")" == "0:0:600" ]] ||
       die "checkpoint dump resume metadata is unsafe"
+    [[ -z "$excluded_path" || "$candidate" != "$excluded_path" ]] || continue
+    candidate_size="$(stat -Lc '%s' -- "$candidate")"
+    if [[ -n "$excluded_sha256" && "$candidate_size" == "$excluded_size" ]] &&
+      [[ "$(sha256sum -- "$candidate" | awk '{print $1}')" == "$excluded_sha256" ]]; then
+      continue
+    fi
     candidates+=("$candidate")
   done < <(
-    find "$STATE_ROOT" -maxdepth 1 -type f \
+    find "$STATE_ROOT" -maxdepth 1 \
       -name 'clone-checkpoint-????????????????????????????????????????????????????????????????.dump' \
       -print0
   )
@@ -2110,6 +2123,14 @@ print(value)
         [[ "$OLD_CHECKPOINT_DUMP" == "$STATE_ROOT"/clone-checkpoint-*.dump ]] ||
           die "replaced checkpoint dump path is unsafe"
       fi
+      OLD_CHECKPOINT_DUMP_SHA256="$(
+        state_helper read-replaced-checkpoint-dump \
+          --checkpoint "$CHECKPOINT_FILE" --field sha256
+      )"
+      OLD_CHECKPOINT_DUMP_SIZE="$(
+        state_helper read-replaced-checkpoint-dump \
+          --checkpoint "$CHECKPOINT_FILE" --field size
+      )"
     elif [[ "$existing_checkpoint_version" == "2" ||
             "$existing_checkpoint_version" == "3" ||
             "$existing_checkpoint_version" == "4" ]]; then
@@ -2167,7 +2188,12 @@ print(value)
   [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND state = 'pending'")" == "0" ]] ||
     die "clone checkpoint has pending acceptance change request residue"
   assert_checkpoint_quiescence
-  NEW_CHECKPOINT_DUMP="$(select_reusable_checkpoint_dump "$OLD_CHECKPOINT_DUMP")"
+  NEW_CHECKPOINT_DUMP="$(
+    select_reusable_checkpoint_dump \
+      "$OLD_CHECKPOINT_DUMP" \
+      "$OLD_CHECKPOINT_DUMP_SHA256" \
+      "$OLD_CHECKPOINT_DUMP_SIZE"
+  )"
   if [[ -n "$NEW_CHECKPOINT_DUMP" ]]; then
     CHECKPOINT_DUMP_DURABLE=1
   else

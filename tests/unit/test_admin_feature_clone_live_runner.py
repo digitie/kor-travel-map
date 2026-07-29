@@ -50,6 +50,53 @@ def _run_helper(*arguments: str, check: bool = True) -> subprocess.CompletedProc
     )
 
 
+def _run_reusable_dump_selector(
+    state_root: Path,
+    *,
+    excluded_path: Path | None = None,
+    excluded_sha256: str = "",
+    excluded_size: int | None = None,
+    normalize_metadata: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    source = _RUNNER.read_text(encoding="utf-8")
+    start = source.index("select_reusable_checkpoint_dump() {")
+    end = source.index("\n}\n\nverify_checkpoint_dump() {", start) + 2
+    function_source = source[start:end]
+    stat_override = (
+        "stat() {\n"
+        "  case \"$*\" in\n"
+        "    *%u:%g:%a*) printf '0:0:600\\n' ;;\n"
+        "    *) command stat \"$@\" ;;\n"
+        "  esac\n"
+        "}\n"
+        if normalize_metadata
+        else ""
+    )
+    script = (
+        "set -euo pipefail\n"
+        'readonly STATE_ROOT="$1"\n'
+        "die() { printf '%s\\n' \"$1\" >&2; exit 1; }\n"
+        f"{stat_override}"
+        f"{function_source}\n"
+        'select_reusable_checkpoint_dump "$2" "$3" "$4"\n'
+    )
+    return subprocess.run(
+        [
+            "bash",
+            "-c",
+            script,
+            "bash",
+            str(state_root),
+            str(excluded_path) if excluded_path is not None else "",
+            excluded_sha256,
+            str(excluded_size) if excluded_size is not None else "",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def _write_snapshot(
     path: Path,
     *,
@@ -563,6 +610,88 @@ def test_checkpoint_rejects_dump_restore_snapshot_drift(tmp_path: Path) -> None:
     assert completed.returncode != 0
     assert "복원 검증 snapshot" in completed.stderr
     assert "fields=feature_total" in completed.stderr
+
+
+def test_reusable_dump_selector_rejects_symlink_and_ambiguous_candidates(
+    tmp_path: Path,
+) -> None:
+    state_root = tmp_path / "state"
+    state_root.mkdir()
+    outside = tmp_path / "outside.dump"
+    outside.write_bytes(b"archive")
+    symlink = state_root / f"clone-checkpoint-{'1' * 64}.dump"
+    symlink.symlink_to(outside)
+
+    unsafe = _run_reusable_dump_selector(
+        state_root,
+        normalize_metadata=True,
+    )
+
+    assert unsafe.returncode != 0
+    assert "resume path is unsafe" in unsafe.stderr
+
+    symlink.unlink()
+    first = state_root / f"clone-checkpoint-{'2' * 64}.dump"
+    second = state_root / f"clone-checkpoint-{'3' * 64}.dump"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+
+    ambiguous = _run_reusable_dump_selector(
+        state_root,
+        normalize_metadata=True,
+    )
+
+    assert ambiguous.returncode != 0
+    assert "resume is ambiguous" in ambiguous.stderr
+
+
+def test_reusable_dump_selector_validates_metadata_and_excludes_old_dump(
+    tmp_path: Path,
+) -> None:
+    state_root = tmp_path / "state"
+    state_root.mkdir()
+    old_dump = state_root / f"clone-checkpoint-{'4' * 64}.dump"
+    candidate = state_root / f"clone-checkpoint-{'5' * 64}.dump"
+    old_dump.write_bytes(b"old")
+    candidate.write_bytes(b"candidate")
+    candidate.chmod(0o644)
+
+    unsafe_metadata = _run_reusable_dump_selector(
+        state_root,
+        excluded_path=old_dump,
+    )
+    selected = _run_reusable_dump_selector(
+        state_root,
+        excluded_path=old_dump,
+        normalize_metadata=True,
+    )
+
+    assert unsafe_metadata.returncode != 0
+    assert "resume metadata is unsafe" in unsafe_metadata.stderr
+    assert selected.returncode == 0
+    assert selected.stdout == str(candidate)
+
+
+def test_reusable_dump_selector_excludes_legacy_dump_by_signed_provenance(
+    tmp_path: Path,
+) -> None:
+    state_root = tmp_path / "state"
+    state_root.mkdir()
+    old_dump = state_root / f"clone-checkpoint-{'6' * 64}.dump"
+    candidate = state_root / f"clone-checkpoint-{'7' * 64}.dump"
+    old_dump.write_bytes(b"legacy-without-filename")
+    candidate.write_bytes(b"durable-resume")
+    old_digest = hashlib.sha256(old_dump.read_bytes()).hexdigest()
+
+    selected = _run_reusable_dump_selector(
+        state_root,
+        excluded_sha256=old_digest,
+        excluded_size=old_dump.stat().st_size,
+        normalize_metadata=True,
+    )
+
+    assert selected.returncode == 0
+    assert selected.stdout == str(candidate)
 
 
 def test_checkpoint_rejects_source_drift_after_restore(tmp_path: Path) -> None:

@@ -762,27 +762,29 @@ def read_replaced_checkpoint_dump(args: argparse.Namespace) -> None:
     checkpoint = _load_object(path)
     version = checkpoint.get("version")
     if version in {2, 3, 4}:
-        print(_validated_checkpoint(path)["dump"]["filename"])
-        return
-    if version != 1 or set(checkpoint) != {
-        "baseline",
-        "checkpoint_sha256",
-        "dump",
-        "version",
-    }:
-        raise RuntimeError("교체 대상 clone checkpoint 계약이 올바르지 않습니다")
-    digest = checkpoint.get("checkpoint_sha256")
-    if not isinstance(digest, str):
-        raise RuntimeError("교체 대상 clone checkpoint digest가 없습니다")
-    _require_pattern(digest, _SHA256_RE, "clone checkpoint SHA256")
-    unsigned = {
-        key: value for key, value in checkpoint.items() if key != "checkpoint_sha256"
-    }
-    if digest != _canonical_sha256(unsigned):
-        raise RuntimeError("교체 대상 clone checkpoint digest가 일치하지 않습니다")
-    dump = checkpoint.get("dump")
-    if not isinstance(dump, dict):
-        raise RuntimeError("교체 대상 clone checkpoint dump provenance가 없습니다")
+        dump = _validated_checkpoint(path)["dump"]
+    else:
+        if version != 1 or set(checkpoint) != {
+            "baseline",
+            "checkpoint_sha256",
+            "dump",
+            "version",
+        }:
+            raise RuntimeError("교체 대상 clone checkpoint 계약이 올바르지 않습니다")
+        digest = checkpoint.get("checkpoint_sha256")
+        if not isinstance(digest, str):
+            raise RuntimeError("교체 대상 clone checkpoint digest가 없습니다")
+        _require_pattern(digest, _SHA256_RE, "clone checkpoint SHA256")
+        unsigned = {
+            key: value
+            for key, value in checkpoint.items()
+            if key != "checkpoint_sha256"
+        }
+        if digest != _canonical_sha256(unsigned):
+            raise RuntimeError("교체 대상 clone checkpoint digest가 일치하지 않습니다")
+        dump = checkpoint.get("dump")
+        if not isinstance(dump, dict):
+            raise RuntimeError("교체 대상 clone checkpoint dump provenance가 없습니다")
     dump_digest = dump.get("sha256")
     dump_size = dump.get("size")
     if not isinstance(dump_digest, str):
@@ -790,8 +792,14 @@ def read_replaced_checkpoint_dump(args: argparse.Namespace) -> None:
     _require_pattern(dump_digest, _SHA256_RE, "dump SHA256")
     if not isinstance(dump_size, int) or isinstance(dump_size, bool) or dump_size < 1:
         raise RuntimeError("교체 대상 clone checkpoint dump size가 올바르지 않습니다")
-    if not isinstance(checkpoint.get("baseline"), dict):
+    if version == 1 and not isinstance(checkpoint.get("baseline"), dict):
         raise RuntimeError("교체 대상 clone checkpoint baseline이 없습니다")
+    if args.field == "sha256":
+        print(dump_digest)
+        return
+    if args.field == "size":
+        print(dump_size)
+        return
     if set(dump) == {"sha256", "size"}:
         return
     if set(dump) != {"filename", "sha256", "size"}:
@@ -1431,6 +1439,11 @@ def main() -> None:
 
     replaced_checkpoint = subparsers.add_parser("read-replaced-checkpoint-dump")
     replaced_checkpoint.add_argument("--checkpoint", required=True)
+    replaced_checkpoint.add_argument(
+        "--field",
+        choices=("filename", "sha256", "size"),
+        default="filename",
+    )
     replaced_checkpoint.set_defaults(handler=read_replaced_checkpoint_dump)
 
     checkpoint_verify = subparsers.add_parser("verify-checkpoint")
