@@ -82,7 +82,11 @@ H25A에서 인수한 미충족 AC를 `scripts/h25b_match_rerun.py`로 채웠다.
 | --- | --- |
 | 미연결 (역반영 후) | 264 |
 | **기준선** (CSV `feature_match_confidence`) | review 178 / unmatched 86 |
-| 자체 matcher | high 6 / review 1 / low 256 / none 1 |
+| 자체 matcher | high **7** / review 1 / low 255 / none 1 |
+
+> 초안은 `high 6`이었다. region 비교를 문자열 포함에서 **시도코드**로 고치니 7이 됐다 —
+> 약칭(`충북`)이 정식명(`충청북도`)에 포함되지 않아 6개 시도의 exact 매칭이 통째로
+> `mismatch`로 떨어지고 있었다(리뷰 지적). 교차표는 manifest `summary.baseline_vs_matcher`에 있다.
 
 ### H25A의 "191건 실제 부재"는 matcher 산물이었다
 
@@ -130,7 +134,7 @@ CSV는 222행 중 **109행(49%)**뿐이다. region 없는 113행은 이 축으�
 시도 약칭(`충북`)과 정식명(`충청북도`)은 코드로 정규화해 비교하므로 6개 시도가 통째로
 빠지는 문제는 없다(초안 matcher의 결함이었다).
 
-### `high` 6건에도 오탐이 있다
+### `high` 등급에도 오탐이 있다
 
 | 항목 | 후보 | 판정 |
 | --- | --- | --- |
