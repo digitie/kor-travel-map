@@ -592,7 +592,9 @@ COPY (
         COALESCE(database.daticulocale, ''),
         COALESCE(database.daticurules, ''),
         COALESCE(database.datcollversion, ''),
-        database.datdba::regrole::text,
+        -- 검증 DB는 crash-safe cleanup을 위해 일회성 전용 role이 소유한다.
+        -- 원본 DB owner는 checkpoint_login_role_invariant에서 별도로 검증한다.
+        '<database-owner>',
         COALESCE(database.datacl::text, '')
       ) AS definition
     FROM pg_catalog.pg_database AS database
@@ -1056,6 +1058,15 @@ checkpoint_login_role_invariant() {
       FROM pg_catalog.pg_roles
       WHERE rolcanlogin
         AND rolname = '$db_user'
+    "
+  )" == "1" ]] || return 1
+  [[ "$(
+    psql_value "
+      SELECT count(*)
+      FROM pg_catalog.pg_database AS database
+      JOIN pg_catalog.pg_roles AS owner ON owner.oid = database.datdba
+      WHERE database.datname = '$ORIGINAL_DB_NAME'
+        AND owner.rolname = '$db_user'
     "
   )" == "1" ]]
 }

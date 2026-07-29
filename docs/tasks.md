@@ -158,6 +158,10 @@ Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별�
     Live/Mocked signal·cleanup 경계까지 보강한 최종 문서 candidate에서 Mocked
     serial/workers=4와 보존 clone 파괴적 Live를 다시 결박한 뒤 PR·CI green·merge한다.
   - 위 gate와 merge가 끝나기 전에는 `tasks-done.md`로 옮기지 않는다.
+  - [ ] **T-VN-48D.1** — legacy v1 checkpoint를 v4로 재검증할 때 restore 전용
+    ownership role과 원본 DB owner가 달라 snapshot이 항상 불일치하는 문제를 수정한다.
+    database digest에서는 의도적인 owner 차이를 정규화하고, 원본 clone DB owner는
+    별도 invariant로 fail-closed 검증하며 mismatch field 이름을 redacted 진단에 남긴다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 

@@ -225,6 +225,15 @@ def _validated_snapshot(path: Path) -> dict[str, Any]:
     return _validated_snapshot_object(_load_object(path), label=path.name)
 
 
+def _snapshot_mismatched_fields(
+    expected: dict[str, Any],
+    observed: dict[str, Any],
+) -> str:
+    return ",".join(
+        sorted(key for key in expected if observed.get(key) != expected[key])
+    )
+
+
 def write_blocked(args: argparse.Namespace) -> None:
     path = Path(args.path)
     if path.exists() or path.is_symlink():
@@ -325,9 +334,15 @@ def write_checkpoint(args: argparse.Namespace) -> None:
     restored_snapshot = _validated_snapshot(Path(args.restored_snapshot))
     final_snapshot = _validated_snapshot(Path(args.final_snapshot))
     if restored_snapshot != snapshot:
-        raise RuntimeError("복원 검증 snapshot이 checkpoint baseline과 다릅니다")
+        raise RuntimeError(
+            "복원 검증 snapshot이 checkpoint baseline과 다릅니다: "
+            f"fields={_snapshot_mismatched_fields(snapshot, restored_snapshot)}"
+        )
     if final_snapshot != snapshot:
-        raise RuntimeError("checkpoint 생성 후 원본 clone snapshot이 baseline과 다릅니다")
+        raise RuntimeError(
+            "checkpoint 생성 후 원본 clone snapshot이 baseline과 다릅니다: "
+            f"fields={_snapshot_mismatched_fields(snapshot, final_snapshot)}"
+        )
     dump_sha256 = _require_pattern(args.dump_sha256, _SHA256_RE, "dump SHA256")
     if args.dump_size < 1:
         raise RuntimeError("dump size가 올바르지 않습니다")

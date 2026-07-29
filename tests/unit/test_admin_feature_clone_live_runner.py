@@ -562,6 +562,7 @@ def test_checkpoint_rejects_dump_restore_snapshot_drift(tmp_path: Path) -> None:
 
     assert completed.returncode != 0
     assert "복원 검증 snapshot" in completed.stderr
+    assert "fields=feature_total" in completed.stderr
 
 
 def test_checkpoint_rejects_source_drift_after_restore(tmp_path: Path) -> None:
@@ -593,6 +594,7 @@ def test_checkpoint_rejects_source_drift_after_restore(tmp_path: Path) -> None:
 
     assert completed.returncode != 0
     assert "원본 clone snapshot" in completed.stderr
+    assert "fields=feature_total" in completed.stderr
 
 
 def test_legacy_v2_checkpoint_is_validated_and_promoted_to_v4(
@@ -945,6 +947,8 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "relation.relowner::regrole::text" in source
     assert "pg_catalog.pg_default_acl" in source
     assert "database_sha256" in source
+    assert "'<database-owner>'" in source
+    assert "owner.rolname = '$db_user'" in source
     assert "extension_sha256" in source
     assert "pg_get_functiondef" in source
     assert "pg_get_viewdef" in source
