@@ -229,3 +229,48 @@ async def test_sweep_does_not_cross_provider_boundary(
         managed_violation_types=_MANAGED,
     )
     assert resolved == 0
+
+
+async def test_dedupe_survives_payload_change(
+    migrated_session: AsyncSession,
+) -> None:
+    """provider payload가 바뀌어도 같은 문제는 한 행으로 접힌다 (T-VN-H30A 핵심 근거).
+
+    이전 구현은 ``dedupe_key``를 ``source_record_key``에 걸었는데 그 키는
+    ``raw_payload_hash`` 파생이라, export에서 무관한 필드 하나만 바뀌어도 **새 열린 행**이
+    생기고 기존 행은 영원히 열려 있었다(MOIS 977k 규모에서 큐 단조 증가).
+    ``source_entity_id`` 기반이면 payload 변경과 무관하게 안정적이어야 한다.
+
+    여기서는 그 불변식을 직접 고정한다 — 같은 entity의 같은 code인데 다른 부수 정보를
+    실어 보내도 행 수가 늘지 않아야 한다.
+    """
+    first = _finding("e1")
+    first["source_record_key"] = None
+    first["payload"]["provider_address"] = "옛 주소"
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[first],
+        managed_violation_types=_MANAGED,
+    )
+
+    # payload가 바뀐 재-export: 부수 정보가 달라졌지만 같은 entity의 같은 문제다.
+    second = _finding("e1")
+    second["source_record_key"] = None
+    second["payload"]["provider_address"] = "새 주소"
+    second["message"] = "같은 문제, 새 payload"
+    _, resolved = await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[second],
+        managed_violation_types=_MANAGED,
+    )
+
+    rows = await _rows(migrated_session)
+    assert len(rows) == 1, "payload 변경이 새 행을 만들면 큐가 export마다 자란다"
+    assert rows[0]["n"] == 2, "같은 문제의 재발이므로 occurrence_count가 올라야 한다"
+    assert rows[0]["addr"] == "새 주소", "최신 단서로 갱신돼야 한다"
+    assert rows[0]["status"] == "open"
+    assert resolved == 0, "여전히 보고 중인 finding을 닫으면 안 된다"
