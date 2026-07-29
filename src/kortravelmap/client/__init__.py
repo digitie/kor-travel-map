@@ -60,7 +60,6 @@ from kortravelmap.enrichment import (
     find_place_phone_candidates,
 )
 from kortravelmap.infra import feature_update_repo as fur_repo
-from kortravelmap.infra.integrity_violation_repo import upsert_integrity_finding
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.batch_dag import (
     BatchDagCancellationWon,
@@ -233,6 +232,7 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.infra.feature_update_repo import (
     start_update_request as repo_start_update_request,
 )
+from kortravelmap.infra.integrity_violation_repo import upsert_integrity_finding
 from kortravelmap.infra.jobs_repo import ImportJobEvent
 from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
 from kortravelmap.infra.poi_cache_target_repo import (

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Final
 
 from dagster import Failure
 from kortravelmap.client import AddressValidationFinding
-
 from kortravelmap.dagster.validation import (
     FeatureAddressValidationSummary,
     validate_feature_bundles_address,
