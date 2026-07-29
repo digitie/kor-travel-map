@@ -6,9 +6,9 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from dagster import Failure
 from kortravelmap.client import AddressValidationFinding
 
+from dagster import Failure
 from kortravelmap.dagster.validation import (
     FeatureAddressValidationSummary,
     validate_feature_bundles_address,
