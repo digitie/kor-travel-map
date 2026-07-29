@@ -230,7 +230,7 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   gitignored runbook에서 결선한다. quiet 상태를 heartbeat 두 주기 이상 유지해 같은 ops-live
   socket이 재연결 없이 유지되는지 브라우저와 proxy metric 양쪽에서 확인한 뒤 #819를 닫는다.
 
-### T-VN-H30 — 주소 검증 관측 durable화·회복 실적재 검증 (H28 후속, 완료)
+### T-VN-H30 — 주소 검증 관측 durable화·회복 실적재 검증 (H28 후속, 부분완료)
 
 - [x] T-VN-H30A — **검증 finding을 `ops.data_integrity_violations`에 durable 기록**
 
@@ -254,6 +254,20 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
 
   격리 clone 재실증: finding 106건 기록 → 재실행에도 106 유지, `occurrence_count` 전부 2,
   `dedupe_key`가 entity id 기반(`…:reverse_geocode_unavailable:79`)으로 안정화됨.
+
+  > **이 live 실증이 보이지 못하는 것** — 두 run이 같은 finding을 보고했으므로 **sweep은
+  > 발화한 적이 없고**, payload가 바뀌지 않았으므로 **키 안정성도 이 실험으로는 확인되지
+  > 않는다**(옛 `source_record_key` 방식으로도 같은 결과가 나온다). 두 불변식은 대신
+  > 테스트로 고정했다 — sweep 5종은 `tests/integration/test_integrity_findings_sync.py`,
+  > 키 유도는 `test_etl.py::test_dedupe_key_uses_stable_entity_id_not_payload_hash`.
+  > live에서 sweep을 발화시키는 실험(한 레코드의 문제를 해소한 뒤 재실행)은 아직 남았다.
+
+  > **H30B 수치 주의** — `source_records` 2000→2458은 **+458**이고 acceptance가 요구한
+  > `feature.features` before/after는 보고하지 않았다. 이미 존재하던 레코드의 재관측이
+  > 섞인 것으로 보이나 확인하지 않았다. "1,477 회복"의 근거로 쓰지 말 것.
+
+  > **`/admin/issues` 노출은 코드 근거다** — `violation_type`에 allowlist·enum·CHECK가 없음을
+  > 코드로 확인했을 뿐, 인증된 `GET /v1/admin/issues?issue_type=…` 실호출은 하지 않았다.
 
 - [x] T-VN-H30B — **회복을 실제 적재로 검증**
 
