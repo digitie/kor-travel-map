@@ -1092,12 +1092,14 @@ def test_rest_client_regions_within_radius_center_xy_fallback_and_malformed_item
 def test_rest_client_regions_within_radius_invalid_response_raises(
     payload: dict[str, Any],
 ) -> None:
+    from kortravelmap.core.exceptions import GeoRequestError
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=payload)
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            with pytest.raises(ValueError, match="kor-travel-geo regions response"):
+            with pytest.raises(GeoRequestError, match="응답 계약 오류"):
                 await _geo_client(http).regions_within_radius(
                     lon=126.978,
                     lat=37.5665,
@@ -1614,6 +1616,74 @@ def test_geo_http_error_never_exposes_proxy_secret(
     asyncio.run(scenario())
     assert secret not in caplog.text
     assert "?key=" not in caplog.text
+
+
+def test_geo_missing_key_response_identifies_trusted_proxy_misconfiguration() -> None:
+    """geo의 public key fallback은 backend trusted-proxy 결선 실패를 뜻한다."""
+    from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
+    from kortravelmap.geocoding import KorTravelGeoRestClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "status": "ERROR",
+                "error": {"code": "E0100", "field": "key"},
+            },
+        )
+
+    async def scenario() -> None:
+        async with _mock_client(handler) as http:
+            client = KorTravelGeoRestClient(
+                http,
+                admin_proxy_secret=SecretStr("map-secret-not-accepted-by-geo"),
+            )
+            with pytest.raises(
+                GeoAuthNotConfiguredError,
+                match="KTG_ADMIN_TRUSTED_PROXY_CIDRS",
+            ) as excinfo:
+                await client.reverse(127.0276, 37.4979)
+            assert excinfo.value.__cause__ is None
+            assert excinfo.value.__context__ is None
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("content", "content_type"),
+    [
+        (b"not-json", "application/json"),
+        (b"[]", "application/json"),
+        (b'{"status":"OK","candidates":[null]}', "application/json"),
+    ],
+)
+def test_geo_success_with_malformed_payload_is_provider_error(
+    content: bytes,
+    content_type: str,
+) -> None:
+    """2xx라도 JSON/schema가 깨졌으면 호출자 4xx가 아닌 provider 502 경계다."""
+    from kortravelmap.core.exceptions import GeoRequestError
+    from kortravelmap.geocoding import KorTravelGeoRestClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=content,
+            headers={"content-type": content_type},
+        )
+
+    async def scenario() -> None:
+        async with _mock_client(handler) as http:
+            client = KorTravelGeoRestClient(
+                http,
+                admin_proxy_secret=SecretStr("configured-proxy-secret"),
+            )
+            with pytest.raises(GeoRequestError, match="응답 계약 오류") as excinfo:
+                await client.reverse(127.0276, 37.4979)
+            assert excinfo.value.__cause__ is None
+            assert excinfo.value.__context__ is None
+
+    asyncio.run(scenario())
 
 
 def test_geo_transport_error_drops_original_request_and_secret() -> None:

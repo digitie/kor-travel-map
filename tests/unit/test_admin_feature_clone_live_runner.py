@@ -172,6 +172,8 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
         _DUMP_SHA256,
         "--dump-size",
         "1024",
+        "--final-snapshot",
+        str(startup),
         "--path",
         str(checkpoint),
         "--restored-snapshot",
@@ -544,6 +546,8 @@ def test_checkpoint_rejects_dump_restore_snapshot_drift(tmp_path: Path) -> None:
         _DUMP_SHA256,
         "--dump-size",
         "1024",
+        "--final-snapshot",
+        str(baseline),
         "--path",
         str(tmp_path / "checkpoint.json"),
         "--restored-snapshot",
@@ -555,6 +559,37 @@ def test_checkpoint_rejects_dump_restore_snapshot_drift(tmp_path: Path) -> None:
 
     assert completed.returncode != 0
     assert "복원 검증 snapshot" in completed.stderr
+
+
+def test_checkpoint_rejects_source_drift_after_restore(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline.json"
+    restored = tmp_path / "restored.json"
+    final = tmp_path / "final.json"
+    _write_snapshot(baseline, total=120)
+    _write_snapshot(restored, total=120)
+    _write_snapshot(final, total=121)
+
+    completed = _run_helper(
+        "write-checkpoint",
+        "--dump-filename",
+        _DUMP_FILENAME,
+        "--dump-sha256",
+        _DUMP_SHA256,
+        "--dump-size",
+        "1024",
+        "--final-snapshot",
+        str(final),
+        "--path",
+        str(tmp_path / "checkpoint.json"),
+        "--restored-snapshot",
+        str(restored),
+        "--snapshot",
+        str(baseline),
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert "원본 clone snapshot" in completed.stderr
 
 
 def test_checkpoint_scratch_ownership_is_durable_and_identity_bound(
@@ -569,9 +604,37 @@ def test_checkpoint_scratch_ownership_is_durable_and_identity_bound(
         "--path",
         str(state),
     )
-    _run_helper("write-scratch", *identity_args)
+    database = f"ktm_checkpoint_{'7' * 24}"
+    ownership_token = "8" * 64
+    _run_helper(
+        "write-scratch",
+        *identity_args,
+        "--database",
+        database,
+        "--ownership-token",
+        ownership_token,
+    )
 
-    observed = _run_helper("read-scratch", *identity_args)
+    intent_version = _run_helper(
+        "read-scratch", *identity_args, "--field", "version"
+    )
+    unclaimed_oid = _run_helper(
+        "read-scratch",
+        *identity_args,
+        "--field",
+        "database_oid",
+        check=False,
+    )
+    _run_helper("claim-scratch", *identity_args, "--database-oid", "16384")
+    observed_database = _run_helper(
+        "read-scratch", *identity_args, "--field", "database"
+    )
+    observed_token = _run_helper(
+        "read-scratch", *identity_args, "--field", "ownership_token"
+    )
+    observed_oid = _run_helper(
+        "read-scratch", *identity_args, "--field", "database_oid"
+    )
     rejected = _run_helper(
         "read-scratch",
         "--clone-container-sha256",
@@ -580,11 +643,17 @@ def test_checkpoint_scratch_ownership_is_durable_and_identity_bound(
         _SYSTEM_SHA256,
         "--path",
         str(state),
+        "--field",
+        "database",
         check=False,
     )
     _run_helper("clear-scratch", *identity_args)
 
-    assert observed.stdout.strip() == "ktm_checkpoint_verify"
+    assert intent_version.stdout.strip() == "2"
+    assert unclaimed_oid.returncode != 0
+    assert observed_database.stdout.strip() == database
+    assert observed_token.stdout.strip() == ownership_token
+    assert observed_oid.stdout.strip() == "16384"
     assert rejected.returncode != 0
     assert not state.exists()
 
@@ -629,7 +698,12 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "pg_dump --format=custom" in source
     assert "pg_restore --exit-on-error --single-transaction" in source
     assert "--restored-snapshot" in source
+    assert "--final-snapshot" in source
+    assert "start_checkpoint_quiescence" in source
+    assert "LOCK TABLE %I.%I IN SHARE MODE" in source
     assert "state_helper write-scratch" in source
+    assert "state_helper claim-scratch" in source
+    assert "shobj_description" in source
     assert "recover_verification_database" in source
     assert "fsync_file_and_directory" in source
     assert "verify_checkpoint_dump" in source
@@ -646,7 +720,8 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert recovery_source.index(
         "if state_helper validate-evidence"
     ) < recovery_source.index('for image in "$API_IMAGE_ID"')
-    assert 'docker image inspect "$image"' in source
+    assert 'docker image rm "$tag"' in source
+    assert 'docker image rm --force "${images[@]}"' not in source
     assert source.rindex("finalize_resources") < source.rindex(
         "state_helper complete"
     )

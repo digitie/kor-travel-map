@@ -744,10 +744,16 @@ FIXTURE_HELPER="$SCRIPT_DIR/admin_feature_live_fixture.py"
 NEW_CHECKPOINT_DUMP=""
 CHECKPOINT_SNAPSHOT=""
 RESTORED_CHECKPOINT_SNAPSHOT=""
+FINAL_CHECKPOINT_SNAPSHOT=""
 OLD_CHECKPOINT_DUMP=""
 VERIFICATION_DB=""
+VERIFICATION_DB_TOKEN=""
+VERIFICATION_DB_OID=""
 VERIFICATION_DB_OWNED=0
 readonly VERIFICATION_STATE="$STATE_ROOT/checkpoint-scratch.json"
+CHECKPOINT_QUIESCENCE_APP=""
+CHECKPOINT_QUIESCENCE_PROCESS=""
+CHECKPOINT_DUMP_DURABLE=0
 BLOCKED_WRITTEN=0
 COMPLETE=0
 
@@ -860,23 +866,39 @@ remove_owned_network() {
 }
 
 remove_owned_images() {
-  local -a images=()
-  local image
-  for image in "$API_IMAGE_ID" "$UI_IMAGE_ID" "$PLAYWRIGHT_IMAGE_ID"; do
-    if [[ -n "$image" ]] && docker image inspect "$image" >/dev/null 2>&1; then
-      images+=("$image")
-    fi
-  done
-  (( ${#images[@]} == 0 )) || docker image rm --force "${images[@]}" >/dev/null
+  remove_owned_image_tag "$API_IMAGE_TAG" "$API_IMAGE_ID"
+  remove_owned_image_tag "$UI_IMAGE_TAG" "$UI_IMAGE_ID"
+  remove_owned_image_tag "$PLAYWRIGHT_IMAGE_TAG" "$PLAYWRIGHT_IMAGE_ID"
+}
+
+remove_owned_image_tag() {
+  local tag="$1"
+  local expected_id="$2"
+  [[ -n "$tag" && -n "$expected_id" ]] || return 0
+  local observed_id
+  observed_id="$(docker image inspect --format '{{.Id}}' "$tag" 2>/dev/null)" ||
+    return 0
+  [[ "$observed_id" == "$expected_id" ]] ||
+    die "runner-owned image tag was reassigned"
+  # ID를 --force 삭제하면 같은 content-addressable image를 참조하는 foreign/cache
+  # tag까지 제거한다. 실행별 tag만 비강제로 해제한다.
+  docker image rm "$tag" >/dev/null
 }
 
 owned_images() {
-  local count=0 image
-  for image in "$API_IMAGE_ID" "$UI_IMAGE_ID" "$PLAYWRIGHT_IMAGE_ID"; do
-    if [[ -n "$image" ]] && docker image inspect "$image" >/dev/null 2>&1; then
-      count=$((count + 1))
-    fi
-  done
+  local count=0 tag expected_id observed_id
+  while IFS='|' read -r tag expected_id; do
+    [[ -n "$tag" && -n "$expected_id" ]] || continue
+    observed_id="$(docker image inspect --format '{{.Id}}' "$tag" 2>/dev/null)" ||
+      continue
+    [[ "$observed_id" == "$expected_id" ]] ||
+      die "runner-owned image tag was reassigned"
+    count=$((count + 1))
+  done <<EOF
+$API_IMAGE_TAG|$API_IMAGE_ID
+$UI_IMAGE_TAG|$UI_IMAGE_ID
+$PLAYWRIGHT_IMAGE_TAG|$PLAYWRIGHT_IMAGE_ID
+EOF
   printf '%s' "$count"
 }
 
@@ -891,13 +913,112 @@ owned_networks() {
 }
 
 foreign_db_sessions() {
+  local quiescence_filter=""
+  if [[ -n "$CHECKPOINT_QUIESCENCE_APP" ]]; then
+    [[ "$CHECKPOINT_QUIESCENCE_APP" =~ ^ktm_checkpoint_[0-9a-f]{16}$ ]] ||
+      die "checkpoint quiescence application name is invalid"
+    quiescence_filter="
+      AND application_name <> '$CHECKPOINT_QUIESCENCE_APP'"
+  fi
   psql_value "
     SELECT count(*)
     FROM pg_catalog.pg_stat_activity
     WHERE datname = current_database()
       AND pid <> pg_backend_pid()
       AND backend_type = 'client backend'
+      $quiescence_filter
   "
+}
+
+start_checkpoint_quiescence() {
+  [[ -z "$CHECKPOINT_QUIESCENCE_PROCESS" ]] ||
+    die "checkpoint quiescence is already active"
+  [[ "$(foreign_db_sessions)" == "0" ]] ||
+    die "clone DB has a foreign client session before checkpoint quiescence"
+  CHECKPOINT_QUIESCENCE_APP="ktm_checkpoint_${RUN_KEY:0:16}"
+  local lock_statements
+  lock_statements="$(
+    psql_query "
+      SELECT format(
+        'LOCK TABLE %I.%I IN SHARE MODE;',
+        namespace.nspname,
+        relation.relname
+      )
+      FROM pg_catalog.pg_class AS relation
+      JOIN pg_catalog.pg_namespace AS namespace
+        ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
+        AND relation.relkind IN ('r', 'p', 'm')
+      ORDER BY namespace.nspname, relation.relname
+    "
+  )"
+  [[ -n "$lock_statements" ]] || die "checkpoint lock relation set is empty"
+  PGPASSWORD="$db_password" PGAPPNAME="$CHECKPOINT_QUIESCENCE_APP" \
+    docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
+    psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$db_name" \
+    -c "BEGIN; SET LOCAL statement_timeout = 0; $lock_statements SELECT pg_sleep(86400); ROLLBACK;" \
+    >/dev/null 2>&1 &
+  CHECKPOINT_QUIESCENCE_PROCESS="$!"
+  local attempt
+  for attempt in $(seq 1 300); do
+    kill -0 "$CHECKPOINT_QUIESCENCE_PROCESS" 2>/dev/null ||
+      die "checkpoint quiescence process exited before acquiring locks"
+    if [[ "$(
+      psql_value "
+        SELECT count(*)
+        FROM pg_catalog.pg_stat_activity
+        WHERE datname = current_database()
+          AND backend_type = 'client backend'
+          AND application_name = '$CHECKPOINT_QUIESCENCE_APP'
+          AND state = 'active'
+          AND wait_event_type = 'Timeout'
+          AND wait_event = 'PgSleep'
+      "
+    )" == "1" ]]; then
+      [[ "$(foreign_db_sessions)" == "0" ]] ||
+        die "clone DB gained a foreign session during checkpoint quiescence"
+      return
+    fi
+    sleep 0.1
+  done
+  die "checkpoint quiescence locks were not acquired"
+}
+
+assert_checkpoint_quiescence() {
+  [[ "$CHECKPOINT_QUIESCENCE_PROCESS" =~ ^[0-9]+$ ]] ||
+    die "checkpoint quiescence process is missing"
+  kill -0 "$CHECKPOINT_QUIESCENCE_PROCESS" 2>/dev/null ||
+    die "checkpoint quiescence process exited"
+  [[ "$(
+    psql_value "
+      SELECT count(*)
+      FROM pg_catalog.pg_stat_activity
+      WHERE datname = current_database()
+        AND backend_type = 'client backend'
+        AND application_name = '$CHECKPOINT_QUIESCENCE_APP'
+        AND state = 'active'
+        AND wait_event_type = 'Timeout'
+        AND wait_event = 'PgSleep'
+    "
+  )" == "1" ]] || die "checkpoint quiescence backend is not holding locks"
+  [[ "$(foreign_db_sessions)" == "0" ]] ||
+    die "clone DB has a foreign session during checkpoint quiescence"
+}
+
+stop_checkpoint_quiescence() {
+  [[ -n "$CHECKPOINT_QUIESCENCE_PROCESS" ]] || return 0
+  if [[ -n "$CHECKPOINT_QUIESCENCE_APP" ]]; then
+    psql_query "
+      SELECT pg_catalog.pg_terminate_backend(pid)
+      FROM pg_catalog.pg_stat_activity
+      WHERE datname = current_database()
+        AND backend_type = 'client backend'
+        AND application_name = '$CHECKPOINT_QUIESCENCE_APP'
+    " >/dev/null
+  fi
+  wait "$CHECKPOINT_QUIESCENCE_PROCESS" 2>/dev/null || true
+  CHECKPOINT_QUIESCENCE_PROCESS=""
+  CHECKPOINT_QUIESCENCE_APP=""
 }
 
 verify_dump_archive() {
@@ -935,15 +1056,43 @@ finally:
 
 drop_verification_database() {
   (( VERIFICATION_DB_OWNED == 1 )) || return 0
-  [[ "$VERIFICATION_DB" == "ktm_checkpoint_verify" ]] ||
+  [[ "$VERIFICATION_DB" =~ ^ktm_checkpoint_[0-9a-f]{24}$ ]] ||
     die "checkpoint verification DB name is unsafe"
-  [[ "$(
-    state_helper read-scratch \
+  [[ "$VERIFICATION_DB_TOKEN" =~ ^[0-9a-f]{64}$ ]] ||
+    die "checkpoint verification DB token is unsafe"
+  [[ "$VERIFICATION_DB_OID" =~ ^[0-9]+$ && "$VERIFICATION_DB_OID" != "0" ]] ||
+    die "checkpoint verification DB OID is unsafe"
+  [[ "$(state_helper read-scratch \
       --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
       --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+      --field database \
       --path "$VERIFICATION_STATE"
   )" == "$VERIFICATION_DB" ]] ||
     die "checkpoint verification DB ownership state is invalid"
+  [[ "$(state_helper read-scratch \
+      --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+      --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+      --field ownership_token \
+      --path "$VERIFICATION_STATE"
+  )" == "$VERIFICATION_DB_TOKEN" ]] ||
+    die "checkpoint verification DB ownership token state is invalid"
+  [[ "$(state_helper read-scratch \
+      --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+      --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+      --field database_oid \
+      --path "$VERIFICATION_STATE"
+  )" == "$VERIFICATION_DB_OID" ]] ||
+    die "checkpoint verification DB ownership OID state is invalid"
+  [[ "$(
+    psql_value "
+      SELECT oid::text || ':' || COALESCE(
+        pg_catalog.shobj_description(oid, 'pg_database'), ''
+      )
+      FROM pg_catalog.pg_database
+      WHERE datname = '$VERIFICATION_DB'
+    "
+  )" == "$VERIFICATION_DB_OID:ktm-checkpoint-owner:$VERIFICATION_DB_TOKEN" ]] ||
+    die "checkpoint verification DB server ownership marker is invalid"
   db_name="$ORIGINAL_DB_NAME"
   PGPASSWORD="$db_password" docker exec -e PGPASSWORD "$DB_CONTAINER" \
     dropdb --if-exists --force -U "$db_user" "$VERIFICATION_DB"
@@ -952,24 +1101,60 @@ drop_verification_database() {
     --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
     --path "$VERIFICATION_STATE"
   VERIFICATION_DB=""
+  VERIFICATION_DB_TOKEN=""
+  VERIFICATION_DB_OID=""
   VERIFICATION_DB_OWNED=0
 }
 
 recover_verification_database() {
-  local database_exists
-  database_exists="$(
-    psql_value \
-      "SELECT count(*) FROM pg_database WHERE datname = 'ktm_checkpoint_verify'"
-  )"
+  local database_exists scratch_version
   if [[ -f "$VERIFICATION_STATE" && ! -L "$VERIFICATION_STATE" ]]; then
     VERIFICATION_DB="$(
       state_helper read-scratch \
         --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
         --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+        --field database \
         --path "$VERIFICATION_STATE"
     )"
-    VERIFICATION_DB_OWNED=1
+    VERIFICATION_DB_TOKEN="$(
+      state_helper read-scratch \
+        --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+        --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+        --field ownership_token \
+        --path "$VERIFICATION_STATE"
+    )"
+    scratch_version="$(
+      state_helper read-scratch \
+        --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+        --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+        --field version \
+        --path "$VERIFICATION_STATE"
+    )"
+    database_exists="$(
+      psql_value \
+        "SELECT count(*) FROM pg_database WHERE datname = '$VERIFICATION_DB'"
+    )"
     if [[ "$database_exists" == "1" ]]; then
+      [[ "$scratch_version" == "3" ]] ||
+        die "journaled checkpoint DB was not server-claimed; refusing to drop it"
+      VERIFICATION_DB_OID="$(
+        state_helper read-scratch \
+          --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+          --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+          --field database_oid \
+          --path "$VERIFICATION_STATE"
+      )"
+      [[ "$(
+        psql_value "
+          SELECT oid::text || ':' || COALESCE(
+            pg_catalog.shobj_description(oid, 'pg_database'), ''
+          )
+          FROM pg_catalog.pg_database
+          WHERE datname = '$VERIFICATION_DB'
+        "
+      )" == "$VERIFICATION_DB_OID:ktm-checkpoint-owner:$VERIFICATION_DB_TOKEN" ]] ||
+        die "journaled checkpoint DB lacks its server ownership marker"
+      VERIFICATION_DB_OWNED=1
       drop_verification_database
     else
       [[ "$database_exists" == "0" ]] ||
@@ -979,11 +1164,15 @@ recover_verification_database() {
         --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
         --path "$VERIFICATION_STATE"
       VERIFICATION_DB=""
+      VERIFICATION_DB_TOKEN=""
+      VERIFICATION_DB_OID=""
       VERIFICATION_DB_OWNED=0
     fi
   else
-    [[ "$database_exists" == "0" ]] ||
-      die "unowned checkpoint verification DB exists"
+    [[ "$(
+      psql_value \
+        "SELECT count(*) FROM pg_database WHERE datname LIKE 'ktm_checkpoint_%'"
+    )" == "0" ]] || die "unowned checkpoint verification DB exists"
   fi
   [[ "$(
     psql_value \
@@ -993,13 +1182,15 @@ recover_verification_database() {
 }
 
 copy_database_settings_to_verification() {
+  [[ "$VERIFICATION_DB" =~ ^ktm_checkpoint_[0-9a-f]{24}$ ]] ||
+    die "checkpoint verification DB name is unsafe"
   local statements
   statements="$(
     psql_query "
       SELECT CASE
         WHEN setting.setrole = 0 THEN format(
           'ALTER DATABASE %I SET %I = %s;',
-          'ktm_checkpoint_verify',
+          '$VERIFICATION_DB',
           split_part(configuration.value, '=', 1),
           substring(
             configuration.value
@@ -1009,7 +1200,7 @@ copy_database_settings_to_verification() {
         ELSE format(
           'ALTER ROLE %I IN DATABASE %I SET %I = %s;',
           setting.setrole::regrole::text,
-          'ktm_checkpoint_verify',
+          '$VERIFICATION_DB',
           split_part(configuration.value, '=', 1),
           substring(
             configuration.value
@@ -1033,15 +1224,42 @@ copy_database_settings_to_verification() {
 verify_dump_restore() {
   local dump_path="$1"
   local restored_snapshot="$2"
-  [[ "$(psql_value "SELECT count(*) FROM pg_database WHERE datname = 'ktm_checkpoint_verify'")" == "0" ]] ||
+  VERIFICATION_DB="ktm_checkpoint_$(openssl rand -hex 12)"
+  VERIFICATION_DB_TOKEN="$(openssl rand -hex 32)"
+  [[ "$(psql_value "SELECT count(*) FROM pg_database WHERE datname = '$VERIFICATION_DB'")" == "0" ]] ||
     die "checkpoint verification DB already exists"
   state_helper write-scratch \
     --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
     --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+    --database "$VERIFICATION_DB" \
+    --ownership-token "$VERIFICATION_DB_TOKEN" \
     --path "$VERIFICATION_STATE"
   PGPASSWORD="$db_password" docker exec -e PGPASSWORD "$DB_CONTAINER" \
-    createdb -U "$db_user" --template=template0 ktm_checkpoint_verify
-  VERIFICATION_DB="ktm_checkpoint_verify"
+    createdb -U "$db_user" --template=template0 "$VERIFICATION_DB"
+  psql_query \
+    "COMMENT ON DATABASE \"$VERIFICATION_DB\" IS 'ktm-checkpoint-owner:$VERIFICATION_DB_TOKEN'" \
+    >/dev/null
+  VERIFICATION_DB_OID="$(
+    psql_value \
+      "SELECT oid::text FROM pg_catalog.pg_database WHERE datname = '$VERIFICATION_DB'"
+  )"
+  [[ "$VERIFICATION_DB_OID" =~ ^[0-9]+$ && "$VERIFICATION_DB_OID" != "0" ]] ||
+    die "checkpoint verification DB OID was not observed"
+  [[ "$(
+    psql_value "
+      SELECT oid::text || ':' || COALESCE(
+        pg_catalog.shobj_description(oid, 'pg_database'), ''
+      )
+      FROM pg_catalog.pg_database
+      WHERE datname = '$VERIFICATION_DB'
+    "
+  )" == "$VERIFICATION_DB_OID:ktm-checkpoint-owner:$VERIFICATION_DB_TOKEN" ]] ||
+    die "checkpoint verification DB server ownership marker was not written"
+  state_helper claim-scratch \
+    --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+    --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+    --database-oid "$VERIFICATION_DB_OID" \
+    --path "$VERIFICATION_STATE"
   VERIFICATION_DB_OWNED=1
   copy_database_settings_to_verification
   PGPASSWORD="$db_password" docker exec -i -e PGPASSWORD "$DB_CONTAINER" \
@@ -1116,6 +1334,7 @@ cleanup_on_exit() {
   set +e
   remove_owned_containers
   remove_owned_network
+  stop_checkpoint_quiescence
   if (( BLOCKED_WRITTEN == 0 || COMPLETE == 1 )); then
     remove_owned_images
   fi
@@ -1128,6 +1347,7 @@ cleanup_on_exit() {
     rm -rf -- "$RUNTIME_DIR"
   fi
   if (( COMPLETE == 0 )) &&
+    (( CHECKPOINT_DUMP_DURABLE == 0 )) &&
     [[ -n "$NEW_CHECKPOINT_DUMP" &&
        "$NEW_CHECKPOINT_DUMP" == "$STATE_ROOT"/clone-checkpoint-*.dump &&
        -f "$NEW_CHECKPOINT_DUMP" && ! -L "$NEW_CHECKPOINT_DUMP" ]] &&
@@ -1147,6 +1367,13 @@ cleanup_on_exit() {
        ! -L "$RESTORED_CHECKPOINT_SNAPSHOT" ]]; then
     rm -f -- "$RESTORED_CHECKPOINT_SNAPSHOT"
   fi
+  if (( COMPLETE == 0 )) &&
+    [[ -n "$FINAL_CHECKPOINT_SNAPSHOT" &&
+       "$FINAL_CHECKPOINT_SNAPSHOT" == "$STATE_ROOT"/.clone-checkpoint-final-*.json &&
+       -f "$FINAL_CHECKPOINT_SNAPSHOT" &&
+       ! -L "$FINAL_CHECKPOINT_SNAPSHOT" ]]; then
+    rm -f -- "$FINAL_CHECKPOINT_SNAPSHOT"
+  fi
   exit "$status"
 }
 trap cleanup_on_exit EXIT
@@ -1158,7 +1385,7 @@ if [[ "$MODE" == "checkpoint" ]]; then
     die "BLOCKED state must be recovered before checkpoint"
   RUN_ID="checkpoint-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 6)"
   RUN_KEY="$(printf '%s' "$RUN_ID" | sha256sum | awk '{print $1}')"
-  API_IMAGE_TAG="kor-travel-map-clone-live-api:${SOURCE_COMMIT:0:12}-checkpoint"
+  API_IMAGE_TAG="kor-travel-map-clone-live-api:${SOURCE_COMMIT:0:12}-checkpoint-${RUN_KEY:0:12}"
   prepare_build_context "$SCRIPT_DIR"
   build_api_image
   EXPECTED_MIGRATION_HEAD="$(read_image_migration_head "$API_IMAGE_ID")"
@@ -1176,13 +1403,15 @@ if [[ "$MODE" == "checkpoint" ]]; then
   )"
   CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-snapshot-$$.json"
   RESTORED_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-restored-$$.json"
+  FINAL_CHECKPOINT_SNAPSHOT="$STATE_ROOT/.clone-checkpoint-final-$$.json"
+  start_checkpoint_quiescence
+  assert_checkpoint_quiescence
   write_snapshot "$CHECKPOINT_SNAPSHOT" "$RUN_ID"
   [[ "$(psql_value "SELECT count(*) FROM feature.features WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND status <> 'deleted'")" == "0" ]] ||
     die "clone checkpoint has active acceptance Feature residue"
   [[ "$(psql_value "SELECT count(*) FROM ops.feature_change_requests WHERE feature_id LIKE 'e2e\\_live\\_acceptance::%' ESCAPE '\\' AND state = 'pending'")" == "0" ]] ||
     die "clone checkpoint has pending acceptance change request residue"
-  [[ "$(foreign_db_sessions)" == "0" ]] ||
-    die "clone DB has a foreign client session before checkpoint dump"
+  assert_checkpoint_quiescence
   NEW_CHECKPOINT_DUMP="$STATE_ROOT/clone-checkpoint-$RUN_KEY.dump"
   [[ ! -e "$NEW_CHECKPOINT_DUMP" && ! -L "$NEW_CHECKPOINT_DUMP" ]] ||
     die "checkpoint dump target already exists"
@@ -1193,8 +1422,8 @@ if [[ "$MODE" == "checkpoint" ]]; then
   chown root:root -- "$NEW_CHECKPOINT_DUMP"
   chmod 0600 -- "$NEW_CHECKPOINT_DUMP"
   fsync_file_and_directory "$NEW_CHECKPOINT_DUMP"
-  [[ "$(foreign_db_sessions)" == "0" ]] ||
-    die "clone DB has a foreign client session after checkpoint dump"
+  CHECKPOINT_DUMP_DURABLE=1
+  assert_checkpoint_quiescence
   verify_dump_archive "$NEW_CHECKPOINT_DUMP"
   dump_before="$(stat -Lc '%d:%i:%s:%Y' -- "$NEW_CHECKPOINT_DUMP")"
   dump_size="$(stat -Lc '%s' -- "$NEW_CHECKPOINT_DUMP")"
@@ -1202,6 +1431,9 @@ if [[ "$MODE" == "checkpoint" ]]; then
   [[ "$(stat -Lc '%d:%i:%s:%Y' -- "$NEW_CHECKPOINT_DUMP")" == "$dump_before" ]] ||
     die "clone dump changed during checkpoint hashing"
   verify_dump_restore "$NEW_CHECKPOINT_DUMP" "$RESTORED_CHECKPOINT_SNAPSHOT"
+  assert_checkpoint_quiescence
+  write_snapshot "$FINAL_CHECKPOINT_SNAPSHOT" "$RUN_ID"
+  assert_checkpoint_quiescence
   [[ "$(stat -Lc '%d:%i:%s:%Y' -- "$NEW_CHECKPOINT_DUMP")" == "$dump_before" ]] ||
     die "clone dump changed during restore verification"
   [[ "$(sha256sum -- "$NEW_CHECKPOINT_DUMP" | awk '{print $1}')" == "$dump_sha256" ]] ||
@@ -1210,25 +1442,34 @@ if [[ "$MODE" == "checkpoint" ]]; then
     old_dump_filename="$(
       state_helper read-replaced-checkpoint-dump --checkpoint "$CHECKPOINT_FILE"
     )"
-    OLD_CHECKPOINT_DUMP="$STATE_ROOT/$old_dump_filename"
-    [[ "$OLD_CHECKPOINT_DUMP" == "$STATE_ROOT"/clone-checkpoint-*.dump ]] ||
-      die "replaced checkpoint dump path is unsafe"
+    if [[ -n "$old_dump_filename" ]]; then
+      OLD_CHECKPOINT_DUMP="$STATE_ROOT/$old_dump_filename"
+      [[ "$OLD_CHECKPOINT_DUMP" == "$STATE_ROOT"/clone-checkpoint-*.dump ]] ||
+        die "replaced checkpoint dump path is unsafe"
+    fi
   fi
   state_helper write-checkpoint \
     --dump-filename "$(basename -- "$NEW_CHECKPOINT_DUMP")" \
     --dump-sha256 "$dump_sha256" \
     --dump-size "$dump_size" \
+    --final-snapshot "$FINAL_CHECKPOINT_SNAPSHOT" \
     --path "$CHECKPOINT_FILE" \
     --restored-snapshot "$RESTORED_CHECKPOINT_SNAPSHOT" \
     --snapshot "$CHECKPOINT_SNAPSHOT"
   COMPLETE=1
-  rm -- "$CHECKPOINT_SNAPSHOT" "$RESTORED_CHECKPOINT_SNAPSHOT"
+  CHECKPOINT_DUMP_DURABLE=0
+  rm -- \
+    "$CHECKPOINT_SNAPSHOT" \
+    "$RESTORED_CHECKPOINT_SNAPSHOT" \
+    "$FINAL_CHECKPOINT_SNAPSHOT"
   if [[ -n "$OLD_CHECKPOINT_DUMP" &&
         "$OLD_CHECKPOINT_DUMP" != "$NEW_CHECKPOINT_DUMP" &&
         -f "$OLD_CHECKPOINT_DUMP" && ! -L "$OLD_CHECKPOINT_DUMP" ]]; then
     rm -- "$OLD_CHECKPOINT_DUMP"
   fi
   remove_unreferenced_checkpoint_dumps
+  assert_checkpoint_quiescence
+  stop_checkpoint_quiescence
   remove_owned_images
   printf 'admin feature clone live checkpoint complete: source=%s checkpoint=%s\n' \
     "$SOURCE_COMMIT" "$CHECKPOINT_FILE"
@@ -1539,6 +1780,9 @@ if [[ "$MODE" == "recover" ]]; then
   BLOCKED_WRITTEN=1
   load_blocked
   blocked_source="$(state_helper read-blocked --path "$BLOCKED_FILE" --field source_commit)"
+  API_IMAGE_TAG="kor-travel-map-clone-live-api:${blocked_source:0:12}-${RUN_KEY:0:12}"
+  UI_IMAGE_TAG="kor-travel-map-clone-live-ui:${blocked_source:0:12}-${RUN_KEY:0:12}"
+  PLAYWRIGHT_IMAGE_TAG="kor-travel-map-clone-live-playwright:${blocked_source:0:12}-${RUN_KEY:0:12}"
   validate_snapshot "$blocked_source" "$INSTALL_BASE/$blocked_source"
   FIXTURE_HELPER="$INSTALL_BASE/$blocked_source/admin_feature_live_fixture.py"
   CONTENT_CUTOFF="$(

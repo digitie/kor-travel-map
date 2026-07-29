@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { pbkdf2Sync, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -151,10 +152,14 @@ const storageStatePath = path.join(runtimeDirectory, "admin-state.json");
 const playwrightArtifactRoot = path.join(runtimeDirectory, "playwright");
 
 const ownedContainerName = `ktm-mocked-e2e-${process.pid}-${randomBytes(6).toString("hex")}`;
+const ownedNetworkName = `ktm-mocked-e2e-${process.pid}-${randomBytes(6).toString("hex")}-net`;
 let ownedContainerId;
 let ownedImageTag;
+let ownedNetworkId;
 let imageInspect;
 let activeChild;
+let denyProxyServer;
+let deniedNetworkAttempts = 0;
 let filesystemCleaned = false;
 let cleanupPromise;
 let terminating = false;
@@ -187,15 +192,64 @@ function runCleanupCommand(args) {
   });
 }
 
+function closeDenyProxy() {
+  return new Promise((resolve) => {
+    if (!denyProxyServer) {
+      resolve();
+      return;
+    }
+    const server = denyProxyServer;
+    denyProxyServer = undefined;
+    server.close(() => resolve());
+    server.closeAllConnections();
+  });
+}
+
 function cleanup() {
   cleanupFilesystem();
   cleanupPromise ??= (async () => {
+    await closeDenyProxy();
     await runCleanupCommand(["rm", "-f", ownedContainerName]);
+    if (ownedNetworkId) {
+      await runCleanupCommand(["network", "rm", ownedNetworkName]);
+    }
     if (ownedImageTag) {
       await runCleanupCommand(["image", "rm", "-f", ownedImageTag]);
     }
   })();
   return cleanupPromise;
+}
+
+function startDenyProxy() {
+  return new Promise((resolve, reject) => {
+    const server = createServer((_request, response) => {
+      deniedNetworkAttempts += 1;
+      response.writeHead(502, {
+        connection: "close",
+        "content-type": "text/plain",
+      });
+      response.end("mocked checkpoint external network denied\n");
+    });
+    server.on("connect", (_request, socket) => {
+      deniedNetworkAttempts += 1;
+      socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+    });
+    server.on("upgrade", (_request, socket) => {
+      deniedNetworkAttempts += 1;
+      socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+    });
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close();
+        reject(new Error("mocked deny proxy의 loopback port를 확인할 수 없습니다."));
+        return;
+      }
+      denyProxyServer = server;
+      resolve(`http://127.0.0.1:${address.port}`);
+    });
+  });
 }
 
 function terminateChildGroup(child, signal) {
@@ -408,10 +462,16 @@ try {
   ownedImageTag =
     `kor-travel-map-mocked-e2e:${revision.slice(0, 12)}-` +
     `${process.pid}-${randomBytes(6).toString("hex")}`;
-  const publicBuildArgs = frontendBuildInputs().flatMap(([name, value]) => [
-    "--build-arg",
-    `${name}=${value}`,
-  ]);
+  const isolatedBuildEnvironment = {
+    NEXT_PUBLIC_KOR_TRAVEL_MAP_API: "http://127.0.0.1:9",
+    NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: "http://127.0.0.1:9",
+    NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: "http://127.0.0.1:9",
+    NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY: "",
+    NEXT_PUBLIC_VWORLD_API_KEY: "",
+  };
+  const publicBuildArgs = frontendBuildInputs(isolatedBuildEnvironment).flatMap(
+    ([name, value]) => ["--build-arg", `${name}=${value}`],
+  );
   const buildResult = await runManagedChild(
     "docker",
     [
@@ -448,11 +508,31 @@ try {
       `KOR_TRAVEL_MAP_UI_SESSION_SECRET=${base64Url(randomBytes(32))}`,
       `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=${base64Url(randomBytes(32))}`,
       "KOR_TRAVEL_MAP_API_INTERNAL_URL=http://127.0.0.1:9",
-      "HOSTNAME=127.0.0.1",
+      "HOSTNAME=0.0.0.0",
       "",
     ].join("\n"),
     { encoding: "utf8", mode: 0o600 },
   );
+  const networkResult = await runManagedChild(
+    "docker",
+    [
+      "network",
+      "create",
+      "--internal",
+      "--label",
+      "io.kortravelmap.mocked-e2e-owned=true",
+      ownedNetworkName,
+    ],
+    { captureOutput: true },
+  );
+  ownedNetworkId = networkResult.stdout?.trim();
+  if (
+    networkResult.status !== 0 ||
+    !ownedNetworkId ||
+    !/^[0-9a-f]{64}$/.test(ownedNetworkId)
+  ) {
+    throw new Error("self-owned mocked internal network를 생성할 수 없습니다.");
+  }
   const createResult = await runManagedChild(
     "docker",
     [
@@ -460,7 +540,9 @@ try {
       "--name",
       ownedContainerName,
       "--network",
-      "host",
+      ownedNetworkName,
+      "--publish",
+      `127.0.0.1:${basePort}:${basePort}`,
       "--read-only",
       "--cap-drop",
       "ALL",
@@ -506,6 +588,7 @@ try {
 
   const require = createRequire(import.meta.url);
   const playwrightCli = require.resolve("@playwright/test/cli");
+  const denyProxyUrl = await startDenyProxy();
   const result = await runManagedChild(
     process.execPath,
     [
@@ -525,6 +608,13 @@ try {
           frontendBuildInfo.sourceDigest,
         MOCKED_E2E_VERIFIED_FRONTEND_IMAGE_ID: imageInspect.Id,
         MOCKED_E2E_VERIFIED_FRONTEND_CONTAINER_ID: containerInspect.Id,
+        MOCKED_E2E_ALLOWED_ORIGIN: parsedBaseUrl.origin,
+        MOCKED_E2E_DENY_PROXY: denyProxyUrl,
+        NEXT_PUBLIC_KOR_TRAVEL_MAP_API: "http://127.0.0.1:9",
+        NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: "http://127.0.0.1:9",
+        NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: "http://127.0.0.1:9",
+        NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY: "",
+        NEXT_PUBLIC_VWORLD_API_KEY: "",
         E2E_STORAGE_STATE: storageStatePath,
         PLAYWRIGHT_ARTIFACT_ROOT: playwrightArtifactRoot,
       },
@@ -570,6 +660,11 @@ try {
   ) {
     throw new Error(
       "mocked E2E 실행 전후 frontend container/build identity가 달라졌습니다.",
+    );
+  }
+  if (deniedNetworkAttempts !== 0) {
+    throw new Error(
+      "mocked E2E가 self-owned frontend 밖의 HTTP/WebSocket 연결을 시도했습니다.",
     );
   }
   if (result.error) {

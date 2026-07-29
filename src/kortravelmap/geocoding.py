@@ -47,7 +47,16 @@ import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Final,
+    Literal,
+    Protocol,
+    TypeVar,
+    cast,
+    runtime_checkable,
+)
 
 from pydantic import SecretStr
 
@@ -63,10 +72,36 @@ from kortravelmap.dto import Address, Coordinate
 if TYPE_CHECKING:
     import httpx
 
+_GeoResponseT = TypeVar("_GeoResponseT")
+
+
+def _is_trusted_proxy_rejection(resp: httpx.Response) -> bool:
+    """geo가 trusted proxy를 인정하지 않아 public ``key``를 요구했는지 판정한다."""
+    if resp.status_code != 400:
+        return False
+    try:
+        payload = resp.json()
+    except ValueError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    error = payload.get("error")
+    return (
+        isinstance(error, dict)
+        and error.get("code") == "E0100"
+        and error.get("field") == "key"
+    )
+
 
 def _raise_for_status_sanitized(resp: httpx.Response) -> None:
     """HTTP status 오류를 credential 없는 typed 예외로 바꾼다."""
     import httpx as _httpx
+
+    if _is_trusted_proxy_rejection(resp):
+        raise GeoAuthNotConfiguredError(
+            "kor-travel-geo가 Map trusted proxy 인증을 거부했습니다. "
+            "양쪽 proxy secret과 geo의 KTG_ADMIN_TRUSTED_PROXY_CIDRS를 확인하세요."
+        )
 
     sanitized: GeoRequestError | None = None
     try:
@@ -81,6 +116,32 @@ def _raise_for_status_sanitized(resp: httpx.Response) -> None:
     # 원본(=key가 든 URL 문자열)이 남아, ``__context__``를 따라가는 로거·리포터로 샌다.
     if sanitized is not None:
         raise sanitized
+
+
+def _parse_response_sanitized(
+    resp: httpx.Response,
+    parser: Callable[[dict[str, Any]], _GeoResponseT],
+) -> _GeoResponseT:
+    """2xx JSON/schema 손상을 credential 없는 provider 오류로 바꾼다."""
+    parsed: _GeoResponseT | None = None
+    sanitized: GeoRequestError | None = None
+    try:
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise TypeError("response JSON is not an object")
+        parsed = parser(payload)
+    except (AttributeError, KeyError, OverflowError, TypeError, ValueError) as exc:
+        safe_url = resp.request.url.copy_with(query=None)
+        sanitized = GeoRequestError(
+            "kor-travel-geo 응답 계약 오류: "
+            f"{type(exc).__name__} for {safe_url}"
+        )
+    # 원 JSON decoder/parser 예외의 frame local에 raw payload가 남을 수 있으므로
+    # except 블록 밖에서 새 typed 오류를 던져 exception chaining도 만들지 않는다.
+    if sanitized is not None:
+        raise sanitized
+    assert parsed is not None
+    return parsed
 
 
 __all__ = [
@@ -905,7 +966,7 @@ class KorTravelGeoRestClient:
             body["radius_m"] = radius_m
         resp = await self._post(f"{self._base}/reverse", json=body)
         _raise_for_status_sanitized(resp)
-        return _parse_reverse_response(resp.json())
+        return _parse_response_sanitized(resp, _parse_reverse_response)
 
     async def geocode(
         self,
@@ -926,7 +987,7 @@ class KorTravelGeoRestClient:
             body["jibun_address"] = address
         resp = await self._post(f"{self._base}/geocode", json=body)
         _raise_for_status_sanitized(resp)
-        return _parse_geocode_response(resp.json())
+        return _parse_response_sanitized(resp, _parse_geocode_response)
 
     async def regions_within_radius(
         self,
@@ -945,7 +1006,10 @@ class KorTravelGeoRestClient:
         }
         resp = await self._post(f"{self._base}/regions/within-radius", json=body)
         _raise_for_status_sanitized(resp)
-        return _parse_regions_within_radius_response(resp.json())
+        return _parse_response_sanitized(
+            resp,
+            _parse_regions_within_radius_response,
+        )
 
 
 # -- kor-travel-geo REST client → 콜러블 팩토리 -----------------------------------

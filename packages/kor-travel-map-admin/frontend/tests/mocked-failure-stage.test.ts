@@ -53,6 +53,10 @@ describe("mocked checkpoint isolation", () => {
     new URL("../e2e/run-mocked-checkpoint.mjs", import.meta.url),
     "utf8",
   );
+  const configSource = readFileSync(
+    new URL("../playwright.config.ts", import.meta.url),
+    "utf8",
+  );
   const ownedResourcePhase = runnerSource.slice(
     runnerSource.indexOf("let exitCode = 2;"),
   );
@@ -68,10 +72,23 @@ describe("mocked checkpoint isolation", () => {
   });
 
   it("self-owned UI와 session artifact를 loopback/private runtime으로 제한한다", () => {
-    expect(runnerSource).toContain('"HOSTNAME=127.0.0.1"');
+    expect(runnerSource).toContain('"HOSTNAME=0.0.0.0"');
+    expect(runnerSource).toContain('"network",\n      "create",\n      "--internal"');
+    expect(runnerSource).not.toContain('"--network",\n      "host"');
     expect(runnerSource).toContain("E2E_STORAGE_STATE: storageStatePath");
     expect(runnerSource).toContain(
       "PLAYWRIGHT_ARTIFACT_ROOT: playwrightArtifactRoot",
     );
+  });
+
+  it("host public env를 빌드에 상속하지 않고 non-self HTTP/WS를 전역 차단한다", () => {
+    expect(runnerSource).toContain(
+      'NEXT_PUBLIC_KOR_TRAVEL_MAP_API: "http://127.0.0.1:9"',
+    );
+    expect(runnerSource).toContain("frontendBuildInputs(isolatedBuildEnvironment)");
+    expect(runnerSource).toContain("const denyProxyUrl = await startDenyProxy()");
+    expect(runnerSource).toContain("if (deniedNetworkAttempts !== 0)");
+    expect(configSource).toContain("proxy: mockedProxy()");
+    expect(configSource).toContain("bypass: allowedUrl.host");
   });
 });
