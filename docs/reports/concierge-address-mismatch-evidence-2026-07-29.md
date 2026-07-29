@@ -102,6 +102,21 @@ scp h28a_final.py n150:/home/digitie/
   "통과"와 "판정 못 함"을 섞지 않는다.
 - 행정코드 불일치 **0건**. §2의 "진짜 불일치 0건"과 일치한다.
 
+### `_address()` 변경이 저장값을 바꾸는가 — 현재 데이터에서는 바꾸지 않는다
+
+`_address()`는 이제 `bjd_code`가 있으면 시군구·시도를 **bjd에서만** 유도한다(이전에는 payload
+`sigungu_code`를 우선). 실데이터로 영향 범위를 확인했다.
+
+- 1,477건 **전부** `legal_dong_code` · `sigungu_code` · `sido_code`를 모두 보유한다.
+- payload 내부 정합성 위반(`legal_dong_code[:5] != sigungu_code`) **0건**.
+
+따라서 현재 데이터에서 새 유도 결과는 기존 payload 값과 **동일**하다 — 저장값 변화 없음.
+(만약 위반이 있었다면 이전 코드는 값을 바꾸는 게 아니라 `Address` 검증에서 예외를 던져
+**batch 전체를 죽였다**. 이 변경은 그 경로를 없앤 것이지 데이터를 바꾼 것이 아니다.)
+
+`feature_id`도 영향받지 않는다 — `make_feature_id`는 `bjd_code`를 입력으로 받고(ADR-009)
+`bjd_code` 유도 규칙은 이번 변경에서 **바뀌지 않았다**(payload `legal_dong_code` → geo bjd 순서 유지).
+
 ### 재적재 경로 — 별도 replay 장치가 필요 없다
 
 이슈는 "payload_hash 불변이면 fast-path skip으로 회복이 막힐 수 있다"를 검토 항목으로 뒀다.
