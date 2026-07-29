@@ -12,9 +12,20 @@
 
 ## 2026-07-29 (codex) — T-VN-48D 최종 gate 완료 → PR·CI·merge
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25B 완료 → 다음은 T-VN-H33
+## 2026-07-29 (claude) — Lane A a1: T-VN-H25B + T-VN-H33 완료 → 다음은 T-VN-H35
 
-**다음 한 작업**: `T-VN-H33`(curation_items 오링크 3건 정리 — 공개 노출 여부 실증 포함).
-이후 `T-VN-H31`(등대 공급원) → `T-VN-H30C`(재작업) → `T-VN-H32` → `T-VN-H22A/B/C`.
+**다음 한 작업**: `T-VN-H35`(prod 마이그레이션 지연 0064~0067 해소).
+이후 `T-VN-H31`(등대 공급원) → `T-VN-H34` → `T-VN-H30C` → `T-VN-H32` → `T-VN-H22A/B/C`.
+
+- **완료**: `T-VN-H33` — 오링크 3건 unlink + 공개 노출 실증 + ledger 방출.
+  해제 전 공개 REST(`/v1/curations/features/{feature_id}`)가 한국관광100선 "남이섬" 자리에
+  **서울 중구 사무소**, "청남대" 자리에 **전남 영암 시설**을 내보내고 있었다(각 2건/1건).
+  해제 후 공개 노출 0건, 탐지기 불일치 3→0건, `--apply` 재실행은 전부 건너뜀(멱등).
+- **🔴 부수 발견 — 머지 ≠ 배포**: ledger 방출을 붙이다 `ON CONFLICT`가 두 번 실패했는데
+  원인이 코드가 아니었다. **prod alembic head가 `0063_pipeline_root_id`**라 H30A가 만든
+  dedupe 부분 유니크 인덱스(`0067`)가 **prod에 없다**. H30A 완료 기록이 주장한 dedupe 효과는
+  현재 prod에서 성립하지 않는다. → `T-VN-H35`. 완료 기록을 쓸 때 *머지된 것*과
+  *배포된 것*을 구분해야 한다는 교훈이다.
 
 - **교훈 — 게이트를 돌리기 전엔 "머지 가능"을 말할 수 없다**: 리뷰 지적을 다 반영하고
   ruff까지 통과한 뒤에도, n150 게이트가 `manifest.json` sha256 불일치를 잡았다(README를

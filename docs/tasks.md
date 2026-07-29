@@ -27,7 +27,8 @@ barrier로 직렬화한다.
     [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
     [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
-    [ ] `T-VN-H33`(curation_items 오링크 3건 정리 — H25B 파생) →
+    [x] `T-VN-H33`(curation_items 오링크 3건 정리 — 공개 오노출 해소) →
+    [ ] `T-VN-H35`(prod 마이그레이션 지연 0064~0067 — H33 부수 발견) →
     [ ] `T-VN-H34`(H25A/H25B 미충족 AC 마무리) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
@@ -400,7 +401,38 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   - **정지오코딩 세션 고정** — 승인/기각 근거를 재현 가능하게 남긴다
     (`scripts/h25b_verify_links.py` 신설; 현재는 손으로 친 상수표뿐이다).
 
-- [ ] T-VN-H33 — **curation_items 오링크 3건 정리 (H25B 파생)**
+- [x] T-VN-H33 — **curation_items 오링크 3건 정리 (H25B 파생)**
+
+  **완료(2026-07-29)**. `scripts/h33_unlink_mislinks.py` (dry-run 기본, `--apply`로 쓰기).
+  - **공개 노출 실증** — `/v1/curations/features/{feature_id}`는 public 라우터다.
+    해제 전 남이섬 feature(서울 중구 사무소)에 한국관광100선 **2건**, 청남대 feature
+    (전남 영암)에 **1건**이 붙어 공개 응답에 나왔다. 해제 후 **0건**.
+  - **탐지기 재실행** — DB 링크 시도 불일치 **3건 → 0건**
+    ([after 산출물](reports/h33-mislink-after-2026-07-29.json)).
+  - **ledger 방출** — `ops.data_integrity_violations`에 `curation_feature_region_mismatch`
+    3건(`error`/`resolved`). payload에 해제 전 `feature_id`를 남겨 되돌릴 수 있다.
+  - **재실행 안전** — 두 번째 `--apply`는 "이미 미연결" 3건 건너뜀. 현재 `feature_id`가
+    예상 오링크와 다르면 손대지 않는다(그 사이 올바로 재링크됐을 수 있으므로).
+  - **재링크되지 않는다** — 공식 CSV import는 `feature_id = EXCLUDED.feature_id`로
+    COALESCE 없이 덮어쓰고, 커밋된 CSV의 이 3행은 비어 있다.
+
+  > **부수 발견 — prod가 마이그레이션 4개 뒤처져 있다.** ledger 방출을 붙이다가
+  > `ON CONFLICT`가 두 번 실패했다. 원인은 코드가 아니라 **prod alembic head가
+  > `0063_pipeline_root_id`**라는 것이었다 — H30A가 만든 dedupe 부분 유니크 인덱스(`0067`)가
+  > **prod에 존재하지 않는다**. H30A의 dedupe 효과는 현재 prod에서 작동하지 않는다.
+  > → `T-VN-H35`로 분리한다. 또 `source_record_key`에는 `provider_sync.source_records`
+  > FK가 걸려 있어 curation 키를 넣을 수 없다(ledger가 provider 적재 전제로 설계됨).
+
+- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0067)**
+
+  prod alembic head `0063_pipeline_root_id` vs 저장소 head. H30A(`0067` dedupe 부분
+  유니크 인덱스)를 포함해 **머지된 마이그레이션이 prod에 반영되지 않았다**. H30A가 주장한
+  dedupe·`/admin/issues` 접기는 현재 prod에서 성립하지 않는다.
+  할 일: 0064~0067 각각의 내용·위험 평가 → 적용 순서 확정 → 적용 → dedupe 인덱스 실측 확인.
+  **머지 = 배포가 아니라는 점을 문서에도 반영한다** — H30A 완료 기록이 prod 상태를
+  주장하는 것으로 읽히지 않게.
+
+  <details><summary>원래 정의 (완료 전)</summary>
 
   H25B가 정지오코딩으로 확인한 오링크가 **DB에는 그대로 남아 있다**(`status=included`,
   archived 아님). `/admin/curations` 계열 화면과 공개 projection이 남이섬 자리에 서울 중구
@@ -426,6 +458,13 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   할 일: 3건 unlink + 공개 projection 노출 여부 실증 + ledger 방출.
   **커버리지 한계를 함께 기록한다** — region 없는 링크는 이 축으로 판정되지 않는다.
+
+  </details>
+
+  **남는 커버리지 한계**(고친 3건이 전부라는 뜻이 아니다): `region`이 있는 링크만 본다
+  (3,269건 중 112건, 3%). `sido_code`가 NULL이면 건너뛰고, `features`와 inner join이라
+  **존재하지 않는 feature를 가리키는 링크는 세지 않는다**. 시도는 맞고 시군구만 다른
+  오링크도 이 축으로는 안 잡힌다. "0건"은 부재의 증명이 아니다.
 
 - [ ] T-VN-H31 — **등대 공급원 부재 해소 (H25A 파생, 전제 재확인됨)**
 

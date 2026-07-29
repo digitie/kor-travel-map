@@ -106,6 +106,35 @@ PR #888 원본 patch를 별도 적대 감사한 결과 8건을 확인하고 현�
   완료 표시를 취소하고 acceptance를 구체화했다.
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H30A 구현·H30B 1차 실증
+## 2026-07-29 — T-VN-H33: curation 오링크 3건 해제, 공개 오노출이 실재했다
+
+H25B가 정지오코딩으로 찾아낸 오링크 3건을 끊었다. **공개 REST가 실제로 틀린 장소를
+내보내고 있었다** — `/v1/curations/features/{feature_id}`는 public 라우터이고, 해제 전
+한국관광100선 "남이섬" 자리에 서울 중구 사무소 feature가(2건), "청남대" 자리에 전남 영암
+시설이(1건) 붙어 응답에 나왔다. 해제 후 공개 노출 0건, 탐지기 불일치 3→0건.
+
+되돌릴 수 있게 만들었다 — 해제 전 `feature_id`를 `curation_items.metadata`와 ledger
+payload 양쪽에 남긴다. 가드도 걸었다: 현재 `feature_id`가 우리가 오링크라 판정한 그 값일
+때만 끊는다(그 사이 올바로 재링크됐을 수 있다). `--apply` 재실행은 3건 전부 건너뛴다.
+
+재링크되지 않는 이유는 CSV import가 `feature_id = EXCLUDED.feature_id`로 COALESCE 없이
+덮어쓰기 때문이다. 커밋된 CSV의 이 3행이 비어 있으니 다음 import도 비운 채로 둔다.
+
+**부수 발견 — 머지 ≠ 배포.** ledger 방출을 붙이는데 `ON CONFLICT`가 두 번 실패했다.
+처음엔 arbiter 술어(`status IN ('open','acknowledged')`)와 내가 넣는 `resolved`가 안 맞는
+줄 알고 고쳤는데 **같은 오류가 또 났다**. 원인은 코드가 아니었다 — prod alembic head가
+`0063_pipeline_root_id`라 **H30A의 dedupe 부분 유니크 인덱스(0067)가 prod에 아예 없다**.
+PR #888은 머지됐지만 마이그레이션은 prod에 닿은 적이 없다. H30A 완료 기록이 주장한
+"dedupe와 `/admin/issues` 접기"는 지금 prod에서 성립하지 않는다. → `T-VN-H35`.
+
+이번에도 형태가 같다. 첫 진단("술어가 안 맞는다")은 **내 코드 안에서만 찾은 설명**이었고,
+두 번째 실패가 아니었으면 그대로 믿었을 것이다. 완료 기록을 쓸 때 *머지된 것*과 *배포된
+것*을 구분해야 한다.
+
+부수로 하나 더: `ops.data_integrity_violations.source_record_key`에는
+`provider_sync.source_records` FK가 걸려 있어 curation item 키를 넣을 수 없다.
+ledger는 provider 적재를 전제로 설계된 테이블이라, 다른 도메인 finding은 payload에 실어야 한다.
+
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25B 공식 curation 링크 역반영·매칭 재실행
 
 **역반영 — 8건 중 5건만 했다.** H25A는 "DB에서는 링크됐으나 CSV가 비어 있는 8건"을
