@@ -49,6 +49,7 @@ from kortravelmap.core.exceptions import (
     GeoAuthNotConfiguredError,
     GeoRequestError,
     ImportJobConflictError,
+    IntegrityFindingPersistenceError,
     KorTravelMapError,
     ProviderError,
     SourceRecordNotFoundError,
@@ -64,11 +65,13 @@ from kortravelmap.core.geometry import (
 )
 from kortravelmap.core.ids import (
     FEATURE_ID_HASH_LENGTH,
+    INTEGRITY_FINDING_KEY_HASH_LENGTH,
     PAYLOAD_HASH_DEFAULT_LENGTH,
     PRICE_VALUE_KEY_HASH_LENGTH,
     SOURCE_RECORD_KEY_HASH_LENGTH,
     WEATHER_VALUE_KEY_HASH_LENGTH,
     make_feature_id,
+    make_integrity_finding_key,
     make_payload_hash,
     make_price_value_key,
     make_source_record_key,
@@ -129,6 +132,7 @@ __all__ = [
     "FileStoreError",
     "GeoAuthNotConfiguredError",
     "GeoRequestError",
+    "IntegrityFindingPersistenceError",
     "FeatureSearchCursorError",
     "FeatureSearchCursorInvalidError",
     "FeatureSearchCursorVersionUnsupportedError",
@@ -137,11 +141,13 @@ __all__ = [
     # ids (PR#20 ADR-009 / PR#26 source key + payload hash / PR#38 weather /
     # PR#42 price)
     "make_feature_id",
+    "make_integrity_finding_key",
     "make_source_record_key",
     "make_payload_hash",
     "make_weather_value_key",
     "make_price_value_key",
     "FEATURE_ID_HASH_LENGTH",
+    "INTEGRITY_FINDING_KEY_HASH_LENGTH",
     "SOURCE_RECORD_KEY_HASH_LENGTH",
     "PAYLOAD_HASH_DEFAULT_LENGTH",
     "WEATHER_VALUE_KEY_HASH_LENGTH",

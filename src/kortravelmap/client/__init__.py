@@ -36,7 +36,6 @@ ADR 참조
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -46,6 +45,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.core.dedup import find_dedup_candidates, find_sibling_candidates
+from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
 from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationCursor,
     DagsterFeatureOperationMutation,
@@ -346,6 +346,7 @@ __all__ = [
     "DagsterFeatureOperationPage",
     "FeatureOperationInvariantConflict",
     "FestivalEnrichmentReviewRefreshResult",
+    "IntegrityFindingSyncResult",
     "OfflineUploadColumnMapping",
     "OfflineUploadLoadResult",
     "OfflineUploadValidationResult",
@@ -423,9 +424,6 @@ class FestivalEnrichmentReviewRefreshResult:
         }
 
 
-_LOG = logging.getLogger(__name__)
-
-
 @dataclass(frozen=True, slots=True)
 class AddressValidationFinding:
     """durable하게 남길 주소/좌표 검증 finding 1건 (T-VN-H30A).
@@ -446,6 +444,20 @@ class AddressValidationFinding:
     feature_id: str | None = None
     linked: bool = False
     payload: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class IntegrityFindingSyncResult:
+    """주소 검증 finding 관측·중복 제거·durable upsert 카운트."""
+
+    observed_count: int
+    unique_count: int
+    upserted_count: int
+
+    @property
+    def unrecorded_count(self) -> int:
+        """고유 finding 중 durable하게 기록되지 않은 건수."""
+        return max(0, self.unique_count - self.upserted_count)
 
 
 class AsyncKorTravelMapClient:
@@ -2104,7 +2116,7 @@ class AsyncKorTravelMapClient:
         *,
         provider: str,
         dataset_key: str,
-    ) -> int:
+    ) -> IntegrityFindingSyncResult:
         """주소/좌표 검증 결과를 ``ops.data_integrity_violations``에 durable하게 남긴다.
 
         T-VN-H30A: 지금까지 검증 결과는 Dagster run metadata에만 있어 **run이 사라지면 증거도
@@ -2115,20 +2127,25 @@ class AsyncKorTravelMapClient:
         단계에서 drop된 행은 두 대상이 DB에 없으므로 id를 payload에만 담아야 한다 — 호출자가
         ``AddressValidationFinding.linked``로 구분해 준다.
 
-        기록 실패가 적재 결과를 되돌리지 않는다. 관측을 위해 넣은 경로가 파이프라인을 죽이면
-        안 되므로 예외를 로그로 낮추고 기록 건수만 반환한다.
+        DB 예외는 raw SQLAlchemy/asyncpg 객체를 노출하지 않고
+        ``IntegrityFindingPersistenceError``로 정규화한다. 호출자는 strict 정책에서 이를
+        fail-closed로 처리하고, 다른 정책에서는 명시적 unrecorded metadata로 남길 수 있다.
         """
         if not provider or not dataset_key:
-            raise ValueError("provider/dataset_key는 sweep 범위를 정하므로 필수다.")
+            raise ValueError("provider/dataset_key는 finding 정체성에 필수다.")
 
         # batch 안 중복 제거 — 같은 dedupe_key가 한 statement에 두 번 오면 Postgres가
         # "ON CONFLICT DO UPDATE command cannot affect row a second time"로 실패한다.
         # (payload가 byte-동일한 중복 레코드가 실제로 export에 존재한다.)
         deduped: dict[str, dict[str, Any]] = {}
         for finding in findings:
+            if finding.provider not in {None, provider}:
+                raise ValueError("finding provider가 기록 범위와 다르다.")
+            if finding.dataset_key not in {None, dataset_key}:
+                raise ValueError("finding dataset_key가 기록 범위와 다르다.")
             deduped[finding.dedupe_key] = {
-                "provider": finding.provider,
-                "dataset_key": finding.dataset_key,
+                "provider": provider,
+                "dataset_key": dataset_key,
                 "source_record_key": (
                     finding.source_record_key if finding.linked else None
                 ),
@@ -2142,7 +2159,7 @@ class AsyncKorTravelMapClient:
                     "occurrence_count": 1,
                 },
             }
-        rows = list(deduped.values())
+        rows = [deduped[key] for key in sorted(deduped)]
         try:
             async with self._session_factory() as session, session.begin():
                 upserted = await sync_integrity_findings(
@@ -2151,13 +2168,16 @@ class AsyncKorTravelMapClient:
                     dataset_key=dataset_key,
                     findings=rows,
                 )
-        except Exception:  # noqa: BLE001
-            _LOG.exception(
-                "주소 검증 finding 기록 실패 — 적재 결과에는 영향을 주지 않는다 "
-                "(provider=%s dataset=%s findings=%d)",
-                provider,
-                dataset_key,
-                len(rows),
-            )
-            return 0
-        return upserted
+        except Exception as exc:  # noqa: BLE001
+            raise IntegrityFindingPersistenceError(
+                provider=provider,
+                dataset_key=dataset_key,
+                observed_count=len(findings),
+                unique_count=len(rows),
+                error_type=type(exc).__name__,
+            ) from None
+        return IntegrityFindingSyncResult(
+            observed_count=len(findings),
+            unique_count=len(rows),
+            upserted_count=upserted,
+        )

@@ -2747,23 +2747,23 @@ class DataIntegrityViolationRow(Base):
             postgresql_using="brin",
         ),
         Index(
-            "idx_violations_status_detected",
+            "idx_violations_status_seen",
             "status",
-            text("detected_at DESC"),
+            text("last_seen_at DESC"),
             text("issue_id DESC"),
         ),
         Index(
-            "idx_violations_provider_status_detected",
+            "idx_violations_provider_status_seen",
             "provider",
             "status",
-            text("detected_at DESC"),
+            text("last_seen_at DESC"),
             text("issue_id DESC"),
             postgresql_where=text("provider IS NOT NULL"),
         ),
         Index(
-            "idx_violations_feature_detected",
+            "idx_violations_feature_seen",
             "feature_id",
-            text("detected_at DESC"),
+            text("last_seen_at DESC"),
             text("issue_id DESC"),
             postgresql_where=text("feature_id IS NOT NULL"),
         ),
@@ -2786,7 +2786,7 @@ class DataIntegrityViolationRow(Base):
     )
     feature_id: Mapped[str | None] = mapped_column(
         String,
-        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+        ForeignKey("feature.features.feature_id", ondelete="SET NULL"),
     )
     violation_type: Mapped[str] = mapped_column(Text, nullable=False)
     severity: Mapped[str] = mapped_column(Text, nullable=False)
@@ -2802,6 +2802,11 @@ class DataIntegrityViolationRow(Base):
         server_default=text("'open'"),
     )
     detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now()"),

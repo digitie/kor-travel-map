@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from kortravelmap.client import AddressValidationFinding
+from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
+from kortravelmap.core.ids import make_integrity_finding_key
 
 from dagster import Failure
 from kortravelmap.dagster.validation import (
@@ -109,8 +111,9 @@ async def load_feature_bundles_for_dagster(
     mode = _normalize_address_validation_mode(strict_address)
     validation = validate_feature_bundles_address(bundles)
     # drop 모드가 bundles를 재할당하기 **전에** 잡는다 — 그러지 않으면 drop된 레코드의
-    # source_entity_id를 잃고 dedupe_key가 불안정한 source_record_key로 되돌아간다.
-    entity_ids = _entity_ids(bundles)
+    # 원천 identity를 잃고 dedupe_key가 payload hash 기반 source_record_key로 되돌아가지
+    # 않도록, drop 전 bundle에서 type+id를 함께 잡는다.
+    source_identities = _source_identities(bundles)
     # strict는 이름 그대로 모든 error에서 run을 중단한다. 영구 손실을 제한하는
     # DROPPABLE_ISSUE_CODES allowlist는 drop 모드에만 적용한다.
     if mode == "strict" and validation.has_errors:
@@ -127,15 +130,46 @@ async def load_feature_bundles_for_dagster(
                 for issue in validation.issues
                 if issue.severity == "error"
             ),
-            entity_ids=entity_ids,
-        )
-        recorded = await client.record_address_validation_findings(
-            failed_findings,
-            provider=provider,
-            dataset_key=dataset_key,
+            source_identities=source_identities,
         )
         failure_metadata = dict(validation.as_metadata())
-        failure_metadata["address_validation_findings_recorded"] = recorded
+        try:
+            sync = await client.record_address_validation_findings(
+                failed_findings,
+                provider=provider,
+                dataset_key=dataset_key,
+            )
+        except IntegrityFindingPersistenceError as exc:
+            failure_metadata.update(
+                {
+                    "address_validation_findings_observed": exc.observed_count,
+                    "address_validation_findings_unique": exc.unique_count,
+                    "address_validation_findings_upserted": 0,
+                    "address_validation_findings_unrecorded": exc.unique_count,
+                    "address_validation_finding_persistence_error": exc.error_type,
+                }
+            )
+            _add_output_metadata(context, failure_metadata)
+            raise Failure(
+                description="Feature 주소/좌표 검증 finding durable 기록 실패",
+                metadata=failure_metadata,
+            ) from None
+        failure_metadata.update(
+            {
+                "address_validation_findings_observed": sync.observed_count,
+                "address_validation_findings_unique": sync.unique_count,
+                "address_validation_findings_upserted": sync.upserted_count,
+            }
+        )
+        if sync.unrecorded_count:
+            failure_metadata["address_validation_findings_unrecorded"] = (
+                sync.unrecorded_count
+            )
+            _add_output_metadata(context, failure_metadata)
+            raise Failure(
+                description="Feature 주소/좌표 검증 finding durable 기록 불완전",
+                metadata=failure_metadata,
+            )
         _add_output_metadata(context, failure_metadata)
         codes = ", ".join(
             issue.code for issue in validation.issues if issue.severity == "error"
@@ -197,17 +231,46 @@ async def load_feature_bundles_for_dagster(
         dataset_key=dataset_key,
         loaded_feature_ids=loaded_ids,
         dropped_feature_ids=frozenset(dropped_feature_ids),
-        entity_ids=entity_ids,
+        source_identities=source_identities,
     )
-    recorded = await client.record_address_validation_findings(
-        findings,
-        provider=provider,
-        dataset_key=dataset_key,
-    )
-    metadata["address_validation_findings_recorded"] = recorded
-    if findings and recorded != len(findings):
-        # 기록 실패를 조용히 넘기지 않는다 — 관측 경로가 죽은 것도 관측 대상이다.
-        metadata["address_validation_findings_unrecorded"] = len(findings) - recorded
+    try:
+        sync = await client.record_address_validation_findings(
+            findings,
+            provider=provider,
+            dataset_key=dataset_key,
+        )
+    except IntegrityFindingPersistenceError as exc:
+        metadata.update(
+            {
+                "address_validation_findings_observed": exc.observed_count,
+                "address_validation_findings_unique": exc.unique_count,
+                "address_validation_findings_upserted": 0,
+                "address_validation_findings_unrecorded": exc.unique_count,
+                "address_validation_finding_persistence_error": exc.error_type,
+            }
+        )
+        if mode == "strict":
+            _add_output_metadata(context, metadata)
+            raise Failure(
+                description="Feature 주소/좌표 검증 finding durable 기록 실패",
+                metadata=metadata,
+            ) from None
+    else:
+        metadata.update(
+            {
+                "address_validation_findings_observed": sync.observed_count,
+                "address_validation_findings_unique": sync.unique_count,
+                "address_validation_findings_upserted": sync.upserted_count,
+            }
+        )
+        if sync.unrecorded_count:
+            metadata["address_validation_findings_unrecorded"] = sync.unrecorded_count
+            if mode == "strict":
+                _add_output_metadata(context, metadata)
+                raise Failure(
+                    description="Feature 주소/좌표 검증 finding durable 기록 불완전",
+                    metadata=metadata,
+                )
 
     _add_output_metadata(context, metadata)
     return result
@@ -220,28 +283,36 @@ def _address_validation_findings(
     dataset_key: str,
     loaded_feature_ids: frozenset[str] | set[str],
     dropped_feature_ids: frozenset[str],
-    entity_ids: Mapping[str, str] | None = None,
+    source_identities: Mapping[str, tuple[str, str]],
 ) -> list[AddressValidationFinding]:
     """검증 issue → durable finding (T-VN-H30A).
 
-    ``dedupe_key``는 (provider, dataset_key, code, **source_entity_id**)로 만든다.
+    ``dedupe_key``는 provider/dataset/code와 source entity **type+id** 전체를
+    SHA256으로 만든다.
 
     ``source_record_key``를 쓰면 안 된다 — 그 키는 ``raw_payload_hash``에서 파생되므로
     (``core.ids.make_source_record_key``) provider export에서 무관한 필드 하나만 바뀌어도
     새 key가 되고, 같은 문제가 **매 export마다 새 열린 이슈**로 쌓인다. MOIS 규모(977k)에서는
-    큐가 단조 증가한다. ``source_entity_id``는 payload 변경과 무관하게 안정적이다.
+    큐가 단조 증가한다. source entity type+id는 payload 변경과 무관하게 안정적이다.
     """
-    entity_ids = entity_ids or {}
     findings: list[AddressValidationFinding] = []
     for issue in validation.issues:
         linked = issue.feature_id in loaded_feature_ids
-        # entity id를 못 찾으면 record key로 물러선다(안정성은 떨어지지만 키를 잃지는 않는다).
-        entity_id = entity_ids.get(issue.source_record_key, issue.source_record_key)
+        identity = source_identities.get(issue.source_record_key)
+        if identity is None:
+            raise ValueError(
+                "주소 검증 finding의 source identity가 없음: "
+                f"{issue.source_record_key}"
+            )
+        source_entity_type, source_entity_id = identity
         findings.append(
             AddressValidationFinding(
-                dedupe_key=(
-                    f"address_validation:{provider}:{dataset_key}:"
-                    f"{issue.code}:{entity_id}"
+                dedupe_key=make_integrity_finding_key(
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    source_entity_type=source_entity_type,
+                    source_entity_id=source_entity_id,
+                    violation_type=issue.code,
                 ),
                 violation_type=issue.code,
                 severity=issue.severity,
@@ -295,27 +366,14 @@ def _add_output_metadata(
             raise
 
 
-def _entity_ids(bundles: Sequence[FeatureBundle]) -> dict[str, str]:
-    """``source_record_key`` → ``source_entity_id`` (dedupe_key 안정화용, T-VN-H30A)."""
+def _source_identities(
+    bundles: Sequence[FeatureBundle],
+) -> dict[str, tuple[str, str]]:
+    """``source_record_key`` → 원천 entity type+id."""
     return {
-        bundle.source_record.source_record_key: bundle.source_record.source_entity_id
+        bundle.source_record.source_record_key: (
+            bundle.source_record.source_entity_type,
+            bundle.source_record.source_entity_id,
+        )
         for bundle in bundles
     }
-
-
-_ADDRESS_VALIDATION_CODES: Final[frozenset[str]] = frozenset(
-    {
-        "reverse_geocode_failed",
-        "reverse_geocode_unavailable",
-        "missing_address",
-        "provider_address_region_disagreement",
-        "admin_code_stale_sido",
-        "admin_code_stale_sigungu",
-        "admin_code_stale_emd",
-    }
-)
-"""주소/좌표 검증이 **소유하는** issue code 전체 (T-VN-H30A).
-
-자동 close(sweep)를 붙일 때 그 범위가 될 집합이다. 현재는 sweep을 달지 않았다 —
-`T-VN-H32` 참조. 새 검증 code를 추가하면 여기에도 넣는다.
-"""

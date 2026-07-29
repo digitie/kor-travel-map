@@ -43,6 +43,7 @@ from kortravelmap.client import (
     DagsterFeatureOperationPage,
     DedupSyncResult,
     FeatureOperationInvariantConflict,
+    IntegrityFindingSyncResult,
     OfflineUploadLoadResult,
     ProviderDatasetOperationKey,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "DagsterFeatureOperationPage",
     "DedupSyncResult",
     "FeatureOperationInvariantConflict",
+    "IntegrityFindingSyncResult",
     "OfflineUploadLoadResult",
     "ProviderDatasetOperationKey",
     "__version__",

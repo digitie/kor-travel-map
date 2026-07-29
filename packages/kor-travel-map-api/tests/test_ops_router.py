@@ -217,6 +217,7 @@ def _issue() -> OpsIntegrityIssue:
         payload={"source": "unit"},
         status="open",
         detected_at=datetime(2026, 6, 3, tzinfo=UTC),
+        last_seen_at=datetime(2026, 6, 4, tzinfo=UTC),
         resolved_at=None,
     )
 

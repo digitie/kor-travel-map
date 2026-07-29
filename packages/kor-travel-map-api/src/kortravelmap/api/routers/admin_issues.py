@@ -107,6 +107,7 @@ class AdminIssueRecord(BaseModel):
     payload: dict[str, Any]
     status: str
     detected_at: datetime
+    last_seen_at: datetime
     resolved_at: datetime | None = None
 
 
@@ -221,6 +222,7 @@ def _record(issue: OpsIntegrityIssue | DataIntegrityViolation) -> AdminIssueReco
         payload=issue.payload,
         status=issue.status,
         detected_at=issue.detected_at,
+        last_seen_at=issue.last_seen_at,
         resolved_at=issue.resolved_at,
     )
 

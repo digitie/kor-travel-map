@@ -74,6 +74,7 @@ def _ops_issue(issue_id: str = _VIOLATION_KEY) -> OpsIntegrityIssue:
         payload={"raw_address": "서울특별시 영등포구 여의공원로 120"},
         status="open",
         detected_at=now,
+        last_seen_at=now,
         resolved_at=None,
     )
 
@@ -97,6 +98,7 @@ def _violation(
         payload={"raw_address": "서울특별시 영등포구 여의공원로 120"},
         status=status,
         detected_at=now,
+        last_seen_at=now,
         resolved_at=resolved_at,
     )
 

@@ -10,7 +10,12 @@ import hashlib
 
 import pytest
 
-from kortravelmap.core.ids import FEATURE_ID_HASH_LENGTH, make_feature_id
+from kortravelmap.core.ids import (
+    FEATURE_ID_HASH_LENGTH,
+    INTEGRITY_FINDING_KEY_HASH_LENGTH,
+    make_feature_id,
+    make_integrity_finding_key,
+)
 
 # -- 결정성 / 멱등 -----------------------------------------------------------
 
@@ -32,6 +37,35 @@ def test_same_input_yields_same_id() -> None:
         source_natural_key="RA00012",
     )
     assert a == b
+
+
+def test_integrity_finding_key_is_fixed_length_and_uses_full_source_identity() -> None:
+    base = make_integrity_finding_key(
+        provider="python-mois-api",
+        dataset_key="licenses",
+        source_entity_type="license",
+        source_entity_id="entity:" + "x" * 20_000,
+        violation_type="missing_address",
+    )
+    same = make_integrity_finding_key(
+        provider="python-mois-api",
+        dataset_key="licenses",
+        source_entity_type="license",
+        source_entity_id="entity:" + "x" * 20_000,
+        violation_type="missing_address",
+    )
+    other_type = make_integrity_finding_key(
+        provider="python-mois-api",
+        dataset_key="licenses",
+        source_entity_type="closed_license",
+        source_entity_id="entity:" + "x" * 20_000,
+        violation_type="missing_address",
+    )
+
+    assert base == same
+    assert base != other_type
+    assert base.startswith("av2_")
+    assert len(base) == 4 + INTEGRITY_FINDING_KEY_HASH_LENGTH
 
 
 def test_id_format_matches_adr_009_spec() -> None:

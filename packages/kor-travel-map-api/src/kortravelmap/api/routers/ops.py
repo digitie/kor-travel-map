@@ -91,6 +91,7 @@ class OpsIntegrityIssueRecord(BaseModel):
     payload: dict[str, Any]
     status: str
     detected_at: datetime
+    last_seen_at: datetime
     resolved_at: datetime | None = None
 
 
@@ -190,6 +191,7 @@ def _issue(row: OpsIntegrityIssue) -> OpsIntegrityIssueRecord:
         payload=row.payload,
         status=row.status,
         detected_at=row.detected_at,
+        last_seen_at=row.last_seen_at,
         resolved_at=row.resolved_at,
     )
 

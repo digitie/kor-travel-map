@@ -7,6 +7,8 @@
 제공 함수:
 - ``make_feature_id`` — Feature ID (ADR-009, ``f_{bjd}_{kind[0]}_{sha1[:16]}``)
 - ``make_source_record_key`` — source_record 자연키 (``sr_{sha1[:20]}``)
+- ``make_integrity_finding_key`` — 주소 검증 finding 안정키
+  (``av2_{sha256}``)
 - ``make_payload_hash`` — canonical JSON → SHA256 hexdigest prefix
   (``docs/architecture/data-model.md §11``)
 
@@ -54,11 +56,13 @@ from typing import Any, Final
 __all__ = [
     "make_feature_id",
     "make_source_record_key",
+    "make_integrity_finding_key",
     "make_payload_hash",
     "make_weather_value_key",
     "make_price_value_key",
     "FEATURE_ID_HASH_LENGTH",
     "SOURCE_RECORD_KEY_HASH_LENGTH",
+    "INTEGRITY_FINDING_KEY_HASH_LENGTH",
     "PAYLOAD_HASH_DEFAULT_LENGTH",
     "WEATHER_VALUE_KEY_HASH_LENGTH",
     "PRICE_VALUE_KEY_HASH_LENGTH",
@@ -171,6 +175,13 @@ SOURCE_RECORD_KEY_HASH_LENGTH: Final[int] = 20
 훨씬 다양 (한 feature당 여러 source).
 """
 
+INTEGRITY_FINDING_KEY_HASH_LENGTH: Final[int] = 64
+"""주소 검증 finding key의 SHA256 hex 길이.
+
+원천 entity id를 그대로 B-tree expression index에 싣지 않고 전체 digest를 사용한다.
+입력 길이와 무관하게 ``av2_`` prefix를 포함한 key가 항상 68 bytes로 고정된다.
+"""
+
 
 def make_source_record_key(
     *,
@@ -235,6 +246,34 @@ def make_source_record_key(
     )
     digest = hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
     return f"sr_{digest[:SOURCE_RECORD_KEY_HASH_LENGTH]}"
+
+
+def make_integrity_finding_key(
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    source_entity_id: str,
+    violation_type: str,
+) -> str:
+    """주소 검증 finding의 원천 정체성과 규칙을 고정 길이 key로 계산한다.
+
+    동일 provider dataset 안에서도 서로 다른 entity type이 같은 id를 재사용할 수 있으므로
+    ``source_entity_type``을 생략하지 않는다. ``source_record_key``는 payload hash에 따라
+    바뀌므로 입력으로 쓰지 않는다.
+    """
+    components = {
+        "provider": provider,
+        "dataset_key": dataset_key,
+        "source_entity_type": source_entity_type,
+        "source_entity_id": source_entity_id,
+        "violation_type": violation_type,
+    }
+    for name, value in components.items():
+        _validate_component(name, value)
+    raw = "|".join(components.values())
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return f"av2_{digest}"
 
 
 PAYLOAD_HASH_DEFAULT_LENGTH: Final[int] = 32

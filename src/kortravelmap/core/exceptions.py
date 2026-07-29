@@ -41,6 +41,7 @@ __all__ = [
     "FileStoreError",
     "GeoAuthNotConfiguredError",
     "GeoRequestError",
+    "IntegrityFindingPersistenceError",
     "FeatureSearchCursorError",
     "FeatureSearchCursorInvalidError",
     "FeatureSearchCursorVersionUnsupportedError",
@@ -152,6 +153,31 @@ class GeoRequestError(KorTravelMapError):
 
     HTTP 502 매핑.
     """
+
+
+class IntegrityFindingPersistenceError(KorTravelMapError):
+    """주소 검증 finding을 durable ledger에 기록하지 못했을 때 발생."""
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        observed_count: int,
+        unique_count: int,
+        error_type: str,
+    ) -> None:
+        self.provider = provider
+        self.dataset_key = dataset_key
+        self.observed_count = observed_count
+        self.unique_count = unique_count
+        self.error_type = error_type
+        super().__init__(
+            "주소 검증 finding durable 기록 실패 "
+            f"(provider={provider!r}, dataset_key={dataset_key!r}, "
+            f"observed={observed_count}, unique={unique_count}, "
+            f"error_type={error_type})"
+        )
 
 
 class FeatureSearchCursorError(ValidationError):
