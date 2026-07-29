@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Final
 from sqlalchemy import text
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,7 @@ __all__ = [
     "get_data_integrity_violation",
     "list_data_integrity_violations",
     "set_data_integrity_violation_status",
+    "sync_integrity_findings",
     "upsert_integrity_finding",
 ]
 
@@ -392,3 +393,109 @@ async def upsert_integrity_finding(
         )
     ).one()
     return _row_to_violation(row)
+
+
+_UPSERT_FINDINGS_BATCH_SQL: Final[str] = """
+INSERT INTO ops.data_integrity_violations (
+    provider, dataset_key, source_record_key, feature_id, violation_type,
+    severity, message, payload
+)
+SELECT * FROM unnest(
+    CAST(:providers AS text[]),
+    CAST(:datasets AS text[]),
+    CAST(:source_record_keys AS text[]),
+    CAST(:feature_ids AS text[]),
+    CAST(:violation_types AS text[]),
+    CAST(:severities AS text[]),
+    CAST(:messages AS text[]),
+    CAST(:payloads AS jsonb[])
+)
+ON CONFLICT ((payload ->> 'dedupe_key'))
+WHERE status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'
+DO UPDATE SET
+    message = EXCLUDED.message,
+    severity = EXCLUDED.severity,
+    payload = ops.data_integrity_violations.payload
+        || jsonb_strip_nulls(EXCLUDED.payload)
+        || jsonb_build_object(
+            'occurrence_count',
+            COALESCE(
+                (ops.data_integrity_violations.payload ->> 'occurrence_count')::bigint,
+                1
+            ) + 1,
+            'last_seen_at', to_jsonb(now() AT TIME ZONE 'UTC')
+        )
+"""
+
+_RESOLVE_STALE_FINDINGS_SQL: Final[str] = """
+UPDATE ops.data_integrity_violations
+SET status = 'resolved', resolved_at = now()
+WHERE provider = :provider
+  AND dataset_key = :dataset_key
+  AND status = 'open'
+  AND payload ? 'dedupe_key'
+  AND violation_type = ANY(CAST(:violation_types AS text[]))
+  AND NOT (payload ->> 'dedupe_key' = ANY(CAST(:live_keys AS text[])))
+"""
+
+
+async def sync_integrity_findings(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    findings: Sequence[Mapping[str, Any]],
+    managed_violation_types: Sequence[str],
+) -> tuple[int, int]:
+    """finding 집합을 **2개 statement로** 동기화한다 (T-VN-H30A). commit은 호출자 책임.
+
+    반환: ``(upsert된 건수, 자동 resolve된 건수)``.
+
+    왜 batch인가 — ``ops.data_integrity_violations``에는 statement 단위 트리거
+    (``trg_data_integrity_violations_ops_live_revision``)가 걸려 있어 statement마다
+    ``ops_live`` revision 단일 행을 갱신한다. finding 하나당 INSERT를 돌리면 그 hot row에
+    배타 락을 N번 잡고 트랜잭션 끝까지 쥐게 되어, ``/admin/issues`` 쓰기를 막고 동시 run을
+    직렬화하며 admin PATCH와 데드락까지 만든다. 전체를 한 statement로 접으면 트리거는
+    1회만 발화한다.
+
+    왜 resolve sweep인가 — 이번 run이 더는 보고하지 않는 finding을 닫지 않으면 큐가 단조
+    증가한다. **이번 검증이 관리하는 code**(``managed_violation_types``)에 한해, 그리고
+    ``open``만 닫는다 — 운영자가 손댄 ``acknowledged``는 건드리지 않는다.
+    """
+    if not findings:
+        live_keys: list[str] = []
+    else:
+        live_keys = [str(f["payload"]["dedupe_key"]) for f in findings]
+
+    upserted = 0
+    if findings:
+        await session.execute(
+            text(_UPSERT_FINDINGS_BATCH_SQL),
+            {
+                "providers": [f.get("provider") for f in findings],
+                "datasets": [f.get("dataset_key") for f in findings],
+                "source_record_keys": [f.get("source_record_key") for f in findings],
+                "feature_ids": [f.get("feature_id") for f in findings],
+                "violation_types": [f["violation_type"] for f in findings],
+                "severities": [f["severity"] for f in findings],
+                "messages": [f["message"] for f in findings],
+                "payloads": [
+                    json.dumps(f["payload"], ensure_ascii=False) for f in findings
+                ],
+            },
+        )
+        upserted = len(findings)
+
+    resolved = 0
+    if managed_violation_types:
+        result = await session.execute(
+            text(_RESOLVE_STALE_FINDINGS_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "violation_types": list(managed_violation_types),
+                "live_keys": live_keys,
+            },
+        )
+        resolved = int(result.rowcount or 0)
+    return upserted, resolved

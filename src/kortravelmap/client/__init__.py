@@ -232,7 +232,7 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.infra.feature_update_repo import (
     start_update_request as repo_start_update_request,
 )
-from kortravelmap.infra.integrity_violation_repo import upsert_integrity_finding
+from kortravelmap.infra.integrity_violation_repo import sync_integrity_findings
 from kortravelmap.infra.jobs_repo import ImportJobEvent
 from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
 from kortravelmap.infra.poi_cache_target_repo import (
@@ -2101,6 +2101,10 @@ class AsyncKorTravelMapClient:
     async def record_address_validation_findings(
         self,
         findings: Sequence[AddressValidationFinding],
+        *,
+        provider: str,
+        dataset_key: str,
+        managed_violation_types: Sequence[str],
     ) -> int:
         """주소/좌표 검증 결과를 ``ops.data_integrity_violations``에 durable하게 남긴다.
 
@@ -2115,33 +2119,54 @@ class AsyncKorTravelMapClient:
         기록 실패가 적재 결과를 되돌리지 않는다. 관측을 위해 넣은 경로가 파이프라인을 죽이면
         안 되므로 예외를 로그로 낮추고 기록 건수만 반환한다.
         """
-        if not findings:
-            return 0
-        recorded = 0
+        if not provider or not dataset_key:
+            raise ValueError("provider/dataset_key는 sweep 범위를 정하므로 필수다.")
+
+        # batch 안 중복 제거 — 같은 dedupe_key가 한 statement에 두 번 오면 Postgres가
+        # "ON CONFLICT DO UPDATE command cannot affect row a second time"로 실패한다.
+        # (payload가 byte-동일한 중복 레코드가 실제로 export에 존재한다.)
+        deduped: dict[str, dict[str, Any]] = {}
+        for finding in findings:
+            deduped[finding.dedupe_key] = {
+                "provider": finding.provider,
+                "dataset_key": finding.dataset_key,
+                "source_record_key": (
+                    finding.source_record_key if finding.linked else None
+                ),
+                "feature_id": finding.feature_id if finding.linked else None,
+                "violation_type": finding.violation_type,
+                "severity": finding.severity,
+                "message": finding.message,
+                "payload": {
+                    **dict(finding.payload),
+                    "dedupe_key": finding.dedupe_key,
+                    "occurrence_count": 1,
+                },
+            }
+        rows = list(deduped.values())
         try:
             async with self._session_factory() as session, session.begin():
-                for finding in findings:
-                    await upsert_integrity_finding(
-                        session,
-                        dedupe_key=finding.dedupe_key,
-                        violation_type=finding.violation_type,
-                        severity=finding.severity,
-                        message=finding.message,
-                        provider=finding.provider,
-                        dataset_key=finding.dataset_key,
-                        source_record_key=(
-                            finding.source_record_key if finding.linked else None
-                        ),
-                        feature_id=finding.feature_id if finding.linked else None,
-                        payload=finding.payload,
-                    )
-                    recorded += 1
+                upserted, resolved = await sync_integrity_findings(
+                    session,
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    findings=rows,
+                    managed_violation_types=managed_violation_types,
+                )
         except Exception:  # noqa: BLE001
             _LOG.exception(
                 "주소 검증 finding 기록 실패 — 적재 결과에는 영향을 주지 않는다 "
-                "(findings=%d, recorded=%d)",
-                len(findings),
-                recorded,
+                "(provider=%s dataset=%s findings=%d)",
+                provider,
+                dataset_key,
+                len(rows),
             )
             return 0
-        return recorded
+        if resolved:
+            _LOG.info(
+                "주소 검증 finding %d건 자동 resolve (provider=%s dataset=%s)",
+                resolved,
+                provider,
+                dataset_key,
+            )
+        return upserted

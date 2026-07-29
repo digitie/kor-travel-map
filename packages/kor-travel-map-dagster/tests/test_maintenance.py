@@ -100,7 +100,9 @@ class _Client:
             },
         )
 
-    async def record_address_validation_findings(self, findings: object) -> int:
+    async def record_address_validation_findings(
+        self, findings: object, **kwargs: object
+    ) -> int:
         """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
         self.recorded_findings = list(findings)  # type: ignore[arg-type]
         return len(self.recorded_findings)

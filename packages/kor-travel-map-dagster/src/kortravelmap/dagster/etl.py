@@ -108,6 +108,9 @@ async def load_feature_bundles_for_dagster(
 
     mode = _normalize_address_validation_mode(strict_address)
     validation = validate_feature_bundles_address(bundles)
+    # drop 모드가 bundles를 재할당하기 **전에** 잡는다 — 그러지 않으면 drop된 레코드의
+    # source_entity_id를 잃고 dedupe_key가 불안정한 source_record_key로 되돌아간다.
+    entity_ids = _entity_ids(bundles)
     # T-VN-H28B: severity가 아니라 code allowlist(DROPPABLE_ISSUE_CODES)가 손실을 정한다.
     # 새 검증이 error를 내도 allowlist를 명시적으로 고치기 전에는 drop/실패가 불가능하다.
     if mode == "strict" and validation.has_blocking_errors:
@@ -122,8 +125,14 @@ async def load_feature_bundles_for_dagster(
             dropped_feature_ids=frozenset(
                 issue.feature_id for issue in validation.blocking_issues
             ),
+            entity_ids=entity_ids,
         )
-        recorded = await client.record_address_validation_findings(failed_findings)
+        recorded = await client.record_address_validation_findings(
+            failed_findings,
+            provider=provider,
+            dataset_key=dataset_key,
+            managed_violation_types=_managed_violation_types(validation),
+        )
         failure_metadata = dict(validation.as_metadata())
         failure_metadata["address_validation_findings_recorded"] = recorded
         _add_output_metadata(context, failure_metadata)
@@ -185,8 +194,14 @@ async def load_feature_bundles_for_dagster(
         dataset_key=dataset_key,
         loaded_feature_ids=loaded_ids,
         dropped_feature_ids=frozenset(dropped_feature_ids),
+        entity_ids=entity_ids,
     )
-    recorded = await client.record_address_validation_findings(findings)
+    recorded = await client.record_address_validation_findings(
+        findings,
+        provider=provider,
+        dataset_key=dataset_key,
+        managed_violation_types=_managed_violation_types(validation),
+    )
     metadata["address_validation_findings_recorded"] = recorded
     if findings and recorded != len(findings):
         # 기록 실패를 조용히 넘기지 않는다 — 관측 경로가 죽은 것도 관측 대상이다.
@@ -203,13 +218,18 @@ def _address_validation_findings(
     dataset_key: str,
     loaded_feature_ids: frozenset[str] | set[str],
     dropped_feature_ids: frozenset[str],
+    entity_ids: Mapping[str, str] | None = None,
 ) -> list[AddressValidationFinding]:
     """검증 issue → durable finding (T-VN-H30A).
 
-    ``dedupe_key``는 (provider, dataset_key, code, source_record_key)로 만든다 — 같은 레코드의
-    같은 문제는 run을 반복해도 한 행으로 접힌다. ``source_record_key``에 payload hash가 들어
-    있어 provider payload가 바뀌면 새 key가 되고, 그때는 새로 열리는 것이 맞다.
+    ``dedupe_key``는 (provider, dataset_key, code, **source_entity_id**)로 만든다.
+
+    ``source_record_key``를 쓰면 안 된다 — 그 키는 ``raw_payload_hash``에서 파생되므로
+    (``core.ids.make_source_record_key``) provider export에서 무관한 필드 하나만 바뀌어도
+    새 key가 되고, 같은 문제가 **매 export마다 새 열린 이슈**로 쌓인다. MOIS 규모(977k)에서는
+    큐가 단조 증가한다. ``source_entity_id``는 payload 변경과 무관하게 안정적이다.
     """
+    entity_ids = entity_ids or {}
     findings: list[AddressValidationFinding] = []
     for issue in validation.issues:
         linked = issue.feature_id in loaded_feature_ids
@@ -217,7 +237,7 @@ def _address_validation_findings(
             AddressValidationFinding(
                 dedupe_key=(
                     f"address_validation:{provider}:{dataset_key}:"
-                    f"{issue.code}:{issue.source_record_key}"
+                    f"{issue.code}:{entity_ids.get(issue.source_record_key, issue.source_record_key)}"
                 ),
                 violation_type=issue.code,
                 severity=issue.severity,
@@ -266,3 +286,37 @@ def _add_output_metadata(
     except Exception as exc:
         if exc.__class__.__name__ != "DagsterInvalidPropertyError":
             raise
+
+
+def _entity_ids(bundles: Sequence[FeatureBundle]) -> dict[str, str]:
+    """``source_record_key`` → ``source_entity_id`` (dedupe_key 안정화용, T-VN-H30A)."""
+    return {
+        bundle.source_record.source_record_key: bundle.source_record.source_entity_id
+        for bundle in bundles
+    }
+
+
+_ADDRESS_VALIDATION_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "reverse_geocode_failed",
+        "reverse_geocode_unavailable",
+        "missing_address",
+        "provider_address_region_disagreement",
+        "admin_code_stale_sido",
+        "admin_code_stale_sigungu",
+        "admin_code_stale_emd",
+    }
+)
+"""주소/좌표 검증이 **소유하는** issue code 전체 (T-VN-H30A).
+
+자동 resolve sweep의 범위다 — 이 집합 밖의 code는 다른 주체가 넣은 것이므로 건드리지 않는다.
+새 검증 code를 추가하면 여기에도 넣어야 큐가 닫힌다(안 넣으면 단조 증가한다).
+"""
+
+
+def _managed_violation_types(
+    validation: FeatureAddressValidationSummary,
+) -> tuple[str, ...]:
+    """이번 검증이 관리하는 code. 실제로 방출된 code도 합쳐 누락을 막는다."""
+    emitted = {issue.code for issue in validation.issues}
+    return tuple(sorted(_ADDRESS_VALIDATION_CODES | emitted))
