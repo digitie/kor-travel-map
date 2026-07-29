@@ -140,10 +140,14 @@ returning issue_id::text
 # 먼저 `resolved`로 잘못 기록한 3행을 바로잡는 데도 쓰인다.)
 _UPDATE_FINDING_SQL = """
 update ops.data_integrity_violations
-   set message = $2,
-       payload = jsonb_strip_nulls($3::jsonb),
+   set provider = 'curation',
+       dataset_key = $4,
+       source_record_key = null,
        feature_id = null,
+       violation_type = 'curation_feature_region_mismatch',
        severity = 'error',
+       message = $2,
+       payload = jsonb_strip_nulls($3::jsonb),
        status = 'open',
        resolved_at = null
  where issue_id = $1::uuid
@@ -280,7 +284,11 @@ async def main() -> None:
                     how = "신규"
                 else:
                     issue_id = await conn.fetchval(
-                        _UPDATE_FINDING_SQL, existing, message, payload_json
+                        _UPDATE_FINDING_SQL,
+                        existing,
+                        message,
+                        payload_json,
+                        collection_key,
                     )
                     how = "갱신"
             print(f"    finding={issue_id} ({how}, open)")
