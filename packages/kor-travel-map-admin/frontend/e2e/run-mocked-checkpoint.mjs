@@ -187,6 +187,7 @@ const ownedNetworkName = `ktm-mocked-e2e-${process.pid}-${randomBytes(6).toStrin
 let ownedContainerId;
 let ownedImageTag;
 let ownedNetworkId;
+let networkCreateAttempted = false;
 let imageInspect;
 let activeChild;
 let denyProxyServer;
@@ -194,6 +195,7 @@ let frontendProxyServer;
 let deniedNetworkAttempts = 0;
 let filesystemCleaned = false;
 let cleanupPromise;
+let cleanupFailed = false;
 let terminating = false;
 
 function cleanupFilesystem() {
@@ -206,22 +208,52 @@ function runCleanupCommand(args) {
   return new Promise((resolve) => {
     const child = spawn("docker", args, {
       detached: process.platform !== "win32",
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "ignore"],
     });
+    const stdout = [];
+    child.stdout?.on("data", (chunk) => stdout.push(chunk));
     let settled = false;
-    const finish = () => {
+    const finish = (status = 1) => {
       if (settled) return;
       settled = true;
       clearTimeout(forceTimer);
-      resolve();
+      resolve({ status, stdout: Buffer.concat(stdout).toString("utf8") });
     };
     const forceTimer = setTimeout(() => {
       terminateChildGroup(child, "SIGKILL");
-      finish();
+      finish(1);
     }, 1_000);
-    child.once("error", finish);
-    child.once("exit", finish);
+    child.once("error", () => finish(1));
+    child.once("exit", (status) => finish(status ?? 1));
   });
+}
+
+async function cleanupOwnedNetwork() {
+  if (!networkCreateAttempted) return;
+  const inspected = await runCleanupCommand([
+    "network",
+    "inspect",
+    "--format",
+    '{{.Id}} {{index .Labels "io.kortravelmap.mocked-e2e-owned"}}',
+    ownedNetworkName,
+  ]);
+  if (inspected.status !== 0) return;
+  const [observedId, ownedLabel, ...extra] = inspected.stdout.trim().split(/\s+/);
+  if (
+    extra.length !== 0 ||
+    ownedLabel !== "true" ||
+    !/^[0-9a-f]{64}$/.test(observedId ?? "") ||
+    (ownedNetworkId !== undefined && observedId !== ownedNetworkId)
+  ) {
+    cleanupFailed = true;
+    return;
+  }
+  const removed = await runCleanupCommand([
+    "network",
+    "rm",
+    ownedNetworkName,
+  ]);
+  if (removed.status !== 0) cleanupFailed = true;
 }
 
 function closeDenyProxy() {
@@ -256,9 +288,7 @@ function cleanup() {
     await closeDenyProxy();
     await closeFrontendProxy();
     await runCleanupCommand(["rm", "-f", ownedContainerName]);
-    if (ownedNetworkId) {
-      await runCleanupCommand(["network", "rm", ownedNetworkName]);
-    }
+    await cleanupOwnedNetwork();
     if (ownedImageTag) {
       await runCleanupCommand(["image", "rm", "-f", ownedImageTag]);
     }
@@ -381,7 +411,7 @@ async function handleSignal(signal, exitCode) {
     }
   }
   await cleanup();
-  process.exit(exitCode);
+  process.exit(cleanupFailed ? 2 : exitCode);
 }
 
 const signalExitCodes = new Map([
@@ -645,6 +675,7 @@ try {
     ].join("\n"),
     { encoding: "utf8", mode: 0o600 },
   );
+  networkCreateAttempted = true;
   const networkResult = await runManagedChild(
     "docker",
     [
@@ -657,14 +688,15 @@ try {
     ],
     { captureOutput: true },
   );
-  ownedNetworkId = networkResult.stdout?.trim();
+  const createdNetworkId = networkResult.stdout?.trim();
   if (
     networkResult.status !== 0 ||
-    !ownedNetworkId ||
-    !/^[0-9a-f]{64}$/.test(ownedNetworkId)
+    !createdNetworkId ||
+    !/^[0-9a-f]{64}$/.test(createdNetworkId)
   ) {
     throw new Error("self-owned mocked internal network를 생성할 수 없습니다.");
   }
+  ownedNetworkId = createdNetworkId;
   const createResult = await runManagedChild(
     "docker",
     [
@@ -822,4 +854,5 @@ try {
 } finally {
   await cleanup();
 }
+if (cleanupFailed) exitCode = 2;
 process.exit(exitCode);

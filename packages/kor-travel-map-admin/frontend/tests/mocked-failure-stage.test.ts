@@ -110,6 +110,29 @@ describe("mocked checkpoint isolation", () => {
     );
   });
 
+  it("network create 응답 전 signal도 이름과 ownership label로 정리한다", () => {
+    const createAttempt = runnerSource.indexOf("networkCreateAttempted = true");
+    const createSpawn = runnerSource.indexOf(
+      'const networkResult = await runManagedChild(',
+    );
+    const cleanupNetwork = runnerSource.slice(
+      runnerSource.indexOf("async function cleanupOwnedNetwork()"),
+      runnerSource.indexOf("function closeDenyProxy()"),
+    );
+
+    expect(createAttempt).toBeGreaterThan(0);
+    expect(createAttempt).toBeLessThan(createSpawn);
+    expect(cleanupNetwork).toContain("if (!networkCreateAttempted) return");
+    expect(cleanupNetwork).toContain('"network",\n    "inspect"');
+    expect(cleanupNetwork).toContain(
+      "io.kortravelmap.mocked-e2e-owned",
+    );
+    expect(cleanupNetwork).toContain(
+      "ownedNetworkId !== undefined && observedId !== ownedNetworkId",
+    );
+    expect(cleanupNetwork).toContain('"network",\n    "rm"');
+  });
+
   it("host public env를 빌드에 상속하지 않고 non-self HTTP/WS를 전역 차단한다", () => {
     expect(runnerSource).toContain(
       'NEXT_PUBLIC_KOR_TRAVEL_MAP_API: "http://127.0.0.1:9"',

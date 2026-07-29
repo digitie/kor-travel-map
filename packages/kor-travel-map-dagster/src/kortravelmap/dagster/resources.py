@@ -1131,7 +1131,7 @@ def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
         )
 
     http = httpx.AsyncClient(
-        base_url=settings.kor_travel_geo_base_url,
+        base_url=settings.kor_travel_geo_base_url.get_secret_value(),
         timeout=settings.kor_travel_geo_timeout_seconds,
     )
     try:

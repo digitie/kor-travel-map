@@ -42,22 +42,33 @@ def test_geo_public_api_key_stays_masked() -> None:
 
 
 @pytest.mark.parametrize(
-    "unsafe_url",
+    ("unsafe_url", "secret_marker"),
     [
-        "http://alice:password@geo.example",
-        "https://geo.example/private-token",
-        "https://geo.example?token=secret",
-        "https://geo.example#secret",
+        ("http://alice:password@geo.example", "password"),
+        ("https://geo.example/private-token", "private-token"),
+        ("https://geo.example?token=query-secret", "query-secret"),
+        ("https://geo.example#fragment-secret", "fragment-secret"),
+        ("http://geo.example:SUPER-SECRET-PORT", "SUPER-SECRET-PORT"),
     ],
 )
-def test_geo_base_url_accepts_only_secret_free_origin(unsafe_url: str) -> None:
-    with pytest.raises(ValidationError, match="HTTP\\(S\\) origin"):
+def test_geo_base_url_accepts_only_secret_free_origin(
+    unsafe_url: str,
+    secret_marker: str,
+) -> None:
+    with pytest.raises(ValidationError, match="HTTP\\(S\\) origin") as excinfo:
         KorTravelMapSettings(kor_travel_geo_base_url=unsafe_url)
+    rendered = f"{excinfo.value}{excinfo.value!r}"
+    assert unsafe_url not in rendered
+    assert secret_marker not in rendered
 
     settings = KorTravelMapSettings(
         kor_travel_geo_base_url="https://geo.example/",
     )
-    assert settings.kor_travel_geo_base_url == "https://geo.example"
+    assert settings.kor_travel_geo_base_url is not None
+    assert (
+        settings.kor_travel_geo_base_url.get_secret_value()
+        == "https://geo.example"
+    )
 
 
 def test_opinet_run_budget_preserves_daily_quota_for_two_datasets() -> None:

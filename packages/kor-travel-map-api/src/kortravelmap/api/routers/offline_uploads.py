@@ -1129,7 +1129,7 @@ async def validate_offline_upload_request(
     try:
         if settings.kor_travel_geo_base_url:
             async with httpx.AsyncClient(
-                base_url=settings.kor_travel_geo_base_url,
+                base_url=settings.kor_travel_geo_base_url.get_secret_value(),
                 timeout=settings.kor_travel_geo_timeout_seconds,
             ) as http:
                 kraddr = KorTravelGeoRestClient(

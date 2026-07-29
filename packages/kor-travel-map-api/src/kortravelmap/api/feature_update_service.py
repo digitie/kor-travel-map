@@ -468,7 +468,7 @@ async def _sigungu_resolver_for_scope(
         return
 
     async with httpx.AsyncClient(
-        base_url=base_url,
+        base_url=base_url.get_secret_value(),
         timeout=settings.kor_travel_geo_timeout_seconds,
     ) as http:
         client = KorTravelGeoRestClient(

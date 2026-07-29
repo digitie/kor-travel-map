@@ -119,28 +119,31 @@ def _raise_for_status_sanitized(resp: httpx.Response) -> None:
         raise sanitized
 
 
+def _parse_response_payload(
+    resp: httpx.Response,
+    parser: Callable[[dict[str, Any]], _GeoResponseT],
+) -> _GeoResponseT:
+    """Raw provider payload를 짧은 내부 frame 안에서만 파싱한다."""
+    payload = resp.json()
+    if not isinstance(payload, dict):
+        raise TypeError("response JSON is not an object")
+    return parser(payload)
+
+
 def _parse_response_sanitized(
     resp: httpx.Response,
     parser: Callable[[dict[str, Any]], _GeoResponseT],
 ) -> _GeoResponseT:
-    """2xx JSON/schema 손상을 credential 없는 provider 오류로 바꾼다."""
-    parsed: _GeoResponseT | None = None
-    sanitized: GeoRequestError | None = None
+    """2xx JSON/schema 손상을 raw payload 없는 typed provider 오류로 바꾼다."""
+    error_type: str | None = None
     try:
-        payload = resp.json()
-        if not isinstance(payload, dict):
-            raise TypeError("response JSON is not an object")
-        parsed = parser(payload)
+        return _parse_response_payload(resp, parser)
     except (AttributeError, KeyError, OverflowError, TypeError, ValueError) as exc:
-        sanitized = GeoRequestError(
-            f"kor-travel-geo 응답 계약 오류: {type(exc).__name__}"
-        )
+        error_type = type(exc).__name__
     # 원 JSON decoder/parser 예외의 frame local에 raw payload가 남을 수 있으므로
     # except 블록 밖에서 새 typed 오류를 던져 exception chaining도 만들지 않는다.
-    if sanitized is not None:
-        raise sanitized
-    assert parsed is not None
-    return parsed
+    assert error_type is not None
+    raise GeoRequestError(f"kor-travel-geo 응답 계약 오류: {error_type}")
 
 
 __all__ = [

@@ -914,9 +914,16 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "coproc BOOTSTRAP_LOCK_GUARD" in source
     assert "mv -T --no-clobber" in source
     assert 'validate_snapshot "$SOURCE_COMMIT" "$expected_root"' in source
+    assert "-name '.incoming-*'" in source
+    assert (
+        r"^\.incoming-[0-9a-f]{40}-[0-9]+(-[0-9a-f]{12})?$"
+        in source
+    )
     assert "DOCKER_HOST DOCKER_TLS_VERIFY" in source
-    assert "exec 9" not in source
-    assert "flock --exclusive --nonblock --close" in source
+    assert 'exec 9<>"$LOCK_FILE"' in source
+    assert "flock --exclusive --nonblock 9" in source
+    assert ">/dev/null 2>&1 9>&- &" in source
+    assert "flock --exclusive --nonblock --close" not in source
     assert "candidate-startup-pending" in source
     assert source.rindex("state_helper write-blocked") < source.rindex(
         "create_candidate_network"
@@ -980,6 +987,9 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert recovery_source.index(
         "if state_helper validate-evidence"
     ) < recovery_source.index('for image in "$API_IMAGE_ID"')
+    assert recovery_source.index("remove_owned_containers") < recovery_source.index(
+        "recover_checkpoint_quiescence"
+    )
     assert 'docker image rm "$tag"' in source
     assert 'docker image rm --force "${images[@]}"' not in source
     assert source.rindex("finalize_resources") < source.rindex(
@@ -992,7 +1002,7 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert cleanup_source.index(
         "refresh_blocked_written_from_durable_state"
     ) < cleanup_source.index("remove_owned_containers")
-    normal_source = source.split(
+    normal_source = source.rsplit(
         '[[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]]',
         maxsplit=1,
     )[1]
@@ -1001,28 +1011,29 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     )
     assert normal_source.index(
         "assert_acceptance_login_fence_after_resources"
-    ) < normal_source.index("state_helper complete")
+    ) < normal_source.index("stop_checkpoint_quiescence")
+    assert normal_source.index("stop_checkpoint_quiescence") < normal_source.index(
+        "state_helper complete"
+    )
     assert "alembic upgrade" not in source
     assert "E2E_LIVE_ALLOW_PROD" not in source
     assert "E2E_ISOLATED_LIVE_DOCKER_NETWORK=1" in source
 
 
-def test_orchestrator_lock_guard_releases_after_runner_sigkill(
+def test_orchestrator_lock_is_not_inherited_by_quiescence_child(
     tmp_path: Path,
 ) -> None:
-    """runner가 SIGKILL되어도 장수 grandchild가 flock을 상속하지 않는다."""
-    harness = tmp_path / "lock-guard.sh"
+    """runner SIGKILL 뒤에도 24시간 quiescence 자식이 flock을 붙잡지 않는다."""
+    harness = tmp_path / "lock-owner.sh"
     lock_path = tmp_path / "orchestrator.lock"
     harness.write_text(
         """#!/usr/bin/env bash
 set -euo pipefail
 lock_path="$1"
-if [[ "${TEST_LOCK_GUARD-}" != "1" ]]; then
-  exec env TEST_LOCK_GUARD=1 \
-    flock --exclusive --nonblock --close "$lock_path" "$0" "$lock_path"
-fi
-sleep 30 &
-printf '%s %s\\n' "$$" "$!"
+exec 9<>"$lock_path"
+flock --exclusive --nonblock 9
+sleep 30 9>&- &
+printf '%s\\n' "$!"
 wait
 """,
         encoding="utf-8",
@@ -1035,11 +1046,9 @@ wait
         text=True,
     )
     assert process.stdout is not None
-    runner_pid_text, grandchild_pid_text = process.stdout.readline().split()
-    runner_pid = int(runner_pid_text)
-    grandchild_pid = int(grandchild_pid_text)
+    grandchild_pid = int(process.stdout.readline())
     try:
-        os.kill(runner_pid, signal.SIGKILL)
+        os.kill(process.pid, signal.SIGKILL)
         process.wait(timeout=5)
         reacquired = subprocess.run(
             ["flock", "--exclusive", "--nonblock", str(lock_path), "true"],

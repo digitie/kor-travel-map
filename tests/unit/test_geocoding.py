@@ -1727,6 +1727,40 @@ def test_geo_transport_error_drops_original_request_and_secret() -> None:
     asyncio.run(scenario())
 
 
+def test_geo_parse_error_traceback_locals_drop_raw_provider_payload() -> None:
+    upstream_secret = "UPSTREAM-SECRET-IN-MALFORMED-PAYLOAD"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "candidates": [{"confidence": upstream_secret}],
+            },
+        )
+
+    async def scenario() -> None:
+        async with _mock_client(handler) as http:
+            client = KorTravelGeoRestClient(
+                http,
+                api_key=SecretStr("configured-public-key"),
+            )
+            with pytest.raises(GeoRequestError) as excinfo:
+                await client.reverse(127.0276, 37.4979)
+            frame_locals: list[str] = []
+            traceback = excinfo.value.__traceback__
+            while traceback is not None:
+                if "/src/kortravelmap/" in traceback.tb_frame.f_code.co_filename:
+                    frame_locals.append(repr(traceback.tb_frame.f_locals))
+                traceback = traceback.tb_next
+            rendered = f"{excinfo.value!r}{''.join(frame_locals)}"
+            assert upstream_secret not in rendered
+            assert excinfo.value.__cause__ is None
+            assert excinfo.value.__context__ is None
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("failure_kind", ["transport", "status", "payload"])
 def test_geo_errors_never_render_base_url_userinfo_or_path(
     failure_kind: str,

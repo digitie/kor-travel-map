@@ -79,7 +79,7 @@ bootstrap_snapshot() {
 
   local stale_name stale_path
   while IFS= read -r stale_name; do
-    [[ "$stale_name" =~ ^\.incoming-${SOURCE_COMMIT}-[0-9]+(-[0-9a-f]{12})?$ ]] ||
+    [[ "$stale_name" =~ ^\.incoming-[0-9a-f]{40}-[0-9]+(-[0-9a-f]{12})?$ ]] ||
       die "stale bootstrap path is unsafe"
     stale_path="$INSTALL_BASE/$stale_name"
     [[ "$(sudo -n stat -c '%u:%g:%a' -- "$stale_path")" == "0:0:700" ]] ||
@@ -87,7 +87,7 @@ bootstrap_snapshot() {
     sudo -n rm -rf -- "$stale_path"
   done < <(
     sudo -n find "$INSTALL_BASE" -mindepth 1 -maxdepth 1 -type d \
-      -name ".incoming-$SOURCE_COMMIT-*" -printf '%f\n'
+      -name '.incoming-*' -printf '%f\n'
   )
 
   local incoming="$INSTALL_BASE/.incoming-$SOURCE_COMMIT-$$-$(openssl rand -hex 6)"
@@ -239,12 +239,9 @@ if [[ -e "$LOCK_FILE" || -L "$LOCK_FILE" ]]; then
 else
   install -o root -g root -m 0600 /dev/null "$LOCK_FILE"
 fi
-if [[ "${KTM_ADMIN_FEATURE_CLONE_LOCK_GUARD-}" != "1" ]]; then
-  exec env KTM_ADMIN_FEATURE_CLONE_LOCK_GUARD=1 \
-    flock --exclusive --nonblock --close "$LOCK_FILE" \
-    "$SCRIPT_DIR/run-admin-feature-clone-live-acceptance.sh" "$MODE"
-fi
-unset KTM_ADMIN_FEATURE_CLONE_LOCK_GUARD
+exec 9<>"$LOCK_FILE"
+flock --exclusive --nonblock 9 ||
+  die "another clone acceptance runner owns the lock"
 
 readonly STATE_HELPER="$SCRIPT_DIR/admin_feature_clone_live_state.py"
 state_helper() {
@@ -1225,8 +1222,6 @@ recover_checkpoint_quiescence() {
 start_database_login_fence() {
   checkpoint_login_role_invariant ||
     die "clone cluster must have exactly the configured LOGIN role"
-  [[ "$(foreign_cluster_sessions)" == "0" ]] ||
-    die "clone cluster has a foreign client session before login fencing"
   CHECKPOINT_QUIESCENCE_APP="ktm_checkpoint_${RUN_KEY:0:16}"
   state_helper write-quiescence \
     --application-name "$CHECKPOINT_QUIESCENCE_APP" \
@@ -1286,7 +1281,7 @@ start_checkpoint_quiescence() {
     docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
     psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$db_name" \
     -c "BEGIN; SET LOCAL statement_timeout = 0; $lock_statements SELECT pg_sleep(86400); ROLLBACK;" \
-    >/dev/null 2>&1 &
+    >/dev/null 2>&1 9>&- &
   CHECKPOINT_QUIESCENCE_PROCESS="$!"
   local attempt
   for attempt in $(seq 1 300); do
@@ -2481,6 +2476,10 @@ if [[ "$MODE" == "recover" ]]; then
   PLAYWRIGHT_IMAGE_TAG="kor-travel-map-clone-live-playwright:${blocked_source:0:12}-${RUN_KEY:0:12}"
   validate_snapshot "$blocked_source" "$INSTALL_BASE/$blocked_source"
   FIXTURE_HELPER="$INSTALL_BASE/$blocked_source/admin_feature_live_fixture.py"
+  # SIGKILL 뒤 daemon에 남은 candidate와 DB pool을 먼저 끊어 첫 recover가 곧바로
+  # 새 login fence를 세울 수 있게 한다.
+  remove_owned_containers
+  remove_owned_network
   CONTENT_CUTOFF="$(
     state_helper read-checkpoint \
       --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
@@ -2508,12 +2507,12 @@ if [[ "$MODE" == "recover" ]]; then
     state_helper update-blocked --path "$BLOCKED_FILE" --phase recovery-resource-finalizing
     finalize_resources
     assert_acceptance_login_fence_after_resources
+    stop_checkpoint_quiescence ||
+      die "clone DB login fence restoration failed after recovery"
     state_helper complete "${completion_args[@]}" \
       --result-path "$RUNTIME_DIR/result.json"
     COMPLETE=1
     BLOCKED_WRITTEN=0
-    stop_checkpoint_quiescence ||
-      die "clone DB login fence restoration failed after recovery"
     printf 'admin feature clone live acceptance recovered: source=%s result=%s\n' \
       "$blocked_source" "$RUNTIME_DIR/result.json"
     exit 0
@@ -2573,12 +2572,12 @@ if [[ "$MODE" == "recover" ]]; then
   state_helper update-blocked --path "$BLOCKED_FILE" --phase recovery-resource-finalizing
   finalize_resources
   assert_acceptance_login_fence_after_resources
+  stop_checkpoint_quiescence ||
+    die "clone DB login fence restoration failed after recovery"
   state_helper complete "${completion_args[@]}" \
     --result-path "$RUNTIME_DIR/result.json"
   COMPLETE=1
   BLOCKED_WRITTEN=0
-  stop_checkpoint_quiescence ||
-    die "clone DB login fence restoration failed after recovery"
   printf 'admin feature clone live acceptance recovered: source=%s result=%s\n' \
     "$blocked_source" "$RUNTIME_DIR/result.json"
   exit 0
@@ -2685,11 +2684,11 @@ state_helper validate-evidence "${completion_args[@]}"
 state_helper update-blocked --path "$BLOCKED_FILE" --phase resource-finalizing
 finalize_resources
 assert_acceptance_login_fence_after_resources
+stop_checkpoint_quiescence ||
+  die "clone DB login fence restoration failed after acceptance"
 state_helper complete "${completion_args[@]}" \
   --result-path "$RUNTIME_DIR/result.json"
 COMPLETE=1
 BLOCKED_WRITTEN=0
-stop_checkpoint_quiescence ||
-  die "clone DB login fence restoration failed after acceptance"
 printf 'admin feature clone live acceptance complete: source=%s result=%s\n' \
   "$SOURCE_COMMIT" "$RUNTIME_DIR/result.json"

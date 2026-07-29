@@ -251,7 +251,7 @@ def _kor_travel_geo_base_url() -> str:
             "kor-travel-geo base URL이 설정되지 않아 지오코딩을 수행할 수 없습니다 "
             "(KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL)."
         )
-    return base_url
+    return base_url.get_secret_value()
 
 
 def _kor_travel_geo_api_key() -> SecretStr | None:
