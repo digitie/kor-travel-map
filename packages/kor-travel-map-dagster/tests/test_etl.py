@@ -143,7 +143,7 @@ def _error_summary(items: Any, *, error_feature_id: str) -> FeatureAddressValida
             FeatureAddressIssue(
                 feature_id=error_feature_id,
                 source_record_key="record-key",
-                code="provider_address_mismatch",
+                code="reverse_geocode_failed",
                 severity="error",
                 message="mismatch",
             ),
@@ -163,7 +163,7 @@ async def test_load_strict_mode_fails_on_error_issue(
         lambda items: _error_summary(items, error_feature_id="feature-1"),
     )
 
-    with pytest.raises(Failure, match="provider_address_mismatch"):
+    with pytest.raises(Failure, match="reverse_geocode_failed"):
         await load_feature_bundles_for_dagster(
             context=context,  # type: ignore[arg-type]
             client=client,  # type: ignore[arg-type]
@@ -239,3 +239,75 @@ async def test_load_rejects_unknown_validation_mode() -> None:
             dataset_key="places",
             strict_address="lenient",
         )
+
+
+def _non_droppable_summary(
+    items: Any, *, error_feature_id: str
+) -> FeatureAddressValidationSummary:
+    """allowlist에 없는 code가 error severity로 올라온 경우 (T-VN-H28B)."""
+    return FeatureAddressValidationSummary(
+        total=len(items),
+        issue_count=1,
+        error_count=1,
+        warning_count=0,
+        issues=(
+            FeatureAddressIssue(
+                feature_id=error_feature_id,
+                source_record_key="record-key",
+                code="some_future_rule_error",
+                severity="error",
+                message="allowlist에 없는 새 규칙",
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize("mode", ["strict", "drop"])
+async def test_non_allowlisted_error_never_loses_rows(
+    monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    """allowlist에 없는 error code는 drop도 run 실패도 만들지 못한다 (T-VN-H28B).
+
+    이전에는 severity만 보고 격리해서, 새 error 규칙이 하나 추가될 때마다 영구 손실
+    범위가 조용히 넓어졌다 — 실제로 ``provider_address_mismatch``가 그렇게 380건을
+    파괴했고 그 380건은 전부 오탐이었다.
+    """
+    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(3)]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: _non_droppable_summary(items, error_feature_id="feature-1"),
+    )
+
+    result = await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address=mode,
+    )
+
+    # 세 건 모두 적재되고, 아무것도 drop되지 않는다.
+    assert client.chunks == [("feature-0", "feature-1", "feature-2")]
+    assert result.feature_ids == ("feature-0", "feature-1", "feature-2")
+    assert context.metadata[-1]["address_validation_dropped_count"] == 0
+
+
+def test_droppable_codes_are_explicit_and_minimal() -> None:
+    """drop 가능한 code 집합은 명시적이며, 늘리려면 이 테스트가 먼저 깨진다."""
+    from kortravelmap.dagster.validation import DROPPABLE_ISSUE_CODES
+
+    assert DROPPABLE_ISSUE_CODES == frozenset(
+        {"reverse_geocode_failed", "missing_address"}
+    )
+    # 이름 축·행정코드 축은 어떤 형태로도 영구 손실을 만들 수 없다.
+    for code in (
+        "provider_address_mismatch",
+        "provider_address_partial_match",
+        "admin_code_conflict_sido",
+        "admin_code_conflict_sigungu",
+        "admin_code_conflict_emd",
+    ):
+        assert code not in DROPPABLE_ISSUE_CODES
