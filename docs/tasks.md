@@ -8,11 +8,8 @@
 ## 진행 중인 작업 인덱스 (2026-07-28 PR #869 후 전면 재감사)
 
 > PR #869 merge `25e9304b` 직후 `tasks.md`·`tasks-done.md`·실코드·Map/PinVi/
-> docker-manager/geo의 열린 PR·이슈를 다시 대조했다. Map의 열린 이슈는 #673·#812·#815·#819,
-> 본 감사 PR #870을 제외한 기존 열린 PR은 #814 한 건이며, PinVi의 관련 열린 PR은 #403이다.
-> `T-VN-H21`의 실서비스 400에서 보호 endpoint `key` 결선 누락을 첫 blocker로 확인했다.
-> 인증 뒤 downstream drift 존재 여부는 아직 미검증이다. 큰 task는 독립 검증·forward recovery가
-> 가능한 실행 단위로 아래처럼 분해한다.
+> PR #869 당시 전면 감사에서 시작했으며 이후 완료·보류 상태를 매 PR 갱신한다.
+> 큰 task는 독립 검증·forward recovery가 가능한 실행 단위로 아래처럼 분해한다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
@@ -64,7 +61,6 @@ barrier로 직렬화한다.
     required-review 운영 주체 결정 필요)
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
   - [ ] `T-VN-EXT-PINVI-215` — PinVi #215 외부 추적(Map Agent A/B queue 밖)
-  - [ ] `T-VN-H29` — PinVi 검색 좌표 null 복구(Map Agent A/B queue 밖)
 
 ## 공통 규율 (2026-07-28 개정)
 
@@ -113,20 +109,18 @@ barrier로 직렬화한다.
   착수 전에 migration head·schema/fixture 계약·파괴적 실행 잔여물·코드/API 호환성·디스크
   여유를 확인해 재사용 가능하면 이름·head·fixture identity와 근거를 `resume.md`/
   `journal.md`에 기록하고, 불가능할 때만 해당 격리 resource를 정확히 정리한다.
-- **cross-lane 순서 제약**: C6c pair capture와 #392, H07A의 Map #814 landing
-  (`259a9ec5`)은 이미 완료됐다. H07B는 오래 열린 PinVi #403을 최신 main에 재배치하고 중복
-  assertion을 제거한 뒤 H07D→H07C 순서로 진행한다.
+- **cross-lane 순서 제약**: C6c pair capture와 #392, H07A~D는 완료됐다.
   H22C는 완료된 T-VN-48B에 이어 같은 curation frontend를 만지는 T-VN-49B가 머지된 뒤
   시작한다. T-VN-12A의 command
   inventory freeze는 H22B의 reclassification command가 머지된 뒤 시작해 curation idempotency가
   누락되지 않게 한다. Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
   T-VN-40은 양 lane의 T-VN-32~38 하위 task가 모두 끝난 join barrier 뒤에 시작하며,
   최종 T-VN-39는 T-VN-32~38·40의 모든 하위 task가 끝난 뒤에만 시작한다.
-- **OpenAPI 계약 변경 규율(2026-07-29 개정 — ADR-079)**: admin/user OpenAPI를 바꾸는 task는
-  **per-surface digest 갱신(`openapi-sha256.json`)과 소비자 vendored 스냅샷 재-vendor**를 같은
-  완료 조건으로 갖는다(PinVi `contract-pin-consistency`). compatible-pair 재-capture·C7
-  attestation은 **해당 없음** — v5 승격은 ADR-079로 기각됐고, 배포 페어의 계약은
-  `map_source_revision`과 배포 이미지 OCI revision 라벨이 이미 결박한다.
+- **OpenAPI 계약 변경 규율(2026-07-29 개정)**: admin/user OpenAPI를 바꾸는 task는
+  두 spec을 재생성하고 실제 소비자가 핀한 Map commit에서 vendored 스냅샷을 다시 추출해
+  `contract-pin-consistency`를 통과시킨다. 소비자가 읽지 않는 파생 digest manifest는 만들지
+  않는다. compatible-pair 재-capture·C7 attestation은 배포 이미지 revision 결박과 중복이므로
+  OpenAPI 변경 완료 조건이 아니다.
 - **prod 격리 규율(2026-07-27 인시던트 재발 방지 —
   [리포트](reports/incident-2026-07-27-shared-prod-db-live-container.md))**: 아래 4개는
   두 lane 공통 필수.
@@ -151,7 +145,7 @@ barrier로 직렬화한다.
 
 ### T-VN-48 — mocked Playwright drift 제거
 
-- [x] T-VN-48A~C — 최초 273-test baseline의 deterministic drift 89건을
+T-VN-48A~C는 최초 273-test baseline의 deterministic drift 89건을
   Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별로 제거했다.
 - [ ] T-VN-48D — 구현과 exact `45e2161d` mocked serial/CI-parallel gate는 각각
   **274/274 passed, expected failure/flake/skip 0건**으로 끝났다.
@@ -222,10 +216,6 @@ barrier로 직렬화한다.
   설정 적용과 proxy metric 확인 모두 **라우터 접근**이 필요해 에이전트가 수행할 수 없다.
   사용자 지시로 보류한다 — 운영자가 라우터에 `timeout tunnel`을 적용한 뒤 quiet 2주기 실증으로
   #819를 닫는다.
-
-  docker-manager의 공개 가능한 base config에 `timeout tunnel`을 명시하고 local prod 값은
-  gitignored runbook에서 결선한다. quiet 상태를 heartbeat 두 주기 이상 유지해 같은 ops-live
-  socket이 재연결 없이 유지되는지 브라우저와 proxy metric 양쪽에서 확인한 뒤 #819를 닫는다.
 
 ### T-VN-H30 — 주소 검증 관측 durable화·회복 실적재 검증 (H28 후속, 부분완료)
 
@@ -405,21 +395,12 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 > (dm#63·#70·map#712·#719·#777·#694), map#684는 H17에서 조건 #8을 "write/error UI 엣지는
 > mock, read·URL·freshness + write 계약은 live"로 명시 축소한 뒤 close했다.
 
-- **task로 승격**: map #673=`T-VN-H28A/B`, map #819=`T-VN-H27`,
-  map #812/#815=`T-VN-H07C/D`.
+- **task로 승격**: map #673=`T-VN-H28A/B`, map #819=`T-VN-H27`(보류).
 - **종결**: map #738은 lane 분배 정본을 본 문서로 이관해 닫혔다.
 - [ ] T-VN-EXT-PINVI-215 — **PinVi #215 외부 follow-up 추적**
 
   post-review cleanup 잔여(ADR-045 VWorld 불투명 자격증명 hard-gate 등)는 PinVi 저장소가
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
-
-- [ ] T-VN-H29 — **PinVi 통합검색 map-import POI 좌표 null 복구** (외부 추적)
-
-  `pinvi apps/api/app/api/v1/search.py::_snapshot_coord`가 `feature_snapshot["coord"]`만 읽는데,
-  Map `CuratedFeatureDetailFeatureSnapshotView`는 `extra="forbid"`이고 `coord` property가 없다
-  (좌표는 **top-level** `lon`/`lat`). 따라서 map-curated import POI가 통합 검색에서 좌표
-  `null`이 된다. PinVi 저장소가 `_snapshot_coord`를 기존 top-level 추출기와 정렬하고 회귀를
-  추가해야 하므로 Map Agent A/B 실행 lane에서는 제외하고 상태만 동기화한다.
 
 ## Lane B 상세 — b1 PinVi 결합
 
@@ -496,49 +477,6 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
   lease/retry/dead-letter/replay가 있는 relay와 DB 대조 reconciliation을 추가한다. backfill checksum
   뒤 critical path 밖에서 PinVi 소비를 enable하고 누락·중복·restore epoch 전환을 live로 증명한다.
-
-## Lane A 상세 — T-VN-H07 cross-repo 계약 완결
-
-Map #814 residual은 `259a9ec5`로 landing해 `tasks-done.md`에 보존했다. 남은 PinVi #403은
-재감사 기준 시점 최신 main보다 13 commits 뒤처졌고, 오래된 task 문서 commit을 재생하지 않고
-H07A의 실제 user OpenAPI SHA와 대조한 residual consumer contract만 남긴다.
-
-- [x] T-VN-H07B — **PinVi #403 residual contract 재감사·landing** (PinVi PR #415, #403 대체)
-
-  재감사 결과 #403의 pin 대상(공개 curated 표면)은 PinVi가 **호출하지 않는** 경로였다 —
-  `_CLIENT_PATHS`에 curated 없음, 큐레이션 런타임 표면은 admin detail-snapshot(H07D 소유),
-  producer exact 고정은 H07A 소유. curated pin 전량 제거 후 **PinVi가 실제로 읽는 필드**의
-  typed consumer contract(21 schema)로 대체했다. H07A의 실제 user OpenAPI SHA와 대조해 stale
-  스냅샷(`91b30f40`@`cf1f0bba`, 174 commits 뒤)을 Map main `8880c29b`/`0a7f1684`로 재동기화.
-  경로→컨테이너→item·map value·envelope `meta` 사슬과 `model_validate` 표면의 model 결합까지
-  고정. 상세는 tasks-done 2026-07-28.
-
-- [x] T-VN-H07D — **#815 admin detail-snapshot field-level contract·freshness** (완료 — #815 close)
-  ① Map PR #878(`5c0e0cae`) payload 타입화 + 계약 게이트 · ② PinVi PR #416(`8ea83358`) subset
-  vendor + 소비자 계약 + freshness CI. 상세는 tasks-done 2026-07-28.
-
-  PinVi 런타임이 실제 소비하는 admin detail-snapshot의 plan/item required/type/enum을 Map full
-  OpenAPI와 PinVi vendored snapshot 양쪽에서 고정한다. admin/user snapshot freshness를 CI에서
-  실제 비교해 skip으로 green이 되는 경로를 제거한다.
-
-- [x] T-VN-H29 — **PinVi 통합검색 map-import POI 좌표 null 복구** (PinVi PR #418, 2026-07-29)
-
-  `pinvi apps/api/app/api/v1/search.py::_snapshot_coord`가 `feature_snapshot["coord"]`만 읽는데,
-  Map `CuratedFeatureDetailFeatureSnapshotView`는 `extra="forbid"`이고 `coord` property가 없다
-  (좌표는 **top-level** `lon`/`lat`). 따라서 이 read는 구조적으로 항상 None이고 map-curated import로
-  들어온 POI는 통합 검색에서 좌표가 null이다. 같은 payload를 `services/admin_pois.py::extract_feature_coord`와
-  `services/kasi.py::extract_feature_coordinates`는 top-level에서 정상 해석한다 —
-  `_snapshot_coord`가 같은 추출기를 재사용하도록 고치고 회귀 테스트를 둔다(PinVi 저장소 작업).
-
-- [x] T-VN-H07C — **#812 compatible-pair manifest v5 → 기각(ADR-079)**
-
-  v5 승격을 실제로 구현한 뒤 적대 리뷰 2명이 (1) 추가 탐지력 0 — 제안 필드는
-  `map_source_revision`의 순수 함수인데 그 revision은 attestation이 이미 배포 이미지 OCI
-  라벨까지 결박한다, (2) 실재하는 운영 마이그레이션 막다름 — v5 전환 즉시 rollback이 무력화되고
-  기존 프로덕션 이미지 revision에는 digest 파일 blob이 없어 capture가 불가능하다 —
-  를 실증해 **기각**했다. manifest는 v4를 유지한다. Map per-surface digest manifest
-  (`openapi-sha256.json`)는 **소비자 freshness 용도로 유지**되며 PinVi가 독립 사본과
-  대조한다(H07B/H07D). 근거·교훈은 ADR-079.
 
 ## Wave 2 상세 — 구조 전환
 

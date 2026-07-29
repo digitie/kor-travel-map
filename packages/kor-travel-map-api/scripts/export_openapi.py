@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -43,14 +42,6 @@ OpenApiProfile = Literal["admin", "user"]
 
 API_OPENAPI_PATH = Path("packages/kor-travel-map-api/openapi.json")
 USER_OPENAPI_PATH = Path("packages/kor-travel-map-api/openapi.user.json")
-# T-VN-H07C(#812): per-surface OpenAPI digest manifest — 각 표면 spec 파일의 sha256을 한 곳에
-# 모은다. 소비자(PinVi)가 vendored 스냅샷의 freshness/무결성을 파일 하나로 대조하는 데 쓴다
-# (T-VN-H07B/H07D의 `contract-pin-consistency` 게이트).
-#
-# 주의: 배포 compatible-pair manifest에 이 digest를 핀하는 방안은 **채택하지 않았다**(ADR-079).
-# 그 값은 `map_source_revision`의 순수 함수라 이미 게이트되는 정보를 중복할 뿐이고, manifest
-# 버전을 올리는 대가로 운영 마이그레이션 비용만 발생한다. 근거는 ADR-079 참조.
-OPENAPI_DIGEST_PATH = Path("packages/kor-travel-map-api/openapi-sha256.json")
 
 # ADR-048/T-216g: 현재 pre-1.0 단계의 기계 정본은 ``/v1`` 경로를 in-place로
 # 갱신하는 admin/user spec 2종이다. v1.0.0 GA 이후 breaking change는 ``/v2``와
@@ -427,51 +418,6 @@ def check(output: Path, *, profile: OpenApiProfile = "admin") -> int:
     return 1
 
 
-def _digest_manifest(surfaces: dict[str, Path]) -> str:
-    """표면별 spec 파일의 sha256을 담은 결정적 manifest JSON.
-
-    key는 논리 표면(`admin`/`user`)이라 출력 경로·basename이 같아도 충돌하지 않는다.
-    값은 **저장된 파일 바이트**의 sha256이므로, `--check`가 spec↔app 일치를 먼저 확인한 뒤
-    이 manifest를 검증하면 manifest가 살아 있는 계약을 transitively pin한다.
-    """
-    digests = {
-        name: hashlib.sha256(path.read_bytes()).hexdigest()
-        for name, path in sorted(surfaces.items())
-    }
-    return json.dumps(digests, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-
-
-def export_digest_manifest(manifest_path: Path, surfaces: dict[str, Path]) -> None:
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(_digest_manifest(surfaces), encoding="utf-8")
-
-
-def check_digest_manifest(manifest_path: Path, surfaces: dict[str, Path]) -> int:
-    """저장된 digest manifest가 현재 spec 파일들과 일치하는지 확인한다."""
-    if not manifest_path.exists():
-        print(f"missing: {manifest_path}", file=sys.stderr)
-        print("hint: run without --check to generate first.", file=sys.stderr)
-        return 1
-    expected = _digest_manifest(surfaces)
-    saved = manifest_path.read_bytes()
-    if saved == expected.encode("utf-8"):
-        return 0
-    print(
-        f"OpenAPI digest manifest drift detected in {manifest_path}.\n"
-        "  - Run scripts/export_openapi.py --profile all to regenerate, then commit.",
-        file=sys.stderr,
-    )
-    return 1
-
-
-def _surfaces(args: argparse.Namespace) -> dict[str, Path]:
-    """digest manifest 대상 — 두 표면 모두. profile과 무관하게 같은 집합을 덮는다."""
-    return {
-        "admin": cast(Path, args.output),
-        "user": cast(Path, args.user_output),
-    }
-
-
 def _output_for_profile(args: argparse.Namespace, profile: OpenApiProfile) -> Path:
     if profile == "admin":
         return cast(Path, args.output)
@@ -499,12 +445,6 @@ def main(argv: list[str] | None = None) -> int:
         help="user OpenAPI 저장/비교 대상 경로.",
     )
     parser.add_argument(
-        "--digest-output",
-        type=Path,
-        default=OPENAPI_DIGEST_PATH,
-        help="per-surface OpenAPI digest manifest 경로 (--profile all에서만 처리).",
-    )
-    parser.add_argument(
         "--check",
         action="store_true",
         help="CI 모드 — drift 발견 시 exit 1 (저장하지 않음)",
@@ -514,26 +454,15 @@ def main(argv: list[str] | None = None) -> int:
     profiles: tuple[OpenApiProfile, ...] = (
         ("admin", "user") if args.profile == "all" else (cast(OpenApiProfile, args.profile),)
     )
-    # digest manifest는 두 표면을 함께 덮으므로 `--profile all`에서만 다룬다. CI(openapi.yml)가
-    # `--profile all --check`로 돌기 때문에 별도 CI 단계 없이 같은 명령이 자동으로 게이트한다.
-    manifest_scope = args.profile == "all"
-
     if args.check:
         failed = False
         for profile in profiles:
             failed = bool(check(_output_for_profile(args, profile), profile=profile)) or failed
-        if manifest_scope and not failed:
-            # spec↔app 일치를 확인한 뒤에만 manifest를 검사한다 — spec이 이미 drift면
-            # manifest 불일치는 파생 증상이라 원인 메시지를 가리지 않게 한다.
-            failed = bool(check_digest_manifest(args.digest_output, _surfaces(args))) or failed
         return int(failed)
     for profile in profiles:
         output = _output_for_profile(args, profile)
         export(output, profile=profile)
         print(f"wrote {output}")
-    if manifest_scope:
-        export_digest_manifest(args.digest_output, _surfaces(args))
-        print(f"wrote {args.digest_output}")
     return 0
 
 

@@ -81,6 +81,20 @@
   있어 비교 근거가 못 된다는 점, (b) MOIS는 payload에 bjd가 있으면 reverse를 아예 부르지 않아
   두 축이 동시에 존재하지 않는다는 점, (c) 단건 `ValidationError`가 batch 전체를 죽인다는 점을
   찾아냈다. 셋 다 코드를 읽어야만 알 수 있고 실데이터만으로는 드러나지 않았다.
+## 2026-07-29 (codex) — issue #881 Claude PR #882~#884 감사 수정
+
+**방금**: PR #884의 backend geo public-key query를 없애고 geo trusted proxy principal로
+전환했다. credential은 `SecretStr`로만 보관하고 request URL에는 query가 없다. status·transport
+오류는 원본 httpx request를 chain하지 않는 `GeoRequestError`로 바꾸며, API 중앙 handler와
+admin issues/offline upload/feature-update adapter는 typed 503/502 problem code를 보존한다.
+
+PR #882/#883 감사에서는 PinVi가 읽지 않는 `openapi-sha256.json` 생성·검사를 제거했다.
+freshness 정본은 PinVi가 실제로 수행하는 핀 commit의 spec bytes/subset 직접 비교다.
+`tasks.md`는 완료 H07C/H07D/H21/H29를 제거하고 H27의 OPNsense 운영자 경로를 하나로 합쳤다.
+
+**다음 한 작업**: n150 targeted gate로 이번 감사 수정을 검증하고 원격 checkpoint commit을
+남긴 뒤, T-VN-48 exact revision의 mocked·격리 clone Live 검증과 적대 리뷰 2명을 진행한다.
+
 ## 2026-07-29 (codex) — T-VN-48D 격리 clone Live 증거·실패 지점 복구
 
 **방금**: R1을 지키는 보존 실데이터 clone 전용 trusted runner를 추가했다. root-owned

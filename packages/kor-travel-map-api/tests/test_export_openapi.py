@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import importlib.util
-import json
-from argparse import Namespace
 from pathlib import Path
 from typing import Any
 
@@ -1028,77 +1025,3 @@ def test_public_curation_collection_item_group_pin_required_types_and_enums() ->
         "curations"
     ]["items"]
     assert group_curations == {"$ref": "#/components/schemas/PublicCurationItemView"}
-
-
-# --- T-VN-H07C(#812): per-surface OpenAPI digest manifest ---
-#
-# 배포 compatible-pair(ADR-076 v5)는 이 manifest 파일의 sha256 **하나**만 핀하고, manifest가
-# 각 표면 spec의 sha256을 담아 전체를 transitively pin한다. 아래는 체크인된 manifest가 체크인된
-# spec들과 실제로 일치하는지를 pytest matrix에서도 잡기 위한 방어선이다
-# (`openapi.yml`의 `--profile all --check`가 1차 게이트).
-
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
-
-
-def test_openapi_digest_manifest_matches_checked_in_specs() -> None:
-    module = _load_script_module()
-    root = _repo_root()
-    manifest_path = root / module.OPENAPI_DIGEST_PATH
-    assert manifest_path.is_file(), "digest manifest가 체크인되어 있지 않다"
-
-    saved = json.loads(manifest_path.read_text(encoding="utf-8"))
-    expected = {
-        "admin": hashlib.sha256((root / module.API_OPENAPI_PATH).read_bytes()).hexdigest(),
-        "user": hashlib.sha256((root / module.USER_OPENAPI_PATH).read_bytes()).hexdigest(),
-    }
-    assert saved == expected, (
-        "digest manifest가 체크인된 spec과 다르다 — "
-        "scripts/export_openapi.py --profile all 재실행 후 커밋 필요"
-    )
-
-
-def test_digest_manifest_check_detects_tamper_and_missing(tmp_path: Path) -> None:
-    """manifest 검사가 변조·부재를 실제로 잡는지 확인(비-tautological 보장)."""
-    module = _load_script_module()
-    admin = tmp_path / "openapi.json"
-    user = tmp_path / "openapi.user.json"
-    admin.write_text('{"a": 1}', encoding="utf-8")
-    user.write_text('{"u": 2}', encoding="utf-8")
-    surfaces = {"admin": admin, "user": user}
-    manifest = tmp_path / "openapi-sha256.json"
-
-    assert module.check_digest_manifest(manifest, surfaces) == 1  # 파일 부재
-    module.export_digest_manifest(manifest, surfaces)
-    assert module.check_digest_manifest(manifest, surfaces) == 0  # 정상
-
-    # spec이 바뀌었는데 manifest를 갱신하지 않은 경우
-    user.write_text('{"u": 3}', encoding="utf-8")
-    assert module.check_digest_manifest(manifest, surfaces) == 1
-
-    # manifest만 손댄 경우
-    module.export_digest_manifest(manifest, surfaces)
-    tampered = json.loads(manifest.read_text(encoding="utf-8"))
-    tampered["user"] = "0" * 64
-    manifest.write_text(json.dumps(tampered, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    assert module.check_digest_manifest(manifest, surfaces) == 1
-
-    # canonical serialization은 byte 단위 계약이다. 의미 없는 공백도 manifest 자체
-    # digest를 바꾸므로 허용하지 않는다.
-    module.export_digest_manifest(manifest, surfaces)
-    manifest.write_bytes(b" " + manifest.read_bytes())
-    assert module.check_digest_manifest(manifest, surfaces) == 1
-
-
-def test_digest_surfaces_use_logical_keys_even_when_basenames_collide(
-    tmp_path: Path,
-) -> None:
-    module = _load_script_module()
-    admin = tmp_path / "admin" / "openapi.json"
-    user = tmp_path / "user" / "openapi.json"
-
-    assert module._surfaces(Namespace(output=admin, user_output=user)) == {
-        "admin": admin,
-        "user": user,
-    }

@@ -192,6 +192,25 @@ ledger 테이블·오프라인 기하 감사·타 provider `AdminEvidence` 채�
 **검증**. n150 CI-parity — ruff / mypy --strict(core 117 · dagster 23) / dagster 494 passed +
 1 skipped / 관련 unit 179 passed. 신규 회귀 25건(오탐 재발 방지 · 단계별 탐지 · 정밀도 규칙 ·
 커버리지 집계 · allowlist 불변).
+## 2026-07-29 (codex) — issue #881 Claude PR #882~#884 사후 감사 반영
+
+**결론**: PR #884의 문자열 sanitization만으로는 URL query와 frame-local secret의 생성
+자체를 막지 못했다. backend geo 인증을 public key query에서 trusted proxy header principal로
+clean-cut하고 typed problem code를 중앙·세 경계에서 보존했다. PR #882/#883이 남긴 미사용
+OpenAPI digest와 완료 task 중복도 제거했다.
+
+- geo의 현행 `origin/main` 계약을 로컬 1차 source로 대조했다. Map backend는
+  `X-KTG-Actor: kor-travel-map`, `X-KTG-Roles: source_file_viewer`,
+  `X-KTG-Admin-Proxy-Secret`을 보내고 geo가 trusted peer CIDR+shared secret을 함께 검증한다.
+  브라우저 public key와 backend secret의 env·compose 결선도 분리했다.
+- `GeoAuthNotConfiguredError`(503/`GEO_AUTH_NOT_CONFIGURED`)와
+  `GeoRequestError`(502/`PROVIDER_ERROR`)를 중앙 problem+json handler에 등록했다.
+  admin issues, offline upload, feature-update adapter에서 generic status code로 소실되지
+  않는 회귀를 각각 고정했다.
+- PinVi `contract-pin-consistency`는 Map 핀 commit의 spec bytes/subset을 직접 비교하고
+  `openapi-sha256.json`을 읽지 않는다. 소비자 없는 파생 manifest 생성·검사를 제거하고
+  `tasks.md`를 열린 작업만 남도록 정리했다.
+
 ## 2026-07-29 (codex) — T-VN-48D durable clone Live·중단 지점 복구
 
 **결론**: production DB를 건드리지 않는 보존 실데이터 clone 전용 trusted runner로

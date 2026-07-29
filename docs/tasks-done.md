@@ -43,11 +43,29 @@
     materialize가 ledger 전량을 재생한다. 규칙만 고치면 자동 회복된다.
   - 검증: n150 CI-parity — ruff / mypy --strict(core 117·dagster 23) / dagster 494 passed +
     1 skipped / 관련 unit 179 passed. 신규 회귀 25건.
+## 2026-07-29 — issue #881: Claude Code PR #882~#884 사후 감사
+
+- [x] **PR #884 geo 인증·오류 계약 재감사** — backend가 VWorld public key를 URL query로
+  계속 전송해 httpx INFO URL과 traceback frame에서 비밀이 노출될 수 있던 구조를 제거했다.
+  Map API/Dagster/CLI는 geo trusted proxy 계약
+  (`X-KTG-Actor`/`X-KTG-Roles`/`X-KTG-Admin-Proxy-Secret`)만 사용하며 credential은
+  `SecretStr`로 보관한다. transport/status 원본 예외는 연결하지 않는다.
+- [x] **typed problem code 보존** — `GeoAuthNotConfiguredError`와 `GeoRequestError`가
+  `/admin/issues`, offline-upload validation, feature-update HTTP adapter를 지나도 각각
+  `GEO_AUTH_NOT_CONFIGURED`(503), `PROVIDER_ERROR`(502)로 유지되게 중앙 handler와 경계별
+  problem+json 회귀 테스트를 추가했다.
+- [x] **PR #882/#883 문서·계약 재감사** — PinVi가 읽지 않는
+  `openapi-sha256.json`은 탐지력 없는 파생 산출물이므로 export/test/file을 제거했다.
+  소비자 freshness는 실제 핀 commit의 spec/subset 비교만 정본으로 유지한다.
+  완료된 H07C/H07D/H21/H29는 active backlog에서 제거하고 H27은 OPNsense 운영자 작업과
+  quiet 2주기 검증 한 경로로만 정리했다.
 
 ## 2026-07-29 — Lane A a1 T-VN-H21: geo 인증 결선 검증·비밀 유출 차단
 
 - [x] **T-VN-H21** — kor-travel-geo live 인증 결선을 검증 가능하게 만들고, 그 과정에서 드러난
   API key 유출 경로를 막았다. dedup 5건은 **브랜치 코드로** 실서비스에서 재통과(5 passed).
+  후속 issue #881 감사에서 URL query 자체가 남긴 2차 유출 경로를 확인해 위 trusted proxy
+  header 계약으로 교체했다. 아래는 PR #884 최초 landing 당시의 검증 이력이다.
   - 열린 질문이었던 "인증 뒤 runtime drift"는 **없음**으로 종결: 실 geo에 대해 reverse
     (status=OK, cand=11)·geocode(status=OK, conf=1.000) 응답이 기존 Pydantic 모델로 무손실
     파싱됐고, 배포된 Map api 컨테이너의 key가 geo 컨테이너 `KTG_VWORLD_API_KEY`와 동일함을 확인했다.
