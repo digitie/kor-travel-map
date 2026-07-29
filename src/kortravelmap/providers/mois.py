@@ -57,6 +57,7 @@ from kortravelmap.core.ids import (
 from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.dto import (
     Address,
+    AdminEvidence,
     Coordinate,
     Feature,
     FeatureBundle,
@@ -675,8 +676,16 @@ async def license_record_to_bundle(
     # bjd_code는 feature_id 전에 확정 (ADR-009). legal_dong_code 1차, 없으면 역지오코딩.
     bjd_code = normalize_bjd_code(record.legal_dong_code)
     geo: Address | None = None
+    # T-VN-H30C: obs 축은 좌표 reverse 결과만 실어야 하므로 출처를 분리해 둔다.
+    reverse_geo: Address | None = None
+    # 실제로 reverse를 **불렀는지**를 기록한다. 입력이 갖춰졌는지가 아니다 — MOIS는
+    # payload에 bjd가 있으면 아래 분기를 타지 않으므로, 입력 기준으로 판정하면
+    # 그 흔한 경우 전부가 "reverse 시도했는데 실패"로 잘못 보고된다.
+    reverse_called = False
     if bjd_code is None and coord is not None and reverse_geocoder is not None:
+        reverse_called = True
         geo = await reverse_geocoder(coord)
+        reverse_geo = geo
         bjd_code = geo.bjd_code if geo is not None else None
     if bjd_code is None and address_resolver is not None:
         resolved = await address_resolver(
@@ -768,6 +777,23 @@ async def license_record_to_bundle(
         feature=feature,
         source_record=source_record,
         source_link=source_link,
+        # T-VN-H30C: MOIS는 payload에 legal_dong_code가 있으면 reverse를 **호출하지 않는다**
+        # (위 분기). 따라서 obs 축이 없어 staleness 대조는 성립하지 않는다 — 그 사실을
+        # ``claim_only``로 집계에 드러내는 것이 목적이다. ``unarmed``(미계측)와 구분된다.
+        # reverse를 강제로 부르지는 않는다: 977k 레코드에 대한 호출은 비용이 다른 문제다.
+        admin_evidence=AdminEvidence(
+            # obs 축은 **좌표 reverse** 결과만이다. 위 분기의 ``geo``는 address_resolver
+            # (provider 주소 문자열의 정지오코딩)로도 채워지므로 그대로 쓰면 obs가
+            # claim_text와 같은 출처가 되어 자기 자신과 비교하게 된다. reverse 경로에서
+            # 온 값만 싣는다.
+            obs_code=reverse_geo.bjd_code if reverse_geo is not None else None,
+            reverse_attempted=reverse_called,
+            claim_code=normalize_bjd_code(record.legal_dong_code),
+            claim_kind=(
+                "bjd" if normalize_bjd_code(record.legal_dong_code) else None
+            ),
+            claim_text=record.road_address or record.lot_address or None,
+        ),
     )
 
 

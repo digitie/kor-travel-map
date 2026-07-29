@@ -72,6 +72,13 @@ class _Client:
             cursor=self.sync_cursor,
         )
 
+    async def record_address_validation_findings(
+        self, findings: object, **kwargs: object
+    ) -> int:
+        """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
+        self.recorded_findings = list(findings)  # type: ignore[arg-type]
+        return len(self.recorded_findings)
+
 
 async def test_price_asset_rejects_whole_run_zero_without_sync_success() -> None:
     client = _Client()

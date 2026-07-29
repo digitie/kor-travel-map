@@ -184,12 +184,19 @@ kor-travel-geo REST v2 적용 중 발생한 주소/좌표 이슈를 admin UI에�
 
 | issue_type | 의미 |
 |------------|------|
-| `provider_address_mismatch` | provider 주소와 좌표 기준 kor-travel-geo 주소가 다른 장소로 보임 |
-| `provider_address_partial_match` | 시군구/읍면동은 맞지만 상세 주소가 불완전하거나 다름 |
+| ~~`provider_address_mismatch`~~ | **발행 중단 (T-VN-H28B)** — 이름 substring 축은 실측 탐지력 0. 기존 행은 보존 |
+| ~~`provider_address_partial_match`~~ | **발행 중단 (T-VN-H28B)** |
+| `provider_address_region_disagreement` | provider 주소 문자열이 지목하는 행정구역이 좌표 reverse 후보 어디에도 없음 |
+| `admin_code_stale_{sido,sigungu,emd}` | payload 행정코드가 좌표 reverse 결과와 불일치 — **위치 오류가 아니라 producer 캐시 staleness** |
+| `reverse_geocode_unavailable` | 좌표 reverse 실패했으나 provider 행정코드로 적재됨 — 좌표 정합성 미확인 |
 | `geocode_failed` | provider 주소 문자열로 좌표를 찾지 못함 |
 | `reverse_geocode_failed` | 좌표로 주소를 찾지 못함 |
 | `missing_address` | provider/kor-travel-geo 양쪽 주소 없음 |
 | `missing_bjd_code` | kor-travel-geo 결과에 법정동코드 없음 |
+
+> `issue_type`에는 allowlist·enum이 없다(`ops_repo`는 정확 일치 필터만, API는 free-form
+> `str`). 새 producer가 code를 추가하면 별도 조치 없이 `/admin/issues`에 노출된다.
+> 주소 검증 code의 payload·dedupe 규약은 `data-model.md` §9.5 참조 (T-VN-H30A).
 
 #### 필수 엔드포인트
 

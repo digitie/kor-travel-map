@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
@@ -23,8 +23,19 @@ class _Feature:
 
 
 @dataclass(frozen=True)
+class _SourceRecord:
+    """T-VN-H30A: dedupe_key는 payload hash가 아닌 안정적 entity id에 걸린다."""
+
+    source_record_key: str
+    source_entity_id: str
+
+
+@dataclass(frozen=True)
 class _Bundle:
     feature: _Feature
+    source_record: _SourceRecord = field(
+        default_factory=lambda: _SourceRecord("sr_x", "entity-x")
+    )
 
 
 class _Context:
@@ -47,6 +58,19 @@ class _Client:
             bundles_total=len(bundles),
             features_inserted=len(bundles),
         )
+
+    async def record_address_validation_findings(
+        self, findings: object, **kwargs: object
+    ) -> int:
+        """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다).
+
+        ``kwargs``도 보관한다 — ``provider``/``dataset_key``는 auto-resolve sweep의
+        ``WHERE``절이라, 잘못된 값이 넘어가면 **다른 provider의 열린 큐를 닫는다**.
+        버리면 그 배선 오류를 테스트가 못 잡는다.
+        """
+        self.recorded_findings = list(findings)  # type: ignore[arg-type]
+        self.recorded_kwargs = dict(kwargs)
+        return len(self.recorded_findings)
 
 
 async def test_load_feature_bundles_for_dagster_chunks_db_load(
@@ -310,3 +334,198 @@ def test_droppable_codes_are_explicit_and_minimal() -> None:
         "admin_code_stale_emd",
     ):
         assert code not in DROPPABLE_ISSUE_CODES
+
+
+def _issue(code: str, feature_id: str, severity: str = "warning") -> FeatureAddressIssue:
+    return FeatureAddressIssue(
+        feature_id=feature_id,
+        source_record_key=f"sr_{feature_id}",
+        code=code,
+        severity=severity,
+        message="msg",
+        provider_address="어딘가",
+        bjd_code="1111017700",
+        sigungu_code="11110",
+    )
+
+
+def test_findings_link_fk_columns_only_for_loaded_features() -> None:
+    """FK 안전성 (T-VN-H30A).
+
+    ``ops.data_integrity_violations``의 ``feature_id``/``source_record_key``는 FK다.
+    주소 검증은 적재 **전**에 돌아서 drop된 행은 두 대상이 DB에 없으므로, 그대로 넘기면
+    기록 자체가 FK 위반으로 실패한다. 적재된 대상만 ``linked``여야 한다.
+    """
+    from kortravelmap.dagster.etl import _address_validation_findings
+
+    summary = FeatureAddressValidationSummary(
+        total=2,
+        issue_count=2,
+        error_count=1,
+        warning_count=1,
+        issues=(
+            _issue("admin_code_stale_sido", "feature-loaded"),
+            _issue("missing_address", "feature-dropped", severity="error"),
+        ),
+    )
+    findings = _address_validation_findings(
+        summary,
+        provider="demo",
+        dataset_key="places",
+        loaded_feature_ids={"feature-loaded"},
+        dropped_feature_ids=frozenset({"feature-dropped"}),
+    )
+    by_fid = {f.payload["feature_id"]: f for f in findings}
+
+    loaded = by_fid["feature-loaded"]
+    assert loaded.linked is True
+    assert loaded.feature_id == "feature-loaded"
+
+    dropped = by_fid["feature-dropped"]
+    assert dropped.linked is False  # ← FK 대상이 DB에 없다
+    assert dropped.payload["dropped"] is True
+    # id 자체는 잃지 않는다 — payload로 나른다.
+    assert dropped.payload["source_record_key"] == "sr_feature-dropped"
+
+
+def test_finding_dedupe_key_is_stable_and_discriminating() -> None:
+    """같은 레코드·같은 code는 run을 반복해도 한 행으로 접혀야 한다 (T-VN-H30A)."""
+    from kortravelmap.dagster.etl import _address_validation_findings
+
+    def build(code: str, feature_id: str, dataset: str = "places") -> str:
+        summary = FeatureAddressValidationSummary(
+            total=1,
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            issues=(_issue(code, feature_id),),
+        )
+        return _address_validation_findings(
+            summary,
+            provider="demo",
+            dataset_key=dataset,
+            loaded_feature_ids={feature_id},
+            dropped_feature_ids=frozenset(),
+        )[0].dedupe_key
+
+    base = build("admin_code_stale_sido", "f1")
+    assert base == build("admin_code_stale_sido", "f1")  # 재실행 시 동일
+    assert base != build("admin_code_stale_sigungu", "f1")  # code가 다르면 별건
+    assert base != build("admin_code_stale_sido", "f2")  # 레코드가 다르면 별건
+    assert base != build("admin_code_stale_sido", "f1", dataset="other")  # dataset 분리
+
+
+async def test_findings_are_recorded_after_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """기록은 적재 **후**에 일어나고 건수가 metadata로 노출된다 (T-VN-H30A)."""
+    bundles = [_Bundle(_Feature("feature-0"))]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            issues=(_issue("admin_code_stale_sido", "feature-0"),),
+        ),
+    )
+
+    await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+    )
+
+    assert context.metadata[-1]["address_validation_findings_recorded"] == 1
+    assert "address_validation_findings_unrecorded" not in context.metadata[-1]
+    # 적재가 먼저 일어났어야 linked가 성립한다.
+    assert client.chunks == [("feature-0",)]
+    assert client.recorded_findings[0].linked is True
+
+
+def test_dedupe_key_uses_stable_entity_id_not_payload_hash() -> None:
+    """dedupe_key는 payload가 바뀌어도 같아야 한다 (T-VN-H30A 핵심 불변식).
+
+    ``source_record_key``는 ``raw_payload_hash`` 파생이라 export의 무관한 필드 하나만
+    바뀌어도 값이 달라진다. 그 키로 dedupe하면 같은 문제가 export마다 새 열린 이슈로
+    쌓인다(MOIS 977k 규모에서 큐 단조 증가). 안정적인 ``source_entity_id``를 써야 한다.
+
+    이 테스트가 없으면 ``_entity_ids()``가 빈 dict를 돌려주는 어떤 회귀에도
+    ``.get(k, k)`` fallback이 조용히 옛 동작으로 되돌아간다.
+    """
+    from kortravelmap.dagster.etl import _address_validation_findings
+
+    def key_for(source_record_key: str, entity_id: str) -> str:
+        summary = FeatureAddressValidationSummary(
+            total=1,
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            issues=(
+                FeatureAddressIssue(
+                    feature_id="f1",
+                    source_record_key=source_record_key,
+                    code="admin_code_stale_sido",
+                    severity="warning",
+                    message="m",
+                ),
+            ),
+        )
+        return _address_validation_findings(
+            summary,
+            provider="demo",
+            dataset_key="places",
+            loaded_feature_ids={"f1"},
+            dropped_feature_ids=frozenset(),
+            entity_ids={source_record_key: entity_id},
+        )[0].dedupe_key
+
+    # payload가 바뀌어 source_record_key가 달라져도 같은 entity면 같은 키다.
+    assert key_for("sr_hash_v1", "E1") == key_for("sr_hash_v2", "E1")
+    # 다른 entity는 반드시 갈라진다.
+    assert key_for("sr_hash_v1", "E1") != key_for("sr_hash_v1", "E2")
+    # 키에 실린 값이 entity id다 — record key가 새면 안정성이 깨진 것이다.
+    assert key_for("sr_hash_v1", "E1").endswith(":E1")
+    assert "sr_hash_v1" not in key_for("sr_hash_v1", "E1")
+
+
+async def test_sweep_scope_arguments_are_wired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sweep의 blast radius를 정하는 인자가 실제로 전달되는지 고정한다 (T-VN-H30A).
+
+    ``provider``/``dataset_key``는 auto-resolve sweep의 ``WHERE``절이다. 잘못 넘어가면
+    한 run이 **다른 provider의 열린 큐를 닫는다**. double이 kwargs를 버리면 이 배선 오류를
+    아무 테스트도 잡지 못한다.
+    """
+    bundles = [_Bundle(_Feature("feature-0"))]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            issues=(_issue("admin_code_stale_sido", "feature-0"),),
+        ),
+    )
+
+    await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+    )
+
+    kwargs = client.recorded_kwargs
+    assert kwargs["provider"] == "demo"
+    assert kwargs["dataset_key"] == "places"
+    # sweep 범위는 주소 검증이 소유하는 code여야 한다 — 비면 큐가 영영 안 닫힌다.

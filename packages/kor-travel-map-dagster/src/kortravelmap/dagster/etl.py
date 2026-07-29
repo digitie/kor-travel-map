@@ -6,6 +6,8 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from kortravelmap.client import AddressValidationFinding
+
 from dagster import Failure
 from kortravelmap.dagster.validation import (
     FeatureAddressValidationSummary,
@@ -106,14 +108,37 @@ async def load_feature_bundles_for_dagster(
 
     mode = _normalize_address_validation_mode(strict_address)
     validation = validate_feature_bundles_address(bundles)
+    # drop 모드가 bundles를 재할당하기 **전에** 잡는다 — 그러지 않으면 drop된 레코드의
+    # source_entity_id를 잃고 dedupe_key가 불안정한 source_record_key로 되돌아간다.
+    entity_ids = _entity_ids(bundles)
     # T-VN-H28B: severity가 아니라 code allowlist(DROPPABLE_ISSUE_CODES)가 손실을 정한다.
     # 새 검증이 error를 내도 allowlist를 명시적으로 고치기 전에는 drop/실패가 불가능하다.
     if mode == "strict" and validation.has_blocking_errors:
-        _add_output_metadata(context, validation.as_metadata())
+        # T-VN-H30A: **던지기 전에** 기록한다. strict는 배포 기본값이고, 여기서 죽는 run이
+        # 바로 증거가 가장 필요한 run이다. 적재가 없으므로 FK 대상도 없다 — 전부 unlinked로
+        # 남기고 id는 payload로만 나른다.
+        failed_findings = _address_validation_findings(
+            validation,
+            provider=provider,
+            dataset_key=dataset_key,
+            loaded_feature_ids=frozenset(),
+            dropped_feature_ids=frozenset(
+                issue.feature_id for issue in validation.blocking_issues
+            ),
+            entity_ids=entity_ids,
+        )
+        recorded = await client.record_address_validation_findings(
+            failed_findings,
+            provider=provider,
+            dataset_key=dataset_key,
+        )
+        failure_metadata = dict(validation.as_metadata())
+        failure_metadata["address_validation_findings_recorded"] = recorded
+        _add_output_metadata(context, failure_metadata)
         codes = ", ".join(issue.code for issue in validation.blocking_issues)
         raise Failure(
             description=f"Feature 주소/좌표 검증 실패: {codes}",
-            metadata=validation.as_metadata(),
+            metadata=failure_metadata,
         )
 
     dropped_feature_ids: tuple[str, ...] = ()
@@ -157,8 +182,82 @@ async def load_feature_bundles_for_dagster(
         # silent cap 금지 — drop 모드에서 격리한 row를 메타데이터로 노출한다.
         metadata["address_validation_dropped_count"] = len(dropped_feature_ids)
         metadata["address_validation_dropped_feature_ids"] = list(dropped_feature_ids)
+
+    # T-VN-H30A: run metadata는 run이 사라지면 함께 사라진다. 검증 결과를
+    # ops.data_integrity_violations에 durable하게 남겨 /admin/issues에서 보이게 한다.
+    # **적재 후에** 기록한다 — feature_id/source_record_key가 FK라 적재 전에는 대상이 없다.
+    loaded_ids = {bundle.feature.feature_id for bundle in bundles}
+    findings = _address_validation_findings(
+        validation,
+        provider=provider,
+        dataset_key=dataset_key,
+        loaded_feature_ids=loaded_ids,
+        dropped_feature_ids=frozenset(dropped_feature_ids),
+        entity_ids=entity_ids,
+    )
+    recorded = await client.record_address_validation_findings(
+        findings,
+        provider=provider,
+        dataset_key=dataset_key,
+    )
+    metadata["address_validation_findings_recorded"] = recorded
+    if findings and recorded != len(findings):
+        # 기록 실패를 조용히 넘기지 않는다 — 관측 경로가 죽은 것도 관측 대상이다.
+        metadata["address_validation_findings_unrecorded"] = len(findings) - recorded
+
     _add_output_metadata(context, metadata)
     return result
+
+
+def _address_validation_findings(
+    validation: FeatureAddressValidationSummary,
+    *,
+    provider: str,
+    dataset_key: str,
+    loaded_feature_ids: frozenset[str] | set[str],
+    dropped_feature_ids: frozenset[str],
+    entity_ids: Mapping[str, str] | None = None,
+) -> list[AddressValidationFinding]:
+    """검증 issue → durable finding (T-VN-H30A).
+
+    ``dedupe_key``는 (provider, dataset_key, code, **source_entity_id**)로 만든다.
+
+    ``source_record_key``를 쓰면 안 된다 — 그 키는 ``raw_payload_hash``에서 파생되므로
+    (``core.ids.make_source_record_key``) provider export에서 무관한 필드 하나만 바뀌어도
+    새 key가 되고, 같은 문제가 **매 export마다 새 열린 이슈**로 쌓인다. MOIS 규모(977k)에서는
+    큐가 단조 증가한다. ``source_entity_id``는 payload 변경과 무관하게 안정적이다.
+    """
+    entity_ids = entity_ids or {}
+    findings: list[AddressValidationFinding] = []
+    for issue in validation.issues:
+        linked = issue.feature_id in loaded_feature_ids
+        # entity id를 못 찾으면 record key로 물러선다(안정성은 떨어지지만 키를 잃지는 않는다).
+        entity_id = entity_ids.get(issue.source_record_key, issue.source_record_key)
+        findings.append(
+            AddressValidationFinding(
+                dedupe_key=(
+                    f"address_validation:{provider}:{dataset_key}:"
+                    f"{issue.code}:{entity_id}"
+                ),
+                violation_type=issue.code,
+                severity=issue.severity,
+                message=issue.message,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_record_key=issue.source_record_key,
+                feature_id=issue.feature_id,
+                linked=linked,
+                payload={
+                    "feature_id": issue.feature_id,
+                    "source_record_key": issue.source_record_key,
+                    "provider_address": issue.provider_address,
+                    "bjd_code": issue.bjd_code,
+                    "sigungu_code": issue.sigungu_code,
+                    "dropped": issue.feature_id in dropped_feature_ids,
+                },
+            )
+        )
+    return findings
 
 
 def _merge_validation_summaries(
@@ -187,3 +286,29 @@ def _add_output_metadata(
     except Exception as exc:
         if exc.__class__.__name__ != "DagsterInvalidPropertyError":
             raise
+
+
+def _entity_ids(bundles: Sequence[FeatureBundle]) -> dict[str, str]:
+    """``source_record_key`` → ``source_entity_id`` (dedupe_key 안정화용, T-VN-H30A)."""
+    return {
+        bundle.source_record.source_record_key: bundle.source_record.source_entity_id
+        for bundle in bundles
+    }
+
+
+_ADDRESS_VALIDATION_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "reverse_geocode_failed",
+        "reverse_geocode_unavailable",
+        "missing_address",
+        "provider_address_region_disagreement",
+        "admin_code_stale_sido",
+        "admin_code_stale_sigungu",
+        "admin_code_stale_emd",
+    }
+)
+"""주소/좌표 검증이 **소유하는** issue code 전체 (T-VN-H30A).
+
+자동 close(sweep)를 붙일 때 그 범위가 될 집합이다. 현재는 sweep을 달지 않았다 —
+`T-VN-H32` 참조. 새 검증 code를 추가하면 여기에도 넣는다.
+"""

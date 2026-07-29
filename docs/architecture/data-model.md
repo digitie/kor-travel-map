@@ -1324,6 +1324,10 @@ CREATE INDEX idx_violations_type_status ON ops.data_integrity_violations (violat
 CREATE INDEX idx_violations_feature     ON ops.data_integrity_violations (feature_id) WHERE feature_id IS NOT NULL;
 CREATE INDEX idx_violations_source_record ON ops.data_integrity_violations (source_record_key) WHERE source_record_key IS NOT NULL;
 CREATE INDEX idx_violations_detected_brin ON ops.data_integrity_violations USING BRIN (detected_at);
+-- T-VN-H30A (migration 0067): 열린 이슈 한정 dedupe. ON CONFLICT 추론 대상.
+CREATE UNIQUE INDEX uq_violations_open_dedupe_key
+    ON ops.data_integrity_violations ((payload ->> 'dedupe_key'))
+    WHERE status IN ('open', 'acknowledged') AND payload ? 'dedupe_key';
 ```
 
 주소/좌표 정합성 위반은 다음 `violation_type`을 우선 지원한다.
@@ -1332,11 +1336,33 @@ CREATE INDEX idx_violations_detected_brin ON ops.data_integrity_violations USING
 |----------------|-----------|-------------------|
 | ~~`provider_address_mismatch`~~ | **발행 중단 (T-VN-H28B, 2026-07-29)** — 이름 substring 축은 실측 탐지력 0으로 확인돼 제거. 기존 행은 보존한다 | — |
 | ~~`provider_address_partial_match`~~ | **발행 중단 (T-VN-H28B)** | — |
-| `admin_code_stale_{sido,sigungu,emd}` | provider 선언 행정코드와 좌표 reverse 행정코드가 해당 단계에서 불일치 | `provider_address`, `bjd_code`, `sigungu_code`, `source_record_key` |
+| `admin_code_stale_{sido,sigungu,emd}` | provider payload 행정코드와 좌표 reverse 행정코드가 해당 단계에서 불일치. **위치 검증이 아니라 producer 캐시 staleness 검출**이다 (T-VN-H28B) | 공통 payload(아래) |
+| `provider_address_region_disagreement` | provider 주소 문자열이 지목하는 행정구역이 좌표 reverse 후보 어디에도 없음 (T-VN-H28B) | 공통 payload |
+| `reverse_geocode_unavailable` | 좌표 reverse가 결과를 못 냈지만 provider 행정코드로 적재 가능 — 좌표 정합성 **미확인** 표시. drop 사유가 아니다 (T-VN-H30A) | 공통 payload |
 | `geocode_failed` | provider 주소 문자열로 `POST /v2/geocode` 후보를 얻지 못함 | `provider_address`, `provider_fields`, `error` |
-| `reverse_geocode_failed` | 좌표로 `POST /v2/reverse` 주소를 얻지 못함 | `coord`, `error` |
-| `missing_address` | provider 주소도 kor-travel-geo 주소도 없음 | `provider_fields`, `coord` |
+| `reverse_geocode_failed` | 좌표는 있는데 어떤 출처로도 법정동코드를 얻지 못함 | 공통 payload |
+| `missing_address` | provider 주소도 kor-travel-geo 주소도 없음 | 공통 payload |
 | `missing_bjd_code` | kor-travel-geo 결과에 10자리 법정동코드가 없음 | `kor_travel_geo_address`, `coord` |
+
+> **주소 검증 공통 payload + dedupe (T-VN-H30A, 2026-07-29)**
+>
+> `dagster.etl`이 쓰는 주소/좌표 검증 finding은 공통 payload를 갖는다:
+> `feature_id`, `source_record_key`, `provider_address`, `bjd_code`, `sigungu_code`,
+> `dropped`(적재 전 격리 여부), 그리고 dedupe 메타 `dedupe_key`, `occurrence_count`,
+> `last_seen_at`(UTC).
+>
+> - `dedupe_key` = `address_validation:{provider}:{dataset_key}:{code}:{source_entity_id}`.
+>   **`source_record_key`를 쓰지 않는다** — 그 키는 `raw_payload_hash` 파생이라 export의
+>   무관한 필드 변경만으로 새 열린 이슈가 생겨 큐가 단조 증가한다.
+> - 부분 unique index **`uq_violations_open_dedupe_key`**(migration `0067`)가
+>   `(payload->>'dedupe_key')`에 걸려 있고 술어는
+>   `status IN ('open','acknowledged') AND payload ? 'dedupe_key'`다. 열린 이슈만 접히므로
+>   resolved/ignored 이력은 보존되고, 재발하면 새 행이 생긴다.
+> - 매 run 끝에 **자동 resolve sweep**이 돈다 — 이번 run이 더는 보고하지 않는 `open`
+>   finding을 닫는다. 범위는 주소 검증이 소유하는 code(`etl._ADDRESS_VALIDATION_CODES`)와
+>   해당 provider/dataset에 한정되며, 운영자가 손댄 `acknowledged`는 건드리지 않는다.
+> - `feature_id`/`source_record_key` **컬럼**은 FK이므로 적재된 대상에만 채운다. 적재 전
+>   단계에서 drop된 행은 두 값을 payload로만 나른다.
 
 > **producer 상태(F-02 구현, 2026-06-16)**: `reverse_geocode_failed`는
 > `validate_feature_bundle_address`가 **좌표-있음+bjd-없음**(reverse가 bjd를 못 냄)에서

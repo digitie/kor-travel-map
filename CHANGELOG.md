@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### 주소 검증 결과 durable 기록 (2026-07-29, T-VN-H30A/B/C)
+
+- **OBSERVABILITY**: 주소/좌표 검증 결과가 `ops.data_integrity_violations`에 남아
+  **run이 사라져도 증거가 보존되고 `/admin/issues`에서 조회된다**. 이전에는 Dagster run
+  metadata에만 있었다. 격리 clone 실증: finding 106건 기록, 재실행에도 106 유지.
+- **DATABASE**: migration `0067_integrity_dedupe_key` — `payload->>'dedupe_key'`에 부분 unique
+  index(열린 이슈 한정). 같은 레코드의 같은 문제는 run을 반복해도 한 행으로 접히고
+  `occurrence_count`/`last_seen_at`만 올라간다. resolved/ignored로 닫힌 이슈는 제약 밖이라
+  이력이 남고, 재발하면 새 행이 생긴다.
+- **API**: `AsyncKorTravelMapClient.record_address_validation_findings()` 추가.
+  `feature_id`/`source_record_key`는 FK이므로 **적재된 대상에만** 연결하고, 적재 전 단계에서
+  drop된 행은 id를 payload로만 나른다. 기록 실패는 적재 결과를 되돌리지 않으며 미기록 건수가
+  metadata(`address_validation_findings_unrecorded`)로 드러난다.
+- **OBSERVABILITY**: MOIS provider가 `AdminEvidence`를 채운다. MOIS는 payload에 법정동코드가
+  있으면 역지오코딩을 호출하지 않아 staleness 대조가 성립하지 않는데, 그 사실이 `claim_only`로
+  집계돼 `unarmed`(미계측)와 구분된다.
+
 ### 주소 검증을 행정코드 교차검증으로 교체 (2026-07-29, T-VN-H28A/B, #673)
 
 - **FIXED**: provider 후보가 주소 문자열 때문에 영구 미적재되던 문제를 해결했다. 기존 규칙은

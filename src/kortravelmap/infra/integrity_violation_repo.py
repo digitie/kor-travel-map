@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Final
 from sqlalchemy import text
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,7 @@ __all__ = [
     "get_data_integrity_violation",
     "list_data_integrity_violations",
     "set_data_integrity_violation_status",
+    "sync_integrity_findings",
 ]
 
 _SEVERITIES: Final[frozenset[str]] = frozenset(
@@ -307,3 +308,101 @@ async def list_data_integrity_violations(
         )
     ).all()
     return tuple(_row_to_violation(row) for row in rows)
+
+
+_UPSERT_FINDINGS_BATCH_SQL: Final[str] = """
+INSERT INTO ops.data_integrity_violations (
+    provider, dataset_key, source_record_key, feature_id, violation_type,
+    severity, message, payload
+)
+SELECT * FROM unnest(
+    CAST(:providers AS text[]),
+    CAST(:datasets AS text[]),
+    CAST(:source_record_keys AS text[]),
+    CAST(:feature_ids AS text[]),
+    CAST(:violation_types AS text[]),
+    CAST(:severities AS text[]),
+    CAST(:messages AS text[]),
+    CAST(:payloads AS jsonb[])
+)
+ON CONFLICT ((payload ->> 'dedupe_key'))
+WHERE status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'
+DO UPDATE SET
+    message = EXCLUDED.message,
+    severity = EXCLUDED.severity,
+    payload = ops.data_integrity_violations.payload
+        || jsonb_strip_nulls(EXCLUDED.payload)
+        || jsonb_build_object(
+            'occurrence_count',
+            COALESCE(
+                (ops.data_integrity_violations.payload ->> 'occurrence_count')::bigint,
+                1
+            ) + 1,
+            'last_seen_at', to_jsonb(now() AT TIME ZONE 'UTC')
+        )
+"""
+
+
+
+async def sync_integrity_findings(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    findings: Sequence[Mapping[str, Any]],
+) -> int:
+    """finding 집합을 **단일 statement로** 기록한다 (T-VN-H30A). commit은 호출자 책임.
+
+    반환: upsert한 건수.
+
+    왜 batch인가 — ``ops.data_integrity_violations``에는 statement 단위 트리거
+    (``trg_data_integrity_violations_ops_live_revision``)가 걸려 있어 statement마다
+    ``ops_live`` revision 단일 행을 갱신한다. finding 하나당 INSERT를 돌리면 그 hot row에
+    배타 락을 N번 잡고 트랜잭션 끝까지 쥐게 되어, ``/admin/issues`` 쓰기를 막고 동시 run을
+    직렬화하며 admin PATCH와 데드락까지 만든다. 전체를 한 statement로 접으면 트리거는
+    1회만 발화한다.
+
+    **자동 close(sweep)는 일부러 없다.** 1차 설계에는 "이번 run이 보고하지 않는 finding을
+    닫는" sweep이 있었는데 적대 리뷰가 실측으로 세 가지를 재현했다.
+
+    - ``_load()``는 provider에 따라 **배치마다** 호출된다(MOIS는 1000건 단위로 ~977회).
+      배치 단위 sweep은 "이 배치에 없는 것"을 닫으므로 한 run이 자기 finding의 대부분을
+      스스로 resolved 처리한다.
+    - sweep이 행을 부분 unique index 밖으로 밀어내므로 다음 run의 INSERT가 충돌하지 않고
+      **새 행**을 만든다 — 막으려던 단조 증가를 오히려 재생산한다.
+    - ``bundles=[]``인 ``_load()``는 OpiNet 일일 스킵·MOIS 무레코드 fallback의 제어 흐름
+      sentinel이라, 빈 finding 집합이 큐 전체를 닫는다.
+
+    그래서 지금은 "닫히지 않는다"를 알려진 한계로 두고, run marker(적재 run id/시각을
+    payload에 남기고 그보다 오래된 것만 닫기) 기반 재설계를 ``T-VN-H32``로 분리했다.
+    """
+    for finding in findings:
+        # batch 경로에도 같은 검증을 건다. 없으면 잘못된 severity가 DB CHECK까지 가서
+        # unnest statement 전체를 실패시키고, 상위의 광범위 except가 삼켜
+        # **그 run의 finding 전부**를 잃는다.
+        _validate_violation(
+            violation_type=str(finding["violation_type"]),
+            severity=str(finding["severity"]),
+            message=str(finding["message"]),
+        )
+
+    upserted = 0
+    if findings:
+        await session.execute(
+            text(_UPSERT_FINDINGS_BATCH_SQL),
+            {
+                "providers": [f.get("provider") for f in findings],
+                "datasets": [f.get("dataset_key") for f in findings],
+                "source_record_keys": [f.get("source_record_key") for f in findings],
+                "feature_ids": [f.get("feature_id") for f in findings],
+                "violation_types": [f["violation_type"] for f in findings],
+                "severities": [f["severity"] for f in findings],
+                "messages": [f["message"] for f in findings],
+                "payloads": [
+                    json.dumps(f["payload"], ensure_ascii=False) for f in findings
+                ],
+            },
+        )
+        upserted = len(findings)
+
+    return upserted

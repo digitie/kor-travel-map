@@ -36,8 +36,10 @@ ADR 참조
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
@@ -230,6 +232,7 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.infra.feature_update_repo import (
     start_update_request as repo_start_update_request,
 )
+from kortravelmap.infra.integrity_violation_repo import sync_integrity_findings
 from kortravelmap.infra.jobs_repo import ImportJobEvent
 from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
 from kortravelmap.infra.poi_cache_target_repo import (
@@ -418,6 +421,31 @@ class FestivalEnrichmentReviewRefreshResult:
             "review_updated": self.review_queue.updated,
             "review_skipped": self.review_queue.skipped,
         }
+
+
+_LOG = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class AddressValidationFinding:
+    """durable하게 남길 주소/좌표 검증 finding 1건 (T-VN-H30A).
+
+    ``linked``가 핵심이다. ``ops.data_integrity_violations``의 ``feature_id``/
+    ``source_record_key``는 **FK**인데 주소 검증은 적재 **전**에 돌아서, drop된 행은 두 대상이
+    아직(또는 영원히) DB에 없다. 그대로 넘기면 FK 위반으로 기록 자체가 실패한다.
+    적재된 대상만 ``linked=True``로 표시하고, 나머지는 id를 ``payload``로만 나른다.
+    """
+
+    dedupe_key: str
+    violation_type: str
+    severity: str
+    message: str
+    provider: str | None = None
+    dataset_key: str | None = None
+    source_record_key: str | None = None
+    feature_id: str | None = None
+    linked: bool = False
+    payload: Mapping[str, Any] = field(default_factory=dict)
 
 
 class AsyncKorTravelMapClient:
@@ -2069,3 +2097,67 @@ class AsyncKorTravelMapClient:
         """
         async with self._session_factory() as session:
             return await gather_status_counts(session)
+
+    async def record_address_validation_findings(
+        self,
+        findings: Sequence[AddressValidationFinding],
+        *,
+        provider: str,
+        dataset_key: str,
+    ) -> int:
+        """주소/좌표 검증 결과를 ``ops.data_integrity_violations``에 durable하게 남긴다.
+
+        T-VN-H30A: 지금까지 검증 결과는 Dagster run metadata에만 있어 **run이 사라지면 증거도
+        사라졌다**. ``/admin/issues``에서도 보이지 않았다. 같은 export를 매 run 전량 재생해도
+        큐가 부풀지 않도록 ``dedupe_key``로 열린 이슈 1건에 접는다.
+
+        ``feature_id``/``source_record_key``는 FK이므로 **적재된 대상에만** 넘긴다. 적재 전
+        단계에서 drop된 행은 두 대상이 DB에 없으므로 id를 payload에만 담아야 한다 — 호출자가
+        ``AddressValidationFinding.linked``로 구분해 준다.
+
+        기록 실패가 적재 결과를 되돌리지 않는다. 관측을 위해 넣은 경로가 파이프라인을 죽이면
+        안 되므로 예외를 로그로 낮추고 기록 건수만 반환한다.
+        """
+        if not provider or not dataset_key:
+            raise ValueError("provider/dataset_key는 sweep 범위를 정하므로 필수다.")
+
+        # batch 안 중복 제거 — 같은 dedupe_key가 한 statement에 두 번 오면 Postgres가
+        # "ON CONFLICT DO UPDATE command cannot affect row a second time"로 실패한다.
+        # (payload가 byte-동일한 중복 레코드가 실제로 export에 존재한다.)
+        deduped: dict[str, dict[str, Any]] = {}
+        for finding in findings:
+            deduped[finding.dedupe_key] = {
+                "provider": finding.provider,
+                "dataset_key": finding.dataset_key,
+                "source_record_key": (
+                    finding.source_record_key if finding.linked else None
+                ),
+                "feature_id": finding.feature_id if finding.linked else None,
+                "violation_type": finding.violation_type,
+                "severity": finding.severity,
+                "message": finding.message,
+                "payload": {
+                    **dict(finding.payload),
+                    "dedupe_key": finding.dedupe_key,
+                    "occurrence_count": 1,
+                },
+            }
+        rows = list(deduped.values())
+        try:
+            async with self._session_factory() as session, session.begin():
+                upserted = await sync_integrity_findings(
+                    session,
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    findings=rows,
+                )
+        except Exception:  # noqa: BLE001
+            _LOG.exception(
+                "주소 검증 finding 기록 실패 — 적재 결과에는 영향을 주지 않는다 "
+                "(provider=%s dataset=%s findings=%d)",
+                provider,
+                dataset_key,
+                len(rows),
+            )
+            return 0
+        return upserted
