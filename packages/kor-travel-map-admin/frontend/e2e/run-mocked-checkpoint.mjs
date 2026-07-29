@@ -404,6 +404,44 @@ async function inspectBuiltImage(builtImageId) {
   return inspected;
 }
 
+function compactDiagnostic(value) {
+  return value
+    .replace(
+      /((?:password|passwd|secret|token|api[_-]?key)[A-Z0-9_]*)=[^\s]+/gi,
+      "$1=<redacted>",
+    )
+    .replace(/[\r\n]+/g, " | ")
+    .trim()
+    .slice(-2_000);
+}
+
+async function frontendReadinessDiagnostic() {
+  if (!ownedContainerId) return "container=unavailable";
+  const stateResult = await runManagedChild(
+    "docker",
+    [
+      "inspect",
+      "--format",
+      "{{json .State}}",
+      ownedContainerId,
+    ],
+    { captureOutput: true },
+  );
+  const logsResult = await runManagedChild(
+    "docker",
+    ["logs", "--tail", "40", ownedContainerId],
+    { captureOutput: true },
+  );
+  const state =
+    stateResult.status === 0
+      ? compactDiagnostic(stateResult.stdout)
+      : `inspect_exit=${stateResult.status}`;
+  const logs = compactDiagnostic(
+    `${logsResult.stdout}\n${logsResult.stderr}`,
+  );
+  return `state=${state || "empty"}; logs=${logs || "empty"}`;
+}
+
 async function readBuildInfo(timeoutMs) {
   let lastError = "응답 없음";
   const deadline = Date.now() + timeoutMs;
@@ -446,8 +484,9 @@ async function readBuildInfo(timeoutMs) {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
+  const diagnostic = await frontendReadinessDiagnostic();
   throw new Error(
-    `self-owned frontend build-info를 확인할 수 없습니다: ${lastError}`,
+    `self-owned frontend build-info를 확인할 수 없습니다: ${lastError}; ${diagnostic}`,
   );
 }
 

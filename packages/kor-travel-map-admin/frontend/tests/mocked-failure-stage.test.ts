@@ -79,6 +79,12 @@ describe("mocked checkpoint isolation", () => {
     expect(runnerSource).toContain(
       "PLAYWRIGHT_ARTIFACT_ROOT: playwrightArtifactRoot",
     );
+    expect(runnerSource).toContain(
+      "const diagnostic = await frontendReadinessDiagnostic()",
+    );
+    expect(runnerSource).toContain(
+      '["logs", "--tail", "40", ownedContainerId]',
+    );
   });
 
   it("host public env를 빌드에 상속하지 않고 non-self HTTP/WS를 전역 차단한다", () => {
