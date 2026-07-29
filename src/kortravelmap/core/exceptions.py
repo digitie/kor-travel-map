@@ -131,11 +131,11 @@ class FileStoreError(KorTravelMapError):
 
 
 class GeoAuthNotConfiguredError(KorTravelMapError):
-    """kor-travel-geo trusted proxy 인증이 결선되지 않았다.
+    """kor-travel-geo public API key 인증이 결선되지 않았다.
 
-    backend-to-backend 호출은 public API key를 URL query로 전달하지 않는다. geo가
-    신뢰하는 peer CIDR과 ``KTG_ADMIN_PROXY_SECRET``을 Map의
-    ``KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET``에 함께 결선한다.
+    backend-to-backend 호출은 public API key를 URL query로 전달하지 않고
+    ``X-KTG-API-Key`` header로 보낸다. Map은 geo public endpoint만 호출하며
+    admin trusted-proxy 권한을 갖지 않는다.
     **서버측 설정 결함**이므로 호출자 입력 오류(422)나 상태 충돌(409)이 아니라
     ``ValidationError`` 계열과 분리한다.
 

@@ -30,14 +30,14 @@ def test_object_store_key_aliases_none_when_unset() -> None:
     assert settings.object_store_secret_key is None
 
 
-def test_geo_admin_proxy_secret_stays_masked() -> None:
-    secret = "geo-proxy-secret"
+def test_geo_public_api_key_stays_masked() -> None:
+    secret = "geo-public-key"
     settings = KorTravelMapSettings(
-        kor_travel_geo_admin_proxy_secret=SecretStr(secret),
+        kor_travel_geo_api_key=SecretStr(secret),
     )
 
-    assert settings.kor_travel_geo_admin_proxy_secret is not None
-    assert settings.kor_travel_geo_admin_proxy_secret.get_secret_value() == secret
+    assert settings.kor_travel_geo_api_key is not None
+    assert settings.kor_travel_geo_api_key.get_secret_value() == secret
     assert secret not in repr(settings)
 
 

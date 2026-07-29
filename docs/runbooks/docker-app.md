@@ -69,7 +69,7 @@ canonical service의 literal `true`를 사용한다. 설정 enablement와 각 �
 | `OPINET_API_KEY`                                  | `KOR_TRAVEL_MAP_OPINET_API_KEY`                                                                             |
 | `KEX_GO_API_KEY`, `KREX_API_KEY`                  | `KOR_TRAVEL_MAP_KREX_EX_API_KEY`, `KOR_TRAVEL_MAP_KREX_GO_API_KEY`                                          |
 | `KOR_TRAVEL_GEO_VWORLD_API_KEY`, `VWORLD_API_KEY` | `NEXT_PUBLIC_VWORLD_API_KEY`, `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` |
-| `KTG_ADMIN_PROXY_SECRET` | `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET` |
+| `KOR_TRAVEL_GEO_VWORLD_API_KEY`, `VWORLD_API_KEY` | `NEXT_PUBLIC_VWORLD_API_KEY`, `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`, `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` |
 
 객체 저장소는 `KOR_TRAVEL_MAP_OBJECT_STORE_*`를 사용한다. Docker 내부 endpoint는
 `KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL`(기본 `http://rustfs:9000`)로 주입하고,

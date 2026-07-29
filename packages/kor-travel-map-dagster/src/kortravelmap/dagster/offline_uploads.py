@@ -53,7 +53,7 @@ async def load_offline_upload_op(context: OpExecutionContext) -> dict[str, objec
         ) as http:
             kraddr = KorTravelGeoRestClient(
                 http,
-                admin_proxy_secret=settings.kor_travel_geo_admin_proxy_secret,
+                api_key=settings.kor_travel_geo_api_key,
             )
             result = await client.run_offline_upload_load_job(
                 upload_id,

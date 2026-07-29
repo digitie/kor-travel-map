@@ -934,7 +934,7 @@ def test_validate_offline_upload_keeps_typed_geo_problem_code(
     settings = KorTravelMapSettings(
         _env_file=None,
         kor_travel_geo_base_url="http://127.0.0.1:12501",
-        kor_travel_geo_admin_proxy_secret=SecretStr("geo-proxy-secret"),
+        kor_travel_geo_api_key=SecretStr("geo-public-key"),
     )
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(

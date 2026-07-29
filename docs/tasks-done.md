@@ -47,9 +47,9 @@
 
 - [x] **PR #884 geo 인증·오류 계약 재감사** — backend가 VWorld public key를 URL query로
   계속 전송해 httpx INFO URL과 traceback frame에서 비밀이 노출될 수 있던 구조를 제거했다.
-  Map API/Dagster/CLI는 geo trusted proxy 계약
-  (`X-KTG-Actor`/`X-KTG-Roles`/`X-KTG-Admin-Proxy-Secret`)만 사용하며 credential은
-  `SecretStr`로 보관한다. transport/status 원본 예외는 연결하지 않는다.
+  Map API/Dagster/CLI는 geo public endpoint에 `X-KTG-API-Key` header만 사용하며
+  credential은 `SecretStr`로 보관한다. admin trusted-proxy principal을 위임하지 않고
+  transport/status 원본 예외도 연결하지 않는다.
 - [x] **typed problem code 보존** — `GeoAuthNotConfiguredError`와 `GeoRequestError`가
   `/admin/issues`, offline-upload validation, feature-update HTTP adapter를 지나도 각각
   `GEO_AUTH_NOT_CONFIGURED`(503), `PROVIDER_ERROR`(502)로 유지되게 중앙 handler와 경계별

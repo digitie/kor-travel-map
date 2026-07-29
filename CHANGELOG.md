@@ -56,9 +56,9 @@
 ### kor-travel-geo backend 인증·typed 오류 계약 (2026-07-29, T-VN-H21/#881)
 
 - **SECURITY (breaking)**: API/Dagster/CLI가 kor-travel-geo public key를 URL query에 넣던
-  경로를 제거했다. backend는 geo trusted proxy header principal만 사용하며
-  `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET`을 geo `KTG_ADMIN_PROXY_SECRET`과
-  결선한다. 브라우저 public/VWorld key와 공유하지 않는다.
+  경로를 제거했다. backend는 geo public endpoint에 `X-KTG-API-Key` header만 사용하며
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`를 결선한다. geo admin trusted-proxy
+  secret/role은 Map에 주입하지 않는다.
 - **SECURITY**: credential은 `SecretStr`로 보관하며 request URL에는 query가 없다.
   transport/status 원본 httpx 예외도 chain하지 않아 INFO URL·응답·traceback frame에서
   secret이 노출되지 않는다.

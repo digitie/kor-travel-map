@@ -1134,7 +1134,7 @@ async def validate_offline_upload_request(
             ) as http:
                 kraddr = KorTravelGeoRestClient(
                     http,
-                    admin_proxy_secret=settings.kor_travel_geo_admin_proxy_secret,
+                    api_key=settings.kor_travel_geo_api_key,
                 )
                 async with session.begin():
                     row = await get_offline_upload(session, upload_id)

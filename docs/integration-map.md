@@ -220,16 +220,15 @@ select/unselect `actor`, enrichment review `reviewed_by`, offline upload
 | kor-travel-concierge feature export | kor-travel-concierge `docs/feature-export-api.md`(로컬 경로는 `F:\dev\kor-travel-concierge`, 프로젝트명은 `kor-travel-concierge`) | 본 repo: `docs/etl/concierge-feature-etl.md` + `providers/kor_travel_concierge.py` docstring |
 | PinVi 사용자 제안 연동(합의 5건) | 본 repo `docs/architecture/rest-api.md` (구 ADR-051) | PinVi `docs/integrations/kor-travel-map-rest-api.md` §7 |
 | YouTube 후보 detail 소비(TM-08) | 본 repo `docs/architecture/rest-api.md` (T-217f) | PinVi UX 기획 |
-| geocoding | kor-travel-geo REST v2 (`POST /v2/{reverse,geocode}`) + trusted proxy 인증 | ADR-046 + geo ADR-064 |
+| geocoding | kor-travel-geo REST v2 (`POST /v2/{reverse,geocode}`) + public API key header 인증 | ADR-046 + geo ADR-064 |
 | 인프라(PostGIS·RustFS) 구동/포트 | **kor-travel-docker-manager** `docker-compose.yml`+README (ADR-052 amendment) | 각 repo는 사용자 — 포트 값은 ADR-047과 정합 |
 
 **원칙**: 계약 정본은 공급자 repo가 갖고(ADR-044), 소비자 repo 문서는 머리말에
 "정본 링크 + view" 선언을 둔다. 형제 repo 실측은 반드시 `git fetch` 후
 **origin/main** 기준(stale 본 체크아웃 함정 — 2026-06-10 검토에서 2건 사고).
 
-kor-travel-map backend의 geo 호출은 public/VWorld key를 URL query로 보내지 않는다.
-Map은 `X-KTG-Actor: kor-travel-map`, `X-KTG-Roles: source_file_viewer`,
-`X-KTG-Admin-Proxy-Secret`을 보내고, geo는 Map peer CIDR과
-`KTG_ADMIN_PROXY_SECRET`을 함께 검증한다. Map 설정
-`KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET`은 geo shared secret과 같아야 하며
-frontend public key, Map admin BFF/service/ops token과 공유하지 않는다.
+kor-travel-map backend의 geo 호출은 public API key를 URL query로 보내지 않고
+`X-KTG-API-Key` header로만 보낸다. Map은 geo public endpoint만 호출하며
+`X-KTG-Actor`/`X-KTG-Roles`/`X-KTG-Admin-Proxy-Secret`을 보내거나 admin 권한을
+위임받지 않는다. Map 설정 `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`에는 geo public key를
+넣으며 Map admin BFF/service/ops token과 공유하지 않는다.

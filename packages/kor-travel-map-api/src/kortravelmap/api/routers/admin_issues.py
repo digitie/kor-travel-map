@@ -254,8 +254,8 @@ def _kor_travel_geo_base_url() -> str:
     return base_url
 
 
-def _kor_travel_geo_admin_proxy_secret() -> SecretStr | None:
-    return KorTravelMapSettings().kor_travel_geo_admin_proxy_secret
+def _kor_travel_geo_api_key() -> SecretStr | None:
+    return KorTravelMapSettings().kor_travel_geo_api_key
 
 
 async def _forward_geocode(address: str) -> dict[str, Any] | None:
@@ -264,7 +264,7 @@ async def _forward_geocode(address: str) -> dict[str, Any] | None:
     async with httpx.AsyncClient(base_url=base_url) as http:
         client = KorTravelGeoRestClient(
             http,
-            admin_proxy_secret=_kor_travel_geo_admin_proxy_secret(),
+            api_key=_kor_travel_geo_api_key(),
         )
         response = await client.geocode(address)
     coordinate = geocode_response_to_coordinate(response)
@@ -294,7 +294,7 @@ async def _reverse_geocode(lon: float, lat: float) -> dict[str, Any] | None:
     async with httpx.AsyncClient(base_url=base_url) as http:
         client = KorTravelGeoRestClient(
             http,
-            admin_proxy_secret=_kor_travel_geo_admin_proxy_secret(),
+            api_key=_kor_travel_geo_api_key(),
         )
         response = await client.reverse(x=lon, y=lat)
     addr = reverse_response_to_address(response)

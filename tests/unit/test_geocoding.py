@@ -776,17 +776,18 @@ def test_rest_client_custom_base_path() -> None:
     assert seen == ["/api/v2/reverse"]
 
 
-def test_rest_client_uses_trusted_proxy_headers_without_query_secret() -> None:
-    seen: list[tuple[str, str, str, str, str]] = []
+def test_rest_client_uses_public_api_header_without_query_or_admin_roles() -> None:
+    seen: list[tuple[str, str, str, bool, bool, bool]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(
             (
                 request.url.path,
                 request.url.query.decode(),
-                request.headers["X-KTG-Actor"],
-                request.headers["X-KTG-Roles"],
-                request.headers["X-KTG-Admin-Proxy-Secret"],
+                request.headers["X-KTG-API-Key"],
+                "X-KTG-Actor" in request.headers,
+                "X-KTG-Roles" in request.headers,
+                "X-KTG-Admin-Proxy-Secret" in request.headers,
             )
         )
         if request.url.path.endswith("/regions/within-radius"):
@@ -805,7 +806,7 @@ def test_rest_client_uses_trusted_proxy_headers_without_query_secret() -> None:
         async with _mock_client(handler) as http:
             client = KorTravelGeoRestClient(
                 http,
-                admin_proxy_secret=SecretStr(" geo-proxy-secret "),
+                api_key=SecretStr(" geo-public-key "),
             )
             await client.reverse(127.0, 37.0)
             await client.geocode("서울특별시 중구 세종대로 110")
@@ -816,23 +817,26 @@ def test_rest_client_uses_trusted_proxy_headers_without_query_secret() -> None:
         (
             "/v2/reverse",
             "",
-            "kor-travel-map",
-            "source_file_viewer",
-            "geo-proxy-secret",
+            "geo-public-key",
+            False,
+            False,
+            False,
         ),
         (
             "/v2/geocode",
             "",
-            "kor-travel-map",
-            "source_file_viewer",
-            "geo-proxy-secret",
+            "geo-public-key",
+            False,
+            False,
+            False,
         ),
         (
             "/v2/regions/within-radius",
             "",
-            "kor-travel-map",
-            "source_file_viewer",
-            "geo-proxy-secret",
+            "geo-public-key",
+            False,
+            False,
+            False,
         ),
     ]
 
@@ -1520,7 +1524,7 @@ def test_cached_reverse_geocoder_caches_none() -> None:
     assert calls == 1
 
 
-def test_geo_rest_client_requires_proxy_secret_at_construction() -> None:
+def test_geo_rest_client_requires_public_api_key_at_construction() -> None:
     """결선 검증은 **생성 시점**에 일어난다 (T-VN-H21).
 
     호출 지점마다 guard를 손으로 붙이는 방식은 한 곳만 빠뜨려도 조용히 무력화된다.
@@ -1534,9 +1538,11 @@ def test_geo_rest_client_requires_proxy_secret_at_construction() -> None:
         for missing in (None, SecretStr(""), SecretStr("   ")):
             with pytest.raises(
                 GeoAuthNotConfiguredError,
-                match="KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET",
+                match="KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY",
             ):
-                KorTravelGeoRestClient(http, admin_proxy_secret=missing)
+                KorTravelGeoRestClient(http, api_key=missing)
+        with pytest.raises(GeoAuthNotConfiguredError, match="128자 이하"):
+            KorTravelGeoRestClient(http, api_key=SecretStr("x" * 129))
     finally:
         asyncio.run(http.aclose())
 
@@ -1566,13 +1572,13 @@ def test_geo_rest_client_opt_out_allows_authless_construction() -> None:
     try:
         # 헬퍼가 아니라 opt-out 인자 자체를 직접 검증한다.
         client = KorTravelGeoRestClient(http, require_auth=False)
-        assert client._trusted_proxy_headers() is None
+        assert client._public_api_headers() is None
     finally:
         asyncio.run(http.aclose())
 
 
 @pytest.mark.parametrize("status_code", [400, 401, 500])
-def test_geo_http_error_never_exposes_proxy_secret(
+def test_geo_http_error_never_exposes_public_api_key(
     status_code: int,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1580,18 +1586,21 @@ def test_geo_http_error_never_exposes_proxy_secret(
     from kortravelmap.core.exceptions import GeoRequestError
     from kortravelmap.geocoding import KorTravelGeoRestClient
 
-    secret = "SUPER-SECRET-GEO-PROXY-0123456789"
+    secret = "SUPER-SECRET-GEO-PUBLIC-0123456789"
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.query == b""
-        assert request.headers["X-KTG-Admin-Proxy-Secret"] == secret
+        assert request.headers["X-KTG-API-Key"] == secret
+        assert "X-KTG-Actor" not in request.headers
+        assert "X-KTG-Roles" not in request.headers
+        assert "X-KTG-Admin-Proxy-Secret" not in request.headers
         return httpx.Response(status_code, json={"status": "ERROR"})
 
     async def scenario() -> None:
         async with _mock_client(handler) as http:
             client = KorTravelGeoRestClient(
                 http,
-                admin_proxy_secret=SecretStr(secret),
+                api_key=SecretStr(secret),
             )
             with pytest.raises(GeoRequestError) as excinfo:
                 await client.reverse(127.0276, 37.4979)
@@ -1618,8 +1627,8 @@ def test_geo_http_error_never_exposes_proxy_secret(
     assert "?key=" not in caplog.text
 
 
-def test_geo_missing_key_response_identifies_trusted_proxy_misconfiguration() -> None:
-    """geo의 public key fallback은 backend trusted-proxy 결선 실패를 뜻한다."""
+def test_geo_missing_key_response_identifies_public_key_misconfiguration() -> None:
+    """geo의 key 오류는 Map public key 결선 실패를 뜻한다."""
     from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
     from kortravelmap.geocoding import KorTravelGeoRestClient
 
@@ -1636,11 +1645,11 @@ def test_geo_missing_key_response_identifies_trusted_proxy_misconfiguration() ->
         async with _mock_client(handler) as http:
             client = KorTravelGeoRestClient(
                 http,
-                admin_proxy_secret=SecretStr("map-secret-not-accepted-by-geo"),
+                api_key=SecretStr("map-key-not-accepted-by-geo"),
             )
             with pytest.raises(
                 GeoAuthNotConfiguredError,
-                match="KTG_ADMIN_TRUSTED_PROXY_CIDRS",
+                match="KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY",
             ) as excinfo:
                 await client.reverse(127.0276, 37.4979)
             assert excinfo.value.__cause__ is None
@@ -1676,7 +1685,7 @@ def test_geo_success_with_malformed_payload_is_provider_error(
         async with _mock_client(handler) as http:
             client = KorTravelGeoRestClient(
                 http,
-                admin_proxy_secret=SecretStr("configured-proxy-secret"),
+                api_key=SecretStr("configured-public-key"),
             )
             with pytest.raises(GeoRequestError, match="응답 계약 오류") as excinfo:
                 await client.reverse(127.0276, 37.4979)
@@ -1687,7 +1696,7 @@ def test_geo_success_with_malformed_payload_is_provider_error(
 
 
 def test_geo_transport_error_drops_original_request_and_secret() -> None:
-    secret = "SUPER-SECRET-GEO-PROXY-TRANSPORT"
+    secret = "SUPER-SECRET-GEO-PUBLIC-TRANSPORT"
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connect failed", request=request)
@@ -1696,7 +1705,7 @@ def test_geo_transport_error_drops_original_request_and_secret() -> None:
         async with _mock_client(handler) as http:
             client = KorTravelGeoRestClient(
                 http,
-                admin_proxy_secret=SecretStr(secret),
+                api_key=SecretStr(secret),
             )
             with pytest.raises(GeoRequestError) as excinfo:
                 await client.reverse(127.0276, 37.4979)

@@ -400,7 +400,7 @@ async def _geocoders_for(
         settings = KorTravelMapSettings()
         client = KorTravelGeoRestClient(
             http,
-            admin_proxy_secret=settings.kor_travel_geo_admin_proxy_secret,
+            api_key=settings.kor_travel_geo_api_key,
         )
         # 인증 결선 검증은 생성 시점(require_auth 기본 True)에서 이뤄진다.
         yield (

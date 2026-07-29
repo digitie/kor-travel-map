@@ -46,8 +46,8 @@ kor-travel-map API backend가 Kakao Local, NAVER Search, Google Places API를 �
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | kor-travel-concierge-youtube | kor-travel-concierge DB `read` scope 키 | `X-API-Key` 헤더로만 전송, static `API_KEYS` 공유 금지 |
 | `KOR_TRAVEL_GEO_*` | kor-travel-geo | (로컬 DB 위주, vworld 폴백 키는 kor-travel-geo가 관리) | geo 서비스 자체 설정. 본 라이브러리는 HTTP client만 사용 |
 | `KOR_TRAVEL_GEO_VWORLD_API_KEY` | kor-travel-geo (reverse geocoding), 디버그/admin UI frontend (MapLibre/VWorld), PinVi 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
-| `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET` | kor-travel-map API/Dagster/CLI의 kor-travel-geo v2 호출 | kor-travel-geo trusted proxy | geo `KTG_ADMIN_PROXY_SECRET`과 같은 값. `X-KTG-Admin-Proxy-Secret` header로만 전송하며 public/VWorld key와 공유 금지 |
-| `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | admin frontend의 kor-travel-geo v2 직접 호출 | kor-travel-geo public REST v2 | 브라우저용 VWorld 호환 `key` query. backend에는 주입하지 않는다. |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` | kor-travel-map API/Dagster/CLI의 kor-travel-geo v2 호출 | kor-travel-geo public REST v2 | `X-KTG-API-Key` header로만 전송한다. admin trusted-proxy secret/role을 Map에 위임하지 않는다. |
+| `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | admin frontend의 kor-travel-geo v2 직접 호출 | kor-travel-geo public REST v2 | 브라우저용 VWorld 호환 `key` query. 같은 public key를 backend 전용 env에 별도로 주입할 수 있다. |
 
 ## 3. provider별 발급 절차 (요약)
 

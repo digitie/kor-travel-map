@@ -136,14 +136,12 @@ class KorTravelMapSettings(BaseSettings):
         le=30.0,
         description="kor-travel-geo REST 호출 timeout seconds.",
     )
-    kor_travel_geo_admin_proxy_secret: SecretStr | None = Field(
+    kor_travel_geo_api_key: SecretStr | None = Field(
         default=None,
         description=(
-            "kor-travel-geo trusted proxy 인증용 shared secret. Map backend는 "
-            "브라우저용 public API key를 query string으로 전달하지 않고, "
-            "``X-KTG-Actor``/``X-KTG-Roles``와 이 값을 "
-            "``X-KTG-Admin-Proxy-Secret`` header로 보낸다. geo의 "
-            "``KTG_ADMIN_PROXY_SECRET``과 같은 값을 사용한다."
+            "kor-travel-geo public endpoint 인증용 API key. Map backend는 이 값을 "
+            "URL query가 아닌 ``X-KTG-API-Key`` header로만 보내며 admin role이나 "
+            "trusted-proxy 권한을 요청하지 않는다."
         ),
     )
 

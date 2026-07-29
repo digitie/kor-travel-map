@@ -47,11 +47,11 @@ Next API proxy, backend trusted-proxy header, VWorld 호환 public API key로 �
 - DB에는 API key 원문이 남지 않는다.
 - 기존 로컬/테스트 하위호환을 위해 `admin_proxy_secret`이 없는 설정에서는 admin gate를 강제하지
   않는다. 실제 운용 `.env`에는 secret을 넣어 프론트 프록시 경계를 활성화한다.
-- `kor-travel-geo` 호출 경로(CLI/API/Dagster/live test)는 같은 trusted proxy secret을 공유한다.
-  secret은 `SecretStr`로 보관하고 `X-KTG-Admin-Proxy-Secret` header로만 보내며 URL query에는
-  넣지 않는다. `X-KTG-Actor: kor-travel-map`과 `X-KTG-Roles: source_file_viewer`를 함께 보내고
-  geo는 peer CIDR과 shared secret을 모두 검증한다. 결선 검증은
-  `KorTravelGeoRestClient` 생성 시점이며 미결선은 `GeoAuthNotConfiguredError` → HTTP 503이다.
+- `kor-travel-geo` 호출 경로(CLI/API/Dagster/live test)는 같은 public API key를
+  `SecretStr`로 보관하고 `X-KTG-API-Key` header로만 보낸다. URL query와
+  `X-KTG-Actor`/`X-KTG-Roles`/`X-KTG-Admin-Proxy-Secret`은 사용하지 않으며 Map에 geo
+  admin 권한을 위임하지 않는다. 결선 검증은 `KorTravelGeoRestClient` 생성 시점이며
+  미결선은 `GeoAuthNotConfiguredError` → HTTP 503이다.
 
 ## 개정 (2026-07-18, ADR-066)
 

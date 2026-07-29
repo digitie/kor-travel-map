@@ -212,8 +212,8 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
     )
     monkeypatch.setenv("KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_TIMEOUT_SECONDS", "2.5")
     monkeypatch.setenv(
-        "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET",
-        "geo-proxy-secret",
+        "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY",
+        "geo-public-key",
     )
     _FakeHttpClient.instances = []
     sentinel = object()
@@ -221,10 +221,10 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
     def _fake_client(
         client: _FakeHttpClient,
         *,
-        admin_proxy_secret: SecretStr | None = None,
+        api_key: SecretStr | None = None,
     ) -> tuple[str, _FakeHttpClient]:
-        assert admin_proxy_secret is not None
-        assert admin_proxy_secret.get_secret_value() == "geo-proxy-secret"
+        assert api_key is not None
+        assert api_key.get_secret_value() == "geo-public-key"
         return ("kraddr", client)
 
     def _fake_reverse(

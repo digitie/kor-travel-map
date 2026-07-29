@@ -75,8 +75,8 @@ if TYPE_CHECKING:
 _GeoResponseT = TypeVar("_GeoResponseT")
 
 
-def _is_trusted_proxy_rejection(resp: httpx.Response) -> bool:
-    """geo가 trusted proxy를 인정하지 않아 public ``key``를 요구했는지 판정한다."""
+def _is_public_key_rejection(resp: httpx.Response) -> bool:
+    """geo가 Map의 public API key를 거부했는지 판정한다."""
     if resp.status_code != 400:
         return False
     try:
@@ -97,10 +97,10 @@ def _raise_for_status_sanitized(resp: httpx.Response) -> None:
     """HTTP status 오류를 credential 없는 typed 예외로 바꾼다."""
     import httpx as _httpx
 
-    if _is_trusted_proxy_rejection(resp):
+    if _is_public_key_rejection(resp):
         raise GeoAuthNotConfiguredError(
-            "kor-travel-geo가 Map trusted proxy 인증을 거부했습니다. "
-            "양쪽 proxy secret과 geo의 KTG_ADMIN_TRUSTED_PROXY_CIDRS를 확인하세요."
+            "kor-travel-geo가 Map public API key를 거부했습니다. "
+            "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY와 geo의 public key 설정을 확인하세요."
         )
 
     sanitized: GeoRequestError | None = None
@@ -871,49 +871,45 @@ class KorTravelGeoRestClient:
         http_client: httpx.AsyncClient,
         *,
         base_path: str = "/v2",
-        admin_proxy_secret: SecretStr | None = None,
+        api_key: SecretStr | None = None,
         require_auth: bool = True,
     ) -> None:
-        """backend-to-backend trusted proxy 인증을 생성 시점에 검증한다.
+        """backend-to-backend public API key 인증을 생성 시점에 검증한다.
 
-        public VWorld 호환 key는 브라우저 같은 외부 클라이언트용이다. backend가 이를
-        query string에 넣으면 access log와 traceback URL에 secret이 남으므로 사용하지
-        않는다. 대신 geo의 기존 trusted proxy 계약을 사용한다.
+        key는 URL query가 아니라 ``X-KTG-API-Key`` header로만 전송한다. Map은 public
+        endpoint만 호출하므로 geo admin trusted-proxy 권한을 요구하거나 위임하지 않는다.
 
         mock transport로만 도는 테스트처럼 인증이 필요 없는 경우에만 명시적으로
         ``require_auth=False``로 opt-out한다.
         """
         self._http = http_client
         self._base = base_path.rstrip("/")
-        self._admin_proxy_secret = admin_proxy_secret
+        self._api_key = api_key
         if require_auth:
             self.preflight()
 
     def preflight(self) -> None:
-        """geo trusted proxy shared secret 결선을 확인한다."""
-        if self._admin_proxy_secret is None:
+        """geo public API key 결선을 확인한다."""
+        if self._api_key is None:
             raise GeoAuthNotConfiguredError(
-                "kor-travel-geo trusted proxy secret이 설정되지 않았습니다. "
-                "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET과 geo의 "
-                "KTG_ADMIN_PROXY_SECRET을 같은 값으로 설정하고 Map peer CIDR을 "
-                "geo의 KTG_ADMIN_TRUSTED_PROXY_CIDRS에 허용해야 합니다."
+                "kor-travel-geo public API key가 설정되지 않았습니다. "
+                "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY를 설정하세요."
             )
-        if not self._admin_proxy_secret.get_secret_value().strip():
+        key = self._api_key.get_secret_value().strip()
+        if not key:
             raise GeoAuthNotConfiguredError(
-                "kor-travel-geo trusted proxy secret이 비어 있습니다. "
-                "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET을 설정하세요."
+                "kor-travel-geo public API key가 비어 있습니다. "
+                "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY를 설정하세요."
+            )
+        if len(key) > 128:
+            raise GeoAuthNotConfiguredError(
+                "kor-travel-geo public API key는 128자 이하여야 합니다."
             )
 
-    def _trusted_proxy_headers(self) -> dict[str, str] | None:
-        if self._admin_proxy_secret is None:
+    def _public_api_headers(self) -> dict[str, str] | None:
+        if self._api_key is None:
             return None
-        return {
-            "X-KTG-Actor": "kor-travel-map",
-            "X-KTG-Roles": "source_file_viewer",
-            "X-KTG-Admin-Proxy-Secret": (
-                self._admin_proxy_secret.get_secret_value().strip()
-            ),
-        }
+        return {"X-KTG-API-Key": self._api_key.get_secret_value().strip()}
 
     async def _post(self, path: str, *, json: dict[str, Any]) -> httpx.Response:
         """transport 오류도 원본 request를 연결하지 않는 typed 예외로 바꾼다."""
@@ -925,7 +921,7 @@ class KorTravelGeoRestClient:
             response = await self._http.post(
                 path,
                 json=json,
-                headers=self._trusted_proxy_headers(),
+                headers=self._public_api_headers(),
             )
         except _httpx.HTTPError as exc:
             request = getattr(exc, "request", None)

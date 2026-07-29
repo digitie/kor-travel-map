@@ -473,7 +473,7 @@ async def _sigungu_resolver_for_scope(
     ) as http:
         client = KorTravelGeoRestClient(
             http,
-            admin_proxy_secret=settings.kor_travel_geo_admin_proxy_secret,
+            api_key=settings.kor_travel_geo_api_key,
         )
 
         async def resolver(

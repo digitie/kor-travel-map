@@ -35,6 +35,8 @@
   공식 `kor-travel-geo` FastAPI 포트는 `http://127.0.0.1:12501`
   (`kor-travel-geo/docs/ports.md`). `None`이면 정/역지오코딩 보강 비활성
   (좌표만으로 적재).
+- 인증: `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`를 `X-KTG-API-Key` header로만
+  전송한다. Map은 geo public endpoint만 호출하며 admin trusted-proxy 권한을 갖지 않는다.
 - VWorld 폴백 키: `kor-travel-geo` REST 서비스 내부 설정에서만. 본 라이브러리에서
   `python-vworld-api` 직접 import 금지.
 
@@ -125,7 +127,7 @@ from kortravelmap.geocoding import (
 async with httpx.AsyncClient(base_url=settings.kor_travel_geo_base_url) as http:
     client = KorTravelGeoRestClient(
         http,
-        admin_proxy_secret=settings.kor_travel_geo_admin_proxy_secret,
+        api_key=settings.kor_travel_geo_api_key,
     )
     reverse = kor_travel_geo_reverse_geocoder(client, max_distance_m=50)
     resolve = kor_travel_geo_address_resolver(client, min_confidence=0.5)
@@ -407,8 +409,8 @@ API 키/한도/재시도는 `kor-travel-geo` REST 서비스 책임. 본 라이�
 ## 14. 운영 체크리스트
 
 - [ ] `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL` 환경변수 (REST 서비스 URL)
-- [ ] `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET` 환경변수
-      (geo `KTG_ADMIN_PROXY_SECRET`과 동일, public/VWorld key와 공유 금지)
+- [ ] `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` 환경변수
+      (`X-KTG-API-Key` header로만 전송, geo admin trusted-proxy 권한 미사용)
 - [ ] `kor-travel-geo` REST 서비스 v2(`POST /v2/reverse`, `POST /v2/geocode`)가 운영 환경에서 reachable
 - [ ] reverse geocoder가 MOIS/OpiNet ETL에 주입되어 있는가
 - [ ] `legal_dong_conflict` / `sigungu_code_only` / `not_geocoded` 비율
