@@ -119,12 +119,23 @@ if (
   );
   process.exit(2);
 }
+const isolatedBuildEnvironment = {
+  NEXT_PUBLIC_KOR_TRAVEL_MAP_API: "http://127.0.0.1:9",
+  NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: "http://127.0.0.1:9",
+  NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: "http://127.0.0.1:9",
+  NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY: "",
+  NEXT_PUBLIC_VWORLD_API_KEY: "",
+};
 const sourceDigestResult = spawnSync(
   process.execPath,
   [path.join(repoRoot, "scripts/frontend-source-digest.mjs")],
   {
     cwd: repoRoot,
     encoding: "utf8",
+    env: {
+      ...playwrightEnvironment,
+      ...isolatedBuildEnvironment,
+    },
   },
 );
 const sourceDigest = sourceDigestResult.stdout?.trim();
@@ -590,13 +601,6 @@ try {
   ownedImageTag =
     `kor-travel-map-mocked-e2e:${revision.slice(0, 12)}-` +
     `${process.pid}-${randomBytes(6).toString("hex")}`;
-  const isolatedBuildEnvironment = {
-    NEXT_PUBLIC_KOR_TRAVEL_MAP_API: "http://127.0.0.1:9",
-    NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: "http://127.0.0.1:9",
-    NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: "http://127.0.0.1:9",
-    NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY: "",
-    NEXT_PUBLIC_VWORLD_API_KEY: "",
-  };
   const publicBuildArgs = frontendBuildInputs(isolatedBuildEnvironment).flatMap(
     ([name, value]) => ["--build-arg", `${name}=${value}`],
   );
@@ -772,6 +776,10 @@ try {
     {
       captureOutput: true,
       cwd: repoRoot,
+      env: {
+        ...playwrightEnvironment,
+        ...isolatedBuildEnvironment,
+      },
     },
   );
   if (

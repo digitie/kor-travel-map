@@ -99,6 +99,7 @@ describe("mocked checkpoint isolation", () => {
       'NEXT_PUBLIC_KOR_TRAVEL_MAP_API: "http://127.0.0.1:9"',
     );
     expect(runnerSource).toContain("frontendBuildInputs(isolatedBuildEnvironment)");
+    expect(runnerSource).toContain("...isolatedBuildEnvironment");
     expect(runnerSource).toContain("const denyProxyUrl = await startDenyProxy()");
     expect(runnerSource).toContain("if (deniedNetworkAttempts !== 0)");
     expect(runnerSource).not.toContain("...process.env");
