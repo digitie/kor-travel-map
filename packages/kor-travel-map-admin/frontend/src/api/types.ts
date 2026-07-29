@@ -4937,7 +4937,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "valid" | "invalid" | "unmatched" | "ambiguous" | "imported";
+            status: "valid" | "invalid" | "unmatched" | "review_required" | "ambiguous" | "imported";
             /** Theme Slug */
             theme_slug: string;
             /** Title */
