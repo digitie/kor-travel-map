@@ -667,10 +667,19 @@ extension_sha256() {
 
 content_sha256() {
   local run_id="$1"
+  local dataset_projection_revision="${2-}"
+  local dataset_projection_updated_at="${3-}"
   [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
     die "content digest run ID is invalid"
   [[ "$CONTENT_CUTOFF" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
     die "content digest cutoff is invalid"
+  if [[ -n "$dataset_projection_revision" ||
+        -n "$dataset_projection_updated_at" ]]; then
+    [[ "$dataset_projection_revision" =~ ^[0-9]+$ ]] ||
+      die "dataset projection baseline revision is invalid"
+    [[ "$dataset_projection_updated_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
+      die "dataset projection baseline timestamp is invalid"
+  fi
   local statement_query statements
   statement_query="$(cat <<SQL
 SELECT CASE
@@ -680,6 +689,25 @@ SELECT CASE
     namespace.nspname || '.' || relation.relname,
     namespace.nspname,
     relation.relname
+  )
+  WHEN namespace.nspname = 'ops'
+    AND relation.relname = 'ops_live_topic_revisions'
+    AND '${dataset_projection_revision}' <> ''
+  THEN format(
+    'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
+    'COALESCE(bit_xor(hashtextextended(row_value::text, 0))::text, ''null'') || ' ||
+    'chr(31) || COALESCE(bit_xor(hashtextextended(row_value::text, ' ||
+    '9223372036854775807))::text, ''null'') ' ||
+    'FROM (' ||
+    'SELECT topic, revision, updated_at FROM %I.%I ' ||
+    'WHERE topic <> ''dataset_projection'' ' ||
+    'UNION ALL SELECT ''dataset_projection'', %s::bigint, %L::timestamptz' ||
+    ') AS row_value;',
+    namespace.nspname || '.' || relation.relname,
+    namespace.nspname,
+    relation.relname,
+    '${dataset_projection_revision}',
+    '${dataset_projection_updated_at}'
   )
   ELSE format(
     'SELECT %L || chr(31) || count(*)::text || chr(31) || ' ||
@@ -702,12 +730,6 @@ SELECT CASE
         ' WHERE row_value.feature_id NOT LIKE %L ESCAPE %L',
         'e2e_live_acceptance::${run_id}::%',
         chr(92)
-      )
-      WHEN namespace.nspname = 'ops'
-        AND relation.relname = 'api_call_log'
-      THEN format(
-        ' WHERE row_value.created_at < %L::timestamptz',
-        '${CONTENT_CUTOFF}'
       )
       WHEN namespace.nspname = 'ops'
         AND relation.relname = 'admin_auth_events'
@@ -744,6 +766,168 @@ EXPECTED_MIGRATION_HEAD=""
 BASE_CLONE_CONTAINER_SHA256=""
 BASE_CLONE_SYSTEM_SHA256=""
 CONTENT_CUTOFF=""
+DATASET_PROJECTION_START_REVISION=""
+DATASET_PROJECTION_START_UPDATED_AT=""
+DATASET_PROJECTION_START_SOURCE=""
+
+read_current_dataset_projection() {
+  local row
+  row="$(
+    psql_value "
+      SELECT revision::text || chr(9) ||
+        to_char(
+          updated_at AT TIME ZONE 'UTC',
+          'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'
+        )
+      FROM ops.ops_live_topic_revisions
+      WHERE topic = 'dataset_projection'
+    "
+  )"
+  [[ "$row" =~ ^([0-9]+)$'\t'([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z)$ ]] ||
+    die "dataset projection current row is invalid"
+  DATASET_PROJECTION_CURRENT_REVISION="${BASH_REMATCH[1]}"
+  DATASET_PROJECTION_CURRENT_UPDATED_AT="${BASH_REMATCH[2]}"
+}
+
+load_dataset_projection_start_from_dump() {
+  local checkpoint_path="$1"
+  local filename dump_path restore_output row raw_updated_at
+  filename="$(
+    state_helper read-checkpoint \
+      --checkpoint "$checkpoint_path" --field dump_filename
+  )"
+  dump_path="$STATE_ROOT/$filename"
+  [[ "$dump_path" == "$STATE_ROOT"/clone-checkpoint-*.dump &&
+     -f "$dump_path" && ! -L "$dump_path" ]] ||
+    die "dataset projection checkpoint dump path is unsafe"
+  restore_output="$(
+    docker run --rm \
+      --network none \
+      --read-only \
+      --security-opt no-new-privileges \
+      --cap-drop ALL \
+      --mount "type=bind,src=$dump_path,dst=/checkpoint.dump,readonly" \
+      --entrypoint pg_restore \
+      "$BASE_CLONE_IMAGE_ID" \
+      --data-only \
+      --schema=ops \
+      --table=ops_live_topic_revisions \
+      -f - \
+      /checkpoint.dump
+  )"
+  row="$(
+    awk -F $'\t' '
+      $1 == "dataset_projection" {
+        if (NF != 3) {
+          exit 2
+        }
+        value = $2 FS $3
+        count += 1
+      }
+      END {
+        if (count != 1) {
+          exit 3
+        }
+        print value
+      }
+    ' <<<"$restore_output"
+  )"
+  unset restore_output
+  [[ "$row" =~ ^([0-9]+)$'\t'([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}\+00)$ ]] ||
+    die "dataset projection checkpoint row is invalid"
+  DATASET_PROJECTION_START_REVISION="${BASH_REMATCH[1]}"
+  raw_updated_at="${BASH_REMATCH[2]}"
+  DATASET_PROJECTION_START_UPDATED_AT="${raw_updated_at/ /T}"
+  DATASET_PROJECTION_START_UPDATED_AT="${DATASET_PROJECTION_START_UPDATED_AT%+00}Z"
+  DATASET_PROJECTION_START_SOURCE="checkpoint-dump"
+}
+
+load_dataset_projection_start_from_runtime() {
+  local path="$RUNTIME_DIR/topic-revision-start.json"
+  [[ -f "$path" && ! -L "$path" ]] ||
+    die "dataset projection runtime start evidence is missing"
+  DATASET_PROJECTION_START_REVISION="$(
+    state_helper read-topic-revision-start \
+      --field revision --path "$path"
+  )"
+  DATASET_PROJECTION_START_UPDATED_AT="$(
+    state_helper read-topic-revision-start \
+      --field updated_at --path "$path"
+  )"
+  [[ "$(
+    state_helper read-topic-revision-start \
+      --field checkpoint_sha256 --path "$path"
+  )" == "$(state_helper read-blocked \
+    --path "$BLOCKED_FILE" --field clone_checkpoint_sha256
+  )" ]] || die "dataset projection runtime checkpoint binding differs"
+  [[ "$(
+    state_helper read-topic-revision-start \
+      --field run_id --path "$path"
+  )" == "$RUN_ID" ]] || die "dataset projection runtime run ID differs"
+  DATASET_PROJECTION_START_SOURCE="runtime-start"
+}
+
+snapshot_content_sha256() {
+  local path="$1"
+  local digest
+  digest="$(
+    KTM_SNAPSHOT_PATH="$path" python3 -I -B -c '
+import json
+import os
+from pathlib import Path
+
+value = json.loads(Path(os.environ["KTM_SNAPSHOT_PATH"]).read_text())["content_sha256"]
+if not isinstance(value, str):
+    raise SystemExit("invalid snapshot content digest")
+print(value)
+'
+  )"
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] ||
+    die "snapshot content digest is invalid"
+  printf '%s' "$digest"
+}
+
+write_dataset_projection_snapshots() {
+  local observed_path="$1"
+  local normalized_path="$2"
+  local checkpoint_sha256 observed_content normalized_content
+  [[ "$DATASET_PROJECTION_START_REVISION" =~ ^[0-9]+$ ]] ||
+    die "dataset projection start revision is unavailable"
+  [[ "$DATASET_PROJECTION_START_UPDATED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$ ]] ||
+    die "dataset projection start timestamp is unavailable"
+  [[ "$DATASET_PROJECTION_START_SOURCE" == "runtime-start" ||
+     "$DATASET_PROJECTION_START_SOURCE" == "checkpoint-dump" ]] ||
+    die "dataset projection start source is unavailable"
+  write_snapshot "$observed_path" "$RUN_ID"
+  read_current_dataset_projection
+  (( DATASET_PROJECTION_CURRENT_REVISION ==
+     DATASET_PROJECTION_START_REVISION + 1 )) ||
+    die "dataset projection revision delta is not one"
+  [[ "$DATASET_PROJECTION_CURRENT_UPDATED_AT" > "$DATASET_PROJECTION_START_UPDATED_AT" ]] ||
+    die "dataset projection revision timestamp did not advance"
+  write_snapshot \
+    "$normalized_path" \
+    "$RUN_ID" \
+    "$DATASET_PROJECTION_START_REVISION" \
+    "$DATASET_PROJECTION_START_UPDATED_AT"
+  checkpoint_sha256="$(
+    state_helper read-blocked \
+      --path "$BLOCKED_FILE" --field clone_checkpoint_sha256
+  )"
+  observed_content="$(snapshot_content_sha256 "$observed_path")"
+  normalized_content="$(snapshot_content_sha256 "$normalized_path")"
+  state_helper write-topic-revision-proof \
+    --checkpoint-sha256 "$checkpoint_sha256" \
+    --current-revision "$DATASET_PROJECTION_CURRENT_REVISION" \
+    --current-updated-at "$DATASET_PROJECTION_CURRENT_UPDATED_AT" \
+    --normalized-content-sha256 "$normalized_content" \
+    --observed-content-sha256 "$observed_content" \
+    --path "$RUNTIME_DIR/topic-revision-proof.json" \
+    --run-id "$RUN_ID" \
+    --source "$DATASET_PROJECTION_START_SOURCE" \
+    --start-revision "$DATASET_PROJECTION_START_REVISION" \
+    --start-updated-at "$DATASET_PROJECTION_START_UPDATED_AT"
+}
 
 read_image_migration_head() {
   local image_id="$1"
@@ -767,6 +951,8 @@ read_image_migration_head() {
 write_snapshot() {
   local path="$1"
   local run_id="$2"
+  local dataset_projection_revision="${3-}"
+  local dataset_projection_updated_at="${4-}"
   [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
     die "snapshot run ID is invalid"
   verify_clone_container
@@ -790,7 +976,12 @@ write_snapshot() {
   schema_digest="$(schema_sha256)"
   database_digest="$(database_sha256)"
   extension_digest="$(extension_sha256)"
-  content_digest="$(content_sha256 "$run_id")"
+  content_digest="$(
+    content_sha256 \
+      "$run_id" \
+      "$dataset_projection_revision" \
+      "$dataset_projection_updated_at"
+  )"
   verify_clone_container
   [[ "$(docker inspect --format '{{.Id}}' "$DB_CONTAINER")" == "$before_id" ]] ||
     die "clone DB container changed during snapshot"
@@ -2562,9 +2753,16 @@ set_completion_args() {
   local phase="$1"
   completion_args=(
     --blocked-path "$BLOCKED_FILE"
+    --observed-snapshot "$RUNTIME_DIR/clone-final-observed.json"
     --phase "$phase"
     --runtime "$RUNTIME_DIR"
+    --topic-revision-proof "$RUNTIME_DIR/topic-revision-proof.json"
   )
+  if [[ "$DATASET_PROJECTION_START_SOURCE" == "runtime-start" ]]; then
+    completion_args+=(
+      --topic-revision-start "$RUNTIME_DIR/topic-revision-start.json"
+    )
+  fi
   if [[ "$phase" == "recovered" ]]; then
     completion_args+=(
       --current-snapshot "$RUNTIME_DIR/clone-recovery-current.json"
@@ -2591,7 +2789,9 @@ run_acceptance_from_fixture() {
   run_helper api-audit "$RUNTIME_DIR/api-owned-audit.json"
   run_helper auth-verify "$RUNTIME_DIR/auth-audit.json"
   assert_database_login_fence
-  write_snapshot "$RUNTIME_DIR/clone-final.json" "$RUN_ID"
+  write_dataset_projection_snapshots \
+    "$RUNTIME_DIR/clone-final-observed.json" \
+    "$RUNTIME_DIR/clone-final.json"
   (( main_status == 0 && recovery_status == 0 )) || {
     state_helper update-blocked --path "$BLOCKED_FILE" --phase test-failed-restored
     die "Playwright acceptance failed after cleanup"
@@ -2647,7 +2847,27 @@ if [[ "$MODE" == "recover" ]]; then
   recover_checkpoint_quiescence
   recover_verification_database
   start_acceptance_login_fence
-  write_snapshot "$RUNTIME_DIR/clone-recovery-current.json" "$RUN_ID"
+  if [[ -f "$RUNTIME_DIR/topic-revision-start.json" &&
+        ! -L "$RUNTIME_DIR/topic-revision-start.json" ]]; then
+    load_dataset_projection_start_from_runtime
+  else
+    [[ "$blocked_source" != "$SOURCE_COMMIT" ]] ||
+      die "legacy dataset projection recovery requires a newer tool revision"
+    [[ "$(state_helper read-blocked \
+      --path "$BLOCKED_FILE" --field phase
+    )" == "direct-cleanup-running" ]] ||
+      die "legacy dataset projection recovery phase is not eligible"
+    load_dataset_projection_start_from_dump \
+      "$RUNTIME_DIR/clone-checkpoint.json"
+  fi
+  write_dataset_projection_snapshots \
+    "$RUNTIME_DIR/clone-recovery-observed.json" \
+    "$RUNTIME_DIR/clone-recovery-current.json"
+  if [[ "$DATASET_PROJECTION_START_SOURCE" == "checkpoint-dump" ]]; then
+    install -o root -g root -m 0600 \
+      "$RUNTIME_DIR/clone-recovery-observed.json" \
+      "$RUNTIME_DIR/clone-final-observed.json"
+  fi
   state_helper verify-checkpoint \
     --allow-owned-drift \
     --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
@@ -2711,12 +2931,16 @@ if [[ "$MODE" == "recover" ]]; then
     "$RUNTIME_DIR/api-owned-audit.json" \
     "$RUNTIME_DIR/auth-audit.json" \
     "$RUNTIME_DIR/clone-final.json" \
+    "$RUNTIME_DIR/clone-final-observed.json" \
     "$RUNTIME_DIR/playwright-main" \
-    "$RUNTIME_DIR/playwright-recovery"; do
+    "$RUNTIME_DIR/playwright-recovery" \
+    "$RUNTIME_DIR/topic-revision-proof.json"; do
     reset_evidence_path "$path"
   done
   run_acceptance_from_fixture
-  write_snapshot "$RUNTIME_DIR/clone-recovery-current.json" "$RUN_ID"
+  write_dataset_projection_snapshots \
+    "$RUNTIME_DIR/clone-recovery-observed.json" \
+    "$RUNTIME_DIR/clone-recovery-current.json"
   set_completion_args recovered
   state_helper validate-evidence "${completion_args[@]}"
   state_helper update-blocked --path "$BLOCKED_FILE" --phase recovery-resource-finalizing
@@ -2778,6 +3002,16 @@ clone_checkpoint_sha256="$(
     --checkpoint "$RUNTIME_DIR/clone-checkpoint.json" \
     --snapshot "$RUNTIME_DIR/clone-startup-before.json"
 )"
+read_current_dataset_projection
+DATASET_PROJECTION_START_REVISION="$DATASET_PROJECTION_CURRENT_REVISION"
+DATASET_PROJECTION_START_UPDATED_AT="$DATASET_PROJECTION_CURRENT_UPDATED_AT"
+DATASET_PROJECTION_START_SOURCE="runtime-start"
+state_helper write-topic-revision-start \
+  --checkpoint-sha256 "$clone_checkpoint_sha256" \
+  --path "$RUNTIME_DIR/topic-revision-start.json" \
+  --revision "$DATASET_PROJECTION_START_REVISION" \
+  --run-id "$RUN_ID" \
+  --updated-at "$DATASET_PROJECTION_START_UPDATED_AT"
 startup_schema="$(
   python3 -I -B -c \
     'import json,sys; print(json.load(open(sys.argv[1]))["schema_sha256"])' \

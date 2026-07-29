@@ -356,7 +356,76 @@ def _complete(
                 _RECOVERY_COMMIT,
             ]
         )
+    topic_proof = runtime / "topic-revision-proof.json"
+    if topic_proof.exists():
+        arguments.extend(
+            [
+                "--observed-snapshot",
+                str(runtime / "clone-final-observed.json"),
+                "--topic-revision-proof",
+                str(topic_proof),
+            ]
+        )
+        topic_start = runtime / "topic-revision-start.json"
+        if topic_start.exists():
+            arguments.extend(["--topic-revision-start", str(topic_start)])
     return _run_helper(*arguments, check=check)
+
+
+def _write_topic_revision_evidence(
+    runtime: Path,
+    *,
+    observed_content_sha256: str,
+    normalized_content_sha256: str = _CONTENT_SHA256,
+    source: str = "checkpoint-dump",
+    start_revision: int = 100,
+    current_revision: int = 101,
+) -> None:
+    checkpoint_sha256 = json.loads(
+        (runtime / "clone-checkpoint.json").read_text(encoding="utf-8")
+    )["checkpoint_sha256"]
+    _write_snapshot(
+        runtime / "clone-final-observed.json",
+        total=126,
+        content_sha256=observed_content_sha256,
+    )
+    if source == "runtime-start":
+        _run_helper(
+            "write-topic-revision-start",
+            "--checkpoint-sha256",
+            checkpoint_sha256,
+            "--path",
+            str(runtime / "topic-revision-start.json"),
+            "--revision",
+            str(start_revision),
+            "--run-id",
+            _RUN_ID,
+            "--updated-at",
+            "2026-07-29T00:00:00.000000Z",
+        )
+    _run_helper(
+        "write-topic-revision-proof",
+        "--checkpoint-sha256",
+        checkpoint_sha256,
+        "--current-revision",
+        str(current_revision),
+        "--current-updated-at",
+        "2026-07-29T00:00:01.000000Z",
+        "--normalized-content-sha256",
+        normalized_content_sha256,
+        "--observed-content-sha256",
+        observed_content_sha256,
+        "--path",
+        str(runtime / "topic-revision-proof.json"),
+        "--run-id",
+        _RUN_ID,
+        "--source",
+        source,
+        "--start-revision",
+        str(start_revision),
+        "--start-updated-at",
+        "2026-07-29T00:00:00.000000Z",
+    )
 
 
 def test_complete_validates_evidence_and_clears_blocked(tmp_path: Path) -> None:
@@ -405,6 +474,25 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
     assert payload["recovery_tool_source_commit"] == _RECOVERY_COMMIT
 
 
+def test_complete_accepts_bound_runtime_topic_revision_normalization(
+    tmp_path: Path,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    _write_topic_revision_evidence(
+        runtime,
+        observed_content_sha256="7" * 64,
+        source="runtime-start",
+    )
+
+    _complete(runtime, blocked)
+
+    payload = json.loads((runtime / "result.json").read_text(encoding="utf-8"))
+    assert not blocked.exists()
+    assert payload["phase"] == "passed"
+    assert payload["isolation"]["dataset_projection_revision_delta"] == 1
+    assert payload["isolation"]["dataset_projection_start_source"] == "runtime-start"
+
+
 def test_recovery_revalidates_only_legacy_content_digest_drift(
     tmp_path: Path,
 ) -> None:
@@ -421,6 +509,10 @@ def test_recovery_revalidates_only_legacy_content_digest_drift(
         "--phase",
         "direct-cleanup-running",
     )
+    _write_topic_revision_evidence(
+        runtime,
+        observed_content_sha256="7" * 64,
+    )
 
     _complete(runtime, blocked, phase="recovered")
 
@@ -428,6 +520,46 @@ def test_recovery_revalidates_only_legacy_content_digest_drift(
     assert not blocked.exists()
     assert payload["phase"] == "recovered"
     assert payload["isolation"]["content_sha256"] == _CONTENT_SHA256
+    assert payload["isolation"]["dataset_projection_revision_delta"] == 1
+    assert (
+        payload["isolation"]["dataset_projection_start_source"]
+        == "checkpoint-dump"
+    )
+
+
+def test_topic_revision_proof_rejects_non_unit_delta(tmp_path: Path) -> None:
+    runtime, _blocked = _prepare_runtime(tmp_path)
+    checkpoint_sha256 = json.loads(
+        (runtime / "clone-checkpoint.json").read_text(encoding="utf-8")
+    )["checkpoint_sha256"]
+
+    completed = _run_helper(
+        "write-topic-revision-proof",
+        "--checkpoint-sha256",
+        checkpoint_sha256,
+        "--current-revision",
+        "102",
+        "--current-updated-at",
+        "2026-07-29T00:00:01.000000Z",
+        "--normalized-content-sha256",
+        _CONTENT_SHA256,
+        "--observed-content-sha256",
+        "7" * 64,
+        "--path",
+        str(runtime / "topic-revision-proof.json"),
+        "--run-id",
+        _RUN_ID,
+        "--source",
+        "checkpoint-dump",
+        "--start-revision",
+        "100",
+        "--start-updated-at",
+        "2026-07-29T00:00:00.000000Z",
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert "revision delta" in completed.stderr
 
 
 def test_recovery_rejects_non_content_snapshot_drift(tmp_path: Path) -> None:
@@ -444,6 +576,10 @@ def test_recovery_rejects_non_content_snapshot_drift(tmp_path: Path) -> None:
         "--phase",
         "direct-cleanup-running",
     )
+    _write_topic_revision_evidence(
+        runtime,
+        observed_content_sha256="7" * 64,
+    )
     current = runtime / "clone-recovery-current.json"
     _write_snapshot(
         current,
@@ -458,6 +594,8 @@ def test_recovery_rejects_non_content_snapshot_drift(tmp_path: Path) -> None:
         str(blocked),
         "--current-snapshot",
         str(current),
+        "--observed-snapshot",
+        str(runtime / "clone-final-observed.json"),
         "--phase",
         "recovered",
         "--recovery-tool-source-commit",
@@ -466,6 +604,8 @@ def test_recovery_rejects_non_content_snapshot_drift(tmp_path: Path) -> None:
         str(runtime / "result.json"),
         "--runtime",
         str(runtime),
+        "--topic-revision-proof",
+        str(runtime / "topic-revision-proof.json"),
         check=False,
     )
 
@@ -1227,8 +1367,10 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "--build-arg NEXT_PUBLIC_VWORLD_API_KEY" in source
     assert "schema_sha256" in source
     assert "content_sha256" in source
-    assert "api_call_log" in source
-    assert "row_value.created_at < %L::timestamptz" in source
+    assert "ops_live_topic_revisions" in source
+    assert "dataset projection revision delta is not one" in source
+    assert "--table=ops_live_topic_revisions" in source
+    assert "write-topic-revision-proof" in source
     assert "hashtextextended(row_value::text" in source
     assert "attribute.attidentity" in source
     assert "attribute.attgenerated" in source
