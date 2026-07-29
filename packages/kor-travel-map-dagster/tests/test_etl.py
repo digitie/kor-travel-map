@@ -305,8 +305,8 @@ def test_droppable_codes_are_explicit_and_minimal() -> None:
     for code in (
         "provider_address_mismatch",
         "provider_address_partial_match",
-        "admin_code_conflict_sido",
-        "admin_code_conflict_sigungu",
-        "admin_code_conflict_emd",
+        "admin_code_stale_sido",
+        "admin_code_stale_sigungu",
+        "admin_code_stale_emd",
     ):
         assert code not in DROPPABLE_ISSUE_CODES

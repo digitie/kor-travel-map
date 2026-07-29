@@ -14,7 +14,7 @@
   `부산 기장 조방국밥`처럼 행정구역명이 없는 짧은 주소였다. 새 규칙 적용 후 **1,477건 전량 적재**.
 - **BEHAVIOR (breaking)**: `provider_address_mismatch` / `provider_address_partial_match`
   issue code는 **발행 중단**됐다(기존 기록은 보존). 대신 provider 선언 행정코드와 좌표 역지오코딩
-  행정코드를 비교하는 `admin_code_conflict_{sido,sigungu,emd}`를 warning으로 방출한다.
+  행정코드를 비교하는 `admin_code_stale_{sido,sigungu,emd}`를 warning으로 방출한다.
 - **RELIABILITY**: 영구 손실(drop)·run 실패 대상이 severity가 아니라 **명시적 code
   화이트리스트**(`DROPPABLE_ISSUE_CODES` = `reverse_geocode_failed`, `missing_address`)로
   정해진다. 새 검증이 error를 내도 이 집합을 고치기 전에는 데이터가 사라지지 않는다.

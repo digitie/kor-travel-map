@@ -145,18 +145,18 @@ def test_address_string_naming_a_different_sigungu_is_not_an_issue() -> None:
         ("2671025300", "2671010200", "emd"),  # 같은 군, 다른 읍면동
     ],
 )
-def test_code_conflict_is_detected_at_the_right_level(
+def test_stale_code_is_detected_at_the_right_level(
     obs: str, claim: str, expected_level: str
 ) -> None:
     bundle = _bundle(
         admin_evidence=AdminEvidence(obs_code=obs, claim_code=claim, claim_kind="bjd")
     )
     issues = validate_feature_bundle_address(bundle).issues
-    codes = [i.code for i in issues if i.code.startswith("admin_code_conflict")]
-    assert codes == [f"admin_code_conflict_{expected_level}"]
+    codes = [i.code for i in issues if i.code.startswith("admin_code_stale")]
+    assert codes == [f"admin_code_stale_{expected_level}"]
 
 
-def test_code_conflict_is_never_an_error() -> None:
+def test_stale_code_is_never_an_error() -> None:
     """행정코드 불일치는 관측 대상이지 영구 손실 사유가 아니다."""
     bundle = _bundle(
         admin_evidence=AdminEvidence(
@@ -164,7 +164,7 @@ def test_code_conflict_is_never_an_error() -> None:
         )
     )
     result = validate_feature_bundle_address(bundle)
-    conflicts = [i for i in result.issues if i.code.startswith("admin_code_conflict")]
+    conflicts = [i for i in result.issues if i.code.startswith("admin_code_stale")]
     assert conflicts
     assert all(i.severity == "warning" for i in conflicts)
     assert all(i.code not in DROPPABLE_ISSUE_CODES for i in conflicts)
@@ -198,7 +198,7 @@ def test_sigungu_claim_compares_only_five_digits() -> None:
         )
     )
     codes = [i.code for i in validate_feature_bundle_address(differ).issues]
-    assert "admin_code_conflict_sigungu" in codes
+    assert "admin_code_stale_sigungu" in codes
 
 
 # ── 침묵을 통과로 착각하지 않는다 ────────────────────────────────────────────
@@ -217,7 +217,7 @@ def test_missing_axis_yields_no_verdict(evidence: AdminEvidence | None) -> None:
     """축이 하나라도 없으면 판정하지 않는다 — 통과가 아니라 증거 없음이다."""
     bundle = _bundle(admin_evidence=evidence)
     issues = validate_feature_bundle_address(bundle).issues
-    assert [i for i in issues if i.code.startswith("admin_code_conflict")] == []
+    assert [i for i in issues if i.code.startswith("admin_code_stale")] == []
 
 
 def test_summary_reports_evidence_coverage() -> None:

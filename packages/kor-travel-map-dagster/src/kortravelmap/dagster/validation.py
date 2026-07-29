@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal
@@ -127,10 +128,17 @@ def validate_feature_bundle_address(
     provider_address = _provider_address(bundle)
     issues: list[FeatureAddressIssue] = []
 
-    if feature.coord is not None and address.bjd_code is None:
-        # 좌표가 있는데 bjd가 없음 = kor-travel-geo reverse 호출이 결과를 못 냄
-        # → ADR-046 전용 코드 `reverse_geocode_failed`로 방출(F-02). 좌표-있음 케이스를
-        #   포괄적 `missing_bjd_code`가 아니라 실패 원인이 분명한 코드로 분류한다.
+    # T-VN-H28B: reverse 실패 판정은 "bjd가 비었는가"가 아니라 "reverse가 실제로 값을
+    # 냈는가"로 한다. provider payload가 bjd를 실어 주면(concierge는 1,477/1,477) 예전
+    # 조건은 **영원히 거짓**이 되어, kor-travel-geo가 run 내내 죽어 있어도 전량이 좌표
+    # 검증 없이 적재된다. AdminEvidence.obs_code가 reverse 성공 여부를 직접 말해 준다.
+    evidence = bundle.admin_evidence
+    reverse_produced_nothing = (
+        address.bjd_code is None
+        if evidence is None
+        else evidence.obs_code is None
+    )
+    if feature.coord is not None and reverse_produced_nothing:
         issues.append(
             FeatureAddressIssue(
                 feature_id=feature.feature_id,
@@ -158,7 +166,8 @@ def validate_feature_bundle_address(
             )
         )
 
-    issues.extend(_admin_code_issues(bundle, provider_address))
+    issues.extend(_provider_address_region_issues(bundle, provider_address))
+    issues.extend(_admin_code_stale_issues(bundle, provider_address))
 
     return FeatureAddressValidation(
         feature_id=feature.feature_id,
@@ -196,8 +205,10 @@ def ensure_feature_address_valid(
 ) -> FeatureAddressValidationSummary:
     """검증 error가 있으면 ``ValueError``로 중단한다."""
     summary = validate_feature_bundles_address(bundles)
-    if summary.has_errors:
-        codes = ", ".join(issue.code for issue in summary.issues if issue.severity == "error")
+    # T-VN-H28B: load 경로와 같은 allowlist를 쓴다. 두 공개 진입점이 서로 다른 drop
+    # 정책을 갖고 있으면 "allowlist를 고치기 전에는 손실 불가"라는 불변식이 깨진다.
+    if summary.has_blocking_errors:
+        codes = ", ".join(issue.code for issue in summary.blocking_issues)
         raise ValueError(f"Feature 주소/좌표 검증 실패: {codes}")
     return summary
 
@@ -245,25 +256,98 @@ def _first_divergence_level(obs: str, claim: str, precision: int) -> str:
     return "emd"
 
 
-def _admin_code_issues(
+_ADMIN_NAME_TOKEN: Final = re.compile(r"[가-힣]+[시군구]")
+"""provider 주소 문자열에서 시/군/구로 끝나는 행정구역 토큰."""
+
+_REGION_SUFFIXES: Final = ("특별자치시", "특별자치도", "광역시", "특별시", "시", "군", "구")
+
+
+def _region_stem(name: str) -> str:
+    """``기장군`` → ``기장``. 같은 지역의 축약 표기를 같게 본다."""
+    compact = _compact(name)
+    for suffix in _REGION_SUFFIXES:
+        if len(compact) > len(suffix) and compact.endswith(suffix):
+            return compact[: -len(suffix)]
+    return compact
+
+
+def _compact(value: str) -> str:
+    return "".join(str(value).split())
+
+
+def _provider_address_region_issues(
     bundle: FeatureBundle,
     provider_address: str | None,
 ) -> tuple[FeatureAddressIssue, ...]:
-    """행정코드 대 행정코드 교차검증 (T-VN-H28B).
+    """provider가 **쓴 주소 문자열**과 좌표 reverse 행정구역명을 대조한다 (T-VN-H28B).
 
-    이전 규칙은 좌표 reverse가 낸 **시군구명**이 provider 주소 **문자열**에 부분문자열로
-    들어있는지를 봤고, 없으면 error → 영구 drop이었다. 실측
-    (``docs/reports/concierge-address-mismatch-evidence-2026-07-29.md``)에서 그 규칙은
-    1,477 후보 중 380건을 drop했는데 **380건 전부 오탐**이었고 진짜 불일치는 0건이었다.
-    실패의 365/380은 provider 주소가 ``부산 기장 조방국밥``처럼 행정구역명을 아예 담지 않은
-    짧은 표기였다 — 좌표가 틀린 것이 아니라 문자열이 짧았을 뿐이다.
+    이것이 "좌표가 주소와 다른 곳을 가리키는가"를 물을 수 있는 **유일한 독립 축**이다.
+    payload 행정코드는 최소 concierge에서 같은 geo reverse의 캐시본이라 쓸 수 없다
+    (``AdminEvidence`` 모듈 docstring).
 
-    그래서 이름 문자열 축은 **판정에서 제거**하고, 권위 있는 코드 축만 쓴다. 코드 두 축이
-    모두 있을 때(``grade == "dual"``)만 판정하며, 없으면 "통과"가 아니라 "증거 없음"으로
-    남긴다(``evidence_grade``가 metadata에 집계된다).
+    이전 규칙은 이 축을 쓰면서 셋을 틀렸고 그래서 1,477 후보 중 380건을 **영구 drop**했다
+    (``docs/reports/concierge-address-mismatch-evidence-2026-07-29.md``).
 
-    판정 결과는 **어떤 경우에도 error가 아니다**. drop 대상은 ``etl`` 쪽 code allowlist가
-    정하며 이 축은 거기 들어있지 않다 — 규칙이 바뀌어도 영구 손실이 생기지 않는다.
+    1. **행정구역 토큰이 없는 문자열을 불일치로 셌다.** 실측 375/380이 ``부산 기장 조방국밥``
+       처럼 시/군/구 토큰이 아예 없어 부분문자열 검사가 좌표와 무관하게 통과 불가였다.
+       → 토큰이 없으면 **판정하지 않는다**.
+    2. **축약·단계 표기를 불일치로 셌다** (``기장`` vs ``기장군``, ``양구읍`` vs ``양구군``).
+       → 어간(``_region_stem``)으로 비교한다.
+    3. **경계 좌표를 불일치로 셌다.** 유일한 잔여 후보였던 ``서울 서대문구 통일로 251``은
+       텍스트를 정지오코딩하면 서대문구이고 후보 좌표에서 **143m**였다(종로구 경계).
+       → reverse **후보 전체**의 시군구명 중 하나와 맞으면 일치로 본다.
+
+    severity는 ``warning``이며 drop allowlist에 없다 — 이 축으로는 데이터가 사라지지 않는다.
+    """
+    if not provider_address:
+        return ()
+    address = bundle.feature.address
+    evidence = bundle.admin_evidence
+
+    observed: list[str] = []
+    if evidence is not None and evidence.obs_sigungu_names:
+        observed.extend(evidence.obs_sigungu_names)
+    elif address.sigungu_name:
+        observed.append(address.sigungu_name)
+    if not observed:
+        return ()
+
+    text = _compact(provider_address)
+    if not _ADMIN_NAME_TOKEN.search(text):
+        # 판정 불가 — 통과가 아니다. 커버리지는 name_state로 집계된다.
+        return ()
+
+    if any(_region_stem(name) and _region_stem(name) in text for name in observed):
+        return ()
+
+    feature = bundle.feature
+    return (
+        FeatureAddressIssue(
+            feature_id=feature.feature_id,
+            source_record_key=bundle.source_record.source_record_key,
+            code="provider_address_region_disagreement",
+            severity="warning",
+            message=(
+                "provider 주소 문자열이 지목하는 행정구역이 좌표 reverse 후보"
+                f"({', '.join(observed[:4])}) 어디에도 해당하지 않음."
+            ),
+            provider_address=provider_address,
+            bjd_code=address.bjd_code,
+            sigungu_code=address.sigungu_code,
+        ),
+    )
+
+
+def _admin_code_stale_issues(
+    bundle: FeatureBundle,
+    provider_address: str | None,
+) -> tuple[FeatureAddressIssue, ...]:
+    """payload 행정코드가 좌표 reverse 결과와 어긋나는지 본다 — **staleness 검출** (T-VN-H28B).
+
+    위치 검증이 **아니다**. concierge의 payload 코드는 같은 geo reverse를 같은 좌표로 호출해
+    만든 캐시본이고, 그 producer는 코드가 이미 있으면 갱신하지 않는다. 따라서 불일치는
+    "좌표가 틀렸다"가 아니라 **"캐시된 코드가 좌표 변경을 따라가지 못했다"**는 뜻이다.
+    적재를 막지 않고 warning으로만 남긴다.
     """
     evidence = bundle.admin_evidence
     if evidence is None or evidence.grade != "dual":
@@ -272,11 +356,8 @@ def _admin_code_issues(
     obs = evidence.obs_code or ""
     claim = evidence.claim_code or ""
     kind = evidence.claim_kind or "bjd"
-    precision = min(_MAX_COMPARE_PRECISION, _CLAIM_PRECISION.get(kind, 10), len(claim))
-    if precision <= 0 or len(obs) < precision:
-        return ()
-
-    if obs[:precision] == claim[:precision]:
+    precision = min(_MAX_COMPARE_PRECISION, _CLAIM_PRECISION[kind], len(claim), len(obs))
+    if precision <= 0 or obs[:precision] == claim[:precision]:
         return ()
 
     feature = bundle.feature
@@ -285,11 +366,11 @@ def _admin_code_issues(
         FeatureAddressIssue(
             feature_id=feature.feature_id,
             source_record_key=bundle.source_record.source_record_key,
-            code=f"admin_code_conflict_{level}",
+            code=f"admin_code_stale_{level}",
             severity="warning",
             message=(
-                f"provider가 선언한 행정코드와 좌표 reverse 행정코드가 {level} 단계에서 다름 "
-                f"(obs={obs[:precision]}, claim={claim[:precision]})."
+                f"payload 행정코드가 좌표 reverse 결과와 {level} 단계에서 다름 — "
+                f"producer 캐시가 낡았을 수 있다 (obs={obs[:precision]}, claim={claim[:precision]})."
             ),
             provider_address=provider_address,
             bjd_code=feature.address.bjd_code,

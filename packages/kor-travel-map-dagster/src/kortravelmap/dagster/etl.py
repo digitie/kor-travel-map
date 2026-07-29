@@ -164,11 +164,16 @@ def _merge_validation_summaries(
     left: FeatureAddressValidationSummary,
     right: FeatureAddressValidationSummary,
 ) -> FeatureAddressValidationSummary:
+    merged_grades = Counter(left.evidence_grade_counts)
+    merged_grades.update(right.evidence_grade_counts)
     return FeatureAddressValidationSummary(
         total=left.total + right.total,
         issue_count=left.issue_count + right.issue_count,
         error_count=left.error_count + right.error_count,
         warning_count=left.warning_count + right.warning_count,
+        # T-VN-H28B: 커버리지를 합치지 않으면 batch가 2개 이상인 run에서 빈 dict가 나가
+        # "측정 안 됨"과 "잴 것이 없음"을 구분할 수 없게 된다.
+        evidence_grade_counts=dict(merged_grades),
         issues=left.issues + right.issues,
     )
 
