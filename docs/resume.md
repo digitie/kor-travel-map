@@ -10,6 +10,30 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-29 (codex) — T-VN-48D 2인 재리뷰 하드닝 → 최종 exact gate
+
+**방금**: T-VN-48/기반 PR #888 수정 델타의 적대 리뷰 2명이 찾은 Live 세션
+`application_name` spoof, foreground 자식의 flock 상속, 자유형 payload timestamp cast,
+구 cursor 의미 재사용, 겹치는 batch의 최신 증거 역전, mocked cleanup 실패 은폐를
+`5d62cde5`에서 보강했다. 재검토에서 찾은 autocommit 부분 적용 재시도·writer default
+공백과 Docker create 응답 유실 cleanup까지 `f28a6a2f`에서 닫았다. migration은 자유형
+payload를 보존하고 `detected_at`으로
+결정 backfill하며, NOT VALID/VALIDATE와 concurrent index로 장시간 ACCESS EXCLUSIVE 구간을
+분리한다. 주소 finding upsert는 statement 관측 시각이 오래된 batch가 최신 FK/payload를
+덮지 못하게 하고 발생 횟수만 증가시킨다. Live runner는 guardian flock과 exact backend
+PID/start identity를 사용하며 Mocked runner는 소유 container/network/image 제거·사후 부재를
+fail-closed로 확인한다.
+
+**검증**: Ruff 전체, strict mypy 196 files, import-linter 4 contracts, shell/Node syntax,
+관련 단위 49개와 신규 migration/upsert 통합 7개가 통과했다. 전체 unit의 앞선 실패 node
+12개도 실패 지점 재개로 통과했고 frontend OpenAPI/type/lint/Vitest 254개와 production build가
+green이다.
+
+**다음 한 작업**: 잔여 P0~P2 0건인 두 리뷰어 재검토와 최종 문서 상태를 커밋한다. 이어
+exact final SHA에서 mocked checkpoint D serial/workers=4와 보존 clone의
+파괴적 Live를 재검증하고, 머지 직전 PR → CI green → 직접 머지한다. Claude Code PR 감사는
+사용자 변경 지시에 따라 task PR 머지 뒤 별도 후속 단계로 옮긴다.
+
 ## 2026-07-29 (codex) — PR #888 사후 감사 반영 중 → T-VN-48D 최종 gate
 
 **방금**: PR #888 원본 patch 적대 감사 8건을 반영했다. 주소 finding key를 source entity

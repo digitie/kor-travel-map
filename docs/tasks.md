@@ -31,8 +31,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [ ] `T-VN-48D`(Live 증거 경계·최종 리뷰) →
-    [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
+  - b0: [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
     [ ] `T-VN-49D`(React 구조 debt)
   - b1: [ ] `T-VN-11A` → [ ] `T-VN-11B`(service batch) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
@@ -66,10 +65,11 @@ barrier로 직렬화한다.
 
 - base는 **main**(`integration/t-vn`은 PR #790 합류로 폐지). 시작·PR 직전·머지 직후
   `origin/main` rebase. PR 하나는 task 하나만 소유.
-- **사용자 명시 동반 감사 예외**: 각 T-VN task의 최종 PR에는 사용자 지시대로 직전 Claude
-  Code PR 사후 감사에서 발견한 수정과 그 감사 issue를 함께 넣는다. 이는 새 실행 lane task가
-  아니라 현재 task의 필수 PR 전 gate다. T-VN-48 PR에는 issue #881의 hidden alias 제거와
-  PR #877 아카이브 복구를 이 예외로 함께 반영한다.
+- **Claude Code PR 감사 순서(사용자 지시 2026-07-29)**: 개별 T-VN task는 자기 구현·적대
+  리뷰·Live·CI를 먼저 끝내 PR을 머지한다. Claude Code PR 사후 감사는 task PR 머지 뒤
+  별도 후속 단계에서 issue를 만들고 진행하며, 진행 중 task의 PR 생성·머지를 지연시키거나
+  그 PR에 새 감사를 합치지 않는다. T-VN-48에는 규칙 변경 전에 완료한 issue #881과 PR #888
+  감사 수정만 유지한다.
 - 첫 reviewable checkpoint부터 원격 feature branch에 작은 의미 단위로 자주 커밋·push하되,
   PR은 구현·적대 리뷰 반영·실데이터 검증·최종 main rebase를 모두 마친 뒤 **머지 직전**에만
   연다. 실패하면 검증된 직전 checkpoint부터 재개한다.
@@ -84,7 +84,7 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(현 head `0067_integrity_dedupe_key`). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(현재 Lane B 후보 `0068_integrity_last_seen`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
@@ -142,23 +142,6 @@ barrier로 직렬화한다.
     대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
 
 ## Lane B 상세 — b0 선행 하드닝
-
-### T-VN-48 — mocked Playwright drift 제거
-
-T-VN-48A~C는 최초 273-test baseline의 deterministic drift 89건을
-  Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별로 제거했다.
-- [ ] T-VN-48D — 구현과 exact `45e2161d` mocked serial/CI-parallel gate는 각각
-  **274/274 passed, expected failure/flake/skip 0건**으로 끝났다.
-  - R1과 양립하는 격리 clone 전용 trusted runner를 추가했다. exact candidate `fe0c956e`의
-    본 acceptance 2/2와 recovery-only 2/2, startup migration 없음, cleanup/audit owned
-    Feature·weather·price·FK·pending change request 0을 root-owned evidence로 확정했다.
-  - 최초 완료 판정은 seed의 정상 FK 2건을 residue로 오판해 BLOCKED를 남겼다. `abc1de8b`의
-    복구 경로가 실패 당시 최종 snapshot과 현재 clone DB·source/image identity가 정확히
-    같은지 확인한 뒤 테스트/build/fixture를 반복하지 않고 완료했다. BLOCKED·후보
-    container/image/listener는 0이다.
-  - 적대 리뷰 2명 반영, 최신 main rebase 뒤 최종 exact revision의 mocked serial/CI-parallel과
-    clone Live 재검증, Claude PR 사후 감사, PR/CI green/merge까지 끝난 뒤에만
-    `tasks-done.md`로 옮긴다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 

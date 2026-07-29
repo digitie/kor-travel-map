@@ -120,6 +120,10 @@ gh pr merge <N> --merge --delete-branch
 
 ## 7. 머지 후 동기화
 
+개별 task PR은 자기 구현·적대 리뷰·Live·CI만으로 먼저 머지한다. 다른 lane의 Claude Code
+PR 사후 감사는 task PR을 막는 선행 gate가 아니며, 머지 뒤 별도 issue와 후속 PR로 진행한다.
+이미 시작한 감사가 있더라도 새 task PR에 계속 누적하지 않는다(사용자 지시 2026-07-29).
+
 머지 후 자기 worktree의 `sandbox/<agent>`와 WSL 미러를 main에 맞춘다:
 
 ```

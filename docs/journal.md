@@ -17,6 +17,38 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-29 (codex) — T-VN-48D 2인 적대 리뷰 하드닝
+
+T-VN-48와 현재 PR에 이미 포함된 PR #888 사후 감사 수정의 branch-authored delta만 두
+리뷰어가 검토했다. rebase로 유입된 PR #887 이하 코드는 범위에서 제외했다.
+
+- Live clone fence가 client-controlled `application_name`을 소유권으로 믿던 문제를 기존
+  client backend 전부 종료 + 정확한 backend PID/시작 시각 추적으로 바꿨다.
+- runner의 FD 9 flock을 외부 명령에 상속하던 구조를 stdin EOF guardian coprocess로
+  바꿔, runner SIGKILL 뒤 장시간 docker/build/executor가 복구 lock을 붙잡지 않게 했다.
+- `0068`은 자유형 `payload.last_seen_at`을 timestamp로 cast·삭제하지 않고 payload를
+  보존한다. `last_seen_at=detected_at` 결정 backfill, NOT VALID/VALIDATE, concurrent index
+  교체로 malformed/null/offset 값과 대용량 lock 경계를 함께 고정했다.
+- integrity cursor kind를 `integrity_issues_last_seen_v2`로 분리해 구
+  `detected_at` cursor를 조용히 새 정렬축에 적용하지 않는다.
+- 겹치는 batch는 `GREATEST(last_seen_at)`과 조건부 최신 필드 갱신으로 오래된 관측이 최신
+  FK/message/severity/payload를 되돌리지 못하며, occurrence count만 누적한다.
+- Mocked checkpoint cleanup은 container/network/image 제거 명령과 사후 부재를 확인하고
+  Docker 오류·timeout·잔존을 exit 2로 승격한다.
+- 1차 재검토가 `0068` 첫 autocommit 중단 뒤 duplicate column으로 재개 불가한 경계와
+  default 설정 전 writer NULL 공백을 재현했다. column 추가+default를 단일 atomic
+  `ALTER TABLE`로 묶고 column/constraint/index 각 단계가 부분 적용 상태를 감지·정규화해
+  같은 forward migration을 재실행할 수 있게 했다.
+- Docker daemon이 create를 완료했지만 CLI 응답이 유실되는 signal 경계는 create-attempt를
+  먼저 기록하고 name+ownership label로 실제 ID를 회수해 제거한다. 검증 전 빈/손상 ID를
+  소유 identity로 저장하지 않으며, stderr 문구 대신 container/network/image 목록의 실제
+  부재로 cleanup 성공을 판정한다.
+
+검증은 관련 단위 49개, 신규 migration/upsert 통합 7개, 전체 Ruff, strict mypy 196 files,
+import-linter 4 contracts, shell/Node syntax가 통과했다. 실패한 migration fixture는
+Alembic naming convention과 asyncpg datetime 타입 지점에서만 재개해 수정했고 downgrade는
+실행하지 않았다.
+
 ## 2026-07-29 (codex) — PR #888 주소 finding ledger 사후 감사 정정
 
 PR #888 원본 patch를 별도 적대 감사한 결과 8건을 확인하고 현재 T-VN-48 PR에 함께

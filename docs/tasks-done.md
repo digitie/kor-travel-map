@@ -3,6 +3,28 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-29 — Lane B T-VN-48A~D: Mocked drift 제거·격리 clone Live 증거
+
+- [x] **T-VN-48A~C** — 최초 273-test baseline의 deterministic drift 89건을
+  Feature·검토 15건, ops 5건, auth/shell 69건으로 고정해 단계별로 제거했다. 최종
+  checkpoint D의 serial/workers=4는 각각 **274/274 passed**, expected failure·actual
+  failure·flake·skip 0건이다.
+- [x] **T-VN-48D** — R1과 양립하는 격리 실데이터 clone 전용 trusted runner를 추가했다.
+  self-built exact revision image와 loopback/internal-network 경계를 결박하고, 본 acceptance
+  2/2와 recovery-only 2/2, startup migration 없음, owned Feature·weather·price·FK·pending
+  change request cleanup 0을 root-owned redacted evidence로 확정했다.
+- [x] **실패 지점 복구** — seed의 정상 FK 2건을 residue로 오판한 최초 BLOCKED 뒤 clone
+  DB·source/image/checkpoint identity를 대조해 실패 지점부터 재개했다. Alembic downgrade는
+  실행하지 않았고 최종 BLOCKED·후보 container/image/listener는 0이다.
+- [x] **적대 리뷰 2인** — branch-authored delta만 검토하고 rebase 유입 diff는 제외했다.
+  Live session spoof와 flock 상속, `0068` payload/cursor/concurrency/online lock·재시작성,
+  Mocked container/network/image cleanup의 정상·signal 경계를 모두 보강했다. 마지막 exact
+  국소 재검토에서 잔여 P0~P2는 0건이다.
+- [x] **검증** — Ruff 전체, strict mypy 196 files, import-linter 4 contracts, 관련 단위
+  49개, migration/upsert 통합 7개, OpenAPI/type/lint/Vitest 254개와 production build가
+  green이다. final exact candidate의 Mocked serial/workers=4와 보존 clone 파괴적 Live를
+  PR 전 다시 결박한다.
+
 ## 2026-07-29 — Lane A a1 T-VN-H28A/B: #673 주소 검증 규칙 교체 (한 PR)
 
 > **정정 (적대 리뷰 반영)** — 아래 "payload 행정코드 == geo 행정코드이므로 전부 오탐"이라는
