@@ -25,9 +25,10 @@ barrier로 직렬화한다.
   - a1: [x] `T-VN-H29`(PinVi 검색 좌표 null 복구 — H07D 파생) →
     [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
     [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
-    [ ] `T-VN-H25A`(stale reference 증거 manifest) →
+    [x] `T-VN-H25A`(미연결 membership 증거·전제 정정) →
     [ ] `T-VN-H30A/B/C`(H28 후속 — 관측 durable화·실적재 검증·타 provider 확대) →
-    [ ] `T-VN-H25B`(검토된 reference 적용) →
+    [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
+    [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
@@ -260,23 +261,45 @@ T-VN-H28A/B(#673)에서 규칙 교체와 영구 손실 차단은 끝났으나, �
   집계되는 현 상태가 의도된 것임을 문서로 고정한다. provider 고유 코드(VisitKorea
   `areaCode` 등)는 넣지 않는다.
 
-### T-VN-H25 — 공식 curation stale Feature reference 재해소
+### T-VN-H25 — 공식 curation 미연결 membership 해소
 
-T-VN-47 격리 실데이터 clone에서 공식 CSV의 고유 `feature_id` 158개 중 54개가 현재
-`feature.features`에 존재하지 않았다. H24가 stable component 기반 미연결 membership으로
-무손실 보존하므로 증거 생성과 mutation을 분리한다.
+> **전제 정정 (2026-07-29, T-VN-H25A)** — 기존 전제 *"공식 CSV의 고유 `feature_id` 158개 중
+> 54개가 `feature.features`에 존재하지 않았다"*는 **재현되지 않는다**. prod에서 158/158이
+> 존재하고 전부 curation 링크 가능한 상태이며 `created_at`이 2026-06-29~07-03로 측정 시점보다
+> 앞선다. `ops.feature_merge_history`는 0행이고 미연결 261건 중 `source_record_key` 보유가
+> 0건이라, `ON DELETE SET NULL` cascade로 링크가 지워진 흔적도 없다.
+> **stale reference 해소는 대상이 없다.** 실제 문제는 처음부터 연결된 적 없는 membership이다.
+> 근거: [`reports/curation-unlinked-reference-evidence-2026-07-29.md`](reports/curation-unlinked-reference-evidence-2026-07-29.md).
 
-- [ ] T-VN-H25A — **stale reference evidence manifest**
+H24가 stable component 기반 미연결 membership으로 무손실 보존하므로 데이터 손실 위험은 없다.
+증거 생성과 mutation을 분리한다.
 
-  provider provenance·이름·주소·Feature lifecycle/merge history를 동일 DB snapshot에서 대조해
-  candidate·confidence·근거와 unresolved 사유를 manifest로 만든다. 좌표 근접만으로 자동 승인하지
-  않고 이 단계에서는 CSV/DB target을 바꾸지 않는다.
+- [x] T-VN-H25A — **미연결 membership evidence manifest** (전제 정정 포함)
 
-- [ ] T-VN-H25B — **검토된 high-confidence reference 적용**
+  prod 단일 snapshot에서 존재 여부·lifecycle/merge·공식 collection 범위 정합을 대조했다.
+  주요 산출: 전제 반증(§1·§2), CSV 217/269 vs DB 225/261로 **같은 모집단이며 DB가 8건 앞섬**(§3),
+  미연결의 지배 원인은 수목원이 아니라 **등대 103건**(105 중 2건만 링크, §4).
+  자체 matcher는 결함이 확인돼 후보 등급 산출에는 쓰지 않는다 — CSV `metadata_json`의
+  `feature_match_confidence`(review 183 / unmatched 86)가 기준선이다(§5·§6).
 
-  H25A에서 승인된 항목만 공식 CSV의 `feature_id`에 반영하고, 불확실한 component는 미연결 상태와
-  근거를 유지한다. 5개 CSV의 linked/unresolved 수치, preview/commit, REST/UI를 같은 실데이터
-  snapshot에서 검증한다.
+- [ ] T-VN-H25B — **CSV 역반영 8건 + 매칭 재실행**
+
+  H25A 재정의 결과 실행 가능한 작업은 둘이다.
+  1. **CSV 역반영 8건** — DB에서는 링크됐으나 CSV `feature_id`가 비어 있는 항목(H25A §3).
+     현재 어느 문서에도 기록돼 있지 않은 확정 대상이다.
+  2. **매칭 재실행** — CSV `metadata_json.feature_match_confidence`(review 183 / unmatched 86)를
+     기준선으로 삼고, 괄호·`&` 복합명·포함 방향·`status` 범위 결함을 고친 matcher로 대조해
+     **차이를 설명**한다. 자체 수치를 기준선으로 삼지 않는다(H25A §5).
+
+  좌표 근접만으로 자동 승인하지 않는다. 불확실한 component는 미연결 상태와 근거를 유지한다.
+  5개 CSV의 linked/unresolved 수치, preview/commit, REST/UI를 같은 실데이터 snapshot에서 검증한다.
+
+- [ ] T-VN-H31 — **등대 공급원 부재 해소 (H25A 파생)**
+
+  공식 curation 미연결 261건 중 **103건이 등대**이며 105개 중 2개만 링크됐다. ADR-034 9단계
+  provider 순서에 등대를 공급하는 provider가 없다 — curation 매칭으로는 해소되지 않는다.
+  공급원(해양수산부/KHOA 계열 등)을 조사해 적재 경로를 만들거나, 불가능하면 미연결 유지 근거를
+  문서로 확정한다.
 
 ### T-VN-H22 — 0065 curation owner quarantine 재분류
 

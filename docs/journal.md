@@ -17,6 +17,50 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-29 (claude) — Lane A a1: T-VN-H25A 공식 curation 미연결 증거·전제 정정
+
+**결론 먼저**. task 전제 *"공식 CSV 고유 `feature_id` 158개 중 54개가 `feature.features`에
+부재"*는 **재현되지 않는다**. prod에서 158/158이 존재하고 전부 curation이 링크 가능한 상태이며
+`created_at`이 2026-06-29~07-03로 측정 시점보다 앞선다("나중에 적재돼서 지금은 보인다"는 양립
+가설 배제). stale reference 해소는 대상이 없다.
+
+**1차 초안이 적대 리뷰 2건에서 기각됐다.** 근거 7개가 무효 판정을 받았고 그 지적이 옳았다.
+
+- *"dangling 0건 → 애초에 미연결"* — `curation_items.feature_id`가 **`ON DELETE SET NULL`**이라
+  dangling은 구조적으로 불가능하다. FK 정의의 재진술을 발견으로 제시했고, 그 결과 261개 NULL이
+  *cascade로 지워진 링크*일 가능성을 배제하지 못했다. 이건 전제가 주장하는 바로 그 형태였다.
+- *"lifecycle/merge를 대조했다"* — `feature.feature_merges`/`feature.source_links`를 조회했는데
+  **둘 다 존재하지 않는 테이블**이다(실제는 `ops.feature_merge_history` /
+  `provider_sync.source_links`). `except Exception`이 삼켰고, 게다가 **빈 배열**에 바인딩돼
+  어떤 결과도 낼 수 없었다. 로그에는 "조회 불가" 세 줄만 남아 축을 덮은 것처럼 보였다.
+- *"자동 승인 가능 high 0건"* — high 조건이 `address_hint` 일치를 요구하는데 그 열은
+  **486행 전부 비어 있다**. 도달 불가 분기였고 0은 채점 함수의 성질이었다. 그런데 이 수치로
+  H25B를 "대상 0건"이라 재정의하려 했다.
+- *"전제가 인용한 바로 그 clone에서도 0"* — clone 신원 미확인. 기록상 T-VN-47 clone은
+  1,030,469이고 삭제됐다. 사용한 것(1,030,487)은 prod 재clone일 가능성이 크다.
+- *"구 CSV로도 158/158 → CSV 변경 배제"* — 두 리비전의 `feature_id` **집합이 동일**해 결과가
+  보장된 공허한 대조였다.
+- *"269 vs 261"* — 전 collection 합계와 공식 CSV를 병치한 비교 불가 수치.
+- *"none 191건은 실제 부재"* — matcher가 괄호·`&` 복합명·포함 방향·`status='active'` 한정에서
+  실패한다. 269건 중 최소 89건이 그 형태다.
+
+**실제 스키마로 다시 측정한 결과**(prod 단일 snapshot, `current_database()` 확인, 읽기 전용):
+
+- `ops.feature_merge_history` **0행**, 158개 중 merge loser 이력 **0**, 미연결 261건 중
+  `source_record_key` 보유 **0** → cascade로 지워진 링크가 아님이 확인됐다. 미연결이 맞다.
+- 공식 collection으로 범위를 좁히니 CSV **217/269** vs DB **225/261**이고 collection별 총계가
+  파일별 행수와 정확히 일치한다 → 같은 모집단이며 **DB가 8건 앞서 있다**. 이 8건은 CSV로
+  역반영할 확정 대상이고 어느 문서에도 기록돼 있지 않았다 — 이번 작업의 유일한 신규 실행 항목.
+- 미연결의 지배 원인은 수목원이 아니라 **등대 103건**(6개 시즌 105개 중 2개만 링크). ADR-034
+  9단계 provider 순서에 등대 공급원이 없다 → `T-VN-H31`로 분리.
+- 후보 등급은 자체 matcher 대신 CSV `metadata_json.feature_match_confidence`
+  (review 183 / unmatched 86)를 기준선으로 삼는다. 자체 matcher는 15/191을 냈는데 168행 차이가
+  이 데이터셋에서 가장 강한 신호이며, 그 방향은 "내 matcher가 약하다"이다.
+
+**교훈**. H28의 tautology(자기 자신과 비교)와 이번의 도달 불가 분기는 같은 계열이다 —
+**결론을 내기 전에 그 근거가 독립적으로 유도됐는지, 그리고 그 조건이 애초에 만족 가능한지를
+먼저 확인한다.** 두 task 연속으로 같은 실수를 냈고 둘 다 리뷰어가 잡았다.
+
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H28A/B #673 주소 검증 규칙 교체
 
 > **정정 (적대 리뷰 반영)** — 아래 "payload 행정코드 == geo 행정코드이므로 전부 오탐"이라는

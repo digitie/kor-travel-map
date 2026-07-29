@@ -10,6 +10,29 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-29 (claude) — Lane A a1: T-VN-H25A 완료(전제 정정) → 다음은 T-VN-H30A
+
+**다음 한 작업**: `T-VN-H30A`(주소 검증 issue를 `ops.data_integrity_violations`에 durable 기록).
+이후 `T-VN-H30B/C` → `T-VN-H25B` → `T-VN-H31` → `T-VN-H22A/B/C`.
+
+- **완료**: `T-VN-H25A` — task 전제(*"158개 중 54개가 `feature.features`에 부재"*)가
+  **재현되지 않음**을 확정하고, 실제 상태를 다시 측정했다. 근거:
+  [`reports/curation-unlinked-reference-evidence-2026-07-29.md`](reports/curation-unlinked-reference-evidence-2026-07-29.md).
+  - 158/158 존재 + 전부 curation 링크 가능 + `created_at` 2026-06-29~07-03(측정 시점보다 앞섬).
+  - `ops.feature_merge_history` **0행**, 미연결 261건 중 `source_record_key` **0건** →
+    `ON DELETE SET NULL` cascade로 링크가 지워진 흔적 없음. 미연결이 맞다.
+  - **신규 발견**: CSV 217/269 vs DB 225/261, collection별 총계 일치 → 같은 모집단이며
+    **DB가 8건 앞서 있다**(CSV 역반영 대상, 어느 문서에도 없던 항목).
+  - **미연결의 지배 원인은 등대 103건**(105 중 2건만 링크). 수목원/krforest가 아니다.
+- **교훈 — 조건이 만족 가능한지부터 확인한다**: 1차 초안의 "자동 승인 가능 0건"은
+  `address_hint` 일치를 요구했는데 그 열이 **486행 전부 비어** 도달 불가 분기였다. 0은 데이터가
+  아니라 채점 함수의 성질이었다. H28의 tautology와 같은 계열의 오류를 **연속으로** 냈다.
+- **교훈 — 없는 테이블에 물으면 답이 없는 게 아니라 "확인했다"는 착각이 남는다**: lifecycle 대조가
+  `feature.feature_merges`/`feature.source_links`(둘 다 미존재)를 향했고 예외를 삼켰으며 빈 배열에
+  바인딩됐다. 로그에는 "조회 불가" 세 줄만 남아 축을 덮은 것처럼 보였다. **스키마를 읽고 쓴다.**
+- **교훈 — FK 정의를 발견으로 착각하지 않는다**: `curation_items.feature_id`가
+  `ON DELETE SET NULL`이라 "dangling 0건"은 구조적으로 자명하다. 판별에는 lifecycle 축이 필요했다.
+
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H28A/B 완료 → 다음은 T-VN-H25A
 
 **다음 한 작업**: Lane A a1 `T-VN-H25A`(공식 curation stale Feature reference 증거 manifest).
