@@ -396,10 +396,32 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     다만 **의미론은 위험하다** — tombstone이 하나라도 있는 identity 그룹에서 survivor는
     tombstone이고 같은 그룹의 **active membership까지 삭제**되며, 백업 테이블을 만들지 않는다.
   - 새 유니크 인덱스 `uq_curation_items_identity`의 충돌 그룹 **0개** → 생성 성공한다.
-  - **예상 못 한 파괴적 변경**: `0065`가 `curation_collections.collection_key` **52개를
-    재작성**한다(`legacy:<theme_uuid>:<source_uuid>:<md5(title)>` 형태). 전부 `published`
-    collection이라 **외부 계약이 바뀐다** — PinVi 등 소비자가 collection_key를 참조하면
-    깨진다. 적용 전에 소비자 조사가 필요하다.
+  - `0065`가 `curation_collections.collection_key` **52개를 재작성**한다
+    (`legacy:<theme_uuid>:<source_uuid>:<md5(title)>` 형태, 전부 `published`/`public`).
+    실체는 concierge YouTube 장소 후보이고 그 안의 공개 item이 3,044건이다.
+
+    > **정정** — 나는 이걸 "외부 계약이 바뀐다 — PinVi 등 소비자가 참조하면 깨진다"고
+    > 적었다. **소비자 전수 조사 결과 깨지는 것이 없다.** 위험을 확인하지 않고 단정했다.
+    > - `collection_key`를 **조회 키로 받는 엔드포인트가 0개**다 — 전부 `collection_id`
+    >   UUID 경로다. 응답에 실리는 **출력 필드**일 뿐이라 스키마·엔드포인트가 안 바뀐다.
+    > - e2e live의 하드코딩 `OFFICIAL_COLLECTION_KEYS` 19개와 재작성 52개의
+    >   **교집합 0개**다. 19개는 `created_by='admin'`이고 `migrated_from` metadata가 없어
+    >   0065의 `WHERE metadata @> '{"migrated_from":…}'`에서 아예 제외된다.
+    > - CSV import는 `ON CONFLICT (collection_key)`로 upsert하지만 CSV의 키
+    >   (`korean-tourism-100:2023-2024` 등)가 재작성 대상이 아니라 그대로 매칭된다 —
+    >   **중복 collection 생성 없음**.
+    > - PinVi·kor-travel-concierge·kor-travel-docker-maneger 전부 `collection_key`
+    >   참조 **0 hit**. dagster asset/CLI도 0 hit.
+    > - 재계산은 **멱등**이다(`(theme_id, source_id, md5(title))` 기반, prod에 NULL/blank
+    >   title 0건, base_key 중복 0건이라 `:split:`/`:conflict:` 접미사 미발생).
+    >
+    > 남는 것은 계약 **문서화** 권고뿐이다(blocker 아님): `collection_key`는 0045→0065에서
+    > 형식이 두 번 바뀐 **불안정 식별자**인데 공개 응답에 실린다. "표시·검색용이고 안정
+    > 식별자는 `collection_id`"임을 명시하고, `docs/integration-map.md`에 curation
+    > collection 표면 계약 행을 추가한다(현재 그 행이 없어 소비자 판정을 전 저장소
+    > grep으로만 할 수 있었다).
+  - `0065` 후반 quarantine 블록도 **no-op**이다 — canonical-only item(`legacy_projection_id
+    IS NULL`)이 prod에 0건이다. 새 유니크 인덱스 위반 행도 0건.
   - `0065`의 대량 UPDATE: `source_updated_at` **3,530행 전량**(WHERE 없음),
     `operator_updated_*` 3,044행, `legacy_projection_id` 3,044행.
   - **트랜잭션 경계 함정**: `alembic/env.py`에 `transaction_per_migration`이 **없어**
@@ -408,10 +430,31 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     `alembic_version`은 0063에 남는다**. 0064는 인덱스 상태 가드가 있어 재실행 가능하다.
   - `0064`는 인덱스만 바꾸고 DML 0건, `downgrade()`도 대칭이라 **완전 가역**이다.
 
-  할 일: ~~0064~0068 각각의 내용·위험 평가~~(완료, 위) →
-  **`collection_key` 52개 재작성의 소비자 영향 조사**(미완, 적용 전 필수) →
-  **마이그레이션과 이미지 배포의 순서·원자성 확정** → 백업 → 적용 →
-  dedupe 인덱스·`last_seen_at`·적재 회복 실측 확인.
+  **선행 조사는 끝났다. 데이터 측면 blocker는 확인되지 않았다.**
+  0064~0068 전부 prod 데이터에서 파괴적 statement가 no-op이거나 가역이고,
+  `collection_key` 재작성도 소비자를 깨뜨리지 않는다.
+
+  남은 할 일:
+  1. **이미지 빌드** — main 최신(H36 게이트 포함)으로 API/dagster/UI 이미지를 만든다.
+     H36 게이트가 실제로 들어갔는지 **커밋 라벨만 보지 말고** 컨테이너 안에서
+     `_adopted_match` 존재를 확인한다.
+  2. **DB 백업** — `0065`/`0066`의 DML은 downgrade로 복구되지 않는다. 적용 전 필수.
+  3. **적용 순서** — 마이그레이션과 이미지를 **같은 정지 창에서** 전환한다.
+     `0065`가 현행 이미지 upsert의 arbiter partial 인덱스를 drop하므로 그 사이에
+     curation 쓰기가 들어오면 깨진다.
+  4. **적용 후 실증** — dedupe 인덱스 존재 / `last_seen_at` 컬럼 존재 /
+     `alembic_version = 0068` / curation import preview가 3건을 여전히 미연결로 두는지 /
+     concierge materialize 후 적재 1,020 → 1,477 회복.
+     검증은 **반증 가능해야 한다** — `inserted/updated/removed 0`처럼 정상 배포에서도
+     거짓인 기준을 쓰지 않는다(`0066` backfill이 `updated`를 만든다).
+
+  > **⚠ 비가역 지점** — 사람 승인이 필요하다.
+  > - `0065`의 `collection_key` 52행 재작성과 `source_updated_at` 3,530행 UPDATE,
+  >   `0066`의 `external_component_id` backfill은 **downgrade로 복구되지 않는다**.
+  >   백업이 유일한 복구 경로다.
+  > - `0064`의 `autocommit_block()`이 트랜잭션을 커밋하므로 **부분 적용 상태가 가능하다**
+  >   (0064만 적용 + `alembic_version`은 0063).
+  > - 이미지 교체는 다운타임을 만든다.
   **머지 = 배포가 아니라는 점을 문서에도 반영한다** — H30A 완료 기록이 prod 상태를
   주장하는 것으로 읽히지 않게. (H36이 이 task보다 **먼저**다.)
 
