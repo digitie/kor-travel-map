@@ -8,6 +8,7 @@ DB에 링크가 있다는 사실만으로 승인하지 않는다. 정지오코�
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -108,6 +109,48 @@ def main() -> None:
     print(f"\n반영 {total}행 / 보류 {len(REJECTED)}행")
     for key, why in REJECTED.items():
         print(f"  보류 {key}: {why}")
+
+    refresh_manifest(CSV_DIR)
+
+
+def refresh_manifest(target: Path) -> None:
+    """`manifest.json`의 sha256/rows를 실제 파일에서 다시 계산한다.
+
+    `tests/unit/test_curation_resources.py`가 manifest의 sha256과 파일 실물을 대조한다.
+    manifest를 손으로 유지하면 CSV·README를 고칠 때마다 어긋나는데, 실제로 어긋났다 —
+    README를 고치고 sha256을 안 고쳐 게이트가 빨간불이 났다. 그러니 **파생시킨다**.
+
+    manifest는 README.md처럼 CSV가 아닌 파일도 추적하므로 `rows`는 CSV에만 다시 센다.
+    재현성 점검은 CSV만 임시 디렉터리에 풀어 돌리므로, manifest가 없으면 조용히 건너뛴다.
+    """
+    manifest_path = target / "manifest.json"
+    if not manifest_path.is_file():
+        return
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    touched = []
+    for entry in manifest.get("files", []):
+        path = target / entry["path"]
+        if not path.is_file():
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        rows = entry.get("rows")
+        if path.suffix == ".csv" and rows is not None:
+            with path.open(encoding="utf-8-sig", newline="") as fh:
+                rows = sum(1 for _ in csv.DictReader(fh))
+        if digest != entry["sha256"] or rows != entry.get("rows"):
+            entry["sha256"] = digest
+            if entry.get("rows") is not None:
+                entry["rows"] = rows
+            touched.append(entry["path"])
+
+    if touched:
+        # 개행을 LF로 고정한다. `write_text`는 Windows에서 CRLF로 번역해 같은 스크립트가
+        # 플랫폼마다 다른 바이트를 내놓는다 — CSV writer에 `lineterminator="\n"`을 준 것과
+        # 같은 이유다.
+        with manifest_path.open("w", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+        print(f"manifest 갱신: {', '.join(touched)}")
 
 
 if __name__ == "__main__":
