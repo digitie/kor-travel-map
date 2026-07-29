@@ -83,6 +83,30 @@ external Postgres host port override는 보존한다.
 - Playwright e2e는 **WSL에서 실행하지 않는다.** n150 Linux에서 먼저 실행하고,
   n150 접근/브라우저 실행이 불가할 때만 Windows 호스트 브라우저로 fallback한다.
 
+### n150 CI-parity 게이트 — 마운트 지점은 반드시 `/workspace`
+
+`kor-travel-map-t176-ci:latest` 이미지에는 **저장소 사본이 `/workspace`에 구워져 있다.**
+다른 경로로 마운트하면 그 구운 사본이 `sys.path`에서 **이기고**, `src/kortravelmap/*`
+import가 조용히 **이미지의 낡은 코드로 해소된다**. 테스트는 통과하지만 내 변경을 안 본다.
+
+```bash
+# 옳다 — 마운트가 구운 사본을 덮는다
+docker run --rm -v /home/digitie/<dir>:/workspace -w /workspace \
+  kor-travel-map-t176-ci:latest bash -lc "python -m pytest tests/unit -q"
+
+# 틀렸다 — src/ import가 이미지의 /workspace/src로 간다
+docker run --rm -v /home/digitie/<dir>:/w -w /w ...
+```
+
+**실측(2026-07-30)**: 같은 트리를 `/w`로 마운트하면 **2543 passed**,
+`/workspace`로 마운트하면 **3053 passed**다. 차이 510건은 수집조차 되지 않았다 —
+`packages/kor-travel-map-dagster/tests/*`가 `from kortravelmap.dto import AdminEvidence`에서
+`ImportError`로 통째로 죽는데, 이미지의 `/workspace/src`가 그 DTO가 생기기 전 커밋이기
+때문이다. `mypy --strict`도 173 → **196 files**로 늘어난다.
+
+**증상이 "통과"라서 위험하다.** `/w` 실행은 실패가 아니라 조용한 축소 통과였다.
+게이트 결과를 보고할 때 **통과 건수를 같이 적어** 이런 축소를 알아챌 수 있게 한다.
+
 ## 2. 파일 위치 정책
 
 | 종류 | 위치 |
