@@ -149,6 +149,9 @@ async def main() -> None:
             where ci.feature_id is not null
             """
         )
+        # region을 코드로 바꿀 수 있는 DB 링크 수. 커버리지 주장("3,269건 중 N건")의 근거라
+        # 산출물에 같이 남긴다 — 리포트에만 적고 아티팩트에 없으면 검증할 수가 없다.
+        db_codeable = 0
         db_bad = []
         for r in db_rows:
             meta = r["metadata"]
@@ -159,6 +162,8 @@ async def main() -> None:
                     meta = {}
             region = str((meta or {}).get("region") or "").strip()
             want = region_to_code(region)
+            if want:
+                db_codeable += 1
             if not want or not r["sido_code"] or want == r["sido_code"]:
                 continue
             db_bad.append(
@@ -202,6 +207,7 @@ async def main() -> None:
                     "csv_region_codeable": len(with_region),
                     "csv_sido_mismatch": len(csv_bad),
                     "db_linked_rows": len(db_rows),
+                    "db_region_codeable": db_codeable,
                     "db_sido_mismatch": len(db_bad),
                 },
                 "csv_mismatches": csv_bad,

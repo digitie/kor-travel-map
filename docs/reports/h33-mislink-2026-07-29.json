@@ -1,0 +1,50 @@
+{
+ "summary": {
+  "database": "krtour_map",
+  "csv_linked_rows": 222,
+  "csv_region_codeable": 109,
+  "csv_sido_mismatch": 0,
+  "db_linked_rows": 3269,
+  "db_region_codeable": 112,
+  "db_sido_mismatch": 3
+ },
+ "csv_mismatches": [],
+ "db_mismatches": [
+  {
+   "collection_key": "korean-tourism-100:2023-2024",
+   "source_item_key": "kt100-2023-2024-025",
+   "place_name": "남이섬",
+   "feature_id": "f_1114010100_p_a11c2e739c5676d2",
+   "feature_name": "남이섬",
+   "region": "강원",
+   "expected_sido": "51",
+   "feature_sido": "11",
+   "feature_sigungu": "11140",
+   "feature_address": "서울특별시 중구 남대문로9길 52 (무교동,101호(지상1층))"
+  },
+  {
+   "collection_key": "korean-tourism-100:2025-2026",
+   "source_item_key": "kt100-2025-2026-024",
+   "place_name": "남이섬",
+   "feature_id": "f_1114010100_p_a11c2e739c5676d2",
+   "feature_name": "남이섬",
+   "region": "강원",
+   "expected_sido": "51",
+   "feature_sido": "11",
+   "feature_sigungu": "11140",
+   "feature_address": "서울특별시 중구 남대문로9길 52 (무교동,101호(지상1층))"
+  },
+  {
+   "collection_key": "korean-tourism-100:2025-2026",
+   "source_item_key": "kt100-2025-2026-036",
+   "place_name": "청남대",
+   "feature_id": "f_4683025328_p_a45038d401d8d1bd",
+   "feature_name": "청남대",
+   "region": "충북",
+   "expected_sido": "43",
+   "feature_sido": "46",
+   "feature_sigungu": "46830",
+   "feature_address": "전라남도 영암군 삼호읍 난전로 45"
+  }
+ ]
+}

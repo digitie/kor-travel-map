@@ -21,9 +21,15 @@
 `source_component_key`는 기계 식별자다.
 `title`과 `place_name`은 공식 표기를 보존한다. `feature_id`는 2026-07-13 prod DB를
 읽기 전용으로 조회해 동일 장소라고 안전하게 확정한 경우에만 채웠다.
+
 **2026-07-29(T-VN-H25B)**: DB `curation_items`에는 링크됐으나 CSV가 비어 있던 항목 중 5행을
 역반영했다. 같은 후보 8건 중 3건은 정지오코딩으로 확인한 결과 다른 지역을 가리켜 제외했다
 (남이섬 → 서울 사무소, 청남대 → 전남 영암).
+이 5행은 **위 "안전하게 확정" 기준보다 약하다** — 5건 전부 `metadata_json.confidence` =
+`backfilled-db-review`이고, 가장 강한 청풍호조차 정지오코딩이 시군구(제천)까지만 지목해
+같은 시군구의 다른 대상과 구분되지 않는다. 나머지 4건은 정지오코딩 후보가 없어 "모순이 없음"에
+그친다. 행별 근거는 `metadata_json.confidence_reason`에 있고, 이 열들을 만드는 정본은
+`scripts/h25b_apply_verified_links.py`다(CSV는 그 스크립트의 산출물로 재현된다).
 `address_hint`도 공식 목록에서 개별 주소를 확정하지 않은 경우 비워 둔다.
 `metadata_json`은 CSV 셀 안의 JSON 객체이며 복합 관광지, 플러스 거점, 박물관 stamp point 같은 원문 구조를 보존한다.
 

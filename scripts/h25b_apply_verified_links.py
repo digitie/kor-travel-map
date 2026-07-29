@@ -23,9 +23,15 @@ APPROVED: dict[str, str] = {
     "kt100-2025-2026-040": "f_4315032041_p_12c53fe662dafc4f",  # 청풍호 (제천 43150)
 }
 
-# key -> (confidence, reason). 승인 근거의 **강도 차이**를 값으로 구분한다.
-# `verified`는 정지오코딩이 지역을 지목해 feature 코드와 대조된 것,
-# `review`는 정지오코딩 후보가 없어 "모순이 없음"에 그친 것이다.
+# key -> (confidence, reason).
+#
+# **5건 모두 `backfilled-db-review`다 — `verified`는 하나도 없다.** 가장 강한 근거를 가진
+# 청풍호조차 정지오코딩이 시군구(제천 43150)까지만 지목해, 같은 시군구의 다른 대상
+# (청풍호반케이블카 등)과 구분되지 않는다. 나머지 4건은 정지오코딩 후보 자체가 없어
+# **"모순이 없음"에 그친다** — 확정이 아니다.
+#
+# 개별 근거의 강도 차이는 `reason` 문장에 남긴다. 등급을 나누면 `verified`가 "확인됨"으로
+# 읽혀 실제보다 강한 주장이 되므로, 지금 데이터로 도달 가능한 최고 등급인 review로 통일한다.
 EVIDENCE: dict[str, tuple[str, str]] = {
     "arboretum-2026-001": (
         "backfilled-db-review",
