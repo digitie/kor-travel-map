@@ -513,6 +513,13 @@ def test_recovery_revalidates_only_legacy_content_digest_drift(
         runtime,
         observed_content_sha256="7" * 64,
     )
+    _run_helper(
+        "update-blocked",
+        "--path",
+        str(blocked),
+        "--phase",
+        "recovery-resource-finalizing",
+    )
 
     _complete(runtime, blocked, phase="recovered")
 
@@ -560,6 +567,35 @@ def test_topic_revision_proof_rejects_non_unit_delta(tmp_path: Path) -> None:
 
     assert completed.returncode != 0
     assert "revision delta" in completed.stderr
+
+
+def test_checkpoint_dump_topic_proof_rejects_unrelated_final_phase(
+    tmp_path: Path,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    _write_snapshot(
+        runtime / "clone-final.json",
+        total=126,
+        content_sha256="7" * 64,
+    )
+    for phase in ("direct-cleanup-running", "browser-main-running"):
+        _run_helper(
+            "update-blocked",
+            "--path",
+            str(blocked),
+            "--phase",
+            phase,
+        )
+    _write_topic_revision_evidence(
+        runtime,
+        observed_content_sha256="7" * 64,
+    )
+
+    completed = _complete(runtime, blocked, phase="recovered", check=False)
+
+    assert completed.returncode != 0
+    assert "실패 당시 최종 snapshot" in completed.stderr
+    assert blocked.exists()
 
 
 def test_recovery_rejects_non_content_snapshot_drift(tmp_path: Path) -> None:

@@ -2853,9 +2853,12 @@ if [[ "$MODE" == "recover" ]]; then
   else
     [[ "$blocked_source" != "$SOURCE_COMMIT" ]] ||
       die "legacy dataset projection recovery requires a newer tool revision"
-    [[ "$(state_helper read-blocked \
-      --path "$BLOCKED_FILE" --field phase
-    )" == "direct-cleanup-running" ]] ||
+    legacy_recovery_phase="$(
+      state_helper read-blocked \
+        --path "$BLOCKED_FILE" --field phase
+    )"
+    [[ "$legacy_recovery_phase" == "direct-cleanup-running" ||
+       "$legacy_recovery_phase" == "recovery-resource-finalizing" ]] ||
       die "legacy dataset projection recovery phase is not eligible"
     load_dataset_projection_start_from_dump \
       "$RUNTIME_DIR/clone-checkpoint.json"

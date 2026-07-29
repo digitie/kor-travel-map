@@ -1346,7 +1346,9 @@ def _build_result(
             if (
                 changed_fields != {"content_sha256"}
                 or recovery_tool_source_commit == identity["source_commit"]
-                or phase_history[-1] != "direct-cleanup-running"
+                or "direct-cleanup-running" not in phase_history
+                or phase_history[-1]
+                not in {"direct-cleanup-running", "recovery-resource-finalizing"}
             ):
                 raise RuntimeError(
                     "recovery 현재 clone DB가 실패 당시 최종 snapshot과 다릅니다"
@@ -1408,7 +1410,9 @@ def _build_result(
             args.topic_revision_start is not None
             or args.phase != "recovered"
             or recovery_tool_source_commit == identity["source_commit"]
-            or phase_history[-1] != "direct-cleanup-running"
+            or "direct-cleanup-running" not in phase_history
+            or phase_history[-1]
+            not in {"direct-cleanup-running", "recovery-resource-finalizing"}
         ):
             raise RuntimeError(
                 "checkpoint dump dataset projection 복구 증거를 사용할 수 없습니다"

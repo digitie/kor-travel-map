@@ -189,6 +189,11 @@ Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별�
     서명된 checkpoint dump의 행을 대입한 전체 digest가 checkpoint와 정확히 일치할 때만
     recovery tool 새 revision으로 실패 지점부터 복구하며, 다른 topic·identity·schema·data
     차이는 계속 fail-closed한다.
+  - [ ] **T-VN-48D.6** — recovery evidence 사전 검증 뒤 resource 정리 phase를 기록하고
+    같은 증거를 `complete`에서 재검증할 때, `direct-cleanup-running`을 이미 거친 정확한
+    `recovery-resource-finalizing` 전이만 허용한다. 이 두 phase 외의 legacy content
+    정규화는 계속 거부하고, resource 정리 뒤 실패한 실행도 브라우저를 반복하지 않고
+    같은 evidence에서 완료할 수 있게 한다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 
