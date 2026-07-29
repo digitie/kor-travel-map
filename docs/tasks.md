@@ -26,7 +26,7 @@ barrier로 직렬화한다.
     [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
     [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
     [x] `T-VN-H25A`(미연결 membership 증거·전제 정정) →
-    [~] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
+    [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
     [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
@@ -235,10 +235,25 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
 - [x] T-VN-H30A — **검증 finding을 `ops.data_integrity_violations`에 durable 기록**
 
   migration `0067_integrity_dedupe_key`(열린 이슈 한정 부분 unique index) +
-  `upsert_integrity_finding()` + `record_address_validation_findings()`.
+  `sync_integrity_findings()` + `record_address_validation_findings()`.
   `feature_id`/`source_record_key`는 FK라 **적재된 대상에만** 연결하고 drop된 행은 payload로만
-  나른다. 격리 clone 실증: finding 106건 기록, 재실행에도 106 유지(dedupe 동작).
-  `/admin/issues`는 `violation_type`에 allowlist가 없어 신규 type이 그대로 노출된다(확인함).
+  나른다. `/admin/issues`는 `violation_type`에 allowlist가 없어 신규 type이 그대로 노출된다.
+
+  적대 리뷰가 실측으로 잡은 설계 결함 4건을 반영했다.
+  - `jsonb ||`는 shallow merge라 재실행 시 `EXCLUDED`의 null이 1회차 증거를 덮어썼다
+    (durable ledger 안에서 증거 소실). `jsonb_strip_nulls`로 차단.
+  - `strict`(배포 기본값)는 기록 **전에** `Failure`를 던져, 증거가 가장 필요한 run이
+    아무것도 남기지 않았다. 던지기 전에 기록한다.
+  - **dedupe가 dedupe하지 않았다** — `dedupe_key`가 `source_record_key`(=`raw_payload_hash`
+    파생)에 걸려 export의 무관한 필드 하나만 바뀌어도 새 열린 행이 생겼다. `source_entity_id`
+    기반으로 바꾸고, 이번 run이 더는 보고하지 않는 finding을 자동 resolve하는 sweep을 추가했다
+    (주소 검증이 소유하는 code에 한정, `open`만 — 운영자가 손댄 `acknowledged`는 불가침).
+  - `ops.data_integrity_violations`에 statement 트리거가 있어(실측) finding당 INSERT가
+    `ops_live` revision 단일 행에 배타 락을 잡고 트랜잭션 끝까지 유지했다 — admin 쓰기 차단·
+    동시 run 직렬화·데드락. `unnest` 단일 statement로 접어 트리거 1회 발화.
+
+  격리 clone 재실증: finding 106건 기록 → 재실행에도 106 유지, `occurrence_count` 전부 2,
+  `dedupe_key`가 entity id 기반(`…:reverse_geocode_unavailable:79`)으로 안정화됨.
 
 - [x] T-VN-H30B — **회복을 실제 적재로 검증**
 
