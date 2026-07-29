@@ -370,7 +370,8 @@ def _admin_code_stale_issues(
             severity="warning",
             message=(
                 f"payload 행정코드가 좌표 reverse 결과와 {level} 단계에서 다름 — "
-                f"producer 캐시가 낡았을 수 있다 (obs={obs[:precision]}, claim={claim[:precision]})."
+                f"producer 캐시가 낡았을 수 있다 "
+                f"(obs={obs[:precision]}, claim={claim[:precision]})."
             ),
             provider_address=provider_address,
             bjd_code=feature.address.bjd_code,

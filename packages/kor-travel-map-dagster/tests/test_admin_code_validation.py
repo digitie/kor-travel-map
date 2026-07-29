@@ -116,10 +116,14 @@ def test_short_provider_address_no_longer_produces_any_issue() -> None:
     assert not result.has_errors
 
 
-def test_address_string_naming_a_different_sigungu_is_not_an_issue() -> None:
-    """`서울 서대문구 통일로 251`인데 좌표는 종로구 — 실측에서 코드는 둘 다 종로구였다.
+def test_address_naming_a_different_sigungu_warns_but_never_drops() -> None:
+    """`서울 서대문구 통일로 251`인데 좌표 reverse는 종로구 — 실측 380건 중 유일한 잔여 후보.
 
-    즉 주소 **문자열** 쪽이 틀렸고 코드 쪽이 맞다. 문자열을 근거로 판정하지 않는다.
+    텍스트를 정지오코딩하면 서대문구이고 후보 좌표에서 **143m**다(종로구 경계). 좌표는
+    맞았다. 그래도 이 축은 검토할 가치가 있는 신호이므로 **warning으로 남기고**, 절대
+    영구 손실로 만들지 않는다.
+
+    reverse 후보집합에 서대문구가 함께 오면 경계로 흡수돼 조용해진다(아래 별도 테스트).
     """
     bundle = _bundle(
         bjd_code="1111017700",
@@ -127,11 +131,39 @@ def test_address_string_naming_a_different_sigungu_is_not_an_issue() -> None:
         sido_code="11",
         sigungu_name="종로구",
         road="서울 서대문구 통일로 251",
+    )
+    issues = validate_feature_bundle_address(bundle).issues
+    codes = [i.code for i in issues]
+    assert "provider_address_region_disagreement" in codes
+    assert all(i.severity == "warning" for i in issues)
+    assert all(i.code not in DROPPABLE_ISSUE_CODES for i in issues)
+
+
+def test_boundary_candidate_set_absorbs_the_disagreement() -> None:
+    """reverse 후보에 인접 시군구가 함께 오면 경계 케이스로 보고 판정하지 않는다."""
+    bundle = _bundle(
+        bjd_code="1111017700",
+        sigungu_code="11110",
+        sido_code="11",
+        sigungu_name="종로구",
+        road="서울 서대문구 통일로 251",
         admin_evidence=AdminEvidence(
-            obs_code="1111017700", claim_code="1111017700", claim_kind="bjd"
+            obs_code="1111017700",
+            obs_sigungu_names=("종로구", "서대문구"),
         ),
     )
     assert validate_feature_bundle_address(bundle).issues == ()
+
+
+def test_name_axis_is_armed_without_admin_evidence() -> None:
+    """``AdminEvidence``를 채우지 않는 provider도 독립 축 검증을 받는다.
+
+    1차 설계는 이 축을 지워 15개 provider 중 14개가 주소 교차검증을 완전히 잃었다.
+    이 테스트가 그 회귀를 막는다.
+    """
+    bundle = _bundle(sigungu_name="종로구", road="부산 해운대구 어딘가", admin_evidence=None)
+    codes = [i.code for i in validate_feature_bundle_address(bundle).issues]
+    assert "provider_address_region_disagreement" in codes
 
 
 # ── 탐지력: 진짜 불일치는 여전히 잡는다 ──────────────────────────────────────
