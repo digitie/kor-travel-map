@@ -32,6 +32,8 @@ from kortravelmap.core.ids import make_feature_id, make_payload_hash, make_sourc
 from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.dto import (
     Address,
+    AdminClaimKind,
+    AdminEvidence,
     Coordinate,
     Feature,
     FeatureBundle,
@@ -43,6 +45,7 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.geocoding import ReverseGeocoder, cached_reverse_geocoder
+from pydantic import ValidationError
 
 __all__ = [
     "DATASET_KEY_YOUTUBE_PLACE_CANDIDATES",
@@ -96,8 +99,13 @@ async def kor_travel_concierge_items_to_bundles(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
+    quarantine: list[tuple[KorTravelConciergeFeatureItem, Exception]] | None = None,
 ) -> list[FeatureBundle]:
     """kor-travel-concierge feature export items → ``list[FeatureBundle]``.
+
+    ``quarantine``을 주면 구성에 실패한 item을 예외와 함께 담고 나머지를 계속 변환한다
+    (T-VN-H28B 건별 격리). 주지 않으면 종전대로 예외를 그대로 올린다 — 호출자가 명시적으로
+    격리를 선택해야 손실을 감춘 채 진행하지 않는다.
 
     ``operation``이 ``upsert``가 아닌 ``reject``/``tombstone`` item은 적재형
     ``FeatureBundle``로 표현하지 않는다 — 같은 items에서
@@ -113,11 +121,19 @@ async def kor_travel_concierge_items_to_bundles(
     for item in items:
         if _operation(item) != _OPERATION_UPSERT:
             continue
-        bundle = await _item_to_bundle(
-            item,
-            fetched_at=fetched_at,
-            reverse_geocoder=geocoder,
-        )
+        try:
+            bundle = await _item_to_bundle(
+                item,
+                fetched_at=fetched_at,
+                reverse_geocoder=geocoder,
+            )
+        except (ValidationError, ValueError) as exc:
+            # T-VN-H28B: 건별 격리. 이전에는 item 1건의 구성 실패가 batch 전체를 죽였다
+            # (concierge export는 1회 1,477건 전량 재생이라 손실이 전부였다).
+            if quarantine is not None:
+                quarantine.append((item, exc))
+                continue
+            raise
         if bundle is not None:
             bundles.append(bundle)
     return bundles
@@ -244,6 +260,7 @@ async def _item_to_bundle(
         feature=feature,
         source_record=source_record,
         source_link=source_link,
+        admin_evidence=_admin_evidence(address_payload, geo=geo),
     )
 
 
@@ -389,19 +406,30 @@ def _decimal_or_none(value: Any) -> Decimal | None:
 
 
 def _address(payload: Mapping[str, Any], *, geo: Address | None) -> Address:
+    """payload/geo를 하나의 ``Address``로 병합한다.
+
+    T-VN-H28B: ``bjd_code``가 있으면 시군구·시도를 **bjd에서만 유도**한다. 이전에는
+    payload ``sigungu_code``를 우선했는데, payload에 ``sigungu_code``만 있고
+    ``legal_dong_code``가 없으면 ``bjd_code``는 geo에서 오고 ``sigungu_code``는 payload에서
+    와서 서로 다른 지역을 가리킬 수 있었다. 그때 ``Address._check_code_consistency``가
+    ``ValidationError``를 던지는데 batch 변환에 건별 격리가 없어 **1건이 batch 전체를
+    죽였다**. bjd에서만 유도하면 불일치가 구조적으로 불가능하다.
+
+    payload가 주장한 코드는 버리지 않는다 — ``_admin_evidence``가 교차검증용으로 보존한다.
+    """
     bjd_code = _ten_digit_code(_text(payload, "legal_dong_code"))
     if bjd_code is None and geo is not None:
         bjd_code = geo.bjd_code
-    sigungu_code = (
-        _five_digit_code(_text(payload, "sigungu_code"))
-        or (geo.sigungu_code if geo is not None else None)
-        or extract_sigungu_code(bjd_code)
-    )
-    sido_code = (
-        _two_digit_code(_text(payload, "sido_code"))
-        or (geo.sido_code if geo is not None else None)
-        or extract_sido_code(bjd_code)
-    )
+    if bjd_code is not None:
+        sigungu_code = extract_sigungu_code(bjd_code)
+        sido_code = extract_sido_code(bjd_code)
+    else:
+        sigungu_code = _five_digit_code(_text(payload, "sigungu_code")) or (
+            geo.sigungu_code if geo is not None else None
+        )
+        sido_code = _two_digit_code(_text(payload, "sido_code")) or (
+            geo.sido_code if geo is not None else None
+        )
     return Address(
         road=normalize_korean_text(_text(payload, "road_address")),
         legal=normalize_korean_text(_text(payload, "official_address")),
@@ -414,6 +442,27 @@ def _address(payload: Mapping[str, Any], *, geo: Address | None) -> Address:
         zipcode=geo.zipcode if geo is not None else None,
         sido_name=geo.sido_name if geo is not None else None,
         sigungu_name=geo.sigungu_name if geo is not None else None,
+    )
+
+
+def _admin_evidence(payload: Mapping[str, Any], *, geo: Address | None) -> AdminEvidence:
+    """행정구역 판정의 두 축을 병합 전에 보존한다 (T-VN-H28B).
+
+    ``obs_code``는 좌표 reverse 결과의 법정동코드만, ``claim_code``는 payload가 스스로
+    선언한 법정동 계열 코드만 담는다. 둘 다 있을 때만 코드 대 코드 교차검증이 성립한다.
+    """
+    claim_code = _ten_digit_code(_text(payload, "legal_dong_code"))
+    claim_kind: AdminClaimKind | None = "bjd" if claim_code else None
+    if claim_code is None:
+        claim_code = _five_digit_code(_text(payload, "sigungu_code"))
+        claim_kind = "sigungu" if claim_code else None
+    if claim_code is None:
+        claim_code = _two_digit_code(_text(payload, "sido_code"))
+        claim_kind = "sido" if claim_code else None
+    return AdminEvidence(
+        obs_code=geo.bjd_code if geo is not None else None,
+        claim_code=claim_code,
+        claim_kind=claim_kind,
     )
 
 

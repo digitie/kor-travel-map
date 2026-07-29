@@ -105,22 +105,20 @@ async def load_feature_bundles_for_dagster(
 
     mode = _normalize_address_validation_mode(strict_address)
     validation = validate_feature_bundles_address(bundles)
-    if mode == "strict" and validation.has_errors:
+    # T-VN-H28B: severity가 아니라 code allowlist(DROPPABLE_ISSUE_CODES)가 손실을 정한다.
+    # 새 검증이 error를 내도 allowlist를 명시적으로 고치기 전에는 drop/실패가 불가능하다.
+    if mode == "strict" and validation.has_blocking_errors:
         _add_output_metadata(context, validation.as_metadata())
-        codes = ", ".join(
-            issue.code for issue in validation.issues if issue.severity == "error"
-        )
+        codes = ", ".join(issue.code for issue in validation.blocking_issues)
         raise Failure(
             description=f"Feature 주소/좌표 검증 실패: {codes}",
             metadata=validation.as_metadata(),
         )
 
     dropped_feature_ids: tuple[str, ...] = ()
-    if mode == "drop" and validation.has_errors:
+    if mode == "drop" and validation.has_blocking_errors:
         error_feature_ids = {
-            issue.feature_id
-            for issue in validation.issues
-            if issue.severity == "error"
+            issue.feature_id for issue in validation.blocking_issues
         }
         dropped = [
             bundle
