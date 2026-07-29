@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
@@ -105,22 +106,20 @@ async def load_feature_bundles_for_dagster(
 
     mode = _normalize_address_validation_mode(strict_address)
     validation = validate_feature_bundles_address(bundles)
-    if mode == "strict" and validation.has_errors:
+    # T-VN-H28B: severity가 아니라 code allowlist(DROPPABLE_ISSUE_CODES)가 손실을 정한다.
+    # 새 검증이 error를 내도 allowlist를 명시적으로 고치기 전에는 drop/실패가 불가능하다.
+    if mode == "strict" and validation.has_blocking_errors:
         _add_output_metadata(context, validation.as_metadata())
-        codes = ", ".join(
-            issue.code for issue in validation.issues if issue.severity == "error"
-        )
+        codes = ", ".join(issue.code for issue in validation.blocking_issues)
         raise Failure(
             description=f"Feature 주소/좌표 검증 실패: {codes}",
             metadata=validation.as_metadata(),
         )
 
     dropped_feature_ids: tuple[str, ...] = ()
-    if mode == "drop" and validation.has_errors:
+    if mode == "drop" and validation.has_blocking_errors:
         error_feature_ids = {
-            issue.feature_id
-            for issue in validation.issues
-            if issue.severity == "error"
+            issue.feature_id for issue in validation.blocking_issues
         }
         dropped = [
             bundle
@@ -166,11 +165,16 @@ def _merge_validation_summaries(
     left: FeatureAddressValidationSummary,
     right: FeatureAddressValidationSummary,
 ) -> FeatureAddressValidationSummary:
+    merged_grades = Counter(left.evidence_grade_counts)
+    merged_grades.update(right.evidence_grade_counts)
     return FeatureAddressValidationSummary(
         total=left.total + right.total,
         issue_count=left.issue_count + right.issue_count,
         error_count=left.error_count + right.error_count,
         warning_count=left.warning_count + right.warning_count,
+        # T-VN-H28B: 커버리지를 합치지 않으면 batch가 2개 이상인 run에서 빈 dict가 나가
+        # "측정 안 됨"과 "잴 것이 없음"을 구분할 수 없게 된다.
+        evidence_grade_counts=dict(merged_grades),
         issues=left.issues + right.issues,
     )
 

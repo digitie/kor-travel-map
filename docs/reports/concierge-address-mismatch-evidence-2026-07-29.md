@@ -1,0 +1,168 @@
+# #673 `provider_address_mismatch` 실데이터 재기준화 (T-VN-H28A)
+
+- 일시: 2026-07-29
+- 실행: n150, `kor-travel-map-t176-ci:latest` + live `kor-travel-concierge`(12601) + live `kor-travel-geo`(12501)
+- 경로: **운영과 동일한 코드** — live export → `kor_travel_concierge_items_to_bundles`(실 geo reverse
+  주입) → `validate_feature_bundles_address`. 근사 재현이 아니다.
+- 원본 manifest(380행, 비커밋): n150 `/home/digitie/h28a/h28a-final.json`
+  (장소명·좌표 등 concierge 업무 데이터라 저장소에 넣지 않는다. 재생성 스크립트는 본 문서 §5.)
+
+## 1. 재기준화 결과
+
+이슈 등록 시점(2026-07-14) 수치와 현재를 나란히 둔다.
+
+| 항목 | 2026-07-14 (#673) | 2026-07-29 (본 실측) |
+| --- | --- | --- |
+| upsert 후보 | 1,430 | **1,477** |
+| `provider_address_mismatch` (error·drop) | 410 | **380** |
+| `provider_address_partial_match` (warning) | 709 | **701** |
+| 적재 | 1,020 | 1,097 |
+
+현상은 **여전히 유효**하다. 후보 집합이 늘고 drop이 소폭 줄었을 뿐 성격은 같다.
+
+> **정정 (2026-07-29, 적대 리뷰 반영)** — 본 리포트의 §2는 처음에 *payload 행정코드 vs 좌표
+> reverse 행정코드*를 근거로 "380건 전부 오탐"이라고 썼다. **그 근거는 무효다.**
+> kor-travel-concierge의 payload 행정코드는 **같은 kor-travel-geo `POST /v2/reverse`를 같은
+> 좌표로** 호출해 만든 캐시본이고(`backend/ktc/etl/admin_region_service.py`
+> `fetch_admin_region`), producer는 코드가 이미 있으면 갱신하지 않는다. 같은 함수를 같은
+> 입력으로 두 번 부른 셈이라 일치는 당연하고, 그 일치는 좌표가 옳다는 증거가 되지 못한다.
+>
+> 결론(380건 오탐)은 유지되지만 근거는 **§2-bis의 독립 축**으로 다시 세웠다. 코드 축은
+> 위치 검증이 아니라 **producer 캐시 staleness 검출**로만 쓴다.
+
+## 2. (근거 무효) 코드 대조 — 자기 자신과의 비교였다
+
+drop된 380건 각각에 대해 세 축을 독립적으로 확보해 대조했다.
+
+1. provider payload의 authoritative 행정코드 (producer T-189이 주입)
+2. 좌표를 **다시** reverse 지오코딩한 결과의 행정코드·이름·거리·후보집합
+3. 현재 규칙(geo `sigungu_name`이 provider 주소 문자열의 부분문자열인가)의 판정
+
+| 분류 | 건수 |
+| --- | --- |
+| `false_positive_code_same` — payload 시군구코드 == geo 시군구코드 | **380** |
+| `true_positive_code_diff` — 좌표가 실제로 다른 행정구역 | **0** |
+
+- **380/380이 payload에 `sigungu_code`와 `legal_dong_code`를 모두 보유**하고 있으며, 그 코드가
+  좌표 reverse 결과와 **한 건도 빠짐없이 일치**한다.
+- 후보 집합 전체(1,477건)로 넓혀도 payload 코드와 geo 코드가 **불일치하는 건은 0건**이다
+  (일치 1,424 / 코드 없음 53).
+- reverse 최근접 거리: `<10m` 210건, `<100m` 136건, `<1km` 34건. 좌표가 엉뚱한 곳을 가리키는
+  것이 아니다.
+
+즉 이 규칙은 현재 실데이터에서 **탐지력이 0인 채로 380건을 영구 파괴**하고 있다.
+
+## 2-bis. 유효한 근거 — 독립 축으로 다시 세운 결론
+
+유일하게 독립적인 축은 **provider가 쓴 주소 문자열**이다(사람이 쓴 값이라 geo에서 유래하지
+않는다). 이 축만으로 380건을 분류했다 — 좌표 증거를 쓰지 않았다.
+
+| 건수 | 판정 | 근거 |
+| --- | --- | --- |
+| **375** | 규칙 산물 | 텍스트에 시/군/구 토큰이 **아예 없다**(`부산 기장 조방국밥`). 부분문자열 검사가 좌표의 옳고 그름과 무관하게 통과 불가다. 텍스트만으로 확정된다 |
+| **4** | 규칙 산물 | 축약·단계 표기 차이(`양구읍` vs `양구군`). 어간이 같다 |
+| **1** | 확인됨 — 경계 | `서울 서대문구 통일로 251`. 텍스트를 **정지오코딩**하니 서대문구, 후보 좌표에서 **143 m**. 좌표가 맞고 종로구 경계에 걸린 것 |
+
+즉 380건 모두 좌표 오류가 아니며, 그중 379건은 좌표를 보지 않고도 규칙 산물임이 확정된다.
+남은 1건도 제3의 독립 수단(정지오코딩)으로 해소했다.
+
+이 축은 `Address.sigungu_name`으로 동작하므로 **15개 provider 전부**에 적용된다 —
+`AdminEvidence`를 채우는 provider에만 걸리는 축이 아니다.
+
+## 3. 규칙이 실제로 재고 있는 것
+
+이름 substring 실패를 유형별로 분류했다.
+
+| 건수 | 유형 | 예 |
+| --- | --- | --- |
+| 365 | 행정구역명이 없는 **짧은 주소** | `부산 기장 조방국밥` / `부산 광안리` (geo=기장군·수영구) |
+| 9 | **접미사 차이** | `부산 기장 해동용궁사` vs `기장군` |
+| 5 | 문자열에 **다른 시군구명**이 있음 | `서울 서대문구 통일로 251` vs geo=종로구 (payload 코드도 종로구) |
+| 1 | 기타 | `대한민국 전라북도 전북` vs `정읍시` |
+
+압도적 다수(365/380)가 **provider 주소 문자열의 완전성 부족**이다. 마케팅형 짧은 표기
+(`부산 기장 해동용궁사`)를 "좌표-주소 불일치"로 분류하고 있는 것이지, 좌표가 틀린 것이 아니다.
+
+5건짜리 "다른 시군구명" 유형조차 오탐이다 — `서울 서대문구 통일로 251`은 payload 코드가
+`11110`(종로구)이고 geo도 `11110`이다. **주소 문자열 쪽이 틀렸고 코드 쪽이 맞다.**
+
+## 4. 구조적 원인
+
+`providers/kor_travel_concierge.py::_address`가 두 출처를 **병합**한다.
+
+```
+sigungu_code = payload 코드  or  geo 코드  or  bjd에서 유도   ← payload 우선
+sigungu_name = geo 이름만                                    ← geo 전용
+```
+
+병합 결과 `Address` 하나에 **provider 권위 코드**와 **geo 유도 이름**이 나란히 담기고, 두 축의
+독립성이 사라진다. `validation.py::_provider_address_match_issues`는 남은 유일한 "독립" 쌍인
+*geo 이름 ↔ provider 주소 문자열*을 비교하는데, 이것이 가능한 조합 중 **가장 약한 신호**다.
+권위 있는 대조 축(코드)은 같은 객체 안에 있는데도 쓰이지 않는다.
+
+## 5. 재현
+
+```bash
+# n150. concierge/geo 키는 컨테이너 env에서 읽으며 출력하지 않는다.
+scp h28a_final.py n150:/home/digitie/
+# scratchpad h28a_final.py — live export → 실 파이프라인 → 분류
+```
+
+`h28a_final.py`는 export 전량을 페이징 수집하고, 운영과 같은 변환·검증을 돌린 뒤 error 후보만
+독립 reverse로 재확인해 위 표를 만든다.
+
+## 6. 회복 검증 (T-VN-H28B 적용 후)
+
+같은 live export를 **새 규칙 코드로** 다시 돌린 결과다.
+
+| | before (`main`) | after (branch) |
+| --- | --- | --- |
+| 후보 | 1,477 | 1,477 |
+| error(drop) | **380** | **0** |
+| warning | 701 | 0 |
+| 적재 | 1,097 | **1,477** |
+| 건별 격리 | — | 0 |
+
+- **380건 전량 회복, 손실 0.**
+- 행정코드 교차검증이 실제로 성립한 비율 **1,372/1,477 (92%)** (`evidence_grade=dual`).
+  나머지 105건은 좌표 reverse 코드가 없어 판정 불가이며 `claim_only`로 **집계된다** —
+  "통과"와 "판정 못 함"을 섞지 않는다.
+- 행정코드 불일치 **0건**. §2의 "진짜 불일치 0건"과 일치한다.
+
+### `_address()` 변경이 저장값을 바꾸는가 — 현재 데이터에서는 바꾸지 않는다
+
+`_address()`는 이제 `bjd_code`가 있으면 시군구·시도를 **bjd에서만** 유도한다(이전에는 payload
+`sigungu_code`를 우선). 실데이터로 영향 범위를 확인했다.
+
+- 1,477건 **전부** `legal_dong_code` · `sigungu_code` · `sido_code`를 모두 보유한다.
+- payload 내부 정합성 위반(`legal_dong_code[:5] != sigungu_code`) **0건**.
+
+따라서 현재 데이터에서 새 유도 결과는 기존 payload 값과 **동일**하다 — 저장값 변화 없음.
+(만약 위반이 있었다면 이전 코드는 값을 바꾸는 게 아니라 `Address` 검증에서 예외를 던져
+**batch 전체를 죽였다**. 이 변경은 그 경로를 없앤 것이지 데이터를 바꾼 것이 아니다.)
+
+`feature_id`도 영향받지 않는다 — `make_feature_id`는 `bjd_code`를 입력으로 받고(ADR-009)
+`bjd_code` 유도 규칙은 이번 변경에서 **바뀌지 않았다**(payload `legal_dong_code` → geo bjd 순서 유지).
+
+### 재적재 경로 — 별도 replay 장치가 필요 없다
+
+이슈는 "payload_hash 불변이면 fast-path skip으로 회복이 막힐 수 있다"를 검토 항목으로 뒀다.
+코드로 확인한 결과 **해당하지 않는다**.
+
+1. drop은 **적재 전** 단계에서 일어나므로 dropped 후보는 `provider_sync.source_entities`에
+   행 자체가 없다(#673 본문의 관찰과 일치). 건너뛸 기존 행이 없다.
+2. concierge fetch cursor는 settings(`kor_travel_concierge_feature_cursor`, 기본 `None`)에서만
+   오고 **영속화되지 않는다**(해당 필드 description: "운영 cursor 영속화가 붙기 전"). 따라서 매
+   materialize가 cursor 없이 시작해 `changes` ledger **전량**을 재생한다(실측 1,477건).
+
+즉 규칙만 고치면 다음 materialize에서 자동 회복된다. 별도 replay 진입점을 만드는 것은 현재
+근거가 없어 만들지 않았다. cursor 영속화가 도입되면 그때 재평가해야 한다.
+
+## 7. T-VN-H28B로 넘기는 결론
+
+1. 현재 규칙의 severity를 `error`(영구 drop)로 두는 것은 **근거가 없다** — 실측 탐지력 0.
+2. 대체 규칙은 payload 행정코드와 좌표 reverse 코드를 **코드 대 코드**로 비교해야 한다.
+   그러려면 두 축이 병합되기 전에 독립적으로 보존돼야 한다(§4).
+3. 380/380이 payload 코드를 갖고 있으므로 코드 기반 규칙의 적용률은 이 provider에서 100%다.
+4. 불확실한 건은 영구 drop이 아니라 관측 가능한 상태로 남겨야 한다 — 지금은 run metadata에만
+   남아 run이 사라지면 증거도 사라진다.

@@ -1330,8 +1330,9 @@ CREATE INDEX idx_violations_detected_brin ON ops.data_integrity_violations USING
 
 | violation_type | 발생 조건 | payload 필수 필드 |
 |----------------|-----------|-------------------|
-| `provider_address_mismatch` | provider 주소와 좌표 기준 kor-travel-geo reverse 주소가 다른 장소로 판단됨 | `provider_address`, `kor_travel_geo_address`, `coord`, `match_level`, `distance_m`, `source_record_key` |
-| `provider_address_partial_match` | 시군구/읍면동은 맞지만 상세 주소가 불완전하거나 다름 | `provider_address`, `kor_travel_geo_address`, `match_level`, `notes` |
+| ~~`provider_address_mismatch`~~ | **발행 중단 (T-VN-H28B, 2026-07-29)** — 이름 substring 축은 실측 탐지력 0으로 확인돼 제거. 기존 행은 보존한다 | — |
+| ~~`provider_address_partial_match`~~ | **발행 중단 (T-VN-H28B)** | — |
+| `admin_code_stale_{sido,sigungu,emd}` | provider 선언 행정코드와 좌표 reverse 행정코드가 해당 단계에서 불일치 | `provider_address`, `bjd_code`, `sigungu_code`, `source_record_key` |
 | `geocode_failed` | provider 주소 문자열로 `POST /v2/geocode` 후보를 얻지 못함 | `provider_address`, `provider_fields`, `error` |
 | `reverse_geocode_failed` | 좌표로 `POST /v2/reverse` 주소를 얻지 못함 | `coord`, `error` |
 | `missing_address` | provider 주소도 kor-travel-geo 주소도 없음 | `provider_fields`, `coord` |

@@ -24,9 +24,9 @@ barrier로 직렬화한다.
     [x] `T-VN-H07C`(#812 — v5 승격 기각, ADR-079)
   - a1: [x] `T-VN-H29`(PinVi 검색 좌표 null 복구 — H07D 파생) →
     [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
-    [ ] `T-VN-H28A`(#673 실데이터 오탐 분류) →
-    [ ] `T-VN-H28B`(#673 검증 규칙·회복 경로) →
+    [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
     [ ] `T-VN-H25A`(stale reference 증거 manifest) →
+    [ ] `T-VN-H30A/B/C`(H28 후속 — 관측 durable화·실적재 검증·타 provider 확대) →
     [ ] `T-VN-H25B`(검토된 reference 적용) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
     [ ] `T-VN-H22B`(원자적 재분류 command) →
@@ -229,17 +229,36 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   gitignored runbook에서 결선한다. quiet 상태를 heartbeat 두 주기 이상 유지해 같은 ops-live
   socket이 재연결 없이 유지되는지 브라우저와 proxy metric 양쪽에서 확인한 뒤 #819를 닫는다.
 
-- [ ] T-VN-H28A — **#673 concierge 주소 불일치 실데이터 재분류**
+### T-VN-H30 — 주소 검증 관측 durable화·회복 실적재 검증 (H28 후속)
 
-  H21의 인증된 reverse 경계 위에서 현재 후보 전체를 다시 실행해 과거 1,430/410 수치가 유효한지
-  재기준화한다. provider 주소/행정코드, reverse 후보·거리·경계/해상 여부, 최종 drop 원인을
-  재현 가능한 evidence manifest로 남기고 true-positive와 false-positive를 분리한다.
+T-VN-H28A/B(#673)에서 규칙 교체와 영구 손실 차단은 끝났으나, 적대 리뷰 2명이 지적한
+관측·검증 항목 세 가지는 범위 밖으로 분리했다(사용자 지시 2026-07-29). H28 브랜치의
+근거는 `docs/reports/concierge-address-mismatch-evidence-2026-07-29.md`.
 
-- [ ] T-VN-H28B — **#673 검증 규칙·재적재 회복 경로**
+- [ ] T-VN-H30A — **주소 검증 issue를 `ops.data_integrity_violations`에 durable 기록**
 
-  H28A 증거를 기준으로 이름 substring 대신 authoritative 행정코드와 거리/경계 의미를 사용하는
-  provider-neutral 규칙을 설계한다. payload hash가 같아도 과거 validation drop을 재평가할 수 있는
-  replay 경로와 관측 metric을 추가하고 실제 후보 복구를 검증한 뒤 #673을 닫는다.
+  현재 검증 결과는 Dagster run metadata에만 남아 run이 사라지면 증거도 사라진다.
+  `docs/architecture/data-model.md`는 `provider_address_*`/`admin_code_stale_*`를 이미
+  해당 테이블 row type으로 광고하지만 dagster 패키지에서 `integrity_violation_repo`를
+  호출하는 경로가 **0건**이다. dedupe key로 중복 누적을 막는 upsert 경로와 alembic
+  migration을 추가하고 `/admin/issues`에서 보이는지까지 확인한다. 기존 metadata 키는
+  이름을 바꾸지 않는다.
+
+- [ ] T-VN-H30B — **회복을 실제 적재로 검증**
+
+  H28의 "1,477건 전량 적재"는 `load_feature_bundles_for_dagster`를 거치지 않은 validation
+  summary 산술이다. 격리 DB에 실제로 적재해 before/after row count로 회복을 확인한다.
+  동시에 배포 환경의 `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_CURSOR`가 실제로
+  비어 있는지 확인한다 — H28의 "자동 회복" 논거는 기본값이 `None`이라는 코드 근거이지
+  배포값 확인이 아니다.
+
+- [ ] T-VN-H30C — **타 provider `AdminEvidence` 채움 + staleness 축 확대**
+
+  독립 축(provider 텍스트)은 `Address.sigungu_name` 기반이라 이미 15개 provider 전부에
+  적용되지만, staleness 축(`AdminEvidence`)은 kor-travel-concierge만 채운다. payload에
+  법정동 계열 코드를 싣는 provider를 조사해 확대하고, 채우지 않은 provider가 `unarmed`로
+  집계되는 현 상태가 의도된 것임을 문서로 고정한다. provider 고유 코드(VisitKorea
+  `areaCode` 등)는 넣지 않는다.
 
 ### T-VN-H25 — 공식 curation stale Feature reference 재해소
 

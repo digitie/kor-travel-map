@@ -3,6 +3,47 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-29 — Lane A a1 T-VN-H28A/B: #673 주소 검증 규칙 교체 (한 PR)
+
+> **정정 (적대 리뷰 반영)** — 아래 "payload 행정코드 == geo 행정코드이므로 전부 오탐"이라는
+> 근거는 **무효**다. concierge의 payload 코드는 같은 kor-travel-geo /v2/reverse를 같은 좌표로
+> 호출한 캐시본이라 자기 자신과의 비교였다. 결론(380건 좌표 오류 아님)은 유지되지만 근거는
+> 독립 축(provider 원천 텍스트 + 정지오코딩)으로 다시 세웠다 — 375건은 텍스트에 행정구역
+> 토큰이 없어 좌표와 무관하게 통과 불가, 4건은 축약·단계 차이, 1건은 143 m 경계.
+> 이름 축은 **삭제하지 않고** 결함만 고쳐 warning으로 유지한다(전 provider 적용).
+> 상세: docs/reports/concierge-address-mismatch-evidence-2026-07-29.md
+
+- [x] **T-VN-H28A** — 운영과 동일한 코드 경로(live concierge export → 실 geo reverse 주입 변환
+  → `validate_feature_bundles_address`)로 재기준화했다. 증거:
+  [`reports/concierge-address-mismatch-evidence-2026-07-29.md`](reports/concierge-address-mismatch-evidence-2026-07-29.md).
+  - 1,430/410 → **1,477/380** (현상 유효).
+  - drop 380건이 **전부 오탐**: payload 시군구코드 == geo 시군구코드 380/380. 진짜 불일치 **0건**.
+    후보 전체(1,477)로 넓혀도 코드 불일치 0건.
+  - 380/380이 payload에 시군구·법정동 코드를 **모두** 보유 — 권위 축이 있는데 규칙이 안 썼다.
+  - 실패의 365/380은 `부산 기장 조방국밥`처럼 **행정구역명이 없는 짧은 주소**. 규칙이 잰 것은
+    좌표-주소 일치가 아니라 provider 주소 문자열의 완전성이었다.
+  - reverse 최근접 거리 `<10m` 210 / `<100m` 136 / `<1km` 34 — 좌표는 정확했다.
+- [x] **T-VN-H28B** — 이름 축을 판정에서 제거하고 행정코드 교차검증으로 교체했다.
+  - `AdminEvidence`(신규 DTO): 판정 두 축(좌표 reverse 코드 / payload 선언 코드)을 `Address`로
+    **병합하기 전에** 보존한다. 병합 후에는 출처를 알 수 없어 교차검증이 원천 불가능했다.
+  - 규칙: 코드 대 코드 접두 비교. 두 축이 모두 있을 때만 판정하고 없으면 **'통과'가 아니라
+    '증거 없음'**으로 집계(`evidence_grade`). 리(8:10)는 `_bjd_code_from_emd_code`가 합성할 수
+    있어 비교하지 않는다(8자리 캡).
+  - **drop을 severity가 아니라 code allowlist로 전환**. 새 error 규칙이 추가돼도
+    `DROPPABLE_ISSUE_CODES`를 명시적으로 고치기 전에는 영구 손실이 구조적으로 불가능하다.
+    (`provider_address_mismatch`가 바로 그 방식으로 380건을 조용히 파괴했다.)
+  - **batch 전멸 위험 제거**: payload에 `sigungu_code`만 있고 `legal_dong_code`가 없으면
+    `Address._check_code_consistency`가 `ValidationError`를 던져 **1건이 1,477건 전체를**
+    죽일 수 있었다(건별 격리 없음). `_address()`가 bjd에서만 유도하도록 바꿔 구조적으로
+    불가능하게 하고, 건별 격리 옵션도 추가했다.
+  - **회복 검증(live)**: 같은 export를 새 코드로 → **380 drop → 0, 1,477/1,477 적재, 손실 0.**
+    교차검증 성립 1,372/1,477(92%), 행정코드 불일치 0건.
+  - **replay 장치는 만들지 않았다** — 코드로 확인한 결과 불필요하다. drop은 적재 **전** 단계라
+    dropped 후보는 `source_entities`에 행이 없고, concierge cursor는 영속화되지 않아 매
+    materialize가 ledger 전량을 재생한다. 규칙만 고치면 자동 회복된다.
+  - 검증: n150 CI-parity — ruff / mypy --strict(core 117·dagster 23) / dagster 494 passed +
+    1 skipped / 관련 unit 179 passed. 신규 회귀 25건.
+
 ## 2026-07-29 — Lane A a1 T-VN-H21: geo 인증 결선 검증·비밀 유출 차단
 
 - [x] **T-VN-H21** — kor-travel-geo live 인증 결선을 검증 가능하게 만들고, 그 과정에서 드러난

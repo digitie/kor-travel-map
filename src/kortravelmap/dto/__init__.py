@@ -35,6 +35,7 @@ from ._enums import (
 )
 from ._time import KST, check_aware_datetime, kst_now
 from .address import Address
+from .admin_evidence import AdminClaimKind, AdminEvidence, EvidenceGrade
 from .area import AREA_KINDS, AreaDetail
 from .bundle import FeatureBundle
 from .coordinate import Coordinate
@@ -148,6 +149,9 @@ __all__ = [
     # source/bundle (PR#26)
     "SourceRecord",
     "SourceLink",
+    "AdminClaimKind",
+    "AdminEvidence",
+    "EvidenceGrade",
     "FeatureBundle",
     # weather (PR#38, ADR-010)
     "WeatherDomain",

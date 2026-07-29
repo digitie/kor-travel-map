@@ -210,8 +210,9 @@ class AddressMatchReport:
 | `sigungu_code_only` | 시군구 레벨만 있음 (10자리 모두 채움 못함) | **검토 대상** |
 | `address_text_match` | 코드 없이 문자열 매칭 | 정상 |
 | `address_text_review` | 문자열 매칭 검토 필요 (불완전 매칭) | **검토 대상** |
-| `provider_address_mismatch` | 좌표 기준 kor-travel-geo 주소와 provider 주소가 다른 장소로 보임 | **검토 대상** |
-| `provider_address_partial_match` | 동/시군구는 맞지만 상세 주소가 불완전하거나 다름 | **검토 대상** |
+| ~~`provider_address_mismatch`~~ | **발행 중단 (T-VN-H28B, 2026-07-29)** — 좌표 reverse 시군구명이 provider 주소 문자열에 부분문자열로 없으면 error였다. 실측에서 1,477 후보 중 380건을 영구 drop했고 **380건 전부 오탐**(진짜 불일치 0건)이라 판정에서 제거했다 | — |
+| ~~`provider_address_partial_match`~~ | **발행 중단 (T-VN-H28B)** — 같은 이름 문자열 축 | — |
+| `admin_code_stale_{sido,sigungu,emd}` | provider가 선언한 행정코드와 좌표 reverse 행정코드가 해당 단계에서 다름. 리(8:10)는 합성 가능해 비교하지 않는다 | **검토 대상** (warning 상한 — drop 불가) |
 | `address_text_only` | 좌표/geocoder 없이 문자열만 있음 | **검토 대상** |
 | `coordinate_only` | 주소 문자열 없이 좌표 결과만 | 정상 |
 | `address_geocode_legal_dong` | 정지오코딩 결과에서 좌표/법정동 보강 | 정상 |

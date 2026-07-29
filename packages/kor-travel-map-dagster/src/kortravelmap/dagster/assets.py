@@ -1241,11 +1241,25 @@ async def run_feature_place_kor_travel_concierge_youtube(
         await _record_list(context, "kor_travel_concierge_youtube_features")
     )
     fetched_at = await _fetched_at(context)
+    # T-VN-H28B: 건별 격리를 실제로 결선한다. 결선하지 않으면 item 1건의 구성 실패가
+    # batch 전체를 죽인다(concierge export는 1회 1,477건 전량 재생이라 손실이 전부다).
+    quarantined: list[tuple[Any, Exception]] = []
     bundles = await kor_travel_concierge_items_to_bundles(
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
+        quarantine=quarantined,
     )
+    if quarantined:
+        # silent cap 금지 — 격리한 건수와 사유를 metadata로 드러낸다.
+        context.add_output_metadata(
+            {
+                "concierge_quarantined_count": len(quarantined),
+                "concierge_quarantined_reasons": [
+                    f"{type(exc).__name__}: {exc}"[:300] for _, exc in quarantined[:20]
+                ],
+            }
+        )
     result = await _load(
         context,
         provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,

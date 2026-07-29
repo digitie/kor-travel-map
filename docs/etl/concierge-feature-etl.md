@@ -97,8 +97,12 @@ bundles = await kor_travel_concierge_items_to_bundles(
 - **행정코드(producer T-189, 2026-07-14)**: producer는 장소 매칭·보강된 후보에
   `place.address.{legal_dong_code,sigungu_code}` 실데이터와 유도 `sido_code`
   (sigungu 앞 2자리, 없으면 legal_dong 앞 2자리)를 보낸다(미매칭·미보강은 여전히
-  None). 소비자는 자리수 검증
-  후 Address로 싣고, 없으면 기존대로 좌표 reverse geocoding fallback을 쓴다.
+  None). 소비자는 자리수 검증 후 Address로 싣고, 없으면 기존대로 좌표 reverse geocoding
+  fallback을 쓴다. **T-VN-H28B 이후**: `legal_dong_code`가 있으면 `sigungu_code`/`sido_code`는
+  거기서만 유도한다(payload 값이 자기 `legal_dong_code`와 어긋나 `Address` 검증이 batch 전체를
+  죽이던 경로 제거). payload가 선언한 코드는 버려지지 않고 `FeatureBundle.admin_evidence`로
+  보존돼 **staleness 검출**에 쓰인다 — 이 코드는 concierge가 같은 kor-travel-geo reverse를
+  같은 좌표로 호출해 캐시한 값이라 좌표 정확성의 독립 증거가 아니다.
   item 상위에 additive `schema_version`(현재 1)도 실린다 — raw_data 보존 외 소비
   분기는 없다. 이 전환으로 **전 item payload_hash가 재발급**되므로 소비자는 다음
   materialize에서 전 후보를 재수신·재-render한다(신규 facility_info 평면 키도 이때

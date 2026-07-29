@@ -26,6 +26,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .admin_evidence import AdminEvidence
 from .area import AreaDetail
 from .event import EventDetail
 from .feature import Feature
@@ -72,6 +73,16 @@ class FeatureBundle(BaseModel):
         description=(
             "미디어 파일 참조 (이미지/영상 등). provider 응답 URL → load 시 "
             "객체 저장소 업로드 (docs/architecture/feature-files-rustfs.md). 기본 빈 list."
+        ),
+    )
+    admin_evidence: AdminEvidence | None = Field(
+        default=None,
+        description=(
+            "행정구역 판정용 원시 증거 2축 (T-VN-H28B). provider 변환기가 payload 코드와 "
+            "좌표 reverse 코드를 ``Address``로 **병합하기 전에** 보존한다. 병합 후에는 어느 "
+            "값이 어느 출처인지 알 수 없어 좌표-주소 교차검증이 불가능해진다. 채우지 않은 "
+            "provider는 ``None``이며, 검증은 그 provider에 대해 침묵한다 — 침묵을 통과로 "
+            "착각하지 않도록 커버리지는 metadata에 별도 집계된다."
         ),
     )
 
