@@ -233,11 +233,13 @@ def _address_validation_findings(
     findings: list[AddressValidationFinding] = []
     for issue in validation.issues:
         linked = issue.feature_id in loaded_feature_ids
+        # entity id를 못 찾으면 record key로 물러선다(안정성은 떨어지지만 키를 잃지는 않는다).
+        entity_id = entity_ids.get(issue.source_record_key, issue.source_record_key)
         findings.append(
             AddressValidationFinding(
                 dedupe_key=(
                     f"address_validation:{provider}:{dataset_key}:"
-                    f"{issue.code}:{entity_ids.get(issue.source_record_key, issue.source_record_key)}"
+                    f"{issue.code}:{entity_id}"
                 ),
                 violation_type=issue.code,
                 severity=issue.severity,
