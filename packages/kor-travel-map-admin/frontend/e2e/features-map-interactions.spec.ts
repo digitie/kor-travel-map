@@ -542,7 +542,20 @@ test.describe("/features map interactions", () => {
       const instrumentedMap = map as unknown as InstrumentedMap;
       const nextFrame = () =>
         new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      // source load 완료 직후 이미 예약된 updater를 먼저 비운 뒤 계측한다.
+      // areTilesLoaded()는 true가 된 직후의 실제 idle event보다 먼저 관측될 수 있다.
+      // repaint로 idle cycle을 하나 확정하고 그 handler의 rAF까지 비운 뒤 계측한다.
+      await new Promise<void>((resolve, reject) => {
+        const onIdle = () => {
+          window.clearTimeout(timeout);
+          resolve();
+        };
+        const timeout = window.setTimeout(() => {
+          map.off("idle", onIdle);
+          reject(new Error("map idle cycle did not settle"));
+        }, 5_000);
+        map.once("idle", onIdle);
+        map.triggerRepaint();
+      });
       await nextFrame();
       await nextFrame();
       const originalQuery = instrumentedMap.querySourceFeatures.bind(map);

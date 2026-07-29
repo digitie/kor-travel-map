@@ -194,6 +194,11 @@ Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별�
     `recovery-resource-finalizing` 전이만 허용한다. 이 두 phase 외의 legacy content
     정규화는 계속 거부하고, resource 정리 뒤 실패한 실행도 브라우저를 반복하지 않고
     같은 evidence에서 완료할 수 있게 한다.
+  - [ ] **T-VN-48D.7** — production MapLibre에서 `areTilesLoaded()`가 true가 된 직후 실제
+    `idle` event가 늦게 도착해 raster `sourcedata` 계측에 섞이는 Mocked race를 제거한다.
+    테스트가 repaint로 실제 idle cycle과 그 marker rAF를 먼저 소진한 뒤 raster/source
+    event를 계측하게 해 production의 raster 무시 계약과 test harness의 늦은 idle updater를
+    분리한다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 
