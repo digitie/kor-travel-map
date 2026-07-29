@@ -11,6 +11,7 @@ from kortravelmap.infra.feature_repo import FeatureLoadResult
 
 from kortravelmap.dagster.etl import load_feature_bundles_for_dagster
 from kortravelmap.dagster.validation import (
+    DROPPABLE_ISSUE_CODES,
     FeatureAddressIssue,
     FeatureAddressValidationSummary,
 )
@@ -299,8 +300,6 @@ async def test_non_allowlisted_error_never_loses_rows(
 
 def test_droppable_codes_are_explicit_and_minimal() -> None:
     """drop 가능한 code 집합은 명시적이며, 늘리려면 이 테스트가 먼저 깨진다."""
-    from kortravelmap.dagster.validation import DROPPABLE_ISSUE_CODES
-
     assert DROPPABLE_ISSUE_CODES == frozenset(
         {"reverse_geocode_failed", "missing_address"}
     )

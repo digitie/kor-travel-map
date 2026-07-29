@@ -11,11 +11,6 @@ from datetime import datetime
 from decimal import Decimal
 
 import pytest
-from kortravelmap.dagster.validation import (
-    DROPPABLE_ISSUE_CODES,
-    validate_feature_bundle_address,
-    validate_feature_bundles_address,
-)
 from kortravelmap.dto import (
     Address,
     AdminEvidence,
@@ -26,6 +21,12 @@ from kortravelmap.dto import (
     SourceLink,
     SourceRecord,
     SourceRole,
+)
+
+from kortravelmap.dagster.validation import (
+    DROPPABLE_ISSUE_CODES,
+    validate_feature_bundle_address,
+    validate_feature_bundles_address,
 )
 
 pytestmark = pytest.mark.unit
@@ -60,6 +61,8 @@ def _bundle(
         category="02020101",
         coord=coord,
         address=address,
+        marker_icon="marker",
+        marker_color="P-01",
         detail=PlaceDetail(feature_id="f_place_test_0001", place_kind="attraction"),
     )
     record = SourceRecord(
