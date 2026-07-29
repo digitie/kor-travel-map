@@ -2720,6 +2720,17 @@ class DataIntegrityViolationRow(Base):
             "violation_type",
             "status",
         ),
+        # T-VN-H30A (migration 0067): 열린 이슈에 한해 dedupe_key 1건으로 접는다.
+        # 파이프라인이 매 run 같은 export를 전량 재생해도 큐가 부풀지 않게 하는 근거이며,
+        # ``sync_integrity_findings``의 ON CONFLICT 추론 대상이다.
+        Index(
+            "uq_violations_open_dedupe_key",
+            text("(payload ->> 'dedupe_key')"),
+            unique=True,
+            postgresql_where=text(
+                "status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'"
+            ),
+        ),
         Index(
             "idx_violations_feature",
             "feature_id",
