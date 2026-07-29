@@ -16,6 +16,10 @@
 **다음 한 작업**: `T-VN-H33`(curation_items 오링크 3건 정리 — 공개 노출 여부 실증 포함).
 이후 `T-VN-H31`(등대 공급원) → `T-VN-H30C`(재작업) → `T-VN-H32` → `T-VN-H22A/B/C`.
 
+- **교훈 — 게이트를 돌리기 전엔 "머지 가능"을 말할 수 없다**: 리뷰 지적을 다 반영하고
+  ruff까지 통과한 뒤에도, n150 게이트가 `manifest.json` sha256 불일치를 잡았다(README를
+  고치고 해시를 안 고침). 손으로 유지하던 manifest를 **스크립트가 파생시키도록** 바꿔
+  같은 결함이 다시 나지 않게 했다. 리뷰 통과 ≠ 게이트 통과.
 - **완료(부분)**: `T-VN-H25B` — 역반영 5건(8건 중 3건은 오링크라 배제), 매칭 재실행 + manifest 커밋.
   근거: [`reports/curation-link-backfill-2026-07-29.md`](reports/curation-link-backfill-2026-07-29.md).
   **미충족 AC 4건**(주소 축 시군구 대조 · provider provenance 조인 · preview/commit·REST/UI

@@ -360,6 +360,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     `ORDER BY length(name)`(양방향 substring이라 2글자 feature가 top이 됨). 세 번째는
     내가 두 번째를 고치며 **새로 넣은** 결함이다. 264행 중 **208행(79%)이 후보 cap 포화**라
     그 행들은 이름 유일성 자체를 판정할 수 없다.
+  - **manifest sha256을 손으로 유지하던 구조를 없앴다.** README를 고치고 sha256을 안 고쳐
+    `test_curation_resource_manifest_and_csv_contract`가 깨졌다(n150 게이트가 잡음).
+    이제 `scripts/h25b_apply_verified_links.py`가 `manifest.json`의 sha256/rows를 실물에서
+    다시 계산한다 — 커밋된 CSV·manifest 전부 그 스크립트 하나의 산출물이다.
   **미충족 AC 원장** — `[x]`는 "AC 전부 충족"이 아니라 "역반영·매칭 재실행으로 종결"이다.
 
   | AC 항목 | 상태 | 이관 |
@@ -405,6 +409,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   **전수 확인 결과 이 축으로 잡히는 오링크는 3건이다** (`scripts/h33_mislink_detect.py`, 재현 가능).
   CSV 링크 222행 시도 불일치 **0건**, DB `curation_items` 링크 전수 **3건**(남이섬 ×2, 청남대).
+  근거 산출물: [`reports/h33-mislink-2026-07-29.json`](reports/h33-mislink-2026-07-29.json)
+  (`db_linked_rows` 3269 / `db_region_codeable` 112 / `db_sido_mismatch` 3).
+  CSV 쪽이 0건인 것은 **그 3건을 역반영에서 뺐기 때문**이지, 축이 안 도는 게 아니다.
 
   > **정정** — H25B 리포트 초안은 호미곶·오륙도를 들어 "오탐이 계통적이니 유형 전수를
   > 대상으로 하라"고 적었으나 **철회했다**. 그 이름의 서울 소재 feature가 *존재할 뿐*
