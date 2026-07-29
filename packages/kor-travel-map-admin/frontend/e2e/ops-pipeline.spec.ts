@@ -3990,6 +3990,7 @@ test.describe("/ops/pipeline", () => {
     await expect(
       dialog.getByText(
         "MOIS source sync 최신 성공이 TTL(24시간)을 넘었습니다.",
+        { exact: true },
       ),
     ).toBeVisible();
   });
