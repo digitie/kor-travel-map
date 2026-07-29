@@ -15,9 +15,30 @@ H25B가 정지오코딩으로 확인한 오링크 3건이 DB에 남아 **공개 
    `/admin/issues`에서 보이게 한다. 고친 직후이므로 `resolved`로 닫되, 무엇이 어떻게
    틀렸는지는 payload에 남는다.
 
-**재링크되지 않는 이유**: 공식 CSV import는 `feature_id = EXCLUDED.feature_id`로
-COALESCE 없이 덮어쓴다(`curation_repo`). 커밋된 CSV의 이 3행은 `feature_id`가 비어 있으므로
-다음 import가 다시 링크하지 않는다. 이 스크립트는 그 상태를 앞당길 뿐이다.
+**⚠ 이 해제는 durable하지 않다 — 다음 공식 CSV import가 그대로 되살린다.**
+
+초안은 여기에 *"CSV의 `feature_id`가 비어 있으니 import가 다시 링크하지 않는다"*고 적었다.
+**틀렸다**(적대 리뷰 실측). `feature_id = EXCLUDED.feature_id`까지만 읽고 `EXCLUDED`에 무엇이
+들어오는지 보지 않은 것이다. 빈 `feature_id`는 링크를 막는 게 아니라 **이름 자동매칭을 켠다**:
+
+    -- curation_repo._RESOLVE_FEATURES_BATCH_SQL
+    WHERE requested.feature_id IS NULL
+      AND lower(f.name) = lower(requested.place_name)
+      AND (requested.address_hint IS NULL OR ...)   -- 이 3행은 address_hint도 비어 있다
+
+단일 매칭이면 그 id가 그대로 `EXCLUDED.feature_id`가 된다(`curations.py`의
+`match = matches[0] if len(matches) == 1 else None`). prod에 `남이섬`·`청남대`라는 이름의
+live feature는 **각각 하나뿐이고 그게 바로 틀린 그 feature**다. 커밋된 CSV의 빈 264행 중
+단일 매칭으로 해석되는 건 정확히 이 3행뿐이고, 전부 방금 끊은 그 feature로 돌아간다.
+
+게다가 import는 `metadata = EXCLUDED.metadata`로 무조건 덮으므로 아래에서 남기는 사유도
+같이 지워진다. 그래서 finding을 `resolved`가 아니라 **`open`으로 남긴다** — 아직 안 끝났다.
+
+근본 수정(리졸버에 지역 교차검증을 넣거나, import가 존중하는 "링크 금지" 표식)은
+`T-VN-H36`이다. 그때까지 이 스크립트는 **증상 완화**이지 해결이 아니다.
+다행히 지금 당장 되살아나지는 않는다 — prod는 alembic `0063`이라 HEAD의 import SQL이
+참조하는 컬럼이 없어 import 자체가 실패한다. `T-VN-H35`가 마이그레이션을 적용하는 순간
+되살아나므로, **H35보다 H36이 먼저**여야 한다.
 
 기본은 **dry-run**이다. 실제 쓰기는 ``--apply``.
 """
@@ -58,6 +79,7 @@ select ci.curation_item_id, ci.external_item_id, ci.place_name, ci.feature_id,
   join feature.curation_collections cc on cc.collection_id = ci.collection_id
   left join feature.features f on f.feature_id = ci.feature_id
  where cc.collection_key = $1 and ci.external_item_id = $2
+   and ci.archived_at is null
 """
 
 _UNLINK_SQL = """
@@ -87,10 +109,15 @@ returning curation_item_id
 # 그러니 dedupe를 **응용단에서** 한다: dedupe_key로 먼저 찾아보고 있으면 UPDATE, 없으면
 # INSERT. 인덱스가 있든 없든 맞게 동작하고, 나중에 0067이 적용돼도 그대로 옳다.
 # (동시성 방어는 인덱스가 하는 일이라 여기선 얻지 못한다. 이 스크립트는 단발 운영 도구다.)
+# **`feature_id` 컬럼은 비운다.** `fk_data_integrity_violations_feature_id_features`가
+# `ON DELETE CASCADE`라, 문제의 그 엉뚱한 feature를 지우는 순간(가장 자연스러운 후속 정리)
+# "그 feature에 잘못 링크돼 있었다"는 기록이 통째로 사라진다. id는 payload에만 남긴다 —
+# `source_record_key`를 비운 것과 같은 이유다.
 _FIND_EXISTING_SQL = """
 select issue_id::text
   from ops.data_integrity_violations
  where payload ->> 'dedupe_key' = $1
+   and violation_type = 'curation_feature_region_mismatch'
  order by detected_at desc
  limit 1
 """
@@ -98,21 +125,27 @@ select issue_id::text
 _INSERT_FINDING_SQL = """
 insert into ops.data_integrity_violations (
     provider, dataset_key, source_record_key, feature_id,
-    violation_type, severity, message, payload, status, resolved_at
+    violation_type, severity, message, payload, status
 ) values (
-    'curation', $1, null, $2,
-    'curation_feature_region_mismatch', 'error', $3,
-    jsonb_strip_nulls($4::jsonb), 'resolved', now() at time zone 'UTC'
+    'curation', $1, null, null,
+    'curation_feature_region_mismatch', 'error', $2,
+    jsonb_strip_nulls($3::jsonb), 'open'
 )
 returning issue_id::text
 """
 
+# 같은 dedupe_key를 **상태와 무관하게** 찾아 open으로 되돌린다.
+# 0067 docstring은 "닫은 뒤 재발하면 새 행"을 의도하지만, 여기서는 애초에 닫지 않는다 —
+# import가 되살릴 수 있는 한 이 finding은 계속 열려 있어야 한다. (이 경로는 이 스크립트가
+# 먼저 `resolved`로 잘못 기록한 3행을 바로잡는 데도 쓰인다.)
 _UPDATE_FINDING_SQL = """
 update ops.data_integrity_violations
    set message = $2,
        payload = jsonb_strip_nulls($3::jsonb),
-       status = 'resolved',
-       resolved_at = now() at time zone 'UTC'
+       feature_id = null,
+       severity = 'error',
+       status = 'open',
+       resolved_at = null
  where issue_id = $1::uuid
 returning issue_id::text
 """
@@ -131,63 +164,86 @@ async def main() -> None:
         print(f"DB={db} mode={mode}\n")
 
         unlinked = 0
-        skipped = 0
+        already = 0
+        guarded = 0
+        emitted = 0
         for (collection_key, item_key), (expected_fid, reason) in MISLINKS.items():
             rows = await conn.fetch(_SELECT_SQL, collection_key, item_key)
             if not rows:
-                print(f"  건너뜀 {item_key}: 해당 curation_item 없음")
-                skipped += 1
+                print(f"  ★ {item_key}: 해당 curation_item 없음")
+                guarded += 1
                 continue
-            for row in rows:
-                current = row["feature_id"]
-                if current is None:
-                    print(f"  건너뜀 {item_key}: 이미 미연결")
-                    skipped += 1
-                    continue
-                if current != expected_fid:
-                    # 가드. 우리가 판정한 오링크가 아니면 손대지 않는다.
-                    print(
-                        f"  ★ 건너뜀 {item_key}: feature_id가 예상과 다름 "
-                        f"(현재 {current}, 예상 {expected_fid}) — 그 사이 재링크됐을 수 있다"
-                    )
-                    skipped += 1
-                    continue
 
+            # (collection_key, external_item_id)는 **유일하지 않다** — 같은 item에
+            # external_component_id가 다른 형제 행이 있을 수 있다(prod에 19개 그룹 존재).
+            # 형제가 다른 feature를 가리키는 건 정상이므로 가드에 걸려도 "동시 변경" 경보를
+            # 울리면 안 된다. 우리가 지목한 feature를 가진 행만 대상으로 좁힌다.
+            targets = [r for r in rows if r["feature_id"] == expected_fid]
+            siblings = len(rows) - len(targets)
+            if siblings:
+                print(f"  참고 {item_key}: 형제 행 {siblings}건은 대상 아님(정상)")
+
+            if not targets:
+                if any(r["feature_id"] is None for r in rows):
+                    print(f"  이미 해제됨 {item_key}")
+                    already += 1
+                else:
+                    print(
+                        f"  ★ 건너뜀 {item_key}: 지목한 오링크({expected_fid})를 가진 행이 없다 "
+                        f"— 그 사이 재링크됐을 수 있다"
+                    )
+                    guarded += 1
+
+            payload = {
+                "dedupe_key": f"curation_mislink:{collection_key}:{item_key}",
+                "collection_key": collection_key,
+                "external_item_id": item_key,
+                "place_name": (targets or rows)[0]["place_name"],
+                "unlinked_feature_id": expected_fid,
+                "reason": reason,
+                "task": "T-VN-H33",
+                "remediation": "feature_id를 NULL로 되돌렸다",
+                "public_exposure": (
+                    "/v1/curations/features/{feature_id} (공개 라우터)로 노출되고 있었다"
+                ),
+                "durability": (
+                    "durable하지 않다 — 공식 CSV import가 빈 feature_id에 대해 이름 자동매칭을 "
+                    "수행해 같은 feature로 되돌린다. 근본 수정은 T-VN-H36."
+                ),
+            }
+            message = f"curation 링크가 다른 지역을 가리킨다: {payload['place_name']} — {reason}"
+
+            for row in targets:
                 print(
                     f"  대상 {item_key} ({row['place_name']}) → "
                     f"{row['feature_name']} | {row['feature_addr'][:44]}"
                 )
+                payload["unlinked_feature_name"] = row["feature_name"]
+                payload["unlinked_feature_address"] = row["feature_addr"]
 
                 meta = row["metadata"]
                 if isinstance(meta, str):
                     meta = json.loads(meta or "{}")
                 meta = dict(meta or {})
                 meta["feature_match_status"] = "unresolved"
-                meta.pop("feature_match_confidence", None)
+                # 링크를 정당화하던 키는 전부 걷어낸다. 하나라도 남으면 "왜 비어 있지?"가
+                # 다시 링크로 이어진다. (H25B 계열 키 confidence/confidence_reason 포함.)
+                for stale in (
+                    "feature_match_confidence",
+                    "feature_match_partial",
+                    "confidence",
+                    "confidence_reason",
+                ):
+                    meta.pop(stale, None)
+                prior = meta.get("feature_match_reasons") or []
                 meta["feature_match_reasons"] = [
                     f"T-VN-H33: 오링크 해제. {reason}. "
-                    f"해제 전 링크 대상은 {expected_fid}였다."
+                    f"해제 전 링크 대상은 {expected_fid}였다.",
+                    *[str(x) for x in prior],
                 ]
 
-                payload = {
-                    "dedupe_key": f"curation_mislink:{collection_key}:{item_key}",
-                    "collection_key": collection_key,
-                    "external_item_id": item_key,
-                    "place_name": row["place_name"],
-                    "unlinked_feature_id": expected_fid,
-                    "unlinked_feature_name": row["feature_name"],
-                    "unlinked_feature_address": row["feature_addr"],
-                    "reason": reason,
-                    "task": "T-VN-H33",
-                    "remediation": "feature_id를 NULL로 되돌렸다",
-                    "public_exposure": (
-                        "/v1/curations/features/{feature_id} (공개 라우터)로 노출되고 있었다"
-                    ),
-                }
-                message = f"curation 링크가 다른 지역을 가리킨다: {row['place_name']} — {reason}"
-
                 if not args.apply:
-                    print("    (dry-run) unlink + finding 방출 예정")
+                    print("    (dry-run) unlink 예정")
                     unlinked += 1
                     continue
 
@@ -198,33 +254,43 @@ async def main() -> None:
                         json.dumps(meta, ensure_ascii=False),
                         expected_fid,
                     )
-                    if done is None:
-                        # 가드 재확인. SELECT와 UPDATE 사이에 바뀌었으면 여기서 걸린다.
-                        print("    ★ UPDATE가 0행 — 동시 변경. 건너뜀")
-                        skipped += 1
-                        continue
-                    payload_json = json.dumps(payload, ensure_ascii=False)
-                    existing = await conn.fetchval(
-                        _FIND_EXISTING_SQL, payload["dedupe_key"]
-                    )
-                    if existing is None:
-                        issue_id = await conn.fetchval(
-                            _INSERT_FINDING_SQL,
-                            collection_key,
-                            expected_fid,
-                            message,
-                            payload_json,
-                        )
-                        how = "신규"
-                    else:
-                        issue_id = await conn.fetchval(
-                            _UPDATE_FINDING_SQL, existing, message, payload_json
-                        )
-                        how = "갱신"
-                print(f"    unlink 완료. finding={issue_id} ({how}, resolved)")
+                if done is None:
+                    # SELECT와 UPDATE 사이에 바뀐 경우에만 여기 온다.
+                    print("    ★ UPDATE가 0행 — 동시 변경. 건너뜀")
+                    guarded += 1
+                    continue
+                print("    unlink 완료")
                 unlinked += 1
 
-        print(f"\n{'해제' if args.apply else '해제 예정'} {unlinked}행 / 건너뜀 {skipped}행")
+            # finding은 **이미 해제된 경우에도** 갱신한다. 문제가 durable하게 해결되지 않았고
+            # (import가 되살린다), 이 스크립트가 처음에 잘못 기록한 resolved 행도 바로잡아야
+            # 하므로, 해제 여부와 무관하게 open 상태로 유지한다.
+            if not args.apply:
+                print("    (dry-run) finding open 유지 예정")
+                emitted += 1
+                continue
+
+            payload_json = json.dumps(payload, ensure_ascii=False)
+            async with conn.transaction():
+                existing = await conn.fetchval(_FIND_EXISTING_SQL, payload["dedupe_key"])
+                if existing is None:
+                    issue_id = await conn.fetchval(
+                        _INSERT_FINDING_SQL, collection_key, message, payload_json
+                    )
+                    how = "신규"
+                else:
+                    issue_id = await conn.fetchval(
+                        _UPDATE_FINDING_SQL, existing, message, payload_json
+                    )
+                    how = "갱신"
+            print(f"    finding={issue_id} ({how}, open)")
+            emitted += 1
+
+        verb = "해제" if args.apply else "해제 예정"
+        print(
+            f"\n{verb} {unlinked}행 / 이미 해제 {already}건 / 가드 {guarded}건 / "
+            f"finding {emitted}건(open)"
+        )
     finally:
         await conn.close()
 

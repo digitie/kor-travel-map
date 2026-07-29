@@ -117,8 +117,22 @@ H25B가 정지오코딩으로 찾아낸 오링크 3건을 끊었다. **공개 RE
 payload 양쪽에 남긴다. 가드도 걸었다: 현재 `feature_id`가 우리가 오링크라 판정한 그 값일
 때만 끊는다(그 사이 올바로 재링크됐을 수 있다). `--apply` 재실행은 3건 전부 건너뛴다.
 
-재링크되지 않는 이유는 CSV import가 `feature_id = EXCLUDED.feature_id`로 COALESCE 없이
-덮어쓰기 때문이다. 커밋된 CSV의 이 3행이 비어 있으니 다음 import도 비운 채로 둔다.
+**🔴 그리고 이 해제는 durable하지 않다 — 초안이 반대로 적었다.** 나는 *"CSV import가
+`feature_id = EXCLUDED.feature_id`로 덮어쓰는데 이 3행은 CSV가 비어 있으니 다시 링크되지
+않는다"*고 쓰고 **그 근거로 task를 닫았다**. 적대 리뷰가 prod 실측으로 반증했다.
+`EXCLUDED.feature_id`까지만 읽고 거기 무엇이 들어오는지 보지 않은 것이다 — 빈 `feature_id`는
+링크를 막는 게 아니라 **이름 자동매칭을 켠다**(`_RESOLVE_FEATURES_BATCH_SQL`의
+`WHERE requested.feature_id IS NULL AND lower(f.name) = lower(requested.place_name)`;
+`address_hint`도 비어 주소 필터는 안 걸린다). 단일 매칭이면 그 id가 `EXCLUDED.feature_id`다.
+커밋된 CSV의 빈 264행 중 단일 매칭으로 풀리는 건 **정확히 이 3행뿐**이고 전부 방금 끊은 그
+feature로 돌아간다 — `남이섬`·`청남대`라는 이름의 live feature가 prod에 각각 하나뿐인데
+그게 바로 틀린 그 feature이기 때문이다. import는 `metadata = EXCLUDED.metadata`로 무조건
+덮으므로 위에 남긴 사유까지 지워진다.
+
+그래서 `[x]`를 `[~]`로 되돌리고, finding도 `resolved` → **`open`**으로 바꿨다
+(`/admin/issues` 기본 필터가 `open`이라 resolved면 운영자에게 보이지도 않았다).
+근본 수정은 `T-VN-H36`이고 **`T-VN-H35`(마이그레이션 적용)보다 먼저**여야 한다 — 지금
+안 되살아나는 건 prod가 `0063`이라 import 자체가 실패하는 우연 덕분이다.
 
 **부수 발견 — 머지 ≠ 배포.** ledger 방출을 붙이는데 `ON CONFLICT`가 두 번 실패했다.
 처음엔 arbiter 술어(`status IN ('open','acknowledged')`)와 내가 넣는 `resolved`가 안 맞는
@@ -130,6 +144,12 @@ PR #888은 머지됐지만 마이그레이션은 prod에 닿은 적이 없다. H
 이번에도 형태가 같다. 첫 진단("술어가 안 맞는다")은 **내 코드 안에서만 찾은 설명**이었고,
 두 번째 실패가 아니었으면 그대로 믿었을 것이다. 완료 기록을 쓸 때 *머지된 것*과 *배포된
 것*을 구분해야 한다.
+
+**가장 큰 교훈은 durability 주장 쪽이다.** SQL의 마지막 문장(`feature_id = EXCLUDED.feature_id`)을
+읽고 "덮어쓴다"까지는 맞게 봤는데, **덮어쓰는 값이 어디서 오는지를 안 따라갔다.** 값의
+출처를 추적하지 않은 채 구문만 보고 안전성을 주장한 것이고, 그 주장 하나로 task를 닫았다.
+이 세션에서 반복된 "측정 도구의 산물을 데이터의 성질로 읽기"와 같은 뿌리다 —
+**결론을 지탱하는 문장일수록 끝까지 따라가야 한다.**
 
 부수로 하나 더: `ops.data_integrity_violations.source_record_key`에는
 `provider_sync.source_records` FK가 걸려 있어 curation item 키를 넣을 수 없다.

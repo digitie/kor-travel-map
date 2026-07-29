@@ -61,14 +61,20 @@ task 요구가 실제로 값을 한 지점이다.
 집계: CSV `linked 217 → 222` / `unresolved 269 → 264`. `manifest.json`의 파일별 수치와
 `sha256`을 함께 갱신했다.
 
-## 4. DB 쪽 오링크는 남아 있다
+## 4. DB 쪽 오링크는 남아 있었다 (→ T-VN-H33에서 해제)
 
-보류한 3행에 대응하는 **`feature.curation_items` 행은 여전히 잘못된 feature를 가리킨다**
-(`status=included`, archived 아님). 즉 `/admin/curations` 계열 화면과 공개 projection은
-남이섬 자리에 서울 중구 사무소를, 청남대 자리에 전남 영암 시설을 노출하고 있을 수 있다.
+보류한 3행에 대응하는 **`feature.curation_items` 행이 잘못된 feature를 가리키고 있었다**
+(`status=included`, archived 아님).
 
-본 task는 CSV 정본만 다루므로 DB mutation은 하지 않았다. 별도 task로 분리한다 —
-`T-VN-H33`.
+본 task는 CSV 정본만 다루므로 DB mutation은 하지 않았고, `T-VN-H33`으로 분리했다.
+
+> **후속(2026-07-29, T-VN-H33)** — 위의 "노출하고 있을 수 있다"는 **실제로 그랬다**.
+> 공개 라우터 `/v1/curations/features/{feature_id}`가 남이섬 feature(서울 중구)에 한국관광
+> 100선 2건, 청남대 feature(전남 영암)에 1건을 붙여 내보내고 있었다. 3건을 해제해 공개
+> 노출 0건이 됐다.
+> **다만 durable하지 않다** — 공식 CSV import가 빈 `feature_id`에 대해 이름 자동매칭을
+> 수행해 같은 feature로 되돌린다. 근본 수정은 `T-VN-H36`. 자세한 내용은 `docs/tasks.md`의
+> T-VN-H33 "철회" 항목.
 
 ## 5. 매칭 재실행 — 자동 승인 대상은 0건이다
 

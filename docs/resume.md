@@ -13,14 +13,24 @@
 ## 2026-07-29 (codex) — T-VN-48D 최종 gate 완료 → PR·CI·merge
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25B 완료 → 다음은 T-VN-H33
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25B + T-VN-H33 완료 → 다음은 T-VN-H35
+## 2026-07-29 (claude) — Lane A a1: T-VN-H25B + H33(부분) → 다음은 T-VN-H36
 
-**다음 한 작업**: `T-VN-H35`(prod 마이그레이션 지연 0064~0067 해소).
-이후 `T-VN-H31`(등대 공급원) → `T-VN-H34` → `T-VN-H30C` → `T-VN-H32` → `T-VN-H22A/B/C`.
+**다음 한 작업**: `T-VN-H36`(curation import가 이름만으로 자동 링크 — H33이 끊은 3건을
+되살린다). **`T-VN-H35`(마이그레이션 적용)보다 먼저** 해야 한다.
+이후 `T-VN-H35` → `T-VN-H31`(등대) → `T-VN-H34` → `T-VN-H30C` → `T-VN-H32` → `T-VN-H22A/B/C`.
 
-- **완료**: `T-VN-H33` — 오링크 3건 unlink + 공개 노출 실증 + ledger 방출.
+- **부분 완료**: `T-VN-H33` — 오링크 3건 unlink + 공개 노출 실증 + ledger 방출.
   해제 전 공개 REST(`/v1/curations/features/{feature_id}`)가 한국관광100선 "남이섬" 자리에
   **서울 중구 사무소**, "청남대" 자리에 **전남 영암 시설**을 내보내고 있었다(각 2건/1건).
-  해제 후 공개 노출 0건, 탐지기 불일치 3→0건, `--apply` 재실행은 전부 건너뜀(멱등).
+  해제 후 공개 노출 0건, 탐지기 불일치 3→0건, `--apply` 재실행 멱등.
+- **🔴 `[x]`를 `[~]`로 되돌렸다 — durability 주장이 반증됐다**: "CSV가 비어 있으니 import가
+  재링크하지 않는다"고 쓰고 그 근거로 닫았는데, 빈 `feature_id`는 링크를 막는 게 아니라
+  **이름 자동매칭을 켠다**. 커밋된 CSV의 빈 264행 중 단일 매칭으로 풀리는 건 정확히 그
+  3행뿐이고 전부 같은 틀린 feature로 복귀한다(prod 실측). finding도 `resolved`→`open`으로
+  정정했다(`/admin/issues` 기본 필터가 `open`이라 resolved면 보이지도 않았다). → `T-VN-H36`.
+- **교훈 — 결론을 지탱하는 문장일수록 끝까지 따라간다**: `feature_id = EXCLUDED.feature_id`를
+  읽고 "덮어쓴다"까지는 맞았지만 **덮어쓰는 값의 출처를 안 따라갔다**. 구문만 보고 안전성을
+  주장했고 그 한 문장으로 task를 닫았다.
 - **🔴 부수 발견 — 머지 ≠ 배포**: ledger 방출을 붙이다 `ON CONFLICT`가 두 번 실패했는데
   원인이 코드가 아니었다. **prod alembic head가 `0063_pipeline_root_id`**라 H30A가 만든
   dedupe 부분 유니크 인덱스(`0067`)가 **prod에 없다**. H30A 완료 기록이 주장한 dedupe 효과는

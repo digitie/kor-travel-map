@@ -27,7 +27,8 @@ barrier로 직렬화한다.
     [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
     [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
-    [x] `T-VN-H33`(curation_items 오링크 3건 정리 — 공개 오노출 해소) →
+    [~] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, durable하지 않음) →
+    [ ] `T-VN-H36`(import가 이름만으로 자동 링크 — H33 파생, H35보다 선행) →
     [ ] `T-VN-H35`(prod 마이그레이션 지연 0064~0067 — H33 부수 발견) →
     [ ] `T-VN-H34`(H25A/H25B 미충족 AC 마무리) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
@@ -401,20 +402,42 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   - **정지오코딩 세션 고정** — 승인/기각 근거를 재현 가능하게 남긴다
     (`scripts/h25b_verify_links.py` 신설; 현재는 손으로 친 상수표뿐이다).
 
-- [x] T-VN-H33 — **curation_items 오링크 3건 정리 (H25B 파생)**
+- [~] T-VN-H33 — **curation_items 오링크 3건 정리 (H25B 파생)**
 
-  **완료(2026-07-29)**. `scripts/h33_unlink_mislinks.py` (dry-run 기본, `--apply`로 쓰기).
+  **증상은 제거했으나 durable하지 않다.** `[x]`로 닫았다가 적대 리뷰 실측으로 되돌렸다 —
+  아래 "철회" 참조. 근본 수정은 `T-VN-H36`.
+
+  `scripts/h33_unlink_mislinks.py` (dry-run 기본, `--apply`로 쓰기).
   - **공개 노출 실증** — `/v1/curations/features/{feature_id}`는 public 라우터다.
     해제 전 남이섬 feature(서울 중구 사무소)에 한국관광100선 **2건**, 청남대 feature
     (전남 영암)에 **1건**이 붙어 공개 응답에 나왔다. 해제 후 **0건**.
   - **탐지기 재실행** — DB 링크 시도 불일치 **3건 → 0건**
     ([after 산출물](reports/h33-mislink-after-2026-07-29.json)).
   - **ledger 방출** — `ops.data_integrity_violations`에 `curation_feature_region_mismatch`
-    3건(`error`/`resolved`). payload에 해제 전 `feature_id`를 남겨 되돌릴 수 있다.
-  - **재실행 안전** — 두 번째 `--apply`는 "이미 미연결" 3건 건너뜀. 현재 `feature_id`가
-    예상 오링크와 다르면 손대지 않는다(그 사이 올바로 재링크됐을 수 있으므로).
-  - **재링크되지 않는다** — 공식 CSV import는 `feature_id = EXCLUDED.feature_id`로
-    COALESCE 없이 덮어쓰고, 커밋된 CSV의 이 3행은 비어 있다.
+    3건. **`open`이다**(초안은 `resolved`였으나 철회 — 아래). `feature_id` 컬럼은 비우고
+    payload에만 남긴다: 이 FK가 `ON DELETE CASCADE`라 문제의 feature를 지우면 "잘못
+    링크돼 있었다"는 기록까지 같이 사라진다.
+  - **재실행 안전** — `--apply` 재실행은 "이미 해제" 3건으로 끝나고 finding만 갱신한다.
+    지목한 오링크 `feature_id`를 가진 행만 대상으로 하며, 형제 행(같은 item의 다른
+    component)은 정상으로 보고 경보를 울리지 않는다.
+
+  > **🔴 철회 — "재링크되지 않는다"는 틀렸다.**
+  > 초안은 *"공식 CSV import가 `feature_id = EXCLUDED.feature_id`로 덮어쓰는데 이 3행은
+  > CSV가 비어 있으니 다시 링크되지 않는다"*고 적고 그 근거로 task를 닫았다.
+  > **적대 리뷰가 prod에서 실측으로 반증했다.** `EXCLUDED.feature_id`까지만 읽고 거기
+  > 무엇이 들어오는지 보지 않은 것이다 — 빈 `feature_id`는 링크를 막는 게 아니라
+  > `curation_repo._RESOLVE_FEATURES_BATCH_SQL`의 **이름 자동매칭을 켠다**
+  > (`WHERE requested.feature_id IS NULL AND lower(f.name) = lower(requested.place_name)`,
+  > `address_hint`도 비어 있어 주소 필터는 건너뛴다). 단일 매칭이면 그 id가 그대로
+  > `EXCLUDED.feature_id`가 된다.
+  > **커밋된 CSV의 빈 264행 중 단일 매칭으로 해석되는 건 정확히 이 3행뿐이고, 전부 방금
+  > 끊은 그 feature로 되돌아간다** — prod에 `남이섬`·`청남대`라는 이름의 live feature가
+  > 각각 하나뿐이고 그게 바로 틀린 그 feature이기 때문이다.
+  > 게다가 import는 `metadata = EXCLUDED.metadata`로 무조건 덮으므로 위에서 남긴 사유도
+  > 지워진다. 그래서 finding을 `resolved`가 아니라 `open`으로 되돌렸다.
+  > 지금 당장 되살아나지는 않는다 — prod가 `0063`이라 HEAD의 import SQL이 참조하는 컬럼이
+  > 없어 import 자체가 실패한다. **`T-VN-H35`가 마이그레이션을 적용하는 순간 되살아나므로
+  > H36이 H35보다 먼저여야 한다.**
 
   > **부수 발견 — prod가 마이그레이션 4개 뒤처져 있다.** ledger 방출을 붙이다가
   > `ON CONFLICT`가 두 번 실패했다. 원인은 코드가 아니라 **prod alembic head가
@@ -422,6 +445,20 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > **prod에 존재하지 않는다**. H30A의 dedupe 효과는 현재 prod에서 작동하지 않는다.
   > → `T-VN-H35`로 분리한다. 또 `source_record_key`에는 `provider_sync.source_records`
   > FK가 걸려 있어 curation 키를 넣을 수 없다(ledger가 provider 적재 전제로 설계됨).
+
+- [ ] T-VN-H36 — **curation import가 이름만으로 자동 링크한다 (H33 파생, H35보다 선행)**
+
+  `curation_repo._RESOLVE_FEATURES_BATCH_SQL`은 CSV `feature_id`가 비면
+  `lower(f.name) = lower(place_name)` 단독으로 후보를 찾고, 단일 매칭이면 그대로 링크한다.
+  `address_hint`가 비면 주소 필터도 걸리지 않는다. **지역 교차검증이 없다.**
+  H33이 끊은 3건이 정확히 이 경로로 되살아난다(prod 실측: 빈 264행 중 단일 매칭 3행 =
+  H33 대상 3건, 전부 틀린 feature로 복귀).
+  또 `metadata = EXCLUDED.metadata`가 무조건 덮어써서 "링크 금지" 사유를 남길 자리도 없다.
+
+  선택지: (a) 리졸버에 시도/시군구 교차검증 추가, (b) import가 존중하는 명시적 "링크 금지"
+  표식, (c) 이름 단독 매칭 시 자동 링크 대신 `review`로 떨어뜨리기.
+  **H35(마이그레이션 적용)보다 먼저 해야 한다** — 지금은 prod가 `0063`이라 import 자체가
+  실패해 우연히 막혀 있을 뿐이다.
 
 - [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0067)**
 
