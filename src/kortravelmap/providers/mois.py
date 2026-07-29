@@ -676,8 +676,11 @@ async def license_record_to_bundle(
     # bjd_code는 feature_id 전에 확정 (ADR-009). legal_dong_code 1차, 없으면 역지오코딩.
     bjd_code = normalize_bjd_code(record.legal_dong_code)
     geo: Address | None = None
+    # T-VN-H30C: obs 축은 좌표 reverse 결과만 실어야 하므로 출처를 분리해 둔다.
+    reverse_geo: Address | None = None
     if bjd_code is None and coord is not None and reverse_geocoder is not None:
         geo = await reverse_geocoder(coord)
+        reverse_geo = geo
         bjd_code = geo.bjd_code if geo is not None else None
     if bjd_code is None and address_resolver is not None:
         resolved = await address_resolver(
@@ -774,8 +777,12 @@ async def license_record_to_bundle(
         # ``claim_only``로 집계에 드러내는 것이 목적이다. ``unarmed``(미계측)와 구분된다.
         # reverse를 강제로 부르지는 않는다: 977k 레코드에 대한 호출은 비용이 다른 문제다.
         admin_evidence=AdminEvidence(
-            obs_code=geo.bjd_code if geo is not None else None,
-            reverse_attempted=geo is not None,
+            # obs 축은 **좌표 reverse** 결과만이다. 위 분기의 ``geo``는 address_resolver
+            # (provider 주소 문자열의 정지오코딩)로도 채워지므로 그대로 쓰면 obs가
+            # claim_text와 같은 출처가 되어 자기 자신과 비교하게 된다. reverse 경로에서
+            # 온 값만 싣는다.
+            obs_code=reverse_geo.bjd_code if reverse_geo is not None else None,
+            reverse_attempted=coord is not None and reverse_geocoder is not None,
             claim_code=normalize_bjd_code(record.legal_dong_code),
             claim_kind=(
                 "bjd" if normalize_bjd_code(record.legal_dong_code) else None

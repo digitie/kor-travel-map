@@ -323,15 +323,19 @@ WHERE status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'
 DO UPDATE SET
     message = EXCLUDED.message,
     severity = EXCLUDED.severity,
+    -- jsonb ||는 shallow merge라 오른쪽의 JSON null이 왼쪽의 값을 **덮어쓴다**.
+    -- 재실행에서 provider_address/bjd_code가 None이면 1회차에 남긴 증거가 지워진다
+    -- (durable ledger 안에서 증거를 잃는 것 — 이 task의 목적과 정반대). null은 버린다.
     payload = ops.data_integrity_violations.payload
-        || EXCLUDED.payload
+        || jsonb_strip_nulls(EXCLUDED.payload)
         || jsonb_build_object(
             'occurrence_count',
             COALESCE(
                 (ops.data_integrity_violations.payload ->> 'occurrence_count')::bigint,
                 1
             ) + 1,
-            'last_seen_at', to_jsonb(now())
+            -- TimeZone GUC에 따라 문자열이 달라지면 세션 간 정렬이 깨진다. UTC로 고정.
+            'last_seen_at', to_jsonb(now() AT TIME ZONE 'UTC')
         )
 RETURNING {_RETURN_COLUMNS}
 """

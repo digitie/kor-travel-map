@@ -26,7 +26,7 @@ barrier로 직렬화한다.
     [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
     [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
     [x] `T-VN-H25A`(미연결 membership 증거·전제 정정) →
-    [x] `T-VN-H30A/B/C`(관측 durable화·실적재 검증·MOIS 무장 — 한 PR) →
+    [~] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
     [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
@@ -247,12 +247,23 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_CURSOR`가 **미설정**임을 확인해 H28의
   "자동 회복" 논거(기본값 근거였던 것)를 배포값으로 실증했다.
 
-- [x] T-VN-H30C — **MOIS `AdminEvidence` 무장**
+- [ ] T-VN-H30C — **타 provider `AdminEvidence` 무장 (미완 — 재작업 필요)**
 
-  MOIS는 payload에 `legal_dong_code`가 있으면 역지오코딩을 호출하지 않아 staleness 대조가
-  성립하지 않는다. 그 사실을 `claim_only`로 드러내 `unarmed`(미계측)와 구분한다 — 977k
-  레코드에 reverse를 강제하지 않는다. 나머지 provider는 payload 법정동코드가 없어 무장 대상이
-  아니며, 독립 축(provider 텍스트)은 이미 `Address.sigungu_name` 기반으로 전 provider 적용된다.
+  MOIS만 무장했으나 **탐지 증가는 0건**이다. MOIS는 payload에 `legal_dong_code`가 있으면
+  역지오코딩을 아예 호출하지 않으므로 `obs_code`와 `claim_code`가 **상호배타**이고
+  `grade == "dual"`이 구조적으로 불가능하다 — staleness 축이 영원히 발화하지 않는다.
+  `unarmed`→`claim_only` 재라벨 이상의 값이 없다.
+
+  > **정정** — 직전 판에 "나머지 provider는 payload 법정동코드가 없어 무장 대상이 아니다"라고
+  > 적었으나 **거짓**이다. 적대 리뷰가 반증했다:
+  > `providers/krforest.py:182` `ForestSpatialItem.region_code`(원천
+  > `python-krforest-api` `_REGION_CODE_KEYS`에 `법정동코드`/`EMD_CD` 포함, 역지오코딩도 함),
+  > `python-visitkorea-api` `models.py:90` `l_dong_regn_cd`/`l_dong_signgu_cd`.
+  > 두 provider가 실제로 `dual`을 낼 수 있는 후보다.
+
+  재작업 시: krforest·visitkorea를 조사해 무장하고, MOIS는 reverse를 강제하지 않는 한
+  staleness 대조가 불가능함을 설계 문서(`docs/architecture/address-geocoding.md`,
+  `dto/admin_evidence.py`)에 고정한다. provider 고유 코드(VisitKorea `areaCode` 등)는 넣지 않는다.
 
 ### T-VN-H25 — 공식 curation 미연결 membership 해소
 
