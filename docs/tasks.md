@@ -25,6 +25,9 @@ barrier로 직렬화한다.
     [x] `T-VN-H25A`(미연결 membership 증거·전제 정정) →
     [x] `T-VN-H30A`(관측 durable화) + [ ] `T-VN-H30B/C`(실적재·provider 재검증) →
     [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
+    [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
+    [x] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제) →
+    [ ] `T-VN-H33`(curation_items 오링크 정리 — H25B 파생) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
@@ -340,7 +343,27 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   좌표 근접만으로 자동 승인하지 않는다. 불확실한 component는 미연결 상태와 근거를 유지한다.
   5개 CSV의 linked/unresolved 수치, preview/commit, REST/UI를 같은 실데이터 snapshot에서 검증한다.
 
-- [ ] T-VN-H31 — **등대 공급원 부재 해소 (H25A 파생)**
+  **결과** ([리포트](reports/curation-link-backfill-2026-07-29.md),
+  manifest `reports/h25b-match-manifest.json`):
+  - **8건 중 5건만 반영.** 3건은 오링크였다 — 청남대(DB 전남 영암 vs 정지오코딩 충북 청주),
+    남이섬 ×2(DB 서울 중구 사무소 vs 강원 춘천). H25A가 "확정 대상"이라 한 것은 **DB에
+    링크가 있다는 사실을 승인 근거로 삼은 오류**였다. CSV linked 217→222 / unresolved 269→264.
+  - matcher 결함 4종 수정 후 **후보 없음 191 → 1**. H25A의 "191건 실제 부재 = provider 적재
+    범위 문제"는 **matcher 산물**이었다.
+  - 다만 개선은 착시다 — 늘어난 후보 대부분이 무의미한 부분일치이고, 등대 103건은 전부
+    상호가 `등대`인 가게에 붙었다. `T-VN-H31` 전제는 그대로 유효.
+  - `high` 6건에도 오탐(`대관령` → 동명 상점) → **자동 승인 대상 0건**. 264건은 사람 검토 대상.
+  - **미완**: preview/commit·REST/UI 실데이터 검증은 하지 않았다(읽기 전용 범위 유지).
+
+- [ ] T-VN-H33 — **curation_items 오링크 3건 정리 (H25B 파생)**
+
+  H25B가 정지오코딩으로 확인한 오링크가 **DB에는 그대로 남아 있다**(`status=included`,
+  archived 아님). `/admin/curations` 계열 화면과 공개 projection이 남이섬 자리에 서울 중구
+  사무소를, 청남대 자리에 전남 영암 시설을 노출하고 있을 수 있다.
+  대상: `kt100-2023-2024-025`, `kt100-2025-2026-024`(남이섬), `kt100-2025-2026-036`(청남대).
+  같은 오탐이 다른 collection에도 있는지 전수 확인한 뒤 unlink하고, 공개 노출 여부를 실증한다.
+
+- [ ] T-VN-H31 — **등대 공급원 부재 해소 (H25A 파생, 전제 재확인됨)**
 
   공식 curation 미연결 261건 중 **103건이 등대**이며 105개 중 2개만 링크됐다. ADR-034 9단계
   provider 순서에 등대를 공급하는 provider가 없다 — curation 매칭으로는 해소되지 않는다.
