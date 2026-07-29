@@ -405,7 +405,7 @@ function FileDetailPanel({
   );
 }
 
-export function FilesClient() {
+function useFilesClientController() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [offset, setOffset] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -496,6 +496,36 @@ export function FilesClient() {
     [],
   );
 
+  return {
+    columns,
+    files,
+    filters,
+    items,
+    offset,
+    patch,
+    rescan,
+    selectedId,
+    setOffset,
+    setSelectedId,
+    summary,
+    total,
+  };
+}
+
+function FilesClientView({
+  columns,
+  files,
+  filters,
+  items,
+  offset,
+  patch,
+  rescan,
+  selectedId,
+  setOffset,
+  setSelectedId,
+  summary,
+  total,
+}: ReturnType<typeof useFilesClientController>) {
   return (
     <AdminShell
       actions={
@@ -748,4 +778,9 @@ export function FilesClient() {
       </div>
     </AdminShell>
   );
+}
+
+export function FilesClient() {
+  const controller = useFilesClientController();
+  return <FilesClientView {...controller} />;
 }

@@ -16,6 +16,7 @@ import {
   useCallback,
   useDeferredValue,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from "react";
@@ -402,7 +403,83 @@ function parseInitialStatus(
     : "open";
 }
 
-export function AdminIssuesClient({
+interface AdminIssueFilters {
+  q: string;
+  status: AdminIssueStatus | "all";
+  severity: AdminIssueSeverity | "all";
+  issueType: string;
+  provider: string;
+  datasetKey: string;
+  featureId: string;
+  bbox: string;
+  pageSize: (typeof PAGE_SIZE_OPTIONS)[number];
+}
+
+interface AdminIssuesState extends AdminIssueFilters {
+  cursor: string | null;
+  selectedIssueId: string | null;
+}
+
+type AdminIssuesAction =
+  | { type: "change-filters"; patch: Partial<AdminIssueFilters> }
+  | { type: "reset-filters" }
+  | { type: "set-cursor"; cursor: string | null }
+  | { type: "select-issue"; issueId: string | null };
+
+function initialAdminIssuesState({
+  initialFeatureId,
+  initialProvider,
+  initialDatasetKey,
+  initialStatus,
+}: {
+  initialFeatureId?: string;
+  initialProvider?: string;
+  initialDatasetKey?: string;
+  initialStatus?: string;
+}): AdminIssuesState {
+  return {
+    q: "",
+    status: parseInitialStatus(initialStatus),
+    severity: "all",
+    issueType: "",
+    provider: initialProvider ?? "",
+    datasetKey: initialDatasetKey ?? "",
+    featureId: initialFeatureId ?? "",
+    bbox: "",
+    pageSize: 100,
+    cursor: null,
+    selectedIssueId: null,
+  };
+}
+
+function adminIssuesReducer(
+  state: AdminIssuesState,
+  action: AdminIssuesAction,
+): AdminIssuesState {
+  switch (action.type) {
+    case "change-filters":
+      return { ...state, ...action.patch, cursor: null };
+    case "reset-filters":
+      return {
+        ...state,
+        q: "",
+        status: "open",
+        severity: "all",
+        issueType: "",
+        provider: "",
+        datasetKey: "",
+        featureId: "",
+        bbox: "",
+        cursor: null,
+      };
+    case "set-cursor":
+      return { ...state, cursor: action.cursor };
+    case "select-issue":
+      return { ...state, selectedIssueId: action.issueId };
+  }
+}
+
+function useAdminIssuesClientController({
   initialFeatureId,
   initialProvider,
   initialDatasetKey,
@@ -413,20 +490,30 @@ export function AdminIssuesClient({
   initialDatasetKey?: string;
   initialStatus?: string;
 } = {}) {
-  const [q, setQ] = useState("");
-  const deferredQ = useDeferredValue(q.trim());
-  const [status, setStatus] = useState<AdminIssueStatus | "all">(() =>
-    parseInitialStatus(initialStatus),
+  const [state, dispatch] = useReducer(
+    adminIssuesReducer,
+    {
+      initialFeatureId,
+      initialProvider,
+      initialDatasetKey,
+      initialStatus,
+    },
+    initialAdminIssuesState,
   );
-  const [severity, setSeverity] = useState<AdminIssueSeverity | "all">("all");
-  const [issueType, setIssueType] = useState("");
-  const [provider, setProvider] = useState(initialProvider ?? "");
-  const [datasetKey, setDatasetKey] = useState(initialDatasetKey ?? "");
-  const [featureId, setFeatureId] = useState(initialFeatureId ?? "");
-  const [bbox, setBbox] = useState("");
-  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+  const {
+    bbox,
+    cursor,
+    datasetKey,
+    featureId,
+    issueType,
+    pageSize,
+    provider,
+    q,
+    selectedIssueId,
+    severity,
+    status,
+  } = state;
+  const deferredQ = useDeferredValue(q.trim());
   const action = useAdminIssueActionMutation();
 
   const params = useMemo(
@@ -460,7 +547,23 @@ export function AdminIssuesClient({
   const items = issues.data?.data.items ?? [];
   const nextCursor = issues.data?.meta.page?.next_cursor ?? null;
 
-  const resetCursor = () => setCursor(null);
+  const changeFilters = (patch: Partial<AdminIssueFilters>) => {
+    dispatch({ type: "change-filters", patch });
+  };
+  const resetFilters = () => {
+    dispatch({ type: "reset-filters" });
+  };
+  const goFirstPage = () => {
+    dispatch({ type: "set-cursor", cursor: null });
+  };
+  const goNextPage = () => {
+    if (nextCursor) {
+      dispatch({ type: "set-cursor", cursor: nextCursor });
+    }
+  };
+  const selectIssue = (issueId: string | null) => {
+    dispatch({ type: "select-issue", issueId });
+  };
   const quickAction = useCallback(
     (issueId: string, actionName: AdminIssueAction) => {
       action.mutate({
@@ -606,6 +709,54 @@ export function AdminIssuesClient({
     [action.isPending, quickAction],
   );
 
+  return {
+    action,
+    bbox,
+    changeFilters,
+    columns,
+    cursor,
+    datasetKey,
+    featureId,
+    goFirstPage,
+    goNextPage,
+    issueType,
+    issues,
+    items,
+    nextCursor,
+    pageSize,
+    provider,
+    q,
+    resetFilters,
+    selectIssue,
+    selectedIssueId,
+    severity,
+    status,
+  };
+}
+
+function AdminIssuesClientView({
+  action,
+  bbox,
+  changeFilters,
+  columns,
+  cursor,
+  datasetKey,
+  featureId,
+  goFirstPage,
+  goNextPage,
+  issueType,
+  issues,
+  items,
+  nextCursor,
+  pageSize,
+  provider,
+  q,
+  resetFilters,
+  selectIssue,
+  selectedIssueId,
+  severity,
+  status,
+}: ReturnType<typeof useAdminIssuesClientController>) {
   return (
     <AdminShell
       actions={
@@ -642,20 +793,18 @@ export function AdminIssuesClient({
                 className="pl-8"
                 placeholder="message, feature_id, source_record_key"
                 value={q}
-                onChange={(event) => {
-                  setQ(event.target.value);
-                  resetCursor();
-                }}
+                onChange={(event) => changeFilters({ q: event.target.value })}
               />
             </div>
             <NativeSelect
               aria-label="이슈 상태 필터"
               className="w-36 shrink-0"
               value={status}
-              onChange={(event) => {
-                setStatus(event.target.value as AdminIssueStatus | "all");
-                resetCursor();
-              }}
+              onChange={(event) =>
+                changeFilters({
+                  status: event.target.value as AdminIssueStatus | "all",
+                })
+              }
             >
               {ISSUE_STATUSES.map((item) => (
                 <NativeSelectOption key={item} value={item}>
@@ -667,10 +816,11 @@ export function AdminIssuesClient({
               aria-label="이슈 심각도 필터"
               className="w-36 shrink-0"
               value={severity}
-              onChange={(event) => {
-                setSeverity(event.target.value as AdminIssueSeverity | "all");
-                resetCursor();
-              }}
+              onChange={(event) =>
+                changeFilters({
+                  severity: event.target.value as AdminIssueSeverity | "all",
+                })
+              }
             >
               {ISSUE_SEVERITIES.map((item) => (
                 <NativeSelectOption key={item} value={item}>
@@ -682,10 +832,11 @@ export function AdminIssuesClient({
               aria-label="issue page size"
               className="w-24 shrink-0"
               value={String(pageSize)}
-              onChange={(event) => {
-                setPageSize(Number(event.target.value) as typeof pageSize);
-                resetCursor();
-              }}
+              onChange={(event) =>
+                changeFilters({
+                  pageSize: Number(event.target.value) as typeof pageSize,
+                })
+              }
             >
               {PAGE_SIZE_OPTIONS.map((item) => (
                 <NativeSelectOption key={item} value={item}>
@@ -698,40 +849,36 @@ export function AdminIssuesClient({
               className="w-40 shrink-0"
               placeholder="issue_type"
               value={issueType}
-              onChange={(event) => {
-                setIssueType(event.target.value);
-                resetCursor();
-              }}
+              onChange={(event) =>
+                changeFilters({ issueType: event.target.value })
+              }
             />
             <Input
               aria-label="issue provider"
               className="w-40 shrink-0"
               placeholder="provider"
               value={provider}
-              onChange={(event) => {
-                setProvider(event.target.value);
-                resetCursor();
-              }}
+              onChange={(event) =>
+                changeFilters({ provider: event.target.value })
+              }
             />
             <Input
               aria-label="issue dataset"
               className="w-40 shrink-0"
               placeholder="dataset_key"
               value={datasetKey}
-              onChange={(event) => {
-                setDatasetKey(event.target.value);
-                resetCursor();
-              }}
+              onChange={(event) =>
+                changeFilters({ datasetKey: event.target.value })
+              }
             />
             <Input
               aria-label="issue feature id"
               className="w-56 shrink-0 font-mono"
               placeholder="feature_id"
               value={featureId}
-              onChange={(event) => {
-                setFeatureId(event.target.value);
-                resetCursor();
-              }}
+              onChange={(event) =>
+                changeFilters({ featureId: event.target.value })
+              }
             />
             <Input
               aria-invalid={
@@ -746,26 +893,13 @@ export function AdminIssuesClient({
                   : undefined
               }
               value={bbox}
-              onChange={(event) => {
-                setBbox(event.target.value);
-                resetCursor();
-              }}
+              onChange={(event) => changeFilters({ bbox: event.target.value })}
             />
             <Button
               className="shrink-0"
               type="button"
               variant="outline"
-              onClick={() => {
-                setQ("");
-                setStatus("open");
-                setSeverity("all");
-                setIssueType("");
-                setProvider("");
-                setDatasetKey("");
-                setFeatureId("");
-                setBbox("");
-                resetCursor();
-              }}
+              onClick={resetFilters}
             >
               초기화
             </Button>
@@ -791,8 +925,8 @@ export function AdminIssuesClient({
                 hasNext={Boolean(nextCursor)}
                 isFetching={issues.isFetching}
                 isFirst={cursor === null}
-                onFirst={() => setCursor(null)}
-                onNext={() => setCursor(nextCursor)}
+                onFirst={goFirstPage}
+                onNext={goNextPage}
               />
             </div>
             <DataTable
@@ -801,7 +935,7 @@ export function AdminIssuesClient({
               getRowId={(row) => row.issue_id}
               isLoading={issues.isLoading}
               emptyMessage="issue가 없습니다."
-              onRowClick={(issue) => setSelectedIssueId(issue.issue_id)}
+              onRowClick={(issue) => selectIssue(issue.issue_id)}
               isRowActive={(issue) => selectedIssueId === issue.issue_id}
               containerClassName="overflow-auto"
             />
@@ -812,4 +946,19 @@ export function AdminIssuesClient({
       </div>
     </AdminShell>
   );
+}
+
+export function AdminIssuesClient({
+  initialFeatureId,
+  initialProvider,
+  initialDatasetKey,
+  initialStatus,
+}: {
+  initialFeatureId?: string;
+  initialProvider?: string;
+  initialDatasetKey?: string;
+  initialStatus?: string;
+} = {}) {
+  const controller = useAdminIssuesClientController({ initialFeatureId, initialProvider, initialDatasetKey, initialStatus });
+  return <AdminIssuesClientView {...controller} />;
 }

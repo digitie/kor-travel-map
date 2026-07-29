@@ -543,7 +543,7 @@ function ValidationPanel({
   );
 }
 
-export function OfflineUploadsClient() {
+function useOfflineUploadsClientController() {
   const [file, setFile] = useState<File | null>(null);
   const [provider, setProvider] = useState("offline-test-provider");
   const [datasetKey, setDatasetKey] = useState("offline_csv");
@@ -753,6 +753,72 @@ export function OfflineUploadsClient() {
     );
   };
 
+  return {
+    createUpload,
+    datasetFilter,
+    datasetKey,
+    datasetOptions,
+    deleteUpload,
+    file,
+    launchLoad,
+    mapping,
+    provider,
+    providerFilter,
+    providerOptions,
+    selected,
+    selectedUpload,
+    selectedUploadId,
+    setDatasetFilter,
+    setDatasetKey,
+    setFile,
+    setMapping,
+    setProvider,
+    setProviderFilter,
+    setSelectedUploadId,
+    setStatus,
+    setSyncScope,
+    status,
+    submitUpload,
+    syncScope,
+    uploadColumns,
+    uploadItems,
+    uploadMissingFields,
+    uploads,
+  };
+}
+
+function OfflineUploadsClientView({
+  createUpload,
+  datasetFilter,
+  datasetKey,
+  datasetOptions,
+  deleteUpload,
+  file,
+  launchLoad,
+  mapping,
+  provider,
+  providerFilter,
+  providerOptions,
+  selected,
+  selectedUpload,
+  selectedUploadId,
+  setDatasetFilter,
+  setDatasetKey,
+  setFile,
+  setMapping,
+  setProvider,
+  setProviderFilter,
+  setSelectedUploadId,
+  setStatus,
+  setSyncScope,
+  status,
+  submitUpload,
+  syncScope,
+  uploadColumns,
+  uploadItems,
+  uploadMissingFields,
+  uploads,
+}: ReturnType<typeof useOfflineUploadsClientController>) {
   return (
     <AdminShell
       actions={
@@ -947,4 +1013,9 @@ export function OfflineUploadsClient() {
       </div>
     </AdminShell>
   );
+}
+
+export function OfflineUploadsClient() {
+  const controller = useOfflineUploadsClientController();
+  return <OfflineUploadsClientView {...controller} />;
 }

@@ -34,7 +34,7 @@ import {
   validateForm,
 } from "@/lib/form-validation";
 
-export function PoiCacheTargetsClient() {
+function usePoiCacheTargetsClientController() {
   const [externalSystem, setExternalSystem] = useState("external-app");
   const [targetKey, setTargetKey] = useState("");
   const [name, setName] = useState("");
@@ -290,6 +290,82 @@ export function PoiCacheTargetsClient() {
     setCursorStack((value) => value.slice(0, -1));
   };
 
+  return {
+    cursorStack,
+    errors,
+    externalSystem,
+    externalSystemRef,
+    goToNextPage,
+    goToPreviousPage,
+    lat,
+    latRef,
+    lon,
+    lonRef,
+    name,
+    nearby,
+    nearbyColumns,
+    nearbyItems,
+    radiusKm,
+    radiusKmRef,
+    remove,
+    scopeMode,
+    selectedTarget,
+    selectedTargetId,
+    setExternalSystem,
+    setLat,
+    setLon,
+    setName,
+    setRadiusKm,
+    setScopeMode,
+    setSelectedTargetId,
+    setTargetKey,
+    submit,
+    targetColumns,
+    targetItems,
+    targetKey,
+    targetKeyRef,
+    targets,
+    upsert,
+  };
+}
+
+function PoiCacheTargetsClientView({
+  cursorStack,
+  errors,
+  externalSystem,
+  externalSystemRef,
+  goToNextPage,
+  goToPreviousPage,
+  lat,
+  latRef,
+  lon,
+  lonRef,
+  name,
+  nearby,
+  nearbyColumns,
+  nearbyItems,
+  radiusKm,
+  radiusKmRef,
+  remove,
+  scopeMode,
+  selectedTarget,
+  selectedTargetId,
+  setExternalSystem,
+  setLat,
+  setLon,
+  setName,
+  setRadiusKm,
+  setScopeMode,
+  setSelectedTargetId,
+  setTargetKey,
+  submit,
+  targetColumns,
+  targetItems,
+  targetKey,
+  targetKeyRef,
+  targets,
+  upsert,
+}: ReturnType<typeof usePoiCacheTargetsClientController>) {
   return (
     <AdminShell
       actions={
@@ -462,4 +538,9 @@ export function PoiCacheTargetsClient() {
       </div>
     </AdminShell>
   );
+}
+
+export function PoiCacheTargetsClient() {
+  const controller = usePoiCacheTargetsClientController();
+  return <PoiCacheTargetsClientView {...controller} />;
 }
