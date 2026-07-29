@@ -10,7 +10,7 @@ resolved/ignored로 닫힌 과거 이슈는 제약 밖이라 이력이 보존되
 
 dedupe_key가 없는 기존/타 경로 행은 ``payload ? 'dedupe_key'`` 조건으로 제약에서 빠진다.
 
-Revision ID: 0067_integrity_finding_dedupe_key
+Revision ID: 0067_integrity_dedupe_key
 Revises: 0066_curation_component_identity
 """
 
@@ -20,7 +20,7 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0067_integrity_finding_dedupe_key"
+revision: str = "0067_integrity_dedupe_key"
 down_revision: str | Sequence[str] | None = "0066_curation_component_identity"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
