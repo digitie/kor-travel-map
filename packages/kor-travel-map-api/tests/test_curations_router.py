@@ -144,6 +144,7 @@ def _csv_content(
     *,
     valid: bool = True,
     feature_ids: tuple[str, ...] = ("",),
+    address_hint: str = "",
     distinct_source_items: bool = False,
     official_ordinal: str = "",
     sort_order: str = "",
@@ -163,6 +164,7 @@ def _csv_content(
             "source_item_key": "healing:ganjeolgot",
             "source_component_key": "primary",
             "place_name": "간절곶등대" if valid else "",
+            "address_hint": address_hint,
             "official_ordinal": official_ordinal,
             "sort_order": sort_order,
         }
@@ -888,11 +890,54 @@ def test_blank_feature_id_never_autolinks_on_single_name_match(
     assert response.status_code == 200
     row = response.json()["data"]["items"][0]
     assert row["resolved_feature_id"] is None, "이름만 맞는 후보를 자동 링크했다"
-    assert row["status"] == "ambiguous"
+    assert row["status"] == "review_required"
     codes = [issue["code"] for issue in row["issues"]]
     assert codes == ["name_only_match"]
     # 후보는 버리지 않는다 — 운영자가 preview에서 보고 직접 링크할 수 있어야 한다.
     assert [c["feature_id"] for c in row["candidates"]] == ["f_seoul_namesake"]
+
+
+@pytest.mark.unit
+def test_blank_feature_id_with_address_hint_keeps_unique_match_contract(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """이름+주소 유일 후보는 ADR-063 계약대로 자동 링크한다."""
+    from kortravelmap.api.routers import curations as module
+
+    async def _matches(_session: object, **_kwargs: Any) -> dict[int, tuple[Any, ...]]:
+        return {
+            2: (
+                _namesake_match(
+                    "feature:ganjeolgot",
+                    "간절곶등대",
+                    "울산광역시",
+                ),
+            )
+        }
+
+    async def _preview(_session: object, **_kwargs: Any) -> CurationImportPlan:
+        return CurationImportPlan(collections=1, inserted=1, updated=0, removals=())
+
+    monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
+    monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
+
+    response = client.post(
+        "/v1/admin/curations/import",
+        params={"dry_run": "true"},
+        files={
+            "file": (
+                "official.csv",
+                _csv_content(address_hint="울산광역시 울주군"),
+                "text/csv",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    row = response.json()["data"]["items"][0]
+    assert row["resolved_feature_id"] == "feature:ganjeolgot"
+    assert row["status"] == "valid"
+    assert row["issues"] == []
 
 
 @pytest.mark.unit
@@ -920,6 +965,7 @@ def test_blank_feature_id_reason_names_the_candidate_region(
     message = response.json()["data"]["items"][0]["issues"][0]["message"]
     assert "서울특별시" in message, message
     assert "T-VN-H36" in message
+    assert "어긋" not in message
 
 
 @pytest.mark.unit

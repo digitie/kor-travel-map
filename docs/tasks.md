@@ -23,11 +23,13 @@ barrier로 직렬화한다.
     [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
     [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
     [x] `T-VN-H25A`(미연결 membership 증거·전제 정정) →
-    [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
+    [x] `T-VN-H30A`(관측 durable화) →
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
     [ ] `T-VN-H35`(prod 마이그레이션 지연 0064~0068 + 이미지 동시 배포 — #673 blocker) →
+    [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
+    [ ] `T-VN-H30C`(타 provider evidence 재작업) →
     [ ] `T-VN-H34`(H25A/H25B 미충족 AC 마무리) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
@@ -37,7 +39,7 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
-  - b1: [ ] `T-VN-11A` → [ ] `T-VN-11B`(service batch) →
+  - b1: [ ] `T-VN-11A/B`(service batch, 단일 PR) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
     [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
     [ ] `T-VN-12D`(domain idempotency) →
@@ -76,7 +78,8 @@ barrier로 직렬화한다.
   리뷰·Live·CI를 먼저 끝내 PR을 머지한다. Claude Code PR 사후 감사는 task PR 머지 뒤
   별도 후속 단계에서 issue를 만들고 진행하며, 진행 중 task의 PR 생성·머지를 지연시키거나
   그 PR에 새 감사를 합치지 않는다. T-VN-48에는 규칙 변경 전에 완료한 issue #881과 PR #888
-  감사 수정만 유지한다.
+  감사 수정만 유지한다. **Lane A a1 task PR 사후 감사는 독립 적대 리뷰어 2명**을 쓰고,
+  docs-only PR은 작은 delta 규칙에 따라 1명으로 한다(사용자 지시 2026-07-30, issue #893부터).
 - 첫 reviewable checkpoint부터 원격 feature branch에 작은 의미 단위로 자주 커밋·push하되,
   PR은 구현·적대 리뷰 반영·실데이터 검증·최종 main rebase를 모두 마친 뒤 **머지 직전**에만
   연다. 실패하면 검증된 직전 checkpoint부터 재개한다.
@@ -593,7 +596,8 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 ### T-VN-11 — service batch 5-state 계약
 
 현재 `features.py` batch는 `found/missing` 2-state이고 코드 주석도 5-state를 후속으로
-명시한다. producer 계약과 consumer cutover를 분리한다.
+명시한다. producer 계약과 consumer cutover는 독립 검증 단위로 유지하되 사용자 지시에 따라
+T-VN-11A/B를 한 브랜치·한 PR로 landing한다.
 
 - [ ] T-VN-11A — **Map 5-state batch projection**
 

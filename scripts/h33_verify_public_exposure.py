@@ -30,7 +30,6 @@ import urllib.parse
 import urllib.request
 
 BASE = os.environ.get("API_BASE", "http://127.0.0.1:12701")
-TOKEN = os.environ["SERVICE_TOKEN"]
 
 TARGET_FEATURES = {
     "f_1114010100_p_a11c2e739c5676d2": "남이섬(서울 중구 사무소 — 오링크 대상)",
@@ -47,11 +46,15 @@ TARGET_ITEMS = {
 
 def get(path: str) -> tuple[int, dict]:
     req = urllib.request.Request(
-        f"{BASE}{path}", headers={"X-Kor-Travel-Map-Service-Token": TOKEN}
+        f"{BASE}{path}",
+        headers={"X-Kor-Travel-Map-Service-Token": os.environ["SERVICE_TOKEN"]},
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-            return resp.status, json.loads(resp.read().decode())
+            try:
+                return resp.status, json.loads(resp.read().decode())
+            except json.JSONDecodeError:
+                return resp.status, {}
     except urllib.error.HTTPError as exc:
         try:
             return exc.code, json.loads(exc.read().decode())
@@ -65,21 +68,31 @@ def main() -> int:
     print("=== 1. feature별 curation 조회 (반증 가능성 점검) ===")
     status_bogus, _ = get(f"/v1/curations/features/{BOGUS_FEATURE}")
     print(f"  negative control (없는 id): HTTP {status_bogus}")
+    if status_bogus != 404:
+        failures.append(f"negative control: HTTP {status_bogus}, expected 404")
     for fid, label in TARGET_FEATURES.items():
         status, body = get(f"/v1/curations/features/{fid}")
-        group = body.get("data") or {}
+        raw_group = body.get("data")
+        group = raw_group if isinstance(raw_group, dict) else {}
         n = len(group.get("curations") or [])
         print(f"  {label}: HTTP {status}, curation {n}건")
-        if status == status_bogus and status != 200:
+        if status not in {200, 404}:
+            failures.append(f"{fid}: unexpected HTTP {status}")
+        elif status == status_bogus and status != 200:
             print(
                 "    ⚠ 없는 id와 같은 status다 — 이 축만으로는 '해소됨'을 주장할 수 없다."
                 " 아래 컬렉션 표면을 근거로 쓴다."
             )
-        elif status == 200 and n:
-            failures.append(f"{fid}: 아직 curation {n}건이 붙어 있다")
+        elif status == 200:
+            if not isinstance(raw_group, dict) or "curations" not in group:
+                failures.append(f"{fid}: 200 응답 body shape가 올바르지 않다")
+            elif n:
+                failures.append(f"{fid}: 아직 curation {n}건이 붙어 있다")
 
     print("\n=== 2. 컬렉션 상세 (반증 가능한 표면) ===")
     status, body = get("/v1/curations/collections?page_size=500")
+    if status != 200:
+        failures.append(f"컬렉션 목록: unexpected HTTP {status}")
     data = body.get("data") or []
     if isinstance(data, dict):
         data = data.get("collections") or data.get("items") or []
@@ -91,8 +104,19 @@ def main() -> int:
             failures.append(f"{key}: 공개 컬렉션 목록에 없다")
             continue
         st, detail = get(f"/v1/curations/collections/{col['collection_id']}")
-        items = (detail.get("data") or {}).get("items") or []
+        raw_detail = detail.get("data")
+        detail_data = raw_detail if isinstance(raw_detail, dict) else {}
+        items = detail_data.get("items") or []
         print(f"  {key}: HTTP {st}, item {len(items)}건 (item_count={col.get('item_count')})")
+        if st != 200:
+            failures.append(f"{key}: 상세 unexpected HTTP {st}")
+            continue
+        if not isinstance(raw_detail, dict) or not isinstance(items, list):
+            failures.append(f"{key}: 상세 200 응답 body shape가 올바르지 않다")
+            continue
+        if not items:
+            failures.append(f"{key}: 상세 positive control item이 비어 있다")
+            continue
         found = {i["external_item_id"] for i in items} & item_keys
         missing = item_keys - found
         if missing:
@@ -117,6 +141,12 @@ def main() -> int:
         ids = {(g.get("feature") or {}).get("feature_id") for g in groups}
         # 양성 대조: q 검색이 결과를 내놓긴 하는지 먼저 확인한다.
         print(f"  q={q}: HTTP {st}, group {len(groups)}건 (양성 대조)")
+        if st != 200:
+            failures.append(f"q={q}: unexpected HTTP {st}")
+            continue
+        if not groups:
+            failures.append(f"q={q}: positive control 결과가 비어 있다")
+            continue
         if fid in ids:
             failures.append(f"q={q} 결과에 오링크 feature {fid}가 아직 있다")
 

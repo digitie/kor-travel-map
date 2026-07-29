@@ -11,17 +11,41 @@ import csv
 import hashlib
 import json
 import sys
+from collections import Counter
 from pathlib import Path
+from typing import TypeAlias
 
-CSV_DIR = Path(sys.argv[1] if len(sys.argv) > 1 else "resources/curations")
+DEFAULT_CSV_DIR = Path("resources/curations")
 
-# (source_item_key) -> feature_id. 정지오코딩으로 지역 정합을 확인한 것만 넣는다.
-APPROVED: dict[str, str] = {
-    "arboretum-2026-001": "f_global_p_2eddbdc1ef5a0c00",  # 국립세종수목원 (세종 36110)
-    "arboretum-2026-063": "f_4812914500_p_f0e7b045758b269a",  # 진해보타닉뮤지엄 (창원 진해 48129)
-    "kt100-2023-2024-036": "f_global_p_2eddbdc1ef5a0c00",  # 국립세종수목원
-    "kt100-2025-2026-035": "f_global_p_2eddbdc1ef5a0c00",  # 국립세종수목원
-    "kt100-2025-2026-040": "f_4315032041_p_12c53fe662dafc4f",  # 청풍호 (제천 43150)
+ApprovalKey: TypeAlias = tuple[str, str, str]
+
+# DB active identity와 같은 (collection, item, component) -> feature_id.
+APPROVED: dict[ApprovalKey, str] = {
+    (
+        "arboretum-garden-stamp-tour:2026",
+        "arboretum-2026-001",
+        "primary",
+    ): "f_global_p_2eddbdc1ef5a0c00",
+    (
+        "arboretum-garden-stamp-tour:2026",
+        "arboretum-2026-063",
+        "primary",
+    ): "f_4812914500_p_f0e7b045758b269a",
+    (
+        "korean-tourism-100:2023-2024",
+        "kt100-2023-2024-036",
+        "primary",
+    ): "f_global_p_2eddbdc1ef5a0c00",
+    (
+        "korean-tourism-100:2025-2026",
+        "kt100-2025-2026-035",
+        "primary",
+    ): "f_global_p_2eddbdc1ef5a0c00",
+    (
+        "korean-tourism-100:2025-2026",
+        "kt100-2025-2026-040",
+        "primary",
+    ): "f_4315032041_p_12c53fe662dafc4f",
 }
 
 # key -> (confidence, reason).
@@ -33,28 +57,48 @@ APPROVED: dict[str, str] = {
 #
 # 개별 근거의 강도 차이는 `reason` 문장에 남긴다. 등급을 나누면 `verified`가 "확인됨"으로
 # 읽혀 실제보다 강한 주장이 되므로, 지금 데이터로 도달 가능한 최고 등급인 review로 통일한다.
-EVIDENCE: dict[str, tuple[str, str]] = {
-    "arboretum-2026-001": (
+EVIDENCE: dict[ApprovalKey, tuple[str, str]] = {
+    (
+        "arboretum-garden-stamp-tour:2026",
+        "arboretum-2026-001",
+        "primary",
+    ): (
         "backfilled-db-review",
         "DB curation_items 링크를 역반영. 정지오코딩 후보가 없어 이름 정합만 확인했다 "
         "— 이 CSV에는 region 값이 없어 독립 축이 없다 (T-VN-H25B).",
     ),
-    "arboretum-2026-063": (
+    (
+        "arboretum-garden-stamp-tour:2026",
+        "arboretum-2026-063",
+        "primary",
+    ): (
         "backfilled-db-review",
         "DB curation_items 링크를 역반영. 정지오코딩 후보가 없어 이름 정합만 확인했다 "
         "— 이 CSV에는 region 값이 없어 독립 축이 없다 (T-VN-H25B).",
     ),
-    "kt100-2023-2024-036": (
+    (
+        "korean-tourism-100:2023-2024",
+        "kt100-2023-2024-036",
+        "primary",
+    ): (
         "backfilled-db-review",
         "DB curation_items 링크를 역반영. 정지오코딩 후보가 없어 이름·region(세종) 정합만 "
         "확인했다 — 좌표 대조로 확정한 것이 아니다 (T-VN-H25B).",
     ),
-    "kt100-2025-2026-035": (
+    (
+        "korean-tourism-100:2025-2026",
+        "kt100-2025-2026-035",
+        "primary",
+    ): (
         "backfilled-db-review",
         "DB curation_items 링크를 역반영. 정지오코딩 후보가 없어 이름·region(세종) 정합만 "
         "확인했다 — 좌표 대조로 확정한 것이 아니다 (T-VN-H25B).",
     ),
-    "kt100-2025-2026-040": (
+    (
+        "korean-tourism-100:2025-2026",
+        "kt100-2025-2026-040",
+        "primary",
+    ): (
         "backfilled-db-review",
         "DB curation_items 링크를 역반영. 정지오코딩이 충북 제천(43150)을 지목해 feature "
         "sigungu_code와 일치했으나, 같은 시군구의 다른 대상(청풍호반케이블카 등)과는 이 축으로 "
@@ -70,32 +114,79 @@ REJECTED: dict[str, str] = {
 }
 
 
-def main() -> None:
-    total = 0
-    for path in sorted(CSV_DIR.glob("*.csv")):
+def _identity(row: dict[str, str | None]) -> ApprovalKey:
+    return (
+        (row.get("collection_key") or "").strip(),
+        (row.get("source_item_key") or "").strip(),
+        (row.get("source_component_key") or "").strip(),
+    )
+
+
+def apply_verified_links(target: Path) -> int:
+    """승인 identity 전체를 먼저 검증한 뒤 CSV와 manifest를 갱신한다."""
+
+    datasets: list[
+        tuple[Path, list[str], list[dict[str, str | None]]]
+    ] = []
+    occurrences: Counter[ApprovalKey] = Counter()
+    errors: list[str] = []
+
+    # 검증 단계에는 파일을 쓰지 않는다. 잘못된 기존 링크·중복·누락이 하나라도 있으면
+    # manifest를 다시 서명하기 전에 전체를 fail-closed한다.
+    for path in sorted(target.glob("*.csv")):
         if path.name == "template.csv":
             continue
         with path.open(encoding="utf-8-sig", newline="") as fh:
             reader = csv.DictReader(fh)
             fields = reader.fieldnames or []
             rows = list(reader)
+        datasets.append((path, fields, rows))
 
-        changed = 0
-        for r in rows:
-            key = (r.get("source_item_key") or "").strip()
-            if key not in APPROVED or (r.get("feature_id") or "").strip():
+        for row in rows:
+            key = _identity(row)
+            if key not in APPROVED:
                 continue
-            r["feature_id"] = APPROVED[key]
+            occurrences[key] += 1
+            current_feature_id = (row.get("feature_id") or "").strip()
+            expected_feature_id = APPROVED[key]
+            if current_feature_id and current_feature_id != expected_feature_id:
+                errors.append(
+                    f"{path.name}: {key!r} feature_id={current_feature_id!r}, "
+                    f"expected={expected_feature_id!r}"
+                )
+
+    for key in APPROVED:
+        count = occurrences[key]
+        if count != 1:
+            errors.append(f"승인 identity {key!r} 출현 {count}건 (정확히 1건이어야 함)")
+    if errors:
+        raise RuntimeError("승인 CSV identity 검증 실패:\n- " + "\n- ".join(errors))
+
+    total = 0
+    for path, fields, rows in datasets:
+        changed = 0
+        for row in rows:
+            key = _identity(row)
+            if key not in APPROVED:
+                continue
+            expected_feature_id = APPROVED[key]
+            current_feature_id = (row.get("feature_id") or "").strip()
+            if current_feature_id != expected_feature_id:
+                row["feature_id"] = expected_feature_id
+                changed += 1
+
             # metadata도 **같은 스크립트에서** 갱신한다. feature_id만 채우고 metadata를
             # 딴 데서 고치면 커밋된 파일을 이 스크립트로 재현할 수 없고, manifest sha256도
             # 유도 불가능해진다(H25A에서 지적받은 "산출물 ≠ 도구 출력" 결함).
-            meta = json.loads(r.get("metadata_json") or "{}")
+            meta = json.loads(row.get("metadata_json") or "{}")
             conf, reason = EVIDENCE[key]
             meta["feature_match_status"] = "linked"
             meta["feature_match_confidence"] = conf
             meta["feature_match_reasons"] = [reason]
-            r["metadata_json"] = json.dumps(meta, ensure_ascii=False)
-            changed += 1
+            expected_metadata = json.dumps(meta, ensure_ascii=False)
+            if row.get("metadata_json") != expected_metadata:
+                row["metadata_json"] = expected_metadata
+                changed += 1
         if not changed:
             continue
 
@@ -106,11 +197,16 @@ def main() -> None:
         print(f"  {path.name}: {changed}행 역반영")
         total += changed
 
+    refresh_manifest(target)
+    return total
+
+
+def main() -> None:
+    target = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_CSV_DIR
+    total = apply_verified_links(target)
     print(f"\n반영 {total}행 / 보류 {len(REJECTED)}행")
     for key, why in REJECTED.items():
         print(f"  보류 {key}: {why}")
-
-    refresh_manifest(CSV_DIR)
 
 
 def refresh_manifest(target: Path) -> None:

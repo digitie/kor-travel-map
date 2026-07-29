@@ -10,6 +10,24 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-30 (codex) — Claude PR #890/#891 사후 감사 정정 → H11A/B
+
+Lane A a1 PR #890은 사용자 최신 규칙에 따라 독립 적대 리뷰어 2명, docs-only #891은
+1명이 원 authored patch를 감사했다. #890에서는 이름 단독 자동링크를 막으면서 ADR-063의
+이름+주소 유일 매칭까지 막은 회귀, H33 unlink와 ledger의 transaction 분리, stale open
+finding 재생성, H25B apply의 잘못된 기존 링크 승인, public verifier의 HTTP 500/빈 양성
+대조 false-pass를 확인했다. #891에서는 열린 H30B를 상단에서 완료로 가린 상태·순서 모순과
+`tasks-done.md`의 열린 checkbox 6개 유입을 확인했다.
+
+같은 감사 PR에서 이름 단독 행을 `review_required`로 분리하고 주소 hint 유일 매칭은 복원한다.
+H33은 row lock·guarded unlink·resolved finding을 항목별 한 transaction으로 묶고, H25B는
+DB active identity 3-tuple의 정확한 1회 출현·기존 ID를 쓰기 전에 fail-closed 검증한다.
+verifier는 모든 HTTP/body shape와 비어 있지 않은 positive control을 강제한다. H30B/C와 Lane A
+순서를 다시 열고 완료 아카이브 checkbox도 일반 역사 bullet로 바꾼다.
+
+**다음 한 작업**: 감사 수정 PR의 CI green·셀프 머지와 issue #893 close를 끝낸다. 이어
+사용자 지시대로 `T-VN-11A/B`를 한 브랜치·한 PR로 구현한다.
+
 ## 2026-07-30 (codex) — Lane B b0 T-VN-49A/B/C/D 완료 → post-merge 재사용 판정
 
 **완료**: H49 A/B/C/D를 한 브랜치에서 구현했다. 19개 giant component를 domain
@@ -37,7 +55,8 @@ full restore는 실행하지 않았다. 이후 main 34커밋을 충돌 없이 re
 ## 2026-07-30 (claude) — Lane A a1: T-VN-H25B/H33/H36 완료 → 다음은 T-VN-H35
 
 **다음 한 작업**: `T-VN-H35`(prod 마이그레이션 0064~0067 + **이미지 동시 배포**).
-이후 `T-VN-H31`(등대) → `T-VN-H34` → `T-VN-H30C` → `T-VN-H32` → `T-VN-H22A/B/C`.
+이후 `T-VN-H30B` → `T-VN-H30C` → `T-VN-H34` → `T-VN-H31` → `T-VN-H32` →
+`T-VN-H22A/B/C`.
 
 - **완료**: `T-VN-H36` — CSV `feature_id`가 빈 행은 이름 단독 일치로 **자동 링크하지 않는다**.
   커밋 CSV 486행 전수 + prod 리졸버 재생 결과 **막히는 자동링크는 정확히 3건이고 전부

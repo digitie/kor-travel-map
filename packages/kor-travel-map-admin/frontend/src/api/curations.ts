@@ -33,6 +33,7 @@ export type CurationImportRowStatus =
   | "valid"
   | "invalid"
   | "unmatched"
+  | "review_required"
   | "ambiguous"
   | "imported";
 

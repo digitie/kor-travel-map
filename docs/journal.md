@@ -17,6 +17,30 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-30 (codex) — Claude PR #890/#891 사후 감사 정정
+
+추적 issue #893에서 Lane A a1 #890은 독립 리뷰어 2명, docs-only #891은 1명이 원 PR patch를
+감사했다. 후속 #892와 rebase 유입 diff는 finding 범위에서 제외했다.
+
+- 이름 단독 오링크를 막는 `_adopted_match`가 주소 hint 유일 매칭까지 함께 막아 ADR-063을
+  위반했다. 주소 hint 경로는 복원하고 이름 단독 후보는 `ambiguous/후보 다수`가 아니라
+  `review_required/수동 검토`로 분리한다. 자유형 region 약칭으로 불일치를 단정하던 문구도
+  단순 context로 낮춘다.
+- H33은 unlink를 먼저 commit하고 ledger를 별도 transaction에 써, 후자 실패 시 감사 공백을
+  남겼다. row lock·guarded UPDATE·advisory-serialized finding을 항목별 한 transaction으로
+  묶고 H36 이후 사실에 맞는 `resolved` 증거로 기록한다. 가드 또는 이미 해제 상태는 신규
+  finding을 만들지 않는다.
+- H25B apply는 승인 key의 기존 `feature_id`가 틀려도 건너뛴 뒤 manifest를 다시 서명했다.
+  `(collection_key, source_item_key, source_component_key)` 정확한 1회 출현과 기존 ID를
+  전 파일 쓰기 전에 검증하고 오류 시 CSV/manifest를 모두 보존한다.
+- 공개 노출 verifier는 feature/search HTTP 500과 빈 positive control도 성공으로 통과했다.
+  negative control 404, 각 표면의 200/body shape, 비어 있지 않은 검색 결과를 강제한다.
+- #891이 가린 열린 H30B/C를 Lane A 순서에 복원하고 `tasks-done.md`에 들어온 열린 checkbox
+  6개는 역사 bullet로 바꿨다. H11A/B 단일 PR 사용자 결정도 백로그 정본에 반영했다.
+
+회귀는 router의 주소 hint/name-only 상태, H33 transaction rollback·가드, H25B 잘못된 기존
+ID·중복 identity, verifier 500/빈 대조를 직접 고정한다.
+
 ## 2026-07-30 (codex) — T-VN-49A/B/C/D 단일 PR 구현·최종 gate 완료
 
 H49 네 단계를 한 브랜치에서 끝냈다. 19개 giant component는 단순 View wrapper가 아니라

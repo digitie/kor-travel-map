@@ -108,7 +108,12 @@ function statusVariant(status: string) {
   if (status === "draft" || status === "candidate" || status === "valid") {
     return "info" as const;
   }
-  if (status === "invalid" || status === "unmatched" || status === "ambiguous") {
+  if (
+    status === "invalid" ||
+    status === "unmatched" ||
+    status === "review_required" ||
+    status === "ambiguous"
+  ) {
     return "destructive" as const;
   }
   return "outline" as const;
@@ -119,6 +124,7 @@ function importStatusLabel(status: CurationImportRowStatus): string {
     valid: "유효",
     invalid: "형식 오류",
     unmatched: "미일치",
+    review_required: "수동 검토",
     ambiguous: "후보 다수",
     imported: "반영됨",
   }[status];
