@@ -131,7 +131,6 @@ async def load_feature_bundles_for_dagster(
             failed_findings,
             provider=provider,
             dataset_key=dataset_key,
-            managed_violation_types=_managed_violation_types(validation),
         )
         failure_metadata = dict(validation.as_metadata())
         failure_metadata["address_validation_findings_recorded"] = recorded
@@ -200,7 +199,6 @@ async def load_feature_bundles_for_dagster(
         findings,
         provider=provider,
         dataset_key=dataset_key,
-        managed_violation_types=_managed_violation_types(validation),
     )
     metadata["address_validation_findings_recorded"] = recorded
     if findings and recorded != len(findings):
@@ -311,14 +309,6 @@ _ADDRESS_VALIDATION_CODES: Final[frozenset[str]] = frozenset(
 )
 """주소/좌표 검증이 **소유하는** issue code 전체 (T-VN-H30A).
 
-자동 resolve sweep의 범위다 — 이 집합 밖의 code는 다른 주체가 넣은 것이므로 건드리지 않는다.
-새 검증 code를 추가하면 여기에도 넣어야 큐가 닫힌다(안 넣으면 단조 증가한다).
+자동 close(sweep)를 붙일 때 그 범위가 될 집합이다. 현재는 sweep을 달지 않았다 —
+`T-VN-H32` 참조. 새 검증 code를 추가하면 여기에도 넣는다.
 """
-
-
-def _managed_violation_types(
-    validation: FeatureAddressValidationSummary,
-) -> tuple[str, ...]:
-    """이번 검증이 관리하는 code. 실제로 방출된 code도 합쳐 누락을 막는다."""
-    emitted = {issue.code for issue in validation.issues}
-    return tuple(sorted(_ADDRESS_VALIDATION_CODES | emitted))

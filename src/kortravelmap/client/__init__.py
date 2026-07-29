@@ -2104,7 +2104,6 @@ class AsyncKorTravelMapClient:
         *,
         provider: str,
         dataset_key: str,
-        managed_violation_types: Sequence[str],
     ) -> int:
         """주소/좌표 검증 결과를 ``ops.data_integrity_violations``에 durable하게 남긴다.
 
@@ -2146,12 +2145,11 @@ class AsyncKorTravelMapClient:
         rows = list(deduped.values())
         try:
             async with self._session_factory() as session, session.begin():
-                upserted, resolved = await sync_integrity_findings(
+                upserted = await sync_integrity_findings(
                     session,
                     provider=provider,
                     dataset_key=dataset_key,
                     findings=rows,
-                    managed_violation_types=managed_violation_types,
                 )
         except Exception:  # noqa: BLE001
             _LOG.exception(
@@ -2162,11 +2160,4 @@ class AsyncKorTravelMapClient:
                 len(rows),
             )
             return 0
-        if resolved:
-            _LOG.info(
-                "주소 검증 finding %d건 자동 resolve (provider=%s dataset=%s)",
-                resolved,
-                provider,
-                dataset_key,
-            )
         return upserted

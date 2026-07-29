@@ -342,26 +342,6 @@ DO UPDATE SET
         )
 """
 
-_RESOLVE_STALE_FINDINGS_SQL: Final[str] = """
-UPDATE ops.data_integrity_violations
-SET status = 'resolved',
-    resolved_at = now(),
-    -- resolved 행은 payload.resolution을 갖는 것이 계약이다(data-model.md §9.5).
-    -- 기계가 닫은 행을 운영자가 닫은 행과 구분할 수 있어야 한다.
-    payload = payload || jsonb_build_object(
-        'resolution',
-        jsonb_build_object(
-            'operator', 'address_validation_sweep',
-            'reason', '이번 run이 더 이상 보고하지 않음'
-        )
-    )
-WHERE provider = :provider
-  AND dataset_key = :dataset_key
-  AND status = 'open'
-  AND payload ? 'dedupe_key'
-  AND violation_type = ANY(CAST(:violation_types AS text[]))
-  AND NOT (payload ->> 'dedupe_key' = ANY(CAST(:live_keys AS text[])))
-"""
 
 
 async def sync_integrity_findings(
@@ -370,8 +350,7 @@ async def sync_integrity_findings(
     provider: str,
     dataset_key: str,
     findings: Sequence[Mapping[str, Any]],
-    managed_violation_types: Sequence[str],
-) -> tuple[int, int]:
+) -> int:
     """finding 집합을 **2개 statement로** 동기화한다 (T-VN-H30A). commit은 호출자 책임.
 
     반환: ``(upsert된 건수, 자동 resolve된 건수)``.
@@ -421,16 +400,4 @@ async def sync_integrity_findings(
         )
         upserted = len(findings)
 
-    resolved = 0
-    if managed_violation_types:
-        result = await session.execute(
-            text(_RESOLVE_STALE_FINDINGS_SQL),
-            {
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "violation_types": list(managed_violation_types),
-                "live_keys": live_keys,
-            },
-        )
-        resolved = int(getattr(result, "rowcount", 0) or 0)
-    return upserted, resolved
+    return upserted

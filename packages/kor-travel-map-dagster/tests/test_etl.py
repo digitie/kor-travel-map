@@ -529,6 +529,3 @@ async def test_sweep_scope_arguments_are_wired(
     assert kwargs["provider"] == "demo"
     assert kwargs["dataset_key"] == "places"
     # sweep 범위는 주소 검증이 소유하는 code여야 한다 — 비면 큐가 영영 안 닫힌다.
-    managed = set(kwargs["managed_violation_types"])
-    assert "admin_code_stale_sido" in managed
-    assert "reverse_geocode_unavailable" in managed

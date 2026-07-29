@@ -678,7 +678,12 @@ async def license_record_to_bundle(
     geo: Address | None = None
     # T-VN-H30C: obs 축은 좌표 reverse 결과만 실어야 하므로 출처를 분리해 둔다.
     reverse_geo: Address | None = None
+    # 실제로 reverse를 **불렀는지**를 기록한다. 입력이 갖춰졌는지가 아니다 — MOIS는
+    # payload에 bjd가 있으면 아래 분기를 타지 않으므로, 입력 기준으로 판정하면
+    # 그 흔한 경우 전부가 "reverse 시도했는데 실패"로 잘못 보고된다.
+    reverse_called = False
     if bjd_code is None and coord is not None and reverse_geocoder is not None:
+        reverse_called = True
         geo = await reverse_geocoder(coord)
         reverse_geo = geo
         bjd_code = geo.bjd_code if geo is not None else None
@@ -782,7 +787,7 @@ async def license_record_to_bundle(
             # claim_text와 같은 출처가 되어 자기 자신과 비교하게 된다. reverse 경로에서
             # 온 값만 싣는다.
             obs_code=reverse_geo.bjd_code if reverse_geo is not None else None,
-            reverse_attempted=coord is not None and reverse_geocoder is not None,
+            reverse_attempted=reverse_called,
             claim_code=normalize_bjd_code(record.legal_dong_code),
             claim_kind=(
                 "bjd" if normalize_bjd_code(record.legal_dong_code) else None
