@@ -62,8 +62,14 @@ class _Client:
     async def record_address_validation_findings(
         self, findings: object, **kwargs: object
     ) -> int:
-        """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
+        """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다).
+
+        ``kwargs``도 보관한다 — ``provider``/``dataset_key``는 auto-resolve sweep의
+        ``WHERE``절이라, 잘못된 값이 넘어가면 **다른 provider의 열린 큐를 닫는다**.
+        버리면 그 배선 오류를 테스트가 못 잡는다.
+        """
         self.recorded_findings = list(findings)  # type: ignore[arg-type]
+        self.recorded_kwargs = dict(kwargs)
         return len(self.recorded_findings)
 
 
@@ -440,3 +446,89 @@ async def test_findings_are_recorded_after_load(
     # 적재가 먼저 일어났어야 linked가 성립한다.
     assert client.chunks == [("feature-0",)]
     assert client.recorded_findings[0].linked is True
+
+
+def test_dedupe_key_uses_stable_entity_id_not_payload_hash() -> None:
+    """dedupe_key는 payload가 바뀌어도 같아야 한다 (T-VN-H30A 핵심 불변식).
+
+    ``source_record_key``는 ``raw_payload_hash`` 파생이라 export의 무관한 필드 하나만
+    바뀌어도 값이 달라진다. 그 키로 dedupe하면 같은 문제가 export마다 새 열린 이슈로
+    쌓인다(MOIS 977k 규모에서 큐 단조 증가). 안정적인 ``source_entity_id``를 써야 한다.
+
+    이 테스트가 없으면 ``_entity_ids()``가 빈 dict를 돌려주는 어떤 회귀에도
+    ``.get(k, k)`` fallback이 조용히 옛 동작으로 되돌아간다.
+    """
+    from kortravelmap.dagster.etl import _address_validation_findings
+
+    def key_for(source_record_key: str, entity_id: str) -> str:
+        summary = FeatureAddressValidationSummary(
+            total=1,
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            issues=(
+                FeatureAddressIssue(
+                    feature_id="f1",
+                    source_record_key=source_record_key,
+                    code="admin_code_stale_sido",
+                    severity="warning",
+                    message="m",
+                ),
+            ),
+        )
+        return _address_validation_findings(
+            summary,
+            provider="demo",
+            dataset_key="places",
+            loaded_feature_ids={"f1"},
+            dropped_feature_ids=frozenset(),
+            entity_ids={source_record_key: entity_id},
+        )[0].dedupe_key
+
+    # payload가 바뀌어 source_record_key가 달라져도 같은 entity면 같은 키다.
+    assert key_for("sr_hash_v1", "E1") == key_for("sr_hash_v2", "E1")
+    # 다른 entity는 반드시 갈라진다.
+    assert key_for("sr_hash_v1", "E1") != key_for("sr_hash_v1", "E2")
+    # 키에 실린 값이 entity id다 — record key가 새면 안정성이 깨진 것이다.
+    assert key_for("sr_hash_v1", "E1").endswith(":E1")
+    assert "sr_hash_v1" not in key_for("sr_hash_v1", "E1")
+
+
+async def test_sweep_scope_arguments_are_wired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sweep의 blast radius를 정하는 인자가 실제로 전달되는지 고정한다 (T-VN-H30A).
+
+    ``provider``/``dataset_key``는 auto-resolve sweep의 ``WHERE``절이다. 잘못 넘어가면
+    한 run이 **다른 provider의 열린 큐를 닫는다**. double이 kwargs를 버리면 이 배선 오류를
+    아무 테스트도 잡지 못한다.
+    """
+    bundles = [_Bundle(_Feature("feature-0"))]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            issues=(_issue("admin_code_stale_sido", "feature-0"),),
+        ),
+    )
+
+    await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+    )
+
+    kwargs = client.recorded_kwargs
+    assert kwargs["provider"] == "demo"
+    assert kwargs["dataset_key"] == "places"
+    # sweep 범위는 주소 검증이 소유하는 code여야 한다 — 비면 큐가 영영 안 닫힌다.
+    managed = set(kwargs["managed_violation_types"])
+    assert "admin_code_stale_sido" in managed
+    assert "reverse_geocode_unavailable" in managed

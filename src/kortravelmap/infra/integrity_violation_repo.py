@@ -27,7 +27,6 @@ __all__ = [
     "list_data_integrity_violations",
     "set_data_integrity_violation_status",
     "sync_integrity_findings",
-    "upsert_integrity_finding",
 ]
 
 _SEVERITIES: Final[frozenset[str]] = frozenset(
@@ -311,90 +310,6 @@ async def list_data_integrity_violations(
     return tuple(_row_to_violation(row) for row in rows)
 
 
-_UPSERT_FINDING_SQL: Final[str] = f"""
-INSERT INTO ops.data_integrity_violations (
-    provider, dataset_key, source_record_key, feature_id, violation_type,
-    severity, message, payload
-) VALUES (
-    :provider, :dataset_key, :source_record_key, :feature_id, :violation_type,
-    :severity, :message, CAST(:payload AS jsonb)
-)
-ON CONFLICT ((payload ->> 'dedupe_key'))
-WHERE status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'
-DO UPDATE SET
-    message = EXCLUDED.message,
-    severity = EXCLUDED.severity,
-    -- jsonb ||는 shallow merge라 오른쪽의 JSON null이 왼쪽의 값을 **덮어쓴다**.
-    -- 재실행에서 provider_address/bjd_code가 None이면 1회차에 남긴 증거가 지워진다
-    -- (durable ledger 안에서 증거를 잃는 것 — 이 task의 목적과 정반대). null은 버린다.
-    payload = ops.data_integrity_violations.payload
-        || jsonb_strip_nulls(EXCLUDED.payload)
-        || jsonb_build_object(
-            'occurrence_count',
-            COALESCE(
-                (ops.data_integrity_violations.payload ->> 'occurrence_count')::bigint,
-                1
-            ) + 1,
-            -- TimeZone GUC에 따라 문자열이 달라지면 세션 간 정렬이 깨진다. UTC로 고정.
-            'last_seen_at', to_jsonb(now() AT TIME ZONE 'UTC')
-        )
-RETURNING {_RETURN_COLUMNS}
-"""
-
-
-async def upsert_integrity_finding(
-    session: AsyncSession,
-    *,
-    dedupe_key: str,
-    violation_type: str,
-    severity: str,
-    message: str,
-    provider: str | None = None,
-    dataset_key: str | None = None,
-    source_record_key: str | None = None,
-    feature_id: str | None = None,
-    payload: Mapping[str, Any] | None = None,
-) -> DataIntegrityViolation:
-    """열린 이슈 1건으로 접히는 finding 기록 (T-VN-H30A). commit은 호출자 책임.
-
-    같은 ``dedupe_key``의 **열린**(open/acknowledged) 이슈가 이미 있으면 새 행을 만들지 않고
-    ``occurrence_count``와 ``last_seen_at``만 올린다. 파이프라인이 매 run 같은 export를 전량
-    재생해도 큐가 부풀지 않는다.
-
-    resolved/ignored로 닫힌 이슈는 부분 unique index 밖이라 이력이 남고, 같은 문제가 재발하면
-    새 행이 생긴다 — 닫은 뒤 재발했다는 사실 자체가 신호이기 때문이다.
-
-    ``feature_id``/``source_record_key``는 FK다. **아직 적재되지 않은 대상에는 넘기지 말고**
-    ``payload``에만 담아야 한다(적재 전 검증 단계에서 drop된 행이 그렇다).
-    """
-    _validate_violation(
-        violation_type=violation_type,
-        severity=severity,
-        message=message,
-    )
-    if not dedupe_key.strip():
-        raise ValueError("dedupe_key는 비어 있을 수 없다.")
-    # 첫 삽입에도 occurrence_count를 둔다. 없으면 1회차 행만 이 키가 비어 있어
-    # 소비자가 "없음"과 "1회"를 구분하지 못한다(ON CONFLICT 쪽 COALESCE와 대칭).
-    merged = {**(payload or {}), "dedupe_key": dedupe_key, "occurrence_count": 1}
-    row = (
-        await session.execute(
-            text(_UPSERT_FINDING_SQL),
-            {
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "source_record_key": source_record_key,
-                "feature_id": feature_id,
-                "violation_type": violation_type,
-                "severity": severity,
-                "message": message,
-                "payload": json.dumps(merged, ensure_ascii=False),
-            },
-        )
-    ).one()
-    return _row_to_violation(row)
-
-
 _UPSERT_FINDINGS_BATCH_SQL: Final[str] = """
 INSERT INTO ops.data_integrity_violations (
     provider, dataset_key, source_record_key, feature_id, violation_type,
@@ -429,7 +344,17 @@ DO UPDATE SET
 
 _RESOLVE_STALE_FINDINGS_SQL: Final[str] = """
 UPDATE ops.data_integrity_violations
-SET status = 'resolved', resolved_at = now()
+SET status = 'resolved',
+    resolved_at = now(),
+    -- resolved 행은 payload.resolution을 갖는 것이 계약이다(data-model.md §9.5).
+    -- 기계가 닫은 행을 운영자가 닫은 행과 구분할 수 있어야 한다.
+    payload = payload || jsonb_build_object(
+        'resolution',
+        jsonb_build_object(
+            'operator', 'address_validation_sweep',
+            'reason', '이번 run이 더 이상 보고하지 않음'
+        )
+    )
 WHERE provider = :provider
   AND dataset_key = :dataset_key
   AND status = 'open'
@@ -466,6 +391,16 @@ async def sync_integrity_findings(
         live_keys: list[str] = []
     else:
         live_keys = [str(f["payload"]["dedupe_key"]) for f in findings]
+
+    for finding in findings:
+        # batch 경로에도 같은 검증을 건다. 없으면 잘못된 severity가 DB CHECK까지 가서
+        # unnest statement 전체를 실패시키고, 상위의 광범위 except가 삼켜
+        # **그 run의 finding 전부**를 잃는다.
+        _validate_violation(
+            violation_type=str(finding["violation_type"]),
+            severity=str(finding["severity"]),
+            message=str(finding["message"]),
+        )
 
     upserted = 0
     if findings:
