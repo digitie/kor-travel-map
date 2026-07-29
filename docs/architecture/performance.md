@@ -108,6 +108,28 @@ GROUP BY f.sigungu_code;
 `coord && bbox` 인덱스 사용 + `GROUP BY sigungu_code` (인덱스 `idx_features_sigungu`
 보조). 큰 zoom out에서는 결과 row 수가 적어 빠르다.
 
+관리 Feature 지도는 zoom 13 이하에서 위 region rollup만 조회한다. 개별 feature로
+전환하는 고zoom에서는 현재 화면을 Web Mercator tile로 나누되 다음 규칙을 지킨다.
+
+- 카메라 zoom에 맞춰 최대 zoom 15 tile을 사용해 고zoom 요청이 고정 zoom 12의 넓은
+  후보 집합을 반복 읽지 않게 한다.
+- 한 화면의 tile fan-out은 최대 8개다. 그보다 많으면 한 단계씩 낮추고, 비정상적으로
+  큰 bbox는 single-bbox 요청으로 되돌아가 API 4-core를 병렬 요청으로 포화시키지 않는다.
+- 정상 tile 경로의 query key는 실제 tile key 집합으로만 정한다. 같은 tile 안의 작은
+  pan은 outer merge와 GeoJSON `setData`를 다시 수행하지 않는다.
+- 기본 `weather`/`notice`처럼 point만 선택했으면 `include_geometry=false`다. `route`, 또는
+  표시 zoom 이상의 `area`, 전체 kind 선택일 때만 geometry를 요청한다.
+
+MapLibre의 DOM marker 갱신은 해당 GeoJSON source가 완전히 적재된 `sourcedata`와
+`moveend`에서만 수행한다. VWorld raster source의 tile 이벤트와 중복 `idle`/`zoomend`
+구독은 marker 전체 순회를 유발하므로 사용하지 않으며, tile 경계에서 중복 반환된
+feature/cluster는 겹침 계산 전에 식별자로 제거한다.
+
+큐레이션 지도는 viewport를 power-of-two grid에 맞춘 padded bbox로 정규화해 query key와
+실제 요청에 함께 쓴다. 작은 pan은 같은 cache를 재사용하고 새 응답 중에도 이전 marker를
+유지한다. padding 밖으로 이동하면 새 bbox를 요청하므로 화면 밖의 stale marker만 남는
+오류는 허용하지 않는다.
+
 ### 2.5 LINESTRING/POLYGON 교차
 
 ```sql
@@ -323,9 +345,28 @@ row-tuple cursor를 사용한다.
 - **인덱스 보조**: `idx_features_dedup_refresh_keyset` partial index가 active,
   좌표 보유 feature만 keyset 순서로 훑도록 돕는다.
 
+### 6.2 POI target entity version과 link/delete 잠금
+
+Alembic 0058의 `ops.poi_cache_targets.lock_version`은 인덱스에 넣지 않는다. DELETE는 active
+natural key partial unique index로 row를 찾고 `FOR UPDATE` 한 뒤 heap의 UUID+version을 비교한다.
+version을 인덱싱하면 모든 target UPDATE가 불필요한 index churn을 만들고 HOT update 기회를 줄인다.
+
+target UPDATE는 row-level version trigger와 `dataset_projection` topic row lock을 함께 사용하므로 같은
+topic writer가 많은 경우 직렬화 비용이 생긴다. 이는 stale mutation 방지와 causal live receipt를 위한
+의도된 비용이다. 특히 0055의 statement trigger는 `ops.data_integrity_violations` write도 같은
+`dataset_projection` revision row에 결박하므로, 그 테이블을 쓰는 장기 ETL transaction이 열려 있는 동안
+admin POI mutation latency는 해당 writer의 commit까지 직렬화되어 지연될 수 있다. link snapshot sync는 모든 active parent UUID를 정렬해 `FOR KEY SHARE`로 먼저
+잠그고, 그 뒤 link를 `(target_id, feature_id)` 순서로 비활성화/upsert한다. 각 parent lock은 target
+DELETE의 `FOR UPDATE`와 직렬화되지만 일반 active parent read는 막지 않는다. multi-target sync와
+delete 모두 parent target → feature link 순서를 지켜 교착을 피한다.
+
 ## 7. JSONB 인덱싱
 
 ### 7.1 자주 조회하는 필드는 generated column으로
+
+> **STORED generated 컬럼과 PROJ 버전**: `coord_5179`처럼 `ST_Transform`으로 만든 STORED
+> generated 컬럼 값은 PROJ 버전에 종속한다. PostGIS/PROJ image tag 상향 시 drift 검사·재계산·
+> REINDEX 절차는 [`../runbooks/coord-5179-proj-pin.md`](../runbooks/coord-5179-proj-pin.md)(T-VN-H04).
 
 ```sql
 ALTER TABLE feature.features
@@ -363,6 +404,116 @@ WHERE feature_id = :fid AND metric_key = 'T1H'
 ORDER BY valid_at DESC NULLS LAST
 LIMIT 1;
 ```
+
+### 8.3 vNext 3단 성능·DDL gate (ADR-075 D-12-4) — **본 절이 정본**
+
+성능 최적화는 도입 전 budget과 재현 fixture를 고정하고 다음 세 계층으로 검증한다. T-VN-21이
+이 세 계층을 CI/release 절차에 연결했다. 각 계층의 **무엇이·어디서·어떻게** 실행되는지가 아래
+정본이다.
+
+#### Tier 1 — 매 PR (CI ``integration`` job에서 상시)
+
+`tests/integration/test_perf_gate_tier1.py` (`@pytest.mark.perf_gate`)가 testcontainers
+PostGIS에서 다음 셋을 검사한다. 기존 integration job(`pytest tests/integration`)이 그대로
+실행하므로 `main`·`integration/t-vn` 대상 모든 PR에서 돈다.
+
+1. **planner-default EXPLAIN smoke**: `tests/integration/perf_gate.py`의 `HOT_QUERIES`
+   registry(public bbox/in-bounds·nearby·search·detail·batch·category counts·cluster
+   rollup 3종)를 **`enable_seqscan`을 건드리지 않고** EXPLAIN해 `feature.features`
+   base-table `Seq Scan`이 없고 기대 index를 타는지 확인한다. `enable_seqscan=off` 결과는
+   회귀 감시(=index 적격성 확인)에만 쓰고 **채택 근거로 삼지 않는다**.
+2. **query 수 ≠ batch item 수 가드**: public batch read를 item 50개·100개로 호출해 발생 SQL
+   statement 수가 item 수에 비례하지 않고 1건으로 일정한지 확인한다(N+1 회귀 차단).
+3. **response-shape 회귀**: hot query 결과 컬럼 집합을 frozen snapshot과 비교해 우발적 필드
+   추가/삭제를 잡는다(OpenAPI drift gate와 별개 — SQL 컬럼 계약 회귀).
+
+**hot query 추가 절차**: `perf_gate.HOT_QUERIES`에 `HotQuery(name, sql, params,
+expected_indexes, no_seq_scan_on=…)` 한 줄을 더한다. 정본 SQL 상수는 `feature_repo`에서
+**읽기만** 하고 재구현하지 않는다. small-fixture에서 planner가 index를 선호하도록
+`seed_hot_query_features`가 features + primary source lineage를 3,200행 규모로 seed·ANALYZE한다.
+
+> **집계 hot query 주의**: category counts처럼 활성 전 행을 훑는 full aggregate는, 공개 notice
+> 감산 필터의 `source_links` NOT EXISTS anti-join이 populated 여야 index를 탄다. 그래서 seed가
+> source lineage를 함께 채운다. `feature_price_values`/`feature_weather_values`는 tier-1 seed에
+> 넣지 않으므로 bbox의 price/weather LATERAL은 빈 aux 테이블을 seq-scan한다(`features` 아님) —
+> 이는 fixture-size 산물이고 aux 테이블 index 실효는 tier-2 실분포에서 잰다.
+
+#### Tier 2 — release/cutover (수동, **CI 아님**)
+
+`scripts/perf_tier2_release_harness.py`가 100만+ 실분포 fixture에서 대표 viewport를
+`EXPLAIN (ANALYZE, BUFFERS)`로 재고 n150 기준 p50/p95, shared read blocks p95, 응답 bytes를
+JSON으로 기록한다. **CI에서 절대 돌리지 않는다**(대용량 fixture는 CI 시간/자원 초과).
+
+- 대표 viewport: 서울 밀집 in-bounds, 전국 low-zoom cluster, 100km nearby, 상용 검색어 search,
+  200건 batch.
+- 실행: `KOR_TRAVEL_MAP_PG_DSN=… python scripts/perf_tier2_release_harness.py --rows 1000000
+  --iterations 30`(alembic head 적용된 빈 DB에). 이미 적재된 DB는 `--skip-seed`.
+- `--skip-seed`는 `feature.public_features`에서 non-notice `feature_id` 200개를 정렬해
+  실제 batch 파라미터로 사용한다. notice는 공개 list가 추가 lifecycle 감산을 적용하므로
+  batch 후보에서 제외해 selector와 응답 visibility 의미를 일치시킨다. 후보가 200건
+  미만이거나 대표 viewport가 각 최소 cardinality(일반 1행, batch 200행)를 만족하지
+  못하면 성공 JSON을 출력하지 않고 종료 코드 2로 실패한다.
+- 각 viewport는 terminal `LIMIT` 전 별도 count의 `matched_rows`와 실제 응답의
+  `returned_rows`/`minimum_returned_rows`를 기록해 truncation을 보존한다. EXPLAIN
+  최상위 Plan 행 수는 LIMIT 적용 뒤 `returned_rows`와 같아야 한다. count는 p95 측정
+  loop 밖에서 한 번만 실행한다.
+  `shared_read_blocks_p95`는 child 누적값을 재귀 합산하지 않고 최상위 Plan의
+  query 전체 누적값만 사용한다.
+- percentile 표본은 오름차순 정렬하고 nearest-rank를 사용한다. 표본 수가 `n`이고
+  percentile 비율이 `p`이면 1-based rank는 `ceil(p × n)`, 0-based index는
+  `ceil(p × n) - 1`이다. 보간하지 않으며 실행시간 p50·p95와 shared read blocks p95를
+  모두 같은 helper로 계산한다. 따라서 값이 `1..n`인 p95 표본은 `n=1/20/30/100`에서
+  각각 index `0/18/28/94`, 값 `1/19/29/95`를 선택한다.
+- 결과는 release 리포트(`docs/reports/`)에 첨부하고, budget 초과 viewport는 index/쿼리 재설계
+  근거로 쓴다.
+
+#### Tier 3 — index/DDL 변경 PR (정책 + helper, 리뷰 enforce)
+
+index/DDL을 바꾸는 PR은 변경 **전후 write 비용·index 크기**(및 필요 시 WAL·lock 획득/보유
+시간)를 측정해 PR에 첨부해야 한다. 하드 CI gate로 만들 수 없다(변경별 index가 달라 generic
+게이트 불가) — **리뷰가 첨부 여부를 확인**한다.
+
+- 재사용 helper: `perf_gate.measure_index_write_cost(session, label=…, insert_sql=…,
+  row_batches=…, index_relation=…)`가 write 소요 시간과 `pg_relation_size(index)`를 반환한다.
+  index 생성/삭제(migration)는 호출자가 하고, helper는 순수 측정만 한다.
+- GiST/BRIN은 실제 predicate·시간 정렬을 지원할 때만 채택한다. GiST 6→partial 정리의 write
+  **~1.6× 개선** 실측이 선례다(§13, T-VN-18 계열이 이 helper로 before/after를 첨부한다).
+- concurrent build 실패 뒤 INVALID index가 0건인지 확인한다([`../runbooks/invalid-index-recovery.md`](../runbooks/invalid-index-recovery.md), T-VN-H05). dedup과
+  UNIQUE 사이 writer race가 있는 0060은 성능보다 원자성을 우선해 table writer lock 아래
+  non-concurrent build를 사용하므로 lock 대기·보유 시간과 fence 범위를 대신 기록한다.
+
+MVT, 범용 batch, cursor HMAC, weather partition/hypertable, 물리 listener, 대규모 fixture 주기는
+T-VN-51~56에서 먼저 채택 기준을 측정하며, "확장 가능해 보인다"는 이유만으로 구현하지 않는다. **측정 결과·판정 정본은 §8.4다.**
+
+### 8.4 Wave 3 도입-조건 측정 결과 (T-VN-51~56) — **본 절이 판정 정본**
+
+§8.3이 유예한 여섯 확장 후보의 채택 기준·근거·판정을 고정한다. 상세 측정 부록은
+[`docs/reports/t-vn-51-56-adoption-measurement-2026-07-21.md`](../reports/t-vn-51-56-adoption-measurement-2026-07-21.md).
+측정은 n150 CI-parity(2026-07-21) 기준이며, tier-1 소규모 gate **12 passed / ~30s**,
+tier-2 100만+ harness **수 분~수십 분(CI 아님)** 을 실측·재확인했다.
+
+| Task | 주제 | 판정 | 트리거(재측정/개방 조건) |
+|---|---|---|---|
+| T-VN-51 | MVT tile | 유예 | low-zoom 개별 point 요구 발생 + tier-2 응답 >256KiB(gzip) 또는 p95 >200 ms |
+| T-VN-52 | 범용 batch | 유예 | weather 외 2번째 per-row 왕복 실측(PinVi trace) |
+| T-VN-53 | cursor key rotation | 유예(clean-cut) | 실 rotation에서 무효화 통증이 grace window 우위 입증 |
+| T-VN-54 | weather partition/hypertable | 유예 | 활성 행 >50M, retention p95 >100 ms, 또는 T-VN-38 append 전환 |
+| T-VN-55 | 물리 listener 분리 | 유예 | read 부하 상호간섭 >20% 또는 장애 전파 인시던트 |
+| T-VN-56 | 대규모 fixture 주기 | 확정(2계층) | tier-2 전용 planner 회귀 반복 시 nightly 10만행 신설 |
+
+- **T-VN-51 MVT / T-VN-52 batch**: low-zoom 계약이 이미 cluster rollup(§9.3.2)이라 내려보내는
+  개별 point가 없고, batch는 200-id·N+1 가드(§8.3 tier-1)로 상한된다. 두 항목 모두 표의 트리거
+  전에는 구현하지 않는다.
+- **T-VN-53 cursor rotation**: T-VN-15가 versioned HMAC keyset을 clean-cut으로 채택했다. cursor는
+  단명이라 rotation 시 진행 cursor만 422→재조회(무손실)된다. 운영 절차는 "secret compromise
+  또는 정기(분기) 교체 시 단일 활성 key clean-cut 교체". grace window는 트리거 전 미구현.
+- **T-VN-54 weather 볼륨**: `feature_weather_values`는 semantic UNIQUE(0060) upsert(수렴)이지
+  시계열 append가 아니고, 대상은 `poi_cache_targets`로 상한된다. 정상상태 활성 행은 partition/
+  hypertable 임계(>50M) 아래로 추정. T-VN-38(current summary)이 이력 보존으로 바뀌면 재측정.
+- **T-VN-55 listener 분리**: API/Dagster는 이미 물리 분리돼 있고 내부 listener는 read 지배
+  비대칭이라 분리 이득이 배포 복잡성을 넘지 못한다.
+- **T-VN-56 fixture 주기**: tier-2(100만+)는 release 주기가 정확하다(비용 수십 분, 결함 검출은
+  소규모 tier-1 담당, tier-2 역할은 release budget 증거). nightly 중간 계층은 트리거 전 미신설.
 
 ## 9. 캐싱 정책 (Postgres 외)
 
@@ -676,10 +827,27 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   - `idx_import_jobs_status(status, created_at, queue_sequence)` — claim FIFO tie-breaker
   - `idx_import_jobs_kind_status(kind, status, created_at DESC, job_id DESC)`
 - `ops.import_job_events`
+  - `idx_import_job_events_time(occurred_at DESC, event_id DESC)`
   - `idx_import_job_events_job_time(job_id, occurred_at DESC, event_id DESC)`
   - `idx_import_job_events_provider_time(provider, occurred_at DESC, event_id DESC)`
-    partial `provider IS NOT NULL`
+    partial `provider IS NOT NULL AND quarantined_at IS NULL`
+  - `idx_import_job_events_provider_dataset_time(provider, dataset_key, occurred_at DESC,
+    event_id DESC)` partial
+    `provider IS NOT NULL AND dataset_key IS NOT NULL AND quarantined_at IS NULL`
   - `idx_import_job_events_level_time(level, occurred_at DESC, event_id DESC)`
+  - `idx_import_job_events_provider_dataset_scope_time(provider, dataset_key,
+    sync_scope, occurred_at DESC, event_id DESC)` partial
+    `provider IS NOT NULL AND dataset_key IS NOT NULL AND sync_scope IS NOT NULL
+    AND quarantined_at IS NULL`
+
+  모든 event 시간순 인덱스는 `quarantined_at IS NULL` partial predicate를 가진다. 0052에서
+  격리한 기존 event는 보존하되 marker를 비정규화하므로, 조회 시 parent job을 join하거나 최신
+  격리 event를 건너뛰지 않고 visible page만 bounded scan한다. `/ops/live`의 전역 revision은
+  최신 event 1건, job event revision은 최근 5건만 읽으며 매 polling마다 exact 전체 건수를
+  다시 세지 않는다. late commit과 최근 page 밖 UPDATE/DELETE는 singleton
+  `ops.import_job_event_clock.revision`의 transactional 증가로 감지한다. AFTER STATEMENT에서 DML
+  statement당 한 번만 global clock을 갱신해 bulk row별 WAL/dead tuple과 교차 row deadlock을
+  피하며, timestamp는 진단에만 쓴다.
 - `ops.feature_consistency_reports`
   - `idx_reports_started(started_at DESC, report_id DESC)`
   - `idx_reports_severity_started(severity_max, started_at DESC, report_id DESC)`
@@ -709,6 +877,44 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   `eupmyeondong` 모두 bbox 후보 단계에서 `idx_features_coord_gist`를 사용한다.
 - consistency F6/F7: F6은 `?| ARRAY[...]`와 partial index로 opening-hours 후보만 읽고,
   F7은 pending dedup 후보를 score keyset CTE로 먼저 고정한다.
+- `/ops/pipeline/executions`: `WITH RECURSIVE`가 `parent_job_id` hierarchy를 component로
+  접고 각 job의 가장 가까운 request anchor를 선택해 branch/standalone partition을
+  만든 뒤 root filter와
+  `(created_at DESC, id DESC, kind DESC)` keyset을 적용한다. recursive walk는
+  `uuid[] path` cycle guard로 반드시 종료한다. provider/dataset 선택 조회는 typed job과
+  request 배열의 indexed seed에서 양방향 parent/child component와 관련 request만
+  먼저 좁힌 뒤 같은 root projection을 적용한다. UUID detail도 요청 또는 member가 속한
+  component만 투영한다. `load_batch_id`/`parent_job_id` deep link도 각각
+  `idx_import_jobs_load_batch_created`/`idx_import_jobs_parent_created`에서 member를 먼저
+  선택한 뒤 component를 확장한다. 따라서 selective 조회에서 전체 job/request graph를 먼저 순회하면
+  회귀다. 실행 identity는 `import_jobs` typed pair만 사용하고 `import_jobs.payload`와
+  `import_job_events`를 projection에서 읽지 않는다.
+- C3e canonical provider operation: overview/timeline/datasets grid/detail은 위 root CTE를
+  공유한다. exact pair latest/history는
+  `idx_import_jobs_provider_dataset_created(provider,dataset_key,created_at DESC,job_id DESC)`,
+  dataset-only 조회는 `idx_import_jobs_dataset_created(dataset_key,created_at DESC,job_id DESC)`를
+  사용한다. provider-only history는 composite pair index의 두 번째 key 때문에 정렬축을
+  만족하지 못하므로 `idx_import_jobs_provider_created(provider,created_at DESC,job_id DESC)`를
+  사용한다. direct scope도 linked typed job index로 찾고 별도 JSON expression index는 두지
+  않는다. provider-only/dataset-only request 배열만 각 GIN access path를 사용한다.
+  provider/dataset 독립 배열의 cross-product와 paginated timeline 첫 page 기반 전 dataset latest
+  계산은 금지한다. overview count/24시간 failure는 raw child가 아니라 canonical root를 센다.
+  event의 provider/dataset은 감사 API filter 메타데이터다. 감사 목록 SQL은 nullable-OR 한 문장을
+  쓰지 않고 실제 입력 filter의 고정 clause만 bind와 함께 조합한다. 대표 REST filter와 인덱스는
+  무필터→`idx_import_job_events_time`, job→`idx_import_job_events_job_time`, provider→
+  `idx_import_job_events_provider_time`,
+  provider+dataset exact pair→`idx_import_job_events_provider_dataset_time`, level→
+  `idx_import_job_events_level_time`, canonical exact scope→
+  `idx_import_job_events_provider_dataset_scope_time`이다. 모든 조합은 event의
+  `quarantined_at IS NULL`을 직접 포함한다. 0057의 scope 조회는 nullable-OR나
+  request/job JOIN을 쓰지 않고 `provider/dataset/sync_scope IS NOT NULL` partial predicate를
+  그대로 넣은 뒤 `(occurred_at,event_id)` keyset과 LIMIT를 적용한다. job 단건처럼 후보가
+  64건 이하인 작은 결과에서는 planner가 같은
+  자연키 index의 bounded bitmap scan + bounded sort를 고를 수 있으며 이를 회귀로
+  허용한다. exact-scope hot path는 sort 없는 ordered index scan을 유지한다.
+  dataset key는 provider namespace에 속하므로 dataset-only event filter는 `422`/`ValueError`로
+  거부한다. 0057은 더 이상 읽기 경로가 없는 `idx_import_job_events_dataset_time`을 제거한다.
+  projection seed용 event index는 두지 않는다.
 
 ### 14.3 회귀 테스트
 
@@ -720,11 +926,40 @@ planner가 base table `Seq Scan`을 선택하지 않는지 별도 가드한다.
 
 - `/features/nearby`, `/features/in-bounds`, `/features/search`
 - `/features/in-bounds` 클러스터(`sido`/`sigungu`/`eupmyeondong`)
-- `/admin/features`, `/ops/import-jobs`, consistency report/issue 목록
+- `/admin/features`, `/ops/pipeline/executions`, consistency report/issue 목록
 - dedup refresh, dedup/enrichment review list
 - consistency F4/F6/F7/F8
 - `/admin/features` `sort=name`의 `idx_features_lower_name_keyset`
 - dedup/enrichment review cursor 전체 순회 gap/중복 없음
+- pipeline root projection은 전체 partition에서 `job_id`가 정확히 한 번 귀속되는지,
+  canonical request root/standalone/cycle/부모 누락에서도 branch가 섞이지 않는지 검증한다.
+  중첩 request root와 동일 job 다중 request는 정상 projection 사례가 아니라 DB constraint 위반
+  회귀로 검증한다. EXPLAIN은
+  `idx_import_jobs_parent_created`, `idx_import_jobs_created_keyset`,
+  `uq_feature_update_requests_job_id` access path와 recursive 비용을 점검한다. selective plan에는
+  `import_job_events` relation 자체가 없어야 한다. 소규모 fixture에서 planner 선택이 흔들리는
+  index는 억지 assert하지 않되 plan 크기·temp I/O·실측 비용과 base table Seq Scan을 gate로 둔다.
+  전체 hierarchy materialization이 page 크기와 무관하게 커지는 plan이면 구현을 중단하고
+  schema/index 변경을 다시 판단한다.
+- C3e pair/provider-only/dataset-only 조회는 direct typed job seed와 request 배열 GIN seed를
+  `UNION ALL` 후보 집합으로 구성한다. 각 전용 index를 EXPLAIN하고, 1,000개
+  이상의 root와 multi-pair child에서도 grid latest 누락 0, overview count의 child fan-out 0,
+  pipeline/detail cursor 누락·중복 0을 검증한다.
+- datasets grid/detail의 실행 상태는 scope마다 별도 쿼리를 보내지 않는다. 공용 root CTE를
+  한 번 실행한 snapshot 안에서 exact pair의 활성/종료 boolean partition별 `row_number=1`만
+  반환한다. 회귀 테스트는 동일 scope의 종료 root와 더 최신 활성 root가 동시에 보존되고,
+  repository 호출이 SQL 한 번으로 끝나는지 검증한다. 실행 이력 후속 cursor는 전체 filter
+  fingerprint가 같을 때만 DB에 도달한다.
+- feature update queue는 request 테이블에 lifecycle 상태를 복제하지 않는다. partial
+  `idx_import_jobs_feature_update_queue`로 queued canonical job만 seed한 뒤 unique `job_id`로 request를
+  JOIN하고 priority를 정렬한다. 완료 이력이 늘어나도 request history 전체를 순회하지 않는지 natural
+  planner EXPLAIN으로 검증한다.
+- event 감사 조회는 same-dataset/different-provider 4,000행과
+  same-provider/different-dataset 4,000행을 둔 natural planner에서 무필터·provider-only·exact pair의
+  첫/후속 page가 각 시간순 index를 사용하고 Seq Scan·Sort·64행 초과 residual을 만들지 않는지
+  검증한다. 0057 exact-scope 회귀는 같은 provider/dataset의 서로 다른 canonical scope를
+  각각 4,000행 넣고 첫/후속 page가 scope partial index를 사용하며 Seq Scan·Sort 없이
+  64행 이내에서 멈추는지도 별도로 검증한다.
 
 제약: `feature.feature_files`는 아직 Alembic 테이블이 없으므로 F8 테스트는 임시 DDL로
 실행 계획 형태만 확인한다. `0020`의 `CREATE INDEX`는 일반 Alembic transaction DDL이며,
