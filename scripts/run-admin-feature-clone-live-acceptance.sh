@@ -246,23 +246,20 @@ done < <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$D
 [[ -n "$db_password" && "$db_password" != *$'\n'* && "$db_password" != *$'\r'* ]] ||
   die "clone DB password is invalid"
 readonly ORIGINAL_DB_NAME="$db_name"
-PSQL_SESSION_OPTIONS=""
 PSQL_APP_NAME=""
 
 psql_query() {
   local query="$1"
   PGPASSWORD="$db_password" \
-    PGOPTIONS="$PSQL_SESSION_OPTIONS" \
     PGAPPNAME="$PSQL_APP_NAME" \
-    docker exec -e PGPASSWORD -e PGOPTIONS -e PGAPPNAME "$DB_CONTAINER" \
+    docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
     psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$db_name" -c "$query"
 }
 
 psql_stream() {
   PGPASSWORD="$db_password" \
-    PGOPTIONS="$PSQL_SESSION_OPTIONS" \
     PGAPPNAME="$PSQL_APP_NAME" \
-    docker exec -i -e PGPASSWORD -e PGOPTIONS -e PGAPPNAME "$DB_CONTAINER" \
+    docker exec -i -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
     psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$db_name"
 }
 
@@ -550,12 +547,6 @@ COPY (
       FROM pg_catalog.pg_database
       WHERE datname = current_database()
     )
-      AND NOT (
-        current_setting('application_name') LIKE 'ktm_checkpoint_%'
-        AND current_setting('default_transaction_read_only') = 'off'
-        AND setting.setrole = 0
-        AND configuration.value = 'default_transaction_read_only=on'
-      )
   )
   SELECT concat_ws(chr(31), kind, object_name, definition)
   FROM objects
@@ -771,7 +762,7 @@ readonly VERIFICATION_STATE="$STATE_ROOT/checkpoint-scratch.json"
 readonly CHECKPOINT_QUIESCENCE_STATE="$STATE_ROOT/checkpoint-quiescence.json"
 CHECKPOINT_QUIESCENCE_APP=""
 CHECKPOINT_QUIESCENCE_PROCESS=""
-CHECKPOINT_READ_ONLY_SET=0
+CHECKPOINT_LOGIN_FENCED=0
 CHECKPOINT_DUMP_DURABLE=0
 BLOCKED_WRITTEN=0
 COMPLETE=0
@@ -949,37 +940,6 @@ foreign_db_sessions() {
   "
 }
 
-checkpoint_read_only_setting_count() {
-  psql_value "
-    SELECT count(*)
-    FROM pg_catalog.pg_db_role_setting AS setting
-    CROSS JOIN LATERAL unnest(setting.setconfig) AS configuration(value)
-    WHERE setting.setdatabase = (
-      SELECT oid
-      FROM pg_catalog.pg_database
-      WHERE datname = '$ORIGINAL_DB_NAME'
-    )
-      AND setting.setrole = 0
-      AND configuration.value = 'default_transaction_read_only=on'
-  "
-}
-
-checkpoint_transaction_setting_count() {
-  psql_value "
-    SELECT count(*)
-    FROM pg_catalog.pg_db_role_setting AS setting
-    CROSS JOIN LATERAL unnest(setting.setconfig) AS configuration(value)
-    WHERE setting.setdatabase = (
-      SELECT oid
-      FROM pg_catalog.pg_database
-      WHERE datname = '$ORIGINAL_DB_NAME'
-    )
-      AND setting.setrole = 0
-      AND split_part(configuration.value, '=', 1) =
-        'default_transaction_read_only'
-  "
-}
-
 clear_checkpoint_quiescence_state() {
   state_helper clear-quiescence \
     --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
@@ -987,11 +947,61 @@ clear_checkpoint_quiescence_state() {
     --path "$CHECKPOINT_QUIESCENCE_STATE"
 }
 
+set_clone_database_password() {
+  local role_password="$1"
+  KTM_CHECKPOINT_DB_ROLE_PASSWORD="$role_password" \
+    PGPASSWORD="$db_password" \
+    PGAPPNAME="$PSQL_APP_NAME" \
+    docker exec -i \
+    -e KTM_CHECKPOINT_DB_ROLE_PASSWORD \
+    -e PGPASSWORD \
+    -e PGAPPNAME \
+    "$DB_CONTAINER" \
+    psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$ORIGINAL_DB_NAME" \
+    <<SQL
+\getenv checkpoint_role_password KTM_CHECKPOINT_DB_ROLE_PASSWORD
+ALTER ROLE "$db_user" PASSWORD :'checkpoint_role_password';
+SQL
+}
+
+clone_tcp_password_works() {
+  local role_password="$1"
+  PGPASSWORD="$role_password" \
+    PGAPPNAME="$PSQL_APP_NAME" \
+    docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
+    psql -X -v ON_ERROR_STOP=1 -Atq \
+    -h 127.0.0.1 -U "$db_user" -d "$ORIGINAL_DB_NAME" \
+    -c "SELECT 1" >/dev/null 2>&1
+}
+
+terminate_checkpoint_backends() {
+  local application_name="$1"
+  [[ "$application_name" =~ ^ktm_checkpoint_[0-9a-f]{16}$ ]] ||
+    die "checkpoint backend application name is invalid"
+  psql_query "
+    SELECT pg_catalog.pg_terminate_backend(pid)
+    FROM pg_catalog.pg_stat_activity
+    WHERE datname = '$ORIGINAL_DB_NAME'
+      AND backend_type = 'client backend'
+      AND application_name = '$application_name'
+      AND pid <> pg_backend_pid()
+  " >/dev/null
+}
+
+terminate_foreign_db_sessions() {
+  psql_query "
+    SELECT pg_catalog.pg_terminate_backend(pid)
+    FROM pg_catalog.pg_stat_activity
+    WHERE datname = '$ORIGINAL_DB_NAME'
+      AND backend_type = 'client backend'
+      AND application_name <> '$CHECKPOINT_QUIESCENCE_APP'
+      AND pid <> pg_backend_pid()
+  " >/dev/null
+}
+
 recover_checkpoint_quiescence() {
-  local setting_count
-  PSQL_SESSION_OPTIONS="-c default_transaction_read_only=off"
+  local journaled_application
   PSQL_APP_NAME="ktm_checkpoint_recovery"
-  setting_count="$(checkpoint_transaction_setting_count)"
   if [[ -f "$CHECKPOINT_QUIESCENCE_STATE" &&
         ! -L "$CHECKPOINT_QUIESCENCE_STATE" ]]; then
     [[ "$(state_helper read-quiescence \
@@ -1001,52 +1011,52 @@ recover_checkpoint_quiescence() {
         --path "$CHECKPOINT_QUIESCENCE_STATE"
     )" == "$ORIGINAL_DB_NAME" ]] ||
       die "checkpoint quiescence state DB differs from clone DB"
-    [[ "$setting_count" == "0" || (
-      "$setting_count" == "1" &&
-      "$(checkpoint_read_only_setting_count)" == "1"
-    ) ]] ||
-      die "checkpoint quiescence setting cardinality is invalid"
-    if [[ "$setting_count" == "1" ]]; then
-      psql_query \
-        "ALTER DATABASE \"$ORIGINAL_DB_NAME\" RESET default_transaction_read_only" \
-        >/dev/null
-    fi
-    clear_checkpoint_quiescence_state
+    journaled_application="$(
+      state_helper read-quiescence \
+        --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+        --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+        --field application_name \
+        --path "$CHECKPOINT_QUIESCENCE_STATE"
+    )"
+    terminate_checkpoint_backends "$journaled_application" ||
+      die "orphaned checkpoint backend termination failed"
+    set_clone_database_password "$db_password" ||
+      die "checkpoint DB login restoration failed"
+    clone_tcp_password_works "$db_password" ||
+      die "restored checkpoint DB login was not accepted"
+    clear_checkpoint_quiescence_state ||
+      die "recovered checkpoint quiescence state cleanup failed"
   else
     [[ ! -e "$CHECKPOINT_QUIESCENCE_STATE" &&
        ! -L "$CHECKPOINT_QUIESCENCE_STATE" ]] ||
       die "checkpoint quiescence state is unsafe"
-    [[ "$setting_count" == "0" ]] ||
-      die "clone DB has an unowned default_transaction_read_only setting"
+    clone_tcp_password_works "$db_password" ||
+      die "clone DB login differs without an ownership journal"
   fi
-  PSQL_SESSION_OPTIONS=""
   PSQL_APP_NAME=""
 }
 
 start_checkpoint_quiescence() {
   [[ -z "$CHECKPOINT_QUIESCENCE_PROCESS" ]] ||
     die "checkpoint quiescence is already active"
-  [[ "$(checkpoint_transaction_setting_count)" == "0" ]] ||
-    die "clone DB already has default_transaction_read_only configured"
   [[ "$(foreign_db_sessions)" == "0" ]] ||
     die "clone DB has a foreign client session before checkpoint quiescence"
   CHECKPOINT_QUIESCENCE_APP="ktm_checkpoint_${RUN_KEY:0:16}"
   state_helper write-quiescence \
+    --application-name "$CHECKPOINT_QUIESCENCE_APP" \
     --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
     --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
     --database "$ORIGINAL_DB_NAME" \
     --path "$CHECKPOINT_QUIESCENCE_STATE"
-  PSQL_SESSION_OPTIONS="-c default_transaction_read_only=off"
   PSQL_APP_NAME="$CHECKPOINT_QUIESCENCE_APP"
-  psql_query \
-    "ALTER DATABASE \"$ORIGINAL_DB_NAME\" SET default_transaction_read_only = on" \
-    >/dev/null
-  CHECKPOINT_READ_ONLY_SET=1
-  [[ "$(checkpoint_transaction_setting_count)" == "1" &&
-     "$(checkpoint_read_only_setting_count)" == "1" ]] ||
-    die "clone DB default_transaction_read_only was not installed"
+  set_clone_database_password "$(openssl rand -hex 32)"
+  CHECKPOINT_LOGIN_FENCED=1
+  if clone_tcp_password_works "$db_password"; then
+    die "clone DB accepted its original password during checkpoint fence"
+  fi
+  terminate_foreign_db_sessions
   [[ "$(foreign_db_sessions)" == "0" ]] ||
-    die "clone DB gained a foreign client before read-only quiescence"
+    die "clone DB retained a foreign client after login fencing"
   local lock_statements
   lock_statements="$(
     psql_query "
@@ -1065,9 +1075,8 @@ start_checkpoint_quiescence() {
   )"
   [[ -n "$lock_statements" ]] || die "checkpoint lock relation set is empty"
   PGPASSWORD="$db_password" \
-    PGOPTIONS="$PSQL_SESSION_OPTIONS" \
     PGAPPNAME="$CHECKPOINT_QUIESCENCE_APP" \
-    docker exec -e PGPASSWORD -e PGOPTIONS -e PGAPPNAME "$DB_CONTAINER" \
+    docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
     psql -X -v ON_ERROR_STOP=1 -Atq -U "$db_user" -d "$db_name" \
     -c "BEGIN; SET LOCAL statement_timeout = 0; $lock_statements SELECT pg_sleep(86400); ROLLBACK;" \
     >/dev/null 2>&1 &
@@ -1116,23 +1125,15 @@ assert_checkpoint_quiescence() {
   )" == "1" ]] || die "checkpoint quiescence backend is not holding locks"
   [[ "$(foreign_db_sessions)" == "0" ]] ||
     die "clone DB has a foreign session during checkpoint quiescence"
-  [[ "$(checkpoint_read_only_setting_count)" == "1" ]] ||
-    die "clone DB read-only quiescence setting is missing"
-  [[ "$(checkpoint_transaction_setting_count)" == "1" ]] ||
-    die "clone DB read-only quiescence setting cardinality changed"
+  if clone_tcp_password_works "$db_password"; then
+    die "clone DB login fence disappeared during checkpoint"
+  fi
 }
 
 stop_checkpoint_quiescence() {
   if [[ -n "$CHECKPOINT_QUIESCENCE_PROCESS" &&
         -n "$CHECKPOINT_QUIESCENCE_APP" ]]; then
-    psql_query "
-      SELECT pg_catalog.pg_terminate_backend(pid)
-      FROM pg_catalog.pg_stat_activity
-      WHERE datname = current_database()
-        AND backend_type = 'client backend'
-        AND application_name = '$CHECKPOINT_QUIESCENCE_APP'
-        AND pid <> pg_backend_pid()
-    " >/dev/null
+    terminate_checkpoint_backends "$CHECKPOINT_QUIESCENCE_APP" || return 1
     wait "$CHECKPOINT_QUIESCENCE_PROCESS" 2>/dev/null || true
   fi
   CHECKPOINT_QUIESCENCE_PROCESS=""
@@ -1144,23 +1145,22 @@ stop_checkpoint_quiescence() {
         --field database \
         --path "$CHECKPOINT_QUIESCENCE_STATE"
     )" == "$ORIGINAL_DB_NAME" ]] ||
-      die "checkpoint quiescence cleanup state is invalid"
-    if [[ "$(checkpoint_transaction_setting_count)" == "1" &&
-          "$(checkpoint_read_only_setting_count)" == "1" ]]; then
-      psql_query \
-        "ALTER DATABASE \"$ORIGINAL_DB_NAME\" RESET default_transaction_read_only" \
-        >/dev/null
-    else
-      [[ "$(checkpoint_transaction_setting_count)" == "0" ]] ||
-        die "checkpoint quiescence cleanup setting cardinality is invalid"
-    fi
-    clear_checkpoint_quiescence_state
-  elif (( CHECKPOINT_READ_ONLY_SET == 1 )); then
-    die "checkpoint quiescence state disappeared before cleanup"
+      return 1
+    [[ "$(state_helper read-quiescence \
+        --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+        --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+        --field application_name \
+        --path "$CHECKPOINT_QUIESCENCE_STATE"
+    )" == "$CHECKPOINT_QUIESCENCE_APP" ]] ||
+      return 1
+    set_clone_database_password "$db_password" || return 1
+    clone_tcp_password_works "$db_password" || return 1
+    clear_checkpoint_quiescence_state || return 1
+  elif (( CHECKPOINT_LOGIN_FENCED == 1 )); then
+    return 1
   fi
-  CHECKPOINT_READ_ONLY_SET=0
+  CHECKPOINT_LOGIN_FENCED=0
   CHECKPOINT_QUIESCENCE_APP=""
-  PSQL_SESSION_OPTIONS=""
   PSQL_APP_NAME=""
 }
 
@@ -1259,10 +1259,10 @@ drop_verification_database() {
       die "checkpoint verification DB server ownership marker is invalid"
     db_name="$ORIGINAL_DB_NAME"
     PGPASSWORD="$db_password" \
-      PGOPTIONS="$PSQL_SESSION_OPTIONS" \
       PGAPPNAME="$PSQL_APP_NAME" \
-      docker exec -e PGPASSWORD -e PGOPTIONS -e PGAPPNAME "$DB_CONTAINER" \
-      dropdb --if-exists --force -U "$db_user" "$VERIFICATION_DB"
+      docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
+      dropdb --if-exists --force -U "$db_user" "$VERIFICATION_DB" ||
+      return 1
   fi
   if (( VERIFICATION_ROLE_OWNED == 1 )); then
     [[ "$VERIFICATION_OWNER_ROLE" =~ ^ktm_checkpoint_owner_[0-9a-f]{24}$ ]] ||
@@ -1308,12 +1308,12 @@ drop_verification_database() {
       "
     )" == "$VERIFICATION_OWNER_ROLE_OID:f:f:f:f:f:f:f:ktm-checkpoint-owner:$VERIFICATION_DB_TOKEN" ]] ||
       die "checkpoint verification owner role server identity is invalid"
-    psql_query "DROP ROLE \"$VERIFICATION_OWNER_ROLE\"" >/dev/null
+    psql_query "DROP ROLE \"$VERIFICATION_OWNER_ROLE\"" >/dev/null || return 1
   fi
   state_helper clear-scratch \
     --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
     --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
-    --path "$VERIFICATION_STATE"
+    --path "$VERIFICATION_STATE" || return 1
   VERIFICATION_DB=""
   VERIFICATION_DB_TOKEN=""
   VERIFICATION_DB_OID=""
@@ -1388,27 +1388,32 @@ recover_verification_database() {
           --path "$VERIFICATION_STATE"
       fi
     elif [[ "$scratch_version" == "3" ]]; then
-      [[ "$database_exists" == "1" ]] ||
-        die "claimed legacy checkpoint DB disappeared"
-      VERIFICATION_DB_OID="$(
-        state_helper read-scratch \
+      if [[ "$database_exists" == "1" ]]; then
+        VERIFICATION_DB_OID="$(
+          state_helper read-scratch \
+            --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
+            --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
+            --field database_oid \
+            --path "$VERIFICATION_STATE"
+        )"
+        [[ "$(
+          psql_value "
+            SELECT oid::text || ':' || COALESCE(
+              pg_catalog.shobj_description(oid, 'pg_database'), ''
+            )
+            FROM pg_catalog.pg_database
+            WHERE datname = '$VERIFICATION_DB'
+          "
+        )" == "$VERIFICATION_DB_OID:ktm-checkpoint-owner:$VERIFICATION_DB_TOKEN" ]] ||
+          die "journaled checkpoint DB lacks its server ownership marker"
+        VERIFICATION_DB_OWNED=1
+        drop_verification_database
+      else
+        state_helper clear-scratch \
           --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
           --clone-system-identifier-sha256 "$BASE_CLONE_SYSTEM_SHA256" \
-          --field database_oid \
           --path "$VERIFICATION_STATE"
-      )"
-      [[ "$(
-        psql_value "
-          SELECT oid::text || ':' || COALESCE(
-            pg_catalog.shobj_description(oid, 'pg_database'), ''
-          )
-          FROM pg_catalog.pg_database
-          WHERE datname = '$VERIFICATION_DB'
-        "
-      )" == "$VERIFICATION_DB_OID:ktm-checkpoint-owner:$VERIFICATION_DB_TOKEN" ]] ||
-        die "journaled checkpoint DB lacks its server ownership marker"
-      VERIFICATION_DB_OWNED=1
-      drop_verification_database
+      fi
     elif [[ "$scratch_version" == "4" || "$scratch_version" == "5" ]]; then
       [[ "$VERIFICATION_OWNER_ROLE" =~ ^ktm_checkpoint_owner_[0-9a-f]{24}$ ]] ||
         die "journaled checkpoint owner role name is invalid"
@@ -1419,7 +1424,7 @@ recover_verification_database() {
       [[ "$role_exists" == "0" || "$role_exists" == "1" ]] ||
         die "checkpoint verification owner role cardinality is invalid"
       if [[ "$role_exists" == "0" ]]; then
-        [[ "$database_exists" == "0" && "$scratch_version" == "4" ]] ||
+        [[ "$database_exists" == "0" ]] ||
           die "journaled checkpoint owner role disappeared"
         state_helper clear-scratch \
           --clone-container-sha256 "$BASE_CLONE_CONTAINER_SHA256" \
@@ -1489,8 +1494,6 @@ recover_verification_database() {
               die "journaled checkpoint owner role OID changed"
           fi
           VERIFICATION_DB_OWNED=1
-        elif [[ "$scratch_version" == "5" ]]; then
-          die "claimed checkpoint verification DB disappeared"
         fi
         drop_verification_database
       fi
@@ -1556,10 +1559,6 @@ copy_database_settings_to_verification() {
         FROM pg_catalog.pg_database
         WHERE datname = current_database()
       )
-      AND NOT (
-        setting.setrole = 0
-        AND configuration.value = 'default_transaction_read_only=on'
-      )
       ORDER BY setting.setrole, configuration.value
     "
   )"
@@ -1601,11 +1600,11 @@ verify_dump_restore() {
     die "checkpoint verification owner role OID was not observed"
   VERIFICATION_ROLE_OWNED=1
   PGPASSWORD="$db_password" \
-    PGOPTIONS="$PSQL_SESSION_OPTIONS" \
     PGAPPNAME="$PSQL_APP_NAME" \
-    docker exec -e PGPASSWORD -e PGOPTIONS -e PGAPPNAME "$DB_CONTAINER" \
+    docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
     createdb -U "$db_user" --template=template0 \
     --owner="$VERIFICATION_OWNER_ROLE" "$VERIFICATION_DB"
+  VERIFICATION_DB_OWNED=1
   psql_query \
     "COMMENT ON DATABASE \"$VERIFICATION_DB\" IS 'ktm-checkpoint-owner:$VERIFICATION_DB_TOKEN'" \
     >/dev/null
@@ -1631,12 +1630,10 @@ verify_dump_restore() {
     --database-oid "$VERIFICATION_DB_OID" \
     --owner-role-oid "$VERIFICATION_OWNER_ROLE_OID" \
     --path "$VERIFICATION_STATE"
-  VERIFICATION_DB_OWNED=1
   copy_database_settings_to_verification
   PGPASSWORD="$db_password" \
-    PGOPTIONS="$PSQL_SESSION_OPTIONS" \
     PGAPPNAME="$PSQL_APP_NAME" \
-    docker exec -i -e PGPASSWORD -e PGOPTIONS -e PGAPPNAME "$DB_CONTAINER" \
+    docker exec -i -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
     pg_restore --exit-on-error --single-transaction \
     -U "$db_user" -d "$VERIFICATION_DB" <"$dump_path"
   db_name="$VERIFICATION_DB"
@@ -1845,9 +1842,8 @@ print(value)
   [[ ! -e "$NEW_CHECKPOINT_DUMP" && ! -L "$NEW_CHECKPOINT_DUMP" ]] ||
     die "checkpoint dump target already exists"
   PGPASSWORD="$db_password" \
-    PGOPTIONS="$PSQL_SESSION_OPTIONS" \
     PGAPPNAME="$PSQL_APP_NAME" \
-    docker exec -e PGPASSWORD -e PGOPTIONS -e PGAPPNAME "$DB_CONTAINER" \
+    docker exec -e PGPASSWORD -e PGAPPNAME "$DB_CONTAINER" \
     pg_dump --format=custom \
     --serializable-deferrable -U "$db_user" -d "$db_name" \
     >"$NEW_CHECKPOINT_DUMP"

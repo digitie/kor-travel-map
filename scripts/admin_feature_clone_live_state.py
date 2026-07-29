@@ -27,6 +27,9 @@ _SCRATCH_ROLE_RE: Final[re.Pattern[str]] = re.compile(
     r"^ktm_checkpoint_owner_[0-9a-f]{24}$"
 )
 _DATABASE_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_CHECKPOINT_APP_RE: Final[re.Pattern[str]] = re.compile(
+    r"^ktm_checkpoint_[0-9a-f]{16}$"
+)
 _UTC_TIMESTAMP_RE: Final[re.Pattern[str]] = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$"
 )
@@ -348,7 +351,7 @@ def write_checkpoint(args: argparse.Namespace) -> None:
             "verified": True,
         },
         "write_quiescence": {
-            "database_default_read_only": True,
+            "database_login_fenced": True,
             "relation_share_locks": True,
             "verified": True,
         },
@@ -506,10 +509,18 @@ def clear_scratch(args: argparse.Namespace) -> None:
 
 def _validated_quiescence(args: argparse.Namespace) -> dict[str, Any]:
     state = _load_object(Path(args.path))
+    application_name = state.get("application_name")
     database = state.get("database")
+    if not isinstance(application_name, str):
+        raise RuntimeError("checkpoint quiescence application name이 없습니다")
     if not isinstance(database, str):
         raise RuntimeError("checkpoint quiescence DB 이름이 없습니다")
     expected = {
+        "application_name": _require_pattern(
+            application_name,
+            _CHECKPOINT_APP_RE,
+            "checkpoint quiescence application name",
+        ),
         "clone_container_sha256": _require_pattern(
             args.clone_container_sha256,
             _SHA256_RE,
@@ -525,8 +536,8 @@ def _validated_quiescence(args: argparse.Namespace) -> dict[str, Any]:
             _DATABASE_RE,
             "checkpoint quiescence DB 이름",
         ),
-        "setting": "default_transaction_read_only=on",
-        "version": 1,
+        "fence": "database_role_password_rotation",
+        "version": 2,
     }
     if state != expected:
         raise RuntimeError("checkpoint quiescence state가 다릅니다")
@@ -540,6 +551,11 @@ def write_quiescence(args: argparse.Namespace) -> None:
     _atomic_json(
         path,
         {
+            "application_name": _require_pattern(
+                args.application_name,
+                _CHECKPOINT_APP_RE,
+                "checkpoint quiescence application name",
+            ),
             "clone_container_sha256": _require_pattern(
                 args.clone_container_sha256,
                 _SHA256_RE,
@@ -555,8 +571,8 @@ def write_quiescence(args: argparse.Namespace) -> None:
                 _DATABASE_RE,
                 "checkpoint quiescence DB 이름",
             ),
-            "setting": "default_transaction_read_only=on",
-            "version": 1,
+            "fence": "database_role_password_rotation",
+            "version": 2,
         },
     )
 
@@ -654,7 +670,7 @@ def _validated_checkpoint(path: Path) -> dict[str, Any]:
     elif version == 3:
         raise RuntimeError("clone checkpoint 원본 안정성 provenance가 없습니다")
     if version == 3 and checkpoint.get("write_quiescence") != {
-        "database_default_read_only": True,
+        "database_login_fenced": True,
         "relation_share_locks": True,
         "verified": True,
     }:
@@ -679,7 +695,7 @@ def promote_checkpoint(args: argparse.Namespace) -> None:
             "verified": True,
         },
         "write_quiescence": {
-            "database_default_read_only": True,
+            "database_login_fenced": True,
             "relation_share_locks": True,
             "verified": True,
         },
@@ -1350,11 +1366,12 @@ def main() -> None:
         quiescence.add_argument("--clone-system-identifier-sha256", required=True)
         quiescence.add_argument("--path", required=True)
         if command == "write-quiescence":
+            quiescence.add_argument("--application-name", required=True)
             quiescence.add_argument("--database", required=True)
         elif command == "read-quiescence":
             quiescence.add_argument(
                 "--field",
-                choices=("database", "setting", "version"),
+                choices=("application_name", "database", "fence", "version"),
                 required=True,
             )
         quiescence.set_defaults(handler=handler)

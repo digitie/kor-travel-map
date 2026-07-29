@@ -92,6 +92,11 @@ describe("mocked checkpoint isolation", () => {
     expect(runnerSource).not.toContain(
       "PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK",
     );
+    expect(runnerSource).toContain(
+      "E2E_BASE_URL: parsedBaseUrl.origin",
+    );
+    expect(runnerSource).toContain("E2E_ADMIN_USERNAME: adminUsername");
+    expect(runnerSource).toContain("E2E_ADMIN_PASSWORD: adminPassword");
     expect(configSource).toContain("proxy: mockedProxy()");
     expect(configSource).toContain(
       "bypass: `<-loopback>,${allowedUrl.host}`",

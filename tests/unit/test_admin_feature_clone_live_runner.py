@@ -649,7 +649,7 @@ def test_legacy_v2_checkpoint_is_validated_and_promoted_to_v3(
     assert promoted["version"] == 3
     assert promoted["source_stability"]["verified"] is True
     assert promoted["write_quiescence"] == {
-        "database_default_read_only": True,
+        "database_login_fenced": True,
         "relation_share_locks": True,
         "verified": True,
     }
@@ -758,6 +758,8 @@ def test_checkpoint_quiescence_state_is_durable_and_identity_bound(
     _run_helper(
         "write-quiescence",
         *identity_args,
+        "--application-name",
+        f"ktm_checkpoint_{'a' * 16}",
         "--database",
         "kor_travel_map_clone",
     )
@@ -765,7 +767,10 @@ def test_checkpoint_quiescence_state_is_durable_and_identity_bound(
         "read-quiescence", *identity_args, "--field", "database"
     )
     setting = _run_helper(
-        "read-quiescence", *identity_args, "--field", "setting"
+        "read-quiescence", *identity_args, "--field", "fence"
+    )
+    application_name = _run_helper(
+        "read-quiescence", *identity_args, "--field", "application_name"
     )
     rejected = _run_helper(
         "read-quiescence",
@@ -782,7 +787,8 @@ def test_checkpoint_quiescence_state_is_durable_and_identity_bound(
     _run_helper("clear-quiescence", *identity_args)
 
     assert database.stdout.strip() == "kor_travel_map_clone"
-    assert setting.stdout.strip() == "default_transaction_read_only=on"
+    assert setting.stdout.strip() == "database_role_password_rotation"
+    assert application_name.stdout.strip() == f"ktm_checkpoint_{'a' * 16}"
     assert rejected.returncode != 0
     assert not state.exists()
 
@@ -830,7 +836,9 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "--final-snapshot" in source
     assert "start_checkpoint_quiescence" in source
     assert "LOCK TABLE %I.%I IN SHARE MODE" in source
-    assert "default_transaction_read_only = on" in source
+    assert "set_clone_database_password" in source
+    assert "clone_tcp_password_works" in source
+    assert "terminate_checkpoint_backends" in source
     assert "state_helper write-quiescence" in source
     assert "state_helper promote-checkpoint" in source
     assert "state_helper write-scratch" in source
