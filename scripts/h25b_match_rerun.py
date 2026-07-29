@@ -14,7 +14,9 @@ H25A matcher의 확인된 결함을 고친다.
 
 축은 실제로 존재하는 것만 쓴다 — ``address_hint``는 486행 전부 비어 있으므로
 ``metadata_json.region``(118/269 보유)과 ``features.sigungu_code``를 쓴다.
-provider provenance는 ``curation_items.source_record_key`` → ``provider_sync.source_records``로 잇는다.
+provider provenance 축은 아직 잇지 않았다 — ``curation_items.source_record_key``가
+미연결 261건에서 **전부 NULL**이라(H25A §2) 조인할 값이 없다. CSV의 ``provider``/
+``dataset_key``/``source_item_key``는 후보 entry에 그대로 실어 둔다.
 
 **자동 승인하지 않는다.** 후보와 근거만 낸다 — H25B 역반영에서 DB 링크 8건 중 3건이
 오링크였던 것이 그 이유다.
@@ -206,7 +208,7 @@ async def main() -> None:
     for (base, got), n in sorted(cross.items()):
         print(f"  baseline={base:<10} matcher={got:<7} {n}")
 
-    with open(OUT, "w", encoding="utf-8") as f:
+    with open(OUT, "w", encoding="utf-8") as f:  # noqa: ASYNC230  # 1회성 증거 산출
         json.dump(
             {
                 "summary": {

@@ -113,7 +113,7 @@ async def main() -> None:
         for r in reverse[:10]:
             print(f"  {r['csv']} | {r['key'][1]} → {r['feature_id']}")
 
-        with open(OUT, "w", encoding="utf-8") as f:
+        with open(OUT, "w", encoding="utf-8") as f:  # noqa: ASYNC230  # 1회성 증거 산출
             json.dump(
                 {"db_only": extra, "csv_only": reverse},
                 f,
