@@ -26,6 +26,10 @@
   - [x] **D.7** — production MapLibre의 늦은 실제 `idle` event가 raster `sourcedata`
     계측에 섞이던 Mocked race를 repaint+idle+rAF barrier로 제거했다. 최초 serial은 이 한 건만
     실패한 273/274였고, 실패 spec 수정 뒤 같은 gate를 재개해 serial/parallel 모두 통과했다.
+  - [x] **D.8** — PR CI가 `record_address_validation_findings()`의 typed
+    `IntegrityFindingSyncResult` 계약과 Dagster asset 테스트 double 12개의 구 `int` 반환
+    drift를 세 Python 버전에서 공통 검출했다. 모든 double을 실제 결과 타입으로 맞추고 Dagster
+    package 전체 **510 passed, 1 skipped**, coverage **83.66%**와 Ruff를 통과했다.
 - [x] **파괴적 Live** — 보존 clone의 본 acceptance와 recovery-only가 각각 **2/2**다.
   result는 `complete/recovered`, raw→normalized 전체 content 증명과 topic revision `+1`을
   기록했다. active acceptance Feature·pending change request·direct weather/price/FK,

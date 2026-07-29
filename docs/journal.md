@@ -45,6 +45,12 @@ content equality가 정상적인 `ops_live_topic_revisions.dataset_projection` r
 문서 이관 뒤 PR을 열고 CI green·직접 머지한다. Claude Code PR 사후 감사는 사용자 지시에
 따라 task PR 머지 뒤 별도 후속 단계에서 진행한다.
 
+PR #889 첫 CI는 Python 3.11/3.12/3.13에서 같은 11개 Dagster asset test를 검출했다.
+`record_address_validation_findings()`가 typed `IntegrityFindingSyncResult`를 반환하도록
+강화됐는데 주변 test double 12개가 여전히 `int`를 반환한 계약 drift였다. production
+fallback을 넣지 않고 모든 double을 실제 결과 타입으로 맞췄다. 실패 node에서 재개한 Dagster
+package 전체는 **510 passed, 1 skipped**, coverage **83.66%**이고 Ruff도 통과했다.
+
 ## 2026-07-29 (codex) — T-VN-48D 2인 적대 리뷰 하드닝
 
 T-VN-48와 현재 PR에 이미 포함된 PR #888 사후 감사 수정의 branch-authored delta만 두

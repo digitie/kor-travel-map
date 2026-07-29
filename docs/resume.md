@@ -21,7 +21,9 @@ Feature·pending request·direct fixture/FK와 모든 runner 임시 자원은 0�
 Mocked 첫 serial은 늦은 실제 MapLibre `idle`이 계측에 섞여 273/274였으며, repaint+idle+rAF
 barrier로 실패 spec만 수정했다. exact `823ba52b` checkpoint D는 serial/workers=4 각각
 **274/274**, expected/actual failure·flake·skip 0이다. self-owned container/network/image와
-loopback listener도 0이다. T-VN-48D/D.1~D.7은 `tasks-done.md`로 이관했다.
+loopback listener도 0이다. PR #889 첫 CI가 찾은 Dagster test double의 typed finding 결과
+계약 drift도 수정했고 package 전체 **510 passed, 1 skipped**, coverage **83.66%**다.
+T-VN-48D/D.1~D.8은 `tasks-done.md`로 이관했다.
 
 **다음 한 작업**: 최신 main을 최종 확인하고 보안 감사를 거쳐 PR을 연다. CI green과 승인
 조건을 확인해 직접 머지하고 issue #881을 닫는다. 머지 뒤 `ktm-tvn45-db`와 v5 dump의

@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from dagster import build_asset_context
+from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.dto import PriceValue
 from kortravelmap.infra.feature_repo import FeatureLoadResult
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
@@ -74,10 +75,11 @@ class _Client:
 
     async def record_address_validation_findings(
         self, findings: object, **kwargs: object
-    ) -> int:
+    ) -> IntegrityFindingSyncResult:
         """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
         self.recorded_findings = list(findings)  # type: ignore[arg-type]
-        return len(self.recorded_findings)
+        count = len(self.recorded_findings)
+        return IntegrityFindingSyncResult(count, count, count)
 
 
 async def test_price_asset_rejects_whole_run_zero_without_sync_success() -> None:
