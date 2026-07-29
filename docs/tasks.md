@@ -282,14 +282,34 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   자체 matcher는 결함이 확인돼 후보 등급 산출에는 쓰지 않는다 — CSV `metadata_json`의
   `feature_match_confidence`(review 183 / unmatched 86)가 기준선이다(§5·§6).
 
+  **미충족 AC — 산출물을 바꿔 닫았음을 명시한다.** 전제가 반증된 이상 원래 형태의 후보
+  manifest는 의미가 줄었고, 실행 가능한 잔여 작업은 아래 H25B로 이관했다. `[x]`는 "AC 전부
+  충족"이 아니라 "전제 반증·재측정으로 종결"의 뜻이다.
+
+  | AC 항목 | 상태 | 이관 |
+  | --- | --- | --- |
+  | lifecycle/merge history 대조 | 충족 | — |
+  | 동일 DB snapshot | 충족 (prod 단일) | — |
+  | 좌표 근접만으로 자동 승인 안 함 | 충족 | — |
+  | CSV/DB target 미변경 | 충족 | — |
+  | provider provenance 대조 | 부분 — `source_record_key` 유무(0건)만 확인, `provider_sync.source_entities` 미조인 | H25B ② |
+  | 이름 대조 | 부분 — matcher 결함(괄호·`&` 복합명·포함 방향·`status='active'` 한정) 확인 후 등급 산출에서 배제 | H25B ② |
+  | 주소 대조 | **미충족** — `address_hint`가 486행 전부 비어 축이 없음. `region`(118/269 보유)은 미반영 | H25B ② |
+  | candidate·confidence·근거 manifest 산출 | **미충족** — JSON 미커밋, 리포트 표로 대체 | H25B ② |
+
 - [ ] T-VN-H25B — **CSV 역반영 8건 + 매칭 재실행**
 
   H25A 재정의 결과 실행 가능한 작업은 둘이다.
   1. **CSV 역반영 8건** — DB에서는 링크됐으나 CSV `feature_id`가 비어 있는 항목(H25A §3).
      현재 어느 문서에도 기록돼 있지 않은 확정 대상이다.
-  2. **매칭 재실행** — CSV `metadata_json.feature_match_confidence`(review 183 / unmatched 86)를
-     기준선으로 삼고, 괄호·`&` 복합명·포함 방향·`status` 범위 결함을 고친 matcher로 대조해
-     **차이를 설명**한다. 자체 수치를 기준선으로 삼지 않는다(H25A §5).
+  2. **매칭 재실행 + H25A 미충족 AC 인수** — CSV `metadata_json.feature_match_confidence`
+     (review 183 / unmatched 86)를 기준선으로 삼고, 괄호·`&` 복합명·포함 방향·`status` 범위
+     결함을 고친 matcher로 대조해 **차이를 설명**한다. 자체 수치를 기준선으로 삼지 않는다.
+     함께 인수하는 H25A 미충족 항목: **주소 축**(`address_hint`가 비어 있으므로
+     `metadata_json.region` 118건 + `features.sigungu_code`를 쓴다), **provider provenance**
+     (`curation_items.source_record_key` → `provider_sync.source_records`/`source_entities` 조인;
+     CSV의 `provider`/`dataset_key`/`source_item_key`는 269행 전부 채워져 있다),
+     그리고 **candidate·confidence·근거 manifest를 JSON으로 커밋**한다.
 
   좌표 근접만으로 자동 승인하지 않는다. 불확실한 component는 미연결 상태와 근거를 유지한다.
   5개 CSV의 linked/unresolved 수치, preview/commit, REST/UI를 같은 실데이터 snapshot에서 검증한다.
