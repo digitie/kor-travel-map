@@ -65,6 +65,9 @@ barrier로 직렬화한다.
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
   - [ ] `T-VN-EXT-PINVI-215` — PinVi #215 외부 추적(Map Agent A/B queue 밖)
 
+> T-VN-49의 `[x]` 이관은 H49 코드와 같은 merge commit으로만 `main`에 들어간다. 따라서
+> `main`에서 구현보다 완료 표시가 먼저 보이거나 H22C barrier만 먼저 풀리는 구간은 없다.
+
 ## 공통 규율 (2026-07-28 개정)
 
 - base는 **main**(`integration/t-vn`은 PR #790 합류로 폐지). 시작·PR 직전·머지 직후
@@ -123,7 +126,8 @@ barrier로 직렬화한다.
   테스트, frontend/mocked/docs-only 변경은 해당 비DB gate만 수행한다.
 - **cross-lane 순서 제약**: C6c pair capture와 #392, H07A~D는 완료됐다.
   H22C의 curation frontend 선행 작업 T-VN-48B·T-VN-49B는 모두 완료됐다. H22A/B가
-  끝나면 최신 구조에서 H22C를 시작한다. T-VN-12A의 command
+  끝나면 최신 구조에서 H22C를 시작한다. T-VN-49B 코드와 이 barrier 해제는 같은 merge
+  commit으로 landing한다. T-VN-12A의 command
   inventory freeze는 H22B의 reclassification command가 머지된 뒤 시작해 curation idempotency가
   누락되지 않게 한다. Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
   T-VN-40은 양 lane의 T-VN-32~38 하위 task가 모두 끝난 join barrier 뒤에 시작하며,
@@ -467,7 +471,8 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
   H22A/B 계약만 소비하는 검토 UI를 만들고 격리 clone에서 충돌 preview·이동·별도 확정·빈
   collection 정리를 파괴적으로 검증한다. 같은 `curation-collections-client.tsx`와 mocked spec의
-  선행 작업 T-VN-48B·49B는 모두 완료됐으므로 H22A/B 뒤 최신 구조 위에서 시작한다.
+  선행 작업 T-VN-48B·49B는 모두 완료됐으므로 H22A/B 뒤 최신 구조 위에서 시작한다. 49B 코드와
+  이 선행 조건 해제는 같은 merge commit으로 `main`에 반영한다.
 
 ## 이슈 종결 추적
 

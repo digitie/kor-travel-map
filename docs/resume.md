@@ -10,7 +10,7 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
-## 2026-07-30 (codex) — Lane B b0 T-VN-49A/B/C/D 완료 → PR·CI·merge
+## 2026-07-30 (codex) — Lane B b0 T-VN-49A/B/C/D 완료 → post-merge 재사용 판정
 
 **완료**: H49 A/B/C/D를 한 브랜치에서 구현했다. 19개 giant component를 domain
 controller/state와 실제 section으로 분해하고 결합 상태 3곳을 reducer로 옮겨,
@@ -27,10 +27,12 @@ BLOCKED와 전용 container/network/image/listener는 0이고 clone은 healthy�
 audit 6행으로 무효가 된 종전 v5 대신 현재 clone baseline만 다시 서명했으며 Alembic downgrade와
 full restore는 실행하지 않았다. 이후 main 34커밋을 충돌 없이 rebase했다.
 
-**다음 한 작업**: 완료 문서 delta를 원 리뷰어 1명이 확인하고 저비용 gate·보안 감사를 거쳐
-H49 A/B/C/D 단일 PR을 연다. CI green이면 셀프 머지한다. 머지 뒤 clone/checkpoint의 head·
-schema/content identity·잔여물·디스크 여유를 읽기 전용으로 확인해 다음 task 재사용 여부를
-기록한 뒤, 다음 T-VN task 전에 별도 Claude Code PR 사후 감사를 진행한다.
+이 완료 이관과 H22C barrier 해제는 H49 코드와 같은 merge commit으로만 `main`에 들어가므로
+문서 상태가 구현보다 앞서는 구간은 없다.
+
+**다음 한 작업**: landing 뒤 clone/checkpoint의 head·schema/content identity·잔여물·디스크
+여유를 읽기 전용으로 확인해 다음 task 재사용 여부를 기록한다. 이어 다음 T-VN task 전에
+별도 Claude Code PR 사후 감사를 진행한다.
 
 ## 2026-07-30 (claude) — Lane A a1: T-VN-H25B/H33/H36 완료 → 다음은 T-VN-H35
 
