@@ -1,0 +1,55 @@
+{
+ "summary": {
+  "csv_rows": 486,
+  "csv_specified": 222,
+  "csv_specified_alive": 222,
+  "csv_blank": 264,
+  "blank_candidate_distribution": {
+   "후보 0건": 256,
+   "후보 2건 이상(옛 규칙도 링크 안 함)": 5,
+   "후보 1건(옛 규칙이 자동 링크)": 3
+  },
+  "blocked_autolinks": 3,
+  "blocked_region_agrees": 0,
+  "blocked_region_disagrees": 3,
+  "blocked_region_unknown": 0
+ },
+ "blocked": [
+  {
+   "csv": "korean-tourism-100-2023-2024.csv",
+   "source_item_key": "kt100-2023-2024-025",
+   "place_name": "남이섬",
+   "feature_id": "",
+   "address_hint": "",
+   "region": "강원",
+   "would_link_feature_id": "f_1114010100_p_a11c2e739c5676d2",
+   "would_link_name": "남이섬",
+   "would_link_sido": "서울특별시",
+   "region_agrees": false
+  },
+  {
+   "csv": "korean-tourism-100-2025-2026.csv",
+   "source_item_key": "kt100-2025-2026-024",
+   "place_name": "남이섬",
+   "feature_id": "",
+   "address_hint": "",
+   "region": "강원",
+   "would_link_feature_id": "f_1114010100_p_a11c2e739c5676d2",
+   "would_link_name": "남이섬",
+   "would_link_sido": "서울특별시",
+   "region_agrees": false
+  },
+  {
+   "csv": "korean-tourism-100-2025-2026.csv",
+   "source_item_key": "kt100-2025-2026-036",
+   "place_name": "청남대",
+   "feature_id": "",
+   "address_hint": "",
+   "region": "충북",
+   "would_link_feature_id": "f_4683025328_p_a45038d401d8d1bd",
+   "would_link_name": "청남대",
+   "would_link_sido": "전라남도",
+   "region_agrees": false
+  }
+ ]
+}

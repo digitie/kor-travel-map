@@ -1,0 +1,13 @@
+{
+ "summary": {
+  "database": "krtour_map",
+  "csv_linked_rows": 222,
+  "csv_region_codeable": 109,
+  "csv_sido_mismatch": 0,
+  "db_linked_rows": 3266,
+  "db_region_codeable": 109,
+  "db_sido_mismatch": 0
+ },
+ "csv_mismatches": [],
+ "db_mismatches": []
+}

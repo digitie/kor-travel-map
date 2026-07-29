@@ -23,8 +23,12 @@ barrier로 직렬화한다.
     [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
     [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
     [x] `T-VN-H25A`(미연결 membership 증거·전제 정정) →
-    [x] `T-VN-H30A`(관측 durable화) + [ ] `T-VN-H30B/C`(실적재·provider 재검증) →
-    [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
+    [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
+    [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
+    [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
+    [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
+    [ ] `T-VN-H35`(prod 마이그레이션 지연 0064~0067 — H33 부수 발견) →
+    [ ] `T-VN-H34`(H25A/H25B 미충족 AC 마무리) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
@@ -323,7 +327,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   | 주소 대조 | **미충족** — `address_hint`가 486행 전부 비어 축이 없음. `region`(118/269 보유)은 미반영 | H25B ② |
   | candidate·confidence·근거 manifest 산출 | **미충족** — JSON 미커밋, 리포트 표로 대체 | H25B ② |
 
-- [ ] T-VN-H25B — **CSV 역반영 8건 + 매칭 재실행**
+- [~] T-VN-H25B — **CSV 역반영 5건 + 매칭 재실행** (미충족 AC는 아래 표)
 
   H25A 재정의 결과 실행 가능한 작업은 둘이다.
   1. **CSV 역반영 8건** — DB에서는 링크됐으나 CSV `feature_id`가 비어 있는 항목(H25A §3).
@@ -340,7 +344,285 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   좌표 근접만으로 자동 승인하지 않는다. 불확실한 component는 미연결 상태와 근거를 유지한다.
   5개 CSV의 linked/unresolved 수치, preview/commit, REST/UI를 같은 실데이터 snapshot에서 검증한다.
 
-- [ ] T-VN-H31 — **등대 공급원 부재 해소 (H25A 파생)**
+  **결과** ([리포트](reports/curation-link-backfill-2026-07-29.md),
+  manifest `reports/h25b-match-manifest.json`):
+  - **8건 중 5건만 반영.** 3건은 오링크였다 — 청남대(DB 전남 영암 vs 정지오코딩 충북 청주),
+    남이섬 ×2(DB 서울 중구 사무소 vs 강원 춘천). H25A가 "확정 대상"이라 한 것은 **DB에
+    링크가 있다는 사실을 승인 근거로 삼은 오류**였다. CSV linked 217→222 / unresolved 269→264.
+  - matcher 결함 4종 수정 후 **후보 없음 191 → 1**. H25A의 "191건 실제 부재 = provider 적재
+    범위 문제"는 **matcher 산물**이었다.
+  - 다만 개선은 착시다 — 늘어난 후보 대부분이 무의미한 부분일치이고, 등대 103건 중 **89건**의
+    최상위 후보가 상호가 `등대`인 가게였다(1건은 후보조차 없다). `T-VN-H31` 전제는 유효.
+  - 최종 등급 **high 2 / review 13 / low 248 / none 1**. `high`에도 오탐이 있었고
+    (`대관령` → 고개가 아닌 동명 업소) → **자동 승인 대상 0건**. 264건은 사람 검토 대상.
+  - `high`는 적대 리뷰에서 6→7→**2**로 세 번 바뀌었다. 세 번 다 원인이 데이터가 아니라
+    **matcher 자신의 결함**이었다 — 시도 약칭 비교, soft-delete 후보 혼입, 그리고
+    `ORDER BY length(name)`(양방향 substring이라 2글자 feature가 top이 됨). 세 번째는
+    내가 두 번째를 고치며 **새로 넣은** 결함이다. 264행 중 **208행(79%)이 후보 cap 포화**라
+    그 행들은 이름 유일성 자체를 판정할 수 없다.
+  - **manifest sha256을 손으로 유지하던 구조를 없앴다.** README를 고치고 sha256을 안 고쳐
+    `test_curation_resource_manifest_and_csv_contract`가 깨졌다(n150 게이트가 잡음).
+    이제 `scripts/h25b_apply_verified_links.py`가 `manifest.json`의 sha256/rows를 실물에서
+    다시 계산한다 — 커밋된 CSV·manifest 전부 그 스크립트 하나의 산출물이다.
+  **미충족 AC 원장** — `[x]`는 "AC 전부 충족"이 아니라 "역반영·매칭 재실행으로 종결"이다.
+
+  | AC 항목 | 상태 | 이관 |
+  | --- | --- | --- |
+  | CSV 역반영 | 충족 (8→5, 3건은 오링크) | — |
+  | 기준선 대조 + 차이 설명 | 충족 — 교차표를 manifest `summary.baseline_vs_matcher`에 기록 | — |
+  | 주소 축 | **부분** — `region`(115/264)만 사용. `sigungu_code`는 시도코드 비교에만 쓰고 시군구 단위 대조는 미구현 | H25B-후속 |
+  | provider provenance 조인 | **미충족** — `source_record_key`가 미연결 261건에서 전부 NULL이라 조인 대상이 없다. CSV의 `provider`/`dataset_key`는 entry에 싣기만 하고 판정에 쓰지 않았다 | H25B-후속 |
+  | candidate·근거 manifest 커밋 | 충족 — 스크립트 실제 산출물, `candidates_total`로 잘린 수 공개 | — |
+  | linked/unresolved 수치 검증 | 충족 (222/264, manifest sha256 일치) | — |
+  | **preview/commit·REST/UI 실데이터 검증** | **미충족** — 읽기 전용 범위를 유지했다 | H25B-후속 |
+  | 동일 snapshot 고정 | **부분** — DB는 `current_database()`로 기록했으나 정지오코딩 세션은 미기록 | H25B-후속 |
+
+  위 4개 미충족·부분 항목은 **`T-VN-H34`**로 이관한다(아래).
+
+- [ ] T-VN-H34 — **H25A/H25B 미충족 AC 마무리**
+
+  H25A가 H25B로, H25B가 다시 여기로 넘긴 항목들이다. **어느 열린 task도 소유하지 않는 상태를
+  만들지 않기 위해** 명시적으로 모은다.
+  - **주소 축 시군구 단위 대조** — 현재는 시도코드까지만 본다.
+    > **문구 정정(2026-07-29)** — 이 항목을 "`metadata.region`을 시군구까지 본다"로 읽으면
+    > **실행 불가**다. `region`은 `강원`·`충북` 같은 **시도 약칭뿐**이라 시군구를 담을 수 없다.
+    > 실제로 가능한 축은 **정지오코딩 결과의 시군구코드 ↔ feature `sigungu_code` 대조**이며,
+    > 청풍호에서 손으로 한 것이 바로 그것이다(제천 `43150` 일치). 따라서 이 항목은 아래
+    > "정지오코딩 세션 고정"과 **같은 도구로 함께** 해결된다 — 별개 축이 아니다.
+    >
+    > **천장도 같이 기록한다**: 시군구까지 내려가도 같은 시군구 안의 다른 대상은 구분되지
+    > 않는다(청풍호 vs 청풍호반케이블카). 시군구 축은 *기각*에는 쓸 수 있어도 *확정*의
+    > 충분조건이 아니다.
+  - **provider provenance** — `curation_items.source_record_key`가 미연결 행에서 전부 NULL이라
+    현 스키마로는 조인 불가. CSV의 `provider`/`dataset_key`/`source_item_key`를 판정에 쓰는
+    설계를 하거나, 불가하다는 결론을 근거와 함께 확정한다.
+  - **preview/commit·REST/UI 실데이터 검증** — 역반영 5건이 실제 화면·API에 반영되는지.
+  - **정지오코딩 세션 고정** — 승인/기각 근거를 재현 가능하게 남긴다
+    (`scripts/h25b_verify_links.py` 신설; 현재는 손으로 친 상수표뿐이다).
+
+- [x] T-VN-H33 — **curation_items 오링크 3건 정리 (H25B 파생)**
+
+  **`[x]` → `[~]` → `[x]`로 두 번 움직였다.** 처음 닫은 근거("import가 재링크하지 않는다")가
+  적대 리뷰 실측으로 반증돼 되돌렸고(아래 "철회"), `T-VN-H36`이 그 재링크 경로를 실제로
+  막은 뒤에야 닫았다. **지금 닫는 근거는 "안 될 것이다"가 아니라 "막았고 측정했다"다** —
+  `T-VN-H36`이 커밋 CSV 486행 전수 재생으로 이 3건이 자동 링크 대상에서 빠지는 것을
+  확인했다(`reports/h36-link-impact-2026-07-29.json`).
+
+  `scripts/h33_unlink_mislinks.py` (dry-run 기본, `--apply`로 쓰기).
+  - **노출 실증** — 해제 전 남이섬 feature(서울 중구 사무소)에 한국관광100선 **2건**,
+    청남대 feature(전남 영암)에 **1건**이 붙어 응답에 나왔다.
+    표면은 `/v1/curations/*`이며 **익명 공개가 아니라 `RoutePolicy.PUBLIC_KEYED`** —
+    public API key 보유자에게 열린 표면이라는 한정 아래 읽어야 한다.
+
+    > **🔴 철회 — "해제 후 0건"의 근거가 반증 불가능했다.**
+    > 초안 확인 스크립트는 `/v1/curations/features/{feature_id}`만 호출했는데, 이 엔드포인트는
+    > curation이 없으면 200+빈 배열이 아니라 **404**를 낸다. 스크립트가 `curl -s`로 status를
+    > 버리고 에러 본문을 파싱해 "0건"을 출력했으므로, **존재하지 않는 feature_id를 넣어도
+    > 같은 출력이 나온다**(리뷰 실측). 오타·삭제·401이 전부 "해소됨"으로 읽혔다.
+    > 이 세션에서 반복된 "측정 도구의 산물을 데이터의 성질로 읽기"와 같은 형태다.
+    >
+    > 대체 증거는 `scripts/h33_verify_public_exposure.py`다 — negative control(없는 id)과
+    > 구별되지 않으면 **스스로 경고**하고, 반증 가능한 표면을 근거로 쓴다:
+    > 컬렉션 상세가 200으로 item 110·114건을 돌려주고 그 안의 대상 3건이 `feature_id=null`,
+    > `q=남이섬` 검색은 5 group을 내놓는 **양성 대조**를 가지며 그 안에 오링크 feature가 없다.
+    > 즉 **item은 공개 응답에 그대로 있고 feature 링크만 끊겼다** — 해제이지 삭제가 아니다.
+    > 부수로 e2e 기대값도 확인된다: 공식 19개 컬렉션 public membership 합계 **486 유지**
+    > (`item_count`가 미연결 item도 세므로 unlink가 기대값을 깨지 않는다).
+  - **탐지기 재실행** ([after 산출물](reports/h33-mislink-after-2026-07-29.json)) —
+    `db_linked_rows` **3269→3266**, `db_region_codeable` **112→109**, `db_sido_mismatch` 3→0.
+
+    > **"3→0"만 인용하면 안 된다.** 탐지기 모집단은 `ci.feature_id is not null` inner join이라
+    > **링크를 끊으면 그 행이 모집단에서 빠진다** — 0은 관측이 아니라 정의다(리뷰 지적).
+    > 엉뚱한 행을 끊었어도, item을 지웠어도 0이 나온다. 정보를 가진 숫자는 오히려
+    > `3269→3266`·`112→109`, 즉 **정확히 대상 3행만 빠졌다**는 사실이다.
+  - **ledger 방출** — `ops.data_integrity_violations`에 `curation_feature_region_mismatch`
+    3건. **`open`이다**(초안은 `resolved`였으나 철회 — 아래). `feature_id` 컬럼은 비우고
+    payload에만 남긴다: 이 FK가 `ON DELETE CASCADE`라 문제의 feature를 지우면 "잘못
+    링크돼 있었다"는 기록까지 같이 사라진다.
+  - **재실행 안전** — `--apply` 재실행은 "이미 해제" 3건으로 끝나고 finding만 갱신한다.
+    지목한 오링크 `feature_id`를 가진 행만 대상으로 하며, 형제 행(같은 item의 다른
+    component)은 정상으로 보고 경보를 울리지 않는다.
+
+  > **🔴 철회 — "재링크되지 않는다"는 틀렸다.**
+  > 초안은 *"공식 CSV import가 `feature_id = EXCLUDED.feature_id`로 덮어쓰는데 이 3행은
+  > CSV가 비어 있으니 다시 링크되지 않는다"*고 적고 그 근거로 task를 닫았다.
+  > **적대 리뷰가 prod에서 실측으로 반증했다.** `EXCLUDED.feature_id`까지만 읽고 거기
+  > 무엇이 들어오는지 보지 않은 것이다 — 빈 `feature_id`는 링크를 막는 게 아니라
+  > `curation_repo._RESOLVE_FEATURES_BATCH_SQL`의 **이름 자동매칭을 켠다**
+  > (`WHERE requested.feature_id IS NULL AND lower(f.name) = lower(requested.place_name)`,
+  > `address_hint`도 비어 있어 주소 필터는 건너뛴다). 단일 매칭이면 그 id가 그대로
+  > `EXCLUDED.feature_id`가 된다.
+  > **커밋된 CSV의 빈 264행 중 단일 매칭으로 해석되는 건 정확히 이 3행뿐이고, 전부 방금
+  > 끊은 그 feature로 되돌아간다** — prod에 `남이섬`·`청남대`라는 이름의 live feature가
+  > 각각 하나뿐이고 그게 바로 틀린 그 feature이기 때문이다.
+  > 게다가 import는 `metadata = EXCLUDED.metadata`로 무조건 덮으므로 위에서 남긴 사유도
+  > 지워진다. 그래서 finding을 `resolved`가 아니라 `open`으로 되돌렸다.
+  > 지금 당장 되살아나지는 않는다 — prod가 `0063`이라 HEAD의 import SQL이 참조하는 컬럼이
+  > 없어 import 자체가 실패한다. **`T-VN-H35`가 마이그레이션을 적용하는 순간 되살아나므로
+  > H36이 H35보다 먼저여야 한다.**
+  >
+  > **덧붙인 정정 — 나는 배포되지 않은 코드로 prod 동작을 주장했다.** 위 인용
+  > (`feature_id = EXCLUDED.feature_id`)은 **브랜치 코드**다. 배포 중인 이미지
+  > (`kor-travel-map-api-latest`, revision `c8ed6164`, 2026-07-27)의 `_UPSERT_ITEM_SQL`은
+  > `ON CONFLICT (collection_id, external_item_id, feature_id) WHERE archived_at IS NULL`이고
+  > **SET 절에 `feature_id`가 아예 없다** — 그 코드에서는 재링크가 안 일어난다.
+  > 즉 "지금 prod는 안전하다"는 맞지만 **내가 댄 이유는 prod에 존재하지 않는 코드였다.**
+  > 같은 커밋에서 "머지 ≠ 배포"를 교훈으로 적어 놓고 마이그레이션에만 적용하고
+  > **코드 주장에는 적용하지 않았다**(리뷰 지적).
+
+  > **부수 발견 — prod가 마이그레이션 4개 뒤처져 있다.** ledger 방출을 붙이다가
+  > `ON CONFLICT`가 두 번 실패했다. 원인은 코드가 아니라 **prod alembic head가
+  > `0063_pipeline_root_id`**라는 것이었다 — H30A가 만든 dedupe 부분 유니크 인덱스(`0067`)가
+  > **prod에 존재하지 않는다**. H30A의 dedupe 효과는 현재 prod에서 작동하지 않는다.
+  > → `T-VN-H35`로 분리한다. 또 `source_record_key`에는 `provider_sync.source_records`
+  > FK가 걸려 있어 curation 키를 넣을 수 없다(ledger가 provider 적재 전제로 설계됨).
+
+- [x] T-VN-H36 — **curation import가 이름만으로 자동 링크한다 (H33 파생, H35보다 선행)**
+
+  **완료(2026-07-29)**. `_adopted_match`로 **CSV `feature_id`가 빈 행은 후보 수와 무관하게
+  링크하지 않는다**. 후보는 버리지 않고 `candidates`로 계속 노출하므로 운영자가 preview에서
+  보고 admin에서 직접 링크할 수 있다 — 자동으로 붙는 것만 없앴다.
+
+  **AC 결과**
+
+  | AC | 결과 |
+  | --- | --- |
+  | H33의 3건이 import 후에도 미연결 | ✅ 막히는 자동링크가 **정확히 그 3건** |
+  | 정당한 링크 손실 수치 | ✅ **0건**. 막히는 3건 전부 region 불일치(강원→서울 ×2, 충북→전남) |
+  | 미연결 사유 구분 | ✅ `unmatched`(후보 없음) vs `name_only_match`(이름만 맞는 후보 있음). 사유 문장에 후보 소재 시도명이 들어간다 |
+  | e2e 기대값 | ✅ 486 불변 — `item_count`가 미연결 item도 세므로(실측) 링크가 줄어도 membership은 안 바뀐다. 기대값 갱신 불필요 |
+  | 반증 가능성 | ✅ 아래 |
+  | 배포 순서 | ✅ **H35 이미지에 반드시 포함**. 아래 |
+
+  근거 산출물: [`reports/h36-link-impact-2026-07-29.json`](reports/h36-link-impact-2026-07-29.json)
+  (`scripts/h36_link_impact.py`, 커밋 CSV 486행 전수 + prod 리졸버 SQL 재생, 읽기 전용).
+  빈 264행의 후보 분포는 **0건 256 / 2건 이상 5 / 1건 3**이다.
+
+  **반증 가능성** — 이 세션에서 반복해 무너진 지점이라 명시한다.
+  - 변경이 아무것도 안 막았다면 `blocked_autolinks`가 0으로 나온다.
+  - 링크를 통째로 껐다면 `csv_specified`(222)가 0이 된다 — 이 값은 리졸버가 아니라
+    **CSV 파일**에서 오므로 두 숫자가 같이 움직이지 않는다.
+  - 리졸버 조회가 죽었다면 후보 분포가 전부 0이 된다.
+  - 테스트에도 대조를 넣었다: **음성 대조**(후보 0건은 여전히 `unmatched` — 리졸버가 통째로
+    죽은 것과 구분), **양성 대조**(CSV가 `feature_id`를 적은 행은 그대로 링크 — "링크 기능을
+    껐다"면 실패). 대조 없이 "전부 미연결"만 보면 성공과 고장이 구별되지 않는다.
+
+  **배포 순서 — 이 변경은 `T-VN-H35` 이미지에 포함돼야 한다.**
+  H35의 인수에는 commit 모드 import 실행이 들어간다(live spec의 `palaceComponents`
+  단언은 `0066` backfill이 `legacy:<uuid>`로 채우는 값을 실제 import로 덮어야 성립한다).
+  그 실행 시점에 이 게이트가 이미지에 없으면 3건이 그 자리에서 되살아난다.
+
+  **표면 비용 0** — SQL·DTO·openapi·마이그레이션 무변경. `code`는 openapi에서 자유
+  문자열(`CurationImportIssueView.code: str`)이라 새 코드를 늘려도 생성 타입·프런트
+  수기 union·배지 맵이 안 바뀐다. `ImportRowStatus`(enum) 확장은 그 5지점 연쇄를 부르므로
+  **일부러 피했다**. 후보 시도명은 `FeatureMatch.address` jsonb에 이미 있어(리졸버가 이미
+  SELECT한다) 리졸버 SQL을 넓히지 않았다.
+  기존 테스트 **23건 무손상**(27 passed) — 라우터 import 테스트 중 비어 있지 않은 후보를
+  돌려주는 것은 하나뿐이고 그건 `feature_id` 명시 경로다.
+
+  <details><summary>원래 정의 (완료 전)</summary>
+
+  `curation_repo._RESOLVE_FEATURES_BATCH_SQL`은 CSV `feature_id`가 비면
+  `lower(f.name) = lower(place_name)` 단독으로 후보를 찾고, 단일 매칭이면 그대로 링크한다.
+  `address_hint`가 비면 주소 필터도 걸리지 않는다. **지역 교차검증이 없다.**
+  H33이 끊은 3건이 정확히 이 경로로 되살아난다(prod 실측: 빈 264행 중 단일 매칭 3행 =
+  H33 대상 3건, 전부 틀린 feature로 복귀).
+  또 `metadata = EXCLUDED.metadata`가 무조건 덮어써서 "링크 금지" 사유를 남길 자리도 없다.
+
+  선택지: (a) 리졸버에 시도/시군구 교차검증 추가, (b) import가 존중하는 명시적 "링크 금지"
+  표식, (c) 이름 단독 매칭 시 자동 링크 대신 `review`로 떨어뜨리기.
+  **H35(마이그레이션 적용)보다 먼저 해야 한다** — 지금은 prod가 `0063`이라 import 자체가
+  실패해 우연히 막혀 있을 뿐이다.
+
+  **AC**
+  - [ ] 이름 단독 일치만으로는 자동 링크되지 않는다. H33이 끊은 3건이 import 후에도
+        미연결로 남는 것을 **실데이터로** 확인한다(preview 경로로, prod 쓰기 없이).
+  - [ ] 정당한 링크를 과도하게 잃지 않는다 — 현재 링크 222건 중 이 변경으로
+        재현되지 않는 건이 몇 건인지 **수치로** 제시한다. 0이 아니어도 되지만 밝혀야 한다.
+  - [ ] 자동 링크되지 않은 행에 **왜**가 남는다(import 리포트 issue 또는 metadata).
+        운영자가 "그냥 안 붙었다"와 "지역이 어긋나 막았다"를 구분할 수 있어야 한다.
+  - [ ] e2e 라이브 기대값(공식 19컬렉션 membership 486, `OFFICIAL_FILES` 행 수)에 대한
+        영향을 밝힌다. 바뀐다면 기대값도 같은 PR에서 갱신한다.
+  - [ ] 검증이 **반증 가능**하다 — 변경이 실패했다면 다른 결과가 나오는 측정인지
+        (negative control / 양성 대조) 명시한다. 이 세션에서 반복된 실수다.
+  - [ ] 배포 순서: prod가 `0063`/이미지 `c8ed6164`라는 사실이 이 변경의 적용 순서에
+        미치는 영향을 기록하고, H35와의 선후를 확정한다.
+
+  **비목표**: 미연결 264건을 사람이 링크하는 작업 자체(그건 `T-VN-H34`/`T-VN-H31`).
+  여기서는 **잘못 붙는 것을 막는 것**까지만 한다.
+
+  </details>
+
+  > **부수 정정 — "prod는 import 자체가 실패한다"는 틀렸다.** H33 작업 중 나는
+  > *prod가 `0063`이라 HEAD의 import SQL이 참조하는 컬럼이 없어 import가 실패하므로 3건이
+  > 당장 되살아나지는 않는다*고 적었다. 조사 결과 **배포된 이미지(`c8ed6164`)의 import
+  > 코드에는 `source_present`/`external_component_id` 참조가 0건**이라 prod 스키마와
+  > 정합하며 **오늘도 정상 동작한다**. 또 CSV import는 `_UPSERT_ITEM_SQL`이 아니라
+  > `_BULK_UPSERT_ITEMS_SQL`을 탄다(전자는 admin 단건 POST 전용). 즉 "HEAD 코드를 prod
+  > 스키마에 돌리면 실패한다"가 참일 뿐, 내가 그걸 "prod에서 import가 실패한다"로 옮겨
+  > 적은 것이다. **또 배포되지 않은 코드를 prod 동작으로 읽었다.**
+
+- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0067)**
+
+  prod alembic head `0063_pipeline_root_id` vs 저장소 head `0067_integrity_dedupe_key`
+  (0063→0064→0065→0066→0067 단일 체인, 분기 없음). H30A(`0067` dedupe 부분 유니크 인덱스)를
+  포함해 **머지된 마이그레이션이 prod에 반영되지 않았다**. H30A가 주장한
+  dedupe·`/admin/issues` 접기는 현재 prod에서 성립하지 않는다.
+
+  > **⚠ 마이그레이션만 올리면 안 된다 — 이미지도 함께 올려야 한다.**
+  > prod는 "DB만 뒤처진 불일치"가 아니라 **코드·스키마가 일관되게 0063에 고정된 상태**다
+  > (배포 이미지 revision `c8ed6164`). 벌어진 간극은 DB↔코드가 아니라 **저장소↔배포**다.
+  > 특히 `0065`는 `uq_curation_items_active_identity`(partial, `WHERE archived_at IS NULL`)를
+  > drop하고 partial이 아닌 `uq_curation_items_identity`를 만드는데, **지금 도는 이미지의
+  > upsert는 `ON CONFLICT (…) WHERE archived_at IS NULL`을 명시**하므로 이미지를 둔 채
+  > 마이그레이션만 적용하면 arbiter 추론이 실패해 curation import·admin item 쓰기가 깨진다.
+  > `0065`에는 중복 정리용 `DELETE FROM feature.curation_items`도 들어 있다.
+
+  할 일: 0064~0067 각각의 내용·위험 평가 → **마이그레이션과 이미지 배포의 순서·원자성 확정**
+  → 적용 → dedupe 인덱스 실측 확인.
+  **머지 = 배포가 아니라는 점을 문서에도 반영한다** — H30A 완료 기록이 prod 상태를
+  주장하는 것으로 읽히지 않게. (H36이 이 task보다 **먼저**다.)
+
+  <details><summary>원래 정의 (완료 전)</summary>
+
+  H25B가 정지오코딩으로 확인한 오링크가 **DB에는 그대로 남아 있다**(`status=included`,
+  archived 아님). `/admin/curations` 계열 화면과 공개 projection이 남이섬 자리에 서울 중구
+  사무소를, 청남대 자리에 전남 영암 시설을 노출하고 있을 수 있다.
+  대상: `kt100-2023-2024-025`, `kt100-2025-2026-024`(남이섬), `kt100-2025-2026-036`(청남대).
+
+  **전수 확인 결과 이 축으로 잡히는 오링크는 3건이다** (`scripts/h33_mislink_detect.py`, 재현 가능).
+  CSV 링크 222행 시도 불일치 **0건**, DB `curation_items` 링크 전수 **3건**(남이섬 ×2, 청남대).
+  근거 산출물: [`reports/h33-mislink-2026-07-29.json`](reports/h33-mislink-2026-07-29.json)
+  (`db_linked_rows` 3269 / `db_region_codeable` 112 / `db_sido_mismatch` 3).
+  CSV 쪽이 0건인 것은 **그 3건을 역반영에서 뺐기 때문**이지, 축이 안 도는 게 아니다.
+
+  > **정정** — H25B 리포트 초안은 호미곶·오륙도를 들어 "오탐이 계통적이니 유형 전수를
+  > 대상으로 하라"고 적었으나 **철회했다**. 그 이름의 서울 소재 feature가 *존재할 뿐*
+  > curation에 링크돼 있지 않다. *실제 오링크*(고칠 데이터, 3건)와 *매칭 함정*(방어할 대상,
+  > 다수)을 뭉갠 것이다.
+
+  **스키마 변경은 권고하지 않는다** — 탐지 축인 `metadata.region`이 DB 링크 3,269건 중
+  **112건(3%)**에만 있어, 그걸로 만든 제약·뷰는 97%를 검사하지 못하면서 검사한 것처럼 보인다.
+  CHECK는 교차 테이블이라 애초에 불가하고, 실제 결함도 3건이다. 대신 H30A의
+  `ops.data_integrity_violations` ledger에 finding으로 방출하면 migration 없이 dedupe와
+  `/admin/issues` 노출을 얻는다.
+
+  할 일: 3건 unlink + 공개 projection 노출 여부 실증 + ledger 방출.
+  **커버리지 한계를 함께 기록한다** — region 없는 링크는 이 축으로 판정되지 않는다.
+
+  </details>
+
+  **남는 커버리지 한계**(고친 3건이 전부라는 뜻이 아니다): `region`이 있는 링크만 본다 —
+  해제 후 기준 **3,266건 중 109건(3.3%)**. 즉 **96.7%인 3,157행은 이 축으로 아예 검사되지
+  않는다.** 시도는 맞고 시군구만 다른 오링크도 안 잡히고, `sido_code`가 NULL인 2건은
+  건너뛴다. "0건"은 부재의 증명이 아니다.
+
+  > 초안은 여기에 "존재하지 않는 feature를 가리키는 링크는 세지 않는다"도 한계로 적었으나
+  > **뺐다** — `curation_items_feature_id_fkey`가 `ON DELETE SET NULL`이라 그런 행은 애초에
+  > 생길 수 없고 prod 실측도 0건이다(리뷰 지적). 존재할 수 없는 위험을 한계 목록에 얹으면
+  > 불확실성의 모양이 실제와 달라진다.
+
+- [ ] T-VN-H31 — **등대 공급원 부재 해소 (H25A 파생, 전제 재확인됨)**
 
   공식 curation 미연결 261건 중 **103건이 등대**이며 105개 중 2개만 링크됐다. ADR-034 9단계
   provider 순서에 등대를 공급하는 provider가 없다 — curation 매칭으로는 해소되지 않는다.

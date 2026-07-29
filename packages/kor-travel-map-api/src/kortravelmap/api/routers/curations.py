@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
@@ -500,6 +501,92 @@ def _candidate_view(
     return CurationImportFeatureCandidateView.model_validate(match, from_attributes=True)
 
 
+def _adopted_match(
+    row: CurationImportRow,
+    matches: Sequence[curation_repo.FeatureMatch],
+) -> curation_repo.FeatureMatch | None:
+    """이 행이 실제로 링크할 feature를 고른다. **CSV가 지정한 경우에만 링크한다** (T-VN-H36).
+
+    이전에는 ``matches[0] if len(matches) == 1 else None``이었다. 그 규칙은 CSV
+    ``feature_id``가 비었을 때 리졸버가 **이름 단독**으로 찾아온 후보(
+    ``_RESOLVE_FEATURES_BATCH_SQL``의 ``lower(f.name) = lower(place_name)`` 브랜치)를
+    "유일하니 맞겠지"라며 그대로 채택했다. 유일성은 *동명 feature가 하나뿐*이라는 뜻이지
+    *그게 맞는 장소*라는 뜻이 아니다.
+
+    실제로 그 구멍으로 오링크가 들어왔다: 한국관광100선 "남이섬"이 서울 중구의 동명 업소
+    feature에, "청남대"가 전남 영암 시설에 붙었다(T-VN-H33이 해제). prod에 그 이름의 live
+    feature가 각각 하나뿐이라 항상 "유일 매칭"으로 통과했다. 그리고 T-VN-H33이 끊어 놓아도
+    다음 import가 같은 경로로 되살렸다.
+
+    그래서 **CSV ``feature_id``가 빈 행은 후보 수와 무관하게 링크하지 않는다.** 리졸버가
+    찾은 후보는 버리지 않고 ``candidates``로 계속 노출하므로, 운영자가 preview에서 보고
+    admin에서 직접 링크할 수 있다. 자동으로 붙는 일만 없어진다.
+
+    CSV가 ``feature_id``를 명시한 행은 그대로다 — 그건 사람이 적어 넣은 값이고
+    리졸버도 PK 조회 브랜치를 탄다.
+    """
+    if not (row.feature_id or "").strip():
+        return None
+    return matches[0] if len(matches) == 1 else None
+
+
+def _sido_name(address: Mapping[str, Any] | None) -> str | None:
+    value = (address or {}).get("sido_name")
+    return str(value) if value else None
+
+
+def _unlinked_issue(
+    row: CurationImportRow,
+    matches: Sequence[curation_repo.FeatureMatch],
+) -> CurationImportIssueView:
+    """미연결 사유를 **구분 가능하게** 만든다 (T-VN-H36).
+
+    운영자가 "후보가 아예 없다"와 "이름은 맞는 후보가 있는데 자동으로 붙이지 않았다"를
+    구분할 수 있어야 한다. 전자는 공급원 부재(→ provider 적재 문제)이고 후자는 사람이
+    확인해서 붙이면 되는 건이라, 해야 할 일이 다르다.
+
+    ``code``는 openapi에서 자유 문자열이므로(``CurationImportIssueView.code: str``)
+    새 코드를 늘려도 스키마·프런트 타입이 바뀌지 않는다. ``ImportRowStatus``(enum)를
+    건드리면 openapi drift → 생성 타입 → 프런트 수기 union → 배지 맵까지 연쇄된다.
+
+    후보의 시도명은 ``FeatureMatch.address`` jsonb에 이미 들어 있어(리졸버가 이미 SELECT한다)
+    SQL도 DTO도 넓히지 않고 사유 문장에 넣을 수 있다.
+    """
+    row_region = str((row.metadata_json or {}).get("region") or "").strip()
+
+    if not matches:
+        return CurationImportIssueView(
+            code="unmatched",
+            message="기존 Feature와 일치하는 후보가 없어 미연결 항목으로 저장합니다.",
+            row_number=row.row_number,
+        )
+
+    if (row.feature_id or "").strip():
+        # feature_id를 지정했는데도 안 붙었다면 후보가 여럿인 경우뿐이다.
+        return CurationImportIssueView(
+            code="ambiguous",
+            message="기존 Feature 후보가 여러 개여서 미연결 항목으로 저장합니다.",
+            row_number=row.row_number,
+        )
+
+    where = ", ".join(
+        sorted({s for s in (_sido_name(m.address) for m in matches[:3]) if s})
+    )
+    detail = f" 후보 소재: {where}." if where else ""
+    differs = bool(row_region) and bool(where) and row_region not in where
+    mismatch = f" CSV의 region은 '{row_region}'입니다." if differs else ""
+    return CurationImportIssueView(
+        code="name_only_match",
+        message=(
+            f"이름만 일치하는 후보 {len(matches)}건을 찾았으나 자동 링크하지 않았습니다 — "
+            f"동명이 하나뿐이라는 것이 같은 장소라는 뜻은 아닙니다 (T-VN-H36)."
+            f"{detail}{mismatch}"
+            " 확인 후 CSV feature_id에 적거나 admin에서 직접 연결하세요."
+        ),
+        row_number=row.row_number,
+    )
+
+
 def _import_metadata(row: CurationImportRow) -> dict[str, Any]:
     metadata = dict(row.metadata_json)
     if row.subcourse:
@@ -589,7 +676,7 @@ async def import_admin_curations(
             continue
 
         matches = matches_by_row.get(row.row_number, ())
-        match = matches[0] if len(matches) == 1 else None
+        match = _adopted_match(row, matches)
         row_status: ImportRowStatus
         row_issues: list[CurationImportIssueView]
         if match is not None:
@@ -597,17 +684,7 @@ async def import_admin_curations(
             row_issues = []
         else:
             row_status = "unmatched" if not matches else "ambiguous"
-            row_issues = [
-                CurationImportIssueView(
-                    code=row_status,
-                    message=(
-                        "기존 Feature와 일치하는 후보가 없어 미연결 항목으로 저장합니다."
-                        if not matches
-                        else "기존 Feature 후보가 여러 개여서 미연결 항목으로 저장합니다."
-                    ),
-                    row_number=row.row_number,
-                )
-            ]
+            row_issues = [_unlinked_issue(row, matches)]
         resolved_rows.append(
             curation_repo.ResolvedCurationImportRow(
                 row_number=row.row_number,

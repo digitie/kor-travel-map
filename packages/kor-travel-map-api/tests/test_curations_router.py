@@ -843,3 +843,149 @@ def test_curated_write_rejects_reserved_detach_marker(
 ) -> None:
     response = client.request(method, path, json=payload)
     assert response.status_code == 422
+
+
+# --- T-VN-H36: 이름 단독 일치로는 자동 링크하지 않는다 ---------------------------
+#
+# 회귀 대상은 실제로 일어난 사고다. 한국관광100선 "남이섬"이 서울 중구의 동명 업소
+# feature에 붙어 공개 응답에 나왔다(T-VN-H33이 해제). prod에 그 이름의 live feature가
+# 하나뿐이라 옛 규칙(`matches[0] if len(matches) == 1`)이 항상 "유일 매칭"으로 채택했다.
+
+
+def _namesake_match(feature_id: str, name: str, sido_name: str) -> FeatureMatch:
+    """이름은 같지만 지역이 다른 후보. 실제 사고를 그대로 본뜬 것이다."""
+    return FeatureMatch(
+        feature_id=feature_id,
+        name=name,
+        address={"road": f"{sido_name} 어딘가 1", "sido_name": sido_name},
+        lon=127.0,
+        lat=37.5,
+    )
+
+
+@pytest.mark.unit
+def test_blank_feature_id_never_autolinks_on_single_name_match(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """빈 feature_id + 유일한 동명 후보 → 링크하지 않는다 (T-VN-H36 핵심)."""
+    from kortravelmap.api.routers import curations as module
+
+    async def _matches(_session: object, **_kwargs: Any) -> dict[int, tuple[Any, ...]]:
+        return {2: (_namesake_match("f_seoul_namesake", "간절곶등대", "서울특별시"),)}
+
+    monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
+    async def _preview(_session: object, **_kwargs: Any) -> CurationImportPlan:
+        return CurationImportPlan(collections=1, inserted=0, updated=0, removals=())
+
+    monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
+
+    response = client.post(
+        "/v1/admin/curations/import",
+        params={"dry_run": "true"},
+        files={"file": ("official.csv", _csv_content(), "text/csv")},
+    )
+
+    assert response.status_code == 200
+    row = response.json()["data"]["items"][0]
+    assert row["resolved_feature_id"] is None, "이름만 맞는 후보를 자동 링크했다"
+    assert row["status"] == "ambiguous"
+    codes = [issue["code"] for issue in row["issues"]]
+    assert codes == ["name_only_match"]
+    # 후보는 버리지 않는다 — 운영자가 preview에서 보고 직접 링크할 수 있어야 한다.
+    assert [c["feature_id"] for c in row["candidates"]] == ["f_seoul_namesake"]
+
+
+@pytest.mark.unit
+def test_blank_feature_id_reason_names_the_candidate_region(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """사유가 '그냥 안 붙었다'와 구분돼야 한다 — 후보 소재지를 말한다."""
+    from kortravelmap.api.routers import curations as module
+
+    async def _matches(_session: object, **_kwargs: Any) -> dict[int, tuple[Any, ...]]:
+        return {2: (_namesake_match("f_seoul_namesake", "간절곶등대", "서울특별시"),)}
+
+    monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
+    async def _preview(_session: object, **_kwargs: Any) -> CurationImportPlan:
+        return CurationImportPlan(collections=1, inserted=0, updated=0, removals=())
+
+    monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
+
+    response = client.post(
+        "/v1/admin/curations/import",
+        params={"dry_run": "true"},
+        files={"file": ("official.csv", _csv_content(), "text/csv")},
+    )
+
+    message = response.json()["data"]["items"][0]["issues"][0]["message"]
+    assert "서울특별시" in message, message
+    assert "T-VN-H36" in message
+
+
+@pytest.mark.unit
+def test_no_candidates_still_reports_unmatched_not_name_only(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """음성 대조. 후보가 아예 없는 행은 여전히 `unmatched`여야 한다.
+
+    이게 없으면 "모든 행이 미연결"이라는 결과가 수정의 성공인지 아니면 리졸버가
+    통째로 죽은 것인지 구분되지 않는다.
+    """
+    from kortravelmap.api.routers import curations as module
+
+    async def _matches(_session: object, **_kwargs: Any) -> dict[int, tuple[Any, ...]]:
+        return {2: ()}
+
+    monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
+    async def _preview(_session: object, **_kwargs: Any) -> CurationImportPlan:
+        return CurationImportPlan(collections=1, inserted=0, updated=0, removals=())
+
+    monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
+
+    response = client.post(
+        "/v1/admin/curations/import",
+        params={"dry_run": "true"},
+        files={"file": ("official.csv", _csv_content(), "text/csv")},
+    )
+
+    row = response.json()["data"]["items"][0]
+    assert row["status"] == "unmatched"
+    assert [issue["code"] for issue in row["issues"]] == ["unmatched"]
+    assert row["candidates"] == []
+
+
+@pytest.mark.unit
+def test_explicit_feature_id_still_links(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """양성 대조. CSV가 feature_id를 적은 행은 그대로 링크돼야 한다.
+
+    이게 없으면 위 테스트들은 "링크 기능을 통째로 껐다"로도 통과한다.
+    """
+    from kortravelmap.api.routers import curations as module
+
+    async def _matches(_session: object, **_kwargs: Any) -> dict[int, tuple[Any, ...]]:
+        return {2: (_namesake_match("feature:active", "간절곶등대", "울산광역시"),)}
+
+    monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
+    async def _preview(_session: object, **_kwargs: Any) -> CurationImportPlan:
+        return CurationImportPlan(collections=1, inserted=0, updated=0, removals=())
+
+    monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
+
+    response = client.post(
+        "/v1/admin/curations/import",
+        params={"dry_run": "true"},
+        files={
+            "file": (
+                "official.csv",
+                _csv_content(feature_ids=("feature:active",)),
+                "text/csv",
+            )
+        },
+    )
+
+    row = response.json()["data"]["items"][0]
+    assert row["resolved_feature_id"] == "feature:active"
+    assert row["status"] == "valid"
+    assert row["issues"] == []
