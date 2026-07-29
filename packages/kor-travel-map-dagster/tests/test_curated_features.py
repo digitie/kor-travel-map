@@ -55,6 +55,11 @@ class _Client:
             }
         )
 
+    async def record_address_validation_findings(self, findings: object) -> int:
+        """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
+        self.recorded_findings = list(findings)  # type: ignore[arg-type]
+        return len(self.recorded_findings)
+
 
 def _context(client: _Client) -> Any:
     return build_asset_context(resources={"kor_travel_map_client": client})

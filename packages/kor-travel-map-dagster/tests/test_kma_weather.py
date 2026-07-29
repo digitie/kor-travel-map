@@ -1434,6 +1434,11 @@ class _FakeBundleLoadClient:
             reconcile=NoticeReconcileResult(),
         )
 
+    async def record_address_validation_findings(self, findings: object) -> int:
+        """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
+        self.recorded_findings = list(findings)  # type: ignore[arg-type]
+        return len(self.recorded_findings)
+
 
 async def test_weather_alerts_asset_loads_notice_bundles() -> None:
     client = _FakeBundleLoadClient()

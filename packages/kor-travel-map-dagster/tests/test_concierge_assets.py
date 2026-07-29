@@ -48,6 +48,11 @@ class _FakeConciergeClient:
         )
         return len(source_entity_ids)
 
+    async def record_address_validation_findings(self, findings: object) -> int:
+        """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
+        self.recorded_findings = list(findings)  # type: ignore[arg-type]
+        return len(self.recorded_findings)
+
 
 def _export_item(operation: str, *, candidate_id: int = 9201) -> dict[str, Any]:
     return {
