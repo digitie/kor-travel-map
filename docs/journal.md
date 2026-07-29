@@ -74,6 +74,29 @@ findings 비었을 때 전량 close, 그리고 **payload 변경에도 접힘**(`
 `alembic_version varchar(32)`를 넘겨 upgrade가 실패했다. 단위 테스트로는 드러나지 않고
 clone에 실제로 걸어야만 나오는 종류다 — H30B를 "산술이 아니라 실적재로" 요구한 값이 여기 있다.
 
+## 2026-07-29 (codex) — T-VN-48D 최종 mocked checkpoint·Claude PR #885 감사
+
+**mocked checkpoint**. PR #887 문서 변경을 rebase한 exact `b35d7cbb`에서 self-built
+frontend와 브라우저를 self-owned internal Docker network에 격리했다. container port는
+publish하지 않고 검증한 내부 IPv4에만 loopback 프록시를 열었으며, HTTP와 WebSocket의
+비소유 외부 연결은 deny gate로 막았다. source digest와 Docker build가 동일한 격리 build
+환경을 쓰도록 결속한 뒤 checkpoint D를 serial과 workers=4에서 각각 **274/274** 통과했다.
+두 실행 모두 expected/actual failure, flake, skip이 0이고 실행별 container/network/image는
+정리됐다.
+
+**PR #885 사후 감사 정정**. 이전 issue #881 기록의 trusted-proxy 전환은 현재 geo 계약과
+맞지 않아 폐기했다. backend는 권한이 넓은 admin proxy principal을 위임하지 않고 scoped
+public API key를 `X-KTG-API-Key` header로만 전달한다. `E0100 key` fallback은 인증 결선
+오류 503, 2xx JSON/schema 손상은 provider 오류 502로 분리한다.
+
+주소 증거는 관측 후보 집합과 시도 여부를 typed DTO로 끝까지 보존한다. strict/ensure는
+모든 error를 거부하고 영구 drop만 명시 allowlist를 쓴다. 이름은 substring이 아니라
+행정구역 token state로 warning을 만들며, quarantine을 별도 typed 결과로 보존해
+`upserts == bundles + quarantine`을 강제했다. 과거 H28 문서의 “380건 좌표 오류 0”은
+독립적인 일반 좌표 정확도 증거가 아니므로, **기존 규칙으로 불일치 근거가 성립하지
+않았다**는 범위로 정정했다. baseline 스크립트도 현재 validator 자기 비교가 아니라 당시
+규칙 버전을 명시적으로 재현한다.
+
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25A 공식 curation 미연결 증거·전제 정정
 
 **결론 먼저**. task 전제 *"공식 CSV 고유 `feature_id` 158개 중 54개가 `feature.features`에

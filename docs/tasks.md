@@ -68,8 +68,9 @@ barrier로 직렬화한다.
   `origin/main` rebase. PR 하나는 task 하나만 소유.
 - **사용자 명시 동반 감사 예외**: 각 T-VN task의 최종 PR에는 사용자 지시대로 직전 Claude
   Code PR 사후 감사에서 발견한 수정과 그 감사 issue를 함께 넣는다. 이는 새 실행 lane task가
-  아니라 현재 task의 필수 PR 전 gate다. T-VN-48 PR에는 issue #881의 hidden alias 제거와
-  PR #877 아카이브 복구를 이 예외로 함께 반영한다.
+  아니라 현재 task의 필수 PR 전 gate다. T-VN-48 PR에는 issue #881로 추적한 PR #882~#886
+  감사를 함께 반영한다. PR #887은 사용자 지시로 docs-only rebase만 수행하고 감사에서
+  제외한다.
 - 첫 reviewable checkpoint부터 원격 feature branch에 작은 의미 단위로 자주 커밋·push하되,
   PR은 구현·적대 리뷰 반영·실데이터 검증·최종 main rebase를 모두 마친 뒤 **머지 직전**에만
   연다. 실패하면 검증된 직전 checkpoint부터 재개한다.
@@ -147,7 +148,7 @@ barrier로 직렬화한다.
 
 T-VN-48A~C는 최초 273-test baseline의 deterministic drift 89건을
   Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별로 제거했다.
-- [ ] T-VN-48D — 구현과 exact `45e2161d` mocked serial/CI-parallel gate는 각각
+- [ ] T-VN-48D — 구현과 exact `b35d7cbb` mocked serial/CI-parallel gate는 각각
   **274/274 passed, expected failure/flake/skip 0건**으로 끝났다.
   - R1과 양립하는 격리 clone 전용 trusted runner를 추가했다. exact candidate `fe0c956e`의
     본 acceptance 2/2와 recovery-only 2/2, startup migration 없음, cleanup/audit owned
@@ -163,7 +164,9 @@ T-VN-48A~C는 최초 273-test baseline의 deterministic drift 89건을
     snapshot equality를 유지하고, scratch DB는 무작위 이름·server ownership token·OID가
     모두 일치할 때만 삭제한다. image cleanup은 실행별 tag만 비강제로 해제하며, mocked
     browser/runtime은 self-owned internal network와 non-self HTTP/WS deny gate로 격리한다.
-  - geo trusted-proxy가 `E0100 key`로 fallback하면 결선 오류 503으로, 2xx JSON/schema
+    host 브라우저는 container publish 없이 검증한 내부 IPv4를 loopback 전용 프록시로만
+    연결하고, source digest는 그 격리 build 환경과 같은 입력으로 계산한다.
+  - geo 호출이 `E0100 key`로 fallback하면 결선 오류 503으로, 2xx JSON/schema
     손상은 provider 오류 502로 보존한다. 기존 v1 checkpoint 교체 실패와 실패 시 검증 dump
     조기 삭제도 같은 D 완료 범위에서 forward recovery한다.
 

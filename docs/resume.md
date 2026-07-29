@@ -31,6 +31,25 @@
 - **교훈 — `jsonb ||`는 null로 지운다**: 재실행 payload의 `null`이 1회차 증거를 덮어썼다.
   durable ledger 안에서 증거를 잃는, 목적과 정반대 동작이었다. `jsonb_strip_nulls`로 차단.
 
+## 2026-07-29 (codex) — T-VN-48D mocked 최종 gate 완료 → 리뷰·clone Live
+
+**방금**: PR #887 docs-only 변경을 rebase한 exact `b35d7cbb`에서 checkpoint D를 serial과
+workers=4로 각각 **274/274** 통과했다. expected/actual failure·flake·skip은 모두 0이다.
+self-built frontend는 internal Docker network에만 두고, 검증한 container IPv4에 연결하는
+loopback 전용 HTTP/WS 프록시로 host Playwright를 결속했다. source digest와 build도 동일한
+격리 환경변수를 사용한다.
+
+PR #885 감사 수정은 typed reverse 후보·시도 여부, strict/ensure의 모든 error 거부,
+drop allowlist, token 단위 이름 warning, typed quarantine 보존과
+`upserts == bundles + quarantine` 불변식을 고정했다. 이전 #881 기록의 geo trusted proxy
+전환은 폐기하고 scoped `X-KTG-API-Key` 계약으로 정정했다. H28의 일반 좌표 정확도
+과장도 baseline 규칙 재현 범위로 좁혔다.
+
+**다음 한 작업**: Claude PR #886 감사 결과와 exact `origin/main...HEAD` 적대 리뷰 2명을
+반영한 뒤, 같은 최종 SHA로 보존 clone의 실패 지점에서 파괴적 Live를 재개한다. 완료 문서를
+확정하고 PR·CI green·직접 머지한다. 머지 뒤 clone의 migration head·fixture identity·잔여물·
+디스크 여유를 읽기 전용으로 확인해 다음 task 재사용 가능성을 기록하고 별도 지시까지 대기한다.
+
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25A 완료(전제 정정) → 다음은 T-VN-H30A
 
 **다음 한 작업**: `T-VN-H30A`(주소 검증 issue를 `ops.data_integrity_violations`에 durable 기록).
