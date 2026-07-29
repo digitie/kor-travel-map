@@ -80,6 +80,14 @@ class AdminEvidence(BaseModel):
     claim_kind: AdminClaimKind | None = Field(
         default=None, description="``claim_code``의 정밀도."
     )
+    reverse_attempted: bool = Field(
+        default=False,
+        description=(
+            "좌표 reverse를 **시도**했는가. ``obs_code``가 비어 있어도 '시도했는데 결과가 "
+            "없음'과 'geocoder 자체가 결선되지 않음'은 완전히 다른 상태다 — 전자만 "
+            "``reverse_geocode_failed``다."
+        ),
+    )
     claim_text: str | None = Field(
         default=None,
         description=(

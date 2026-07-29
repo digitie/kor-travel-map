@@ -261,7 +261,11 @@ async def _item_to_bundle(
         feature=feature,
         source_record=source_record,
         source_link=source_link,
-        admin_evidence=_admin_evidence(address_payload, geo=geo),
+        admin_evidence=_admin_evidence(
+            address_payload,
+            geo=geo,
+            reverse_attempted=coord is not None and reverse_geocoder is not None,
+        ),
     )
 
 
@@ -446,7 +450,12 @@ def _address(payload: Mapping[str, Any], *, geo: Address | None) -> Address:
     )
 
 
-def _admin_evidence(payload: Mapping[str, Any], *, geo: Address | None) -> AdminEvidence:
+def _admin_evidence(
+    payload: Mapping[str, Any],
+    *,
+    geo: Address | None,
+    reverse_attempted: bool,
+) -> AdminEvidence:
     """행정구역 판정의 두 축을 병합 전에 보존한다 (T-VN-H28B).
 
     ``obs_code``는 좌표 reverse 결과의 법정동코드만, ``claim_code``는 payload가 스스로
@@ -462,8 +471,12 @@ def _admin_evidence(payload: Mapping[str, Any], *, geo: Address | None) -> Admin
         claim_kind = "sido" if claim_code else None
     return AdminEvidence(
         obs_code=geo.bjd_code if geo is not None else None,
+        reverse_attempted=reverse_attempted,
         claim_code=claim_code,
         claim_kind=claim_kind,
+        # 독립 축 — provider **원천** 문자열만. geo 유래 값을 넣으면 자기 자신과 비교하게 된다.
+        claim_text=normalize_korean_text(_text(payload, "road_address"))
+        or normalize_korean_text(_text(payload, "official_address")),
     )
 
 

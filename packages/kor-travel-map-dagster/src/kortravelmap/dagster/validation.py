@@ -133,11 +133,13 @@ def validate_feature_bundle_address(
     # 조건은 **영원히 거짓**이 되어, kor-travel-geo가 run 내내 죽어 있어도 전량이 좌표
     # 검증 없이 적재된다. AdminEvidence.obs_code가 reverse 성공 여부를 직접 말해 준다.
     evidence = bundle.admin_evidence
-    reverse_produced_nothing = (
-        address.bjd_code is None
-        if evidence is None
-        else evidence.obs_code is None
-    )
+    if evidence is None:
+        reverse_produced_nothing = address.bjd_code is None
+    elif evidence.reverse_attempted:
+        reverse_produced_nothing = evidence.obs_code is None
+    else:
+        # reverse를 시도조차 안 했으면 실패로 볼 수 없다(geocoder 미결선).
+        reverse_produced_nothing = address.bjd_code is None
     if feature.coord is not None and reverse_produced_nothing:
         issues.append(
             FeatureAddressIssue(
@@ -186,8 +188,8 @@ def validate_feature_bundles_address(
     issues = tuple(issue for validation in validations for issue in validation.issues)
     error_count = sum(1 for issue in issues if issue.severity == "error")
     warning_count = sum(1 for issue in issues if issue.severity == "warning")
-    grades = Counter(
-        "unarmed" if b.admin_evidence is None else b.admin_evidence.grade
+    grades: Counter[str] = Counter(
+        "unarmed" if b.admin_evidence is None else str(b.admin_evidence.grade)
         for b in materialized
     )
     return FeatureAddressValidationSummary(
