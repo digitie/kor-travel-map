@@ -1,12 +1,20 @@
 """T-VN-H28A 최종 증거 manifest — Map 실제 파이프라인 + 후보별 독립 reverse 대조.
 
 각 error 후보에 대해 세 축을 나란히 기록한다.
-  1. provider payload의 authoritative 행정코드 (producer T-189 주입)
+  1. provider payload의 행정코드
   2. 좌표를 다시 reverse 지오코딩한 결과의 행정코드·이름·거리·후보집합
   3. 현재 규칙(이름 substring)의 판정
 
-이 세 축으로 true-positive(좌표가 실제로 다른 행정구역)와 false-positive(코드는 일치하는데
-이름 표기만 달라 걸린 것)를 분리한다. 비밀은 출력하지 않는다.
+**중요 — 1 vs 2는 독립이 아니다.** kor-travel-concierge의 payload 행정코드는 같은
+kor-travel-geo ``POST /v2/reverse``를 같은 좌표로 호출해 만든 캐시본이다
+(``backend/ktc/etl/admin_region_service.py`` ``fetch_admin_region``). 따라서 둘의 일치는
+좌표 정확성의 증거가 못 되고, 불일치는 위치 오류가 아니라 producer 캐시 낡음을 뜻한다.
+``classification`` 필드는 그 한계를 안고 있는 값이므로 결론 근거로 쓰지 않는다.
+
+결론 근거는 ``classify_by_text_axis``다 — 유일한 독립 축인 provider **원천 텍스트**만
+쓰며 좌표 증거를 쓰지 않는다(리포트 §2-bis, 375/4/1).
+
+비밀은 출력하지 않는다.
 """
 
 from __future__ import annotations
@@ -14,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import urllib.parse
 import urllib.request
 from collections import Counter
@@ -50,6 +59,63 @@ def fetch_items() -> list[dict]:
             break
         cursor = page["next_cursor"]
     return items
+
+
+# ── 독립 축 분류 (T-VN-H28B 정정 근거) ──────────────────────────────────────
+#
+# payload 행정코드는 같은 kor-travel-geo /v2/reverse를 같은 좌표로 호출한 캐시본이라
+# 좌표 정확성의 증거가 되지 못한다(리포트 §2 정정). 유일한 독립 축인 provider **원천
+# 텍스트**만으로 분류한다 — 좌표 증거를 쓰지 않는다.
+
+_ADMIN_TOKEN = re.compile(r"[가-힣]+[시군구]")
+_SUFFIXES = ("특별자치시", "특별자치도", "광역시", "특별시", "시", "군", "구")
+
+
+def compact(value: object) -> str:
+    return "".join(str(value or "").split())
+
+
+def _stem(name: str) -> str:
+    c = compact(name)
+    for s in _SUFFIXES:
+        if len(c) > len(s) and c.endswith(s):
+            return c[: -len(s)]
+    return c
+
+
+def classify_by_text_axis(rows: list[dict]) -> dict[str, list[dict]]:
+    """리포트 §2-bis 표(375 / 4 / 1)를 재생성한다."""
+    out: dict[str, list[dict]] = {
+        "A_행정구역_토큰_없음": [],
+        "B_축약_단계_차이": [],
+        "C_다른_행정구역_지목": [],
+    }
+    for r in rows:
+        text = compact(r.get("provider_address"))
+        geo = r.get("geo_sigungu_name") or ""
+        if not _ADMIN_TOKEN.search(text):
+            out["A_행정구역_토큰_없음"].append(r)
+        elif geo and _stem(geo) and _stem(geo) in text:
+            out["B_축약_단계_차이"].append(r)
+        else:
+            out["C_다른_행정구역_지목"].append(r)
+    return out
+
+
+def print_text_axis_report(rows: list[dict]) -> None:
+    groups = classify_by_text_axis(rows)
+    print("\n=== 독립 축(provider 텍스트) 분류 — 좌표 증거 불사용 ===")
+    for name, items in groups.items():
+        print(f"  {len(items):4d}  {name}")
+        for r in items[:3]:
+            print(
+                f"          {r.get('name')} | geo={r.get('geo_sigungu_name')} "
+                f"| {str(r.get('provider_address'))[:40]}"
+            )
+    print(
+        "\n  A/B는 좌표를 보지 않고도 규칙 산물임이 확정된다. "
+        "C만 제3의 독립 수단(정지오코딩)으로 개별 확인이 필요하다."
+    )
 
 
 async def main() -> None:
@@ -185,8 +251,10 @@ async def main() -> None:
     }
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
+    print_text_axis_report(rows)
     print(f"\nmanifest 저장: {OUT} ({len(rows)} rows)")
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+

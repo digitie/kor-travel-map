@@ -9,12 +9,21 @@
 
 - **FIXED**: provider 후보가 주소 문자열 때문에 영구 미적재되던 문제를 해결했다. 기존 규칙은
   좌표 역지오코딩 시군구명이 provider 주소 문자열에 부분문자열로 없으면 error → drop이었는데,
-  실측(kor-travel-concierge 1,477 후보)에서 **380건을 drop했고 380건 전부 오탐**이었다
-  (payload 행정코드와 좌표 행정코드가 전부 일치, 진짜 불일치 0건). 실패의 365/380은
-  `부산 기장 조방국밥`처럼 행정구역명이 없는 짧은 주소였다. 새 규칙 적용 후 **1,477건 전량 적재**.
+  실측(kor-travel-concierge 1,477 후보)에서 **380건을 drop했고 좌표 오류는 0건**이었다.
+  그중 **375건은 provider 주소에 시/군/구 토큰이 아예 없어**(`부산 기장 조방국밥`) 좌표의
+  옳고 그름과 무관하게 부분문자열 검사가 통과 불가였고, 4건은 축약·단계 표기 차이,
+  나머지 1건은 정지오코딩상 **143 m 경계** 케이스였다. 새 규칙 적용 후 **1,477건 전량 적재**.
 - **BEHAVIOR (breaking)**: `provider_address_mismatch` / `provider_address_partial_match`
-  issue code는 **발행 중단**됐다(기존 기록은 보존). 대신 provider 선언 행정코드와 좌표 역지오코딩
-  행정코드를 비교하는 `admin_code_stale_{sido,sigungu,emd}`를 warning으로 방출한다.
+  issue code는 **발행 중단**됐다(기존 기록은 보존). 같은 축(provider 주소 문자열 ↔ 좌표
+  역지오코딩 행정구역명)은 위 세 결함을 고쳐 `provider_address_region_disagreement`
+  **warning**으로 계속 방출한다 — `Address.sigungu_name` 기반이라 **모든 provider**에 적용된다.
+  추가로 payload 행정코드와 역지오코딩 코드가 어긋나면
+  `admin_code_stale_{sido,sigungu,emd}` warning을 낸다. 이는 **위치 검증이 아니라 producer
+  캐시 낡음 검출**이다 — 최소 kor-travel-concierge에서 payload 코드는 같은 역지오코딩
+  결과의 캐시본이므로 좌표 정확성의 독립 증거가 아니다.
+- **BEHAVIOR**: 좌표 역지오코딩이 결과를 내지 못했지만 provider 행정코드로 적재 가능한 경우
+  `reverse_geocode_unavailable` warning을 낸다. 좌표 정합성이 미확인 상태임을 드러내되
+  적재는 막지 않는다.
 - **RELIABILITY**: 영구 손실(drop)·run 실패 대상이 severity가 아니라 **명시적 code
   화이트리스트**(`DROPPABLE_ISSUE_CODES` = `reverse_geocode_failed`, `missing_address`)로
   정해진다. 새 검증이 error를 내도 이 집합을 고치기 전에는 데이터가 사라지지 않는다.

@@ -19,6 +19,14 @@
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H28A/B #673 주소 검증 규칙 교체
 
+> **정정 (적대 리뷰 반영)** — 아래 "payload 행정코드 == geo 행정코드이므로 전부 오탐"이라는
+> 근거는 **무효**다. concierge의 payload 코드는 같은 kor-travel-geo /v2/reverse를 같은 좌표로
+> 호출한 캐시본이라 자기 자신과의 비교였다. 결론(380건 좌표 오류 아님)은 유지되지만 근거는
+> 독립 축(provider 원천 텍스트 + 정지오코딩)으로 다시 세웠다 — 375건은 텍스트에 행정구역
+> 토큰이 없어 좌표와 무관하게 통과 불가, 4건은 축약·단계 차이, 1건은 143 m 경계.
+> 이름 축은 **삭제하지 않고** 결함만 고쳐 warning으로 유지한다(전 provider 적용).
+> 상세: docs/reports/concierge-address-mismatch-evidence-2026-07-29.md
+
 **배경**. #673은 concierge 후보 1,430건 중 410건이 `provider_address_mismatch`로 **영구
 미적재**되는 현상이다. 규칙은 좌표 reverse `sigungu_name`이 provider 주소 문자열에
 부분문자열로 없으면 error. 표본(해동용궁사)은 주소에 '기장'이 있는데도 error였다.
