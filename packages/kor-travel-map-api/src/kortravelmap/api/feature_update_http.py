@@ -77,11 +77,25 @@ def to_http_exception(
     if isinstance(exc, feature_update_service.FeatureUpdateRequestNotFound):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, feature_update_service.SigunguResolverUnavailable):
-        return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "GEO_AUTH_NOT_CONFIGURED",
+                "message": str(exc),
+                "details": {},
+            },
+        )
     if isinstance(exc, feature_update_service.FeatureUpdateValidationError):
         return HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, feature_update_service.FeatureUpdateResolverError):
-        return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+        return HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "PROVIDER_ERROR",
+                "message": str(exc),
+                "details": {},
+            },
+        )
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="feature update request enqueue failed",

@@ -125,7 +125,7 @@ from kortravelmap.geocoding import (
 async with httpx.AsyncClient(base_url=settings.kor_travel_geo_base_url) as http:
     client = KorTravelGeoRestClient(
         http,
-        api_key=settings.kor_travel_geo_api_key_value,  # VWorld key와 동일 값
+        admin_proxy_secret=settings.kor_travel_geo_admin_proxy_secret,
     )
     reverse = kor_travel_geo_reverse_geocoder(client, max_distance_m=50)
     resolve = kor_travel_geo_address_resolver(client, min_confidence=0.5)
@@ -407,7 +407,8 @@ API 키/한도/재시도는 `kor-travel-geo` REST 서비스 책임. 본 라이�
 ## 14. 운영 체크리스트
 
 - [ ] `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL` 환경변수 (REST 서비스 URL)
-- [ ] `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` 환경변수 (VWorld API key와 동일 값)
+- [ ] `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET` 환경변수
+      (geo `KTG_ADMIN_PROXY_SECRET`과 동일, public/VWorld key와 공유 금지)
 - [ ] `kor-travel-geo` REST 서비스 v2(`POST /v2/reverse`, `POST /v2/geocode`)가 운영 환경에서 reachable
 - [ ] reverse geocoder가 MOIS/OpiNet ETL에 주입되어 있는가
 - [ ] `legal_dong_conflict` / `sigungu_code_only` / `not_geocoded` 비율

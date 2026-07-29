@@ -53,23 +53,22 @@
 - **API**: `FeatureBundle.admin_evidence`(`AdminEvidence`) 필드가 추가됐다. 기본 `None`이며
   기존 생성 코드는 영향받지 않는다.
 
-### kor-travel-geo 인증 결선 검증·비밀 유출 차단 (2026-07-29, T-VN-H21)
+### kor-travel-geo backend 인증·typed 오류 계약 (2026-07-29, T-VN-H21/#881)
 
-- **SECURITY**: kor-travel-geo 호출이 HTTP 오류로 실패할 때 응답 body·로그로 API key가
-  새던 경로를 막았다. `str(httpx.HTTPStatusError)`는 `?key=<SECRET>`가 포함된 request URL을
-  그대로 담고 그 문자열이 502 detail로 나갔다. 이제 query를 제거한 `GeoRequestError`로 감싸며
-  `__cause__`/`__context__` 어느 쪽으로도 원본이 남지 않는다. key가 비어 있던 동안에만
-  무해했으므로, key 결선과 동시에 실제 유출이 되는 상태였다.
-- **FIXED**: `KorTravelGeoRestClient`가 API key 미결선을 **생성 시점**에 거부한다
-  (`require_api_key` 기본 `True`, mock transport 테스트만 명시적 opt-out). 이전에는 키가 없어도
-  객체가 만들어져 서버에서 `400 E0100 query.key`로 막혔고, 그 응답만 보면 좌표/payload 문제로
-  오진하기 쉬웠다. 128자를 넘는 key도 같은 400이 되므로 함께 사전 차단한다.
-- **API**: geo API key 미결선은 `503`으로 보고한다(base_url 미설정과 동일 등급). 이전에는
-  `/admin/issues` 지오코딩 재시도가 `422`, offline-upload validation이 `409`로 응답해
-  서버측 설정 결함을 호출자 입력·상태 문제로 잘못 지목했다. 신규 예외
-  `GeoAuthNotConfiguredError`(503)·`GeoRequestError`(502)를 `kortravelmap.core`에서 re-export한다.
+- **SECURITY (breaking)**: API/Dagster/CLI가 kor-travel-geo public key를 URL query에 넣던
+  경로를 제거했다. backend는 geo trusted proxy header principal만 사용하며
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET`을 geo `KTG_ADMIN_PROXY_SECRET`과
+  결선한다. 브라우저 public/VWorld key와 공유하지 않는다.
+- **SECURITY**: credential은 `SecretStr`로 보관하며 request URL에는 query가 없다.
+  transport/status 원본 httpx 예외도 chain하지 않아 INFO URL·응답·traceback frame에서
+  secret이 노출되지 않는다.
+- **API**: `GeoAuthNotConfiguredError`와 `GeoRequestError`는 admin issues, offline upload,
+  feature-update 경계를 지나도 각각 503 `GEO_AUTH_NOT_CONFIGURED`, 502 `PROVIDER_ERROR`
+  problem+json으로 유지된다.
 - **CLI**: `import` 명령이 geo 결선 누락 시 traceback(exit 1) 대신 stderr 메시지와
   `exit 2`(`_EXIT_INVALID`)로 끝난다.
+- **REMOVED**: 실제 소비자가 읽지 않던 `openapi-sha256.json`과 생성·검사 코드를 제거했다.
+  OpenAPI freshness는 소비자가 핀 commit의 spec/subset을 직접 비교하는 게이트로만 검증한다.
 
 ### React Doctor·durable curation (2026-07-27, T-VN-47·T-VN-H13·H24)
 

@@ -136,22 +136,16 @@ class KorTravelMapSettings(BaseSettings):
         le=30.0,
         description="kor-travel-geo REST 호출 timeout seconds.",
     )
-    kor_travel_geo_api_key: SecretStr | None = Field(
+    kor_travel_geo_admin_proxy_secret: SecretStr | None = Field(
         default=None,
         description=(
-            "kor-travel-geo REST v2 public API key. geo PR#399 이후 외부/비신뢰 "
-            "호출에는 VWorld 호환 ``key`` query가 필요하다. 현재 운영은 "
-            "VWorld API key와 동일 값을 넣는다."
+            "kor-travel-geo trusted proxy 인증용 shared secret. Map backend는 "
+            "브라우저용 public API key를 query string으로 전달하지 않고, "
+            "``X-KTG-Actor``/``X-KTG-Roles``와 이 값을 "
+            "``X-KTG-Admin-Proxy-Secret`` header로 보낸다. geo의 "
+            "``KTG_ADMIN_PROXY_SECRET``과 같은 값을 사용한다."
         ),
     )
-
-    @property
-    def kor_travel_geo_api_key_value(self) -> str | None:
-        """kor-travel-geo REST client에 넘길 query key 원문 값."""
-        if self.kor_travel_geo_api_key is None:
-            return None
-        value = self.kor_travel_geo_api_key.get_secret_value().strip()
-        return value or None
 
     # ── Admin on-demand address/POI search ────────────────────────────────
     kakao_local_rest_api_key: SecretStr | None = Field(

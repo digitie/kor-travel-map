@@ -49,6 +49,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast, runtime_checkable
 
+from pydantic import SecretStr
+
 from kortravelmap.core.address import (
     extract_sido_code,
     extract_sigungu_code,
@@ -61,18 +63,9 @@ from kortravelmap.dto import Address, Coordinate
 if TYPE_CHECKING:
     import httpx
 
-# geo public_api_key의 query.key max_length. 초과 시 미설정과 같은 400 E0100이 돌아온다.
-_MAX_API_KEY_LENGTH: Final = 128
-
 
 def _raise_for_status_sanitized(resp: httpx.Response) -> None:
-    """``resp.raise_for_status()``를 하되 비밀이 든 메시지를 새로 만들지 않는다 (T-VN-H21).
-
-    ``str(httpx.HTTPStatusError)``는 request URL을 그대로 담고, 그 URL query에는
-    ``key=<SECRET>``가 들어 있다. 이 문자열은 상위 boundary에서 **502 응답 body와 로그로
-    그대로 흘러간다**(키가 비어 있던 동안만 무해했다). query string을 제거한 URL만 남기고,
-    ``from None``으로 원본을 연결하지 않아 traceback chain으로도 새지 않게 한다.
-    """
+    """HTTP status 오류를 credential 없는 typed 예외로 바꾼다."""
     import httpx as _httpx
 
     sanitized: GeoRequestError | None = None
@@ -817,55 +810,76 @@ class KorTravelGeoRestClient:
         http_client: httpx.AsyncClient,
         *,
         base_path: str = "/v2",
-        api_key: str | None = None,
-        require_api_key: bool = True,
+        admin_proxy_secret: SecretStr | None = None,
+        require_auth: bool = True,
     ) -> None:
-        """T-VN-H21: ``require_api_key``는 기본 ``True``다.
+        """backend-to-backend trusted proxy 인증을 생성 시점에 검증한다.
 
-        결선 검증을 **생성 시점**에 두어, 새 live 호출 지점이 추가돼도 별도 조치 없이
-        자동으로 보호된다(호출 지점마다 수동으로 guard를 붙이는 방식은 한 곳만 빠뜨려도
-        조용히 무력화된다 — 실제로 최초 구현이 그랬다).
+        public VWorld 호환 key는 브라우저 같은 외부 클라이언트용이다. backend가 이를
+        query string에 넣으면 access log와 traceback URL에 secret이 남으므로 사용하지
+        않는다. 대신 geo의 기존 trusted proxy 계약을 사용한다.
 
-        mock transport로만 도는 테스트처럼 key가 필요 없는 경우에만 명시적으로
-        ``require_api_key=False``로 opt-out한다.
+        mock transport로만 도는 테스트처럼 인증이 필요 없는 경우에만 명시적으로
+        ``require_auth=False``로 opt-out한다.
         """
         self._http = http_client
         self._base = base_path.rstrip("/")
-        self._api_key = api_key.strip() if api_key is not None else None
-        if require_api_key:
+        self._admin_proxy_secret = admin_proxy_secret
+        if require_auth:
             self.preflight()
 
     def preflight(self) -> None:
-        """인증 결선을 확인한다 (T-VN-H21).
-
-        geo PR#399 이후 `/v2/*`는 **외부/비신뢰 호출에** VWorld 호환 ``key`` query를 요구한다
-        (trusted admin proxy·service-token 경로는 우회 — ADR-060). key가 비어 있으면 서버가
-        **handler 실행 전에** ``400 E0100 query.key: Field required``로 막는데, 그 응답만 보면
-        좌표/payload 문제로 오인하기 쉽다(실제 오진 이력: ADR-060). 결선 누락을 원인 그대로
-        먼저 드러낸다.
-
-        비밀은 메시지에 넣지 않는다 — 결선 여부와 길이 위반 여부만 말한다.
-        """
-        if not self._api_key:
+        """geo trusted proxy shared secret 결선을 확인한다."""
+        if self._admin_proxy_secret is None:
             raise GeoAuthNotConfiguredError(
-                "kor-travel-geo REST v2 requires an API key but none is configured; "
-                "set KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY "
-                "(운영은 VWorld API key와 같은 값을 사용한다). "
-                "미설정 시 서버가 handler 실행 전에 400 E0100 query.key로 막는다."
+                "kor-travel-geo trusted proxy secret이 설정되지 않았습니다. "
+                "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET과 geo의 "
+                "KTG_ADMIN_PROXY_SECRET을 같은 값으로 설정하고 Map peer CIDR을 "
+                "geo의 KTG_ADMIN_TRUSTED_PROXY_CIDRS에 허용해야 합니다."
             )
-        # geo public_api_key는 128자 초과를 query.key string_too_long으로 되돌려보내
-        # 미설정과 동일한 E0100/400 envelope가 된다. 값은 노출하지 않고 길이만 알린다.
-        if len(self._api_key) > _MAX_API_KEY_LENGTH:
+        if not self._admin_proxy_secret.get_secret_value().strip():
             raise GeoAuthNotConfiguredError(
-                "kor-travel-geo REST v2 API key is too long "
-                f"({len(self._api_key)} > {_MAX_API_KEY_LENGTH} chars); "
-                "서버가 query.key string_too_long으로 400 E0100을 돌려준다."
+                "kor-travel-geo trusted proxy secret이 비어 있습니다. "
+                "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET을 설정하세요."
             )
 
-    def _query_params(self) -> dict[str, str] | None:
-        if not self._api_key:
+    def _trusted_proxy_headers(self) -> dict[str, str] | None:
+        if self._admin_proxy_secret is None:
             return None
-        return {"key": self._api_key}
+        return {
+            "X-KTG-Actor": "kor-travel-map",
+            "X-KTG-Roles": "source_file_viewer",
+            "X-KTG-Admin-Proxy-Secret": (
+                self._admin_proxy_secret.get_secret_value().strip()
+            ),
+        }
+
+    async def _post(self, path: str, *, json: dict[str, Any]) -> httpx.Response:
+        """transport 오류도 원본 request를 연결하지 않는 typed 예외로 바꾼다."""
+        import httpx as _httpx
+
+        response: httpx.Response | None = None
+        sanitized: GeoRequestError | None = None
+        try:
+            response = await self._http.post(
+                path,
+                json=json,
+                headers=self._trusted_proxy_headers(),
+            )
+        except _httpx.HTTPError as exc:
+            request = getattr(exc, "request", None)
+            safe_url = (
+                request.url.copy_with(query=None)
+                if request is not None
+                else self._http.base_url
+            )
+            sanitized = GeoRequestError(
+                f"kor-travel-geo transport 실패: {type(exc).__name__} for {safe_url}"
+            )
+        if sanitized is not None:
+            raise sanitized
+        assert response is not None
+        return response
 
     async def reverse(
         self,
@@ -889,11 +903,7 @@ class KorTravelGeoRestClient:
         }
         if radius_m is not None:
             body["radius_m"] = radius_m
-        resp = await self._http.post(
-            f"{self._base}/reverse",
-            json=body,
-            params=self._query_params(),
-        )
+        resp = await self._post(f"{self._base}/reverse", json=body)
         _raise_for_status_sanitized(resp)
         return _parse_reverse_response(resp.json())
 
@@ -914,11 +924,7 @@ class KorTravelGeoRestClient:
             body["road_address"] = address
         else:
             body["jibun_address"] = address
-        resp = await self._http.post(
-            f"{self._base}/geocode",
-            json=body,
-            params=self._query_params(),
-        )
+        resp = await self._post(f"{self._base}/geocode", json=body)
         _raise_for_status_sanitized(resp)
         return _parse_geocode_response(resp.json())
 
@@ -937,11 +943,7 @@ class KorTravelGeoRestClient:
             "radius_km": radius_km,
             "levels": list(levels),
         }
-        resp = await self._http.post(
-            f"{self._base}/regions/within-radius",
-            json=body,
-            params=self._query_params(),
-        )
+        resp = await self._post(f"{self._base}/regions/within-radius", json=body)
         _raise_for_status_sanitized(resp)
         return _parse_regions_within_radius_response(resp.json())
 

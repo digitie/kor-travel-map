@@ -131,10 +131,11 @@ class FileStoreError(KorTravelMapError):
 
 
 class GeoAuthNotConfiguredError(KorTravelMapError):
-    """kor-travel-geo REST v2 호출에 필요한 API key가 결선되지 않았다 (T-VN-H21).
+    """kor-travel-geo trusted proxy 인증이 결선되지 않았다.
 
-    key가 없으면 geo 서버는 handler 실행 전에 ``400 E0100 query.key: Field required``로
-    막는데, 그 응답만 보면 좌표/payload 문제로 오인하기 쉽다(실제 오진 이력: ADR-060).
+    backend-to-backend 호출은 public API key를 URL query로 전달하지 않는다. geo가
+    신뢰하는 peer CIDR과 ``KTG_ADMIN_PROXY_SECRET``을 Map의
+    ``KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET``에 함께 결선한다.
     **서버측 설정 결함**이므로 호출자 입력 오류(422)나 상태 충돌(409)이 아니라
     ``ValidationError`` 계열과 분리한다.
 
@@ -144,11 +145,10 @@ class GeoAuthNotConfiguredError(KorTravelMapError):
 
 
 class GeoRequestError(KorTravelMapError):
-    """kor-travel-geo 호출이 HTTP 오류로 실패했다 (비밀 제거된 메시지).
+    """kor-travel-geo 호출이 transport/HTTP 오류로 실패했다.
 
-    raw ``httpx`` 오류 문자열에는 ``?key=<SECRET>``가 포함된 request URL이 들어가고,
-    그 문자열이 API 응답 body와 로그로 그대로 흘러간다. 본 예외는 query string을 제거한
-    URL만 담는다 (T-VN-H21, SKILL.md §4 비밀 비출력).
+    원본 ``httpx`` 예외는 request URL·header를 보존하므로 상위 boundary로 전달하지
+    않는다. 본 예외는 query와 credential을 제거한 method/status/path만 담는다.
 
     HTTP 502 매핑.
     """

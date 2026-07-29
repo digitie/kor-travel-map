@@ -1137,7 +1137,7 @@ def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
     try:
         client = KorTravelGeoRestClient(
             http,
-            api_key=settings.kor_travel_geo_api_key_value,
+            admin_proxy_secret=settings.kor_travel_geo_admin_proxy_secret,
         )
         yield kor_travel_geo_reverse_geocoder(
             client,

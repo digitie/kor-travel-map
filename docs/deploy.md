@@ -225,8 +225,9 @@ API→Dagster GraphQL 호출은 docker 내부망(`http://dagster:12702`,
 - `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL` — 백엔드(API/Dagster)의 server-side 정/역
   지오코딩 보강 주소. **비우면 geocoding이 꺼져 좌표만 적재**한다. geo가 같은 docker
   호스트에 있으면 `http://host.docker.internal:12501`이 프록시 왕복을 피해 더 효율적이다.
-- `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` — 백엔드(API/Dagster/CLI)의 kor-travel-geo v2
-  호출용 `key` query 값. 현재 VWorld API key와 같은 값을 넣는다.
+- `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET` — 백엔드(API/Dagster/CLI)의
+  kor-travel-geo trusted proxy shared secret. geo `KTG_ADMIN_PROXY_SECRET`과 같은 값을
+  넣고 geo trusted proxy CIDR에 Map peer를 허용한다. public/VWorld key와 공유하지 않는다.
   geo console(`<geo-console-host>`, `:12505`)은 운영 콘솔 reverse-proxy 라우트일 뿐
   앱 env가 아니다.
 

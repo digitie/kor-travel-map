@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from kortravelmap.core.exceptions import GeoRequestError
 from kortravelmap.dto import Address, Coordinate
@@ -40,7 +41,7 @@ pytestmark = pytest.mark.unit
 
 def _geo_client(http: httpx.AsyncClient, **kwargs: Any) -> KorTravelGeoRestClient:
     """mock transport 테스트용 client — 실 geo를 때리지 않으므로 결선 검증을 opt-out한다."""
-    return KorTravelGeoRestClient(http, require_api_key=False, **kwargs)
+    return KorTravelGeoRestClient(http, require_auth=False, **kwargs)
 
 # -- kor-travel-geo REST v2 응답 fake (structural Protocol 만족) -------------------
 
@@ -775,11 +776,19 @@ def test_rest_client_custom_base_path() -> None:
     assert seen == ["/api/v2/reverse"]
 
 
-def test_rest_client_api_key_is_sent_as_vworld_compatible_query() -> None:
-    seen: list[tuple[str, str]] = []
+def test_rest_client_uses_trusted_proxy_headers_without_query_secret() -> None:
+    seen: list[tuple[str, str, str, str, str]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append((request.url.path, request.url.params.get("key", "")))
+        seen.append(
+            (
+                request.url.path,
+                request.url.query.decode(),
+                request.headers["X-KTG-Actor"],
+                request.headers["X-KTG-Roles"],
+                request.headers["X-KTG-Admin-Proxy-Secret"],
+            )
+        )
         if request.url.path.endswith("/regions/within-radius"):
             return httpx.Response(
                 200,
@@ -794,16 +803,37 @@ def test_rest_client_api_key_is_sent_as_vworld_compatible_query() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, api_key=" geo-key ")
+            client = KorTravelGeoRestClient(
+                http,
+                admin_proxy_secret=SecretStr(" geo-proxy-secret "),
+            )
             await client.reverse(127.0, 37.0)
             await client.geocode("서울특별시 중구 세종대로 110")
             await client.regions_within_radius(lon=126.978, lat=37.5665)
 
     asyncio.run(_run())
     assert seen == [
-        ("/v2/reverse", "geo-key"),
-        ("/v2/geocode", "geo-key"),
-        ("/v2/regions/within-radius", "geo-key"),
+        (
+            "/v2/reverse",
+            "",
+            "kor-travel-map",
+            "source_file_viewer",
+            "geo-proxy-secret",
+        ),
+        (
+            "/v2/geocode",
+            "",
+            "kor-travel-map",
+            "source_file_viewer",
+            "geo-proxy-secret",
+        ),
+        (
+            "/v2/regions/within-radius",
+            "",
+            "kor-travel-map",
+            "source_file_viewer",
+            "geo-proxy-secret",
+        ),
     ]
 
 
@@ -1488,17 +1518,7 @@ def test_cached_reverse_geocoder_caches_none() -> None:
     assert calls == 1
 
 
-# --- T-VN-H21: kor-travel-geo 인증 결선 preflight ---
-#
-# geo PR#399 이후 `/v2/*`는 **외부/비신뢰 호출에** VWorld 호환 `key` query를 요구한다
-# (trusted admin proxy / service-token 경로는 우회 — ADR-060). key가 비면 서버가 **handler
-# 실행 전에** `400 E0100 query.key: Field required`로 막는데, 그 응답만 보면 좌표/payload
-# 문제로 오진하기 쉽다(실제 오진 이력이 있어 이 결선 검증을 도입했다).
-
-
-
-
-def test_geo_rest_client_requires_api_key_at_construction() -> None:
+def test_geo_rest_client_requires_proxy_secret_at_construction() -> None:
     """결선 검증은 **생성 시점**에 일어난다 (T-VN-H21).
 
     호출 지점마다 guard를 손으로 붙이는 방식은 한 곳만 빠뜨려도 조용히 무력화된다.
@@ -1509,13 +1529,12 @@ def test_geo_rest_client_requires_api_key_at_construction() -> None:
 
     http = httpx.AsyncClient(base_url="http://127.0.0.1:12501")
     try:
-        for missing in (None, "", "   "):
+        for missing in (None, SecretStr(""), SecretStr("   ")):
             with pytest.raises(
                 GeoAuthNotConfiguredError,
-                match="KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY",
-            ) as excinfo:
-                KorTravelGeoRestClient(http, api_key=missing)
-            assert "E0100" in str(excinfo.value)
+                match="KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_ADMIN_PROXY_SECRET",
+            ):
+                KorTravelGeoRestClient(http, admin_proxy_secret=missing)
     finally:
         asyncio.run(http.aclose())
 
@@ -1537,82 +1556,83 @@ def test_geo_auth_error_is_not_a_value_error() -> None:
     assert not issubclass(GeoAuthNotConfiguredError, ValidationError)
 
 
-def test_geo_rest_client_opt_out_allows_keyless_construction() -> None:
+def test_geo_rest_client_opt_out_allows_authless_construction() -> None:
     """mock transport 테스트는 명시적으로만 결선 검증을 건너뛴다."""
     from kortravelmap.geocoding import KorTravelGeoRestClient
 
     http = httpx.AsyncClient(base_url="http://127.0.0.1:12501")
     try:
         # 헬퍼가 아니라 opt-out 인자 자체를 직접 검증한다.
-        client = KorTravelGeoRestClient(http, require_api_key=False)
-        assert client._query_params() is None  # 키가 없으면 query도 붙지 않는다.
-    finally:
-        asyncio.run(http.aclose())
-
-
-def test_geo_rest_client_rejects_over_long_api_key() -> None:
-    """128자 초과 key도 서버에서 같은 400 E0100이 되므로 미리 막는다 (T-VN-H21)."""
-    from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
-    from kortravelmap.geocoding import KorTravelGeoRestClient
-
-    too_long = "k" * 129
-    http = httpx.AsyncClient(base_url="http://127.0.0.1:12501")
-    try:
-        with pytest.raises(GeoAuthNotConfiguredError, match="too long") as excinfo:
-            KorTravelGeoRestClient(http, api_key=too_long)
-        assert too_long not in str(excinfo.value)  # 길이만 말하고 값은 말하지 않는다.
-        assert "129" in str(excinfo.value)
-        KorTravelGeoRestClient(http, api_key="k" * 128)  # 경계값은 통과.
+        client = KorTravelGeoRestClient(http, require_auth=False)
+        assert client._trusted_proxy_headers() is None
     finally:
         asyncio.run(http.aclose())
 
 
 @pytest.mark.parametrize("status_code", [400, 401, 500])
-def test_geo_http_error_message_never_contains_the_api_key(status_code: int) -> None:
-    """geo HTTP 오류 문자열에 ``key=<SECRET>``가 남지 않는다 (T-VN-H21).
-
-    ``str(httpx.HTTPStatusError)``는 request URL 전체(=query 포함)를 담고, 그 문자열이
-    상위 boundary에서 **502 응답 body와 로그로 그대로 나간다**. 키를 결선하는 순간
-    무해했던 경로가 실제 유출 경로가 되므로, 실 요청을 흘려 회귀를 고정한다.
-    """
+def test_geo_http_error_never_exposes_proxy_secret(
+    status_code: int,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """URL, typed 오류, traceback frame, httpx INFO log 어디에도 secret이 없다."""
     from kortravelmap.core.exceptions import GeoRequestError
     from kortravelmap.geocoding import KorTravelGeoRestClient
 
-    secret = "SUPER-SECRET-VWORLD-KEY-0123456789"
+    secret = "SUPER-SECRET-GEO-PROXY-0123456789"
 
     def handler(request: httpx.Request) -> httpx.Response:
-        # 키가 실제로 wire에 실렸는지부터 확인한다 — 아니면 이 테스트는 공허해진다.
-        assert request.url.params.get("key") == secret
+        assert request.url.query == b""
+        assert request.headers["X-KTG-Admin-Proxy-Secret"] == secret
         return httpx.Response(status_code, json={"status": "ERROR"})
 
     async def scenario() -> None:
         async with _mock_client(handler) as http:
-            client = KorTravelGeoRestClient(http, api_key=secret)
+            client = KorTravelGeoRestClient(
+                http,
+                admin_proxy_secret=SecretStr(secret),
+            )
+            with pytest.raises(GeoRequestError) as excinfo:
+                await client.reverse(127.0276, 37.4979)
+            frames: list[str] = []
+            traceback = excinfo.value.__traceback__
+            while traceback is not None:
+                filename = traceback.tb_frame.f_code.co_filename
+                if "/src/kortravelmap/" in filename:
+                    frames.append(repr(traceback.tb_frame.f_locals))
+                traceback = traceback.tb_next
+            rendered = (
+                f"{excinfo.value}{excinfo.value!r}"
+                f"{vars(client)!r}{''.join(frames)}"
+            )
+            assert secret not in rendered
+            assert "key=" not in rendered
+            assert str(status_code) in rendered
+            assert excinfo.value.__cause__ is None
+            assert excinfo.value.__context__ is None
+
+    caplog.set_level("INFO", logger="httpx")
+    asyncio.run(scenario())
+    assert secret not in caplog.text
+    assert "?key=" not in caplog.text
+
+
+def test_geo_transport_error_drops_original_request_and_secret() -> None:
+    secret = "SUPER-SECRET-GEO-PROXY-TRANSPORT"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connect failed", request=request)
+
+    async def scenario() -> None:
+        async with _mock_client(handler) as http:
+            client = KorTravelGeoRestClient(
+                http,
+                admin_proxy_secret=SecretStr(secret),
+            )
             with pytest.raises(GeoRequestError) as excinfo:
                 await client.reverse(127.0276, 37.4979)
             rendered = f"{excinfo.value}{excinfo.value!r}"
             assert secret not in rendered
-            assert "key=" not in rendered
-            assert str(status_code) in rendered
-            # traceback chain으로도 새지 않는다 (from None).
             assert excinfo.value.__cause__ is None
             assert excinfo.value.__context__ is None
 
     asyncio.run(scenario())
-
-
-def test_geo_http_error_leak_guard_is_not_tautological() -> None:
-    """위 회귀 테스트가 실제 유출을 잡아내는지 스스로 증명한다.
-
-    비밀을 그대로 담는 구현을 흉내 내 같은 단언을 돌렸을 때 반드시 실패해야 한다.
-    """
-    secret = "SUPER-SECRET-VWORLD-KEY-0123456789"
-    leaking = (
-        f"Client error '400 Bad Request' for url "
-        f"'http://127.0.0.1:12501/v2/reverse?key={secret}'"
-    )
-    assert secret in leaking  # 유출 구현은 단언을 통과하지 못한다.
-
-    sanitized = "kor-travel-geo 호출 실패: 400 Bad Request for http://127.0.0.1:12501/v2/reverse"
-    assert secret not in sanitized
-    assert "key=" not in sanitized
