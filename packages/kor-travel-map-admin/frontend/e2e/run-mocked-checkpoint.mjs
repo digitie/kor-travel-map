@@ -865,14 +865,15 @@ try {
     { captureOutput: true },
   );
   rmSync(runtimeEnvPath, { force: true });
-  ownedContainerId = createResult.stdout?.trim();
+  const createdContainerId = createResult.stdout?.trim();
   if (
     createResult.status !== 0 ||
-    !ownedContainerId ||
-    !/^[0-9a-f]{64}$/.test(ownedContainerId)
+    !createdContainerId ||
+    !/^[0-9a-f]{64}$/.test(createdContainerId)
   ) {
     throw new Error("self-owned frontend container를 생성할 수 없습니다.");
   }
+  ownedContainerId = createdContainerId;
   const startResult = await runManagedChild(
     "docker",
     ["start", ownedContainerId],
