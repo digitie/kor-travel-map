@@ -497,5 +497,5 @@ async def sync_integrity_findings(
                 "live_keys": live_keys,
             },
         )
-        resolved = int(result.rowcount or 0)
+        resolved = int(getattr(result, "rowcount", 0) or 0)
     return upserted, resolved

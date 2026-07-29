@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
@@ -23,8 +23,19 @@ class _Feature:
 
 
 @dataclass(frozen=True)
+class _SourceRecord:
+    """T-VN-H30A: dedupe_key는 payload hash가 아닌 안정적 entity id에 걸린다."""
+
+    source_record_key: str
+    source_entity_id: str
+
+
+@dataclass(frozen=True)
 class _Bundle:
     feature: _Feature
+    source_record: _SourceRecord = field(
+        default_factory=lambda: _SourceRecord("sr_x", "entity-x")
+    )
 
 
 class _Context:
