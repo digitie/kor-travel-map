@@ -28,7 +28,7 @@ barrier로 직렬화한다.
     [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
     [~] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, durable하지 않음) →
-    [ ] `T-VN-H36`(import가 이름만으로 자동 링크 — H33 파생, H35보다 선행) →
+    [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
     [ ] `T-VN-H35`(prod 마이그레이션 지연 0064~0067 — H33 부수 발견) →
     [ ] `T-VN-H34`(H25A/H25B 미충족 AC 마무리) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
@@ -476,7 +476,50 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > → `T-VN-H35`로 분리한다. 또 `source_record_key`에는 `provider_sync.source_records`
   > FK가 걸려 있어 curation 키를 넣을 수 없다(ledger가 provider 적재 전제로 설계됨).
 
-- [ ] T-VN-H36 — **curation import가 이름만으로 자동 링크한다 (H33 파생, H35보다 선행)**
+- [x] T-VN-H36 — **curation import가 이름만으로 자동 링크한다 (H33 파생, H35보다 선행)**
+
+  **완료(2026-07-29)**. `_adopted_match`로 **CSV `feature_id`가 빈 행은 후보 수와 무관하게
+  링크하지 않는다**. 후보는 버리지 않고 `candidates`로 계속 노출하므로 운영자가 preview에서
+  보고 admin에서 직접 링크할 수 있다 — 자동으로 붙는 것만 없앴다.
+
+  **AC 결과**
+
+  | AC | 결과 |
+  | --- | --- |
+  | H33의 3건이 import 후에도 미연결 | ✅ 막히는 자동링크가 **정확히 그 3건** |
+  | 정당한 링크 손실 수치 | ✅ **0건**. 막히는 3건 전부 region 불일치(강원→서울 ×2, 충북→전남) |
+  | 미연결 사유 구분 | ✅ `unmatched`(후보 없음) vs `name_only_match`(이름만 맞는 후보 있음). 사유 문장에 후보 소재 시도명이 들어간다 |
+  | e2e 기대값 | ✅ 486 불변 — `item_count`가 미연결 item도 세므로(실측) 링크가 줄어도 membership은 안 바뀐다. 기대값 갱신 불필요 |
+  | 반증 가능성 | ✅ 아래 |
+  | 배포 순서 | ✅ **H35 이미지에 반드시 포함**. 아래 |
+
+  근거 산출물: [`reports/h36-link-impact-2026-07-29.json`](reports/h36-link-impact-2026-07-29.json)
+  (`scripts/h36_link_impact.py`, 커밋 CSV 486행 전수 + prod 리졸버 SQL 재생, 읽기 전용).
+  빈 264행의 후보 분포는 **0건 256 / 2건 이상 5 / 1건 3**이다.
+
+  **반증 가능성** — 이 세션에서 반복해 무너진 지점이라 명시한다.
+  - 변경이 아무것도 안 막았다면 `blocked_autolinks`가 0으로 나온다.
+  - 링크를 통째로 껐다면 `csv_specified`(222)가 0이 된다 — 이 값은 리졸버가 아니라
+    **CSV 파일**에서 오므로 두 숫자가 같이 움직이지 않는다.
+  - 리졸버 조회가 죽었다면 후보 분포가 전부 0이 된다.
+  - 테스트에도 대조를 넣었다: **음성 대조**(후보 0건은 여전히 `unmatched` — 리졸버가 통째로
+    죽은 것과 구분), **양성 대조**(CSV가 `feature_id`를 적은 행은 그대로 링크 — "링크 기능을
+    껐다"면 실패). 대조 없이 "전부 미연결"만 보면 성공과 고장이 구별되지 않는다.
+
+  **배포 순서 — 이 변경은 `T-VN-H35` 이미지에 포함돼야 한다.**
+  H35의 인수에는 commit 모드 import 실행이 들어간다(live spec의 `palaceComponents`
+  단언은 `0066` backfill이 `legacy:<uuid>`로 채우는 값을 실제 import로 덮어야 성립한다).
+  그 실행 시점에 이 게이트가 이미지에 없으면 3건이 그 자리에서 되살아난다.
+
+  **표면 비용 0** — SQL·DTO·openapi·마이그레이션 무변경. `code`는 openapi에서 자유
+  문자열(`CurationImportIssueView.code: str`)이라 새 코드를 늘려도 생성 타입·프런트
+  수기 union·배지 맵이 안 바뀐다. `ImportRowStatus`(enum) 확장은 그 5지점 연쇄를 부르므로
+  **일부러 피했다**. 후보 시도명은 `FeatureMatch.address` jsonb에 이미 있어(리졸버가 이미
+  SELECT한다) 리졸버 SQL을 넓히지 않았다.
+  기존 테스트 **23건 무손상**(27 passed) — 라우터 import 테스트 중 비어 있지 않은 후보를
+  돌려주는 것은 하나뿐이고 그건 `feature_id` 명시 경로다.
+
+  <details><summary>원래 정의 (완료 전)</summary>
 
   `curation_repo._RESOLVE_FEATURES_BATCH_SQL`은 CSV `feature_id`가 비면
   `lower(f.name) = lower(place_name)` 단독으로 후보를 찾고, 단일 매칭이면 그대로 링크한다.
@@ -506,6 +549,17 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   **비목표**: 미연결 264건을 사람이 링크하는 작업 자체(그건 `T-VN-H34`/`T-VN-H31`).
   여기서는 **잘못 붙는 것을 막는 것**까지만 한다.
+
+  </details>
+
+  > **부수 정정 — "prod는 import 자체가 실패한다"는 틀렸다.** H33 작업 중 나는
+  > *prod가 `0063`이라 HEAD의 import SQL이 참조하는 컬럼이 없어 import가 실패하므로 3건이
+  > 당장 되살아나지는 않는다*고 적었다. 조사 결과 **배포된 이미지(`c8ed6164`)의 import
+  > 코드에는 `source_present`/`external_component_id` 참조가 0건**이라 prod 스키마와
+  > 정합하며 **오늘도 정상 동작한다**. 또 CSV import는 `_UPSERT_ITEM_SQL`이 아니라
+  > `_BULK_UPSERT_ITEMS_SQL`을 탄다(전자는 admin 단건 POST 전용). 즉 "HEAD 코드를 prod
+  > 스키마에 돌리면 실패한다"가 참일 뿐, 내가 그걸 "prod에서 import가 실패한다"로 옮겨
+  > 적은 것이다. **또 배포되지 않은 코드를 prod 동작으로 읽었다.**
 
 - [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0067)**
 
