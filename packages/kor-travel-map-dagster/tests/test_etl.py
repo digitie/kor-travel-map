@@ -315,3 +315,115 @@ def test_droppable_codes_are_explicit_and_minimal() -> None:
         "admin_code_stale_emd",
     ):
         assert code not in DROPPABLE_ISSUE_CODES
+
+
+def _issue(code: str, feature_id: str, severity: str = "warning") -> FeatureAddressIssue:
+    return FeatureAddressIssue(
+        feature_id=feature_id,
+        source_record_key=f"sr_{feature_id}",
+        code=code,
+        severity=severity,
+        message="msg",
+        provider_address="어딘가",
+        bjd_code="1111017700",
+        sigungu_code="11110",
+    )
+
+
+def test_findings_link_fk_columns_only_for_loaded_features() -> None:
+    """FK 안전성 (T-VN-H30A).
+
+    ``ops.data_integrity_violations``의 ``feature_id``/``source_record_key``는 FK다.
+    주소 검증은 적재 **전**에 돌아서 drop된 행은 두 대상이 DB에 없으므로, 그대로 넘기면
+    기록 자체가 FK 위반으로 실패한다. 적재된 대상만 ``linked``여야 한다.
+    """
+    from kortravelmap.dagster.etl import _address_validation_findings
+
+    summary = FeatureAddressValidationSummary(
+        total=2,
+        issue_count=2,
+        error_count=1,
+        warning_count=1,
+        issues=(
+            _issue("admin_code_stale_sido", "feature-loaded"),
+            _issue("missing_address", "feature-dropped", severity="error"),
+        ),
+    )
+    findings = _address_validation_findings(
+        summary,
+        provider="demo",
+        dataset_key="places",
+        loaded_feature_ids={"feature-loaded"},
+        dropped_feature_ids=frozenset({"feature-dropped"}),
+    )
+    by_fid = {f.payload["feature_id"]: f for f in findings}
+
+    loaded = by_fid["feature-loaded"]
+    assert loaded.linked is True
+    assert loaded.feature_id == "feature-loaded"
+
+    dropped = by_fid["feature-dropped"]
+    assert dropped.linked is False  # ← FK 대상이 DB에 없다
+    assert dropped.payload["dropped"] is True
+    # id 자체는 잃지 않는다 — payload로 나른다.
+    assert dropped.payload["source_record_key"] == "sr_feature-dropped"
+
+
+def test_finding_dedupe_key_is_stable_and_discriminating() -> None:
+    """같은 레코드·같은 code는 run을 반복해도 한 행으로 접혀야 한다 (T-VN-H30A)."""
+    from kortravelmap.dagster.etl import _address_validation_findings
+
+    def build(code: str, feature_id: str, dataset: str = "places") -> str:
+        summary = FeatureAddressValidationSummary(
+            total=1,
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            issues=(_issue(code, feature_id),),
+        )
+        return _address_validation_findings(
+            summary,
+            provider="demo",
+            dataset_key=dataset,
+            loaded_feature_ids={feature_id},
+            dropped_feature_ids=frozenset(),
+        )[0].dedupe_key
+
+    base = build("admin_code_stale_sido", "f1")
+    assert base == build("admin_code_stale_sido", "f1")  # 재실행 시 동일
+    assert base != build("admin_code_stale_sigungu", "f1")  # code가 다르면 별건
+    assert base != build("admin_code_stale_sido", "f2")  # 레코드가 다르면 별건
+    assert base != build("admin_code_stale_sido", "f1", dataset="other")  # dataset 분리
+
+
+async def test_findings_are_recorded_after_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """기록은 적재 **후**에 일어나고 건수가 metadata로 노출된다 (T-VN-H30A)."""
+    bundles = [_Bundle(_Feature("feature-0"))]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            issues=(_issue("admin_code_stale_sido", "feature-0"),),
+        ),
+    )
+
+    await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+    )
+
+    assert context.metadata[-1]["address_validation_findings_recorded"] == 1
+    assert "address_validation_findings_unrecorded" not in context.metadata[-1]
+    # 적재가 먼저 일어났어야 linked가 성립한다.
+    assert client.chunks == [("feature-0",)]
+    assert client.recorded_findings[0].linked is True
