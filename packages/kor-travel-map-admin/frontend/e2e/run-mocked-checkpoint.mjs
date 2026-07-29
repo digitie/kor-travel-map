@@ -1,8 +1,9 @@
 import { spawn, spawnSync } from "node:child_process";
 import { pbkdf2Sync, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { createRequire } from "node:module";
+import { connect as connectTcp, isIP } from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -178,6 +179,7 @@ let ownedNetworkId;
 let imageInspect;
 let activeChild;
 let denyProxyServer;
+let frontendProxyServer;
 let deniedNetworkAttempts = 0;
 let filesystemCleaned = false;
 let cleanupPromise;
@@ -224,10 +226,24 @@ function closeDenyProxy() {
   });
 }
 
+function closeFrontendProxy() {
+  return new Promise((resolve) => {
+    if (!frontendProxyServer) {
+      resolve();
+      return;
+    }
+    const server = frontendProxyServer;
+    frontendProxyServer = undefined;
+    server.close(() => resolve());
+    server.closeAllConnections();
+  });
+}
+
 function cleanup() {
   cleanupFilesystem();
   cleanupPromise ??= (async () => {
     await closeDenyProxy();
+    await closeFrontendProxy();
     await runCleanupCommand(["rm", "-f", ownedContainerName]);
     if (ownedNetworkId) {
       await runCleanupCommand(["network", "rm", ownedNetworkName]);
@@ -237,6 +253,60 @@ function cleanup() {
     }
   })();
   return cleanupPromise;
+}
+
+function startFrontendProxy(targetHost) {
+  return new Promise((resolve, reject) => {
+    if (isIP(targetHost) !== 4) {
+      reject(new Error("frontend internal IPv4 identity가 올바르지 않습니다."));
+      return;
+    }
+    const server = createServer((request, response) => {
+      const upstream = httpRequest(
+        {
+          headers: request.headers,
+          host: targetHost,
+          method: request.method,
+          path: request.url,
+          port: basePort,
+        },
+        (upstreamResponse) => {
+          response.writeHead(
+            upstreamResponse.statusCode ?? 502,
+            upstreamResponse.headers,
+          );
+          upstreamResponse.pipe(response);
+        },
+      );
+      upstream.on("error", () => {
+        if (!response.headersSent) response.writeHead(502);
+        response.end();
+      });
+      request.pipe(upstream);
+    });
+    server.on("upgrade", (request, socket, head) => {
+      const upstream = connectTcp(basePort, targetHost, () => {
+        const headers = Object.entries(request.headers)
+          .flatMap(([name, value]) =>
+            Array.isArray(value)
+              ? value.map((item) => `${name}: ${item}`)
+              : [`${name}: ${value ?? ""}`],
+          )
+          .join("\r\n");
+        upstream.write(
+          `${request.method} ${request.url} HTTP/${request.httpVersion}\r\n${headers}\r\n\r\n`,
+        );
+        if (head.length > 0) upstream.write(head);
+        socket.pipe(upstream).pipe(socket);
+      });
+      upstream.on("error", () => socket.destroy());
+    });
+    server.once("error", reject);
+    server.listen(basePort, "127.0.0.1", () => {
+      frontendProxyServer = server;
+      resolve();
+    });
+  });
 }
 
 function startDenyProxy() {
@@ -599,8 +669,6 @@ try {
       ownedContainerName,
       "--network",
       ownedNetworkName,
-      "--publish",
-      `127.0.0.1:${basePort}:${basePort}`,
       "--read-only",
       "--cap-drop",
       "ALL",
@@ -632,6 +700,12 @@ try {
     throw new Error("self-owned frontend container를 시작할 수 없습니다.");
   }
   const containerInspect = await inspectOwnedContainer();
+  const frontendContainerIp =
+    containerInspect.NetworkSettings?.Networks?.[ownedNetworkName]?.IPAddress;
+  if (!frontendContainerIp || isIP(frontendContainerIp) !== 4) {
+    throw new Error("self-owned frontend internal IPv4 identity를 확인할 수 없습니다.");
+  }
+  await startFrontendProxy(frontendContainerIp);
   const frontendBuildInfo = await readBuildInfo(30_000);
   if (frontendBuildInfo.revision !== revision) {
     throw new Error(

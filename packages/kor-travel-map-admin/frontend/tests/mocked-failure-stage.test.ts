@@ -75,6 +75,13 @@ describe("mocked checkpoint isolation", () => {
     expect(runnerSource).toContain('"HOSTNAME=0.0.0.0"');
     expect(runnerSource).toContain('"network",\n      "create",\n      "--internal"');
     expect(runnerSource).not.toContain('"--network",\n      "host"');
+    expect(runnerSource).not.toContain('"--publish"');
+    expect(runnerSource).toContain(
+      'server.listen(basePort, "127.0.0.1"',
+    );
+    expect(runnerSource).toContain(
+      "await startFrontendProxy(frontendContainerIp)",
+    );
     expect(runnerSource).toContain("E2E_STORAGE_STATE: storageStatePath");
     expect(runnerSource).toContain(
       "PLAYWRIGHT_ARTIFACT_ROOT: playwrightArtifactRoot",
