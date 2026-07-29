@@ -1023,7 +1023,7 @@ function LocationEditDialog({
   );
 }
 
-export function FeatureChangeRequestsClient({
+function useFeatureChangeRequestsClientController({
   prefill,
   view = "request",
   highlightRequestId = null,
@@ -1513,52 +1513,60 @@ export function FeatureChangeRequestsClient({
     [anyMutationPending, approve, reject],
   );
 
+  return {
+    action,
+    anyMutationPending,
+    applyRegionCandidate,
+    categories,
+    categoryItems,
+    changes,
+    columns,
+    correctionBasis,
+    correctionConflict,
+    form,
+    formCoord,
+    formCoordError,
+    formError,
+    formMarkerIconOptions,
+    highlightRequestId,
+    items,
+    locationDialogOpen,
+    mutationError,
+    pageSize,
+    q,
+    reloadCorrectionBasis,
+    resetForm,
+    reviewMode,
+    selectedCorrectionBasis,
+    selectedRequest,
+    setAction,
+    setFormError,
+    setLocationDialogOpen,
+    setPageSize,
+    setQ,
+    setSelectedRequest,
+    setStatus,
+    showRequestForm,
+    showReview,
+    status,
+    submitChange,
+    unsupportedUpdateKind,
+    updateForm,
+  };
+}
+
+function ChangeRequestFeedback({
+  changes,
+  correctionBasis,
+  correctionConflict,
+  formError,
+  mutationError,
+  reloadCorrectionBasis,
+  setFormError,
+}: Pick<ReturnType<typeof useFeatureChangeRequestsClientController>, "changes" | "correctionBasis" | "correctionConflict" | "formError" | "mutationError" | "reloadCorrectionBasis" | "setFormError">) {
   return (
-    <AdminShell
-      actions={
-        <>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/features"
-          >
-            <ClipboardListIcon data-icon="inline-start" />
-            목록
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href={
-              showReview
-                ? "/admin/features/change-requests"
-                : "/admin/features/change-reviews"
-            }
-          >
-            {showReview ? (
-              <PlusIcon data-icon="inline-start" />
-            ) : (
-              <CheckIcon data-icon="inline-start" />
-            )}
-            {showReview ? "변경 요청 작성" : "검수 화면"}
-          </Link>
-          <Button
-            disabled={changes.isFetching}
-            type="button"
-            variant="outline"
-            onClick={() => void changes.refetch()}
-          >
-            <RefreshCwIcon data-icon="inline-start" />
-            새로고침
-          </Button>
-        </>
-      }
-      description={
-        showReview
-          ? "변경 요청을 검수합니다."
-          : "Feature를 추가·수정·삭제하는 요청을 작성합니다."
-      }
-      title={showReview ? "Feature 검수" : "변경 요청 작성"}
-    >
-      <div className="flex flex-col gap-4">
-        {(changes.isError ||
+    <>
+{(changes.isError ||
           (!correctionConflict && mutationError) ||
           correctionBasis.isError ||
           formError) && (
@@ -1600,10 +1608,23 @@ export function FeatureChangeRequestsClient({
             </AlertDescription>
           </Alert>
         ) : null}
+    </>
+  );
+}
 
-        {showRequestForm ? (
-          <form className="flex flex-col gap-4" onSubmit={submitChange}>
-          <section className="rounded-lg border bg-background p-4">
+function ChangeRequestCoreFields({
+  anyMutationPending,
+  correctionBasis,
+  correctionConflict,
+  form,
+  resetForm,
+  selectedCorrectionBasis,
+  unsupportedUpdateKind,
+  updateForm,
+}: Pick<ReturnType<typeof useFeatureChangeRequestsClientController>, "anyMutationPending" | "correctionBasis" | "correctionConflict" | "form" | "resetForm" | "selectedCorrectionBasis" | "unsupportedUpdateKind" | "updateForm">) {
+  return (
+    <>
+<section className="rounded-lg border bg-background p-4">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="font-medium">변경 요청 작성</h2>
@@ -1722,8 +1743,25 @@ export function FeatureChangeRequestsClient({
               />
             </div>
           </section>
+    </>
+  );
+}
 
-          {form.action !== "delete" ? (
+function ChangeRequestMutationFields({
+  applyRegionCandidate,
+  categories,
+  categoryItems,
+  form,
+  formCoord,
+  formCoordError,
+  formMarkerIconOptions,
+  setLocationDialogOpen,
+  unsupportedUpdateKind,
+  updateForm,
+}: Pick<ReturnType<typeof useFeatureChangeRequestsClientController>, "applyRegionCandidate" | "categories" | "categoryItems" | "form" | "formCoord" | "formCoordError" | "formMarkerIconOptions" | "setLocationDialogOpen" | "unsupportedUpdateKind" | "updateForm">) {
+  return (
+    <>
+{form.action !== "delete" ? (
             <>
               <FeatureBasicInfoSection
                 category={form.category}
@@ -1898,6 +1936,38 @@ export function FeatureChangeRequestsClient({
               </section>
             </>
           ) : null}
+    </>
+  );
+}
+
+function ChangeRequestEditorWorkspace({
+  anyMutationPending,
+  applyRegionCandidate,
+  categories,
+  categoryItems,
+  correctionBasis,
+  correctionConflict,
+  form,
+  formCoord,
+  formCoordError,
+  formMarkerIconOptions,
+  locationDialogOpen,
+  resetForm,
+  selectedCorrectionBasis,
+  selectedRequest,
+  setLocationDialogOpen,
+  showRequestForm,
+  submitChange,
+  unsupportedUpdateKind,
+  updateForm,
+}: Pick<ReturnType<typeof useFeatureChangeRequestsClientController>, "anyMutationPending" | "applyRegionCandidate" | "categories" | "categoryItems" | "correctionBasis" | "correctionConflict" | "form" | "formCoord" | "formCoordError" | "formMarkerIconOptions" | "locationDialogOpen" | "resetForm" | "selectedCorrectionBasis" | "selectedRequest" | "setLocationDialogOpen" | "showRequestForm" | "submitChange" | "unsupportedUpdateKind" | "updateForm">) {
+  return (
+    <>
+{showRequestForm ? (
+          <form className="flex flex-col gap-4" onSubmit={submitChange}>
+          <ChangeRequestCoreFields anyMutationPending={anyMutationPending} correctionBasis={correctionBasis} correctionConflict={correctionConflict} form={form} resetForm={resetForm} selectedCorrectionBasis={selectedCorrectionBasis} unsupportedUpdateKind={unsupportedUpdateKind} updateForm={updateForm} />
+
+          <ChangeRequestMutationFields applyRegionCandidate={applyRegionCandidate} categories={categories} categoryItems={categoryItems} form={form} formCoord={formCoord} formCoordError={formCoordError} formMarkerIconOptions={formMarkerIconOptions} setLocationDialogOpen={setLocationDialogOpen} unsupportedUpdateKind={unsupportedUpdateKind} updateForm={updateForm} />
         </form>
         ) : null}
 
@@ -1920,8 +1990,31 @@ export function FeatureChangeRequestsClient({
             <ChangeRequestDetail request={selectedRequest} />
           </section>
         ) : null}
+    </>
+  );
+}
 
-        {showReview ? (
+function ChangeRequestReviewWorkspace({
+  action,
+  changes,
+  columns,
+  highlightRequestId,
+  items,
+  pageSize,
+  q,
+  reviewMode,
+  selectedRequest,
+  setAction,
+  setPageSize,
+  setQ,
+  setSelectedRequest,
+  setStatus,
+  showReview,
+  status,
+}: Pick<ReturnType<typeof useFeatureChangeRequestsClientController>, "action" | "changes" | "columns" | "highlightRequestId" | "items" | "pageSize" | "q" | "reviewMode" | "selectedRequest" | "setAction" | "setPageSize" | "setQ" | "setSelectedRequest" | "setStatus" | "showReview" | "status">) {
+  return (
+    <>
+{showReview ? (
         <>
         <section className="rounded-lg border bg-background p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -2013,7 +2106,115 @@ export function FeatureChangeRequestsClient({
         </section>
         </>
         ) : null}
+    </>
+  );
+}
+
+function FeatureChangeRequestsClientView({
+  action,
+  anyMutationPending,
+  applyRegionCandidate,
+  categories,
+  categoryItems,
+  changes,
+  columns,
+  correctionBasis,
+  correctionConflict,
+  form,
+  formCoord,
+  formCoordError,
+  formError,
+  formMarkerIconOptions,
+  highlightRequestId,
+  items,
+  locationDialogOpen,
+  mutationError,
+  pageSize,
+  q,
+  reloadCorrectionBasis,
+  resetForm,
+  reviewMode,
+  selectedCorrectionBasis,
+  selectedRequest,
+  setAction,
+  setFormError,
+  setLocationDialogOpen,
+  setPageSize,
+  setQ,
+  setSelectedRequest,
+  setStatus,
+  showRequestForm,
+  showReview,
+  status,
+  submitChange,
+  unsupportedUpdateKind,
+  updateForm,
+}: ReturnType<typeof useFeatureChangeRequestsClientController>) {
+  return (
+    <AdminShell
+      actions={
+        <>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/admin/features"
+          >
+            <ClipboardListIcon data-icon="inline-start" />
+            목록
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href={
+              showReview
+                ? "/admin/features/change-requests"
+                : "/admin/features/change-reviews"
+            }
+          >
+            {showReview ? (
+              <PlusIcon data-icon="inline-start" />
+            ) : (
+              <CheckIcon data-icon="inline-start" />
+            )}
+            {showReview ? "변경 요청 작성" : "검수 화면"}
+          </Link>
+          <Button
+            disabled={changes.isFetching}
+            type="button"
+            variant="outline"
+            onClick={() => void changes.refetch()}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            새로고침
+          </Button>
+        </>
+      }
+      description={
+        showReview
+          ? "변경 요청을 검수합니다."
+          : "Feature를 추가·수정·삭제하는 요청을 작성합니다."
+      }
+      title={showReview ? "Feature 검수" : "변경 요청 작성"}
+    >
+      <div className="flex flex-col gap-4">
+        <ChangeRequestFeedback changes={changes} correctionBasis={correctionBasis} correctionConflict={correctionConflict} formError={formError} mutationError={mutationError} reloadCorrectionBasis={reloadCorrectionBasis} setFormError={setFormError} />
+
+        <ChangeRequestEditorWorkspace anyMutationPending={anyMutationPending} applyRegionCandidate={applyRegionCandidate} categories={categories} categoryItems={categoryItems} correctionBasis={correctionBasis} correctionConflict={correctionConflict} form={form} formCoord={formCoord} formCoordError={formCoordError} formMarkerIconOptions={formMarkerIconOptions} locationDialogOpen={locationDialogOpen} resetForm={resetForm} selectedCorrectionBasis={selectedCorrectionBasis} selectedRequest={selectedRequest} setLocationDialogOpen={setLocationDialogOpen} showRequestForm={showRequestForm} submitChange={submitChange} unsupportedUpdateKind={unsupportedUpdateKind} updateForm={updateForm} />
+
+        <ChangeRequestReviewWorkspace action={action} changes={changes} columns={columns} highlightRequestId={highlightRequestId} items={items} pageSize={pageSize} q={q} reviewMode={reviewMode} selectedRequest={selectedRequest} setAction={setAction} setPageSize={setPageSize} setQ={setQ} setSelectedRequest={setSelectedRequest} setStatus={setStatus} showReview={showReview} status={status} />
       </div>
     </AdminShell>
   );
+}
+
+export function FeatureChangeRequestsClient({
+  prefill,
+  view = "request",
+  highlightRequestId = null,
+}: {
+  prefill?: FeatureChangeRequestPrefill;
+  view?: "request" | "review";
+  /** ?request_id= 딥링크 — 목록에서 해당 요청 행을 강조한다(선택 전까지). */
+  highlightRequestId?: string | null;
+}) {
+  const controller = useFeatureChangeRequestsClientController({ prefill, view, highlightRequestId });
+  return <FeatureChangeRequestsClientView {...controller} />;
 }

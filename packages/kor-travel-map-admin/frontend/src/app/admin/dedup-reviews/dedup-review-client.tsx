@@ -14,7 +14,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { type Map as MapLibreMap } from "maplibre-gl";
-import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useReducer } from "react";
 
 import {
   type DedupDecision,
@@ -325,157 +325,244 @@ function DedupDetailDialog({
   );
 }
 
-export function DedupReviewClient() {
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState<DedupStatus | "all">("pending");
-  const [kind, setKind] = useState<DedupKindFilter>("all");
-  const [providers, setProviders] = useState<string[]>([]);
-  const [datasetKeys, setDatasetKeys] = useState<string[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [scoreFilter, setScoreFilter] = useState<ScoreFilter>("all");
-  const [pageSize, setPageSize] =
-    useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
-  const [mergeKey, setMergeKey] = useState<string | null>(null);
-  const [detailReviewId, setDetailReviewId] = useState<string | null>(null);
-  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
-  const [pageIndex, setPageIndex] = useState(1);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const deferredQ = useDeferredValue(q.trim());
-  const deferredProviders = useDeferredValue(providers);
-  const deferredDatasetKeys = useDeferredValue(datasetKeys);
-  const deferredCategories = useDeferredValue(categories);
-  const bounds = scoreBounds(scoreFilter);
-  const reviewParams = useMemo(
-    () => ({
-      status: status === "all" ? undefined : [status],
-      kind: kind === "all" ? undefined : [kind],
-      provider: deferredProviders.length > 0 ? deferredProviders : undefined,
-      dataset_key:
-        deferredDatasetKeys.length > 0 ? deferredDatasetKeys : undefined,
-      category: deferredCategories.length > 0 ? deferredCategories : undefined,
-      min_score: bounds.min,
-      max_score: bounds.max,
-      q: deferredQ.length > 0 ? deferredQ : undefined,
-      page_size: pageSize,
-      cursor: cursor ?? undefined,
-    }),
-    [
-      bounds.max,
-      bounds.min,
-      cursor,
-      deferredCategories,
-      deferredDatasetKeys,
-      deferredProviders,
-      deferredQ,
-      kind,
-      pageSize,
-      status,
-    ],
-  );
-  const reviews = useDedupReviews(reviewParams);
-  const detail = useDedupReviewDetail(detailReviewId);
-  const decision = useDedupDecisionMutation();
-  const items = useMemo(
-    () => reviews.data?.data.items ?? [],
-    [reviews.data?.data.items],
-  );
-  const providerOptions = useMemo(
-    () =>
-      uniqueSorted([
-        ...providers,
-        ...items.flatMap((item) => [
-          item.feature_a.provider ?? "",
-          item.feature_b.provider ?? "",
-        ]),
-      ]),
-    [items, providers],
-  );
-  const datasetOptions = useMemo(
-    () =>
-      uniqueSorted([
-        ...datasetKeys,
-        ...items.flatMap((item) => [
-          item.feature_a.dataset_key ?? "",
-          item.feature_b.dataset_key ?? "",
-        ]),
-      ]),
-    [datasetKeys, items],
-  );
-  const categoryOptions = useMemo(
-    () =>
-      uniqueSorted([
-        ...categories,
-        ...items.flatMap((item) => [
-          item.feature_a.category,
-          item.feature_b.category,
-        ]),
-      ]),
-    [categories, items],
-  );
-  const totalItems = reviews.data?.meta.page?.total ?? null;
-  const nextCursor = reviews.data?.meta.page?.next_cursor ?? null;
+interface DedupReviewFilters {
+  q: string;
+  status: DedupStatus | "all";
+  kind: DedupKindFilter;
+  providers: string[];
+  datasetKeys: string[];
+  categories: string[];
+  scoreFilter: ScoreFilter;
+  pageSize: (typeof PAGE_SIZE_OPTIONS)[number];
+}
 
-  // keyset 페이지 이동 시 병합 선택/상세/행 선택을 함께 초기화한다.
-  const resetPage = () => {
-    setCursor(null);
-    setPageIndex(1);
-    setMergeKey(null);
-    setDetailReviewId(null);
-    setRowSelection({});
+interface DedupReviewState extends DedupReviewFilters {
+  mergeKey: string | null;
+  detailReviewId: string | null;
+  rowSelection: RowSelectionState;
+  pageIndex: number;
+  cursor: string | null;
+}
+
+type RowSelectionUpdate =
+  | RowSelectionState
+  | ((previous: RowSelectionState) => RowSelectionState);
+
+type DedupReviewAction =
+  | { type: "change-filters"; patch: Partial<DedupReviewFilters> }
+  | { type: "first-page" }
+  | { type: "next-page"; cursor: string }
+  | { type: "open-detail"; reviewId: string }
+  | { type: "close-detail" }
+  | { type: "select-merge"; reviewId: string | null }
+  | { type: "select-rows"; update: RowSelectionUpdate };
+
+const INITIAL_DEDUP_REVIEW_STATE: DedupReviewState = {
+  q: "",
+  status: "pending",
+  kind: "all",
+  providers: [],
+  datasetKeys: [],
+  categories: [],
+  scoreFilter: "all",
+  pageSize: 100,
+  mergeKey: null,
+  detailReviewId: null,
+  rowSelection: {},
+  pageIndex: 1,
+  cursor: null,
+};
+
+function resetDedupPage(
+  state: DedupReviewState,
+  patch: Partial<DedupReviewFilters> = {},
+): DedupReviewState {
+  return {
+    ...state,
+    ...patch,
+    cursor: null,
+    pageIndex: 1,
+    mergeKey: null,
+    detailReviewId: null,
+    rowSelection: {},
   };
-  const goFirstPage = () => {
-    resetPage();
-  };
-  const goNextPage = () => {
-    if (!nextCursor) return;
-    setCursor(nextCursor);
-    setPageIndex((page) => page + 1);
-    setMergeKey(null);
-    setDetailReviewId(null);
-    setRowSelection({});
-  };
+}
 
-  const decide = useCallback((reviewId: string, value: DedupDecision) => {
-    decision.mutate({
-      reviewKey: reviewId,
-      body: {
-        decision: value,
-        decision_reason: `admin-ui ${value}`,
-      },
-    });
-  }, [decision]);
+function dedupReviewReducer(
+  state: DedupReviewState,
+  action: DedupReviewAction,
+): DedupReviewState {
+  switch (action.type) {
+    case "change-filters":
+      return resetDedupPage(state, action.patch);
+    case "first-page":
+      return resetDedupPage(state);
+    case "next-page":
+      return {
+        ...state,
+        cursor: action.cursor,
+        pageIndex: state.pageIndex + 1,
+        mergeKey: null,
+        detailReviewId: null,
+        rowSelection: {},
+      };
+    case "open-detail":
+      return {
+        ...state,
+        detailReviewId: action.reviewId,
+        mergeKey: null,
+      };
+    case "close-detail":
+      return { ...state, detailReviewId: null };
+    case "select-merge":
+      return { ...state, mergeKey: action.reviewId };
+    case "select-rows":
+      return {
+        ...state,
+        rowSelection:
+          typeof action.update === "function"
+            ? action.update(state.rowSelection)
+            : action.update,
+      };
+  }
+}
 
-  /**
-   * merge 확정. ``masterFeatureId``가 없으면 backend가 ``select_master``로 자동 선정한다.
-   * 성공/실패와 무관하게 inline master 선택 패널을 닫는다.
-   */
-  const merge = useCallback((reviewId: string, masterFeatureId?: string) => {
-    decision.mutate(
-      {
-        reviewKey: reviewId,
-        body: {
-          decision: "merged",
-          master_feature_id: masterFeatureId,
-          decision_reason: masterFeatureId
-            ? "admin-ui merge (master 수동 선택)"
-            : "admin-ui merge (master 자동 선정)",
-        },
-      },
-      { onSettled: () => setMergeKey(null) },
-    );
-  }, [decision]);
+function DedupReviewFiltersPanel({
+  categoryOptions,
+  datasetOptions,
+  filters,
+  providerOptions,
+  onChange,
+}: {
+  categoryOptions: string[];
+  datasetOptions: string[];
+  filters: DedupReviewFilters;
+  providerOptions: string[];
+  onChange: (patch: Partial<DedupReviewFilters>) => void;
+}) {
+  return (
+    <section className="rounded-lg border bg-background p-4">
+      <div className="grid gap-3 lg:grid-cols-[minmax(12rem,1fr)_auto_auto_minmax(10rem,14rem)_minmax(10rem,14rem)_minmax(8rem,12rem)_auto_auto]">
+        <div className="relative">
+          <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+          <Input
+            aria-label="dedup search"
+            className="pl-8"
+            placeholder="feature id, name"
+            value={filters.q}
+            onChange={(event) => onChange({ q: event.target.value })}
+          />
+        </div>
+        <NativeSelect
+          aria-label="dedup status"
+          value={filters.status}
+          onChange={(event) =>
+            onChange({ status: event.target.value as DedupStatus | "all" })
+          }
+        >
+          {statuses.map((item) => (
+            <NativeSelectOption key={item} value={item}>
+              {item}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <NativeSelect
+          aria-label="dedup kind"
+          value={filters.kind}
+          onChange={(event) =>
+            onChange({ kind: event.target.value as DedupKindFilter })
+          }
+        >
+          <NativeSelectOption value="all">all kinds</NativeSelectOption>
+          {DEDUP_KINDS.map((item) => (
+            <NativeSelectOption key={item} value={item}>
+              {item}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <MultiFilterCombobox
+          ariaLabel="dedup provider"
+          options={providerOptions}
+          placeholder="provider"
+          values={filters.providers}
+          onChange={(providers) => onChange({ providers })}
+        />
+        <MultiFilterCombobox
+          ariaLabel="dedup dataset"
+          options={datasetOptions}
+          placeholder="dataset"
+          values={filters.datasetKeys}
+          onChange={(datasetKeys) => onChange({ datasetKeys })}
+        />
+        <MultiFilterCombobox
+          ariaLabel="dedup category"
+          options={categoryOptions}
+          placeholder="category"
+          values={filters.categories}
+          onChange={(categories) => onChange({ categories })}
+        />
+        <NativeSelect
+          aria-label="dedup score filter"
+          value={filters.scoreFilter}
+          onChange={(event) =>
+            onChange({ scoreFilter: event.target.value as ScoreFilter })
+          }
+        >
+          {SCORE_FILTERS.map((item) => (
+            <NativeSelectOption key={item.value} value={item.value}>
+              {item.label}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <NativeSelect
+          aria-label="dedup page size"
+          value={String(filters.pageSize)}
+          onChange={(event) =>
+            onChange({
+              pageSize: Number(
+                event.target.value,
+              ) as DedupReviewFilters["pageSize"],
+            })
+          }
+        >
+          {PAGE_SIZE_OPTIONS.map((item) => (
+            <NativeSelectOption key={item} value={item}>
+              {item}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </div>
+    </section>
+  );
+}
 
-  const openDetail = useCallback((reviewId: string) => {
-    setDetailReviewId(reviewId);
-    setMergeKey(null);
-  }, []);
-
-  const renderPagination = (placement: "top" | "bottom") => (
+function DedupReviewPager({
+  hasNext,
+  isFetching,
+  isFirst,
+  itemCount,
+  pageIndex,
+  placement,
+  totalItems,
+  onFirst,
+  onNext,
+}: {
+  hasNext: boolean;
+  isFetching: boolean;
+  isFirst: boolean;
+  itemCount: number;
+  pageIndex: number;
+  placement: "top" | "bottom";
+  totalItems: number | null;
+  onFirst: () => void;
+  onNext: () => void;
+}) {
+  return (
     <CursorPager
       ariaPrefix="dedup"
-      hasNext={Boolean(nextCursor)}
-      isFetching={reviews.isFetching}
-      isFirst={cursor === null}
+      hasNext={hasNext}
+      isFetching={isFetching}
+      isFirst={isFirst}
       placement={placement}
       summary={
         <>
@@ -483,14 +570,31 @@ export function DedupReviewClient() {
           {totalItems !== null ? (
             <> · 총 {totalItems.toLocaleString("ko-KR")}건</>
           ) : null}{" "}
-          · 이 페이지 {items.length.toLocaleString("ko-KR")}개
+          · 이 페이지 {itemCount.toLocaleString("ko-KR")}개
         </>
       }
-      onFirst={goFirstPage}
-      onNext={goNextPage}
+      onFirst={onFirst}
+      onNext={onNext}
     />
   );
-  const columns = useMemo<ColumnDef<DedupReviewRecord, unknown>[]>(
+}
+
+function useDedupReviewColumns({
+  decisionPending,
+  mergeKey,
+  onDecide,
+  onMerge,
+  onOpenDetail,
+  onSelectMerge,
+}: {
+  decisionPending: boolean;
+  mergeKey: string | null;
+  onDecide: (reviewId: string, decision: DedupDecision) => void;
+  onMerge: (reviewId: string, masterFeatureId?: string) => void;
+  onOpenDetail: (reviewId: string) => void;
+  onSelectMerge: (reviewId: string | null) => void;
+}) {
+  return useMemo<ColumnDef<DedupReviewRecord, unknown>[]>(
     () => [
       {
         id: "review",
@@ -574,8 +678,27 @@ export function DedupReviewClient() {
         enableSorting: false,
         cell: ({ row }) => {
           const item = row.original;
-          return item.status === "pending" ? (
-            mergeKey === item.review_id ? (
+          if (item.status !== "pending") {
+            return (
+              <div
+                className="flex flex-wrap items-center gap-1"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => onOpenDetail(item.review_id)}
+                >
+                  <EyeIcon data-icon="inline-start" />
+                  detail
+                </Button>
+                <span className="text-sm text-muted-foreground">완료</span>
+              </div>
+            );
+          }
+          if (mergeKey === item.review_id) {
+            return (
               <div
                 className="flex flex-col gap-1"
                 onClick={(event) => event.stopPropagation()}
@@ -588,132 +711,333 @@ export function DedupReviewClient() {
                     size="sm"
                     type="button"
                     variant="outline"
-                    onClick={() => openDetail(item.review_id)}
+                    onClick={() => onOpenDetail(item.review_id)}
                   >
                     <EyeIcon data-icon="inline-start" />
                     detail
                   </Button>
                   <Button
-                    disabled={decision.isPending}
+                    disabled={decisionPending}
                     size="sm"
                     type="button"
                     variant="outline"
                     onClick={() =>
-                      merge(item.review_id, item.feature_a.feature_id)
+                      onMerge(item.review_id, item.feature_a.feature_id)
                     }
                   >
                     A: {item.feature_a.name}
                     {hasCoord(item.feature_a) ? " · 좌표✓" : ""}
                   </Button>
                   <Button
-                    disabled={decision.isPending}
+                    disabled={decisionPending}
                     size="sm"
                     type="button"
                     variant="outline"
                     onClick={() =>
-                      merge(item.review_id, item.feature_b.feature_id)
+                      onMerge(item.review_id, item.feature_b.feature_id)
                     }
                   >
                     B: {item.feature_b.name}
                     {hasCoord(item.feature_b) ? " · 좌표✓" : ""}
                   </Button>
                   <Button
-                    disabled={decision.isPending}
+                    disabled={decisionPending}
                     size="sm"
                     type="button"
                     variant="secondary"
-                    onClick={() => merge(item.review_id)}
+                    onClick={() => onMerge(item.review_id)}
                   >
                     자동 선정
                   </Button>
                   <Button
-                    disabled={decision.isPending}
+                    disabled={decisionPending}
                     size="sm"
                     type="button"
                     variant="ghost"
-                    onClick={() => setMergeKey(null)}
+                    onClick={() => onSelectMerge(null)}
                   >
                     취소
                   </Button>
                 </div>
               </div>
-            ) : (
-              <div
-                className="flex flex-wrap gap-1"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <Button
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={() => openDetail(item.review_id)}
-                >
-                  <EyeIcon data-icon="inline-start" />
-                  detail
-                </Button>
-                <Button
-                  disabled={decision.isPending}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={() => decide(item.review_id, "accepted")}
-                >
-                  <CheckIcon data-icon="inline-start" />
-                  accept
-                </Button>
-                <Button
-                  disabled={decision.isPending}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={() => decide(item.review_id, "rejected")}
-                >
-                  <XIcon data-icon="inline-start" />
-                  reject
-                </Button>
-                <Button
-                  disabled={decision.isPending}
-                  size="sm"
-                  type="button"
-                  variant="default"
-                  onClick={() => setMergeKey(item.review_id)}
-                >
-                  <MergeIcon data-icon="inline-start" />
-                  merge
-                </Button>
-                <Button
-                  disabled={decision.isPending}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                  onClick={() => decide(item.review_id, "ignored")}
-                >
-                  ignore
-                </Button>
-              </div>
-            )
-          ) : (
+            );
+          }
+          return (
             <div
-              className="flex flex-wrap items-center gap-1"
+              className="flex flex-wrap gap-1"
               onClick={(event) => event.stopPropagation()}
             >
               <Button
                 size="sm"
                 type="button"
                 variant="outline"
-                onClick={() => openDetail(item.review_id)}
+                onClick={() => onOpenDetail(item.review_id)}
               >
                 <EyeIcon data-icon="inline-start" />
                 detail
               </Button>
-              <span className="text-sm text-muted-foreground">완료</span>
+              <Button
+                disabled={decisionPending}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => onDecide(item.review_id, "accepted")}
+              >
+                <CheckIcon data-icon="inline-start" />
+                accept
+              </Button>
+              <Button
+                disabled={decisionPending}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => onDecide(item.review_id, "rejected")}
+              >
+                <XIcon data-icon="inline-start" />
+                reject
+              </Button>
+              <Button
+                disabled={decisionPending}
+                size="sm"
+                type="button"
+                variant="default"
+                onClick={() => onSelectMerge(item.review_id)}
+              >
+                <MergeIcon data-icon="inline-start" />
+                merge
+              </Button>
+              <Button
+                disabled={decisionPending}
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={() => onDecide(item.review_id, "ignored")}
+              >
+                ignore
+              </Button>
             </div>
           );
         },
       },
     ],
-    [decide, decision.isPending, merge, mergeKey, openDetail],
+    [
+      decisionPending,
+      mergeKey,
+      onDecide,
+      onMerge,
+      onOpenDetail,
+      onSelectMerge,
+    ],
   );
+}
+
+function DedupReviewTable({
+  columns,
+  data,
+  detailReviewId,
+  decisionPending,
+  isLoading,
+  rowSelection,
+  onDecide,
+  onOpenDetail,
+  onRowSelectionChange,
+}: {
+  columns: ColumnDef<DedupReviewRecord, unknown>[];
+  data: DedupReviewRecord[];
+  detailReviewId: string | null;
+  decisionPending: boolean;
+  isLoading: boolean;
+  rowSelection: RowSelectionState;
+  onDecide: (reviewId: string, decision: DedupDecision) => void;
+  onOpenDetail: (reviewId: string) => void;
+  onRowSelectionChange: (update: RowSelectionUpdate) => void;
+}) {
+  return (
+    <DataTable
+      columns={columns}
+      data={data}
+      getRowId={(row) => row.review_id}
+      emptyMessage="dedup review가 없습니다."
+      isLoading={isLoading}
+      manualSorting={false}
+      containerClassName="overflow-auto rounded-lg border bg-background"
+      onRowClick={(row) => onOpenDetail(row.review_id)}
+      isRowActive={(row) => row.review_id === detailReviewId}
+      enableRowSelection={(row) => row.original.status === "pending"}
+      rowSelection={rowSelection}
+      onRowSelectionChange={onRowSelectionChange}
+      renderBulkActions={(rows: Row<DedupReviewRecord>[]) => {
+        const decideBulk = (value: DedupDecision) => {
+          for (const row of rows) {
+            if (row.original.status === "pending") {
+              onDecide(row.original.review_id, value);
+            }
+          }
+          onRowSelectionChange({});
+        };
+        return (
+          <div className="flex flex-wrap gap-1">
+            <Button
+              disabled={decisionPending}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => decideBulk("accepted")}
+            >
+              <CheckIcon data-icon="inline-start" />
+              선택 accept
+            </Button>
+            <Button
+              disabled={decisionPending}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => decideBulk("rejected")}
+            >
+              <XIcon data-icon="inline-start" />
+              선택 reject
+            </Button>
+          </div>
+        );
+      }}
+    />
+  );
+}
+
+export function DedupReviewClient() {
+  const [state, dispatch] = useReducer(
+    dedupReviewReducer,
+    INITIAL_DEDUP_REVIEW_STATE,
+  );
+  const deferredQ = useDeferredValue(state.q.trim());
+  const deferredProviders = useDeferredValue(state.providers);
+  const deferredDatasetKeys = useDeferredValue(state.datasetKeys);
+  const deferredCategories = useDeferredValue(state.categories);
+  const bounds = scoreBounds(state.scoreFilter);
+  const reviewParams = useMemo(
+    () => ({
+      status: state.status === "all" ? undefined : [state.status],
+      kind: state.kind === "all" ? undefined : [state.kind],
+      provider: deferredProviders.length > 0 ? deferredProviders : undefined,
+      dataset_key:
+        deferredDatasetKeys.length > 0 ? deferredDatasetKeys : undefined,
+      category: deferredCategories.length > 0 ? deferredCategories : undefined,
+      min_score: bounds.min,
+      max_score: bounds.max,
+      q: deferredQ.length > 0 ? deferredQ : undefined,
+      page_size: state.pageSize,
+      cursor: state.cursor ?? undefined,
+    }),
+    [
+      bounds.max,
+      bounds.min,
+      deferredCategories,
+      deferredDatasetKeys,
+      deferredProviders,
+      deferredQ,
+      state.cursor,
+      state.kind,
+      state.pageSize,
+      state.status,
+    ],
+  );
+  const reviews = useDedupReviews(reviewParams);
+  const detail = useDedupReviewDetail(state.detailReviewId);
+  const decision = useDedupDecisionMutation();
+  const items = useMemo(
+    () => reviews.data?.data.items ?? [],
+    [reviews.data?.data.items],
+  );
+  const providerOptions = useMemo(
+    () =>
+      uniqueSorted([
+        ...state.providers,
+        ...items.flatMap((item) => [
+          item.feature_a.provider ?? "",
+          item.feature_b.provider ?? "",
+        ]),
+      ]),
+    [items, state.providers],
+  );
+  const datasetOptions = useMemo(
+    () =>
+      uniqueSorted([
+        ...state.datasetKeys,
+        ...items.flatMap((item) => [
+          item.feature_a.dataset_key ?? "",
+          item.feature_b.dataset_key ?? "",
+        ]),
+      ]),
+    [items, state.datasetKeys],
+  );
+  const categoryOptions = useMemo(
+    () =>
+      uniqueSorted([
+        ...state.categories,
+        ...items.flatMap((item) => [
+          item.feature_a.category,
+          item.feature_b.category,
+        ]),
+      ]),
+    [items, state.categories],
+  );
+  const totalItems = reviews.data?.meta.page?.total ?? null;
+  const nextCursor = reviews.data?.meta.page?.next_cursor ?? null;
+
+  const goNextPage = useCallback(() => {
+    if (!nextCursor) return;
+    dispatch({ type: "next-page", cursor: nextCursor });
+  }, [nextCursor]);
+
+  const decide = useCallback(
+    (reviewId: string, value: DedupDecision) => {
+      decision.mutate({
+        reviewKey: reviewId,
+        body: {
+          decision: value,
+          decision_reason: `admin-ui ${value}`,
+        },
+      });
+    },
+    [decision],
+  );
+
+  const merge = useCallback(
+    (reviewId: string, masterFeatureId?: string) => {
+      decision.mutate(
+        {
+          reviewKey: reviewId,
+          body: {
+            decision: "merged",
+            master_feature_id: masterFeatureId,
+            decision_reason: masterFeatureId
+              ? "admin-ui merge (master 수동 선택)"
+              : "admin-ui merge (master 자동 선정)",
+          },
+        },
+        {
+          onSettled: () =>
+            dispatch({ type: "select-merge", reviewId: null }),
+        },
+      );
+    },
+    [decision],
+  );
+
+  const openDetail = useCallback((reviewId: string) => {
+    dispatch({ type: "open-detail", reviewId });
+  }, []);
+  const selectMerge = useCallback((reviewId: string | null) => {
+    dispatch({ type: "select-merge", reviewId });
+  }, []);
+  const columns = useDedupReviewColumns({
+    decisionPending: decision.isPending,
+    mergeKey: state.mergeKey,
+    onDecide: decide,
+    onMerge: merge,
+    onOpenDetail: openDetail,
+    onSelectMerge: selectMerge,
+  });
 
   return (
     <AdminShell
@@ -741,174 +1065,60 @@ export function DedupReviewClient() {
           </Alert>
         )}
 
-        {detailReviewId ? (
+        {state.detailReviewId ? (
           <DedupDetailDialog
             detail={detail.data?.data}
             error={detail.error ?? null}
             isLoading={detail.isLoading}
-            onClose={() => setDetailReviewId(null)}
+            onClose={() => dispatch({ type: "close-detail" })}
           />
         ) : null}
 
-        <section className="rounded-lg border bg-background p-4">
-          <div className="grid gap-3 lg:grid-cols-[minmax(12rem,1fr)_auto_auto_minmax(10rem,14rem)_minmax(10rem,14rem)_minmax(8rem,12rem)_auto_auto]">
-            <div className="relative">
-              <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-              <Input
-                aria-label="dedup search"
-                className="pl-8"
-                placeholder="feature id, name"
-                value={q}
-                onChange={(event) => {
-                  setQ(event.target.value);
-                  resetPage();
-                }}
-              />
-            </div>
-            <NativeSelect
-              aria-label="dedup status"
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value as DedupStatus | "all");
-                resetPage();
-              }}
-            >
-              {statuses.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="dedup kind"
-              value={kind}
-              onChange={(event) => {
-                setKind(event.target.value as DedupKindFilter);
-                resetPage();
-              }}
-            >
-              <NativeSelectOption value="all">all kinds</NativeSelectOption>
-              {DEDUP_KINDS.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <MultiFilterCombobox
-              ariaLabel="dedup provider"
-              options={providerOptions}
-              placeholder="provider"
-              values={providers}
-              onChange={(values) => {
-                setProviders(values);
-                resetPage();
-              }}
-            />
-            <MultiFilterCombobox
-              ariaLabel="dedup dataset"
-              options={datasetOptions}
-              placeholder="dataset"
-              values={datasetKeys}
-              onChange={(values) => {
-                setDatasetKeys(values);
-                resetPage();
-              }}
-            />
-            <MultiFilterCombobox
-              ariaLabel="dedup category"
-              options={categoryOptions}
-              placeholder="category"
-              values={categories}
-              onChange={(values) => {
-                setCategories(values);
-                resetPage();
-              }}
-            />
-            <NativeSelect
-              aria-label="dedup score filter"
-              value={scoreFilter}
-              onChange={(event) => {
-                setScoreFilter(event.target.value as ScoreFilter);
-                resetPage();
-              }}
-            >
-              {SCORE_FILTERS.map((item) => (
-                <NativeSelectOption key={item.value} value={item.value}>
-                  {item.label}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="dedup page size"
-              value={String(pageSize)}
-              onChange={(event) => {
-                setPageSize(Number(event.target.value) as typeof pageSize);
-                resetPage();
-              }}
-            >
-              {PAGE_SIZE_OPTIONS.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </div>
-        </section>
-
-        {renderPagination("top")}
-
-        <DataTable
-          columns={columns}
-          data={items}
-          getRowId={(row) => row.review_id}
-          isLoading={reviews.isLoading}
-          emptyMessage="dedup review가 없습니다."
-          manualSorting={false}
-          containerClassName="overflow-auto rounded-lg border bg-background"
-          onRowClick={(row) => openDetail(row.review_id)}
-          isRowActive={(row) => row.review_id === detailReviewId}
-          enableRowSelection={(row) => row.original.status === "pending"}
-          rowSelection={rowSelection}
-          onRowSelectionChange={setRowSelection}
-          renderBulkActions={(rows: Row<DedupReviewRecord>[]) => {
-            // pending review만 일괄 결정한다(완료된 review 재결정 방지 — 선택 자체도
-            // enableRowSelection predicate로 막지만 방어적으로 한 번 더 거른다).
-            const decideBulk = (value: DedupDecision) => {
-              for (const row of rows) {
-                if (row.original.status === "pending") {
-                  decide(row.original.review_id, value);
-                }
-              }
-              setRowSelection({});
-            };
-            return (
-              <div className="flex flex-wrap gap-1">
-                <Button
-                  disabled={decision.isPending}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={() => decideBulk("accepted")}
-                >
-                  <CheckIcon data-icon="inline-start" />
-                  선택 accept
-                </Button>
-                <Button
-                  disabled={decision.isPending}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={() => decideBulk("rejected")}
-                >
-                  <XIcon data-icon="inline-start" />
-                  선택 reject
-                </Button>
-              </div>
-            );
-          }}
+        <DedupReviewFiltersPanel
+          categoryOptions={categoryOptions}
+          datasetOptions={datasetOptions}
+          filters={state}
+          providerOptions={providerOptions}
+          onChange={(patch) => dispatch({ type: "change-filters", patch })}
         />
 
-        {renderPagination("bottom")}
+        <DedupReviewPager
+          hasNext={Boolean(nextCursor)}
+          isFetching={reviews.isFetching}
+          isFirst={state.cursor === null}
+          itemCount={items.length}
+          pageIndex={state.pageIndex}
+          placement="top"
+          totalItems={totalItems}
+          onFirst={() => dispatch({ type: "first-page" })}
+          onNext={goNextPage}
+        />
+
+        <DedupReviewTable
+          columns={columns}
+          data={items}
+          detailReviewId={state.detailReviewId}
+          decisionPending={decision.isPending}
+          isLoading={reviews.isLoading}
+          rowSelection={state.rowSelection}
+          onDecide={decide}
+          onOpenDetail={openDetail}
+          onRowSelectionChange={(update) =>
+            dispatch({ type: "select-rows", update })
+          }
+        />
+
+        <DedupReviewPager
+          hasNext={Boolean(nextCursor)}
+          isFetching={reviews.isFetching}
+          isFirst={state.cursor === null}
+          itemCount={items.length}
+          pageIndex={state.pageIndex}
+          placement="bottom"
+          totalItems={totalItems}
+          onFirst={() => dispatch({ type: "first-page" })}
+          onNext={goNextPage}
+        />
       </div>
     </AdminShell>
   );

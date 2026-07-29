@@ -212,7 +212,7 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
   );
 }
 
-export function AdminFeaturesClient({
+function useAdminFeaturesClientController({
   initialQ,
   initialKind,
   initialStatus,
@@ -528,6 +528,84 @@ export function AdminFeaturesClient({
     [deactivate.isPending, deactivateFeature],
   );
 
+  return {
+    columns,
+    cursor,
+    datasetKey,
+    datasetOptions,
+    deactivate,
+    durationMs,
+    features,
+    goFirstPage,
+    goNextPage,
+    handleSortingChange,
+    hasIssue,
+    items,
+    kind,
+    nextCursor,
+    order,
+    pageIndex,
+    pageSize,
+    provider,
+    providerOptions,
+    q,
+    refresh,
+    resetCursor,
+    selectedFeatureId,
+    setDatasetKey,
+    setHasIssue,
+    setKind,
+    setOrder,
+    setPageSize,
+    setProvider,
+    setQ,
+    setSelectedFeatureId,
+    setSort,
+    setStatus,
+    sort,
+    sorting,
+    status,
+  };
+}
+
+function AdminFeaturesClientView({
+  columns,
+  cursor,
+  datasetKey,
+  datasetOptions,
+  deactivate,
+  durationMs,
+  features,
+  goFirstPage,
+  goNextPage,
+  handleSortingChange,
+  hasIssue,
+  items,
+  kind,
+  nextCursor,
+  order,
+  pageIndex,
+  pageSize,
+  provider,
+  providerOptions,
+  q,
+  refresh,
+  resetCursor,
+  selectedFeatureId,
+  setDatasetKey,
+  setHasIssue,
+  setKind,
+  setOrder,
+  setPageSize,
+  setProvider,
+  setQ,
+  setSelectedFeatureId,
+  setSort,
+  setStatus,
+  sort,
+  sorting,
+  status,
+}: ReturnType<typeof useAdminFeaturesClientController>) {
   return (
     <AdminShell
       actions={
@@ -755,4 +833,23 @@ export function AdminFeaturesClient({
       </div>
     </AdminShell>
   );
+}
+
+export function AdminFeaturesClient({
+  initialQ,
+  initialKind,
+  initialStatus,
+  initialProvider,
+  initialDatasetKey,
+  initialHasIssue,
+}: {
+  initialQ?: string;
+  initialKind?: string;
+  initialStatus?: string;
+  initialProvider?: string;
+  initialDatasetKey?: string;
+  initialHasIssue?: string;
+} = {}) {
+  const controller = useAdminFeaturesClientController({ initialQ, initialKind, initialStatus, initialProvider, initialDatasetKey, initialHasIssue });
+  return <AdminFeaturesClientView {...controller} />;
 }

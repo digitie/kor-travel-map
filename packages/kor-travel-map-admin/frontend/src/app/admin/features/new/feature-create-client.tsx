@@ -17,8 +17,8 @@ import Link from "next/link";
 import {
   useCallback,
   useMemo,
+  useReducer,
   useRef,
-  useState,
   type FormEvent,
 } from "react";
 
@@ -378,20 +378,118 @@ function korTravelGeoCandidateAddressText(
   );
 }
 
-export function FeatureCreateClient() {
+interface FeatureCreateState {
+  form: FeatureCreateFormState;
+  formError: string | null;
+  fieldErrors: Partial<Record<FeatureCreateField, string>>;
+  korTravelGeoError: string | null;
+  korTravelGeoCandidates: KorTravelGeoCandidate[];
+  korTravelGeoPending: boolean;
+  selectedKorTravelGeoKey: string | null;
+  createdRequest: AdminFeatureChangeRecord | null;
+}
+
+type FeatureCreateAction =
+  | {
+      type: "patch-form";
+      patch: Partial<FeatureCreateFormState>;
+      clearErrors?: FeatureCreateField[];
+      selectedCandidateKey?: string;
+    }
+  | { type: "geo-start" }
+  | { type: "geo-success"; candidates: KorTravelGeoCandidate[] }
+  | { type: "geo-error"; message: string }
+  | { type: "reset" }
+  | { type: "submit-start" }
+  | {
+      type: "validation-errors";
+      errors: Partial<Record<FeatureCreateField, string>>;
+    }
+  | { type: "create-success"; request: AdminFeatureChangeRecord }
+  | { type: "create-error"; message: string };
+
+function initialFeatureCreateState(): FeatureCreateState {
+  return {
+    form: initialForm(),
+    formError: null,
+    fieldErrors: {},
+    korTravelGeoError: null,
+    korTravelGeoCandidates: [],
+    korTravelGeoPending: false,
+    selectedKorTravelGeoKey: null,
+    createdRequest: null,
+  };
+}
+
+function featureCreateReducer(
+  state: FeatureCreateState,
+  action: FeatureCreateAction,
+): FeatureCreateState {
+  switch (action.type) {
+    case "patch-form": {
+      const fieldErrors = { ...state.fieldErrors };
+      for (const field of action.clearErrors ?? []) {
+        delete fieldErrors[field];
+      }
+      return {
+        ...state,
+        form: { ...state.form, ...action.patch },
+        fieldErrors,
+        selectedKorTravelGeoKey:
+          action.selectedCandidateKey ?? state.selectedKorTravelGeoKey,
+      };
+    }
+    case "geo-start":
+      return {
+        ...state,
+        korTravelGeoError: null,
+        korTravelGeoPending: true,
+      };
+    case "geo-success":
+      return {
+        ...state,
+        korTravelGeoCandidates: action.candidates,
+        korTravelGeoPending: false,
+        selectedKorTravelGeoKey: null,
+      };
+    case "geo-error":
+      return {
+        ...state,
+        korTravelGeoError: action.message,
+        korTravelGeoPending: false,
+      };
+    case "reset":
+      return initialFeatureCreateState();
+    case "submit-start":
+      return { ...state, formError: null, fieldErrors: {} };
+    case "validation-errors":
+      return { ...state, fieldErrors: action.errors };
+    case "create-success":
+      return { ...state, createdRequest: action.request };
+    case "create-error":
+      return { ...state, formError: action.message };
+  }
+}
+
+function useFeatureCreateClientController() {
   const mapRef = useRef<MapLibreMap | null>(null);
   const submitCreateInFlightRef = useRef(false);
 
-  const [form, setForm] = useState<FeatureCreateFormState>(() => initialForm());
-  const [formError, setFormError] = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<FeatureCreateField, string>>>({});
-  const [korTravelGeoError, setKorTravelGeoError] = useState<string | null>(null);
-  const [korTravelGeoCandidates, setKorTravelGeoCandidates] = useState<KorTravelGeoCandidate[]>([]);
-  const [korTravelGeoPending, setKorTravelGeoPending] = useState(false);
-  const [selectedKorTravelGeoKey, setSelectedKorTravelGeoKey] =
-    useState<string | null>(null);
-  const [createdRequest, setCreatedRequest] =
-    useState<AdminFeatureChangeRecord | null>(null);
+  const [state, dispatch] = useReducer(
+    featureCreateReducer,
+    undefined,
+    initialFeatureCreateState,
+  );
+  const {
+    createdRequest,
+    fieldErrors,
+    form,
+    formError,
+    korTravelGeoCandidates,
+    korTravelGeoError,
+    korTravelGeoPending,
+    selectedKorTravelGeoKey,
+  } = state;
 
   const categories = useCategories();
   const createFeature = useCreateAdminFeatureMutation();
@@ -463,17 +561,19 @@ export function FeatureCreateClient() {
     key: K,
     value: FeatureCreateFormState[K],
   ) => {
-    setForm((current) => ({ ...current, [key]: value }));
-    setFieldErrors((current) => ({ ...current, [key]: undefined }));
+    dispatch({
+      type: "patch-form",
+      patch: { [key]: value },
+      clearErrors: [key],
+    });
   };
 
   const updateCoord = useCallback((lon: number, lat: number, fly = false) => {
-    setForm((current) => ({
-      ...current,
-      lon: lon.toFixed(6),
-      lat: lat.toFixed(6),
-    }));
-    setFieldErrors((current) => ({ ...current, lon: undefined, lat: undefined }));
+    dispatch({
+      type: "patch-form",
+      patch: { lon: lon.toFixed(6), lat: lat.toFixed(6) },
+      clearErrors: ["lon", "lat"],
+    });
     if (fly && mapRef.current) {
       mapRef.current.easeTo({
         center: [lon, lat],
@@ -488,67 +588,72 @@ export function FeatureCreateClient() {
     const address = korTravelGeoCandidateToAddressRecord(candidate);
     const codes = korTravelGeoCodesFromCandidate(candidate);
     const addressText = korTravelGeoCandidateAddressText(candidate);
-    setSelectedKorTravelGeoKey(korTravelGeoCandidateKey(candidate));
-    setForm((current) => ({
-      ...current,
-      addressAdmin: fieldText(address.admin) ?? current.addressAdmin,
-      addressLegal: fieldText(address.legal) ?? current.addressLegal,
-      addressRoad: fieldText(address.road) ?? current.addressRoad,
-      geocodeQuery: addressText || current.geocodeQuery,
-      adminDongCode: codes.admin_dong_code ?? current.adminDongCode,
-      legalDongCode: codes.legal_dong_code ?? current.legalDongCode,
-      roadNameCode: codes.road_name_code ?? current.roadNameCode,
-      sidoCode: codes.sido_code ?? current.sidoCode,
-      sigunguCode: codes.sigungu_code ?? current.sigunguCode,
+    dispatch({
+      type: "patch-form",
+      selectedCandidateKey: korTravelGeoCandidateKey(candidate),
+      patch: {
+        addressAdmin: fieldText(address.admin) ?? form.addressAdmin,
+        addressLegal: fieldText(address.legal) ?? form.addressLegal,
+        addressRoad: fieldText(address.road) ?? form.addressRoad,
+        geocodeQuery: addressText || form.geocodeQuery,
+        adminDongCode: codes.admin_dong_code ?? form.adminDongCode,
+        legalDongCode: codes.legal_dong_code ?? form.legalDongCode,
+        roadNameCode: codes.road_name_code ?? form.roadNameCode,
+        sidoCode: codes.sido_code ?? form.sidoCode,
+        sigunguCode: codes.sigungu_code ?? form.sigunguCode,
       ...(nextCoord
         ? {
             lon: nextCoord.lon.toFixed(6),
             lat: nextCoord.lat.toFixed(6),
           }
         : {}),
-    }));
-    if (nextCoord) {
-      updateCoord(nextCoord.lon, nextCoord.lat, true);
+      },
+      clearErrors: nextCoord ? ["lon", "lat"] : undefined,
+    });
+    if (nextCoord && mapRef.current) {
+      mapRef.current.easeTo({
+        center: [nextCoord.lon, nextCoord.lat],
+        zoom: Math.max(mapRef.current.getZoom(), 14),
+        duration: 400,
+      });
     }
   };
 
   const runReverseGeocode = async () => {
-    setKorTravelGeoError(null);
-    setKorTravelGeoPending(true);
+    dispatch({ type: "geo-start" });
     try {
       const selectedCoord = parseCoord(form);
       const response = await reverseGeocode(selectedCoord);
-      setKorTravelGeoCandidates(response.candidates);
-      setSelectedKorTravelGeoKey(null);
+      dispatch({ type: "geo-success", candidates: response.candidates });
       if (response.candidates[0]) {
         applyCandidate(response.candidates[0]);
       }
     } catch (error) {
-      setKorTravelGeoError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setKorTravelGeoPending(false);
+      dispatch({
+        type: "geo-error",
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
   const runGeocode = async () => {
     const query = form.geocodeQuery.trim();
     if (query.length === 0) {
-      setKorTravelGeoError("주소 검색어를 입력하세요.");
+      dispatch({ type: "geo-error", message: "주소 검색어를 입력하세요." });
       return;
     }
-    setKorTravelGeoError(null);
-    setKorTravelGeoPending(true);
+    dispatch({ type: "geo-start" });
     try {
       const response = await geocodeAddress(query, form.geocodeType);
-      setKorTravelGeoCandidates(response.candidates);
-      setSelectedKorTravelGeoKey(null);
+      dispatch({ type: "geo-success", candidates: response.candidates });
       if (response.candidates[0]) {
         applyCandidate(response.candidates[0]);
       }
     } catch (error) {
-      setKorTravelGeoError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setKorTravelGeoPending(false);
+      dispatch({
+        type: "geo-error",
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
@@ -559,20 +664,13 @@ export function FeatureCreateClient() {
   };
 
   const resetForm = () => {
-    setForm(initialForm());
-    setFormError(null);
-    setFieldErrors({});
-    setKorTravelGeoError(null);
-    setKorTravelGeoCandidates([]);
-    setSelectedKorTravelGeoKey(null);
-    setCreatedRequest(null);
+    dispatch({ type: "reset" });
   };
 
   const submitCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submitCreateInFlightRef.current) return;
-    setFormError(null);
-    setFieldErrors({});
+    dispatch({ type: "submit-start" });
     // §4: 필드 규칙을 제출 전에 일괄 검증해 인라인 에러로 보여준다 —
     // 서버/예외 메시지 keyword 라우팅(구 message.includes 분기)은 제거.
     const result = validateForm(form, [
@@ -592,7 +690,7 @@ export function FeatureCreateClient() {
       { field: "urlsExtraJson", validate: jsonObject() },
     ]);
     if (!result.isValid) {
-      setFieldErrors(result.errors);
+      dispatch({ type: "validation-errors", errors: result.errors });
       return;
     }
     submitCreateInFlightRef.current = true;
@@ -600,39 +698,55 @@ export function FeatureCreateClient() {
       validateCreateTextFields(form, categoryItems);
       const payload = buildCreatePayload(form);
       const response = await createFeature.mutateAsync(payload);
-      setCreatedRequest(response.data.request);
+      dispatch({ type: "create-success", request: response.data.request });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setFormError(message);
+      dispatch({ type: "create-error", message });
     } finally {
       submitCreateInFlightRef.current = false;
     }
   };
 
+  return {
+    applyCandidate,
+    applyMapCenter,
+    categories,
+    categoryItems,
+    coord,
+    coordError,
+    createFeature,
+    createdRequest,
+    duplicateColumns,
+    duplicateItems,
+    duplicateRadius,
+    fieldErrors,
+    form,
+    formError,
+    formMarkerIconOptions,
+    korTravelGeoCandidates,
+    korTravelGeoError,
+    korTravelGeoPending,
+    mapRef,
+    nearby,
+    resetForm,
+    runGeocode,
+    runReverseGeocode,
+    selectedKorTravelGeoKey,
+    submitCreate,
+    updateCoord,
+    updateForm,
+  };
+}
+
+function FeatureCreateFeedback({
+  createFeature,
+  createdRequest,
+  formError,
+  korTravelGeoError,
+}: Pick<ReturnType<typeof useFeatureCreateClientController>, "createFeature" | "createdRequest" | "formError" | "korTravelGeoError">) {
   return (
-    <AdminShell
-      actions={
-        <>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/features"
-          >
-            <ArrowLeftIcon data-icon="inline-start" />
-            목록
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/features/change-requests"
-          >
-            변경 요청 작성
-          </Link>
-        </>
-      }
-      description="새 Feature를 등록합니다."
-      title="새 Feature"
-    >
-      <form className="flex flex-col gap-4" onSubmit={submitCreate}>
-        {(formError || korTravelGeoError || createFeature.isError) && (
+    <>
+{(formError || korTravelGeoError || createFeature.isError) && (
           <Alert variant="destructive">
             <AlertTitle>Feature 작성 실패</AlertTitle>
             <AlertDescription>
@@ -656,8 +770,32 @@ export function FeatureCreateClient() {
             </AlertDescription>
           </Alert>
         ) : null}
+    </>
+  );
+}
 
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
+function FeatureCreateLocationWorkspace({
+  applyCandidate,
+  applyMapCenter,
+  coord,
+  duplicateColumns,
+  duplicateItems,
+  duplicateRadius,
+  fieldErrors,
+  form,
+  korTravelGeoCandidates,
+  korTravelGeoPending,
+  mapRef,
+  nearby,
+  runGeocode,
+  runReverseGeocode,
+  selectedKorTravelGeoKey,
+  updateCoord,
+  updateForm,
+}: Pick<ReturnType<typeof useFeatureCreateClientController>, "applyCandidate" | "applyMapCenter" | "coord" | "duplicateColumns" | "duplicateItems" | "duplicateRadius" | "fieldErrors" | "form" | "korTravelGeoCandidates" | "korTravelGeoPending" | "mapRef" | "nearby" | "runGeocode" | "runReverseGeocode" | "selectedKorTravelGeoKey" | "updateCoord" | "updateForm">) {
+  return (
+    <>
+<section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
           <FeatureLocationPreviewSection
             apiKey={VWORLD_KEY}
             className="h-full"
@@ -824,8 +962,24 @@ export function FeatureCreateClient() {
             </section>
           </div>
         </section>
+    </>
+  );
+}
 
-        <FeatureBasicInfoSection
+function FeatureCreateIdentityFields({
+  categories,
+  categoryItems,
+  coordError,
+  createFeature,
+  fieldErrors,
+  form,
+  formMarkerIconOptions,
+  resetForm,
+  updateForm,
+}: Pick<ReturnType<typeof useFeatureCreateClientController>, "categories" | "categoryItems" | "coordError" | "createFeature" | "fieldErrors" | "form" | "formMarkerIconOptions" | "resetForm" | "updateForm">) {
+  return (
+    <>
+<FeatureBasicInfoSection
           actions={
             <>
               <Button type="button" variant="outline" onClick={resetForm}>
@@ -937,8 +1091,20 @@ export function FeatureCreateClient() {
             />
           </div>
         </section>
+    </>
+  );
+}
 
-        <section className="grid gap-4 xl:grid-cols-2">
+function FeatureCreateDetailFields({
+  applyCandidate,
+  createdRequest,
+  fieldErrors,
+  form,
+  updateForm,
+}: Pick<ReturnType<typeof useFeatureCreateClientController>, "applyCandidate" | "createdRequest" | "fieldErrors" | "form" | "updateForm">) {
+  return (
+    <>
+<section className="grid gap-4 xl:grid-cols-2">
           <FeatureAddressSection
             idPrefix="create"
             values={{
@@ -1009,7 +1175,75 @@ export function FeatureCreateClient() {
             </div>
           </section>
         ) : null}
+    </>
+  );
+}
+
+function FeatureCreateClientView({
+  applyCandidate,
+  applyMapCenter,
+  categories,
+  categoryItems,
+  coord,
+  coordError,
+  createFeature,
+  createdRequest,
+  duplicateColumns,
+  duplicateItems,
+  duplicateRadius,
+  fieldErrors,
+  form,
+  formError,
+  formMarkerIconOptions,
+  korTravelGeoCandidates,
+  korTravelGeoError,
+  korTravelGeoPending,
+  mapRef,
+  nearby,
+  resetForm,
+  runGeocode,
+  runReverseGeocode,
+  selectedKorTravelGeoKey,
+  submitCreate,
+  updateCoord,
+  updateForm,
+}: ReturnType<typeof useFeatureCreateClientController>) {
+  return (
+    <AdminShell
+      actions={
+        <>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/admin/features"
+          >
+            <ArrowLeftIcon data-icon="inline-start" />
+            목록
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/admin/features/change-requests"
+          >
+            변경 요청 작성
+          </Link>
+        </>
+      }
+      description="새 Feature를 등록합니다."
+      title="새 Feature"
+    >
+      <form className="flex flex-col gap-4" onSubmit={submitCreate}>
+        <FeatureCreateFeedback createFeature={createFeature} createdRequest={createdRequest} formError={formError} korTravelGeoError={korTravelGeoError} />
+
+        <FeatureCreateLocationWorkspace applyCandidate={applyCandidate} applyMapCenter={applyMapCenter} coord={coord} duplicateColumns={duplicateColumns} duplicateItems={duplicateItems} duplicateRadius={duplicateRadius} fieldErrors={fieldErrors} form={form} korTravelGeoCandidates={korTravelGeoCandidates} korTravelGeoPending={korTravelGeoPending} mapRef={mapRef} nearby={nearby} runGeocode={runGeocode} runReverseGeocode={runReverseGeocode} selectedKorTravelGeoKey={selectedKorTravelGeoKey} updateCoord={updateCoord} updateForm={updateForm} />
+
+        <FeatureCreateIdentityFields categories={categories} categoryItems={categoryItems} coordError={coordError} createFeature={createFeature} fieldErrors={fieldErrors} form={form} formMarkerIconOptions={formMarkerIconOptions} resetForm={resetForm} updateForm={updateForm} />
+
+        <FeatureCreateDetailFields applyCandidate={applyCandidate} createdRequest={createdRequest} fieldErrors={fieldErrors} form={form} updateForm={updateForm} />
       </form>
     </AdminShell>
   );
+}
+
+export function FeatureCreateClient() {
+  const controller = useFeatureCreateClientController();
+  return <FeatureCreateClientView {...controller} />;
 }
