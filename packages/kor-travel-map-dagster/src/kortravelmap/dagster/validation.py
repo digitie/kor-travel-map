@@ -133,14 +133,36 @@ def validate_feature_bundle_address(
     # 조건은 **영원히 거짓**이 되어, kor-travel-geo가 run 내내 죽어 있어도 전량이 좌표
     # 검증 없이 적재된다. AdminEvidence.obs_code가 reverse 성공 여부를 직접 말해 준다.
     evidence = bundle.admin_evidence
-    if evidence is None:
-        reverse_produced_nothing = address.bjd_code is None
-    elif evidence.reverse_attempted:
-        reverse_produced_nothing = evidence.obs_code is None
-    else:
-        # reverse를 시도조차 안 했으면 실패로 볼 수 없다(geocoder 미결선).
-        reverse_produced_nothing = address.bjd_code is None
-    if feature.coord is not None and reverse_produced_nothing:
+
+    # T-VN-H28B: reverse가 결과를 못 냈어도 payload가 법정동코드를 실어 주면 위치 단서는
+    # 남아 있다 — 그건 **저하**이지 손실 사유가 아니다. 이걸 error로 올리면 실측 105건이
+    # 새로 drop되어, 이 task가 없애려던 바로 그 피해를 재생산한다.
+    # 반대로 완전히 침묵하면 geo가 run 내내 죽어 있어도 전량이 무검증 적재된다(적대 리뷰
+    # 지적). 그래서 **warning으로 드러내고 적재는 유지**한다.
+    if (
+        feature.coord is not None
+        and evidence is not None
+        and evidence.reverse_attempted
+        and evidence.obs_code is None
+        and address.bjd_code is not None
+    ):
+        issues.append(
+            FeatureAddressIssue(
+                feature_id=feature.feature_id,
+                source_record_key=bundle.source_record.source_record_key,
+                code="reverse_geocode_unavailable",
+                severity="warning",
+                message=(
+                    "좌표 reverse가 결과를 내지 못해 좌표 기준 검증을 못 했다 "
+                    "(provider 행정코드로 적재 — 좌표 정합성은 미확인)."
+                ),
+                provider_address=provider_address,
+                bjd_code=address.bjd_code,
+                sigungu_code=address.sigungu_code,
+            )
+        )
+
+    if feature.coord is not None and address.bjd_code is None:
         issues.append(
             FeatureAddressIssue(
                 feature_id=feature.feature_id,
