@@ -44,6 +44,7 @@ __all__ = [
 ]
 
 _MAX_PAGE_SIZE: Final[int] = 200
+_INTEGRITY_ISSUES_CURSOR_KIND: Final[str] = "integrity_issues_last_seen_v2"
 
 
 class OpsCursorFilterMismatch(ValueError):
@@ -147,6 +148,7 @@ class OpsIntegrityIssue:
     payload: dict[str, Any]
     status: str
     detected_at: datetime
+    last_seen_at: datetime
     resolved_at: datetime | None
 
 
@@ -409,7 +411,8 @@ LIMIT 1
 
 _ISSUE_COLUMNS: Final[str] = (
     "issue_id, provider, dataset_key, source_record_key, feature_id, "
-    "violation_type, severity, message, payload, status, detected_at, resolved_at"
+    "violation_type, severity, message, payload, status, detected_at, "
+    "last_seen_at, resolved_at"
 )
 
 _LIST_ISSUES_SQL: Final[str] = f"""
@@ -444,13 +447,13 @@ WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
     )
   )
   AND (
-    CAST(:cursor_detected_at AS timestamptz) IS NULL
-    OR (detected_at, issue_id) < (
-        CAST(:cursor_detected_at AS timestamptz),
+    CAST(:cursor_last_seen_at AS timestamptz) IS NULL
+    OR (last_seen_at, issue_id) < (
+        CAST(:cursor_last_seen_at AS timestamptz),
         CAST(:cursor_issue_id AS uuid)
     )
   )
-ORDER BY detected_at DESC, issue_id DESC
+ORDER BY last_seen_at DESC, issue_id DESC
 LIMIT :limit
 """
 
@@ -560,6 +563,7 @@ def _row_to_issue(row: Any) -> OpsIntegrityIssue:
         payload=_json_dict(row.payload),
         status=str(row.status),
         detected_at=row.detected_at,
+        last_seen_at=row.last_seen_at,
         resolved_at=row.resolved_at,
     )
 
@@ -747,8 +751,8 @@ async def list_ops_integrity_issues(
     없는 이슈는 제외). 둘 다 ``None``이면 필터하지 않는다.
     """
     page_size = _limit(limit)
-    cursor_detected_at, cursor_issue_id = _decode_cursor(
-        cursor, kind="integrity_issues"
+    cursor_last_seen_at, cursor_issue_id = _decode_cursor(
+        cursor, kind=_INTEGRITY_ISSUES_CURSOR_KIND
     )
     q_like = f"%{q}%" if q else None
     bbox_min_lon, bbox_min_lat, bbox_max_lon, bbox_max_lat = (
@@ -769,7 +773,7 @@ async def list_ops_integrity_issues(
                 "bbox_min_lat": bbox_min_lat,
                 "bbox_max_lon": bbox_max_lon,
                 "bbox_max_lat": bbox_max_lat,
-                "cursor_detected_at": cursor_detected_at,
+                "cursor_last_seen_at": cursor_last_seen_at,
                 "cursor_issue_id": cursor_issue_id,
                 "limit": page_size + 1,
             },
@@ -778,7 +782,9 @@ async def list_ops_integrity_issues(
     items = tuple(_row_to_issue(row) for row in rows[:page_size])
     next_cursor = (
         _encode_cursor(
-            "integrity_issues", at=items[-1].detected_at, key=items[-1].issue_id
+            _INTEGRITY_ISSUES_CURSOR_KIND,
+            at=items[-1].last_seen_at,
+            key=items[-1].issue_id,
         )
         if len(rows) > page_size and items
         else None

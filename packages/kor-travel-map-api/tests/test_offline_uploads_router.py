@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.infra.file_store import StoredObject
 from kortravelmap.infra.jobs_repo import ImportJob
 from kortravelmap.infra.offline_upload_repo import (
@@ -17,6 +18,8 @@ from kortravelmap.infra.offline_upload_repo import (
     OfflineUploadStatusConflict,
 )
 from kortravelmap.offline_upload import validate_offline_tabular_upload
+from kortravelmap.settings import KorTravelMapSettings
+from pydantic import SecretStr
 from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.api.app import create_app
@@ -888,6 +891,76 @@ def test_validate_offline_upload_runs_validation_job(
     assert body_json["data"]["status"] == "validated"
     assert body_json["meta"]["valid_rows"] == 1
     assert body_json["meta"]["issues"] == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_code"),
+    [
+        (
+            GeoAuthNotConfiguredError("geo trusted proxy 인증 미설정"),
+            503,
+            "GEO_AUTH_NOT_CONFIGURED",
+        ),
+        (
+            GeoRequestError("kor-travel-geo 호출 실패"),
+            502,
+            "PROVIDER_ERROR",
+        ),
+    ],
+)
+def test_validate_offline_upload_keeps_typed_geo_problem_code(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected_status: int,
+    expected_code: str,
+) -> None:
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
+    upload = _upload(
+        original_filename="features.csv",
+        detected_format="csv",
+        dataset_key="offline_csv",
+    )
+    store = _FakeStore()
+
+    async def _get(_session: Any, _upload_id: str) -> OfflineUpload:
+        return upload
+
+    async def _run(_session: Any, _upload_id: str, **_kwargs: Any) -> Any:
+        raise error
+
+    settings = KorTravelMapSettings(
+        _env_file=None,
+        kor_travel_geo_base_url="http://127.0.0.1:12501",
+        kor_travel_geo_api_key=SecretStr("geo-public-key"),
+    )
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+    monkeypatch.setattr(
+        router_mod,
+        "_kor_travel_map_settings_from_request",
+        lambda _request: settings,
+    )
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
+    monkeypatch.setattr(router_mod, "run_offline_upload_validation_job", _run)
+
+    response = client.post(
+        f"/v1/admin/offline-uploads/{upload.upload_id}/validate",
+        json={
+            "sample_size": 100,
+            "column_mapping": {
+                "name": "name",
+                "lon": "lon",
+                "lat": "lat",
+                "address": "address",
+            },
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == expected_code
 
 
 @pytest.mark.unit

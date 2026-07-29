@@ -9,15 +9,103 @@
 
 | 파일 | 기간 | 엔트리 | 크기 |
 | --- | --- | --- | --- |
-| [`journal-2026-07a.md`](archive/journal-2026-07a.md) | 2026-07-12 ~ 2026-07-24 | 116건 | 220 KB |
-| [`journal-2026-07b.md`](archive/journal-2026-07b.md) | 2026-07-01 ~ 2026-07-12 | 27건 | 44 KB |
+| [`journal-2026-07a.md`](archive/journal-2026-07a.md) | 2026-07-13 ~ 2026-07-24 | 115건 | 219 KB |
+| [`journal-2026-07b.md`](archive/journal-2026-07b.md) | 2026-07-01 ~ 2026-07-12 | 28건 | 45 KB |
 | [`journal-2026-06a.md`](archive/journal-2026-06a.md) | 2026-06-10 ~ 2026-06-30 | 172건 | 219 KB |
 | [`journal-2026-06b.md`](archive/journal-2026-06b.md) | 2026-06-02 ~ 2026-06-10 | 179건 | 220 KB |
 | [`journal-2026-06c.md`](archive/journal-2026-06c.md) | 2026-06-01 ~ 2026-06-02 | 36건 | 53 KB |
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
-## 2026-07-29 (claude) — Lane A a1: T-VN-H30A/B 검증 결과 durable 기록
+## 2026-07-29 (codex) — T-VN-48D 최종 Mocked·clone Live 완료
+
+보존 clone의 파괴적 Live 본편·recovery-only는 이미 각각 2/2를 실행한 상태에서, 최종
+content equality가 정상적인 `ops_live_topic_revisions.dataset_projection` revision `+1`까지
+변조로 취급해 fail-closed했다. 전체 clone/restore나 UI를 반복하지 않고 실패 지점부터
+복구했다.
+
+- 서명된 checkpoint dump의 직전 topic 행을 현재 DB에 대입한 전체 content digest가 v5
+  baseline과 정확히 같은 경우만 허용했다. current row는 revision `+1`과 증가한 timestamp를
+  별도 root-owned 증거로 결박하고, 다른 topic·schema·identity·content 차이는 그대로
+  거부한다.
+- evidence 사전 검증 뒤 `recovery-resource-finalizing`을 기록한 상태에서 `complete`가 같은
+  증거를 다시 거부하던 전이도 수정했다. `direct-cleanup-running`을 이미 거친 이 두 단계만
+  허용하고 임의 phase는 음성 테스트로 차단했다.
+- Live result는 `complete/recovered`, main 2/2·recovery 2/2다. active acceptance Feature,
+  pending change request, direct weather/price/FK, BLOCKED/quiescence/scratch/temp DB·role,
+  runner container/network/image가 모두 0이며 clone은 healthy다. v5 custom dump는
+  `archive_verified=true`, `full_restore_verified=false`로 보존했다.
+- Mocked 첫 serial은 273/274로, `areTilesLoaded()` 뒤 늦게 도착한 실제 MapLibre `idle`이
+  raster `sourcedata` 계측에 섞이는 한 건만 실패했다. repaint로 실제 idle cycle과 marker
+  rAF를 먼저 소진한 뒤 계측하게 고쳤고, exact `823ba52b` checkpoint D를 serial과
+  workers=4에서 각각 **274/274** 통과했다. expected/actual failure·flake·skip과 종료 자원은
+  모두 0이다.
+
+국소 gate는 runner unit 35개, Ruff, shell syntax, e2e TypeScript/ESLint가 통과했다. 최종
+문서 이관 뒤 PR을 열고 CI green·직접 머지한다. Claude Code PR 사후 감사는 사용자 지시에
+따라 task PR 머지 뒤 별도 후속 단계에서 진행한다.
+
+PR #889 첫 CI는 Python 3.11/3.12/3.13에서 같은 11개 Dagster asset test를 검출했다.
+`record_address_validation_findings()`가 typed `IntegrityFindingSyncResult`를 반환하도록
+강화됐는데 주변 test double 12개가 여전히 `int`를 반환한 계약 drift였다. production
+fallback을 넣지 않고 모든 double을 실제 결과 타입으로 맞췄다. 실패 node에서 재개한 Dagster
+package 전체는 **510 passed, 1 skipped**, coverage **83.66%**이고 Ruff도 통과했다.
+
+## 2026-07-29 (codex) — T-VN-48D 2인 적대 리뷰 하드닝
+
+T-VN-48와 현재 PR에 이미 포함된 PR #888 사후 감사 수정의 branch-authored delta만 두
+리뷰어가 검토했다. rebase로 유입된 PR #887 이하 코드는 범위에서 제외했다.
+
+- Live clone fence가 client-controlled `application_name`을 소유권으로 믿던 문제를 기존
+  client backend 전부 종료 + 정확한 backend PID/시작 시각 추적으로 바꿨다.
+- runner의 FD 9 flock을 외부 명령에 상속하던 구조를 stdin EOF guardian coprocess로
+  바꿔, runner SIGKILL 뒤 장시간 docker/build/executor가 복구 lock을 붙잡지 않게 했다.
+- `0068`은 자유형 `payload.last_seen_at`을 timestamp로 cast·삭제하지 않고 payload를
+  보존한다. `last_seen_at=detected_at` 결정 backfill, NOT VALID/VALIDATE, concurrent index
+  교체로 malformed/null/offset 값과 대용량 lock 경계를 함께 고정했다.
+- integrity cursor kind를 `integrity_issues_last_seen_v2`로 분리해 구
+  `detected_at` cursor를 조용히 새 정렬축에 적용하지 않는다.
+- 겹치는 batch는 `GREATEST(last_seen_at)`과 조건부 최신 필드 갱신으로 오래된 관측이 최신
+  FK/message/severity/payload를 되돌리지 못하며, occurrence count만 누적한다.
+- Mocked checkpoint cleanup은 container/network/image 제거 명령과 사후 부재를 확인하고
+  Docker 오류·timeout·잔존을 exit 2로 승격한다.
+- 1차 재검토가 `0068` 첫 autocommit 중단 뒤 duplicate column으로 재개 불가한 경계와
+  default 설정 전 writer NULL 공백을 재현했다. column 추가+default를 단일 atomic
+  `ALTER TABLE`로 묶고 column/constraint/index 각 단계가 부분 적용 상태를 감지·정규화해
+  같은 forward migration을 재실행할 수 있게 했다.
+- Docker daemon이 create를 완료했지만 CLI 응답이 유실되는 signal 경계는 create-attempt를
+  먼저 기록하고 name+ownership label로 실제 ID를 회수해 제거한다. 검증 전 빈/손상 ID를
+  소유 identity로 저장하지 않으며, stderr 문구 대신 container/network/image 목록의 실제
+  부재로 cleanup 성공을 판정한다.
+
+검증은 관련 단위 49개, 신규 migration/upsert 통합 7개, 전체 Ruff, strict mypy 196 files,
+import-linter 4 contracts, shell/Node syntax가 통과했다. 실패한 migration fixture는
+Alembic naming convention과 asyncpg datetime 타입 지점에서만 재개해 수정했고 downgrade는
+실행하지 않았다.
+
+## 2026-07-29 (codex) — PR #888 주소 finding ledger 사후 감사 정정
+
+PR #888 원본 patch를 별도 적대 감사한 결과 8건을 확인하고 현재 T-VN-48 PR에 함께
+반영했다.
+
+- 서로 반대 순서의 multi-row upsert가 같은 unique key를 잠그며 deadlock할 수 있어,
+  repository 진입점에서 `dedupe_key` 정렬 후 모든 `unnest` 배열을 만든다.
+- 구 key는 `source_entity_type`을 생략하고 원천 id를 그대로 붙여 entity type 충돌과
+  B-tree row 크기 초과가 가능했다. provider/dataset/type/id/code 전체의
+  `av2_<sha256>` 68-byte key로 교체했다.
+- recurrence가 payload만 갱신해 실제 `feature_id`/`source_record_key`는 최초 값을
+  가리키던 문제를 고쳤다. Feature FK도 `CASCADE`에서 `SET NULL`로 바꿔 대상 삭제가
+  ledger 자체를 삭제하지 않게 했다.
+- `detected_at`은 최초 탐지 시각으로 보존하고 `last_seen_at` column을 추가했다.
+  Admin/Ops 목록과 cursor·실제 query index는 최신 관측 시각을 사용한다.
+- client의 broad catch를 typed `IntegrityFindingPersistenceError`로 바꾸고 strict는
+  durable 기록 실패를 validation 실패보다 먼저 fail-closed한다.
+- 결과를 `observed/unique/upserted`로 분리해 batch 내부 중복을 미기록으로 계산하지 않는다.
+- 실제 구현에 없는 자동 close sweep을 광고하던 문서·상수·테스트를 제거했다.
+- H30B는 동일 snapshot의 Feature before/after와 인증된 Admin API 실호출이 없으므로
+  완료 표시를 취소하고 acceptance를 구체화했다.
+
+## 2026-07-29 (claude) — Lane A a1: T-VN-H30A 구현·H30B 1차 실증
 
 **목표**. 주소/좌표 검증 결과가 Dagster run metadata에만 있어 run이 사라지면 증거도 사라지고
 `/admin/issues`에서도 안 보였다. `ops.data_integrity_violations`에 남긴다.
@@ -42,25 +130,21 @@ client 메서드로 만들고 격리 clone에서 "finding 106건, 재실행에�
    `/admin/issues` 쓰기 차단·동시 run 직렬화·admin PATCH와 데드락.
 
 **재설계**. `sync_integrity_findings()`로 통합했다.
-- `unnest` 기반 **단일 INSERT** + **단일 UPDATE sweep** → 트리거 2회 발화. batch 내 중복은
-  파이썬에서 먼저 제거한다(같은 key가 한 statement에 두 번 오면 Postgres가 거부).
-- `dedupe_key`를 **`source_entity_id`** 기반으로. payload 변경과 무관하게 안정적이다.
-- **자동 resolve sweep** — 이번 run이 더는 보고하지 않는 `open` finding을 닫는다. 주소 검증이
-  소유하는 code와 해당 provider/dataset에 한정하고, 운영자가 손댄 `acknowledged`는 불가침.
-- `jsonb_strip_nulls`로 증거 소실 차단, `last_seen_at`은 UTC 고정(TimeZone GUC 의존 제거).
+- `unnest` 기반 단일 INSERT로 트리거 1회만 발화한다. batch 내 중복은 파이썬에서 제거한다.
+- `dedupe_key`를 source entity type+id 전체의 고정 길이 SHA256으로 만든다.
+- 자동 resolve sweep은 배치 경계에서 안전하지 않아 넣지 않았다(`T-VN-H32`).
+- `jsonb_strip_nulls`로 증거 소실을 차단하고 `last_seen_at`은 정규 column으로 둔다.
 - strict 경로도 던지기 전에 기록한다.
 - MOIS `obs_code`/`reverse_attempted`는 **reverse 경로 값만** 쓴다 — `geo`는 정지오코딩으로도
   채워져 obs가 `claim_text`와 같은 출처가 되는 오염이 있었다.
 
-**검증**. 통합 테스트 8건을 새로 붙였다 — 재실행 접힘·`occurrence_count` 증가·null이 증거를
-덮지 않음·sweep이 보고 안 된 것만 닫음·`acknowledged` 불가침·관리 code 한정·provider 경계·
-findings 비었을 때 전량 close, 그리고 **payload 변경에도 접힘**(`source_entity_id` 전환의
-전체 근거인데 그전까지 실증한 적이 없었다). 모델 `__table_args__`에도 0067 인덱스를 반영해
-`create_all` 스키마에서 ON CONFLICT 대상이 사라지지 않게 했다.
+**후속 검증 정정**. payload 변경에도 접힘은 유효하지만 sweep 관련 검증은 실제 코드와
+일치하지 않아 제거했다. 후속 감사가 type+id key, 고정 길이, 잠금 정렬, recurrence FK,
+`last_seen_at` cursor, strict 기록 실패를 직접 고정했다.
 
-격리 clone 실증: finding 106건 기록 → 재실행에도 106, `occurrence_count` 전부 2,
-`dedupe_key`가 entity id 기반(`…:reverse_geocode_unavailable:79`)으로 안정화.
-실적재 경로도 태워 `source_records` 2000→2458, 2회차 insert 0(멱등)을 확인했다.
+격리 clone의 106→106, `occurrence_count` 2 실증은 구 v1 key의 동일 export 재실행만
+확인했으므로 새 v2 key의 Live 근거로 사용하지 않는다. 실적재의 `source_records`
+2000→2458(+458), 2회차 insert 0도 Feature 회복량을 증명하지 않는다.
 배포 컨테이너 2곳의 concierge cursor가 미설정임을 확인해 H28의 "자동 회복" 논거를
 기본값이 아니라 **배포값**으로 실증했다.
 
@@ -73,6 +157,29 @@ findings 비었을 때 전량 close, 그리고 **payload 변경에도 접힘**(`
 **실적재 검증이 잡은 것**. revision id `0067_integrity_finding_dedupe_key`가 33자라
 `alembic_version varchar(32)`를 넘겨 upgrade가 실패했다. 단위 테스트로는 드러나지 않고
 clone에 실제로 걸어야만 나오는 종류다 — H30B를 "산술이 아니라 실적재로" 요구한 값이 여기 있다.
+
+## 2026-07-29 (codex) — T-VN-48D 최종 mocked checkpoint·Claude PR #885 감사
+
+**mocked checkpoint**. PR #887 문서 변경을 rebase한 exact `b35d7cbb`에서 self-built
+frontend와 브라우저를 self-owned internal Docker network에 격리했다. container port는
+publish하지 않고 검증한 내부 IPv4에만 loopback 프록시를 열었으며, HTTP와 WebSocket의
+비소유 외부 연결은 deny gate로 막았다. source digest와 Docker build가 동일한 격리 build
+환경을 쓰도록 결속한 뒤 checkpoint D를 serial과 workers=4에서 각각 **274/274** 통과했다.
+두 실행 모두 expected/actual failure, flake, skip이 0이고 실행별 container/network/image는
+정리됐다.
+
+**PR #885 사후 감사 정정**. 이전 issue #881 기록의 trusted-proxy 전환은 현재 geo 계약과
+맞지 않아 폐기했다. backend는 권한이 넓은 admin proxy principal을 위임하지 않고 scoped
+public API key를 `X-KTG-API-Key` header로만 전달한다. `E0100 key` fallback은 인증 결선
+오류 503, 2xx JSON/schema 손상은 provider 오류 502로 분리한다.
+
+주소 증거는 관측 후보 집합과 시도 여부를 typed DTO로 끝까지 보존한다. strict/ensure는
+모든 error를 거부하고 영구 drop만 명시 allowlist를 쓴다. 이름은 substring이 아니라
+행정구역 token state로 warning을 만들며, quarantine을 별도 typed 결과로 보존해
+`upserts == bundles + quarantine`을 강제했다. 과거 H28 문서의 “380건 좌표 오류 0”은
+독립적인 일반 좌표 정확도 증거가 아니므로, **기존 규칙으로 불일치 근거가 성립하지
+않았다**는 범위로 정정했다. baseline 스크립트도 현재 validator 자기 비교가 아니라 당시
+규칙 버전을 명시적으로 재현한다.
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25A 공식 curation 미연결 증거·전제 정정
 
@@ -192,6 +299,48 @@ ledger 테이블·오프라인 기하 감사·타 provider `AdminEvidence` 채�
 **검증**. n150 CI-parity — ruff / mypy --strict(core 117 · dagster 23) / dagster 494 passed +
 1 skipped / 관련 unit 179 passed. 신규 회귀 25건(오탐 재발 방지 · 단계별 탐지 · 정밀도 규칙 ·
 커버리지 집계 · allowlist 불변).
+## 2026-07-29 (codex) — issue #881 Claude PR #882~#884 사후 감사 반영
+
+**결론**: PR #884의 문자열 sanitization만으로는 URL query와 frame-local secret의 생성
+자체를 막지 못했다. backend geo 인증을 public key query에서 trusted proxy header principal로
+clean-cut하고 typed problem code를 중앙·세 경계에서 보존했다. PR #882/#883이 남긴 미사용
+OpenAPI digest와 완료 task 중복도 제거했다.
+
+- geo의 현행 `origin/main` 계약을 로컬 1차 source로 대조했다. Map backend는
+  `X-KTG-Actor: kor-travel-map`, `X-KTG-Roles: source_file_viewer`,
+  `X-KTG-Admin-Proxy-Secret`을 보내고 geo가 trusted peer CIDR+shared secret을 함께 검증한다.
+  브라우저 public key와 backend secret의 env·compose 결선도 분리했다.
+- `GeoAuthNotConfiguredError`(503/`GEO_AUTH_NOT_CONFIGURED`)와
+  `GeoRequestError`(502/`PROVIDER_ERROR`)를 중앙 problem+json handler에 등록했다.
+  admin issues, offline upload, feature-update adapter에서 generic status code로 소실되지
+  않는 회귀를 각각 고정했다.
+- PinVi `contract-pin-consistency`는 Map 핀 commit의 spec bytes/subset을 직접 비교하고
+  `openapi-sha256.json`을 읽지 않는다. 소비자 없는 파생 manifest 생성·검사를 제거하고
+  `tasks.md`를 열린 작업만 남도록 정리했다.
+
+## 2026-07-29 (codex) — T-VN-48D durable clone Live·중단 지점 복구
+
+**결론**: production DB를 건드리지 않는 보존 실데이터 clone 전용 trusted runner로
+파괴적 Admin Feature Live evidence를 확정했다. 최초 실행의 최종 판정 버그는 build나
+Playwright를 반복하지 않고 보존한 BLOCKED/final snapshot에서 복구했다.
+
+- **격리·출처**: root-owned immutable git snapshot에서 exact `fe0c956e` API/UI/Playwright
+  image를 만들고 image revision, clone container/system identity, loopback DB/API/UI 포트,
+  non-production compose project를 결속했다. API는 `uvicorn`을 직접 실행해 Alembic
+  startup mutation이 없음을 시작 전후 snapshot으로 증명했다.
+- **파괴적 결과**: 본 acceptance **2/2**, recovery-only **2/2**. random-owned direct
+  fixture는 Feature 2건과 weather/price 각 1건을 만들었고, UI create/delete 6건은
+  soft-delete 감사 이력으로 남았다. final total 1,030,487건, non-deleted 1,030,387건이며
+  migration `0066_curation_component_identity`, relation 49는 불변이다. cleanup/audit의
+  owned Feature·weather·price·FK·pending change request는 모두 0이다.
+- **실패 지점 재개**: 최초 `complete`가 seed의 정상 child→Feature FK 2건을 cleanup
+  residue로 오판했다. `abc1de8b`에서 seed 기대 2/cleanup·audit 기대 0을 분리하고,
+  old immutable source와 세 image revision, clone identity, 실패 당시 final과 현재 DB
+  snapshot의 exact equality를 요구하는 `recover`를 추가했다. 그 검증만 실행해 완료했으며
+  test/build/fixture/browser는 재실행하지 않았다.
+- **종료 상태**: result는 `complete/recovered`, main·recovery 각 2 passed다. BLOCKED와
+  후보 container/image/listener는 0이고 민감 browser raw artifact는 남지 않았다.
+  다음 exact revision 재검증과 post-merge 재사용 판정을 위해 clone DB만 보존한다.
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H21 geo 인증 결선 검증·비밀 유출 차단
 
@@ -1124,4 +1273,3 @@ re-render**(button attach/detach + `scheduleControlsDisabled` 깜빡임)로 star
 비활성화 → `ops.dagster_schedule_overrides` 정리 + dagster reload로 `20 * * * *` 복원. 현 prod: cron=20, RUNNING.
 **descope 방법**: `scripts/run-c7-prod-live-e2e.sh` SPECS에서 schedule-write 제외(spec 파일·contract test content 계약은
 유지). spec은 b5375a52 배포본 유지(WIP fix는 위 6개로 문서화 — 재적용 시 참조). **머지**: #837(gate descope) + #74.
-

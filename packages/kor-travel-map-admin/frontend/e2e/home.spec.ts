@@ -1,11 +1,48 @@
 import { expect, test } from "@playwright/test";
 
+import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
+import { installInertOpsLiveWebSocket } from "./ws-isolation";
+
+type ProblemDetail = components["schemas"]["ProblemDetail"];
+
+const BACKEND_UNAVAILABLE: ProblemDetail = {
+  code: "SERVICE_UNAVAILABLE",
+  detail: "mocked backend unavailable",
+  request_id: "e2e-home-backend-unavailable",
+  status: 503,
+  title: "mocked backend unavailable",
+  type: "https://kor-travel-map/errors/service-unavailable",
+};
+
 /**
  * 홈(`/`) — 운영 홈 대시보드 smoke.
  * 실 API 데이터가 비어 있거나 일시 실패해도 shell, 주요 metric, 운영 내비게이션은
  * 렌더되어야 한다.
  */
 test.describe("home page (/)", () => {
+  test.beforeEach(async ({ page }) => {
+    // 이 smoke의 계약은 backend 실패와 무관한 shell/navigation 렌더다.
+    // 세부 happy/error payload는 home-nav.spec.ts가 생성 OpenAPI 타입에
+    // 바인딩해 검증하므로, 여기서는 navigation 목적지까지 모든 BFF REST와
+    // ops-live WebSocket을 차단해 mocked suite가 실 backend에 닿지 않게 한다.
+    await installInertOpsLiveWebSocket(page);
+    await page.route("**/api/proxy/**", async (route) => {
+      const request = route.request();
+      const apiPath = bffApiPath(request.url());
+      if (request.method() !== "GET") {
+        throw new Error(
+          `home smoke에서 예상하지 않은 BFF 요청: ${request.method()} ${apiPath}`,
+        );
+      }
+      await route.fulfill({
+        body: JSON.stringify(BACKEND_UNAVAILABLE),
+        contentType: "application/problem+json",
+        status: 503,
+      });
+    });
+  });
+
   test("운영 홈 shell + 주요 운영 내비 링크 렌더", async ({ page }) => {
     await page.goto("/");
 

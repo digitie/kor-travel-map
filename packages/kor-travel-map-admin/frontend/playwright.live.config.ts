@@ -16,6 +16,16 @@ const c7RawOutputDir = path.join(
 const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const C7_READ_AUTH_SPEC = "ops-c7-read-auth.live.spec";
+const ISOLATED_EVIDENCE_ENV = "E2E_ISOLATED_LIVE_EVIDENCE";
+const ISOLATED_DOCKER_NETWORK_ENV = "E2E_ISOLATED_LIVE_DOCKER_NETWORK";
+const ADMIN_FEATURE_RUN_ID_ENV = "E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID";
+const ADMIN_FEATURE_RECOVERY_ENV =
+  "E2E_ADMIN_FEATURE_ACCEPTANCE_RECOVERY_ONLY";
+const ADMIN_FEATURE_RUN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{15,79}$/;
+const isolatedEvidenceRaw = process.env[ISOLATED_EVIDENCE_ENV];
+const isolatedEvidence = isolatedEvidenceRaw === "1";
+const isolatedDockerNetworkRaw = process.env[ISOLATED_DOCKER_NETWORK_ENV];
+const isolatedDockerNetwork = isolatedDockerNetworkRaw === "1";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -41,6 +51,32 @@ function expectedSha256(envName: string): string {
     );
   }
   return value;
+}
+
+function isolatedAuthRequestHeaders(): Record<string, string> {
+  const runId = process.env[ADMIN_FEATURE_RUN_ID_ENV];
+  if (runId === undefined) {
+    return {};
+  }
+  if (
+    !isolatedEvidence ||
+    !isolatedDockerNetwork ||
+    !ADMIN_FEATURE_RUN_ID_PATTERN.test(runId)
+  ) {
+    throw new Error(
+      `[playwright.live] ${ADMIN_FEATURE_RUN_ID_ENV}은 검증된 격리 실행의 run ID여야 합니다`,
+    );
+  }
+  const recoveryRaw = process.env[ADMIN_FEATURE_RECOVERY_ENV];
+  if (recoveryRaw !== undefined && recoveryRaw !== "1") {
+    throw new Error(
+      `[playwright.live] ${ADMIN_FEATURE_RECOVERY_ENV}=1만 허용합니다`,
+    );
+  }
+  const phase = recoveryRaw === "1" ? "recovery" : "main";
+  return {
+    "x-request-id": `e2e_live_acceptance::${runId}::auth::${phase}`,
+  };
 }
 
 /**
@@ -78,6 +114,19 @@ function isLocalHost(hostname: string): boolean {
   );
 }
 
+function isTrustedIsolatedDockerOrigin(url: URL): boolean {
+  return (
+    isolatedDockerNetwork &&
+    url.protocol === "http:" &&
+    url.hostname === "candidate-ui" &&
+    url.username === "" &&
+    url.password === "" &&
+    url.pathname === "/" &&
+    url.search === "" &&
+    url.hash === ""
+  );
+}
+
 (function assertNotProdUnlessOptedIn() {
   let parsed: URL;
   try {
@@ -87,7 +136,32 @@ function isLocalHost(hostname: string): boolean {
       "[playwright.live] E2E_BASE_URL이 유효한 URL이 아닙니다 (value redacted)",
     );
   }
-  if (!isLocalHost(parsed.hostname) && process.env.E2E_LIVE_ALLOW_PROD !== "1") {
+  if (isolatedEvidenceRaw !== undefined && isolatedEvidenceRaw !== "1") {
+    throw new Error(
+      `[playwright.live] ${ISOLATED_EVIDENCE_ENV}=1만 허용합니다 (value redacted)`,
+    );
+  }
+  if (
+    isolatedDockerNetworkRaw !== undefined &&
+    isolatedDockerNetworkRaw !== "1"
+  ) {
+    throw new Error(
+      `[playwright.live] ${ISOLATED_DOCKER_NETWORK_ENV}=1만 허용합니다 (value redacted)`,
+    );
+  }
+  if (isolatedDockerNetwork && !isolatedEvidence) {
+    throw new Error(
+      `[playwright.live] ${ISOLATED_DOCKER_NETWORK_ENV}=1은 ${ISOLATED_EVIDENCE_ENV}=1이 필요합니다`,
+    );
+  }
+  const isolatedTarget =
+    isLocalHost(parsed.hostname) || isTrustedIsolatedDockerOrigin(parsed);
+  if (isolatedEvidence && !isolatedTarget) {
+    throw new Error(
+      `[playwright.live] ${ISOLATED_EVIDENCE_ENV}=1은 검증된 격리 대상만 허용합니다`,
+    );
+  }
+  if (!isolatedTarget && process.env.E2E_LIVE_ALLOW_PROD !== "1") {
     throw new Error(
       "[playwright.live] E2E_BASE_URL이 비-로컬(prod 등)입니다 (value redacted). " +
         "의도한 실행이면 E2E_LIVE_ALLOW_PROD=1을 설정하세요.",
@@ -119,6 +193,9 @@ function isLocalHost(hostname: string): boolean {
     }
   }
 })();
+
+const redactedEvidence = shouldAssertC7OriginGuard() || isolatedEvidence;
+const authRequestHeaders = isolatedAuthRequestHeaders();
 
 /**
  * Playwright e2e — **LIVE(비-mock) 시나리오 전용** config (`e2e/live/**`).
@@ -154,10 +231,11 @@ function isLocalHost(hostname: string): boolean {
  */
 export default defineConfig({
   testDir: "./e2e/live",
+  globalTeardown: "./e2e/live/global-teardown.ts",
   timeout: 30_000,
   expect: { timeout: 15_000 },
   // C7의 raw attachment/error output은 evidence bind 밖 container tmpfs에만 둔다.
-  outputDir: shouldAssertC7OriginGuard()
+  outputDir: redactedEvidence
     ? c7RawOutputDir
     : path.join(artifactRoot, "test-results"),
   fullyParallel: true,
@@ -166,7 +244,7 @@ export default defineConfig({
   workers: liveWorkers(),
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: shouldAssertC7OriginGuard()
+  reporter: redactedEvidence
     ? [["./e2e/c7-redacted-reporter.ts", { outputFolder: artifactRoot }]]
     : [
         ["list"],
@@ -188,9 +266,9 @@ export default defineConfig({
     actionTimeout: 60_000,
     navigationTimeout: 60_000,
     // C7 evidence에는 session cookie가 포함될 수 있는 trace ZIP을 남기지 않는다.
-    trace: shouldAssertC7OriginGuard() ? "off" : "on-first-retry",
+    trace: redactedEvidence ? "off" : "on-first-retry",
     // C7 evidence는 UI 운영 데이터가 픽셀에 남을 수 있는 screenshot도 생성하지 않는다.
-    screenshot: shouldAssertC7OriginGuard() ? "off" : "only-on-failure",
+    screenshot: redactedEvidence ? "off" : "only-on-failure",
   },
   projects: [
     // #520 인증 게이트 대응: chromium 전에 로그인 세션을 1회 만들어 STORAGE_STATE에 저장.
@@ -199,7 +277,10 @@ export default defineConfig({
     {
       name: "setup",
       testMatch: /auth\.setup\.ts/,
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        extraHTTPHeaders: authRequestHeaders,
+      },
     },
     {
       name: "chromium",

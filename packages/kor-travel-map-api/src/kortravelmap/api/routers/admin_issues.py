@@ -18,7 +18,7 @@ from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
+from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
 from kortravelmap.geocoding import (
     KorTravelGeoRestClient,
     geocode_response_to_address,
@@ -38,12 +38,12 @@ from kortravelmap.infra.integrity_violation_repo import (
 )
 from kortravelmap.infra.ops_repo import OpsIntegrityIssue, list_ops_integrity_issues
 from kortravelmap.settings import KorTravelMapSettings
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
-from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.response import Meta, ProblemDetail, make_meta
 
 __all__ = [
     "router",
@@ -75,7 +75,7 @@ _STATUS_BY_ACTION: dict[str, str] = {
 }
 
 
-class _KorTravelGeoUnavailable(RuntimeError):
+class _KorTravelGeoUnavailable(GeoAuthNotConfiguredError):
     """kor-travel-geo base URL이 설정되지 않아 지오코딩을 수행할 수 없을 때."""
 
 
@@ -107,6 +107,7 @@ class AdminIssueRecord(BaseModel):
     payload: dict[str, Any]
     status: str
     detected_at: datetime
+    last_seen_at: datetime
     resolved_at: datetime | None = None
 
 
@@ -221,6 +222,7 @@ def _record(issue: OpsIntegrityIssue | DataIntegrityViolation) -> AdminIssueReco
         payload=issue.payload,
         status=issue.status,
         detected_at=issue.detected_at,
+        last_seen_at=issue.last_seen_at,
         resolved_at=issue.resolved_at,
     )
 
@@ -251,18 +253,21 @@ def _kor_travel_geo_base_url() -> str:
             "kor-travel-geo base URL이 설정되지 않아 지오코딩을 수행할 수 없습니다 "
             "(KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL)."
         )
-    return base_url
+    return base_url.get_secret_value()
 
 
-def _kor_travel_geo_api_key() -> str | None:
-    return KorTravelMapSettings().kor_travel_geo_api_key_value
+def _kor_travel_geo_api_key() -> SecretStr | None:
+    return KorTravelMapSettings().kor_travel_geo_api_key
 
 
 async def _forward_geocode(address: str) -> dict[str, Any] | None:
     """주소 문자열 → kor-travel-geo 정지오코딩 candidate dict. 결과 없으면 ``None``."""
     base_url = _kor_travel_geo_base_url()
     async with httpx.AsyncClient(base_url=base_url) as http:
-        client = KorTravelGeoRestClient(http, api_key=_kor_travel_geo_api_key())
+        client = KorTravelGeoRestClient(
+            http,
+            api_key=_kor_travel_geo_api_key(),
+        )
         response = await client.geocode(address)
     coordinate = geocode_response_to_coordinate(response)
     addr = geocode_response_to_address(response)
@@ -289,7 +294,10 @@ async def _reverse_geocode(lon: float, lat: float) -> dict[str, Any] | None:
     """좌표 → kor-travel-geo 역지오코딩 candidate dict. 결과 없으면 ``None``."""
     base_url = _kor_travel_geo_base_url()
     async with httpx.AsyncClient(base_url=base_url) as http:
-        client = KorTravelGeoRestClient(http, api_key=_kor_travel_geo_api_key())
+        client = KorTravelGeoRestClient(
+            http,
+            api_key=_kor_travel_geo_api_key(),
+        )
         response = await client.reverse(x=lon, y=lat)
     addr = reverse_response_to_address(response)
     if addr is None:
@@ -457,6 +465,10 @@ def _resolution_payload(
     responses={
         404: {"description": "이슈/feature 없음"},
         409: {"description": "상태 전이 충돌"},
+        502: {
+            "description": "kor-travel-geo provider 오류",
+            "model": ProblemDetail,
+        },
         503: {"description": "kor-travel-geo 미설정"},
     },
 )
@@ -483,18 +495,6 @@ async def patch_admin_issue(
             actor=context.actor,
             started_at=started_at,
         )
-    except (_KorTravelGeoUnavailable, GeoAuthNotConfiguredError) as exc:
-        # T-VN-H21: key 미결선은 base_url 미설정과 같은 **서버측 설정 결함**이다.
-        # 호출자 입력 오류(422)로 보고하면 좌표 문제로 오진하게 된다.
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    except (httpx.HTTPError, GeoRequestError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"kor-travel-geo 호출 실패: {exc}",
-        ) from exc
     except DataIntegrityViolationStateConflict as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

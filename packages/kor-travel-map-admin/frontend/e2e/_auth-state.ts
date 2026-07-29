@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -19,3 +20,14 @@ export const MOCKED_STORAGE_STATE = storageStatePath("mocked");
 
 /** Live suite의 repo 밖 admin session state. */
 export const LIVE_STORAGE_STATE = storageStatePath("live");
+
+/** 테스트가 끝나면 재사용 가능한 admin session cookie 파일을 반드시 폐기한다. */
+export function removeStorageState(storageState: string): void {
+  try {
+    fs.unlinkSync(storageState);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+}

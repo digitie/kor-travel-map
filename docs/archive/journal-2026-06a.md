@@ -1096,7 +1096,7 @@ kor-travel-concierge PR #111(BFF 프록시가 `request.signal`을 upstream으로
 ## 2026-06-21 (codex) — UI live e2e 재실행 + 하네스 안정화
 
 정본 보고서:
-[`docs/reports/ui-live-e2e-rerun-2026-06-21.md`](reports/ui-live-e2e-rerun-2026-06-21.md).
+[`docs/reports/ui-live-e2e-rerun-2026-06-21.md`](../reports/ui-live-e2e-rerun-2026-06-21.md).
 
 - live stack(`api :12701`, `admin/user UI :12705`, `dagster :12702`) 기준 전체 Playwright e2e
   630개를 실행했다.
@@ -1111,7 +1111,7 @@ kor-travel-concierge PR #111(BFF 프록시가 `request.signal`을 upstream으로
 ## 2026-06-21 (codex) — UI e2e 테스트 3배 확장
 
 정본 보고서:
-[`docs/reports/ui-e2e-density-expansion-2026-06-21.md`](reports/ui-e2e-density-expansion-2026-06-21.md).
+[`docs/reports/ui-e2e-density-expansion-2026-06-21.md`](../reports/ui-e2e-density-expansion-2026-06-21.md).
 
 - 기존 209개 Playwright e2e를 631개로 확장했다(3.02배).
 - 신규 `home-density-matrix.spec.ts`에서 공용 shell/nav 18개 항목, 390/768/1440 viewport,
@@ -1123,7 +1123,7 @@ kor-travel-concierge PR #111(BFF 프록시가 `request.signal`을 upstream으로
 ## 2026-06-21 (codex) — 사용자/admin UI live e2e dev/prod green
 
 정본 보고서:
-[`docs/reports/ui-live-e2e-dev-prod-copy-2026-06-21.md`](reports/ui-live-e2e-dev-prod-copy-2026-06-21.md).
+[`docs/reports/ui-live-e2e-dev-prod-copy-2026-06-21.md`](../reports/ui-live-e2e-dev-prod-copy-2026-06-21.md).
 
 - dev stack(`api :12701`, `dagster :12702`, `admin/user UI :12705`)를 WSL에서 기동하고,
   Playwright는 Windows 호스트에서 실행했다.
@@ -1145,7 +1145,7 @@ kor-travel-concierge PR #111(BFF 프록시가 `request.signal`을 upstream으로
 
 `kor-travel-concierge`와 `kor-travel-geo` 로컬 repo를 `origin/main` 기준으로 다시 읽고
 `kor-travel-map` 소비 계약을 대조했다. 정본 보고서:
-[`docs/reports/prod-api-live-contract-check-2026-06-21.md`](reports/prod-api-live-contract-check-2026-06-21.md).
+[`docs/reports/prod-api-live-contract-check-2026-06-21.md`](../reports/prod-api-live-contract-check-2026-06-21.md).
 
 - **concierge**: `origin/main` `bec63ad2ab39` 기준 `GET /api/v1/features/{snapshot,changes}`,
   `X-API-Key`, envelope 없는 `{items,next_cursor,has_more}`, `limit<=500`,
@@ -1327,7 +1327,7 @@ Codex PR #476(maplibre-vworld-js dep 제거)을 다차원 적대적 리뷰하고
   `0.0.0.0:12706` + Windows Playwright `E2E_BASE_URL=http://172.26.51.35:12706`에서
   `features-map-interactions.spec.ts` **5 passed / 0 failed**.
 - **정본 리포트**:
-  [`docs/reports/maplibre-vworld-js-dependency-removal-2026-06-18.md`](reports/maplibre-vworld-js-dependency-removal-2026-06-18.md).
+  [`docs/reports/maplibre-vworld-js-dependency-removal-2026-06-18.md`](../reports/maplibre-vworld-js-dependency-removal-2026-06-18.md).
 
 ## 2026-06-18 (claude) — T-452 OpenAPI problem+json 기계 계약 보강
 
@@ -1387,7 +1387,7 @@ admin frontend 공통 surface에 적용했다.
   screenshot(1280×720, 390×844)으로 overflow/겹침 없음 확인. WSL Node는 작업 중
   `/usr/local/bin/node` bus error가 발생해 검증 실행 경로에서 제외했다.
 - **문서화**: admin frontend 로컬 디자인 규칙을
-  [`docs/architecture/admin-frontend-design-rules.md`](architecture/admin-frontend-design-rules.md)에
+  [`docs/architecture/admin-frontend-design-rules.md`](../architecture/admin-frontend-design-rules.md)에
   정리하고, package/API 계약 문서에서 링크했다.
 
 ## 2026-06-17 (Codex) — maplibre-vworld-react 지도 e2e 종결
@@ -1400,7 +1400,7 @@ admin frontend 공통 surface에 적용했다.
 - **범위**: map/table 탭, bbox fetch, kind 필터 refetch, table 선택→지도 상세 패널,
   error/empty 상태.
 - **후속 수정**: 최종 e2e에서 추가 수정할 회귀는 없었다.
-- **정본 리포트**: [`docs/reports/maplibre-vworld-react-e2e-2026-06-17.md`](reports/maplibre-vworld-react-e2e-2026-06-17.md).
+- **정본 리포트**: [`docs/reports/maplibre-vworld-react-e2e-2026-06-17.md`](../reports/maplibre-vworld-react-e2e-2026-06-17.md).
 
 ## 2026-06-17 (Codex) — admin features 지도 VWorldMapView 전환
 
@@ -1428,7 +1428,7 @@ admin UI 지도를 `digitie/maplibre-vworld-react` 기반 모델로 전환하기
 - **범위 결정**: 외부 모노레포 전체 vendoring 없이 admin `features` 지도에 필요한
   `VWorldMapView`/React marker 계층을 얇게 이식한다. 기존 bbox 동기화, kind 필터,
   선택 상세 패널, VWorld key 미설정 fallback은 유지한다.
-- **정본 계획**: [`docs/reports/maplibre-vworld-react-migration-plan-2026-06-17.md`](reports/maplibre-vworld-react-migration-plan-2026-06-17.md).
+- **정본 계획**: [`docs/reports/maplibre-vworld-react-migration-plan-2026-06-17.md`](../reports/maplibre-vworld-react-migration-plan-2026-06-17.md).
 
 ## 2026-06-17 (claude) — 문서 구조 정리 (ADR/ETL/architecture 디렉토리화 + entry 문서 슬림 + tasks 3분할 + Telegram MCP 제거)
 
@@ -1436,7 +1436,7 @@ admin UI 지도를 `digitie/maplibre-vworld-react` 기반 모델로 전환하기
 
 - **ADR 디렉토리화**: `docs/decisions.md`(3,526줄, 59 ADR)를 파일당 1개 `docs/adr/NNN-<slug>.md`(53개)
   + 색인 `docs/adr/README.md`로 분리. 순수 개발 규칙(금지·프로세스)이던 6건(ADR-006/012/019/021/030/039)은
-  ADR 파일을 만들지 않고 [`SKILL.md` §4](../SKILL.md)로 이전(원 맥락은 git history 보존). superseded 3건
+  ADR 파일을 만들지 않고 [`SKILL.md` §4](../../SKILL.md)로 이전(원 맥락은 git history 보존). superseded 3건
   (003/029/049)은 기록 유지. `decisions.md`는 adr/로 가는 redirect stub. `docs/decisions.md` 경로 참조
   40건을 `docs/adr/README.md`로 재배선.
 - **ETL 디렉토리화**: `*-etl.md` 15 + normalization 2(weather-feature-normalization·place-phone-enrichment)를
@@ -1450,7 +1450,7 @@ admin UI 지도를 `digitie/maplibre-vworld-react` 기반 모델로 전환하기
   SKILL 323→173줄. 단일 정본 = 식별자 table→AGENTS, 개발환경→dev-environment, codegraph/worktree→
   codegraph-worktree, 26 DO-NOT 룰→SKILL §4(룰 27 codegraph 영향평가 추가), 진입순서→CLAUDE §3,
   체크리스트→AGENTS. ADR 대량 나열 삭제, v1 언급은 파일당 1줄로 축약.
-- **tasks 3분할**: 작성·유지 규약을 새 [`docs/tasks-rule.md`](tasks-rule.md)로 분리, `tasks.md`는 백로그만
+- **tasks 3분할**: 작성·유지 규약을 새 [`docs/tasks-rule.md`](../tasks-rule.md)로 분리, `tasks.md`는 백로그만
   (인덱스 `[ ]` 일관화·상태 스냅샷 제거), `tasks-done.md` 유지. `agent-guide.md §6`는 tasks-rule 포인터로.
 - **Telegram MCP 제거**: 5개 MCP 설정(opencode/antigravity/.gemini/claude.json·.codex/config.toml)에서
   `mcp-telegram` 항목 + 런처 `scripts/mcp_telegram_start.py` 삭제, 관련 문서 섹션(codegraph-worktree §6.5·

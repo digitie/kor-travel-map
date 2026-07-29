@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from dagster import build_asset_context
+import pytest
+from dagster import Failure, build_asset_context
+from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.infra.feature_repo import FeatureLoadResult
 
 from kortravelmap.dagster.assets import run_feature_place_kor_travel_concierge_youtube
@@ -50,10 +52,11 @@ class _FakeConciergeClient:
 
     async def record_address_validation_findings(
         self, findings: object, **kwargs: object
-    ) -> int:
+    ) -> IntegrityFindingSyncResult:
         """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
         self.recorded_findings = list(findings)  # type: ignore[arg-type]
-        return len(self.recorded_findings)
+        count = len(self.recorded_findings)
+        return IntegrityFindingSyncResult(count, count, count)
 
 
 def _export_item(operation: str, *, candidate_id: int = 9201) -> dict[str, Any]:
@@ -160,3 +163,22 @@ async def test_concierge_asset_removal_mid_run_inactivates_latest_tombstone() ->
     assert call["dataset_key"] == "youtube_place_candidates"
     assert call["source_entity_type"] == "extracted_place_candidate"
     assert call["source_entity_ids"] == {"9201"}
+
+
+async def test_concierge_asset_rejects_unaccounted_upsert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _silently_drop(*args: Any, **kwargs: Any) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(
+        "kortravelmap.dagster.assets.kor_travel_concierge_items_to_bundles",
+        _silently_drop,
+    )
+    client = _FakeConciergeClient()
+    context = _context(client, [_export_item("upsert")])
+
+    with pytest.raises(Failure, match="upsert 보존 불변식 위반"):
+        await run_feature_place_kor_travel_concierge_youtube(context)
+
+    assert client.loaded_bundles == []

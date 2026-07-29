@@ -11,13 +11,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
+import math
 import re
+from collections import Counter
 from datetime import timedelta
 from decimal import Decimal
-from typing import Final
+from typing import Final, NamedTuple
 
 from sqlalchemy import text
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.dto._time import kst_now
@@ -35,6 +39,48 @@ _LAT: Final[float] = 36.5
 def _feature_ids(run_id: str) -> tuple[str, str]:
     prefix = f"e2e_live_acceptance::{run_id}"
     return f"{prefix}::weather", f"{prefix}::price"
+
+
+def _api_feature_fingerprints(
+    run_id: str,
+) -> dict[str, tuple[float, float, frozenset[str]]]:
+    prefix = f"e2e_live_acceptance::{run_id}"
+    jitter = hashlib.sha256(f"acceptance-coord:{run_id}".encode()).digest()
+
+    def coord_jitter(offset: int) -> float:
+        return (
+            int.from_bytes(jitter[offset : offset + 4], "big") / 0xFFFFFFFF * 2 - 1
+        ) * 0.25
+
+    marker_lon = _LON + coord_jitter(0)
+    marker_lat = _LAT + coord_jitter(4)
+    expected: dict[str, tuple[float, float, frozenset[str]]] = {}
+    for index, status in enumerate(("draft", "inactive", "hidden")):
+        expected[f"{prefix}::marker::{status}"] = (
+            marker_lon + index * 0.001,
+            marker_lat + index * 0.001,
+            frozenset({f"E2E {status} marker {run_id}"}),
+        )
+    expected[f"{prefix}::correction"] = (
+        _LON,
+        _LAT - 0.002,
+        frozenset(
+            {
+                f"E2E correction baseline {run_id}",
+                f"E2E approved competing update {run_id}",
+            }
+        ),
+    )
+    search_token = hashlib.sha256(
+        f"acceptance-search:{run_id}".encode()
+    ).hexdigest()[:32]
+    for index, suffix in enumerate(("alpha", "beta")):
+        expected[f"{prefix}::search::{suffix}"] = (
+            _LON + 0.004 + index * 0.001,
+            _LAT + 0.004 + index * 0.001,
+            frozenset({f"e2esrch {search_token} {suffix}"}),
+        )
+    return expected
 
 
 async def _counts(session: AsyncSession, feature_ids: tuple[str, str]) -> dict[str, int]:
@@ -141,7 +187,7 @@ def _quote_identifier(value: str) -> str:
 
 async def _foreign_key_reference_counts(
     session: AsyncSession,
-    feature_ids: tuple[str, str],
+    feature_ids: tuple[str, ...],
 ) -> dict[str, int]:
     constraints = (
         await session.execute(
@@ -425,7 +471,435 @@ async def _cleanup(
     return observed, foreign_keys
 
 
-async def _run(action: str, run_id: str) -> dict[str, object]:
+class _ApiOwnedInspection(NamedTuple):
+    feature_ids: tuple[str, ...]
+    features: int
+    requests: int
+    request_fingerprints: Counter[tuple[str, str, str]]
+    versions: int
+    foreign_keys: dict[str, int]
+
+
+async def _inspect_api_owned(
+    session: AsyncSession,
+    run_id: str,
+) -> _ApiOwnedInspection:
+    expected = _api_feature_fingerprints(run_id)
+    feature_ids = tuple(expected)
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  feature_id, kind, name, category, status,
+                  marker_icon, marker_color, data_origin,
+                  x_extension.ST_X(coord) AS lon,
+                  x_extension.ST_Y(coord) AS lat
+                FROM feature.features
+                WHERE feature_id LIKE :prefix ESCAPE '\\'
+                ORDER BY feature_id
+                FOR UPDATE
+                """
+            ),
+            {"prefix": f"e2e_live_acceptance::{run_id}::%"},
+        )
+    ).mappings().all()
+    for row in rows:
+        feature_id = str(row["feature_id"])
+        fingerprint = expected.get(feature_id)
+        if fingerprint is None:
+            raise RuntimeError("API-owned prefix에 예상하지 않은 Feature가 있습니다")
+        expected_lon, expected_lat, expected_names = fingerprint
+        if (
+            row["kind"] != "place"
+            or row["category"] != "01070300"
+            or row["status"] != "deleted"
+            or row["marker_icon"] != "marker"
+            or row["marker_color"] != "P-02"
+            or row["data_origin"] != "user_request"
+            or row["name"] not in expected_names
+            or not math.isclose(
+                float(row["lon"]),
+                expected_lon,
+                rel_tol=0,
+                abs_tol=1e-9,
+            )
+            or not math.isclose(
+                float(row["lat"]),
+                expected_lat,
+                rel_tol=0,
+                abs_tol=1e-9,
+            )
+        ):
+            raise RuntimeError("API-owned Feature fingerprint가 다릅니다")
+
+    request_rows = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  request_id, feature_id, action, state, review_mode, reason,
+                  requested_by, reviewed_by
+                FROM ops.feature_change_requests
+                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                ORDER BY created_at, request_id
+                FOR UPDATE
+                """
+            ),
+            {"feature_ids": list(feature_ids)},
+        )
+    ).mappings().all()
+    reason_prefix = f"admin feature live acceptance {run_id} "
+    allowed_reasons = {
+        f"{reason_prefix}create active",
+        f"{reason_prefix}create draft",
+        f"{reason_prefix}create hidden",
+        f"{reason_prefix}create inactive",
+        f"{reason_prefix}competing update",
+        f"{reason_prefix}reject reapply fixture",
+        f"{reason_prefix}cleanup delete",
+    }
+    requests_by_id: dict[str, tuple[str, str, str]] = {}
+    request_fingerprints: Counter[tuple[str, str, str]] = Counter()
+    for request in request_rows:
+        if (
+            request["feature_id"] not in expected
+            or request["action"] not in {"add", "update", "delete"}
+            or request["state"] not in {"applied", "rejected"}
+            or request["review_mode"] != "require_review"
+            or request["reason"] not in allowed_reasons
+            or request["requested_by"] != "admin"
+            or request["reviewed_by"] != "admin"
+        ):
+            raise RuntimeError("API-owned change request fingerprint가 다릅니다")
+        request_id = str(request["request_id"])
+        if request_id in requests_by_id:
+            raise RuntimeError("API-owned change request ID가 중복됩니다")
+        requests_by_id[request_id] = (
+            str(request["feature_id"]),
+            str(request["action"]),
+            str(request["state"]),
+        )
+        request_fingerprints[
+            (
+                str(request["action"]),
+                str(request["state"]),
+                str(request["reason"]),
+            )
+        ] += 1
+
+    version_rows = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  feature_id, version, origin, change_kind, payload,
+                  request_id, created_by
+                FROM feature.feature_versions
+                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                ORDER BY feature_id, version
+                FOR UPDATE
+                """
+            ),
+            {"feature_ids": list(feature_ids)},
+        )
+    ).mappings().all()
+    changes_by_feature: dict[str, list[str]] = {}
+    for version_row in version_rows:
+        feature_id = str(version_row["feature_id"])
+        fingerprint = expected.get(feature_id)
+        payload = version_row["payload"]
+        version = int(version_row["version"])
+        change_kind = str(version_row["change_kind"])
+        linked_request = requests_by_id.get(str(version_row["request_id"]))
+        if (
+            fingerprint is None
+            or not isinstance(payload, dict)
+            or version < 1
+            or version_row["origin"] != "user_request"
+            or change_kind not in {"add", "update", "delete"}
+            or version_row["created_by"] != "admin"
+            or linked_request != (feature_id, change_kind, "applied")
+        ):
+            raise RuntimeError("API-owned Feature version 소유권이 다릅니다")
+        expected_lon, expected_lat, expected_names = fingerprint
+        expected_status = "active"
+        if change_kind == "delete":
+            expected_status = "deleted"
+        elif change_kind == "add":
+            for marker_status in ("draft", "inactive", "hidden"):
+                if feature_id.endswith(f"::marker::{marker_status}"):
+                    expected_status = marker_status
+                    break
+        if (
+            payload.get("feature_id") != feature_id
+            or payload.get("kind") != "place"
+            or payload.get("category") != "01070300"
+            or payload.get("data_origin") != "user_request"
+            or payload.get("marker_icon") != "marker"
+            or payload.get("marker_color") != "P-02"
+            or payload.get("coord_precision_digits") != 6
+            or payload.get("data_version") != version
+            or payload.get("user_change_kind") != change_kind
+            or payload.get("user_change_status") != "applied"
+            or payload.get("name") not in expected_names
+            or payload.get("status") != expected_status
+            or not isinstance(payload.get("lon"), (int, float))
+            or not isinstance(payload.get("lat"), (int, float))
+            or not math.isclose(
+                float(payload["lon"]), expected_lon, rel_tol=0, abs_tol=1e-9
+            )
+            or not math.isclose(
+                float(payload["lat"]), expected_lat, rel_tol=0, abs_tol=1e-9
+            )
+        ):
+            raise RuntimeError("API-owned Feature version payload가 다릅니다")
+        changes_by_feature.setdefault(feature_id, []).append(change_kind)
+
+    for feature_id, changes in changes_by_feature.items():
+        expected_sequence = ["add", "delete"]
+        if feature_id.endswith("::correction") and "update" in changes:
+            expected_sequence = ["add", "update", "delete"]
+        versions = [
+            int(row["version"])
+            for row in version_rows
+            if str(row["feature_id"]) == feature_id
+        ]
+        if changes != expected_sequence or versions != list(
+            range(1, len(changes) + 1)
+        ):
+            raise RuntimeError("API-owned Feature version 이력이 예상과 다릅니다")
+    if set(changes_by_feature) != {str(row["feature_id"]) for row in rows}:
+        raise RuntimeError("API-owned Feature와 version 이력이 일치하지 않습니다")
+
+    foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
+    unexpected_references = {
+        key: value
+        for key, value in foreign_keys.items()
+        if value and key != "feature.feature_versions.feature_id"
+    }
+    if unexpected_references:
+        raise RuntimeError("API-owned Feature에 예상하지 않은 FK reference가 있습니다")
+    if foreign_keys.get("feature.feature_versions.feature_id", 0) != len(
+        version_rows
+    ):
+        raise RuntimeError("API-owned Feature version FK 수가 다릅니다")
+    return _ApiOwnedInspection(
+        feature_ids=feature_ids,
+        features=len(rows),
+        requests=len(request_rows),
+        request_fingerprints=request_fingerprints,
+        versions=len(version_rows),
+        foreign_keys=foreign_keys,
+    )
+
+
+async def _purge_api_owned(
+    session: AsyncSession,
+    run_id: str,
+) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
+    inspection = await _inspect_api_owned(session, run_id)
+    await session.execute(
+        text(
+            """
+            DELETE FROM ops.feature_change_requests
+            WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+            """
+        ),
+        {"feature_ids": list(inspection.feature_ids)},
+    )
+    await session.execute(
+        text(
+            """
+            DELETE FROM feature.features
+            WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+            """
+        ),
+        {"feature_ids": list(inspection.feature_ids)},
+    )
+    remaining_features = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*) FROM feature.features
+                    WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                    """
+                ),
+                {"feature_ids": list(inspection.feature_ids)},
+            )
+        )
+        .scalars()
+        .one()
+    )
+    remaining_requests = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*) FROM ops.feature_change_requests
+                    WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                    """
+                ),
+                {"feature_ids": list(inspection.feature_ids)},
+            )
+        )
+        .scalars()
+        .one()
+    )
+    if remaining_features or remaining_requests:
+        raise RuntimeError("API-owned purge가 완결되지 않았습니다")
+    remaining_foreign_keys = await _foreign_key_reference_counts(
+        session,
+        inspection.feature_ids,
+    )
+    if any(remaining_foreign_keys.values()):
+        raise RuntimeError("API-owned purge 뒤 FK reference가 남았습니다")
+    return (
+        {"features": 0, "price_values": 0, "weather_values": 0},
+        remaining_foreign_keys,
+        {
+            "change_requests": inspection.requests,
+            "feature_versions": inspection.versions,
+            "features": inspection.features,
+        },
+    )
+
+
+async def _audit_complete_api_owned(
+    session: AsyncSession,
+    run_id: str,
+) -> tuple[dict[str, int], dict[str, int]]:
+    inspection = await _inspect_api_owned(session, run_id)
+    reason_prefix = f"admin feature live acceptance {run_id} "
+    expected_requests = Counter(
+        {
+            ("add", "applied", f"{reason_prefix}create active"): 3,
+            ("add", "applied", f"{reason_prefix}create draft"): 1,
+            ("add", "applied", f"{reason_prefix}create hidden"): 1,
+            ("add", "applied", f"{reason_prefix}create inactive"): 1,
+            ("delete", "applied", f"{reason_prefix}cleanup delete"): 6,
+            ("update", "applied", f"{reason_prefix}competing update"): 1,
+            (
+                "update",
+                "rejected",
+                f"{reason_prefix}reject reapply fixture",
+            ): 1,
+        }
+    )
+    if (
+        inspection.features != 6
+        or inspection.requests != 14
+        or inspection.versions != 13
+        or inspection.request_fingerprints != expected_requests
+    ):
+        raise RuntimeError("완료 API-owned 행 집합이 예상과 다릅니다")
+    return (
+        {
+            "change_requests": inspection.requests,
+            "feature_versions": inspection.versions,
+            "features": inspection.features,
+        },
+        inspection.foreign_keys,
+    )
+
+
+def _auth_request_ids(run_id: str) -> dict[str, str]:
+    prefix = f"e2e_live_acceptance::{run_id}::auth"
+    return {
+        "main": f"{prefix}::main",
+        "recovery": f"{prefix}::recovery",
+    }
+
+
+async def _inspect_auth_audit(
+    session: AsyncSession,
+    run_id: str,
+) -> tuple[list[RowMapping], dict[str, int]]:
+    request_ids = _auth_request_ids(run_id)
+    auth_rows = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  auth_event_id, event_type, outcome, attempted_username,
+                  actor, reason, next_path, client_ip, user_agent, request_id
+                FROM ops.admin_auth_events
+                WHERE request_id = ANY(CAST(:request_ids AS text[]))
+                ORDER BY created_at, auth_event_id
+                FOR UPDATE
+                """
+            ),
+            {"request_ids": list(request_ids.values())},
+        )
+    ).mappings().all()
+    counts = {"main": 0, "recovery": 0}
+    for row in auth_rows:
+        if (
+            row["event_type"] != "login"
+            or row["outcome"] != "succeeded"
+            or row["attempted_username"] != "admin"
+            or row["actor"] != "ui-auth"
+            or row["reason"] != "authenticated"
+            or row["next_path"] != "/"
+            or row["client_ip"] is not None
+            or row["request_id"] not in request_ids.values()
+            or not isinstance(row["user_agent"], str)
+            or not row["user_agent"].startswith("Mozilla/5.0 ")
+        ):
+            raise RuntimeError("run-bound admin 인증 감사행 소유권이 다릅니다")
+        phase = "main" if row["request_id"] == request_ids["main"] else "recovery"
+        counts[phase] += 1
+    return list(auth_rows), counts
+
+
+async def _reset_auth_audit(session: AsyncSession, run_id: str) -> dict[str, int]:
+    auth_rows, counts = await _inspect_auth_audit(session, run_id)
+    if auth_rows:
+        await session.execute(
+            text(
+                """
+                DELETE FROM ops.admin_auth_events
+                WHERE auth_event_id = ANY(CAST(:auth_event_ids AS uuid[]))
+                """
+            ),
+            {"auth_event_ids": [str(row["auth_event_id"]) for row in auth_rows]},
+        )
+    remaining = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM ops.admin_auth_events
+                    WHERE request_id = ANY(CAST(:request_ids AS text[]))
+                    """
+                ),
+                {"request_ids": list(_auth_request_ids(run_id).values())},
+            )
+        )
+        .scalars()
+        .one()
+    )
+    if remaining:
+        raise RuntimeError("run-bound admin 인증 감사행 reset이 완결되지 않았습니다")
+    return counts
+
+
+async def _verify_auth_audit(
+    session: AsyncSession,
+    run_id: str,
+) -> dict[str, int]:
+    _auth_rows, counts = await _inspect_auth_audit(session, run_id)
+    if counts != {"main": 1, "recovery": 1}:
+        raise RuntimeError("run-bound admin 인증 감사행 수가 예상과 다릅니다")
+    return counts
+
+
+async def _run(
+    action: str,
+    run_id: str,
+) -> dict[str, object]:
     settings = KorTravelMapSettings()
     # make_async_engine은 normalize_async_dsn으로 plain `postgresql://` DSN도
     # asyncpg dialect로 정규화한다. raw create_async_engine을 쓰면 배포 env가
@@ -438,6 +912,20 @@ async def _run(action: str, run_id: str) -> dict[str, object]:
                 counts, foreign_keys = await _seed(session, run_id)
             elif action == "cleanup":
                 counts, foreign_keys = await _cleanup(session, run_id)
+            elif action == "purge":
+                counts, foreign_keys, purged = await _purge_api_owned(
+                    session,
+                    run_id,
+                )
+            elif action == "api-audit":
+                counts, foreign_keys = await _audit_complete_api_owned(
+                    session,
+                    run_id,
+                )
+            elif action == "auth-reset":
+                auth_counts = await _reset_auth_audit(session, run_id)
+            elif action == "auth-verify":
+                auth_counts = await _verify_auth_audit(session, run_id)
             else:
                 counts, foreign_keys = await _assert_owned_state(
                     session,
@@ -446,23 +934,48 @@ async def _run(action: str, run_id: str) -> dict[str, object]:
                 )
     finally:
         await engine.dispose()
-    return {
+    if action in {"auth-reset", "auth-verify"}:
+        return {
+            "action": action,
+            "counts": auth_counts,
+            "version": 1,
+        }
+    result: dict[str, object] = {
         "action": action,
         "counts": counts,
         "foreign_key_constraints_checked": len(foreign_keys),
         "foreign_key_references": sum(foreign_keys.values()),
         "version": 1,
     }
+    if action == "purge":
+        result["purged"] = purged
+    return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("seed", "cleanup", "audit"))
+    parser.add_argument(
+        "action",
+        choices=(
+            "seed",
+            "cleanup",
+            "audit",
+            "purge",
+            "api-audit",
+            "auth-reset",
+            "auth-verify",
+        ),
+    )
     parser.add_argument("--run-id", required=True)
     args = parser.parse_args()
     if _RUN_ID_RE.fullmatch(args.run_id) is None:
         raise SystemExit("run-id 형식이 올바르지 않습니다")
-    print(json.dumps(asyncio.run(_run(args.action, args.run_id)), sort_keys=True))
+    print(
+        json.dumps(
+            asyncio.run(_run(args.action, args.run_id)),
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

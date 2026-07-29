@@ -16,6 +16,7 @@
     "test": "vitest run --exclude \"e2e/**\" --passWithNoTests",
     "e2e": "playwright test",
     "e2e:mocked": "playwright test",
+    "e2e:mocked:checkpoint": "node e2e/run-mocked-checkpoint.mjs",
     "e2e:live": "playwright test --config playwright.live.config.ts",
     "e2e:ui": "playwright test --ui",
     "e2e:install": "playwright install chromium",

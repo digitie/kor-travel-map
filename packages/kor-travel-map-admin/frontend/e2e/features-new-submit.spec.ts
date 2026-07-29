@@ -32,6 +32,7 @@ type AdminFeatureChangeResponse =
   components["schemas"]["AdminFeatureChangeResponse"];
 type AdminFeatureCreateRequest =
   components["schemas"]["AdminFeatureCreateRequest"];
+type CategoriesResponse = components["schemas"]["CategoriesResponse"];
 type FeaturesNearbyResponse = components["schemas"]["FeaturesNearbyResponse"];
 type NearbyFeatureSummary = components["schemas"]["NearbyFeatureSummary"];
 type NearbyOriginSummary = components["schemas"]["NearbyOriginSummary"];
@@ -211,10 +212,27 @@ async function fillCoord(page: Page, lon = "126.978", lat = "37.5665") {
 }
 
 test.describe("/admin/features/new (mocked routes)", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/v1/categories**", async (route) => {
+      const request = route.request();
+      const apiPath = bffApiPath(request.url());
+      if (request.method() !== "GET" || apiPath !== "/v1/categories") {
+        throw new Error(
+          `Unhandled categories route: ${request.method()} ${apiPath}`,
+        );
+      }
+      const response: CategoriesResponse = {
+        data: { include_counts: false, items: [] },
+        meta: { duration_ms: 1, request_id: "e2e-feature-create-categories" },
+      };
+      await fulfillJson(route, response);
+    });
+  });
+
   test("제출 성공 — POST /v1/admin/features → 변경 요청 생성 알림 + 생성 요청 섹션", async ({
     page,
   }) => {
-    const nearby = await mockNearbyRoute(page, () => makeNearbyResponse([]));
+    await mockNearbyRoute(page, () => makeNearbyResponse([]));
     const create = await mockCreateRoute(page, async (route, body) => {
       await fulfillJson(
         route,
@@ -234,11 +252,14 @@ test.describe("/admin/features/new (mocked routes)", () => {
 
     await page.goto("/admin/features/new");
 
-    await page.getByRole("textbox", { name: "create name", exact: true }).fill("새 장소");
-    await page.getByRole("textbox", { name: "사유", exact: true }).fill("e2e 수동 생성");
-    // category 기본값 '01070300' 그대로 유효. 유효 좌표 입력 → nearby 자동 발화.
+    await page
+      .getByRole("textbox", { name: "create name", exact: true })
+      .fill("새 장소");
+    await page
+      .getByRole("textbox", { name: "사유", exact: true })
+      .fill("e2e 수동 생성");
+    // category 기본값 '01070300' 그대로 유효. nearby 동작은 아래 전용 시나리오가 소유한다.
     await fillCoord(page);
-    await expect.poll(() => nearby.count).toBeGreaterThanOrEqual(1);
 
     await page.getByRole("button", { name: "요청 생성" }).click();
 
@@ -252,8 +273,8 @@ test.describe("/admin/features/new (mocked routes)", () => {
       status: "active",
       marker_icon: "marker",
       marker_color: "P-01",
-      operator: "local-admin",
     });
+    expect(create.bodies[0]).not.toHaveProperty("operator");
 
     // 성공 Alert(role=status) + 라벨 텍스트.
     const successAlert = page
@@ -338,8 +359,12 @@ test.describe("/admin/features/new (mocked routes)", () => {
     });
 
     await page.goto("/admin/features/new");
-    await page.getByRole("textbox", { name: "create name", exact: true }).fill("새 장소");
-    await page.getByRole("textbox", { name: "사유", exact: true }).fill("e2e 수동 생성");
+    await page
+      .getByRole("textbox", { name: "create name", exact: true })
+      .fill("새 장소");
+    await page
+      .getByRole("textbox", { name: "사유", exact: true })
+      .fill("e2e 수동 생성");
     await fillCoord(page);
 
     await page.getByRole("button", { name: "요청 생성" }).click();
@@ -380,8 +405,12 @@ test.describe("/admin/features/new (mocked routes)", () => {
     });
 
     await page.goto("/admin/features/new");
-    await page.getByRole("textbox", { name: "create name", exact: true }).fill("새 장소");
-    await page.getByRole("textbox", { name: "사유", exact: true }).fill("e2e 수동 생성");
+    await page
+      .getByRole("textbox", { name: "create name", exact: true })
+      .fill("새 장소");
+    await page
+      .getByRole("textbox", { name: "사유", exact: true })
+      .fill("e2e 수동 생성");
     await fillCoord(page);
 
     await page.getByRole("button", { name: "요청 생성" }).click();
@@ -435,12 +464,12 @@ test.describe("/admin/features/new (mocked routes)", () => {
     });
 
     // applyCandidate가 첫 후보 자동 적용: updateCoord(toFixed(6)).
-    await expect(page.getByRole("textbox", { name: "경도", exact: true })).toHaveValue(
-      "126.978400",
-    );
-    await expect(page.getByRole("textbox", { name: "위도", exact: true })).toHaveValue(
-      "37.566500",
-    );
+    await expect(
+      page.getByRole("textbox", { name: "경도", exact: true }),
+    ).toHaveValue("126.978400");
+    await expect(
+      page.getByRole("textbox", { name: "위도", exact: true }),
+    ).toHaveValue("37.566500");
     await expect(
       page.getByRole("textbox", {
         name: "create road address",
@@ -449,9 +478,7 @@ test.describe("/admin/features/new (mocked routes)", () => {
     ).toHaveValue("서울특별시 중구 세종대로 110");
 
     // 후보 버튼 리스트 + 배지 카운트.
-    await expect(
-      page.getByRole("button", { name: /세종대로/ }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /세종대로/ })).toBeVisible();
     await expect(page.getByText("1건")).toBeVisible();
   });
 
@@ -501,9 +528,7 @@ test.describe("/admin/features/new (mocked routes)", () => {
         exact: true,
       }),
     ).toHaveValue("서울특별시 중구 세종대로 110");
-    await expect(
-      page.getByRole("button", { name: /세종대로/ }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /세종대로/ })).toBeVisible();
   });
 
   test("정지오코딩 실패 — :12501 5xx 응답이 'Feature 작성 실패' 알림으로 노출", async ({

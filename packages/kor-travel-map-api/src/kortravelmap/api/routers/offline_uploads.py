@@ -27,11 +27,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from kortravelmap.core.exceptions import (
-    FileStoreError,
-    GeoAuthNotConfiguredError,
-    GeoRequestError,
-)
+from kortravelmap.core.exceptions import FileStoreError
 from kortravelmap.core.managed_file_states import (
     MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
 )
@@ -1133,12 +1129,12 @@ async def validate_offline_upload_request(
     try:
         if settings.kor_travel_geo_base_url:
             async with httpx.AsyncClient(
-                base_url=settings.kor_travel_geo_base_url,
+                base_url=settings.kor_travel_geo_base_url.get_secret_value(),
                 timeout=settings.kor_travel_geo_timeout_seconds,
             ) as http:
                 kraddr = KorTravelGeoRestClient(
                     http,
-                    api_key=settings.kor_travel_geo_api_key_value,
+                    api_key=settings.kor_travel_geo_api_key,
                 )
                 async with session.begin():
                     row = await get_offline_upload(session, upload_id)
@@ -1181,18 +1177,6 @@ async def validate_offline_upload_request(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
-        ) from exc
-    except GeoAuthNotConfiguredError as exc:
-        # T-VN-H21: 서버측 설정 결함 — 409("validation 가능한 상태 아님")로 보고하면
-        # 호출자가 자기 업로드 상태 문제로 오진한다.
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    except (httpx.HTTPError, GeoRequestError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"kor-travel-geo geocode 호출 실패: {exc}",
         ) from exc
     except ValueError as exc:
         raise HTTPException(

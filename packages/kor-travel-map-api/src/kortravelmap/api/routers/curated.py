@@ -71,10 +71,7 @@ KAKAO_LOCAL_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
 NAVER_LOCAL_SEARCH_URL = "https://openapi.naver.com/v1/search/local.json"
 GOOGLE_PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 GOOGLE_PLACES_FIELD_MASK = (
-    "places.displayName,"
-    "places.formattedAddress,"
-    "places.location,"
-    "places.primaryTypeDisplayName"
+    "places.displayName,places.formattedAddress,places.location,places.primaryTypeDisplayName"
 )
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -305,7 +302,7 @@ class CuratedFeatureDetailItemView(BaseModel):
 
     curated_feature_item_id: str
     feature_id: str
-    relation: str
+    relation: CurationRelation
     sort_order: int
     day_index: int | None
     memo: str | None
@@ -336,8 +333,8 @@ class CuratedFeatureDetailContentView(BaseModel):
     destination_name: str | None
     region_code: str | None
     category: str
-    curation_status: str
-    reuse_policy: str
+    curation_status: CurationStatus
+    reuse_policy: ReusePolicy
 
 
 class CuratedFeatureDetailSourceView(BaseModel):
@@ -989,11 +986,7 @@ async def list_curated_features_route(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return PublicCuratedFeaturesResponse(
         data=PublicCuratedFeaturesData(
-            items=[
-                item
-                for row in page.items
-                if (item := _public_feature_view(row)) is not None
-            ]
+            items=[item for row in page.items if (item := _public_feature_view(row)) is not None]
         ),
         meta=make_meta(started_at=started_at, next_cursor=page.next_cursor),
     )
@@ -1109,11 +1102,6 @@ async def get_admin_curated_feature_route(
     "/features/curated/{curated_feature_id}/detail-snapshot",
     response_model=CuratedFeatureDetailSnapshotResponse,
 )
-@admin_router.get(
-    "/curated-features/{curated_feature_id}/detail-snapshot",
-    response_model=CuratedFeatureDetailSnapshotResponse,
-    include_in_schema=False,
-)
 async def get_admin_curated_feature_detail_snapshot_route(
     curated_feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -1147,12 +1135,7 @@ async def search_admin_curated_feature_places_route(
 ) -> CuratedPlaceSearchResponse:
     started_at = perf_counter()
     feature = await _feature_or_404(session, curated_feature_id, include_archived=True)
-    query = (
-        q
-        or feature.display_title
-        or feature.feature_name
-        or feature.source_name
-    ).strip()
+    query = (q or feature.display_title or feature.feature_name or feature.source_name).strip()
     if not query:
         raise HTTPException(status_code=400, detail="검색어 q가 필요합니다")
     data = await _direct_place_search(query)

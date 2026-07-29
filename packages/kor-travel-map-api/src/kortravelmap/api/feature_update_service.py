@@ -96,7 +96,7 @@ class FeatureUpdateServiceError(Exception):
     """Feature update application service의 공개 예외 기반."""
 
 
-class SigunguResolverUnavailable(RuntimeError, FeatureUpdateServiceError):
+class SigunguResolverUnavailable(GeoAuthNotConfiguredError, FeatureUpdateServiceError):
     """시군구 반경 scope에 필요한 kor-travel-geo resolver 설정이 없을 때 발생."""
 
 
@@ -159,7 +159,7 @@ class FeatureUpdateRequestNotFound(LookupError, FeatureUpdateServiceError):
     """request_id에 해당하는 canonical feature update request가 없다."""
 
 
-class FeatureUpdateResolverError(RuntimeError, FeatureUpdateServiceError):
+class FeatureUpdateResolverError(GeoRequestError, FeatureUpdateServiceError):
     """kor-travel-geo 호출이 실패했다."""
 
 
@@ -468,12 +468,12 @@ async def _sigungu_resolver_for_scope(
         return
 
     async with httpx.AsyncClient(
-        base_url=base_url,
+        base_url=base_url.get_secret_value(),
         timeout=settings.kor_travel_geo_timeout_seconds,
     ) as http:
         client = KorTravelGeoRestClient(
             http,
-            api_key=settings.kor_travel_geo_api_key_value,
+            api_key=settings.kor_travel_geo_api_key,
         )
 
         async def resolver(

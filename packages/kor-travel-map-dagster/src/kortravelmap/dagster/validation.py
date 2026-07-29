@@ -84,6 +84,8 @@ class FeatureAddressValidationSummary:
     ``dual``만 실제로 판정된 건수다. ``claim_only``/``obs_only``/``none``/``unarmed``는
     "통과"가 아니라 **판정하지 못함**이다. 이 집계가 없으면 침묵을 통과로 착각하게 된다.
     """
+    name_state_counts: dict[str, int] = field(default_factory=dict)
+    """독립 이름축 판정 상태(``matched``/``disagreed``/판정 불가 사유) 집계."""
 
     @property
     def has_errors(self) -> bool:
@@ -91,7 +93,7 @@ class FeatureAddressValidationSummary:
 
     @property
     def blocking_issues(self) -> tuple[FeatureAddressIssue, ...]:
-        """drop/실패를 일으키는 issue만 (``DROPPABLE_ISSUE_CODES`` 화이트리스트)."""
+        """``drop`` 모드에서 영구 격리할 issue만."""
         return tuple(
             issue
             for issue in self.issues
@@ -110,6 +112,7 @@ class FeatureAddressValidationSummary:
             "address_validation_warning_count": self.warning_count,
             "address_validation_issues": [issue.as_dict() for issue in self.issues],
             "address_validation_evidence_grades": dict(self.evidence_grade_counts),
+            "address_validation_name_states": dict(self.name_state_counts),
         }
 
 
@@ -133,6 +136,24 @@ def validate_feature_bundle_address(
     # 조건은 **영원히 거짓**이 되어, kor-travel-geo가 run 내내 죽어 있어도 전량이 좌표
     # 검증 없이 적재된다. AdminEvidence.obs_code가 reverse 성공 여부를 직접 말해 준다.
     evidence = bundle.admin_evidence
+
+    if (
+        feature.coord is not None
+        and evidence is not None
+        and not evidence.reverse_attempted
+    ):
+        issues.append(
+            FeatureAddressIssue(
+                feature_id=feature.feature_id,
+                source_record_key=bundle.source_record.source_record_key,
+                code="reverse_geocode_not_attempted",
+                severity="warning",
+                message="좌표가 있지만 reverse geocoder가 결선되지 않아 검증을 시도하지 못함.",
+                provider_address=provider_address,
+                bjd_code=address.bjd_code,
+                sigungu_code=address.sigungu_code,
+            )
+        )
 
     # T-VN-H28B: reverse가 결과를 못 냈어도 payload가 법정동코드를 실어 주면 위치 단서는
     # 남아 있다 — 그건 **저하**이지 손실 사유가 아니다. 이걸 error로 올리면 실측 105건이
@@ -162,7 +183,14 @@ def validate_feature_bundle_address(
             )
         )
 
-    if feature.coord is not None and address.bjd_code is None:
+    if (
+        feature.coord is not None
+        and address.bjd_code is None
+        and (
+            evidence is None
+            or (evidence.reverse_attempted and evidence.obs_code is None)
+        )
+    ):
         issues.append(
             FeatureAddressIssue(
                 feature_id=feature.feature_id,
@@ -214,12 +242,16 @@ def validate_feature_bundles_address(
         "unarmed" if b.admin_evidence is None else str(b.admin_evidence.grade)
         for b in materialized
     )
+    name_states: Counter[str] = Counter(
+        _provider_address_name_state(b, _provider_address(b)) for b in materialized
+    )
     return FeatureAddressValidationSummary(
         total=len(validations),
         issue_count=len(issues),
         error_count=error_count,
         warning_count=warning_count,
         evidence_grade_counts=dict(grades),
+        name_state_counts=dict(name_states),
         issues=issues,
     )
 
@@ -229,10 +261,11 @@ def ensure_feature_address_valid(
 ) -> FeatureAddressValidationSummary:
     """검증 error가 있으면 ``ValueError``로 중단한다."""
     summary = validate_feature_bundles_address(bundles)
-    # T-VN-H28B: load 경로와 같은 allowlist를 쓴다. 두 공개 진입점이 서로 다른 drop
-    # 정책을 갖고 있으면 "allowlist를 고치기 전에는 손실 불가"라는 불변식이 깨진다.
-    if summary.has_blocking_errors:
-        codes = ", ".join(issue.code for issue in summary.blocking_issues)
+    if summary.has_errors:
+        error_issues = tuple(
+            issue for issue in summary.issues if issue.severity == "error"
+        )
+        codes = ", ".join(issue.code for issue in error_issues)
         raise ValueError(f"Feature 주소/좌표 검증 실패: {codes}")
     return summary
 
@@ -280,8 +313,14 @@ def _first_divergence_level(obs: str, claim: str, precision: int) -> str:
     return "emd"
 
 
-_ADMIN_NAME_TOKEN: Final = re.compile(r"[가-힣]+[시군구]")
-"""provider 주소 문자열에서 시/군/구로 끝나는 행정구역 토큰."""
+_ADMIN_NAME_TOKEN: Final = re.compile(
+    r"(?<![가-힣])([가-힣]{1,4}(?:시|군|구))(?![가-힣])"
+)
+"""provider 주소의 독립된 2~5자 시/군/구 토큰.
+
+상호명 내부 부분문자열(``종로김밥``)과 일반 명사(``현대미술전시``)는 행정구역 주장으로
+오인하지 않는다.
+"""
 
 _REGION_SUFFIXES: Final = ("특별자치시", "특별자치도", "광역시", "특별시", "시", "군", "구")
 
@@ -297,6 +336,44 @@ def _region_stem(name: str) -> str:
 
 def _compact(value: str) -> str:
     return "".join(str(value).split())
+
+
+def _observed_region_stems(names: Iterable[str]) -> set[str]:
+    stems: set[str] = set()
+    for name in names:
+        compact = _compact(name)
+        stem = _region_stem(compact)
+        if stem:
+            stems.add(stem)
+        for token in _ADMIN_NAME_TOKEN.findall(name):
+            token_stem = _region_stem(token)
+            if token_stem:
+                stems.add(token_stem)
+    return stems
+
+
+def _provider_address_name_state(
+    bundle: FeatureBundle,
+    provider_address: str | None,
+) -> Literal["matched", "disagreed", "no_token", "no_observation", "no_claim"]:
+    if not provider_address:
+        return "no_claim"
+    evidence = bundle.admin_evidence
+    observed = list(evidence.obs_sigungu_names) if evidence is not None else []
+    if not observed and bundle.feature.address.sigungu_name:
+        observed.append(bundle.feature.address.sigungu_name)
+    if not observed:
+        return "no_observation"
+    claim_tokens = _ADMIN_NAME_TOKEN.findall(provider_address)
+    if not claim_tokens:
+        return "no_token"
+    claim_stems = {_region_stem(token) for token in claim_tokens}
+    claim_stems.discard("")
+    return (
+        "matched"
+        if claim_stems & _observed_region_stems(observed)
+        else "disagreed"
+    )
 
 
 def _provider_address_region_issues(
@@ -323,27 +400,14 @@ def _provider_address_region_issues(
 
     severity는 ``warning``이며 drop allowlist에 없다 — 이 축으로는 데이터가 사라지지 않는다.
     """
-    if not provider_address:
+    if _provider_address_name_state(bundle, provider_address) != "disagreed":
         return ()
+
     address = bundle.feature.address
     evidence = bundle.admin_evidence
-
-    observed: list[str] = []
-    if evidence is not None and evidence.obs_sigungu_names:
-        observed.extend(evidence.obs_sigungu_names)
-    elif address.sigungu_name:
+    observed = list(evidence.obs_sigungu_names) if evidence is not None else []
+    if not observed and address.sigungu_name:
         observed.append(address.sigungu_name)
-    if not observed:
-        return ()
-
-    text = _compact(provider_address)
-    if not _ADMIN_NAME_TOKEN.search(text):
-        # 판정 불가 — 통과가 아니다. 커버리지는 name_state로 집계된다.
-        return ()
-
-    if any(_region_stem(name) and _region_stem(name) in text for name in observed):
-        return ()
-
     feature = bundle.feature
     return (
         FeatureAddressIssue(

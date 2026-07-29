@@ -8,11 +8,8 @@
 ## 진행 중인 작업 인덱스 (2026-07-28 PR #869 후 전면 재감사)
 
 > PR #869 merge `25e9304b` 직후 `tasks.md`·`tasks-done.md`·실코드·Map/PinVi/
-> docker-manager/geo의 열린 PR·이슈를 다시 대조했다. Map의 열린 이슈는 #673·#812·#815·#819,
-> 본 감사 PR #870을 제외한 기존 열린 PR은 #814 한 건이며, PinVi의 관련 열린 PR은 #403이다.
-> `T-VN-H21`의 실서비스 400에서 보호 endpoint `key` 결선 누락을 첫 blocker로 확인했다.
-> 인증 뒤 downstream drift 존재 여부는 아직 미검증이다. 큰 task는 독립 검증·forward recovery가
-> 가능한 실행 단위로 아래처럼 분해한다.
+> PR #869 당시 전면 감사에서 시작했으며 이후 완료·보류 상태를 매 PR 갱신한다.
+> 큰 task는 독립 검증·forward recovery가 가능한 실행 단위로 아래처럼 분해한다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
@@ -26,7 +23,7 @@ barrier로 직렬화한다.
     [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
     [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
     [x] `T-VN-H25A`(미연결 membership 증거·전제 정정) →
-    [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
+    [x] `T-VN-H30A`(관측 durable화) + [ ] `T-VN-H30B/C`(실적재·provider 재검증) →
     [ ] `T-VN-H25B`(CSV 역반영 8건·매칭 재실행) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
@@ -34,8 +31,7 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [ ] `T-VN-48A` → [ ] `T-VN-48B` → [ ] `T-VN-48C` →
-    [ ] `T-VN-48D`(mocked E2E drift) →
+  - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
     [ ] `T-VN-49D`(React 구조 debt)
   - b1: [ ] `T-VN-11A` → [ ] `T-VN-11B`(service batch) →
@@ -70,6 +66,11 @@ barrier로 직렬화한다.
 
 - base는 **main**(`integration/t-vn`은 PR #790 합류로 폐지). 시작·PR 직전·머지 직후
   `origin/main` rebase. PR 하나는 task 하나만 소유.
+- **Claude Code PR 감사 순서(사용자 지시 2026-07-29)**: 개별 T-VN task는 자기 구현·적대
+  리뷰·Live·CI를 먼저 끝내 PR을 머지한다. Claude Code PR 사후 감사는 task PR 머지 뒤
+  별도 후속 단계에서 issue를 만들고 진행하며, 진행 중 task의 PR 생성·머지를 지연시키거나
+  그 PR에 새 감사를 합치지 않는다. T-VN-48에는 규칙 변경 전에 완료한 issue #881과 PR #888
+  감사 수정만 유지한다.
 - 첫 reviewable checkpoint부터 원격 feature branch에 작은 의미 단위로 자주 커밋·push하되,
   PR은 구현·적대 리뷰 반영·실데이터 검증·최종 main rebase를 모두 마친 뒤 **머지 직전**에만
   연다. 실패하면 검증된 직전 checkpoint부터 재개한다.
@@ -84,7 +85,7 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(현 head `0067_integrity_dedupe_key`). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(현재 Lane B 후보 `0068_integrity_last_seen`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
@@ -109,19 +110,26 @@ barrier로 직렬화한다.
   착수 전에 migration head·schema/fixture 계약·파괴적 실행 잔여물·코드/API 호환성·디스크
   여유를 확인해 재사용 가능하면 이름·head·fixture identity와 근거를 `resume.md`/
   `journal.md`에 기록하고, 불가능할 때만 해당 격리 resource를 정확히 정리한다.
-- **cross-lane 순서 제약**: C6c pair capture와 #392, H07A의 Map #814 landing
-  (`259a9ec5`)은 이미 완료됐다. H07B는 오래 열린 PinVi #403을 최신 main에 재배치하고 중복
-  assertion을 제거한 뒤 H07D→H07C 순서로 진행한다.
-  H22C는 같은 curation frontend를 만지는 T-VN-48B·49B 뒤에 시작한다. T-VN-12A의 command
+- **DB 검증 위험 기반 선택(2026-07-29)**: 전체 실데이터 clone 생성은 기존 clone의 출처·
+  container/system identity·migration head·schema/content identity가 필요한 계약을 충족하지
+  않을 때만 한다. 전체 dump 복원 검증은 migration/schema, backup·restore, checkpoint,
+  database ownership처럼 복구 가능성에 직접 영향을 주는 코드가 바뀌었거나 서명된 checkpoint가
+  없거나 무효일 때만 1회 수행한다. 동일 migration head + schema/content hash + dump SHA256 +
+  checkpoint 계약 버전이 유지되면 다음 task와 최종 비DB 문서 commit에서 재사용하며, exact source
+  revision 변경만으로 전체 복원을 반복하지 않는다. 일반 repository/query 변경은 관련 통합
+  테스트, frontend/mocked/docs-only 변경은 해당 비DB gate만 수행한다.
+- **cross-lane 순서 제약**: C6c pair capture와 #392, H07A~D는 완료됐다.
+  H22C는 완료된 T-VN-48B에 이어 같은 curation frontend를 만지는 T-VN-49B가 머지된 뒤
+  시작한다. T-VN-12A의 command
   inventory freeze는 H22B의 reclassification command가 머지된 뒤 시작해 curation idempotency가
   누락되지 않게 한다. Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
   T-VN-40은 양 lane의 T-VN-32~38 하위 task가 모두 끝난 join barrier 뒤에 시작하며,
   최종 T-VN-39는 T-VN-32~38·40의 모든 하위 task가 끝난 뒤에만 시작한다.
-- **OpenAPI 계약 변경 규율(2026-07-29 개정 — ADR-079)**: admin/user OpenAPI를 바꾸는 task는
-  **per-surface digest 갱신(`openapi-sha256.json`)과 소비자 vendored 스냅샷 재-vendor**를 같은
-  완료 조건으로 갖는다(PinVi `contract-pin-consistency`). compatible-pair 재-capture·C7
-  attestation은 **해당 없음** — v5 승격은 ADR-079로 기각됐고, 배포 페어의 계약은
-  `map_source_revision`과 배포 이미지 OCI revision 라벨이 이미 결박한다.
+- **OpenAPI 계약 변경 규율(2026-07-29 개정)**: admin/user OpenAPI를 바꾸는 task는
+  두 spec을 재생성하고 실제 소비자가 핀한 Map commit에서 vendored 스냅샷을 다시 추출해
+  `contract-pin-consistency`를 통과시킨다. 소비자가 읽지 않는 파생 digest manifest는 만들지
+  않는다. compatible-pair 재-capture·C7 attestation은 배포 이미지 revision 결박과 중복이므로
+  OpenAPI 변경 완료 조건이 아니다.
 - **prod 격리 규율(2026-07-27 인시던트 재발 방지 —
   [리포트](reports/incident-2026-07-27-shared-prod-db-live-container.md))**: 아래 4개는
   두 lane 공통 필수.
@@ -143,32 +151,6 @@ barrier로 직렬화한다.
     대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
 
 ## Lane B 상세 — b0 선행 하드닝
-
-### T-VN-48 — mocked Playwright drift 단계별 제거
-
-T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drift를 재현했다. 한 PR에서
-전체 contract를 동시에 바꾸지 않고 실패 목록을 고정한 뒤 기능 경계별로 줄인다.
-
-- [ ] T-VN-48A — **실패 manifest·runner 고정**
-
-  exact main SHA, spec/test title, 최초 실패 단계, request/accessible-name/actor 차이를
-  machine-readable artifact로 고정한다. retry로 사라지는 flake와 deterministic contract drift를
-  분리하고 각 후속 PR이 자기 소유 실패만 줄였는지 fail-close한다.
-
-- [ ] T-VN-48B — **Feature·큐레이션·검토 mocked 계약 정렬**
-
-  `후보 A/B` 대 `feature A/B`, 한국어 dialog name, 실제 principal actor와 Feature/curation
-  API route·payload drift를 현행 UI 계약에 맞춘다.
-
-- [ ] T-VN-48C — **ops datasets·pipeline mocked 계약 정렬**
-
-  `/v1/ops/datasets` list/detail/preview와 pipeline continuation·schedule recovery route mock을
-  현행 canonical URL·principal 계약에 맞추고, stale legacy route가 다시 등록되면 실패시킨다.
-
-- [ ] T-VN-48D — **나머지 shell/auth/files 계약과 전체 병렬 gate**
-
-  앞 단계 소유 밖의 navigation/auth/files/offline drift를 정리한다. 전체 mocked suite를 n150
-  Linux에서 workers=1과 CI 병렬 모드 모두 green으로 만들고 manifest 잔여를 0으로 닫는다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 
@@ -227,60 +209,46 @@ T-VN-43 gate에서 전체 269개 파일 중 165번째까지 52건의 기존 drif
   사용자 지시로 보류한다 — 운영자가 라우터에 `timeout tunnel`을 적용한 뒤 quiet 2주기 실증으로
   #819를 닫는다.
 
-  docker-manager의 공개 가능한 base config에 `timeout tunnel`을 명시하고 local prod 값은
-  gitignored runbook에서 결선한다. quiet 상태를 heartbeat 두 주기 이상 유지해 같은 ops-live
-  socket이 재연결 없이 유지되는지 브라우저와 proxy metric 양쪽에서 확인한 뒤 #819를 닫는다.
-
 ### T-VN-H30 — 주소 검증 관측 durable화·회복 실적재 검증 (H28 후속, 부분완료)
 
 - [x] T-VN-H30A — **검증 finding을 `ops.data_integrity_violations`에 durable 기록**
 
-  migration `0067_integrity_dedupe_key`(열린 이슈 한정 부분 unique index) +
-  `sync_integrity_findings()` + `record_address_validation_findings()`.
-  `feature_id`/`source_record_key`는 FK라 **적재된 대상에만** 연결하고 drop된 행은 payload로만
-  나른다. `/admin/issues`는 `violation_type`에 allowlist가 없어 신규 type이 그대로 노출된다.
+  migration `0067_integrity_dedupe_key` + `0068_integrity_last_seen`,
+  `sync_integrity_findings()`와 `record_address_validation_findings()`로 구현한다.
+  PR #888 사후 감사에서 확인된 결함까지 현재 Lane B PR에서 보강했다.
 
-  적대 리뷰가 실측으로 잡은 설계 결함 4건을 반영했다.
   - `jsonb ||`는 shallow merge라 재실행 시 `EXCLUDED`의 null이 1회차 증거를 덮어썼다
     (durable ledger 안에서 증거 소실). `jsonb_strip_nulls`로 차단.
-  - `strict`(배포 기본값)는 기록 **전에** `Failure`를 던져, 증거가 가장 필요한 run이
-    아무것도 남기지 않았다. 던지기 전에 기록한다.
-  - **dedupe가 dedupe하지 않았다** — `dedupe_key`가 `source_record_key`(=`raw_payload_hash`
-    파생)에 걸려 export의 무관한 필드 하나만 바뀌어도 새 열린 행이 생겼다. `source_entity_id`
-    기반으로 바꾸고, 이번 run이 더는 보고하지 않는 finding을 자동 resolve하는 sweep을 추가했다
-    (주소 검증이 소유하는 code에 한정, `open`만 — 운영자가 손댄 `acknowledged`는 불가침).
+  - key는 `source_record_key`나 원천 id 문자열을 직접 싣지 않는다.
+    provider/dataset/`source_entity_type`/`source_entity_id`/violation code 전체의
+    `av2_<sha256>`(68 bytes)로 고정해 payload 변경·entity type 재사용·B-tree 행 크기 한계를
+    함께 차단한다.
   - `ops.data_integrity_violations`에 statement 트리거가 있어(실측) finding당 INSERT가
     `ops_live` revision 단일 행에 배타 락을 잡고 트랜잭션 끝까지 유지했다 — admin 쓰기 차단·
-    동시 run 직렬화·데드락. `unnest` 단일 statement로 접어 트리거 1회 발화.
+    동시 run 직렬화·데드락. `dedupe_key` 정렬 후 `unnest` 단일 statement로 접어
+    트리거 1회·잠금 순서 1개로 고정한다.
+  - recurrence는 최초 `detected_at`을 보존하고 별도 `last_seen_at`을 갱신한다.
+    `/admin/issues` cursor도 최신 관측 시각을 쓴다. FK target은 최신 recurrence로 갱신하고,
+    Feature 삭제는 `ON DELETE SET NULL`이라 ledger 행을 지우지 않는다.
+  - client 결과는 `observed/unique/upserted`를 구분해 내부 중복을 미기록으로 오산하지 않는다.
+    DB 기록 실패는 typed error이며 strict 경로는 validation `Failure` 전에 fail-closed한다.
 
-  격리 clone 재실증: finding 106건 기록 → 재실행에도 106 유지, `occurrence_count` 전부 2,
-  `dedupe_key`가 entity id 기반(`…:reverse_geocode_unavailable:79`)으로 안정화됨.
+  > **자동 close는 없다** — 배치마다 sweep하면 같은 run의 다른 batch finding을 닫고,
+  > 부분 unique index 밖으로 밀린 행이 다음 run에 다시 생성되며, 빈 bundle sentinel이 큐를
+  > 전부 닫는다. `T-VN-H32`에서 run marker 기반으로 별도 설계한다.
 
-  > **이 live 실증이 보이지 못하는 것** — 두 run이 같은 finding을 보고했으므로 **sweep은
-  > 발화한 적이 없고**, payload가 바뀌지 않았으므로 **키 안정성도 이 실험으로는 확인되지
-  > 않는다**(옛 `source_record_key` 방식으로도 같은 결과가 나온다). 두 불변식은 대신
-  > 테스트로 고정했다 — sweep 5종은 `tests/integration/test_integrity_findings_sync.py`,
-  > 키 유도는 `test_etl.py::test_dedupe_key_uses_stable_entity_id_not_payload_hash`.
-  > live에서 sweep을 발화시키는 실험(한 레코드의 문제를 해소한 뒤 재실행)은 아직 남았다.
+- [ ] T-VN-H30B — **회복을 같은 격리 snapshot의 실제 적재·인증 API로 재검증**
 
-  > **H30B 수치 주의** — `source_records` 2000→2458은 **+458**이고 acceptance가 요구한
-  > `feature.features` before/after는 보고하지 않았다. 이미 존재하던 레코드의 재관측이
-  > 섞인 것으로 보이나 확인하지 않았다. "1,477 회복"의 근거로 쓰지 말 것.
+  종전 실증은 bundles 1,477와 `source_records` 2000→2458(+458), 2회차 insert 0만 남겼다.
+  acceptance가 요구한 같은 snapshot의 `feature.features` before/after를 보고하지 않았고,
+  `/admin/issues`도 코드 경로만 확인했을 뿐 인증된 실호출을 하지 않았다.
 
-  > **`/admin/issues` 노출은 코드 근거다** — `violation_type`에 allowlist·enum·CHECK가 없음을
-  > 코드로 확인했을 뿐, 인증된 `GET /v1/admin/issues?issue_type=…` 실호출은 하지 않았다.
-
-  > **자동 close는 없다** — 1차 설계의 sweep이 실측으로 기각됐다(배치마다 발화해 자기
-  > finding을 닫음 / 부분 인덱스 밖으로 밀려나 다음 run이 새 행 생성 / `bundles=[]` sentinel이
-  > 큐 전체 close). finding은 해소돼도 `open`으로 남는다 — `T-VN-H32`에서 run marker 기반으로
-  > 재설계한다.
-
-- [x] T-VN-H30B — **회복을 실제 적재로 검증**
-
-  `load_feature_bundles_for_dagster`를 격리 clone에 실제로 태웠다 — bundles 1,477,
-  `source_records` 2000→2458, 2회차 insert 0(멱등). 배포 컨테이너 2곳의
-  `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_CURSOR`가 **미설정**임을 확인해 H28의
-  "자동 회복" 논거(기본값 근거였던 것)를 배포값으로 실증했다.
+  재검증 acceptance:
+  - 같은 격리 snapshot identity와 migration head를 기록한다.
+  - 적재 직전/직후 `feature.features`의 동일 scope 수와 복구된 feature id 집합을 기록한다.
+  - 같은 run의 finding `observed/unique/upserted`, linked/unlinked 수를 함께 기록한다.
+  - 인증된 `GET /v1/admin/issues?issue_type=…` 실호출로 최신 `last_seen_at`·최신 FK target을
+    확인한다.
 
 - [ ] T-VN-H30C — **타 provider `AdminEvidence` 무장 (미완 — 재작업 필요)**
 
@@ -409,8 +377,7 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 > (dm#63·#70·map#712·#719·#777·#694), map#684는 H17에서 조건 #8을 "write/error UI 엣지는
 > mock, read·URL·freshness + write 계약은 live"로 명시 축소한 뒤 close했다.
 
-- **task로 승격**: map #673=`T-VN-H28A/B`, map #819=`T-VN-H27`,
-  map #812/#815=`T-VN-H07C/D`.
+- **task로 승격**: map #673=`T-VN-H28A/B`, map #819=`T-VN-H27`(보류).
 - **종결**: map #738은 lane 분배 정본을 본 문서로 이관해 닫혔다.
 - [ ] T-VN-EXT-PINVI-215 — **PinVi #215 외부 follow-up 추적**
 
@@ -492,49 +459,6 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
   lease/retry/dead-letter/replay가 있는 relay와 DB 대조 reconciliation을 추가한다. backfill checksum
   뒤 critical path 밖에서 PinVi 소비를 enable하고 누락·중복·restore epoch 전환을 live로 증명한다.
-
-## Lane A 상세 — T-VN-H07 cross-repo 계약 완결
-
-Map #814 residual은 `259a9ec5`로 landing해 `tasks-done.md`에 보존했다. 남은 PinVi #403은
-재감사 기준 시점 최신 main보다 13 commits 뒤처졌고, 오래된 task 문서 commit을 재생하지 않고
-H07A의 실제 user OpenAPI SHA와 대조한 residual consumer contract만 남긴다.
-
-- [x] T-VN-H07B — **PinVi #403 residual contract 재감사·landing** (PinVi PR #415, #403 대체)
-
-  재감사 결과 #403의 pin 대상(공개 curated 표면)은 PinVi가 **호출하지 않는** 경로였다 —
-  `_CLIENT_PATHS`에 curated 없음, 큐레이션 런타임 표면은 admin detail-snapshot(H07D 소유),
-  producer exact 고정은 H07A 소유. curated pin 전량 제거 후 **PinVi가 실제로 읽는 필드**의
-  typed consumer contract(21 schema)로 대체했다. H07A의 실제 user OpenAPI SHA와 대조해 stale
-  스냅샷(`91b30f40`@`cf1f0bba`, 174 commits 뒤)을 Map main `8880c29b`/`0a7f1684`로 재동기화.
-  경로→컨테이너→item·map value·envelope `meta` 사슬과 `model_validate` 표면의 model 결합까지
-  고정. 상세는 tasks-done 2026-07-28.
-
-- [x] T-VN-H07D — **#815 admin detail-snapshot field-level contract·freshness** (완료 — #815 close)
-  ① Map PR #878(`5c0e0cae`) payload 타입화 + 계약 게이트 · ② PinVi PR #416(`8ea83358`) subset
-  vendor + 소비자 계약 + freshness CI. 상세는 tasks-done 2026-07-28.
-
-  PinVi 런타임이 실제 소비하는 admin detail-snapshot의 plan/item required/type/enum을 Map full
-  OpenAPI와 PinVi vendored snapshot 양쪽에서 고정한다. admin/user snapshot freshness를 CI에서
-  실제 비교해 skip으로 green이 되는 경로를 제거한다.
-
-- [x] T-VN-H29 — **PinVi 통합검색 map-import POI 좌표 null 복구** (PinVi PR #418, 2026-07-29)
-
-  `pinvi apps/api/app/api/v1/search.py::_snapshot_coord`가 `feature_snapshot["coord"]`만 읽는데,
-  Map `CuratedFeatureDetailFeatureSnapshotView`는 `extra="forbid"`이고 `coord` property가 없다
-  (좌표는 **top-level** `lon`/`lat`). 따라서 이 read는 구조적으로 항상 None이고 map-curated import로
-  들어온 POI는 통합 검색에서 좌표가 null이다. 같은 payload를 `services/admin_pois.py::extract_feature_coord`와
-  `services/kasi.py::extract_feature_coordinates`는 top-level에서 정상 해석한다 —
-  `_snapshot_coord`가 같은 추출기를 재사용하도록 고치고 회귀 테스트를 둔다(PinVi 저장소 작업).
-
-- [x] T-VN-H07C — **#812 compatible-pair manifest v5 → 기각(ADR-079)**
-
-  v5 승격을 실제로 구현한 뒤 적대 리뷰 2명이 (1) 추가 탐지력 0 — 제안 필드는
-  `map_source_revision`의 순수 함수인데 그 revision은 attestation이 이미 배포 이미지 OCI
-  라벨까지 결박한다, (2) 실재하는 운영 마이그레이션 막다름 — v5 전환 즉시 rollback이 무력화되고
-  기존 프로덕션 이미지 revision에는 digest 파일 blob이 없어 capture가 불가능하다 —
-  를 실증해 **기각**했다. manifest는 v4를 유지한다. Map per-surface digest manifest
-  (`openapi-sha256.json`)는 **소비자 freshness 용도로 유지**되며 PinVi가 독립 사본과
-  대조한다(H07B/H07D). 근거·교훈은 ADR-079.
 
 ## Wave 2 상세 — 구조 전환
 

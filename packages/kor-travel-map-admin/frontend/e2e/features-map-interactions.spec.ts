@@ -509,6 +509,22 @@ test.describe("/features map interactions", () => {
     await expect(
       page.getByRole("button", { name: new RegExp(MOCK_NAME) }),
     ).toBeVisible();
+    // production build의 VWorld raster worker는 feature marker가 보인 뒤에도 타일을
+    // 마저 읽을 수 있다. 이때 늦은 map idle updater가 아래 인위적 sourcedata 계측
+    // 창에 섞이지 않도록 실제 tile 안정화를 기다린다.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const container = document.querySelector(
+            '[data-testid="map-canvas-container"]',
+          ) as (HTMLElement & {
+            _maplibreMap?: import("maplibre-gl").Map;
+          }) | null;
+          const map = container?._maplibreMap;
+          return Boolean(map?.areTilesLoaded() && !map.isMoving());
+        }),
+      )
+      .toBe(true);
 
     const calls = await page.evaluate(async (id) => {
       const container = document.querySelector(
@@ -526,7 +542,20 @@ test.describe("/features map interactions", () => {
       const instrumentedMap = map as unknown as InstrumentedMap;
       const nextFrame = () =>
         new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      // source load 완료 직후 이미 예약된 updater를 먼저 비운 뒤 계측한다.
+      // areTilesLoaded()는 true가 된 직후의 실제 idle event보다 먼저 관측될 수 있다.
+      // repaint로 idle cycle을 하나 확정하고 그 handler의 rAF까지 비운 뒤 계측한다.
+      await new Promise<void>((resolve, reject) => {
+        const onIdle = () => {
+          window.clearTimeout(timeout);
+          resolve();
+        };
+        const timeout = window.setTimeout(() => {
+          map.off("idle", onIdle);
+          reject(new Error("map idle cycle did not settle"));
+        }, 5_000);
+        map.once("idle", onIdle);
+        map.triggerRepaint();
+      });
       await nextFrame();
       await nextFrame();
       const originalQuery = instrumentedMap.querySourceFeatures.bind(map);
@@ -910,7 +939,10 @@ test.describe("/features map interactions", () => {
     await expect(
       panel
         .getByTestId("feature-price-panel")
-        .getByText("휘발유 1,820", { exact: true }),
+        .getByText(
+          "휘발유 · python-opinet-api/opinet_gas_station 1,820",
+          { exact: true },
+        ),
     ).toBeVisible();
     await expect(panel.getByText("History")).toBeVisible();
     const graph = panel.getByRole("img", { name: "price history graph" });

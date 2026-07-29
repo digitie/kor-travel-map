@@ -10,13 +10,73 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
-## 2026-07-29 (claude) — Lane A a1: T-VN-H30A/B 완료, H30C 미완 → 다음은 T-VN-H25B
+## 2026-07-29 (codex) — T-VN-48D 최종 gate 완료 → PR·CI·merge
 
-**다음 한 작업**: `T-VN-H25B`(CSV 역반영 8건 + 기준선 대조 매칭 재실행).
-이후 `T-VN-H30C`(재작업) → `T-VN-H31`(등대 공급원) → `T-VN-H22A/B/C`.
+**완료**: 보존 clone Live의 main/recovery 2/2 증거를 전체 restore·브라우저 재실행 없이
+실패 지점부터 복구했다. 정상적인 `dataset_projection` revision `+1`은 서명 dump 직전 행을
+대입한 전체 digest가 v5 checkpoint와 정확히 같을 때만 정규화하고, raw/normalized snapshot과
+revision/timestamp 증거를 함께 남긴다. result는 `complete/recovered`; active acceptance
+Feature·pending request·direct fixture/FK와 모든 runner 임시 자원은 0이다.
 
-- **완료**: `T-VN-H30A/B` — 주소 검증 결과가 `ops.data_integrity_violations`에 durable하게
-  남고 `/admin/issues`에서 보인다. 실적재로 회복 검증, 배포 cursor 미설정 실증.
+Mocked 첫 serial은 늦은 실제 MapLibre `idle`이 계측에 섞여 273/274였으며, repaint+idle+rAF
+barrier로 실패 spec만 수정했다. exact `823ba52b` checkpoint D는 serial/workers=4 각각
+**274/274**, expected/actual failure·flake·skip 0이다. self-owned container/network/image와
+loopback listener도 0이다. PR #889 첫 CI가 찾은 Dagster test double의 typed finding 결과
+계약 drift도 수정했고 package 전체 **510 passed, 1 skipped**, coverage **83.66%**다.
+T-VN-48D/D.1~D.8은 `tasks-done.md`로 이관했다.
+
+**다음 한 작업**: 최신 main을 최종 확인하고 보안 감사를 거쳐 PR을 연다. CI green과 승인
+조건을 확인해 직접 머지하고 issue #881을 닫는다. 머지 뒤 `ktm-tvn45-db`와 v5 dump의
+migration head·fixture identity·잔여물·디스크 여유를 읽기 전용으로 확인해 다음 task 재사용
+가능 여부를 기록한 뒤, 별도 사용자 지시까지 대기한다. 새 Claude Code PR 감사는 이 대기
+지시 때문에 자동 시작하지 않는다.
+
+## 2026-07-29 (codex) — T-VN-48D 2인 재리뷰 하드닝 → 최종 exact gate
+
+**방금**: T-VN-48/기반 PR #888 수정 델타의 적대 리뷰 2명이 찾은 Live 세션
+`application_name` spoof, foreground 자식의 flock 상속, 자유형 payload timestamp cast,
+구 cursor 의미 재사용, 겹치는 batch의 최신 증거 역전, mocked cleanup 실패 은폐를
+`5d62cde5`에서 보강했다. 재검토에서 찾은 autocommit 부분 적용 재시도·writer default
+공백과 Docker create 응답 유실 cleanup까지 `f28a6a2f`에서 닫았다. migration은 자유형
+payload를 보존하고 `detected_at`으로
+결정 backfill하며, NOT VALID/VALIDATE와 concurrent index로 장시간 ACCESS EXCLUSIVE 구간을
+분리한다. 주소 finding upsert는 statement 관측 시각이 오래된 batch가 최신 FK/payload를
+덮지 못하게 하고 발생 횟수만 증가시킨다. Live runner는 guardian flock과 exact backend
+PID/start identity를 사용하며 Mocked runner는 소유 container/network/image 제거·사후 부재를
+fail-closed로 확인한다.
+
+**검증**: Ruff 전체, strict mypy 196 files, import-linter 4 contracts, shell/Node syntax,
+관련 단위 49개와 신규 migration/upsert 통합 7개가 통과했다. 전체 unit의 앞선 실패 node
+12개도 실패 지점 재개로 통과했고 frontend OpenAPI/type/lint/Vitest 254개와 production build가
+green이다.
+
+**다음 한 작업**: 잔여 P0~P2 0건인 두 리뷰어 재검토와 최종 문서 상태를 커밋한다. 이어
+exact final SHA에서 mocked checkpoint D serial/workers=4와 보존 clone의
+파괴적 Live를 재검증하고, 머지 직전 PR → CI green → 직접 머지한다. Claude Code PR 감사는
+사용자 변경 지시에 따라 task PR 머지 뒤 별도 후속 단계로 옮긴다.
+
+## 2026-07-29 (codex) — PR #888 사후 감사 반영 중 → T-VN-48D 최종 gate
+
+**방금**: PR #888 원본 patch 적대 감사 8건을 반영했다. 주소 finding key를 source entity
+type+id 전체의 고정 길이 SHA256으로 바꾸고, batch 잠금 순서를 key 정렬로 고정했다.
+`last_seen_at`을 정규 column+keyset 정렬축으로 추가했으며 recurrence의 FK target 갱신,
+Feature 삭제 시 ledger 보존, strict durable 기록 fail-closed,
+`observed/unique/upserted` 결과를 구현했다. 종전 sweep 문서·테스트는 제거했고 H30B는
+실제 Feature before/after와 인증 Admin API 실호출이 없어 다시 열었다.
+
+**다음 한 작업**: OpenAPI·문서 계약을 확정하고 현재 branch exact delta를 적대 리뷰 2명에게
+검토시킨다. 이후 exact SHA mocked serial/workers=4와 보존 clone Live를 실패 지점부터 재개한
+뒤 PR·CI green·직접 머지한다.
+
+## 2026-07-29 (claude) — Lane A a1: T-VN-H30A 완료, H30B/C 미완
+
+**후속 정정**: PR #888 사후 감사에서 H30B acceptance가 충족되지 않았음을 확인해 다시
+열었다. `T-VN-H30B` 재실증 → `T-VN-H30C` 재작업 후 다음 Lane A task로 진행한다.
+
+- **완료**: `T-VN-H30A` — 주소 검증 결과를 `ops.data_integrity_violations`에 durable하게
+  남기는 경로와 `/admin/issues` 표면을 구현했다.
+- **미완**: `T-VN-H30B` — 실적재 수치는 source record만 보고했으며 동일 snapshot의
+  `feature.features` before/after와 인증 Admin API 실호출이 없다.
 - **미완**: `T-VN-H30C` — MOIS만 무장했는데 `obs`/`claim`이 상호배타라 **탐지 증가 0건**.
   krforest(`region_code`)·visitkorea(`l_dong_regn_cd`)가 실제 후보임을 리뷰어가 반증했다.
 - **교훈 — "dedupe를 넣었다"와 "dedupe가 된다"는 다르다**: 1차 구현의 `dedupe_key`는
@@ -30,6 +90,25 @@
   테이블의 트리거를 먼저 본다.** `unnest` 단일 statement로 접어 해소.
 - **교훈 — `jsonb ||`는 null로 지운다**: 재실행 payload의 `null`이 1회차 증거를 덮어썼다.
   durable ledger 안에서 증거를 잃는, 목적과 정반대 동작이었다. `jsonb_strip_nulls`로 차단.
+
+## 2026-07-29 (codex) — T-VN-48D mocked 최종 gate 완료 → 리뷰·clone Live
+
+**방금**: PR #887 docs-only 변경을 rebase한 exact `b35d7cbb`에서 checkpoint D를 serial과
+workers=4로 각각 **274/274** 통과했다. expected/actual failure·flake·skip은 모두 0이다.
+self-built frontend는 internal Docker network에만 두고, 검증한 container IPv4에 연결하는
+loopback 전용 HTTP/WS 프록시로 host Playwright를 결속했다. source digest와 build도 동일한
+격리 환경변수를 사용한다.
+
+PR #885 감사 수정은 typed reverse 후보·시도 여부, strict/ensure의 모든 error 거부,
+drop allowlist, token 단위 이름 warning, typed quarantine 보존과
+`upserts == bundles + quarantine` 불변식을 고정했다. 이전 #881 기록의 geo trusted proxy
+전환은 폐기하고 scoped `X-KTG-API-Key` 계약으로 정정했다. H28의 일반 좌표 정확도
+과장도 baseline 규칙 재현 범위로 좁혔다.
+
+**다음 한 작업**: Claude PR #886 감사 결과와 exact `origin/main...HEAD` 적대 리뷰 2명을
+반영한 뒤, 같은 최종 SHA로 보존 clone의 실패 지점에서 파괴적 Live를 재개한다. 완료 문서를
+확정하고 PR·CI green·직접 머지한다. 머지 뒤 clone의 migration head·fixture identity·잔여물·
+디스크 여유를 읽기 전용으로 확인해 다음 task 재사용 가능성을 기록하고 별도 지시까지 대기한다.
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H25A 완료(전제 정정) → 다음은 T-VN-H30A
 
@@ -81,6 +160,46 @@
   있어 비교 근거가 못 된다는 점, (b) MOIS는 payload에 bjd가 있으면 reverse를 아예 부르지 않아
   두 축이 동시에 존재하지 않는다는 점, (c) 단건 `ValidationError`가 batch 전체를 죽인다는 점을
   찾아냈다. 셋 다 코드를 읽어야만 알 수 있고 실데이터만으로는 드러나지 않았다.
+## 2026-07-29 (codex) — issue #881 Claude PR #882~#884 감사 수정
+
+**방금**: PR #884의 backend geo public-key query를 없애고 geo trusted proxy principal로
+전환했다. credential은 `SecretStr`로만 보관하고 request URL에는 query가 없다. status·transport
+오류는 원본 httpx request를 chain하지 않는 `GeoRequestError`로 바꾸며, API 중앙 handler와
+admin issues/offline upload/feature-update adapter는 typed 503/502 problem code를 보존한다.
+
+PR #882/#883 감사에서는 PinVi가 읽지 않는 `openapi-sha256.json` 생성·검사를 제거했다.
+freshness 정본은 PinVi가 실제로 수행하는 핀 commit의 spec bytes/subset 직접 비교다.
+`tasks.md`는 완료 H07C/H07D/H21/H29를 제거하고 H27의 OPNsense 운영자 경로를 하나로 합쳤다.
+
+**다음 한 작업**: n150 targeted gate로 이번 감사 수정을 검증하고 원격 checkpoint commit을
+남긴 뒤, T-VN-48 exact revision의 mocked·격리 clone Live 검증과 적대 리뷰 2명을 진행한다.
+
+## 2026-07-29 (codex) — T-VN-48D 격리 clone Live 증거·실패 지점 복구
+
+**방금**: R1을 지키는 보존 실데이터 clone 전용 trusted runner를 추가했다. root-owned
+immutable source snapshot과 BLOCKED/result를 두고 exact candidate API/UI/Playwright image,
+clone container/system identity, loopback 전용 포트, migration head와 시작 전후 row count를
+결속한다. API는 entrypoint migration을 우회해 직접 기동하며 production compose project·
+기본 prod 포트를 fail-close한다.
+
+exact candidate `fe0c956e`의 본 acceptance **2/2**와 recovery-only **2/2**는 모두
+통과했다. direct cleanup/audit 뒤 active owned Feature·weather·price·FK reference와
+nonterminal change request가 모두 0이고, startup 전후 migration
+`0066_curation_component_identity`·relation 49·Feature count는 동일했다. UI create/delete
+감사 이력 6건만 soft-delete로 늘어 final total은 1,030,487건, non-deleted는 시작과 같은
+1,030,387건이다.
+
+최초 완료 판정은 seed의 정상 weather/price FK 2건을 residue로 잘못 보아 BLOCKED 상태에서
+중단됐다. `abc1de8b`에서 seed 기대 FK 2와 cleanup/audit 기대 0을 분리하고 `recover`를
+추가했다. 보존 evidence, 실패 당시 final snapshot과 현재 clone snapshot, old source
+snapshot, 세 image revision, clone identity가 모두 정확히 같을 때만 완료하도록 한 뒤
+build·fixture·브라우저를 반복하지 않고 실패 지점부터 복구했다. 결과는 `phase=recovered`,
+BLOCKED·후보 container/image/listener 0이며 clone DB는 그대로 보존했다.
+
+**다음 한 작업**: 리베이스된 exact revision의 적대 리뷰 2명 지적을 반영하고
+mocked serial/CI-parallel 및 격리 clone Live를 다시 확정한다. Claude Code PR 사후 감사까지
+마친 뒤 PR을 생성해 CI green·self-approval·직접 머지하고, clone 재사용 가능성을 읽기
+전용으로 재확인한 다음 별도 지시까지 대기한다.
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H21 완료 → 다음은 T-VN-H28A
 
@@ -636,4 +755,3 @@ spec 측 6-layer fix 재적용 지침은 `docs/journal.md` 2026-07-26.
 - **잔여 = app-side render churn**(deterministic app 버그, test로 우회 불가). fresh 환경 재확인 권장(22회 재현이
   dagster DB bloat로 reload/getSchedule을 느리게 했을 가능성).
 - **머지**: #837(map, gate descope) + #74(docker-manager, getSchedule public url + reload timeout).
-

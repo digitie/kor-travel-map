@@ -1308,13 +1308,14 @@ CREATE TABLE ops.data_integrity_violations (
   provider            TEXT,
   dataset_key         TEXT,
   source_record_key   TEXT REFERENCES provider_sync.source_records(source_record_key) ON DELETE SET NULL,
-  feature_id          TEXT REFERENCES feature.features(feature_id) ON DELETE CASCADE,
+  feature_id          TEXT REFERENCES feature.features(feature_id) ON DELETE SET NULL,
   violation_type      TEXT NOT NULL,                  -- 'F1_coord_outside_bjd', 'F4_provider_coord_drift', ...
   severity            TEXT NOT NULL,                  -- info, warning, error, critical
   message             TEXT NOT NULL,
   payload             JSONB NOT NULL DEFAULT '{}'::jsonb,
   status              TEXT NOT NULL DEFAULT 'open',
   detected_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at         TIMESTAMPTZ,
   CONSTRAINT ck_violations_severity CHECK (severity IN ('info','warning','error','critical')),
   CONSTRAINT ck_violations_status   CHECK (status IN ('open','acknowledged','resolved','ignored'))
@@ -1328,6 +1329,14 @@ CREATE INDEX idx_violations_detected_brin ON ops.data_integrity_violations USING
 CREATE UNIQUE INDEX uq_violations_open_dedupe_key
     ON ops.data_integrity_violations ((payload ->> 'dedupe_key'))
     WHERE status IN ('open', 'acknowledged') AND payload ? 'dedupe_key';
+CREATE INDEX idx_violations_status_seen
+    ON ops.data_integrity_violations (status, last_seen_at DESC, issue_id DESC);
+CREATE INDEX idx_violations_provider_status_seen
+    ON ops.data_integrity_violations (provider, status, last_seen_at DESC, issue_id DESC)
+    WHERE provider IS NOT NULL;
+CREATE INDEX idx_violations_feature_seen
+    ON ops.data_integrity_violations (feature_id, last_seen_at DESC, issue_id DESC)
+    WHERE feature_id IS NOT NULL;
 ```
 
 주소/좌표 정합성 위반은 다음 `violation_type`을 우선 지원한다.
@@ -1348,21 +1357,20 @@ CREATE UNIQUE INDEX uq_violations_open_dedupe_key
 >
 > `dagster.etl`이 쓰는 주소/좌표 검증 finding은 공통 payload를 갖는다:
 > `feature_id`, `source_record_key`, `provider_address`, `bjd_code`, `sigungu_code`,
-> `dropped`(적재 전 격리 여부), 그리고 dedupe 메타 `dedupe_key`, `occurrence_count`,
-> `last_seen_at`(UTC).
+> `dropped`(적재 전 격리 여부), 그리고 dedupe 메타 `dedupe_key`, `occurrence_count`.
 >
-> - `dedupe_key` = `address_validation:{provider}:{dataset_key}:{code}:{source_entity_id}`.
->   **`source_record_key`를 쓰지 않는다** — 그 키는 `raw_payload_hash` 파생이라 export의
->   무관한 필드 변경만으로 새 열린 이슈가 생겨 큐가 단조 증가한다.
+> - `dedupe_key`는 provider/dataset/source entity type+id/violation code 전체의
+>   `av2_<sha256>` 68-byte 값이다. `source_record_key`는 payload hash에 따라 바뀌고,
+>   원천 id 직접 저장은 B-tree key 크기가 무제한이므로 둘 다 쓰지 않는다.
 > - 부분 unique index **`uq_violations_open_dedupe_key`**(migration `0067`)가
 >   `(payload->>'dedupe_key')`에 걸려 있고 술어는
 >   `status IN ('open','acknowledged') AND payload ? 'dedupe_key'`다. 열린 이슈만 접히므로
 >   resolved/ignored 이력은 보존되고, 재발하면 새 행이 생긴다.
-> - 매 run 끝에 **자동 resolve sweep**이 돈다 — 이번 run이 더는 보고하지 않는 `open`
->   finding을 닫는다. 범위는 주소 검증이 소유하는 code(`etl._ADDRESS_VALIDATION_CODES`)와
->   해당 provider/dataset에 한정되며, 운영자가 손댄 `acknowledged`는 건드리지 않는다.
-> - `feature_id`/`source_record_key` **컬럼**은 FK이므로 적재된 대상에만 채운다. 적재 전
->   단계에서 drop된 행은 두 값을 payload로만 나른다.
+> - 자동 resolve sweep은 없다. batch 경계에서 안전하지 않아 run marker 설계를
+>   `T-VN-H32`로 분리했다.
+> - `detected_at`은 최초 탐지, `last_seen_at`은 최신 recurrence다. recurrence 때 실제
+>   `feature_id`/`source_record_key`도 최신 target으로 갱신한다. 적재 전 drop 행은 두 값을
+>   payload로만 나르고, 연결 대상 삭제는 `SET NULL`이라 ledger 행을 보존한다.
 
 > **producer 상태(F-02 구현, 2026-06-16)**: `reverse_geocode_failed`는
 > `validate_feature_bundle_address`가 **좌표-있음+bjd-없음**(reverse가 bjd를 못 냄)에서

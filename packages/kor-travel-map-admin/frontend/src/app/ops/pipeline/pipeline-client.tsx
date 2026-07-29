@@ -5,10 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import {
-  opsLiveConnectionLabel,
-  useOpsLiveInvalidation,
-} from "@/api/live";
+import { opsLiveConnectionLabel, useOpsLiveInvalidation } from "@/api/live";
 import {
   type ExecutionKind,
   type PipelineOverviewResponse,
@@ -245,11 +242,14 @@ function OverviewStrip({
   );
 }
 
-export function PipelineClient({ initialQuery }: { initialQuery: string }) {
+export function PipelineClient() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const urlStateRef = useRef(initialQuery);
+  const urlStateRef = useRef<string | null>(null);
+  if (urlStateRef.current === null) {
+    urlStateRef.current = searchParams.toString();
+  }
   const focusReturnExecutionIdRef = useRef<string | null>(null);
   const focusAfterCloseRef = useRef(false);
   const urlSchedule = searchParams.get("schedule");
@@ -286,7 +286,7 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
       updates: Record<string, string | null>,
       mode: "push" | "replace" = "push",
     ) => {
-      const previous = new URLSearchParams(urlStateRef.current);
+      const previous = new URLSearchParams(urlStateRef.current ?? "");
       const next = new URLSearchParams(previous);
       for (const [key, value] of Object.entries(updates)) {
         if (value === null || value === "") {
@@ -314,12 +314,15 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
       } else if (providerChanged && !datasetExplicitlyUpdated) {
         next.delete("dataset_key");
         next.delete("sync_scope");
-      } else if (!datasetKey || ((providerChanged || datasetChanged) && !scopeExplicitlyUpdated)) {
+      } else if (
+        !datasetKey ||
+        ((providerChanged || datasetChanged) && !scopeExplicitlyUpdated)
+      ) {
         next.delete("sync_scope");
       }
       const query = next.toString();
       const href = query ? `${pathname}?${query}` : pathname;
-      const currentQuery = urlStateRef.current;
+      const currentQuery = urlStateRef.current ?? "";
       const current = currentQuery ? `${pathname}?${currentQuery}` : pathname;
       if (href === current) {
         return;
@@ -351,13 +354,7 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
     } else if (urlSyncScope && !hasExactScopeTuple) {
       updateUrl({ sync_scope: null }, "replace");
     }
-  }, [
-    hasExactScopeTuple,
-    updateUrl,
-    urlDatasetKey,
-    urlProvider,
-    urlSyncScope,
-  ]);
+  }, [hasExactScopeTuple, updateUrl, urlDatasetKey, urlProvider, urlSyncScope]);
 
   const selectExecution = (
     kind: ExecutionKind,
@@ -384,7 +381,13 @@ export function PipelineClient({ initialQuery }: { initialQuery: string }) {
         createdFrom: searchParams.get("created_from") ?? undefined,
         createdTo: searchParams.get("created_to") ?? undefined,
       }),
-    [hasExactScopeTuple, searchParams, urlDatasetKey, urlProvider, urlSyncScope],
+    [
+      hasExactScopeTuple,
+      searchParams,
+      urlDatasetKey,
+      urlProvider,
+      urlSyncScope,
+    ],
   );
   const timelineLoadBatchId = searchParams.get("load_batch_id") ?? undefined;
   const timelineParentJobId = searchParams.get("parent_job_id") ?? undefined;

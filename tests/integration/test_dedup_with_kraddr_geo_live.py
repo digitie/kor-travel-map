@@ -157,7 +157,7 @@ async def _enrich_and_load(
         settings = KorTravelMapSettings()
         kraddr = KorTravelGeoRestClient(
             http,
-            api_key=settings.kor_travel_geo_api_key_value,
+            api_key=settings.kor_travel_geo_api_key,
         )
         reverse = cached_reverse_geocoder(
             kor_travel_geo_reverse_geocoder(kraddr, max_distance_m=500)

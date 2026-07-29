@@ -3,6 +3,42 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-29 — Lane B b0 T-VN-48 mocked drift·격리 clone Live 완료
+
+- [x] **T-VN-48A~C** — 최초 273-test baseline의 deterministic drift 89건을
+  Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별로 제거했다.
+- [x] **T-VN-48D** — checkpoint D를 exact `823ba52b`에서 serial과 workers=4로 각각
+  **274/274** 통과했다. expected/actual failure·flake·skip은 모두 0이고, 종료 뒤 self-owned
+  container/network/image와 loopback listener도 0건이다.
+  - [x] **D.1~D.3** — restore 전용 owner를 정규화하되 원본 owner invariant는 별도 검증하고,
+    fail-closed dump를 정확히 하나일 때만 재사용하며, PostGIS `extconfig` OID를 안정적인
+    schema+relation identity로 바꿨다. 실제 schema-only restore에서 extension digest
+    동등성을 확인했다.
+  - [x] **D.4** — 경량 v5 baseline과 선택적 full restore certification을 분리했다. v5는
+    custom archive 구조·dump SHA256·clone snapshot·write fence를 서명하고
+    `full_restore_verified=false`를 명시한다. 이번 최종 gate는 migration/schema/복구 계약이
+    바뀌지 않아 이미 보유한 dump와 clone을 재사용하고 전체 restore를 반복하지 않았다.
+  - [x] **D.5~D.6** — Feature 승인으로 정상 증가한
+    `ops.ops_live_topic_revisions.dataset_projection` 한 행을 시작값으로 정규화하되,
+    서명 dump의 직전 행을 대입한 전체 digest가 checkpoint와 정확히 같고 revision이 `+1`인
+    경우만 허용했다. `direct-cleanup-running → recovery-resource-finalizing`의 정확한
+    forward-recovery만 인정해 UI·fixture를 반복하지 않고 기존 evidence에서 완료했다.
+  - [x] **D.7** — production MapLibre의 늦은 실제 `idle` event가 raster `sourcedata`
+    계측에 섞이던 Mocked race를 repaint+idle+rAF barrier로 제거했다. 최초 serial은 이 한 건만
+    실패한 273/274였고, 실패 spec 수정 뒤 같은 gate를 재개해 serial/parallel 모두 통과했다.
+  - [x] **D.8** — PR CI가 `record_address_validation_findings()`의 typed
+    `IntegrityFindingSyncResult` 계약과 Dagster asset 테스트 double 12개의 구 `int` 반환
+    drift를 세 Python 버전에서 공통 검출했다. 모든 double을 실제 결과 타입으로 맞추고 Dagster
+    package 전체 **510 passed, 1 skipped**, coverage **83.66%**와 Ruff를 통과했다.
+- [x] **파괴적 Live** — 보존 clone의 본 acceptance와 recovery-only가 각각 **2/2**다.
+  result는 `complete/recovered`, raw→normalized 전체 content 증명과 topic revision `+1`을
+  기록했다. active acceptance Feature·pending change request·direct weather/price/FK,
+  BLOCKED/quiescence/scratch/temp DB·role, runner container/network/image는 전부 0이다.
+  v5 custom dump는 다음 task 재사용 판정 대상으로 보존했다.
+- [x] **리뷰·감사** — branch-authored delta는 적대 리뷰 2인과 국소 후속 검토에서 P0~P2
+  0건이며, 규칙 변경 전에 완료한 issue #881의 Claude Code PR #888 사후 감사 수정도 같은
+  변경 집합에 포함했다.
+
 ## 2026-07-29 — Lane A a1 T-VN-H28A/B: #673 주소 검증 규칙 교체 (한 PR)
 
 > **정정 (적대 리뷰 반영)** — 아래 "payload 행정코드 == geo 행정코드이므로 전부 오탐"이라는
@@ -43,11 +79,29 @@
     materialize가 ledger 전량을 재생한다. 규칙만 고치면 자동 회복된다.
   - 검증: n150 CI-parity — ruff / mypy --strict(core 117·dagster 23) / dagster 494 passed +
     1 skipped / 관련 unit 179 passed. 신규 회귀 25건.
+## 2026-07-29 — issue #881: Claude Code PR #882~#884 사후 감사
+
+- [x] **PR #884 geo 인증·오류 계약 재감사** — backend가 VWorld public key를 URL query로
+  계속 전송해 httpx INFO URL과 traceback frame에서 비밀이 노출될 수 있던 구조를 제거했다.
+  Map API/Dagster/CLI는 geo public endpoint에 `X-KTG-API-Key` header만 사용하며
+  credential은 `SecretStr`로 보관한다. admin trusted-proxy principal을 위임하지 않고
+  transport/status 원본 예외도 연결하지 않는다.
+- [x] **typed problem code 보존** — `GeoAuthNotConfiguredError`와 `GeoRequestError`가
+  `/admin/issues`, offline-upload validation, feature-update HTTP adapter를 지나도 각각
+  `GEO_AUTH_NOT_CONFIGURED`(503), `PROVIDER_ERROR`(502)로 유지되게 중앙 handler와 경계별
+  problem+json 회귀 테스트를 추가했다.
+- [x] **PR #882/#883 문서·계약 재감사** — PinVi가 읽지 않는
+  `openapi-sha256.json`은 탐지력 없는 파생 산출물이므로 export/test/file을 제거했다.
+  소비자 freshness는 실제 핀 commit의 spec/subset 비교만 정본으로 유지한다.
+  완료된 H07C/H07D/H21/H29는 active backlog에서 제거하고 H27은 OPNsense 운영자 작업과
+  quiet 2주기 검증 한 경로로만 정리했다.
 
 ## 2026-07-29 — Lane A a1 T-VN-H21: geo 인증 결선 검증·비밀 유출 차단
 
 - [x] **T-VN-H21** — kor-travel-geo live 인증 결선을 검증 가능하게 만들고, 그 과정에서 드러난
   API key 유출 경로를 막았다. dedup 5건은 **브랜치 코드로** 실서비스에서 재통과(5 passed).
+  후속 issue #881 감사에서 URL query 자체가 남긴 2차 유출 경로를 확인해 위 trusted proxy
+  header 계약으로 교체했다. 아래는 PR #884 최초 landing 당시의 검증 이력이다.
   - 열린 질문이었던 "인증 뒤 runtime drift"는 **없음**으로 종결: 실 geo에 대해 reverse
     (status=OK, cand=11)·geocode(status=OK, conf=1.000) 응답이 기존 Pydantic 모델로 무손실
     파싱됐고, 배포된 Map api 컨테이너의 key가 geo 컨테이너 `KTG_VWORLD_API_KEY`와 동일함을 확인했다.

@@ -47,7 +47,18 @@ import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Final,
+    Literal,
+    Protocol,
+    TypeVar,
+    cast,
+    runtime_checkable,
+)
+
+from pydantic import SecretStr
 
 from kortravelmap.core.address import (
     extract_sido_code,
@@ -61,28 +72,46 @@ from kortravelmap.dto import Address, Coordinate
 if TYPE_CHECKING:
     import httpx
 
-# geo public_api_key의 query.key max_length. 초과 시 미설정과 같은 400 E0100이 돌아온다.
-_MAX_API_KEY_LENGTH: Final = 128
+_GeoResponseT = TypeVar("_GeoResponseT")
+
+
+def _is_public_key_rejection(resp: httpx.Response) -> bool:
+    """geo가 Map의 public API key를 거부했는지 판정한다."""
+    if resp.status_code not in {400, 401}:
+        return False
+    try:
+        payload = resp.json()
+    except ValueError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return False
+    return (
+        resp.status_code == 400
+        and error.get("code") == "E0100"
+        and error.get("field") == "key"
+    ) or (resp.status_code == 401 and error.get("code") == "E0401")
 
 
 def _raise_for_status_sanitized(resp: httpx.Response) -> None:
-    """``resp.raise_for_status()``를 하되 비밀이 든 메시지를 새로 만들지 않는다 (T-VN-H21).
-
-    ``str(httpx.HTTPStatusError)``는 request URL을 그대로 담고, 그 URL query에는
-    ``key=<SECRET>``가 들어 있다. 이 문자열은 상위 boundary에서 **502 응답 body와 로그로
-    그대로 흘러간다**(키가 비어 있던 동안만 무해했다). query string을 제거한 URL만 남기고,
-    ``from None``으로 원본을 연결하지 않아 traceback chain으로도 새지 않게 한다.
-    """
+    """HTTP status 오류를 credential 없는 typed 예외로 바꾼다."""
     import httpx as _httpx
+
+    if _is_public_key_rejection(resp):
+        raise GeoAuthNotConfiguredError(
+            "kor-travel-geo가 Map public API key를 거부했습니다. "
+            "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY와 geo의 public key 설정을 확인하세요."
+        )
 
     sanitized: GeoRequestError | None = None
     try:
         resp.raise_for_status()
     except _httpx.HTTPStatusError as exc:
-        safe_url = exc.request.url.copy_with(query=None)
         sanitized = GeoRequestError(
             f"kor-travel-geo 호출 실패: {exc.response.status_code} "
-            f"{exc.response.reason_phrase} for {safe_url}"
+            f"{exc.response.reason_phrase}"
         )
     # except 블록 **밖에서** 던진다. 안에서 던지면 ``from None``으로도 ``__context__``에
     # 원본(=key가 든 URL 문자열)이 남아, ``__context__``를 따라가는 로거·리포터로 샌다.
@@ -90,10 +119,39 @@ def _raise_for_status_sanitized(resp: httpx.Response) -> None:
         raise sanitized
 
 
+def _parse_response_payload(
+    resp: httpx.Response,
+    parser: Callable[[dict[str, Any]], _GeoResponseT],
+) -> _GeoResponseT:
+    """Raw provider payload를 짧은 내부 frame 안에서만 파싱한다."""
+    payload = resp.json()
+    if not isinstance(payload, dict):
+        raise TypeError("response JSON is not an object")
+    return parser(payload)
+
+
+def _parse_response_sanitized(
+    resp: httpx.Response,
+    parser: Callable[[dict[str, Any]], _GeoResponseT],
+) -> _GeoResponseT:
+    """2xx JSON/schema 손상을 raw payload 없는 typed provider 오류로 바꾼다."""
+    error_type: str | None = None
+    try:
+        return _parse_response_payload(resp, parser)
+    except (AttributeError, KeyError, OverflowError, TypeError, ValueError) as exc:
+        error_type = type(exc).__name__
+    # 원 JSON decoder/parser 예외의 frame local에 raw payload가 남을 수 있으므로
+    # except 블록 밖에서 새 typed 오류를 던져 exception chaining도 만들지 않는다.
+    assert error_type is not None
+    raise GeoRequestError(f"kor-travel-geo 응답 계약 오류: {error_type}")
+
+
 __all__ = [
     # 비동기 콜러블 계약 (docs/architecture/address-geocoding.md §2)
     "AddressGeocoder",
     "AddressResolver",
+    "ObservedReverseGeocoder",
+    "ReverseGeocodeObservation",
     "ReverseGeocoder",
     "cached_address_resolver",
     "cached_reverse_geocoder",
@@ -139,6 +197,23 @@ ReverseGeocoder = Callable[[Coordinate], Awaitable[Address | None]]
 """역지오코딩: ``Coordinate`` → ``Address | None`` (await)."""
 
 
+@dataclass(frozen=True)
+class ReverseGeocodeObservation:
+    """대표 주소와 reverse 후보 전체의 시군구명을 함께 보존한 관측."""
+
+    address: Address | None
+    sigungu_names: tuple[str, ...] = ()
+
+
+@runtime_checkable
+class ObservedReverseGeocoder(Protocol):
+    """대표 주소 외에 후보집합 증거도 제공하는 ``ReverseGeocoder``."""
+
+    async def __call__(self, coord: Coordinate) -> Address | None: ...
+
+    async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation: ...
+
+
 # -- 역지오코딩 결과 캐싱 (async) ---------------------------------------------
 #
 # provider 변환 함수는 모두 async이고 feature_id가 bjd_code에 의존(ADR-009)하므로,
@@ -154,22 +229,46 @@ def cached_reverse_geocoder(
     geocoder: ReverseGeocoder,
     *,
     precision: int = _DEFAULT_COORD_PRECISION,
-) -> ReverseGeocoder:
+) -> ObservedReverseGeocoder:
     """``ReverseGeocoder``를 좌표(precision 자리 양자화) 기준 메모이즈한다.
 
     반환 콜러블은 호출 수명 동안 결과(``Address | None`` 포함)를 캐싱 — batch
     변환에서 중복 좌표의 역지오코딩 round-trip을 1회로 줄인다. ``None`` 결과도
     캐싱하므로 실패 좌표를 재시도하지 않는다.
     """
-    cache: dict[tuple[str, str], Address | None] = {}
+    return _CachedObservedReverseGeocoder(geocoder, precision=precision)
 
-    async def _cached(coord: Coordinate) -> Address | None:
-        key = (f"{coord.lon:.{precision}f}", f"{coord.lat:.{precision}f}")
-        if key not in cache:
-            cache[key] = await geocoder(coord)
-        return cache[key]
 
-    return _cached
+class _CachedObservedReverseGeocoder:
+    def __init__(self, geocoder: ReverseGeocoder, *, precision: int) -> None:
+        self._geocoder = geocoder
+        self._precision = precision
+        self._cache: dict[tuple[str, str], ReverseGeocodeObservation] = {}
+
+    def _key(self, coord: Coordinate) -> tuple[str, str]:
+        return (
+            f"{coord.lon:.{self._precision}f}",
+            f"{coord.lat:.{self._precision}f}",
+        )
+
+    async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
+        key = self._key(coord)
+        if key not in self._cache:
+            if isinstance(self._geocoder, ObservedReverseGeocoder):
+                observation = await self._geocoder.observe(coord)
+            else:
+                address = await self._geocoder(coord)
+                names = (
+                    (address.sigungu_name,)
+                    if address is not None and address.sigungu_name
+                    else ()
+                )
+                observation = ReverseGeocodeObservation(address, names)
+            self._cache[key] = observation
+        return self._cache[key]
+
+    async def __call__(self, coord: Coordinate) -> Address | None:
+        return (await self.observe(coord)).address
 
 
 def cached_address_resolver(resolver: AddressResolver) -> AddressResolver:
@@ -382,6 +481,39 @@ class RegionsWithinRadiusResponse:
 # -- 순수 변환 함수 -----------------------------------------------------------
 
 
+def _usable_reverse_candidates(
+    response: KraddrReverseV2Response,
+    *,
+    max_distance_m: float | None,
+) -> tuple[KraddrCandidateV2, ...]:
+    if response.status != _STATUS_OK:
+        return ()
+    if max_distance_m is None:
+        return response.candidates
+    return tuple(
+        candidate
+        for candidate in response.candidates
+        if candidate.distance_m is None or candidate.distance_m <= max_distance_m
+    )
+
+
+def _reverse_sigungu_names(
+    response: KraddrReverseV2Response,
+    *,
+    max_distance_m: float | None,
+) -> tuple[str, ...]:
+    names: list[str] = []
+    for candidate in _usable_reverse_candidates(
+        response, max_distance_m=max_distance_m
+    ):
+        name = normalize_korean_text(
+            candidate.region.sigungu if candidate.region is not None else None
+        )
+        if name and name not in names:
+            names.append(name)
+    return tuple(names)
+
+
 def reverse_response_to_address(
     response: KraddrReverseV2Response,
     *,
@@ -412,17 +544,11 @@ def reverse_response_to_address(
     잘못된 자릿수 코드/우편번호는 ``None``으로 떨어뜨려 ``Address`` validator 거부를
     피한다 (kor-travel-geo가 비정형 코드를 돌려줘도 reverse 전체가 깨지지 않게).
     """
-    if response.status != _STATUS_OK or not response.candidates:
+    cands = _usable_reverse_candidates(
+        response, max_distance_m=max_distance_m
+    )
+    if not cands:
         return None
-    cands = response.candidates
-    if max_distance_m is not None:
-        cands = tuple(
-            c
-            for c in cands
-            if c.distance_m is None or c.distance_m <= max_distance_m
-        )
-        if not cands:
-            return None
 
     primary = _closest_candidate(cands)
     paddr = primary.address
@@ -817,55 +943,66 @@ class KorTravelGeoRestClient:
         http_client: httpx.AsyncClient,
         *,
         base_path: str = "/v2",
-        api_key: str | None = None,
-        require_api_key: bool = True,
+        api_key: SecretStr | None = None,
+        require_auth: bool = True,
     ) -> None:
-        """T-VN-H21: ``require_api_key``는 기본 ``True``다.
+        """backend-to-backend public API key 인증을 생성 시점에 검증한다.
 
-        결선 검증을 **생성 시점**에 두어, 새 live 호출 지점이 추가돼도 별도 조치 없이
-        자동으로 보호된다(호출 지점마다 수동으로 guard를 붙이는 방식은 한 곳만 빠뜨려도
-        조용히 무력화된다 — 실제로 최초 구현이 그랬다).
+        key는 URL query가 아니라 ``X-KTG-API-Key`` header로만 전송한다. Map은 public
+        endpoint만 호출하므로 geo admin trusted-proxy 권한을 요구하거나 위임하지 않는다.
 
-        mock transport로만 도는 테스트처럼 key가 필요 없는 경우에만 명시적으로
-        ``require_api_key=False``로 opt-out한다.
+        mock transport로만 도는 테스트처럼 인증이 필요 없는 경우에만 명시적으로
+        ``require_auth=False``로 opt-out한다.
         """
         self._http = http_client
         self._base = base_path.rstrip("/")
-        self._api_key = api_key.strip() if api_key is not None else None
-        if require_api_key:
+        self._api_key = api_key
+        if require_auth:
             self.preflight()
 
     def preflight(self) -> None:
-        """인증 결선을 확인한다 (T-VN-H21).
-
-        geo PR#399 이후 `/v2/*`는 **외부/비신뢰 호출에** VWorld 호환 ``key`` query를 요구한다
-        (trusted admin proxy·service-token 경로는 우회 — ADR-060). key가 비어 있으면 서버가
-        **handler 실행 전에** ``400 E0100 query.key: Field required``로 막는데, 그 응답만 보면
-        좌표/payload 문제로 오인하기 쉽다(실제 오진 이력: ADR-060). 결선 누락을 원인 그대로
-        먼저 드러낸다.
-
-        비밀은 메시지에 넣지 않는다 — 결선 여부와 길이 위반 여부만 말한다.
-        """
-        if not self._api_key:
+        """geo public API key 결선을 확인한다."""
+        if self._api_key is None:
             raise GeoAuthNotConfiguredError(
-                "kor-travel-geo REST v2 requires an API key but none is configured; "
-                "set KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY "
-                "(운영은 VWorld API key와 같은 값을 사용한다). "
-                "미설정 시 서버가 handler 실행 전에 400 E0100 query.key로 막는다."
+                "kor-travel-geo public API key가 설정되지 않았습니다. "
+                "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY를 설정하세요."
             )
-        # geo public_api_key는 128자 초과를 query.key string_too_long으로 되돌려보내
-        # 미설정과 동일한 E0100/400 envelope가 된다. 값은 노출하지 않고 길이만 알린다.
-        if len(self._api_key) > _MAX_API_KEY_LENGTH:
+        key = self._api_key.get_secret_value().strip()
+        if not key:
             raise GeoAuthNotConfiguredError(
-                "kor-travel-geo REST v2 API key is too long "
-                f"({len(self._api_key)} > {_MAX_API_KEY_LENGTH} chars); "
-                "서버가 query.key string_too_long으로 400 E0100을 돌려준다."
+                "kor-travel-geo public API key가 비어 있습니다. "
+                "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY를 설정하세요."
+            )
+        if len(key) > 128:
+            raise GeoAuthNotConfiguredError(
+                "kor-travel-geo public API key는 128자 이하여야 합니다."
             )
 
-    def _query_params(self) -> dict[str, str] | None:
-        if not self._api_key:
+    def _public_api_headers(self) -> dict[str, str] | None:
+        if self._api_key is None:
             return None
-        return {"key": self._api_key}
+        return {"X-KTG-API-Key": self._api_key.get_secret_value().strip()}
+
+    async def _post(self, path: str, *, json: dict[str, Any]) -> httpx.Response:
+        """transport 오류도 원본 request를 연결하지 않는 typed 예외로 바꾼다."""
+        import httpx as _httpx
+
+        response: httpx.Response | None = None
+        sanitized: GeoRequestError | None = None
+        try:
+            response = await self._http.post(
+                path,
+                json=json,
+                headers=self._public_api_headers(),
+            )
+        except _httpx.HTTPError as exc:
+            sanitized = GeoRequestError(
+                f"kor-travel-geo transport 실패: {type(exc).__name__}"
+            )
+        if sanitized is not None:
+            raise sanitized
+        assert response is not None
+        return response
 
     async def reverse(
         self,
@@ -889,13 +1026,9 @@ class KorTravelGeoRestClient:
         }
         if radius_m is not None:
             body["radius_m"] = radius_m
-        resp = await self._http.post(
-            f"{self._base}/reverse",
-            json=body,
-            params=self._query_params(),
-        )
+        resp = await self._post(f"{self._base}/reverse", json=body)
         _raise_for_status_sanitized(resp)
-        return _parse_reverse_response(resp.json())
+        return _parse_response_sanitized(resp, _parse_reverse_response)
 
     async def geocode(
         self,
@@ -914,13 +1047,9 @@ class KorTravelGeoRestClient:
             body["road_address"] = address
         else:
             body["jibun_address"] = address
-        resp = await self._http.post(
-            f"{self._base}/geocode",
-            json=body,
-            params=self._query_params(),
-        )
+        resp = await self._post(f"{self._base}/geocode", json=body)
         _raise_for_status_sanitized(resp)
-        return _parse_geocode_response(resp.json())
+        return _parse_response_sanitized(resp, _parse_geocode_response)
 
     async def regions_within_radius(
         self,
@@ -937,62 +1066,65 @@ class KorTravelGeoRestClient:
             "radius_km": radius_km,
             "levels": list(levels),
         }
-        resp = await self._http.post(
-            f"{self._base}/regions/within-radius",
-            json=body,
-            params=self._query_params(),
-        )
+        resp = await self._post(f"{self._base}/regions/within-radius", json=body)
         _raise_for_status_sanitized(resp)
-        return _parse_regions_within_radius_response(resp.json())
+        return _parse_response_sanitized(
+            resp,
+            _parse_regions_within_radius_response,
+        )
 
 
 # -- kor-travel-geo REST client → 콜러블 팩토리 -----------------------------------
 
 
-def kor_travel_geo_reverse_geocoder(
-    client: KorTravelGeoRestClient,
-    *,
-    radius_m: int | None = None,
-    max_distance_m: float | None = None,
-    region_fallback_radius_km: float | None = None,
-) -> ReverseGeocoder:
-    """kor-travel-geo REST client → ``ReverseGeocoder`` (좌표 → ``Address``) 콜러블.
+class _KorTravelGeoObservedReverseGeocoder:
+    def __init__(
+        self,
+        client: KorTravelGeoRestClient,
+        *,
+        radius_m: int | None,
+        max_distance_m: float | None,
+        region_fallback_radius_km: float | None,
+    ) -> None:
+        self._client = client
+        self._radius_m = radius_m
+        self._max_distance_m = max_distance_m
+        self._region_fallback_radius_km = region_fallback_radius_km
 
-    ``region_fallback_radius_km``를 지정하면 ``POST /v2/reverse``가 주소 후보를
-    찾지 못했을 때 ``POST /v2/regions/within-radius``로 중심 좌표가 포함된
-    행정구역을 조회해 bjd/sigungu/sido code만 최소 보강한다.
-
-    Examples
-    --------
-    >>> # import httpx
-    >>> # async with httpx.AsyncClient(base_url="http://127.0.0.1:12501") as http:
-    >>> #     client = KorTravelGeoRestClient(http)
-    >>> #     reverse = kor_travel_geo_reverse_geocoder(client)
-    >>> #     addr = await reverse(Coordinate(lon=Decimal("127.0"), lat=Decimal("37.5")))
-    """
-
-    async def _reverse(coord: Coordinate) -> Address | None:
-        response = await client.reverse(
-            float(coord.lon), float(coord.lat), radius_m=radius_m
+    async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
+        response = await self._client.reverse(
+            float(coord.lon), float(coord.lat), radius_m=self._radius_m
         )
         address = reverse_response_to_address(
-            response, max_distance_m=max_distance_m
+            response, max_distance_m=self._max_distance_m
+        )
+        names = list(
+            _reverse_sigungu_names(
+                response, max_distance_m=self._max_distance_m
+            )
         )
         if (
             address is not None and address.bjd_code is not None
-        ) or region_fallback_radius_km is None:
-            return address
+        ) or self._region_fallback_radius_km is None:
+            return ReverseGeocodeObservation(address, tuple(names))
 
-        regions = await client.regions_within_radius(
+        regions = await self._client.regions_within_radius(
             lon=float(coord.lon),
             lat=float(coord.lat),
-            radius_km=region_fallback_radius_km,
+            radius_km=self._region_fallback_radius_km,
             levels=("sido", "sigungu", "emd"),
         )
+        for item in regions.sigungu:
+            name = normalize_korean_text(item.name)
+            if name and name not in names:
+                names.append(name)
         region_address = _regions_within_radius_response_to_address(regions)
         if address is None or region_address is None:
-            return region_address or address
-        return address.model_copy(
+            return ReverseGeocodeObservation(
+                region_address or address,
+                tuple(names),
+            )
+        merged = address.model_copy(
             update={
                 "legal": address.legal or region_address.legal,
                 "admin": address.admin or region_address.admin,
@@ -1005,8 +1137,32 @@ def kor_travel_geo_reverse_geocoder(
                 or region_address.sigungu_name,
             }
         )
+        return ReverseGeocodeObservation(merged, tuple(names))
 
-    return _reverse
+    async def __call__(self, coord: Coordinate) -> Address | None:
+        return (await self.observe(coord)).address
+
+
+def kor_travel_geo_reverse_geocoder(
+    client: KorTravelGeoRestClient,
+    *,
+    radius_m: int | None = None,
+    max_distance_m: float | None = None,
+    region_fallback_radius_km: float | None = None,
+) -> ObservedReverseGeocoder:
+    """kor-travel-geo REST client → 대표 주소와 후보집합을 보존하는 역지오코더.
+
+    일반 ``ReverseGeocoder``처럼 호출하면 대표 ``Address``만 반환하고, ``observe``는
+    경계 좌표 검증에 필요한 reverse 후보 전체의 시군구명도 함께 반환한다.
+    ``region_fallback_radius_km``를 지정하면 주소 후보가 없을 때 중심 좌표가 포함된
+    행정구역을 조회해 최소 코드를 보강한다.
+    """
+    return _KorTravelGeoObservedReverseGeocoder(
+        client,
+        radius_m=radius_m,
+        max_distance_m=max_distance_m,
+        region_fallback_radius_km=region_fallback_radius_km,
+    )
 
 
 def kor_travel_geo_address_geocoder(

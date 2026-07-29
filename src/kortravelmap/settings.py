@@ -24,8 +24,9 @@ Sprint 1 (본 PR#17) — minimum settings만. Provider key 등은 후속 sprint�
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogFormat = Literal["json", "console"]
@@ -47,6 +48,7 @@ class KorTravelMapSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",  # 다른 prefix env (예: TRIPMATE_*) 침범 차단
+        hide_input_in_errors=True,
     )
 
     # ── PostgreSQL (ADR-007) ─────────────────────────────────────────────
@@ -121,7 +123,7 @@ class KorTravelMapSettings(BaseSettings):
         return self.object_store_secret_access_key
 
     # ── kor-travel-geo REST API v2 (geocoding, ADR-006/044) ─────────────────
-    kor_travel_geo_base_url: str | None = Field(
+    kor_travel_geo_base_url: SecretStr | None = Field(
         default=None,
         description=(
             "kor-travel-geo REST 서비스 base URL (로컬 기본 예: ``http://127.0.0.1:12501``). "
@@ -139,19 +141,48 @@ class KorTravelMapSettings(BaseSettings):
     kor_travel_geo_api_key: SecretStr | None = Field(
         default=None,
         description=(
-            "kor-travel-geo REST v2 public API key. geo PR#399 이후 외부/비신뢰 "
-            "호출에는 VWorld 호환 ``key`` query가 필요하다. 현재 운영은 "
-            "VWorld API key와 동일 값을 넣는다."
+            "kor-travel-geo public endpoint 인증용 API key. Map backend는 이 값을 "
+            "URL query가 아닌 ``X-KTG-API-Key`` header로만 보내며 admin role이나 "
+            "trusted-proxy 권한을 요청하지 않는다."
         ),
     )
 
-    @property
-    def kor_travel_geo_api_key_value(self) -> str | None:
-        """kor-travel-geo REST client에 넘길 query key 원문 값."""
-        if self.kor_travel_geo_api_key is None:
+    @field_validator("kor_travel_geo_base_url")
+    @classmethod
+    def _validate_kor_travel_geo_base_url(
+        cls,
+        value: SecretStr | None,
+    ) -> SecretStr | None:
+        """Geo base URL에는 origin만 허용해 진단·경로 경계에 비밀을 두지 않는다."""
+        if value is None:
             return None
-        value = self.kor_travel_geo_api_key.get_secret_value().strip()
-        return value or None
+        raw_value = value.get_secret_value()
+        invalid_url = False
+        parsed_port: int | None = None
+        try:
+            parsed = urlsplit(raw_value)
+            # ``hostname``만 읽으면 잘못된 port 문자열은 지연 실패하므로 여기서 강제한다.
+            parsed_port = parsed.port
+        except ValueError:
+            invalid_url = True
+            parsed = None
+        if (
+            invalid_url
+            or parsed is None
+            or parsed.scheme not in {"http", "https"}
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or (parsed_port is not None and parsed_port == 0)
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "kor_travel_geo_base_url은 userinfo/query/fragment/path가 없는 "
+                "HTTP(S) origin이어야 합니다."
+            )
+        return SecretStr(raw_value.rstrip("/"))
 
     # ── Admin on-demand address/POI search ────────────────────────────────
     kakao_local_rest_api_key: SecretStr | None = Field(

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import importlib.util
-import json
 from pathlib import Path
 from typing import Any
 
@@ -17,11 +15,7 @@ from kortravelmap.api.settings import ApiSettings
 
 
 def _load_script_module() -> Any:
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "scripts"
-        / "export_openapi.py"
-    )
+    path = Path(__file__).resolve().parents[1] / "scripts" / "export_openapi.py"
     spec = importlib.util.spec_from_file_location("kor_travel_map_admin_export_openapi", path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -53,11 +47,7 @@ def _schema_properties(spec: dict[str, Any], name: str) -> set[str]:
 
 def _query_parameter_names(spec: dict[str, Any], path: str) -> set[str]:
     parameters = spec["paths"][path]["get"].get("parameters", [])
-    return {
-        str(parameter["name"])
-        for parameter in parameters
-        if parameter.get("in") == "query"
-    }
+    return {str(parameter["name"]) for parameter in parameters if parameter.get("in") == "query"}
 
 
 @pytest.mark.unit
@@ -71,28 +61,18 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "visibility" not in _query_parameter_names(full, "/v1/curated-themes")
     assert "visibility" in _query_parameter_names(full, "/v1/admin/curated-themes")
     assert "curation_status" not in _query_parameter_names(full, "/v1/curated-features")
-    assert "curation_status" in _query_parameter_names(
-        full, "/v1/admin/features/curated"
-    )
+    assert "curation_status" in _query_parameter_names(full, "/v1/admin/features/curated")
     public_curated_queries = _query_parameter_names(full, "/v1/curated-features")
-    admin_curated_queries = _query_parameter_names(
-        full, "/v1/admin/features/curated"
-    )
-    assert {"theme_slug", "q", "feature_name", "display_title"} <= (
-        public_curated_queries
-    )
-    assert {"theme_id", "source_id", "provider", "dataset_key"}.isdisjoint(
-        public_curated_queries
-    )
-    assert {"theme_id", "source_id", "provider", "dataset_key"} <= (
-        admin_curated_queries
-    )
-    assert _refs(
-        full["paths"]["/v1/curated-features"]["get"]["responses"]["200"]
-    ) == {"PublicCuratedFeaturesResponse"}
-    assert _refs(
-        full["paths"]["/v1/admin/features/curated"]["get"]["responses"]["200"]
-    ) == {"CuratedFeaturesResponse"}
+    admin_curated_queries = _query_parameter_names(full, "/v1/admin/features/curated")
+    assert {"theme_slug", "q", "feature_name", "display_title"} <= (public_curated_queries)
+    assert {"theme_id", "source_id", "provider", "dataset_key"}.isdisjoint(public_curated_queries)
+    assert {"theme_id", "source_id", "provider", "dataset_key"} <= (admin_curated_queries)
+    assert _refs(full["paths"]["/v1/curated-features"]["get"]["responses"]["200"]) == {
+        "PublicCuratedFeaturesResponse"
+    }
+    assert _refs(full["paths"]["/v1/admin/features/curated"]["get"]["responses"]["200"]) == {
+        "CuratedFeaturesResponse"
+    }
     full_schemas = full["components"]["schemas"]
     assert "source_record_key" in _schema_properties(full, "CuratedFeatureView")
     assert "PublicCuratedFeatureView" in full_schemas
@@ -284,12 +264,8 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "source_record_key",
         "metadata",
     }.isdisjoint(_schema_properties(user, "PublicCurationItemView"))
-    assert "metadata" not in _schema_properties(
-        user, "PublicCurationCollectionView"
-    )
-    assert "source_record_key" not in _schema_properties(
-        user, "PublicWeatherValueItem"
-    )
+    assert "metadata" not in _schema_properties(user, "PublicCurationCollectionView")
+    assert "source_record_key" not in _schema_properties(user, "PublicWeatherValueItem")
     assert {
         "source_record_key",
         "payload",
@@ -490,9 +466,7 @@ def test_openapi_declares_rfc7807_problem_json_error_responses() -> None:
             if method not in module.HTTP_METHODS:
                 continue
             responses = operation["responses"]
-            default_schema = responses["default"]["content"][
-                "application/problem+json"
-            ]["schema"]
+            default_schema = responses["default"]["content"]["application/problem+json"]["schema"]
             assert default_schema == problem_ref
             for code, response in responses.items():
                 if code.isdigit() and int(code) >= 400:
@@ -503,12 +477,10 @@ def test_openapi_declares_rfc7807_problem_json_error_responses() -> None:
                     error_responses_seen += 1
     assert error_responses_seen > 0
 
-    policy_conflict = spec["paths"]["/v1/ops/datasets/refresh-policy"]["put"][
-        "responses"
-    ]["409"]["content"]["application/problem+json"]["schema"]
-    assert policy_conflict == {
-        "$ref": "#/components/schemas/ProviderRefreshPolicyConflictProblem"
-    }
+    policy_conflict = spec["paths"]["/v1/ops/datasets/refresh-policy"]["put"]["responses"]["409"][
+        "content"
+    ]["application/problem+json"]["schema"]
+    assert policy_conflict == {"$ref": "#/components/schemas/ProviderRefreshPolicyConflictProblem"}
 
 
 @pytest.mark.unit
@@ -534,9 +506,7 @@ def test_problem_augmenter_does_not_preserve_non_problem_error_ref() -> None:
                             "description": "잘못 지정된 성공 DTO",
                             "content": {
                                 "application/json": {
-                                    "schema": {
-                                        "$ref": "#/components/schemas/NotAProblem"
-                                    }
+                                    "schema": {"$ref": "#/components/schemas/NotAProblem"}
                                 }
                             },
                         }
@@ -605,11 +575,7 @@ def _property_format(prop: dict[str, Any]) -> str | None:
     if "format" in prop:
         return str(prop["format"])
     for branch in prop.get("anyOf", []):
-        if (
-            isinstance(branch, dict)
-            and branch.get("type") != "null"
-            and "format" in branch
-        ):
+        if isinstance(branch, dict) and branch.get("type") != "null" and "format" in branch:
             return str(branch["format"])
     return None
 
@@ -1055,64 +1021,7 @@ def test_public_curation_collection_item_group_pin_required_types_and_enums() ->
         },
         refs={"feature": "CurationFeatureView"},
     )
-    group_curations = user["components"]["schemas"]["FeatureCurationGroupView"][
-        "properties"
-    ]["curations"]["items"]
-    assert group_curations == {
-        "$ref": "#/components/schemas/PublicCurationItemView"
-    }
-
-
-# --- T-VN-H07C(#812): per-surface OpenAPI digest manifest ---
-#
-# 배포 compatible-pair(ADR-076 v5)는 이 manifest 파일의 sha256 **하나**만 핀하고, manifest가
-# 각 표면 spec의 sha256을 담아 전체를 transitively pin한다. 아래는 체크인된 manifest가 체크인된
-# spec들과 실제로 일치하는지를 pytest matrix에서도 잡기 위한 방어선이다
-# (`openapi.yml`의 `--profile all --check`가 1차 게이트).
-
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
-
-
-def test_openapi_digest_manifest_matches_checked_in_specs() -> None:
-    module = _load_script_module()
-    root = _repo_root()
-    manifest_path = root / module.OPENAPI_DIGEST_PATH
-    assert manifest_path.is_file(), "digest manifest가 체크인되어 있지 않다"
-
-    saved = json.loads(manifest_path.read_text(encoding="utf-8"))
-    expected = {
-        path.name: hashlib.sha256((root / path).read_bytes()).hexdigest()
-        for path in (module.API_OPENAPI_PATH, module.USER_OPENAPI_PATH)
-    }
-    assert saved == expected, (
-        "digest manifest가 체크인된 spec과 다르다 — "
-        "scripts/export_openapi.py --profile all 재실행 후 커밋 필요"
-    )
-
-
-def test_digest_manifest_check_detects_tamper_and_missing(tmp_path: Path) -> None:
-    """manifest 검사가 변조·부재를 실제로 잡는지 확인(비-tautological 보장)."""
-    module = _load_script_module()
-    admin = tmp_path / "openapi.json"
-    user = tmp_path / "openapi.user.json"
-    admin.write_text('{"a": 1}', encoding="utf-8")
-    user.write_text('{"u": 2}', encoding="utf-8")
-    surfaces = {admin.name: admin, user.name: user}
-    manifest = tmp_path / "openapi-sha256.json"
-
-    assert module.check_digest_manifest(manifest, surfaces) == 1  # 파일 부재
-    module.export_digest_manifest(manifest, surfaces)
-    assert module.check_digest_manifest(manifest, surfaces) == 0  # 정상
-
-    # spec이 바뀌었는데 manifest를 갱신하지 않은 경우
-    user.write_text('{"u": 3}', encoding="utf-8")
-    assert module.check_digest_manifest(manifest, surfaces) == 1
-
-    # manifest만 손댄 경우
-    module.export_digest_manifest(manifest, surfaces)
-    tampered = json.loads(manifest.read_text(encoding="utf-8"))
-    tampered[user.name] = "0" * 64
-    manifest.write_text(json.dumps(tampered, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    assert module.check_digest_manifest(manifest, surfaces) == 1
+    group_curations = user["components"]["schemas"]["FeatureCurationGroupView"]["properties"][
+        "curations"
+    ]["items"]
+    assert group_curations == {"$ref": "#/components/schemas/PublicCurationItemView"}

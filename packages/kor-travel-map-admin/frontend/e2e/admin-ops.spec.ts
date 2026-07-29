@@ -187,7 +187,9 @@ async function mockCategories(page: Page) {
       await fulfillJson(route, categoriesResponse());
       return;
     }
-    throw new Error(`Unhandled categories route: ${request.method()} ${apiPath}`);
+    throw new Error(
+      `Unhandled categories route: ${request.method()} ${apiPath}`,
+    );
   });
 }
 
@@ -248,9 +250,14 @@ async function mockOfflineUploadMutations(page: Page) {
       return;
     }
 
-    if (request.method() === "POST" && apiPath === "/v1/admin/offline-uploads") {
+    if (
+      request.method() === "POST" &&
+      apiPath === "/v1/admin/offline-uploads"
+    ) {
       requests.create += 1;
-      expect(request.headers()["content-type"]).toContain("multipart/form-data");
+      expect(request.headers()["content-type"]).toContain(
+        "multipart/form-data",
+      );
       uploads = [upload];
       await fulfillJson(route, {
         data: upload,
@@ -431,7 +438,10 @@ async function mockPoiCacheTargetMutations(page: Page) {
     const apiPath = bffApiPath(request.url());
     const targetPath = "/v1/admin/poi-cache-targets/external-app/mock-target-1";
 
-    if (request.method() === "GET" && apiPath === "/v1/admin/poi-cache-targets") {
+    if (
+      request.method() === "GET" &&
+      apiPath === "/v1/admin/poi-cache-targets"
+    ) {
       await fulfillJson(route, {
         data: { items: targets },
         meta: {
@@ -488,7 +498,10 @@ async function mockPoiCacheTargetMutations(page: Page) {
     const request = route.request();
     const url = new URL(request.url());
     const apiPath = bffApiPath(request.url());
-    if (request.method() !== "GET" || apiPath !== "/v1/features/nearby/by-target") {
+    if (
+      request.method() !== "GET" ||
+      apiPath !== "/v1/features/nearby/by-target"
+    ) {
       throw new Error(
         `Unhandled nearby-by-target route: ${request.method()} ${apiPath}`,
       );
@@ -786,10 +799,7 @@ async function mockFeatureChangeMutations(
     const reviewPathMatch = apiPath.match(
       /^\/v1\/admin\/features\/change-requests\/([^/]+)\/(approve|reject)$/,
     );
-    if (
-      request.method() === "POST" &&
-      reviewPathMatch?.[2] === "approve"
-    ) {
+    if (request.method() === "POST" && reviewPathMatch?.[2] === "approve") {
       requests.approve += 1;
       const body = request.postDataJSON() as AdminFeatureReviewActionRequest;
       requests.reviewBodies.push(body);
@@ -1032,7 +1042,6 @@ test.describe("admin/ops pages", () => {
       "change action",
       "change feature id",
       "change reason",
-      "change operator",
       "change kind",
       "change feature status",
       "change name",
@@ -1104,7 +1113,9 @@ test.describe("admin/ops pages", () => {
     ).toContainText("detail extra JSON은(는) JSON object여야 합니다.");
   });
 
-  test("/v1/admin/features/change-requests approve workflow", async ({ page }) => {
+  test("/v1/admin/features/change-requests approve workflow", async ({
+    page,
+  }) => {
     const requests = await mockFeatureChangeMutations(page, {
       initial: [
         makeFeatureChange({
@@ -1126,15 +1137,17 @@ test.describe("admin/ops pages", () => {
     const pendingRow = page.getByRole("row", { name: /Mock pending feature/ });
     await expect(pendingRow).toBeVisible();
     await pendingRow.click();
-    await expect(page.locator("aside").getByText("change-pending-1")).toBeVisible();
+    await expect(
+      page.locator("aside").getByText("change-pending-1"),
+    ).toBeVisible();
 
     await pendingRow.getByRole("button", { name: "승인" }).click();
 
     await expect.poll(() => requests.approve).toBe(1);
     expect(requests.reviewBodies[0]).toMatchObject({
-      operator: "local-admin",
       reason: "admin-ui approve",
     });
+    expect(requests.reviewBodies[0]).not.toHaveProperty("operator");
     await expect(pendingRow.getByText("반영됨")).toBeVisible();
     await expect(pendingRow.getByRole("button", { name: "승인" })).toHaveCount(
       0,
@@ -1157,7 +1170,9 @@ test.describe("admin/ops pages", () => {
       }),
     ).toBeVisible();
 
-    await page.getByLabel("change name", { exact: true }).fill("Immediate feature");
+    await page
+      .getByLabel("change name", { exact: true })
+      .fill("Immediate feature");
     await page.getByLabel("change reason", { exact: true }).fill("즉시 적용");
     await page.getByLabel("change lon", { exact: true }).fill("126.978");
     await page.getByLabel("change lat", { exact: true }).fill("37.5665");
@@ -1184,15 +1199,19 @@ test.describe("admin/ops pages", () => {
 
     await page.goto("/admin/features/change-requests");
 
-    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page
+      .getByLabel("change action", { exact: true })
+      .selectOption("update");
     await page
       .getByLabel("change feature id", { exact: true })
       .fill("feature-update-1");
-    await expect(
-      page.getByLabel("change name", { exact: true }),
-    ).toHaveValue("Existing feature-update-1");
+    await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
+      "Existing feature-update-1",
+    );
     await page.getByLabel("change reason", { exact: true }).fill("이름 수정");
-    await page.getByLabel("change name", { exact: true }).fill("Updated feature");
+    await page
+      .getByLabel("change name", { exact: true })
+      .fill("Updated feature");
     const revisionReadsBeforePatch = requests.revision;
     await page.getByRole("button", { name: "요청 생성" }).click();
 
@@ -1205,10 +1224,14 @@ test.describe("admin/ops pages", () => {
     });
     await page.goto("/admin/features/change-reviews");
     await page.getByLabel("change status", { exact: true }).selectOption("all");
-    await expect(page.getByRole("row", { name: /Updated feature/ })).toBeVisible();
+    await expect(
+      page.getByRole("row", { name: /Updated feature/ }),
+    ).toBeVisible();
 
     await page.goto("/admin/features/change-requests");
-    await page.getByLabel("change action", { exact: true }).selectOption("delete");
+    await page
+      .getByLabel("change action", { exact: true })
+      .selectOption("delete");
     await page
       .getByLabel("change feature id", { exact: true })
       .fill("feature-delete-1");
@@ -1238,9 +1261,9 @@ test.describe("admin/ops pages", () => {
       .getByLabel("change action filter", { exact: true })
       .selectOption("delete");
     await expect(deleteRow).toBeVisible();
-    await expect(page.getByRole("row", { name: /Updated feature/ })).toHaveCount(
-      0,
-    );
+    await expect(
+      page.getByRole("row", { name: /Updated feature/ }),
+    ).toHaveCount(0);
   });
 
   test("stale correction은 draft를 보존하고 명시적 reload 뒤에만 새 ETag를 쓴다", async ({
@@ -1252,13 +1275,21 @@ test.describe("admin/ops pages", () => {
     });
 
     await page.goto("/admin/features/change-requests");
-    await page.getByLabel("change action", { exact: true }).selectOption("update");
-    await page.getByLabel("change feature id", { exact: true }).fill("feature-stale-1");
+    await page
+      .getByLabel("change action", { exact: true })
+      .selectOption("update");
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("feature-stale-1");
     await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
       "Existing feature-stale-1",
     );
-    await page.getByLabel("change reason", { exact: true }).fill("stale draft reason");
-    await page.getByLabel("change name", { exact: true }).fill("Operator draft");
+    await page
+      .getByLabel("change reason", { exact: true })
+      .fill("stale draft reason");
+    await page
+      .getByLabel("change name", { exact: true })
+      .fill("Operator draft");
     const revisionReadsBeforePatch = requests.revision;
 
     await page.getByRole("button", { name: "요청 생성" }).click();
@@ -1300,16 +1331,22 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("change reason", { exact: true })).toHaveValue(
       "stale draft reason",
     );
-    await expect.poll(() => requests.revision).toBe(revisionReadsBeforePatch + 1);
+    await expect
+      .poll(() => requests.revision)
+      .toBe(revisionReadsBeforePatch + 1);
     await expect(page.getByText(/reload fixture failure/)).toBeVisible();
 
     await reloadButton.click();
     await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
       "Server latest feature-stale-1",
     );
-    await expect.poll(() => requests.revision).toBe(revisionReadsBeforePatch + 2);
+    await expect
+      .poll(() => requests.revision)
+      .toBe(revisionReadsBeforePatch + 2);
 
-    await page.getByLabel("change name", { exact: true }).fill("Reapplied draft");
+    await page
+      .getByLabel("change name", { exact: true })
+      .fill("Reapplied draft");
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => requests.patch).toBe(2);
@@ -1329,12 +1366,20 @@ test.describe("admin/ops pages", () => {
     });
 
     await page.goto("/admin/features/change-requests");
-    await page.getByLabel("change action", { exact: true }).selectOption("update");
-    await page.getByLabel("change feature id", { exact: true }).fill("feature-slow-1");
+    await page
+      .getByLabel("change action", { exact: true })
+      .selectOption("update");
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("feature-slow-1");
     await requests.waitForDeferredDetail();
 
-    await page.getByLabel("change reason", { exact: true }).fill("slow draft reason");
-    await page.getByLabel("change name", { exact: true }).fill("Slow operator draft");
+    await page
+      .getByLabel("change reason", { exact: true })
+      .fill("slow draft reason");
+    await page
+      .getByLabel("change name", { exact: true })
+      .fill("Slow operator draft");
     requests.resolveDeferredDetail();
 
     await expect(page.getByText("데이터 로드됨")).toBeVisible();
@@ -1344,9 +1389,9 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("change name", { exact: true })).toHaveValue(
       "Slow operator draft",
     );
-    await expect(page.getByLabel("change category", { exact: true })).toHaveValue(
-      "01070400",
-    );
+    await expect(
+      page.getByLabel("change category", { exact: true }),
+    ).toHaveValue("01070400");
     await expect(
       page.getByLabel("change marker icon", { exact: true }),
     ).toHaveValue("park");
@@ -1371,7 +1416,9 @@ test.describe("admin/ops pages", () => {
     const requests = await mockFeatureChangeMutations(page);
 
     await page.goto("/admin/features/change-requests");
-    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page
+      .getByLabel("change action", { exact: true })
+      .selectOption("update");
     await page
       .getByLabel("change feature id", { exact: true })
       .fill("feature-null-marker-1");
@@ -1379,8 +1426,12 @@ test.describe("admin/ops pages", () => {
       "Existing feature-null-marker-1",
     );
 
-    await page.getByLabel("change reason", { exact: true }).fill("name only reason");
-    await page.getByLabel("change name", { exact: true }).fill("Name only draft");
+    await page
+      .getByLabel("change reason", { exact: true })
+      .fill("name only reason");
+    await page
+      .getByLabel("change name", { exact: true })
+      .fill("Name only draft");
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect.poll(() => requests.patch).toBe(1);
@@ -1405,7 +1456,9 @@ test.describe("admin/ops pages", () => {
     });
 
     await page.goto("/admin/features/change-requests");
-    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page
+      .getByLabel("change action", { exact: true })
+      .selectOption("update");
     await page
       .getByLabel("change feature id", { exact: true })
       .fill("feature-dialog-slow-1");
@@ -1423,9 +1476,9 @@ test.describe("admin/ops pages", () => {
     await expect(dialog.getByLabel("marker_icon", { exact: true })).toHaveValue(
       "park",
     );
-    await expect(dialog.getByLabel("marker_color", { exact: true })).toHaveValue(
-      "P-02",
-    );
+    await expect(
+      dialog.getByLabel("marker_color", { exact: true }),
+    ).toHaveValue("P-02");
     await dialog.getByRole("button", { name: "적용" }).click();
 
     await expect(
@@ -1469,7 +1522,9 @@ test.describe("admin/ops pages", () => {
       "감지",
       "작업",
     ]) {
-      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+      await expect(
+        page.getByRole("columnheader", { name: column }),
+      ).toBeVisible();
     }
     // 라이브 backend 직격 spec(#409) — 첫 행 type에 의존하지 않도록 manual
     // override(주소/좌표 보정) 대상 type으로 필터를 먼저 적용해 행을 고정한다.
@@ -1520,22 +1575,21 @@ test.describe("admin/ops pages", () => {
   test("/v1/ops/logs", async ({ page }) => {
     await page.goto("/ops/logs");
 
-    await expect(page.getByRole("heading", { level: 1, name: "운영 로그" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "운영 로그" }),
+    ).toBeVisible();
     await expect(page.getByLabel("log page size")).toBeVisible();
     await expect(page.getByRole("tab", { name: "System logs" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "API call logs" })).toBeVisible();
+    await expect(
+      page.getByRole("tab", { name: "API call logs" }),
+    ).toBeVisible();
     await expect(page.getByLabel("system log search")).toBeVisible();
     await expect(page.getByLabel("system log level")).toBeVisible();
     await expect(page.getByLabel("system log source")).toBeVisible();
-    for (const column of [
-      "생성",
-      "레벨",
-      "소스",
-      "이벤트",
-      "메시지",
-      "요청",
-    ]) {
-      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    for (const column of ["생성", "레벨", "소스", "이벤트", "메시지", "요청"]) {
+      await expect(
+        page.getByRole("columnheader", { name: column }),
+      ).toBeVisible();
     }
     await page.getByRole("tab", { name: "API call logs" }).click();
     await expect(page.getByLabel("api log method")).toBeVisible();
@@ -1550,7 +1604,9 @@ test.describe("admin/ops pages", () => {
       "요청",
       "오류",
     ]) {
-      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+      await expect(
+        page.getByRole("columnheader", { name: column }),
+      ).toBeVisible();
     }
   });
 
@@ -1571,7 +1627,9 @@ test.describe("admin/ops pages", () => {
       "생성",
       "작업",
     ]) {
-      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+      await expect(
+        page.getByRole("columnheader", { name: column }),
+      ).toBeVisible();
     }
   });
 
@@ -1592,12 +1650,14 @@ test.describe("admin/ops pages", () => {
       "생성",
       "작업",
     ]) {
-      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+      await expect(
+        page.getByRole("columnheader", { name: column }),
+      ).toBeVisible();
     }
-    // 상/하단 페이지네이션 컨트롤.
-    await expect(page.getByLabel("이전 페이지")).toHaveCount(2);
+    // cursor 기반 목록은 상/하단에 "다음"만 노출한다.
+    await expect(page.getByLabel("이전 페이지")).toHaveCount(0);
     await expect(page.getByLabel("다음 페이지")).toHaveCount(2);
-    await expect(page.getByLabel("마지막 페이지")).toHaveCount(2);
+    await expect(page.getByLabel("마지막 페이지")).toHaveCount(0);
   });
 
   test("/v1/admin/poi-cache-targets", async ({ page }) => {
@@ -1650,7 +1710,9 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText("target을 선택하세요")).toBeVisible();
   });
 
-  test("/v1/admin/poi-cache-targets validation (T-218b a11y)", async ({ page }) => {
+  test("/v1/admin/poi-cache-targets validation (T-218b a11y)", async ({
+    page,
+  }) => {
     const requests = await mockPoiCacheTargetMutations(page);
 
     await page.goto("/admin/poi-cache-targets");
@@ -1681,7 +1743,7 @@ test.describe("admin/ops pages", () => {
     ).toBeVisible();
     await expect(page.getByText("파일 업로드")).toBeVisible();
     await expect(page.getByTestId("offline-upload-file-input")).toBeVisible();
-    for (const label of ["provider", "dataset key", "sync scope", "created by"]) {
+    for (const label of ["provider", "dataset key", "sync scope"]) {
       await expect(page.getByLabel(label, { exact: true })).toBeVisible();
     }
     await expect(page.getByRole("button", { name: "업로드" })).toBeDisabled();
@@ -1699,7 +1761,9 @@ test.describe("admin/ops pages", () => {
       "수정",
       "작업",
     ]) {
-      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+      await expect(
+        page.getByRole("columnheader", { name: column }),
+      ).toBeVisible();
     }
   });
 
@@ -1778,7 +1842,9 @@ test.describe("admin/ops pages", () => {
       page.getByRole("heading", { level: 1, name: "백업" }),
     ).toBeVisible();
     for (const column of ["백업 ID", "생성", "상태", "크기", "작업"]) {
-      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+      await expect(
+        page.getByRole("columnheader", { name: column }),
+      ).toBeVisible();
     }
     // 목록 + manifest 상세(선택 없음 시 첫 행을 detail로 노출)
     await expect(page.getByText("1 artifacts")).toBeVisible();
@@ -1813,5 +1879,4 @@ test.describe("admin/ops pages", () => {
     await expect.poll(() => requests.swap).toBe(1);
     await expect(page.getByText("swap command planned")).toBeVisible();
   });
-
 });

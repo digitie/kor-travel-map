@@ -1,0 +1,148 @@
+{
+  "alembic_head": "0063_pipeline_root_id",
+  "csv_file_sha256": {
+    "arboretum-garden-stamp-tour-2026.csv": "964d30732f39bb0e714e9c0f625fd6d2b080641cfb9d58e37c4c8cc87dabe33a",
+    "heritage-visit-campaign.csv": "9171ae926b4c974455612a0a949480222125b12b00cb45834a975716194e126d",
+    "korean-tourism-100-2023-2024.csv": "f72c216c8d8a5fcab13e3da18f33c48d4ab9178e56b2db0f8b4963c80a3f4127",
+    "korean-tourism-100-2025-2026.csv": "9deb6120576fa1da30f317f736dc3f00065c89a9173239c0228945189c95fd4b",
+    "lighthouse-stamp-tour.csv": "067beaf7b2f09494e82c1509248d558ddae5ba8767af69d6a2de016fc86944a2"
+  },
+  "csv_unlinked_db_linked": [
+    {
+      "collection_key": "arboretum-garden-stamp-tour:2026",
+      "csv_file": "arboretum-garden-stamp-tour-2026.csv",
+      "csv_legacy_identity_multiplicity": 1,
+      "csv_line": 2,
+      "csv_sha256": "964d30732f39bb0e714e9c0f625fd6d2b080641cfb9d58e37c4c8cc87dabe33a",
+      "db_feature_id": "f_global_p_2eddbdc1ef5a0c00",
+      "db_legacy_identity_multiplicity": 1,
+      "db_status": "included",
+      "place_name": "국립세종수목원",
+      "source_component_key": "primary",
+      "source_item_key": "arboretum-2026-001"
+    },
+    {
+      "collection_key": "arboretum-garden-stamp-tour:2026",
+      "csv_file": "arboretum-garden-stamp-tour-2026.csv",
+      "csv_legacy_identity_multiplicity": 1,
+      "csv_line": 64,
+      "csv_sha256": "964d30732f39bb0e714e9c0f625fd6d2b080641cfb9d58e37c4c8cc87dabe33a",
+      "db_feature_id": "f_4812914500_p_f0e7b045758b269a",
+      "db_legacy_identity_multiplicity": 1,
+      "db_status": "included",
+      "place_name": "진해보타닉뮤지엄",
+      "source_component_key": "primary",
+      "source_item_key": "arboretum-2026-063"
+    },
+    {
+      "collection_key": "korean-tourism-100:2023-2024",
+      "csv_file": "korean-tourism-100-2023-2024.csv",
+      "csv_legacy_identity_multiplicity": 1,
+      "csv_line": 27,
+      "csv_sha256": "f72c216c8d8a5fcab13e3da18f33c48d4ab9178e56b2db0f8b4963c80a3f4127",
+      "db_feature_id": "f_1114010100_p_a11c2e739c5676d2",
+      "db_legacy_identity_multiplicity": 1,
+      "db_status": "included",
+      "place_name": "남이섬",
+      "source_component_key": "primary",
+      "source_item_key": "kt100-2023-2024-025"
+    },
+    {
+      "collection_key": "korean-tourism-100:2023-2024",
+      "csv_file": "korean-tourism-100-2023-2024.csv",
+      "csv_legacy_identity_multiplicity": 1,
+      "csv_line": 38,
+      "csv_sha256": "f72c216c8d8a5fcab13e3da18f33c48d4ab9178e56b2db0f8b4963c80a3f4127",
+      "db_feature_id": "f_global_p_2eddbdc1ef5a0c00",
+      "db_legacy_identity_multiplicity": 1,
+      "db_status": "included",
+      "place_name": "국립세종수목원",
+      "source_component_key": "primary",
+      "source_item_key": "kt100-2023-2024-036"
+    },
+    {
+      "collection_key": "korean-tourism-100:2025-2026",
+      "csv_file": "korean-tourism-100-2025-2026.csv",
+      "csv_legacy_identity_multiplicity": 1,
+      "csv_line": 26,
+      "csv_sha256": "9deb6120576fa1da30f317f736dc3f00065c89a9173239c0228945189c95fd4b",
+      "db_feature_id": "f_1114010100_p_a11c2e739c5676d2",
+      "db_legacy_identity_multiplicity": 1,
+      "db_status": "included",
+      "place_name": "남이섬",
+      "source_component_key": "primary",
+      "source_item_key": "kt100-2025-2026-024"
+    },
+    {
+      "collection_key": "korean-tourism-100:2025-2026",
+      "csv_file": "korean-tourism-100-2025-2026.csv",
+      "csv_legacy_identity_multiplicity": 1,
+      "csv_line": 38,
+      "csv_sha256": "9deb6120576fa1da30f317f736dc3f00065c89a9173239c0228945189c95fd4b",
+      "db_feature_id": "f_global_p_2eddbdc1ef5a0c00",
+      "db_legacy_identity_multiplicity": 1,
+      "db_status": "included",
+      "place_name": "국립세종수목원",
+      "source_component_key": "primary",
+      "source_item_key": "kt100-2025-2026-035"
+    },
+    {
+      "collection_key": "korean-tourism-100:2025-2026",
+      "csv_file": "korean-tourism-100-2025-2026.csv",
+      "csv_legacy_identity_multiplicity": 1,
+      "csv_line": 39,
+      "csv_sha256": "9deb6120576fa1da30f317f736dc3f00065c89a9173239c0228945189c95fd4b",
+      "db_feature_id": "f_4683025328_p_a45038d401d8d1bd",
+      "db_legacy_identity_multiplicity": 1,
+      "db_status": "included",
+      "place_name": "청남대",
+      "source_component_key": "primary",
+      "source_item_key": "kt100-2025-2026-036"
+    },
+    {
+      "collection_key": "korean-tourism-100:2025-2026",
+      "csv_file": "korean-tourism-100-2025-2026.csv",
+      "csv_legacy_identity_multiplicity": 1,
+      "csv_line": 43,
+      "csv_sha256": "9deb6120576fa1da30f317f736dc3f00065c89a9173239c0228945189c95fd4b",
+      "db_feature_id": "f_4315032041_p_12c53fe662dafc4f",
+      "db_legacy_identity_multiplicity": 1,
+      "db_status": "included",
+      "place_name": "청풍호",
+      "source_component_key": "primary",
+      "source_item_key": "kt100-2025-2026-040"
+    }
+  ],
+  "current_feature_snapshot_sha256": "92903f9c3a7d97afa27841b8dbd30f876f6af84612608231335852b65c028b90",
+  "current_membership_snapshot_sha256": "a11a800f0584e626cda20e167d08f816b58bf35f031f063bd5e4b24f00fe3510",
+  "current_merge_history_rows": 0,
+  "historical_membership_inference": "unsupported",
+  "input_commit": "6865509f9cfabb78a2583acbd9fbcfc35d94c458",
+  "schema_contract": {
+    "curation_feature_fk": "FOREIGN KEY (feature_id) REFERENCES feature.features(feature_id) ON DELETE SET NULL",
+    "curation_identity_strategy": "legacy snapshot exact group: collection_key + external_item_id + place_name",
+    "curation_legacy_identity_index": "CREATE UNIQUE INDEX uq_curation_items_active_identity ON feature.curation_items USING btree (collection_id, external_item_id, feature_id) NULLS NOT DISTINCT WHERE (archived_at IS NULL)",
+    "merge_feature_fks": [
+      "FOREIGN KEY (loser_feature_id) REFERENCES feature.features(feature_id) ON DELETE CASCADE",
+      "FOREIGN KEY (master_feature_id) REFERENCES feature.features(feature_id) ON DELETE CASCADE"
+    ]
+  },
+  "scope": "current_snapshot_only",
+  "source_record_key_nonnull": {
+    "linked": 0,
+    "unresolved": 0
+  },
+  "summary": {
+    "csv_linked": 217,
+    "csv_linked_db_unlinked": 0,
+    "csv_rows": 486,
+    "csv_unique_feature_ids": 158,
+    "csv_unlinked_db_linked": 8,
+    "csv_unresolved": 269,
+    "db_linked": 225,
+    "db_rows": 486,
+    "db_unresolved": 261,
+    "linked_target_mismatch": 0
+  },
+  "version": 2
+}

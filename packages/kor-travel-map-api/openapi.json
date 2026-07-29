@@ -3730,6 +3730,11 @@
             "title": "Issue Id",
             "type": "string"
           },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -3793,7 +3798,8 @@
           "message",
           "payload",
           "status",
-          "detected_at"
+          "detected_at",
+          "last_seen_at"
         ],
         "title": "AdminIssueRecord",
         "type": "object"
@@ -5388,6 +5394,12 @@
             "type": "string"
           },
           "curation_status": {
+            "enum": [
+              "candidate",
+              "curated",
+              "rejected",
+              "archived"
+            ],
             "title": "Curation Status",
             "type": "string"
           },
@@ -5414,6 +5426,11 @@
             "title": "Region Code"
           },
           "reuse_policy": {
+            "enum": [
+              "allowed",
+              "blocked",
+              "manual_review"
+            ],
             "title": "Reuse Policy",
             "type": "string"
           },
@@ -5585,6 +5602,17 @@
             "title": "Memo"
           },
           "relation": {
+            "enum": [
+              "primary_stop",
+              "food_stop",
+              "cafe_stop",
+              "bookstore_stop",
+              "nearby_option",
+              "accessibility_support",
+              "pet_support",
+              "family_support",
+              "theme_area_anchor"
+            ],
             "title": "Relation",
             "type": "string"
           },
@@ -15672,6 +15700,11 @@
             "title": "Issue Id",
             "type": "string"
           },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -15735,7 +15768,8 @@
           "message",
           "payload",
           "status",
-          "detected_at"
+          "detected_at",
+          "last_seen_at"
         ],
         "title": "OpsIntegrityIssueRecord",
         "type": "object"
@@ -31291,6 +31325,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "kor-travel-geo provider 오류"
           },
           "503": {
             "content": {

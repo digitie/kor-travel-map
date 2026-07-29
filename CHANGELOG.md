@@ -5,19 +5,22 @@
 
 ## [Unreleased]
 
-### 주소 검증 결과 durable 기록 (2026-07-29, T-VN-H30A/B/C)
+### 주소 검증 결과 durable 기록 (2026-07-29, T-VN-H30A)
 
 - **OBSERVABILITY**: 주소/좌표 검증 결과가 `ops.data_integrity_violations`에 남아
   **run이 사라져도 증거가 보존되고 `/admin/issues`에서 조회된다**. 이전에는 Dagster run
   metadata에만 있었다. 격리 clone 실증: finding 106건 기록, 재실행에도 106 유지.
-- **DATABASE**: migration `0067_integrity_dedupe_key` — `payload->>'dedupe_key'`에 부분 unique
-  index(열린 이슈 한정). 같은 레코드의 같은 문제는 run을 반복해도 한 행으로 접히고
-  `occurrence_count`/`last_seen_at`만 올라간다. resolved/ignored로 닫힌 이슈는 제약 밖이라
-  이력이 남고, 재발하면 새 행이 생긴다.
+- **DATABASE**: migration `0067_integrity_dedupe_key` + `0068_integrity_last_seen`.
+  key는 provider/dataset/source entity type+id/violation code 전체의 고정 길이
+  `av2_<sha256>`이며 열린 이슈 한정 부분 unique index로 접힌다. `detected_at`은 최초 탐지,
+  `last_seen_at`은 최신 recurrence로 분리한다. Feature 삭제는 FK `SET NULL`이라 ledger를
+  지우지 않는다.
 - **API**: `AsyncKorTravelMapClient.record_address_validation_findings()` 추가.
   `feature_id`/`source_record_key`는 FK이므로 **적재된 대상에만** 연결하고, 적재 전 단계에서
-  drop된 행은 id를 payload로만 나른다. 기록 실패는 적재 결과를 되돌리지 않으며 미기록 건수가
-  metadata(`address_validation_findings_unrecorded`)로 드러난다.
+  drop된 행은 id를 payload로만 나른다. 결과는 `observed/unique/upserted`로 구분하고,
+  strict 경로의 기록 실패는 typed error로 fail-closed한다.
+- **ADMIN/OPS**: issue record에 `last_seen_at`을 추가하고 목록 cursor와 index를 최신 관측
+  순서로 바꿨다. recurrence는 실제 `feature_id`/`source_record_key`도 최신 target으로 갱신한다.
 - **OBSERVABILITY**: MOIS provider가 `AdminEvidence`를 채운다. MOIS는 payload에 법정동코드가
   있으면 역지오코딩을 호출하지 않아 staleness 대조가 성립하지 않는데, 그 사실이 `claim_only`로
   집계돼 `unarmed`(미계측)와 구분된다.
@@ -26,7 +29,8 @@
 
 - **FIXED**: provider 후보가 주소 문자열 때문에 영구 미적재되던 문제를 해결했다. 기존 규칙은
   좌표 역지오코딩 시군구명이 provider 주소 문자열에 부분문자열로 없으면 error → drop이었는데,
-  실측(kor-travel-concierge 1,477 후보)에서 **380건을 drop했고 좌표 오류는 0건**이었다.
+  실측(kor-travel-concierge 1,477 후보)에서 **380건을 drop했지만 기존 규칙으로 불일치
+  근거가 성립한 건은 0건**이었다(전체 후보의 일반적 좌표 정확성을 증명한다는 뜻은 아니다).
   그중 **375건은 provider 주소에 시/군/구 토큰이 아예 없어**(`부산 기장 조방국밥`) 좌표의
   옳고 그름과 무관하게 부분문자열 검사가 통과 불가였고, 4건은 축약·단계 표기 차이,
   나머지 1건은 정지오코딩상 **143 m 경계** 케이스였다. 새 규칙 적용 후 **1,477건 전량 적재**.
@@ -41,35 +45,36 @@
 - **BEHAVIOR**: 좌표 역지오코딩이 결과를 내지 못했지만 provider 행정코드로 적재 가능한 경우
   `reverse_geocode_unavailable` warning을 낸다. 좌표 정합성이 미확인 상태임을 드러내되
   적재는 막지 않는다.
-- **RELIABILITY**: 영구 손실(drop)·run 실패 대상이 severity가 아니라 **명시적 code
-  화이트리스트**(`DROPPABLE_ISSUE_CODES` = `reverse_geocode_failed`, `missing_address`)로
-  정해진다. 새 검증이 error를 내도 이 집합을 고치기 전에는 데이터가 사라지지 않는다.
+- **RELIABILITY**: `strict`와 `ensure_feature_address_valid()`는 **모든 error**에서 run을
+  중단한다. 영구 손실 가능성이 있는 `drop` 모드만 명시적 code 화이트리스트
+  (`DROPPABLE_ISSUE_CODES` = `reverse_geocode_failed`, `missing_address`)를 적용해, 신규
+  error가 검토 없이 레코드 삭제 사유가 되지 않게 한다.
 - **FIXED**: provider payload에 시군구코드만 있고 법정동코드가 없을 때 `Address` 코드 정합성
   검증이 예외를 던져 **레코드 1건이 batch 전체 적재를 중단**시키던 경로를 제거했다. 법정동코드가
   있으면 시군구·시도를 거기서만 유도하며, batch 변환에 건별 격리 옵션을 추가했다.
-- **OBSERVABILITY**: materialization metadata에 `address_validation_evidence_grades`가 추가됐다.
-  행정코드 교차검증이 실제로 성립한 건수(`dual`)와 판정하지 못한 건수를 분리해, 커버리지 부족을
-  "이상 없음"으로 오독하지 않게 한다.
+- **OBSERVABILITY**: materialization metadata에 `address_validation_evidence_grades`,
+  `address_validation_name_states`, quarantine의 안정 item key·reason code가 추가됐다.
+  행정코드/이름축 검증 성립 여부와 필수 필드 누락을 분리해, 판정 불능이나 silent omission을
+  “이상 없음”으로 오독하지 않게 한다. `upserts == bundles + quarantine` 불변식도 강제한다.
 - **API**: `FeatureBundle.admin_evidence`(`AdminEvidence`) 필드가 추가됐다. 기본 `None`이며
   기존 생성 코드는 영향받지 않는다.
 
-### kor-travel-geo 인증 결선 검증·비밀 유출 차단 (2026-07-29, T-VN-H21)
+### kor-travel-geo backend 인증·typed 오류 계약 (2026-07-29, T-VN-H21/#881)
 
-- **SECURITY**: kor-travel-geo 호출이 HTTP 오류로 실패할 때 응답 body·로그로 API key가
-  새던 경로를 막았다. `str(httpx.HTTPStatusError)`는 `?key=<SECRET>`가 포함된 request URL을
-  그대로 담고 그 문자열이 502 detail로 나갔다. 이제 query를 제거한 `GeoRequestError`로 감싸며
-  `__cause__`/`__context__` 어느 쪽으로도 원본이 남지 않는다. key가 비어 있던 동안에만
-  무해했으므로, key 결선과 동시에 실제 유출이 되는 상태였다.
-- **FIXED**: `KorTravelGeoRestClient`가 API key 미결선을 **생성 시점**에 거부한다
-  (`require_api_key` 기본 `True`, mock transport 테스트만 명시적 opt-out). 이전에는 키가 없어도
-  객체가 만들어져 서버에서 `400 E0100 query.key`로 막혔고, 그 응답만 보면 좌표/payload 문제로
-  오진하기 쉬웠다. 128자를 넘는 key도 같은 400이 되므로 함께 사전 차단한다.
-- **API**: geo API key 미결선은 `503`으로 보고한다(base_url 미설정과 동일 등급). 이전에는
-  `/admin/issues` 지오코딩 재시도가 `422`, offline-upload validation이 `409`로 응답해
-  서버측 설정 결함을 호출자 입력·상태 문제로 잘못 지목했다. 신규 예외
-  `GeoAuthNotConfiguredError`(503)·`GeoRequestError`(502)를 `kortravelmap.core`에서 re-export한다.
+- **SECURITY (breaking)**: API/Dagster/CLI가 kor-travel-geo public key를 URL query에 넣던
+  경로를 제거했다. backend는 geo public endpoint에 `X-KTG-API-Key` header만 사용하며
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`를 결선한다. geo admin trusted-proxy
+  secret/role은 Map에 주입하지 않는다.
+- **SECURITY**: credential은 `SecretStr`로 보관하며 request URL에는 query가 없다.
+  transport/status 원본 httpx 예외도 chain하지 않아 INFO URL·응답·traceback frame에서
+  secret이 노출되지 않는다.
+- **API**: `GeoAuthNotConfiguredError`와 `GeoRequestError`는 admin issues, offline upload,
+  feature-update 경계를 지나도 각각 503 `GEO_AUTH_NOT_CONFIGURED`, 502 `PROVIDER_ERROR`
+  problem+json으로 유지된다.
 - **CLI**: `import` 명령이 geo 결선 누락 시 traceback(exit 1) 대신 stderr 메시지와
   `exit 2`(`_EXIT_INVALID`)로 끝난다.
+- **REMOVED**: 실제 소비자가 읽지 않던 `openapi-sha256.json`과 생성·검사 코드를 제거했다.
+  OpenAPI freshness는 소비자가 핀 commit의 spec/subset을 직접 비교하는 게이트로만 검증한다.
 
 ### React Doctor·durable curation (2026-07-27, T-VN-47·T-VN-H13·H24)
 

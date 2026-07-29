@@ -852,9 +852,9 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   - `idx_reports_started(started_at DESC, report_id DESC)`
   - `idx_reports_severity_started(severity_max, started_at DESC, report_id DESC)`
 - `ops.data_integrity_violations`
-  - `idx_violations_status_detected(status, detected_at DESC, issue_id DESC)`
-  - `idx_violations_provider_status_detected(provider, status, detected_at DESC, issue_id DESC)`
-  - `idx_violations_feature_detected(feature_id, detected_at DESC, issue_id DESC)`
+  - `idx_violations_status_seen(status, last_seen_at DESC, issue_id DESC)`
+  - `idx_violations_provider_status_seen(provider, status, last_seen_at DESC, issue_id DESC)`
+  - `idx_violations_feature_seen(feature_id, last_seen_at DESC, issue_id DESC)`
 - review queue
   - `idx_dedup_status_score(status, total_score DESC, review_id DESC)`
   - `idx_enrichment_review_status_score(status, name_score DESC, review_id DESC)`

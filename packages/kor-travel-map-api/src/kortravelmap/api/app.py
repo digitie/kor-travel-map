@@ -30,6 +30,7 @@ import httpx
 from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
+from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.infra.log_repo import record_api_call
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
@@ -607,6 +608,32 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             message="요청 값이 올바르지 않습니다.",
             details={"errors": exc.errors()},
             request_id=request_id,
+        )
+
+    @application.exception_handler(GeoAuthNotConfiguredError)
+    async def geo_auth_not_configured_handler(
+        request: Request,
+        exc: GeoAuthNotConfiguredError,
+    ) -> JSONResponse:
+        return _error_response(
+            status_code=503,
+            code="GEO_AUTH_NOT_CONFIGURED",
+            message=str(exc),
+            details={},
+            request_id=_request_id(request),
+        )
+
+    @application.exception_handler(GeoRequestError)
+    async def geo_request_error_handler(
+        request: Request,
+        exc: GeoRequestError,
+    ) -> JSONResponse:
+        return _error_response(
+            status_code=502,
+            code="PROVIDER_ERROR",
+            message=str(exc),
+            details={},
+            request_id=_request_id(request),
         )
 
     @application.exception_handler(Exception)

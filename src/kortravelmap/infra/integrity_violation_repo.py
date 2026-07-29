@@ -40,12 +40,13 @@ _MAX_LIST_LIMIT: Final[int] = 500
 
 _RETURN_COLUMNS: Final[str] = (
     "issue_id, provider, dataset_key, source_record_key, feature_id, "
-    "violation_type, severity, message, payload, status, detected_at, resolved_at"
+    "violation_type, severity, message, payload, status, detected_at, "
+    "last_seen_at, resolved_at"
 )
 _RETURN_COLUMNS_V: Final[str] = (
     "v.issue_id, v.provider, v.dataset_key, v.source_record_key, v.feature_id, "
     "v.violation_type, v.severity, v.message, v.payload, v.status, v.detected_at, "
-    "v.resolved_at"
+    "v.last_seen_at, v.resolved_at"
 )
 
 
@@ -64,6 +65,7 @@ class DataIntegrityViolation:
     payload: dict[str, Any]
     status: str
     detected_at: datetime
+    last_seen_at: datetime
     resolved_at: datetime | None
 
 
@@ -106,6 +108,7 @@ def _row_to_violation(row: Any) -> DataIntegrityViolation:
         payload=_json_dict(row.payload),
         status=str(row.status),
         detected_at=row.detected_at,
+        last_seen_at=row.last_seen_at,
         resolved_at=row.resolved_at,
     )
 
@@ -185,7 +188,7 @@ WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
   AND (CAST(:feature_id AS text) IS NULL OR feature_id = CAST(:feature_id AS text))
   AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
   AND (CAST(:dataset_key AS text) IS NULL OR dataset_key = CAST(:dataset_key AS text))
-ORDER BY detected_at DESC, issue_id DESC
+ORDER BY last_seen_at DESC, issue_id DESC
 LIMIT :limit
 """
 
@@ -313,33 +316,65 @@ async def list_data_integrity_violations(
 _UPSERT_FINDINGS_BATCH_SQL: Final[str] = """
 INSERT INTO ops.data_integrity_violations (
     provider, dataset_key, source_record_key, feature_id, violation_type,
-    severity, message, payload
+    severity, message, payload, last_seen_at
 )
-SELECT * FROM unnest(
-    CAST(:providers AS text[]),
-    CAST(:datasets AS text[]),
-    CAST(:source_record_keys AS text[]),
-    CAST(:feature_ids AS text[]),
-    CAST(:violation_types AS text[]),
-    CAST(:severities AS text[]),
-    CAST(:messages AS text[]),
-    CAST(:payloads AS jsonb[])
-)
+SELECT finding.*, statement_timestamp()
+FROM unnest(
+        CAST(:providers AS text[]),
+        CAST(:datasets AS text[]),
+        CAST(:source_record_keys AS text[]),
+        CAST(:feature_ids AS text[]),
+        CAST(:violation_types AS text[]),
+        CAST(:severities AS text[]),
+        CAST(:messages AS text[]),
+        CAST(:payloads AS jsonb[])
+    ) AS finding(
+        provider, dataset_key, source_record_key, feature_id, violation_type,
+        severity, message, payload
+    )
 ON CONFLICT ((payload ->> 'dedupe_key'))
 WHERE status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'
 DO UPDATE SET
-    message = EXCLUDED.message,
-    severity = EXCLUDED.severity,
-    payload = ops.data_integrity_violations.payload
-        || jsonb_strip_nulls(EXCLUDED.payload)
+    source_record_key = CASE
+        WHEN EXCLUDED.last_seen_at >= ops.data_integrity_violations.last_seen_at
+        THEN EXCLUDED.source_record_key
+        ELSE ops.data_integrity_violations.source_record_key
+    END,
+    feature_id = CASE
+        WHEN EXCLUDED.last_seen_at >= ops.data_integrity_violations.last_seen_at
+        THEN EXCLUDED.feature_id
+        ELSE ops.data_integrity_violations.feature_id
+    END,
+    message = CASE
+        WHEN EXCLUDED.last_seen_at >= ops.data_integrity_violations.last_seen_at
+        THEN EXCLUDED.message
+        ELSE ops.data_integrity_violations.message
+    END,
+    severity = CASE
+        WHEN EXCLUDED.last_seen_at >= ops.data_integrity_violations.last_seen_at
+        THEN EXCLUDED.severity
+        ELSE ops.data_integrity_violations.severity
+    END,
+    last_seen_at = GREATEST(
+        ops.data_integrity_violations.last_seen_at,
+        EXCLUDED.last_seen_at
+    ),
+    payload = (
+        CASE
+            WHEN EXCLUDED.last_seen_at >= ops.data_integrity_violations.last_seen_at
+            THEN ops.data_integrity_violations.payload
+                || jsonb_strip_nulls(EXCLUDED.payload)
+            ELSE ops.data_integrity_violations.payload
+        END
+    )
         || jsonb_build_object(
             'occurrence_count',
             COALESCE(
                 (ops.data_integrity_violations.payload ->> 'occurrence_count')::bigint,
                 1
-            ) + 1,
-            'last_seen_at', to_jsonb(now() AT TIME ZONE 'UTC')
+            ) + 1
         )
+RETURNING issue_id
 """
 
 
@@ -376,7 +411,22 @@ async def sync_integrity_findings(
     그래서 지금은 "닫히지 않는다"를 알려진 한계로 두고, run marker(적재 run id/시각을
     payload에 남기고 그보다 오래된 것만 닫기) 기반 재설계를 ``T-VN-H32``로 분리했다.
     """
-    for finding in findings:
+    ordered_findings = sorted(
+        findings,
+        key=lambda finding: str(finding["payload"]["dedupe_key"]),
+    )
+    for finding in ordered_findings:
+        dedupe_key = str(finding["payload"]["dedupe_key"])
+        if (
+            len(dedupe_key) != 68
+            or not dedupe_key.startswith("av2_")
+            or any(char not in "0123456789abcdef" for char in dedupe_key[4:])
+        ):
+            raise ValueError("finding dedupe_key는 av2_<sha256> 형식이어야 한다.")
+        if finding.get("provider") != provider:
+            raise ValueError("finding provider가 sync 범위와 다르다.")
+        if finding.get("dataset_key") != dataset_key:
+            raise ValueError("finding dataset_key가 sync 범위와 다르다.")
         # batch 경로에도 같은 검증을 건다. 없으면 잘못된 severity가 DB CHECK까지 가서
         # unnest statement 전체를 실패시키고, 상위의 광범위 except가 삼켜
         # **그 run의 finding 전부**를 잃는다.
@@ -387,22 +437,25 @@ async def sync_integrity_findings(
         )
 
     upserted = 0
-    if findings:
-        await session.execute(
+    if ordered_findings:
+        result = await session.execute(
             text(_UPSERT_FINDINGS_BATCH_SQL),
             {
-                "providers": [f.get("provider") for f in findings],
-                "datasets": [f.get("dataset_key") for f in findings],
-                "source_record_keys": [f.get("source_record_key") for f in findings],
-                "feature_ids": [f.get("feature_id") for f in findings],
-                "violation_types": [f["violation_type"] for f in findings],
-                "severities": [f["severity"] for f in findings],
-                "messages": [f["message"] for f in findings],
+                "providers": [f.get("provider") for f in ordered_findings],
+                "datasets": [f.get("dataset_key") for f in ordered_findings],
+                "source_record_keys": [
+                    f.get("source_record_key") for f in ordered_findings
+                ],
+                "feature_ids": [f.get("feature_id") for f in ordered_findings],
+                "violation_types": [f["violation_type"] for f in ordered_findings],
+                "severities": [f["severity"] for f in ordered_findings],
+                "messages": [f["message"] for f in ordered_findings],
                 "payloads": [
-                    json.dumps(f["payload"], ensure_ascii=False) for f in findings
+                    json.dumps(f["payload"], ensure_ascii=False)
+                    for f in ordered_findings
                 ],
             },
         )
-        upserted = len(findings)
+        upserted = len(result.scalars().all())
 
     return upserted

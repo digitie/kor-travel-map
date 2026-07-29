@@ -75,12 +75,20 @@ def test_feature_update_http_lock_conflict_preserves_retry_contract() -> None:
         (
             feature_update_service.SigunguResolverUnavailable("resolver disabled"),
             503,
-            "resolver disabled",
+            {
+                "code": "GEO_AUTH_NOT_CONFIGURED",
+                "message": "resolver disabled",
+                "details": {},
+            },
         ),
         (
             feature_update_service.FeatureUpdateResolverError("upstream failed"),
             502,
-            "upstream failed",
+            {
+                "code": "PROVIDER_ERROR",
+                "message": "upstream failed",
+                "details": {},
+            },
         ),
         (
             feature_update_service.FeatureUpdateServiceError("unknown"),
@@ -92,7 +100,7 @@ def test_feature_update_http_lock_conflict_preserves_retry_contract() -> None:
 def test_feature_update_http_maps_typed_and_unknown_errors(
     error: feature_update_service.FeatureUpdateServiceError,
     expected_status: int,
-    expected_detail: str,
+    expected_detail: str | dict[str, object],
 ) -> None:
     mapped = to_http_exception(error)
 

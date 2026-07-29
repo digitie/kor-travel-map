@@ -696,26 +696,30 @@ async def test_ops_integrity_issues_list_cursor_and_counts(
         text(
             """
             UPDATE ops.data_integrity_violations
-            SET detected_at = :detected_at
+            SET detected_at = :detected_at,
+                last_seen_at = :last_seen_at
             WHERE issue_id = :issue_id
             """
         ),
         {
             "issue_id": first.issue_id,
             "detected_at": datetime(2026, 6, 3, 10, 0, tzinfo=_KST),
+            "last_seen_at": datetime(2026, 6, 3, 12, 0, tzinfo=_KST),
         },
     )
     await migrated_session.execute(
         text(
             """
             UPDATE ops.data_integrity_violations
-            SET detected_at = :detected_at
+            SET detected_at = :detected_at,
+                last_seen_at = :last_seen_at
             WHERE issue_id = :issue_id
             """
         ),
         {
             "issue_id": second.issue_id,
             "detected_at": datetime(2026, 6, 3, 11, 0, tzinfo=_KST),
+            "last_seen_at": datetime(2026, 6, 3, 11, 0, tzinfo=_KST),
         },
     )
     await migrated_session.flush()
@@ -725,7 +729,7 @@ async def test_ops_integrity_issues_list_cursor_and_counts(
         provider="python-mois-api",
         limit=1,
     )
-    assert [item.issue_id for item in page1.items] == [second.issue_id]
+    assert [item.issue_id for item in page1.items] == [first.issue_id]
     assert page1.next_cursor is not None
 
     page2 = await list_ops_integrity_issues(
@@ -734,7 +738,8 @@ async def test_ops_integrity_issues_list_cursor_and_counts(
         limit=1,
         cursor=page1.next_cursor,
     )
-    assert [item.issue_id for item in page2.items] == [first.issue_id]
+    assert [item.issue_id for item in page2.items] == [second.issue_id]
+    assert page1.items[0].last_seen_at > page2.items[0].last_seen_at
 
     counts = await get_ops_integrity_issue_counts(migrated_session)
     assert counts.open_total == 2

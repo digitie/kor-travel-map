@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
 import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 /**
@@ -706,8 +707,7 @@ async function fulfillJson(
 }
 
 function observedApiContract(request: { method(): string; url(): string }) {
-  const pathname = new URL(request.url()).pathname.replace(/^\/api\/proxy/, "");
-  return `${request.method()} ${pathname}`;
+  return `${request.method()} ${bffApiPath(request.url())}`;
 }
 
 type ExactPagedScope = {
@@ -1608,12 +1608,21 @@ async function installPipelineMocks(
       );
       return;
     }
-    await route.continue();
+    throw new Error(
+      `Unhandled pipeline route: ${request.method()} ${bffApiPath(request.url())}`,
+    );
   });
 
   // 요청 dialog는 C4와 같은 canonical ops datasets catalog만 사용한다.
   await page.route("**/v1/ops/datasets", async (route) => {
-    counters.observedApiContracts.push(observedApiContract(route.request()));
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() !== "GET" || apiPath !== "/v1/ops/datasets") {
+      throw new Error(
+        `Unhandled dataset catalog route: ${request.method()} ${apiPath}`,
+      );
+    }
+    counters.observedApiContracts.push(observedApiContract(request));
     const sequenceResponse =
       options.catalogResponses?.[
         Math.min(counters.catalogCalls, options.catalogResponses.length - 1)
@@ -1633,31 +1642,9 @@ async function installPipelineMocks(
   return counters;
 }
 
-/**
- * #520 인증 게이트: middleware가 유효 세션 없는 페이지 접근을 /login으로
- * 돌린다. live suite의 auth.setup.ts와 같은 규약 — `E2E_ADMIN_PASSWORD`가
- * 설정된 대상에서는 UI 로그인으로 세션을 만들고(로그인 → same-site 내비게이션
- * 이라 SameSite=Strict 쿠키 유지), 미설정이면 인증이 꺼진 대상으로 간주한다.
- */
-async function loginIfConfigured(page: Page): Promise<void> {
-  const password = process.env.E2E_ADMIN_PASSWORD;
-  if (!password) {
-    return;
-  }
-  const username = process.env.E2E_ADMIN_USERNAME ?? "admin";
-  await page.goto("/login");
-  await page.locator("#admin-username").fill(username);
-  await page.locator("#admin-password").fill(password);
-  await page.getByRole("button", { name: "로그인" }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"), {
-    timeout: 15_000,
-  });
-}
-
 test.describe("/ops/pipeline", () => {
   test.beforeEach(async ({ page }) => {
     await installInertOpsLiveWebSocket(page);
-    await loginIfConfigured(page);
   });
 
   test("상태 스트립 + root 타임라인(projected_job 분리 표시)", async ({
@@ -1679,9 +1666,17 @@ test.describe("/ops/pipeline", () => {
     await expect(requestRow).toBeVisible();
     await expect(requestRow.getByText("작업 2")).toBeVisible();
     // C3b (b): effective provider_datasets exact pair로 대상 표시.
-    await expect(requestRow.getByText("python-kma-api")).toBeVisible();
-    await expect(requestRow.getByText("kma_short_forecast")).toBeVisible();
-    await expect(requestRow.getByText("target_grids")).toBeVisible();
+    await expect(
+      requestRow.getByText("python-kma-api", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      requestRow.getByText("kma_short_forecast", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      requestRow.getByText("python-kma-api/kma_short_forecast · target_grids", {
+        exact: true,
+      }),
+    ).toBeVisible();
     // C3b (c): request 상태와 projected_job 진행률·단계 분리 표시.
     await expect(requestRow.getByText("40% · loading")).toBeVisible();
     await expect(
@@ -2078,6 +2073,146 @@ test.describe("/ops/pipeline", () => {
     await expect(page).toHaveURL(/provider=python-kma-api/);
   });
 
+  test("focus 중 programmatic history 변경은 세 타임라인 draft와 REST scope를 함께 교체한다", async ({
+    page,
+  }) => {
+    const counters = await installPipelineMocks(page);
+    await page.goto(
+      "/ops/pipeline?provider=alpha&dataset_key=alpha-data&sync_scope=alpha-scope",
+    );
+    // same-route native history가 useSearchParams에 연결된 hydration 완료를 먼저 고정한다.
+    await expect(page.getByLabel("provider 필터")).toHaveValue("alpha");
+    await expect(page.getByLabel("데이터셋 필터")).toHaveValue("alpha-data");
+    await expect(page.getByLabel("sync scope 필터")).toHaveValue("alpha-scope");
+
+    const transitions = [
+      {
+        label: "provider 필터",
+        provider: "beta",
+        datasetKey: "beta-data",
+        syncScope: "beta-scope",
+      },
+      {
+        label: "데이터셋 필터",
+        provider: "gamma",
+        datasetKey: "gamma-data",
+        syncScope: "gamma-scope",
+      },
+      {
+        label: "sync scope 필터",
+        provider: "delta",
+        datasetKey: "delta-data",
+        syncScope: "delta-scope",
+      },
+    ] as const;
+
+    for (const transition of transitions) {
+      const field = page.getByLabel(transition.label);
+      await field.focus();
+      const queryStart = counters.executionQueries.length;
+      await page.evaluate(({ provider, datasetKey, syncScope }) => {
+        const query = new URLSearchParams({
+          provider,
+          dataset_key: datasetKey,
+          sync_scope: syncScope,
+        });
+        window.history.pushState(null, "", `/ops/pipeline?${query}`);
+      }, transition);
+
+      await expect(field).toBeFocused();
+      await expect(page.getByLabel("provider 필터")).toHaveValue(
+        transition.provider,
+      );
+      await expect(page.getByLabel("데이터셋 필터")).toHaveValue(
+        transition.datasetKey,
+      );
+      await expect(page.getByLabel("sync scope 필터")).toHaveValue(
+        transition.syncScope,
+      );
+      await expect
+        .poll(() =>
+          counters.executionQueries
+            .slice(queryStart)
+            .some(
+              (query) =>
+                query.get("provider") === transition.provider &&
+                query.get("dataset_key") === transition.datasetKey &&
+                query.get("sync_scope") === transition.syncScope,
+            ),
+        )
+        .toBe(true);
+    }
+  });
+
+  test("focus 중 Back/Forward는 세 타임라인 draft와 REST scope를 함께 복원한다", async ({
+    page,
+  }) => {
+    const [alphaExecution, betaExecution] = makeRoots();
+    await installPipelineMocks(page, {
+      executionsForQuery: (query) =>
+        query.get("provider") === "beta" ? [betaExecution!] : [alphaExecution!],
+    });
+    const alphaUrl =
+      "/ops/pipeline?provider=alpha&dataset_key=alpha-data&sync_scope=alpha-scope";
+    const betaUrl =
+      "/ops/pipeline?provider=beta&dataset_key=beta-data&sync_scope=beta-scope";
+    await page.goto(alphaUrl);
+    // Next.js가 native history API를 연결한 뒤에만 same-route pushState가
+    // useSearchParams를 갱신한다. 초기 URL 상태 렌더를 확인해 hydration 경계를 고정한다.
+    await expect(page.getByLabel("provider 필터")).toHaveValue("alpha");
+    await expect(page.getByLabel("데이터셋 필터")).toHaveValue("alpha-data");
+    await expect(page.getByLabel("sync scope 필터")).toHaveValue("alpha-scope");
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${alphaExecution!.id}`),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${betaExecution!.id}`),
+    ).toHaveCount(0);
+    await page.evaluate((url) => {
+      window.history.pushState(null, "", url);
+    }, betaUrl);
+    await expect(page.getByLabel("provider 필터")).toHaveValue("beta");
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${betaExecution!.id}`),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${alphaExecution!.id}`),
+    ).toHaveCount(0);
+
+    for (const label of ["provider 필터", "데이터셋 필터", "sync scope 필터"]) {
+      const field = page.getByLabel(label);
+      await field.focus();
+      await page.goBack();
+
+      await expect(field).toBeFocused();
+      await expect(page.getByLabel("provider 필터")).toHaveValue("alpha");
+      await expect(page.getByLabel("데이터셋 필터")).toHaveValue("alpha-data");
+      await expect(page.getByLabel("sync scope 필터")).toHaveValue(
+        "alpha-scope",
+      );
+      await expect(
+        page.getByTestId(`pipeline-execution-row-${alphaExecution!.id}`),
+      ).toBeVisible();
+      await expect(
+        page.getByTestId(`pipeline-execution-row-${betaExecution!.id}`),
+      ).toHaveCount(0);
+
+      await page.goForward();
+      await expect(field).toBeFocused();
+      await expect(page.getByLabel("provider 필터")).toHaveValue("beta");
+      await expect(page.getByLabel("데이터셋 필터")).toHaveValue("beta-data");
+      await expect(page.getByLabel("sync scope 필터")).toHaveValue(
+        "beta-scope",
+      );
+      await expect(
+        page.getByTestId(`pipeline-execution-row-${betaExecution!.id}`),
+      ).toBeVisible();
+      await expect(
+        page.getByTestId(`pipeline-execution-row-${alphaExecution!.id}`),
+      ).toHaveCount(0);
+    }
+  });
+
   test("필터·탭 URL을 초기 복원하고 back/forward로 조사 상태를 재현", async ({
     page,
   }) => {
@@ -2299,7 +2434,7 @@ test.describe("/ops/pipeline", () => {
     await expect(panel).toContainText("DAGSTER_UNAVAILABLE");
     await expect(panel).toContainText("7초 후 재시도 가능");
     await expect(panel.getByLabel("취소 실패 상세 근거")).toContainText(
-      '"retryable":true',
+      '"retryable": true',
     );
     await expect
       .poll(
@@ -2310,7 +2445,11 @@ test.describe("/ops/pipeline", () => {
       )
       .toBeGreaterThan(2);
 
-    await panel.getByRole("button", { name: /대표 작업/ }).click();
+    await panel
+      .locator(
+        `button[data-detail-url="/v1/ops/pipeline/executions/import_job/${TWIN_JOB_ID}"]`,
+      )
+      .click();
     panel = page.getByTestId("pipeline-execution-detail");
     await expect(panel).toContainText("B execution event");
     await expect(panel.getByLabel("이벤트 레벨")).toHaveValue("all");
@@ -2421,7 +2560,11 @@ test.describe("/ops/pipeline", () => {
     await panel.getByRole("button", { name: "즉시 재큐잉 (run-now)" }).click();
 
     await expect(panel.getByText("우선 dispatch 요청됨")).toBeVisible();
-    await expect(panel.getByText(REQUEST_ID.slice(0, 12))).toBeVisible();
+    await expect(
+      panel
+        .getByRole("status")
+        .getByText(`${REQUEST_ID.slice(0, 12)}...`, { exact: true }),
+    ).toBeVisible();
     expect(counters.runNowBodies).toEqual([null]);
     expect(counters.observedApiContracts).toContain(
       `POST /v1/ops/pipeline/requests/${REQUEST_ID}/run-now`,
@@ -2501,6 +2644,9 @@ test.describe("/ops/pipeline", () => {
   }) => {
     await installPipelineMocks(page);
     await page.goto("/ops/pipeline");
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${REQUEST_ID}`),
+    ).toBeVisible();
 
     await page.evaluate((requestId) => {
       window.history.pushState(
@@ -2928,9 +3074,7 @@ test.describe("/ops/pipeline", () => {
     await expect(page.getByTestId("schedule-command-result")).toBeVisible({
       timeout: 5_000,
     });
-    await expect
-      .poll(() => counters.scheduleQueries)
-      .toBeGreaterThanOrEqual(3);
+    await expect.poll(() => counters.scheduleQueries).toBeGreaterThanOrEqual(3);
     await expect(
       page.getByRole("button", {
         name: `${replacementName} 스케줄 중지`,
@@ -3846,6 +3990,7 @@ test.describe("/ops/pipeline", () => {
     await expect(
       dialog.getByText(
         "MOIS source sync 최신 성공이 TTL(24시간)을 넘었습니다.",
+        { exact: true },
       ),
     ).toBeVisible();
   });

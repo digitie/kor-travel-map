@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from kortravelmap.client import DedupRefreshResult
+from kortravelmap.client import DedupRefreshResult, IntegrityFindingSyncResult
 from kortravelmap.core.dedup import DedupCandidate
 from kortravelmap.infra.consistency import CaseResult, ConsistencyReport
 from kortravelmap.infra.dedup_refresh_repo import DedupRefreshScope
@@ -102,10 +102,11 @@ class _Client:
 
     async def record_address_validation_findings(
         self, findings: object, **kwargs: object
-    ) -> int:
+    ) -> IntegrityFindingSyncResult:
         """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
         self.recorded_findings = list(findings)  # type: ignore[arg-type]
-        return len(self.recorded_findings)
+        count = len(self.recorded_findings)
+        return IntegrityFindingSyncResult(count, count, count)
 
 
 def test_consistency_dedup_refresh_job_executes_configured_scopes() -> None:

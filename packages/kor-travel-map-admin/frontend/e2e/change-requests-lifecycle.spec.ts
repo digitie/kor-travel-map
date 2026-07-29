@@ -88,7 +88,9 @@ async function mockCategories(page: Page) {
     const request = route.request();
     const apiPath = bffApiPath(request.url());
     if (request.method() !== "GET" || apiPath !== "/v1/categories") {
-      throw new Error(`Unhandled category route: ${request.method()} ${apiPath}`);
+      throw new Error(
+        `Unhandled category route: ${request.method()} ${apiPath}`,
+      );
     }
     await fulfillJson(route, categoriesResponse());
   });
@@ -305,9 +307,9 @@ test.describe("admin feature change-requests lifecycle", () => {
 
     await expect.poll(() => requests.reject).toBe(1);
     expect(requests.reviewBodies[0]).toMatchObject({
-      operator: "local-admin",
       reason: "admin-ui reject",
     });
+    expect(requests.reviewBodies[0]).not.toHaveProperty("operator");
 
     // StatusBadge는 raw status 문자열을 텍스트로 렌더한다.
     await expect(pendingRow.getByText("거절됨", { exact: true })).toBeVisible();
@@ -352,7 +354,8 @@ test.describe("admin feature change-requests lifecycle", () => {
 
       if (
         request.method() === "POST" &&
-        apiPath === "/v1/admin/features/change-requests/change-pending-1/approve"
+        apiPath ===
+          "/v1/admin/features/change-requests/change-pending-1/approve"
       ) {
         approveCount += 1;
         await route.fulfill({
@@ -388,9 +391,7 @@ test.describe("admin feature change-requests lifecycle", () => {
     // ("Mock pending feature") 등 여러 곳에 substring으로 등장한다. status가
     // 'pending'으로 남았음만 단언하려면 StatusBadge가 렌더한 정확한 텍스트
     // 노드만 노린다 → exact 매칭으로 name 셀의 substring을 배제한다.
-    await expect(
-      pendingRow.getByText("대기", { exact: true }),
-    ).toBeVisible();
+    await expect(pendingRow.getByText("대기", { exact: true })).toBeVisible();
     await expect(
       pendingRow.getByRole("button", { name: "승인", exact: true }),
     ).toBeVisible();
@@ -416,10 +417,7 @@ test.describe("admin feature change-requests lifecycle", () => {
         return;
       }
 
-      if (
-        request.method() === "POST" &&
-        apiPath === "/v1/admin/features"
-      ) {
+      if (request.method() === "POST" && apiPath === "/v1/admin/features") {
         postCount += 1;
         await route.fulfill({
           status: 422,
@@ -476,9 +474,7 @@ test.describe("admin feature change-requests lifecycle", () => {
     await page.goto("/admin/features/change-reviews");
 
     // DataTable emptyMessage prop.
-    await expect(
-      page.getByText("변경 요청이 없습니다."),
-    ).toBeVisible();
+    await expect(page.getByText("변경 요청이 없습니다.")).toBeVisible();
     // 데이터 행 0개 확인.
     await expect(page.getByRole("row", { name: /Mock|feature-/ })).toHaveCount(
       0,
@@ -494,13 +490,21 @@ test.describe("admin feature change-requests lifecycle", () => {
       initial: [
         makeFeatureChange({
           feature_id: "feature-alpha",
-          payload: { category: "01070300", kind: "place", name: "Alpha feature" },
+          payload: {
+            category: "01070300",
+            kind: "place",
+            name: "Alpha feature",
+          },
           reason: "r1",
           request_id: "change-alpha",
         }),
         makeFeatureChange({
           feature_id: "feature-beta",
-          payload: { category: "01070300", kind: "place", name: "Beta feature" },
+          payload: {
+            category: "01070300",
+            kind: "place",
+            name: "Beta feature",
+          },
           reason: "r2",
           request_id: "change-beta",
         }),

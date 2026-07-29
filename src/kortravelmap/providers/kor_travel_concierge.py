@@ -17,12 +17,14 @@ ADR 참조: ADR-006 / ADR-009 / ADR-019 / ADR-024 / ADR-045 / ADR-050 / ADR-053 
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Final
 
-from pydantic import ValidationError
+from pydantic import ValidationError as PydanticValidationError
 
 from kortravelmap.category import PlaceCategoryCode, mapbox_maki_icon_or_none
 from kortravelmap.core.address import (
@@ -30,6 +32,7 @@ from kortravelmap.core.address import (
     extract_sigungu_code,
     normalize_korean_text,
 )
+from kortravelmap.core.exceptions import ValidationError as DomainValidationError
 from kortravelmap.core.ids import make_feature_id, make_payload_hash, make_source_record_key
 from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.dto import (
@@ -46,7 +49,11 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
-from kortravelmap.geocoding import ReverseGeocoder, cached_reverse_geocoder
+from kortravelmap.geocoding import (
+    ObservedReverseGeocoder,
+    ReverseGeocoder,
+    cached_reverse_geocoder,
+)
 
 __all__ = [
     "DATASET_KEY_YOUTUBE_PLACE_CANDIDATES",
@@ -55,14 +62,33 @@ __all__ = [
     "KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE",
     "KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK",
     "KorTravelConciergeFeatureItem",
+    "KorTravelConciergeQuarantine",
     "kor_travel_concierge_inactive_entity_ids",
     "kor_travel_concierge_items_to_bundles",
     "kor_travel_concierge_latest_items",
+    "kor_travel_concierge_upsert_count",
 ]
 
 
 KorTravelConciergeFeatureItem = Mapping[str, Any]
 """kor-travel-concierge ``/api/v1/features/*`` item JSON shape."""
+
+
+class KorTravelConciergeItemValidationError(DomainValidationError):
+    """upsert item 하나가 Map의 필수 적재 계약을 충족하지 못했다."""
+
+    def __init__(self, reason_code: str, message: str) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
+@dataclass(frozen=True)
+class KorTravelConciergeQuarantine:
+    """적재하지 못한 upsert item의 안정 식별자와 sanitized 사유."""
+
+    item_key: str
+    reason_code: str
+    message: str
 
 KOR_TRAVEL_CONCIERGE_PROVIDER_NAME: Final[str] = "kor-travel-concierge-youtube"
 """YouTube 장소 후보 provider canonical name."""
@@ -100,7 +126,7 @@ async def kor_travel_concierge_items_to_bundles(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
-    quarantine: list[tuple[KorTravelConciergeFeatureItem, Exception]] | None = None,
+    quarantine: list[KorTravelConciergeQuarantine] | None = None,
 ) -> list[FeatureBundle]:
     """kor-travel-concierge feature export items → ``list[FeatureBundle]``.
 
@@ -128,30 +154,77 @@ async def kor_travel_concierge_items_to_bundles(
                 fetched_at=fetched_at,
                 reverse_geocoder=geocoder,
             )
-        except (ValidationError, ValueError) as exc:
+        except (PydanticValidationError, DomainValidationError) as exc:
             # T-VN-H28B: 건별 격리. 이전에는 item 1건의 구성 실패가 batch 전체를 죽였다
             # (concierge export는 1회 1,477건 전량 재생이라 손실이 전부였다).
             if quarantine is not None:
-                quarantine.append((item, exc))
+                quarantine.append(_quarantine_entry(item, exc))
                 continue
             raise
-        if bundle is not None:
-            bundles.append(bundle)
+        bundles.append(bundle)
     return bundles
+
+
+def _quarantine_item_key(item: KorTravelConciergeFeatureItem) -> str:
+    source_record = _mapping(item.get("source_record"))
+    for value in (
+        item.get("export_id"),
+        item.get("candidate_id"),
+        source_record.get("source_entity_id"),
+    ):
+        text = str(value).strip() if value is not None else ""
+        if text:
+            return text[:160]
+    digest = make_payload_hash(_plain_json_dict(item)).removeprefix("sha256:")
+    return f"payload:{digest[:16]}"
+
+
+def _quarantine_entry(
+    item: KorTravelConciergeFeatureItem,
+    exc: PydanticValidationError | DomainValidationError,
+) -> KorTravelConciergeQuarantine:
+    if isinstance(exc, KorTravelConciergeItemValidationError):
+        reason_code = exc.reason_code
+        message = str(exc)
+    elif isinstance(exc, PydanticValidationError):
+        reason_code = "dto_validation"
+        fields = [
+            ".".join(str(part) for part in error.get("loc", ()))
+            for error in exc.errors(include_url=False, include_input=False)[:5]
+        ]
+        message = "DTO validation failed"
+        if fields:
+            message = f"{message}: {', '.join(fields)}"
+    else:
+        reason_code = "domain_validation"
+        message = f"{type(exc).__name__}: domain validation failed"
+    return KorTravelConciergeQuarantine(
+        item_key=_quarantine_item_key(item),
+        reason_code=reason_code,
+        message=message[:300],
+    )
 
 
 async def _item_to_bundle(
     item: KorTravelConciergeFeatureItem,
     *,
     fetched_at: datetime,
-    reverse_geocoder: ReverseGeocoder | None,
-) -> FeatureBundle | None:
+    reverse_geocoder: ObservedReverseGeocoder | None,
+) -> FeatureBundle:
     place = _mapping(item.get("place"))
     source_record_payload = _mapping(item.get("source_record"))
     name = normalize_korean_text(_text(place, "name"))
     source_entity_id = _source_entity_id(item, source_record_payload)
-    if not name or not source_entity_id:
-        return None
+    if not name:
+        raise KorTravelConciergeItemValidationError(
+            "missing_place_name",
+            "upsert item의 place.name이 비어 있습니다.",
+        )
+    if not source_entity_id:
+        raise KorTravelConciergeItemValidationError(
+            "missing_source_entity_id",
+            "upsert item의 source entity 식별자가 비어 있습니다.",
+        )
 
     # ADR-053/057 (C-04) — identity triple(provider/dataset_key/source_entity_type)은 이
     # provider에서 **고정**이다(inactive 전환도 같은 고정값으로 매칭). payload 값을 그대로
@@ -167,8 +240,11 @@ async def _item_to_bundle(
 
     address_payload = _mapping(place.get("address"))
     geo: Address | None = None
+    obs_sigungu_names: tuple[str, ...] = ()
     if coord is not None and reverse_geocoder is not None:
-        geo = await reverse_geocoder(coord)
+        observation = await reverse_geocoder.observe(coord)
+        geo = observation.address
+        obs_sigungu_names = observation.sigungu_names
     address = _address(address_payload, geo=geo)
 
     raw_data = _plain_json_dict(item)
@@ -264,6 +340,7 @@ async def _item_to_bundle(
         admin_evidence=_admin_evidence(
             address_payload,
             geo=geo,
+            obs_sigungu_names=obs_sigungu_names,
             reverse_attempted=coord is not None and reverse_geocoder is not None,
         ),
     )
@@ -294,6 +371,13 @@ def kor_travel_concierge_latest_items(
         latest.pop(entity_id, None)
         latest[entity_id] = item
     return [*passthrough, *latest.values()]
+
+
+def kor_travel_concierge_upsert_count(
+    items: Iterable[KorTravelConciergeFeatureItem],
+) -> int:
+    """현재 stream에서 적재 대상으로 분류되는 upsert item 수."""
+    return sum(1 for item in items if _operation(item) == _OPERATION_UPSERT)
 
 
 def kor_travel_concierge_inactive_entity_ids(
@@ -454,6 +538,7 @@ def _admin_evidence(
     payload: Mapping[str, Any],
     *,
     geo: Address | None,
+    obs_sigungu_names: tuple[str, ...],
     reverse_attempted: bool,
 ) -> AdminEvidence:
     """행정구역 판정의 두 축을 병합 전에 보존한다 (T-VN-H28B).
@@ -471,6 +556,7 @@ def _admin_evidence(
         claim_kind = "sido" if claim_code else None
     return AdminEvidence(
         obs_code=geo.bjd_code if geo is not None else None,
+        obs_sigungu_names=obs_sigungu_names,
         reverse_attempted=reverse_attempted,
         claim_code=claim_code,
         claim_kind=claim_kind,
@@ -534,6 +620,8 @@ def _confidence(value: Any) -> int:
     try:
         score = float(value)
     except (TypeError, ValueError):
+        return 80
+    if not math.isfinite(score):
         return 80
     if 0 <= score <= 1:
         score *= 100

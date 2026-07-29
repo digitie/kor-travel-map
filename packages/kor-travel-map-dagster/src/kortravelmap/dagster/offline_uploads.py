@@ -48,12 +48,12 @@ async def load_offline_upload_op(context: OpExecutionContext) -> dict[str, objec
         import httpx
 
         async with httpx.AsyncClient(
-            base_url=settings.kor_travel_geo_base_url,
+            base_url=settings.kor_travel_geo_base_url.get_secret_value(),
             timeout=10.0,
         ) as http:
             kraddr = KorTravelGeoRestClient(
                 http,
-                api_key=settings.kor_travel_geo_api_key_value,
+                api_key=settings.kor_travel_geo_api_key,
             )
             result = await client.run_offline_upload_load_job(
                 upload_id,

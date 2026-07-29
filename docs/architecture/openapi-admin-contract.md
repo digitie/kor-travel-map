@@ -1232,9 +1232,10 @@ Query:
 
 ### `GET /ops/consistency/issues`
 
-`ops.data_integrity_violations` 목록을 `detected_at DESC, issue_id DESC` keyset
+`ops.data_integrity_violations` 목록을 `last_seen_at DESC, issue_id DESC` keyset
 cursor로 반환한다. Phase 2 F5~F8 계열과 주소/좌표 매칭 이슈는 이 큐를 통해 운영
-화면에 노출한다.
+화면에 노출한다. record는 최초 탐지 `detected_at`과 최신 recurrence
+`last_seen_at`을 함께 반환한다.
 
 Query:
 

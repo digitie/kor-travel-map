@@ -103,6 +103,7 @@ function makeIntegrityIssue(
     detected_at: MOCK_NOW,
     feature_id: null,
     issue_id: "issue-aaaaaaaa-0001",
+    last_seen_at: MOCK_NOW,
     message: "default issue message",
     payload: {},
     provider: null,
@@ -212,10 +213,10 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
     await expect(openIssuesCard.getByText("7", { exact: true })).toBeVisible();
 
     // latest_consistency_report.severity_max='critical' → 'Latest severity' 카드
-    // StatusBadge가 verbatim 'critical'을 렌더. severity columnheader와 충돌하지
+    // StatusBadge가 현행 한국어 '심각'을 렌더. 심각도 columnheader와 충돌하지
     // 않도록 카드로 scope.
     const latestSeverityCard = metricsCard(page, "Latest severity");
-    await expect(latestSeverityCard.getByText("critical")).toBeVisible();
+    await expect(latestSeverityCard.getByText("심각")).toBeVisible();
 
     // reports 카드 — count Badge '2' + 두 report 행 모두 가시.
     const reportsCard = metricsCard(page, "Reports");
@@ -227,12 +228,12 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
     await expect(
       reportsCard.getByText(REPORT_B_ID.slice(0, 12) + "..."),
     ).toBeVisible();
-    // 두 번째 report 행의 severity 셀이 verbatim 'critical' StatusBadge를 렌더.
+    // 두 번째 report 행의 severity 셀이 '심각' StatusBadge를 렌더.
     // 행은 short batch_id로 scope.
     const reportBRow = reportsCard.getByRole("row", {
       name: new RegExp(BATCH_B_ID.slice(0, 12)),
     });
-    await expect(reportBRow.getByText("critical")).toBeVisible();
+    await expect(reportBRow.getByText("심각")).toBeVisible();
 
     // canonical pipeline에서 같은 load batch로 필터한다.
     await expect(reportBRow.getByRole("link")).toHaveAttribute(
@@ -240,12 +241,12 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
       `/ops/pipeline?load_batch_id=${BATCH_B_ID}`,
     );
 
-    // issues 카드 — unique message + severity 'critical' + provider cell.
+    // issues 카드 — unique message + 심각도 '심각' + provider cell.
     const issuesCard = metricsCard(page, "Integrity issues");
     await expect(
       issuesCard.getByText("mois permit duplicate source key detected"),
     ).toBeVisible();
-    await expect(issuesCard.getByText("critical")).toBeVisible();
+    await expect(issuesCard.getByText("심각", { exact: true })).toBeVisible();
     await expect(issuesCard.getByText("python-mois-api")).toBeVisible();
     // 개편 B 크로스링크: provider 셀은 provider로 필터된 이슈 목록으로 딥링크.
     await expect(
@@ -253,19 +254,19 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
     ).toHaveAttribute("href", "/admin/issues?provider=python-mois-api");
 
     // columnheaders for both tables.
-    for (const name of ["report", "batch", "finished"]) {
+    for (const name of ["리포트", "배치", "완료"]) {
       await expect(
         page.getByRole("columnheader", { name, exact: true }),
       ).toBeVisible();
     }
-    for (const name of ["issue", "message", "detected", "provider"]) {
+    for (const name of ["이슈", "메시지", "감지", "provider"]) {
       await expect(
         page.getByRole("columnheader", { name, exact: true }),
       ).toBeVisible();
     }
-    // 'severity' columnheader는 두 표 모두에 존재 → 2개.
+    // '심각도' columnheader는 두 표 모두에 존재 → 2개.
     await expect(
-      page.getByRole("columnheader", { name: "severity", exact: true }),
+      page.getByRole("columnheader", { name: "심각도", exact: true }),
     ).toHaveCount(2);
 
     // 이 페이지는 row-click 상세 pane이 없다(DataTable에 onRowClick 미전달, source 확인).
@@ -379,7 +380,7 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
       await fulfillJson(
         route,
         // open_total=0 → 'Open issues' 카드 '0'; latest_consistency_report: null
-        // → 'Latest severity' StatusBadge가 default 'none'을 렌더.
+        // → 'Latest severity' StatusBadge가 기본값 '없음'을 렌더.
         makeOpsMetrics({
           data_integrity_issues: makeIssueCounts({ open_total: 0 }),
           latest_consistency_report: null,
@@ -414,9 +415,9 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
     await expect(
       metricsCard(page, "Open issues").getByText("0", { exact: true }),
     ).toBeVisible();
-    // latest_consistency_report null → StatusBadge 'none'.
+    // latest_consistency_report null → StatusBadge '없음'.
     await expect(
-      metricsCard(page, "Latest severity").getByText("none"),
+      metricsCard(page, "Latest severity").getByText("없음"),
     ).toBeVisible();
   });
 

@@ -1131,13 +1131,13 @@ def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
         )
 
     http = httpx.AsyncClient(
-        base_url=settings.kor_travel_geo_base_url,
+        base_url=settings.kor_travel_geo_base_url.get_secret_value(),
         timeout=settings.kor_travel_geo_timeout_seconds,
     )
     try:
         client = KorTravelGeoRestClient(
             http,
-            api_key=settings.kor_travel_geo_api_key_value,
+            api_key=settings.kor_travel_geo_api_key,
         )
         yield kor_travel_geo_reverse_geocoder(
             client,

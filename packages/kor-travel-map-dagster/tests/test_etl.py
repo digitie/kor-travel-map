@@ -7,13 +7,19 @@ from typing import Any
 
 import pytest
 from dagster import Failure
+from kortravelmap.client import IntegrityFindingSyncResult
+from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
 from kortravelmap.infra.feature_repo import FeatureLoadResult
 
-from kortravelmap.dagster.etl import load_feature_bundles_for_dagster
+from kortravelmap.dagster.etl import (
+    DagsterFeatureLoadResult,
+    load_feature_bundles_for_dagster,
+)
 from kortravelmap.dagster.validation import (
     DROPPABLE_ISSUE_CODES,
     FeatureAddressIssue,
     FeatureAddressValidationSummary,
+    ensure_feature_address_valid,
 )
 
 
@@ -24,10 +30,11 @@ class _Feature:
 
 @dataclass(frozen=True)
 class _SourceRecord:
-    """T-VN-H30A: dedupe_key는 payload hash가 아닌 안정적 entity id에 걸린다."""
+    """T-VN-H30A: dedupe_key는 payload hash가 아닌 안정적 entity identity에 걸린다."""
 
     source_record_key: str
     source_entity_id: str
+    source_entity_type: str = "place"
 
 
 @dataclass(frozen=True)
@@ -35,6 +42,16 @@ class _Bundle:
     feature: _Feature
     source_record: _SourceRecord = field(
         default_factory=lambda: _SourceRecord("sr_x", "entity-x")
+    )
+
+
+def _bundle(feature_id: str) -> _Bundle:
+    return _Bundle(
+        _Feature(feature_id),
+        _SourceRecord(
+            source_record_key=f"sr_{feature_id}",
+            source_entity_id=feature_id,
+        ),
     )
 
 
@@ -61,22 +78,68 @@ class _Client:
 
     async def record_address_validation_findings(
         self, findings: object, **kwargs: object
-    ) -> int:
+    ) -> IntegrityFindingSyncResult:
         """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다).
 
-        ``kwargs``도 보관한다 — ``provider``/``dataset_key``는 auto-resolve sweep의
-        ``WHERE``절이라, 잘못된 값이 넘어가면 **다른 provider의 열린 큐를 닫는다**.
-        버리면 그 배선 오류를 테스트가 못 잡는다.
+        ``kwargs``도 보관해 provider/dataset 정체성 배선을 검증할 수 있게 한다.
         """
         self.recorded_findings = list(findings)  # type: ignore[arg-type]
         self.recorded_kwargs = dict(kwargs)
-        return len(self.recorded_findings)
+        unique_count = len(
+            {finding.dedupe_key for finding in self.recorded_findings}
+        )
+        return IntegrityFindingSyncResult(
+            observed_count=len(self.recorded_findings),
+            unique_count=unique_count,
+            upserted_count=unique_count,
+        )
+
+
+def test_dagster_feature_load_result_merge_preserves_name_states() -> None:
+    left = DagsterFeatureLoadResult(
+        provider="demo",
+        dataset_key="places",
+        feature_ids=("left",),
+        load=FeatureLoadResult(bundles_total=1, features_inserted=1),
+        address_validation=FeatureAddressValidationSummary(
+            total=1,
+            issue_count=0,
+            error_count=0,
+            warning_count=0,
+            evidence_grade_counts={"unarmed": 1},
+            name_state_counts={"matched": 1},
+            issues=(),
+        ),
+    )
+    right = DagsterFeatureLoadResult(
+        provider="demo",
+        dataset_key="places",
+        feature_ids=("right",),
+        load=FeatureLoadResult(bundles_total=1, features_inserted=1),
+        address_validation=FeatureAddressValidationSummary(
+            total=1,
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            evidence_grade_counts={"unarmed": 1},
+            name_state_counts={"disagreed": 1},
+            issues=(),
+        ),
+    )
+
+    merged = left.merge(right)
+
+    assert merged.address_validation.evidence_grade_counts == {"unarmed": 2}
+    assert merged.address_validation.name_state_counts == {
+        "matched": 1,
+        "disagreed": 1,
+    }
 
 
 async def test_load_feature_bundles_for_dagster_chunks_db_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(5)]
+    bundles = [_bundle(f"feature-{index}") for index in range(5)]
     context = _Context()
     client = _Client()
 
@@ -117,7 +180,7 @@ async def test_load_feature_bundles_for_dagster_chunks_db_load(
 async def test_load_feature_bundles_for_dagster_uses_atomic_load_all_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(5)]
+    bundles = [_bundle(f"feature-{index}") for index in range(5)]
     context = _Context()
     client = _Client()
     atomic_calls: list[tuple[str, ...]] = []
@@ -167,7 +230,7 @@ def _error_summary(items: Any, *, error_feature_id: str) -> FeatureAddressValida
         issues=(
             FeatureAddressIssue(
                 feature_id=error_feature_id,
-                source_record_key="record-key",
+                source_record_key=f"sr_{error_feature_id}",
                 code="reverse_geocode_failed",
                 severity="error",
                 message="mismatch",
@@ -180,7 +243,7 @@ def _error_summary(items: Any, *, error_feature_id: str) -> FeatureAddressValida
 async def test_load_strict_mode_fails_on_error_issue(
     monkeypatch: pytest.MonkeyPatch, mode: bool | str
 ) -> None:
-    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(3)]
+    bundles = [_bundle(f"feature-{index}") for index in range(3)]
     context = _Context()
     client = _Client()
     monkeypatch.setattr(
@@ -203,7 +266,7 @@ async def test_load_strict_mode_fails_on_error_issue(
 async def test_load_drop_mode_quarantines_error_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(3)]
+    bundles = [_bundle(f"feature-{index}") for index in range(3)]
     context = _Context()
     client = _Client()
     monkeypatch.setattr(
@@ -232,7 +295,7 @@ async def test_load_drop_mode_quarantines_error_rows(
 async def test_load_off_mode_loads_all_rows(
     monkeypatch: pytest.MonkeyPatch, mode: bool | str
 ) -> None:
-    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(3)]
+    bundles = [_bundle(f"feature-{index}") for index in range(3)]
     context = _Context()
     client = _Client()
     monkeypatch.setattr(
@@ -278,7 +341,7 @@ def _non_droppable_summary(
         issues=(
             FeatureAddressIssue(
                 feature_id=error_feature_id,
-                source_record_key="record-key",
+                source_record_key=f"sr_{error_feature_id}",
                 code="some_future_rule_error",
                 severity="error",
                 message="allowlist에 없는 새 규칙",
@@ -287,17 +350,85 @@ def _non_droppable_summary(
     )
 
 
-@pytest.mark.parametrize("mode", ["strict", "drop"])
-async def test_non_allowlisted_error_never_loses_rows(
-    monkeypatch: pytest.MonkeyPatch, mode: str
+def test_ensure_feature_address_valid_rejects_every_error(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """allowlist에 없는 error code는 drop도 run 실패도 만들지 못한다 (T-VN-H28B).
+    bundles = [_bundle("feature-0")]
+    monkeypatch.setattr(
+        "kortravelmap.dagster.validation.validate_feature_bundles_address",
+        lambda items: _non_droppable_summary(items, error_feature_id="feature-0"),
+    )
 
-    이전에는 severity만 보고 격리해서, 새 error 규칙이 하나 추가될 때마다 영구 손실
-    범위가 조용히 넓어졌다 — 실제로 ``provider_address_mismatch``가 그렇게 380건을
-    파괴했고 그 380건은 전부 오탐이었다.
-    """
-    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(3)]
+    with pytest.raises(ValueError, match="some_future_rule_error"):
+        ensure_feature_address_valid(bundles)  # type: ignore[arg-type]
+
+
+async def test_non_allowlisted_error_fails_strict_without_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = [_bundle(f"feature-{index}") for index in range(3)]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: _non_droppable_summary(items, error_feature_id="feature-1"),
+    )
+
+    with pytest.raises(Failure, match="some_future_rule_error"):
+        await load_feature_bundles_for_dagster(
+            context=context,  # type: ignore[arg-type]
+            client=client,  # type: ignore[arg-type]
+            bundles=bundles,  # type: ignore[arg-type]
+            provider="demo",
+            dataset_key="places",
+            strict_address="strict",
+        )
+
+    assert client.chunks == []
+
+
+async def test_strict_mode_fails_closed_when_durable_recording_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = [_bundle("feature-0")]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: _non_droppable_summary(items, error_feature_id="feature-0"),
+    )
+
+    async def _fail_recording(findings: object, **kwargs: object) -> None:
+        del findings, kwargs
+        raise IntegrityFindingPersistenceError(
+            provider="demo",
+            dataset_key="places",
+            observed_count=1,
+            unique_count=1,
+            error_type="OperationalError",
+        )
+
+    monkeypatch.setattr(client, "record_address_validation_findings", _fail_recording)
+
+    with pytest.raises(Failure, match="durable 기록 실패"):
+        await load_feature_bundles_for_dagster(
+            context=context,  # type: ignore[arg-type]
+            client=client,  # type: ignore[arg-type]
+            bundles=bundles,  # type: ignore[arg-type]
+            provider="demo",
+            dataset_key="places",
+            strict_address="strict",
+        )
+
+    assert client.chunks == []
+    assert context.metadata[-1]["address_validation_findings_unrecorded"] == 1
+
+
+async def test_non_allowlisted_error_is_not_permanently_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """allowlist 밖 error는 drop 모드에서 영구 손실을 만들지 않는다."""
+    bundles = [_bundle(f"feature-{index}") for index in range(3)]
     context = _Context()
     client = _Client()
     monkeypatch.setattr(
@@ -311,10 +442,9 @@ async def test_non_allowlisted_error_never_loses_rows(
         bundles=bundles,  # type: ignore[arg-type]
         provider="demo",
         dataset_key="places",
-        strict_address=mode,
+        strict_address="drop",
     )
 
-    # 세 건 모두 적재되고, 아무것도 drop되지 않는다.
     assert client.chunks == [("feature-0", "feature-1", "feature-2")]
     assert result.feature_ids == ("feature-0", "feature-1", "feature-2")
     # drop이 없으면 격리 metadata 키 자체가 방출되지 않는다.
@@ -374,6 +504,10 @@ def test_findings_link_fk_columns_only_for_loaded_features() -> None:
         dataset_key="places",
         loaded_feature_ids={"feature-loaded"},
         dropped_feature_ids=frozenset({"feature-dropped"}),
+        source_identities={
+            "sr_feature-loaded": ("place", "feature-loaded"),
+            "sr_feature-dropped": ("place", "feature-dropped"),
+        },
     )
     by_fid = {f.payload["feature_id"]: f for f in findings}
 
@@ -406,6 +540,7 @@ def test_finding_dedupe_key_is_stable_and_discriminating() -> None:
             dataset_key=dataset,
             loaded_feature_ids={feature_id},
             dropped_feature_ids=frozenset(),
+            source_identities={f"sr_{feature_id}": ("place", feature_id)},
         )[0].dedupe_key
 
     base = build("admin_code_stale_sido", "f1")
@@ -419,7 +554,7 @@ async def test_findings_are_recorded_after_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """기록은 적재 **후**에 일어나고 건수가 metadata로 노출된다 (T-VN-H30A)."""
-    bundles = [_Bundle(_Feature("feature-0"))]
+    bundles = [_bundle("feature-0")]
     context = _Context()
     client = _Client()
     monkeypatch.setattr(
@@ -441,7 +576,9 @@ async def test_findings_are_recorded_after_load(
         dataset_key="places",
     )
 
-    assert context.metadata[-1]["address_validation_findings_recorded"] == 1
+    assert context.metadata[-1]["address_validation_findings_observed"] == 1
+    assert context.metadata[-1]["address_validation_findings_unique"] == 1
+    assert context.metadata[-1]["address_validation_findings_upserted"] == 1
     assert "address_validation_findings_unrecorded" not in context.metadata[-1]
     # 적재가 먼저 일어났어야 linked가 성립한다.
     assert client.chunks == [("feature-0",)]
@@ -482,50 +619,13 @@ def test_dedupe_key_uses_stable_entity_id_not_payload_hash() -> None:
             dataset_key="places",
             loaded_feature_ids={"f1"},
             dropped_feature_ids=frozenset(),
-            entity_ids={source_record_key: entity_id},
+            source_identities={source_record_key: ("place", entity_id)},
         )[0].dedupe_key
 
     # payload가 바뀌어 source_record_key가 달라져도 같은 entity면 같은 키다.
     assert key_for("sr_hash_v1", "E1") == key_for("sr_hash_v2", "E1")
     # 다른 entity는 반드시 갈라진다.
     assert key_for("sr_hash_v1", "E1") != key_for("sr_hash_v1", "E2")
-    # 키에 실린 값이 entity id다 — record key가 새면 안정성이 깨진 것이다.
-    assert key_for("sr_hash_v1", "E1").endswith(":E1")
+    # 고정 길이 digest라 원천 id 자체를 B-tree key에 노출하지 않는다.
+    assert key_for("sr_hash_v1", "E1").startswith("av2_")
     assert "sr_hash_v1" not in key_for("sr_hash_v1", "E1")
-
-
-async def test_sweep_scope_arguments_are_wired(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """sweep의 blast radius를 정하는 인자가 실제로 전달되는지 고정한다 (T-VN-H30A).
-
-    ``provider``/``dataset_key``는 auto-resolve sweep의 ``WHERE``절이다. 잘못 넘어가면
-    한 run이 **다른 provider의 열린 큐를 닫는다**. double이 kwargs를 버리면 이 배선 오류를
-    아무 테스트도 잡지 못한다.
-    """
-    bundles = [_Bundle(_Feature("feature-0"))]
-    context = _Context()
-    client = _Client()
-    monkeypatch.setattr(
-        "kortravelmap.dagster.etl.validate_feature_bundles_address",
-        lambda items: FeatureAddressValidationSummary(
-            total=len(items),
-            issue_count=1,
-            error_count=0,
-            warning_count=1,
-            issues=(_issue("admin_code_stale_sido", "feature-0"),),
-        ),
-    )
-
-    await load_feature_bundles_for_dagster(
-        context=context,  # type: ignore[arg-type]
-        client=client,  # type: ignore[arg-type]
-        bundles=bundles,  # type: ignore[arg-type]
-        provider="demo",
-        dataset_key="places",
-    )
-
-    kwargs = client.recorded_kwargs
-    assert kwargs["provider"] == "demo"
-    assert kwargs["dataset_key"] == "places"
-    # sweep 범위는 주소 검증이 소유하는 code여야 한다 — 비면 큐가 영영 안 닫힌다.

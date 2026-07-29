@@ -110,6 +110,10 @@ class AdminEvidence(BaseModel):
     @model_validator(mode="after")
     def _claim_kind_matches_length(self) -> AdminEvidence:
         """``claim_kind``와 ``claim_code`` 길이가 어긋나면 비교 자리수가 조용히 줄어든다."""
+        if (self.obs_code is not None or self.obs_sigungu_names) and not self.reverse_attempted:
+            raise ValueError(
+                "obs_code 또는 obs_sigungu_names가 있으면 reverse_attempted=True여야 한다."
+            )
         if self.claim_code is None:
             return self
         if self.claim_kind is None:

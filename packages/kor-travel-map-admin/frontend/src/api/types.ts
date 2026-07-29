@@ -3468,6 +3468,11 @@ export interface components {
             feature_id?: string | null;
             /** Issue Id */
             issue_id: string;
+            /**
+             * Last Seen At
+             * Format: date-time
+             */
+            last_seen_at: string;
             /** Message */
             message: string;
             /** Payload */
@@ -4068,14 +4073,20 @@ export interface components {
         CuratedFeatureDetailContentView: {
             /** Category */
             category: string;
-            /** Curation Status */
-            curation_status: string;
+            /**
+             * Curation Status
+             * @enum {string}
+             */
+            curation_status: "candidate" | "curated" | "rejected" | "archived";
             /** Destination Name */
             destination_name: string | null;
             /** Region Code */
             region_code: string | null;
-            /** Reuse Policy */
-            reuse_policy: string;
+            /**
+             * Reuse Policy
+             * @enum {string}
+             */
+            reuse_policy: "allowed" | "blocked" | "manual_review";
             /** Summary */
             summary: string | null;
             /** Title */
@@ -4136,8 +4147,11 @@ export interface components {
             feature_snapshot: components["schemas"]["CuratedFeatureDetailFeatureSnapshotView"];
             /** Memo */
             memo: string | null;
-            /** Relation */
-            relation: string;
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
             /** Sort Order */
             sort_order: number;
             /** Source Record Key */
@@ -7677,6 +7691,11 @@ export interface components {
             feature_id?: string | null;
             /** Issue Id */
             issue_id: string;
+            /**
+             * Last Seen At
+             * Format: date-time
+             */
+            last_seen_at: string;
             /** Message */
             message: string;
             /** Payload */
@@ -13859,6 +13878,15 @@ export interface operations {
             };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description kor-travel-geo provider 오류 */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

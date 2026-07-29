@@ -9,7 +9,9 @@ from typing import Any
 
 import pytest
 
+from kortravelmap.core.exceptions import ValidationError as DomainValidationError
 from kortravelmap.dto import Address, Coordinate, FeatureKind, SourceRole
+from kortravelmap.geocoding import ReverseGeocodeObservation
 from kortravelmap.providers.kor_travel_concierge import (
     DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
     KOR_TRAVEL_CONCIERGE_MARKER_COLOR,
@@ -324,10 +326,52 @@ async def test_kor_travel_concierge_feature_id_stable_when_category_fills_in() -
     assert b_before.feature.feature_id == b_after.feature.feature_id
 
 
-async def test_kor_travel_concierge_missing_name_is_skipped() -> None:
+async def test_kor_travel_concierge_missing_name_is_quarantined() -> None:
+    item = _item(place={**_item()["place"], "name": ""})
+    quarantined = []
+
+    assert await kor_travel_concierge_items_to_bundles(
+        [item],
+        fetched_at=_FETCHED,
+        quarantine=quarantined,
+    ) == []
+    assert [(entry.item_key, entry.reason_code) for entry in quarantined] == [
+        ("ytpc_123", "missing_place_name")
+    ]
+
+
+async def test_kor_travel_concierge_invalid_upsert_raises_without_quarantine() -> None:
     item = _item(place={**_item()["place"], "name": ""})
 
-    assert await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED) == []
+    with pytest.raises(DomainValidationError, match="place.name"):
+        await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+
+
+async def test_kor_travel_concierge_preserves_reverse_candidate_names() -> None:
+    class _Observed:
+        async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
+            assert coord == Coordinate(lon="126.7958", lat="33.5563")
+            return ReverseGeocodeObservation(
+                Address(
+                    bjd_code="1111017700",
+                    sigungu_code="11110",
+                    sido_code="11",
+                    sigungu_name="종로구",
+                ),
+                ("종로구", "서대문구"),
+            )
+
+        async def __call__(self, coord: Coordinate) -> Address | None:
+            return (await self.observe(coord)).address
+
+    [bundle] = await kor_travel_concierge_items_to_bundles(
+        [_item()],
+        fetched_at=_FETCHED,
+        reverse_geocoder=_Observed(),
+    )
+
+    assert bundle.admin_evidence is not None
+    assert bundle.admin_evidence.obs_sigungu_names == ("종로구", "서대문구")
 
 
 async def test_kor_travel_concierge_sparse_payload_uses_export_id_and_json_fallbacks() -> None:
@@ -368,13 +412,47 @@ async def test_kor_travel_concierge_sparse_payload_uses_export_id_and_json_fallb
     assert isinstance(bundle.source_record.raw_data["extra_list"][1], str)
 
 
-async def test_kor_travel_concierge_skips_non_mapping_place_and_missing_source_id() -> None:
+async def test_kor_travel_concierge_nonfinite_confidence_preserves_batch() -> None:
+    valid = _item()
+    nonfinite = _item(
+        candidate_id="candidate-nan",
+        export_id="export-nan",
+        evidence={"confidence_score": "NaN"},
+        source_record={
+            **_item()["source_record"],
+            "source_entity_id": "source-nan",
+        },
+    )
+    quarantined = []
+
+    bundles = await kor_travel_concierge_items_to_bundles(
+        [valid, nonfinite],
+        fetched_at=_FETCHED,
+        quarantine=quarantined,
+    )
+
+    assert len(bundles) == 2
+    assert quarantined == []
+    assert bundles[1].source_link.confidence == 80
+
+
+async def test_kor_travel_concierge_quarantines_missing_required_upsert_fields() -> None:
     no_place = _item(place=None)
     no_source_id = _item(candidate_id="", export_id="", source_record={})
+    quarantined = []
 
     assert await kor_travel_concierge_items_to_bundles(
-        [no_place, no_source_id], fetched_at=_FETCHED
+        [no_place, no_source_id],
+        fetched_at=_FETCHED,
+        quarantine=quarantined,
     ) == []
+    assert [(entry.item_key, entry.reason_code) for entry in quarantined] == [
+        ("ytpc_123", "missing_place_name"),
+        (
+            "payload:2fdb8d542cac7e8e",
+            "missing_source_entity_id",
+        ),
+    ]
 
 
 async def test_kor_travel_concierge_unknown_operation_is_not_loaded_or_inactivated(

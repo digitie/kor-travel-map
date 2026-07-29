@@ -1,4 +1,4 @@
-# journal 아카이브 — 2026-07-12 ~ 2026-07-24
+# journal 아카이브 — 2026-07-13 ~ 2026-07-24
 
 > `docs/journal.md`에서 분리한 과거 기록(역시간순). 현행 정본은
 > [`docs/journal.md`](../journal.md)이며, 전체 아카이브 목록도 거기에 있다.
@@ -2584,17 +2584,4 @@ types 생성물은 각 백엔드 PR에서 재생성(T-C6 일괄안은 openapi-dr
 - **n150 검증**: Python 3.11 일회성 컨테이너에서 core/lint 1,169개, API 331개, Dagster
   220개 테스트를 통과했고 Dagster 1개는 환경성 skip이었다. 전체 Ruff, main/API/Dagster strict
   mypy, import 계약, prod 문서 redaction 검사도 통과했다. live smoke는 prod 전환 단계에서 수행한다.
-
-## 2026-07-12 (codex) — Feature 목록/상세 polish와 큐레이션 지도 필터 보정
-
-- **Feature 목록**: rows/page/page size/duration 요약을 필터줄에서 표 헤더의 "Feature 목록" 옆으로
-  옮기고, 같은 영역 안의 cursor pagination은 테두리 없는 형태로 표시해 중복 테두리를 줄였다.
-- **Feature 상세 패널**: 우측 preview의 별도 "Feature 상세" 헤더 row를 제거하고, feature 이름 행에
-  편집 버튼과 전체 feature_id를 함께 표시하도록 정리했다.
-- **큐레이션 지도**: PC 화면에서 검색/필터 영역이 두 줄로 깨지지 않도록 한 줄 가로 스크롤 컨트롤바로
-  재배치하고 title 다중 선택 label은 접근성 label만 남겼다.
-- **검수 500 확인**: n150 `/v1/admin/features/change-requests?status=pending&page_size=100` 직접 호출과
-  live 검수 화면에서 500이 재현되지 않고 200/정상 빈 목록으로 표시됨을 확인했다.
-- **검증(로컬)**: admin frontend `type-check` 통과, `lint` 0 error(기존 warning 3),
-  `NEXT_PUBLIC_KOR_TRAVEL_MAP_*` 로컬값 주입 production build 통과.
 

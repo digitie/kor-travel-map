@@ -400,9 +400,9 @@ async def _geocoders_for(
         settings = KorTravelMapSettings()
         client = KorTravelGeoRestClient(
             http,
-            api_key=settings.kor_travel_geo_api_key_value,
+            api_key=settings.kor_travel_geo_api_key,
         )
-        # T-VN-H21: 결선 검증은 생성 시점(require_api_key 기본 True)에서 이뤄진다.
+        # 인증 결선 검증은 생성 시점(require_auth 기본 True)에서 이뤄진다.
         yield (
             kor_travel_geo_reverse_geocoder(client),
             kor_travel_geo_address_resolver(client, fallback="api"),

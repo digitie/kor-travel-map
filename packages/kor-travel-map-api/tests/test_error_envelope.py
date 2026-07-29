@@ -4,12 +4,22 @@ from __future__ import annotations
 
 from time import perf_counter
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
+from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
+from kortravelmap.geocoding import KorTravelGeoRestClient
+from pydantic import SecretStr
 
 from kortravelmap.api.app import create_app
+from kortravelmap.api.feature_update_http import to_http_exception
+from kortravelmap.api.feature_update_service import (
+    FeatureUpdateResolverError,
+    FeatureUpdateServiceError,
+    SigunguResolverUnavailable,
+)
 from kortravelmap.api.response import make_meta
 from kortravelmap.api.settings import ApiSettings
 
@@ -82,6 +92,122 @@ def test_unhandled_exception_uses_problem_json_500() -> None:
     assert "super secret internal stack detail" not in serialized
     assert "RuntimeError" not in serialized
     assert "Traceback" not in serialized
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_code"),
+    [
+        (
+            GeoAuthNotConfiguredError("geo trusted proxy 인증 미설정"),
+            503,
+            "GEO_AUTH_NOT_CONFIGURED",
+        ),
+        (
+            GeoRequestError("kor-travel-geo 호출 실패"),
+            502,
+            "PROVIDER_ERROR",
+        ),
+    ],
+)
+def test_typed_geo_errors_keep_exact_problem_code(
+    error: Exception,
+    expected_status: int,
+    expected_code: str,
+) -> None:
+    app = create_app(ApiSettings())
+
+    @app.get("/geo-error")
+    async def _geo_error() -> None:
+        raise error
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/geo-error",
+        headers={"X-Request-ID": "req-geo-error"},
+    )
+
+    assert response.status_code == expected_status
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json() == {
+        "type": f"https://kor-travel-map/errors/{expected_code.lower().replace('_', '-')}",
+        "title": str(error),
+        "status": expected_status,
+        "detail": str(error),
+        "code": expected_code,
+        "request_id": "req-geo-error",
+        "errors": [],
+    }
+
+
+@pytest.mark.unit
+def test_geo_problem_envelope_does_not_reflect_provider_base_url_secrets() -> None:
+    """공통 502 handler까지 통과해도 provider URL의 userinfo/path는 노출되지 않는다."""
+    app = create_app(ApiSettings())
+    secret_user = "alice"
+    secret_password = "base-password"
+    secret_path = "private-token"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502, json={"status": "ERROR"})
+
+    @app.get("/geo-sanitized-error")
+    async def _geo_sanitized_error() -> None:
+        async with httpx.AsyncClient(
+            base_url=(
+                f"http://{secret_user}:{secret_password}@geo.test/{secret_path}"
+            ),
+            transport=httpx.MockTransport(handler),
+        ) as http:
+            client = KorTravelGeoRestClient(
+                http,
+                api_key=SecretStr("configured-public-key"),
+            )
+            await client.reverse(127.0276, 37.4979)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/geo-sanitized-error",
+        headers={"X-Request-ID": "req-geo-sanitized"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["code"] == "PROVIDER_ERROR"
+    assert secret_user not in response.text
+    assert secret_password not in response.text
+    assert secret_path not in response.text
+    assert "geo.test" not in response.text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_code"),
+    [
+        (
+            SigunguResolverUnavailable("geo trusted proxy 인증 미설정"),
+            503,
+            "GEO_AUTH_NOT_CONFIGURED",
+        ),
+        (
+            FeatureUpdateResolverError("kor-travel-geo 호출 실패"),
+            502,
+            "PROVIDER_ERROR",
+        ),
+    ],
+)
+def test_feature_update_geo_adapter_keeps_typed_problem_code(
+    error: FeatureUpdateServiceError,
+    expected_status: int,
+    expected_code: str,
+) -> None:
+    app = create_app(ApiSettings())
+
+    @app.get("/feature-update-geo-error")
+    async def _feature_update_geo_error() -> None:
+        raise to_http_exception(error)
+
+    response = TestClient(app).get("/feature-update-geo-error")
+
+    assert response.status_code == expected_status
+    assert response.json()["code"] == expected_code
 
 
 @pytest.mark.unit

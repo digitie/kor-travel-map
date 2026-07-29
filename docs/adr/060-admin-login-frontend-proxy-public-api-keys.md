@@ -32,8 +32,9 @@ Next API proxy, backend trusted-proxy header, VWorld 호환 public API key로 �
    생성/폐기 시 cache를 무효화한다.
 6. Public REST surface는 `key` query parameter를 VWorld 호환 32자 영숫자 형식으로 받는다.
    trusted admin proxy 또는 service-token 요청은 key 검증을 우회한다.
-7. `kor-travel-geo` v2 호출은 PR#399 이후 `key` query를 붙인다. 현재 운용에서는 VWorld API key와
-   같은 값을 쓴다.
+7. 브라우저의 `kor-travel-geo` v2 직접 호출만 public `key` query를 사용한다. Map
+   backend(API/Dagster/CLI)는 query credential을 금지하고 geo trusted proxy identity header와
+   shared secret을 사용한다.
 8. Login rate-limit/audit의 client IP는 기본적으로 `X-Forwarded-For`/`X-Real-IP`를 신뢰하지
    않는다. reverse proxy가 해당 헤더를 덮어쓰는 배포에서만
    `KOR_TRAVEL_MAP_UI_TRUST_PROXY_HEADERS=true`로 opt-in한다.
@@ -46,11 +47,11 @@ Next API proxy, backend trusted-proxy header, VWorld 호환 public API key로 �
 - DB에는 API key 원문이 남지 않는다.
 - 기존 로컬/테스트 하위호환을 위해 `admin_proxy_secret`이 없는 설정에서는 admin gate를 강제하지
   않는다. 실제 운용 `.env`에는 secret을 넣어 프론트 프록시 경계를 활성화한다.
-- `kor-travel-geo` 호출 경로(CLI/API/Dagster/live test)는 같은 settings key 추출 규칙을 공유한다.
-  **결선 검증 위치는 T-VN-H21(2026-07-29)에서 호출 지점이 아니라 `KorTravelGeoRestClient`
-  생성 시점으로 확정했다** — 경로별로 guard를 붙이는 방식은 한 곳만 빠뜨려도 조용히 무력화되고,
-  그 회귀를 막으려던 정적 스캐너 자체가 우회 가능함이 적대적 리뷰에서 시연됐다. 위 4개 경로는
-  이제 별도 조치 없이 같은 규칙을 공유하며, 미결선은 `GeoAuthNotConfiguredError` → HTTP 503이다.
+- `kor-travel-geo` 호출 경로(CLI/API/Dagster/live test)는 같은 public API key를
+  `SecretStr`로 보관하고 `X-KTG-API-Key` header로만 보낸다. URL query와
+  `X-KTG-Actor`/`X-KTG-Roles`/`X-KTG-Admin-Proxy-Secret`은 사용하지 않으며 Map에 geo
+  admin 권한을 위임하지 않는다. 결선 검증은 `KorTravelGeoRestClient` 생성 시점이며
+  미결선은 `GeoAuthNotConfiguredError` → HTTP 503이다.
 
 ## 개정 (2026-07-18, ADR-066)
 

@@ -9,7 +9,12 @@ cd "$ROOT_DIR"
 
 IMAGE_REGISTRY="${KOR_TRAVEL_MAP_IMAGE_REGISTRY:-ghcr.io/digitie}"
 IMAGE_NAMESPACE="${KOR_TRAVEL_MAP_IMAGE_NAMESPACE:-kor-travel-map}"
-IMAGE_TAG="${KOR_TRAVEL_MAP_IMAGE_TAG:-$(git rev-parse --short=12 HEAD)}"
+GIT_REVISION="$(git rev-parse HEAD)"
+if [[ ! "$GIT_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "exact 40-character Git HEAD is required; got $GIT_REVISION" >&2
+  exit 2
+fi
+IMAGE_TAG="${KOR_TRAVEL_MAP_IMAGE_TAG:-${GIT_REVISION:0:12}}"
 PLATFORMS="${KOR_TRAVEL_MAP_DOCKER_PLATFORMS:-linux/amd64,linux/arm64}"
 BUILDER="${KOR_TRAVEL_MAP_BUILDX_BUILDER:-kor-travel-map-builder}"
 OUTPUT="${KOR_TRAVEL_MAP_BUILDX_OUTPUT:-registry}"
@@ -77,6 +82,7 @@ ensure_builder
 
 build_one "$API_IMAGE" docker/api.Dockerfile
 build_one "$FRONTEND_IMAGE" docker/frontend.Dockerfile \
+  --build-arg "KOR_TRAVEL_MAP_GIT_COMMIT=${GIT_REVISION}" \
   --build-arg "NEXT_PUBLIC_KOR_TRAVEL_MAP_API=${NEXT_PUBLIC_KOR_TRAVEL_MAP_API}" \
   --build-arg "NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=${NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL}" \
   --build-arg "NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=${NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL:-http://127.0.0.1:12501}" \

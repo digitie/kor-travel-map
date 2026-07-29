@@ -11,7 +11,7 @@ from typing import Any, cast
 
 import pytest
 from dagster import DagsterInstance, Definitions, asset, define_asset_job, resource
-from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.client import AsyncKorTravelMapClient, IntegrityFindingSyncResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationKey
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
 from kortravelmap.providers.feature_operation_registry import (
@@ -80,10 +80,11 @@ class _Client:
 
     async def record_address_validation_findings(
         self, findings: object, **kwargs: object
-    ) -> int:
+    ) -> IntegrityFindingSyncResult:
         """T-VN-H30A: durable finding 기록 (테스트 double은 보관만 한다)."""
         self.recorded_findings = list(findings)  # type: ignore[arg-type]
-        return len(self.recorded_findings)
+        count = len(self.recorded_findings)
+        return IntegrityFindingSyncResult(count, count, count)
 
 
 class _Log:

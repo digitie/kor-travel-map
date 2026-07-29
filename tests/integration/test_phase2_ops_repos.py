@@ -8,12 +8,14 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.core.ids import make_integrity_finding_key
 from kortravelmap.infra.integrity_violation_repo import (
     DataIntegrityViolationStateConflict,
     create_data_integrity_violation,
     get_data_integrity_violation,
     list_data_integrity_violations,
     set_data_integrity_violation_status,
+    sync_integrity_findings,
 )
 from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
 from kortravelmap.infra.poi_cache_target_repo import (
@@ -441,6 +443,7 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     )
     assert violation.status == "open"
     assert violation.payload["distance_m"] == 120.0
+    assert violation.last_seen_at >= violation.detected_at
 
     loaded = await get_data_integrity_violation(migrated_session, violation.issue_id)
     assert loaded == violation
@@ -505,4 +508,62 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     await migrated_session.execute(
         text("DELETE FROM feature.features WHERE feature_id = 'feature:violation:1'")
     )
-    assert await get_data_integrity_violation(migrated_session, violation.issue_id) is None
+    after_feature_delete = await get_data_integrity_violation(
+        migrated_session, violation.issue_id
+    )
+    assert after_feature_delete is not None
+    assert after_feature_delete.feature_id is None
+
+
+async def test_integrity_finding_recurrence_tracks_latest_fk_targets(
+    migrated_session: AsyncSession,
+) -> None:
+    provider = "python-mois-api"
+    dataset_key = "mois_license_features_bulk"
+    for suffix in ("old", "new"):
+        await _insert_feature(migrated_session, f"feature:violation:{suffix}")
+        await _insert_source_record(migrated_session, f"src:violation:{suffix}")
+
+    dedupe_key = make_integrity_finding_key(
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type="license",
+        source_entity_id="stable-entity",
+        violation_type="missing_address",
+    )
+
+    def finding(suffix: str) -> dict[str, object]:
+        return {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "source_record_key": f"src:violation:{suffix}",
+            "feature_id": f"feature:violation:{suffix}",
+            "violation_type": "missing_address",
+            "severity": "warning",
+            "message": suffix,
+            "payload": {"dedupe_key": dedupe_key, "occurrence_count": 1},
+        }
+
+    await sync_integrity_findings(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        findings=[finding("old")],
+    )
+    await sync_integrity_findings(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        findings=[finding("new")],
+    )
+
+    rows = await list_data_integrity_violations(
+        migrated_session,
+        provider=provider,
+        dataset_key=dataset_key,
+        violation_type="missing_address",
+    )
+    matched = [row for row in rows if row.payload.get("dedupe_key") == dedupe_key]
+    assert len(matched) == 1
+    assert matched[0].source_record_key == "src:violation:new"
+    assert matched[0].feature_id == "feature:violation:new"

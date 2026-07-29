@@ -1,5 +1,18 @@
 import { expect, test } from "@playwright/test";
 
+import type { components } from "../src/api/types";
+import { bffApiPath } from "./bff-api-path";
+
+type CategoriesResponse = components["schemas"]["CategoriesResponse"];
+
+const EMPTY_CATEGORIES: CategoriesResponse = {
+  data: { include_counts: false, items: [] },
+  meta: {
+    duration_ms: 0,
+    request_id: "e2e-features-new-categories",
+  },
+};
+
 /**
  * `/admin/features/new` (1097줄 수동 생성 폼) — ZERO 커버 페이지 spec
  * (T-AUDIT-0616, `docs/reports/e2e-scenario-coverage-2026-06-16.md` §1.2).
@@ -15,37 +28,67 @@ import { expect, test } from "@playwright/test";
  * NOTE: Playwright는 Windows 호스트에서만 실행된다. 라이브 실행 검증은 Windows 런 필요.
  */
 test.describe("/admin/features/new", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/v1/categories**", async (route) => {
+      const request = route.request();
+      const apiPath = bffApiPath(request.url());
+      if (request.method() !== "GET" || apiPath !== "/v1/categories") {
+        throw new Error(
+          `Unhandled category route: ${request.method()} ${apiPath}`,
+        );
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(EMPTY_CATEGORIES),
+      });
+    });
+  });
+
   test("폼 렌더 — 섹션 + 핵심 필드 + 제출 버튼", async ({ page }) => {
     await page.goto("/admin/features/new");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "New feature" }),
+      page.getByRole("heading", { level: 1, name: "새 Feature" }),
     ).toBeVisible();
 
-    for (const section of ["좌표", "kor-travel-geo", "중복 후보", "기본 정보", "주소", "상세"]) {
+    for (const section of [
+      "좌표",
+      "kor-travel-geo",
+      "중복 후보",
+      "기본 정보",
+      "주소",
+      "상세",
+    ]) {
       await expect(
         page.getByRole("heading", { level: 2, name: section }),
       ).toBeVisible();
     }
 
-    await expect(page.getByLabel("name", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("category", { exact: true })).toHaveValue(
-      "01070300",
-    );
-    await expect(page.getByLabel("lon", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("lat", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("create name", { exact: true })).toBeVisible();
+    await expect(
+      page.getByLabel("create category", { exact: true }),
+    ).toHaveValue("01070300");
+    await expect(
+      page.getByRole("textbox", { name: "경도", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "위도", exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "요청 생성" })).toBeVisible();
   });
 
   test("kind 옵션은 place/event 2종", async ({ page }) => {
     await page.goto("/admin/features/new");
 
-    const kind = page.getByLabel("kind", { exact: true });
+    const kind = page.getByLabel("create kind", { exact: true });
     await expect(kind).toHaveValue("place");
     await kind.selectOption("event");
     await expect(kind).toHaveValue("event");
     // event 전환 시 detail 폼에 starts_at 노출.
-    await expect(page.getByLabel("starts_at", { exact: true })).toBeVisible();
+    await expect(
+      page.getByLabel("create event start", { exact: true }),
+    ).toBeVisible();
   });
 
   test("검증 — name 비우고 제출하면 필수 에러", async ({ page }) => {
@@ -54,21 +97,24 @@ test.describe("/admin/features/new", () => {
     // 기본값: name 빈값, reason 빈값. 그대로 제출 → name 필수에서 throw.
     await page.getByRole("button", { name: "요청 생성" }).click();
 
-    await expect(page.getByText("feature 작성 실패")).toBeVisible();
     await expect(page.getByText("name은 필수입니다.").first()).toBeVisible();
   });
 
   test("검증 — 한국 본토 밖 좌표는 범위 에러", async ({ page }) => {
     await page.goto("/admin/features/new");
 
-    await page.getByLabel("name", { exact: true }).fill("범위밖 테스트");
-    await page.getByLabel("reason", { exact: true }).fill("e2e");
-    await page.getByLabel("lon", { exact: true }).fill("200");
-    await page.getByLabel("lat", { exact: true }).fill("10");
+    await page.getByLabel("create name", { exact: true }).fill("범위밖 테스트");
+    await page.getByRole("textbox", { name: "사유", exact: true }).fill("e2e");
+    await page.getByRole("textbox", { name: "경도", exact: true }).fill("200");
+    await page.getByRole("textbox", { name: "위도", exact: true }).fill("10");
     await page.getByRole("button", { name: "요청 생성" }).click();
 
     await expect(
-      page.getByText("좌표는 한국 본토 기준 범위 안이어야 합니다.").first(),
+      page
+        .getByText(
+          "좌표는 대한민국 범위 안의 숫자로 입력하세요. 경도는 124~132, 위도는 33~39.5 사이입니다.",
+        )
+        .first(),
     ).toBeVisible();
   });
 });

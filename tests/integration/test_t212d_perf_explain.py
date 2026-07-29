@@ -828,15 +828,15 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "bbox_min_lat": None,
             "bbox_max_lon": None,
             "bbox_max_lat": None,
-            "cursor_detected_at": None,
+            "cursor_last_seen_at": None,
             "cursor_issue_id": None,
             "limit": 51,
         },
     )
     _assert_uses_index(
         issues,
-        "idx_violations_provider_status_detected",
-        "idx_violations_status_detected",
+        "idx_violations_provider_status_seen",
+        "idx_violations_status_seen",
     )
 
     dedup = await _explain_json(

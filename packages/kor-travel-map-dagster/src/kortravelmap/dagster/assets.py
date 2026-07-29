@@ -49,9 +49,11 @@ from kortravelmap.providers.kor_travel_concierge import (
     DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
     KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
     KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
+    KorTravelConciergeQuarantine,
     kor_travel_concierge_inactive_entity_ids,
     kor_travel_concierge_items_to_bundles,
     kor_travel_concierge_latest_items,
+    kor_travel_concierge_upsert_count,
 )
 from kortravelmap.providers.krairport import (
     DATASET_KEY_AIRPORTS,
@@ -127,7 +129,7 @@ from kortravelmap.providers.standard_data import (
     tourist_attractions_to_bundles,
 )
 
-from dagster import AssetExecutionContext, Backoff, RetryPolicy, asset
+from dagster import AssetExecutionContext, Backoff, Failure, RetryPolicy, asset
 
 from .etl import (
     DagsterFeatureLoadResult,
@@ -1243,20 +1245,33 @@ async def run_feature_place_kor_travel_concierge_youtube(
     fetched_at = await _fetched_at(context)
     # T-VN-H28B: 건별 격리를 실제로 결선한다. 결선하지 않으면 item 1건의 구성 실패가
     # batch 전체를 죽인다(concierge export는 1회 1,477건 전량 재생이라 손실이 전부다).
-    quarantined: list[tuple[Any, Exception]] = []
+    quarantined: list[KorTravelConciergeQuarantine] = []
     bundles = await kor_travel_concierge_items_to_bundles(
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
         quarantine=quarantined,
     )
+    upsert_count = kor_travel_concierge_upsert_count(records)
+    accounted_count = len(bundles) + len(quarantined)
+    if accounted_count != upsert_count:
+        raise Failure(
+            description=(
+                "concierge upsert 보존 불변식 위반: "
+                f"input={upsert_count}, bundle+quarantine={accounted_count}"
+            )
+        )
     if quarantined:
         # silent cap 금지 — 격리한 건수와 사유를 metadata로 드러낸다.
         context.add_output_metadata(
             {
                 "concierge_quarantined_count": len(quarantined),
+                "concierge_quarantined_item_keys": [
+                    entry.item_key for entry in quarantined[:20]
+                ],
                 "concierge_quarantined_reasons": [
-                    f"{type(exc).__name__}: {exc}"[:300] for _, exc in quarantined[:20]
+                    f"{entry.reason_code}: {entry.message}"[:300]
+                    for entry in quarantined[:20]
                 ],
             }
         )

@@ -9,31 +9,10 @@ export const metadata: Metadata = {
     "실행 타임라인·스케줄·갱신 요청을 한 화면에서 관측/조작하는 파이프라인 운영 화면 (ADR-064).",
 };
 
-type SearchParams = Record<string, string | string[] | undefined>;
-
-function firstParam(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-  return value;
-}
-
-export default async function OpsPipelinePage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
-  const params = await searchParams;
-  const initialQuery = new URLSearchParams();
-  for (const [key, rawValue] of Object.entries(params)) {
-    const value = firstParam(rawValue);
-    if (value !== undefined) {
-      initialQuery.set(key, value);
-    }
-  }
+export default function OpsPipelinePage() {
   return (
     <Suspense fallback={<div className="p-6">파이프라인 불러오는 중...</div>}>
-      <PipelineClient initialQuery={initialQuery.toString()} />
+      <PipelineClient />
     </Suspense>
   );
 }

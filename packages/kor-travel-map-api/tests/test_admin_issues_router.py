@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from kortravelmap.core.exceptions import GeoRequestError
 from kortravelmap.infra.feature_address_repo import (
     FeatureAddressOverrideResult,
     FeatureAddressSnapshot,
@@ -73,6 +74,7 @@ def _ops_issue(issue_id: str = _VIOLATION_KEY) -> OpsIntegrityIssue:
         payload={"raw_address": "서울특별시 영등포구 여의공원로 120"},
         status="open",
         detected_at=now,
+        last_seen_at=now,
         resolved_at=None,
     )
 
@@ -96,6 +98,7 @@ def _violation(
         payload={"raw_address": "서울특별시 영등포구 여의공원로 120"},
         status=status,
         detected_at=now,
+        last_seen_at=now,
         resolved_at=resolved_at,
     )
 
@@ -176,6 +179,7 @@ def test_list_issues_passes_filters_and_envelope(
         "total": None,
     }
     assert body["data"]["items"][0]["issue_id"] == _VIOLATION_KEY
+    assert body["data"]["items"][0]["last_seen_at"] == "2026-06-03T00:00:00Z"
 
 
 @pytest.mark.unit
@@ -471,3 +475,33 @@ def test_patch_geocode_action_503_when_base_url_unset(
     )
 
     assert response.status_code == 503
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "GEO_AUTH_NOT_CONFIGURED"
+
+
+@pytest.mark.unit
+def test_patch_geocode_action_keeps_provider_error_code(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _get(_session: Any, _key: str) -> DataIntegrityViolation:
+        return _violation()
+
+    async def _feature(_session: Any, _feature_id: str) -> FeatureAddressSnapshot:
+        return _snapshot()
+
+    async def _reverse(_lon: float, _lat: float) -> dict[str, Any] | None:
+        raise GeoRequestError("kor-travel-geo 호출 실패")
+
+    monkeypatch.setattr(router_mod, "get_data_integrity_violation", _get)
+    monkeypatch.setattr(router_mod, "get_feature_address_snapshot", _feature)
+    monkeypatch.setattr(router_mod, "_reverse_geocode", _reverse)
+
+    response = client.patch(
+        f"/v1/admin/issues/{_VIOLATION_KEY}",
+        json={"action": "retry_reverse_geocode"},
+    )
+
+    assert response.status_code == 502
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "PROVIDER_ERROR"
