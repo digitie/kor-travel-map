@@ -427,6 +427,11 @@ def test_reverse_not_attempted_is_warning_not_failure() -> None:
     ]
 
 
+def test_observation_requires_reverse_attempted() -> None:
+    with pytest.raises(ValueError, match="reverse_attempted=True"):
+        AdminEvidence(obs_code="2671025300")
+
+
 def test_reverse_attempted_without_observation_or_claim_is_error() -> None:
     bundle = _bundle(
         bjd_code=None,

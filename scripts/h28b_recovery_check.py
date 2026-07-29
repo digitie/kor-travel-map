@@ -15,12 +15,13 @@ from collections import Counter
 from datetime import UTC, datetime
 
 import httpx
+from kortravelmap.dagster.validation import validate_feature_bundles_address
+
 from kortravelmap.geocoding import KorTravelGeoRestClient, kor_travel_geo_reverse_geocoder
 from kortravelmap.providers.kor_travel_concierge import (
+    KorTravelConciergeQuarantine,
     kor_travel_concierge_items_to_bundles,
 )
-
-from kortravelmap.dagster.validation import validate_feature_bundles_address
 
 CONCIERGE = os.environ["CONCIERGE_BASE"]
 CKEY = os.environ["CONCIERGE_KEY"]
@@ -48,7 +49,8 @@ def fetch_items() -> list[dict]:
 
 async def main() -> None:
     items = fetch_items()
-    quarantine: list = []
+    upserts = [item for item in items if item.get("operation") == "upsert"]
+    quarantine: list[KorTravelConciergeQuarantine] = []
 
     async with httpx.AsyncClient(base_url=GEO, timeout=30.0) as http:
         client = KorTravelGeoRestClient(http, api_key=GKEY)
@@ -61,6 +63,11 @@ async def main() -> None:
 
     print(f"export items : {len(items)}")
     print(f"bundles      : {len(bundles)}  (건별 격리 {len(quarantine)}건)")
+    assert len(upserts) == len(bundles) + len(quarantine), (
+        "upsert 보존 불변식이 깨졌다: upserts != bundles + quarantine"
+    )
+    for entry in quarantine[:20]:
+        print(f"  quarantine {entry.item_key} | {entry.reason_code} | {entry.message}")
 
     summary = validate_feature_bundles_address(bundles)
     by_code = Counter(i.code for i in summary.issues)
@@ -68,6 +75,7 @@ async def main() -> None:
     print(f"error(전체)  : {summary.error_count}")
     print(f"blocking     : {len(summary.blocking_issues)}  ← 실제 drop 대상")
     print(f"evidence     : {summary.evidence_grade_counts}")
+    print(f"name states  : {summary.name_state_counts}")
 
     dropped = {i.feature_id for i in summary.blocking_issues}
     print(f"\n적재되는 후보: {len(bundles) - len(dropped)} / {len(bundles)}")
@@ -76,9 +84,9 @@ async def main() -> None:
     dual = summary.evidence_grade_counts.get("dual", 0)
     print(f"코드 교차검증 성립: {dual}/{len(bundles)} ({dual * 100 // max(len(bundles), 1)}%)")
 
-    conflicts = [i for i in summary.issues if i.code.startswith("admin_code_conflict")]
-    print(f"행정코드 불일치(warning): {len(conflicts)}")
-    for c in conflicts[:10]:
+    stale = [i for i in summary.issues if i.code.startswith("admin_code_stale")]
+    print(f"행정코드 staleness(warning): {len(stale)}")
+    for c in stale[:10]:
         print(f"  {c.code} | {c.message}")
 
 
