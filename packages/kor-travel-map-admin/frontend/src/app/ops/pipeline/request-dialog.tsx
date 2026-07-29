@@ -1,7 +1,7 @@
 "use client";
 
 import { PlayIcon } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 
 import { ApiClientError, getJson } from "@/api/client";
 import {
@@ -217,62 +217,20 @@ function MoisPrecheckNotice({
   );
 }
 
-function useRequestCreateDialogController({
-  onCreated,
-}: {
-  onCreated: (kind: ExecutionKind, id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const dialogSessionRef = useRef(0);
-  const createPendingRef = useRef(false);
-  const submitPendingSessionRef = useRef<number | null>(null);
+function useRequestScopeForm(catalogRows: CatalogRow[]) {
   const [scopeType, setScopeType] = useState<ScopeType>("provider_dataset");
-  // provider_dataset scope
   const [scopeProvider, setScopeProvider] = useState("");
   const [scopeDataset, setScopeDataset] = useState("");
   const [scopeSyncScope, setScopeSyncScope] = useState("");
-  // 좌표 계열 scope
   const [lon, setLon] = useState("126.9780");
   const [lat, setLat] = useState("37.5665");
   const [radiusKm, setRadiusKm] = useState("5");
-  // bbox scope
   const [minLon, setMinLon] = useState("126.7");
   const [minLat, setMinLat] = useState("37.3");
   const [maxLon, setMaxLon] = useState("127.2");
   const [maxLat, setMaxLat] = useState("37.8");
-  // 목록 계열 scope
   const [featureIdsText, setFeatureIdsText] = useState("");
-  const [externalSystem, setExternalSystem] = useState("");
-  const [targetKeysText, setTargetKeysText] = useState("");
-  const [cacheScopeMode, setCacheScopeMode] = useState<
-    "center_radius" | "sigungu_by_radius"
-  >("center_radius");
-  const [cacheRadiusKm, setCacheRadiusKm] = useState("");
-  // 공통 필드
-  const [providers, setProviders] = useState<string[]>([]);
-  const [datasetKeys, setDatasetKeys] = useState("");
-  const [runMode, setRunMode] = useState<"queued" | "now">("queued");
-  const [priority, setPriority] = useState("50");
-  const [dryRun, setDryRun] = useState(true);
-  const [reason, setReason] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-  const [submittingSession, setSubmittingSession] = useState<number | null>(null);
-  const [previewInputKey, setPreviewInputKey] = useState<string | null>(null);
-  const [createInputKey, setCreateInputKey] = useState<string | null>(null);
-  const submittingPrecheck = submittingSession !== null;
 
-  const catalogQuery = usePipelineDatasetsCatalog();
-  const catalogRows = useMemo(
-    () => canonicalCatalogRows(catalogQuery.data),
-    [catalogQuery.data],
-  );
-  const providerOptions = useMemo(
-    () =>
-      [...new Set(catalogRows.map((row) => row.provider))]
-        .sort()
-        .map((provider) => ({ value: provider, label: provider })),
-    [catalogRows],
-  );
   const providerDatasetOptions = useMemo(() => {
     const selectedProvider = scopeProvider.trim();
     const options = new Set<string>();
@@ -295,13 +253,262 @@ function useRequestCreateDialogController({
       selectedScopeCapability.supported &&
       selectedScopeCapability.selector !== "none",
   );
-  if (
-    scopeSyncScope &&
-    selectedScopeCapability &&
-    !explicitScopeSupported
-  ) {
-    setScopeSyncScope("");
-  }
+  const effectiveScopeSyncScope =
+    selectedScopeCapability !== null && !explicitScopeSupported
+      ? ""
+      : scopeSyncScope;
+
+  const buildScope = useCallback((): FeatureUpdateScope | string => {
+    if (scopeType === "provider_dataset") {
+      if (!scopeProvider.trim() || !scopeDataset.trim()) {
+        return "provider와 dataset_key를 입력하세요.";
+      }
+      return {
+        type: "provider_dataset",
+        provider: scopeProvider.trim(),
+        dataset_key: scopeDataset.trim(),
+        ...(effectiveScopeSyncScope.trim()
+          ? { sync_scope: effectiveScopeSyncScope.trim() }
+          : {}),
+      };
+    }
+    if (scopeType === "center_radius" || scopeType === "sigungu_by_radius") {
+      const lonValue = Number(lon);
+      const latValue = Number(lat);
+      const radiusValue = Number(radiusKm);
+      if (
+        !Number.isFinite(lonValue) ||
+        !Number.isFinite(latValue) ||
+        !Number.isFinite(radiusValue) ||
+        radiusValue <= 0
+      ) {
+        return "경도/위도/반경(km)을 숫자로 입력하세요.";
+      }
+      if (scopeType === "center_radius") {
+        return {
+          type: "center_radius",
+          center: { lon: lonValue, lat: latValue },
+          radius_km: radiusValue,
+        };
+      }
+      return {
+        type: "sigungu_by_radius",
+        center: { lon: lonValue, lat: latValue },
+        radius_km: radiusValue,
+        match: "intersects",
+      };
+    }
+    if (scopeType === "bbox") {
+      const values = [minLon, minLat, maxLon, maxLat].map(Number);
+      if (values.some((value) => !Number.isFinite(value))) {
+        return "bbox 좌표 4개를 숫자로 입력하세요.";
+      }
+      return {
+        type: "bbox",
+        min_lon: values[0],
+        min_lat: values[1],
+        max_lon: values[2],
+        max_lat: values[3],
+      };
+    }
+    if (scopeType === "feature_ids") {
+      const ids = splitList(featureIdsText);
+      if (ids.length === 0) {
+        return "feature id를 1개 이상 입력하세요.";
+      }
+      return { type: "feature_ids", feature_ids: ids };
+    }
+    return "cache target scope 입력을 확인하세요.";
+  }, [
+    effectiveScopeSyncScope,
+    featureIdsText,
+    lat,
+    lon,
+    maxLat,
+    maxLon,
+    minLat,
+    minLon,
+    radiusKm,
+    scopeDataset,
+    scopeProvider,
+    scopeType,
+  ]);
+
+  return useMemo(
+    () => ({
+      buildScope,
+      effectiveScopeSyncScope,
+      explicitScopeSupported,
+      featureIdsText,
+      lat,
+      lon,
+      maxLat,
+      maxLon,
+      minLat,
+      minLon,
+      providerDatasetOptions,
+      radiusKm,
+      scopeDataset,
+      scopeProvider,
+      scopeType,
+      selectedScopeCapability,
+      setFeatureIdsText,
+      setLat,
+      setLon,
+      setMaxLat,
+      setMaxLon,
+      setMinLat,
+      setMinLon,
+      setRadiusKm,
+      setScopeDataset,
+      setScopeProvider,
+      setScopeSyncScope,
+      setScopeType,
+    }),
+    [
+      buildScope,
+      effectiveScopeSyncScope,
+      explicitScopeSupported,
+      featureIdsText,
+      lat,
+      lon,
+      maxLat,
+      maxLon,
+      minLat,
+      minLon,
+      providerDatasetOptions,
+      radiusKm,
+      scopeDataset,
+      scopeProvider,
+      scopeType,
+      selectedScopeCapability,
+    ],
+  );
+}
+
+function useRequestTargetForm() {
+  const [externalSystem, setExternalSystem] = useState("");
+  const [targetKeysText, setTargetKeysText] = useState("");
+  const [cacheScopeMode, setCacheScopeMode] = useState<
+    "center_radius" | "sigungu_by_radius"
+  >("center_radius");
+  const [cacheRadiusKm, setCacheRadiusKm] = useState("");
+  const [providers, setProviders] = useState<string[]>([]);
+  const [datasetKeys, setDatasetKeys] = useState("");
+
+  const buildCacheTargetScope = useCallback((): FeatureUpdateScope | string => {
+    const keys = splitList(targetKeysText);
+    if (!externalSystem.trim() || keys.length === 0) {
+      return "external_system과 target key를 입력하세요.";
+    }
+    const cacheRadius = cacheRadiusKm.trim() ? Number(cacheRadiusKm) : null;
+    if (
+      cacheRadius !== null &&
+      (!Number.isFinite(cacheRadius) || cacheRadius <= 0)
+    ) {
+      return "cache 반경(km)은 양수여야 합니다.";
+    }
+    return {
+      type: "cache_target_keys",
+      external_system: externalSystem.trim(),
+      target_keys: keys,
+      scope_mode: cacheScopeMode,
+      ...(cacheRadius !== null ? { radius_km: cacheRadius } : {}),
+    };
+  }, [cacheRadiusKm, cacheScopeMode, externalSystem, targetKeysText]);
+
+  return useMemo(
+    () => ({
+      buildCacheTargetScope,
+      cacheRadiusKm,
+      cacheScopeMode,
+      datasetKeys,
+      externalSystem,
+      providers,
+      setCacheRadiusKm,
+      setCacheScopeMode,
+      setDatasetKeys,
+      setExternalSystem,
+      setProviders,
+      setTargetKeysText,
+      targetKeysText,
+    }),
+    [
+      buildCacheTargetScope,
+      cacheRadiusKm,
+      cacheScopeMode,
+      datasetKeys,
+      externalSystem,
+      providers,
+      targetKeysText,
+    ],
+  );
+}
+
+function useRequestExecutionForm() {
+  const [runMode, setRunMode] = useState<"queued" | "now">("queued");
+  const [priority, setPriority] = useState("50");
+  const [dryRun, setDryRun] = useState(true);
+  const [reason, setReason] = useState("");
+
+  return useMemo(
+    () => ({
+      dryRun,
+      priority,
+      reason,
+      runMode,
+      setDryRun,
+      setPriority,
+      setReason,
+      setRunMode,
+    }),
+    [dryRun, priority, reason, runMode],
+  );
+}
+
+function useRequestCreateDialogController() {
+  const [open, setOpen] = useState(false);
+  const dialogSessionRef = useRef(0);
+  const createPendingRef = useRef(false);
+  const submitPendingSessionRef = useRef<number | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [submittingSession, setSubmittingSession] = useState<number | null>(null);
+  const [previewInputKey, setPreviewInputKey] = useState<string | null>(null);
+  const [createInputKey, setCreateInputKey] = useState<string | null>(null);
+  const submittingPrecheck = submittingSession !== null;
+
+  const catalogQuery = usePipelineDatasetsCatalog();
+  const catalogRows = useMemo(
+    () => canonicalCatalogRows(catalogQuery.data),
+    [catalogQuery.data],
+  );
+  const providerOptions = useMemo(
+    () =>
+      [...new Set(catalogRows.map((row) => row.provider))]
+        .sort()
+        .map((provider) => ({ value: provider, label: provider })),
+    [catalogRows],
+  );
+  const scopeForm = useRequestScopeForm(catalogRows);
+  const targetForm = useRequestTargetForm();
+  const executionForm = useRequestExecutionForm();
+  const {
+    buildScope: buildNonCacheScope,
+    effectiveScopeSyncScope,
+    scopeDataset,
+    scopeProvider,
+    scopeType,
+  } = scopeForm;
+  const {
+    buildCacheTargetScope,
+    cacheRadiusKm,
+    cacheScopeMode,
+    datasetKeys,
+    externalSystem,
+    providers,
+    targetKeysText,
+  } = targetForm;
+  const { dryRun, priority, reason, runMode } = executionForm;
 
   const createRequest = useCreateUpdateRequestMutation();
   const previewRequest = usePreviewUpdateRequestMutation();
@@ -309,15 +516,15 @@ function useRequestCreateDialogController({
     scopeType,
     scopeProvider,
     scopeDataset,
-    scopeSyncScope,
-    lon,
-    lat,
-    radiusKm,
-    minLon,
-    minLat,
-    maxLon,
-    maxLat,
-    featureIdsText,
+    effectiveScopeSyncScope,
+    scopeForm.lon,
+    scopeForm.lat,
+    scopeForm.radiusKm,
+    scopeForm.minLon,
+    scopeForm.minLat,
+    scopeForm.maxLon,
+    scopeForm.maxLat,
+    scopeForm.featureIdsText,
     externalSystem,
     targetKeysText,
     cacheScopeMode,
@@ -388,84 +595,6 @@ function useRequestCreateDialogController({
   ]);
   const moisPrecheck = useMoisSourceSyncPrecheck(moisSelected !== null);
 
-  const buildScope = (): FeatureUpdateScope | string => {
-    if (scopeType === "provider_dataset") {
-      if (!scopeProvider.trim() || !scopeDataset.trim()) {
-        return "provider와 dataset_key를 입력하세요.";
-      }
-      return {
-        type: "provider_dataset",
-        provider: scopeProvider.trim(),
-        dataset_key: scopeDataset.trim(),
-        ...(scopeSyncScope.trim() ? { sync_scope: scopeSyncScope.trim() } : {}),
-      };
-    }
-    if (scopeType === "center_radius" || scopeType === "sigungu_by_radius") {
-      const lonValue = Number(lon);
-      const latValue = Number(lat);
-      const radiusValue = Number(radiusKm);
-      if (
-        !Number.isFinite(lonValue) ||
-        !Number.isFinite(latValue) ||
-        !Number.isFinite(radiusValue) ||
-        radiusValue <= 0
-      ) {
-        return "경도/위도/반경(km)을 숫자로 입력하세요.";
-      }
-      if (scopeType === "center_radius") {
-        return {
-          type: "center_radius",
-          center: { lon: lonValue, lat: latValue },
-          radius_km: radiusValue,
-        };
-      }
-      return {
-        type: "sigungu_by_radius",
-        center: { lon: lonValue, lat: latValue },
-        radius_km: radiusValue,
-        match: "intersects",
-      };
-    }
-    if (scopeType === "bbox") {
-      const values = [minLon, minLat, maxLon, maxLat].map(Number);
-      if (values.some((value) => !Number.isFinite(value))) {
-        return "bbox 좌표 4개를 숫자로 입력하세요.";
-      }
-      return {
-        type: "bbox",
-        min_lon: values[0],
-        min_lat: values[1],
-        max_lon: values[2],
-        max_lat: values[3],
-      };
-    }
-    if (scopeType === "feature_ids") {
-      const ids = splitList(featureIdsText);
-      if (ids.length === 0) {
-        return "feature id를 1개 이상 입력하세요.";
-      }
-      return { type: "feature_ids", feature_ids: ids };
-    }
-    const keys = splitList(targetKeysText);
-    if (!externalSystem.trim() || keys.length === 0) {
-      return "external_system과 target key를 입력하세요.";
-    }
-    const cacheRadius = cacheRadiusKm.trim() ? Number(cacheRadiusKm) : null;
-    if (
-      cacheRadius !== null &&
-      (!Number.isFinite(cacheRadius) || cacheRadius <= 0)
-    ) {
-      return "cache 반경(km)은 양수여야 합니다.";
-    }
-    return {
-      type: "cache_target_keys",
-      external_system: externalSystem.trim(),
-      target_keys: keys,
-      scope_mode: cacheScopeMode,
-      ...(cacheRadius !== null ? { radius_km: cacheRadius } : {}),
-    };
-  };
-
   const submit = async () => {
     const dialogSession = dialogSessionRef.current;
     if (submitPendingSessionRef.current === dialogSession) return;
@@ -475,7 +604,10 @@ function useRequestCreateDialogController({
     createRequest.reset();
     setPreviewInputKey(null);
     setCreateInputKey(null);
-    const scope = buildScope();
+    const scope =
+      scopeType === "cache_target_keys"
+        ? buildCacheTargetScope()
+        : buildNonCacheScope();
     if (typeof scope === "string") {
       setFormError(scope);
       return;
@@ -630,107 +762,69 @@ function useRequestCreateDialogController({
   const preview = matchingPreview ? previewRequest.data?.data : undefined;
 
   return {
-    cacheRadiusKm,
-    cacheScopeMode,
     catalogQuery,
     closeDialog,
     conflictRequestId,
     createRequest,
     created,
-    datasetKeys,
-    dryRun,
-    explicitScopeSupported,
-    externalSystem,
-    featureIdsText,
+    executionForm,
     formError,
     handleOpenChange,
+    moisPrecheck,
+    moisSelected,
+    open,
+    openDialog,
+    preview,
+    previewRequest,
+    providerOptions,
+    requestError,
+    retryAfterSeconds,
+    scopeForm,
+    setFormError,
+    submit,
+    submittingPrecheck,
+    targetForm,
+  };
+}
+
+const RequestIdentityFields = memo(function RequestIdentityFields({
+  clearFormError,
+  providerOptions,
+  scopeForm,
+}: {
+  clearFormError: () => void;
+  providerOptions: { label: string; value: string }[];
+  scopeForm: ReturnType<typeof useRequestScopeForm>;
+}) {
+  const {
+    effectiveScopeSyncScope: scopeSyncScope,
+    explicitScopeSupported,
+    featureIdsText,
     lat,
     lon,
     maxLat,
     maxLon,
     minLat,
     minLon,
-    moisPrecheck,
-    moisSelected,
-    onCreated,
-    open,
-    openDialog,
-    preview,
-    previewRequest,
-    priority,
     providerDatasetOptions,
-    providerOptions,
-    providers,
     radiusKm,
-    reason,
-    requestError,
-    retryAfterSeconds,
-    runMode,
     scopeDataset,
     scopeProvider,
-    scopeSyncScope,
     scopeType,
     selectedScopeCapability,
-    setCacheRadiusKm,
-    setCacheScopeMode,
-    setDatasetKeys,
-    setDryRun,
-    setExternalSystem,
     setFeatureIdsText,
-    setFormError,
     setLat,
     setLon,
     setMaxLat,
     setMaxLon,
     setMinLat,
     setMinLon,
-    setPriority,
-    setProviders,
     setRadiusKm,
-    setReason,
-    setRunMode,
     setScopeDataset,
     setScopeProvider,
     setScopeSyncScope,
     setScopeType,
-    setTargetKeysText,
-    submit,
-    submittingPrecheck,
-    targetKeysText,
-  };
-}
-
-function RequestIdentityFields({
-  explicitScopeSupported,
-  featureIdsText,
-  lat,
-  lon,
-  maxLat,
-  maxLon,
-  minLat,
-  minLon,
-  providerDatasetOptions,
-  providerOptions,
-  radiusKm,
-  scopeDataset,
-  scopeProvider,
-  scopeSyncScope,
-  scopeType,
-  selectedScopeCapability,
-  setFeatureIdsText,
-  setFormError,
-  setLat,
-  setLon,
-  setMaxLat,
-  setMaxLon,
-  setMinLat,
-  setMinLon,
-  setRadiusKm,
-  setScopeDataset,
-  setScopeProvider,
-  setScopeSyncScope,
-  setScopeType,
-}: Pick<ReturnType<typeof useRequestCreateDialogController>, "explicitScopeSupported" | "featureIdsText" | "lat" | "lon" | "maxLat" | "maxLon" | "minLat" | "minLon" | "providerDatasetOptions" | "providerOptions" | "radiusKm" | "scopeDataset" | "scopeProvider" | "scopeSyncScope" | "scopeType" | "selectedScopeCapability" | "setFeatureIdsText" | "setFormError" | "setLat" | "setLon" | "setMaxLat" | "setMaxLon" | "setMinLat" | "setMinLon" | "setRadiusKm" | "setScopeDataset" | "setScopeProvider" | "setScopeSyncScope" | "setScopeType">) {
+  } = scopeForm;
   return (
     <>
 <FormSelect
@@ -738,7 +832,7 @@ function RequestIdentityFields({
               value={scopeType}
               onChange={(event) => {
                 setScopeType(event.target.value as ScopeType);
-                setFormError(null);
+                clearFormError();
               }}
             >
               {SCOPE_TYPE_ORDER.map((value) => (
@@ -874,33 +968,35 @@ function RequestIdentityFields({
             ) : null}
     </>
   );
-}
+});
 
-function RequestTargetFields({
-  cacheRadiusKm,
-  cacheScopeMode,
-  catalogQuery,
-  datasetKeys,
-  dryRun,
-  externalSystem,
-  priority,
+const RequestTargetFields = memo(function RequestTargetFields({
+  catalogError,
+  catalogLoading,
   providerOptions,
-  providers,
-  reason,
-  runMode,
   scopeType,
-  setCacheRadiusKm,
-  setCacheScopeMode,
-  setDatasetKeys,
-  setDryRun,
-  setExternalSystem,
-  setPriority,
-  setProviders,
-  setReason,
-  setRunMode,
-  setTargetKeysText,
-  targetKeysText,
-}: Pick<ReturnType<typeof useRequestCreateDialogController>, "cacheRadiusKm" | "cacheScopeMode" | "catalogQuery" | "datasetKeys" | "dryRun" | "externalSystem" | "priority" | "providerOptions" | "providers" | "reason" | "runMode" | "scopeType" | "setCacheRadiusKm" | "setCacheScopeMode" | "setDatasetKeys" | "setDryRun" | "setExternalSystem" | "setPriority" | "setProviders" | "setReason" | "setRunMode" | "setTargetKeysText" | "targetKeysText">) {
+  targetForm,
+}: {
+  catalogError: boolean;
+  catalogLoading: boolean;
+  providerOptions: { label: string; value: string }[];
+  scopeType: ScopeType;
+  targetForm: ReturnType<typeof useRequestTargetForm>;
+}) {
+  const {
+    cacheRadiusKm,
+    cacheScopeMode,
+    datasetKeys,
+    externalSystem,
+    providers,
+    setCacheRadiusKm,
+    setCacheScopeMode,
+    setDatasetKeys,
+    setExternalSystem,
+    setProviders,
+    setTargetKeysText,
+    targetKeysText,
+  } = targetForm;
   return (
     <>
 {scopeType === "cache_target_keys" ? (
@@ -954,12 +1050,12 @@ function RequestTargetFields({
             {scopeType !== "provider_dataset" ? (
               <>
                 <ComboboxMultiple
-                  disabled={catalogQuery.isLoading || catalogQuery.isError}
+                  disabled={catalogLoading || catalogError}
                   emptyMessage="일치하는 제공자가 없습니다."
                   label="제공자 필터"
                   options={providerOptions}
                   placeholder={
-                    catalogQuery.isLoading
+                    catalogLoading
                       ? "canonical catalog 불러오는 중"
                       : "제공자 선택"
                   }
@@ -975,6 +1071,27 @@ function RequestTargetFields({
                 />
               </>
             ) : null}
+    </>
+  );
+});
+
+const RequestExecutionSettings = memo(function RequestExecutionSettings({
+  executionForm,
+}: {
+  executionForm: ReturnType<typeof useRequestExecutionForm>;
+}) {
+  const {
+    dryRun,
+    priority,
+    reason,
+    runMode,
+    setDryRun,
+    setPriority,
+    setReason,
+    setRunMode,
+  } = executionForm;
+  return (
+    <>
             <div className="grid grid-cols-2 gap-2">
               <FormSelect
                 label="실행 모드"
@@ -1018,9 +1135,9 @@ function RequestTargetFields({
             </label>
     </>
   );
-}
+});
 
-function RequestExecutionFields({
+function RequestResultFeedback({
   catalogQuery,
   closeDialog,
   conflictRequestId,
@@ -1033,7 +1150,22 @@ function RequestExecutionFields({
   preview,
   requestError,
   retryAfterSeconds,
-}: Pick<ReturnType<typeof useRequestCreateDialogController>, "catalogQuery" | "closeDialog" | "conflictRequestId" | "createRequest" | "created" | "formError" | "moisPrecheck" | "moisSelected" | "onCreated" | "preview" | "requestError" | "retryAfterSeconds">) {
+}: Pick<
+  ReturnType<typeof useRequestCreateDialogController>,
+  | "catalogQuery"
+  | "closeDialog"
+  | "conflictRequestId"
+  | "createRequest"
+  | "created"
+  | "formError"
+  | "moisPrecheck"
+  | "moisSelected"
+  | "preview"
+  | "requestError"
+  | "retryAfterSeconds"
+> & {
+  onCreated: (kind: ExecutionKind, id: string) => void;
+}) {
   return (
     <>
 {catalogQuery.isError ? (
@@ -1134,75 +1266,37 @@ function RequestExecutionFields({
   );
 }
 
-function RequestCreateDialogView({
-  cacheRadiusKm,
-  cacheScopeMode,
-  catalogQuery,
-  closeDialog,
-  conflictRequestId,
-  createRequest,
-  created,
-  datasetKeys,
-  dryRun,
-  explicitScopeSupported,
-  externalSystem,
-  featureIdsText,
-  formError,
-  handleOpenChange,
-  lat,
-  lon,
-  maxLat,
-  maxLon,
-  minLat,
-  minLon,
-  moisPrecheck,
-  moisSelected,
+export function RequestCreateDialog({
   onCreated,
-  open,
-  openDialog,
-  preview,
-  previewRequest,
-  priority,
-  providerDatasetOptions,
-  providerOptions,
-  providers,
-  radiusKm,
-  reason,
-  requestError,
-  retryAfterSeconds,
-  runMode,
-  scopeDataset,
-  scopeProvider,
-  scopeSyncScope,
-  scopeType,
-  selectedScopeCapability,
-  setCacheRadiusKm,
-  setCacheScopeMode,
-  setDatasetKeys,
-  setDryRun,
-  setExternalSystem,
-  setFeatureIdsText,
-  setFormError,
-  setLat,
-  setLon,
-  setMaxLat,
-  setMaxLon,
-  setMinLat,
-  setMinLon,
-  setPriority,
-  setProviders,
-  setRadiusKm,
-  setReason,
-  setRunMode,
-  setScopeDataset,
-  setScopeProvider,
-  setScopeSyncScope,
-  setScopeType,
-  setTargetKeysText,
-  submit,
-  submittingPrecheck,
-  targetKeysText,
-}: ReturnType<typeof useRequestCreateDialogController>) {
+}: {
+  onCreated: (kind: ExecutionKind, id: string) => void;
+}) {
+  const {
+    catalogQuery,
+    closeDialog,
+    conflictRequestId,
+    createRequest,
+    created,
+    executionForm,
+    formError,
+    handleOpenChange,
+    moisPrecheck,
+    moisSelected,
+    open,
+    openDialog,
+    preview,
+    previewRequest,
+    providerOptions,
+    requestError,
+    retryAfterSeconds,
+    scopeForm,
+    setFormError,
+    submit,
+    submittingPrecheck,
+    targetForm,
+  } = useRequestCreateDialogController();
+  const clearFormError = useCallback(() => setFormError(null), [setFormError]);
+
   return (
     <>
       <Button type="button" onClick={openDialog}>
@@ -1221,11 +1315,36 @@ function RequestCreateDialogView({
             className="m-0 flex min-w-0 max-h-[65vh] flex-col gap-3 overflow-y-auto border-0 p-0 pr-1"
             disabled={createRequest.isPending || submittingPrecheck}
           >
-            <RequestIdentityFields explicitScopeSupported={explicitScopeSupported} featureIdsText={featureIdsText} lat={lat} lon={lon} maxLat={maxLat} maxLon={maxLon} minLat={minLat} minLon={minLon} providerDatasetOptions={providerDatasetOptions} providerOptions={providerOptions} radiusKm={radiusKm} scopeDataset={scopeDataset} scopeProvider={scopeProvider} scopeSyncScope={scopeSyncScope} scopeType={scopeType} selectedScopeCapability={selectedScopeCapability} setFeatureIdsText={setFeatureIdsText} setFormError={setFormError} setLat={setLat} setLon={setLon} setMaxLat={setMaxLat} setMaxLon={setMaxLon} setMinLat={setMinLat} setMinLon={setMinLon} setRadiusKm={setRadiusKm} setScopeDataset={setScopeDataset} setScopeProvider={setScopeProvider} setScopeSyncScope={setScopeSyncScope} setScopeType={setScopeType} />
+            <RequestIdentityFields
+              clearFormError={clearFormError}
+              providerOptions={providerOptions}
+              scopeForm={scopeForm}
+            />
 
-            <RequestTargetFields cacheRadiusKm={cacheRadiusKm} cacheScopeMode={cacheScopeMode} catalogQuery={catalogQuery} datasetKeys={datasetKeys} dryRun={dryRun} externalSystem={externalSystem} priority={priority} providerOptions={providerOptions} providers={providers} reason={reason} runMode={runMode} scopeType={scopeType} setCacheRadiusKm={setCacheRadiusKm} setCacheScopeMode={setCacheScopeMode} setDatasetKeys={setDatasetKeys} setDryRun={setDryRun} setExternalSystem={setExternalSystem} setPriority={setPriority} setProviders={setProviders} setReason={setReason} setRunMode={setRunMode} setTargetKeysText={setTargetKeysText} targetKeysText={targetKeysText} />
+            <RequestTargetFields
+              catalogError={catalogQuery.isError}
+              catalogLoading={catalogQuery.isLoading}
+              providerOptions={providerOptions}
+              scopeType={scopeForm.scopeType}
+              targetForm={targetForm}
+            />
 
-            <RequestExecutionFields catalogQuery={catalogQuery} closeDialog={closeDialog} conflictRequestId={conflictRequestId} createRequest={createRequest} created={created} formError={formError} moisPrecheck={moisPrecheck} moisSelected={moisSelected} onCreated={onCreated} preview={preview} requestError={requestError} retryAfterSeconds={retryAfterSeconds} />
+            <RequestExecutionSettings executionForm={executionForm} />
+
+            <RequestResultFeedback
+              catalogQuery={catalogQuery}
+              closeDialog={closeDialog}
+              conflictRequestId={conflictRequestId}
+              createRequest={createRequest}
+              created={created}
+              formError={formError}
+              moisPrecheck={moisPrecheck}
+              moisSelected={moisSelected}
+              onCreated={onCreated}
+              preview={preview}
+              requestError={requestError}
+              retryAfterSeconds={retryAfterSeconds}
+            />
           </fieldset>
           <DialogFooter>
             <Button
@@ -1247,20 +1366,11 @@ function RequestCreateDialogView({
               type="button"
               onClick={() => void submit()}
             >
-              {dryRun ? "dry-run 실행" : "요청 생성"}
+              {executionForm.dryRun ? "dry-run 실행" : "요청 생성"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
   );
-}
-
-export function RequestCreateDialog({
-  onCreated,
-}: {
-  onCreated: (kind: ExecutionKind, id: string) => void;
-}) {
-  const controller = useRequestCreateDialogController({ onCreated });
-  return <RequestCreateDialogView {...controller} />;
 }

@@ -677,10 +677,10 @@ export function EnrichmentReviewClient() {
     [decision],
   );
 
-  const openDetail = (reviewId: string) => {
+  const openDetail = useCallback((reviewId: string) => {
     setDetailReviewId(reviewId);
     setSelectedDetailSource(null);
-  };
+  }, []);
 
   const renderPagination = (placement: "top" | "bottom") => (
     <CursorPager

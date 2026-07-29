@@ -473,6 +473,7 @@ function featureCreateReducer(
 
 function useFeatureCreateClientController() {
   const mapRef = useRef<MapLibreMap | null>(null);
+  const geoRequestIdRef = useRef(0);
   const submitCreateInFlightRef = useRef(false);
 
   const [state, dispatch] = useReducer(
@@ -588,25 +589,34 @@ function useFeatureCreateClientController() {
     const address = korTravelGeoCandidateToAddressRecord(candidate);
     const codes = korTravelGeoCodesFromCandidate(candidate);
     const addressText = korTravelGeoCandidateAddressText(candidate);
+    const addressAdmin = fieldText(address.admin);
+    const addressLegal = fieldText(address.legal);
+    const addressRoad = fieldText(address.road);
     dispatch({
       type: "patch-form",
       selectedCandidateKey: korTravelGeoCandidateKey(candidate),
       patch: {
-        addressAdmin: fieldText(address.admin) ?? form.addressAdmin,
-        addressLegal: fieldText(address.legal) ?? form.addressLegal,
-        addressRoad: fieldText(address.road) ?? form.addressRoad,
-        geocodeQuery: addressText || form.geocodeQuery,
-        adminDongCode: codes.admin_dong_code ?? form.adminDongCode,
-        legalDongCode: codes.legal_dong_code ?? form.legalDongCode,
-        roadNameCode: codes.road_name_code ?? form.roadNameCode,
-        sidoCode: codes.sido_code ?? form.sidoCode,
-        sigunguCode: codes.sigungu_code ?? form.sigunguCode,
-      ...(nextCoord
-        ? {
-            lon: nextCoord.lon.toFixed(6),
-            lat: nextCoord.lat.toFixed(6),
-          }
-        : {}),
+        ...(addressAdmin !== null ? { addressAdmin } : {}),
+        ...(addressLegal !== null ? { addressLegal } : {}),
+        ...(addressRoad !== null ? { addressRoad } : {}),
+        ...(addressText ? { geocodeQuery: addressText } : {}),
+        ...(codes.admin_dong_code
+          ? { adminDongCode: codes.admin_dong_code }
+          : {}),
+        ...(codes.legal_dong_code
+          ? { legalDongCode: codes.legal_dong_code }
+          : {}),
+        ...(codes.road_name_code
+          ? { roadNameCode: codes.road_name_code }
+          : {}),
+        ...(codes.sido_code ? { sidoCode: codes.sido_code } : {}),
+        ...(codes.sigungu_code ? { sigunguCode: codes.sigungu_code } : {}),
+        ...(nextCoord
+          ? {
+              lon: nextCoord.lon.toFixed(6),
+              lat: nextCoord.lat.toFixed(6),
+            }
+          : {}),
       },
       clearErrors: nextCoord ? ["lon", "lat"] : undefined,
     });
@@ -620,15 +630,18 @@ function useFeatureCreateClientController() {
   };
 
   const runReverseGeocode = async () => {
+    const requestId = ++geoRequestIdRef.current;
     dispatch({ type: "geo-start" });
     try {
       const selectedCoord = parseCoord(form);
       const response = await reverseGeocode(selectedCoord);
+      if (requestId !== geoRequestIdRef.current) return;
       dispatch({ type: "geo-success", candidates: response.candidates });
       if (response.candidates[0]) {
         applyCandidate(response.candidates[0]);
       }
     } catch (error) {
+      if (requestId !== geoRequestIdRef.current) return;
       dispatch({
         type: "geo-error",
         message: error instanceof Error ? error.message : String(error),
@@ -642,14 +655,17 @@ function useFeatureCreateClientController() {
       dispatch({ type: "geo-error", message: "주소 검색어를 입력하세요." });
       return;
     }
+    const requestId = ++geoRequestIdRef.current;
     dispatch({ type: "geo-start" });
     try {
       const response = await geocodeAddress(query, form.geocodeType);
+      if (requestId !== geoRequestIdRef.current) return;
       dispatch({ type: "geo-success", candidates: response.candidates });
       if (response.candidates[0]) {
         applyCandidate(response.candidates[0]);
       }
     } catch (error) {
+      if (requestId !== geoRequestIdRef.current) return;
       dispatch({
         type: "geo-error",
         message: error instanceof Error ? error.message : String(error),
@@ -664,6 +680,7 @@ function useFeatureCreateClientController() {
   };
 
   const resetForm = () => {
+    geoRequestIdRef.current += 1;
     dispatch({ type: "reset" });
   };
 
