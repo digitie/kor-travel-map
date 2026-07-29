@@ -30,12 +30,17 @@ _LAST_SEEN_NOT_NULL = "ck_data_integrity_violations_last_seen_not_null"
 
 
 def upgrade() -> None:
-    # ADD COLUMN의 ACCESS EXCLUSIVE lock을 대용량 backfill과 분리한다.
+    # ADD COLUMN의 ACCESS EXCLUSIVE lock을 대용량 backfill과 분리한다. default를
+    # column과 함께 commit해 backfill/VALIDATE 사이의 기존 writer도 NULL을 만들지
+    # 않는다. IF NOT EXISTS는 이 autocommit 직후 process가 죽어도 같은 revision을
+    # forward 재실행할 수 있게 한다.
     with op.get_context().autocommit_block():
-        op.add_column(
-            _TABLE,
-            sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
-            schema=_SCHEMA,
+        op.execute(
+            """
+            ALTER TABLE ops.data_integrity_violations
+            ADD COLUMN IF NOT EXISTS last_seen_at timestamptz,
+            ALTER COLUMN last_seen_at SET DEFAULT now()
+            """
         )
 
     # ``payload``는 자유형 사용자 증거다. 과거 구현이 내부적으로 쓴 동명 키도
@@ -70,20 +75,34 @@ def upgrade() -> None:
     # NOT NULL/FK scan 동안 ADD CONSTRAINT의 ACCESS EXCLUSIVE lock을 유지하지 않는다.
     op.execute(
         f"""
-        ALTER TABLE {_SCHEMA}.{_TABLE}
-        ADD CONSTRAINT {_LAST_SEEN_NOT_NULL}
-        CHECK (last_seen_at IS NOT NULL)
-        NOT VALID
-        """
-    )
-    op.execute(
-        f"""
-        ALTER TABLE {_SCHEMA}.{_TABLE}
-        ADD CONSTRAINT {_SET_NULL_FEATURE_FK}
-        FOREIGN KEY (feature_id)
-        REFERENCES feature.features(feature_id)
-        ON DELETE SET NULL
-        NOT VALID
+        DO $migration$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_constraint
+                WHERE conrelid = '{_SCHEMA}.{_TABLE}'::regclass
+                  AND conname = '{_LAST_SEEN_NOT_NULL}'
+            ) THEN
+                ALTER TABLE {_SCHEMA}.{_TABLE}
+                ADD CONSTRAINT {_LAST_SEEN_NOT_NULL}
+                CHECK (last_seen_at IS NOT NULL)
+                NOT VALID;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_constraint
+                WHERE conrelid = '{_SCHEMA}.{_TABLE}'::regclass
+                  AND conname = '{_SET_NULL_FEATURE_FK}'
+            ) THEN
+                ALTER TABLE {_SCHEMA}.{_TABLE}
+                ADD CONSTRAINT {_SET_NULL_FEATURE_FK}
+                FOREIGN KEY (feature_id)
+                REFERENCES feature.features(feature_id)
+                ON DELETE SET NULL
+                NOT VALID;
+            END IF;
+        END
+        $migration$
         """
     )
     with op.get_context().autocommit_block():
@@ -114,7 +133,18 @@ def upgrade() -> None:
     )
 
     # 대용량 큐에서도 writer를 막지 않도록 교체 index는 concurrent DDL로 만든다.
+    # 앞선 실행이 중단해 남긴 valid/invalid 후보 index를 먼저 제거하므로 재실행 가능하다.
     with op.get_context().autocommit_block():
+        op.execute(
+            "DROP INDEX CONCURRENTLY IF EXISTS ops.idx_violations_status_seen"
+        )
+        op.execute(
+            "DROP INDEX CONCURRENTLY IF EXISTS "
+            "ops.idx_violations_provider_status_seen"
+        )
+        op.execute(
+            "DROP INDEX CONCURRENTLY IF EXISTS ops.idx_violations_feature_seen"
+        )
         op.execute(
             """
             CREATE INDEX CONCURRENTLY idx_violations_status_seen
@@ -139,14 +169,16 @@ def upgrade() -> None:
             """
         )
         op.execute(
-            "DROP INDEX CONCURRENTLY ops.idx_violations_status_detected"
+            "DROP INDEX CONCURRENTLY IF EXISTS "
+            "ops.idx_violations_status_detected"
         )
         op.execute(
-            "DROP INDEX CONCURRENTLY "
+            "DROP INDEX CONCURRENTLY IF EXISTS "
             "ops.idx_violations_provider_status_detected"
         )
         op.execute(
-            "DROP INDEX CONCURRENTLY ops.idx_violations_feature_detected"
+            "DROP INDEX CONCURRENTLY IF EXISTS "
+            "ops.idx_violations_feature_detected"
         )
 
 

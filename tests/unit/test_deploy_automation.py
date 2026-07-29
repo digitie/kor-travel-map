@@ -121,9 +121,11 @@ def test_mocked_checkpoint_runner_owns_exact_frontend_container() -> None:
     assert "await cleanupOwnedImage()" in script
     assert "await cleanupOwnedNetwork()" in script
     assert "removed.status !== 0" in script
-    assert "/No such object:/i.test(inspected.stderr)" in script
-    assert "/No such image:/i.test(inspected.stderr)" in script
-    assert "/No such network:/i.test(postInspect.stderr)" in script
+    assert "containerCreateAttempted = true" in script
+    assert "io.kortravelmap.mocked-e2e-owned=true" in script
+    assert '`name=^${ownedContainerName}$`' in script
+    assert '`name=^${ownedNetworkName}$`' in script
+    assert '"image",\n      "ls",' in script
     assert 'terminateChildGroup(child, "SIGKILL")' in script
     assert 'spawnSync("docker"' not in script
     assert (

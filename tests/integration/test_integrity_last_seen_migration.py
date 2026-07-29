@@ -87,7 +87,27 @@ async def test_integrity_last_seen_upgrade_preserves_free_form_payload(
                         ),
                         "detected_at": datetime(2026, 7, 3, tzinfo=UTC),
                     },
-                ],
+                    ],
+                )
+            # 첫 autocommit 직후 runner가 중단된 상태를 재현한다. revision은 여전히
+            # 0067이고 column/default 및 후보 index만 남아도 forward 재실행돼야 한다.
+            await connection.execute(
+                text(
+                    """
+                    ALTER TABLE ops.data_integrity_violations
+                    ADD COLUMN last_seen_at timestamptz,
+                    ALTER COLUMN last_seen_at SET DEFAULT now()
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    CREATE INDEX idx_violations_status_seen
+                    ON ops.data_integrity_violations
+                      (status, last_seen_at DESC, issue_id DESC)
+                    """
+                )
             )
 
         await target_engine.dispose()

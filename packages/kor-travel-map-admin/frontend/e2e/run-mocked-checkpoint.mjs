@@ -187,6 +187,7 @@ const ownedNetworkName = `ktm-mocked-e2e-${process.pid}-${randomBytes(6).toStrin
 let ownedContainerId;
 let ownedImageTag;
 let ownedNetworkId;
+let containerCreateAttempted = false;
 let networkCreateAttempted = false;
 let imageInspect;
 let activeChild;
@@ -244,9 +245,17 @@ async function cleanupOwnedNetwork() {
     ownedNetworkName,
   ]);
   if (inspected.status !== 0) {
+    const listed = await runCleanupCommand([
+      "network",
+      "ls",
+      "-q",
+      "--filter",
+      `name=^${ownedNetworkName}$`,
+    ]);
     if (
-      ownedNetworkId === undefined &&
-      /No such network:/i.test(inspected.stderr)
+      listed.status === 0 &&
+      listed.stdout.trim() === "" &&
+      ownedNetworkId === undefined
     ) {
       return;
     }
@@ -268,28 +277,70 @@ async function cleanupOwnedNetwork() {
     "rm",
     ownedNetworkName,
   ]);
-  const postInspect = await runCleanupCommand([
+  const postList = await runCleanupCommand([
     "network",
-    "inspect",
-    ownedNetworkName,
+    "ls",
+    "-q",
+    "--filter",
+    `name=^${ownedNetworkName}$`,
   ]);
   if (
     removed.status !== 0 ||
-    postInspect.status === 0 ||
-    !/No such network:/i.test(postInspect.stderr)
+    postList.status !== 0 ||
+    postList.stdout.trim() !== ""
   ) {
     cleanupFailed = true;
   }
 }
 
 async function cleanupOwnedContainer() {
-  if (!ownedContainerId) return;
-  const removed = await runCleanupCommand(["rm", "-f", ownedContainerName]);
-  const inspected = await runCleanupCommand(["inspect", ownedContainerId]);
+  if (!containerCreateAttempted) return;
+  const inspected = await runCleanupCommand([
+    "inspect",
+    "--format",
+    '{{.Id}} {{index .Config.Labels "io.kortravelmap.mocked-e2e-owned"}}',
+    ownedContainerName,
+  ]);
+  if (inspected.status !== 0) {
+    const listed = await runCleanupCommand([
+      "ps",
+      "-aq",
+      "--no-trunc",
+      "--filter",
+      `name=^${ownedContainerName}$`,
+    ]);
+    if (
+      listed.status === 0 &&
+      listed.stdout.trim() === "" &&
+      ownedContainerId === undefined
+    ) {
+      return;
+    }
+    cleanupFailed = true;
+    return;
+  }
+  const [observedId, ownedLabel, ...extra] = inspected.stdout.trim().split(/\s+/);
+  if (
+    extra.length !== 0 ||
+    ownedLabel !== "true" ||
+    !/^[0-9a-f]{64}$/.test(observedId ?? "") ||
+    (ownedContainerId !== undefined && observedId !== ownedContainerId)
+  ) {
+    cleanupFailed = true;
+    return;
+  }
+  const removed = await runCleanupCommand(["rm", "-f", observedId]);
+  const listed = await runCleanupCommand([
+    "ps",
+    "-aq",
+    "--no-trunc",
+    "--filter",
+    `name=^${ownedContainerName}$`,
+  ]);
   if (
     removed.status !== 0 ||
-    inspected.status === 0 ||
-    !/No such object:/i.test(inspected.stderr)
+    listed.status !== 0 ||
+    listed.stdout.trim() !== ""
   ) {
     cleanupFailed = true;
   }
@@ -297,21 +348,50 @@ async function cleanupOwnedContainer() {
 
 async function cleanupOwnedImage() {
   if (!ownedImageTag) return;
+  const inspected = await runCleanupCommand([
+    "image",
+    "inspect",
+    "--format",
+    "{{.Id}}",
+    ownedImageTag,
+  ]);
+  if (inspected.status !== 0) {
+    const listed = await runCleanupCommand([
+      "image",
+      "ls",
+      "-q",
+      "--no-trunc",
+      ownedImageTag,
+    ]);
+    if (listed.status === 0 && listed.stdout.trim() === "") return;
+    cleanupFailed = true;
+    return;
+  }
+  const observedId = inspected.stdout.trim();
+  if (
+    !/^sha256:[0-9a-f]{64}$/.test(observedId) ||
+    (imageInspect !== undefined && observedId !== imageInspect.Id)
+  ) {
+    cleanupFailed = true;
+    return;
+  }
   const removed = await runCleanupCommand([
     "image",
     "rm",
     "-f",
     ownedImageTag,
   ]);
-  const inspected = await runCleanupCommand([
+  const listed = await runCleanupCommand([
     "image",
-    "inspect",
+    "ls",
+    "-q",
+    "--no-trunc",
     ownedImageTag,
   ]);
   if (
     removed.status !== 0 ||
-    inspected.status === 0 ||
-    !/No such image:/i.test(inspected.stderr)
+    listed.status !== 0 ||
+    listed.stdout.trim() !== ""
   ) {
     cleanupFailed = true;
   }
@@ -467,6 +547,10 @@ async function handleSignal(signal, exitCode) {
     ]);
     if (!exited) {
       terminateChildGroup(child, "SIGKILL");
+      await Promise.race([
+        childExited,
+        new Promise((resolve) => setTimeout(resolve, 750)),
+      ]);
     }
   }
   await cleanup();
@@ -756,12 +840,15 @@ try {
     throw new Error("self-owned mocked internal network를 생성할 수 없습니다.");
   }
   ownedNetworkId = createdNetworkId;
+  containerCreateAttempted = true;
   const createResult = await runManagedChild(
     "docker",
     [
       "create",
       "--name",
       ownedContainerName,
+      "--label",
+      "io.kortravelmap.mocked-e2e-owned=true",
       "--network",
       ownedNetworkName,
       "--read-only",
