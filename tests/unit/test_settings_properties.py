@@ -30,18 +30,15 @@ def test_object_store_key_aliases_none_when_unset() -> None:
     assert settings.object_store_secret_key is None
 
 
-def test_geo_api_key_value_strips_and_returns_none_for_blank() -> None:
-    assert (
-        KorTravelMapSettings(
-            kor_travel_geo_api_key=SecretStr("  vkey  ")
-        ).kor_travel_geo_api_key_value
-        == "vkey"
+def test_geo_admin_proxy_secret_stays_masked() -> None:
+    secret = "geo-proxy-secret"
+    settings = KorTravelMapSettings(
+        kor_travel_geo_admin_proxy_secret=SecretStr(secret),
     )
-    assert (
-        KorTravelMapSettings(kor_travel_geo_api_key=SecretStr("   ")).kor_travel_geo_api_key_value
-        is None
-    )
-    assert KorTravelMapSettings(kor_travel_geo_api_key=None).kor_travel_geo_api_key_value is None
+
+    assert settings.kor_travel_geo_admin_proxy_secret is not None
+    assert settings.kor_travel_geo_admin_proxy_secret.get_secret_value() == secret
+    assert secret not in repr(settings)
 
 
 def test_opinet_run_budget_preserves_daily_quota_for_two_datasets() -> None:

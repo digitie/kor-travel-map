@@ -49,22 +49,23 @@ v4 설치에서:
 즉 기존 운영 pair는 v5로 capture할 수 없고, 운영자는 manifest 없는 상태에 갇힌다. 탐지력 이득이
 0인 변경에 이 비용을 치를 이유가 없다.
 
-## 유지하는 것
+## 후속 감사 개정 (#881)
 
-Map의 **per-surface digest manifest 자체는 유지한다**
-(`packages/kor-travel-map-api/openapi-sha256.json`, `export_openapi.py --profile all`이 생성·검증,
-기존 `openapi.yml` CI가 게이트). 배포 핀 용도가 아니라 **소비자 계약 freshness** 용도로 실제로
-쓰이고 있다 — PinVi가 vendored 스냅샷의 무결성·최신성을 파일 하나로 대조한다
-(T-VN-H07B/H07D의 `contract-pin-consistency`). 이 쪽에서는 digest가 **독립적으로 유도된 값**
-(PinVi가 보관한 사본)과 대조되므로 실질적 탐지력이 있다.
+PR #882의 “per-surface digest manifest는 소비자 freshness에 쓰인다”는 전제도 후속 감사에서
+사실이 아닌 것으로 확인했다. PinVi `contract-pin-consistency`는 Map 핀 commit을 체크아웃해
+user spec bytes와 admin subset을 직접 비교하며 `openapi-sha256.json`을 읽지 않는다.
+소비자 없는 파생 산출물은 추가 탐지력이 없고 spec 변경마다 함께 갱신해야 하는 반복만 만들므로
+Map의 digest 파일·생성·검사 코드를 제거한다. 이 개정은 compatible-pair v4 유지 결정을
+바꾸지 않는다.
 
 ## 결과
 
 - ADR-076의 manifest v4가 계속 정본이다. 배포 경로·운영 문서·런북은 변경 없다.
 - 배포된 페어의 OpenAPI 계약은 `map_source_revision` + 이미지 OCI revision 라벨로 계속 결박된다.
-- 소비자 측 계약 드리프트는 PinVi의 vendored 스냅샷 게이트가 담당한다(H07B/H07D).
-- 후속 규율 정정: admin/user OpenAPI를 바꾸는 task는 **per-surface digest 갱신 + 소비자
-  스냅샷 재-vendor**를 완료 조건으로 갖는다(compatible-pair 재-capture는 해당 없음).
+- 소비자 측 계약 드리프트는 PinVi가 핀 commit의 spec/subset을 직접 비교하는 vendored
+  스냅샷 게이트가 담당한다(H07B/H07D).
+- admin/user OpenAPI를 바꾸는 task는 두 spec 재생성 + 실제 소비자 스냅샷 재-vendor를
+  완료 조건으로 갖는다. 별도 digest 갱신과 compatible-pair 재-capture는 해당 없다.
 
 ## 교훈
 
