@@ -455,8 +455,10 @@ async function mockOpsDatasets(
       | OpsDatasetDetailData
       | ((detailCount: number, syncScope: string) => OpsDatasetDetailData)
     >;
-    detailDelayMs?:
-      number | ((detailCount: number, syncScope: string) => number);
+    beforeDetailFulfill?: (
+      detailCount: number,
+      syncScope: string,
+    ) => Promise<void>;
     allowInvalidDetailContract?: boolean;
     previewStatus?: number;
     policyConflictCode?:
@@ -659,13 +661,7 @@ async function mockOpsDatasets(
         );
       }
     }
-    const delayMs =
-      typeof options.detailDelayMs === "function"
-        ? options.detailDelayMs(counts.detail, syncScope)
-        : (options.detailDelayMs ?? 0);
-    if (delayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
+    await options.beforeDetailFulfill?.(counts.detail, syncScope);
     await fulfillJson(route, makeDetailResponse(detail));
   });
 
@@ -1506,6 +1502,14 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
   test("정책 편집 — 같은 dataset의 exact scope 전환 중에도 draft를 보존한다", async ({
     page,
   }) => {
+    let markActiveScopeDetailStarted!: () => void;
+    const activeScopeDetailStarted = new Promise<void>((resolve) => {
+      markActiveScopeDetailStarted = resolve;
+    });
+    let releaseActiveScopeDetail!: () => void;
+    const activeScopeDetailRelease = new Promise<void>((resolve) => {
+      releaseActiveScopeDetail = resolve;
+    });
     const scopes = [
       ...makeDetail().scopes,
       {
@@ -1518,8 +1522,11 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       makeGridRow({ sync_scope: ACTIVE_EXTERNAL_SCOPE }),
     ];
     const mocks = await mockOpsDatasets(page, {
-      detailDelayMs: (_detailCount, syncScope) =>
-        syncScope === ACTIVE_EXTERNAL_SCOPE ? 300 : 0,
+      beforeDetailFulfill: async (_detailCount, syncScope) => {
+        if (syncScope !== ACTIVE_EXTERNAL_SCOPE) return;
+        markActiveScopeDetailStarted();
+        await activeScopeDetailRelease;
+      },
       items,
       details: {
         [`${KMA_PROVIDER}/${KMA_DATASET}`]: (_detailCount, syncScope) =>
@@ -1545,19 +1552,24 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(targetedPolicy).toHaveValue("allow_targeted");
     await expect(page.getByRole("button", { name: "저장" })).toBeEnabled();
 
-    await page
-      .getByRole("button", {
-        name: `${KMA_PROVIDER} ${KMA_DATASET} ${ACTIVE_EXTERNAL_SCOPE} 상세 열기`,
-      })
-      .click();
-    await expect(page).toHaveURL(
-      new RegExp(`sync_scope=${encodeURIComponent(ACTIVE_EXTERNAL_SCOPE)}`),
-    );
-    await expect(page.getByTestId("policy-readonly-alert")).toContainText(
-      "초안은 유지",
-    );
-    await expect(targetedPolicy).toHaveValue("allow_targeted");
-    await expect(page.getByRole("button", { name: "저장" })).toBeDisabled();
+    try {
+      await page
+        .getByRole("button", {
+          name: `${KMA_PROVIDER} ${KMA_DATASET} ${ACTIVE_EXTERNAL_SCOPE} 상세 열기`,
+        })
+        .click();
+      await activeScopeDetailStarted;
+      await expect(page).toHaveURL(
+        new RegExp(`sync_scope=${encodeURIComponent(ACTIVE_EXTERNAL_SCOPE)}`),
+      );
+      await expect(page.getByTestId("policy-readonly-alert")).toContainText(
+        "초안은 유지",
+      );
+      await expect(targetedPolicy).toHaveValue("allow_targeted");
+      await expect(page.getByRole("button", { name: "저장" })).toBeDisabled();
+    } finally {
+      releaseActiveScopeDetail();
+    }
 
     await expect.poll(() => mocks.counts.detail).toBeGreaterThan(1);
     await expect(page.getByTestId("policy-readonly-alert")).toHaveCount(0);
