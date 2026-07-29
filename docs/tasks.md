@@ -159,6 +159,13 @@ T-VN-48A~C는 최초 273-test baseline의 deterministic drift 89건을
   - 적대 리뷰 2명 반영, 최신 main rebase 뒤 최종 exact revision의 mocked serial/CI-parallel과
     clone Live 재검증, Claude PR 사후 감사, PR/CI green/merge까지 끝난 뒤에만
     `tasks-done.md`로 옮긴다.
+  - 최종 리뷰 추가 완료 조건: checkpoint publish까지 app table write lock과 원본 final
+    snapshot equality를 유지하고, scratch DB는 무작위 이름·server ownership token·OID가
+    모두 일치할 때만 삭제한다. image cleanup은 실행별 tag만 비강제로 해제하며, mocked
+    browser/runtime은 self-owned internal network와 non-self HTTP/WS deny gate로 격리한다.
+  - geo trusted-proxy가 `E0100 key`로 fallback하면 결선 오류 503으로, 2xx JSON/schema
+    손상은 provider 오류 502로 보존한다. 기존 v1 checkpoint 교체 실패와 실패 시 검증 dump
+    조기 삭제도 같은 D 완료 범위에서 forward recovery한다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 
