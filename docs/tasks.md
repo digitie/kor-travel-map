@@ -31,7 +31,8 @@ barrier로 직렬화한다.
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - b0: [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
+  - b0: [ ] `T-VN-48D`(final exact Mocked/Live·PR) →
+    [ ] `T-VN-49A` → [ ] `T-VN-49B` → [ ] `T-VN-49C` →
     [ ] `T-VN-49D`(React 구조 debt)
   - b1: [ ] `T-VN-11A` → [ ] `T-VN-11B`(service batch) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
@@ -142,6 +143,21 @@ barrier로 직렬화한다.
     대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
 
 ## Lane B 상세 — b0 선행 하드닝
+
+### T-VN-48 — mocked Playwright drift 제거
+
+T-VN-48A~C는 최초 273-test baseline의 deterministic drift 89건을
+Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별로 제거했다.
+
+- [ ] **T-VN-48D** — 구현과 사전 exact checkpoint D의 serial/workers=4는 각각
+  **274/274 passed**, expected failure·actual failure·flake·skip 0건이다.
+  - R1과 양립하는 격리 clone trusted runner의 본 acceptance 2/2와 recovery-only 2/2,
+    startup migration 없음, owned Feature·weather·price·FK·pending change request cleanup
+    0을 root-owned redacted evidence로 검증했다.
+  - 적대 리뷰 2인과 국소 후속 리뷰에서 잔여 P0~P2 0건이다. `0068` 재시작성과
+    Live/Mocked signal·cleanup 경계까지 보강한 최종 문서 candidate에서 Mocked
+    serial/workers=4와 보존 clone 파괴적 Live를 다시 결박한 뒤 PR·CI green·merge한다.
+  - 위 gate와 merge가 끝나기 전에는 `tasks-done.md`로 옮기지 않는다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 
