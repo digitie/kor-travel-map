@@ -2,13 +2,29 @@ import type { TestStep } from "@playwright/test/reporter";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { firstFailureStageMatches } from "../e2e/mocked-failure-reporter";
+import {
+  firstFailureStageMatches,
+  testInventorySha256,
+} from "../e2e/mocked-failure-reporter";
 
 function step(category: string, title: string): TestStep {
   return { category, title } as TestStep;
 }
 
 describe("mocked failure stage provenance", () => {
+  it("동일 개수의 test rename/delete 대체도 inventory hash를 바꾼다", () => {
+    const baseline = ["e2e/a.spec.ts::A", "e2e/b.spec.ts::B"];
+    const replaced = ["e2e/a.spec.ts::A", "e2e/c.spec.ts::C"];
+
+    expect(replaced).toHaveLength(baseline.length);
+    expect(testInventorySha256(replaced)).not.toBe(
+      testInventorySha256(baseline),
+    );
+    expect(testInventorySha256([...baseline].reverse())).toBe(
+      testInventorySha256(baseline),
+    );
+  });
+
   it("같은 auth locator라도 beforeEach hook 밖이면 auth로 분류하지 않는다", () => {
     const authHook = [
       step("hook", "Before Hooks"),

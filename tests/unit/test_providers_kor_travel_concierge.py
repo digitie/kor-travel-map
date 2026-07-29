@@ -412,6 +412,30 @@ async def test_kor_travel_concierge_sparse_payload_uses_export_id_and_json_fallb
     assert isinstance(bundle.source_record.raw_data["extra_list"][1], str)
 
 
+async def test_kor_travel_concierge_nonfinite_confidence_preserves_batch() -> None:
+    valid = _item()
+    nonfinite = _item(
+        candidate_id="candidate-nan",
+        export_id="export-nan",
+        evidence={"confidence_score": "NaN"},
+        source_record={
+            **_item()["source_record"],
+            "source_entity_id": "source-nan",
+        },
+    )
+    quarantined = []
+
+    bundles = await kor_travel_concierge_items_to_bundles(
+        [valid, nonfinite],
+        fetched_at=_FETCHED,
+        quarantine=quarantined,
+    )
+
+    assert len(bundles) == 2
+    assert quarantined == []
+    assert bundles[1].source_link.confidence == 80
+
+
 async def test_kor_travel_concierge_quarantines_missing_required_upsert_fields() -> None:
     no_place = _item(place=None)
     no_source_id = _item(candidate_id="", export_id="", source_record={})

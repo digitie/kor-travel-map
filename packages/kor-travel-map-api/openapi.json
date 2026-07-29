@@ -31314,6 +31314,16 @@
             },
             "description": "Validation Error"
           },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "kor-travel-geo provider 오류"
+          },
           "503": {
             "content": {
               "application/problem+json": {

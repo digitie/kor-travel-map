@@ -17,6 +17,7 @@ ADR 참조: ADR-006 / ADR-009 / ADR-019 / ADR-024 / ADR-045 / ADR-050 / ADR-053 
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -619,6 +620,8 @@ def _confidence(value: Any) -> int:
     try:
         score = float(value)
     except (TypeError, ValueError):
+        return 80
+    if not math.isfinite(score):
         return 80
     if 0 <= score <= 1:
         score *= 100

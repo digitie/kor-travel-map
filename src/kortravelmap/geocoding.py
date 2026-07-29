@@ -77,7 +77,7 @@ _GeoResponseT = TypeVar("_GeoResponseT")
 
 def _is_public_key_rejection(resp: httpx.Response) -> bool:
     """geo가 Map의 public API key를 거부했는지 판정한다."""
-    if resp.status_code != 400:
+    if resp.status_code not in {400, 401}:
         return False
     try:
         payload = resp.json()
@@ -86,11 +86,13 @@ def _is_public_key_rejection(resp: httpx.Response) -> bool:
     if not isinstance(payload, dict):
         return False
     error = payload.get("error")
+    if not isinstance(error, dict):
+        return False
     return (
-        isinstance(error, dict)
+        resp.status_code == 400
         and error.get("code") == "E0100"
         and error.get("field") == "key"
-    )
+    ) or (resp.status_code == 401 and error.get("code") == "E0401")
 
 
 def _raise_for_status_sanitized(resp: httpx.Response) -> None:

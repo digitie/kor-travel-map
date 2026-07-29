@@ -6,6 +6,7 @@ import type {
   TestCase,
   TestStep,
 } from "@playwright/test/reporter";
+import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -42,7 +43,8 @@ interface FailureManifest {
   baselineRevision: string;
   discoveredTests: number;
   groups: ManifestGroup[];
-  schemaVersion: 2;
+  schemaVersion: 3;
+  testInventorySha256: string;
 }
 
 interface TestIdentity {
@@ -64,6 +66,11 @@ function sortedDifference(left: Set<string>, right: Set<string>): string[] {
 
 function identityKey(spec: string, title: string): string {
   return `${spec}::${title}`;
+}
+
+export function testInventorySha256(identities: Iterable<string>): string {
+  const canonical = [...identities].sort().join("\n");
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
 function testIdentity(test: TestCase): TestIdentity {
@@ -90,7 +97,7 @@ function parseCheckpoint(value: string | undefined): Checkpoint {
 }
 
 function validateManifest(manifest: FailureManifest): void {
-  if (manifest.schemaVersion !== 2) {
+  if (manifest.schemaVersion !== 3) {
     throw new Error(
       `지원하지 않는 failure manifest schema: ${manifest.schemaVersion}`,
     );
@@ -108,6 +115,9 @@ function validateManifest(manifest: FailureManifest): void {
     manifest.discoveredTests < 1
   ) {
     throw new Error("discoveredTests는 양의 정수여야 합니다.");
+  }
+  if (!/^[0-9a-f]{64}$/u.test(manifest.testInventorySha256)) {
+    throw new Error("testInventorySha256에 exact SHA-256이 필요합니다.");
   }
   for (const group of manifest.groups) {
     if (
@@ -312,6 +322,7 @@ class MockedFailureReporter implements Reporter {
       if (discovered.size !== identities.length) {
         throw new Error("mocked suite에 중복 spec/title identity가 있습니다.");
       }
+      const observedTestInventorySha256 = testInventorySha256(discovered);
 
       const manifestTests = manifest.groups.flatMap((group) =>
         group.tests.map((test) => ({
@@ -407,6 +418,8 @@ class MockedFailureReporter implements Reporter {
         baselineMainRevision: manifest.baselineMainRevision,
         baselineRevision: manifest.baselineRevision,
         discoveredTests: identities.length,
+        observedTestInventorySha256,
+        expectedTestInventorySha256: manifest.testInventorySha256,
         expectedFailures: [...expectedFailures].sort(),
         expectedFlakes: [...expectedFlakes].sort(),
         unexpectedFailures: [...unexpectedFailures].sort(),
@@ -444,6 +457,7 @@ class MockedFailureReporter implements Reporter {
 
       gatePassed =
         identities.length === manifest.discoveredTests &&
+        observedTestInventorySha256 === manifest.testInventorySha256 &&
         result.status === (checkpoint === "D" ? "passed" : "failed") &&
         report.missingExpectedFailures.length === 0 &&
         report.newUnexpectedFailures.length === 0 &&
@@ -459,7 +473,8 @@ class MockedFailureReporter implements Reporter {
       console.log(
         `[mocked-checkpoint ${checkpoint}] manifest ${summary}: ` +
           `tests=${identities.length}, expected-failures=${expectedFailures.size}, ` +
-          `actual-failures=${unexpectedFailures.size}, flakes=${flakyTests.size}`,
+          `actual-failures=${unexpectedFailures.size}, flakes=${flakyTests.size}, ` +
+          `inventory=${observedTestInventorySha256}`,
       );
       if (!gatePassed) {
         console.error(

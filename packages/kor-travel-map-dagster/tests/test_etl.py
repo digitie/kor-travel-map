@@ -9,7 +9,10 @@ import pytest
 from dagster import Failure
 from kortravelmap.infra.feature_repo import FeatureLoadResult
 
-from kortravelmap.dagster.etl import load_feature_bundles_for_dagster
+from kortravelmap.dagster.etl import (
+    DagsterFeatureLoadResult,
+    load_feature_bundles_for_dagster,
+)
 from kortravelmap.dagster.validation import (
     DROPPABLE_ISSUE_CODES,
     FeatureAddressIssue,
@@ -72,6 +75,47 @@ class _Client:
         self.recorded_findings = list(findings)  # type: ignore[arg-type]
         self.recorded_kwargs = dict(kwargs)
         return len(self.recorded_findings)
+
+
+def test_dagster_feature_load_result_merge_preserves_name_states() -> None:
+    left = DagsterFeatureLoadResult(
+        provider="demo",
+        dataset_key="places",
+        feature_ids=("left",),
+        load=FeatureLoadResult(bundles_total=1, features_inserted=1),
+        address_validation=FeatureAddressValidationSummary(
+            total=1,
+            issue_count=0,
+            error_count=0,
+            warning_count=0,
+            evidence_grade_counts={"unarmed": 1},
+            name_state_counts={"matched": 1},
+            issues=(),
+        ),
+    )
+    right = DagsterFeatureLoadResult(
+        provider="demo",
+        dataset_key="places",
+        feature_ids=("right",),
+        load=FeatureLoadResult(bundles_total=1, features_inserted=1),
+        address_validation=FeatureAddressValidationSummary(
+            total=1,
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            evidence_grade_counts={"unarmed": 1},
+            name_state_counts={"disagreed": 1},
+            issues=(),
+        ),
+    )
+
+    merged = left.merge(right)
+
+    assert merged.address_validation.evidence_grade_counts == {"unarmed": 2}
+    assert merged.address_validation.name_state_counts == {
+        "matched": 1,
+        "disagreed": 1,
+    }
 
 
 async def test_load_feature_bundles_for_dagster_chunks_db_load(

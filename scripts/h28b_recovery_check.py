@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 
 import httpx
 from kortravelmap.dagster.validation import validate_feature_bundles_address
+from pydantic import SecretStr
 
 from kortravelmap.geocoding import KorTravelGeoRestClient, kor_travel_geo_reverse_geocoder
 from kortravelmap.providers.kor_travel_concierge import (
@@ -26,7 +27,7 @@ from kortravelmap.providers.kor_travel_concierge import (
 CONCIERGE = os.environ["CONCIERGE_BASE"]
 CKEY = os.environ["CONCIERGE_KEY"]
 GEO = os.environ["GEO_BASE"]
-GKEY = os.environ["GEO_KEY"]
+GKEY = SecretStr(os.environ["GEO_KEY"])
 
 
 def fetch_items() -> list[dict]:

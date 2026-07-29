@@ -43,7 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
-from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.response import Meta, ProblemDetail, make_meta
 
 __all__ = [
     "router",
@@ -463,6 +463,10 @@ def _resolution_payload(
     responses={
         404: {"description": "이슈/feature 없음"},
         409: {"description": "상태 전이 충돌"},
+        502: {
+            "description": "kor-travel-geo provider 오류",
+            "model": ProblemDetail,
+        },
         503: {"description": "kor-travel-geo 미설정"},
     },
 )

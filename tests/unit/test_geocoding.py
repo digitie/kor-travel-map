@@ -1627,17 +1627,27 @@ def test_geo_http_error_never_exposes_public_api_key(
     assert "?key=" not in caplog.text
 
 
-def test_geo_missing_key_response_identifies_public_key_misconfiguration() -> None:
+@pytest.mark.parametrize(
+    ("status_code", "error"),
+    [
+        (400, {"code": "E0100", "field": "key"}),
+        (401, {"code": "E0401"}),
+    ],
+)
+def test_geo_key_rejection_identifies_public_key_misconfiguration(
+    status_code: int,
+    error: dict[str, str],
+) -> None:
     """geo의 key 오류는 Map public key 결선 실패를 뜻한다."""
     from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
     from kortravelmap.geocoding import KorTravelGeoRestClient
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
-            400,
+            status_code,
             json={
                 "status": "ERROR",
-                "error": {"code": "E0100", "field": "key"},
+                "error": error,
             },
         )
 
