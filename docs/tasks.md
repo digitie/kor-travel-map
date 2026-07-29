@@ -110,6 +110,14 @@ barrier로 직렬화한다.
   착수 전에 migration head·schema/fixture 계약·파괴적 실행 잔여물·코드/API 호환성·디스크
   여유를 확인해 재사용 가능하면 이름·head·fixture identity와 근거를 `resume.md`/
   `journal.md`에 기록하고, 불가능할 때만 해당 격리 resource를 정확히 정리한다.
+- **DB 검증 위험 기반 선택(2026-07-29)**: 전체 실데이터 clone 생성은 기존 clone의 출처·
+  container/system identity·migration head·schema/content identity가 필요한 계약을 충족하지
+  않을 때만 한다. 전체 dump 복원 검증은 migration/schema, backup·restore, checkpoint,
+  database ownership처럼 복구 가능성에 직접 영향을 주는 코드가 바뀌었거나 서명된 checkpoint가
+  없거나 무효일 때만 1회 수행한다. 동일 migration head + schema/content hash + dump SHA256 +
+  checkpoint 계약 버전이 유지되면 다음 task와 최종 비DB 문서 commit에서 재사용하며, exact source
+  revision 변경만으로 전체 복원을 반복하지 않는다. 일반 repository/query 변경은 관련 통합
+  테스트, frontend/mocked/docs-only 변경은 해당 비DB gate만 수행한다.
 - **cross-lane 순서 제약**: C6c pair capture와 #392, H07A~D는 완료됐다.
   H22C는 완료된 T-VN-48B에 이어 같은 curation frontend를 만지는 T-VN-49B가 머지된 뒤
   시작한다. T-VN-12A의 command
@@ -165,6 +173,11 @@ Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별�
   - [ ] **T-VN-48D.2** — v4 교체 직전 fail-closed된 durable dump를 다음 checkpoint가
     다시 `pg_dump`하지 않고 재검증하도록 한다. 기존 checkpoint가 참조한 dump는 제외하고,
     root-owned 0600 후보가 정확히 하나일 때만 재사용하며 복수 후보는 fail-closed한다.
+  - [ ] **T-VN-48D.3** — PostGIS extension의 restore마다 달라지는 `extconfig` relation OID를
+    그대로 해시해 복원 검증이 `extension_sha256`에서 항상 불일치하는 문제를 수정한다.
+    OID 대신 순서가 보존된 schema+relation 식별자를 해시하고, real dump의 schema-only
+    복원으로 extension digest 동등성을 국소 검증해 이미 완료한 전체 데이터 restore를 반복하지
+    않는다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 

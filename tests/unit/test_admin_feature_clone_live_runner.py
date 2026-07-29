@@ -1079,6 +1079,10 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "'<database-owner>'" in source
     assert "owner.rolname = '$db_user'" in source
     assert "extension_sha256" in source
+    assert "unnest(extension.extconfig) WITH ORDINALITY" in source
+    assert "config_namespace.nspname" in source
+    assert "config_relation.relname" in source
+    assert "extension.extconfig::text" not in source
     assert "pg_get_functiondef" in source
     assert "pg_get_viewdef" in source
     assert "pg_catalog.pg_policy" in source

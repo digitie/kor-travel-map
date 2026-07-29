@@ -634,7 +634,26 @@ extension_sha256() {
         namespace.nspname,
         extension.extrelocatable,
         extension.extversion,
-        COALESCE(extension.extconfig::text, ''),
+        COALESCE(
+          (
+            SELECT string_agg(
+              concat_ws(
+                chr(30),
+                config_namespace.nspname,
+                config_relation.relname
+              ),
+              chr(29)
+              ORDER BY config.ordinality
+            )
+            FROM unnest(extension.extconfig) WITH ORDINALITY
+              AS config(relation_oid, ordinality)
+            JOIN pg_catalog.pg_class AS config_relation
+              ON config_relation.oid = config.relation_oid
+            JOIN pg_catalog.pg_namespace AS config_namespace
+              ON config_namespace.oid = config_relation.relnamespace
+          ),
+          ''
+        ),
         COALESCE(extension.extcondition::text, '')
       )
       FROM pg_catalog.pg_extension AS extension
