@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 
 import pytest
@@ -42,8 +43,6 @@ def _bundle(
     coord: Coordinate | None = None,
     admin_evidence: AdminEvidence | None = None,
 ) -> FeatureBundle:
-    from datetime import datetime
-
     if coord is None:
         coord = Coordinate(lon=Decimal("129.223"), lat=Decimal("35.1886"))
     address = Address(

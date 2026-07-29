@@ -22,6 +22,8 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Final
 
+from pydantic import ValidationError
+
 from kortravelmap.category import PlaceCategoryCode, mapbox_maki_icon_or_none
 from kortravelmap.core.address import (
     extract_sido_code,
@@ -45,7 +47,6 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.geocoding import ReverseGeocoder, cached_reverse_geocoder
-from pydantic import ValidationError
 
 __all__ = [
     "DATASET_KEY_YOUTUBE_PLACE_CANDIDATES",
