@@ -182,6 +182,11 @@ Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별�
     분리한다. baseline은 clone snapshot·write fence·custom archive 구조·dump SHA256을
     서명하되 `full_restore_verified=false`를 명시하고, migration/schema 또는 backup·restore
     경계가 바뀌어 복구 인증 자체가 필요한 task에서만 별도 full checkpoint를 수행한다.
+  - [ ] **T-VN-48D.5** — 후보 API의 의도적인 `ops.api_call_log` append가 최종 stable content
+    digest를 오염시키지 않도록 checkpoint `content_cutoff` 이후 행을 제외한다. 이전 digest로
+    기록된 실패 증거는 recovery tool revision이 달라지고 마지막 phase가 cleanup이며 현재
+    snapshot 차이가 `content_sha256` 하나뿐일 때만 새 digest로 재검증해 처음부터 재실행하지
+    않고, 그 외 identity/schema/data 차이는 계속 fail-closed한다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 

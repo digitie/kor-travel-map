@@ -103,6 +103,7 @@ def _write_snapshot(
     total: int,
     non_deleted: int = 100,
     schema_sha256: str = _SCHEMA_SHA256,
+    content_sha256: str = _CONTENT_SHA256,
 ) -> None:
     _run_helper(
         "write-snapshot",
@@ -117,7 +118,7 @@ def _write_snapshot(
         "--content-cutoff",
         _CONTENT_CUTOFF,
         "--content-sha256",
-        _CONTENT_SHA256,
+        content_sha256,
         "--database-sha256",
         _DATABASE_SHA256,
         "--extension-sha256",
@@ -402,6 +403,75 @@ def test_complete_recovers_without_rerunning_valid_evidence(tmp_path: Path) -> N
     assert not blocked.exists()
     assert payload["phase"] == "recovered"
     assert payload["recovery_tool_source_commit"] == _RECOVERY_COMMIT
+
+
+def test_recovery_revalidates_only_legacy_content_digest_drift(
+    tmp_path: Path,
+) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    _write_snapshot(
+        runtime / "clone-final.json",
+        total=126,
+        content_sha256="7" * 64,
+    )
+    _run_helper(
+        "update-blocked",
+        "--path",
+        str(blocked),
+        "--phase",
+        "direct-cleanup-running",
+    )
+
+    _complete(runtime, blocked, phase="recovered")
+
+    payload = json.loads((runtime / "result.json").read_text(encoding="utf-8"))
+    assert not blocked.exists()
+    assert payload["phase"] == "recovered"
+    assert payload["isolation"]["content_sha256"] == _CONTENT_SHA256
+
+
+def test_recovery_rejects_non_content_snapshot_drift(tmp_path: Path) -> None:
+    runtime, blocked = _prepare_runtime(tmp_path)
+    _write_snapshot(
+        runtime / "clone-final.json",
+        total=126,
+        content_sha256="7" * 64,
+    )
+    _run_helper(
+        "update-blocked",
+        "--path",
+        str(blocked),
+        "--phase",
+        "direct-cleanup-running",
+    )
+    current = runtime / "clone-recovery-current.json"
+    _write_snapshot(
+        current,
+        total=126,
+        content_sha256=_CONTENT_SHA256,
+        schema_sha256="6" * 64,
+    )
+
+    completed = _run_helper(
+        "complete",
+        "--blocked-path",
+        str(blocked),
+        "--current-snapshot",
+        str(current),
+        "--phase",
+        "recovered",
+        "--recovery-tool-source-commit",
+        _RECOVERY_COMMIT,
+        "--result-path",
+        str(runtime / "result.json"),
+        "--runtime",
+        str(runtime),
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert "실패 당시 최종 snapshot" in completed.stderr
+    assert blocked.exists()
 
 
 def test_recovered_result_preserves_hard_purge_evidence(tmp_path: Path) -> None:
@@ -1157,6 +1227,8 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "--build-arg NEXT_PUBLIC_VWORLD_API_KEY" in source
     assert "schema_sha256" in source
     assert "content_sha256" in source
+    assert "api_call_log" in source
+    assert "row_value.created_at < %L::timestamptz" in source
     assert "hashtextextended(row_value::text" in source
     assert "attribute.attidentity" in source
     assert "attribute.attgenerated" in source

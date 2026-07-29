@@ -1177,6 +1177,33 @@ def _build_result(
     startup_before = _validated_snapshot(runtime / "clone-startup-before.json")
     startup_after = _validated_snapshot(runtime / "clone-startup-after.json")
     final = _validated_snapshot(runtime / "clone-final.json")
+    effective_final = final
+    if args.phase == "recovered":
+        if args.current_snapshot is None or args.recovery_tool_source_commit is None:
+            raise RuntimeError("recovery 완료에는 현재 snapshot/tool commit이 필요합니다")
+        current = _validated_snapshot(Path(args.current_snapshot))
+        recovery_tool_source_commit: str | None = _require_pattern(
+            args.recovery_tool_source_commit,
+            _COMMIT_RE,
+            "recovery tool source commit",
+        )
+        if not _same_snapshot(final, current):
+            changed_fields = {
+                key for key in final if final[key] != current.get(key)
+            } | {key for key in current if key not in final}
+            if (
+                changed_fields != {"content_sha256"}
+                or recovery_tool_source_commit == identity["source_commit"]
+                or phase_history[-1] != "direct-cleanup-running"
+            ):
+                raise RuntimeError(
+                    "recovery 현재 clone DB가 실패 당시 최종 snapshot과 다릅니다"
+                )
+            effective_final = current
+    else:
+        if args.current_snapshot is not None or args.recovery_tool_source_commit is not None:
+            raise RuntimeError("일반 완료에는 recovery 전용 인자를 사용할 수 없습니다")
+        recovery_tool_source_commit = None
     if checkpoint["baseline"] != startup_before:
         raise RuntimeError("startup clone DB가 trusted checkpoint와 다릅니다")
     if not _same_snapshot(startup_before, startup_after):
@@ -1205,33 +1232,17 @@ def _build_result(
         "schema_sha256",
         "version",
     ):
-        if final[key] != startup_before[key]:
+        if effective_final[key] != startup_before[key]:
             raise RuntimeError("최종 clone DB identity/schema/content가 시작 기준과 다릅니다")
-    if final["feature_non_deleted"] != startup_before["feature_non_deleted"]:
+    if effective_final["feature_non_deleted"] != startup_before["feature_non_deleted"]:
         raise RuntimeError("최종 non-deleted Feature 수가 시작 기준과 다릅니다")
-    if final["feature_total"] != startup_before["feature_total"] + 6:
+    if effective_final["feature_total"] != startup_before["feature_total"] + 6:
         raise RuntimeError("최종 soft-delete 감사 Feature 6건이 예상과 다릅니다")
     if (
-        final["active_owned_features"] != 0
-        or final["nonterminal_owned_change_requests"] != 0
+        effective_final["active_owned_features"] != 0
+        or effective_final["nonterminal_owned_change_requests"] != 0
     ):
         raise RuntimeError("최종 API-owned Feature/change request residue가 있습니다")
-
-    if args.phase == "recovered":
-        if args.current_snapshot is None or args.recovery_tool_source_commit is None:
-            raise RuntimeError("recovery 완료에는 현재 snapshot/tool commit이 필요합니다")
-        current = _validated_snapshot(Path(args.current_snapshot))
-        if not _same_snapshot(final, current):
-            raise RuntimeError("recovery 현재 clone DB가 실패 당시 최종 snapshot과 다릅니다")
-        recovery_tool_source_commit: str | None = _require_pattern(
-            args.recovery_tool_source_commit,
-            _COMMIT_RE,
-            "recovery tool source commit",
-        )
-    else:
-        if args.current_snapshot is not None or args.recovery_tool_source_commit is not None:
-            raise RuntimeError("일반 완료에는 recovery 전용 인자를 사용할 수 없습니다")
-        recovery_tool_source_commit = None
 
     _fixture_counts(
         runtime / "direct-seed.json",
@@ -1285,8 +1296,8 @@ def _build_result(
             "recovery_purged_change_requests": purge["change_requests"],
             "recovery_purged_feature_versions": purge["feature_versions"],
             "recovery_purged_features": purge["features"],
-            "api_owned_active_features": final["active_owned_features"],
-            "api_owned_nonterminal_change_requests": final[
+            "api_owned_active_features": effective_final["active_owned_features"],
+            "api_owned_nonterminal_change_requests": effective_final[
                 "nonterminal_owned_change_requests"
             ],
             "post_cleanup_audit_features": audit["counts"]["features"],

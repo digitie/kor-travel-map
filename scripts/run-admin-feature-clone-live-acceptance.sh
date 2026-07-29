@@ -704,6 +704,12 @@ SELECT CASE
         chr(92)
       )
       WHEN namespace.nspname = 'ops'
+        AND relation.relname = 'api_call_log'
+      THEN format(
+        ' WHERE row_value.created_at < %L::timestamptz',
+        '${CONTENT_CUTOFF}'
+      )
+      WHEN namespace.nspname = 'ops'
         AND relation.relname = 'admin_auth_events'
       THEN format(
         ' WHERE row_value.request_id IS DISTINCT FROM %L' ||
