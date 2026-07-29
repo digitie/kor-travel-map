@@ -109,10 +109,9 @@ def _raise_for_status_sanitized(resp: httpx.Response) -> None:
     try:
         resp.raise_for_status()
     except _httpx.HTTPStatusError as exc:
-        safe_url = exc.request.url.copy_with(query=None)
         sanitized = GeoRequestError(
             f"kor-travel-geo 호출 실패: {exc.response.status_code} "
-            f"{exc.response.reason_phrase} for {safe_url}"
+            f"{exc.response.reason_phrase}"
         )
     # except 블록 **밖에서** 던진다. 안에서 던지면 ``from None``으로도 ``__context__``에
     # 원본(=key가 든 URL 문자열)이 남아, ``__context__``를 따라가는 로거·리포터로 샌다.
@@ -133,10 +132,8 @@ def _parse_response_sanitized(
             raise TypeError("response JSON is not an object")
         parsed = parser(payload)
     except (AttributeError, KeyError, OverflowError, TypeError, ValueError) as exc:
-        safe_url = resp.request.url.copy_with(query=None)
         sanitized = GeoRequestError(
-            "kor-travel-geo 응답 계약 오류: "
-            f"{type(exc).__name__} for {safe_url}"
+            f"kor-travel-geo 응답 계약 오류: {type(exc).__name__}"
         )
     # 원 JSON decoder/parser 예외의 frame local에 raw payload가 남을 수 있으므로
     # except 블록 밖에서 새 typed 오류를 던져 exception chaining도 만들지 않는다.
@@ -996,14 +993,8 @@ class KorTravelGeoRestClient:
                 headers=self._public_api_headers(),
             )
         except _httpx.HTTPError as exc:
-            request = getattr(exc, "request", None)
-            safe_url = (
-                request.url.copy_with(query=None)
-                if request is not None
-                else self._http.base_url
-            )
             sanitized = GeoRequestError(
-                f"kor-travel-geo transport 실패: {type(exc).__name__} for {safe_url}"
+                f"kor-travel-geo transport 실패: {type(exc).__name__}"
             )
         if sanitized is not None:
             raise sanitized

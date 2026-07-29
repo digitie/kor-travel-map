@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import signal
 import subprocess
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -907,12 +910,20 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "source.tar.gz" in source
     assert "github.com/digitie/kor-travel-map/archive" in source
     assert "--proto '=https' --proto-redir '=https'" in source
+    assert 'readonly BOOTSTRAP_LOCK_FILE="$INSTALL_BASE/bootstrap.lock"' in source
+    assert "coproc BOOTSTRAP_LOCK_GUARD" in source
+    assert "mv -T --no-clobber" in source
+    assert 'validate_snapshot "$SOURCE_COMMIT" "$expected_root"' in source
     assert "DOCKER_HOST DOCKER_TLS_VERIFY" in source
+    assert "exec 9" not in source
+    assert "flock --exclusive --nonblock --close" in source
     assert "candidate-startup-pending" in source
     assert source.rindex("state_helper write-blocked") < source.rindex(
         "create_candidate_network"
     )
     assert 'docker network create --internal \\' in source
+    assert "owned_network_identity" in source
+    assert "candidate network ownership label mismatch" in source
     assert '--network "$NETWORK_NAME"' in source
     assert source.count("--network host") == 1
     assert "-e PGPASSWORD=" not in source
@@ -954,6 +965,8 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "recover_verification_database" in source
     assert "fsync_file_and_directory" in source
     assert "verify_checkpoint_dump" in source
+    assert "checkpoint_references_dump" in source
+    assert source.count("remove_unreferenced_checkpoint_dumps") >= 5
     assert "docker network create --internal" in source
     assert "'{{.Internal}}'" in source
     assert "clone-recovery-current.json" in source
@@ -972,10 +985,80 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert source.rindex("finalize_resources") < source.rindex(
         "state_helper complete"
     )
-    assert "if (( BLOCKED_WRITTEN == 0 && COMPLETE == 0 ))" in source
+    assert "refresh_blocked_written_from_durable_state" in source
+    cleanup_source = source.split("cleanup_on_exit() {", maxsplit=1)[1].split(
+        "trap cleanup_on_exit EXIT", maxsplit=1
+    )[0]
+    assert cleanup_source.index(
+        "refresh_blocked_written_from_durable_state"
+    ) < cleanup_source.index("remove_owned_containers")
+    normal_source = source.split(
+        '[[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]]',
+        maxsplit=1,
+    )[1]
+    assert normal_source.index("start_acceptance_login_fence") < normal_source.index(
+        'write_snapshot "$RUNTIME_DIR/clone-startup-before.json"'
+    )
+    assert normal_source.index(
+        "assert_acceptance_login_fence_after_resources"
+    ) < normal_source.index("state_helper complete")
     assert "alembic upgrade" not in source
     assert "E2E_LIVE_ALLOW_PROD" not in source
     assert "E2E_ISOLATED_LIVE_DOCKER_NETWORK=1" in source
+
+
+def test_orchestrator_lock_guard_releases_after_runner_sigkill(
+    tmp_path: Path,
+) -> None:
+    """runner가 SIGKILL되어도 장수 grandchild가 flock을 상속하지 않는다."""
+    harness = tmp_path / "lock-guard.sh"
+    lock_path = tmp_path / "orchestrator.lock"
+    harness.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+lock_path="$1"
+if [[ "${TEST_LOCK_GUARD-}" != "1" ]]; then
+  exec env TEST_LOCK_GUARD=1 \
+    flock --exclusive --nonblock --close "$lock_path" "$0" "$lock_path"
+fi
+sleep 30 &
+printf '%s %s\\n' "$$" "$!"
+wait
+""",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    process = subprocess.Popen(
+        [str(harness), str(lock_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdout is not None
+    runner_pid_text, grandchild_pid_text = process.stdout.readline().split()
+    runner_pid = int(runner_pid_text)
+    grandchild_pid = int(grandchild_pid_text)
+    try:
+        os.kill(runner_pid, signal.SIGKILL)
+        process.wait(timeout=5)
+        reacquired = subprocess.run(
+            ["flock", "--exclusive", "--nonblock", str(lock_path), "true"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert reacquired.returncode == 0
+        os.kill(grandchild_pid, 0)
+    finally:
+        with suppress(ProcessLookupError):
+            os.kill(grandchild_pid, signal.SIGTERM)
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
 
 
 @pytest.mark.parametrize("unsafe_entry", ["trace.zip", "screenshot.png", "extra.json"])

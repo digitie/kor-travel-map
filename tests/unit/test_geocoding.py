@@ -1725,3 +1725,42 @@ def test_geo_transport_error_drops_original_request_and_secret() -> None:
             assert excinfo.value.__context__ is None
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure_kind", ["transport", "status", "payload"])
+def test_geo_errors_never_render_base_url_userinfo_or_path(
+    failure_kind: str,
+) -> None:
+    """직접 주입된 httpx client도 origin의 민감 경로를 오류에 반사하지 않는다."""
+    secret_user = "alice"
+    secret_password = "base-password"
+    secret_path = "private-token"
+    base_url = (
+        f"http://{secret_user}:{secret_password}@geo.test/{secret_path}"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if failure_kind == "transport":
+            raise httpx.ConnectError("connect failed", request=request)
+        if failure_kind == "status":
+            return httpx.Response(502, json={"status": "ERROR"})
+        return httpx.Response(200, content=b"not-json")
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(
+            base_url=base_url,
+            transport=httpx.MockTransport(handler),
+        ) as http:
+            client = KorTravelGeoRestClient(
+                http,
+                api_key=SecretStr("configured-public-key"),
+            )
+            with pytest.raises(GeoRequestError) as excinfo:
+                await client.reverse(127.0276, 37.4979)
+            rendered = f"{excinfo.value}{excinfo.value!r}"
+            assert secret_user not in rendered
+            assert secret_password not in rendered
+            assert secret_path not in rendered
+            assert "geo.test" not in rendered
+
+    asyncio.run(scenario())

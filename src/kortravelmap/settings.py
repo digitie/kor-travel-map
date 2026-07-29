@@ -24,8 +24,9 @@ Sprint 1 (본 PR#17) — minimum settings만. Provider key 등은 후속 sprint�
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogFormat = Literal["json", "console"]
@@ -144,6 +145,28 @@ class KorTravelMapSettings(BaseSettings):
             "trusted-proxy 권한을 요청하지 않는다."
         ),
     )
+
+    @field_validator("kor_travel_geo_base_url")
+    @classmethod
+    def _validate_kor_travel_geo_base_url(cls, value: str | None) -> str | None:
+        """Geo base URL에는 origin만 허용해 진단·경로 경계에 비밀을 두지 않는다."""
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "kor_travel_geo_base_url은 userinfo/query/fragment/path가 없는 "
+                "HTTP(S) origin이어야 합니다."
+            )
+        return value.rstrip("/")
 
     # ── Admin on-demand address/POI search ────────────────────────────────
     kakao_local_rest_api_key: SecretStr | None = Field(

@@ -16,6 +16,7 @@ readonly STATE_ROOT="/var/lib/kor-travel-map/admin-feature-clone-live-acceptance
 readonly BLOCKED_FILE="$STATE_ROOT/BLOCKED.json"
 readonly CHECKPOINT_FILE="$STATE_ROOT/clone-checkpoint.json"
 readonly LOCK_FILE="$STATE_ROOT/orchestrator.lock"
+readonly BOOTSTRAP_LOCK_FILE="$INSTALL_BASE/bootstrap.lock"
 readonly MODE="${1-run}"
 readonly SOURCE_COMMIT="${E2E_SOURCE_COMMIT-}"
 readonly DB_CONTAINER="${E2E_CLONE_DB_CONTAINER-}"
@@ -51,14 +52,48 @@ safe_remove_temporary() {
 bootstrap_snapshot() {
   (( EUID != 0 )) || die "bootstrap must run without root"
   require_command curl
+  require_command flock
+  require_command openssl
   require_command sudo
   require_command tar
   [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "source commit is invalid"
 
   local expected_root="$INSTALL_BASE/$SOURCE_COMMIT"
-  if ! sudo -n test -d "$expected_root"; then
-    local incoming="$INSTALL_BASE/.incoming-$SOURCE_COMMIT-$$"
-    sudo -n install -d -o root -g root -m 0555 "$INSTALL_BASE"
+  sudo -n install -d -o root -g root -m 0555 "$INSTALL_BASE"
+  sudo -n touch "$BOOTSTRAP_LOCK_FILE"
+  sudo -n chown root:root "$BOOTSTRAP_LOCK_FILE"
+  sudo -n chmod 0600 "$BOOTSTRAP_LOCK_FILE"
+  [[ "$(sudo -n stat -c '%u:%g:%a' -- "$BOOTSTRAP_LOCK_FILE")" == "0:0:600" ]] ||
+    die "bootstrap lock metadata is unsafe"
+
+  # flock guardian이 stdin EOF까지 lock을 소유한다. 호출자가 SIGKILL되어도 coproc의
+  # write end가 닫혀 lock과 caller 고유 incoming 디렉터리가 다음 실행을 막지 않는다.
+  coproc BOOTSTRAP_LOCK_GUARD {
+    sudo -n flock --exclusive "$BOOTSTRAP_LOCK_FILE" \
+      /bin/sh -c 'printf "locked\n"; IFS= read -r _'
+  }
+  local lock_status
+  IFS= read -r lock_status <&"${BOOTSTRAP_LOCK_GUARD[0]}" ||
+    die "bootstrap lock guardian did not start"
+  [[ "$lock_status" == "locked" ]] || die "bootstrap lock was not acquired"
+
+  local stale_name stale_path
+  while IFS= read -r stale_name; do
+    [[ "$stale_name" =~ ^\.incoming-${SOURCE_COMMIT}-[0-9]+(-[0-9a-f]{12})?$ ]] ||
+      die "stale bootstrap path is unsafe"
+    stale_path="$INSTALL_BASE/$stale_name"
+    [[ "$(sudo -n stat -c '%u:%g:%a' -- "$stale_path")" == "0:0:700" ]] ||
+      die "stale bootstrap metadata is unsafe"
+    sudo -n rm -rf -- "$stale_path"
+  done < <(
+    sudo -n find "$INSTALL_BASE" -mindepth 1 -maxdepth 1 -type d \
+      -name ".incoming-$SOURCE_COMMIT-*" -printf '%f\n'
+  )
+
+  local incoming="$INSTALL_BASE/.incoming-$SOURCE_COMMIT-$$-$(openssl rand -hex 6)"
+  local bootstrap_status=0
+  (
+    set -e
     sudo -n install -d -o root -g root -m 0700 "$incoming"
     sudo -n curl -q --fail --show-error --silent --location \
       --proto '=https' --proto-redir '=https' --tlsv1.2 \
@@ -79,8 +114,20 @@ bootstrap_snapshot() {
       "$incoming/admin_feature_live_fixture.py"
     sudo -n chmod 0555 "$incoming/run-admin-feature-clone-live-acceptance.sh"
     sudo -n chmod 0555 "$incoming"
-    sudo -n mv -- "$incoming" "$expected_root"
+    if ! sudo -n mv -T --no-clobber -- "$incoming" "$expected_root"; then
+      sudo -n rm -rf -- "$incoming"
+      sudo -n test -d "$expected_root"
+    fi
+  ) || bootstrap_status=$?
+  if sudo -n test -e "$incoming"; then
+    sudo -n rm -rf -- "$incoming"
   fi
+  (( bootstrap_status == 0 )) || die "immutable snapshot bootstrap failed"
+  validate_snapshot "$SOURCE_COMMIT" "$expected_root"
+
+  printf 'release\n' >&"${BOOTSTRAP_LOCK_GUARD[1]}" || true
+  wait "$BOOTSTRAP_LOCK_GUARD_PID" ||
+    die "bootstrap lock guardian exited unexpectedly"
 
   exec sudo -n \
     --preserve-env=E2E_SOURCE_COMMIT,E2E_CLONE_DB_CONTAINER,E2E_CLONE_DB_PORT,E2E_CLONE_DB_DUMP,E2E_CLONE_DUMP_PATH,E2E_CLONE_API_PORT,E2E_CLONE_UI_PORT,E2E_ADMIN_PASSWORD,E2E_VWORLD_API_KEY \
@@ -192,8 +239,12 @@ if [[ -e "$LOCK_FILE" || -L "$LOCK_FILE" ]]; then
 else
   install -o root -g root -m 0600 /dev/null "$LOCK_FILE"
 fi
-exec 9<>"$LOCK_FILE"
-flock -n 9 || die "another clone acceptance runner owns the lock"
+if [[ "${KTM_ADMIN_FEATURE_CLONE_LOCK_GUARD-}" != "1" ]]; then
+  exec env KTM_ADMIN_FEATURE_CLONE_LOCK_GUARD=1 \
+    flock --exclusive --nonblock --close "$LOCK_FILE" \
+    "$SCRIPT_DIR/run-admin-feature-clone-live-acceptance.sh" "$MODE"
+fi
+unset KTM_ADMIN_FEATURE_CLONE_LOCK_GUARD
 
 readonly STATE_HELPER="$SCRIPT_DIR/admin_feature_clone_live_state.py"
 state_helper() {
@@ -276,8 +327,14 @@ psql_value() {
 make_dsn() {
   local host="$1"
   local port="$2"
+  local connection_password="$db_password"
+  if (( CHECKPOINT_LOGIN_FENCED == 1 )); then
+    [[ -n "$CHECKPOINT_FENCE_PASSWORD" ]] ||
+      die "active clone DB login fence has no runner password"
+    connection_password="$CHECKPOINT_FENCE_PASSWORD"
+  fi
   KTM_E2E_DB_USER="$db_user" \
-    KTM_E2E_DB_PASSWORD="$db_password" \
+    KTM_E2E_DB_PASSWORD="$connection_password" \
     KTM_E2E_DB_HOST="$host" \
     KTM_E2E_DB_PORT="$port" \
     KTM_E2E_DB_NAME="$db_name" \
@@ -740,6 +797,7 @@ RUNTIME_DIR=""
 RUN_ID=""
 RUN_KEY=""
 NETWORK_NAME=""
+NETWORK_CREATED_ID=""
 API_IMAGE_ID=""
 UI_IMAGE_ID=""
 PLAYWRIGHT_IMAGE_ID=""
@@ -869,14 +927,41 @@ print(str(os.environ["NETWORK_TO_FIND"] in json.load(sys.stdin)).lower())
 '
 }
 
+owned_network_identity() {
+  [[ -n "$NETWORK_NAME" && -n "$RUN_KEY" ]] ||
+    die "runner-owned network identity is incomplete"
+  [[ "$NETWORK_NAME" == "ktm-afcla-${RUN_KEY:0:12}-net" ]] ||
+    die "runner-owned network name is invalid"
+  local observed_id observed_run_key
+  observed_id="$(docker network inspect --format '{{.Id}}' "$NETWORK_NAME")" ||
+    return 1
+  observed_run_key="$(
+    docker network inspect --format \
+      '{{index .Labels "io.kortravelmap.admin-feature-clone-acceptance.run-key"}}' \
+      "$NETWORK_NAME"
+  )"
+  [[ "$observed_run_key" == "$RUN_KEY" ]] ||
+    die "candidate network ownership label mismatch"
+  if [[ -n "$NETWORK_CREATED_ID" ]]; then
+    [[ "$observed_id" == "$NETWORK_CREATED_ID" ]] ||
+      die "candidate network identity changed"
+  fi
+  printf '%s' "$observed_id"
+}
+
 remove_owned_network() {
   [[ -n "$NETWORK_NAME" ]] || return 0
+  if ! docker network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
+    return 0
+  fi
+  local observed_id
+  observed_id="$(owned_network_identity)" || return 0
+  [[ -n "$observed_id" ]] || die "candidate network identity is empty"
   if [[ "$(clone_network_attached)" == "true" ]]; then
     docker network disconnect "$NETWORK_NAME" "$DB_CONTAINER"
   fi
-  if docker network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
-    docker network rm "$NETWORK_NAME" >/dev/null
-  fi
+  docker network rm "$NETWORK_NAME" >/dev/null
+  NETWORK_CREATED_ID=""
 }
 
 remove_owned_images() {
@@ -1137,13 +1222,11 @@ recover_checkpoint_quiescence() {
   PSQL_APP_NAME=""
 }
 
-start_checkpoint_quiescence() {
-  [[ -z "$CHECKPOINT_QUIESCENCE_PROCESS" ]] ||
-    die "checkpoint quiescence is already active"
+start_database_login_fence() {
   checkpoint_login_role_invariant ||
     die "clone cluster must have exactly the configured LOGIN role"
   [[ "$(foreign_cluster_sessions)" == "0" ]] ||
-    die "clone cluster has a foreign client session before checkpoint quiescence"
+    die "clone cluster has a foreign client session before login fencing"
   CHECKPOINT_QUIESCENCE_APP="ktm_checkpoint_${RUN_KEY:0:16}"
   state_helper write-quiescence \
     --application-name "$CHECKPOINT_QUIESCENCE_APP" \
@@ -1157,14 +1240,30 @@ start_checkpoint_quiescence() {
   CHECKPOINT_LOGIN_FENCED=1
   terminate_foreign_cluster_sessions
   checkpoint_login_role_invariant ||
-    die "clone cluster LOGIN role invariant changed during checkpoint fence"
+    die "clone cluster LOGIN role invariant changed during login fence"
   clone_host_tcp_password_works "$CHECKPOINT_FENCE_PASSWORD" ||
-    die "runner-owned checkpoint password was not accepted at the host boundary"
+    die "runner-owned fence password was not accepted at the host boundary"
   if clone_host_tcp_password_works "$db_password"; then
-    die "clone DB accepted its original password at the host boundary during checkpoint fence"
+    die "clone DB accepted its original password at the host boundary during login fence"
   fi
   [[ "$(foreign_cluster_sessions)" == "0" ]] ||
     die "clone cluster retained a foreign client after login fencing"
+}
+
+assert_database_login_fence() {
+  checkpoint_login_role_invariant ||
+    die "clone cluster LOGIN role invariant changed during login fence"
+  clone_host_tcp_password_works "$CHECKPOINT_FENCE_PASSWORD" ||
+    die "runner-owned fence password changed during acceptance"
+  if clone_host_tcp_password_works "$db_password"; then
+    die "clone DB login fence disappeared during acceptance"
+  fi
+}
+
+start_checkpoint_quiescence() {
+  [[ -z "$CHECKPOINT_QUIESCENCE_PROCESS" ]] ||
+    die "checkpoint quiescence is already active"
+  start_database_login_fence
   local lock_statements
   lock_statements="$(
     psql_query "
@@ -1231,15 +1330,24 @@ assert_checkpoint_quiescence() {
         AND wait_event = 'PgSleep'
     "
   )" == "1" ]] || die "checkpoint quiescence backend is not holding locks"
-  checkpoint_login_role_invariant ||
-    die "clone cluster LOGIN role invariant changed during checkpoint"
+  assert_database_login_fence
   [[ "$(foreign_cluster_sessions)" == "0" ]] ||
     die "clone cluster has a foreign session during checkpoint quiescence"
-  clone_host_tcp_password_works "$CHECKPOINT_FENCE_PASSWORD" ||
-    die "runner-owned checkpoint password changed during checkpoint"
-  if clone_host_tcp_password_works "$db_password"; then
-    die "clone DB login fence disappeared at the host boundary during checkpoint"
-  fi
+}
+
+start_acceptance_login_fence() {
+  [[ -z "$CHECKPOINT_QUIESCENCE_PROCESS" ]] ||
+    die "checkpoint quiescence process exists before acceptance"
+  start_database_login_fence
+}
+
+assert_acceptance_login_fence_after_resources() {
+  # candidate containers를 제거한 뒤 남는 연결은 runner-owned가 아니므로 모두 종료하고
+  # 새 연결이 original credential로 재진입하지 못하는지 다시 확인한다.
+  terminate_foreign_cluster_sessions
+  assert_database_login_fence
+  [[ "$(foreign_cluster_sessions)" == "0" ]] ||
+    die "clone cluster has a foreign session after candidate cleanup"
 }
 
 stop_checkpoint_quiescence() {
@@ -1760,15 +1868,24 @@ verify_dump_restore() {
   drop_verification_database
 }
 
-checkpoint_references_dump() {
-  local dump_path="$1"
+checkpoint_path_references_dump() {
+  local checkpoint_path="$1"
+  local dump_path="$2"
   local filename
-  [[ -f "$CHECKPOINT_FILE" && ! -L "$CHECKPOINT_FILE" ]] || return 1
+  [[ -f "$checkpoint_path" && ! -L "$checkpoint_path" ]] || return 1
   filename="$(
     state_helper read-checkpoint \
-      --checkpoint "$CHECKPOINT_FILE" --field dump_filename 2>/dev/null
+      --checkpoint "$checkpoint_path" --field dump_filename 2>/dev/null
   )" || return 1
   [[ "$STATE_ROOT/$filename" == "$dump_path" ]]
+}
+
+checkpoint_references_dump() {
+  local dump_path="$1"
+  checkpoint_path_references_dump "$CHECKPOINT_FILE" "$dump_path" && return 0
+  [[ -n "$RUNTIME_DIR" ]] || return 1
+  checkpoint_path_references_dump \
+    "$RUNTIME_DIR/clone-checkpoint.json" "$dump_path"
 }
 
 remove_unreferenced_checkpoint_dumps() {
@@ -1780,6 +1897,7 @@ remove_unreferenced_checkpoint_dumps() {
       die "unreferenced checkpoint dump path is unsafe"
     [[ "$(stat -c '%u:%g:%a' -- "$dump_path")" == "0:0:600" ]] ||
       die "unreferenced checkpoint dump metadata is unsafe"
+    checkpoint_references_dump "$dump_path" && continue
     rm -- "$dump_path"
   done < <(
     find "$STATE_ROOT" -maxdepth 1 -type f \
@@ -1817,10 +1935,25 @@ verify_checkpoint_dump() {
   verify_dump_archive "$dump_path"
 }
 
+refresh_blocked_written_from_durable_state() {
+  (( COMPLETE == 0 && BLOCKED_WRITTEN == 0 )) || return 0
+  [[ -n "$RUN_KEY" && -f "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] || return 0
+  [[ "$(stat -c '%u:%g:%a' -- "$BLOCKED_FILE")" == "0:0:600" ]] || return 0
+  local durable_run_key
+  durable_run_key="$(
+    state_helper read-blocked --path "$BLOCKED_FILE" --field run_key 2>/dev/null
+  )" || return 0
+  [[ "$durable_run_key" == "$RUN_KEY" ]] || return 0
+  BLOCKED_WRITTEN=1
+}
+
 cleanup_on_exit() {
   local status=$?
   trap - EXIT INT TERM
   set +e
+  # write-blocked의 atomic replace 직후 signal이 와도 메모리 flag보다 durable state를
+  # 정본으로 삼아 recovery용 runtime/image를 보존한다.
+  refresh_blocked_written_from_durable_state
   remove_owned_containers
   remove_owned_network
   stop_checkpoint_quiescence
@@ -1912,6 +2045,7 @@ print(value)
       )" == "$existing_checkpoint_version" ]] ||
         die "existing checkpoint version validation changed"
       verify_checkpoint_dump "$CHECKPOINT_FILE"
+      remove_unreferenced_checkpoint_dumps
       CONTENT_CUTOFF="$(
         state_helper read-checkpoint \
           --checkpoint "$CHECKPOINT_FILE" --field content_cutoff
@@ -1933,6 +2067,7 @@ print(value)
       fi
       assert_checkpoint_quiescence
       verify_checkpoint_dump "$CHECKPOINT_FILE"
+      remove_unreferenced_checkpoint_dumps
       COMPLETE=1
       rm -- "$FINAL_CHECKPOINT_SNAPSHOT"
       stop_checkpoint_quiescence
@@ -2048,9 +2183,19 @@ print(f"pbkdf2_sha256$310000${encode(salt)}${encode(digest)}")
 }
 
 create_candidate_network() {
-  docker network create --internal \
-    --label "io.kortravelmap.admin-feature-clone-acceptance.run-key=$RUN_KEY" \
-    "$NETWORK_NAME" >/dev/null
+  local create_output="" create_status=0
+  create_output="$(
+    docker network create --internal \
+      --label "io.kortravelmap.admin-feature-clone-acceptance.run-key=$RUN_KEY" \
+      "$NETWORK_NAME"
+  )" || create_status=$?
+  if docker network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
+    NETWORK_CREATED_ID="$(owned_network_identity)"
+  fi
+  (( create_status == 0 )) ||
+    die "candidate network create returned failure after ownership inspection"
+  [[ -n "$NETWORK_CREATED_ID" && "$create_output" == "$NETWORK_CREATED_ID" ]] ||
+    die "candidate network create identity mismatch"
   [[ "$(docker network inspect --format '{{.Internal}}' "$NETWORK_NAME")" == "true" ]] ||
     die "candidate network is not internal"
   docker network connect --alias clone-db "$NETWORK_NAME" "$DB_CONTAINER"
@@ -2172,6 +2317,7 @@ start_candidate_services() {
     die "candidate UI build revision mismatch"
   assert_candidate_container "$API_CONTAINER" "$API_IMAGE_ID"
   assert_candidate_container "$UI_CONTAINER" "$UI_IMAGE_ID"
+  assert_database_login_fence
 }
 
 run_helper() {
@@ -2299,6 +2445,7 @@ run_acceptance_from_fixture() {
   run_helper audit "$RUNTIME_DIR/direct-audit.json"
   run_helper api-audit "$RUNTIME_DIR/api-owned-audit.json"
   run_helper auth-verify "$RUNTIME_DIR/auth-audit.json"
+  assert_database_login_fence
   write_snapshot "$RUNTIME_DIR/clone-final.json" "$RUN_ID"
   (( main_status == 0 && recovery_status == 0 )) || {
     state_helper update-blocked --path "$BLOCKED_FILE" --phase test-failed-restored
@@ -2340,6 +2487,7 @@ if [[ "$MODE" == "recover" ]]; then
       --field content_cutoff
   )"
   verify_checkpoint_dump "$RUNTIME_DIR/clone-checkpoint.json"
+  remove_unreferenced_checkpoint_dumps
   BASE_CLONE_CONTAINER_SHA256="$(
     printf '%s' "$BASE_CLONE_CONTAINER_ID" | sha256sum | awk '{print $1}'
   )"
@@ -2349,6 +2497,7 @@ if [[ "$MODE" == "recover" ]]; then
   )"
   recover_checkpoint_quiescence
   recover_verification_database
+  start_acceptance_login_fence
   write_snapshot "$RUNTIME_DIR/clone-recovery-current.json" "$RUN_ID"
   state_helper verify-checkpoint \
     --allow-owned-drift \
@@ -2358,10 +2507,13 @@ if [[ "$MODE" == "recover" ]]; then
   if state_helper validate-evidence "${completion_args[@]}" >/dev/null 2>&1; then
     state_helper update-blocked --path "$BLOCKED_FILE" --phase recovery-resource-finalizing
     finalize_resources
+    assert_acceptance_login_fence_after_resources
     state_helper complete "${completion_args[@]}" \
       --result-path "$RUNTIME_DIR/result.json"
     COMPLETE=1
     BLOCKED_WRITTEN=0
+    stop_checkpoint_quiescence ||
+      die "clone DB login fence restoration failed after recovery"
     printf 'admin feature clone live acceptance recovered: source=%s result=%s\n' \
       "$blocked_source" "$RUNTIME_DIR/result.json"
     exit 0
@@ -2420,10 +2572,13 @@ if [[ "$MODE" == "recover" ]]; then
   state_helper validate-evidence "${completion_args[@]}"
   state_helper update-blocked --path "$BLOCKED_FILE" --phase recovery-resource-finalizing
   finalize_resources
+  assert_acceptance_login_fence_after_resources
   state_helper complete "${completion_args[@]}" \
     --result-path "$RUNTIME_DIR/result.json"
   COMPLETE=1
   BLOCKED_WRITTEN=0
+  stop_checkpoint_quiescence ||
+    die "clone DB login fence restoration failed after recovery"
   printf 'admin feature clone live acceptance recovered: source=%s result=%s\n' \
     "$blocked_source" "$RUNTIME_DIR/result.json"
   exit 0
@@ -2440,6 +2595,7 @@ CONTENT_CUTOFF="$(
     --checkpoint "$CHECKPOINT_FILE" --field content_cutoff
 )"
 verify_checkpoint_dump "$CHECKPOINT_FILE"
+remove_unreferenced_checkpoint_dumps
 
 RUN_ID="clone-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 6)"
 RUN_KEY="$(printf '%s' "$RUN_ID" | sha256sum | awk '{print $1}')"
@@ -2465,6 +2621,7 @@ BASE_CLONE_SYSTEM_SHA256="$(
 )"
 recover_checkpoint_quiescence
 recover_verification_database
+start_acceptance_login_fence
 write_snapshot "$RUNTIME_DIR/clone-startup-before.json" "$RUN_ID"
 install -o root -g root -m 0600 "$CHECKPOINT_FILE" "$RUNTIME_DIR/clone-checkpoint.json"
 clone_checkpoint_sha256="$(
@@ -2527,9 +2684,12 @@ set_completion_args passed
 state_helper validate-evidence "${completion_args[@]}"
 state_helper update-blocked --path "$BLOCKED_FILE" --phase resource-finalizing
 finalize_resources
+assert_acceptance_login_fence_after_resources
 state_helper complete "${completion_args[@]}" \
   --result-path "$RUNTIME_DIR/result.json"
 COMPLETE=1
 BLOCKED_WRITTEN=0
+stop_checkpoint_quiescence ||
+  die "clone DB login fence restoration failed after acceptance"
 printf 'admin feature clone live acceptance complete: source=%s result=%s\n' \
   "$SOURCE_COMMIT" "$RUNTIME_DIR/result.json"

@@ -41,6 +41,25 @@ def test_geo_public_api_key_stays_masked() -> None:
     assert secret not in repr(settings)
 
 
+@pytest.mark.parametrize(
+    "unsafe_url",
+    [
+        "http://alice:password@geo.example",
+        "https://geo.example/private-token",
+        "https://geo.example?token=secret",
+        "https://geo.example#secret",
+    ],
+)
+def test_geo_base_url_accepts_only_secret_free_origin(unsafe_url: str) -> None:
+    with pytest.raises(ValidationError, match="HTTP\\(S\\) origin"):
+        KorTravelMapSettings(kor_travel_geo_base_url=unsafe_url)
+
+    settings = KorTravelMapSettings(
+        kor_travel_geo_base_url="https://geo.example/",
+    )
+    assert settings.kor_travel_geo_base_url == "https://geo.example"
+
+
 def test_opinet_run_budget_preserves_daily_quota_for_two_datasets() -> None:
     assert KorTravelMapSettings(opinet_run_call_budget=700).opinet_run_call_budget == 700
     with pytest.raises(ValidationError):
