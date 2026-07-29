@@ -178,6 +178,10 @@ Feature·검토 15건, ops 5건, auth/shell 69건으로 고정하고 단계별�
     OID 대신 순서가 보존된 schema+relation 식별자를 해시하고, real dump의 schema-only
     복원으로 extension digest 동등성을 국소 검증해 이미 완료한 전체 데이터 restore를 반복하지
     않는다.
+  - [ ] **T-VN-48D.4** — 파괴적 Live의 경량 baseline과 선택적 full restore certification을
+    분리한다. baseline은 clone snapshot·write fence·custom archive 구조·dump SHA256을
+    서명하되 `full_restore_verified=false`를 명시하고, migration/schema 또는 backup·restore
+    경계가 바뀌어 복구 인증 자체가 필요한 task에서만 별도 full checkpoint를 수행한다.
 
 ### T-VN-49 — React Doctor 구조 debt 단계별 제거
 

@@ -376,6 +376,42 @@ def write_checkpoint(args: argparse.Namespace) -> None:
     _atomic_json(Path(args.path), payload)
 
 
+def write_baseline_checkpoint(args: argparse.Namespace) -> None:
+    snapshot = _validated_snapshot(Path(args.snapshot))
+    dump_sha256 = _require_pattern(args.dump_sha256, _SHA256_RE, "dump SHA256")
+    if args.dump_size < 1:
+        raise RuntimeError("dump size가 올바르지 않습니다")
+    payload: dict[str, Any] = {
+        "baseline": snapshot,
+        "dump": {
+            "filename": _require_pattern(
+                args.dump_filename,
+                _CHECKPOINT_DUMP_RE,
+                "checkpoint dump filename",
+            ),
+            "sha256": dump_sha256,
+            "size": args.dump_size,
+        },
+        "recovery_provenance": {
+            "archive_format": "custom",
+            "archive_verified": True,
+            "full_restore_verified": False,
+        },
+        "source_stability": {
+            "snapshot_sha256": _canonical_sha256(snapshot),
+            "verified": True,
+        },
+        "write_quiescence": {
+            "cluster_single_login_role_fenced": True,
+            "relation_share_locks": True,
+            "verified": True,
+        },
+        "version": 5,
+    }
+    payload["checkpoint_sha256"] = _canonical_sha256(payload)
+    _atomic_json(Path(args.path), payload)
+
+
 def _validated_scratch(args: argparse.Namespace) -> dict[str, Any]:
     scratch = _load_object(Path(args.path))
     database = scratch.get("database")
@@ -640,11 +676,22 @@ def _validated_checkpoint(path: Path) -> dict[str, Any]:
         "source_stability",
         "write_quiescence",
     }
+    version_5_keys = {
+        "baseline",
+        "checkpoint_sha256",
+        "dump",
+        "recovery_provenance",
+        "source_stability",
+        "version",
+        "write_quiescence",
+    }
     fields = set(checkpoint)
     if version == 2:
         valid_fields = fields in version_2_keys
     elif version in {3, 4}:
         valid_fields = fields == version_3_or_4_keys
+    elif version == 5:
+        valid_fields = fields == version_5_keys
     else:
         valid_fields = False
     if not valid_fields:
@@ -681,15 +728,23 @@ def _validated_checkpoint(path: Path) -> dict[str, Any]:
     baseline = _validated_snapshot_object(
         checkpoint.get("baseline"), label="checkpoint baseline"
     )
-    restore_verification = checkpoint.get("restore_verification")
-    if (
-        not isinstance(restore_verification, dict)
-        or restore_verification.get("verified") is not True
-        or set(restore_verification) != {"snapshot_sha256", "verified"}
-        or restore_verification.get("snapshot_sha256")
-        != _canonical_sha256(baseline)
-    ):
-        raise RuntimeError("clone checkpoint 복원 검증 provenance가 없습니다")
+    if version == 5:
+        if checkpoint.get("recovery_provenance") != {
+            "archive_format": "custom",
+            "archive_verified": True,
+            "full_restore_verified": False,
+        }:
+            raise RuntimeError("clone checkpoint archive provenance가 없습니다")
+    else:
+        restore_verification = checkpoint.get("restore_verification")
+        if (
+            not isinstance(restore_verification, dict)
+            or restore_verification.get("verified") is not True
+            or set(restore_verification) != {"snapshot_sha256", "verified"}
+            or restore_verification.get("snapshot_sha256")
+            != _canonical_sha256(baseline)
+        ):
+            raise RuntimeError("clone checkpoint 복원 검증 provenance가 없습니다")
     source_stability = checkpoint.get("source_stability")
     if source_stability is not None:
         if (
@@ -707,7 +762,7 @@ def _validated_checkpoint(path: Path) -> dict[str, Any]:
         "verified": True,
     }:
         raise RuntimeError("clone checkpoint write quiescence provenance가 없습니다")
-    if version == 4 and checkpoint.get("write_quiescence") != {
+    if version in {4, 5} and checkpoint.get("write_quiescence") != {
         "cluster_single_login_role_fenced": True,
         "relation_share_locks": True,
         "verified": True,
@@ -761,7 +816,7 @@ def read_replaced_checkpoint_dump(args: argparse.Namespace) -> None:
     path = Path(args.checkpoint)
     checkpoint = _load_object(path)
     version = checkpoint.get("version")
-    if version in {2, 3, 4}:
+    if version in {2, 3, 4, 5}:
         dump = _validated_checkpoint(path)["dump"]
     else:
         if version != 1 or set(checkpoint) != {
@@ -1363,6 +1418,14 @@ def main() -> None:
     checkpoint.add_argument("--restored-snapshot", required=True)
     checkpoint.add_argument("--snapshot", required=True)
     checkpoint.set_defaults(handler=write_checkpoint)
+
+    baseline_checkpoint = subparsers.add_parser("write-baseline-checkpoint")
+    baseline_checkpoint.add_argument("--dump-filename", required=True)
+    baseline_checkpoint.add_argument("--dump-sha256", required=True)
+    baseline_checkpoint.add_argument("--dump-size", required=True, type=int)
+    baseline_checkpoint.add_argument("--path", required=True)
+    baseline_checkpoint.add_argument("--snapshot", required=True)
+    baseline_checkpoint.set_defaults(handler=write_baseline_checkpoint)
 
     promote = subparsers.add_parser("promote-checkpoint")
     promote.add_argument("--checkpoint", required=True)

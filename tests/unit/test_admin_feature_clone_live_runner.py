@@ -612,6 +612,94 @@ def test_checkpoint_rejects_dump_restore_snapshot_drift(tmp_path: Path) -> None:
     assert "fields=feature_total" in completed.stderr
 
 
+def test_baseline_checkpoint_records_archive_without_claiming_full_restore(
+    tmp_path: Path,
+) -> None:
+    snapshot = tmp_path / "snapshot.json"
+    checkpoint = tmp_path / "checkpoint.json"
+    _write_snapshot(snapshot, total=120)
+
+    _run_helper(
+        "write-baseline-checkpoint",
+        "--dump-filename",
+        _DUMP_FILENAME,
+        "--dump-sha256",
+        _DUMP_SHA256,
+        "--dump-size",
+        "1024",
+        "--path",
+        str(checkpoint),
+        "--snapshot",
+        str(snapshot),
+    )
+    version = _run_helper(
+        "read-checkpoint",
+        "--checkpoint",
+        str(checkpoint),
+        "--field",
+        "version",
+    )
+    verified = _run_helper(
+        "verify-checkpoint",
+        "--checkpoint",
+        str(checkpoint),
+        "--snapshot",
+        str(snapshot),
+    )
+    payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+
+    assert version.stdout.strip() == "5"
+    assert len(verified.stdout.strip()) == 64
+    assert "restore_verification" not in payload
+    assert payload["recovery_provenance"] == {
+        "archive_format": "custom",
+        "archive_verified": True,
+        "full_restore_verified": False,
+    }
+
+
+def test_baseline_checkpoint_rejects_forged_full_restore_claim(
+    tmp_path: Path,
+) -> None:
+    snapshot = tmp_path / "snapshot.json"
+    checkpoint = tmp_path / "checkpoint.json"
+    _write_snapshot(snapshot, total=120)
+    _run_helper(
+        "write-baseline-checkpoint",
+        "--dump-filename",
+        _DUMP_FILENAME,
+        "--dump-sha256",
+        _DUMP_SHA256,
+        "--dump-size",
+        "1024",
+        "--path",
+        str(checkpoint),
+        "--snapshot",
+        str(snapshot),
+    )
+    payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+    payload["recovery_provenance"]["full_restore_verified"] = True
+    unsigned = {
+        key: value for key, value in payload.items() if key != "checkpoint_sha256"
+    }
+    payload["checkpoint_sha256"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    checkpoint.write_text(json.dumps(payload), encoding="utf-8")
+
+    rejected = _run_helper(
+        "read-checkpoint",
+        "--checkpoint",
+        str(checkpoint),
+        "--field",
+        "version",
+        check=False,
+    )
+
+    assert rejected.returncode != 0
+    assert "archive provenance" in rejected.stderr
+
+
 def test_reusable_dump_selector_rejects_symlink_and_ambiguous_candidates(
     tmp_path: Path,
 ) -> None:
@@ -1083,6 +1171,8 @@ def test_runner_closes_reviewed_trust_boundaries() -> None:
     assert "config_namespace.nspname" in source
     assert "config_relation.relname" in source
     assert "extension.extconfig::text" not in source
+    assert 'MODE" == "baseline"' in source
+    assert "state_helper write-baseline-checkpoint" in source
     assert "pg_get_functiondef" in source
     assert "pg_get_viewdef" in source
     assert "pg_catalog.pg_policy" in source

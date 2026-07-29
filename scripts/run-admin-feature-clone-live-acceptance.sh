@@ -182,8 +182,9 @@ validate_snapshot() {
   done
 }
 
-[[ "$MODE" == "checkpoint" || "$MODE" == "recover" || "$MODE" == "run" ]] ||
-  die "usage: runner checkpoint|recover|run"
+[[ "$MODE" == "baseline" || "$MODE" == "checkpoint" ||
+   "$MODE" == "recover" || "$MODE" == "run" ]] ||
+  die "usage: runner baseline|checkpoint|recover|run"
 require_env E2E_SOURCE_COMMIT
 if [[ "$SCRIPT_DIR" != "$INSTALL_BASE/$SOURCE_COMMIT" ]]; then
   bootstrap_snapshot
@@ -213,7 +214,7 @@ for port in "$API_PORT" "$UI_PORT"; do
     die "candidate port overlaps production/default"
 done
 [[ "$API_PORT" != "$UI_PORT" ]] || die "candidate ports overlap"
-if [[ "$MODE" != "checkpoint" ]]; then
+if [[ "$MODE" != "baseline" && "$MODE" != "checkpoint" ]]; then
   require_env E2E_ADMIN_PASSWORD
   require_env E2E_VWORLD_API_KEY
   [[ "${E2E_ADMIN_PASSWORD}" != *$'\n'* && "${E2E_ADMIN_PASSWORD}" != *$'\r'* ]] ||
@@ -2100,7 +2101,7 @@ trap cleanup_on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if [[ "$MODE" == "checkpoint" ]]; then
+if [[ "$MODE" == "baseline" || "$MODE" == "checkpoint" ]]; then
   [[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
     die "BLOCKED state must be recovered before checkpoint"
   RUN_ID="checkpoint-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 6)"
@@ -2152,7 +2153,10 @@ print(value)
       )"
     elif [[ "$existing_checkpoint_version" == "2" ||
             "$existing_checkpoint_version" == "3" ||
-            "$existing_checkpoint_version" == "4" ]]; then
+            "$existing_checkpoint_version" == "4" ||
+            "$existing_checkpoint_version" == "5" ]]; then
+      [[ "$MODE" == "baseline" || "$existing_checkpoint_version" != "5" ]] ||
+        die "full restore certification cannot reuse a baseline-only checkpoint"
       [[ "$(state_helper read-checkpoint \
           --checkpoint "$CHECKPOINT_FILE" --field version
       )" == "$existing_checkpoint_version" ]] ||
@@ -2237,10 +2241,12 @@ print(value)
   dump_sha256="$(sha256sum -- "$NEW_CHECKPOINT_DUMP" | awk '{print $1}')"
   [[ "$(stat -Lc '%d:%i:%s:%Y' -- "$NEW_CHECKPOINT_DUMP")" == "$dump_before" ]] ||
     die "clone dump changed during checkpoint hashing"
-  verify_dump_restore "$NEW_CHECKPOINT_DUMP" "$RESTORED_CHECKPOINT_SNAPSHOT"
-  assert_checkpoint_quiescence
-  write_snapshot "$FINAL_CHECKPOINT_SNAPSHOT" "$RUN_ID"
-  assert_checkpoint_quiescence
+  if [[ "$MODE" == "checkpoint" ]]; then
+    verify_dump_restore "$NEW_CHECKPOINT_DUMP" "$RESTORED_CHECKPOINT_SNAPSHOT"
+    assert_checkpoint_quiescence
+    write_snapshot "$FINAL_CHECKPOINT_SNAPSHOT" "$RUN_ID"
+    assert_checkpoint_quiescence
+  fi
   [[ "$(stat -Lc '%d:%i:%s:%Y' -- "$NEW_CHECKPOINT_DUMP")" == "$dump_before" ]] ||
     die "clone dump changed during restore verification"
   [[ "$(sha256sum -- "$NEW_CHECKPOINT_DUMP" | awk '{print $1}')" == "$dump_sha256" ]] ||
@@ -2256,20 +2262,29 @@ print(value)
         die "replaced checkpoint dump path is unsafe"
     fi
   fi
-  state_helper write-checkpoint \
-    --dump-filename "$(basename -- "$NEW_CHECKPOINT_DUMP")" \
-    --dump-sha256 "$dump_sha256" \
-    --dump-size "$dump_size" \
-    --final-snapshot "$FINAL_CHECKPOINT_SNAPSHOT" \
-    --path "$CHECKPOINT_FILE" \
-    --restored-snapshot "$RESTORED_CHECKPOINT_SNAPSHOT" \
-    --snapshot "$CHECKPOINT_SNAPSHOT"
+  if [[ "$MODE" == "checkpoint" ]]; then
+    state_helper write-checkpoint \
+      --dump-filename "$(basename -- "$NEW_CHECKPOINT_DUMP")" \
+      --dump-sha256 "$dump_sha256" \
+      --dump-size "$dump_size" \
+      --final-snapshot "$FINAL_CHECKPOINT_SNAPSHOT" \
+      --path "$CHECKPOINT_FILE" \
+      --restored-snapshot "$RESTORED_CHECKPOINT_SNAPSHOT" \
+      --snapshot "$CHECKPOINT_SNAPSHOT"
+  else
+    state_helper write-baseline-checkpoint \
+      --dump-filename "$(basename -- "$NEW_CHECKPOINT_DUMP")" \
+      --dump-sha256 "$dump_sha256" \
+      --dump-size "$dump_size" \
+      --path "$CHECKPOINT_FILE" \
+      --snapshot "$CHECKPOINT_SNAPSHOT"
+  fi
   COMPLETE=1
   CHECKPOINT_DUMP_DURABLE=0
-  rm -- \
-    "$CHECKPOINT_SNAPSHOT" \
-    "$RESTORED_CHECKPOINT_SNAPSHOT" \
-    "$FINAL_CHECKPOINT_SNAPSHOT"
+  rm -- "$CHECKPOINT_SNAPSHOT"
+  if [[ "$MODE" == "checkpoint" ]]; then
+    rm -- "$RESTORED_CHECKPOINT_SNAPSHOT" "$FINAL_CHECKPOINT_SNAPSHOT"
+  fi
   if [[ -n "$OLD_CHECKPOINT_DUMP" &&
         "$OLD_CHECKPOINT_DUMP" != "$NEW_CHECKPOINT_DUMP" &&
         -f "$OLD_CHECKPOINT_DUMP" && ! -L "$OLD_CHECKPOINT_DUMP" ]]; then
@@ -2279,8 +2294,8 @@ print(value)
   assert_checkpoint_quiescence
   stop_checkpoint_quiescence
   remove_owned_images
-  printf 'admin feature clone live checkpoint complete: source=%s checkpoint=%s\n' \
-    "$SOURCE_COMMIT" "$CHECKPOINT_FILE"
+  printf 'admin feature clone live %s complete: source=%s checkpoint=%s\n' \
+    "$MODE" "$SOURCE_COMMIT" "$CHECKPOINT_FILE"
   exit 0
 fi
 
