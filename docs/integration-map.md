@@ -220,8 +220,17 @@ select/unselect `actor`, enrichment review `reviewed_by`, offline upload
 | kor-travel-concierge feature export | kor-travel-concierge `docs/feature-export-api.md`(로컬 경로는 `F:\dev\kor-travel-concierge`, 프로젝트명은 `kor-travel-concierge`) | 본 repo: `docs/etl/concierge-feature-etl.md` + `providers/kor_travel_concierge.py` docstring |
 | PinVi 사용자 제안 연동(합의 5건) | 본 repo `docs/architecture/rest-api.md` (구 ADR-051) | PinVi `docs/integrations/kor-travel-map-rest-api.md` §7 |
 | YouTube 후보 detail 소비(TM-08) | 본 repo `docs/architecture/rest-api.md` (T-217f) | PinVi UX 기획 |
+| **curation collection 표면** | 본 repo `packages/kor-travel-map-api/src/kortravelmap/api/routers/curations.py` + `openapi{,.user}.json`. CSV 정본은 `resources/curations/*.csv` + `manifest.json` | **현재 외부 소비자 없음**(2026-07-30 전수 grep: PinVi·concierge·docker-manager 0 hit) |
 | geocoding | kor-travel-geo REST v2 (`POST /v2/{reverse,geocode}`) + public API key header 인증 | ADR-046 + geo ADR-064 |
 | 인프라(PostGIS·RustFS) 구동/포트 | **kor-travel-docker-manager** `docker-compose.yml`+README (ADR-052 amendment) | 각 repo는 사용자 — 포트 값은 ADR-047과 정합 |
+
+> **`collection_key`는 안정 식별자가 아니다 (2026-07-30).** 공개/admin 응답에 실리지만
+> 마이그레이션 `0045` → `0065`에서 형식이 **두 번** 바뀌었다(`0065`가 legacy collection 52개를
+> `legacy:<theme_uuid>:<source_uuid>:<md5(title)>`로 재작성한다). 표시·검색용으로만 쓰고
+> **조회·저장에는 `collection_id`(UUID)를 쓴다** — 실제로 `collection_key`를 조회 키로 받는
+> 엔드포인트는 없고 전부 `collection_id` 경로다. 예외는 CSV import의
+> `ON CONFLICT (collection_key)` upsert뿐이며, CSV가 쓰는 키(`korean-tourism-100:*` 등)는
+> legacy 재작성 대상이 아니라 안정적이다. 소비자가 생기면 이 문단을 계약에 명시할 것.
 
 **원칙**: 계약 정본은 공급자 repo가 갖고(ADR-044), 소비자 repo 문서는 머리말에
 "정본 링크 + view" 선언을 둔다. 형제 repo 실측은 반드시 `git fetch` 후
