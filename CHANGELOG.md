@@ -26,7 +26,8 @@
 
 - **FIXED**: provider 후보가 주소 문자열 때문에 영구 미적재되던 문제를 해결했다. 기존 규칙은
   좌표 역지오코딩 시군구명이 provider 주소 문자열에 부분문자열로 없으면 error → drop이었는데,
-  실측(kor-travel-concierge 1,477 후보)에서 **380건을 drop했고 좌표 오류는 0건**이었다.
+  실측(kor-travel-concierge 1,477 후보)에서 **380건을 drop했지만 기존 규칙으로 불일치
+  근거가 성립한 건은 0건**이었다(전체 후보의 일반적 좌표 정확성을 증명한다는 뜻은 아니다).
   그중 **375건은 provider 주소에 시/군/구 토큰이 아예 없어**(`부산 기장 조방국밥`) 좌표의
   옳고 그름과 무관하게 부분문자열 검사가 통과 불가였고, 4건은 축약·단계 표기 차이,
   나머지 1건은 정지오코딩상 **143 m 경계** 케이스였다. 새 규칙 적용 후 **1,477건 전량 적재**.
@@ -41,15 +42,17 @@
 - **BEHAVIOR**: 좌표 역지오코딩이 결과를 내지 못했지만 provider 행정코드로 적재 가능한 경우
   `reverse_geocode_unavailable` warning을 낸다. 좌표 정합성이 미확인 상태임을 드러내되
   적재는 막지 않는다.
-- **RELIABILITY**: 영구 손실(drop)·run 실패 대상이 severity가 아니라 **명시적 code
-  화이트리스트**(`DROPPABLE_ISSUE_CODES` = `reverse_geocode_failed`, `missing_address`)로
-  정해진다. 새 검증이 error를 내도 이 집합을 고치기 전에는 데이터가 사라지지 않는다.
+- **RELIABILITY**: `strict`와 `ensure_feature_address_valid()`는 **모든 error**에서 run을
+  중단한다. 영구 손실 가능성이 있는 `drop` 모드만 명시적 code 화이트리스트
+  (`DROPPABLE_ISSUE_CODES` = `reverse_geocode_failed`, `missing_address`)를 적용해, 신규
+  error가 검토 없이 레코드 삭제 사유가 되지 않게 한다.
 - **FIXED**: provider payload에 시군구코드만 있고 법정동코드가 없을 때 `Address` 코드 정합성
   검증이 예외를 던져 **레코드 1건이 batch 전체 적재를 중단**시키던 경로를 제거했다. 법정동코드가
   있으면 시군구·시도를 거기서만 유도하며, batch 변환에 건별 격리 옵션을 추가했다.
-- **OBSERVABILITY**: materialization metadata에 `address_validation_evidence_grades`가 추가됐다.
-  행정코드 교차검증이 실제로 성립한 건수(`dual`)와 판정하지 못한 건수를 분리해, 커버리지 부족을
-  "이상 없음"으로 오독하지 않게 한다.
+- **OBSERVABILITY**: materialization metadata에 `address_validation_evidence_grades`,
+  `address_validation_name_states`, quarantine의 안정 item key·reason code가 추가됐다.
+  행정코드/이름축 검증 성립 여부와 필수 필드 누락을 분리해, 판정 불능이나 silent omission을
+  “이상 없음”으로 오독하지 않게 한다. `upserts == bundles + quarantine` 불변식도 강제한다.
 - **API**: `FeatureBundle.admin_evidence`(`AdminEvidence`) 필드가 추가됐다. 기본 `None`이며
   기존 생성 코드는 영향받지 않는다.
 
