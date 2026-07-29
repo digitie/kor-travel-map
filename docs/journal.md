@@ -17,95 +17,44 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
-## 2026-07-29 (codex) — T-VN-48D 최종 Mocked·clone Live 완료
+## 2026-07-29 — T-VN-H36: 이름 단독 자동링크를 막았다. H33이 비로소 durable해졌다
 
-보존 clone의 파괴적 Live 본편·recovery-only는 이미 각각 2/2를 실행한 상태에서, 최종
-content equality가 정상적인 `ops_live_topic_revisions.dataset_projection` revision `+1`까지
-변조로 취급해 fail-closed했다. 전체 clone/restore나 UI를 반복하지 않고 실패 지점부터
-복구했다.
+curation CSV import에서 `feature_id`가 빈 행이 이름만 일치하는 후보에 자동으로 붙던 경로를
+막았다. 리졸버가 `lower(f.name) = lower(place_name)` 단독으로 후보를 찾고, 라우터가
+`matches[0] if len(matches) == 1`로 "유일하니 맞겠지"라며 채택하던 규칙이다. **유일성은
+동명 feature가 하나뿐이라는 뜻이지 같은 장소라는 뜻이 아니다.**
 
-- 서명된 checkpoint dump의 직전 topic 행을 현재 DB에 대입한 전체 content digest가 v5
-  baseline과 정확히 같은 경우만 허용했다. current row는 revision `+1`과 증가한 timestamp를
-  별도 root-owned 증거로 결박하고, 다른 topic·schema·identity·content 차이는 그대로
-  거부한다.
-- evidence 사전 검증 뒤 `recovery-resource-finalizing`을 기록한 상태에서 `complete`가 같은
-  증거를 다시 거부하던 전이도 수정했다. `direct-cleanup-running`을 이미 거친 이 두 단계만
-  허용하고 임의 phase는 음성 테스트로 차단했다.
-- Live result는 `complete/recovered`, main 2/2·recovery 2/2다. active acceptance Feature,
-  pending change request, direct weather/price/FK, BLOCKED/quiescence/scratch/temp DB·role,
-  runner container/network/image가 모두 0이며 clone은 healthy다. v5 custom dump는
-  `archive_verified=true`, `full_restore_verified=false`로 보존했다.
-- Mocked 첫 serial은 273/274로, `areTilesLoaded()` 뒤 늦게 도착한 실제 MapLibre `idle`이
-  raster `sourcedata` 계측에 섞이는 한 건만 실패했다. repaint로 실제 idle cycle과 marker
-  rAF를 먼저 소진한 뒤 계측하게 고쳤고, exact `823ba52b` checkpoint D를 serial과
-  workers=4에서 각각 **274/274** 통과했다. expected/actual failure·flake·skip과 종료 자원은
-  모두 0이다.
+바꾼 것은 `_adopted_match` 하나다 — CSV가 `feature_id`를 적지 않았으면 후보 수와 무관하게
+링크하지 않는다. 후보는 버리지 않고 `candidates`로 계속 노출하므로 운영자가 preview에서
+보고 admin에서 직접 붙일 수 있다. SQL·DTO·openapi·마이그레이션 무변경, 기존 테스트 23건 무손상.
 
-국소 gate는 runner unit 35개, Ruff, shell syntax, e2e TypeScript/ESLint가 통과했다. 최종
-문서 이관 뒤 PR을 열고 CI green·직접 머지한다. Claude Code PR 사후 감사는 사용자 지시에
-따라 task PR 머지 뒤 별도 후속 단계에서 진행한다.
+**측정.** 커밋 CSV 486행 전수에 prod 리졸버 SQL을 재생했다(읽기 전용).
+빈 264행의 후보 분포는 0건 256 / 2건 이상 5 / **1건 3**. 그 3건이 막히는 자동링크 전부이고,
+**셋 다 region 불일치**다(남이섬 강원→서울 ×2, 청남대 충북→전남). 즉 **잃는 정당한 링크는
+0건**이고 막는 것은 T-VN-H33이 끊었던 바로 그 3건이다.
 
-PR #889 첫 CI는 Python 3.11/3.12/3.13에서 같은 11개 Dagster asset test를 검출했다.
-`record_address_validation_findings()`가 typed `IntegrityFindingSyncResult`를 반환하도록
-강화됐는데 주변 test double 12개가 여전히 `int`를 반환한 계약 drift였다. production
-fallback을 넣지 않고 모든 double을 실제 결과 타입으로 맞췄다. 실패 node에서 재개한 Dagster
-package 전체는 **510 passed, 1 skipped**, coverage **83.66%**이고 Ruff도 통과했다.
+**이번엔 반증 가능성을 먼저 설계했다.** 이 세션에서 두 번(공개 노출 0건, 탐지기 3→0) 무너진
+지점이라 측정을 만들 때 "실패했다면 다른 결과가 나오는가"를 먼저 물었다.
+- `blocked_autolinks`가 0이면 아무것도 안 막은 것이다.
+- `csv_specified`(222)는 리졸버가 아니라 **CSV 파일**에서 오므로, 링크를 통째로 껐다면
+  이 숫자가 blocked와 **같이 움직이지 않는다**.
+- 후보 분포가 전부 0이면 조회가 죽은 것이다.
+테스트에도 음성 대조(후보 0건은 여전히 `unmatched`)와 양성 대조(CSV가 `feature_id`를 적은
+행은 그대로 링크)를 넣었다. 대조가 없으면 "전부 미연결"이 성공인지 고장인지 구별되지 않는다.
 
-## 2026-07-29 (codex) — T-VN-48D 2인 적대 리뷰 하드닝
+**또 배포되지 않은 코드를 prod 동작으로 읽었다.** H33에서 나는 "prod가 0063이라 import
+자체가 실패하므로 당장 되살아나지 않는다"고 적었는데, 배포 이미지 `c8ed6164`의 import 코드에는
+`source_present`/`external_component_id` 참조가 0건이라 prod 스키마와 정합하며 **오늘도
+동작한다**. 참인 명제는 "HEAD 코드를 prod 스키마에 돌리면 실패한다"였고 나는 그걸 "prod에서
+import가 실패한다"로 옮겨 적었다. 같은 실수를 H33에서 한 번 지적받고 또 했다. 덤으로,
+CSV import는 `_UPSERT_ITEM_SQL`이 아니라 `_BULK_UPSERT_ITEMS_SQL`을 탄다 — 내가 근거로
+인용한 SQL 자체가 다른 경로였다.
 
-T-VN-48와 현재 PR에 이미 포함된 PR #888 사후 감사 수정의 branch-authored delta만 두
-리뷰어가 검토했다. rebase로 유입된 PR #887 이하 코드는 범위에서 제외했다.
+**배포 순서**: 이 게이트는 `T-VN-H35` 이미지에 **반드시 포함**돼야 한다. H35 인수가 commit
+모드 import를 실행하는데(live spec의 `palaceComponents` 단언이 실제 import를 요구한다),
+그때 게이트가 없으면 3건이 그 자리에서 되살아난다. 마이그레이션만 올리는 것도 안 된다 —
+`0065`가 drop하는 partial 인덱스를 현행 이미지 upsert가 arbiter로 명시하고 있다.
 
-- Live clone fence가 client-controlled `application_name`을 소유권으로 믿던 문제를 기존
-  client backend 전부 종료 + 정확한 backend PID/시작 시각 추적으로 바꿨다.
-- runner의 FD 9 flock을 외부 명령에 상속하던 구조를 stdin EOF guardian coprocess로
-  바꿔, runner SIGKILL 뒤 장시간 docker/build/executor가 복구 lock을 붙잡지 않게 했다.
-- `0068`은 자유형 `payload.last_seen_at`을 timestamp로 cast·삭제하지 않고 payload를
-  보존한다. `last_seen_at=detected_at` 결정 backfill, NOT VALID/VALIDATE, concurrent index
-  교체로 malformed/null/offset 값과 대용량 lock 경계를 함께 고정했다.
-- integrity cursor kind를 `integrity_issues_last_seen_v2`로 분리해 구
-  `detected_at` cursor를 조용히 새 정렬축에 적용하지 않는다.
-- 겹치는 batch는 `GREATEST(last_seen_at)`과 조건부 최신 필드 갱신으로 오래된 관측이 최신
-  FK/message/severity/payload를 되돌리지 못하며, occurrence count만 누적한다.
-- Mocked checkpoint cleanup은 container/network/image 제거 명령과 사후 부재를 확인하고
-  Docker 오류·timeout·잔존을 exit 2로 승격한다.
-- 1차 재검토가 `0068` 첫 autocommit 중단 뒤 duplicate column으로 재개 불가한 경계와
-  default 설정 전 writer NULL 공백을 재현했다. column 추가+default를 단일 atomic
-  `ALTER TABLE`로 묶고 column/constraint/index 각 단계가 부분 적용 상태를 감지·정규화해
-  같은 forward migration을 재실행할 수 있게 했다.
-- Docker daemon이 create를 완료했지만 CLI 응답이 유실되는 signal 경계는 create-attempt를
-  먼저 기록하고 name+ownership label로 실제 ID를 회수해 제거한다. 검증 전 빈/손상 ID를
-  소유 identity로 저장하지 않으며, stderr 문구 대신 container/network/image 목록의 실제
-  부재로 cleanup 성공을 판정한다.
-
-검증은 관련 단위 49개, 신규 migration/upsert 통합 7개, 전체 Ruff, strict mypy 196 files,
-import-linter 4 contracts, shell/Node syntax가 통과했다. 실패한 migration fixture는
-Alembic naming convention과 asyncpg datetime 타입 지점에서만 재개해 수정했고 downgrade는
-실행하지 않았다.
-
-## 2026-07-29 (codex) — PR #888 주소 finding ledger 사후 감사 정정
-
-PR #888 원본 patch를 별도 적대 감사한 결과 8건을 확인하고 현재 T-VN-48 PR에 함께
-반영했다.
-
-- 서로 반대 순서의 multi-row upsert가 같은 unique key를 잠그며 deadlock할 수 있어,
-  repository 진입점에서 `dedupe_key` 정렬 후 모든 `unnest` 배열을 만든다.
-- 구 key는 `source_entity_type`을 생략하고 원천 id를 그대로 붙여 entity type 충돌과
-  B-tree row 크기 초과가 가능했다. provider/dataset/type/id/code 전체의
-  `av2_<sha256>` 68-byte key로 교체했다.
-- recurrence가 payload만 갱신해 실제 `feature_id`/`source_record_key`는 최초 값을
-  가리키던 문제를 고쳤다. Feature FK도 `CASCADE`에서 `SET NULL`로 바꿔 대상 삭제가
-  ledger 자체를 삭제하지 않게 했다.
-- `detected_at`은 최초 탐지 시각으로 보존하고 `last_seen_at` column을 추가했다.
-  Admin/Ops 목록과 cursor·실제 query index는 최신 관측 시각을 사용한다.
-- client의 broad catch를 typed `IntegrityFindingPersistenceError`로 바꾸고 strict는
-  durable 기록 실패를 validation 실패보다 먼저 fail-closed한다.
-- 결과를 `observed/unique/upserted`로 분리해 batch 내부 중복을 미기록으로 계산하지 않는다.
-- 실제 구현에 없는 자동 close sweep을 광고하던 문서·상수·테스트를 제거했다.
-- H30B는 동일 snapshot의 Feature before/after와 인증된 Admin API 실호출이 없으므로
-  완료 표시를 취소하고 acceptance를 구체화했다.
-
-## 2026-07-29 (claude) — Lane A a1: T-VN-H30A 구현·H30B 1차 실증
 ## 2026-07-29 — T-VN-H33: curation 오링크 3건 해제, 공개 오노출이 실재했다
 
 H25B가 정지오코딩으로 찾아낸 오링크 3건을 끊었다. **실제로 틀린 장소를 내보내고 있었다** —
@@ -233,6 +182,95 @@ substring이라 `스카`·`스페이스` 같은 2~4글자 feature가 그걸 포�
 "수정이 통했다"처럼 보였다. 리뷰 지적을 반영한 직후의 수치 변화도 검증 대상이다.
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H30A/B 검증 결과 durable 기록
+## 2026-07-29 (codex) — T-VN-48D 최종 Mocked·clone Live 완료
+
+보존 clone의 파괴적 Live 본편·recovery-only는 이미 각각 2/2를 실행한 상태에서, 최종
+content equality가 정상적인 `ops_live_topic_revisions.dataset_projection` revision `+1`까지
+변조로 취급해 fail-closed했다. 전체 clone/restore나 UI를 반복하지 않고 실패 지점부터
+복구했다.
+
+- 서명된 checkpoint dump의 직전 topic 행을 현재 DB에 대입한 전체 content digest가 v5
+  baseline과 정확히 같은 경우만 허용했다. current row는 revision `+1`과 증가한 timestamp를
+  별도 root-owned 증거로 결박하고, 다른 topic·schema·identity·content 차이는 그대로
+  거부한다.
+- evidence 사전 검증 뒤 `recovery-resource-finalizing`을 기록한 상태에서 `complete`가 같은
+  증거를 다시 거부하던 전이도 수정했다. `direct-cleanup-running`을 이미 거친 이 두 단계만
+  허용하고 임의 phase는 음성 테스트로 차단했다.
+- Live result는 `complete/recovered`, main 2/2·recovery 2/2다. active acceptance Feature,
+  pending change request, direct weather/price/FK, BLOCKED/quiescence/scratch/temp DB·role,
+  runner container/network/image가 모두 0이며 clone은 healthy다. v5 custom dump는
+  `archive_verified=true`, `full_restore_verified=false`로 보존했다.
+- Mocked 첫 serial은 273/274로, `areTilesLoaded()` 뒤 늦게 도착한 실제 MapLibre `idle`이
+  raster `sourcedata` 계측에 섞이는 한 건만 실패했다. repaint로 실제 idle cycle과 marker
+  rAF를 먼저 소진한 뒤 계측하게 고쳤고, exact `823ba52b` checkpoint D를 serial과
+  workers=4에서 각각 **274/274** 통과했다. expected/actual failure·flake·skip과 종료 자원은
+  모두 0이다.
+
+국소 gate는 runner unit 35개, Ruff, shell syntax, e2e TypeScript/ESLint가 통과했다. 최종
+문서 이관 뒤 PR을 열고 CI green·직접 머지한다. Claude Code PR 사후 감사는 사용자 지시에
+따라 task PR 머지 뒤 별도 후속 단계에서 진행한다.
+
+PR #889 첫 CI는 Python 3.11/3.12/3.13에서 같은 11개 Dagster asset test를 검출했다.
+`record_address_validation_findings()`가 typed `IntegrityFindingSyncResult`를 반환하도록
+강화됐는데 주변 test double 12개가 여전히 `int`를 반환한 계약 drift였다. production
+fallback을 넣지 않고 모든 double을 실제 결과 타입으로 맞췄다. 실패 node에서 재개한 Dagster
+package 전체는 **510 passed, 1 skipped**, coverage **83.66%**이고 Ruff도 통과했다.
+
+## 2026-07-29 (codex) — T-VN-48D 2인 적대 리뷰 하드닝
+
+T-VN-48와 현재 PR에 이미 포함된 PR #888 사후 감사 수정의 branch-authored delta만 두
+리뷰어가 검토했다. rebase로 유입된 PR #887 이하 코드는 범위에서 제외했다.
+
+- Live clone fence가 client-controlled `application_name`을 소유권으로 믿던 문제를 기존
+  client backend 전부 종료 + 정확한 backend PID/시작 시각 추적으로 바꿨다.
+- runner의 FD 9 flock을 외부 명령에 상속하던 구조를 stdin EOF guardian coprocess로
+  바꿔, runner SIGKILL 뒤 장시간 docker/build/executor가 복구 lock을 붙잡지 않게 했다.
+- `0068`은 자유형 `payload.last_seen_at`을 timestamp로 cast·삭제하지 않고 payload를
+  보존한다. `last_seen_at=detected_at` 결정 backfill, NOT VALID/VALIDATE, concurrent index
+  교체로 malformed/null/offset 값과 대용량 lock 경계를 함께 고정했다.
+- integrity cursor kind를 `integrity_issues_last_seen_v2`로 분리해 구
+  `detected_at` cursor를 조용히 새 정렬축에 적용하지 않는다.
+- 겹치는 batch는 `GREATEST(last_seen_at)`과 조건부 최신 필드 갱신으로 오래된 관측이 최신
+  FK/message/severity/payload를 되돌리지 못하며, occurrence count만 누적한다.
+- Mocked checkpoint cleanup은 container/network/image 제거 명령과 사후 부재를 확인하고
+  Docker 오류·timeout·잔존을 exit 2로 승격한다.
+- 1차 재검토가 `0068` 첫 autocommit 중단 뒤 duplicate column으로 재개 불가한 경계와
+  default 설정 전 writer NULL 공백을 재현했다. column 추가+default를 단일 atomic
+  `ALTER TABLE`로 묶고 column/constraint/index 각 단계가 부분 적용 상태를 감지·정규화해
+  같은 forward migration을 재실행할 수 있게 했다.
+- Docker daemon이 create를 완료했지만 CLI 응답이 유실되는 signal 경계는 create-attempt를
+  먼저 기록하고 name+ownership label로 실제 ID를 회수해 제거한다. 검증 전 빈/손상 ID를
+  소유 identity로 저장하지 않으며, stderr 문구 대신 container/network/image 목록의 실제
+  부재로 cleanup 성공을 판정한다.
+
+검증은 관련 단위 49개, 신규 migration/upsert 통합 7개, 전체 Ruff, strict mypy 196 files,
+import-linter 4 contracts, shell/Node syntax가 통과했다. 실패한 migration fixture는
+Alembic naming convention과 asyncpg datetime 타입 지점에서만 재개해 수정했고 downgrade는
+실행하지 않았다.
+
+## 2026-07-29 (codex) — PR #888 주소 finding ledger 사후 감사 정정
+
+PR #888 원본 patch를 별도 적대 감사한 결과 8건을 확인하고 현재 T-VN-48 PR에 함께
+반영했다.
+
+- 서로 반대 순서의 multi-row upsert가 같은 unique key를 잠그며 deadlock할 수 있어,
+  repository 진입점에서 `dedupe_key` 정렬 후 모든 `unnest` 배열을 만든다.
+- 구 key는 `source_entity_type`을 생략하고 원천 id를 그대로 붙여 entity type 충돌과
+  B-tree row 크기 초과가 가능했다. provider/dataset/type/id/code 전체의
+  `av2_<sha256>` 68-byte key로 교체했다.
+- recurrence가 payload만 갱신해 실제 `feature_id`/`source_record_key`는 최초 값을
+  가리키던 문제를 고쳤다. Feature FK도 `CASCADE`에서 `SET NULL`로 바꿔 대상 삭제가
+  ledger 자체를 삭제하지 않게 했다.
+- `detected_at`은 최초 탐지 시각으로 보존하고 `last_seen_at` column을 추가했다.
+  Admin/Ops 목록과 cursor·실제 query index는 최신 관측 시각을 사용한다.
+- client의 broad catch를 typed `IntegrityFindingPersistenceError`로 바꾸고 strict는
+  durable 기록 실패를 validation 실패보다 먼저 fail-closed한다.
+- 결과를 `observed/unique/upserted`로 분리해 batch 내부 중복을 미기록으로 계산하지 않는다.
+- 실제 구현에 없는 자동 close sweep을 광고하던 문서·상수·테스트를 제거했다.
+- H30B는 동일 snapshot의 Feature before/after와 인증된 Admin API 실호출이 없으므로
+  완료 표시를 취소하고 acceptance를 구체화했다.
+
+## 2026-07-29 (claude) — Lane A a1: T-VN-H30A 구현·H30B 1차 실증
 
 **목표**. 주소/좌표 검증 결과가 Dagster run metadata에만 있어 run이 사라지면 증거도 사라지고
 `/admin/issues`에서도 안 보였다. `ops.data_integrity_violations`에 남긴다.

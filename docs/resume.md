@@ -10,10 +10,7 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
-## 2026-07-29 (codex) — T-VN-48D 최종 gate 완료 → PR·CI·merge
-## 2026-07-29 (claude) — Lane A a1: T-VN-H25B 완료 → 다음은 T-VN-H33
-## 2026-07-29 (claude) — Lane A a1: T-VN-H25B + T-VN-H33 완료 → 다음은 T-VN-H35
-## 2026-07-29 (claude) — Lane A a1: T-VN-H25B + H33(부분) → 다음은 T-VN-H36
+## 2026-07-30 (claude) — Lane A a1: T-VN-H25B/H33/H36 완료 → 다음은 T-VN-H35
 
 **다음 한 작업**: `T-VN-H35`(prod 마이그레이션 0064~0067 + **이미지 동시 배포**).
 이후 `T-VN-H31`(등대) → `T-VN-H34` → `T-VN-H30C` → `T-VN-H32` → `T-VN-H22A/B/C`.
@@ -77,6 +74,13 @@
   다만 `T-VN-H31`(등대 공급원 부재) 전제는 다른 경로로 **재확인**됐다.
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H30A/B 완료, H30C 미완 → 다음은 T-VN-H25B
+
+**다음 한 작업**: `T-VN-H25B`(CSV 역반영 8건 + 기준선 대조 매칭 재실행).
+이후 `T-VN-H30C`(재작업) → `T-VN-H31`(등대 공급원) → `T-VN-H22A/B/C`.
+
+- **완료**: `T-VN-H30A/B` — 주소 검증 결과가 `ops.data_integrity_violations`에 durable하게
+  남고 `/admin/issues`에서 보인다. 실적재로 회복 검증, 배포 cursor 미설정 실증.
+## 2026-07-29 (codex) — T-VN-48D 최종 gate 완료 → PR·CI·merge
 
 **완료**: 보존 clone Live의 main/recovery 2/2 증거를 전체 restore·브라우저 재실행 없이
 실패 지점부터 복구했다. 정상적인 `dataset_projection` revision `+1`은 서명 dump 직전 행을
