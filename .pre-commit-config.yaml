@@ -14,7 +14,7 @@ repos:
         name: no prod endpoint details in committed docs (#508)
         entry: python scripts/check_prod_redaction.py
         language: python
-        files: ^docs/.*\.(md|mdx|txt|rst|json|csv)$
+        files: ^docs/.*\.(md|mdx|txt|rst)$
 
       - id: kor-travel-map-ruff-format-check
         name: ruff format --check

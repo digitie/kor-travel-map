@@ -43,7 +43,11 @@ OUT = os.environ.get("OUT", "/out/h25b-match-manifest.json")
 
 _PAREN = re.compile(r"[（(][^)）]*[)）]")
 _SPLIT = re.compile(r"\s*[&＆]\s*|\s*,\s*")
-# 로더와 같은 범위(curation_repo: deleted/hidden 배제). 'active' 한정이 아니다.
+# 로더와 **같은** 술어를 쓴다 (``curated_repo``의 link 검증):
+#   ``deleted_at IS NULL AND status NOT IN ('deleted','hidden')``
+# soft-delete는 ``status='deleted'``가 아니라 ``status='inactive' + deleted_at``으로 남으므로
+# (``feature_repo._SOFT_DELETE_NOT_IN_SNAPSHOT_SQL``), status만 걸면 **삭제된 feature가
+# 후보로 올라온다**. 초안이 그 상태였다.
 _LINKABLE = ("deleted", "hidden")
 
 
@@ -102,20 +106,23 @@ def load_unlinked() -> list[dict]:
 
 async def candidates(
     conn: asyncpg.Connection, row: dict
-) -> tuple[list[dict], int]:
+) -> tuple[list[dict], int, bool]:
     """이름 변형 × 양방향 포함으로 후보를 모은다. 승인은 하지 않는다."""
     found: dict[str, dict] = {}
-    truncated_total = 0
+    matched_total = 0
+    saturated = False
     for variant in name_variants(row["place_name"]):
         v = norm(variant)
         if len(v) < 2:
             continue
         hits = await conn.fetch(
             """
-            select feature_id, name, status, sigungu_code,
-                   coalesce(address->>'road', address->>'legal', '') as addr
+            select feature_id, name, status, sido_code, sigungu_code,
+                   coalesce(address->>'road', address->>'legal', '') as addr,
+                   count(*) over () as total_matches
             from feature.features
-            where status <> all($2::text[])
+            where deleted_at is null
+              and status <> all($2::text[])
               and (
                 -- DB이름 ⊇ CSV이름
                 replace(lower(name), ' ', '') like '%' || $1 || '%'
@@ -123,11 +130,18 @@ async def candidates(
                 or $1 like '%' || replace(lower(name), ' ', '') || '%'
               )
               and length(name) >= 2
+            -- 결정적 순서. ORDER BY 없이 LIMIT을 걸면 어떤 15건이 오는지가 plan에 좌우돼
+            -- exact 유일성 판정(high 등급의 게이트)이 실행마다 달라진다.
+            order by length(name), feature_id
             limit 15
             """,
             v,
             list(_LINKABLE),
         )
+        if hits:
+            # cap **이전**의 실제 매칭 수. cap 이후 길이를 세면 잘린 사실이 감춰진다.
+            matched_total = max(matched_total, int(hits[0]["total_matches"]))
+            saturated = saturated or len(hits) >= 15
         for h in hits:
             found.setdefault(
                 h["feature_id"],
@@ -135,6 +149,7 @@ async def candidates(
                     "feature_id": h["feature_id"],
                     "name": h["name"],
                     "status": h["status"],
+                    "sido_code": h["sido_code"],
                     "sigungu_code": h["sigungu_code"],
                     "address": h["addr"],
                     "matched_variant": variant,
@@ -151,12 +166,13 @@ async def candidates(
         # 정식명(``충청북도``)에 포함되지 않아 충북·충남·전북·전남·경북·경남 6개 시도가
         # 통째로 mismatch가 된다 — 그 시도에서는 어떤 exact 매칭도 high에 도달할 수 없다.
         want = region_to_code(region)
-        if not want:
-            region_state = "unknown"
-        elif not c["sigungu_code"]:
+        # sigungu_code가 없어도 sido_code가 있으면 축이 살아 있다. 초안은 sigungu만 보고
+        # 축을 버려 후보를 high에서 review로 조용히 강등했다.
+        have = (c["sigungu_code"] or "")[:2] or (c["sido_code"] or "")
+        if not want or not have:
             region_state = "unknown"
         else:
-            region_state = "match" if c["sigungu_code"][:2] == want else "mismatch"
+            region_state = "match" if have == want else "mismatch"
         c["exact_name"] = exact
         c["region_state"] = region_state
         scored.append(c)
@@ -172,14 +188,27 @@ async def candidates(
         else:
             c["grade"] = "low"
     order = {"high": 0, "review": 1, "low": 2}
+    # 이름 유일성 판정이 cap에 걸린 표본 위에서 이뤄지면 등급이 실행마다 달라진다.
+    # 포화된 경우 exact 유일성을 주장할 수 없으므로 high를 만들지 않는다.
+    if saturated:
+        for c in scored:
+            if c["grade"] == "high":
+                c["grade"] = "review"
+                c["capped"] = True
     ranked = sorted(scored, key=lambda c: order[c["grade"]])
     # 상위 2건만 남긴다 — manifest를 저장소에 커밋해 검토 가능하게 유지하기 위한 상한.
     # 잘린 사실을 감추지 않도록 **전체 수를 함께 돌려준다**(silent cap 금지).
-    return ranked[:2], len(ranked)
+    # 두 번째 값은 **cap 이전** 실제 매칭 수다. cap 이후 길이를 돌려주면 잘린 사실이 감춰진다.
+    return ranked[:2], max(matched_total, len(ranked)), saturated
 
 
 async def main() -> None:
     rows = load_unlinked()
+    if not rows:
+        # 빈 입력을 "결함 0건"으로 보고하면 잘못 마운트한 경로와 구분되지 않는다.
+        raise SystemExit(
+            f"FATAL: {CSV_DIR}에서 미연결 행을 하나도 찾지 못했다. CSV_DIR을 확인하라."
+        )
     print(f"미연결 {len(rows)}행")
     print("CSV 자체 판정(기준선):", dict(Counter(r["baseline"] for r in rows)))
 
@@ -189,7 +218,7 @@ async def main() -> None:
         db = await conn.fetchval("select current_database()")
         print(f"DB={db}")
         for i, row in enumerate(rows):
-            cands, total = await candidates(conn, row)
+            cands, total, capped = await candidates(conn, row)
             top = cands[0]["grade"] if cands else "none"
             entries.append(
                 {
@@ -197,6 +226,9 @@ async def main() -> None:
                     "top_grade": top,
                     "candidates_total": total,
                     "candidates_shown": len(cands),
+                    # 이 행의 후보 조회가 per-variant cap(15)에 걸렸는가.
+                    # 걸렸으면 이름 유일성을 주장할 수 없어 high를 만들지 않았다.
+                    "candidate_pool_capped": capped,
                     "candidates": cands,
                     # **어떤 등급도 자동 승인이 아니다.** high에도 오탐이 있다
                     # (`대관령` → 동명 상점). 이 필드를 null로 두면 소비자가

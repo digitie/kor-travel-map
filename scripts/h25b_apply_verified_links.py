@@ -8,6 +8,7 @@ DB에 링크가 있다는 사실만으로 승인하지 않는다. 정지오코�
 from __future__ import annotations
 
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -20,6 +21,38 @@ APPROVED: dict[str, str] = {
     "kt100-2023-2024-036": "f_global_p_2eddbdc1ef5a0c00",  # 국립세종수목원
     "kt100-2025-2026-035": "f_global_p_2eddbdc1ef5a0c00",  # 국립세종수목원
     "kt100-2025-2026-040": "f_4315032041_p_12c53fe662dafc4f",  # 청풍호 (제천 43150)
+}
+
+# key -> (confidence, reason). 승인 근거의 **강도 차이**를 값으로 구분한다.
+# `verified`는 정지오코딩이 지역을 지목해 feature 코드와 대조된 것,
+# `review`는 정지오코딩 후보가 없어 "모순이 없음"에 그친 것이다.
+EVIDENCE: dict[str, tuple[str, str]] = {
+    "arboretum-2026-001": (
+        "backfilled-db-review",
+        "DB curation_items 링크를 역반영. 정지오코딩 후보가 없어 이름 정합만 확인했다 "
+        "— 이 CSV에는 region 값이 없어 독립 축이 없다 (T-VN-H25B).",
+    ),
+    "arboretum-2026-063": (
+        "backfilled-db-review",
+        "DB curation_items 링크를 역반영. 정지오코딩 후보가 없어 이름 정합만 확인했다 "
+        "— 이 CSV에는 region 값이 없어 독립 축이 없다 (T-VN-H25B).",
+    ),
+    "kt100-2023-2024-036": (
+        "backfilled-db-review",
+        "DB curation_items 링크를 역반영. 정지오코딩 후보가 없어 이름·region(세종) 정합만 "
+        "확인했다 — 좌표 대조로 확정한 것이 아니다 (T-VN-H25B).",
+    ),
+    "kt100-2025-2026-035": (
+        "backfilled-db-review",
+        "DB curation_items 링크를 역반영. 정지오코딩 후보가 없어 이름·region(세종) 정합만 "
+        "확인했다 — 좌표 대조로 확정한 것이 아니다 (T-VN-H25B).",
+    ),
+    "kt100-2025-2026-040": (
+        "backfilled-db-review",
+        "DB curation_items 링크를 역반영. 정지오코딩이 충북 제천(43150)을 지목해 feature "
+        "sigungu_code와 일치했으나, 같은 시군구의 다른 대상(청풍호반케이블카 등)과는 이 축으로 "
+        "구분되지 않는다 — 확정이 아니다 (T-VN-H25B).",
+    ),
 }
 
 # 반영하지 않는다 — 정지오코딩 결과 DB 링크가 다른 지역을 가리킨다.
@@ -43,9 +76,19 @@ def main() -> None:
         changed = 0
         for r in rows:
             key = (r.get("source_item_key") or "").strip()
-            if key in APPROVED and not (r.get("feature_id") or "").strip():
-                r["feature_id"] = APPROVED[key]
-                changed += 1
+            if key not in APPROVED or (r.get("feature_id") or "").strip():
+                continue
+            r["feature_id"] = APPROVED[key]
+            # metadata도 **같은 스크립트에서** 갱신한다. feature_id만 채우고 metadata를
+            # 딴 데서 고치면 커밋된 파일을 이 스크립트로 재현할 수 없고, manifest sha256도
+            # 유도 불가능해진다(H25A에서 지적받은 "산출물 ≠ 도구 출력" 결함).
+            meta = json.loads(r.get("metadata_json") or "{}")
+            conf, reason = EVIDENCE[key]
+            meta["feature_match_status"] = "linked"
+            meta["feature_match_confidence"] = conf
+            meta["feature_match_reasons"] = [reason]
+            r["metadata_json"] = json.dumps(meta, ensure_ascii=False)
+            changed += 1
         if not changed:
             continue
 

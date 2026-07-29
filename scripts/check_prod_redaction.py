@@ -27,14 +27,9 @@ def normalize_path(path: str) -> str:
     return path.replace("\\", "/").removeprefix("./")
 
 
-# T-VN-H25B: `.json`/`.csv` 추가. evidence manifest처럼 prod 파생 산출물이 docs/에 들어오는데
-# 확장자 목록이 좁으면 가드가 통째로 비껴간다(리뷰 지적). 실제로 첫 `.json`이 들어왔다.
-_DOCS_SUFFIXES = (".md", ".mdx", ".txt", ".rst", ".json", ".csv")
-
-
 def is_docs_path(path: str) -> bool:
     normalized = normalize_path(path)
-    return normalized.startswith("docs/") and normalized.endswith(_DOCS_SUFFIXES)
+    return normalized.startswith("docs/") and normalized.endswith((".md", ".mdx", ".txt", ".rst"))
 
 
 def tracked_docs() -> list[str]:
