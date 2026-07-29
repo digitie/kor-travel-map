@@ -97,9 +97,12 @@ def load_unlinked() -> list[dict]:
     return rows
 
 
-async def candidates(conn: asyncpg.Connection, row: dict) -> list[dict]:
+async def candidates(
+    conn: asyncpg.Connection, row: dict
+) -> tuple[list[dict], int]:
     """이름 변형 × 양방향 포함으로 후보를 모은다. 승인은 하지 않는다."""
     found: dict[str, dict] = {}
+    truncated_total = 0
     for variant in name_variants(row["place_name"]):
         v = norm(variant)
         if len(v) < 2:
@@ -161,7 +164,10 @@ async def candidates(conn: asyncpg.Connection, row: dict) -> list[dict]:
         else:
             c["grade"] = "low"
     order = {"high": 0, "review": 1, "low": 2}
-    return sorted(scored, key=lambda c: order[c["grade"]])[:5]
+    ranked = sorted(scored, key=lambda c: order[c["grade"]])
+    # 상위 2건만 남긴다 — manifest를 저장소에 커밋해 검토 가능하게 유지하기 위한 상한.
+    # 잘린 사실을 감추지 않도록 **전체 수를 함께 돌려준다**(silent cap 금지).
+    return ranked[:2], len(ranked)
 
 
 async def main() -> None:
@@ -175,20 +181,22 @@ async def main() -> None:
         db = await conn.fetchval("select current_database()")
         print(f"DB={db}")
         for i, row in enumerate(rows):
-            cands = await candidates(conn, row)
+            cands, total = await candidates(conn, row)
             top = cands[0]["grade"] if cands else "none"
             entries.append(
                 {
                     **row,
                     "top_grade": top,
-                    "candidate_count": len(cands),
+                    "candidates_total": total,
+                    "candidates_shown": len(cands),
                     "candidates": cands,
+                    # **어떤 등급도 자동 승인이 아니다.** high에도 오탐이 있다
+                    # (`대관령` → 동명 상점). 이 필드를 null로 두면 소비자가
+                    # `unresolved_reason is None`으로 걸러 자동 수용한다.
                     "unresolved_reason": (
-                        None
-                        if top == "high"
-                        else "후보 없음"
+                        "후보 없음"
                         if top == "none"
-                        else "자동 승인 불가 — 검토 필요"
+                        else "검토 필요 — 자동 승인 대상 아님 (high에도 오탐 존재)"
                     ),
                 }
             )
@@ -212,10 +220,25 @@ async def main() -> None:
         json.dump(
             {
                 "summary": {
+                    "database": db,
                     "unlinked_rows": len(rows),
                     "baseline": dict(Counter(str(r["baseline"]) for r in rows)),
                     "matcher": dict(mine),
+                    # AC "차이를 설명한다" — 기준선×자체 교차표를 산출물에 남긴다.
+                    # 콘솔에만 찍으면 검토자가 재현 없이는 볼 수 없다.
+                    "baseline_vs_matcher": {
+                        f"{base}|{got}": n for (base, got), n in sorted(cross.items())
+                    },
+                    "region_axis_coverage": sum(1 for r in rows if r["region"]),
+                    "candidates_truncated_to": 2,
+                    "auto_approvable": 0,
                 },
+                "notes": (
+                    "자동 승인 대상은 0건이다 — high 등급에도 오탐이 있다(대관령 → 동명 상점). "
+                    "등급은 검토 우선순위일 뿐 승인 신호가 아니며, 모든 entry의 "
+                    "unresolved_reason이 채워져 있다. 후보는 상위 2건만 실었고 전체 수는 "
+                    "candidates_total에 있다."
+                ),
                 "entries": entries,
             },
             f,
