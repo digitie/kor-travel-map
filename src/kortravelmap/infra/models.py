@@ -2490,6 +2490,56 @@ class FeatureUpdateRequestIdempotencyRow(Base):
     )
 
 
+class DomainCommandLedgerRow(Base):
+    """Actor-scoped append-only terminal command replay ledger."""
+
+    __tablename__ = "domain_command_ledger"
+    __table_args__ = (
+        CheckConstraint(
+            "btrim(actor) <> '' AND char_length(actor) <= 200",
+            name=conv("ck_domain_command_ledger_actor"),
+        ),
+        CheckConstraint(
+            "operation ~ '^[a-z][a-z0-9_.-]{0,127}$'",
+            name=conv("ck_domain_command_ledger_operation"),
+        ),
+        CheckConstraint(
+            "fingerprint_version = 1",
+            name=conv("ck_domain_command_ledger_fingerprint_version"),
+        ),
+        CheckConstraint(
+            "request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_domain_command_ledger_request_fingerprint"),
+        ),
+        CheckConstraint(
+            "response_status BETWEEN 200 AND 599",
+            name=conv("ck_domain_command_ledger_response_status"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(response_body) = 'object'",
+            name=conv("ck_domain_command_ledger_response_body"),
+        ),
+        {"schema": "ops"},
+    )
+
+    actor: Mapped[str] = mapped_column(Text, primary_key=True)
+    operation: Mapped[str] = mapped_column(Text, primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    fingerprint_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
+    )
+    request_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    response_status: Mapped[int] = mapped_column(Integer, nullable=False)
+    response_body: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
 # =============================================================================
 # ops.pipeline_cancellations / members / runs  (ADR-064 T-ADM-C3d)
 # =============================================================================
