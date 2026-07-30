@@ -45,7 +45,7 @@ from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     get_poi_cache_target_by_key,
 )
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_frontend, require_service_token
@@ -407,17 +407,32 @@ class FeaturePriceResponse(BaseModel):
     meta: Meta
 
 
+_POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807
+_PostgresBigintRevision = Annotated[
+    int,
+    Field(ge=1, le=_POSTGRES_BIGINT_MAX),
+    WithJsonSchema(
+        {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+        }
+    ),
+]
+
+
 class FeatureBatchRequestItem(BaseModel):
     """feature batch 요청 1건."""
 
     model_config = ConfigDict(extra="forbid")
 
     feature_id: str = Field(min_length=1)
-    known_row_revision: int | None = Field(
+    known_row_revision: _PostgresBigintRevision | None = Field(
         default=None,
-        ge=1,
-        le=9_223_372_036_854_775_807,
-        description="소비자가 보유한 trip_card의 row_revision. 일치하면 unchanged.",
+        description=(
+            "소비자가 보유한 trip_card의 PostgreSQL bigint row_revision"
+            "(최대 9223372036854775807). 일치하면 unchanged."
+        ),
     )
 
 
@@ -463,7 +478,7 @@ class FeatureBatchFoundItem(BaseModel):
 
     state: Literal["found"]
     feature_id: str
-    row_revision: int = Field(ge=1)
+    row_revision: _PostgresBigintRevision
     trip_card: FeatureTripCard
 
 
@@ -474,7 +489,7 @@ class FeatureBatchRetiredItem(BaseModel):
 
     state: Literal["retired"]
     feature_id: str
-    row_revision: int = Field(ge=1)
+    row_revision: _PostgresBigintRevision
 
 
 class FeatureBatchSuppressedItem(BaseModel):
@@ -484,7 +499,7 @@ class FeatureBatchSuppressedItem(BaseModel):
 
     state: Literal["suppressed"]
     feature_id: str
-    row_revision: int = Field(ge=1)
+    row_revision: _PostgresBigintRevision
 
 
 class FeatureBatchMissingItem(BaseModel):
@@ -503,7 +518,7 @@ class FeatureBatchUnchangedItem(BaseModel):
 
     state: Literal["unchanged"]
     feature_id: str
-    row_revision: int = Field(ge=1)
+    row_revision: _PostgresBigintRevision
 
 
 FeatureBatchItem = Annotated[

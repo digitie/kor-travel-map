@@ -10302,6 +10302,7 @@
             "type": "string"
           },
           "row_revision": {
+            "format": "int64",
             "minimum": 1.0,
             "title": "Row Revision",
             "type": "integer"
@@ -10384,7 +10385,7 @@
           "known_row_revision": {
             "anyOf": [
               {
-                "maximum": 9.223372036854776e+18,
+                "format": "int64",
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -10392,7 +10393,7 @@
                 "type": "null"
               }
             ],
-            "description": "소비자가 보유한 trip_card의 row_revision. 일치하면 unchanged.",
+            "description": "소비자가 보유한 trip_card의 PostgreSQL bigint row_revision(최대 9223372036854775807). 일치하면 unchanged.",
             "title": "Known Row Revision"
           }
         },
@@ -10429,6 +10430,7 @@
             "type": "string"
           },
           "row_revision": {
+            "format": "int64",
             "minimum": 1.0,
             "title": "Row Revision",
             "type": "integer"
@@ -10456,6 +10458,7 @@
             "type": "string"
           },
           "row_revision": {
+            "format": "int64",
             "minimum": 1.0,
             "title": "Row Revision",
             "type": "integer"
@@ -10483,6 +10486,7 @@
             "type": "string"
           },
           "row_revision": {
+            "format": "int64",
             "minimum": 1.0,
             "title": "Row Revision",
             "type": "integer"
