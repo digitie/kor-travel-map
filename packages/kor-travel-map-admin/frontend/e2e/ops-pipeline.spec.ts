@@ -3141,7 +3141,13 @@ test.describe("/ops/pipeline", () => {
   test("스케줄 명령 진행 중에는 cron과 다른 명령도 함께 차단", async ({
     page,
   }) => {
-    await installPipelineMocks(page, { scheduleResponseDelayMs: 600 });
+    let releaseScheduleResponse: () => void = () => undefined;
+    const scheduleActionResponseGate = new Promise<void>((resolve) => {
+      releaseScheduleResponse = resolve;
+    });
+    const counters = await installPipelineMocks(page, {
+      scheduleActionResponseGate,
+    });
     await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
 
     await page
@@ -3149,13 +3155,20 @@ test.describe("/ops/pipeline", () => {
       .click();
     await page.getByRole("button", { name: "즉시 실행", exact: true }).click();
 
+    try {
+      await expect.poll(() => counters.commandBodies.length).toBe(1);
+      await expectScheduleControlsDisabled(page);
+    } finally {
+      releaseScheduleResponse();
+    }
+
+    await expect(page.getByTestId("schedule-command-result")).toBeVisible();
     await expect(
       page.getByRole("button", { name: `${SCHEDULE_NAME} cron 수정` }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     await expect(
       page.getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` }),
-    ).toBeDisabled();
-    await expect(page.getByTestId("schedule-command-result")).toBeVisible();
+    ).toBeEnabled();
   });
 
   test("같은 render의 terminal schedule 명령 double click은 첫 결과를 보존", async ({
