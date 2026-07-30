@@ -800,7 +800,7 @@ interface MockOptions {
     headers?: Record<string, string>;
     body?: unknown;
   };
-  requestCreateDelayMs?: number;
+  requestCreateResponseGate?: Promise<void>;
   requestCreateResponseLossOnce?: boolean;
   detailFactory?: (
     executionId: string,
@@ -1504,11 +1504,7 @@ async function installPipelineMocks(
       const idempotencyKey = request.headers()["idempotency-key"] ?? "";
       counters.requestBodies.push(requestBody);
       counters.requestKeys.push(idempotencyKey);
-      if (options.requestCreateDelayMs) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, options.requestCreateDelayMs),
-        );
-      }
+      await options.requestCreateResponseGate;
       const custom = options.requestCreate;
       if (custom && custom.status && custom.status >= 400) {
         await fulfillJson(
@@ -3673,8 +3669,12 @@ test.describe("/ops/pipeline", () => {
   test("요청 dialog — non-provider create pending 중 닫기와 중복 POST를 차단", async ({
     page,
   }) => {
+    let releaseRequestCreateResponse: () => void = () => undefined;
+    const requestCreateResponseGate = new Promise<void>((resolve) => {
+      releaseRequestCreateResponse = resolve;
+    });
     const counters = await installPipelineMocks(page, {
-      requestCreateDelayMs: 700,
+      requestCreateResponseGate,
     });
     await page.goto("/ops/pipeline");
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
@@ -3690,19 +3690,23 @@ test.describe("/ops/pipeline", () => {
     await expect.poll(() => counters.requestBodies.length).toBe(1);
 
     const closeButton = dialog.getByRole("button", { name: "닫기" });
-    await expect(closeButton).toBeDisabled();
-    await expect(
-      dialog.getByRole("button", { name: "요청 생성", exact: true }),
-    ).toBeDisabled();
-    await expect(dialog.getByLabel("scope 유형")).toBeDisabled();
-    await expect(dialog.getByLabel("데이터셋 키 필터")).toBeDisabled();
-    await expect(
-      dialog.getByLabel("dry-run(행을 만들지 않고 대상 수만 확인)"),
-    ).toBeDisabled();
-    await page.keyboard.press("Escape");
-    await expect(dialog).toBeVisible();
-    await page.mouse.click(4, 4);
-    await expect(dialog).toBeVisible();
+    try {
+      await expect(closeButton).toBeDisabled();
+      await expect(
+        dialog.getByRole("button", { name: "요청 생성", exact: true }),
+      ).toBeDisabled();
+      await expect(dialog.getByLabel("scope 유형")).toBeDisabled();
+      await expect(dialog.getByLabel("데이터셋 키 필터")).toBeDisabled();
+      await expect(
+        dialog.getByLabel("dry-run(행을 만들지 않고 대상 수만 확인)"),
+      ).toBeDisabled();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeVisible();
+      await page.mouse.click(4, 4);
+      await expect(dialog).toBeVisible();
+    } finally {
+      releaseRequestCreateResponse();
+    }
 
     await expect(dialog.getByTestId("request-create-result")).toBeVisible();
     await expect(dialog.getByLabel("데이터셋 키 필터")).toHaveValue(

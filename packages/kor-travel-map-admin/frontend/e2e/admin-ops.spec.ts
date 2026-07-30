@@ -1222,7 +1222,14 @@ test.describe("admin/ops pages", () => {
       name: "Updated feature",
       reason: "이름 수정",
     });
+    const patchReviewLoaded = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname ===
+          "/api/proxy/v1/admin/features/change-requests",
+    );
     await page.goto("/admin/features/change-reviews");
+    await patchReviewLoaded;
     await page.getByLabel("change status", { exact: true }).selectOption("all");
     await expect(
       page.getByRole("row", { name: /Updated feature/ }),
@@ -1248,7 +1255,14 @@ test.describe("admin/ops pages", () => {
     });
     expect(requests.deleteBodies[0]).not.toHaveProperty("operator");
 
+    const deleteReviewLoaded = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname ===
+          "/api/proxy/v1/admin/features/change-requests",
+    );
     await page.goto("/admin/features/change-reviews");
+    await deleteReviewLoaded;
     await page.getByLabel("change status", { exact: true }).selectOption("all");
     const deleteRow = page.getByRole("row", { name: /feature-delete-1/ });
     await expect(deleteRow).toBeVisible();

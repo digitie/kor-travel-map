@@ -40,7 +40,8 @@ barrier로 직렬화한다.
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
   - b1: [x] `T-VN-11A/B`(service batch, 저장소별 호환 PR 쌍) →
-    [ ] `T-VN-H37`(Mocked checkpoint 종료 판정·고병렬 flaky 진단) →
+    [x] `T-VN-H37`(Mocked checkpoint 종료 판정·고병렬 flaky 진단) →
+    [ ] `T-VN-H38`(failure manifest retry/error fingerprint 완전성) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
     [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
     [ ] `T-VN-12D`(domain idempotency) →
@@ -677,23 +678,21 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
-### T-VN-H37 — Mocked checkpoint 종료 판정·고병렬 flaky 진단
+### T-VN-H38 — Mocked failure manifest retry/error fingerprint 완전성
 
-Claude PR #890/#891 감사 수정 exact HEAD에서 workers=4 전체 suite가 두 번 모두
-**276/276**, failure manifest 일치로 끝났지만 `run-mocked-checkpoint.mjs` 자식은 nonzero를
-반환했다. owned container/network/image·임시 디렉터리·listener는 남지 않았고 HEAD/status/
-frontend source digest도 동일했다. 원인 문구만 수집한 workers=8 실행은 기존
-`change-requests update/delete workflow`의 `toBeVisible` timing 실패 1건으로 275/276이었다.
+H37 적대 리뷰에서 authored delta 밖의 기존 reporter가 expected failure의 첫 실패 attempt와
+첫 error만 검사한다는 잔여 위험을 확인했다. checkpoint A~C에서 첫 attempt가 manifest
+원인으로 실패한 뒤 retry가 다른 회귀로 실패하거나 같은 attempt의 후속 soft assertion이
+다른 원인으로 실패해도 identity 집합과 첫 fingerprint만 맞으면 reporter가 green으로
+override할 수 있다.
 
-- runner가 Playwright `result.status`·child exit status/signal·postcondition·cleanup 실패를
-  서로 구분해 redacted 진단으로 남기도록 한다. manifest 일치만으로 성공을 주장하거나
-  실제 cleanup/network 실패를 통과시키면 안 된다.
-- workers=4의 "276 passed + manifest 일치 + nonzero"를 재현해 종료 원인을 고정하고,
-  같은 상태가 다시 발생하면 원인 없는 exit만 남지 않는 회귀를 추가한다.
-- workers=8에서 실패한 기존 spec은 polling/focus/animation 중 실제 원인을 좁혀 deterministic
-  barrier로 고친다. 단순 timeout 증가는 금지한다.
-- 수정 뒤 exact production image에서 workers=4와 workers=8을 각각 1회 통과시키고 owned
-  리소스 0건을 확인한다.
+- expected failure의 모든 non-passed retry attempt와 모든 실패 error/step을 수집하고, 허용된
+  cause/stage fingerprint 밖의 증거가 하나라도 있으면 gate를 fail-closed한다.
+- `attempt 1 expected + attempt 2 unrelated`, `첫 error expected + 후속 soft error unrelated`를
+  합성 reporter 회귀로 고정한다. retry 번호와 error index는 redacted report에 남기되 실제
+  payload·자격증명은 포함하지 않는다.
+- checkpoint D의 기존 276 inventory와 A~C manifest 의미를 깨지 않고, reporter 단위 회귀와
+  exact production-image checkpoint로 종료 판정을 다시 확인한다.
 
 ### T-VN-16 — weather batch와 부모 404
 

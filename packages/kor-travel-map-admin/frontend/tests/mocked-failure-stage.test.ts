@@ -74,7 +74,7 @@ describe("mocked checkpoint isolation", () => {
     "utf8",
   );
   const ownedResourcePhase = runnerSource.slice(
-    runnerSource.indexOf("let exitCode = 2;"),
+    runnerSource.indexOf("let playwrightChild;"),
   );
 
   it("소유 resource 생성 뒤에는 signal handler를 우회하는 spawnSync를 쓰지 않는다", () => {
@@ -130,7 +130,23 @@ describe("mocked checkpoint isolation", () => {
     expect(cleanupNetwork).toContain(
       "ownedNetworkId !== undefined && observedId !== ownedNetworkId",
     );
-    expect(cleanupNetwork).toContain('"network",\n    "rm"');
+    expect(cleanupNetwork).toContain(
+      'await runCleanupCommand(["network", "rm", ownedNetworkName])',
+    );
+  });
+
+  it("cleanup 명령 exit보다 exact resource 부재를 종료 판정으로 사용한다", () => {
+    const cleanupPhase = runnerSource.slice(
+      runnerSource.indexOf("async function waitForResourceAbsence("),
+      runnerSource.indexOf("function closeDenyProxy()"),
+    );
+
+    expect(cleanupPhase).toContain("await waitForResourceAbsence(listArgs)");
+    expect(cleanupPhase).not.toContain("removed.status");
+    expect(cleanupPhase).toContain("cleanup_container_remaining");
+    expect(cleanupPhase).toContain("cleanup_network_remaining");
+    expect(cleanupPhase).toContain("cleanup_image_remaining");
+    expect(runnerSource).toContain("cleanup_filesystem_failed");
   });
 
   it("host public env를 빌드에 상속하지 않고 non-self HTTP/WS를 전역 차단한다", () => {

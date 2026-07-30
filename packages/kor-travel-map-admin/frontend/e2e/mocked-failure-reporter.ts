@@ -409,7 +409,7 @@ class MockedFailureReporter implements Reporter {
         .sort((left, right) => left.key.localeCompare(right.key));
 
       const report = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         checkpoint,
         observedRevision,
         observedFrontendSourceDigest: verifiedFrontendSourceDigest,
@@ -441,19 +441,8 @@ class MockedFailureReporter implements Reporter {
         mismatchedExpectedFailureCauses,
         globalErrors: this.globalErrors,
         originalStatus: result.status,
+        gatePassed: false,
       };
-
-      const artifactRoot =
-        process.env.PLAYWRIGHT_ARTIFACT_ROOT ??
-        path.join(os.tmpdir(), "kor-travel-map-playwright", "admin-frontend");
-      const outputPath =
-        process.env.MOCKED_E2E_FAILURE_OUTPUT ??
-        path.join(artifactRoot, "mocked-failure-report.json");
-      await mkdir(path.dirname(outputPath), { recursive: true });
-      await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, {
-        mode: 0o600,
-      });
-      await chmod(outputPath, 0o600);
 
       gatePassed =
         identities.length === manifest.discoveredTests &&
@@ -468,6 +457,19 @@ class MockedFailureReporter implements Reporter {
         report.newSkippedTests.length === 0 &&
         report.mismatchedExpectedFailureCauses.length === 0 &&
         report.globalErrors === 0;
+      report.gatePassed = gatePassed;
+
+      const artifactRoot =
+        process.env.PLAYWRIGHT_ARTIFACT_ROOT ??
+        path.join(os.tmpdir(), "kor-travel-map-playwright", "admin-frontend");
+      const outputPath =
+        process.env.MOCKED_E2E_FAILURE_OUTPUT ??
+        path.join(artifactRoot, "mocked-failure-report.json");
+      await mkdir(path.dirname(outputPath), { recursive: true });
+      await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, {
+        mode: 0o600,
+      });
+      await chmod(outputPath, 0o600);
 
       const summary = gatePassed ? "일치" : "불일치";
       console.log(

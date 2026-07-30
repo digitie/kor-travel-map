@@ -112,7 +112,7 @@ def test_mocked_checkpoint_runner_owns_exact_frontend_container() -> None:
     assert '"--entrypoint"' not in script
     assert '"archive",' in script
     assert '"--iidfile",' in script
-    assert "const result = await runManagedChild(" in script
+    assert "playwrightChild = await runManagedChild(" in script
     assert 'detached: process.platform !== "win32"' in script
     assert "process.kill(-child.pid, signal)" in script
     assert "const postContainerInspect = await inspectOwnedContainer()" in script
@@ -120,18 +120,23 @@ def test_mocked_checkpoint_runner_owns_exact_frontend_container() -> None:
     assert "await cleanupOwnedContainer()" in script
     assert "await cleanupOwnedImage()" in script
     assert "await cleanupOwnedNetwork()" in script
-    assert "removed.status !== 0" in script
+    assert "removed.status !== 0" not in script
+    assert "await waitForResourceAbsence(listArgs)" in script
+    assert "cleanup_container_remaining" in script
+    assert "cleanup_filesystem_failed" in script
     assert "containerCreateAttempted = true" in script
     assert "io.kortravelmap.mocked-e2e-owned=true" in script
     assert '`name=^${ownedContainerName}$`' in script
     assert '`name=^${ownedNetworkName}$`' in script
-    assert '"image",\n      "ls",' in script
+    assert 'const listArgs = [\n    "image",\n    "ls",' in script
     assert 'terminateChildGroup(child, "SIGKILL")' in script
     assert 'spawnSync("docker"' not in script
     assert (
         'result.status === (checkpoint === "D" ? "passed" : "failed")'
         in reporter
     )
+    assert "schemaVersion: 3" in reporter
+    assert "report.gatePassed = gatePassed" in reporter
 
 
 @pytest.mark.unit
