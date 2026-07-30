@@ -3,8 +3,8 @@
 H25B가 확인한 3건만 현재 ``feature_id``를 가드로 잠근 뒤 해제한다. H36이 이름 단독
 자동 링크를 막았으므로 해제는 durable하며 finding은 증거를 보존한 ``resolved`` 상태다.
 대상 row lock, guarded UPDATE, finding 기록은 항목별 한 transaction이다. ledger 기록이
-실패하면 unlink도 함께 rollback한다. 이미 해제됐거나 올바른 Feature로 재연결된 행은
-신규 finding을 만들지 않고 기존 finding만 resolved로 정규화한다.
+실패하면 unlink도 함께 rollback한다. 이미 해제된 행은 ledger가 없으면 resolved 증거를
+재구성하고, 올바른 Feature로 재연결된 행은 신규 finding 없이 기존 finding만 정규화한다.
 
 기본은 **dry-run**이다. 실제 쓰기는 ``--apply``.
 """
@@ -164,7 +164,8 @@ async def run(conn: object, *, apply: bool) -> None:
                 print(f"  참고 {item_key}: 형제 행 {siblings}건은 대상 아님(정상)")
 
             if not targets:
-                if any(r["feature_id"] is None for r in rows):
+                already_unlinked = any(r["feature_id"] is None for r in rows)
+                if already_unlinked:
                     print(f"  이미 해제됨 {item_key}")
                     already += 1
                 else:
@@ -179,10 +180,14 @@ async def run(conn: object, *, apply: bool) -> None:
                     existing = await conn.fetchval(  # type: ignore[attr-defined]
                         _FIND_EXISTING_SQL, dedupe_key
                     )
-                    if existing is not None:
+                    # 지목한 오링크가 이미 NULL이면 실제 해제 이력이 있으므로 ledger가
+                    # 유실된 clone/복구 상태에서도 resolved 증거를 재구성한다. 반대로
+                    # 올바른 non-null 링크로 바뀐 guard 상태는 기존 finding만 닫고 신규
+                    # finding을 만들지 않는다.
+                    if existing is not None or already_unlinked:
                         outcome = (
                             "already_unlinked"
-                            if any(r["feature_id"] is None for r in rows)
+                            if already_unlinked
                             else "guarded_current_link_preserved"
                         )
                         payload = _finding_payload(
@@ -197,16 +202,26 @@ async def run(conn: object, *, apply: bool) -> None:
                             "curation 오링크 해소 상태를 재검증했다: "
                             f"{payload['place_name']} — {reason}"
                         )
-                        issue_id = await conn.fetchval(  # type: ignore[attr-defined]
-                            _UPDATE_FINDING_SQL,
-                            existing,
-                            message,
-                            json.dumps(payload, ensure_ascii=False),
-                            collection_key,
-                        )
+                        payload_json = json.dumps(payload, ensure_ascii=False)
+                        if existing is None:
+                            issue_id = await conn.fetchval(  # type: ignore[attr-defined]
+                                _INSERT_FINDING_SQL,
+                                collection_key,
+                                message,
+                                payload_json,
+                            )
+                            how = "신규 finding 재구성"
+                        else:
+                            issue_id = await conn.fetchval(  # type: ignore[attr-defined]
+                                _UPDATE_FINDING_SQL,
+                                existing,
+                                message,
+                                payload_json,
+                                collection_key,
+                            )
+                            how = "기존 finding resolved 정규화"
                         print(
-                            "    finding="
-                            f"{issue_id} (기존 finding resolved 정규화, resolved)"
+                            f"    finding={issue_id} ({how}, resolved)"
                         )
                         emitted += 1
                 continue

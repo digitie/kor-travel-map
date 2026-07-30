@@ -29,6 +29,7 @@ import {
   type CurationImportRowStatus,
 } from "@/api/curations";
 import { AdminShell } from "@/components/admin-shell";
+import { CopyButton } from "@/components/copy-button";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/section-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -1428,9 +1429,14 @@ function ImportReport({ report }: { report: CurationImportResponse }) {
                   {row.candidates.map((candidate) => (
                     <div className="text-xs" key={candidate.feature_id}>
                       <span className="font-medium">{candidate.name}</span>
-                      {" · "}
-                      <span className="font-mono">
-                        {shortId(candidate.feature_id, 16)}
+                      <span className="flex items-start gap-1">
+                        <code className="break-all font-mono">
+                          {candidate.feature_id}
+                        </code>
+                        <CopyButton
+                          label={`${candidate.name} 후보 Feature ID`}
+                          value={candidate.feature_id}
+                        />
                       </span>
                       <span className="block text-text-secondary">
                         {addressLabel(candidate.address)}

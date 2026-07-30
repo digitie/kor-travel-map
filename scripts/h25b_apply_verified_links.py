@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
+import os
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import TypeAlias
@@ -123,7 +126,7 @@ def _identity(row: dict[str, str | None]) -> ApprovalKey:
 
 
 def apply_verified_links(target: Path) -> int:
-    """승인 identity 전체를 먼저 검증한 뒤 CSV와 manifest를 갱신한다."""
+    """승인 identity 전체를 검증·직렬화한 뒤 CSV와 manifest를 한 batch로 교체한다."""
 
     datasets: list[
         tuple[Path, list[str], list[dict[str, str | None]]]
@@ -159,26 +162,47 @@ def apply_verified_links(target: Path) -> int:
         count = occurrences[key]
         if count != 1:
             errors.append(f"승인 identity {key!r} 출현 {count}건 (정확히 1건이어야 함)")
+    if set(APPROVED) != set(EVIDENCE):
+        errors.append("APPROVED와 EVIDENCE identity 집합이 일치하지 않음")
     if errors:
         raise RuntimeError("승인 CSV identity 검증 실패:\n- " + "\n- ".join(errors))
 
+    outputs: dict[Path, bytes] = {}
+    changed_rows_by_path: dict[Path, int] = {}
     total = 0
     for path, fields, rows in datasets:
-        changed = 0
+        changed_rows = 0
         for row in rows:
             key = _identity(row)
             if key not in APPROVED:
                 continue
+            required_fields = {"feature_id", "metadata_json"}
+            missing_fields = required_fields - set(fields)
+            if missing_fields:
+                raise RuntimeError(
+                    f"{path.name}: 승인 행 필수 필드 누락 {sorted(missing_fields)}"
+                )
+
+            row_changed = False
             expected_feature_id = APPROVED[key]
             current_feature_id = (row.get("feature_id") or "").strip()
             if current_feature_id != expected_feature_id:
                 row["feature_id"] = expected_feature_id
-                changed += 1
+                row_changed = True
 
             # metadata도 **같은 스크립트에서** 갱신한다. feature_id만 채우고 metadata를
             # 딴 데서 고치면 커밋된 파일을 이 스크립트로 재현할 수 없고, manifest sha256도
             # 유도 불가능해진다(H25A에서 지적받은 "산출물 ≠ 도구 출력" 결함).
-            meta = json.loads(row.get("metadata_json") or "{}")
+            try:
+                meta = json.loads(row.get("metadata_json") or "{}")
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    f"{path.name}: 승인 identity {key!r} metadata_json이 올바르지 않음"
+                ) from exc
+            if not isinstance(meta, dict):
+                raise RuntimeError(
+                    f"{path.name}: 승인 identity {key!r} metadata_json은 object여야 함"
+                )
             conf, reason = EVIDENCE[key]
             meta["feature_match_status"] = "linked"
             meta["feature_match_confidence"] = conf
@@ -186,18 +210,35 @@ def apply_verified_links(target: Path) -> int:
             expected_metadata = json.dumps(meta, ensure_ascii=False)
             if row.get("metadata_json") != expected_metadata:
                 row["metadata_json"] = expected_metadata
-                changed += 1
-        if not changed:
+                row_changed = True
+            if row_changed:
+                changed_rows += 1
+
+        if not changed_rows:
             continue
 
-        with path.open("w", encoding="utf-8", newline="") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fields, lineterminator="\n")
-            writer.writeheader()
-            writer.writerows(rows)
-        print(f"  {path.name}: {changed}행 역반영")
-        total += changed
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(output, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+        outputs[path] = output.getvalue().encode("utf-8")
+        changed_rows_by_path[path] = changed_rows
+        total += changed_rows
 
-    refresh_manifest(target)
+    manifest_path, manifest_output, manifest_touched = _render_manifest(
+        target, overrides=outputs
+    )
+    if manifest_path is not None and manifest_output is not None:
+        outputs[manifest_path] = manifest_output
+
+    # JSON 변환·CSV 직렬화·manifest 계산을 모두 끝낸 뒤에만 파일을 건드린다.
+    # 각 산출물은 같은 디렉터리에 staging하고 os.replace로 교체하며, batch 중간
+    # 실패 시 이미 교체한 파일을 원본 bytes로 되돌린다.
+    _replace_outputs(outputs)
+    for path, changed_rows in changed_rows_by_path.items():
+        print(f"  {path.name}: {changed_rows}행 역반영")
+    if manifest_touched:
+        print(f"manifest 갱신: {', '.join(manifest_touched)}")
     return total
 
 
@@ -207,6 +248,90 @@ def main() -> None:
     print(f"\n반영 {total}행 / 보류 {len(REJECTED)}행")
     for key, why in REJECTED.items():
         print(f"  보류 {key}: {why}")
+
+
+def _render_manifest(
+    target: Path,
+    *,
+    overrides: dict[Path, bytes],
+) -> tuple[Path | None, bytes | None, list[str]]:
+    """override를 반영한 최종 manifest bytes를 쓰기 없이 계산한다."""
+
+    manifest_path = target / "manifest.json"
+    if not manifest_path.is_file():
+        return None, None, []
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    touched: list[str] = []
+    for entry in manifest.get("files", []):
+        path = target / entry["path"]
+        if not path.is_file() and path not in overrides:
+            continue
+        content = overrides.get(path)
+        if content is None:
+            content = path.read_bytes()
+        digest = hashlib.sha256(content).hexdigest()
+        rows = entry.get("rows")
+        if path.suffix == ".csv" and rows is not None:
+            text = content.decode("utf-8-sig")
+            rows = sum(1 for _ in csv.DictReader(io.StringIO(text, newline="")))
+        if digest != entry["sha256"] or rows != entry.get("rows"):
+            entry["sha256"] = digest
+            if entry.get("rows") is not None:
+                entry["rows"] = rows
+            touched.append(entry["path"])
+
+    if not touched:
+        return manifest_path, None, []
+    output = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode()
+    return manifest_path, output, touched
+
+
+def _replace_outputs(outputs: dict[Path, bytes]) -> None:
+    """모든 bytes를 staging한 뒤 교체하고 중간 실패 시 원본으로 복구한다."""
+
+    staged: dict[Path, Path] = {}
+    originals = {path: path.read_bytes() for path in outputs}
+    replaced: list[Path] = []
+    try:
+        for path, content in outputs.items():
+            descriptor, temporary_name = tempfile.mkstemp(
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+            )
+            temporary = Path(temporary_name)
+            staged[path] = temporary
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary.chmod(path.stat().st_mode & 0o777)
+
+        for path, temporary in staged.items():
+            os.replace(temporary, path)
+            replaced.append(path)
+    except Exception:
+        for path in reversed(replaced):
+            descriptor, rollback_name = tempfile.mkstemp(
+                dir=path.parent,
+                prefix=f".{path.name}.rollback.",
+                suffix=".tmp",
+            )
+            rollback = Path(rollback_name)
+            try:
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(originals[path])
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                rollback.chmod(path.stat().st_mode & 0o777)
+                os.replace(rollback, path)
+            finally:
+                rollback.unlink(missing_ok=True)
+        raise
+    finally:
+        for temporary in staged.values():
+            temporary.unlink(missing_ok=True)
 
 
 def refresh_manifest(target: Path) -> None:
@@ -219,33 +344,9 @@ def refresh_manifest(target: Path) -> None:
     manifest는 README.md처럼 CSV가 아닌 파일도 추적하므로 `rows`는 CSV에만 다시 센다.
     재현성 점검은 CSV만 임시 디렉터리에 풀어 돌리므로, manifest가 없으면 조용히 건너뛴다.
     """
-    manifest_path = target / "manifest.json"
-    if not manifest_path.is_file():
-        return
-
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    touched = []
-    for entry in manifest.get("files", []):
-        path = target / entry["path"]
-        if not path.is_file():
-            continue
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        rows = entry.get("rows")
-        if path.suffix == ".csv" and rows is not None:
-            with path.open(encoding="utf-8-sig", newline="") as fh:
-                rows = sum(1 for _ in csv.DictReader(fh))
-        if digest != entry["sha256"] or rows != entry.get("rows"):
-            entry["sha256"] = digest
-            if entry.get("rows") is not None:
-                entry["rows"] = rows
-            touched.append(entry["path"])
-
-    if touched:
-        # 개행을 LF로 고정한다. `write_text`는 Windows에서 CRLF로 번역해 같은 스크립트가
-        # 플랫폼마다 다른 바이트를 내놓는다 — CSV writer에 `lineterminator="\n"`을 준 것과
-        # 같은 이유다.
-        with manifest_path.open("w", encoding="utf-8", newline="\n") as fh:
-            fh.write(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+    manifest_path, output, touched = _render_manifest(target, overrides={})
+    if manifest_path is not None and output is not None:
+        _replace_outputs({manifest_path: output})
         print(f"manifest 갱신: {', '.join(touched)}")
 
 

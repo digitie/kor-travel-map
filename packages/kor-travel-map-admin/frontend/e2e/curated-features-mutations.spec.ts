@@ -167,6 +167,12 @@ test.describe("큐레이션 CSV import", () => {
     await expect(
       report.getByText("이름만 일치하는 후보는 자동 링크하지 않습니다."),
     ).toBeVisible();
+    await expect(
+      report.getByText("feature-seoul-namesake", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      report.getByRole("button", { name: "남이섬 후보 Feature ID 복사" }),
+    ).toBeVisible();
   });
 
   test("dry-run에서 미연결 행을 보여주고 형식 오류가 없으면 전체 반영한다", async ({

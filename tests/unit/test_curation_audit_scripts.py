@@ -21,8 +21,10 @@ def _write_approval_csv(
     *,
     key: h25.ApprovalKey,
     feature_ids: tuple[str, ...],
+    filename: str = "approval.csv",
+    metadata_values: tuple[str, ...] | None = None,
 ) -> Path:
-    path = target / "approval.csv"
+    path = target / filename
     fields = [
         "collection_key",
         "source_item_key",
@@ -33,20 +35,21 @@ def _write_approval_csv(
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
-        for feature_id in feature_ids:
+        values = metadata_values or tuple("{}" for _ in feature_ids)
+        for feature_id, metadata_json in zip(feature_ids, values, strict=True):
             writer.writerow(
                 {
                     "collection_key": key[0],
                     "source_item_key": key[1],
                     "source_component_key": key[2],
                     "feature_id": feature_id,
-                    "metadata_json": "{}",
+                    "metadata_json": metadata_json,
                 }
             )
     return path
 
 
-def _write_manifest(target: Path, csv_path: Path) -> Path:
+def _write_manifest(target: Path, *csv_paths: Path) -> Path:
     manifest = target / "manifest.json"
     manifest.write_text(
         json.dumps(
@@ -55,8 +58,14 @@ def _write_manifest(target: Path, csv_path: Path) -> Path:
                     {
                         "path": csv_path.name,
                         "sha256": hashlib.sha256(csv_path.read_bytes()).hexdigest(),
-                        "rows": 1,
+                        "rows": sum(
+                            1
+                            for _ in csv.DictReader(
+                                csv_path.read_text(encoding="utf-8").splitlines()
+                            )
+                        ),
                     }
+                    for csv_path in csv_paths
                 ]
             },
             ensure_ascii=False,
@@ -101,6 +110,69 @@ def test_h25_apply_rejects_duplicate_approved_identity(tmp_path: Path) -> None:
         h25.apply_verified_links(tmp_path)
 
     assert (csv_path.read_bytes(), manifest.read_bytes()) == before
+
+
+@pytest.mark.unit
+def test_h25_apply_preflights_all_metadata_before_any_file_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    approvals = dict(list(h25.APPROVED.items())[:2])
+    evidence = {key: h25.EVIDENCE[key] for key in approvals}
+    monkeypatch.setattr(h25, "APPROVED", approvals)
+    monkeypatch.setattr(h25, "EVIDENCE", evidence)
+    (first_key, first_feature), (second_key, second_feature) = approvals.items()
+    first = _write_approval_csv(
+        tmp_path,
+        key=first_key,
+        feature_ids=("",),
+        filename="a.csv",
+    )
+    second = _write_approval_csv(
+        tmp_path,
+        key=second_key,
+        feature_ids=(second_feature,),
+        filename="b.csv",
+        metadata_values=("{broken",),
+    )
+    manifest = _write_manifest(tmp_path, first, second)
+    before = {
+        path: path.read_bytes()
+        for path in (first, second, manifest)
+    }
+
+    with pytest.raises(RuntimeError, match="metadata_json이 올바르지 않음"):
+        h25.apply_verified_links(tmp_path)
+
+    assert {path: path.read_bytes() for path in before} == before
+    assert first_feature
+
+
+@pytest.mark.unit
+def test_h25_apply_counts_changed_rows_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key, expected = next(iter(h25.APPROVED.items()))
+    monkeypatch.setattr(h25, "APPROVED", {key: expected})
+    monkeypatch.setattr(h25, "EVIDENCE", {key: h25.EVIDENCE[key]})
+    csv_path = _write_approval_csv(
+        tmp_path,
+        key=key,
+        feature_ids=("",),
+    )
+    manifest = _write_manifest(tmp_path, csv_path)
+
+    assert h25.apply_verified_links(tmp_path) == 1
+
+    with csv_path.open(encoding="utf-8", newline="") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["feature_id"] == expected
+    assert json.loads(row["metadata_json"])["feature_match_status"] == "linked"
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    assert manifest_data["files"][0]["sha256"] == hashlib.sha256(
+        csv_path.read_bytes()
+    ).hexdigest()
 
 
 class _FakeTransaction:
@@ -219,6 +291,24 @@ async def test_h33_guarded_current_link_does_not_create_finding(
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_h33_already_unlinked_reconstructs_missing_resolved_finding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        h33,
+        "MISLINKS",
+        {("collection", "item-key"): ("feature:wrong", "지역 불일치")},
+    )
+    conn = _FakeH33Connection(feature_id=None)
+
+    await h33.run(conn, apply=True)
+
+    assert conn.rows[0]["feature_id"] is None
+    assert conn.findings == {"new-issue": {"status": "resolved"}}
+
+
+@pytest.mark.unit
 def test_h33_public_verifier_rejects_500_and_empty_positive_control(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -246,6 +336,43 @@ def test_h33_public_verifier_rejects_500_and_empty_positive_control(
             }
         if path.startswith("/v1/curations?q="):
             return 500, {}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(h33_verify, "get", fake_get)
+
+    assert h33_verify.main() == 1
+
+
+@pytest.mark.unit
+def test_h33_public_verifier_requires_target_feature_id_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collections = [
+        {"collection_key": key, "collection_id": key, "item_count": len(item_keys)}
+        for key, item_keys in h33_verify.TARGET_ITEMS.items()
+    ]
+
+    def fake_get(path: str) -> tuple[int, dict]:
+        if path.startswith("/v1/curations/features/"):
+            return 404, {}
+        if path == "/v1/curations/collections?page_size=500":
+            return 200, {"data": collections}
+        if path.startswith("/v1/curations/collections/"):
+            key = path.rsplit("/", 1)[-1]
+            return 200, {
+                "data": {
+                    "items": [
+                        {"external_item_id": item_key}
+                        for item_key in h33_verify.TARGET_ITEMS[key]
+                    ]
+                }
+            }
+        if path.startswith("/v1/curations?q="):
+            return 200, {
+                "data": [
+                    {"feature": {"feature_id": "feature:unrelated"}},
+                ]
+            }
         raise AssertionError(path)
 
     monkeypatch.setattr(h33_verify, "get", fake_get)
