@@ -25,6 +25,13 @@ DB active identity 3-tuple의 정확한 1회 출현·기존 ID를 쓰기 전에 
 verifier는 모든 HTTP/body shape와 비어 있지 않은 positive control을 강제한다. H30B/C와 Lane A
 순서를 다시 열고 완료 아카이브 checkbox도 일반 역사 bullet로 바꾼다.
 
+Python 회귀 **37 passed**, Ruff·mypy 173 files·ESLint·OpenAPI/type drift, Vitest **254**,
+Mocked D **276/276**은 green이다. 기존 `ktm-tvn45-db`를 새 clone/restore/downgrade 없이
+재사용한 파괴적 curation Live UI도 공식 CSV preview/commit 포함 **4/4** 통과했다. item
+3,530과 active/source-present는 보존되고 링크만 3,269→3,266으로 줄어 오링크 3건의
+비재생성을 실증했다. 후보 자원은 모두 제거했고 clone은 `0068`, healthy라 다음 task에
+재사용 가능하다.
+
 **다음 한 작업**: 감사 수정 PR의 CI green·셀프 머지와 issue #893 close를 끝낸다. 이어
 사용자 지시대로 `T-VN-11A/B`를 한 브랜치·한 PR로 구현한다.
 

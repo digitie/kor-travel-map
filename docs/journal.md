@@ -41,6 +41,15 @@
 회귀는 router의 주소 hint/name-only 상태, H33 transaction rollback·가드, H25B 잘못된 기존
 ID·중복 identity, verifier 500/빈 대조를 직접 고정한다.
 
+검증은 Python 회귀 **37 passed**, Ruff·mypy(173 files)·ESLint·OpenAPI/type drift green,
+Vitest **254 passed**다. exact HEAD production image를 쓴 Mocked 최종 D checkpoint는
+**276/276**, expected/actual failure·flake·skip 0으로 통과했다. 기존 `ktm-tvn45-db`
+(`0068_integrity_last_seen`)를 새 clone·restore·downgrade 없이 재사용한 파괴적 Live UI도
+공식 CSV 5개 preview/commit과 REST·관리자·지도 표면 **4/4**가 통과했다. 전체 item 3,530,
+active/source-present 3,530은 보존됐고 링크는 3,269→3,266으로 정확히 3개 줄어 이름 단독
+오링크가 재생성되지 않았음을 확인했다. 후보 container/network/image/listener는 0으로
+정리했고 clone은 healthy 상태로 다음 task에 재사용할 수 있다.
+
 ## 2026-07-30 (codex) — T-VN-49A/B/C/D 단일 PR 구현·최종 gate 완료
 
 H49 네 단계를 한 브랜치에서 끝냈다. 19개 giant component는 단순 View wrapper가 아니라
