@@ -23,11 +23,13 @@ barrier로 직렬화한다.
     [x] `T-VN-H21`(geo live 인증 결선 검증·5건 재실증) →
     [x] `T-VN-H28A/B`(#673 실데이터 오탐 분류 + 검증 규칙·회복 — 한 PR) →
     [x] `T-VN-H25A`(미연결 membership 증거·전제 정정) →
-    [x] `T-VN-H30A/B`(관측 durable화·실적재 검증) + [ ] `T-VN-H30C`(재작업 필요) →
+    [x] `T-VN-H30A`(관측 durable화) →
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
     [ ] `T-VN-H35`(prod 마이그레이션 지연 0064~0068 + 이미지 동시 배포 — #673 blocker) →
+    [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
+    [ ] `T-VN-H30C`(타 provider evidence 재작업) →
     [ ] `T-VN-H34`(H25A/H25B 미충족 AC 마무리) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
@@ -37,7 +39,8 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
-  - b1: [ ] `T-VN-11A` → [ ] `T-VN-11B`(service batch) →
+  - b1: [ ] `T-VN-11A/B`(service batch, 단일 PR) →
+    [ ] `T-VN-H37`(Mocked checkpoint 종료 판정·고병렬 flaky 진단) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
     [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
     [ ] `T-VN-12D`(domain idempotency) →
@@ -76,7 +79,8 @@ barrier로 직렬화한다.
   리뷰·Live·CI를 먼저 끝내 PR을 머지한다. Claude Code PR 사후 감사는 task PR 머지 뒤
   별도 후속 단계에서 issue를 만들고 진행하며, 진행 중 task의 PR 생성·머지를 지연시키거나
   그 PR에 새 감사를 합치지 않는다. T-VN-48에는 규칙 변경 전에 완료한 issue #881과 PR #888
-  감사 수정만 유지한다.
+  감사 수정만 유지한다. **Lane A a1 task PR 사후 감사는 독립 적대 리뷰어 2명**을 쓰고,
+  docs-only PR은 작은 delta 규칙에 따라 1명으로 한다(사용자 지시 2026-07-30, issue #893부터).
 - 첫 reviewable checkpoint부터 원격 feature branch에 작은 의미 단위로 자주 커밋·push하되,
   PR은 구현·적대 리뷰 반영·실데이터 검증·최종 main rebase를 모두 마친 뒤 **머지 직전**에만
   연다. 실패하면 검증된 직전 checkpoint부터 재개한다.
@@ -202,6 +206,13 @@ barrier로 직렬화한다.
   - 같은 run의 finding `observed/unique/upserted`, linked/unlinked 수를 함께 기록한다.
   - 인증된 `GET /v1/admin/issues?issue_type=…` 실호출로 최신 `last_seen_at`·최신 FK target을
     확인한다.
+  - H35가 서명한 post-migration app·Dagster DB bundle을 격리 scratch DB pair에 복원해
+    검증한다. H35 daemon preflight 뒤에도 두 DB의 서명 identity가 그대로면 같은 scratch
+    pair를 재사용하고, 다르면 새 clone을 만들지 말고 그 pair를 같은 bundle로 reset한다.
+    prod DB·schedule/sensor·ingress는 이 task에서 변경하지 않는다.
+  - 같은 bundle의 concierge `changes` export artifact를 SHA-256·page/cursor chain·행 수까지
+    검증하고, live endpoint credential/network 없이 resource override로 ordered item을
+    재생한다. 이 artifact 외 입력을 섞거나 H30B 시점의 live export를 다시 조회하지 않는다.
 
 - [ ] T-VN-H30C — **타 provider `AdminEvidence` 무장 (미완 — 재작업 필요)**
 
@@ -401,75 +412,151 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     실체는 concierge YouTube 장소 후보이고 그 안의 공개 item이 3,044건이다.
 
     > **정정** — 나는 이걸 "외부 계약이 바뀐다 — PinVi 등 소비자가 참조하면 깨진다"고
-    > 적었다. **소비자 전수 조사 결과 깨지는 것이 없다.** 위험을 확인하지 않고 단정했다.
+    > 적었다. **현재 runtime identity lookup 소비자는 없어 52행 재작성으로 깨지는 호출은
+    > 확인되지 않았다.** 위험을 확인하지 않고 단정했다.
     > - `collection_key`를 **조회 키로 받는 엔드포인트가 0개**다 — 전부 `collection_id`
-    >   UUID 경로다. 응답에 실리는 **출력 필드**일 뿐이라 스키마·엔드포인트가 안 바뀐다.
+    >   UUID 경로다. 다만 admin collection 생성의 필수 입력·저장 필드이고 목록 검색 대상이므로
+    >   단순 출력 필드라는 종전 설명은 틀렸다.
     > - e2e live의 하드코딩 `OFFICIAL_COLLECTION_KEYS` 19개와 재작성 52개의
     >   **교집합 0개**다. 19개는 `created_by='admin'`이고 `migrated_from` metadata가 없어
     >   0065의 `WHERE metadata @> '{"migrated_from":…}'`에서 아예 제외된다.
     > - CSV import는 `ON CONFLICT (collection_key)`로 upsert하지만 CSV의 키
     >   (`korean-tourism-100:2023-2024` 등)가 재작성 대상이 아니라 그대로 매칭된다 —
     >   **중복 collection 생성 없음**.
-    > - PinVi·kor-travel-concierge·kor-travel-docker-maneger 전부 `collection_key`
-    >   참조 **0 hit**. dagster asset/CLI도 0 hit.
+    > - PinVi runtime client·kor-travel-concierge·kor-travel-docker-manager에는
+    >   `collection_key` identity lookup이 없다. PinVi pinned OpenAPI snapshot의 schema
+    >   field hit는 소비 호출이 아니며 0 hit 주장에 포함하지 않는다. dagster asset/CLI도
+    >   runtime lookup이 없다.
     > - 재계산은 **멱등**이다(`(theme_id, source_id, md5(title))` 기반, prod에 NULL/blank
     >   title 0건, base_key 중복 0건이라 `:split:`/`:conflict:` 접미사 미발생).
     >
     > 남는 것은 계약 **문서화** 권고뿐이다(blocker 아님): `collection_key`는 0045→0065에서
-    > 형식이 두 번 바뀐 **불안정 식별자**인데 공개 응답에 실린다. "표시·검색용이고 안정
-    > 식별자는 `collection_id`"임을 명시하고, `docs/integration-map.md`에 curation
-    > collection 표면 계약 행을 추가한다(현재 그 행이 없어 소비자 판정을 전 저장소
-    > grep으로만 할 수 있었다).
+    > 형식이 두 번 바뀐 **불안정 business key**다. admin create·저장·검색과 CSV upsert에는
+    > 쓰지만 외부의 장기 참조·path identity는 `collection_id`를 써야 한다.
+    > `docs/integration-map.md`에 이 경계를 명시한다.
   - `0065` 후반 quarantine 블록도 **no-op**이다 — canonical-only item(`legacy_projection_id
     IS NULL`)이 prod에 0건이다. 새 유니크 인덱스 위반 행도 0건.
   - `0065`의 대량 UPDATE: `source_updated_at` **3,530행 전량**(WHERE 없음),
     `operator_updated_*` 3,044행, `legacy_projection_id` 3,044행.
   - **트랜잭션 경계 함정**: `alembic/env.py`에 `transaction_per_migration`이 **없어**
-    0064~0068이 원래 한 트랜잭션인데, `0064`의 `autocommit_block()`(CREATE/DROP INDEX
-    CONCURRENTLY)이 **그 트랜잭션을 커밋한다**. 따라서 0065가 실패하면 **0064만 적용된 채
-    `alembic_version`은 0063에 남는다**. 0064는 인덱스 상태 가드가 있어 재실행 가능하다.
+    0064~0068이 원래 한 트랜잭션이지만, `0064`의 `autocommit_block()`(CREATE/DROP INDEX
+    CONCURRENTLY)이 그 트랜잭션을 커밋한다. 따라서 0065가 실패하면 **0064만 적용된 채
+    `alembic_version`은 0063에 남는다**. 0068도 column/default 추가와 constraint validate/
+    concurrent index 단계에 `autocommit_block()`을 쓰므로, 실패 시 **version은 0067인데
+    0068의 column·constraint·candidate index 일부가 남는 상태**가 가능하다. 0064와 0068은
+    이 부분 상태를 감지해 forward 재실행하도록 작성됐고 integration test가 0068/0067
+    재개를 고정한다.
   - `0064`는 인덱스만 바꾸고 DML 0건, `downgrade()`도 대칭이라 **완전 가역**이다.
 
-  **선행 조사는 끝났다. 데이터 측면 blocker는 확인되지 않았다.**
-  0064~0068 전부 prod 데이터에서 파괴적 statement가 no-op이거나 가역이고,
-  `collection_key` 재작성도 소비자를 깨뜨리지 않는다.
+  **선행 조사에서 constraint/data blocker는 확인되지 않았다.** 그러나 0065의 52행 key
+  재작성·3,530행 UPDATE와 0066 backfill은 비가역이며, 0064/0068 autocommit은 부분 적용
+  상태를 만든다. `collection_key` 재작성으로 깨지는 runtime lookup 소비자는 확인되지 않았다.
 
-  **배포 역학 실측(2026-07-30)** — 계획이 크게 단순해진다:
+  **배포 역학 실측(2026-07-30)**:
   - **`docker/api-entrypoint.sh:216`이 `alembic upgrade head`를 재시도 루프로 직접 돌린다**
-    (uvicorn 기동 **전**). 즉 **마이그레이션과 새 코드는 이미 원자적**이다 — 새 이미지로
-    API 컨테이너를 recreate하면 그 컨테이너가 스스로 0064~0068을 올리고 나서 서비스한다.
-    내가 걱정한 "새 스키마 + 낡은 코드" 창은 compose가 old를 먼저 정지하는 한 생기지 않는다.
+    (uvicorn 기동 **전**). 이는 부분 migration 상태에서 새 API가 serving되는 것을 막는
+    **기동 gate**이지 DB migration을 원자화하지 않는다. 새 이미지로 API를 recreate하면
+    entrypoint가 0064~0068을 forward 재시도하고 head에 도달한 뒤에만 서비스한다.
   - **`docker/dagster-entrypoint.sh`는 마이그레이션을 하지 않는다**(`alembic upgrade` 0 hit).
     dagster는 스키마를 소비만 하므로 API 뒤에 올린다.
-  - 백업 수단이 실재한다: **`scripts/docker-backup.sh`** — map DB + dagster DB를 받고
-    `KOR_TRAVEL_MAP_BACKUP_ROOT`(기본 `data/backups`)에 `BACKUP_ID`별로 쌓는다.
-    기본값이 `ALLOW_RUNNING=0`이라 정지 상태를 요구한다.
+  - prod는 external-infra 모드라 local `postgres` service를 띄우지 않는다.
+    `scripts/docker-backup.sh`는 standalone compose의 `postgres`를 하드코딩하므로 prod
+    복구 수단이 아니다. H35는 배포 전에 external DB용 백업·복원 검증 경로를 먼저 만든다.
 
   남은 할 일:
-  1. **백업** — `scripts/docker-backup.sh`. `0065`의 52행 재작성·3,530행 UPDATE와 `0066`
-     backfill은 downgrade로 복구되지 않으므로 **이게 유일한 복구 경로**다.
-  2. **이미지 빌드** — main 최신(H36 게이트 포함)으로 API/dagster/UI.
-  3. **H36 게이트가 이미지에 실렸는지 확인** — 커밋 라벨만 보지 말고 컨테이너 안에서
-     `_adopted_match` 존재를 직접 확인한다. 라벨은 빌드 컨텍스트를 증명하지 않는다.
-  4. **API recreate** → entrypoint가 0064~0068을 적용. 그 다음 dagster/UI.
-  5. **적용 후 실증(반증 가능해야 한다)**:
+  1. **rollback image set 고정** — candidate build 전에 현재 API·UI·Dagster web·Dagster
+     daemon 네 service의 실제 container image ID·OCI source revision과 배포
+     manifest/compose의 redacted checksum을 기록한다(두 Dagster service가 같은 image ID여도
+     service별 결속을 생략하지 않는다). 기존 image ID에 rollback 전용 immutable tag를 붙여
+     prune 대상에서 제외하고, 현재 `alembic_version=0063`과 login/API/Dagster smoke를 같은
+     manifest에 결속한다. env 비밀 원문이나 `docker compose config`의 비밀 확장 결과는
+     산출물에 넣지 않는다.
+  2. **candidate 이미지 build-only** — main 최신(H36 게이트 포함)으로 API/dagster/UI를
+     기존 rollback tag와 다른 immutable candidate tag에 준비한다. compose 기본 tag를 덮어
+     이전 pair를 잃는 build는 금지한다. 이 단계에서는 candidate service의
+     `docker compose create/run/up`을 모두 금지한다. 특히 API 기본
+     `docker/api-entrypoint.sh`는 serving 전에 `alembic upgrade head`를 실행하므로,
+     cold fence와 verified dump보다 먼저 candidate 기본 entrypoint/CMD를 단 한 번도
+     시작하지 않는다.
+  3. **H36 게이트를 DB와 단절해 확인** — 커밋 라벨만 보지 말고 image layer를 offline으로
+     검사하거나, DB credential/env를 주입하지 않은 `--network none --entrypoint` override로만
+     candidate image 안의 `_adopted_match` 존재를 확인한다. candidate API의 기본
+     entrypoint/CMD를 쓰거나 prod network에 붙여 검사하지 않는다. 검사 직후 현재 배포
+     도구 또는 pinned PostgreSQL client의 read-only query로 prod
+     `alembic_version=0063_pipeline_root_id`가 그대로인지 확인하고, 달라졌다면 step 4로
+     진행하지 말고 비인가 migration으로 취급해 상태를 보존·조사한다. 라벨은 빌드 컨텍스트를
+     증명하지 않는다.
+  4. **cold writer fence** — prod ingress를 maintenance 상태로 두고 기존 app DB write
+     schedule/sensor의 enablement를 기록한 뒤 모두 pause하고, pending/running run 0건을
+     확인한다. 기존 API·Dagster web·Dagster daemon을 정지하고 map 소유 writer
+     container/process 0건과 app 역할의 active write transaction 0건을 확인한 시점부터
+     dump·migration·구조 smoke가 끝날 때까지 fence를 유지한다. dump 뒤 정상 write가 생길
+     수 있는 상태에서는 복원을 복구 경로라고 부르지 않는다.
+  5. **prod external DB 백업·복원 gate 실행** — 비밀을 argv/log에 싣지 않는
+     `PGSERVICEFILE`/`PGPASSFILE` 기반의 pinned PostgreSQL client로 app·Dagster DB를 custom
+     dump한다. SHA-256과 `pg_restore --list`만 확인하고 끝내지 않고, 격리 scratch DB에
+     실제 복원해 pre-migration head·핵심 schema/row count를 대조한다. standalone
+     `scripts/docker-backup.sh`를 prod에서 호출하지 않는다.
+  6. **API candidate recreate** → fence 안에서 entrypoint가 0064~0068을 forward 적용한다.
+     실패하면 downgrade하지 않고 `alembic_version`과 0064/0068 partial-state probe를
+     기록해 같은 image/command로 재개한다.
+  7. **fence 안 구조 실증(반증 가능해야 한다)**:
      - `alembic_version = 0068_integrity_last_seen`
+     - 0068의 `last_seen_at` column/default/NOT NULL·FK·세 concurrent index가 모두 최종
+       shape이며 invalid/candidate index와 임시 constraint가 남지 않음
      - `uq_violations_open_dedupe_key` 인덱스 존재 / `last_seen_at` 컬럼 존재
        (둘 다 지금은 **없음**이 확인돼 있어 before/after가 갈린다)
      - curation import **preview**가 오링크 3건을 여전히 미연결로 두는지
        (H36 게이트 실효 확인. 실패했다면 `resolved_feature_id`가 채워져 값이 달라진다)
-     - concierge materialize 후 적재 **1,020 → 1,477** 회복(#673 종결 조건)
-     - `inserted/updated/removed 0`처럼 **정상 배포에서도 거짓인 기준은 쓰지 않는다**
-       (`0066` backfill이 `updated`를 만든다)
+  8. **post-migration 격리 bundle·daemon preflight** — candidate API를 다시 정지해
+     prod app·Dagster DB writer 0건을 재확인한 뒤, 0068 상태의 app·Dagster DB를 H30B용
+     immutable custom dump bundle로 만든다. SHA-256·`pg_restore --list`와
+     pre-materialize Feature **1,020**, head·schema/content identity를 기록한다. 실제
+     concierge `changes` export도 cursor 없이 시작해 끝까지 한 번 수집하고, ordered page
+     envelope마다 request cursor·`next_cursor`·`has_more`와 item 원문(operation 포함)을
+     credential/header 없이 canonical JSON artifact로 보존한다. cursor chain의 전진·종료와
+     전체 **1,477행**을 확인하고 payload SHA-256을 DB dump·candidate image manifest와
+     하나로 결속한다. producer에는 durable snapshot/version identity가 없으므로 count만
+     기록한 live 재조회는 같은 입력으로 인정하지 않는다. step 5에서 쓴 같은 scratch DB pair를
+     reset·복원해 DB identity를 대조하고, candidate Dagster daemon을 prod credential·network
+     없이 이 scratch pair에만 연결해 모든 app DB write schedule/sensor pause·pending/running
+     run 0 상태에서 실제 기동한다. image ID·OCI revision·heartbeat/health 검증 뒤 정지하고,
+     preflight가 scratch metadata를 바꿨다면 같은 pair를 signed DB bundle로 다시 reset해
+     H30B 인수 identity를 복구한다. 별도 clone은 만들지 않는다.
+  9. **prod 비-daemon candidate recreate·health** — API·UI·Dagster web을 각 service에
+     고정한 immutable candidate image ID로 recreate한다. 세 service의 실제 container
+     image ID·OCI revision과 login POST·API·Dagster web health를 candidate manifest에
+     대조한다. prod Dagster daemon과 app DB write schedule/sensor는 계속 정지·pause한다.
+     old container를 단순 start하거나 UI만 이전 image로 남긴 상태에서는 다음 단계로 가지
+     않는다.
+  10. **cutover 전 실패 복구 분기** — forward 재개가 불가능해 verified dump를 복원할 때는
+     fence를 유지한 채 candidate를 모두 내린다. DB를 0063 dump로 복원하고 step 1의 exact
+     rollback service image ID·manifest/compose checksum으로 API·UI·Dagster web을
+     recreate한다. 이전 set의 `alembic_version=0063`, 세 실행 service identity와
+     login/API/Dagster web smoke가 green임을 확인해 rollback을 확정한 뒤 exact 이전 daemon을
+     시작하고 step 4에 기록한 schedule/sensor enablement를 복원한다. daemon identity·health가
+     green인 뒤에만 fence를 해제한다. 새 candidate entrypoint를 복원 DB에 다시 실행하는
+     절차는 rollback이 아니다.
+  11. **forward-only cutover·prod 정상화·H30B handoff** — 구조·세 prod service health와
+      step 8의 isolated daemon runnable gate가 모두 green이면 forward-only cutover를
+      확정한다. 이 시점부터 옛 dump 복원을 금지하고 실패를 forward 수정으로만 처리한다.
+      prod candidate daemon을 writer pause 상태로 시작해 실제 image ID·OCI revision·health를
+      확인한 뒤 step 4에 기록한 schedule/sensor enablement와 API·Dagster/UI ingress를
+      복원한다. H35에서는 concierge materialize를 실행하지 않는다. prod를 정상 상태로
+      돌려놓고 step 8의 signed post-migration DB·concierge export bundle과 clean scratch
+      identity만 H30B에 넘긴다. 실제 1,020→1,477 회복과 authenticated `/admin/issues`
+      검증은 export artifact를 network-free로 재생하고 격리 DB만 사용하는 다음 단일 소유
+      task `T-VN-H30B`가 수행한다.
 
   > **⚠ 비가역 지점** — 사람 승인이 필요하다.
   > - `0065`의 `collection_key` 52행 재작성과 `source_updated_at` 3,530행 UPDATE,
   >   `0066`의 `external_component_id` backfill은 **downgrade로 복구되지 않는다**.
-  >   백업이 유일한 복구 경로다.
-  > - `0064`의 `autocommit_block()`이 트랜잭션을 커밋하므로 **부분 적용 상태가 가능하다**
-  >   (0064만 적용 + `alembic_version`은 0063). entrypoint가 실패 시 재시도하므로
-  >   0064 재실행은 가드로 안전하지만, 0065가 계속 실패하면 **컨테이너가 기동하지 못한다**
-  >   (`exit 1`) — 즉 실패는 조용하지 않고 API 다운으로 드러난다.
+  >   검증된 external DB dump와 0063-compatible rollback image set·배포 manifest를 함께
+  >   보존한 bundle이 유일한 복구 경로다.
+  > - `0064`와 `0068`의 `autocommit_block()` 때문에 **부분 적용 상태가 가능하다**.
+  >   entrypoint가 실패 시 재시도하므로 forward recovery를 우선하고 꼭 필요한 경우가
+  >   아니면 Alembic downgrade하지 않는다. 계속 실패하면 API가 기동하지 않아 장애가
+  >   조용히 숨지는 않지만, DB가 자동으로 원상복구되는 것도 아니다.
   > - 이미지 교체는 다운타임을 만든다.
   **머지 = 배포가 아니라는 점을 문서에도 반영한다** — H30A 완료 기록이 prod 상태를
   주장하는 것으로 읽히지 않게. (H36이 이 task보다 **먼저**다.)
@@ -593,7 +680,8 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 ### T-VN-11 — service batch 5-state 계약
 
 현재 `features.py` batch는 `found/missing` 2-state이고 코드 주석도 5-state를 후속으로
-명시한다. producer 계약과 consumer cutover를 분리한다.
+명시한다. producer 계약과 consumer cutover는 독립 검증 단위로 유지하되 사용자 지시에 따라
+T-VN-11A/B를 한 브랜치·한 PR로 landing한다.
 
 - [ ] T-VN-11A — **Map 5-state batch projection**
 
@@ -605,6 +693,24 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
   PinVi가 5-state/revision을 exhaustively 처리하고 이전 2-state 추측을 제거한다. vendored
   OpenAPI/consumer contract와 실제 compatible pair live를 같은 cutover에서 고정한다.
+
+### T-VN-H37 — Mocked checkpoint 종료 판정·고병렬 flaky 진단
+
+Claude PR #890/#891 감사 수정 exact HEAD에서 workers=4 전체 suite가 두 번 모두
+**276/276**, failure manifest 일치로 끝났지만 `run-mocked-checkpoint.mjs` 자식은 nonzero를
+반환했다. owned container/network/image·임시 디렉터리·listener는 남지 않았고 HEAD/status/
+frontend source digest도 동일했다. 원인 문구만 수집한 workers=8 실행은 기존
+`change-requests update/delete workflow`의 `toBeVisible` timing 실패 1건으로 275/276이었다.
+
+- runner가 Playwright `result.status`·child exit status/signal·postcondition·cleanup 실패를
+  서로 구분해 redacted 진단으로 남기도록 한다. manifest 일치만으로 성공을 주장하거나
+  실제 cleanup/network 실패를 통과시키면 안 된다.
+- workers=4의 "276 passed + manifest 일치 + nonzero"를 재현해 종료 원인을 고정하고,
+  같은 상태가 다시 발생하면 원인 없는 exit만 남지 않는 회귀를 추가한다.
+- workers=8에서 실패한 기존 spec은 polling/focus/animation 중 실제 원인을 좁혀 deterministic
+  barrier로 고친다. 단순 timeout 증가는 금지한다.
+- 수정 뒤 exact production image에서 workers=4와 workers=8을 각각 1회 통과시키고 owned
+  리소스 0건을 확인한다.
 
 ### T-VN-16 — weather batch와 부모 404
 

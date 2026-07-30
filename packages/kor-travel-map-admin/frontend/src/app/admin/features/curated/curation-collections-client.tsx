@@ -29,6 +29,7 @@ import {
   type CurationImportRowStatus,
 } from "@/api/curations";
 import { AdminShell } from "@/components/admin-shell";
+import { CopyButton } from "@/components/copy-button";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/section-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -108,7 +109,12 @@ function statusVariant(status: string) {
   if (status === "draft" || status === "candidate" || status === "valid") {
     return "info" as const;
   }
-  if (status === "invalid" || status === "unmatched" || status === "ambiguous") {
+  if (
+    status === "invalid" ||
+    status === "unmatched" ||
+    status === "review_required" ||
+    status === "ambiguous"
+  ) {
     return "destructive" as const;
   }
   return "outline" as const;
@@ -119,6 +125,7 @@ function importStatusLabel(status: CurationImportRowStatus): string {
     valid: "유효",
     invalid: "형식 오류",
     unmatched: "미일치",
+    review_required: "수동 검토",
     ambiguous: "후보 다수",
     imported: "반영됨",
   }[status];
@@ -1422,9 +1429,14 @@ function ImportReport({ report }: { report: CurationImportResponse }) {
                   {row.candidates.map((candidate) => (
                     <div className="text-xs" key={candidate.feature_id}>
                       <span className="font-medium">{candidate.name}</span>
-                      {" · "}
-                      <span className="font-mono">
-                        {shortId(candidate.feature_id, 16)}
+                      <span className="flex items-start gap-1">
+                        <code className="break-all font-mono">
+                          {candidate.feature_id}
+                        </code>
+                        <CopyButton
+                          label={`${candidate.name} 후보 Feature ID`}
+                          value={candidate.feature_id}
+                        />
                       </span>
                       <span className="block text-text-secondary">
                         {addressLabel(candidate.address)}

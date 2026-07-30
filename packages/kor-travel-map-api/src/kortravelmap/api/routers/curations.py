@@ -382,7 +382,14 @@ class CurationItemPatchRequest(BaseModel):
     metadata: dict[str, Any] = None  # type: ignore[assignment]
 
 
-ImportRowStatus = Literal["valid", "invalid", "unmatched", "ambiguous", "imported"]
+ImportRowStatus = Literal[
+    "valid",
+    "invalid",
+    "unmatched",
+    "review_required",
+    "ambiguous",
+    "imported",
+]
 
 
 class CurationImportIssueView(BaseModel):
@@ -505,27 +512,17 @@ def _adopted_match(
     row: CurationImportRow,
     matches: Sequence[curation_repo.FeatureMatch],
 ) -> curation_repo.FeatureMatch | None:
-    """이 행이 실제로 링크할 feature를 고른다. **CSV가 지정한 경우에만 링크한다** (T-VN-H36).
+    """명시 ID 또는 이름+주소로 유일하게 식별한 Feature만 채택한다.
 
-    이전에는 ``matches[0] if len(matches) == 1 else None``이었다. 그 규칙은 CSV
-    ``feature_id``가 비었을 때 리졸버가 **이름 단독**으로 찾아온 후보(
-    ``_RESOLVE_FEATURES_BATCH_SQL``의 ``lower(f.name) = lower(place_name)`` 브랜치)를
-    "유일하니 맞겠지"라며 그대로 채택했다. 유일성은 *동명 feature가 하나뿐*이라는 뜻이지
-    *그게 맞는 장소*라는 뜻이 아니다.
+    CSV ``feature_id``가 비고 ``address_hint``도 없으면 이름 단독 후보는 수와 무관하게
+    자동 링크하지 않는다(T-VN-H36). 반면 주소 hint가 있으면 ADR-063의
+    ``정규화 이름+주소 유일 일치`` 계약을 유지한다. 후보가 여러 개면 두 경로 모두
+    미연결로 남긴다.
 
-    실제로 그 구멍으로 오링크가 들어왔다: 한국관광100선 "남이섬"이 서울 중구의 동명 업소
-    feature에, "청남대"가 전남 영암 시설에 붙었다(T-VN-H33이 해제). prod에 그 이름의 live
-    feature가 각각 하나뿐이라 항상 "유일 매칭"으로 통과했다. 그리고 T-VN-H33이 끊어 놓아도
-    다음 import가 같은 경로로 되살렸다.
-
-    그래서 **CSV ``feature_id``가 빈 행은 후보 수와 무관하게 링크하지 않는다.** 리졸버가
-    찾은 후보는 버리지 않고 ``candidates``로 계속 노출하므로, 운영자가 preview에서 보고
-    admin에서 직접 링크할 수 있다. 자동으로 붙는 일만 없어진다.
-
-    CSV가 ``feature_id``를 명시한 행은 그대로다 — 그건 사람이 적어 넣은 값이고
-    리졸버도 PK 조회 브랜치를 탄다.
+    이름 단독 후보는 ``review_required`` 상태와 ``candidates``로 노출해 운영자가
+    ``feature_id``를 명시적으로 확정할 수 있게 한다.
     """
-    if not (row.feature_id or "").strip():
+    if not (row.feature_id or "").strip() and not (row.address_hint or "").strip():
         return None
     return matches[0] if len(matches) == 1 else None
 
@@ -552,8 +549,6 @@ def _unlinked_issue(
     후보의 시도명은 ``FeatureMatch.address`` jsonb에 이미 들어 있어(리졸버가 이미 SELECT한다)
     SQL도 DTO도 넓히지 않고 사유 문장에 넣을 수 있다.
     """
-    row_region = str((row.metadata_json or {}).get("region") or "").strip()
-
     if not matches:
         return CurationImportIssueView(
             code="unmatched",
@@ -561,11 +556,11 @@ def _unlinked_issue(
             row_number=row.row_number,
         )
 
-    if (row.feature_id or "").strip():
-        # feature_id를 지정했는데도 안 붙었다면 후보가 여럿인 경우뿐이다.
+    if (row.feature_id or "").strip() or (row.address_hint or "").strip():
+        basis = "명시한 Feature ID" if (row.feature_id or "").strip() else "이름+주소"
         return CurationImportIssueView(
             code="ambiguous",
-            message="기존 Feature 후보가 여러 개여서 미연결 항목으로 저장합니다.",
+            message=f"{basis} 조건의 Feature 후보가 여러 개여서 미연결 항목으로 저장합니다.",
             row_number=row.row_number,
         )
 
@@ -573,14 +568,14 @@ def _unlinked_issue(
         sorted({s for s in (_sido_name(m.address) for m in matches[:3]) if s})
     )
     detail = f" 후보 소재: {where}." if where else ""
-    differs = bool(row_region) and bool(where) and row_region not in where
-    mismatch = f" CSV의 region은 '{row_region}'입니다." if differs else ""
+    row_region = str((row.metadata_json or {}).get("region") or "").strip()
+    region_context = f" CSV region: '{row_region}'." if row_region else ""
     return CurationImportIssueView(
         code="name_only_match",
         message=(
             f"이름만 일치하는 후보 {len(matches)}건을 찾았으나 자동 링크하지 않았습니다 — "
             f"동명이 하나뿐이라는 것이 같은 장소라는 뜻은 아닙니다 (T-VN-H36)."
-            f"{detail}{mismatch}"
+            f"{detail}{region_context}"
             " 확인 후 CSV feature_id에 적거나 admin에서 직접 연결하세요."
         ),
         row_number=row.row_number,
@@ -683,7 +678,14 @@ async def import_admin_curations(
             row_status = "valid" if dry_run else "imported"
             row_issues = []
         else:
-            row_status = "unmatched" if not matches else "ambiguous"
+            if not matches:
+                row_status = "unmatched"
+            elif not (row.feature_id or "").strip() and not (
+                row.address_hint or ""
+            ).strip():
+                row_status = "review_required"
+            else:
+                row_status = "ambiguous"
             row_issues = [_unlinked_issue(row, matches)]
         resolved_rows.append(
             curation_repo.ResolvedCurationImportRow(
@@ -799,7 +801,10 @@ async def import_admin_curations(
 
     invalid_rows = sum(item.status == "invalid" for item in item_views)
     valid_rows = sum(item.status != "invalid" for item in item_views)
-    unresolved_rows = sum(item.status in {"unmatched", "ambiguous"} for item in item_views)
+    unresolved_rows = sum(
+        item.status in {"unmatched", "review_required", "ambiguous"}
+        for item in item_views
+    )
     return CurationImportResponse(
         data=CurationImportData(
             dry_run=dry_run,

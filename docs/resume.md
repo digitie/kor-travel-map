@@ -10,6 +10,55 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-30 (codex) — Claude PR #890/#891 사후 감사 정정 → H11A/B
+
+Lane A a1 PR #890은 사용자 최신 규칙에 따라 독립 적대 리뷰어 2명, docs-only #891은
+1명이 원 authored patch를 감사했다. #890에서는 이름 단독 자동링크를 막으면서 ADR-063의
+이름+주소 유일 매칭까지 막은 회귀, H33 unlink와 ledger의 transaction 분리, stale open
+finding 재생성, H25B apply의 잘못된 기존 링크 승인, public verifier의 HTTP 500/빈 양성
+대조 false-pass를 확인했다. #891에서는 열린 H30B를 상단에서 완료로 가린 상태·순서 모순과
+`tasks-done.md`의 열린 checkbox 6개 유입을 확인했다.
+
+같은 감사 PR에서 이름 단독 행을 `review_required`로 분리하고 주소 hint 유일 매칭은 복원한다.
+H33은 row lock·guarded unlink·resolved finding을 항목별 한 transaction으로 묶고, H25B는
+DB active identity 3-tuple의 정확한 1회 출현·기존 ID를 쓰기 전에 fail-closed 검증한다.
+후속 적대 리뷰에서 이미 해제된 H33 대상의 누락 ledger 복구, H25B 전체 사전
+변환·직렬화와 원자 교체, 행 단위 변경 수, verifier의 명시적 `feature_id`, 수동 검토 후보의
+전체 ID·복사 동작까지 보강했다. H30B/C와 Lane A 순서를 다시 열고 완료 아카이브 checkbox도
+일반 역사 bullet로 바꾼다. 이 전체 authored delta는 독립 Lane A a1 리뷰어 2명의 최종
+재검토에서 각각 P0~P2 0건이다.
+함께 감사한 #894의 H35 배포 계획은 current 0063-compatible 네 service rollback bundle,
+external DB 복원 검증, cold writer fence, 네 candidate service의 identity·health 확인을
+하나의 순서로 결속했다. candidate API 기본 entrypoint가 fence 전에 migration을 실행하지
+못하도록 준비를 build-only로 제한하고, H36 image 검사는 network·DB credential 없는
+entrypoint override/offline layer로 수행한 뒤 prod head가 여전히 0063인지 다시 확인한다.
+Dagster daemon은 rollback 가능한 구간과 H30B baseline 서명까지 정지하고 app DB write
+schedule/sensor도 pause한다. post-migration app·Dagster DB bundle을 같은 scratch pair에
+복원해 candidate daemon을 실제 선검증한 뒤에만 forward-only cutover를 확정한다. H35가
+prod daemon enablement와 ingress를 정상화하고, H30B는 signed bundle/clean scratch만
+인수해 격리 DB에서 실적재를 검증한다. concierge 입력도 H35가 cursor chain·operation을
+포함한 ordered 1,477행 canonical artifact로 서명하며, H30B는 live endpoint 없이 그
+artifact만 resource override로 재생한다.
+
+핵심 Python 회귀 **42 passed**, 확장 targeted **57 passed**, Ruff·mypy **196 files**
+(core 117 + API 56 + Dagster 23)·ESLint·OpenAPI/type drift, Vitest **254**는 green이다.
+Mocked D workers=4 두 번은 모두
+**276/276**와 manifest expected/actual
+failure·flake 0이었지만 runner가 manifest 뒤 nonzero로 끝나 checkpoint 전체 green으로
+부르지 않는다. owned 자원·HEAD·source digest는 깨끗했고, workers=8 진단에서는 기존
+`change-requests update/delete` timing 한 건이 실패했다. runner 종료 판정과 고병렬 flaky는
+`T-VN-H37`로 기록했다.
+
+기존 `ktm-tvn45-db`를 새 clone/restore/downgrade 없이
+재사용한 파괴적 curation Live UI도 공식 CSV preview/commit 포함 **4/4** 통과했다. item
+3,530과 active/source-present는 보존되고 링크만 3,269→3,266으로 줄어 오링크 3건의
+비재생성을 실증했다. 후속 H33 실제 적용은 누락 ledger를 0→3으로 복구하고 재실행도 3을
+유지했으며 H25 resource aggregate hash `bfc3d558…`는 동일하다. 후보 자원은 모두 제거했고
+clone은 `0068`, healthy라 다음 task에 재사용 가능하다.
+
+**다음 한 작업**: 감사 수정 PR의 CI green·셀프 머지와 issue #893 close를 끝낸다. 이어
+사용자 지시대로 `T-VN-11A/B`를 한 브랜치·한 PR로 구현한다.
+
 ## 2026-07-30 (codex) — Lane B b0 T-VN-49A/B/C/D 완료 → post-merge 재사용 판정
 
 **완료**: H49 A/B/C/D를 한 브랜치에서 구현했다. 19개 giant component를 domain
@@ -36,8 +85,9 @@ full restore는 실행하지 않았다. 이후 main 34커밋을 충돌 없이 re
 
 ## 2026-07-30 (claude) — Lane A a1: T-VN-H25B/H33/H36 완료 → 다음은 T-VN-H35
 
-**다음 한 작업**: `T-VN-H35`(prod 마이그레이션 0064~0067 + **이미지 동시 배포**).
-이후 `T-VN-H31`(등대) → `T-VN-H34` → `T-VN-H30C` → `T-VN-H32` → `T-VN-H22A/B/C`.
+**다음 한 작업**: `T-VN-H35`(prod 마이그레이션 0064~0068 + **이미지 동시 배포**).
+이후 `T-VN-H30B` → `T-VN-H30C` → `T-VN-H34` → `T-VN-H31` → `T-VN-H32` →
+`T-VN-H22A/B/C`.
 
 - **완료**: `T-VN-H36` — CSV `feature_id`가 빈 행은 이름 단독 일치로 **자동 링크하지 않는다**.
   커밋 CSV 486행 전수 + prod 리졸버 재생 결과 **막히는 자동링크는 정확히 3건이고 전부

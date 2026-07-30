@@ -17,6 +17,83 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-30 (codex) — Claude PR #890/#891 사후 감사 정정
+
+추적 issue #893에서 Lane A a1 #890은 독립 리뷰어 2명, docs-only #891은 1명이 원 PR patch를
+감사했다. 후속 #892와 rebase 유입 diff는 finding 범위에서 제외했다.
+감사 도중 추가 머지된 Claude docs/docstring PR #894는 issue #895로 별도 원본 patch를
+전문 리뷰어 1명이 감사했다. 현재 브랜치가 이미 H30B/C 인덱스·상세 불일치를 고친 것 외에,
+prod external-infra에서 동작하지 않는 standalone backup 계획, 0068 autocommit 부분 적용,
+`collection_key`의 admin 입력·저장·검색 계약 누락, resume의 0064~0067 stale 범위를 정정했다.
+H35는 external DB custom dump를 scratch DB에 실제 복원 검증한 뒤, 0064/0068 partial state를
+downgrade 없이 forward 재개하는 계획으로 바꿨다. 이미지 준비를 먼저 끝내고 API·Dagster
+writer/ingress cold fence 안에서 dump→복원 검증→migration→구조 smoke를 마친 뒤에만
+fence를 해제해, dump 이후 정상 write를 옛 snapshot 복원으로 잃는 창도 닫았다. candidate
+build 전에 현재 0063-compatible API·UI·Dagster web·daemon의 service별 image ID·revision·
+배포 checksum을 immutable rollback bundle로 보존한다. 성공 경로는 API·UI·Dagster web을
+prod에서 검증하고 daemon은 격리 DB에서 선검증한 뒤 forward-only 결정을 내린다. H35는
+materialize하지 않고 1,020/1,477 baseline을 H30B에 넘겨 task 소유권과 before/after를
+보존한다.
+후보 API의 기본 entrypoint가 이미지 점검만으로도 migration을 먼저 실행할 수 있으므로,
+candidate 준비는 build-only로 제한한다. H36 코드는 network·DB credential이 없는 entrypoint
+override 또는 offline image layer로 확인하고, 그 직후 prod head가 여전히 0063인지 확인한
+뒤에만 cold fence 단계로 넘어간다.
+Dagster schedule/sensor와 pending run도 writer fence에 포함한다. rollback 가능한 동안
+prod candidate daemon은 시작하지 않는다. 대신 post-migration app·Dagster DB bundle을
+같은 scratch pair에 실제 복원하고 candidate daemon을 그 격리 DB에서 pause 상태로
+기동·검증해 네 번째 service의 runnable gate를 cutover 전에 닫는다. 그 bundle과 clean
+scratch identity만 H30B에 넘기고, H35 자체가 prod daemon enablement와 ingress를 정상화해
+task/PR 경계를 maintenance 상태로 넘기지 않는다.
+H30B materialize 입력도 live concierge 재조회에 맡기지 않는다. H35가 `changes` 전 페이지의
+cursor chain·operation 포함 ordered payload를 credential 없이 canonical artifact로 보존하고,
+1,477행·SHA-256을 DB dump/image manifest와 결속한다. H30B는 이 artifact만 network-free
+resource로 재생해 DB 기준선과 입력 양쪽의 동일 snapshot을 보장한다.
+
+- 이름 단독 오링크를 막는 `_adopted_match`가 주소 hint 유일 매칭까지 함께 막아 ADR-063을
+  위반했다. 주소 hint 경로는 복원하고 이름 단독 후보는 `ambiguous/후보 다수`가 아니라
+  `review_required/수동 검토`로 분리한다. 자유형 region 약칭으로 불일치를 단정하던 문구도
+  단순 context로 낮춘다.
+- H33은 unlink를 먼저 commit하고 ledger를 별도 transaction에 써, 후자 실패 시 감사 공백을
+  남겼다. row lock·guarded UPDATE·advisory-serialized finding을 항목별 한 transaction으로
+  묶고 H36 이후 사실에 맞는 `resolved` 증거로 기록한다. 올바른 non-null 링크는 건드리지
+  않되, 이미 해제됐지만 ledger가 없는 대상은 멱등하게 `resolved` 증거를 복구한다.
+- H25B apply는 승인 key의 기존 `feature_id`가 틀려도 건너뛴 뒤 manifest를 다시 서명했다.
+  `(collection_key, source_item_key, source_component_key)` 정확한 1회 출현과 기존 ID를
+  전 파일 쓰기 전에 검증한다. 승인 전체를 메모리에서 변환·직렬화한 뒤 동일 디렉터리 임시
+  파일과 `os.replace`로 CSV/manifest를 교체해, 뒤쪽 malformed metadata도 부분 반영을
+  남기지 않는다. 실제로 바뀐 행 수는 필드 수가 아니라 행 단위로 센다.
+- 공개 노출 verifier는 feature/search HTTP 500과 빈 positive control도 성공으로 통과했다.
+  negative control 404, 각 표면의 200/body shape, 비어 있지 않은 검색 결과와 명시적
+  `feature_id` 필드를 강제한다.
+- 수동 검토 UI가 후보 ID를 축약 표시만 해 운영자가 연결할 수 없었다. 전체 ID와 기존
+  `CopyButton`을 노출하고 mocked UI 회귀로 고정했다.
+- #891이 가린 열린 H30B/C를 Lane A 순서에 복원하고 `tasks-done.md`에 들어온 열린 checkbox
+  6개는 역사 bullet로 바꿨다. H11A/B 단일 PR 사용자 결정도 백로그 정본에 반영했다.
+
+회귀는 router의 주소 hint/name-only 상태, H33 transaction rollback·가드, H25B 잘못된 기존
+ID·중복 identity·후행 malformed metadata 원자성·행 단위 count, verifier 500/빈 대조/
+누락 `feature_id`를 직접 고정한다. Lane A a1 독립 적대 리뷰어 2명은 최종 authored delta에서
+모두 P0~P2 0건을 확인했고, #894 docs 전문 리뷰어도 배포 계약 잔여 finding 0건으로 종료했다.
+
+최종 exact HEAD 검증은 핵심 Python 회귀 **42 passed**, 두 번째 reviewer의 확장 targeted
+**57 passed**, Ruff·mypy(**196 files**: core 117 + API 56 + Dagster 23)·ESLint·
+OpenAPI/type drift green,
+Vitest **254 passed**다. exact HEAD production image를 쓴 Mocked 최종 D checkpoint는
+workers=4 두 번 모두 **276/276**, manifest expected/actual failure·flake 0으로 일치했다.
+다만 두 실행 모두 manifest 출력 뒤 runner가 nonzero로 끝났고, owned 자원·HEAD·source
+digest 사후 검사는 깨끗했다. 원인 진단용 workers=8에서는 변경과 무관한 기존
+`change-requests update/delete` spec 한 건이 timing 실패해 275/276이었다. 테스트 성공과
+checkpoint 프로세스 성공을 섞어 green으로 기록하지 않고 `T-VN-H37`로 후속한다.
+
+기존 `ktm-tvn45-db`
+(`0068_integrity_last_seen`)를 새 clone·restore·downgrade 없이 재사용한 파괴적 Live UI도
+공식 CSV 5개 preview/commit과 REST·관리자·지도 표면 **4/4**가 통과했다. 전체 item 3,530,
+active/source-present 3,530은 보존됐고 링크는 3,269→3,266으로 정확히 3개 줄어 이름 단독
+오링크가 재생성되지 않았음을 확인했다. 후보 container/network/image/listener는 0으로
+정리했다. 후속 스크립트를 실제 clone에 재실행해 H33 ledger는 0→3→3으로 멱등 복구됐고,
+H25 resource aggregate hash `bfc3d558…`는 전후 동일하다. clone은 healthy 상태로 다음
+task에 재사용할 수 있다.
+
 ## 2026-07-30 (codex) — T-VN-49A/B/C/D 단일 PR 구현·최종 gate 완료
 
 H49 네 단계를 한 브랜치에서 끝냈다. 19개 giant component는 단순 View wrapper가 아니라

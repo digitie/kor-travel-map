@@ -13,22 +13,39 @@ async function fulfillJson(route: Route, body: unknown) {
   });
 }
 
-function importRow(status: "valid" | "imported" | "unmatched") {
+function importRow(
+  status: "valid" | "imported" | "unmatched" | "review_required",
+) {
   const unmatched = status === "unmatched";
+  const reviewRequired = status === "review_required";
   return {
-    row_number: unmatched ? 3 : 2,
+    row_number: unmatched ? 3 : reviewRequired ? 4 : 2,
     status,
     collection_key: "lighthouse-stamp-tour",
     theme_slug: "lighthouse-stamp-tour",
     title: "등대 스탬프투어",
     edition_key: "2026",
-    place_name: unmatched ? "간절곶 등대" : "국립해양박물관",
-    address_hint: unmatched ? "울산 울주군" : "부산 영도구",
+    place_name: unmatched ? "간절곶 등대" : reviewRequired ? "남이섬" : "국립해양박물관",
+    address_hint: unmatched ? "울산 울주군" : reviewRequired ? "" : "부산 영도구",
     requested_feature_id: "",
-    resolved_feature_id: unmatched ? null : "feature-maritime-museum",
-    source_item_key: unmatched ? "lighthouse-ganjeolgot" : "museum-busan",
+    resolved_feature_id: unmatched || reviewRequired ? null : "feature-maritime-museum",
+    source_item_key: unmatched
+      ? "lighthouse-ganjeolgot"
+      : reviewRequired
+        ? "tourism-namiseom"
+        : "museum-busan",
     candidates: unmatched
       ? []
+      : reviewRequired
+        ? [
+            {
+              feature_id: "feature-seoul-namesake",
+              name: "남이섬",
+              address: { road_address: "서울특별시 중구" },
+              lon: 126.99,
+              lat: 37.56,
+            },
+          ]
       : [
           {
             feature_id: "feature-maritime-museum",
@@ -47,6 +64,15 @@ function importRow(status: "valid" | "imported" | "unmatched") {
             column: null,
           },
         ]
+      : reviewRequired
+        ? [
+            {
+              code: "name_only_match",
+              message: "이름만 일치하는 후보는 자동 링크하지 않습니다.",
+              row_number: 4,
+              column: null,
+            },
+          ]
       : [],
   };
 }
@@ -79,9 +105,22 @@ function importResponse(dryRun: boolean, fileIssues: unknown[] = []) {
   };
 }
 
+function reviewRequiredImportResponse(dryRun: boolean, fileIssues: unknown[] = []) {
+  const response = importResponse(dryRun, fileIssues);
+  response.data.rows_total = 1;
+  response.data.valid_rows = 1;
+  response.data.unresolved_rows = 1;
+  response.data.inserted = dryRun ? 0 : 1;
+  response.data.removed = 0;
+  response.data.removals = [];
+  response.data.items = [importRow("review_required")];
+  return response;
+}
+
 async function mockCsvImportRoutes(
   page: Page,
   fileIssues: unknown[] = [],
+  responseFactory = importResponse,
 ): Promise<ImportRequests> {
   const requests: ImportRequests = { commit: 0, preview: 0 };
 
@@ -99,7 +138,7 @@ async function mockCsvImportRoutes(
       if (dryRun) requests.preview += 1;
       else requests.commit += 1;
       expect(request.headers()["content-type"]).toContain("multipart/form-data");
-      await fulfillJson(route, importResponse(dryRun, dryRun ? fileIssues : []));
+      await fulfillJson(route, responseFactory(dryRun, dryRun ? fileIssues : []));
       return;
     }
     await fulfillJson(route, { data: { items: [] }, meta: {} });
@@ -109,6 +148,33 @@ async function mockCsvImportRoutes(
 }
 
 test.describe("큐레이션 CSV import", () => {
+  test("이름 단독 후보를 후보 다수가 아닌 수동 검토로 표시한다", async ({ page }) => {
+    await mockCsvImportRoutes(page, [], reviewRequiredImportResponse);
+    await page.goto("/admin/features/curated");
+
+    await page.getByLabel("CSV 파일").setInputFiles({
+      name: "name-only.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(
+        "collection_key,theme_slug,title,place_name\nlighthouse-stamp-tour,lighthouse-stamp-tour,등대 스탬프투어,남이섬\n",
+      ),
+    });
+    await page.getByRole("button", { name: "매칭 미리보기" }).click();
+
+    const report = page.getByTestId("curation-import-report");
+    await expect(report.getByText("수동 검토", { exact: true })).toBeVisible();
+    await expect(report.getByText("후보 다수", { exact: true })).toHaveCount(0);
+    await expect(
+      report.getByText("이름만 일치하는 후보는 자동 링크하지 않습니다."),
+    ).toBeVisible();
+    await expect(
+      report.getByText("feature-seoul-namesake", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      report.getByRole("button", { name: "남이섬 후보 Feature ID 복사" }),
+    ).toBeVisible();
+  });
+
   test("dry-run에서 미연결 행을 보여주고 형식 오류가 없으면 전체 반영한다", async ({
     page,
   }) => {

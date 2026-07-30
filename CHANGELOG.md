@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### 큐레이션 import 검토 상태·운영 복구 원자성 (2026-07-30, #893)
+
+- **FIXED**: 주소 hint가 있는 이름+주소 유일 후보는 ADR-063 계약대로 자동 연결한다.
+  주소 없는 이름 단독 후보는 `review_required`로 반환해 “후보 다수”와 구분하고 admin UI에
+  “수동 검토”로 표시한다.
+- **RELIABILITY**: H33 오링크 해제와 integrity finding 기록을 한 transaction으로 묶어
+  ledger 실패 시 링크 해제도 rollback한다. 이미 해제됐거나 올바르게 재연결된 행은 허위
+  open finding을 만들지 않는다.
+- **VALIDATION**: H25B 공식 CSV 역반영은 DB active identity 3-tuple과 기존 `feature_id`를
+  전체 파일 쓰기 전에 검증하고, 불일치·누락·중복이면 CSV와 manifest를 바꾸지 않는다.
+
 ### 주소 검증 결과 durable 기록 (2026-07-29, T-VN-H30A)
 
 - **OBSERVABILITY**: 주소/좌표 검증 결과가 `ops.data_integrity_violations`에 남아
