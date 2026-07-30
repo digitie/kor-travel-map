@@ -937,6 +937,38 @@ CREATE INDEX idx_weather_valid_at_brin
   ON feature.feature_weather_values USING BRIN (valid_at);
 CREATE INDEX idx_weather_collected_at_brin
   ON feature.feature_weather_values USING BRIN (collected_at);
+
+CREATE TABLE feature.weather_metric_series (
+  feature_id              TEXT NOT NULL
+    REFERENCES feature.features(feature_id) ON DELETE CASCADE,
+  provider                TEXT NOT NULL,
+  weather_domain          TEXT NOT NULL,
+  forecast_style          TEXT NOT NULL,
+  metric_key              TEXT NOT NULL,
+  PRIMARY KEY (
+    feature_id, provider, weather_domain, forecast_style, metric_key
+  )
+);
+
+CREATE INDEX idx_weather_values_feature_effective
+  ON feature.feature_weather_values (
+    feature_id,
+    provider,
+    weather_domain,
+    forecast_style,
+    metric_key,
+    (COALESCE(valid_at, observed_at, valid_from, issued_at)) DESC,
+    issued_at DESC NULLS LAST,
+    collected_at DESC,
+    weather_value_key
+  );
+
+CREATE INDEX idx_features_public_weather_coord_5179_gist
+  ON feature.features USING gist (coord_5179)
+  WHERE status = 'active'
+    AND deleted_at IS NULL
+    AND kind = 'weather'
+    AND coord_5179 IS NOT NULL;
 ```
 
 **인덱스 설계**:
@@ -944,6 +976,17 @@ CREATE INDEX idx_weather_collected_at_brin
 - `feature_id + metric_key + valid_at DESC` — `build_weather_card`의 핵심
   쿼리 (각 metric별 최신값).
 - `provider + weather_domain + valid_at DESC` — admin 검증.
+- `weather_metric_series`는 fact insert와 series identity 변경 trigger가 단조롭게
+  유지하는 작은 physical-series registry다. 삭제로 stale row가 남아도 predecessor 조회가
+  0행이므로 read 결과는 바뀌지 않으며, 대용량 fact에서 매 요청마다 series를 `DISTINCT`로
+  재발견하지 않는다.
+- `idx_weather_values_feature_effective`는 physical-series exact prefix 뒤에 effective time과
+  결정적 tie-break를 둬 current predecessor와 24시간 timeline을 index range scan으로 읽는다.
+  concurrent build 뒤 후속 DDL이 실패해 revision이 미적용으로 남아도, 재시도는 catalog에서
+  이미 valid인 index를 재사용하고 invalid 잔재만 제거·재구축한다.
+- `idx_features_public_weather_coord_5179_gist`는 공유 가능한 canonical weather anchor만 담는
+  partial GiST다. nearest KNN이 일반 place 후보를 훑지 않으며 공간 술어에서
+  `ST_Transform`을 사용하지 않는다.
 
 0060 이후 semantic UNIQUE는 위 시간축의 NULL을 같은 값으로 취급하는 `NULLS NOT DISTINCT`다.
 같은 semantic tuple의 current row는 `collected_at`이 더 최신인 입력만 갱신한다. 더 오래된

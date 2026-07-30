@@ -79,6 +79,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `feature_opening_periods` | `(feature_id, period_index)` | start_weekday (0-6), start_time (HHMM regex), duration_minutes (1~10080) |
 | `feature_special_days` | `(feature_id, special_date)` | is_closed, periods JSONB |
 | `feature_weather_values` | `weather_value_key` | UNIQUE (feature_id, provider, weather_domain, forecast_style, metric_key, issued_at, valid_at, observed_at) |
+| `weather_metric_series` | `(feature_id, provider, weather_domain, forecast_style, metric_key)` | weather fact writer trigger가 단조롭게 유지하는 physical-series registry; stale row는 read 무영향 |
 | `feature_price_values` | `price_value_key` | feature_id FK; provider/price_domain/product_key/observed_at/value_number/unit; UNIQUE (feature_id,provider,price_domain,product_key,observed_at) |
 | `curation_collections` | `collection_id UUID` | UNIQUE collection_key; theme/source/title/edition/status/visibility; legacy key는 theme/source UUID+title hash, 중복 group은 split identity; created_by/updated_by |
 | `curation_items` | `curation_item_id UUID` | collection FK; nullable·mutable feature_id; source_record_key; legacy_projection_id deferrable FK/partial UNIQUE; external_item_id + external_component_id stable identity; place_name/address_hint/source_present/source_updated_at/status/sort_order; operator_updated_by/at; source 누락·재등장과 운영자 tombstone 이력 |
@@ -389,6 +390,7 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `feature_special_days.feature_id` → `features` | CASCADE | |
 | `feature_weather_values.feature_id` → `features` | CASCADE | |
 | `feature_weather_values.source_record_key` → `source_records` | SET NULL | |
+| `weather_metric_series.feature_id` → `features` | CASCADE | |
 | `feature_price_values.feature_id` → `features` | CASCADE | price anchor 삭제 시 시계열도 삭제 |
 | `feature_price_values.source_record_key` → `source_records` | SET NULL | source 정리 후에도 가격값 유지 |
 | `source_links.feature_id` → `features` | CASCADE | |

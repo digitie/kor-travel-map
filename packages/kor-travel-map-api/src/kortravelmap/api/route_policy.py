@@ -179,6 +179,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/curated-themes": RoutePolicy.PUBLIC_KEYED,
     # -- service — service-to-service surface (X-Kor-Travel-Map-Service-Token).
     "/v1/features/batch": RoutePolicy.SERVICE,
+    "/v1/features/weather/batch": RoutePolicy.SERVICE,
     # -- operator/debug — raw provider payload은 local-dev debug mount에서만
     #    노출하되 mount된 route도 trusted admin BFF를 요구한다. production은
     #    debug_routes_enabled=false로 route 자체를 내린다.

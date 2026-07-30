@@ -218,11 +218,15 @@ def test_operator_route_does_not_broadly_allow_arbitrary_origin(
 
 
 @pytest.mark.unit
-def test_service_route_gets_no_cors(client: TestClient) -> None:
-    # service surface(``/v1/features/batch``, X-Kor-Travel-Map-Service-Token) —
+@pytest.mark.parametrize(
+    "path",
+    ["/v1/features/batch", "/v1/features/weather/batch"],
+)
+def test_service_route_gets_no_cors(client: TestClient, path: str) -> None:
+    # service surface(X-Kor-Travel-Map-Service-Token) —
     # server-to-server라 브라우저 cross-origin이 아니다. CORS 헤더를 내보내지 않는다.
     response = client.options(
-        "/v1/features/batch",
+        path,
         headers={
             "Origin": ALLOWED_ORIGIN,
             "Access-Control-Request-Method": "POST",

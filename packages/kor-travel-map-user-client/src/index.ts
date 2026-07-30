@@ -46,6 +46,13 @@ export type FeatureBatchMissingItem = Schemas["FeatureBatchMissingItem"];
 export type FeatureBatchUnchangedItem = Schemas["FeatureBatchUnchangedItem"];
 export type FeatureTripCard = Schemas["FeatureTripCard"];
 export type FeatureWeatherResponse = Schemas["FeatureWeatherResponse"];
+export type WeatherMetric = Schemas["WeatherMetricOut"];
+export type WeatherBatchRequest = Schemas["WeatherBatchRequest"];
+export type WeatherBatchResponse = Schemas["WeatherBatchResponse"];
+export type WeatherBatchItem = WeatherBatchResponse["data"]["items"][number];
+export type WeatherBatchFoundItem = Schemas["WeatherBatchFoundItem"];
+export type WeatherBatchNoDataItem = Schemas["WeatherBatchNoDataItem"];
+export type WeatherBatchRetiredItem = Schemas["WeatherBatchRetiredItem"];
 export type CategoriesResponse = Schemas["CategoriesResponse"];
 export type CategorySummary = Schemas["CategorySummary"];
 export type ProviderLastSyncResponse = Schemas["ProviderLastSyncResponse"];
@@ -86,6 +93,15 @@ type _BatchStatesExact = _Assert<
 type _BatchFoundHasRevisionAndTripCard = _Assert<
   _Has<FeatureBatchFoundItem, "row_revision" | "trip_card">
 >;
+type _WeatherBatchStatesExact = _Assert<
+  _Equal<WeatherBatchItem["state"], "found" | "no_data" | "retired">
+>;
+type _WeatherBatchFoundHasSnapshot = _Assert<
+  _Has<
+    WeatherBatchFoundItem,
+    "current" | "timeline" | "latest_at" | "is_stale" | "source_styles"
+  >
+>;
 // pagination은 meta.page (data.next_cursor 폐기, ADR-048 #2/#12).
 type _MetaHasPage = _Assert<_Has<Meta, "page">>;
 type _PageHasNextCursor = _Assert<
@@ -107,6 +123,7 @@ type _PathsStable = _Assert<
     | "/v1/features/search"
     | "/v1/features/nearby"
     | "/v1/features/batch"
+    | "/v1/features/weather/batch"
     | "/v1/features/{feature_id}"
     | "/v1/features/{feature_id}/contained-features"
     | "/v1/features/{feature_id}/weather"
@@ -129,6 +146,8 @@ export type _SurfaceAssertions = [
   _BatchHasItems,
   _BatchStatesExact,
   _BatchFoundHasRevisionAndTripCard,
+  _WeatherBatchStatesExact,
+  _WeatherBatchFoundHasSnapshot,
   _MetaHasPage,
   _PageHasNextCursor,
   _SummaryHasFlatLonLat,

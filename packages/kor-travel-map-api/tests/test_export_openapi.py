@@ -97,6 +97,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/features/{feature_id}/weather/forecast",
         "/v1/features/weather/forecast",
         "/v1/features/weather/alerts",
+        "/v1/features/weather/batch",
         "/v1/features/batch",
         "/v1/public/beaches",
         "/v1/public/beaches/map-markers",
@@ -131,6 +132,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
 
     schemas = user["components"]["schemas"]
     assert "FeatureBatchResponse" in schemas
+    assert "WeatherBatchResponse" in schemas
     assert "BeachPublicView" in schemas
     assert "FestivalPublicView" in schemas
     assert "PublicCuratedFeatureView" in schemas

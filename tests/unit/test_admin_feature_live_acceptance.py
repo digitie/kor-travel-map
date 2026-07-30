@@ -544,7 +544,7 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
         )
     ]
     assert fixture.count('lock_clause = " FOR UPDATE" if lock else ""') == 2
-    assert owned_values.count("+ lock_clause") == 2
+    assert owned_values.count("+ lock_clause") == 3
     assert "_assert_owned_values(session, feature_ids, present, lock=lock)" in fixture
     lock = cleanup.index("lock=True")
     foreign_key_audit = cleanup.index("DELETE FROM feature.features")
@@ -555,7 +555,9 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert "foreign_key_references" in fixture
     assert "owned fixture ID의 소유권 fingerprint가 다릅니다" in fixture
     assert "owned weather value fingerprint가 다릅니다" in fixture
+    assert "owned weather series fingerprint가 다릅니다" in fixture
     assert "owned price value fingerprint가 다릅니다" in fixture
+    assert '"feature.weather_metric_series.feature_id"] = 1' in fixture
     assert cleanup.count("DELETE FROM feature.features") == 1
     assert purge.count("DELETE FROM feature.features") == 1
     assert "DELETE FROM ops.feature_change_requests" in purge

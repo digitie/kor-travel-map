@@ -277,6 +277,19 @@ async def _assert_owned_values(
             {"feature_id": feature_ids[0]},
         )
     ).mappings().all()
+    weather_series_rows = (
+        await session.execute(
+            text(
+                """
+                SELECT provider, weather_domain, forecast_style, metric_key
+                FROM feature.weather_metric_series
+                WHERE feature_id = :feature_id
+                """
+                + lock_clause
+            ),
+            {"feature_id": feature_ids[0]},
+        )
+    ).mappings().all()
     price_rows = (
         await session.execute(
             text(
@@ -308,6 +321,16 @@ async def _assert_owned_values(
                 "weather_domain": "kma_short_forecast",
             }
         )
+    expected_weather_series = []
+    if feature_ids[0] in present:
+        expected_weather_series.append(
+            {
+                "forecast_style": "short",
+                "metric_key": "TMP",
+                "provider": "e2e-live-acceptance",
+                "weather_domain": "kma_short_forecast",
+            }
+        )
     expected_price = []
     if feature_ids[1] in present:
         expected_price.append(
@@ -324,6 +347,8 @@ async def _assert_owned_values(
         )
     if [dict(row) for row in weather_rows] != expected_weather:
         raise RuntimeError("owned weather value fingerprint가 다릅니다")
+    if [dict(row) for row in weather_series_rows] != expected_weather_series:
+        raise RuntimeError("owned weather series fingerprint가 다릅니다")
     if [dict(row) for row in price_rows] != expected_price:
         raise RuntimeError("owned price value fingerprint가 다릅니다")
 
@@ -349,6 +374,7 @@ async def _assert_owned_state(
     expected_references: dict[str, int] = {}
     if feature_ids[0] in present:
         expected_references["feature.feature_weather_values.feature_id"] = 1
+        expected_references["feature.weather_metric_series.feature_id"] = 1
     if feature_ids[1] in present:
         expected_references["feature.feature_price_values.feature_id"] = 1
     observed_references = {key: value for key, value in foreign_keys.items() if value}

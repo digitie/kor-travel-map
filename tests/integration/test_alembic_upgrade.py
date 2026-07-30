@@ -8,10 +8,12 @@ PostGIS에서 깨끗하게 적용되는지 확인 + 4 schema / 3 extension / 4 �
 from __future__ import annotations
 
 import re
+import uuid
 from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.infra.alembic_exclusions import (
@@ -281,8 +283,8 @@ def _canonical_pg_sql(value: str | None) -> str:
     return re.sub(r'[\s()"]+', "", without_casts).lower()
 
 
-async def _run_alembic_upgrade(dsn: str) -> None:
-    """``alembic.command.upgrade(cfg, "head")``를 worker thread에서 실행.
+async def _run_alembic_upgrade(dsn: str, revision: str = "head") -> None:
+    """``alembic.command.upgrade``를 worker thread에서 실행.
 
     alembic은 sync API + 자체 asyncio.run(env.py)을 호출하므로 현재 pytest
     event loop과 충돌. ``asyncio.to_thread``로 별도 thread에서 alembic의
@@ -302,7 +304,7 @@ async def _run_alembic_upgrade(dsn: str) -> None:
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
     cfg.set_main_option("sqlalchemy.url", dsn)
-    await asyncio.to_thread(command.upgrade, cfg, "head")
+    await asyncio.to_thread(command.upgrade, cfg, revision)
 
 
 @pytest.fixture(scope="session")
@@ -549,6 +551,113 @@ async def test_alembic_creates_feature_merge_history(
             )
         ).scalar_one()
     assert exists is not None
+
+
+async def test_weather_migration_reuses_valid_index_after_partial_failure(
+    pg_container: object,
+) -> None:
+    """0069 후반 실패 재시도는 이미 완성된 대형 index를 다시 만들지 않는다."""
+    from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
+
+    raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
+    admin_dsn = normalize_async_dsn(raw_dsn)
+    database_name = f"weather_migration_retry_{uuid.uuid4().hex}"
+    retry_dsn = make_url(admin_dsn).set(database=database_name).render_as_string(
+        hide_password=False
+    )
+    admin_engine = make_async_engine(admin_dsn)
+    retry_engine = None
+    try:
+        async with admin_engine.connect() as raw_admin_conn:
+            admin_conn = await raw_admin_conn.execution_options(
+                isolation_level="AUTOCOMMIT"
+            )
+            await admin_conn.execute(text(f'CREATE DATABASE "{database_name}"'))
+
+        await _run_alembic_upgrade(retry_dsn, "0068_integrity_last_seen")
+        retry_engine = make_async_engine(retry_dsn)
+        async with retry_engine.connect() as raw_retry_conn:
+            retry_conn = await raw_retry_conn.execution_options(
+                isolation_level="AUTOCOMMIT"
+            )
+            await retry_conn.execute(
+                text(
+                    """
+                    CREATE INDEX CONCURRENTLY idx_weather_values_feature_effective
+                    ON feature.feature_weather_values (
+                        feature_id,
+                        provider,
+                        weather_domain,
+                        forecast_style,
+                        metric_key,
+                        (
+                            COALESCE(
+                                valid_at,
+                                observed_at,
+                                valid_from,
+                                issued_at
+                            )
+                        ) DESC,
+                        issued_at DESC NULLS LAST,
+                        collected_at DESC,
+                        weather_value_key
+                    )
+                    """
+                )
+            )
+            relfilenode_before = (
+                await retry_conn.execute(
+                    text(
+                        """
+                        SELECT index_relation.relfilenode
+                        FROM pg_catalog.pg_class AS index_relation
+                        JOIN pg_catalog.pg_namespace AS namespace
+                          ON namespace.oid = index_relation.relnamespace
+                        WHERE namespace.nspname = 'feature'
+                          AND index_relation.relname =
+                              'idx_weather_values_feature_effective'
+                        """
+                    )
+                )
+            ).scalar_one()
+        await retry_engine.dispose()
+        retry_engine = None
+
+        await _run_alembic_upgrade(retry_dsn)
+        retry_engine = make_async_engine(retry_dsn)
+        async with retry_engine.connect() as retry_conn:
+            relfilenode_after = (
+                await retry_conn.execute(
+                    text(
+                        """
+                        SELECT index_relation.relfilenode
+                        FROM pg_catalog.pg_class AS index_relation
+                        JOIN pg_catalog.pg_namespace AS namespace
+                          ON namespace.oid = index_relation.relnamespace
+                        WHERE namespace.nspname = 'feature'
+                          AND index_relation.relname =
+                              'idx_weather_values_feature_effective'
+                        """
+                    )
+                )
+            ).scalar_one()
+            migration_head = (
+                await retry_conn.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalar_one()
+
+        assert relfilenode_after == relfilenode_before
+        assert migration_head == "0069_weather_series_catalog"
+    finally:
+        if retry_engine is not None:
+            await retry_engine.dispose()
+        async with admin_engine.connect() as raw_admin_conn:
+            admin_conn = await raw_admin_conn.execution_options(
+                isolation_level="AUTOCOMMIT"
+            )
+            await admin_conn.execute(
+                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
+            )
+        await admin_engine.dispose()
 
 
 async def test_alembic_unmapped_tables_keep_structural_contract(

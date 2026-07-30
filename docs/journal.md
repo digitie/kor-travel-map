@@ -17,6 +17,29 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-30 (codex) — T-VN-16A set-based weather snapshot
+
+- service-token 전용 `POST /v1/features/weather/batch`는 중복 없는 ID 1~200개를 한
+  set-based statement로 읽고 입력 순서를 보존한다. parent 존재와 weather 없음은
+  `retired`/`no_data`로 분리하며 단건 endpoint도 같은 판정을 재사용한다.
+- current는 target predecessor이면서 known-at cutoff를 만족하고 range가 끝나지 않은 값이다.
+  24시간 timeline과 metric의 provider/domain·valid/effective 시각을 함께 반환한다.
+- 30M fact의 열린 physical series를 매번 `DISTINCT`하지 않도록
+  `weather_metric_series` registry+trigger를 추가했다. series exact-prefix effective
+  index와 canonical weather-only partial GiST로 단건 17.8ms, 200건 1.27s, fact Seq Scan
+  0을 실데이터 clone에서 확인했다.
+- 첫 적대 리뷰는 GET asof known-at, 빈/중복 ID, range 시각 손실, overflow, global
+  decorrelation, nullable forecast issue, 만료 range, provider/domain 동률, 대형 index
+  이중 build를 찾았다. query/contract/migration을 고친 뒤 후반 DDL 실패 재시도에서 valid
+  2.283GB index를 다시 만드는 P2도 relfilenode 보존 회귀로 닫았다. 큰 delta 최종 리뷰
+  2명은 P0/P1/P2 모두 0이다.
+- 파괴적 Live 첫 seed는 새 registry FK가 helper 허용 목록에 없어 transaction rollback됐다.
+  처음부터 반복하지 않고 해당 seed 지점에서 series exact fingerprint, parent lock, 동적 FK
+  count를 추가했다. main·recovery 재실행은 모두 통과했고 Feature/change request/weather/
+  price/series/auth residue는 0이다.
+- 새 clone·dump·checkpoint를 만들거나 Alembic downgrade하지 않았다.
+  `ktm-tvn45-db`는 healthy, head `0069_weather_series_catalog`로 다음 DB task에 재사용한다.
+
 ## 2026-07-30 (codex) — T-VN-H39 schedule pending barrier
 
 - schedule command route가 body를 기록한 뒤 테스트 소유 promise에서 응답을 보류한다.

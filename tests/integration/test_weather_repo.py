@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import weather_repo
@@ -105,6 +105,172 @@ async def test_weather_card_empty(migrated_session: AsyncSession) -> None:
     assert card.source_styles == []
     assert card.latest_at is None
     assert card.is_stale is True
+
+
+async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
+    migrated_session: AsyncSession,
+) -> None:
+    target_at = _T2
+    known_at = _T2 + timedelta(hours=1)
+    await _ins_feature_at(
+        migrated_session,
+        "batch_weather",
+        lon=_BASE_LON,
+        lat=_BASE_LAT,
+        kind="weather",
+    )
+    await _ins_weather_feature(migrated_session, "batch_no_data")
+    await _ins_weather_feature(migrated_session, "batch_retired")
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.features
+            SET status = 'deleted', deleted_at = :deleted_at
+            WHERE feature_id = 'batch_retired'
+            """
+        ),
+        {"deleted_at": known_at},
+    )
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _kma_short(
+                "batch_weather",
+                "TMP",
+                issued_at=_T1,
+                valid_at=_T1,
+                collected_at=_T1 + timedelta(minutes=20),
+                value_number=Decimal("20.0"),
+                unit="deg_c",
+            ),
+            _kma_short(
+                "batch_weather",
+                "TMP",
+                issued_at=_T2,
+                valid_at=_T2 + timedelta(days=1),
+                collected_at=_T2 + timedelta(minutes=20),
+                value_number=Decimal("23.0"),
+                unit="deg_c",
+            ),
+            # known_at 뒤 수집된 미래 row는 snapshot에 보이지 않는다.
+            _kma_short(
+                "batch_weather",
+                "TMP",
+                issued_at=_T2,
+                valid_at=_T2 + timedelta(days=2),
+                collected_at=known_at + timedelta(seconds=1),
+                value_number=Decimal("99.0"),
+                unit="deg_c",
+            ),
+            # 발행시각이 없는 forecast는 known-at 계약을 만족하지 않는다.
+            _kma_short(
+                "batch_weather",
+                "POP",
+                issued_at=None,
+                valid_at=_T2 + timedelta(hours=6),
+                collected_at=_T1,
+                value_number=Decimal("88.0"),
+                unit="%",
+            ),
+            # 구간형 weather는 valid_from을 effective_at으로 보존한다.
+            _wv(
+                "RANGE_CURRENT",
+                feature_id="batch_weather",
+                weather_domain="kma_weather_alert",
+                forecast_style="advisory",
+                timeline_bucket=None,
+                issued_at=None,
+                valid_from=_T2 - timedelta(minutes=30),
+                valid_until=_T2 + timedelta(minutes=30),
+                collected_at=_T1,
+                value_text="현재 구간",
+            ),
+            _wv(
+                "RANGE_EXPIRED",
+                feature_id="batch_weather",
+                weather_domain="kma_weather_alert",
+                forecast_style="advisory",
+                timeline_bucket=None,
+                issued_at=None,
+                valid_from=_T1 - timedelta(hours=2),
+                valid_until=_T1 - timedelta(hours=1),
+                collected_at=_T1 - timedelta(hours=3),
+                value_text="종료 구간",
+            ),
+            _wv(
+                "RANGE_TIMELINE",
+                feature_id="batch_weather",
+                weather_domain="kma_weather_alert",
+                forecast_style="advisory",
+                timeline_bucket=None,
+                issued_at=None,
+                valid_from=_T2 + timedelta(hours=12),
+                valid_until=_T2 + timedelta(hours=18),
+                collected_at=_T1,
+                value_text="예정 구간",
+            ),
+        ],
+    )
+    await migrated_session.flush()
+    series_count = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM feature.weather_metric_series
+                WHERE feature_id = 'batch_weather'
+                """
+            )
+        )
+    ).scalar_one()
+    assert series_count == 5
+
+    connection = await migrated_session.connection()
+    statement_count = 0
+
+    def _count_statement(
+        *_args: object,
+    ) -> None:
+        nonlocal statement_count
+        statement_count += 1
+
+    event.listen(connection.sync_connection, "before_cursor_execute", _count_statement)
+    try:
+        items = await weather_repo.get_weather_batch_items(
+            migrated_session,
+            feature_ids=("batch_weather", "batch_no_data", "batch_retired"),
+            target_at=target_at,
+            known_at=known_at,
+            freshness_seconds=10**9,
+        )
+    finally:
+        event.remove(
+            connection.sync_connection,
+            "before_cursor_execute",
+            _count_statement,
+        )
+
+    assert statement_count == 1
+    assert [item.state for item in items] == ["found", "no_data", "retired"]
+    current_by_key = {metric.metric_key: metric for metric in items[0].current}
+    timeline_by_key = {metric.metric_key: metric for metric in items[0].timeline}
+    assert current_by_key["TMP"].value_number == Decimal("20.0")
+    assert current_by_key["RANGE_CURRENT"].effective_at == _T2 - timedelta(
+        minutes=30
+    )
+    assert "RANGE_EXPIRED" not in current_by_key
+    assert timeline_by_key["TMP"].value_number == Decimal("23.0")
+    assert "POP" not in timeline_by_key
+    assert timeline_by_key["RANGE_TIMELINE"].effective_at == _T2 + timedelta(
+        hours=12
+    )
+    assert timeline_by_key["RANGE_TIMELINE"].valid_until == _T2 + timedelta(
+        hours=18
+    )
+    assert items[0].latest_at == _T2 - timedelta(minutes=30)
+    assert items[1].current == []
+    assert items[1].timeline == []
+    assert items[2].current == []
 
 
 async def test_weather_timeline_preserves_forecast_issue_history(
@@ -359,11 +525,19 @@ async def test_weather_card_tiered_merge_observed_augments_kma_mid(
 
     # KREX 관측 anchor ≈ 3km 동쪽.
     await _ins_feature_at(
-        migrated_session, "krex_obs", lon=_BASE_LON + 0.034, lat=_BASE_LAT
+        migrated_session,
+        "krex_obs",
+        lon=_BASE_LON + 0.034,
+        lat=_BASE_LAT,
+        kind="weather",
     )
     # KMA 중기/단기 anchor ≈ 8km 동쪽 (관측보다 멀다).
     await _ins_feature_at(
-        migrated_session, "kma_anchor", lon=_BASE_LON + 0.090, lat=_BASE_LAT
+        migrated_session,
+        "kma_anchor",
+        lon=_BASE_LON + 0.090,
+        lat=_BASE_LAT,
+        kind="weather",
     )
 
     await weather_repo.load_weather_values(
@@ -422,7 +596,11 @@ async def test_weather_card_krex_observed_only_in_radius(
     await _ins_feature_at(migrated_session, "rural2", lon=_BASE_LON, lat=_BASE_LAT)
     # KREX 관측 ≈ 3km.
     await _ins_feature_at(
-        migrated_session, "krex_only", lon=_BASE_LON + 0.034, lat=_BASE_LAT
+        migrated_session,
+        "krex_only",
+        lon=_BASE_LON + 0.034,
+        lat=_BASE_LAT,
+        kind="weather",
     )
     await weather_repo.load_weather_values(
         migrated_session, [_krex_observed("krex_only")]
@@ -446,7 +624,11 @@ async def test_weather_card_own_rows_no_fallback(
     await _ins_feature_at(migrated_session, "own", lon=_BASE_LON, lat=_BASE_LAT)
     # 가까운 KREX 관측 anchor가 있어도, 자기 row가 기온을 채우면 병합하지 않아야 함.
     await _ins_feature_at(
-        migrated_session, "neighbor_obs", lon=_BASE_LON + 0.01, lat=_BASE_LAT
+        migrated_session,
+        "neighbor_obs",
+        lon=_BASE_LON + 0.01,
+        lat=_BASE_LAT,
+        kind="weather",
     )
     await weather_repo.load_weather_values(
         migrated_session, [_krex_observed("neighbor_obs")]
@@ -477,7 +659,11 @@ async def test_weather_card_far_anchor_outside_radius_no_merge(
     await _ins_feature_at(migrated_session, "isolated", lon=_BASE_LON, lat=_BASE_LAT)
     # ≈ 90km 동쪽 (반경 50km 밖).
     await _ins_feature_at(
-        migrated_session, "far_kma", lon=_BASE_LON + 1.0, lat=_BASE_LAT
+        migrated_session,
+        "far_kma",
+        lon=_BASE_LON + 1.0,
+        lat=_BASE_LAT,
+        kind="weather",
     )
     await weather_repo.load_weather_values(
         migrated_session,
@@ -520,7 +706,8 @@ async def test_nearest_temp_uses_coord_gist_and_no_weather_full_scan(
             )
             SELECT
                 'wseed:' || lpad(g::text, 6, '0'),
-                'place', 'seed ' || g::text, '06020000',
+                CASE WHEN g % 7 = 1 THEN 'weather' ELSE 'place' END,
+                'seed ' || g::text, '06020000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(
                         126.90 + ((g % 200)::float * 0.002),
@@ -575,8 +762,8 @@ async def test_nearest_temp_uses_coord_gist_and_no_weather_full_scan(
     index_names = {
         str(n["Index Name"]) for n in nodes if n.get("Index Name") is not None
     }
-    assert "idx_features_coord_5179_gist" in index_names, (
-        f"expected features coord_5179 GiST KNN, used={sorted(index_names)}"
+    assert "idx_features_public_weather_coord_5179_gist" in index_names, (
+        f"expected weather-only coord_5179 GiST KNN, used={sorted(index_names)}"
     )
     weather_seq_scans = [
         n
@@ -587,3 +774,32 @@ async def test_nearest_temp_uses_coord_gist_and_no_weather_full_scan(
     assert not weather_seq_scans, (
         f"feature_weather_values must not be full-scanned: {weather_seq_scans}"
     )
+
+    batch_plan = (
+        await migrated_session.execute(
+            text(
+                "EXPLAIN (FORMAT JSON, COSTS OFF) "
+                + weather_repo._WEATHER_BATCH_SQL  # noqa: SLF001
+            ),
+            {
+                "feature_ids": ["explain_target"],
+                "target_at": datetime.now(_KST),
+                "known_at": datetime.now(_KST),
+                "radius_m": 50_000.0,
+                "timeline_days": 1,
+            },
+        )
+    ).scalar_one()[0]["Plan"]
+    batch_nodes = _walk_plan(batch_plan)
+    batch_indexes = {
+        str(node["Index Name"])
+        for node in batch_nodes
+        if node.get("Index Name") is not None
+    }
+    assert "idx_weather_values_feature_effective" in batch_indexes
+    assert not [
+        node
+        for node in batch_nodes
+        if node.get("Node Type") == "Seq Scan"
+        and node.get("Relation Name") == "feature_weather_values"
+    ]

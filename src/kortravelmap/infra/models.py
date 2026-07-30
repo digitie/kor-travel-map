@@ -85,6 +85,7 @@ __all__ = [
     "metadata",
     "Base",
     "FeatureRow",
+    "WeatherMetricSeriesRow",
     "FeatureVersionRow",
     "SourceEntityRow",
     "NoticeLifecycleScopeRow",
@@ -213,6 +214,17 @@ class FeatureRow(Base):
             "coord_5179",
             postgresql_using="gist",
             postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "idx_features_public_weather_coord_5179_gist",
+            "coord_5179",
+            postgresql_using="gist",
+            postgresql_where=text(
+                "status = 'active' "
+                "AND deleted_at IS NULL "
+                "AND kind = 'weather' "
+                "AND coord_5179 IS NOT NULL"
+            ),
         ),
         Index(
             "idx_features_geom_gist",
@@ -368,6 +380,8 @@ class FeatureRow(Base):
         nullable=False,
         server_default=text("1"),
     )
+
+
     user_change_kind: Mapped[str | None] = mapped_column(Text)
     user_change_status: Mapped[str | None] = mapped_column(Text)
     user_change_request_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
@@ -386,6 +400,28 @@ class FeatureRow(Base):
         server_default=text("now()"),
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WeatherMetricSeriesRow(Base):
+    """weather history의 작은 physical-series registry.
+
+    대용량 fact table에서 매 batch마다 ``DISTINCT``로 series를 재발견하지 않도록
+    writer trigger가 단조롭게 등록한다. stale registry row는 조회 시 fact
+    predecessor가 없어 자연스럽게 제외된다.
+    """
+
+    __tablename__ = "weather_metric_series"
+    __table_args__ = ({"schema": "feature"},)
+
+    feature_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    provider: Mapped[str] = mapped_column(Text, primary_key=True)
+    weather_domain: Mapped[str] = mapped_column(Text, primary_key=True)
+    forecast_style: Mapped[str] = mapped_column(Text, primary_key=True)
+    metric_key: Mapped[str] = mapped_column(Text, primary_key=True)
 
 
 class FeatureVersionRow(Base):
