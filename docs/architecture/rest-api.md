@@ -27,7 +27,7 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | public-keyed | `GET /v1/categories` | catalog revision ETag |
 | public-keyed | `GET /v1/collections`, `GET /v1/collections/{id}` | collection/item 단일 curation read 정본 |
 | service | `POST /v1/features/batch` | `found|retired|suppressed|missing|unchanged` + revision; transport 503 분리 |
-| service | `POST /v1/features/weather/batch` | set-based `target_at`/`known_at` bitemporal query |
+| service | `POST /v1/features/weather/batch` | sparse `targets[]`/`known_at` 다중 시각 bitemporal query |
 | service | `PUT/DELETE /v1/service/cache-targets/{system}/{key}` | 단조 `source_generation`, ETag/If-Match |
 | service | `POST/GET /v1/service/refresh-requests[/{id}]` | Idempotency-Key, 202 operation resource |
 | operator | `/v1/features/{id}/sources|observations` | raw lineage의 유일한 REST 표면 |
@@ -256,7 +256,7 @@ GET  /v1/features/{feature_id}          # 단건 상세
 GET  /v1/features/{feature_id}/observations/{source_entity_key}/history
 GET  /v1/features/{feature_id}/weather  # 날씨 카드(metric + forecast_style)
 POST /v1/features/batch                 # trip_card 5-state batch, cap≤200 (ServiceToken)
-POST /v1/features/weather/batch         # target_at/known_at weather snapshot, cap≤200 (ServiceToken)
+POST /v1/features/weather/batch         # sparse targets[]/known_at weather snapshots (ServiceToken)
 ```
 - 단건과 batch의 각 Feature 상세는 `curations[]`와 `observations[]`를 함께 반환한다.
   `observations[]`는 Feature에 연결된 provider entity별 **현재 immutable payload 전부**이며,
@@ -270,20 +270,35 @@ POST /v1/features/weather/batch         # target_at/known_at weather snapshot, c
   잘못되거나 다른 관측에 재사용한 cursor는 422, 첫 page에 해당 link가 없으면 404이며,
   마지막 cursor 다음은 200과 빈 `items`다.
 
-#### Weather batch 계약(T-VN-16A)
+#### Weather batch 계약(T-VN-16A/C)
 
 - service-token 전용 `POST /v1/features/weather/batch`가 set-based 조회의 정본이다.
-- 요청은 중복 없는 `feature_ids` 1~200개와 timezone-aware `target_at`·`known_at`을
-  받는다. `target_at`은 날씨가 설명하는 시각이고, `known_at`은 소비자가 허용하는
-  지식 cutoff다. current-row fact에서는 `collected_at`을 `known_at` 대리값으로
-  사용하며 forecast는 `issued_at <= known_at`도 강제한다.
-- 부모 공개 판정, nearest weather source tier, `current`, `target_at` 뒤 24시간
-  `timeline`을 요청 크기와 무관하게 PostgreSQL statement 1회에서 읽는다.
-  `timeline_until`이 고정 지평선을 명시하며, `target_at + 24시간`을 표현할 수 없는
-  최댓값 부근 시각은 422로 거부한다.
+- 요청은 `targets=[{target_at, feature_ids}]` sparse group과 timezone-aware
+  `known_at`을 받는다. target은 중복 없이 `target_at` 오름차순이며 최대 366개,
+  group별 Feature ID는 입력 순서를 보존하는 고유값 1~200개, 전체 실제
+  `target_at×feature_id` pair는 2,000개 이하다. 날짜별로 필요하지 않은 Feature를
+  Cartesian product로 조회하지 않는다.
+- `target_at`은 해당 group의 날씨가 설명하는 시각이고, 모든 group이 같은
+  `known_at` 지식 cutoff를 공유한다. current-row fact에서는 `collected_at`을
+  `known_at` 대리값으로 사용하며 forecast는 `issued_at <= known_at`도 강제한다.
+- 부모 공개 판정, nearest weather source tier, `current`, 각 `target_at` 뒤 24시간
+  `timeline`을 group 수와 무관하게 PostgreSQL statement 1회에서 읽는다. nearest
+  source capability는 요청 안의 고유 parent마다 `weather_metric_series`에서 한 번
+  고르고, 각 날짜는 그 source의 fact에 bitemporal cutoff를 적용한다.
+- 응답 `targets[]`와 각 `items[]`는 요청 순서를 그대로 보존하며 target마다
+  `timeline_until`을 명시한다. `found` item은 target-local `card_key`만 가지며 같은
+  target/source bundle의 metric은 `cards[]`에 한 번만 둔다. `no_data`와 `retired`는
+  card를 참조하지 않는다. `target_at + 24시간`을 표현할 수 없는 최댓값 부근 시각은
+  422로 거부한다.
+- 정규화된 `cards[]`의 전체 current/timeline metric은 최대 20,000행이다. SQL이 전체 행 수를 같은
+  snapshot에서 계산하며 초과하면 부분 item을 반환하지 않고
+  `413 WEATHER_BATCH_RESULT_LIMIT_EXCEEDED`로 전량 거부한다. DB/transport 실패도 item
+  상태로 축약하지 않고 전체 `503 WEATHER_BATCH_UNAVAILABLE`다.
 - source 선택은 요청 Feature 자체의 weather를 먼저 쓰고, 없으면 공개·활성
-  `kind='weather'` anchor만 거리순으로 사용한다. `kind='place'` 등에 결합된 weather는
-  해당 Feature의 자체 값일 뿐 다른 Feature가 공유하는 anchor가 아니다.
+  `kind='weather'` anchor capability만 거리순으로 사용한다. capability는 요청 날짜별
+  우연한 row 존재가 아니라 series catalog로 결정되어 여러 날짜에서 source provenance가
+  흔들리지 않는다. `kind='place'` 등에 결합된 weather는 해당 Feature의 자체 값일 뿐
+  다른 Feature가 공유하는 anchor가 아니다.
 - physical series는
   `(feature_id, provider, weather_domain, forecast_style, metric_key)`다. 응답 metric은
   `provider`·`weather_domain`, 원래의 `valid_at`/`valid_from`/`valid_until`과 current
@@ -291,8 +306,7 @@ POST /v1/features/weather/batch         # target_at/known_at weather snapshot, c
   valid_until`일 때만 `current`이며, 미래 구간은 24시간 지평선의 `timeline`에 남는다.
 - item state는 `found|no_data|retired`다. `no_data`는 공개 parent는 있으나 cutoff에
   맞는 날씨가 없음, `retired`는 현재 공개 projection에 parent가 없어 단건에서 404가
-  되는 상태다. transport/DB 실패는 item으로 축약하지 않고 전체
-  `503 WEATHER_BATCH_UNAVAILABLE`로 분리한다.
+  되는 상태다.
 - `GET /v1/features/{feature_id}/weather`도 같은 batch repository를 ID 1개로 호출한다.
   따라서 parent 404와 빈 날씨 판정이 단건/batch에서 달라지지 않는다.
 - ⚠️ `/tripmate/*` namespace **제거**(kor-travel-map은 PinVi 전용이 아니다). batch는

@@ -155,7 +155,7 @@ C6c v4 capture를 수행하고, 그 capture 증거로 C7 live를 실행한다.
 | ops 관측 read | PinVi PR #393의 consistency/log caller `ops:read` 전환과 metrics/health-deep direct caller inventory | T-VN-03 operator gate·route exception 0건; 두 head를 C6c manifest v4 exact pair source에 포함 |
 | feature batch | 5-state typed DTO, transport 503 stale 유지, opaque UUID 보존 | state classifier와 revision, pinned service OpenAPI |
 | Feature UUID | legacy alias-map DB 이관과 모든 FK/consumer 참조 shadow 검증 | UUID read/write 전환, alias lookup 보존, checksum 일치 |
-| weather | set-based batch와 `target_at`/`known_at` typed consumer | bitemporal fact/current projection과 parent 404 |
+| weather | sparse 다중 `targets[]`/`known_at`, item `card_key`·target-local `cards[]` typed consumer | 단일 snapshot bitemporal projection, 공유 card 정규화, metric budget, parent 404 |
 | cache target/refresh | generation·ETag·Idempotency-Key·outbox consumer | service resource와 replay/outbox 활성화 |
 | public/operator 분리 | 공개 DTO의 raw lineage 의존 0건, operator principal 사용 | route matrix·read-only DB role·표면별 OpenAPI SHA |
 

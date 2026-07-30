@@ -3,6 +3,23 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-30 — Lane B b1 T-VN-16B PinVi weather batch 소비
+
+- [x] **T-VN-16B — PinVi weather batch 소비 cutover** (PinVi PR #420)
+
+  Trip 상세/공유 view의 단건 weather N+1을 날짜별 Map batch projection으로 전환했다.
+  `found|no_data|retired|suppressed|missing|unavailable|not_requested`를 day-scoped
+  union으로 구분하고, 고유 날짜 31개·worker 4개·view 전체 10초 budget과 부모 request
+  취소 전파로 outbound를 제한했다. Web은 서버 view만 렌더하며 단건 weather를 호출하지
+  않는다.
+
+  적대 리뷰어 2명의 최종 finding은 P0/P1/P2 0건이었다. 재사용
+  `ktm-tvn45-db`에서 실제 parent 여섯 상태, weather found/no_data/retired,
+  weather-only 503→복구, 단건 요청 0회와 활성 Trip 잔존 0건을 파괴적 Live UI로
+  통과했다. PinVi PR #420은 전체 CI green 뒤 squash merge됐고 merge commit은
+  `9eb95c6f0e02eeec11ff7b49a4ca8ab2654758c2`다. 날짜 fan-out과 31일 상한 제거는
+  `T-VN-16C`로 분리했다.
+
 ## 2026-07-30 — Lane B b1 T-VN-16A set-based weather batch
 
 - [x] **T-VN-16A — Map set-based weather batch**

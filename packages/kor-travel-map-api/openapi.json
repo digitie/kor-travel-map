@@ -25055,74 +25055,20 @@
         "title": "WeatherAnchorOut",
         "type": "object"
       },
-      "WeatherBatchData": {
+      "WeatherBatchCardOut": {
         "additionalProperties": false,
-        "description": "한 DB snapshot에서 계산한 weather batch data.",
+        "description": "한 target 안에서 같은 source bundle을 공유하는 weather card.",
         "properties": {
-          "items": {
-            "items": {
-              "discriminator": {
-                "mapping": {
-                  "found": "#/components/schemas/WeatherBatchFoundItem",
-                  "no_data": "#/components/schemas/WeatherBatchNoDataItem",
-                  "retired": "#/components/schemas/WeatherBatchRetiredItem"
-                },
-                "propertyName": "state"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/WeatherBatchFoundItem"
-                },
-                {
-                  "$ref": "#/components/schemas/WeatherBatchNoDataItem"
-                },
-                {
-                  "$ref": "#/components/schemas/WeatherBatchRetiredItem"
-                }
-              ]
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "known_at": {
-            "format": "date-time",
-            "title": "Known At",
+          "card_key": {
+            "title": "Card Key",
             "type": "string"
           },
-          "target_at": {
-            "format": "date-time",
-            "title": "Target At",
-            "type": "string"
-          },
-          "timeline_until": {
-            "format": "date-time",
-            "title": "Timeline Until",
-            "type": "string"
-          }
-        },
-        "required": [
-          "target_at",
-          "known_at",
-          "timeline_until",
-          "items"
-        ],
-        "title": "WeatherBatchData",
-        "type": "object"
-      },
-      "WeatherBatchFoundItem": {
-        "additionalProperties": false,
-        "description": "공개 parent에 weather가 있는 snapshot item.",
-        "properties": {
           "current": {
             "items": {
               "$ref": "#/components/schemas/WeatherMetricOut"
             },
             "title": "Current",
             "type": "array"
-          },
-          "feature_id": {
-            "title": "Feature Id",
-            "type": "string"
           },
           "is_stale": {
             "title": "Is Stale",
@@ -25147,11 +25093,6 @@
             "title": "Source Styles",
             "type": "array"
           },
-          "state": {
-            "const": "found",
-            "title": "State",
-            "type": "string"
-          },
           "timeline": {
             "items": {
               "$ref": "#/components/schemas/WeatherMetricOut"
@@ -25161,12 +25102,61 @@
           }
         },
         "required": [
-          "state",
-          "feature_id",
+          "card_key",
           "source_styles",
           "current",
           "timeline",
           "is_stale"
+        ],
+        "title": "WeatherBatchCardOut",
+        "type": "object"
+      },
+      "WeatherBatchData": {
+        "additionalProperties": false,
+        "description": "한 DB snapshot에서 계산한 다중 target weather batch data.",
+        "properties": {
+          "known_at": {
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherBatchTargetData"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "known_at",
+          "targets"
+        ],
+        "title": "WeatherBatchData",
+        "type": "object"
+      },
+      "WeatherBatchFoundItem": {
+        "additionalProperties": false,
+        "description": "공개 parent와 target의 공유 weather card 참조.",
+        "properties": {
+          "card_key": {
+            "title": "Card Key",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "state": {
+            "const": "found",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id",
+          "card_key"
         ],
         "title": "WeatherBatchFoundItem",
         "type": "object"
@@ -25194,35 +25184,27 @@
       },
       "WeatherBatchRequest": {
         "additionalProperties": false,
-        "description": "set-based weather snapshot 요청.",
+        "description": "여러 시각을 한 snapshot statement로 읽는 sparse weather 요청.",
         "properties": {
-          "feature_ids": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 200,
-            "minItems": 1,
-            "title": "Feature Ids",
-            "type": "array",
-            "uniqueItems": true
-          },
           "known_at": {
             "description": "소비자가 허용하는 지식 cutoff(UTC offset 필수).",
             "format": "date-time",
             "title": "Known At",
             "type": "string"
           },
-          "target_at": {
-            "description": "예보·관측이 설명해야 하는 시각(UTC offset 필수).",
-            "format": "date-time",
-            "title": "Target At",
-            "type": "string"
+          "targets": {
+            "description": "target_at 오름차순 group. 전체 target×feature pair는 2000개 이하.",
+            "items": {
+              "$ref": "#/components/schemas/WeatherBatchTargetRequest"
+            },
+            "maxItems": 366,
+            "minItems": 1,
+            "title": "Targets",
+            "type": "array"
           }
         },
         "required": [
-          "feature_ids",
-          "target_at",
+          "targets",
           "known_at"
         ],
         "title": "WeatherBatchRequest",
@@ -25265,6 +25247,91 @@
           "feature_id"
         ],
         "title": "WeatherBatchRetiredItem",
+        "type": "object"
+      },
+      "WeatherBatchTargetData": {
+        "additionalProperties": false,
+        "description": "target 시각 하나의 weather snapshot.",
+        "properties": {
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherBatchCardOut"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "found": "#/components/schemas/WeatherBatchFoundItem",
+                  "no_data": "#/components/schemas/WeatherBatchNoDataItem",
+                  "retired": "#/components/schemas/WeatherBatchRetiredItem"
+                },
+                "propertyName": "state"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/WeatherBatchFoundItem"
+                },
+                {
+                  "$ref": "#/components/schemas/WeatherBatchNoDataItem"
+                },
+                {
+                  "$ref": "#/components/schemas/WeatherBatchRetiredItem"
+                }
+              ]
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "target_at": {
+            "format": "date-time",
+            "title": "Target At",
+            "type": "string"
+          },
+          "timeline_until": {
+            "format": "date-time",
+            "title": "Timeline Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_at",
+          "timeline_until",
+          "items",
+          "cards"
+        ],
+        "title": "WeatherBatchTargetData",
+        "type": "object"
+      },
+      "WeatherBatchTargetRequest": {
+        "additionalProperties": false,
+        "description": "한 시각에 실제로 필요한 Feature ID 집합.",
+        "properties": {
+          "feature_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Feature Ids",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "target_at": {
+            "description": "예보·관측이 설명해야 하는 시각(UTC offset 필수).",
+            "format": "date-time",
+            "title": "Target At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_at",
+          "feature_ids"
+        ],
+        "title": "WeatherBatchTargetRequest",
         "type": "object"
       },
       "WeatherCardData": {
@@ -35853,6 +35920,16 @@
             },
             "description": "Successful Response"
           },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row 예산 초과"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -35861,7 +35938,7 @@
                 }
               }
             },
-            "description": "서로 다른 feature ID 1~200개와 aware datetime 필요"
+            "description": "target 1~366개, target별 고유 Feature ID 1~200개, 전체 pair 2,000개 이하와 aware datetime 필요"
           },
           "503": {
             "content": {

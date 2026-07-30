@@ -137,6 +137,12 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
         lat=_BASE_LAT,
         kind="weather",
     )
+    await _ins_feature_at(
+        migrated_session,
+        "batch_weather_peer",
+        lon=_BASE_LON + 0.001,
+        lat=_BASE_LAT,
+    )
     await _ins_weather_feature(migrated_session, "batch_no_data")
     await _ins_weather_feature(migrated_session, "batch_retired")
     await migrated_session.execute(
@@ -265,6 +271,7 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
                     target_at=target_at,
                     feature_ids=(
                         "batch_weather",
+                        "batch_weather_peer",
                         "batch_no_data",
                         "batch_retired",
                     ),
@@ -286,13 +293,19 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
         target_at,
     ]
     earlier_item = snapshots[0].items[0]
+    earlier_card = snapshots[0].cards[0]
     assert earlier_item.feature_id == "batch_weather"
-    assert "RANGE_CURRENT" not in {metric.metric_key for metric in earlier_item.current}
-    assert "RANGE_CURRENT" in {metric.metric_key for metric in earlier_item.timeline}
+    assert earlier_item.card_key == earlier_card.card_key
+    assert "RANGE_CURRENT" not in {metric.metric_key for metric in earlier_card.current}
+    assert "RANGE_CURRENT" in {metric.metric_key for metric in earlier_card.timeline}
     items = snapshots[1].items
-    assert [item.state for item in items] == ["found", "no_data", "retired"]
-    current_by_key = {metric.metric_key: metric for metric in items[0].current}
-    timeline_by_key = {metric.metric_key: metric for metric in items[0].timeline}
+    assert [item.state for item in items] == ["found", "found", "no_data", "retired"]
+    assert items[0].card_key == items[1].card_key
+    assert len(snapshots[1].cards) == 1
+    card = snapshots[1].cards[0]
+    assert card.card_key == items[0].card_key
+    current_by_key = {metric.metric_key: metric for metric in card.current}
+    timeline_by_key = {metric.metric_key: metric for metric in card.timeline}
     assert current_by_key["TMP"].value_number == Decimal("20.0")
     assert current_by_key["RANGE_CURRENT"].effective_at == _T2 - timedelta(minutes=30)
     assert "RANGE_EXPIRED" not in current_by_key
@@ -300,10 +313,9 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
     assert "POP" not in timeline_by_key
     assert timeline_by_key["RANGE_TIMELINE"].effective_at == _T2 + timedelta(hours=12)
     assert timeline_by_key["RANGE_TIMELINE"].valid_until == _T2 + timedelta(hours=18)
-    assert items[0].latest_at == _T2 - timedelta(minutes=30)
-    assert items[1].current == []
-    assert items[1].timeline == []
-    assert items[2].current == []
+    assert card.latest_at == _T2 - timedelta(minutes=30)
+    assert items[2].card_key is None
+    assert items[3].card_key is None
 
 
 async def test_weather_batch_metric_budget_fails_without_partial_snapshot(

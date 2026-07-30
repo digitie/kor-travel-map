@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from kortravelmap.infra.weather_repo import (
     WEATHER_BATCH_MAX_PAIRS,
+    WeatherBatchCard,
     WeatherBatchItem,
     WeatherBatchMetricLimitExceededError,
     WeatherBatchSnapshot,
@@ -40,8 +41,9 @@ def _fake_session(client: TestClient) -> None:
 def _snapshot(
     target_at: datetime,
     *items: WeatherBatchItem,
+    cards: tuple[WeatherBatchCard, ...] = (),
 ) -> tuple[WeatherBatchSnapshot, ...]:
-    return (WeatherBatchSnapshot(target_at=target_at, items=items),)
+    return (WeatherBatchSnapshot(target_at=target_at, items=items, cards=cards),)
 
 
 @pytest.mark.unit
@@ -51,6 +53,7 @@ def test_weather_in_openapi(client: TestClient) -> None:
     assert "/v1/features/weather/batch" in spec["paths"]
     assert "FeatureWeatherResponse" in spec["components"]["schemas"]
     assert "WeatherBatchResponse" in spec["components"]["schemas"]
+    assert "WeatherBatchCardOut" in spec["components"]["schemas"]
     request_schema = spec["components"]["schemas"]["WeatherBatchRequest"]
     targets = request_schema["properties"]["targets"]
     assert targets["maxItems"] == 366
@@ -70,9 +73,8 @@ def test_weather_card_response_maps_metrics(
     from kortravelmap.api.routers import features as mod
 
     valid_at = datetime(2026, 6, 6, 3, 0, tzinfo=UTC)
-    item = WeatherBatchItem(
-        feature_id="f1",
-        state="found",
+    card = WeatherBatchCard(
+        card_key="c1",
         source_styles=["short"],
         current=[
             WeatherMetric(
@@ -95,12 +97,13 @@ def test_weather_card_response_maps_metrics(
         latest_at=valid_at,
         is_stale=False,
     )
+    item = WeatherBatchItem(feature_id="f1", state="found", card_key="c1")
 
     async def _batch(_s: Any, **kw: Any) -> tuple[WeatherBatchSnapshot, ...]:
         target = kw["targets"][0]
         assert target.feature_ids == ("f1",)
         assert target.target_at == kw["known_at"]
-        return _snapshot(target.target_at, item)
+        return _snapshot(target.target_at, item, cards=(card,))
 
     monkeypatch.setattr(mod.weather_repo, "get_weather_batch_snapshots", _batch)
     _fake_session(client)
@@ -139,11 +142,7 @@ def test_weather_card_asof_only_changes_target_time(
             WeatherBatchItem(
                 feature_id="f1",
                 state="no_data",
-                source_styles=[],
-                current=[],
-                timeline=[],
-                latest_at=None,
-                is_stale=True,
+                card_key=None,
             ),
         )
 
@@ -185,11 +184,7 @@ def test_weather_card_404_when_feature_not_public(
             WeatherBatchItem(
                 feature_id="hidden-f",
                 state="retired",
-                source_styles=[],
-                current=[],
-                timeline=[],
-                latest_at=None,
-                is_stale=True,
+                card_key=None,
             ),
         )
 
@@ -254,7 +249,7 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
                 ),
                 WeatherBatchTarget(
                     target_at=target_at,
-                    feature_ids=("found", "no-data", "retired"),
+                    feature_ids=("found", "found-peer", "no-data", "retired"),
                 ),
             ),
             "known_at": known_at,
@@ -266,13 +261,10 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
                     WeatherBatchItem(
                         feature_id="earlier-no-data",
                         state="no_data",
-                        source_styles=[],
-                        current=[],
-                        timeline=[],
-                        latest_at=None,
-                        is_stale=True,
+                        card_key=None,
                     ),
                 ),
+                cards=(),
             ),
             WeatherBatchSnapshot(
                 target_at=target_at,
@@ -280,29 +272,32 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
                     WeatherBatchItem(
                         feature_id="found",
                         state="found",
+                        card_key="c2",
+                    ),
+                    WeatherBatchItem(
+                        feature_id="found-peer",
+                        state="found",
+                        card_key="c2",
+                    ),
+                    WeatherBatchItem(
+                        feature_id="no-data",
+                        state="no_data",
+                        card_key=None,
+                    ),
+                    WeatherBatchItem(
+                        feature_id="retired",
+                        state="retired",
+                        card_key=None,
+                    ),
+                ),
+                cards=(
+                    WeatherBatchCard(
+                        card_key="c2",
                         source_styles=["observed", "short"],
                         current=[current_metric],
                         timeline=[timeline_metric],
                         latest_at=target_at,
                         is_stale=False,
-                    ),
-                    WeatherBatchItem(
-                        feature_id="no-data",
-                        state="no_data",
-                        source_styles=[],
-                        current=[],
-                        timeline=[],
-                        latest_at=None,
-                        is_stale=True,
-                    ),
-                    WeatherBatchItem(
-                        feature_id="retired",
-                        state="retired",
-                        source_styles=[],
-                        current=[],
-                        timeline=[],
-                        latest_at=None,
-                        is_stale=True,
                     ),
                 ),
             ),
@@ -321,7 +316,7 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
                     },
                     {
                         "target_at": target_at.isoformat(),
-                        "feature_ids": ["found", "no-data", "retired"],
+                        "feature_ids": ["found", "found-peer", "no-data", "retired"],
                     },
                 ],
                 "known_at": known_at.isoformat(),
@@ -342,15 +337,27 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
         assert later["timeline_until"] == "2026-07-31T00:00:00Z"
         assert [item["state"] for item in later["items"]] == [
             "found",
+            "found",
             "no_data",
             "retired",
         ]
         found = later["items"][0]
-        assert found["current"][0]["provider"] == "python-krex-api"
-        assert found["timeline"][0]["valid_at"] == "2026-07-31T00:00:00Z"
-        assert found["timeline"][0]["effective_at"] == "2026-07-31T00:00:00Z"
-        assert later["items"][1] == {"state": "no_data", "feature_id": "no-data"}
-        assert later["items"][2] == {"state": "retired", "feature_id": "retired"}
+        assert found == {"state": "found", "feature_id": "found", "card_key": "c2"}
+        assert later["items"][1] == {
+            "state": "found",
+            "feature_id": "found-peer",
+            "card_key": "c2",
+        }
+        assert len(later["cards"]) == 1
+        assert later["cards"][0]["card_key"] == "c2"
+        assert later["cards"][0]["current"][0]["provider"] == "python-krex-api"
+        assert later["cards"][0]["timeline"][0]["valid_at"] == "2026-07-31T00:00:00Z"
+        assert (
+            later["cards"][0]["timeline"][0]["effective_at"]
+            == "2026-07-31T00:00:00Z"
+        )
+        assert later["items"][2] == {"state": "no_data", "feature_id": "no-data"}
+        assert later["items"][3] == {"state": "retired", "feature_id": "retired"}
     finally:
         client.app.dependency_overrides.clear()
 

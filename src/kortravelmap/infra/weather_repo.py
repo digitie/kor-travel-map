@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 __all__ = [
     "WeatherMetric",
     "WeatherCard",
+    "WeatherBatchCard",
     "WeatherBatchItem",
     "WeatherBatchItemState",
     "WeatherBatchMetricLimitExceededError",
@@ -115,10 +116,18 @@ WeatherBatchItemState = Literal["found", "no_data", "retired"]
 
 @dataclass(frozen=True)
 class WeatherBatchItem:
-    """한 snapshot에서 판정한 공개 parent와 weather current/timeline."""
+    """한 snapshot에서 판정한 공개 parent와 공유 weather card 참조."""
 
     feature_id: str
     state: WeatherBatchItemState
+    card_key: str | None
+
+
+@dataclass(frozen=True)
+class WeatherBatchCard:
+    """같은 target/source bundle을 공유하는 정규화 weather card."""
+
+    card_key: str
     source_styles: list[str]
     current: list[WeatherMetric]
     timeline: list[WeatherMetric]
@@ -140,6 +149,7 @@ class WeatherBatchSnapshot:
 
     target_at: datetime
     items: tuple[WeatherBatchItem, ...]
+    cards: tuple[WeatherBatchCard, ...]
 
 
 class WeatherBatchMetricLimitExceededError(RuntimeError):
@@ -344,27 +354,18 @@ _BATCH_EFFECTIVE_AT: Final[str] = _weather_effective_at_sql("w")
 _BATCH_KNOWN_AT: Final[str] = _weather_known_at_sql("w")
 
 
-def _weather_batch_current_predicate(target_expression: str) -> str:
-    """고정된 내부 target 식에 대한 current weather 술어를 만든다."""
-
-    if target_expression not in {"parent.target_at", "metric.target_at"}:
-        raise ValueError("unsupported weather batch target expression")
-    return f"""
+_BATCH_CURRENT_FOR_METRIC: Final[str] = f"""
 {_BATCH_KNOWN_AT}
 AND {_BATCH_EFFECTIVE_AT} IS NOT NULL
-AND {_BATCH_EFFECTIVE_AT} <= {target_expression}
+AND {_BATCH_EFFECTIVE_AT} <= metric.target_at
 AND (
     w.valid_at IS NOT NULL
     OR w.observed_at IS NOT NULL
     OR w.valid_from IS NULL
     OR w.valid_until IS NULL
-    OR w.valid_until >= {target_expression}
+    OR w.valid_until >= metric.target_at
 )
 """
-
-
-_BATCH_CURRENT_FOR_PARENT: Final[str] = _weather_batch_current_predicate("parent.target_at")
-_BATCH_CURRENT_FOR_METRIC: Final[str] = _weather_batch_current_predicate("metric.target_at")
 
 # KMA weather source tier 술어. batch SQL이 module import 시 이 상수를 삽입하므로
 # nearest-anchor SQL 정의보다 먼저 둔다.
@@ -376,8 +377,10 @@ _OBSERVED_TEMP_PREDICATE: Final[str] = (
     "w.forecast_style = 'observed' AND w.metric_key IN ('T1H', 'TMP')"
 )
 
-# T-VN-16C: 날짜별 sparse target을 flatten한 뒤 parent 판정, tiered nearest-anchor
-# 선택, current와 24시간 forecast timeline을 한 SQL statement/snapshot에서 읽는다.
+# T-VN-16C: 날짜별 sparse target을 flatten한 뒤 parent 판정, 고유 parent별 tiered
+# nearest-anchor capability 선택, current와 24시간 forecast timeline을 한 SQL
+# statement/snapshot에서 읽는다. capability를 날짜마다 다시 고르지 않아 provenance가
+# 안정적이고, 같은 target/source bundle은 공유 card 한 번만 계산한다.
 #
 # 0060은 full correction history/current-summary 이전 단계라 ``collected_at``이
 # ``known_at`` proxy다(ADR-072). forecast는 미래 지식 누출을 막기 위해
@@ -401,23 +404,30 @@ parents AS (
     LEFT JOIN feature.public_features AS visible
       ON visible.feature_id = requested.feature_id
 ),
+unique_parents AS (
+    SELECT DISTINCT ON (feature_id)
+        feature_id,
+        visible_feature_id,
+        coord_5179
+    FROM parents
+    ORDER BY feature_id, ordinality
+),
 own_has_temperature AS (
     SELECT
-        parent.ordinality,
+        parent.feature_id,
         EXISTS (
             SELECT 1
-            FROM feature.feature_weather_values AS w
-            WHERE w.feature_id = parent.visible_feature_id
-              AND w.metric_key IN ('T1H', 'TMP')
-              AND {_BATCH_CURRENT_FOR_PARENT}
+            FROM feature.weather_metric_series AS series
+            WHERE series.feature_id = parent.visible_feature_id
+              AND series.metric_key IN ('T1H', 'TMP')
             LIMIT 1 OFFSET 0
         ) AS value
-    FROM parents AS parent
+    FROM unique_parents AS parent
 ),
 kma_anchor AS (
-    SELECT parent.ordinality, parent.target_at, anchor.feature_id
-    FROM parents AS parent
-    JOIN own_has_temperature AS own_temp USING (ordinality)
+    SELECT parent.feature_id AS parent_feature_id, anchor.feature_id
+    FROM unique_parents AS parent
+    JOIN own_has_temperature AS own_temp USING (feature_id)
     LEFT JOIN LATERAL (
         SELECT candidate.feature_id
         FROM feature.public_features AS candidate
@@ -433,10 +443,10 @@ kma_anchor AS (
               )
           AND EXISTS (
               SELECT 1
-              FROM feature.feature_weather_values AS w
-              WHERE w.feature_id = candidate.feature_id
-                AND {_KMA_FORECAST_PREDICATE}
-                AND {_BATCH_CURRENT_FOR_PARENT}
+              FROM feature.weather_metric_series AS series
+              WHERE series.feature_id = candidate.feature_id
+                AND series.provider = 'python-kma-api'
+                AND series.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')
               LIMIT 1 OFFSET 0
           )
         ORDER BY
@@ -447,9 +457,9 @@ kma_anchor AS (
     ) AS anchor ON true
 ),
 observed_anchor AS (
-    SELECT parent.ordinality, parent.target_at, anchor.feature_id
-    FROM parents AS parent
-    JOIN own_has_temperature AS own_temp USING (ordinality)
+    SELECT parent.feature_id AS parent_feature_id, anchor.feature_id
+    FROM unique_parents AS parent
+    JOIN own_has_temperature AS own_temp USING (feature_id)
     LEFT JOIN LATERAL (
         SELECT candidate.feature_id
         FROM feature.public_features AS candidate
@@ -465,10 +475,10 @@ observed_anchor AS (
               )
           AND EXISTS (
               SELECT 1
-              FROM feature.feature_weather_values AS w
-              WHERE w.feature_id = candidate.feature_id
-                AND {_OBSERVED_TEMP_PREDICATE}
-                AND {_BATCH_CURRENT_FOR_PARENT}
+              FROM feature.weather_metric_series AS series
+              WHERE series.feature_id = candidate.feature_id
+                AND series.forecast_style = 'observed'
+                AND series.metric_key IN ('T1H', 'TMP')
               LIMIT 1 OFFSET 0
           )
         ORDER BY
@@ -480,49 +490,37 @@ observed_anchor AS (
 ),
 preferred_sources AS (
     SELECT
-        ordinality,
-        target_at,
+        feature_id AS parent_feature_id,
         visible_feature_id AS source_feature_id,
         0 AS tier
-    FROM parents
+    FROM unique_parents
     WHERE visible_feature_id IS NOT NULL
     UNION ALL
-    SELECT ordinality, target_at, feature_id, 1
+    SELECT parent_feature_id, feature_id, 1
     FROM kma_anchor
     WHERE feature_id IS NOT NULL
     UNION ALL
-    SELECT ordinality, target_at, feature_id, 2
+    SELECT parent_feature_id, feature_id, 2
     FROM observed_anchor
     WHERE feature_id IS NOT NULL
 ),
-preferred_has_current AS (
+preferred_has_series AS (
     SELECT
-        parent.ordinality,
+        parent.feature_id,
         EXISTS (
             SELECT 1
             FROM preferred_sources AS source
             JOIN feature.weather_metric_series AS series
               ON series.feature_id = source.source_feature_id
-            JOIN LATERAL (
-                SELECT 1
-                FROM feature.feature_weather_values AS w
-                WHERE w.feature_id = series.feature_id
-                  AND w.provider = series.provider
-                  AND w.weather_domain = series.weather_domain
-                  AND w.forecast_style = series.forecast_style
-                  AND w.metric_key = series.metric_key
-                  AND {_BATCH_CURRENT_FOR_PARENT}
-                LIMIT 1
-            ) AS current_row ON true
-            WHERE source.ordinality = parent.ordinality
+            WHERE source.parent_feature_id = parent.feature_id
             LIMIT 1 OFFSET 0
         ) AS value
-    FROM parents AS parent
+    FROM unique_parents AS parent
 ),
 fallback_anchor AS (
-    SELECT parent.ordinality, parent.target_at, anchor.feature_id
-    FROM parents AS parent
-    JOIN preferred_has_current AS preferred USING (ordinality)
+    SELECT parent.feature_id AS parent_feature_id, anchor.feature_id
+    FROM unique_parents AS parent
+    JOIN preferred_has_series AS preferred USING (feature_id)
     LEFT JOIN LATERAL (
         SELECT candidate.feature_id
         FROM feature.public_features AS candidate
@@ -538,9 +536,8 @@ fallback_anchor AS (
               )
           AND EXISTS (
               SELECT 1
-              FROM feature.feature_weather_values AS w
-              WHERE w.feature_id = candidate.feature_id
-                AND {_BATCH_CURRENT_FOR_PARENT}
+              FROM feature.weather_metric_series AS series
+              WHERE series.feature_id = candidate.feature_id
               LIMIT 1 OFFSET 0
           )
         ORDER BY
@@ -550,13 +547,71 @@ fallback_anchor AS (
         LIMIT 1
     ) AS anchor ON true
 ),
-sources AS (
-    SELECT ordinality, target_at, source_feature_id, tier
+feature_sources AS (
+    SELECT parent_feature_id, source_feature_id, tier
     FROM preferred_sources
     UNION ALL
-    SELECT ordinality, target_at, feature_id, 3
+    SELECT parent_feature_id, feature_id, 3
     FROM fallback_anchor
     WHERE feature_id IS NOT NULL
+),
+sources AS (
+    SELECT
+        parent.ordinality,
+        parent.target_at,
+        source.source_feature_id,
+        source.tier
+    FROM parents AS parent
+    JOIN feature_sources AS source
+      ON source.parent_feature_id = parent.feature_id
+),
+metric_sources AS MATERIALIZED (
+    SELECT DISTINCT
+        source.ordinality,
+        source.target_at,
+        source.source_feature_id,
+        source.tier
+    FROM sources AS source
+    JOIN feature.weather_metric_series AS series
+      ON series.feature_id = source.source_feature_id
+),
+source_bundles AS (
+    SELECT
+        parent.ordinality,
+        parent.target_at,
+        COALESCE(
+            array_agg(source.source_feature_id ORDER BY source.tier)
+                FILTER (WHERE source.source_feature_id IS NOT NULL),
+            CAST(ARRAY[] AS text[])
+        ) AS source_feature_ids
+    FROM parents AS parent
+    LEFT JOIN metric_sources AS source USING (ordinality, target_at)
+    GROUP BY parent.ordinality, parent.target_at
+),
+cards AS (
+    SELECT
+        target_at,
+        source_feature_ids,
+        min(ordinality) AS card_ordinal
+    FROM source_bundles
+    GROUP BY target_at, source_feature_ids
+),
+parent_cards AS (
+    SELECT bundle.ordinality, card.card_ordinal
+    FROM source_bundles AS bundle
+    JOIN cards AS card
+      ON card.target_at = bundle.target_at
+     AND card.source_feature_ids = bundle.source_feature_ids
+),
+card_sources AS (
+    SELECT
+        card.card_ordinal AS ordinality,
+        card.target_at,
+        source.source_feature_id,
+        source.tier
+    FROM cards AS card
+    JOIN metric_sources AS source
+      ON source.ordinality = card.card_ordinal
 ),
 source_metric_keys AS MATERIALIZED (
     SELECT
@@ -568,7 +623,7 @@ source_metric_keys AS MATERIALIZED (
         series.weather_domain,
         series.forecast_style,
         series.metric_key
-    FROM sources AS source
+    FROM card_sources AS source
     JOIN feature.weather_metric_series AS series
       ON series.feature_id = source.source_feature_id
 ),
@@ -756,44 +811,116 @@ weather_rows AS (
 weather_row_count AS (
     SELECT count(*)::bigint AS value
     FROM weather_rows
+),
+card_states AS (
+    SELECT
+        card.card_ordinal,
+        EXISTS (
+            SELECT 1
+            FROM weather_rows AS weather
+            WHERE weather.ordinality = card.card_ordinal
+        ) AS has_weather
+    FROM cards AS card
+),
+batch_rows AS (
+    SELECT
+        'item'::text AS row_kind,
+        parent.ordinality AS item_ordinality,
+        parent.feature_id,
+        CASE
+          WHEN parent.visible_feature_id IS NOT NULL AND card_state.has_weather
+          THEN parent_card.card_ordinal
+          ELSE NULL
+        END AS card_ordinal,
+        CASE
+          WHEN parent.visible_feature_id IS NULL THEN 'retired'
+          WHEN card_state.has_weather THEN 'found'
+          ELSE 'no_data'
+        END AS state,
+        NULL::text AS section,
+        NULL::text AS forecast_style,
+        NULL::text AS metric_key,
+        NULL::text AS metric_name,
+        NULL::text AS timeline_bucket,
+        NULL::numeric AS value_number,
+        NULL::text AS value_text,
+        NULL::text AS unit,
+        NULL::text AS severity,
+        NULL::timestamptz AS issued_at,
+        NULL::timestamptz AS valid_at,
+        NULL::timestamptz AS valid_from,
+        NULL::timestamptz AS valid_until,
+        NULL::timestamptz AS observed_at,
+        NULL::text AS provider,
+        NULL::text AS weather_domain,
+        NULL::timestamptz AS effective_at
+    FROM parents AS parent
+    LEFT JOIN parent_cards AS parent_card USING (ordinality)
+    LEFT JOIN card_states AS card_state
+      ON card_state.card_ordinal = parent_card.card_ordinal
+
+    UNION ALL
+
+    SELECT
+        'metric'::text AS row_kind,
+        NULL::bigint AS item_ordinality,
+        NULL::text AS feature_id,
+        weather.ordinality AS card_ordinal,
+        NULL::text AS state,
+        weather.section,
+        weather.forecast_style,
+        weather.metric_key,
+        weather.metric_name,
+        weather.timeline_bucket,
+        weather.value_number,
+        weather.value_text,
+        weather.unit,
+        weather.severity,
+        weather.issued_at,
+        weather.valid_at,
+        weather.valid_from,
+        weather.valid_until,
+        weather.observed_at,
+        weather.provider,
+        weather.weather_domain,
+        weather.effective_at
+    FROM weather_rows AS weather
+    CROSS JOIN weather_row_count
+    WHERE weather_row_count.value <= CAST(:metric_row_limit AS bigint)
 )
 SELECT
-    parent.feature_id,
-    parent.ordinality,
-    weather_row_count.value AS metric_row_count,
-    CASE
-      WHEN parent.visible_feature_id IS NULL THEN 'retired'
-      WHEN weather.section IS NULL THEN 'no_data'
-      ELSE 'found'
-    END AS state,
-    weather.section,
-    weather.forecast_style,
-    weather.metric_key,
-    weather.metric_name,
-    weather.timeline_bucket,
-    weather.value_number,
-    weather.value_text,
-    weather.unit,
-    weather.severity,
-    weather.issued_at,
-    weather.valid_at,
-    weather.valid_from,
-    weather.valid_until,
-    weather.observed_at,
-    weather.provider,
-    weather.weather_domain,
-    weather.effective_at
-FROM parents AS parent
+    batch.row_kind,
+    batch.item_ordinality,
+    batch.feature_id,
+    batch.card_ordinal,
+    batch.state,
+    batch.section,
+    batch.forecast_style,
+    batch.metric_key,
+    batch.metric_name,
+    batch.timeline_bucket,
+    batch.value_number,
+    batch.value_text,
+    batch.unit,
+    batch.severity,
+    batch.issued_at,
+    batch.valid_at,
+    batch.valid_from,
+    batch.valid_until,
+    batch.observed_at,
+    batch.provider,
+    batch.weather_domain,
+    batch.effective_at,
+    weather_row_count.value AS metric_row_count
+FROM batch_rows AS batch
 CROSS JOIN weather_row_count
-LEFT JOIN weather_rows AS weather
-  ON weather_row_count.value <= CAST(:metric_row_limit AS bigint)
- AND weather.ordinality = parent.ordinality
 ORDER BY
-    parent.ordinality,
-    CASE weather.section WHEN 'current' THEN 0 WHEN 'timeline' THEN 1 ELSE 2 END,
-    weather.effective_at,
-    weather.forecast_style,
-    weather.metric_key
+    CASE batch.row_kind WHEN 'item' THEN 0 ELSE 1 END,
+    COALESCE(batch.item_ordinality, batch.card_ordinal),
+    CASE batch.section WHEN 'current' THEN 0 WHEN 'timeline' THEN 1 ELSE 2 END,
+    batch.effective_at,
+    batch.forecast_style,
+    batch.metric_key
 """
 
 # KMA weather는 격자(≈5km) 단위라 적재된 격자에 속한 place feature에만 붙는다.
@@ -1389,7 +1516,8 @@ async def get_weather_batch_snapshots(
     """날짜별 공개 parent와 weather를 한 SQL snapshot에서 반환한다.
 
     각 target은 그 날짜에 실제로 필요한 Feature ID만 가진 sparse group이다.
-    target 순서와 group 안의 Feature ID 순서는 응답에서도 그대로 유지한다.
+    target 순서와 group 안의 Feature ID 순서는 응답에서도 그대로 유지한다. 같은
+    target/source bundle의 item은 target-local ``card_key``로 한 card를 공유한다.
     ``known_at``은 모든 target이 공유하는 지식 cutoff다. 현 0060 schema에서는
     ``collected_at``을 known-at proxy로 사용하고 forecast ``issued_at``도 cutoff
     이하로 제한한다.
@@ -1451,65 +1579,115 @@ async def get_weather_batch_snapshots(
         )
 
     pair_count = len(feature_ids)
-    current_by_ordinal: dict[int, list[WeatherMetric]] = {
-        ordinal: [] for ordinal in range(1, pair_count + 1)
-    }
-    timeline_by_ordinal: dict[int, list[WeatherMetric]] = {
-        ordinal: [] for ordinal in range(1, pair_count + 1)
-    }
+    current_by_card: dict[int, list[WeatherMetric]] = {}
+    timeline_by_card: dict[int, list[WeatherMetric]] = {}
     state_by_ordinal: dict[int, WeatherBatchItemState] = {}
+    card_by_ordinal: dict[int, int | None] = {}
+    feature_by_ordinal: dict[int, str] = {}
     valid_states: frozenset[str] = frozenset({"found", "no_data", "retired"})
     for row in rows:
-        ordinal = int(row["ordinality"])
-        if ordinal not in current_by_ordinal:
-            raise RuntimeError(f"unexpected weather batch ordinal: {ordinal}")
-        raw_state = str(row["state"])
-        if raw_state not in valid_states:
-            raise RuntimeError(f"unexpected weather batch state: {raw_state}")
-        state_by_ordinal[ordinal] = cast(WeatherBatchItemState, raw_state)
+        row_kind = str(row["row_kind"])
+        if row_kind == "item":
+            ordinal = int(row["item_ordinality"])
+            if not 1 <= ordinal <= pair_count:
+                raise RuntimeError(f"unexpected weather batch item ordinal: {ordinal}")
+            raw_state = str(row["state"])
+            if raw_state not in valid_states:
+                raise RuntimeError(f"unexpected weather batch state: {raw_state}")
+            raw_card_ordinal = row["card_ordinal"]
+            card_ordinal = int(raw_card_ordinal) if raw_card_ordinal is not None else None
+            if raw_state == "found" and card_ordinal is None:
+                raise RuntimeError("found weather batch item has no card")
+            if raw_state != "found" and card_ordinal is not None:
+                raise RuntimeError("non-found weather batch item references a card")
+            state_by_ordinal[ordinal] = cast(WeatherBatchItemState, raw_state)
+            card_by_ordinal[ordinal] = card_ordinal
+            feature_by_ordinal[ordinal] = str(row["feature_id"])
+            continue
+        if row_kind != "metric":
+            raise RuntimeError(f"unexpected weather batch row kind: {row_kind}")
+        raw_card_ordinal = row["card_ordinal"]
+        if raw_card_ordinal is None:
+            raise RuntimeError("weather batch metric has no card ordinal")
+        card_ordinal = int(raw_card_ordinal)
+        if not 1 <= card_ordinal <= pair_count:
+            raise RuntimeError(f"unexpected weather batch card ordinal: {card_ordinal}")
         section = row["section"]
         if section is None:
-            continue
+            raise RuntimeError("weather batch metric has no section")
         metric = _weather_metric(row)
         if section == "current":
-            current_by_ordinal[ordinal].append(metric)
+            current_by_card.setdefault(card_ordinal, []).append(metric)
         elif section == "timeline":
-            timeline_by_ordinal[ordinal].append(metric)
+            timeline_by_card.setdefault(card_ordinal, []).append(metric)
         else:
             raise RuntimeError(f"unexpected weather batch section: {section}")
 
+    expected_ordinals = set(range(1, pair_count + 1))
+    if set(state_by_ordinal) != expected_ordinals:
+        raise RuntimeError("weather batch query returned incomplete item rows")
+
     flat_items: list[WeatherBatchItem] = []
-    for ordinal, (feature_id, target_at) in enumerate(
-        zip(feature_ids, target_ats, strict=True),
-        start=1,
-    ):
-        current = current_by_ordinal[ordinal]
-        timeline = timeline_by_ordinal[ordinal]
+    cards: dict[int, WeatherBatchCard] = {}
+    for ordinal, feature_id in enumerate(feature_ids, start=1):
+        if feature_by_ordinal[ordinal] != feature_id:
+            raise RuntimeError("weather batch query changed item identity or order")
+        state = state_by_ordinal[ordinal]
+        card_ordinal = card_by_ordinal[ordinal]
+        card_key = f"c{card_ordinal}" if card_ordinal is not None else None
+        flat_items.append(
+            WeatherBatchItem(
+                feature_id=feature_id,
+                state=state,
+                card_key=card_key,
+            )
+        )
+        if card_ordinal is None or card_ordinal in cards:
+            continue
+        current = current_by_card.get(card_ordinal, [])
+        timeline = timeline_by_card.get(card_ordinal, [])
+        if not current and not timeline:
+            raise RuntimeError("found weather batch card has no metrics")
         latest_candidates = [
             metric.effective_at for metric in current if metric.effective_at is not None
         ]
         latest_at = max(latest_candidates) if latest_candidates else None
-        is_stale = latest_at is None or (target_at - latest_at).total_seconds() > freshness_seconds
-        flat_items.append(
-            WeatherBatchItem(
-                feature_id=feature_id,
-                state=state_by_ordinal[ordinal],
-                source_styles=sorted({metric.forecast_style for metric in (*current, *timeline)}),
-                current=current,
-                timeline=timeline,
-                latest_at=latest_at,
-                is_stale=is_stale,
-            )
+        card_target_at = target_ats[card_ordinal - 1]
+        cards[card_ordinal] = WeatherBatchCard(
+            card_key=f"c{card_ordinal}",
+            source_styles=sorted(
+                {metric.forecast_style for metric in (*current, *timeline)}
+            ),
+            current=current,
+            timeline=timeline,
+            latest_at=latest_at,
+            is_stale=(
+                latest_at is None
+                or (card_target_at - latest_at).total_seconds() > freshness_seconds
+            ),
         )
 
+    if (set(current_by_card) | set(timeline_by_card)) != set(cards):
+        raise RuntimeError("weather batch query returned an unreferenced card")
+
+    cards_by_key = {card.card_key: card for card in cards.values()}
     snapshots: list[WeatherBatchSnapshot] = []
     offset = 0
     for target in targets:
         next_offset = offset + len(target.feature_ids)
+        target_items = flat_items[offset:next_offset]
+        target_cards: list[WeatherBatchCard] = []
+        seen_card_keys: set[str] = set()
+        for item in target_items:
+            if item.card_key is None or item.card_key in seen_card_keys:
+                continue
+            target_cards.append(cards_by_key[item.card_key])
+            seen_card_keys.add(item.card_key)
         snapshots.append(
             WeatherBatchSnapshot(
                 target_at=target.target_at,
-                items=tuple(flat_items[offset:next_offset]),
+                items=tuple(target_items),
+                cards=tuple(target_cards),
             )
         )
         offset = next_offset

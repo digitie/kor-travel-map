@@ -17,6 +17,29 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-30 (codex) — T-VN-16B landing·T-VN-16C sparse 계약 착수
+
+- PinVi PR #420은 Web e2e fixture의 새 필수 `weather_by_feature_id` 누락과 날짜 수정
+  mock의 stale `effective_date`를 실패 지점에서 고쳤다. 영향 6개 spec은 32 passed,
+  1 skipped였고 새 head 전체 e2e·API·Web·mobile·aggregate CI가 green인 상태로
+  `9eb95c6f`에 squash merge됐다.
+- 보존 `ktm-tvn45-db`는 healthy·head `0069_weather_series_catalog`로 재사용한다. merge
+  뒤 #894 이후 closed 포함 새 Claude Code PR은 없었다.
+- T-VN-16C 생산자는 날짜별 실제 Feature만 보내는 sparse
+  `targets[{target_at, feature_ids}]`를 사용한다. canonical target ordering과
+  366 target/target별 200 ID/전체 2,000 pair/20,000 metric 제한을 분리하고, metric
+  초과는 부분 응답 없이 413으로 거부한다. 여러 target의 parent·anchor·current·timeline은
+  한 SQL snapshot에서 계산한다.
+- 첫 원격 checkpoint `28ea73e5`는 API/SQL/통합 계약을 담았다. 실제 변경 코드의 targeted
+  API와 PostgreSQL 통합은 각각 15·11 passed였고 Ruff·strict mypy도 통과했다.
+- 첫 실데이터 40 target × 5 Feature probe는 동일 card를 item마다 반복해 56,625 metric
+  예산을 넘겼다. target-local `card_key`·`cards[]`로 payload를 정규화하고 source
+  capability를 `weather_metric_series`에서 고유 parent별 한 번만 고르도록 바꿨다.
+  자체 series가 없는 실제 공개 Feature 5개의 200 sparse pair는 공유 card 34개,
+  11,667 metric, batch 3.89초로 통과했다(중간 날짜별 source lookup은 35.1초).
+- admin/user OpenAPI와 두 TypeScript client 산출물을 다시 생성했고 export/type drift
+  check가 모두 통과했다. 다음 checkpoint는 전체 gate·적대 리뷰·파괴적 API Live다.
+
 ## 2026-07-30 (codex) — T-VN-16A set-based weather snapshot
 
 - service-token 전용 `POST /v1/features/weather/batch`는 중복 없는 ID 1~200개를 한

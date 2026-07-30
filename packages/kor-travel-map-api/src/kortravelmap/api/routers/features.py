@@ -1583,12 +1583,21 @@ class WeatherBatchRequest(BaseModel):
 
 
 class WeatherBatchFoundItem(BaseModel):
-    """공개 parent에 weather가 있는 snapshot item."""
+    """공개 parent와 target의 공유 weather card 참조."""
 
     model_config = ConfigDict(extra="forbid")
 
     state: Literal["found"]
     feature_id: str
+    card_key: str
+
+
+class WeatherBatchCardOut(BaseModel):
+    """한 target 안에서 같은 source bundle을 공유하는 weather card."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    card_key: str
     source_styles: list[str]
     current: list[WeatherMetricOut]
     timeline: list[WeatherMetricOut]
@@ -1628,6 +1637,7 @@ class WeatherBatchTargetData(BaseModel):
     target_at: datetime
     timeline_until: datetime
     items: list[WeatherBatchItemOut]
+    cards: list[WeatherBatchCardOut]
 
 
 class WeatherBatchData(BaseModel):
@@ -1652,20 +1662,31 @@ def _weather_batch_item_out(
     item: weather_repo.WeatherBatchItem,
 ) -> WeatherBatchItemOut:
     if item.state == "found":
+        if item.card_key is None:
+            raise RuntimeError("found weather batch item has no card key")
         return WeatherBatchFoundItem(
             state="found",
             feature_id=item.feature_id,
-            source_styles=item.source_styles,
-            current=[_weather_metric_out(metric) for metric in item.current],
-            timeline=[_weather_metric_out(metric) for metric in item.timeline],
-            latest_at=item.latest_at,
-            is_stale=item.is_stale,
+            card_key=item.card_key,
         )
     if item.state == "no_data":
         return WeatherBatchNoDataItem(state="no_data", feature_id=item.feature_id)
     if item.state == "retired":
         return WeatherBatchRetiredItem(state="retired", feature_id=item.feature_id)
     assert_never(item.state)
+
+
+def _weather_batch_card_out(
+    card: weather_repo.WeatherBatchCard,
+) -> WeatherBatchCardOut:
+    return WeatherBatchCardOut(
+        card_key=card.card_key,
+        source_styles=card.source_styles,
+        current=[_weather_metric_out(metric) for metric in card.current],
+        timeline=[_weather_metric_out(metric) for metric in card.timeline],
+        latest_at=card.latest_at,
+        is_stale=card.is_stale,
+    )
 
 
 @router.post(
@@ -1735,6 +1756,7 @@ async def get_feature_weather_batch(
                     timeline_until=snapshot.target_at
                     + timedelta(days=weather_repo.WEATHER_BATCH_TIMELINE_DAYS),
                     items=[_weather_batch_item_out(item) for item in snapshot.items],
+                    cards=[_weather_batch_card_out(card) for card in snapshot.cards],
                 )
                 for snapshot in snapshots
             ],
@@ -1775,15 +1797,27 @@ async def get_feature_weather(
     item = snapshots[0].items[0]
     if item.state == "retired":
         raise HTTPException(status_code=404, detail="공개 feature 없음")
-    metrics = [_weather_metric_out(metric) for metric in item.current]
+    card = None
+    if item.card_key is not None:
+        card = next(
+            (
+                candidate
+                for candidate in snapshots[0].cards
+                if candidate.card_key == item.card_key
+            ),
+            None,
+        )
+        if card is None:
+            raise RuntimeError("weather batch item references a missing card")
+    metrics = [] if card is None else [_weather_metric_out(metric) for metric in card.current]
     return FeatureWeatherResponse(
         data=WeatherCardData(
             feature_id=item.feature_id,
             asof=asof,
-            source_styles=sorted({metric.forecast_style for metric in item.current}),
+            source_styles=[] if card is None else card.source_styles,
             metrics=metrics,
-            latest_at=item.latest_at,
-            is_stale=item.is_stale,
+            latest_at=None if card is None else card.latest_at,
+            is_stale=True if card is None else card.is_stale,
         ),
         meta=make_meta(request, started_at=started_at),
     )
