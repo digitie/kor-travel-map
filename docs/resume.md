@@ -10,6 +10,34 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-30 (codex) — Lane B b1 T-VN-H38 failure fingerprint 완전성 완료
+
+Mocked failure reporter가 첫 attempt/error만 보던 경로를 제거했다. deterministic failure와
+expected flaky 모두에서 non-passed retry, result error, step-only error를 전수 검사하며
+passed-only expected failure·skipped·interrupted는 원인 증거 누락으로 거부한다. 정상
+Playwright timeout은 `failed|timedOut`으로 수용하되, ANSI 제거 뒤 exact timeout envelope와
+같은 timeout 값의 result leaf를 attempt/hook ancestry로 결속한다. 따라서 caught locator 뒤
+별도 hang, beforeEach 뒤 afterEach timeout, soft assertion 뒤 body hang은 통과하지 않는다.
+
+parent 오류는 result에 직접 있거나 step-only인 경우 모두 own stage를 유지한다. Playwright
+1.60은 boxed propagation과 boxed 내부에서 같은 오류를 독립 재투척한 경우의 reporter
+metadata를 구별할 수 없으므로, descendant stage 차용과 동일 text 중복 제거를 금지해
+fail-closed한다. redacted report는 retry/error index와 category/location만 쓰고 error
+text와 raw step title을 제거했다.
+
+적대 리뷰어 2명이 실제 Playwright 1.60 probe와 합성 반례로 찾은 retry·flaky·timeout·parent·
+redaction 결함을 모두 반영했다. 관련 회귀 **27 passed**, frontend 전체 **277 passed**,
+TypeScript·ESLint가 통과했다. exact production image D workers=4도 **276/276**, manifest
+일치, child exit 0·reporter gate true, owned container/network/image 0건이다. DB 작업은 없어
+보존 clone을 그대로 유지했다.
+
+workers=8에서 schedule command의 600ms 응답이 pending 단언 전에 끝난 기존 시간 의존
+테스트 1건은 `T-VN-H39`로 분리했다.
+
+**다음 한 작업**: 보안 gate 뒤 H38 PR을 열어 CI green 후 셀프 머지한다. 머지 뒤 새 Claude
+Code PR 사후 감사를 확인하고, Lane B `T-VN-H39`의 명시적 schedule response barrier로
+이동한다.
+
 ## 2026-07-30 (codex) — Lane B b1 T-VN-H37 Mocked checkpoint 결정성 완료
 
 Mocked checkpoint의 종료 판정을 reporter manifest 한 신호에 맡기지 않고 Playwright

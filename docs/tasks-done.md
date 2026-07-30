@@ -3,6 +3,37 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-30 — Lane B b1 T-VN-H38 failure fingerprint 완전성
+
+- [x] **T-VN-H38 — Mocked failure manifest retry/error fingerprint 완전성**
+
+  reporter는 deterministic failure와 expected flaky의 모든 non-passed retry, 모든
+  `TestResult.errors`, result에 없는 leaf/parent step error를 각각 검증한다. `failed`와 실제
+  Playwright test timeout인 `timedOut`만 실패 증거로 인정하고, `skipped`·`interrupted`와
+  expected failure의 passed-only 결과는 원인 증거 누락으로 fail-closed한다.
+
+  Playwright timeout은 ANSI를 제거한 exact generic envelope, 같은 timeout 값, 같은 hook의
+  strict descendant result leaf를 함께 만족할 때만 wrapper를 제외한다. path 없는 test-body
+  envelope도 같은 timeout leaf가 실제 result에 있을 때만 제외해, caught locator 뒤 별도
+  hang·beforeEach 뒤 독립 afterEach timeout·soft assertion 뒤 별도 body hang을 숨기지 않는다.
+  result에 직접 있는 parent error뿐 아니라 result에 없는 step-only parent도 자체 stage로
+  검사한다. Playwright 1.60은 boxed propagation과 boxed 내부의 독립 재투척을 reporter
+  metadata로 구별할 수 없으므로, descendant stage를 빌려주는 추론을 금지하고 fail-closed한다.
+
+retry/error 합성 회귀 **27 passed**, frontend Vitest 전체 **277 passed**, TypeScript·ESLint가
+통과했다. exact production image checkpoint D workers=4는 **276/276**, manifest 일치,
+child exit 0·reporter gate true로 끝났고 owned container/network/image는 모두 0건이다.
+report에는 retry/error index·status·category·source basename/line만 남기며 error text와
+`TestStep.title`의 실제 입력값은 기록하지 않는다.
+
+적대 리뷰어 2명은 skipped retry와 expected flaky 누락, `timedOut`/unexpected-pass false-red·
+false-green, boxed propagation/독립 재투척의 식별 불가능성, hook/body/afterEach envelope
+인과, ANSI title 비밀 노출을 실제 Playwright 1.60 probe와 합성 반례로 찾아 모두 회귀로
+고정했다.
+workers=8 exact D에서 600ms 지연보다 pending 단언이 늦게 시작한 schedule command 1건은
+제품 회귀가 아닌 별도 동기화 결함으로 분리해 `T-VN-H39`로 등록했다. DB는 사용하지 않아
+`ktm-tvn45-db`를 clone·restore·migration·downgrade 없이 보존했다.
+
 ## 2026-07-30 — Lane B b1 T-VN-H37 Mocked checkpoint 결정성
 
 - [x] **T-VN-H37 — Mocked checkpoint 종료 판정·고병렬 flaky 진단**

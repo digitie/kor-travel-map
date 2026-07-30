@@ -17,6 +17,27 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-30 (codex) — T-VN-H38 failure fingerprint 전수 검증
+
+- expected deterministic failure와 flaky의 모든 non-passed retry 및 result/step error를
+  개별 cause/stage/status로 검증한다. passed-only, skipped, interrupted와 빈 오류 증거는
+  fail-closed한다.
+- 실제 Playwright 1.60의 `timedOut`은 generic envelope와 locator error를 함께 만든다. ANSI
+  제어문자를 제거한 exact envelope, 같은 timeout 값, hook strict descendant result leaf를
+  모두 만족할 때만 wrapper를 제외한다. test-body timeout도 같은 timeout result leaf를
+  요구한다.
+- result에 직접 매칭된 parent와 result에 없는 step-only parent를 모두 own stage로 검사한다.
+  Playwright 1.60에서는 boxed propagation과 boxed 내부의 독립 재투척 metadata가 같으므로,
+  descendant stage 차용·동일 text 중복 제거를 금지해 모호한 parent를 fail-closed한다.
+- redacted mismatch에는 retry/error index와 status·category·source 위치만 남기고 error text와
+  실제 입력값이 포함될 수 있는 `TestStep.title`은 제거했다.
+- 검증: 합성 회귀 **27 passed**, frontend 전체 **277 passed**, TypeScript·ESLint green.
+  exact production image D workers=4 **276/276**, manifest 일치·child exit 0·reporter gate
+  true, owned container/network/image 0건이다. DB는 사용하지 않았다.
+- workers=8에서 기존 schedule pending test의 600ms 지연이 먼저 끝난 275/276을 재현했다.
+  단순 timeout 증가 없이 명시적 response barrier로 바꾸는 `T-VN-H39`를 다음 task로
+  등록했다.
+
 ## 2026-07-30 (codex) — T-VN-H37 Mocked checkpoint 종료·고병렬 경합 해소
 
 - reporter report schema를 3으로 올리고 `originalStatus`와 최종 `gatePassed`를 함께 쓴다.
