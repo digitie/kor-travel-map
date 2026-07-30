@@ -3,6 +3,20 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-31 — PR #732 설계 결정의 현재 정본 반영
+
+- [x] **T-VN-DOC-732 — 인증·canonical ops·C6c/C7 문서 정합성**
+
+  닫힌 미병합 PR #808의 오래된 task snapshot은 가져오지 않고, PR #732가 확인한
+  header-only public 인증, principal-only actor, canonical datasets/pipeline과
+  compatible-pair 설계를 최신 main에 선택적으로 반영했다. ADR-060·076, REST 카탈로그,
+  cross-repo 통합 지도, 성능 문서와 C7 runbook이 현재 OpenAPI 및 완료된 production
+  cutover를 같은 상태로 설명한다.
+
+  C6c/C7 관련 Map·Manager·PinVi issue를 다시 대조해 완료 이슈는 모두 closed임을
+  확인했다. 남은 Map #819는 외부 HAProxy `timeout tunnel` 운영 설정이 필요한 별도 보류
+  항목이므로 이 문서 task에서 닫지 않는다. 코드·DB·runtime 변경과 새 live 실행은 없다.
+
 ## 2026-07-30 — Lane B b1 T-VN-16C Map sparse weather 생산자
 
 - [x] **T-VN-16C Map 생산자 — sparse 다중 날짜 weather batch**

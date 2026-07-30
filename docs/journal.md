@@ -17,6 +17,21 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-31 (codex) — PR #732 설계 결정을 현재 문서 정본에 반영
+
+- PR #808은 `dd965d08` 기준에서 닫힌 미병합 draft이고 현재 main보다 크게 뒤처져 있어
+  재사용하지 않았다. 최신 main에서 독립 `T-VN-DOC-732` 문서 task와 PR #903을 만들었다.
+- ADR-060의 Map public `key` query를 `X-Kor-Travel-Map-Api-Key` header-only로
+  개정하고, geo 브라우저 query/Map backend header 계약과 구분했다.
+- REST·integration 정본은 canonical ops principal, production debug unmount,
+  5-state feature batch, 완료된 C6c manifest v4/C7 live와 후속 pair 활성화 순서를 현재
+  OpenAPI에 맞췄다. 폐기된 `integration/t-vn`은 성능 문서와 C7 runbook에서도 제거했다.
+- n150 현재 Map 4개와 PinVi API runtime이 healthy인 것을 read-only로 확인했다.
+  C6c/C7 완료 이슈는 모두 closed이며 Map #819만 외부 HAProxy 운영 설정 대기로 유지한다.
+- 문서 전용 변경이라 새 runtime 배포·파괴적 live·DB 변경은 수행하지 않았다.
+  `git diff --check`, OpenAPI `PublicApiKey` header 정본 대조,
+  `scripts/check_prod_redaction.py`와 push 전 민감값 감사를 통과했다.
+
 ## 2026-07-30 (codex) — T-VN-16B landing·T-VN-16C sparse 계약 착수
 
 - PinVi PR #420은 Web e2e fixture의 새 필수 `weather_by_feature_id` 누락과 날짜 수정

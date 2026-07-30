@@ -15,9 +15,6 @@
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
 barrier로 직렬화한다.
 
-- **문서 정합성 후속(독립 docs PR)**
-  - [ ] `T-VN-DOC-732` — PR #732의 인증·canonical ops·C6c/C7 설계 결정을 현재
-    OpenAPI와 완료된 production cutover 기준으로 ADR·REST·cross-repo 정본에 반영
 - **Lane A — cross-repo 계약·운영·데이터 품질**
   - a0: [x] `T-VN-H07B`(PinVi #403 재감사·landing) →
     [x] `T-VN-H07D`(#815 admin snapshot/freshness) →
