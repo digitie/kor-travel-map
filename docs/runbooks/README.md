@@ -22,6 +22,7 @@ Codex / Google Antigravity 가 **같은 파일을 공유**한다 — 내용은 �
 | [admin-ui-screen-checklist.md](./admin-ui-screen-checklist.md) | admin UI 16 route 화면별 점검(필터/cursor/빈·에러/kill-switch/a11y/e2e 매트릭스) + 신규 폼 추가 절차 (T-218f) |
 | [cross-repo-audit-checklist.md](./cross-repo-audit-checklist.md) | 분기 1회 4-repo 계약/문서 drift 점검(origin/main 실측·계약 대조·전제 신선도·결정 전파) (T-217d) — 연동 지도는 [`../integration-map.md`](../integration-map.md) |
 | [coord-5179-proj-pin.md](./coord-5179-proj-pin.md) | `feature.features.coord_5179`(STORED generated) PROJ 버전 고정·drift 검사·재계산·GiST REINDEX (T-VN-H04) |
+| [h35-prod-migration-cutover.md](./h35-prod-migration-cutover.md) | prod alembic `0063`→`0068` + map 이미지 cutover의 11단계 cold-fence 절차 — rollback image 고정·build-only·writer fence·백업/복원 gate·forward-only cutover (T-VN-H35) |
 | [invalid-index-recovery.md](./invalid-index-recovery.md) | `CREATE INDEX CONCURRENTLY` 실패로 남는 INVALID index(`indisvalid=false`) 탐지·drop·재빌드 (T-VN-H05) |
 | [../backup-restore.md](../backup-restore.md) | 독립 app cold backup/restore 경계. 대상: `kor_travel_map` + `kor_travel_map_dagster` + RustFS |
 
