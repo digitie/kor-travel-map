@@ -717,11 +717,7 @@ def _public_detail(detail: dict[str, Any]) -> dict[str, Any]:
     provider raw subset(MOIS ``payload`` 등)은 공개 표면에서 제외한다. DB 컬럼과
     ETL이 쓰는 값은 그대로 두고 **읽기 projection에서만** 제거한다.
     """
-    return {
-        key: value
-        for key, value in detail.items()
-        if key not in _PUBLIC_DETAIL_STRIPPED_KEYS
-    }
+    return {key: value for key, value in detail.items() if key not in _PUBLIC_DETAIL_STRIPPED_KEYS}
 
 
 def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
@@ -1483,9 +1479,7 @@ def _weather_metric_out(metric: weather_repo.WeatherMetric) -> WeatherMetricOut:
         metric_key=metric.metric_key,
         metric_name=metric.metric_name,
         timeline_bucket=metric.timeline_bucket,
-        value_number=(
-            float(metric.value_number) if metric.value_number is not None else None
-        ),
+        value_number=(float(metric.value_number) if metric.value_number is not None else None),
         value_text=metric.value_text,
         unit=metric.unit,
         severity=metric.severity,
@@ -1538,27 +1532,53 @@ _WeatherTargetAt = Annotated[
 ]
 
 
-class WeatherBatchRequest(BaseModel):
-    """set-based weather snapshot 요청."""
+class WeatherBatchTargetRequest(BaseModel):
+    """한 시각에 실제로 필요한 Feature ID 집합."""
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_ids: list[Annotated[str, Field(min_length=1)]] = Field(
-        min_length=1,
-        max_length=200,
-        json_schema_extra={"uniqueItems": True},
-    )
     target_at: _WeatherTargetAt = Field(
         description="예보·관측이 설명해야 하는 시각(UTC offset 필수)."
     )
-    known_at: AwareDatetime = Field(
-        description="소비자가 허용하는 지식 cutoff(UTC offset 필수)."
+    feature_ids: list[Annotated[str, Field(min_length=1)]] = Field(
+        min_length=1,
+        max_length=weather_repo.WEATHER_BATCH_MAX_FEATURE_IDS_PER_TARGET,
+        json_schema_extra={"uniqueItems": True},
     )
 
     @model_validator(mode="after")
-    def feature_ids_must_be_unique(self) -> WeatherBatchRequest:
+    def feature_ids_must_be_unique(self) -> WeatherBatchTargetRequest:
         if len(self.feature_ids) != len(set(self.feature_ids)):
-            raise ValueError("feature_ids는 중복될 수 없습니다.")
+            raise ValueError("target의 feature_ids는 중복될 수 없습니다.")
+        return self
+
+
+class WeatherBatchRequest(BaseModel):
+    """여러 시각을 한 snapshot statement로 읽는 sparse weather 요청."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    targets: list[WeatherBatchTargetRequest] = Field(
+        min_length=1,
+        max_length=weather_repo.WEATHER_BATCH_MAX_TARGETS,
+        description=(
+            "target_at 오름차순 group. 전체 target×feature pair는 "
+            f"{weather_repo.WEATHER_BATCH_MAX_PAIRS}개 이하."
+        ),
+    )
+    known_at: AwareDatetime = Field(description="소비자가 허용하는 지식 cutoff(UTC offset 필수).")
+
+    @model_validator(mode="after")
+    def targets_must_be_canonical_and_bounded(self) -> WeatherBatchRequest:
+        target_ats = [target.target_at for target in self.targets]
+        if any(right <= left for left, right in zip(target_ats, target_ats[1:], strict=False)):
+            raise ValueError("targets는 중복 없이 target_at 오름차순이어야 합니다.")
+        pair_count = sum(len(target.feature_ids) for target in self.targets)
+        if pair_count > weather_repo.WEATHER_BATCH_MAX_PAIRS:
+            raise ValueError(
+                "targets의 전체 target_at×feature_id pair 수가 "
+                f"{weather_repo.WEATHER_BATCH_MAX_PAIRS}개를 넘을 수 없습니다."
+            )
         return self
 
 
@@ -1600,15 +1620,23 @@ WeatherBatchItemOut = Annotated[
 ]
 
 
-class WeatherBatchData(BaseModel):
-    """한 DB snapshot에서 계산한 weather batch data."""
+class WeatherBatchTargetData(BaseModel):
+    """target 시각 하나의 weather snapshot."""
 
     model_config = ConfigDict(extra="forbid")
 
     target_at: datetime
-    known_at: datetime
     timeline_until: datetime
     items: list[WeatherBatchItemOut]
+
+
+class WeatherBatchData(BaseModel):
+    """한 DB snapshot에서 계산한 다중 target weather batch data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    known_at: datetime
+    targets: list[WeatherBatchTargetData]
 
 
 class WeatherBatchResponse(BaseModel):
@@ -1646,7 +1674,16 @@ def _weather_batch_item_out(
     summary="feature weather bitemporal batch 조회 (service read)",
     dependencies=[Depends(require_service_token)],
     responses={
-        422: {"description": "서로 다른 feature ID 1~200개와 aware datetime 필요"},
+        413: {
+            "model": ProblemDetail,
+            "description": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row 예산 초과",
+        },
+        422: {
+            "description": (
+                "target 1~366개, target별 고유 Feature ID 1~200개, "
+                "전체 pair 2,000개 이하와 aware datetime 필요"
+            )
+        },
         503: {
             "model": ProblemDetail,
             "description": "WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패",
@@ -1660,12 +1697,26 @@ async def get_feature_weather_batch(
 ) -> WeatherBatchResponse:
     started_at = perf_counter()
     try:
-        items = await weather_repo.get_weather_batch_items(
+        snapshots = await weather_repo.get_weather_batch_snapshots(
             session,
-            feature_ids=body.feature_ids,
-            target_at=body.target_at,
+            targets=tuple(
+                weather_repo.WeatherBatchTarget(
+                    target_at=target.target_at,
+                    feature_ids=tuple(target.feature_ids),
+                )
+                for target in body.targets
+            ),
             known_at=body.known_at,
         )
+    except weather_repo.WeatherBatchMetricLimitExceededError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
+                "message": "weather batch 결과가 metric row 예산을 초과했습니다.",
+                "details": {"actual": exc.actual, "limit": exc.limit},
+            },
+        ) from exc
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1677,11 +1728,16 @@ async def get_feature_weather_batch(
         ) from exc
     return WeatherBatchResponse(
         data=WeatherBatchData(
-            target_at=body.target_at,
             known_at=body.known_at,
-            timeline_until=body.target_at
-            + timedelta(days=weather_repo.WEATHER_BATCH_TIMELINE_DAYS),
-            items=[_weather_batch_item_out(item) for item in items],
+            targets=[
+                WeatherBatchTargetData(
+                    target_at=snapshot.target_at,
+                    timeline_until=snapshot.target_at
+                    + timedelta(days=weather_repo.WEATHER_BATCH_TIMELINE_DAYS),
+                    items=[_weather_batch_item_out(item) for item in snapshot.items],
+                )
+                for snapshot in snapshots
+            ],
         ),
         meta=make_meta(request, started_at=started_at),
     )
@@ -1706,14 +1762,17 @@ async def get_feature_weather(
     known_at = datetime.now(UTC)
     target_at = asof or known_at
     # 단건도 batch의 parent/no-data 판정과 bitemporal cutoff를 그대로 재사용한다.
-    item = (
-        await weather_repo.get_weather_batch_items(
-            session,
-            feature_ids=(feature_id,),
-            target_at=target_at,
-            known_at=known_at,
-        )
-    )[0]
+    snapshots = await weather_repo.get_weather_batch_snapshots(
+        session,
+        targets=(
+            weather_repo.WeatherBatchTarget(
+                target_at=target_at,
+                feature_ids=(feature_id,),
+            ),
+        ),
+        known_at=known_at,
+    )
+    item = snapshots[0].items[0]
     if item.state == "retired":
         raise HTTPException(status_code=404, detail="공개 feature 없음")
     metrics = [_weather_metric_out(metric) for metric in item.current]
@@ -1797,8 +1856,8 @@ async def get_feature_price(
     await _public_feature_row_or_404(session, feature_id)
     card = await price_repo.build_price_card(
         session,
-            feature_id=feature_id,
-            asof=asof,
+        feature_id=feature_id,
+        asof=asof,
         history_limit=history_limit,
     )
     return FeaturePriceResponse(
