@@ -32,9 +32,10 @@ external DB 복원 검증, cold writer fence, 네 candidate service의 identity�
 못하도록 준비를 build-only로 제한하고, H36 image 검사는 network·DB credential 없는
 entrypoint override/offline layer로 수행한 뒤 prod head가 여전히 0063인지 다시 확인한다.
 Dagster daemon은 rollback 가능한 구간과 H30B baseline 서명까지 정지하고 app DB write
-schedule/sensor도 pause한다. baseline 뒤 forward-only cutover를 먼저 확정한 다음 daemon을
-writer pause 상태로 기동한다. write-capable ingress도 maintenance로 남겨, 실적재 검증과
-원래 enablement·ingress 복원을 H30B가 인수한다.
+schedule/sensor도 pause한다. post-migration app·Dagster DB bundle을 같은 scratch pair에
+복원해 candidate daemon을 실제 선검증한 뒤에만 forward-only cutover를 확정한다. H35가
+prod daemon enablement와 ingress를 정상화하고, H30B는 signed bundle/clean scratch만
+인수해 격리 DB에서 실적재를 검증한다.
 
 Python 회귀 **38 passed**, Ruff·mypy 173 files·ESLint·OpenAPI/type drift, Vitest **254**는
 green이다. Mocked D workers=4 두 번은 모두 **276/276**와 manifest expected/actual

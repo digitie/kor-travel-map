@@ -206,10 +206,10 @@ barrier로 직렬화한다.
   - 같은 run의 finding `observed/unique/upserted`, linked/unlinked 수를 함께 기록한다.
   - 인증된 `GET /v1/admin/issues?issue_type=…` 실호출로 최신 `last_seen_at`·최신 FK target을
     확인한다.
-  - H35에서 인계한 app DB write schedule/sensor의 pause 상태를 유지한 채 실적재·검증하고,
-    성공 뒤 원래 enablement를 복원한다. pause 전후 schedule/sensor 상태와 pending/running
-    run 0건을 같은 증거에 기록하고, 마지막에 API·Dagster/UI ingress maintenance를
-    해제한다.
+  - H35가 서명한 post-migration app·Dagster DB bundle을 격리 scratch DB pair에 복원해
+    검증한다. H35 daemon preflight 뒤에도 두 DB의 서명 identity가 그대로면 같은 scratch
+    pair를 재사용하고, 다르면 새 clone을 만들지 말고 그 pair를 같은 bundle로 reset한다.
+    prod DB·schedule/sensor·ingress는 이 task에서 변경하지 않는다.
 
 - [ ] T-VN-H30C — **타 provider `AdminEvidence` 무장 (미완 — 재작업 필요)**
 
@@ -505,13 +505,23 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
        (둘 다 지금은 **없음**이 확인돼 있어 before/after가 갈린다)
      - curation import **preview**가 오링크 3건을 여전히 미연결로 두는지
        (H36 게이트 실효 확인. 실패했다면 `resolved_feature_id`가 채워져 값이 달라진다)
-  8. **비-writer candidate recreate·health** — schema가 최종 shape일 때 UI와 Dagster
-     web만 각 service에 고정한 immutable candidate image ID로 recreate한다. API·UI·Dagster
-     web의 실제 container image ID·OCI revision과 login POST·API·Dagster web health를
-     candidate manifest에 대조한다. Dagster daemon은 계속 정지하고, 실행 없이 resolved
-     service config의 image ID·OCI revision만 candidate manifest에 대조한다. old container를
-     단순 start하거나 UI만 이전 image로 남긴 상태에서는 다음 단계로 가지 않는다.
-  9. **cutover 전 실패 복구 분기** — forward 재개가 불가능해 verified dump를 복원할 때는
+  8. **post-migration 격리 bundle·daemon preflight** — candidate API를 다시 정지해
+     prod app·Dagster DB writer 0건을 재확인한 뒤, 0068 상태의 app·Dagster DB를 H30B용
+     immutable custom dump bundle로 만든다. SHA-256·`pg_restore --list`와
+     pre-materialize Feature **1,020**, source/export **1,477**, head·schema/content identity를
+     기록하고 step 5에서 쓴 같은 scratch DB pair를 reset·복원해 대조한다. candidate
+     Dagster daemon을 prod credential·network 없이 이 scratch pair에만 연결하고 모든
+     app DB write schedule/sensor pause·pending/running run 0 상태에서 실제 기동해 image
+     ID·OCI revision·heartbeat/health를 검증한 뒤 정지한다. preflight가 scratch metadata를
+     바꿨다면 같은 pair를 signed bundle로 다시 reset해 H30B 인수 identity를 복구한다.
+     별도 clone은 만들지 않는다.
+  9. **prod 비-daemon candidate recreate·health** — API·UI·Dagster web을 각 service에
+     고정한 immutable candidate image ID로 recreate한다. 세 service의 실제 container
+     image ID·OCI revision과 login POST·API·Dagster web health를 candidate manifest에
+     대조한다. prod Dagster daemon과 app DB write schedule/sensor는 계속 정지·pause한다.
+     old container를 단순 start하거나 UI만 이전 image로 남긴 상태에서는 다음 단계로 가지
+     않는다.
+  10. **cutover 전 실패 복구 분기** — forward 재개가 불가능해 verified dump를 복원할 때는
      fence를 유지한 채 candidate를 모두 내린다. DB를 0063 dump로 복원하고 step 1의 exact
      rollback service image ID·manifest/compose checksum으로 API·UI·Dagster web을
      recreate한다. 이전 set의 `alembic_version=0063`, 세 실행 service identity와
@@ -519,18 +529,15 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
      시작하고 step 4에 기록한 schedule/sensor enablement를 복원한다. daemon identity·health가
      green인 뒤에만 fence를 해제한다. 새 candidate entrypoint를 복원 DB에 다시 실행하는
      절차는 rollback이 아니다.
-  10. **baseline 서명 → forward-only cutover → daemon 기동** — H35에서는 concierge
-      materialize를 실행하지 않는다. app DB write schedule/sensor가 pause이고
-      pending/running run이 0인 상태에서 같은 prod snapshot의 pre-materialize Feature 수
-      **1,020**, source/export **1,477**, head·schema/content identity를 H30B 인수로 먼저
-      기록한다. 구조·세 실행 service health·daemon offline identity가 모두 green이면
-      forward-only cutover를 확정해 이 시점부터 옛 dump 복원을 금지하고 실패를 forward
-      수정으로만 처리한다. 그 뒤 candidate daemon을 시작하되 app DB writer는 pause 상태로
-      유지하고 실제 daemon image ID·OCI revision과 health를 확인한다. H30B baseline이
-      외부 요청으로 drift하지 않도록 API·Dagster/UI의 write-capable ingress도 maintenance
-      상태로 남겨 pause·ingress 소유권을 H30B에 넘긴다. 실제 1,020→1,477 회복,
-      authenticated `/admin/issues` 검증, 원래 schedule/sensor enablement와 ingress 복원은
-      다음 단일 소유 task `T-VN-H30B`가 수행한다.
+  11. **forward-only cutover·prod 정상화·H30B handoff** — 구조·세 prod service health와
+      step 8의 isolated daemon runnable gate가 모두 green이면 forward-only cutover를
+      확정한다. 이 시점부터 옛 dump 복원을 금지하고 실패를 forward 수정으로만 처리한다.
+      prod candidate daemon을 writer pause 상태로 시작해 실제 image ID·OCI revision·health를
+      확인한 뒤 step 4에 기록한 schedule/sensor enablement와 API·Dagster/UI ingress를
+      복원한다. H35에서는 concierge materialize를 실행하지 않는다. prod를 정상 상태로
+      돌려놓고 step 8의 signed post-migration bundle과 clean scratch identity만 H30B에
+      넘긴다. 실제 1,020→1,477 회복과 authenticated `/admin/issues` 검증은 격리 DB만
+      사용하는 다음 단일 소유 task `T-VN-H30B`가 수행한다.
 
   > **⚠ 비가역 지점** — 사람 승인이 필요하다.
   > - `0065`의 `collection_key` 52행 재작성과 `source_updated_at` 3,530행 UPDATE,
