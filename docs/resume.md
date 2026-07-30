@@ -10,6 +10,22 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-31 (codex) — T-VN-DOC-732 문서 정합성 완료
+
+PR #732의 설계 결정을 최신 main에 다시 대조했다. Map public 인증은 URL `key` query가
+아닌 `X-Kor-Travel-Map-Api-Key` header-only이고, PinVi ops는 canonical
+datasets/pipeline과 제한된 `ops:read`/`ops:cancel` principal로 production 활성화됐다.
+C6c manifest v4와 C7 destructive live는 2026-07-26~27 완료 상태이며 후속 pair도
+capture → attestation → live 순서로만 활성화한다.
+
+닫힌 미병합 PR #808의 오래된 task snapshot은 폐기하고 최신 main 기반 PR #903에서
+ADR·REST·integration·performance·C7 runbook만 선택적으로 정렬했다. n150 runtime healthy,
+C6c/C7 관련 완료 이슈 closed, 외부 HAProxy 설정이 필요한 Map #819만 보류임을 확인했다.
+문서 전용이므로 새 배포·DB 변경·파괴적 live는 실행하지 않았다.
+
+**다음 한 작업**: 기존 lane 순서를 유지한다. Lane B는 `T-VN-16C` PinVi consumer,
+Lane A는 `T-VN-H35` production migration/image 배포부터 이어간다.
+
 ## 2026-07-30 (codex) — T-VN-16B landing 완료·T-VN-16C 생산자 진행
 
 PinVi PR #420이 전체 CI green 뒤 `9eb95c6f`로 squash merge됐다. 날짜별 Map batch

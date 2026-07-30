@@ -54,9 +54,9 @@ exact 비교하고, 네 image의 `org.opencontainers.image.revision`이 모두
 
 ## 후속
 
-- docker-manager PR #61과 Map issue #777 구현 PR을 먼저 병합하되 중간 commit을
-  production에 활성화하지 않는다. latest main을 `integration/t-vn`에 병합하고
-  잔여 T-VN blocker를 닫은 후 integration을 main에 병합한 최종 commit으로
-  C6c capture를 한 번만 재시도한다.
-- n150에서 root-owned v4 manifest snapshot, Map 네 runtime image ID·OCI revision,
-  C7 destructive live E2E를 같은 증거 단위로 검증한다.
+- **완료(2026-07-26~27)**: docker-manager PR #61과 Map issue #777 구현을 병합하고,
+  producer/consumer blocker가 모두 합류한 main exact commit으로 v4 capture와 n150 C7
+  destructive live E2E를 통과했다.
+- 후속 pair도 root-owned v4 manifest snapshot, Map 네 runtime image ID·OCI revision,
+  C7 destructive live E2E를 같은 증거 단위로 검증한다. 중간 commit은 production에
+  활성화하지 않는다.
