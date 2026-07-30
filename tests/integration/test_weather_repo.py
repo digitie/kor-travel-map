@@ -392,7 +392,38 @@ async def test_weather_batch_payload_budget_fails_without_partial_snapshot(
                 issued_at=_T1,
                 valid_at=_T2,
                 collected_at=_T1,
-                value_text="x" * 512,
+                value_text="ok",
+            )
+        ],
+    )
+    await migrated_session.flush()
+
+    short_snapshot = await weather_repo.get_weather_batch_snapshots(
+        migrated_session,
+        targets=(
+            weather_repo.WeatherBatchTarget(
+                target_at=_T2,
+                feature_ids=("batch_payload_budget",),
+            ),
+        ),
+        known_at=_T2,
+        response_byte_limit=6000,
+    )
+    assert short_snapshot[0].items[0].state == "found"
+
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _wv(
+                "LONG_TEXT",
+                feature_id="batch_payload_budget",
+                weather_domain="kma_weather_alert",
+                forecast_style="advisory",
+                timeline_bucket=None,
+                issued_at=_T1,
+                valid_at=_T2,
+                collected_at=_T1 + timedelta(seconds=1),
+                value_text="x" * 5000,
             )
         ],
     )
@@ -400,7 +431,7 @@ async def test_weather_batch_payload_budget_fails_without_partial_snapshot(
 
     with pytest.raises(
         weather_repo.WeatherBatchPayloadLimitExceededError,
-        match=r"response bytes \d+ exceed limit 4096",
+        match=r"response bytes \d+ exceed limit 6000",
     ):
         await weather_repo.get_weather_batch_snapshots(
             migrated_session,
@@ -411,7 +442,7 @@ async def test_weather_batch_payload_budget_fails_without_partial_snapshot(
                 ),
             ),
             known_at=_T2,
-            response_byte_limit=4096,
+            response_byte_limit=6000,
         )
 
 
@@ -432,12 +463,13 @@ async def test_weather_batch_series_work_budget_stops_before_fact_projection(
                 "batch_series_budget",
                 metric_key,
                 issued_at=_T1,
-                valid_at=_T2,
+                valid_at=_T2 + timedelta(hours=hour),
                 collected_at=_T1,
                 value_number=Decimal("20.0"),
                 unit="deg_c",
             )
             for metric_key in ("TMP", "POP")
+            for hour in range(25)
         ],
     )
     await migrated_session.flush()
@@ -457,6 +489,34 @@ async def test_weather_batch_series_work_budget_stops_before_fact_projection(
             known_at=_T2,
             series_work_limit=1,
         )
+
+    plan = (
+        await migrated_session.execute(
+            text(
+                "EXPLAIN (ANALYZE, FORMAT JSON, COSTS OFF, TIMING OFF) "
+                + weather_repo._WEATHER_BATCH_SQL  # noqa: SLF001
+            ),
+            {
+                "feature_ids": ["batch_series_budget"],
+                "target_ats": [_T2],
+                "known_at": _T2,
+                "radius_m": 50_000.0,
+                "timeline_days": 1,
+                "metric_row_limit": weather_repo.WEATHER_BATCH_MAX_METRIC_ROWS,
+                "response_byte_limit": weather_repo.WEATHER_BATCH_MAX_RESPONSE_BYTES,
+                "series_work_limit": 1,
+            },
+        )
+    ).scalar_one()[0]["Plan"]
+    fact_rows_read = sum(
+        float(node.get("Actual Rows", 0)) * float(node.get("Actual Loops", 0))
+        for node in _walk_plan(plan)
+        if node.get("Relation Name") == "feature_weather_values"
+    )
+    assert fact_rows_read < 25, (
+        "series-work gate must stop the 50-row timeline projection; "
+        f"fact rows read={fact_rows_read:g}"
+    )
 
 
 async def test_weather_batch_future_own_series_does_not_change_past_anchor(
@@ -503,6 +563,7 @@ async def test_weather_batch_future_own_series_does_not_change_past_anchor(
                 ),
             ),
             known_at=known_at,
+            series_work_limit=1,
         )
         assert snapshots[0].items[0].state == "found"
         return snapshots[0].cards[0].current[0].value_number
@@ -1019,6 +1080,36 @@ async def test_nearest_temp_uses_coord_gist_and_no_weather_full_scan(
     await migrated_session.flush()
     await migrated_session.execute(text("ANALYZE feature.features"))
     await migrated_session.execute(text("ANALYZE feature.feature_weather_values"))
+    await migrated_session.execute(text("ANALYZE feature.weather_metric_series"))
+
+    batch_params = {
+        "feature_ids": ["explain_target"],
+        "target_ats": [datetime.now(_KST)],
+        "known_at": datetime.now(_KST),
+        "radius_m": 50_000.0,
+        "timeline_days": 1,
+        "metric_row_limit": weather_repo.WEATHER_BATCH_MAX_METRIC_ROWS,
+        "response_byte_limit": weather_repo.WEATHER_BATCH_MAX_RESPONSE_BYTES,
+        "series_work_limit": weather_repo.WEATHER_BATCH_MAX_SOURCE_SERIES_WORK,
+    }
+    default_batch_plan = (
+        await migrated_session.execute(
+            text(
+                "EXPLAIN (FORMAT JSON, COSTS OFF) " + weather_repo._WEATHER_BATCH_SQL  # noqa: SLF001
+            ),
+            batch_params,
+        )
+    ).scalar_one()[0]["Plan"]
+    catalog_seq_scans = [
+        node
+        for node in _walk_plan(default_batch_plan)
+        if node.get("Node Type") == "Seq Scan"
+        and node.get("Relation Name") == "weather_metric_series"
+    ]
+    assert not catalog_seq_scans, (
+        "weather batch must index-probe only request/spatial candidate series: "
+        f"{catalog_seq_scans}"
+    )
 
     await migrated_session.execute(text("SET LOCAL enable_seqscan = off"))
     plan = (
@@ -1049,16 +1140,7 @@ async def test_nearest_temp_uses_coord_gist_and_no_weather_full_scan(
             text(
                 "EXPLAIN (FORMAT JSON, COSTS OFF) " + weather_repo._WEATHER_BATCH_SQL  # noqa: SLF001
             ),
-            {
-                "feature_ids": ["explain_target"],
-                "target_ats": [datetime.now(_KST)],
-                "known_at": datetime.now(_KST),
-                "radius_m": 50_000.0,
-                    "timeline_days": 1,
-                    "metric_row_limit": weather_repo.WEATHER_BATCH_MAX_METRIC_ROWS,
-                    "response_byte_limit": weather_repo.WEATHER_BATCH_MAX_RESPONSE_BYTES,
-                    "series_work_limit": weather_repo.WEATHER_BATCH_MAX_SOURCE_SERIES_WORK,
-                },
+            batch_params,
         )
     ).scalar_one()[0]["Plan"]
     batch_nodes = _walk_plan(batch_plan)

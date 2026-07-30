@@ -10974,7 +10974,7 @@ export interface components {
             known_at: string;
             /**
              * Targets
-             * @description target_at 오름차순 group. 전체 target×feature pair는 2000개 이하.
+             * @description target_at 오름차순 group. 전체 target×feature pair는 2000개 이하이고, pairs + 5×전체 고유 Feature 수는 2500 이하.
              */
             targets: components["schemas"]["WeatherBatchTargetRequest"][];
         };
@@ -15990,7 +15990,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description target 1~366개, target별 고유 Feature ID 1~200개, Feature ID 256자 이하, 전체 pair 2,000개 이하와 aware datetime 필요 */
+            /** @description target 1~366개, target별 고유 Feature ID 1~200개, Feature ID 256자 이하, 전체 pair 2,000개·planning work 2,500 이하와 aware datetime 필요 */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -16379,8 +16379,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row/byte 예산 초과 */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

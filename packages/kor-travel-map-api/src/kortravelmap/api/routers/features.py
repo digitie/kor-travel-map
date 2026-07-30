@@ -1720,6 +1720,76 @@ def _weather_batch_card_out(
     )
 
 
+_WEATHER_BATCH_READ_EXCEPTIONS = (
+    weather_repo.WeatherBatchMetricLimitExceededError,
+    weather_repo.WeatherBatchWorkLimitExceededError,
+    weather_repo.WeatherBatchPayloadLimitExceededError,
+    weather_repo.WeatherBatchQueryTimeoutError,
+    SQLAlchemyError,
+)
+
+
+def _weather_batch_http_exception(
+    exc: weather_repo.WeatherBatchMetricLimitExceededError
+    | weather_repo.WeatherBatchWorkLimitExceededError
+    | weather_repo.WeatherBatchPayloadLimitExceededError
+    | weather_repo.WeatherBatchQueryTimeoutError
+    | SQLAlchemyError,
+) -> HTTPException:
+    """공용 weather repository 실패를 단건/batch의 같은 HTTP 계약으로 변환한다."""
+
+    if isinstance(exc, weather_repo.WeatherBatchMetricLimitExceededError):
+        return HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
+                "message": "weather batch 결과가 metric row 예산을 초과했습니다.",
+                "details": {"actual": exc.actual, "limit": exc.limit},
+            },
+        )
+    if isinstance(exc, weather_repo.WeatherBatchWorkLimitExceededError):
+        return HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
+                "message": "weather batch 요청이 source-series 작업량 예산을 초과했습니다.",
+                "details": {
+                    "actual_series_work": exc.actual,
+                    "limit_series_work": exc.limit,
+                },
+            },
+        )
+    if isinstance(exc, weather_repo.WeatherBatchPayloadLimitExceededError):
+        return HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
+                "message": "weather batch 결과가 payload byte 예산을 초과했습니다.",
+                "details": {
+                    "actual_bytes": exc.actual,
+                    "limit_bytes": exc.limit,
+                },
+            },
+        )
+    if isinstance(exc, weather_repo.WeatherBatchQueryTimeoutError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "WEATHER_BATCH_UNAVAILABLE",
+                "message": "weather batch query가 시간 예산을 초과했습니다.",
+                "details": {},
+            },
+        )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": "WEATHER_BATCH_UNAVAILABLE",
+            "message": "weather batch 저장소를 사용할 수 없습니다.",
+            "details": {},
+        },
+    )
+
+
 @router.post(
     "/weather/batch",
     response_model=WeatherBatchResponse,
@@ -1763,57 +1833,8 @@ async def get_feature_weather_batch(
             ),
             known_at=body.known_at,
         )
-    except weather_repo.WeatherBatchMetricLimitExceededError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={
-                "code": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
-                "message": "weather batch 결과가 metric row 예산을 초과했습니다.",
-                "details": {"actual": exc.actual, "limit": exc.limit},
-            },
-        ) from exc
-    except weather_repo.WeatherBatchWorkLimitExceededError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={
-                "code": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
-                "message": "weather batch 요청이 source-series 작업량 예산을 초과했습니다.",
-                "details": {
-                    "actual_series_work": exc.actual,
-                    "limit_series_work": exc.limit,
-                },
-            },
-        ) from exc
-    except weather_repo.WeatherBatchPayloadLimitExceededError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={
-                "code": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
-                "message": "weather batch 결과가 payload byte 예산을 초과했습니다.",
-                "details": {
-                    "actual_bytes": exc.actual,
-                    "limit_bytes": exc.limit,
-                },
-            },
-        ) from exc
-    except weather_repo.WeatherBatchQueryTimeoutError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "WEATHER_BATCH_UNAVAILABLE",
-                "message": "weather batch query가 시간 예산을 초과했습니다.",
-                "details": {},
-            },
-        ) from exc
-    except SQLAlchemyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "WEATHER_BATCH_UNAVAILABLE",
-                "message": "weather batch 저장소를 사용할 수 없습니다.",
-                "details": {},
-            },
-        ) from exc
+    except _WEATHER_BATCH_READ_EXCEPTIONS as exc:
+        raise _weather_batch_http_exception(exc) from exc
     return WeatherBatchResponse(
         data=WeatherBatchData(
             known_at=body.known_at,
@@ -1836,7 +1857,19 @@ async def get_feature_weather_batch(
     "/{feature_id}/weather",
     response_model=FeatureWeatherResponse,
     summary="feature weather card (forecast_style별 최신값 + freshness)",
-    responses={404: {"description": "공개 feature 없음"}},
+    responses={
+        404: {"description": "공개 feature 없음"},
+        413: {
+            "model": ProblemDetail,
+            "description": (
+                "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row/byte 예산 초과"
+            ),
+        },
+        503: {
+            "model": ProblemDetail,
+            "description": "WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패",
+        },
+    },
 )
 async def get_feature_weather(
     request: Request,
@@ -1851,16 +1884,19 @@ async def get_feature_weather(
     known_at = datetime.now(UTC)
     target_at = asof or known_at
     # 단건도 batch의 parent/no-data 판정과 bitemporal cutoff를 그대로 재사용한다.
-    snapshots = await weather_repo.get_weather_batch_snapshots(
-        session,
-        targets=(
-            weather_repo.WeatherBatchTarget(
-                target_at=target_at,
-                feature_ids=(feature_id,),
+    try:
+        snapshots = await weather_repo.get_weather_batch_snapshots(
+            session,
+            targets=(
+                weather_repo.WeatherBatchTarget(
+                    target_at=target_at,
+                    feature_ids=(feature_id,),
+                ),
             ),
-        ),
-        known_at=known_at,
-    )
+            known_at=known_at,
+        )
+    except _WEATHER_BATCH_READ_EXCEPTIONS as exc:
+        raise _weather_batch_http_exception(exc) from exc
     item = snapshots[0].items[0]
     if item.state == "retired":
         raise HTTPException(status_code=404, detail="공개 feature 없음")

@@ -69,6 +69,8 @@ def test_weather_in_openapi(client: TestClient) -> None:
     assert feature_ids["items"]["maxLength"] == WEATHER_BATCH_MAX_FEATURE_ID_LENGTH
     operation = spec["paths"]["/v1/features/weather/batch"]["post"]
     assert "413" in operation["responses"]
+    single_operation = spec["paths"]["/v1/features/{feature_id}/weather"]["get"]
+    assert {"413", "503"} <= single_operation["responses"].keys()
 
 
 @pytest.mark.unit
@@ -215,6 +217,83 @@ def test_weather_card_404_when_feature_not_public(
     try:
         r = client.get("/v1/features/hidden-f/weather")
         assert r.status_code == 404
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("repo_error", "expected_status", "expected_code", "expected_details"),
+    [
+        pytest.param(
+            WeatherBatchMetricLimitExceededError(actual=20_001, limit=20_000),
+            413,
+            "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
+            {"actual": 20_001, "limit": 20_000},
+            id="metric-limit",
+        ),
+        pytest.param(
+            WeatherBatchWorkLimitExceededError(actual=150_001, limit=150_000),
+            413,
+            "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
+            {
+                "actual_series_work": 150_001,
+                "limit_series_work": 150_000,
+            },
+            id="series-work-limit",
+        ),
+        pytest.param(
+            WeatherBatchPayloadLimitExceededError(
+                actual=8 * 1024 * 1024 + 1,
+                limit=8 * 1024 * 1024,
+            ),
+            413,
+            "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
+            {
+                "actual_bytes": 8 * 1024 * 1024 + 1,
+                "limit_bytes": 8 * 1024 * 1024,
+            },
+            id="payload-limit",
+        ),
+        pytest.param(
+            WeatherBatchQueryTimeoutError("weather batch query exceeded budget"),
+            503,
+            "WEATHER_BATCH_UNAVAILABLE",
+            {},
+            id="query-timeout",
+        ),
+        pytest.param(
+            OperationalError("weather batch", {}, OSError("database unavailable")),
+            503,
+            "WEATHER_BATCH_UNAVAILABLE",
+            {},
+            id="database",
+        ),
+    ],
+)
+def test_weather_card_maps_shared_repository_failures(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    repo_error: Exception,
+    expected_status: int,
+    expected_code: str,
+    expected_details: dict[str, object],
+) -> None:
+    from kortravelmap.api.routers import features as mod
+
+    async def _failed(_s: Any, **_kw: Any) -> None:
+        raise repo_error
+
+    monkeypatch.setattr(mod.weather_repo, "get_weather_batch_snapshots", _failed)
+    _fake_session(client)
+    try:
+        response = client.get("/v1/features/f1/weather")
+        assert response.status_code == expected_status
+        assert response.headers["content-type"].startswith("application/problem+json")
+        problem = response.json()
+        assert problem["code"] == expected_code
+        assert problem.get("details", {}) == expected_details
+        assert "data" not in problem
     finally:
         client.app.dependency_overrides.clear()
 

@@ -471,28 +471,12 @@ unique_parents AS (
     FROM parents
     ORDER BY feature_id, ordinality
 ),
-source_capabilities AS MATERIALIZED (
-    SELECT
-        series.feature_id,
-        bool_or(
-            series.provider = 'python-kma-api'
-            AND series.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')
-        ) AS has_kma_forecast,
-        bool_or(
-            series.forecast_style = 'observed'
-            AND series.metric_key IN ('T1H', 'TMP')
-        ) AS has_observed_temperature
-    FROM feature.weather_metric_series AS series
-    GROUP BY series.feature_id
-),
-anchor_candidates AS MATERIALIZED (
+spatial_candidates AS MATERIALIZED (
     SELECT
         parent.feature_id AS parent_feature_id,
         candidate.feature_id,
         candidate.coord_5179
-          OPERATOR(x_extension.<->) parent.coord_5179 AS distance_order,
-        capability.has_kma_forecast,
-        capability.has_observed_temperature
+          OPERATOR(x_extension.<->) parent.coord_5179 AS distance_order
     FROM unique_parents AS parent
     JOIN feature.public_features AS candidate
       ON parent.visible_feature_id IS NOT NULL
@@ -504,6 +488,67 @@ anchor_candidates AS MATERIALIZED (
            parent.coord_5179,
            CAST(:radius_m AS double precision)
          )
+),
+candidate_feature_ids AS MATERIALIZED (
+    SELECT visible_feature_id AS feature_id
+    FROM unique_parents
+    WHERE visible_feature_id IS NOT NULL
+    UNION
+    SELECT feature_id
+    FROM spatial_candidates
+),
+candidate_series AS MATERIALIZED (
+    SELECT series.*
+    FROM candidate_feature_ids AS candidate
+    JOIN LATERAL (
+        SELECT
+            catalog.feature_id,
+            catalog.provider,
+            catalog.weather_domain,
+            catalog.forecast_style,
+            catalog.metric_key
+        FROM feature.weather_metric_series AS catalog
+        WHERE catalog.feature_id = candidate.feature_id
+        OFFSET 0
+    ) AS series ON true
+),
+known_series AS MATERIALIZED (
+    SELECT series.*
+    FROM candidate_series AS series
+    JOIN LATERAL (
+        SELECT 1
+        FROM feature.feature_weather_values AS w
+        WHERE w.feature_id = series.feature_id
+          AND w.provider = series.provider
+          AND w.weather_domain = series.weather_domain
+          AND w.forecast_style = series.forecast_style
+          AND w.metric_key = series.metric_key
+          AND {_BATCH_KNOWN_AT}
+        LIMIT 1 OFFSET 0
+    ) AS known_fact ON true
+),
+source_capabilities AS MATERIALIZED (
+    SELECT
+        series.feature_id,
+        bool_or(
+            series.provider = 'python-kma-api'
+            AND series.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')
+        ) AS has_kma_forecast,
+        bool_or(
+            series.forecast_style = 'observed'
+            AND series.metric_key IN ('T1H', 'TMP')
+        ) AS has_observed_temperature
+    FROM known_series AS series
+    GROUP BY series.feature_id
+),
+anchor_candidates AS MATERIALIZED (
+    SELECT
+        candidate.parent_feature_id,
+        candidate.feature_id,
+        candidate.distance_order,
+        capability.has_kma_forecast,
+        capability.has_observed_temperature
+    FROM spatial_candidates AS candidate
     JOIN source_capabilities AS capability
       ON capability.feature_id = candidate.feature_id
 ),
@@ -512,7 +557,7 @@ own_has_temperature AS (
         parent.ordinality,
         EXISTS (
             SELECT 1 AS found
-            FROM feature.weather_metric_series AS series
+            FROM known_series AS series
             JOIN LATERAL (
                 SELECT 1
                 FROM feature.feature_weather_values AS w
@@ -542,7 +587,7 @@ kma_anchor AS (
           AND NOT own_temp.value
           AND EXISTS (
               SELECT 1 AS found
-              FROM feature.weather_metric_series AS series
+              FROM known_series AS series
               JOIN LATERAL (
                   SELECT 1
                   FROM feature.feature_weather_values AS w
@@ -575,7 +620,7 @@ observed_anchor AS (
           AND NOT own_temp.value
           AND EXISTS (
               SELECT 1 AS found
-              FROM feature.weather_metric_series AS series
+              FROM known_series AS series
               JOIN LATERAL (
                   SELECT 1
                   FROM feature.feature_weather_values AS w
@@ -619,7 +664,7 @@ preferred_has_current AS (
         EXISTS (
             SELECT 1 AS found
             FROM preferred_sources AS source
-            JOIN feature.weather_metric_series AS series
+            JOIN known_series AS series
               ON series.feature_id = source.source_feature_id
             JOIN LATERAL (
                 SELECT 1
@@ -648,7 +693,7 @@ fallback_anchor AS (
           AND NOT preferred.value
           AND EXISTS (
               SELECT 1 AS found
-              FROM feature.weather_metric_series AS series
+              FROM known_series AS series
               JOIN LATERAL (
                   SELECT 1
                   FROM feature.feature_weather_values AS w
@@ -682,7 +727,7 @@ metric_sources AS MATERIALIZED (
         source.source_feature_id,
         source.tier
     FROM sources AS source
-    JOIN feature.weather_metric_series AS series
+    JOIN known_series AS series
       ON series.feature_id = source.source_feature_id
 ),
 source_bundles AS (
@@ -734,12 +779,18 @@ source_metric_keys AS MATERIALIZED (
         series.forecast_style,
         series.metric_key
     FROM card_sources AS source
-    JOIN feature.weather_metric_series AS series
+    JOIN known_series AS series
       ON series.feature_id = source.source_feature_id
 ),
-source_metric_key_count AS (
+source_metric_key_count AS MATERIALIZED (
     SELECT count(*)::bigint AS value
     FROM source_metric_keys
+),
+gated_source_metric_keys AS MATERIALIZED (
+    SELECT metric.*
+    FROM source_metric_keys AS metric
+    CROSS JOIN source_metric_key_count
+    WHERE source_metric_key_count.value <= CAST(:series_work_limit AS bigint)
 ),
 current_source_rows AS (
     SELECT
@@ -765,8 +816,7 @@ current_source_rows AS (
         row.effective_at,
         row.collected_at,
         row.weather_value_key
-    FROM source_metric_keys AS metric
-    CROSS JOIN source_metric_key_count
+    FROM gated_source_metric_keys AS metric
     JOIN LATERAL (
         SELECT
             w.forecast_style,
@@ -800,8 +850,7 @@ current_source_rows AS (
             w.collected_at DESC,
             w.weather_value_key
         LIMIT 1
-    ) AS row
-      ON source_metric_key_count.value <= CAST(:series_work_limit AS bigint)
+    ) AS row ON true
 ),
 current_rows AS (
     SELECT DISTINCT ON (
@@ -863,15 +912,13 @@ timeline_source_rows AS (
         w.provider,
         w.weather_domain,
         {_BATCH_EFFECTIVE_AT} AS effective_at
-    FROM source_metric_keys AS metric
-    CROSS JOIN source_metric_key_count
+    FROM gated_source_metric_keys AS metric
     JOIN feature.feature_weather_values AS w
       ON w.feature_id = metric.source_feature_id
      AND w.provider = metric.provider
      AND w.weather_domain = metric.weather_domain
      AND w.forecast_style = metric.forecast_style
      AND w.metric_key = metric.metric_key
-     AND source_metric_key_count.value <= CAST(:series_work_limit AS bigint)
     WHERE {_BATCH_KNOWN_AT}
       AND {_BATCH_EFFECTIVE_AT} > metric.target_at
       AND {_BATCH_EFFECTIVE_AT}
