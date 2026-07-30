@@ -23,7 +23,8 @@ PinVi 호환 소비자는 정확히 같은 OpenAPI snapshot을 vendor하고 5상
 `1..200` chunk 경계, generation/revision fence를 가진 bounded LRU cache, Web·Map·Mobile 공용
 표시 resolver로 전환했다. 적대 리뷰에서 flat `lon/lat` snapshot 때문에 지도 마커가 사라지는
 문제, out-of-order 응답이 최신 revision/tombstone을 되돌리는 문제, 200개 초과 설정과
-PostgreSQL 범위 밖 revision, plan registry 누락을 찾아 모두 보강했다. 저장소가 서로 달라
+PostgreSQL 범위 밖 revision, 같은 revision의 비공개→공개 복구를 막는 negative fence,
+plan registry 누락을 찾아 모두 보강했다. 저장소가 서로 달라
 물리적으로 한 PR이 될 수 없으므로 생산자와 소비자 두 PR을 하나의 호환 쌍으로 묶고
 Map → PinVi 순서로 머지한다.
 

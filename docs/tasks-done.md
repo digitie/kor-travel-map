@@ -21,8 +21,9 @@
   다른 저장소라 하나의 GitHub PR 대신 생산자·소비자 호환 PR 쌍으로 검증하고 Map → PinVi
   순서로 landing한다.
 
-적대 리뷰에서 지도 좌표 shape 불일치, out-of-order cache rollback, chunk 상한·revision 범위·
-plan registry·문서 drift를 찾아 모두 수정했다. 재사용 `ktm-tvn45-db`에서 다섯 상태와 강제
+적대 리뷰에서 지도 좌표 shape 불일치, out-of-order cache rollback, 동일 revision 상태 복구를
+막는 negative fence, chunk 상한·revision 범위·plan registry·문서 drift를 찾아 모두 수정했다.
+재사용 `ktm-tvn45-db`에서 다섯 상태와 강제
 503·복구를 파괴적 Live UI로 검증했고 지도 포인트 4곳도 확인했다. fixture는 원복하고 전용
 container/listener는 제거했으며 clone은 healthy `0068_integrity_last_seen`로 보존했다.
 

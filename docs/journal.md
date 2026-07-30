@@ -32,6 +32,10 @@
 - 첫 적대 리뷰는 `FeatureTripCard.as_snapshot()`의 flat 좌표가 `tripMapPoints`의 canonical
   `coord` 계약과 달라 모든 복원 마커를 제거하는 문제, out-of-order cache rollback,
   chunk 상한·revision 범위·plan registry·문서 drift를 찾았다. 모두 회귀와 함께 수정했다.
+- 최종 재리뷰는 공개 가시성이 바뀌어도 Map base `row_revision`은 같을 수 있는데 negative
+  fence가 후속 authoritative `found`를 계속 막는 문제를 재현했다. 최신 refresh generation은
+  동일 revision과 missing 뒤 낮은 revision의 재생성을 수용하되, 늦은 이전 generation과
+  무순서 write는 계속 차단하도록 고쳤다.
 - Live 첫 재검증은 접근성 snapshot에 `1일 표시 장소 4곳`이 보이지만 문구가 두 sibling
   element라 합친 text locator가 찾지 못했다. 테스트를 실제 DOM 경계인 `1일 표시`와
   `장소 4곳`으로 나눠 실패 지점부터 재실행했고 **1 passed**다.
