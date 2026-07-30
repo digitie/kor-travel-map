@@ -43,7 +43,8 @@ barrier로 직렬화한다.
     [x] `T-VN-H37`(Mocked checkpoint 종료 판정·고병렬 flaky 진단) →
     [x] `T-VN-H38`(failure manifest retry/error fingerprint 완전성) →
     [x] `T-VN-H39`(schedule command pending barrier) →
-    [ ] `T-VN-16B`(weather batch 소비) →
+    [x] `T-VN-16B`(weather batch 소비) →
+    [ ] `T-VN-16C`(sparse 다중 날짜 weather batch) →
     [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
     [ ] `T-VN-12D`(domain idempotency) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
@@ -681,12 +682,24 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
 ### T-VN-16 — weather batch와 부모 404
 
-Map set-based 생산자는 완료됐다. 남은 PinVi 소비 전환을 별도 호환 경계로 유지한다.
+단일 날짜 생산자와 날짜별 PinVi 소비는 완료됐다. 16B 적대 리뷰에서 확인한 날짜 fan-out과
+31일 조회 상한을 sparse 다중 날짜 계약으로 제거한다.
 
-- [ ] T-VN-16B — **PinVi weather batch 소비 cutover**
+- [ ] T-VN-16C — **sparse 다중 날짜 weather batch**
 
-  PinVi의 단건 N+1을 batch 호출로 교체하고 parent 404·weather 없음·transport 실패를 각각 처리한다.
-  query count와 field-level contract를 회귀 테스트로 고정한다.
+  Map은 날짜별 실제 Feature ID만 받는 `targets[{target_at, feature_ids}]`를 한
+  PostgreSQL snapshot statement로 읽는다. target/group/pair/전체 metric row budget,
+  canonical ordering, 중복 거부와 전량 성공·실패를 계약으로 고정한다. PinVi는 한 Trip
+  view를 호출 한 번으로 소비해 31일 `not_requested` 상태와 worker/time budget fan-out을
+  제거한다. Map query plan·OpenAPI와 PinVi 장기 여행 파괴적 Live UI가 완료 조건이다.
+
+  - [x] Map 생산자: 고유 parent별 spatial 후보를 한 번 계산하고 target별 bitemporal
+    fact로 최종 source를 결정한 뒤 같은 target/source bundle을 `card_key`·`cards[]`로
+    정규화한다. 요청·계획·series·metric·payload·timeout 예산을 전량
+    성공·실패 계약으로 고정했다. 실데이터 40 target × 5 Feature는 200 pair·공유 card
+    40개·11,763 metric을 5.77초에 반환한다(본 PR landing으로 완료).
+  - [ ] PinVi 소비자: Trip view당 sparse batch 호출 한 번, 장기 여행 UI와 실패 상태를
+    새 공유 card 계약으로 전환한다(Map 생산자 merge 뒤 별도 호환 PR).
 
 ### T-VN-12 — domain-owned Idempotency-Key 전개
 

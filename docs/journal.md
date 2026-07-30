@@ -17,6 +17,54 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-30 (codex) — T-VN-16B landing·T-VN-16C sparse 계약 착수
+
+- PinVi PR #420은 Web e2e fixture의 새 필수 `weather_by_feature_id` 누락과 날짜 수정
+  mock의 stale `effective_date`를 실패 지점에서 고쳤다. 영향 6개 spec은 32 passed,
+  1 skipped였고 새 head 전체 e2e·API·Web·mobile·aggregate CI가 green인 상태로
+  `9eb95c6f`에 squash merge됐다.
+- 보존 `ktm-tvn45-db`는 healthy·head `0069_weather_series_catalog`로 재사용한다. merge
+  뒤 #894 이후 closed 포함 새 Claude Code PR은 없었다.
+- T-VN-16C 생산자는 날짜별 실제 Feature만 보내는 sparse
+  `targets[{target_at, feature_ids}]`를 사용한다. canonical target ordering과
+  366 target/target별 200 ID/전체 2,000 pair를 제한한다. ID 256자, planning work
+  `pair + 5 × 고유 Feature <= 2,500`, source-series work 150,000, metric 20,000,
+  응답 추정 8 MiB, query 20초 예산을 추가하고 결과 초과는 부분 응답 없이 413,
+  timeout은 503으로 거부한다. 여러 target의 parent·anchor·current·timeline은 한 SQL
+  snapshot에서 계산한다.
+- 첫 원격 checkpoint `28ea73e5`는 API/SQL/통합 계약을 담았다. 실제 변경 코드의 targeted
+  API와 PostgreSQL 통합은 각각 15·11 passed였고 Ruff·strict mypy도 통과했다.
+- 첫 실데이터 40 target × 5 Feature probe는 동일 card를 item마다 반복해 56,625 metric
+  예산을 넘겼다. target-local `card_key`·`cards[]`로 payload를 정규화하고 source
+  spatial 후보 집합을 고유 parent별 한 번만 계산하도록 바꿨다. 최종 source는 target별
+  bitemporal fact 적격성으로 정해 미래 series가 과거 snapshot을 바꾸지 않는다. 자체
+  series가 없는 실제 공개 Feature 5개의 200 sparse pair는 공유 card 40개,
+  11,763 metric, source-series work 716, batch 5.77초로 통과했다(중간 날짜별 source
+  lookup은 35.1초). 보수적 payload 추정은 6,030,012 bytes로 실제 data JSON
+  4,677,305 bytes보다 1,352,707 bytes 컸다.
+- admin/user OpenAPI와 두 TypeScript client 산출물을 다시 생성했고 export/type drift
+  check가 모두 통과했다. 1차 적대 리뷰가 찾은 future-catalog contamination, 단건
+  `source_styles`의 timeline 혼입, 무제한 workload/payload/timeout을 회귀 테스트와 위
+  예산으로 보완했다.
+- 최종 SQL 적대 리뷰는 source-series gate 뒤 current/timeline fact projection,
+  catalog global sequential scan 부재와 timeout cleanup을 실측했다. query budget은
+  transaction-local PostgreSQL `statement_timeout`을 설정하고 성공 시 이전 값을
+  복원한다. 50ms probe는 0.155초에 `WeatherBatchQueryTimeoutError`로 반환했으며,
+  반환 시 실행 중인 orphan query 0, caller rollback 0.001초, 같은 session 재사용과
+  pool 종료 오류 없음까지 확인해 P0/P1/P2 모두 0으로 종결했다.
+- 최종 계약 적대 리뷰는 단건 weather GET의 257자 Feature ID가 repository `ValueError`로
+  늦게 거부돼 500이 되는 P2를 찾았다. path를 1~256자로 먼저 검증해 422로 고정하고
+  admin/user OpenAPI와 두 TypeScript 산출물을 다시 생성했다. 실패 지점 재검토 뒤 두
+  리뷰어 모두 P0/P1/P2 0으로 종결했다.
+- 최종 SQL 확정 뒤 파괴적 API Live는 보존 clone `ktm-tvn45-db`의 기존
+  `0069_weather_series_catalog`를 그대로 재사용했다. sparse target 2개 `found`,
+  잘못된 service token 401, planning-work 초과 422, fixture `active→hidden` 뒤
+  `retired`를 확인했다. owned weather/price/series fixture cleanup과 audit는 모두 잔여
+  0건, API error log도 0건이었다. 첫 credential-key 탐색, `psql -c` 변수 치환,
+  재검증 heredoc의 `docker exec -i` 누락과 SIGTERM `wait` 143 처리는 seed 전 또는 trap
+  cleanup 뒤 각각 실패 지점부터 재개했다. 새 clone·checkpoint·migration rollback은
+  만들지 않았다.
+
 ## 2026-07-30 (codex) — T-VN-16A set-based weather snapshot
 
 - service-token 전용 `POST /v1/features/weather/batch`는 중복 없는 ID 1~200개를 한

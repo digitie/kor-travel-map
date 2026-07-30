@@ -26,7 +26,7 @@ from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Annotated, Any, Literal, assert_never
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
 from kortravelmap.core.exceptions import (
     FeatureSearchCursorError,
     FeatureSearchCursorInvalidError,
@@ -717,11 +717,7 @@ def _public_detail(detail: dict[str, Any]) -> dict[str, Any]:
     provider raw subset(MOIS ``payload`` 등)은 공개 표면에서 제외한다. DB 컬럼과
     ETL이 쓰는 값은 그대로 두고 **읽기 projection에서만** 제거한다.
     """
-    return {
-        key: value
-        for key, value in detail.items()
-        if key not in _PUBLIC_DETAIL_STRIPPED_KEYS
-    }
+    return {key: value for key, value in detail.items() if key not in _PUBLIC_DETAIL_STRIPPED_KEYS}
 
 
 def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
@@ -1483,9 +1479,7 @@ def _weather_metric_out(metric: weather_repo.WeatherMetric) -> WeatherMetricOut:
         metric_key=metric.metric_key,
         metric_name=metric.metric_name,
         timeline_bucket=metric.timeline_bucket,
-        value_number=(
-            float(metric.value_number) if metric.value_number is not None else None
-        ),
+        value_number=(float(metric.value_number) if metric.value_number is not None else None),
         value_text=metric.value_text,
         unit=metric.unit,
         severity=metric.severity,
@@ -1538,37 +1532,103 @@ _WeatherTargetAt = Annotated[
 ]
 
 
-class WeatherBatchRequest(BaseModel):
-    """set-based weather snapshot 요청."""
+class WeatherBatchTargetRequest(BaseModel):
+    """한 시각에 실제로 필요한 Feature ID 집합."""
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_ids: list[Annotated[str, Field(min_length=1)]] = Field(
-        min_length=1,
-        max_length=200,
-        json_schema_extra={"uniqueItems": True},
-    )
     target_at: _WeatherTargetAt = Field(
         description="예보·관측이 설명해야 하는 시각(UTC offset 필수)."
     )
-    known_at: AwareDatetime = Field(
-        description="소비자가 허용하는 지식 cutoff(UTC offset 필수)."
+    feature_ids: list[
+        Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=weather_repo.WEATHER_BATCH_MAX_FEATURE_ID_LENGTH,
+            ),
+        ]
+    ] = Field(
+        min_length=1,
+        max_length=weather_repo.WEATHER_BATCH_MAX_FEATURE_IDS_PER_TARGET,
+        json_schema_extra={"uniqueItems": True},
     )
 
     @model_validator(mode="after")
-    def feature_ids_must_be_unique(self) -> WeatherBatchRequest:
+    def feature_ids_must_be_unique(self) -> WeatherBatchTargetRequest:
         if len(self.feature_ids) != len(set(self.feature_ids)):
-            raise ValueError("feature_ids는 중복될 수 없습니다.")
+            raise ValueError("target의 feature_ids는 중복될 수 없습니다.")
+        return self
+
+
+class WeatherBatchRequest(BaseModel):
+    """여러 시각을 한 snapshot statement로 읽는 sparse weather 요청."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    targets: list[WeatherBatchTargetRequest] = Field(
+        min_length=1,
+        max_length=weather_repo.WEATHER_BATCH_MAX_TARGETS,
+        description=(
+            "target_at 오름차순 group. 전체 target×feature pair는 "
+            f"{weather_repo.WEATHER_BATCH_MAX_PAIRS}개 이하이고, "
+            "pairs + "
+            f"{weather_repo.WEATHER_BATCH_UNIQUE_FEATURE_WORK_WEIGHT}"
+            "×전체 고유 Feature 수는 "
+            f"{weather_repo.WEATHER_BATCH_MAX_PLANNING_WORK} 이하."
+        ),
+    )
+    known_at: AwareDatetime = Field(description="소비자가 허용하는 지식 cutoff(UTC offset 필수).")
+
+    @model_validator(mode="after")
+    def targets_must_be_canonical_and_bounded(self) -> WeatherBatchRequest:
+        target_ats = [target.target_at for target in self.targets]
+        if any(right <= left for left, right in zip(target_ats, target_ats[1:], strict=False)):
+            raise ValueError("targets는 중복 없이 target_at 오름차순이어야 합니다.")
+        pair_count = sum(len(target.feature_ids) for target in self.targets)
+        if pair_count > weather_repo.WEATHER_BATCH_MAX_PAIRS:
+            raise ValueError(
+                "targets의 전체 target_at×feature_id pair 수가 "
+                f"{weather_repo.WEATHER_BATCH_MAX_PAIRS}개를 넘을 수 없습니다."
+            )
+        unique_feature_count = len(
+            {
+                feature_id
+                for target in self.targets
+                for feature_id in target.feature_ids
+            }
+        )
+        planning_work = (
+            pair_count
+            + weather_repo.WEATHER_BATCH_UNIQUE_FEATURE_WORK_WEIGHT
+            * unique_feature_count
+        )
+        if planning_work > weather_repo.WEATHER_BATCH_MAX_PLANNING_WORK:
+            raise ValueError(
+                "targets의 planning work(pairs + "
+                f"{weather_repo.WEATHER_BATCH_UNIQUE_FEATURE_WORK_WEIGHT}"
+                "×전체 고유 Feature 수)가 "
+                f"{weather_repo.WEATHER_BATCH_MAX_PLANNING_WORK}를 넘을 수 없습니다."
+            )
         return self
 
 
 class WeatherBatchFoundItem(BaseModel):
-    """공개 parent에 weather가 있는 snapshot item."""
+    """공개 parent와 target의 공유 weather card 참조."""
 
     model_config = ConfigDict(extra="forbid")
 
     state: Literal["found"]
     feature_id: str
+    card_key: str
+
+
+class WeatherBatchCardOut(BaseModel):
+    """한 target 안에서 같은 source bundle을 공유하는 weather card."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    card_key: str
     source_styles: list[str]
     current: list[WeatherMetricOut]
     timeline: list[WeatherMetricOut]
@@ -1600,15 +1660,24 @@ WeatherBatchItemOut = Annotated[
 ]
 
 
-class WeatherBatchData(BaseModel):
-    """한 DB snapshot에서 계산한 weather batch data."""
+class WeatherBatchTargetData(BaseModel):
+    """target 시각 하나의 weather snapshot."""
 
     model_config = ConfigDict(extra="forbid")
 
     target_at: datetime
-    known_at: datetime
     timeline_until: datetime
     items: list[WeatherBatchItemOut]
+    cards: list[WeatherBatchCardOut]
+
+
+class WeatherBatchData(BaseModel):
+    """한 DB snapshot에서 계산한 다중 target weather batch data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    known_at: datetime
+    targets: list[WeatherBatchTargetData]
 
 
 class WeatherBatchResponse(BaseModel):
@@ -1624,14 +1693,12 @@ def _weather_batch_item_out(
     item: weather_repo.WeatherBatchItem,
 ) -> WeatherBatchItemOut:
     if item.state == "found":
+        if item.card_key is None:
+            raise RuntimeError("found weather batch item has no card key")
         return WeatherBatchFoundItem(
             state="found",
             feature_id=item.feature_id,
-            source_styles=item.source_styles,
-            current=[_weather_metric_out(metric) for metric in item.current],
-            timeline=[_weather_metric_out(metric) for metric in item.timeline],
-            latest_at=item.latest_at,
-            is_stale=item.is_stale,
+            card_key=item.card_key,
         )
     if item.state == "no_data":
         return WeatherBatchNoDataItem(state="no_data", feature_id=item.feature_id)
@@ -1640,13 +1707,109 @@ def _weather_batch_item_out(
     assert_never(item.state)
 
 
+def _weather_batch_card_out(
+    card: weather_repo.WeatherBatchCard,
+) -> WeatherBatchCardOut:
+    return WeatherBatchCardOut(
+        card_key=card.card_key,
+        source_styles=card.source_styles,
+        current=[_weather_metric_out(metric) for metric in card.current],
+        timeline=[_weather_metric_out(metric) for metric in card.timeline],
+        latest_at=card.latest_at,
+        is_stale=card.is_stale,
+    )
+
+
+_WEATHER_BATCH_READ_EXCEPTIONS = (
+    weather_repo.WeatherBatchMetricLimitExceededError,
+    weather_repo.WeatherBatchWorkLimitExceededError,
+    weather_repo.WeatherBatchPayloadLimitExceededError,
+    weather_repo.WeatherBatchQueryTimeoutError,
+    SQLAlchemyError,
+)
+
+
+def _weather_batch_http_exception(
+    exc: weather_repo.WeatherBatchMetricLimitExceededError
+    | weather_repo.WeatherBatchWorkLimitExceededError
+    | weather_repo.WeatherBatchPayloadLimitExceededError
+    | weather_repo.WeatherBatchQueryTimeoutError
+    | SQLAlchemyError,
+) -> HTTPException:
+    """공용 weather repository 실패를 단건/batch의 같은 HTTP 계약으로 변환한다."""
+
+    if isinstance(exc, weather_repo.WeatherBatchMetricLimitExceededError):
+        return HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
+                "message": "weather batch 결과가 metric row 예산을 초과했습니다.",
+                "details": {"actual": exc.actual, "limit": exc.limit},
+            },
+        )
+    if isinstance(exc, weather_repo.WeatherBatchWorkLimitExceededError):
+        return HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
+                "message": "weather batch 요청이 source-series 작업량 예산을 초과했습니다.",
+                "details": {
+                    "actual_series_work": exc.actual,
+                    "limit_series_work": exc.limit,
+                },
+            },
+        )
+    if isinstance(exc, weather_repo.WeatherBatchPayloadLimitExceededError):
+        return HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED",
+                "message": "weather batch 결과가 payload byte 예산을 초과했습니다.",
+                "details": {
+                    "actual_bytes": exc.actual,
+                    "limit_bytes": exc.limit,
+                },
+            },
+        )
+    if isinstance(exc, weather_repo.WeatherBatchQueryTimeoutError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "WEATHER_BATCH_UNAVAILABLE",
+                "message": "weather batch query가 시간 예산을 초과했습니다.",
+                "details": {},
+            },
+        )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": "WEATHER_BATCH_UNAVAILABLE",
+            "message": "weather batch 저장소를 사용할 수 없습니다.",
+            "details": {},
+        },
+    )
+
+
 @router.post(
     "/weather/batch",
     response_model=WeatherBatchResponse,
     summary="feature weather bitemporal batch 조회 (service read)",
     dependencies=[Depends(require_service_token)],
     responses={
-        422: {"description": "서로 다른 feature ID 1~200개와 aware datetime 필요"},
+        413: {
+            "model": ProblemDetail,
+            "description": (
+                "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, "
+                "metric row 또는 payload byte 예산 초과"
+            ),
+        },
+        422: {
+            "description": (
+                "target 1~366개, target별 고유 Feature ID 1~200개, "
+                "Feature ID 256자 이하, 전체 pair 2,000개·planning work 2,500 이하와 "
+                "aware datetime 필요"
+            )
+        },
         503: {
             "model": ProblemDetail,
             "description": "WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패",
@@ -1660,28 +1823,32 @@ async def get_feature_weather_batch(
 ) -> WeatherBatchResponse:
     started_at = perf_counter()
     try:
-        items = await weather_repo.get_weather_batch_items(
+        snapshots = await weather_repo.get_weather_batch_snapshots(
             session,
-            feature_ids=body.feature_ids,
-            target_at=body.target_at,
+            targets=tuple(
+                weather_repo.WeatherBatchTarget(
+                    target_at=target.target_at,
+                    feature_ids=tuple(target.feature_ids),
+                )
+                for target in body.targets
+            ),
             known_at=body.known_at,
         )
-    except SQLAlchemyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "WEATHER_BATCH_UNAVAILABLE",
-                "message": "weather batch 저장소를 사용할 수 없습니다.",
-                "details": {},
-            },
-        ) from exc
+    except _WEATHER_BATCH_READ_EXCEPTIONS as exc:
+        raise _weather_batch_http_exception(exc) from exc
     return WeatherBatchResponse(
         data=WeatherBatchData(
-            target_at=body.target_at,
             known_at=body.known_at,
-            timeline_until=body.target_at
-            + timedelta(days=weather_repo.WEATHER_BATCH_TIMELINE_DAYS),
-            items=[_weather_batch_item_out(item) for item in items],
+            targets=[
+                WeatherBatchTargetData(
+                    target_at=snapshot.target_at,
+                    timeline_until=snapshot.target_at
+                    + timedelta(days=weather_repo.WEATHER_BATCH_TIMELINE_DAYS),
+                    items=[_weather_batch_item_out(item) for item in snapshot.items],
+                    cards=[_weather_batch_card_out(card) for card in snapshot.cards],
+                )
+                for snapshot in snapshots
+            ],
         ),
         meta=make_meta(request, started_at=started_at),
     )
@@ -1691,12 +1858,31 @@ async def get_feature_weather_batch(
     "/{feature_id}/weather",
     response_model=FeatureWeatherResponse,
     summary="feature weather card (forecast_style별 최신값 + freshness)",
-    responses={404: {"description": "공개 feature 없음"}},
+    responses={
+        404: {"description": "공개 feature 없음"},
+        413: {
+            "model": ProblemDetail,
+            "description": (
+                "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, "
+                "metric row 또는 payload byte 예산 초과"
+            ),
+        },
+        503: {
+            "model": ProblemDetail,
+            "description": "WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패",
+        },
+    },
 )
 async def get_feature_weather(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-    feature_id: str,
+    feature_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=weather_repo.WEATHER_BATCH_MAX_FEATURE_ID_LENGTH,
+        ),
+    ],
     asof: Annotated[
         _WeatherTargetAt | None,
         Query(description="이 시점 이하 weather만(미래 예보 제외)."),
@@ -1706,25 +1892,47 @@ async def get_feature_weather(
     known_at = datetime.now(UTC)
     target_at = asof or known_at
     # 단건도 batch의 parent/no-data 판정과 bitemporal cutoff를 그대로 재사용한다.
-    item = (
-        await weather_repo.get_weather_batch_items(
+    try:
+        snapshots = await weather_repo.get_weather_batch_snapshots(
             session,
-            feature_ids=(feature_id,),
-            target_at=target_at,
+            targets=(
+                weather_repo.WeatherBatchTarget(
+                    target_at=target_at,
+                    feature_ids=(feature_id,),
+                ),
+            ),
             known_at=known_at,
         )
-    )[0]
+    except _WEATHER_BATCH_READ_EXCEPTIONS as exc:
+        raise _weather_batch_http_exception(exc) from exc
+    item = snapshots[0].items[0]
     if item.state == "retired":
         raise HTTPException(status_code=404, detail="공개 feature 없음")
-    metrics = [_weather_metric_out(metric) for metric in item.current]
+    card = None
+    if item.card_key is not None:
+        card = next(
+            (
+                candidate
+                for candidate in snapshots[0].cards
+                if candidate.card_key == item.card_key
+            ),
+            None,
+        )
+        if card is None:
+            raise RuntimeError("weather batch item references a missing card")
+    metrics = [] if card is None else [_weather_metric_out(metric) for metric in card.current]
     return FeatureWeatherResponse(
         data=WeatherCardData(
             feature_id=item.feature_id,
             asof=asof,
-            source_styles=sorted({metric.forecast_style for metric in item.current}),
+            source_styles=(
+                []
+                if card is None
+                else sorted({metric.forecast_style for metric in card.current})
+            ),
             metrics=metrics,
-            latest_at=item.latest_at,
-            is_stale=item.is_stale,
+            latest_at=None if card is None else card.latest_at,
+            is_stale=True if card is None else card.is_stale,
         ),
         meta=make_meta(request, started_at=started_at),
     )
@@ -1797,8 +2005,8 @@ async def get_feature_price(
     await _public_feature_row_or_404(session, feature_id)
     card = await price_repo.build_price_card(
         session,
-            feature_id=feature_id,
-            asof=asof,
+        feature_id=feature_id,
+        asof=asof,
         history_limit=history_limit,
     )
     return FeaturePriceResponse(

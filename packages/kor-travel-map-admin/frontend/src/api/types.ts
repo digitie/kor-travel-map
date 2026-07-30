@@ -10903,50 +10903,50 @@ export interface components {
             name: string;
         };
         /**
-         * WeatherBatchData
-         * @description 한 DB snapshot에서 계산한 weather batch data.
+         * WeatherBatchCardOut
+         * @description 한 target 안에서 같은 source bundle을 공유하는 weather card.
          */
-        WeatherBatchData: {
-            /** Items */
-            items: (components["schemas"]["WeatherBatchFoundItem"] | components["schemas"]["WeatherBatchNoDataItem"] | components["schemas"]["WeatherBatchRetiredItem"])[];
-            /**
-             * Known At
-             * Format: date-time
-             */
-            known_at: string;
-            /**
-             * Target At
-             * Format: date-time
-             */
-            target_at: string;
-            /**
-             * Timeline Until
-             * Format: date-time
-             */
-            timeline_until: string;
-        };
-        /**
-         * WeatherBatchFoundItem
-         * @description 공개 parent에 weather가 있는 snapshot item.
-         */
-        WeatherBatchFoundItem: {
+        WeatherBatchCardOut: {
+            /** Card Key */
+            card_key: string;
             /** Current */
             current: components["schemas"]["WeatherMetricOut"][];
-            /** Feature Id */
-            feature_id: string;
             /** Is Stale */
             is_stale: boolean;
             /** Latest At */
             latest_at?: string | null;
             /** Source Styles */
             source_styles: string[];
+            /** Timeline */
+            timeline: components["schemas"]["WeatherMetricOut"][];
+        };
+        /**
+         * WeatherBatchData
+         * @description 한 DB snapshot에서 계산한 다중 target weather batch data.
+         */
+        WeatherBatchData: {
+            /**
+             * Known At
+             * Format: date-time
+             */
+            known_at: string;
+            /** Targets */
+            targets: components["schemas"]["WeatherBatchTargetData"][];
+        };
+        /**
+         * WeatherBatchFoundItem
+         * @description 공개 parent와 target의 공유 weather card 참조.
+         */
+        WeatherBatchFoundItem: {
+            /** Card Key */
+            card_key: string;
+            /** Feature Id */
+            feature_id: string;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
             state: "found";
-            /** Timeline */
-            timeline: components["schemas"]["WeatherMetricOut"][];
         };
         /**
          * WeatherBatchNoDataItem
@@ -10963,11 +10963,9 @@ export interface components {
         };
         /**
          * WeatherBatchRequest
-         * @description set-based weather snapshot 요청.
+         * @description 여러 시각을 한 snapshot statement로 읽는 sparse weather 요청.
          */
         WeatherBatchRequest: {
-            /** Feature Ids */
-            feature_ids: string[];
             /**
              * Known At
              * Format: date-time
@@ -10975,11 +10973,10 @@ export interface components {
              */
             known_at: string;
             /**
-             * Target At
-             * Format: date-time
-             * @description 예보·관측이 설명해야 하는 시각(UTC offset 필수).
+             * Targets
+             * @description target_at 오름차순 group. 전체 target×feature pair는 2000개 이하이고, pairs + 5×전체 고유 Feature 수는 2500 이하.
              */
-            target_at: string;
+            targets: components["schemas"]["WeatherBatchTargetRequest"][];
         };
         /**
          * WeatherBatchResponse
@@ -11001,6 +10998,40 @@ export interface components {
              * @enum {string}
              */
             state: "retired";
+        };
+        /**
+         * WeatherBatchTargetData
+         * @description target 시각 하나의 weather snapshot.
+         */
+        WeatherBatchTargetData: {
+            /** Cards */
+            cards: components["schemas"]["WeatherBatchCardOut"][];
+            /** Items */
+            items: (components["schemas"]["WeatherBatchFoundItem"] | components["schemas"]["WeatherBatchNoDataItem"] | components["schemas"]["WeatherBatchRetiredItem"])[];
+            /**
+             * Target At
+             * Format: date-time
+             */
+            target_at: string;
+            /**
+             * Timeline Until
+             * Format: date-time
+             */
+            timeline_until: string;
+        };
+        /**
+         * WeatherBatchTargetRequest
+         * @description 한 시각에 실제로 필요한 Feature ID 집합.
+         */
+        WeatherBatchTargetRequest: {
+            /** Feature Ids */
+            feature_ids: string[];
+            /**
+             * Target At
+             * Format: date-time
+             * @description 예보·관측이 설명해야 하는 시각(UTC offset 필수).
+             */
+            target_at: string;
         };
         /**
          * WeatherCardData
@@ -15950,7 +15981,16 @@ export interface operations {
                     "application/json": components["schemas"]["WeatherBatchResponse"];
                 };
             };
-            /** @description 서로 다른 feature ID 1~200개와 aware datetime 필요 */
+            /** @description WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, metric row 또는 payload byte 예산 초과 */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description target 1~366개, target별 고유 Feature ID 1~200개, Feature ID 256자 이하, 전체 pair 2,000개·planning work 2,500 이하와 aware datetime 필요 */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -16339,8 +16379,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, metric row 또는 payload byte 예산 초과 */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

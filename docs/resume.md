@@ -10,6 +10,35 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-30 (codex) — T-VN-16B landing 완료·T-VN-16C 생산자 진행
+
+PinVi PR #420이 전체 CI green 뒤 `9eb95c6f`로 squash merge됐다. 날짜별 Map batch
+소비, 7-state day projection, 브라우저 단건 weather 0회와 재사용 clone 파괴적 Live
+근거를 `tasks-done.md`로 이관했다. merge 뒤 `ktm-tvn45-db`는 healthy,
+`0069_weather_series_catalog`라 다음 weather 작업에 그대로 재사용 가능하다. #894 이후
+새 Claude Code PR은 없어 사후 감사 이슈를 만들지 않았다.
+
+16B 리뷰 후속 `T-VN-16C`는 단일 날짜 계약을 sparse
+`targets[{target_at, feature_ids}]`로 전환한다. target 366개·target별 ID 200개·실제 pair
+2,000개에 더해 Feature ID 256자, planning work 2,500, source-series work 150,000,
+metric 20,000행, 보수적 응답 8 MiB, query 20초를 각각 제한하고 target/item 순서
+보존과 전량 성공·실패를 강제한다. Map 생산자는 고유 parent의 spatial 후보를 한 번만
+계산하고 target별 bitemporal fact로 최종 source를 고른 뒤 같은 target/source bundle을
+`card_key`·`cards[]`로 정규화한다. 미래 series가 과거 snapshot을 바꾸는 1차 리뷰 결함도
+회귀 테스트로 고정했다. 재사용 실데이터 clone의 40 target × 5 Feature(200 pair)는
+공유 card 40개·metric 11,763행·source-series work 716을 5.77초에 반환했다. 보수적
+payload 추정 6,030,012 bytes는 실제 data JSON 4,677,305 bytes보다 1,352,707 bytes
+컸다. query budget은 transaction-local PostgreSQL `statement_timeout`으로 설정·복원하고
+DB가 취소를 끝낸 뒤에만 503으로 변환한다. 50ms 적대 probe는 0.155초에 반환했고
+실행 중인 orphan backend 0, rollback과 같은 session 재사용도 정상임을 확인했다.
+최종 SQL 확정 뒤 파괴적 API Live도 같은 clone에서 다시 실행해 sparse target 2개
+`found`, 잘못된 token 401, planning-work 초과 422, fixture `active→hidden` 뒤
+`retired`, cleanup/audit 잔여 0건과 API error log 0건을 확인했다. PinVi는 이 계약을
+Trip view당 outbound 한 번으로 소비해 31일 `not_requested`와 worker fan-out을 제거한다.
+
+**다음 한 작업**: Map 생산자 전체 gate·적대 리뷰 2명·실데이터 파괴적 API 검증을 끝내
+생산자 PR을 먼저 머지하고, 같은 task의 PinVi 소비자 cutover를 이어간다.
+
 ## 2026-07-30 (codex) — Lane B b1 T-VN-16A set-based weather batch 완료
 
 `POST /v1/features/weather/batch`가 중복 없는 ID 1~200개를 입력 순서대로 한 snapshot

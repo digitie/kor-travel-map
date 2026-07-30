@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from time import monotonic
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,7 +15,7 @@ from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import weather_repo
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 pytestmark = pytest.mark.integration
 
@@ -54,14 +55,33 @@ def _wv(metric_key: str, **kw: object) -> WeatherValue:
 async def test_weather_load_card_asof_freshness(migrated_session: AsyncSession) -> None:
     await _ins_weather_feature(migrated_session, "f_w")
     values = [
-        _wv("TMP", metric_name="기온", value_number=Decimal("20.0"), unit="deg_c",
-            issued_at=_T1, valid_at=_T1),
+        _wv(
+            "TMP",
+            metric_name="기온",
+            value_number=Decimal("20.0"),
+            unit="deg_c",
+            issued_at=_T1,
+            valid_at=_T1,
+        ),
         # 같은 (short, TMP) 더 최신 valid_at → card 최신값.
-        _wv("TMP", metric_name="기온", value_number=Decimal("25.0"), unit="deg_c",
-            issued_at=_T1, valid_at=_T2),
-        _wv("FIRE_RISK", weather_domain="kma_weather_alert", forecast_style="advisory",
-            timeline_bucket=None, value_text="주의보", severity="주의보",
-            issued_at=_T2, valid_at=_T2),
+        _wv(
+            "TMP",
+            metric_name="기온",
+            value_number=Decimal("25.0"),
+            unit="deg_c",
+            issued_at=_T1,
+            valid_at=_T2,
+        ),
+        _wv(
+            "FIRE_RISK",
+            weather_domain="kma_weather_alert",
+            forecast_style="advisory",
+            timeline_bucket=None,
+            value_text="주의보",
+            severity="주의보",
+            issued_at=_T2,
+            valid_at=_T2,
+        ),
     ]
     assert await weather_repo.load_weather_values(migrated_session, values) == 3
 
@@ -98,9 +118,7 @@ async def test_weather_load_card_asof_freshness(migrated_session: AsyncSession) 
 
 
 async def test_weather_card_empty(migrated_session: AsyncSession) -> None:
-    card = await weather_repo.build_weather_card(
-        migrated_session, feature_id="f_none"
-    )
+    card = await weather_repo.build_weather_card(migrated_session, feature_id="f_none")
     assert card.metrics == []
     assert card.source_styles == []
     assert card.latest_at is None
@@ -111,6 +129,7 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
     migrated_session: AsyncSession,
 ) -> None:
     target_at = _T2
+    earlier_target_at = _T2 - timedelta(hours=1)
     known_at = _T2 + timedelta(hours=1)
     await _ins_feature_at(
         migrated_session,
@@ -118,6 +137,12 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
         lon=_BASE_LON,
         lat=_BASE_LAT,
         kind="weather",
+    )
+    await _ins_feature_at(
+        migrated_session,
+        "batch_weather_peer",
+        lon=_BASE_LON + 0.001,
+        lat=_BASE_LAT,
     )
     await _ins_weather_feature(migrated_session, "batch_no_data")
     await _ins_weather_feature(migrated_session, "batch_retired")
@@ -236,10 +261,23 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
 
     event.listen(connection.sync_connection, "before_cursor_execute", _count_statement)
     try:
-        items = await weather_repo.get_weather_batch_items(
+        snapshots = await weather_repo.get_weather_batch_snapshots(
             migrated_session,
-            feature_ids=("batch_weather", "batch_no_data", "batch_retired"),
-            target_at=target_at,
+            targets=(
+                weather_repo.WeatherBatchTarget(
+                    target_at=earlier_target_at,
+                    feature_ids=("batch_weather",),
+                ),
+                weather_repo.WeatherBatchTarget(
+                    target_at=target_at,
+                    feature_ids=(
+                        "batch_weather",
+                        "batch_weather_peer",
+                        "batch_no_data",
+                        "batch_retired",
+                    ),
+                ),
+            ),
             known_at=known_at,
             freshness_seconds=10**9,
         )
@@ -250,27 +288,357 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
             _count_statement,
         )
 
-    assert statement_count == 1
-    assert [item.state for item in items] == ["found", "no_data", "retired"]
-    current_by_key = {metric.metric_key: metric for metric in items[0].current}
-    timeline_by_key = {metric.metric_key: metric for metric in items[0].timeline}
+    # transaction-local statement_timeout 설정/복원과 snapshot 본문 한 번이다.
+    assert statement_count == 3
+    assert [snapshot.target_at for snapshot in snapshots] == [
+        earlier_target_at,
+        target_at,
+    ]
+    earlier_item = snapshots[0].items[0]
+    earlier_card = snapshots[0].cards[0]
+    assert earlier_item.feature_id == "batch_weather"
+    assert earlier_item.card_key == earlier_card.card_key
+    assert "RANGE_CURRENT" not in {metric.metric_key for metric in earlier_card.current}
+    assert "RANGE_CURRENT" in {metric.metric_key for metric in earlier_card.timeline}
+    items = snapshots[1].items
+    assert [item.state for item in items] == ["found", "found", "no_data", "retired"]
+    assert items[0].card_key == items[1].card_key
+    assert len(snapshots[1].cards) == 1
+    card = snapshots[1].cards[0]
+    assert card.card_key == items[0].card_key
+    current_by_key = {metric.metric_key: metric for metric in card.current}
+    timeline_by_key = {metric.metric_key: metric for metric in card.timeline}
     assert current_by_key["TMP"].value_number == Decimal("20.0")
-    assert current_by_key["RANGE_CURRENT"].effective_at == _T2 - timedelta(
-        minutes=30
-    )
+    assert current_by_key["RANGE_CURRENT"].effective_at == _T2 - timedelta(minutes=30)
     assert "RANGE_EXPIRED" not in current_by_key
     assert timeline_by_key["TMP"].value_number == Decimal("23.0")
     assert "POP" not in timeline_by_key
-    assert timeline_by_key["RANGE_TIMELINE"].effective_at == _T2 + timedelta(
-        hours=12
+    assert timeline_by_key["RANGE_TIMELINE"].effective_at == _T2 + timedelta(hours=12)
+    assert timeline_by_key["RANGE_TIMELINE"].valid_until == _T2 + timedelta(hours=18)
+    assert card.latest_at == _T2 - timedelta(minutes=30)
+    assert items[2].card_key is None
+    assert items[3].card_key is None
+
+
+async def test_weather_batch_metric_budget_fails_without_partial_snapshot(
+    migrated_session: AsyncSession,
+) -> None:
+    await _ins_feature_at(
+        migrated_session,
+        "batch_budget",
+        lon=_BASE_LON,
+        lat=_BASE_LAT,
+        kind="weather",
     )
-    assert timeline_by_key["RANGE_TIMELINE"].valid_until == _T2 + timedelta(
-        hours=18
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _kma_short(
+                "batch_budget",
+                "TMP",
+                issued_at=_T1,
+                valid_at=_T1,
+                collected_at=_T1,
+                value_number=Decimal("20.0"),
+                unit="deg_c",
+            ),
+            _kma_short(
+                "batch_budget",
+                "POP",
+                issued_at=_T1,
+                valid_at=_T2,
+                collected_at=_T1,
+                value_number=Decimal("40.0"),
+                unit="%",
+            ),
+        ],
     )
-    assert items[0].latest_at == _T2 - timedelta(minutes=30)
-    assert items[1].current == []
-    assert items[1].timeline == []
-    assert items[2].current == []
+    await migrated_session.flush()
+
+    with pytest.raises(
+        weather_repo.WeatherBatchMetricLimitExceededError,
+        match="metric rows 2 exceed limit 1",
+    ):
+        await weather_repo.get_weather_batch_snapshots(
+            migrated_session,
+            targets=(
+                weather_repo.WeatherBatchTarget(
+                    target_at=_T2,
+                    feature_ids=("batch_budget",),
+                ),
+            ),
+            known_at=_T2,
+            metric_row_limit=1,
+        )
+
+
+async def test_weather_batch_payload_budget_fails_without_partial_snapshot(
+    migrated_session: AsyncSession,
+) -> None:
+    await _ins_feature_at(
+        migrated_session,
+        "batch_payload_budget",
+        lon=_BASE_LON,
+        lat=_BASE_LAT,
+        kind="weather",
+    )
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _wv(
+                "LONG_TEXT",
+                feature_id="batch_payload_budget",
+                weather_domain="kma_weather_alert",
+                forecast_style="advisory",
+                timeline_bucket=None,
+                issued_at=_T1,
+                valid_at=_T2,
+                collected_at=_T1,
+                value_text="ok",
+            )
+        ],
+    )
+    await migrated_session.flush()
+
+    short_snapshot = await weather_repo.get_weather_batch_snapshots(
+        migrated_session,
+        targets=(
+            weather_repo.WeatherBatchTarget(
+                target_at=_T2,
+                feature_ids=("batch_payload_budget",),
+            ),
+        ),
+        known_at=_T2,
+        response_byte_limit=6000,
+    )
+    assert short_snapshot[0].items[0].state == "found"
+
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _wv(
+                "LONG_TEXT",
+                feature_id="batch_payload_budget",
+                weather_domain="kma_weather_alert",
+                forecast_style="advisory",
+                timeline_bucket=None,
+                issued_at=_T1,
+                valid_at=_T2,
+                collected_at=_T1 + timedelta(seconds=1),
+                value_text="x" * 5000,
+            )
+        ],
+    )
+    await migrated_session.flush()
+
+    with pytest.raises(
+        weather_repo.WeatherBatchPayloadLimitExceededError,
+        match=r"response bytes \d+ exceed limit 6000",
+    ):
+        await weather_repo.get_weather_batch_snapshots(
+            migrated_session,
+            targets=(
+                weather_repo.WeatherBatchTarget(
+                    target_at=_T2,
+                    feature_ids=("batch_payload_budget",),
+                ),
+            ),
+            known_at=_T2,
+            response_byte_limit=6000,
+        )
+
+
+async def test_weather_batch_series_work_budget_stops_before_fact_projection(
+    migrated_session: AsyncSession,
+) -> None:
+    await _ins_feature_at(
+        migrated_session,
+        "batch_series_budget",
+        lon=_BASE_LON,
+        lat=_BASE_LAT,
+        kind="weather",
+    )
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _kma_short(
+                "batch_series_budget",
+                metric_key,
+                issued_at=_T1,
+                valid_at=_T2 + timedelta(hours=hour),
+                collected_at=_T1,
+                value_number=Decimal("20.0"),
+                unit="deg_c",
+            )
+            for metric_key in ("TMP", "POP")
+            for hour in range(25)
+        ],
+    )
+    await migrated_session.flush()
+
+    with pytest.raises(
+        weather_repo.WeatherBatchWorkLimitExceededError,
+        match="series work 2 exceeds limit 1",
+    ):
+        await weather_repo.get_weather_batch_snapshots(
+            migrated_session,
+            targets=(
+                weather_repo.WeatherBatchTarget(
+                    target_at=_T2,
+                    feature_ids=("batch_series_budget",),
+                ),
+            ),
+            known_at=_T2,
+            series_work_limit=1,
+        )
+
+    plan = (
+        await migrated_session.execute(
+            text(
+                "EXPLAIN (ANALYZE, FORMAT JSON, COSTS OFF, TIMING OFF) "
+                + weather_repo._WEATHER_BATCH_SQL  # noqa: SLF001
+            ),
+            {
+                "feature_ids": ["batch_series_budget"],
+                "target_ats": [_T2],
+                "known_at": _T2,
+                "radius_m": 50_000.0,
+                "timeline_days": 1,
+                "metric_row_limit": weather_repo.WEATHER_BATCH_MAX_METRIC_ROWS,
+                "response_byte_limit": weather_repo.WEATHER_BATCH_MAX_RESPONSE_BYTES,
+                "series_work_limit": 1,
+            },
+        )
+    ).scalar_one()[0]["Plan"]
+    fact_rows_read = sum(
+        float(node.get("Actual Rows", 0)) * float(node.get("Actual Loops", 0))
+        for node in _walk_plan(plan)
+        if node.get("Relation Name") == "feature_weather_values"
+    )
+    assert fact_rows_read < 25, (
+        "series-work gate must stop the 50-row timeline projection; "
+        f"fact rows read={fact_rows_read:g}"
+    )
+
+
+async def test_weather_batch_future_own_series_does_not_change_past_anchor(
+    migrated_session: AsyncSession,
+) -> None:
+    target_at = _T2
+    known_at = _T2 + timedelta(hours=1)
+    await _ins_feature_at(
+        migrated_session,
+        "batch_bitemporal_parent",
+        lon=_BASE_LON,
+        lat=_BASE_LAT,
+    )
+    await _ins_feature_at(
+        migrated_session,
+        "batch_bitemporal_anchor",
+        lon=_BASE_LON + 0.001,
+        lat=_BASE_LAT,
+        kind="weather",
+    )
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _kma_short(
+                "batch_bitemporal_anchor",
+                "TMP",
+                issued_at=_T1,
+                valid_at=target_at,
+                collected_at=_T1,
+                value_number=Decimal("18.0"),
+                unit="deg_c",
+            )
+        ],
+    )
+    await migrated_session.flush()
+
+    async def _temperature() -> Decimal | None:
+        snapshots = await weather_repo.get_weather_batch_snapshots(
+            migrated_session,
+            targets=(
+                weather_repo.WeatherBatchTarget(
+                    target_at=target_at,
+                    feature_ids=("batch_bitemporal_parent",),
+                ),
+            ),
+            known_at=known_at,
+            series_work_limit=1,
+        )
+        assert snapshots[0].items[0].state == "found"
+        return snapshots[0].cards[0].current[0].value_number
+
+    assert await _temperature() == Decimal("18.0000")
+
+    # Catalog는 monotonic이라 이 미래 own series identity 자체는 즉시 등록된다.
+    # 그러나 fact가 known_at 뒤라 같은 과거 snapshot의 source 선택을 바꾸면 안 된다.
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _kma_short(
+                "batch_bitemporal_parent",
+                "TMP",
+                issued_at=_T1,
+                valid_at=target_at,
+                collected_at=known_at + timedelta(hours=1),
+                value_number=Decimal("99.0"),
+                unit="deg_c",
+            )
+        ],
+    )
+    await migrated_session.flush()
+    assert await _temperature() == Decimal("18.0000")
+
+
+async def test_weather_batch_database_timeout_returns_without_pool_cancel_delay(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    monkeypatch.setattr(
+        weather_repo,
+        "_WEATHER_BATCH_SQL",
+        "SELECT pg_sleep(2) /* tvn16c-timeout-cancel-probe */",
+    )
+    async with AsyncSession(migrated_engine) as session:
+        started_at = monotonic()
+        with pytest.raises(
+            weather_repo.WeatherBatchQueryTimeoutError,
+            match="query exceeded 0.05 seconds",
+        ):
+            await weather_repo.get_weather_batch_snapshots(
+                session,
+                targets=(
+                    weather_repo.WeatherBatchTarget(
+                        target_at=_T2,
+                        feature_ids=("timeout-probe",),
+                    ),
+                ),
+                known_at=_T2,
+                query_timeout_seconds=0.05,
+            )
+        elapsed = monotonic() - started_at
+        assert elapsed < 1.0, f"database timeout returned after {elapsed:.3f}s"
+        await session.rollback()
+    async with migrated_engine.connect() as monitor:
+        remaining = (
+            await monitor.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM pg_stat_activity
+                    WHERE pid <> pg_backend_pid()
+                      AND state = 'active'
+                      AND query LIKE
+                          'SELECT pg_sleep(2) /* tvn16c-timeout-cancel-probe */%'
+                    """
+                )
+            )
+        ).scalar_one()
+    assert remaining == 0
 
 
 async def test_weather_timeline_preserves_forecast_issue_history(
@@ -288,12 +656,20 @@ async def test_weather_timeline_preserves_forecast_issue_history(
         migrated_session,
         [
             _kma_short(
-                "kma_anchor", "TMP", issued_at=previous_issue, valid_at=_T2,
-                value_number=Decimal("22.0"), unit="deg_c",
+                "kma_anchor",
+                "TMP",
+                issued_at=previous_issue,
+                valid_at=_T2,
+                value_number=Decimal("22.0"),
+                unit="deg_c",
             ),
             _kma_short(
-                "kma_anchor", "TMP", issued_at=_T1, valid_at=_T2,
-                value_number=Decimal("24.0"), unit="deg_c",
+                "kma_anchor",
+                "TMP",
+                issued_at=_T1,
+                valid_at=_T2,
+                value_number=Decimal("24.0"),
+                unit="deg_c",
             ),
         ],
     )
@@ -463,9 +839,7 @@ async def _ins_feature_at(
     await session.flush()
 
 
-def _kma_short(
-    fid: str, metric_key: str, **kw: object
-) -> WeatherValue:
+def _kma_short(fid: str, metric_key: str, **kw: object) -> WeatherValue:
     base: dict[str, object] = {
         "feature_id": fid,
         "provider": "python-kma-api",
@@ -540,31 +914,44 @@ async def test_weather_card_tiered_merge_observed_augments_kma_mid(
         kind="weather",
     )
 
-    await weather_repo.load_weather_values(
-        migrated_session, [_krex_observed("krex_obs")]
-    )
+    await weather_repo.load_weather_values(migrated_session, [_krex_observed("krex_obs")])
     await weather_repo.load_weather_values(
         migrated_session,
         [
             _kma_mid(
-                "kma_anchor", "SKY", value_text="구름많음",
-                metric_name="하늘상태", unit="code",
+                "kma_anchor",
+                "SKY",
+                value_text="구름많음",
+                metric_name="하늘상태",
+                unit="code",
             ),
             _kma_mid(
-                "kma_anchor", "POP", value_number=Decimal("30"),
-                metric_name="강수확률", unit="%",
+                "kma_anchor",
+                "POP",
+                value_number=Decimal("30"),
+                metric_name="강수확률",
+                unit="%",
             ),
             _kma_mid(
-                "kma_anchor", "TMN", value_number=Decimal("12.0"),
-                metric_name="일 최저기온", unit="deg_c",
+                "kma_anchor",
+                "TMN",
+                value_number=Decimal("12.0"),
+                metric_name="일 최저기온",
+                unit="deg_c",
             ),
             _kma_mid(
-                "kma_anchor", "TMX", value_number=Decimal("24.0"),
-                metric_name="일 최고기온", unit="deg_c",
+                "kma_anchor",
+                "TMX",
+                value_number=Decimal("24.0"),
+                metric_name="일 최고기온",
+                unit="deg_c",
             ),
             _kma_short(
-                "kma_anchor", "TMP", value_number=Decimal("21.0"),
-                metric_name="기온", unit="deg_c",
+                "kma_anchor",
+                "TMP",
+                value_number=Decimal("21.0"),
+                metric_name="기온",
+                unit="deg_c",
             ),
         ],
     )
@@ -602,9 +989,7 @@ async def test_weather_card_krex_observed_only_in_radius(
         lat=_BASE_LAT,
         kind="weather",
     )
-    await weather_repo.load_weather_values(
-        migrated_session, [_krex_observed("krex_only")]
-    )
+    await weather_repo.load_weather_values(migrated_session, [_krex_observed("krex_only")])
 
     card = await weather_repo.build_weather_card(
         migrated_session, feature_id="rural2", freshness_seconds=10**9
@@ -630,15 +1015,16 @@ async def test_weather_card_own_rows_no_fallback(
         lat=_BASE_LAT,
         kind="weather",
     )
-    await weather_repo.load_weather_values(
-        migrated_session, [_krex_observed("neighbor_obs")]
-    )
+    await weather_repo.load_weather_values(migrated_session, [_krex_observed("neighbor_obs")])
     await weather_repo.load_weather_values(
         migrated_session,
         [
             _kma_short(
-                "own", "TMP", value_number=Decimal("22.0"),
-                metric_name="기온", unit="deg_c",
+                "own",
+                "TMP",
+                value_number=Decimal("22.0"),
+                metric_name="기온",
+                unit="deg_c",
             )
         ],
     )
@@ -669,8 +1055,11 @@ async def test_weather_card_far_anchor_outside_radius_no_merge(
         migrated_session,
         [
             _kma_short(
-                "far_kma", "TMP", value_number=Decimal("20.0"),
-                metric_name="기온", unit="deg_c",
+                "far_kma",
+                "TMP",
+                value_number=Decimal("20.0"),
+                metric_name="기온",
+                unit="deg_c",
             )
         ],
     )
@@ -738,38 +1127,60 @@ async def test_nearest_temp_uses_coord_gist_and_no_weather_full_scan(
             """
         )
     )
-    await _ins_feature_at(
-        migrated_session, "explain_target", lon=126.95, lat=37.55
-    )
+    await _ins_feature_at(migrated_session, "explain_target", lon=126.95, lat=37.55)
     await migrated_session.flush()
     await migrated_session.execute(text("ANALYZE feature.features"))
-    await migrated_session.execute(
-        text("ANALYZE feature.feature_weather_values")
+    await migrated_session.execute(text("ANALYZE feature.feature_weather_values"))
+    await migrated_session.execute(text("ANALYZE feature.weather_metric_series"))
+
+    batch_params = {
+        "feature_ids": ["explain_target"],
+        "target_ats": [datetime.now(_KST)],
+        "known_at": datetime.now(_KST),
+        "radius_m": 50_000.0,
+        "timeline_days": 1,
+        "metric_row_limit": weather_repo.WEATHER_BATCH_MAX_METRIC_ROWS,
+        "response_byte_limit": weather_repo.WEATHER_BATCH_MAX_RESPONSE_BYTES,
+        "series_work_limit": weather_repo.WEATHER_BATCH_MAX_SOURCE_SERIES_WORK,
+    }
+    default_batch_plan = (
+        await migrated_session.execute(
+            text(
+                "EXPLAIN (FORMAT JSON, COSTS OFF) " + weather_repo._WEATHER_BATCH_SQL  # noqa: SLF001
+            ),
+            batch_params,
+        )
+    ).scalar_one()[0]["Plan"]
+    catalog_seq_scans = [
+        node
+        for node in _walk_plan(default_batch_plan)
+        if node.get("Node Type") == "Seq Scan"
+        and node.get("Relation Name") == "weather_metric_series"
+    ]
+    assert not catalog_seq_scans, (
+        "weather batch must index-probe only request/spatial candidate series: "
+        f"{catalog_seq_scans}"
     )
 
     await migrated_session.execute(text("SET LOCAL enable_seqscan = off"))
     plan = (
         await migrated_session.execute(
             text(
-                "EXPLAIN (FORMAT JSON, COSTS OFF) "
-                + weather_repo._NEAREST_KMA_FORECAST_SQL  # noqa: SLF001
+                "EXPLAIN (FORMAT JSON, COSTS OFF) " + weather_repo._NEAREST_KMA_FORECAST_SQL  # noqa: SLF001
             ),
             {"feature_id": "explain_target", "radius_m": 50_000.0},
         )
     ).scalar_one()[0]["Plan"]
     nodes = _walk_plan(plan)
 
-    index_names = {
-        str(n["Index Name"]) for n in nodes if n.get("Index Name") is not None
-    }
+    index_names = {str(n["Index Name"]) for n in nodes if n.get("Index Name") is not None}
     assert "idx_features_public_weather_coord_5179_gist" in index_names, (
         f"expected weather-only coord_5179 GiST KNN, used={sorted(index_names)}"
     )
     weather_seq_scans = [
         n
         for n in nodes
-        if n.get("Node Type") == "Seq Scan"
-        and n.get("Relation Name") == "feature_weather_values"
+        if n.get("Node Type") == "Seq Scan" and n.get("Relation Name") == "feature_weather_values"
     ]
     assert not weather_seq_scans, (
         f"feature_weather_values must not be full-scanned: {weather_seq_scans}"
@@ -778,23 +1189,14 @@ async def test_nearest_temp_uses_coord_gist_and_no_weather_full_scan(
     batch_plan = (
         await migrated_session.execute(
             text(
-                "EXPLAIN (FORMAT JSON, COSTS OFF) "
-                + weather_repo._WEATHER_BATCH_SQL  # noqa: SLF001
+                "EXPLAIN (FORMAT JSON, COSTS OFF) " + weather_repo._WEATHER_BATCH_SQL  # noqa: SLF001
             ),
-            {
-                "feature_ids": ["explain_target"],
-                "target_at": datetime.now(_KST),
-                "known_at": datetime.now(_KST),
-                "radius_m": 50_000.0,
-                "timeline_days": 1,
-            },
+            batch_params,
         )
     ).scalar_one()[0]["Plan"]
     batch_nodes = _walk_plan(batch_plan)
     batch_indexes = {
-        str(node["Index Name"])
-        for node in batch_nodes
-        if node.get("Index Name") is not None
+        str(node["Index Name"]) for node in batch_nodes if node.get("Index Name") is not None
     }
     assert "idx_weather_values_feature_effective" in batch_indexes
     assert not [
