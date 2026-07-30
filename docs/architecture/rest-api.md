@@ -14,11 +14,13 @@
 
 ---
 
-## vNext 목표 표면 (ADR-066·067·072~074, 미구현)
+## vNext 단계적 전환 표면 (ADR-066·067·072~074, 부분 구현)
 
-기계 정본 OpenAPI는 **현재 구현 계약**이고, 아래 표는 T-VN task가 clean-cut으로 도달할 목표다.
+기계 정본 OpenAPI는 **현재 구현 계약**이다. 공개 조회·검색, route policy 기반 security,
+raw lineage 분리와 principal actor, 5-state feature batch와 sparse weather batch는
+main에 반영됐다. 아래 표에는 현재 계약과 cache target·refresh 같은 후속 목표를 함께 표시한다.
 PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의 consumer-first 조건을
-통과하기 전 현재 운영 계약으로 간주하지 않는다. 호환 alias는 만들지 않는다.
+통과한 compatible pair에서만 활성화한다. 호환 alias는 만들지 않는다.
 
 | 표면 | 목표 resource | 핵심 계약 |
 |---|---|---|
@@ -110,9 +112,10 @@ debug 표면은 origin이 허용 목록에 있어도 CORS를 광고하지 않는
 
 ### 1.3 인증 (ADR-066·T-VN-57)
 - `RoutePolicy.PUBLIC_KEYED`로 분류된 모든 public operation은 production에서 VWorld 호환
-  `key` query 또는 `ServiceToken` 중 하나를 요구한다. OpenAPI도 두 scheme을 OR 대안으로
-  선언한다. trusted admin BFF 우회는 same-origin UI용 내부 경계이며 public consumer
-  security에는 노출하지 않는다.
+  `X-Kor-Travel-Map-Api-Key` header 또는 `ServiceToken` 중 하나를 요구한다.
+  URL `key` query는 T-VN-H01에서 clean-cut으로 폐기했다. OpenAPI도 두 scheme을 OR
+  대안으로 선언한다. trusted admin BFF 우회는 same-origin UI용 내부 경계이며 public
+  consumer security에는 노출하지 않는다.
 - `POST /v1/features/batch`와 `POST /v1/features/weather/batch`는
   `RoutePolicy.SERVICE`이며 `ServiceToken`(`X-Kor-Travel-Map-Service-Token`) 전용이다.
   `/health`·`/version`·기계 판독 `/openapi.json`만 public-unauthenticated다.

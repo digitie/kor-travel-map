@@ -415,7 +415,7 @@ LIMIT 1;
 
 `tests/integration/test_perf_gate_tier1.py` (`@pytest.mark.perf_gate`)가 testcontainers
 PostGIS에서 다음 셋을 검사한다. 기존 integration job(`pytest tests/integration`)이 그대로
-실행하므로 `main`·`integration/t-vn` 대상 모든 PR에서 돈다.
+실행하므로 `main` 대상 모든 PR에서 돈다.
 
 1. **planner-default EXPLAIN smoke**: `tests/integration/perf_gate.py`의 `HOT_QUERIES`
    registry(public bbox/in-bounds·nearby·search·detail·batch·category counts·cluster
