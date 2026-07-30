@@ -10,6 +10,27 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-30 (codex) — Lane B b1 T-VN-H37 Mocked checkpoint 결정성 완료
+
+Mocked checkpoint의 종료 판정을 reporter manifest 한 신호에 맡기지 않고 Playwright
+`result.status`·reporter gate·child exit status/signal·postcondition·cleanup으로 분리했다.
+276개와 manifest가 모두 맞아도 child nonzero면 `playwright_child_nonzero`가 남는 합성 회귀를
+고정했고, 모든 진단은 경로·자격증명 대신 제한된 issue code와 count/status만 출력한다.
+Docker cleanup은 client 명령의 1초 종료보다 daemon state가 늦게 수렴한 경우 exact 소유
+리소스 부재를 확인해 성공하고, identity가 다르거나 끝까지 남은 리소스는 계속 실패한다.
+
+workers=8에서 기존 change review spec은 BFF list 응답 완료 barrier로, 새로 재현된 pipeline
+pending create spec은 700ms 지연 대신 명시적 response release barrier로 바꿨다. 실패한
+predicate 지점부터 exact workers=8을 다시 실행해 **276/276**, 이어 workers=4도
+**276/276**를 통과했다. 두 실행 모두 manifest 일치, child exit 0, reporter gate true,
+owned container/network/image 0건이다. frontend Vitest 전체 **259 passed**, TypeScript·
+ESLint, 배포 자동화 단위 **8 passed**도 green이다. DB 작업은 없어 보존
+`ktm-tvn45-db`를 clone·restore·migration·downgrade 없이 그대로 유지했다.
+
+**다음 한 작업**: PR 전 적대 리뷰어 2명의 authored delta 검토와 보안 gate를 마치고
+CI green 후 셀프 머지한다. 머지 뒤 새 Claude Code PR 사후 감사를 확인한 다음 Lane B
+`T-VN-16A` Map set-based weather batch로 이동한다.
+
 ## 2026-07-30 (codex) — Lane B b1 T-VN-11A/B 5상태 batch 호환 쌍 완료
 
 Map은 service-token 전용 `POST /v1/features/batch`를

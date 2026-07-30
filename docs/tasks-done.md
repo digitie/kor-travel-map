@@ -3,6 +3,28 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-30 — Lane B b1 T-VN-H37 Mocked checkpoint 결정성
+
+- [x] **T-VN-H37 — Mocked checkpoint 종료 판정·고병렬 flaky 진단**
+
+  checkpoint runner는 reporter의 원래 `result.status`·gate 판정·발견 test 수와 Playwright
+  child exit status/signal, 실행 전후 postcondition, cleanup 실패를 서로 다른 redacted
+  issue code로 남긴다. manifest가 일치해도 child가 nonzero면
+  `playwright_child_nonzero`로 실패하며 원인 없는 exit가 되지 않는다. cleanup은 1초 Docker
+  client 종료코드 대신 exact 소유 container/network/image가 실제로 사라졌는지를 제한
+  polling해, daemon 정리가 늦은 정상 상태와 실제 잔존을 구분한다.
+
+  workers=8에서 재현된 change review 목록은 BFF 응답 완료를 기다린 뒤 row를 단언하고,
+  pipeline create pending 검증은 700ms 시간 지연 대신 테스트가 직접 해제하는 response
+  barrier를 쓴다. 단순 timeout 증가는 없다.
+
+합성 종료 판정 회귀 **4 passed**, checkpoint 격리 회귀 포함 **13 passed**, 배포 자동화
+단위 **8 passed**, frontend Vitest 전체 **259 passed**, TypeScript·ESLint가 통과했다.
+exact production image checkpoint D는 동일 SHA에서 workers=8과 workers=4가 각각
+**276/276**, manifest 일치, child exit 0·reporter gate true로 끝났고 매 실행 뒤 owned
+container/network/image는 모두 0건이다. 이 task는 DB를 사용하지 않아
+`ktm-tvn45-db`를 clone·restore·migration·downgrade 없이 그대로 보존했다.
+
 ## 2026-07-30 — Lane B b1 T-VN-11A/B service batch 5상태 호환 쌍
 
 - [x] **T-VN-11A — Map 5-state batch projection**

@@ -40,7 +40,7 @@ barrier로 직렬화한다.
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
   - b1: [x] `T-VN-11A/B`(service batch, 저장소별 호환 PR 쌍) →
-    [ ] `T-VN-H37`(Mocked checkpoint 종료 판정·고병렬 flaky 진단) →
+    [x] `T-VN-H37`(Mocked checkpoint 종료 판정·고병렬 flaky 진단) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
     [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
     [ ] `T-VN-12D`(domain idempotency) →
@@ -676,24 +676,6 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
-
-### T-VN-H37 — Mocked checkpoint 종료 판정·고병렬 flaky 진단
-
-Claude PR #890/#891 감사 수정 exact HEAD에서 workers=4 전체 suite가 두 번 모두
-**276/276**, failure manifest 일치로 끝났지만 `run-mocked-checkpoint.mjs` 자식은 nonzero를
-반환했다. owned container/network/image·임시 디렉터리·listener는 남지 않았고 HEAD/status/
-frontend source digest도 동일했다. 원인 문구만 수집한 workers=8 실행은 기존
-`change-requests update/delete workflow`의 `toBeVisible` timing 실패 1건으로 275/276이었다.
-
-- runner가 Playwright `result.status`·child exit status/signal·postcondition·cleanup 실패를
-  서로 구분해 redacted 진단으로 남기도록 한다. manifest 일치만으로 성공을 주장하거나
-  실제 cleanup/network 실패를 통과시키면 안 된다.
-- workers=4의 "276 passed + manifest 일치 + nonzero"를 재현해 종료 원인을 고정하고,
-  같은 상태가 다시 발생하면 원인 없는 exit만 남지 않는 회귀를 추가한다.
-- workers=8에서 실패한 기존 spec은 polling/focus/animation 중 실제 원인을 좁혀 deterministic
-  barrier로 고친다. 단순 timeout 증가는 금지한다.
-- 수정 뒤 exact production image에서 workers=4와 workers=8을 각각 1회 통과시키고 owned
-  리소스 0건을 확인한다.
 
 ### T-VN-16 — weather batch와 부모 404
 

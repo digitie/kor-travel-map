@@ -17,6 +17,29 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-30 (codex) — T-VN-H37 Mocked checkpoint 종료·고병렬 경합 해소
+
+- reporter report schema를 3으로 올리고 `originalStatus`와 최종 `gatePassed`를 함께 쓴다.
+  runner는 child exit status/signal, reporter gate, worktree/frontend/network postcondition,
+  cleanup failure를 구조화된 redacted outcome으로 합성한다.
+- "276 passed + manifest 일치 + child nonzero"를 합성 회귀로 재현해
+  `playwright_child_nonzero` exit 1로 고정했다. postcondition·cleanup·spawn 실패는 exit 2로
+  우선해 실제 인프라 실패를 통과시키지 않는다.
+- 이전 cleanup은 Docker remove client가 1초 안에 끝나지 않으면 daemon이 직후 실제로
+  제거해도 실패했다. remove 종료코드는 성공 조건에서 제외하고 exact ownership을 검증한 뒤
+  container/network/image 부재를 제한 polling한다. identity mismatch·계속 남은 리소스는
+  별도 issue code로 실패한다.
+- workers=8 기준선에서 기존 change request update/delete와 pipeline create pending flaky를
+  각각 재현했다. change review는 exact BFF list 응답 완료, pipeline create는 테스트가 직접
+  release하는 response gate를 기준으로 바꿨고 timeout은 늘리지 않았다. 첫 response predicate가
+  문서 응답에 BFF parser를 호출한 실패는 해당 predicate 지점부터 exact pathname으로 고쳤다.
+- 검증: 종료 판정·격리 Vitest **13 passed**, frontend 전체 **259 passed**, 배포 자동화
+  단위 **8 passed**, TypeScript·ESLint green. exact production image D는 동일 SHA에서
+  workers=8 **276/276**, workers=4 **276/276**, 두 번 모두 manifest 일치·child exit 0·
+  reporter gate true다. 각 종료 후 owned container/network/image는 0건이다.
+- DB는 사용하지 않았다. 보존 clone `ktm-tvn45-db`는 새 clone/restore/migration/downgrade
+  없이 다음 DB 관련 task용으로 유지한다.
+
 ## 2026-07-30 (codex) — T-VN-11A/B 5상태 batch 생산자·소비자 호환 완료
 
 - Map `POST /v1/features/batch`는 최대 200개 ID를 한 set-based snapshot query로 처리하고
