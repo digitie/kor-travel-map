@@ -56,22 +56,26 @@ const SOLO_JOB_ID = "99999999-9999-4999-8999-999999999999";
 const NEW_REQUEST_ID = "33333333-3333-4333-8333-333333333333";
 const SCHEDULE_NAME = "feature_weather_kma_short_forecast_hourly_schedule";
 
-async function expectScheduleControlsDisabled(page: Page): Promise<void> {
-  await expect(page.getByLabel("명령 사유 (선택)")).toBeDisabled();
-  await expect(
+async function expectScheduleControls(
+  page: Page,
+  state: "disabled" | "enabled",
+): Promise<void> {
+  const controls = [
+    page.getByLabel("명령 사유 (선택)"),
     page.getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` }),
-  ).toBeDisabled();
-  await expect(
     page.getByRole("button", {
       name: new RegExp(`${SCHEDULE_NAME} 스케줄 (시작|중지)`),
     }),
-  ).toBeDisabled();
-  await expect(
     page.getByRole("button", { name: `${SCHEDULE_NAME} 상태 기본값 복귀` }),
-  ).toBeDisabled();
-  await expect(
     page.getByRole("button", { name: `${SCHEDULE_NAME} cron 수정` }),
-  ).toBeDisabled();
+  ];
+  for (const control of controls) {
+    if (state === "disabled") {
+      await expect(control).toBeDisabled();
+    } else {
+      await expect(control).toBeEnabled();
+    }
+  }
 }
 
 const META = { duration_ms: 1, request_id: "e2e-pipeline" };
@@ -3141,7 +3145,13 @@ test.describe("/ops/pipeline", () => {
   test("스케줄 명령 진행 중에는 cron과 다른 명령도 함께 차단", async ({
     page,
   }) => {
-    await installPipelineMocks(page, { scheduleResponseDelayMs: 600 });
+    let releaseScheduleResponse: () => void = () => undefined;
+    const scheduleActionResponseGate = new Promise<void>((resolve) => {
+      releaseScheduleResponse = resolve;
+    });
+    const counters = await installPipelineMocks(page, {
+      scheduleActionResponseGate,
+    });
     await page.goto(`/ops/pipeline?schedule=${SCHEDULE_NAME}`);
 
     await page
@@ -3149,13 +3159,15 @@ test.describe("/ops/pipeline", () => {
       .click();
     await page.getByRole("button", { name: "즉시 실행", exact: true }).click();
 
-    await expect(
-      page.getByRole("button", { name: `${SCHEDULE_NAME} cron 수정` }),
-    ).toBeDisabled();
-    await expect(
-      page.getByRole("button", { name: `${SCHEDULE_NAME} 스케줄 중지` }),
-    ).toBeDisabled();
+    try {
+      await expect.poll(() => counters.commandBodies.length).toBe(1);
+      await expectScheduleControls(page, "disabled");
+    } finally {
+      releaseScheduleResponse();
+    }
+
     await expect(page.getByTestId("schedule-command-result")).toBeVisible();
+    await expectScheduleControls(page, "enabled");
   });
 
   test("같은 render의 terminal schedule 명령 double click은 첫 결과를 보존", async ({
@@ -3179,7 +3191,7 @@ test.describe("/ops/pipeline", () => {
     await expect(recovery).toContainText(
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     );
-    await expectScheduleControlsDisabled(page);
+    await expectScheduleControls(page, "disabled");
     expect(counters.scheduleKeys).toHaveLength(1);
   });
 
@@ -3226,7 +3238,7 @@ test.describe("/ops/pipeline", () => {
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     );
     await expect(page.getByTestId("schedule-claim-recovery")).toBeVisible();
-    await expectScheduleControlsDisabled(page);
+    await expectScheduleControls(page, "disabled");
     expect(counters.scheduleKeys).toHaveLength(1);
     expect(counters.patchBodies).toHaveLength(1);
   });
@@ -3252,7 +3264,7 @@ test.describe("/ops/pipeline", () => {
     const frozen = page.getByTestId("schedule-frozen-submission");
     await expect(frozen).toBeVisible();
     await expect(page.getByTestId("schedule-claim-recovery")).toHaveCount(0);
-    await expectScheduleControlsDisabled(page);
+    await expectScheduleControls(page, "disabled");
     await frozen.getByRole("button", { name: "동일 요청 재확인" }).click();
 
     await expect(frozen).toHaveCount(0);
@@ -3283,7 +3295,7 @@ test.describe("/ops/pipeline", () => {
     await expect(recovery).toContainText(
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     );
-    await expectScheduleControlsDisabled(page);
+    await expectScheduleControls(page, "disabled");
     expect(counters.patchBodies).toHaveLength(1);
     expect(counters.scheduleKeys).toHaveLength(1);
   });
@@ -3306,7 +3318,7 @@ test.describe("/ops/pipeline", () => {
       "terminal 감사 기록에 실패",
     );
     await expect(reason).toHaveValue("감사 결과 확인 필요");
-    await expectScheduleControlsDisabled(page);
+    await expectScheduleControls(page, "disabled");
     expect(counters.scheduleKeys).toHaveLength(1);
     expect(counters.commandBodies).toHaveLength(1);
   });
@@ -3406,7 +3418,7 @@ test.describe("/ops/pipeline", () => {
           recovery.getByLabel("확인 근거·해제 사유 (필수)"),
         ).toBeDisabled();
         await expect(page.getByText("claim 해제 실패")).toBeVisible();
-        await expectScheduleControlsDisabled(page);
+        await expectScheduleControls(page, "disabled");
         await page.reload();
         await expect(recovery).toBeVisible();
         await expect(
@@ -3478,7 +3490,7 @@ test.describe("/ops/pipeline", () => {
         await expect(
           recovery.getByLabel("확인 근거·해제 사유 (필수)"),
         ).toBeDisabled();
-        await expectScheduleControlsDisabled(page);
+        await expectScheduleControls(page, "disabled");
       }
     }
 
@@ -3530,7 +3542,7 @@ test.describe("/ops/pipeline", () => {
     await expect(
       recovery.getByLabel("schedule claim 실제 반영 확인 결과"),
     ).toBeEnabled();
-    await expectScheduleControlsDisabled(page);
+    await expectScheduleControls(page, "disabled");
     await reason.fill("수정한 확인 사유");
     await recovery.getByRole("button", { name: "claim 해제" }).click();
     await page

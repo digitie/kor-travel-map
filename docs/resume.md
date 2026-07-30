@@ -10,6 +10,29 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-30 (codex) — Lane B b1 T-VN-H39 schedule pending barrier 완료
+
+H38 workers=8에서 재현한 schedule pending test의 600ms 시간 추정을 제거했다.
+`scheduleActionResponseGate`는 route가 command body를 기록한 뒤 응답을 보류하며, 테스트는
+request 도달을 확인한 다음 같은 5개 schedule control이 모두 disabled인지 검사한다.
+`finally`에서 응답을 해제한 뒤 결과와 동일 control 5개의 enabled 복원을 대칭 검증하므로,
+고병렬 부하와 assertion 실패 모두에서 gate가 남지 않는다. timeout 증가는 없다.
+
+적대 리뷰어 1명이 release 뒤 2개 control만 확인하던 P2를 찾아 동일 locator 집합을 상태
+인자로 재사용하도록 반영했다. 격리 실패 spec은 setup 포함 **2/2**, frontend 전체
+**278 passed**, TypeScript·ESLint가 green이다. exact production image D workers=8은
+**276/276**, manifest 일치, child exit 0·reporter gate true, owned
+container/network/image 0건으로 끝났다.
+
+첫 표적 실행은 공유 12705의 인증 없는 storage state 때문에 로그인 화면에서 멈췄다. 제품
+실패로 재시작하지 않고 독립 21715 frontend+session으로 해당 지점부터 재개했으며, 7월
+29일부터 Agent B worktree에 남아 있던 orphan Next dev와 생성된 mocked failure artifact를
+정리했다. DB는 사용하지 않았고 보존 `ktm-tvn45-db`는
+healthy·`0068_integrity_last_seen`라 재사용 가능하다.
+
+**다음 한 작업**: 보안 gate 뒤 H39 PR을 열어 CI green 후 셀프 머지한다. 머지 뒤 새 Claude
+Code PR 사후 감사를 확인하고, Lane B `T-VN-16A` Map set-based weather batch로 이동한다.
+
 ## 2026-07-30 (codex) — Lane B b1 T-VN-H38 failure fingerprint 완전성 완료
 
 Mocked failure reporter가 첫 attempt/error만 보던 경로를 제거했다. deterministic failure와
