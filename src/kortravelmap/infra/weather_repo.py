@@ -435,10 +435,20 @@ preferred_has_current AS (
         EXISTS (
             SELECT 1
             FROM preferred_sources AS source
-            JOIN feature.feature_weather_values AS w
-              ON w.feature_id = source.source_feature_id
+            JOIN feature.weather_metric_series AS series
+              ON series.feature_id = source.source_feature_id
+            JOIN LATERAL (
+                SELECT 1
+                FROM feature.feature_weather_values AS w
+                WHERE w.feature_id = series.feature_id
+                  AND w.provider = series.provider
+                  AND w.weather_domain = series.weather_domain
+                  AND w.forecast_style = series.forecast_style
+                  AND w.metric_key = series.metric_key
+                  AND {_BATCH_CURRENT_PREDICATE}
+                LIMIT 1
+            ) AS current_row ON true
             WHERE source.ordinality = parent.ordinality
-              AND {_BATCH_CURRENT_PREDICATE}
             LIMIT 1 OFFSET 0
         ) AS value
     FROM parents AS parent
