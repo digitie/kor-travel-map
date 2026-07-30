@@ -167,6 +167,11 @@ interface FailureEvidence {
   text: string;
 }
 
+interface FailedStepPath {
+  hasFailedDescendant: boolean;
+  stepPath: TestStep[];
+}
+
 function failureErrorText(error: TestError | undefined): string {
   return [error?.message, error?.stack, error?.value]
     .filter((value): value is string => Boolean(value))
@@ -176,18 +181,16 @@ function failureErrorText(error: TestError | undefined): string {
 function failedStepPaths(
   steps: TestStep[],
   parents: TestStep[] = [],
-): TestStep[][] {
-  const paths: TestStep[][] = [];
+): FailedStepPath[] {
+  const paths: FailedStepPath[] = [];
   for (const step of steps) {
     const currentPath = [...parents, step];
     const childPaths = failedStepPaths(step.steps, currentPath);
-    const ownErrorText = failureErrorText(step.error);
-    const propagatedFromChild = childPaths.some(
-      (childPath) =>
-        failureErrorText(childPath.at(-1)?.error) === ownErrorText,
-    );
-    if (step.error && !propagatedFromChild) {
-      paths.push(currentPath);
+    if (step.error) {
+      paths.push({
+        hasFailedDescendant: childPaths.length > 0,
+        stepPath: currentPath,
+      });
     }
     paths.push(...childPaths);
   }
@@ -196,39 +199,54 @@ function failedStepPaths(
 
 function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
   return results.flatMap((result) => {
-    if (result.status === "passed" || result.status === "skipped") {
+    if (result.status === "passed") {
       return [];
     }
 
     const stepPaths = failedStepPaths(result.steps);
     const unmatchedStepPaths = new Set(stepPaths);
-    const evidence = result.errors.map((error, errorIndex) => {
+    const evidence = result.errors.flatMap((error, errorIndex) => {
       const text = failureErrorText(error);
-      const matchingStepPath = stepPaths.find(
-        (stepPath) =>
-          unmatchedStepPaths.has(stepPath) &&
-          failureErrorText(stepPath.at(-1)?.error) === text,
-      );
+      const matchingStepPath = stepPaths
+        .filter(
+          ({ stepPath }) =>
+            failureErrorText(stepPath.at(-1)?.error) === text,
+        )
+        .sort(
+          (left, right) =>
+            right.stepPath.length - left.stepPath.length,
+        )
+        .find((stepPath) => unmatchedStepPaths.has(stepPath));
       if (matchingStepPath) {
         unmatchedStepPaths.delete(matchingStepPath);
       }
-      return {
+      if (
+        result.status === "timedOut" &&
+        matchingStepPath?.hasFailedDescendant &&
+        matchingStepPath.stepPath.at(-1)?.category === "hook"
+      ) {
+        return [];
+      }
+      return [{
         errorIndex,
         retry: result.retry,
         status: result.status,
-        stepPath: matchingStepPath ?? [],
+        stepPath: matchingStepPath?.stepPath ?? [],
         text,
-      };
+      }];
     });
 
-    for (const stepPath of unmatchedStepPaths) {
+    let nextStepOnlyErrorIndex = result.errors.length;
+    for (const { hasFailedDescendant, stepPath } of unmatchedStepPaths) {
+      if (hasFailedDescendant) continue;
       evidence.push({
-        errorIndex: evidence.length,
+        errorIndex: nextStepOnlyErrorIndex,
         retry: result.retry,
         status: result.status,
         stepPath,
         text: failureErrorText(stepPath.at(-1)?.error),
       });
+      nextStepOnlyErrorIndex += 1;
     }
     if (evidence.length === 0) {
       evidence.push({
@@ -263,7 +281,6 @@ function serializedStepPath(stepPath: TestStep[]) {
           line: step.location.line,
         }
       : null,
-    title: step.title,
   }));
 }
 
@@ -303,7 +320,22 @@ export function expectedFailureEvidenceMismatches(
   failureStage: FailureStage,
 ) {
   const expectedCause = new RegExp(errorPattern, "u");
-  return failureEvidence(results)
+  const evidence = failureEvidence(results);
+  if (evidence.length === 0) {
+    const lastResult = results.at(-1);
+    return [
+      {
+        causeMatched: false,
+        errorIndex: -1,
+        failureStepPath: [],
+        retry: lastResult?.retry ?? -1,
+        stageMatched: false,
+        status: lastResult?.status ?? "missing",
+        statusMatched: false,
+      },
+    ];
+  }
+  return evidence
     .map(({ errorIndex, retry, status, stepPath, text }) => ({
       causeMatched: text.length > 0 && expectedCause.test(text),
       errorIndex,
@@ -311,7 +343,7 @@ export function expectedFailureEvidenceMismatches(
       retry,
       stageMatched: firstFailureStageMatches(failureStage, stepPath),
       status,
-      statusMatched: status === "failed",
+      statusMatched: status === "failed" || status === "timedOut",
     }))
     .filter(
       ({ causeMatched, stageMatched, statusMatched }) =>
@@ -433,6 +465,10 @@ class MockedFailureReporter implements Reporter {
           )
           .map(({ key }) => key),
       );
+      const expectedFailureFingerprints = new Set([
+        ...expectedFailures,
+        ...expectedFlakes,
+      ]);
       const unexpectedFailures = new Set(
         this.tests
           .filter((test) => test.outcome() === "unexpected")
@@ -456,17 +492,14 @@ class MockedFailureReporter implements Reporter {
       const testByIdentity = new Map(
         this.tests.map((test) => [testIdentity(test).key, test]),
       );
-      const mismatchedExpectedFailureCauses = manifestTests
-        .filter(({ key }) => expectedFailures.has(key))
+      const mismatchedExpectedFailureEvidence = manifestTests
+        .filter(({ key }) => expectedFailureFingerprints.has(key))
         .flatMap(({ difference, errorPattern, firstFailureStage, key }) => {
           const test = testByIdentity.get(key);
-          return (test
-            ? expectedFailureEvidenceMismatches(
-                test.results,
-                errorPattern,
-                firstFailureStage,
-              )
-            : []
+          return expectedFailureEvidenceMismatches(
+            test?.results ?? [],
+            errorPattern,
+            firstFailureStage,
           ).map((mismatch) => ({
             ...mismatch,
             difference,
@@ -511,7 +544,7 @@ class MockedFailureReporter implements Reporter {
         missingManifestTests,
         missingAllowedSkipped: sortedDifference(allowedSkipped, skippedTests),
         newSkippedTests: sortedDifference(skippedTests, allowedSkipped),
-        mismatchedExpectedFailureCauses,
+        mismatchedExpectedFailureEvidence,
         globalErrors: this.globalErrors,
         originalStatus: result.status,
         gatePassed: false,
@@ -528,7 +561,7 @@ class MockedFailureReporter implements Reporter {
         report.missingManifestTests.length === 0 &&
         report.missingAllowedSkipped.length === 0 &&
         report.newSkippedTests.length === 0 &&
-        report.mismatchedExpectedFailureCauses.length === 0 &&
+        report.mismatchedExpectedFailureEvidence.length === 0 &&
         report.globalErrors === 0;
       report.gatePassed = gatePassed;
 

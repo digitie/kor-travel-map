@@ -190,6 +190,82 @@ describe("mocked failure retry/error provenance", () => {
     ]);
   });
 
+  it("첫 실패 뒤 skipped retry도 non-passed attempt로 거부한다", () => {
+    const mismatches = expectedFailureEvidenceMismatches(
+      [
+        result(0, [expectedError], [
+          step("expect", 'Expect "toBeVisible"', expectedError),
+        ]),
+        result(1, [], [], "skipped"),
+      ],
+      "expected render failure",
+      "render.assertion",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 0,
+        retry: 1,
+        stageMatched: false,
+        status: "skipped",
+        statusMatched: false,
+      }),
+    ]);
+  });
+
+  it("expected failure가 passed-only 결과면 원인 증거 누락으로 거부한다", () => {
+    const mismatches = expectedFailureEvidenceMismatches(
+      [result(0, [], [], "passed")],
+      "expected render failure",
+      "render.assertion",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: -1,
+        retry: 0,
+        stageMatched: false,
+        status: "passed",
+        statusMatched: false,
+      }),
+    ]);
+  });
+
+  it("timedOut beforeEach wrapper는 제외하고 실제 locator 오류를 검증한다", () => {
+    const hookTimeout = {
+      message:
+        'Test timeout of 1200ms exceeded while running "beforeEach" hook.',
+    };
+    const locatorTimeout = {
+      message:
+        "locator.fill: Test timeout of 1200ms exceeded. waiting for locator('#admin-username')",
+    };
+    const hookPath = step(
+      "hook",
+      "Before Hooks",
+      hookTimeout,
+      [
+        step("hook", "beforeEach hook", hookTimeout, [
+          step(
+            "pw:api",
+            "Fill <redacted> locator('#admin-username')",
+            locatorTimeout,
+          ),
+        ]),
+      ],
+    );
+
+    expect(
+      expectedFailureEvidenceMismatches(
+        [result(0, [hookTimeout, locatorTimeout], [hookPath], "timedOut")],
+        "#admin-username",
+        "beforeEach.auth",
+      ),
+    ).toEqual([]);
+  });
+
   it("오류 증거가 없는 failed attempt는 permissive regex로도 인정하지 않는다", () => {
     const mismatches = expectedFailureEvidenceMismatches(
       [result(0, [], [])],
@@ -229,11 +305,74 @@ describe("mocked failure retry/error provenance", () => {
       ),
     ).toEqual([]);
   });
+
+  it("boxed parent가 stack을 바꿔도 leaf 오류를 중복 실패로 세지 않는다", () => {
+    const childError = {
+      message: "expected render failure",
+      stack: "at assertion.ts:10:2",
+    };
+    const boxedParentError = {
+      message: "expected render failure",
+      stack: "at boxed-step.ts:20:4",
+    };
+    const boxed = step(
+      "test.step",
+      "boxed render",
+      boxedParentError,
+      [step("expect", 'Expect "toBeVisible"', childError)],
+    );
+
+    expect(
+      expectedFailureEvidenceMismatches(
+        [result(0, [childError], [boxed])],
+        "expected render failure",
+        "render.assertion",
+      ),
+    ).toEqual([]);
+  });
+
+  it("redacted mismatch에는 실제 error와 step payload를 남기지 않는다", () => {
+    const sensitiveValue = "real-sensitive-input";
+    const mismatches = expectedFailureEvidenceMismatches(
+      [
+        result(
+          0,
+          [{ message: sensitiveValue }],
+          [
+            step(
+              "pw:api",
+              `Fill "${sensitiveValue}" locator('#credential-field')`,
+              { message: sensitiveValue },
+            ),
+          ],
+        ),
+      ],
+      "allowed manifest cause",
+      "beforeEach.auth",
+    );
+
+    expect(JSON.stringify(mismatches)).not.toContain(sensitiveValue);
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        errorIndex: 0,
+        failureStepPath: [
+          expect.objectContaining({
+            category: "pw:api",
+          }),
+        ],
+        retry: 0,
+      }),
+    ]);
+  });
 });
 
 describe("mocked checkpoint isolation", () => {
   const runnerSource = readFileSync(
     new URL("../e2e/run-mocked-checkpoint.mjs", import.meta.url),
+    "utf8",
+  );
+  const reporterSource = readFileSync(
+    new URL("../e2e/mocked-failure-reporter.ts", import.meta.url),
     "utf8",
   );
   const configSource = readFileSync(
@@ -243,6 +382,17 @@ describe("mocked checkpoint isolation", () => {
   const ownedResourcePhase = runnerSource.slice(
     runnerSource.indexOf("let playwrightChild;"),
   );
+
+  it("deterministic failure와 expected flaky의 모든 실패 증거를 함께 검증한다", () => {
+    expect(reporterSource).toContain(
+      "const expectedFailureFingerprints = new Set([",
+    );
+    expect(reporterSource).toContain("...expectedFailures,");
+    expect(reporterSource).toContain("...expectedFlakes,");
+    expect(reporterSource).toContain(
+      ".filter(({ key }) => expectedFailureFingerprints.has(key))",
+    );
+  });
 
   it("소유 resource 생성 뒤에는 signal handler를 우회하는 spawnSync를 쓰지 않는다", () => {
     expect(ownedResourcePhase).not.toContain("spawnSync(");
