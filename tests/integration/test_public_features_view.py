@@ -245,6 +245,55 @@ async def test_detail_and_batch_rows_use_projection(migrated_session: AsyncSessi
     assert set(raw) == {ids[suffix] for suffix, *_ in _STATE_MATRIX}
 
 
+async def test_service_batch_classifies_five_states_in_request_order(
+    migrated_session: AsyncSession,
+) -> None:
+    ids = await _seed_matrix(migrated_session, "pfv:service", name_token="서비스장소")
+    unchanged_id = "pfv:service:unchanged"
+    await _ins_feature(
+        migrated_session,
+        feature_id=unchanged_id,
+        name="변경 없는 서비스장소",
+    )
+    unchanged_row = await feature_repo.get_public_feature_row(migrated_session, unchanged_id)
+    assert unchanged_row is not None
+
+    requested = (
+        (ids["active"], None),
+        (ids["retired"], None),
+        (ids["admin-inactive"], None),
+        ("pfv:service:ghost", None),
+        (unchanged_id, int(unchanged_row["row_revision"])),
+    )
+    batch = await feature_repo.get_service_feature_batch_items(migrated_session, requested)
+
+    assert [item.feature_id for item in batch] == [feature_id for feature_id, _ in requested]
+    assert [item.state for item in batch] == [
+        "found",
+        "retired",
+        "suppressed",
+        "missing",
+        "unchanged",
+    ]
+    assert batch[0].trip_card == {
+        "feature_id": ids["active"],
+        "kind": "place",
+        "name": "서비스장소 active",
+        "category": "06020000",
+        "lon": 126.978,
+        "lat": 37.5665,
+        "address": {},
+        "marker_icon": None,
+        "marker_color": None,
+    }
+    assert batch[0].row_revision is not None
+    assert batch[1].row_revision is not None
+    assert batch[2].row_revision is not None
+    assert batch[3].row_revision is None
+    assert batch[4].row_revision == unchanged_row["row_revision"]
+    assert all(item.trip_card is None for item in batch[1:])
+
+
 async def test_nearby_by_target_uses_projection(migrated_session: AsyncSession) -> None:
     ids = await _seed_matrix(migrated_session, "pfv:target", name_token="타깃장소")
     target = await upsert_poi_cache_target(

@@ -796,55 +796,69 @@ def test_get_area_contained_features_rejects_non_area(
 
 
 @pytest.mark.unit
-def test_features_batch_returns_items_and_missing(
+def test_features_batch_returns_exhaustive_typed_items(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from kortravelmap.infra.feature_repo import FeatureBatchItemRow
+
     from kortravelmap.api.db import get_session
     from kortravelmap.api.routers import features as features_mod
 
-    row = {
-        "feature_id": "f1",
-        "kind": "event",
-        "name": "축제",
-        "category": "01000000",
-        "lon": 126.92,
-        "lat": 37.52,
-        "coord_5179_srid": 5179,
-        "address": {"road": "서울"},
-        "detail": {"event_kind": "festival", "payload": {"raw_source_field": "x"}},
-        "urls": {},
-        "raw_refs": [],
-        "legal_dong_code": None,
-        "sido_code": "11",
-        "sigungu_code": "11560",
-        "marker_icon": "star",
-        "marker_color": "P-11",
-        "status": "active",
-        "row_revision": 9,
-        "parent_feature_id": None,
-        "sibling_group_id": None,
-        "created_at": "2026-05-29T00:00:00+09:00",
-        "updated_at": "2026-05-29T00:00:00+09:00",
-        "deleted_at": None,
-    }
+    async def _get_items(
+        _session: Any,
+        items: tuple[tuple[str, int | None], ...],
+    ) -> tuple[FeatureBatchItemRow, ...]:
+        assert items == (
+            ("found", None),
+            ("retired", None),
+            ("suppressed", None),
+            ("missing", None),
+            ("unchanged", 17),
+        )
+        return (
+            FeatureBatchItemRow(
+                feature_id="found",
+                state="found",
+                row_revision=9,
+                trip_card={
+                    "feature_id": "found",
+                    "kind": "event",
+                    "name": "축제",
+                    "category": "01000000",
+                    "lon": 126.92,
+                    "lat": 37.52,
+                    "address": {"road": "서울"},
+                    "marker_icon": "star",
+                    "marker_color": "P-11",
+                },
+            ),
+            FeatureBatchItemRow(
+                feature_id="retired",
+                state="retired",
+                row_revision=10,
+                trip_card=None,
+            ),
+            FeatureBatchItemRow(
+                feature_id="suppressed",
+                state="suppressed",
+                row_revision=11,
+                trip_card=None,
+            ),
+            FeatureBatchItemRow(
+                feature_id="missing",
+                state="missing",
+                row_revision=None,
+                trip_card=None,
+            ),
+            FeatureBatchItemRow(
+                feature_id="unchanged",
+                state="unchanged",
+                row_revision=17,
+                trip_card=None,
+            ),
+        )
 
-    async def _get_rows(_session: Any, feature_ids: list[str]) -> dict[str, dict[str, Any]]:
-        assert feature_ids == ["f1", "missing"]
-        return {"f1": row}
-
-    async def _curations(
-        _session: Any, *, feature_ids: list[str], public_only: bool
-    ) -> dict[str, tuple[Any, ...]]:
-        assert feature_ids == ["f1", "missing"]
-        assert public_only is True
-        return {}
-
-    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_rows_by_ids", _get_rows)
-    monkeypatch.setattr(
-        features_mod.curation_repo,
-        "list_curation_items_by_feature_ids",
-        _curations,
-    )
+    monkeypatch.setattr(features_mod.feature_repo, "get_service_feature_batch_items", _get_items)
 
     async def _fake_session() -> AsyncIterator[Any]:
         yield object()
@@ -853,75 +867,71 @@ def test_features_batch_returns_items_and_missing(
     try:
         r = client.post(
             "/v1/features/batch",
-            json={"feature_ids": ["f1", "missing", "f1"]},
+            json={
+                "items": [
+                    {"feature_id": "found"},
+                    {"feature_id": "retired"},
+                    {"feature_id": "suppressed"},
+                    {"feature_id": "missing"},
+                    {"feature_id": "unchanged", "known_row_revision": 17},
+                ]
+            },
         )
         assert r.status_code == 200
-        body = r.json()
-        found = body["data"]["found"]["f1"]
-        assert found["name"] == "축제"
-        assert found["row_revision"] == 9
-        assert "coord_5179_srid" not in found
-        assert "parent_feature_id" not in found
-        assert "sibling_group_id" not in found
-        assert found["curations"] == []
-        # T-VN-05: service batch는 고정 typed payload — raw lineage/payload 없음.
-        assert "observations" not in found
-        assert "payload" not in found["detail"]
-        assert body["data"]["missing"] == ["missing"]
+        items = r.json()["data"]["items"]
+        assert [item["state"] for item in items] == [
+            "found",
+            "retired",
+            "suppressed",
+            "missing",
+            "unchanged",
+        ]
+        assert items[0] == {
+            "state": "found",
+            "feature_id": "found",
+            "row_revision": 9,
+            "trip_card": {
+                "feature_id": "found",
+                "kind": "event",
+                "name": "축제",
+                "category": "01000000",
+                "lon": 126.92,
+                "lat": 37.52,
+                "address": {"road": "서울"},
+                "marker_icon": "star",
+                "marker_color": "P-11",
+            },
+        }
+        assert items[1] == {
+            "state": "retired",
+            "feature_id": "retired",
+            "row_revision": 10,
+        }
+        assert items[2] == {
+            "state": "suppressed",
+            "feature_id": "suppressed",
+            "row_revision": 11,
+        }
+        assert items[3] == {"state": "missing", "feature_id": "missing"}
+        assert items[4] == {
+            "state": "unchanged",
+            "feature_id": "unchanged",
+            "row_revision": 17,
+        }
     finally:
         client.app.dependency_overrides.clear()
 
 
 @pytest.mark.unit
-def test_features_batch_reports_ended_or_non_latest_notice_as_missing(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+def test_features_batch_rejects_duplicate_ids_before_db(
+    client: TestClient,
 ) -> None:
-    from kortravelmap.api.db import get_session
-    from kortravelmap.api.routers import features as features_mod
-
-    async def _get_rows(_session: Any, feature_ids: list[str]) -> dict[str, dict[str, Any]]:
-        assert feature_ids == ["notice-old"]
-        return {
-            "notice-old": {
-                "feature_id": "notice-old",
-                "kind": "notice",
-                "status": "active",
-                "deleted_at": None,
-            }
-        }
-
-    async def _public_ids(_session: Any, feature_ids: list[str]) -> set[str]:
-        assert feature_ids == ["notice-old"]
-        return set()
-
-    async def _empty(_session: Any, *args: Any, **kwargs: Any) -> dict[str, tuple[Any, ...]]:
-        return {}
-
-    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_rows_by_ids", _get_rows)
-    monkeypatch.setattr(
-        features_mod.feature_repo,
-        "public_active_notice_feature_ids",
-        _public_ids,
+    r = client.post(
+        "/v1/features/batch",
+        json={"items": [{"feature_id": "same"}, {"feature_id": "same"}]},
     )
-    monkeypatch.setattr(
-        features_mod.curation_repo,
-        "list_curation_items_by_feature_ids",
-        _empty,
-    )
-
-    async def _fake_session() -> AsyncIterator[Any]:
-        yield object()
-
-    client.app.dependency_overrides[get_session] = _fake_session
-    try:
-        r = client.post(
-            "/v1/features/batch",
-            json={"feature_ids": ["notice-old"]},
-        )
-        assert r.status_code == 200
-        assert r.json()["data"] == {"found": {}, "missing": ["notice-old"]}
-    finally:
-        client.app.dependency_overrides.clear()
+    assert r.status_code == 422
+    assert r.json()["code"] == "VALIDATION_ERROR"
 
 
 @pytest.mark.unit

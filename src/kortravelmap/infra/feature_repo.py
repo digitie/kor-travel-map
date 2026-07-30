@@ -39,7 +39,7 @@ import math
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from sqlalchemy import text
 
@@ -62,6 +62,7 @@ __all__ = [
     "DEFAULT_PRICE_STALE_HIDE_DAYS",
     "EnrichmentLoadResult",
     "FeatureLoadResult",
+    "FeatureBatchItemRow",
     "FeatureSearchPage",
     "FeatureSearchRow",
     "NearbyFeaturePage",
@@ -87,6 +88,7 @@ __all__ = [
     "get_feature_rows_by_ids",
     "get_public_feature_row",
     "get_public_feature_rows_by_ids",
+    "get_service_feature_batch_items",
     "public_active_notice_filter_sql",
     "public_active_notice_feature_ids",
     "list_active_place_coords",
@@ -697,6 +699,49 @@ def public_active_notice_filter_sql(feature_alias: str) -> str:
 
 
 _PUBLIC_ACTIVE_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("f")
+
+
+# service batch는 공개 payload와 base-table 상태 판정을 한 snapshot에서 읽는다.
+# ``feature.public_features``가 payload의 유일한 출처이고 base row는 state와
+# ``row_revision``만 제공한다(ADR-067). notice 종료/계보 감산도 다른 공개 read와
+# 같은 fragment를 사용한다.
+_SERVICE_FEATURE_BATCH_SQL: Final[str] = f"""
+WITH requested AS (
+    SELECT
+        item.feature_id,
+        item.known_row_revision,
+        item.ordinality
+    FROM unnest(
+        CAST(:feature_ids AS text[]),
+        CAST(:known_row_revisions AS bigint[])
+    ) WITH ORDINALITY AS item(feature_id, known_row_revision, ordinality)
+)
+SELECT
+    requested.feature_id,
+    CASE
+      WHEN base.feature_id IS NULL THEN 'missing'
+      WHEN base.deleted_at IS NOT NULL OR base.status = 'deleted' THEN 'retired'
+      WHEN visible.feature_id IS NULL THEN 'suppressed'
+      WHEN requested.known_row_revision = visible.row_revision THEN 'unchanged'
+      ELSE 'found'
+    END AS state,
+    base.row_revision,
+    visible.kind,
+    visible.name,
+    visible.category,
+    x_extension.ST_X(visible.coord) AS lon,
+    x_extension.ST_Y(visible.coord) AS lat,
+    visible.address,
+    visible.marker_icon,
+    visible.marker_color
+FROM requested
+LEFT JOIN feature.features AS base
+  ON base.feature_id = requested.feature_id
+LEFT JOIN feature.public_features AS visible
+  ON visible.feature_id = requested.feature_id
+{public_active_notice_filter_sql("visible")}
+ORDER BY requested.ordinality
+"""
 
 
 # ─── in-bounds 후보 술어 단일화 (F-8 / ADR-073 D-9-3·D-9-4) ──────────────────
@@ -1680,6 +1725,25 @@ class FeatureLoadResult:
             source_links_inserted=(self.source_links_inserted + other.source_links_inserted),
             source_links_updated=(self.source_links_updated + other.source_links_updated),
         )
+
+
+FeatureBatchItemState = Literal[
+    "found",
+    "retired",
+    "suppressed",
+    "missing",
+    "unchanged",
+]
+
+
+@dataclass(frozen=True)
+class FeatureBatchItemRow:
+    """service batch의 상태 판정과 공개 ``trip_card`` projection."""
+
+    feature_id: str
+    state: FeatureBatchItemState
+    row_revision: int | None
+    trip_card: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -3416,6 +3480,60 @@ async def get_public_feature_rows_by_ids(
     )
     rows = result.mappings().all()
     return {str(row["feature_id"]): _deserialize_feature_row(row) for row in rows}
+
+
+async def get_service_feature_batch_items(
+    session: AsyncSession,
+    items: Sequence[tuple[str, int | None]],
+) -> tuple[FeatureBatchItemRow, ...]:
+    """service batch 5-state item을 요청 순서대로 한 SQL snapshot에서 반환한다.
+
+    base table은 존재/lifecycle 상태와 ``row_revision`` 판정에만 사용한다.
+    ``trip_card``는 반드시 ``feature.public_features``에서만 만들며 retired,
+    suppressed, missing item에는 비공개 payload를 싣지 않는다.
+    """
+    if not items:
+        return ()
+
+    result = await session.execute(
+        text(_SERVICE_FEATURE_BATCH_SQL),
+        {
+            "feature_ids": [feature_id for feature_id, _revision in items],
+            "known_row_revisions": [revision for _feature_id, revision in items],
+        },
+    )
+    batch: list[FeatureBatchItemRow] = []
+    valid_states: frozenset[str] = frozenset(
+        {"found", "retired", "suppressed", "missing", "unchanged"}
+    )
+    for raw_row in result.mappings().all():
+        row = _deserialize_feature_row(raw_row)
+        state = str(row["state"])
+        if state not in valid_states:
+            raise RuntimeError(f"unexpected feature batch state: {state}")
+        revision = int(row["row_revision"]) if row["row_revision"] is not None else None
+        trip_card = None
+        if state == "found":
+            trip_card = {
+                "feature_id": str(row["feature_id"]),
+                "kind": str(row["kind"]),
+                "name": str(row["name"]),
+                "category": str(row["category"]),
+                "lon": float(row["lon"]) if row["lon"] is not None else None,
+                "lat": float(row["lat"]) if row["lat"] is not None else None,
+                "address": row["address"],
+                "marker_icon": row["marker_icon"],
+                "marker_color": row["marker_color"],
+            }
+        batch.append(
+            FeatureBatchItemRow(
+                feature_id=str(row["feature_id"]),
+                state=cast(FeatureBatchItemState, state),
+                row_revision=revision,
+                trip_card=trip_card,
+            )
+        )
+    return tuple(batch)
 
 
 async def public_active_notice_feature_ids(
