@@ -5661,7 +5661,10 @@ export interface components {
         FeatureBatchFoundItem: {
             /** Feature Id */
             feature_id: string;
-            /** Row Revision */
+            /**
+             * Row Revision
+             * Format: int64
+             */
             row_revision: number;
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -5707,7 +5710,7 @@ export interface components {
             feature_id: string;
             /**
              * Known Row Revision
-             * @description 소비자가 보유한 trip_card의 row_revision. 일치하면 unchanged.
+             * @description 소비자가 보유한 trip_card의 PostgreSQL bigint row_revision(최대 9223372036854775807). 일치하면 unchanged.
              */
             known_row_revision?: number | null;
         };
@@ -5726,7 +5729,10 @@ export interface components {
         FeatureBatchRetiredItem: {
             /** Feature Id */
             feature_id: string;
-            /** Row Revision */
+            /**
+             * Row Revision
+             * Format: int64
+             */
             row_revision: number;
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -5741,7 +5747,10 @@ export interface components {
         FeatureBatchSuppressedItem: {
             /** Feature Id */
             feature_id: string;
-            /** Row Revision */
+            /**
+             * Row Revision
+             * Format: int64
+             */
             row_revision: number;
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -5756,7 +5765,10 @@ export interface components {
         FeatureBatchUnchangedItem: {
             /** Feature Id */
             feature_id: string;
-            /** Row Revision */
+            /**
+             * Row Revision
+             * Format: int64
+             */
             row_revision: number;
             /**
              * @description discriminator enum property added by openapi-typescript
