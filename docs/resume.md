@@ -25,7 +25,8 @@ DB active identity 3-tuple의 정확한 1회 출현·기존 ID를 쓰기 전에 
 후속 적대 리뷰에서 이미 해제된 H33 대상의 누락 ledger 복구, H25B 전체 사전
 변환·직렬화와 원자 교체, 행 단위 변경 수, verifier의 명시적 `feature_id`, 수동 검토 후보의
 전체 ID·복사 동작까지 보강했다. H30B/C와 Lane A 순서를 다시 열고 완료 아카이브 checkbox도
-일반 역사 bullet로 바꾼다. 이 전체 후속 delta를 같은 두 리뷰어가 최종 재검토한다.
+일반 역사 bullet로 바꾼다. 이 전체 authored delta는 독립 Lane A a1 리뷰어 2명의 최종
+재검토에서 각각 P0~P2 0건이다.
 함께 감사한 #894의 H35 배포 계획은 current 0063-compatible 네 service rollback bundle,
 external DB 복원 검증, cold writer fence, 네 candidate service의 identity·health 확인을
 하나의 순서로 결속했다. candidate API 기본 entrypoint가 fence 전에 migration을 실행하지
@@ -39,8 +40,9 @@ prod daemon enablement와 ingress를 정상화하고, H30B는 signed bundle/clea
 포함한 ordered 1,477행 canonical artifact로 서명하며, H30B는 live endpoint 없이 그
 artifact만 resource override로 재생한다.
 
-Python 회귀 **38 passed**, Ruff·mypy 173 files·ESLint·OpenAPI/type drift, Vitest **254**는
-green이다. Mocked D workers=4 두 번은 모두 **276/276**와 manifest expected/actual
+핵심 Python 회귀 **42 passed**, 확장 targeted **57 passed**, Ruff·mypy 173 files·ESLint·
+OpenAPI/type drift, Vitest **254**는 green이다. Mocked D workers=4 두 번은 모두
+**276/276**와 manifest expected/actual
 failure·flake 0이었지만 runner가 manifest 뒤 nonzero로 끝나 checkpoint 전체 green으로
 부르지 않는다. owned 자원·HEAD·source digest는 깨끗했고, workers=8 진단에서는 기존
 `change-requests update/delete` timing 한 건이 실패했다. runner 종료 판정과 고병렬 flaky는
