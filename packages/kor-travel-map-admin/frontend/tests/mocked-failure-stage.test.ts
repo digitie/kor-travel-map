@@ -236,7 +236,7 @@ describe("mocked failure retry/error provenance", () => {
   it("timedOut beforeEach wrapper는 제외하고 실제 locator 오류를 검증한다", () => {
     const hookTimeout = {
       message:
-        'Test timeout of 1200ms exceeded while running "beforeEach" hook.',
+        '\u001b[31mTest timeout of 1200ms exceeded while running "beforeEach" hook.\u001b[39m',
     };
     const locatorTimeout = {
       message:
@@ -308,7 +308,7 @@ describe("mocked failure retry/error provenance", () => {
 
   it("test body timeout wrapper도 실제 interaction leaf가 보고될 때만 제외한다", () => {
     const bodyTimeout = {
-      message: "Test timeout of 1200ms exceeded.",
+      message: "\u001b[31mTest timeout of 1200ms exceeded.\u001b[39m",
     };
     const clickTimeout = {
       message:

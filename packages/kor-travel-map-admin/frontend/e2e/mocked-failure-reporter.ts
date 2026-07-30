@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 type Checkpoint = "A" | "B" | "C" | "D";
 export type FailureStage =
@@ -228,7 +229,7 @@ function diagnosticStepPath(
 
 function isPlaywrightTimeoutEnvelope(error: TestError): boolean {
   return /^Test timeout of \d+ms exceeded(?: while running "(?:beforeAll|beforeEach|afterEach|afterAll)" hook)?\.$/u.test(
-    error.message ?? "",
+    stripVTControlCharacters(error.message ?? ""),
   );
 }
 
