@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.core.exceptions import (
@@ -45,7 +45,8 @@ from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     get_poi_cache_target_by_key,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema, model_validator
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_frontend, require_service_token
@@ -407,21 +408,136 @@ class FeaturePriceResponse(BaseModel):
     meta: Meta
 
 
-class FeatureBatchRequest(BaseModel):
-    """feature batch 상세 조회 요청 (service read)."""
+_POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807
+_PostgresBigintRevision = Annotated[
+    int,
+    Field(ge=1, le=_POSTGRES_BIGINT_MAX),
+    WithJsonSchema(
+        {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+        }
+    ),
+]
+
+
+class FeatureBatchRequestItem(BaseModel):
+    """feature batch 요청 1건."""
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_ids: list[str] = Field(min_length=1, max_length=200)
+    feature_id: str = Field(min_length=1)
+    known_row_revision: _PostgresBigintRevision | None = Field(
+        default=None,
+        description=(
+            "소비자가 보유한 trip_card의 PostgreSQL bigint row_revision"
+            "(최대 9223372036854775807). 일치하면 unchanged."
+        ),
+    )
+
+
+class FeatureBatchRequest(BaseModel):
+    """5-state feature batch 조회 요청 (service read)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FeatureBatchRequestItem] = Field(min_length=1, max_length=200)
+    projection: Literal["trip_card"] = Field(
+        default="trip_card",
+        description="서버 정의 고정 projection. raw/detail projection은 선택할 수 없다.",
+    )
+
+    @model_validator(mode="after")
+    def feature_ids_must_be_unique(self) -> FeatureBatchRequest:
+        feature_ids = [item.feature_id for item in self.items]
+        if len(feature_ids) != len(set(feature_ids)):
+            raise ValueError("items의 feature_id는 중복될 수 없습니다.")
+        return self
+
+
+class FeatureTripCard(BaseModel):
+    """여행 일정 POI 표시에 필요한 공개-안전 고정 projection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    kind: str
+    name: str
+    category: str
+    lon: float | None
+    lat: float | None
+    address: dict[str, Any]
+    marker_icon: str | None
+    marker_color: str | None
+
+
+class FeatureBatchFoundItem(BaseModel):
+    """공개 feature의 최신 trip_card."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["found"]
+    feature_id: str
+    row_revision: _PostgresBigintRevision
+    trip_card: FeatureTripCard
+
+
+class FeatureBatchRetiredItem(BaseModel):
+    """lifecycle tombstone이 확인된 feature."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["retired"]
+    feature_id: str
+    row_revision: _PostgresBigintRevision
+
+
+class FeatureBatchSuppressedItem(BaseModel):
+    """존재하지만 현재 공개 projection에 없는 feature."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["suppressed"]
+    feature_id: str
+    row_revision: _PostgresBigintRevision
+
+
+class FeatureBatchMissingItem(BaseModel):
+    """저장소에 존재하지 않는 feature."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["missing"]
+    feature_id: str
+
+
+class FeatureBatchUnchangedItem(BaseModel):
+    """소비자 revision과 동일한 공개 feature."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["unchanged"]
+    feature_id: str
+    row_revision: _PostgresBigintRevision
+
+
+FeatureBatchItem = Annotated[
+    FeatureBatchFoundItem
+    | FeatureBatchRetiredItem
+    | FeatureBatchSuppressedItem
+    | FeatureBatchMissingItem
+    | FeatureBatchUnchangedItem,
+    Field(discriminator="state"),
+]
 
 
 class FeatureBatchData(BaseModel):
-    """feature batch 상세 data payload."""
+    """feature batch 5-state data payload."""
 
     model_config = ConfigDict(extra="forbid")
 
-    found: dict[str, FeatureDetailResponse]
-    missing: list[str]
+    items: list[FeatureBatchItem]
 
 
 class FeatureBatchResponse(BaseModel):
@@ -618,6 +734,41 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         row_revision=row["row_revision"],
         updated_at=row["updated_at"],
     )
+
+
+def _batch_item_from_row(row: feature_repo.FeatureBatchItemRow) -> FeatureBatchItem:
+    if row.state == "missing":
+        return FeatureBatchMissingItem(state="missing", feature_id=row.feature_id)
+    if row.row_revision is None:
+        raise RuntimeError(f"{row.state} batch item has no row_revision")
+    if row.state == "found":
+        if row.trip_card is None:
+            raise RuntimeError("found batch item has no trip_card")
+        return FeatureBatchFoundItem(
+            state="found",
+            feature_id=row.feature_id,
+            row_revision=row.row_revision,
+            trip_card=FeatureTripCard.model_validate(row.trip_card),
+        )
+    if row.state == "retired":
+        return FeatureBatchRetiredItem(
+            state="retired",
+            feature_id=row.feature_id,
+            row_revision=row.row_revision,
+        )
+    if row.state == "suppressed":
+        return FeatureBatchSuppressedItem(
+            state="suppressed",
+            feature_id=row.feature_id,
+            row_revision=row.row_revision,
+        )
+    if row.state == "unchanged":
+        return FeatureBatchUnchangedItem(
+            state="unchanged",
+            feature_id=row.feature_id,
+            row_revision=row.row_revision,
+        )
+    assert_never(row.state)
 
 
 async def _public_feature_row(
@@ -1468,9 +1619,15 @@ async def get_feature_price(
 @router.post(
     "/batch",
     response_model=FeatureBatchResponse,
-    summary="feature 상세 batch 조회 (service read)",
+    summary="feature 5-state trip_card batch 조회 (service read)",
     dependencies=[Depends(require_service_token)],
-    responses={422: {"description": "feature_ids 1~200개 필요"}},
+    responses={
+        422: {"description": "서로 다른 item 1~200개 필요"},
+        503: {
+            "model": ProblemDetail,
+            "description": "FEATURE_BATCH_UNAVAILABLE — feature 저장소 연결/조회 실패",
+        },
+    },
 )
 async def get_features_batch(
     request: Request,
@@ -1478,41 +1635,21 @@ async def get_features_batch(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureBatchResponse:
     started_at = perf_counter()
-    feature_ids = list(dict.fromkeys(body.feature_ids))
-    # 공개 batch — ADR-067 단일 projection에서만 payload를 만든다. projection에
-    # 없는 ID는 일괄 ``missing``이며, retired/suppressed 세분화(5-state item 계약)는
-    # T-VN-11에서 이 projection과 base 상태를 조합해 도입한다.
-    public_rows = await feature_repo.get_public_feature_rows_by_ids(session, feature_ids)
-    notice_ids = [
-        feature_id for feature_id, row in public_rows.items() if row.get("kind") == "notice"
-    ]
-    if notice_ids:
-        visible_notice_ids = await feature_repo.public_active_notice_feature_ids(
+    try:
+        rows = await feature_repo.get_service_feature_batch_items(
             session,
-            notice_ids,
+            tuple((item.feature_id, item.known_row_revision) for item in body.items),
         )
-        public_rows = {
-            feature_id: row
-            for feature_id, row in public_rows.items()
-            if row.get("kind") != "notice" or feature_id in visible_notice_ids
-        }
-    curations = await curation_repo.list_curation_items_by_feature_ids(
-        session, feature_ids=feature_ids, public_only=True
-    )
-    # T-VN-05: service batch는 고정 typed payload만 반환한다 — raw observation
-    # lineage/payload passthrough 없음, raw opt-in 없음(FeatureBatchRequest는
-    # extra=forbid로 feature_ids만 받는다).
-    items = {
-        feature_id: _detail_from_row(public_rows[feature_id]).model_copy(
-            update={
-                "curations": [_curation_item_view(item) for item in curations.get(feature_id, ())],
-            }
-        )
-        for feature_id in feature_ids
-        if feature_id in public_rows
-    }
-    missing = [feature_id for feature_id in feature_ids if feature_id not in public_rows]
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "FEATURE_BATCH_UNAVAILABLE",
+                "message": "feature batch 저장소를 사용할 수 없습니다.",
+                "details": {},
+            },
+        ) from exc
     return FeatureBatchResponse(
-        data=FeatureBatchData(found=items, missing=missing),
+        data=FeatureBatchData(items=[_batch_item_from_row(row) for row in rows]),
         meta=make_meta(request, started_at=started_at),
     )

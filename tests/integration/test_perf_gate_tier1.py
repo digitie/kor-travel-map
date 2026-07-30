@@ -6,7 +6,7 @@
    detail·batch·category counts·cluster rollup)를 ``enable_seqscan`` 조작 없이 EXPLAIN해
    ``feature.features`` base-table Seq Scan이 없고 기대 index를 쓰는지 검사한다.
    ``enable_seqscan=off`` crutch는 쓰지 않는다(그건 회귀 감시 전용).
-2. **query 수 ≠ batch item 수 가드**: public batch read를 item 50개·100개로 호출해
+2. **query 수 ≠ batch item 수 가드**: service 5-state batch를 item 50개·100개로 호출해
    발생 SQL statement 수가 item 수에 비례하지 않고 일정(1건)함을 검사한다(N+1 회귀 차단).
 3. **response-shape 회귀**: hot query 결과 컬럼 집합을 frozen snapshot과 비교해
    우발적 필드 추가/삭제를 잡는다.
@@ -44,7 +44,10 @@ async def test_tier1_hot_query_planner_default_no_seq_scan(
 ) -> None:
     """각 hot query가 planner 기본 설정에서 features Seq Scan 없이 index를 탄다."""
 
-    await seed_hot_query_features(migrated_session)
+    await seed_hot_query_features(
+        migrated_session,
+        n=hot.seed_n,  # type: ignore[attr-defined]
+    )
     plan = await explain_plan(
         migrated_session,
         hot.sql,  # type: ignore[attr-defined]
@@ -56,30 +59,32 @@ async def test_tier1_hot_query_planner_default_no_seq_scan(
     assert_uses_index(plan, *hot.expected_indexes)  # type: ignore[attr-defined]
 
 
-async def test_tier1_public_batch_query_count_is_constant(
+async def test_tier1_service_batch_query_count_is_constant(
     migrated_engine: AsyncEngine,
     migrated_session: AsyncSession,
 ) -> None:
-    """public batch read의 SQL statement 수가 item 수에 비례하지 않는다(N+1 가드)."""
+    """service 5-state batch의 SQL 수가 item 수에 비례하지 않는다(N+1 가드)."""
 
     await seed_hot_query_features(migrated_session)
     ids_50 = [f"perf:f:{i:06d}" for i in range(1, 51)]
     ids_100 = [f"perf:f:{i:06d}" for i in range(1, 101)]
 
     with count_sql_statements(migrated_engine) as stmts_50:
-        rows_50 = await feature_repo.get_public_feature_rows_by_ids(
-            migrated_session, ids_50
+        rows_50 = await feature_repo.get_service_feature_batch_items(
+            migrated_session,
+            tuple((feature_id, None) for feature_id in ids_50),
         )
     with count_sql_statements(migrated_engine) as stmts_100:
-        rows_100 = await feature_repo.get_public_feature_rows_by_ids(
-            migrated_session, ids_100
+        rows_100 = await feature_repo.get_service_feature_batch_items(
+            migrated_session,
+            tuple((feature_id, None) for feature_id in ids_100),
         )
 
-    # item 2배에도 query 수가 그대로여야 한다(단일 ANY(ids) read).
+    # item 2배에도 query 수가 그대로여야 한다(단일 unnest + set-based classifier).
     assert len(stmts_50) == 1, stmts_50
     assert len(stmts_100) == len(stmts_50), (len(stmts_50), len(stmts_100))
-    # 실제로 더 많은 row를 읽었는지도 확인(seed의 active 비율 반영).
-    assert len(rows_100) > len(rows_50) > 0
+    assert len(rows_50) == 50
+    assert len(rows_100) == 100
 
 
 # hot query 결과 컬럼 frozen snapshot (response-shape 회귀). 값 변경은 의도적
@@ -111,6 +116,19 @@ _FROZEN_SHAPES: dict[str, tuple[str, ...]] = {
         "status",
         "updated_at",
         "urls",
+    ),
+    "service feature batch 5-state (200)": (
+        "address",
+        "category",
+        "feature_id",
+        "kind",
+        "lat",
+        "lon",
+        "marker_color",
+        "marker_icon",
+        "name",
+        "row_revision",
+        "state",
     ),
     "category counts (GROUP BY)": ("category", "n"),
 }

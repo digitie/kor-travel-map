@@ -36,7 +36,15 @@ export type FeaturesNearbyByTargetResponse =
   Schemas["FeaturesNearbyByTargetResponse"];
 export type NearbyFeatureSummary = Schemas["NearbyFeatureSummary"];
 export type FeatureBatchRequest = Schemas["FeatureBatchRequest"];
+export type FeatureBatchRequestItem = Schemas["FeatureBatchRequestItem"];
 export type FeatureBatchResponse = Schemas["FeatureBatchResponse"];
+export type FeatureBatchItem = FeatureBatchResponse["data"]["items"][number];
+export type FeatureBatchFoundItem = Schemas["FeatureBatchFoundItem"];
+export type FeatureBatchRetiredItem = Schemas["FeatureBatchRetiredItem"];
+export type FeatureBatchSuppressedItem = Schemas["FeatureBatchSuppressedItem"];
+export type FeatureBatchMissingItem = Schemas["FeatureBatchMissingItem"];
+export type FeatureBatchUnchangedItem = Schemas["FeatureBatchUnchangedItem"];
+export type FeatureTripCard = Schemas["FeatureTripCard"];
 export type FeatureWeatherResponse = Schemas["FeatureWeatherResponse"];
 export type CategoriesResponse = Schemas["CategoriesResponse"];
 export type CategorySummary = Schemas["CategorySummary"];
@@ -55,14 +63,28 @@ export type PublicMapMarkerLayerResponse =
 // (예: batch found→items 회귀, meta.page 제거, lon/lat 중첩화, 경로 rename)
 
 type _Assert<T extends true> = T;
+type _Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B
+  ? 1
+  : 2)
+  ? true
+  : false;
 // 비-distributive — union K의 **모든** 멤버가 keyof T여야 true.
 // 실패 시 never가 아니라 false를 반환해야 _Assert 제약이 실제로 깨진다
 // (never는 bottom type이라 `extends true`를 통과해 단언이 무력화된다).
 type _Has<T, K> = [K] extends [keyof T] ? true : false;
 
-// batch: data = { found: id-keyed map, missing: [] } — list `items`와 키 분리(T-216e).
-type _BatchHasFound = _Assert<
-  _Has<FeatureBatchResponse["data"], "found" | "missing">
+// batch: request/response 모두 item list이며 state가 exhaustiveness 정본이다(T-VN-11).
+type _BatchHasItems = _Assert<
+  _Has<FeatureBatchRequest | FeatureBatchResponse["data"], "items">
+>;
+type _BatchStatesExact = _Assert<
+  _Equal<
+    FeatureBatchItem["state"],
+    "found" | "retired" | "suppressed" | "missing" | "unchanged"
+  >
+>;
+type _BatchFoundHasRevisionAndTripCard = _Assert<
+  _Has<FeatureBatchFoundItem, "row_revision" | "trip_card">
 >;
 // pagination은 meta.page (data.next_cursor 폐기, ADR-048 #2/#12).
 type _MetaHasPage = _Assert<_Has<Meta, "page">>;
@@ -104,7 +126,9 @@ type _PathsStable = _Assert<
 
 // noUnusedLocals 회피용 도달 불가 참조 (타입 단언만 목적).
 export type _SurfaceAssertions = [
-  _BatchHasFound,
+  _BatchHasItems,
+  _BatchStatesExact,
+  _BatchFoundHasRevisionAndTripCard,
   _MetaHasPage,
   _PageHasNextCursor,
   _SummaryHasFlatLonLat,
