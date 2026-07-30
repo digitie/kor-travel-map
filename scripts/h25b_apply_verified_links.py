@@ -311,7 +311,7 @@ def _replace_outputs(outputs: dict[Path, bytes]) -> None:
         for path, temporary in staged.items():
             os.replace(temporary, path)
             replaced.append(path)
-    except Exception:
+    except BaseException:
         for path in reversed(replaced):
             descriptor, rollback_name = tempfile.mkstemp(
                 dir=path.parent,

@@ -175,6 +175,35 @@ def test_h25_apply_counts_changed_rows_once(
     ).hexdigest()
 
 
+@pytest.mark.unit
+def test_h25_replace_outputs_rolls_back_on_keyboard_interrupt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = tmp_path / "a.csv"
+    second = tmp_path / "b.csv"
+    first.write_bytes(b"old-a")
+    second.write_bytes(b"old-b")
+    real_replace = h25.os.replace
+    replace_calls = 0
+
+    def interrupt_second_replace(source: Path, destination: Path) -> None:
+        nonlocal replace_calls
+        replace_calls += 1
+        if replace_calls == 2:
+            raise KeyboardInterrupt
+        real_replace(source, destination)
+
+    monkeypatch.setattr(h25.os, "replace", interrupt_second_replace)
+
+    with pytest.raises(KeyboardInterrupt):
+        h25._replace_outputs({first: b"new-a", second: b"new-b"})
+
+    assert first.read_bytes() == b"old-a"
+    assert second.read_bytes() == b"old-b"
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
 class _FakeTransaction:
     def __init__(self, conn: _FakeH33Connection) -> None:
         self.conn = conn
