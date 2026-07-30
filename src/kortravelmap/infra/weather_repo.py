@@ -361,6 +361,7 @@ kma_anchor AS (
         FROM feature.public_features AS candidate
         WHERE parent.visible_feature_id IS NOT NULL
           AND NOT own_temp.value
+          AND candidate.kind = 'weather'
           AND parent.coord_5179 IS NOT NULL
           AND candidate.coord_5179 IS NOT NULL
           AND x_extension.ST_DWithin(
@@ -392,6 +393,7 @@ observed_anchor AS (
         FROM feature.public_features AS candidate
         WHERE parent.visible_feature_id IS NOT NULL
           AND NOT own_temp.value
+          AND candidate.kind = 'weather'
           AND parent.coord_5179 IS NOT NULL
           AND candidate.coord_5179 IS NOT NULL
           AND x_extension.ST_DWithin(
@@ -450,6 +452,7 @@ fallback_anchor AS (
         FROM feature.public_features AS candidate
         WHERE parent.visible_feature_id IS NOT NULL
           AND NOT preferred.value
+          AND candidate.kind = 'weather'
           AND parent.coord_5179 IS NOT NULL
           AND candidate.coord_5179 IS NOT NULL
           AND x_extension.ST_DWithin(
@@ -479,12 +482,115 @@ sources AS (
     FROM fallback_anchor
     WHERE feature_id IS NOT NULL
 ),
+source_metric_keys AS MATERIALIZED (
+    SELECT DISTINCT
+        source.source_feature_id,
+        w.forecast_style,
+        w.metric_key
+    FROM (
+        SELECT DISTINCT source_feature_id
+        FROM sources
+    ) AS source
+    JOIN feature.feature_weather_values AS w
+      ON w.feature_id = source.source_feature_id
+    WHERE {_BATCH_KNOWN_AT}
+      AND {_BATCH_EFFECTIVE_AT} IS NOT NULL
+      AND {_BATCH_EFFECTIVE_AT}
+          <= CAST(:target_at AS timestamptz)
+             + make_interval(days => CAST(:timeline_days AS integer))
+),
+current_source_rows AS (
+    SELECT
+        metric.source_feature_id,
+        row.forecast_style,
+        row.metric_key,
+        row.metric_name,
+        row.timeline_bucket,
+        row.value_number,
+        row.value_text,
+        row.unit,
+        row.severity,
+        row.issued_at,
+        row.valid_at,
+        row.valid_from,
+        row.valid_until,
+        row.observed_at,
+        row.provider,
+        row.weather_domain,
+        row.effective_at
+    FROM source_metric_keys AS metric
+    JOIN LATERAL (
+        SELECT
+            w.forecast_style,
+            w.metric_key,
+            w.metric_name,
+            w.timeline_bucket,
+            w.value_number,
+            w.value_text,
+            w.unit,
+            w.severity,
+            w.issued_at,
+            w.valid_at,
+            w.valid_from,
+            w.valid_until,
+            w.observed_at,
+            w.provider,
+            w.weather_domain,
+            {_BATCH_EFFECTIVE_AT} AS effective_at
+        FROM feature.feature_weather_values AS w
+        WHERE w.feature_id = metric.source_feature_id
+          AND w.forecast_style = metric.forecast_style
+          AND w.metric_key = metric.metric_key
+          AND {_BATCH_CURRENT_PREDICATE}
+        ORDER BY
+            {_BATCH_EFFECTIVE_AT} DESC,
+            w.issued_at DESC NULLS LAST,
+            w.collected_at DESC,
+            w.weather_value_key
+        LIMIT 1
+    ) AS row ON true
+),
 current_rows AS (
     SELECT DISTINCT ON (
-        source.ordinality, w.forecast_style, w.metric_key
+        source.ordinality, row.forecast_style, row.metric_key
     )
         source.ordinality,
         'current'::text AS section,
+        row.forecast_style,
+        row.metric_key,
+        row.metric_name,
+        row.timeline_bucket,
+        row.value_number,
+        row.value_text,
+        row.unit,
+        row.severity,
+        row.issued_at,
+        row.valid_at,
+        row.valid_from,
+        row.valid_until,
+        row.observed_at,
+        row.provider,
+        row.weather_domain,
+        row.effective_at
+    FROM sources AS source
+    JOIN current_source_rows AS row
+      ON row.source_feature_id = source.source_feature_id
+    ORDER BY
+        source.ordinality,
+        row.forecast_style,
+        row.metric_key,
+        source.tier,
+        row.effective_at DESC,
+        row.issued_at DESC NULLS LAST
+),
+timeline_source_rows AS (
+    SELECT DISTINCT ON (
+        metric.source_feature_id,
+        w.forecast_style,
+        w.metric_key,
+        {_BATCH_EFFECTIVE_AT}
+    )
+        metric.source_feature_id,
         w.forecast_style,
         w.metric_key,
         w.metric_name,
@@ -501,16 +607,21 @@ current_rows AS (
         w.provider,
         w.weather_domain,
         {_BATCH_EFFECTIVE_AT} AS effective_at
-    FROM sources AS source
+    FROM source_metric_keys AS metric
     JOIN feature.feature_weather_values AS w
-      ON w.feature_id = source.source_feature_id
-    WHERE {_BATCH_CURRENT_PREDICATE}
+      ON w.feature_id = metric.source_feature_id
+     AND w.forecast_style = metric.forecast_style
+     AND w.metric_key = metric.metric_key
+    WHERE {_BATCH_KNOWN_AT}
+      AND {_BATCH_EFFECTIVE_AT} > CAST(:target_at AS timestamptz)
+      AND {_BATCH_EFFECTIVE_AT}
+          <= CAST(:target_at AS timestamptz)
+             + make_interval(days => CAST(:timeline_days AS integer))
     ORDER BY
-        source.ordinality,
+        metric.source_feature_id,
         w.forecast_style,
         w.metric_key,
-        source.tier,
-        {_BATCH_EFFECTIVE_AT} DESC,
+        {_BATCH_EFFECTIVE_AT},
         w.issued_at DESC NULLS LAST,
         w.collected_at DESC,
         w.weather_value_key
@@ -518,45 +629,38 @@ current_rows AS (
 timeline_rows AS (
     SELECT DISTINCT ON (
         source.ordinality,
-        w.forecast_style,
-        w.metric_key,
-        {_BATCH_EFFECTIVE_AT}
+        row.forecast_style,
+        row.metric_key,
+        row.effective_at
     )
         source.ordinality,
         'timeline'::text AS section,
-        w.forecast_style,
-        w.metric_key,
-        w.metric_name,
-        w.timeline_bucket,
-        w.value_number,
-        w.value_text,
-        w.unit,
-        w.severity,
-        w.issued_at,
-        w.valid_at,
-        w.valid_from,
-        w.valid_until,
-        w.observed_at,
-        w.provider,
-        w.weather_domain,
-        {_BATCH_EFFECTIVE_AT} AS effective_at
+        row.forecast_style,
+        row.metric_key,
+        row.metric_name,
+        row.timeline_bucket,
+        row.value_number,
+        row.value_text,
+        row.unit,
+        row.severity,
+        row.issued_at,
+        row.valid_at,
+        row.valid_from,
+        row.valid_until,
+        row.observed_at,
+        row.provider,
+        row.weather_domain,
+        row.effective_at
     FROM sources AS source
-    JOIN feature.feature_weather_values AS w
-      ON w.feature_id = source.source_feature_id
-    WHERE {_BATCH_KNOWN_AT}
-      AND {_BATCH_EFFECTIVE_AT} > CAST(:target_at AS timestamptz)
-      AND {_BATCH_EFFECTIVE_AT}
-          <= CAST(:target_at AS timestamptz)
-             + make_interval(days => CAST(:timeline_days AS integer))
+    JOIN timeline_source_rows AS row
+      ON row.source_feature_id = source.source_feature_id
     ORDER BY
         source.ordinality,
-        w.forecast_style,
-        w.metric_key,
-        {_BATCH_EFFECTIVE_AT},
+        row.forecast_style,
+        row.metric_key,
+        row.effective_at,
         source.tier,
-        w.issued_at DESC NULLS LAST,
-        w.collected_at DESC,
-        w.weather_value_key
+        row.issued_at DESC NULLS LAST
 ),
 weather_rows AS (
     SELECT * FROM current_rows

@@ -500,11 +500,19 @@ async def test_weather_card_tiered_merge_observed_augments_kma_mid(
 
     # KREX 관측 anchor ≈ 3km 동쪽.
     await _ins_feature_at(
-        migrated_session, "krex_obs", lon=_BASE_LON + 0.034, lat=_BASE_LAT
+        migrated_session,
+        "krex_obs",
+        lon=_BASE_LON + 0.034,
+        lat=_BASE_LAT,
+        kind="weather",
     )
     # KMA 중기/단기 anchor ≈ 8km 동쪽 (관측보다 멀다).
     await _ins_feature_at(
-        migrated_session, "kma_anchor", lon=_BASE_LON + 0.090, lat=_BASE_LAT
+        migrated_session,
+        "kma_anchor",
+        lon=_BASE_LON + 0.090,
+        lat=_BASE_LAT,
+        kind="weather",
     )
 
     await weather_repo.load_weather_values(
@@ -563,7 +571,11 @@ async def test_weather_card_krex_observed_only_in_radius(
     await _ins_feature_at(migrated_session, "rural2", lon=_BASE_LON, lat=_BASE_LAT)
     # KREX 관측 ≈ 3km.
     await _ins_feature_at(
-        migrated_session, "krex_only", lon=_BASE_LON + 0.034, lat=_BASE_LAT
+        migrated_session,
+        "krex_only",
+        lon=_BASE_LON + 0.034,
+        lat=_BASE_LAT,
+        kind="weather",
     )
     await weather_repo.load_weather_values(
         migrated_session, [_krex_observed("krex_only")]
@@ -587,7 +599,11 @@ async def test_weather_card_own_rows_no_fallback(
     await _ins_feature_at(migrated_session, "own", lon=_BASE_LON, lat=_BASE_LAT)
     # 가까운 KREX 관측 anchor가 있어도, 자기 row가 기온을 채우면 병합하지 않아야 함.
     await _ins_feature_at(
-        migrated_session, "neighbor_obs", lon=_BASE_LON + 0.01, lat=_BASE_LAT
+        migrated_session,
+        "neighbor_obs",
+        lon=_BASE_LON + 0.01,
+        lat=_BASE_LAT,
+        kind="weather",
     )
     await weather_repo.load_weather_values(
         migrated_session, [_krex_observed("neighbor_obs")]
@@ -618,7 +634,11 @@ async def test_weather_card_far_anchor_outside_radius_no_merge(
     await _ins_feature_at(migrated_session, "isolated", lon=_BASE_LON, lat=_BASE_LAT)
     # ≈ 90km 동쪽 (반경 50km 밖).
     await _ins_feature_at(
-        migrated_session, "far_kma", lon=_BASE_LON + 1.0, lat=_BASE_LAT
+        migrated_session,
+        "far_kma",
+        lon=_BASE_LON + 1.0,
+        lat=_BASE_LAT,
+        kind="weather",
     )
     await weather_repo.load_weather_values(
         migrated_session,
@@ -661,7 +681,8 @@ async def test_nearest_temp_uses_coord_gist_and_no_weather_full_scan(
             )
             SELECT
                 'wseed:' || lpad(g::text, 6, '0'),
-                'place', 'seed ' || g::text, '06020000',
+                CASE WHEN g % 7 = 1 THEN 'weather' ELSE 'place' END,
+                'seed ' || g::text, '06020000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(
                         126.90 + ((g % 200)::float * 0.002),
@@ -728,3 +749,32 @@ async def test_nearest_temp_uses_coord_gist_and_no_weather_full_scan(
     assert not weather_seq_scans, (
         f"feature_weather_values must not be full-scanned: {weather_seq_scans}"
     )
+
+    batch_plan = (
+        await migrated_session.execute(
+            text(
+                "EXPLAIN (FORMAT JSON, COSTS OFF) "
+                + weather_repo._WEATHER_BATCH_SQL  # noqa: SLF001
+            ),
+            {
+                "feature_ids": ["explain_target"],
+                "target_at": datetime.now(_KST),
+                "known_at": datetime.now(_KST),
+                "radius_m": 50_000.0,
+                "timeline_days": 1,
+            },
+        )
+    ).scalar_one()[0]["Plan"]
+    batch_nodes = _walk_plan(batch_plan)
+    batch_indexes = {
+        str(node["Index Name"])
+        for node in batch_nodes
+        if node.get("Index Name") is not None
+    }
+    assert "idx_weather_values_feature_effective" in batch_indexes
+    assert not [
+        node
+        for node in batch_nodes
+        if node.get("Node Type") == "Seq Scan"
+        and node.get("Relation Name") == "feature_weather_values"
+    ]
