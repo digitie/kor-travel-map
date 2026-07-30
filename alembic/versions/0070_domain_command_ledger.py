@@ -20,6 +20,19 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    op.drop_constraint(
+        "ck_offline_uploads_status",
+        "offline_uploads",
+        schema="ops",
+        type_="check",
+    )
+    op.create_check_constraint(
+        "ck_offline_uploads_status",
+        "offline_uploads",
+        "status IN ('uploading', 'uploaded', 'validating', 'validated', "
+        "'validation_failed', 'loading', 'loaded', 'load_failed', 'cancelled')",
+        schema="ops",
+    )
     op.create_table(
         "domain_commands",
         sa.Column(
@@ -195,8 +208,13 @@ def upgrade() -> None:
             postgresql.UUID(as_uuid=False),
             nullable=False,
         ),
+        sa.Column("storage_backend", sa.Text(), nullable=True),
+        sa.Column("bucket", sa.Text(), nullable=True),
         sa.Column("storage_key", sa.Text(), nullable=True),
+        sa.Column("content_type", sa.Text(), nullable=True),
+        sa.Column("byte_size", sa.BigInteger(), nullable=True),
         sa.Column("content_sha256", sa.Text(), nullable=True),
+        sa.Column("metadata_digest", sa.Text(), nullable=True),
         sa.Column(
             "load_job_id",
             postgresql.UUID(as_uuid=False),
@@ -227,8 +245,15 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "(effect_kind <> 'create') OR "
-            "(storage_key IS NOT NULL AND content_sha256 IS NOT NULL "
-            "AND content_sha256 ~ '^[0-9a-f]{64}$')",
+            "(storage_backend IS NOT NULL AND btrim(storage_backend) <> '' "
+            "AND bucket IS NOT NULL AND btrim(bucket) <> '' "
+            "AND storage_key IS NOT NULL AND btrim(storage_key) <> '' "
+            "AND content_type IS NOT NULL AND btrim(content_type) <> '' "
+            "AND byte_size IS NOT NULL AND byte_size > 0 "
+            "AND content_sha256 IS NOT NULL "
+            "AND content_sha256 ~ '^[0-9a-f]{64}$' "
+            "AND metadata_digest IS NOT NULL "
+            "AND metadata_digest ~ '^[0-9a-f]{64}$')",
             name=op.f("ck_offline_upload_command_executions_create_identity"),
         ),
         sa.CheckConstraint(
@@ -315,12 +340,16 @@ def upgrade() -> None:
             RAISE EXCEPTION 'invalid offline upload command execution transition'
               USING ERRCODE = '55000';
           END IF;
-          IF (OLD.command_id, OLD.effect_kind, OLD.upload_id, OLD.storage_key,
-              OLD.content_sha256, OLD.load_job_id, OLD.input_digest,
+          IF (OLD.command_id, OLD.effect_kind, OLD.upload_id,
+              OLD.storage_backend, OLD.bucket, OLD.storage_key,
+              OLD.content_type, OLD.byte_size, OLD.content_sha256,
+              OLD.metadata_digest, OLD.load_job_id, OLD.input_digest,
               OLD.prepared_at)
              IS DISTINCT FROM
-             (NEW.command_id, NEW.effect_kind, NEW.upload_id, NEW.storage_key,
-              NEW.content_sha256, NEW.load_job_id, NEW.input_digest,
+             (NEW.command_id, NEW.effect_kind, NEW.upload_id,
+              NEW.storage_backend, NEW.bucket, NEW.storage_key,
+              NEW.content_type, NEW.byte_size, NEW.content_sha256,
+              NEW.metadata_digest, NEW.load_job_id, NEW.input_digest,
               NEW.prepared_at) THEN
             RAISE EXCEPTION 'offline upload command execution identity is immutable'
               USING ERRCODE = '55000';
@@ -443,3 +472,16 @@ def downgrade() -> None:
     )
     op.execute("DROP FUNCTION ops.reject_domain_command_history_mutation()")
     op.drop_table("domain_commands", schema="ops")
+    op.drop_constraint(
+        "ck_offline_uploads_status",
+        "offline_uploads",
+        schema="ops",
+        type_="check",
+    )
+    op.create_check_constraint(
+        "ck_offline_uploads_status",
+        "offline_uploads",
+        "status IN ('uploaded', 'validating', 'validated', "
+        "'validation_failed', 'loading', 'loaded', 'load_failed', 'cancelled')",
+        schema="ops",
+    )

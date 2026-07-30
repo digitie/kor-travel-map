@@ -28,6 +28,7 @@ __all__ = [
 ]
 
 OfflineUploadState = Literal[
+    "uploading",
     "uploaded",
     "validating",
     "validated",
@@ -39,6 +40,7 @@ OfflineUploadState = Literal[
 ]
 
 OFFLINE_UPLOAD_STATE_VALUES: Final[tuple[OfflineUploadState, ...]] = (
+    "uploading",
     "uploaded",
     "validating",
     "validated",
@@ -72,7 +74,7 @@ OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES: Final[frozenset[OfflineUploadState]] =
 )
 OFFLINE_UPLOAD_RESERVED_STATES: Final[frozenset[OfflineUploadState]] = frozenset({"cancelled"})
 OFFLINE_UPLOAD_IN_PROGRESS_STATES: Final[frozenset[OfflineUploadState]] = frozenset(
-    {"validating", "loading"}
+    {"uploading", "validating", "loading"}
 )
 OFFLINE_UPLOAD_DELETABLE_STATES: Final[frozenset[OfflineUploadState]] = (
     OFFLINE_UPLOAD_STATES - OFFLINE_UPLOAD_IN_PROGRESS_STATES

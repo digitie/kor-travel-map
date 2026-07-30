@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -10,7 +11,16 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import Response
 from kortravelmap.curation_import import (
     CURATION_CSV_HEADERS,
@@ -25,6 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.api import domain_command_service
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
 from kortravelmap.api.domain_command_service import (
@@ -630,12 +641,23 @@ async def import_admin_curations(
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     file: Annotated[UploadFile, File(description="UTF-8 CSV 파일")],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     dry_run: Annotated[bool, Query()] = True,
 ) -> CurationImportResponse:
     """CSV를 preview하거나 오류 없는 전체 파일을 원자적으로 멱등 반영한다."""
     started_at = perf_counter()
     content = await file.read(CURATION_CSV_MAX_BYTES + 1)
     preview = parse_curation_csv(content)
+    command = await domain_command_service.begin_domain_command(
+        session,
+        actor=context.actor,
+        operation="admin.curation.import",
+        idempotency_key=idempotency_key,
+        payload={
+            "content_sha256": hashlib.sha256(content).hexdigest(),
+            "dry_run": dry_run,
+        },
+    )
     matches_by_row = await curation_repo.resolve_feature_matches(
         session,
         requests=tuple(
@@ -795,7 +817,6 @@ async def import_admin_curations(
             result = await curation_repo.import_curation_rows(
                 session, rows=resolved_rows, actor=context.actor
             )
-            await session.commit()
     except IntegrityError as exc:
         await session.rollback()
         raise _conflict(exc) from exc
@@ -809,7 +830,7 @@ async def import_admin_curations(
         item.status in {"unmatched", "review_required", "ambiguous"}
         for item in item_views
     )
-    return CurationImportResponse(
+    response = CurationImportResponse(
         data=CurationImportData(
             dry_run=dry_run,
             rows_total=preview.rows_total,
@@ -827,6 +848,13 @@ async def import_admin_curations(
         ),
         meta=make_meta(request, started_at=started_at),
     )
+    await domain_command_service.complete_domain_command(
+        session,
+        command=command,
+        response=response,
+    )
+    await session.commit()
+    return response
 
 
 @router.get("", response_model=FeatureCurationGroupsResponse)

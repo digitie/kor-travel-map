@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
@@ -21,7 +22,6 @@ from kortravelmap.infra.offline_upload_repo import (
 from kortravelmap.offline_upload import validate_offline_tabular_upload
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
-from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
@@ -47,6 +47,7 @@ class _FakeSession:
 
 class _FakeStore:
     def __init__(self, objects: dict[str, bytes] | None = None) -> None:
+        self.bucket = "kor-travel-map-uploads"
         self.calls: list[dict[str, Any]] = []
         self.deleted: list[str] = []
         self.objects = objects or {}
@@ -75,7 +76,23 @@ class _FakeStore:
             bucket="kor-travel-map-uploads",
             object_key=storage_key,
             byte_size=len(body),
-            checksum_sha256="a" * 64,
+            checksum_sha256=hashlib.sha256(body).hexdigest(),
+            content_type=content_type or "application/octet-stream",
+            metadata=dict(metadata or {}),
+        )
+
+    async def inspect_object(self, storage_key: str) -> StoredObject:
+        call = next(
+            item for item in reversed(self.calls) if item["storage_key"] == storage_key
+        )
+        body = self.objects[storage_key]
+        return StoredObject(
+            bucket="kor-travel-map-uploads",
+            object_key=storage_key,
+            byte_size=len(body),
+            checksum_sha256=hashlib.sha256(body).hexdigest(),
+            content_type=call["content_type"],
+            metadata=dict(call["metadata"] or {}),
         )
 
     async def delete_object(self, storage_key: str) -> None:
@@ -93,7 +110,12 @@ def client(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> TestClient:
+    from kortravelmap.infra.domain_command_execution_repo import (
+        OfflineUploadCommandExecution,
+    )
+
     from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import offline_uploads as router_mod
 
     app = create_app(ApiSettings(admin_destructive_enabled=True))
 
@@ -108,7 +130,7 @@ def client(
             return_value=domain_command_service.DomainCommandHandle(
                 command_id=1,
                 actor="local-dev",
-                operation="admin.offline-upload.validate",
+                operation="admin.offline-upload.create",
                 idempotency_key="95000000-0000-4000-8000-000000000001",
                 request_fingerprint="a" * 64,
             )
@@ -117,6 +139,74 @@ def client(
     monkeypatch.setattr(
         domain_command_service,
         "complete_domain_command",
+        AsyncMock(),
+    )
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    executions: dict[int, OfflineUploadCommandExecution] = {}
+
+    async def _create_execution(
+        _session: object,
+        **kwargs: Any,
+    ) -> OfflineUploadCommandExecution:
+        execution = OfflineUploadCommandExecution(
+            command_id=int(kwargs["command_id"]),
+            effect_kind=str(kwargs["effect_kind"]),
+            phase="prepared",
+            upload_id=str(kwargs["upload_id"]),
+            storage_backend=kwargs["storage_backend"],
+            bucket=kwargs["bucket"],
+            storage_key=kwargs["storage_key"],
+            content_type=kwargs["content_type"],
+            byte_size=kwargs["byte_size"],
+            content_sha256=kwargs["content_sha256"],
+            metadata_digest=kwargs["metadata_digest"],
+            load_job_id=kwargs["load_job_id"],
+            dagster_run_id=None,
+            input_digest=str(kwargs["input_digest"]),
+            output_digest=None,
+            prepared_at=now,
+            effect_started_at=None,
+            effect_completed_at=None,
+        )
+        executions[execution.command_id] = execution
+        return execution
+
+    async def _get_execution(
+        _session: object,
+        command_id: int,
+    ) -> OfflineUploadCommandExecution | None:
+        return executions.get(command_id)
+
+    async def _start_execution(
+        _session: object,
+        command_id: int,
+    ) -> OfflineUploadCommandExecution:
+        execution = replace(
+            executions[command_id],
+            phase="effect_started",
+            effect_started_at=now,
+        )
+        executions[command_id] = execution
+        return execution
+
+    monkeypatch.setattr(
+        router_mod,
+        "create_offline_upload_command_execution",
+        _create_execution,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "get_offline_upload_command_execution",
+        _get_execution,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "start_offline_upload_command_effect",
+        _start_execution,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "complete_offline_upload_command_effect",
         AsyncMock(),
     )
     return TestClient(
@@ -204,8 +294,10 @@ def test_create_offline_upload_writes_object_and_metadata(
     store = _FakeStore()
     upload_body = b'{"feature":{"feature_id":"f1"}}\n'
     expected_checksum = hashlib.sha256(upload_body).hexdigest()
+    reserved: OfflineUpload | None = None
 
     async def _create(_session: Any, **kwargs: Any) -> OfflineUpload:
+        nonlocal reserved
         assert kwargs["provider"] == "offline-test-provider"
         assert kwargs["dataset_key"] == "offline_jsonl"
         assert kwargs["storage_backend"] == "rustfs"
@@ -214,14 +306,21 @@ def test_create_offline_upload_writes_object_and_metadata(
         assert kwargs["checksum_sha256"] == expected_checksum
         # T-VN-20 (ADR-066 D-2): created_by는 인증 principal(local-dev)에서만 파생한다.
         assert kwargs["created_by"] == "local-dev"
-        return _upload(
+        reserved = _upload(
             upload_id=kwargs["upload_id"],
+            state="uploading",
             storage_key=kwargs["storage_key"],
             checksum_sha256=kwargs["checksum_sha256"],
         )
+        return reserved
+
+    async def _finalize(_session: Any, **_kwargs: Any) -> OfflineUpload:
+        assert reserved is not None
+        return replace(reserved, status="uploaded")
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
-    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "finalize_offline_upload_reservation", _finalize)
 
     response = client.post(
         "/v1/admin/offline-uploads",
@@ -246,13 +345,12 @@ def test_create_offline_upload_writes_object_and_metadata(
     assert body["meta"]["object_key"].startswith("offline-uploads/")
     assert store.calls[0]["body"] == b'{"feature":{"feature_id":"f1"}}\n'
     assert store.calls[0]["metadata"]["provider"] == "offline-test-provider"
-    # 1: upload 생성 tx, 2: best-effort managed-file registry 등록 hook의 별도 tx
-    # (registry_guard가 hook 실패를 무해화하므로 위 201 응답/store 동작은 불변).
-    assert session.begin_count == 2
+    # claim+DB 예약, effect_started, 증명+terminal result, registry hook.
+    assert session.begin_count == 4
 
 
 @pytest.mark.unit
-def test_create_offline_upload_duplicate_checksum_rolls_back_object(
+def test_create_offline_upload_duplicate_checksum_stops_before_object_store(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -261,8 +359,8 @@ def test_create_offline_upload_duplicate_checksum_rolls_back_object(
     store = _FakeStore()
     existing = _upload(upload_id="00000000-0000-0000-0000-000000000099")
 
-    async def _create(_session: Any, **_kwargs: Any) -> OfflineUpload:
-        raise IntegrityError("insert offline upload", {}, Exception("duplicate"))
+    async def _reserve(_session: Any, **_kwargs: Any) -> None:
+        return None
 
     async def _duplicate(_session: Any, **kwargs: Any) -> OfflineUpload:
         assert kwargs["provider"] == "p"
@@ -271,7 +369,7 @@ def test_create_offline_upload_duplicate_checksum_rolls_back_object(
         return existing
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
-    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _reserve)
     monkeypatch.setattr(router_mod, "get_offline_upload_by_checksum", _duplicate)
 
     response = client.post(
@@ -290,7 +388,8 @@ def test_create_offline_upload_duplicate_checksum_rolls_back_object(
     body = response.json()
     assert body["code"] == "OFFLINE_UPLOAD_DUPLICATE"
     assert body["details"]["upload_id"] == existing.upload_id
-    assert store.deleted == [store.calls[0]["storage_key"]]
+    assert store.calls == []
+    assert store.deleted == []
 
 
 @pytest.mark.unit
@@ -301,11 +400,14 @@ def test_create_offline_upload_accepts_csv(
     from kortravelmap.api.routers import offline_uploads as router_mod
 
     store = _FakeStore()
+    reserved: OfflineUpload | None = None
 
     async def _create(_session: Any, **kwargs: Any) -> OfflineUpload:
+        nonlocal reserved
         assert kwargs["detected_format"] == "csv"
-        return _upload(
+        reserved = _upload(
             upload_id=kwargs["upload_id"],
+            state="uploading",
             storage_key=kwargs["storage_key"],
             original_filename="features.csv",
             detected_format="csv",
@@ -313,9 +415,15 @@ def test_create_offline_upload_accepts_csv(
             byte_size=kwargs["byte_size"],
             checksum_sha256=kwargs["checksum_sha256"],
         )
+        return reserved
+
+    async def _finalize(_session: Any, **_kwargs: Any) -> OfflineUpload:
+        assert reserved is not None
+        return replace(reserved, status="uploaded")
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
-    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "finalize_offline_upload_reservation", _finalize)
 
     response = client.post(
         "/v1/admin/offline-uploads",
@@ -336,6 +444,7 @@ def test_offline_upload_store_is_reused_from_app_state(
 
     store = _FakeStore()
     build_count = 0
+    reserved: OfflineUpload | None = None
 
     def _build_store(_settings: Any) -> _FakeStore:
         nonlocal build_count
@@ -343,16 +452,24 @@ def test_offline_upload_store_is_reused_from_app_state(
         return store
 
     async def _create(_session: Any, **kwargs: Any) -> OfflineUpload:
-        return _upload(
+        nonlocal reserved
+        reserved = _upload(
             upload_id=kwargs["upload_id"],
+            state="uploading",
             storage_key=kwargs["storage_key"],
             dataset_key=kwargs["dataset_key"],
             byte_size=kwargs["byte_size"],
             checksum_sha256=kwargs["checksum_sha256"],
         )
+        return reserved
+
+    async def _finalize(_session: Any, **_kwargs: Any) -> OfflineUpload:
+        assert reserved is not None
+        return replace(reserved, status="uploaded")
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", _build_store)
-    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "finalize_offline_upload_reservation", _finalize)
 
     for filename in ("features-a.jsonl", "features-b.jsonl"):
         response = client.post(
@@ -497,7 +614,7 @@ def test_create_app_lifespan_closes_cached_offline_upload_s3_client() -> None:
 
 
 @pytest.mark.unit
-def test_create_offline_upload_deletes_object_when_metadata_insert_fails(
+def test_create_offline_upload_stops_before_object_when_reservation_fails(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -506,12 +623,12 @@ def test_create_offline_upload_deletes_object_when_metadata_insert_fails(
     store = _FakeStore()
 
     async def _create(_session: Any, **_kwargs: Any) -> OfflineUpload:
-        raise RuntimeError("metadata insert failed")
+        raise RuntimeError("metadata reservation failed")
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
-    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _create)
 
-    with pytest.raises(RuntimeError, match="metadata insert failed"):
+    with pytest.raises(RuntimeError, match="metadata reservation failed"):
         client.post(
             "/v1/admin/offline-uploads",
             data={"provider": "p", "dataset_key": "d"},
@@ -524,8 +641,8 @@ def test_create_offline_upload_deletes_object_when_metadata_insert_fails(
             },
         )
 
-    assert store.calls
-    assert store.deleted == [store.calls[0]["storage_key"]]
+    assert store.calls == []
+    assert store.deleted == []
     assert store.objects == {}
 
 

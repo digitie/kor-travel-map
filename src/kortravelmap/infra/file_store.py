@@ -34,6 +34,8 @@ class StoredObject:
     checksum_sha256: str
     public_url: str | None = None
     etag: str | None = None
+    content_type: str | None = None
+    metadata: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -92,7 +94,21 @@ class S3ObjectStore:
             checksum_sha256=checksum,
             public_url=self.public_url(storage_key),
             etag=str(etag) if etag is not None else None,
+            content_type=content_type or "application/octet-stream",
+            metadata=dict(metadata or {}),
         )
+
+    async def inspect_object(self, storage_key: str) -> StoredObject:
+        """객체 identity와 저장 metadata를 다시 읽어 side-effect 증명으로 반환한다."""
+        try:
+            return await asyncio.to_thread(self._inspect_object_sync, storage_key)
+        except FileStoreError:
+            raise
+        except Exception as exc:
+            raise FileStoreError(
+                f"객체 저장소 metadata 조회 실패: bucket={self.bucket!r}, "
+                f"key={storage_key!r}"
+            ) from exc
 
     async def delete_object(self, storage_key: str) -> None:
         """``storage_key`` 객체를 삭제한다."""
@@ -175,6 +191,35 @@ class S3ObjectStore:
         if isinstance(data, bytes):
             return data
         raise FileStoreError(f"S3 Body.read() 결과가 bytes가 아님: key={storage_key!r}")
+
+    def _inspect_object_sync(self, storage_key: str) -> StoredObject:
+        response = self.s3_client.head_object(Bucket=self.bucket, Key=storage_key)
+        if not isinstance(response, dict):
+            raise FileStoreError(
+                f"S3 head_object 응답이 mapping이 아님: key={storage_key!r}"
+            )
+        raw_metadata = response.get("Metadata")
+        metadata = (
+            {str(key): str(value) for key, value in raw_metadata.items()}
+            if isinstance(raw_metadata, dict)
+            else {}
+        )
+        etag = response.get("ETag")
+        checksum = metadata.get("content-sha256", "")
+        return StoredObject(
+            bucket=self.bucket,
+            object_key=storage_key,
+            byte_size=int(response.get("ContentLength") or 0),
+            checksum_sha256=checksum,
+            public_url=self.public_url(storage_key),
+            etag=str(etag) if etag is not None else None,
+            content_type=(
+                str(response["ContentType"])
+                if response.get("ContentType") is not None
+                else None
+            ),
+            metadata=metadata,
+        )
 
 
 def create_s3_client(

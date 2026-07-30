@@ -50,6 +50,8 @@ __all__ = [
     "list_offline_uploads",
     "mark_offline_upload_loading",
     "mark_offline_upload_validating",
+    "finalize_offline_upload_reservation",
+    "reserve_offline_upload",
     "reserve_offline_upload_load",
 ]
 
@@ -195,6 +197,21 @@ INSERT INTO ops.offline_uploads (
 RETURNING {_RETURN_COLUMNS}
 """
 
+_RESERVE_SQL: Final[str] = f"""
+INSERT INTO ops.offline_uploads (
+    upload_id, provider, dataset_key, sync_scope, original_filename,
+    storage_backend, storage_key, byte_size, checksum_sha256,
+    detected_format, detected_encoding, status, created_by
+) VALUES (
+    CAST(:upload_id AS uuid), :provider, :dataset_key, :sync_scope,
+    :original_filename, :storage_backend, :storage_key, :byte_size,
+    :checksum_sha256, :detected_format, :detected_encoding, 'uploading',
+    :created_by
+)
+ON CONFLICT (provider, dataset_key, sync_scope, checksum_sha256) DO NOTHING
+RETURNING {_RETURN_COLUMNS}
+"""
+
 _GET_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.offline_uploads
@@ -291,6 +308,15 @@ WHERE upload_id = :upload_id
 RETURNING {_RETURN_COLUMNS}
 """
 
+_FINALIZE_RESERVATION_SQL: Final[str] = f"""
+UPDATE ops.offline_uploads
+SET status = 'uploaded',
+    updated_at = now()
+WHERE upload_id = :upload_id
+  AND status = 'uploading'
+RETURNING {_RETURN_COLUMNS}
+"""
+
 
 async def _missing_or_status_conflict(
     session: AsyncSession,
@@ -354,6 +380,69 @@ async def create_offline_upload(
         },
     )
     return _row_to_upload(result.one())
+
+
+async def reserve_offline_upload(
+    session: AsyncSession,
+    *,
+    upload_id: str,
+    provider: str,
+    dataset_key: str,
+    original_filename: str,
+    storage_backend: str,
+    storage_key: str,
+    byte_size: int,
+    checksum_sha256: str,
+    sync_scope: str = "default",
+    detected_format: str | None = None,
+    detected_encoding: str | None = None,
+    created_by: str | None = None,
+) -> OfflineUpload | None:
+    """외부 저장 전에 ``uploading`` row와 checksum 소유권을 원자적으로 선점한다."""
+    result = await session.execute(
+        text(_RESERVE_SQL),
+        {
+            "upload_id": upload_id,
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "sync_scope": sync_scope,
+            "original_filename": original_filename,
+            "storage_backend": storage_backend,
+            "storage_key": storage_key,
+            "byte_size": byte_size,
+            "checksum_sha256": checksum_sha256,
+            "detected_format": detected_format,
+            "detected_encoding": detected_encoding,
+            "created_by": created_by,
+        },
+    )
+    row = result.one_or_none()
+    return _row_to_upload(row) if row is not None else None
+
+
+async def finalize_offline_upload_reservation(
+    session: AsyncSession,
+    *,
+    upload_id: str,
+) -> OfflineUpload | None:
+    """증명된 object의 예약 row를 ``uploaded``로 확정한다."""
+    result = await session.execute(
+        text(_FINALIZE_RESERVATION_SQL),
+        {"upload_id": upload_id},
+    )
+    row = result.one_or_none()
+    if row is not None:
+        return _row_to_upload(row)
+    upload = await get_offline_upload(session, upload_id)
+    if upload is not None and upload.status == "uploaded":
+        return upload
+    await _missing_or_status_conflict(
+        session,
+        upload_id=upload_id,
+        target_status="uploaded",
+        allowed_statuses=frozenset({"uploading", "uploaded"}),
+    )
+    return None
 
 
 async def delete_offline_upload(

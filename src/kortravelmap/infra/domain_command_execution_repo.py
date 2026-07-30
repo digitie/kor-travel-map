@@ -56,8 +56,13 @@ class OfflineUploadCommandExecution:
     effect_kind: str
     phase: ExecutionPhase
     upload_id: str
+    storage_backend: str | None
+    bucket: str | None
     storage_key: str | None
+    content_type: str | None
+    byte_size: int | None
     content_sha256: str | None
+    metadata_digest: str | None
     load_job_id: str | None
     dagster_run_id: str | None
     input_digest: str
@@ -73,9 +78,10 @@ marker_key, input_digest, output_digest, marker_sha256, prepared_at,
 effect_started_at, effect_completed_at
 """
 _OFFLINE_COLUMNS = """
-command_id, effect_kind, phase, upload_id, storage_key, content_sha256,
-load_job_id, dagster_run_id, input_digest, output_digest, prepared_at,
-effect_started_at, effect_completed_at
+command_id, effect_kind, phase, upload_id, storage_backend, bucket, storage_key,
+content_type, byte_size, content_sha256, metadata_digest, load_job_id,
+dagster_run_id, input_digest, output_digest, prepared_at, effect_started_at,
+effect_completed_at
 """
 
 
@@ -104,8 +110,13 @@ def _offline(row: Any) -> OfflineUploadCommandExecution:
         effect_kind=str(row.effect_kind),
         phase=row.phase,
         upload_id=str(row.upload_id),
+        storage_backend=row.storage_backend,
+        bucket=row.bucket,
         storage_key=row.storage_key,
+        content_type=row.content_type,
+        byte_size=int(row.byte_size) if row.byte_size is not None else None,
         content_sha256=row.content_sha256,
+        metadata_digest=row.metadata_digest,
         load_job_id=str(row.load_job_id) if row.load_job_id is not None else None,
         dagster_run_id=row.dagster_run_id,
         input_digest=str(row.input_digest),
@@ -250,8 +261,13 @@ async def create_offline_upload_command_execution(
     command_id: int,
     effect_kind: str,
     upload_id: str,
+    storage_backend: str | None,
+    bucket: str | None,
     storage_key: str | None,
+    content_type: str | None,
+    byte_size: int | None,
     content_sha256: str | None,
+    metadata_digest: str | None,
     load_job_id: str | None,
     input_digest: str,
 ) -> OfflineUploadCommandExecution:
@@ -260,12 +276,14 @@ async def create_offline_upload_command_execution(
             text(
                 f"""
                 INSERT INTO ops.offline_upload_command_executions (
-                    command_id, effect_kind, phase, upload_id, storage_key,
-                    content_sha256, load_job_id, input_digest
+                    command_id, effect_kind, phase, upload_id, storage_backend,
+                    bucket, storage_key, content_type, byte_size, content_sha256,
+                    metadata_digest, load_job_id, input_digest
                 ) VALUES (
                     :command_id, :effect_kind, 'prepared',
-                    CAST(:upload_id AS uuid), :storage_key, :content_sha256,
-                    CAST(:load_job_id AS uuid), :input_digest
+                    CAST(:upload_id AS uuid), :storage_backend, :bucket,
+                    :storage_key, :content_type, :byte_size, :content_sha256,
+                    :metadata_digest, CAST(:load_job_id AS uuid), :input_digest
                 )
                 RETURNING {_OFFLINE_COLUMNS}
                 """
@@ -274,8 +292,13 @@ async def create_offline_upload_command_execution(
                 "command_id": command_id,
                 "effect_kind": effect_kind,
                 "upload_id": upload_id,
+                "storage_backend": storage_backend,
+                "bucket": bucket,
                 "storage_key": storage_key,
+                "content_type": content_type,
+                "byte_size": byte_size,
                 "content_sha256": content_sha256,
+                "metadata_digest": metadata_digest,
                 "load_job_id": load_job_id,
                 "input_digest": input_digest,
             },

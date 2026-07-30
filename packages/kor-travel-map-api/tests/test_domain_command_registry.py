@@ -88,7 +88,6 @@ def test_feature_curation_review_domain_routes_require_uuid_header() -> None:
         "admin.backup.delete",
         "admin.backup.restore",
         "admin.backup.swap",
-        "admin.curation.import",
         "admin.offline-upload.create",
         "admin.offline-upload.delete",
         "admin.offline-upload.load",

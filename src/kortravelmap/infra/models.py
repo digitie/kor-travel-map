@@ -2664,8 +2664,15 @@ class OfflineUploadCommandExecutionRow(Base):
         ),
         CheckConstraint(
             "(effect_kind <> 'create') OR "
-            "(storage_key IS NOT NULL AND content_sha256 IS NOT NULL "
-            "AND content_sha256 ~ '^[0-9a-f]{64}$')",
+            "(storage_backend IS NOT NULL AND btrim(storage_backend) <> '' "
+            "AND bucket IS NOT NULL AND btrim(bucket) <> '' "
+            "AND storage_key IS NOT NULL AND btrim(storage_key) <> '' "
+            "AND content_type IS NOT NULL AND btrim(content_type) <> '' "
+            "AND byte_size IS NOT NULL AND byte_size > 0 "
+            "AND content_sha256 IS NOT NULL "
+            "AND content_sha256 ~ '^[0-9a-f]{64}$' "
+            "AND metadata_digest IS NOT NULL "
+            "AND metadata_digest ~ '^[0-9a-f]{64}$')",
             name=conv("ck_offline_upload_command_executions_create_identity"),
         ),
         CheckConstraint(
@@ -2698,8 +2705,13 @@ class OfflineUploadCommandExecutionRow(Base):
     effect_kind: Mapped[str] = mapped_column(Text, nullable=False)
     phase: Mapped[str] = mapped_column(Text, nullable=False)
     upload_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    storage_backend: Mapped[str | None] = mapped_column(Text)
+    bucket: Mapped[str | None] = mapped_column(Text)
     storage_key: Mapped[str | None] = mapped_column(Text)
+    content_type: Mapped[str | None] = mapped_column(Text)
+    byte_size: Mapped[int | None] = mapped_column(BigInteger)
     content_sha256: Mapped[str | None] = mapped_column(Text)
+    metadata_digest: Mapped[str | None] = mapped_column(Text)
     load_job_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     dagster_run_id: Mapped[str | None] = mapped_column(Text)
     input_digest: Mapped[str] = mapped_column(Text, nullable=False)
