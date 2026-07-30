@@ -200,6 +200,18 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
         ],
     )
     await migrated_session.flush()
+    series_count = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM feature.weather_metric_series
+                WHERE feature_id = 'batch_weather'
+                """
+            )
+        )
+    ).scalar_one()
+    assert series_count == 4
 
     connection = await migrated_session.connection()
     statement_count = 0
@@ -737,8 +749,8 @@ async def test_nearest_temp_uses_coord_gist_and_no_weather_full_scan(
     index_names = {
         str(n["Index Name"]) for n in nodes if n.get("Index Name") is not None
     }
-    assert "idx_features_coord_5179_gist" in index_names, (
-        f"expected features coord_5179 GiST KNN, used={sorted(index_names)}"
+    assert "idx_features_public_weather_coord_5179_gist" in index_names, (
+        f"expected weather-only coord_5179 GiST KNN, used={sorted(index_names)}"
     )
     weather_seq_scans = [
         n

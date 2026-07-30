@@ -483,21 +483,18 @@ sources AS (
     WHERE feature_id IS NOT NULL
 ),
 source_metric_keys AS MATERIALIZED (
-    SELECT DISTINCT
+    SELECT
         source.source_feature_id,
-        w.forecast_style,
-        w.metric_key
+        series.provider,
+        series.weather_domain,
+        series.forecast_style,
+        series.metric_key
     FROM (
         SELECT DISTINCT source_feature_id
         FROM sources
     ) AS source
-    JOIN feature.feature_weather_values AS w
-      ON w.feature_id = source.source_feature_id
-    WHERE {_BATCH_KNOWN_AT}
-      AND {_BATCH_EFFECTIVE_AT} IS NOT NULL
-      AND {_BATCH_EFFECTIVE_AT}
-          <= CAST(:target_at AS timestamptz)
-             + make_interval(days => CAST(:timeline_days AS integer))
+    JOIN feature.weather_metric_series AS series
+      ON series.feature_id = source.source_feature_id
 ),
 current_source_rows AS (
     SELECT
@@ -539,6 +536,8 @@ current_source_rows AS (
             {_BATCH_EFFECTIVE_AT} AS effective_at
         FROM feature.feature_weather_values AS w
         WHERE w.feature_id = metric.source_feature_id
+          AND w.provider = metric.provider
+          AND w.weather_domain = metric.weather_domain
           AND w.forecast_style = metric.forecast_style
           AND w.metric_key = metric.metric_key
           AND {_BATCH_CURRENT_PREDICATE}
@@ -610,6 +609,8 @@ timeline_source_rows AS (
     FROM source_metric_keys AS metric
     JOIN feature.feature_weather_values AS w
       ON w.feature_id = metric.source_feature_id
+     AND w.provider = metric.provider
+     AND w.weather_domain = metric.weather_domain
      AND w.forecast_style = metric.forecast_style
      AND w.metric_key = metric.metric_key
     WHERE {_BATCH_KNOWN_AT}
@@ -733,7 +734,8 @@ WITH target AS (
 )
 SELECT f.feature_id
 FROM feature.public_features AS f, target AS t
-WHERE f.coord_5179 IS NOT NULL
+WHERE f.kind = 'weather'
+  AND f.coord_5179 IS NOT NULL
   AND x_extension.ST_DWithin(
         f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
       )
@@ -780,6 +782,7 @@ FROM feature.features AS f, target AS t
 WHERE f.deleted_at IS NULL
   AND f.user_deleted_at IS NULL
   AND f.status <> 'deleted'
+  AND f.kind = 'weather'
   AND f.coord_5179 IS NOT NULL
   AND x_extension.ST_DWithin(
         f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
