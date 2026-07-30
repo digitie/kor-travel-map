@@ -37,6 +37,11 @@ def test_weather_in_openapi(client: TestClient) -> None:
     assert "/v1/features/weather/batch" in spec["paths"]
     assert "FeatureWeatherResponse" in spec["components"]["schemas"]
     assert "WeatherBatchResponse" in spec["components"]["schemas"]
+    feature_ids = spec["components"]["schemas"]["WeatherBatchRequest"]["properties"][
+        "feature_ids"
+    ]
+    assert feature_ids["uniqueItems"] is True
+    assert feature_ids["items"]["minLength"] == 1
 
 
 @pytest.mark.unit
@@ -85,6 +90,41 @@ def test_weather_card_response_maps_metrics(
         assert m["unit"] == "deg_c"
         assert m["provider"] == "python-kma-api"
         assert m["weather_domain"] == "kma_short_forecast"
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_weather_card_asof_only_changes_target_time(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import features as mod
+
+    asof = datetime(2026, 6, 6, 3, 0, tzinfo=UTC)
+
+    async def _batch(_s: Any, **kw: Any) -> tuple[WeatherBatchItem, ...]:
+        assert kw["target_at"] == asof
+        assert kw["known_at"] > asof
+        return (
+            WeatherBatchItem(
+                feature_id="f1",
+                state="no_data",
+                source_styles=[],
+                current=[],
+                timeline=[],
+                latest_at=None,
+                is_stale=True,
+            ),
+        )
+
+    monkeypatch.setattr(mod.weather_repo, "get_weather_batch_items", _batch)
+    _fake_session(client)
+    try:
+        response = client.get(
+            "/v1/features/f1/weather",
+            params={"asof": asof.isoformat()},
+        )
+        assert response.status_code == 200
     finally:
         client.app.dependency_overrides.clear()
 
@@ -142,6 +182,7 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
         observed_at=target_at,
         provider="python-krex-api",
         weather_domain="rest_area_weather",
+        effective_at=target_at,
     )
     timeline_metric = WeatherMetric(
         forecast_style="short",
@@ -157,6 +198,7 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
         observed_at=None,
         provider="python-kma-api",
         weather_domain="kma_short_forecast",
+        effective_at=future_at,
     )
 
     async def _batch(_s: Any, **kw: Any) -> tuple[WeatherBatchItem, ...]:
@@ -219,6 +261,7 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
         found = data["items"][0]
         assert found["current"][0]["provider"] == "python-krex-api"
         assert found["timeline"][0]["valid_at"] == "2026-07-31T00:00:00Z"
+        assert found["timeline"][0]["effective_at"] == "2026-07-31T00:00:00Z"
         assert data["items"][1] == {"state": "no_data", "feature_id": "no-data"}
         assert data["items"][2] == {"state": "retired", "feature_id": "retired"}
     finally:
@@ -237,6 +280,16 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
         {
             "feature_ids": ["naive"],
             "target_at": "2026-07-30T00:00:00",
+            "known_at": "2026-07-29T00:00:00Z",
+        },
+        {
+            "feature_ids": [""],
+            "target_at": "2026-07-30T00:00:00Z",
+            "known_at": "2026-07-29T00:00:00Z",
+        },
+        {
+            "feature_ids": ["overflow"],
+            "target_at": "9999-12-31T23:59:59.999999Z",
             "known_at": "2026-07-29T00:00:00Z",
         },
     ],

@@ -74,6 +74,9 @@ class WeatherMetric:
     observed_at: datetime | None
     provider: str | None = None
     weather_domain: str | None = None
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+    effective_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -257,7 +260,7 @@ _CARD_SQL: Final[str] = """
 SELECT DISTINCT ON (forecast_style, metric_key)
     forecast_style, metric_key, metric_name, timeline_bucket,
     value_number, value_text, unit, severity,
-    issued_at, valid_at, observed_at,
+    issued_at, valid_at, valid_from, valid_until, observed_at,
     provider, weather_domain
 FROM feature.feature_weather_values
 WHERE feature_id = :feature_id
@@ -290,7 +293,9 @@ def _weather_known_at_sql(alias: str) -> str:
     return (
         f"{alias}.collected_at <= CAST(:known_at AS timestamptz) "
         f"AND ({alias}.issued_at IS NULL "
-        f"OR {alias}.issued_at <= CAST(:known_at AS timestamptz))"
+        f"OR {alias}.issued_at <= CAST(:known_at AS timestamptz)) "
+        f"AND ({alias}.forecast_style NOT IN ('ultra_short', 'short', 'mid') "
+        f"OR {alias}.issued_at IS NOT NULL)"
     )
 
 
@@ -343,6 +348,7 @@ own_has_temperature AS (
             WHERE w.feature_id = parent.visible_feature_id
               AND w.metric_key IN ('T1H', 'TMP')
               AND {_BATCH_CURRENT_PREDICATE}
+            LIMIT 1 OFFSET 0
         ) AS value
     FROM parents AS parent
 ),
@@ -368,6 +374,7 @@ kma_anchor AS (
               WHERE w.feature_id = candidate.feature_id
                 AND {_KMA_FORECAST_PREDICATE}
                 AND {_BATCH_CURRENT_PREDICATE}
+              LIMIT 1 OFFSET 0
           )
         ORDER BY
             candidate.coord_5179
@@ -398,6 +405,7 @@ observed_anchor AS (
               WHERE w.feature_id = candidate.feature_id
                 AND {_OBSERVED_TEMP_PREDICATE}
                 AND {_BATCH_CURRENT_PREDICATE}
+              LIMIT 1 OFFSET 0
           )
         ORDER BY
             candidate.coord_5179
@@ -429,6 +437,7 @@ preferred_has_current AS (
               ON w.feature_id = source.source_feature_id
             WHERE source.ordinality = parent.ordinality
               AND {_BATCH_CURRENT_PREDICATE}
+            LIMIT 1 OFFSET 0
         ) AS value
     FROM parents AS parent
 ),
@@ -453,6 +462,7 @@ fallback_anchor AS (
               FROM feature.feature_weather_values AS w
               WHERE w.feature_id = candidate.feature_id
                 AND {_BATCH_CURRENT_PREDICATE}
+              LIMIT 1 OFFSET 0
           )
         ORDER BY
             candidate.coord_5179
@@ -485,6 +495,8 @@ current_rows AS (
         w.severity,
         w.issued_at,
         w.valid_at,
+        w.valid_from,
+        w.valid_until,
         w.observed_at,
         w.provider,
         w.weather_domain,
@@ -522,6 +534,8 @@ timeline_rows AS (
         w.severity,
         w.issued_at,
         w.valid_at,
+        w.valid_from,
+        w.valid_until,
         w.observed_at,
         w.provider,
         w.weather_domain,
@@ -568,6 +582,8 @@ SELECT
     weather.severity,
     weather.issued_at,
     weather.valid_at,
+    weather.valid_from,
+    weather.valid_until,
     weather.observed_at,
     weather.provider,
     weather.weather_domain,
@@ -1143,6 +1159,13 @@ async def list_kma_weather_alert_history(
 
 
 def _weather_metric(row: RowMapping) -> WeatherMetric:
+    valid_at = row["valid_at"]
+    observed_at = row["observed_at"]
+    valid_from = row["valid_from"]
+    issued_at = row["issued_at"]
+    effective_at = row.get("effective_at")
+    if effective_at is None:
+        effective_at = valid_at or observed_at or valid_from or issued_at
     return WeatherMetric(
         forecast_style=str(row["forecast_style"]),
         metric_key=str(row["metric_key"]),
@@ -1152,11 +1175,14 @@ def _weather_metric(row: RowMapping) -> WeatherMetric:
         value_text=row["value_text"],
         unit=row["unit"],
         severity=row["severity"],
-        issued_at=row["issued_at"],
-        valid_at=row["valid_at"],
-        observed_at=row["observed_at"],
+        issued_at=issued_at,
+        valid_at=valid_at,
+        observed_at=observed_at,
         provider=row["provider"],
         weather_domain=row["weather_domain"],
+        valid_from=valid_from,
+        valid_until=row["valid_until"],
+        effective_at=effective_at,
     )
 
 
@@ -1227,14 +1253,9 @@ async def get_weather_batch_items(
         current = current_by_id[feature_id]
         timeline = timeline_by_id[feature_id]
         latest_candidates = [
-            timestamp
+            metric.effective_at
             for metric in current
-            if (
-                timestamp := (
-                    metric.valid_at or metric.observed_at or metric.issued_at
-                )
-            )
-            is not None
+            if metric.effective_at is not None
         ]
         latest_at = max(latest_candidates) if latest_candidates else None
         is_stale = (

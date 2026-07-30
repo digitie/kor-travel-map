@@ -1468,7 +1468,10 @@ class WeatherMetricOut(BaseModel):
     severity: str | None = None
     issued_at: datetime | None = None
     valid_at: datetime | None = None
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
     observed_at: datetime | None = None
+    effective_at: datetime | None = None
     provider: str | None = None
     weather_domain: str | None = None
 
@@ -1487,7 +1490,10 @@ def _weather_metric_out(metric: weather_repo.WeatherMetric) -> WeatherMetricOut:
         severity=metric.severity,
         issued_at=metric.issued_at,
         valid_at=metric.valid_at,
+        valid_from=metric.valid_from,
+        valid_until=metric.valid_until,
         observed_at=metric.observed_at,
+        effective_at=metric.effective_at,
         provider=metric.provider,
         weather_domain=metric.weather_domain,
     )
@@ -1520,7 +1526,11 @@ class WeatherBatchRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_ids: list[str] = Field(min_length=1, max_length=200)
+    feature_ids: list[Annotated[str, Field(min_length=1)]] = Field(
+        min_length=1,
+        max_length=200,
+        json_schema_extra={"uniqueItems": True},
+    )
     target_at: AwareDatetime = Field(
         description="예보·관측이 설명해야 하는 시각(UTC offset 필수)."
     )
@@ -1532,6 +1542,14 @@ class WeatherBatchRequest(BaseModel):
     def feature_ids_must_be_unique(self) -> WeatherBatchRequest:
         if len(self.feature_ids) != len(set(self.feature_ids)):
             raise ValueError("feature_ids는 중복될 수 없습니다.")
+        try:
+            self.target_at + timedelta(
+                days=weather_repo.WEATHER_BATCH_TIMELINE_DAYS
+            )
+        except OverflowError as exc:
+            raise ValueError(
+                "target_at은 timeline 지평선을 계산할 수 있는 범위여야 합니다."
+            ) from exc
         return self
 
 
@@ -1671,19 +1689,20 @@ async def get_feature_weather(
     session: Annotated[AsyncSession, Depends(get_session)],
     feature_id: str,
     asof: Annotated[
-        datetime | None,
+        AwareDatetime | None,
         Query(description="이 시점 이하 weather만(미래 예보 제외)."),
     ] = None,
 ) -> FeatureWeatherResponse:
     started_at = perf_counter()
-    snapshot_at = asof or datetime.now(UTC)
+    known_at = datetime.now(UTC)
+    target_at = asof or known_at
     # 단건도 batch의 parent/no-data 판정과 bitemporal cutoff를 그대로 재사용한다.
     item = (
         await weather_repo.get_weather_batch_items(
             session,
             feature_ids=(feature_id,),
-            target_at=snapshot_at,
-            known_at=snapshot_at,
+            target_at=target_at,
+            known_at=known_at,
         )
     )[0]
     if item.state == "retired":
@@ -1769,8 +1788,8 @@ async def get_feature_price(
     await _public_feature_row_or_404(session, feature_id)
     card = await price_repo.build_price_card(
         session,
-        feature_id=feature_id,
-        asof=asof,
+            feature_id=feature_id,
+            asof=asof,
         history_limit=history_limit,
     )
     return FeaturePriceResponse(

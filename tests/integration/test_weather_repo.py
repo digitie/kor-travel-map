@@ -162,6 +162,41 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
                 value_number=Decimal("99.0"),
                 unit="deg_c",
             ),
+            # 발행시각이 없는 forecast는 known-at 계약을 만족하지 않는다.
+            _kma_short(
+                "batch_weather",
+                "POP",
+                issued_at=None,
+                valid_at=_T2 + timedelta(hours=6),
+                collected_at=_T1,
+                value_number=Decimal("88.0"),
+                unit="%",
+            ),
+            # 구간형 weather는 valid_from을 effective_at으로 보존한다.
+            _wv(
+                "RANGE_CURRENT",
+                feature_id="batch_weather",
+                weather_domain="kma_weather_alert",
+                forecast_style="advisory",
+                timeline_bucket=None,
+                issued_at=None,
+                valid_from=_T2 - timedelta(minutes=30),
+                valid_until=_T2 + timedelta(minutes=30),
+                collected_at=_T1,
+                value_text="현재 구간",
+            ),
+            _wv(
+                "RANGE_TIMELINE",
+                feature_id="batch_weather",
+                weather_domain="kma_weather_alert",
+                forecast_style="advisory",
+                timeline_bucket=None,
+                issued_at=None,
+                valid_from=_T2 + timedelta(hours=12),
+                valid_until=_T2 + timedelta(hours=18),
+                collected_at=_T1,
+                value_text="예정 구간",
+            ),
         ],
     )
     await migrated_session.flush()
@@ -193,8 +228,21 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
 
     assert statement_count == 1
     assert [item.state for item in items] == ["found", "no_data", "retired"]
-    assert [metric.value_number for metric in items[0].current] == [Decimal("20.0")]
-    assert [metric.value_number for metric in items[0].timeline] == [Decimal("23.0")]
+    current_by_key = {metric.metric_key: metric for metric in items[0].current}
+    timeline_by_key = {metric.metric_key: metric for metric in items[0].timeline}
+    assert current_by_key["TMP"].value_number == Decimal("20.0")
+    assert current_by_key["RANGE_CURRENT"].effective_at == _T2 - timedelta(
+        minutes=30
+    )
+    assert timeline_by_key["TMP"].value_number == Decimal("23.0")
+    assert "POP" not in timeline_by_key
+    assert timeline_by_key["RANGE_TIMELINE"].effective_at == _T2 + timedelta(
+        hours=12
+    )
+    assert timeline_by_key["RANGE_TIMELINE"].valid_until == _T2 + timedelta(
+        hours=18
+    )
+    assert items[0].latest_at == _T2 - timedelta(minutes=30)
     assert items[1].current == []
     assert items[1].timeline == []
     assert items[2].current == []
