@@ -40,8 +40,9 @@ prod daemon enablement와 ingress를 정상화하고, H30B는 signed bundle/clea
 포함한 ordered 1,477행 canonical artifact로 서명하며, H30B는 live endpoint 없이 그
 artifact만 resource override로 재생한다.
 
-핵심 Python 회귀 **42 passed**, 확장 targeted **57 passed**, Ruff·mypy 173 files·ESLint·
-OpenAPI/type drift, Vitest **254**는 green이다. Mocked D workers=4 두 번은 모두
+핵심 Python 회귀 **42 passed**, 확장 targeted **57 passed**, Ruff·mypy **196 files**
+(core 117 + API 56 + Dagster 23)·ESLint·OpenAPI/type drift, Vitest **254**는 green이다.
+Mocked D workers=4 두 번은 모두
 **276/276**와 manifest expected/actual
 failure·flake 0이었지만 runner가 manifest 뒤 nonzero로 끝나 checkpoint 전체 green으로
 부르지 않는다. owned 자원·HEAD·source digest는 깨끗했고, workers=8 진단에서는 기존

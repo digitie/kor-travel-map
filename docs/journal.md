@@ -76,7 +76,8 @@ ID·중복 identity·후행 malformed metadata 원자성·행 단위 count, veri
 모두 P0~P2 0건을 확인했고, #894 docs 전문 리뷰어도 배포 계약 잔여 finding 0건으로 종료했다.
 
 최종 exact HEAD 검증은 핵심 Python 회귀 **42 passed**, 두 번째 reviewer의 확장 targeted
-**57 passed**, Ruff·mypy(173 files)·ESLint·OpenAPI/type drift green,
+**57 passed**, Ruff·mypy(**196 files**: core 117 + API 56 + Dagster 23)·ESLint·
+OpenAPI/type drift green,
 Vitest **254 passed**다. exact HEAD production image를 쓴 Mocked 최종 D checkpoint는
 workers=4 두 번 모두 **276/276**, manifest expected/actual failure·flake 0으로 일치했다.
 다만 두 실행 모두 manifest 출력 뒤 runner가 nonzero로 끝났고, owned 자원·HEAD·source
