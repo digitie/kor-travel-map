@@ -210,6 +210,9 @@ barrier로 직렬화한다.
     검증한다. H35 daemon preflight 뒤에도 두 DB의 서명 identity가 그대로면 같은 scratch
     pair를 재사용하고, 다르면 새 clone을 만들지 말고 그 pair를 같은 bundle로 reset한다.
     prod DB·schedule/sensor·ingress는 이 task에서 변경하지 않는다.
+  - 같은 bundle의 concierge `changes` export artifact를 SHA-256·page/cursor chain·행 수까지
+    검증하고, live endpoint credential/network 없이 resource override로 ordered item을
+    재생한다. 이 artifact 외 입력을 섞거나 H30B 시점의 live export를 다시 조회하지 않는다.
 
 - [ ] T-VN-H30C — **타 provider `AdminEvidence` 무장 (미완 — 재작업 필요)**
 
@@ -508,13 +511,18 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   8. **post-migration 격리 bundle·daemon preflight** — candidate API를 다시 정지해
      prod app·Dagster DB writer 0건을 재확인한 뒤, 0068 상태의 app·Dagster DB를 H30B용
      immutable custom dump bundle로 만든다. SHA-256·`pg_restore --list`와
-     pre-materialize Feature **1,020**, source/export **1,477**, head·schema/content identity를
-     기록하고 step 5에서 쓴 같은 scratch DB pair를 reset·복원해 대조한다. candidate
-     Dagster daemon을 prod credential·network 없이 이 scratch pair에만 연결하고 모든
-     app DB write schedule/sensor pause·pending/running run 0 상태에서 실제 기동해 image
-     ID·OCI revision·heartbeat/health를 검증한 뒤 정지한다. preflight가 scratch metadata를
-     바꿨다면 같은 pair를 signed bundle로 다시 reset해 H30B 인수 identity를 복구한다.
-     별도 clone은 만들지 않는다.
+     pre-materialize Feature **1,020**, head·schema/content identity를 기록한다. 실제
+     concierge `changes` export도 cursor 없이 시작해 끝까지 한 번 수집하고, ordered page
+     envelope마다 request cursor·`next_cursor`·`has_more`와 item 원문(operation 포함)을
+     credential/header 없이 canonical JSON artifact로 보존한다. cursor chain의 전진·종료와
+     전체 **1,477행**을 확인하고 payload SHA-256을 DB dump·candidate image manifest와
+     하나로 결속한다. producer에는 durable snapshot/version identity가 없으므로 count만
+     기록한 live 재조회는 같은 입력으로 인정하지 않는다. step 5에서 쓴 같은 scratch DB pair를
+     reset·복원해 DB identity를 대조하고, candidate Dagster daemon을 prod credential·network
+     없이 이 scratch pair에만 연결해 모든 app DB write schedule/sensor pause·pending/running
+     run 0 상태에서 실제 기동한다. image ID·OCI revision·heartbeat/health 검증 뒤 정지하고,
+     preflight가 scratch metadata를 바꿨다면 같은 pair를 signed DB bundle로 다시 reset해
+     H30B 인수 identity를 복구한다. 별도 clone은 만들지 않는다.
   9. **prod 비-daemon candidate recreate·health** — API·UI·Dagster web을 각 service에
      고정한 immutable candidate image ID로 recreate한다. 세 service의 실제 container
      image ID·OCI revision과 login POST·API·Dagster web health를 candidate manifest에
@@ -535,9 +543,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
       prod candidate daemon을 writer pause 상태로 시작해 실제 image ID·OCI revision·health를
       확인한 뒤 step 4에 기록한 schedule/sensor enablement와 API·Dagster/UI ingress를
       복원한다. H35에서는 concierge materialize를 실행하지 않는다. prod를 정상 상태로
-      돌려놓고 step 8의 signed post-migration bundle과 clean scratch identity만 H30B에
-      넘긴다. 실제 1,020→1,477 회복과 authenticated `/admin/issues` 검증은 격리 DB만
-      사용하는 다음 단일 소유 task `T-VN-H30B`가 수행한다.
+      돌려놓고 step 8의 signed post-migration DB·concierge export bundle과 clean scratch
+      identity만 H30B에 넘긴다. 실제 1,020→1,477 회복과 authenticated `/admin/issues`
+      검증은 export artifact를 network-free로 재생하고 격리 DB만 사용하는 다음 단일 소유
+      task `T-VN-H30B`가 수행한다.
 
   > **⚠ 비가역 지점** — 사람 승인이 필요하다.
   > - `0065`의 `collection_key` 52행 재작성과 `source_updated_at` 3,530행 UPDATE,

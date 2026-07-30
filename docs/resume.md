@@ -35,7 +35,9 @@ Dagster daemon은 rollback 가능한 구간과 H30B baseline 서명까지 정지
 schedule/sensor도 pause한다. post-migration app·Dagster DB bundle을 같은 scratch pair에
 복원해 candidate daemon을 실제 선검증한 뒤에만 forward-only cutover를 확정한다. H35가
 prod daemon enablement와 ingress를 정상화하고, H30B는 signed bundle/clean scratch만
-인수해 격리 DB에서 실적재를 검증한다.
+인수해 격리 DB에서 실적재를 검증한다. concierge 입력도 H35가 cursor chain·operation을
+포함한 ordered 1,477행 canonical artifact로 서명하며, H30B는 live endpoint 없이 그
+artifact만 resource override로 재생한다.
 
 Python 회귀 **38 passed**, Ruff·mypy 173 files·ESLint·OpenAPI/type drift, Vitest **254**는
 green이다. Mocked D workers=4 두 번은 모두 **276/276**와 manifest expected/actual

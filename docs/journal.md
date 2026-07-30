@@ -44,6 +44,10 @@ prod candidate daemon은 시작하지 않는다. 대신 post-migration app·Dags
 기동·검증해 네 번째 service의 runnable gate를 cutover 전에 닫는다. 그 bundle과 clean
 scratch identity만 H30B에 넘기고, H35 자체가 prod daemon enablement와 ingress를 정상화해
 task/PR 경계를 maintenance 상태로 넘기지 않는다.
+H30B materialize 입력도 live concierge 재조회에 맡기지 않는다. H35가 `changes` 전 페이지의
+cursor chain·operation 포함 ordered payload를 credential 없이 canonical artifact로 보존하고,
+1,477행·SHA-256을 DB dump/image manifest와 결속한다. H30B는 이 artifact만 network-free
+resource로 재생해 DB 기준선과 입력 양쪽의 동일 snapshot을 보장한다.
 
 - 이름 단독 오링크를 막는 `_adopted_match`가 주소 hint 유일 매칭까지 함께 막아 ADR-063을
   위반했다. 주소 hint 경로는 복원하고 이름 단독 후보는 `ambiguous/후보 다수`가 아니라
