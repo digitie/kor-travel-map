@@ -1,14 +1,33 @@
-import type { TestStep } from "@playwright/test/reporter";
+import type {
+  TestError,
+  TestResult,
+  TestStep,
+} from "@playwright/test/reporter";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  expectedFailureEvidenceMismatches,
   firstFailureStageMatches,
   testInventorySha256,
 } from "../e2e/mocked-failure-reporter";
 
-function step(category: string, title: string): TestStep {
-  return { category, title } as TestStep;
+function step(
+  category: string,
+  title: string,
+  error?: TestError,
+  steps: TestStep[] = [],
+): TestStep {
+  return { category, error, steps, title } as TestStep;
+}
+
+function result(
+  retry: number,
+  errors: TestError[],
+  steps: TestStep[],
+  status: TestResult["status"] = "failed",
+): TestResult {
+  return { errors, retry, status, steps } as TestResult;
 }
 
 describe("mocked failure stage provenance", () => {
@@ -61,6 +80,154 @@ describe("mocked failure stage provenance", () => {
         step("pw:api", "Navigate to /ops/datasets"),
       ]),
     ).toBe(false);
+  });
+});
+
+describe("mocked failure retry/error provenance", () => {
+  const expectedError = { message: "expected render failure" };
+  const unrelatedError = { message: "unrelated interaction failure" };
+
+  it("첫 attempt만 예상 원인이어도 이후 retry의 다른 원인을 거부한다", () => {
+    const mismatches = expectedFailureEvidenceMismatches(
+      [
+        result(0, [expectedError], [
+          step("expect", 'Expect "toBeVisible"', expectedError),
+        ]),
+        result(1, [unrelatedError], [
+          step("pw:api", "Click unrelated control", unrelatedError),
+        ]),
+      ],
+      "expected render failure",
+      "render.assertion",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 0,
+        retry: 1,
+        stageMatched: false,
+        statusMatched: true,
+      }),
+    ]);
+  });
+
+  it("첫 error만 예상 원인이어도 이후 soft error의 다른 원인을 거부한다", () => {
+    const mismatches = expectedFailureEvidenceMismatches(
+      [
+        result(
+          0,
+          [expectedError, unrelatedError],
+          [
+            step("expect", 'Expect "toBeVisible"', expectedError),
+            step("expect", 'Expect "toHaveText"', unrelatedError),
+          ],
+        ),
+      ],
+      "expected render failure",
+      "render.assertion",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 1,
+        retry: 0,
+        stageMatched: true,
+      }),
+    ]);
+  });
+
+  it("result.errors에 없는 추가 step error도 독립적으로 거부한다", () => {
+    const mismatches = expectedFailureEvidenceMismatches(
+      [
+        result(
+          0,
+          [expectedError],
+          [
+            step("expect", 'Expect "toBeVisible"', expectedError),
+            step("pw:api", "Click unrelated control", unrelatedError),
+          ],
+        ),
+      ],
+      "expected render failure",
+      "render.assertion",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 1,
+        retry: 0,
+        stageMatched: false,
+      }),
+    ]);
+  });
+
+  it("expected-looking error라도 interrupted attempt는 실패로 인정하지 않는다", () => {
+    const mismatches = expectedFailureEvidenceMismatches(
+      [
+        result(
+          2,
+          [expectedError],
+          [step("expect", 'Expect "toBeVisible"', expectedError)],
+          "interrupted",
+        ),
+      ],
+      "expected render failure",
+      "render.assertion",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: true,
+        errorIndex: 0,
+        retry: 2,
+        stageMatched: true,
+        status: "interrupted",
+        statusMatched: false,
+      }),
+    ]);
+  });
+
+  it("오류 증거가 없는 failed attempt는 permissive regex로도 인정하지 않는다", () => {
+    const mismatches = expectedFailureEvidenceMismatches(
+      [result(0, [], [])],
+      ".*",
+      "mock.install",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 0,
+        retry: 0,
+        stageMatched: true,
+        statusMatched: true,
+      }),
+    ]);
+  });
+
+  it("같은 예상 오류가 parent step에 전파되어도 중복 실패로 세지 않는다", () => {
+    const propagated = step(
+      "test.step",
+      "render wrapper",
+      expectedError,
+      [step("expect", 'Expect "toBeVisible"', expectedError)],
+    );
+
+    expect(
+      expectedFailureEvidenceMismatches(
+        [
+          result(0, [expectedError], [propagated]),
+          result(1, [expectedError], [
+            step("expect", 'Expect "toHaveText"', expectedError),
+          ]),
+        ],
+        "expected render failure",
+        "render.assertion",
+      ),
+    ).toEqual([]);
   });
 });
 

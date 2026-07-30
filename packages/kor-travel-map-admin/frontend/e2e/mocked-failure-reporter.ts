@@ -4,6 +4,8 @@ import type {
   Reporter,
   Suite,
   TestCase,
+  TestError,
+  TestResult,
   TestStep,
 } from "@playwright/test/reporter";
 import { createHash } from "node:crypto";
@@ -157,39 +159,88 @@ function validateManifest(manifest: FailureManifest): void {
   }
 }
 
-interface FirstFailureEvidence {
+interface FailureEvidence {
+  errorIndex: number;
+  retry: number;
+  status: TestResult["status"];
   stepPath: TestStep[];
   text: string;
 }
 
-function firstFailedStepPath(
-  steps: TestStep[],
-  parents: TestStep[] = [],
-): TestStep[] {
-  for (const step of steps) {
-    if (!step.error) continue;
-    const currentPath = [...parents, step];
-    const childPath = firstFailedStepPath(step.steps, currentPath);
-    return childPath.length > 0 ? childPath : currentPath;
-  }
-  return [];
+function failureErrorText(error: TestError | undefined): string {
+  return [error?.message, error?.stack, error?.value]
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
 }
 
-function firstFailureEvidence(test: TestCase): FirstFailureEvidence {
-  const firstFailureResult = test.results.find(
-    (result) => result.status !== "passed" && result.status !== "skipped",
-  );
-  const stepPath = firstFailureResult
-    ? firstFailedStepPath(firstFailureResult.steps)
-    : [];
-  const firstFailure =
-    stepPath.at(-1)?.error ?? firstFailureResult?.errors.at(0);
-  return {
-    stepPath,
-    text: [firstFailure?.message, firstFailure?.stack]
-      .filter((value): value is string => Boolean(value))
-      .join("\n"),
-  };
+function failedStepPaths(
+  steps: TestStep[],
+  parents: TestStep[] = [],
+): TestStep[][] {
+  const paths: TestStep[][] = [];
+  for (const step of steps) {
+    const currentPath = [...parents, step];
+    const childPaths = failedStepPaths(step.steps, currentPath);
+    const ownErrorText = failureErrorText(step.error);
+    const propagatedFromChild = childPaths.some(
+      (childPath) =>
+        failureErrorText(childPath.at(-1)?.error) === ownErrorText,
+    );
+    if (step.error && !propagatedFromChild) {
+      paths.push(currentPath);
+    }
+    paths.push(...childPaths);
+  }
+  return paths;
+}
+
+function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
+  return results.flatMap((result) => {
+    if (result.status === "passed" || result.status === "skipped") {
+      return [];
+    }
+
+    const stepPaths = failedStepPaths(result.steps);
+    const unmatchedStepPaths = new Set(stepPaths);
+    const evidence = result.errors.map((error, errorIndex) => {
+      const text = failureErrorText(error);
+      const matchingStepPath = stepPaths.find(
+        (stepPath) =>
+          unmatchedStepPaths.has(stepPath) &&
+          failureErrorText(stepPath.at(-1)?.error) === text,
+      );
+      if (matchingStepPath) {
+        unmatchedStepPaths.delete(matchingStepPath);
+      }
+      return {
+        errorIndex,
+        retry: result.retry,
+        status: result.status,
+        stepPath: matchingStepPath ?? [],
+        text,
+      };
+    });
+
+    for (const stepPath of unmatchedStepPaths) {
+      evidence.push({
+        errorIndex: evidence.length,
+        retry: result.retry,
+        status: result.status,
+        stepPath,
+        text: failureErrorText(stepPath.at(-1)?.error),
+      });
+    }
+    if (evidence.length === 0) {
+      evidence.push({
+        errorIndex: 0,
+        retry: result.retry,
+        status: result.status,
+        stepPath: [],
+        text: "",
+      });
+    }
+    return evidence;
+  });
 }
 
 function isHookStep(step: TestStep): boolean {
@@ -244,6 +295,28 @@ export function firstFailureStageMatches(
     case "request.assertion":
       return !hasHook && stepPath.some(isRequestAssertionStep);
   }
+}
+
+export function expectedFailureEvidenceMismatches(
+  results: readonly TestResult[],
+  errorPattern: string,
+  failureStage: FailureStage,
+) {
+  const expectedCause = new RegExp(errorPattern, "u");
+  return failureEvidence(results)
+    .map(({ errorIndex, retry, status, stepPath, text }) => ({
+      causeMatched: text.length > 0 && expectedCause.test(text),
+      errorIndex,
+      failureStepPath: serializedStepPath(stepPath),
+      retry,
+      stageMatched: firstFailureStageMatches(failureStage, stepPath),
+      status,
+      statusMatched: status === "failed",
+    }))
+    .filter(
+      ({ causeMatched, stageMatched, statusMatched }) =>
+        !causeMatched || !stageMatched || !statusMatched,
+    );
 }
 
 class MockedFailureReporter implements Reporter {
@@ -385,28 +458,28 @@ class MockedFailureReporter implements Reporter {
       );
       const mismatchedExpectedFailureCauses = manifestTests
         .filter(({ key }) => expectedFailures.has(key))
-        .map(({ difference, errorPattern, firstFailureStage, key }) => {
+        .flatMap(({ difference, errorPattern, firstFailureStage, key }) => {
           const test = testByIdentity.get(key);
-          const evidence =
-            test === undefined
-              ? { stepPath: [], text: "" }
-              : firstFailureEvidence(test);
-          return {
-            causeMatched: new RegExp(errorPattern, "u").test(evidence.text),
+          return (test
+            ? expectedFailureEvidenceMismatches(
+                test.results,
+                errorPattern,
+                firstFailureStage,
+              )
+            : []
+          ).map((mismatch) => ({
+            ...mismatch,
             difference,
-            firstFailureStepPath: serializedStepPath(evidence.stepPath),
             firstFailureStage,
             key,
-            stageMatched: firstFailureStageMatches(
-              firstFailureStage,
-              evidence.stepPath,
-            ),
-          };
+          }));
         })
-        .filter(
-          ({ causeMatched, stageMatched }) => !causeMatched || !stageMatched,
-        )
-        .sort((left, right) => left.key.localeCompare(right.key));
+        .sort(
+          (left, right) =>
+            left.key.localeCompare(right.key) ||
+            left.retry - right.retry ||
+            left.errorIndex - right.errorIndex,
+        );
 
       const report = {
         schemaVersion: 3,
