@@ -39,6 +39,12 @@
   reporter gate true다. 각 종료 후 owned container/network/image는 0건이다.
 - DB는 사용하지 않았다. 보존 clone `ktm-tvn45-db`는 새 clone/restore/migration/downgrade
   없이 다음 DB 관련 task용으로 유지한다.
+- 적대 리뷰는 child signal을 test failure로 분류하던 P2를 찾아 infrastructure exit 2로
+  정정했다. pending response는 assertion 실패에도 `finally`에서 해제하고, filesystem
+  cleanup 실패를 기록한 뒤에도 Docker cleanup을 계속한다.
+- reporter가 expected failure의 첫 retry/error만 fingerprint해 다른 재시도 회귀나 후속 soft
+  error를 가릴 수 있는 기존 잔여 위험은 현재 authored delta 밖이다. 작업 확장 규칙에 따라
+  `T-VN-H38`로 등록해 다음 Lane B task로 배치했다.
 
 ## 2026-07-30 (codex) — T-VN-11A/B 5상태 batch 생산자·소비자 호환 완료
 

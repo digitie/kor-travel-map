@@ -25,6 +25,11 @@ exact production image checkpoint D는 동일 SHA에서 workers=8과 workers=4�
 container/network/image는 모두 0건이다. 이 task는 DB를 사용하지 않아
 `ktm-tvn45-db`를 clone·restore·migration·downgrade 없이 그대로 보존했다.
 
+적대 리뷰에서 child signal을 test failure로 분류하던 P2를 infrastructure failure(exit 2)로
+정정하고, assertion 실패 시에도 response gate를 `finally`에서 해제하며 filesystem cleanup
+실패 뒤 Docker cleanup을 계속하도록 보강했다. reporter가 첫 retry/error fingerprint만
+검사하는 기존 잔여 위험은 범위 확장 규칙에 따라 `T-VN-H38`로 분리했다.
+
 ## 2026-07-30 — Lane B b1 T-VN-11A/B service batch 5상태 호환 쌍
 
 - [x] **T-VN-11A — Map 5-state batch projection**

@@ -3690,21 +3690,24 @@ test.describe("/ops/pipeline", () => {
     await expect.poll(() => counters.requestBodies.length).toBe(1);
 
     const closeButton = dialog.getByRole("button", { name: "닫기" });
-    await expect(closeButton).toBeDisabled();
-    await expect(
-      dialog.getByRole("button", { name: "요청 생성", exact: true }),
-    ).toBeDisabled();
-    await expect(dialog.getByLabel("scope 유형")).toBeDisabled();
-    await expect(dialog.getByLabel("데이터셋 키 필터")).toBeDisabled();
-    await expect(
-      dialog.getByLabel("dry-run(행을 만들지 않고 대상 수만 확인)"),
-    ).toBeDisabled();
-    await page.keyboard.press("Escape");
-    await expect(dialog).toBeVisible();
-    await page.mouse.click(4, 4);
-    await expect(dialog).toBeVisible();
+    try {
+      await expect(closeButton).toBeDisabled();
+      await expect(
+        dialog.getByRole("button", { name: "요청 생성", exact: true }),
+      ).toBeDisabled();
+      await expect(dialog.getByLabel("scope 유형")).toBeDisabled();
+      await expect(dialog.getByLabel("데이터셋 키 필터")).toBeDisabled();
+      await expect(
+        dialog.getByLabel("dry-run(행을 만들지 않고 대상 수만 확인)"),
+      ).toBeDisabled();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeVisible();
+      await page.mouse.click(4, 4);
+      await expect(dialog).toBeVisible();
+    } finally {
+      releaseRequestCreateResponse();
+    }
 
-    releaseRequestCreateResponse();
     await expect(dialog.getByTestId("request-create-result")).toBeVisible();
     await expect(dialog.getByLabel("데이터셋 키 필터")).toHaveValue(
       "kma_short_forecast",

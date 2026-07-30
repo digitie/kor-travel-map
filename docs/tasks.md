@@ -41,6 +41,7 @@ barrier로 직렬화한다.
     [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
   - b1: [x] `T-VN-11A/B`(service batch, 저장소별 호환 PR 쌍) →
     [x] `T-VN-H37`(Mocked checkpoint 종료 판정·고병렬 flaky 진단) →
+    [ ] `T-VN-H38`(failure manifest retry/error fingerprint 완전성) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
     [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
     [ ] `T-VN-12D`(domain idempotency) →
@@ -676,6 +677,22 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
+
+### T-VN-H38 — Mocked failure manifest retry/error fingerprint 완전성
+
+H37 적대 리뷰에서 authored delta 밖의 기존 reporter가 expected failure의 첫 실패 attempt와
+첫 error만 검사한다는 잔여 위험을 확인했다. checkpoint A~C에서 첫 attempt가 manifest
+원인으로 실패한 뒤 retry가 다른 회귀로 실패하거나 같은 attempt의 후속 soft assertion이
+다른 원인으로 실패해도 identity 집합과 첫 fingerprint만 맞으면 reporter가 green으로
+override할 수 있다.
+
+- expected failure의 모든 non-passed retry attempt와 모든 실패 error/step을 수집하고, 허용된
+  cause/stage fingerprint 밖의 증거가 하나라도 있으면 gate를 fail-closed한다.
+- `attempt 1 expected + attempt 2 unrelated`, `첫 error expected + 후속 soft error unrelated`를
+  합성 reporter 회귀로 고정한다. retry 번호와 error index는 redacted report에 남기되 실제
+  payload·자격증명은 포함하지 않는다.
+- checkpoint D의 기존 276 inventory와 A~C manifest 의미를 깨지 않고, reporter 단위 회귀와
+  exact production-image checkpoint로 종료 판정을 다시 확인한다.
 
 ### T-VN-16 — weather batch와 부모 404
 

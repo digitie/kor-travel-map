@@ -211,7 +211,11 @@ function markCleanupFailure(code) {
 function cleanupFilesystem() {
   if (filesystemCleaned) return;
   filesystemCleaned = true;
-  rmSync(runtimeDirectory, { force: true, recursive: true });
+  try {
+    rmSync(runtimeDirectory, { force: true, recursive: true });
+  } catch {
+    markCleanupFailure("cleanup_filesystem_failed");
+  }
 }
 
 function runCleanupCommand(args) {

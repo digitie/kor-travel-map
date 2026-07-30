@@ -34,7 +34,8 @@ describe("mocked checkpoint outcome", () => {
       reporter: { ...passedReporter, gatePassed: false },
     });
 
-    expect(outcome.exitCode).toBe(1);
+    expect(outcome.classification).toBe("infrastructure_failed");
+    expect(outcome.exitCode).toBe(2);
     expect(outcome.issues).toEqual([
       "playwright_child_signaled",
       "reporter_gate_failed",

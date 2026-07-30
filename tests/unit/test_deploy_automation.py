@@ -123,6 +123,7 @@ def test_mocked_checkpoint_runner_owns_exact_frontend_container() -> None:
     assert "removed.status !== 0" not in script
     assert "await waitForResourceAbsence(listArgs)" in script
     assert "cleanup_container_remaining" in script
+    assert "cleanup_filesystem_failed" in script
     assert "containerCreateAttempted = true" in script
     assert "io.kortravelmap.mocked-e2e-owned=true" in script
     assert '`name=^${ownedContainerName}$`' in script

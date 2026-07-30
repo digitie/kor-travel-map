@@ -146,6 +146,7 @@ describe("mocked checkpoint isolation", () => {
     expect(cleanupPhase).toContain("cleanup_container_remaining");
     expect(cleanupPhase).toContain("cleanup_network_remaining");
     expect(cleanupPhase).toContain("cleanup_image_remaining");
+    expect(runnerSource).toContain("cleanup_filesystem_failed");
   });
 
   it("host public env를 빌드에 상속하지 않고 non-self HTTP/WS를 전역 차단한다", () => {

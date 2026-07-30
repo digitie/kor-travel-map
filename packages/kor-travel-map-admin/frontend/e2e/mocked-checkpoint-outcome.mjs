@@ -4,7 +4,6 @@ const TEST_EXIT_CODE = 1;
 function childStatusIssue(child) {
   if (!child) return "playwright_not_started";
   if (child.spawnError) return "playwright_spawn_failed";
-  if (child.signal) return "playwright_child_signaled";
   if (child.status !== 0) return "playwright_child_nonzero";
   return undefined;
 }
@@ -23,8 +22,12 @@ export function classifyMockedCheckpointOutcome({
   if (!reporter) {
     infrastructureIssues.push("reporter_outcome_missing");
   }
-  if (child?.spawnError) {
+  if (!child) {
+    infrastructureIssues.push("playwright_not_started");
+  } else if (child.spawnError) {
     infrastructureIssues.push("playwright_spawn_failed");
+  } else if (child.signal) {
+    infrastructureIssues.push("playwright_child_signaled");
   } else {
     const issue = childStatusIssue(child);
     if (issue) testIssues.push(issue);
