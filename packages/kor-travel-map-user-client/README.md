@@ -11,6 +11,9 @@ ADR-048/T-216g 기계 정본)에서 `openapi-typescript`로 생성한 **TypeScri
   gate(`gen:types:check`)로 spec과 고정한다.
 - T-222b부터 `BeachPublicView`/`FestivalPublicView`와 `/v1/public/*` 공개 해수욕장·
   축제 view 경로를 named alias와 compile-time 경로 단언에 포함한다.
+- T-VN-16C weather batch는 sparse `targets[]`와 target-local `cards[]`를 사용한다.
+  `found` item의 `card_key`로 같은 target의 `WeatherBatchCard`를 찾아야 하며 item에
+  metric을 직접 기대하지 않는다.
 
 ## 인증 계약
 

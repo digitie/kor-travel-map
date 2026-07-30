@@ -48,8 +48,11 @@ export type FeatureTripCard = Schemas["FeatureTripCard"];
 export type FeatureWeatherResponse = Schemas["FeatureWeatherResponse"];
 export type WeatherMetric = Schemas["WeatherMetricOut"];
 export type WeatherBatchRequest = Schemas["WeatherBatchRequest"];
+export type WeatherBatchTargetRequest = Schemas["WeatherBatchTargetRequest"];
 export type WeatherBatchResponse = Schemas["WeatherBatchResponse"];
-export type WeatherBatchItem = WeatherBatchResponse["data"]["items"][number];
+export type WeatherBatchTarget = WeatherBatchResponse["data"]["targets"][number];
+export type WeatherBatchItem = WeatherBatchTarget["items"][number];
+export type WeatherBatchCard = Schemas["WeatherBatchCardOut"];
 export type WeatherBatchFoundItem = Schemas["WeatherBatchFoundItem"];
 export type WeatherBatchNoDataItem = Schemas["WeatherBatchNoDataItem"];
 export type WeatherBatchRetiredItem = Schemas["WeatherBatchRetiredItem"];
@@ -96,10 +99,16 @@ type _BatchFoundHasRevisionAndTripCard = _Assert<
 type _WeatherBatchStatesExact = _Assert<
   _Equal<WeatherBatchItem["state"], "found" | "no_data" | "retired">
 >;
-type _WeatherBatchFoundHasSnapshot = _Assert<
+type _WeatherBatchFoundReferencesCard = _Assert<
+  _Has<WeatherBatchFoundItem, "card_key">
+>;
+type _WeatherBatchTargetHasNormalizedCards = _Assert<
+  _Has<WeatherBatchTarget, "target_at" | "timeline_until" | "items" | "cards">
+>;
+type _WeatherBatchCardHasSnapshot = _Assert<
   _Has<
-    WeatherBatchFoundItem,
-    "current" | "timeline" | "latest_at" | "is_stale" | "source_styles"
+    WeatherBatchCard,
+    "card_key" | "current" | "timeline" | "latest_at" | "is_stale" | "source_styles"
   >
 >;
 // pagination은 meta.page (data.next_cursor 폐기, ADR-048 #2/#12).
@@ -147,7 +156,9 @@ export type _SurfaceAssertions = [
   _BatchStatesExact,
   _BatchFoundHasRevisionAndTripCard,
   _WeatherBatchStatesExact,
-  _WeatherBatchFoundHasSnapshot,
+  _WeatherBatchFoundReferencesCard,
+  _WeatherBatchTargetHasNormalizedCards,
+  _WeatherBatchCardHasSnapshot,
   _MetaHasPage,
   _PageHasNextCursor,
   _SummaryHasFlatLonLat,
