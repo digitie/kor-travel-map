@@ -219,3 +219,107 @@ async def test_durable_claim_can_exist_without_terminal_result(
     assert row.command_id > 0
     assert row.request_fingerprint == "e" * 64
     assert row.completed_at is None
+
+
+async def test_external_execution_state_requires_operation_specific_terminal_proof(
+    migrated_session: AsyncSession,
+) -> None:
+    backup_command_id = await migrated_session.scalar(
+        text(
+            """
+            INSERT INTO ops.domain_commands (
+              actor, operation, idempotency_key, request_fingerprint
+            ) VALUES (
+              'admin:alice', 'admin.backup.restore',
+              '96000000-0000-4000-8000-000000000001', repeat('a', 64)
+            )
+            RETURNING command_id
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.backup_command_executions (
+              command_id, effect_kind, phase, backup_id, app_db, dagster_db,
+              rustfs_volume, marker_key, input_digest, effect_started_at
+            ) VALUES (
+              :command_id, 'restore', 'effect_started', 'backup-1',
+              'app_stage', 'dagster_stage', 'rustfs_stage',
+              'restore-1.json', repeat('b', 64), now()
+            )
+            """
+        ),
+        {"command_id": backup_command_id},
+    )
+    with pytest.raises(IntegrityError):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    """
+                    UPDATE ops.backup_command_executions
+                    SET phase = 'effect_succeeded',
+                        effect_completed_at = now()
+                    WHERE command_id = :command_id
+                    """
+                ),
+                {"command_id": backup_command_id},
+            )
+
+    offline_command_id = await migrated_session.scalar(
+        text(
+            """
+            INSERT INTO ops.domain_commands (
+              actor, operation, idempotency_key, request_fingerprint
+            ) VALUES (
+              'admin:alice', 'admin.offline-upload.load',
+              '96000000-0000-4000-8000-000000000002', repeat('c', 64)
+            )
+            RETURNING command_id
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.offline_upload_command_executions (
+              command_id, effect_kind, phase, upload_id, load_job_id,
+              input_digest, effect_started_at
+            ) VALUES (
+              :command_id, 'load', 'effect_started',
+              '00000000-0000-0000-0000-000000000001',
+              '10000000-0000-0000-0000-000000000001', repeat('d', 64), now()
+            )
+            """
+        ),
+        {"command_id": offline_command_id},
+    )
+    with pytest.raises(IntegrityError):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    """
+                    UPDATE ops.offline_upload_command_executions
+                    SET phase = 'effect_succeeded',
+                        output_digest = repeat('e', 64),
+                        effect_completed_at = now()
+                    WHERE command_id = :command_id
+                    """
+                ),
+                {"command_id": offline_command_id},
+            )
+
+    for statement in (
+        "UPDATE ops.backup_command_executions SET backup_id = 'foreign' "
+        "WHERE command_id = :command_id",
+        "UPDATE ops.backup_command_executions SET phase = 'prepared' "
+        "WHERE command_id = :command_id",
+        "DELETE FROM ops.backup_command_executions "
+        "WHERE command_id = :command_id",
+    ):
+        with pytest.raises(DBAPIError):
+            async with migrated_session.begin_nested():
+                await migrated_session.execute(
+                    text(statement),
+                    {"command_id": backup_command_id},
+                )

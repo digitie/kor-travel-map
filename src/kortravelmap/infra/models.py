@@ -2580,6 +2580,141 @@ class DomainCommandResultRow(Base):
     )
 
 
+class BackupCommandExecutionRow(Base):
+    """Backup/restore side effect의 explicit recovery state machine."""
+
+    __tablename__ = "backup_command_executions"
+    __table_args__ = (
+        CheckConstraint(
+            "effect_kind IN ('create', 'delete', 'restore', 'swap')",
+            name=conv("ck_backup_command_executions_effect_kind"),
+        ),
+        CheckConstraint(
+            "phase IN ('prepared', 'effect_started', 'effect_succeeded')",
+            name=conv("ck_backup_command_executions_phase"),
+        ),
+        CheckConstraint(
+            "input_digest ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_backup_command_executions_input_digest"),
+        ),
+        CheckConstraint(
+            "marker_key ~ '^[a-z0-9][a-z0-9_.-]{0,127}$'",
+            name=conv("ck_backup_command_executions_marker_key"),
+        ),
+        CheckConstraint(
+            "(phase = 'prepared' AND effect_started_at IS NULL "
+            "AND effect_completed_at IS NULL AND output_digest IS NULL "
+            "AND marker_sha256 IS NULL) OR "
+            "(phase = 'effect_started' AND effect_started_at IS NOT NULL "
+            "AND effect_completed_at IS NULL AND output_digest IS NULL "
+            "AND marker_sha256 IS NULL) OR "
+            "(phase = 'effect_succeeded' AND effect_started_at IS NOT NULL "
+            "AND effect_completed_at IS NOT NULL "
+            "AND output_digest IS NOT NULL "
+            "AND output_digest ~ '^[0-9a-f]{64}$' "
+            "AND marker_sha256 IS NOT NULL "
+            "AND marker_sha256 ~ '^[0-9a-f]{64}$')",
+            name=conv("ck_backup_command_executions_phase_evidence"),
+        ),
+        {"schema": "ops"},
+    )
+
+    command_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    effect_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    phase: Mapped[str] = mapped_column(Text, nullable=False)
+    backup_id: Mapped[str] = mapped_column(Text, nullable=False)
+    app_db: Mapped[str | None] = mapped_column(Text)
+    dagster_db: Mapped[str | None] = mapped_column(Text)
+    rustfs_volume: Mapped[str | None] = mapped_column(Text)
+    marker_key: Mapped[str] = mapped_column(Text, nullable=False)
+    input_digest: Mapped[str] = mapped_column(Text, nullable=False)
+    output_digest: Mapped[str | None] = mapped_column(Text)
+    marker_sha256: Mapped[str | None] = mapped_column(Text)
+    prepared_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    effect_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    effect_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+
+class OfflineUploadCommandExecutionRow(Base):
+    """Offline object/Dagster side effect의 explicit recovery state machine."""
+
+    __tablename__ = "offline_upload_command_executions"
+    __table_args__ = (
+        CheckConstraint(
+            "effect_kind IN ('create', 'delete', 'load')",
+            name=conv("ck_offline_upload_command_executions_effect_kind"),
+        ),
+        CheckConstraint(
+            "phase IN ('prepared', 'effect_started', 'effect_succeeded')",
+            name=conv("ck_offline_upload_command_executions_phase"),
+        ),
+        CheckConstraint(
+            "input_digest ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_offline_upload_command_executions_input_digest"),
+        ),
+        CheckConstraint(
+            "(effect_kind <> 'create') OR "
+            "(storage_key IS NOT NULL AND content_sha256 IS NOT NULL "
+            "AND content_sha256 ~ '^[0-9a-f]{64}$')",
+            name=conv("ck_offline_upload_command_executions_create_identity"),
+        ),
+        CheckConstraint(
+            "(phase = 'prepared' AND effect_started_at IS NULL "
+            "AND effect_completed_at IS NULL AND output_digest IS NULL "
+            "AND dagster_run_id IS NULL) OR "
+            "(phase = 'effect_started' AND effect_started_at IS NOT NULL "
+            "AND effect_completed_at IS NULL AND output_digest IS NULL "
+            "AND dagster_run_id IS NULL) OR "
+            "(phase = 'effect_succeeded' AND effect_started_at IS NOT NULL "
+            "AND effect_completed_at IS NOT NULL "
+            "AND output_digest IS NOT NULL "
+            "AND output_digest ~ '^[0-9a-f]{64}$')",
+            name=conv("ck_offline_upload_command_executions_phase_evidence"),
+        ),
+        CheckConstraint(
+            "(effect_kind <> 'load' OR phase <> 'effect_succeeded') OR "
+            "(load_job_id IS NOT NULL AND dagster_run_id IS NOT NULL "
+            "AND btrim(dagster_run_id) <> '')",
+            name=conv("ck_offline_upload_command_executions_load_proof"),
+        ),
+        {"schema": "ops"},
+    )
+
+    command_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    effect_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    phase: Mapped[str] = mapped_column(Text, nullable=False)
+    upload_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    storage_key: Mapped[str | None] = mapped_column(Text)
+    content_sha256: Mapped[str | None] = mapped_column(Text)
+    load_job_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    dagster_run_id: Mapped[str | None] = mapped_column(Text)
+    input_digest: Mapped[str] = mapped_column(Text, nullable=False)
+    output_digest: Mapped[str | None] = mapped_column(Text)
+    prepared_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    effect_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    effect_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+
 # =============================================================================
 # ops.pipeline_cancellations / members / runs  (ADR-064 T-ADM-C3d)
 # =============================================================================

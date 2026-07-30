@@ -74,6 +74,10 @@ from kortravelmap.api.auth import (
     require_admin_frontend,
 )
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    domain_command_transaction,
+    idempotent_domain_command,
+)
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.settings import ApiSettings
 
@@ -1116,6 +1120,7 @@ async def preview_offline_upload_request(
         502: {"description": "객체 저장소 읽기 실패"},
     },
 )
+@idempotent_domain_command("admin.offline-upload.validate")
 async def validate_offline_upload_request(
     upload_id: str,
     request: Request,
@@ -1136,7 +1141,7 @@ async def validate_offline_upload_request(
                     http,
                     api_key=settings.kor_travel_geo_api_key,
                 )
-                async with session.begin():
+                async with domain_command_transaction(session):
                     row = await get_offline_upload(session, upload_id)
                     if row is None:
                         raise HTTPException(
@@ -1155,7 +1160,7 @@ async def validate_offline_upload_request(
                         reverse_geocoder=kor_travel_geo_reverse_geocoder(kraddr),
                     )
         else:
-            async with session.begin():
+            async with domain_command_transaction(session):
                 row = await get_offline_upload(session, upload_id)
                 if row is None:
                     raise HTTPException(
