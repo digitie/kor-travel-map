@@ -318,10 +318,13 @@ def test_metrics_route_is_gated_by_metrics_token_dependency() -> None:
 
 
 @pytest.mark.unit
-def test_service_policy_covers_features_batch_only() -> None:
+def test_service_policy_covers_feature_and_weather_batches() -> None:
     matrix = build_route_policy_matrix(_representative_app())
     service_rows = [row for row in matrix if row.policy is RoutePolicy.SERVICE]
-    assert {row.path for row in service_rows} == {"/v1/features/batch"}
+    assert {row.path for row in service_rows} == {
+        "/v1/features/batch",
+        "/v1/features/weather/batch",
+    }
     for row in service_rows:
         assert "require_service_token" in row.observed_enforcement
 

@@ -719,9 +719,10 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         # 사용자/서비스 표면 ``/features`` · ``/categories`` · ``/providers``는 ``/v1``
         # prefix로 노출한다(T-214b, ADR-048 — clean cut, unversioned alias 없음). 브라우저
         # admin UI도 쓰는 공용 read라 앱 토큰을 강제하지 않는다(operator는 proxy SSO).
-        # ``POST /v1/features/batch``는 순수 service-to-service read라 route-level에서
-        # service token으로 게이트한다(ADR-045 D-1; features.py). token 미설정이면
-        # 통과(하위호환). 나머지 ``/v1/features`` read는 공용이라 앱 토큰을 강제하지 않는다.
+        # ``POST /v1/features/batch``와 ``POST /v1/features/weather/batch``는 순수
+        # service-to-service read라 route-level에서 service token으로 게이트한다
+        # (ADR-045 D-1; features.py). 나머지 ``/v1/features`` read는 공용이라
+        # 앱 토큰을 강제하지 않는다.
         public_dependencies = [Depends(require_public_api_key)]
         application.include_router(
             features_router,

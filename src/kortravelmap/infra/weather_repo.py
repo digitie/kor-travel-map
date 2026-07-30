@@ -9,16 +9,17 @@ raw SQL은 본 모듈에 모음(ADR-004). commit은 호출자 책임.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from sqlalchemy import text
 
 from kortravelmap.core.ids import make_weather_value_key
 from kortravelmap.dto._time import kst_now
+from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
 if TYPE_CHECKING:
     from sqlalchemy import RowMapping
@@ -29,14 +30,18 @@ if TYPE_CHECKING:
 __all__ = [
     "WeatherMetric",
     "WeatherCard",
+    "WeatherBatchItem",
+    "WeatherBatchItemState",
     "WeatherAnchor",
     "WeatherValueTimelineRow",
     "WeatherAlertHistoryRow",
     "DEFAULT_WEATHER_FRESHNESS_SECONDS",
     "DEFAULT_WEATHER_HISTORY_RETENTION_DAYS",
+    "WEATHER_BATCH_TIMELINE_DAYS",
     "load_weather_values",
     "build_admin_weather_card",
     "build_weather_card",
+    "get_weather_batch_items",
     "list_weather_values",
     "weather_history_floor",
     "nearest_weather_feature_for_coordinate",
@@ -48,6 +53,9 @@ __all__ = [
 DEFAULT_WEATHER_FRESHNESS_SECONDS: Final[int] = 6 * 60 * 60
 DEFAULT_WEATHER_HISTORY_RETENTION_DAYS: Final[int] = 365 * 3
 """REST weather history 기본 보존/조회 지평선(3년)."""
+
+WEATHER_BATCH_TIMELINE_DAYS: Final[int] = 10
+"""batch snapshot이 ``target_at`` 뒤에 제공하는 예보 timeline 지평선."""
 
 
 @dataclass(frozen=True)
@@ -77,6 +85,22 @@ class WeatherCard:
     asof: datetime | None
     source_styles: list[str]
     metrics: list[WeatherMetric]
+    latest_at: datetime | None
+    is_stale: bool
+
+
+WeatherBatchItemState = Literal["found", "no_data", "retired"]
+
+
+@dataclass(frozen=True)
+class WeatherBatchItem:
+    """한 snapshot에서 판정한 공개 parent와 weather current/timeline."""
+
+    feature_id: str
+    state: WeatherBatchItemState
+    source_styles: list[str]
+    current: list[WeatherMetric]
+    timeline: list[WeatherMetric]
     latest_at: datetime | None
     is_stale: bool
 
@@ -247,29 +271,326 @@ ORDER BY
     COALESCE(valid_at, observed_at, issued_at) DESC NULLS LAST
 """
 
+
+def _weather_effective_at_sql(alias: str) -> str:
+    """weather의 예보/관측 대상 시각 SQL을 한 정의로 반환한다."""
+
+    if not alias.isidentifier():
+        raise ValueError("weather SQL alias must be an identifier")
+    return (
+        f"COALESCE({alias}.valid_at, {alias}.observed_at, "
+        f"{alias}.valid_from, {alias}.issued_at)"
+    )
+
+
+def _weather_known_at_sql(alias: str) -> str:
+    """0060 current-row 단계의 ``known_at`` cutoff SQL."""
+
+    if not alias.isidentifier():
+        raise ValueError("weather SQL alias must be an identifier")
+    return (
+        f"{alias}.collected_at <= CAST(:known_at AS timestamptz) "
+        f"AND ({alias}.issued_at IS NULL "
+        f"OR {alias}.issued_at <= CAST(:known_at AS timestamptz))"
+    )
+
+
+_BATCH_EFFECTIVE_AT: Final[str] = _weather_effective_at_sql("w")
+_BATCH_KNOWN_AT: Final[str] = _weather_known_at_sql("w")
+_BATCH_CURRENT_PREDICATE: Final[str] = f"""
+{_BATCH_KNOWN_AT}
+AND {_BATCH_EFFECTIVE_AT} IS NOT NULL
+AND {_BATCH_EFFECTIVE_AT} <= CAST(:target_at AS timestamptz)
+"""
+
+# KMA weather source tier 술어. batch SQL이 module import 시 이 상수를 삽입하므로
+# nearest-anchor SQL 정의보다 먼저 둔다.
+_KMA_FORECAST_PREDICATE: Final[str] = (
+    "w.provider = 'python-kma-api' "
+    "AND w.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')"
+)
+_OBSERVED_TEMP_PREDICATE: Final[str] = (
+    "w.forecast_style = 'observed' AND w.metric_key IN ('T1H', 'TMP')"
+)
+
+# T-VN-16A: parent 판정, tiered nearest-anchor 선택, current와 10일 forecast
+# timeline을 요청 ID 수와 무관하게 한 SQL statement/snapshot에서 읽는다.
+#
+# 0060은 full correction history/current-summary 이전 단계라 ``collected_at``이
+# ``known_at`` proxy다(ADR-072). forecast는 미래 지식 누출을 막기 위해
+# ``issued_at <= known_at``도 함께 강제한다.
+_WEATHER_BATCH_SQL: Final[str] = f"""
+WITH requested AS (
+    SELECT item.feature_id, item.ordinality
+    FROM unnest(CAST(:feature_ids AS text[]))
+         WITH ORDINALITY AS item(feature_id, ordinality)
+),
+parents AS (
+    SELECT
+        requested.feature_id,
+        requested.ordinality,
+        visible.feature_id AS visible_feature_id,
+        visible.coord_5179
+    FROM requested
+    LEFT JOIN feature.public_features AS visible
+      ON visible.feature_id = requested.feature_id
+    {public_active_notice_filter_sql("visible")}
+),
+own_has_temperature AS (
+    SELECT
+        parent.ordinality,
+        EXISTS (
+            SELECT 1
+            FROM feature.feature_weather_values AS w
+            WHERE w.feature_id = parent.visible_feature_id
+              AND w.metric_key IN ('T1H', 'TMP')
+              AND {_BATCH_CURRENT_PREDICATE}
+        ) AS value
+    FROM parents AS parent
+),
+kma_anchor AS (
+    SELECT parent.ordinality, anchor.feature_id
+    FROM parents AS parent
+    JOIN own_has_temperature AS own_temp USING (ordinality)
+    LEFT JOIN LATERAL (
+        SELECT candidate.feature_id
+        FROM feature.public_features AS candidate
+        WHERE parent.visible_feature_id IS NOT NULL
+          AND NOT own_temp.value
+          AND parent.coord_5179 IS NOT NULL
+          AND candidate.coord_5179 IS NOT NULL
+          AND x_extension.ST_DWithin(
+                candidate.coord_5179,
+                parent.coord_5179,
+                CAST(:radius_m AS double precision)
+              )
+          AND EXISTS (
+              SELECT 1
+              FROM feature.feature_weather_values AS w
+              WHERE w.feature_id = candidate.feature_id
+                AND {_KMA_FORECAST_PREDICATE}
+                AND {_BATCH_CURRENT_PREDICATE}
+          )
+        ORDER BY
+            candidate.coord_5179
+              OPERATOR(x_extension.<->) parent.coord_5179,
+            candidate.feature_id
+        LIMIT 1
+    ) AS anchor ON true
+),
+observed_anchor AS (
+    SELECT parent.ordinality, anchor.feature_id
+    FROM parents AS parent
+    JOIN own_has_temperature AS own_temp USING (ordinality)
+    LEFT JOIN LATERAL (
+        SELECT candidate.feature_id
+        FROM feature.public_features AS candidate
+        WHERE parent.visible_feature_id IS NOT NULL
+          AND NOT own_temp.value
+          AND parent.coord_5179 IS NOT NULL
+          AND candidate.coord_5179 IS NOT NULL
+          AND x_extension.ST_DWithin(
+                candidate.coord_5179,
+                parent.coord_5179,
+                CAST(:radius_m AS double precision)
+              )
+          AND EXISTS (
+              SELECT 1
+              FROM feature.feature_weather_values AS w
+              WHERE w.feature_id = candidate.feature_id
+                AND {_OBSERVED_TEMP_PREDICATE}
+                AND {_BATCH_CURRENT_PREDICATE}
+          )
+        ORDER BY
+            candidate.coord_5179
+              OPERATOR(x_extension.<->) parent.coord_5179,
+            candidate.feature_id
+        LIMIT 1
+    ) AS anchor ON true
+),
+preferred_sources AS (
+    SELECT ordinality, visible_feature_id AS source_feature_id, 0 AS tier
+    FROM parents
+    WHERE visible_feature_id IS NOT NULL
+    UNION ALL
+    SELECT ordinality, feature_id, 1
+    FROM kma_anchor
+    WHERE feature_id IS NOT NULL
+    UNION ALL
+    SELECT ordinality, feature_id, 2
+    FROM observed_anchor
+    WHERE feature_id IS NOT NULL
+),
+preferred_has_current AS (
+    SELECT
+        parent.ordinality,
+        EXISTS (
+            SELECT 1
+            FROM preferred_sources AS source
+            JOIN feature.feature_weather_values AS w
+              ON w.feature_id = source.source_feature_id
+            WHERE source.ordinality = parent.ordinality
+              AND {_BATCH_CURRENT_PREDICATE}
+        ) AS value
+    FROM parents AS parent
+),
+fallback_anchor AS (
+    SELECT parent.ordinality, anchor.feature_id
+    FROM parents AS parent
+    JOIN preferred_has_current AS preferred USING (ordinality)
+    LEFT JOIN LATERAL (
+        SELECT candidate.feature_id
+        FROM feature.public_features AS candidate
+        WHERE parent.visible_feature_id IS NOT NULL
+          AND NOT preferred.value
+          AND parent.coord_5179 IS NOT NULL
+          AND candidate.coord_5179 IS NOT NULL
+          AND x_extension.ST_DWithin(
+                candidate.coord_5179,
+                parent.coord_5179,
+                CAST(:radius_m AS double precision)
+              )
+          AND EXISTS (
+              SELECT 1
+              FROM feature.feature_weather_values AS w
+              WHERE w.feature_id = candidate.feature_id
+                AND {_BATCH_CURRENT_PREDICATE}
+          )
+        ORDER BY
+            candidate.coord_5179
+              OPERATOR(x_extension.<->) parent.coord_5179,
+            candidate.feature_id
+        LIMIT 1
+    ) AS anchor ON true
+),
+sources AS (
+    SELECT ordinality, source_feature_id, tier
+    FROM preferred_sources
+    UNION ALL
+    SELECT ordinality, feature_id, 3
+    FROM fallback_anchor
+    WHERE feature_id IS NOT NULL
+),
+current_rows AS (
+    SELECT DISTINCT ON (
+        source.ordinality, w.forecast_style, w.metric_key
+    )
+        source.ordinality,
+        'current'::text AS section,
+        w.forecast_style,
+        w.metric_key,
+        w.metric_name,
+        w.timeline_bucket,
+        w.value_number,
+        w.value_text,
+        w.unit,
+        w.severity,
+        w.issued_at,
+        w.valid_at,
+        w.observed_at,
+        w.provider,
+        w.weather_domain,
+        {_BATCH_EFFECTIVE_AT} AS effective_at
+    FROM sources AS source
+    JOIN feature.feature_weather_values AS w
+      ON w.feature_id = source.source_feature_id
+    WHERE {_BATCH_CURRENT_PREDICATE}
+    ORDER BY
+        source.ordinality,
+        w.forecast_style,
+        w.metric_key,
+        source.tier,
+        {_BATCH_EFFECTIVE_AT} DESC,
+        w.issued_at DESC NULLS LAST,
+        w.collected_at DESC,
+        w.weather_value_key
+),
+timeline_rows AS (
+    SELECT DISTINCT ON (
+        source.ordinality,
+        w.forecast_style,
+        w.metric_key,
+        {_BATCH_EFFECTIVE_AT}
+    )
+        source.ordinality,
+        'timeline'::text AS section,
+        w.forecast_style,
+        w.metric_key,
+        w.metric_name,
+        w.timeline_bucket,
+        w.value_number,
+        w.value_text,
+        w.unit,
+        w.severity,
+        w.issued_at,
+        w.valid_at,
+        w.observed_at,
+        w.provider,
+        w.weather_domain,
+        {_BATCH_EFFECTIVE_AT} AS effective_at
+    FROM sources AS source
+    JOIN feature.feature_weather_values AS w
+      ON w.feature_id = source.source_feature_id
+    WHERE {_BATCH_KNOWN_AT}
+      AND {_BATCH_EFFECTIVE_AT} > CAST(:target_at AS timestamptz)
+      AND {_BATCH_EFFECTIVE_AT}
+          <= CAST(:target_at AS timestamptz)
+             + make_interval(days => CAST(:timeline_days AS integer))
+    ORDER BY
+        source.ordinality,
+        w.forecast_style,
+        w.metric_key,
+        {_BATCH_EFFECTIVE_AT},
+        source.tier,
+        w.issued_at DESC NULLS LAST,
+        w.collected_at DESC,
+        w.weather_value_key
+),
+weather_rows AS (
+    SELECT * FROM current_rows
+    UNION ALL
+    SELECT * FROM timeline_rows
+)
+SELECT
+    parent.feature_id,
+    parent.ordinality,
+    CASE
+      WHEN parent.visible_feature_id IS NULL THEN 'retired'
+      WHEN weather.section IS NULL THEN 'no_data'
+      ELSE 'found'
+    END AS state,
+    weather.section,
+    weather.forecast_style,
+    weather.metric_key,
+    weather.metric_name,
+    weather.timeline_bucket,
+    weather.value_number,
+    weather.value_text,
+    weather.unit,
+    weather.severity,
+    weather.issued_at,
+    weather.valid_at,
+    weather.observed_at,
+    weather.provider,
+    weather.weather_domain,
+    weather.effective_at
+FROM parents AS parent
+LEFT JOIN weather_rows AS weather
+  ON weather.ordinality = parent.ordinality
+ORDER BY
+    parent.ordinality,
+    CASE weather.section WHEN 'current' THEN 0 WHEN 'timeline' THEN 1 ELSE 2 END,
+    weather.effective_at,
+    weather.forecast_style,
+    weather.metric_key
+"""
+
 # KMA weather는 격자(≈5km) 단위라 적재된 격자에 속한 place feature에만 붙는다.
 # 그 외 feature는 자기 weather_value가 없으므로, 반경 내 weather 보유한 가장 가까운
 # feature(=가장 가까운 격자)의 값으로 폴백한다("위치에 맞춘" 지역 날씨). coord_5179
 # (m, STORED generated)로 KNN(ADR-012: ST_Transform 술어 금지, PostGIS는 x_extension
 # 스키마 qualify — #410/#411).
 _NEAREST_WEATHER_RADIUS_M: Final[float] = 50_000.0
-
-# KMA-forecast tier 술어 — 단기/초단기/중기 예보를 만드는 격자 anchor.
-# `python-kma-api`의 nowcast/ultra_short/short/mid가 SKY/POP/TMN/TMX(+TMP/T1H)를
-# 모두 싣는다. (#498) 휴게소 관측(observed)·airkorea 대기질을 제외해야 단순 "가장
-# 가까운 weather"가 더 가까운 관측만 잡고 예보를 못 잡는 문제를 막는다.
-_KMA_FORECAST_PREDICATE: Final[str] = (
-    "w.provider = 'python-kma-api' "
-    "AND w.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')"
-)
-
-# observed-temp tier 술어 — 관측 기온 anchor (KREX 휴게소 등 forecast_style=observed).
-# (#497) 휴게소는 관측 기온을 T1H로 적재한다. 관측 기온은 예보 anchor를 그림자로
-# 가리지 않고 별도 row로 **증강**된다(병합 키에 forecast_style 포함).
-_OBSERVED_TEMP_PREDICATE: Final[str] = (
-    "w.forecast_style = 'observed' AND w.metric_key IN ('T1H', 'TMP')"
-)
-
 
 def _nearest_anchor_sql(exists_predicate: str) -> str:
     """반경 내 가장 가까운(KNN) anchor feature 1건을 찾는 SQL.
@@ -823,6 +1144,124 @@ async def list_kma_weather_alert_history(
     return [_alert_history_row(row) for row in rows]
 
 
+def _weather_metric(row: RowMapping) -> WeatherMetric:
+    return WeatherMetric(
+        forecast_style=str(row["forecast_style"]),
+        metric_key=str(row["metric_key"]),
+        metric_name=row["metric_name"],
+        timeline_bucket=row["timeline_bucket"],
+        value_number=row["value_number"],
+        value_text=row["value_text"],
+        unit=row["unit"],
+        severity=row["severity"],
+        issued_at=row["issued_at"],
+        valid_at=row["valid_at"],
+        observed_at=row["observed_at"],
+        provider=row["provider"],
+        weather_domain=row["weather_domain"],
+    )
+
+
+async def get_weather_batch_items(
+    session: AsyncSession,
+    *,
+    feature_ids: Sequence[str],
+    target_at: datetime,
+    known_at: datetime,
+    freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
+) -> tuple[WeatherBatchItem, ...]:
+    """공개 parent와 weather current/timeline을 한 SQL snapshot에서 반환한다.
+
+    ``target_at``은 weather가 설명하는 시각, ``known_at``은 소비자가 허용하는
+    지식 cutoff다. 현 0060 schema에서는 ``collected_at``을 known-at proxy로
+    사용하고 forecast ``issued_at``도 cutoff 이하로 제한한다.
+
+    ``retired``는 base-table 세부 상태를 공개하지 않는 service weather 경계에서
+    "현재 공개 parent가 아님"을 뜻한다. ``no_data``는 공개 parent가 존재하지만
+    cutoff와 source-tier 규칙을 만족하는 weather가 없다는 별도 상태다.
+    """
+    if not feature_ids:
+        return ()
+
+    rows = (
+        (
+            await session.execute(
+                text(_WEATHER_BATCH_SQL),
+                {
+                    "feature_ids": list(feature_ids),
+                    "target_at": target_at,
+                    "known_at": known_at,
+                    "radius_m": _NEAREST_WEATHER_RADIUS_M,
+                    "timeline_days": WEATHER_BATCH_TIMELINE_DAYS,
+                },
+            )
+        )
+        .mappings()
+        .all()
+    )
+    current_by_id: dict[str, list[WeatherMetric]] = {
+        feature_id: [] for feature_id in feature_ids
+    }
+    timeline_by_id: dict[str, list[WeatherMetric]] = {
+        feature_id: [] for feature_id in feature_ids
+    }
+    state_by_id: dict[str, WeatherBatchItemState] = {}
+    valid_states: frozenset[str] = frozenset({"found", "no_data", "retired"})
+    for row in rows:
+        feature_id = str(row["feature_id"])
+        raw_state = str(row["state"])
+        if raw_state not in valid_states:
+            raise RuntimeError(f"unexpected weather batch state: {raw_state}")
+        state_by_id[feature_id] = cast(WeatherBatchItemState, raw_state)
+        section = row["section"]
+        if section is None:
+            continue
+        metric = _weather_metric(row)
+        if section == "current":
+            current_by_id[feature_id].append(metric)
+        elif section == "timeline":
+            timeline_by_id[feature_id].append(metric)
+        else:
+            raise RuntimeError(f"unexpected weather batch section: {section}")
+
+    result: list[WeatherBatchItem] = []
+    for feature_id in feature_ids:
+        current = current_by_id[feature_id]
+        timeline = timeline_by_id[feature_id]
+        latest_candidates = [
+            timestamp
+            for metric in current
+            if (
+                timestamp := (
+                    metric.valid_at or metric.observed_at or metric.issued_at
+                )
+            )
+            is not None
+        ]
+        latest_at = max(latest_candidates) if latest_candidates else None
+        is_stale = (
+            latest_at is None
+            or (target_at - latest_at).total_seconds() > freshness_seconds
+        )
+        result.append(
+            WeatherBatchItem(
+                feature_id=feature_id,
+                state=state_by_id[feature_id],
+                source_styles=sorted(
+                    {
+                        metric.forecast_style
+                        for metric in (*current, *timeline)
+                    }
+                ),
+                current=current,
+                timeline=timeline,
+                latest_at=latest_at,
+                is_stale=is_stale,
+            )
+        )
+    return tuple(result)
+
+
 async def _build_weather_card(
     session: AsyncSession,
     *,
@@ -898,24 +1337,7 @@ async def _build_weather_card(
     # 어느 tier도 반경에 없으면(완전 미적재 지역) 가장 가까운 임의 weather로 폴백(빈 카드 회피).
     if not rows:
         _merge(await _anchor_rows(nearest_weather_sql))
-    metrics = [
-        WeatherMetric(
-            forecast_style=str(row["forecast_style"]),
-            metric_key=str(row["metric_key"]),
-            metric_name=row["metric_name"],
-            timeline_bucket=row["timeline_bucket"],
-            value_number=row["value_number"],
-            value_text=row["value_text"],
-            unit=row["unit"],
-            severity=row["severity"],
-            issued_at=row["issued_at"],
-            valid_at=row["valid_at"],
-            observed_at=row["observed_at"],
-            provider=row["provider"],
-            weather_domain=row["weather_domain"],
-        )
-        for row in rows
-    ]
+    metrics = [_weather_metric(row) for row in rows]
     source_styles = sorted({m.forecast_style for m in metrics})
     candidates = [
         ts

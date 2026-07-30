@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import weather_repo
@@ -105,6 +105,99 @@ async def test_weather_card_empty(migrated_session: AsyncSession) -> None:
     assert card.source_styles == []
     assert card.latest_at is None
     assert card.is_stale is True
+
+
+async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
+    migrated_session: AsyncSession,
+) -> None:
+    target_at = _T2
+    known_at = _T2 + timedelta(hours=1)
+    await _ins_feature_at(
+        migrated_session,
+        "batch_weather",
+        lon=_BASE_LON,
+        lat=_BASE_LAT,
+        kind="weather",
+    )
+    await _ins_weather_feature(migrated_session, "batch_no_data")
+    await _ins_weather_feature(migrated_session, "batch_retired")
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.features
+            SET status = 'deleted', deleted_at = :deleted_at
+            WHERE feature_id = 'batch_retired'
+            """
+        ),
+        {"deleted_at": known_at},
+    )
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _kma_short(
+                "batch_weather",
+                "TMP",
+                issued_at=_T1,
+                valid_at=_T1,
+                collected_at=_T1 + timedelta(minutes=20),
+                value_number=Decimal("20.0"),
+                unit="deg_c",
+            ),
+            _kma_short(
+                "batch_weather",
+                "TMP",
+                issued_at=_T2,
+                valid_at=_T2 + timedelta(days=1),
+                collected_at=_T2 + timedelta(minutes=20),
+                value_number=Decimal("23.0"),
+                unit="deg_c",
+            ),
+            # known_at 뒤 수집된 미래 row는 snapshot에 보이지 않는다.
+            _kma_short(
+                "batch_weather",
+                "TMP",
+                issued_at=_T2,
+                valid_at=_T2 + timedelta(days=2),
+                collected_at=known_at + timedelta(seconds=1),
+                value_number=Decimal("99.0"),
+                unit="deg_c",
+            ),
+        ],
+    )
+    await migrated_session.flush()
+
+    connection = await migrated_session.connection()
+    statement_count = 0
+
+    def _count_statement(
+        *_args: object,
+    ) -> None:
+        nonlocal statement_count
+        statement_count += 1
+
+    event.listen(connection.sync_connection, "before_cursor_execute", _count_statement)
+    try:
+        items = await weather_repo.get_weather_batch_items(
+            migrated_session,
+            feature_ids=("batch_weather", "batch_no_data", "batch_retired"),
+            target_at=target_at,
+            known_at=known_at,
+            freshness_seconds=10**9,
+        )
+    finally:
+        event.remove(
+            connection.sync_connection,
+            "before_cursor_execute",
+            _count_statement,
+        )
+
+    assert statement_count == 1
+    assert [item.state for item in items] == ["found", "no_data", "retired"]
+    assert [metric.value_number for metric in items[0].current] == [Decimal("20.0")]
+    assert [metric.value_number for metric in items[0].timeline] == [Decimal("23.0")]
+    assert items[1].current == []
+    assert items[1].timeline == []
+    assert items[2].current == []
 
 
 async def test_weather_timeline_preserves_forecast_issue_history(

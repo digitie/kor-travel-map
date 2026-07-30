@@ -43,6 +43,7 @@ def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/features/{feature_id}" in spec["paths"]
     assert "/v1/features/{feature_id}/price" in spec["paths"]
     assert "/v1/features/batch" in spec["paths"]
+    assert "/v1/features/weather/batch" in spec["paths"]
     schemas = spec["components"]["schemas"]
     assert "FeatureSummary" in schemas
     assert "FeaturePriceResponse" in schemas
@@ -50,6 +51,7 @@ def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "FeatureDetailResponse" in schemas
     assert "FeatureDetailEnvelopeResponse" in schemas
     assert "FeatureBatchResponse" in schemas
+    assert "WeatherBatchResponse" in schemas
     assert "FeatureSearchResponse" in schemas
     assert "FeaturesNearbyResponse" in schemas
     batch_responses = spec["paths"]["/v1/features/batch"]["post"]["responses"]

@@ -966,6 +966,8 @@ def test_openapi_declares_service_and_public_key_security_schemes() -> None:
     # service token 중 하나를 요구한다.
     tri = spec["paths"]["/v1/features/batch"]["post"]
     assert tri["security"] == [{"ServiceToken": []}]
+    weather_batch = spec["paths"]["/v1/features/weather/batch"]["post"]
+    assert weather_batch["security"] == [{"ServiceToken": []}]
     feat = spec["paths"]["/v1/features"]["get"]
     assert feat["security"] == [
         {"PublicApiKey": []},
@@ -974,13 +976,17 @@ def test_openapi_declares_service_and_public_key_security_schemes() -> None:
 
 
 @pytest.mark.unit
-def test_batch_requires_token_when_set() -> None:
+@pytest.mark.parametrize(
+    "path",
+    ["/v1/features/batch", "/v1/features/weather/batch"],
+)
+def test_batch_requires_token_when_set(path: str) -> None:
     client = _client(_api_settings(service_token=SecretStr("tok")))
     # 헤더 없음/오류 → 401(핸들러/DB 도달 전 auth 차단).
-    assert client.post("/v1/features/batch", json={}).status_code == 401
+    assert client.post(path, json={}).status_code == 401
     assert (
         client.post(
-            "/v1/features/batch",
+            path,
             json={},
             headers={SERVICE_TOKEN_HEADER: "wrong"},
         ).status_code
@@ -989,10 +995,14 @@ def test_batch_requires_token_when_set() -> None:
 
 
 @pytest.mark.unit
-def test_batch_token_unset_not_blocked() -> None:
+@pytest.mark.parametrize(
+    "path",
+    ["/v1/features/batch", "/v1/features/weather/batch"],
+)
+def test_batch_token_unset_not_blocked(path: str) -> None:
     client = _client(_api_settings(service_token=None))
     # 미설정이면 auth가 막지 않는다(하위호환). 본문/DB 사유로 401은 아니어야 한다.
-    assert client.post("/v1/features/batch", json={}).status_code != 401
+    assert client.post(path, json={}).status_code != 401
 
 
 @pytest.mark.unit
