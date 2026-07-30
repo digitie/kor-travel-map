@@ -266,6 +266,76 @@ describe("mocked failure retry/error provenance", () => {
     ).toEqual([]);
   });
 
+  it("caught locator 오류 뒤 독립 timeout은 hook wrapper로 숨기지 않는다", () => {
+    const hookTimeout = {
+      message:
+        'Test timeout of 1200ms exceeded while running "beforeEach" hook.',
+    };
+    const caughtLocatorTimeout = {
+      message:
+        "locator.fill: Timeout 100ms exceeded. waiting for locator('#admin-username')",
+    };
+    const hookPath = step(
+      "hook",
+      "Before Hooks",
+      hookTimeout,
+      [
+        step("hook", "beforeEach hook", hookTimeout, [
+          step(
+            "pw:api",
+            "Fill <redacted> locator('#admin-username')",
+            caughtLocatorTimeout,
+          ),
+        ]),
+      ],
+    );
+    const mismatches = expectedFailureEvidenceMismatches(
+      [result(0, [hookTimeout], [hookPath], "timedOut")],
+      "#admin-username",
+      "beforeEach.auth",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 0,
+        retry: 0,
+        stageMatched: true,
+        statusMatched: true,
+      }),
+    ]);
+  });
+
+  it("test body timeout wrapper도 실제 interaction leaf가 보고될 때만 제외한다", () => {
+    const bodyTimeout = {
+      message: "Test timeout of 1200ms exceeded.",
+    };
+    const clickTimeout = {
+      message:
+        "locator.click: Test timeout of 1200ms exceeded. waiting for getByRole('button', { name: '요청 생성' })",
+    };
+    const clickStep = step(
+      "pw:api",
+      "Click getByRole('button')",
+      clickTimeout,
+    );
+
+    expect(
+      expectedFailureEvidenceMismatches(
+        [
+          result(
+            0,
+            [bodyTimeout, clickTimeout],
+            [clickStep],
+            "timedOut",
+          ),
+        ],
+        "요청 생성",
+        "interaction",
+      ),
+    ).toEqual([]);
+  });
+
   it("오류 증거가 없는 failed attempt는 permissive regex로도 인정하지 않는다", () => {
     const mismatches = expectedFailureEvidenceMismatches(
       [result(0, [], [])],
@@ -329,6 +399,32 @@ describe("mocked failure retry/error provenance", () => {
         "render.assertion",
       ),
     ).toEqual([]);
+  });
+
+  it("실패 leaf가 있어도 unrelated parent step 오류를 버리지 않는다", () => {
+    const unrelatedParent = {
+      message: "unrelated parent regression",
+    };
+    const nested = step(
+      "test.step",
+      "render wrapper",
+      unrelatedParent,
+      [step("expect", 'Expect "toBeVisible"', expectedError)],
+    );
+    const mismatches = expectedFailureEvidenceMismatches(
+      [result(0, [expectedError], [nested])],
+      "expected render failure",
+      "render.assertion",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 1,
+        retry: 0,
+        stageMatched: true,
+      }),
+    ]);
   });
 
   it("redacted mismatch에는 실제 error와 step payload를 남기지 않는다", () => {
