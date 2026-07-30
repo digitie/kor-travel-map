@@ -272,13 +272,23 @@ POST /v1/features/weather/batch         # target_at/known_at weather snapshot, c
 
 #### Weather batch 계약(T-VN-16A)
 
+- service-token 전용 `POST /v1/features/weather/batch`가 set-based 조회의 정본이다.
 - 요청은 중복 없는 `feature_ids` 1~200개와 timezone-aware `target_at`·`known_at`을
   받는다. `target_at`은 날씨가 설명하는 시각이고, `known_at`은 소비자가 허용하는
-  지식 cutoff다. 현 0060 current-row 단계에서는 `collected_at`을 `known_at` 대리값으로
+  지식 cutoff다. current-row fact에서는 `collected_at`을 `known_at` 대리값으로
   사용하며 forecast는 `issued_at <= known_at`도 강제한다.
 - 부모 공개 판정, nearest weather source tier, `current`, `target_at` 뒤 24시간
   `timeline`을 요청 크기와 무관하게 PostgreSQL statement 1회에서 읽는다.
-  `timeline_until`이 고정 지평선을 명시한다.
+  `timeline_until`이 고정 지평선을 명시하며, `target_at + 24시간`을 표현할 수 없는
+  최댓값 부근 시각은 422로 거부한다.
+- source 선택은 요청 Feature 자체의 weather를 먼저 쓰고, 없으면 공개·활성
+  `kind='weather'` anchor만 거리순으로 사용한다. `kind='place'` 등에 결합된 weather는
+  해당 Feature의 자체 값일 뿐 다른 Feature가 공유하는 anchor가 아니다.
+- physical series는
+  `(feature_id, provider, weather_domain, forecast_style, metric_key)`다. 응답 metric은
+  `provider`·`weather_domain`, 원래의 `valid_at`/`valid_from`/`valid_until`과 current
+  선택에 사용한 `effective_at`을 함께 반환한다. range 값은 `valid_from <= target_at <=
+  valid_until`일 때만 `current`이며, 미래 구간은 24시간 지평선의 `timeline`에 남는다.
 - item state는 `found|no_data|retired`다. `no_data`는 공개 parent는 있으나 cutoff에
   맞는 날씨가 없음, `retired`는 현재 공개 projection에 parent가 없어 단건에서 404가
   되는 상태다. transport/DB 실패는 item으로 축약하지 않고 전체

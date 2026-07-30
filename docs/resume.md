@@ -10,6 +10,29 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-30 (codex) — Lane B b1 T-VN-16A set-based weather batch 완료
+
+`POST /v1/features/weather/batch`가 중복 없는 ID 1~200개를 입력 순서대로 한 snapshot
+statement에서 읽는다. `target_at`/`known_at`, current/24시간 timeline,
+`found|no_data|retired`를 분리하고 단건 weather도 같은 repository를 사용한다. metric은
+provider/domain·원래 유효 구간·`effective_at`을 보존하며 만료 range와 snapshot 이후
+forecast를 배제한다.
+
+30M weather fact의 series를 요청마다 재발견하지 않도록
+`feature.weather_metric_series`를 writer trigger로 단조롭게 유지한다. physical-series
+exact-prefix effective index와 공개 weather-only partial GiST를 migration 0069에서 한 번만
+만들며, 후반 실패 재시도는 이미 valid인 대형 index를 그대로 쓴다. 실데이터 clone은 단건
+17.8ms, 200건 1.27s, weather Seq Scan 0이었다.
+
+적대 리뷰어 2명의 최종 결과는 P0/P1/P2 모두 0이다. 파괴적 Live 첫 실데이터 seed가 새
+series FK를 helper의 미등록 reference로 검출해 exact series fingerprint와 parent lock/FK
+audit를 보강한 뒤 main·recovery를 모두 통과했다. 소유 Feature/change request/weather/
+price/series와 인증 감사행을 제거했고 clone은 새 dump/checkpoint/downgrade 없이 healthy
+`0069_weather_series_catalog`로 재사용 가능하다.
+
+**다음 한 작업**: PR을 열어 CI green과 셀프 승인 뒤 머지한다. 머지 후 새 Claude Code PR
+사후 감사를 확인하고 Lane B `T-VN-16B` PinVi weather batch 소비 cutover로 이동한다.
+
 ## 2026-07-30 (codex) — Lane B b1 T-VN-H39 schedule pending barrier 완료
 
 H38 workers=8에서 재현한 schedule pending test의 600ms 시간 추정을 제거했다.

@@ -3,6 +3,28 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-30 — Lane B b1 T-VN-16A set-based weather batch
+
+- [x] **T-VN-16A — Map set-based weather batch**
+
+  service-token 전용 `POST /v1/features/weather/batch`가 중복 없는 Feature ID 1~200개를
+  한 PostgreSQL statement에서 순서 보존 조회한다. `target_at`/`known_at` snapshot,
+  `current`/24시간 `timeline`, `found|no_data|retired`를 구분하고 단건 weather도 같은
+  repository를 재사용한다. metric은 provider/domain과 원래 유효 구간·선택
+  `effective_at`을 보존하며, 만료 range와 known-at 이후 forecast를 current에서 제외한다.
+
+migration `0069_weather_series_catalog`는 physical-series registry, series exact-prefix
+effective-time index와 공개 `kind='weather'` 전용 partial GiST를 한 번만 만든다. 후속 DDL
+실패 재시도는 valid index를 재사용하고 invalid 잔재만 다시 만든다. 실데이터 clone에서
+단건 17.8ms, 200건 1.27s, weather fact Seq Scan 0을 확인했다.
+
+큰 delta 적대 리뷰어 2명이 range 만료, provider/domain 동률 결정성, 대형 index 이중 build와
+재시도 rebuild를 찾아 회귀와 함께 닫았고 최종 P0/P1/P2는 모두 0이었다. 파괴적 Live에서 새
+series FK를 helper가 모르던 실패를 해당 지점에서 재현해 exact fingerprint/parent lock/FK
+audit를 추가했다. main·recovery가 모두 통과하고 소유 Feature/change request/weather/price/
+series 잔여는 0이다. 새 clone·dump·checkpoint·downgrade 없이 `ktm-tvn45-db`를 head
+`0069_weather_series_catalog`, healthy 상태로 보존했다.
+
 ## 2026-07-30 — Lane B b1 T-VN-H39 schedule pending barrier
 
 - [x] **T-VN-H39 — Mocked schedule command pending barrier**

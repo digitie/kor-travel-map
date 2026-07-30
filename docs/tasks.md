@@ -43,7 +43,7 @@ barrier로 직렬화한다.
     [x] `T-VN-H37`(Mocked checkpoint 종료 판정·고병렬 flaky 진단) →
     [x] `T-VN-H38`(failure manifest retry/error fingerprint 완전성) →
     [x] `T-VN-H39`(schedule command pending barrier) →
-    [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
+    [ ] `T-VN-16B`(weather batch 소비) →
     [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
     [ ] `T-VN-12D`(domain idempotency) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
@@ -681,12 +681,7 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
 ### T-VN-16 — weather batch와 부모 404
 
-현재 단건 forecast만 존재한다. Map set-based API와 PinVi 소비를 분리한다.
-
-- [ ] T-VN-16A — **Map set-based weather batch**
-
-  feature ID 집합과 `target_at`/`known_at`을 받아 한 snapshot에서 timeline/current를 반환한다.
-  존재하지 않는 parent를 빈 weather 결과와 구분하고 단건도 같은 parent existence 판정을 재사용한다.
+Map set-based 생산자는 완료됐다. 남은 PinVi 소비 전환을 별도 호환 경계로 유지한다.
 
 - [ ] T-VN-16B — **PinVi weather batch 소비 cutover**
 

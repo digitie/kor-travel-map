@@ -5,6 +5,26 @@
 
 ## [Unreleased]
 
+### set-based weather snapshot batch (2026-07-30, T-VN-16A)
+
+- **ADDED**: service-token 전용 `POST /v1/features/weather/batch`가 중복 없는 Feature ID
+  1~200개를 한 PostgreSQL snapshot statement로 읽는다. 입력 순서를 보존하며 각 item을
+  `found|no_data|retired`로 구분하고, `current`와 24시간 `timeline`을 함께 반환한다.
+- **CHANGED**: 단건 `GET /v1/features/{feature_id}/weather`도 같은 batch repository를
+  재사용해 parent 404와 빈 weather 판정을 일치시킨다. `asof`는 target time만 바꾸고
+  known-at은 요청 시각을 유지한다.
+- **API**: metric에 `provider`·`weather_domain`, `valid_at`/`valid_from`/`valid_until`,
+  선택 기준 `effective_at`을 노출한다. forecast는 issued/collected known-at cutoff를
+  모두 지키고, 만료 range는 current에서 제외한다.
+- **PERFORMANCE**: migration `0069_weather_series_catalog`가 physical-series registry,
+  exact-prefix effective-time index, 공개 `kind='weather'` 전용 partial GiST를 도입한다.
+  실데이터 clone에서 일반 place 단건은 17.8ms, 200건 batch는 1.27s였고 weather fact
+  sequential scan 없이 두 인덱스를 사용했다. 후속 DDL 실패 뒤 재시도는 이미 valid인
+  대형 index를 재사용해 성공한 단계부터 이어간다.
+- **RELIABILITY**: 파괴적 admin Live helper도 registry row의 exact series identity와 FK를
+  parent lock 아래 검증하고 cleanup한다. 새 weather child table이 추가돼도 owned fixture
+  정리가 조용히 불완전해지지 않는다.
+
 ### 큐레이션 import 검토 상태·운영 복구 원자성 (2026-07-30, #893)
 
 - **FIXED**: 주소 hint가 있는 이름+주소 유일 후보는 ADR-063 계약대로 자동 연결한다.
