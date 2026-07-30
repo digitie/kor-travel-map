@@ -179,14 +179,6 @@ function failureErrorText(error: TestError | undefined): string {
     .join("\n");
 }
 
-function failureErrorIdentity(
-  error: TestError | undefined,
-): string | undefined {
-  const message = stripVTControlCharacters(error?.message ?? "");
-  const value = error?.value ?? "";
-  return message || value ? [message, value].join("\n") : undefined;
-}
-
 function failedStepPaths(
   steps: TestStep[],
   parents: TestStep[] = [],
@@ -214,25 +206,6 @@ function isStrictStepAncestor(
     ancestor.length < descendant.length &&
     ancestor.every((step, index) => descendant[index] === step)
   );
-}
-
-function diagnosticStepPath(
-  failure: FailedStepPath | undefined,
-  failures: FailedStepPath[],
-): TestStep[] {
-  if (!failure) return [];
-  if (!failure.hasFailedDescendant) return failure.stepPath;
-  const deepestLeaf = failures
-    .filter(
-      (candidate) =>
-        !candidate.hasFailedDescendant &&
-        isStrictStepAncestor(failure.stepPath, candidate.stepPath),
-    )
-    .sort(
-      (left, right) => right.stepPath.length - left.stepPath.length,
-    )
-    .at(0);
-  return deepestLeaf?.stepPath ?? failure.stepPath;
 }
 
 function playwrightTimeoutEnvelopeMs(
@@ -330,21 +303,6 @@ function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
       const text = failureErrorText(
         failedStepPath.stepPath.at(-1)?.error,
       );
-      const duplicatesMatchedResult = result.errors.some(
-        (resultError, resultErrorIndex) => {
-          const matchingStepPath =
-            matchingStepPaths[resultErrorIndex]?.stepPath;
-          return (
-            matchingStepPath !== undefined &&
-            failureErrorText(resultError) === text &&
-            isStrictStepAncestor(
-              failedStepPath.stepPath,
-              matchingStepPath,
-            )
-          );
-        },
-      );
-      if (duplicatesMatchedResult) continue;
       if (
         playwrightTimeoutEnvelopeMs(
           failedStepPath.stepPath.at(-1)?.error ?? {},
@@ -353,32 +311,11 @@ function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
       ) {
         continue;
       }
-      const parentIdentity = failureErrorIdentity(
-        failedStepPath.stepPath.at(-1)?.error,
-      );
-      const propagatedToMatchedDescendant =
-        parentIdentity !== undefined &&
-        failedStepPath.hasFailedDescendant &&
-        stepPaths.some(
-          (candidate) =>
-            !candidate.hasFailedDescendant &&
-            isStrictStepAncestor(
-              failedStepPath.stepPath,
-              candidate.stepPath,
-            ) &&
-            matchingStepPaths.includes(candidate) &&
-            parentIdentity ===
-              failureErrorIdentity(
-                candidate.stepPath.at(-1)?.error,
-              ),
-        );
       evidence.push({
         errorIndex: nextStepOnlyErrorIndex,
         retry: result.retry,
         status: result.status,
-        stepPath: propagatedToMatchedDescendant
-          ? diagnosticStepPath(failedStepPath, stepPaths)
-          : failedStepPath.stepPath,
+        stepPath: failedStepPath.stepPath,
         text,
       });
       nextStepOnlyErrorIndex += 1;

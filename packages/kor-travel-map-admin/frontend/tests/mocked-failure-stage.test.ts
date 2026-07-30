@@ -303,6 +303,13 @@ describe("mocked failure retry/error provenance", () => {
         stageMatched: false,
         statusMatched: true,
       }),
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 1,
+        retry: 0,
+        stageMatched: false,
+        statusMatched: true,
+      }),
     ]);
   });
 
@@ -390,6 +397,13 @@ describe("mocked failure retry/error provenance", () => {
         stageMatched: false,
         statusMatched: true,
       }),
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 3,
+        retry: 0,
+        stageMatched: false,
+        statusMatched: true,
+      }),
     ]);
   });
 
@@ -448,8 +462,8 @@ describe("mocked failure retry/error provenance", () => {
     ]);
   });
 
-  it("같은 예상 오류가 parent step에 전파되어도 중복 실패로 세지 않는다", () => {
-    const propagated = step(
+  it("result에 없는 same-message parent는 독립 오류일 수 있어 자체 stage로 거부한다", () => {
+    const ambiguousParent = step(
       "test.step",
       "render wrapper",
       expectedError,
@@ -459,40 +473,51 @@ describe("mocked failure retry/error provenance", () => {
     expect(
       expectedFailureEvidenceMismatches(
         [
-          result(0, [expectedError], [propagated]),
-          result(1, [expectedError], [
-            step("expect", 'Expect "toHaveText"', expectedError),
-          ]),
+          result(0, [expectedError], [ambiguousParent]),
         ],
         "expected render failure",
         "render.assertion",
       ),
-    ).toEqual([]);
+    ).toEqual([
+      expect.objectContaining({
+        causeMatched: true,
+        errorIndex: 1,
+        retry: 0,
+        stageMatched: false,
+      }),
+    ]);
   });
 
-  it("boxed parent가 stack을 바꿔도 leaf 오류를 중복 실패로 세지 않는다", () => {
+  it("stack이 다른 step-only parent도 자체 stage로 거부한다", () => {
     const childError = {
       message: "expected render failure",
       stack: "at assertion.ts:10:2",
     };
-    const boxedParentError = {
+    const parentError = {
       message: "expected render failure",
       stack: "at boxed-step.ts:20:4",
     };
-    const boxed = step(
+    const nested = step(
       "test.step",
-      "boxed render",
-      boxedParentError,
+      "render wrapper",
+      parentError,
       [step("expect", 'Expect "toBeVisible"', childError)],
     );
 
-    expect(
-      expectedFailureEvidenceMismatches(
-        [result(0, [childError], [boxed])],
-        "expected render failure",
-        "render.assertion",
-      ),
-    ).toEqual([]);
+    const mismatches = expectedFailureEvidenceMismatches(
+      [result(0, [childError], [nested])],
+      "expected render failure",
+      "render.assertion",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: true,
+        errorIndex: 1,
+        retry: 0,
+        stageMatched: false,
+      }),
+    ]);
   });
 
   it("실패 leaf가 있어도 unrelated parent step 오류를 버리지 않는다", () => {
