@@ -138,7 +138,7 @@ describe("mocked failure retry/error provenance", () => {
     ]);
   });
 
-  it("top-level wrapper가 예상 원인이어도 중첩 cause의 다른 원인을 거부한다", () => {
+  it("중첩 cause를 검증하면서 실제 result error index를 보존한다", () => {
     const deepCause = {
       message: "unrelated database regression",
     };
@@ -154,7 +154,7 @@ describe("mocked failure retry/error provenance", () => {
       [
         result(
           0,
-          [expectedWrapper],
+          [expectedWrapper, unrelatedError],
           [
             step(
               "expect",
@@ -170,10 +170,18 @@ describe("mocked failure retry/error provenance", () => {
 
     expect(mismatches).toEqual([
       expect.objectContaining({
+        causeDepth: 2,
         causeMatched: false,
-        errorIndex: 2,
+        errorIndex: 0,
         retry: 0,
         stageMatched: true,
+      }),
+      expect.objectContaining({
+        causeDepth: 0,
+        causeMatched: false,
+        errorIndex: 1,
+        retry: 0,
+        stageMatched: false,
       }),
     ]);
   });

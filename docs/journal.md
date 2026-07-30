@@ -29,8 +29,8 @@
 - result에 직접 매칭된 parent와 result에 없는 step-only parent를 모두 own stage로 검사한다.
   Playwright 1.60에서는 boxed propagation과 boxed 내부의 독립 재투척 metadata가 같으므로,
   descendant stage 차용·동일 text 중복 제거를 금지해 모호한 parent를 fail-closed한다.
-- redacted mismatch에는 retry/error index와 status·category·source 위치만 남기고 error text와
-  실제 입력값이 포함될 수 있는 `TestStep.title`은 제거했다.
+- redacted mismatch에는 retry·실제 result error index·cause depth와 status·category·source
+  위치만 남기고 error text와 실제 입력값이 포함될 수 있는 `TestStep.title`은 제거했다.
 - 검증: 합성 회귀 **28 passed**, frontend 전체 **278 passed**, TypeScript·ESLint green.
   exact production image D workers=4 **276/276**, manifest 일치·child exit 0·reporter gate
   true, owned container/network/image 0건이다. DB는 사용하지 않았다.

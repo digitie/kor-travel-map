@@ -23,8 +23,8 @@ Playwright timeout은 `failed|timedOut`으로 수용하되, ANSI 제거 뒤 exac
 parent 오류는 result에 직접 있거나 step-only인 경우 모두 own stage를 유지한다. Playwright
 1.60은 boxed propagation과 boxed 내부에서 같은 오류를 독립 재투척한 경우의 reporter
 metadata를 구별할 수 없으므로, descendant stage 차용과 동일 text 중복 제거를 금지해
-fail-closed한다. redacted report는 retry/error index와 category/location만 쓰고 error
-text와 raw step title을 제거했다.
+fail-closed한다. redacted report는 retry·실제 result error index·cause depth와
+category/location만 쓰고 error text와 raw step title을 제거했다.
 
 적대 리뷰어 2명이 실제 Playwright 1.60 probe와 합성 반례로 찾은 retry·flaky·timeout·parent·
 redaction 결함을 모두 반영했다. 관련 회귀 **28 passed**, frontend 전체 **278 passed**,

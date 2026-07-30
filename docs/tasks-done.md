@@ -24,8 +24,8 @@
 retry/error 합성 회귀 **28 passed**, frontend Vitest 전체 **278 passed**, TypeScript·ESLint가
 통과했다. exact production image checkpoint D workers=4는 **276/276**, manifest 일치,
 child exit 0·reporter gate true로 끝났고 owned container/network/image는 모두 0건이다.
-report에는 retry/error index·status·category·source basename/line만 남기며 error text와
-`TestStep.title`의 실제 입력값은 기록하지 않는다.
+report에는 retry·실제 result error index·cause depth·status·category·source
+basename/line만 남기며 error text와 `TestStep.title`의 실제 입력값은 기록하지 않는다.
 
 적대 리뷰어 2명은 skipped retry와 expected flaky 누락, `timedOut`/unexpected-pass false-red·
 false-green, boxed propagation/독립 재투척의 식별 불가능성, hook/body/afterEach envelope

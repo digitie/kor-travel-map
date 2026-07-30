@@ -161,6 +161,7 @@ function validateManifest(manifest: FailureManifest): void {
 }
 
 interface FailureEvidence {
+  causeDepth: number;
   errorIndex: number;
   retry: number;
   status: TestResult["status"];
@@ -180,6 +181,7 @@ interface ResultErrorEntry {
 }
 
 interface StepErrorEntry {
+  causeDepth: number;
   error: TestError;
   failure: FailedStepPath;
 }
@@ -256,7 +258,11 @@ function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
     const stepPaths = failedStepPaths(result.steps);
     const stepErrorEntries = stepPaths.flatMap((failure) =>
       failureErrorChain(failure.stepPath.at(-1)!.error!).map(
-        (error): StepErrorEntry => ({ error, failure }),
+        (error, causeDepth): StepErrorEntry => ({
+          causeDepth,
+          error,
+          failure,
+        }),
       ),
     );
     const unmatchedStepErrors = new Set(stepErrorEntries);
@@ -337,7 +343,8 @@ function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
           return [];
         }
         return [{
-          errorIndex,
+          causeDepth: entry.causeDepth,
+          errorIndex: entry.rootIndex,
           retry: result.retry,
           status: result.status,
           stepPath: matchingStepError?.failure.stepPath ?? [],
@@ -346,8 +353,9 @@ function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
       },
     );
 
-    let nextStepOnlyErrorIndex = resultErrorEntries.length;
-    for (const { error, failure } of unmatchedStepErrors) {
+    let nextStepOnlyErrorIndex = result.errors.length;
+    const stepOnlyErrorIndexes = new Map<FailedStepPath, number>();
+    for (const { causeDepth, error, failure } of unmatchedStepErrors) {
       const text = failureErrorText(error);
       if (
         playwrightTimeoutEnvelopeMs(error) !== undefined &&
@@ -355,17 +363,24 @@ function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
       ) {
         continue;
       }
+      let errorIndex = stepOnlyErrorIndexes.get(failure);
+      if (errorIndex === undefined) {
+        errorIndex = nextStepOnlyErrorIndex;
+        stepOnlyErrorIndexes.set(failure, errorIndex);
+        nextStepOnlyErrorIndex += 1;
+      }
       evidence.push({
-        errorIndex: nextStepOnlyErrorIndex,
+        causeDepth,
+        errorIndex,
         retry: result.retry,
         status: result.status,
         stepPath: failure.stepPath,
         text,
       });
-      nextStepOnlyErrorIndex += 1;
     }
     if (evidence.length === 0) {
       evidence.push({
+        causeDepth: 0,
         errorIndex: 0,
         retry: result.retry,
         status: result.status,
@@ -441,6 +456,7 @@ export function expectedFailureEvidenceMismatches(
     const lastResult = results.at(-1);
     return [
       {
+        causeDepth: -1,
         causeMatched: false,
         errorIndex: -1,
         failureStepPath: [],
@@ -452,7 +468,8 @@ export function expectedFailureEvidenceMismatches(
     ];
   }
   return evidence
-    .map(({ errorIndex, retry, status, stepPath, text }) => ({
+    .map(({ causeDepth, errorIndex, retry, status, stepPath, text }) => ({
+      causeDepth,
       causeMatched: text.length > 0 && expectedCause.test(text),
       errorIndex,
       failureStepPath: serializedStepPath(stepPath),
