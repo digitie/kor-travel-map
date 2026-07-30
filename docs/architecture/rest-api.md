@@ -113,9 +113,9 @@ debug 표면은 origin이 허용 목록에 있어도 CORS를 광고하지 않는
   `key` query 또는 `ServiceToken` 중 하나를 요구한다. OpenAPI도 두 scheme을 OR 대안으로
   선언한다. trusted admin BFF 우회는 same-origin UI용 내부 경계이며 public consumer
   security에는 노출하지 않는다.
-- `POST /v1/features/batch`는 `RoutePolicy.SERVICE`이며 `ServiceToken`
-  (`X-Kor-Travel-Map-Service-Token`) 전용이다. `/health`·`/version`·기계 판독
-  `/openapi.json`만 public-unauthenticated다.
+- `POST /v1/features/batch`와 `POST /v1/features/weather/batch`는
+  `RoutePolicy.SERVICE`이며 `ServiceToken`(`X-Kor-Travel-Map-Service-Token`) 전용이다.
+  `/health`·`/version`·기계 판독 `/openapi.json`만 public-unauthenticated다.
 - `/v1/admin/*`는 trusted Admin BFF, `/v1/ops/*`는 경로·method별 Admin BFF 또는 제한된
   ops principal, `/metrics`는 metrics token을 사용한다. production은 필요한 secret이나 public
   key gate가 빠진 구성을 기동 전에 거부한다.
@@ -255,7 +255,8 @@ GET /v1/features/nearby/by-target       # 등록 POI cache target 주변
 GET  /v1/features/{feature_id}          # 단건 상세
 GET  /v1/features/{feature_id}/observations/{source_entity_key}/history
 GET  /v1/features/{feature_id}/weather  # 날씨 카드(metric + forecast_style)
-POST /v1/features/batch                 # 배치 조회 {feature_ids[]} cap≤200 → {found{},missing[]} (ServiceToken)
+POST /v1/features/batch                 # trip_card 5-state batch, cap≤200 (ServiceToken)
+POST /v1/features/weather/batch         # target_at/known_at weather snapshot, cap≤200 (ServiceToken)
 ```
 - 단건과 batch의 각 Feature 상세는 `curations[]`와 `observations[]`를 함께 반환한다.
   `observations[]`는 Feature에 연결된 provider entity별 **현재 immutable payload 전부**이며,
@@ -268,6 +269,22 @@ POST /v1/features/batch                 # 배치 조회 {feature_ids[]} cap≤20
   `source_record_key DESC`이고 cursor는 해당 `feature_id`/`source_entity_key`에 묶인다.
   잘못되거나 다른 관측에 재사용한 cursor는 422, 첫 page에 해당 link가 없으면 404이며,
   마지막 cursor 다음은 200과 빈 `items`다.
+
+#### Weather batch 계약(T-VN-16A)
+
+- 요청은 중복 없는 `feature_ids` 1~200개와 timezone-aware `target_at`·`known_at`을
+  받는다. `target_at`은 날씨가 설명하는 시각이고, `known_at`은 소비자가 허용하는
+  지식 cutoff다. 현 0060 current-row 단계에서는 `collected_at`을 `known_at` 대리값으로
+  사용하며 forecast는 `issued_at <= known_at`도 강제한다.
+- 부모 공개 판정, nearest weather source tier, `current`, `target_at` 뒤 24시간
+  `timeline`을 요청 크기와 무관하게 PostgreSQL statement 1회에서 읽는다.
+  `timeline_until`이 고정 지평선을 명시한다.
+- item state는 `found|no_data|retired`다. `no_data`는 공개 parent는 있으나 cutoff에
+  맞는 날씨가 없음, `retired`는 현재 공개 projection에 parent가 없어 단건에서 404가
+  되는 상태다. transport/DB 실패는 item으로 축약하지 않고 전체
+  `503 WEATHER_BATCH_UNAVAILABLE`로 분리한다.
+- `GET /v1/features/{feature_id}/weather`도 같은 batch repository를 ID 1개로 호출한다.
+  따라서 parent 404와 빈 날씨 판정이 단건/batch에서 달라지지 않는다.
 - ⚠️ `/tripmate/*` namespace **제거**(kor-travel-map은 PinVi 전용이 아니다). batch는
   `POST /v1/features/batch`(service read, ServiceToken)로 일반화, `/tripmate/
   feature-update-requests*`는 #317로 `/v1/admin/*`에 이미 이전(중복 C2 해소).
