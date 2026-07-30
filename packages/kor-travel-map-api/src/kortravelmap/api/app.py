@@ -50,6 +50,11 @@ from kortravelmap.api.cors import (
     build_cors_surface_patterns,
 )
 from kortravelmap.api.db import configure_prometheus_metrics
+from kortravelmap.api.domain_command_service import (
+    DomainCommandFingerprintConflict,
+    DomainCommandPending,
+    DomainCommandReplay,
+)
 from kortravelmap.api.prometheus import PrometheusMetrics
 from kortravelmap.api.response import ProblemDetail, bind_request_id, reset_request_id
 from kortravelmap.api.response import request_id as response_request_id
@@ -608,6 +613,62 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             message="요청 값이 올바르지 않습니다.",
             details={"errors": exc.errors()},
             request_id=request_id,
+        )
+
+    @application.exception_handler(DomainCommandReplay)
+    async def domain_command_replay_handler(
+        _request: Request,
+        exc: DomainCommandReplay,
+    ) -> JSONResponse:
+        body = exc.record.response_body
+        meta = body.get("meta")
+        original_request_id = (
+            meta.get("request_id")
+            if isinstance(meta, Mapping)
+            and isinstance(meta.get("request_id"), str)
+            else None
+        )
+        headers = {"Idempotency-Replayed": "true"}
+        if original_request_id:
+            headers["X-Request-ID"] = original_request_id
+        return JSONResponse(
+            status_code=exc.record.response_status,
+            content=jsonable_encoder(body),
+            headers=headers,
+        )
+
+    @application.exception_handler(DomainCommandFingerprintConflict)
+    async def domain_command_fingerprint_conflict_handler(
+        request: Request,
+        exc: DomainCommandFingerprintConflict,
+    ) -> JSONResponse:
+        return _error_response(
+            status_code=409,
+            code="IDEMPOTENCY_KEY_REUSED",
+            message=str(exc),
+            details={
+                "operation": exc.claim.operation,
+                "idempotency_key": exc.claim.idempotency_key,
+            },
+            request_id=_request_id(request),
+        )
+
+    @application.exception_handler(DomainCommandPending)
+    async def domain_command_pending_handler(
+        request: Request,
+        exc: DomainCommandPending,
+    ) -> JSONResponse:
+        return _error_response(
+            status_code=409,
+            code="IDEMPOTENCY_RESULT_PENDING",
+            message=str(exc),
+            details={
+                "operation": exc.claim.operation,
+                "idempotency_key": exc.claim.idempotency_key,
+                "claimed_at": exc.claim.created_at.isoformat(),
+            },
+            request_id=_request_id(request),
+            headers={"Retry-After": "5"},
         )
 
     @application.exception_handler(GeoAuthNotConfiguredError)

@@ -26,12 +26,23 @@ async def test_domain_command_ledger_is_actor_and_operation_scoped(
         await migrated_session.execute(
             text(
                 """
-                INSERT INTO ops.domain_command_ledger (
-                  actor, operation, idempotency_key, request_fingerprint,
-                  response_status, response_body
+                INSERT INTO ops.domain_command_claims (
+                  actor, operation, idempotency_key, request_fingerprint
                 ) VALUES (
-                  :actor, :operation, CAST(:key AS uuid), repeat('a', 64),
-                  200, jsonb_build_object('marker', :marker)
+                  :actor, :operation, CAST(:key AS uuid), repeat('a', 64)
+                )
+                """
+            ),
+            {"actor": actor, "operation": operation, "key": key},
+        )
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO ops.domain_command_ledger (
+                  actor, operation, idempotency_key, response_status, response_body
+                ) VALUES (
+                  :actor, :operation, CAST(:key AS uuid), 200,
+                  jsonb_build_object('marker', CAST(:marker AS text))
                 )
                 """
             ),
@@ -47,11 +58,13 @@ async def test_domain_command_ledger_is_actor_and_operation_scoped(
         await migrated_session.execute(
             text(
                 """
-                SELECT actor, operation, fingerprint_version,
-                       response_body->>'marker' AS marker
-                FROM ops.domain_command_ledger
-                WHERE idempotency_key = CAST(:key AS uuid)
-                ORDER BY actor, operation
+                SELECT claim.actor, claim.operation, claim.fingerprint_version,
+                       result.response_body->>'marker' AS marker
+                FROM ops.domain_command_claims AS claim
+                JOIN ops.domain_command_ledger AS result
+                  USING (actor, operation, idempotency_key)
+                WHERE claim.idempotency_key = CAST(:key AS uuid)
+                ORDER BY claim.actor, claim.operation
                 """
             ),
             {"key": key},
@@ -68,12 +81,11 @@ async def test_domain_command_ledger_is_actor_and_operation_scoped(
             await migrated_session.execute(
                 text(
                     """
-                    INSERT INTO ops.domain_command_ledger (
-                      actor, operation, idempotency_key, request_fingerprint,
-                      response_status, response_body
+                    INSERT INTO ops.domain_command_claims (
+                      actor, operation, idempotency_key, request_fingerprint
                     ) VALUES (
                       'admin:alice', 'admin.feature.create',
-                      CAST(:key AS uuid), repeat('b', 64), 200, '{}'::jsonb
+                      CAST(:key AS uuid), repeat('b', 64)
                     )
                     """
                 ),
@@ -87,19 +99,33 @@ async def test_domain_command_ledger_is_append_only(
     await migrated_session.execute(
         text(
             """
+            INSERT INTO ops.domain_command_claims (
+              actor, operation, idempotency_key, request_fingerprint
+            ) VALUES (
+              'admin:alice', 'admin.feature.delete',
+              '92000000-0000-4000-8000-000000000001', repeat('c', 64)
+            )
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
             INSERT INTO ops.domain_command_ledger (
-              actor, operation, idempotency_key, request_fingerprint,
-              response_status, response_body
+              actor, operation, idempotency_key, response_status, response_body
             ) VALUES (
               'admin:alice', 'admin.feature.delete',
               '92000000-0000-4000-8000-000000000001',
-              repeat('c', 64), 200, '{"deleted": true}'::jsonb
+              200, '{"deleted": true}'::jsonb
             )
             """
         )
     )
 
     for statement in (
+        "UPDATE ops.domain_command_claims SET request_fingerprint = repeat('d', 64) "
+        "WHERE actor = 'admin:alice'",
+        "DELETE FROM ops.domain_command_claims WHERE actor = 'admin:alice'",
         "UPDATE ops.domain_command_ledger SET response_status = 201 "
         "WHERE actor = 'admin:alice'",
         "DELETE FROM ops.domain_command_ledger WHERE actor = 'admin:alice'",
@@ -118,13 +144,26 @@ async def test_domain_mutation_and_terminal_result_rollback_together(
             await migrated_session.execute(
                 text(
                     """
+                    INSERT INTO ops.domain_command_claims (
+                      actor, operation, idempotency_key, request_fingerprint
+                    ) VALUES (
+                      'admin:alice', 'admin.feature.create',
+                      '93000000-0000-4000-8000-000000000001',
+                      repeat('d', 64)
+                    )
+                    """
+                )
+            )
+            await migrated_session.execute(
+                text(
+                    """
                     INSERT INTO ops.domain_command_ledger (
-                      actor, operation, idempotency_key, request_fingerprint,
+                      actor, operation, idempotency_key,
                       response_status, response_body
                     ) VALUES (
                       'admin:alice', 'admin.feature.create',
                       '93000000-0000-4000-8000-000000000001',
-                      repeat('d', 64), 201, '{"feature_id": "feature-1"}'::jsonb
+                      201, '{"feature_id": "feature-1"}'::jsonb
                     )
                     """
                 )
@@ -145,3 +184,48 @@ async def test_domain_mutation_and_terminal_result_rollback_together(
         )
     )
     assert count == 0
+    claim_count = await migrated_session.scalar(
+        text(
+            """
+            SELECT count(*)
+            FROM ops.domain_command_claims
+            WHERE idempotency_key =
+              '93000000-0000-4000-8000-000000000001'::uuid
+            """
+        )
+    )
+    assert claim_count == 0
+
+
+async def test_durable_claim_can_exist_without_terminal_result(
+    migrated_session: AsyncSession,
+) -> None:
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO ops.domain_command_claims (
+              actor, operation, idempotency_key, request_fingerprint
+            ) VALUES (
+              'admin:alice', 'admin.backup.restore',
+              '94000000-0000-4000-8000-000000000001', repeat('e', 64)
+            )
+            """
+        )
+    )
+
+    row = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT claim.request_fingerprint, result.completed_at
+                FROM ops.domain_command_claims AS claim
+                LEFT JOIN ops.domain_command_ledger AS result
+                  USING (actor, operation, idempotency_key)
+                WHERE claim.actor = 'admin:alice'
+                  AND claim.operation = 'admin.backup.restore'
+                """
+            )
+        )
+    ).one()
+    assert row.request_fingerprint == "e" * 64
+    assert row.completed_at is None

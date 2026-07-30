@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from time import perf_counter
 
 import httpx
@@ -11,9 +12,18 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.geocoding import KorTravelGeoRestClient
+from kortravelmap.infra.domain_command_repo import (
+    DomainCommandClaim,
+    DomainCommandRecord,
+)
 from pydantic import SecretStr
 
 from kortravelmap.api.app import create_app
+from kortravelmap.api.domain_command_service import (
+    DomainCommandFingerprintConflict,
+    DomainCommandPending,
+    DomainCommandReplay,
+)
 from kortravelmap.api.feature_update_http import to_http_exception
 from kortravelmap.api.feature_update_service import (
     FeatureUpdateResolverError,
@@ -22,6 +32,88 @@ from kortravelmap.api.feature_update_service import (
 )
 from kortravelmap.api.response import make_meta
 from kortravelmap.api.settings import ApiSettings
+
+
+def _domain_claim() -> DomainCommandClaim:
+    return DomainCommandClaim(
+        actor="admin:alice",
+        operation="admin.feature.create",
+        idempotency_key="95000000-0000-4000-8000-000000000001",
+        fingerprint_version=1,
+        request_fingerprint="a" * 64,
+        created_at=datetime(2026, 7, 31, tzinfo=UTC),
+    )
+
+
+def _domain_record() -> DomainCommandRecord:
+    claim = _domain_claim()
+    return DomainCommandRecord(
+        actor=claim.actor,
+        operation=claim.operation,
+        idempotency_key=claim.idempotency_key,
+        fingerprint_version=claim.fingerprint_version,
+        request_fingerprint=claim.request_fingerprint,
+        response_status=201,
+        response_body={
+            "data": {"feature_id": "feature-1"},
+            "meta": {"duration_ms": 3, "request_id": "request-original"},
+        },
+        claimed_at=claim.created_at,
+        completed_at=claim.created_at,
+    )
+
+
+@pytest.mark.unit
+def test_domain_command_terminal_result_replays_exact_response() -> None:
+    app = create_app(ApiSettings())
+
+    @app.post("/domain-replay")
+    async def _domain_replay() -> None:
+        raise DomainCommandReplay(_domain_record())
+
+    response = TestClient(app).post(
+        "/domain-replay",
+        headers={"X-Request-ID": "request-retry"},
+    )
+
+    assert response.status_code == 201
+    assert response.headers["idempotency-replayed"] == "true"
+    assert response.headers["x-request-id"] == "request-original"
+    assert response.json() == _domain_record().response_body
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "expected_code", "retry_after"),
+    [
+        (
+            DomainCommandFingerprintConflict(_domain_claim()),
+            "IDEMPOTENCY_KEY_REUSED",
+            None,
+        ),
+        (DomainCommandPending(_domain_claim()), "IDEMPOTENCY_RESULT_PENDING", "5"),
+    ],
+)
+def test_domain_command_claim_errors_use_typed_problem(
+    error: Exception,
+    expected_code: str,
+    retry_after: str | None,
+) -> None:
+    app = create_app(ApiSettings())
+
+    @app.post("/domain-command-error")
+    async def _domain_command_error() -> None:
+        raise error
+
+    response = TestClient(app).post(
+        "/domain-command-error",
+        headers={"X-Request-ID": "request-domain-error"},
+    )
+
+    assert response.status_code == 409
+    assert response.headers.get("retry-after") == retry_after
+    assert response.json()["code"] == expected_code
+    assert response.json()["request_id"] == "request-domain-error"
 
 
 @pytest.mark.unit
