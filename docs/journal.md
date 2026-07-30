@@ -26,7 +26,9 @@
 prod external-infra에서 동작하지 않는 standalone backup 계획, 0068 autocommit 부분 적용,
 `collection_key`의 admin 입력·저장·검색 계약 누락, resume의 0064~0067 stale 범위를 정정했다.
 H35는 external DB custom dump를 scratch DB에 실제 복원 검증한 뒤, 0064/0068 partial state를
-downgrade 없이 forward 재개하는 계획으로 바꿨다.
+downgrade 없이 forward 재개하는 계획으로 바꿨다. 이미지 준비를 먼저 끝내고 API·Dagster
+writer/ingress cold fence 안에서 dump→복원 검증→migration→구조 smoke를 마친 뒤에만
+fence를 해제해, dump 이후 정상 write를 옛 snapshot 복원으로 잃는 창도 닫았다.
 
 - 이름 단독 오링크를 막는 `_adopted_match`가 주소 hint 유일 매칭까지 함께 막아 ADR-063을
   위반했다. 주소 hint 경로는 복원하고 이름 단독 후보는 `ambiguous/후보 다수`가 아니라
