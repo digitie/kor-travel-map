@@ -10,6 +10,21 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-31 (codex) — T-VN-16C 완료·T-VN-12A/B/C/D 단일 PR 전환
+
+Map PR #902와 PinVi PR #421이 모두 병합됐고 sparse 다중 날짜 weather batch의
+생산자·소비자·장기 여행 파괴적 Live UI까지 완료됐다. PinVi는 Trip view당 outbound
+한 번으로 target/card를 소비하며 31일 `not_requested`와 worker fan-out을 제거했다.
+
+사용자 최신 지시에 따라 다음 Lane B 작업은 `T-VN-12A/B/C/D`이며 하나의 PR에서
+inventory freeze, domain ledger, destructive command 결합, consumer cutover를 함께
+완결한다. 12A의 정적 registry와 CI 완전성 검사가 이후 생성되는 H22B command도 같은
+actor-scoped ledger에 등록하도록 강제하므로 종전의 H22B 선행 barrier를 대체한다.
+
+**다음 한 작업**: T-VN-12 단일 PR의 command inventory·공통 ledger schema checkpoint를
+먼저 올리고 Feature/curation/review와 import/offline/backup/restore 소비자를 순서대로
+결합한다.
+
 ## 2026-07-31 (codex) — T-VN-DOC-732 문서 정합성 완료
 
 PR #732의 설계 결정을 최신 main에 다시 대조했다. Map public 인증은 URL `key` query가

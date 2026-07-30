@@ -17,7 +17,7 @@
   확인했다. 남은 Map #819는 외부 HAProxy `timeout tunnel` 운영 설정이 필요한 별도 보류
   항목이므로 이 문서 task에서 닫지 않는다. 코드·DB·runtime 변경과 새 live 실행은 없다.
 
-## 2026-07-30 — Lane B b1 T-VN-16C Map sparse weather 생산자
+## 2026-07-30 — Lane B b1 T-VN-16C sparse weather 생산자·소비자
 
 - [x] **T-VN-16C Map 생산자 — sparse 다중 날짜 weather batch**
 
@@ -31,8 +31,13 @@
   실데이터 40 target × 5 Feature는 200 pair·공유 card 40개·11,763 metric을 5.77초에
   반환했다. 적대 리뷰어 2명의 최종 finding은 P0/P1/P2 0건이며, 보존
   `ktm-tvn45-db`의 sparse found·401·422·`active→hidden→retired`·cleanup/audit 0을
-  파괴적 API Live로 검증했다. PinVi outbound 1회 소비와 장기 여행 Live UI는 열린
-  `T-VN-16C` 소비자 단계에서 이어간다.
+  파괴적 API Live로 검증했다.
+
+  PinVi PR #421은 Trip view를 sparse batch 단 한 번으로 소비하고 31일
+  `not_requested`·worker fan-out을 제거했다. target/card strict ordering과 7-state
+  projection을 owner/shared Web 경로에 함께 적용하고 vendored OpenAPI를 Map #902와
+  맞췄다. 장기 여행 파괴적 Live UI와 전체 gate를 통과한 뒤 merge commit
+  `e79a09d46e5500437418be29e0df341dcad139bd`로 병합됐다.
 
 ## 2026-07-30 — Lane B b1 T-VN-16B PinVi weather batch 소비
 

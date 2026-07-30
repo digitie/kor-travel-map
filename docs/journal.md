@@ -17,6 +17,18 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-31 (codex) — T-VN-16C 완료 이관·T-VN-12 단일 PR 착수
+
+- Map #902와 PinVi #421의 실제 병합 상태를 재확인했다. sparse 다중 날짜 생산자,
+  Trip당 outbound 1회 소비, owner/shared Web projection과 파괴적 Live UI가 모두
+  완료됐으므로 `T-VN-16C`를 완료 이력으로 이관했다.
+- 사용자 최신 지시에 따라 다음 Lane B 작업은 `T-VN-12A/B/C/D`이고 네 단계를 하나의
+  PR에서 완결한다.
+- 아직 없는 H22B command를 기다리는 대신 12A의 정적 write-operation registry와 CI
+  완전성 검사가 미래 route도 미등록 상태로 둘 수 없게 한다. H22B는 구현되는 시점부터
+  같은 actor-scoped ledger에 등록해야 하므로 종전의 선행 barrier를 제거한다.
+- 이 변경은 문서 상태·순서 정리뿐이며 코드·DB·runtime에는 영향을 주지 않는다.
+
 ## 2026-07-31 (codex) — PR #732 설계 결정을 현재 문서 정본에 반영
 
 - PR #808은 `dd965d08` 기준에서 닫힌 미병합 draft이고 현재 main보다 크게 뒤처져 있어

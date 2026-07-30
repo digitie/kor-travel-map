@@ -45,9 +45,9 @@ barrier로 직렬화한다.
     [x] `T-VN-H38`(failure manifest retry/error fingerprint 완전성) →
     [x] `T-VN-H39`(schedule command pending barrier) →
     [x] `T-VN-16B`(weather batch 소비) →
-    [ ] `T-VN-16C`(sparse 다중 날짜 weather batch) →
+    [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
     [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
-    [ ] `T-VN-12D`(domain idempotency) →
+    [ ] `T-VN-12D`(domain idempotency, A/B/C/D 단일 PR) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [ ] `T-VN-31A` → [ ] `T-VN-31B` → [ ] `T-VN-31C`
@@ -135,9 +135,11 @@ barrier로 직렬화한다.
 - **cross-lane 순서 제약**: C6c pair capture와 #392, H07A~D는 완료됐다.
   H22C의 curation frontend 선행 작업 T-VN-48B·T-VN-49B는 모두 완료됐다. H22A/B가
   끝나면 최신 구조에서 H22C를 시작한다. T-VN-49B 코드와 이 barrier 해제는 같은 merge
-  commit으로 landing한다. T-VN-12A의 command
-  inventory freeze는 H22B의 reclassification command가 머지된 뒤 시작해 curation idempotency가
-  누락되지 않게 한다. Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
+  commit으로 landing한다. **2026-07-31 사용자 지시**에 따라 T-VN-12A/B/C/D는 지금
+  하나의 PR로 진행한다. 12A의 정적 command registry와 CI 완전성 검사가 새 write route를
+  미등록 상태로 둘 수 없게 하고, 미래 H22B reclassification command도 생성 시점부터 같은
+  actor-scoped ledger 계약을 등록하도록 강제해 종전의 H22B 선행 barrier를 대체한다.
+  Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
   T-VN-40은 양 lane의 T-VN-32~38 하위 task가 모두 끝난 join barrier 뒤에 시작하며,
   최종 T-VN-39는 T-VN-32~38·40의 모든 하위 task가 끝난 뒤에만 시작한다.
 - **OpenAPI 계약 변경 규율(2026-07-29 개정)**: admin/user OpenAPI를 바꾸는 task는
@@ -758,31 +760,14 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
-### T-VN-16 — weather batch와 부모 404
-
-단일 날짜 생산자와 날짜별 PinVi 소비는 완료됐다. 16B 적대 리뷰에서 확인한 날짜 fan-out과
-31일 조회 상한을 sparse 다중 날짜 계약으로 제거한다.
-
-- [ ] T-VN-16C — **sparse 다중 날짜 weather batch**
-
-  Map은 날짜별 실제 Feature ID만 받는 `targets[{target_at, feature_ids}]`를 한
-  PostgreSQL snapshot statement로 읽는다. target/group/pair/전체 metric row budget,
-  canonical ordering, 중복 거부와 전량 성공·실패를 계약으로 고정한다. PinVi는 한 Trip
-  view를 호출 한 번으로 소비해 31일 `not_requested` 상태와 worker/time budget fan-out을
-  제거한다. Map query plan·OpenAPI와 PinVi 장기 여행 파괴적 Live UI가 완료 조건이다.
-
-  - [x] Map 생산자: 고유 parent별 spatial 후보를 한 번 계산하고 target별 bitemporal
-    fact로 최종 source를 결정한 뒤 같은 target/source bundle을 `card_key`·`cards[]`로
-    정규화한다. 요청·계획·series·metric·payload·timeout 예산을 전량
-    성공·실패 계약으로 고정했다. 실데이터 40 target × 5 Feature는 200 pair·공유 card
-    40개·11,763 metric을 5.77초에 반환한다(본 PR landing으로 완료).
-  - [ ] PinVi 소비자: Trip view당 sparse batch 호출 한 번, 장기 여행 UI와 실패 상태를
-    새 공유 card 계약으로 전환한다(Map 생산자 merge 뒤 별도 호환 PR).
-
 ### T-VN-12 — domain-owned Idempotency-Key 전개
 
 기존 feature-update·pipeline/schedule ledger를 기준 구현으로 두고, 모든 write endpoint가 아니라
 네트워크 재시도 가능한 command만 대상으로 한다.
+
+2026-07-31 사용자 지시에 따라 A/B/C/D는 한 PR에서 완결한다. 12A의 정적 inventory와
+CI 완전성 검사가 이후 추가되는 모든 write operation의 retryable 분류와 ledger 등록 여부를
+강제하므로, 아직 구현되지 않은 H22B도 별도 선행 barrier 없이 생성 시점에 같은 계약을 따른다.
 
 - [ ] T-VN-12A — **retryable command inventory·계약 freeze**
 
