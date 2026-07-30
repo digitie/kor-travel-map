@@ -1,7 +1,7 @@
 """weather physical-series registry와 weather-only 공간 인덱스.
 
-Revision ID: 0070_weather_series_catalog
-Revises: 0069_weather_effective_lookup
+Revision ID: 0069_weather_series_catalog
+Revises: 0068_integrity_last_seen
 Create Date: 2026-07-30
 
 대용량 weather fact에서 매 요청마다 열린 ``forecast_style × metric_key`` 집합을
@@ -22,8 +22,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0070_weather_series_catalog"
-down_revision: str | Sequence[str] | None = "0069_weather_effective_lookup"
+revision: str = "0069_weather_series_catalog"
+down_revision: str | Sequence[str] | None = "0068_integrity_last_seen"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -169,27 +169,6 @@ def downgrade() -> None:
     with op.get_context().autocommit_block():
         op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS feature.{_WEATHER_GIST}")
         op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS feature.{_EFFECTIVE_INDEX}")
-        op.execute(
-            f"""
-            CREATE INDEX CONCURRENTLY {_EFFECTIVE_INDEX}
-            ON feature.feature_weather_values (
-                feature_id,
-                forecast_style,
-                metric_key,
-                (
-                    COALESCE(
-                        valid_at,
-                        observed_at,
-                        valid_from,
-                        issued_at
-                    )
-                ) DESC,
-                issued_at DESC NULLS LAST,
-                collected_at DESC,
-                weather_value_key
-            )
-            """
-        )
         op.execute(
             """
             DROP TRIGGER IF EXISTS trg_register_weather_metric_series

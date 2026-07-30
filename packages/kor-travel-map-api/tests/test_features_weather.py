@@ -130,6 +130,18 @@ def test_weather_card_asof_only_changes_target_time(
 
 
 @pytest.mark.unit
+def test_weather_card_rejects_asof_without_timeline_headroom(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/v1/features/f1/weather",
+        params={"asof": "9999-12-31T23:59:59.999999Z"},
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.unit
 def test_weather_card_404_when_feature_not_public(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -47,6 +47,7 @@ from kortravelmap.infra.poi_cache_target_repo import (
     get_poi_cache_target_by_key,
 )
 from pydantic import (
+    AfterValidator,
     AwareDatetime,
     BaseModel,
     ConfigDict,
@@ -1521,6 +1522,22 @@ class FeatureWeatherResponse(BaseModel):
     meta: Meta
 
 
+def _weather_target_at_within_timeline(value: datetime) -> datetime:
+    try:
+        value + timedelta(days=weather_repo.WEATHER_BATCH_TIMELINE_DAYS)
+    except OverflowError as exc:
+        raise ValueError(
+            "weather target 시각은 timeline 지평선을 계산할 수 있어야 합니다."
+        ) from exc
+    return value
+
+
+_WeatherTargetAt = Annotated[
+    AwareDatetime,
+    AfterValidator(_weather_target_at_within_timeline),
+]
+
+
 class WeatherBatchRequest(BaseModel):
     """set-based weather snapshot 요청."""
 
@@ -1531,7 +1548,7 @@ class WeatherBatchRequest(BaseModel):
         max_length=200,
         json_schema_extra={"uniqueItems": True},
     )
-    target_at: AwareDatetime = Field(
+    target_at: _WeatherTargetAt = Field(
         description="예보·관측이 설명해야 하는 시각(UTC offset 필수)."
     )
     known_at: AwareDatetime = Field(
@@ -1542,14 +1559,6 @@ class WeatherBatchRequest(BaseModel):
     def feature_ids_must_be_unique(self) -> WeatherBatchRequest:
         if len(self.feature_ids) != len(set(self.feature_ids)):
             raise ValueError("feature_ids는 중복될 수 없습니다.")
-        try:
-            self.target_at + timedelta(
-                days=weather_repo.WEATHER_BATCH_TIMELINE_DAYS
-            )
-        except OverflowError as exc:
-            raise ValueError(
-                "target_at은 timeline 지평선을 계산할 수 있는 범위여야 합니다."
-            ) from exc
         return self
 
 
@@ -1689,7 +1698,7 @@ async def get_feature_weather(
     session: Annotated[AsyncSession, Depends(get_session)],
     feature_id: str,
     asof: Annotated[
-        AwareDatetime | None,
+        _WeatherTargetAt | None,
         Query(description="이 시점 이하 weather만(미래 예보 제외)."),
     ] = None,
 ) -> FeatureWeatherResponse:

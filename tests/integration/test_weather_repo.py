@@ -186,6 +186,18 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
                 value_text="현재 구간",
             ),
             _wv(
+                "RANGE_EXPIRED",
+                feature_id="batch_weather",
+                weather_domain="kma_weather_alert",
+                forecast_style="advisory",
+                timeline_bucket=None,
+                issued_at=None,
+                valid_from=_T1 - timedelta(hours=2),
+                valid_until=_T1 - timedelta(hours=1),
+                collected_at=_T1 - timedelta(hours=3),
+                value_text="종료 구간",
+            ),
+            _wv(
                 "RANGE_TIMELINE",
                 feature_id="batch_weather",
                 weather_domain="kma_weather_alert",
@@ -211,7 +223,7 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
             )
         )
     ).scalar_one()
-    assert series_count == 4
+    assert series_count == 5
 
     connection = await migrated_session.connection()
     statement_count = 0
@@ -246,6 +258,7 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
     assert current_by_key["RANGE_CURRENT"].effective_at == _T2 - timedelta(
         minutes=30
     )
+    assert "RANGE_EXPIRED" not in current_by_key
     assert timeline_by_key["TMP"].value_number == Decimal("23.0")
     assert "POP" not in timeline_by_key
     assert timeline_by_key["RANGE_TIMELINE"].effective_at == _T2 + timedelta(

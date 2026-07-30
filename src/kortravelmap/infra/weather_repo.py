@@ -305,6 +305,13 @@ _BATCH_CURRENT_PREDICATE: Final[str] = f"""
 {_BATCH_KNOWN_AT}
 AND {_BATCH_EFFECTIVE_AT} IS NOT NULL
 AND {_BATCH_EFFECTIVE_AT} <= CAST(:target_at AS timestamptz)
+AND (
+    w.valid_at IS NOT NULL
+    OR w.observed_at IS NOT NULL
+    OR w.valid_from IS NULL
+    OR w.valid_until IS NULL
+    OR w.valid_until >= CAST(:target_at AS timestamptz)
+)
 """
 
 # KMA weather source tier 술어. batch SQL이 module import 시 이 상수를 삽입하므로
@@ -524,7 +531,9 @@ current_source_rows AS (
         row.observed_at,
         row.provider,
         row.weather_domain,
-        row.effective_at
+        row.effective_at,
+        row.collected_at,
+        row.weather_value_key
     FROM source_metric_keys AS metric
     JOIN LATERAL (
         SELECT
@@ -543,7 +552,9 @@ current_source_rows AS (
             w.observed_at,
             w.provider,
             w.weather_domain,
-            {_BATCH_EFFECTIVE_AT} AS effective_at
+            {_BATCH_EFFECTIVE_AT} AS effective_at,
+            w.collected_at,
+            w.weather_value_key
         FROM feature.feature_weather_values AS w
         WHERE w.feature_id = metric.source_feature_id
           AND w.provider = metric.provider
@@ -590,7 +601,9 @@ current_rows AS (
         row.metric_key,
         source.tier,
         row.effective_at DESC,
-        row.issued_at DESC NULLS LAST
+        row.issued_at DESC NULLS LAST,
+        row.collected_at DESC,
+        row.weather_value_key
 ),
 timeline_source_rows AS (
     SELECT DISTINCT ON (
