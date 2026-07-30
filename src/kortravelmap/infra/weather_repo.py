@@ -19,7 +19,6 @@ from sqlalchemy import text
 
 from kortravelmap.core.ids import make_weather_value_key
 from kortravelmap.dto._time import kst_now
-from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
 if TYPE_CHECKING:
     from sqlalchemy import RowMapping
@@ -54,8 +53,8 @@ DEFAULT_WEATHER_FRESHNESS_SECONDS: Final[int] = 6 * 60 * 60
 DEFAULT_WEATHER_HISTORY_RETENTION_DAYS: Final[int] = 365 * 3
 """REST weather history 기본 보존/조회 지평선(3년)."""
 
-WEATHER_BATCH_TIMELINE_DAYS: Final[int] = 10
-"""batch snapshot이 ``target_at`` 뒤에 제공하는 예보 timeline 지평선."""
+WEATHER_BATCH_TIMELINE_DAYS: Final[int] = 1
+"""batch snapshot이 ``target_at`` 뒤에 제공하는 24시간 예보 timeline 지평선."""
 
 
 @dataclass(frozen=True)
@@ -313,7 +312,7 @@ _OBSERVED_TEMP_PREDICATE: Final[str] = (
     "w.forecast_style = 'observed' AND w.metric_key IN ('T1H', 'TMP')"
 )
 
-# T-VN-16A: parent 판정, tiered nearest-anchor 선택, current와 10일 forecast
+# T-VN-16A: parent 판정, tiered nearest-anchor 선택, current와 24시간 forecast
 # timeline을 요청 ID 수와 무관하게 한 SQL statement/snapshot에서 읽는다.
 #
 # 0060은 full correction history/current-summary 이전 단계라 ``collected_at``이
@@ -334,7 +333,6 @@ parents AS (
     FROM requested
     LEFT JOIN feature.public_features AS visible
       ON visible.feature_id = requested.feature_id
-    {public_active_notice_filter_sql("visible")}
 ),
 own_has_temperature AS (
     SELECT

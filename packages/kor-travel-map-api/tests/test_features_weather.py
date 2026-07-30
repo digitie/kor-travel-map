@@ -210,7 +210,7 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
         data = response.json()["data"]
         assert data["target_at"] == "2026-07-30T00:00:00Z"
         assert data["known_at"] == "2026-07-29T12:00:00Z"
-        assert data["timeline_until"] == "2026-08-09T00:00:00Z"
+        assert data["timeline_until"] == "2026-07-31T00:00:00Z"
         assert [item["state"] for item in data["items"]] == [
             "found",
             "no_data",
