@@ -38,21 +38,32 @@
   예산을 넘겼다. target-local `card_key`·`cards[]`로 payload를 정규화하고 source
   spatial 후보 집합을 고유 parent별 한 번만 계산하도록 바꿨다. 최종 source는 target별
   bitemporal fact 적격성으로 정해 미래 series가 과거 snapshot을 바꾸지 않는다. 자체
-  series가 없는 실제 공개 Feature 5개의 200 sparse pair는 공유 card 34개,
-  11,554 metric, source-series work 597, batch 3.36초로 통과했다(중간 날짜별 source
-  lookup은 35.1초). 보수적 payload 추정은 5,924,333 bytes로 실제 data JSON
-  4,593,610 bytes보다 1,330,723 bytes 컸다.
+  series가 없는 실제 공개 Feature 5개의 200 sparse pair는 공유 card 40개,
+  11,763 metric, source-series work 716, batch 5.77초로 통과했다(중간 날짜별 source
+  lookup은 35.1초). 보수적 payload 추정은 6,030,012 bytes로 실제 data JSON
+  4,677,305 bytes보다 1,352,707 bytes 컸다.
 - admin/user OpenAPI와 두 TypeScript client 산출물을 다시 생성했고 export/type drift
   check가 모두 통과했다. 1차 적대 리뷰가 찾은 future-catalog contamination, 단건
   `source_styles`의 timeline 혼입, 무제한 workload/payload/timeout을 회귀 테스트와 위
   예산으로 보완했다.
-- 최종 파괴적 API Live는 보존 clone `ktm-tvn45-db`의 기존
+- 최종 SQL 적대 리뷰는 source-series gate 뒤 current/timeline fact projection,
+  catalog global sequential scan 부재와 timeout cleanup을 실측했다. query budget은
+  transaction-local PostgreSQL `statement_timeout`을 설정하고 성공 시 이전 값을
+  복원한다. 50ms probe는 0.155초에 `WeatherBatchQueryTimeoutError`로 반환했으며,
+  반환 시 실행 중인 orphan query 0, caller rollback 0.001초, 같은 session 재사용과
+  pool 종료 오류 없음까지 확인해 P0/P1/P2 모두 0으로 종결했다.
+- 최종 계약 적대 리뷰는 단건 weather GET의 257자 Feature ID가 repository `ValueError`로
+  늦게 거부돼 500이 되는 P2를 찾았다. path를 1~256자로 먼저 검증해 422로 고정하고
+  admin/user OpenAPI와 두 TypeScript 산출물을 다시 생성했다. 실패 지점 재검토 뒤 두
+  리뷰어 모두 P0/P1/P2 0으로 종결했다.
+- 최종 SQL 확정 뒤 파괴적 API Live는 보존 clone `ktm-tvn45-db`의 기존
   `0069_weather_series_catalog`를 그대로 재사용했다. sparse target 2개 `found`,
   잘못된 service token 401, planning-work 초과 422, fixture `active→hidden` 뒤
   `retired`를 확인했다. owned weather/price/series fixture cleanup과 audit는 모두 잔여
-  0건, API error log도 0건이었다. 첫 credential-key 탐색과 `psql -c` 변수 치환 실패는
-  seed 전/자동 cleanup 뒤 각각 실패 지점부터 재개했으며 새 clone·checkpoint·migration
-  rollback은 만들지 않았다.
+  0건, API error log도 0건이었다. 첫 credential-key 탐색, `psql -c` 변수 치환,
+  재검증 heredoc의 `docker exec -i` 누락과 SIGTERM `wait` 143 처리는 seed 전 또는 trap
+  cleanup 뒤 각각 실패 지점부터 재개했다. 새 clone·checkpoint·migration rollback은
+  만들지 않았다.
 
 ## 2026-07-30 (codex) — T-VN-16A set-based weather snapshot
 

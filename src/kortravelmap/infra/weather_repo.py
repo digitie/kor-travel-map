@@ -9,14 +9,15 @@ raw SQL은 본 모듈에 모음(ADR-004). commit은 호출자 책임.
 from __future__ import annotations
 
 import json
-from asyncio import timeout as asyncio_timeout
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
+from math import ceil
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.ids import make_weather_value_key
 from kortravelmap.dto._time import kst_now
@@ -489,57 +490,33 @@ spatial_candidates AS MATERIALIZED (
            CAST(:radius_m AS double precision)
          )
 ),
-candidate_feature_ids AS MATERIALIZED (
-    SELECT visible_feature_id AS feature_id
-    FROM unique_parents
-    WHERE visible_feature_id IS NOT NULL
-    UNION
-    SELECT feature_id
+anchor_feature_ids AS MATERIALIZED (
+    SELECT DISTINCT
+        feature_id
     FROM spatial_candidates
-),
-candidate_series AS MATERIALIZED (
-    SELECT series.*
-    FROM candidate_feature_ids AS candidate
-    JOIN LATERAL (
-        SELECT
-            catalog.feature_id,
-            catalog.provider,
-            catalog.weather_domain,
-            catalog.forecast_style,
-            catalog.metric_key
-        FROM feature.weather_metric_series AS catalog
-        WHERE catalog.feature_id = candidate.feature_id
-        OFFSET 0
-    ) AS series ON true
-),
-known_series AS MATERIALIZED (
-    SELECT series.*
-    FROM candidate_series AS series
-    JOIN LATERAL (
-        SELECT 1
-        FROM feature.feature_weather_values AS w
-        WHERE w.feature_id = series.feature_id
-          AND w.provider = series.provider
-          AND w.weather_domain = series.weather_domain
-          AND w.forecast_style = series.forecast_style
-          AND w.metric_key = series.metric_key
-          AND {_BATCH_KNOWN_AT}
-        LIMIT 1 OFFSET 0
-    ) AS known_fact ON true
 ),
 source_capabilities AS MATERIALIZED (
     SELECT
-        series.feature_id,
-        bool_or(
-            series.provider = 'python-kma-api'
-            AND series.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')
-        ) AS has_kma_forecast,
-        bool_or(
-            series.forecast_style = 'observed'
-            AND series.metric_key IN ('T1H', 'TMP')
-        ) AS has_observed_temperature
-    FROM known_series AS series
-    GROUP BY series.feature_id
+        candidate.feature_id,
+        kma.value IS NOT NULL AS has_kma_forecast,
+        observed.value IS NOT NULL AS has_observed_temperature
+    FROM anchor_feature_ids AS candidate
+    LEFT JOIN LATERAL (
+        SELECT true AS value
+        FROM feature.weather_metric_series AS series
+        WHERE series.feature_id = candidate.feature_id
+          AND series.provider = 'python-kma-api'
+          AND series.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')
+        LIMIT 1 OFFSET 0
+    ) AS kma ON true
+    LEFT JOIN LATERAL (
+        SELECT true AS value
+        FROM feature.weather_metric_series AS series
+        WHERE series.feature_id = candidate.feature_id
+          AND series.forecast_style = 'observed'
+          AND series.metric_key IN ('T1H', 'TMP')
+        LIMIT 1 OFFSET 0
+    ) AS observed ON true
 ),
 anchor_candidates AS MATERIALIZED (
     SELECT
@@ -557,7 +534,7 @@ own_has_temperature AS (
         parent.ordinality,
         EXISTS (
             SELECT 1 AS found
-            FROM known_series AS series
+            FROM feature.weather_metric_series AS series
             JOIN LATERAL (
                 SELECT 1
                 FROM feature.feature_weather_values AS w
@@ -575,6 +552,12 @@ own_has_temperature AS (
         ) AS value
     FROM parents AS parent
 ),
+/*
+ * The remaining CTEs deliberately probe ``weather_metric_series`` by the
+ * selected feature_id.  Keeping those probes correlated preserves the PK
+ * prefix lookup; a shared materialized series CTE becomes an unindexed
+ * intermediate and is slower for many target dates.
+ */
 kma_anchor AS (
     SELECT parent.ordinality, parent.target_at, anchor.feature_id
     FROM parents AS parent
@@ -587,7 +570,7 @@ kma_anchor AS (
           AND NOT own_temp.value
           AND EXISTS (
               SELECT 1 AS found
-              FROM known_series AS series
+              FROM feature.weather_metric_series AS series
               JOIN LATERAL (
                   SELECT 1
                   FROM feature.feature_weather_values AS w
@@ -620,7 +603,7 @@ observed_anchor AS (
           AND NOT own_temp.value
           AND EXISTS (
               SELECT 1 AS found
-              FROM known_series AS series
+              FROM feature.weather_metric_series AS series
               JOIN LATERAL (
                   SELECT 1
                   FROM feature.feature_weather_values AS w
@@ -664,7 +647,7 @@ preferred_has_current AS (
         EXISTS (
             SELECT 1 AS found
             FROM preferred_sources AS source
-            JOIN known_series AS series
+            JOIN feature.weather_metric_series AS series
               ON series.feature_id = source.source_feature_id
             JOIN LATERAL (
                 SELECT 1
@@ -693,7 +676,7 @@ fallback_anchor AS (
           AND NOT preferred.value
           AND EXISTS (
               SELECT 1 AS found
-              FROM known_series AS series
+              FROM feature.weather_metric_series AS series
               JOIN LATERAL (
                   SELECT 1
                   FROM feature.feature_weather_values AS w
@@ -720,15 +703,47 @@ sources AS (
     FROM fallback_anchor
     WHERE feature_id IS NOT NULL
 ),
-metric_sources AS MATERIALIZED (
+source_known_series AS MATERIALIZED (
     SELECT DISTINCT
         source.ordinality,
         source.target_at,
         source.source_feature_id,
-        source.tier
+        source.tier,
+        series.provider,
+        series.weather_domain,
+        series.forecast_style,
+        series.metric_key
     FROM sources AS source
-    JOIN known_series AS series
-      ON series.feature_id = source.source_feature_id
+    JOIN LATERAL (
+        SELECT
+            catalog.feature_id,
+            catalog.provider,
+            catalog.weather_domain,
+            catalog.forecast_style,
+            catalog.metric_key
+        FROM feature.weather_metric_series AS catalog
+        WHERE catalog.feature_id = source.source_feature_id
+        OFFSET 0
+    ) AS series ON true
+    JOIN LATERAL (
+        SELECT 1
+        FROM feature.feature_weather_values AS w
+        WHERE w.feature_id = series.feature_id
+          AND w.provider = series.provider
+          AND w.weather_domain = series.weather_domain
+          AND w.forecast_style = series.forecast_style
+          AND w.metric_key = series.metric_key
+          AND {_BATCH_KNOWN_AT}
+        LIMIT 1 OFFSET 0
+    ) AS known_fact ON true
+),
+metric_sources AS MATERIALIZED (
+    SELECT DISTINCT
+        ordinality,
+        target_at,
+        source_feature_id,
+        tier
+    FROM source_known_series
 ),
 source_bundles AS (
     SELECT
@@ -779,8 +794,10 @@ source_metric_keys AS MATERIALIZED (
         series.forecast_style,
         series.metric_key
     FROM card_sources AS source
-    JOIN known_series AS series
-      ON series.feature_id = source.source_feature_id
+    JOIN source_known_series AS series
+      ON series.ordinality = source.ordinality
+     AND series.source_feature_id = source.source_feature_id
+     AND series.tier = source.tier
 ),
 source_metric_key_count AS MATERIALIZED (
     SELECT count(*)::bigint AS value
@@ -913,17 +930,21 @@ timeline_source_rows AS (
         w.weather_domain,
         {_BATCH_EFFECTIVE_AT} AS effective_at
     FROM gated_source_metric_keys AS metric
-    JOIN feature.feature_weather_values AS w
-      ON w.feature_id = metric.source_feature_id
-     AND w.provider = metric.provider
-     AND w.weather_domain = metric.weather_domain
-     AND w.forecast_style = metric.forecast_style
-     AND w.metric_key = metric.metric_key
-    WHERE {_BATCH_KNOWN_AT}
-      AND {_BATCH_EFFECTIVE_AT} > metric.target_at
-      AND {_BATCH_EFFECTIVE_AT}
-          <= metric.target_at
-             + make_interval(days => CAST(:timeline_days AS integer))
+    JOIN LATERAL (
+        SELECT w.*
+        FROM feature.feature_weather_values AS w
+        WHERE w.feature_id = metric.source_feature_id
+          AND w.provider = metric.provider
+          AND w.weather_domain = metric.weather_domain
+          AND w.forecast_style = metric.forecast_style
+          AND w.metric_key = metric.metric_key
+          AND {_BATCH_KNOWN_AT}
+          AND {_BATCH_EFFECTIVE_AT} > metric.target_at
+          AND {_BATCH_EFFECTIVE_AT}
+              <= metric.target_at
+                 + make_interval(days => CAST(:timeline_days AS integer))
+        OFFSET 0
+    ) AS w ON true
     ORDER BY
         metric.ordinality,
         metric.source_feature_id,
@@ -1134,6 +1155,19 @@ ORDER BY
     batch.effective_at,
     batch.forecast_style,
     batch.metric_key
+"""
+
+_WEATHER_BATCH_SET_STATEMENT_TIMEOUT_SQL: Final[str] = """
+WITH previous AS MATERIALIZED (
+    SELECT current_setting('statement_timeout') AS value
+)
+SELECT
+    previous.value,
+    set_config('statement_timeout', :statement_timeout, true)
+FROM previous
+"""
+_WEATHER_BATCH_RESTORE_STATEMENT_TIMEOUT_SQL: Final[str] = """
+SELECT set_config('statement_timeout', :statement_timeout, true)
 """
 
 # KMA weather는 격자(≈5km) 단위라 적재된 격자에 속한 place feature에만 붙는다.
@@ -1784,31 +1818,42 @@ async def get_weather_batch_snapshots(
     if planning_work > WEATHER_BATCH_MAX_PLANNING_WORK:
         raise ValueError("weather batch planning work exceeds limit")
 
-    try:
-        async with asyncio_timeout(query_timeout_seconds):
-            rows = (
-                (
-                    await session.execute(
-                        text(_WEATHER_BATCH_SQL),
-                        {
-                            "feature_ids": feature_ids,
-                            "target_ats": target_ats,
-                            "known_at": known_at,
-                            "radius_m": _NEAREST_WEATHER_RADIUS_M,
-                            "timeline_days": WEATHER_BATCH_TIMELINE_DAYS,
-                            "metric_row_limit": metric_row_limit,
-                            "response_byte_limit": response_byte_limit,
-                            "series_work_limit": series_work_limit,
-                        },
-                    )
-                )
-                .mappings()
-                .all()
+    statement_timeout = f"{max(1, ceil(query_timeout_seconds * 1000))}ms"
+    previous_statement_timeout = str(
+        (
+            await session.execute(
+                text(_WEATHER_BATCH_SET_STATEMENT_TIMEOUT_SQL),
+                {"statement_timeout": statement_timeout},
             )
-    except TimeoutError as exc:
-        raise WeatherBatchQueryTimeoutError(
-            f"weather batch query exceeded {query_timeout_seconds:g} seconds"
-        ) from exc
+        ).scalar_one()
+    )
+    try:
+        rows = (
+            await session.execute(
+                text(_WEATHER_BATCH_SQL),
+                {
+                    "feature_ids": feature_ids,
+                    "target_ats": target_ats,
+                    "known_at": known_at,
+                    "radius_m": _NEAREST_WEATHER_RADIUS_M,
+                    "timeline_days": WEATHER_BATCH_TIMELINE_DAYS,
+                    "metric_row_limit": metric_row_limit,
+                    "response_byte_limit": response_byte_limit,
+                    "series_work_limit": series_work_limit,
+                },
+            )
+        ).mappings().all()
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) == "57014":
+            raise WeatherBatchQueryTimeoutError(
+                f"weather batch query exceeded {query_timeout_seconds:g} seconds"
+            ) from exc
+        raise
+    else:
+        await session.execute(
+            text(_WEATHER_BATCH_RESTORE_STATEMENT_TIMEOUT_SQL),
+            {"statement_timeout": previous_statement_timeout},
+        )
     if not rows:
         raise RuntimeError("weather batch query returned no parent rows")
     series_work_count = int(rows[0]["series_work_count"])

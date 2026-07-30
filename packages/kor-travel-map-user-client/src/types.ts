@@ -3903,7 +3903,7 @@ export interface operations {
                     "application/json": components["schemas"]["WeatherBatchResponse"];
                 };
             };
-            /** @description WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row/byte 예산 초과 */
+            /** @description WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, metric row 또는 payload byte 예산 초과 */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -4199,7 +4199,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row/byte 예산 초과 */
+            /** @description WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, metric row 또는 payload byte 예산 초과 */
             413: {
                 headers: {
                     [name: string]: unknown;

@@ -3,6 +3,23 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-30 — Lane B b1 T-VN-16C Map sparse weather 생산자
+
+- [x] **T-VN-16C Map 생산자 — sparse 다중 날짜 weather batch**
+
+  `POST /v1/features/weather/batch`를 날짜별 실제 Feature만 받는
+  `targets[{target_at, feature_ids}]` 계약으로 전환했다. 고유 parent의 spatial 후보를
+  한 번 계산하고 target별 bitemporal fact로 source를 고른 뒤 target-local
+  `card_key`·`cards[]`로 metric 반복을 제거했다. planning/source-series/metric/payload와
+  PostgreSQL `statement_timeout`을 독립 제한하며 timeout은 DB 취소 완료 뒤 503으로
+  변환한다.
+
+  실데이터 40 target × 5 Feature는 200 pair·공유 card 40개·11,763 metric을 5.77초에
+  반환했다. 적대 리뷰어 2명의 최종 finding은 P0/P1/P2 0건이며, 보존
+  `ktm-tvn45-db`의 sparse found·401·422·`active→hidden→retired`·cleanup/audit 0을
+  파괴적 API Live로 검증했다. PinVi outbound 1회 소비와 장기 여행 Live UI는 열린
+  `T-VN-16C` 소비자 단계에서 이어간다.
+
 ## 2026-07-30 — Lane B b1 T-VN-16B PinVi weather batch 소비
 
 - [x] **T-VN-16B — PinVi weather batch 소비 cutover** (PinVi PR #420)

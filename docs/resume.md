@@ -26,12 +26,15 @@ metric 20,000행, 보수적 응답 8 MiB, query 20초를 각각 제한하고 tar
 계산하고 target별 bitemporal fact로 최종 source를 고른 뒤 같은 target/source bundle을
 `card_key`·`cards[]`로 정규화한다. 미래 series가 과거 snapshot을 바꾸는 1차 리뷰 결함도
 회귀 테스트로 고정했다. 재사용 실데이터 clone의 40 target × 5 Feature(200 pair)는
-공유 card 34개·metric 11,554행·source-series work 597을 3.36초에 반환했다. 보수적
-payload 추정 5,924,333 bytes는 실제 data JSON 4,593,610 bytes보다 1,330,723 bytes
-컸다. 최종 파괴적 API Live는 같은 clone에서 sparse target 2개 `found`, 잘못된 token
-401, planning-work 초과 422, fixture `active→hidden` 뒤 `retired`, cleanup/audit 잔여
-0건과 API error log 0건을 확인했다. PinVi는 이 계약을 Trip view당 outbound 한 번으로
-소비해 31일 `not_requested`와 worker fan-out을 제거한다.
+공유 card 40개·metric 11,763행·source-series work 716을 5.77초에 반환했다. 보수적
+payload 추정 6,030,012 bytes는 실제 data JSON 4,677,305 bytes보다 1,352,707 bytes
+컸다. query budget은 transaction-local PostgreSQL `statement_timeout`으로 설정·복원하고
+DB가 취소를 끝낸 뒤에만 503으로 변환한다. 50ms 적대 probe는 0.155초에 반환했고
+실행 중인 orphan backend 0, rollback과 같은 session 재사용도 정상임을 확인했다.
+최종 SQL 확정 뒤 파괴적 API Live도 같은 clone에서 다시 실행해 sparse target 2개
+`found`, 잘못된 token 401, planning-work 초과 422, fixture `active→hidden` 뒤
+`retired`, cleanup/audit 잔여 0건과 API error log 0건을 확인했다. PinVi는 이 계약을
+Trip view당 outbound 한 번으로 소비해 31일 `not_requested`와 worker fan-out을 제거한다.
 
 **다음 한 작업**: Map 생산자 전체 gate·적대 리뷰 2명·실데이터 파괴적 API 검증을 끝내
 생산자 PR을 먼저 머지하고, 같은 task의 PinVi 소비자 cutover를 이어간다.

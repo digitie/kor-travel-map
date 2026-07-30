@@ -297,9 +297,10 @@ POST /v1/features/weather/batch         # sparse targets[]/known_at weather snap
   정규화된 `cards[]`의 전체 current/timeline metric은 최대 20,000행이며 item/card/metric
   구조를 포함한 보수적 전체 JSON 응답 추정치는 최대 8 MiB다. SQL이 이 예산을 같은
   snapshot에서 계산하며 초과하면 부분 item을 반환하지 않고
-  `413 WEATHER_BATCH_RESULT_LIMIT_EXCEEDED`로 전량 거부한다. query는 20초를 넘기지
-  않으며 timeout과 DB/transport 실패는 item 상태로 축약하지 않고 전체
-  `503 WEATHER_BATCH_UNAVAILABLE`다.
+  `413 WEATHER_BATCH_RESULT_LIMIT_EXCEEDED`로 전량 거부한다. query는 transaction-local
+  PostgreSQL `statement_timeout` 20초를 적용하고 성공 시 이전 값을 복원한다. timeout은
+  DB의 statement 취소가 끝난 뒤 응답하며, DB/transport 실패와 함께 item 상태로
+  축약하지 않고 전체 `503 WEATHER_BATCH_UNAVAILABLE`다.
 - source 선택은 요청 Feature 자체의 weather를 먼저 쓰고, 없으면 공개·활성
   `kind='weather'` anchor 후보만 거리순으로 사용한다. 후보는 series catalog로
   좁히지만 실제 선택은 해당 target의 bitemporal fact 적격성까지 만족해야 한다.

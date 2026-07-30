@@ -26,7 +26,7 @@ from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Annotated, Any, Literal, assert_never
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
 from kortravelmap.core.exceptions import (
     FeatureSearchCursorError,
     FeatureSearchCursorInvalidError,
@@ -1799,7 +1799,8 @@ def _weather_batch_http_exception(
         413: {
             "model": ProblemDetail,
             "description": (
-                "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row/byte 예산 초과"
+                "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, "
+                "metric row 또는 payload byte 예산 초과"
             ),
         },
         422: {
@@ -1862,7 +1863,8 @@ async def get_feature_weather_batch(
         413: {
             "model": ProblemDetail,
             "description": (
-                "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row/byte 예산 초과"
+                "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, "
+                "metric row 또는 payload byte 예산 초과"
             ),
         },
         503: {
@@ -1874,7 +1876,13 @@ async def get_feature_weather_batch(
 async def get_feature_weather(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-    feature_id: str,
+    feature_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=weather_repo.WEATHER_BATCH_MAX_FEATURE_ID_LENGTH,
+        ),
+    ],
     asof: Annotated[
         _WeatherTargetAt | None,
         Query(description="이 시점 이하 weather만(미래 예보 제외)."),

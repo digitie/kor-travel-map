@@ -71,6 +71,34 @@ def test_weather_in_openapi(client: TestClient) -> None:
     assert "413" in operation["responses"]
     single_operation = spec["paths"]["/v1/features/{feature_id}/weather"]["get"]
     assert {"413", "503"} <= single_operation["responses"].keys()
+    feature_id_parameter = next(
+        parameter
+        for parameter in single_operation["parameters"]
+        if parameter["in"] == "path" and parameter["name"] == "feature_id"
+    )
+    assert feature_id_parameter["schema"]["minLength"] == 1
+    assert (
+        feature_id_parameter["schema"]["maxLength"]
+        == WEATHER_BATCH_MAX_FEATURE_ID_LENGTH
+    )
+
+
+@pytest.mark.unit
+def test_weather_card_rejects_oversized_feature_id_before_repo(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import features as mod
+
+    _fake_session(client)
+
+    async def _unexpected_batch(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("oversized feature_id reached repository")
+
+    monkeypatch.setattr(mod.weather_repo, "get_weather_batch_snapshots", _unexpected_batch)
+    response = client.get(
+        f"/v1/features/{'x' * (WEATHER_BATCH_MAX_FEATURE_ID_LENGTH + 1)}/weather"
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.unit

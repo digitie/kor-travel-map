@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from time import monotonic
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,7 +15,7 @@ from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import weather_repo
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 pytestmark = pytest.mark.integration
 
@@ -287,7 +288,8 @@ async def test_weather_batch_is_one_snapshot_and_separates_parent_states(
             _count_statement,
         )
 
-    assert statement_count == 1
+    # transaction-local statement_timeout 설정/복원과 snapshot 본문 한 번이다.
+    assert statement_count == 3
     assert [snapshot.target_at for snapshot in snapshots] == [
         earlier_target_at,
         target_at,
@@ -588,6 +590,55 @@ async def test_weather_batch_future_own_series_does_not_change_past_anchor(
     )
     await migrated_session.flush()
     assert await _temperature() == Decimal("18.0000")
+
+
+async def test_weather_batch_database_timeout_returns_without_pool_cancel_delay(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    monkeypatch.setattr(
+        weather_repo,
+        "_WEATHER_BATCH_SQL",
+        "SELECT pg_sleep(2) /* tvn16c-timeout-cancel-probe */",
+    )
+    async with AsyncSession(migrated_engine) as session:
+        started_at = monotonic()
+        with pytest.raises(
+            weather_repo.WeatherBatchQueryTimeoutError,
+            match="query exceeded 0.05 seconds",
+        ):
+            await weather_repo.get_weather_batch_snapshots(
+                session,
+                targets=(
+                    weather_repo.WeatherBatchTarget(
+                        target_at=_T2,
+                        feature_ids=("timeout-probe",),
+                    ),
+                ),
+                known_at=_T2,
+                query_timeout_seconds=0.05,
+            )
+        elapsed = monotonic() - started_at
+        assert elapsed < 1.0, f"database timeout returned after {elapsed:.3f}s"
+        await session.rollback()
+    async with migrated_engine.connect() as monitor:
+        remaining = (
+            await monitor.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM pg_stat_activity
+                    WHERE pid <> pg_backend_pid()
+                      AND state = 'active'
+                      AND query LIKE
+                          'SELECT pg_sleep(2) /* tvn16c-timeout-cancel-probe */%'
+                    """
+                )
+            )
+        ).scalar_one()
+    assert remaining == 0
 
 
 async def test_weather_timeline_preserves_forecast_issue_history(
