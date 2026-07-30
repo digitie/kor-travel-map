@@ -19,9 +19,9 @@
 
 ## 2026-07-30 (codex) — T-VN-H38 failure fingerprint 전수 검증
 
-- expected deterministic failure와 flaky의 모든 non-passed retry 및 result/step error를
-  개별 cause/stage/status로 검증한다. passed-only, skipped, interrupted와 빈 오류 증거는
-  fail-closed한다.
+- expected deterministic failure와 flaky의 모든 non-passed retry, result/step error와 중첩
+  `TestError.cause`를 개별 cause/stage/status로 검증한다. passed-only, skipped, interrupted와
+  빈 오류 증거는 fail-closed한다.
 - 실제 Playwright 1.60의 `timedOut`은 generic envelope와 locator error를 함께 만든다. ANSI
   제어문자를 제거한 exact envelope, 같은 timeout 값, hook strict descendant result leaf를
   모두 만족할 때만 wrapper를 제외한다. test-body timeout도 같은 timeout result leaf를
@@ -31,7 +31,7 @@
   descendant stage 차용·동일 text 중복 제거를 금지해 모호한 parent를 fail-closed한다.
 - redacted mismatch에는 retry/error index와 status·category·source 위치만 남기고 error text와
   실제 입력값이 포함될 수 있는 `TestStep.title`은 제거했다.
-- 검증: 합성 회귀 **27 passed**, frontend 전체 **277 passed**, TypeScript·ESLint green.
+- 검증: 합성 회귀 **28 passed**, frontend 전체 **278 passed**, TypeScript·ESLint green.
   exact production image D workers=4 **276/276**, manifest 일치·child exit 0·reporter gate
   true, owned container/network/image 0건이다. DB는 사용하지 않았다.
 - workers=8에서 기존 schedule pending test의 600ms 지연이 먼저 끝난 275/276을 재현했다.

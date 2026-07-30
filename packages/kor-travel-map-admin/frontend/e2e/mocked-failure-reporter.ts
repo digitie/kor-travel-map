@@ -173,10 +173,33 @@ interface FailedStepPath {
   stepPath: TestStep[];
 }
 
+interface ResultErrorEntry {
+  causeDepth: number;
+  error: TestError;
+  rootIndex: number;
+}
+
+interface StepErrorEntry {
+  error: TestError;
+  failure: FailedStepPath;
+}
+
 function failureErrorText(error: TestError | undefined): string {
   return [error?.message, error?.stack, error?.value]
     .filter((value): value is string => Boolean(value))
     .join("\n");
+}
+
+function failureErrorChain(error: TestError): TestError[] {
+  const chain: TestError[] = [];
+  const seen = new Set<TestError>();
+  let current: TestError | undefined = error;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    chain.push(current);
+    current = current.cause;
+  }
+  return chain;
 }
 
 function failedStepPaths(
@@ -231,82 +254,103 @@ function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
     }
 
     const stepPaths = failedStepPaths(result.steps);
-    const unmatchedStepPaths = new Set(stepPaths);
-    const matchingStepPaths = result.errors.map((error) => {
+    const stepErrorEntries = stepPaths.flatMap((failure) =>
+      failureErrorChain(failure.stepPath.at(-1)!.error!).map(
+        (error): StepErrorEntry => ({ error, failure }),
+      ),
+    );
+    const unmatchedStepErrors = new Set(stepErrorEntries);
+    const resultErrorEntries = result.errors.flatMap(
+      (error, rootIndex): ResultErrorEntry[] =>
+        failureErrorChain(error).map((cause, causeDepth) => ({
+          causeDepth,
+          error: cause,
+          rootIndex,
+        })),
+    );
+    const matchingStepErrors = resultErrorEntries.map(({ error }) => {
       const text = failureErrorText(error);
-      const matchingStepPath = stepPaths
+      const matchingStepError = stepErrorEntries
         .filter(
-          ({ stepPath }) =>
-            failureErrorText(stepPath.at(-1)?.error) === text,
+          (entry) => failureErrorText(entry.error) === text,
         )
         .sort(
           (left, right) =>
-            right.stepPath.length - left.stepPath.length,
+            right.failure.stepPath.length -
+            left.failure.stepPath.length,
         )
-        .find((stepPath) => unmatchedStepPaths.has(stepPath));
-      if (matchingStepPath) {
-        unmatchedStepPaths.delete(matchingStepPath);
+        .find((entry) => unmatchedStepErrors.has(entry));
+      if (matchingStepError) {
+        unmatchedStepErrors.delete(matchingStepError);
       }
-      return matchingStepPath;
+      return matchingStepError;
     });
     const matchedLeafErrorIndexes = new Set(
-      matchingStepPaths.flatMap((matchingStepPath, errorIndex) =>
-        matchingStepPath && !matchingStepPath.hasFailedDescendant
+      matchingStepErrors.flatMap((matchingStepError, errorIndex) =>
+        matchingStepError &&
+        !matchingStepError.failure.hasFailedDescendant
           ? [errorIndex]
           : [],
       ),
     );
     const excludedEnvelopeTexts = new Set<string>();
-    const evidence = result.errors.flatMap((error, errorIndex) => {
-      const matchingStepPath = matchingStepPaths[errorIndex];
-      const envelopeTimeoutMs = playwrightTimeoutEnvelopeMs(error);
-      if (
-        result.status === "timedOut" &&
-        envelopeTimeoutMs !== undefined &&
-        [...matchedLeafErrorIndexes].some(
-          (leafErrorIndex) => {
-            if (leafErrorIndex === errorIndex) return false;
-            if (
-              playwrightTimeoutEvidenceMs(
-                result.errors[leafErrorIndex]!,
-              ) !== envelopeTimeoutMs
-            ) {
-              return false;
-            }
-            if (!matchingStepPath) return true;
-            const leafStepPath =
-              matchingStepPaths[leafErrorIndex]?.stepPath;
-            return (
-              leafStepPath !== undefined &&
-              isStrictStepAncestor(
-                matchingStepPath.stepPath,
-                leafStepPath,
-              )
-            );
-          },
-        )
-      ) {
-        excludedEnvelopeTexts.add(failureErrorText(error));
-        return [];
-      }
-      return [{
-        errorIndex,
-        retry: result.retry,
-        status: result.status,
-        stepPath: matchingStepPath?.stepPath ?? [],
-        text: failureErrorText(error),
-      }];
-    });
+    const evidence = resultErrorEntries.flatMap(
+      (entry, errorIndex) => {
+        const matchingStepError = matchingStepErrors[errorIndex];
+        const envelopeTimeoutMs = playwrightTimeoutEnvelopeMs(
+          entry.error,
+        );
+        if (
+          result.status === "timedOut" &&
+          envelopeTimeoutMs !== undefined &&
+          [...matchedLeafErrorIndexes].some(
+            (leafErrorIndex) => {
+              if (leafErrorIndex === errorIndex) return false;
+              if (
+                playwrightTimeoutEvidenceMs(
+                  resultErrorEntries[leafErrorIndex]!.error,
+                ) !== envelopeTimeoutMs
+              ) {
+                return false;
+              }
+              const leafEntry = resultErrorEntries[leafErrorIndex]!;
+              if (
+                leafEntry.rootIndex === entry.rootIndex &&
+                leafEntry.causeDepth > entry.causeDepth
+              ) {
+                return true;
+              }
+              if (!matchingStepError) return true;
+              const leafStepPath =
+                matchingStepErrors[leafErrorIndex]?.failure.stepPath;
+              return (
+                leafStepPath !== undefined &&
+                isStrictStepAncestor(
+                  matchingStepError.failure.stepPath,
+                  leafStepPath,
+                )
+              );
+            },
+          )
+        ) {
+          excludedEnvelopeTexts.add(failureErrorText(entry.error));
+          return [];
+        }
+        return [{
+          errorIndex,
+          retry: result.retry,
+          status: result.status,
+          stepPath: matchingStepError?.failure.stepPath ?? [],
+          text: failureErrorText(entry.error),
+        }];
+      },
+    );
 
-    let nextStepOnlyErrorIndex = result.errors.length;
-    for (const failedStepPath of unmatchedStepPaths) {
-      const text = failureErrorText(
-        failedStepPath.stepPath.at(-1)?.error,
-      );
+    let nextStepOnlyErrorIndex = resultErrorEntries.length;
+    for (const { error, failure } of unmatchedStepErrors) {
+      const text = failureErrorText(error);
       if (
-        playwrightTimeoutEnvelopeMs(
-          failedStepPath.stepPath.at(-1)?.error ?? {},
-        ) !== undefined &&
+        playwrightTimeoutEnvelopeMs(error) !== undefined &&
         excludedEnvelopeTexts.has(text)
       ) {
         continue;
@@ -315,7 +359,7 @@ function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
         errorIndex: nextStepOnlyErrorIndex,
         retry: result.retry,
         status: result.status,
-        stepPath: failedStepPath.stepPath,
+        stepPath: failure.stepPath,
         text,
       });
       nextStepOnlyErrorIndex += 1;

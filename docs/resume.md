@@ -13,8 +13,9 @@
 ## 2026-07-30 (codex) — Lane B b1 T-VN-H38 failure fingerprint 완전성 완료
 
 Mocked failure reporter가 첫 attempt/error만 보던 경로를 제거했다. deterministic failure와
-expected flaky 모두에서 non-passed retry, result error, step-only error를 전수 검사하며
-passed-only expected failure·skipped·interrupted는 원인 증거 누락으로 거부한다. 정상
+expected flaky 모두에서 non-passed retry, result error와 중첩 `cause`, step-only error를
+전수 검사하며 passed-only expected failure·skipped·interrupted는 원인 증거 누락으로
+거부한다. 정상
 Playwright timeout은 `failed|timedOut`으로 수용하되, ANSI 제거 뒤 exact timeout envelope와
 같은 timeout 값의 result leaf를 attempt/hook ancestry로 결속한다. 따라서 caught locator 뒤
 별도 hang, beforeEach 뒤 afterEach timeout, soft assertion 뒤 body hang은 통과하지 않는다.
@@ -26,7 +27,7 @@ fail-closed한다. redacted report는 retry/error index와 category/location만 
 text와 raw step title을 제거했다.
 
 적대 리뷰어 2명이 실제 Playwright 1.60 probe와 합성 반례로 찾은 retry·flaky·timeout·parent·
-redaction 결함을 모두 반영했다. 관련 회귀 **27 passed**, frontend 전체 **277 passed**,
+redaction 결함을 모두 반영했다. 관련 회귀 **28 passed**, frontend 전체 **278 passed**,
 TypeScript·ESLint가 통과했다. exact production image D workers=4도 **276/276**, manifest
 일치, child exit 0·reporter gate true, owned container/network/image 0건이다. DB 작업은 없어
 보존 clone을 그대로 유지했다.

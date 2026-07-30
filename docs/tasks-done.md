@@ -8,9 +8,10 @@
 - [x] **T-VN-H38 — Mocked failure manifest retry/error fingerprint 완전성**
 
   reporter는 deterministic failure와 expected flaky의 모든 non-passed retry, 모든
-  `TestResult.errors`, result에 없는 leaf/parent step error를 각각 검증한다. `failed`와 실제
-  Playwright test timeout인 `timedOut`만 실패 증거로 인정하고, `skipped`·`interrupted`와
-  expected failure의 passed-only 결과는 원인 증거 누락으로 fail-closed한다.
+  `TestResult.errors`와 각 오류의 중첩 `cause`, result에 없는 leaf/parent step error를 각각
+  검증한다. `failed`와 실제 Playwright test timeout인 `timedOut`만 실패 증거로 인정하고,
+  `skipped`·`interrupted`와 expected failure의 passed-only 결과는 원인 증거 누락으로
+  fail-closed한다.
 
   Playwright timeout은 ANSI를 제거한 exact generic envelope, 같은 timeout 값, 같은 hook의
   strict descendant result leaf를 함께 만족할 때만 wrapper를 제외한다. path 없는 test-body
@@ -20,7 +21,7 @@
   검사한다. Playwright 1.60은 boxed propagation과 boxed 내부의 독립 재투척을 reporter
   metadata로 구별할 수 없으므로, descendant stage를 빌려주는 추론을 금지하고 fail-closed한다.
 
-retry/error 합성 회귀 **27 passed**, frontend Vitest 전체 **277 passed**, TypeScript·ESLint가
+retry/error 합성 회귀 **28 passed**, frontend Vitest 전체 **278 passed**, TypeScript·ESLint가
 통과했다. exact production image checkpoint D workers=4는 **276/276**, manifest 일치,
 child exit 0·reporter gate true로 끝났고 owned container/network/image는 모두 0건이다.
 report에는 retry/error index·status·category·source basename/line만 남기며 error text와

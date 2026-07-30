@@ -138,6 +138,46 @@ describe("mocked failure retry/error provenance", () => {
     ]);
   });
 
+  it("top-level wrapper가 예상 원인이어도 중첩 cause의 다른 원인을 거부한다", () => {
+    const deepCause = {
+      message: "unrelated database regression",
+    };
+    const expectedCause = {
+      cause: deepCause,
+      message: "expected render failure in service",
+    };
+    const expectedWrapper = {
+      cause: expectedCause,
+      message: "expected render failure",
+    };
+    const mismatches = expectedFailureEvidenceMismatches(
+      [
+        result(
+          0,
+          [expectedWrapper],
+          [
+            step(
+              "expect",
+              'Expect "toBeVisible"',
+              expectedWrapper,
+            ),
+          ],
+        ),
+      ],
+      "expected render failure",
+      "render.assertion",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 2,
+        retry: 0,
+        stageMatched: true,
+      }),
+    ]);
+  });
+
   it("result.errors에 없는 추가 step error도 독립적으로 거부한다", () => {
     const mismatches = expectedFailureEvidenceMismatches(
       [
