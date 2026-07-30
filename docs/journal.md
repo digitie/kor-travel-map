@@ -27,18 +27,32 @@
   뒤 #894 이후 closed 포함 새 Claude Code PR은 없었다.
 - T-VN-16C 생산자는 날짜별 실제 Feature만 보내는 sparse
   `targets[{target_at, feature_ids}]`를 사용한다. canonical target ordering과
-  366 target/target별 200 ID/전체 2,000 pair/20,000 metric 제한을 분리하고, metric
-  초과는 부분 응답 없이 413으로 거부한다. 여러 target의 parent·anchor·current·timeline은
-  한 SQL snapshot에서 계산한다.
+  366 target/target별 200 ID/전체 2,000 pair를 제한한다. ID 256자, planning work
+  `pair + 5 × 고유 Feature <= 2,500`, source-series work 150,000, metric 20,000,
+  응답 추정 8 MiB, query 20초 예산을 추가하고 결과 초과는 부분 응답 없이 413,
+  timeout은 503으로 거부한다. 여러 target의 parent·anchor·current·timeline은 한 SQL
+  snapshot에서 계산한다.
 - 첫 원격 checkpoint `28ea73e5`는 API/SQL/통합 계약을 담았다. 실제 변경 코드의 targeted
   API와 PostgreSQL 통합은 각각 15·11 passed였고 Ruff·strict mypy도 통과했다.
 - 첫 실데이터 40 target × 5 Feature probe는 동일 card를 item마다 반복해 56,625 metric
   예산을 넘겼다. target-local `card_key`·`cards[]`로 payload를 정규화하고 source
-  capability를 `weather_metric_series`에서 고유 parent별 한 번만 고르도록 바꿨다.
-  자체 series가 없는 실제 공개 Feature 5개의 200 sparse pair는 공유 card 34개,
-  11,667 metric, batch 3.89초로 통과했다(중간 날짜별 source lookup은 35.1초).
+  spatial 후보 집합을 고유 parent별 한 번만 계산하도록 바꿨다. 최종 source는 target별
+  bitemporal fact 적격성으로 정해 미래 series가 과거 snapshot을 바꾸지 않는다. 자체
+  series가 없는 실제 공개 Feature 5개의 200 sparse pair는 공유 card 34개,
+  11,554 metric, source-series work 597, batch 3.36초로 통과했다(중간 날짜별 source
+  lookup은 35.1초). 보수적 payload 추정은 5,924,333 bytes로 실제 data JSON
+  4,593,610 bytes보다 1,330,723 bytes 컸다.
 - admin/user OpenAPI와 두 TypeScript client 산출물을 다시 생성했고 export/type drift
-  check가 모두 통과했다. 다음 checkpoint는 전체 gate·적대 리뷰·파괴적 API Live다.
+  check가 모두 통과했다. 1차 적대 리뷰가 찾은 future-catalog contamination, 단건
+  `source_styles`의 timeline 혼입, 무제한 workload/payload/timeout을 회귀 테스트와 위
+  예산으로 보완했다.
+- 최종 파괴적 API Live는 보존 clone `ktm-tvn45-db`의 기존
+  `0069_weather_series_catalog`를 그대로 재사용했다. sparse target 2개 `found`,
+  잘못된 service token 401, planning-work 초과 422, fixture `active→hidden` 뒤
+  `retired`를 확인했다. owned weather/price/series fixture cleanup과 audit는 모두 잔여
+  0건, API error log도 0건이었다. 첫 credential-key 탐색과 `psql -c` 변수 치환 실패는
+  seed 전/자동 cleanup 뒤 각각 실패 지점부터 재개했으며 새 clone·checkpoint·migration
+  rollback은 만들지 않았다.
 
 ## 2026-07-30 (codex) — T-VN-16A set-based weather snapshot
 

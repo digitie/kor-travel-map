@@ -10,12 +10,16 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from kortravelmap.infra.weather_repo import (
+    WEATHER_BATCH_MAX_FEATURE_ID_LENGTH,
     WEATHER_BATCH_MAX_PAIRS,
     WeatherBatchCard,
     WeatherBatchItem,
     WeatherBatchMetricLimitExceededError,
+    WeatherBatchPayloadLimitExceededError,
+    WeatherBatchQueryTimeoutError,
     WeatherBatchSnapshot,
     WeatherBatchTarget,
+    WeatherBatchWorkLimitExceededError,
     WeatherMetric,
 )
 from sqlalchemy.exc import OperationalError
@@ -62,6 +66,7 @@ def test_weather_in_openapi(client: TestClient) -> None:
     assert feature_ids["uniqueItems"] is True
     assert feature_ids["maxItems"] == 200
     assert feature_ids["items"]["minLength"] == 1
+    assert feature_ids["items"]["maxLength"] == WEATHER_BATCH_MAX_FEATURE_ID_LENGTH
     operation = spec["paths"]["/v1/features/weather/batch"]["post"]
     assert "413" in operation["responses"]
 
@@ -75,7 +80,7 @@ def test_weather_card_response_maps_metrics(
     valid_at = datetime(2026, 6, 6, 3, 0, tzinfo=UTC)
     card = WeatherBatchCard(
         card_key="c1",
-        source_styles=["short"],
+        source_styles=["mid", "short"],
         current=[
             WeatherMetric(
                 forecast_style="short",
@@ -93,7 +98,23 @@ def test_weather_card_response_maps_metrics(
                 weather_domain="kma_short_forecast",
             )
         ],
-        timeline=[],
+        timeline=[
+            WeatherMetric(
+                forecast_style="mid",
+                metric_key="TMX",
+                metric_name="최고 기온",
+                timeline_bucket="mid",
+                value_number=Decimal("28.0"),
+                value_text=None,
+                unit="deg_c",
+                severity=None,
+                issued_at=valid_at,
+                valid_at=valid_at.replace(hour=6),
+                observed_at=None,
+                provider="python-kma-api",
+                weather_domain="kma_mid_forecast",
+            )
+        ],
         latest_at=valid_at,
         is_stale=False,
     )
@@ -113,6 +134,7 @@ def test_weather_card_response_maps_metrics(
         d = r.json()["data"]
         assert d["feature_id"] == "f1"
         assert d["source_styles"] == ["short"]
+        assert len(d["metrics"]) == 1
         assert d["is_stale"] is False
         m = d["metrics"][0]
         assert m["forecast_style"] == "short"
@@ -378,6 +400,15 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
         {
             "targets": [
                 {
+                    "target_at": "2026-07-30T00:00:00Z",
+                    "feature_ids": ["x" * (WEATHER_BATCH_MAX_FEATURE_ID_LENGTH + 1)],
+                }
+            ],
+            "known_at": "2026-07-29T00:00:00Z",
+        },
+        {
+            "targets": [
+                {
                     "target_at": "2026-07-30T00:00:00",
                     "feature_ids": ["naive"],
                 }
@@ -458,6 +489,26 @@ def test_weather_batch_rejects_total_pair_budget_before_db(
 
 
 @pytest.mark.unit
+def test_weather_batch_rejects_planning_work_budget_before_db(
+    client: TestClient,
+) -> None:
+    shared_feature_ids = [f"f-{feature_index:03d}" for feature_index in range(200)]
+    targets = [
+        {
+            "target_at": f"2026-08-{day:02d}T00:00:00Z",
+            "feature_ids": shared_feature_ids,
+        }
+        for day in range(1, 11)
+    ]
+    response = client.post(
+        "/v1/features/weather/batch",
+        json={"targets": targets, "known_at": "2026-07-29T00:00:00Z"},
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.unit
 def test_weather_batch_maps_database_failure_to_unavailable(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -484,6 +535,39 @@ def test_weather_batch_maps_database_failure_to_unavailable(
         assert response.status_code == 503
         assert response.headers["content-type"].startswith("application/problem+json")
         assert response.json()["code"] == "WEATHER_BATCH_UNAVAILABLE"
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_weather_batch_maps_query_timeout_to_unavailable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import features as mod
+
+    async def _timed_out(_s: Any, **_kw: Any) -> None:
+        raise WeatherBatchQueryTimeoutError("weather batch query exceeded budget")
+
+    monkeypatch.setattr(mod.weather_repo, "get_weather_batch_snapshots", _timed_out)
+    _fake_session(client)
+    try:
+        response = client.post(
+            "/v1/features/weather/batch",
+            json={
+                "targets": [
+                    {
+                        "target_at": "2026-07-30T00:00:00Z",
+                        "feature_ids": ["f1"],
+                    }
+                ],
+                "known_at": "2026-07-29T00:00:00Z",
+            },
+        )
+        assert response.status_code == 503
+        assert response.headers["content-type"].startswith("application/problem+json")
+        problem = response.json()
+        assert problem["code"] == "WEATHER_BATCH_UNAVAILABLE"
+        assert problem.get("details", {}) == {}
     finally:
         client.app.dependency_overrides.clear()
 
@@ -521,6 +605,89 @@ def test_weather_batch_rejects_metric_result_over_budget_without_partial_items(
         problem = response.json()
         assert problem["code"] == "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED"
         assert problem["details"] == {"actual": 20_001, "limit": 20_000}
+        assert "data" not in problem
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_weather_batch_rejects_series_work_over_budget_without_querying_facts(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import features as mod
+
+    async def _too_large(_s: Any, **_kw: Any) -> None:
+        raise WeatherBatchWorkLimitExceededError(actual=150_001, limit=150_000)
+
+    monkeypatch.setattr(
+        mod.weather_repo,
+        "get_weather_batch_snapshots",
+        _too_large,
+    )
+    _fake_session(client)
+    try:
+        response = client.post(
+            "/v1/features/weather/batch",
+            json={
+                "targets": [
+                    {
+                        "target_at": "2026-07-30T00:00:00Z",
+                        "feature_ids": ["f1"],
+                    }
+                ],
+                "known_at": "2026-07-29T00:00:00Z",
+            },
+        )
+        assert response.status_code == 413
+        problem = response.json()
+        assert problem["code"] == "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED"
+        assert problem["details"] == {
+            "actual_series_work": 150_001,
+            "limit_series_work": 150_000,
+        }
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_weather_batch_rejects_payload_over_budget_without_partial_items(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import features as mod
+
+    async def _too_large(_s: Any, **_kw: Any) -> None:
+        raise WeatherBatchPayloadLimitExceededError(
+            actual=8 * 1024 * 1024 + 1,
+            limit=8 * 1024 * 1024,
+        )
+
+    monkeypatch.setattr(
+        mod.weather_repo,
+        "get_weather_batch_snapshots",
+        _too_large,
+    )
+    _fake_session(client)
+    try:
+        response = client.post(
+            "/v1/features/weather/batch",
+            json={
+                "targets": [
+                    {
+                        "target_at": "2026-07-30T00:00:00Z",
+                        "feature_ids": ["f1"],
+                    }
+                ],
+                "known_at": "2026-07-29T00:00:00Z",
+            },
+        )
+        assert response.status_code == 413
+        assert response.headers["content-type"].startswith("application/problem+json")
+        problem = response.json()
+        assert problem["code"] == "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED"
+        assert problem["details"] == {
+            "actual_bytes": 8 * 1024 * 1024 + 1,
+            "limit_bytes": 8 * 1024 * 1024,
+        }
         assert "data" not in problem
     finally:
         client.app.dependency_overrides.clear()

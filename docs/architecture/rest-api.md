@@ -275,30 +275,36 @@ POST /v1/features/weather/batch         # sparse targets[]/known_at weather snap
 - service-token 전용 `POST /v1/features/weather/batch`가 set-based 조회의 정본이다.
 - 요청은 `targets=[{target_at, feature_ids}]` sparse group과 timezone-aware
   `known_at`을 받는다. target은 중복 없이 `target_at` 오름차순이며 최대 366개,
-  group별 Feature ID는 입력 순서를 보존하는 고유값 1~200개, 전체 실제
-  `target_at×feature_id` pair는 2,000개 이하다. 날짜별로 필요하지 않은 Feature를
-  Cartesian product로 조회하지 않는다.
+  group별 Feature ID는 입력 순서를 보존하는 256자 이하 고유값 1~200개, 전체 실제
+  `target_at×feature_id` pair는 2,000개 이하다. DB 진입 전
+  `pair 수 + 5 × 전체 고유 Feature 수 <= 2,500`도 강제해 spatial 후보 계획 비용을
+  제한한다. 날짜별로 필요하지 않은 Feature를 Cartesian product로 조회하지 않는다.
 - `target_at`은 해당 group의 날씨가 설명하는 시각이고, 모든 group이 같은
   `known_at` 지식 cutoff를 공유한다. current-row fact에서는 `collected_at`을
   `known_at` 대리값으로 사용하며 forecast는 `issued_at <= known_at`도 강제한다.
 - 부모 공개 판정, nearest weather source tier, `current`, 각 `target_at` 뒤 24시간
-  `timeline`을 group 수와 무관하게 PostgreSQL statement 1회에서 읽는다. nearest
-  source capability는 요청 안의 고유 parent마다 `weather_metric_series`에서 한 번
-  고르고, 각 날짜는 그 source의 fact에 bitemporal cutoff를 적용한다.
+  `timeline`을 group 수와 무관하게 PostgreSQL statement 1회에서 읽는다. 고유
+  parent별 own/nearby spatial 후보 집합은 한 번만 계산하되, 최종 source의 series와
+  fact 적격성은 각 `target_at` 및 공통 `known_at` cutoff로 판정한다. 따라서 미래에
+  추가된 series가 과거 snapshot의 `found|no_data` 또는 source를 바꾸지 않으며,
+  가용한 weather가 달라지면 target마다 source가 달라질 수 있다.
 - 응답 `targets[]`와 각 `items[]`는 요청 순서를 그대로 보존하며 target마다
   `timeline_until`을 명시한다. `found` item은 target-local `card_key`만 가지며 같은
   target/source bundle의 metric은 `cards[]`에 한 번만 둔다. `no_data`와 `retired`는
   card를 참조하지 않는다. `target_at + 24시간`을 표현할 수 없는 최댓값 부근 시각은
   422로 거부한다.
-- 정규화된 `cards[]`의 전체 current/timeline metric은 최대 20,000행이다. SQL이 전체 행 수를 같은
+- fact projection 전에 공유 card×physical series 작업량 150,000을 제한한다.
+  정규화된 `cards[]`의 전체 current/timeline metric은 최대 20,000행이며 item/card/metric
+  구조를 포함한 보수적 전체 JSON 응답 추정치는 최대 8 MiB다. SQL이 이 예산을 같은
   snapshot에서 계산하며 초과하면 부분 item을 반환하지 않고
-  `413 WEATHER_BATCH_RESULT_LIMIT_EXCEEDED`로 전량 거부한다. DB/transport 실패도 item
-  상태로 축약하지 않고 전체 `503 WEATHER_BATCH_UNAVAILABLE`다.
+  `413 WEATHER_BATCH_RESULT_LIMIT_EXCEEDED`로 전량 거부한다. query는 20초를 넘기지
+  않으며 timeout과 DB/transport 실패는 item 상태로 축약하지 않고 전체
+  `503 WEATHER_BATCH_UNAVAILABLE`다.
 - source 선택은 요청 Feature 자체의 weather를 먼저 쓰고, 없으면 공개·활성
-  `kind='weather'` anchor capability만 거리순으로 사용한다. capability는 요청 날짜별
-  우연한 row 존재가 아니라 series catalog로 결정되어 여러 날짜에서 source provenance가
-  흔들리지 않는다. `kind='place'` 등에 결합된 weather는 해당 Feature의 자체 값일 뿐
-  다른 Feature가 공유하는 anchor가 아니다.
+  `kind='weather'` anchor 후보만 거리순으로 사용한다. 후보는 series catalog로
+  좁히지만 실제 선택은 해당 target의 bitemporal fact 적격성까지 만족해야 한다.
+  `kind='place'` 등에 결합된 weather는 해당 Feature의 자체 값일 뿐 다른 Feature가
+  공유하는 anchor가 아니다.
 - physical series는
   `(feature_id, provider, weather_domain, forecast_style, metric_key)`다. 응답 metric은
   `provider`·`weather_domain`, 원래의 `valid_at`/`valid_from`/`valid_until`과 current

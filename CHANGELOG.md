@@ -10,18 +10,21 @@
 - **CHANGED**: `POST /v1/features/weather/batch` 요청을 단일
   `feature_ids + target_at`에서 날짜별 sparse `targets[{target_at, feature_ids}]`로
   전환했다. target은 오름차순 최대 366개, target별 ID 1~200개, 전체 실제 pair
-  2,000개이며 응답도 target/item 순서를 보존한다.
+  2,000개이며 Feature ID는 256자 이하다. 응답도 target/item 순서를 보존한다.
 - **PERFORMANCE**: 여러 날짜의 parent·nearest source·current·24시간 timeline을
-  PostgreSQL statement 한 번에서 계산한다. Feature별 nearest source는
-  `weather_metric_series` capability로 요청 내 한 번만 고르고 날짜별 fact cutoff를
-  적용한다. 날짜에 속하지 않는 Feature의 불필요한 Cartesian product와 같은
-  target/source bundle의 metric 반복을 만들지 않는다. 실데이터 clone의 40 target ×
-  5 Feature(200 pair)는 공유 card 34개·metric 11,667행을 3.89초에 반환했다.
+  PostgreSQL statement 한 번에서 계산한다. 고유 parent별 spatial 후보 집합은 한 번만
+  계산하되 최종 source는 각 target의 `known_at` fact 적격성으로 결정해 미래에 추가된
+  series가 과거 snapshot을 바꾸지 않는다. 날짜에 속하지 않는 Feature의 불필요한
+  Cartesian product와 같은 target/source bundle의 metric 반복을 만들지 않는다.
+  실데이터 clone의 40 target × 5 Feature(200 pair)는 공유 card 34개·metric 11,554행을
+  3.36초에 반환했다.
 - **CHANGED**: `found` item은 metric을 반복하지 않고 target-local `card_key`를 참조하며,
   공유 payload는 각 target의 `cards[]`에 한 번만 둔다.
-- **RELIABILITY**: 전체 metric 20,000행 예산을 같은 snapshot에서 계산한다. 초과 시
-  부분 weather를 반환하지 않고 `413 WEATHER_BATCH_RESULT_LIMIT_EXCEEDED`로 전량
-  거부한다.
+- **RELIABILITY**: DB 진입 전 planning work(`pair + 5 × 고유 Feature`) 2,500,
+  fact projection 전 공유 card×physical series 150,000, 전체 metric 20,000행,
+  보수적 전체 응답 추정치 8 MiB와 query 20초를 독립적으로 제한한다. 결과 예산 초과는
+  부분 weather 없이 `413 WEATHER_BATCH_RESULT_LIMIT_EXCEEDED`, timeout은
+  `503 WEATHER_BATCH_UNAVAILABLE`로 전량 거부한다.
 
 ### set-based weather snapshot batch (2026-07-30, T-VN-16A)
 

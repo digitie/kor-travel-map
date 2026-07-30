@@ -15981,7 +15981,7 @@ export interface operations {
                     "application/json": components["schemas"]["WeatherBatchResponse"];
                 };
             };
-            /** @description WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row 예산 초과 */
+            /** @description WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row/byte 예산 초과 */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -15990,7 +15990,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description target 1~366개, target별 고유 Feature ID 1~200개, 전체 pair 2,000개 이하와 aware datetime 필요 */
+            /** @description target 1~366개, target별 고유 Feature ID 1~200개, Feature ID 256자 이하, 전체 pair 2,000개 이하와 aware datetime 필요 */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -693,9 +693,11 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   view를 호출 한 번으로 소비해 31일 `not_requested` 상태와 worker/time budget fan-out을
   제거한다. Map query plan·OpenAPI와 PinVi 장기 여행 파괴적 Live UI가 완료 조건이다.
 
-  - [x] Map 생산자: 고유 parent별 source capability를 한 번 계산하고 같은
-    target/source bundle을 `card_key`·`cards[]`로 정규화한다. 실데이터 40 target ×
-    5 Feature는 200 pair·11,667 metric을 3.89초에 반환한다(본 PR landing으로 완료).
+  - [x] Map 생산자: 고유 parent별 spatial 후보를 한 번 계산하고 target별 bitemporal
+    fact로 최종 source를 결정한 뒤 같은 target/source bundle을 `card_key`·`cards[]`로
+    정규화한다. 요청·계획·series·metric·payload·timeout 예산을 전량
+    성공·실패 계약으로 고정했다. 실데이터 40 target × 5 Feature는 200 pair·공유 card
+    34개·11,554 metric을 3.36초에 반환한다(본 PR landing으로 완료).
   - [ ] PinVi 소비자: Trip view당 sparse batch 호출 한 번, 장기 여행 UI와 실패 상태를
     새 공유 card 계약으로 전환한다(Map 생산자 merge 뒤 별도 호환 PR).
 

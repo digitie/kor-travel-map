@@ -25311,6 +25311,7 @@
         "properties": {
           "feature_ids": {
             "items": {
+              "maxLength": 256,
               "minLength": 1,
               "type": "string"
             },
@@ -35928,7 +35929,7 @@
                 }
               }
             },
-            "description": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row 예산 초과"
+            "description": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — metric row/byte 예산 초과"
           },
           "422": {
             "content": {
@@ -35938,7 +35939,7 @@
                 }
               }
             },
-            "description": "target 1~366개, target별 고유 Feature ID 1~200개, 전체 pair 2,000개 이하와 aware datetime 필요"
+            "description": "target 1~366개, target별 고유 Feature ID 1~200개, Feature ID 256자 이하, 전체 pair 2,000개 이하와 aware datetime 필요"
           },
           "503": {
             "content": {

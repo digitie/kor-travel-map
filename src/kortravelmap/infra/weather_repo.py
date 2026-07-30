@@ -9,6 +9,7 @@ raw SQL은 본 모듈에 모음(ADR-004). commit은 호출자 책임.
 from __future__ import annotations
 
 import json
+from asyncio import timeout as asyncio_timeout
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -33,6 +34,9 @@ __all__ = [
     "WeatherBatchItem",
     "WeatherBatchItemState",
     "WeatherBatchMetricLimitExceededError",
+    "WeatherBatchPayloadLimitExceededError",
+    "WeatherBatchQueryTimeoutError",
+    "WeatherBatchWorkLimitExceededError",
     "WeatherBatchSnapshot",
     "WeatherBatchTarget",
     "WeatherAnchor",
@@ -40,11 +44,17 @@ __all__ = [
     "WeatherAlertHistoryRow",
     "DEFAULT_WEATHER_FRESHNESS_SECONDS",
     "DEFAULT_WEATHER_HISTORY_RETENTION_DAYS",
+    "WEATHER_BATCH_MAX_FEATURE_ID_LENGTH",
     "WEATHER_BATCH_MAX_FEATURE_IDS_PER_TARGET",
     "WEATHER_BATCH_MAX_METRIC_ROWS",
     "WEATHER_BATCH_MAX_PAIRS",
+    "WEATHER_BATCH_MAX_PLANNING_WORK",
+    "WEATHER_BATCH_MAX_RESPONSE_BYTES",
     "WEATHER_BATCH_MAX_TARGETS",
+    "WEATHER_BATCH_QUERY_TIMEOUT_SECONDS",
+    "WEATHER_BATCH_MAX_SOURCE_SERIES_WORK",
     "WEATHER_BATCH_TIMELINE_DAYS",
+    "WEATHER_BATCH_UNIQUE_FEATURE_WORK_WEIGHT",
     "load_weather_values",
     "build_admin_weather_card",
     "build_weather_card",
@@ -70,11 +80,29 @@ WEATHER_BATCH_MAX_TARGETS: Final[int] = 366
 WEATHER_BATCH_MAX_FEATURE_IDS_PER_TARGET: Final[int] = 200
 """target group 하나의 Feature ID 상한."""
 
+WEATHER_BATCH_MAX_FEATURE_ID_LENGTH: Final[int] = 256
+"""request body와 PostgreSQL text[] 메모리를 제한하는 Feature ID 문자 상한."""
+
 WEATHER_BATCH_MAX_PAIRS: Final[int] = 2_000
 """한 요청에서 실제 조회하는 ``target_at × feature_id`` pair 상한."""
 
+WEATHER_BATCH_UNIQUE_FEATURE_WORK_WEIGHT: Final[int] = 5
+"""고유 parent의 spatial candidate 계산 비용을 pair 대비 환산하는 가중치."""
+
+WEATHER_BATCH_MAX_PLANNING_WORK: Final[int] = 2_500
+"""DB 진입 전 ``pairs + weight × unique Feature`` 작업량 상한."""
+
 WEATHER_BATCH_MAX_METRIC_ROWS: Final[int] = 20_000
 """부분 응답을 금지하기 위한 전체 current/timeline metric row 상한."""
+
+WEATHER_BATCH_MAX_RESPONSE_BYTES: Final[int] = 8 * 1024 * 1024
+"""item/card/metric 전체 응답의 보수적 JSON payload byte 상한(8 MiB)."""
+
+WEATHER_BATCH_QUERY_TIMEOUT_SECONDS: Final[float] = 20.0
+"""service request 하나가 PostgreSQL backend를 점유할 수 있는 절대 시간 상한."""
+
+WEATHER_BATCH_MAX_SOURCE_SERIES_WORK: Final[int] = 150_000
+"""fact 조회 전에 허용하는 공유 card×physical series 조합 상한."""
 
 
 @dataclass(frozen=True)
@@ -159,6 +187,28 @@ class WeatherBatchMetricLimitExceededError(RuntimeError):
         self.actual = actual
         self.limit = limit
         super().__init__(f"weather batch metric rows {actual} exceed limit {limit}")
+
+
+class WeatherBatchPayloadLimitExceededError(RuntimeError):
+    """weather batch 전체 payload 추정치가 공개 응답 byte 예산을 넘었다."""
+
+    def __init__(self, *, actual: int, limit: int) -> None:
+        self.actual = actual
+        self.limit = limit
+        super().__init__(f"weather batch response bytes {actual} exceed limit {limit}")
+
+
+class WeatherBatchQueryTimeoutError(RuntimeError):
+    """weather batch statement가 service query 시간 예산을 넘었다."""
+
+
+class WeatherBatchWorkLimitExceededError(RuntimeError):
+    """weather batch source/card 조합이 DB 작업량 예산을 넘었다."""
+
+    def __init__(self, *, actual: int, limit: int) -> None:
+        self.actual = actual
+        self.limit = limit
+        super().__init__(f"weather batch series work {actual} exceeds limit {limit}")
 
 
 @dataclass(frozen=True)
@@ -354,18 +404,27 @@ _BATCH_EFFECTIVE_AT: Final[str] = _weather_effective_at_sql("w")
 _BATCH_KNOWN_AT: Final[str] = _weather_known_at_sql("w")
 
 
-_BATCH_CURRENT_FOR_METRIC: Final[str] = f"""
+def _weather_batch_current_predicate(target_expression: str) -> str:
+    """고정된 내부 target 식에 대한 current weather 술어를 만든다."""
+
+    if target_expression not in {"parent.target_at", "metric.target_at"}:
+        raise ValueError("unsupported weather batch target expression")
+    return f"""
 {_BATCH_KNOWN_AT}
 AND {_BATCH_EFFECTIVE_AT} IS NOT NULL
-AND {_BATCH_EFFECTIVE_AT} <= metric.target_at
+AND {_BATCH_EFFECTIVE_AT} <= {target_expression}
 AND (
     w.valid_at IS NOT NULL
     OR w.observed_at IS NOT NULL
     OR w.valid_from IS NULL
     OR w.valid_until IS NULL
-    OR w.valid_until >= metric.target_at
+    OR w.valid_until >= {target_expression}
 )
 """
+
+
+_BATCH_CURRENT_FOR_PARENT: Final[str] = _weather_batch_current_predicate("parent.target_at")
+_BATCH_CURRENT_FOR_METRIC: Final[str] = _weather_batch_current_predicate("metric.target_at")
 
 # KMA weather source tier 술어. batch SQL이 module import 시 이 상수를 삽입하므로
 # nearest-anchor SQL 정의보다 먼저 둔다.
@@ -377,10 +436,10 @@ _OBSERVED_TEMP_PREDICATE: Final[str] = (
     "w.forecast_style = 'observed' AND w.metric_key IN ('T1H', 'TMP')"
 )
 
-# T-VN-16C: 날짜별 sparse target을 flatten한 뒤 parent 판정, 고유 parent별 tiered
-# nearest-anchor capability 선택, current와 24시간 forecast timeline을 한 SQL
-# statement/snapshot에서 읽는다. capability를 날짜마다 다시 고르지 않아 provenance가
-# 안정적이고, 같은 target/source bundle은 공유 card 한 번만 계산한다.
+# T-VN-16C: 날짜별 sparse target을 flatten한 뒤 parent 판정, 고유 parent별 spatial
+# candidate 계산, target별 bitemporal nearest-anchor 선택, current와 24시간 forecast
+# timeline을 한 SQL statement/snapshot에서 읽는다. 같은 target/source bundle은 공유
+# card 한 번만 계산한다.
 #
 # 0060은 full correction history/current-summary 이전 단계라 ``collected_at``이
 # ``known_at`` proxy다(ADR-072). forecast는 미래 지식 누출을 막기 위해
@@ -412,158 +471,209 @@ unique_parents AS (
     FROM parents
     ORDER BY feature_id, ordinality
 ),
+source_capabilities AS MATERIALIZED (
+    SELECT
+        series.feature_id,
+        bool_or(
+            series.provider = 'python-kma-api'
+            AND series.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')
+        ) AS has_kma_forecast,
+        bool_or(
+            series.forecast_style = 'observed'
+            AND series.metric_key IN ('T1H', 'TMP')
+        ) AS has_observed_temperature
+    FROM feature.weather_metric_series AS series
+    GROUP BY series.feature_id
+),
+anchor_candidates AS MATERIALIZED (
+    SELECT
+        parent.feature_id AS parent_feature_id,
+        candidate.feature_id,
+        candidate.coord_5179
+          OPERATOR(x_extension.<->) parent.coord_5179 AS distance_order,
+        capability.has_kma_forecast,
+        capability.has_observed_temperature
+    FROM unique_parents AS parent
+    JOIN feature.public_features AS candidate
+      ON parent.visible_feature_id IS NOT NULL
+     AND candidate.kind = 'weather'
+     AND parent.coord_5179 IS NOT NULL
+     AND candidate.coord_5179 IS NOT NULL
+     AND x_extension.ST_DWithin(
+           candidate.coord_5179,
+           parent.coord_5179,
+           CAST(:radius_m AS double precision)
+         )
+    JOIN source_capabilities AS capability
+      ON capability.feature_id = candidate.feature_id
+),
 own_has_temperature AS (
     SELECT
-        parent.feature_id,
+        parent.ordinality,
         EXISTS (
-            SELECT 1
+            SELECT 1 AS found
             FROM feature.weather_metric_series AS series
+            JOIN LATERAL (
+                SELECT 1
+                FROM feature.feature_weather_values AS w
+                WHERE w.feature_id = series.feature_id
+                  AND w.provider = series.provider
+                  AND w.weather_domain = series.weather_domain
+                  AND w.forecast_style = series.forecast_style
+                  AND w.metric_key = series.metric_key
+                  AND {_BATCH_CURRENT_FOR_PARENT}
+                LIMIT 1
+            ) AS current_row ON true
             WHERE series.feature_id = parent.visible_feature_id
               AND series.metric_key IN ('T1H', 'TMP')
             LIMIT 1 OFFSET 0
         ) AS value
-    FROM unique_parents AS parent
+    FROM parents AS parent
 ),
 kma_anchor AS (
-    SELECT parent.feature_id AS parent_feature_id, anchor.feature_id
-    FROM unique_parents AS parent
-    JOIN own_has_temperature AS own_temp USING (feature_id)
+    SELECT parent.ordinality, parent.target_at, anchor.feature_id
+    FROM parents AS parent
+    JOIN own_has_temperature AS own_temp USING (ordinality)
     LEFT JOIN LATERAL (
         SELECT candidate.feature_id
-        FROM feature.public_features AS candidate
-        WHERE parent.visible_feature_id IS NOT NULL
+        FROM anchor_candidates AS candidate
+        WHERE candidate.parent_feature_id = parent.feature_id
+          AND candidate.has_kma_forecast
           AND NOT own_temp.value
-          AND candidate.kind = 'weather'
-          AND parent.coord_5179 IS NOT NULL
-          AND candidate.coord_5179 IS NOT NULL
-          AND x_extension.ST_DWithin(
-                candidate.coord_5179,
-                parent.coord_5179,
-                CAST(:radius_m AS double precision)
-              )
           AND EXISTS (
-              SELECT 1
+              SELECT 1 AS found
               FROM feature.weather_metric_series AS series
+              JOIN LATERAL (
+                  SELECT 1
+                  FROM feature.feature_weather_values AS w
+                  WHERE w.feature_id = series.feature_id
+                    AND w.provider = series.provider
+                    AND w.weather_domain = series.weather_domain
+                    AND w.forecast_style = series.forecast_style
+                    AND w.metric_key = series.metric_key
+                    AND {_BATCH_CURRENT_FOR_PARENT}
+                  LIMIT 1
+              ) AS current_row ON true
               WHERE series.feature_id = candidate.feature_id
                 AND series.provider = 'python-kma-api'
                 AND series.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')
               LIMIT 1 OFFSET 0
           )
-        ORDER BY
-            candidate.coord_5179
-              OPERATOR(x_extension.<->) parent.coord_5179,
-            candidate.feature_id
+        ORDER BY candidate.distance_order, candidate.feature_id
         LIMIT 1
     ) AS anchor ON true
 ),
 observed_anchor AS (
-    SELECT parent.feature_id AS parent_feature_id, anchor.feature_id
-    FROM unique_parents AS parent
-    JOIN own_has_temperature AS own_temp USING (feature_id)
+    SELECT parent.ordinality, parent.target_at, anchor.feature_id
+    FROM parents AS parent
+    JOIN own_has_temperature AS own_temp USING (ordinality)
     LEFT JOIN LATERAL (
         SELECT candidate.feature_id
-        FROM feature.public_features AS candidate
-        WHERE parent.visible_feature_id IS NOT NULL
+        FROM anchor_candidates AS candidate
+        WHERE candidate.parent_feature_id = parent.feature_id
+          AND candidate.has_observed_temperature
           AND NOT own_temp.value
-          AND candidate.kind = 'weather'
-          AND parent.coord_5179 IS NOT NULL
-          AND candidate.coord_5179 IS NOT NULL
-          AND x_extension.ST_DWithin(
-                candidate.coord_5179,
-                parent.coord_5179,
-                CAST(:radius_m AS double precision)
-              )
           AND EXISTS (
-              SELECT 1
+              SELECT 1 AS found
               FROM feature.weather_metric_series AS series
+              JOIN LATERAL (
+                  SELECT 1
+                  FROM feature.feature_weather_values AS w
+                  WHERE w.feature_id = series.feature_id
+                    AND w.provider = series.provider
+                    AND w.weather_domain = series.weather_domain
+                    AND w.forecast_style = series.forecast_style
+                    AND w.metric_key = series.metric_key
+                    AND {_BATCH_CURRENT_FOR_PARENT}
+                  LIMIT 1
+              ) AS current_row ON true
               WHERE series.feature_id = candidate.feature_id
                 AND series.forecast_style = 'observed'
                 AND series.metric_key IN ('T1H', 'TMP')
               LIMIT 1 OFFSET 0
           )
-        ORDER BY
-            candidate.coord_5179
-              OPERATOR(x_extension.<->) parent.coord_5179,
-            candidate.feature_id
+        ORDER BY candidate.distance_order, candidate.feature_id
         LIMIT 1
     ) AS anchor ON true
 ),
 preferred_sources AS (
     SELECT
-        feature_id AS parent_feature_id,
+        ordinality,
+        target_at,
         visible_feature_id AS source_feature_id,
         0 AS tier
-    FROM unique_parents
+    FROM parents
     WHERE visible_feature_id IS NOT NULL
     UNION ALL
-    SELECT parent_feature_id, feature_id, 1
+    SELECT ordinality, target_at, feature_id, 1
     FROM kma_anchor
     WHERE feature_id IS NOT NULL
     UNION ALL
-    SELECT parent_feature_id, feature_id, 2
+    SELECT ordinality, target_at, feature_id, 2
     FROM observed_anchor
     WHERE feature_id IS NOT NULL
 ),
-preferred_has_series AS (
+preferred_has_current AS (
     SELECT
-        parent.feature_id,
+        parent.ordinality,
         EXISTS (
-            SELECT 1
+            SELECT 1 AS found
             FROM preferred_sources AS source
             JOIN feature.weather_metric_series AS series
               ON series.feature_id = source.source_feature_id
-            WHERE source.parent_feature_id = parent.feature_id
+            JOIN LATERAL (
+                SELECT 1
+                FROM feature.feature_weather_values AS w
+                WHERE w.feature_id = series.feature_id
+                  AND w.provider = series.provider
+                  AND w.weather_domain = series.weather_domain
+                  AND w.forecast_style = series.forecast_style
+                  AND w.metric_key = series.metric_key
+                  AND {_BATCH_CURRENT_FOR_PARENT}
+                LIMIT 1
+            ) AS current_row ON true
+            WHERE source.ordinality = parent.ordinality
             LIMIT 1 OFFSET 0
         ) AS value
-    FROM unique_parents AS parent
+    FROM parents AS parent
 ),
 fallback_anchor AS (
-    SELECT parent.feature_id AS parent_feature_id, anchor.feature_id
-    FROM unique_parents AS parent
-    JOIN preferred_has_series AS preferred USING (feature_id)
+    SELECT parent.ordinality, parent.target_at, anchor.feature_id
+    FROM parents AS parent
+    JOIN preferred_has_current AS preferred USING (ordinality)
     LEFT JOIN LATERAL (
         SELECT candidate.feature_id
-        FROM feature.public_features AS candidate
-        WHERE parent.visible_feature_id IS NOT NULL
+        FROM anchor_candidates AS candidate
+        WHERE candidate.parent_feature_id = parent.feature_id
           AND NOT preferred.value
-          AND candidate.kind = 'weather'
-          AND parent.coord_5179 IS NOT NULL
-          AND candidate.coord_5179 IS NOT NULL
-          AND x_extension.ST_DWithin(
-                candidate.coord_5179,
-                parent.coord_5179,
-                CAST(:radius_m AS double precision)
-              )
           AND EXISTS (
-              SELECT 1
+              SELECT 1 AS found
               FROM feature.weather_metric_series AS series
+              JOIN LATERAL (
+                  SELECT 1
+                  FROM feature.feature_weather_values AS w
+                  WHERE w.feature_id = series.feature_id
+                    AND w.provider = series.provider
+                    AND w.weather_domain = series.weather_domain
+                    AND w.forecast_style = series.forecast_style
+                    AND w.metric_key = series.metric_key
+                    AND {_BATCH_CURRENT_FOR_PARENT}
+                  LIMIT 1
+              ) AS current_row ON true
               WHERE series.feature_id = candidate.feature_id
               LIMIT 1 OFFSET 0
           )
-        ORDER BY
-            candidate.coord_5179
-              OPERATOR(x_extension.<->) parent.coord_5179,
-            candidate.feature_id
+        ORDER BY candidate.distance_order, candidate.feature_id
         LIMIT 1
     ) AS anchor ON true
 ),
-feature_sources AS (
-    SELECT parent_feature_id, source_feature_id, tier
+sources AS (
+    SELECT ordinality, target_at, source_feature_id, tier
     FROM preferred_sources
     UNION ALL
-    SELECT parent_feature_id, feature_id, 3
+    SELECT ordinality, target_at, feature_id, 3
     FROM fallback_anchor
     WHERE feature_id IS NOT NULL
-),
-sources AS (
-    SELECT
-        parent.ordinality,
-        parent.target_at,
-        source.source_feature_id,
-        source.tier
-    FROM parents AS parent
-    JOIN feature_sources AS source
-      ON source.parent_feature_id = parent.feature_id
 ),
 metric_sources AS MATERIALIZED (
     SELECT DISTINCT
@@ -627,6 +737,10 @@ source_metric_keys AS MATERIALIZED (
     JOIN feature.weather_metric_series AS series
       ON series.feature_id = source.source_feature_id
 ),
+source_metric_key_count AS (
+    SELECT count(*)::bigint AS value
+    FROM source_metric_keys
+),
 current_source_rows AS (
     SELECT
         metric.ordinality,
@@ -652,6 +766,7 @@ current_source_rows AS (
         row.collected_at,
         row.weather_value_key
     FROM source_metric_keys AS metric
+    CROSS JOIN source_metric_key_count
     JOIN LATERAL (
         SELECT
             w.forecast_style,
@@ -685,7 +800,8 @@ current_source_rows AS (
             w.collected_at DESC,
             w.weather_value_key
         LIMIT 1
-    ) AS row ON true
+    ) AS row
+      ON source_metric_key_count.value <= CAST(:series_work_limit AS bigint)
 ),
 current_rows AS (
     SELECT DISTINCT ON (
@@ -748,12 +864,14 @@ timeline_source_rows AS (
         w.weather_domain,
         {_BATCH_EFFECTIVE_AT} AS effective_at
     FROM source_metric_keys AS metric
+    CROSS JOIN source_metric_key_count
     JOIN feature.feature_weather_values AS w
       ON w.feature_id = metric.source_feature_id
      AND w.provider = metric.provider
      AND w.weather_domain = metric.weather_domain
      AND w.forecast_style = metric.forecast_style
      AND w.metric_key = metric.metric_key
+     AND source_metric_key_count.value <= CAST(:series_work_limit AS bigint)
     WHERE {_BATCH_KNOWN_AT}
       AND {_BATCH_EFFECTIVE_AT} > metric.target_at
       AND {_BATCH_EFFECTIVE_AT}
@@ -810,6 +928,48 @@ weather_rows AS (
 ),
 weather_row_count AS (
     SELECT count(*)::bigint AS value
+    FROM weather_rows
+),
+weather_response_size AS (
+    SELECT (
+        4096
+        + COALESCE(
+            sum(
+                64
+                + octet_length(
+                    CAST(
+                        jsonb_build_object(
+                            'forecast_style', forecast_style,
+                            'metric_key', metric_key,
+                            'metric_name', metric_name,
+                            'timeline_bucket', timeline_bucket,
+                            'value_number', value_number,
+                            'value_text', value_text,
+                            'unit', unit,
+                            'severity', severity,
+                            'issued_at', issued_at,
+                            'valid_at', valid_at,
+                            'valid_from', valid_from,
+                            'valid_until', valid_until,
+                            'observed_at', observed_at,
+                            'provider', provider,
+                            'weather_domain', weather_domain,
+                            'effective_at', effective_at
+                        ) AS text
+                    )
+                )
+            ),
+            0
+        )
+        + (
+            SELECT COALESCE(
+                sum(256 + octet_length(parent.feature_id)),
+                0
+            )
+            FROM parents AS parent
+        )
+        + (SELECT count(*) * 256 FROM cards)
+    )::bigint AS value
     FROM weather_rows
 ),
 card_states AS (
@@ -886,7 +1046,9 @@ batch_rows AS (
         weather.effective_at
     FROM weather_rows AS weather
     CROSS JOIN weather_row_count
+    CROSS JOIN weather_response_size
     WHERE weather_row_count.value <= CAST(:metric_row_limit AS bigint)
+      AND weather_response_size.value <= CAST(:response_byte_limit AS bigint)
 )
 SELECT
     batch.row_kind,
@@ -911,9 +1073,13 @@ SELECT
     batch.provider,
     batch.weather_domain,
     batch.effective_at,
-    weather_row_count.value AS metric_row_count
+    source_metric_key_count.value AS series_work_count,
+    weather_row_count.value AS metric_row_count,
+    weather_response_size.value AS response_payload_bytes
 FROM batch_rows AS batch
+CROSS JOIN source_metric_key_count
 CROSS JOIN weather_row_count
+CROSS JOIN weather_response_size
 ORDER BY
     CASE batch.row_kind WHEN 'item' THEN 0 ELSE 1 END,
     COALESCE(batch.item_ordinality, batch.card_ordinal),
@@ -1512,6 +1678,9 @@ async def get_weather_batch_snapshots(
     known_at: datetime,
     freshness_seconds: int = DEFAULT_WEATHER_FRESHNESS_SECONDS,
     metric_row_limit: int = WEATHER_BATCH_MAX_METRIC_ROWS,
+    response_byte_limit: int = WEATHER_BATCH_MAX_RESPONSE_BYTES,
+    series_work_limit: int = WEATHER_BATCH_MAX_SOURCE_SERIES_WORK,
+    query_timeout_seconds: float = WEATHER_BATCH_QUERY_TIMEOUT_SECONDS,
 ) -> tuple[WeatherBatchSnapshot, ...]:
     """날짜별 공개 parent와 weather를 한 SQL snapshot에서 반환한다.
 
@@ -1532,6 +1701,12 @@ async def get_weather_batch_snapshots(
         raise ValueError("weather batch target count exceeds limit")
     if not 1 <= metric_row_limit <= WEATHER_BATCH_MAX_METRIC_ROWS:
         raise ValueError("weather batch metric row limit is out of range")
+    if not 1 <= response_byte_limit <= WEATHER_BATCH_MAX_RESPONSE_BYTES:
+        raise ValueError("weather batch response byte limit is out of range")
+    if not 1 <= series_work_limit <= WEATHER_BATCH_MAX_SOURCE_SERIES_WORK:
+        raise ValueError("weather batch series work limit is out of range")
+    if not 0 < query_timeout_seconds <= WEATHER_BATCH_QUERY_TIMEOUT_SECONDS:
+        raise ValueError("weather batch query timeout is out of range")
 
     feature_ids: list[str] = []
     target_ats: list[datetime] = []
@@ -1546,36 +1721,66 @@ async def get_weather_batch_snapshots(
             raise ValueError("weather batch target feature count exceeds limit")
         if len(target.feature_ids) != len(set(target.feature_ids)):
             raise ValueError("weather batch target feature_ids must be unique")
+        if any(
+            len(feature_id) > WEATHER_BATCH_MAX_FEATURE_ID_LENGTH
+            for feature_id in target.feature_ids
+        ):
+            raise ValueError("weather batch feature_id length exceeds limit")
         feature_ids.extend(target.feature_ids)
         target_ats.extend([target.target_at] * len(target.feature_ids))
 
     if len(feature_ids) > WEATHER_BATCH_MAX_PAIRS:
         raise ValueError("weather batch pair count exceeds limit")
-
-    rows = (
-        (
-            await session.execute(
-                text(_WEATHER_BATCH_SQL),
-                {
-                    "feature_ids": feature_ids,
-                    "target_ats": target_ats,
-                    "known_at": known_at,
-                    "radius_m": _NEAREST_WEATHER_RADIUS_M,
-                    "timeline_days": WEATHER_BATCH_TIMELINE_DAYS,
-                    "metric_row_limit": metric_row_limit,
-                },
-            )
-        )
-        .mappings()
-        .all()
+    planning_work = len(feature_ids) + WEATHER_BATCH_UNIQUE_FEATURE_WORK_WEIGHT * len(
+        set(feature_ids)
     )
+    if planning_work > WEATHER_BATCH_MAX_PLANNING_WORK:
+        raise ValueError("weather batch planning work exceeds limit")
+
+    try:
+        async with asyncio_timeout(query_timeout_seconds):
+            rows = (
+                (
+                    await session.execute(
+                        text(_WEATHER_BATCH_SQL),
+                        {
+                            "feature_ids": feature_ids,
+                            "target_ats": target_ats,
+                            "known_at": known_at,
+                            "radius_m": _NEAREST_WEATHER_RADIUS_M,
+                            "timeline_days": WEATHER_BATCH_TIMELINE_DAYS,
+                            "metric_row_limit": metric_row_limit,
+                            "response_byte_limit": response_byte_limit,
+                            "series_work_limit": series_work_limit,
+                        },
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    except TimeoutError as exc:
+        raise WeatherBatchQueryTimeoutError(
+            f"weather batch query exceeded {query_timeout_seconds:g} seconds"
+        ) from exc
     if not rows:
         raise RuntimeError("weather batch query returned no parent rows")
+    series_work_count = int(rows[0]["series_work_count"])
+    if series_work_count > series_work_limit:
+        raise WeatherBatchWorkLimitExceededError(
+            actual=series_work_count,
+            limit=series_work_limit,
+        )
     metric_row_count = int(rows[0]["metric_row_count"])
     if metric_row_count > metric_row_limit:
         raise WeatherBatchMetricLimitExceededError(
             actual=metric_row_count,
             limit=metric_row_limit,
+        )
+    response_payload_bytes = int(rows[0]["response_payload_bytes"])
+    if response_payload_bytes > response_byte_limit:
+        raise WeatherBatchPayloadLimitExceededError(
+            actual=response_payload_bytes,
+            limit=response_byte_limit,
         )
 
     pair_count = len(feature_ids)

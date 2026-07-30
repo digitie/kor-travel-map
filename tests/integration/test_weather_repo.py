@@ -370,6 +370,165 @@ async def test_weather_batch_metric_budget_fails_without_partial_snapshot(
         )
 
 
+async def test_weather_batch_payload_budget_fails_without_partial_snapshot(
+    migrated_session: AsyncSession,
+) -> None:
+    await _ins_feature_at(
+        migrated_session,
+        "batch_payload_budget",
+        lon=_BASE_LON,
+        lat=_BASE_LAT,
+        kind="weather",
+    )
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _wv(
+                "LONG_TEXT",
+                feature_id="batch_payload_budget",
+                weather_domain="kma_weather_alert",
+                forecast_style="advisory",
+                timeline_bucket=None,
+                issued_at=_T1,
+                valid_at=_T2,
+                collected_at=_T1,
+                value_text="x" * 512,
+            )
+        ],
+    )
+    await migrated_session.flush()
+
+    with pytest.raises(
+        weather_repo.WeatherBatchPayloadLimitExceededError,
+        match=r"response bytes \d+ exceed limit 4096",
+    ):
+        await weather_repo.get_weather_batch_snapshots(
+            migrated_session,
+            targets=(
+                weather_repo.WeatherBatchTarget(
+                    target_at=_T2,
+                    feature_ids=("batch_payload_budget",),
+                ),
+            ),
+            known_at=_T2,
+            response_byte_limit=4096,
+        )
+
+
+async def test_weather_batch_series_work_budget_stops_before_fact_projection(
+    migrated_session: AsyncSession,
+) -> None:
+    await _ins_feature_at(
+        migrated_session,
+        "batch_series_budget",
+        lon=_BASE_LON,
+        lat=_BASE_LAT,
+        kind="weather",
+    )
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _kma_short(
+                "batch_series_budget",
+                metric_key,
+                issued_at=_T1,
+                valid_at=_T2,
+                collected_at=_T1,
+                value_number=Decimal("20.0"),
+                unit="deg_c",
+            )
+            for metric_key in ("TMP", "POP")
+        ],
+    )
+    await migrated_session.flush()
+
+    with pytest.raises(
+        weather_repo.WeatherBatchWorkLimitExceededError,
+        match="series work 2 exceeds limit 1",
+    ):
+        await weather_repo.get_weather_batch_snapshots(
+            migrated_session,
+            targets=(
+                weather_repo.WeatherBatchTarget(
+                    target_at=_T2,
+                    feature_ids=("batch_series_budget",),
+                ),
+            ),
+            known_at=_T2,
+            series_work_limit=1,
+        )
+
+
+async def test_weather_batch_future_own_series_does_not_change_past_anchor(
+    migrated_session: AsyncSession,
+) -> None:
+    target_at = _T2
+    known_at = _T2 + timedelta(hours=1)
+    await _ins_feature_at(
+        migrated_session,
+        "batch_bitemporal_parent",
+        lon=_BASE_LON,
+        lat=_BASE_LAT,
+    )
+    await _ins_feature_at(
+        migrated_session,
+        "batch_bitemporal_anchor",
+        lon=_BASE_LON + 0.001,
+        lat=_BASE_LAT,
+        kind="weather",
+    )
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _kma_short(
+                "batch_bitemporal_anchor",
+                "TMP",
+                issued_at=_T1,
+                valid_at=target_at,
+                collected_at=_T1,
+                value_number=Decimal("18.0"),
+                unit="deg_c",
+            )
+        ],
+    )
+    await migrated_session.flush()
+
+    async def _temperature() -> Decimal | None:
+        snapshots = await weather_repo.get_weather_batch_snapshots(
+            migrated_session,
+            targets=(
+                weather_repo.WeatherBatchTarget(
+                    target_at=target_at,
+                    feature_ids=("batch_bitemporal_parent",),
+                ),
+            ),
+            known_at=known_at,
+        )
+        assert snapshots[0].items[0].state == "found"
+        return snapshots[0].cards[0].current[0].value_number
+
+    assert await _temperature() == Decimal("18.0000")
+
+    # Catalog는 monotonic이라 이 미래 own series identity 자체는 즉시 등록된다.
+    # 그러나 fact가 known_at 뒤라 같은 과거 snapshot의 source 선택을 바꾸면 안 된다.
+    await weather_repo.load_weather_values(
+        migrated_session,
+        [
+            _kma_short(
+                "batch_bitemporal_parent",
+                "TMP",
+                issued_at=_T1,
+                valid_at=target_at,
+                collected_at=known_at + timedelta(hours=1),
+                value_number=Decimal("99.0"),
+                unit="deg_c",
+            )
+        ],
+    )
+    await migrated_session.flush()
+    assert await _temperature() == Decimal("18.0000")
+
+
 async def test_weather_timeline_preserves_forecast_issue_history(
     migrated_session: AsyncSession,
 ) -> None:
@@ -895,9 +1054,11 @@ async def test_nearest_temp_uses_coord_gist_and_no_weather_full_scan(
                 "target_ats": [datetime.now(_KST)],
                 "known_at": datetime.now(_KST),
                 "radius_m": 50_000.0,
-                "timeline_days": 1,
-                "metric_row_limit": weather_repo.WEATHER_BATCH_MAX_METRIC_ROWS,
-            },
+                    "timeline_days": 1,
+                    "metric_row_limit": weather_repo.WEATHER_BATCH_MAX_METRIC_ROWS,
+                    "response_byte_limit": weather_repo.WEATHER_BATCH_MAX_RESPONSE_BYTES,
+                    "series_work_limit": weather_repo.WEATHER_BATCH_MAX_SOURCE_SERIES_WORK,
+                },
         )
     ).scalar_one()[0]["Plan"]
     batch_nodes = _walk_plan(batch_plan)
