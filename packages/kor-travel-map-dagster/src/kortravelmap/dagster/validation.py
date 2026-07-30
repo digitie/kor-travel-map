@@ -21,7 +21,13 @@ DROPPABLE_ISSUE_CODES: Final[frozenset[str]] = frozenset(
 
 이전에는 severity가 ``error``이기만 하면 code와 무관하게 drop됐다. 그래서 새 error 하나가
 추가될 때마다 drop 정책이 조용히 넓어졌고, 실제로 ``provider_address_mismatch``가 그렇게
-1,477건 중 380건을 영구 파괴했다(전부 오탐 — 위 리포트).
+1,477건 중 380건을 영구 파괴했다.
+
+그 380건을 두고 초안은 *"전부 오탐"*이라 적었으나 **근거가 tautology였다** — concierge
+payload의 행정코드는 같은 좌표로 같은 geo reverse를 호출한 **캐시**라 항상 일치한다.
+유효한 결론은 독립 축(provider ``Address.sigungu_name`` 대조 + 정지오코딩)으로 재수립한
+"기존 규칙으로 **좌표 오류가 성립한 건 0건**"이다. 어느 쪽이든 **영구 drop이 과했다**는
+이 화이트리스트의 근거는 그대로다.
 
 이제 drop 대상은 여기 **명시된 code만**이다. 다른 검증이 error를 내더라도 이 집합을 고치는
 별도 변경 없이는 데이터가 사라지지 않는다. 두 code는 위치 단서 자체가 없어 적재해도 의미가

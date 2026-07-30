@@ -49,6 +49,53 @@ BLOCKED, 전용 container/network/image와 loopback listener는 모두 0이고 c
 `main`에서 문서 상태가 구현보다 앞서는 구간은 없다. landing 뒤에는 clone/checkpoint의
 다음 task 재사용 가능성을 다시 판정하고 별도 Claude Code PR 사후 감사를 진행한다.
 
+## 2026-07-30 — 게이트가 조용히 축소 통과하고 있었다 (+ 철회 근거 3곳 정정)
+
+**n150 CI-parity 게이트를 잘못 돌리고 있었다.** `kor-travel-map-t176-ci:latest`에는 저장소
+사본이 `/workspace`에 구워져 있는데, 나는 트리를 `/w`로 마운트했다. 그러면 구운 사본이
+`sys.path`에서 이겨 `src/kortravelmap/*` import가 **이미지의 낡은 코드로 해소된다**.
+
+같은 트리, 마운트만 바꿔 실측했다:
+
+| | `/w` 마운트 | `/workspace` 마운트 |
+| --- | --- | --- |
+| pytest | 2543 passed | **3053 passed** |
+| mypy --strict | 173 files | **196 files** |
+
+차이 510건은 실패가 아니라 **수집조차 되지 않았다** —
+`packages/kor-travel-map-dagster/tests/*`가 `from kortravelmap.dto import AdminEvidence`에서
+`ImportError`로 통째로 죽는데, 이미지의 `/workspace/src`가 그 DTO(H28B에서 추가)가 생기기
+전 커밋이기 때문이다.
+
+**증상이 "3 failed, 2543 passed"라서 알아채기 어려웠다.** 실패가 아니라 조용한 축소 통과였고,
+나는 그 숫자를 여러 PR에서 "게이트 통과"의 근거로 인용했다. 다행히 #890의 실제 판정은
+GitHub CI(8잡 green)가 했고 내 변경은 `packages/`·`scripts/`·`docs/`·`resources/`에 있어
+그 부분은 `/w`에서도 제대로 테스트됐다. 하지만 **나머지 회귀 주장은 그만큼 약했다.**
+`docs/dev-environment.md`에 마운트 지점과 실측 수치를 박고, 게이트 보고 시 **통과 건수를
+같이 적는다**는 규칙을 넣었다.
+
+이번 것도 형태가 같다 — **성공을 보고하는 측정이 실패했을 때 다르게 나오는지** 묻지 않았다.
+`/w`와 `/workspace`를 비교해 볼 이유가 없었고, 그래서 비교하지 않았다.
+
+**철회된 tautology 근거가 3곳에 원문 그대로 남아 있었다.** #673 조사 서브에이전트가 찾았다.
+concierge payload의 `legal_dong_code`는 같은 좌표로 같은 geo `/v2/reverse`를 호출한 캐시라
+"payload 코드 == geo 코드"는 tautology인데, 그 축이 아직 근거로 적혀 있었다 —
+특히 `test_admin_code_validation.py`의 docstring이 **무효 축을 회귀 테스트의 정당화로**
+쓰고 있었다. `validation.py`, `docs/architecture/address-geocoding.md`도 같다.
+유효 근거(독립 축: `Address.sigungu_name` 대조 + 정지오코딩)로 교체했다.
+리포트·journal에는 정정문이 있었는데 **코드 주석까지 따라가지 않은** 것이다.
+
+**#673은 닫을 수 없다.** 규칙 교체는 머지됐지만 prod에 배포되지 않았고, 이슈가 신고한 손실이
+실재한다 — live export 1,477 대비 prod 적재 1,020(**457건 미적재**), `max(last_seen_at)`이
+2026-07-14(이슈 제기일)로 그 뒤 materialize가 없다. blocker는 `T-VN-H35`(배포)와
+`T-VN-H30B`(실적재 실증)이고, `T-VN-H30C`·`T-VN-H32`는 이슈 범위 밖이다.
+
+**H35 실측 정정**: 저장소 head는 `0067`이 아니라 `0068_integrity_last_seen`이라 간극은 5개다.
+`0065`의 `DELETE`는 **0행**(prod에 `archived_at IS NOT NULL`이 0건)이라 내가 경고했던
+파괴는 이번엔 발화하지 않는다. 대신 **`collection_key` 52개 재작성**이라는 외부 계약 변경이
+있고, `env.py`에 `transaction_per_migration`이 없는데 `0064`의 `autocommit_block()`이
+트랜잭션을 커밋해 **0065 실패 시 0064만 적용된 채 version은 0063에 남는다.**
+
 ## 2026-07-29 — T-VN-H36: 이름 단독 자동링크를 막았다. H33이 비로소 durable해졌다
 
 curation CSV import에서 `feature_id`가 빈 행이 이름만 일치하는 후보에 자동으로 붙던 경로를

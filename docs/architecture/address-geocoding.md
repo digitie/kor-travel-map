@@ -212,7 +212,7 @@ class AddressMatchReport:
 | `sigungu_code_only` | 시군구 레벨만 있음 (10자리 모두 채움 못함) | **검토 대상** |
 | `address_text_match` | 코드 없이 문자열 매칭 | 정상 |
 | `address_text_review` | 문자열 매칭 검토 필요 (불완전 매칭) | **검토 대상** |
-| ~~`provider_address_mismatch`~~ | **발행 중단 (T-VN-H28B, 2026-07-29)** — 좌표 reverse 시군구명이 provider 주소 문자열에 부분문자열로 없으면 error였다. 실측에서 1,477 후보 중 380건을 영구 drop했고 **380건 전부 오탐**(진짜 불일치 0건)이라 판정에서 제거했다 | — |
+| ~~`provider_address_mismatch`~~ | **발행 중단 (T-VN-H28B, 2026-07-29)** — 좌표 reverse 시군구명이 provider 주소 문자열에 부분문자열로 없으면 error였다. 실측에서 1,477 후보 중 380건을 영구 drop했고, 독립 축(provider `Address.sigungu_name` 대조 + 정지오코딩)으로 **기존 규칙으로 좌표 오류가 성립한 건은 0건**임을 확인해 판정에서 제거했다. (초안이 근거로 든 "payload 행정코드 == geo 행정코드"는 **tautology라 철회**했다 — payload 코드가 같은 좌표의 같은 geo reverse 캐시다) | — |
 | ~~`provider_address_partial_match`~~ | **발행 중단 (T-VN-H28B)** — 같은 이름 문자열 축 | — |
 | `admin_code_stale_{sido,sigungu,emd}` | provider가 선언한 행정코드와 좌표 reverse 행정코드가 해당 단계에서 다름. 리(8:10)는 합성 가능해 비교하지 않는다 | **검토 대상** (warning 상한 — drop 불가) |
 | `address_text_only` | 좌표/geocoder 없이 문자열만 있음 | **검토 대상** |

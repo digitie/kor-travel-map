@@ -27,7 +27,7 @@ barrier로 직렬화한다.
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
-    [ ] `T-VN-H35`(prod 마이그레이션 지연 0064~0067 — H33 부수 발견) →
+    [ ] `T-VN-H35`(prod 마이그레이션 지연 0064~0068 + 이미지 동시 배포 — #673 blocker) →
     [ ] `T-VN-H34`(H25A/H25B 미충족 AC 마무리) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
@@ -353,12 +353,32 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [x] T-VN-H36 — curation import의 이름 단독 자동링크 금지 (#890, 막힌 자동링크 3건 전부 오링크 / 정당한 손실 0건) → [`tasks-done.md`](tasks-done.md)
 
-- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0067)**
+> **issue #673 판정(2026-07-30) — 아직 닫을 수 없다.** 서브에이전트 조사로 이슈 본문·코멘트를
+> 요구사항으로 분해해 대조했다. 3항목 중 둘(오탐 분포 규명 / 규칙 교체)은 충족이고,
+> 셋째("다음 materialize에서 자동 회복되는가")는 **코드 논증만 있고 실증이 없다**.
+> 결정적 blocker는 **prod 미배포**이며 이슈가 신고한 손실(현재 457건)이 실재한다 → `T-VN-H35`.
+> 남은 실증은 `T-VN-H30B`. **`T-VN-H30C`·`T-VN-H32`는 #673 범위 밖**이다 —
+> 이슈는 "concierge provider에 한해" 완화를 요구했고 두 task는 그 파생 개선이다.
+> 저장소 열린 이슈는 #673·#819 두 건뿐이고 #673은 epic이 아니다.
 
-  prod alembic head `0063_pipeline_root_id` vs 저장소 head `0067_integrity_dedupe_key`
-  (0063→0064→0065→0066→0067 단일 체인, 분기 없음). H30A(`0067` dedupe 부분 유니크 인덱스)를
-  포함해 **머지된 마이그레이션이 prod에 반영되지 않았다**. H30A가 주장한
-  dedupe·`/admin/issues` 접기는 현재 prod에서 성립하지 않는다.
+- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0068)**
+
+  prod alembic head `0063_pipeline_root_id` vs 저장소 head **`0068_integrity_last_seen`**
+  (0063→0064→0065→0066→0067→0068 단일 체인, 분기 없음). 즉 간극은 **5개**다.
+  H30A(`0067` dedupe 부분 유니크 인덱스)를 포함해 **머지된 마이그레이션이 prod에 반영되지
+  않았다**. H30A가 주장한 dedupe·`/admin/issues` 접기는 현재 prod에서 성립하지 않는다.
+
+  > **정정(2026-07-30)** — 이 항목은 처음에 `0064~0067`(4개)로 적혀 있었다. 실제 head는
+  > `0068_integrity_last_seen`(`down_revision=0067`)이라 **0064~0068 5개**다.
+  > `ops.data_integrity_violations.last_seen_at` 컬럼이 prod에 없는 것도 그래서다.
+
+  **이 task는 issue #673의 유일한 결정적 blocker다.** #673("concierge 후보 410건 영구
+  미적재")의 규칙 교체는 `T-VN-H28A/B`로 머지됐지만 **prod에 배포되지 않았다** —
+  실측으로 prod dagster 컨테이너는 아직 옛 규칙(`provider_address_mismatch`)을 담고 있고,
+  live export **1,477**건 대비 prod 적재는 **1,020**건(**457건 미적재**)이다.
+  `max(last_seen_at)`이 2026-07-14(이슈 제기일)로 그 뒤 materialize가 돈 적이 없다.
+  배포해도 회복은 즉시가 아니다 — 스케줄이 월 1회(`40 3 3 * *`)라 **2026-08-03** 또는
+  수동 트리거 시점이다. #673의 남은 절반(실적재 before/after 실증)은 `T-VN-H30B`가 담당한다.
 
   > **⚠ 마이그레이션만 올리면 안 된다 — 이미지도 함께 올려야 한다.**
   > prod는 "DB만 뒤처진 불일치"가 아니라 **코드·스키마가 일관되게 0063에 고정된 상태**다
@@ -369,8 +389,88 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > 마이그레이션만 적용하면 arbiter 추론이 실패해 curation import·admin item 쓰기가 깨진다.
   > `0065`에는 중복 정리용 `DELETE FROM feature.curation_items`도 들어 있다.
 
-  할 일: 0064~0067 각각의 내용·위험 평가 → **마이그레이션과 이미지 배포의 순서·원자성 확정**
-  → 적용 → dedupe 인덱스 실측 확인.
+  **실측으로 위험도가 재평가됐다(읽기 전용 조사, 2026-07-30)**:
+  - `0065`의 `DELETE FROM feature.curation_items`는 **0행**이다. tombstone dedupe가
+    `archived_at IS NOT NULL`을 요구하는데 prod에 그런 행이 **0건**이고, 직전 statement가
+    새로 만드는 tombstone도 0건(`status='archived'` 0행)이다. 이번 적용에서는 발화하지 않는다.
+    다만 **의미론은 위험하다** — tombstone이 하나라도 있는 identity 그룹에서 survivor는
+    tombstone이고 같은 그룹의 **active membership까지 삭제**되며, 백업 테이블을 만들지 않는다.
+  - 새 유니크 인덱스 `uq_curation_items_identity`의 충돌 그룹 **0개** → 생성 성공한다.
+  - `0065`가 `curation_collections.collection_key` **52개를 재작성**한다
+    (`legacy:<theme_uuid>:<source_uuid>:<md5(title)>` 형태, 전부 `published`/`public`).
+    실체는 concierge YouTube 장소 후보이고 그 안의 공개 item이 3,044건이다.
+
+    > **정정** — 나는 이걸 "외부 계약이 바뀐다 — PinVi 등 소비자가 참조하면 깨진다"고
+    > 적었다. **소비자 전수 조사 결과 깨지는 것이 없다.** 위험을 확인하지 않고 단정했다.
+    > - `collection_key`를 **조회 키로 받는 엔드포인트가 0개**다 — 전부 `collection_id`
+    >   UUID 경로다. 응답에 실리는 **출력 필드**일 뿐이라 스키마·엔드포인트가 안 바뀐다.
+    > - e2e live의 하드코딩 `OFFICIAL_COLLECTION_KEYS` 19개와 재작성 52개의
+    >   **교집합 0개**다. 19개는 `created_by='admin'`이고 `migrated_from` metadata가 없어
+    >   0065의 `WHERE metadata @> '{"migrated_from":…}'`에서 아예 제외된다.
+    > - CSV import는 `ON CONFLICT (collection_key)`로 upsert하지만 CSV의 키
+    >   (`korean-tourism-100:2023-2024` 등)가 재작성 대상이 아니라 그대로 매칭된다 —
+    >   **중복 collection 생성 없음**.
+    > - PinVi·kor-travel-concierge·kor-travel-docker-maneger 전부 `collection_key`
+    >   참조 **0 hit**. dagster asset/CLI도 0 hit.
+    > - 재계산은 **멱등**이다(`(theme_id, source_id, md5(title))` 기반, prod에 NULL/blank
+    >   title 0건, base_key 중복 0건이라 `:split:`/`:conflict:` 접미사 미발생).
+    >
+    > 남는 것은 계약 **문서화** 권고뿐이다(blocker 아님): `collection_key`는 0045→0065에서
+    > 형식이 두 번 바뀐 **불안정 식별자**인데 공개 응답에 실린다. "표시·검색용이고 안정
+    > 식별자는 `collection_id`"임을 명시하고, `docs/integration-map.md`에 curation
+    > collection 표면 계약 행을 추가한다(현재 그 행이 없어 소비자 판정을 전 저장소
+    > grep으로만 할 수 있었다).
+  - `0065` 후반 quarantine 블록도 **no-op**이다 — canonical-only item(`legacy_projection_id
+    IS NULL`)이 prod에 0건이다. 새 유니크 인덱스 위반 행도 0건.
+  - `0065`의 대량 UPDATE: `source_updated_at` **3,530행 전량**(WHERE 없음),
+    `operator_updated_*` 3,044행, `legacy_projection_id` 3,044행.
+  - **트랜잭션 경계 함정**: `alembic/env.py`에 `transaction_per_migration`이 **없어**
+    0064~0068이 원래 한 트랜잭션인데, `0064`의 `autocommit_block()`(CREATE/DROP INDEX
+    CONCURRENTLY)이 **그 트랜잭션을 커밋한다**. 따라서 0065가 실패하면 **0064만 적용된 채
+    `alembic_version`은 0063에 남는다**. 0064는 인덱스 상태 가드가 있어 재실행 가능하다.
+  - `0064`는 인덱스만 바꾸고 DML 0건, `downgrade()`도 대칭이라 **완전 가역**이다.
+
+  **선행 조사는 끝났다. 데이터 측면 blocker는 확인되지 않았다.**
+  0064~0068 전부 prod 데이터에서 파괴적 statement가 no-op이거나 가역이고,
+  `collection_key` 재작성도 소비자를 깨뜨리지 않는다.
+
+  **배포 역학 실측(2026-07-30)** — 계획이 크게 단순해진다:
+  - **`docker/api-entrypoint.sh:216`이 `alembic upgrade head`를 재시도 루프로 직접 돌린다**
+    (uvicorn 기동 **전**). 즉 **마이그레이션과 새 코드는 이미 원자적**이다 — 새 이미지로
+    API 컨테이너를 recreate하면 그 컨테이너가 스스로 0064~0068을 올리고 나서 서비스한다.
+    내가 걱정한 "새 스키마 + 낡은 코드" 창은 compose가 old를 먼저 정지하는 한 생기지 않는다.
+  - **`docker/dagster-entrypoint.sh`는 마이그레이션을 하지 않는다**(`alembic upgrade` 0 hit).
+    dagster는 스키마를 소비만 하므로 API 뒤에 올린다.
+  - 백업 수단이 실재한다: **`scripts/docker-backup.sh`** — map DB + dagster DB를 받고
+    `KOR_TRAVEL_MAP_BACKUP_ROOT`(기본 `data/backups`)에 `BACKUP_ID`별로 쌓는다.
+    기본값이 `ALLOW_RUNNING=0`이라 정지 상태를 요구한다.
+
+  남은 할 일:
+  1. **백업** — `scripts/docker-backup.sh`. `0065`의 52행 재작성·3,530행 UPDATE와 `0066`
+     backfill은 downgrade로 복구되지 않으므로 **이게 유일한 복구 경로**다.
+  2. **이미지 빌드** — main 최신(H36 게이트 포함)으로 API/dagster/UI.
+  3. **H36 게이트가 이미지에 실렸는지 확인** — 커밋 라벨만 보지 말고 컨테이너 안에서
+     `_adopted_match` 존재를 직접 확인한다. 라벨은 빌드 컨텍스트를 증명하지 않는다.
+  4. **API recreate** → entrypoint가 0064~0068을 적용. 그 다음 dagster/UI.
+  5. **적용 후 실증(반증 가능해야 한다)**:
+     - `alembic_version = 0068_integrity_last_seen`
+     - `uq_violations_open_dedupe_key` 인덱스 존재 / `last_seen_at` 컬럼 존재
+       (둘 다 지금은 **없음**이 확인돼 있어 before/after가 갈린다)
+     - curation import **preview**가 오링크 3건을 여전히 미연결로 두는지
+       (H36 게이트 실효 확인. 실패했다면 `resolved_feature_id`가 채워져 값이 달라진다)
+     - concierge materialize 후 적재 **1,020 → 1,477** 회복(#673 종결 조건)
+     - `inserted/updated/removed 0`처럼 **정상 배포에서도 거짓인 기준은 쓰지 않는다**
+       (`0066` backfill이 `updated`를 만든다)
+
+  > **⚠ 비가역 지점** — 사람 승인이 필요하다.
+  > - `0065`의 `collection_key` 52행 재작성과 `source_updated_at` 3,530행 UPDATE,
+  >   `0066`의 `external_component_id` backfill은 **downgrade로 복구되지 않는다**.
+  >   백업이 유일한 복구 경로다.
+  > - `0064`의 `autocommit_block()`이 트랜잭션을 커밋하므로 **부분 적용 상태가 가능하다**
+  >   (0064만 적용 + `alembic_version`은 0063). entrypoint가 실패 시 재시도하므로
+  >   0064 재실행은 가드로 안전하지만, 0065가 계속 실패하면 **컨테이너가 기동하지 못한다**
+  >   (`exit 1`) — 즉 실패는 조용하지 않고 API 다운으로 드러난다.
+  > - 이미지 교체는 다운타임을 만든다.
   **머지 = 배포가 아니라는 점을 문서에도 반영한다** — H30A 완료 기록이 prod 상태를
   주장하는 것으로 읽히지 않게. (H36이 이 task보다 **먼저**다.)
 
