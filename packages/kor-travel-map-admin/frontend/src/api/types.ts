@@ -1401,6 +1401,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/features/weather/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** feature weather bitemporal batch 조회 (service read) */
+        post: operations["get_feature_weather_batch_v1_features_weather_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/features/weather/forecast": {
         parameters: {
             query?: never;
@@ -10886,6 +10903,106 @@ export interface components {
             name: string;
         };
         /**
+         * WeatherBatchData
+         * @description 한 DB snapshot에서 계산한 weather batch data.
+         */
+        WeatherBatchData: {
+            /** Items */
+            items: (components["schemas"]["WeatherBatchFoundItem"] | components["schemas"]["WeatherBatchNoDataItem"] | components["schemas"]["WeatherBatchRetiredItem"])[];
+            /**
+             * Known At
+             * Format: date-time
+             */
+            known_at: string;
+            /**
+             * Target At
+             * Format: date-time
+             */
+            target_at: string;
+            /**
+             * Timeline Until
+             * Format: date-time
+             */
+            timeline_until: string;
+        };
+        /**
+         * WeatherBatchFoundItem
+         * @description 공개 parent에 weather가 있는 snapshot item.
+         */
+        WeatherBatchFoundItem: {
+            /** Current */
+            current: components["schemas"]["WeatherMetricOut"][];
+            /** Feature Id */
+            feature_id: string;
+            /** Is Stale */
+            is_stale: boolean;
+            /** Latest At */
+            latest_at?: string | null;
+            /** Source Styles */
+            source_styles: string[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            state: "found";
+            /** Timeline */
+            timeline: components["schemas"]["WeatherMetricOut"][];
+        };
+        /**
+         * WeatherBatchNoDataItem
+         * @description 공개 parent는 있으나 cutoff에 맞는 weather가 없는 item.
+         */
+        WeatherBatchNoDataItem: {
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            state: "no_data";
+        };
+        /**
+         * WeatherBatchRequest
+         * @description set-based weather snapshot 요청.
+         */
+        WeatherBatchRequest: {
+            /** Feature Ids */
+            feature_ids: string[];
+            /**
+             * Known At
+             * Format: date-time
+             * @description 소비자가 허용하는 지식 cutoff(UTC offset 필수).
+             */
+            known_at: string;
+            /**
+             * Target At
+             * Format: date-time
+             * @description 예보·관측이 설명해야 하는 시각(UTC offset 필수).
+             */
+            target_at: string;
+        };
+        /**
+         * WeatherBatchResponse
+         * @description ``POST /features/weather/batch`` 응답.
+         */
+        WeatherBatchResponse: {
+            data: components["schemas"]["WeatherBatchData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * WeatherBatchRetiredItem
+         * @description 현재 공개 parent가 아니어서 weather를 제공할 수 없는 item.
+         */
+        WeatherBatchRetiredItem: {
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            state: "retired";
+        };
+        /**
          * WeatherCardData
          * @description ``GET /features/{feature_id}/weather`` data payload.
          */
@@ -10918,6 +11035,8 @@ export interface components {
             metric_name?: string | null;
             /** Observed At */
             observed_at?: string | null;
+            /** Provider */
+            provider?: string | null;
             /** Severity */
             severity?: string | null;
             /** Timeline Bucket */
@@ -10930,6 +11049,8 @@ export interface components {
             value_number?: number | null;
             /** Value Text */
             value_text?: string | null;
+            /** Weather Domain */
+            weather_domain?: string | null;
         };
         /**
          * WeatherSummaryOut
@@ -15783,6 +15904,57 @@ export interface operations {
             };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_weather_batch_v1_features_weather_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WeatherBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherBatchResponse"];
+                };
+            };
+            /** @description 서로 다른 feature ID 1~200개와 aware datetime 필요 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
