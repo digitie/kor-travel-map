@@ -800,7 +800,7 @@ interface MockOptions {
     headers?: Record<string, string>;
     body?: unknown;
   };
-  requestCreateDelayMs?: number;
+  requestCreateResponseGate?: Promise<void>;
   requestCreateResponseLossOnce?: boolean;
   detailFactory?: (
     executionId: string,
@@ -1504,11 +1504,7 @@ async function installPipelineMocks(
       const idempotencyKey = request.headers()["idempotency-key"] ?? "";
       counters.requestBodies.push(requestBody);
       counters.requestKeys.push(idempotencyKey);
-      if (options.requestCreateDelayMs) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, options.requestCreateDelayMs),
-        );
-      }
+      await options.requestCreateResponseGate;
       const custom = options.requestCreate;
       if (custom && custom.status && custom.status >= 400) {
         await fulfillJson(
@@ -3673,8 +3669,12 @@ test.describe("/ops/pipeline", () => {
   test("요청 dialog — non-provider create pending 중 닫기와 중복 POST를 차단", async ({
     page,
   }) => {
+    let releaseRequestCreateResponse: () => void = () => undefined;
+    const requestCreateResponseGate = new Promise<void>((resolve) => {
+      releaseRequestCreateResponse = resolve;
+    });
     const counters = await installPipelineMocks(page, {
-      requestCreateDelayMs: 700,
+      requestCreateResponseGate,
     });
     await page.goto("/ops/pipeline");
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
@@ -3704,6 +3704,7 @@ test.describe("/ops/pipeline", () => {
     await page.mouse.click(4, 4);
     await expect(dialog).toBeVisible();
 
+    releaseRequestCreateResponse();
     await expect(dialog.getByTestId("request-create-result")).toBeVisible();
     await expect(dialog.getByLabel("데이터셋 키 필터")).toHaveValue(
       "kma_short_forecast",

@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { frontendBuildInputs } from "../../../../scripts/frontend-build-inputs.mjs";
+import { classifyMockedCheckpointOutcome } from "./mocked-checkpoint-outcome.mjs";
 
 const checkpoints = new Set(["A", "B", "C", "D"]);
 const [checkpoint, ...playwrightArgs] = process.argv.slice(2);
@@ -181,6 +182,10 @@ const imageIdPath = path.join(runtimeDirectory, "frontend-image.id");
 const runtimeEnvPath = path.join(runtimeDirectory, "frontend.env");
 const storageStatePath = path.join(runtimeDirectory, "admin-state.json");
 const playwrightArtifactRoot = path.join(runtimeDirectory, "playwright");
+const reporterOutcomePath = path.join(
+  playwrightArtifactRoot,
+  "mocked-failure-report.json",
+);
 
 const ownedContainerName = `ktm-mocked-e2e-${process.pid}-${randomBytes(6).toString("hex")}`;
 const ownedNetworkName = `ktm-mocked-e2e-${process.pid}-${randomBytes(6).toString("hex")}-net`;
@@ -196,8 +201,12 @@ let frontendProxyServer;
 let deniedNetworkAttempts = 0;
 let filesystemCleaned = false;
 let cleanupPromise;
-let cleanupFailed = false;
+const cleanupFailures = new Set();
 let terminating = false;
+
+function markCleanupFailure(code) {
+  cleanupFailures.add(code);
+}
 
 function cleanupFilesystem() {
   if (filesystemCleaned) return;
@@ -235,8 +244,24 @@ function runCleanupCommand(args) {
   });
 }
 
+async function waitForResourceAbsence(listArgs) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const listed = await runCleanupCommand(listArgs);
+    if (listed.status === 0 && listed.stdout.trim() === "") return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
 async function cleanupOwnedNetwork() {
   if (!networkCreateAttempted) return;
+  const listArgs = [
+    "network",
+    "ls",
+    "-q",
+    "--filter",
+    `name=^${ownedNetworkName}$`,
+  ];
   const inspected = await runCleanupCommand([
     "network",
     "inspect",
@@ -245,21 +270,8 @@ async function cleanupOwnedNetwork() {
     ownedNetworkName,
   ]);
   if (inspected.status !== 0) {
-    const listed = await runCleanupCommand([
-      "network",
-      "ls",
-      "-q",
-      "--filter",
-      `name=^${ownedNetworkName}$`,
-    ]);
-    if (
-      listed.status === 0 &&
-      listed.stdout.trim() === "" &&
-      ownedNetworkId === undefined
-    ) {
-      return;
-    }
-    cleanupFailed = true;
+    if (await waitForResourceAbsence(listArgs)) return;
+    markCleanupFailure("cleanup_network_ownership_unverified");
     return;
   }
   const [observedId, ownedLabel, ...extra] = inspected.stdout.trim().split(/\s+/);
@@ -269,32 +281,24 @@ async function cleanupOwnedNetwork() {
     !/^[0-9a-f]{64}$/.test(observedId ?? "") ||
     (ownedNetworkId !== undefined && observedId !== ownedNetworkId)
   ) {
-    cleanupFailed = true;
+    markCleanupFailure("cleanup_network_identity_mismatch");
     return;
   }
-  const removed = await runCleanupCommand([
-    "network",
-    "rm",
-    ownedNetworkName,
-  ]);
-  const postList = await runCleanupCommand([
-    "network",
-    "ls",
-    "-q",
-    "--filter",
-    `name=^${ownedNetworkName}$`,
-  ]);
-  if (
-    removed.status !== 0 ||
-    postList.status !== 0 ||
-    postList.stdout.trim() !== ""
-  ) {
-    cleanupFailed = true;
+  await runCleanupCommand(["network", "rm", ownedNetworkName]);
+  if (!(await waitForResourceAbsence(listArgs))) {
+    markCleanupFailure("cleanup_network_remaining");
   }
 }
 
 async function cleanupOwnedContainer() {
   if (!containerCreateAttempted) return;
+  const listArgs = [
+    "ps",
+    "-aq",
+    "--no-trunc",
+    "--filter",
+    `name=^${ownedContainerName}$`,
+  ];
   const inspected = await runCleanupCommand([
     "inspect",
     "--format",
@@ -302,21 +306,8 @@ async function cleanupOwnedContainer() {
     ownedContainerName,
   ]);
   if (inspected.status !== 0) {
-    const listed = await runCleanupCommand([
-      "ps",
-      "-aq",
-      "--no-trunc",
-      "--filter",
-      `name=^${ownedContainerName}$`,
-    ]);
-    if (
-      listed.status === 0 &&
-      listed.stdout.trim() === "" &&
-      ownedContainerId === undefined
-    ) {
-      return;
-    }
-    cleanupFailed = true;
+    if (await waitForResourceAbsence(listArgs)) return;
+    markCleanupFailure("cleanup_container_ownership_unverified");
     return;
   }
   const [observedId, ownedLabel, ...extra] = inspected.stdout.trim().split(/\s+/);
@@ -326,28 +317,24 @@ async function cleanupOwnedContainer() {
     !/^[0-9a-f]{64}$/.test(observedId ?? "") ||
     (ownedContainerId !== undefined && observedId !== ownedContainerId)
   ) {
-    cleanupFailed = true;
+    markCleanupFailure("cleanup_container_identity_mismatch");
     return;
   }
-  const removed = await runCleanupCommand(["rm", "-f", observedId]);
-  const listed = await runCleanupCommand([
-    "ps",
-    "-aq",
-    "--no-trunc",
-    "--filter",
-    `name=^${ownedContainerName}$`,
-  ]);
-  if (
-    removed.status !== 0 ||
-    listed.status !== 0 ||
-    listed.stdout.trim() !== ""
-  ) {
-    cleanupFailed = true;
+  await runCleanupCommand(["rm", "-f", observedId]);
+  if (!(await waitForResourceAbsence(listArgs))) {
+    markCleanupFailure("cleanup_container_remaining");
   }
 }
 
 async function cleanupOwnedImage() {
   if (!ownedImageTag) return;
+  const listArgs = [
+    "image",
+    "ls",
+    "-q",
+    "--no-trunc",
+    ownedImageTag,
+  ];
   const inspected = await runCleanupCommand([
     "image",
     "inspect",
@@ -356,15 +343,8 @@ async function cleanupOwnedImage() {
     ownedImageTag,
   ]);
   if (inspected.status !== 0) {
-    const listed = await runCleanupCommand([
-      "image",
-      "ls",
-      "-q",
-      "--no-trunc",
-      ownedImageTag,
-    ]);
-    if (listed.status === 0 && listed.stdout.trim() === "") return;
-    cleanupFailed = true;
+    if (await waitForResourceAbsence(listArgs)) return;
+    markCleanupFailure("cleanup_image_ownership_unverified");
     return;
   }
   const observedId = inspected.stdout.trim();
@@ -372,28 +352,12 @@ async function cleanupOwnedImage() {
     !/^sha256:[0-9a-f]{64}$/.test(observedId) ||
     (imageInspect !== undefined && observedId !== imageInspect.Id)
   ) {
-    cleanupFailed = true;
+    markCleanupFailure("cleanup_image_identity_mismatch");
     return;
   }
-  const removed = await runCleanupCommand([
-    "image",
-    "rm",
-    "-f",
-    ownedImageTag,
-  ]);
-  const listed = await runCleanupCommand([
-    "image",
-    "ls",
-    "-q",
-    "--no-trunc",
-    ownedImageTag,
-  ]);
-  if (
-    removed.status !== 0 ||
-    listed.status !== 0 ||
-    listed.stdout.trim() !== ""
-  ) {
-    cleanupFailed = true;
+  await runCleanupCommand(["image", "rm", "-f", ownedImageTag]);
+  if (!(await waitForResourceAbsence(listArgs))) {
+    markCleanupFailure("cleanup_image_remaining");
   }
 }
 
@@ -554,7 +518,21 @@ async function handleSignal(signal, exitCode) {
     }
   }
   await cleanup();
-  process.exit(cleanupFailed ? 2 : exitCode);
+  const cleanupIssueCodes = [...cleanupFailures].sort();
+  console.error(
+    `[mocked-checkpoint] outcome ${JSON.stringify({
+      schemaVersion: 1,
+      classification:
+        cleanupIssueCodes.length > 0 ? "infrastructure_failed" : "interrupted",
+      exitCode: cleanupIssueCodes.length > 0 ? 2 : exitCode,
+      issues:
+        cleanupIssueCodes.length > 0
+          ? cleanupIssueCodes
+          : ["runner_received_signal"],
+      runnerSignal: signal,
+    })}`,
+  );
+  process.exit(cleanupIssueCodes.length > 0 ? 2 : exitCode);
 }
 
 const signalExitCodes = new Map([
@@ -744,7 +722,32 @@ async function readBuildInfo(timeoutMs) {
   );
 }
 
-let exitCode = 2;
+function readReporterOutcome() {
+  try {
+    const report = JSON.parse(readFileSync(reporterOutcomePath, "utf8"));
+    if (
+      report?.schemaVersion !== 3 ||
+      typeof report.gatePassed !== "boolean" ||
+      !Number.isInteger(report.discoveredTests) ||
+      typeof report.originalStatus !== "string"
+    ) {
+      return undefined;
+    }
+    return {
+      discoveredTests: report.discoveredTests,
+      gatePassed: report.gatePassed,
+      originalStatus: report.originalStatus,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+let playwrightChild;
+let reporterOutcome;
+let runnerFailure;
+let runnerPhase = "setup";
+const postconditionFailures = [];
 try {
   const archiveResult = await runManagedChild(
     "git",
@@ -904,7 +907,8 @@ try {
   const require = createRequire(import.meta.url);
   const playwrightCli = require.resolve("@playwright/test/cli");
   const denyProxyUrl = await startDenyProxy();
-  const result = await runManagedChild(
+  runnerPhase = "playwright";
+  playwrightChild = await runManagedChild(
     process.execPath,
     [
       playwrightCli,
@@ -939,6 +943,8 @@ try {
       stdio: "inherit",
     },
   );
+  reporterOutcome = readReporterOutcome();
+  runnerPhase = "postconditions";
   const postHeadResult = await runManagedChild(
     "git",
     ["rev-parse", "HEAD"],
@@ -969,37 +975,46 @@ try {
     postSourceDigestResult.status !== 0 ||
     postSourceDigestResult.stdout.trim() !== sourceDigest
   ) {
-    throw new Error(
-      "mocked E2E 실행 전후 worktree HEAD/status/source digest가 달라졌습니다.",
-    );
+    postconditionFailures.push("postcondition_worktree_changed");
   }
-  const postContainerInspect = await inspectOwnedContainer();
-  const postBuildInfo = await readBuildInfo(5_000);
-  if (
-    postContainerInspect.Id !== containerInspect.Id ||
-    postBuildInfo.revision !== frontendBuildInfo.revision ||
-    postBuildInfo.sourceDigest !== frontendBuildInfo.sourceDigest
-  ) {
-    throw new Error(
-      "mocked E2E 실행 전후 frontend container/build identity가 달라졌습니다.",
-    );
+  try {
+    const postContainerInspect = await inspectOwnedContainer();
+    const postBuildInfo = await readBuildInfo(5_000);
+    if (
+      postContainerInspect.Id !== containerInspect.Id ||
+      postBuildInfo.revision !== frontendBuildInfo.revision ||
+      postBuildInfo.sourceDigest !== frontendBuildInfo.sourceDigest
+    ) {
+      postconditionFailures.push("postcondition_frontend_identity_changed");
+    }
+  } catch {
+    postconditionFailures.push("postcondition_frontend_identity_unavailable");
   }
   if (deniedNetworkAttempts !== 0) {
-    throw new Error(
-      "mocked E2E가 self-owned frontend 밖의 HTTP/WebSocket 연결을 시도했습니다.",
-    );
-  }
-  if (result.error) {
-    console.error(result.error.message);
-    exitCode = 1;
-  } else {
-    exitCode = result.status ?? 1;
+    postconditionFailures.push("postcondition_denied_network_attempted");
   }
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  exitCode = 2;
+  runnerFailure = `runner_${runnerPhase}_failed`;
+  console.error(
+    `[mocked-checkpoint] ${runnerFailure}: ${
+      error instanceof Error ? error.name : "unknown_error"
+    }`,
+  );
 } finally {
   await cleanup();
 }
-if (cleanupFailed) exitCode = 2;
-process.exit(exitCode);
+const outcome = classifyMockedCheckpointOutcome({
+  child: playwrightChild
+    ? {
+        signal: playwrightChild.signal ?? null,
+        spawnError: Boolean(playwrightChild.error),
+        status: playwrightChild.status,
+      }
+    : undefined,
+  cleanupFailures: [...cleanupFailures],
+  postconditionFailures,
+  reporter: reporterOutcome,
+  runnerFailure,
+});
+console.log(`[mocked-checkpoint] outcome ${JSON.stringify(outcome)}`);
+process.exit(outcome.exitCode);
