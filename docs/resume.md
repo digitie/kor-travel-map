@@ -26,6 +26,15 @@ DB active identity 3-tuple의 정확한 1회 출현·기존 ID를 쓰기 전에 
 변환·직렬화와 원자 교체, 행 단위 변경 수, verifier의 명시적 `feature_id`, 수동 검토 후보의
 전체 ID·복사 동작까지 보강했다. H30B/C와 Lane A 순서를 다시 열고 완료 아카이브 checkbox도
 일반 역사 bullet로 바꾼다. 이 전체 후속 delta를 같은 두 리뷰어가 최종 재검토한다.
+함께 감사한 #894의 H35 배포 계획은 current 0063-compatible 네 service rollback bundle,
+external DB 복원 검증, cold writer fence, 네 candidate service의 identity·health 확인을
+하나의 순서로 결속했다. candidate API 기본 entrypoint가 fence 전에 migration을 실행하지
+못하도록 준비를 build-only로 제한하고, H36 image 검사는 network·DB credential 없는
+entrypoint override/offline layer로 수행한 뒤 prod head가 여전히 0063인지 다시 확인한다.
+Dagster daemon은 rollback 가능한 구간과 H30B baseline 서명까지 정지하고 app DB write
+schedule/sensor도 pause한다. baseline 뒤 forward-only cutover를 먼저 확정한 다음 daemon을
+writer pause 상태로 기동한다. write-capable ingress도 maintenance로 남겨, 실적재 검증과
+원래 enablement·ingress 복원을 H30B가 인수한다.
 
 Python 회귀 **38 passed**, Ruff·mypy 173 files·ESLint·OpenAPI/type drift, Vitest **254**는
 green이다. Mocked D workers=4 두 번은 모두 **276/276**와 manifest expected/actual

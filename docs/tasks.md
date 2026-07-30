@@ -206,6 +206,10 @@ barrier로 직렬화한다.
   - 같은 run의 finding `observed/unique/upserted`, linked/unlinked 수를 함께 기록한다.
   - 인증된 `GET /v1/admin/issues?issue_type=…` 실호출로 최신 `last_seen_at`·최신 FK target을
     확인한다.
+  - H35에서 인계한 app DB write schedule/sensor의 pause 상태를 유지한 채 실적재·검증하고,
+    성공 뒤 원래 enablement를 복원한다. pause 전후 schedule/sensor 상태와 pending/running
+    run 0건을 같은 증거에 기록하고, 마지막에 API·Dagster/UI ingress maintenance를
+    해제한다.
 
 - [ ] T-VN-H30C — **타 provider `AdminEvidence` 무장 (미완 — 재작업 필요)**
 
@@ -464,16 +468,27 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
      prune 대상에서 제외하고, 현재 `alembic_version=0063`과 login/API/Dagster smoke를 같은
      manifest에 결속한다. env 비밀 원문이나 `docker compose config`의 비밀 확장 결과는
      산출물에 넣지 않는다.
-  2. **candidate 이미지 빌드** — main 최신(H36 게이트 포함)으로 API/dagster/UI를 기존
-     rollback tag와 다른 immutable candidate tag에 준비한다. compose 기본 tag를 덮어 이전
-     pair를 잃는 build는 금지한다.
-  3. **H36 게이트가 이미지에 실렸는지 확인** — 커밋 라벨만 보지 말고 컨테이너 안에서
-     `_adopted_match` 존재를 직접 확인한다. 라벨은 빌드 컨텍스트를 증명하지 않는다.
-  4. **cold writer fence** — prod ingress를 maintenance 상태로 두고 기존 API·Dagster·
-     Dagster daemon을 정지한다. map 소유 writer container/process가 0이고 app 역할의 active
-     write transaction이 없음을 확인한 시점부터 dump·migration·구조 smoke가 끝날 때까지
-     fence를 유지한다. dump 뒤 정상 write가 생길 수 있는 상태에서는 복원을 복구 경로라고
-     부르지 않는다.
+  2. **candidate 이미지 build-only** — main 최신(H36 게이트 포함)으로 API/dagster/UI를
+     기존 rollback tag와 다른 immutable candidate tag에 준비한다. compose 기본 tag를 덮어
+     이전 pair를 잃는 build는 금지한다. 이 단계에서는 candidate service의
+     `docker compose create/run/up`을 모두 금지한다. 특히 API 기본
+     `docker/api-entrypoint.sh`는 serving 전에 `alembic upgrade head`를 실행하므로,
+     cold fence와 verified dump보다 먼저 candidate 기본 entrypoint/CMD를 단 한 번도
+     시작하지 않는다.
+  3. **H36 게이트를 DB와 단절해 확인** — 커밋 라벨만 보지 말고 image layer를 offline으로
+     검사하거나, DB credential/env를 주입하지 않은 `--network none --entrypoint` override로만
+     candidate image 안의 `_adopted_match` 존재를 확인한다. candidate API의 기본
+     entrypoint/CMD를 쓰거나 prod network에 붙여 검사하지 않는다. 검사 직후 현재 배포
+     도구 또는 pinned PostgreSQL client의 read-only query로 prod
+     `alembic_version=0063_pipeline_root_id`가 그대로인지 확인하고, 달라졌다면 step 4로
+     진행하지 말고 비인가 migration으로 취급해 상태를 보존·조사한다. 라벨은 빌드 컨텍스트를
+     증명하지 않는다.
+  4. **cold writer fence** — prod ingress를 maintenance 상태로 두고 기존 app DB write
+     schedule/sensor의 enablement를 기록한 뒤 모두 pause하고, pending/running run 0건을
+     확인한다. 기존 API·Dagster web·Dagster daemon을 정지하고 map 소유 writer
+     container/process 0건과 app 역할의 active write transaction 0건을 확인한 시점부터
+     dump·migration·구조 smoke가 끝날 때까지 fence를 유지한다. dump 뒤 정상 write가 생길
+     수 있는 상태에서는 복원을 복구 경로라고 부르지 않는다.
   5. **prod external DB 백업·복원 gate 실행** — 비밀을 argv/log에 싣지 않는
      `PGSERVICEFILE`/`PGPASSFILE` 기반의 pinned PostgreSQL client로 app·Dagster DB를 custom
      dump한다. SHA-256과 `pg_restore --list`만 확인하고 끝내지 않고, 격리 scratch DB에
@@ -490,24 +505,32 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
        (둘 다 지금은 **없음**이 확인돼 있어 before/after가 갈린다)
      - curation import **preview**가 오링크 3건을 여전히 미연결로 두는지
        (H36 게이트 실효 확인. 실패했다면 `resolved_feature_id`가 채워져 값이 달라진다)
-  8. **나머지 candidate recreate·health** — schema가 최종 shape일 때 UI·Dagster web·
-     Dagster daemon을 각 service에 고정한 immutable candidate image ID로 recreate한다.
-     API를 포함한 네 service의 실제 container image ID·OCI revision이 candidate manifest와
-     일치하는지, login POST·API·Dagster health가 green인지 확인한다. old container를 단순
-     start하거나 UI만 이전 image로 남긴 상태에서는 ingress를 열지 않는다.
-  9. **실패 복구 분기** — forward 재개가 불가능해 verified dump를 복원할 때는 fence를
-     유지한 채 candidate를 모두 내린다. DB를 0063 dump로 복원하고 step 1의 exact rollback
-     service image ID·manifest/compose checksum으로 API·UI·Dagster web·daemon을 recreate한다.
-     이전 set의 `alembic_version=0063`, 네 service identity와 login/API/Dagster smoke가 다시
-     green인 뒤에만 fence를 해제한다.
-     새 candidate entrypoint를 복원 DB에 다시 실행하는 절차는 rollback이 아니다.
-  10. **cutover 확정·fence 해제·H30B handoff** — 구조·네 service health가 모두 green일 때만
-      API ingress와 Dagster/UI를 순서대로 연다. 이 시점부터 새 write는 forward 상태의
-      정본이며 옛 dump로 되돌리지 않는다. H35에서는 concierge materialize를 실행하지 않고,
-      같은 prod snapshot의 pre-materialize Feature 수 **1,020**, source/export **1,477**,
-      head·schema/content identity를 H30B 인수로 기록한다. 실제 1,020→1,477 회복과
-      authenticated `/admin/issues` 검증은 다음 단일 소유 task `T-VN-H30B`가 수행하며,
-      실패하면 forward 수정한다.
+  8. **비-writer candidate recreate·health** — schema가 최종 shape일 때 UI와 Dagster
+     web만 각 service에 고정한 immutable candidate image ID로 recreate한다. API·UI·Dagster
+     web의 실제 container image ID·OCI revision과 login POST·API·Dagster web health를
+     candidate manifest에 대조한다. Dagster daemon은 계속 정지하고, 실행 없이 resolved
+     service config의 image ID·OCI revision만 candidate manifest에 대조한다. old container를
+     단순 start하거나 UI만 이전 image로 남긴 상태에서는 다음 단계로 가지 않는다.
+  9. **cutover 전 실패 복구 분기** — forward 재개가 불가능해 verified dump를 복원할 때는
+     fence를 유지한 채 candidate를 모두 내린다. DB를 0063 dump로 복원하고 step 1의 exact
+     rollback service image ID·manifest/compose checksum으로 API·UI·Dagster web을
+     recreate한다. 이전 set의 `alembic_version=0063`, 세 실행 service identity와
+     login/API/Dagster web smoke가 green임을 확인해 rollback을 확정한 뒤 exact 이전 daemon을
+     시작하고 step 4에 기록한 schedule/sensor enablement를 복원한다. daemon identity·health가
+     green인 뒤에만 fence를 해제한다. 새 candidate entrypoint를 복원 DB에 다시 실행하는
+     절차는 rollback이 아니다.
+  10. **baseline 서명 → forward-only cutover → daemon 기동** — H35에서는 concierge
+      materialize를 실행하지 않는다. app DB write schedule/sensor가 pause이고
+      pending/running run이 0인 상태에서 같은 prod snapshot의 pre-materialize Feature 수
+      **1,020**, source/export **1,477**, head·schema/content identity를 H30B 인수로 먼저
+      기록한다. 구조·세 실행 service health·daemon offline identity가 모두 green이면
+      forward-only cutover를 확정해 이 시점부터 옛 dump 복원을 금지하고 실패를 forward
+      수정으로만 처리한다. 그 뒤 candidate daemon을 시작하되 app DB writer는 pause 상태로
+      유지하고 실제 daemon image ID·OCI revision과 health를 확인한다. H30B baseline이
+      외부 요청으로 drift하지 않도록 API·Dagster/UI의 write-capable ingress도 maintenance
+      상태로 남겨 pause·ingress 소유권을 H30B에 넘긴다. 실제 1,020→1,477 회복,
+      authenticated `/admin/issues` 검증, 원래 schedule/sensor enablement와 ingress 복원은
+      다음 단일 소유 task `T-VN-H30B`가 수행한다.
 
   > **⚠ 비가역 지점** — 사람 승인이 필요하다.
   > - `0065`의 `collection_key` 52행 재작성과 `source_updated_at` 3,530행 UPDATE,

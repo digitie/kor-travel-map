@@ -30,9 +30,19 @@ downgrade 없이 forward 재개하는 계획으로 바꿨다. 이미지 준비�
 writer/ingress cold fence 안에서 dump→복원 검증→migration→구조 smoke를 마친 뒤에만
 fence를 해제해, dump 이후 정상 write를 옛 snapshot 복원으로 잃는 창도 닫았다. candidate
 build 전에 현재 0063-compatible API·UI·Dagster web·daemon의 service별 image ID·revision·
-배포 checksum을 immutable rollback bundle로 보존하고, 성공 경로에서도 네 candidate
-service를 모두 recreate·health 확인한 뒤에만 ingress를 연다. H35는 materialize하지 않고
-1,020/1,477 baseline을 H30B에 넘겨 task 소유권과 before/after를 보존한다.
+배포 checksum을 immutable rollback bundle로 보존한다. 성공 경로는 API·UI·Dagster web을
+먼저 검증하고, baseline·forward-only 결정 뒤 daemon을 writer pause 상태로 검증한다.
+H35는 materialize하지 않고 1,020/1,477 baseline을 H30B에 넘겨 task 소유권과 before/after를
+보존한다.
+후보 API의 기본 entrypoint가 이미지 점검만으로도 migration을 먼저 실행할 수 있으므로,
+candidate 준비는 build-only로 제한한다. H36 코드는 network·DB credential이 없는 entrypoint
+override 또는 offline image layer로 확인하고, 그 직후 prod head가 여전히 0063인지 확인한
+뒤에만 cold fence 단계로 넘어간다.
+Dagster schedule/sensor와 pending run도 writer fence에 포함한다. rollback 가능한 동안
+candidate daemon은 시작하지 않고, H30B pre-materialize baseline과 forward-only 결정을
+먼저 기록한다. 이후 daemon은 app DB writer pause 상태로 기동·검증하며 pause 해제는 실제
+회복 검증을 소유한 H30B가 맡는다. write-capable ingress도 H30B 완료까지 maintenance로
+유지해 서명한 baseline이 task 사이 외부 요청으로 변하는 창을 닫는다.
 
 - 이름 단독 오링크를 막는 `_adopted_match`가 주소 hint 유일 매칭까지 함께 막아 ADR-063을
   위반했다. 주소 hint 경로는 복원하고 이름 단독 후보는 `ambiguous/후보 다수`가 아니라
