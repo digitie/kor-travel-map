@@ -18,33 +18,36 @@ import os
 
 import asyncpg
 
-# (collection_key, external_item_id) -> (오링크 feature_id, 사유)
+# (collection_key, external_item_id, external_component_id) ->
+# (오링크 feature_id, 사유)
 #
 # feature_id를 가드로 쓴다. H25B에서 정지오코딩으로 각각 확인한 값이다.
-MISLINKS: dict[tuple[str, str], tuple[str, str]] = {
-    ("korean-tourism-100:2023-2024", "kt100-2023-2024-025"): (
+MISLINKS: dict[tuple[str, str, str], tuple[str, str]] = {
+    ("korean-tourism-100:2023-2024", "kt100-2023-2024-025", "primary"): (
         "f_1114010100_p_a11c2e739c5676d2",
         "남이섬 → 서울 중구(11140) 사무소. 정지오코딩은 강원 춘천(51110)",
     ),
-    ("korean-tourism-100:2025-2026", "kt100-2025-2026-024"): (
+    ("korean-tourism-100:2025-2026", "kt100-2025-2026-024", "primary"): (
         "f_1114010100_p_a11c2e739c5676d2",
         "남이섬 → 서울 중구(11140) 사무소. 정지오코딩은 강원 춘천(51110)",
     ),
-    ("korean-tourism-100:2025-2026", "kt100-2025-2026-036"): (
+    ("korean-tourism-100:2025-2026", "kt100-2025-2026-036", "primary"): (
         "f_4683025328_p_a45038d401d8d1bd",
         "청남대 → 전남 영암(46830). 정지오코딩은 충북 청주(43111)",
     ),
 }
 
 _SELECT_SQL = """
-select ci.curation_item_id, ci.external_item_id, ci.place_name, ci.feature_id,
-       ci.metadata, cc.collection_key,
+select ci.curation_item_id, ci.external_item_id, ci.external_component_id,
+       ci.place_name, ci.feature_id, ci.metadata, cc.collection_key,
        f.name as feature_name,
        coalesce(f.address->>'road', f.address->>'legal', '') as feature_addr
   from feature.curation_items ci
   join feature.curation_collections cc on cc.collection_id = ci.collection_id
   left join feature.features f on f.feature_id = ci.feature_id
- where cc.collection_key = $1 and ci.external_item_id = $2
+ where cc.collection_key = $1
+   and ci.external_item_id = $2
+   and ci.external_component_id = $3
    and ci.archived_at is null
 """
 
@@ -67,7 +70,7 @@ select pg_advisory_xact_lock(hashtextextended($1, 0))
 _FIND_EXISTING_SQL = """
 select issue_id::text
   from ops.data_integrity_violations
- where payload ->> 'dedupe_key' = $1
+ where payload ->> 'dedupe_key' = any($1::text[])
    and violation_type = 'curation_feature_region_mismatch'
  order by detected_at desc
  limit 1
@@ -106,15 +109,19 @@ def _finding_payload(
     *,
     collection_key: str,
     item_key: str,
+    component_key: str,
     expected_fid: str,
     reason: str,
     row: object,
     outcome: str,
 ) -> dict[str, object]:
     return {
-        "dedupe_key": f"curation_mislink:{collection_key}:{item_key}",
+        "dedupe_key": (
+            f"curation_mislink:{collection_key}:{item_key}:{component_key}"
+        ),
         "collection_key": collection_key,
         "external_item_id": item_key,
+        "external_component_id": component_key,
         "place_name": row["place_name"],  # type: ignore[index]
         "unlinked_feature_id": expected_fid,
         "reason": reason,
@@ -141,44 +148,58 @@ async def run(conn: object, *, apply: bool) -> None:
     already = 0
     guarded = 0
     emitted = 0
-    for (collection_key, item_key), (expected_fid, reason) in MISLINKS.items():
+    for (
+        collection_key,
+        item_key,
+        component_key,
+    ), (expected_fid, reason) in MISLINKS.items():
         finding_result: tuple[str, str] | None = None
         async with conn.transaction():  # type: ignore[attr-defined]
             rows = await conn.fetch(  # type: ignore[attr-defined]
                 _SELECT_FOR_UPDATE_SQL if apply else _SELECT_SQL,
                 collection_key,
                 item_key,
+                component_key,
             )
             if not rows:
-                print(f"  ★ {item_key}: 해당 curation_item 없음")
+                print(
+                    f"  ★ {item_key}/{component_key}: 해당 curation_item 없음"
+                )
                 guarded += 1
                 continue
+            if len(rows) != 1:
+                raise RuntimeError(
+                    f"{item_key}/{component_key}: active identity가 {len(rows)}행이다"
+                )
 
-            # (collection_key, external_item_id)는 **유일하지 않다** — 같은 item에
-            # external_component_id가 다른 형제 행이 있을 수 있다(prod에 19개 그룹 존재).
-            # 형제가 다른 feature를 가리키는 건 정상이므로 가드에 걸려도 "동시 변경" 경보를
-            # 울리면 안 된다. 우리가 지목한 feature를 가진 행만 대상으로 좁힌다.
+            # membership의 정확한 identity는 collection + item + component다.
+            # item만 조회하면 NULL인 형제 component를 대상 해제 이력으로 오인한다.
             targets = [r for r in rows if r["feature_id"] == expected_fid]
-            siblings = len(rows) - len(targets)
-            if siblings:
-                print(f"  참고 {item_key}: 형제 행 {siblings}건은 대상 아님(정상)")
 
             if not targets:
-                already_unlinked = any(r["feature_id"] is None for r in rows)
+                already_unlinked = rows[0]["feature_id"] is None
                 if already_unlinked:
-                    print(f"  이미 해제됨 {item_key}")
+                    print(f"  이미 해제됨 {item_key}/{component_key}")
                     already += 1
                 else:
                     print(
-                        f"  ★ 건너뜀 {item_key}: 지목한 오링크({expected_fid})를 가진 행이 없다 "
+                        f"  ★ 건너뜀 {item_key}/{component_key}: "
+                        f"지목한 오링크({expected_fid})를 가진 행이 없다 "
                         f"— 현재 링크를 보존한다"
                     )
                     guarded += 1
                 if apply:
-                    dedupe_key = f"curation_mislink:{collection_key}:{item_key}"
+                    dedupe_key = (
+                        f"curation_mislink:{collection_key}:{item_key}:"
+                        f"{component_key}"
+                    )
+                    legacy_dedupe_key = (
+                        f"curation_mislink:{collection_key}:{item_key}"
+                    )
                     await conn.fetchval(_LOCK_FINDING_SQL, dedupe_key)  # type: ignore[attr-defined]
                     existing = await conn.fetchval(  # type: ignore[attr-defined]
-                        _FIND_EXISTING_SQL, dedupe_key
+                        _FIND_EXISTING_SQL,
+                        [dedupe_key, legacy_dedupe_key],
                     )
                     # 지목한 오링크가 이미 NULL이면 실제 해제 이력이 있으므로 ledger가
                     # 유실된 clone/복구 상태에서도 resolved 증거를 재구성한다. 반대로
@@ -193,6 +214,7 @@ async def run(conn: object, *, apply: bool) -> None:
                         payload = _finding_payload(
                             collection_key=collection_key,
                             item_key=item_key,
+                            component_key=component_key,
                             expected_fid=expected_fid,
                             reason=reason,
                             row=rows[0],
@@ -229,6 +251,7 @@ async def run(conn: object, *, apply: bool) -> None:
             payload = _finding_payload(
                 collection_key=collection_key,
                 item_key=item_key,
+                component_key=component_key,
                 expected_fid=expected_fid,
                 reason=reason,
                 row=targets[0],
@@ -238,7 +261,7 @@ async def run(conn: object, *, apply: bool) -> None:
 
             for row in targets:
                 print(
-                    f"  대상 {item_key} ({row['place_name']}) → "
+                    f"  대상 {item_key}/{component_key} ({row['place_name']}) → "
                     f"{row['feature_name']} | {row['feature_addr'][:44]}"
                 )
                 payload.setdefault("unlinked_features", [])
@@ -297,7 +320,11 @@ async def run(conn: object, *, apply: bool) -> None:
             payload_json = json.dumps(payload, ensure_ascii=False)
             await conn.fetchval(_LOCK_FINDING_SQL, payload["dedupe_key"])  # type: ignore[attr-defined]
             existing = await conn.fetchval(  # type: ignore[attr-defined]
-                _FIND_EXISTING_SQL, payload["dedupe_key"]
+                _FIND_EXISTING_SQL,
+                [
+                    payload["dedupe_key"],
+                    f"curation_mislink:{collection_key}:{item_key}",
+                ],
             )
             if existing is None:
                 issue_id = await conn.fetchval(  # type: ignore[attr-defined]

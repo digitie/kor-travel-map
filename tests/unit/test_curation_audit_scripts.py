@@ -204,6 +204,35 @@ def test_h25_replace_outputs_rolls_back_on_keyboard_interrupt(
     assert list(tmp_path.glob(".*.tmp")) == []
 
 
+@pytest.mark.unit
+def test_h25_replace_outputs_rolls_back_after_rename_then_interrupt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = tmp_path / "a.csv"
+    second = tmp_path / "b.csv"
+    first.write_bytes(b"old-a")
+    second.write_bytes(b"old-b")
+    real_replace = h25.os.replace
+    replace_calls = 0
+
+    def interrupt_after_first_replace(source: Path, destination: Path) -> None:
+        nonlocal replace_calls
+        replace_calls += 1
+        real_replace(source, destination)
+        if replace_calls == 1:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(h25.os, "replace", interrupt_after_first_replace)
+
+    with pytest.raises(KeyboardInterrupt):
+        h25._replace_outputs({first: b"new-a", second: b"new-b"})
+
+    assert first.read_bytes() == b"old-a"
+    assert second.read_bytes() == b"old-b"
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
 class _FakeTransaction:
     def __init__(self, conn: _FakeH33Connection) -> None:
         self.conn = conn
@@ -231,11 +260,13 @@ class _FakeH33Connection:
         feature_id: str | None,
         fail_finding_insert: bool = False,
         existing_finding: bool = False,
+        sibling_feature_id: str | None | object = ...,
     ) -> None:
         self.rows = [
             {
                 "curation_item_id": "item-id",
                 "external_item_id": "item-key",
+                "external_component_id": "primary",
                 "place_name": "대상",
                 "feature_id": feature_id,
                 "metadata": {},
@@ -244,6 +275,20 @@ class _FakeH33Connection:
                 "feature_addr": "잘못된 주소",
             }
         ]
+        if sibling_feature_id is not ...:
+            self.rows.append(
+                {
+                    "curation_item_id": "sibling-id",
+                    "external_item_id": "item-key",
+                    "external_component_id": "component-02",
+                    "place_name": "대상 형제",
+                    "feature_id": sibling_feature_id,
+                    "metadata": {},
+                    "collection_key": "collection",
+                    "feature_name": "형제 대상",
+                    "feature_addr": "형제 주소",
+                }
+            )
         self.fail_finding_insert = fail_finding_insert
         self.findings: dict[str, dict[str, Any]] = (
             {"issue-id": {"status": "open"}} if existing_finding else {}
@@ -252,8 +297,18 @@ class _FakeH33Connection:
     def transaction(self) -> _FakeTransaction:
         return _FakeTransaction(self)
 
-    async def fetch(self, _sql: str, _collection: str, _item: str) -> list[dict[str, Any]]:
-        return self.rows
+    async def fetch(
+        self,
+        _sql: str,
+        _collection: str,
+        _item: str,
+        component: str,
+    ) -> list[dict[str, Any]]:
+        return [
+            row
+            for row in self.rows
+            if row["external_component_id"] == component
+        ]
 
     async def fetchval(self, sql: str, *args: object) -> object:
         if sql == "select current_database()":
@@ -290,7 +345,7 @@ async def test_h33_finding_failure_rolls_back_unlink(
     monkeypatch.setattr(
         h33,
         "MISLINKS",
-        {("collection", "item-key"): (expected, "지역 불일치")},
+        {("collection", "item-key", "primary"): (expected, "지역 불일치")},
     )
     conn = _FakeH33Connection(feature_id=expected, fail_finding_insert=True)
 
@@ -309,7 +364,12 @@ async def test_h33_guarded_current_link_does_not_create_finding(
     monkeypatch.setattr(
         h33,
         "MISLINKS",
-        {("collection", "item-key"): ("feature:wrong", "지역 불일치")},
+        {
+            ("collection", "item-key", "primary"): (
+                "feature:wrong",
+                "지역 불일치",
+            )
+        },
     )
     conn = _FakeH33Connection(feature_id="feature:correct")
 
@@ -327,7 +387,12 @@ async def test_h33_already_unlinked_reconstructs_missing_resolved_finding(
     monkeypatch.setattr(
         h33,
         "MISLINKS",
-        {("collection", "item-key"): ("feature:wrong", "지역 불일치")},
+        {
+            ("collection", "item-key", "primary"): (
+                "feature:wrong",
+                "지역 불일치",
+            )
+        },
     )
     conn = _FakeH33Connection(feature_id=None)
 
@@ -335,6 +400,33 @@ async def test_h33_already_unlinked_reconstructs_missing_resolved_finding(
 
     assert conn.rows[0]["feature_id"] is None
     assert conn.findings == {"new-issue": {"status": "resolved"}}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_h33_null_sibling_does_not_create_false_resolved_finding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        h33,
+        "MISLINKS",
+        {
+            ("collection", "item-key", "primary"): (
+                "feature:wrong",
+                "지역 불일치",
+            )
+        },
+    )
+    conn = _FakeH33Connection(
+        feature_id="feature:correct",
+        sibling_feature_id=None,
+    )
+
+    await h33.run(conn, apply=True)
+
+    assert conn.rows[0]["feature_id"] == "feature:correct"
+    assert conn.rows[1]["feature_id"] is None
+    assert conn.findings == {}
 
 
 @pytest.mark.unit

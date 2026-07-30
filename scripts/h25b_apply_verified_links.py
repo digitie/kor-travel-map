@@ -309,8 +309,8 @@ def _replace_outputs(outputs: dict[Path, bytes]) -> None:
             temporary.chmod(path.stat().st_mode & 0o777)
 
         for path, temporary in staged.items():
-            os.replace(temporary, path)
             replaced.append(path)
+            os.replace(temporary, path)
     except BaseException:
         for path in reversed(replaced):
             descriptor, rollback_name = tempfile.mkstemp(
