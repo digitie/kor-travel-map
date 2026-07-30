@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0069_weather_series_catalog"
@@ -29,6 +31,39 @@ depends_on: str | Sequence[str] | None = None
 
 _EFFECTIVE_INDEX = "idx_weather_values_feature_effective"
 _WEATHER_GIST = "idx_features_public_weather_coord_5179_gist"
+
+
+def _index_is_valid(index_name: str) -> bool:
+    return (
+        op.get_bind()
+        .execute(
+            sa.text(
+                """
+                SELECT index_.indisvalid
+                FROM pg_catalog.pg_index AS index_
+                JOIN pg_catalog.pg_class AS index_relation
+                  ON index_relation.oid = index_.indexrelid
+                JOIN pg_catalog.pg_namespace AS namespace
+                  ON namespace.oid = index_relation.relnamespace
+                WHERE namespace.nspname = 'feature'
+                  AND index_relation.relname = :index_name
+                """
+            ),
+            {"index_name": index_name},
+        )
+        .scalar_one_or_none()
+        is True
+    )
+
+
+def _create_concurrent_index_unless_valid(
+    index_name: str,
+    create_statement: str,
+) -> None:
+    if _index_is_valid(index_name):
+        return
+    op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS feature.{index_name}")
+    op.execute(create_statement)
 
 
 def _create_series_table_and_trigger() -> None:
@@ -128,8 +163,8 @@ def upgrade() -> None:
     )
 
     with op.get_context().autocommit_block():
-        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS feature.{_EFFECTIVE_INDEX}")
-        op.execute(
+        _create_concurrent_index_unless_valid(
+            _EFFECTIVE_INDEX,
             f"""
             CREATE INDEX CONCURRENTLY {_EFFECTIVE_INDEX}
             ON feature.feature_weather_values (
@@ -150,10 +185,10 @@ def upgrade() -> None:
                 collected_at DESC,
                 weather_value_key
             )
-            """
+            """,
         )
-        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS feature.{_WEATHER_GIST}")
-        op.execute(
+        _create_concurrent_index_unless_valid(
+            _WEATHER_GIST,
             f"""
             CREATE INDEX CONCURRENTLY {_WEATHER_GIST}
             ON feature.features USING gist (coord_5179)
@@ -161,7 +196,7 @@ def upgrade() -> None:
               AND deleted_at IS NULL
               AND kind = 'weather'
               AND coord_5179 IS NOT NULL
-            """
+            """,
         )
 
 
