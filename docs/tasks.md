@@ -27,7 +27,8 @@ barrier로 직렬화한다.
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
-    [ ] `T-VN-H35`(prod 마이그레이션 지연 0064~0068 + 이미지 동시 배포 — #673 blocker) →
+    [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0069** + 이미지 동시 배포 — #673 blocker;
+        2026-07-31 중단, 백업 확보·B′ 경로 확정, 본문 상단 인수 블록 참조) →
     [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
     [ ] `T-VN-H30C`(타 provider evidence 재작업) →
     [ ] `T-VN-H34`(H25A/H25B 미충족 AC 마무리) →
@@ -375,7 +376,66 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 이슈는 "concierge provider에 한해" 완화를 요구했고 두 task는 그 파생 개선이다.
 > 저장소 열린 이슈는 #673·#819 두 건뿐이고 #673은 epic이 아니다.
 
-- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0068)**
+- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0069)**
+
+  > ## 2026-07-31 중단 시점 상태 — **다음 사람이 여기서 이어받는다**
+  >
+  > **prod는 무손상이다.** `c8ed6164` / alembic `0063` / 5 런타임 healthy. 배포 시도 2회는
+  > 전부 fail-closed로 막혔고 마이그레이션은 한 줄도 적용되지 않았다.
+  >
+  > ### 확보된 것
+  > - **writer-quiesced 백업** (복구점 자격 있음 — `inflight_runs=0`·`app_write_tx=0` 확인 후 채취):
+  >   - `n150:/home/digitie/h35/backup/krtour_map-20260730T213912Z.dump` 1,168 MiB `sha256=629d1669f8cd3c67…`
+  >   - `…/krtour_map_dagster-20260730T213912Z.dump` 65 MiB `sha256=7e331c42b578fdef…`
+  >   - `…/baseline-20260730T213912Z.txt` — `alembic=0063` / features 1,030,613 / curation_items 3,530 /
+  >     curation_collections 71 / curated_features 3,044 / source_entities 1,035,869 / violations 3
+  >   - 그 이전 `20260730T010600Z` dump는 **fence 없이 떠서 무효**다. 쓰지 마라.
+  > - **선행 조건 실측 완료**: 디스크 avail **80.7 GiB**(P1 임계 40 통과) / superuser `addr`
+  >   자격증명 없이 도달(`addr|t`) / `pg_hba`는 local·127.0.0.1·::1 `trust`, 마지막 줄만
+  >   `all all all scram-sha-256` / `archive_mode=off`(**PITR 없음 — dump가 유일 복구점**) / server 16.9.
+  > - **자격증명 정합** cache `.env` ↔ live 해시 바이트 동일(지문 `2f2a19e6`).
+  > - **runbook** [`runbooks/h35-prod-migration-cutover.md`](runbooks/h35-prod-migration-cutover.md)
+  >   — 11단계 절차. **감사 2회 모두 NO_GO**다. 마지막 커밋은 2차 지적을 반영하다 중단한
+  >   **미완 상태**이니 그대로 실행하지 마라.
+  >
+  > ### ⛔ B(단순 `ktdctl deploy`) 경로를 막는 실측
+  > `compose_service.py:3540`이 `--wait --wait-timeout 120`을 **하드코딩**한다. 그런데
+  > `docker/api-entrypoint.sh:216`이 uvicorn 기동 **전에** `alembic upgrade head`를 돌리고,
+  > `0069` 하나만 **8~18분**(1,640만 행 `feature_weather_values`에 CIC 2개, ~3.4 GB)이다.
+  > → `ktdctl pinvi-pair deploy`는 120초에 실패 판정하고 **마이그레이션이 도는 중인 컨테이너를
+  > 뜯으며 자동 롤백을 발동한다.** `0064`/`0068`/`0069`가 `autocommit_block()`을 쓰므로 그 순간
+  > 부분 적용 상태가 남는다. **그대로 실행하면 안 된다.**
+  >
+  > ### 권고 경로 **B′** (마이그레이션과 배포를 분리)
+  > 1. ~~writer-quiesced 백업~~ ✅ 완료
+  > 2. **candidate build-only** — 라이브러리 seam `_prepare_c6c_candidate_pair(cfg, build=True, …)`.
+  >    실행 컨테이너를 보지 않아 fence 아래에서도 성립한다. ktdctl CLI는 분해 불가
+  >    (`cli.py:122`가 `recreate=True` 하드코딩 / `ensure --build`는 production fail-closed /
+  >    `capture`는 v4 manifest 존재로 거부).
+  > 3. **마이그레이션을 일회성 컨테이너로 적용** — `--entrypoint sh -c 'alembic upgrade head'`,
+  >    writer 정지 상태, 시간 제한 없음.
+  > 4. **`ktdctl pinvi-pair deploy`** — 이 시점엔 이미 head라 entrypoint의 upgrade가 no-op이고
+  >    120초 안에 healthy가 된다. **자동 롤백 기계가 그대로 살아 있다.**
+  > 5. 실증(아래 검증 항목).
+  >
+  > 3→4 사이에 prod가 **새 스키마 + 구 이미지**로 잠깐 돈다. `0069` 방향은 무해하지만
+  > **`0065`가 arbiter 인덱스를 바꾸므로 그 창에 curation write가 들어오면 깨진다** — writer를
+  > 멈춘 채 곧바로 4로 넘어간다.
+  >
+  > ### 배포 target
+  > **실행 시점 `origin/main`**(사용자 확정, 0069 포함). main이 계속 전진하므로
+  > `/home/digitie/h35/h35b_mkdeploy.sh`가 실행 시점에 target을 확정해 배포 스크립트를 생성한다
+  > (검증된 원본에서 **커밋 상수 2줄만** 교체 — flock·자격증명 검증·자동 롤백 보존).
+  >
+  > ### 실증 항목 (반증 가능해야 한다)
+  > `alembic_version = 0069_weather_series_catalog` / `uq_violations_open_dedupe_key` 존재 /
+  > `last_seen_at`·`source_present`·`external_component_id` 컬럼 존재 / 이미지에 H36
+  > `_adopted_match` 존재 / dagster에 `DROPPABLE_ISSUE_CODES` 존재 / 오링크 3건 미연결 유지 /
+  > `GET /v1/curations/collections` 200. 스크립트는 `/home/digitie/h35/h35_verify.sh`
+  > (배포 전 baseline에서 6항목이 `★FAIL`로 나오는 것을 확인했다 = 반증 가능).
+  > **`features`·`source_entities` 행 수는 고정 통과값으로 쓰지 마라** — 하루 +37 드리프트가 실측됐다.
+
+
 
   prod alembic head `0063_pipeline_root_id` vs 저장소 head **`0068_integrity_last_seen`**
   (0063→0064→0065→0066→0067→0068 단일 체인, 분기 없음). 즉 간극은 **5개**다.
@@ -454,6 +514,24 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   **선행 조사에서 constraint/data blocker는 확인되지 않았다.** 그러나 0065의 52행 key
   재작성·3,530행 UPDATE와 0066 backfill은 비가역이며, 0064/0068 autocommit은 부분 적용
   상태를 만든다. `collection_key` 재작성으로 깨지는 runtime lookup 소비자는 확인되지 않았다.
+
+  **`0069_weather_series_catalog` 실측 분석(2026-07-31)** — 배포 target에 새로 포함됐다:
+  - **파괴적 statement 0개.** DELETE·TRUNCATE·컬럼 삭제·타입 변경·WHERE 없는 UPDATE 전부 없다.
+    `downgrade()`가 **완전 대칭**이라 **0064~0069 중 유일하게 완전 가역**이다.
+  - 유일한 DML은 자기가 방금 만든 빈 테이블에 `INSERT … SELECT DISTINCT … ON CONFLICT DO NOTHING`
+    (**7,796행**). 기존 테이블에 **행·컬럼 변경 0건**.
+  - 기존 구조 게이트 중 통과값이 바뀌는 것은 **`alembic_version` 하나뿐**이다(→ `0069_weather_series_catalog`).
+  - 대가는 위험이 아니라 **시간(+8~18분)과 디스크(+3.4 GB)**다. CIC 2개가 1,640만 행
+    `feature_weather_values`를 색인한다(ShareUpdateExclusive만 잡아 읽기·쓰기를 막지 않는다).
+  - ⚠ **새 이미지 + 0069 미적용** 조합에서 기존 공개 엔드포인트
+    `GET /features/{feature_id}/weather`가 503이 아니라 **500**을 낸다(#901이 batch 쿼리로
+    재배선했고 그 SQL이 `weather_metric_series`를 hard JOIN한다). 반대 방향(스키마 적용 + 구
+    이미지)은 무해하다. entrypoint가 upgrade 성공 뒤에만 uvicorn을 exec하므로 정상 경로에서는
+    발현하지 않지만, **alembic을 건너뛰고 API를 강제 기동하면 발현한다.**
+  - `autocommit_block()` 2회 + CIC 2개 → 부분 적용 가능 지점이다. `upgrade()`는 재진입 가능하게
+    작성됐고(`IF NOT EXISTS`/`ON CONFLICT DO NOTHING`/`indisvalid` 확인 후 재빌드) entrypoint의
+    재시도 루프가 자동으로 돌린다. 다만 **재시도마다 16.4M행 DISTINCT 스캔(60~100초)과
+    3.4 GB 인덱스 재빌드를 처음부터** 한다.
 
   **배포 역학 실측(2026-07-30)**:
   - **`docker/api-entrypoint.sh:216`이 `alembic upgrade head`를 재시도 루프로 직접 돌린다**

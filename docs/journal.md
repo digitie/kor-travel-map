@@ -32,6 +32,47 @@
   `git diff --check`, OpenAPI `PublicApiKey` header 정본 대조,
   `scripts/check_prod_redaction.py`와 push 전 민감값 감사를 통과했다.
 
+## 2026-07-31 — H35를 멈춘 이유: 절차가 위험을 줄이는 대신 만들고 있었다
+
+**prod는 손대지 않았다.** `c8ed6164` / `0063` / 5 런타임 healthy. 배포 시도 2회는 전부
+fail-closed로 막혔고 그때마다 그 안전장치가 옳았다 — 1회는 자격증명 드리프트, 2회는
+`origin/main`이 그 사이 전진해 감사가 새로 박은 제약을 모르고 나갈 뻔한 것을 막았다.
+
+**절차를 만드는 데 400만 토큰을 쓰고 prod에서 바뀐 것은 없다.** 11단계 cold-fence runbook은
+1,679 → 2,446줄로 자랐고 감사 2회 모두 **NO_GO**였다. 중요한 건 결함의 추이다 —
+1차 BLOCKER 9건을 고쳤더니 **새로 쓴 +992줄에서 BLOCKER 5건이 났고 그중 4건이 같은 유형**
+("명령이 자기 driver·자기 도구에 막힌다")이었다. 결함률이 떨어지지 않았다.
+그 시점에 "절차가 위험을 줄이는가"를 물었어야 했는데 묻지 않고 계속 고쳤다.
+
+**11단계는 사람이 요구한 게 아니라 감사 에이전트(PR #896)가 쓴 것이다.** 나는 그걸 움직일 수
+없는 사양으로 취급했다. 사용자가 "지금 이 task가 필요한 이유?"라고 물었을 때야 그 전제를
+검토했다 — 실측하니 #673의 457건은 소비자가 확인되지 않았고, 회복은 월 1회 스케줄이라
+어차피 즉시가 아니며, prod는 정상 동작 중이었다. **급한 일이 아니었다.**
+
+**내 실측도 불완전했다.** bridge 격리를 잰다면서 `--network bridge` 하나만 찔렀는데, 실제로는
+bridge 계열 network가 4개이고 하필 내가 찌른 것에는 컨테이너가 0개였다. 그 측정을 그대로
+반영한 `L2b` fence는 4개 중 1개만 막고 음성통제도 그 1개만 찔러 **"닫혔다"를 보고**한다.
+내가 경계한다고 말해 온 "실패했을 때도 같은 값을 내는 게이트"를 내 측정이 만들어 냈다.
+
+**단순 경로 B도 실측으로 막혔다.** `compose_service.py:3540`이 `--wait-timeout 120`을
+하드코딩하는데 `0069` 하나만 8~18분이다. `ktdctl deploy`는 120초에 실패 판정하고
+**마이그레이션이 도는 중인 컨테이너를 뜯으며 롤백을 발동한다.** 그래서 마이그레이션과 배포를
+분리하는 **B′**로 확정했다 — build-only(라이브러리 seam) → 일회성 컨테이너로 마이그레이션 →
+`ktdctl deploy`(이미 head라 no-op, 자동 롤백 보존).
+
+**확보한 것**: writer-quiesced 백업(`20260730T213912Z`, app 1,168 MiB + dagster 65 MiB,
+`inflight_runs=0`·`app_write_tx=0` 확인 후 채취 — 이전 dump는 fence 없이 떠서 무효),
+선행 조건 실측(디스크 80.7 GiB / superuser `addr` 도달 / `archive_mode=off`로 PITR 없음),
+`0069` 전수 분석(**파괴적 statement 0개, downgrade 완전 대칭 — 0064~0069 중 유일하게 완전 가역**).
+
+`0069`에서 하나 건졌다: **새 이미지 + 0069 미적용**이면 기존 공개 엔드포인트
+`GET /features/{id}/weather`가 503이 아니라 **500**을 낸다(#901이 batch 쿼리로 재배선하며
+`weather_metric_series`를 hard JOIN). 정상 경로에서는 entrypoint가 upgrade 성공 뒤에만
+uvicorn을 exec해 발현하지 않지만, alembic을 건너뛰고 API를 강제 기동하면 발현한다.
+
+인수 상태는 `tasks.md`의 T-VN-H35 본문 상단 블록에 전부 적었다. 다음은 막히지 않은
+`T-VN-H30C`로 넘어간다 — H30B·ledger 정규화는 `0066` 컬럼이 필요해 H35에 막혀 있다.
+
 ## 2026-07-30 (codex) — T-VN-16B landing·T-VN-16C sparse 계약 착수
 
 - PinVi PR #420은 Web e2e fixture의 새 필수 `weather_by_feature_id` 누락과 날짜 수정

@@ -26,6 +26,24 @@ C6c/C7 관련 완료 이슈 closed, 외부 HAProxy 설정이 필요한 Map #819�
 **다음 한 작업**: 기존 lane 순서를 유지한다. Lane B는 `T-VN-16C` PinVi consumer,
 Lane A는 `T-VN-H35` production migration/image 배포부터 이어간다.
 
+## 2026-07-31 (claude) — T-VN-H35 중단·인수 기록, 다음은 T-VN-H30C
+
+H35를 실행 전에 멈췄다. **prod 무손상**(`c8ed6164`/`0063`/5 런타임 healthy), 마이그레이션
+미적용. 11단계 runbook은 감사 2회 모두 NO_GO이고, 1차 수정 후 **새로 쓴 부분에서 BLOCKER가
+다시 5건**(4건이 동일 유형) 나 결함률이 떨어지지 않았다. 11단계는 사람 요구가 아니라 감사
+에이전트 산출물이었고, #673의 457건은 급하지 않다는 것을 실측으로 확인했다.
+
+확보: **writer-quiesced 백업** `20260730T213912Z`(app 1,168 MiB / dagster 65 MiB,
+`inflight_runs=0`·`app_write_tx=0` 확인 후) · 선행조건 실측(디스크 80.7 GiB, superuser `addr`
+도달, `archive_mode=off`) · **0069 전수 분석**(파괴적 statement 0개, downgrade 완전 대칭).
+
+**B 경로는 실측으로 막혔다** — `compose_service.py:3540`의 `--wait-timeout 120` vs 0069만
+8~18분. `ktdctl deploy`가 마이그레이션 중인 컨테이너를 뜯으며 롤백을 건다. → **B′**(build-only
+→ 일회성 컨테이너 마이그레이션 → deploy) 확정. 인수 블록은 `tasks.md` T-VN-H35 본문 상단.
+
+**다음 한 작업: `T-VN-H30C`** (타 provider `AdminEvidence` 재작업). H30B·ledger 정규화는
+`0066`의 `external_component_id`가 필요해 H35에 막혀 있다.
+
 ## 2026-07-30 (codex) — T-VN-16B landing 완료·T-VN-16C 생산자 진행
 
 PinVi PR #420이 전체 CI green 뒤 `9eb95c6f`로 squash merge됐다. 날짜별 Map batch
