@@ -213,7 +213,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** feature 상세 batch 조회 (service read) */
+        /** feature 5-state trip_card batch 조회 (service read) */
         post: operations["get_features_batch_v1_features_batch_post"];
         delete?: never;
         options?: never;
@@ -911,23 +911,68 @@ export interface components {
         };
         /**
          * FeatureBatchData
-         * @description feature batch 상세 data payload.
+         * @description feature batch 5-state data payload.
          */
         FeatureBatchData: {
-            /** Found */
-            found: {
-                [key: string]: components["schemas"]["FeatureDetailResponse"];
-            };
-            /** Missing */
-            missing: string[];
+            /** Items */
+            items: (components["schemas"]["FeatureBatchFoundItem"] | components["schemas"]["FeatureBatchRetiredItem"] | components["schemas"]["FeatureBatchSuppressedItem"] | components["schemas"]["FeatureBatchMissingItem"] | components["schemas"]["FeatureBatchUnchangedItem"])[];
+        };
+        /**
+         * FeatureBatchFoundItem
+         * @description 공개 feature의 최신 trip_card.
+         */
+        FeatureBatchFoundItem: {
+            /** Feature Id */
+            feature_id: string;
+            /** Row Revision */
+            row_revision: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            state: "found";
+            trip_card: components["schemas"]["FeatureTripCard"];
+        };
+        /**
+         * FeatureBatchMissingItem
+         * @description 저장소에 존재하지 않는 feature.
+         */
+        FeatureBatchMissingItem: {
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            state: "missing";
         };
         /**
          * FeatureBatchRequest
-         * @description feature batch 상세 조회 요청 (service read).
+         * @description 5-state feature batch 조회 요청 (service read).
          */
         FeatureBatchRequest: {
-            /** Feature Ids */
-            feature_ids: string[];
+            /** Items */
+            items: components["schemas"]["FeatureBatchRequestItem"][];
+            /**
+             * Projection
+             * @description 서버 정의 고정 projection. raw/detail projection은 선택할 수 없다.
+             * @default trip_card
+             * @constant
+             */
+            projection: "trip_card";
+        };
+        /**
+         * FeatureBatchRequestItem
+         * @description feature batch 요청 1건.
+         */
+        FeatureBatchRequestItem: {
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * Known Row Revision
+             * @description 소비자가 보유한 trip_card의 row_revision. 일치하면 unchanged.
+             */
+            known_row_revision?: number | null;
         };
         /**
          * FeatureBatchResponse
@@ -936,6 +981,51 @@ export interface components {
         FeatureBatchResponse: {
             data: components["schemas"]["FeatureBatchData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FeatureBatchRetiredItem
+         * @description lifecycle tombstone이 확인된 feature.
+         */
+        FeatureBatchRetiredItem: {
+            /** Feature Id */
+            feature_id: string;
+            /** Row Revision */
+            row_revision: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            state: "retired";
+        };
+        /**
+         * FeatureBatchSuppressedItem
+         * @description 존재하지만 현재 공개 projection에 없는 feature.
+         */
+        FeatureBatchSuppressedItem: {
+            /** Feature Id */
+            feature_id: string;
+            /** Row Revision */
+            row_revision: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            state: "suppressed";
+        };
+        /**
+         * FeatureBatchUnchangedItem
+         * @description 소비자 revision과 동일한 공개 feature.
+         */
+        FeatureBatchUnchangedItem: {
+            /** Feature Id */
+            feature_id: string;
+            /** Row Revision */
+            row_revision: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            state: "unchanged";
         };
         /** FeatureCurationGroupResponse */
         FeatureCurationGroupResponse: {
@@ -1145,6 +1235,32 @@ export interface components {
             status: string;
             /** @description kind=weather일 때 현재/예보 marker 요약. */
             weather_summary?: components["schemas"]["WeatherSummaryOut"] | null;
+        };
+        /**
+         * FeatureTripCard
+         * @description 여행 일정 POI 표시에 필요한 공개-안전 고정 projection.
+         */
+        FeatureTripCard: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Category */
+            category: string;
+            /** Feature Id */
+            feature_id: string;
+            /** Kind */
+            kind: string;
+            /** Lat */
+            lat: number | null;
+            /** Lon */
+            lon: number | null;
+            /** Marker Color */
+            marker_color: string | null;
+            /** Marker Icon */
+            marker_icon: string | null;
+            /** Name */
+            name: string;
         };
         /**
          * FeatureWeatherResponse
@@ -3278,7 +3394,7 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureBatchResponse"];
                 };
             };
-            /** @description feature_ids 1~200개 필요 */
+            /** @description 서로 다른 item 1~200개 필요 */
             422: {
                 headers: {
                     [name: string]: unknown;

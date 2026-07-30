@@ -10251,48 +10251,154 @@
       },
       "FeatureBatchData": {
         "additionalProperties": false,
-        "description": "feature batch 상세 data payload.",
+        "description": "feature batch 5-state data payload.",
         "properties": {
-          "found": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/FeatureDetailResponse"
-            },
-            "title": "Found",
-            "type": "object"
-          },
-          "missing": {
+          "items": {
             "items": {
-              "type": "string"
+              "discriminator": {
+                "mapping": {
+                  "found": "#/components/schemas/FeatureBatchFoundItem",
+                  "missing": "#/components/schemas/FeatureBatchMissingItem",
+                  "retired": "#/components/schemas/FeatureBatchRetiredItem",
+                  "suppressed": "#/components/schemas/FeatureBatchSuppressedItem",
+                  "unchanged": "#/components/schemas/FeatureBatchUnchangedItem"
+                },
+                "propertyName": "state"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/FeatureBatchFoundItem"
+                },
+                {
+                  "$ref": "#/components/schemas/FeatureBatchRetiredItem"
+                },
+                {
+                  "$ref": "#/components/schemas/FeatureBatchSuppressedItem"
+                },
+                {
+                  "$ref": "#/components/schemas/FeatureBatchMissingItem"
+                },
+                {
+                  "$ref": "#/components/schemas/FeatureBatchUnchangedItem"
+                }
+              ]
             },
-            "title": "Missing",
+            "title": "Items",
             "type": "array"
           }
         },
         "required": [
-          "found",
-          "missing"
+          "items"
         ],
         "title": "FeatureBatchData",
         "type": "object"
       },
-      "FeatureBatchRequest": {
+      "FeatureBatchFoundItem": {
         "additionalProperties": false,
-        "description": "feature batch 상세 조회 요청 (service read).",
+        "description": "공개 feature의 최신 trip_card.",
         "properties": {
-          "feature_ids": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 200,
-            "minItems": 1,
-            "title": "Feature Ids",
-            "type": "array"
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "row_revision": {
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
+          "state": {
+            "const": "found",
+            "title": "State",
+            "type": "string"
+          },
+          "trip_card": {
+            "$ref": "#/components/schemas/FeatureTripCard"
           }
         },
         "required": [
-          "feature_ids"
+          "state",
+          "feature_id",
+          "row_revision",
+          "trip_card"
+        ],
+        "title": "FeatureBatchFoundItem",
+        "type": "object"
+      },
+      "FeatureBatchMissingItem": {
+        "additionalProperties": false,
+        "description": "저장소에 존재하지 않는 feature.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "state": {
+            "const": "missing",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id"
+        ],
+        "title": "FeatureBatchMissingItem",
+        "type": "object"
+      },
+      "FeatureBatchRequest": {
+        "additionalProperties": false,
+        "description": "5-state feature batch 조회 요청 (service read).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureBatchRequestItem"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "projection": {
+            "const": "trip_card",
+            "default": "trip_card",
+            "description": "서버 정의 고정 projection. raw/detail projection은 선택할 수 없다.",
+            "title": "Projection",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ],
         "title": "FeatureBatchRequest",
+        "type": "object"
+      },
+      "FeatureBatchRequestItem": {
+        "additionalProperties": false,
+        "description": "feature batch 요청 1건.",
+        "properties": {
+          "feature_id": {
+            "minLength": 1,
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "known_row_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "소비자가 보유한 trip_card의 row_revision. 일치하면 unchanged.",
+            "title": "Known Row Revision"
+          }
+        },
+        "required": [
+          "feature_id"
+        ],
+        "title": "FeatureBatchRequestItem",
         "type": "object"
       },
       "FeatureBatchResponse": {
@@ -10311,6 +10417,87 @@
           "meta"
         ],
         "title": "FeatureBatchResponse",
+        "type": "object"
+      },
+      "FeatureBatchRetiredItem": {
+        "additionalProperties": false,
+        "description": "lifecycle tombstone이 확인된 feature.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "row_revision": {
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
+          "state": {
+            "const": "retired",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id",
+          "row_revision"
+        ],
+        "title": "FeatureBatchRetiredItem",
+        "type": "object"
+      },
+      "FeatureBatchSuppressedItem": {
+        "additionalProperties": false,
+        "description": "존재하지만 현재 공개 projection에 없는 feature.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "row_revision": {
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
+          "state": {
+            "const": "suppressed",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id",
+          "row_revision"
+        ],
+        "title": "FeatureBatchSuppressedItem",
+        "type": "object"
+      },
+      "FeatureBatchUnchangedItem": {
+        "additionalProperties": false,
+        "description": "소비자 revision과 동일한 공개 feature.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "row_revision": {
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
+          "state": {
+            "const": "unchanged",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id",
+          "row_revision"
+        ],
+        "title": "FeatureBatchUnchangedItem",
         "type": "object"
       },
       "FeatureCurationGroupResponse": {
@@ -11112,6 +11299,90 @@
           "status"
         ],
         "title": "FeatureSummary",
+        "type": "object"
+      },
+      "FeatureTripCard": {
+        "additionalProperties": false,
+        "description": "여행 일정 POI 표시에 필요한 공개-안전 고정 projection.",
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "marker_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Color"
+          },
+          "marker_icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "lon",
+          "lat",
+          "address",
+          "marker_icon",
+          "marker_color"
+        ],
+        "title": "FeatureTripCard",
         "type": "object"
       },
       "FeatureUpdatePoint": {
@@ -34187,7 +34458,7 @@
                 }
               }
             },
-            "description": "feature_ids 1~200개 필요"
+            "description": "서로 다른 item 1~200개 필요"
           },
           "default": {
             "content": {
@@ -34205,7 +34476,7 @@
             "ServiceToken": []
           }
         ],
-        "summary": "feature 상세 batch 조회 (service read)",
+        "summary": "feature 5-state trip_card batch 조회 (service read)",
         "tags": [
           "features"
         ]
