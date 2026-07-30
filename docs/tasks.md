@@ -405,59 +405,73 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     실체는 concierge YouTube 장소 후보이고 그 안의 공개 item이 3,044건이다.
 
     > **정정** — 나는 이걸 "외부 계약이 바뀐다 — PinVi 등 소비자가 참조하면 깨진다"고
-    > 적었다. **소비자 전수 조사 결과 깨지는 것이 없다.** 위험을 확인하지 않고 단정했다.
+    > 적었다. **현재 runtime identity lookup 소비자는 없어 52행 재작성으로 깨지는 호출은
+    > 확인되지 않았다.** 위험을 확인하지 않고 단정했다.
     > - `collection_key`를 **조회 키로 받는 엔드포인트가 0개**다 — 전부 `collection_id`
-    >   UUID 경로다. 응답에 실리는 **출력 필드**일 뿐이라 스키마·엔드포인트가 안 바뀐다.
+    >   UUID 경로다. 다만 admin collection 생성의 필수 입력·저장 필드이고 목록 검색 대상이므로
+    >   단순 출력 필드라는 종전 설명은 틀렸다.
     > - e2e live의 하드코딩 `OFFICIAL_COLLECTION_KEYS` 19개와 재작성 52개의
     >   **교집합 0개**다. 19개는 `created_by='admin'`이고 `migrated_from` metadata가 없어
     >   0065의 `WHERE metadata @> '{"migrated_from":…}'`에서 아예 제외된다.
     > - CSV import는 `ON CONFLICT (collection_key)`로 upsert하지만 CSV의 키
     >   (`korean-tourism-100:2023-2024` 등)가 재작성 대상이 아니라 그대로 매칭된다 —
     >   **중복 collection 생성 없음**.
-    > - PinVi·kor-travel-concierge·kor-travel-docker-maneger 전부 `collection_key`
-    >   참조 **0 hit**. dagster asset/CLI도 0 hit.
+    > - PinVi runtime client·kor-travel-concierge·kor-travel-docker-manager에는
+    >   `collection_key` identity lookup이 없다. PinVi pinned OpenAPI snapshot의 schema
+    >   field hit는 소비 호출이 아니며 0 hit 주장에 포함하지 않는다. dagster asset/CLI도
+    >   runtime lookup이 없다.
     > - 재계산은 **멱등**이다(`(theme_id, source_id, md5(title))` 기반, prod에 NULL/blank
     >   title 0건, base_key 중복 0건이라 `:split:`/`:conflict:` 접미사 미발생).
     >
     > 남는 것은 계약 **문서화** 권고뿐이다(blocker 아님): `collection_key`는 0045→0065에서
-    > 형식이 두 번 바뀐 **불안정 식별자**인데 공개 응답에 실린다. "표시·검색용이고 안정
-    > 식별자는 `collection_id`"임을 명시하고, `docs/integration-map.md`에 curation
-    > collection 표면 계약 행을 추가한다(현재 그 행이 없어 소비자 판정을 전 저장소
-    > grep으로만 할 수 있었다).
+    > 형식이 두 번 바뀐 **불안정 business key**다. admin create·저장·검색과 CSV upsert에는
+    > 쓰지만 외부의 장기 참조·path identity는 `collection_id`를 써야 한다.
+    > `docs/integration-map.md`에 이 경계를 명시한다.
   - `0065` 후반 quarantine 블록도 **no-op**이다 — canonical-only item(`legacy_projection_id
     IS NULL`)이 prod에 0건이다. 새 유니크 인덱스 위반 행도 0건.
   - `0065`의 대량 UPDATE: `source_updated_at` **3,530행 전량**(WHERE 없음),
     `operator_updated_*` 3,044행, `legacy_projection_id` 3,044행.
   - **트랜잭션 경계 함정**: `alembic/env.py`에 `transaction_per_migration`이 **없어**
-    0064~0068이 원래 한 트랜잭션인데, `0064`의 `autocommit_block()`(CREATE/DROP INDEX
-    CONCURRENTLY)이 **그 트랜잭션을 커밋한다**. 따라서 0065가 실패하면 **0064만 적용된 채
-    `alembic_version`은 0063에 남는다**. 0064는 인덱스 상태 가드가 있어 재실행 가능하다.
+    0064~0068이 원래 한 트랜잭션이지만, `0064`의 `autocommit_block()`(CREATE/DROP INDEX
+    CONCURRENTLY)이 그 트랜잭션을 커밋한다. 따라서 0065가 실패하면 **0064만 적용된 채
+    `alembic_version`은 0063에 남는다**. 0068도 column/default 추가와 constraint validate/
+    concurrent index 단계에 `autocommit_block()`을 쓰므로, 실패 시 **version은 0067인데
+    0068의 column·constraint·candidate index 일부가 남는 상태**가 가능하다. 0064와 0068은
+    이 부분 상태를 감지해 forward 재실행하도록 작성됐고 integration test가 0068/0067
+    재개를 고정한다.
   - `0064`는 인덱스만 바꾸고 DML 0건, `downgrade()`도 대칭이라 **완전 가역**이다.
 
-  **선행 조사는 끝났다. 데이터 측면 blocker는 확인되지 않았다.**
-  0064~0068 전부 prod 데이터에서 파괴적 statement가 no-op이거나 가역이고,
-  `collection_key` 재작성도 소비자를 깨뜨리지 않는다.
+  **선행 조사에서 constraint/data blocker는 확인되지 않았다.** 그러나 0065의 52행 key
+  재작성·3,530행 UPDATE와 0066 backfill은 비가역이며, 0064/0068 autocommit은 부분 적용
+  상태를 만든다. `collection_key` 재작성으로 깨지는 runtime lookup 소비자는 확인되지 않았다.
 
-  **배포 역학 실측(2026-07-30)** — 계획이 크게 단순해진다:
+  **배포 역학 실측(2026-07-30)**:
   - **`docker/api-entrypoint.sh:216`이 `alembic upgrade head`를 재시도 루프로 직접 돌린다**
-    (uvicorn 기동 **전**). 즉 **마이그레이션과 새 코드는 이미 원자적**이다 — 새 이미지로
-    API 컨테이너를 recreate하면 그 컨테이너가 스스로 0064~0068을 올리고 나서 서비스한다.
-    내가 걱정한 "새 스키마 + 낡은 코드" 창은 compose가 old를 먼저 정지하는 한 생기지 않는다.
+    (uvicorn 기동 **전**). 이는 부분 migration 상태에서 새 API가 serving되는 것을 막는
+    **기동 gate**이지 DB migration을 원자화하지 않는다. 새 이미지로 API를 recreate하면
+    entrypoint가 0064~0068을 forward 재시도하고 head에 도달한 뒤에만 서비스한다.
   - **`docker/dagster-entrypoint.sh`는 마이그레이션을 하지 않는다**(`alembic upgrade` 0 hit).
     dagster는 스키마를 소비만 하므로 API 뒤에 올린다.
-  - 백업 수단이 실재한다: **`scripts/docker-backup.sh`** — map DB + dagster DB를 받고
-    `KOR_TRAVEL_MAP_BACKUP_ROOT`(기본 `data/backups`)에 `BACKUP_ID`별로 쌓는다.
-    기본값이 `ALLOW_RUNNING=0`이라 정지 상태를 요구한다.
+  - prod는 external-infra 모드라 local `postgres` service를 띄우지 않는다.
+    `scripts/docker-backup.sh`는 standalone compose의 `postgres`를 하드코딩하므로 prod
+    복구 수단이 아니다. H35는 배포 전에 external DB용 백업·복원 검증 경로를 먼저 만든다.
 
   남은 할 일:
-  1. **백업** — `scripts/docker-backup.sh`. `0065`의 52행 재작성·3,530행 UPDATE와 `0066`
-     backfill은 downgrade로 복구되지 않으므로 **이게 유일한 복구 경로**다.
+  1. **prod external DB 백업·복원 gate 구현** — 비밀을 argv/log에 싣지 않는
+     `PGSERVICEFILE`/`PGPASSFILE` 기반의 pinned PostgreSQL client로 app·Dagster DB를 custom
+     dump한다. SHA-256과 `pg_restore --list`만 확인하고 끝내지 않고, 격리 scratch DB에
+     실제 복원해 pre-migration head·핵심 schema/row count를 대조한다. standalone
+     `scripts/docker-backup.sh`를 prod에서 호출하지 않는다.
   2. **이미지 빌드** — main 최신(H36 게이트 포함)으로 API/dagster/UI.
   3. **H36 게이트가 이미지에 실렸는지 확인** — 커밋 라벨만 보지 말고 컨테이너 안에서
      `_adopted_match` 존재를 직접 확인한다. 라벨은 빌드 컨텍스트를 증명하지 않는다.
-  4. **API recreate** → entrypoint가 0064~0068을 적용. 그 다음 dagster/UI.
+  4. **API recreate** → entrypoint가 0064~0068을 forward 적용한다. 실패하면 downgrade하지
+     않고 `alembic_version`과 0064/0068 partial-state probe를 기록해 같은 image/command로
+     재개한다. head 확인 뒤 dagster/UI를 올린다.
   5. **적용 후 실증(반증 가능해야 한다)**:
      - `alembic_version = 0068_integrity_last_seen`
+     - 0068의 `last_seen_at` column/default/NOT NULL·FK·세 concurrent index가 모두 최종
+       shape이며 invalid/candidate index와 임시 constraint가 남지 않음
      - `uq_violations_open_dedupe_key` 인덱스 존재 / `last_seen_at` 컬럼 존재
        (둘 다 지금은 **없음**이 확인돼 있어 before/after가 갈린다)
      - curation import **preview**가 오링크 3건을 여전히 미연결로 두는지
@@ -469,11 +483,11 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > **⚠ 비가역 지점** — 사람 승인이 필요하다.
   > - `0065`의 `collection_key` 52행 재작성과 `source_updated_at` 3,530행 UPDATE,
   >   `0066`의 `external_component_id` backfill은 **downgrade로 복구되지 않는다**.
-  >   백업이 유일한 복구 경로다.
-  > - `0064`의 `autocommit_block()`이 트랜잭션을 커밋하므로 **부분 적용 상태가 가능하다**
-  >   (0064만 적용 + `alembic_version`은 0063). entrypoint가 실패 시 재시도하므로
-  >   0064 재실행은 가드로 안전하지만, 0065가 계속 실패하면 **컨테이너가 기동하지 못한다**
-  >   (`exit 1`) — 즉 실패는 조용하지 않고 API 다운으로 드러난다.
+  >   검증된 external DB dump가 유일한 복구 경로다.
+  > - `0064`와 `0068`의 `autocommit_block()` 때문에 **부분 적용 상태가 가능하다**.
+  >   entrypoint가 실패 시 재시도하므로 forward recovery를 우선하고 꼭 필요한 경우가
+  >   아니면 Alembic downgrade하지 않는다. 계속 실패하면 API가 기동하지 않아 장애가
+  >   조용히 숨지는 않지만, DB가 자동으로 원상복구되는 것도 아니다.
   > - 이미지 교체는 다운타임을 만든다.
   **머지 = 배포가 아니라는 점을 문서에도 반영한다** — H30A 완료 기록이 prod 상태를
   주장하는 것으로 읽히지 않게. (H36이 이 task보다 **먼저**다.)
