@@ -36,6 +36,7 @@ __all__ = [
 class DomainCommandClaim:
     """한 actor가 선점한 immutable command identity."""
 
+    command_id: int
     actor: str
     operation: str
     idempotency_key: str
@@ -48,6 +49,7 @@ class DomainCommandClaim:
 class DomainCommandRecord:
     """One append-only terminal command result."""
 
+    command_id: int
     actor: str
     operation: str
     idempotency_key: str
@@ -55,50 +57,50 @@ class DomainCommandRecord:
     request_fingerprint: str
     response_status: int
     response_body: dict[str, Any]
+    response_headers: dict[str, str]
     claimed_at: datetime
     completed_at: datetime
 
 
 _GET_CLAIM_SQL = """
-SELECT actor, operation, idempotency_key, fingerprint_version,
+SELECT command_id, actor, operation, idempotency_key, fingerprint_version,
        request_fingerprint, created_at
-FROM ops.domain_command_claims
+FROM ops.domain_commands
 WHERE actor = :actor
   AND operation = :operation
   AND idempotency_key = CAST(:idempotency_key AS uuid)
 """
 
 _GET_SQL = """
-SELECT claim.actor, claim.operation, claim.idempotency_key,
-       claim.fingerprint_version, claim.request_fingerprint,
-       result.response_status, result.response_body,
-       claim.created_at AS claimed_at, result.completed_at
-FROM ops.domain_command_claims AS claim
-JOIN ops.domain_command_ledger AS result
-  USING (actor, operation, idempotency_key)
-WHERE claim.actor = :actor
-  AND claim.operation = :operation
-  AND claim.idempotency_key = CAST(:idempotency_key AS uuid)
+SELECT command.command_id, command.actor, command.operation,
+       command.idempotency_key, command.fingerprint_version,
+       command.request_fingerprint,
+       result.response_status, result.response_body, result.response_headers,
+       command.created_at AS claimed_at, result.completed_at
+FROM ops.domain_commands AS command
+JOIN ops.domain_command_results AS result
+  ON result.command_id = command.command_id
+WHERE command.command_id = :command_id
 """
 
 _INSERT_CLAIM_SQL = """
-INSERT INTO ops.domain_command_claims (
+INSERT INTO ops.domain_commands (
     actor, operation, idempotency_key, fingerprint_version,
     request_fingerprint
 ) VALUES (
     :actor, :operation, CAST(:idempotency_key AS uuid), 1,
     :request_fingerprint
 )
-RETURNING actor, operation, idempotency_key, fingerprint_version,
+RETURNING command_id, actor, operation, idempotency_key, fingerprint_version,
           request_fingerprint, created_at
 """
 
 _INSERT_SQL = """
-INSERT INTO ops.domain_command_ledger (
-    actor, operation, idempotency_key, response_status, response_body
+INSERT INTO ops.domain_command_results (
+    command_id, response_status, response_body, response_headers
 ) VALUES (
-    :actor, :operation, CAST(:idempotency_key AS uuid),
-    :response_status, CAST(:response_body AS jsonb)
+    :command_id, :response_status, CAST(:response_body AS jsonb),
+    CAST(:response_headers AS jsonb)
 )
 """
 
@@ -136,6 +138,7 @@ async def lock_domain_command(
 
 def _claim(row: Any) -> DomainCommandClaim:
     return DomainCommandClaim(
+        command_id=int(row.command_id),
         actor=str(row.actor),
         operation=str(row.operation),
         idempotency_key=str(row.idempotency_key),
@@ -147,6 +150,7 @@ def _claim(row: Any) -> DomainCommandClaim:
 
 def _record(row: Any) -> DomainCommandRecord:
     return DomainCommandRecord(
+        command_id=int(row.command_id),
         actor=str(row.actor),
         operation=str(row.operation),
         idempotency_key=str(row.idempotency_key),
@@ -154,6 +158,10 @@ def _record(row: Any) -> DomainCommandRecord:
         request_fingerprint=str(row.request_fingerprint),
         response_status=int(row.response_status),
         response_body=dict(row.response_body),
+        response_headers={
+            str(key): str(value)
+            for key, value in dict(row.response_headers).items()
+        },
         claimed_at=row.claimed_at,
         completed_at=row.completed_at,
     )
@@ -182,18 +190,12 @@ async def get_domain_command_claim(
 async def get_domain_command_record(
     session: AsyncSession,
     *,
-    actor: str,
-    operation: str,
-    idempotency_key: str,
+    command_id: int,
 ) -> DomainCommandRecord | None:
     row = (
         await session.execute(
             text(_GET_SQL),
-            {
-                "actor": actor,
-                "operation": operation,
-                "idempotency_key": idempotency_key,
-            },
+            {"command_id": command_id},
         )
     ).one_or_none()
     return _record(row) if row is not None else None
@@ -224,22 +226,26 @@ async def create_domain_command_claim(
 async def create_domain_command_record(
     session: AsyncSession,
     *,
-    actor: str,
-    operation: str,
-    idempotency_key: str,
+    command_id: int,
     response_status: int,
     response_body: dict[str, Any],
+    response_headers: dict[str, str],
 ) -> None:
     await session.execute(
         text(_INSERT_SQL),
         {
-            "actor": actor,
-            "operation": operation,
-            "idempotency_key": idempotency_key,
+            "command_id": command_id,
             "response_status": response_status,
             "response_body": json.dumps(
                 response_body,
                 ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "response_headers": json.dumps(
+                response_headers,
+                ensure_ascii=True,
                 allow_nan=False,
                 sort_keys=True,
                 separators=(",", ":"),

@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import NAMESPACE_URL, uuid5
 
 import pytest
@@ -51,7 +52,9 @@ class _FakeSession:
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from kortravelmap.api import domain_command_service
+
     app = create_app(
         ApiSettings(
             admin_proxy_secret=None,
@@ -64,7 +67,28 @@ def client() -> TestClient:
         yield _FakeSession()
 
     app.dependency_overrides[get_session] = _session
-    return TestClient(app)
+    monkeypatch.setattr(
+        domain_command_service,
+        "begin_domain_command",
+        AsyncMock(
+            return_value=domain_command_service.DomainCommandHandle(
+                command_id=1,
+                actor="local-dev",
+                operation="admin.curation-item.patch",
+                idempotency_key="95000000-0000-4000-8000-000000000001",
+                request_fingerprint="a" * 64,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        domain_command_service,
+        "complete_domain_command",
+        AsyncMock(),
+    )
+    return TestClient(
+        app,
+        headers={"Idempotency-Key": "95000000-0000-4000-8000-000000000001"},
+    )
 
 
 def _item(*, item_id: str, edition: str) -> CurationItem:

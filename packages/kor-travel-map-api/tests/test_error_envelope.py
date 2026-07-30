@@ -36,6 +36,7 @@ from kortravelmap.api.settings import ApiSettings
 
 def _domain_claim() -> DomainCommandClaim:
     return DomainCommandClaim(
+        command_id=1,
         actor="admin:alice",
         operation="admin.feature.create",
         idempotency_key="95000000-0000-4000-8000-000000000001",
@@ -48,6 +49,7 @@ def _domain_claim() -> DomainCommandClaim:
 def _domain_record() -> DomainCommandRecord:
     claim = _domain_claim()
     return DomainCommandRecord(
+        command_id=claim.command_id,
         actor=claim.actor,
         operation=claim.operation,
         idempotency_key=claim.idempotency_key,
@@ -58,6 +60,7 @@ def _domain_record() -> DomainCommandRecord:
             "data": {"feature_id": "feature-1"},
             "meta": {"duration_ms": 3, "request_id": "request-original"},
         },
+        response_headers={"Location": "/v1/admin/features/feature-1"},
         claimed_at=claim.created_at,
         completed_at=claim.created_at,
     )
@@ -79,6 +82,7 @@ def test_domain_command_terminal_result_replays_exact_response() -> None:
     assert response.status_code == 201
     assert response.headers["idempotency-replayed"] == "true"
     assert response.headers["x-request-id"] == "request-original"
+    assert response.headers["location"] == "/v1/admin/features/feature-1"
     assert response.json() == _domain_record().response_body
 
 

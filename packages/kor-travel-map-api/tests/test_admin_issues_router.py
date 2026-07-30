@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -50,14 +51,40 @@ def session() -> _FakeSession:
 
 
 @pytest.fixture
-def client(session: _FakeSession) -> TestClient:
+def client(
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> TestClient:
+    from kortravelmap.api import domain_command_service
+
     app = create_app(ApiSettings())
 
     async def _fake_session() -> AsyncIterator[_FakeSession]:
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
-    return TestClient(app)
+    monkeypatch.setattr(
+        domain_command_service,
+        "begin_domain_command",
+        AsyncMock(
+            return_value=domain_command_service.DomainCommandHandle(
+                command_id=1,
+                actor="local-dev",
+                operation="admin.issue.patch",
+                idempotency_key="95000000-0000-4000-8000-000000000001",
+                request_fingerprint="a" * 64,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        domain_command_service,
+        "complete_domain_command",
+        AsyncMock(),
+    )
+    return TestClient(
+        app,
+        headers={"Idempotency-Key": "95000000-0000-4000-8000-000000000001"},
+    )
 
 
 def _ops_issue(issue_id: str = _VIOLATION_KEY) -> OpsIntegrityIssue:
@@ -385,7 +412,7 @@ def test_patch_manual_override_no_fields_returns_422(
     )
 
     assert response.status_code == 422
-    assert session.begin_count == 0
+    assert session.begin_count == 1
 
 
 @pytest.mark.unit
@@ -448,7 +475,7 @@ def test_patch_retry_reverse_geocode_returns_candidate(
     # 상태 변경 없음 — 후보만 반환.
     assert body["data"]["issue"]["status"] == "open"
     assert body["data"]["geocode_candidate"]["legal_dong_code"] == "1156010100"
-    assert session.begin_count == 0
+    assert session.begin_count == 1
 
 
 @pytest.mark.unit

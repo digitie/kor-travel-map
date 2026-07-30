@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from inspect import signature
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
+from fastapi import HTTPException, Request, Response
 from kortravelmap.infra.domain_command_repo import (
     DomainCommandClaim,
     DomainCommandRecord,
@@ -16,6 +18,7 @@ from kortravelmap.infra.domain_command_repo import (
 from pydantic import BaseModel
 
 from kortravelmap.api import domain_command_service as service
+from kortravelmap.api.auth import AdminProxyContext
 
 _KEY = UUID("95000000-0000-4000-8000-000000000001")
 _ACTOR = "admin:alice"
@@ -26,6 +29,7 @@ _NOW = datetime(2026, 7, 31, tzinfo=UTC)
 
 def _claim(*, fingerprint: str | None = None) -> DomainCommandClaim:
     return DomainCommandClaim(
+        command_id=1,
         actor=_ACTOR,
         operation=_OPERATION,
         idempotency_key=str(_KEY),
@@ -38,6 +42,7 @@ def _claim(*, fingerprint: str | None = None) -> DomainCommandClaim:
 
 def _record() -> DomainCommandRecord:
     return DomainCommandRecord(
+        command_id=1,
         actor=_ACTOR,
         operation=_OPERATION,
         idempotency_key=str(_KEY),
@@ -45,6 +50,7 @@ def _record() -> DomainCommandRecord:
         request_fingerprint=canonical_domain_command_fingerprint(_PAYLOAD),
         response_status=201,
         response_body={"data": {"feature_id": "feature-1"}},
+        response_headers={"Location": "/v1/admin/features/feature-1"},
         claimed_at=_NOW,
         completed_at=_NOW,
     )
@@ -70,6 +76,7 @@ async def test_begin_creates_new_actor_scoped_claim(
     )
 
     assert handle.actor == _ACTOR
+    assert handle.command_id == 1
     assert handle.idempotency_key == str(_KEY)
     assert handle.request_fingerprint == canonical_domain_command_fingerprint(_PAYLOAD)
     lock.assert_awaited_once()
@@ -160,6 +167,258 @@ class _Response(BaseModel):
     data: dict[str, Any]
 
 
+class _Tx:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+class _Session:
+    def __init__(self) -> None:
+        self.begin_count = 0
+
+    def begin(self) -> _Tx:
+        self.begin_count += 1
+        return _Tx()
+
+    def in_transaction(self) -> bool:
+        return False
+
+
+def _request(*, headers: dict[str, str] | None = None) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/admin/features",
+            "headers": [
+                (name.lower().encode("ascii"), value.encode("ascii"))
+                for name, value in (headers or {}).items()
+            ],
+            "query_string": b"",
+            "server": ("testserver", 80),
+            "client": ("127.0.0.1", 1),
+            "scheme": "http",
+            "app": type("_App", (), {"state": type("_State", (), {})()})(),
+        }
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation",
+    ["admin.feature.patch", "admin.feature.delete"],
+)
+async def test_same_key_and_body_with_different_if_match_conflicts(
+    operation: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_fingerprint: str | None = None
+    command = service.DomainCommandHandle(
+        command_id=1,
+        actor=_ACTOR,
+        operation=operation,
+        idempotency_key=str(_KEY),
+        request_fingerprint="a" * 64,
+    )
+
+    async def _begin(
+        _session: object,
+        *,
+        actor: str,
+        operation: str,
+        idempotency_key: UUID,
+        payload: object,
+    ) -> service.DomainCommandHandle:
+        nonlocal first_fingerprint
+        fingerprint = canonical_domain_command_fingerprint(payload)
+        if first_fingerprint is None:
+            first_fingerprint = fingerprint
+            return command
+        if fingerprint != first_fingerprint:
+            raise service.DomainCommandFingerprintConflict(
+                _claim(fingerprint=first_fingerprint)
+            )
+        return command
+
+    monkeypatch.setattr(service, "begin_domain_command", _begin)
+    monkeypatch.setattr(service, "complete_domain_command", AsyncMock())
+
+    @service.idempotent_domain_command(operation)
+    async def _route(
+        body: _Response,
+        context: AdminProxyContext,
+        session: _Session,
+        request: Request,
+    ) -> _Response:
+        return body
+
+    body = _Response(data={"name": "같은 본문"})
+    first = await _route(
+        body=body,
+        context=AdminProxyContext(actor=_ACTOR),
+        session=_Session(),
+        request=_request(headers={"If-Match": '"7"'}),
+        __domain_idempotency_key=_KEY,
+    )
+
+    assert first is body
+    with pytest.raises(service.DomainCommandFingerprintConflict):
+        await _route(
+            body=body,
+            context=AdminProxyContext(actor=_ACTOR),
+            session=_Session(),
+            request=_request(headers={"If-Match": '"8"'}),
+            __domain_idempotency_key=_KEY,
+        )
+
+
+@pytest.mark.asyncio
+async def test_route_decorator_exposes_required_header_and_wraps_terminal_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = "admin.feature.patch"
+    command = service.DomainCommandHandle(
+        command_id=1,
+        actor=_ACTOR,
+        operation=operation,
+        idempotency_key=str(_KEY),
+        request_fingerprint="a" * 64,
+    )
+    begin = AsyncMock(return_value=command)
+    complete = AsyncMock()
+    monkeypatch.setattr(service, "begin_domain_command", begin)
+    monkeypatch.setattr(service, "complete_domain_command", complete)
+
+    @service.idempotent_domain_command(operation)
+    async def _route(
+        body: _Response,
+        context: AdminProxyContext,
+        session: _Session,
+        request: Request,
+        response: Response,
+    ) -> _Response:
+        response.headers["ETag"] = '"revision-7"'
+        response.headers["Location"] = "/v1/admin/features/feature-1"
+        return body
+
+    exposed = signature(_route)
+    header = exposed.parameters["__domain_idempotency_key"]
+    assert header.annotation is UUID
+    assert header.default.alias == "Idempotency-Key"
+    session = _Session()
+    response = _Response(data={"feature_id": "feature-1"})
+    http_response = Response()
+
+    result = await _route(
+        body=response,
+        context=AdminProxyContext(actor=_ACTOR),
+        session=session,
+        request=_request(),
+        response=http_response,
+        __domain_idempotency_key=_KEY,
+    )
+
+    assert result is response
+    assert session.begin_count == 1
+    begin.assert_awaited_once()
+    complete.assert_awaited_once_with(
+        session,
+        command=command,
+        response=response,
+        status_code=200,
+        response_headers={
+            "ETag": '"revision-7"',
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_route_decorator_uses_operation_success_status_without_response_parameter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = "admin.curation-collection.create"
+    command = service.DomainCommandHandle(
+        command_id=1,
+        actor=_ACTOR,
+        operation=operation,
+        idempotency_key=str(_KEY),
+        request_fingerprint="a" * 64,
+    )
+    monkeypatch.setattr(
+        service,
+        "begin_domain_command",
+        AsyncMock(return_value=command),
+    )
+    complete = AsyncMock()
+    monkeypatch.setattr(service, "complete_domain_command", complete)
+
+    @service.idempotent_domain_command(operation)
+    async def _route(
+        context: AdminProxyContext,
+        session: _Session,
+        request: Request,
+    ) -> _Response:
+        return _Response(data={"collection_id": "collection-1"})
+
+    session = _Session()
+    result = await _route(
+        context=AdminProxyContext(actor=_ACTOR),
+        session=session,
+        request=_request(),
+        __domain_idempotency_key=_KEY,
+    )
+
+    complete.assert_awaited_once_with(
+        session,
+        command=command,
+        response=result,
+        status_code=201,
+        response_headers={},
+    )
+
+
+@pytest.mark.asyncio
+async def test_route_error_rolls_back_claim_and_does_not_persist_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command = service.DomainCommandHandle(
+        command_id=1,
+        actor=_ACTOR,
+        operation=_OPERATION,
+        idempotency_key=str(_KEY),
+        request_fingerprint="a" * 64,
+    )
+    begin = AsyncMock(return_value=command)
+    complete = AsyncMock()
+    monkeypatch.setattr(service, "begin_domain_command", begin)
+    monkeypatch.setattr(service, "complete_domain_command", complete)
+
+    @service.idempotent_domain_command(_OPERATION)
+    async def _route(
+        context: AdminProxyContext,
+        session: _Session,
+        request: Request,
+    ) -> _Response:
+        raise HTTPException(status_code=503, detail="temporary provider failure")
+
+    session = _Session()
+    with pytest.raises(HTTPException) as raised:
+        await _route(
+            context=AdminProxyContext(actor=_ACTOR),
+            session=session,
+            request=_request(),
+            __domain_idempotency_key=_KEY,
+        )
+
+    assert raised.value.status_code == 503
+    assert session.begin_count == 1
+    begin.assert_awaited_once()
+    complete.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_complete_serializes_typed_response_as_json_object(
     monkeypatch: pytest.MonkeyPatch,
@@ -167,6 +426,7 @@ async def test_complete_serializes_typed_response_as_json_object(
     create_record = AsyncMock()
     monkeypatch.setattr(service, "create_domain_command_record", create_record)
     command = service.DomainCommandHandle(
+        command_id=1,
         actor=_ACTOR,
         operation=_OPERATION,
         idempotency_key=str(_KEY),
@@ -183,11 +443,10 @@ async def test_complete_serializes_typed_response_as_json_object(
 
     create_record.assert_awaited_once_with(
         session,
-        actor=_ACTOR,
-        operation=_OPERATION,
-        idempotency_key=str(_KEY),
+        command_id=1,
         response_status=201,
         response_body={"data": {"created_at": "2026-07-31T00:00:00Z"}},
+        response_headers={},
     )
 
 

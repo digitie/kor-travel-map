@@ -28,6 +28,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    domain_command_transaction,
+    idempotent_domain_command,
+)
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.routers.dedup_review import (
     ReviewFeatureDetailRecord,
@@ -370,6 +374,7 @@ async def get_review_detail(
     response_model=EnrichmentReviewDecisionResponse,
     responses={409: {"description": "이미 검토됨/없음"}},
 )
+@idempotent_domain_command("admin.enrichment-review.decide")
 async def decide_review(
     request: Request,
     review_id: str,
@@ -378,7 +383,7 @@ async def decide_review(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EnrichmentReviewDecisionResponse:
     started_at = perf_counter()
-    async with session.begin():
+    async with domain_command_transaction(session):
         result = await decide_enrichment_review(
             session,
             review_id,

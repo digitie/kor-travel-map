@@ -43,6 +43,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    domain_command_transaction,
+    idempotent_domain_command,
+)
 from kortravelmap.api.response import Meta, ProblemDetail, make_meta
 
 __all__ = [
@@ -472,6 +476,7 @@ def _resolution_payload(
         503: {"description": "kor-travel-geo 미설정"},
     },
 )
+@idempotent_domain_command("admin.issue.patch")
 async def patch_admin_issue(
     issue_id: str,
     body: AdminIssuePatchRequest,
@@ -517,7 +522,7 @@ async def _dispatch_action(
 
     if action in _STATUS_BY_ACTION:
         target_status = _STATUS_BY_ACTION[action]
-        async with session.begin():
+        async with domain_command_transaction(session):
             updated = await set_data_integrity_violation_status(
                 session,
                 issue_id,
@@ -572,7 +577,7 @@ async def _dispatch_action(
                 status_code=422,
                 detail="kor-travel-geo 역지오코딩 결과가 없어 적용할 수 없습니다.",
             )
-        async with session.begin():
+        async with domain_command_transaction(session):
             result = await apply_feature_address_override(
                 session,
                 feature_id,
@@ -619,7 +624,7 @@ async def _dispatch_action(
             status_code=422,
             detail="manual_override는 address/coord/행정코드 중 최소 1개가 필요합니다.",
         )
-    async with session.begin():
+    async with domain_command_transaction(session):
         result = await apply_feature_address_override(
             session,
             feature_id,

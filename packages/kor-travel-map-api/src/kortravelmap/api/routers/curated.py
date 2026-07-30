@@ -27,6 +27,10 @@ from kortravelmap.api.curated_public_schema import (
     public_curated_feature_view,
 )
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    domain_command_transaction,
+    idempotent_domain_command,
+)
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = ["admin_router", "router"]
@@ -1151,6 +1155,7 @@ async def search_admin_curated_feature_places_route(
     response_model=CuratedFeatureResponse,
     include_in_schema=False,
 )
+@idempotent_domain_command("admin.curated-feature.create")
 async def create_admin_curated_feature_route(
     body: CuratedFeatureCreateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -1160,7 +1165,7 @@ async def create_admin_curated_feature_route(
     payload = body.model_dump()
     curation_status = payload["curation_status"]
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             row = await curated_repo.create_curated_feature(
                 session,
                 **payload,
@@ -1188,6 +1193,7 @@ async def create_admin_curated_feature_route(
     response_model=CuratedFeatureResponse,
     include_in_schema=False,
 )
+@idempotent_domain_command("admin.curated-feature.patch")
 async def patch_admin_curated_feature_route(
     curated_feature_id: str,
     body: CuratedFeaturePatchRequest,
@@ -1196,7 +1202,7 @@ async def patch_admin_curated_feature_route(
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             row = await curated_repo.update_curated_feature(
                 session,
                 curated_feature_id=curated_feature_id,
@@ -1224,13 +1230,14 @@ async def patch_admin_curated_feature_route(
     response_model=CuratedFeatureResponse,
     include_in_schema=False,
 )
+@idempotent_domain_command("admin.curated-feature.delete")
 async def delete_admin_curated_feature_route(
     curated_feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
-    async with session.begin():
+    async with domain_command_transaction(session):
         row = await curated_repo.archive_curated_feature(
             session,
             curated_feature_id=curated_feature_id,
@@ -1253,6 +1260,7 @@ async def delete_admin_curated_feature_route(
     response_model=CuratedFeatureResponse,
     include_in_schema=False,
 )
+@idempotent_domain_command("admin.curated-feature.select")
 async def select_admin_curated_feature_route(
     curated_feature_id: str,
     body: CuratedFeatureStatusRequest,
@@ -1260,7 +1268,7 @@ async def select_admin_curated_feature_route(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
-    async with session.begin():
+    async with domain_command_transaction(session):
         row = await curated_repo.set_curated_feature_status(
             session,
             curated_feature_id=curated_feature_id,
@@ -1285,6 +1293,7 @@ async def select_admin_curated_feature_route(
     response_model=CuratedFeatureResponse,
     include_in_schema=False,
 )
+@idempotent_domain_command("admin.curated-feature.unselect")
 async def unselect_admin_curated_feature_route(
     curated_feature_id: str,
     body: CuratedFeatureStatusRequest,
@@ -1292,7 +1301,7 @@ async def unselect_admin_curated_feature_route(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedFeatureResponse:
     started_at = perf_counter()
-    async with session.begin():
+    async with domain_command_transaction(session):
         row = await curated_repo.set_curated_feature_status(
             session,
             curated_feature_id=curated_feature_id,
@@ -1324,13 +1333,14 @@ async def list_admin_curated_themes_route(
 
 
 @admin_router.post("/curated-themes", response_model=CuratedThemeResponse)
+@idempotent_domain_command("admin.curated-theme.create")
 async def create_admin_curated_theme_route(
     body: CuratedThemeCreateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedThemeResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             row = await curated_repo.create_curated_theme(session, **body.model_dump())
     except IntegrityError as exc:
         raise _integrity_error(exc) from exc
@@ -1343,6 +1353,7 @@ async def create_admin_curated_theme_route(
 
 
 @admin_router.patch("/curated-themes/{theme_id}", response_model=CuratedThemeResponse)
+@idempotent_domain_command("admin.curated-theme.patch")
 async def patch_admin_curated_theme_route(
     theme_id: str,
     body: CuratedThemePatchRequest,
@@ -1350,7 +1361,7 @@ async def patch_admin_curated_theme_route(
 ) -> CuratedThemeResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             row = await curated_repo.update_curated_theme(
                 session,
                 theme_id=theme_id,
@@ -1384,13 +1395,14 @@ async def list_admin_curated_sources_route(
 
 
 @admin_router.post("/curated-sources", response_model=CuratedSourceResponse)
+@idempotent_domain_command("admin.curated-source.create")
 async def create_admin_curated_source_route(
     body: CuratedSourceCreateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedSourceResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             row = await curated_repo.create_curated_source(session, **body.model_dump())
     except IntegrityError as exc:
         raise _integrity_error(exc) from exc
@@ -1406,6 +1418,7 @@ async def create_admin_curated_source_route(
     "/curated-sources/{source_id}",
     response_model=CuratedSourceResponse,
 )
+@idempotent_domain_command("admin.curated-source.patch")
 async def patch_admin_curated_source_route(
     source_id: str,
     body: CuratedSourcePatchRequest,
@@ -1413,7 +1426,7 @@ async def patch_admin_curated_source_route(
 ) -> CuratedSourceResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             row = await curated_repo.update_curated_source(
                 session,
                 source_id=source_id,
@@ -1464,13 +1477,14 @@ async def list_admin_curated_source_rules_route(
     "/curated-source-rules",
     response_model=CuratedSourceRuleResponse,
 )
+@idempotent_domain_command("admin.curated-source-rule.create")
 async def create_admin_curated_source_rule_route(
     body: CuratedSourceRuleCreateRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CuratedSourceRuleResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             row = await curated_repo.create_curated_source_rule(
                 session,
                 **body.model_dump(),
@@ -1489,6 +1503,7 @@ async def create_admin_curated_source_rule_route(
     "/curated-source-rules/{rule_id}",
     response_model=CuratedSourceRuleResponse,
 )
+@idempotent_domain_command("admin.curated-source-rule.patch")
 async def patch_admin_curated_source_rule_route(
     rule_id: str,
     body: CuratedSourceRulePatchRequest,
@@ -1496,7 +1511,7 @@ async def patch_admin_curated_source_rule_route(
 ) -> CuratedSourceRuleResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             row = await curated_repo.update_curated_source_rule(
                 session,
                 rule_id=rule_id,
@@ -1516,12 +1531,13 @@ async def patch_admin_curated_source_rule_route(
     "/curated-source-rules/{rule_id}/apply",
     response_model=RuleApplyResponse,
 )
+@idempotent_domain_command("admin.curated-source-rule.apply")
 async def apply_admin_curated_source_rule_route(
     rule_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> RuleApplyResponse:
     started_at = perf_counter()
-    async with session.begin():
+    async with domain_command_transaction(session):
         result = await curated_repo.apply_curated_source_rule(session, rule_id=rule_id)
     return RuleApplyResponse(
         data=RuleApplyData(

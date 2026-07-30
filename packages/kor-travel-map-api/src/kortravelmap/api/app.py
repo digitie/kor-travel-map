@@ -617,7 +617,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
 
     @application.exception_handler(DomainCommandReplay)
     async def domain_command_replay_handler(
-        _request: Request,
+        request: Request,
         exc: DomainCommandReplay,
     ) -> JSONResponse:
         body = exc.record.response_body
@@ -628,7 +628,10 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             and isinstance(meta.get("request_id"), str)
             else None
         )
-        headers = {"Idempotency-Replayed": "true"}
+        headers = {
+            **exc.record.response_headers,
+            "Idempotency-Replayed": "true",
+        }
         if original_request_id:
             headers["X-Request-ID"] = original_request_id
         return JSONResponse(

@@ -2490,33 +2490,44 @@ class FeatureUpdateRequestIdempotencyRow(Base):
     )
 
 
-class DomainCommandClaimRow(Base):
+class DomainCommandRow(Base):
     """Actor-scoped immutable command identity."""
 
-    __tablename__ = "domain_command_claims"
+    __tablename__ = "domain_commands"
     __table_args__ = (
         CheckConstraint(
             "btrim(actor) <> '' AND char_length(actor) <= 200",
-            name=conv("ck_domain_command_claims_actor"),
+            name=conv("ck_domain_commands_actor"),
         ),
         CheckConstraint(
             "operation ~ '^[a-z][a-z0-9_.-]{0,127}$'",
-            name=conv("ck_domain_command_claims_operation"),
+            name=conv("ck_domain_commands_operation"),
         ),
         CheckConstraint(
             "fingerprint_version = 1",
-            name=conv("ck_domain_command_claims_fingerprint_version"),
+            name=conv("ck_domain_commands_fingerprint_version"),
         ),
         CheckConstraint(
             "request_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_domain_command_claims_request_fingerprint"),
+            name=conv("ck_domain_commands_request_fingerprint"),
+        ),
+        UniqueConstraint(
+            "actor",
+            "operation",
+            "idempotency_key",
+            name=conv("uq_domain_commands_actor_operation_key"),
         ),
         {"schema": "ops"},
     )
 
-    actor: Mapped[str] = mapped_column(Text, primary_key=True)
-    operation: Mapped[str] = mapped_column(Text, primary_key=True)
-    idempotency_key: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    command_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
+    actor: Mapped[str] = mapped_column(Text, nullable=False)
+    operation: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     fingerprint_version: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
@@ -2530,37 +2541,38 @@ class DomainCommandClaimRow(Base):
     )
 
 
-class DomainCommandLedgerRow(Base):
+class DomainCommandResultRow(Base):
     """Actor-scoped immutable terminal command result."""
 
-    __tablename__ = "domain_command_ledger"
+    __tablename__ = "domain_command_results"
     __table_args__ = (
         CheckConstraint(
             "response_status BETWEEN 200 AND 599",
-            name=conv("ck_domain_command_ledger_response_status"),
+            name=conv("ck_domain_command_results_response_status"),
         ),
         CheckConstraint(
             "jsonb_typeof(response_body) = 'object'",
-            name=conv("ck_domain_command_ledger_response_body"),
+            name=conv("ck_domain_command_results_response_body"),
         ),
-        ForeignKeyConstraint(
-            ["actor", "operation", "idempotency_key"],
-            [
-                "ops.domain_command_claims.actor",
-                "ops.domain_command_claims.operation",
-                "ops.domain_command_claims.idempotency_key",
-            ],
-            name=conv("fk_domain_command_ledger_claim"),
-            ondelete="RESTRICT",
+        CheckConstraint(
+            "jsonb_typeof(response_headers) = 'object'",
+            name=conv("ck_domain_command_results_response_headers"),
         ),
         {"schema": "ops"},
     )
 
-    actor: Mapped[str] = mapped_column(Text, primary_key=True)
-    operation: Mapped[str] = mapped_column(Text, primary_key=True)
-    idempotency_key: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    command_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
     response_status: Mapped[int] = mapped_column(Integer, nullable=False)
     response_body: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    response_headers: Mapped[dict[str, str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
     completed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

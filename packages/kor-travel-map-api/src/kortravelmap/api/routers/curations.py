@@ -27,6 +27,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    domain_command_transaction,
+    idempotent_domain_command,
+)
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = ["admin_router", "router"]
@@ -1012,6 +1016,7 @@ async def get_admin_curation_collection(
 
 
 @admin_router.post("", response_model=AdminCurationCollectionResponse, status_code=201)
+@idempotent_domain_command("admin.curation-collection.create")
 async def create_admin_curation_collection(
     request: Request,
     body: CurationCollectionCreateRequest,
@@ -1020,7 +1025,7 @@ async def create_admin_curation_collection(
 ) -> AdminCurationCollectionResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             theme_id: str
             if body.theme_id is None:
                 assert body.theme_slug is not None
@@ -1058,6 +1063,7 @@ async def create_admin_curation_collection(
 
 
 @admin_router.patch("/{collection_id}", response_model=AdminCurationCollectionResponse)
+@idempotent_domain_command("admin.curation-collection.patch")
 async def patch_admin_curation_collection(
     request: Request,
     collection_id: UUID,
@@ -1067,7 +1073,7 @@ async def patch_admin_curation_collection(
 ) -> AdminCurationCollectionResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             updates = body.model_dump(exclude_unset=True)
             for field in ("theme_id", "source_id"):
                 if updates.get(field) is not None:
@@ -1100,6 +1106,7 @@ async def patch_admin_curation_collection(
 
 
 @admin_router.delete("/{collection_id}", response_model=AdminCurationCollectionResponse)
+@idempotent_domain_command("admin.curation-collection.archive")
 async def archive_admin_curation_collection(
     request: Request,
     collection_id: UUID,
@@ -1107,7 +1114,7 @@ async def archive_admin_curation_collection(
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationCollectionResponse:
     started_at = perf_counter()
-    async with session.begin():
+    async with domain_command_transaction(session):
         collection = await curation_repo.archive_curation_collection(
             session, collection_id=str(collection_id), actor=context.actor
         )
@@ -1131,6 +1138,7 @@ async def archive_admin_curation_collection(
     response_model=AdminCurationItemResponse,
     status_code=201,
 )
+@idempotent_domain_command("admin.curation-item.create")
 async def add_admin_curation_item(
     request: Request,
     collection_id: UUID,
@@ -1140,7 +1148,7 @@ async def add_admin_curation_item(
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             item, inserted = await curation_repo.add_curation_item(
                 session,
                 collection_id=str(collection_id),
@@ -1168,6 +1176,7 @@ async def add_admin_curation_item(
     "/{collection_id}/items/{curation_item_id}",
     response_model=AdminCurationItemResponse,
 )
+@idempotent_domain_command("admin.curation-item.patch")
 async def patch_admin_curation_item(
     request: Request,
     collection_id: UUID,
@@ -1178,7 +1187,7 @@ async def patch_admin_curation_item(
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             item = await curation_repo.update_curation_item(
                 session,
                 collection_id=str(collection_id),
@@ -1202,6 +1211,7 @@ async def patch_admin_curation_item(
     "/{collection_id}/items/{curation_item_id}",
     response_model=AdminCurationItemResponse,
 )
+@idempotent_domain_command("admin.curation-item.archive")
 async def archive_admin_curation_item(
     request: Request,
     collection_id: UUID,
@@ -1211,7 +1221,7 @@ async def archive_admin_curation_item(
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             item = await curation_repo.archive_curation_item(
                 session,
                 collection_id=str(collection_id),

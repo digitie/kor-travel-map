@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -53,7 +54,12 @@ def session() -> _FakeSession:
 
 
 @pytest.fixture
-def client(session: _FakeSession) -> TestClient:
+def client(
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> TestClient:
+    from kortravelmap.api import domain_command_service
+
     app = create_app(
         ApiSettings(
             admin_destructive_enabled=True,
@@ -68,7 +74,28 @@ def client(session: _FakeSession) -> TestClient:
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
-    return TestClient(app)
+    monkeypatch.setattr(
+        domain_command_service,
+        "begin_domain_command",
+        AsyncMock(
+            return_value=domain_command_service.DomainCommandHandle(
+                command_id=1,
+                actor="local-dev",
+                operation="admin.feature.create",
+                idempotency_key="95000000-0000-4000-8000-000000000001",
+                request_fingerprint="a" * 64,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        domain_command_service,
+        "complete_domain_command",
+        AsyncMock(),
+    )
+    return TestClient(
+        app,
+        headers={"Idempotency-Key": "95000000-0000-4000-8000-000000000001"},
+    )
 
 
 def _feature_row() -> AdminFeatureRow:

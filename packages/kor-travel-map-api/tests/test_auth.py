@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -1093,6 +1094,7 @@ def test_auth_event_records_authenticated_principal_not_body_actor(
 
     from kortravelmap.infra.auth_event_repo import AdminAuthEventRow
 
+    from kortravelmap.api import domain_command_service
     from kortravelmap.api.routers import admin_auth as admin_auth_mod
 
     captured: dict[str, Any] = {}
@@ -1114,8 +1116,28 @@ def test_auth_event_records_authenticated_principal_not_body_actor(
         )
 
     monkeypatch.setattr(admin_auth_mod, "record_admin_auth_event", _record)
+    monkeypatch.setattr(
+        domain_command_service,
+        "begin_domain_command",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
+        domain_command_service,
+        "complete_domain_command",
+        AsyncMock(),
+    )
+
+    class _Transaction:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
 
     class _CommitSession:
+        def begin(self) -> _Transaction:
+            return _Transaction()
+
         async def commit(self) -> None:
             return None
 
@@ -1130,6 +1152,7 @@ def test_auth_event_records_authenticated_principal_not_body_actor(
         headers={
             ADMIN_ACTOR_HEADER: "admin:real",
             ADMIN_PROXY_SECRET_HEADER: "proxy-secret",
+            "Idempotency-Key": "95000000-0000-4000-8000-000000000001",
         },
         json={
             "event_type": "login",

@@ -41,6 +41,9 @@ class CommandPolicy:
     kind: CommandPolicyKind
     reason: str
     operation: str | None = None
+    success_status: int | None = None
+    replay_headers: tuple[str, ...] = ()
+    fingerprint_headers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.kind in {
@@ -51,13 +54,47 @@ class CommandPolicy:
                 raise ValueError(f"{self.kind.value} policy requires operation")
         elif self.operation is not None:
             raise ValueError(f"{self.kind.value} policy must not declare operation")
+        if self.kind is CommandPolicyKind.DOMAIN_LEDGER:
+            if self.success_status is None:
+                raise ValueError("domain-ledger policy requires success_status")
+            unsupported = set(self.replay_headers) - {"ETag", "Location"}
+            if unsupported:
+                raise ValueError(
+                    f"unsupported terminal response headers: {sorted(unsupported)}"
+                )
+            unsupported_fingerprint_headers = set(self.fingerprint_headers) - {
+                "If-Match"
+            }
+            if unsupported_fingerprint_headers:
+                raise ValueError(
+                    "unsupported fingerprint headers: "
+                    f"{sorted(unsupported_fingerprint_headers)}"
+                )
+        elif (
+            self.success_status is not None
+            or self.replay_headers
+            or self.fingerprint_headers
+        ):
+            raise ValueError(
+                f"{self.kind.value} policy must not declare terminal response contract"
+            )
 
 
-def _domain(operation: str, reason: str) -> CommandPolicy:
+def _domain(
+    operation: str,
+    reason: str,
+    *,
+    success_status: int = 200,
+    replay_headers: tuple[str, ...] = (),
+    fingerprint_headers: tuple[str, ...] = (),
+) -> CommandPolicy:
     return CommandPolicy(
         kind=CommandPolicyKind.DOMAIN_LEDGER,
         operation=operation,
         reason=reason,
+        success_status=success_status,
+        replay_headers=replay_headers,
+        fingerprint_headers=fingerprint_headers,
     )
 
 
@@ -112,10 +149,14 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ("PATCH", "/v1/admin/features/{feature_id}"): _domain(
         "admin.feature.patch",
         _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
     ),
     ("DELETE", "/v1/admin/features/{feature_id}"): _domain(
         "admin.feature.delete",
         _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
     ),
     ("POST", "/v1/admin/features/{feature_id}/deactivate"): _domain(
         "admin.feature.deactivate",
@@ -124,7 +165,11 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     (
         "POST",
         "/v1/admin/features/change-requests/{request_id}/approve",
-    ): _domain("admin.feature-change.approve", _MUTATION_RESULT),
+    ): _domain(
+        "admin.feature-change.approve",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+    ),
     (
         "POST",
         "/v1/admin/features/change-requests/{request_id}/reject",
@@ -184,6 +229,7 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ("POST", "/v1/admin/curations"): _domain(
         "admin.curation-collection.create",
         _MUTATION_RESULT,
+        success_status=201,
     ),
     ("PATCH", "/v1/admin/curations/{collection_id}"): _domain(
         "admin.curation-collection.patch",
@@ -196,6 +242,7 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ("POST", "/v1/admin/curations/{collection_id}/items"): _domain(
         "admin.curation-item.create",
         _MUTATION_RESULT,
+        success_status=201,
     ),
     (
         "PATCH",
@@ -228,6 +275,7 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ("POST", "/v1/admin/offline-uploads"): _domain(
         "admin.offline-upload.create",
         _DESTRUCTIVE_RESULT,
+        success_status=201,
     ),
     ("DELETE", "/v1/admin/offline-uploads/{upload_id}"): _domain(
         "admin.offline-upload.delete",
