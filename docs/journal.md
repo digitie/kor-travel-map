@@ -28,27 +28,41 @@
   단순 context로 낮춘다.
 - H33은 unlink를 먼저 commit하고 ledger를 별도 transaction에 써, 후자 실패 시 감사 공백을
   남겼다. row lock·guarded UPDATE·advisory-serialized finding을 항목별 한 transaction으로
-  묶고 H36 이후 사실에 맞는 `resolved` 증거로 기록한다. 가드 또는 이미 해제 상태는 신규
-  finding을 만들지 않는다.
+  묶고 H36 이후 사실에 맞는 `resolved` 증거로 기록한다. 올바른 non-null 링크는 건드리지
+  않되, 이미 해제됐지만 ledger가 없는 대상은 멱등하게 `resolved` 증거를 복구한다.
 - H25B apply는 승인 key의 기존 `feature_id`가 틀려도 건너뛴 뒤 manifest를 다시 서명했다.
   `(collection_key, source_item_key, source_component_key)` 정확한 1회 출현과 기존 ID를
-  전 파일 쓰기 전에 검증하고 오류 시 CSV/manifest를 모두 보존한다.
+  전 파일 쓰기 전에 검증한다. 승인 전체를 메모리에서 변환·직렬화한 뒤 동일 디렉터리 임시
+  파일과 `os.replace`로 CSV/manifest를 교체해, 뒤쪽 malformed metadata도 부분 반영을
+  남기지 않는다. 실제로 바뀐 행 수는 필드 수가 아니라 행 단위로 센다.
 - 공개 노출 verifier는 feature/search HTTP 500과 빈 positive control도 성공으로 통과했다.
-  negative control 404, 각 표면의 200/body shape, 비어 있지 않은 검색 결과를 강제한다.
+  negative control 404, 각 표면의 200/body shape, 비어 있지 않은 검색 결과와 명시적
+  `feature_id` 필드를 강제한다.
+- 수동 검토 UI가 후보 ID를 축약 표시만 해 운영자가 연결할 수 없었다. 전체 ID와 기존
+  `CopyButton`을 노출하고 mocked UI 회귀로 고정했다.
 - #891이 가린 열린 H30B/C를 Lane A 순서에 복원하고 `tasks-done.md`에 들어온 열린 checkbox
   6개는 역사 bullet로 바꿨다. H11A/B 단일 PR 사용자 결정도 백로그 정본에 반영했다.
 
 회귀는 router의 주소 hint/name-only 상태, H33 transaction rollback·가드, H25B 잘못된 기존
-ID·중복 identity, verifier 500/빈 대조를 직접 고정한다.
+ID·중복 identity·후행 malformed metadata 원자성·행 단위 count, verifier 500/빈 대조/
+누락 `feature_id`를 직접 고정한다. 두 적대 리뷰어가 이 후속 delta를 최종 재검토한다.
 
-검증은 Python 회귀 **37 passed**, Ruff·mypy(173 files)·ESLint·OpenAPI/type drift green,
+검증은 Python 회귀 **38 passed**, Ruff·mypy(173 files)·ESLint·OpenAPI/type drift green,
 Vitest **254 passed**다. exact HEAD production image를 쓴 Mocked 최종 D checkpoint는
-**276/276**, expected/actual failure·flake·skip 0으로 통과했다. 기존 `ktm-tvn45-db`
+workers=4 두 번 모두 **276/276**, manifest expected/actual failure·flake 0으로 일치했다.
+다만 두 실행 모두 manifest 출력 뒤 runner가 nonzero로 끝났고, owned 자원·HEAD·source
+digest 사후 검사는 깨끗했다. 원인 진단용 workers=8에서는 변경과 무관한 기존
+`change-requests update/delete` spec 한 건이 timing 실패해 275/276이었다. 테스트 성공과
+checkpoint 프로세스 성공을 섞어 green으로 기록하지 않고 `T-VN-H37`로 후속한다.
+
+기존 `ktm-tvn45-db`
 (`0068_integrity_last_seen`)를 새 clone·restore·downgrade 없이 재사용한 파괴적 Live UI도
 공식 CSV 5개 preview/commit과 REST·관리자·지도 표면 **4/4**가 통과했다. 전체 item 3,530,
 active/source-present 3,530은 보존됐고 링크는 3,269→3,266으로 정확히 3개 줄어 이름 단독
 오링크가 재생성되지 않았음을 확인했다. 후보 container/network/image/listener는 0으로
-정리했고 clone은 healthy 상태로 다음 task에 재사용할 수 있다.
+정리했다. 후속 스크립트를 실제 clone에 재실행해 H33 ledger는 0→3→3으로 멱등 복구됐고,
+H25 resource aggregate hash `bfc3d558…`는 전후 동일하다. clone은 healthy 상태로 다음
+task에 재사용할 수 있다.
 
 ## 2026-07-30 (codex) — T-VN-49A/B/C/D 단일 PR 구현·최종 gate 완료
 

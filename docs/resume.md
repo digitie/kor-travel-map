@@ -22,15 +22,24 @@ finding 재생성, H25B apply의 잘못된 기존 링크 승인, public verifier
 같은 감사 PR에서 이름 단독 행을 `review_required`로 분리하고 주소 hint 유일 매칭은 복원한다.
 H33은 row lock·guarded unlink·resolved finding을 항목별 한 transaction으로 묶고, H25B는
 DB active identity 3-tuple의 정확한 1회 출현·기존 ID를 쓰기 전에 fail-closed 검증한다.
-verifier는 모든 HTTP/body shape와 비어 있지 않은 positive control을 강제한다. H30B/C와 Lane A
-순서를 다시 열고 완료 아카이브 checkbox도 일반 역사 bullet로 바꾼다.
+후속 적대 리뷰에서 이미 해제된 H33 대상의 누락 ledger 복구, H25B 전체 사전
+변환·직렬화와 원자 교체, 행 단위 변경 수, verifier의 명시적 `feature_id`, 수동 검토 후보의
+전체 ID·복사 동작까지 보강했다. H30B/C와 Lane A 순서를 다시 열고 완료 아카이브 checkbox도
+일반 역사 bullet로 바꾼다. 이 전체 후속 delta를 같은 두 리뷰어가 최종 재검토한다.
 
-Python 회귀 **37 passed**, Ruff·mypy 173 files·ESLint·OpenAPI/type drift, Vitest **254**,
-Mocked D **276/276**은 green이다. 기존 `ktm-tvn45-db`를 새 clone/restore/downgrade 없이
+Python 회귀 **38 passed**, Ruff·mypy 173 files·ESLint·OpenAPI/type drift, Vitest **254**는
+green이다. Mocked D workers=4 두 번은 모두 **276/276**와 manifest expected/actual
+failure·flake 0이었지만 runner가 manifest 뒤 nonzero로 끝나 checkpoint 전체 green으로
+부르지 않는다. owned 자원·HEAD·source digest는 깨끗했고, workers=8 진단에서는 기존
+`change-requests update/delete` timing 한 건이 실패했다. runner 종료 판정과 고병렬 flaky는
+`T-VN-H37`로 기록했다.
+
+기존 `ktm-tvn45-db`를 새 clone/restore/downgrade 없이
 재사용한 파괴적 curation Live UI도 공식 CSV preview/commit 포함 **4/4** 통과했다. item
 3,530과 active/source-present는 보존되고 링크만 3,269→3,266으로 줄어 오링크 3건의
-비재생성을 실증했다. 후보 자원은 모두 제거했고 clone은 `0068`, healthy라 다음 task에
-재사용 가능하다.
+비재생성을 실증했다. 후속 H33 실제 적용은 누락 ledger를 0→3으로 복구하고 재실행도 3을
+유지했으며 H25 resource aggregate hash `bfc3d558…`는 동일하다. 후보 자원은 모두 제거했고
+clone은 `0068`, healthy라 다음 task에 재사용 가능하다.
 
 **다음 한 작업**: 감사 수정 PR의 CI green·셀프 머지와 issue #893 close를 끝낸다. 이어
 사용자 지시대로 `T-VN-11A/B`를 한 브랜치·한 PR로 구현한다.
