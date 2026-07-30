@@ -17,6 +17,30 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-30 (codex) — T-VN-11A/B 5상태 batch 생산자·소비자 호환 완료
+
+- Map `POST /v1/features/batch`는 최대 200개 ID를 한 set-based snapshot query로 처리하고
+  입력 순서를 보존한다. `found`는 고정 `trip_card`, `retired|suppressed|missing`은 revision
+  tombstone, validator가 일치하면 `unchanged`를 반환한다. 중복 ID와 PostgreSQL `bigint`
+  범위 밖 revision은 422다.
+- OpenAPI runtime 경계는 정확한 `2^63-1`을 유지하되 JSON Schema maximum의 부동소수점
+  반올림을 피하려고 표준 `format: int64`와 정확한 설명을 쓴다. 200개 실데이터 EXPLAIN은
+  `feature.features` PK index를 사용하고 base feature sequential scan은 0이다.
+- PinVi는 다섯 arm을 exhaustively decode하고 `1..200` 설정을 fail-fast한다. cache는 refresh
+  generation과 revision fence로 늦게 도착한 응답의 rollback을 막고, terminal/missing도 bounded
+  negative record로 보존한다. transport 실패만 만료 snapshot을 `unverified`로 재사용한다.
+- 첫 적대 리뷰는 `FeatureTripCard.as_snapshot()`의 flat 좌표가 `tripMapPoints`의 canonical
+  `coord` 계약과 달라 모든 복원 마커를 제거하는 문제, out-of-order cache rollback,
+  chunk 상한·revision 범위·plan registry·문서 drift를 찾았다. 모두 회귀와 함께 수정했다.
+- Live 첫 재검증은 접근성 snapshot에 `1일 표시 장소 4곳`이 보이지만 문구가 두 sibling
+  element라 합친 text locator가 찾지 못했다. 테스트를 실제 DOM 경계인 `1일 표시`와
+  `장소 4곳`으로 나눠 실패 지점부터 재실행했고 **1 passed**다.
+- 기존 `ktm-tvn45-db`를 새로 복제하거나 복원하지 않았다. 종료·비공개 fixture를 만든 뒤
+  다섯 상태, 503 `unverified`, 회복을 검증하고 원본 SQL로 fixture만 복구했다. 전용 API/Web/
+  proxy container와 loopback listener는 0이며 clone은 healthy `0068`로 보존한다.
+- 서로 다른 저장소라 한 GitHub PR은 불가능하다. Map 생산자와 PinVi 소비자 PR을 동일
+  OpenAPI snapshot·Live 증거로 묶은 호환 쌍으로 취급하고 Map → PinVi 순서로 머지한다.
+
 ## 2026-07-30 (codex) — Claude PR #890/#891 사후 감사 정정
 
 추적 issue #893에서 Lane A a1 #890은 독립 리뷰어 2명, docs-only #891은 1명이 원 PR patch를

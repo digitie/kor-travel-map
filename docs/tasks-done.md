@@ -3,6 +3,29 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-30 — Lane B b1 T-VN-11A/B service batch 5상태 호환 쌍
+
+- [x] **T-VN-11A — Map 5-state batch projection**
+
+  service-token 전용 `POST /v1/features/batch`가 최대 200개 ID를 순서 보존 set-based
+  snapshot으로 조회한다. `found|retired|suppressed|missing|unchanged` 각 arm은 PostgreSQL
+  `bigint` 범위 revision을 가지며 `found`만 고정 `trip_card` projection을 반환한다. 중복 ID와
+  범위 밖 validator는 422, upstream DB 실패는 503이다. 200개 planner gate는 PK index와
+  frozen response shape를 검증한다.
+
+- [x] **T-VN-11B — PinVi typed consumer cutover**
+
+  PinVi는 같은 OpenAPI snapshot을 vendor해 다섯 arm을 exhaustively decode한다. 최대 200개
+  chunk, generation/revision fence를 가진 bounded LRU cache, transport-only `unverified`
+  fallback, Web·Map·Mobile 공용 상태 resolver와 canonical `coord` snapshot을 사용한다. 서로
+  다른 저장소라 하나의 GitHub PR 대신 생산자·소비자 호환 PR 쌍으로 검증하고 Map → PinVi
+  순서로 landing한다.
+
+적대 리뷰에서 지도 좌표 shape 불일치, out-of-order cache rollback, chunk 상한·revision 범위·
+plan registry·문서 drift를 찾아 모두 수정했다. 재사용 `ktm-tvn45-db`에서 다섯 상태와 강제
+503·복구를 파괴적 Live UI로 검증했고 지도 포인트 4곳도 확인했다. fixture는 원복하고 전용
+container/listener는 제거했으며 clone은 healthy `0068_integrity_last_seen`로 보존했다.
+
 ## 2026-07-30 — Lane B b0 T-VN-49A/B/C/D React 구조 debt 완결
 
 사용자 지시에 따라 네 단계는 브랜치와 PR을 나누지 않고 한 번에 구현·검증했다. 이 완료

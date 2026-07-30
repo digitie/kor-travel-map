@@ -39,7 +39,7 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - b0: [x] `T-VN-48D`(final exact Mocked/Live) →
     [x] `T-VN-49A/B/C/D`(React 구조 debt, 단일 PR)
-  - b1: [ ] `T-VN-11A/B`(service batch, 단일 PR) →
+  - b1: [x] `T-VN-11A/B`(service batch, 저장소별 호환 PR 쌍) →
     [ ] `T-VN-H37`(Mocked checkpoint 종료 판정·고병렬 flaky 진단) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
     [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
@@ -675,24 +675,7 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   post-review cleanup 잔여(ADR-045 VWorld 불투명 자격증명 hard-gate 등)는 PinVi 저장소가
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
 
-## Lane B 상세 — b1 PinVi 결합
-
-### T-VN-11 — service batch 5-state 계약
-
-현재 `features.py` batch는 `found/missing` 2-state이고 코드 주석도 5-state를 후속으로
-명시한다. producer 계약과 consumer cutover는 독립 검증 단위로 유지하되 사용자 지시에 따라
-T-VN-11A/B를 한 브랜치·한 PR로 landing한다.
-
-- [ ] T-VN-11A — **Map 5-state batch projection**
-
-  `found|retired|suppressed|missing|unchanged` item과 row revision을 한 set-based query snapshot에서
-  반환한다. 공개 projection과 tombstone/visibility 판정을 분리하고 upstream transport 실패를
-  `503`으로 모델링한다.
-
-- [ ] T-VN-11B — **PinVi typed consumer cutover**
-
-  PinVi가 5-state/revision을 exhaustively 처리하고 이전 2-state 추측을 제거한다. vendored
-  OpenAPI/consumer contract와 실제 compatible pair live를 같은 cutover에서 고정한다.
+## Lane B 상세 — b1 PinVi 결합·후속
 
 ### T-VN-H37 — Mocked checkpoint 종료 판정·고병렬 flaky 진단
 

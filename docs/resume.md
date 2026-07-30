@@ -10,6 +10,33 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-30 (codex) — Lane B b1 T-VN-11A/B 5상태 batch 호환 쌍 완료
+
+Map은 service-token 전용 `POST /v1/features/batch`를
+`found|retired|suppressed|missing|unchanged` discriminated union으로 전환했다. 최대 200개
+요청을 순서 보존 `unnest` 단일 snapshot query로 처리하고, 공개 projection·종료·비공개·
+tombstone 판정을 같은 statement 안에서 분리한다. 요청과 응답 revision은 PostgreSQL
+`bigint` 범위를 런타임에서 정확히 제한하고 OpenAPI에는 `int64`로 고정했다. 200개 plan
+registry는 `feature.features` PK index 사용과 응답 shape를 고정한다.
+
+PinVi 호환 소비자는 정확히 같은 OpenAPI snapshot을 vendor하고 5상태 typed decode,
+`1..200` chunk 경계, generation/revision fence를 가진 bounded LRU cache, Web·Map·Mobile 공용
+표시 resolver로 전환했다. 적대 리뷰에서 flat `lon/lat` snapshot 때문에 지도 마커가 사라지는
+문제, out-of-order 응답이 최신 revision/tombstone을 되돌리는 문제, 200개 초과 설정과
+PostgreSQL 범위 밖 revision, plan registry 누락을 찾아 모두 보강했다. 저장소가 서로 달라
+물리적으로 한 PR이 될 수 없으므로 생산자와 소비자 두 PR을 하나의 호환 쌍으로 묶고
+Map → PinVi 순서로 머지한다.
+
+재사용 `ktm-tvn45-db`에서 새 clone·migration·downgrade 없이 실데이터 다섯 상태와 강제
+upstream 장애·복구를 만들었다. 파괴적 Live UI는 5상태 문구·broken count·저장 snapshot
+fallback·복구와 지도 포인트 **4곳**을 통과했다. 변형한 fixture는 원복하고 격리
+container/listener는 모두 제거했으며 clone은 `0068_integrity_last_seen`, healthy 상태라 다음
+task에 재사용할 수 있다.
+
+**다음 한 작업**: 두 호환 PR을 Map → PinVi 순서로 CI green·셀프 머지한다. 머지 뒤 별도
+Claude Code PR 사후 감사를 수행하고, Lane B `T-VN-H37`의 Mocked checkpoint 종료 판정과
+고병렬 flaky 진단으로 이동한다.
+
 ## 2026-07-30 (codex) — Claude PR #890/#891 사후 감사 정정 → H11A/B
 
 Lane A a1 PR #890은 사용자 최신 규칙에 따라 독립 적대 리뷰어 2명, docs-only #891은
