@@ -39,8 +39,13 @@ TARGET_FEATURES = {
 BOGUS_FEATURE = "f_0000000000_p_ffffffffffffffff"
 
 TARGET_ITEMS = {
-    "korean-tourism-100:2023-2024": {"kt100-2023-2024-025"},
-    "korean-tourism-100:2025-2026": {"kt100-2025-2026-024", "kt100-2025-2026-036"},
+    "korean-tourism-100:2023-2024": {
+        ("kt100-2023-2024-025", "primary"),
+    },
+    "korean-tourism-100:2025-2026": {
+        ("kt100-2025-2026-024", "primary"),
+        ("kt100-2025-2026-036", "primary"),
+    },
 }
 
 
@@ -106,7 +111,7 @@ def main() -> int:
         if isinstance(c, dict) and isinstance(c.get("collection_key"), str)
     }
 
-    for key, item_keys in TARGET_ITEMS.items():
+    for key, item_identities in TARGET_ITEMS.items():
         col = by_key.get(key)
         if col is None:
             failures.append(f"{key}: 공개 컬렉션 목록에 없다")
@@ -126,33 +131,47 @@ def main() -> int:
             failures.append(f"{key}: 상세 positive control item이 비어 있다")
             continue
         found = {
-            item["external_item_id"]
+            (item["external_item_id"], item["external_component_id"])
             for item in items
             if isinstance(item, dict)
             and isinstance(item.get("external_item_id"), str)
-        } & item_keys
-        missing = item_keys - found
+            and isinstance(item.get("external_component_id"), str)
+        } & item_identities
+        missing = item_identities - found
         if missing:
             # item이 사라졌다면 해제가 아니라 삭제를 한 것이다 — 그건 실패다.
-            failures.append(f"{key}: item이 응답에서 사라졌다 {sorted(missing)}")
+            failures.append(
+                f"{key}: item/component가 응답에서 사라졌다 {sorted(missing)}"
+            )
         for item in items:
             if not isinstance(item, dict):
                 failures.append(f"{key}: 상세 item shape가 올바르지 않다")
                 continue
             item_key = item.get("external_item_id")
-            if item_key not in item_keys:
+            component_key = item.get("external_component_id")
+            identity = (item_key, component_key)
+            if identity not in item_identities:
                 continue
             if "feature_id" not in item:
-                failures.append(f"{item_key}: feature_id 필드가 없다")
+                failures.append(
+                    f"{item_key}/{component_key}: feature_id 필드가 없다"
+                )
                 continue
             fid = item["feature_id"]
             if fid is not None and not isinstance(fid, str):
-                failures.append(f"{item_key}: feature_id 타입이 올바르지 않다")
+                failures.append(
+                    f"{item_key}/{component_key}: feature_id 타입이 올바르지 않다"
+                )
                 continue
             mark = "링크 없음(기대)" if fid is None else f"★ 아직 링크됨 {fid}"
-            print(f"    {item_key} {item.get('place_name')}: {mark}")
+            print(
+                f"    {item_key}/{component_key} "
+                f"{item.get('place_name')}: {mark}"
+            )
             if fid is not None:
-                failures.append(f"{item_key}: 아직 {fid}에 링크됨")
+                failures.append(
+                    f"{item_key}/{component_key}: 아직 {fid}에 링크됨"
+                )
 
     print("\n=== 3. 이름 검색에 오링크 feature가 남아 있는가 ===")
     for q, fid in (("남이섬", "f_1114010100_p_a11c2e739c5676d2"),):

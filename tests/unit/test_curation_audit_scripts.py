@@ -434,8 +434,12 @@ def test_h33_public_verifier_rejects_500_and_empty_positive_control(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     collections = [
-        {"collection_key": key, "collection_id": key, "item_count": len(item_keys)}
-        for key, item_keys in h33_verify.TARGET_ITEMS.items()
+        {
+            "collection_key": key,
+            "collection_id": key,
+            "item_count": len(item_identities),
+        }
+        for key, item_identities in h33_verify.TARGET_ITEMS.items()
     ]
 
     def fake_get(path: str) -> tuple[int, dict]:
@@ -450,8 +454,12 @@ def test_h33_public_verifier_rejects_500_and_empty_positive_control(
             return 200, {
                 "data": {
                     "items": [
-                        {"external_item_id": item_key, "feature_id": None}
-                        for item_key in h33_verify.TARGET_ITEMS[key]
+                        {
+                            "external_item_id": item_key,
+                            "external_component_id": component_key,
+                            "feature_id": None,
+                        }
+                        for item_key, component_key in h33_verify.TARGET_ITEMS[key]
                     ]
                 }
             }
@@ -469,8 +477,12 @@ def test_h33_public_verifier_requires_target_feature_id_field(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     collections = [
-        {"collection_key": key, "collection_id": key, "item_count": len(item_keys)}
-        for key, item_keys in h33_verify.TARGET_ITEMS.items()
+        {
+            "collection_key": key,
+            "collection_id": key,
+            "item_count": len(item_identities),
+        }
+        for key, item_identities in h33_verify.TARGET_ITEMS.items()
     ]
 
     def fake_get(path: str) -> tuple[int, dict]:
@@ -483,8 +495,11 @@ def test_h33_public_verifier_requires_target_feature_id_field(
             return 200, {
                 "data": {
                     "items": [
-                        {"external_item_id": item_key}
-                        for item_key in h33_verify.TARGET_ITEMS[key]
+                        {
+                            "external_item_id": item_key,
+                            "external_component_id": component_key,
+                        }
+                        for item_key, component_key in h33_verify.TARGET_ITEMS[key]
                     ]
                 }
             }
@@ -499,3 +514,106 @@ def test_h33_public_verifier_requires_target_feature_id_field(
     monkeypatch.setattr(h33_verify, "get", fake_get)
 
     assert h33_verify.main() == 1
+
+
+@pytest.mark.unit
+def test_h33_public_verifier_rejects_target_replaced_by_null_sibling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing_identity = ("kt100-2025-2026-024", "primary")
+    collections = [
+        {
+            "collection_key": key,
+            "collection_id": key,
+            "item_count": len(item_identities),
+        }
+        for key, item_identities in h33_verify.TARGET_ITEMS.items()
+    ]
+
+    def fake_get(path: str) -> tuple[int, dict]:
+        if path.startswith("/v1/curations/features/"):
+            return 404, {}
+        if path == "/v1/curations/collections?page_size=500":
+            return 200, {"data": collections}
+        if path.startswith("/v1/curations/collections/"):
+            key = path.rsplit("/", 1)[-1]
+            items = [
+                {
+                    "external_item_id": item_key,
+                    "external_component_id": component_key,
+                    "feature_id": None,
+                }
+                for item_key, component_key in h33_verify.TARGET_ITEMS[key]
+                if (item_key, component_key) != missing_identity
+            ]
+            if key == "korean-tourism-100:2025-2026":
+                items.append(
+                    {
+                        "external_item_id": missing_identity[0],
+                        "external_component_id": "component-02",
+                        "feature_id": None,
+                    }
+                )
+            return 200, {"data": {"items": items}}
+        if path.startswith("/v1/curations?q="):
+            return 200, {
+                "data": [
+                    {"feature": {"feature_id": "feature:unrelated"}},
+                ]
+            }
+        raise AssertionError(path)
+
+    monkeypatch.setattr(h33_verify, "get", fake_get)
+
+    assert h33_verify.main() == 1
+
+
+@pytest.mark.unit
+def test_h33_public_verifier_ignores_legitimate_linked_sibling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sibling_item = "kt100-2025-2026-024"
+    collections = [
+        {
+            "collection_key": key,
+            "collection_id": key,
+            "item_count": len(item_identities),
+        }
+        for key, item_identities in h33_verify.TARGET_ITEMS.items()
+    ]
+
+    def fake_get(path: str) -> tuple[int, dict]:
+        if path.startswith("/v1/curations/features/"):
+            return 404, {}
+        if path == "/v1/curations/collections?page_size=500":
+            return 200, {"data": collections}
+        if path.startswith("/v1/curations/collections/"):
+            key = path.rsplit("/", 1)[-1]
+            items = [
+                {
+                    "external_item_id": item_key,
+                    "external_component_id": component_key,
+                    "feature_id": None,
+                }
+                for item_key, component_key in h33_verify.TARGET_ITEMS[key]
+            ]
+            if key == "korean-tourism-100:2025-2026":
+                items.append(
+                    {
+                        "external_item_id": sibling_item,
+                        "external_component_id": "component-02",
+                        "feature_id": "feature:legitimate",
+                    }
+                )
+            return 200, {"data": {"items": items}}
+        if path.startswith("/v1/curations?q="):
+            return 200, {
+                "data": [
+                    {"feature": {"feature_id": "feature:unrelated"}},
+                ]
+            }
+        raise AssertionError(path)
+
+    monkeypatch.setattr(h33_verify, "get", fake_get)
+
+    assert h33_verify.main() == 0
