@@ -179,6 +179,14 @@ function failureErrorText(error: TestError | undefined): string {
     .join("\n");
 }
 
+function failureErrorIdentity(
+  error: TestError | undefined,
+): string | undefined {
+  const message = stripVTControlCharacters(error?.message ?? "");
+  const value = error?.value ?? "";
+  return message || value ? [message, value].join("\n") : undefined;
+}
+
 function failedStepPaths(
   steps: TestStep[],
   parents: TestStep[] = [],
@@ -227,10 +235,20 @@ function diagnosticStepPath(
   return deepestLeaf?.stepPath ?? failure.stepPath;
 }
 
-function isPlaywrightTimeoutEnvelope(error: TestError): boolean {
-  return /^Test timeout of \d+ms exceeded(?: while running "(?:beforeAll|beforeEach|afterEach|afterAll)" hook)?\.$/u.test(
+function playwrightTimeoutEnvelopeMs(
+  error: TestError,
+): string | undefined {
+  return /^Test timeout of (\d+)ms exceeded(?: while running "(?:beforeAll|beforeEach|afterEach|afterAll)" hook)?\.$/u.exec(
     stripVTControlCharacters(error.message ?? ""),
-  );
+  )?.[1];
+}
+
+function playwrightTimeoutEvidenceMs(
+  error: TestError,
+): string | undefined {
+  return /Test timeout of (\d+)ms exceeded/u.exec(
+    stripVTControlCharacters(error.message ?? ""),
+  )?.[1];
 }
 
 function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
@@ -268,11 +286,31 @@ function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
     const excludedEnvelopeTexts = new Set<string>();
     const evidence = result.errors.flatMap((error, errorIndex) => {
       const matchingStepPath = matchingStepPaths[errorIndex];
+      const envelopeTimeoutMs = playwrightTimeoutEnvelopeMs(error);
       if (
         result.status === "timedOut" &&
-        isPlaywrightTimeoutEnvelope(error) &&
+        envelopeTimeoutMs !== undefined &&
         [...matchedLeafErrorIndexes].some(
-          (leafErrorIndex) => leafErrorIndex !== errorIndex,
+          (leafErrorIndex) => {
+            if (leafErrorIndex === errorIndex) return false;
+            if (
+              playwrightTimeoutEvidenceMs(
+                result.errors[leafErrorIndex]!,
+              ) !== envelopeTimeoutMs
+            ) {
+              return false;
+            }
+            if (!matchingStepPath) return true;
+            const leafStepPath =
+              matchingStepPaths[leafErrorIndex]?.stepPath;
+            return (
+              leafStepPath !== undefined &&
+              isStrictStepAncestor(
+                matchingStepPath.stepPath,
+                leafStepPath,
+              )
+            );
+          },
         )
       ) {
         excludedEnvelopeTexts.add(failureErrorText(error));
@@ -282,7 +320,7 @@ function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
         errorIndex,
         retry: result.retry,
         status: result.status,
-        stepPath: diagnosticStepPath(matchingStepPath, stepPaths),
+        stepPath: matchingStepPath?.stepPath ?? [],
         text: failureErrorText(error),
       }];
     });
@@ -308,18 +346,39 @@ function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
       );
       if (duplicatesMatchedResult) continue;
       if (
-        isPlaywrightTimeoutEnvelope(
+        playwrightTimeoutEnvelopeMs(
           failedStepPath.stepPath.at(-1)?.error ?? {},
-        ) &&
+        ) !== undefined &&
         excludedEnvelopeTexts.has(text)
       ) {
         continue;
       }
+      const parentIdentity = failureErrorIdentity(
+        failedStepPath.stepPath.at(-1)?.error,
+      );
+      const propagatedToMatchedDescendant =
+        parentIdentity !== undefined &&
+        failedStepPath.hasFailedDescendant &&
+        stepPaths.some(
+          (candidate) =>
+            !candidate.hasFailedDescendant &&
+            isStrictStepAncestor(
+              failedStepPath.stepPath,
+              candidate.stepPath,
+            ) &&
+            matchingStepPaths.includes(candidate) &&
+            parentIdentity ===
+              failureErrorIdentity(
+                candidate.stepPath.at(-1)?.error,
+              ),
+        );
       evidence.push({
         errorIndex: nextStepOnlyErrorIndex,
         retry: result.retry,
         status: result.status,
-        stepPath: diagnosticStepPath(failedStepPath, stepPaths),
+        stepPath: propagatedToMatchedDescendant
+          ? diagnosticStepPath(failedStepPath, stepPaths)
+          : failedStepPath.stepPath,
         text,
       });
       nextStepOnlyErrorIndex += 1;

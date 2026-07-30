@@ -300,7 +300,7 @@ describe("mocked failure retry/error provenance", () => {
         causeMatched: false,
         errorIndex: 0,
         retry: 0,
-        stageMatched: true,
+        stageMatched: false,
         statusMatched: true,
       }),
     ]);
@@ -334,6 +334,100 @@ describe("mocked failure retry/error provenance", () => {
         "interaction",
       ),
     ).toEqual([]);
+  });
+
+  it("beforeEach leaf가 별도 afterEach timeout envelope를 숨기지 않는다", () => {
+    const beforeEachTimeout = {
+      message:
+        'Test timeout of 1200ms exceeded while running "beforeEach" hook.',
+    };
+    const locatorTimeout = {
+      message:
+        "locator.fill: Test timeout of 1200ms exceeded. waiting for locator('#admin-username')",
+    };
+    const afterEachTimeout = {
+      message:
+        'Test timeout of 1200ms exceeded while running "afterEach" hook.',
+    };
+    const beforeHooks = step(
+      "hook",
+      "Before Hooks",
+      beforeEachTimeout,
+      [
+        step("hook", "beforeEach hook", beforeEachTimeout, [
+          step(
+            "pw:api",
+            "Fill <redacted> locator('#admin-username')",
+            locatorTimeout,
+          ),
+        ]),
+      ],
+    );
+    const afterHooks = step(
+      "hook",
+      "After Hooks",
+      afterEachTimeout,
+      [step("hook", "afterEach hook", afterEachTimeout)],
+    );
+    const mismatches = expectedFailureEvidenceMismatches(
+      [
+        result(
+          0,
+          [beforeEachTimeout, locatorTimeout, afterEachTimeout],
+          [beforeHooks, afterHooks],
+          "timedOut",
+        ),
+      ],
+      "#admin-username",
+      "beforeEach.auth",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 2,
+        retry: 0,
+        stageMatched: false,
+        statusMatched: true,
+      }),
+    ]);
+  });
+
+  it("soft assertion 뒤 독립 body timeout을 같은 attempt leaf로 숨기지 않는다", () => {
+    const bodyTimeout = {
+      message: "Test timeout of 1200ms exceeded.",
+    };
+    const softAssertion = {
+      message: "expected render failure",
+    };
+    const mismatches = expectedFailureEvidenceMismatches(
+      [
+        result(
+          0,
+          [bodyTimeout, softAssertion],
+          [
+            step(
+              "expect",
+              'Expect "toBeVisible"',
+              softAssertion,
+            ),
+          ],
+          "timedOut",
+        ),
+      ],
+      "expected render failure",
+      "render.assertion",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: false,
+        errorIndex: 0,
+        retry: 0,
+        stageMatched: false,
+        statusMatched: true,
+      }),
+    ]);
   });
 
   it("오류 증거가 없는 failed attempt는 permissive regex로도 인정하지 않는다", () => {
@@ -422,7 +516,36 @@ describe("mocked failure retry/error provenance", () => {
         causeMatched: false,
         errorIndex: 1,
         retry: 0,
-        stageMatched: true,
+        stageMatched: false,
+      }),
+    ]);
+  });
+
+  it("같은 regex를 공유하는 독립 parent result에는 leaf stage를 빌려주지 않는다", () => {
+    const childError = {
+      message: "expected render failure at assertion",
+    };
+    const parentError = {
+      message: "expected render failure during wrapper cleanup",
+    };
+    const nested = step(
+      "test.step",
+      "render wrapper",
+      parentError,
+      [step("expect", 'Expect "toBeVisible"', childError)],
+    );
+    const mismatches = expectedFailureEvidenceMismatches(
+      [result(0, [childError, parentError], [nested])],
+      "expected render failure",
+      "render.assertion",
+    );
+
+    expect(mismatches).toEqual([
+      expect.objectContaining({
+        causeMatched: true,
+        errorIndex: 1,
+        retry: 0,
+        stageMatched: false,
       }),
     ]);
   });
