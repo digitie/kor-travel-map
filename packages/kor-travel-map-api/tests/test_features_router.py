@@ -935,6 +935,67 @@ def test_features_batch_rejects_duplicate_ids_before_db(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("revision", "expected_status"),
+    [
+        (9_223_372_036_854_775_807, 200),
+        (9_223_372_036_854_775_808, 422),
+    ],
+)
+def test_features_batch_bounds_known_revision_to_postgres_bigint(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    revision: int,
+    expected_status: int,
+) -> None:
+    from kortravelmap.infra.feature_repo import FeatureBatchItemRow
+
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    called = False
+
+    async def _get_items(
+        _session: Any,
+        items: tuple[tuple[str, int | None], ...],
+    ) -> tuple[FeatureBatchItemRow, ...]:
+        nonlocal called
+        called = True
+        assert items == (("boundary", 9_223_372_036_854_775_807),)
+        return (
+            FeatureBatchItemRow(
+                feature_id="boundary",
+                state="unchanged",
+                row_revision=9_223_372_036_854_775_807,
+                trip_card=None,
+            ),
+        )
+
+    monkeypatch.setattr(features_mod.feature_repo, "get_service_feature_batch_items", _get_items)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        response = client.post(
+            "/v1/features/batch",
+            json={
+                "items": [
+                    {
+                        "feature_id": "boundary",
+                        "known_row_revision": revision,
+                    }
+                ]
+            },
+        )
+        assert response.status_code == expected_status
+        assert called is (expected_status == 200)
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
 def test_search_features_maps_page_and_requires_scope(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

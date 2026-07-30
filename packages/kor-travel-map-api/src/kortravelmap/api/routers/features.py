@@ -416,6 +416,7 @@ class FeatureBatchRequestItem(BaseModel):
     known_row_revision: int | None = Field(
         default=None,
         ge=1,
+        le=9_223_372_036_854_775_807,
         description="소비자가 보유한 trip_card의 row_revision. 일치하면 unchanged.",
     )
 

@@ -29,6 +29,7 @@ from kortravelmap.infra.feature_repo import (
     _GET_PUBLIC_FEATURE_SQL,
     _GET_PUBLIC_FEATURES_BY_IDS_SQL,
     _NEARBY_COORD_DISTANCE_SQL,
+    _SERVICE_FEATURE_BATCH_SQL,
 )
 
 if TYPE_CHECKING:
@@ -138,6 +139,15 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
         "public batch (ANY ids)",
         _GET_PUBLIC_FEATURES_BY_IDS_SQL,
         {"feature_ids": [f"perf:f:{i:06d}" for i in range(1, 51)]},
+        expected_indexes=("pk_features",),
+    ),
+    HotQuery(
+        "service feature batch 5-state (200)",
+        _SERVICE_FEATURE_BATCH_SQL,
+        {
+            "feature_ids": [f"perf:f:{i:06d}" for i in range(1, 201)],
+            "known_row_revisions": [None] * 200,
+        },
         expected_indexes=("pk_features",),
     ),
     HotQuery(

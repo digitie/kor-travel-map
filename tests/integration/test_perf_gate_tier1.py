@@ -114,6 +114,19 @@ _FROZEN_SHAPES: dict[str, tuple[str, ...]] = {
         "updated_at",
         "urls",
     ),
+    "service feature batch 5-state (200)": (
+        "address",
+        "category",
+        "feature_id",
+        "kind",
+        "lat",
+        "lon",
+        "marker_color",
+        "marker_icon",
+        "name",
+        "row_revision",
+        "state",
+    ),
     "category counts (GROUP BY)": ("category", "n"),
 }
 
