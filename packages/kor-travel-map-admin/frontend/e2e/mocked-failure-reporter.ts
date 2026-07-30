@@ -4,12 +4,15 @@ import type {
   Reporter,
   Suite,
   TestCase,
+  TestError,
+  TestResult,
   TestStep,
 } from "@playwright/test/reporter";
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 type Checkpoint = "A" | "B" | "C" | "D";
 export type FailureStage =
@@ -157,39 +160,236 @@ function validateManifest(manifest: FailureManifest): void {
   }
 }
 
-interface FirstFailureEvidence {
+interface FailureEvidence {
+  causeDepth: number;
+  errorIndex: number;
+  retry: number;
+  status: TestResult["status"];
   stepPath: TestStep[];
   text: string;
 }
 
-function firstFailedStepPath(
-  steps: TestStep[],
-  parents: TestStep[] = [],
-): TestStep[] {
-  for (const step of steps) {
-    if (!step.error) continue;
-    const currentPath = [...parents, step];
-    const childPath = firstFailedStepPath(step.steps, currentPath);
-    return childPath.length > 0 ? childPath : currentPath;
-  }
-  return [];
+interface FailedStepPath {
+  hasFailedDescendant: boolean;
+  stepPath: TestStep[];
 }
 
-function firstFailureEvidence(test: TestCase): FirstFailureEvidence {
-  const firstFailureResult = test.results.find(
-    (result) => result.status !== "passed" && result.status !== "skipped",
+interface ResultErrorEntry {
+  causeDepth: number;
+  error: TestError;
+  rootIndex: number;
+}
+
+interface StepErrorEntry {
+  causeDepth: number;
+  error: TestError;
+  failure: FailedStepPath;
+}
+
+function failureErrorText(error: TestError | undefined): string {
+  return [error?.message, error?.stack, error?.value]
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
+}
+
+function failureErrorChain(error: TestError): TestError[] {
+  const chain: TestError[] = [];
+  const seen = new Set<TestError>();
+  let current: TestError | undefined = error;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    chain.push(current);
+    current = current.cause;
+  }
+  return chain;
+}
+
+function failedStepPaths(
+  steps: TestStep[],
+  parents: TestStep[] = [],
+): FailedStepPath[] {
+  const paths: FailedStepPath[] = [];
+  for (const step of steps) {
+    const currentPath = [...parents, step];
+    const childPaths = failedStepPaths(step.steps, currentPath);
+    if (step.error) {
+      paths.push({
+        hasFailedDescendant: childPaths.length > 0,
+        stepPath: currentPath,
+      });
+    }
+    paths.push(...childPaths);
+  }
+  return paths;
+}
+
+function isStrictStepAncestor(
+  ancestor: TestStep[],
+  descendant: TestStep[],
+): boolean {
+  return (
+    ancestor.length < descendant.length &&
+    ancestor.every((step, index) => descendant[index] === step)
   );
-  const stepPath = firstFailureResult
-    ? firstFailedStepPath(firstFailureResult.steps)
-    : [];
-  const firstFailure =
-    stepPath.at(-1)?.error ?? firstFailureResult?.errors.at(0);
-  return {
-    stepPath,
-    text: [firstFailure?.message, firstFailure?.stack]
-      .filter((value): value is string => Boolean(value))
-      .join("\n"),
-  };
+}
+
+function playwrightTimeoutEnvelopeMs(
+  error: TestError,
+): string | undefined {
+  return /^Test timeout of (\d+)ms exceeded(?: while running "(?:beforeAll|beforeEach|afterEach|afterAll)" hook)?\.$/u.exec(
+    stripVTControlCharacters(error.message ?? ""),
+  )?.[1];
+}
+
+function playwrightTimeoutEvidenceMs(
+  error: TestError,
+): string | undefined {
+  return /Test timeout of (\d+)ms exceeded/u.exec(
+    stripVTControlCharacters(error.message ?? ""),
+  )?.[1];
+}
+
+function failureEvidence(results: readonly TestResult[]): FailureEvidence[] {
+  return results.flatMap((result) => {
+    if (result.status === "passed") {
+      return [];
+    }
+
+    const stepPaths = failedStepPaths(result.steps);
+    const stepErrorEntries = stepPaths.flatMap((failure) =>
+      failureErrorChain(failure.stepPath.at(-1)!.error!).map(
+        (error, causeDepth): StepErrorEntry => ({
+          causeDepth,
+          error,
+          failure,
+        }),
+      ),
+    );
+    const unmatchedStepErrors = new Set(stepErrorEntries);
+    const resultErrorEntries = result.errors.flatMap(
+      (error, rootIndex): ResultErrorEntry[] =>
+        failureErrorChain(error).map((cause, causeDepth) => ({
+          causeDepth,
+          error: cause,
+          rootIndex,
+        })),
+    );
+    const matchingStepErrors = resultErrorEntries.map(({ error }) => {
+      const text = failureErrorText(error);
+      const matchingStepError = stepErrorEntries
+        .filter(
+          (entry) => failureErrorText(entry.error) === text,
+        )
+        .sort(
+          (left, right) =>
+            right.failure.stepPath.length -
+            left.failure.stepPath.length,
+        )
+        .find((entry) => unmatchedStepErrors.has(entry));
+      if (matchingStepError) {
+        unmatchedStepErrors.delete(matchingStepError);
+      }
+      return matchingStepError;
+    });
+    const matchedLeafErrorIndexes = new Set(
+      matchingStepErrors.flatMap((matchingStepError, errorIndex) =>
+        matchingStepError &&
+        !matchingStepError.failure.hasFailedDescendant
+          ? [errorIndex]
+          : [],
+      ),
+    );
+    const excludedEnvelopeTexts = new Set<string>();
+    const evidence = resultErrorEntries.flatMap(
+      (entry, errorIndex) => {
+        const matchingStepError = matchingStepErrors[errorIndex];
+        const envelopeTimeoutMs = playwrightTimeoutEnvelopeMs(
+          entry.error,
+        );
+        if (
+          result.status === "timedOut" &&
+          envelopeTimeoutMs !== undefined &&
+          [...matchedLeafErrorIndexes].some(
+            (leafErrorIndex) => {
+              if (leafErrorIndex === errorIndex) return false;
+              if (
+                playwrightTimeoutEvidenceMs(
+                  resultErrorEntries[leafErrorIndex]!.error,
+                ) !== envelopeTimeoutMs
+              ) {
+                return false;
+              }
+              const leafEntry = resultErrorEntries[leafErrorIndex]!;
+              if (
+                leafEntry.rootIndex === entry.rootIndex &&
+                leafEntry.causeDepth > entry.causeDepth
+              ) {
+                return true;
+              }
+              if (!matchingStepError) return true;
+              const leafStepPath =
+                matchingStepErrors[leafErrorIndex]?.failure.stepPath;
+              return (
+                leafStepPath !== undefined &&
+                isStrictStepAncestor(
+                  matchingStepError.failure.stepPath,
+                  leafStepPath,
+                )
+              );
+            },
+          )
+        ) {
+          excludedEnvelopeTexts.add(failureErrorText(entry.error));
+          return [];
+        }
+        return [{
+          causeDepth: entry.causeDepth,
+          errorIndex: entry.rootIndex,
+          retry: result.retry,
+          status: result.status,
+          stepPath: matchingStepError?.failure.stepPath ?? [],
+          text: failureErrorText(entry.error),
+        }];
+      },
+    );
+
+    let nextStepOnlyErrorIndex = result.errors.length;
+    const stepOnlyErrorIndexes = new Map<FailedStepPath, number>();
+    for (const { causeDepth, error, failure } of unmatchedStepErrors) {
+      const text = failureErrorText(error);
+      if (
+        playwrightTimeoutEnvelopeMs(error) !== undefined &&
+        excludedEnvelopeTexts.has(text)
+      ) {
+        continue;
+      }
+      let errorIndex = stepOnlyErrorIndexes.get(failure);
+      if (errorIndex === undefined) {
+        errorIndex = nextStepOnlyErrorIndex;
+        stepOnlyErrorIndexes.set(failure, errorIndex);
+        nextStepOnlyErrorIndex += 1;
+      }
+      evidence.push({
+        causeDepth,
+        errorIndex,
+        retry: result.retry,
+        status: result.status,
+        stepPath: failure.stepPath,
+        text,
+      });
+    }
+    if (evidence.length === 0) {
+      evidence.push({
+        causeDepth: 0,
+        errorIndex: 0,
+        retry: result.retry,
+        status: result.status,
+        stepPath: [],
+        text: "",
+      });
+    }
+    return evidence;
+  });
 }
 
 function isHookStep(step: TestStep): boolean {
@@ -212,7 +412,6 @@ function serializedStepPath(stepPath: TestStep[]) {
           line: step.location.line,
         }
       : null,
-    title: step.title,
   }));
 }
 
@@ -244,6 +443,45 @@ export function firstFailureStageMatches(
     case "request.assertion":
       return !hasHook && stepPath.some(isRequestAssertionStep);
   }
+}
+
+export function expectedFailureEvidenceMismatches(
+  results: readonly TestResult[],
+  errorPattern: string,
+  failureStage: FailureStage,
+) {
+  const expectedCause = new RegExp(errorPattern, "u");
+  const evidence = failureEvidence(results);
+  if (evidence.length === 0) {
+    const lastResult = results.at(-1);
+    return [
+      {
+        causeDepth: -1,
+        causeMatched: false,
+        errorIndex: -1,
+        failureStepPath: [],
+        retry: lastResult?.retry ?? -1,
+        stageMatched: false,
+        status: lastResult?.status ?? "missing",
+        statusMatched: false,
+      },
+    ];
+  }
+  return evidence
+    .map(({ causeDepth, errorIndex, retry, status, stepPath, text }) => ({
+      causeDepth,
+      causeMatched: text.length > 0 && expectedCause.test(text),
+      errorIndex,
+      failureStepPath: serializedStepPath(stepPath),
+      retry,
+      stageMatched: firstFailureStageMatches(failureStage, stepPath),
+      status,
+      statusMatched: status === "failed" || status === "timedOut",
+    }))
+    .filter(
+      ({ causeMatched, stageMatched, statusMatched }) =>
+        !causeMatched || !stageMatched || !statusMatched,
+    );
 }
 
 class MockedFailureReporter implements Reporter {
@@ -360,6 +598,10 @@ class MockedFailureReporter implements Reporter {
           )
           .map(({ key }) => key),
       );
+      const expectedFailureFingerprints = new Set([
+        ...expectedFailures,
+        ...expectedFlakes,
+      ]);
       const unexpectedFailures = new Set(
         this.tests
           .filter((test) => test.outcome() === "unexpected")
@@ -383,30 +625,27 @@ class MockedFailureReporter implements Reporter {
       const testByIdentity = new Map(
         this.tests.map((test) => [testIdentity(test).key, test]),
       );
-      const mismatchedExpectedFailureCauses = manifestTests
-        .filter(({ key }) => expectedFailures.has(key))
-        .map(({ difference, errorPattern, firstFailureStage, key }) => {
+      const mismatchedExpectedFailureEvidence = manifestTests
+        .filter(({ key }) => expectedFailureFingerprints.has(key))
+        .flatMap(({ difference, errorPattern, firstFailureStage, key }) => {
           const test = testByIdentity.get(key);
-          const evidence =
-            test === undefined
-              ? { stepPath: [], text: "" }
-              : firstFailureEvidence(test);
-          return {
-            causeMatched: new RegExp(errorPattern, "u").test(evidence.text),
+          return expectedFailureEvidenceMismatches(
+            test?.results ?? [],
+            errorPattern,
+            firstFailureStage,
+          ).map((mismatch) => ({
+            ...mismatch,
             difference,
-            firstFailureStepPath: serializedStepPath(evidence.stepPath),
             firstFailureStage,
             key,
-            stageMatched: firstFailureStageMatches(
-              firstFailureStage,
-              evidence.stepPath,
-            ),
-          };
+          }));
         })
-        .filter(
-          ({ causeMatched, stageMatched }) => !causeMatched || !stageMatched,
-        )
-        .sort((left, right) => left.key.localeCompare(right.key));
+        .sort(
+          (left, right) =>
+            left.key.localeCompare(right.key) ||
+            left.retry - right.retry ||
+            left.errorIndex - right.errorIndex,
+        );
 
       const report = {
         schemaVersion: 3,
@@ -438,7 +677,7 @@ class MockedFailureReporter implements Reporter {
         missingManifestTests,
         missingAllowedSkipped: sortedDifference(allowedSkipped, skippedTests),
         newSkippedTests: sortedDifference(skippedTests, allowedSkipped),
-        mismatchedExpectedFailureCauses,
+        mismatchedExpectedFailureEvidence,
         globalErrors: this.globalErrors,
         originalStatus: result.status,
         gatePassed: false,
@@ -455,7 +694,7 @@ class MockedFailureReporter implements Reporter {
         report.missingManifestTests.length === 0 &&
         report.missingAllowedSkipped.length === 0 &&
         report.newSkippedTests.length === 0 &&
-        report.mismatchedExpectedFailureCauses.length === 0 &&
+        report.mismatchedExpectedFailureEvidence.length === 0 &&
         report.globalErrors === 0;
       report.gatePassed = gatePassed;
 
