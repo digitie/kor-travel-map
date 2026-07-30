@@ -36,6 +36,12 @@
   fence가 후속 authoritative `found`를 계속 막는 문제를 재현했다. 최신 refresh generation은
   동일 revision과 missing 뒤 낮은 revision의 재생성을 수용하되, 늦은 이전 generation과
   무순서 write는 계속 차단하도록 고쳤다.
+- 같은 재리뷰에서 200개 registry가 3,200행 seed의 6.25%를 조회해 planner-default
+  `feature.features` Seq Scan을 실제 선택하는 P1, DB `OperationalError`가 계약된 503 대신
+  generic 500으로 새는 P2도 재현했다. service batch만 기존 public batch와 같은 1.56%
+  selectivity(12,800행)로 검증하고 `-k service` **3 passed**를 확인했다. DB 계층
+  `SQLAlchemyError`는 `FEATURE_BATCH_UNAVAILABLE` problem+json 503으로 변환하고 OpenAPI와
+  `OperationalError` 회귀를 추가했다.
 - Live 첫 재검증은 접근성 snapshot에 `1일 표시 장소 4곳`이 보이지만 문구가 두 sibling
   element라 합친 text locator가 찾지 못했다. 테스트를 실제 DOM 경계인 `1일 표시`와
   `장소 4곳`으로 나눠 실패 지점부터 재실행했고 **1 passed**다.

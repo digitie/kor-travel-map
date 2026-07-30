@@ -44,7 +44,10 @@ async def test_tier1_hot_query_planner_default_no_seq_scan(
 ) -> None:
     """각 hot query가 planner 기본 설정에서 features Seq Scan 없이 index를 탄다."""
 
-    await seed_hot_query_features(migrated_session)
+    await seed_hot_query_features(
+        migrated_session,
+        n=hot.seed_n,  # type: ignore[attr-defined]
+    )
     plan = await explain_plan(
         migrated_session,
         hot.sql,  # type: ignore[attr-defined]

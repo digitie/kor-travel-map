@@ -34465,6 +34465,16 @@
             },
             "description": "서로 다른 item 1~200개 필요"
           },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "FEATURE_BATCH_UNAVAILABLE — feature 저장소 연결/조회 실패"
+          },
           "default": {
             "content": {
               "application/problem+json": {

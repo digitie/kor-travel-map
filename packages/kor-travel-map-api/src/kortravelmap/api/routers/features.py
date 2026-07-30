@@ -46,6 +46,7 @@ from kortravelmap.infra.poi_cache_target_repo import (
     get_poi_cache_target_by_key,
 )
 from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema, model_validator
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_frontend, require_service_token
@@ -1620,7 +1621,13 @@ async def get_feature_price(
     response_model=FeatureBatchResponse,
     summary="feature 5-state trip_card batch 조회 (service read)",
     dependencies=[Depends(require_service_token)],
-    responses={422: {"description": "서로 다른 item 1~200개 필요"}},
+    responses={
+        422: {"description": "서로 다른 item 1~200개 필요"},
+        503: {
+            "model": ProblemDetail,
+            "description": "FEATURE_BATCH_UNAVAILABLE — feature 저장소 연결/조회 실패",
+        },
+    },
 )
 async def get_features_batch(
     request: Request,
@@ -1628,10 +1635,20 @@ async def get_features_batch(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureBatchResponse:
     started_at = perf_counter()
-    rows = await feature_repo.get_service_feature_batch_items(
-        session,
-        tuple((item.feature_id, item.known_row_revision) for item in body.items),
-    )
+    try:
+        rows = await feature_repo.get_service_feature_batch_items(
+            session,
+            tuple((item.feature_id, item.known_row_revision) for item in body.items),
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "FEATURE_BATCH_UNAVAILABLE",
+                "message": "feature batch 저장소를 사용할 수 없습니다.",
+                "details": {},
+            },
+        ) from exc
     return FeatureBatchResponse(
         data=FeatureBatchData(items=[_batch_item_from_row(row) for row in rows]),
         meta=make_meta(request, started_at=started_at),

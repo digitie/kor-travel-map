@@ -17,14 +17,17 @@ Map은 service-token 전용 `POST /v1/features/batch`를
 요청을 순서 보존 `unnest` 단일 snapshot query로 처리하고, 공개 projection·종료·비공개·
 tombstone 판정을 같은 statement 안에서 분리한다. 요청과 응답 revision은 PostgreSQL
 `bigint` 범위를 런타임에서 정확히 제한하고 OpenAPI에는 `int64`로 고정했다. 200개 plan
-registry는 `feature.features` PK index 사용과 응답 shape를 고정한다.
+registry는 기존 50개/3,200행 gate와 같은 1.56% selectivity가 되도록 12,800행을 seed해
+planner-default `feature.features` PK index 사용과 응답 shape를 고정한다. DB read 실패는
+`FEATURE_BATCH_UNAVAILABLE` RFC7807 503으로 명시한다.
 
 PinVi 호환 소비자는 정확히 같은 OpenAPI snapshot을 vendor하고 5상태 typed decode,
 `1..200` chunk 경계, generation/revision fence를 가진 bounded LRU cache, Web·Map·Mobile 공용
 표시 resolver로 전환했다. 적대 리뷰에서 flat `lon/lat` snapshot 때문에 지도 마커가 사라지는
 문제, out-of-order 응답이 최신 revision/tombstone을 되돌리는 문제, 200개 초과 설정과
 PostgreSQL 범위 밖 revision, 같은 revision의 비공개→공개 복구를 막는 negative fence,
-plan registry 누락을 찾아 모두 보강했다. 저장소가 서로 달라
+작은 seed에서 실제로 실패한 planner-default gate, DB 장애의 generic 500 누출을 찾아 모두
+보강했다. 저장소가 서로 달라
 물리적으로 한 PR이 될 수 없으므로 생산자와 소비자 두 PR을 하나의 호환 쌍으로 묶고
 Map → PinVi 순서로 머지한다.
 

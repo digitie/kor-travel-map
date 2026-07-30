@@ -52,6 +52,12 @@ def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "FeatureBatchResponse" in schemas
     assert "FeatureSearchResponse" in schemas
     assert "FeaturesNearbyResponse" in schemas
+    batch_responses = spec["paths"]["/v1/features/batch"]["post"]["responses"]
+    assert "503" in batch_responses
+    assert (
+        batch_responses["503"]["content"]["application/problem+json"]["schema"]["$ref"]
+        == "#/components/schemas/ProblemDetail"
+    )
 
 
 @pytest.mark.unit
@@ -932,6 +938,40 @@ def test_features_batch_rejects_duplicate_ids_before_db(
     )
     assert r.status_code == 422
     assert r.json()["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.unit
+def test_features_batch_maps_database_failure_to_service_unavailable(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    async def _get_items(
+        _session: Any,
+        _items: tuple[tuple[str, int | None], ...],
+    ) -> None:
+        raise OperationalError("SELECT feature batch", {}, OSError("database unavailable"))
+
+    monkeypatch.setattr(features_mod.feature_repo, "get_service_feature_batch_items", _get_items)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        response = client.post(
+            "/v1/features/batch",
+            json={"items": [{"feature_id": "unavailable"}]},
+        )
+        assert response.status_code == 503
+        assert response.headers["content-type"].startswith("application/problem+json")
+        assert response.json()["code"] == "FEATURE_BATCH_UNAVAILABLE"
+    finally:
+        client.app.dependency_overrides.clear()
 
 
 @pytest.mark.unit

@@ -22,8 +22,9 @@
   순서로 landing한다.
 
 적대 리뷰에서 지도 좌표 shape 불일치, out-of-order cache rollback, 동일 revision 상태 복구를
-막는 negative fence, chunk 상한·revision 범위·plan registry·문서 drift를 찾아 모두 수정했다.
-재사용 `ktm-tvn45-db`에서 다섯 상태와 강제
+막는 negative fence, chunk 상한·revision 범위, 실제 실패한 planner-default gate, DB 장애의
+500 누출, 문서 drift를 찾아 모두 수정했다. service perf target **3 passed**, DB 장애 503
+OpenAPI/단위 회귀를 고정했다. 재사용 `ktm-tvn45-db`에서 다섯 상태와 강제
 503·복구를 파괴적 Live UI로 검증했고 지도 포인트 4곳도 확인했다. fixture는 원복하고 전용
 container/listener는 제거했으며 clone은 healthy `0068_integrity_last_seen`로 보존했다.
 

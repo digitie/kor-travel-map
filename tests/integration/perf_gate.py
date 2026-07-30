@@ -73,6 +73,8 @@ class HotQuery:
     no_seq_scan_on: tuple[str, ...] = ("features",)
     # EXPLAIN 전에 같은 트랜잭션에서 실행할 SET LOCAL 등.
     pre_statements: tuple[str, ...] = field(default_factory=tuple)
+    # 요청 cardinality가 커도 운영 규모와 비슷한 selectivity에서 planner를 검증한다.
+    seed_n: int = 3200
 
 
 _BBOX_PARAMS: dict[str, Any] = {
@@ -149,6 +151,8 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
             "known_row_revisions": [None] * 200,
         },
         expected_indexes=("pk_features",),
+        # 기존 public batch 50/3,200과 같은 1.56% selectivity를 유지한다.
+        seed_n=12_800,
     ),
     HotQuery(
         "in-bounds / bbox",
