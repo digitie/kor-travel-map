@@ -1225,8 +1225,8 @@ test.describe("admin/ops pages", () => {
     const patchReviewLoaded = page.waitForResponse(
       (response) =>
         response.request().method() === "GET" &&
-        bffApiPath(response.url()) ===
-          "/v1/admin/features/change-requests",
+        new URL(response.url()).pathname ===
+          "/api/proxy/v1/admin/features/change-requests",
     );
     await page.goto("/admin/features/change-reviews");
     await patchReviewLoaded;
@@ -1258,8 +1258,8 @@ test.describe("admin/ops pages", () => {
     const deleteReviewLoaded = page.waitForResponse(
       (response) =>
         response.request().method() === "GET" &&
-        bffApiPath(response.url()) ===
-          "/v1/admin/features/change-requests",
+        new URL(response.url()).pathname ===
+          "/api/proxy/v1/admin/features/change-requests",
     );
     await page.goto("/admin/features/change-reviews");
     await deleteReviewLoaded;
