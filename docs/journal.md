@@ -29,9 +29,10 @@ H35는 external DB custom dump를 scratch DB에 실제 복원 검증한 뒤, 006
 downgrade 없이 forward 재개하는 계획으로 바꿨다. 이미지 준비를 먼저 끝내고 API·Dagster
 writer/ingress cold fence 안에서 dump→복원 검증→migration→구조 smoke를 마친 뒤에만
 fence를 해제해, dump 이후 정상 write를 옛 snapshot 복원으로 잃는 창도 닫았다. candidate
-build 전에 현재 0063-compatible API/UI/Dagster image ID·revision·배포 checksum을 immutable
-rollback bundle로 보존하고, 복원 시 candidate가 아니라 그 exact pair로만 재기동하도록
-실행 가능한 복구 분기도 고정했다.
+build 전에 현재 0063-compatible API·UI·Dagster web·daemon의 service별 image ID·revision·
+배포 checksum을 immutable rollback bundle로 보존하고, 성공 경로에서도 네 candidate
+service를 모두 recreate·health 확인한 뒤에만 ingress를 연다. H35는 materialize하지 않고
+1,020/1,477 baseline을 H30B에 넘겨 task 소유권과 before/after를 보존한다.
 
 - 이름 단독 오링크를 막는 `_adopted_match`가 주소 hint 유일 매칭까지 함께 막아 ADR-063을
   위반했다. 주소 hint 경로는 복원하고 이름 단독 후보는 `ambiguous/후보 다수`가 아니라

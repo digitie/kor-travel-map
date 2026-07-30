@@ -457,11 +457,13 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     복구 수단이 아니다. H35는 배포 전에 external DB용 백업·복원 검증 경로를 먼저 만든다.
 
   남은 할 일:
-  1. **rollback image pair 고정** — candidate build 전에 현재 API/UI/Dagster의 immutable
-     image ID·OCI source revision과 실제 배포 manifest/compose의 redacted checksum을 기록한다.
-     기존 image ID에 rollback 전용 immutable tag를 붙여 prune 대상에서 제외하고, 현재
-     `alembic_version=0063`과 login/API/Dagster smoke를 같은 manifest에 결속한다. env 비밀
-     원문이나 `docker compose config`의 비밀 확장 결과는 산출물에 넣지 않는다.
+  1. **rollback image set 고정** — candidate build 전에 현재 API·UI·Dagster web·Dagster
+     daemon 네 service의 실제 container image ID·OCI source revision과 배포
+     manifest/compose의 redacted checksum을 기록한다(두 Dagster service가 같은 image ID여도
+     service별 결속을 생략하지 않는다). 기존 image ID에 rollback 전용 immutable tag를 붙여
+     prune 대상에서 제외하고, 현재 `alembic_version=0063`과 login/API/Dagster smoke를 같은
+     manifest에 결속한다. env 비밀 원문이나 `docker compose config`의 비밀 확장 결과는
+     산출물에 넣지 않는다.
   2. **candidate 이미지 빌드** — main 최신(H36 게이트 포함)으로 API/dagster/UI를 기존
      rollback tag와 다른 immutable candidate tag에 준비한다. compose 기본 tag를 덮어 이전
      pair를 잃는 build는 금지한다.
@@ -488,22 +490,29 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
        (둘 다 지금은 **없음**이 확인돼 있어 before/after가 갈린다)
      - curation import **preview**가 오링크 3건을 여전히 미연결로 두는지
        (H36 게이트 실효 확인. 실패했다면 `resolved_feature_id`가 채워져 값이 달라진다)
-  8. **실패 복구 분기** — forward 재개가 불가능해 verified dump를 복원할 때는 fence를
+  8. **나머지 candidate recreate·health** — schema가 최종 shape일 때 UI·Dagster web·
+     Dagster daemon을 각 service에 고정한 immutable candidate image ID로 recreate한다.
+     API를 포함한 네 service의 실제 container image ID·OCI revision이 candidate manifest와
+     일치하는지, login POST·API·Dagster health가 green인지 확인한다. old container를 단순
+     start하거나 UI만 이전 image로 남긴 상태에서는 ingress를 열지 않는다.
+  9. **실패 복구 분기** — forward 재개가 불가능해 verified dump를 복원할 때는 fence를
      유지한 채 candidate를 모두 내린다. DB를 0063 dump로 복원하고 step 1의 exact rollback
-     image ID·manifest/compose checksum으로 API/UI/Dagster를 recreate한다. 이전 pair의
-     `alembic_version=0063`, login/API/Dagster smoke가 다시 green인 뒤에만 fence를 해제한다.
+     service image ID·manifest/compose checksum으로 API·UI·Dagster web·daemon을 recreate한다.
+     이전 set의 `alembic_version=0063`, 네 service identity와 login/API/Dagster smoke가 다시
+     green인 뒤에만 fence를 해제한다.
      새 candidate entrypoint를 복원 DB에 다시 실행하는 절차는 rollback이 아니다.
-  9. **cutover 확정·fence 해제** — 구조 실증이 모두 green일 때만 API ingress와 Dagster/UI를
-     순서대로 연다. 이 시점부터 새 write는 forward 상태의 정본이며 옛 dump로 되돌리지 않는다.
-     이후 아래 materialize·업무 smoke가 실패하면 forward 수정한다.
-     - concierge materialize 후 적재 **1,020 → 1,477** 회복(#673 종결 조건)
-     - `inserted/updated/removed 0`처럼 **정상 배포에서도 거짓인 기준은 쓰지 않는다**
-       (`0066` backfill이 `updated`를 만든다)
+  10. **cutover 확정·fence 해제·H30B handoff** — 구조·네 service health가 모두 green일 때만
+      API ingress와 Dagster/UI를 순서대로 연다. 이 시점부터 새 write는 forward 상태의
+      정본이며 옛 dump로 되돌리지 않는다. H35에서는 concierge materialize를 실행하지 않고,
+      같은 prod snapshot의 pre-materialize Feature 수 **1,020**, source/export **1,477**,
+      head·schema/content identity를 H30B 인수로 기록한다. 실제 1,020→1,477 회복과
+      authenticated `/admin/issues` 검증은 다음 단일 소유 task `T-VN-H30B`가 수행하며,
+      실패하면 forward 수정한다.
 
   > **⚠ 비가역 지점** — 사람 승인이 필요하다.
   > - `0065`의 `collection_key` 52행 재작성과 `source_updated_at` 3,530행 UPDATE,
   >   `0066`의 `external_component_id` backfill은 **downgrade로 복구되지 않는다**.
-  >   검증된 external DB dump와 0063-compatible rollback image pair·배포 manifest를 함께
+  >   검증된 external DB dump와 0063-compatible rollback image set·배포 manifest를 함께
   >   보존한 bundle이 유일한 복구 경로다.
   > - `0064`와 `0068`의 `autocommit_block()` 때문에 **부분 적용 상태가 가능하다**.
   >   entrypoint가 실패 시 재시도하므로 forward recovery를 우선하고 꼭 필요한 경우가
