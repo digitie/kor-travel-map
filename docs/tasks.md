@@ -457,24 +457,30 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     복구 수단이 아니다. H35는 배포 전에 external DB용 백업·복원 검증 경로를 먼저 만든다.
 
   남은 할 일:
-  1. **이미지 빌드** — main 최신(H36 게이트 포함)으로 API/dagster/UI를 먼저 준비한다.
-  2. **H36 게이트가 이미지에 실렸는지 확인** — 커밋 라벨만 보지 말고 컨테이너 안에서
+  1. **rollback image pair 고정** — candidate build 전에 현재 API/UI/Dagster의 immutable
+     image ID·OCI source revision과 실제 배포 manifest/compose의 redacted checksum을 기록한다.
+     기존 image ID에 rollback 전용 immutable tag를 붙여 prune 대상에서 제외하고, 현재
+     `alembic_version=0063`과 login/API/Dagster smoke를 같은 manifest에 결속한다. env 비밀
+     원문이나 `docker compose config`의 비밀 확장 결과는 산출물에 넣지 않는다.
+  2. **candidate 이미지 빌드** — main 최신(H36 게이트 포함)으로 API/dagster/UI를 기존
+     rollback tag와 다른 immutable candidate tag에 준비한다. compose 기본 tag를 덮어 이전
+     pair를 잃는 build는 금지한다.
+  3. **H36 게이트가 이미지에 실렸는지 확인** — 커밋 라벨만 보지 말고 컨테이너 안에서
      `_adopted_match` 존재를 직접 확인한다. 라벨은 빌드 컨텍스트를 증명하지 않는다.
-  3. **cold writer fence** — prod ingress를 maintenance 상태로 두고 기존 API·Dagster·
+  4. **cold writer fence** — prod ingress를 maintenance 상태로 두고 기존 API·Dagster·
      Dagster daemon을 정지한다. map 소유 writer container/process가 0이고 app 역할의 active
      write transaction이 없음을 확인한 시점부터 dump·migration·구조 smoke가 끝날 때까지
      fence를 유지한다. dump 뒤 정상 write가 생길 수 있는 상태에서는 복원을 복구 경로라고
      부르지 않는다.
-  4. **prod external DB 백업·복원 gate 실행** — 비밀을 argv/log에 싣지 않는
+  5. **prod external DB 백업·복원 gate 실행** — 비밀을 argv/log에 싣지 않는
      `PGSERVICEFILE`/`PGPASSFILE` 기반의 pinned PostgreSQL client로 app·Dagster DB를 custom
      dump한다. SHA-256과 `pg_restore --list`만 확인하고 끝내지 않고, 격리 scratch DB에
      실제 복원해 pre-migration head·핵심 schema/row count를 대조한다. standalone
      `scripts/docker-backup.sh`를 prod에서 호출하지 않는다.
-  5. **API candidate recreate** → fence 안에서 entrypoint가 0064~0068을 forward 적용한다.
+  6. **API candidate recreate** → fence 안에서 entrypoint가 0064~0068을 forward 적용한다.
      실패하면 downgrade하지 않고 `alembic_version`과 0064/0068 partial-state probe를
-     기록해 같은 image/command로 재개한다. verified dump 복원이 필요한 경우에도 fence를
-     유지해 post-dump 정상 write 유실을 막는다.
-  6. **fence 안 구조 실증(반증 가능해야 한다)**:
+     기록해 같은 image/command로 재개한다.
+  7. **fence 안 구조 실증(반증 가능해야 한다)**:
      - `alembic_version = 0068_integrity_last_seen`
      - 0068의 `last_seen_at` column/default/NOT NULL·FK·세 concurrent index가 모두 최종
        shape이며 invalid/candidate index와 임시 constraint가 남지 않음
@@ -482,7 +488,12 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
        (둘 다 지금은 **없음**이 확인돼 있어 before/after가 갈린다)
      - curation import **preview**가 오링크 3건을 여전히 미연결로 두는지
        (H36 게이트 실효 확인. 실패했다면 `resolved_feature_id`가 채워져 값이 달라진다)
-  7. **cutover 확정·fence 해제** — 구조 실증이 모두 green일 때만 API ingress와 Dagster/UI를
+  8. **실패 복구 분기** — forward 재개가 불가능해 verified dump를 복원할 때는 fence를
+     유지한 채 candidate를 모두 내린다. DB를 0063 dump로 복원하고 step 1의 exact rollback
+     image ID·manifest/compose checksum으로 API/UI/Dagster를 recreate한다. 이전 pair의
+     `alembic_version=0063`, login/API/Dagster smoke가 다시 green인 뒤에만 fence를 해제한다.
+     새 candidate entrypoint를 복원 DB에 다시 실행하는 절차는 rollback이 아니다.
+  9. **cutover 확정·fence 해제** — 구조 실증이 모두 green일 때만 API ingress와 Dagster/UI를
      순서대로 연다. 이 시점부터 새 write는 forward 상태의 정본이며 옛 dump로 되돌리지 않는다.
      이후 아래 materialize·업무 smoke가 실패하면 forward 수정한다.
      - concierge materialize 후 적재 **1,020 → 1,477** 회복(#673 종결 조건)
@@ -492,7 +503,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > **⚠ 비가역 지점** — 사람 승인이 필요하다.
   > - `0065`의 `collection_key` 52행 재작성과 `source_updated_at` 3,530행 UPDATE,
   >   `0066`의 `external_component_id` backfill은 **downgrade로 복구되지 않는다**.
-  >   검증된 external DB dump가 유일한 복구 경로다.
+  >   검증된 external DB dump와 0063-compatible rollback image pair·배포 manifest를 함께
+  >   보존한 bundle이 유일한 복구 경로다.
   > - `0064`와 `0068`의 `autocommit_block()` 때문에 **부분 적용 상태가 가능하다**.
   >   entrypoint가 실패 시 재시도하므로 forward recovery를 우선하고 꼭 필요한 경우가
   >   아니면 Alembic downgrade하지 않는다. 계속 실패하면 API가 기동하지 않아 장애가
