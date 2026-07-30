@@ -17,6 +17,23 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-30 (codex) — T-VN-H39 schedule pending barrier
+
+- schedule command route가 body를 기록한 뒤 테스트 소유 promise에서 응답을 보류한다.
+  request 도달을 먼저 단언하고 `finally`에서 release하므로 fixed delay와 assertion 실패
+  hang이 없다.
+- pending의 사유·즉시 실행·시작/중지·기본값 복귀·cron control 5개와 release 뒤 동일
+  5개의 enabled 복원을 한 helper로 대칭 검증한다. 적대 리뷰어 1명이 cron/stop만 복원
+  확인하던 P2를 찾아 보강했다.
+- 격리 21715 실패 spec setup 포함 **2/2**, frontend **278 passed**, TypeScript·ESLint
+  green. exact production image D workers=8 **276/276**, manifest 일치·child exit 0·
+  reporter gate true, owned container/network/image 0건이다.
+- 최초 shared 12705 실행은 빈 auth state로 로그인 화면에 머문 환경 실패였다. 독립
+  frontend/session으로 실패 지점부터 재개하고 mocked screenshot/result/report 복제본과
+  Agent B worktree의 orphan Next dev를 정리했다.
+- DB는 사용하지 않았다. 보존 `ktm-tvn45-db`는 healthy,
+  `0068_integrity_last_seen`라 다음 DB 관련 task에서 재사용한다.
+
 ## 2026-07-30 (codex) — T-VN-H38 failure fingerprint 전수 검증
 
 - expected deterministic failure와 flaky의 모든 non-passed retry, result/step error와 중첩

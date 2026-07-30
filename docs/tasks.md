@@ -42,7 +42,7 @@ barrier로 직렬화한다.
   - b1: [x] `T-VN-11A/B`(service batch, 저장소별 호환 PR 쌍) →
     [x] `T-VN-H37`(Mocked checkpoint 종료 판정·고병렬 flaky 진단) →
     [x] `T-VN-H38`(failure manifest retry/error fingerprint 완전성) →
-    [ ] `T-VN-H39`(schedule command pending barrier) →
+    [x] `T-VN-H39`(schedule command pending barrier) →
     [ ] `T-VN-16A` → [ ] `T-VN-16B`(weather batch) →
     [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
     [ ] `T-VN-12D`(domain idempotency) →
@@ -678,20 +678,6 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
-
-### T-VN-H39 — Mocked schedule command pending barrier
-
-H38 exact D의 workers=8 실행에서 schedule command 요청의 600ms 고정 지연이 끝난 뒤에
-pending UI 단언이 시작돼, `스케줄 중지` 버튼이 이미 다시 활성화된 1건을 재현했다. 동일
-HEAD의 workers=4에서는 통과했으므로 제품 상태 회귀가 아니라 고병렬 부하에 의존하는 테스트
-동기화 결함이다.
-
-- `scheduleResponseDelayMs` 시간 지연으로 pending 구간을 추정하지 않고, 테스트가 응답을
-  명시적으로 해제하는 request/response barrier로 바꾼다.
-- cron 수정과 다른 schedule command가 실제 pending 동안 모두 잠기고, response release 뒤
-  결과와 조작 가능 상태가 복원되는 순서를 검증한다.
-- 실패한 schedule spec부터 재실행한 뒤 exact D workers=8에서 276 inventory와 owned
-  container/network/image 0건을 다시 확인한다. 단순 timeout 증가는 허용하지 않는다.
 
 ### T-VN-16 — weather batch와 부모 404
 

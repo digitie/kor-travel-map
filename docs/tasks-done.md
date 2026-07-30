@@ -3,6 +3,26 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-30 — Lane B b1 T-VN-H39 schedule pending barrier
+
+- [x] **T-VN-H39 — Mocked schedule command pending barrier**
+
+  workers=8에서 600ms 응답 지연보다 pending 단언이 늦게 시작하던 schedule command
+  테스트를 `scheduleActionResponseGate`로 전환했다. route가 `commandBodies`를 기록해 요청
+  도달을 증명한 뒤 테스트가 응답을 잡아두고, `finally`에서 반드시 해제한다. pending과
+  release 뒤에 같은 5개 control(사유·즉시 실행·시작/중지·기본값 복귀·cron)을 각각
+  disabled/enabled로 대칭 검증하며 timeout은 늘리지 않았다.
+
+격리 포트에서 실패 spec은 setup 포함 **2/2**, frontend Vitest **278 passed**,
+TypeScript·ESLint가 통과했다. exact production image checkpoint D workers=8은
+**276/276**, manifest 일치, child exit 0·reporter gate true로 끝났고 owned
+container/network/image는 모두 0건이다.
+
+작은 delta 적대 리뷰어 1명은 release 뒤 cron/stop만 복원 확인해 나머지 control의
+sticky-disabled 회귀를 놓치는 P2를 찾아, 동일 locator 집합의 대칭 상태 helper로 고정했다.
+DB는 사용하지 않았고 보존 `ktm-tvn45-db`는 healthy·`0068_integrity_last_seen`라 다음 DB
+작업에 재사용한다.
+
 ## 2026-07-30 — Lane B b1 T-VN-H38 failure fingerprint 완전성
 
 - [x] **T-VN-H38 — Mocked failure manifest retry/error fingerprint 완전성**
