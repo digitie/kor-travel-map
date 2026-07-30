@@ -11025,6 +11025,8 @@ export interface components {
          * @description weather card metric 1건 (forecast_style × metric_key 최신값, T-213e).
          */
         WeatherMetricOut: {
+            /** Effective At */
+            effective_at?: string | null;
             /** Forecast Style */
             forecast_style: string;
             /** Issued At */
@@ -11045,6 +11047,10 @@ export interface components {
             unit?: string | null;
             /** Valid At */
             valid_at?: string | null;
+            /** Valid From */
+            valid_from?: string | null;
+            /** Valid Until */
+            valid_until?: string | null;
             /** Value Number */
             value_number?: number | null;
             /** Value Text */

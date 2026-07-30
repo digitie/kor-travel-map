@@ -25198,12 +25198,14 @@
         "properties": {
           "feature_ids": {
             "items": {
+              "minLength": 1,
               "type": "string"
             },
             "maxItems": 200,
             "minItems": 1,
             "title": "Feature Ids",
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
           "known_at": {
             "description": "소비자가 허용하는 지식 cutoff(UTC offset 필수).",
@@ -25329,6 +25331,18 @@
         "additionalProperties": false,
         "description": "weather card metric 1건 (forecast_style × metric_key 최신값, T-213e).",
         "properties": {
+          "effective_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective At"
+          },
           "forecast_style": {
             "title": "Forecast Style",
             "type": "string"
@@ -25427,6 +25441,30 @@
               }
             ],
             "title": "Valid At"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
           },
           "value_number": {
             "anyOf": [
