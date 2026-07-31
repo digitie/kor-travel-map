@@ -82,6 +82,29 @@ production DB에 직접 migration을 자동 적용하지 않는다. exact source
 evidence에는 Map/PinVi commit, image ID, migration head, snapshot ID/epoch/high-watermark/count/Merkle,
 fixture event ID만 남긴다. token, cookie, raw payload, 실데이터 screenshot과 trace는 종료 즉시 폐기한다.
 
+### 5.1 추적 가능한 Live UI 증거
+
+격리 candidate의 dead-letter fixture와 PinVi recovery worker를 준비한 뒤 admin frontend 디렉터리에서
+`npm run e2e:live:cache-target-streams`를 실행한다. 이 명령은 일반 live suite와 분리되어 있으며
+다음 환경변수가 모두 정확해야만 destructive recovery를 실행한다.
+
+- 격리 경계: `E2E_ISOLATED_LIVE_EVIDENCE=1`,
+  `E2E_ISOLATED_LIVE_DOCKER_NETWORK=1`
+- destructive opt-in: `E2E_CACHE_TARGET_STREAM_RECOVERY_WRITE=1`
+- 접속·인증: `E2E_BASE_URL`, `E2E_ADMIN_USERNAME`, `E2E_ADMIN_PASSWORD`
+- 증거 결박: `E2E_CACHE_TARGET_STREAM_EXTERNAL_SYSTEM`,
+  `E2E_CACHE_TARGET_STREAM_DEAD_EVENT_ID`,
+  `E2E_CACHE_TARGET_STREAM_EXPECTED_SNAPSHOT_ID`,
+  `E2E_CACHE_TARGET_STREAM_EXPECTED_RESTORE_EPOCH`,
+  `E2E_CACHE_TARGET_STREAM_EXPECTED_COUNT`,
+  `E2E_CACHE_TARGET_STREAM_EXPECTED_MERKLE_ROOT`
+
+대상 URL은 loopback, RFC 1918 주소 또는 격리 Compose의 `candidate-ui`만 허용한다. 일부 opt-in만
+지정한 실행은 skip하지 않고 fail-close한다. 스펙은 실제 login POST의 `200`과 `Set-Cookie`, 브라우저의
+ops/admin BFF 전용 호출, replay ETag·Idempotency-Key, 최종 ready/backlog 0/dead 0 및 동일
+snapshot/count/Merkle을 확인한다. trace, video, screenshot은 생성하지 않으며 종료 시 cookie와 Web
+Storage 및 임시 인증 상태를 삭제한다.
+
 ## 6. 중지와 forward recovery
 
 문제가 생기면 consumer flag를 끄고 claim을 중단하되 outbox와 dead letter를 삭제하지 않는다. 이미

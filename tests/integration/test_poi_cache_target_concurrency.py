@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.feature_update_executor import _sync_cache_target_links
+from kortravelmap.infra.feature_update_repo import FeatureUpdateRequest
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     PoiCacheTargetConflict,
@@ -105,6 +107,31 @@ def _link_resolution(target: PoiCacheTarget, feature_id: str) -> ScopeResolution
                 relation="within_radius",
             ),
         ),
+    )
+
+
+def _link_request() -> FeatureUpdateRequest:
+    """link 동기화 결과 event에 필요한 실제 executor request 계약을 만든다."""
+    return FeatureUpdateRequest(
+        request_id=str(uuid4()),
+        scope_type="cache_target_keys",
+        scope={"type": "cache_target_keys"},
+        providers=(),
+        dataset_keys=(),
+        update_policy={},
+        run_mode="queue",
+        priority=50,
+        status="running",
+        matched_scope={},
+        job_id=str(uuid4()),
+        dagster_run_id=None,
+        operator=None,
+        reason=None,
+        error_message=None,
+        created_at=datetime.now(UTC),
+        started_at=None,
+        finished_at=None,
+        generation=1,
     )
 
 
@@ -373,7 +400,11 @@ async def test_executor_link_sync_wins_parent_lock_then_delete_leaves_no_active_
             AsyncSession(migrated_engine) as deleter,
         ):
             await syncer.begin()
-            await _sync_cache_target_links(syncer, resolution)
+            await _sync_cache_target_links(
+                syncer,
+                resolution,
+                request=_link_request(),
+            )
             await deleter.begin()
             deleter_pid = await deleter.scalar(text("SELECT pg_backend_pid()"))
             assert deleter_pid is not None
@@ -466,7 +497,11 @@ async def test_delete_wins_parent_lock_then_executor_sync_skips_inactive_parent(
             assert syncer_pid is not None
 
             async def _sync() -> None:
-                await _sync_cache_target_links(syncer, resolution)
+                await _sync_cache_target_links(
+                    syncer,
+                    resolution,
+                    request=_link_request(),
+                )
                 await syncer.commit()
 
             sync_task = asyncio.create_task(_sync())
