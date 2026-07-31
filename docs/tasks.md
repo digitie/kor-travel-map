@@ -781,6 +781,10 @@ fence pre-acquire, host script mutation 전 exact fence verification으로 보�
 뒤 동일 command와 다른 command 모두 mutation 0건으로 manual-reconcile에 남고, 외부 operator가
 workload terminal/output proof를 확인해 marker를 기록하기 전에는 fence를 해제하거나 자동
 terminalize하지 않는 actual Docker+PostgreSQL SIGKILL 회귀를 완료 기준에 추가한다.
+create reservation은 같은 maintenance lock 안에서 exact fence 성공 뒤와 `effect_started`
+전이 사이에만 만들고, foreign fence 응답의 backup root byte mutation 0건을 고정한다.
+동일 key stale `prepared` 요청은 lock 획득 뒤 DB phase를 다시 읽어 fence 재채택·0-row
+UPDATE·500 없이 markerless 409/replay 경로에 합류하는 실제 migrated PostgreSQL 회귀를 둔다.
 
 - [ ] T-VN-12A — **retryable command inventory·계약 freeze**
 

@@ -57,6 +57,10 @@ child에 위임하지 않는다. 다만 API는 같은 lock을 짧게 잡아 glob
 digest/source revision/Image ID label을 가진다. canonical compose `postgres` container의 local
 immutable `sha256:` Image ID만 `--pull=never`로 사용하며 network none, read-only rootfs,
 capability 전체 제거, `no-new-privileges`, 비 root user, PID 제한을 적용한다.
+create의 destination reservation은 같은 maintenance lock 안에서 exact fence 획득에 성공한
+뒤, `effect_started` 전이 직전에만 만든다. foreign fence면 backup root는 바뀌지 않는다.
+reservation 실패 때는 DB phase가 여전히 `prepared`임을 근거로 exact 자기 fence만 해제하며,
+그 해제까지 증명하지 못하면 자동 진행하지 않고 manual reconciliation으로 남긴다.
 
 host script는 mutation 전에 pre-acquired fence의 exact identity·running·hardened shape를 다시
 검사한다. foreign fence가 이미 있으면 새 command는 `prepared`에 남고 mutation 0건으로
@@ -75,6 +79,9 @@ command 재시도는 host script를 호출하지 않고
 `409 BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED`로 끝난다. 다른 command도 같은 fence에서
 막힌다. host script가 create-once marker를 남긴 뒤 재시도하면
 외부 효과를 반복하지 않고 marker proof로 `effect_succeeded`와 terminal response를 확정한다.
+동일 key의 stale `prepared` 요청은 maintenance lock 획득 뒤 execution을 다시 읽는다. 이미
+`effect_started`면 fence를 다시 채택하거나 phase UPDATE를 반복하지 않고 recovered 상태로
+기존 marker 확인·manual reconciliation 경로에 합류한다.
 API 내부 delete의
 filesystem `rmtree`는 같은 lock을 marker proof와 domain command terminal result commit까지
 직접 보유한다. 경합은 무기한 대기하지 않고 `409 BACKUP_MAINTENANCE_BUSY`와

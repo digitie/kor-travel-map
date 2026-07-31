@@ -250,7 +250,12 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
   생성·inspect한 뒤에만 `effect_started`로 전이한다. fence는 canonical compose service의
   local immutable Image ID와 `--pull=never`, network none, read-only rootfs, capability 제거,
   `no-new-privileges`, 비 root user를 사용한다. command/operation/input digest/source revision/
-  Image ID label과 runtime shape가 exact하지 않으면 새 command는 `prepared`에 남는다. wrapper가
+  Image ID label과 runtime shape가 exact하지 않으면 새 command는 `prepared`에 남는다.
+  create destination reservation도 같은 lock 안에서 exact fence 성공 뒤, phase 전이 전에만
+  수행한다. reservation 실패는 아직 `prepared`인 exact 자기 fence만 정리하며, 정리를
+  증명하지 못하면 manual reconciliation으로 남긴다. maintenance lock을 얻은 요청은 execution
+  phase를 다시 읽으므로 stale `prepared` retry가 exact fence와 phase 전이를 반복하지 않는다.
+  wrapper가
   `TERM`/`INT`를 받으면 호출자 detach만 기록하고 daemon effect와 연결된 child에는 전달하지
   않는다. child output은 API pipe와 분리된 임시 spool에 저장하며 direct child와 process
   group이 자연 terminal에 도달한 뒤에만 lock을 해제한다. API cancellation은 호출자에게

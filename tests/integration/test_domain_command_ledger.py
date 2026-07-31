@@ -171,6 +171,116 @@ async def test_backup_maintenance_lock_fails_fast_when_exact_key_is_busy(
             assert unlocked is True
 
 
+async def test_stale_prepared_retry_rereads_phase_without_second_fence_adoption(
+    migrated_engine: AsyncEngine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_backups as router_mod
+    from kortravelmap.api.settings import ApiSettings
+
+    from kortravelmap.infra.domain_command_execution_repo import (
+        create_backup_command_execution,
+    )
+
+    sessions = async_sessionmaker(migrated_engine, expire_on_commit=False)
+    request_fingerprint = "a" * 64
+    idempotency_key = uuid4()
+    async with sessions.begin() as session:
+        command_id = await session.scalar(
+            text(
+                """
+                INSERT INTO ops.domain_commands (
+                  actor, operation, idempotency_key, request_fingerprint
+                ) VALUES (
+                  'admin:stale', 'admin.backup.create',
+                  CAST(:idempotency_key AS uuid),
+                  :request_fingerprint
+                )
+                RETURNING command_id
+                """
+            ),
+            {
+                "idempotency_key": str(idempotency_key),
+                "request_fingerprint": request_fingerprint,
+            },
+        )
+        assert command_id is not None
+        execution = await create_backup_command_execution(
+            session,
+            command_id=command_id,
+            effect_kind="create",
+            effect_token="b" * 64,
+            backup_id="stale-prepared",
+            app_db=None,
+            dagster_db=None,
+            rustfs_volume=None,
+            marker_key=f"command-{command_id}",
+            input_digest=request_fingerprint,
+        )
+    command = domain_command_service.DomainCommandHandle(
+        command_id=command_id,
+        actor="admin:stale",
+        operation="admin.backup.create",
+        idempotency_key=idempotency_key,
+        request_fingerprint=request_fingerprint,
+    )
+    stale = router_mod._PreparedBackupCommand(
+        command=command,
+        execution=execution,
+        started_now=False,
+    )
+    fence_acquisitions = 0
+
+    async def _acquire_exact_fence(
+        _settings: ApiSettings,
+        _prepared: router_mod._PreparedBackupCommand,
+    ) -> None:
+        nonlocal fence_acquisitions
+        fence_acquisitions += 1
+
+    monkeypatch.setattr(
+        router_mod,
+        "_acquire_docker_effect_fence",
+        _acquire_exact_fence,
+    )
+    settings = ApiSettings(
+        backup_root=tmp_path,
+        backup_project_root=Path(__file__).resolve().parents[2],  # noqa: ASYNC240
+    )
+    async with sessions() as first_session:
+        first = await router_mod._start_prepared_backup_command(
+            first_session,
+            migrated_engine,
+            settings,
+            stale,
+        )
+    async with sessions() as second_session:
+        second = await router_mod._start_prepared_backup_command(
+            second_session,
+            migrated_engine,
+            settings,
+            stale,
+        )
+
+    assert first.execution.phase == "effect_started"
+    assert first.started_now is True
+    assert second.execution.phase == "effect_started"
+    assert second.started_now is False
+    assert fence_acquisitions == 1
+    manual = router_mod._effect_reconciliation_required(
+        second,
+        reason="effect_started command에 exact terminal marker가 없음",
+    )
+    assert isinstance(manual, HTTPException)
+    assert manual.status_code == 409
+    assert manual.detail["code"] == (
+        "BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED"
+    )
+
+
 async def test_lock_wrapper_holds_lock_until_detached_docker_effect_exits(
     migrated_engine: AsyncEngine,
     tmp_path: Path,

@@ -98,6 +98,12 @@
   주입한 host script 재실행도 mutation 전에 exit 4로 거부한다. 최종 전체 unit+API
   **2,650건**, domain ledger integration **9건**, ruff·strict mypy·import 경계·OpenAPI/
   TypeScript drift·bash syntax·prod redaction이 모두 통과했다.
+- 최종 P2 재검토에서 foreign fence 거절 전에 create reservation이 남는 순서와 stale
+  `prepared` 동일 key의 0-row UPDATE/500을 확인했다. reservation을 maintenance lock 안의
+  exact fence 성공 뒤·phase 전이 앞으로 옮기고, 실패 시 아직 `prepared`인 exact 자기 fence만
+  정리한다. lock 획득 뒤 execution을 다시 읽어 stale 요청은 fence/UPDATE를 반복하지 않고
+  기존 markerless 409 경로에 합류시켰다. 실제 reservation의 backup root 불변 unit과 migrated
+  PostgreSQL stale snapshot 회귀가 green이다.
 
 ## 2026-07-31 (codex) — T-VN-16C 완료 이관·T-VN-12 단일 PR 착수
 

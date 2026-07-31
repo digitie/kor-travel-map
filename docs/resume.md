@@ -68,6 +68,12 @@ marker proof 뒤 exact fence release와 recovery-env 우회 차단까지 포함�
 unit+API는 **2,650건**, domain ledger migration/Docker integration은 **9건**이 통과했다.
 ruff 전체, strict mypy(core 120/API+helper 59/Dagster 23), import 경계, OpenAPI 재생성·drift,
 frontend TypeScript drift/type-check, bash syntax, prod redaction도 모두 green이다.
+최종 P2 보강은 create reservation을 exact fence 성공 뒤·phase 전이 앞으로 옮겨 foreign
+fence에서 backup root를 byte-for-byte 보존한다. reservation 자체가 실패하면 아직
+`prepared`인 exact 자기 fence만 정리한다. stale `prepared` 동일 key는 maintenance lock 뒤
+DB phase를 재조회해 두 번째 fence 채택/UPDATE를 하지 않고 markerless 409 경로에 합류한다.
+router/fence/runbook focused **43건**과 실제 migrated PostgreSQL stale snapshot 회귀 **1건**이
+통과했다.
 
 **다음 한 작업**: 전체 backend/migration/OpenAPI/lint gate와 push 전 보안 감사를 마쳐
 PR #906에 작은 commit을 추가하고 같은 적대 리뷰어가 exact head를 재검토한다. 이어

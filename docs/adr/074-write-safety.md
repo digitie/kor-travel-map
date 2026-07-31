@@ -39,7 +39,11 @@
    global Docker fence를 먼저 원자 생성·inspect하고 그 뒤에만 `prepared → effect_started`를
    commit한다. 기존 foreign/mismatched fence가 있으면 새 command는 `prepared`에 남고 외부
    mutation은 시작하지 않는다. API가 fence 생성 뒤 transition 전에 종료되면 같은
-   `prepared` command만 exact running fence를 다시 채택할 수 있다.
+   `prepared` command만 exact running fence를 다시 채택할 수 있다. create destination
+   reservation은 exact fence 성공 뒤와 phase 전이 사이에만 만든다. reservation 실패 시 아직
+   `prepared`인 exact 자기 fence만 정리할 수 있고, 정리를 증명하지 못하면 fail-close한다.
+   maintenance lock 획득 뒤 execution을 다시 읽어 stale `prepared` 요청의 fence 재채택과
+   0-row phase UPDATE를 막는다.
 9. Docker fence는 canonical compose `postgres` container의 local immutable `sha256:` Image
    ID만 사용하고 `--pull=never`로 만든다. 고정 name, `effect_token`, command ID, operation,
    effect kind, input digest, marker key, backup ID, fence source revision, Image ID label을
@@ -67,7 +71,8 @@
    marker는 command/operation/effect/target identity, input digest, effect-specific output
    digest, 완료 시각을 포함한다. 기존 marker는 exact proof가 같을 때만 재사용하며 덮어쓰지 않는다.
 13. caller 지정 backup destination은 `command_id + input_digest + backup_id` reservation을
-    빈 `0700` 디렉터리에 먼저 fsync하고 `RENAME_NOREPLACE`로 공개한 뒤에만 effect를 시작한다.
+    exact global fence 획득 뒤 빈 `0700` 디렉터리에 fsync하고 `RENAME_NOREPLACE`로 공개한
+    뒤에만 effect를 시작한다.
     exact reservation·marker가 없는 기존 artifact나 restore target의 단순 health는 새 command의
     provenance가 아니므로 성공 결과로 채택하지 않는다.
 

@@ -16,6 +16,9 @@
 - **SECURITY**: fence는 canonical local immutable Image ID만 `--pull=never`로 사용하고
   exact command/input/source labels, network none, read-only rootfs, capability 제거,
   `no-new-privileges`, 비 root user와 PID 제한을 검증한다.
+- **CORRECTNESS**: create destination reservation은 exact fence 성공 뒤에만 만들며, 동일
+  key의 stale `prepared` retry는 lock 안에서 DB phase를 다시 읽어 500이나 중복 fence
+  채택 대신 기존 manual-reconcile/replay 결과로 수렴한다.
 
 ### sparse 다중 날짜 weather batch (2026-07-30, T-VN-16C)
 

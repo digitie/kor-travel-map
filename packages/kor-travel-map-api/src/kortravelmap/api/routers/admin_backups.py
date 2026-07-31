@@ -869,16 +869,91 @@ async def _start_prepared_backup_command(
     engine: AsyncEngine,
     settings: ApiSettings,
     prepared: _PreparedBackupCommand,
+    *,
+    reserve_destination: bool = False,
 ) -> _PreparedBackupCommand:
     if prepared.execution.phase != "prepared":
         return prepared
     async with _maintenance_lock(engine):
-        await _acquire_docker_effect_fence(settings, prepared)
         async with session.begin():
-            execution = await start_backup_command_effect(
+            current = await get_backup_command_execution(
                 session,
                 prepared.command.command_id,
             )
+        if current is None:
+            raise _effect_reconciliation_required(
+                prepared,
+                reason="maintenance lock 획득 뒤 command execution을 다시 읽을 수 없음",
+            )
+        current_prepared = _PreparedBackupCommand(
+            command=prepared.command,
+            execution=current,
+            started_now=False,
+        )
+        if current.phase != "prepared":
+            return current_prepared
+        await _acquire_docker_effect_fence(settings, current_prepared)
+        if reserve_destination:
+            try:
+                await asyncio.to_thread(
+                    reserve_backup_destination,
+                    settings.backup_root,
+                    command_id=current_prepared.command.command_id,
+                    backup_id=current.backup_id,
+                    input_digest=current.input_digest,
+                )
+            except (OSError, ValueError) as exc:
+                try:
+                    await _release_docker_effect_fence(
+                        settings,
+                        current_prepared,
+                    )
+                except HTTPException as release_exc:
+                    raise _effect_reconciliation_required(
+                        current_prepared,
+                        reason=(
+                            "effect 시작 전 destination reservation 실패 뒤 "
+                            "exact prepared fence 해제를 증명하지 못함"
+                        ),
+                    ) from release_exc
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "BACKUP_DESTINATION_NOT_OWNED",
+                        "message": (
+                            "backup destination이 다른 artifact 또는 command 소유입니다."
+                        ),
+                        "details": {
+                            "backup_id": current.backup_id,
+                            "error": str(exc),
+                        },
+                    },
+                ) from exc
+        try:
+            async with session.begin():
+                execution = await start_backup_command_effect(
+                    session,
+                    prepared.command.command_id,
+                )
+        except RuntimeError as exc:
+            async with session.begin():
+                recovered = await get_backup_command_execution(
+                    session,
+                    prepared.command.command_id,
+                )
+            if recovered is not None and recovered.phase != "prepared":
+                return _PreparedBackupCommand(
+                    command=prepared.command,
+                    execution=recovered,
+                    started_now=False,
+                )
+            raise _effect_reconciliation_required(
+                current_prepared,
+                reason=(
+                    "exact fence 획득 뒤 prepared effect transition의 "
+                    "현재 phase를 증명하지 못함"
+                ),
+            ) from exc
     return _PreparedBackupCommand(
         command=prepared.command,
         execution=execution,
@@ -1174,28 +1249,12 @@ async def create_backup(
         backup_id=backup_id,
         start_effect=False,
     )
-    try:
-        await asyncio.to_thread(
-            reserve_backup_destination,
-            settings.backup_root,
-            command_id=prepared.command.command_id,
-            backup_id=backup_id,
-            input_digest=prepared.execution.input_digest,
-        )
-    except (OSError, ValueError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "BACKUP_DESTINATION_NOT_OWNED",
-                "message": "backup destination이 다른 artifact 또는 command 소유입니다.",
-                "details": {"backup_id": backup_id, "error": str(exc)},
-            },
-        ) from exc
     prepared = await _start_prepared_backup_command(
         session,
         engine,
         settings,
         prepared,
+        reserve_destination=True,
     )
     plan = _plan_with_marker(
         plan,

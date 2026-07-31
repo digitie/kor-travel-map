@@ -142,7 +142,7 @@ def _domain_command_fakes(
     monkeypatch.setattr(
         router_mod,
         "get_backup_command_execution",
-        AsyncMock(return_value=None),
+        AsyncMock(side_effect=lambda _session, command_id: executions.get(command_id)),
     )
     monkeypatch.setattr(
         router_mod,
@@ -612,16 +612,31 @@ def test_foreign_fence_keeps_new_command_prepared_and_runs_no_effect(
             backup_command_enabled=True,
         )
     )
+    before = {
+        path.relative_to(tmp_path): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+    before_paths = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
 
     response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
         "/v1/admin/backups",
         json={"backup_id": "fenced", "execute": True},
     )
+    after = {
+        path.relative_to(tmp_path): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+    after_paths = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
 
     assert response.status_code == 409
     assert response.json()["code"] == (
         "BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED"
     )
+    assert after == before
+    assert after_paths == before_paths
+    assert not (tmp_path / "fenced").exists()
     start_effect.assert_not_awaited()
     run.assert_not_awaited()
 
@@ -896,6 +911,7 @@ def test_create_backup_rejects_existing_unreserved_custom_destination_before_eff
 
     _write_artifact(tmp_path, "custom")
     start_effect = AsyncMock()
+    release_fence = AsyncMock()
     monkeypatch.setattr(
         router_mod,
         "reserve_backup_destination",
@@ -905,6 +921,11 @@ def test_create_backup_rejects_existing_unreserved_custom_destination_before_eff
         router_mod,
         "start_backup_command_effect",
         start_effect,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "_release_docker_effect_fence",
+        release_fence,
     )
     app = create_app(
         ApiSettings(
@@ -924,6 +945,7 @@ def test_create_backup_rejects_existing_unreserved_custom_destination_before_eff
     assert response.status_code == 409
     assert response.json()["code"] == "BACKUP_DESTINATION_NOT_OWNED"
     start_effect.assert_not_awaited()
+    release_fence.assert_awaited_once()
 
 
 @pytest.mark.unit
