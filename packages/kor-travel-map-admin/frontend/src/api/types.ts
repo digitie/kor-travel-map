@@ -902,10 +902,12 @@ export interface paths {
         post?: never;
         /**
          * 오프라인 업로드 삭제 (정리 lifecycle)
-         * @description 업로드 메타데이터 row를 지우고 저장 객체를 best-effort로 정리한다.
+         * @description 저장 객체 삭제를 확인한 뒤 업로드 메타데이터 row를 지운다.
          *
          *     객체가 이미 없어도(예: RustFS 교체로 원본이 소실된 좀비 업로드, #397)
-         *     삭제는 성공한다. 진행 중(``validating``/``loading``) 업로드는 409.
+         *     S3 ``DeleteObject`` 계약에 따라 삭제는 성공한다. 저장소 응답이 모호하면 command와
+         *     row를 pending으로 남겨 같은 key 재시도가 동일 삭제 effect를 복구한다.
+         *     진행 중(``validating``/``loading``) 업로드의 신규 삭제 command는 409.
          *     같은 checksum 재업로드의 멱등 가드(409)는 row 삭제로 풀린다.
          */
         delete: operations["delete_offline_upload_request_v1_admin_offline_uploads__upload_id__delete"];
