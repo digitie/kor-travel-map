@@ -98,6 +98,9 @@ __all__ = [
     "CuratedFeatureRow",
     "CurationCollectionRow",
     "CurationItemRow",
+    "CurationImportBatchRow",
+    "CurationImportRowRow",
+    "CurationLinkDecisionRow",
     "ProviderSyncStateRow",
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
@@ -1266,6 +1269,33 @@ class CurationItemRow(Base):
             "status",
             "collection_id",
         ),
+        ForeignKeyConstraint(
+            ["current_import_row_id", "curation_item_id"],
+            [
+                "feature.curation_import_rows.import_row_id",
+                "feature.curation_import_rows.curation_item_id",
+            ],
+            name=conv("fk_curation_items_current_import_row"),
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        ForeignKeyConstraint(
+            [
+                "accepted_link_decision_id",
+                "curation_item_id",
+                "feature_id",
+            ],
+            [
+                "feature.curation_link_decisions.decision_id",
+                "feature.curation_link_decisions.curation_item_id",
+                "feature.curation_link_decisions.feature_id",
+            ],
+            name=conv("fk_curation_items_accepted_link_decision"),
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
         {"schema": "feature"},
     )
 
@@ -1296,6 +1326,8 @@ class CurationItemRow(Base):
             initially="DEFERRED",
         ),
     )
+    current_import_row_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    accepted_link_decision_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     external_item_id: Mapped[str] = mapped_column(Text, nullable=False)
     external_component_id: Mapped[str] = mapped_column(
         Text,
@@ -1334,6 +1366,238 @@ class CurationItemRow(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CurationImportBatchRow(Base):
+    """성공한 curation import 파일/정규화 row 집합의 append-only receipt."""
+
+    __tablename__ = "curation_import_batches"
+    __table_args__ = (
+        CheckConstraint(
+            "content_sha256 ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_curation_import_batches_sha256"),
+        ),
+        CheckConstraint(
+            "batch_kind IN ('csv_upload','normalized_rows','forward_recovery')",
+            name=conv("ck_curation_import_batches_kind"),
+        ),
+        CheckConstraint(
+            "row_count >= 0",
+            name=conv("ck_curation_import_batches_row_count"),
+        ),
+        CheckConstraint(
+            "actor = btrim(actor) AND actor <> ''",
+            name=conv("ck_curation_import_batches_actor"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(metadata) = 'object'",
+            name=conv("ck_curation_import_batches_metadata"),
+        ),
+        Index(
+            "idx_curation_import_batches_sha_time",
+            "content_sha256",
+            text("imported_at DESC"),
+            "import_batch_id",
+        ),
+        {"schema": "feature"},
+    )
+
+    import_batch_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    content_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    batch_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class CurationImportRowRow(Base):
+    """한 import batch의 exact normalized source row evidence."""
+
+    __tablename__ = "curation_import_rows"
+    __table_args__ = (
+        CheckConstraint(
+            "row_number > 0",
+            name=conv("ck_curation_import_rows_row_number"),
+        ),
+        CheckConstraint(
+            "source_row_sha256 ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_curation_import_rows_sha256"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(row_payload) = 'object'",
+            name=conv("ck_curation_import_rows_payload"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(provenance) = 'object'",
+            name=conv("ck_curation_import_rows_provenance"),
+        ),
+        ForeignKeyConstraint(
+            ["import_batch_id"],
+            ["feature.curation_import_batches.import_batch_id"],
+            name=conv("fk_curation_import_rows_batch"),
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["curation_item_id"],
+            ["feature.curation_items.curation_item_id"],
+            name=conv("fk_curation_import_rows_item"),
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "import_batch_id",
+            "row_number",
+            name=conv("uq_curation_import_rows_batch_row"),
+        ),
+        UniqueConstraint(
+            "import_row_id",
+            "curation_item_id",
+            name=conv("uq_curation_import_rows_item_pointer"),
+        ),
+        Index(
+            "idx_curation_import_rows_item_time",
+            "curation_item_id",
+            text("imported_at DESC"),
+            "import_row_id",
+        ),
+        {"schema": "feature"},
+    )
+
+    import_row_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    import_batch_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        nullable=False,
+    )
+    curation_item_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        nullable=False,
+    )
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_row_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    row_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    provenance: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class CurationLinkDecisionRow(Base):
+    """Feature link 승인·철회의 append-only 운영 결정."""
+
+    __tablename__ = "curation_link_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "decision_kind IN ('accepted','revoked')",
+            name=conv("ck_curation_link_decisions_kind"),
+        ),
+        CheckConstraint(
+            "match_basis IN ("
+            "'csv_explicit_feature_id','admin_review','legacy_unattributed',"
+            "'forward_recovery'"
+            ")",
+            name=conv("ck_curation_link_decisions_basis"),
+        ),
+        CheckConstraint(
+            "resolver_version = btrim(resolver_version) "
+            "AND resolver_version <> ''",
+            name=conv("ck_curation_link_decisions_resolver"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence) = 'object'",
+            name=conv("ck_curation_link_decisions_evidence"),
+        ),
+        CheckConstraint(
+            "actor = btrim(actor) AND actor <> ''",
+            name=conv("ck_curation_link_decisions_actor"),
+        ),
+        ForeignKeyConstraint(
+            ["curation_item_id"],
+            ["feature.curation_items.curation_item_id"],
+            name=conv("fk_curation_link_decisions_item"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["import_row_id"],
+            ["feature.curation_import_rows.import_row_id"],
+            name=conv("fk_curation_link_decisions_import_row"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["supersedes_decision_id"],
+            ["feature.curation_link_decisions.decision_id"],
+            name=conv("fk_curation_link_decisions_supersedes"),
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "decision_id",
+            "curation_item_id",
+            "feature_id",
+            name=conv("uq_curation_link_decisions_item_target"),
+        ),
+        Index(
+            "idx_curation_link_decisions_item_time",
+            "curation_item_id",
+            text("decided_at DESC"),
+            "decision_id",
+        ),
+        Index(
+            "idx_curation_link_decisions_basis_time",
+            "match_basis",
+            text("decided_at DESC"),
+            "decision_id",
+        ),
+        {"schema": "feature"},
+    )
+
+    decision_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    curation_item_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        nullable=False,
+    )
+    feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    import_row_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    decision_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    match_basis: Mapped[str] = mapped_column(Text, nullable=False)
+    resolver_version: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    actor: Mapped[str] = mapped_column(Text, nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    supersedes_decision_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
 
 
 class CuratedFeatureDetailSnapshotRow(Base):

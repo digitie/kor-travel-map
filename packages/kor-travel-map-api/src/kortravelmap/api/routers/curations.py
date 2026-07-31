@@ -194,6 +194,13 @@ class AdminCurationItemView(BaseModel):
     curation_relation: CurationRelation
     reuse_policy: ReusePolicy
     metadata: dict[str, Any]
+    current_import_row_id: UUID | None
+    accepted_link_decision_id: UUID | None
+    link_match_basis: str | None
+    link_resolver_version: str | None
+    link_evidence: dict[str, Any]
+    link_actor: str | None
+    link_decided_at: datetime | None
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
@@ -457,6 +464,7 @@ class CurationImportData(BaseModel):
     updated: int
     removed: int
     collections: int
+    import_batch_id: UUID | None
     removals: list[AdminCurationItemView]
     items: list[CurationImportRowView]
     issues: list[CurationImportIssueView]
@@ -466,6 +474,35 @@ class CurationImportResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: CurationImportData
+    meta: Meta
+
+
+class CurationLinkAuditView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    curation_item_id: UUID
+    collection_key: str
+    external_item_id: str
+    external_component_id: str
+    feature_id: str
+    place_name: str
+    address_hint: str | None
+    match_basis: str | None
+    resolver_version: str | None
+    decided_at: datetime | None
+
+
+class CurationLinkAuditData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[CurationLinkAuditView]
+    count: int
+
+
+class CurationLinkAuditResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: CurationLinkAuditData
     meta: Meta
 
 
@@ -617,6 +654,33 @@ def _import_metadata(row: CurationImportRow) -> dict[str, Any]:
 
 
 @admin_router.get(
+    "/link-audit",
+    response_model=CurationLinkAuditResponse,
+)
+async def audit_unattributed_curation_links(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    limit: Annotated[int, Query(ge=1, le=10_000)] = 500,
+) -> CurationLinkAuditResponse:
+    """공개 승인에 쓸 수 없는 legacy/provenance-less current link를 감사한다."""
+
+    started_at = perf_counter()
+    rows = await curation_repo.list_unattributed_curation_links(
+        session,
+        limit=limit,
+    )
+    items = [
+        CurationLinkAuditView.model_validate(row, from_attributes=True)
+        for row in rows
+    ]
+    return CurationLinkAuditResponse(
+        data=CurationLinkAuditData(items=items, count=len(items)),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@admin_router.get(
     "/import-template.csv",
     include_in_schema=True,
     response_class=Response,
@@ -653,6 +717,7 @@ async def import_admin_curations(
     """CSV를 preview하거나 오류 없는 전체 파일을 원자적으로 멱등 반영한다."""
     started_at = perf_counter()
     content = await file.read(CURATION_CSV_MAX_BYTES + 1)
+    content_sha256 = hashlib.sha256(content).hexdigest()
     preview = parse_curation_csv(content)
     command = await domain_command_service.begin_domain_command(
         session,
@@ -660,7 +725,7 @@ async def import_admin_curations(
         operation="admin.curation.import",
         idempotency_key=idempotency_key,
         payload={
-            "content_sha256": hashlib.sha256(content).hexdigest(),
+            "content_sha256": content_sha256,
             "dry_run": dry_run,
         },
     )
@@ -816,10 +881,15 @@ async def import_admin_curations(
             "removed": len(change_plan.removals),
             "collections": change_plan.collections,
             "removals": change_plan.removals,
+            "import_batch_id": None,
         }
         if not dry_run:
             result = await curation_repo.import_curation_rows(
-                session, rows=resolved_rows, actor=context.actor
+                session,
+                rows=resolved_rows,
+                actor=context.actor,
+                source_content_sha256=content_sha256,
+                batch_kind="csv_upload",
             )
     except IntegrityError as exc:
         await session.rollback()
@@ -845,6 +915,11 @@ async def import_admin_curations(
             updated=int(result["updated"]),
             removed=int(result["removed"]),
             collections=int(result["collections"]),
+            import_batch_id=(
+                UUID(str(result["import_batch_id"]))
+                if result["import_batch_id"] is not None
+                else None
+            ),
             removals=[_admin_item_view(item) for item in result["removals"]],
             items=item_views,
             issues=[_issue_view(issue) for issue in preview.issues]

@@ -212,6 +212,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/curations": RoutePolicy.OPERATOR,
     "/v1/admin/curations/import": RoutePolicy.OPERATOR,
     "/v1/admin/curations/import-template.csv": RoutePolicy.OPERATOR,
+    "/v1/admin/curations/link-audit": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}/items": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}/items/{curation_item_id}": (

@@ -126,6 +126,13 @@ def _item(*, item_id: str, edition: str) -> CurationItem:
         curation_relation="nearby_option",
         reuse_policy="manual_review",
         metadata={"edition": edition},
+        current_import_row_id=None,
+        accepted_link_decision_id=None,
+        link_match_basis=None,
+        link_resolver_version=None,
+        link_evidence={},
+        link_actor=None,
+        link_decided_at=None,
         created_by="fixture-creator",
         updated_by="fixture-updater",
         created_at=now,
@@ -227,6 +234,7 @@ def test_csv_preview_and_commit_keep_unresolved_official_item(
                 _item(item_id="removed-2023", edition="2023-2024"),
                 _item(item_id="removed-2025", edition="2025-2026"),
             ),
+            "import_batch_id": "55555555-5555-4555-8555-555555555555",
         }
 
     async def _preview(_session: object, **_kwargs: Any) -> CurationImportPlan:
@@ -387,9 +395,16 @@ def test_csv_accepts_mixed_component_resolution(
         )
 
     async def _import(
-        _session: object, *, rows: tuple[Any, ...], actor: str
+        _session: object,
+        *,
+        rows: tuple[Any, ...],
+        actor: str,
+        source_content_sha256: str,
+        batch_kind: str,
     ) -> CurationImportResult:
         assert actor == "local-dev"
+        assert len(source_content_sha256) == 64
+        assert batch_kind == "csv_upload"
         return {
             "rows": len(rows),
             "collections": 1,
@@ -397,6 +412,7 @@ def test_csv_accepts_mixed_component_resolution(
             "updated": 0,
             "removed": 0,
             "removals": (),
+            "import_batch_id": "55555555-5555-4555-8555-555555555555",
         }
 
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
