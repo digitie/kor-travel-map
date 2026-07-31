@@ -489,7 +489,7 @@ async def sync_integrity_findings(
 # - ``payload ->> 'dedupe_key' LIKE 'av2\_%'`` — ``sync_integrity_findings``가 만든 계열만
 #   닫는다. 같은 provider/dataset에 다른 subsystem이 남긴 finding(예: curation mislink)을
 #   쓸어버리지 않기 위한 경계다.
-_CLOSE_STALE_FINDINGS_SQL: Final[str] = """
+_CLOSE_STALE_FINDINGS_SQL: Final[str] = r"""
 UPDATE ops.data_integrity_violations AS v
    SET status = 'resolved',
        resolved_at = now(),
