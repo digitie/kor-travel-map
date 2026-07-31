@@ -50,8 +50,6 @@ barrier로 직렬화한다.
     [x] `T-VN-H39`(schedule command pending barrier) →
     [x] `T-VN-16B`(weather batch 소비) →
     [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
-    [ ] `T-VN-12A/B/C/D`(domain idempotency, 단일 PR #906 — Docker daemon effect를
-        non-interruptible supervision으로 보강, 동일 리뷰어 재검토·n150 파괴적 Live·merge 대기) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [ ] `T-VN-31A` → [ ] `T-VN-31B` → [ ] `T-VN-31C`
@@ -137,10 +135,10 @@ barrier로 직렬화한다.
 - **cross-lane 순서 제약**: C6c pair capture와 #392, H07A~D는 완료됐다.
   H22C의 curation frontend 선행 작업 T-VN-48B·T-VN-49B는 모두 완료됐다. H22A/B가
   끝나면 최신 구조에서 H22C를 시작한다. T-VN-49B 코드와 이 barrier 해제는 같은 merge
-  commit으로 landing한다. **2026-07-31 사용자 지시**에 따라 T-VN-12A/B/C/D는 지금
-  하나의 PR로 진행한다. 12A의 정적 command registry와 CI 완전성 검사가 새 write route를
-  미등록 상태로 둘 수 없게 하고, 미래 H22B reclassification command도 생성 시점부터 같은
-  actor-scoped ledger 계약을 등록하도록 강제해 종전의 H22B 선행 barrier를 대체한다.
+  commit으로 landing한다. PR #906에서 완료한 T-VN-12A의 정적 command registry와 CI
+  완전성 검사가 새 write route를 미등록 상태로 둘 수 없게 한다. 미래 H22B reclassification
+  command도 생성 시점부터 같은 actor-scoped ledger 계약을 등록해야 하므로 종전의 H22B
+  선행 barrier는 없다.
   Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
   T-VN-40은 양 lane의 T-VN-32~38 하위 task가 모두 끝난 join barrier 뒤에 시작하며,
   최종 T-VN-39는 T-VN-32~38·40의 모든 하위 task가 끝난 뒤에만 시작한다.
@@ -863,7 +861,7 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   운영자가 target collection 이동 또는 별도 collection 확정을 선택하는 command를 구현한다.
   parent collection→item lock, revision/actor 감사, conflict fail-close, 빈 quarantine 정리를
   한 transaction에서 보장한다. actor-scoped `Idempotency-Key`, body fingerprint와 terminal
-  result replay를 처음부터 포함하고 T-VN-12A가 이 계약을 inventory 기준선으로 승계한다.
+  result replay를 처음부터 포함하고 PR #906의 완료된 정적 inventory에 등록한다.
 
 - [ ] T-VN-H22C — **Admin UI·실데이터 파괴적 수용**
 
@@ -887,56 +885,6 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
-
-### T-VN-12 — domain-owned Idempotency-Key 전개
-
-기존 feature-update·pipeline/schedule ledger를 기준 구현으로 두고, 모든 write endpoint가 아니라
-네트워크 재시도 가능한 command만 대상으로 한다.
-
-2026-07-31 사용자 지시에 따라 A/B/C/D는 한 PR에서 완결한다. 12A의 정적 inventory와
-CI 완전성 검사가 이후 추가되는 모든 write operation의 retryable 분류와 ledger 등록 여부를
-강제하므로, 아직 구현되지 않은 H22B도 별도 선행 barrier 없이 생성 시점에 같은 계약을 따른다.
-
-PR #906의 세 번째 적대 검토에서 local Docker CLI의 종료가 daemon container 종료를 보장하지
-않는 P1을 확인했다. backup/restore/swap은 effect 시작 뒤 non-interruptible supervised 작업으로
-취급한다. API cancellation/timeout은 bounded 반환하되 wrapper는 child·Docker CLI 자연
-terminal과 marker 생성까지 PostgreSQL lock을 보유한다. actual Docker container 실행 중
-경쟁 lock 거부, terminal 뒤 lock 해제·marker 생성, 동일 command retry의 무재실행 terminal
-회수를 회귀 기준으로 둔다.
-
-네 번째 exact 재현에서는 wrapper/local child group을 `SIGKILL`하면 PostgreSQL session lock은
-풀리지만 daemon workload가 계속되고 marker가 없는 상태에서 기존 recovery가 effect를 다시
-시작하는 P1을 확인했다. DB execution의 immutable `effect_token`, API phase 전 global Docker
-fence pre-acquire, host script mutation 전 exact fence verification으로 보강한다. hard crash
-뒤 동일 command와 다른 command 모두 mutation 0건으로 manual-reconcile에 남고, 외부 operator가
-workload terminal/output proof를 확인해 marker를 기록하기 전에는 fence를 해제하거나 자동
-terminalize하지 않는 actual Docker+PostgreSQL SIGKILL 회귀를 완료 기준에 추가한다.
-create reservation은 같은 maintenance lock 안에서 exact fence 성공 뒤와 `effect_started`
-전이 사이에만 만들고, foreign fence 응답의 backup root byte mutation 0건을 고정한다.
-동일 key stale `prepared` 요청은 lock 획득 뒤 DB phase를 다시 읽어 fence 재채택·0-row
-UPDATE·500 없이 markerless 409/replay 경로에 합류하는 실제 migrated PostgreSQL 회귀를 둔다.
-
-- [ ] T-VN-12A — **retryable command inventory·계약 freeze**
-
-  OpenAPI write operation을 domain/actor/transaction/advisory-lock/현재 dedupe 의미로 분류하고
-  idempotency 적용·비적용 근거를 고정한다. `admin_features`의 `natural_key` 같은 body surrogate를
-  ledger로 오인하지 않는다.
-
-- [ ] T-VN-12B — **Feature·curation·review command ledger**
-
-  T-VN-12A에서 retryable로 분류된 Feature/curation/review command에 actor-scoped key,
-  canonical body fingerprint, terminal result replay, 다른 body 재사용 `409`를 구현한다.
-
-- [ ] T-VN-12C — **import·offline·backup/restore command ledger**
-
-  write mutex가 있는 import/offline/backup/restore command의 기존 advisory lock과 같은 transaction
-  경계에 ledger를 결합한다. 응답 유실과 process 재시작 뒤에도 결과를 재생하고 destructive command가
-  두 번 실행되지 않음을 증명한다.
-
-- [ ] T-VN-12D — **consumer cutover·surrogate 제거**
-
-  UI/CLI가 명시적 `Idempotency-Key`를 생성·재사용하도록 전환하고 body natural-key나 client-side
-  dedupe 중복을 제거한다. 적용 대상 전체의 key reuse/replay matrix를 n150에서 검증한다.
 
 ### T-VN-41 — cache-target generation·outbox 전파
 
