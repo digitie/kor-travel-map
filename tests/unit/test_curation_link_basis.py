@@ -12,6 +12,8 @@ import re
 from pathlib import Path
 from types import ModuleType
 
+from sqlalchemy import CheckConstraint
+
 from kortravelmap.infra.curation_link_basis import (
     ALL_LINK_BASES,
     TRUSTED_LINK_BASES,
@@ -56,6 +58,23 @@ def test_unattributed_basis_is_never_trusted() -> None:
     """근거를 복구할 수 없는 값은 어떤 경로에서도 공개 승인 근거가 아니다."""
     assert UNATTRIBUTED_LINK_BASIS not in TRUSTED_LINK_BASES
     assert UNATTRIBUTED_LINK_BASIS not in trusted_basis_sql("d.match_basis")
+
+
+def test_orm_metadata_check_matches_python_definition() -> None:
+    """SQLAlchemy metadata의 CHECK도 같은 집합이어야 한다.
+
+    alembic autogenerate는 CHECK 변경을 감지하지 못하므로, 여기가 어긋나도
+    `alembic check`는 조용히 통과한다. 그래서 테스트로 잡는다.
+    """
+    from kortravelmap.infra.models import CurationLinkDecisionRow
+
+    clauses = [
+        str(constraint.sqltext)
+        for constraint in CurationLinkDecisionRow.__table__.constraints
+        if isinstance(constraint, CheckConstraint) and "match_basis" in str(constraint.sqltext)
+    ]
+    assert len(clauses) == 1
+    assert _check_values(clauses[0]) == set(ALL_LINK_BASES)
 
 
 def test_public_surface_and_merge_share_one_definition() -> None:

@@ -71,6 +71,7 @@ from kortravelmap.core.pipeline_cancellation_states import (
     PIPELINE_CANCELLATION_ROOT_KIND_VALUES,
     PIPELINE_CANCELLATION_STATUS_VALUES,
 )
+from kortravelmap.infra.curation_link_basis import ALL_LINK_BASES
 
 _CANONICAL_WHITESPACE_SQL = (
     "(' ' || chr(9) || chr(10) || chr(11) || chr(12) || chr(13) "
@@ -308,9 +309,7 @@ class FeatureRow(Base):
     # 공개 술어 partial GiST(idx_features_*_gist, WHERE deleted_at IS NULL)만
     # __table_args__에 명시적으로 유지한다 — 자동 full은 write 비용만 늘리고 공개
     # 조회는 partial로 충분하다. 0061이 DB의 자동 full 3개를 drop한다.
-    coord: Mapped[Any | None] = mapped_column(
-        Geometry("POINT", srid=4326, spatial_index=False)
-    )
+    coord: Mapped[Any | None] = mapped_column(Geometry("POINT", srid=4326, spatial_index=False))
     coord_precision_digits: Mapped[int | None] = mapped_column(SmallInteger)
     coord_5179: Mapped[Any | None] = mapped_column(
         Geometry("POINT", srid=5179, spatial_index=False),
@@ -319,9 +318,7 @@ class FeatureRow(Base):
             persisted=True,
         ),
     )
-    geom: Mapped[Any | None] = mapped_column(
-        Geometry("GEOMETRY", srid=4326, spatial_index=False)
-    )
+    geom: Mapped[Any | None] = mapped_column(Geometry("GEOMETRY", srid=4326, spatial_index=False))
 
     # 주소 (kortravelmap.dto.Address 직렬화, ADR-041 — kraddr-base 흡수).
     address: Mapped[dict[str, Any]] = mapped_column(
@@ -386,7 +383,6 @@ class FeatureRow(Base):
         nullable=False,
         server_default=text("1"),
     )
-
 
     user_change_kind: Mapped[str | None] = mapped_column(Text)
     user_change_status: Mapped[str | None] = mapped_column(Text)
@@ -1206,8 +1202,7 @@ class CurationItemRow(Base):
     __table_args__ = (
         CheckConstraint("btrim(external_item_id) <> ''", name="external_id"),
         CheckConstraint(
-            "external_component_id <> '' "
-            "AND external_component_id = btrim(external_component_id)",
+            "external_component_id <> '' AND external_component_id = btrim(external_component_id)",
             name="external_component_id_canonical",
         ),
         CheckConstraint("btrim(place_name) <> ''", name="place_name"),
@@ -1514,15 +1509,13 @@ class CurationLinkDecisionRow(Base):
             name=conv("ck_curation_link_decisions_kind"),
         ),
         CheckConstraint(
-            "match_basis IN ("
-            "'csv_explicit_feature_id','admin_review','legacy_unattributed',"
-            "'forward_recovery'"
-            ")",
+            # 값 목록은 `curation_link_basis`가 소유한다. 여기 열거하면 값이 늘 때
+            # 세 곳(DB CHECK / 공개·merge 술어 / 이 metadata)이 따로 놀게 된다.
+            f"match_basis IN ({_sql_text_literals(tuple(sorted(ALL_LINK_BASES)))})",
             name=conv("ck_curation_link_decisions_basis"),
         ),
         CheckConstraint(
-            "resolver_version = btrim(resolver_version) "
-            "AND resolver_version <> ''",
+            "resolver_version = btrim(resolver_version) AND resolver_version <> ''",
             name=conv("ck_curation_link_decisions_resolver"),
         ),
         CheckConstraint(
@@ -2942,9 +2935,7 @@ class BackupCommandExecutionRow(Base):
         server_default=text("now()"),
     )
     effect_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    effect_completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    effect_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class OfflineUploadCommandExecutionRow(Base):
@@ -3024,9 +3015,7 @@ class OfflineUploadCommandExecutionRow(Base):
         server_default=text("now()"),
     )
     effect_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    effect_completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    effect_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # =============================================================================
@@ -3480,9 +3469,7 @@ class DataIntegrityViolationRow(Base):
             "uq_violations_open_dedupe_key",
             text("(payload ->> 'dedupe_key')"),
             unique=True,
-            postgresql_where=text(
-                "status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'"
-            ),
+            postgresql_where=text("status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'"),
         ),
         Index(
             "idx_violations_feature",
