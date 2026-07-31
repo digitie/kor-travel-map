@@ -430,3 +430,185 @@ async def test_backfill_is_idempotent_on_rerun(pg_container: Any) -> None:
         )
     finally:
         await engine.dispose()
+
+
+_REVOKE_SQL = """
+WITH revocation AS (
+    INSERT INTO feature.curation_link_decisions (
+        curation_item_id, feature_id, decision_kind, match_basis,
+        resolver_version, evidence, actor, supersedes_decision_id
+    )
+    SELECT item.curation_item_id, item.feature_id, 'revoked', 'forward_recovery',
+           'feature-merge-v1',
+           jsonb_build_object('operation', 'feature_merge_link_retarget'),
+           'merge:test', item.accepted_link_decision_id
+    FROM feature.curation_items AS item
+    WHERE COALESCE(item.legacy_projection_id, item.curation_item_id)
+          = CAST(:projection AS uuid)
+    RETURNING curation_item_id
+)
+UPDATE feature.curation_items AS item
+   SET accepted_link_decision_id = NULL
+  FROM revocation
+ WHERE revocation.curation_item_id = item.curation_item_id
+"""
+
+_APPEND_FORWARD_RECOVERY_SQL = """
+WITH appended AS (
+    INSERT INTO feature.curation_link_decisions (
+        curation_item_id, feature_id, decision_kind, match_basis,
+        resolver_version, evidence, actor, supersedes_decision_id
+    )
+    SELECT item.curation_item_id, item.feature_id, 'accepted',
+           'forward_recovery', 'feature-merge-v1',
+           jsonb_build_object('operation', 'feature_merge'),
+           'merge:test', item.accepted_link_decision_id
+    FROM feature.curation_items AS item
+    WHERE COALESCE(item.legacy_projection_id, item.curation_item_id)
+          = CAST(:projection AS uuid)
+    RETURNING decision_id, curation_item_id
+)
+UPDATE feature.curation_items AS item
+   SET accepted_link_decision_id = appended.decision_id
+  FROM appended
+ WHERE appended.curation_item_id = item.curation_item_id
+"""
+
+_SIMULATE_0072_BACKFILL_SQL = """
+WITH inserted AS (
+    INSERT INTO feature.curation_link_decisions (
+        curation_item_id, feature_id, decision_kind,
+        match_basis, resolver_version, evidence, actor
+    )
+    SELECT item.curation_item_id, item.feature_id, 'accepted',
+           'legacy_unattributed', 'pre-0072-unknown',
+           jsonb_build_object('migration', '0072_curation_provenance'),
+           'migration:0072'
+    FROM feature.curation_items AS item
+    WHERE item.feature_id IS NOT NULL
+      AND item.accepted_link_decision_id IS NULL
+    RETURNING decision_id, curation_item_id
+)
+UPDATE feature.curation_items AS item
+   SET accepted_link_decision_id = inserted.decision_id
+  FROM inserted
+ WHERE inserted.curation_item_id = item.curation_item_id
+"""
+
+
+async def test_trigger_does_not_resurrect_a_revoked_link(pg_container: Any) -> None:
+    """merge가 끊은 link을 트리거가 되살리면 안 된다.
+
+    merge는 link을 revoke할 때 revoked decision을 남기고
+    `accepted_link_decision_id`를 NULL로 만든다(`merge_repo.py:507-512`).
+    포인터가 비었다는 것을 "아무도 판단한 적 없다"로 읽으면, 그 뒤 어떤 갱신에서든
+    트리거가 새 `source_rule` 승인을 발급해 그 취소를 덮는다.
+    """
+    dsn = await _fresh_database(pg_container)
+    await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+    engine = make_async_engine(dsn)
+    try:
+        await _seed(engine)
+        projection_id = await _insert_projection(engine)
+        assert (await _link_state(engine, projection_id)).match_basis == "source_rule"
+
+        async with engine.begin() as connection:
+            await connection.execute(text(_REVOKE_SQL), {"projection": projection_id})
+        assert (await _link_state(engine, projection_id)).decision_id is None
+
+        # 취소 이후의 평범한 갱신 — 여기서 되살아나면 안 된다.
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE feature.curated_features "
+                    "SET display_summary = '취소 이후 갱신', "
+                    "    updated_at = clock_timestamp() "
+                    "WHERE curated_feature_id = CAST(:projection AS uuid)"
+                ),
+                {"projection": projection_id},
+            )
+
+        after = await _link_state(engine, projection_id)
+        assert after.decision_id is None, (
+            "취소된 link이 다시 승인됐다 — 운영자 결정이 트리거에 덮였다"
+        )
+    finally:
+        await engine.dispose()
+
+
+async def test_backfill_does_not_resurrect_a_revoked_link(pg_container: Any) -> None:
+    """일회성 backfill도 같은 축을 지켜야 한다.
+
+    승인과 취소를 **한 transaction에서** 쓴다 — merge가 실제로 그렇게 한다. 그러면
+    `decided_at`이 `now()`로 같아져 시각으로는 순서가 갈리지 않는다. 판정을
+    `ORDER BY decided_at DESC, decision_id DESC`로 하면 v4 UUID가 tie-break를 하게 돼
+    결과가 무작위가 된다(이 테스트가 실제로 그렇게 흔들렸다). 최신 결정은 supersedes
+    사슬의 머리로 찾아야 한다.
+    """
+    dsn = await _fresh_database(pg_container)
+    await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION)
+    engine = make_async_engine(dsn)
+    try:
+        await _seed(engine)
+        projection_id = await _insert_projection(engine)
+
+        # 0072 backfill 상태를 만든 뒤 merge가 그 link을 끊은 상황을 재현한다.
+        async with engine.begin() as connection:
+            await connection.execute(text(_SIMULATE_0072_BACKFILL_SQL))
+            await connection.execute(text(_REVOKE_SQL), {"projection": projection_id})
+
+        await engine.dispose()
+        await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+        engine = make_async_engine(dsn)
+
+        after = await _link_state(engine, projection_id)
+        assert after.decision_id is None, "backfill이 취소된 link을 source_rule로 승격했다"
+    finally:
+        await engine.dispose()
+
+
+async def test_downgrade_survives_a_supersedes_chain(pg_container: Any) -> None:
+    """`source_rule` 결정을 이어받은 결정이 있어도 downgrade가 끝까지 간다.
+
+    `supersedes_decision_id` FK는 ON DELETE RESTRICT다. merge가 `source_rule`
+    결정을 이어 `forward_recovery`를 쌓으면, 단순 DELETE는 그 참조에 막혀
+    downgrade 전체가 중단된다.
+    """
+    dsn = await _fresh_database(pg_container)
+    await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+    engine = make_async_engine(dsn)
+    try:
+        await _seed(engine)
+        projection_id = await _insert_projection(engine)
+        state = await _link_state(engine, projection_id)
+        assert state.match_basis == "source_rule"
+
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(_APPEND_FORWARD_RECOVERY_SQL), {"projection": projection_id}
+            )
+        chained = await _link_state(engine, projection_id)
+        assert chained.match_basis == "forward_recovery"
+        assert chained.supersedes_decision_id == state.decision_id
+
+        await engine.dispose()
+        # 여기서 RESTRICT에 막히면 downgrade가 통째로 실패한다.
+        await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION, downgrade=True)
+        engine = make_async_engine(dsn)
+
+        async with engine.connect() as connection:
+            leftover = (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM feature.curation_link_decisions "
+                        "WHERE match_basis = 'source_rule'"
+                    )
+                )
+            ).scalar_one()
+        assert leftover == 0, "downgrade가 source_rule 행을 남겼다"
+
+        survivor = await _link_state(engine, projection_id)
+        assert survivor.match_basis == "forward_recovery"
+        assert survivor.supersedes_decision_id is None, "사슬이 삭제된 결정을 계속 가리킨다"
+    finally:
+        await engine.dispose()

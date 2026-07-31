@@ -142,6 +142,24 @@ WITH promoted AS (
       AND cf.source_record_key IS NOT DISTINCT FROM item.source_record_key
       AND COALESCE(current_decision.match_basis, 'legacy_unattributed')
               = 'legacy_unattributed'
+      -- 포인터가 비어 있다고 해서 "근거 없음"이 아니다. merge는 link을 끊을 때
+      -- revoked decision을 남기고 포인터를 NULL로 만든다(`merge_repo.py:507-512`).
+      -- 그 취소를 못 보면 승격이 운영자 결정을 되살린다.
+      --
+      -- 최신 결정은 `decided_at`이 아니라 **supersedes 사슬의 머리**로 찾는다.
+      -- 같은 transaction 안에서 쓰인 결정들은 `now()`가 같아 시각으로는 순서가
+      -- 갈리지 않고, tie-break를 v4 UUID로 하면 결과가 무작위가 된다.
+      AND NOT EXISTS (
+          SELECT 1
+          FROM feature.curation_link_decisions AS revocation
+          WHERE revocation.curation_item_id = item.curation_item_id
+            AND revocation.decision_kind = 'revoked'
+            AND NOT EXISTS (
+                SELECT 1
+                FROM feature.curation_link_decisions AS successor
+                WHERE successor.supersedes_decision_id = revocation.decision_id
+            )
+      )
     RETURNING decision_id, curation_item_id
 )
 UPDATE feature.curation_items AS item
@@ -171,6 +189,28 @@ BEGIN
           AND existing.feature_id = NEW.feature_id
           AND existing.decision_kind = 'accepted'
           AND existing.match_basis <> 'legacy_unattributed'
+    ) THEN
+        RETURN NULL;
+    END IF;
+
+    -- 포인터가 비어 있는 것과 "아무도 판단한 적 없다"는 다르다. merge는 link을
+    -- 끊을 때 revoked decision을 남기고 포인터를 NULL로 만든다
+    -- (`merge_repo.py:507-512`). 그것을 근거 없음으로 읽으면 운영자가 끊은 link을
+    -- 트리거가 되살린다 — 그것도 merge와 같은 transaction 안에서.
+    --
+    -- 최신 결정은 `decided_at`이 아니라 **supersedes 사슬의 머리**로 찾는다.
+    -- merge는 취소를 다른 결정과 같은 transaction에서 쓰므로 `now()`가 같고,
+    -- v4 UUID로 tie-break하면 판정이 무작위가 된다.
+    IF EXISTS (
+        SELECT 1
+        FROM feature.curation_link_decisions AS revocation
+        WHERE revocation.curation_item_id = NEW.curation_item_id
+          AND revocation.decision_kind = 'revoked'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM feature.curation_link_decisions AS successor
+              WHERE successor.supersedes_decision_id = revocation.decision_id
+          )
     ) THEN
         RETURN NULL;
     END IF;
@@ -265,21 +305,59 @@ def downgrade() -> None:
     op.execute(f"DROP TRIGGER IF EXISTS {_TRIGGER_NAME} ON feature.curation_items")
     op.execute(f"DROP FUNCTION IF EXISTS {_FUNCTION_NAME}()")
 
-    # decision 이력은 append-only다. 포인터를 직전 결정으로 되돌려 `source_rule`이
-    # 공개 승인 근거로 쓰이지 않게 한 뒤, CHECK를 좁히기 위해 그 행들을 제거한다.
-    op.execute(
-        """
-        UPDATE feature.curation_items AS item
-           SET accepted_link_decision_id = decision.supersedes_decision_id
-          FROM feature.curation_link_decisions AS decision
-         WHERE decision.decision_id = item.accepted_link_decision_id
-           AND decision.match_basis = 'source_rule'
-        """
-    )
-    # append-only 트리거가 DELETE를 막는다. downgrade 전용으로 잠시 비활성화한다.
+    # `source_rule` 행을 지우려면 그 행을 가리키는 참조를 **전부** 먼저 풀어야 한다.
+    # 참조는 두 갈래이고 둘 다 ON DELETE RESTRICT다:
+    #   ① curation_items.accepted_link_decision_id
+    #   ② curation_link_decisions.supersedes_decision_id  ← merge가 `source_rule`
+    #      결정을 이어받아 `forward_recovery`를 쌓으면 여기가 생긴다
+    # 한 번만 건너뛰면 `source_rule` → `source_rule` 연쇄에서 여전히 걸린다.
+    # 그래서 둘 다 **더 옮길 것이 없을 때까지** 반복해서 되감는다.
     op.execute(
         "ALTER TABLE feature.curation_link_decisions "
         "DISABLE TRIGGER trg_curation_link_decisions_append_only"
+    )
+    op.execute(
+        """
+        DO $$
+        BEGIN
+          -- ② supersedes 사슬을 source_rule 행 너머로 잇는다.
+          LOOP
+            UPDATE feature.curation_link_decisions AS dependent
+               SET supersedes_decision_id = target.supersedes_decision_id
+              FROM feature.curation_link_decisions AS target
+             WHERE dependent.supersedes_decision_id = target.decision_id
+               AND target.match_basis = 'source_rule'
+               AND target.supersedes_decision_id
+                       IS DISTINCT FROM dependent.decision_id;
+            EXIT WHEN NOT FOUND;
+          END LOOP;
+
+          -- ① item 포인터를 source_rule이 아닌 가장 가까운 조상으로 되감는다.
+          LOOP
+            UPDATE feature.curation_items AS item
+               SET accepted_link_decision_id = decision.supersedes_decision_id
+              FROM feature.curation_link_decisions AS decision
+             WHERE decision.decision_id = item.accepted_link_decision_id
+               AND decision.match_basis = 'source_rule';
+            EXIT WHEN NOT FOUND;
+          END LOOP;
+        END $$
+        """
+    )
+    # 되감은 조상이 지금의 link 대상과 다르면 composite FK
+    # (decision_id, curation_item_id, feature_id)를 만족하지 못한다. 그 경우는
+    # 근거 없음으로 되돌린다 — 0072 상태에서 그 link은 어차피 공개되지 않는다.
+    op.execute(
+        """
+        UPDATE feature.curation_items AS item
+           SET accepted_link_decision_id = NULL
+          FROM feature.curation_link_decisions AS decision
+         WHERE decision.decision_id = item.accepted_link_decision_id
+           AND (
+                decision.curation_item_id <> item.curation_item_id
+                OR decision.feature_id IS DISTINCT FROM item.feature_id
+           )
+        """
     )
     op.execute("DELETE FROM feature.curation_link_decisions WHERE match_basis = 'source_rule'")
     op.execute(

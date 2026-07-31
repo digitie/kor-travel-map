@@ -536,7 +536,7 @@ INSERT INTO feature.curation_import_batches (
 RETURNING import_batch_id
 """
 
-_APPEND_DUPLICATE_MERGE_IMPORT_ROWS_SQL: Final[str] = """
+_APPEND_DUPLICATE_MERGE_IMPORT_ROWS_SQL: Final[str] = f"""
 WITH pair_input AS MATERIALIZED (
     SELECT *
     FROM jsonb_to_recordset(CAST(:pairs AS jsonb)) AS pair(
@@ -661,11 +661,7 @@ WITH pair_input AS MATERIALIZED (
     JOIN inserted_rows AS inserted
       ON inserted.curation_item_id = snapshot.curation_item_id
     WHERE snapshot.previous_decision_kind = 'accepted'
-      AND snapshot.previous_match_basis IN (
-          'csv_explicit_feature_id',
-          'admin_review',
-          'forward_recovery'
-      )
+      AND {trusted_basis_sql("snapshot.previous_match_basis")}
     RETURNING decision_id, curation_item_id
 )
 UPDATE feature.curation_items AS survivor
