@@ -80,10 +80,7 @@ restore_router = APIRouter(prefix="/admin/restore", tags=["admin-backups"])
 
 BackupOperation = Literal["backup", "restore", "swap"]
 BackupOperationStatus = Literal["planned", "completed", "failed", "manual_required"]
-# Wrapper의 child-group grace(기본 5초)보다 길어야 wrapper가 lock을 보유한 채
-# SIGKILL·reap을 끝낸 뒤 정상 종료할 수 있다.
-_COMMAND_TERMINATE_GRACE_SECONDS = 7.0
-_COMMAND_KILL_REAP_SECONDS = 5.0
+_SUPERVISED_COMMAND_COMMUNICATIONS: set[asyncio.Task[tuple[bytes, bytes]]] = set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -428,7 +425,7 @@ async def _run_command(
             timeout=timeout_seconds,
         )
     except TimeoutError:
-        await _reap_process_group(process, communication)
+        _detach_supervised_command(process, communication)
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail={
@@ -438,7 +435,7 @@ async def _run_command(
             },
         ) from None
     except BaseException:
-        await _reap_process_group(process, communication)
+        _detach_supervised_command(process, communication)
         raise
     return _CommandResult(
         returncode=process.returncode if process.returncode is not None else -1,
@@ -447,51 +444,28 @@ async def _run_command(
     )
 
 
-async def _terminate_process_group(
+def _consume_supervised_command(
+    communication: asyncio.Task[tuple[bytes, bytes]],
+) -> None:
+    _SUPERVISED_COMMAND_COMMUNICATIONS.discard(communication)
+    if communication.cancelled():
+        return
+    with suppress(Exception):
+        communication.exception()
+
+
+def _detach_supervised_command(
     process: asyncio.subprocess.Process,
     communication: asyncio.Task[tuple[bytes, bytes]],
 ) -> None:
     if communication.done():
-        await communication
         return
+    # Wrapper만 signal한다. wrapper는 이를 detach 요청으로 기록하고 daemon
+    # effect와 연결된 child를 자연 terminal까지 감독하며 advisory lock을 유지한다.
     with suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGTERM)
-    done, _ = await asyncio.wait(
-        {communication},
-        timeout=_COMMAND_TERMINATE_GRACE_SECONDS,
-    )
-    if done:
-        await communication
-        return
-    with suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGKILL)
-    done, _ = await asyncio.wait(
-        {communication},
-        timeout=_COMMAND_KILL_REAP_SECONDS,
-    )
-    if not done:
-        communication.cancel()
-        with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        with suppress(asyncio.CancelledError):
-            await communication
-        raise RuntimeError("backup command process group did not close its pipes")
-    await communication
-
-
-async def _reap_process_group(
-    process: asyncio.subprocess.Process,
-    communication: asyncio.Task[tuple[bytes, bytes]],
-) -> None:
-    """반복 cancellation에도 child group 회수를 끝낸 뒤 반환한다."""
-
-    cleanup = asyncio.create_task(_terminate_process_group(process, communication))
-    while not cleanup.done():
-        try:
-            await asyncio.shield(cleanup)
-        except asyncio.CancelledError:
-            continue
-    await cleanup
+    _SUPERVISED_COMMAND_COMMUNICATIONS.add(communication)
+    communication.add_done_callback(_consume_supervised_command)
 
 
 async def _write_marker(

@@ -43,13 +43,20 @@ reservation과 exact marker 없는 기존 backup/restore 산출물은 성공으�
 ruff·strict mypy·bash syntax가 green이다.
 
 재검토에서 wrapper가 `TERM`으로 먼저 종료돼 lock을 놓고 TERM 무시 descendant가 살아남는
-P1을 추가로 확인했다. wrapper가 DB session을 유지한 채 child group의
-`TERM → bounded wait → KILL → reap`을 끝내고, API도 return code가 아니라 pipe 완료를
-기준으로 escalation하도록 수정했다. actual wrapper·PostgreSQL contender와 leader 종료 뒤
-pipe 보유 descendant 회귀 2건, 관련 focused 55건, 전체 unit+API 2,642건은 green이다.
+P1을 추가로 확인해 group reap 방식으로 보강했지만, 세 번째 검토는 local Docker CLI를
+회수해도 daemon container가 계속될 수 있음을 실제 재현했다. 시작된 backup/restore/swap은
+취소 가능한 process가 아니라 non-interruptible supervised effect로 다시 정의했다. API
+cancellation/timeout은 bounded 반환하고 DB phase는 `effect_started`에 남기되, 별도 session의
+wrapper는 임시 output spool과 PostgreSQL lock을 child/Docker CLI 자연 terminal까지 유지한다.
+실제 TERM-ignore Docker container 실행 중 경쟁 lock 거부, terminal 뒤 lock 해제와 durable
+marker 생성, 동일 command retry의 무재실행 `completed`, API cancellation/timeout bounded
+detach 회귀 4건이 green이다. 관련 focused 49건, PostgreSQL/Docker ledger integration 8건,
+전체 unit+API **2,644건**, ruff·strict mypy(core 120/API 58/Dagster 23)·import 경계·
+OpenAPI drift·prod redaction도 모두 통과했다.
 
-**다음 한 작업**: P1 수정 보안 감사를 마쳐 PR #906에 push하고 같은 적대 리뷰어가 일반
-코드 수정 전체를 재검토한다. 이어 n150 파괴적 live UI/API, 최종
+**다음 한 작업**: push 전 staged·프로젝트 민감값 감사를 마쳐 PR #906에 commit·main
+rebase·push하고 같은 적대 리뷰어가 일반 코드 수정 전체를 재검토한다. 이어
+n150 파괴적 live UI/API, 최종
 rebase·merge를 끝낸 뒤 T-VN-12A/B/C/D를 `tasks-done.md`로 한 PR 단위 이관한다.
 
 ## 2026-07-31 (codex) — T-VN-16C 완료·T-VN-12A/B/C/D 단일 PR 전환

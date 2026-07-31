@@ -70,12 +70,20 @@ PostgreSQL advisory lock `maintenance:backup-restore`를 잡고 실행된다. lo
 잡혀 있으면 실행은 실패한다. lock bypass 환경변수는 지원하지 않는다.
 
 Admin API도 script wrapper 자체가 lock owner다. API connection이 잡은 lock을 env로
-child에 위임하지 않는다. wrapper는 `SIGTERM`/`SIGINT`를 기본 동작으로 종료하지 않고,
-DB session을 유지한 채 별도 child process group에 전달한다. 제한 시간 뒤에도 group이
-남으면 `SIGKILL`하고 direct child와 group 소멸을 확인한 뒤에만 lock을 해제한다. API도
-wrapper return code가 이미 정해졌는지가 아니라 stdout/stderr pipe communication 완료를
-기준으로 두 단계 bounded escalation한다. 따라서 TERM을 무시하는 descendant가 pipe를
-잡고 있어도 무기한 대기하거나 lock 없이 host 효과만 계속하지 않는다. API 내부 delete의
+child에 위임하지 않는다. Docker daemon 작업은 local CLI 종료만으로 취소를 증명할 수 없으므로
+effect 시작 뒤에는 non-interruptible supervised 작업이다. wrapper는 `SIGTERM`/`SIGINT`를
+호출자 detach로만 기록하고 child에는 전달하지 않는다. stdout/stderr는 API pipe가 아니라
+임시 파일에 spool하고 direct child와 child process group이 자연 terminal에 도달한 뒤에만
+출력을 재생하고 lock을 해제한다.
+
+API cancellation은 bounded하게 호출 task를 끝내고 timeout은
+`504 BACKUP_COMMAND_TIMEOUT`을 반환하지만 wrapper communication은 background에서 계속된다.
+DB execution phase는 `effect_started`에 남는다. 작업 중 동일 command를 재시도하면
+`409 BACKUP_MAINTENANCE_BUSY`이고, host script가 create-once marker를 남긴 뒤 재시도하면
+외부 효과를 반복하지 않고 marker proof로 `effect_succeeded`와 terminal response를 확정한다.
+API worker가 종료돼도 새 session의 wrapper와 임시 spool은 child terminal까지 lock을 유지한다.
+wrapper 자체를 `SIGKILL`하는 운영 개입은 이 보장을 우회하므로 정상 취소 절차가 아니다.
+API 내부 delete의
 filesystem `rmtree`는 같은 lock을 marker proof와 domain command terminal result commit까지
 직접 보유한다. 경합은 무기한 대기하지 않고 `409 BACKUP_MAINTENANCE_BUSY`와
 `Retry-After: 3`으로 실패한다.

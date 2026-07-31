@@ -36,10 +36,14 @@
    result는 효과별 output digest/proof가 있어야만 기록한다. `pending`은 성공으로 추정하지 않는다.
 8. backup/create/restore/swap은 동일 session advisory lock
    `maintenance:backup-restore`를 host wrapper process가 fail-fast로 획득하고 child script
-   전체 수명 동안 보유한다. wrapper는 `TERM`/`INT`를 직접 받아 DB session을 유지한 채
-   child process group에 전달하고 제한 시간 뒤 `KILL`로 올린 다음 group 소멸과 direct child
-   reap을 확인한 후에만 종료한다. API task 취소·timeout도 wrapper의 return code가 아니라
-   pipe communication 완료를 기준으로 `TERM → bounded wait → KILL → bounded reap`한다.
+   전체 수명 동안 보유한다. Docker daemon 외부 효과는 local CLI 종료로 취소됐다고 증명할 수
+   없으므로 effect가 시작된 뒤에는 non-interruptible supervised 작업이다. wrapper는
+   `TERM`/`INT`를 호출자 detach 요청으로만 기록하고 child에는 전달하지 않으며, API pipe와
+   분리된 임시 spool을 사용한다. direct child와 그 process group이 자연 terminal에 도달한
+   뒤에만 output을 재생하고 lock을 해제한다. API task 취소·timeout은 bounded하게 반환하되
+   wrapper communication을 background에서 유지하고 execution은 `effect_started`로 남긴다.
+   즉시 같은 command를 재시도하면 살아 있는 lock 때문에 retryable `409`이고, host script가
+   exact marker를 만든 뒤 재시도하면 외부 효과를 다시 실행하지 않고 terminal result를 확정한다.
    API connection에서 획득한 lock을 env flag로 child에게 위임하지 않는다. API 내부 delete도
    같은 key를 effect·proof·terminal commit 전체에 직접 보유한다.
 9. host completion marker는 backup root의 전용 `0700` 디렉터리에서 `O_NOFOLLOW`,
@@ -67,6 +71,8 @@ admin UI는 `412`를 자동 재시도하지 않는다. 작성 중인 draft와 �
 - **부정**: command별 ledger와 outbox 운영·purge가 필요하다.
 - **부정**: 외부 효과 command는 별도 execution 상태·proof 저장과 process-restart 복구
   분기가 필요하고, backup/restore 동시 요청은 fail-fast `409`로 다시 시도해야 한다.
+  시작된 Docker 효과는 API cancellation/timeout 뒤에도 terminal까지 계속되므로 운영자는
+  marker와 동일 command 재시도로 최종 상태를 회수해야 한다.
 - **전환/rollback**: domain별로 독립 도입한다. relay는 backfill/reconciliation 뒤 enable하고 실패 시
   소비를 중단해 outbox를 보존한다. revision을 이해하지 못하는 consumer는 해당 resource cutover
   전에 선배포한다.

@@ -46,8 +46,8 @@ barrier로 직렬화한다.
     [x] `T-VN-H39`(schedule command pending barrier) →
     [x] `T-VN-16B`(weather batch 소비) →
     [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
-    [ ] `T-VN-12A/B/C/D`(domain idempotency, 단일 PR #906 — 재검토 P1 signal/lock
-        lifecycle 반영 중, 동일 리뷰어 재검토·n150 파괴적 Live·merge 대기) →
+    [ ] `T-VN-12A/B/C/D`(domain idempotency, 단일 PR #906 — Docker daemon effect를
+        non-interruptible supervision으로 보강, 동일 리뷰어 재검토·n150 파괴적 Live·merge 대기) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [ ] `T-VN-31A` → [ ] `T-VN-31B` → [ ] `T-VN-31C`
@@ -766,6 +766,13 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 2026-07-31 사용자 지시에 따라 A/B/C/D는 한 PR에서 완결한다. 12A의 정적 inventory와
 CI 완전성 검사가 이후 추가되는 모든 write operation의 retryable 분류와 ledger 등록 여부를
 강제하므로, 아직 구현되지 않은 H22B도 별도 선행 barrier 없이 생성 시점에 같은 계약을 따른다.
+
+PR #906의 세 번째 적대 검토에서 local Docker CLI의 종료가 daemon container 종료를 보장하지
+않는 P1을 확인했다. backup/restore/swap은 effect 시작 뒤 non-interruptible supervised 작업으로
+취급한다. API cancellation/timeout은 bounded 반환하되 wrapper는 child·Docker CLI 자연
+terminal과 marker 생성까지 PostgreSQL lock을 보유한다. actual Docker container 실행 중
+경쟁 lock 거부, terminal 뒤 lock 해제·marker 생성, 동일 command retry의 무재실행 terminal
+회수를 회귀 기준으로 둔다.
 
 - [ ] T-VN-12A — **retryable command inventory·계약 freeze**
 

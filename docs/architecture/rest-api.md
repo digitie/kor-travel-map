@@ -246,12 +246,17 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
   다른 key의 경쟁 요청은 claim까지 rollback된 `409`로 끝난다.
 - backup/restore/swap은 host wrapper가 `maintenance:backup-restore` session lock을
   `pg_try_advisory_lock`으로 잡고 child process 전체 수명 동안 보유한다. wrapper가
-  `TERM`/`INT`를 받아 child group의 `TERM → bounded wait → KILL → reap`을 끝낸 뒤 lock을
-  해제하며, API cancellation과 timeout도 wrapper return code와 무관하게 pipe가 닫힐 때까지
-  bounded escalation한다. busy는
+  `TERM`/`INT`를 받으면 호출자 detach만 기록하고 daemon effect와 연결된 child에는 전달하지
+  않는다. child output은 API pipe와 분리된 임시 spool에 저장하며 direct child와 process
+  group이 자연 terminal에 도달한 뒤에만 lock을 해제한다. API cancellation은 호출자에게
+  응답하지 못한 채 bounded하게 반환하고 timeout은 `504 BACKUP_COMMAND_TIMEOUT`으로
+  bounded 반환하지만, execution row는 `effect_started`로 남고 wrapper supervision은 계속된다.
+  진행 중 동일 command 재시도는 lock 경합으로
   `409 BACKUP_MAINTENANCE_BUSY`와 `Retry-After: 3`이다. API 내부 backup delete는 같은 lock을
   effect·proof·terminal DB commit까지 직접 보유한다. exact command marker/reservation 없는
-  기존 backup artifact나 restore target은 새 command 결과로 채택하지 않는다.
+  기존 backup artifact나 restore target은 새 command 결과로 채택하지 않는다. wrapper가
+  exact marker를 만든 뒤 동일 command를 재시도하면 외부 효과를 반복하지 않고 marker proof로
+  terminal result를 확정한다.
 - admin UI는 resource command slot 또는 create draft slot에 UUID와 submission fingerprint를
   함께 동결한다. response-loss/transport ambiguity에서는 같은 submission만 같은 UUID로
   재시도하며 내용이 달라지면 로컬에서 차단한다. 성공·확정 실패·인증 actor 전환 때 slot을

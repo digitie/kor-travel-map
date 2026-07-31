@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import shlex
-import signal
+import hashlib
+import json
 import sys
-from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
@@ -170,26 +169,43 @@ async def test_backup_maintenance_lock_fails_fast_when_exact_key_is_busy(
             assert unlocked is True
 
 
-async def test_lock_wrapper_reaps_term_ignoring_child_before_unlock(
+async def test_lock_wrapper_holds_lock_until_detached_docker_effect_exits(
     migrated_engine: AsyncEngine,
     tmp_path: Path,
 ) -> None:
-    from kortravelmap.api.routers.admin_backups import (
-        BackupCommandPlan,
-        _run_command,
-    )
+    from kortravelmap.api.routers import admin_backups as router_mod
 
     from kortravelmap.infra.advisory_lock import advisory_lock_key
+    from kortravelmap.infra.domain_command_marker import (
+        backup_artifact_output_proof,
+        verify_domain_command_marker,
+    )
 
     project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240
-    child_pid_file = tmp_path / "lock-child.pid"
-    term_observed_file = tmp_path / "lock-child-term"
-    child_command = (
-        f"echo $$ > {shlex.quote(str(child_pid_file))}; "
-        f"trap 'touch {shlex.quote(str(term_observed_file))}' TERM INT; "
-        "while true; do sleep 0.05; done"
+    container_name = f"ktm-tvn12-supervised-{uuid4().hex}"
+    backup_id = "detached-backup"
+    command_id = 912
+    marker_key = f"command-{command_id}"
+    input_digest = "a" * 64
+    artifact = tmp_path / backup_id
+    (artifact / "meta").mkdir(parents=True)
+    (artifact / "postgres").mkdir()
+    dump = artifact / "postgres" / "app.dump"
+    dump.write_bytes(b"detached-effect")
+    (artifact / "meta" / "manifest.json").write_text(
+        json.dumps({"backup_id": backup_id}),
+        encoding="utf-8",
     )
-    plan = BackupCommandPlan(
+    (artifact / "meta" / "SHA256SUMS").write_text(
+        f"{hashlib.sha256(dump.read_bytes()).hexdigest()}  postgres/app.dump\n",
+        encoding="utf-8",
+    )
+    marker_writer = project_root / "scripts" / "write-domain-command-marker.py"
+    child_command = (
+        f"docker run --rm --name {container_name} alpine:3.20 "
+        "sh -c \"trap '' TERM INT; sleep 2\"; exec \"$@\""
+    )
+    plan = router_mod.BackupCommandPlan(
         cwd=str(project_root),
         command=[
             sys.executable,
@@ -198,12 +214,29 @@ async def test_lock_wrapper_reaps_term_ignoring_child_before_unlock(
             "maintenance:backup-restore",
             "--dsn",
             migrated_engine.url.render_as_string(hide_password=False),
-            "--terminate-grace-seconds",
-            "1.0",
             "--",
             "bash",
             "-c",
             child_command,
+            "marker-writer",
+            sys.executable,
+            str(marker_writer),
+            "--backup-root",
+            str(tmp_path),
+            "--command-id",
+            str(command_id),
+            "--operation",
+            "admin.backup.create",
+            "--marker-key",
+            marker_key,
+            "--effect-kind",
+            "create",
+            "--effect-state",
+            "created",
+            "--backup-id",
+            backup_id,
+            "--input-digest",
+            input_digest,
         ],
         env={},
         enabled=True,
@@ -226,39 +259,86 @@ async def test_lock_wrapper_reaps_term_ignoring_child_before_unlock(
                 assert unlocked is True
             return acquired
 
-    task = asyncio.create_task(_run_command(plan, timeout_seconds=30.0))
-    child_pid: int | None = None
+    async def _docker(*args: str) -> tuple[int, str]:
+        process = await asyncio.create_subprocess_exec(
+            "docker",
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await process.communicate()
+        return process.returncode, stdout.decode("utf-8", errors="replace").strip()
+
+    async def _container_is_running() -> bool:
+        returncode, output = await _docker(
+            "inspect",
+            "--format",
+            "{{.State.Running}}",
+            container_name,
+        )
+        return returncode == 0 and output == "true"
+
+    task = asyncio.create_task(
+        router_mod._run_command(plan, timeout_seconds=30.0)
+    )
     try:
-        for _ in range(300):
-            if child_pid_file.exists():
-                child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+        for _ in range(600):
+            if await _container_is_running():
                 break
-            await asyncio.sleep(0.01)
-        assert child_pid is not None
+            await asyncio.sleep(0.05)
+        assert await _container_is_running()
         assert await _contender_can_acquire() is False
 
+        started = asyncio.get_running_loop().time()
         task.cancel()
-        for _ in range(200):
-            if term_observed_file.exists():
-                break
-            await asyncio.sleep(0.01)
-        assert term_observed_file.exists()
-        assert task.done() is False
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert asyncio.get_running_loop().time() - started < 1.0
+
+        assert await _container_is_running()
         assert await _contender_can_acquire() is False
 
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(task, timeout=5.0)
-        with pytest.raises(ProcessLookupError):
-            os.kill(child_pid, 0)
+        supervised = tuple(router_mod._SUPERVISED_COMMAND_COMMUNICATIONS)
+        assert supervised
+        await asyncio.wait_for(
+            asyncio.gather(*supervised),
+            timeout=10.0,
+        )
+        assert not router_mod._SUPERVISED_COMMAND_COMMUNICATIONS
+        assert await _container_is_running() is False
+        output_proof = backup_artifact_output_proof(tmp_path, backup_id)
+        marker_sha256 = verify_domain_command_marker(
+            tmp_path,
+            command_id=command_id,
+            operation="admin.backup.create",
+            marker_key=marker_key,
+            effect_kind="create",
+            effect_state="created",
+            backup_id=backup_id,
+            input_digest=input_digest,
+            output_proof=output_proof,
+        )
+        assert marker_sha256 is not None
+        assert (
+            verify_domain_command_marker(
+                tmp_path,
+                command_id=command_id,
+                operation="admin.backup.create",
+                marker_key=marker_key,
+                effect_kind="create",
+                effect_state="created",
+                backup_id=backup_id,
+                input_digest=input_digest,
+                output_proof=output_proof,
+            )
+            == marker_sha256
+        )
         assert await _contender_can_acquire() is True
     finally:
-        if child_pid is not None:
-            with suppress(ProcessLookupError):
-                os.killpg(child_pid, signal.SIGKILL)
+        await _docker("rm", "--force", container_name)
         if not task.done():
             task.cancel()
-            with suppress(asyncio.CancelledError, RuntimeError):
-                await task
+            await asyncio.gather(task, return_exceptions=True)
 
 
 async def test_domain_command_ledger_is_actor_and_operation_scoped(

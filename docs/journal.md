@@ -65,6 +65,18 @@
   기준으로 escalation하도록 수정했다. 실제 wrapper·TERM 무시 child·별도 PostgreSQL contender와
   leader 종료 뒤 pipe를 보유한 descendant 회귀 2건, 관련 focused 55건, 전체 unit+API
   **2,642건**이 통과했다.
+- 세 번째 검토에서 local Docker CLI가 종료돼도 daemon container가 계속 실행되는 P1을 실제
+  재현했다. 시작된 backup/restore/swap을 non-interruptible supervised effect로 재정의해
+  cancellation/timeout은 bounded 반환하되 wrapper가 child에 signal을 전달하지 않고 임시
+  output spool·별도 session·PostgreSQL lock을 자연 terminal까지 유지하도록 바꿨다.
+- actual `docker run` TERM-ignore container가 살아 있는 동안 별도 PostgreSQL contender가
+  lock을 얻지 못하고, container 종료 뒤 wrapper가 durable marker를 쓴 다음에만 lock을 얻는
+  integration 회귀가 통과했다. 동일 command retry는 그 marker를 검증해 `_run_command`를
+  다시 호출하지 않고 `completed`로 terminalize하며, 호출 task detach 단위 회귀까지 현재
+  cancellation/timeout을 나눠 exact 4건이 green이다.
+- 최종 local gate는 관련 focused 49건, PostgreSQL/Docker ledger integration 8건, 전체
+  unit+API **2,644건**, ruff 전체, strict mypy(core 120/API 58/Dagster 23), import 경계,
+  bash syntax, OpenAPI drift, prod redaction까지 모두 통과했다.
 
 ## 2026-07-31 (codex) — T-VN-16C 완료 이관·T-VN-12 단일 PR 착수
 

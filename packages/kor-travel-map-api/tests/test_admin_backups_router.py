@@ -16,6 +16,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from kortravelmap.api.app import create_app
@@ -302,21 +303,18 @@ async def test_maintenance_lock_is_exact_fail_fast_and_exactly_unlocked() -> Non
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_command_cancellation_kills_descendant_after_leader_exits(
+@pytest.mark.parametrize("trigger", ["cancellation", "timeout"])
+async def test_command_abort_detaches_supervised_effect(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    trigger: str,
 ) -> None:
     from kortravelmap.api.routers import admin_backups as router_mod
 
-    monkeypatch.setattr(router_mod, "_COMMAND_TERMINATE_GRACE_SECONDS", 0.2)
-    monkeypatch.setattr(router_mod, "_COMMAND_KILL_REAP_SECONDS", 2.0)
-    descendant_pid_file = tmp_path / "descendant.pid"
-    leader_terminated_file = tmp_path / "leader-terminated"
+    pid_file = tmp_path / "supervised.pid"
+    completed_file = tmp_path / "supervised-completed"
     command = (
-        f"trap 'touch {leader_terminated_file}; exit 0' TERM; "
-        f"(trap '' TERM; echo $BASHPID > {descendant_pid_file}; "
-        "while true; do sleep 1; done) & "
-        "wait"
+        f"trap '' TERM INT; echo $$ > {pid_file}; "
+        f"sleep 0.5; touch {completed_file}"
     )
     plan = router_mod.BackupCommandPlan(
         cwd=str(tmp_path),
@@ -325,22 +323,38 @@ async def test_command_cancellation_kills_descendant_after_leader_exits(
         enabled=True,
     )
     task = asyncio.create_task(
-        router_mod._run_command(plan, timeout_seconds=30.0)
+        router_mod._run_command(
+            plan,
+            timeout_seconds=30.0 if trigger == "cancellation" else 0.2,
+        )
     )
     for _ in range(200):
-        if descendant_pid_file.exists():
+        if pid_file.exists():
             break
         await asyncio.sleep(0.01)
-    assert descendant_pid_file.exists()
-    descendant_pid = int(descendant_pid_file.read_text(encoding="utf-8"))
+    assert pid_file.exists()
+    supervised_pid = int(pid_file.read_text(encoding="utf-8"))
 
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(task, timeout=3.0)
+    if trigger == "cancellation":
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        with pytest.raises(HTTPException) as raised:
+            await task
+        assert raised.value.status_code == 504
+        assert raised.value.detail["code"] == "BACKUP_COMMAND_TIMEOUT"
 
-    assert leader_terminated_file.exists()
+    assert router_mod._SUPERVISED_COMMAND_COMMUNICATIONS
+    os.kill(supervised_pid, 0)
+    await asyncio.wait_for(
+        asyncio.gather(*tuple(router_mod._SUPERVISED_COMMAND_COMMUNICATIONS)),
+        timeout=3.0,
+    )
+    assert completed_file.exists()
+    assert not router_mod._SUPERVISED_COMMAND_COMMUNICATIONS
     with pytest.raises(ProcessLookupError):
-        os.kill(descendant_pid, 0)
+        os.kill(supervised_pid, 0)
 
 
 @pytest.fixture
@@ -663,6 +677,136 @@ def test_create_backup_never_adopts_unmarked_artifact_after_process_crash(
     assert response.status_code == 200
     run.assert_awaited_once()
     assert response.json()["data"]["stdout"] == "rerun"
+
+
+@pytest.mark.unit
+def test_create_backup_retry_terminalizes_detached_effect_marker_without_rerun(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.infra import domain_command_marker as marker_mod
+    from kortravelmap.infra.domain_command_execution_repo import (
+        BackupCommandExecution,
+    )
+    from kortravelmap.infra.domain_command_repo import DomainCommandClaim
+
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_backups as router_mod
+
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    command_id = 73
+    backup_id = "detached"
+    input_digest = "a" * 64
+    marker_mod.reserve_backup_destination(
+        tmp_path,
+        command_id=command_id,
+        backup_id=backup_id,
+        input_digest=input_digest,
+    )
+    _write_artifact(tmp_path, backup_id)
+    output_proof = marker_mod.backup_artifact_output_proof(
+        tmp_path, backup_id
+    )
+    marker_sha256 = marker_mod.write_domain_command_marker(
+        tmp_path,
+        command_id=command_id,
+        operation="admin.backup.create",
+        marker_key=f"command-{command_id}",
+        effect_kind="create",
+        effect_state="created",
+        backup_id=backup_id,
+        input_digest=input_digest,
+        output_proof=output_proof,
+    )
+    claim = DomainCommandClaim(
+        command_id=command_id,
+        actor="admin",
+        operation="admin.backup.create",
+        idempotency_key=_IDEMPOTENCY_HEADERS["Idempotency-Key"],
+        fingerprint_version=1,
+        request_fingerprint=input_digest,
+        created_at=now,
+    )
+    execution = BackupCommandExecution(
+        command_id=command_id,
+        effect_kind="create",
+        phase="effect_started",
+        backup_id=backup_id,
+        app_db=None,
+        dagster_db=None,
+        rustfs_volume=None,
+        marker_key=f"command-{command_id}",
+        input_digest=input_digest,
+        prepared_result=None,
+        output_digest=None,
+        marker_sha256=None,
+        prepared_at=now,
+        effect_started_at=now,
+        effect_completed_at=None,
+    )
+
+    async def _pending(*_args: Any, **_kwargs: Any) -> Any:
+        raise domain_command_service.DomainCommandPending(claim)
+
+    async def _actual_marker_proof(
+        _settings: ApiSettings,
+        prepared: Any,
+        *,
+        effect_state: str,
+        output_proof: dict[str, object],
+    ) -> str | None:
+        current = prepared.execution
+        return marker_mod.verify_domain_command_marker(
+            tmp_path,
+            command_id=prepared.command.command_id,
+            operation=prepared.command.operation,
+            marker_key=current.marker_key,
+            effect_kind=current.effect_kind,
+            effect_state=effect_state,
+            backup_id=current.backup_id,
+            input_digest=current.input_digest,
+            output_proof=output_proof,
+        )
+
+    run = AsyncMock()
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _pending)
+    monkeypatch.setattr(
+        router_mod,
+        "get_backup_command_execution",
+        AsyncMock(return_value=execution),
+    )
+    monkeypatch.setattr(router_mod, "_marker_proof", _actual_marker_proof)
+    monkeypatch.setattr(router_mod, "_run_command", run)
+    app = create_app(
+        ApiSettings(
+            admin_destructive_enabled=True,
+            admin_proxy_secret=None,
+            backup_root=tmp_path,
+            backup_project_root=tmp_path,
+            backup_command_enabled=True,
+        )
+    )
+
+    response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
+        "/v1/admin/backups",
+        json={"backup_id": backup_id, "execute": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "completed"
+    assert response.json()["data"]["stdout"] is None
+    run.assert_not_awaited()
+    assert marker_mod.verify_domain_command_marker(
+        tmp_path,
+        command_id=command_id,
+        operation="admin.backup.create",
+        marker_key=f"command-{command_id}",
+        effect_kind="create",
+        effect_state="created",
+        backup_id=backup_id,
+        input_digest=input_digest,
+        output_proof=output_proof,
+    ) == marker_sha256
 
 
 @pytest.mark.unit
