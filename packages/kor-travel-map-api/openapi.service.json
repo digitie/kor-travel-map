@@ -587,6 +587,26 @@
         "title": "CacheTargetDeliveryResponse",
         "type": "object"
       },
+      "CacheTargetEventCoordinate": {
+        "additionalProperties": false,
+        "description": "Canonical fixed-point coordinate in a target source event.",
+        "properties": {
+          "lat_e6": {
+            "title": "Lat E6",
+            "type": "integer"
+          },
+          "lon_e6": {
+            "title": "Lon E6",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lon_e6",
+          "lat_e6"
+        ],
+        "title": "CacheTargetEventCoordinate",
+        "type": "object"
+      },
       "CacheTargetEventRecord": {
         "additionalProperties": false,
         "description": "Outbox event delivered to a consumer.",
@@ -628,9 +648,21 @@
             "type": "string"
           },
           "payload": {
-            "additionalProperties": true,
-            "title": "Payload",
-            "type": "object"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheTargetStateAppliedPayload"
+              },
+              {
+                "$ref": "#/components/schemas/CacheTargetLinksReconciledPayload"
+              },
+              {
+                "$ref": "#/components/schemas/CacheTargetRefreshStatusChangedPayload"
+              },
+              {
+                "$ref": "#/components/schemas/CacheTargetReconciledPayload"
+              }
+            ],
+            "title": "Payload"
           },
           "payload_fingerprint": {
             "maxLength": 64,
@@ -715,6 +747,52 @@
           "occurred_at"
         ],
         "title": "CacheTargetEventRecord",
+        "type": "object"
+      },
+      "CacheTargetLinksReconciledPayload": {
+        "additionalProperties": false,
+        "description": "Exact payload for ``cache_target.links_reconciled``.",
+        "properties": {
+          "active_link_count": {
+            "minimum": 0.0,
+            "title": "Active Link Count",
+            "type": "integer"
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "reconciled",
+            "title": "Status",
+            "type": "string"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "version": {
+            "const": "cache-target-event-v1",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "request_id",
+          "job_id",
+          "status",
+          "target_id",
+          "active_link_count"
+        ],
+        "title": "CacheTargetLinksReconciledPayload",
         "type": "object"
       },
       "CacheTargetNackRequest": {
@@ -822,6 +900,56 @@
           "meta"
         ],
         "title": "CacheTargetOperationResponse",
+        "type": "object"
+      },
+      "CacheTargetReconciledPayload": {
+        "additionalProperties": false,
+        "description": "Exact request-bound fixed snapshot reconciliation receipt.",
+        "properties": {
+          "actual_merkle_root": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Actual Merkle Root",
+            "type": "string"
+          },
+          "expected_merkle_root": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Merkle Root",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "format": "uuid",
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "succeeded",
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "const": "cache-target-reconciliation-v1",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "snapshot_id",
+          "actual_merkle_root",
+          "expected_merkle_root",
+          "status",
+          "version"
+        ],
+        "title": "CacheTargetReconciledPayload",
         "type": "object"
       },
       "CacheTargetReconciliationBeginRequest": {
@@ -1081,6 +1209,18 @@
             "title": "Operation Id",
             "type": "string"
           },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -1225,6 +1365,64 @@
           "meta"
         ],
         "title": "CacheTargetRefreshRequestResponse",
+        "type": "object"
+      },
+      "CacheTargetRefreshStatusChangedPayload": {
+        "additionalProperties": false,
+        "description": "Exact payload for ``refresh_request.status_changed``.",
+        "properties": {
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "version": {
+            "const": "cache-target-event-v1",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "request_id",
+          "job_id",
+          "status",
+          "target_id",
+          "error_code"
+        ],
+        "title": "CacheTargetRefreshStatusChangedPayload",
         "type": "object"
       },
       "CacheTargetRestoreFenceRequest": {
@@ -1599,6 +1797,84 @@
           "occurred_at"
         ],
         "title": "CacheTargetSourceUpsertRequest",
+        "type": "object"
+      },
+      "CacheTargetStateAppliedPayload": {
+        "additionalProperties": false,
+        "description": "Exact payload for ``cache_target.state_applied``.",
+        "properties": {
+          "source_event_id": {
+            "format": "uuid",
+            "title": "Source Event Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "deleted"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheTargetStateAppliedTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "const": "cache-target-event-v1",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "state",
+          "source_event_id",
+          "target"
+        ],
+        "title": "CacheTargetStateAppliedPayload",
+        "type": "object"
+      },
+      "CacheTargetStateAppliedTarget": {
+        "additionalProperties": false,
+        "description": "Applied active target projection embedded in an outbox event.",
+        "properties": {
+          "coord": {
+            "$ref": "#/components/schemas/CacheTargetEventCoordinate"
+          },
+          "entity_tag": {
+            "title": "Entity Tag",
+            "type": "string"
+          },
+          "radius_m": {
+            "minimum": 0.0,
+            "title": "Radius M",
+            "type": "integer"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "update_enabled": {
+            "title": "Update Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_id",
+          "entity_tag",
+          "coord",
+          "radius_m",
+          "update_enabled"
+        ],
+        "title": "CacheTargetStateAppliedTarget",
         "type": "object"
       },
       "CacheTargetStreamControlRecord": {
