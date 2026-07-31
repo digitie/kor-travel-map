@@ -3,6 +3,22 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-31 — T-VN-12A/B/C/D domain command idempotency
+
+- [x] **T-VN-12A/B/C/D — 재시도 가능한 write command의 단일 ledger 전환 (PR #906)**
+
+  정적 registry가 55개 write route의 retryability와 ledger 등록 완전성을 검사하고,
+  Feature·curation·review와 import·offline·backup/restore command를 actor-scoped
+  `Idempotency-Key`, canonical body fingerprint, terminal replay와 `409` conflict로 통일했다.
+  migration `0070_domain_command_ledger`는 DB-only transaction과 외부 효과 execution을
+  분리하고, backup/restore/swap의 immutable effect token·Docker fence·secure marker·수동
+  reconciliation 경계를 정본으로 만든다. Admin UI는 actor 경계에서 stable command key를
+  생성·폐기하며 body surrogate dedupe를 제거했다.
+
+  단일 적대 리뷰어의 최종 exact head `b2169512` 판정은 P0/P1/P2 0건이었다. Python
+  3.11/3.12/3.13, lint, OpenAPI drift, fixture replay, frontend build와 PostGIS integration
+  8개 check가 모두 성공했고, PR #906은 merge commit `01aa335f`로 `main`에 반영됐다.
+
 ## 2026-07-31 — T-VN-H31R curation 주소·행별 provenance fail-close
 
 - [x] **T-VN-H31R — DB/REST/admin 경계의 curation provenance 완결 (#909, PR #910)**
