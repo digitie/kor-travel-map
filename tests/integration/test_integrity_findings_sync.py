@@ -17,7 +17,11 @@ from kortravelmap.client import (
     AsyncKorTravelMapClient,
 )
 from kortravelmap.core.ids import make_integrity_finding_key
-from kortravelmap.infra.integrity_violation_repo import sync_integrity_findings
+from kortravelmap.infra.integrity_violation_repo import (
+    close_stale_integrity_findings,
+    purge_resolved_integrity_findings,
+    sync_integrity_findings,
+)
 
 pytestmark = [pytest.mark.integration]
 
@@ -278,3 +282,238 @@ async def test_client_reports_observed_unique_and_upserted_counts(
     assert result.unique_count == 1
     assert result.upserted_count == 1
     assert result.unrecorded_count == 0
+
+
+# --- T-VN-H32 run marker 기반 close --------------------------------------------
+#
+# 1차 설계의 배치 sweep을 적대 리뷰가 실측으로 기각했다. 아래는 **그 3모드가 재현되지
+# 않음**을 고정한다. 연결을 잘못하면 큐 전체를 닫으므로 안전망이 먼저다.
+
+
+def _finding_with_run(entity_id: str, run_id: str) -> dict[str, Any]:
+    """upsert가 ``observed_run_id``를 심은 finding."""
+    row = _finding(entity_id)
+    row["payload"] = {**row["payload"], "observed_run_id": run_id}
+    return row
+
+
+async def _statuses(session: AsyncSession) -> dict[str, str]:
+    result = await session.execute(
+        text(
+            "select payload->>'dedupe_key' as k, status "
+            "from ops.data_integrity_violations where provider = :p"
+        ),
+        {"p": _PROVIDER},
+    )
+    return {r["k"]: r["status"] for r in result.mappings()}
+
+
+async def test_close_spares_findings_observed_in_this_run(
+    migrated_session: AsyncSession,
+) -> None:
+    """**기각 모드 1** — 이번 run이 관측한 finding을 스스로 닫으면 안 된다.
+
+    배치 sweep은 "이 배치에 없는 것"을 닫아 한 run이 자기 finding 대부분을 resolved
+    처리했다. run marker를 쓰면 이번 run이 관측한 것은 marker가 일치해 걸리지 않는다.
+    """
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[_finding_with_run("a", "run-1"), _finding_with_run("b", "run-1")],
+    )
+    closed = await close_stale_integrity_findings(
+        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-1"
+    )
+    assert closed == 0
+    assert set((await _statuses(migrated_session)).values()) == {"open"}
+
+
+async def test_close_targets_only_findings_this_run_did_not_observe(
+    migrated_session: AsyncSession,
+) -> None:
+    """run 2가 a만 다시 관측하면 b만 닫힌다."""
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[_finding_with_run("a", "run-1"), _finding_with_run("b", "run-1")],
+    )
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[_finding_with_run("a", "run-2")],
+    )
+    closed = await close_stale_integrity_findings(
+        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-2"
+    )
+    assert closed == 1
+    assert sorted((await _statuses(migrated_session)).values()) == ["open", "resolved"]
+
+
+async def test_close_never_touches_acknowledged(
+    migrated_session: AsyncSession,
+) -> None:
+    """``acknowledged``는 사람이 인지한 표시라 기계가 닫지 않는다."""
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[_finding_with_run("a", "run-1")],
+    )
+    await migrated_session.execute(
+        text(
+            "update ops.data_integrity_violations set status='acknowledged' "
+            "where provider = :p"
+        ),
+        {"p": _PROVIDER},
+    )
+    closed = await close_stale_integrity_findings(
+        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-2"
+    )
+    assert closed == 0
+    assert set((await _statuses(migrated_session)).values()) == {"acknowledged"}
+
+
+async def test_close_does_not_sweep_other_subsystem_findings(
+    migrated_session: AsyncSession,
+) -> None:
+    """같은 provider/dataset에 다른 subsystem이 남긴 finding은 건드리지 않는다.
+
+    ``dedupe_key``가 ``av2_`` 계열이 아니면 ``sync_integrity_findings``가 만든 것이 아니다
+    (예: curation mislink는 ``curation_mislink:...``). 그걸 쓸어버리면 안 된다.
+    """
+    await migrated_session.execute(
+        text(
+            "insert into ops.data_integrity_violations "
+            "(provider, dataset_key, violation_type, severity, message, payload) "
+            "values (:p, :d, 'curation_feature_region_mismatch', 'warning', 'x', "
+            "jsonb_build_object('dedupe_key', 'curation_mislink:foo:bar'))"
+        ),
+        {"p": _PROVIDER, "d": _DATASET},
+    )
+    closed = await close_stale_integrity_findings(
+        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-9"
+    )
+    assert closed == 0
+    assert set((await _statuses(migrated_session)).values()) == {"open"}
+
+
+async def test_close_respects_provider_and_dataset_boundary(
+    migrated_session: AsyncSession,
+) -> None:
+    """provider 경계를 넘지 않는다."""
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[_finding_with_run("a", "run-1")],
+    )
+    closed_other = await close_stale_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key="another_dataset",
+        run_id="run-2",
+    )
+    assert closed_other == 0
+    assert set((await _statuses(migrated_session)).values()) == {"open"}
+
+
+async def test_close_rejects_empty_run_id(migrated_session: AsyncSession) -> None:
+    """빈 ``run_id``는 술어가 모든 행에 참이 되어 큐 전체를 닫는다 — fail-closed."""
+    with pytest.raises(ValueError, match="run_id"):
+        await close_stale_integrity_findings(
+            migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id=""
+        )
+
+
+async def test_close_stamps_resolution_and_is_idempotent(
+    migrated_session: AsyncSession,
+) -> None:
+    """기계가 닫았음을 ``payload.resolution``에 남기고, 재실행해도 더 닫지 않는다."""
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[_finding_with_run("a", "run-1")],
+    )
+    first = await close_stale_integrity_findings(
+        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-2"
+    )
+    second = await close_stale_integrity_findings(
+        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-2"
+    )
+    assert (first, second) == (1, 0)
+
+    result = await migrated_session.execute(
+        text(
+            "select payload->'resolution'->>'closed_by' as closed_by, "
+            "payload->'resolution'->>'run_id' as rid, resolved_at "
+            "from ops.data_integrity_violations where provider = :p"
+        ),
+        {"p": _PROVIDER},
+    )
+    row = result.mappings().one()
+    assert row["closed_by"] == "run_marker_sweep"
+    assert row["rid"] == "run-2"
+    assert row["resolved_at"] is not None
+
+
+async def test_purge_removes_only_aged_resolved_rows(
+    migrated_session: AsyncSession,
+) -> None:
+    """retention이 지난 ``resolved``만 삭제하고 ``acknowledged``/``open``은 남긴다."""
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[
+            _finding_with_run("a", "run-1"),
+            _finding_with_run("b", "run-1"),
+            _finding_with_run("c", "run-1"),
+        ],
+    )
+    keys = sorted((await _statuses(migrated_session)).keys())
+    await migrated_session.execute(
+        text(
+            "update ops.data_integrity_violations "
+            "set status='resolved', resolved_at = now() - interval '200 days' "
+            "where provider = :p and payload->>'dedupe_key' = :k"
+        ),
+        {"p": _PROVIDER, "k": keys[0]},
+    )
+    await migrated_session.execute(
+        text(
+            "update ops.data_integrity_violations set status='acknowledged' "
+            "where provider = :p and payload->>'dedupe_key' = :k"
+        ),
+        {"p": _PROVIDER, "k": keys[1]},
+    )
+
+    purged = await purge_resolved_integrity_findings(
+        migrated_session, retention="90 days"
+    )
+    assert purged == 1
+    assert sorted((await _statuses(migrated_session)).values()) == [
+        "acknowledged",
+        "open",
+    ]
+
+
+async def test_purge_keeps_recent_resolved(migrated_session: AsyncSession) -> None:
+    """보존 기간 안의 ``resolved``는 남긴다 — 삭제 기준이 무조건 참이면 안 된다."""
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[_finding_with_run("a", "run-1")],
+    )
+    await close_stale_integrity_findings(
+        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-2"
+    )
+    purged = await purge_resolved_integrity_findings(
+        migrated_session, retention="90 days"
+    )
+    assert purged == 0
+    assert set((await _statuses(migrated_session)).values()) == {"resolved"}

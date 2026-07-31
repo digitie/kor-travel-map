@@ -511,7 +511,9 @@ _PURGE_RESOLVED_FINDINGS_SQL: Final[str] = """
 DELETE FROM ops.data_integrity_violations AS v
  WHERE v.status = 'resolved'
    AND v.resolved_at IS NOT NULL
-   AND v.resolved_at < now() - CAST(:retention AS interval)
+   -- asyncpg가 파라미터 타입을 interval로 추론하면 str을 거부한다.
+   -- feature_repo.purge_expired_notices와 같은 이중 캐스팅을 쓴다.
+   AND v.resolved_at < now() - CAST(CAST(:retention AS text) AS interval)
 RETURNING v.issue_id
 """
 
