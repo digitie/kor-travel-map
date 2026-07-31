@@ -9,9 +9,37 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 pytestmark = pytest.mark.integration
+
+
+async def test_backup_maintenance_lock_fails_fast_when_exact_key_is_busy(
+    migrated_engine: AsyncEngine,
+) -> None:
+    from fastapi import HTTPException
+    from kortravelmap.api.routers.admin_backups import _maintenance_lock
+
+    from kortravelmap.infra.advisory_lock import advisory_lock_key
+
+    lock_id = advisory_lock_key("maintenance:backup-restore")
+    async with migrated_engine.connect() as owner:
+        await owner.execute(
+            text("SELECT pg_advisory_lock(:lock_id)"),
+            {"lock_id": lock_id},
+        )
+        try:
+            with pytest.raises(HTTPException) as raised:
+                async with _maintenance_lock(migrated_engine):
+                    pass
+            assert raised.value.status_code == 409
+            assert raised.value.detail["code"] == "BACKUP_MAINTENANCE_BUSY"
+        finally:
+            unlocked = await owner.scalar(
+                text("SELECT pg_advisory_unlock(:lock_id)"),
+                {"lock_id": lock_id},
+            )
+            assert unlocked is True
 
 
 async def test_domain_command_ledger_is_actor_and_operation_scoped(

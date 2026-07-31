@@ -4,7 +4,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, patchJson, pathWithQuery } from "./client";
+import {
+  domainCommandSlot,
+  getJson,
+  patchJson,
+  pathWithQuery,
+  withDomainIdempotencySubmission,
+} from "./client";
 import type { components, paths } from "./types";
 
 type EnrichmentSchemas = components["schemas"];
@@ -59,9 +65,17 @@ function decideEnrichmentReview(
   reviewKey: string,
   body: EnrichmentReviewDecisionRequest,
 ): Promise<EnrichmentReviewDecisionResponse> {
-  return patchJson<EnrichmentReviewDecisionResponse>(
-    `/v1/admin/features/enrichment-reviews/${encodeURIComponent(reviewKey)}`,
-    body,
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.enrichment-review.decide", reviewKey),
+    { reviewKey, body },
+    (submission, idempotencyKey) =>
+      patchJson<EnrichmentReviewDecisionResponse>(
+        `/v1/admin/features/enrichment-reviews/${encodeURIComponent(
+          submission.reviewKey,
+        )}`,
+        submission.body,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 

@@ -11,12 +11,16 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  clearDomainCreateCommandSlot,
   deleteJson,
+  domainCommandSlot,
+  domainCreateCommandSlot,
   getJson,
   getJsonWithResponse,
   patchJson,
   pathWithQuery,
   postJson,
+  withDomainIdempotencySubmission,
 } from "./client";
 import type { components, paths } from "./types";
 
@@ -508,9 +512,17 @@ function deactivateAdminFeature(
   featureId: string,
   body: AdminFeatureDeactivateRequest,
 ): Promise<AdminFeatureDeactivateResponse> {
-  return postJson<AdminFeatureDeactivateResponse>(
-    `/v1/admin/features/${encodeURIComponent(featureId)}/deactivate`,
-    body,
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.feature.deactivate", featureId),
+    { featureId, body },
+    (submission, idempotencyKey) =>
+      postJson<AdminFeatureDeactivateResponse>(
+        `/v1/admin/features/${encodeURIComponent(
+          submission.featureId,
+        )}/deactivate`,
+        submission.body,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 
@@ -532,7 +544,16 @@ function fetchAdminFeatureChangeRequests(
 function createAdminFeature(
   body: AdminFeatureCreateRequest,
 ): Promise<AdminFeatureChangeResponse> {
-  return postJson<AdminFeatureChangeResponse>("/v1/admin/features", body);
+  const operation = "admin.feature.create";
+  return withDomainIdempotencySubmission(
+    domainCreateCommandSlot(operation),
+    body,
+    (submission, idempotencyKey) =>
+      postJson<AdminFeatureChangeResponse>("/v1/admin/features", submission, {
+        headers: { "Idempotency-Key": idempotencyKey },
+      }),
+    { onRelease: () => clearDomainCreateCommandSlot(operation) },
+  );
 }
 
 export function patchAdminFeature(
@@ -540,10 +561,20 @@ export function patchAdminFeature(
   entityTag: string,
   body: AdminFeaturePatchRequest,
 ): Promise<AdminFeatureChangeResponse> {
-  return patchJson<AdminFeatureChangeResponse>(
-    `/v1/admin/features/${encodeURIComponent(featureId)}`,
-    body,
-    { headers: { "If-Match": entityTag } },
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.feature.patch", featureId),
+    { featureId, entityTag, body },
+    (submission, idempotencyKey) =>
+      patchJson<AdminFeatureChangeResponse>(
+        `/v1/admin/features/${encodeURIComponent(submission.featureId)}`,
+        submission.body,
+        {
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+            "If-Match": submission.entityTag,
+          },
+        },
+      ),
   );
 }
 
@@ -552,10 +583,20 @@ export function deleteAdminFeature(
   entityTag: string,
   body: AdminFeatureDeleteRequest,
 ): Promise<AdminFeatureChangeResponse> {
-  return deleteJson<AdminFeatureChangeResponse>(
-    `/v1/admin/features/${encodeURIComponent(featureId)}`,
-    body,
-    { headers: { "If-Match": entityTag } },
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.feature.delete", featureId),
+    { featureId, entityTag, body },
+    (submission, idempotencyKey) =>
+      deleteJson<AdminFeatureChangeResponse>(
+        `/v1/admin/features/${encodeURIComponent(submission.featureId)}`,
+        submission.body,
+        {
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+            "If-Match": submission.entityTag,
+          },
+        },
+      ),
   );
 }
 
@@ -563,9 +604,17 @@ function approveAdminFeatureChangeRequest(
   requestId: string,
   body: AdminFeatureReviewActionRequest,
 ): Promise<AdminFeatureChangeResponse> {
-  return postJson<AdminFeatureChangeResponse>(
-    `/v1/admin/features/change-requests/${encodeURIComponent(requestId)}/approve`,
-    body,
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.feature-change.approve", requestId),
+    { requestId, body },
+    (submission, idempotencyKey) =>
+      postJson<AdminFeatureChangeResponse>(
+        `/v1/admin/features/change-requests/${encodeURIComponent(
+          submission.requestId,
+        )}/approve`,
+        submission.body,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 
@@ -573,9 +622,17 @@ function rejectAdminFeatureChangeRequest(
   requestId: string,
   body: AdminFeatureReviewActionRequest,
 ): Promise<AdminFeatureChangeResponse> {
-  return postJson<AdminFeatureChangeResponse>(
-    `/v1/admin/features/change-requests/${encodeURIComponent(requestId)}/reject`,
-    body,
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.feature-change.reject", requestId),
+    { requestId, body },
+    (submission, idempotencyKey) =>
+      postJson<AdminFeatureChangeResponse>(
+        `/v1/admin/features/change-requests/${encodeURIComponent(
+          submission.requestId,
+        )}/reject`,
+        submission.body,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 

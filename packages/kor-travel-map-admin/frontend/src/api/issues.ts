@@ -4,7 +4,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, patchJson, pathWithQuery } from "./client";
+import {
+  domainCommandSlot,
+  getJson,
+  patchJson,
+  pathWithQuery,
+  withDomainIdempotencySubmission,
+} from "./client";
 import type { components, paths } from "./types";
 
 type IssueSchemas = components["schemas"];
@@ -68,9 +74,15 @@ function patchAdminIssue(
   issueId: string,
   body: AdminIssuePatchRequest,
 ): Promise<AdminIssueActionResponse> {
-  return patchJson<AdminIssueActionResponse>(
-    `/v1/admin/issues/${encodeURIComponent(issueId)}`,
-    body,
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.issue.patch", issueId),
+    { issueId, body },
+    (submission, idempotencyKey) =>
+      patchJson<AdminIssueActionResponse>(
+        `/v1/admin/issues/${encodeURIComponent(submission.issueId)}`,
+        submission.body,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 

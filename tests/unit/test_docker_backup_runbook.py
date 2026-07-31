@@ -39,6 +39,7 @@ def test_docker_backup_script_captures_standalone_backup_bundle() -> None:
     assert "SHA256SUMS" in script
     assert "with-pg-advisory-lock.py" in script
     assert "maintenance:backup-restore" in script
+    assert "write-domain-command-marker.py" in script
 
 
 @pytest.mark.unit
@@ -81,6 +82,10 @@ def test_docker_restore_script_restores_backup_into_staging_targets() -> None:
     assert "docker-restore-verify.sh" in script
     assert "with-pg-advisory-lock.py" in script
     assert "maintenance:backup-restore" in script
+    assert "KOR_TRAVEL_MAP_COMMAND_RECOVERY" in script
+    assert "refusing ambiguous resume" in script
+    assert "recovery_performed" in script
+    assert "write-domain-command-marker.py" in script
 
 
 @pytest.mark.unit
@@ -121,14 +126,20 @@ def test_n150_restore_runner_analyzes_restored_databases() -> None:
 @pytest.mark.unit
 def test_restore_swap_script_generates_env_switch_and_can_apply() -> None:
     script = _read("scripts/docker-restore-swap.sh")
+    writer = _read("scripts/write-restore-swap-env.py")
 
     assert "docker-restore-verify.sh" in script
-    assert "KOR_TRAVEL_MAP_DOCKER_PG_DSN" in script
-    assert "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL" in script
-    assert "KOR_TRAVEL_MAP_RUSTFS_VOLUME" in script
+    assert "write-restore-swap-env.py" in script
+    assert "KOR_TRAVEL_MAP_DOCKER_PG_DSN" in writer
+    assert "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL" in writer
+    assert "KOR_TRAVEL_MAP_RUSTFS_VOLUME" in writer
     assert "KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY" in script
     assert "docker compose" in script
     assert "with-pg-advisory-lock.py" in script
+    assert "KOR_TRAVEL_MAP_RESTORE_SWAP_ENV_FILE" not in script
+    assert 'marker_effect_state="swap_applied"' in script
+    assert 'marker_effect_state="swap_planned"' in script
+    assert "write-domain-command-marker.py" in script
 
 
 @pytest.mark.unit

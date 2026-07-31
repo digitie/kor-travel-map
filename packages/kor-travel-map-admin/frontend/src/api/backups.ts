@@ -4,7 +4,14 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, postJson } from "./client";
+import {
+  clearDomainCreateCommandSlot,
+  domainCommandSlot,
+  domainCreateCommandSlot,
+  getJson,
+  postJson,
+  withDomainIdempotencySubmission,
+} from "./client";
 import type { components } from "./types";
 
 type BackupSchemas = components["schemas"];
@@ -21,7 +28,16 @@ function fetchBackups(signal?: AbortSignal): Promise<BackupListResponse> {
 }
 
 function createBackup(body: BackupRunRequest): Promise<BackupOperationResponse> {
-  return postJson<BackupOperationResponse>("/v1/admin/backups", body);
+  const operation = "admin.backup.create";
+  return withDomainIdempotencySubmission(
+    domainCreateCommandSlot(operation),
+    body,
+    (submission, idempotencyKey) =>
+      postJson<BackupOperationResponse>("/v1/admin/backups", submission, {
+        headers: { "Idempotency-Key": idempotencyKey },
+      }),
+    { onRelease: () => clearDomainCreateCommandSlot(operation) },
+  );
 }
 
 
@@ -32,9 +48,15 @@ function restoreBackup({
   backupId: string;
   body: RestoreRunRequest;
 }): Promise<BackupOperationResponse> {
-  return postJson<BackupOperationResponse>(
-    `/v1/admin/restore/${encodeURIComponent(backupId)}`,
-    body,
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.backup.restore", backupId),
+    { backupId, body },
+    (submission, idempotencyKey) =>
+      postJson<BackupOperationResponse>(
+        `/v1/admin/restore/${encodeURIComponent(submission.backupId)}`,
+        submission.body,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 
@@ -45,9 +67,15 @@ function planRestoreSwap({
   backupId: string;
   body: RestoreSwapRequest;
 }): Promise<BackupOperationResponse> {
-  return postJson<BackupOperationResponse>(
-    `/v1/admin/restore/${encodeURIComponent(backupId)}/swap`,
-    body,
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.backup.swap", backupId),
+    { backupId, body },
+    (submission, idempotencyKey) =>
+      postJson<BackupOperationResponse>(
+        `/v1/admin/restore/${encodeURIComponent(submission.backupId)}/swap`,
+        submission.body,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 

@@ -17,6 +17,35 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-31 (codex) — T-VN-12 외부 효과 복구·consumer cutover checkpoint
+
+- static inventory가 55개 write route의 `db_only|external|non_retryable` 분류와 operation
+  등록을 강제한다. 공통 actor-scoped UUID claim/result와 canonical fingerprint를 도입해
+  DB-only command의 업무 변경·terminal response를 한 transaction으로 묶었다.
+- offline upload create는 `uploading` reservation을 먼저 commit하고 object byte/size/
+  content-type/metadata proof 뒤에만 `uploaded`와 terminal result를 확정한다. process가
+  `effect_started` 뒤 종료되면 typed `NoSuchKey`만 exact PUT을 재개하고 transport ambiguity는
+  pending으로 보존한다. load는 deterministic Dagster run ID를 사용한다. load/delete 모두
+  현재 row precondition보다 claim/replay/conflict를 먼저 확정하며, delete transport ambiguity는
+  row를 지우거나 terminal 성공으로 굳히지 않고 같은 key의 exact `DeleteObject` 재시도로 복구한다.
+- backup/restore/swap/delete execution state와 create-once filesystem marker를 추가했다.
+  marker writer는 nofollow/exclusive temp, file+dir fsync, `renameat2(RENAME_NOREPLACE)`,
+  owner/mode/nlink 검증과 effect-specific output digest를 사용한다. foreign marker·symlink/
+  hardlink는 거부한다.
+- 네 backup operation은 같은 `maintenance:backup-restore` session lock을
+  `pg_try_advisory_lock`으로 공유하고 host effect부터 proof·DB result commit까지 보유한다.
+  busy는 409, delete first-missing은 claim rollback 404, restore partial target은 fail-close,
+  swap은 canonical project child의 planned/applied env digest를 분리한다.
+- frontend는 body hash를 command slot으로 쓰지 않는다. stable resource slot 또는 create
+  draft slot에 UUID+submission fingerprint를 동결하고, 불명확한 결과 뒤 다른 submission은
+  차단하며 로그인·로그아웃/401 actor 경계에서 admin slot을 제거한다.
+- 검증: ruff 전체와 strict mypy 178개 source, backend targeted 74건, 실제 PostgreSQL
+  migration/ledger/maintenance-lock integration 6건, frontend lint·type-check·286건,
+  OpenAPI TypeScript drift 검사가 통과했다. 전체 unit+API 첫 실행에서 찾은 typed
+  `FileStoreObjectNotFoundError`의 `__all__` 기대값 1건을 수정했다. 나머지 환경 실패는
+  subprocess `PATH`의 `.venv/bin`과 optional Dagster dev dependency를 보강했고, 같은 venv의
+  clean 재실행에서 전체 **2,634건**이 모두 통과했다.
+
 ## 2026-07-31 (codex) — T-VN-16C 완료 이관·T-VN-12 단일 PR 착수
 
 - Map #902와 PinVi #421의 실제 병합 상태를 재확인했다. sparse 다중 날짜 생산자,

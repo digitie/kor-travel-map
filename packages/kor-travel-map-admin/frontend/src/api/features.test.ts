@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { DomainIdempotencySubmissionMismatchError } from "./client";
 import {
   adminFeaturesInBboxQueryKey,
   adminFeatureRequestZoom,
@@ -38,6 +39,15 @@ function detailResponse(rowRevision: number): Response {
     },
     meta: {},
   });
+}
+
+function stubRandomUUID(keys: string[]) {
+  const subtle = globalThis.crypto.subtle;
+  const randomUUID = vi.fn(
+    () => keys.shift() ?? "ffffffff-ffff-4fff-8fff-ffffffffffff",
+  );
+  vi.stubGlobal("crypto", { randomUUID, subtle });
+  return randomUUID;
 }
 
 afterEach(() => {
@@ -221,5 +231,48 @@ describe("admin feature correction basis", () => {
       expect.objectContaining({ "If-Match": '"4"' }),
       expect.objectContaining({ "If-Match": '"5"' }),
     ]);
+  });
+
+  it("불명확한 PATCH 뒤 body가 바뀐 재시도는 새 side effect를 보내지 않는다", async () => {
+    const randomUUID = stubRandomUUID([
+      "89898989-8989-4989-8989-898989898989",
+    ]);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("{}", { status: 503 }))
+      .mockImplementation(async () =>
+        jsonResponse({ data: { request: { feature_id: "feature-1" } }, meta: {} }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      patchAdminFeature("feature-1", '"4"', {
+        reason: "original",
+      }),
+    ).rejects.toMatchObject({ status: 503 });
+    await expect(
+      patchAdminFeature("feature-1", '"4"', {
+        reason: "changed",
+      }),
+    ).rejects.toBeInstanceOf(DomainIdempotencySubmissionMismatchError);
+    await patchAdminFeature("feature-1", '"4"', {
+      reason: "original",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual([
+      "PATCH",
+      "PATCH",
+    ]);
+    expect(
+      fetchMock.mock.calls.map(
+        ([, init]) =>
+          (init?.headers as Record<string, string>)["Idempotency-Key"],
+      ),
+    ).toEqual([
+      "89898989-8989-4989-8989-898989898989",
+      "89898989-8989-4989-8989-898989898989",
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(1);
   });
 });

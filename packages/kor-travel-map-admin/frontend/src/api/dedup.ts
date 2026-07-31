@@ -4,7 +4,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, patchJson, pathWithQuery } from "./client";
+import {
+  domainCommandSlot,
+  getJson,
+  patchJson,
+  pathWithQuery,
+  withDomainIdempotencySubmission,
+} from "./client";
 import type { components, paths } from "./types";
 
 type DedupSchemas = components["schemas"];
@@ -70,9 +76,17 @@ function decideDedupReview(
   reviewKey: string,
   body: DedupReviewDecisionRequest,
 ): Promise<DedupReviewDecisionResponse> {
-  return patchJson<DedupReviewDecisionResponse>(
-    `/v1/admin/features/dedup-reviews/${encodeURIComponent(reviewKey)}`,
-    body,
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.dedup-review.decide", reviewKey),
+    { reviewKey, body },
+    (submission, idempotencyKey) =>
+      patchJson<DedupReviewDecisionResponse>(
+        `/v1/admin/features/dedup-reviews/${encodeURIComponent(
+          submission.reviewKey,
+        )}`,
+        submission.body,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 

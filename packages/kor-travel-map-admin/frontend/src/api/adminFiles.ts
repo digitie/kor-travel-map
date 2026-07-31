@@ -7,7 +7,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, pathWithQuery, postJson } from "./client";
+import {
+  domainCommandSlot,
+  getJson,
+  pathWithQuery,
+  postJson,
+  withDomainIdempotencySubmission,
+} from "./client";
 import type { components, paths } from "./types";
 
 type FileSchemas = components["schemas"];
@@ -81,15 +87,27 @@ function fetchManagedFile(
 function rescanManagedFiles(
   locations: string[] | null,
 ): Promise<ManagedFileRescanResponse> {
-  return postJson<ManagedFileRescanResponse>("/v1/admin/files/rescan", {
-    locations,
-  });
+  const body = { locations };
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.managed-file.rescan", "all"),
+    body,
+    (submission, idempotencyKey) =>
+      postJson<ManagedFileRescanResponse>("/v1/admin/files/rescan", submission, {
+        headers: { "Idempotency-Key": idempotencyKey },
+      }),
+  );
 }
 
 function purgeManagedFile(fileId: number): Promise<ManagedFilePurgeResponse> {
-  return postJson<ManagedFilePurgeResponse>(
-    `/v1/admin/files/${encodeURIComponent(String(fileId))}/purge`,
-    {},
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.managed-file.purge", fileId),
+    { fileId },
+    (submission, idempotencyKey) =>
+      postJson<ManagedFilePurgeResponse>(
+        `/v1/admin/files/${encodeURIComponent(String(submission.fileId))}/purge`,
+        {},
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 

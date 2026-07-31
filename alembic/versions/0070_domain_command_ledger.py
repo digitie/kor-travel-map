@@ -20,18 +20,15 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_constraint(
-        "ck_offline_uploads_status",
-        "offline_uploads",
-        schema="ops",
-        type_="check",
+    op.execute(
+        "ALTER TABLE ops.offline_uploads "
+        "DROP CONSTRAINT ck_offline_uploads_ck_offline_uploads_state"
     )
-    op.create_check_constraint(
-        "ck_offline_uploads_status",
-        "offline_uploads",
-        "status IN ('uploading', 'uploaded', 'validating', 'validated', "
-        "'validation_failed', 'loading', 'loaded', 'load_failed', 'cancelled')",
-        schema="ops",
+    op.execute(
+        "ALTER TABLE ops.offline_uploads "
+        "ADD CONSTRAINT ck_offline_uploads_ck_offline_uploads_status CHECK "
+        "(status IN ('uploading', 'uploaded', 'validating', 'validated', "
+        "'validation_failed', 'loading', 'loaded', 'load_failed', 'cancelled'))"
     )
     op.create_table(
         "domain_commands",
@@ -145,6 +142,11 @@ def upgrade() -> None:
         sa.Column("rustfs_volume", sa.Text(), nullable=True),
         sa.Column("marker_key", sa.Text(), nullable=False),
         sa.Column("input_digest", sa.Text(), nullable=False),
+        sa.Column(
+            "prepared_result",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=True,
+        ),
         sa.Column("output_digest", sa.Text(), nullable=True),
         sa.Column("marker_sha256", sa.Text(), nullable=True),
         sa.Column(
@@ -170,6 +172,12 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "marker_key ~ '^[a-z0-9][a-z0-9_.-]{0,127}$'",
             name=op.f("ck_backup_command_executions_marker_key"),
+        ),
+        sa.CheckConstraint(
+            "(effect_kind <> 'delete') OR "
+            "(prepared_result IS NOT NULL "
+            "AND jsonb_typeof(prepared_result) = 'object')",
+            name=op.f("ck_backup_command_executions_delete_result"),
         ),
         sa.CheckConstraint(
             "(phase = 'prepared' AND effect_started_at IS NULL "
@@ -304,11 +312,11 @@ def upgrade() -> None:
           END IF;
           IF (OLD.command_id, OLD.effect_kind, OLD.backup_id, OLD.app_db,
               OLD.dagster_db, OLD.rustfs_volume, OLD.marker_key,
-              OLD.input_digest, OLD.prepared_at)
+              OLD.input_digest, OLD.prepared_result, OLD.prepared_at)
              IS DISTINCT FROM
              (NEW.command_id, NEW.effect_kind, NEW.backup_id, NEW.app_db,
               NEW.dagster_db, NEW.rustfs_volume, NEW.marker_key,
-              NEW.input_digest, NEW.prepared_at) THEN
+              NEW.input_digest, NEW.prepared_result, NEW.prepared_at) THEN
             RAISE EXCEPTION 'backup command execution identity is immutable'
               USING ERRCODE = '55000';
           END IF;
@@ -472,16 +480,13 @@ def downgrade() -> None:
     )
     op.execute("DROP FUNCTION ops.reject_domain_command_history_mutation()")
     op.drop_table("domain_commands", schema="ops")
-    op.drop_constraint(
-        "ck_offline_uploads_status",
-        "offline_uploads",
-        schema="ops",
-        type_="check",
+    op.execute(
+        "ALTER TABLE ops.offline_uploads "
+        "DROP CONSTRAINT ck_offline_uploads_ck_offline_uploads_status"
     )
-    op.create_check_constraint(
-        "ck_offline_uploads_status",
-        "offline_uploads",
-        "status IN ('uploaded', 'validating', 'validated', "
-        "'validation_failed', 'loading', 'loaded', 'load_failed', 'cancelled')",
-        schema="ops",
+    op.execute(
+        "ALTER TABLE ops.offline_uploads "
+        "ADD CONSTRAINT ck_offline_uploads_ck_offline_uploads_state CHECK "
+        "(status IN ('uploaded', 'validating', 'validated', "
+        "'validation_failed', 'loading', 'loaded', 'load_failed', 'cancelled'))"
     )

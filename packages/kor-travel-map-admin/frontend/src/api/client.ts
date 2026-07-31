@@ -5,6 +5,8 @@
  * `src/api/types.ts`의 OpenAPI 타입에서 파생한다.
  */
 
+import { subscribeAdminLogout } from "@/lib/admin-auth-events";
+
 import type { components } from "./types";
 
 const BASE_URL = "/api/proxy";
@@ -29,6 +31,9 @@ class ApiClientError extends Error {
 }
 
 const idempotencyFallback = new Map<string, string>();
+const DOMAIN_IDEMPOTENCY_OPERATION_PREFIX = "admin.";
+
+let subscribedDomainIdempotencyAuthBoundary = false;
 
 function idempotencyStorageKey(operationKey: string): string {
   return `kor-travel-map:idempotency:${operationKey}`;
@@ -163,6 +168,30 @@ export function clearIdempotencyKeys(operationPrefix: string): void {
   }
 }
 
+export function domainCommandSlot(
+  operation: string,
+  ...parts: Array<number | string>
+): string {
+  return [operation, ...parts.map((part) => encodeURIComponent(String(part)))].join(
+    ":",
+  );
+}
+
+function domainDraftSlotKey(operation: string): string {
+  return `${operation}:draft-slot`;
+}
+
+export function domainCreateCommandSlot(operation: string): string {
+  const draftSlotKey = domainDraftSlotKey(operation);
+  const draftId = readIdempotencyKey(draftSlotKey) ?? globalThis.crypto.randomUUID();
+  writeIdempotencyKey(draftSlotKey, draftId);
+  return domainCommandSlot(operation, "draft", draftId);
+}
+
+export function clearDomainCreateCommandSlot(operation: string): void {
+  writeIdempotencyKey(domainDraftSlotKey(operation), null);
+}
+
 function canonicalIdempotencyValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(canonicalIdempotencyValue);
@@ -177,26 +206,109 @@ function canonicalIdempotencyValue(value: unknown): unknown {
   );
 }
 
+async function sha256Hex(value: BufferSource): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", value);
+  return Array.from(new Uint8Array(digest), (item) =>
+    item.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+function blobArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
+  if (typeof blob.arrayBuffer === "function") {
+    return blob.arrayBuffer();
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("error", () => {
+      reject(reader.error ?? new Error("파일 내용을 읽을 수 없습니다."));
+    });
+    reader.addEventListener("load", () => {
+      if (reader.result instanceof ArrayBuffer) {
+        resolve(reader.result);
+      } else {
+        reject(new Error("파일 내용을 ArrayBuffer로 읽지 못했습니다."));
+      }
+    });
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
 /** 민감한 request body를 storage key에 노출하지 않는 deterministic SHA-256 key. */
 export async function idempotencyOperationKey(
   namespace: string,
   body: unknown,
 ): Promise<string> {
   const canonical = JSON.stringify(canonicalIdempotencyValue(body));
-  const digest = await globalThis.crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(canonical),
+  return `${namespace}:${await sha256Hex(new TextEncoder().encode(canonical))}`;
+}
+
+export interface FileIdempotencyFingerprint {
+  filename: string;
+  contentType: string | null;
+  byteSize: number;
+  contentSha256: string;
+}
+
+export async function fileIdempotencyFingerprint(
+  file: File,
+): Promise<FileIdempotencyFingerprint> {
+  const content = await blobArrayBuffer(file);
+  return {
+    filename: file.name,
+    contentType: file.type.trim().toLowerCase() || null,
+    byteSize: file.size,
+    contentSha256: await sha256Hex(new Uint8Array(content)),
+  };
+}
+
+const UNCERTAIN_IDEMPOTENCY_ERROR_CODES = [
+  "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
+  "DAGSTER_SCHEDULE_OUTCOME_UNCERTAIN",
+  "IDEMPOTENCY_RESULT_PENDING",
+] as const;
+
+function shouldClearIdempotencyKeyOnError(error: unknown): boolean {
+  const problemDetails =
+    error instanceof ApiClientError &&
+    typeof error.problem?.details === "object" &&
+    error.problem.details !== null
+      ? (error.problem.details as Record<string, unknown>)
+      : null;
+  const confirmedRecordedFailure =
+    problemDetails?.outcome_certainty === "confirmed" &&
+    problemDetails.audit_status === "recorded";
+  const explicitPreMutationFailure =
+    error instanceof ApiClientError &&
+    [
+      "DAGSTER_SCHEDULE_STORAGE_UNAVAILABLE",
+      "INVALID_SCHEDULE_COMMAND",
+    ].includes(error.problem?.code ?? "");
+  const uncertainConflict =
+    error instanceof ApiClientError &&
+    UNCERTAIN_IDEMPOTENCY_ERROR_CODES.includes(
+      error.problem?.code as (typeof UNCERTAIN_IDEMPOTENCY_ERROR_CODES)[number],
+    );
+  const uncertainTransport =
+    error instanceof ApiClientError &&
+    (error.status >= 500 ||
+      error.status === 408 ||
+      error.status === 425 ||
+      error.status === 429 ||
+      error.status === 499);
+  return (
+    error instanceof ApiClientError &&
+    (explicitPreMutationFailure ||
+      (!uncertainConflict && (confirmedRecordedFailure || !uncertainTransport)))
   );
-  const hex = Array.from(new Uint8Array(digest), (value) =>
-    value.toString(16).padStart(2, "0"),
-  ).join("");
-  return `${namespace}:${hex}`;
 }
 
 export async function withIdempotencyKey<T>(
   operationKey: string,
   operation: (idempotencyKey: string) => Promise<T>,
-  options: { retainOnSuccess?: (result: T) => boolean } = {},
+  options: {
+    onRelease?: () => void;
+    retainOnSuccess?: (result: T) => boolean;
+  } = {},
 ): Promise<T> {
   const idempotencyKey =
     readIdempotencyKey(operationKey) ?? globalThis.crypto.randomUUID();
@@ -205,47 +317,84 @@ export async function withIdempotencyKey<T>(
     const result = await operation(idempotencyKey);
     if (!options.retainOnSuccess?.(result)) {
       writeIdempotencyKey(operationKey, null);
+      options.onRelease?.();
     }
     return result;
   } catch (error) {
-    const problemDetails =
-      error instanceof ApiClientError &&
-      typeof error.problem?.details === "object" &&
-      error.problem.details !== null
-        ? (error.problem.details as Record<string, unknown>)
-        : null;
-    const confirmedRecordedFailure =
-      problemDetails?.outcome_certainty === "confirmed" &&
-      problemDetails.audit_status === "recorded";
-    const explicitPreMutationFailure =
-      error instanceof ApiClientError &&
-      [
-        "DAGSTER_SCHEDULE_STORAGE_UNAVAILABLE",
-        "INVALID_SCHEDULE_COMMAND",
-      ].includes(error.problem?.code ?? "");
-    const uncertainConflict =
-      error instanceof ApiClientError &&
-      [
-        "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
-        "DAGSTER_SCHEDULE_OUTCOME_UNCERTAIN",
-      ].includes(error.problem?.code ?? "");
-    const uncertainTransport =
-      error instanceof ApiClientError &&
-      (error.status >= 500 ||
-        error.status === 408 ||
-        error.status === 425 ||
-        error.status === 429 ||
-        error.status === 499);
-    if (
-      error instanceof ApiClientError &&
-      (explicitPreMutationFailure ||
-        (!uncertainConflict &&
-          (confirmedRecordedFailure || !uncertainTransport)))
-    ) {
+    if (shouldClearIdempotencyKeyOnError(error)) {
       writeIdempotencyKey(operationKey, null);
+      options.onRelease?.();
     }
     throw error;
   }
+}
+
+export class DomainIdempotencySubmissionMismatchError extends Error {
+  constructor(slot: string) {
+    super(
+      `불명확한 ${slot} 요청과 다른 내용을 같은 command slot으로 재시도할 수 없습니다.`,
+    );
+    this.name = "DomainIdempotencySubmissionMismatchError";
+  }
+}
+
+export async function withDomainIdempotencySubmission<TSubmission, TResult>(
+  slot: string,
+  requestedSubmission: TSubmission,
+  operation: (
+    submission: TSubmission,
+    idempotencyKey: string,
+  ) => Promise<TResult>,
+  options: {
+    onRelease?: () => void;
+    retainOnSuccess?: (result: TResult) => boolean;
+  } = {},
+): Promise<TResult> {
+  const fingerprint = await idempotencyOperationKey(
+    `${slot}:submission`,
+    requestedSubmission,
+  );
+  return withFrozenIdempotencySubmission(
+    slot,
+    fingerprint,
+    (storedFingerprint, idempotencyKey) => {
+      if (storedFingerprint !== fingerprint) {
+        throw new DomainIdempotencySubmissionMismatchError(slot);
+      }
+      return operation(requestedSubmission, idempotencyKey);
+    },
+    options,
+  );
+}
+
+export async function withDomainIdempotencyFingerprint<TResult>(
+  slot: string,
+  fingerprintPayload: unknown,
+  request: (idempotencyKey: string) => Promise<TResult>,
+  options: {
+    onRelease?: () => void;
+    retainOnSuccess?: (result: TResult) => boolean;
+  } = {},
+): Promise<TResult> {
+  const fingerprint = await idempotencyOperationKey(
+    `${slot}:submission`,
+    fingerprintPayload,
+  );
+  return withFrozenIdempotencySubmission(
+    slot,
+    fingerprint,
+    (storedFingerprint, idempotencyKey) => {
+      if (storedFingerprint !== fingerprint) {
+        throw new DomainIdempotencySubmissionMismatchError(slot);
+      }
+      return request(idempotencyKey);
+    },
+    options,
+  );
+}
+
+export function clearDomainIdempotencyKeys(): void {
+  clearIdempotencyKeys(DOMAIN_IDEMPOTENCY_OPERATION_PREFIX);
 }
 
 /**
@@ -260,7 +409,10 @@ export async function withFrozenIdempotencySubmission<TSubmission, TResult>(
     submission: TSubmission,
     idempotencyKey: string,
   ) => Promise<TResult>,
-  options: { retainOnSuccess?: (result: TResult) => boolean } = {},
+  options: {
+    onRelease?: () => void;
+    retainOnSuccess?: (result: TResult) => boolean;
+  } = {},
 ): Promise<TResult> {
   const frozen = readFrozenIdempotencySubmission<TSubmission>(operationKey) ?? {
     idempotencyKey: globalThis.crypto.randomUUID(),
@@ -276,44 +428,13 @@ export async function withFrozenIdempotencySubmission<TSubmission, TResult>(
     const result = await operation(frozen.submission, frozen.idempotencyKey);
     if (!options.retainOnSuccess?.(result)) {
       writeFrozenIdempotencyValue(operationKey, null);
+      options.onRelease?.();
     }
     return result;
   } catch (error) {
-    const problemDetails =
-      error instanceof ApiClientError &&
-      typeof error.problem?.details === "object" &&
-      error.problem.details !== null
-        ? (error.problem.details as Record<string, unknown>)
-        : null;
-    const confirmedRecordedFailure =
-      problemDetails?.outcome_certainty === "confirmed" &&
-      problemDetails.audit_status === "recorded";
-    const explicitPreMutationFailure =
-      error instanceof ApiClientError &&
-      [
-        "DAGSTER_SCHEDULE_STORAGE_UNAVAILABLE",
-        "INVALID_SCHEDULE_COMMAND",
-      ].includes(error.problem?.code ?? "");
-    const uncertainConflict =
-      error instanceof ApiClientError &&
-      [
-        "DAGSTER_SCHEDULE_IDEMPOTENCY_CONFLICT",
-        "DAGSTER_SCHEDULE_OUTCOME_UNCERTAIN",
-      ].includes(error.problem?.code ?? "");
-    const uncertainTransport =
-      error instanceof ApiClientError &&
-      (error.status >= 500 ||
-        error.status === 408 ||
-        error.status === 425 ||
-        error.status === 429 ||
-        error.status === 499);
-    if (
-      error instanceof ApiClientError &&
-      (explicitPreMutationFailure ||
-        (!uncertainConflict &&
-          (confirmedRecordedFailure || !uncertainTransport)))
-    ) {
+    if (shouldClearIdempotencyKeyOnError(error)) {
       writeFrozenIdempotencyValue(operationKey, null);
+      options.onRelease?.();
     }
     throw error;
   }
@@ -562,11 +683,22 @@ function redirectToLoginOnAuthRequired(status: number): void {
   if (status !== 401 || typeof window === "undefined") {
     return;
   }
+  clearDomainIdempotencyKeys();
   const current = `${window.location.pathname}${window.location.search}`;
   if (window.location.pathname === "/login") {
     return;
   }
   window.location.assign(`/login?next=${encodeURIComponent(current)}`);
 }
+
+function subscribeDomainIdempotencyAuthBoundary(): void {
+  if (subscribedDomainIdempotencyAuthBoundary || typeof window === "undefined") {
+    return;
+  }
+  subscribedDomainIdempotencyAuthBoundary = true;
+  subscribeAdminLogout(clearDomainIdempotencyKeys);
+}
+
+subscribeDomainIdempotencyAuthBoundary();
 
 export { ApiClientError, BASE_URL };

@@ -2602,6 +2602,12 @@ class BackupCommandExecutionRow(Base):
             name=conv("ck_backup_command_executions_marker_key"),
         ),
         CheckConstraint(
+            "(effect_kind <> 'delete') OR "
+            "(prepared_result IS NOT NULL "
+            "AND jsonb_typeof(prepared_result) = 'object')",
+            name=conv("ck_backup_command_executions_delete_result"),
+        ),
+        CheckConstraint(
             "(phase = 'prepared' AND effect_started_at IS NULL "
             "AND effect_completed_at IS NULL AND output_digest IS NULL "
             "AND marker_sha256 IS NULL) OR "
@@ -2632,6 +2638,7 @@ class BackupCommandExecutionRow(Base):
     rustfs_volume: Mapped[str | None] = mapped_column(Text)
     marker_key: Mapped[str] = mapped_column(Text, nullable=False)
     input_digest: Mapped[str] = mapped_column(Text, nullable=False)
+    prepared_result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     output_digest: Mapped[str | None] = mapped_column(Text)
     marker_sha256: Mapped[str | None] = mapped_column(Text)
     prepared_at: Mapped[datetime] = mapped_column(

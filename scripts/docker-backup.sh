@@ -12,6 +12,12 @@ KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB="${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_tr
 KOR_TRAVEL_MAP_BACKUP_ROOT="${KOR_TRAVEL_MAP_BACKUP_ROOT:-$ROOT_DIR/data/backups}"
 KOR_TRAVEL_MAP_BACKUP_ID="${KOR_TRAVEL_MAP_BACKUP_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING="${KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING:-0}"
+KOR_TRAVEL_MAP_COMMAND_ID="${KOR_TRAVEL_MAP_COMMAND_ID:-}"
+KOR_TRAVEL_MAP_COMMAND_OPERATION="${KOR_TRAVEL_MAP_COMMAND_OPERATION:-}"
+KOR_TRAVEL_MAP_COMMAND_MARKER_KEY="${KOR_TRAVEL_MAP_COMMAND_MARKER_KEY:-}"
+KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND="${KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND:-}"
+KOR_TRAVEL_MAP_COMMAND_BACKUP_ID="${KOR_TRAVEL_MAP_COMMAND_BACKUP_ID:-}"
+KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST="${KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST:-}"
 
 validate_identifier() {
   local name="$1"
@@ -161,5 +167,17 @@ EOF
   sha256sum "$app_dump" "$dagster_dump" "$rustfs_archive" > meta/SHA256SUMS
 )
 
+if [[ -n "$KOR_TRAVEL_MAP_COMMAND_MARKER_KEY" ]]; then
+  python_bin="$(select_python)"
+  "$python_bin" "$ROOT_DIR/scripts/write-domain-command-marker.py" \
+    --backup-root "$KOR_TRAVEL_MAP_BACKUP_ROOT" \
+    --command-id "$KOR_TRAVEL_MAP_COMMAND_ID" \
+    --operation "$KOR_TRAVEL_MAP_COMMAND_OPERATION" \
+    --marker-key "$KOR_TRAVEL_MAP_COMMAND_MARKER_KEY" \
+    --effect-kind "$KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND" \
+    --effect-state "created" \
+    --backup-id "$KOR_TRAVEL_MAP_COMMAND_BACKUP_ID" \
+    --input-digest "$KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST"
+fi
 echo "backup completed: $backup_dir"
 echo "verify with: cd \"$backup_dir\" && sha256sum -c meta/SHA256SUMS"

@@ -14,7 +14,7 @@ import importlib
 from dataclasses import dataclass
 from typing import Any, cast
 
-from kortravelmap.core.exceptions import FileStoreError
+from kortravelmap.core.exceptions import FileStoreError, FileStoreObjectNotFoundError
 
 __all__ = [
     "S3ObjectStore",
@@ -22,6 +22,21 @@ __all__ = [
     "build_s3_object_store",
     "create_s3_client",
 ]
+
+
+def _is_s3_not_found(exc: Exception) -> bool:
+    response = getattr(exc, "response", None)
+    if not isinstance(response, dict):
+        return False
+    error = response.get("Error")
+    metadata = response.get("ResponseMetadata")
+    code = str(error.get("Code", "")) if isinstance(error, dict) else ""
+    status = (
+        int(metadata.get("HTTPStatusCode", 0))
+        if isinstance(metadata, dict)
+        else 0
+    )
+    return status == 404 or code in {"404", "NoSuchKey", "NotFound"}
 
 
 @dataclass(frozen=True)
@@ -58,6 +73,11 @@ class S3ObjectStore:
         except FileStoreError:
             raise
         except Exception as exc:
+            if _is_s3_not_found(exc):
+                raise FileStoreObjectNotFoundError(
+                    f"객체 저장소 key 없음: bucket={self.bucket!r}, "
+                    f"key={storage_key!r}"
+                ) from exc
             raise FileStoreError(
                 f"객체 저장소 읽기 실패: bucket={self.bucket!r}, key={storage_key!r}"
             ) from exc
@@ -105,6 +125,11 @@ class S3ObjectStore:
         except FileStoreError:
             raise
         except Exception as exc:
+            if _is_s3_not_found(exc):
+                raise FileStoreObjectNotFoundError(
+                    f"객체 저장소 key 없음: bucket={self.bucket!r}, "
+                    f"key={storage_key!r}"
+                ) from exc
             raise FileStoreError(
                 f"객체 저장소 metadata 조회 실패: bucket={self.bucket!r}, "
                 f"key={storage_key!r}"

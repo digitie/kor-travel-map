@@ -7,6 +7,7 @@ the same command must not be executed again after a process crash.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
@@ -43,6 +44,7 @@ class BackupCommandExecution:
     rustfs_volume: str | None
     marker_key: str
     input_digest: str
+    prepared_result: dict[str, Any] | None
     output_digest: str | None
     marker_sha256: str | None
     prepared_at: datetime
@@ -74,7 +76,7 @@ class OfflineUploadCommandExecution:
 
 _BACKUP_COLUMNS = """
 command_id, effect_kind, phase, backup_id, app_db, dagster_db, rustfs_volume,
-marker_key, input_digest, output_digest, marker_sha256, prepared_at,
+marker_key, input_digest, prepared_result, output_digest, marker_sha256, prepared_at,
 effect_started_at, effect_completed_at
 """
 _OFFLINE_COLUMNS = """
@@ -96,6 +98,7 @@ def _backup(row: Any) -> BackupCommandExecution:
         rustfs_volume=row.rustfs_volume,
         marker_key=str(row.marker_key),
         input_digest=str(row.input_digest),
+        prepared_result=row.prepared_result,
         output_digest=row.output_digest,
         marker_sha256=row.marker_sha256,
         prepared_at=row.prepared_at,
@@ -154,6 +157,7 @@ async def create_backup_command_execution(
     rustfs_volume: str | None,
     marker_key: str,
     input_digest: str,
+    prepared_result: dict[str, Any] | None = None,
 ) -> BackupCommandExecution:
     row = (
         await session.execute(
@@ -161,10 +165,12 @@ async def create_backup_command_execution(
                 f"""
                 INSERT INTO ops.backup_command_executions (
                     command_id, effect_kind, phase, backup_id, app_db,
-                    dagster_db, rustfs_volume, marker_key, input_digest
+                    dagster_db, rustfs_volume, marker_key, input_digest,
+                    prepared_result
                 ) VALUES (
                     :command_id, :effect_kind, 'prepared', :backup_id, :app_db,
-                    :dagster_db, :rustfs_volume, :marker_key, :input_digest
+                    :dagster_db, :rustfs_volume, :marker_key, :input_digest,
+                    CAST(:prepared_result AS jsonb)
                 )
                 RETURNING {_BACKUP_COLUMNS}
                 """
@@ -178,6 +184,17 @@ async def create_backup_command_execution(
                 "rustfs_volume": rustfs_volume,
                 "marker_key": marker_key,
                 "input_digest": input_digest,
+                "prepared_result": (
+                    json.dumps(
+                        prepared_result,
+                        ensure_ascii=False,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    if prepared_result is not None
+                    else None
+                ),
             },
         )
     ).one()

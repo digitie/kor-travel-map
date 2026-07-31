@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import { LockKeyholeIcon, LogInIcon } from "lucide-react";
 
+import { clearDomainIdempotencyKeys } from "@/api/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +49,9 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
         return;
       }
       const payload = (await response.json()) as { next?: string };
+      // 같은 browser tab에서 다른 admin principal로 바뀌어도 이전 actor의
+      // uncertain command UUID/submission을 재사용하지 않는다.
+      clearDomainIdempotencyKeys();
       window.location.assign(payload.next ?? nextPath);
     } finally {
       setBusy(false);

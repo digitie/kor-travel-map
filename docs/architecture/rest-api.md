@@ -226,6 +226,32 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
 - rate limit은 `429`+`RateLimit-*`+`Retry-After`, lock 경합은
   `409 LOCK_BUSY`+`Retry-After: 15`를 사용한다.
 
+#### Admin domain command ledger (T-VN-12)
+
+- 정적 route inventory가 모든 write operation을 `db_only|external|non_retryable`로
+  분류한다. retryable command는 UUID `Idempotency-Key`가 필수이며 actor·operation과 함께
+  key 공간을 이룬다. body natural key나 client-side body hash는 command identity가 아니다.
+- 최초 요청은 canonical path/body fingerprint를 `ops.domain_commands`에 claim한다. 같은
+  actor/operation/key와 같은 fingerprint는 저장된 terminal status/body/header를 그대로
+  재생하고, 다른 fingerprint는 `409 IDEMPOTENCY_FINGERPRINT_CONFLICT`다. 다른 actor는 같은
+  UUID를 독립적으로 쓸 수 있다.
+- DB-only command는 domain 변경과 terminal result를 한 transaction에서 commit/rollback한다.
+  외부 효과 command는 도메인 execution row를 먼저 `prepared`, 실행 직전
+  `effect_started`, 효과별 proof 확정 뒤 `effect_succeeded`로 전진시킨다. claim만 있거나
+  proof가 불충분한 상태는 `409 IDEMPOTENCY_RESULT_PENDING`이며 성공을 합성하지 않는다.
+- offline upload create는 DB에 `uploading` reservation과 object identity를 먼저 고정하고
+  S3 write 뒤 byte/size/content-type/metadata proof와 `uploaded` 전이를 terminal result와
+  함께 commit한다. authoritative `NoSuchKey`만 exact PUT 재개를 허용하고 transport/5xx
+  ambiguity는 fail-close한다.
+- backup/restore/swap/delete는 API가 `maintenance:backup-restore` session lock을
+  `pg_try_advisory_lock`으로 잡는다. busy는 `409 BACKUP_MAINTENANCE_BUSY`와
+  `Retry-After: 3`이다. lock은 host 효과, durable marker 검증, terminal DB commit이 모두
+  끝난 뒤 exact unlock한다.
+- admin UI는 resource command slot 또는 create draft slot에 UUID와 submission fingerprint를
+  함께 동결한다. response-loss/transport ambiguity에서는 같은 submission만 같은 UUID로
+  재시도하며 내용이 달라지면 로컬에서 차단한다. 성공·확정 실패·인증 actor 전환 때 slot을
+  해제한다.
+
 ### 1.8 좌표 · datetime
 - WGS84 lon,lat. bbox=`min_lon,min_lat,max_lon,max_lat`. 목록 좌표는 평면 `lon`/`lat`.
   datetime ISO 8601 KST-aware.

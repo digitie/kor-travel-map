@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { deleteJson, getJson, patchJson, pathWithQuery, postJson } from "./client";
+import {
+  deleteJson,
+  domainCommandSlot,
+  getJson,
+  patchJson,
+  pathWithQuery,
+  postJson,
+  withDomainIdempotencySubmission,
+} from "./client";
 import type { components, paths } from "./types";
 
 type CuratedSchemas = components["schemas"];
@@ -184,11 +192,17 @@ export function useSelectCuratedFeatureMutation() {
     { curatedFeatureId: string; body: CuratedFeatureStatusRequest }
   >({
     mutationFn: ({ curatedFeatureId, body }) =>
-      postJson<CuratedFeatureResponse>(
-        `/v1/admin/features/curated/${encodeURIComponent(
-          curatedFeatureId,
-        )}/select`,
-        body,
+      withDomainIdempotencySubmission(
+        domainCommandSlot("admin.curated-feature.select", curatedFeatureId),
+        { curatedFeatureId, body },
+        (submission, idempotencyKey) =>
+          postJson<CuratedFeatureResponse>(
+            `/v1/admin/features/curated/${encodeURIComponent(
+              submission.curatedFeatureId,
+            )}/select`,
+            submission.body,
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
       ),
     onSuccess: () => invalidateCurated(queryClient),
   });
@@ -202,11 +216,17 @@ export function useUnselectCuratedFeatureMutation() {
     { curatedFeatureId: string; body: CuratedFeatureStatusRequest }
   >({
     mutationFn: ({ curatedFeatureId, body }) =>
-      postJson<CuratedFeatureResponse>(
-        `/v1/admin/features/curated/${encodeURIComponent(
-          curatedFeatureId,
-        )}/unselect`,
-        body,
+      withDomainIdempotencySubmission(
+        domainCommandSlot("admin.curated-feature.unselect", curatedFeatureId),
+        { curatedFeatureId, body },
+        (submission, idempotencyKey) =>
+          postJson<CuratedFeatureResponse>(
+            `/v1/admin/features/curated/${encodeURIComponent(
+              submission.curatedFeatureId,
+            )}/unselect`,
+            submission.body,
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
       ),
     onSuccess: () => invalidateCurated(queryClient),
   });
@@ -220,9 +240,17 @@ export function useArchiveCuratedFeatureMutation() {
     { curatedFeatureId: string; body: CuratedFeatureStatusRequest }
   >({
     mutationFn: ({ curatedFeatureId, body }) =>
-      deleteJson<CuratedFeatureResponse>(
-        `/v1/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`,
-        body,
+      withDomainIdempotencySubmission(
+        domainCommandSlot("admin.curated-feature.delete", curatedFeatureId),
+        { curatedFeatureId, body },
+        (submission, idempotencyKey) =>
+          deleteJson<CuratedFeatureResponse>(
+            `/v1/admin/features/curated/${encodeURIComponent(
+              submission.curatedFeatureId,
+            )}`,
+            submission.body,
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
       ),
     onSuccess: () => invalidateCurated(queryClient),
   });
@@ -236,9 +264,17 @@ export function usePatchCuratedFeatureMutation() {
     { curatedFeatureId: string; body: CuratedFeaturePatchRequest }
   >({
     mutationFn: ({ curatedFeatureId, body }) =>
-      patchJson<CuratedFeatureResponse>(
-        `/v1/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`,
-        body,
+      withDomainIdempotencySubmission(
+        domainCommandSlot("admin.curated-feature.patch", curatedFeatureId),
+        { curatedFeatureId, body },
+        (submission, idempotencyKey) =>
+          patchJson<CuratedFeatureResponse>(
+            `/v1/admin/features/curated/${encodeURIComponent(
+              submission.curatedFeatureId,
+            )}`,
+            submission.body,
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
       ),
     onSuccess: () => invalidateCurated(queryClient),
   });

@@ -10,6 +10,33 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-31 (codex) — T-VN-12A/B/C/D 구현·로컬 gate 완료
+
+55개 write route의 retryable 분류를 정적 registry와 CI 계약으로 고정하고
+`ops.domain_commands`/`domain_command_results` 공통 ledger를 Feature·curation·review·
+file·offline·backup command에 연결했다. DB-only command는 업무 변경과 result를 한
+transaction에서 끝내며, offline/backup 외부 효과는 별도 execution 상태와 output proof를
+terminal 전제에 둔다. offline create는 `uploading` DB reservation 뒤 S3 write를 실행하고,
+authoritative object 부재만 exact PUT 재개를 허용한다.
+
+backup/restore/swap/delete는 API가 같은 `maintenance:backup-restore` lock을 fail-fast로
+보유한 채 host effect·secure create-once marker·terminal DB commit까지 끝낸다. restore
+partial target은 fail-close하고 swap은 고정 `.env.restore-swap`의 planned/applied proof를
+분리했다. UI는 stable resource/draft slot에 UUID와 submission fingerprint를 동결하고 다른
+submission retry를 차단하며 로그인·로그아웃 actor 경계에서 key 저장소를 지운다. delete/load는
+현재 row precondition보다 claim/replay/conflict를 먼저 확정해 terminal retry를 상태 변화가
+가로막지 않으며, 저장소 삭제 결과가 모호하면 row와 command를 pending으로 보존한다.
+
+OpenAPI·TypeScript 생성물은 최신이며 ruff와 strict mypy가 통과했다. backend targeted
+74건, 실제 PostgreSQL ledger/migration/maintenance-lock integration 6건, frontend 286건과
+lint/type-check/OpenAPI type drift가 모두 green이다. 새
+`FileStoreObjectNotFoundError` export 기대값을 갱신하고 `.venv/bin` subprocess PATH와
+Dagster dev dependency를 갖춘 동일 venv에서 전체 unit+API **2,634건**도 모두 통과했다.
+
+**다음 한 작업**: PR #906 최신 checkpoint를 push하고 적대 리뷰어 1명의 일반 코드 재검토를
+반영한다. 이어 n150 파괴적 live UI/API, 최종 rebase·merge를 끝낸 뒤 T-VN-12A/B/C/D를
+`tasks-done.md`로 한 PR 단위 이관한다.
+
 ## 2026-07-31 (codex) — T-VN-16C 완료·T-VN-12A/B/C/D 단일 PR 전환
 
 Map PR #902와 PinVi PR #421이 모두 병합됐고 sparse 다중 날짜 weather batch의

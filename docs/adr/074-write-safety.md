@@ -27,6 +27,21 @@
    원격 consumer 성공을 기다리지 않는다.
 5. pipeline exact-scope active operation UNIQUE와 Idempotency-Key replay는 각각 업무 single-flight와
    HTTP 재시도 책임으로 직교한다.
+6. admin의 네트워크 재시도 가능 command는 정적 inventory에서 누락 없이 분류한다. 공통
+   `ops.domain_commands`는 actor·operation·UUID key·canonical request fingerprint를
+   immutable claim으로, `ops.domain_command_results`는 최초 terminal HTTP 결과를 append-only로
+   저장한다. DB-only command는 업무 변경과 claim/result를 한 transaction에 둔다.
+7. 객체 저장소·Dagster·filesystem·host script처럼 DB 밖 효과가 있는 command는 도메인별
+   execution table에서 `prepared → effect_started → effect_succeeded`를 단조 전이한다. terminal
+   result는 효과별 output digest/proof가 있어야만 기록한다. `pending`은 성공으로 추정하지 않는다.
+8. backup/create/delete/restore/swap은 동일 session advisory lock
+   `maintenance:backup-restore`를 API가 fail-fast로 획득하고, 효과 실행부터 durable marker 검증과
+   DB terminal commit까지 한 owner가 보유한다. host script는 API가 이미 lock을 소유했다는 env를
+   받으면 중첩 획득하지 않는다.
+9. host completion marker는 backup root의 전용 `0700` 디렉터리에서 `O_NOFOLLOW`,
+   `O_EXCL`, file/dir `fsync`, Linux `renameat2(RENAME_NOREPLACE)`로 한 번만 생성한다.
+   marker는 command/operation/effect/target identity, input digest, effect-specific output
+   digest, 완료 시각을 포함한다. 기존 marker는 exact proof가 같을 때만 재사용하며 덮어쓰지 않는다.
 
 ## 근거
 
@@ -42,6 +57,8 @@ admin UI는 `412`를 자동 재시도하지 않는다. 작성 중인 draft와 �
 
 - **긍정**: 재시도, 경쟁 수정, 순서 역전, 외부 전파 실패를 구분하고 복구할 수 있다.
 - **부정**: command별 ledger와 outbox 운영·purge가 필요하다.
+- **부정**: 외부 효과 command는 별도 execution 상태·proof 저장과 process-restart 복구
+  분기가 필요하고, backup/restore 동시 요청은 fail-fast `409`로 다시 시도해야 한다.
 - **전환/rollback**: domain별로 독립 도입한다. relay는 backfill/reconciliation 뒤 enable하고 실패 시
   소비를 중단해 outbox를 보존한다. revision을 이해하지 못하는 consumer는 해당 resource cutover
   전에 선배포한다.

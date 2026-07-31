@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +20,10 @@ from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
+
+_IDEMPOTENCY_HEADERS = {
+    "Idempotency-Key": "96000000-0000-4000-8000-000000000001"
+}
 
 
 class _Tx:
@@ -28,6 +37,155 @@ class _Tx:
 class _FakeSession:
     def begin(self) -> _Tx:
         return _Tx()
+
+
+@pytest.fixture(autouse=True)
+def _domain_command_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    from kortravelmap.infra.domain_command_execution_repo import (
+        BackupCommandExecution,
+    )
+
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_backups as router_mod
+
+    next_command_id = {"value": 0}
+
+    async def _begin(_session: Any, **kwargs: Any) -> Any:
+        next_command_id["value"] += 1
+        return domain_command_service.DomainCommandHandle(
+            command_id=next_command_id["value"],
+            actor=str(kwargs["actor"]),
+            operation=str(kwargs["operation"]),
+            idempotency_key=str(kwargs["idempotency_key"]),
+            request_fingerprint="a" * 64,
+        )
+
+    async def _create(_session: Any, **kwargs: Any) -> BackupCommandExecution:
+        return BackupCommandExecution(
+            command_id=int(kwargs["command_id"]),
+            effect_kind=str(kwargs["effect_kind"]),
+            phase="prepared",
+            backup_id=str(kwargs["backup_id"]),
+            app_db=kwargs["app_db"],
+            dagster_db=kwargs["dagster_db"],
+            rustfs_volume=kwargs["rustfs_volume"],
+            marker_key=str(kwargs["marker_key"]),
+            input_digest=str(kwargs["input_digest"]),
+            prepared_result=kwargs["prepared_result"],
+            output_digest=None,
+            marker_sha256=None,
+            prepared_at=datetime(2026, 7, 31, tzinfo=UTC),
+            effect_started_at=None,
+            effect_completed_at=None,
+        )
+
+    async def _start(
+        _session: Any,
+        command_id: int,
+    ) -> BackupCommandExecution:
+        execution = await _create(
+            _session,
+            command_id=command_id,
+            effect_kind="create",
+            backup_id="unused",
+            app_db=None,
+            dagster_db=None,
+            rustfs_volume=None,
+            marker_key=f"command-{command_id}",
+            input_digest="a" * 64,
+            prepared_result=None,
+        )
+        return replace(
+            execution,
+            phase="effect_started",
+            effect_started_at=datetime(2026, 7, 31, tzinfo=UTC),
+        )
+
+    executions: dict[int, BackupCommandExecution] = {}
+
+    async def _create_and_remember(
+        _session: Any, **kwargs: Any
+    ) -> BackupCommandExecution:
+        execution = await _create(_session, **kwargs)
+        executions[execution.command_id] = execution
+        return execution
+
+    async def _start_remembered(
+        _session: Any, command_id: int
+    ) -> BackupCommandExecution:
+        execution = replace(
+            executions[command_id],
+            phase="effect_started",
+            effect_started_at=datetime(2026, 7, 31, tzinfo=UTC),
+        )
+        executions[command_id] = execution
+        return execution
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _begin)
+    monkeypatch.setattr(
+        domain_command_service,
+        "complete_domain_command",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "create_backup_command_execution",
+        _create_and_remember,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "get_backup_command_execution",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "start_backup_command_effect",
+        _start_remembered,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "complete_backup_command_effect",
+        AsyncMock(),
+    )
+
+    @asynccontextmanager
+    async def _lock(_engine: Any) -> AsyncIterator[None]:
+        yield
+
+    proof_calls: dict[int, int] = {}
+
+    async def _marker_proof(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _write_marker(*_args: Any, **_kwargs: Any) -> str:
+        return "b" * 64
+
+    async def _marker_proof_variants(
+        _settings: Any,
+        prepared: Any,
+        **_kwargs: Any,
+    ) -> str | None:
+        command_id = int(prepared.command.command_id)
+        proof_calls[command_id] = proof_calls.get(command_id, 0) + 1
+        return "c" * 64 if proof_calls[command_id] > 1 else None
+
+    if request.node.name != "test_maintenance_lock_is_exact_fail_fast_and_exactly_unlocked":
+        monkeypatch.setattr(router_mod, "_maintenance_lock", _lock)
+    monkeypatch.setattr(router_mod, "_marker_proof", _marker_proof)
+    monkeypatch.setattr(router_mod, "_write_marker", _write_marker)
+    monkeypatch.setattr(
+        router_mod,
+        "_marker_proof_variants",
+        _marker_proof_variants,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "swap_output_proof",
+        lambda *_args, **_kwargs: {"swap": "proof"},
+    )
 
 
 def _write_artifact(root: Path, backup_id: str = "backup-1") -> None:
@@ -51,10 +209,82 @@ def _write_artifact(root: Path, backup_id: str = "backup-1") -> None:
         ),
         encoding="utf-8",
     )
+    checksum_lines = []
+    for relative_path in (
+        "postgres/kor_travel_map.dump",
+        "postgres/kor_travel_map_dagster.dump",
+        "rustfs/rustfs-data.tar.gz",
+    ):
+        digest = hashlib.sha256(
+            (backup_dir / relative_path).read_bytes()
+        ).hexdigest()
+        checksum_lines.append(f"{digest}  {relative_path}")
     (backup_dir / "meta" / "SHA256SUMS").write_text(
-        "a  postgres/kor_travel_map.dump\n",
+        "\n".join(checksum_lines) + "\n",
         encoding="utf-8",
     )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_maintenance_lock_is_exact_fail_fast_and_exactly_unlocked() -> None:
+    from fastapi import HTTPException
+    from kortravelmap.infra.advisory_lock import advisory_lock_key
+
+    from kortravelmap.api.routers import admin_backups as router_mod
+
+    class _Connection:
+        def __init__(self, acquired: bool) -> None:
+            self.acquired = acquired
+            self.calls: list[tuple[str, dict[str, int]]] = []
+
+        async def execute(
+            self,
+            statement: Any,
+            parameters: dict[str, int],
+        ) -> Any:
+            sql = str(statement)
+            self.calls.append((sql, parameters))
+            value = self.acquired if "pg_try" in sql else True
+            return SimpleNamespace(scalar_one=lambda: value)
+
+    class _Connect:
+        def __init__(self, connection: _Connection) -> None:
+            self.connection = connection
+
+        async def __aenter__(self) -> _Connection:
+            return self.connection
+
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
+
+    class _Engine:
+        def __init__(self, connection: _Connection) -> None:
+            self.connection = connection
+
+        def connect(self) -> _Connect:
+            return _Connect(self.connection)
+
+    connection = _Connection(acquired=True)
+    async with router_mod._maintenance_lock(_Engine(connection)):  # type: ignore[arg-type]
+        pass
+    expected_id = advisory_lock_key("maintenance:backup-restore")
+    assert [call[0] for call in connection.calls] == [
+        "SELECT pg_try_advisory_lock(:lock_id)",
+        "SELECT pg_advisory_unlock(:lock_id)",
+    ]
+    assert [call[1]["lock_id"] for call in connection.calls] == [
+        expected_id,
+        expected_id,
+    ]
+
+    busy = _Connection(acquired=False)
+    with pytest.raises(HTTPException) as raised:
+        async with router_mod._maintenance_lock(_Engine(busy)):  # type: ignore[arg-type]
+            pass
+    assert raised.value.status_code == 409
+    assert raised.value.detail["code"] == "BACKUP_MAINTENANCE_BUSY"
+    assert len(busy.calls) == 1
 
 
 @pytest.fixture
@@ -69,7 +299,8 @@ def client(tmp_path: Path) -> TestClient:
                 backup_project_root=tmp_path,
                 backup_command_enabled=False,
             )
-        )
+        ),
+        headers=_IDEMPOTENCY_HEADERS,
     )
 
 
@@ -133,7 +364,8 @@ def test_delete_backup_removes_artifact(tmp_path: Path) -> None:
                 backup_project_root=tmp_path,
                 backup_command_enabled=False,
             )
-        )
+        ),
+        headers=_IDEMPOTENCY_HEADERS,
     )
 
     response = client.delete("/v1/admin/backups/delete-me")
@@ -144,6 +376,28 @@ def test_delete_backup_removes_artifact(tmp_path: Path) -> None:
     assert body["data"]["item"]["backup_id"] == "delete-me"
     assert not (tmp_path / "delete-me").exists()
     assert client.get("/v1/admin/backups/delete-me").status_code == 404
+
+
+@pytest.mark.unit
+def test_delete_missing_backup_does_not_leave_new_command_claim(
+    tmp_path: Path,
+) -> None:
+    client = TestClient(
+        create_app(
+            ApiSettings(
+                admin_destructive_enabled=True,
+                admin_proxy_secret=None,
+                backup_root=tmp_path,
+                backup_project_root=tmp_path,
+            )
+        ),
+        headers=_IDEMPOTENCY_HEADERS,
+    )
+
+    response = client.delete("/v1/admin/backups/missing")
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "BACKUP_NOT_FOUND"
 
 
 @pytest.mark.unit
@@ -158,7 +412,8 @@ def test_delete_backup_requires_destructive_gate(tmp_path: Path) -> None:
                 backup_project_root=tmp_path,
                 backup_command_enabled=False,
             )
-        )
+        ),
+        headers=_IDEMPOTENCY_HEADERS,
     )
 
     response = client.delete("/v1/admin/backups/keep-me")
@@ -182,13 +437,14 @@ def test_execute_backup_requires_opt_in(client: TestClient) -> None:
 def test_execute_backup_reports_missing_command_cwd(tmp_path: Path) -> None:
     app = create_app(
         ApiSettings(
+            admin_destructive_enabled=True,
             admin_proxy_secret=None,
             backup_root=tmp_path,
             backup_project_root=tmp_path / "missing-runner",
             backup_command_enabled=True,
         )
     )
-    response = TestClient(app).post(
+    response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
         "/v1/admin/backups",
         json={"backup_id": "manual", "execute": True},
     )
@@ -224,7 +480,7 @@ def test_execute_backup_uses_command_runner(
         return router_mod._CommandResult(returncode=0, stdout="ok", stderr="")
 
     monkeypatch.setattr(router_mod, "_run_command", _fake_run)
-    response = TestClient(app).post(
+    response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
         "/v1/admin/backups",
         json={"backup_id": "manual", "execute": True},
     )
@@ -234,6 +490,79 @@ def test_execute_backup_uses_command_runner(
     assert body["data"]["status"] == "completed"
     assert body["data"]["artifact"]["backup_id"] == "manual"
     assert seen["plan"].env["KOR_TRAVEL_MAP_BACKUP_ID"] == "manual"
+    assert seen["plan"].env["KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD"] == "1"
+
+
+@pytest.mark.unit
+def test_create_backup_recovers_complete_artifact_after_process_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.infra.domain_command_execution_repo import (
+        BackupCommandExecution,
+    )
+    from kortravelmap.infra.domain_command_repo import DomainCommandClaim
+
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_backups as router_mod
+
+    _write_artifact(tmp_path, "manual")
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    claim = DomainCommandClaim(
+        command_id=71,
+        actor="admin",
+        operation="admin.backup.create",
+        idempotency_key=_IDEMPOTENCY_HEADERS["Idempotency-Key"],
+        fingerprint_version=1,
+        request_fingerprint="a" * 64,
+        created_at=now,
+    )
+    execution = BackupCommandExecution(
+        command_id=71,
+        effect_kind="create",
+        phase="effect_started",
+        backup_id="manual",
+        app_db=None,
+        dagster_db=None,
+        rustfs_volume=None,
+        marker_key="command-71",
+        input_digest="a" * 64,
+        prepared_result=None,
+        output_digest=None,
+        marker_sha256=None,
+        prepared_at=now,
+        effect_started_at=now,
+        effect_completed_at=None,
+    )
+
+    async def _pending(*_args: Any, **_kwargs: Any) -> Any:
+        raise domain_command_service.DomainCommandPending(claim)
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _pending)
+    monkeypatch.setattr(
+        router_mod,
+        "get_backup_command_execution",
+        AsyncMock(return_value=execution),
+    )
+    run = AsyncMock(side_effect=AssertionError("complete artifact must not rerun"))
+    monkeypatch.setattr(router_mod, "_run_command", run)
+    app = create_app(
+        ApiSettings(
+            admin_destructive_enabled=True,
+            admin_proxy_secret=None,
+            backup_root=tmp_path,
+            backup_project_root=tmp_path,
+            backup_command_enabled=True,
+        )
+    )
+
+    response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
+        "/v1/admin/backups",
+        json={"backup_id": "manual", "execute": True},
+    )
+
+    assert response.status_code == 200
+    run.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -294,7 +623,7 @@ def test_execute_restore_swap_uses_command_runner(
         return router_mod._CommandResult(returncode=0, stdout="swapped", stderr="")
 
     monkeypatch.setattr(router_mod, "_run_command", _fake_run)
-    response = TestClient(app).post(
+    response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
         "/v1/admin/restore/backup-1/swap",
         json={"execute": True, "apply": True, "skip_verify": True},
     )
@@ -305,6 +634,107 @@ def test_execute_restore_swap_uses_command_runner(
     assert body["data"]["stdout"] == "swapped"
     assert seen["plan"].env["KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY"] == "1"
     assert seen["plan"].env["KOR_TRAVEL_MAP_RESTORE_SWAP_SKIP_VERIFY"] == "1"
+    assert seen["plan"].env["KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD"] == "1"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path", "operation", "effect_kind", "payload"),
+    [
+        (
+            "/v1/admin/restore/backup-1",
+            "admin.backup.restore",
+            "restore",
+            {"execute": True},
+        ),
+        (
+            "/v1/admin/restore/backup-1/swap",
+            "admin.backup.swap",
+            "swap",
+            {"execute": True, "apply": True},
+        ),
+    ],
+)
+def test_restore_commands_resume_started_effect_with_recovery_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    operation: str,
+    effect_kind: str,
+    payload: dict[str, object],
+) -> None:
+    from kortravelmap.infra.domain_command_execution_repo import (
+        BackupCommandExecution,
+    )
+    from kortravelmap.infra.domain_command_repo import DomainCommandClaim
+
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_backups as router_mod
+
+    _write_artifact(tmp_path, "backup-1")
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    claim = DomainCommandClaim(
+        command_id=72,
+        actor="admin",
+        operation=operation,
+        idempotency_key=_IDEMPOTENCY_HEADERS["Idempotency-Key"],
+        fingerprint_version=1,
+        request_fingerprint="a" * 64,
+        created_at=now,
+    )
+    execution = BackupCommandExecution(
+        command_id=72,
+        effect_kind=effect_kind,
+        phase="effect_started",
+        backup_id="backup-1",
+        app_db="kor_travel_map_restore",
+        dagster_db="kor_travel_map_dagster_restore",
+        rustfs_volume="kor-travel-map-rustfs-restore",
+        marker_key="command-72",
+        input_digest="a" * 64,
+        prepared_result=None,
+        output_digest=None,
+        marker_sha256=None,
+        prepared_at=now,
+        effect_started_at=now,
+        effect_completed_at=None,
+    )
+
+    async def _pending(*_args: Any, **_kwargs: Any) -> Any:
+        raise domain_command_service.DomainCommandPending(claim)
+
+    seen: dict[str, Any] = {}
+
+    async def _run(plan: Any, *, timeout_seconds: float) -> Any:
+        seen["plan"] = plan
+        seen["timeout_seconds"] = timeout_seconds
+        return router_mod._CommandResult(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _pending)
+    monkeypatch.setattr(
+        router_mod,
+        "get_backup_command_execution",
+        AsyncMock(return_value=execution),
+    )
+    monkeypatch.setattr(router_mod, "_run_command", _run)
+    app = create_app(
+        ApiSettings(
+            admin_destructive_enabled=True,
+            admin_proxy_secret=None,
+            backup_root=tmp_path,
+            backup_project_root=tmp_path,
+            backup_command_enabled=True,
+        )
+    )
+
+    response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
+        path,
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert seen["plan"].env["KOR_TRAVEL_MAP_COMMAND_RECOVERY"] == "1"
+    assert seen["plan"].env["KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD"] == "1"
 
 
 @pytest.mark.unit
@@ -312,6 +742,16 @@ def test_restore_swap_rejects_removed_operator_field(client: TestClient) -> None
     response = client.post(
         "/v1/admin/restore/backup-1/swap",
         json={"operator": "spoofed-principal"},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_restore_swap_rejects_removed_env_file_override(client: TestClient) -> None:
+    response = client.post(
+        "/v1/admin/restore/backup-1/swap",
+        json={"env_file": "/tmp/foreign"},
     )
 
     assert response.status_code == 422
@@ -389,7 +829,7 @@ def test_backup_registry_events_use_each_authenticated_principal(
     monkeypatch.setattr(router_mod.file_registry, "touch_loaded", _fake_touch_loaded)
     monkeypatch.setattr(router_mod.file_registry, "register_file", _fake_register_file)
 
-    with TestClient(app) as principal_client:
+    with TestClient(app, headers=_IDEMPOTENCY_HEADERS) as principal_client:
         create = principal_client.post(
             "/v1/admin/backups",
             json={"backup_id": "manual", "execute": True},

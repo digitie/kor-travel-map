@@ -1,12 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  clearDomainCreateCommandSlot,
   deleteJson,
+  domainCommandSlot,
+  domainCreateCommandSlot,
+  fileIdempotencyFingerprint,
   getJson,
   patchJson,
   pathWithQuery,
   postFormData,
   postJson,
+  withDomainIdempotencyFingerprint,
+  withDomainIdempotencySubmission,
 } from "./client";
 
 export type CurationCollectionStatus = "draft" | "published" | "archived";
@@ -315,8 +321,18 @@ export function useCreateCurationCollectionMutation() {
     Error,
     CurationCollectionCreateRequest
   >({
-    mutationFn: (body) =>
-      postJson<CurationCollectionResponse>("/v1/admin/curations", body),
+    mutationFn: (body) => {
+      const operation = "admin.curation-collection.create";
+      return withDomainIdempotencySubmission(
+        domainCreateCommandSlot(operation),
+        body,
+        (submission, idempotencyKey) =>
+          postJson<CurationCollectionResponse>("/v1/admin/curations", submission, {
+            headers: { "Idempotency-Key": idempotencyKey },
+          }),
+        { onRelease: () => clearDomainCreateCommandSlot(operation) },
+      );
+    },
     onSuccess: () => invalidateCurations(queryClient),
   });
 }
@@ -328,11 +344,25 @@ export function useAddCurationItemMutation() {
     Error,
     { collectionId: string; body: CurationItemCreateRequest }
   >({
-    mutationFn: ({ collectionId, body }) =>
-      postJson<CurationItemResponse>(
-        `/v1/admin/curations/${encodeURIComponent(collectionId)}/items`,
-        body,
-      ),
+    mutationFn: ({ collectionId, body }) => {
+      const operation = domainCommandSlot(
+        "admin.curation-item.create",
+        collectionId,
+      );
+      return withDomainIdempotencySubmission(
+        domainCreateCommandSlot(operation),
+        { collectionId, body },
+        (submission, idempotencyKey) =>
+          postJson<CurationItemResponse>(
+            `/v1/admin/curations/${encodeURIComponent(
+              submission.collectionId,
+            )}/items`,
+            submission.body,
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
+        { onRelease: () => clearDomainCreateCommandSlot(operation) },
+      );
+    },
     onSuccess: () => invalidateCurations(queryClient),
   });
 }
@@ -349,9 +379,21 @@ export function usePatchCurationItemMutation() {
     }
   >({
     mutationFn: ({ collectionId, curationItemId, body }) =>
-      patchJson<CurationItemResponse>(
-        `/v1/admin/curations/${encodeURIComponent(collectionId)}/items/${encodeURIComponent(curationItemId)}`,
-        body,
+      withDomainIdempotencySubmission(
+        domainCommandSlot(
+          "admin.curation-item.patch",
+          collectionId,
+          curationItemId,
+        ),
+        { collectionId, curationItemId, body },
+        (submission, idempotencyKey) =>
+          patchJson<CurationItemResponse>(
+            `/v1/admin/curations/${encodeURIComponent(
+              submission.collectionId,
+            )}/items/${encodeURIComponent(submission.curationItemId)}`,
+            submission.body,
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
       ),
     onSuccess: () => invalidateCurations(queryClient),
   });
@@ -365,8 +407,21 @@ export function useArchiveCurationItemMutation() {
     { collectionId: string; curationItemId: string }
   >({
     mutationFn: ({ collectionId, curationItemId }) =>
-      deleteJson<CurationItemResponse>(
-        `/v1/admin/curations/${encodeURIComponent(collectionId)}/items/${encodeURIComponent(curationItemId)}`,
+      withDomainIdempotencySubmission(
+        domainCommandSlot(
+          "admin.curation-item.archive",
+          collectionId,
+          curationItemId,
+        ),
+        { collectionId, curationItemId },
+        (submission, idempotencyKey) =>
+          deleteJson<CurationItemResponse>(
+            `/v1/admin/curations/${encodeURIComponent(
+              submission.collectionId,
+            )}/items/${encodeURIComponent(submission.curationItemId)}`,
+            undefined,
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
       ),
     onSuccess: () => invalidateCurations(queryClient),
   });
@@ -379,14 +434,26 @@ export function useImportCurationCsvMutation() {
     Error,
     { file: File; dryRun: boolean }
   >({
-    mutationFn: ({ file, dryRun }) => {
+    mutationFn: async ({ file, dryRun }) => {
       const body = new FormData();
       body.append("file", file);
-      return postFormData<CurationImportResponse>(
-        pathWithQuery("/v1/admin/curations/import", {
+      const fileIdentity = await fileIdempotencyFingerprint(file);
+      const operation = "admin.curation.import";
+      return withDomainIdempotencyFingerprint(
+        domainCreateCommandSlot(operation),
+        {
+          content_sha256: fileIdentity.contentSha256,
           dry_run: dryRun,
-        }),
-        body,
+        },
+        (idempotencyKey) =>
+          postFormData<CurationImportResponse>(
+            pathWithQuery("/v1/admin/curations/import", {
+              dry_run: dryRun,
+            }),
+            body,
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
+        { onRelease: () => clearDomainCreateCommandSlot(operation) },
       );
     },
     onSuccess: (response) => {
