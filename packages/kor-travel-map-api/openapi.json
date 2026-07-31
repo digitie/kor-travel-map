@@ -7265,6 +7265,11 @@
             "title": "State",
             "type": "string"
           },
+          "superseded_count": {
+            "minimum": 0.0,
+            "title": "Superseded Count",
+            "type": "integer"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -7282,6 +7287,7 @@
           "retry_count",
           "dead_count",
           "delivered_count",
+          "superseded_count",
           "updated_at"
         ],
         "title": "CacheTargetStreamStatusRecord",
