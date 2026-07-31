@@ -157,7 +157,8 @@ import-job cancel 한 곳만 호출한다. health·metrics·live·운영 로그�
 별도 인프라 접근 제어 경계에서 제공한다. 런타임
 `OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.
 저장소 산출물은 admin 전체 `packages/kor-travel-map-api/openapi.json`과
-PinVi/user subset `packages/kor-travel-map-api/openapi.user.json`을 함께 관리한다.
+공개 사용자 subset `packages/kor-travel-map-api/openapi.user.json`, 서버 간
+`ServiceToken` subset `packages/kor-travel-map-api/openapi.service.json`을 함께 관리한다.
 
 ## Prometheus
 

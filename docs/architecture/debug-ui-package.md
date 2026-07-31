@@ -96,6 +96,7 @@ packages/kor-travel-map-api/
 ├── scripts/export_openapi.py
 ├── openapi.json
 ├── openapi.user.json
+├── openapi.service.json
 └── tests/
 
 packages/kor-travel-map-admin/

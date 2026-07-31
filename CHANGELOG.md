@@ -18,6 +18,9 @@
   dead-letter 0에서만 resume한다.
 - **CONTRACT**: target event와 stream reconciliation event를 `event_scope`로 분리해 empty 및
   tombstone-only snapshot에도 fake target tuple을 만들지 않는다.
+- **OPENAPI (breaking)**: 공개 사용자와 서버 간 profile을 분리했다.
+  `@kor-travel-map/user-client`는 `RoutePolicy.SERVICE` batch 타입을 더는 노출하지 않으며,
+  서버 간 소비자는 `openapi.service.json`을 pin한다.
 
 ### curation 주소 fail-close·행별 provenance (2026-07-31, T-VN-H31R)
 

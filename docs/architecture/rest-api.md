@@ -7,7 +7,8 @@
 > **이미 반영된 변경 이력**으로 읽는다(구 `limit`/CSV-bbox/`count` 형태는 더는 존재하지 않음).
 > **범위**: kor-travel-map **전 표면**(공개/user + admin + ops + debug)의 **단일 계약 정본**
 > (ADR-048 #9).
-> **정본 우선순위**: 기계 정본 = `packages/kor-travel-map-api/openapi.json`·`openapi.user.json`.
+> **정본 우선순위**: 기계 정본 = `packages/kor-travel-map-api/openapi.json`·
+> `openapi.user.json`·`openapi.service.json`.
 > 충돌 시 **OpenAPI 우선**. 결정 = ADR-048.
 > **전환 정책(ADR-048)**: 호환성 미고려 — `/v1` clean cut, 구 경로/alias 없음.
 > **표기**: 🆕 신규 · 🔁 변경 · ⚠️ 제거 · ✅#317 = #317로 이미 구현.
@@ -1066,17 +1067,18 @@ codegraph impact 선행). raw `text()` SQL이 물리명을 써서 ORM attr만으
 
 도메인/process/운영 성격이라 ADR에서 빼고 본 REST API 정본으로 이관한 결정들이다.
 
-- **OpenAPI export 정책 — 첫 라우터부터 활성화 + 이원 drift gate** (구 ADR-031): FastAPI 첫
+- **OpenAPI export 정책 — 첫 라우터부터 활성화 + profile drift gate** (구 ADR-031): FastAPI 첫
   라우터 등장 PR부터 `packages/kor-travel-map-api/openapi.json`(admin profile)과
-  `openapi.user.json`(사용자 profile)을 저장소에 커밋하고, `scripts/export_openapi.py
+  `openapi.user.json`(사용자 profile), `openapi.service.json`(서버 간 profile)을 저장소에
+  커밋하고, `scripts/export_openapi.py
   --profile all --check`를 `.github/workflows/openapi.yml` CI drift gate로 돌린다. 라우터/DTO
   변경 PR은 반드시 openapi diff를 동반(누락 시 CI fail)하므로, 라우터 변경의 외부 효과(frontend
   type·외부 도구)가 PR diff에서 즉시 가시화되고 frontend 도입 시 type drift 부담이 0이 된다.
   메인 라이브러리 `kortravelmap`은 FastAPI 미의존(ADR-020)이라 본 정책은 항상 api/admin 패키지
   한정이다.
-- **OpenAPI 이원화 + SemVer 버저닝** (구 ADR-031, ADR-045 D-3 amendment): API가 admin과
-  사용자(공개) 양쪽에 서비스되므로 OpenAPI를 admin schema(`/admin`·`/ops`·`/debug`·`/features`
-  admin 뷰)와 사용자 schema(`/features` 공개 뷰)로 별도 export + 별도 drift gate(CI 2개)한다.
+- **OpenAPI profile 분리 + SemVer 버저닝** (구 ADR-031, ADR-045 D-3 amendment): OpenAPI를
+  admin 전체 schema, 사용자 공개 schema, `ServiceToken` 서버 간 schema로 별도 export하고
+  profile별 drift를 함께 검사한다. 사용자 profile에는 `RoutePolicy.SERVICE`를 섞지 않는다.
   spec 버저닝은 SemVer(필드 추가=minor / 제거·의미변경=major), 변경은 CHANGELOG `### API`
   섹션에 기록하고 frontend client는 `openapi-typescript` codegen으로 생성한다. (기계 정본 우선순위는
   §0 헤더 참조 — 충돌 시 OpenAPI 우선.)
