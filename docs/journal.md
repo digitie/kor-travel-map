@@ -17,6 +17,31 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-01 — T-VN-H40 `0073` 구현: source-rule link provenance
+
+- `0072`가 공개 표면 fail-close를 넣으며 기존 link을 전부 `legacy_unattributed`로
+  이관해, 격리 restore clone 실측에서 공개 노출 가능 link이 **3,266 → 0**이 됐다.
+  concierge projection 3,044건은 근거가 실재하므로(`source_record_key` 100% 도달)
+  `0073`이 `match_basis`에 **`source_rule`** 을 더하고 검증 통과분만 승격한다.
+- `forward_recovery` 재사용은 하지 않았다 — merge 전용 의미라 빌려 쓰면 왜곡이다.
+- 트리거는 `curated_features`가 아니라 **`curation_items`** 에 달았다.
+  `sync_curated_feature_collection()`은 link 생성 지점이 둘이고 merge/detach 불변식이
+  얽힌 800줄이라, 불변식이 사는 자리에 거는 편이 두 지점과 미래 writer를 함께 덮는다.
+- **승인 근거 판정이 두 곳에 다른 모양이었다** — 공개 표면 denylist, merge whitelist.
+  값이 늘 때 whitelist만 뒤처지면 공개 표면이 노출하는 link을 merge가 끊는다.
+  `infra/curation_link_basis.py` 한 곳으로 모으고 양쪽 whitelist로 맞췄다.
+- **읽기로 낸 결론 2건이 실행으로 뒤집혔다.** `0065`의 함수 정의가 파일에 두 번
+  나오는데 downgrade 본문을 최신으로 읽어, "트리거가 item을 DELETE 후 INSERT하므로
+  RESTRICT로 writer가 죽고 decision이 누적된다"고 봤다. 컨테이너에 `0072`를 올려
+  재현하니 UPDATE·DELETE 모두 정상이었다. 실제 정의는 targeted UPDATE +
+  `ON CONFLICT DO NOTHING`이다. 누적 축은 그래도 회귀 테스트로 고정했다.
+- 게이트: unit **1821 passed**, 관련 integration **91 passed**,
+  `ruff`/`mypy --strict`(123 files)/`lint-imports`(4 kept). 새 통합 테스트 6건은
+  **변이 2회**로 falsifiability를 확인했다 — 검증 술어를 빼면 fail-close 2건,
+  재진입 가드를 빼면 누적·멱등 3건이 죽는다.
+- `test_alembic_upgrade.py`가 head revision을 리터럴로 박아 마이그레이션 추가마다
+  깨졌다. ScriptDirectory에서 계산하도록 바꿨다.
+
 ## 2026-07-31 (codex) — PostGIS-only workflow와 stale T-VN-12 이관
 
 - `postgis-only.yml`을 `workflow_dispatch` 전용으로 추가했다. 선택한 ref, Python 3.13,

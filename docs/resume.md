@@ -10,6 +10,22 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-01 — T-VN-H40 `0073` 구현 완료, T-VN-H35 배포는 여전히 대기
+
+`0073_curation_source_rule`을 넣었다. `0072`가 공개 표면 fail-close를 넣으면서 기존
+link을 전부 `legacy_unattributed`로 이관해 격리 restore clone에서 공개 노출 가능
+link이 3,266 → 0이 됐는데, concierge projection 3,044건은 근거가 실재한다. `0073`이
+`match_basis`에 `source_rule`을 더해 **검증 4조건을 통과한 것만** 승격하고,
+`curation_items` 트리거로 앞으로 생기는 link에도 같은 근거를 붙인다. 승인 근거 판정이
+공개 표면(denylist)과 merge(whitelist) 두 곳에 다른 모양으로 있던 것도
+`infra/curation_link_basis.py` 한 곳으로 모아 양쪽 whitelist로 맞췄다.
+
+**다음 한 작업**: PR #918(문서·스크립트, CI green·CLEAN)과 이 PR을 머지한 뒤,
+T-VN-H35 배포를 B′ 경로로 진행한다. `0064~0073` 마이그레이션은 실측 1,754초(29분)로
+`ktdctl deploy`의 하드코딩 `--wait-timeout 120`을 크게 넘으므로 마이그레이션을 배포와
+분리해 돌린다. 배포 전 공개 표면 before/after exact count를 restore clone에서 다시
+잰다 — 이번엔 `0073`까지 포함해서.
+
 ## 2026-07-31 (codex) — T-VN-CI-PG 임의 ref PostGIS 수동 gate 완료
 
 `workflow_dispatch` 전용 `.github/workflows/postgis-only.yml`을 추가했다. GitHub UI의
