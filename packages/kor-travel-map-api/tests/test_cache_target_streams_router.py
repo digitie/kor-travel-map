@@ -10,9 +10,11 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import CACHE_TARGET_CONSUMER_HEADER, SERVICE_TOKEN_HEADER
+from kortravelmap.api.cache_target_stream_schema import CacheTargetEventRecord
 from kortravelmap.api.cache_target_stream_service import get_cache_target_stream_service
 from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
@@ -44,6 +46,8 @@ class _FakeSession:
 class _FakeCacheTargetService:
     def __init__(self) -> None:
         self.apply_calls: list[dict[str, Any]] = []
+        self.claim_calls: list[dict[str, Any]] = []
+        self.reconciliation_calls: list[dict[str, Any]] = []
         self.restore_calls: list[dict[str, Any]] = []
         self.replay_calls: list[dict[str, Any]] = []
         self.apply_result: Any = SimpleNamespace(
@@ -82,6 +86,13 @@ class _FakeCacheTargetService:
             invalidated_claim_count=0,
         )
         self.dead_letter: Any | None = None
+        self.claim_result: Any | None = None
+        self.reconciliation_result: Any = SimpleNamespace(
+            operation_id="88888888-8888-4888-8888-888888888888",
+            status="running",
+            status_url="/v1/ops/cache-target-operations/88888888-8888-4888-8888-888888888888",
+            retry_after_seconds=5,
+        )
         self.replay_result: Any = SimpleNamespace(
             event_id=EVENT_ID,
             status="retry",
@@ -109,6 +120,18 @@ class _FakeCacheTargetService:
     ) -> Any:
         self.restore_calls.append(kwargs)
         return self.restore_result
+
+    async def claim_cache_target_events(self, _session: Any, **kwargs: Any) -> Any:
+        self.claim_calls.append(kwargs)
+        return self.claim_result
+
+    async def request_cache_target_reconciliation(
+        self,
+        _session: Any,
+        **kwargs: Any,
+    ) -> Any:
+        self.reconciliation_calls.append(kwargs)
+        return self.reconciliation_result
 
     async def get_cache_target_dead_letter(
         self,
@@ -266,6 +289,127 @@ def test_put_cache_target_rejects_float_decimal_inputs() -> None:
 
     assert response.status_code == 422
     assert service.apply_calls == []
+
+
+@pytest.mark.unit
+def test_cache_target_claim_serializes_stream_scoped_reconciled_event() -> None:
+    service = _FakeCacheTargetService()
+    service.claim_result = SimpleNamespace(
+        claim_id=CLAIM_ID,
+        external_system=EXTERNAL_SYSTEM,
+        consumer_id=CONSUMER_ID,
+        lease_token=LEASE_TOKEN,
+        status="active",
+        first_relay_order=10,
+        last_relay_order=11,
+        acked_through_relay_order=None,
+        lease_expires_at=NOW + timedelta(seconds=60),
+        events=[
+            SimpleNamespace(
+                event_id=EVENT_ID,
+                event_scope="target",
+                event_type="cache_target.state_applied",
+                external_system=EXTERNAL_SYSTEM,
+                target_key="target-1",
+                target_id=TARGET_ID,
+                restore_epoch=1,
+                source_generation=1,
+                target_sequence=1,
+                relay_order=10,
+                cursor="cursor-10",
+                source_payload_fingerprint="a" * 64,
+                payload_fingerprint="b" * 64,
+                payload={"state": "active"},
+                occurred_at=NOW,
+            ),
+            SimpleNamespace(
+                event_id="77777777-7777-4777-8777-777777777777",
+                event_scope="stream",
+                event_type="cache_target.reconciled",
+                external_system=EXTERNAL_SYSTEM,
+                target_key="stale-fake-target",
+                target_id=TARGET_ID,
+                restore_epoch=1,
+                source_generation=99,
+                target_sequence=9,
+                relay_order=11,
+                cursor="cursor-11",
+                source_payload_fingerprint="c" * 64,
+                payload_fingerprint="d" * 64,
+                payload={"status": "reconciled"},
+                occurred_at=NOW + timedelta(seconds=1),
+            ),
+        ],
+    )
+    client = _client(service, settings=_settings(scopes=["cache-target:claim"]))
+
+    response = client.post(
+        "/v1/service/cache-target-event-claims",
+        headers=_service_headers(),
+        json={
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "limit": 2,
+            "lease_seconds": 60,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert service.claim_calls[0]["external_system"] == EXTERNAL_SYSTEM
+    assert service.claim_calls[0]["consumer_id"] == CONSUMER_ID
+    events = response.json()["data"]["events"]
+    assert events[0]["event_scope"] == "target"
+    assert events[0]["target_key"] == "target-1"
+    assert events[0]["target_id"] == TARGET_ID
+    assert events[0]["source_generation"] == 1
+    assert events[0]["target_sequence"] == 1
+    assert events[1]["event_scope"] == "stream"
+    assert events[1]["event_type"] == "cache_target.reconciled"
+    assert events[1]["target_key"] is None
+    assert events[1]["target_id"] is None
+    assert events[1]["source_generation"] is None
+    assert events[1]["target_sequence"] is None
+    assert events[1]["source_payload_fingerprint"] == "c" * 64
+
+
+@pytest.mark.unit
+def test_cache_target_event_record_rejects_inconsistent_stream_scope() -> None:
+    with pytest.raises(ValidationError, match="stream-scoped cache target events"):
+        CacheTargetEventRecord(
+            event_id=EVENT_ID,
+            event_scope="stream",
+            event_type="cache_target.state_applied",
+            external_system=EXTERNAL_SYSTEM,
+            target_key=None,
+            target_id=None,
+            restore_epoch=1,
+            source_generation=None,
+            target_sequence=None,
+            relay_order=1,
+            cursor="cursor-1",
+            source_payload_fingerprint="a" * 64,
+            payload_fingerprint="b" * 64,
+            payload={},
+            occurred_at=NOW,
+        )
+
+
+@pytest.mark.unit
+def test_refresh_request_rejects_more_than_500_targets_before_service_call() -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service, settings=_settings(scopes=["cache-target:consumer"]))
+
+    response = client.post(
+        "/v1/service/refresh-requests",
+        headers=_service_headers(),
+        json={
+            "external_system": EXTERNAL_SYSTEM,
+            "target_keys": [f"target-{index}" for index in range(501)],
+            "reason": "operator refresh",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.unit
@@ -427,6 +571,57 @@ def test_restore_fence_rejects_other_stream_etag_before_domain_claim(
     assert response.json()["code"] == "PRECONDITION_FAILED"
     assert begin_calls == []
     assert service.restore_calls == []
+
+
+@pytest.mark.unit
+def test_admin_reconciliation_passes_domain_command_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import cache_target_streams as router_module
+
+    service = _FakeCacheTargetService()
+    captured_complete: dict[str, Any] = {}
+
+    async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
+        assert kwargs["actor"] == "local-dev"
+        assert kwargs["operation"] == "admin.cache-target-reconciliation.request"
+        assert kwargs["idempotency_key"].hex == IDEMPOTENCY_KEY.replace("-", "")
+        assert kwargs["payload"] == {
+            "external_system": EXTERNAL_SYSTEM,
+            "reason": "operator-requested checksum reconciliation",
+        }
+        return SimpleNamespace(command_id=456, request_fingerprint="e" * 64)
+
+    async def _complete_domain_command(_session: Any, **kwargs: Any) -> None:
+        captured_complete.update(kwargs)
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
+    monkeypatch.setattr(
+        router_module,
+        "complete_domain_command",
+        _complete_domain_command,
+    )
+    client = _client(service)
+
+    response = client.post(
+        "/v1/admin/cache-target-reconciliations",
+        headers={"Idempotency-Key": IDEMPOTENCY_KEY},
+        json={
+            "external_system": EXTERNAL_SYSTEM,
+            "reason": "operator-requested checksum reconciliation",
+        },
+    )
+
+    assert response.status_code == 202, response.text
+    assert response.headers["location"] == service.reconciliation_result.status_url
+    assert response.headers["retry-after"] == "5"
+    assert service.reconciliation_calls[0]["command_id"] == 456
+    assert service.reconciliation_calls[0]["external_system"] == EXTERNAL_SYSTEM
+    assert captured_complete["status_code"] == 202
+    assert captured_complete["response_headers"] == {
+        "Location": service.reconciliation_result.status_url,
+        "Retry-After": "5",
+    }
 
 
 @pytest.mark.unit

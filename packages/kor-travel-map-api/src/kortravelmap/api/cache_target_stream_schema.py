@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from kortravelmap.api.response import Meta
 
@@ -55,6 +55,7 @@ CacheTargetEventType = Literal[
     "refresh_request.status_changed",
     "cache_target.reconciled",
 ]
+CacheTargetEventScope = Literal["target", "stream"]
 CacheTargetSourceState = Literal["active", "deleted"]
 CacheTargetStreamState = Literal[
     "active",
@@ -193,7 +194,7 @@ class CacheTargetRefreshRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     external_system: str
-    target_keys: list[str] = Field(min_length=1, max_length=1000)
+    target_keys: list[str] = Field(min_length=1, max_length=500)
     reason: str = Field(min_length=1, max_length=1000)
 
 
@@ -219,25 +220,72 @@ class CacheTargetRefreshRequestResponse(BaseModel):
     meta: Meta
 
 
+def _validate_cache_target_event_scope(
+    *,
+    event_scope: CacheTargetEventScope,
+    event_type: CacheTargetEventType,
+    target_key: str | None,
+    target_id: str | None,
+    source_generation: int | None,
+    target_sequence: int | None,
+) -> None:
+    if event_scope == "stream":
+        if event_type != "cache_target.reconciled":
+            raise ValueError("stream-scoped cache target events must be reconciled events.")
+        if (
+            target_key is not None
+            or target_id is not None
+            or source_generation is not None
+            or target_sequence is not None
+        ):
+            raise ValueError(
+                "stream-scoped cache target events cannot include target tuple fields."
+            )
+        return
+
+    if event_type == "cache_target.reconciled":
+        raise ValueError("reconciled cache target events must be stream-scoped.")
+    if (
+        target_key is None
+        or target_id is None
+        or source_generation is None
+        or target_sequence is None
+    ):
+        raise ValueError("target-scoped cache target events require target tuple fields.")
+
+
 class CacheTargetEventRecord(BaseModel):
     """Outbox event delivered to a consumer."""
 
     model_config = ConfigDict(extra="forbid")
 
     event_id: UUID
+    event_scope: CacheTargetEventScope
     event_type: CacheTargetEventType
     external_system: str
-    target_key: str
+    target_key: str | None = None
     target_id: str | None = None
     restore_epoch: int = Field(ge=1)
-    source_generation: int = Field(ge=1)
-    target_sequence: int = Field(ge=0)
+    source_generation: int | None = Field(default=None, ge=1)
+    target_sequence: int | None = Field(default=None, ge=0)
     relay_order: int = Field(ge=1)
     cursor: str
     source_payload_fingerprint: str = Field(min_length=64, max_length=64)
     payload_fingerprint: str = Field(min_length=64, max_length=64)
     payload: dict[str, Any]
     occurred_at: datetime
+
+    @model_validator(mode="after")
+    def _validate_event_scope(self) -> CacheTargetEventRecord:
+        _validate_cache_target_event_scope(
+            event_scope=self.event_scope,
+            event_type=self.event_type,
+            target_key=self.target_key,
+            target_id=self.target_id,
+            source_generation=self.source_generation,
+            target_sequence=self.target_sequence,
+        )
+        return self
 
 
 class CacheTargetClaimRequest(BaseModel):
@@ -366,13 +414,15 @@ class CacheTargetDeadLetterRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     event_id: UUID
+    event_scope: CacheTargetEventScope
     event_type: CacheTargetEventType
     external_system: str | None = None
     relay_order: int = Field(ge=1)
-    target_key: str
+    target_key: str | None = None
+    target_id: str | None = None
     restore_epoch: int = Field(ge=1)
-    source_generation: int = Field(ge=1)
-    target_sequence: int = Field(ge=0)
+    source_generation: int | None = Field(default=None, ge=1)
+    target_sequence: int | None = Field(default=None, ge=0)
     attempt_count: int = Field(ge=0)
     error_class: str | None = None
     error_code: str | None = None
@@ -381,6 +431,19 @@ class CacheTargetDeadLetterRecord(BaseModel):
     entity_tag: str
     occurred_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def _validate_event_scope(self) -> CacheTargetDeadLetterRecord:
+        _validate_cache_target_event_scope(
+            event_scope=self.event_scope,
+            event_type=self.event_type,
+            target_key=self.target_key,
+            target_id=self.target_id,
+            source_generation=self.source_generation,
+            target_sequence=self.target_sequence,
+        )
+        return self
+
 
 
 class CacheTargetDeadLetterListData(BaseModel):

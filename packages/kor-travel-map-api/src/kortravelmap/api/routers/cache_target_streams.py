@@ -361,36 +361,67 @@ def _stream_control(row: Any) -> CacheTargetStreamControlRecord:
     )
 
 
+def _event_scope(row: Any) -> str:
+    event_scope = _getattr(row, "event_scope")
+    if event_scope in {"target", "stream"}:
+        return str(event_scope)
+    return "stream" if _getattr(row, "event_type") == "cache_target.reconciled" else "target"
+
+
 def _event_record(row: Any) -> CacheTargetEventRecord:
-    return CacheTargetEventRecord(
-        event_id=_getattr(row, "event_id"),
-        event_type=_getattr(row, "event_type"),
-        external_system=_getattr(row, "external_system"),
-        target_key=_getattr(row, "target_key"),
-        target_id=_getattr(row, "target_id"),
-        restore_epoch=_getattr(row, "restore_epoch"),
-        source_generation=_getattr(row, "source_generation"),
-        target_sequence=_getattr(row, "target_sequence"),
-        relay_order=_getattr(row, "relay_order"),
-        cursor=_getattr(row, "cursor"),
-        source_payload_fingerprint=_getattr(row, "source_payload_fingerprint"),
-        payload_fingerprint=_getattr(row, "payload_fingerprint"),
-        payload=_getattr(row, "payload", {}),
-        occurred_at=_getattr(row, "occurred_at"),
-    )
+    event_scope = _event_scope(row)
+    data = {
+        "event_id": _getattr(row, "event_id"),
+        "event_scope": event_scope,
+        "event_type": _getattr(row, "event_type"),
+        "external_system": _getattr(row, "external_system"),
+        "restore_epoch": _getattr(row, "restore_epoch"),
+        "relay_order": _getattr(row, "relay_order"),
+        "cursor": _getattr(row, "cursor"),
+        "source_payload_fingerprint": _getattr(row, "source_payload_fingerprint"),
+        "payload_fingerprint": _getattr(row, "payload_fingerprint"),
+        "payload": _getattr(row, "payload", {}),
+        "occurred_at": _getattr(row, "occurred_at"),
+    }
+    if event_scope == "stream":
+        data.update(
+            {
+                "target_key": None,
+                "target_id": None,
+                "source_generation": None,
+                "target_sequence": None,
+            }
+        )
+    else:
+        data.update(
+            {
+                "target_key": _getattr(row, "target_key"),
+                "target_id": _getattr(row, "target_id"),
+                "source_generation": _getattr(row, "source_generation"),
+                "target_sequence": _getattr(row, "target_sequence"),
+            }
+        )
+    return CacheTargetEventRecord.model_validate(data)
 
 
 def _dead_letter_record(row: Any) -> CacheTargetDeadLetterRecord:
     event = _getattr(row, "event", row)
+    event_scope = _event_scope(event)
     return CacheTargetDeadLetterRecord(
         event_id=_getattr(event, "event_id"),
+        event_scope=event_scope,
         event_type=_getattr(event, "event_type"),
         external_system=_getattr(event, "external_system"),
         relay_order=_getattr(event, "relay_order"),
-        target_key=_getattr(event, "target_key"),
+        target_key=None if event_scope == "stream" else _getattr(event, "target_key"),
+        target_id=None if event_scope == "stream" else _getattr(event, "target_id"),
         restore_epoch=_getattr(event, "restore_epoch"),
-        source_generation=_getattr(event, "source_generation"),
-        target_sequence=_getattr(event, "target_sequence"),
+        source_generation=(
+            None if event_scope == "stream" else _getattr(event, "source_generation")
+        ),
+        target_sequence=(
+            None if event_scope == "stream" else _getattr(event, "target_sequence")
+        ),
         attempt_count=_getattr(row, "attempt_count"),
         error_class=_getattr(row, "error_class"),
         error_code=_getattr(row, "error_code"),
@@ -435,12 +466,18 @@ def _set_etag(response: Response, record: BaseModel) -> None:
         response.headers["ETag"] = value
 
 
-def _set_async_headers(response: Response, row: Any, *, default_retry_after: int) -> None:
+def _async_headers(row: Any, *, default_retry_after: int) -> dict[str, str]:
+    headers: dict[str, str] = {}
     status_url = _getattr(row, "status_url")
     if isinstance(status_url, str) and status_url:
-        response.headers["Location"] = status_url
+        headers["Location"] = status_url
     retry_after = _getattr(row, "retry_after_seconds", default_retry_after)
-    response.headers["Retry-After"] = str(retry_after)
+    headers["Retry-After"] = str(retry_after)
+    return headers
+
+
+def _set_async_headers(response: Response, row: Any, *, default_retry_after: int) -> None:
+    response.headers.update(_async_headers(row, default_retry_after=default_retry_after))
 
 
 def _require_bound_consumer(
@@ -1391,7 +1428,6 @@ async def replay_admin_cache_target_dead_letter(
         202: {"description": "reconciliation accepted", "headers": _ASYNC_OPERATION_HEADERS}
     },
 )
-@idempotent_domain_command("admin.cache-target-reconciliation.request")
 async def request_admin_cache_target_reconciliation(
     body: CacheTargetReconciliationRequest,
     response: Response,
@@ -1401,15 +1437,41 @@ async def request_admin_cache_target_reconciliation(
         Depends(get_cache_target_stream_service),
     ],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
 ) -> CacheTargetOperationResponse:
-    del context
     started_at = perf_counter()
-    result = await stream_service.request_cache_target_reconciliation(
-        session,
-        external_system=body.external_system,
-        reason=body.reason,
-    )
-    raise_for_cache_target_status(result)
-    record = _operation_record(result)
-    _set_async_headers(response, result, default_retry_after=5)
-    return CacheTargetOperationResponse(data=record, meta=_meta(started_at))
+    operation = "admin.cache-target-reconciliation.request"
+    payload = {
+        "external_system": body.external_system,
+        "reason": body.reason,
+    }
+    async with session.begin():
+        command = await begin_domain_command(
+            session,
+            actor=context.actor,
+            operation=operation,
+            idempotency_key=idempotency_key,
+            payload=payload,
+        )
+        result = await stream_service.request_cache_target_reconciliation(
+            session,
+            command_id=command.command_id,
+            external_system=body.external_system,
+            reason=body.reason,
+        )
+        raise_for_cache_target_status(result)
+        record = _operation_record(result)
+        response_body = CacheTargetOperationResponse(
+            data=record,
+            meta=_meta(started_at),
+        )
+        response_headers = _async_headers(result, default_retry_after=5)
+        await complete_domain_command(
+            session,
+            command=command,
+            response=response_body,
+            status_code=status.HTTP_202_ACCEPTED,
+            response_headers=response_headers,
+        )
+    response.headers.update(response_headers)
+    return response_body

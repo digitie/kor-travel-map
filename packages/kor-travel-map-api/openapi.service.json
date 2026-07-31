@@ -1,0 +1,3966 @@
+{
+  "components": {
+    "schemas": {
+      "CacheTargetAckRecord": {
+        "additionalProperties": false,
+        "description": "ACK result.",
+        "properties": {
+          "accepted_count": {
+            "minimum": 0.0,
+            "title": "Accepted Count",
+            "type": "integer"
+          },
+          "acked_through": {
+            "title": "Acked Through",
+            "type": "string"
+          },
+          "claim_id": {
+            "format": "uuid",
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "consumer_id": {
+            "title": "Consumer Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "consumer_id",
+          "acked_through",
+          "accepted_count",
+          "status"
+        ],
+        "title": "CacheTargetAckRecord",
+        "type": "object"
+      },
+      "CacheTargetAckRequest": {
+        "additionalProperties": false,
+        "description": "ACK contiguous global prefix for a claim.",
+        "properties": {
+          "applied": {
+            "items": {
+              "$ref": "#/components/schemas/CacheTargetAppliedReceipt"
+            },
+            "maxItems": 500,
+            "title": "Applied",
+            "type": "array"
+          },
+          "claim_id": {
+            "format": "uuid",
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "consumer_id": {
+            "title": "Consumer Id",
+            "type": "string"
+          },
+          "lease_token": {
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "through_cursor": {
+            "title": "Through Cursor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consumer_id",
+          "claim_id",
+          "lease_token",
+          "through_cursor"
+        ],
+        "title": "CacheTargetAckRequest",
+        "type": "object"
+      },
+      "CacheTargetAckResponse": {
+        "additionalProperties": false,
+        "description": "ACK response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CacheTargetAckRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CacheTargetAckResponse",
+        "type": "object"
+      },
+      "CacheTargetAppliedReceipt": {
+        "additionalProperties": false,
+        "description": "Consumer-applied event receipt.",
+        "properties": {
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "payload_fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Payload Fingerprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "payload_fingerprint"
+        ],
+        "title": "CacheTargetAppliedReceipt",
+        "type": "object"
+      },
+      "CacheTargetClaimRecord": {
+        "additionalProperties": false,
+        "description": "Claim lease and event page.",
+        "properties": {
+          "acked_through": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acked Through"
+          },
+          "claim_id": {
+            "format": "uuid",
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "consumer_id": {
+            "title": "Consumer Id",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/CacheTargetEventRecord"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "first_relay_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Relay Order"
+          },
+          "idempotent_replay": {
+            "default": false,
+            "title": "Idempotent Replay",
+            "type": "boolean"
+          },
+          "last_relay_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Relay Order"
+          },
+          "lease_expires_at": {
+            "format": "date-time",
+            "title": "Lease Expires At",
+            "type": "string"
+          },
+          "lease_token": {
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "external_system",
+          "consumer_id",
+          "lease_token",
+          "status",
+          "lease_expires_at",
+          "events"
+        ],
+        "title": "CacheTargetClaimRecord",
+        "type": "object"
+      },
+      "CacheTargetClaimRequest": {
+        "additionalProperties": false,
+        "description": "Consumer pull claim request.",
+        "properties": {
+          "consumer_id": {
+            "title": "Consumer Id",
+            "type": "string"
+          },
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "lease_seconds": {
+            "default": 60,
+            "maximum": 600.0,
+            "minimum": 1.0,
+            "title": "Lease Seconds",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 100,
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "external_system",
+          "consumer_id"
+        ],
+        "title": "CacheTargetClaimRequest",
+        "type": "object"
+      },
+      "CacheTargetClaimResponse": {
+        "additionalProperties": false,
+        "description": "Consumer claim response.",
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheTargetClaimRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CacheTargetClaimResponse",
+        "type": "object"
+      },
+      "CacheTargetDeadLetterDetailResponse": {
+        "additionalProperties": false,
+        "description": "Dead-letter detail response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CacheTargetDeadLetterRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CacheTargetDeadLetterDetailResponse",
+        "type": "object"
+      },
+      "CacheTargetDeadLetterRecord": {
+        "additionalProperties": false,
+        "description": "Dead-letter event detail for service and ops reads.",
+        "properties": {
+          "attempt_count": {
+            "minimum": 0.0,
+            "title": "Attempt Count",
+            "type": "integer"
+          },
+          "delivery_version": {
+            "minimum": 1.0,
+            "title": "Delivery Version",
+            "type": "integer"
+          },
+          "entity_tag": {
+            "title": "Entity Tag",
+            "type": "string"
+          },
+          "error_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Class"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_scope": {
+            "enum": [
+              "target",
+              "stream"
+            ],
+            "title": "Event Scope",
+            "type": "string"
+          },
+          "event_type": {
+            "enum": [
+              "cache_target.state_applied",
+              "cache_target.links_reconciled",
+              "refresh_request.status_changed",
+              "cache_target.reconciled"
+            ],
+            "title": "Event Type",
+            "type": "string"
+          },
+          "external_system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External System"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload_fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Payload Fingerprint",
+            "type": "string"
+          },
+          "relay_order": {
+            "minimum": 1.0,
+            "title": "Relay Order",
+            "type": "integer"
+          },
+          "restore_epoch": {
+            "minimum": 1.0,
+            "title": "Restore Epoch",
+            "type": "integer"
+          },
+          "source_generation": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Generation"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Key"
+          },
+          "target_sequence": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Sequence"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_scope",
+          "event_type",
+          "relay_order",
+          "restore_epoch",
+          "attempt_count",
+          "payload_fingerprint",
+          "delivery_version",
+          "entity_tag",
+          "occurred_at",
+          "updated_at"
+        ],
+        "title": "CacheTargetDeadLetterRecord",
+        "type": "object"
+      },
+      "CacheTargetDeadLetterReplayRequest": {
+        "additionalProperties": false,
+        "description": "Replay command body.",
+        "properties": {
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "CacheTargetDeadLetterReplayRequest",
+        "type": "object"
+      },
+      "CacheTargetDecimalCoordinate": {
+        "additionalProperties": false,
+        "description": "Input-only lon/lat values for canonical source hashing.",
+        "properties": {
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Lon"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "CacheTargetDecimalCoordinate",
+        "type": "object"
+      },
+      "CacheTargetDeliveryRecord": {
+        "additionalProperties": false,
+        "description": "Mutable delivery state after NACK/replay.",
+        "properties": {
+          "delivery_version": {
+            "minimum": 1.0,
+            "title": "Delivery Version",
+            "type": "integer"
+          },
+          "entity_tag": {
+            "title": "Entity Tag",
+            "type": "string"
+          },
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "relay_order": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relay Order"
+          },
+          "retry_after_seconds": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After Seconds"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "status",
+          "delivery_version",
+          "entity_tag"
+        ],
+        "title": "CacheTargetDeliveryRecord",
+        "type": "object"
+      },
+      "CacheTargetDeliveryResponse": {
+        "additionalProperties": false,
+        "description": "NACK/replay service response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CacheTargetDeliveryRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CacheTargetDeliveryResponse",
+        "type": "object"
+      },
+      "CacheTargetEventRecord": {
+        "additionalProperties": false,
+        "description": "Outbox event delivered to a consumer.",
+        "properties": {
+          "cursor": {
+            "title": "Cursor",
+            "type": "string"
+          },
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_scope": {
+            "enum": [
+              "target",
+              "stream"
+            ],
+            "title": "Event Scope",
+            "type": "string"
+          },
+          "event_type": {
+            "enum": [
+              "cache_target.state_applied",
+              "cache_target.links_reconciled",
+              "refresh_request.status_changed",
+              "cache_target.reconciled"
+            ],
+            "title": "Event Type",
+            "type": "string"
+          },
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "payload_fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Payload Fingerprint",
+            "type": "string"
+          },
+          "relay_order": {
+            "minimum": 1.0,
+            "title": "Relay Order",
+            "type": "integer"
+          },
+          "restore_epoch": {
+            "minimum": 1.0,
+            "title": "Restore Epoch",
+            "type": "integer"
+          },
+          "source_generation": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Generation"
+          },
+          "source_payload_fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Source Payload Fingerprint",
+            "type": "string"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Key"
+          },
+          "target_sequence": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Sequence"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_scope",
+          "event_type",
+          "external_system",
+          "restore_epoch",
+          "relay_order",
+          "cursor",
+          "source_payload_fingerprint",
+          "payload_fingerprint",
+          "payload",
+          "occurred_at"
+        ],
+        "title": "CacheTargetEventRecord",
+        "type": "object"
+      },
+      "CacheTargetNackRequest": {
+        "additionalProperties": false,
+        "description": "NACK a claimed event.",
+        "properties": {
+          "backoff_seconds": {
+            "default": 30,
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Backoff Seconds",
+            "type": "integer"
+          },
+          "claim_id": {
+            "format": "uuid",
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "consumer_id": {
+            "title": "Consumer Id",
+            "type": "string"
+          },
+          "disposition": {
+            "default": "transient",
+            "enum": [
+              "transient",
+              "permanent"
+            ],
+            "title": "Disposition",
+            "type": "string"
+          },
+          "error_class": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Error Class",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_fingerprint": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Error Fingerprint",
+            "type": "string"
+          },
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "lease_token": {
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "max_attempts": {
+            "default": 5,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Max Attempts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "external_system",
+          "consumer_id",
+          "claim_id",
+          "lease_token",
+          "event_id",
+          "error_class",
+          "error_fingerprint"
+        ],
+        "title": "CacheTargetNackRequest",
+        "type": "object"
+      },
+      "CacheTargetRefreshRequest": {
+        "additionalProperties": false,
+        "description": "Service refresh request creation body.",
+        "properties": {
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "target_keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Target Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "external_system",
+          "target_keys",
+          "reason"
+        ],
+        "title": "CacheTargetRefreshRequest",
+        "type": "object"
+      },
+      "CacheTargetRefreshRequestRecord": {
+        "additionalProperties": false,
+        "description": "Refresh request status.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "retry_after_seconds": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After Seconds"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "status_url": {
+            "title": "Status Url",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "status_url"
+        ],
+        "title": "CacheTargetRefreshRequestRecord",
+        "type": "object"
+      },
+      "CacheTargetRefreshRequestResponse": {
+        "additionalProperties": false,
+        "description": "Service refresh request response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CacheTargetRefreshRequestRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CacheTargetRefreshRequestResponse",
+        "type": "object"
+      },
+      "CacheTargetRestoreFenceRequest": {
+        "additionalProperties": false,
+        "description": "Restore-fence command body.",
+        "properties": {
+          "consumer_id": {
+            "title": "Consumer Id",
+            "type": "string"
+          },
+          "expected_restore_epoch": {
+            "minimum": 1.0,
+            "title": "Expected Restore Epoch",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consumer_id",
+          "expected_restore_epoch",
+          "reason"
+        ],
+        "title": "CacheTargetRestoreFenceRequest",
+        "type": "object"
+      },
+      "CacheTargetRestoreFenceResponse": {
+        "additionalProperties": false,
+        "description": "Restore-fence command result.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CacheTargetStreamControlRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CacheTargetRestoreFenceResponse",
+        "type": "object"
+      },
+      "CacheTargetSnapshotData": {
+        "additionalProperties": false,
+        "description": "Fixed snapshot page.",
+        "properties": {
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "high_watermark_cursor": {
+            "title": "High Watermark Cursor",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CacheTargetSnapshotRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "merkle_root": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Merkle Root",
+            "type": "string"
+          },
+          "restore_epoch": {
+            "minimum": 1.0,
+            "title": "Restore Epoch",
+            "type": "integer"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "restore_epoch",
+          "high_watermark_cursor",
+          "count",
+          "merkle_root",
+          "items"
+        ],
+        "title": "CacheTargetSnapshotData",
+        "type": "object"
+      },
+      "CacheTargetSnapshotResponse": {
+        "additionalProperties": false,
+        "description": "Service snapshot response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CacheTargetSnapshotData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CacheTargetSnapshotResponse",
+        "type": "object"
+      },
+      "CacheTargetSnapshotRow": {
+        "additionalProperties": false,
+        "description": "Fixed snapshot leaf row.",
+        "properties": {
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "source_generation": {
+            "minimum": 1.0,
+            "title": "Source Generation",
+            "type": "integer"
+          },
+          "source_payload_fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Source Payload Fingerprint",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "deleted"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target_key": {
+            "title": "Target Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "external_system",
+          "target_key",
+          "state",
+          "source_generation",
+          "source_payload_fingerprint"
+        ],
+        "title": "CacheTargetSnapshotRow",
+        "type": "object"
+      },
+      "CacheTargetSourceDeleteRequest": {
+        "additionalProperties": false,
+        "description": "Service desired-state tombstone source event.",
+        "properties": {
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "restore_epoch": {
+            "minimum": 1.0,
+            "title": "Restore Epoch",
+            "type": "integer"
+          },
+          "source_event_id": {
+            "format": "uuid",
+            "title": "Source Event Id",
+            "type": "string"
+          },
+          "source_generation": {
+            "minimum": 1.0,
+            "title": "Source Generation",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_event_id",
+          "restore_epoch",
+          "source_generation",
+          "occurred_at"
+        ],
+        "title": "CacheTargetSourceDeleteRequest",
+        "type": "object"
+      },
+      "CacheTargetSourceMutationResponse": {
+        "additionalProperties": false,
+        "description": "Service target PUT/DELETE response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CacheTargetSourceRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CacheTargetSourceMutationResponse",
+        "type": "object"
+      },
+      "CacheTargetSourceRecord": {
+        "additionalProperties": false,
+        "description": "Target source projection representation.",
+        "properties": {
+          "entity_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Tag"
+          },
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "restore_epoch": {
+            "minimum": 1.0,
+            "title": "Restore Epoch",
+            "type": "integer"
+          },
+          "source_generation": {
+            "minimum": 1.0,
+            "title": "Source Generation",
+            "type": "integer"
+          },
+          "source_payload_fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Source Payload Fingerprint",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "deleted"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_key": {
+            "title": "Target Key",
+            "type": "string"
+          },
+          "target_sequence": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Sequence"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "external_system",
+          "target_key",
+          "state",
+          "restore_epoch",
+          "source_generation",
+          "source_payload_fingerprint"
+        ],
+        "title": "CacheTargetSourceRecord",
+        "type": "object"
+      },
+      "CacheTargetSourceUpsertRequest": {
+        "additionalProperties": false,
+        "description": "Service desired-state active source event.",
+        "properties": {
+          "coord": {
+            "$ref": "#/components/schemas/CacheTargetDecimalCoordinate"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "radius_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Radius Km"
+          },
+          "restore_epoch": {
+            "minimum": 1.0,
+            "title": "Restore Epoch",
+            "type": "integer"
+          },
+          "source_event_id": {
+            "format": "uuid",
+            "title": "Source Event Id",
+            "type": "string"
+          },
+          "source_generation": {
+            "minimum": 1.0,
+            "title": "Source Generation",
+            "type": "integer"
+          },
+          "update_enabled": {
+            "default": true,
+            "title": "Update Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_event_id",
+          "restore_epoch",
+          "source_generation",
+          "coord",
+          "radius_km",
+          "occurred_at"
+        ],
+        "title": "CacheTargetSourceUpsertRequest",
+        "type": "object"
+      },
+      "CacheTargetStreamControlRecord": {
+        "additionalProperties": false,
+        "description": "External-system stream control.",
+        "properties": {
+          "blocked_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Event Id"
+          },
+          "consumer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumer Id"
+          },
+          "control_version": {
+            "minimum": 1.0,
+            "title": "Control Version",
+            "type": "integer"
+          },
+          "entity_tag": {
+            "title": "Entity Tag",
+            "type": "string"
+          },
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "restore_epoch": {
+            "minimum": 1.0,
+            "title": "Restore Epoch",
+            "type": "integer"
+          },
+          "state": {
+            "default": "active",
+            "enum": [
+              "active",
+              "blocked",
+              "disabled",
+              "fenced",
+              "ready",
+              "restore_fenced"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "external_system",
+          "restore_epoch",
+          "control_version",
+          "entity_tag"
+        ],
+        "title": "CacheTargetStreamControlRecord",
+        "type": "object"
+      },
+      "CacheTargetStreamControlResponse": {
+        "additionalProperties": false,
+        "description": "Service stream control response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CacheTargetStreamControlRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CacheTargetStreamControlResponse",
+        "type": "object"
+      },
+      "ClusterMeta": {
+        "additionalProperties": false,
+        "description": "Map clustering metadata.",
+        "properties": {
+          "cluster_unit": {
+            "description": "현재 응답의 행정구역 cluster 단위.",
+            "enum": [
+              "sido",
+              "sigungu",
+              "eupmyeondong"
+            ],
+            "title": "Cluster Unit",
+            "type": "string"
+          },
+          "drill_down_unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sido",
+                  "sigungu",
+                  "eupmyeondong"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "한 단계 확대 시 요청할 다음 cluster_unit. eupmyeondong 다음은 개별 feature이므로 null.",
+            "title": "Drill Down Unit"
+          }
+        },
+        "required": [
+          "cluster_unit",
+          "drill_down_unit"
+        ],
+        "title": "ClusterMeta",
+        "type": "object"
+      },
+      "FeatureBatchData": {
+        "additionalProperties": false,
+        "description": "feature batch 5-state data payload.",
+        "properties": {
+          "items": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "found": "#/components/schemas/FeatureBatchFoundItem",
+                  "missing": "#/components/schemas/FeatureBatchMissingItem",
+                  "retired": "#/components/schemas/FeatureBatchRetiredItem",
+                  "suppressed": "#/components/schemas/FeatureBatchSuppressedItem",
+                  "unchanged": "#/components/schemas/FeatureBatchUnchangedItem"
+                },
+                "propertyName": "state"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/FeatureBatchFoundItem"
+                },
+                {
+                  "$ref": "#/components/schemas/FeatureBatchRetiredItem"
+                },
+                {
+                  "$ref": "#/components/schemas/FeatureBatchSuppressedItem"
+                },
+                {
+                  "$ref": "#/components/schemas/FeatureBatchMissingItem"
+                },
+                {
+                  "$ref": "#/components/schemas/FeatureBatchUnchangedItem"
+                }
+              ]
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FeatureBatchData",
+        "type": "object"
+      },
+      "FeatureBatchFoundItem": {
+        "additionalProperties": false,
+        "description": "공개 feature의 최신 trip_card.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "row_revision": {
+            "format": "int64",
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
+          "state": {
+            "const": "found",
+            "title": "State",
+            "type": "string"
+          },
+          "trip_card": {
+            "$ref": "#/components/schemas/FeatureTripCard"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id",
+          "row_revision",
+          "trip_card"
+        ],
+        "title": "FeatureBatchFoundItem",
+        "type": "object"
+      },
+      "FeatureBatchMissingItem": {
+        "additionalProperties": false,
+        "description": "저장소에 존재하지 않는 feature.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "state": {
+            "const": "missing",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id"
+        ],
+        "title": "FeatureBatchMissingItem",
+        "type": "object"
+      },
+      "FeatureBatchRequest": {
+        "additionalProperties": false,
+        "description": "5-state feature batch 조회 요청 (service read).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureBatchRequestItem"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "projection": {
+            "const": "trip_card",
+            "default": "trip_card",
+            "description": "서버 정의 고정 projection. raw/detail projection은 선택할 수 없다.",
+            "title": "Projection",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FeatureBatchRequest",
+        "type": "object"
+      },
+      "FeatureBatchRequestItem": {
+        "additionalProperties": false,
+        "description": "feature batch 요청 1건.",
+        "properties": {
+          "feature_id": {
+            "minLength": 1,
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "known_row_revision": {
+            "anyOf": [
+              {
+                "format": "int64",
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "소비자가 보유한 trip_card의 PostgreSQL bigint row_revision(최대 9223372036854775807). 일치하면 unchanged.",
+            "title": "Known Row Revision"
+          }
+        },
+        "required": [
+          "feature_id"
+        ],
+        "title": "FeatureBatchRequestItem",
+        "type": "object"
+      },
+      "FeatureBatchResponse": {
+        "additionalProperties": false,
+        "description": "``POST /features/batch`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureBatchData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureBatchResponse",
+        "type": "object"
+      },
+      "FeatureBatchRetiredItem": {
+        "additionalProperties": false,
+        "description": "lifecycle tombstone이 확인된 feature.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "row_revision": {
+            "format": "int64",
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
+          "state": {
+            "const": "retired",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id",
+          "row_revision"
+        ],
+        "title": "FeatureBatchRetiredItem",
+        "type": "object"
+      },
+      "FeatureBatchSuppressedItem": {
+        "additionalProperties": false,
+        "description": "존재하지만 현재 공개 projection에 없는 feature.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "row_revision": {
+            "format": "int64",
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
+          "state": {
+            "const": "suppressed",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id",
+          "row_revision"
+        ],
+        "title": "FeatureBatchSuppressedItem",
+        "type": "object"
+      },
+      "FeatureBatchUnchangedItem": {
+        "additionalProperties": false,
+        "description": "소비자 revision과 동일한 공개 feature.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "row_revision": {
+            "format": "int64",
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
+          "state": {
+            "const": "unchanged",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id",
+          "row_revision"
+        ],
+        "title": "FeatureBatchUnchangedItem",
+        "type": "object"
+      },
+      "FeatureTripCard": {
+        "additionalProperties": false,
+        "description": "여행 일정 POI 표시에 필요한 공개-안전 고정 projection.",
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "marker_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Color"
+          },
+          "marker_icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "lon",
+          "lat",
+          "address",
+          "marker_icon",
+          "marker_color"
+        ],
+        "title": "FeatureTripCard",
+        "type": "object"
+      },
+      "Meta": {
+        "additionalProperties": false,
+        "description": "전 REST 표면에서 공유하는 성공 응답 metadata.",
+        "properties": {
+          "cluster": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClusterMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "default": "",
+            "description": "X-Request-ID와 같은 요청 ID.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "Meta",
+        "type": "object"
+      },
+      "PageMeta": {
+        "additionalProperties": false,
+        "description": "Cursor pagination metadata.\n\n``next_cursor``는 페이지가 끝났을 때도 ``null``로 항상 직렬화한다.",
+        "properties": {
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "page_size"
+        ],
+        "title": "PageMeta",
+        "type": "object"
+      },
+      "ProblemDetail": {
+        "additionalProperties": true,
+        "description": "RFC7807 ``application/problem+json`` 에러 본문 (중앙 핸들러 정본, §1.5).\n\n중앙 예외 핸들러(`app._error_response`)가 모든 4xx/5xx를 이 형식으로 통일한다.\n``code``·``request_id``는 소비자 파싱 위치 고정용 top-level 확장 멤버다.",
+        "properties": {
+          "code": {
+            "description": "기계 판독용 오류 코드(§4 enum 확장). 예: NOT_FOUND.",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "description": "이 발생 건에 대한 사람이 읽는 설명.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "errors": {
+            "description": "필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).",
+            "items": {
+              "$ref": "#/components/schemas/ProblemDetailError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "request_id": {
+            "description": "요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "HTTP 상태 코드.",
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "사람이 읽는 짧은 요약(= detail).",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "오류 유형 URI. 예: https://kor-travel-map/errors/not-found",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "request_id"
+        ],
+        "title": "ProblemDetail",
+        "type": "object"
+      },
+      "ProblemDetailError": {
+        "additionalProperties": true,
+        "description": "RFC7807 problem 본문 ``errors`` 항목 (필드 단위 오류).\n\n§1.5 산문 계약은 ``{field, message}``를 정의하지만, 검증 실패(422)는 pydantic\n원본 오류(``loc``/``msg``/``type`` 등)를 그대로 싣는다. 두 형태를 모두 허용하도록\n추가 키를 열어 둔다(``extra='allow'``).",
+        "properties": {
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "오류가 발생한 입력 필드.",
+            "title": "Field"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "사람이 읽는 오류 메시지.",
+            "title": "Message"
+          }
+        },
+        "title": "ProblemDetailError",
+        "type": "object"
+      },
+      "WeatherBatchCardOut": {
+        "additionalProperties": false,
+        "description": "한 target 안에서 같은 source bundle을 공유하는 weather card.",
+        "properties": {
+          "card_key": {
+            "title": "Card Key",
+            "type": "string"
+          },
+          "current": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherMetricOut"
+            },
+            "title": "Current",
+            "type": "array"
+          },
+          "is_stale": {
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "latest_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest At"
+          },
+          "source_styles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Styles",
+            "type": "array"
+          },
+          "timeline": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherMetricOut"
+            },
+            "title": "Timeline",
+            "type": "array"
+          }
+        },
+        "required": [
+          "card_key",
+          "source_styles",
+          "current",
+          "timeline",
+          "is_stale"
+        ],
+        "title": "WeatherBatchCardOut",
+        "type": "object"
+      },
+      "WeatherBatchData": {
+        "additionalProperties": false,
+        "description": "한 DB snapshot에서 계산한 다중 target weather batch data.",
+        "properties": {
+          "known_at": {
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherBatchTargetData"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "known_at",
+          "targets"
+        ],
+        "title": "WeatherBatchData",
+        "type": "object"
+      },
+      "WeatherBatchFoundItem": {
+        "additionalProperties": false,
+        "description": "공개 parent와 target의 공유 weather card 참조.",
+        "properties": {
+          "card_key": {
+            "title": "Card Key",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "state": {
+            "const": "found",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id",
+          "card_key"
+        ],
+        "title": "WeatherBatchFoundItem",
+        "type": "object"
+      },
+      "WeatherBatchNoDataItem": {
+        "additionalProperties": false,
+        "description": "공개 parent는 있으나 cutoff에 맞는 weather가 없는 item.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "state": {
+            "const": "no_data",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id"
+        ],
+        "title": "WeatherBatchNoDataItem",
+        "type": "object"
+      },
+      "WeatherBatchRequest": {
+        "additionalProperties": false,
+        "description": "여러 시각을 한 snapshot statement로 읽는 sparse weather 요청.",
+        "properties": {
+          "known_at": {
+            "description": "소비자가 허용하는 지식 cutoff(UTC offset 필수).",
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
+          },
+          "targets": {
+            "description": "target_at 오름차순 group. 전체 target×feature pair는 2000개 이하이고, pairs + 5×전체 고유 Feature 수는 2500 이하.",
+            "items": {
+              "$ref": "#/components/schemas/WeatherBatchTargetRequest"
+            },
+            "maxItems": 366,
+            "minItems": 1,
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "targets",
+          "known_at"
+        ],
+        "title": "WeatherBatchRequest",
+        "type": "object"
+      },
+      "WeatherBatchResponse": {
+        "additionalProperties": false,
+        "description": "``POST /features/weather/batch`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WeatherBatchData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "WeatherBatchResponse",
+        "type": "object"
+      },
+      "WeatherBatchRetiredItem": {
+        "additionalProperties": false,
+        "description": "현재 공개 parent가 아니어서 weather를 제공할 수 없는 item.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "state": {
+            "const": "retired",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "feature_id"
+        ],
+        "title": "WeatherBatchRetiredItem",
+        "type": "object"
+      },
+      "WeatherBatchTargetData": {
+        "additionalProperties": false,
+        "description": "target 시각 하나의 weather snapshot.",
+        "properties": {
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherBatchCardOut"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "found": "#/components/schemas/WeatherBatchFoundItem",
+                  "no_data": "#/components/schemas/WeatherBatchNoDataItem",
+                  "retired": "#/components/schemas/WeatherBatchRetiredItem"
+                },
+                "propertyName": "state"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/WeatherBatchFoundItem"
+                },
+                {
+                  "$ref": "#/components/schemas/WeatherBatchNoDataItem"
+                },
+                {
+                  "$ref": "#/components/schemas/WeatherBatchRetiredItem"
+                }
+              ]
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "target_at": {
+            "format": "date-time",
+            "title": "Target At",
+            "type": "string"
+          },
+          "timeline_until": {
+            "format": "date-time",
+            "title": "Timeline Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_at",
+          "timeline_until",
+          "items",
+          "cards"
+        ],
+        "title": "WeatherBatchTargetData",
+        "type": "object"
+      },
+      "WeatherBatchTargetRequest": {
+        "additionalProperties": false,
+        "description": "한 시각에 실제로 필요한 Feature ID 집합.",
+        "properties": {
+          "feature_ids": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Feature Ids",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "target_at": {
+            "description": "예보·관측이 설명해야 하는 시각(UTC offset 필수).",
+            "format": "date-time",
+            "title": "Target At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_at",
+          "feature_ids"
+        ],
+        "title": "WeatherBatchTargetRequest",
+        "type": "object"
+      },
+      "WeatherMetricOut": {
+        "additionalProperties": false,
+        "description": "weather card metric 1건 (forecast_style × metric_key 최신값, T-213e).",
+        "properties": {
+          "effective_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective At"
+          },
+          "forecast_style": {
+            "title": "Forecast Style",
+            "type": "string"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "metric_key": {
+            "title": "Metric Key",
+            "type": "string"
+          },
+          "metric_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Name"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severity"
+          },
+          "timeline_bucket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeline Bucket"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "valid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid At"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
+          },
+          "value_number": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Number"
+          },
+          "value_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Text"
+          },
+          "weather_domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weather Domain"
+          }
+        },
+        "required": [
+          "forecast_style",
+          "metric_key"
+        ],
+        "title": "WeatherMetricOut",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "ServiceToken": {
+        "description": "외부 서비스 호출 토큰 (ADR-045 D-1).",
+        "in": "header",
+        "name": "X-Kor-Travel-Map-Service-Token",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "Service-to-service subset of kor-travel-map OpenAPI. Public user, admin, debug, and ops routes are intentionally excluded.",
+    "title": "kor-travel-map-service",
+    "version": "0.2.0-dev"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/features/batch": {
+      "post": {
+        "operationId": "get_features_batch_v1_features_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "서로 다른 item 1~200개 필요"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "FEATURE_BATCH_UNAVAILABLE — feature 저장소 연결/조회 실패"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "feature 5-state trip_card batch 조회 (service read)",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/v1/features/weather/batch": {
+      "post": {
+        "operationId": "get_feature_weather_batch_v1_features_weather_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WeatherBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeatherBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, metric row 또는 payload byte 예산 초과"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "target 1~366개, target별 고유 Feature ID 1~200개, Feature ID 256자 이하, 전체 pair 2,000개·planning work 2,500 이하와 aware datetime 필요"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "feature weather bitemporal batch 조회 (service read)",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/v1/service/cache-target-event-acks": {
+      "post": {
+        "operationId": "ack_service_cache_target_events_v1_service_cache_target_event_acks_post",
+        "parameters": [
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheTargetAckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetAckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Ack Service Cache Target Events",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/cache-target-event-claims": {
+      "post": {
+        "operationId": "claim_service_cache_target_events_v1_service_cache_target_event_claims_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheTargetClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetClaimResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Claim Service Cache Target Events",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/cache-target-event-dead-letters/{event_id}": {
+      "get": {
+        "operationId": "get_service_cache_target_dead_letter_v1_service_cache_target_event_dead_letters__event_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetDeadLetterDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 resource의 raw strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "dead letter 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Service Cache Target Dead Letter",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/cache-target-event-dead-letters/{event_id}/replays": {
+      "post": {
+        "operationId": "replay_service_cache_target_dead_letter_v1_service_cache_target_event_dead_letters__event_id__replays_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          },
+          {
+            "description": "직전 GET/성공 응답의 raw strong ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheTargetDeadLetterReplayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetDeliveryResponse"
+                }
+              }
+            },
+            "description": "dead letter replayed",
+            "headers": {
+              "ETag": {
+                "description": "현재 resource의 raw strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale delivery ETag"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "missing If-Match"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Replay Service Cache Target Dead Letter",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/cache-target-event-nacks": {
+      "post": {
+        "operationId": "nack_service_cache_target_event_v1_service_cache_target_event_nacks_post",
+        "parameters": [
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheTargetNackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetDeliveryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Conflict",
+            "headers": {
+              "Retry-After": {
+                "description": "status URL 재조회 전 최소 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Nack Service Cache Target Event",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/cache-target-snapshots/{external_system}": {
+      "get": {
+        "operationId": "get_service_cache_target_snapshot_v1_service_cache_target_snapshots__external_system__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_system",
+            "required": true,
+            "schema": {
+              "maxLength": 112,
+              "minLength": 1,
+              "title": "External System",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Service Cache Target Snapshot",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/cache-target-streams/{external_system}": {
+      "get": {
+        "operationId": "get_service_cache_target_stream_v1_service_cache_target_streams__external_system__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_system",
+            "required": true,
+            "schema": {
+              "maxLength": 112,
+              "minLength": 1,
+              "title": "External System",
+              "type": "string"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetStreamControlResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 resource의 raw strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stream 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Service Cache Target Stream",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/cache-target-streams/{external_system}/restore-fences": {
+      "post": {
+        "operationId": "create_service_restore_fence_v1_service_cache_target_streams__external_system__restore_fences_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_system",
+            "required": true,
+            "schema": {
+              "maxLength": 112,
+              "minLength": 1,
+              "title": "External System",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          },
+          {
+            "description": "직전 GET/성공 응답의 raw strong ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheTargetRestoreFenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetRestoreFenceResponse"
+                }
+              }
+            },
+            "description": "restore fence advanced",
+            "headers": {
+              "ETag": {
+                "description": "현재 resource의 raw strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale stream ETag"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "missing If-Match"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Create Service Restore Fence",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/cache-targets/{external_system}/{target_key}": {
+      "delete": {
+        "operationId": "delete_service_cache_target_v1_service_cache_targets__external_system___target_key__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_system",
+            "required": true,
+            "schema": {
+              "maxLength": 112,
+              "minLength": 1,
+              "title": "External System",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_key",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Target Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          },
+          {
+            "description": "직전 GET/성공 응답의 raw strong ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheTargetSourceDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetSourceMutationResponse"
+                }
+              }
+            },
+            "description": "target tombstone applied",
+            "headers": {
+              "ETag": {
+                "description": "현재 resource의 raw strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale If-Match"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "missing If-Match"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Delete Service Cache Target",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      },
+      "get": {
+        "operationId": "get_service_cache_target_v1_service_cache_targets__external_system___target_key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_system",
+            "required": true,
+            "schema": {
+              "maxLength": 112,
+              "minLength": 1,
+              "title": "External System",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_key",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Target Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_deleted",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Deleted",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetSourceMutationResponse"
+                }
+              }
+            },
+            "description": "target source read",
+            "headers": {
+              "ETag": {
+                "description": "현재 resource의 raw strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "target source not found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Service Cache Target",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      },
+      "put": {
+        "operationId": "put_service_cache_target_v1_service_cache_targets__external_system___target_key__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_system",
+            "required": true,
+            "schema": {
+              "maxLength": 112,
+              "minLength": 1,
+              "title": "External System",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_key",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Target Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          },
+          {
+            "description": "create-only command에는 정확히 `*`를 보낸다.",
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 GET/성공 응답의 raw strong ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheTargetSourceUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetSourceMutationResponse"
+                }
+              }
+            },
+            "description": "target source applied",
+            "headers": {
+              "ETag": {
+                "description": "현재 resource의 raw strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale If-Match"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "missing If-Match/If-None-Match"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Put Service Cache Target",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/refresh-requests": {
+      "post": {
+        "operationId": "create_service_refresh_request_v1_service_refresh_requests_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheTargetRefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetRefreshRequestResponse"
+                }
+              }
+            },
+            "description": "refresh request accepted",
+            "headers": {
+              "Location": {
+                "description": "accepted recovery operation status URL.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "status URL 재조회 전 최소 대기 시간(초).",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Create Service Refresh Request",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/refresh-requests/{request_id}": {
+      "get": {
+        "operationId": "get_service_refresh_request_v1_service_refresh_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetRefreshRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "refresh request 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Service Refresh Request",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    }
+  }
+}

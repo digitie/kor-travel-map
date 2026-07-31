@@ -137,17 +137,6 @@ class CacheTargetStreamService(Protocol):
     ) -> Any | None: ...
 
 
-def _service_unavailable(message: str) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail={
-            "code": "CACHE_TARGET_STREAM_SERVICE_UNAVAILABLE",
-            "message": message,
-            "details": {},
-        },
-    )
-
-
 class _RepoCacheTargetStreamService:
     """Thin API adapter over available main-library repository functions."""
 
@@ -159,8 +148,14 @@ class _RepoCacheTargetStreamService:
         target_key: str,
         include_deleted: bool = False,
     ) -> Any | None:
-        del session, external_system, target_key, include_deleted
-        raise _service_unavailable("cache target source read repository is not bound.")
+        from kortravelmap.infra import get_cache_target_source
+
+        return await get_cache_target_source(
+            session,
+            external_system=external_system,
+            target_key=target_key,
+            include_deleted=include_deleted,
+        )
 
     async def apply_cache_target_source(self, session: Any, **kwargs: Any) -> Any:
         from kortravelmap.infra import apply_cache_target_source
@@ -187,8 +182,9 @@ class _RepoCacheTargetStreamService:
         return await advance_cache_target_restore_fence(session, **kwargs)
 
     async def create_refresh_request(self, session: Any, **kwargs: Any) -> Any:
-        del session, kwargs
-        raise _service_unavailable("cache target refresh service is not bound.")
+        from kortravelmap.infra import create_cache_target_refresh_request
+
+        return await create_cache_target_refresh_request(session, **kwargs)
 
     async def get_refresh_request(
         self,
@@ -196,8 +192,9 @@ class _RepoCacheTargetStreamService:
         *,
         request_id: str,
     ) -> Any | None:
-        del session, request_id
-        raise _service_unavailable("cache target refresh read service is not bound.")
+        from kortravelmap.infra import get_cache_target_refresh_request
+
+        return await get_cache_target_refresh_request(session, request_id=request_id)
 
     async def claim_cache_target_events(self, session: Any, **kwargs: Any) -> Any:
         from kortravelmap.infra import claim_cache_target_events
@@ -233,8 +230,9 @@ class _RepoCacheTargetStreamService:
         return await get_cache_target_dead_letter(session, event_id=event_id)
 
     async def list_cache_target_dead_letters(self, session: Any, **kwargs: Any) -> Any:
-        del session, kwargs
-        raise _service_unavailable("cache target dead-letter list repository is not bound.")
+        from kortravelmap.infra import list_cache_target_dead_letters
+
+        return await list_cache_target_dead_letters(session, **kwargs)
 
     async def replay_cache_target_dead_letter(self, session: Any, **kwargs: Any) -> Any:
         from kortravelmap.infra import replay_cache_target_dead_letter
@@ -242,16 +240,19 @@ class _RepoCacheTargetStreamService:
         return await replay_cache_target_dead_letter(session, **kwargs)
 
     async def get_cache_target_snapshot(self, session: Any, **kwargs: Any) -> Any:
-        del session, kwargs
-        raise _service_unavailable("cache target snapshot repository is not bound.")
+        from kortravelmap.infra import get_cache_target_snapshot
+
+        return await get_cache_target_snapshot(session, **kwargs)
 
     async def list_cache_target_stream_statuses(self, session: Any, **kwargs: Any) -> Any:
-        del session, kwargs
-        raise _service_unavailable("cache target stream status repository is not bound.")
+        from kortravelmap.infra import list_cache_target_stream_statuses
+
+        return await list_cache_target_stream_statuses(session, **kwargs)
 
     async def request_cache_target_reconciliation(self, session: Any, **kwargs: Any) -> Any:
-        del session, kwargs
-        raise _service_unavailable("cache target reconciliation service is not bound.")
+        from kortravelmap.infra import request_cache_target_reconciliation
+
+        return await request_cache_target_reconciliation(session, **kwargs)
 
     async def get_cache_target_operation(
         self,
@@ -259,8 +260,9 @@ class _RepoCacheTargetStreamService:
         *,
         operation_id: str,
     ) -> Any | None:
-        del session, operation_id
-        raise _service_unavailable("cache target operation repository is not bound.")
+        from kortravelmap.infra import get_cache_target_operation
+
+        return await get_cache_target_operation(session, operation_id=operation_id)
 
 
 def get_cache_target_stream_service(request: Request) -> CacheTargetStreamService:

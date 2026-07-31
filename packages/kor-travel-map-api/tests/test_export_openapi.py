@@ -97,8 +97,6 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/features/{feature_id}/weather/forecast",
         "/v1/features/weather/forecast",
         "/v1/features/weather/alerts",
-        "/v1/features/weather/batch",
-        "/v1/features/batch",
         "/v1/public/beaches",
         "/v1/public/beaches/map-markers",
         "/v1/public/beaches/{feature_id}",
@@ -131,8 +129,10 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
             ]
 
     schemas = user["components"]["schemas"]
-    assert "FeatureBatchResponse" in schemas
-    assert "WeatherBatchResponse" in schemas
+    assert "FeatureBatchResponse" not in schemas
+    assert "WeatherBatchResponse" not in schemas
+    assert "CacheTargetClaimResponse" not in schemas
+    assert "CacheTargetEventRecord" not in schemas
     assert "BeachPublicView" in schemas
     assert "FestivalPublicView" in schemas
     assert "PublicCuratedFeatureView" in schemas
@@ -380,6 +380,7 @@ def test_route_policy_full_and_user_operations_match_bidirectionally() -> None:
     app = create_app(ApiSettings())
     full = app.openapi()
     user = module.user_openapi_spec(full, app=app)
+    service = module.service_openapi_spec(full, app=app)
 
     route_operations = {
         (row.schema_path, method.lower())
@@ -398,9 +399,71 @@ def test_route_policy_full_and_user_operations_match_bidirectionally() -> None:
         for method in row.methods
         if method.lower() in module.HTTP_METHODS
     }
+    expected_service_operations = {
+        (row.schema_path, method.lower())
+        for row in build_route_policy_matrix(app)
+        if row.include_in_schema
+        and not row.is_websocket
+        and row.policy in module.SERVICE_ROUTE_POLICIES
+        for method in row.methods
+        if method.lower() in module.HTTP_METHODS
+    }
 
     assert full_operations == route_operations
     assert module._openapi_operations(user) == expected_user_operations
+    assert module._openapi_operations(service) == expected_service_operations
+
+
+@pytest.mark.unit
+def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -> None:
+    module = _load_script_module()
+    app = create_app(ApiSettings())
+    service = module.service_openapi_spec(app.openapi(), app=app)
+
+    assert service["info"]["title"] == "kor-travel-map-service"
+    assert set(service["paths"]) == {
+        "/v1/features/batch",
+        "/v1/features/weather/batch",
+        "/v1/service/cache-target-event-acks",
+        "/v1/service/cache-target-event-claims",
+        "/v1/service/cache-target-event-dead-letters/{event_id}",
+        "/v1/service/cache-target-event-dead-letters/{event_id}/replays",
+        "/v1/service/cache-target-event-nacks",
+        "/v1/service/cache-target-snapshots/{external_system}",
+        "/v1/service/cache-target-streams/{external_system}",
+        "/v1/service/cache-target-streams/{external_system}/restore-fences",
+        "/v1/service/cache-targets/{external_system}/{target_key}",
+        "/v1/service/refresh-requests",
+        "/v1/service/refresh-requests/{request_id}",
+    }
+    assert set(service["components"]["securitySchemes"]) == {"ServiceToken"}
+    for path, method in module._openapi_operations(service):
+        assert service["paths"][path][method]["security"] == [{"ServiceToken": []}]
+
+    schemas = service["components"]["schemas"]
+    assert "FeatureBatchResponse" in schemas
+    assert "WeatherBatchResponse" in schemas
+    assert "CacheTargetClaimResponse" in schemas
+    event_schema = schemas["CacheTargetEventRecord"]
+    event_properties = event_schema["properties"]
+    assert {
+        "event_scope",
+        "payload",
+        "source_payload_fingerprint",
+        "target_key",
+        "target_id",
+        "source_generation",
+        "target_sequence",
+    } <= set(event_properties)
+    assert set(event_properties["event_scope"]["enum"]) == {"target", "stream"}
+    assert {"type": "null"} in event_properties["target_key"]["anyOf"]
+    assert {"type": "null"} in event_properties["target_id"]["anyOf"]
+    assert {"type": "null"} in event_properties["source_generation"]["anyOf"]
+    assert {"type": "null"} in event_properties["target_sequence"]["anyOf"]
+    refresh_target_keys = schemas["CacheTargetRefreshRequest"]["properties"]["target_keys"]
+    assert refresh_target_keys["maxItems"] == 500
+    assert "PublicCuratedFeatureView" not in schemas
+    assert "AdminFeatureListResponse" not in schemas
 
 
 @pytest.mark.unit
@@ -420,6 +483,7 @@ def test_public_security_matches_route_policy_in_full_and_user_specs() -> None:
     app = create_app(ApiSettings())
     full = app.openapi()
     user = module.user_openapi_spec(full, app=app)
+    service = module.service_openapi_spec(full, app=app)
     policies = {
         row.schema_path: row.policy
         for row in build_route_policy_matrix(app)
@@ -434,7 +498,7 @@ def test_public_security_matches_route_policy_in_full_and_user_specs() -> None:
         RoutePolicy.SERVICE: [{"ServiceToken": []}],
     }
 
-    for spec in (full, user):
+    for spec in (full, user, service):
         for path, method in module._openapi_operations(spec):
             policy = policies[path]
             operation = spec["paths"][path][method]
