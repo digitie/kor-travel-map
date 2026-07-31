@@ -126,7 +126,7 @@ def upgrade() -> None:
             ["import_batch_id"],
             ["feature.curation_import_batches.import_batch_id"],
             name="fk_curation_import_rows_batch",
-            ondelete="CASCADE",
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["curation_item_id"],
@@ -209,6 +209,10 @@ def upgrade() -> None:
             "actor = btrim(actor) AND actor <> ''",
             name="ck_curation_link_decisions_actor",
         ),
+        sa.CheckConstraint(
+            "supersedes_decision_id IS DISTINCT FROM decision_id",
+            name="ck_curation_link_decisions_not_self_superseding",
+        ),
         sa.ForeignKeyConstraint(
             ["curation_item_id"],
             ["feature.curation_items.curation_item_id"],
@@ -216,20 +220,31 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["import_row_id"],
-            ["feature.curation_import_rows.import_row_id"],
+            ["import_row_id", "curation_item_id"],
+            [
+                "feature.curation_import_rows.import_row_id",
+                "feature.curation_import_rows.curation_item_id",
+            ],
             name="fk_curation_link_decisions_import_row",
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["supersedes_decision_id"],
-            ["feature.curation_link_decisions.decision_id"],
+            ["supersedes_decision_id", "curation_item_id"],
+            [
+                "feature.curation_link_decisions.decision_id",
+                "feature.curation_link_decisions.curation_item_id",
+            ],
             name="fk_curation_link_decisions_supersedes",
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint(
             "decision_id",
             name="pk_curation_link_decisions",
+        ),
+        sa.UniqueConstraint(
+            "decision_id",
+            "curation_item_id",
+            name="uq_curation_link_decisions_item_pointer",
         ),
         sa.UniqueConstraint(
             "decision_id",
@@ -329,6 +344,40 @@ def upgrade() -> None:
          WHERE inserted.curation_item_id = item.curation_item_id
         """
     )
+    op.execute(
+        """
+        CREATE FUNCTION feature.reject_curation_history_mutation()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          RAISE EXCEPTION 'curation import/link history is append-only'
+            USING ERRCODE = '55000';
+        END;
+        $$
+        """
+    )
+    for table_name in (
+        "curation_import_batches",
+        "curation_import_rows",
+        "curation_link_decisions",
+    ):
+        op.execute(
+            f"""
+            CREATE TRIGGER trg_{table_name}_append_only
+            BEFORE UPDATE OR DELETE ON feature.{table_name}
+            FOR EACH ROW
+            EXECUTE FUNCTION feature.reject_curation_history_mutation()
+            """
+        )
+        op.execute(
+            f"""
+            CREATE TRIGGER trg_{table_name}_no_truncate
+            BEFORE TRUNCATE ON feature.{table_name}
+            FOR EACH STATEMENT
+            EXECUTE FUNCTION feature.reject_curation_history_mutation()
+            """
+        )
 
 
 def downgrade() -> None:
@@ -351,21 +400,46 @@ def downgrade() -> None:
         table_name="curation_link_decisions",
         schema="feature",
     )
+    op.execute(
+        "DROP TRIGGER trg_curation_link_decisions_no_truncate "
+        "ON feature.curation_link_decisions"
+    )
+    op.execute(
+        "DROP TRIGGER trg_curation_link_decisions_append_only "
+        "ON feature.curation_link_decisions"
+    )
     op.drop_index(
         "idx_curation_link_decisions_item_time",
         table_name="curation_link_decisions",
         schema="feature",
     )
     op.drop_table("curation_link_decisions", schema="feature")
+    op.execute(
+        "DROP TRIGGER trg_curation_import_rows_no_truncate "
+        "ON feature.curation_import_rows"
+    )
+    op.execute(
+        "DROP TRIGGER trg_curation_import_rows_append_only "
+        "ON feature.curation_import_rows"
+    )
     op.drop_index(
         "idx_curation_import_rows_item_time",
         table_name="curation_import_rows",
         schema="feature",
     )
     op.drop_table("curation_import_rows", schema="feature")
+    op.execute(
+        "DROP TRIGGER trg_curation_import_batches_no_truncate "
+        "ON feature.curation_import_batches"
+    )
+    op.execute(
+        "DROP TRIGGER trg_curation_import_batches_append_only "
+        "ON feature.curation_import_batches"
+    )
     op.drop_index(
         "idx_curation_import_batches_sha_time",
         table_name="curation_import_batches",
         schema="feature",
     )
     op.drop_table("curation_import_batches", schema="feature")
+    op.execute("DROP FUNCTION feature.reject_curation_history_mutation()")

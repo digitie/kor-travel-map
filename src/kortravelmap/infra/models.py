@@ -1449,7 +1449,7 @@ class CurationImportRowRow(Base):
             ["import_batch_id"],
             ["feature.curation_import_batches.import_batch_id"],
             name=conv("fk_curation_import_rows_batch"),
-            ondelete="CASCADE",
+            ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
             ["curation_item_id"],
@@ -1533,6 +1533,10 @@ class CurationLinkDecisionRow(Base):
             "actor = btrim(actor) AND actor <> ''",
             name=conv("ck_curation_link_decisions_actor"),
         ),
+        CheckConstraint(
+            "supersedes_decision_id IS DISTINCT FROM decision_id",
+            name=conv("ck_curation_link_decisions_not_self_superseding"),
+        ),
         ForeignKeyConstraint(
             ["curation_item_id"],
             ["feature.curation_items.curation_item_id"],
@@ -1540,16 +1544,27 @@ class CurationLinkDecisionRow(Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["import_row_id"],
-            ["feature.curation_import_rows.import_row_id"],
+            ["import_row_id", "curation_item_id"],
+            [
+                "feature.curation_import_rows.import_row_id",
+                "feature.curation_import_rows.curation_item_id",
+            ],
             name=conv("fk_curation_link_decisions_import_row"),
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["supersedes_decision_id"],
-            ["feature.curation_link_decisions.decision_id"],
+            ["supersedes_decision_id", "curation_item_id"],
+            [
+                "feature.curation_link_decisions.decision_id",
+                "feature.curation_link_decisions.curation_item_id",
+            ],
             name=conv("fk_curation_link_decisions_supersedes"),
             ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "decision_id",
+            "curation_item_id",
+            name=conv("uq_curation_link_decisions_item_pointer"),
         ),
         UniqueConstraint(
             "decision_id",

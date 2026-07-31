@@ -222,7 +222,7 @@ async def _purge_curation_test_provenance(
     *,
     theme_slugs: tuple[str, ...],
 ) -> None:
-    """불변 provenance를 쓰는 테스트 fixture만 leaf-first로 완전 정리한다."""
+    """DB owner인 테스트 teardown만 immutable trigger를 끄고 leaf-first 정리한다."""
 
     item_ids = [
         str(row[0])
@@ -245,6 +245,18 @@ async def _purge_curation_test_provenance(
     ]
     if not item_ids:
         return
+    immutable_tables = (
+        "curation_import_batches",
+        "curation_import_rows",
+        "curation_link_decisions",
+    )
+    for table_name in immutable_tables:
+        await session.execute(
+            text(
+                f"ALTER TABLE feature.{table_name} "
+                f"DISABLE TRIGGER trg_{table_name}_append_only"
+            )
+        )
     await session.execute(
         text(
             """
@@ -299,6 +311,13 @@ async def _purge_curation_test_provenance(
             """
         )
     )
+    for table_name in reversed(immutable_tables):
+        await session.execute(
+            text(
+                f"ALTER TABLE feature.{table_name} "
+                f"ENABLE TRIGGER trg_{table_name}_append_only"
+            )
+        )
 
 
 async def _links_of(engine: AsyncEngine, feature_id: str) -> set[str]:
@@ -676,6 +695,339 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
         assert override[1] is True
         assert override[2] == "dup"
         assert override[3] == "op-1"
+
+
+async def test_merge_keeps_legacy_and_provenance_less_links_fail_closed(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        state = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                        collection_id::text,
+                        curation_item_id::text
+                    FROM feature.curation_items
+                    WHERE feature_id = 'f_loser'
+                      AND external_item_id = 'loser-only'
+                    """
+                )
+            )
+        ).one()
+        legacy_decision_id = str(
+            (
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO feature.curation_link_decisions (
+                            curation_item_id,
+                            feature_id,
+                            decision_kind,
+                            match_basis,
+                            resolver_version,
+                            evidence,
+                            actor
+                        ) VALUES (
+                            CAST(:item_id AS uuid),
+                            'f_loser',
+                            'accepted',
+                            'legacy_unattributed',
+                            'pre-0072-unknown',
+                            '{"fixture":"legacy"}'::jsonb,
+                            'migration:0072'
+                        )
+                        RETURNING decision_id::text
+                        """
+                    ),
+                    {"item_id": state.curation_item_id},
+                )
+            ).scalar_one()
+        )
+        await session.execute(
+            text(
+                """
+                UPDATE feature.curation_items
+                SET accepted_link_decision_id =
+                        CAST(:decision_id AS uuid)
+                WHERE curation_item_id = CAST(:item_id AS uuid)
+                """
+            ),
+            {
+                "decision_id": legacy_decision_id,
+                "item_id": state.curation_item_id,
+            },
+        )
+        provenance_less_item_id = str(
+            (
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO feature.curation_items (
+                            collection_id,
+                            feature_id,
+                            external_item_id,
+                            external_component_id,
+                            place_name,
+                            status
+                        ) VALUES (
+                            CAST(:collection_id AS uuid),
+                            'f_loser',
+                            'provenance-less',
+                            'primary',
+                            '근거 없는 병합 대상',
+                            'included'
+                        )
+                        RETURNING curation_item_id::text
+                        """
+                    ),
+                    {"collection_id": state.collection_id},
+                )
+            ).scalar_one()
+        )
+        await merge_from_review(
+            session,
+            seeded,
+            merged_by="fail-close-merge",
+            reason="unsafe links stay private",
+        )
+
+    async with AsyncSession(migrated_engine) as session:
+        moved = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                        external_item_id,
+                        feature_id,
+                        accepted_link_decision_id::text
+                    FROM feature.curation_items
+                    WHERE curation_item_id IN (
+                        CAST(:legacy_item_id AS uuid),
+                        CAST(:provenance_less_item_id AS uuid)
+                    )
+                    ORDER BY external_item_id
+                    """
+                ),
+                {
+                    "legacy_item_id": state.curation_item_id,
+                    "provenance_less_item_id": provenance_less_item_id,
+                },
+            )
+        ).all()
+        public_gate_count = (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM feature.curation_items AS item
+                    JOIN feature.curation_link_decisions AS decision
+                      ON decision.decision_id =
+                         item.accepted_link_decision_id
+                     AND decision.curation_item_id =
+                         item.curation_item_id
+                     AND decision.feature_id = item.feature_id
+                    WHERE item.curation_item_id IN (
+                        CAST(:legacy_item_id AS uuid),
+                        CAST(:provenance_less_item_id AS uuid)
+                    )
+                      AND decision.decision_kind = 'accepted'
+                      AND decision.match_basis <> 'legacy_unattributed'
+                    """
+                ),
+                {
+                    "legacy_item_id": state.curation_item_id,
+                    "provenance_less_item_id": provenance_less_item_id,
+                },
+            )
+        ).scalar_one()
+        revocations = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                        curation_item_id::text,
+                        decision_kind,
+                        match_basis,
+                        evidence->>'trusted_acceptance'
+                    FROM feature.curation_link_decisions
+                    WHERE curation_item_id IN (
+                        CAST(:legacy_item_id AS uuid),
+                        CAST(:provenance_less_item_id AS uuid)
+                    )
+                      AND resolver_version = 'feature-merge-v1'
+                    ORDER BY curation_item_id
+                    """
+                ),
+                {
+                    "legacy_item_id": state.curation_item_id,
+                    "provenance_less_item_id": provenance_less_item_id,
+                },
+            )
+        ).all()
+    assert moved == [
+        ("loser-only", "f_master", None),
+        ("provenance-less", "f_master", None),
+    ]
+    assert public_gate_count == 0
+    assert len(revocations) == 2
+    assert all(row[1:] == ("revoked", "forward_recovery", "false") for row in revocations)
+
+
+async def test_duplicate_merge_appends_survivor_owned_current_import_row(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    common = {
+        "collection_key": "merge-test:2026",
+        "theme_slug": "merge-test",
+        "theme_name": "병합 테스트",
+        "theme_group": "test",
+        "title": "병합 테스트 2026",
+        "edition_key": "2026",
+        "provider": "merge-test-provider",
+        "dataset_key": "duplicate-provenance",
+        "source_name": "병합 테스트 출처",
+        "source_url": None,
+        "source_item_key": "shared",
+        "address_hint": None,
+        "sort_order": 1,
+        "item_title": None,
+        "item_summary": None,
+    }
+    rows = (
+        ResolvedCurationImportRow(
+            row_number=2,
+            source_component_key="component-01",
+            feature_id="f_master",
+            place_name="이전 master source",
+            metadata={"provider_revision": "master-old"},
+            provenance={"fixture": "master-import"},
+            **common,
+        ),
+        ResolvedCurationImportRow(
+            row_number=3,
+            source_component_key="component-02",
+            feature_id="f_loser",
+            place_name="최신 loser source",
+            metadata={"provider_revision": "loser-new"},
+            provenance={"fixture": "loser-import"},
+            **common,
+        ),
+    )
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        await import_curation_rows(
+            session,
+            rows=rows,
+            actor="duplicate-importer",
+            source_content_sha256="c" * 64,
+            batch_kind="csv_upload",
+        )
+        before = {
+            str(row["feature_id"]): dict(row)
+            for row in (
+                (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT
+                                feature_id,
+                                curation_item_id::text,
+                                current_import_row_id::text,
+                                accepted_link_decision_id::text
+                            FROM feature.curation_items
+                            WHERE external_item_id = 'shared'
+                              AND source_present
+                            """
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        }
+        await session.execute(
+            text(
+                """
+                UPDATE feature.curation_items
+                SET source_updated_at = source_updated_at + interval '1 hour'
+                WHERE curation_item_id =
+                      CAST(:loser_item_id AS uuid)
+                """
+            ),
+            {"loser_item_id": before["f_loser"]["curation_item_id"]},
+        )
+        await merge_from_review(
+            session,
+            seeded,
+            merged_by="duplicate-merge-operator",
+            reason="loser provider row is newer",
+        )
+
+    async with AsyncSession(migrated_engine) as session:
+        survivor = (
+            (
+                await session.execute(
+                    text(
+                        """
+                        SELECT
+                            item.curation_item_id::text,
+                            item.place_name,
+                            item.metadata,
+                            item.current_import_row_id::text,
+                            import_row.curation_item_id::text AS row_owner,
+                            import_row.row_payload->>'place_name' AS row_place_name,
+                            import_row.row_payload->'metadata' AS row_metadata,
+                            import_row.provenance,
+                            batch.batch_kind,
+                            batch.row_count,
+                            batch.actor,
+                            decision.import_row_id::text AS decision_import_row_id,
+                            decision.match_basis,
+                            decision.resolver_version,
+                            decision.supersedes_decision_id::text
+                        FROM feature.curation_items AS item
+                        JOIN feature.curation_import_rows AS import_row
+                          ON import_row.import_row_id =
+                             item.current_import_row_id
+                        JOIN feature.curation_import_batches AS batch
+                          ON batch.import_batch_id =
+                             import_row.import_batch_id
+                        JOIN feature.curation_link_decisions AS decision
+                          ON decision.decision_id =
+                             item.accepted_link_decision_id
+                        WHERE item.curation_item_id =
+                              CAST(:survivor_item_id AS uuid)
+                        """
+                    ),
+                    {"survivor_item_id": before["f_master"]["curation_item_id"]},
+                )
+            )
+            .mappings()
+            .one()
+        )
+    assert survivor["place_name"] == "최신 loser source"
+    assert survivor["metadata"] == {"provider_revision": "loser-new"}
+    assert survivor["current_import_row_id"] not in {
+        before["f_master"]["current_import_row_id"],
+        before["f_loser"]["current_import_row_id"],
+    }
+    assert survivor["row_owner"] == before["f_master"]["curation_item_id"]
+    assert survivor["row_place_name"] == survivor["place_name"]
+    assert survivor["row_metadata"] == survivor["metadata"]
+    assert survivor["provenance"]["loser_import_row_id"] == (
+        before["f_loser"]["current_import_row_id"]
+    )
+    assert survivor["batch_kind"] == "forward_recovery"
+    assert survivor["row_count"] == 1
+    assert survivor["actor"] == "duplicate-merge-operator"
+    assert survivor["decision_import_row_id"] == survivor["current_import_row_id"]
+    assert survivor["match_basis"] == "forward_recovery"
+    assert survivor["resolver_version"] == "feature-merge-v2"
+    assert survivor["supersedes_decision_id"] == (
+        before["f_master"]["accepted_link_decision_id"]
+    )
 
 
 async def test_merge_moves_legacy_projection_into_canonical_only_master_identity(

@@ -553,6 +553,143 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
         "row_count": 2,
         "actor": "provenance-importer",
     }
+    immutable_history = (
+        (
+            "curation_import_batches",
+            "import_batch_id",
+            str(first["import_batch_id"]),
+        ),
+        (
+            "curation_import_rows",
+            "import_row_id",
+            first_state["item-a"]["import_row_id"],
+        ),
+        (
+            "curation_link_decisions",
+            "decision_id",
+            first_state["item-a"]["decision_id"],
+        ),
+    )
+    for table_name, key_name, key_value in immutable_history:
+        for statement in (
+            f"UPDATE feature.{table_name} "
+            f"SET {key_name} = {key_name} "
+            f"WHERE {key_name} = CAST(:key_value AS uuid)",
+            f"DELETE FROM feature.{table_name} "
+            f"WHERE {key_name} = CAST(:key_value AS uuid)",
+        ):
+            with pytest.raises(DBAPIError, match="append-only"):
+                async with migrated_session.begin_nested():
+                    await migrated_session.execute(
+                        text(statement),
+                        {"key_value": key_value},
+                    )
+    no_truncate_triggers = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT array_agg(trigger.tgname ORDER BY trigger.tgname)
+                FROM pg_trigger AS trigger
+                JOIN pg_class AS relation
+                  ON relation.oid = trigger.tgrelid
+                JOIN pg_namespace AS namespace
+                  ON namespace.oid = relation.relnamespace
+                WHERE namespace.nspname = 'feature'
+                  AND relation.relname IN (
+                      'curation_import_batches',
+                      'curation_import_rows',
+                      'curation_link_decisions'
+                  )
+                  AND trigger.tgname LIKE '%_no_truncate'
+                  AND NOT trigger.tgisinternal
+                """
+            )
+        )
+    ).scalar_one()
+    assert no_truncate_triggers == [
+        "trg_curation_import_batches_no_truncate",
+        "trg_curation_import_rows_no_truncate",
+        "trg_curation_link_decisions_no_truncate",
+    ]
+    batch_delete_action = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT constraint_name, delete_rule
+                FROM information_schema.referential_constraints
+                WHERE constraint_schema = 'feature'
+                  AND constraint_name = 'fk_curation_import_rows_batch'
+                """
+            )
+        )
+    ).one()
+    assert batch_delete_action == (
+        "fk_curation_import_rows_batch",
+        "RESTRICT",
+    )
+
+    decision_insert = """
+        INSERT INTO feature.curation_link_decisions (
+            decision_id,
+            curation_item_id,
+            feature_id,
+            import_row_id,
+            decision_kind,
+            match_basis,
+            resolver_version,
+            evidence,
+            actor,
+            supersedes_decision_id
+        ) VALUES (
+            CAST(:decision_id AS uuid),
+            CAST(:curation_item_id AS uuid),
+            :feature_id,
+            CAST(:import_row_id AS uuid),
+            'accepted',
+            'forward_recovery',
+            'same-item-fk-test-v1',
+            '{}'::jsonb,
+            'same-item-fk-test',
+            CAST(:supersedes_decision_id AS uuid)
+        )
+    """
+    with pytest.raises(DBAPIError, match="fk_curation_link_decisions_import_row"):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(decision_insert),
+                {
+                    "decision_id": str(uuid4()),
+                    "curation_item_id": first_state["item-a"]["curation_item_id"],
+                    "feature_id": "feature:provenance-a",
+                    "import_row_id": first_state["item-b"]["import_row_id"],
+                    "supersedes_decision_id": None,
+                },
+            )
+    with pytest.raises(DBAPIError, match="fk_curation_link_decisions_supersedes"):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(decision_insert),
+                {
+                    "decision_id": str(uuid4()),
+                    "curation_item_id": first_state["item-a"]["curation_item_id"],
+                    "feature_id": "feature:provenance-a",
+                    "import_row_id": first_state["item-a"]["import_row_id"],
+                    "supersedes_decision_id": first_state["item-b"]["decision_id"],
+                },
+            )
+    self_decision_id = str(uuid4())
+    with pytest.raises(DBAPIError, match="CheckViolationError"):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(decision_insert),
+                {
+                    "decision_id": self_decision_id,
+                    "curation_item_id": first_state["item-a"]["curation_item_id"],
+                    "feature_id": "feature:provenance-a",
+                    "import_row_id": first_state["item-a"]["import_row_id"],
+                    "supersedes_decision_id": self_decision_id,
+                },
+            )
 
     recovered_row_a = replace(
         row_a,
