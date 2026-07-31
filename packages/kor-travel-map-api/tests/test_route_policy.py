@@ -330,6 +330,7 @@ def test_service_policy_covers_feature_and_weather_batches() -> None:
         "/v1/service/cache-target-event-dead-letters/{event_id}/replays",
         "/v1/service/cache-target-event-nacks",
         "/v1/service/cache-target-reconciliations/{request_id}/completions",
+        "/v1/service/cache-target-reconciliations/{request_id}/snapshot",
         "/v1/service/cache-target-snapshots/{external_system}",
         "/v1/service/cache-target-streams/{external_system}",
         "/v1/service/cache-target-streams/{external_system}/restore-fences",

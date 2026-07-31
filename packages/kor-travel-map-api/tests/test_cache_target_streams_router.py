@@ -54,6 +54,7 @@ class _FakeCacheTargetService:
         self.claim_calls: list[dict[str, Any]] = []
         self.reconciliation_calls: list[dict[str, Any]] = []
         self.reconciliation_completion_calls: list[dict[str, Any]] = []
+        self.reconciliation_snapshot_calls: list[dict[str, Any]] = []
         self.reconciliation_completion_error: Exception | None = None
         self.restore_calls: list[dict[str, Any]] = []
         self.replay_calls: list[dict[str, Any]] = []
@@ -80,6 +81,7 @@ class _FakeCacheTargetService:
             status="ready",
             consumer_id=CONSUMER_ID,
             blocked_event_id=None,
+            active_reconciliation=None,
             updated_at=NOW,
         )
         self.restore_result: Any = SimpleNamespace(
@@ -109,6 +111,24 @@ class _FakeCacheTargetService:
             ),
             retry_after_seconds=None,
         )
+        self.reconciliation_snapshot_result: Any = SimpleNamespace(
+            snapshot_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            external_system=EXTERNAL_SYSTEM,
+            restore_epoch=4,
+            high_watermark_cursor="snapshot-high-watermark",
+            count=1,
+            merkle_root="a" * 64,
+            items=[
+                SimpleNamespace(
+                    external_system=EXTERNAL_SYSTEM,
+                    target_key="target-1",
+                    state="active",
+                    source_generation=1,
+                    source_payload_fingerprint="b" * 64,
+                )
+            ],
+            next_cursor=None,
+        )
         self.replay_result: Any = SimpleNamespace(
             event_id=EVENT_ID,
             status="retry",
@@ -125,8 +145,11 @@ class _FakeCacheTargetService:
         _session: Any,
         *,
         external_system: str,
+        consumer_id: str,
     ) -> Any:
         assert external_system == EXTERNAL_SYSTEM
+        if consumer_id != CONSUMER_ID:
+            raise CacheTargetStreamConflict("consumer_mismatch", "consumer mismatch")
         return self.stream
 
     async def advance_cache_target_restore_fence(
@@ -159,6 +182,16 @@ class _FakeCacheTargetService:
             raise self.reconciliation_completion_error
         return self.reconciliation_completion_result
 
+    async def get_cache_target_reconciliation_snapshot(
+        self,
+        _session: Any,
+        **kwargs: Any,
+    ) -> Any:
+        self.reconciliation_snapshot_calls.append(kwargs)
+        if kwargs["consumer_id"] != CONSUMER_ID:
+            raise CacheTargetStreamConflict("consumer_mismatch", "consumer mismatch")
+        return self.reconciliation_snapshot_result
+
     async def get_cache_target_dead_letter(
         self,
         _session: Any,
@@ -187,6 +220,8 @@ def _settings(
     scopes: list[str] | None = None,
     external_systems: list[str] | None = None,
     admin_destructive_enabled: bool = False,
+    consumer_id: str = CONSUMER_ID,
+    principal_id: str = "svc:pinvi",
 ) -> ApiSettings:
     return ApiSettings(
         _env_file=None,
@@ -199,8 +234,8 @@ def _settings(
         admin_destructive_enabled=admin_destructive_enabled,
         cache_target_service_principals=[
             {
-                "principal_id": "svc:pinvi",
-                "consumer_id": CONSUMER_ID,
+                "principal_id": principal_id,
+                "consumer_id": consumer_id,
                 "token_sha256": _token_sha256(token),
                 "scopes": scopes or ["cache-target:consumer"],
                 "external_systems": external_systems or [EXTERNAL_SYSTEM],
@@ -722,6 +757,16 @@ def test_service_reconciliation_completion_binds_preconditions_and_ledger(
     from kortravelmap.api.routers import cache_target_streams as router_module
 
     service = _FakeCacheTargetService()
+    service.stream.active_reconciliation = SimpleNamespace(
+        request_id="88888888-8888-4888-8888-888888888888",
+        status="running",
+        snapshot_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        restore_epoch=4,
+        count=1,
+        merkle_root="a" * 64,
+        high_watermark_cursor="snapshot-high-watermark",
+        created_at=NOW,
+    )
     captured_complete: dict[str, Any] = {}
 
     async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
@@ -744,8 +789,35 @@ def test_service_reconciliation_completion_binds_preconditions_and_ledger(
 
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
     monkeypatch.setattr(router_module, "complete_domain_command", _complete_domain_command)
-    client = _client(service, settings=_settings(scopes=["cache-target:snapshot"]))
+    client = _client(
+        service,
+        settings=_settings(scopes=["cache-target:read", "cache-target:snapshot"]),
+    )
     request_id = "88888888-8888-4888-8888-888888888888"
+
+    discovery = client.get(
+        f"/v1/service/cache-target-streams/{EXTERNAL_SYSTEM}",
+        headers=_service_headers(),
+    )
+    assert discovery.status_code == 200, discovery.text
+    active = discovery.json()["data"]["active_reconciliation"]
+    assert active["request_id"] == request_id
+    assert active["snapshot_id"] == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    fixed = client.get(
+        f"/v1/service/cache-target-reconciliations/{request_id}/snapshot",
+        headers=_service_headers(),
+    )
+    assert fixed.status_code == 200, fixed.text
+    assert fixed.json()["data"]["snapshot_id"] == active["snapshot_id"]
+    assert fixed.json()["data"]["merkle_root"] == active["merkle_root"]
+    assert service.reconciliation_snapshot_calls == [
+        {
+            "request_id": request_id,
+            "consumer_id": CONSUMER_ID,
+            "limit": 500,
+            "cursor": None,
+        }
+    ]
 
     response = client.post(
         f"/v1/service/cache-target-reconciliations/{request_id}/completions",
@@ -772,6 +844,46 @@ def test_service_reconciliation_completion_binds_preconditions_and_ledger(
         }
     ]
     assert captured_complete["status_code"] == 200
+
+
+@pytest.mark.unit
+def test_reconciliation_discovery_snapshot_and_completion_reject_other_consumer() -> None:
+    service = _FakeCacheTargetService()
+    client = _client(
+        service,
+        settings=_settings(
+            scopes=["cache-target:read", "cache-target:snapshot"],
+            consumer_id="other-consumer",
+            principal_id="svc:other",
+        ),
+    )
+    request_id = "88888888-8888-4888-8888-888888888888"
+    headers = _service_headers()
+
+    discovery = client.get(
+        f"/v1/service/cache-target-streams/{EXTERNAL_SYSTEM}",
+        headers=headers,
+    )
+    fixed = client.get(
+        f"/v1/service/cache-target-reconciliations/{request_id}/snapshot",
+        headers=headers,
+    )
+    completion = client.post(
+        f"/v1/service/cache-target-reconciliations/{request_id}/completions",
+        headers=headers,
+        json={
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "snapshot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "expected_restore_epoch": 4,
+            "actual_merkle_root": "a" * 64,
+        },
+    )
+
+    assert discovery.status_code == 403
+    assert fixed.status_code == 403
+    assert completion.status_code == 403
+    assert service.reconciliation_completion_calls == []
 
 
 @pytest.mark.unit
@@ -803,10 +915,23 @@ def test_service_reconciliation_completion_distinguishes_412_and_409(
         "expected_restore_epoch": 4,
         "actual_merkle_root": "a" * 64,
     }
-    stale = client.post(path, headers=_service_headers(), json=body)
-
-    assert stale.status_code == 412
-    assert stale.json()["code"] == "RECONCILIATION_PRECONDITION_FAILED"
+    stale_requests = (
+        (
+            "/v1/service/cache-target-reconciliations/"
+            "99999999-9999-4999-8999-999999999999/completions",
+            body,
+        ),
+        (path, {**body, "snapshot_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}),
+        (path, {**body, "expected_restore_epoch": 5}),
+    )
+    for stale_path, stale_body in stale_requests:
+        stale = client.post(
+            stale_path,
+            headers=_service_headers(),
+            json=stale_body,
+        )
+        assert stale.status_code == 412
+        assert stale.json()["code"] == "RECONCILIATION_PRECONDITION_FAILED"
 
     async def _idempotency_conflict(_session: Any, **_kwargs: Any) -> Any:
         raise DomainCommandFingerprintConflict(

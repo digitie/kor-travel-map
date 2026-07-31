@@ -89,6 +89,7 @@ class CacheTargetStreamService(Protocol):
         session: Any,
         *,
         external_system: str,
+        consumer_id: str,
     ) -> Any | None: ...
 
     async def advance_cache_target_restore_fence(
@@ -124,6 +125,12 @@ class CacheTargetStreamService(Protocol):
     async def replay_cache_target_dead_letter(self, session: Any, **kwargs: Any) -> Any: ...
 
     async def get_cache_target_snapshot(self, session: Any, **kwargs: Any) -> Any: ...
+
+    async def get_cache_target_reconciliation_snapshot(
+        self,
+        session: Any,
+        **kwargs: Any,
+    ) -> Any: ...
 
     async def list_cache_target_stream_statuses(self, session: Any, **kwargs: Any) -> Any: ...
 
@@ -169,10 +176,15 @@ class _RepoCacheTargetStreamService:
         session: Any,
         *,
         external_system: str,
+        consumer_id: str,
     ) -> Any | None:
-        from kortravelmap.infra import get_cache_target_stream
+        from kortravelmap.infra import get_cache_target_stream_discovery
 
-        return await get_cache_target_stream(session, external_system=external_system)
+        return await get_cache_target_stream_discovery(
+            session,
+            external_system=external_system,
+            consumer_id=consumer_id,
+        )
 
     async def advance_cache_target_restore_fence(
         self,
@@ -245,6 +257,15 @@ class _RepoCacheTargetStreamService:
         from kortravelmap.infra import get_cache_target_snapshot
 
         return await get_cache_target_snapshot(session, **kwargs)
+
+    async def get_cache_target_reconciliation_snapshot(
+        self,
+        session: Any,
+        **kwargs: Any,
+    ) -> Any:
+        from kortravelmap.infra import get_cache_target_reconciliation_snapshot
+
+        return await get_cache_target_reconciliation_snapshot(session, **kwargs)
 
     async def list_cache_target_stream_statuses(self, session: Any, **kwargs: Any) -> Any:
         from kortravelmap.infra import list_cache_target_stream_statuses

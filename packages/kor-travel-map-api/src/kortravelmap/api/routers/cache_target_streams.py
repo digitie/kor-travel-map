@@ -36,6 +36,7 @@ from kortravelmap.api.cache_target_stream_schema import (
     CacheTargetAckRecord,
     CacheTargetAckRequest,
     CacheTargetAckResponse,
+    CacheTargetActiveReconciliation,
     CacheTargetAppliedReceipt,
     CacheTargetClaimRecord,
     CacheTargetClaimRequest,
@@ -349,6 +350,19 @@ def _stream_control(row: Any) -> CacheTargetStreamControlRecord:
     external_system = _getattr(row, "external_system")
     control_version = _getattr(row, "control_version")
     default_state = "fenced" if _getattr(row, "fence_id") is not None else "active"
+    active = _getattr(row, "active_reconciliation")
+    active_record = None
+    if active is not None:
+        active_record = CacheTargetActiveReconciliation(
+            request_id=_getattr(active, "request_id"),
+            status=_getattr(active, "status"),
+            snapshot_id=_getattr(active, "snapshot_id"),
+            restore_epoch=_getattr(active, "restore_epoch"),
+            count=_getattr(active, "count"),
+            merkle_root=_getattr(active, "merkle_root"),
+            high_watermark_cursor=_getattr(active, "high_watermark_cursor"),
+            created_at=_getattr(active, "created_at"),
+        )
     return CacheTargetStreamControlRecord(
         external_system=external_system,
         restore_epoch=_getattr(row, "restore_epoch"),
@@ -358,6 +372,7 @@ def _stream_control(row: Any) -> CacheTargetStreamControlRecord:
         state=_getattr(row, "state", _getattr(row, "status", default_state)),
         consumer_id=_getattr(row, "consumer_id"),
         blocked_event_id=_getattr(row, "blocked_event_id"),
+        active_reconciliation=active_record,
         updated_at=_getattr(row, "updated_at"),
     )
 
@@ -706,6 +721,7 @@ async def get_service_cache_target_stream(
     row = await stream_service.get_cache_target_stream(
         session,
         external_system=external_system,
+        consumer_id=context.consumer_id,
     )
     if row is None:
         raise _http_error(status.HTTP_404_NOT_FOUND, "NOT_FOUND", "stream이 없습니다.")
@@ -1267,6 +1283,19 @@ async def get_service_cache_target_snapshot(
         cursor=cursor,
     )
     raise_for_cache_target_status(page)
+    return _snapshot_response(
+        page,
+        started_at=started_at,
+        page_size=page_size,
+    )
+
+
+def _snapshot_response(
+    page: Any,
+    *,
+    started_at: float,
+    page_size: int,
+) -> CacheTargetSnapshotResponse:
     data = CacheTargetSnapshotData(
         snapshot_id=_getattr(page, "snapshot_id"),
         restore_epoch=_getattr(page, "restore_epoch"),
@@ -1294,6 +1323,46 @@ async def get_service_cache_target_snapshot(
             page_size=page_size,
             next_cursor=_getattr(page, "next_cursor"),
         ),
+    )
+
+
+@service_router.get(
+    "/cache-target-reconciliations/{request_id}/snapshot",
+    response_model=CacheTargetSnapshotResponse,
+)
+async def get_service_cache_target_reconciliation_snapshot(
+    request_id: Annotated[UUID, Path()],
+    session: Annotated[Any, Depends(get_session)],
+    stream_service: Annotated[
+        CacheTargetStreamService,
+        Depends(get_cache_target_stream_service),
+    ],
+    context: Annotated[
+        CacheTargetServicePrincipalContext,
+        Depends(require_cache_target_service_principal),
+    ],
+    page_size: Annotated[int, Query(ge=1, le=1000)] = 500,
+    cursor: Annotated[str | None, Query()] = None,
+) -> CacheTargetSnapshotResponse:
+    started_at = perf_counter()
+    require_cache_target_service_scope(context, scope="cache-target:snapshot")
+    page = await stream_service.get_cache_target_reconciliation_snapshot(
+        session,
+        request_id=str(request_id),
+        consumer_id=context.consumer_id,
+        limit=page_size,
+        cursor=cursor,
+    )
+    raise_for_cache_target_status(page)
+    require_cache_target_service_scope(
+        context,
+        scope="cache-target:snapshot",
+        external_system=_getattr(page, "external_system"),
+    )
+    return _snapshot_response(
+        page,
+        started_at=started_at,
+        page_size=page_size,
     )
 
 

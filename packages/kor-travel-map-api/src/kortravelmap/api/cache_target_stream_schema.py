@@ -14,6 +14,7 @@ from kortravelmap.api.response import Meta
 __all__ = [
     "CacheTargetAckRequest",
     "CacheTargetAckRecord",
+    "CacheTargetActiveReconciliation",
     "CacheTargetAppliedReceipt",
     "CacheTargetClaimRequest",
     "CacheTargetClaimRecord",
@@ -146,6 +147,21 @@ class CacheTargetSourceMutationResponse(BaseModel):
     meta: Meta
 
 
+class CacheTargetActiveReconciliation(BaseModel):
+    """Consumer가 request-bound fixed snapshot을 찾는 active descriptor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: UUID
+    status: Literal["running"]
+    snapshot_id: UUID
+    restore_epoch: int = Field(ge=1)
+    count: int = Field(ge=0)
+    merkle_root: str = Field(min_length=64, max_length=64)
+    high_watermark_cursor: str
+    created_at: datetime
+
+
 class CacheTargetStreamControlRecord(BaseModel):
     """External-system stream control."""
 
@@ -158,6 +174,7 @@ class CacheTargetStreamControlRecord(BaseModel):
     state: CacheTargetStreamState = "active"
     consumer_id: str | None = None
     blocked_event_id: UUID | None = None
+    active_reconciliation: CacheTargetActiveReconciliation | None = None
     updated_at: datetime | None = None
 
 

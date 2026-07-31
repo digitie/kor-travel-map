@@ -197,6 +197,9 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/service/cache-target-reconciliations/{request_id}/completions": (
         RoutePolicy.SERVICE
     ),
+    "/v1/service/cache-target-reconciliations/{request_id}/snapshot": (
+        RoutePolicy.SERVICE
+    ),
     "/v1/service/cache-target-snapshots/{external_system}": RoutePolicy.SERVICE,
     "/v1/service/refresh-requests": RoutePolicy.SERVICE,
     "/v1/service/refresh-requests/{request_id}": RoutePolicy.SERVICE,

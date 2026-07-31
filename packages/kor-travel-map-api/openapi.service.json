@@ -95,6 +95,64 @@
         "title": "CacheTargetAckResponse",
         "type": "object"
       },
+      "CacheTargetActiveReconciliation": {
+        "additionalProperties": false,
+        "description": "Consumer가 request-bound fixed snapshot을 찾는 active descriptor.",
+        "properties": {
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "high_watermark_cursor": {
+            "title": "High Watermark Cursor",
+            "type": "string"
+          },
+          "merkle_root": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Merkle Root",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "restore_epoch": {
+            "minimum": 1.0,
+            "title": "Restore Epoch",
+            "type": "integer"
+          },
+          "snapshot_id": {
+            "format": "uuid",
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "running",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "snapshot_id",
+          "restore_epoch",
+          "count",
+          "merkle_root",
+          "high_watermark_cursor",
+          "created_at"
+        ],
+        "title": "CacheTargetActiveReconciliation",
+        "type": "object"
+      },
       "CacheTargetAppliedReceipt": {
         "additionalProperties": false,
         "description": "Consumer-applied event receipt.",
@@ -1384,6 +1442,16 @@
         "additionalProperties": false,
         "description": "External-system stream control.",
         "properties": {
+          "active_reconciliation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CacheTargetActiveReconciliation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "blocked_event_id": {
             "anyOf": [
               {
@@ -3216,6 +3284,110 @@
           }
         ],
         "summary": "Complete Service Cache Target Reconciliation",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/cache-target-reconciliations/{request_id}/snapshot": {
+      "get": {
+        "operationId": "get_service_cache_target_reconciliation_snapshot_v1_service_cache_target_reconciliations__request_id__snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Service Cache Target Reconciliation Snapshot",
         "tags": [
           "service-cache-target-streams"
         ]

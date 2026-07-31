@@ -27,7 +27,9 @@ from kortravelmap.infra.cache_target_outbox_repo import (
 from kortravelmap.infra.cache_target_reconciliation_repo import (
     complete_cache_target_reconciliation,
     get_cache_target_operation,
+    get_cache_target_reconciliation_snapshot,
     get_cache_target_snapshot,
+    get_cache_target_stream_discovery,
     list_cache_target_stream_statuses,
     request_cache_target_reconciliation,
 )
@@ -778,6 +780,157 @@ async def test_fixed_snapshot_pages_ignore_concurrent_committed_write(
     ]
     assert fresh.snapshot_id != first.snapshot_id
     assert fresh.count == 3
+
+
+@pytest.mark.integration
+async def test_reconciliation_discovery_pages_only_request_bound_snapshot(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "reconciliation-discovery-test"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-a",
+        event_id="9a000000-0000-0000-0000-000000000001",
+        idempotency_key="9b000000-0000-0000-0000-000000000001",
+    )
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-b",
+        event_id="9a000000-0000-0000-0000-000000000002",
+        idempotency_key="9b000000-0000-0000-0000-000000000002",
+    )
+    command_id = await _reconciliation_command(
+        migrated_session,
+        key="9c000000-0000-0000-0000-000000000001",
+    )
+    request = await request_cache_target_reconciliation(
+        migrated_session,
+        command_id=command_id,
+        external_system=system,
+        reason="discover fixed snapshot",
+    )
+    discovery = await get_cache_target_stream_discovery(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+    )
+    assert discovery is not None
+    active = discovery.active_reconciliation
+    assert active is not None
+    assert active.request_id == request.request_id
+    assert active.snapshot_id == request.snapshot_id
+    assert active.count == 2
+    assert active.merkle_root == request.expected_merkle_root
+
+    generic = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=1,
+    )
+    assert generic.snapshot_id != active.snapshot_id
+    assert generic.next_cursor is not None
+    first = await get_cache_target_reconciliation_snapshot(
+        migrated_session,
+        request_id=active.request_id,
+        consumer_id=_CONSUMER,
+        limit=1,
+    )
+    assert first.snapshot_id == active.snapshot_id
+    assert first.next_cursor is not None
+    second = await get_cache_target_reconciliation_snapshot(
+        migrated_session,
+        request_id=active.request_id,
+        consumer_id=_CONSUMER,
+        limit=1,
+        cursor=first.next_cursor,
+    )
+    assert [first.items[0].target_key, second.items[0].target_key] == [
+        "target-a",
+        "target-b",
+    ]
+    with pytest.raises(CacheTargetStreamConflict) as wrong_snapshot_cursor:
+        await get_cache_target_reconciliation_snapshot(
+            migrated_session,
+            request_id=active.request_id,
+            consumer_id=_CONSUMER,
+            limit=1,
+            cursor=generic.next_cursor,
+        )
+    assert wrong_snapshot_cursor.value.code == "reconciliation_precondition_failed"
+    with pytest.raises(CacheTargetStreamConflict) as wrong_epoch:
+        await complete_cache_target_reconciliation(
+            migrated_session,
+            request_id=active.request_id,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            snapshot_id=active.snapshot_id,
+            expected_restore_epoch=active.restore_epoch + 1,
+            actual_merkle_root=active.merkle_root,
+        )
+    assert wrong_epoch.value.code == "reconciliation_precondition_failed"
+    with pytest.raises(CacheTargetStreamConflict) as wrong_snapshot:
+        await complete_cache_target_reconciliation(
+            migrated_session,
+            request_id=active.request_id,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            snapshot_id=generic.snapshot_id,
+            expected_restore_epoch=active.restore_epoch,
+            actual_merkle_root=active.merkle_root,
+        )
+    assert wrong_snapshot.value.code == "reconciliation_precondition_failed"
+    with pytest.raises(CacheTargetStreamConflict) as wrong_request:
+        await complete_cache_target_reconciliation(
+            migrated_session,
+            request_id="9d000000-0000-0000-0000-000000000001",
+            external_system=system,
+            consumer_id=_CONSUMER,
+            snapshot_id=active.snapshot_id,
+            expected_restore_epoch=active.restore_epoch,
+            actual_merkle_root=active.merkle_root,
+        )
+    assert wrong_request.value.code == "reconciliation_precondition_failed"
+    with pytest.raises(CacheTargetStreamConflict) as wrong_consumer:
+        await get_cache_target_reconciliation_snapshot(
+            migrated_session,
+            request_id=active.request_id,
+            consumer_id="other-consumer",
+        )
+    assert wrong_consumer.value.code == "consumer_mismatch"
+
+    another_command = await _reconciliation_command(
+        migrated_session,
+        key="9c000000-0000-0000-0000-000000000002",
+    )
+    with pytest.raises(CacheTargetStreamConflict) as already_active:
+        await request_cache_target_reconciliation(
+            migrated_session,
+            command_id=another_command,
+            external_system=system,
+            reason="must not replace active request",
+        )
+    assert already_active.value.code == "reconciliation_active"
+    completed = await complete_cache_target_reconciliation(
+        migrated_session,
+        request_id=active.request_id,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        snapshot_id=active.snapshot_id,
+        expected_restore_epoch=active.restore_epoch,
+        actual_merkle_root=active.merkle_root,
+    )
+    assert completed.status == "succeeded"
+    resumed = await get_cache_target_stream_discovery(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+    )
+    assert resumed is not None
+    assert resumed.active_reconciliation is None
+    assert resumed.consumer_enabled
+    assert resumed.status == "ready"
 
 
 async def _reconciliation_command(
