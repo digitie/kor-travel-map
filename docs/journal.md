@@ -17,6 +17,17 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-31 (codex) — T-VN-H31R #909 curation provenance 완결
+
+- 주소 후보를 구조화 field·Unicode/literal hierarchy·versioned alias로 제한하고
+  `address_hint` 단독 자동 링크를 제거했다. 등대 105행 sidecar와 manifest를 결박했다.
+- migration `0072_curation_provenance`로 import batch/row와 link decision을 append-only
+  정규화했다. exact current pointer FK, legacy fail-close, admin link audit와 import receipt를
+  추가했다.
+- selective forward recovery와 Feature merge가 승인 근거를 새 decision으로 남기도록 했다.
+  duplicate loser membership은 물리 삭제 대신 revocation+archive tombstone으로 보존한다.
+- 관련 unit/API/PostgreSQL migration·curation·merge 159건, ruff, strict mypy가 통과했다.
+
 ## 2026-07-31 (codex) — PR #908 #911~#914 적대 리뷰 보강
 
 - #911: provider 적재 성공과 absence 증거를 분리했다. source 전체 관측·finding 전량 durable

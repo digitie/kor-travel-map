@@ -10,6 +10,23 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-31 (codex) — T-VN-H31R #909 구현·PostgreSQL gate 완료
+
+주소 후보를 구조화 field의 Unicode/literal hierarchy와 versioned alias로 제한하고
+`address_hint` 자동 링크를 제거했다. 등대 105행 provenance sidecar는 manifest의 SHA와
+ordered identity에 결박했다. migration `0072_curation_provenance`는 import batch/row와
+link decision을 append-only로 정규화하고 current item의 exact row/target을 composite
+deferred FK로 강제한다. 기존 link는 `legacy_unattributed`로 이관해 public에서 fail-close한다.
+
+Admin REST는 import `import_batch_id`, item provenance와 `/v1/admin/curations/link-audit`를
+제공한다. 선택적 `forward_recovery`는 대상 collection만 전진하며, Feature merge도 active
+link를 새 decision으로 master에 재승인하고 duplicate loser를 revocation+archive로 보존한다.
+관련 unit/API/PostgreSQL migration·repository·merge **159건**이 통과했고 ruff와 strict mypy도
+green이다.
+
+**다음 한 작업**: OpenAPI를 재생성하고 전체 gate·보안 감사를 통과한 exact #910 head를
+lease-safe push한 뒤 단일 적대 리뷰를 요청한다.
+
 ## 2026-07-31 (codex) — PR #908 H32R/H34R 적대 리뷰 보강 완료
 
 PR #908 사후 리뷰 #911~#914를 구현했다. stale finding close는 provider/dataset별

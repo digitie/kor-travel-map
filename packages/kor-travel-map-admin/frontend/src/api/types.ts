@@ -276,6 +276,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/curations/link-audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Audit Unattributed Curation Links
+         * @description 공개 승인에 쓸 수 없는 legacy/provenance-less current link를 감사한다.
+         */
+        get: operations["audit_unattributed_curation_links_v1_admin_curations_link_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/curations/{collection_id}": {
         parameters: {
             query?: never;
@@ -2429,6 +2449,8 @@ export interface components {
         };
         /** AdminCurationItemView */
         AdminCurationItemView: {
+            /** Accepted Link Decision Id */
+            accepted_link_decision_id: string | null;
             /** Address */
             address: {
                 [key: string]: unknown;
@@ -2461,6 +2483,8 @@ export interface components {
              * @enum {string}
              */
             curation_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+            /** Current Import Row Id */
+            current_import_row_id: string | null;
             /** Dataset Key */
             dataset_key: string | null;
             /** Edition Key */
@@ -2483,6 +2507,18 @@ export interface components {
             item_title: string | null;
             /** Lat */
             lat: number | null;
+            /** Link Actor */
+            link_actor: string | null;
+            /** Link Decided At */
+            link_decided_at: string | null;
+            /** Link Evidence */
+            link_evidence: {
+                [key: string]: unknown;
+            };
+            /** Link Match Basis */
+            link_match_basis: string | null;
+            /** Link Resolver Version */
+            link_resolver_version: string | null;
             /** Lon */
             lon: number | null;
             /** Metadata */
@@ -4876,6 +4912,8 @@ export interface components {
             collections: number;
             /** Dry Run */
             dry_run: boolean;
+            /** Import Batch Id */
+            import_batch_id: string | null;
             /** Inserted */
             inserted: number;
             /** Invalid Rows */
@@ -5050,6 +5088,44 @@ export interface components {
              * @enum {string}
              */
             status?: "candidate" | "included" | "rejected";
+        };
+        /** CurationLinkAuditData */
+        CurationLinkAuditData: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["CurationLinkAuditView"][];
+        };
+        /** CurationLinkAuditResponse */
+        CurationLinkAuditResponse: {
+            data: components["schemas"]["CurationLinkAuditData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** CurationLinkAuditView */
+        CurationLinkAuditView: {
+            /** Address Hint */
+            address_hint: string | null;
+            /** Collection Key */
+            collection_key: string;
+            /**
+             * Curation Item Id
+             * Format: uuid
+             */
+            curation_item_id: string;
+            /** Decided At */
+            decided_at: string | null;
+            /** External Component Id */
+            external_component_id: string;
+            /** External Item Id */
+            external_item_id: string;
+            /** Feature Id */
+            feature_id: string;
+            /** Match Basis */
+            match_basis: string | null;
+            /** Place Name */
+            place_name: string;
+            /** Resolver Version */
+            resolver_version: string | null;
         };
         /**
          * DagsterGraphqlError
@@ -12002,6 +12078,46 @@ export interface operations {
                 };
                 content: {
                     "text/csv": string;
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    audit_unattributed_curation_links_v1_admin_curations_link_audit_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurationLinkAuditResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */

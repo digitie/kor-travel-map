@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### curation 주소 fail-close·행별 provenance (2026-07-31, T-VN-H31R)
+
+- **DATABASE (breaking)**: migration `0072_curation_provenance`로 import batch/row와
+  accepted/revoked link decision을 append-only 정규화하고 current item을 exact row/target에
+  composite FK로 결박했다. 기존 link는 `legacy_unattributed`로 이관한다.
+- **CORRECTNESS**: `address_hint`는 preview evidence일 뿐 자동 링크 권한이 아니다.
+  구조화 주소 field의 Unicode/literal hierarchy와 versioned alias만 후보 검색에 사용하며,
+  public read는 explicit/admin/recovery accepted decision이 없는 link를 fail-close한다.
+- **API**: admin import 응답에 `import_batch_id`, item에 link provenance를 추가하고
+  `GET /v1/admin/curations/link-audit`를 제공한다.
+- **RECOVERY**: 선택적 forward recovery와 Feature merge는 새 decision을 append한다.
+  duplicate loser membership은 삭제하지 않고 revocation+archive tombstone으로 보존한다.
+
 ### 주소 finding authoritative generation·curation 링크 감사 보강 (2026-07-31, H32R/H34R)
 
 - **DATABASE**: mutable `payload.observed_run_id` sweep을 제거하고 provider/dataset scope,

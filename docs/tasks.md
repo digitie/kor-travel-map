@@ -34,7 +34,6 @@ barrier로 직렬화한다.
     [~] `T-VN-H34`(H25A/H25B 미충족 AC — 4항목 중 3 완료·1은 H35 배포 대기,
         카테고리 축 신설로 링크 결함 8건 발견) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
-    [ ] `T-VN-H31R`(#909 주소 후보 fail-close·행별 provenance 복구) →
     [x] `T-VN-H32`(주소 검증 finding 자동 close — 초기 marker, #912 generation으로 대체) →
     [x] `T-VN-H32R`(#911~#913 — authoritative observation receipt·동시 run fence·
         retention job 등록) →
@@ -848,32 +847,6 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   할 일: 등대 원천 데이터 확보·CSV 스키마 확정 → 변환 함수 + 적재 경로 → 무결성 게이트 →
   ADR-080 → 링크 판정(별도).
-
-- [ ] T-VN-H31R — **curation 주소 후보를 fail-close하고 행별 provenance를 복구한다 (#909)**
-
-  PR #907 사후 감사에서 `address::text ILIKE` 토큰 AND가 JSON field 의미와 단어 경계를
-  잃고 `%`·`_`를 SQL wildcard로 실행하며 NFC/NFD를 다르게 취급하는 P1이 재현됐다.
-  `address_hint` 단일 후보를 곧바로 durable `feature_id`로 승격하므로 preview 오탐이
-  공개 membership 오노출로 이어질 수 있다. 등대 105행의 주소 근거도 PR 집계에만 있어
-  선택적 재검증·forward recovery가 불가능하다.
-
-  이 task는 하나의 코드 PR로 다음 AC를 완결한다.
-
-  - 후보 검색은 `road`·`legal`·`admin`·`sido_name`·`sigungu_name`만 읽고 Unicode
-    normalization, literal token boundary, 시도→시군구→읍면동→리 hierarchy와 versioned
-    행정명 alias를 적용한다. JSON 직렬화·다른 field substring·SQL wildcard는 검색하지 않는다.
-  - `address_hint`는 side-effect 없는 preview evidence일 뿐 자동 링크 권한이 아니다.
-    CSV explicit `feature_id` 또는 admin의 검토 완료 decision만 current link가 될 수 있고,
-    0건·다건·후보 상한 초과·hierarchy 충돌은 모두 미연결로 닫는다.
-  - import batch/row identity와 append-only link decision을 DB에 보존한다. 각 current item은
-    exact import row와 accepted decision을 가리키며 actor/time/basis/resolver/evidence를
-    남긴다. bad import/decision만 revoke·forward replay할 수 있고 다른 item은 되감지 않는다.
-  - `lighthouse-stamp-tour.csv` 105행마다 별도 provenance JSON을 두고 source type/URL,
-    조회 시각, 원 입력 좌표, 실제 probe/대체 좌표, 원 응답 주소, 정규화 근거와 신뢰도를
-    기계 검증한다. CSV·provenance SHA와 ordered identity를 manifest에 함께 결박한다.
-  - wrong-field/단어 내부/%/_/NFC-NFD/구·신 행정명/동명이인/멱등 재적재/선택적 recovery/
-    public 오노출/PostGIS EXPLAIN을 회귀 gate로 둔다. migration 번호는 병행 PR #906 landing
-    뒤 latest main 단일 head에서 확정한다.
 
 ### T-VN-H22 — 0065 curation owner quarantine 재분류
 
