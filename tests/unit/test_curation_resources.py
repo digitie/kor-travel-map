@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from kortravelmap.curation_import import CURATION_CSV_HEADERS, parse_curation_csv
+from kortravelmap.curation_provenance import parse_curation_provenance
 
 pytestmark = pytest.mark.unit
 
@@ -21,7 +22,7 @@ _RESOURCE_DIR = _ROOT / "resources" / "curations"
 def test_curation_resource_manifest_and_csv_contract() -> None:
     manifest = json.loads((_RESOURCE_DIR / "manifest.json").read_text(encoding="utf-8"))
 
-    assert manifest["schema_version"] == 2
+    assert manifest["schema_version"] == 3
     assert manifest["encoding"] == "UTF-8"
     assert manifest["delimiter"] == ","
     assert manifest["csv_columns"] == list(CURATION_CSV_HEADERS)
@@ -73,3 +74,75 @@ def test_curation_resource_manifest_and_csv_contract() -> None:
                     f"component-{ordinal:02d}"
                     for ordinal in range(1, len(components) + 1)
                 ]
+
+
+def test_lighthouse_provenance_is_row_complete_and_manifest_bound() -> None:
+    manifest = json.loads((_RESOURCE_DIR / "manifest.json").read_text(encoding="utf-8"))
+    lighthouse = next(
+        entry for entry in manifest["files"] if entry["path"] == "lighthouse-stamp-tour.csv"
+    )
+    provenance_path = _RESOURCE_DIR / lighthouse["provenance_path"]
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+
+    assert hashlib.sha256(provenance_path.read_bytes()).hexdigest() == lighthouse[
+        "provenance_sha256"
+    ]
+    assert provenance["schema_version"] == 1
+    assert provenance["source_csv_sha256"] == lighthouse["sha256"]
+    assert len(provenance["rows"]) == lighthouse["expected_rows"] == 105
+    parsed_provenance = parse_curation_provenance(
+        csv_content=(_RESOURCE_DIR / lighthouse["path"]).read_bytes(),
+        provenance_content=provenance_path.read_bytes(),
+    )
+    assert len(parsed_provenance.rows) == 105
+
+    with (_RESOURCE_DIR / lighthouse["path"]).open(
+        encoding="utf-8", newline=""
+    ) as stream:
+        csv_rows = list(csv.DictReader(stream))
+    csv_identities = [
+        (
+            row["collection_key"],
+            row["source_item_key"],
+            row["source_component_key"],
+        )
+        for row in csv_rows
+    ]
+    evidence_identities = [
+        (
+            row["collection_key"],
+            row["source_item_key"],
+            row["source_component_key"],
+        )
+        for row in provenance["rows"]
+    ]
+    assert evidence_identities == csv_identities
+
+    for row in provenance["rows"]:
+        assert row["source_type"]
+        assert row["source_urls"]
+        assert row["observed_at"].endswith(("+09:00", "Z"))
+        assert row["returned_address"]
+        assert row["normalized_address"]
+        assert row["confidence"] in {"medium", "medium-high", "high"}
+        assert row["derivation"] in {
+            "vworld_direct",
+            "vworld_probe",
+            "vworld_forward",
+            "vworld_direct_extra",
+            "vworld_override",
+            "document",
+        }
+        if row["derivation"] in {
+            "vworld_direct",
+            "vworld_probe",
+            "vworld_direct_extra",
+            "vworld_override",
+        }:
+            assert row["input_coordinate"] is not None
+        if row["derivation"] == "vworld_probe":
+            assert row["probe_coordinate"] is not None
+            assert row["probe_offset_m"] > 0
+            assert row["resolved_coordinate"] == row["probe_coordinate"]
+        if row["derivation"] == "vworld_forward":
+            assert row["resolved_coordinate"] is not None

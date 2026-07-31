@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -13,12 +15,15 @@ from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 from fastapi.testclient import TestClient
-from kortravelmap.curation_import import CURATION_CSV_HEADERS
+from kortravelmap.curation_import import CURATION_CSV_HEADERS, parse_curation_csv
 from kortravelmap.infra.curation_repo import (
     CurationCollection,
+    CurationImportBatch,
     CurationImportPlan,
     CurationImportResult,
+    CurationImportRowReceipt,
     CurationItem,
+    CurationLinkAudit,
     FeatureCurationGroup,
     FeatureMatch,
 )
@@ -126,6 +131,13 @@ def _item(*, item_id: str, edition: str) -> CurationItem:
         curation_relation="nearby_option",
         reuse_policy="manual_review",
         metadata={"edition": edition},
+        current_import_row_id=None,
+        accepted_link_decision_id=None,
+        link_match_basis=None,
+        link_resolver_version=None,
+        link_evidence={},
+        link_actor=None,
+        link_decided_at=None,
         created_by="fixture-creator",
         updated_by="fixture-updater",
         created_at=now,
@@ -172,6 +184,7 @@ def _csv_content(
     distinct_source_items: bool = False,
     official_ordinal: str = "",
     sort_order: str = "",
+    official_lighthouse: bool = False,
 ) -> bytes:
     values = dict.fromkeys(CURATION_CSV_HEADERS, "")
     values.update(
@@ -193,6 +206,14 @@ def _csv_content(
             "sort_order": sort_order,
         }
     )
+    if official_lighthouse:
+        values.update(
+            {
+                "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+                "provider": "korea-institute-of-aids-to-navigation",
+                "dataset_key": "lighthouse-stamp-tour-season-5",
+            }
+        )
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=CURATION_CSV_HEADERS)
     writer.writeheader()
@@ -205,6 +226,39 @@ def _csv_content(
             values["source_component_key"] = f"component-{index:02d}"
         writer.writerow(values)
     return output.getvalue().encode()
+
+
+def _provenance_content(csv_content: bytes) -> bytes:
+    row = parse_curation_csv(csv_content).rows[0]
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "source_csv_sha256": hashlib.sha256(csv_content).hexdigest(),
+            "rows": [
+                {
+                    "collection_key": row.collection_key,
+                    "source_item_key": row.source_item_key,
+                    "source_component_key": row.source_component_key,
+                    "source_type": "official_document",
+                    "derivation": "document",
+                    "source_urls": ["https://example.test/official-document"],
+                    "observed_at": "2026-07-31T09:00:00+09:00",
+                    "input_coordinate": None,
+                    "probe_coordinate": None,
+                    "resolved_coordinate": None,
+                    "probe_offset_m": 0,
+                    "returned_address": [
+                        {"kind": "document", "text": "울산광역시 울주군"}
+                    ],
+                    "normalized_address": "울산광역시 울주군",
+                    "confidence": "high",
+                    "source_reference": "공식 문서 1쪽",
+                    "rationale": "공식 주소 원문",
+                }
+            ],
+        },
+        ensure_ascii=False,
+    ).encode()
 
 
 @pytest.mark.unit
@@ -227,6 +281,7 @@ def test_csv_preview_and_commit_keep_unresolved_official_item(
                 _item(item_id="removed-2023", edition="2023-2024"),
                 _item(item_id="removed-2025", edition="2025-2026"),
             ),
+            "import_batch_id": "55555555-5555-4555-8555-555555555555",
         }
 
     async def _preview(_session: object, **_kwargs: Any) -> CurationImportPlan:
@@ -260,6 +315,267 @@ def test_csv_preview_and_commit_keep_unresolved_official_item(
     assert committed_data["removed"] == 2
     assert len(committed_data["removals"]) == committed_data["removed"]
     assert committed_data["collections"] == 1
+    assert committed_data["import_batch_id"] == "55555555-5555-4555-8555-555555555555"
+
+
+@pytest.mark.unit
+def test_official_lighthouse_import_requires_provenance_sidecar(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    matches = AsyncMock()
+    monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", matches)
+
+    response = client.post(
+        "/v1/admin/curations/import",
+        params={"dry_run": "false"},
+        files={
+            "file": (
+                "lighthouse-stamp-tour.csv",
+                _csv_content(official_lighthouse=True),
+                "text/csv",
+            )
+        },
+    )
+
+    assert response.status_code == 422
+    assert "provenance_file" in response.json()["detail"]
+    matches.assert_not_awaited()
+
+
+@pytest.mark.unit
+def test_official_lighthouse_import_rejects_mismatched_sidecar(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    content = _csv_content(official_lighthouse=True)
+    provenance = json.loads(_provenance_content(content))
+    provenance["source_csv_sha256"] = "0" * 64
+    matches = AsyncMock()
+    monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", matches)
+
+    response = client.post(
+        "/v1/admin/curations/import",
+        params={"dry_run": "false"},
+        files={
+            "file": ("lighthouse-stamp-tour.csv", content, "text/csv"),
+            "provenance_file": (
+                "lighthouse-stamp-tour.provenance.json",
+                json.dumps(provenance).encode(),
+                "application/json",
+            ),
+        },
+    )
+
+    assert response.status_code == 422
+    assert "CSV와 일치하지 않습니다" in response.json()["detail"]
+    matches.assert_not_awaited()
+
+
+@pytest.mark.unit
+def test_official_lighthouse_import_persists_validated_row_provenance(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    content = _csv_content(official_lighthouse=True)
+    sidecar = _provenance_content(content)
+
+    async def _matches(_session: object, **_kwargs: Any) -> dict[int, tuple[Any, ...]]:
+        return {2: ()}
+
+    async def _preview(_session: object, **_kwargs: Any) -> CurationImportPlan:
+        return CurationImportPlan(collections=1, inserted=1, updated=0, removals=())
+
+    async def _import(
+        _session: object,
+        *,
+        rows: tuple[Any, ...],
+        **_kwargs: Any,
+    ) -> CurationImportResult:
+        assert rows[0].provenance == {
+            "schema_version": 1,
+            "source_csv_sha256": hashlib.sha256(content).hexdigest(),
+            "row": {
+                "collection_key": (
+                    "lighthouse-stamp-tour:healing-lighthouses:season-5"
+                ),
+                "source_item_key": "healing:ganjeolgot",
+                "source_component_key": "primary",
+                "source_type": "official_document",
+                "derivation": "document",
+                "source_urls": ["https://example.test/official-document"],
+                "observed_at": "2026-07-31T09:00:00+09:00",
+                "input_coordinate": None,
+                "probe_coordinate": None,
+                "resolved_coordinate": None,
+                "probe_offset_m": 0,
+                "returned_address": [
+                    {"kind": "document", "text": "울산광역시 울주군"}
+                ],
+                "normalized_address": "울산광역시 울주군",
+                "confidence": "high",
+                "source_reference": "공식 문서 1쪽",
+                "rationale": "공식 주소 원문",
+            },
+        }
+        return {
+            "rows": 1,
+            "collections": 1,
+            "inserted": 1,
+            "updated": 0,
+            "removed": 0,
+            "removals": (),
+            "import_batch_id": "55555555-5555-4555-8555-555555555555",
+        }
+
+    monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
+    monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
+    monkeypatch.setattr(module.curation_repo, "import_curation_rows", _import)
+
+    response = client.post(
+        "/v1/admin/curations/import",
+        params={"dry_run": "false"},
+        files={
+            "file": ("lighthouse-stamp-tour.csv", content, "text/csv"),
+            "provenance_file": (
+                "lighthouse-stamp-tour.provenance.json",
+                sidecar,
+                "application/json",
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["import_batch_id"] == (
+        "55555555-5555-4555-8555-555555555555"
+    )
+
+
+@pytest.mark.unit
+def test_admin_link_audit_exposes_fail_closed_items(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    decided_at = datetime(2026, 7, 31, tzinfo=UTC)
+    audit = AsyncMock(
+        return_value=(
+            (
+                CurationLinkAudit(
+                    curation_item_id=ITEM_ID,
+                    collection_key="lighthouse:healing",
+                    external_item_id="healing:ganjeolgot",
+                    external_component_id="primary",
+                    feature_id="feature:legacy-link",
+                    place_name="간절곶등대",
+                    address_hint="울산광역시 울주군",
+                    match_basis="legacy_unattributed",
+                    resolver_version="pre-0072-unknown",
+                    decided_at=decided_at,
+                ),
+            ),
+            "opaque-next",
+        )
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "list_unattributed_curation_links_page",
+        audit,
+    )
+
+    response = client.get("/v1/admin/curations/link-audit", params={"limit": 25})
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "items": [
+            {
+                "curation_item_id": ITEM_ID,
+                "collection_key": "lighthouse:healing",
+                "external_item_id": "healing:ganjeolgot",
+                "external_component_id": "primary",
+                "feature_id": "feature:legacy-link",
+                "place_name": "간절곶등대",
+                "address_hint": "울산광역시 울주군",
+                "match_basis": "legacy_unattributed",
+                "resolver_version": "pre-0072-unknown",
+                "decided_at": "2026-07-31T00:00:00Z",
+            }
+        ],
+        "count": 1,
+        "has_more": True,
+        "next_cursor": "opaque-next",
+    }
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs == {"limit": 25, "cursor": None}
+
+
+@pytest.mark.unit
+def test_admin_import_batch_and_current_row_expose_durable_provenance(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    imported_at = datetime(2026, 7, 31, 1, 2, 3, tzinfo=UTC)
+    batch_id = "55555555-5555-4555-8555-555555555555"
+    row_id = "66666666-6666-4666-8666-666666666666"
+    row = CurationImportRowReceipt(
+        import_row_id=row_id,
+        import_batch_id=batch_id,
+        curation_item_id=ITEM_ID,
+        row_number=2,
+        source_row_sha256="a" * 64,
+        row_payload={"place_name": "간절곶등대"},
+        provenance={
+            "schema_version": 1,
+            "source_csv_sha256": "b" * 64,
+            "row": {"source_type": "official_document"},
+        },
+        imported_at=imported_at,
+    )
+    batch = CurationImportBatch(
+        import_batch_id=batch_id,
+        content_sha256="b" * 64,
+        batch_kind="csv_upload",
+        row_count=1,
+        actor="admin:test",
+        metadata={"schema_version": 1},
+        imported_at=imported_at,
+    )
+    get_batch = AsyncMock(return_value=(batch, (row,)))
+    get_current = AsyncMock(return_value=row)
+    monkeypatch.setattr(module.curation_repo, "get_curation_import_batch", get_batch)
+    monkeypatch.setattr(
+        module.curation_repo,
+        "get_current_curation_import_row",
+        get_current,
+    )
+
+    batch_response = client.get(
+        f"/v1/admin/curations/import-batches/{batch_id}"
+    )
+    row_response = client.get(
+        f"/v1/admin/curations/items/{ITEM_ID}/current-import-row"
+    )
+
+    assert batch_response.status_code == 200
+    assert batch_response.json()["data"]["content_sha256"] == "b" * 64
+    assert batch_response.json()["data"]["rows"][0]["row_payload"] == {
+        "place_name": "간절곶등대"
+    }
+    assert batch_response.json()["data"]["rows"][0]["provenance"] == row.provenance
+    assert row_response.status_code == 200
+    assert row_response.json()["data"]["import_row_id"] == row_id
+    assert row_response.json()["data"]["provenance"] == row.provenance
+    assert get_batch.await_args.kwargs == {"import_batch_id": batch_id}
+    assert get_current.await_args.kwargs == {"curation_item_id": ITEM_ID}
 
 
 @pytest.mark.unit
@@ -387,9 +703,16 @@ def test_csv_accepts_mixed_component_resolution(
         )
 
     async def _import(
-        _session: object, *, rows: tuple[Any, ...], actor: str
+        _session: object,
+        *,
+        rows: tuple[Any, ...],
+        actor: str,
+        source_content_sha256: str,
+        batch_kind: str,
     ) -> CurationImportResult:
         assert actor == "local-dev"
+        assert len(source_content_sha256) == 64
+        assert batch_kind == "csv_upload"
         return {
             "rows": len(rows),
             "collections": 1,
@@ -397,6 +720,7 @@ def test_csv_accepts_mixed_component_resolution(
             "updated": 0,
             "removed": 0,
             "removals": (),
+            "import_batch_id": "55555555-5555-4555-8555-555555555555",
         }
 
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
@@ -687,7 +1011,13 @@ def test_curation_paths_are_in_openapi(client: TestClient) -> None:
     assert "/v1/curations" in paths
     assert "/v1/curations/features/{feature_id}" in paths
     assert "/v1/admin/curations/import" in paths
+    assert "/v1/admin/curations/import-batches/{import_batch_id}" in paths
     assert "/v1/admin/curations/import-template.csv" in paths
+    assert (
+        "/v1/admin/curations/items/{curation_item_id}/current-import-row"
+        in paths
+    )
+    assert "/v1/admin/curations/link-audit" in paths
     assert "/v1/admin/curations/{collection_id}/items/{curation_item_id}" in paths
     collection_parameter = next(
         parameter
@@ -922,10 +1252,10 @@ def test_blank_feature_id_never_autolinks_on_single_name_match(
 
 
 @pytest.mark.unit
-def test_blank_feature_id_with_address_hint_keeps_unique_match_contract(
+def test_blank_feature_id_with_address_hint_requires_explicit_review(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """이름+주소 유일 후보는 ADR-063 계약대로 자동 링크한다."""
+    """이름+주소 유일 후보도 preview로만 보이고 자동 링크하지 않는다."""
     from kortravelmap.api.routers import curations as module
 
     async def _matches(_session: object, **_kwargs: Any) -> dict[int, tuple[Any, ...]]:
@@ -959,9 +1289,14 @@ def test_blank_feature_id_with_address_hint_keeps_unique_match_contract(
 
     assert response.status_code == 200
     row = response.json()["data"]["items"][0]
-    assert row["resolved_feature_id"] == "feature:ganjeolgot"
-    assert row["status"] == "valid"
-    assert row["issues"] == []
+    assert row["resolved_feature_id"] is None
+    assert row["status"] == "review_required"
+    assert [issue["code"] for issue in row["issues"]] == [
+        "address_candidate_requires_review"
+    ]
+    assert [candidate["feature_id"] for candidate in row["candidates"]] == [
+        "feature:ganjeolgot"
+    ]
 
 
 @pytest.mark.unit

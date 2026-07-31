@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import unicodedata
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -37,12 +38,14 @@ from kortravelmap.infra.curation_repo import (
     list_curation_collections,
     list_curation_items_by_feature_ids,
     list_feature_curation_groups,
+    list_unattributed_curation_links,
     preview_curation_import,
     resolve_feature_matches,
     update_curation_item,
     upsert_curation_theme,
 )
 from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -359,6 +362,7 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         "updated": 0,
         "removed": 0,
         "removals": (),
+        "import_batch_id": first["import_batch_id"],
     }
     assert second == {
         "rows": 3,
@@ -367,6 +371,7 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         "updated": 0,
         "removed": 0,
         "removals": (),
+        "import_batch_id": second["import_batch_id"],
     }
     assert no_op_plan.inserted == 0
     assert no_op_plan.updated == 0
@@ -383,6 +388,7 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         "updated": 1,
         "removed": 1,
         "removals": replacement_plan.removals,
+        "import_batch_id": replaced["import_batch_id"],
     }
     counts = (
         await migrated_session.execute(
@@ -411,6 +417,402 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         )
     ).scalar_one()
     assert rematched == "feature:import-b"
+
+
+async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
+    migrated_session: AsyncSession,
+) -> None:
+    """Import/수동 승인 근거와 selective forward recovery를 실 DB에 고정한다."""
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, marker_icon, marker_color
+            ) VALUES
+                ('feature:provenance-a', 'place', '근거 장소 A', '01070100',
+                 'place', 'P-01'),
+                ('feature:provenance-b', 'place', '근거 장소 B', '01070100',
+                 'place', 'P-01'),
+                ('feature:provenance-c', 'place', '복구 장소 C', '01070100',
+                 'place', 'P-01'),
+                ('feature:provenance-unsafe', 'place', '미승인 장소', '01070100',
+                 'place', 'P-01')
+            """
+        )
+    )
+    common = {
+        "theme_slug": "provenance-test",
+        "theme_name": "큐레이션 근거 테스트",
+        "theme_group": "test",
+        "edition_key": "2026",
+        "provider": "provenance-provider",
+        "dataset_key": "provenance-dataset",
+        "source_name": "근거 출처",
+        "source_url": None,
+        "source_component_key": "primary",
+        "address_hint": "서울특별시 종로구",
+        "sort_order": 1,
+        "item_title": None,
+        "item_summary": None,
+        "metadata": {},
+    }
+    row_a = ResolvedCurationImportRow(
+        row_number=2,
+        collection_key="provenance:a",
+        title="근거 목록 A",
+        source_item_key="item-a",
+        feature_id="feature:provenance-a",
+        place_name="근거 장소 A",
+        provenance={
+            "sidecar_schema": 1,
+            "address_fields": {"sido": "서울특별시", "sigungu": "종로구"},
+        },
+        **common,
+    )
+    row_b = ResolvedCurationImportRow(
+        row_number=3,
+        collection_key="provenance:b",
+        title="근거 목록 B",
+        source_item_key="item-b",
+        feature_id="feature:provenance-b",
+        place_name="근거 장소 B",
+        provenance={"sidecar_schema": 1},
+        **common,
+    )
+    first = await import_curation_rows(
+        migrated_session,
+        rows=(row_a, row_b),
+        actor="provenance-importer",
+        source_content_sha256="a" * 64,
+        batch_kind="csv_upload",
+    )
+    assert first["import_batch_id"] is not None
+
+    first_state = {
+        str(row["external_item_id"]): dict(row)
+        for row in (
+            (
+                await migrated_session.execute(
+                    text(
+                        """
+                        SELECT
+                            item.external_item_id,
+                            item.curation_item_id::text AS curation_item_id,
+                            item.current_import_row_id::text AS import_row_id,
+                            item.accepted_link_decision_id::text AS decision_id,
+                            decision.match_basis,
+                            decision.resolver_version,
+                            decision.actor,
+                            decision.evidence,
+                            import_row.provenance
+                        FROM feature.curation_items AS item
+                        JOIN feature.curation_link_decisions AS decision
+                          ON decision.decision_id =
+                             item.accepted_link_decision_id
+                        JOIN feature.curation_import_rows AS import_row
+                          ON import_row.import_row_id =
+                             item.current_import_row_id
+                        WHERE item.external_item_id IN ('item-a', 'item-b')
+                        ORDER BY item.external_item_id
+                        """
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+    }
+    assert first_state["item-a"]["match_basis"] == "csv_explicit_feature_id"
+    assert first_state["item-a"]["resolver_version"] == "explicit-feature-id-v1"
+    assert first_state["item-a"]["actor"] == "provenance-importer"
+    assert first_state["item-a"]["evidence"]["requested_feature_id"] == (
+        "feature:provenance-a"
+    )
+    assert first_state["item-a"]["provenance"]["address_fields"] == {
+        "sido": "서울특별시",
+        "sigungu": "종로구",
+    }
+    batch = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT content_sha256, batch_kind, row_count, actor
+                    FROM feature.curation_import_batches
+                    WHERE import_batch_id = CAST(:batch_id AS uuid)
+                    """
+                ),
+                {"batch_id": first["import_batch_id"]},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert dict(batch) == {
+        "content_sha256": "a" * 64,
+        "batch_kind": "csv_upload",
+        "row_count": 2,
+        "actor": "provenance-importer",
+    }
+    immutable_history = (
+        (
+            "curation_import_batches",
+            "import_batch_id",
+            str(first["import_batch_id"]),
+        ),
+        (
+            "curation_import_rows",
+            "import_row_id",
+            first_state["item-a"]["import_row_id"],
+        ),
+        (
+            "curation_link_decisions",
+            "decision_id",
+            first_state["item-a"]["decision_id"],
+        ),
+    )
+    for table_name, key_name, key_value in immutable_history:
+        for statement in (
+            f"UPDATE feature.{table_name} "
+            f"SET {key_name} = {key_name} "
+            f"WHERE {key_name} = CAST(:key_value AS uuid)",
+            f"DELETE FROM feature.{table_name} "
+            f"WHERE {key_name} = CAST(:key_value AS uuid)",
+        ):
+            with pytest.raises(DBAPIError, match="append-only"):
+                async with migrated_session.begin_nested():
+                    await migrated_session.execute(
+                        text(statement),
+                        {"key_value": key_value},
+                    )
+    no_truncate_triggers = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT array_agg(trigger.tgname ORDER BY trigger.tgname)
+                FROM pg_trigger AS trigger
+                JOIN pg_class AS relation
+                  ON relation.oid = trigger.tgrelid
+                JOIN pg_namespace AS namespace
+                  ON namespace.oid = relation.relnamespace
+                WHERE namespace.nspname = 'feature'
+                  AND relation.relname IN (
+                      'curation_import_batches',
+                      'curation_import_rows',
+                      'curation_link_decisions'
+                  )
+                  AND trigger.tgname LIKE '%_no_truncate'
+                  AND NOT trigger.tgisinternal
+                """
+            )
+        )
+    ).scalar_one()
+    assert no_truncate_triggers == [
+        "trg_curation_import_batches_no_truncate",
+        "trg_curation_import_rows_no_truncate",
+        "trg_curation_link_decisions_no_truncate",
+    ]
+    batch_delete_action = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT constraint_name, delete_rule
+                FROM information_schema.referential_constraints
+                WHERE constraint_schema = 'feature'
+                  AND constraint_name = 'fk_curation_import_rows_batch'
+                """
+            )
+        )
+    ).one()
+    assert batch_delete_action == (
+        "fk_curation_import_rows_batch",
+        "RESTRICT",
+    )
+
+    decision_insert = """
+        INSERT INTO feature.curation_link_decisions (
+            decision_id,
+            curation_item_id,
+            feature_id,
+            import_row_id,
+            decision_kind,
+            match_basis,
+            resolver_version,
+            evidence,
+            actor,
+            supersedes_decision_id
+        ) VALUES (
+            CAST(:decision_id AS uuid),
+            CAST(:curation_item_id AS uuid),
+            :feature_id,
+            CAST(:import_row_id AS uuid),
+            'accepted',
+            'forward_recovery',
+            'same-item-fk-test-v1',
+            '{}'::jsonb,
+            'same-item-fk-test',
+            CAST(:supersedes_decision_id AS uuid)
+        )
+    """
+    with pytest.raises(DBAPIError, match="fk_curation_link_decisions_import_row"):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(decision_insert),
+                {
+                    "decision_id": str(uuid4()),
+                    "curation_item_id": first_state["item-a"]["curation_item_id"],
+                    "feature_id": "feature:provenance-a",
+                    "import_row_id": first_state["item-b"]["import_row_id"],
+                    "supersedes_decision_id": None,
+                },
+            )
+    with pytest.raises(DBAPIError, match="fk_curation_link_decisions_supersedes"):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(decision_insert),
+                {
+                    "decision_id": str(uuid4()),
+                    "curation_item_id": first_state["item-a"]["curation_item_id"],
+                    "feature_id": "feature:provenance-a",
+                    "import_row_id": first_state["item-a"]["import_row_id"],
+                    "supersedes_decision_id": first_state["item-b"]["decision_id"],
+                },
+            )
+    self_decision_id = str(uuid4())
+    with pytest.raises(DBAPIError, match="CheckViolationError"):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(decision_insert),
+                {
+                    "decision_id": self_decision_id,
+                    "curation_item_id": first_state["item-a"]["curation_item_id"],
+                    "feature_id": "feature:provenance-a",
+                    "import_row_id": first_state["item-a"]["import_row_id"],
+                    "supersedes_decision_id": self_decision_id,
+                },
+            )
+
+    recovered_row_a = replace(
+        row_a,
+        feature_id="feature:provenance-c",
+        provenance={"recovery_ticket": "#909"},
+    )
+    recovery = await import_curation_rows(
+        migrated_session,
+        rows=(recovered_row_a,),
+        actor="recovery-operator",
+        source_content_sha256="b" * 64,
+        batch_kind="forward_recovery",
+    )
+    assert recovery["import_batch_id"] is not None
+    recovered_state = (
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT
+                        item.feature_id,
+                        item.current_import_row_id::text AS import_row_id,
+                        item.accepted_link_decision_id::text AS decision_id,
+                        decision.match_basis,
+                        decision.supersedes_decision_id::text AS supersedes
+                    FROM feature.curation_items AS item
+                    JOIN feature.curation_link_decisions AS decision
+                      ON decision.decision_id =
+                         item.accepted_link_decision_id
+                    WHERE item.external_item_id = 'item-a'
+                    """
+                )
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert recovered_state["feature_id"] == "feature:provenance-c"
+    assert recovered_state["match_basis"] == "forward_recovery"
+    assert recovered_state["import_row_id"] != first_state["item-a"]["import_row_id"]
+    assert recovered_state["decision_id"] != first_state["item-a"]["decision_id"]
+    assert recovered_state["supersedes"] == first_state["item-a"]["decision_id"]
+
+    untouched_b = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT
+                    current_import_row_id::text,
+                    accepted_link_decision_id::text
+                FROM feature.curation_items
+                WHERE external_item_id = 'item-b'
+                """
+            )
+        )
+    ).one()
+    assert untouched_b == (
+        first_state["item-b"]["import_row_id"],
+        first_state["item-b"]["decision_id"],
+    )
+
+    collection_a_id = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT collection_id::text
+                FROM feature.curation_collections
+                WHERE collection_key = 'provenance:a'
+                """
+            )
+        )
+    ).scalar_one()
+    unsafe_item = (
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO feature.curation_items (
+                    collection_id, feature_id, external_item_id,
+                    place_name, status
+                ) VALUES (
+                    CAST(:collection_id AS uuid),
+                    'feature:provenance-unsafe',
+                    'unsafe-item',
+                    '미승인 장소',
+                    'included'
+                )
+                RETURNING curation_item_id::text
+                """
+            ),
+            {"collection_id": collection_a_id},
+        )
+    ).scalar_one()
+    audits = await list_unattributed_curation_links(migrated_session)
+    assert [audit.curation_item_id for audit in audits] == [unsafe_item]
+    assert (
+        await get_feature_curation_group(
+            migrated_session,
+            feature_id="feature:provenance-unsafe",
+            public_only=True,
+        )
+        is None
+    )
+
+    approved = await update_curation_item(
+        migrated_session,
+        collection_id=collection_a_id,
+        curation_item_id=unsafe_item,
+        updates={"feature_id": "feature:provenance-unsafe"},
+        actor="manual-reviewer",
+    )
+    assert approved is not None
+    assert approved.link_match_basis == "admin_review"
+    assert approved.link_actor == "manual-reviewer"
+    assert await list_unattributed_curation_links(migrated_session) == ()
+    assert (
+        await get_feature_curation_group(
+            migrated_session,
+            feature_id="feature:provenance-unsafe",
+            public_only=True,
+        )
+        is not None
+    )
 
 
 async def test_authoritative_reimport_preserves_operator_curation_overrides(
@@ -2638,24 +3040,11 @@ async def test_concurrent_import_returns_the_items_actually_removed(
         async with migrated_engine.begin() as connection:
             await connection.execute(
                 text(
-                    "DELETE FROM feature.curation_collections "
+                    "UPDATE feature.curation_collections "
+                    "SET status = 'archived', archived_at = now() "
                     "WHERE collection_key = :collection_key"
                 ),
                 {"collection_key": common["collection_key"]},
-            )
-            await connection.execute(
-                text(
-                    "DELETE FROM feature.curated_sources "
-                    "WHERE provider = :provider AND dataset_key = :dataset_key"
-                ),
-                {
-                    "provider": common["provider"],
-                    "dataset_key": common["dataset_key"],
-                },
-            )
-            await connection.execute(
-                text("DELETE FROM feature.curated_themes WHERE theme_slug = :theme_slug"),
-                {"theme_slug": common["theme_slug"]},
             )
 
 
@@ -2778,28 +3167,26 @@ async def test_new_collection_create_add_does_not_deadlock_import(
         await setup.close()
         await creator.close()
         await importer.close()
-        async with migrated_engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "DELETE FROM feature.curation_collections "
-                    "WHERE collection_key = :collection_key"
-                ),
-                {"collection_key": collection_key},
+        async with AsyncSession(
+            migrated_engine, expire_on_commit=False
+        ) as cleanup, cleanup.begin():
+            await truncate_committed_test_rows(
+                cleanup,
+                "TRUNCATE feature.features RESTART IDENTITY CASCADE",
             )
-            await connection.execute(
+            await cleanup.execute(
                 text(
                     "DELETE FROM feature.curated_sources "
-                    "WHERE provider = :provider AND dataset_key = 'dataset'"
+                    "WHERE provider = :provider"
                 ),
                 {"provider": provider},
             )
-            await connection.execute(
-                text("DELETE FROM feature.curated_themes WHERE theme_slug = :theme_slug"),
+            await cleanup.execute(
+                text(
+                    "DELETE FROM feature.curated_themes "
+                    "WHERE theme_slug = :theme_slug"
+                ),
                 {"theme_slug": theme_slug},
-            )
-            await connection.execute(
-                text("DELETE FROM feature.features WHERE feature_id = :feature_id"),
-                {"feature_id": feature_id},
             )
 
 
@@ -3155,6 +3542,7 @@ async def test_import_adopts_migrated_legacy_components_without_losing_state(
         "updated": 2,
         "removed": 0,
         "removals": (),
+        "import_batch_id": adopted["import_batch_id"],
     }
     after_rows = (
         (
@@ -3713,7 +4101,9 @@ async def test_feature_curation_lookup_uses_membership_index(
             names.update(index_names(child))
         return names
 
-    assert "idx_curation_items_feature_status_collection" in index_names(plan)
+    public_lookup_indexes = index_names(plan)
+    assert "idx_curation_items_feature_status_collection" in public_lookup_indexes
+    assert "idx_curation_link_decisions_item_time" in public_lookup_indexes
 
     match_plan = (
         await migrated_session.execute(
@@ -3739,29 +4129,26 @@ async def test_feature_curation_lookup_uses_membership_index(
 async def test_address_hint_matches_split_jsonb_fields(
     migrated_session: AsyncSession,
 ) -> None:
-    """다중 토큰 ``address_hint``가 분리 저장된 address jsonb에도 매칭돼야 한다 (T-VN-H31).
-
-    이전 리졸버는 ``f.address::text ILIKE '%' || hint || '%'``로 **직렬화 jsonb에 통짜
-    substring**을 걸었다. 그런데 address jsonb는 ``sido_name``·``sigungu_name``·``admin``을
-    **분리 저장**하므로 ``'울산광역시 울주군 서생면'`` 같은 hint는 어떤 행에서도 연속
-    부분문자열이 아니다 — **상세할수록 매칭이 안 되는 역전**이 있었다.
-
-    실측 근거: ``feature.features``의 8%는 ``road``/``legal``이 둘 다 null이고 관광 Feature는
-    그 비율이 더 높다. 도로명이든 지번이든 토큰이 2개 이상이면 같은 벽에 막힌다.
-
-    이 테스트는 그 역전을 고정한다 — 토큰이 흩어져 있어도 **전부 포함**하면 매칭되고,
-    토큰이 하나라도 어긋나면 매칭되지 않는다.
-    """
+    """주소 후보는 authoritative field의 정규화된 literal hierarchy만 일치시킨다."""
     await migrated_session.execute(
         text(
             """
             INSERT INTO feature.features (
                 feature_id, kind, name, category, marker_icon, marker_color, address
-            ) VALUES (
-                'feature:h31-split-address', 'place', '토큰분리 등대', '01050400',
-                'place', 'P-09',
-                '{"sido_name":"울산광역시","sigungu_name":"울주군","admin":"서생면"}'::jsonb
-            )
+            ) VALUES
+                (
+                    'feature:h31-split-address', 'place', '토큰분리 등대', '01050400',
+                    'place', 'P-09',
+                    '{"sido_name":"울산광역시","sigungu_name":"울주군",'
+                    '"admin":"울산광역시 울주군 서생면"}'::jsonb
+                ),
+                (
+                    'feature:h31-wrong-field', 'place', '토큰분리 등대', '01050400',
+                    'place', 'P-09',
+                    '{"sido_name":"울산광역시","sigungu_name":"울주군",'
+                    '"admin":"울산광역시 울주군 온산읍",'
+                    '"road":"울산광역시 울주군 서생면로 1"}'::jsonb
+                )
             """
         )
     )
@@ -3780,14 +4167,130 @@ async def test_address_hint_matches_split_jsonb_fields(
         )
         return tuple(m.feature_id for m in matches[1])
 
-    # 토큰이 jsonb에 흩어져 있어도 전부 포함하면 매칭된다.
+    # hierarchy가 맞는 authoritative component만 남는다.
     assert await _match("울산광역시 울주군 서생면") == ("feature:h31-split-address",)
-    # 부분 hint도 성립한다 (토큰이 적을수록 넓다).
-    assert await _match("울주군") == ("feature:h31-split-address",)
-    # hint 없음 = 이름만으로 매칭 (H36이 자동 링크를 막는 경로는 상위 계층이다).
-    assert await _match(None) == ("feature:h31-split-address",)
-    # 토큰이 하나라도 어긋나면 매칭되지 않는다 — 토큰이 많을수록 좁아진다.
+    # NFD 입력도 NFKC/NFC 주소와 같은 의미다.
+    assert await _match(
+        unicodedata.normalize("NFD", "울산광역시 울주군 서생면")
+    ) == ("feature:h31-split-address",)
+    # SQL LIKE wildcard는 주소 증거 없이 후보를 만들 수 없다.
+    assert await _match("%") == ()
+    assert await _match("_") == ()
+    # hierarchy가 하나라도 어긋나면 일치하지 않는다.
     assert await _match("울산광역시 동구 일산동") == ()
     assert await _match("부산광역시 울주군 서생면") == ()
-    # 공백이 여럿이어도 정규화된다.
-    assert await _match("울산광역시   울주군") == ("feature:h31-split-address",)
+    # 공백은 정규화하되 token boundary는 유지한다.
+    assert await _match("울산광역시   울주군") == (
+        "feature:h31-split-address",
+        "feature:h31-wrong-field",
+    )
+
+
+async def test_address_candidate_reimport_is_idempotent_and_never_publicly_links(
+    migrated_session: AsyncSession,
+) -> None:
+    """주소 후보는 반복 import에서도 미승인 상태이며 Feature 공개 membership이 아니다."""
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, marker_icon, marker_color, address
+            ) VALUES (
+                'feature:h31-preview-only', 'place', '미승인 등대', '01050400',
+                'place', 'P-09',
+                '{"sido_name":"울산광역시","sigungu_name":"울주군",'
+                '"admin":"울산광역시 울주군 서생면 대송리"}'::jsonb
+            )
+            """
+        )
+    )
+    matches = await resolve_feature_matches(
+        migrated_session,
+        requests=(
+            FeatureMatchRequest(
+                row_number=2,
+                feature_id=None,
+                place_name="미승인 등대",
+                address_hint="울산광역시 울주군 서생면 대송리",
+            ),
+        ),
+    )
+    assert [match.feature_id for match in matches[2]] == ["feature:h31-preview-only"]
+
+    row = ResolvedCurationImportRow(
+        row_number=2,
+        collection_key="h31-preview-only:2026",
+        theme_slug="h31-preview-only",
+        theme_name="주소 후보 검토",
+        theme_group="official",
+        title="주소 후보 검토 목록",
+        edition_key="2026",
+        provider="official-static-source",
+        dataset_key="h31-preview-only",
+        source_name="공식 정적 원천",
+        source_url="https://example.test/h31-preview-only",
+        source_item_key="preview-only-1",
+        source_component_key="primary",
+        feature_id=None,
+        place_name="미승인 등대",
+        address_hint="울산광역시 울주군 서생면 대송리",
+        sort_order=1,
+        item_title="미승인 등대",
+        item_summary=None,
+        metadata={},
+    )
+    first = await import_curation_rows(
+        migrated_session,
+        rows=(row,),
+        actor="official-import",
+    )
+    second = await import_curation_rows(
+        migrated_session,
+        rows=(row,),
+        actor="official-import",
+    )
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curation_collections
+            SET status = 'published', visibility = 'public'
+            WHERE collection_key = 'h31-preview-only:2026'
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curated_themes
+            SET visibility = 'public'
+            WHERE theme_slug = 'h31-preview-only'
+            """
+        )
+    )
+
+    assert first["inserted"] == 1
+    assert second["inserted"] == 0
+    assert second["updated"] == 0
+    assert (
+        await get_feature_curation_group(
+            migrated_session,
+            feature_id="feature:h31-preview-only",
+            public_only=True,
+        )
+        is None
+    )
+    stored_feature_id = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT item.feature_id
+                FROM feature.curation_items AS item
+                JOIN feature.curation_collections AS collection
+                  ON collection.collection_id = item.collection_id
+                WHERE collection.collection_key = 'h31-preview-only:2026'
+                  AND item.external_item_id = 'preview-only-1'
+                """
+            )
+        )
+    ).scalar_one()
+    assert stored_feature_id is None

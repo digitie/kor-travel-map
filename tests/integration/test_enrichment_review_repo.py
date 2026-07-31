@@ -43,6 +43,7 @@ from kortravelmap.providers.visitkorea import (
     ScoringFestivalMatcher,
     festival_to_review_candidates,
 )
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -466,7 +467,7 @@ async def test_concurrent_decide_no_accepted_link_leak(
         assert (link_count == 1) == (status == "accepted")
     finally:
         async with _AsyncSession(migrated_engine) as session, session.begin():
-            await session.execute(text(_RACE_TRUNCATE))
+            await truncate_committed_test_rows(session, _RACE_TRUNCATE)
 
 
 def _enrichment_queue_row(

@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "generated_on": "2026-07-29",
+  "schema_version": 3,
+  "generated_on": "2026-07-31",
   "encoding": "UTF-8",
   "delimiter": ",",
   "csv_columns": [
@@ -31,7 +31,8 @@
     "expected_rows는 복합 공식 항목의 기존 Feature 다중 연결을 펼친 membership 행 수다.",
     "source_component_key는 Feature 연결과 독립적인 membership 식별자다.",
     "metadata_json.feature_match_confidence/reasons가 운영 DB read-only 매칭 근거를 보존한다.",
-    "feature_id가 빈 행은 공식 항목을 DB에 미연결 상태로 보존한다."
+    "feature_id가 빈 행은 공식 항목을 DB에 미연결 상태로 보존한다.",
+    "등대 CSV는 행별 provenance sidecar의 SHA-256과 ordered identity를 함께 결박한다."
   ],
   "files": [
     {
@@ -40,7 +41,7 @@
       "expected_rows": null,
       "source_name": "저장소 큐레이션 데이터 설명",
       "source_url": null,
-      "sha256": "3a2f2fc2cabe4b26acfc05496469df501a74867a545759fef7ca5e0feebbe889"
+      "sha256": "b2c08d0307a7d1853c2cb50d3682bd3fa7f10486ca751dd2e44e52fb4a30e514"
     },
     {
       "path": "template.csv",
@@ -115,7 +116,9 @@
         "https://www.lighthouse-museum.or.kr/sea/passport/heal/list",
         "https://www.lighthouse-museum.or.kr/sea/passport/sunrise/list"
       ],
-      "sha256": "48576418799dd52d3c789bdfdcd791fd3b127d52f9af7e38aaaf8d42175d4273"
+      "sha256": "48576418799dd52d3c789bdfdcd791fd3b127d52f9af7e38aaaf8d42175d4273",
+      "provenance_path": "lighthouse-stamp-tour.provenance.json",
+      "provenance_sha256": "075f6c06ac73899052173e72cb1d6f0129b93127980074a0483904f981ed5b81"
     }
   ]
 }

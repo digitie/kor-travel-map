@@ -1,0 +1,3457 @@
+{
+  "rows": [
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.359167,
+        "lon": 129.360472
+      },
+      "normalized_address": "울산광역시 울주군 서생면 대송리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"울산광역시 울주군 서생면 대송리 28-6\" / 역지오코딩 도로명 원문 \"울산광역시 울주군 서생면 간절곶1길 39-4\"",
+      "resolved_coordinate": {
+        "lat": 35.359167,
+        "lon": 129.360472
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "울산광역시 울주군 서생면 대송리 28-6"
+        },
+        {
+          "kind": "road",
+          "text": "울산광역시 울주군 서생면 간절곶1길 39-4"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful01",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500786, nobjnm=\"간절곶\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.239389,
+        "lon": 131.869806
+      },
+      "normalized_address": "경상북도 울릉군 울릉읍 독도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상북도 울릉군 울릉읍 독도리 30-3\"",
+      "resolved_coordinate": {
+        "lat": 37.239389,
+        "lon": 131.869806
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상북도 울릉군 울릉읍 독도리 30-3"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful02",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501640, nobjnm=\"독도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 33.116672,
+        "lon": 126.269388
+      },
+      "normalized_address": "제주특별자치도 서귀포시 대정읍 가파리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"제주특별자치도 서귀포시 대정읍 가파리 639\" / 역지오코딩 도로명 원문 \"제주특별자치도 서귀포시 대정읍 마라로 165\"",
+      "resolved_coordinate": {
+        "lat": 33.116672,
+        "lon": 126.269388
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "제주특별자치도 서귀포시 대정읍 가파리 639"
+        },
+        {
+          "kind": "road",
+          "text": "제주특별자치도 서귀포시 대정읍 마라로 165"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful03",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502123, nobjnm=\"마라도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.619417,
+        "lon": 128.548556
+      },
+      "normalized_address": "경상남도 통영시 한산면 매죽리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상남도 통영시 한산면 매죽리 산 65\"",
+      "resolved_coordinate": {
+        "lat": 34.619417,
+        "lon": 128.548556
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상남도 통영시 한산면 매죽리 산 65"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful04",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502244, nobjnm=\"소매물도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 37.76,
+        "lon": 124.729444
+      },
+      "normalized_address": "인천광역시 옹진군 대청면 소청리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 37.761556,
+        "lon": 124.73058
+      },
+      "probe_offset_m": 200,
+      "rationale": "역지오코딩 지번 원문 \"인천광역시 옹진군 대청면 소청리 산 307\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+200m).",
+      "resolved_coordinate": {
+        "lat": 37.761556,
+        "lon": 124.73058
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "인천광역시 옹진군 대청면 소청리 산 307"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful05",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501715, nobjnm=\"소청도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 200m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 38.213639,
+        "lon": 128.600249
+      },
+      "normalized_address": "강원특별자치도 속초시 영랑동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"강원특별자치도 속초시 영랑동 1-2\"",
+      "resolved_coordinate": {
+        "lat": 38.213639,
+        "lon": 128.600249
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "강원특별자치도 속초시 영랑동 1-2"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful06",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501652, nobjnm=\"속초\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 36.125056,
+        "lon": 125.96775
+      },
+      "normalized_address": "전북특별자치도 군산시 옥도면 어청도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 도로명 원문 \"전북특별자치도 군산시 옥도면 어청도길 240 (어청도항로표지 관리)\" / 법정리 보강 근거: VWorld getAddress parcel(등대 좌표 +150m) \"전북특별자치도 군산시 옥도면 어청도리 364\"",
+      "resolved_coordinate": {
+        "lat": 36.125056,
+        "lon": 125.96775
+      },
+      "returned_address": [
+        {
+          "kind": "road",
+          "text": "전북특별자치도 군산시 옥도면 어청도길 240 (어청도항로표지 관리)"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful07",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제2호] 소재지 \"전북 군산시 옥도면 어청도길 240\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501060, nobjnm=\"어청도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.052288,
+        "lon": 129.091891
+      },
+      "normalized_address": "부산광역시 영도구 동삼동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"부산광역시 영도구 동삼동 1054\" / 역지오코딩 도로명 원문 \"부산광역시 영도구 전망로 181 (동삼동,영도등대)\"",
+      "resolved_coordinate": {
+        "lat": 35.052288,
+        "lon": 129.091891
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "부산광역시 영도구 동삼동 1054"
+        },
+        {
+          "kind": "road",
+          "text": "부산광역시 영도구 전망로 181 (동삼동,영도등대)"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful08",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500881, nobjnm=\"영도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.744237,
+        "lon": 127.767702
+      },
+      "normalized_address": "전라남도 여수시 수정동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 여수시 수정동 1-7\" / 역지오코딩 도로명 원문 \"전남광주통합특별시 여수시 오동도로 238-32 (수정동)\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.744237,
+        "lon": 127.767702
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 여수시 수정동 1-7"
+        },
+        {
+          "kind": "road",
+          "text": "전남광주통합특별시 여수시 오동도로 238-32 (수정동)"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful09",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500284, nobjnm=\"오동도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 36.647389,
+        "lon": 126.008556
+      },
+      "normalized_address": "충청남도 태안군 근흥면 가의도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"충청남도 태안군 근흥면 가의도리 510\" / 역지오코딩 도로명 원문 \"충청남도 태안군 근흥면 가의도길 44-69\"",
+      "resolved_coordinate": {
+        "lat": 36.647389,
+        "lon": 126.008556
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "충청남도 태안군 근흥면 가의도리 510"
+        },
+        {
+          "kind": "road",
+          "text": "충청남도 태안군 근흥면 가의도길 44-69"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful10",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501704, nobjnm=\"옹도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 33.492694,
+        "lon": 126.965861
+      },
+      "normalized_address": "제주특별자치도 제주시 우도면 연평리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"제주특별자치도 제주시 우도면 연평리 337\"",
+      "resolved_coordinate": {
+        "lat": 33.492694,
+        "lon": 126.965861
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "제주특별자치도 제주시 우도면 연평리 337"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful11",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제7호 우도(구)등대] 소재지 \"제주시 우도면 우도봉길 105\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502130, nobjnm=\"우도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.492736,
+        "lon": 129.443023
+      },
+      "normalized_address": "울산광역시 동구 일산동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"울산광역시 동구 일산동 905-5\"",
+      "resolved_coordinate": {
+        "lat": 35.492736,
+        "lon": 129.443023
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "울산광역시 동구 일산동 905-5"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful12",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제9호 울기(구)등대] 소재지 \"울산광역시 동구 등대로 155\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500965, nobjnm=\"울기\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.358435,
+        "lon": 126.510674
+      },
+      "normalized_address": "인천광역시 중구 무의동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"인천광역시 영종구 무의동 산 372\" / 역지오코딩 도로명 원문 \"인천광역시 영종구 팔미로 28 (무의동)\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 37.358435,
+        "lon": 126.510674
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "인천광역시 영종구 무의동 산 372"
+        },
+        {
+          "kind": "road",
+          "text": "인천광역시 영종구 팔미로 28 (무의동)"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful13",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제1호 팔미도(구)등대] 소재지 \"인천광역시 중구 팔미로 28\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501329, nobjnm=\"팔미도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 36.077714,
+        "lon": 129.568961
+      },
+      "normalized_address": "경상북도 포항시 남구 호미곶면 대보리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상북도 포항시 남구 호미곶면 대보리 221\" / 역지오코딩 도로명 원문 \"경상북도 포항시 남구 호미곶면 해맞이로150번길 20 (해양수산관)\"",
+      "resolved_coordinate": {
+        "lat": 36.077714,
+        "lon": 129.568961
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상북도 포항시 남구 호미곶면 대보리 221"
+        },
+        {
+          "kind": "road",
+          "text": "경상북도 포항시 남구 호미곶면 해맞이로150번길 20 (해양수산관)"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful14",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제10호] 소재지 \"경북 포항시 남구 호미곶면 호미곶길 99\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501284, nobjnm=\"호미곶\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:beautiful-lighthouses:season-1",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.711194,
+        "lon": 125.204139
+      },
+      "normalized_address": "전라남도 신안군 흑산면 홍도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 신안군 흑산면 홍도리 산 8-1\" / KHOA 동명 후보 2건 — 공식 목록 설명/문화유산 지정현황으로 1건 확정. / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.711194,
+        "lon": 125.204139
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 신안군 흑산면 홍도리 산 8-1"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "beautiful15",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제3호] 소재지 \"전남 신안군 흑산면 홍도리 5-1\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500114, nobjnm=\"홍도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "high",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 34.094889,
+        "lon": 125.099222
+      },
+      "normalized_address": "전라남도 신안군 흑산면 가거도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 34.093092,
+        "lon": 125.099222
+      },
+      "probe_offset_m": 200,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 신안군 흑산면 가거도리 1105\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+200m). / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.093092,
+        "lon": 125.099222
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 신안군 흑산면 가거도리 1105"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history01",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제5호] 소재지 \"전남 신안군 흑산면 가거도리 산9-2\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500117, nobjnm=\"가거도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 200m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.460265,
+        "lon": 126.042738
+      },
+      "normalized_address": "전라남도 진도군 조도면 가사도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 진도군 조도면 가사도리 896-2\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.460265,
+        "lon": 126.042738
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 진도군 조도면 가사도리 896-2"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history02",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501861, nobjnm=\"가사도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.007084,
+        "lon": 127.322083
+      },
+      "normalized_address": "전라남도 여수시 삼산면 덕촌리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 여수시 삼산면 덕촌리 산 172-534\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.007084,
+        "lon": 127.322083
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 여수시 삼산면 덕촌리 산 172-534"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history03",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제17호 거문도(구)등대] 소재지 \"전남 여수시 삼산면 거문도등대길 299\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500377, nobjnm=\"거문도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.098,
+        "lon": 126.602417
+      },
+      "normalized_address": "전라남도 완도군 소안면 당사리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 완도군 소안면 당사리 1\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.098,
+        "lon": 126.602417
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 완도군 소안면 당사리 1"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history04",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제21호 당사도(구)등대] 소재지 \"전남 완도군 소안면 당사도길 17-239\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501998, nobjnm=\"당사도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.858224,
+        "lon": 126.315165
+      },
+      "normalized_address": "전북특별자치도 군산시 옥도면 말도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전북특별자치도 군산시 옥도면 말도리 1\" / 역지오코딩 도로명 원문 \"전북특별자치도 군산시 옥도면 말도2길 29 (말도항로표지관리소)\"",
+      "resolved_coordinate": {
+        "lat": 35.858224,
+        "lon": 126.315165
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전북특별자치도 군산시 옥도면 말도리 1"
+        },
+        {
+          "kind": "road",
+          "text": "전북특별자치도 군산시 옥도면 말도2길 29 (말도항로표지관리소)"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history05",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500637, nobjnm=\"말도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.762278,
+        "lon": 126.297417
+      },
+      "normalized_address": "전라남도 해남군 화원면 매월리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 도로명 원문 \"전남광주통합특별시 해남군 화원면 매봉길 582\" / 법정리 보강 근거: 등대문화유산 제4호 소재지 \"전남 해남군 화원면 매월리 696-1\"",
+      "resolved_coordinate": {
+        "lat": 34.762278,
+        "lon": 126.297417
+      },
+      "returned_address": [
+        {
+          "kind": "road",
+          "text": "전남광주통합특별시 해남군 화원면 매봉길 582"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history06",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제4호 목포구(구)등대] 소재지 \"전남 해남군 화원면 매월리 696-1\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501953, nobjnm=\"목포구 등대\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 33.521381,
+        "lon": 126.545731
+      },
+      "normalized_address": "제주특별자치도 제주시 건입동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"제주특별자치도 제주시 건입동 340-2\"",
+      "resolved_coordinate": {
+        "lat": 33.521381,
+        "lon": 126.545731
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "제주특별자치도 제주시 건입동 340-2"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history07",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제6호 산지(구)등대] 소재지 \"제주시 건입동 사라봉동길 108-1\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500006, nobjnm=\"산지\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.055278,
+        "lon": 127.582889
+      },
+      "normalized_address": "전라남도 여수시 삼산면 거문리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 여수시 삼산면 거문리 산 39\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.055278,
+        "lon": 127.582889
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 여수시 삼산면 거문리 산 39"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history08",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502267, nobjnm=\"상백도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.4115,
+        "lon": 127.800736
+      },
+      "normalized_address": "전라남도 여수시 남면 연도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 여수시 남면 연도리 2030-2\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.4115,
+        "lon": 127.800736
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 여수시 남면 연도리 2030-2"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history09",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제22호] 소재지 \"전남 여수시 남면 덕포길 133\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500391, nobjnm=\"소리도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.866056,
+        "lon": 126.156278
+      },
+      "normalized_address": "전라남도 신안군 암태면 신석리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 신안군 암태면 신석리 산 39\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.866056,
+        "lon": 126.156278
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 신안군 암태면 신석리 산 39"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history10",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501795, nobjnm=\"암태도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "high",
+      "derivation": "vworld_forward",
+      "input_coordinate": null,
+      "normalized_address": "부산광역시 남구 감만동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 도로명 원문 \"부산광역시 남구 감만동 626-1\"",
+      "resolved_coordinate": {
+        "lat": 35.10972288196609,
+        "lon": 129.0687621294523
+      },
+      "returned_address": [
+        {
+          "kind": "refined",
+          "text": "부산광역시 남구 감만동 626-1"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history11",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제23호] 소재지 \"부산광역시 남구 감만동 626-1 (감만시민공원 내)\" | VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 문헌 주소를 정지오코딩으로 검증",
+      "source_type": "vworld_forward_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.897664,
+        "lon": 128.833921
+      },
+      "normalized_address": "강원특별자치도 강릉시 주문진읍 주문리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"강원특별자치도 강릉시 주문진읍 주문리 187-2\" / 역지오코딩 도로명 원문 \"강원특별자치도 강릉시 주문진읍 옛등대길 24-7 (주문진등대)\"",
+      "resolved_coordinate": {
+        "lat": 37.897664,
+        "lon": 128.833921
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "강원특별자치도 강릉시 주문진읍 주문리 187-2"
+        },
+        {
+          "kind": "road",
+          "text": "강원특별자치도 강릉시 주문진읍 옛등대길 24-7 (주문진등대)"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history12",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제12호] 소재지 \"강원도 강릉시 주문진읍 옛등대길 24-7\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501513, nobjnm=\"주문진\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.058247,
+        "lon": 129.429475
+      },
+      "normalized_address": "경상북도 울진군 죽변면 죽변리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상북도 울진군 죽변면 죽변리 1-23\"",
+      "resolved_coordinate": {
+        "lat": 37.058247,
+        "lon": 129.429475
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상북도 울진군 죽변면 죽변리 1-23"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history13",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제11호] 소재지 \"경북 울진군 죽변면 등대길 52\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501553, nobjnm=\"죽변\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.311041,
+        "lon": 126.087785
+      },
+      "normalized_address": "전라남도 진도군 조도면 창유리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 진도군 조도면 창유리 1-2\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.311041,
+        "lon": 126.087785
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 진도군 조도면 창유리 1-2"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history14",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501852, nobjnm=\"하조도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct_extra",
+      "input_coordinate": {
+        "lat": 34.801368,
+        "lon": 128.469167
+      },
+      "normalized_address": "경상남도 통영시 한산면 두억리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상남도 통영시 한산면 두억리 산 42-33\" / KHOA 육표(VI_LNDMRK_P) 레이어에 \"한산항등표\"는 없다(등표는 해상 구조물). 같은 항의 육표 \"한산항\" 좌표로 소재 행정구역만 확정했다 — 리 단위까지만 신뢰.",
+      "resolved_coordinate": {
+        "lat": 34.801368,
+        "lon": 128.469167
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상남도 통영시 한산면 두억리 산 42-33"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history15",
+      "source_reference": "KHOA VI_LNDMRK_P objnum=500419 nobjnm=한산항 → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 대체 좌표 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:historic-lighthouses:season-2",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.699889,
+        "lon": 126.241222
+      },
+      "normalized_address": "전라남도 해남군 화원면 치하리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 해남군 화원면 치하리 산 14\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.699889,
+        "lon": 126.241222
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 해남군 화원면 치하리 산 14"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "history17",
+      "source_reference": "해양수산부_등대문화유산 지정현황 (data.go.kr 3081773, HWPX) — scratchpad/h31/dl/mof_lighthouse_heritage_3081773 [제19호] 소재지 \"전남 해남군 화원면 치하리 시하도 산14임\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501962, nobjnm=\"시하도 등대\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/3081773/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct_extra",
+      "input_coordinate": {
+        "lat": 35.805611,
+        "lon": 129.506444
+      },
+      "normalized_address": "경상북도 경주시 감포읍 감포리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상북도 경주시 감포읍 감포리 504-39\" / KHOA에는 \"감포항내측남방파제\"/\"감포항 북방파제\"/\"감포항 파제제북단\"만 있고 \"감포항남방파제등대\"라는 정확한 이름은 없다. 세 후보 모두 감포읍 감포리라 리 단위는 안전하다.",
+      "resolved_coordinate": {
+        "lat": 35.805611,
+        "lon": 129.506444
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상북도 경주시 감포읍 감포리 504-39"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun01",
+      "source_reference": "KHOA VI_LNDMRK_P objnum=500956 nobjnm=감포항내측남방파제 → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 대체 좌표 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.44875,
+        "lon": 126.424778
+      },
+      "normalized_address": "전북특별자치도 고창군 상하면 자룡리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전북특별자치도 고창군 상하면 자룡리 978\"",
+      "resolved_coordinate": {
+        "lat": 35.44875,
+        "lon": 126.424778
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전북특별자치도 고창군 상하면 자룡리 978"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun02",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500646, nobjnm=\"구시포항 남방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.805167,
+        "lon": 128.700833
+      },
+      "normalized_address": "경상남도 거제시 일운면 구조라리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상남도 거제시 일운면 구조라리 191-13\"",
+      "resolved_coordinate": {
+        "lat": 34.805167,
+        "lon": 128.700833
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상남도 거제시 일운면 구조라리 191-13"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun03",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500552, nobjnm=\"구조라항 남방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 34.829543,
+        "lon": 128.436992
+      },
+      "normalized_address": "경상남도 통영시 도남동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 34.828196,
+        "lon": 128.439835
+      },
+      "probe_offset_m": 300,
+      "rationale": "역지오코딩 지번 원문 \"경상남도 통영시 도남동 645-3\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+300m).",
+      "resolved_coordinate": {
+        "lat": 34.828196,
+        "lon": 128.439835
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상남도 통영시 도남동 645-3"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun04",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500483, nobjnm=\"도남항 동방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 300m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.805316,
+        "lon": 126.359879
+      },
+      "normalized_address": "전라남도 목포시 죽교동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 목포시 죽교동 672\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.805316,
+        "lon": 126.359879
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 목포시 죽교동 672"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun05",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500196, nobjnm=\"목포북항 동방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 38.153361,
+        "lon": 128.612028
+      },
+      "normalized_address": "강원특별자치도 양양군 강현면 물치리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"강원특별자치도 양양군 강현면 물치리 7-18\"",
+      "resolved_coordinate": {
+        "lat": 38.153361,
+        "lon": 128.612028
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "강원특별자치도 양양군 강현면 물치리 7-18"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun06",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501694, nobjnm=\"물치항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.006928,
+        "lon": 126.451985
+      },
+      "normalized_address": "충청남도 서산시 대산읍 화곡리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"충청남도 서산시 대산읍 화곡리 1-35\"",
+      "resolved_coordinate": {
+        "lat": 37.006928,
+        "lon": 126.451985
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "충청남도 서산시 대산읍 화곡리 1-35"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun07",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501402, nobjnm=\"삼길포항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.213795,
+        "lon": 129.223621
+      },
+      "normalized_address": "부산광역시 기장군 기장읍 연화리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"부산광역시 기장군 기장읍 연화리 297-5\"",
+      "resolved_coordinate": {
+        "lat": 35.213795,
+        "lon": 129.223621
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "부산광역시 기장군 기장읍 연화리 297-5"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun08",
+      "source_reference": "부산지방해양수산청_항로표지정보_20250623 (data.go.kr 15144073) — https://www.data.go.kr/data/15144073/fileData.do 주소 \"부산광역시 기장군 기장읍 연화리 서암항\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501008, nobjnm=\"서암항 남방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/15144073/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.827083,
+        "lon": 126.418361
+      },
+      "normalized_address": "전북특별자치도 군산시 옥도면 선유도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전북특별자치도 군산시 옥도면 선유도리 474-1\"",
+      "resolved_coordinate": {
+        "lat": 35.827083,
+        "lon": 126.418361
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전북특별자치도 군산시 옥도면 선유도리 474-1"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun09",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501808, nobjnm=\"선유도항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.736439,
+        "lon": 127.747047
+      },
+      "normalized_address": "전라남도 여수시 종화동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 여수시 종화동 458-7\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.736439,
+        "lon": 127.747047
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 여수시 종화동 458-7"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun10",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500274, nobjnm=\"여수구항 방파제하멜\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.325575,
+        "lon": 126.7531
+      },
+      "normalized_address": "전라남도 완도군 완도읍 가용리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 완도군 완도읍 가용리 1017-2\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.325575,
+        "lon": 126.7531
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 완도군 완도읍 가용리 1017-2"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun11",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500157, nobjnm=\"완도항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 33.501833,
+        "lon": 126.452083
+      },
+      "normalized_address": "제주특별자치도 제주시 이호일동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"제주특별자치도 제주시 이호일동 375-43\"",
+      "resolved_coordinate": {
+        "lat": 33.501833,
+        "lon": 126.452083
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "제주특별자치도 제주시 이호일동 375-43"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun12",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500025, nobjnm=\"이호랜드 방사제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.61637,
+        "lon": 129.453986
+      },
+      "normalized_address": "울산광역시 북구 정자동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"울산광역시 북구 정자동 638\"",
+      "resolved_coordinate": {
+        "lat": 35.61637,
+        "lon": 129.453986
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "울산광역시 북구 정자동 638"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun13",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500938, nobjnm=\"정자항 북방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 36.42575,
+        "lon": 129.434787
+      },
+      "normalized_address": "경상북도 영덕군 영덕읍 창포리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상북도 영덕군 영덕읍 창포리 산 5-5\"",
+      "resolved_coordinate": {
+        "lat": 36.42575,
+        "lon": 129.434787
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상북도 영덕군 영덕읍 창포리 산 5-5"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun14",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502154, nobjnm=\"창포말\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.299585,
+        "lon": 129.262666
+      },
+      "normalized_address": "부산광역시 기장군 일광읍 칠암리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"부산광역시 기장군 일광읍 칠암리 2-15\"",
+      "resolved_coordinate": {
+        "lat": 35.299585,
+        "lon": 129.262666
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "부산광역시 기장군 일광읍 칠암리 2-15"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun15",
+      "source_reference": "부산지방해양수산청_항로표지정보_20250623 (data.go.kr 15144073) — https://www.data.go.kr/data/15144073/fileData.do 주소 \"부산광역시 기장군 일광면 칠암리\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500997, nobjnm=\"칠암항 남방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/15144073/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 34.96627,
+        "lon": 126.390082
+      },
+      "normalized_address": "전라남도 무안군 망운면 피서리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 34.968067,
+        "lon": 126.390082
+      },
+      "probe_offset_m": 200,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 무안군 망운면 피서리 산 153-6\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+200m). / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.968067,
+        "lon": 126.390082
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 무안군 망운면 피서리 산 153-6"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun16",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501951, nobjnm=\"톱머리항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 200m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 34.906072,
+        "lon": 128.272822
+      },
+      "normalized_address": "경상남도 고성군 삼산면 두포리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 34.90697,
+        "lon": 128.274719
+      },
+      "probe_offset_m": 200,
+      "rationale": "역지오코딩 지번 원문 \"경상남도 고성군 삼산면 두포리 1092\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+200m).",
+      "resolved_coordinate": {
+        "lat": 34.90697,
+        "lon": 128.274719
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상남도 고성군 삼산면 두포리 1092"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun17",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502225, nobjnm=\"포교항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 200m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:fun-lighthouses:season-3",
+      "confidence": "high",
+      "derivation": "vworld_forward",
+      "input_coordinate": null,
+      "normalized_address": "부산광역시 기장군 기장읍 시랑리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 도로명 원문 \"부산광역시 기장군 기장읍 기장해안로 216\" / 법정리 보강 근거: VWorld getAddress parcel(도로명 정지오코딩 좌표) \"부산광역시 기장군 기장읍 시랑리 408-1\"",
+      "resolved_coordinate": {
+        "lat": 35.194848970607005,
+        "lon": 129.22369763280363
+      },
+      "returned_address": [
+        {
+          "kind": "refined",
+          "text": "부산광역시 기장군 기장읍 기장해안로 216"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "fun18",
+      "source_reference": "https://www.fsm.go.kr/ · 기장군 문화관광 https://www.gijang.go.kr/index.gijang?menuCd=DOM_000000306004002000 · VWorld getcoord 검증(detail=\"국립수산과학원\") — 공식 주소 \"부산광역시 기장군 기장읍 기장해안로 216\" | VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 문헌 주소를 정지오코딩으로 검증",
+      "source_type": "vworld_forward_geocode",
+      "source_urls": [
+        "https://www.fsm.go.kr/",
+        "https://www.gijang.go.kr/index.gijang?menuCd=DOM_000000306004002000",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 36.604889,
+        "lon": 126.409722
+      },
+      "normalized_address": "충청남도 서산시 부석면 간월도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"충청남도 서산시 부석면 간월도리 26-28\"",
+      "resolved_coordinate": {
+        "lat": 36.604889,
+        "lon": 126.409722
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "충청남도 서산시 부석면 간월도리 26-28"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich01",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501712, nobjnm=\"간월도항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.621721,
+        "lon": 126.460974
+      },
+      "normalized_address": "전북특별자치도 부안군 변산면 격포리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전북특별자치도 부안군 변산면 격포리 794\"",
+      "resolved_coordinate": {
+        "lat": 35.621721,
+        "lon": 126.460974
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전북특별자치도 부안군 변산면 격포리 794"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich02",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500632, nobjnm=\"격포항 북방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.060833,
+        "lon": 126.560611
+      },
+      "normalized_address": "경기도 화성시 우정읍 국화리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경기도 화성시 만세구 우정읍 국화리 136\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 37.060833,
+        "lon": 126.560611
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경기도 화성시 만세구 우정읍 국화리 136"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich03",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501750, nobjnm=\"국화도항 A호 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.117222,
+        "lon": 126.674444
+      },
+      "normalized_address": "경기도 화성시 서신면 궁평리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경기도 화성시 만세구 서신면 궁평리 692\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 37.117222,
+        "lon": 126.674444
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경기도 화성시 만세구 서신면 궁평리 692"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich04",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501495, nobjnm=\"궁평항 북방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 36.533431,
+        "lon": 126.470062
+      },
+      "normalized_address": "충청남도 홍성군 서부면 남당리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"충청남도 홍성군 서부면 남당리 862\"",
+      "resolved_coordinate": {
+        "lat": 36.533431,
+        "lon": 126.470062
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "충청남도 홍성군 서부면 남당리 862"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich05",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501131, nobjnm=\"남당항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.053722,
+        "lon": 126.451444
+      },
+      "normalized_address": "충청남도 당진시 석문면 난지도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"충청남도 당진시 석문면 난지도리 4-26\"",
+      "resolved_coordinate": {
+        "lat": 37.053722,
+        "lon": 126.451444
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "충청남도 당진시 석문면 난지도리 4-26"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich06",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501350, nobjnm=\"대난지도항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 35.352778,
+        "lon": 126.387222
+      },
+      "normalized_address": "전라남도 영광군 백수읍 대신리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 35.352778,
+        "lon": 126.388323
+      },
+      "probe_offset_m": 100,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 영광군 백수읍 대신리 771\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+100m). / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 35.352778,
+        "lon": 126.388323
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 영광군 백수읍 대신리 771"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich07",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500621, nobjnm=\"대신\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 100m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 36.1295,
+        "lon": 126.508694
+      },
+      "normalized_address": "충청남도 서천군 서면 마량리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"충청남도 서천군 서면 마량리 339-8\"",
+      "resolved_coordinate": {
+        "lat": 36.1295,
+        "lon": 126.508694
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "충청남도 서천군 서면 마량리 339-8"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich08",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501160, nobjnm=\"마량진항 남방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 36.249806,
+        "lon": 126.535167
+      },
+      "normalized_address": "충청남도 보령시 웅천읍 관당리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"충청남도 보령시 웅천읍 관당리 888-58\"",
+      "resolved_coordinate": {
+        "lat": 36.249806,
+        "lon": 126.535167
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "충청남도 보령시 웅천읍 관당리 888-58"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich09",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501155, nobjnm=\"무창포항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 37.653444,
+        "lon": 125.686333
+      },
+      "normalized_address": "인천광역시 옹진군 연평면 연평리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 37.653893,
+        "lon": 125.687316
+      },
+      "probe_offset_m": 100,
+      "rationale": "역지오코딩 지번 원문 \"인천광역시 옹진군 연평면 연평리 산 10-115\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+100m).",
+      "resolved_coordinate": {
+        "lat": 37.653893,
+        "lon": 125.687316
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "인천광역시 옹진군 연평면 연평리 산 10-115"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich10",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501299, nobjnm=\"연평도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 100m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.954109,
+        "lon": 124.738307
+      },
+      "normalized_address": "인천광역시 옹진군 백령면 진촌리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"인천광역시 옹진군 백령면 진촌리 2620\"",
+      "resolved_coordinate": {
+        "lat": 37.954109,
+        "lon": 124.738307
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "인천광역시 옹진군 백령면 진촌리 2620"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich11",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501293, nobjnm=\"용기포항 서방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.454454,
+        "lon": 126.591256
+      },
+      "normalized_address": "인천광역시 중구 항동7가",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"인천광역시 제물포구 항동7가 82-11\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 37.454454,
+        "lon": 126.591256
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "인천광역시 제물포구 항동7가 82-11"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich12",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501438, nobjnm=\"인천항 역무선방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.108556,
+        "lon": 126.539667
+      },
+      "normalized_address": "경기도 화성시 우정읍 국화리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경기도 화성시 만세구 우정읍 국화리 산 4-1\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 37.108556,
+        "lon": 126.539667
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경기도 화성시 만세구 우정읍 국화리 산 4-1"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich13",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501767, nobjnm=\"입파도등대\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 37.179472,
+        "lon": 126.622083
+      },
+      "normalized_address": "경기도 화성시 서신면 제부리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 37.179023,
+        "lon": 126.623059
+      },
+      "probe_offset_m": 100,
+      "rationale": "역지오코딩 지번 원문 \"경기도 화성시 만세구 서신면 제부리 289-19\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+100m). / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 37.179023,
+        "lon": 126.623059
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경기도 화성시 만세구 서신면 제부리 289-19"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich14",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501762, nobjnm=\"제부도항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 100m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 36.161,
+        "lon": 126.506444
+      },
+      "normalized_address": "충청남도 서천군 서면 도둔리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"충청남도 서천군 서면 도둔리 1469\"",
+      "resolved_coordinate": {
+        "lat": 36.161,
+        "lon": 126.506444
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "충청남도 서천군 서면 도둔리 1469"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich15",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501157, nobjnm=\"홍원항 마리나 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 34.688667,
+        "lon": 125.438083
+      },
+      "normalized_address": "전라남도 신안군 흑산면 예리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 34.691811,
+        "lon": 125.444706
+      },
+      "probe_offset_m": 700,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 신안군 흑산면 예리 165-7\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+700m). / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.691811,
+        "lon": 125.444706
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 신안군 흑산면 예리 165-7"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich16",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500126, nobjnm=\"흑산도항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 700m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:abundant-lighthouses:season-4",
+      "confidence": "high",
+      "derivation": "vworld_forward",
+      "input_coordinate": null,
+      "normalized_address": "충청남도 서천군 장항읍 송림리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 도로명 원문 \"충청남도 서천군 장항읍 장산로101번길 75\" / 법정리 보강 근거: VWorld getAddress parcel(도로명 정지오코딩 좌표) \"충청남도 서천군 장항읍 송림리 913\"",
+      "resolved_coordinate": {
+        "lat": 36.01716782417208,
+        "lon": 126.669983496633
+      },
+      "returned_address": [
+        {
+          "kind": "refined",
+          "text": "충청남도 서천군 장항읍 장산로101번길 75"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "rich17",
+      "source_reference": "https://www.mabik.re.kr/kor/sub06_06.do (찾아오시는길) · 충남관광 tour.chungnam.go.kr trsrcnNo=84 · VWorld getcoord 검증 — 공식 주소 \"충청남도 서천군 장항읍 장산로101번길 75\" | VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 문헌 주소를 정지오코딩으로 검증",
+      "source_type": "vworld_forward_geocode",
+      "source_urls": [
+        "https://www.mabik.re.kr/kor/sub06_06.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.062861,
+        "lon": 127.292639
+      },
+      "normalized_address": "전라남도 여수시 삼산면 서도리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 여수시 삼산면 서도리 산 233-1\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.062861,
+        "lon": 127.292639
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 여수시 삼산면 서도리 산 233-1"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal01",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502050, nobjnm=\"녹산곶\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.612444,
+        "lon": 127.722139
+      },
+      "normalized_address": "전라남도 여수시 돌산읍 군내리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 여수시 돌산읍 군내리 1581\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.612444,
+        "lon": 127.722139
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 여수시 돌산읍 군내리 1581"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal02",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500343, nobjnm=\"돌산항 남방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.446934,
+        "lon": 126.818542
+      },
+      "normalized_address": "전라남도 강진군 마량면 마량리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 강진군 마량면 마량리 983-44\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.446934,
+        "lon": 126.818542
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 강진군 마량면 마량리 983-44"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal03",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500213, nobjnm=\"마량항중방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.199278,
+        "lon": 128.57825
+      },
+      "normalized_address": "경상남도 창원시 마산합포구 오동동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상남도 창원시 마산합포구 오동동 323\"",
+      "resolved_coordinate": {
+        "lat": 35.199278,
+        "lon": 128.57825
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상남도 창원시 마산합포구 오동동 323"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal04",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500667, nobjnm=\"마산항서파제제서단\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 33.427417,
+        "lon": 126.933667
+      },
+      "normalized_address": "제주특별자치도 서귀포시 성산읍 고성리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 33.428315,
+        "lon": 126.933667
+      },
+      "probe_offset_m": 100,
+      "rationale": "역지오코딩 지번 원문 \"제주특별자치도 서귀포시 성산읍 고성리 47\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+100m).",
+      "resolved_coordinate": {
+        "lat": 33.428315,
+        "lon": 126.933667
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "제주특별자치도 서귀포시 성산읍 고성리 47"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal05",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502127, nobjnm=\"방두포\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 100m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.609029,
+        "lon": 127.654557
+      },
+      "normalized_address": "전라남도 여수시 화정면 백야리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 여수시 화정면 백야리 산 34-1\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.609029,
+        "lon": 127.654557
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 여수시 화정면 백야리 산 34-1"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal06",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502019, nobjnm=\"백야도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.923199,
+        "lon": 128.067154
+      },
+      "normalized_address": "경상남도 사천시 서금동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상남도 사천시 서금동 127-12\"",
+      "resolved_coordinate": {
+        "lat": 34.923199,
+        "lon": 128.067154
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상남도 사천시 서금동 127-12"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal07",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500438, nobjnm=\"삼천포 구항 동방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.787671,
+        "lon": 128.738097
+      },
+      "normalized_address": "경상남도 거제시 일운면 와현리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상남도 거제시 일운면 와현리 산 98-40\"",
+      "resolved_coordinate": {
+        "lat": 34.787671,
+        "lon": 128.738097
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상남도 거제시 일운면 와현리 산 98-40"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal08",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500557, nobjnm=\"서이말\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.989278,
+        "lon": 127.9235
+      },
+      "normalized_address": "경상남도 하동군 진교면 술상리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상남도 하동군 진교면 술상리 741-2\"",
+      "resolved_coordinate": {
+        "lat": 34.989278,
+        "lon": 127.9235
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상남도 하동군 진교면 술상리 741-2"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal09",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502010, nobjnm=\"술상항 남방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 33.345531,
+        "lon": 126.169444
+      },
+      "normalized_address": "제주특별자치도 제주시 한경면 신창리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"제주특별자치도 제주시 한경면 신창리 1481-14\"",
+      "resolved_coordinate": {
+        "lat": 33.345531,
+        "lon": 126.169444
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "제주특별자치도 제주시 한경면 신창리 1481-14"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal10",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502072, nobjnm=\"신창\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 34.465806,
+        "lon": 127.442639
+      },
+      "normalized_address": "전라남도 고흥군 봉래면 사양리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"전남광주통합특별시 고흥군 봉래면 사양리 563\" / VWorld는 2026 개편 행정구역명을 반환 — feature.features가 쓰는 구명칭으로 정규화했다.",
+      "resolved_coordinate": {
+        "lat": 34.465806,
+        "lon": 127.442639
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "전남광주통합특별시 고흥군 봉래면 사양리 563"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal11",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500350, nobjnm=\"애도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_override",
+      "input_coordinate": {
+        "lat": 33.311528,
+        "lon": 126.146083
+      },
+      "normalized_address": "제주특별자치도 제주시 한경면 고산리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"제주특별자치도 제주시 한경면 고산리 산 117\" / KHOA 동명 후보 9건(죽도/하죽도/장죽도/손죽도…) — 좌표 최근접만 보면 진도 맹골죽도(등대문화유산 제20호)로 가지만, 공식 힐링등대 목록의 죽도등대는 제주 차귀도 등대다. 제20호 죽도등대와는 다른 등대.",
+      "resolved_coordinate": {
+        "lat": 33.311528,
+        "lon": 126.146083
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "제주특별자치도 제주시 한경면 고산리 산 117"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal12",
+      "source_reference": "공식 목록 https://www.lighthouse-museum.or.kr/sea/passport/heal/list — 죽도등대 소개 \"제주도 서해를 밝히는\" · 제주환경일보 향토문화 \"죽도등대(차귀도등대) … 고산리 산 117번지\" https://www.newsje.com/news/articleView.html?idxno=271822 → KHOA VI_LNDMRK_P objnum=502090 nobjnm=\"죽도\"(33.311528, 126.146083) → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 공식 목록 설명으로 확정한 좌표 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.lighthouse-museum.or.kr/sea/passport/heal/list",
+        "https://www.newsje.com/news/articleView.html?idxno=271822",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 35.068056,
+        "lon": 129.064167
+      },
+      "normalized_address": "부산광역시 영도구 동삼동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 35.068505,
+        "lon": 129.065118
+      },
+      "probe_offset_m": 100,
+      "rationale": "역지오코딩 지번 원문 \"부산광역시 영도구 동삼동 639-11\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+100m).",
+      "resolved_coordinate": {
+        "lat": 35.068505,
+        "lon": 129.065118
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "부산광역시 영도구 동삼동 639-11"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal13",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500870, nobjnm=\"중리항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 100m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 33.955306,
+        "lon": 126.296583
+      },
+      "normalized_address": "제주특별자치도 제주시 추자면 영흥리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"제주특별자치도 제주시 추자면 영흥리 77-3\"",
+      "resolved_coordinate": {
+        "lat": 33.955306,
+        "lon": 126.296583
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "제주특별자치도 제주시 추자면 영흥리 77-3"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal14",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500030, nobjnm=\"추자도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 34.834223,
+        "lon": 128.410918
+      },
+      "normalized_address": "경상남도 통영시 미수동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 34.833325,
+        "lon": 128.410918
+      },
+      "probe_offset_m": 100,
+      "rationale": "역지오코딩 지번 원문 \"경상남도 통영시 미수동 1-17\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+100m).",
+      "resolved_coordinate": {
+        "lat": 34.833325,
+        "lon": 128.410918
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상남도 통영시 미수동 1-17"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal15",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500492, nobjnm=\"통영운하 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 100m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:healing-lighthouses:season-5",
+      "confidence": "high",
+      "derivation": "document",
+      "input_coordinate": null,
+      "normalized_address": "제주특별자치도 제주시 조천읍 북촌리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "지번 미확인 — 리(里) 단위까지만 채웠다. 좌표 출처 없음(KHOA 항로표지가 아닌 제주 민간 등명대).",
+      "resolved_coordinate": null,
+      "returned_address": [
+        {
+          "kind": "official_document",
+          "text": "제주특별자치도 제주시 조천읍 북촌리"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "heal16",
+      "source_reference": "국가유산포털 제주특별자치도 등록문화유산 \"북촌리 등명대\" 소재지 \"제주특별자치도 제주시\" https://www.heritage.go.kr/heri/cul/culSelectDetail.do?ccbaKdcd=25&ccbaAsno=00010500&ccbaCtcd=50 + 공식 스탬프 지점명 자체가 \"조천읍 북촌리\"",
+      "source_type": "official_document",
+      "source_urls": [
+        "https://www.heritage.go.kr/heri/cul/culSelectDetail.do?ccbaKdcd=25&ccbaAsno=00010500&ccbaCtcd=50"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 38.449472,
+        "lon": 128.464722
+      },
+      "normalized_address": "강원특별자치도 고성군 거진읍 거진리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"강원특별자치도 고성군 거진읍 거진리 10-6\"",
+      "resolved_coordinate": {
+        "lat": 38.449472,
+        "lon": 128.464722
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "강원특별자치도 고성군 거진읍 거진리 10-6"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise01",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501669, nobjnm=\"거진\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 38.022061,
+        "lon": 128.735607
+      },
+      "normalized_address": "강원특별자치도 양양군 현북면 하광정리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"강원특별자치도 양양군 현북면 하광정리 4-1\"",
+      "resolved_coordinate": {
+        "lat": 38.022061,
+        "lon": 128.735607
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "강원특별자치도 양양군 현북면 하광정리 4-1"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise02",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501659, nobjnm=\"기사문\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 35.355972,
+        "lon": 129.339556
+      },
+      "normalized_address": "울산광역시 울주군 서생면 나사리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 35.357769,
+        "lon": 129.339556
+      },
+      "probe_offset_m": 200,
+      "rationale": "역지오코딩 지번 원문 \"울산광역시 울주군 서생면 나사리 303-12\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+200m).",
+      "resolved_coordinate": {
+        "lat": 35.357769,
+        "lon": 129.339556
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "울산광역시 울주군 서생면 나사리 303-12"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise03",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500781, nobjnm=\"나사 방사제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 200m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.362778,
+        "lon": 129.361305
+      },
+      "normalized_address": "울산광역시 울주군 서생면 대송리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"울산광역시 울주군 서생면 대송리 1-8\"",
+      "resolved_coordinate": {
+        "lat": 35.362778,
+        "lon": 129.361305
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "울산광역시 울주군 서생면 대송리 1-8"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise04",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500787, nobjnm=\"대송항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 38.503806,
+        "lon": 128.428917
+      },
+      "normalized_address": "강원특별자치도 고성군 현내면 대진리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"강원특별자치도 고성군 현내면 대진리 16-4\"",
+      "resolved_coordinate": {
+        "lat": 38.503806,
+        "lon": 128.428917
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "강원특별자치도 고성군 현내면 대진리 16-4"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise05",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501664, nobjnm=\"대진\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_override",
+      "input_coordinate": {
+        "lat": 36.558161,
+        "lon": 129.434541
+      },
+      "normalized_address": "경상북도 영덕군 영해면 대진리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상북도 영덕군 영해면 대진리 220-1\" / KHOA 동명 후보 다수(포항 장기면 대진리 / 영덕 영해면 대진리 / 고성 현내면 대진리) — 같은 season-6에 이미 대진등대(강원 고성)가 따로 있고, 기사가 영덕 영해면으로 특정한다.",
+      "resolved_coordinate": {
+        "lat": 36.558161,
+        "lon": 129.434541
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상북도 영덕군 영해면 대진리 220-1"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise06",
+      "source_reference": "어업in수산 \"이달의 등대 – 대진항 남방파제등대\" — \"경상북도 영덕군 영해면에 위치한 대진항 남방파제등대\" https://www.suhyupnews.co.kr/news/articleView.html?idxno=34271 → KHOA VI_LNDMRK_P objnum=501255 nobjnm=\"대진항남방파제\"(36.558161, 129.434541) → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 공식 목록 설명으로 확정한 좌표 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.suhyupnews.co.kr/news/articleView.html?idxno=34271",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 38.169993,
+        "lon": 128.611719
+      },
+      "normalized_address": "강원특별자치도 속초시 대포동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"강원특별자치도 속초시 대포동 952\"",
+      "resolved_coordinate": {
+        "lat": 38.169993,
+        "lon": 128.611719
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "강원특별자치도 속초시 대포동 952"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise07",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501693, nobjnm=\"대포항 동방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.487,
+        "lon": 130.919417
+      },
+      "normalized_address": "경상북도 울릉군 울릉읍 도동리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상북도 울릉군 울릉읍 도동리 1-1\" / 역지오코딩 도로명 원문 \"경상북도 울릉군 울릉읍 행남길 291-71 (행남등대)\"",
+      "resolved_coordinate": {
+        "lat": 37.487,
+        "lon": 130.919417
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상북도 울릉군 울릉읍 도동리 1-1"
+        },
+        {
+          "kind": "road",
+          "text": "경상북도 울릉군 울릉읍 행남길 291-71 (행남등대)"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise08",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501639, nobjnm=\"도동 등대\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "high",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 35.195191,
+        "lon": 129.226885
+      },
+      "normalized_address": "부산광역시 기장군 기장읍 시랑리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 35.196988,
+        "lon": 129.226885
+      },
+      "probe_offset_m": 200,
+      "rationale": "역지오코딩 지번 원문 \"부산광역시 기장군 기장읍 시랑리 74-1\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+200m).",
+      "resolved_coordinate": {
+        "lat": 35.196988,
+        "lon": 129.226885
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "부산광역시 기장군 기장읍 시랑리 74-1"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise09",
+      "source_reference": "부산지방해양수산청_항로표지정보_20250623 (data.go.kr 15144073) — https://www.data.go.kr/data/15144073/fileData.do 주소 \"부산광역시 기장군 기장읍 시랑리 동암항방파제 끝단\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502216, nobjnm=\"동암어항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 200m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/15144073/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.554472,
+        "lon": 129.118556
+      },
+      "normalized_address": "강원특별자치도 동해시 묵호진동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"강원특별자치도 동해시 묵호진동 2-215\"",
+      "resolved_coordinate": {
+        "lat": 37.554472,
+        "lon": 129.118556
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "강원특별자치도 동해시 묵호진동 2-215"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise10",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501541, nobjnm=\"묵호\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.304252,
+        "lon": 129.261373
+      },
+      "normalized_address": "부산광역시 기장군 일광읍 문중리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"부산광역시 기장군 일광읍 문중리 202-5\"",
+      "resolved_coordinate": {
+        "lat": 35.304252,
+        "lon": 129.261373
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "부산광역시 기장군 일광읍 문중리 202-5"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise11",
+      "source_reference": "부산지방해양수산청_항로표지정보_20250623 (data.go.kr 15144073) — https://www.data.go.kr/data/15144073/fileData.do 주소 \"부산광역시 기장군 일광면 문중리\" | KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500983, nobjnm=\"문중항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://www.data.go.kr/data/15144073/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.807278,
+        "lon": 129.511417
+      },
+      "normalized_address": "경상북도 경주시 감포읍 오류리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상북도 경주시 감포읍 오류리 583-3\" / 역지오코딩 도로명 원문 \"경상북도 경주시 감포읍 감포로 226-19\"",
+      "resolved_coordinate": {
+        "lat": 35.807278,
+        "lon": 129.511417
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상북도 경주시 감포읍 오류리 583-3"
+        },
+        {
+          "kind": "road",
+          "text": "경상북도 경주시 감포읍 감포로 226-19"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise12",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500953, nobjnm=\"송대말\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct_extra",
+      "input_coordinate": {
+        "lat": 35.18086,
+        "lon": 129.20708
+      },
+      "normalized_address": "부산광역시 해운대구 송정동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"부산광역시 해운대구 송정동 288-55\" / KHOA·부산청 데이터 모두 \"송정항 동방파제등대\"/\"송정항 서방파제등대\"만 등재하고 \"남방파제\"는 없다. 두 등대의 부산청 공식 주소가 모두 \"부산광역시 해운대구 송정동 송정항방파제\"라 동(洞) 단위는 안전하다. 부산 강서구 송정동(송정수로 등주)과는 다른 곳이다 — 스탬프투어 season-6이 강원 고성 대진등대에서 부산 송정까지라는 공식 설명과 일치.",
+      "resolved_coordinate": {
+        "lat": 35.18086,
+        "lon": 129.20708
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "부산광역시 해운대구 송정동 288-55"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise13",
+      "source_reference": "부산청 항로표지정보 15144073 송정항동방파제등대 35-10-51.1N,129-12-25.5E → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 대체 좌표 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15144073/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.478134,
+        "lon": 129.431083
+      },
+      "normalized_address": "울산광역시 동구 방어동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"울산광역시 동구 방어동 948-1\"",
+      "resolved_coordinate": {
+        "lat": 35.478134,
+        "lon": 129.431083
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "울산광역시 동구 방어동 948-1"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise14",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500973, nobjnm=\"슬도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.518028,
+        "lon": 130.797638
+      },
+      "normalized_address": "경상북도 울릉군 서면 태하리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상북도 울릉군 서면 태하리 산 100\"",
+      "resolved_coordinate": {
+        "lat": 37.518028,
+        "lon": 130.797638
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상북도 울릉군 서면 태하리 산 100"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise15",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502170, nobjnm=\"울릉도\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium",
+      "derivation": "vworld_probe",
+      "input_coordinate": {
+        "lat": 35.690262,
+        "lon": 129.476317
+      },
+      "normalized_address": "경상북도 경주시 양남면 읍천리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": {
+        "lat": 35.690711,
+        "lon": 129.477275
+      },
+      "probe_offset_m": 100,
+      "rationale": "역지오코딩 지번 원문 \"경상북도 경주시 양남면 읍천리 195-3\" / 해상 좌표 — 지번은 등대 자체가 아닌 인접 육지 필지라 채우지 않았다(+100m).",
+      "resolved_coordinate": {
+        "lat": 35.690711,
+        "lon": 129.477275
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상북도 경주시 양남면 읍천리 195-3"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise16",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500931, nobjnm=\"읍천항 남방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표가 해상이라 반경 100m 최근접 육지점 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 37.969278,
+        "lon": 128.765944
+      },
+      "normalized_address": "강원특별자치도 양양군 현남면 인구리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"강원특별자치도 양양군 현남면 인구리 1-133\"",
+      "resolved_coordinate": {
+        "lat": 37.969278,
+        "lon": 128.765944
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "강원특별자치도 양양군 현남면 인구리 1-133"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise17",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501501, nobjnm=\"인구항 방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.561295,
+        "lon": 129.458303
+      },
+      "normalized_address": "울산광역시 동구 주전동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"울산광역시 동구 주전동 94-13\"",
+      "resolved_coordinate": {
+        "lat": 35.561295,
+        "lon": 129.458303
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "울산광역시 동구 주전동 94-13"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise18",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=502196, nobjnm=\"주전항 북방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.159308,
+        "lon": 129.191502
+      },
+      "normalized_address": "부산광역시 해운대구 중동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"부산광역시 해운대구 중동 591-21\"",
+      "resolved_coordinate": {
+        "lat": 35.159308,
+        "lon": 129.191502
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "부산광역시 해운대구 중동 591-21"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise19",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500806, nobjnm=\"청사포어항 동방파제\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct_extra",
+      "input_coordinate": {
+        "lat": 35.261139,
+        "lon": 129.246889
+      },
+      "normalized_address": "부산광역시 기장군 일광읍 학리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"부산광역시 기장군 일광읍 학리 251-20\" / 부산청 항로표지정보에는 \"학리항서방파제등대\"(부산광역시 기장군 일광면 학리 학리항서방파제 끝단)만 등재돼 있다. KHOA \"학리항 방파제 동단\"(objnum=502274) 좌표를 썼고 두 좌표 모두 일광읍 학리다. 경북 영덕군 축산면 학리는 KHOA 항로표지 등재가 없어 후보에서 제외했다.",
+      "resolved_coordinate": {
+        "lat": 35.261139,
+        "lon": 129.246889
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "부산광역시 기장군 일광읍 학리 251-20"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise20",
+      "source_reference": "KHOA VI_LNDMRK_P objnum=502274 nobjnm=학리항 방파제 동단 → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 대체 좌표 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 35.4725,
+        "lon": 129.407338
+      },
+      "normalized_address": "울산광역시 동구 방어동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"울산광역시 동구 방어동 962-2\" / 역지오코딩 도로명 원문 \"울산광역시 동구 화암등대길 50 (방어동,항로표지관리소)\"",
+      "resolved_coordinate": {
+        "lat": 35.4725,
+        "lon": 129.407338
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "울산광역시 동구 방어동 962-2"
+        },
+        {
+          "kind": "road",
+          "text": "울산광역시 동구 화암등대길 50 (방어동,항로표지관리소)"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise21",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=500976, nobjnm=\"화암추\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "medium-high",
+      "derivation": "vworld_direct",
+      "input_coordinate": {
+        "lat": 36.68075,
+        "lon": 129.462139
+      },
+      "normalized_address": "경상북도 울진군 후포면 후포리",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 지번 원문 \"경상북도 울진군 후포면 후포리 산 141-9\"",
+      "resolved_coordinate": {
+        "lat": 36.68075,
+        "lon": 129.462139
+      },
+      "returned_address": [
+        {
+          "kind": "parcel",
+          "text": "경상북도 울진군 후포면 후포리 산 141-9"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise22",
+      "source_reference": "KHOA VI_LNDMRK_P (data.go.kr 15130184) — scratchpad/h31/shp/flat/lh.dbf (objnum=501249, nobjnm=\"후포\") → VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 좌표 직접 역지오코딩",
+      "source_type": "vworld_reverse_geocode",
+      "source_urls": [
+        "https://www.data.go.kr/data/15130184/fileData.do",
+        "https://api.vworld.kr/req/address"
+      ]
+    },
+    {
+      "collection_key": "lighthouse-stamp-tour:sunrise-lighthouses:season-6",
+      "confidence": "high",
+      "derivation": "vworld_forward",
+      "input_coordinate": null,
+      "normalized_address": "부산광역시 영도구 동삼동",
+      "observed_at": "2026-07-31T09:21:15+09:00",
+      "probe_coordinate": null,
+      "probe_offset_m": 0,
+      "rationale": "역지오코딩 도로명 원문 \"부산광역시 영도구 해양로301번길 45 (동삼동)\"",
+      "resolved_coordinate": {
+        "lat": 35.07870945955884,
+        "lon": 129.08019978962696
+      },
+      "returned_address": [
+        {
+          "kind": "refined",
+          "text": "부산광역시 영도구 해양로301번길 45 (동삼동)"
+        }
+      ],
+      "source_component_key": "primary",
+      "source_item_key": "sunrise23",
+      "source_reference": "VWorld getcoord 검증(detail=\"국립해양박물관\") · feature.features f_2620012100_p_f5692f4e67a10e69 address.road — 공식 주소 \"부산광역시 영도구 해양로301번길 45\" | VWorld 주소 API 2.0 getAddress — https://api.vworld.kr/req/address (국토교통부 공간정보 오픈플랫폼) — 문헌 주소를 정지오코딩으로 검증",
+      "source_type": "vworld_forward_geocode",
+      "source_urls": [
+        "https://api.vworld.kr/req/address"
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "source_csv_sha256": "48576418799dd52d3c789bdfdcd791fd3b127d52f9af7e38aaaf8d42175d4273"
+}

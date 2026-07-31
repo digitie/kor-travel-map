@@ -553,6 +553,146 @@ async def test_alembic_creates_feature_merge_history(
     assert exists is not None
 
 
+async def test_curation_provenance_migration_fail_closes_legacy_links(
+    pg_container: object,
+) -> None:
+    """0072는 기존 link를 승인으로 추정하지 않고 감사 대상에 고정한다."""
+    from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
+
+    raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
+    admin_dsn = normalize_async_dsn(raw_dsn)
+    database_name = f"curation_provenance_{uuid.uuid4().hex}"
+    migration_dsn = make_url(admin_dsn).set(database=database_name).render_as_string(
+        hide_password=False
+    )
+    admin_engine = make_async_engine(admin_dsn)
+    migration_engine = None
+    try:
+        async with admin_engine.connect() as raw_admin_conn:
+            admin_conn = await raw_admin_conn.execution_options(
+                isolation_level="AUTOCOMMIT"
+            )
+            await admin_conn.execute(text(f'CREATE DATABASE "{database_name}"'))
+
+        await _run_alembic_upgrade(migration_dsn, "0071_integrity_observations")
+        migration_engine = make_async_engine(migration_dsn)
+        async with migration_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO feature.features (
+                        feature_id, kind, name, category,
+                        marker_icon, marker_color
+                    ) VALUES (
+                        'feature:legacy-curation-link',
+                        'place',
+                        '근거 없는 기존 연결',
+                        '01070100',
+                        'place',
+                        'P-01'
+                    )
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_themes (
+                        theme_slug, theme_name, theme_group, visibility
+                    ) VALUES (
+                        'legacy-provenance-test',
+                        '기존 연결 감사',
+                        'test',
+                        'public'
+                    )
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO feature.curation_collections (
+                        collection_key, theme_id, title, status, visibility
+                    )
+                    SELECT
+                        'legacy-provenance-test:2026',
+                        theme_id,
+                        '기존 연결 감사',
+                        'published',
+                        'public'
+                    FROM feature.curated_themes
+                    WHERE theme_slug = 'legacy-provenance-test'
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO feature.curation_items (
+                        collection_id, feature_id, external_item_id,
+                        place_name, status, created_by
+                    )
+                    SELECT
+                        collection_id,
+                        'feature:legacy-curation-link',
+                        'legacy-item',
+                        '근거 없는 기존 연결',
+                        'included',
+                        'migration-fixture'
+                    FROM feature.curation_collections
+                    WHERE collection_key = 'legacy-provenance-test:2026'
+                    """
+                )
+            )
+        await migration_engine.dispose()
+        migration_engine = None
+
+        await _run_alembic_upgrade(migration_dsn)
+        migration_engine = make_async_engine(migration_dsn)
+        async with migration_engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    text(
+                        """
+                        SELECT
+                            item.accepted_link_decision_id =
+                                decision.decision_id AS exact_pointer,
+                            decision.feature_id,
+                            decision.decision_kind,
+                            decision.match_basis,
+                            decision.resolver_version,
+                            decision.actor,
+                            decision.evidence
+                        FROM feature.curation_items AS item
+                        JOIN feature.curation_link_decisions AS decision
+                          ON decision.decision_id =
+                             item.accepted_link_decision_id
+                        WHERE item.external_item_id = 'legacy-item'
+                        """
+                    )
+                )
+            ).mappings().one()
+
+        assert row["exact_pointer"]
+        assert row["feature_id"] == "feature:legacy-curation-link"
+        assert row["decision_kind"] == "accepted"
+        assert row["match_basis"] == "legacy_unattributed"
+        assert row["resolver_version"] == "pre-0072-unknown"
+        assert row["actor"] == "migration-fixture"
+        assert row["evidence"]["migration"] == "0072_curation_provenance"
+    finally:
+        if migration_engine is not None:
+            await migration_engine.dispose()
+        async with admin_engine.connect() as raw_admin_conn:
+            admin_conn = await raw_admin_conn.execution_options(
+                isolation_level="AUTOCOMMIT"
+            )
+            await admin_conn.execute(
+                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
+            )
+        await admin_engine.dispose()
+
+
 async def test_weather_migration_reuses_valid_index_after_partial_failure(
     pg_container: object,
 ) -> None:
@@ -646,7 +786,7 @@ async def test_weather_migration_reuses_valid_index_after_partial_failure(
             ).scalar_one()
 
         assert relfilenode_after == relfilenode_before
-        assert migration_head == "0071_integrity_observations"
+        assert migration_head == "0072_curation_provenance"
     finally:
         if retry_engine is not None:
             await retry_engine.dispose()

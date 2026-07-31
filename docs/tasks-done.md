@@ -3,6 +3,25 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-31 — T-VN-H31R curation 주소·행별 provenance fail-close
+
+- [x] **T-VN-H31R — DB/REST/admin 경계의 curation provenance 완결 (#909, PR #910)**
+
+  주소 후보를 구조화 field·Unicode literal hierarchy·versioned alias로 제한하고
+  `address_hint` 단독 자동 링크를 제거했다. migration `0072_curation_provenance`는
+  import batch/row/link decision을 append-only 정규화하며 DB immutable trigger,
+  batch→row `RESTRICT`, same-item composite FK와 exact current pointer를 강제한다.
+  official 등대 import는 sidecar를 hard-require해 행별 durable provenance를 저장하고,
+  batch/current-row 조회와 stable cursor link audit를 REST/OpenAPI/admin type으로 제공한다.
+
+  Feature merge는 trusted accepted link만 재승인한다. external item별 canonical
+  survivor/provider/operator winner를 결정적으로 하나만 고르고 loser current를 coalesce한다.
+  source-absent component history는 legacy 정본 동기화 뒤 master로 옮겨 active unique와
+  projection/current pointer를 함께 보존한다. 단일 적대 리뷰의 최초 P1 2건·P2 3건·P3 1건과
+  재리뷰 신규 P2 1건을 모두 닫았고 exact `e69f8926` 최종 판정은 P0/P1/P2/P3 0건이다.
+  관련 unit/API/실 PostgreSQL 195건, merge 29건, legacy projection clean DB 5회 반복,
+  admin frontend 286건과 정적/OpenAPI/보안 gate가 통과했다.
+
 ## 2026-07-31 — PR #732 설계 결정의 현재 정본 반영
 
 - [x] **T-VN-DOC-732 — 인증·canonical ops·C6c/C7 문서 정합성**

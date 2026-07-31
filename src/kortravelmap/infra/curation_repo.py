@@ -7,16 +7,22 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, TypedDict
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 
+from kortravelmap.core.address import normalize_korean_text
+from kortravelmap.core.curation_address import (
+    CURATION_ADDRESS_RESOLVER_VERSION,
+    address_hint_matches,
+)
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
 if TYPE_CHECKING:
@@ -26,8 +32,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CurationCollection",
+    "CurationImportBatch",
     "CurationImportPlan",
     "CurationImportResult",
+    "CurationImportRowReceipt",
+    "CurationLinkAudit",
     "CurationItem",
     "FeatureCurationGroup",
     "FeatureMatch",
@@ -39,11 +48,15 @@ __all__ = [
     "archive_curation_collection",
     "create_curation_collection",
     "get_curation_collection",
+    "get_curation_import_batch",
     "get_curation_item",
+    "get_current_curation_import_row",
     "get_feature_curation_group",
     "import_curation_rows",
     "list_curation_collections",
     "list_curation_items_by_feature_ids",
+    "list_unattributed_curation_links",
+    "list_unattributed_curation_links_page",
     "list_feature_curation_groups",
     "preview_curation_import",
     "resolve_feature_match",
@@ -76,6 +89,7 @@ _RELATIONS: Final = frozenset(
 )
 _REUSE_POLICIES: Final = frozenset({"allowed", "blocked", "manual_review"})
 _POSTGRES_INTEGER_MAX: Final = 2_147_483_647
+_FEATURE_MATCH_NAME_CANDIDATE_LIMIT: Final = 100
 
 
 @dataclass(frozen=True)
@@ -140,6 +154,13 @@ class CurationItem:
     curation_relation: str
     reuse_policy: str
     metadata: dict[str, Any]
+    current_import_row_id: str | None
+    accepted_link_decision_id: str | None
+    link_match_basis: str | None
+    link_resolver_version: str | None
+    link_evidence: dict[str, Any]
+    link_actor: str | None
+    link_decided_at: datetime | None
     created_by: str | None
     updated_by: str | None
     created_at: datetime
@@ -178,6 +199,49 @@ class FeatureMatchRequest:
 
 
 @dataclass(frozen=True)
+class CurationLinkAudit:
+    """승인 근거가 없거나 legacy로만 귀속된 current Feature link."""
+
+    curation_item_id: str
+    collection_key: str
+    external_item_id: str
+    external_component_id: str
+    feature_id: str
+    place_name: str
+    address_hint: str | None
+    match_basis: str | None
+    resolver_version: str | None
+    decided_at: datetime | None
+
+
+@dataclass(frozen=True)
+class CurationImportBatch:
+    """성공한 import transaction의 immutable receipt."""
+
+    import_batch_id: str
+    content_sha256: str
+    batch_kind: str
+    row_count: int
+    actor: str
+    metadata: dict[str, Any]
+    imported_at: datetime
+
+
+@dataclass(frozen=True)
+class CurationImportRowReceipt:
+    """batch 또는 item current pointer로 읽는 immutable source row."""
+
+    import_row_id: str
+    import_batch_id: str
+    curation_item_id: str
+    row_number: int
+    source_row_sha256: str
+    row_payload: dict[str, Any]
+    provenance: dict[str, Any]
+    imported_at: datetime
+
+
+@dataclass(frozen=True)
 class ResolvedCurationImportRow:
     row_number: int
     collection_key: str
@@ -199,6 +263,7 @@ class ResolvedCurationImportRow:
     item_summary: str | None
     metadata: dict[str, Any]
     source_component_key: str = "primary"
+    provenance: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -229,6 +294,7 @@ class CurationImportResult(TypedDict):
     updated: int
     removed: int
     removals: tuple[CurationItem, ...]
+    import_batch_id: str | None
 
 
 _COLLECTION_COUNT_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql(
@@ -238,6 +304,22 @@ _COLLECTION_PUBLIC_COUNT_NOTICE_FILTER_SQL: Final[str] = (
     public_active_notice_filter_sql("public_count_pf")
 )
 _ITEM_PUBLIC_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("pf")
+
+
+def _trusted_link_sql(item_alias: str) -> str:
+    return f"""
+    EXISTS (
+        SELECT 1
+        FROM feature.curation_link_decisions AS trusted_decision
+        WHERE trusted_decision.decision_id =
+                  {item_alias}.accepted_link_decision_id
+          AND trusted_decision.curation_item_id =
+                  {item_alias}.curation_item_id
+          AND trusted_decision.feature_id = {item_alias}.feature_id
+          AND trusted_decision.decision_kind = 'accepted'
+          AND trusted_decision.match_basis <> 'legacy_unattributed'
+    )
+    """
 
 
 _COLLECTION_SELECT: Final[str] = f"""
@@ -268,11 +350,14 @@ SELECT
           AND (
               NOT CAST(:public_only AS boolean)
               OR count_item.feature_id IS NULL
-              OR EXISTS (
-                  SELECT 1
-                  FROM feature.public_features AS count_pf
-                  WHERE count_pf.feature_id = count_item.feature_id
-                  {_COLLECTION_COUNT_NOTICE_FILTER_SQL}
+              OR (
+                  {_trusted_link_sql("count_item")}
+                  AND EXISTS (
+                      SELECT 1
+                      FROM feature.public_features AS count_pf
+                      WHERE count_pf.feature_id = count_item.feature_id
+                      {_COLLECTION_COUNT_NOTICE_FILTER_SQL}
+                  )
               )
           )
     ) AS item_count,
@@ -286,11 +371,14 @@ SELECT
           AND (
               NOT CAST(:public_only AS boolean)
               OR public_count_item.feature_id IS NULL
-              OR EXISTS (
-                  SELECT 1
-                  FROM feature.public_features AS public_count_pf
-                  WHERE public_count_pf.feature_id = public_count_item.feature_id
-                  {_COLLECTION_PUBLIC_COUNT_NOTICE_FILTER_SQL}
+              OR (
+                  {_trusted_link_sql("public_count_item")}
+                  AND EXISTS (
+                      SELECT 1
+                      FROM feature.public_features AS public_count_pf
+                      WHERE public_count_pf.feature_id = public_count_item.feature_id
+                      {_COLLECTION_PUBLIC_COUNT_NOTICE_FILTER_SQL}
+                  )
               )
           )
     ) AS public_item_count,
@@ -343,6 +431,13 @@ _ITEM_SELECT_FIELDS: Final[str] = f"""
     i.curation_relation,
     i.reuse_policy,
     i.metadata,
+    i.current_import_row_id::text AS current_import_row_id,
+    i.accepted_link_decision_id::text AS accepted_link_decision_id,
+    link_decision.match_basis AS link_match_basis,
+    link_decision.resolver_version AS link_resolver_version,
+    link_decision.evidence AS link_evidence,
+    link_decision.actor AS link_actor,
+    link_decision.decided_at AS link_decided_at,
     i.created_by,
     i.updated_by,
     i.created_at,
@@ -361,6 +456,8 @@ JOIN feature.curation_collections AS c ON c.collection_id = i.collection_id
 JOIN feature.curated_themes AS t ON t.theme_id = c.theme_id
 LEFT JOIN feature.curated_sources AS s ON s.source_id = c.source_id
 LEFT JOIN feature.features AS f ON f.feature_id = i.feature_id
+LEFT JOIN feature.curation_link_decisions AS link_decision
+  ON link_decision.decision_id = i.accepted_link_decision_id
 """
 )
 
@@ -454,11 +551,14 @@ WHERE i.collection_id = CAST(:collection_id AS uuid)
   AND (
       NOT CAST(:public_only AS boolean)
       OR i.feature_id IS NULL
-      OR EXISTS (
-          SELECT 1
-          FROM feature.public_features AS pf
-          WHERE pf.feature_id = i.feature_id
-          {_ITEM_PUBLIC_NOTICE_FILTER_SQL}
+      OR (
+          {_trusted_link_sql("i")}
+          AND EXISTS (
+              SELECT 1
+              FROM feature.public_features AS pf
+              WHERE pf.feature_id = i.feature_id
+              {_ITEM_PUBLIC_NOTICE_FILTER_SQL}
+          )
       )
   )
 ORDER BY i.sort_order, i.curation_item_id
@@ -479,7 +579,7 @@ WHERE i.collection_id = CAST(:collection_id AS uuid)
 
 _LIST_FEATURE_ITEMS_SQL: Final[str] = (
     _ITEM_SELECT
-    + """
+    + f"""
 WHERE i.feature_id = :feature_id
   AND i.archived_at IS NULL
   AND i.source_present
@@ -491,6 +591,7 @@ WHERE i.feature_id = :feature_id
           AND c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND {_trusted_link_sql("i")}
       )
   )
 ORDER BY c.edition_key DESC, c.title, i.sort_order, i.curation_item_id
@@ -499,7 +600,7 @@ ORDER BY c.edition_key DESC, c.title, i.sort_order, i.curation_item_id
 
 _LIST_FEATURE_ITEMS_BATCH_SQL: Final[str] = (
     _ITEM_SELECT
-    + """
+    + f"""
 WHERE i.feature_id = ANY(CAST(:feature_ids AS text[]))
   AND i.archived_at IS NULL
   AND i.source_present
@@ -511,6 +612,7 @@ WHERE i.feature_id = ANY(CAST(:feature_ids AS text[]))
           AND c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND {_trusted_link_sql("i")}
       )
   )
 ORDER BY i.feature_id, c.edition_key DESC, c.title, i.sort_order,
@@ -554,6 +656,7 @@ WHERE (
                 AND matched_collection.status = 'published'
                 AND matched_collection.visibility = 'public'
                 AND matched_theme.visibility = 'public'
+                AND {_trusted_link_sql("matched_item")}
             )
         )
         AND (
@@ -773,6 +876,8 @@ JOIN feature.curation_collections AS c ON c.collection_id = i.collection_id
 JOIN feature.curated_themes AS t ON t.theme_id = c.theme_id
 LEFT JOIN feature.curated_sources AS s ON s.source_id = c.source_id
 LEFT JOIN feature.features AS f ON f.feature_id = i.feature_id
+LEFT JOIN feature.curation_link_decisions AS link_decision
+  ON link_decision.decision_id = i.accepted_link_decision_id
 ORDER BY c.collection_key, i.sort_order, i.curation_item_id
 """
 )
@@ -1017,6 +1122,213 @@ SELECT
     count(*) FILTER (WHERE inserted)::integer AS inserted,
     count(*) FILTER (WHERE NOT inserted)::integer AS updated
 FROM written
+"""
+
+_INSERT_IMPORT_BATCH_SQL: Final[str] = """
+INSERT INTO feature.curation_import_batches (
+    content_sha256, batch_kind, row_count, actor, metadata
+) VALUES (
+    :content_sha256, :batch_kind, :row_count, :actor, CAST(:metadata AS jsonb)
+)
+RETURNING import_batch_id::text
+"""
+
+_IMPORT_ITEM_IDENTITIES_SQL: Final[str] = """
+WITH incoming AS (
+    SELECT *
+    FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS value(
+        row_number integer,
+        collection_key text,
+        external_item_id text,
+        external_component_id text
+    )
+)
+SELECT
+    incoming.row_number,
+    item.curation_item_id::text AS curation_item_id,
+    item.feature_id,
+    item.archived_at,
+    item.accepted_link_decision_id::text AS accepted_link_decision_id,
+    previous_decision.feature_id AS previous_decision_feature_id
+FROM incoming
+JOIN feature.curation_collections AS collection
+  ON collection.collection_key = incoming.collection_key
+JOIN feature.curation_items AS item
+  ON item.collection_id = collection.collection_id
+ AND item.external_item_id = incoming.external_item_id
+ AND item.external_component_id = incoming.external_component_id
+LEFT JOIN feature.curation_link_decisions AS previous_decision
+  ON previous_decision.decision_id = item.accepted_link_decision_id
+ORDER BY incoming.row_number
+"""
+
+_INSERT_IMPORT_ROWS_SQL: Final[str] = """
+INSERT INTO feature.curation_import_rows (
+    import_row_id, import_batch_id, curation_item_id, row_number,
+    source_row_sha256, row_payload, provenance
+)
+SELECT
+    CAST(value.import_row_id AS uuid),
+    CAST(:import_batch_id AS uuid),
+    CAST(value.curation_item_id AS uuid),
+    value.row_number,
+    value.source_row_sha256,
+    value.row_payload,
+    value.provenance
+FROM jsonb_to_recordset(CAST(:rows AS jsonb)) AS value(
+    import_row_id text,
+    curation_item_id text,
+    row_number integer,
+    source_row_sha256 text,
+    row_payload jsonb,
+    provenance jsonb
+)
+"""
+
+_INSERT_LINK_DECISIONS_SQL: Final[str] = """
+INSERT INTO feature.curation_link_decisions (
+    decision_id, curation_item_id, feature_id, import_row_id,
+    decision_kind, match_basis, resolver_version, evidence, actor,
+    supersedes_decision_id
+)
+SELECT
+    CAST(value.decision_id AS uuid),
+    CAST(value.curation_item_id AS uuid),
+    value.feature_id,
+    CAST(value.import_row_id AS uuid),
+    value.decision_kind,
+    value.match_basis,
+    value.resolver_version,
+    value.evidence,
+    :actor,
+    CAST(value.supersedes_decision_id AS uuid)
+FROM jsonb_to_recordset(CAST(:decisions AS jsonb)) AS value(
+    decision_id text,
+    curation_item_id text,
+    feature_id text,
+    import_row_id text,
+    decision_kind text,
+    match_basis text,
+    resolver_version text,
+    evidence jsonb,
+    supersedes_decision_id text
+)
+"""
+
+_ADVANCE_IMPORT_POINTERS_SQL: Final[str] = """
+WITH pointers AS (
+    SELECT *
+    FROM jsonb_to_recordset(CAST(:pointers AS jsonb)) AS value(
+        curation_item_id text,
+        import_row_id text,
+        accepted_link_decision_id text
+    )
+)
+UPDATE feature.curation_items AS item
+SET current_import_row_id = CAST(pointers.import_row_id AS uuid),
+    accepted_link_decision_id =
+        CAST(pointers.accepted_link_decision_id AS uuid)
+FROM pointers
+WHERE item.curation_item_id = CAST(pointers.curation_item_id AS uuid)
+"""
+
+_INSERT_MANUAL_LINK_DECISION_SQL: Final[str] = """
+INSERT INTO feature.curation_link_decisions (
+    curation_item_id, feature_id, decision_kind, match_basis,
+    resolver_version, evidence, actor, supersedes_decision_id
+) VALUES (
+    CAST(:curation_item_id AS uuid),
+    :feature_id,
+    :decision_kind,
+    :match_basis,
+    :resolver_version,
+    CAST(:evidence AS jsonb),
+    :actor,
+    CAST(:supersedes_decision_id AS uuid)
+)
+RETURNING decision_id::text
+"""
+
+_LIST_UNATTRIBUTED_LINKS_SQL: Final[str] = """
+SELECT
+    collection.collection_id::text AS collection_id,
+    item.curation_item_id::text AS curation_item_id,
+    collection.collection_key,
+    item.external_item_id,
+    item.external_component_id,
+    item.feature_id,
+    item.place_name,
+    item.address_hint,
+    decision.match_basis,
+    decision.resolver_version,
+    decision.decided_at
+FROM feature.curation_items AS item
+JOIN feature.curation_collections AS collection
+  ON collection.collection_id = item.collection_id
+LEFT JOIN feature.curation_link_decisions AS decision
+  ON decision.decision_id = item.accepted_link_decision_id
+WHERE item.feature_id IS NOT NULL
+  AND item.archived_at IS NULL
+  AND item.source_present
+  AND (
+      CAST(:cursor_collection_id AS uuid) IS NULL
+      OR (collection.collection_id, item.curation_item_id) > (
+          CAST(:cursor_collection_id AS uuid),
+          CAST(:cursor_curation_item_id AS uuid)
+      )
+  )
+  AND (
+      decision.decision_id IS NULL
+      OR decision.decision_kind <> 'accepted'
+      OR decision.match_basis = 'legacy_unattributed'
+  )
+ORDER BY collection.collection_id, item.curation_item_id
+LIMIT :limit
+"""
+
+_GET_IMPORT_BATCH_SQL: Final[str] = """
+SELECT
+    import_batch_id::text AS import_batch_id,
+    content_sha256,
+    batch_kind,
+    row_count,
+    actor,
+    metadata,
+    imported_at
+FROM feature.curation_import_batches
+WHERE import_batch_id = CAST(:import_batch_id AS uuid)
+"""
+
+_LIST_IMPORT_BATCH_ROWS_SQL: Final[str] = """
+SELECT
+    import_row_id::text AS import_row_id,
+    import_batch_id::text AS import_batch_id,
+    curation_item_id::text AS curation_item_id,
+    row_number,
+    source_row_sha256,
+    row_payload,
+    provenance,
+    imported_at
+FROM feature.curation_import_rows
+WHERE import_batch_id = CAST(:import_batch_id AS uuid)
+ORDER BY row_number, import_row_id
+"""
+
+_GET_CURRENT_IMPORT_ROW_SQL: Final[str] = """
+SELECT
+    import_row.import_row_id::text AS import_row_id,
+    import_row.import_batch_id::text AS import_batch_id,
+    import_row.curation_item_id::text AS curation_item_id,
+    import_row.row_number,
+    import_row.source_row_sha256,
+    import_row.row_payload,
+    import_row.provenance,
+    import_row.imported_at
+FROM feature.curation_items AS item
+JOIN feature.curation_import_rows AS import_row
+  ON import_row.import_row_id = item.current_import_row_id
+ AND import_row.curation_item_id = item.curation_item_id
+WHERE item.curation_item_id = CAST(:curation_item_id AS uuid)
 """
 
 _PREVIEW_IMPORT_COUNTS_SQL: Final[str] = """
@@ -1310,7 +1622,8 @@ SELECT
     matched.name,
     matched.address,
     matched.lon,
-    matched.lat
+    matched.lat,
+    matched.name_candidate_count
 FROM requested
 CROSS JOIN LATERAL (
     (
@@ -1319,7 +1632,8 @@ CROSS JOIN LATERAL (
             f.name,
             f.address,
             x_extension.ST_X(f.coord) AS lon,
-            x_extension.ST_Y(f.coord) AS lat
+            x_extension.ST_Y(f.coord) AS lat,
+            1::bigint AS name_candidate_count
         FROM feature.features AS f
         WHERE requested.feature_id IS NOT NULL
           AND f.feature_id = requested.feature_id
@@ -1333,41 +1647,16 @@ CROSS JOIN LATERAL (
             f.name,
             f.address,
             x_extension.ST_X(f.coord) AS lon,
-            x_extension.ST_Y(f.coord) AS lat
+            x_extension.ST_Y(f.coord) AS lat,
+            count(*) OVER () AS name_candidate_count
         FROM feature.features AS f
         WHERE requested.feature_id IS NULL
           AND requested.place_name IS NOT NULL
           AND lower(f.name) = lower(requested.place_name)
           AND f.deleted_at IS NULL
           AND f.status NOT IN ('deleted', 'hidden')
-          AND (
-              requested.address_hint IS NULL
-              OR NOT EXISTS (
-                  -- hint를 공백 토큰으로 쪼개 **전부** 포함하는지 본다 (T-VN-H31).
-                  --
-                  -- 이전에는 `f.address::text ILIKE '%' || hint || '%'`로 직렬화 jsonb에
-                  -- 통짜 substring을 걸었다. 그런데 address jsonb는 `sido_name`·
-                  -- `sigungu_name`·`admin`을 **분리 저장**하므로 `'울산광역시 울주군
-                  -- 서생면'` 같은 다중 토큰 hint는 어떤 행에서도 연속 부분문자열이
-                  -- 아니다 — 상세할수록 매칭이 안 되는 역전이 있었다. 실측으로
-                  -- `feature.features`의 8%는 `road`/`legal`이 둘 다 null이고 관광
-                  -- Feature는 그 비율이 더 높아, 도로명/지번 어느 쪽을 넣어도 같은 벽에 막힌다.
-                  --
-                  -- 토큰 AND로 바꾸면 시군구 단독은 물론 `'시도 시군구 읍면동 리'`까지
-                  -- 그대로 작동하고, 토큰이 많을수록 **더 좁아진다**(오링크가 줄어든다).
-                  SELECT 1
-                  FROM unnest(
-                      string_to_array(
-                          btrim(regexp_replace(requested.address_hint, '\\s+', ' ', 'g')),
-                          ' '
-                      )
-                  ) AS hint_token
-                  WHERE hint_token <> ''
-                    AND f.address::text NOT ILIKE '%' || hint_token || '%'
-              )
-          )
         ORDER BY f.feature_id
-        LIMIT 3
+        LIMIT 101
     )
 ) AS matched
 ORDER BY requested.row_number, matched.feature_id
@@ -1463,6 +1752,23 @@ def _item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
         curation_relation=str(row["curation_relation"]),
         reuse_policy=str(row["reuse_policy"]),
         metadata=_object(row["metadata"]),
+        current_import_row_id=(
+            str(value) if (value := row.get("current_import_row_id")) else None
+        ),
+        accepted_link_decision_id=(
+            str(value)
+            if (value := row.get("accepted_link_decision_id"))
+            else None
+        ),
+        link_match_basis=(
+            str(value) if (value := row.get("link_match_basis")) else None
+        ),
+        link_resolver_version=(
+            str(value) if (value := row.get("link_resolver_version")) else None
+        ),
+        link_evidence=_object(row.get("link_evidence")),
+        link_actor=str(value) if (value := row.get("link_actor")) else None,
+        link_decided_at=row.get("link_decided_at"),
         created_by=row["created_by"],
         updated_by=row["updated_by"],
         created_at=row["created_at"],
@@ -1478,6 +1784,50 @@ def _feature_match(row: RowMapping | Mapping[str, Any]) -> FeatureMatch:
         address=_object(row["address"]),
         lon=float(row["lon"]) if row["lon"] is not None else None,
         lat=float(row["lat"]) if row["lat"] is not None else None,
+    )
+
+
+def _import_batch(row: RowMapping | Mapping[str, Any]) -> CurationImportBatch:
+    return CurationImportBatch(
+        import_batch_id=str(row["import_batch_id"]),
+        content_sha256=str(row["content_sha256"]),
+        batch_kind=str(row["batch_kind"]),
+        row_count=int(row["row_count"]),
+        actor=str(row["actor"]),
+        metadata=_object(row["metadata"]),
+        imported_at=row["imported_at"],
+    )
+
+
+def _import_row_receipt(
+    row: RowMapping | Mapping[str, Any],
+) -> CurationImportRowReceipt:
+    return CurationImportRowReceipt(
+        import_row_id=str(row["import_row_id"]),
+        import_batch_id=str(row["import_batch_id"]),
+        curation_item_id=str(row["curation_item_id"]),
+        row_number=int(row["row_number"]),
+        source_row_sha256=str(row["source_row_sha256"]),
+        row_payload=_object(row["row_payload"]),
+        provenance=_object(row["provenance"]),
+        imported_at=row["imported_at"],
+    )
+
+
+def _link_audit(row: RowMapping | Mapping[str, Any]) -> CurationLinkAudit:
+    return CurationLinkAudit(
+        curation_item_id=str(row["curation_item_id"]),
+        collection_key=str(row["collection_key"]),
+        external_item_id=str(row["external_item_id"]),
+        external_component_id=str(row["external_component_id"]),
+        feature_id=str(row["feature_id"]),
+        place_name=str(row["place_name"]),
+        address_hint=row["address_hint"],
+        match_basis=str(row["match_basis"]) if row["match_basis"] else None,
+        resolver_version=(
+            str(row["resolver_version"]) if row["resolver_version"] else None
+        ),
+        decided_at=row["decided_at"],
     )
 
 
@@ -1529,6 +1879,44 @@ def decode_group_cursor(cursor: str | None) -> str | None:
     if not isinstance(feature_id, str) or not feature_id:
         raise ValueError("invalid curation group cursor")
     return feature_id
+
+
+def encode_link_audit_cursor(collection_id: str, curation_item_id: str) -> str:
+    """audit total order key를 versioned opaque cursor로 직렬화한다."""
+
+    payload = json.dumps(
+        {
+            "v": 1,
+            "collection_id": str(UUID(collection_id)),
+            "curation_item_id": str(UUID(curation_item_id)),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def decode_link_audit_cursor(cursor: str | None) -> tuple[str, str] | None:
+    if cursor is None:
+        return None
+    try:
+        raw = base64.b64decode(
+            cursor + "=" * (-len(cursor) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+        value = json.loads(raw)
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"v", "collection_id", "curation_item_id"}
+            or value["v"] != 1
+        ):
+            raise ValueError
+        collection_id = str(UUID(value["collection_id"]))
+        curation_item_id = str(UUID(value["curation_item_id"]))
+    except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid curation link audit cursor") from exc
+    return collection_id, curation_item_id
 
 
 async def list_curation_collections(
@@ -1644,6 +2032,60 @@ async def get_curation_item(
         .first()
     )
     return _item(row) if row is not None else None
+
+
+async def get_curation_import_batch(
+    session: AsyncSession,
+    *,
+    import_batch_id: str,
+) -> tuple[CurationImportBatch, tuple[CurationImportRowReceipt, ...]] | None:
+    """한 import receipt와 exact row evidence를 batch row 순서로 읽는다."""
+
+    batch_row = (
+        (
+            await session.execute(
+                text(_GET_IMPORT_BATCH_SQL),
+                {"import_batch_id": import_batch_id},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if batch_row is None:
+        return None
+    row_rows = (
+        (
+            await session.execute(
+                text(_LIST_IMPORT_BATCH_ROWS_SQL),
+                {"import_batch_id": import_batch_id},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return _import_batch(batch_row), tuple(
+        _import_row_receipt(row) for row in row_rows
+    )
+
+
+async def get_current_curation_import_row(
+    session: AsyncSession,
+    *,
+    curation_item_id: str,
+) -> CurationImportRowReceipt | None:
+    """item의 composite current pointer가 가리키는 immutable row를 읽는다."""
+
+    row = (
+        (
+            await session.execute(
+                text(_GET_CURRENT_IMPORT_ROW_SQL),
+                {"curation_item_id": curation_item_id},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return _import_row_receipt(row) if row is not None else None
 
 
 async def _lock_collection_keys(
@@ -1986,6 +2428,59 @@ async def add_curation_item(
         .one()
     )
     item_id = str(row["curation_item_id"])
+    previous_decision = (
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                        item.accepted_link_decision_id::text AS decision_id,
+                        decision.feature_id
+                    FROM feature.curation_items AS item
+                    LEFT JOIN feature.curation_link_decisions AS decision
+                      ON decision.decision_id =
+                         item.accepted_link_decision_id
+                    WHERE item.curation_item_id =
+                          CAST(:curation_item_id AS uuid)
+                    """
+                ),
+                {"curation_item_id": item_id},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    previous_decision_id = (
+        str(previous_decision["decision_id"])
+        if previous_decision["decision_id"]
+        else None
+    )
+    if feature_id is not None:
+        await _record_manual_link_decision(
+            session,
+            curation_item_id=item_id,
+            feature_id=feature_id,
+            decision_kind="accepted",
+            actor=actor,
+            supersedes_decision_id=previous_decision_id,
+            evidence={
+                "operation": "add_curation_item",
+                "requested_feature_id": feature_id,
+            },
+        )
+    elif previous_decision_id is not None:
+        await _record_manual_link_decision(
+            session,
+            curation_item_id=item_id,
+            feature_id=str(previous_decision["feature_id"]),
+            decision_kind="revoked",
+            actor=actor,
+            supersedes_decision_id=previous_decision_id,
+            evidence={
+                "operation": "add_curation_item",
+                "reason": "명시적 feature_id=null",
+            },
+        )
     item_row = (
         (
             await session.execute(
@@ -2218,6 +2713,36 @@ async def update_curation_item(
     ).first()
     if row is None:
         return None
+    if "feature_id" in normalized:
+        requested_feature_id = normalized["feature_id"]
+        if requested_feature_id is not None:
+            await _record_manual_link_decision(
+                session,
+                curation_item_id=curation_item_id,
+                feature_id=str(requested_feature_id),
+                decision_kind="accepted",
+                actor=actor,
+                supersedes_decision_id=current.accepted_link_decision_id,
+                evidence={
+                    "operation": "update_curation_item",
+                    "previous_feature_id": current.feature_id,
+                    "requested_feature_id": requested_feature_id,
+                },
+            )
+        elif current.feature_id is not None:
+            await _record_manual_link_decision(
+                session,
+                curation_item_id=curation_item_id,
+                feature_id=current.feature_id,
+                decision_kind="revoked",
+                actor=actor,
+                supersedes_decision_id=current.accepted_link_decision_id,
+                evidence={
+                    "operation": "update_curation_item",
+                    "previous_feature_id": current.feature_id,
+                    "reason": "명시적 feature_id=null",
+                },
+            )
     if operator_owned_changed:
         target_status = str(normalized.get("status", current.status))
         target_relation = str(
@@ -2380,6 +2905,59 @@ async def list_curation_items_by_feature_ids(
     return {feature_id: tuple(items) for feature_id, items in grouped.items()}
 
 
+async def list_unattributed_curation_links(
+    session: AsyncSession,
+    *,
+    limit: int = 500,
+) -> tuple[CurationLinkAudit, ...]:
+    """첫 audit page만 읽는 기존 내부 호출용 편의 함수."""
+
+    rows, _next_cursor = await list_unattributed_curation_links_page(
+        session,
+        limit=limit,
+    )
+    return rows
+
+
+async def list_unattributed_curation_links_page(
+    session: AsyncSession,
+    *,
+    limit: int = 500,
+    cursor: str | None = None,
+) -> tuple[tuple[CurationLinkAudit, ...], str | None]:
+    """unsafe current link를 stable UUID total order로 전진 조회한다."""
+
+    effective_limit = max(1, min(limit, 10_000))
+    decoded_cursor = decode_link_audit_cursor(cursor)
+    row_mappings = (
+        (
+            await session.execute(
+                text(_LIST_UNATTRIBUTED_LINKS_SQL),
+                {
+                    "limit": effective_limit + 1,
+                    "cursor_collection_id": (
+                        decoded_cursor[0] if decoded_cursor else None
+                    ),
+                    "cursor_curation_item_id": (
+                        decoded_cursor[1] if decoded_cursor else None
+                    ),
+                },
+            )
+        )
+        .mappings()
+        .all()
+    )
+    page_rows = row_mappings[:effective_limit]
+    next_cursor = None
+    if len(row_mappings) > effective_limit and page_rows:
+        last = page_rows[-1]
+        next_cursor = encode_link_audit_cursor(
+            str(last["collection_id"]),
+            str(last["curation_item_id"]),
+        )
+    return tuple(_link_audit(row) for row in page_rows), next_cursor
+
+
 async def list_feature_curation_groups(
     session: AsyncSession,
     *,
@@ -2486,7 +3064,11 @@ async def resolve_feature_matches(
     *,
     requests: Sequence[FeatureMatchRequest],
 ) -> dict[int, tuple[FeatureMatch, ...]]:
-    """CSV 전체의 exact Feature/name 후보를 한 번의 parameterized query로 찾는다."""
+    """CSV 전체의 exact Feature/name 후보를 한 번의 parameterized query로 찾는다.
+
+    DB는 ``lower(name)`` index로 후보만 좁힌다. 주소는 JSON serialization/SQL pattern을
+    전혀 사용하지 않고 Python의 구조화 literal matcher로 판정한다.
+    """
 
     if not requests:
         return {}
@@ -2494,8 +3076,8 @@ async def resolve_feature_matches(
         {
             "row_number": request.row_number,
             "feature_id": request.feature_id.strip() if request.feature_id else None,
-            "place_name": request.place_name.strip() if request.place_name else None,
-            "address_hint": (request.address_hint.strip() if request.address_hint else None),
+            "place_name": normalize_korean_text(request.place_name),
+            "address_hint": normalize_korean_text(request.address_hint),
         }
         for request in requests
     ]
@@ -2509,9 +3091,27 @@ async def resolve_feature_matches(
         .mappings()
         .all()
     )
+    requests_by_row = {request.row_number: request for request in requests}
     grouped: dict[int, list[FeatureMatch]] = {request.row_number: [] for request in requests}
     for row in rows:
-        grouped[int(row["row_number"])].append(_feature_match(row))
+        row_number = int(row["row_number"])
+        request = requests_by_row[row_number]
+        if (
+            request.feature_id is None
+            and int(row["name_candidate_count"]) > _FEATURE_MATCH_NAME_CANDIDATE_LIMIT
+        ):
+            # 상한 밖 후보를 보지 않고 "유일"로 오판하지 않는다.
+            grouped[row_number].clear()
+            continue
+        match = _feature_match(row)
+        normalized_hint = normalize_korean_text(request.address_hint)
+        if (
+            request.feature_id is None
+            and normalized_hint is not None
+            and not address_hint_matches(match.address, normalized_hint)
+        ):
+            continue
+        grouped[row_number].append(match)
     return {row_number: tuple(items) for row_number, items in grouped.items()}
 
 
@@ -2597,6 +3197,296 @@ def _ensure_resolved_curation_identities(
         raise ValueError(issues[0].message)
 
 
+def _canonical_import_row_payload(
+    row: ResolvedCurationImportRow,
+) -> dict[str, Any]:
+    return {
+        "row_number": row.row_number,
+        "collection_key": row.collection_key,
+        "theme_slug": row.theme_slug,
+        "theme_name": row.theme_name,
+        "theme_group": row.theme_group,
+        "title": row.title,
+        "edition_key": row.edition_key,
+        "provider": row.provider,
+        "dataset_key": row.dataset_key,
+        "source_name": row.source_name,
+        "source_url": row.source_url,
+        "source_item_key": row.source_item_key,
+        "source_component_key": row.source_component_key,
+        "feature_id": row.feature_id,
+        "place_name": row.place_name,
+        "address_hint": row.address_hint,
+        "sort_order": row.sort_order,
+        "item_title": row.item_title,
+        "item_summary": row.item_summary,
+        "metadata": row.metadata,
+    }
+
+
+def _canonical_json_sha256(value: object) -> str:
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(serialized).hexdigest()
+
+
+def _validated_sha256(value: str) -> str:
+    normalized = value.strip().lower()
+    if len(normalized) != 64 or any(
+        character not in "0123456789abcdef" for character in normalized
+    ):
+        raise ValueError("content_sha256는 lowercase SHA-256 hex여야 합니다.")
+    return normalized
+
+
+async def _record_import_provenance(
+    session: AsyncSession,
+    *,
+    rows: Sequence[ResolvedCurationImportRow],
+    actor: str | None,
+    source_content_sha256: str | None,
+    batch_kind: str | None,
+) -> str:
+    """current item을 exact immutable import row/decision으로 전진시킨다."""
+
+    effective_actor = (actor or "system:curation-import").strip()
+    if not effective_actor:
+        raise ValueError("curation import actor는 비어 있을 수 없습니다.")
+    canonical_rows = [_canonical_import_row_payload(row) for row in rows]
+    effective_content_sha256 = (
+        _validated_sha256(source_content_sha256)
+        if source_content_sha256 is not None
+        else _canonical_json_sha256(canonical_rows)
+    )
+    effective_kind = batch_kind or (
+        "csv_upload" if source_content_sha256 is not None else "normalized_rows"
+    )
+    if effective_kind not in {
+        "csv_upload",
+        "normalized_rows",
+        "forward_recovery",
+    }:
+        raise ValueError("지원하지 않는 curation import batch_kind입니다.")
+    decision_match_basis = (
+        "forward_recovery"
+        if effective_kind == "forward_recovery"
+        else "csv_explicit_feature_id"
+    )
+    decision_resolver_version = (
+        "forward-recovery-v1"
+        if effective_kind == "forward_recovery"
+        else "explicit-feature-id-v1"
+    )
+
+    import_batch_id = str(
+        (
+            await session.execute(
+                text(_INSERT_IMPORT_BATCH_SQL),
+                {
+                    "content_sha256": effective_content_sha256,
+                    "batch_kind": effective_kind,
+                    "row_count": len(rows),
+                    "actor": effective_actor,
+                    "metadata": json.dumps(
+                        {
+                            "schema_version": 1,
+                            "address_resolver": CURATION_ADDRESS_RESOLVER_VERSION,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            )
+        ).scalar_one()
+    )
+    if not rows:
+        return import_batch_id
+
+    identity_payload = json.dumps(
+        [
+            {
+                "row_number": row.row_number,
+                "collection_key": row.collection_key,
+                "external_item_id": row.source_item_key,
+                "external_component_id": row.source_component_key,
+            }
+            for row in rows
+        ],
+        ensure_ascii=False,
+    )
+    identity_rows = (
+        (
+            await session.execute(
+                text(_IMPORT_ITEM_IDENTITIES_SQL),
+                {"items": identity_payload},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    identities = {int(row["row_number"]): row for row in identity_rows}
+    if set(identities) != {row.row_number for row in rows}:
+        raise RuntimeError("import row를 current curation item에 exact 결박하지 못했습니다.")
+
+    import_rows: list[dict[str, Any]] = []
+    decisions: list[dict[str, Any]] = []
+    pointers: list[dict[str, Any]] = []
+    for row, row_payload in zip(rows, canonical_rows, strict=True):
+        identity = identities[row.row_number]
+        item_is_archived = identity["archived_at"] is not None
+        current_feature_id = (
+            str(identity["feature_id"]) if identity["feature_id"] else None
+        )
+        if not item_is_archived and current_feature_id != row.feature_id:
+            raise RuntimeError("import 직후 item Feature가 normalized row와 다릅니다.")
+        import_row_id = str(uuid4())
+        source_row_sha256 = _canonical_json_sha256(row_payload)
+        import_rows.append(
+            {
+                "import_row_id": import_row_id,
+                "curation_item_id": str(identity["curation_item_id"]),
+                "row_number": row.row_number,
+                "source_row_sha256": source_row_sha256,
+                "row_payload": row_payload,
+                "provenance": row.provenance or {},
+            }
+        )
+        if item_is_archived:
+            continue
+        previous_decision_id = (
+            str(identity["accepted_link_decision_id"])
+            if identity["accepted_link_decision_id"]
+            else None
+        )
+        accepted_decision_id: str | None = None
+        if row.feature_id is not None:
+            accepted_decision_id = str(uuid4())
+            decisions.append(
+                {
+                    "decision_id": accepted_decision_id,
+                    "curation_item_id": str(identity["curation_item_id"]),
+                    "feature_id": row.feature_id,
+                    "import_row_id": import_row_id,
+                    "decision_kind": "accepted",
+                    "match_basis": decision_match_basis,
+                    "resolver_version": decision_resolver_version,
+                    "evidence": {
+                        "source_row_sha256": source_row_sha256,
+                        "requested_feature_id": row.feature_id,
+                        "normalized_place_name": normalize_korean_text(
+                            row.place_name
+                        ),
+                        "normalized_address_hint": normalize_korean_text(
+                            row.address_hint
+                        ),
+                    },
+                    "supersedes_decision_id": previous_decision_id,
+                }
+            )
+        elif previous_decision_id is not None:
+            previous_feature_id = str(identity["previous_decision_feature_id"])
+            decisions.append(
+                {
+                    "decision_id": str(uuid4()),
+                    "curation_item_id": str(identity["curation_item_id"]),
+                    "feature_id": previous_feature_id,
+                    "import_row_id": import_row_id,
+                    "decision_kind": "revoked",
+                    "match_basis": decision_match_basis,
+                    "resolver_version": decision_resolver_version,
+                    "evidence": {
+                        "source_row_sha256": source_row_sha256,
+                        "previous_feature_id": previous_feature_id,
+                        "reason": "authoritative import row에 feature_id가 없음",
+                    },
+                    "supersedes_decision_id": previous_decision_id,
+                }
+            )
+        pointers.append(
+            {
+                "curation_item_id": str(identity["curation_item_id"]),
+                "import_row_id": import_row_id,
+                "accepted_link_decision_id": accepted_decision_id,
+            }
+        )
+
+    await session.execute(
+        text(_INSERT_IMPORT_ROWS_SQL),
+        {
+            "import_batch_id": import_batch_id,
+            "rows": json.dumps(import_rows, ensure_ascii=False),
+        },
+    )
+    if decisions:
+        await session.execute(
+            text(_INSERT_LINK_DECISIONS_SQL),
+            {
+                "actor": effective_actor,
+                "decisions": json.dumps(decisions, ensure_ascii=False),
+            },
+        )
+    await session.execute(
+        text(_ADVANCE_IMPORT_POINTERS_SQL),
+        {"pointers": json.dumps(pointers, ensure_ascii=False)},
+    )
+    return import_batch_id
+
+
+async def _record_manual_link_decision(
+    session: AsyncSession,
+    *,
+    curation_item_id: str,
+    feature_id: str,
+    decision_kind: Literal["accepted", "revoked"],
+    actor: str | None,
+    supersedes_decision_id: str | None,
+    evidence: Mapping[str, Any],
+) -> str:
+    effective_actor = (actor or "system:curation-admin").strip()
+    if not effective_actor:
+        raise ValueError("curation link decision actor는 비어 있을 수 없습니다.")
+    decision_id = str(
+        (
+            await session.execute(
+                text(_INSERT_MANUAL_LINK_DECISION_SQL),
+                {
+                    "curation_item_id": curation_item_id,
+                    "feature_id": feature_id,
+                    "decision_kind": decision_kind,
+                    "match_basis": "admin_review",
+                    "resolver_version": "manual-admin-v1",
+                    "evidence": json.dumps(dict(evidence), ensure_ascii=False),
+                    "actor": effective_actor,
+                    "supersedes_decision_id": supersedes_decision_id,
+                },
+            )
+        ).scalar_one()
+    )
+    await session.execute(
+        text(
+            """
+            UPDATE feature.curation_items
+            SET accepted_link_decision_id =
+                    CASE
+                        WHEN :decision_kind = 'accepted'
+                        THEN CAST(:decision_id AS uuid)
+                        ELSE NULL
+                    END
+            WHERE curation_item_id = CAST(:curation_item_id AS uuid)
+            """
+        ),
+        {
+            "curation_item_id": curation_item_id,
+            "decision_id": decision_id,
+            "decision_kind": decision_kind,
+        },
+    )
+    return decision_id
+
+
 async def _ensure_unambiguous_legacy_import_adoptions(
     session: AsyncSession,
     *,
@@ -2673,6 +3563,8 @@ async def import_curation_rows(
     *,
     rows: Sequence[ResolvedCurationImportRow],
     actor: str | None = None,
+    source_content_sha256: str | None = None,
+    batch_kind: str | None = None,
 ) -> CurationImportResult:
     """검증·Feature 해소가 끝난 CSV 행을 한 transaction에서 멱등 upsert한다."""
     _ensure_resolved_curation_identities(rows)
@@ -2847,6 +3739,13 @@ async def import_curation_rows(
                 ),
                 {"collection_ids": collection_ids, "actor": actor},
             )
+    import_batch_id = await _record_import_provenance(
+        session,
+        rows=rows,
+        actor=actor,
+        source_content_sha256=source_content_sha256,
+        batch_kind=batch_kind,
+    )
     return {
         "rows": len(rows),
         "collections": len(collections),
@@ -2854,4 +3753,5 @@ async def import_curation_rows(
         "updated": counts["updated"],
         "removed": counts["removed"],
         "removals": removals,
+        "import_batch_id": import_batch_id,
     }

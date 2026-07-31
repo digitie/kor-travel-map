@@ -279,7 +279,7 @@ cache를 추가했다.
 PinVi는 REST snapshot을 읽어 `app.curated_trip_plans` /
 `app.curated_plan_pois`로 복사하며, kor-travel-map DB에 직접 접근하지 않는다.
 
-### 1.3 `feature.curation_collections` / `feature.curation_items` (ADR-063, alembic 0045·0065·0066)
+### 1.3 `feature.curation_*` (ADR-063, alembic 0045·0065·0066·0072)
 
 공식 목록·회차·캠페인처럼 하나의 Feature가 여러 큐레이션 사실을 동시에 가질 수 있는
 데이터는 collection과 membership을 분리한다. 기존 `feature.curated_features`의 source-rule
@@ -329,6 +329,8 @@ CREATE TABLE feature.curation_items (
   legacy_projection_id UUID
     REFERENCES feature.curated_features(curated_feature_id)
     DEFERRABLE INITIALLY DEFERRED,
+  current_import_row_id UUID,
+  accepted_link_decision_id UUID,
   external_item_id TEXT NOT NULL,
   external_component_id TEXT NOT NULL DEFAULT 'primary',
   place_name TEXT NOT NULL,
@@ -389,6 +391,92 @@ CREATE INDEX idx_curation_items_collection_status_order
 CREATE INDEX idx_curation_items_feature_status_collection
   ON feature.curation_items
     (feature_id, source_present, status, collection_id);
+
+CREATE TABLE feature.curation_import_batches (
+  import_batch_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  content_sha256 TEXT NOT NULL CHECK (content_sha256 ~ '^[0-9a-f]{64}$'),
+  batch_kind TEXT NOT NULL
+    CHECK (batch_kind IN ('csv_upload','normalized_rows','forward_recovery')),
+  row_count INTEGER NOT NULL CHECK (row_count >= 0),
+  actor TEXT NOT NULL CHECK (actor = btrim(actor) AND actor <> ''),
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE feature.curation_import_rows (
+  import_row_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  import_batch_id UUID NOT NULL
+    REFERENCES feature.curation_import_batches(import_batch_id) ON DELETE RESTRICT,
+  curation_item_id UUID NOT NULL
+    REFERENCES feature.curation_items(curation_item_id) ON DELETE RESTRICT,
+  row_number INTEGER NOT NULL CHECK (row_number > 0),
+  source_row_sha256 TEXT NOT NULL CHECK (source_row_sha256 ~ '^[0-9a-f]{64}$'),
+  row_payload JSONB NOT NULL,
+  provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
+  imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (import_batch_id, row_number),
+  UNIQUE (import_row_id, curation_item_id)
+);
+
+CREATE TABLE feature.curation_link_decisions (
+  decision_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  curation_item_id UUID NOT NULL
+    REFERENCES feature.curation_items(curation_item_id) ON DELETE RESTRICT,
+  feature_id TEXT NOT NULL,
+  import_row_id UUID,
+  decision_kind TEXT NOT NULL CHECK (decision_kind IN ('accepted','revoked')),
+  match_basis TEXT NOT NULL CHECK (
+    match_basis IN (
+      'csv_explicit_feature_id','admin_review','legacy_unattributed',
+      'forward_recovery'
+    )
+  ),
+  resolver_version TEXT NOT NULL,
+  evidence JSONB NOT NULL DEFAULT '{}'::jsonb,
+  actor TEXT NOT NULL,
+  decided_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  supersedes_decision_id UUID,
+  CHECK (supersedes_decision_id IS DISTINCT FROM decision_id),
+  FOREIGN KEY (import_row_id, curation_item_id)
+    REFERENCES feature.curation_import_rows(import_row_id, curation_item_id)
+    ON DELETE RESTRICT,
+  FOREIGN KEY (supersedes_decision_id, curation_item_id)
+    REFERENCES feature.curation_link_decisions(decision_id, curation_item_id)
+    ON DELETE RESTRICT,
+  UNIQUE (decision_id, curation_item_id),
+  UNIQUE (decision_id, curation_item_id, feature_id)
+);
+
+ALTER TABLE feature.curation_items
+  ADD CONSTRAINT fk_curation_items_current_import_row
+  FOREIGN KEY (current_import_row_id, curation_item_id)
+  REFERENCES feature.curation_import_rows(import_row_id, curation_item_id)
+  ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+  ADD CONSTRAINT fk_curation_items_accepted_link_decision
+  FOREIGN KEY (accepted_link_decision_id, curation_item_id, feature_id)
+  REFERENCES feature.curation_link_decisions(
+    decision_id, curation_item_id, feature_id
+  )
+  ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+CREATE FUNCTION feature.reject_curation_history_mutation()
+RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION '% is append-only', TG_TABLE_NAME
+    USING ERRCODE = '55000';
+END;
+$$;
+
+CREATE TRIGGER trg_curation_import_batches_immutable
+  BEFORE UPDATE OR DELETE ON feature.curation_import_batches
+  FOR EACH ROW EXECUTE FUNCTION feature.reject_curation_history_mutation();
+CREATE TRIGGER trg_curation_import_rows_immutable
+  BEFORE UPDATE OR DELETE ON feature.curation_import_rows
+  FOR EACH ROW EXECUTE FUNCTION feature.reject_curation_history_mutation();
+CREATE TRIGGER trg_curation_link_decisions_immutable
+  BEFORE UPDATE OR DELETE ON feature.curation_link_decisions
+  FOR EACH ROW EXECUTE FUNCTION feature.reject_curation_history_mutation();
 ```
 
 `feature_id`는 의도적으로 nullable이다. CSV의 공식 항목을 기존 Feature와 안전하게
@@ -421,8 +509,29 @@ rewrite가 같은 결합 증거를 제외한다.
 collection과 item의 `created_by`/`updated_by`는 인증된 admin proxy actor만 기록한다.
 수동 item 추가·수정·보관은 item과 parent collection의 `updated_by`/`updated_at`을 함께
 갱신한다. public projection은 actor 필드를 제외하고 게시·공개 collection의 included
-item만 반환한다. admin collection/item projection은 actor 필드를 포함하고 collection
+item 중 현재 target과 정확히 일치하는 non-legacy accepted decision이 있는 link만 반환한다.
+미결정·`legacy_unattributed` link는 admin 감사 대상으로 남고 public에서는 fail-close한다.
+admin collection/item projection은 actor 필드를 포함하고 collection
 상세에서는 미연결·비공개·보관 item까지 조회할 수 있다.
+
+import batch·row와 link decision은 immutable trigger가 `UPDATE`/`DELETE`를 거부하는
+append-only history다. batch 삭제도 row를 cascade하지 않는다. 같은 파일의 멱등 재적재도
+별도 receipt를 남기되 current pointer만 새 exact row/decision으로 전진한다. decision의
+import row와 supersedes chain은 composite FK로 같은 item에만 속하며 self-supersede를
+금지한다.
+
+`forward_recovery`는 선택한 collection/item만 갱신하고 다른 pointer를 되감지 않는다.
+Feature merge도 link를 무근거로 바꾸거나 item을 물리 삭제하지 않는다. 현재 decision이
+non-legacy accepted인 active link만 master에 재승인한다. legacy/NULL/revoked link는
+accepted pointer 없이 audit 대상으로 남는다. duplicate loser source projection이 이기면
+survivor item 소유의 merge import row를 append해 current row payload와 projection을
+일치시키고, loser는 revocation 뒤 feature 없는 archive tombstone으로 보존한다.
+동일 external item의 source-absent 과거 component와 active component가 함께 있을 때는
+external item별 canonical survivor/provider winner를 결정적 순서로 각각 하나만 선택한다.
+충돌하는 loser current는 일반 move 전에 coalesce하고, 과거 component는 identity·provenance를
+유지한 채 master history로 이동한다. 따라서 active
+`(collection_id, external_item_id, feature_id)`는 merge 뒤에도 정확히 한 행이고 current
+import row/decision은 실제 winner projection과 일치한다.
 
 membership에는 서로 독립인 두 revision 축을 둔다. `source_updated_at`은 source presence와
 제공자 파생 필드가 바뀐 시각이고, `operator_updated_at`/`operator_updated_by`는

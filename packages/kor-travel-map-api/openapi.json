@@ -583,6 +583,18 @@
       "AdminCurationItemView": {
         "additionalProperties": false,
         "properties": {
+          "accepted_link_decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Link Decision Id"
+          },
           "address": {
             "additionalProperties": true,
             "title": "Address",
@@ -655,6 +667,18 @@
             ],
             "title": "Curation Relation",
             "type": "string"
+          },
+          "current_import_row_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Import Row Id"
           },
           "dataset_key": {
             "anyOf": [
@@ -755,6 +779,56 @@
               }
             ],
             "title": "Lat"
+          },
+          "link_actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Actor"
+          },
+          "link_decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Decided At"
+          },
+          "link_evidence": {
+            "additionalProperties": true,
+            "title": "Link Evidence",
+            "type": "object"
+          },
+          "link_match_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Match Basis"
+          },
+          "link_resolver_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Resolver Version"
           },
           "lon": {
             "anyOf": [
@@ -913,6 +987,13 @@
           "curation_relation",
           "reuse_policy",
           "metadata",
+          "current_import_row_id",
+          "accepted_link_decision_id",
+          "link_match_basis",
+          "link_resolver_version",
+          "link_evidence",
+          "link_actor",
+          "link_decided_at",
           "created_at",
           "updated_at",
           "archived_at",
@@ -4900,6 +4981,19 @@
             "description": "UTF-8 CSV 파일",
             "title": "File",
             "type": "string"
+          },
+          "provenance_file": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "행별 source provenance JSON sidecar",
+            "title": "Provenance File"
           }
         },
         "required": [
@@ -7811,6 +7905,78 @@
         "title": "CurationFeatureView",
         "type": "object"
       },
+      "CurationImportBatchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CurationImportBatchView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CurationImportBatchResponse",
+        "type": "object"
+      },
+      "CurationImportBatchView": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "batch_kind": {
+            "title": "Batch Kind",
+            "type": "string"
+          },
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "import_batch_id": {
+            "format": "uuid",
+            "title": "Import Batch Id",
+            "type": "string"
+          },
+          "imported_at": {
+            "format": "date-time",
+            "title": "Imported At",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/CurationImportRowReceiptView"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "import_batch_id",
+          "content_sha256",
+          "batch_kind",
+          "row_count",
+          "actor",
+          "metadata",
+          "imported_at",
+          "rows"
+        ],
+        "title": "CurationImportBatchView",
+        "type": "object"
+      },
       "CurationImportData": {
         "additionalProperties": false,
         "properties": {
@@ -7821,6 +7987,18 @@
           "dry_run": {
             "title": "Dry Run",
             "type": "boolean"
+          },
+          "import_batch_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Batch Id"
           },
           "inserted": {
             "title": "Inserted",
@@ -7882,6 +8060,7 @@
           "updated",
           "removed",
           "collections",
+          "import_batch_id",
           "removals",
           "items",
           "issues"
@@ -7994,6 +8173,78 @@
           "meta"
         ],
         "title": "CurationImportResponse",
+        "type": "object"
+      },
+      "CurationImportRowReceiptResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CurationImportRowReceiptView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CurationImportRowReceiptResponse",
+        "type": "object"
+      },
+      "CurationImportRowReceiptView": {
+        "additionalProperties": false,
+        "properties": {
+          "curation_item_id": {
+            "format": "uuid",
+            "title": "Curation Item Id",
+            "type": "string"
+          },
+          "import_batch_id": {
+            "format": "uuid",
+            "title": "Import Batch Id",
+            "type": "string"
+          },
+          "import_row_id": {
+            "format": "uuid",
+            "title": "Import Row Id",
+            "type": "string"
+          },
+          "imported_at": {
+            "format": "date-time",
+            "title": "Imported At",
+            "type": "string"
+          },
+          "provenance": {
+            "additionalProperties": true,
+            "title": "Provenance",
+            "type": "object"
+          },
+          "row_number": {
+            "title": "Row Number",
+            "type": "integer"
+          },
+          "row_payload": {
+            "additionalProperties": true,
+            "title": "Row Payload",
+            "type": "object"
+          },
+          "source_row_sha256": {
+            "title": "Source Row Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "import_row_id",
+          "import_batch_id",
+          "curation_item_id",
+          "row_number",
+          "source_row_sha256",
+          "row_payload",
+          "provenance",
+          "imported_at"
+        ],
+        "title": "CurationImportRowReceiptView",
         "type": "object"
       },
       "CurationImportRowView": {
@@ -8361,6 +8612,151 @@
           }
         },
         "title": "CurationItemPatchRequest",
+        "type": "object"
+      },
+      "CurationLinkAuditData": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CurationLinkAuditView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "count",
+          "has_more",
+          "next_cursor"
+        ],
+        "title": "CurationLinkAuditData",
+        "type": "object"
+      },
+      "CurationLinkAuditResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CurationLinkAuditData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CurationLinkAuditResponse",
+        "type": "object"
+      },
+      "CurationLinkAuditView": {
+        "additionalProperties": false,
+        "properties": {
+          "address_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Hint"
+          },
+          "collection_key": {
+            "title": "Collection Key",
+            "type": "string"
+          },
+          "curation_item_id": {
+            "format": "uuid",
+            "title": "Curation Item Id",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "external_component_id": {
+            "title": "External Component Id",
+            "type": "string"
+          },
+          "external_item_id": {
+            "title": "External Item Id",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "match_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Basis"
+          },
+          "place_name": {
+            "title": "Place Name",
+            "type": "string"
+          },
+          "resolver_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver Version"
+          }
+        },
+        "required": [
+          "curation_item_id",
+          "collection_key",
+          "external_item_id",
+          "external_component_id",
+          "feature_id",
+          "place_name",
+          "address_hint",
+          "match_basis",
+          "resolver_version",
+          "decided_at"
+        ],
+        "title": "CurationLinkAuditView",
         "type": "object"
       },
       "DagsterGraphqlError": {
@@ -27307,7 +27703,7 @@
     },
     "/v1/admin/curations/import": {
       "post": {
-        "description": "CSV를 preview하거나 오류 없는 전체 파일을 원자적으로 멱등 반영한다.",
+        "description": "CSV+sidecar를 검증한 뒤 preview하거나 원자적으로 멱등 반영한다.",
         "operationId": "import_admin_curations_v1_admin_curations_import_post",
         "parameters": [
           {
@@ -27384,6 +27780,65 @@
         ]
       }
     },
+    "/v1/admin/curations/import-batches/{import_batch_id}": {
+      "get": {
+        "description": "성공한 import batch와 immutable row payload/provenance를 조회한다.",
+        "operationId": "get_admin_curation_import_batch_v1_admin_curations_import_batches__import_batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Batch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationImportBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Get Admin Curation Import Batch",
+        "tags": [
+          "admin-curations"
+        ]
+      }
+    },
     "/v1/admin/curations/import-template.csv": {
       "get": {
         "description": "큐레이션 import용 UTF-8 BOM CSV header를 내려준다.",
@@ -27417,6 +27872,142 @@
           }
         ],
         "summary": "Download Curation Import Template",
+        "tags": [
+          "admin-curations"
+        ]
+      }
+    },
+    "/v1/admin/curations/items/{curation_item_id}/current-import-row": {
+      "get": {
+        "description": "item current pointer의 exact row payload/provenance를 조회한다.",
+        "operationId": "get_admin_curation_item_current_import_row_v1_admin_curations_items__curation_item_id__current_import_row_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "curation_item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Curation Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationImportRowReceiptResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Get Admin Curation Item Current Import Row",
+        "tags": [
+          "admin-curations"
+        ]
+      }
+    },
+    "/v1/admin/curations/link-audit": {
+      "get": {
+        "description": "공개 승인에 쓸 수 없는 legacy/provenance-less current link를 감사한다.",
+        "operationId": "audit_unattributed_curation_links_v1_admin_curations_link_audit_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 10000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationLinkAuditResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Audit Unattributed Curation Links",
         "tags": [
           "admin-curations"
         ]

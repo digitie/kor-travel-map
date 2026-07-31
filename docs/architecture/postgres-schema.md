@@ -82,12 +82,27 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `weather_metric_series` | `(feature_id, provider, weather_domain, forecast_style, metric_key)` | weather fact writer trigger가 단조롭게 유지하는 physical-series registry; stale row는 read 무영향 |
 | `feature_price_values` | `price_value_key` | feature_id FK; provider/price_domain/product_key/observed_at/value_number/unit; UNIQUE (feature_id,provider,price_domain,product_key,observed_at) |
 | `curation_collections` | `collection_id UUID` | UNIQUE collection_key; theme/source/title/edition/status/visibility; legacy key는 theme/source UUID+title hash, 중복 group은 split identity; created_by/updated_by |
-| `curation_items` | `curation_item_id UUID` | collection FK; nullable·mutable feature_id; source_record_key; legacy_projection_id deferrable FK/partial UNIQUE; external_item_id + external_component_id stable identity; place_name/address_hint/source_present/source_updated_at/status/sort_order; operator_updated_by/at; source 누락·재등장과 운영자 tombstone 이력 |
+| `curation_items` | `curation_item_id UUID` | collection FK; nullable·mutable feature_id; current import row/accepted decision exact pointer; external item+component stable identity; source 누락·재등장과 운영자 tombstone 이력 |
+| `curation_import_batches` | `import_batch_id UUID` | content SHA-256, csv/normalized/recovery 종류, 행 수, actor, imported_at의 append-only receipt |
+| `curation_import_rows` | `import_row_id UUID` | batch/item FK; 원 행 번호·canonical row SHA-256·normalized payload·구조화 provenance |
+| `curation_link_decisions` | `decision_id UUID` | item/target, accepted/revoked, explicit/admin/legacy/recovery basis, resolver version, evidence, actor/time, supersedes chain |
 
 0045 큐레이션 write는 다음 불변식을 지킨다.
 
 - actor 값은 인증된 admin proxy context에서만 받고 collection/item 양쪽에 감사값을 남긴다.
   public projection에서는 이 필드를 제거하고 admin projection에서만 반환한다.
+- public link는 item의 `accepted_link_decision_id`가 같은 item·Feature를 가리키고 basis가
+  `legacy_unattributed`가 아닌 경우에만 승인한다. migration 0072는 기존 link를 근거 있는
+  승인으로 추정하지 않고 legacy 감사 대상으로 backfill한다.
+- import는 성공 batch와 각 normalized row를 append-only로 기록한다. item의
+  `current_import_row_id`와 `accepted_link_decision_id`는 composite deferrable FK로 exact
+  item/target을 강제한다. 세 history table의 immutable trigger는 직접 `UPDATE`/`DELETE`를
+  거부하고 batch→row FK도 `RESTRICT`한다. decision의 import row와 supersedes target은
+  같은 item만 허용하며 self-supersede를 거부한다.
+- 선택적 `forward_recovery`와 Feature merge는 이미 non-legacy accepted인 link만 새
+  decision으로 재승인한다. legacy/NULL/revoked link는 공개 불가 상태를 유지한다. duplicate
+  loser source가 이기면 survivor 소유 merge row를 append해 projection/current pointer를
+  함께 전진시키고 loser item은 물리 삭제하지 않는다.
 - 수동 item 추가·수정·보관은 parent collection row를 먼저 잠그고 collection의
   `updated_by`/`updated_at`도 함께 갱신한다.
 - CSV authoritative replace는 transaction advisory lock으로 직렬화한 뒤 대상 collection을

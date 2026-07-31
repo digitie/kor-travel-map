@@ -30,6 +30,13 @@ from kortravelmap.curation_import import (
     CurationImportRow,
     parse_curation_csv,
 )
+from kortravelmap.curation_provenance import (
+    CURATION_PROVENANCE_MAX_BYTES,
+    CurationProvenanceError,
+    parse_curation_provenance,
+    provenance_row_payload,
+    requires_lighthouse_provenance,
+)
 from kortravelmap.infra import curation_repo
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import IntegrityError
@@ -194,6 +201,13 @@ class AdminCurationItemView(BaseModel):
     curation_relation: CurationRelation
     reuse_policy: ReusePolicy
     metadata: dict[str, Any]
+    current_import_row_id: UUID | None
+    accepted_link_decision_id: UUID | None
+    link_match_basis: str | None
+    link_resolver_version: str | None
+    link_evidence: dict[str, Any]
+    link_actor: str | None
+    link_decided_at: datetime | None
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
@@ -457,6 +471,7 @@ class CurationImportData(BaseModel):
     updated: int
     removed: int
     collections: int
+    import_batch_id: UUID | None
     removals: list[AdminCurationItemView]
     items: list[CurationImportRowView]
     issues: list[CurationImportIssueView]
@@ -466,6 +481,77 @@ class CurationImportResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: CurationImportData
+    meta: Meta
+
+
+class CurationLinkAuditView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    curation_item_id: UUID
+    collection_key: str
+    external_item_id: str
+    external_component_id: str
+    feature_id: str
+    place_name: str
+    address_hint: str | None
+    match_basis: str | None
+    resolver_version: str | None
+    decided_at: datetime | None
+
+
+class CurationLinkAuditData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[CurationLinkAuditView]
+    count: int
+    has_more: bool
+    next_cursor: str | None
+
+
+class CurationLinkAuditResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: CurationLinkAuditData
+    meta: Meta
+
+
+class CurationImportRowReceiptView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    import_row_id: UUID
+    import_batch_id: UUID
+    curation_item_id: UUID
+    row_number: int
+    source_row_sha256: str
+    row_payload: dict[str, Any]
+    provenance: dict[str, Any]
+    imported_at: datetime
+
+
+class CurationImportBatchView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    import_batch_id: UUID
+    content_sha256: str
+    batch_kind: str
+    row_count: int
+    actor: str
+    metadata: dict[str, Any]
+    imported_at: datetime
+    rows: list[CurationImportRowReceiptView]
+
+
+class CurationImportBatchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: CurationImportBatchView
+    meta: Meta
+
+
+class CurationImportRowReceiptResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: CurationImportRowReceiptView
     meta: Meta
 
 
@@ -488,6 +574,12 @@ def _public_item_view(row: curation_repo.CurationItem) -> PublicCurationItemView
 
 def _admin_item_view(row: curation_repo.CurationItem) -> AdminCurationItemView:
     return AdminCurationItemView.model_validate(row, from_attributes=True)
+
+
+def _import_row_receipt_view(
+    row: curation_repo.CurationImportRowReceipt,
+) -> CurationImportRowReceiptView:
+    return CurationImportRowReceiptView.model_validate(row, from_attributes=True)
 
 
 def _group_view(
@@ -527,17 +619,13 @@ def _adopted_match(
     row: CurationImportRow,
     matches: Sequence[curation_repo.FeatureMatch],
 ) -> curation_repo.FeatureMatch | None:
-    """명시 ID 또는 이름+주소로 유일하게 식별한 Feature만 채택한다.
+    """CSV가 명시한 exact Feature ID만 자동 채택한다.
 
-    CSV ``feature_id``가 비고 ``address_hint``도 없으면 이름 단독 후보는 수와 무관하게
-    자동 링크하지 않는다(T-VN-H36). 반면 주소 hint가 있으면 ADR-063의
-    ``정규화 이름+주소 유일 일치`` 계약을 유지한다. 후보가 여러 개면 두 경로 모두
-    미연결로 남긴다.
-
-    이름 단독 후보는 ``review_required`` 상태와 ``candidates``로 노출해 운영자가
-    ``feature_id``를 명시적으로 확정할 수 있게 한다.
+    이름과 구조화 주소가 유일해도 ``address_hint``는 preview evidence일 뿐 승인
+    decision이 아니다. 운영자는 후보를 검토한 뒤 CSV ``feature_id`` 또는 admin item
+    PATCH로 명시적으로 확정한다(#909).
     """
-    if not (row.feature_id or "").strip() and not (row.address_hint or "").strip():
+    if not (row.feature_id or "").strip():
         return None
     return matches[0] if len(matches) == 1 else None
 
@@ -571,11 +659,21 @@ def _unlinked_issue(
             row_number=row.row_number,
         )
 
-    if (row.feature_id or "").strip() or (row.address_hint or "").strip():
-        basis = "명시한 Feature ID" if (row.feature_id or "").strip() else "이름+주소"
+    if (row.feature_id or "").strip():
         return CurationImportIssueView(
             code="ambiguous",
-            message=f"{basis} 조건의 Feature 후보가 여러 개여서 미연결 항목으로 저장합니다.",
+            message="명시한 Feature ID 후보가 여러 개여서 미연결 항목으로 저장합니다.",
+            row_number=row.row_number,
+        )
+
+    if (row.address_hint or "").strip():
+        return CurationImportIssueView(
+            code="address_candidate_requires_review",
+            message=(
+                f"정규화 이름+구조화 주소 후보 {len(matches)}건을 찾았으나 address_hint는 "
+                "링크 승인 근거가 아닙니다. 후보를 검토한 뒤 CSV feature_id 또는 admin에서 "
+                "명시적으로 연결하세요."
+            ),
             row_number=row.row_number,
         )
 
@@ -611,6 +709,106 @@ def _import_metadata(row: CurationImportRow) -> dict[str, Any]:
 
 
 @admin_router.get(
+    "/link-audit",
+    response_model=CurationLinkAuditResponse,
+)
+async def audit_unattributed_curation_links(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    limit: Annotated[int, Query(ge=1, le=10_000)] = 500,
+    cursor: Annotated[str | None, Query()] = None,
+) -> CurationLinkAuditResponse:
+    """공개 승인에 쓸 수 없는 legacy/provenance-less current link를 감사한다."""
+
+    started_at = perf_counter()
+    try:
+        rows, next_cursor = (
+            await curation_repo.list_unattributed_curation_links_page(
+                session,
+                limit=limit,
+                cursor=cursor,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    items = [
+        CurationLinkAuditView.model_validate(row, from_attributes=True)
+        for row in rows
+    ]
+    return CurationLinkAuditResponse(
+        data=CurationLinkAuditData(
+            items=items,
+            count=len(items),
+            has_more=next_cursor is not None,
+            next_cursor=next_cursor,
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@admin_router.get(
+    "/import-batches/{import_batch_id}",
+    response_model=CurationImportBatchResponse,
+)
+async def get_admin_curation_import_batch(
+    request: Request,
+    import_batch_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> CurationImportBatchResponse:
+    """성공한 import batch와 immutable row payload/provenance를 조회한다."""
+
+    started_at = perf_counter()
+    result = await curation_repo.get_curation_import_batch(
+        session,
+        import_batch_id=str(import_batch_id),
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="curation import batch 없음")
+    batch, rows = result
+    data = CurationImportBatchView(
+        import_batch_id=UUID(batch.import_batch_id),
+        content_sha256=batch.content_sha256,
+        batch_kind=batch.batch_kind,
+        row_count=batch.row_count,
+        actor=batch.actor,
+        metadata=batch.metadata,
+        imported_at=batch.imported_at,
+        rows=[_import_row_receipt_view(row) for row in rows],
+    )
+    return CurationImportBatchResponse(
+        data=data,
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@admin_router.get(
+    "/items/{curation_item_id}/current-import-row",
+    response_model=CurationImportRowReceiptResponse,
+)
+async def get_admin_curation_item_current_import_row(
+    request: Request,
+    curation_item_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> CurationImportRowReceiptResponse:
+    """item current pointer의 exact row payload/provenance를 조회한다."""
+
+    started_at = perf_counter()
+    row = await curation_repo.get_current_curation_import_row(
+        session,
+        curation_item_id=str(curation_item_id),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="curation current import row 없음")
+    return CurationImportRowReceiptResponse(
+        data=_import_row_receipt_view(row),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@admin_router.get(
     "/import-template.csv",
     include_in_schema=True,
     response_class=Response,
@@ -643,18 +841,54 @@ async def import_admin_curations(
     file: Annotated[UploadFile, File(description="UTF-8 CSV 파일")],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     dry_run: Annotated[bool, Query()] = True,
+    provenance_file: Annotated[
+        UploadFile | None,
+        File(description="행별 source provenance JSON sidecar"),
+    ] = None,
 ) -> CurationImportResponse:
-    """CSV를 preview하거나 오류 없는 전체 파일을 원자적으로 멱등 반영한다."""
+    """CSV+sidecar를 검증한 뒤 preview하거나 원자적으로 멱등 반영한다."""
     started_at = perf_counter()
     content = await file.read(CURATION_CSV_MAX_BYTES + 1)
+    content_sha256 = hashlib.sha256(content).hexdigest()
     preview = parse_curation_csv(content)
+    provenance_content: bytes | None = None
+    provenance_by_row: dict[int, dict[str, Any]] = {}
+    if provenance_file is not None:
+        provenance_content = await provenance_file.read(
+            CURATION_PROVENANCE_MAX_BYTES + 1
+        )
+        try:
+            provenance = parse_curation_provenance(
+                csv_content=content,
+                provenance_content=provenance_content,
+            )
+        except CurationProvenanceError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        provenance_by_row = {
+            csv_row.row_number: provenance_row_payload(provenance, row)
+            for csv_row, row in zip(preview.rows, provenance.rows, strict=True)
+        }
+    elif requires_lighthouse_provenance(preview.rows):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "저장소 공식 등대 dataset import에는 exact CSV와 결박된 "
+                "provenance_file이 필요합니다."
+            ),
+        )
+    provenance_sha256 = (
+        hashlib.sha256(provenance_content).hexdigest()
+        if provenance_content is not None
+        else None
+    )
     command = await domain_command_service.begin_domain_command(
         session,
         actor=context.actor,
         operation="admin.curation.import",
         idempotency_key=idempotency_key,
         payload={
-            "content_sha256": hashlib.sha256(content).hexdigest(),
+            "content_sha256": content_sha256,
+            "provenance_sha256": provenance_sha256,
             "dry_run": dry_run,
         },
     )
@@ -706,9 +940,7 @@ async def import_admin_curations(
         else:
             if not matches:
                 row_status = "unmatched"
-            elif not (row.feature_id or "").strip() and not (
-                row.address_hint or ""
-            ).strip():
+            elif not (row.feature_id or "").strip():
                 row_status = "review_required"
             else:
                 row_status = "ambiguous"
@@ -745,6 +977,7 @@ async def import_admin_curations(
                 item_title=row.item_title or None,
                 item_summary=row.item_summary or None,
                 metadata=_import_metadata(row),
+                provenance=provenance_by_row.get(row.row_number),
             )
         )
         item_views.append(
@@ -812,10 +1045,15 @@ async def import_admin_curations(
             "removed": len(change_plan.removals),
             "collections": change_plan.collections,
             "removals": change_plan.removals,
+            "import_batch_id": None,
         }
         if not dry_run:
             result = await curation_repo.import_curation_rows(
-                session, rows=resolved_rows, actor=context.actor
+                session,
+                rows=resolved_rows,
+                actor=context.actor,
+                source_content_sha256=content_sha256,
+                batch_kind="csv_upload",
             )
     except IntegrityError as exc:
         await session.rollback()
@@ -841,6 +1079,11 @@ async def import_admin_curations(
             updated=int(result["updated"]),
             removed=int(result["removed"]),
             collections=int(result["collections"]),
+            import_batch_id=(
+                UUID(str(result["import_batch_id"]))
+                if result["import_batch_id"] is not None
+                else None
+            ),
             removals=[_admin_item_view(item) for item in result["removals"]],
             items=item_views,
             issues=[_issue_view(issue) for issue in preview.issues]

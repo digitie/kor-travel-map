@@ -37,6 +37,7 @@ from kortravelmap.geocoding import (
 )
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 from kortravelmap.settings import KorTravelMapSettings
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -102,7 +103,7 @@ async def map_client(
         yield client
     finally:
         async with AsyncSession(migrated_engine) as session, session.begin():
-            await session.execute(text(_TRUNCATE_SQL))
+            await truncate_committed_test_rows(session, _TRUNCATE_SQL)
 
 
 # ── 헬퍼 ─────────────────────────────────────────────────────────────────

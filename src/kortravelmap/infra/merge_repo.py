@@ -28,6 +28,8 @@ ADR 참조
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
@@ -167,151 +169,521 @@ ORDER BY collection.collection_id
 FOR UPDATE OF collection
 """
 
-# 한 collection 안의 동일 official item을 Feature merge할 때 durable source/tombstone과
-# operator override를 잃지 않는다. provider 파생 필드는 source-present row(동률이면 최신),
-# operator 필드는 전용 operator_updated_at이 최신인 row가 이기며, 어느 한쪽이라도
-# tombstone이면 tombstone이 최우선이다. master UUID를 survivor로 유지한 뒤 loser
-# duplicate만 제거한다.
+# 한 collection의 동일 official item에는 source에서 빠진 과거 component와 현재
+# component가 함께 있을 수 있다. 따라서 master×loser pair join으로 UPDATE하지 않고,
+# feature별 canonical row를 먼저 하나씩 고른 뒤 external item group당 정확히 한 번
+# reconcile한다. 모든 loser duplicate는 일반 MOVE보다 먼저 source-absent master history로
+# 전환해 active partial unique 충돌을 없애며 import/link provenance FK는 그대로 보존한다.
 _MERGE_DUPLICATE_CURATION_ITEMS_SQL: Final[str] = """
-WITH pairs AS MATERIALIZED (
+WITH locked_items AS MATERIALIZED (
     SELECT
-        master_item.curation_item_id AS master_item_id,
-        loser_item.curation_item_id AS loser_item_id,
+        item.*
+    FROM feature.curation_items AS item
+    WHERE item.feature_id IN (:master, :loser)
+    ORDER BY
+        item.collection_id,
+        item.external_item_id,
+        item.feature_id,
+        item.curation_item_id
+    FOR UPDATE OF item
+), ranked AS MATERIALIZED (
+    SELECT
+        item.*,
+        row_number() OVER (
+            PARTITION BY
+                item.collection_id,
+                item.external_item_id,
+                item.feature_id
+            ORDER BY
+                (
+                    item.source_present
+                    AND item.archived_at IS NULL
+                    AND item.status <> 'archived'
+                ) DESC,
+                item.source_present DESC,
+                (item.archived_at IS NULL) DESC,
+                item.source_updated_at DESC,
+                item.curation_item_id
+        ) AS feature_rank
+    FROM locked_items AS item
+), canonical AS MATERIALIZED (
+    SELECT *
+    FROM ranked
+    WHERE feature_rank = 1
+), plans AS MATERIALIZED (
+    SELECT
+        master_item.collection_id,
+        master_item.external_item_id,
+        master_item.curation_item_id AS survivor_item_id,
+        provider_winner.curation_item_id AS provider_winner_item_id,
+        provider_winner.feature_id AS provider_winner_feature_id,
+        operator_winner.curation_item_id AS operator_winner_item_id,
         (
-            (loser_item.source_present AND NOT master_item.source_present)
-            OR (
-                loser_item.source_present = master_item.source_present
-                AND loser_item.source_updated_at > master_item.source_updated_at
-            )
-        ) AS loser_provider_wins,
-        (
-            loser_item.operator_updated_at IS NOT NULL
-            AND (
-                master_item.operator_updated_at IS NULL
-                OR loser_item.operator_updated_at > master_item.operator_updated_at
-            )
-        ) AS loser_override_wins,
-        master_item.archived_at IS NOT NULL
-            OR loser_item.archived_at IS NOT NULL AS tombstone_wins,
-        loser_item.archived_at IS NOT NULL
-            AND (
-                master_item.archived_at IS NULL
-                OR COALESCE(
-                    loser_item.operator_updated_at,
-                    loser_item.archived_at
-                ) > COALESCE(
-                    master_item.operator_updated_at,
-                    master_item.archived_at
-                )
-            ) AS loser_tombstone_wins
-    FROM feature.curation_items AS loser_item
-    JOIN feature.curation_items AS master_item
-      ON master_item.feature_id = :master
-     AND loser_item.collection_id = master_item.collection_id
+            master_item.archived_at IS NOT NULL
+            OR loser_item.archived_at IS NOT NULL
+        ) AS tombstone_wins,
+        bool_or(
+            grouped.source_present
+            AND grouped.archived_at IS NULL
+            AND grouped.status <> 'archived'
+        ) AS any_active_source
+    FROM canonical AS master_item
+    JOIN canonical AS loser_item
+      ON loser_item.collection_id = master_item.collection_id
      AND loser_item.external_item_id = master_item.external_item_id
+     AND loser_item.feature_id = :loser
+    JOIN LATERAL (
+        SELECT candidate.*
+        FROM (VALUES
+            (
+                master_item.curation_item_id,
+                master_item.feature_id,
+                master_item.source_present,
+                master_item.archived_at,
+                master_item.status,
+                master_item.source_updated_at
+            ),
+            (
+                loser_item.curation_item_id,
+                loser_item.feature_id,
+                loser_item.source_present,
+                loser_item.archived_at,
+                loser_item.status,
+                loser_item.source_updated_at
+            )
+        ) AS candidate(
+            curation_item_id,
+            feature_id,
+            source_present,
+            archived_at,
+            status,
+            source_updated_at
+        )
+        ORDER BY
+            (
+                candidate.source_present
+                AND candidate.archived_at IS NULL
+                AND candidate.status <> 'archived'
+            ) DESC,
+            candidate.source_present DESC,
+            (candidate.archived_at IS NULL) DESC,
+            candidate.source_updated_at DESC,
+            candidate.curation_item_id
+        LIMIT 1
+    ) AS provider_winner ON true
+    JOIN LATERAL (
+        SELECT candidate.*
+        FROM (VALUES
+            (
+                master_item.curation_item_id,
+                master_item.archived_at,
+                master_item.operator_updated_at
+            ),
+            (
+                loser_item.curation_item_id,
+                loser_item.archived_at,
+                loser_item.operator_updated_at
+            )
+        ) AS candidate(
+            curation_item_id,
+            archived_at,
+            operator_updated_at
+        )
+        ORDER BY
+            (candidate.archived_at IS NOT NULL) DESC,
+            COALESCE(
+                candidate.operator_updated_at,
+                candidate.archived_at
+            ) DESC NULLS LAST,
+            candidate.curation_item_id
+        LIMIT 1
+    ) AS operator_winner ON true
+    JOIN locked_items AS grouped
+      ON grouped.collection_id = master_item.collection_id
+     AND grouped.external_item_id = master_item.external_item_id
+     AND grouped.feature_id IN (:master, :loser)
+    WHERE master_item.feature_id = :master
+    GROUP BY
+        master_item.collection_id,
+        master_item.external_item_id,
+        master_item.curation_item_id,
+        master_item.archived_at,
+        loser_item.archived_at,
+        provider_winner.curation_item_id,
+        provider_winner.feature_id,
+        operator_winner.curation_item_id
+), duplicate_losers AS MATERIALIZED (
+    SELECT
+        loser_item.*,
+        plan.survivor_item_id
+    FROM locked_items AS loser_item
+    JOIN plans AS plan
+      ON plan.collection_id = loser_item.collection_id
+     AND plan.external_item_id = loser_item.external_item_id
     WHERE loser_item.feature_id = :loser
-    FOR UPDATE OF master_item, loser_item
+), revocations AS (
+    INSERT INTO feature.curation_link_decisions (
+        curation_item_id,
+        feature_id,
+        decision_kind,
+        match_basis,
+        resolver_version,
+        evidence,
+        actor,
+        supersedes_decision_id
+    )
+    SELECT
+        loser_item.curation_item_id,
+        loser_item.feature_id,
+        'revoked',
+        'forward_recovery',
+        'feature-merge-v1',
+        jsonb_build_object(
+            'operation', 'feature_merge_duplicate_archive',
+            'master_feature_id', CAST(:master AS text),
+            'loser_feature_id', CAST(:loser AS text),
+            'review_id', CAST(:review_id AS text),
+            'reason', CAST(:reason AS text)
+        ),
+        :merge_actor,
+        loser_item.accepted_link_decision_id
+    FROM duplicate_losers AS loser_item
+    WHERE loser_item.accepted_link_decision_id IS NOT NULL
+    RETURNING curation_item_id
 ), reconciled AS (
     UPDATE feature.curation_items AS survivor
-    SET source_record_key = CASE
-            WHEN pairs.loser_provider_wins THEN loser_item.source_record_key
-            ELSE survivor.source_record_key
-        END,
-        place_name = CASE
-            WHEN pairs.loser_provider_wins THEN loser_item.place_name
-            ELSE survivor.place_name
-        END,
-        address_hint = CASE
-            WHEN pairs.loser_provider_wins THEN loser_item.address_hint
-            ELSE survivor.address_hint
-        END,
-        source_present = survivor.source_present OR loser_item.source_present,
-        source_updated_at = CASE
-            WHEN pairs.loser_provider_wins THEN loser_item.source_updated_at
-            ELSE survivor.source_updated_at
-        END,
+    SET source_record_key = provider_winner.source_record_key,
+        place_name = provider_winner.place_name,
+        address_hint = provider_winner.address_hint,
+        source_present = plan.any_active_source,
+        source_updated_at = provider_winner.source_updated_at,
         status = CASE
-            WHEN pairs.tombstone_wins THEN 'archived'
-            WHEN pairs.loser_override_wins THEN loser_item.status
-            ELSE survivor.status
+            WHEN plan.tombstone_wins THEN 'archived'
+            ELSE operator_winner.status
         END,
-        sort_order = CASE
-            WHEN pairs.loser_provider_wins THEN loser_item.sort_order
-            ELSE survivor.sort_order
-        END,
-        item_title = CASE
-            WHEN pairs.loser_provider_wins THEN loser_item.item_title
-            ELSE survivor.item_title
-        END,
-        item_summary = CASE
-            WHEN pairs.loser_provider_wins THEN loser_item.item_summary
-            ELSE survivor.item_summary
-        END,
-        curation_relation = CASE
-            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
-            THEN loser_item.curation_relation
-            WHEN pairs.tombstone_wins THEN survivor.curation_relation
-            WHEN pairs.loser_override_wins THEN loser_item.curation_relation
-            ELSE survivor.curation_relation
-        END,
-        reuse_policy = CASE
-            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
-            THEN loser_item.reuse_policy
-            WHEN pairs.tombstone_wins THEN survivor.reuse_policy
-            WHEN pairs.loser_override_wins THEN loser_item.reuse_policy
-            ELSE survivor.reuse_policy
-        END,
-        metadata = CASE
-            WHEN pairs.loser_provider_wins THEN loser_item.metadata
-            ELSE survivor.metadata
-        END,
-        updated_by = CASE
-            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
-            THEN loser_item.updated_by
-            WHEN pairs.tombstone_wins THEN survivor.updated_by
-            WHEN pairs.loser_override_wins THEN loser_item.updated_by
-            ELSE survivor.updated_by
-        END,
-        operator_updated_by = CASE
-            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
-            THEN loser_item.operator_updated_by
-            WHEN pairs.tombstone_wins THEN survivor.operator_updated_by
-            WHEN pairs.loser_override_wins THEN loser_item.operator_updated_by
-            ELSE survivor.operator_updated_by
-        END,
-        operator_updated_at = CASE
-            WHEN pairs.tombstone_wins AND pairs.loser_tombstone_wins
-            THEN loser_item.operator_updated_at
-            WHEN pairs.tombstone_wins THEN survivor.operator_updated_at
-            WHEN pairs.loser_override_wins THEN loser_item.operator_updated_at
-            ELSE survivor.operator_updated_at
-        END,
+        sort_order = provider_winner.sort_order,
+        item_title = provider_winner.item_title,
+        item_summary = provider_winner.item_summary,
+        curation_relation = operator_winner.curation_relation,
+        reuse_policy = operator_winner.reuse_policy,
+        metadata = provider_winner.metadata,
+        updated_by = operator_winner.updated_by,
+        operator_updated_by = operator_winner.operator_updated_by,
+        operator_updated_at = operator_winner.operator_updated_at,
         updated_at = now(),
         archived_at = CASE
-            WHEN pairs.tombstone_wins
-            THEN CASE
-                WHEN pairs.loser_tombstone_wins THEN loser_item.archived_at
-                ELSE survivor.archived_at
-            END
+            WHEN plan.tombstone_wins THEN operator_winner.archived_at
             ELSE NULL
         END
-    FROM pairs
-    JOIN feature.curation_items AS loser_item
-      ON loser_item.curation_item_id = pairs.loser_item_id
-    WHERE survivor.curation_item_id = pairs.master_item_id
-    RETURNING pairs.loser_item_id
+    FROM plans AS plan
+    JOIN locked_items AS provider_winner
+      ON provider_winner.curation_item_id =
+         plan.provider_winner_item_id
+    JOIN locked_items AS operator_winner
+      ON operator_winner.curation_item_id =
+         plan.operator_winner_item_id
+    WHERE survivor.curation_item_id = plan.survivor_item_id
+    RETURNING
+        survivor.collection_id,
+        survivor.external_item_id,
+        survivor.curation_item_id AS survivor_item_id,
+        plan.provider_winner_item_id,
+        (
+            plan.provider_winner_item_id <>
+            survivor.curation_item_id
+        ) AS provider_winner_requires_recovery
+), archived AS (
+    UPDATE feature.curation_items AS loser_item
+    SET feature_id = NULL,
+        accepted_link_decision_id = NULL,
+        source_present = false,
+        status = 'archived',
+        updated_by = :merge_actor,
+        updated_at = now(),
+        archived_at = COALESCE(loser_item.archived_at, now()),
+        metadata = loser_item.metadata || jsonb_build_object(
+            'feature_merge_duplicate_archived', true,
+            'feature_merge_master_id', CAST(:master AS text),
+            'feature_merge_loser_id', CAST(:loser AS text)
+        )
+    FROM duplicate_losers
+    JOIN reconciled
+      ON reconciled.collection_id = duplicate_losers.collection_id
+     AND reconciled.external_item_id =
+         duplicate_losers.external_item_id
+    LEFT JOIN revocations
+      ON revocations.curation_item_id =
+         duplicate_losers.curation_item_id
+    WHERE loser_item.curation_item_id =
+          duplicate_losers.curation_item_id
+    RETURNING
+        loser_item.collection_id,
+        loser_item.external_item_id,
+        loser_item.curation_item_id
+), archived_groups AS (
+    SELECT DISTINCT collection_id, external_item_id
+    FROM archived
 )
-DELETE FROM feature.curation_items AS loser_item
-USING reconciled
-WHERE loser_item.curation_item_id = reconciled.loser_item_id
-RETURNING loser_item.curation_item_id
+SELECT
+    reconciled.survivor_item_id,
+    reconciled.provider_winner_item_id,
+    reconciled.provider_winner_requires_recovery
+FROM reconciled
+JOIN archived_groups
+  ON archived_groups.collection_id = reconciled.collection_id
+ AND archived_groups.external_item_id =
+     reconciled.external_item_id
 """
 
 _MOVE_CURATION_ITEMS_SQL: Final[str] = """
-UPDATE feature.curation_items
-SET feature_id = :master, updated_at = now()
-WHERE feature_id = :loser
-RETURNING curation_item_id
+WITH candidates AS MATERIALIZED (
+    SELECT
+        item.curation_item_id,
+        item.feature_id,
+        item.accepted_link_decision_id,
+        current_decision.decision_kind AS previous_decision_kind,
+        current_decision.match_basis AS previous_match_basis,
+        COALESCE(
+            current_decision.decision_kind = 'accepted'
+            AND current_decision.match_basis IN (
+                'csv_explicit_feature_id',
+                'admin_review',
+                'forward_recovery'
+            ),
+            false
+        ) AS has_trusted_acceptance,
+        (
+            item.archived_at IS NULL
+            AND item.source_present
+            AND item.status <> 'archived'
+        ) AS remains_active
+    FROM feature.curation_items AS item
+    LEFT JOIN feature.curation_link_decisions AS current_decision
+      ON current_decision.decision_id = item.accepted_link_decision_id
+     AND current_decision.curation_item_id = item.curation_item_id
+     AND current_decision.feature_id = item.feature_id
+    WHERE item.feature_id = :loser
+    FOR UPDATE OF item
+), decisions AS (
+    INSERT INTO feature.curation_link_decisions (
+        curation_item_id,
+        feature_id,
+        decision_kind,
+        match_basis,
+        resolver_version,
+        evidence,
+        actor,
+        supersedes_decision_id
+    )
+    SELECT
+        candidate.curation_item_id,
+        CASE
+            WHEN candidate.remains_active
+             AND candidate.has_trusted_acceptance
+            THEN CAST(:master AS text)
+            ELSE candidate.feature_id
+        END,
+        CASE
+            WHEN candidate.remains_active
+             AND candidate.has_trusted_acceptance
+            THEN 'accepted'
+            ELSE 'revoked'
+        END,
+        'forward_recovery',
+        'feature-merge-v1',
+        jsonb_build_object(
+            'operation', 'feature_merge_link_retarget',
+            'master_feature_id', CAST(:master AS text),
+            'loser_feature_id', CAST(:loser AS text),
+            'review_id', CAST(:review_id AS text),
+            'reason', CAST(:reason AS text),
+            'previous_decision_kind', candidate.previous_decision_kind,
+            'previous_match_basis', candidate.previous_match_basis,
+            'trusted_acceptance',
+                candidate.has_trusted_acceptance
+        ),
+        :merge_actor,
+        candidate.accepted_link_decision_id
+    FROM candidates AS candidate
+    RETURNING decision_id, curation_item_id, decision_kind
+)
+UPDATE feature.curation_items AS item
+SET feature_id = :master,
+    accepted_link_decision_id = CASE
+        WHEN decision.decision_kind = 'accepted' THEN decision.decision_id
+        ELSE NULL
+    END,
+    updated_by = :merge_actor,
+    updated_at = now()
+FROM candidates AS candidate
+LEFT JOIN decisions AS decision
+  ON decision.curation_item_id = candidate.curation_item_id
+WHERE item.curation_item_id = candidate.curation_item_id
+RETURNING item.curation_item_id
+"""
+
+_INSERT_MERGE_IMPORT_BATCH_SQL: Final[str] = """
+INSERT INTO feature.curation_import_batches (
+    content_sha256,
+    batch_kind,
+    row_count,
+    actor,
+    metadata
+) VALUES (
+    :content_sha256,
+    'forward_recovery',
+    :row_count,
+    :merge_actor,
+    CAST(:metadata AS jsonb)
+)
+RETURNING import_batch_id
+"""
+
+_APPEND_DUPLICATE_MERGE_IMPORT_ROWS_SQL: Final[str] = """
+WITH pair_input AS MATERIALIZED (
+    SELECT *
+    FROM jsonb_to_recordset(CAST(:pairs AS jsonb)) AS pair(
+        row_number integer,
+        survivor_item_id uuid,
+        provider_winner_item_id uuid
+    )
+), snapshots AS MATERIALIZED (
+    SELECT
+        pair.row_number,
+        survivor.curation_item_id,
+        survivor.feature_id,
+        survivor.accepted_link_decision_id AS previous_decision_id,
+        previous_decision.decision_kind AS previous_decision_kind,
+        previous_decision.match_basis AS previous_match_basis,
+        survivor.current_import_row_id AS survivor_previous_import_row_id,
+        provider_winner.current_import_row_id AS
+            provider_winner_import_row_id,
+        jsonb_build_object(
+            'row_number', pair.row_number,
+            'collection_key', collection.collection_key,
+            'theme_slug', theme.theme_slug,
+            'theme_name', theme.theme_name,
+            'theme_group', theme.theme_group,
+            'title', collection.title,
+            'edition_key', collection.edition_key,
+            'provider', source.provider,
+            'dataset_key', source.dataset_key,
+            'source_name', source.source_name,
+            'source_url', source.source_url,
+            'source_item_key', survivor.external_item_id,
+            'source_component_key', survivor.external_component_id,
+            'feature_id', survivor.feature_id,
+            'place_name', survivor.place_name,
+            'address_hint', survivor.address_hint,
+            'sort_order', survivor.sort_order,
+            'item_title', survivor.item_title,
+            'item_summary', survivor.item_summary,
+            'metadata', survivor.metadata
+        ) AS row_payload
+    FROM pair_input AS pair
+    JOIN feature.curation_items AS survivor
+      ON survivor.curation_item_id = pair.survivor_item_id
+    JOIN feature.curation_items AS provider_winner
+      ON provider_winner.curation_item_id =
+         pair.provider_winner_item_id
+    JOIN feature.curation_collections AS collection
+      ON collection.collection_id = survivor.collection_id
+    JOIN feature.curated_themes AS theme
+      ON theme.theme_id = collection.theme_id
+    LEFT JOIN feature.curated_sources AS source
+      ON source.source_id = collection.source_id
+    LEFT JOIN feature.curation_link_decisions AS previous_decision
+      ON previous_decision.decision_id =
+         survivor.accepted_link_decision_id
+     AND previous_decision.curation_item_id =
+         survivor.curation_item_id
+     AND previous_decision.feature_id = survivor.feature_id
+), inserted_rows AS (
+    INSERT INTO feature.curation_import_rows (
+        import_batch_id,
+        curation_item_id,
+        row_number,
+        source_row_sha256,
+        row_payload,
+        provenance
+    )
+    SELECT
+        CAST(:import_batch_id AS uuid),
+        snapshot.curation_item_id,
+        snapshot.row_number,
+        encode(
+            x_extension.digest(snapshot.row_payload::text, 'sha256'),
+            'hex'
+        ),
+        snapshot.row_payload,
+        jsonb_build_object(
+            'schema_version', 1,
+            'operation', 'feature_merge_duplicate_source_winner',
+            'master_feature_id', CAST(:master AS text),
+            'loser_feature_id', CAST(:loser AS text),
+            'review_id', CAST(:review_id AS text),
+            'reason', CAST(:reason AS text),
+            'survivor_previous_import_row_id',
+                snapshot.survivor_previous_import_row_id,
+            'provider_winner_import_row_id',
+                snapshot.provider_winner_import_row_id
+        )
+    FROM snapshots AS snapshot
+    RETURNING import_row_id, curation_item_id, source_row_sha256
+), accepted AS (
+    INSERT INTO feature.curation_link_decisions (
+        curation_item_id,
+        feature_id,
+        import_row_id,
+        decision_kind,
+        match_basis,
+        resolver_version,
+        evidence,
+        actor,
+        supersedes_decision_id
+    )
+    SELECT
+        snapshot.curation_item_id,
+        snapshot.feature_id,
+        inserted.import_row_id,
+        'accepted',
+        'forward_recovery',
+        'feature-merge-v2',
+        jsonb_build_object(
+            'operation', 'feature_merge_duplicate_source_winner',
+            'master_feature_id', CAST(:master AS text),
+            'loser_feature_id', CAST(:loser AS text),
+            'review_id', CAST(:review_id AS text),
+            'reason', CAST(:reason AS text),
+            'source_row_sha256', inserted.source_row_sha256,
+            'previous_match_basis', snapshot.previous_match_basis
+        ),
+        :merge_actor,
+        snapshot.previous_decision_id
+    FROM snapshots AS snapshot
+    JOIN inserted_rows AS inserted
+      ON inserted.curation_item_id = snapshot.curation_item_id
+    WHERE snapshot.previous_decision_kind = 'accepted'
+      AND snapshot.previous_match_basis IN (
+          'csv_explicit_feature_id',
+          'admin_review',
+          'forward_recovery'
+      )
+    RETURNING decision_id, curation_item_id
+)
+UPDATE feature.curation_items AS survivor
+SET current_import_row_id = inserted.import_row_id,
+    accepted_link_decision_id = accepted.decision_id,
+    updated_by = :merge_actor,
+    updated_at = now()
+FROM inserted_rows AS inserted
+LEFT JOIN accepted
+  ON accepted.curation_item_id = inserted.curation_item_id
+WHERE survivor.curation_item_id = inserted.curation_item_id
+RETURNING
+    survivor.curation_item_id,
+    survivor.current_import_row_id,
+    survivor.accepted_link_decision_id
 """
 
 # Duplicate reconcile가 loser의 최신 operator state/tombstone을 master canonical
@@ -380,6 +752,26 @@ WHERE item.feature_id = :master
       item.archived_at
   )
 RETURNING legacy.curated_feature_id
+"""
+
+# Legacy projection 동기화 전에는 duplicate history의 target을 비워 둔다. 같은
+# collection/external item에서 survivor와 archived history가 모두 master를 가리키면
+# 0065 legacy trigger의 target identity 조회가 둘 중 하나를 임의 선택해 active master
+# projection을 detach할 수 있다. 정본 projection을 먼저 동기화한 뒤 history만 master로
+# 옮기며 source/current pointer는 건드리지 않는다.
+_MOVE_ARCHIVED_DUPLICATE_CURATION_HISTORY_SQL: Final[str] = """
+UPDATE feature.curation_items AS item
+SET feature_id = :master,
+    updated_at = now()
+WHERE item.feature_id IS NULL
+  AND NOT item.source_present
+  AND item.archived_at IS NOT NULL
+  AND item.metadata @> jsonb_build_object(
+      'feature_merge_duplicate_archived', true,
+      'feature_merge_master_id', CAST(:master AS text),
+      'feature_merge_loser_id', CAST(:loser AS text)
+  )
+RETURNING item.curation_item_id
 """
 
 # 0045 전환 trigger는 legacy curated_feature UUID와 같은 curation_item UUID를 다시
@@ -591,17 +983,101 @@ async def apply_feature_merge(
         text(_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL),
         {"master": master_id, "loser": loser_id},
     )
-    await session.execute(
-        text(_MERGE_DUPLICATE_CURATION_ITEMS_SQL),
-        {"master": master_id, "loser": loser_id},
+    merge_actor = (merged_by or "system:feature-merge").strip()
+    if not merge_actor:
+        merge_actor = "system:feature-merge"
+    curation_merge_params = {
+        "master": master_id,
+        "loser": loser_id,
+        "review_id": review_id,
+        "reason": reason,
+        "merge_actor": merge_actor,
+    }
+    duplicate_rows = (
+        (
+            await session.execute(
+                text(_MERGE_DUPLICATE_CURATION_ITEMS_SQL),
+                curation_merge_params,
+            )
+        )
+        .mappings()
+        .all()
     )
+    provider_recovery_pairs = [
+        {
+            "row_number": row_number,
+            "survivor_item_id": str(row["survivor_item_id"]),
+            "provider_winner_item_id": str(
+                row["provider_winner_item_id"]
+            ),
+        }
+        for row_number, row in enumerate(
+            (
+                row
+                for row in duplicate_rows
+                if bool(row["provider_winner_requires_recovery"])
+            ),
+            start=1,
+        )
+    ]
+    if provider_recovery_pairs:
+        batch_identity = {
+            "schema_version": 1,
+            "operation": "feature_merge_duplicate_source_winner",
+            "master_feature_id": master_id,
+            "loser_feature_id": loser_id,
+            "review_id": review_id,
+            "pairs": provider_recovery_pairs,
+        }
+        canonical_batch = json.dumps(
+            batch_identity,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        import_batch_id = str(
+            (
+                await session.execute(
+                    text(_INSERT_MERGE_IMPORT_BATCH_SQL),
+                    {
+                        "content_sha256": hashlib.sha256(
+                            canonical_batch
+                        ).hexdigest(),
+                        "row_count": len(provider_recovery_pairs),
+                        "merge_actor": merge_actor,
+                        "metadata": json.dumps(
+                            {
+                                **batch_identity,
+                                "reason": reason,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                )
+            ).scalar_one()
+        )
+        await session.execute(
+            text(_APPEND_DUPLICATE_MERGE_IMPORT_ROWS_SQL),
+            {
+                **curation_merge_params,
+                "import_batch_id": import_batch_id,
+                "pairs": json.dumps(
+                    provider_recovery_pairs,
+                    ensure_ascii=False,
+                ),
+            },
+        )
     await session.execute(
         text(_MOVE_CURATION_ITEMS_SQL),
-        {"master": master_id, "loser": loser_id},
+        curation_merge_params,
     )
     await session.execute(
         text(_SYNC_MASTER_LEGACY_PROJECTIONS_SQL),
         {"master": master_id},
+    )
+    await session.execute(
+        text(_MOVE_ARCHIVED_DUPLICATE_CURATION_HISTORY_SQL),
+        {"master": master_id, "loser": loser_id},
     )
     await session.execute(
         text(_MOVE_LEGACY_CURATED_FEATURES_SQL),

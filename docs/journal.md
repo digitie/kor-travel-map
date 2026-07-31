@@ -17,6 +17,24 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-31 (codex) — T-VN-H31R #909 curation provenance 완결
+
+- 주소 후보를 구조화 field·Unicode/literal hierarchy·versioned alias로 제한하고
+  `address_hint` 단독 자동 링크를 제거했다. 등대 105행 sidecar와 manifest를 결박했다.
+- migration `0072_curation_provenance`로 import batch/row와 link decision을 append-only
+  정규화했다. DB immutable trigger, same-item composite FK, exact current pointer와 legacy
+  fail-close를 강제했다.
+- official 등대 sidecar를 실제 multipart import와 durable row provenance에 결박하고
+  batch/current-row 조회, stable cursor link audit를 추가했다.
+- Feature merge는 non-legacy accepted link만 재승인한다. duplicate loser source가 이기면
+  survivor-owned merge row/decision을 append하고 loser는 revocation+archive로 보존한다.
+- 다중 component inactive history+active current는 external item별 canonical
+  survivor/provider/operator winner로 결정하고, legacy 정본 동기화 뒤 loser history를
+  master로 옮겨 projection/current pointer를 보존한다.
+- 단일 적대 리뷰의 최초 P1 2건·P2 3건·P3 1건과 재리뷰 P2 1건을 모두 닫았다. exact
+  `e69f8926` 최종 판정은 P0/P1/P2/P3 0건이다. 관련 195건, merge 29건, legacy clean DB
+  5/5와 admin frontend 286건, 정적/OpenAPI/보안 gate가 통과했다.
+
 ## 2026-07-31 (codex) — PR #908 #911~#914 적대 리뷰 보강
 
 - #911: provider 적재 성공과 absence 증거를 분리했다. source 전체 관측·finding 전량 durable

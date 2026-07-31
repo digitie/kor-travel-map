@@ -653,11 +653,27 @@ async def test_add_item_success_normalizes_and_touches_collection(
         if feature_id is not None
         else [_FakeResult(scalar=None)]
     )
-    session = _FakeSession(
+    results = [
         *prefix,
-        _FakeResult(rows=[{"curation_item_id": _CURATION_ITEM_ID, "inserted": inserted}]),
-        _FakeResult(rows=[_item_row(feature_id=feature_id)]),
-    )
+        _FakeResult(
+            rows=[
+                {
+                    "curation_item_id": _CURATION_ITEM_ID,
+                    "inserted": inserted,
+                }
+            ]
+        ),
+        _FakeResult(rows=[{"decision_id": None, "feature_id": None}]),
+    ]
+    if feature_id is not None:
+        results.extend(
+            [
+                _FakeResult(scalar="00000000-0000-4000-8000-000000000099"),
+                _FakeResult(),
+            ]
+        )
+    results.append(_FakeResult(rows=[_item_row(feature_id=feature_id)]))
+    session = _FakeSession(*results)
     item, was_inserted = await repo.add_curation_item(
         session,
         collection_id=_COLLECTION_ID,
@@ -671,7 +687,11 @@ async def test_add_item_success_normalizes_and_touches_collection(
     )
     assert was_inserted is inserted
     assert item.curation_item_id == _CURATION_ITEM_ID
-    upsert_params = session.calls[-2][1]
+    upsert_params = next(
+        params
+        for sql, params in session.calls
+        if "INSERT INTO feature.curation_items" in sql
+    )
     assert upsert_params["external_item_id"] == "external"
     assert upsert_params["external_component_id"] == "component-01"
     assert upsert_params["place_name"] == ("DB Feature 이름" if feature_id else "직접 장소")
@@ -834,6 +854,8 @@ async def test_update_item_noop_update_miss_and_full_success(
         _FakeResult(scalar=None),
         _FakeResult(scalar=None),
         _FakeResult(first=(_CURATION_ITEM_ID,)),
+        _FakeResult(scalar="00000000-0000-4000-8000-000000000099"),
+        _FakeResult(),
         _FakeResult(),
     )
     updated = await repo.update_curation_item(
@@ -1133,6 +1155,14 @@ async def test_preview_import_empty_counts_updates_and_removals() -> None:
 
 
 async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    provenance = AsyncMock(
+        side_effect=[
+            "00000000-0000-4000-8000-000000000090",
+            "00000000-0000-4000-8000-000000000091",
+            "00000000-0000-4000-8000-000000000092",
+        ]
+    )
+    monkeypatch.setattr(repo, "_record_import_provenance", provenance)
     assert await repo.import_curation_rows(_FakeSession(), rows=[]) == {
         "rows": 0,
         "collections": 0,
@@ -1140,6 +1170,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
         "updated": 0,
         "removed": 0,
         "removals": (),
+        "import_batch_id": "00000000-0000-4000-8000-000000000090",
     }
 
     rows = (
@@ -1182,6 +1213,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     assert result["updated"] == 1
     assert result["removed"] == 1
     assert result["removals"] == (_item(),)
+    assert result["import_batch_id"] == "00000000-0000-4000-8000-000000000091"
     assert "pg_advisory_xact_lock" in changed.calls[0][0]
     assert "UPDATE feature.curation_collections" in changed.calls[-1][0]
     assert [call.kwargs["theme_slug"] for call in theme.await_args_list] == [
@@ -1206,4 +1238,5 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     )
     no_change = await repo.import_curation_rows(unchanged, rows=(rows[0],))
     assert no_change["inserted"] == no_change["updated"] == no_change["removed"] == 0
+    assert no_change["import_batch_id"] == "00000000-0000-4000-8000-000000000092"
     assert len(unchanged.calls) == 9
