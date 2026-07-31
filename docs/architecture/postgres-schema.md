@@ -33,7 +33,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 |--------|------|------------------|
 | `feature` | feature 도메인 본체 + 큐레이션 collection/item overlay | 핵심 14+ |
 | `provider_sync` | provider entity/current payload + immutable 이력 + sync state | 4 |
-| `ops` | 운영 (작업 큐, 검수, 정합성, 사용자 변경 요청, api 로그) | 13 |
+| `ops` | 운영 (작업 큐, 검수, 정합성, 사용자 변경 요청, api 로그) | 17 |
 | `x_extension` | 확장 (postgis 등) | extensions only |
 
 ## vNext 목표 schema (미구현, 재설계 정본 §3)
@@ -149,6 +149,9 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `dedup_review_queue` | `review_id UUID` | feature_id_a < feature_id_b canonical pair UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
 | `feature_overrides` | `override_id UUID` | **구현됨(alembic 0010, ADR-045 T-207c)** — feature_id FK, field_path, source_value/override_value JSONB, prevent_provider_reactivation, status |
 | `feature_merge_history` | `merge_id UUID` | master_feature_id FK, loser_feature_id FK (둘 다 CASCADE), score, review_id FK (SET NULL), merged_by, reason, merged_at (alembic 0007, ADR-016) |
+| `integrity_observation_scopes` | `(provider, dataset_key)` | migration 0071; scope별 `latest_generation`과 `latest_authoritative_generation` monotonic close fence |
+| `integrity_observation_runs` | `observation_run_id BIGINT IDENTITY` | scope FK; external run UNIQUE, generation UNIQUE, collecting/authoritative/superseded 상태와 source/finding receipt |
+| `integrity_finding_observations` | `(observation_run_id, dedupe_key)` | run FK CASCADE; run이 실제 관측한 `av2_<sha256>` 집합을 payload와 분리해 불변 저장 |
 | `data_integrity_violations` | `issue_id UUID` | **구현됨(alembic 0009, ADR-045 T-205c)** — provider/dataset/source_record/feature 연결, violation_type, severity (info/warning/error/critical), payload, status |
 | `poi_cache_targets` | `target_id UUID` | **구현됨(alembic 0009+0053, ADR-045 T-205c)** — trimmed non-empty 112자 이하 external_system+target_key active UNIQUE, lon/lat, coord/coord_5179, radius_km, refresh_policy, provider_overrides, soft delete |
 | `poi_cache_target_feature_links` | `(target_id, feature_id)` | **구현됨(alembic 0009, ADR-045 T-205c)** — target 주변 feature link, provider/dataset, distance_m, relation, active |
@@ -282,6 +285,8 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `idx_overrides_field` | (field_path) | |
 | `idx_merge_history_master` | (master_feature_id, merged_at DESC) | |
 | `idx_merge_history_loser` | (loser_feature_id) | "이 feature가 어디로 병합됐나" 역추적 |
+| `idx_integrity_observation_runs_scope_status` | (provider, dataset_key, status, generation DESC) | scope별 collecting/authoritative run 감사 |
+| `idx_integrity_finding_observations_key_run` | (dedupe_key, observation_run_id) | stale sweep의 current/newer generation anti-join |
 | `idx_violations_type_status` | (violation_type, status) | |
 | `idx_violations_feature` | (feature_id) | partial NOT NULL |
 | `idx_violations_detected_brin` | BRIN(detected_at) | |

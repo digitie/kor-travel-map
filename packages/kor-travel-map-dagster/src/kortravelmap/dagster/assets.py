@@ -20,6 +20,9 @@ from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     NoticeFeatureLoadResult,
 )
+from kortravelmap.infra.integrity_violation_repo import (
+    IntegrityObservationReceipt as DurableIntegrityObservationReceipt,
+)
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
 from kortravelmap.providers.airkorea import (
     AIRKOREA_PROVIDER_NAME,
@@ -132,8 +135,10 @@ from kortravelmap.providers.standard_data import (
 from dagster import AssetExecutionContext, Backoff, Failure, RetryPolicy, asset
 
 from .etl import (
+    AddressFindingObservationReceipt,
     DagsterFeatureLoadResult,
     _add_output_metadata,
+    _dagster_run_id,
     load_feature_bundles_for_dagster,
 )
 from .feature_operation_tracking import run_tracked_feature_asset
@@ -193,6 +198,7 @@ async def run_feature_event_datagokr_cultural_festivals(
         provider=DATAGOKR_STANDARD_PROVIDER_NAME,
         dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -227,6 +233,7 @@ async def run_feature_place_opinet_stations(
                 provider=OPINET_PROVIDER_NAME,
                 dataset_key=OPINET_STATION_DATASET_KEY,
                 bundles=[],
+                authoritative_snapshot_complete=False,
                 record_sync_state=False,
             )
         return await _run_feature_place_opinet_stations_locked(
@@ -252,6 +259,7 @@ async def _run_feature_place_opinet_stations_locked(
         provider=OPINET_PROVIDER_NAME,
         dataset_key=OPINET_STATION_DATASET_KEY,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -487,6 +495,7 @@ async def run_feature_place_krex_rest_areas(
         provider=KREX_PROVIDER_NAME,
         dataset_key=REST_AREA_DATASET_KEY,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -634,6 +643,7 @@ async def _run_feature_notice_krex_traffic_notices_locked(
         provider=KREX_PROVIDER_NAME,
         dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
         record_sync_state=False,
         load_all=load_snapshot_atomically,
     )
@@ -660,6 +670,7 @@ async def _run_feature_notice_krex_traffic_notices_locked(
             "notices_reopened": reconciled.reopened,
             "snapshot_applied_at": fetched_at.isoformat(),
         },
+        observation_receipt=result.observation_receipt,
     )
     return result
 
@@ -765,6 +776,7 @@ async def run_feature_place_krheritage_items(
         provider=KRHERITAGE_PROVIDER_NAME,
         dataset_key=KRHERITAGE_DATASET_KEY,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     inactivated = await client.inactivate_geometryless_area_features_by_source(
@@ -807,6 +819,7 @@ async def run_feature_event_krheritage_events(
         provider=KRHERITAGE_PROVIDER_NAME,
         dataset_key=KRHERITAGE_EVENT_DATASET_KEY,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -842,11 +855,13 @@ async def run_feature_place_mois_licenses(
             provider=MOIS_PROVIDER_NAME,
             dataset_key=str(dataset_key),
             bundles=bundles,
+            authoritative_snapshot_complete=False,
             record_sync_state=False,
         )
         result = batch_result if result is None else result.merge(batch_result)
 
     if result is not None:
+        result = result.complete_authoritative_snapshot()
         client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
         await _record_feature_sync_success(
             context,
@@ -854,6 +869,7 @@ async def run_feature_place_mois_licenses(
             provider=MOIS_PROVIDER_NAME,
             dataset_key=str(dataset_key),
             cursor_extra=_feature_result_cursor_extra(result),
+            observation_receipt=result.observation_receipt,
         )
         return result
     return await _load(
@@ -861,6 +877,7 @@ async def run_feature_place_mois_licenses(
         provider=MOIS_PROVIDER_NAME,
         dataset_key=str(dataset_key),
         bundles=[],
+        authoritative_snapshot_complete=False,
     )
 
 
@@ -897,6 +914,7 @@ async def run_feature_place_knps_points(
         provider=KNPS_PROVIDER_NAME,
         dataset_key=dataset_key,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -933,6 +951,7 @@ async def run_feature_geometry_knps_records(
         provider=KNPS_PROVIDER_NAME,
         dataset_key=dataset_key,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -964,6 +983,7 @@ async def run_feature_place_krforest_recreation_forests(
         provider=KRFOREST_PROVIDER_NAME,
         dataset_key=KRFOREST_RECREATION_FORESTS_DATASET_KEY,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -996,6 +1016,7 @@ async def run_feature_place_krforest_arboretums(
         provider=KRFOREST_PROVIDER_NAME,
         dataset_key=KRFOREST_ARBORETUMS_DATASET_KEY,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -1026,6 +1047,7 @@ async def run_feature_place_standard_museums(
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_MUSEUMS,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -1056,6 +1078,7 @@ async def run_feature_place_standard_tourist_attractions(
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_TOURIST_ATTRACTIONS,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -1088,6 +1111,7 @@ async def run_feature_place_standard_parking_lots(
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_PARKING_LOTS,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -1120,6 +1144,7 @@ async def run_feature_place_standard_special_streets(
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_SPECIAL_STREETS,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -1154,6 +1179,7 @@ async def run_feature_place_datagokr_file_data(
         provider=DATAGOKR_FILEDATA_PROVIDER_NAME,
         dataset_key=dataset_key,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -1185,6 +1211,7 @@ async def run_feature_place_khoa_beaches(
         provider=KHOA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_BEACHES,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -1215,6 +1242,7 @@ async def run_feature_place_krairport_airports(
         provider=KRAIRPORT_PROVIDER_NAME,
         dataset_key=DATASET_KEY_AIRPORTS,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
 
 
@@ -1280,6 +1308,7 @@ async def run_feature_place_kor_travel_concierge_youtube(
         provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
         dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
     )
     inactive_ids = kor_travel_concierge_inactive_entity_ids(records)
     if inactive_ids:
@@ -1495,6 +1524,7 @@ async def _load(
     provider: str,
     dataset_key: str,
     bundles: list[Any],
+    authoritative_snapshot_complete: bool,
     record_sync_state: bool = True,
     load_all: Callable[[Sequence[Any]], Awaitable[FeatureLoadResult]] | None = None,
 ) -> DagsterFeatureLoadResult:
@@ -1511,6 +1541,7 @@ async def _load(
         provider=provider,
         dataset_key=dataset_key,
         strict_address=strict_address,
+        authoritative_snapshot_complete=authoritative_snapshot_complete,
         load_all=load_all,
     )
     if record_sync_state:
@@ -1520,6 +1551,7 @@ async def _load(
             provider=provider,
             dataset_key=dataset_key,
             cursor_extra=_feature_result_cursor_extra(result),
+            observation_receipt=result.observation_receipt,
         )
     return result
 
@@ -1542,6 +1574,7 @@ async def _record_feature_sync_success(
     provider: str,
     dataset_key: str,
     cursor_extra: dict[str, object],
+    observation_receipt: AddressFindingObservationReceipt | None = None,
 ) -> None:
     record_sync_success = getattr(client, "record_sync_success", None)
     if not callable(record_sync_success):
@@ -1564,6 +1597,41 @@ async def _record_feature_sync_success(
         dataset_key=dataset_key,
         cursor=cursor,
     )
+
+    # Provider sync 성공과 stale close 권한은 별개다(#911). source 전체 관측과 finding
+    # durable 기록을 증명한 typed receipt가 없으면 absence를 부정 증거로 쓰지 않는다.
+    if observation_receipt is None or not observation_receipt.permits_stale_close:
+        return
+
+    close_stale = getattr(client, "close_stale_address_validation_findings", None)
+    run_id = _dagster_run_id(context)
+    if callable(close_stale) and run_id:
+        try:
+            closed = await close_stale(
+                provider=provider,
+                dataset_key=dataset_key,
+                run_id=run_id,
+                receipt=DurableIntegrityObservationReceipt(
+                    authoritative_snapshot_complete=(
+                        observation_receipt.authoritative_snapshot_complete
+                    ),
+                    source_observations=observation_receipt.source_observations,
+                    findings_observed=observation_receipt.findings_observed,
+                    findings_unique=observation_receipt.findings_unique,
+                    findings_upserted=observation_receipt.findings_upserted,
+                    finding_persistence_complete=(
+                        observation_receipt.finding_persistence_complete
+                    ),
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            context.log.warning(f"finding close 생략 (provider={provider}): {exc!r}")
+        else:
+            if closed:
+                context.log.info(
+                    f"이번 run이 관측하지 않은 finding {closed}건을 닫았다 "
+                    f"(provider={provider}, dataset={dataset_key})"
+                )
 
 
 async def _record_list(context: AssetExecutionContext, resource_key: str) -> list[Any]:

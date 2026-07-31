@@ -42,9 +42,11 @@ __all__ = [
     "MAINTENANCE_RETRY_POLICY",
     "MAINTENANCE_JOBS",
     "MAINTENANCE_SCHEDULES",
+    "FINDING_PURGE_DEFAULT_RETENTION",
     "NOTICE_PURGE_DEFAULT_RETENTION",
     "consistency_dedup_refresh_job",
     "purge_expired_notices_op",
+    "purge_resolved_integrity_findings_op",
     "refresh_dedup_candidates_op",
     "run_consistency_check_op",
 ]
@@ -250,6 +252,42 @@ NOTICE_PURGE_DEFAULT_RETENTION: Final[str] = "1 year"
 """만료 notice 보존 기간 — 종료일(없으면 발표일) + 본 기간 경과 시 soft-delete(§9)."""
 
 
+FINDING_PURGE_DEFAULT_RETENTION: Final[str] = "90 days"
+"""resolved finding 보존 기간 (T-VN-H32).
+
+``NOTICE_PURGE_DEFAULT_RETENTION``(1년)보다 짧다 — finding은 notice와 달리 **운영 신호**라
+분기 회고에 필요한 만큼만 둔다. ``acknowledged``는 어떤 경우에도 지우지 않는다.
+"""
+
+
+@op(
+    name="purge_resolved_integrity_findings",
+    required_resource_keys={"kor_travel_map_client"},
+    config_schema={
+        "retention": Field(
+            str,
+            default_value=FINDING_PURGE_DEFAULT_RETENTION,
+            description="PostgreSQL interval 문자열 (예: '90 days').",
+        ),
+    },
+    retry_policy=MAINTENANCE_RETRY_POLICY,
+)
+async def purge_resolved_integrity_findings_op(
+    context: OpExecutionContext,
+) -> dict[str, object]:
+    """보존 기간이 지난 ``resolved`` finding을 삭제한다 (T-VN-H32R).
+
+    immutable authoritative generation sweep이 만든 ``resolved`` 이력을 90일 보존한다.
+    ``open``·``acknowledged``는 대상이 아니다.
+    """
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    retention = str(context.op_config.get("retention", FINDING_PURGE_DEFAULT_RETENTION))
+    purged = await client.purge_resolved_integrity_findings(retention=retention)
+    metadata: dict[str, object] = {"purged": purged, "retention": retention}
+    context.add_output_metadata(metadata)
+    return metadata
+
+
 @op(
     name="purge_expired_notices",
     required_resource_keys={"kor_travel_map_client"},
@@ -277,13 +315,14 @@ async def purge_expired_notices_op(context: OpExecutionContext) -> dict[str, obj
     tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
     description=(
         "DB 기준 dedup 후보 큐를 갱신한 뒤 F1~F4 consistency report를 저장하고, "
-        "보존 기간이 지난 notice를 정리한다."
+        "보존 기간이 지난 notice와 resolved integrity finding을 정리한다."
     ),
 )
 def consistency_dedup_refresh_job() -> None:
     """운영자가 Dagster UI/API에서 실행하는 consistency/dedup refresh job."""
     run_consistency_check_op(refresh_dedup_candidates_op())
     purge_expired_notices_op()
+    purge_resolved_integrity_findings_op()
 
 
 CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
@@ -297,7 +336,10 @@ CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,
         tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
-        description="dedup 후보 큐 재계산과 consistency report를 일 1회 실행한다.",
+        description=(
+            "dedup 후보 큐·consistency report 갱신과 notice/finding 보존 정리를 "
+            "일 1회 실행한다."
+        ),
     )
 ]
 """consistency/dedup maintenance schedule 목록. 운영 enable 전까지 STOPPED."""

@@ -132,6 +132,7 @@ async def run_feature_place_mcst_culture(
             provider=MCST_PROVIDER_NAME,
             dataset_key=spec.dataset_key,
             bundles=bundles,
+            authoritative_snapshot_complete=True,
         )
         if on_pair_done is not None:
             await on_pair_done(MCST_PROVIDER_NAME, spec.dataset_key)

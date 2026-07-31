@@ -232,7 +232,12 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.infra.feature_update_repo import (
     start_update_request as repo_start_update_request,
 )
-from kortravelmap.infra.integrity_violation_repo import sync_integrity_findings
+from kortravelmap.infra.integrity_violation_repo import (
+    IntegrityObservationReceipt,
+    close_stale_integrity_findings,
+    purge_resolved_integrity_findings,
+    sync_integrity_findings,
+)
 from kortravelmap.infra.jobs_repo import ImportJobEvent
 from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
 from kortravelmap.infra.poi_cache_target_repo import (
@@ -807,6 +812,33 @@ class AsyncKorTravelMapClient:
         """
         async with self._session_factory() as session, session.begin():
             return await repo_purge_expired_notices(session, retention=retention)
+
+    async def close_stale_address_validation_findings(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        run_id: str,
+        receipt: IntegrityObservationReceipt,
+    ) -> int:
+        """불변 observation generation을 authoritative finalize한다. 한 transaction."""
+
+        async with self._session_factory() as session, session.begin():
+            return await close_stale_integrity_findings(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                run_id=run_id,
+                receipt=receipt,
+            )
+
+    async def purge_resolved_integrity_findings(self, *, retention: str = "90 days") -> int:
+        """보존 기간이 지난 ``resolved`` finding을 삭제한다 (T-VN-H32). 한 transaction.
+
+        ``acknowledged``는 지우지 않는다. ``purge_expired_notices``와 같은 retention 패턴이다.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await purge_resolved_integrity_findings(session, retention=retention)
 
     async def load_enrichment_links(
         self, enrichments: Iterable[FestivalEnrichment]
@@ -2116,6 +2148,7 @@ class AsyncKorTravelMapClient:
         *,
         provider: str,
         dataset_key: str,
+        run_id: str | None = None,
     ) -> IntegrityFindingSyncResult:
         """주소/좌표 검증 결과를 ``ops.data_integrity_violations``에 durable하게 남긴다.
 
@@ -2167,6 +2200,7 @@ class AsyncKorTravelMapClient:
                     provider=provider,
                     dataset_key=dataset_key,
                     findings=rows,
+                    external_run_id=run_id,
                 )
         except Exception as exc:  # noqa: BLE001
             raise IntegrityFindingPersistenceError(

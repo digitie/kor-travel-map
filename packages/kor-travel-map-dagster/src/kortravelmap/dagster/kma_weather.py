@@ -1227,6 +1227,7 @@ async def run_feature_notice_kma_weather_alerts(
         provider=KMA_PROVIDER_NAME,
         dataset_key=KMA_WEATHER_ALERT_DATASET_KEY,
         bundles=bundles,
+        authoritative_snapshot_complete=True,
         load_all=load_events_atomically,
     )
     if reconciled is None:

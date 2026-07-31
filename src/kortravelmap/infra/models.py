@@ -113,6 +113,9 @@ __all__ = [
     "PipelineCancellationRow",
     "PipelineCancellationRunRow",
     "PipelineCancellationMemberRow",
+    "IntegrityObservationScopeRow",
+    "IntegrityObservationRunRow",
+    "IntegrityFindingObservationRow",
     "DataIntegrityViolationRow",
     "PoiCacheTargetRow",
     "PoiCacheTargetFeatureLinkRow",
@@ -2991,8 +2994,186 @@ class PipelineCancellationMemberRow(Base):
 
 
 # =============================================================================
-# ops.data_integrity_violations / poi_cache_* / provider_refresh_policies
+# ops.integrity_observation_* / data_integrity_violations / poi_cache_*
 # =============================================================================
+
+
+class IntegrityObservationScopeRow(Base):
+    """provider/dataset별 monotonic observation generation fence."""
+
+    __tablename__ = "integrity_observation_scopes"
+    __table_args__ = (
+        CheckConstraint(
+            "provider = btrim(provider) AND provider <> ''",
+            name=conv("ck_integrity_observation_scopes_provider"),
+        ),
+        CheckConstraint(
+            "dataset_key = btrim(dataset_key) AND dataset_key <> ''",
+            name=conv("ck_integrity_observation_scopes_dataset"),
+        ),
+        CheckConstraint(
+            "latest_generation >= 0 "
+            "AND latest_authoritative_generation >= 0 "
+            "AND latest_authoritative_generation <= latest_generation",
+            name=conv("ck_integrity_observation_scopes_generations"),
+        ),
+        {"schema": "ops"},
+    )
+
+    provider: Mapped[str] = mapped_column(Text, primary_key=True)
+    dataset_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    latest_generation: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("0"),
+    )
+    latest_authoritative_generation: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("0"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class IntegrityObservationRunRow(Base):
+    """한 external Dagster run의 불변 generation과 authoritative receipt."""
+
+    __tablename__ = "integrity_observation_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "generation > 0",
+            name=conv("ck_integrity_observation_runs_generation"),
+        ),
+        CheckConstraint(
+            "external_run_id = btrim(external_run_id) AND external_run_id <> ''",
+            name=conv("ck_integrity_observation_runs_external_run"),
+        ),
+        CheckConstraint(
+            "status IN ('collecting','authoritative','superseded')",
+            name=conv("ck_integrity_observation_runs_status"),
+        ),
+        CheckConstraint(
+            "source_observations >= 0 "
+            "AND findings_observed >= 0 "
+            "AND findings_unique >= 0 "
+            "AND findings_upserted >= 0 "
+            "AND findings_unique <= findings_observed "
+            "AND findings_upserted <= findings_unique",
+            name=conv("ck_integrity_observation_runs_counts"),
+        ),
+        CheckConstraint(
+            "(status = 'collecting' AND completed_at IS NULL) "
+            "OR (status IN ('authoritative','superseded') "
+            "AND completed_at IS NOT NULL)",
+            name=conv("ck_integrity_observation_runs_completion"),
+        ),
+        ForeignKeyConstraint(
+            ["provider", "dataset_key"],
+            [
+                "ops.integrity_observation_scopes.provider",
+                "ops.integrity_observation_scopes.dataset_key",
+            ],
+            name=conv("fk_integrity_observation_runs_scope"),
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "provider",
+            "dataset_key",
+            "generation",
+            name=conv("uq_integrity_observation_runs_generation"),
+        ),
+        UniqueConstraint(
+            "provider",
+            "dataset_key",
+            "external_run_id",
+            name=conv("uq_integrity_observation_runs_external_run"),
+        ),
+        Index(
+            "idx_integrity_observation_runs_scope_status",
+            "provider",
+            "dataset_key",
+            "status",
+            text("generation DESC"),
+        ),
+        {"schema": "ops"},
+    )
+
+    observation_run_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
+    generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    external_run_id: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'collecting'"),
+    )
+    source_observations: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("0"),
+    )
+    findings_observed: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("0"),
+    )
+    findings_unique: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("0"),
+    )
+    findings_upserted: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("0"),
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class IntegrityFindingObservationRow(Base):
+    """observation run이 실제로 본 dedupe key의 불변 집합."""
+
+    __tablename__ = "integrity_finding_observations"
+    __table_args__ = (
+        CheckConstraint(
+            "dedupe_key ~ '^av2_[0-9a-f]{64}$'",
+            name=conv("ck_integrity_finding_observations_key"),
+        ),
+        ForeignKeyConstraint(
+            ["observation_run_id"],
+            ["ops.integrity_observation_runs.observation_run_id"],
+            name=conv("fk_integrity_finding_observations_run"),
+            ondelete="CASCADE",
+        ),
+        Index(
+            "idx_integrity_finding_observations_key_run",
+            "dedupe_key",
+            "observation_run_id",
+        ),
+        {"schema": "ops"},
+    )
+
+    observation_run_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    dedupe_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
 
 
 class DataIntegrityViolationRow(Base):

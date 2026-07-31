@@ -17,6 +17,25 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-31 (codex) — PR #908 #911~#914 적대 리뷰 보강
+
+- #911: provider 적재 성공과 absence 증거를 분리했다. source 전체 관측·finding 전량 durable
+  기록을 typed receipt가 증명할 때만 close하며 empty/partial/drop/persistence 실패는
+  fail-close한다.
+- #912: migration `0071_integrity_observations`로 provider/dataset scope fence, external run
+  generation/receipt, run별 immutable dedupe-key observation set을 추가했다. 최신 authoritative
+  generation만 sweep하고 current/newer observation을 보호한다. ADR-080과 data model/schema
+  카탈로그를 갱신했다.
+- #913: resolved finding purge를 consistency maintenance job과 daily schedule에 실제로
+  연결하고 retention override·metadata·retry를 검증했다.
+- #914: linked name과 exact-name candidate ID를 현재 Feature에 결박했다. `approved|public`
+  scope를 분리하고 public repository 정본을 재사용하며, 감사 전체를 read-only
+  repeatable-read transaction 하나에서 실행해 snapshot identity를 보고한다.
+- 검증: unit+Dagster **2,315 passed**(optional MOIS 1 skipped), relevant PostgreSQL
+  integration **43 passed**. public audit와 generation 교차·동시성·migration 왕복은 실제
+  migrated PostgreSQL에서 실행했다. ruff 전체, strict mypy(core 120/Dagster 23 files),
+  import-linter도 통과했다.
+
 ## 2026-07-31 (codex) — T-VN-12 외부 효과 복구·consumer cutover checkpoint
 
 - static inventory가 55개 write route의 `db_only|external|non_retryable` 분류와 operation

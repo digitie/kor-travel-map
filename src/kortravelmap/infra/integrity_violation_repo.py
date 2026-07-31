@@ -22,9 +22,15 @@ if TYPE_CHECKING:
 __all__ = [
     "DataIntegrityViolation",
     "DataIntegrityViolationStateConflict",
+    "IntegrityObservationRun",
+    "IntegrityObservationReceipt",
+    "close_stale_integrity_findings",
     "create_data_integrity_violation",
+    "ensure_integrity_observation_run",
+    "finalize_integrity_observation_run",
     "get_data_integrity_violation",
     "list_data_integrity_violations",
+    "purge_resolved_integrity_findings",
     "set_data_integrity_violation_status",
     "sync_integrity_findings",
 ]
@@ -86,6 +92,53 @@ class DataIntegrityViolationStateConflict(ValueError):
             "data integrity violation "
             f"{issue_id!r}는 {target_status!r} 전이를 허용하지 않음: "
             f"status={current_status!r}"
+        )
+
+
+@dataclass(frozen=True)
+class IntegrityObservationRun:
+    """provider/dataset scope에서 external run에 배정한 불변 generation."""
+
+    observation_run_id: int
+    provider: str
+    dataset_key: str
+    generation: int
+    external_run_id: str
+    status: str
+
+
+@dataclass(frozen=True)
+class IntegrityObservationReceipt:
+    """authoritative close를 허용하는 source/finding 전량 관측 증명."""
+
+    authoritative_snapshot_complete: bool
+    source_observations: int
+    findings_observed: int
+    findings_unique: int
+    findings_upserted: int
+    finding_persistence_complete: bool
+
+    def __post_init__(self) -> None:
+        counts = (
+            self.source_observations,
+            self.findings_observed,
+            self.findings_unique,
+            self.findings_upserted,
+        )
+        if any(count < 0 for count in counts):
+            raise ValueError("observation receipt count는 음수일 수 없다.")
+        if self.findings_unique > self.findings_observed:
+            raise ValueError("unique finding 수는 observed finding 수를 넘을 수 없다.")
+        if self.findings_upserted > self.findings_unique:
+            raise ValueError("upserted finding 수는 unique finding 수를 넘을 수 없다.")
+
+    @property
+    def permits_stale_close(self) -> bool:
+        return (
+            self.authoritative_snapshot_complete
+            and self.source_observations > 0
+            and self.finding_persistence_complete
+            and self.findings_upserted == self.findings_unique
         )
 
 
@@ -377,6 +430,122 @@ DO UPDATE SET
 RETURNING issue_id
 """
 
+_INSERT_OBSERVATION_SCOPE_SQL: Final[str] = """
+INSERT INTO ops.integrity_observation_scopes (provider, dataset_key)
+VALUES (:provider, :dataset_key)
+ON CONFLICT (provider, dataset_key) DO NOTHING
+"""
+
+_LOCK_OBSERVATION_SCOPE_SQL: Final[str] = """
+SELECT latest_generation, latest_authoritative_generation
+FROM ops.integrity_observation_scopes
+WHERE provider = :provider
+  AND dataset_key = :dataset_key
+FOR UPDATE
+"""
+
+_GET_OBSERVATION_RUN_SQL: Final[str] = """
+SELECT observation_run_id, provider, dataset_key, generation, external_run_id, status
+FROM ops.integrity_observation_runs
+WHERE provider = :provider
+  AND dataset_key = :dataset_key
+  AND external_run_id = :external_run_id
+"""
+
+_GET_OBSERVATION_RUN_FOR_UPDATE_SQL: Final[str] = (
+    _GET_OBSERVATION_RUN_SQL + "\nFOR UPDATE"
+)
+
+_ALLOCATE_OBSERVATION_GENERATION_SQL: Final[str] = """
+UPDATE ops.integrity_observation_scopes
+SET latest_generation = latest_generation + 1,
+    updated_at = now()
+WHERE provider = :provider
+  AND dataset_key = :dataset_key
+RETURNING latest_generation
+"""
+
+_INSERT_OBSERVATION_RUN_SQL: Final[str] = """
+INSERT INTO ops.integrity_observation_runs (
+    provider, dataset_key, generation, external_run_id
+) VALUES (
+    :provider, :dataset_key, :generation, :external_run_id
+)
+RETURNING observation_run_id, provider, dataset_key, generation, external_run_id, status
+"""
+
+_INSERT_FINDING_OBSERVATIONS_SQL: Final[str] = """
+INSERT INTO ops.integrity_finding_observations (
+    observation_run_id, dedupe_key
+)
+SELECT :observation_run_id, observed.dedupe_key
+FROM unnest(CAST(:dedupe_keys AS text[])) AS observed(dedupe_key)
+ON CONFLICT (observation_run_id, dedupe_key) DO NOTHING
+"""
+
+
+def _observation_run(row: Any) -> IntegrityObservationRun:
+    return IntegrityObservationRun(
+        observation_run_id=int(row.observation_run_id),
+        provider=str(row.provider),
+        dataset_key=str(row.dataset_key),
+        generation=int(row.generation),
+        external_run_id=str(row.external_run_id),
+        status=str(row.status),
+    )
+
+
+async def ensure_integrity_observation_run(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    external_run_id: str,
+) -> IntegrityObservationRun:
+    """scope row lock 아래에서 external run에 단조 generation을 한 번만 배정한다."""
+
+    if not provider or not dataset_key:
+        raise ValueError("provider/dataset_key는 observation scope에 필수다.")
+    if not external_run_id.strip():
+        raise ValueError("external_run_id는 비어 있을 수 없다.")
+    await session.execute(
+        text(_INSERT_OBSERVATION_SCOPE_SQL),
+        {"provider": provider, "dataset_key": dataset_key},
+    )
+    scope = (
+        await session.execute(
+            text(_LOCK_OBSERVATION_SCOPE_SQL),
+            {"provider": provider, "dataset_key": dataset_key},
+        )
+    ).one()
+    del scope
+    params = {
+        "provider": provider,
+        "dataset_key": dataset_key,
+        "external_run_id": external_run_id,
+    }
+    existing = (
+        await session.execute(text(_GET_OBSERVATION_RUN_SQL), params)
+    ).one_or_none()
+    if existing is not None:
+        return _observation_run(existing)
+
+    generation = int(
+        (
+            await session.execute(
+                text(_ALLOCATE_OBSERVATION_GENERATION_SQL),
+                {"provider": provider, "dataset_key": dataset_key},
+            )
+        ).scalar_one()
+    )
+    inserted = (
+        await session.execute(
+            text(_INSERT_OBSERVATION_RUN_SQL),
+            {**params, "generation": generation},
+        )
+    ).one()
+    return _observation_run(inserted)
+
 
 
 async def sync_integrity_findings(
@@ -385,6 +554,7 @@ async def sync_integrity_findings(
     provider: str,
     dataset_key: str,
     findings: Sequence[Mapping[str, Any]],
+    external_run_id: str | None = None,
 ) -> int:
     """finding 집합을 **단일 statement로** 기록한다 (T-VN-H30A). commit은 호출자 책임.
 
@@ -397,19 +567,11 @@ async def sync_integrity_findings(
     직렬화하며 admin PATCH와 데드락까지 만든다. 전체를 한 statement로 접으면 트리거는
     1회만 발화한다.
 
-    **자동 close(sweep)는 일부러 없다.** 1차 설계에는 "이번 run이 보고하지 않는 finding을
-    닫는" sweep이 있었는데 적대 리뷰가 실측으로 세 가지를 재현했다.
-
-    - ``_load()``는 provider에 따라 **배치마다** 호출된다(MOIS는 1000건 단위로 ~977회).
-      배치 단위 sweep은 "이 배치에 없는 것"을 닫으므로 한 run이 자기 finding의 대부분을
-      스스로 resolved 처리한다.
-    - sweep이 행을 부분 unique index 밖으로 밀어내므로 다음 run의 INSERT가 충돌하지 않고
-      **새 행**을 만든다 — 막으려던 단조 증가를 오히려 재생산한다.
-    - ``bundles=[]``인 ``_load()``는 OpiNet 일일 스킵·MOIS 무레코드 fallback의 제어 흐름
-      sentinel이라, 빈 finding 집합이 큐 전체를 닫는다.
-
-    그래서 지금은 "닫히지 않는다"를 알려진 한계로 두고, run marker(적재 run id/시각을
-    payload에 남기고 그보다 오래된 것만 닫기) 기반 재설계를 ``T-VN-H32``로 분리했다.
+    이 함수는 finding을 닫지 않는다. ``external_run_id``가 있으면 같은 transaction에서
+    immutable generation을 확보하고 run별 dedupe-key observation set을 기록한다.
+    provider 전체 snapshot이 끝난 뒤 authoritative typed receipt를 가진 호출자가
+    ``finalize_integrity_observation_run``으로 scope fence 아래에서 한 번만 sweep한다.
+    따라서 배치 경계나 빈 제어-flow sentinel은 absence 증거가 되지 않는다(T-VN-H32R).
     """
     ordered_findings = sorted(
         findings,
@@ -436,6 +598,15 @@ async def sync_integrity_findings(
             message=str(finding["message"]),
         )
 
+    observation_run: IntegrityObservationRun | None = None
+    if external_run_id is not None:
+        observation_run = await ensure_integrity_observation_run(
+            session,
+            provider=provider,
+            dataset_key=dataset_key,
+            external_run_id=external_run_id,
+        )
+
     upserted = 0
     if ordered_findings:
         result = await session.execute(
@@ -457,5 +628,235 @@ async def sync_integrity_findings(
             },
         )
         upserted = len(result.scalars().all())
+        if observation_run is not None:
+            await session.execute(
+                text(_INSERT_FINDING_OBSERVATIONS_SQL),
+                {
+                    "observation_run_id": observation_run.observation_run_id,
+                    "dedupe_keys": [
+                        str(finding["payload"]["dedupe_key"])
+                        for finding in ordered_findings
+                    ],
+                },
+            )
 
     return upserted
+
+
+# T-VN-H32R — immutable observation generation 기반 close.
+#
+# **왜 한 statement인가.** 이 테이블에는 statement 단위 트리거
+# ``trg_data_integrity_violations_ops_live_revision``이 걸려 있어 statement마다 ``ops_live``
+# revision 단일 행을 갱신한다. finding마다 UPDATE를 돌리면 그 hot row에 배타 락을 N번 잡고
+# 트랜잭션 끝까지 쥐게 되어 ``/admin/issues`` 쓰기를 막고 데드락까지 만든다
+# (``sync_integrity_findings``가 batch upsert인 이유와 같다).
+#
+# **술어 하나하나가 기각된 설계를 피한다.**
+#
+# - ``status = 'open'`` — ``acknowledged``는 사람이 인지한 표시라 **불가침**이다.
+#   기계가 닫지 않는다.
+# - 현재 run의 immutable observation set에 있는 dedupe key는 닫지 않는다.
+# - 더 새 generation의 partial run이 이미 관측한 key도 닫지 않는다. 그 run이 실패해
+#   authoritative가 되지 못해도 새 증거를 과거 snapshot이 파괴할 수 없다.
+# - scope row ``FOR UPDATE``와 ``latest_authoritative_generation`` fence로 오래된 run이
+#   새 authoritative run 뒤에서 sweep하는 것을 막는다.
+# - ``provider``/``dataset_key`` — provider 경계를 넘지 않는다.
+# - ``payload ->> 'dedupe_key' LIKE 'av2\_%'`` — ``sync_integrity_findings``가 만든 계열만
+#   닫는다. 같은 provider/dataset에 다른 subsystem이 남긴 finding(예: curation mislink)을
+#   쓸어버리지 않기 위한 경계다.
+_CLOSE_STALE_FINDINGS_SQL: Final[str] = r"""
+UPDATE ops.data_integrity_violations AS v
+   SET status = 'resolved',
+       resolved_at = now(),
+       payload = v.payload || jsonb_build_object('resolution', CAST(:resolution AS jsonb))
+ WHERE v.provider = :provider
+   AND v.dataset_key = :dataset_key
+   AND v.status = 'open'
+   AND v.payload ? 'dedupe_key'
+   AND v.payload ->> 'dedupe_key' LIKE 'av2\_%'
+   AND NOT EXISTS (
+       SELECT 1
+       FROM ops.integrity_finding_observations AS current_observation
+       WHERE current_observation.observation_run_id = :observation_run_id
+         AND current_observation.dedupe_key = v.payload ->> 'dedupe_key'
+   )
+   AND NOT EXISTS (
+       SELECT 1
+       FROM ops.integrity_observation_runs AS newer_run
+       JOIN ops.integrity_finding_observations AS newer_observation
+         ON newer_observation.observation_run_id = newer_run.observation_run_id
+       WHERE newer_run.provider = :provider
+         AND newer_run.dataset_key = :dataset_key
+         AND newer_run.generation > :generation
+         AND newer_observation.dedupe_key = v.payload ->> 'dedupe_key'
+   )
+RETURNING v.issue_id
+"""
+
+_FINALIZE_OBSERVATION_RUN_SQL: Final[str] = """
+UPDATE ops.integrity_observation_runs
+SET status = :status,
+    source_observations = :source_observations,
+    findings_observed = :findings_observed,
+    findings_unique = :findings_unique,
+    findings_upserted = :findings_upserted,
+    completed_at = now()
+WHERE observation_run_id = :observation_run_id
+  AND status = 'collecting'
+"""
+
+_ADVANCE_AUTHORITATIVE_GENERATION_SQL: Final[str] = """
+UPDATE ops.integrity_observation_scopes
+SET latest_authoritative_generation = :generation,
+    updated_at = now()
+WHERE provider = :provider
+  AND dataset_key = :dataset_key
+"""
+
+# resolved 보존 기간이 지난 행을 **삭제**한다 (T-VN-H32R).
+#
+# ``acknowledged``는 어떤 경우에도 지우지 않는다 — close 대상도, 삭제 대상도 아니다.
+# ``feature_repo.purge_expired_notices``와 같은 retention 문자열 패턴을 쓴다.
+_PURGE_RESOLVED_FINDINGS_SQL: Final[str] = """
+DELETE FROM ops.data_integrity_violations AS v
+ WHERE v.status = 'resolved'
+   AND v.resolved_at IS NOT NULL
+   -- asyncpg가 파라미터 타입을 interval로 추론하면 str을 거부한다.
+   -- feature_repo.purge_expired_notices와 같은 이중 캐스팅을 쓴다.
+   AND v.resolved_at < now() - CAST(CAST(:retention AS text) AS interval)
+RETURNING v.issue_id
+"""
+
+
+async def close_stale_integrity_findings(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    run_id: str,
+    receipt: IntegrityObservationReceipt,
+) -> int:
+    """최신 authoritative generation에서만 stale finding을 닫는다."""
+
+    if not provider or not dataset_key:
+        raise ValueError("provider/dataset_key는 close 범위에 필수다.")
+    if not run_id:
+        raise ValueError("run_id는 비어 있을 수 없다 — 빈 값은 큐 전체를 닫는다.")
+    if not receipt.permits_stale_close:
+        raise ValueError("authoritative observation receipt가 close를 허용하지 않는다.")
+
+    await session.execute(
+        text(_INSERT_OBSERVATION_SCOPE_SQL),
+        {"provider": provider, "dataset_key": dataset_key},
+    )
+    scope = (
+        (
+            await session.execute(
+                text(_LOCK_OBSERVATION_SCOPE_SQL),
+                {"provider": provider, "dataset_key": dataset_key},
+            )
+        )
+        .mappings()
+        .one()
+    )
+    row = (
+        await session.execute(
+            text(_GET_OBSERVATION_RUN_FOR_UPDATE_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "external_run_id": run_id,
+            },
+        )
+    ).one_or_none()
+    if row is None:
+        raise LookupError("finding observation run이 durable하게 시작되지 않았다.")
+    observation_run = _observation_run(row)
+    if observation_run.status != "collecting":
+        return 0
+
+    latest_authoritative = int(scope["latest_authoritative_generation"])
+    status = (
+        "superseded"
+        if observation_run.generation <= latest_authoritative
+        else "authoritative"
+    )
+    finalize_params = {
+        "status": status,
+        "source_observations": receipt.source_observations,
+        "findings_observed": receipt.findings_observed,
+        "findings_unique": receipt.findings_unique,
+        "findings_upserted": receipt.findings_upserted,
+        "observation_run_id": observation_run.observation_run_id,
+    }
+    await session.execute(text(_FINALIZE_OBSERVATION_RUN_SQL), finalize_params)
+    if status == "superseded":
+        return 0
+
+    await session.execute(
+        text(_ADVANCE_AUTHORITATIVE_GENERATION_SQL),
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "generation": observation_run.generation,
+        },
+    )
+    resolution = {
+        "closed_by": "observation_generation_sweep",
+        "task": "T-VN-H32R",
+        "run_id": run_id,
+        "generation": observation_run.generation,
+        "reason": "이 run이 같은 dedupe_key를 다시 관측하지 않았다",
+    }
+    result = await session.execute(
+        text(_CLOSE_STALE_FINDINGS_SQL),
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "observation_run_id": observation_run.observation_run_id,
+            "generation": observation_run.generation,
+            "resolution": json.dumps(resolution, ensure_ascii=False),
+        },
+    )
+    return len(result.fetchall())
+
+
+async def finalize_integrity_observation_run(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    external_run_id: str,
+    receipt: IntegrityObservationReceipt,
+) -> int:
+    """명시 이름으로 generation을 authoritative finalize하고 stale을 닫는다."""
+
+    return await close_stale_integrity_findings(
+        session,
+        provider=provider,
+        dataset_key=dataset_key,
+        run_id=external_run_id,
+        receipt=receipt,
+    )
+
+
+async def purge_resolved_integrity_findings(
+    session: AsyncSession,
+    *,
+    retention: str = "90 days",
+) -> int:
+    """보존 기간이 지난 ``resolved`` finding을 삭제한다 (T-VN-H32R). commit은 호출자 책임.
+
+    ``acknowledged``는 사람이 인지한 표시라 **지우지 않는다**. ``open``도 당연히 대상이 아니다.
+
+    기본 90일 — ``feature_repo.purge_expired_notices``(1년)와 같은 패턴이지만 finding은
+    notice와 달리 **운영 신호**라 분기 회고에 필요한 만큼만 둔다.
+
+    반환: 삭제한 행 수.
+    """
+    if not retention.strip():
+        raise ValueError("retention은 비어 있을 수 없다.")
+    result = await session.execute(
+        text(_PURGE_RESOLVED_FINDINGS_SQL), {"retention": retention}
+    )
+    return len(result.fetchall())

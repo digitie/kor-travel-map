@@ -31,9 +31,13 @@ barrier로 직렬화한다.
         2026-07-31 중단, 백업 확보·B′ 경로 확정, 본문 상단 인수 블록 참조) →
     [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
     [ ] `T-VN-H30C`(타 provider evidence 재작업) →
-    [ ] `T-VN-H34`(H25A/H25B 미충족 AC 마무리) →
+    [~] `T-VN-H34`(H25A/H25B 미충족 AC — 4항목 중 3 완료·1은 H35 배포 대기,
+        카테고리 축 신설로 링크 결함 8건 발견) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
-    [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
+    [x] `T-VN-H32`(주소 검증 finding 자동 close — 초기 marker, #912 generation으로 대체) →
+    [x] `T-VN-H32R`(#911~#913 — authoritative observation receipt·동시 run fence·
+        retention job 등록) →
+    [x] `T-VN-H34R`(#914 — linked name exact evidence·공개 repeatable-read snapshot) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
@@ -100,7 +104,7 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(현재 Lane B 후보 `0070_domain_command_ledger`). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(현재 head `0071_integrity_observations`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
@@ -248,12 +252,66 @@ H30A가 durable ledger를 붙였으나 **자동 close는 일부러 넣지 않았
 - `bundles=[]`인 `_load()`는 OpiNet 일일 스킵·MOIS 무레코드 fallback의 **제어 흐름
   sentinel**이라, 빈 finding 집합이 큐 전체를 닫는다.
 
-- [ ] T-VN-H32 — **run marker 기반 close**
+- [x] T-VN-H32 — **run marker 기반 close** (2026-07-31, #912로 superseded)
 
-  적재 run id/시각을 finding payload에 남기고 "그 run보다 오래된 것"만 닫는다. 배치 경계와
-  무관해지고 `live_keys` 배열(MOIS면 ~977k 원소)도 사라진다. 함께 확인할 것:
-  기계가 닫은 행의 `payload.resolution` 스탬프, `acknowledged` 불가침, provider 경계,
-  그리고 resolved 행의 보존 기간(현재 retention 정책이 없다).
+  **marker는 시각이 아니라 `run_id`다.** 처음엔 `last_seen_at < run_started_at`으로 짰는데
+  `dagster/definitions.py:99`에서 `fetched_at` resource가 **`None`**이라 `_fetched_at()`이
+  **호출할 때마다 새 `now()`**를 반환한다. run-end hook에서 그 값을 marker로 쓰면 이번 run의
+  upsert보다 나중 시각이 되어 **자기 finding을 스스로 닫는다** — 기각된 실패모드를 시각 축으로
+  재현하는 것이다. `run_id`는 그 시계 함정이 없다.
+
+  upsert가 `payload.observed_run_id`를 찍고, close는
+  `COALESCE(payload->>'observed_run_id','') <> :run_id`인 것만 닫는다.
+  **빈 `run_id`는 술어가 모든 행에 참이 되므로 `ValueError`로 fail-closed**한다.
+
+  호출 지점은 `assets.py`의 `_record_feature_sync_success` — **8개 asset 공통, 배치 루프 밖,
+  run당 1회**이고 MOIS처럼 배치를 도는 asset도 `result is not None`(실제로 배치를 처리함)일
+  때만 닿는다. `bundles=[]` sentinel 경로(OpiNet 일일 스킵·MOIS 무레코드 fallback)는 이 hook을
+  거치지 않으므로 빈 관측 집합이 큐를 닫는 일이 없다. close 실패는 적재를 되돌리지 않는다 —
+  관측 위생이지 적재 계약이 아니다.
+
+  술어별 방어: `status='open'`(**`acknowledged` 불가침**) / `provider`·`dataset_key`(provider 경계)
+  / `dedupe_key LIKE 'av2\_%'`(같은 provider의 **다른 subsystem** finding, 예 `curation_mislink:…`를
+  쓸어버리지 않음) / **단일 statement**(`trg_data_integrity_violations_ops_live_revision`이
+  statement 단위라 finding마다 UPDATE를 돌리면 `ops_live` hot row에 배타 락을 N번 잡아
+  `/admin/issues` 쓰기를 막고 데드락까지 만든다 — batch upsert와 같은 이유).
+
+  **retention**: `purge_resolved_integrity_findings(retention='90 days')` +
+  dagster op `purge_resolved_integrity_findings`. `feature_repo.purge_expired_notices`(1년)와
+  같은 패턴이되 finding은 운영 신호라 분기 회고에 필요한 만큼만 둔다.
+  `acknowledged`는 어떤 경우에도 지우지 않는다.
+
+  > **flap은 아직 관측되지 않았다.** close를 켜면 resolved가 쌓이기 시작하고, 재발하는 finding은
+  > 부분 유니크 인덱스 밖으로 나갔다 돌아오며 사이클마다 새 행을 남긴다. 지금은 prod finding이
+  > 3건뿐이라 flap 비율을 측정할 데이터가 없다. **A(시간 기준)로 시작하고, 첫 몇 run에서
+  > resolved 증가율을 재서 dedupe_key별 상한(B)이 필요한지 판단한다** — 관측되지 않은 문제에
+  > 선제 대응하지 않는다.
+
+  검증: 통합 테스트 **15 passed**(기각된 3모드 미재현 / `acknowledged` 불가침 / 다른 subsystem
+  미침범 / provider 경계 / 빈 `run_id` fail-closed / `resolution` 스탬프·멱등 / retention 양방향),
+  n150 CI-parity **2278 passed**, `mypy --strict` **196 files clean**.
+
+- [x] T-VN-H32R — **PR #908 사후 감사의 close·retention 불변식을 보강한다 (#911~#913)**
+
+  exact head `312b1b4b` 적대 리뷰에서 기존 H32 완료 판정을 뒤집는 P1 두 건과 P2 한 건이
+  재현됐다. `record_sync_success`는 provider 적재 성공일 뿐 absence를 부정 증거로 쓸 수
+  있는 완전한 관측 receipt가 아니다. MOIS empty fallback과 finding 저장 불완전에서도
+  close가 호출되고, 단일 mutable `observed_run_id`는 A upsert→B upsert→A close 교차에서
+  A가 실제 관측한 finding을 resolved 처리한다. retention op도 어떤 Dagster job에 없었다.
+
+  - [x] **#911** — source snapshot이 authoritative·complete이고 현재 run finding 전량이
+    durable하게 기록됐다는 typed receipt가 있을 때만 close한다. empty/partial/transform·load
+    일부 실패/finding 저장 실패·`unrecorded_count > 0`은 모두 close 0회로 fail-close한다.
+  - [x] **#912** — migration 0071이 provider/dataset scope, external run generation,
+    run별 dedupe-key observation set을 정규화한다. scope row lock이 generation 배정과
+    authoritative fence를 직렬화하고, current run과 더 새 partial run의 관측은 immutable
+    anti-join으로 sweep에서 보호한다. A/B 교차·역순·동시 allocation을 실제 PostgreSQL로
+    검증한다.
+  - [x] **#913** — resolved purge op을 `MAINTENANCE_JOBS`와 schedule이 실제 실행하는 graph에
+    등록하고 Definitions node·execute-in-process의 retention config/metadata를 검증한다.
+
+  migration은 PR #906의 0070 landing 뒤 단일 head를 기준으로
+  `0071_integrity_observations`에 추가했다.
 
 ### T-VN-H25 — 공식 curation 미연결 membership 해소
 
@@ -347,7 +405,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   H25A가 H25B로, H25B가 다시 여기로 넘긴 항목들이다. **어느 열린 task도 소유하지 않는 상태를
   만들지 않기 위해** 명시적으로 모은다.
-  - **주소 축 시군구 단위 대조** — 현재는 시도코드까지만 본다.
+  - **주소 축 시군구 단위 대조** — ~~미충족~~ → **위 도구에 통합(완료)**. 다만 **천장이 실증됐다**:
+    전수 8건의 결함이 **행정구역 축으로는 전부 통과**한다(주차장·카페·펜션이 대상과 같은
+    시군구에 있다). 시군구 축은 *기각*에 쓸 수 있어도 *확정*의 충분조건이 아니라는 본문 서술이
+    맞았고, **카테고리 축이 추가로 필요하다는 것이 새 발견이다.**
     > **문구 정정(2026-07-29)** — 이 항목을 "`metadata.region`을 시군구까지 본다"로 읽으면
     > **실행 불가**다. `region`은 `강원`·`충북` 같은 **시도 약칭뿐**이라 시군구를 담을 수 없다.
     > 실제로 가능한 축은 **정지오코딩 결과의 시군구코드 ↔ feature `sigungu_code` 대조**이며,
@@ -357,12 +418,81 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > **천장도 같이 기록한다**: 시군구까지 내려가도 같은 시군구 안의 다른 대상은 구분되지
     > 않는다(청풍호 vs 청풍호반케이블카). 시군구 축은 *기각*에는 쓸 수 있어도 *확정*의
     > 충분조건이 아니다.
-  - **provider provenance** — `curation_items.source_record_key`가 미연결 행에서 전부 NULL이라
-    현 스키마로는 조인 불가. CSV의 `provider`/`dataset_key`/`source_item_key`를 판정에 쓰는
-    설계를 하거나, 불가하다는 결론을 근거와 함께 확정한다.
-  - **preview/commit·REST/UI 실데이터 검증** — 역반영 5건이 실제 화면·API에 반영되는지.
-  - **정지오코딩 세션 고정** — 승인/기각 근거를 재현 가능하게 남긴다
-    (`scripts/h25b_verify_links.py` 신설; 현재는 손으로 친 상수표뿐이다).
+  - **provider provenance** — ~~설계 또는 불가 확정~~ → **불가로 확정(2026-07-31, 실측)**.
+    > CSV 5개 486행은 `provider`/`dataset_key`/`source_item_key`/`source_component_key`가
+    > **전부 채워져 있다**. 그런데 그 값이 `provider_sync.source_entities`에 **하나도 없다** —
+    > 10종 조합 전부 provider 이름조차 **0 hit**다(`korea-tourism-organization`,
+    > `korea-heritage-agency`, `korea-arboreta-and-gardens-institute`,
+    > `korea-institute-of-aids-to-navigation`). `source_entities`의 provider는 전부
+    > `python-*-api` 계열(`python-mois-api` 977,908 / `data.go.kr-standard` 21,102 …)이다.
+    > **CSV의 provider는 캠페인 주관기관이고 source_entities의 provider는 수집 라이브러리라
+    > 서로 다른 네임스페이스다.** `source_item_key`(`arboretum-2026-001` 등)도
+    > `source_entity_id`/`source_entity_key`/`current_source_record_key` 어디에도 0 hit.
+    > 공식 CSV는 provider 파이프라인을 거치지 않고 직접 적재되므로 `source_entities`에 대응
+    > 행이 **없는 것이 정상**이다. 조인 경로를 만들려면 기관↔라이브러리 매핑을 발명해야 하고
+    > 그건 의미가 없다.
+    >
+    > **본문 전제 정정** — "미연결 행에서 전부 NULL"은 맞지만 전체 모집단으로 읽으면 틀린다.
+    > 실측: active 3,530건 중 `source_record_key` 보유 **3,044건**. NULL은 공식 CSV 적재분
+    > **486건**뿐이고 링크 222 / 미연결 264로 갈린다.
+  - **preview/commit·REST/UI 실데이터 검증** — ~~미충족~~ → **REST는 실증 완료(2026-07-31)**,
+    preview는 **prod 미배포로 측정 불가**.
+    > `GET /v1/curations/features/{id}` 실측(prod, service token):
+    > `국립세종수목원` **6건**(공식 3 + concierge legacy 3) / `진해보타닉뮤지엄` 1건 /
+    > `청풍호` 1건. `GET /v1/features/{id}` 200, `GET /v1/curations/collections` 200에
+    > 공식 collection **19건** 공개. **링크는 화면·API에 실제로 반영돼 있다** — 그래서 위
+    > 카테고리 결함도 공개 표면에 그대로 노출된다(진해보타닉뮤지엄이 카페로, 청풍호가 펜션으로).
+    >
+    > **import preview의 H36 게이트 동작은 prod에서 잴 수 없다** — 배포 이미지가 `c8ed6164`라
+    > `_adopted_match`가 없고 `0066`의 `external_component_id`도 없다. `T-VN-H35` 배포 후에만
+    > 실증 가능하다.
+    >
+    > 측정 실수 기록: ① 원격 셸에서 명령치환이 깨져 토큰이 비었고 401을 엔드포인트 인증
+    > 문제로 오독할 뻔했다(스크립트 파일로 해결). ② 응답 구조가 `data.feature`+`data.curations`인데
+    > `data`를 리스트로 기대해 **"0건"으로 잘못 보고**했다. 둘 다 그럴듯한 값이 나와 확인하지
+    > 않았으면 틀린 결론이 됐다.
+  - **정지오코딩 세션 고정** — ~~신설~~ → **완료**: [`scripts/h25b_verify_links.py`](../scripts/h25b_verify_links.py).
+    판정 축 3개(행정구역 시도코드 대조 / **카테고리 정합성**(신규) / 동명 유일성).
+    현재는 `--scope public`로 운영 public repository 정본을 훑고, 과거 H25B 내부 승인
+    5건은 `--scope approved`로 명시 분리한다. 단위 테스트는
+    [`tests/unit/test_h25b_verify_links.py`](../tests/unit/test_h25b_verify_links.py).
+
+    **전수 실행 결과(222건 링크, 2026-07-31)**: 모순 **8건** / 무모순 214건.
+    8건은 전부 **카테고리 축에서만** 걸린다 — 행정구역 축으로는 10건 전부 통과한다.
+    고유 feature 5개:
+    | curation | feature category | 판정 |
+    | --- | --- | --- |
+    | `태화강 국가정원`(2캠페인 3행) | `06010000` TRANSPORT_PARKING | 그 관광지의 **주차장**에 붙음 |
+    | `반디랜드&태권도원`(2행) | `06010000` TRANSPORT_PARKING | 동일 |
+    | `김해가야테마파크` | `06010000` TRANSPORT_PARKING | 동일 |
+    | `진해보타닉뮤지엄` | `02020100` FOOD_CAFE_COFFEE | 카페에 붙음 |
+    | `청풍호` | `03050200` LODGING_PENSION_RURAL | 농어촌펜션에 붙음 |
+
+    **장소는 맞고 유형이 틀린 것**이다(좌표·주소가 대상과 일치). H33이 해제한 3건처럼
+    *다른 장소*에 붙은 오링크가 아니므로 **링크 해제가 아니라 올바른 feature로 재연결하거나
+    카테고리를 고치는 것**이 맞다. 후속 처리는 별도 판단이 필요하다.
+
+    > **판정 로직을 두 번 고쳤다(기록)**. ① 동명 다수를 *모순*으로 셌다 → 222건 중 30건이
+    > 모순으로 잡히고 그중 20건이 이 축 단독이었다. 동명 다수는 반증이 아니라 **그 축으로
+    > 확정할 수 없다**는 뜻이다(30→10). ② 카테고리 기대를 `01`(TOURISM)만으로 좁혔다 →
+    > `장태산자연휴양림`·`거창 항노화힐링랜드`(`03030000` LODGING_RECREATION_FOREST)가
+    > 오탐이 됐다. 숙박을 갖춘 휴양림이 그렇게 분류되는 건 정당하다. 축을 "관광이어야 한다"에서
+    > **"명백히 대상일 수 없는 유형인가"** 로 뒤집었다(10→8). 두 회귀 모두 단위 테스트로 고정했다.
+
+- [x] T-VN-H34R — **H34 링크 evidence를 linked target·공개 snapshot에 결박한다 (#914)**
+
+  - [x] `place_name`과 linked `feature_name`을 동일 정규화 함수로 exact 비교하고, 동명
+    후보 query는 count가 아니라 candidate `feature_id`를 반환해 현재 링크와 결박한다.
+    linked-name mismatch는 독립 axis/evidence이며 무관한 동명 Feature로 pass할 수 없다.
+  - [x] `--scope public`은 공개 curation 정본(`source_present`, included,
+    collection published/public/unarchived, theme public, `feature.public_features`)을
+    repository 함수로 재사용한다. H25B 내부 승인 5건은 `--scope approved`로 분리한다.
+  - [x] 대상 rows와 name candidate evidence를 read-only repeatable-read transaction
+    하나에서 읽고 결과에 scope, 대상 수, snapshot identity를 기록한다.
+  - [x] linked-name mismatch와 source removed/excluded/draft/admin-only/private-theme/
+    inactive 공개 경계를 회귀 테스트로 고정한다. 실제 migrated PostgreSQL에서 별도
+    connection의 committed fixture를 `audit_database()`로 읽어 transaction isolation과
+    read-only metadata까지 검증한다.
 
 - [x] T-VN-H33 — curation_items 오링크 3건 해제 + 공개 오노출 실증 + ledger 방출 (#890, H36으로 durable해짐) → [`tasks-done.md`](tasks-done.md)
 

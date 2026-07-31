@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### 주소 finding authoritative generation·curation 링크 감사 보강 (2026-07-31, H32R/H34R)
+
+- **DATABASE**: mutable `payload.observed_run_id` sweep을 제거하고 provider/dataset scope,
+  external run별 monotonic generation/receipt, run별 immutable dedupe-key observation set을
+  migration `0071_integrity_observations`로 정규화했다.
+- **CORRECTNESS**: authoritative·complete receipt를 가진 최신 generation만 stale finding을
+  닫는다. 현재 run과 더 새 partial run의 관측, 사람이 확인한 `acknowledged`, 다른 subsystem
+  finding은 sweep하지 않는다.
+- **OPS**: resolved finding 90일 purge가 consistency maintenance job과 daily schedule에서
+  실제 실행된다.
+- **AUDIT**: H25B 링크 검증은 public repository 정본을 재사용하고 linked name·exact-name
+  candidate Feature ID를 현재 링크에 결박한다. read-only repeatable-read DB snapshot의
+  모집단·대상 수·identity를 JSON 보고서에 기록한다.
+- **CLI (breaking)**: 모호한 `--all`을 제거하고 `--scope public|approved`로 감사 모집단을
+  명시한다.
+
 ### backup/restore hard-crash effect fence (2026-07-31, T-VN-12)
 
 - **RELIABILITY**: backup/create/restore/swap은 DB의 immutable `effect_token`과 고정 이름

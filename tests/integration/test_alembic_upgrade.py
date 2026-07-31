@@ -646,7 +646,7 @@ async def test_weather_migration_reuses_valid_index_after_partial_failure(
             ).scalar_one()
 
         assert relfilenode_after == relfilenode_before
-        assert migration_head == "0070_domain_command_ledger"
+        assert migration_head == "0071_integrity_observations"
     finally:
         if retry_engine is not None:
             await retry_engine.dispose()
