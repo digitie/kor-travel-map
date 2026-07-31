@@ -126,6 +126,16 @@ snapshot이다. active와 tombstone을 모두 포함한다. leaf row는 다음 �
 MVCC view로 읽어 immutable header/item에 고정한다. 후속 page는 같은 snapshot item만 읽으므로
 중간에 새 source write가 commit돼도 count/root/page membership은 바뀌지 않는다.
 
+초기 cutover는 service recovery principal의 `begin → writer backfill → seal` 두 단계로 고정한다.
+begin은 stream을 fenced 상태로 만들고 active claim을 끊지만 snapshot을 만들지 않는 `preparing`
+reconciliation request만 남긴다. seal은 PinVi가 계산한 expected epoch/count/Merkle root를 body로 받아
+같은 transaction에서 Map source heads를 fixed snapshot으로 캡처하고 비교한다. 비교가 맞을 때만
+snapshot을 저장하고 request를 `running`으로 전환하며, mismatch는 snapshot 저장과 phase 전이를 모두
+rollback한 `412`다. begin 요청의 precondition은 stream control ETag 또는 stream 없음
+`If-None-Match: *`이고, begin/seal 응답과 seal `If-Match`는 reconciliation request
+`request_id:phase_version` ETag를 사용한다. begin/seal은 모두 UUID `Idempotency-Key`와 precondition
+header를 domain ledger에 포함해 exact response replay와 changed-body `409`를 보장한다.
+
 ```text
 (external_system, target_key, state, source_generation, source_payload_fingerprint)
 ```
@@ -177,7 +187,7 @@ T-VN-12 정적 registry에서 generic DB command, 기존 refresh ledger, outbox 
 
 operator는 ops read에서 epoch/claim/backlog/dead/reconciliation 상태를 보고, admin 표면에서 replay와
 reconciliation command를 실행한다. ServiceToken scope는 consumer read/claim/ack/nack/snapshot,
-restore-fence, recovery replay로 분리한다. admin reconciliation 시작은 active claim을 끊는 복구
+restore-fence, recovery replay, recovery cutover로 분리한다. admin reconciliation 시작은 active claim을 끊는 복구
 mutation이므로 destructive recovery gate가 켜진 경우에만 허용한다.
 
 reconciliation command는 active claim을 무효화하고 stream을 먼저 halt한 뒤 fixed snapshot을 만든다.

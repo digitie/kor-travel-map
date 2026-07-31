@@ -583,14 +583,16 @@ POST /v1/service/cache-target-event-nacks
 GET  /v1/service/cache-target-event-dead-letters/{event_id}
 POST /v1/service/cache-target-event-dead-letters/{event_id}/replays
 GET  /v1/service/cache-target-snapshots/{external_system}
+POST /v1/service/cache-target-reconciliations
+POST /v1/service/cache-target-reconciliations/{request_id}/seals
 GET  /v1/service/cache-target-reconciliations/{request_id}/snapshot
 POST /v1/service/cache-target-reconciliations/{request_id}/completions
 ```
 
 모두 `X-Kor-Travel-Map-Service-Token`을 쓰되 token principal의 `consumer_id`와
 external system을 exact 결박한다. scope는 consumer read/claim/ack/nack/snapshot,
-restore-fence, recovery replay로 분리한다. PinVi에 admin proxy secret이나 ops mutation 권한을
-주지 않는다.
+restore-fence, recovery replay, recovery cutover로 분리한다. PinVi에 admin proxy secret이나
+ops mutation 권한을 주지 않는다.
 
 target create는 `If-None-Match: *`, update/delete는 직전 GET/성공 응답의 raw strong ETag를
 `If-Match`로 보낸다. `source_generation`은 ETag나 queue generation을 대체하지 않는다. `412`는
@@ -606,12 +608,32 @@ fingerprint만 재활성화한다.
 
 snapshot page는 `snapshot_id`, `restore_epoch`, `high_watermark_cursor`, `count`, `merkle_root`가
 끝까지 고정된다. 상세 byte 계약과 strict event union은 ADR-081이 정본이다. 이 표면은 Map foundation
-PR만으로 enable하지 않으며 PinVi paired consumer와 contract checksum을 통과한 뒤 켠다. admin
-reconciliation 시작은 destructive recovery gate를 요구한다. consumer completion은
-`cache-target:snapshot` principal과 request/system/consumer/snapshot/epoch/root를 exact 결박하고
-UUID Idempotency-Key로 terminal 응답을 재생한다. stream read의 nullable active reconciliation
-descriptor로 request와 fixed snapshot identity를 발견한 뒤 request-bound snapshot만 page한다.
-일반 snapshot read가 새로 만든 snapshot은 completion 근거가 아니다.
+PR만으로 enable하지 않으며 PinVi paired consumer와 contract checksum을 통과한 뒤 켠다.
+
+초기 cutover는 service recovery principal의 2단계 reconciliation으로 수행한다.
+`POST /v1/service/cache-target-reconciliations`는 UUID `Idempotency-Key`와 `If-None-Match: *`
+(stream 없음) 또는 직전 stream control `If-Match`를 요구하고, claim을 끊고 stream을 fenced 상태로
+만든 뒤 snapshot 없이 `preparing` request를 만든다. begin 응답의 `ETag`는 stream이 아니라
+reconciliation request entity(`request_id:phase_version`)이며, fenced stream control ETag는 body
+`stream_entity_tag`에 별도로 반환한다. PinVi writer는 이 fenced epoch에서 desired target/tombstone을
+PUT/DELETE로 backfill한다.
+
+`POST /v1/service/cache-target-reconciliations/{request_id}/seals`는 begin 응답의 reconciliation
+`ETag`를 `If-Match`로 요구하고 UUID `Idempotency-Key`를 받는다. body의 `external_system`,
+`consumer_id`, `expected_restore_epoch`, `expected_item_count`, `expected_merkle_root`를 현재 Map
+source heads와 같은 transaction에서 비교한다. exact match일 때만 immutable fixed snapshot을 저장하고
+request를 `running`으로 전환하며, seal 성공 응답의 `ETag`도 같은 reconciliation request의 새
+phase version이다. mismatch는 snapshot 저장과 phase 전이를 rollback한 `412`이며 request는
+`preparing`으로 남는다. 두 command 모두 body와 precondition header를 domain ledger fingerprint에
+포함해 same-key/same-body exact response replay와 changed-body `409`를 보장한다.
+
+admin reconciliation 시작은 destructive recovery gate를 요구하며 begin+seal을 한 transaction으로
+수행하는 one-step convenience다. consumer completion은 `cache-target:snapshot` principal과
+request/system/consumer/snapshot/epoch/root를 exact 결박하고 UUID Idempotency-Key로 terminal 응답을
+재생한다. stream read의 active reconciliation descriptor는 `preparing|running` strict union이며
+consumer는 `running` descriptor에서 request와 fixed snapshot identity를 발견한 뒤 request-bound
+snapshot만 page한다. `preparing` request나 일반 snapshot read가 새로 만든 snapshot은 completion
+근거가 아니다.
 
 PATCH/DELETE correction UI는 `GET .../{feature_id}/revision`의 body `row_revision`과 응답 header
 `ETag`를 먼저 읽고, 이어서 `GET .../{feature_id}` detail의 `feature.row_revision`과 같을 때만

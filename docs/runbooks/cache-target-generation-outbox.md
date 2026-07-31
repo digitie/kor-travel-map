@@ -7,8 +7,8 @@ ADR-081 producer foundation과 paired PinVi consumer의 준비·복구·검증 �
 
 1. Map/PinVi exact source commit과 pinned service OpenAPI SHA를 기록한다.
 2. Map DB의 단일 Alembic head와 `alembic check`를 확인한다.
-3. ServiceToken principal을 consumer, restore-fence, recovery replay scope로 분리하고 서로 다른
-   external system이나 admin route에 사용할 수 없는지 확인한다.
+3. ServiceToken principal을 consumer, restore-fence, recovery replay, recovery cutover scope로
+   분리하고 서로 다른 external system이나 admin route에 사용할 수 없는지 확인한다.
 4. Map target stream은 blocked/dead 0이고 PinVi consumer flag는 off여야 한다.
 5. snapshot serializer/Merkle golden vector가 양쪽 exact commit에서 모두 통과해야 한다.
 
@@ -16,22 +16,29 @@ ADR-081 producer foundation과 paired PinVi consumer의 준비·복구·검증 �
 
 1. PinVi writer를 fence한 repeatable-read snapshot에서 desired target과 tombstone, source generation,
    source payload fingerprint를 만든다.
-2. destructive recovery gate를 켠 제한된 admin 경계에서 reconciliation을 시작해 active claim을
-   끊고 stream을 halt한다.
-3. service stream read의 active reconciliation descriptor에서 request ID와 fixed snapshot identity,
-   epoch, count, root, high-watermark를 읽는다. descriptor가 없거나 admin receipt와 다르면 중단한다.
-4. request-bound snapshot endpoint를 끝까지 page한다. 모든 page의 `snapshot_id`, epoch,
+2. `cache-target:recovery` principal로 stream ETag를 조건부 전송해 reconciliation begin을 호출한다.
+   stream이 아직 없으면 `If-None-Match: *`로 시작하고, 응답의 `preparing` request ID,
+   reconciliation ETag, body의 `stream_entity_tag`를 각각 기록한다.
+3. PinVi writer snapshot의 desired target/tombstone을 Map service PUT/DELETE로 backfill한다. 이때
+   restore epoch는 begin receipt와 같아야 하며 claim consumer는 아직 켜지 않는다.
+4. begin에서 받은 request ID와 reconciliation ETag를 `If-Match`로 보내 seal을 호출한다. seal body에는
+   PinVi writer snapshot에서 계산한 `expected_restore_epoch`, `expected_item_count`,
+   `expected_merkle_root`를 넣는다. Map의 현재 source heads와 다르면 `412`로 실패하고 request는
+   `preparing`으로 남아야 한다.
+5. service stream read의 active reconciliation descriptor에서 request ID와 fixed snapshot identity,
+   epoch, count, root, high-watermark를 읽는다. descriptor가 없거나 seal receipt와 다르면 중단한다.
+6. request-bound snapshot endpoint를 끝까지 page한다. 모든 page의 `snapshot_id`, epoch,
    high-watermark, count, Merkle root가 descriptor와 같지 않으면 폐기하고 다시 시작한다. 일반
    snapshot endpoint에서 새 snapshot을 만들어 completion에 사용하지 않는다.
-5. 두 source projection의 count와 Merkle root를 비교한다. mismatch면 consumer를 켜지 않고 leaf
+7. 두 source projection의 count와 Merkle root를 비교한다. mismatch면 consumer를 켜지 않고 leaf
    identity/fingerprint 차이를 조사한다.
-6. PinVi inbox/replica/checkpoint를 한 transaction에 backfill하고 같은 snapshot을 다시 비교한다.
-7. `cache-target:snapshot` principal로 request/system/consumer/snapshot/epoch/root를 exact 결박한
+8. PinVi inbox/replica/checkpoint를 한 transaction에 backfill하고 같은 snapshot을 다시 비교한다.
+9. `cache-target:snapshot` principal로 request/system/consumer/snapshot/epoch/root를 exact 결박한
    completion receipt를 UUID Idempotency-Key와 함께 제출한다. exact replay 외 다른 body/key 조합은
    실패해야 한다.
-8. Map이 `ready`/enabled로 전이한 receipt와 credential, OpenAPI SHA gate가 모두 green일 때만 PinVi
+10. Map이 `ready`/enabled로 전이한 receipt와 credential, OpenAPI SHA gate가 모두 green일 때만 PinVi
    consumer flag를 켠다.
-9. claim→PinVi DB commit→ACK 순서를 확인하고 backlog가 contiguous하게 줄어드는지 본다.
+11. claim→PinVi DB commit→ACK 순서를 확인하고 backlog가 contiguous하게 줄어드는지 본다.
 
 ## 3. restore epoch 전환
 
