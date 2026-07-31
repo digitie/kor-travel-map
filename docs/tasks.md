@@ -564,15 +564,30 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   **`match_basis` 허용값은 4개다**(`0072` `ck_curation_link_decisions_basis`):
   `csv_explicit_feature_id` · `admin_review` · `legacy_unattributed` · **`forward_recovery`**.
-  즉 **새 값을 만들 필요가 없다** — 복구용 축(`forward_recovery`)이 이미 계약에 있다.
-  문제는 그 생성 경로가 **merge 승인 한 곳뿐**이라는 것이다(`merge_repo.py:339`, `:451`).
+  그 생성 경로는 **merge 승인 한 곳뿐**이다(`merge_repo.py:339`, `:451`).
+  (이 문단은 처음에 "복구용 축이 이미 있으니 **새 값을 만들 필요가 없다**"고 적었으나
+  아래 판정에서 뒤집혔다 — `forward_recovery`는 "합쳐진 대상의 결정을 이어받는다"는
+  merge 전용 의미라 projection에 빌려 쓰면 의미가 왜곡된다. `0073`은 `source_rule`을 더한다.)
 
   **`0065`가 `sync_curated_feature_collection()`의 최신 정의다.** `0066`~`0072` 어느 것도
-  이 함수를 갱신하지 않는다(전수 확인). 그 함수는 `curated_features` 변경 시
-  `curation_items`를 **DELETE 후 INSERT**하는데(`0065:892`), INSERT 컬럼 목록에
-  `accepted_link_decision_id`·`current_import_row_id`가 **없다**. 그래서 트리거가 만드는
-  projection은 항상 decision 없이 태어나고, `_trusted_link_sql()`에서 제외된다.
+  이 함수를 갱신하지 않는다(전수 확인). 그 함수가 `curation_items`에 쓰는 어느 경로에도
+  `accepted_link_decision_id`가 **없다**. 그래서 트리거가 만드는 projection은 항상
+  decision 없이 태어나고, `_trusted_link_sql()`에서 제외된다.
   → **#910 답변의 진단이 코드로 확인됐다.**
+
+  > **정정(2026-07-31 실행 확인)** — 위 문단은 처음에 "`curation_items`를 DELETE 후
+  > INSERT한다(`0065:892`)"고 적었는데 **틀렸다.** `0065` 파일에는 이 함수 정의가 두 번
+  > 나오고 `:835`는 **downgrade가 되돌리는 옛 본문**이다. 실제 최신 정의(`:28`)는 DELETE 없이
+  > targeted UPDATE 여러 개 + `INSERT ... ON CONFLICT DO NOTHING`을 쓴다. 컨테이너에 `0072`를
+  > 올리고 직접 확인했다 — projection UPDATE 후 item의 `ctid`는 바뀌지만
+  > `accepted_link_decision_id` 포인터는 **살아남는다**(재작성이 아니라 갱신).
+  >
+  > 이 오독은 결론을 두 개 바꿀 뻔했다: ① `fk_curation_link_decisions_item`이
+  > `ON DELETE RESTRICT`라 "0072 배포 후 concierge writer가 통째로 죽는다"고 볼 뻔했다 —
+  > 직접 DELETE는 실제로 RESTRICT에 막히지만(확인함) 트리거가 DELETE를 하지 않으므로
+  > 그 경로는 발생하지 않는다. ② "재삽입마다 decision이 누적된다"는 우려도 같은 이유로
+  > 성립하지 않는다. 그래도 누적 축은 **회귀 테스트로 고정했다** — 미래에 writer가 바뀌면
+  > 되살아나는 위험이기 때문이다.
 
   ## 실증 (2026-07-31, 격리 restore clone — prod 무접촉)
 
@@ -655,36 +670,46 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   그 함수는 `NEW`(=`curated_features` 행)를 갖고 있으므로 위 표의 값을 **전부 채울 수 있다** —
   DB 트리거에 actor/evidence 맥락이 없다는 일반론이 여기서는 해당하지 않는다.
 
-  > **누적 함정** — 트리거가 `curation_items`를 DELETE 후 INSERT하고(`0065:892`)
-  > `0072`의 append-only 트리거가 decision UPDATE/DELETE를 막으므로, 재삽입마다 decision이
-  > 쌓인다. `supersedes_decision_id`로 직전 것을 잇고 `accepted_link_decision_id` 포인터만
-  > 갱신한다. **무한 증식은 `0067` dedupe 사고와 같은 계열이므로 회귀 테스트로 고정한다.**
+  > **누적 축** — `0072`의 append-only 트리거가 decision UPDATE/DELETE를 막으므로, 발급
+  > 조건이 느슨하면 decision이 단조 증가한다. 처음엔 "트리거가 item을 DELETE 후 INSERT하니
+  > 재삽입마다 쌓인다"고 봤으나 그 전제는 위 정정대로 **틀렸다**. 그래도 갱신 1회마다
+  > 1건씩 쌓는 설계는 얼마든지 가능하므로 **회귀 테스트로 고정한다**(`0067` dedupe 계열).
   >
   > **FK 순환** — `curation_items.accepted_link_decision_id` → `curation_link_decisions` →
   > `curation_items`가 서로를 참조한다. `0072`가 그 FK를 DEFERRABLE INITIALLY DEFERRED로
   > 만든 이유가 이것이고, 트리거 안에서 둘을 만들 때 그 성질에 의존한다.
 
-  ## 두 갈래 — ②가 본질이다
+  ## 구현 완료 (2026-08-01, `0073_curation_source_rule`)
 
-  **① one-shot 복구** (기존 3,044건)
-  재검증한 immutable evidence로 `forward_recovery` decision을 **append**한다.
-  ⚠ #910이 못박은 제약: `legacy_unattributed`를 이름만 바꾸거나 public 술어를 완화하지 않는다.
-  **재검증 없는 일괄 승격 금지** — `provider_sync.source_entities`와 `feature.curated_features`의
-  source entity/record/rule/Feature identity를 다시 확인해 근거를 만든다.
+  확정 설계대로 넣었다. 설계에서 **바뀐 것 하나**: 트리거를 `curated_features`가 아니라
+  **`curation_items`** 에 단다(`trg_curation_items_source_rule_decision`).
+  `sync_curated_feature_collection()`은 link을 만드는 지점이 **둘**(신규 item INSERT,
+  `source_change` 시 `feature_id` UPDATE)이고 merge/detach 불변식이 얽힌 800줄이라,
+  그 안을 두 군데 고치는 것보다 불변식이 실제로 사는 자리 — "feature_id를 가진 item에는
+  근거가 있어야 한다" — 에 거는 편이 두 지점을 모두 덮고 앞으로 생길 writer도 덮는다.
 
-  **② ongoing writer 연결** (트리거)
-  `sync_curated_feature_collection()`이 `curation_items`를 INSERT할 때 **같은 transaction에서**
-  `curation_link_decisions` 행도 만들고 `accepted_link_decision_id`를 채우게 한다.
-  **①만 하면 배포 후 새로 생기는 concierge 링크가 같은 문제를 반복해 일회성 땜질이 된다.**
+  검증 술어는 **4조건**으로 늘렸다(설계의 2조건 + link 정합성 2개):
+  `selection_origin='source_rule'` · `projection.feature_id = item.feature_id` ·
+  `projection.source_record_key = item.source_record_key` · 그 key가
+  `provider_sync.source_records`에 도달. 하나라도 실패하면 `legacy_unattributed`로 남는다.
 
-  > **트리거에서 decision을 만들 때 주의** — `0072`의 append-only 트리거가
-  > `curation_link_decisions`의 UPDATE/DELETE를 막는다. 트리거가 projection을 **DELETE 후
-  > INSERT**하는 구조라(`0065:892`) 같은 `curation_item_id`로 재삽입될 때마다 decision이
-  > **누적**된다. `supersedes` 체인으로 이전 decision을 잇거나, 재삽입 시 새 decision을
-  > 발급하고 포인터만 갱신하는 설계를 명시해야 한다. 무한 증식은 `0067`의 dedupe 사고와
-  > 같은 계열이다.
+  **함께 고친 것 — 승인 근거 판정이 두 곳에 다른 모양으로 있었다.** 공개 표면은
+  denylist(`<> 'legacy_unattributed'`), merge 재타게팅은 whitelist(3값 열거,
+  `merge_repo._MOVE_CURATION_ITEMS_SQL`). 값이 늘 때 whitelist만 뒤처지면 **공개 표면은
+  노출하는 link을 merge가 `revoked`로 끊는다** — 어느 쪽도 오류를 내지 않아 "링크가
+  언젠가 사라짐"으로만 나타난다. `infra/curation_link_basis.py` 한 곳으로 모으고
+  양쪽 다 whitelist로 맞췄다(모르는 근거를 기본 신뢰하지 않는 쪽이 `0072` 원칙과 같은 방향).
 
-  할 일:
+  게이트: unit **1821 passed** · 관련 integration **91 passed** ·
+  `ruff`/`mypy --strict`(123 files)/`lint-imports`(4 kept). 새 통합 테스트 6건은
+  **변이 2회로 falsifiability를 확인**했다 — 검증 술어에서 `selection_origin`을 빼면
+  fail-close 테스트 2건이, 재진입 가드를 빼면 누적·멱등 테스트 3건이 죽는다.
+
+  곁가지로 `test_alembic_upgrade.py`가 head revision을 리터럴로 박고 있어 마이그레이션을
+  추가할 때마다 깨졌다. ScriptDirectory에서 계산하도록 바꿨다.
+
+  남은 할 일:
+  - **before/after exact count 확정** — `0063` restore clone에 `0064`→head와 새 이미지를 적용해
   - **before/after exact count 확정** — `0063` restore clone에 `0064`→head와 새 이미지를 적용해
     collection/item/Feature-group별로 잰다. 현재 `3,265→264`는 **0063 실측에서 산출한 예상치**이지
     배포 인수값이 아니다 — `0065`의 collection/item 재정규화, `source_present`/`status`/`archived_at`,
