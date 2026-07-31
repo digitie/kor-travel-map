@@ -35,6 +35,9 @@ barrier로 직렬화한다.
         카테고리 축 신설로 링크 결함 8건 발견) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [x] `T-VN-H32`(주소 검증 finding 자동 close — run_id marker, retention 90일) →
+    [ ] `T-VN-H32R`(#911~#913 — authoritative observation receipt·동시 run fence·
+        retention job 등록) →
+    [ ] `T-VN-H34R`(#914 — linked name exact evidence·공개 repeatable-read snapshot) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
@@ -288,6 +291,26 @@ H30A가 durable ledger를 붙였으나 **자동 close는 일부러 넣지 않았
   미침범 / provider 경계 / 빈 `run_id` fail-closed / `resolution` 스탬프·멱등 / retention 양방향),
   n150 CI-parity **2278 passed**, `mypy --strict` **196 files clean**.
 
+- [ ] T-VN-H32R — **PR #908 사후 감사의 close·retention 불변식을 보강한다 (#911~#913)**
+
+  exact head `312b1b4b` 적대 리뷰에서 기존 H32 완료 판정을 뒤집는 P1 두 건과 P2 한 건이
+  재현됐다. `record_sync_success`는 provider 적재 성공일 뿐 absence를 부정 증거로 쓸 수
+  있는 완전한 관측 receipt가 아니다. MOIS empty fallback과 finding 저장 불완전에서도
+  close가 호출되고, 단일 mutable `observed_run_id`는 A upsert→B upsert→A close 교차에서
+  A가 실제 관측한 finding을 resolved 처리한다. retention op도 어떤 Dagster job에 없었다.
+
+  - [ ] **#911** — source snapshot이 authoritative·complete이고 현재 run finding 전량이
+    durable하게 기록됐다는 typed receipt가 있을 때만 close한다. empty/partial/transform·load
+    일부 실패/finding 저장 실패·`unrecorded_count > 0`은 모두 close 0회로 fail-close한다.
+  - [ ] **#912** — provider+dataset full observation/upsert/sweep을 DB advisory lock 또는
+    단조 generation으로 직렬화한다. process-local lock은 금지하며 A/B 교차 순서를 실제
+    PostgreSQL 회귀로 고정한다.
+  - [ ] **#913** — resolved purge op을 `MAINTENANCE_JOBS`와 schedule이 실제 실행하는 graph에
+    등록하고 Definitions node·execute-in-process의 retention config/metadata를 검증한다.
+
+  migration은 병행 PR #906의 0070과 충돌하지 않는다. schema가 필요하면 #906 landing 뒤
+  latest main의 단일 head 다음 번호로만 추가한다.
+
 ### T-VN-H25 — 공식 curation 미연결 membership 해소
 
 > **전제 정정 (2026-07-29, T-VN-H25A)** — 기존 전제 *"공식 CSV의 고유 `feature_id` 158개 중
@@ -452,6 +475,19 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > `장태산자연휴양림`·`거창 항노화힐링랜드`(`03030000` LODGING_RECREATION_FOREST)가
     > 오탐이 됐다. 숙박을 갖춘 휴양림이 그렇게 분류되는 건 정당하다. 축을 "관광이어야 한다"에서
     > **"명백히 대상일 수 없는 유형인가"** 로 뒤집었다(10→8). 두 회귀 모두 단위 테스트로 고정했다.
+
+- [ ] T-VN-H34R — **H34 링크 evidence를 linked target·공개 snapshot에 결박한다 (#914)**
+
+  - [ ] `place_name`과 linked `feature_name`을 동일 정규화 함수로 exact 비교하고, 동명
+    후보 query는 count가 아니라 candidate `feature_id`를 반환해 현재 링크와 결박한다.
+    linked-name mismatch는 독립 axis/evidence이며 무관한 동명 Feature로 pass할 수 없다.
+  - [ ] `--all` 기본 scope는 공개 curation 정본(`source_present`, included,
+    collection published/public/unarchived, theme public, `feature.public_features`)을
+    재사용한다. 내부 전체가 필요하면 별도 명시 scope로 분리한다.
+  - [ ] 대상 rows와 name candidate evidence를 read-only repeatable-read transaction
+    하나에서 읽고 결과에 scope, 대상 수, snapshot identity를 기록한다.
+  - [ ] linked-name mismatch와 source removed/excluded/draft/broken/inactive 공개 경계를
+    회귀 테스트로 고정한다.
 
 - [x] T-VN-H33 — curation_items 오링크 3건 해제 + 공개 오노출 실증 + ledger 방출 (#890, H36으로 durable해짐) → [`tasks-done.md`](tasks-done.md)
 
