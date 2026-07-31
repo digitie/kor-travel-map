@@ -347,7 +347,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   H25A가 H25B로, H25B가 다시 여기로 넘긴 항목들이다. **어느 열린 task도 소유하지 않는 상태를
   만들지 않기 위해** 명시적으로 모은다.
-  - **주소 축 시군구 단위 대조** — 현재는 시도코드까지만 본다.
+  - **주소 축 시군구 단위 대조** — ~~미충족~~ → **위 도구에 통합(완료)**. 다만 **천장이 실증됐다**:
+    전수 8건의 결함이 **행정구역 축으로는 전부 통과**한다(주차장·카페·펜션이 대상과 같은
+    시군구에 있다). 시군구 축은 *기각*에 쓸 수 있어도 *확정*의 충분조건이 아니라는 본문 서술이
+    맞았고, **카테고리 축이 추가로 필요하다는 것이 새 발견이다.**
     > **문구 정정(2026-07-29)** — 이 항목을 "`metadata.region`을 시군구까지 본다"로 읽으면
     > **실행 불가**다. `region`은 `강원`·`충북` 같은 **시도 약칭뿐**이라 시군구를 담을 수 없다.
     > 실제로 가능한 축은 **정지오코딩 결과의 시군구코드 ↔ feature `sigungu_code` 대조**이며,
@@ -357,12 +360,50 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > **천장도 같이 기록한다**: 시군구까지 내려가도 같은 시군구 안의 다른 대상은 구분되지
     > 않는다(청풍호 vs 청풍호반케이블카). 시군구 축은 *기각*에는 쓸 수 있어도 *확정*의
     > 충분조건이 아니다.
-  - **provider provenance** — `curation_items.source_record_key`가 미연결 행에서 전부 NULL이라
-    현 스키마로는 조인 불가. CSV의 `provider`/`dataset_key`/`source_item_key`를 판정에 쓰는
-    설계를 하거나, 불가하다는 결론을 근거와 함께 확정한다.
+  - **provider provenance** — ~~설계 또는 불가 확정~~ → **불가로 확정(2026-07-31, 실측)**.
+    > CSV 5개 486행은 `provider`/`dataset_key`/`source_item_key`/`source_component_key`가
+    > **전부 채워져 있다**. 그런데 그 값이 `provider_sync.source_entities`에 **하나도 없다** —
+    > 10종 조합 전부 provider 이름조차 **0 hit**다(`korea-tourism-organization`,
+    > `korea-heritage-agency`, `korea-arboreta-and-gardens-institute`,
+    > `korea-institute-of-aids-to-navigation`). `source_entities`의 provider는 전부
+    > `python-*-api` 계열(`python-mois-api` 977,908 / `data.go.kr-standard` 21,102 …)이다.
+    > **CSV의 provider는 캠페인 주관기관이고 source_entities의 provider는 수집 라이브러리라
+    > 서로 다른 네임스페이스다.** `source_item_key`(`arboretum-2026-001` 등)도
+    > `source_entity_id`/`source_entity_key`/`current_source_record_key` 어디에도 0 hit.
+    > 공식 CSV는 provider 파이프라인을 거치지 않고 직접 적재되므로 `source_entities`에 대응
+    > 행이 **없는 것이 정상**이다. 조인 경로를 만들려면 기관↔라이브러리 매핑을 발명해야 하고
+    > 그건 의미가 없다.
+    >
+    > **본문 전제 정정** — "미연결 행에서 전부 NULL"은 맞지만 전체 모집단으로 읽으면 틀린다.
+    > 실측: active 3,530건 중 `source_record_key` 보유 **3,044건**. NULL은 공식 CSV 적재분
+    > **486건**뿐이고 링크 222 / 미연결 264로 갈린다.
   - **preview/commit·REST/UI 실데이터 검증** — 역반영 5건이 실제 화면·API에 반영되는지.
-  - **정지오코딩 세션 고정** — 승인/기각 근거를 재현 가능하게 남긴다
-    (`scripts/h25b_verify_links.py` 신설; 현재는 손으로 친 상수표뿐이다).
+  - **정지오코딩 세션 고정** — ~~신설~~ → **완료**: [`scripts/h25b_verify_links.py`](../scripts/h25b_verify_links.py).
+    판정 축 3개(행정구역 시도코드 대조 / **카테고리 정합성**(신규) / 동명 유일성).
+    `--all`로 링크된 공식 curation 전수를 훑는다. 단위 테스트는
+    [`tests/unit/test_h25b_verify_links.py`](../tests/unit/test_h25b_verify_links.py).
+
+    **전수 실행 결과(222건 링크, 2026-07-31)**: 모순 **8건** / 무모순 214건.
+    8건은 전부 **카테고리 축에서만** 걸린다 — 행정구역 축으로는 10건 전부 통과한다.
+    고유 feature 5개:
+    | curation | feature category | 판정 |
+    | --- | --- | --- |
+    | `태화강 국가정원`(2캠페인 3행) | `06010000` TRANSPORT_PARKING | 그 관광지의 **주차장**에 붙음 |
+    | `반디랜드&태권도원`(2행) | `06010000` TRANSPORT_PARKING | 동일 |
+    | `김해가야테마파크` | `06010000` TRANSPORT_PARKING | 동일 |
+    | `진해보타닉뮤지엄` | `02020100` FOOD_CAFE_COFFEE | 카페에 붙음 |
+    | `청풍호` | `03050200` LODGING_PENSION_RURAL | 농어촌펜션에 붙음 |
+
+    **장소는 맞고 유형이 틀린 것**이다(좌표·주소가 대상과 일치). H33이 해제한 3건처럼
+    *다른 장소*에 붙은 오링크가 아니므로 **링크 해제가 아니라 올바른 feature로 재연결하거나
+    카테고리를 고치는 것**이 맞다. 후속 처리는 별도 판단이 필요하다.
+
+    > **판정 로직을 두 번 고쳤다(기록)**. ① 동명 다수를 *모순*으로 셌다 → 222건 중 30건이
+    > 모순으로 잡히고 그중 20건이 이 축 단독이었다. 동명 다수는 반증이 아니라 **그 축으로
+    > 확정할 수 없다**는 뜻이다(30→10). ② 카테고리 기대를 `01`(TOURISM)만으로 좁혔다 →
+    > `장태산자연휴양림`·`거창 항노화힐링랜드`(`03030000` LODGING_RECREATION_FOREST)가
+    > 오탐이 됐다. 숙박을 갖춘 휴양림이 그렇게 분류되는 건 정당하다. 축을 "관광이어야 한다"에서
+    > **"명백히 대상일 수 없는 유형인가"** 로 뒤집었다(10→8). 두 회귀 모두 단위 테스트로 고정했다.
 
 - [x] T-VN-H33 — curation_items 오링크 3건 해제 + 공개 오노출 실증 + ledger 방출 (#890, H36으로 durable해짐) → [`tasks-done.md`](tasks-done.md)
 
