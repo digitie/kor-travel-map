@@ -32,8 +32,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CurationCollection",
+    "CurationImportBatch",
     "CurationImportPlan",
     "CurationImportResult",
+    "CurationImportRowReceipt",
     "CurationLinkAudit",
     "CurationItem",
     "FeatureCurationGroup",
@@ -46,12 +48,15 @@ __all__ = [
     "archive_curation_collection",
     "create_curation_collection",
     "get_curation_collection",
+    "get_curation_import_batch",
     "get_curation_item",
+    "get_current_curation_import_row",
     "get_feature_curation_group",
     "import_curation_rows",
     "list_curation_collections",
     "list_curation_items_by_feature_ids",
     "list_unattributed_curation_links",
+    "list_unattributed_curation_links_page",
     "list_feature_curation_groups",
     "preview_curation_import",
     "resolve_feature_match",
@@ -207,6 +212,33 @@ class CurationLinkAudit:
     match_basis: str | None
     resolver_version: str | None
     decided_at: datetime | None
+
+
+@dataclass(frozen=True)
+class CurationImportBatch:
+    """성공한 import transaction의 immutable receipt."""
+
+    import_batch_id: str
+    content_sha256: str
+    batch_kind: str
+    row_count: int
+    actor: str
+    metadata: dict[str, Any]
+    imported_at: datetime
+
+
+@dataclass(frozen=True)
+class CurationImportRowReceipt:
+    """batch 또는 item current pointer로 읽는 immutable source row."""
+
+    import_row_id: str
+    import_batch_id: str
+    curation_item_id: str
+    row_number: int
+    source_row_sha256: str
+    row_payload: dict[str, Any]
+    provenance: dict[str, Any]
+    imported_at: datetime
 
 
 @dataclass(frozen=True)
@@ -1219,6 +1251,7 @@ RETURNING decision_id::text
 
 _LIST_UNATTRIBUTED_LINKS_SQL: Final[str] = """
 SELECT
+    collection.collection_id::text AS collection_id,
     item.curation_item_id::text AS curation_item_id,
     collection.collection_key,
     item.external_item_id,
@@ -1238,13 +1271,64 @@ WHERE item.feature_id IS NOT NULL
   AND item.archived_at IS NULL
   AND item.source_present
   AND (
+      CAST(:cursor_collection_id AS uuid) IS NULL
+      OR (collection.collection_id, item.curation_item_id) > (
+          CAST(:cursor_collection_id AS uuid),
+          CAST(:cursor_curation_item_id AS uuid)
+      )
+  )
+  AND (
       decision.decision_id IS NULL
       OR decision.decision_kind <> 'accepted'
       OR decision.match_basis = 'legacy_unattributed'
   )
-ORDER BY collection.collection_key, item.external_item_id,
-         item.external_component_id, item.curation_item_id
+ORDER BY collection.collection_id, item.curation_item_id
 LIMIT :limit
+"""
+
+_GET_IMPORT_BATCH_SQL: Final[str] = """
+SELECT
+    import_batch_id::text AS import_batch_id,
+    content_sha256,
+    batch_kind,
+    row_count,
+    actor,
+    metadata,
+    imported_at
+FROM feature.curation_import_batches
+WHERE import_batch_id = CAST(:import_batch_id AS uuid)
+"""
+
+_LIST_IMPORT_BATCH_ROWS_SQL: Final[str] = """
+SELECT
+    import_row_id::text AS import_row_id,
+    import_batch_id::text AS import_batch_id,
+    curation_item_id::text AS curation_item_id,
+    row_number,
+    source_row_sha256,
+    row_payload,
+    provenance,
+    imported_at
+FROM feature.curation_import_rows
+WHERE import_batch_id = CAST(:import_batch_id AS uuid)
+ORDER BY row_number, import_row_id
+"""
+
+_GET_CURRENT_IMPORT_ROW_SQL: Final[str] = """
+SELECT
+    import_row.import_row_id::text AS import_row_id,
+    import_row.import_batch_id::text AS import_batch_id,
+    import_row.curation_item_id::text AS curation_item_id,
+    import_row.row_number,
+    import_row.source_row_sha256,
+    import_row.row_payload,
+    import_row.provenance,
+    import_row.imported_at
+FROM feature.curation_items AS item
+JOIN feature.curation_import_rows AS import_row
+  ON import_row.import_row_id = item.current_import_row_id
+ AND import_row.curation_item_id = item.curation_item_id
+WHERE item.curation_item_id = CAST(:curation_item_id AS uuid)
 """
 
 _PREVIEW_IMPORT_COUNTS_SQL: Final[str] = """
@@ -1703,6 +1787,50 @@ def _feature_match(row: RowMapping | Mapping[str, Any]) -> FeatureMatch:
     )
 
 
+def _import_batch(row: RowMapping | Mapping[str, Any]) -> CurationImportBatch:
+    return CurationImportBatch(
+        import_batch_id=str(row["import_batch_id"]),
+        content_sha256=str(row["content_sha256"]),
+        batch_kind=str(row["batch_kind"]),
+        row_count=int(row["row_count"]),
+        actor=str(row["actor"]),
+        metadata=_object(row["metadata"]),
+        imported_at=row["imported_at"],
+    )
+
+
+def _import_row_receipt(
+    row: RowMapping | Mapping[str, Any],
+) -> CurationImportRowReceipt:
+    return CurationImportRowReceipt(
+        import_row_id=str(row["import_row_id"]),
+        import_batch_id=str(row["import_batch_id"]),
+        curation_item_id=str(row["curation_item_id"]),
+        row_number=int(row["row_number"]),
+        source_row_sha256=str(row["source_row_sha256"]),
+        row_payload=_object(row["row_payload"]),
+        provenance=_object(row["provenance"]),
+        imported_at=row["imported_at"],
+    )
+
+
+def _link_audit(row: RowMapping | Mapping[str, Any]) -> CurationLinkAudit:
+    return CurationLinkAudit(
+        curation_item_id=str(row["curation_item_id"]),
+        collection_key=str(row["collection_key"]),
+        external_item_id=str(row["external_item_id"]),
+        external_component_id=str(row["external_component_id"]),
+        feature_id=str(row["feature_id"]),
+        place_name=str(row["place_name"]),
+        address_hint=row["address_hint"],
+        match_basis=str(row["match_basis"]) if row["match_basis"] else None,
+        resolver_version=(
+            str(row["resolver_version"]) if row["resolver_version"] else None
+        ),
+        decided_at=row["decided_at"],
+    )
+
+
 def encode_collection_cursor(updated_at: datetime, collection_id: str) -> str:
     raw = json.dumps(
         {"updated_at": updated_at.isoformat(), "collection_id": collection_id},
@@ -1751,6 +1879,44 @@ def decode_group_cursor(cursor: str | None) -> str | None:
     if not isinstance(feature_id, str) or not feature_id:
         raise ValueError("invalid curation group cursor")
     return feature_id
+
+
+def encode_link_audit_cursor(collection_id: str, curation_item_id: str) -> str:
+    """audit total order key를 versioned opaque cursor로 직렬화한다."""
+
+    payload = json.dumps(
+        {
+            "v": 1,
+            "collection_id": str(UUID(collection_id)),
+            "curation_item_id": str(UUID(curation_item_id)),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def decode_link_audit_cursor(cursor: str | None) -> tuple[str, str] | None:
+    if cursor is None:
+        return None
+    try:
+        raw = base64.b64decode(
+            cursor + "=" * (-len(cursor) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+        value = json.loads(raw)
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"v", "collection_id", "curation_item_id"}
+            or value["v"] != 1
+        ):
+            raise ValueError
+        collection_id = str(UUID(value["collection_id"]))
+        curation_item_id = str(UUID(value["curation_item_id"]))
+    except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid curation link audit cursor") from exc
+    return collection_id, curation_item_id
 
 
 async def list_curation_collections(
@@ -1866,6 +2032,60 @@ async def get_curation_item(
         .first()
     )
     return _item(row) if row is not None else None
+
+
+async def get_curation_import_batch(
+    session: AsyncSession,
+    *,
+    import_batch_id: str,
+) -> tuple[CurationImportBatch, tuple[CurationImportRowReceipt, ...]] | None:
+    """한 import receipt와 exact row evidence를 batch row 순서로 읽는다."""
+
+    batch_row = (
+        (
+            await session.execute(
+                text(_GET_IMPORT_BATCH_SQL),
+                {"import_batch_id": import_batch_id},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if batch_row is None:
+        return None
+    row_rows = (
+        (
+            await session.execute(
+                text(_LIST_IMPORT_BATCH_ROWS_SQL),
+                {"import_batch_id": import_batch_id},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return _import_batch(batch_row), tuple(
+        _import_row_receipt(row) for row in row_rows
+    )
+
+
+async def get_current_curation_import_row(
+    session: AsyncSession,
+    *,
+    curation_item_id: str,
+) -> CurationImportRowReceipt | None:
+    """item의 composite current pointer가 가리키는 immutable row를 읽는다."""
+
+    row = (
+        (
+            await session.execute(
+                text(_GET_CURRENT_IMPORT_ROW_SQL),
+                {"curation_item_id": curation_item_id},
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return _import_row_receipt(row) if row is not None else None
 
 
 async def _lock_collection_keys(
@@ -2690,40 +2910,52 @@ async def list_unattributed_curation_links(
     *,
     limit: int = 500,
 ) -> tuple[CurationLinkAudit, ...]:
-    """공개 승인에 쓸 수 없는 provenance-less/legacy current link를 나열한다."""
+    """첫 audit page만 읽는 기존 내부 호출용 편의 함수."""
+
+    rows, _next_cursor = await list_unattributed_curation_links_page(
+        session,
+        limit=limit,
+    )
+    return rows
+
+
+async def list_unattributed_curation_links_page(
+    session: AsyncSession,
+    *,
+    limit: int = 500,
+    cursor: str | None = None,
+) -> tuple[tuple[CurationLinkAudit, ...], str | None]:
+    """unsafe current link를 stable UUID total order로 전진 조회한다."""
 
     effective_limit = max(1, min(limit, 10_000))
-    rows = (
+    decoded_cursor = decode_link_audit_cursor(cursor)
+    row_mappings = (
         (
             await session.execute(
                 text(_LIST_UNATTRIBUTED_LINKS_SQL),
-                {"limit": effective_limit},
+                {
+                    "limit": effective_limit + 1,
+                    "cursor_collection_id": (
+                        decoded_cursor[0] if decoded_cursor else None
+                    ),
+                    "cursor_curation_item_id": (
+                        decoded_cursor[1] if decoded_cursor else None
+                    ),
+                },
             )
         )
         .mappings()
         .all()
     )
-    return tuple(
-        CurationLinkAudit(
-            curation_item_id=str(row["curation_item_id"]),
-            collection_key=str(row["collection_key"]),
-            external_item_id=str(row["external_item_id"]),
-            external_component_id=str(row["external_component_id"]),
-            feature_id=str(row["feature_id"]),
-            place_name=str(row["place_name"]),
-            address_hint=row["address_hint"],
-            match_basis=(
-                str(row["match_basis"]) if row["match_basis"] else None
-            ),
-            resolver_version=(
-                str(row["resolver_version"])
-                if row["resolver_version"]
-                else None
-            ),
-            decided_at=row["decided_at"],
+    page_rows = row_mappings[:effective_limit]
+    next_cursor = None
+    if len(row_mappings) > effective_limit and page_rows:
+        last = page_rows[-1]
+        next_cursor = encode_link_audit_cursor(
+            str(last["collection_id"]),
+            str(last["curation_item_id"]),
         )
-        for row in rows
-    )
+    return tuple(_link_audit(row) for row in page_rows), next_cursor
 
 
 async def list_feature_curation_groups(

@@ -30,6 +30,13 @@ from kortravelmap.curation_import import (
     CurationImportRow,
     parse_curation_csv,
 )
+from kortravelmap.curation_provenance import (
+    CURATION_PROVENANCE_MAX_BYTES,
+    CurationProvenanceError,
+    parse_curation_provenance,
+    provenance_row_payload,
+    requires_lighthouse_provenance,
+)
 from kortravelmap.infra import curation_repo
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import IntegrityError
@@ -497,12 +504,54 @@ class CurationLinkAuditData(BaseModel):
 
     items: list[CurationLinkAuditView]
     count: int
+    has_more: bool
+    next_cursor: str | None
 
 
 class CurationLinkAuditResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: CurationLinkAuditData
+    meta: Meta
+
+
+class CurationImportRowReceiptView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    import_row_id: UUID
+    import_batch_id: UUID
+    curation_item_id: UUID
+    row_number: int
+    source_row_sha256: str
+    row_payload: dict[str, Any]
+    provenance: dict[str, Any]
+    imported_at: datetime
+
+
+class CurationImportBatchView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    import_batch_id: UUID
+    content_sha256: str
+    batch_kind: str
+    row_count: int
+    actor: str
+    metadata: dict[str, Any]
+    imported_at: datetime
+    rows: list[CurationImportRowReceiptView]
+
+
+class CurationImportBatchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: CurationImportBatchView
+    meta: Meta
+
+
+class CurationImportRowReceiptResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: CurationImportRowReceiptView
     meta: Meta
 
 
@@ -525,6 +574,12 @@ def _public_item_view(row: curation_repo.CurationItem) -> PublicCurationItemView
 
 def _admin_item_view(row: curation_repo.CurationItem) -> AdminCurationItemView:
     return AdminCurationItemView.model_validate(row, from_attributes=True)
+
+
+def _import_row_receipt_view(
+    row: curation_repo.CurationImportRowReceipt,
+) -> CurationImportRowReceiptView:
+    return CurationImportRowReceiptView.model_validate(row, from_attributes=True)
 
 
 def _group_view(
@@ -662,20 +717,93 @@ async def audit_unattributed_curation_links(
     session: Annotated[AsyncSession, Depends(get_session)],
     _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     limit: Annotated[int, Query(ge=1, le=10_000)] = 500,
+    cursor: Annotated[str | None, Query()] = None,
 ) -> CurationLinkAuditResponse:
     """공개 승인에 쓸 수 없는 legacy/provenance-less current link를 감사한다."""
 
     started_at = perf_counter()
-    rows = await curation_repo.list_unattributed_curation_links(
-        session,
-        limit=limit,
-    )
+    try:
+        rows, next_cursor = (
+            await curation_repo.list_unattributed_curation_links_page(
+                session,
+                limit=limit,
+                cursor=cursor,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     items = [
         CurationLinkAuditView.model_validate(row, from_attributes=True)
         for row in rows
     ]
     return CurationLinkAuditResponse(
-        data=CurationLinkAuditData(items=items, count=len(items)),
+        data=CurationLinkAuditData(
+            items=items,
+            count=len(items),
+            has_more=next_cursor is not None,
+            next_cursor=next_cursor,
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@admin_router.get(
+    "/import-batches/{import_batch_id}",
+    response_model=CurationImportBatchResponse,
+)
+async def get_admin_curation_import_batch(
+    request: Request,
+    import_batch_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> CurationImportBatchResponse:
+    """성공한 import batch와 immutable row payload/provenance를 조회한다."""
+
+    started_at = perf_counter()
+    result = await curation_repo.get_curation_import_batch(
+        session,
+        import_batch_id=str(import_batch_id),
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="curation import batch 없음")
+    batch, rows = result
+    data = CurationImportBatchView(
+        import_batch_id=UUID(batch.import_batch_id),
+        content_sha256=batch.content_sha256,
+        batch_kind=batch.batch_kind,
+        row_count=batch.row_count,
+        actor=batch.actor,
+        metadata=batch.metadata,
+        imported_at=batch.imported_at,
+        rows=[_import_row_receipt_view(row) for row in rows],
+    )
+    return CurationImportBatchResponse(
+        data=data,
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@admin_router.get(
+    "/items/{curation_item_id}/current-import-row",
+    response_model=CurationImportRowReceiptResponse,
+)
+async def get_admin_curation_item_current_import_row(
+    request: Request,
+    curation_item_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> CurationImportRowReceiptResponse:
+    """item current pointer의 exact row payload/provenance를 조회한다."""
+
+    started_at = perf_counter()
+    row = await curation_repo.get_current_curation_import_row(
+        session,
+        curation_item_id=str(curation_item_id),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="curation current import row 없음")
+    return CurationImportRowReceiptResponse(
+        data=_import_row_receipt_view(row),
         meta=make_meta(request, started_at=started_at),
     )
 
@@ -713,12 +841,46 @@ async def import_admin_curations(
     file: Annotated[UploadFile, File(description="UTF-8 CSV 파일")],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     dry_run: Annotated[bool, Query()] = True,
+    provenance_file: Annotated[
+        UploadFile | None,
+        File(description="행별 source provenance JSON sidecar"),
+    ] = None,
 ) -> CurationImportResponse:
-    """CSV를 preview하거나 오류 없는 전체 파일을 원자적으로 멱등 반영한다."""
+    """CSV+sidecar를 검증한 뒤 preview하거나 원자적으로 멱등 반영한다."""
     started_at = perf_counter()
     content = await file.read(CURATION_CSV_MAX_BYTES + 1)
     content_sha256 = hashlib.sha256(content).hexdigest()
     preview = parse_curation_csv(content)
+    provenance_content: bytes | None = None
+    provenance_by_row: dict[int, dict[str, Any]] = {}
+    if provenance_file is not None:
+        provenance_content = await provenance_file.read(
+            CURATION_PROVENANCE_MAX_BYTES + 1
+        )
+        try:
+            provenance = parse_curation_provenance(
+                csv_content=content,
+                provenance_content=provenance_content,
+            )
+        except CurationProvenanceError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        provenance_by_row = {
+            csv_row.row_number: provenance_row_payload(provenance, row)
+            for csv_row, row in zip(preview.rows, provenance.rows, strict=True)
+        }
+    elif requires_lighthouse_provenance(preview.rows):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "저장소 공식 등대 dataset import에는 exact CSV와 결박된 "
+                "provenance_file이 필요합니다."
+            ),
+        )
+    provenance_sha256 = (
+        hashlib.sha256(provenance_content).hexdigest()
+        if provenance_content is not None
+        else None
+    )
     command = await domain_command_service.begin_domain_command(
         session,
         actor=context.actor,
@@ -726,6 +888,7 @@ async def import_admin_curations(
         idempotency_key=idempotency_key,
         payload={
             "content_sha256": content_sha256,
+            "provenance_sha256": provenance_sha256,
             "dry_run": dry_run,
         },
     )
@@ -814,6 +977,7 @@ async def import_admin_curations(
                 item_title=row.item_title or None,
                 item_summary=row.item_summary or None,
                 metadata=_import_metadata(row),
+                provenance=provenance_by_row.get(row.row_number),
             )
         )
         item_views.append(

@@ -247,9 +247,29 @@ export interface paths {
         put?: never;
         /**
          * Import Admin Curations
-         * @description CSV를 preview하거나 오류 없는 전체 파일을 원자적으로 멱등 반영한다.
+         * @description CSV+sidecar를 검증한 뒤 preview하거나 원자적으로 멱등 반영한다.
          */
         post: operations["import_admin_curations_v1_admin_curations_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curations/import-batches/{import_batch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Admin Curation Import Batch
+         * @description 성공한 import batch와 immutable row payload/provenance를 조회한다.
+         */
+        get: operations["get_admin_curation_import_batch_v1_admin_curations_import_batches__import_batch_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -268,6 +288,26 @@ export interface paths {
          * @description 큐레이션 import용 UTF-8 BOM CSV header를 내려준다.
          */
         get: operations["download_curation_import_template_v1_admin_curations_import_template_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curations/items/{curation_item_id}/current-import-row": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Admin Curation Item Current Import Row
+         * @description item current pointer의 exact row payload/provenance를 조회한다.
+         */
+        get: operations["get_admin_curation_item_current_import_row_v1_admin_curations_items__curation_item_id__current_import_row_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3935,6 +3975,11 @@ export interface components {
              * @description UTF-8 CSV 파일
              */
             file: string;
+            /**
+             * Provenance File
+             * @description 행별 source provenance JSON sidecar
+             */
+            provenance_file?: string | null;
         };
         /**
          * CacheTargetKeysScope
@@ -4906,6 +4951,38 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** CurationImportBatchResponse */
+        CurationImportBatchResponse: {
+            data: components["schemas"]["CurationImportBatchView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** CurationImportBatchView */
+        CurationImportBatchView: {
+            /** Actor */
+            actor: string;
+            /** Batch Kind */
+            batch_kind: string;
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Import Batch Id
+             * Format: uuid
+             */
+            import_batch_id: string;
+            /**
+             * Imported At
+             * Format: date-time
+             */
+            imported_at: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Row Count */
+            row_count: number;
+            /** Rows */
+            rows: components["schemas"]["CurationImportRowReceiptView"][];
+        };
         /** CurationImportData */
         CurationImportData: {
             /** Collections */
@@ -4965,6 +5042,46 @@ export interface components {
         CurationImportResponse: {
             data: components["schemas"]["CurationImportData"];
             meta: components["schemas"]["Meta"];
+        };
+        /** CurationImportRowReceiptResponse */
+        CurationImportRowReceiptResponse: {
+            data: components["schemas"]["CurationImportRowReceiptView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** CurationImportRowReceiptView */
+        CurationImportRowReceiptView: {
+            /**
+             * Curation Item Id
+             * Format: uuid
+             */
+            curation_item_id: string;
+            /**
+             * Import Batch Id
+             * Format: uuid
+             */
+            import_batch_id: string;
+            /**
+             * Import Row Id
+             * Format: uuid
+             */
+            import_row_id: string;
+            /**
+             * Imported At
+             * Format: date-time
+             */
+            imported_at: string;
+            /** Provenance */
+            provenance: {
+                [key: string]: unknown;
+            };
+            /** Row Number */
+            row_number: number;
+            /** Row Payload */
+            row_payload: {
+                [key: string]: unknown;
+            };
+            /** Source Row Sha256 */
+            source_row_sha256: string;
         };
         /** CurationImportRowView */
         CurationImportRowView: {
@@ -5093,8 +5210,12 @@ export interface components {
         CurationLinkAuditData: {
             /** Count */
             count: number;
+            /** Has More */
+            has_more: boolean;
             /** Items */
             items: components["schemas"]["CurationLinkAuditView"][];
+            /** Next Cursor */
+            next_cursor: string | null;
         };
         /** CurationLinkAuditResponse */
         CurationLinkAuditResponse: {
@@ -12062,6 +12183,46 @@ export interface operations {
             };
         };
     };
+    get_admin_curation_import_batch_v1_admin_curations_import_batches__import_batch_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurationImportBatchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     download_curation_import_template_v1_admin_curations_import_template_csv_get: {
         parameters: {
             query?: never;
@@ -12091,10 +12252,51 @@ export interface operations {
             };
         };
     };
+    get_admin_curation_item_current_import_row_v1_admin_curations_items__curation_item_id__current_import_row_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curation_item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurationImportRowReceiptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     audit_unattributed_curation_links_v1_admin_curations_link_audit_get: {
         parameters: {
             query?: {
                 limit?: number;
+                cursor?: string | null;
             };
             header?: never;
             path?: never;

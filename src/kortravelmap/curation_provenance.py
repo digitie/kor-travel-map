@@ -6,17 +6,20 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Final, Literal, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 from urllib.parse import urlparse
 
 from kortravelmap.curation_import import parse_curation_csv
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-    from typing import Any
+    from collections.abc import Mapping, Sequence
+
+    from kortravelmap.curation_import import CurationImportRow
 
 CURATION_PROVENANCE_MAX_BYTES: Final = 4 * 1024 * 1024
 CURATION_PROVENANCE_SCHEMA_VERSION: Final = 1
+LIGHTHOUSE_COLLECTION_PREFIX: Final = "lighthouse-stamp-tour:"
+LIGHTHOUSE_DATASET_PREFIX: Final = "lighthouse-stamp-tour-season-"
 
 Derivation = Literal[
     "vworld_direct",
@@ -102,6 +105,57 @@ class CurationProvenance:
 
     source_csv_sha256: str
     rows: tuple[CurationRowProvenance, ...]
+
+
+def requires_lighthouse_provenance(rows: Sequence[CurationImportRow]) -> bool:
+    """저장소 공식 등대 seed identity면 sidecar를 반드시 요구한다."""
+
+    return any(
+        row.collection_key.startswith(LIGHTHOUSE_COLLECTION_PREFIX)
+        or row.dataset_key.startswith(LIGHTHOUSE_DATASET_PREFIX)
+        for row in rows
+    )
+
+
+def provenance_row_payload(
+    provenance: CurationProvenance,
+    row: CurationRowProvenance,
+) -> dict[str, Any]:
+    """검증된 sidecar row를 CSV digest와 함께 JSON 저장 형태로 바꾼다."""
+
+    return {
+        "schema_version": CURATION_PROVENANCE_SCHEMA_VERSION,
+        "source_csv_sha256": provenance.source_csv_sha256,
+        "row": {
+            "collection_key": row.collection_key,
+            "source_item_key": row.source_item_key,
+            "source_component_key": row.source_component_key,
+            "source_type": row.source_type,
+            "derivation": row.derivation,
+            "source_urls": list(row.source_urls),
+            "observed_at": row.observed_at.isoformat(),
+            "input_coordinate": _coordinate_payload(row.input_coordinate),
+            "probe_coordinate": _coordinate_payload(row.probe_coordinate),
+            "resolved_coordinate": _coordinate_payload(row.resolved_coordinate),
+            "probe_offset_m": row.probe_offset_m,
+            "returned_address": [
+                {"kind": address.kind, "text": address.text}
+                for address in row.returned_address
+            ],
+            "normalized_address": row.normalized_address,
+            "confidence": row.confidence,
+            "source_reference": row.source_reference,
+            "rationale": row.rationale,
+        },
+    }
+
+
+def _coordinate_payload(
+    coordinate: ProvenanceCoordinate | None,
+) -> dict[str, float] | None:
+    if coordinate is None:
+        return None
+    return {"lon": coordinate.lon, "lat": coordinate.lat}
 
 
 def parse_curation_provenance(
