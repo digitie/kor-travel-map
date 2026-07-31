@@ -40,6 +40,7 @@ def _row(**overrides: Any) -> dict[str, Any]:
         "external_item_id": "kt100-2025-2026-001",
         "place_name": "어떤 관광지",
         "feature_id": "f_x_p_y",
+        "feature_name": "어떤 관광지",
         "region": "충북",
         "feature_category": "01020300",
         "feature_sido_code": "43",
@@ -52,10 +53,10 @@ def _row(**overrides: Any) -> dict[str, Any]:
 @pytest.mark.unit
 def test_region_axis_compares_by_code_not_text() -> None:
     """``충북`` vs ``충청북도`` 문자열 비교로는 축이 통째로 깨진다 — 코드로 본다."""
-    ok = _judge(_row(region="충북", feature_sido_code="43"), 1)
+    ok = _judge(_row(region="충북", feature_sido_code="43"), ("f_x_p_y",))
     assert ok["axes"]["region"] == "pass"
 
-    bad = _judge(_row(region="충북", feature_sido_code="11"), 1)
+    bad = _judge(_row(region="충북", feature_sido_code="11"), ("f_x_p_y",))
     assert bad["axes"]["region"] == "fail"
     assert bad["verdict"] == "contradiction"
 
@@ -63,7 +64,7 @@ def test_region_axis_compares_by_code_not_text() -> None:
 @pytest.mark.unit
 def test_missing_region_is_not_a_contradiction() -> None:
     """region이 없으면 축을 못 쓰는 것이지 모순이 아니다."""
-    result = _judge(_row(region=None), 1)
+    result = _judge(_row(region=None), ("f_x_p_y",))
     assert result["axes"]["region"] == "n/a"
     assert result["verdict"] == "no_contradiction"
 
@@ -78,7 +79,7 @@ def test_missing_region_is_not_a_contradiction() -> None:
     ],
 )
 def test_implausible_category_is_a_contradiction(category: str) -> None:
-    result = _judge(_row(feature_category=category), 1)
+    result = _judge(_row(feature_category=category), ("f_x_p_y",))
     assert result["axes"]["category"] == "fail"
     assert result["verdict"] == "contradiction"
 
@@ -94,7 +95,7 @@ def test_implausible_category_is_a_contradiction(category: str) -> None:
 )
 def test_plausible_category_passes(category: str) -> None:
     """축을 ``01``만 허용으로 좁히면 휴양림이 오탐이 된다 — 그 회귀를 막는다."""
-    result = _judge(_row(feature_category=category), 1)
+    result = _judge(_row(feature_category=category), ("f_x_p_y",))
     assert result["axes"]["category"] == "pass"
     assert result["verdict"] == "no_contradiction"
 
@@ -105,8 +106,11 @@ def test_duplicate_names_never_produce_contradiction() -> None:
 
     초안은 이걸 ``fail``로 두어 전수 222건 중 20건을 잘못 모순으로 보고했다.
     """
-    result = _judge(_row(), 7)
-    assert result["axes"]["name_unique"] == "n/a"
+    result = _judge(
+        _row(),
+        ("f_x_p_y", "feature:2", "feature:3", "feature:4"),
+    )
+    assert result["axes"]["linked_exact_name_candidate"] == "n/a"
     assert result["verdict"] == "no_contradiction"
     assert any("확정할 수 없다" in reason for reason in result["reasons"])
 
@@ -115,8 +119,13 @@ def test_duplicate_names_never_produce_contradiction() -> None:
 def test_no_axis_available_is_insufficient_not_confirmation() -> None:
     """모든 축이 n/a면 ``insufficient``다 — ``no_contradiction``으로 승격하지 않는다."""
     result = _judge(
-        _row(region=None, feature_category="", collection_key="legacy:whatever:1"),
-        0,
+        _row(
+            region=None,
+            feature_category="",
+            feature_name=None,
+            collection_key="legacy:whatever:1",
+        ),
+        (),
     )
     assert set(result["axes"].values()) == {"n/a"}
     assert result["verdict"] == "insufficient"
@@ -125,5 +134,45 @@ def test_no_axis_available_is_insufficient_not_confirmation() -> None:
 @pytest.mark.unit
 def test_non_tourism_campaign_skips_category_axis() -> None:
     """카테고리 축은 관광 캠페인에만 적용한다 — concierge legacy에는 기대가 없다."""
-    result = _judge(_row(collection_key="legacy:media-places:abc"), 1)
+    result = _judge(
+        _row(collection_key="legacy:media-places:abc"),
+        ("f_x_p_y",),
+    )
     assert result["axes"]["category"] == "n/a"
+
+
+@pytest.mark.unit
+def test_linked_name_mismatch_is_explicit_contradiction() -> None:
+    """DB 다른 곳의 유일 동명 후보를 linked feature의 긍정 근거로 쓰지 않는다."""
+
+    result = _judge(
+        _row(
+            place_name="정답 장소",
+            feature_name="완전히 다른 장소",
+            feature_id="feature:wrong",
+        ),
+        ("feature:right",),
+    )
+
+    assert result["axes"]["linked_name"] == "fail"
+    assert result["axes"]["linked_exact_name_candidate"] == "n/a"
+    assert result["verdict"] == "contradiction"
+    assert result["evidence"]["exact_name_candidate_feature_ids"] == [
+        "feature:right"
+    ]
+    assert result["evidence"]["linked_feature_is_exact_name_candidate"] is False
+
+
+@pytest.mark.unit
+def test_linked_name_uses_same_nfkc_whitespace_policy_on_both_sides() -> None:
+    result = _judge(
+        _row(
+            place_name="  Ａ 관광지  ",
+            feature_name="A   관광지",
+        ),
+        ("f_x_p_y",),
+    )
+
+    assert result["axes"]["linked_name"] == "pass"
+    assert result["evidence"]["normalized_place_name"] == "a 관광지"
+    assert result["evidence"]["normalized_linked_feature_name"] == "a 관광지"

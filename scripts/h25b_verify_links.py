@@ -1,36 +1,21 @@
-"""T-VN-H34 — H25B 승인 링크의 근거를 재현 가능하게 검증한다. **읽기 전용.**
+"""T-VN-H34 — H25B 링크 근거를 한 DB snapshot에서 재현한다. **읽기 전용.**
 
-H25B는 승인 5건을 ``h25b_apply_verified_links.py``의 **손으로 친 상수표**로만 남겼다.
-등급(``backfilled-db-review``)과 사유 문장은 있으나 **그 판정을 다시 돌려볼 수단이 없었다** —
-"정지오코딩으로 확인했다"는 주장의 재현 경로가 저장소에 없었다. 이 도구가 그 구멍을 메운다.
+이 도구는 링크를 자동 승인하지 않는다. 행정구역·카테고리·연결된 Feature 이름을 독립
+반증 축으로 검사하고, 각 축에서 모순이 없다는 사실만 보고한다.
 
-## 판정 축 세 개
+모집단은 명시적으로 분리한다.
 
-1. **행정구역 일치** — curation item의 ``metadata.region``(시도 약칭)과 링크된 feature의
-   ``sido_code``를 **코드로** 대조한다. 문자열로 비교하면 ``충북`` vs ``충청북도``에서 축이
-   통째로 깨진다(H25B 리뷰 지적, ``h33_mislink_detect.py``와 같은 처리).
-2. **카테고리 정합성** — 링크된 feature의 category 대분류가 캠페인 성격과 맞는지 본다.
-   **T-VN-H34에서 새로 추가한 축이다.** 실측으로 승인 5건 중 2건이 이 축에서만 걸린다:
-   ``진해보타닉뮤지엄``(수목원 캠페인)이 ``02020100 FOOD_CAFE_COFFEE``에,
-   ``청풍호``(호수)가 ``03050200 LODGING_PENSION_RURAL``에 붙어 있다.
-   **두 건 다 행정구역 축은 통과한다** — 시군구 축만으로는 잡히지 않는다.
-3. **동명 유일성** — 같은 이름의 active feature가 몇 개인지 센다. 유일하면 *다른 장소에
-   붙었을* 가능성이 낮다는 약한 근거이고, 여럿이면 이름 축이 판정에 못 쓰인다.
+- ``approved``: H25B에서 수동 승인한 5개 내부 항목
+- ``public``: 공개 repository 정본
+  ``list_feature_curation_groups(public_only=True)``가 반환하는 항목 전체
 
-## 이 도구가 증명하지 못하는 것 (천장)
+``public`` scope는 item ``source_present/included/unarchived``, collection
+``published/public/unarchived``, public theme, ``feature.public_features``를 스크립트에서
+다시 구현하지 않는다. 운영 REST와 같은 repository query를 그대로 사용한다.
 
-- **시군구까지 내려가도 같은 시군구 안의 다른 대상은 구분되지 않는다.** 청풍호(제천 43150)와
-  청풍호반케이블카가 그 예다. 행정구역 축은 *기각*에는 쓸 수 있어도 *확정*의 충분조건이 아니다.
-- 카테고리 축은 **원천 provider의 분류를 신뢰**한다. provider가 틀리게 분류했으면 이 축도 틀린다.
-  실제로 위 2건은 "장소는 맞고 카테고리가 틀린" 경우로 보인다 — 링크를 끊을 근거가 아니라
-  **카테고리를 고칠 근거**다.
-- ``metadata.region``이 없는 행은 축 1이 통째로 없다. 실측상 공식 CSV 486행 중 ``region``
-  보유는 일부뿐이다.
-
-그래서 출력의 ``verdict``는 ``confirm``이 아니라 ``no_contradiction``/``contradiction``/
-``insufficient`` 셋이다. **"모순 없음"을 "확인됨"으로 읽지 않게** 하려는 것이다.
-
-기본은 승인 5건만 본다. ``--all``이면 링크된 공식 curation 전체를 훑는다.
+모든 조회는 하나의 read-only repeatable-read transaction에서 실행한다. JSON 보고서는
+모집단 정의·대상 수·PostgreSQL snapshot identity를 포함하므로 결과가 어느 상태를 감사한
+것인지 식별할 수 있다.
 """
 
 from __future__ import annotations
@@ -39,11 +24,25 @@ import argparse
 import asyncio
 import json
 import os
-from typing import Any, Final
+from collections import Counter
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
-import asyncpg
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-# 시도 약칭 → 시도코드. `h33_mislink_detect.py`와 같은 표를 쓴다.
+from kortravelmap.core.address import normalize_korean_text
+from kortravelmap.infra.curation_repo import list_feature_curation_groups
+from kortravelmap.infra.db import make_async_engine
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
+
+AuditScope = Literal["approved", "public"]
+
 _SIDO_CODE: Final[dict[str, str]] = {
     "서울": "11",
     "부산": "26",
@@ -64,45 +63,26 @@ _SIDO_CODE: Final[dict[str, str]] = {
     "제주": "50",
 }
 
-# 관광 캠페인 대상으로 **정당한** category 대분류(앞 2자리).
-#
-# 처음에는 `01`(TOURISM)만 허용했는데 전수 실행에서 오탐이 나왔다 — `장태산자연휴양림`·
-# `거창 항노화힐링랜드`는 `03030000 LODGING_RECREATION_FOREST`이고, 숙박을 갖춘 휴양림이
-# 그렇게 분류되는 것은 **정당하다**. 대상이 관광지라는 것과 원천 provider가 그것을 숙박으로
-# 등록하는 것은 모순이 아니다.
-#
-# 그래서 축을 뒤집었다 — "관광이어야 한다"가 아니라 **"명백히 대상일 수 없는 유형인가"** 를 본다.
 _TOURISM_PLAUSIBLE_MAJOR: Final[frozenset[str]] = frozenset(
     {
-        "01",  # TOURISM — 관광지 그 자체
-        "03",  # LODGING — 휴양림·리조트형 관광지가 여기 온다
-        "04",  # HOT_SPRING_SPA — 온천 관광지
+        "01",  # TOURISM
+        "03",  # LODGING — 휴양림·리조트형 관광지 포함
+        "04",  # HOT_SPRING_SPA
     }
 )
-
-# 관광 캠페인 대상에 붙으면 **거의 확실히 잘못된 링크**인 대분류.
-#
-# 실측 근거(전수 222건): `태화강국가정원`·`반디랜드`·`김해가야테마파크`가 각각
-# `06010000 TRANSPORT_PARKING`에 붙어 있다 — 관광지 이름으로 검색해 **그 관광지의 주차장**
-# feature를 잡은 것으로 보인다. 이름도 좌표도 근처라 행정구역·이름 축으로는 전부 통과한다.
-# `진해보타닉뮤지엄`은 `02020100 FOOD_CAFE_COFFEE`, `청풍호`는 `03050200 LODGING_PENSION_RURAL`.
-#
-# `03`은 위에서 허용하지만 `03050200`(농어촌펜션)만은 예외로 둔다 — 호수 자체가 펜션일 수 없다.
 _TOURISM_IMPLAUSIBLE_MAJOR: Final[frozenset[str]] = frozenset(
     {
-        "02",  # FOOD — 음식점/카페
+        "02",  # FOOD
         "05",  # CONVENIENCE
-        "06",  # TRANSPORT — 주차장 등
+        "06",  # TRANSPORT
         "07",  # MEDICAL
     }
 )
-
 _TOURISM_IMPLAUSIBLE_EXACT: Final[frozenset[str]] = frozenset(
     {
         "03050200",  # LODGING_PENSION_RURAL
     }
 )
-
 _TOURISM_CAMPAIGNS: Final[frozenset[str]] = frozenset(
     {
         "arboretum-garden-stamp-tour",
@@ -120,9 +100,10 @@ _APPROVED: Final[tuple[tuple[str, str, str], ...]] = (
     ("korean-tourism-100:2025-2026", "kt100-2025-2026-040", "primary"),
 )
 
-_ROW_SQL: Final[str] = """
+_APPROVED_ROW_SQL: Final[str] = """
 SELECT cc.collection_key,
        ci.external_item_id,
+       ci.external_component_id,
        ci.place_name,
        ci.feature_id,
        ci.metadata ->> 'region' AS region,
@@ -130,60 +111,91 @@ SELECT cc.collection_key,
        f.name AS feature_name,
        f.category AS feature_category,
        f.status AS feature_status,
-       f.address ->> 'sido_code' AS feature_sido_code,
-       f.address ->> 'sigungu_code' AS feature_sigungu_code,
-       COALESCE(f.address ->> 'road', f.address ->> 'legal', '') AS feature_address
-  FROM feature.curation_items ci
-  JOIN feature.curation_collections cc ON cc.collection_id = ci.collection_id
-  LEFT JOIN feature.features f ON f.feature_id = ci.feature_id
+       f.address
+  FROM feature.curation_items AS ci
+  JOIN feature.curation_collections AS cc
+    ON cc.collection_id = ci.collection_id
+  LEFT JOIN feature.features AS f
+    ON f.feature_id = ci.feature_id
  WHERE ci.archived_at IS NULL
-   AND cc.collection_key = $1
-   AND ci.external_item_id = $2
+   AND cc.collection_key = :collection_key
+   AND ci.external_item_id = :external_item_id
+   AND ci.external_component_id = :external_component_id
 """
 
-_ALL_SQL: Final[str] = """
-SELECT cc.collection_key,
-       ci.external_item_id,
-       ci.place_name,
-       ci.feature_id,
-       ci.metadata ->> 'region' AS region,
-       ci.metadata ->> 'feature_match_confidence' AS declared_confidence,
-       f.name AS feature_name,
-       f.category AS feature_category,
-       f.status AS feature_status,
-       f.address ->> 'sido_code' AS feature_sido_code,
-       f.address ->> 'sigungu_code' AS feature_sigungu_code,
-       COALESCE(f.address ->> 'road', f.address ->> 'legal', '') AS feature_address
-  FROM feature.curation_items ci
-  JOIN feature.curation_collections cc ON cc.collection_id = ci.collection_id
-  JOIN feature.features f ON f.feature_id = ci.feature_id
- WHERE ci.archived_at IS NULL
-   AND ci.feature_id IS NOT NULL
-   AND cc.collection_key NOT LIKE 'legacy:%'
- ORDER BY cc.collection_key, ci.external_item_id
+_NAME_CANDIDATES_SQL: Final[str] = """
+SELECT feature_id, name
+  FROM feature.public_features
+ WHERE lower(name) = lower(:normalized_name)
+ ORDER BY feature_id
 """
 
-_SAMENAME_SQL: Final[str] = """
-SELECT count(*)
-  FROM feature.features
- WHERE lower(name) = lower($1)
-   AND deleted_at IS NULL
-   AND status NOT IN ('deleted', 'hidden')
+_SNAPSHOT_SQL: Final[str] = """
+SELECT txid_current_snapshot()::text AS transaction_snapshot,
+       current_database() AS database_name,
+       current_setting('transaction_isolation') AS isolation_level,
+       current_setting('transaction_read_only') AS read_only,
+       transaction_timestamp() AS transaction_started_at
 """
+
+_POPULATION: Final[dict[AuditScope, dict[str, str]]] = {
+    "approved": {
+        "kind": "h25b-approved-internal",
+        "definition": (
+            "H25B 수동 승인 상수표의 collection_key/external_item_id/"
+            "external_component_id 5개"
+        ),
+    },
+    "public": {
+        "kind": "public-curation-repository",
+        "definition": (
+            "list_feature_curation_groups(public_only=True): source_present + "
+            "included + item/collection unarchived + collection published/public + "
+            "theme public + feature.public_features"
+        ),
+    },
+}
+
+
+@dataclass(frozen=True)
+class AuditTarget:
+    collection_key: str
+    external_item_id: str
+    external_component_id: str
+    place_name: str
+    feature_id: str | None
+    region: str | None
+    declared_confidence: str | None
+    feature_name: str | None
+    feature_category: str | None
+    feature_status: str | None
+    feature_sido_code: str | None
+    feature_sigungu_code: str | None
+    feature_address: str
 
 
 def _campaign(collection_key: str) -> str:
     return collection_key.split(":", 1)[0]
 
 
-def _judge(row: Any, same_name_count: int) -> dict[str, Any]:
-    """세 축을 각각 평가한다. 축마다 ``pass``/``fail``/``n/a``를 따로 낸다."""
+def _normalize_name(value: str | None) -> str | None:
+    """양쪽 이름에 동일 적용하는 exact-name 정규화 정책."""
+
+    normalized = normalize_korean_text(value)
+    return normalized.casefold() if normalized is not None else None
+
+
+def _judge(
+    row: Mapping[str, Any],
+    candidate_feature_ids: Sequence[str],
+) -> dict[str, Any]:
+    """반증 축과 링크에 결합된 exact-name evidence를 평가한다."""
+
     axes: dict[str, str] = {}
     reasons: list[str] = []
 
-    # 축 1 — 행정구역
-    region = (row["region"] or "").strip()
-    feature_sido = (row["feature_sido_code"] or "").strip()
+    region = str(row.get("region") or "").strip()
+    feature_sido = str(row.get("feature_sido_code") or "").strip()
     expected_sido = _SIDO_CODE.get(region)
     if not region:
         axes["region"] = "n/a"
@@ -199,18 +211,18 @@ def _judge(row: Any, same_name_count: int) -> dict[str, Any]:
     else:
         axes["region"] = "fail"
         reasons.append(
-            f"시도 불일치: curation region={region}({expected_sido}) vs feature sido={feature_sido}"
+            f"시도 불일치: curation region={region}({expected_sido}) vs "
+            f"feature sido={feature_sido}"
         )
 
-    # 축 2 — 카테고리 정합성 (T-VN-H34 신규)
-    #
-    # "관광이어야 한다"가 아니라 **"명백히 대상일 수 없는 유형인가"** 를 본다.
-    # 좁게 잡으면 휴양림 같은 정당한 분류가 오탐이 된다(위 상수 주석 참조).
-    category = (row["feature_category"] or "").strip()
-    is_tourism_campaign = _campaign(row["collection_key"]) in _TOURISM_CAMPAIGNS
+    category = str(row.get("feature_category") or "").strip()
+    is_tourism_campaign = _campaign(str(row["collection_key"])) in _TOURISM_CAMPAIGNS
     if not category or not is_tourism_campaign:
         axes["category"] = "n/a"
-    elif category in _TOURISM_IMPLAUSIBLE_EXACT or category[:2] in _TOURISM_IMPLAUSIBLE_MAJOR:
+    elif (
+        category in _TOURISM_IMPLAUSIBLE_EXACT
+        or category[:2] in _TOURISM_IMPLAUSIBLE_MAJOR
+    ):
         axes["category"] = "fail"
         reasons.append(
             f"카테고리가 관광 대상으로 성립하지 않는다: feature category={category}"
@@ -220,126 +232,338 @@ def _judge(row: Any, same_name_count: int) -> dict[str, Any]:
     else:
         axes["category"] = "n/a"
 
-    # 축 3 — 동명 유일성.
-    #
-    # **이 축은 확증 전용이고 반증에는 쓰지 않는다.** 동명 feature가 여럿이라는 것은
-    # "링크가 틀렸다"는 증거가 아니라 *이 축으로 확정할 수 없다*는 뜻이다. 처음에는 이걸
-    # `fail`로 두고 모순으로 셌는데, 그러면 전수 222건 중 30건이 모순으로 잡히고 그중
-    # 20건이 이 축 단독이었다 — 링크가 멀쩡한데 "모순"으로 보고하는 것이라 잘못이다.
-    # 반증 축은 region·category 둘뿐이다.
-    if same_name_count == 1:
-        axes["name_unique"] = "pass"
-    elif same_name_count == 0:
-        axes["name_unique"] = "n/a"
-        reasons.append("이름이 일치하는 feature가 없다(이름이 변형됐거나 feature가 사라졌다)")
+    normalized_place_name = _normalize_name(cast("str | None", row.get("place_name")))
+    normalized_feature_name = _normalize_name(
+        cast("str | None", row.get("feature_name"))
+    )
+    if normalized_place_name is None or normalized_feature_name is None:
+        axes["linked_name"] = "n/a"
+        reasons.append("curation 또는 linked feature 이름이 비어 있어 이름 축을 쓸 수 없다")
+    elif normalized_place_name == normalized_feature_name:
+        axes["linked_name"] = "pass"
     else:
-        axes["name_unique"] = "n/a"
+        axes["linked_name"] = "fail"
         reasons.append(
-            f"같은 이름 feature가 {same_name_count}건이라 이름 축으로는 확정할 수 없다"
-            " (반증은 아니다)"
+            "연결된 feature 이름 불일치: "
+            f"curation={row.get('place_name')!r} vs feature={row.get('feature_name')!r}"
         )
 
-    # 반증 축(region·category)에서만 모순을 판정한다.
-    if any(axes.get(axis) == "fail" for axis in ("region", "category")):
+    linked_feature_id = cast("str | None", row.get("feature_id"))
+    candidates = tuple(dict.fromkeys(candidate_feature_ids))
+    if len(candidates) == 1 and candidates[0] == linked_feature_id:
+        axes["linked_exact_name_candidate"] = "pass"
+    elif not candidates:
+        axes["linked_exact_name_candidate"] = "n/a"
+        reasons.append("공개 exact-name feature 후보가 없다")
+    elif linked_feature_id in candidates:
+        axes["linked_exact_name_candidate"] = "n/a"
+        reasons.append(
+            f"공개 exact-name feature가 {len(candidates)}건이라 후보 축으로 확정할 수 없다"
+        )
+    else:
+        axes["linked_exact_name_candidate"] = "n/a"
+        reasons.append(
+            "공개 exact-name 후보가 linked feature를 포함하지 않는다: "
+            + ", ".join(candidates)
+        )
+
+    if any(
+        axes.get(axis) == "fail"
+        for axis in ("region", "category", "linked_name")
+    ):
         verdict = "contradiction"
-    elif all(v == "n/a" for v in axes.values()):
+    elif all(value == "n/a" for value in axes.values()):
         verdict = "insufficient"
     else:
-        # 어떤 반증 축도 모순되지 않았다는 뜻일 뿐 **확인됨이 아니다**.
         verdict = "no_contradiction"
 
-    return {"axes": axes, "verdict": verdict, "reasons": reasons}
+    return {
+        "axes": axes,
+        "verdict": verdict,
+        "reasons": reasons,
+        "evidence": {
+            "normalized_place_name": normalized_place_name,
+            "normalized_linked_feature_name": normalized_feature_name,
+            "exact_name_candidate_feature_ids": list(candidates),
+            "linked_feature_is_exact_name_candidate": linked_feature_id in candidates,
+        },
+    }
 
 
-async def run(conn: Any, *, check_all: bool) -> list[dict[str, Any]]:
-    rows: list[Any]
-    if check_all:
-        rows = list(await conn.fetch(_ALL_SQL))
-    else:
-        rows = []
-        for collection_key, item_key, _component in _APPROVED:
-            rows.extend(await conn.fetch(_ROW_SQL, collection_key, item_key))
+def _address_parts(address: object) -> tuple[str | None, str | None, str]:
+    if not isinstance(address, Mapping):
+        return None, None, ""
+    sido_code = address.get("sido_code")
+    sigungu_code = address.get("sigungu_code")
+    display = address.get("road") or address.get("legal") or ""
+    return (
+        str(sido_code) if sido_code is not None else None,
+        str(sigungu_code) if sigungu_code is not None else None,
+        str(display),
+    )
+
+
+async def _approved_targets(session: AsyncSession) -> list[AuditTarget]:
+    targets: list[AuditTarget] = []
+    for collection_key, external_item_id, external_component_id in _APPROVED:
+        rows = (
+            (
+                await session.execute(
+                    text(_APPROVED_ROW_SQL),
+                    {
+                        "collection_key": collection_key,
+                        "external_item_id": external_item_id,
+                        "external_component_id": external_component_id,
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            sido_code, sigungu_code, address = _address_parts(row["address"])
+            targets.append(
+                AuditTarget(
+                    collection_key=str(row["collection_key"]),
+                    external_item_id=str(row["external_item_id"]),
+                    external_component_id=str(row["external_component_id"]),
+                    place_name=str(row["place_name"]),
+                    feature_id=(
+                        str(row["feature_id"])
+                        if row["feature_id"] is not None
+                        else None
+                    ),
+                    region=str(row["region"]) if row["region"] is not None else None,
+                    declared_confidence=(
+                        str(row["declared_confidence"])
+                        if row["declared_confidence"] is not None
+                        else None
+                    ),
+                    feature_name=(
+                        str(row["feature_name"])
+                        if row["feature_name"] is not None
+                        else None
+                    ),
+                    feature_category=(
+                        str(row["feature_category"])
+                        if row["feature_category"] is not None
+                        else None
+                    ),
+                    feature_status=(
+                        str(row["feature_status"])
+                        if row["feature_status"] is not None
+                        else None
+                    ),
+                    feature_sido_code=sido_code,
+                    feature_sigungu_code=sigungu_code,
+                    feature_address=address,
+                )
+            )
+    return targets
+
+
+async def _public_targets(session: AsyncSession) -> list[AuditTarget]:
+    """공개 repository의 page를 끝까지 읽어 audit target으로 평탄화한다."""
+
+    targets: list[AuditTarget] = []
+    cursor: str | None = None
+    while True:
+        groups, next_cursor = await list_feature_curation_groups(
+            session,
+            public_only=True,
+            page_size=500,
+            cursor=cursor,
+        )
+        for group in groups:
+            sido_code, sigungu_code, address = _address_parts(group.address)
+            for item in group.curations:
+                targets.append(
+                    AuditTarget(
+                        collection_key=item.collection_key,
+                        external_item_id=item.external_item_id,
+                        external_component_id=item.external_component_id,
+                        place_name=item.place_name,
+                        feature_id=group.feature_id,
+                        region=(
+                            str(item.metadata["region"])
+                            if item.metadata.get("region") is not None
+                            else None
+                        ),
+                        declared_confidence=(
+                            str(item.metadata["feature_match_confidence"])
+                            if item.metadata.get("feature_match_confidence") is not None
+                            else None
+                        ),
+                        feature_name=group.name,
+                        feature_category=group.category,
+                        feature_status=group.status,
+                        feature_sido_code=sido_code,
+                        feature_sigungu_code=sigungu_code,
+                        feature_address=address,
+                    )
+                )
+        if next_cursor is None:
+            return targets
+        cursor = next_cursor
+
+
+async def _candidate_feature_ids(
+    session: AsyncSession,
+    *,
+    place_name: str,
+) -> tuple[str, ...]:
+    normalized_name = normalize_korean_text(place_name)
+    if normalized_name is None:
+        return ()
+    rows = (
+        (
+            await session.execute(
+                text(_NAME_CANDIDATES_SQL),
+                {"normalized_name": normalized_name},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    expected = _normalize_name(place_name)
+    return tuple(
+        str(row["feature_id"])
+        for row in rows
+        if _normalize_name(str(row["name"])) == expected
+    )
+
+
+async def run(
+    session: AsyncSession,
+    *,
+    scope: AuditScope,
+    snapshot: Mapping[str, Any],
+) -> dict[str, Any]:
+    targets = (
+        await _public_targets(session)
+        if scope == "public"
+        else await _approved_targets(session)
+    )
 
     results: list[dict[str, Any]] = []
-    for row in rows:
-        if row["feature_id"] is None:
+    for target in targets:
+        row = asdict(target)
+        if target.feature_id is None:
             results.append(
                 {
-                    "collection_key": row["collection_key"],
-                    "external_item_id": row["external_item_id"],
-                    "place_name": row["place_name"],
-                    "feature_id": None,
+                    **row,
                     "verdict": "unlinked",
                     "axes": {},
                     "reasons": ["curation item이 feature에 링크돼 있지 않다"],
+                    "evidence": {
+                        "exact_name_candidate_feature_ids": [],
+                        "linked_feature_is_exact_name_candidate": False,
+                    },
                 }
             )
             continue
-        same = await conn.fetchval(_SAMENAME_SQL, row["place_name"])
-        judged = _judge(row, same)
-        results.append(
-            {
-                "collection_key": row["collection_key"],
-                "external_item_id": row["external_item_id"],
-                "place_name": row["place_name"],
-                "feature_id": row["feature_id"],
-                "feature_name": row["feature_name"],
-                "feature_category": row["feature_category"],
-                "feature_address": row["feature_address"],
-                "region": row["region"],
-                "declared_confidence": row["declared_confidence"],
-                "same_name_features": same,
-                **judged,
-            }
+        candidate_ids = await _candidate_feature_ids(
+            session,
+            place_name=target.place_name,
         )
-    return results
+        results.append({**row, **_judge(row, candidate_ids)})
+
+    verdict_counts = Counter(str(result["verdict"]) for result in results)
+    return {
+        "schema_version": 2,
+        "scope": scope,
+        "population": dict(_POPULATION[scope]),
+        "target_count": len(results),
+        "snapshot": dict(snapshot),
+        "verdict_counts": dict(sorted(verdict_counts.items())),
+        "results": results,
+    }
+
+
+async def _snapshot_metadata(connection: AsyncConnection) -> dict[str, Any]:
+    row = (await connection.execute(text(_SNAPSHOT_SQL))).mappings().one()
+    started_at = row["transaction_started_at"]
+    return {
+        "transaction_snapshot": str(row["transaction_snapshot"]),
+        "database_name": str(row["database_name"]),
+        "isolation_level": str(row["isolation_level"]),
+        "read_only": str(row["read_only"]),
+        "transaction_started_at": started_at.isoformat(),
+    }
+
+
+async def audit_database(dsn: str, *, scope: AuditScope) -> dict[str, Any]:
+    engine = make_async_engine(dsn, pool_size=1, max_overflow=0)
+    try:
+        async with engine.connect() as connection, connection.begin():
+            # 첫 query 전에 transaction 특성을 고정한다.
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            )
+            snapshot = await _snapshot_metadata(connection)
+            async with AsyncSession(
+                bind=connection,
+                expire_on_commit=False,
+            ) as session:
+                return await run(session, scope=scope, snapshot=snapshot)
+    finally:
+        await engine.dispose()
+
+
+def _write_json_report(path: str, report: Mapping[str, Any]) -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(report, handle, ensure_ascii=False, indent=1)
 
 
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--all",
-        action="store_true",
-        help="승인 5건이 아니라 링크된 공식 curation 전체를 검증한다",
+        "--scope",
+        choices=("approved", "public"),
+        default="approved",
+        help="감사 모집단: H25B 승인 5건 또는 공개 curation repository 전체",
     )
     parser.add_argument("--json", type=str, default="", help="결과 JSON 출력 경로")
     args = parser.parse_args()
 
-    dsn = os.environ["DSN"].replace("+asyncpg", "")
-    conn = await asyncpg.connect(dsn)
-    try:
-        results = await run(conn, check_all=args.all)
-    finally:
-        await conn.close()
+    report = await audit_database(
+        os.environ["DSN"],
+        scope=cast("AuditScope", args.scope),
+    )
+    results = cast("list[dict[str, Any]]", report["results"])
 
-    counts: dict[str, int] = {}
-    for r in results:
-        counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
-
-    print(f"검증 대상 {len(results)}건")
-    for verdict, n in sorted(counts.items()):
-        print(f"  {verdict:<18} {n}")
+    print(
+        f"검증 scope={report['scope']} 대상={report['target_count']}건 "
+        f"snapshot={report['snapshot']['transaction_snapshot']}"
+    )
+    for verdict, count in cast(
+        "dict[str, int]", report["verdict_counts"]
+    ).items():
+        print(f"  {verdict:<18} {count}")
     print()
-    for r in results:
-        mark = "  " if r["verdict"] == "no_contradiction" else "* "
-        print(f"{mark}{r['collection_key']} / {r['external_item_id']}  {r['place_name']}")
-        print(f"    verdict={r['verdict']}  axes={r.get('axes')}")
-        if r.get("feature_id"):
+    for result in results:
+        mark = "  " if result["verdict"] == "no_contradiction" else "* "
+        print(
+            f"{mark}{result['collection_key']} / {result['external_item_id']}  "
+            f"{result['place_name']}"
+        )
+        print(f"    verdict={result['verdict']}  axes={result.get('axes')}")
+        if result.get("feature_id"):
             print(
-                f"    feature={r['feature_id']} [{r.get('feature_category')}] "
-                f"{r.get('feature_address', '')[:52]}"
+                f"    feature={result['feature_id']} "
+                f"[{result.get('feature_category')}] "
+                f"{str(result.get('feature_address', ''))[:52]}"
             )
-        for reason in r["reasons"]:
+        for reason in result["reasons"]:
             print(f"    - {reason}")
 
     print(
-        "\n주의: no_contradiction은 **확인됨이 아니다** — 어떤 축도 모순되지 않았다는 뜻이다.\n"
-        "같은 시군구 안의 다른 대상은 이 도구로 구분되지 않는다(청풍호 vs 청풍호반케이블카)."
+        "\n주의: no_contradiction은 확인됨이 아니다. 현재 반증 축에서 모순을 찾지 "
+        "못했다는 뜻이다."
     )
 
     if args.json:
-        with open(args.json, "w", encoding="utf-8") as handle:  # noqa: ASYNC230  # 1회성 증거 산출
-            json.dump(results, handle, ensure_ascii=False, indent=1)
+        _write_json_report(args.json, report)
         print(f"\nJSON: {args.json}")
 
 
