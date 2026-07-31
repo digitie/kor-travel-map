@@ -27,6 +27,7 @@ barrier로 직렬화한다.
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
+    [ ] `T-VN-H35R`(prod external DB recovery gate 제품화 — H35 선행) →
     [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0069** + 이미지 동시 배포 — #673 blocker;
         2026-07-31 중단, 백업 확보·B′ 경로 확정, 본문 상단 인수 블록 참조) →
     [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
@@ -505,6 +506,31 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 남은 실증은 `T-VN-H30B`. **`T-VN-H30C`·`T-VN-H32`는 #673 범위 밖**이다 —
 > 이슈는 "concierge provider에 한해" 완화를 요구했고 두 task는 그 파생 개선이다.
 > 저장소 열린 이슈는 #673·#819 두 건뿐이고 #673은 epic이 아니다.
+
+- [ ] T-VN-H35R — **prod external PostgreSQL recovery gate 제품화**
+
+  H35 배포 전에 external DB용 app·Dagster custom dump가 실제로 복원 가능한지 증명하는
+  production-only gate를 제품화한다. 기존 standalone `scripts/docker-backup.sh`는 prod external
+  DB를 대상으로 하지 않으므로 재사용하지 않는다.
+
+  산출물:
+  - `docs/runbooks/h35-prod-external-db-recovery.md` — root-only 설치·실행·failure recovery runbook.
+  - `scripts/run-prod-external-db-recovery-gate.sh` — pinned PostgreSQL 16 client/PostGIS 16 scratch
+    image, root `0600` `PGSERVICEFILE`/`PGPASSFILE`, docker-manager global mutation lock, writer
+    quiescence 재검증, custom dump, SHA-256, `pg_restore --list`, disposable scratch restore,
+    Alembic/schema/핵심 row-count equality를 수행하는 gate.
+  - `tests/unit/test_h35_prod_external_db_recovery_gate.py` — production-only opt-in, credential
+    non-exposure, digest pin, scratch 격리, fail-close cleanup 계약을 고정한다.
+
+  acceptance:
+  - production 명시 opt-in·root-owned immutable git archive snapshot 없이는 fail-close한다.
+  - app DB와 Dagster DB를 같은 writer-quiesced window에서 dump하고, dump 뒤에도 writer 0건을
+    재확인한다.
+  - source credential은 argv/log/artifact/Docker metadata에 평문으로 남기지 않는다.
+  - scratch server는 고정 PostGIS digest, unique `--internal` network, no published ports,
+    no host bind, scratch-only `POSTGRES_HOST_AUTH_METHOD=trust`로 disposable하게 만든다.
+  - 실패 시 원본 DB는 불변이고, `BLOCKED`/failure journal/scratch identity를 남긴 채 임의 cleanup을
+    금지한다.
 
 - [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0069)**
 
