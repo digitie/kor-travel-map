@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 import shutil
 import signal
 import stat
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -81,6 +83,7 @@ restore_router = APIRouter(prefix="/admin/restore", tags=["admin-backups"])
 BackupOperation = Literal["backup", "restore", "swap"]
 BackupOperationStatus = Literal["planned", "completed", "failed", "manual_required"]
 _SUPERVISED_COMMAND_COMMUNICATIONS: set[asyncio.Task[tuple[bytes, bytes]]] = set()
+_DOCKER_EFFECT_FENCE_NAME = "kor-travel-map-maintenance-effect-fence-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -560,6 +563,8 @@ def _plan_with_marker(
                 **plan.env,
                 "KOR_TRAVEL_MAP_COMMAND_ID": str(prepared.command.command_id),
                 "KOR_TRAVEL_MAP_COMMAND_OPERATION": prepared.command.operation,
+                "KOR_TRAVEL_MAP_COMMAND_EFFECT_TOKEN": execution.effect_token,
+                "KOR_TRAVEL_MAP_COMMAND_FENCE_PREACQUIRED": "1",
                 "KOR_TRAVEL_MAP_COMMAND_MARKER_KEY": execution.marker_key,
                 "KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND": execution.effect_kind,
                 "KOR_TRAVEL_MAP_COMMAND_BACKUP_ID": execution.backup_id,
@@ -616,11 +621,18 @@ def _maintenance_busy() -> HTTPException:
 def _raise_external_command_failure(
     result: _CommandResult,
     *,
+    prepared: _PreparedBackupCommand,
     code: str,
     message: str,
 ) -> None:
     if result.returncode == 3:
         raise _maintenance_busy()
+    if result.returncode == 4:
+        raise _effect_reconciliation_required(
+            prepared,
+            reason="global Docker effect fence가 이미 존재하거나 상태가 모호함",
+            diagnostic=result.stderr.strip(),
+        )
     raise HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail={
@@ -632,6 +644,125 @@ def _raise_external_command_failure(
             },
         },
     )
+
+
+def _effect_reconciliation_required(
+    prepared: _PreparedBackupCommand,
+    *,
+    reason: str,
+    diagnostic: str | None = None,
+) -> HTTPException:
+    execution = prepared.execution
+    details: dict[str, object] = {
+        "state": "manual_reconcile_required",
+        "reason": reason,
+        "command_id": prepared.command.command_id,
+        "operation": prepared.command.operation,
+        "effect_kind": execution.effect_kind,
+        "effect_token": execution.effect_token,
+        "input_digest": execution.input_digest,
+        "fence_name": _DOCKER_EFFECT_FENCE_NAME,
+        "safe_procedure": [
+            "Docker fence의 exact name과 labels를 inspect하고 실제 target 상태를 확인합니다.",
+            "command/output identity가 모두 일치할 때만 운영 runbook에 따라 "
+            "terminal marker를 기록합니다.",
+            "marker proof를 검증한 뒤 exact effect_token fence만 해제하고 "
+            "같은 Idempotency-Key로 재시도합니다.",
+            "missing/foreign/mismatched evidence이면 자동 재실행·자동 채택하지 않습니다.",
+        ],
+    }
+    if diagnostic:
+        details["diagnostic"] = diagnostic
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED",
+            "message": (
+                "이전 backup/restore effect의 terminal proof가 없어 "
+                "중복 mutation을 방지하기 위해 자동 실행을 차단했습니다."
+            ),
+            "details": details,
+        },
+    )
+
+
+def _docker_effect_fence_plan(
+    settings: ApiSettings,
+    prepared: _PreparedBackupCommand,
+    *,
+    action: Literal["acquire", "release"],
+) -> BackupCommandPlan:
+    execution = prepared.execution
+    command = [
+        sys.executable,
+        str(
+            _script_path(
+                settings,
+                Path("scripts/docker-domain-command-fence.py"),
+            )
+        ),
+        action,
+        "--effect-token",
+        execution.effect_token,
+        "--command-id",
+        str(prepared.command.command_id),
+        "--operation",
+        prepared.command.operation,
+        "--effect-kind",
+        execution.effect_kind,
+        "--input-digest",
+        execution.input_digest,
+        "--marker-key",
+        execution.marker_key,
+        "--backup-id",
+        execution.backup_id,
+    ]
+    if action == "acquire":
+        command.append("--adopt-existing-exact")
+    return BackupCommandPlan(
+        cwd=str(settings.backup_project_root.resolve()),
+        command=command,
+        env={},
+        enabled=True,
+    )
+
+
+async def _acquire_docker_effect_fence(
+    settings: ApiSettings,
+    prepared: _PreparedBackupCommand,
+) -> None:
+    plan = _docker_effect_fence_plan(
+        settings,
+        prepared,
+        action="acquire",
+    )
+    result = await _run_command(plan, timeout_seconds=30.0)
+    if result.returncode != 0:
+        _raise_external_command_failure(
+            result,
+            prepared=prepared,
+            code="BACKUP_EFFECT_FENCE_ACQUIRE_FAILED",
+            message="durable Docker effect fence 획득에 실패했습니다.",
+        )
+
+
+async def _release_docker_effect_fence(
+    settings: ApiSettings,
+    prepared: _PreparedBackupCommand,
+) -> None:
+    plan = _docker_effect_fence_plan(
+        settings,
+        prepared,
+        action="release",
+    )
+    result = await _run_command(plan, timeout_seconds=30.0)
+    if result.returncode != 0:
+        _raise_external_command_failure(
+            result,
+            prepared=prepared,
+            code="BACKUP_EFFECT_FENCE_RELEASE_FAILED",
+            message="terminal marker 뒤 exact Docker effect fence 해제에 실패했습니다.",
+        )
 
 
 def _pending_execution(
@@ -681,6 +812,7 @@ async def _prepare_backup_command(
                 session,
                 command_id=command.command_id,
                 effect_kind=effect_kind,
+                effect_token=secrets.token_hex(32),
                 backup_id=backup_id,
                 app_db=app_db,
                 dagster_db=dagster_db,
@@ -734,15 +866,19 @@ async def _prepare_backup_command(
 
 async def _start_prepared_backup_command(
     session: AsyncSession,
+    engine: AsyncEngine,
+    settings: ApiSettings,
     prepared: _PreparedBackupCommand,
 ) -> _PreparedBackupCommand:
     if prepared.execution.phase != "prepared":
         return prepared
-    async with session.begin():
-        execution = await start_backup_command_effect(
-            session,
-            prepared.command.command_id,
-        )
+    async with _maintenance_lock(engine):
+        await _acquire_docker_effect_fence(settings, prepared)
+        async with session.begin():
+            execution = await start_backup_command_effect(
+                session,
+                prepared.command.command_id,
+            )
     return _PreparedBackupCommand(
         command=prepared.command,
         execution=execution,
@@ -978,6 +1114,7 @@ async def delete_backup(
 async def create_backup(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: BackupRunRequest | None = None,
@@ -1054,7 +1191,12 @@ async def create_backup(
                 "details": {"backup_id": backup_id, "error": str(exc)},
             },
         ) from exc
-    prepared = await _start_prepared_backup_command(session, prepared)
+    prepared = await _start_prepared_backup_command(
+        session,
+        engine,
+        settings,
+        prepared,
+    )
     plan = _plan_with_marker(
         plan,
         prepared,
@@ -1081,6 +1223,11 @@ async def create_backup(
     )
     result: _CommandResult | None = None
     if marker_sha256 is None:
+        if not prepared.started_now:
+            raise _effect_reconciliation_required(
+                prepared,
+                reason="effect_started command에 exact terminal marker가 없음",
+            )
         result = await _run_command(
             plan,
             timeout_seconds=settings.backup_command_timeout_seconds,
@@ -1088,6 +1235,7 @@ async def create_backup(
         if result.returncode != 0:
             _raise_external_command_failure(
                 result,
+                prepared=prepared,
                 code="BACKUP_COMMAND_FAILED",
                 message="백업 command 실행이 실패했습니다.",
             )
@@ -1114,6 +1262,7 @@ async def create_backup(
         )
         if marker_sha256 is None:
             raise _pending_execution(prepared)
+    await _release_docker_effect_fence(settings, prepared)
     artifact_raw: BackupArtifact | None = None
     try:
         artifact_raw = backup_artifact(settings.backup_root, backup_id)
@@ -1170,6 +1319,7 @@ async def restore_backup(
     request: Request,
     backup_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: RestoreRunRequest | None = None,
@@ -1250,6 +1400,13 @@ async def restore_backup(
         app_db=targets.app_db,
         dagster_db=targets.dagster_db,
         rustfs_volume=targets.rustfs_volume,
+        start_effect=False,
+    )
+    prepared = await _start_prepared_backup_command(
+        session,
+        engine,
+        settings,
+        prepared,
     )
     plan = _plan_with_marker(
         plan,
@@ -1272,6 +1429,11 @@ async def restore_backup(
     )
     result: _CommandResult | None = None
     if marker_sha256 is None:
+        if not prepared.started_now:
+            raise _effect_reconciliation_required(
+                prepared,
+                reason="effect_started command에 exact terminal marker가 없음",
+            )
         result = await _run_command(
             plan,
             timeout_seconds=settings.backup_command_timeout_seconds,
@@ -1279,6 +1441,7 @@ async def restore_backup(
         if result.returncode != 0:
             _raise_external_command_failure(
                 result,
+                prepared=prepared,
                 code="RESTORE_COMMAND_FAILED",
                 message="restore command 실행이 실패했습니다.",
             )
@@ -1290,6 +1453,7 @@ async def restore_backup(
         )
         if marker_sha256 is None:
             raise _pending_execution(prepared)
+    await _release_docker_effect_fence(settings, prepared)
     response = BackupOperationResponse(
         data=BackupOperationData(
             operation="restore",
@@ -1342,6 +1506,7 @@ async def plan_restore_swap(
     request: Request,
     backup_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: RestoreSwapRequest | None = None,
@@ -1420,6 +1585,13 @@ async def plan_restore_swap(
         app_db=targets.app_db,
         dagster_db=targets.dagster_db,
         rustfs_volume=targets.rustfs_volume,
+        start_effect=False,
+    )
+    prepared = await _start_prepared_backup_command(
+        session,
+        engine,
+        settings,
+        prepared,
     )
     plan = _plan_with_marker(
         plan,
@@ -1459,6 +1631,11 @@ async def plan_restore_swap(
     )
     result: _CommandResult | None = None
     if marker_sha256 is None:
+        if not prepared.started_now:
+            raise _effect_reconciliation_required(
+                prepared,
+                reason="effect_started command에 exact terminal marker가 없음",
+            )
         result = await _run_command(
             plan,
             timeout_seconds=settings.backup_command_timeout_seconds,
@@ -1466,6 +1643,7 @@ async def plan_restore_swap(
         if result.returncode != 0:
             _raise_external_command_failure(
                 result,
+                prepared=prepared,
                 code="RESTORE_SWAP_COMMAND_FAILED",
                 message="restore hot-swap command 실행이 실패했습니다.",
             )
@@ -1503,6 +1681,7 @@ async def plan_restore_swap(
         )
         if marker_sha256 is None:
             raise _pending_execution(prepared)
+    await _release_docker_effect_fence(settings, prepared)
     response = BackupOperationResponse(
         data=BackupOperationData(
             operation="swap",

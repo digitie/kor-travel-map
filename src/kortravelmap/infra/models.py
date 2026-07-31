@@ -2606,6 +2606,10 @@ class BackupCommandExecutionRow(Base):
             name=conv("ck_backup_command_executions_input_digest"),
         ),
         CheckConstraint(
+            "effect_token ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_backup_command_executions_effect_token"),
+        ),
+        CheckConstraint(
             "marker_key ~ '^[a-z0-9][a-z0-9_.-]{0,127}$'",
             name=conv("ck_backup_command_executions_marker_key"),
         ),
@@ -2639,6 +2643,7 @@ class BackupCommandExecutionRow(Base):
         primary_key=True,
     )
     effect_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    effect_token: Mapped[str] = mapped_column(Text, nullable=False)
     phase: Mapped[str] = mapped_column(Text, nullable=False)
     backup_id: Mapped[str] = mapped_column(Text, nullable=False)
     app_db: Mapped[str | None] = mapped_column(Text)

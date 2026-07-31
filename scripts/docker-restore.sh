@@ -22,6 +22,8 @@ KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY="${KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY:-0}"
 KOR_TRAVEL_MAP_COMMAND_ID="${KOR_TRAVEL_MAP_COMMAND_ID:-}"
 KOR_TRAVEL_MAP_COMMAND_OPERATION="${KOR_TRAVEL_MAP_COMMAND_OPERATION:-}"
 KOR_TRAVEL_MAP_COMMAND_RECOVERY="${KOR_TRAVEL_MAP_COMMAND_RECOVERY:-0}"
+KOR_TRAVEL_MAP_COMMAND_EFFECT_TOKEN="${KOR_TRAVEL_MAP_COMMAND_EFFECT_TOKEN:-}"
+KOR_TRAVEL_MAP_COMMAND_FENCE_PREACQUIRED="${KOR_TRAVEL_MAP_COMMAND_FENCE_PREACQUIRED:-0}"
 KOR_TRAVEL_MAP_COMMAND_MARKER_KEY="${KOR_TRAVEL_MAP_COMMAND_MARKER_KEY:-}"
 KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND="${KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND:-}"
 KOR_TRAVEL_MAP_COMMAND_BACKUP_ID="${KOR_TRAVEL_MAP_COMMAND_BACKUP_ID:-}"
@@ -90,6 +92,9 @@ select_python() {
     exit 127
   fi
 }
+
+# shellcheck source=scripts/domain-command-fence.sh
+source "$ROOT_DIR/scripts/domain-command-fence.sh"
 
 with_maintenance_lock() {
   if [[ "${1:-}" == "--maintenance-lock-child" ]]; then
@@ -229,6 +234,24 @@ if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" == "1" ]]; then
   marker_verification="skipped"
 fi
 
+for database_name in \
+  "$KOR_TRAVEL_MAP_RESTORE_APP_DB" \
+  "$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB"; do
+  if database_exists "$database_name" && [[ "$KOR_TRAVEL_MAP_RESTORE_RECREATE" != "1" ]]; then
+    echo "restore target DB already exists: $database_name" >&2
+    echo "set KOR_TRAVEL_MAP_RESTORE_RECREATE=1 to recreate staging targets." >&2
+    exit 1
+  fi
+done
+if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" != "1" ]] \
+  && docker volume inspect "$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" >/dev/null 2>&1 \
+  && [[ "$KOR_TRAVEL_MAP_RESTORE_RECREATE" != "1" ]]; then
+  echo "restore RustFS volume already exists: $KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" >&2
+  echo "set KOR_TRAVEL_MAP_RESTORE_RECREATE=1 to recreate staging targets." >&2
+  exit 1
+fi
+
+acquire_domain_command_fence
 prepare_database "$KOR_TRAVEL_MAP_RESTORE_APP_DB"
 restore_database "$app_dump" "$KOR_TRAVEL_MAP_RESTORE_APP_DB"
 
@@ -269,19 +292,18 @@ if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" != "1" ]]; then
     bash "$ROOT_DIR/scripts/docker-restore-verify.sh"
 fi
 
-if [[ -n "$KOR_TRAVEL_MAP_COMMAND_MARKER_KEY" ]]; then
-  python_bin="$(select_python)"
-  "$python_bin" "$ROOT_DIR/scripts/write-domain-command-marker.py" \
-    --backup-root "$KOR_TRAVEL_MAP_BACKUP_ROOT" \
-    --command-id "$KOR_TRAVEL_MAP_COMMAND_ID" \
-    --operation "$KOR_TRAVEL_MAP_COMMAND_OPERATION" \
-    --marker-key "$KOR_TRAVEL_MAP_COMMAND_MARKER_KEY" \
-    --effect-kind "$KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND" \
-    --effect-state "restored" \
-    --backup-id "$KOR_TRAVEL_MAP_COMMAND_BACKUP_ID" \
-    --input-digest "$KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST" \
-    --app-db "$KOR_TRAVEL_MAP_RESTORE_APP_DB" \
-    --dagster-db "$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB" \
-    --rustfs-volume "$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" \
-    --verification "$marker_verification"
-fi
+python_bin="$(select_python)"
+"$python_bin" "$ROOT_DIR/scripts/write-domain-command-marker.py" \
+  --backup-root "$KOR_TRAVEL_MAP_BACKUP_ROOT" \
+  --command-id "$KOR_TRAVEL_MAP_COMMAND_ID" \
+  --operation "$KOR_TRAVEL_MAP_COMMAND_OPERATION" \
+  --marker-key "$KOR_TRAVEL_MAP_COMMAND_MARKER_KEY" \
+  --effect-kind "$KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND" \
+  --effect-state "restored" \
+  --backup-id "$KOR_TRAVEL_MAP_COMMAND_BACKUP_ID" \
+  --input-digest "$KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST" \
+  --app-db "$KOR_TRAVEL_MAP_RESTORE_APP_DB" \
+  --dagster-db "$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB" \
+  --rustfs-volume "$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" \
+  --verification "$marker_verification"
+release_domain_command_fence

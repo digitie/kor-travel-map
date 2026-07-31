@@ -774,6 +774,14 @@ terminal과 marker 생성까지 PostgreSQL lock을 보유한다. actual Docker c
 경쟁 lock 거부, terminal 뒤 lock 해제·marker 생성, 동일 command retry의 무재실행 terminal
 회수를 회귀 기준으로 둔다.
 
+네 번째 exact 재현에서는 wrapper/local child group을 `SIGKILL`하면 PostgreSQL session lock은
+풀리지만 daemon workload가 계속되고 marker가 없는 상태에서 기존 recovery가 effect를 다시
+시작하는 P1을 확인했다. DB execution의 immutable `effect_token`, API phase 전 global Docker
+fence pre-acquire, host script mutation 전 exact fence verification으로 보강한다. hard crash
+뒤 동일 command와 다른 command 모두 mutation 0건으로 manual-reconcile에 남고, 외부 operator가
+workload terminal/output proof를 확인해 marker를 기록하기 전에는 fence를 해제하거나 자동
+terminalize하지 않는 actual Docker+PostgreSQL SIGKILL 회귀를 완료 기준에 추가한다.
+
 - [ ] T-VN-12A — **retryable command inventory·계약 freeze**
 
   OpenAPI write operation을 domain/actor/transaction/advisory-lock/현재 dedupe 의미로 분류하고

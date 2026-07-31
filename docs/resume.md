@@ -54,8 +54,23 @@ detach 회귀 4건이 green이다. 관련 focused 49건, PostgreSQL/Docker ledge
 전체 unit+API **2,644건**, ruff·strict mypy(core 120/API 58/Dagster 23)·import 경계·
 OpenAPI drift·prod redaction도 모두 통과했다.
 
-**다음 한 작업**: push 전 staged·프로젝트 민감값 감사를 마쳐 PR #906에 commit·main
-rebase·push하고 같은 적대 리뷰어가 일반 코드 수정 전체를 재검토한다. 이어
+네 번째 재검토는 wrapper와 local child group을 hard kill하면 session lock만 풀리고 daemon
+workload는 계속되는 P1을 재현했다. `ops.backup_command_executions.effect_token`을 immutable
+identity로 추가하고, API가 같은 maintenance lock 안에서 hardened global Docker fence를
+pre-acquire한 뒤에만 `effect_started`를 commit하도록 바꿨다. 세 host script는 mutation 전에
+exact fence를 다시 검증하고 marker 기록 뒤 exact identity로만 해제한다. marker 없는
+`effect_started` retry는 `_run_command` 호출 전 explicit manual-reconcile 409로 끝나며,
+foreign fence를 만난 새 command는 `prepared`와 mutation 0건을 유지한다. local immutable
+Image ID/no-pull와 runtime hardening unit 4건, router 26건, 실제 Docker+PostgreSQL에서
+wrapper/child SIGKILL·lock 해제·orphan workload/fence 유지·동일/다른 retry mutation 0건·외부
+operator proof marker 뒤 exact 해제를 고정한 integration 1건이 통과했다.
+marker proof 뒤 exact fence release와 recovery-env 우회 차단까지 포함한 최종 전체
+unit+API는 **2,650건**, domain ledger migration/Docker integration은 **9건**이 통과했다.
+ruff 전체, strict mypy(core 120/API+helper 59/Dagster 23), import 경계, OpenAPI 재생성·drift,
+frontend TypeScript drift/type-check, bash syntax, prod redaction도 모두 green이다.
+
+**다음 한 작업**: 전체 backend/migration/OpenAPI/lint gate와 push 전 보안 감사를 마쳐
+PR #906에 작은 commit을 추가하고 같은 적대 리뷰어가 exact head를 재검토한다. 이어
 n150 파괴적 live UI/API, 최종
 rebase·merge를 끝낸 뒤 T-VN-12A/B/C/D를 `tasks-done.md`로 한 PR 단위 이관한다.
 

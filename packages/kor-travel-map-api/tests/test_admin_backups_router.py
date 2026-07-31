@@ -70,6 +70,7 @@ def _domain_command_fakes(
         return BackupCommandExecution(
             command_id=int(kwargs["command_id"]),
             effect_kind=str(kwargs["effect_kind"]),
+            effect_token=str(kwargs["effect_token"]),
             phase="prepared",
             backup_id=str(kwargs["backup_id"]),
             app_db=kwargs["app_db"],
@@ -151,6 +152,16 @@ def _domain_command_fakes(
     monkeypatch.setattr(
         router_mod,
         "complete_backup_command_effect",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "_acquire_docker_effect_fence",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "_release_docker_effect_fence",
         AsyncMock(),
     )
 
@@ -560,7 +571,59 @@ def test_execute_backup_uses_command_runner(
     assert body["data"]["status"] == "completed"
     assert body["data"]["artifact"]["backup_id"] == "manual"
     assert seen["plan"].env["KOR_TRAVEL_MAP_BACKUP_ID"] == "manual"
+    assert len(seen["plan"].env["KOR_TRAVEL_MAP_COMMAND_EFFECT_TOKEN"]) == 64
+    assert seen["plan"].env["KOR_TRAVEL_MAP_COMMAND_FENCE_PREACQUIRED"] == "1"
     assert "KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD" not in seen["plan"].env
+
+
+@pytest.mark.unit
+def test_foreign_fence_keeps_new_command_prepared_and_runs_no_effect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_backups as router_mod
+
+    start_effect = AsyncMock()
+
+    async def _foreign_fence(_settings: Any, prepared: Any) -> None:
+        raise router_mod._effect_reconciliation_required(
+            prepared,
+            reason="foreign Docker fence",
+        )
+
+    monkeypatch.setattr(
+        router_mod,
+        "_acquire_docker_effect_fence",
+        _foreign_fence,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "start_backup_command_effect",
+        start_effect,
+    )
+    run = AsyncMock()
+    monkeypatch.setattr(router_mod, "_run_command", run)
+    app = create_app(
+        ApiSettings(
+            admin_destructive_enabled=True,
+            admin_proxy_secret=None,
+            backup_root=tmp_path,
+            backup_project_root=tmp_path,
+            backup_command_enabled=True,
+        )
+    )
+
+    response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
+        "/v1/admin/backups",
+        json={"backup_id": "fenced", "execute": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == (
+        "BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED"
+    )
+    start_effect.assert_not_awaited()
+    run.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -625,6 +688,7 @@ def test_create_backup_never_adopts_unmarked_artifact_after_process_crash(
     execution = BackupCommandExecution(
         command_id=71,
         effect_kind="create",
+        effect_token="1" * 64,
         phase="effect_started",
         backup_id="manual",
         app_db=None,
@@ -674,9 +738,17 @@ def test_create_backup_never_adopts_unmarked_artifact_after_process_crash(
         json={"backup_id": "manual", "execute": True},
     )
 
-    assert response.status_code == 200
-    run.assert_awaited_once()
-    assert response.json()["data"]["stdout"] == "rerun"
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == "BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED"
+    assert body["details"]["state"] == "manual_reconcile_required"
+    assert body["details"]["command_id"] == 71
+    assert body["details"]["effect_token"] == "1" * 64
+    assert (
+        body["details"]["fence_name"]
+        == "kor-travel-map-maintenance-effect-fence-v1"
+    )
+    run.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -730,6 +802,7 @@ def test_create_backup_retry_terminalizes_detached_effect_marker_without_rerun(
     execution = BackupCommandExecution(
         command_id=command_id,
         effect_kind="create",
+        effect_token="2" * 64,
         phase="effect_started",
         backup_id=backup_id,
         app_db=None,
@@ -769,6 +842,7 @@ def test_create_backup_retry_terminalizes_detached_effect_marker_without_rerun(
         )
 
     run = AsyncMock()
+    release = AsyncMock()
     monkeypatch.setattr(domain_command_service, "begin_domain_command", _pending)
     monkeypatch.setattr(
         router_mod,
@@ -777,6 +851,7 @@ def test_create_backup_retry_terminalizes_detached_effect_marker_without_rerun(
     )
     monkeypatch.setattr(router_mod, "_marker_proof", _actual_marker_proof)
     monkeypatch.setattr(router_mod, "_run_command", run)
+    monkeypatch.setattr(router_mod, "_release_docker_effect_fence", release)
     app = create_app(
         ApiSettings(
             admin_destructive_enabled=True,
@@ -796,6 +871,7 @@ def test_create_backup_retry_terminalizes_detached_effect_marker_without_rerun(
     assert response.json()["data"]["status"] == "completed"
     assert response.json()["data"]["stdout"] is None
     run.assert_not_awaited()
+    release.assert_awaited_once()
     assert marker_mod.verify_domain_command_marker(
         tmp_path,
         command_id=command_id,
@@ -940,7 +1016,7 @@ def test_execute_restore_swap_uses_command_runner(
         ),
     ],
 )
-def test_restore_commands_resume_started_effect_with_recovery_mode(
+def test_restore_commands_fail_close_started_effect_without_marker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     path: str,
@@ -970,6 +1046,7 @@ def test_restore_commands_resume_started_effect_with_recovery_mode(
     execution = BackupCommandExecution(
         command_id=72,
         effect_kind=effect_kind,
+        effect_token="3" * 64,
         phase="effect_started",
         backup_id="backup-1",
         app_db="kor_travel_map_restore",
@@ -988,12 +1065,7 @@ def test_restore_commands_resume_started_effect_with_recovery_mode(
     async def _pending(*_args: Any, **_kwargs: Any) -> Any:
         raise domain_command_service.DomainCommandPending(claim)
 
-    seen: dict[str, Any] = {}
-
-    async def _run(plan: Any, *, timeout_seconds: float) -> Any:
-        seen["plan"] = plan
-        seen["timeout_seconds"] = timeout_seconds
-        return router_mod._CommandResult(returncode=0, stdout="ok", stderr="")
+    run = AsyncMock()
 
     monkeypatch.setattr(domain_command_service, "begin_domain_command", _pending)
     monkeypatch.setattr(
@@ -1001,7 +1073,7 @@ def test_restore_commands_resume_started_effect_with_recovery_mode(
         "get_backup_command_execution",
         AsyncMock(return_value=execution),
     )
-    monkeypatch.setattr(router_mod, "_run_command", _run)
+    monkeypatch.setattr(router_mod, "_run_command", run)
     app = create_app(
         ApiSettings(
             admin_destructive_enabled=True,
@@ -1017,9 +1089,12 @@ def test_restore_commands_resume_started_effect_with_recovery_mode(
         json=payload,
     )
 
-    assert response.status_code == 200
-    assert seen["plan"].env["KOR_TRAVEL_MAP_COMMAND_RECOVERY"] == "1"
-    assert "KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD" not in seen["plan"].env
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == "BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED"
+    assert body["details"]["command_id"] == 72
+    assert body["details"]["effect_token"] == "3" * 64
+    run.assert_not_awaited()
 
 
 @pytest.mark.unit

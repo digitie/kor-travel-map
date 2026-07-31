@@ -20,6 +20,8 @@ RESTORE_SWAP_SKIP_VERIFY="${KOR_TRAVEL_MAP_RESTORE_SWAP_SKIP_VERIFY:-0}"
 KOR_TRAVEL_MAP_COMMAND_ID="${KOR_TRAVEL_MAP_COMMAND_ID:-}"
 KOR_TRAVEL_MAP_COMMAND_OPERATION="${KOR_TRAVEL_MAP_COMMAND_OPERATION:-}"
 KOR_TRAVEL_MAP_COMMAND_RECOVERY="${KOR_TRAVEL_MAP_COMMAND_RECOVERY:-0}"
+KOR_TRAVEL_MAP_COMMAND_EFFECT_TOKEN="${KOR_TRAVEL_MAP_COMMAND_EFFECT_TOKEN:-}"
+KOR_TRAVEL_MAP_COMMAND_FENCE_PREACQUIRED="${KOR_TRAVEL_MAP_COMMAND_FENCE_PREACQUIRED:-0}"
 KOR_TRAVEL_MAP_COMMAND_MARKER_KEY="${KOR_TRAVEL_MAP_COMMAND_MARKER_KEY:-}"
 KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND="${KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND:-}"
 KOR_TRAVEL_MAP_COMMAND_BACKUP_ID="${KOR_TRAVEL_MAP_COMMAND_BACKUP_ID:-}"
@@ -58,6 +60,9 @@ select_python() {
   fi
 }
 
+# shellcheck source=scripts/domain-command-fence.sh
+source "$ROOT_DIR/scripts/domain-command-fence.sh"
+
 with_maintenance_lock() {
   if [[ "${1:-}" == "--maintenance-lock-child" ]]; then
     return 0
@@ -92,6 +97,7 @@ else
 fi
 
 python_bin="$(select_python)"
+acquire_domain_command_fence
 KOR_TRAVEL_MAP_POSTGRES_USER="$POSTGRES_USER" \
   KOR_TRAVEL_MAP_POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
   KOR_TRAVEL_MAP_RESTORE_APP_DB="$RESTORE_APP_DB" \
@@ -126,20 +132,19 @@ Apply manually with:
 SUMMARY
 fi
 
-if [[ -n "$KOR_TRAVEL_MAP_COMMAND_MARKER_KEY" ]]; then
-  python_bin="$(select_python)"
-  "$python_bin" "$ROOT_DIR/scripts/write-domain-command-marker.py" \
-    --backup-root "$BACKUP_ROOT" \
-    --command-id "$KOR_TRAVEL_MAP_COMMAND_ID" \
-    --operation "$KOR_TRAVEL_MAP_COMMAND_OPERATION" \
-    --marker-key "$KOR_TRAVEL_MAP_COMMAND_MARKER_KEY" \
-    --effect-kind "$KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND" \
-    --effect-state "$marker_effect_state" \
-    --backup-id "$KOR_TRAVEL_MAP_COMMAND_BACKUP_ID" \
-    --input-digest "$KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST" \
-    --app-db "$RESTORE_APP_DB" \
-    --dagster-db "$RESTORE_DAGSTER_DB" \
-    --rustfs-volume "$RESTORE_RUSTFS_VOLUME" \
-    --verification "$marker_verification" \
-    --env-file "$RESTORE_SWAP_ENV_FILE"
-fi
+python_bin="$(select_python)"
+"$python_bin" "$ROOT_DIR/scripts/write-domain-command-marker.py" \
+  --backup-root "$BACKUP_ROOT" \
+  --command-id "$KOR_TRAVEL_MAP_COMMAND_ID" \
+  --operation "$KOR_TRAVEL_MAP_COMMAND_OPERATION" \
+  --marker-key "$KOR_TRAVEL_MAP_COMMAND_MARKER_KEY" \
+  --effect-kind "$KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND" \
+  --effect-state "$marker_effect_state" \
+  --backup-id "$KOR_TRAVEL_MAP_COMMAND_BACKUP_ID" \
+  --input-digest "$KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST" \
+  --app-db "$RESTORE_APP_DB" \
+  --dagster-db "$RESTORE_DAGSTER_DB" \
+  --rustfs-volume "$RESTORE_RUSTFS_VOLUME" \
+  --verification "$marker_verification" \
+  --env-file "$RESTORE_SWAP_ENV_FILE"
+release_domain_command_fence

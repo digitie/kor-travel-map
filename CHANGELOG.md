@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### backup/restore hard-crash effect fence (2026-07-31, T-VN-12)
+
+- **RELIABILITY**: backup/create/restore/swap은 DB의 immutable `effect_token`과 고정 이름
+  hardened Docker fence를 mutation 전에 결합한다. API/wrapper가 hard crash해 PostgreSQL
+  session lock이 풀려도 daemon fence가 동일·다른 command의 중복 effect를 막는다.
+- **BEHAVIOR (breaking)**: marker 없는 `effect_started`는 자동 재실행하지 않고
+  `409 BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED`로 fail-close한다. host script 직접
+  실행도 DB command identity와 pre-acquired fence가 없으면 거부한다.
+- **SECURITY**: fence는 canonical local immutable Image ID만 `--pull=never`로 사용하고
+  exact command/input/source labels, network none, read-only rootfs, capability 제거,
+  `no-new-privileges`, 비 root user와 PID 제한을 검증한다.
+
 ### sparse 다중 날짜 weather batch (2026-07-30, T-VN-16C)
 
 - **CHANGED**: `POST /v1/features/weather/batch` 요청을 단일

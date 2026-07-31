@@ -62,6 +62,40 @@ def test_maintenance_lock_handoff_is_not_environment_spoofable() -> None:
 
 
 @pytest.mark.unit
+def test_all_backup_effect_scripts_require_preacquired_durable_docker_fence() -> None:
+    common = _read("scripts/domain-command-fence.sh")
+    helper = _read("scripts/docker-domain-command-fence.py")
+    assert "KOR_TRAVEL_MAP_COMMAND_FENCE_PREACQUIRED" in common
+    assert 'KOR_TRAVEL_MAP_COMMAND_RECOVERY:-0}" != "0"' in common
+    assert "domain_command_fence verify" in common
+    assert "domain_command_fence release" in common
+    assert "--pull=never" in helper
+    assert '"none"' in helper
+    assert '"--read-only"' in helper
+    assert '"ALL"' in helper
+    assert '"no-new-privileges"' in helper
+    assert "fence-image-id" in helper
+    assert "source-revision" in helper
+
+    for path, first_mutation in (
+        ("scripts/docker-backup.sh", "rm -rf --"),
+        ("scripts/docker-restore.sh", 'prepare_database "$KOR_TRAVEL_MAP_RESTORE_APP_DB"'),
+        (
+            "scripts/docker-restore-swap.sh",
+            '"$python_bin" "$ROOT_DIR/scripts/write-restore-swap-env.py"',
+        ),
+    ):
+        script = _read(path)
+        assert "source \"$ROOT_DIR/scripts/domain-command-fence.sh\"" in script
+        assert script.index("acquire_domain_command_fence") < script.index(
+            first_mutation
+        )
+        assert script.index("write-domain-command-marker.py") < script.index(
+            "release_domain_command_fence"
+        )
+
+
+@pytest.mark.unit
 def test_docker_backup_script_is_non_destructive() -> None:
     script = _read("scripts/docker-backup.sh")
 

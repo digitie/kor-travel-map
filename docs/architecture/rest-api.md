@@ -245,18 +245,28 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
   ambiguity는 fail-close한다. delete는 `deleting + delete_command_id`를 원자 예약하므로
   다른 key의 경쟁 요청은 claim까지 rollback된 `409`로 끝난다.
 - backup/restore/swap은 host wrapper가 `maintenance:backup-restore` session lock을
-  `pg_try_advisory_lock`으로 잡고 child process 전체 수명 동안 보유한다. wrapper가
+  `pg_try_advisory_lock`으로 잡고 child process 전체 수명 동안 보유한다. 그 전에 API는 같은
+  lock 안에서 execution의 immutable `effect_token`에 묶인 고정 이름 global Docker fence를
+  생성·inspect한 뒤에만 `effect_started`로 전이한다. fence는 canonical compose service의
+  local immutable Image ID와 `--pull=never`, network none, read-only rootfs, capability 제거,
+  `no-new-privileges`, 비 root user를 사용한다. command/operation/input digest/source revision/
+  Image ID label과 runtime shape가 exact하지 않으면 새 command는 `prepared`에 남는다. wrapper가
   `TERM`/`INT`를 받으면 호출자 detach만 기록하고 daemon effect와 연결된 child에는 전달하지
   않는다. child output은 API pipe와 분리된 임시 spool에 저장하며 direct child와 process
   group이 자연 terminal에 도달한 뒤에만 lock을 해제한다. API cancellation은 호출자에게
   응답하지 못한 채 bounded하게 반환하고 timeout은 `504 BACKUP_COMMAND_TIMEOUT`으로
   bounded 반환하지만, execution row는 `effect_started`로 남고 wrapper supervision은 계속된다.
-  진행 중 동일 command 재시도는 lock 경합으로
-  `409 BACKUP_MAINTENANCE_BUSY`와 `Retry-After: 3`이다. API 내부 backup delete는 같은 lock을
+  wrapper와 local child group이 hard crash로 사라지면 session lock은 풀릴 수 있지만 daemon의
+  global fence는 남는다. marker 없는 `effect_started` 동일 command는 script 호출 전에
+  `409 BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED`로 차단하고, 다른 command도 fence
+  preflight에서 mutation 없이 `prepared`로 남긴다. 문제 응답은 secret이 아닌 command ID,
+  operation, effect token, input digest, fence name과 안전한 수동 절차를 제공한다. missing/
+  foreign/mismatched fence나 marker는 자동 채택하지 않는다. API 내부 backup delete는 같은 lock을
   effect·proof·terminal DB commit까지 직접 보유한다. exact command marker/reservation 없는
   기존 backup artifact나 restore target은 새 command 결과로 채택하지 않는다. wrapper가
   exact marker를 만든 뒤 동일 command를 재시도하면 외부 효과를 반복하지 않고 marker proof로
-  terminal result를 확정한다.
+  terminal result를 확정한다. hard crash 뒤 marker는 외부 운영자가 실제 workload terminal과
+  output identity를 확인한 경우에만 만들며, marker proof 전에 fence를 해제하지 않는다.
 - admin UI는 resource command slot 또는 create draft slot에 UUID와 submission fingerprint를
   함께 동결한다. response-loss/transport ambiguity에서는 같은 submission만 같은 UUID로
   재시도하며 내용이 달라지면 로컬에서 차단한다. 성공·확정 실패·인증 actor 전환 때 slot을

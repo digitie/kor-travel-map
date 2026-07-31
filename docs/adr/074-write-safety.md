@@ -34,23 +34,39 @@
 7. 객체 저장소·Dagster·filesystem·host script처럼 DB 밖 효과가 있는 command는 도메인별
    execution table에서 `prepared → effect_started → effect_succeeded`를 단조 전이한다. terminal
    result는 효과별 output digest/proof가 있어야만 기록한다. `pending`은 성공으로 추정하지 않는다.
-8. backup/create/restore/swap은 동일 session advisory lock
-   `maintenance:backup-restore`를 host wrapper process가 fail-fast로 획득하고 child script
-   전체 수명 동안 보유한다. Docker daemon 외부 효과는 local CLI 종료로 취소됐다고 증명할 수
-   없으므로 effect가 시작된 뒤에는 non-interruptible supervised 작업이다. wrapper는
-   `TERM`/`INT`를 호출자 detach 요청으로만 기록하고 child에는 전달하지 않으며, API pipe와
-   분리된 임시 spool을 사용한다. direct child와 그 process group이 자연 terminal에 도달한
-   뒤에만 output을 재생하고 lock을 해제한다. API task 취소·timeout은 bounded하게 반환하되
-   wrapper communication을 background에서 유지하고 execution은 `effect_started`로 남긴다.
-   즉시 같은 command를 재시도하면 살아 있는 lock 때문에 retryable `409`이고, host script가
-   exact marker를 만든 뒤 재시도하면 외부 효과를 다시 실행하지 않고 terminal result를 확정한다.
-   API connection에서 획득한 lock을 env flag로 child에게 위임하지 않는다. API 내부 delete도
-   같은 key를 effect·proof·terminal commit 전체에 직접 보유한다.
-9. host completion marker는 backup root의 전용 `0700` 디렉터리에서 `O_NOFOLLOW`,
+8. backup/create/restore/swap은 DB execution에 무작위 256-bit `effect_token`을 immutable
+   identity로 저장한다. API는 `maintenance:backup-restore` session lock 안에서 고정 이름의
+   global Docker fence를 먼저 원자 생성·inspect하고 그 뒤에만 `prepared → effect_started`를
+   commit한다. 기존 foreign/mismatched fence가 있으면 새 command는 `prepared`에 남고 외부
+   mutation은 시작하지 않는다. API가 fence 생성 뒤 transition 전에 종료되면 같은
+   `prepared` command만 exact running fence를 다시 채택할 수 있다.
+9. Docker fence는 canonical compose `postgres` container의 local immutable `sha256:` Image
+   ID만 사용하고 `--pull=never`로 만든다. 고정 name, `effect_token`, command ID, operation,
+   effect kind, input digest, marker key, backup ID, fence source revision, Image ID label을
+   모두 inspect한다. fence는 network none, read-only rootfs, capability 전체 제거,
+   `no-new-privileges`, 비 root user, PID 제한을 적용한다. host script는 mutation 전에 이
+   pre-acquired exact running shape를 다시 검증한다.
+10. host wrapper는 같은 advisory lock을 fail-fast로 획득하고 child script 전체 수명 동안
+    보유한다. Docker daemon 외부 효과는 local CLI 종료로 취소됐다고 증명할 수 없으므로
+    effect가 시작된 뒤에는 non-interruptible supervised 작업이다. wrapper는 `TERM`/`INT`를
+    호출자 detach 요청으로만 기록하고 child에는 전달하지 않으며 API pipe와 분리된 임시
+    spool을 쓴다. direct child와 process group이 자연 terminal에 도달한 뒤에만 lock을
+    해제한다. API cancellation/timeout은 bounded 반환하되 wrapper communication은 background에서
+    유지한다.
+11. wrapper/API container가 `SIGKILL`, OOM, rollout으로 함께 사라져 PostgreSQL lock이
+    해제돼도 Docker fence는 daemon에 남아 동일 command와 다른 command의 mutation을 모두
+    막는다. marker 없는 `effect_started`는 script를 다시 호출하지 않고
+    `409 BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED`로 fail-close한다. missing/foreign/
+    mismatched/terminal-without-marker evidence는 자동 채택하지 않는다. 실제 target과 output
+    identity를 외부 운영자가 검증한 뒤 exact marker를 먼저 기록하고, marker proof 뒤 exact
+    fence만 해제한 다음 같은 key로 terminal result를 회수한다. workload 자체의 exact
+    terminal을 증명할 수 없으면 manual 상태를 유지한다. API 내부 delete는 같은 advisory
+    key를 effect·proof·terminal commit 전체에 직접 보유한다.
+12. host completion marker는 backup root의 전용 `0700` 디렉터리에서 `O_NOFOLLOW`,
    `O_EXCL`, file/dir `fsync`, Linux `renameat2(RENAME_NOREPLACE)`로 한 번만 생성한다.
    marker는 command/operation/effect/target identity, input digest, effect-specific output
    digest, 완료 시각을 포함한다. 기존 marker는 exact proof가 같을 때만 재사용하며 덮어쓰지 않는다.
-10. caller 지정 backup destination은 `command_id + input_digest + backup_id` reservation을
+13. caller 지정 backup destination은 `command_id + input_digest + backup_id` reservation을
     빈 `0700` 디렉터리에 먼저 fsync하고 `RENAME_NOREPLACE`로 공개한 뒤에만 effect를 시작한다.
     exact reservation·marker가 없는 기존 artifact나 restore target의 단순 health는 새 command의
     provenance가 아니므로 성공 결과로 채택하지 않는다.
@@ -69,10 +85,9 @@ admin UI는 `412`를 자동 재시도하지 않는다. 작성 중인 draft와 �
 
 - **긍정**: 재시도, 경쟁 수정, 순서 역전, 외부 전파 실패를 구분하고 복구할 수 있다.
 - **부정**: command별 ledger와 outbox 운영·purge가 필요하다.
-- **부정**: 외부 효과 command는 별도 execution 상태·proof 저장과 process-restart 복구
-  분기가 필요하고, backup/restore 동시 요청은 fail-fast `409`로 다시 시도해야 한다.
-  시작된 Docker 효과는 API cancellation/timeout 뒤에도 terminal까지 계속되므로 운영자는
-  marker와 동일 command 재시도로 최종 상태를 회수해야 한다.
+- **부정**: 외부 효과 command는 execution 상태·proof·Docker fence를 함께 운영해야 한다.
+  hard crash 뒤 workload terminal을 exact 증명할 수 없으면 자동 복구하지 않으므로 운영자가
+  target/output을 대조하고 marker를 기록할 때까지 backup/restore/swap 전체가 fail-close한다.
 - **전환/rollback**: domain별로 독립 도입한다. relay는 backfill/reconciliation 뒤 enable하고 실패 시
   소비를 중단해 outbox를 보존한다. revision을 이해하지 못하는 consumer는 해당 resource cutover
   전에 선배포한다.

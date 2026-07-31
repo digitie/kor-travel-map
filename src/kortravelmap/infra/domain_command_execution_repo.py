@@ -37,6 +37,7 @@ ExecutionPhase = Literal["prepared", "effect_started", "effect_succeeded"]
 class BackupCommandExecution:
     command_id: int
     effect_kind: str
+    effect_token: str
     phase: ExecutionPhase
     backup_id: str
     app_db: str | None
@@ -75,7 +76,7 @@ class OfflineUploadCommandExecution:
 
 
 _BACKUP_COLUMNS = """
-command_id, effect_kind, phase, backup_id, app_db, dagster_db, rustfs_volume,
+command_id, effect_kind, effect_token, phase, backup_id, app_db, dagster_db, rustfs_volume,
 marker_key, input_digest, prepared_result, output_digest, marker_sha256, prepared_at,
 effect_started_at, effect_completed_at
 """
@@ -91,6 +92,7 @@ def _backup(row: Any) -> BackupCommandExecution:
     return BackupCommandExecution(
         command_id=int(row.command_id),
         effect_kind=str(row.effect_kind),
+        effect_token=str(row.effect_token),
         phase=row.phase,
         backup_id=str(row.backup_id),
         app_db=row.app_db,
@@ -151,6 +153,7 @@ async def create_backup_command_execution(
     *,
     command_id: int,
     effect_kind: str,
+    effect_token: str,
     backup_id: str,
     app_db: str | None,
     dagster_db: str | None,
@@ -164,11 +167,11 @@ async def create_backup_command_execution(
             text(
                 f"""
                 INSERT INTO ops.backup_command_executions (
-                    command_id, effect_kind, phase, backup_id, app_db,
+                    command_id, effect_kind, effect_token, phase, backup_id, app_db,
                     dagster_db, rustfs_volume, marker_key, input_digest,
                     prepared_result
                 ) VALUES (
-                    :command_id, :effect_kind, 'prepared', :backup_id, :app_db,
+                    :command_id, :effect_kind, :effect_token, 'prepared', :backup_id, :app_db,
                     :dagster_db, :rustfs_volume, :marker_key, :input_digest,
                     CAST(:prepared_result AS jsonb)
                 )
@@ -178,6 +181,7 @@ async def create_backup_command_execution(
             {
                 "command_id": command_id,
                 "effect_kind": effect_kind,
+                "effect_token": effect_token,
                 "backup_id": backup_id,
                 "app_db": app_db,
                 "dagster_db": dagster_db,

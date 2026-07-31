@@ -77,6 +77,27 @@
 - 최종 local gate는 관련 focused 49건, PostgreSQL/Docker ledger integration 8건, 전체
   unit+API **2,644건**, ruff 전체, strict mypy(core 120/API 58/Dagster 23), import 경계,
   bash syntax, OpenAPI drift, prod redaction까지 모두 통과했다.
+- 네 번째 재검토는 wrapper/local child group `SIGKILL` 뒤 PostgreSQL lock이 풀리고 marker
+  없는 daemon effect를 같은 command가 다시 시작하는 P1을 실제 재현했다. DB execution에
+  immutable 256-bit `effect_token`을 추가하고 API가 maintenance lock 안에서 고정 이름 global
+  Docker fence를 pre-acquire·inspect한 뒤에만 phase를 전이하도록 순서를 바꿨다.
+- fence는 canonical local immutable Image ID와 `--pull=never`, exact command/input/source
+  revision/Image label, network none/read-only/capability drop/no-new-privileges/non-root/PID
+  limit shape를 검증한다. foreign fence의 새 command는 `prepared`에 남고 host script는
+  pre-acquired exact running fence 없이는 세 effect 모두 mutation하지 않는다.
+- marker 없는 `effect_started` 동일 command는 외부 command를 다시 호출하지 않고 secret-free
+  `409 BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED`에 exact identifier와 안전 절차를 제공한다.
+  workload terminal을 자동 증명할 수 없으므로 hard crash는 외부 operator가 target/output을
+  확인해 marker를 먼저 만든 뒤 exact fence를 해제하는 경계로만 복구한다.
+- 현재 gate는 router 26건, fence/runbook/marker/wrapper focused 55건, 실제 Docker+PostgreSQL
+  hard-crash integration 1건이 green이다. actual test는 wrapper와 local child group을
+  `SIGKILL`한 뒤 orphan workload/fence 유지, PG contender 재획득, 동일/foreign retry mutation
+  0건, 외부 operator proof marker 뒤 exact release를 반복 실행 가능하게 고정한다.
+- marker proof와 fence 해제 사이의 crash gap은 API가 proof 확인 뒤 idempotent exact release를
+  다시 수행하도록 닫았다. helper source revision은 파일 SHA-256 label이며 recovery env를 직접
+  주입한 host script 재실행도 mutation 전에 exit 4로 거부한다. 최종 전체 unit+API
+  **2,650건**, domain ledger integration **9건**, ruff·strict mypy·import 경계·OpenAPI/
+  TypeScript drift·bash syntax·prod redaction이 모두 통과했다.
 
 ## 2026-07-31 (codex) — T-VN-16C 완료 이관·T-VN-12 단일 PR 착수
 

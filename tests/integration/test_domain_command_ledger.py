@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
+import signal
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -341,6 +343,354 @@ async def test_lock_wrapper_holds_lock_until_detached_docker_effect_exits(
             await asyncio.gather(task, return_exceptions=True)
 
 
+async def test_hard_crash_keeps_docker_fence_and_blocks_all_retry_effects(
+    migrated_engine: AsyncEngine,
+    tmp_path: Path,
+) -> None:
+    """SIGKILL 뒤 markerless effect는 operator proof 전까지 재실행하지 않는다."""
+
+    from kortravelmap.infra.advisory_lock import advisory_lock_key
+    from kortravelmap.infra.domain_command_marker import (
+        backup_artifact_output_proof,
+        verify_domain_command_marker,
+        write_domain_command_marker,
+    )
+
+    project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240
+    helper = project_root / "scripts" / "docker-domain-command-fence.py"
+    marker_writer = project_root / "scripts" / "write-domain-command-marker.py"
+    suffix = uuid4().hex
+    canonical_name = f"ktm-tvn12-canonical-{suffix}"
+    fence_name = f"ktm-tvn12-fence-{suffix}"
+    workload_name = f"ktm-tvn12-workload-{suffix}"
+    same_retry_mutation = f"ktm-tvn12-same-retry-{suffix}"
+    foreign_mutation = f"ktm-tvn12-foreign-{suffix}"
+    command_id = 913
+    effect_token = "7" * 64
+    input_digest = "8" * 64
+    backup_id = "hard-crash-backup"
+    marker_key = f"command-{command_id}"
+
+    async def _docker(*args: str) -> tuple[int, str, str]:
+        process = await asyncio.create_subprocess_exec(
+            "docker",
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        return (
+            process.returncode,
+            stdout.decode("utf-8", errors="replace").strip(),
+            stderr.decode("utf-8", errors="replace").strip(),
+        )
+
+    async def _run(*args: str) -> tuple[int, str, str]:
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            cwd=project_root,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        return (
+            process.returncode,
+            stdout.decode("utf-8", errors="replace").strip(),
+            stderr.decode("utf-8", errors="replace").strip(),
+        )
+
+    async def _running(container_name: str) -> bool:
+        returncode, output, _ = await _docker(
+            "inspect",
+            "--format",
+            "{{.State.Running}}",
+            container_name,
+        )
+        return returncode == 0 and output == "true"
+
+    async def _missing(container_name: str) -> bool:
+        returncode, _, _ = await _docker("inspect", container_name)
+        return returncode != 0
+
+    async def _guarded_retry(
+        retry_identity_args: tuple[str, ...] | list[str],
+        mutation_name: str,
+        image_id: str,
+    ) -> int:
+        process = await asyncio.create_subprocess_exec(
+            "bash",
+            "-c",
+            '"$1" "$2" acquire "${@:4}" && '
+            'docker create --pull=never --name "$3" "$IMAGE_ID" '
+            '/bin/sh -c "exit 0"',
+            "guarded-retry",
+            sys.executable,
+            str(helper),
+            mutation_name,
+            *retry_identity_args,
+            cwd=project_root,
+            env={**os.environ, "IMAGE_ID": image_id},
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await process.communicate()
+        return process.returncode
+
+    async def _contender_can_acquire() -> bool:
+        lock_id = advisory_lock_key("maintenance:backup-restore")
+        async with migrated_engine.connect() as contender:
+            acquired = bool(
+                await contender.scalar(
+                    text("SELECT pg_try_advisory_lock(:lock_id)"),
+                    {"lock_id": lock_id},
+                )
+            )
+            if acquired:
+                unlocked = await contender.scalar(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": lock_id},
+                )
+                assert unlocked is True
+            return acquired
+
+    image_result = await _docker(
+        "image",
+        "inspect",
+        "alpine:3.20",
+        "--format",
+        "{{.Id}}",
+    )
+    if image_result[0] != 0:
+        pytest.skip("local alpine:3.20 image가 없어 no-pull Docker gate를 생략")
+    image_id = image_result[1]
+
+    identity_args = (
+        "--effect-token",
+        effect_token,
+        "--command-id",
+        str(command_id),
+        "--operation",
+        "admin.backup.create",
+        "--effect-kind",
+        "create",
+        "--input-digest",
+        input_digest,
+        "--marker-key",
+        marker_key,
+        "--backup-id",
+        backup_id,
+        "--fence-name",
+        fence_name,
+    )
+    artifact = tmp_path / backup_id
+    (artifact / "meta").mkdir(parents=True)
+    (artifact / "postgres").mkdir()
+    dump = artifact / "postgres" / "app.dump"
+    dump.write_bytes(b"hard-crash-effect")
+    (artifact / "meta" / "manifest.json").write_text(
+        json.dumps({"backup_id": backup_id}),
+        encoding="utf-8",
+    )
+    (artifact / "meta" / "SHA256SUMS").write_text(
+        f"{hashlib.sha256(dump.read_bytes()).hexdigest()}  postgres/app.dump\n",
+        encoding="utf-8",
+    )
+    marker_path = tmp_path / ".domain-command-markers" / f"{marker_key}.json"
+    worker = tmp_path / "hard-crash-worker.sh"
+    worker.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+"$PYTHON_BIN" "$FENCE_HELPER" verify "${IDENTITY_ARGS[@]}"
+docker run --rm --pull=never --name "$WORKLOAD_NAME" \
+  --network none --read-only --cap-drop ALL \
+  --security-opt no-new-privileges --user 65534:65534 \
+  --entrypoint /bin/sh "$IMAGE_ID" -c "sleep 8"
+"$PYTHON_BIN" "$MARKER_WRITER" \
+  --backup-root "$BACKUP_ROOT" --command-id "$COMMAND_ID" \
+  --operation admin.backup.create --marker-key "$MARKER_KEY" \
+  --effect-kind create --effect-state created --backup-id "$BACKUP_ID" \
+  --input-digest "$INPUT_DIGEST"
+"$PYTHON_BIN" "$FENCE_HELPER" release "${IDENTITY_ARGS[@]}"
+""",
+        encoding="utf-8",
+    )
+    worker.chmod(0o700)
+    worker_env = {
+        **os.environ,
+        "PYTHON_BIN": sys.executable,
+        "FENCE_HELPER": str(helper),
+        "MARKER_WRITER": str(marker_writer),
+        "WORKLOAD_NAME": workload_name,
+        "IMAGE_ID": image_id,
+        "BACKUP_ROOT": str(tmp_path),
+        "COMMAND_ID": str(command_id),
+        "MARKER_KEY": marker_key,
+        "BACKUP_ID": backup_id,
+        "INPUT_DIGEST": input_digest,
+        "IDENTITY_ARGS": "\0".join(identity_args),
+    }
+    # Bash array는 environment로 전달할 수 없으므로 positional argument로 재작성한다.
+    worker.write_text(
+        worker.read_text(encoding="utf-8").replace(
+            '"${IDENTITY_ARGS[@]}"',
+            '"$@"',
+        ),
+        encoding="utf-8",
+    )
+    worker_env.pop("IDENTITY_ARGS")
+
+    wrapper: asyncio.subprocess.Process | None = None
+    try:
+        created = await _docker(
+            "create",
+            "--pull=never",
+            "--name",
+            canonical_name,
+            image_id,
+            "/bin/sh",
+            "-c",
+            "exit 0",
+        )
+        assert created[0] == 0, created[2]
+        acquired = await _run(
+            sys.executable,
+            str(helper),
+            "acquire",
+            *identity_args,
+            "--canonical-container",
+            canonical_name,
+        )
+        assert acquired[0] == 0, acquired[2]
+        assert await _running(fence_name)
+        inspect = await _docker("inspect", fence_name)
+        assert inspect[0] == 0
+        fence = json.loads(inspect[1])[0]
+        assert fence["Image"] == image_id
+        assert fence["Config"]["Labels"][
+            "io.kortravelmap.domain-command-fence.effect-token"
+        ] == effect_token
+        source_revision = fence["Config"]["Labels"][
+            "io.kortravelmap.domain-command-fence.source-revision"
+        ]
+        assert len(source_revision) == 64
+        assert all(character in "0123456789abcdef" for character in source_revision)
+        assert fence["HostConfig"]["NetworkMode"] == "none"
+        assert fence["HostConfig"]["ReadonlyRootfs"] is True
+
+        wrapper = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(project_root / "scripts" / "with-pg-advisory-lock.py"),
+            "--key",
+            "maintenance:backup-restore",
+            "--dsn",
+            migrated_engine.url.render_as_string(hide_password=False),
+            "--",
+            str(worker),
+            *identity_args,
+            cwd=project_root,
+            env=worker_env,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        for _ in range(300):
+            if await _running(workload_name):
+                break
+            await asyncio.sleep(0.05)
+        assert await _running(workload_name)
+        assert await _contender_can_acquire() is False
+
+        children = Path(  # noqa: ASYNC240
+            f"/proc/{wrapper.pid}/task/{wrapper.pid}/children"
+        ).read_text(encoding="ascii")
+        child_pid = int(children.split()[0])
+        os.kill(wrapper.pid, signal.SIGKILL)
+        os.killpg(child_pid, signal.SIGKILL)
+        await wrapper.wait()
+
+        assert await _running(workload_name)
+        assert await _running(fence_name)
+        assert not marker_path.exists()
+        for _ in range(100):
+            if await _contender_can_acquire():
+                break
+            await asyncio.sleep(0.05)
+        assert await _contender_can_acquire() is True
+
+        same_retry_returncode = await _guarded_retry(
+            identity_args,
+            same_retry_mutation,
+            image_id,
+        )
+        assert same_retry_returncode == 4
+        assert await _missing(same_retry_mutation)
+
+        foreign_args = list(identity_args)
+        token_index = foreign_args.index("--effect-token") + 1
+        foreign_args[token_index] = "9" * 64
+        foreign_returncode = await _guarded_retry(
+            foreign_args,
+            foreign_mutation,
+            image_id,
+        )
+        assert foreign_returncode == 4
+        assert await _missing(foreign_mutation)
+
+        for _ in range(300):
+            if await _missing(workload_name):
+                break
+            await asyncio.sleep(0.05)
+        assert await _missing(workload_name)
+        assert not marker_path.exists()
+
+        # 외부 operator가 workload terminal과 output identity를 확인한 경계다.
+        output_proof = backup_artifact_output_proof(tmp_path, backup_id)
+        marker_sha256 = write_domain_command_marker(
+            tmp_path,
+            command_id=command_id,
+            operation="admin.backup.create",
+            marker_key=marker_key,
+            effect_kind="create",
+            effect_state="created",
+            backup_id=backup_id,
+            input_digest=input_digest,
+            output_proof=output_proof,
+        )
+        released = await _run(
+            sys.executable,
+            str(helper),
+            "release",
+            *identity_args,
+        )
+        assert released[0] == 0, released[2]
+        assert await _missing(fence_name)
+        assert (
+            verify_domain_command_marker(
+                tmp_path,
+                command_id=command_id,
+                operation="admin.backup.create",
+                marker_key=marker_key,
+                effect_kind="create",
+                effect_state="created",
+                backup_id=backup_id,
+                input_digest=input_digest,
+                output_proof=output_proof,
+            )
+            == marker_sha256
+        )
+    finally:
+        if wrapper is not None and wrapper.returncode is None:
+            wrapper.kill()
+            await wrapper.wait()
+        for container_name in (
+            workload_name,
+            fence_name,
+            same_retry_mutation,
+            foreign_mutation,
+            canonical_name,
+        ):
+            await _docker("rm", "--force", container_name)
+
+
 async def test_domain_command_ledger_is_actor_and_operation_scoped(
     migrated_session: AsyncSession,
 ) -> None:
@@ -568,10 +918,12 @@ async def test_external_execution_state_requires_operation_specific_terminal_pro
         text(
             """
             INSERT INTO ops.backup_command_executions (
-              command_id, effect_kind, phase, backup_id, app_db, dagster_db,
+              command_id, effect_kind, effect_token, phase,
+              backup_id, app_db, dagster_db,
               rustfs_volume, marker_key, input_digest, effect_started_at
             ) VALUES (
-              :command_id, 'restore', 'effect_started', 'backup-1',
+              :command_id, 'restore', repeat('9', 64),
+              'effect_started', 'backup-1',
               'app_stage', 'dagster_stage', 'rustfs_stage',
               'restore-1.json', repeat('b', 64), now()
             )
@@ -638,6 +990,8 @@ async def test_external_execution_state_requires_operation_specific_terminal_pro
 
     for statement in (
         "UPDATE ops.backup_command_executions SET backup_id = 'foreign' "
+        "WHERE command_id = :command_id",
+        "UPDATE ops.backup_command_executions SET effect_token = repeat('f', 64) "
         "WHERE command_id = :command_id",
         "UPDATE ops.backup_command_executions SET phase = 'prepared' "
         "WHERE command_id = :command_id",

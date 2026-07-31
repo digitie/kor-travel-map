@@ -157,6 +157,7 @@ def upgrade() -> None:
         "backup_command_executions",
         sa.Column("command_id", sa.BigInteger(), nullable=False),
         sa.Column("effect_kind", sa.Text(), nullable=False),
+        sa.Column("effect_token", sa.Text(), nullable=False),
         sa.Column("phase", sa.Text(), nullable=False),
         sa.Column("backup_id", sa.Text(), nullable=False),
         sa.Column("app_db", sa.Text(), nullable=True),
@@ -190,6 +191,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "input_digest ~ '^[0-9a-f]{64}$'",
             name=op.f("ck_backup_command_executions_input_digest"),
+        ),
+        sa.CheckConstraint(
+            "effect_token ~ '^[0-9a-f]{64}$'",
+            name=op.f("ck_backup_command_executions_effect_token"),
         ),
         sa.CheckConstraint(
             "marker_key ~ '^[a-z0-9][a-z0-9_.-]{0,127}$'",
@@ -332,11 +337,13 @@ def upgrade() -> None:
             RAISE EXCEPTION 'invalid backup command execution transition'
               USING ERRCODE = '55000';
           END IF;
-          IF (OLD.command_id, OLD.effect_kind, OLD.backup_id, OLD.app_db,
+          IF (OLD.command_id, OLD.effect_kind, OLD.effect_token,
+              OLD.backup_id, OLD.app_db,
               OLD.dagster_db, OLD.rustfs_volume, OLD.marker_key,
               OLD.input_digest, OLD.prepared_result, OLD.prepared_at)
              IS DISTINCT FROM
-             (NEW.command_id, NEW.effect_kind, NEW.backup_id, NEW.app_db,
+             (NEW.command_id, NEW.effect_kind, NEW.effect_token,
+              NEW.backup_id, NEW.app_db,
               NEW.dagster_db, NEW.rustfs_volume, NEW.marker_key,
               NEW.input_digest, NEW.prepared_result, NEW.prepared_at) THEN
             RAISE EXCEPTION 'backup command execution identity is immutable'
