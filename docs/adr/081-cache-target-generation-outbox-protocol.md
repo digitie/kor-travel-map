@@ -165,6 +165,8 @@ PinVi는 admin route나 AdminBFF credential을 사용하지 않는다. service �
 - `PUT|GET|DELETE /v1/service/cache-targets/{external_system}/{target_key}`
 - `POST /v1/service/refresh-requests`, `GET /v1/service/refresh-requests/{request_id}`
 - stream control/restore fence, claim/ack/nack, dead-letter/replay, fixed snapshot resource
+- stream control의 active reconciliation descriptor와
+  `GET /v1/service/cache-target-reconciliations/{request_id}/snapshot`
 - `POST /v1/service/cache-target-reconciliations/{request_id}/completions`
 
 target create는 `If-None-Match: *`, update/delete는 앞서 받은 raw strong `If-Match`와 UUID
@@ -179,6 +181,9 @@ restore-fence, recovery replay로 분리한다. admin reconciliation 시작은 a
 mutation이므로 destructive recovery gate가 켜진 경우에만 허용한다.
 
 reconciliation command는 active claim을 무효화하고 stream을 먼저 halt한 뒤 fixed snapshot을 만든다.
+stream control read는 현재 active reconciliation의 request ID와 request에 결박된 fixed snapshot
+identity/epoch/count/root/high-watermark를 nullable descriptor로 노출한다. consumer는 그 request ID의
+snapshot read만 page하며 일반 snapshot 첫 page를 다시 생성해 completion 근거로 대체할 수 없다.
 consumer는 `cache-target:snapshot` principal로 request ID와 external system/consumer ID/snapshot
 ID/expected epoch/actual Merkle root를 exact 결박한 completion receipt를 제출한다. UUID
 `Idempotency-Key`는 terminal 응답을 재생한다. receipt의 root가 snapshot root와 정확히 같고 epoch이

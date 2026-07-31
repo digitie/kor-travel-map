@@ -35,6 +35,7 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | service | `POST/GET /v1/service/refresh-requests[/{id}]` | Idempotency-Key, 202 operation resource |
 | service | `/v1/service/cache-target-streams/*`, `/v1/service/cache-target-event-*` | restore fence와 pull claim/ACK/NACK/dead/replay |
 | service | `GET /v1/service/cache-target-snapshots/{system}` | fixed MVCC snapshot, active+tombstone Merkle v1 |
+| service | `GET /v1/service/cache-target-reconciliations/{id}/snapshot` | active request에 결박된 fixed snapshot paging |
 | service | `POST /v1/service/cache-target-reconciliations/{id}/completions` | snapshot/epoch/Merkle receipt와 원자적 ready 전이 |
 | operator | `/v1/features/{id}/sources|observations` | raw lineage의 유일한 REST 표면 |
 | operator | `/v1/feature-change-requests` | principal actor, revision 재검사 |
@@ -582,6 +583,7 @@ POST /v1/service/cache-target-event-nacks
 GET  /v1/service/cache-target-event-dead-letters/{event_id}
 POST /v1/service/cache-target-event-dead-letters/{event_id}/replays
 GET  /v1/service/cache-target-snapshots/{external_system}
+GET  /v1/service/cache-target-reconciliations/{request_id}/snapshot
 POST /v1/service/cache-target-reconciliations/{request_id}/completions
 ```
 
@@ -607,7 +609,9 @@ snapshot page는 `snapshot_id`, `restore_epoch`, `high_watermark_cursor`, `count
 PR만으로 enable하지 않으며 PinVi paired consumer와 contract checksum을 통과한 뒤 켠다. admin
 reconciliation 시작은 destructive recovery gate를 요구한다. consumer completion은
 `cache-target:snapshot` principal과 request/system/consumer/snapshot/epoch/root를 exact 결박하고
-UUID Idempotency-Key로 terminal 응답을 재생한다.
+UUID Idempotency-Key로 terminal 응답을 재생한다. stream read의 nullable active reconciliation
+descriptor로 request와 fixed snapshot identity를 발견한 뒤 request-bound snapshot만 page한다.
+일반 snapshot read가 새로 만든 snapshot은 completion 근거가 아니다.
 
 PATCH/DELETE correction UI는 `GET .../{feature_id}/revision`의 body `row_revision`과 응답 header
 `ETag`를 먼저 읽고, 이어서 `GET .../{feature_id}` detail의 `feature.row_revision`과 같을 때만
