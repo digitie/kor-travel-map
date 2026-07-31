@@ -220,6 +220,43 @@ def client(
         "complete_offline_upload_command_effect",
         AsyncMock(),
     )
+
+    async def _reserve_delete(
+        _session: object,
+        *,
+        upload_id: str,
+        command_id: int,
+    ) -> OfflineUpload | None:
+        row = await router_mod.get_offline_upload(_session, upload_id)
+        if row is None:
+            return None
+        if row.status in {"uploading", "validating", "loading", "deleting"}:
+            raise OfflineUploadStatusConflict(
+                upload_id=upload_id,
+                current_status=row.status,
+                target_status="deleting",
+                allowed_statuses=frozenset(
+                    {
+                        "uploaded",
+                        "validated",
+                        "validation_failed",
+                        "loaded",
+                        "load_failed",
+                        "cancelled",
+                    }
+                ),
+            )
+        return replace(
+            row,
+            status="deleting",
+            delete_command_id=command_id,
+        )
+
+    monkeypatch.setattr(
+        router_mod,
+        "reserve_offline_upload_delete",
+        _reserve_delete,
+    )
     return TestClient(
         app,
         headers={"Idempotency-Key": "95000000-0000-4000-8000-000000000001"},
@@ -1404,9 +1441,15 @@ def test_delete_offline_upload_removes_row_and_object(
     upload = _upload(state="loaded")
     store = _FakeStore({upload.storage_key: b'{"feature":{"feature_id":"f1"}}\n'})
 
-    async def _delete(_session: Any, *, upload_id: str) -> OfflineUpload:
+    async def _delete(
+        _session: Any,
+        *,
+        upload_id: str,
+        command_id: int,
+    ) -> OfflineUpload:
         assert upload_id == upload.upload_id
-        return upload
+        assert command_id == 1
+        return replace(upload, status="deleting", delete_command_id=command_id)
 
     async def _get(_session: Any, upload_id: str) -> OfflineUpload:
         assert upload_id == upload.upload_id
@@ -1421,7 +1464,7 @@ def test_delete_offline_upload_removes_row_and_object(
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["upload_id"] == upload.upload_id
-    assert body["data"]["status"] == "loaded"
+    assert body["data"]["status"] == "deleting"
     assert "duration_ms" in body["meta"]
     assert store.deleted == [upload.storage_key]
     assert store.objects == {}
@@ -1453,11 +1496,18 @@ def test_delete_offline_upload_retries_same_effect_after_ambiguous_store_failure
 
     store = _FlakyStore({upload.storage_key: b"payload"})
 
-    async def _delete(_session: Any, *, upload_id: str) -> OfflineUpload:
+    async def _delete(
+        _session: Any,
+        *,
+        upload_id: str,
+        command_id: int,
+    ) -> OfflineUpload:
         deleted_rows.append(upload_id)
-        return upload
+        return replace(upload, status="deleting", delete_command_id=command_id)
 
     async def _get(_session: Any, upload_id: str) -> OfflineUpload:
+        if begin_calls > 1:
+            return replace(upload, status="deleting", delete_command_id=1)
         return upload
 
     async def _begin(*_args: Any, **_kwargs: Any) -> Any:
@@ -1617,7 +1667,12 @@ def test_delete_offline_upload_blocked_when_destructive_disabled(
 ) -> None:
     from kortravelmap.api.routers import offline_uploads as router_mod
 
-    async def _delete(_session: Any, *, upload_id: str) -> OfflineUpload:
+    async def _delete(
+        _session: Any,
+        *,
+        upload_id: str,
+        command_id: int,
+    ) -> OfflineUpload:
         raise AssertionError("destructive kill-switch must reject before repo delete")
 
     monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)

@@ -2239,6 +2239,10 @@ class OfflineUploadRow(Base):
             "checksum_sha256 ~ '^[0-9a-f]{64}$'",
             name="ck_offline_uploads_checksum_sha256",
         ),
+        CheckConstraint(
+            "(status = 'deleting') = (delete_command_id IS NOT NULL)",
+            name="ck_offline_uploads_delete_owner",
+        ),
         UniqueConstraint(
             "provider",
             "dataset_key",
@@ -2287,6 +2291,10 @@ class OfflineUploadRow(Base):
     load_job_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
         ForeignKey("ops.import_jobs.job_id", ondelete="SET NULL"),
+    )
+    delete_command_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT"),
     )
     created_by: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(

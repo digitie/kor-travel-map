@@ -52,6 +52,7 @@ __all__ = [
     "mark_offline_upload_validating",
     "finalize_offline_upload_reservation",
     "reserve_offline_upload",
+    "reserve_offline_upload_delete",
     "reserve_offline_upload_load",
 ]
 
@@ -59,7 +60,7 @@ _RETURN_COLUMNS: Final[str] = (
     "upload_id, provider, dataset_key, sync_scope, original_filename, "
     "storage_backend, storage_key, byte_size, checksum_sha256, detected_format, "
     "detected_encoding, status, validation_job_id, load_job_id, created_by, "
-    "created_at, updated_at"
+    "delete_command_id, created_at, updated_at"
 )
 
 _MAX_LIST_LIMIT: Final[int] = 200
@@ -86,6 +87,7 @@ class OfflineUpload:
     created_by: str | None
     created_at: datetime
     updated_at: datetime
+    delete_command_id: int | None = None
 
     def as_metadata(self) -> dict[str, object]:
         """Dagster/OpenAPI metadata로 쓰기 쉬운 축약 표현."""
@@ -104,6 +106,7 @@ class OfflineUpload:
             "status": self.status,
             "validation_job_id": self.validation_job_id,
             "load_job_id": self.load_job_id,
+            "delete_command_id": self.delete_command_id,
         }
 
 
@@ -158,6 +161,11 @@ def _row_to_upload(row: Any) -> OfflineUpload:
         created_by=data["created_by"],
         created_at=data["created_at"],
         updated_at=data["updated_at"],
+        delete_command_id=(
+            int(data["delete_command_id"])
+            if data["delete_command_id"] is not None
+            else None
+        ),
     )
 
 
@@ -256,7 +264,19 @@ LIMIT :limit_plus_one
 _DELETE_SQL: Final[str] = f"""
 DELETE FROM ops.offline_uploads
 WHERE upload_id = :upload_id
+  AND status = 'deleting'
+  AND delete_command_id = :command_id
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_RESERVE_DELETE_SQL: Final[str] = f"""
+UPDATE ops.offline_uploads
+SET status = 'deleting',
+    delete_command_id = :command_id,
+    updated_at = now()
+WHERE upload_id = :upload_id
   AND status = ANY(CAST(:allowed_statuses AS text[]))
+  AND delete_command_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -449,19 +469,19 @@ async def delete_offline_upload(
     session: AsyncSession,
     *,
     upload_id: str,
+    command_id: int,
 ) -> OfflineUpload | None:
-    """업로드 메타데이터 row를 삭제한다. commit은 호출자 책임.
+    """소유 command가 예약한 업로드 메타데이터 row를 삭제한다.
 
-    validation/load가 진행 중(``validating``/``loading``)이면
-    :class:`OfflineUploadStatusConflict`를 던지고, row가 없으면 ``None``을
-    반환한다. 연관 ``ops.import_jobs`` row는 audit 기록으로 보존한다
+    ``status='deleting'``과 ``delete_command_id``가 모두 일치해야 한다. row가
+    없으면 ``None``을 반환한다. 연관 ``ops.import_jobs`` row는 audit 기록으로 보존한다
     (FK는 upload→job 방향 ``ON DELETE SET NULL`` — row 삭제로 job은 안 지워짐).
     """
     result = await session.execute(
         text(_DELETE_SQL),
         {
             "upload_id": upload_id,
-            "allowed_statuses": list(OFFLINE_UPLOAD_DELETABLE_STATES),
+            "command_id": command_id,
         },
     )
     row = result.one_or_none()
@@ -471,6 +491,33 @@ async def delete_offline_upload(
         session,
         upload_id=upload_id,
         target_status="deleted",
+        allowed_statuses=frozenset({"deleting"}),
+    )
+    return None
+
+
+async def reserve_offline_upload_delete(
+    session: AsyncSession,
+    *,
+    upload_id: str,
+    command_id: int,
+) -> OfflineUpload | None:
+    """삭제 command가 resource row를 원자적으로 소유하고 ``deleting``으로 전이한다."""
+    result = await session.execute(
+        text(_RESERVE_DELETE_SQL),
+        {
+            "upload_id": upload_id,
+            "command_id": command_id,
+            "allowed_statuses": list(OFFLINE_UPLOAD_DELETABLE_STATES),
+        },
+    )
+    row = result.one_or_none()
+    if row is not None:
+        return _row_to_upload(row)
+    await _missing_or_status_conflict(
+        session,
+        upload_id=upload_id,
+        target_status="deleting",
         allowed_statuses=OFFLINE_UPLOAD_DELETABLE_STATES,
     )
     return None

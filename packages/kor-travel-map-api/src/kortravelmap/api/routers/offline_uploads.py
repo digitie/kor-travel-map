@@ -36,7 +36,6 @@ from kortravelmap.core.managed_file_states import (
     MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
 )
 from kortravelmap.core.offline_upload_states import (
-    OFFLINE_UPLOAD_DELETABLE_STATES,
     OFFLINE_UPLOAD_LOADABLE_STATES,
     OFFLINE_UPLOAD_TABULAR_FORMATS,
     OFFLINE_UPLOAD_TABULAR_LOADABLE_STATES,
@@ -74,6 +73,7 @@ from kortravelmap.infra.offline_upload_repo import (
     get_offline_upload_by_checksum,
     list_offline_uploads,
     reserve_offline_upload,
+    reserve_offline_upload_delete,
     reserve_offline_upload_load,
 )
 from kortravelmap.offline_upload import (
@@ -1192,13 +1192,17 @@ async def delete_offline_upload_request(
                     detail=f"offline upload 없음: {upload_id!r}",
                 )
             if pending_claim is None:
-                if row.status not in OFFLINE_UPLOAD_DELETABLE_STATES:
-                    raise OfflineUploadStatusConflict(
-                        upload_id=upload_id,
-                        current_status=row.status,
-                        target_status="deleted",
-                        allowed_statuses=OFFLINE_UPLOAD_DELETABLE_STATES,
+                reserved = await reserve_offline_upload_delete(
+                    session,
+                    upload_id=upload_id,
+                    command_id=command.command_id,
+                )
+                if reserved is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"offline upload 없음: {upload_id!r}",
                     )
+                row = reserved
                 execution = await create_offline_upload_command_execution(
                     session,
                     command_id=command.command_id,
@@ -1214,6 +1218,11 @@ async def delete_offline_upload_request(
                     load_job_id=None,
                     input_digest=command.request_fingerprint,
                 )
+            elif (
+                row.status != "deleting"
+                or row.delete_command_id != command.command_id
+            ):
+                raise domain_command_service.DomainCommandPending(pending_claim)
     except OfflineUploadStatusConflict as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1264,7 +1273,11 @@ async def delete_offline_upload_request(
             )
         ) from exc
     async with session.begin():
-        deleted = await delete_offline_upload(session, upload_id=upload_id)
+        deleted = await delete_offline_upload(
+            session,
+            upload_id=upload_id,
+            command_id=command.command_id,
+        )
         if deleted is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

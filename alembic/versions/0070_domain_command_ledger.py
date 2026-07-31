@@ -28,7 +28,8 @@ def upgrade() -> None:
         "ALTER TABLE ops.offline_uploads "
         "ADD CONSTRAINT ck_offline_uploads_ck_offline_uploads_status CHECK "
         "(status IN ('uploading', 'uploaded', 'validating', 'validated', "
-        "'validation_failed', 'loading', 'loaded', 'load_failed', 'cancelled'))"
+        "'validation_failed', 'loading', 'loaded', 'load_failed', 'deleting', "
+        "'cancelled'))"
     )
     op.create_table(
         "domain_commands",
@@ -84,6 +85,27 @@ def upgrade() -> None:
             "idempotency_key",
             name=op.f("uq_domain_commands_actor_operation_key"),
         ),
+        schema="ops",
+    )
+    op.add_column(
+        "offline_uploads",
+        sa.Column("delete_command_id", sa.BigInteger(), nullable=True),
+        schema="ops",
+    )
+    op.create_foreign_key(
+        "fk_offline_uploads_delete_command_id_domain_commands",
+        "offline_uploads",
+        "domain_commands",
+        ["delete_command_id"],
+        ["command_id"],
+        source_schema="ops",
+        referent_schema="ops",
+        ondelete="RESTRICT",
+    )
+    op.create_check_constraint(
+        "ck_offline_uploads_delete_owner",
+        "offline_uploads",
+        "(status = 'deleting') = (delete_command_id IS NOT NULL)",
         schema="ops",
     )
     op.create_table(
@@ -478,6 +500,23 @@ def downgrade() -> None:
         "DROP TRIGGER trg_domain_commands_append_only "
         "ON ops.domain_commands"
     )
+    op.execute(
+        "UPDATE ops.offline_uploads SET status = 'cancelled', "
+        "delete_command_id = NULL WHERE status = 'deleting'"
+    )
+    op.drop_constraint(
+        "ck_offline_uploads_ck_offline_uploads_delete_owner",
+        "offline_uploads",
+        schema="ops",
+        type_="check",
+    )
+    op.drop_constraint(
+        "fk_offline_uploads_delete_command_id_domain_commands",
+        "offline_uploads",
+        schema="ops",
+        type_="foreignkey",
+    )
+    op.drop_column("offline_uploads", "delete_command_id", schema="ops")
     op.execute("DROP FUNCTION ops.reject_domain_command_history_mutation()")
     op.drop_table("domain_commands", schema="ops")
     op.execute(

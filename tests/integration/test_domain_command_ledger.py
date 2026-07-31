@@ -2,16 +2,138 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from kortravelmap.infra.offline_upload_repo import (
+    OfflineUploadStatusConflict,
+    reserve_offline_upload_delete,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 pytestmark = pytest.mark.integration
+
+
+async def test_offline_delete_resource_reservation_rolls_back_competing_claim(
+    migrated_engine: AsyncEngine,
+) -> None:
+    upload_id = "97000000-0000-4000-8000-000000000001"
+    first_reserved = asyncio.Event()
+    release_first = asyncio.Event()
+    sessions = async_sessionmaker(migrated_engine, expire_on_commit=False)
+
+    async with sessions.begin() as session:
+        await session.execute(
+            text(
+                """
+                INSERT INTO ops.offline_uploads (
+                  upload_id, provider, dataset_key, sync_scope,
+                  original_filename, storage_backend, storage_key, byte_size,
+                  checksum_sha256, detected_format, status
+                ) VALUES (
+                  CAST(:upload_id AS uuid), 'integration', 'delete-race',
+                  'default', 'race.jsonl', 'rustfs', 'offline/race.jsonl', 1,
+                  repeat('f', 64), 'jsonl', 'uploaded'
+                )
+                """
+            ),
+            {"upload_id": upload_id},
+        )
+
+    async def _first() -> int:
+        async with sessions() as session, session.begin():
+            command_id = await session.scalar(
+                text(
+                    """
+                    INSERT INTO ops.domain_commands (
+                      actor, operation, idempotency_key, request_fingerprint
+                    ) VALUES (
+                      'integration:first', 'admin.offline-upload.delete',
+                      '97000000-0000-4000-8000-000000000011', repeat('a', 64)
+                    )
+                    RETURNING command_id
+                    """
+                )
+            )
+            assert command_id is not None
+            reserved = await reserve_offline_upload_delete(
+                session,
+                upload_id=upload_id,
+                command_id=command_id,
+            )
+            assert reserved is not None
+            first_reserved.set()
+            await release_first.wait()
+            return command_id
+
+    async def _attempt_competing_reservation() -> None:
+        async with sessions() as session, session.begin():
+            command_id = await session.scalar(
+                text(
+                    """
+                    INSERT INTO ops.domain_commands (
+                      actor, operation, idempotency_key, request_fingerprint
+                    ) VALUES (
+                      'integration:second', 'admin.offline-upload.delete',
+                      '97000000-0000-4000-8000-000000000012',
+                      repeat('b', 64)
+                    )
+                    RETURNING command_id
+                    """
+                )
+            )
+            assert command_id is not None
+            await reserve_offline_upload_delete(
+                session,
+                upload_id=upload_id,
+                command_id=command_id,
+            )
+
+    async def _competing() -> None:
+        await first_reserved.wait()
+        with pytest.raises(OfflineUploadStatusConflict):
+            await _attempt_competing_reservation()
+
+    first_task = asyncio.create_task(_first())
+    competing_task = asyncio.create_task(_competing())
+    await first_reserved.wait()
+    await asyncio.sleep(0)
+    release_first.set()
+    first_command_id, _ = await asyncio.gather(first_task, competing_task)
+
+    async with sessions() as session:
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT status, delete_command_id
+                    FROM ops.offline_uploads
+                    WHERE upload_id = CAST(:upload_id AS uuid)
+                    """
+                ),
+                {"upload_id": upload_id},
+            )
+        ).one()
+        second_claims = await session.scalar(
+            text(
+                """
+                SELECT count(*)
+                FROM ops.domain_commands
+                WHERE actor = 'integration:second'
+                  AND operation = 'admin.offline-upload.delete'
+                """
+            )
+        )
+    assert row.status == "deleting"
+    assert row.delete_command_id == first_command_id
+    assert second_claims == 0
 
 
 async def test_backup_maintenance_lock_fails_fast_when_exact_key_is_busy(

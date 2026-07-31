@@ -31,6 +31,7 @@ def test_offline_upload_state_sets_are_single_source_contract() -> None:
         "loading",
         "loaded",
         "load_failed",
+        "deleting",
         "cancelled",
     )
     assert set(OFFLINE_UPLOAD_STATE_VALUES) == OFFLINE_UPLOAD_STATES
@@ -43,6 +44,7 @@ def test_offline_upload_state_sets_are_single_source_contract() -> None:
         "loading",
         "loaded",
         "load_failed",
+        "deleting",
         "cancelled",
     } == OFFLINE_UPLOAD_STATES
     assert {
@@ -62,6 +64,7 @@ def test_offline_upload_state_sets_are_single_source_contract() -> None:
         "uploading",
         "validating",
         "loading",
+        "deleting",
     } == OFFLINE_UPLOAD_IN_PROGRESS_STATES
     assert {
         "uploaded",
