@@ -134,6 +134,7 @@ from dagster import AssetExecutionContext, Backoff, Failure, RetryPolicy, asset
 from .etl import (
     DagsterFeatureLoadResult,
     _add_output_metadata,
+    _dagster_run_id,
     load_feature_bundles_for_dagster,
 )
 from .feature_operation_tracking import run_tracked_feature_asset
@@ -1564,6 +1565,30 @@ async def _record_feature_sync_success(
         dataset_key=dataset_key,
         cursor=cursor,
     )
+
+    # T-VN-H32 — 이번 run이 관측하지 못한 주소 검증 finding을 닫는다.
+    #
+    # **여기가 유일하게 옳은 호출 지점이다.** 이 hook은 배치 루프 **밖**에서 run당 1회
+    # 불리고, MOIS처럼 배치를 도는 asset도 ``result is not None``(= 실제로 배치를 처리함)
+    # 일 때만 여기에 닿는다. ``bundles=[]``인 sentinel 경로(OpiNet 일일 스킵·MOIS 무레코드
+    # fallback)는 이 hook을 거치지 않으므로 빈 관측 집합이 큐를 닫는 일이 없다.
+    #
+    # 실패해도 적재를 되돌리지 않는다 — close는 관측 위생이지 적재 계약이 아니다.
+    close_stale = getattr(client, "close_stale_address_validation_findings", None)
+    run_id = _dagster_run_id(context)
+    if callable(close_stale) and run_id:
+        try:
+            closed = await close_stale(
+                provider=provider, dataset_key=dataset_key, run_id=run_id
+            )
+        except Exception as exc:  # noqa: BLE001
+            context.log.warning(f"finding close 생략 (provider={provider}): {exc!r}")
+        else:
+            if closed:
+                context.log.info(
+                    f"이번 run이 관측하지 않은 finding {closed}건을 닫았다 "
+                    f"(provider={provider}, dataset={dataset_key})"
+                )
 
 
 async def _record_list(context: AssetExecutionContext, resource_key: str) -> list[Any]:

@@ -34,7 +34,7 @@ barrier로 직렬화한다.
     [~] `T-VN-H34`(H25A/H25B 미충족 AC — 4항목 중 3 완료·1은 H35 배포 대기,
         카테고리 축 신설로 링크 결함 8건 발견) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
-    [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
+    [x] `T-VN-H32`(주소 검증 finding 자동 close — run_id marker, retention 90일) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
@@ -249,12 +249,44 @@ H30A가 durable ledger를 붙였으나 **자동 close는 일부러 넣지 않았
 - `bundles=[]`인 `_load()`는 OpiNet 일일 스킵·MOIS 무레코드 fallback의 **제어 흐름
   sentinel**이라, 빈 finding 집합이 큐 전체를 닫는다.
 
-- [ ] T-VN-H32 — **run marker 기반 close**
+- [x] T-VN-H32 — **run marker 기반 close** (2026-07-31)
 
-  적재 run id/시각을 finding payload에 남기고 "그 run보다 오래된 것"만 닫는다. 배치 경계와
-  무관해지고 `live_keys` 배열(MOIS면 ~977k 원소)도 사라진다. 함께 확인할 것:
-  기계가 닫은 행의 `payload.resolution` 스탬프, `acknowledged` 불가침, provider 경계,
-  그리고 resolved 행의 보존 기간(현재 retention 정책이 없다).
+  **marker는 시각이 아니라 `run_id`다.** 처음엔 `last_seen_at < run_started_at`으로 짰는데
+  `dagster/definitions.py:99`에서 `fetched_at` resource가 **`None`**이라 `_fetched_at()`이
+  **호출할 때마다 새 `now()`**를 반환한다. run-end hook에서 그 값을 marker로 쓰면 이번 run의
+  upsert보다 나중 시각이 되어 **자기 finding을 스스로 닫는다** — 기각된 실패모드를 시각 축으로
+  재현하는 것이다. `run_id`는 그 시계 함정이 없다.
+
+  upsert가 `payload.observed_run_id`를 찍고, close는
+  `COALESCE(payload->>'observed_run_id','') <> :run_id`인 것만 닫는다.
+  **빈 `run_id`는 술어가 모든 행에 참이 되므로 `ValueError`로 fail-closed**한다.
+
+  호출 지점은 `assets.py`의 `_record_feature_sync_success` — **8개 asset 공통, 배치 루프 밖,
+  run당 1회**이고 MOIS처럼 배치를 도는 asset도 `result is not None`(실제로 배치를 처리함)일
+  때만 닿는다. `bundles=[]` sentinel 경로(OpiNet 일일 스킵·MOIS 무레코드 fallback)는 이 hook을
+  거치지 않으므로 빈 관측 집합이 큐를 닫는 일이 없다. close 실패는 적재를 되돌리지 않는다 —
+  관측 위생이지 적재 계약이 아니다.
+
+  술어별 방어: `status='open'`(**`acknowledged` 불가침**) / `provider`·`dataset_key`(provider 경계)
+  / `dedupe_key LIKE 'av2\_%'`(같은 provider의 **다른 subsystem** finding, 예 `curation_mislink:…`를
+  쓸어버리지 않음) / **단일 statement**(`trg_data_integrity_violations_ops_live_revision`이
+  statement 단위라 finding마다 UPDATE를 돌리면 `ops_live` hot row에 배타 락을 N번 잡아
+  `/admin/issues` 쓰기를 막고 데드락까지 만든다 — batch upsert와 같은 이유).
+
+  **retention**: `purge_resolved_integrity_findings(retention='90 days')` +
+  dagster op `purge_resolved_integrity_findings`. `feature_repo.purge_expired_notices`(1년)와
+  같은 패턴이되 finding은 운영 신호라 분기 회고에 필요한 만큼만 둔다.
+  `acknowledged`는 어떤 경우에도 지우지 않는다.
+
+  > **flap은 아직 관측되지 않았다.** close를 켜면 resolved가 쌓이기 시작하고, 재발하는 finding은
+  > 부분 유니크 인덱스 밖으로 나갔다 돌아오며 사이클마다 새 행을 남긴다. 지금은 prod finding이
+  > 3건뿐이라 flap 비율을 측정할 데이터가 없다. **A(시간 기준)로 시작하고, 첫 몇 run에서
+  > resolved 증가율을 재서 dedupe_key별 상한(B)이 필요한지 판단한다** — 관측되지 않은 문제에
+  > 선제 대응하지 않는다.
+
+  검증: 통합 테스트 **15 passed**(기각된 3모드 미재현 / `acknowledged` 불가침 / 다른 subsystem
+  미침범 / provider 경계 / 빈 `run_id` fail-closed / `resolution` 스탬프·멱등 / retention 양방향),
+  n150 CI-parity **2278 passed**, `mypy --strict` **196 files clean**.
 
 ### T-VN-H25 — 공식 curation 미연결 membership 해소
 

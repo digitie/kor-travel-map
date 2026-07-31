@@ -45,6 +45,7 @@ __all__ = [
     "NOTICE_PURGE_DEFAULT_RETENTION",
     "consistency_dedup_refresh_job",
     "purge_expired_notices_op",
+    "purge_resolved_integrity_findings_op",
     "refresh_dedup_candidates_op",
     "run_consistency_check_op",
 ]
@@ -248,6 +249,42 @@ async def run_consistency_check_op(
 
 NOTICE_PURGE_DEFAULT_RETENTION: Final[str] = "1 year"
 """만료 notice 보존 기간 — 종료일(없으면 발표일) + 본 기간 경과 시 soft-delete(§9)."""
+
+
+FINDING_PURGE_DEFAULT_RETENTION: Final[str] = "90 days"
+"""resolved finding 보존 기간 (T-VN-H32).
+
+``NOTICE_PURGE_DEFAULT_RETENTION``(1년)보다 짧다 — finding은 notice와 달리 **운영 신호**라
+분기 회고에 필요한 만큼만 둔다. ``acknowledged``는 어떤 경우에도 지우지 않는다.
+"""
+
+
+@op(
+    name="purge_resolved_integrity_findings",
+    required_resource_keys={"kor_travel_map_client"},
+    config_schema={
+        "retention": Field(
+            str,
+            default_value=FINDING_PURGE_DEFAULT_RETENTION,
+            description="PostgreSQL interval 문자열 (예: '90 days').",
+        ),
+    },
+    retry_policy=MAINTENANCE_RETRY_POLICY,
+)
+async def purge_resolved_integrity_findings_op(
+    context: OpExecutionContext,
+) -> dict[str, object]:
+    """보존 기간이 지난 ``resolved`` finding을 삭제한다 (T-VN-H32).
+
+    ``T-VN-H32``가 run marker 기반 자동 close를 켜면서 ``resolved`` 행이 쌓이기 시작한다.
+    ``open``·``acknowledged``는 대상이 아니다.
+    """
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    retention = str(context.op_config.get("retention", FINDING_PURGE_DEFAULT_RETENTION))
+    purged = await client.purge_resolved_integrity_findings(retention=retention)
+    metadata: dict[str, object] = {"purged": purged, "retention": retention}
+    context.add_output_metadata(metadata)
+    return metadata
 
 
 @op(

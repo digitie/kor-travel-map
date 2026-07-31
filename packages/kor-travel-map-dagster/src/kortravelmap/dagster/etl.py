@@ -237,6 +237,7 @@ async def load_feature_bundles_for_dagster(
             findings,
             provider=provider,
             dataset_key=dataset_key,
+            run_id=_dagster_run_id(context),
         )
     except IntegrityFindingPersistenceError as exc:
         metadata.update(
@@ -387,3 +388,16 @@ def _source_identities(
         )
         for bundle in bundles
     }
+
+
+def _dagster_run_id(context: AssetExecutionContext) -> str | None:
+    """이 run의 식별자. 직접 호출(테스트)에서는 없을 수 있다 (T-VN-H32).
+
+    ``run_id``가 없으면 ``observed_run_id``를 심지 않고, 그러면 close도 그 finding을
+    건드리지 않는다 — marker가 없는 행은 **닫지 않는 쪽**으로 fail-safe한다.
+    """
+    try:
+        run_id = context.run_id
+    except Exception:
+        return None
+    return str(run_id) if run_id else None
