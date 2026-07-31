@@ -6,7 +6,9 @@ hand-written SQL이라 단위 테스트로는 ON CONFLICT 추론·sweep 범위·
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
@@ -18,12 +20,16 @@ from kortravelmap.client import (
 )
 from kortravelmap.core.ids import make_integrity_finding_key
 from kortravelmap.infra.integrity_violation_repo import (
+    IntegrityObservationReceipt,
     close_stale_integrity_findings,
     purge_resolved_integrity_findings,
     sync_integrity_findings,
 )
 
 pytestmark = [pytest.mark.integration]
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncEngine
 
 _PROVIDER = "test-provider-h30a"
 _DATASET = "test_dataset_h30a"
@@ -284,17 +290,59 @@ async def test_client_reports_observed_unique_and_upserted_counts(
     assert result.unrecorded_count == 0
 
 
-# --- T-VN-H32 run marker 기반 close --------------------------------------------
-#
-# 1차 설계의 배치 sweep을 적대 리뷰가 실측으로 기각했다. 아래는 **그 3모드가 재현되지
-# 않음**을 고정한다. 연결을 잘못하면 큐 전체를 닫으므로 안전망이 먼저다.
+# --- T-VN-H32R immutable observation generation close -------------------------
 
 
-def _finding_with_run(entity_id: str, run_id: str) -> dict[str, Any]:
-    """upsert가 ``observed_run_id``를 심은 finding."""
-    row = _finding(entity_id)
-    row["payload"] = {**row["payload"], "observed_run_id": run_id}
-    return row
+def _receipt(
+    *,
+    source_observations: int = 1,
+    findings_observed: int = 0,
+    findings_unique: int = 0,
+    findings_upserted: int = 0,
+    authoritative_snapshot_complete: bool = True,
+    finding_persistence_complete: bool = True,
+) -> IntegrityObservationReceipt:
+    return IntegrityObservationReceipt(
+        authoritative_snapshot_complete=authoritative_snapshot_complete,
+        source_observations=source_observations,
+        findings_observed=findings_observed,
+        findings_unique=findings_unique,
+        findings_upserted=findings_upserted,
+        finding_persistence_complete=finding_persistence_complete,
+    )
+
+
+async def _observe(
+    session: AsyncSession,
+    run_id: str,
+    entity_ids: list[str],
+) -> None:
+    await sync_integrity_findings(
+        session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        findings=[_finding(entity_id) for entity_id in entity_ids],
+        external_run_id=run_id,
+    )
+
+
+async def _close(
+    session: AsyncSession,
+    run_id: str,
+    *,
+    finding_count: int,
+) -> int:
+    return await close_stale_integrity_findings(
+        session,
+        provider=_PROVIDER,
+        dataset_key=_DATASET,
+        run_id=run_id,
+        receipt=_receipt(
+            findings_observed=finding_count,
+            findings_unique=finding_count,
+            findings_upserted=finding_count,
+        ),
+    )
 
 
 async def _statuses(session: AsyncSession) -> dict[str, str]:
@@ -311,20 +359,9 @@ async def _statuses(session: AsyncSession) -> dict[str, str]:
 async def test_close_spares_findings_observed_in_this_run(
     migrated_session: AsyncSession,
 ) -> None:
-    """**기각 모드 1** — 이번 run이 관측한 finding을 스스로 닫으면 안 된다.
+    await _observe(migrated_session, "run-1", ["a", "b"])
+    closed = await _close(migrated_session, "run-1", finding_count=2)
 
-    배치 sweep은 "이 배치에 없는 것"을 닫아 한 run이 자기 finding 대부분을 resolved
-    처리했다. run marker를 쓰면 이번 run이 관측한 것은 marker가 일치해 걸리지 않는다.
-    """
-    await sync_integrity_findings(
-        migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
-        findings=[_finding_with_run("a", "run-1"), _finding_with_run("b", "run-1")],
-    )
-    closed = await close_stale_integrity_findings(
-        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-1"
-    )
     assert closed == 0
     assert set((await _statuses(migrated_session)).values()) == {"open"}
 
@@ -333,35 +370,128 @@ async def test_close_targets_only_findings_this_run_did_not_observe(
     migrated_session: AsyncSession,
 ) -> None:
     """run 2가 a만 다시 관측하면 b만 닫힌다."""
-    await sync_integrity_findings(
-        migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
-        findings=[_finding_with_run("a", "run-1"), _finding_with_run("b", "run-1")],
-    )
-    await sync_integrity_findings(
-        migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
-        findings=[_finding_with_run("a", "run-2")],
-    )
-    closed = await close_stale_integrity_findings(
-        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-2"
-    )
+    await _observe(migrated_session, "run-1", ["a", "b"])
+    await _close(migrated_session, "run-1", finding_count=2)
+    await _observe(migrated_session, "run-2", ["a"])
+    closed = await _close(migrated_session, "run-2", finding_count=1)
+
     assert closed == 1
     assert sorted((await _statuses(migrated_session)).values()) == ["open", "resolved"]
+
+
+async def test_overlapping_run_cannot_overwrite_observation_evidence(
+    migrated_session: AsyncSession,
+) -> None:
+    """A upsert → B upsert → A close에서도 A가 본 X는 열린 상태다 (#912)."""
+
+    await _observe(migrated_session, "run-a", ["x"])
+    await _observe(migrated_session, "run-b", ["x"])
+
+    assert await _close(migrated_session, "run-a", finding_count=1) == 0
+    assert set((await _statuses(migrated_session)).values()) == {"open"}
+
+
+async def test_newer_partial_run_evidence_is_preserved_by_older_authoritative_run(
+    migrated_session: AsyncSession,
+) -> None:
+    """더 새 partial run은 close 권한이 없지만, 이미 남긴 증거는 과거 sweep이 못 지운다."""
+
+    await _observe(migrated_session, "baseline", ["x", "stale"])
+    await _close(migrated_session, "baseline", finding_count=2)
+    await _observe(migrated_session, "run-a", ["x"])
+    await _observe(migrated_session, "run-b-partial", ["newer"])
+
+    assert await _close(migrated_session, "run-a", finding_count=1) == 1
+    statuses = await _statuses(migrated_session)
+    assert statuses[_finding("x")["payload"]["dedupe_key"]] == "open"
+    assert statuses[_finding("newer")["payload"]["dedupe_key"]] == "open"
+    assert statuses[_finding("stale")["payload"]["dedupe_key"]] == "resolved"
+
+
+async def test_older_run_is_superseded_after_newer_authoritative_close(
+    migrated_session: AsyncSession,
+) -> None:
+    """B close → A close 순서에서는 오래된 A가 새 B finding을 쓸지 못한다."""
+
+    await _observe(migrated_session, "run-a", ["a"])
+    await _observe(migrated_session, "run-b", ["b"])
+    assert await _close(migrated_session, "run-b", finding_count=1) == 1
+    assert await _close(migrated_session, "run-a", finding_count=1) == 0
+
+    statuses = await _statuses(migrated_session)
+    assert statuses[_finding("a")["payload"]["dedupe_key"]] == "resolved"
+    assert statuses[_finding("b")["payload"]["dedupe_key"]] == "open"
+    run_statuses = (
+        (
+            await migrated_session.execute(
+                text(
+                    "SELECT external_run_id, status "
+                    "FROM ops.integrity_observation_runs "
+                    "WHERE provider = :provider AND dataset_key = :dataset"
+                ),
+                {"provider": _PROVIDER, "dataset": _DATASET},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    assert {row["external_run_id"]: row["status"] for row in run_statuses} == {
+        "run-a": "superseded",
+        "run-b": "authoritative",
+    }
+
+
+async def test_concurrent_scope_allocation_assigns_unique_monotonic_generations(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """서로 다른 DB connection도 scope row fence에서 generation을 직렬화한다."""
+
+    provider = f"concurrent-{uuid4().hex}"
+    dataset = "generation-allocation"
+
+    async def allocate(run_id: str) -> None:
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            await sync_integrity_findings(
+                session,
+                provider=provider,
+                dataset_key=dataset,
+                findings=[],
+                external_run_id=run_id,
+            )
+
+    await asyncio.gather(allocate("run-a"), allocate("run-b"))
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        generations = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT generation "
+                        "FROM ops.integrity_observation_runs "
+                        "WHERE provider = :provider AND dataset_key = :dataset "
+                        "ORDER BY generation"
+                    ),
+                    {"provider": provider, "dataset": dataset},
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert generations == [1, 2]
+        await session.execute(
+            text(
+                "DELETE FROM ops.integrity_observation_scopes "
+                "WHERE provider = :provider AND dataset_key = :dataset"
+            ),
+            {"provider": provider, "dataset": dataset},
+        )
 
 
 async def test_close_never_touches_acknowledged(
     migrated_session: AsyncSession,
 ) -> None:
     """``acknowledged``는 사람이 인지한 표시라 기계가 닫지 않는다."""
-    await sync_integrity_findings(
-        migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
-        findings=[_finding_with_run("a", "run-1")],
-    )
+    await _observe(migrated_session, "run-1", ["a"])
+    await _observe(migrated_session, "run-2", [])
     await migrated_session.execute(
         text(
             "update ops.data_integrity_violations set status='acknowledged' "
@@ -369,9 +499,7 @@ async def test_close_never_touches_acknowledged(
         ),
         {"p": _PROVIDER},
     )
-    closed = await close_stale_integrity_findings(
-        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-2"
-    )
+    closed = await _close(migrated_session, "run-2", finding_count=0)
     assert closed == 0
     assert set((await _statuses(migrated_session)).values()) == {"acknowledged"}
 
@@ -393,9 +521,8 @@ async def test_close_does_not_sweep_other_subsystem_findings(
         ),
         {"p": _PROVIDER, "d": _DATASET},
     )
-    closed = await close_stale_integrity_findings(
-        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-9"
-    )
+    await _observe(migrated_session, "run-9", [])
+    closed = await _close(migrated_session, "run-9", finding_count=0)
     assert closed == 0
     assert set((await _statuses(migrated_session)).values()) == {"open"}
 
@@ -408,13 +535,21 @@ async def test_close_respects_provider_and_dataset_boundary(
         migrated_session,
         provider=_PROVIDER,
         dataset_key=_DATASET,
-        findings=[_finding_with_run("a", "run-1")],
+        findings=[_finding("a")],
+    )
+    await sync_integrity_findings(
+        migrated_session,
+        provider=_PROVIDER,
+        dataset_key="another_dataset",
+        findings=[],
+        external_run_id="run-2",
     )
     closed_other = await close_stale_integrity_findings(
         migrated_session,
         provider=_PROVIDER,
         dataset_key="another_dataset",
         run_id="run-2",
+        receipt=_receipt(),
     )
     assert closed_other == 0
     assert set((await _statuses(migrated_session)).values()) == {"open"}
@@ -424,7 +559,39 @@ async def test_close_rejects_empty_run_id(migrated_session: AsyncSession) -> Non
     """빈 ``run_id``는 술어가 모든 행에 참이 되어 큐 전체를 닫는다 — fail-closed."""
     with pytest.raises(ValueError, match="run_id"):
         await close_stale_integrity_findings(
-            migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id=""
+            migrated_session,
+            provider=_PROVIDER,
+            dataset_key=_DATASET,
+            run_id="",
+            receipt=_receipt(),
+        )
+
+
+@pytest.mark.parametrize(
+    "receipt",
+    [
+        _receipt(source_observations=0),
+        _receipt(authoritative_snapshot_complete=False),
+        _receipt(
+            findings_observed=1,
+            findings_unique=1,
+            findings_upserted=0,
+        ),
+        _receipt(finding_persistence_complete=False),
+    ],
+)
+async def test_close_rejects_incomplete_receipt(
+    migrated_session: AsyncSession,
+    receipt: IntegrityObservationReceipt,
+) -> None:
+    await _observe(migrated_session, "run-incomplete", [])
+    with pytest.raises(ValueError, match="receipt"):
+        await close_stale_integrity_findings(
+            migrated_session,
+            provider=_PROVIDER,
+            dataset_key=_DATASET,
+            run_id="run-incomplete",
+            receipt=receipt,
         )
 
 
@@ -432,18 +599,10 @@ async def test_close_stamps_resolution_and_is_idempotent(
     migrated_session: AsyncSession,
 ) -> None:
     """기계가 닫았음을 ``payload.resolution``에 남기고, 재실행해도 더 닫지 않는다."""
-    await sync_integrity_findings(
-        migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
-        findings=[_finding_with_run("a", "run-1")],
-    )
-    first = await close_stale_integrity_findings(
-        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-2"
-    )
-    second = await close_stale_integrity_findings(
-        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-2"
-    )
+    await _observe(migrated_session, "run-1", ["a"])
+    await _observe(migrated_session, "run-2", [])
+    first = await _close(migrated_session, "run-2", finding_count=0)
+    second = await _close(migrated_session, "run-2", finding_count=0)
     assert (first, second) == (1, 0)
 
     result = await migrated_session.execute(
@@ -455,7 +614,7 @@ async def test_close_stamps_resolution_and_is_idempotent(
         {"p": _PROVIDER},
     )
     row = result.mappings().one()
-    assert row["closed_by"] == "run_marker_sweep"
+    assert row["closed_by"] == "observation_generation_sweep"
     assert row["rid"] == "run-2"
     assert row["resolved_at"] is not None
 
@@ -469,9 +628,9 @@ async def test_purge_removes_only_aged_resolved_rows(
         provider=_PROVIDER,
         dataset_key=_DATASET,
         findings=[
-            _finding_with_run("a", "run-1"),
-            _finding_with_run("b", "run-1"),
-            _finding_with_run("c", "run-1"),
+            _finding("a"),
+            _finding("b"),
+            _finding("c"),
         ],
     )
     keys = sorted((await _statuses(migrated_session)).keys())
@@ -503,15 +662,9 @@ async def test_purge_removes_only_aged_resolved_rows(
 
 async def test_purge_keeps_recent_resolved(migrated_session: AsyncSession) -> None:
     """보존 기간 안의 ``resolved``는 남긴다 — 삭제 기준이 무조건 참이면 안 된다."""
-    await sync_integrity_findings(
-        migrated_session,
-        provider=_PROVIDER,
-        dataset_key=_DATASET,
-        findings=[_finding_with_run("a", "run-1")],
-    )
-    await close_stale_integrity_findings(
-        migrated_session, provider=_PROVIDER, dataset_key=_DATASET, run_id="run-2"
-    )
+    await _observe(migrated_session, "run-1", ["a"])
+    await _observe(migrated_session, "run-2", [])
+    await _close(migrated_session, "run-2", finding_count=0)
     purged = await purge_resolved_integrity_findings(
         migrated_session, retention="90 days"
     )

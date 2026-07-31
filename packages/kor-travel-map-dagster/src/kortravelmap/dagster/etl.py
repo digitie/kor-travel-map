@@ -503,10 +503,11 @@ def _source_identities(
 
 
 def _dagster_run_id(context: AssetExecutionContext) -> str | None:
-    """이 run의 식별자. 직접 호출(테스트)에서는 없을 수 있다 (T-VN-H32).
+    """이 run의 외부 식별자. 직접 호출(테스트)에서는 없을 수 있다 (T-VN-H32R).
 
-    ``run_id``가 없으면 ``observed_run_id``를 심지 않고, 그러면 close도 그 finding을
-    건드리지 않는다 — marker가 없는 행은 **닫지 않는 쪽**으로 fail-safe한다.
+    ``run_id``가 없으면 immutable observation generation을 만들지 않고 close receipt도
+    발행하지 않는다. 직접 호출은 absence를 증명하지 못하므로 **닫지 않는 쪽**으로
+    fail-safe한다.
     """
     try:
         run_id = context.run_id

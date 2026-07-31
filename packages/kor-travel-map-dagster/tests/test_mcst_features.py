@@ -171,8 +171,10 @@ async def test_culture_raw_callback_preserves_early_success_on_late_failure(
         provider: str,
         dataset_key: str,
         bundles: object,
+        authoritative_snapshot_complete: bool,
     ) -> Any:
         del provider, bundles
+        assert authoritative_snapshot_complete is True
         events.append(("load", dataset_key))
         if dataset_key == second_dataset:
             raise RuntimeError("late MCST failure")
@@ -266,8 +268,10 @@ async def test_culture_public_wrapper_same_run_retry_keeps_done_and_failed_pairs
         provider: str,
         dataset_key: str,
         bundles: object,
+        authoritative_snapshot_complete: bool,
     ) -> Any:
         del provider, bundles
+        assert authoritative_snapshot_complete is True
         if dataset_key == second_dataset:
             raise RuntimeError("late MCST failure")
         return object()

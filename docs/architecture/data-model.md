@@ -1409,8 +1409,11 @@ CREATE INDEX idx_violations_feature_seen
 >   `(payload->>'dedupe_key')`에 걸려 있고 술어는
 >   `status IN ('open','acknowledged') AND payload ? 'dedupe_key'`다. 열린 이슈만 접히므로
 >   resolved/ignored 이력은 보존되고, 재발하면 새 행이 생긴다.
-> - 자동 resolve sweep은 없다. batch 경계에서 안전하지 않아 run marker 설계를
->   `T-VN-H32`로 분리했다.
+> - 자동 resolve는 batch 경계에서 수행하지 않는다. `T-VN-H32R`은
+>   `ops.integrity_observation_scopes/runs`와
+>   `ops.integrity_finding_observations`에 provider/dataset generation과 run별 관측 집합을
+>   정규화한다. authoritative·complete typed receipt를 가진 run만 scope row fence 아래에서
+>   sweep하며 current generation과 더 새 partial generation의 관측은 닫지 않는다.
 > - `detected_at`은 최초 탐지, `last_seen_at`은 최신 recurrence다. recurrence 때 실제
 >   `feature_id`/`source_record_key`도 최신 target으로 갱신한다. 적재 전 drop 행은 두 값을
 >   payload로만 나르고, 연결 대상 삭제는 `SET NULL`이라 ledger 행을 보존한다.

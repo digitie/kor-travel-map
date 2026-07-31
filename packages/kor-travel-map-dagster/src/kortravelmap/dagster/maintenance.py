@@ -275,9 +275,9 @@ FINDING_PURGE_DEFAULT_RETENTION: Final[str] = "90 days"
 async def purge_resolved_integrity_findings_op(
     context: OpExecutionContext,
 ) -> dict[str, object]:
-    """보존 기간이 지난 ``resolved`` finding을 삭제한다 (T-VN-H32).
+    """보존 기간이 지난 ``resolved`` finding을 삭제한다 (T-VN-H32R).
 
-    ``T-VN-H32``가 run marker 기반 자동 close를 켜면서 ``resolved`` 행이 쌓이기 시작한다.
+    immutable authoritative generation sweep이 만든 ``resolved`` 이력을 90일 보존한다.
     ``open``·``acknowledged``는 대상이 아니다.
     """
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))

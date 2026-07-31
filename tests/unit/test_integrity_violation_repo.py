@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from kortravelmap.core.ids import make_integrity_finding_key
-from kortravelmap.infra.integrity_violation_repo import sync_integrity_findings
+from kortravelmap.infra.integrity_violation_repo import (
+    IntegrityObservationReceipt,
+    sync_integrity_findings,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,4 +96,28 @@ async def test_sync_rejects_unbounded_legacy_dedupe_key() -> None:
             provider="test-provider",
             dataset_key="places",
             findings=[finding],
+        )
+
+
+@pytest.mark.parametrize(
+    ("observed", "unique", "upserted"),
+    [
+        (-1, 0, 0),
+        (0, 1, 1),
+        (1, 1, 2),
+    ],
+)
+def test_observation_receipt_rejects_impossible_counts(
+    observed: int,
+    unique: int,
+    upserted: int,
+) -> None:
+    with pytest.raises(ValueError, match="음수|unique|upserted"):
+        IntegrityObservationReceipt(
+            authoritative_snapshot_complete=True,
+            source_observations=1,
+            findings_observed=observed,
+            findings_unique=unique,
+            findings_upserted=upserted,
+            finding_persistence_complete=True,
         )

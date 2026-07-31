@@ -130,10 +130,9 @@ async def test_complete_nonempty_snapshot_receipt_closes_findings_once() -> None
     )
 
     assert len(client.sync_calls) == 1
-    assert client.close_calls == [
-        {
-            "provider": "demo",
-            "dataset_key": "places",
-            "run_id": "run-1",
-        }
-    ]
+    assert len(client.close_calls) == 1
+    close_call = client.close_calls[0]
+    assert close_call["provider"] == "demo"
+    assert close_call["dataset_key"] == "places"
+    assert close_call["run_id"] == "run-1"
+    assert close_call["receipt"].permits_stale_close is True

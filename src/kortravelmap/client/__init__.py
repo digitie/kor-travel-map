@@ -233,6 +233,7 @@ from kortravelmap.infra.feature_update_repo import (
     start_update_request as repo_start_update_request,
 )
 from kortravelmap.infra.integrity_violation_repo import (
+    IntegrityObservationReceipt,
     close_stale_integrity_findings,
     purge_resolved_integrity_findings,
     sync_integrity_findings,
@@ -818,25 +819,17 @@ class AsyncKorTravelMapClient:
         provider: str,
         dataset_key: str,
         run_id: str,
+        receipt: IntegrityObservationReceipt,
     ) -> int:
-        """이번 run이 관측하지 못한 주소 검증 finding을 닫는다 (T-VN-H32). 한 transaction.
+        """불변 observation generation을 authoritative finalize한다. 한 transaction."""
 
-        **run당 1회, 배치 루프 밖에서** 불러야 한다. ``_load()``는 provider에 따라 배치마다
-        호출되므로(MOIS는 1000건 단위 ~977회) 거기서 부르면 한 run이 자기 finding 대부분을
-        스스로 resolved 처리한다 — 1차 설계가 그렇게 기각됐다.
-
-        그리고 **실제로 데이터를 처리한 run에서만** 불러야 한다. ``bundles=[]``인 ``_load()``는
-        OpiNet 일일 스킵·MOIS 무레코드 fallback의 제어 흐름 sentinel이라, 그 경로에서 부르면
-        빈 관측 집합이 큐 전체를 닫는다.
-
-        ``acknowledged``는 닫지 않는다 — 사람이 인지한 표시다.
-        """
         async with self._session_factory() as session, session.begin():
             return await close_stale_integrity_findings(
                 session,
                 provider=provider,
                 dataset_key=dataset_key,
                 run_id=run_id,
+                receipt=receipt,
             )
 
     async def purge_resolved_integrity_findings(self, *, retention: str = "90 days") -> int:
@@ -2197,10 +2190,6 @@ class AsyncKorTravelMapClient:
                     **dict(finding.payload),
                     "dedupe_key": finding.dedupe_key,
                     "occurrence_count": 1,
-                    # T-VN-H32 run marker. `close_stale_address_validation_findings`가
-                    # 이 값으로 "이번 run이 관측했는가"를 판정한다. 없으면 close가
-                    # 그 행을 미관측으로 보므로, **close를 켤 provider는 반드시 넘겨야 한다.**
-                    **({"observed_run_id": run_id} if run_id else {}),
                 },
             }
         rows = [deduped[key] for key in sorted(deduped)]
@@ -2211,6 +2200,7 @@ class AsyncKorTravelMapClient:
                     provider=provider,
                     dataset_key=dataset_key,
                     findings=rows,
+                    external_run_id=run_id,
                 )
         except Exception as exc:  # noqa: BLE001
             raise IntegrityFindingPersistenceError(

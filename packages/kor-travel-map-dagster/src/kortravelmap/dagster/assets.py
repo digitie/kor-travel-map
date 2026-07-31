@@ -20,6 +20,9 @@ from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     NoticeFeatureLoadResult,
 )
+from kortravelmap.infra.integrity_violation_repo import (
+    IntegrityObservationReceipt as DurableIntegrityObservationReceipt,
+)
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
 from kortravelmap.providers.airkorea import (
     AIRKOREA_PROVIDER_NAME,
@@ -1605,7 +1608,21 @@ async def _record_feature_sync_success(
     if callable(close_stale) and run_id:
         try:
             closed = await close_stale(
-                provider=provider, dataset_key=dataset_key, run_id=run_id
+                provider=provider,
+                dataset_key=dataset_key,
+                run_id=run_id,
+                receipt=DurableIntegrityObservationReceipt(
+                    authoritative_snapshot_complete=(
+                        observation_receipt.authoritative_snapshot_complete
+                    ),
+                    source_observations=observation_receipt.source_observations,
+                    findings_observed=observation_receipt.findings_observed,
+                    findings_unique=observation_receipt.findings_unique,
+                    findings_upserted=observation_receipt.findings_upserted,
+                    finding_persistence_complete=(
+                        observation_receipt.finding_persistence_complete
+                    ),
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             context.log.warning(f"finding close 생략 (provider={provider}): {exc!r}")
