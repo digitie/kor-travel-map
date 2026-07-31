@@ -250,7 +250,14 @@ def test_restore_swap_script_generates_env_switch_and_can_apply() -> None:
     writer = _read("scripts/write-restore-swap-env.py")
 
     assert "docker-restore-verify.sh" in script
+    assert "fence-cache-target-restored-db.py" in script
     assert "write-restore-swap-env.py" in script
+    assert script.index("acquire_domain_command_fence") < script.index(
+        "fence-cache-target-restored-db.py"
+    )
+    assert script.index("fence-cache-target-restored-db.py") < script.index(
+        "write-restore-swap-env.py"
+    )
     assert "KOR_TRAVEL_MAP_DOCKER_PG_DSN" in writer
     assert "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL" in writer
     assert "KOR_TRAVEL_MAP_RUSTFS_VOLUME" in writer

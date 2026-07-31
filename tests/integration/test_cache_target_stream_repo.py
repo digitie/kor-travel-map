@@ -23,11 +23,17 @@ from kortravelmap.infra.cache_target_outbox_repo import (
     nack_cache_target_event,
     replay_cache_target_dead_letter,
 )
+from kortravelmap.infra.cache_target_restore import (
+    CacheTargetRestoreReference,
+    fence_restored_cache_target_streams,
+    list_cache_target_restore_references,
+)
 from kortravelmap.infra.cache_target_stream_repo import (
     CacheTargetStreamConflict,
     advance_cache_target_restore_fence,
     apply_cache_target_source,
     get_cache_target_stream,
+    lock_cache_target_stream,
 )
 from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
@@ -278,6 +284,56 @@ async def test_generation_gap_and_restore_fence_cas(
     )
     assert replay.idempotent_replay
     assert replay.restore_epoch == 2
+
+
+@pytest.mark.integration
+async def test_restore_swap_fence_replays_and_rejects_epoch_regression(
+    migrated_session: AsyncSession,
+) -> None:
+    await lock_cache_target_stream(
+        migrated_session,
+        external_system="restore-swap-test",
+        consumer_id=_CONSUMER,
+    )
+    live_references = await list_cache_target_restore_references(
+        migrated_session
+    )
+    results = await fence_restored_cache_target_streams(
+        migrated_session,
+        live_references=live_references,
+        host_command_id=901,
+        host_input_digest="a" * 64,
+    )
+    assert len(results) == 1
+    assert results[0].previous_restore_epoch == 1
+    assert results[0].restore_epoch == 2
+    assert not results[0].idempotent_replay
+
+    replay = await fence_restored_cache_target_streams(
+        migrated_session,
+        live_references=live_references,
+        host_command_id=901,
+        host_input_digest="a" * 64,
+    )
+    assert len(replay) == 1
+    assert replay[0].restore_epoch == 2
+    assert replay[0].idempotent_replay
+
+    with pytest.raises(CacheTargetStreamConflict) as caught:
+        await fence_restored_cache_target_streams(
+            migrated_session,
+            live_references=(
+                CacheTargetRestoreReference(
+                    external_system="restore-swap-test",
+                    consumer_id=_CONSUMER,
+                    restore_epoch=3,
+                    control_version=3,
+                ),
+            ),
+            host_command_id=902,
+            host_input_digest="b" * 64,
+        )
+    assert caught.value.code == "restore_epoch_regression"
 
 
 @pytest.mark.integration

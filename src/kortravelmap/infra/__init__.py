@@ -76,6 +76,11 @@ from kortravelmap.infra.cache_target_outbox_repo import (
     parse_cache_target_event_cursor,
     replay_cache_target_dead_letter,
 )
+from kortravelmap.infra.cache_target_restore import (
+    CacheTargetRestoreReference,
+    fence_restored_cache_target_streams,
+    list_cache_target_restore_references,
+)
 from kortravelmap.infra.cache_target_stream_repo import (
     CacheTargetRestoreFenceResult,
     CacheTargetSourceApplyResult,
@@ -338,6 +343,7 @@ __all__ = [
     "CacheTargetEventClaim",
     "CacheTargetOutboxEvent",
     "CacheTargetRefreshMember",
+    "CacheTargetRestoreReference",
     "CacheTargetResultEvent",
     "CacheTargetRestoreFenceResult",
     "CacheTargetSourceApplyResult",
@@ -354,9 +360,11 @@ __all__ = [
     "claim_cache_target_events",
     "capture_cache_target_refresh_members",
     "capture_cache_target_refresh_members_by_keys",
+    "fence_restored_cache_target_streams",
     "get_cache_target_dead_letter",
     "get_cache_target_stream",
     "lock_cache_target_stream",
+    "list_cache_target_restore_references",
     "nack_cache_target_event",
     "parse_cache_target_event_cursor",
     "replay_cache_target_dead_letter",

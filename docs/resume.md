@@ -84,12 +84,17 @@ T-VN-H35 배포를 B′ 경로로 진행한다. `0064~0073` 마이그레이션�
 Map/PinVi paired 계약을 ADR-081로 고정했다. source generation, Map restore epoch, target result
 sequence, queue CAS, ETag를 분리하고 durable natural-key head/tombstone, same-transaction result
 outbox, ServiceToken pull claim/contiguous ACK/NACK/dead/replay, fixed snapshot Merkle v1을 선택했다.
+Migration 0073과 source/result outbox repository를 구현했고, Map restore swap은 live stream
+epoch을 복원 DB와 먼저 대조한다. 복원 epoch 회귀나 consumer binding drift는 fail-close하며,
+통과한 모든 stream은 동일 restore-fence 도메인 함수와 durable command receipt로 전진한 뒤에만
+`.env.restore-swap`을 기록한다. 동일 host command 재시도는 epoch을 다시 올리지 않는다.
 
 본 Map PR은 producer foundation이며 `T-VN-41A/B/C` 완료가 아니다. PinVi paired consumer,
 pinned service OpenAPI, n150 isolated duplicate/gap/restore epoch live와 checksum equality 전까지 task와
 consumer enable은 open/off로 유지한다.
 
-**다음 한 작업**: docs-first PR checkpoint 뒤 migration과 repository/service protocol을 구현한다.
+**다음 한 작업**: fixed MVCC snapshot/Merkle와 checksum reconciliation·consumer enable 경계를
+구현한다.
 
 ## 2026-07-31 (codex) — T-VN-CI-PG 임의 ref PostGIS 수동 gate 완료
 

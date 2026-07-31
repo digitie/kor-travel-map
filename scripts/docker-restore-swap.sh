@@ -98,6 +98,10 @@ fi
 
 python_bin="$(select_python)"
 acquire_domain_command_fence
+"$python_bin" "$ROOT_DIR/scripts/fence-cache-target-restored-db.py" \
+  --restored-database "$RESTORE_APP_DB" \
+  --command-id "$KOR_TRAVEL_MAP_COMMAND_ID" \
+  --input-digest "$KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST"
 KOR_TRAVEL_MAP_POSTGRES_USER="$POSTGRES_USER" \
   KOR_TRAVEL_MAP_POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
   KOR_TRAVEL_MAP_RESTORE_APP_DB="$RESTORE_APP_DB" \

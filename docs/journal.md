@@ -96,8 +96,13 @@
   delivery order를 분리했다. admin route를 재사용하지 않고 principal-bound ServiceToken resource를 쓴다.
 - target/link/refresh와 outbox same-transaction, external-system single pull stream, contiguous ACK,
   transient/permanent NACK, dead/replay, active+tombstone fixed snapshot과 exact Merkle byte 계약을 고정했다.
-- 다음 checkpoint는 migration/models와 source/outbox repository다. consumer는 default off이고 paired
-  contract pin과 n150 isolated live 전에는 production에서 enable하지 않는다.
+- migration 0073, source/result outbox와 claim/ACK/NACK/dead/replay repository를 구현했다. target,
+  link snapshot, refresh running/done/failed와 typed event는 같은 transaction에서 commit/rollback한다.
+- restore swap은 env switch 파일 생성 전에 live/restore stream을 비교한다. epoch 회귀와 consumer
+  binding drift를 거부하고, 동일 restore-fence 도메인 함수로 전진한 durable receipt가 있을 때만
+  cutover 계획을 노출한다. host command retry는 같은 receipt를 replay한다.
+- 다음 checkpoint는 fixed MVCC snapshot/Merkle와 checksum reconciliation이다. consumer는 default
+  off이고 paired contract pin과 n150 isolated live 전에는 production에서 enable하지 않는다.
 
 ## 2026-07-31 (codex) — PostGIS-only workflow와 stale T-VN-12 이관
 
