@@ -25,6 +25,7 @@ import asyncio
 import json
 import os
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
@@ -36,7 +37,7 @@ from kortravelmap.infra.curation_repo import list_feature_curation_groups
 from kortravelmap.infra.db import make_async_engine
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -126,7 +127,14 @@ SELECT cc.collection_key,
 _NAME_CANDIDATES_SQL: Final[str] = """
 SELECT feature_id, name
   FROM feature.public_features
- WHERE lower(name) = lower(:normalized_name)
+ WHERE lower(
+           regexp_replace(
+               btrim(normalize(name, NFKC)),
+               '[[:space:]]+',
+               ' ',
+               'g'
+           )
+       ) = lower(:normalized_name)
  ORDER BY feature_id
 """
 
