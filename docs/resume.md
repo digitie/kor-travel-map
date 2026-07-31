@@ -10,6 +10,22 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-31 (codex) — T-VN-CI-PG 임의 ref PostGIS 수동 gate 완료
+
+`workflow_dispatch` 전용 `.github/workflows/postgis-only.yml`을 추가했다. GitHub UI의
+branch/tag 선택 또는 `gh workflow run postgis-only.yml --ref <ref>`가 선택한 ref에서
+Python 3.13, editable 메인·REST API·Dagster와 Docker testcontainers를 사용해
+`pytest tests/integration -q --no-cov`만 실행한다. 기존 `ci.yml`은 수정하지 않아 Python
+matrix 뒤 unit coverage를 합산하는 정규 PostGIS gate와 fixture replay 계약을 유지한다.
+
+PR #906의 merge commit `01aa335f`, 최종 code head `b2169512`, 단일 적대 리뷰 P0/P1/P2
+0건과 8개 green check를 재확인했다. 이에 따라 stale T-VN-12A/B/C/D open block을
+`tasks.md`에서 제거하고 `tasks-done.md`로 이관했다. 신규 workflow는 pinned
+`actionlint 1.7.7`과 diff check를 통과했다.
+
+**다음 한 작업**: 기존 lane 정본을 유지해 Lane A는 `T-VN-H35`, Lane B는
+`T-VN-41A`부터 이어간다.
+
 ## 2026-07-31 (codex) — T-VN-H31R #909 단일 적대 리뷰 승인
 
 주소 후보를 구조화 field의 Unicode/literal hierarchy와 versioned alias로 제한하고

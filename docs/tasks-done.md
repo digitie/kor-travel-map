@@ -3,6 +3,17 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-07-31 — T-VN-CI-PG 임의 ref PostGIS 수동 gate
+
+- [x] **T-VN-CI-PG — workflow_dispatch 전용 PostGIS integration 경로**
+
+  `.github/workflows/postgis-only.yml`은 GitHub UI의 branch/tag 선택기 또는
+  `gh workflow run postgis-only.yml --ref <ref>`로 지정한 ref를 checkout한다. Python
+  3.13에서 메인·REST API·Dagster 패키지를 editable로 설치하고 Docker testcontainers 기반
+  `pytest tests/integration -q --no-cov`만 실행한다. `contents: read` 최소 권한과 30분 timeout을
+  고정했으며 기존 `ci.yml`의 Python matrix·coverage 합산·fixture replay는 변경하지 않았다.
+  pinned `actionlint 1.7.7` 검증과 diff check를 통과했다.
+
 ## 2026-07-31 — T-VN-12A/B/C/D domain command idempotency
 
 - [x] **T-VN-12A/B/C/D — 재시도 가능한 write command의 단일 ledger 전환 (PR #906)**

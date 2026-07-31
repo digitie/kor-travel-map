@@ -17,6 +17,17 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-07-31 (codex) — PostGIS-only workflow와 stale T-VN-12 이관
+
+- `postgis-only.yml`을 `workflow_dispatch` 전용으로 추가했다. 선택한 ref, Python 3.13,
+  editable 메인/API/Dagster, Docker testcontainers와 `--no-cov` integration만 소유한다.
+- 정규 `ci.yml`은 손대지 않아 Python matrix·coverage 합산·fixture replay가 계속 필수다.
+- PR #906의 merged 상태, merge `01aa335f`, 최종 head `b2169512`, 단일 리뷰 최종
+  P0/P1/P2 0건과 8개 green check를 근거로 T-VN-12A/B/C/D의 stale open 상태를 완료
+  이관했다. 다른 열린 task의 checkbox와 순서는 변경하지 않았다.
+- pinned `actionlint 1.7.7`과 `git diff --check`가 통과했다. 사용자 지시에 따라 이
+  CI/task 문서 PR은 생성 후 적대 리뷰와 CI 결과를 기다리지 않고 바로 병합한다.
+
 ## 2026-07-31 (codex) — T-VN-H31R #909 curation provenance 완결
 
 - 주소 후보를 구조화 field·Unicode/literal hierarchy·versioned alias로 제한하고

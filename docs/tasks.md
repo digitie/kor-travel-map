@@ -51,8 +51,6 @@ barrier로 직렬화한다.
     [x] `T-VN-16B`(weather batch 소비) →
     [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
-- **독립 CI 운영**
-  - [ ] `T-VN-CI-PG`(임의 ref용 수동 PostGIS-only integration workflow)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [ ] `T-VN-31A` → [ ] `T-VN-31B` → [ ] `T-VN-31C`
   - Lane A: [ ] `T-VN-32A` → [ ] `T-VN-32B` → [ ] `T-VN-32C` →
@@ -871,16 +869,6 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   collection 정리를 파괴적으로 검증한다. 같은 `curation-collections-client.tsx`와 mocked spec의
   선행 작업 T-VN-48B·49B는 모두 완료됐으므로 H22A/B 뒤 최신 구조 위에서 시작한다. 49B 코드와
   이 선행 조건 해제는 같은 merge commit으로 `main`에 반영한다.
-
-## 독립 CI 운영
-
-- [ ] T-VN-CI-PG — **임의 ref용 수동 PostGIS-only integration workflow**
-
-  `workflow_dispatch`에서 선택한 ref를 checkout하고 Python 3.13에 메인·REST API·Dagster
-  패키지를 editable로 설치한 뒤 Docker testcontainers로
-  `pytest tests/integration -q --no-cov`만 실행한다. 기존 `ci.yml`의 Python matrix·통합
-  coverage 합산 gate는 변경하지 않으며, UI의 branch 선택기와
-  `gh workflow run <workflow> --ref <ref>`를 모두 공식 실행 경로로 둔다.
 
 ## 이슈 종결 추적
 
