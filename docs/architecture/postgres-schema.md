@@ -169,6 +169,8 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `integrity_finding_observations` | `(observation_run_id, dedupe_key)` | run FK CASCADE; run이 실제 관측한 `av2_<sha256>` 집합을 payload와 분리해 불변 저장 |
 | `data_integrity_violations` | `issue_id UUID` | **구현됨(alembic 0009, ADR-045 T-205c)** — provider/dataset/source_record/feature 연결, violation_type, severity (info/warning/error/critical), payload, status |
 | `poi_cache_targets` | `target_id UUID` | **구현됨(alembic 0009+0053, ADR-045 T-205c)** — trimmed non-empty 112자 이하 external_system+target_key active UNIQUE, lon/lat, coord/coord_5179, radius_km, refresh_policy, provider_overrides, soft delete |
+| cache target source control/head/event | source/natural/event identity | **T-VN-41 producer foundation 목표(ADR-081)** — Map-owned positive restore epoch, durable natural-key generation+tombstone, immutable source replay ledger |
+| cache target result outbox/delivery | event/relay/claim identity | **T-VN-41 producer foundation 목표(ADR-081)** — same-transaction typed outbox, global delivery order, lease/retry/dead/replay와 contiguous ACK |
 | `poi_cache_target_feature_links` | `(target_id, feature_id)` | **구현됨(alembic 0009, ADR-045 T-205c)** — target 주변 feature link, provider/dataset, distance_m, relation, active |
 | `provider_refresh_policies` | `(provider, dataset_key)` | **구현됨(alembic 0009 + 0049, ADR-045 T-205c)** — source_kind, targeted_policy, interval/rate-limit/max_concurrent, 명시적 `stale_after_minutes`, rate_limit_source, enabled |
 | `api_call_log` | `id BIGSERIAL` | provider, endpoint, status, latency_ms, occurred_at; BRIN(occurred_at) |

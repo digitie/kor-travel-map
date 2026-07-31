@@ -30,8 +30,10 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | public-keyed | `GET /v1/collections`, `GET /v1/collections/{id}` | collection/item 단일 curation read 정본 |
 | service | `POST /v1/features/batch` | `found|retired|suppressed|missing|unchanged` + revision; transport 503 분리 |
 | service | `POST /v1/features/weather/batch` | sparse `targets[]`/`known_at` 다중 시각 bitemporal query |
-| service | `PUT/DELETE /v1/service/cache-targets/{system}/{key}` | 단조 `source_generation`, ETag/If-Match |
+| service | `PUT/GET/DELETE /v1/service/cache-targets/{system}/{key}` | 단조 source generation, If-None-Match/ETag/If-Match, Idempotency-Key |
 | service | `POST/GET /v1/service/refresh-requests[/{id}]` | Idempotency-Key, 202 operation resource |
+| service | `/v1/service/cache-target-streams/*`, `/v1/service/cache-target-event-*` | restore fence와 pull claim/ACK/NACK/dead/replay |
+| service | `GET /v1/service/cache-target-snapshots/{system}` | fixed MVCC snapshot, active+tombstone Merkle v1 |
 | operator | `/v1/features/{id}/sources|observations` | raw lineage의 유일한 REST 표면 |
 | operator | `/v1/feature-change-requests` | principal actor, revision 재검사 |
 | operator | `/v1/ops/datasets/*`, `/v1/ops/pipeline/*` | ADR-064 canonical control plane 유지 |
@@ -543,9 +545,8 @@ GET/POST /v1/admin/offline-uploads  (+ {upload_id}[/preview|/validate|/validatio
 DELETE /v1/admin/offline-uploads/{upload_id}           # ✅#397 정리 lifecycle(진행중 409·객체 best-effort 삭제)
 GET    /v1/admin/poi-cache-targets
 GET/PUT/DELETE /v1/admin/poi-cache-targets/{external_system}/{target_key}  # 복합 자연키 + ETag/If-Match 삭제
-# T-214f 결정: POI cache target write(PUT/DELETE)는 admin/operator flow 전용.
-# PinVi 직접 write 미허용 — service-safe /v1/poi-cache-targets/* write 경로 안 둠.
-# PinVi는 등록된 target 기준 read(GET /v1/features/nearby/by-target)만 소비.
+# T-214f의 PinVi 직접 write 금지는 ADR-081이 service route에 한해 supersede한다.
+# PinVi는 admin/AdminBFF를 사용하지 않고 아래 ServiceToken resource만 사용한다.
 GET/POST /v1/admin/backups   GET /v1/admin/backups/{backup_id}
 DELETE /v1/admin/backups/{backup_id}                   # 🆕 정리 lifecycle
 POST   /v1/admin/restore/{backup_id}[/swap]            # kill-switch
@@ -564,6 +565,42 @@ DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id} # item soft 
 GET    /v1/admin/curations/import-template.csv          # UTF-8 BOM CSV 양식 다운로드
 POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 authoritative replace
 ```
+
+### 2.6 cache target service stream (ADR-081, T-VN-41 producer foundation)
+
+```text
+PUT|GET|DELETE /v1/service/cache-targets/{external_system}/{target_key}
+POST /v1/service/refresh-requests
+GET  /v1/service/refresh-requests/{request_id}
+GET  /v1/service/cache-target-streams/{external_system}
+POST /v1/service/cache-target-streams/{external_system}/restore-fences
+POST /v1/service/cache-target-event-claims
+POST /v1/service/cache-target-event-acks
+POST /v1/service/cache-target-event-nacks
+GET  /v1/service/cache-target-event-dead-letters/{event_id}
+POST /v1/service/cache-target-event-dead-letters/{event_id}/replays
+GET  /v1/service/cache-target-snapshots/{external_system}
+```
+
+모두 `X-Kor-Travel-Map-Service-Token`을 쓰되 token principal의 `consumer_id`와
+external system을 exact 결박한다. scope는 consumer read/claim/ack/nack/snapshot,
+restore-fence, recovery replay로 분리한다. PinVi에 admin proxy secret이나 ops mutation 권한을
+주지 않는다.
+
+target create는 `If-None-Match: *`, update/delete는 직전 GET/성공 응답의 raw strong ETag를
+`If-Match`로 보낸다. `source_generation`은 ETag나 queue generation을 대체하지 않는다. `412`는
+자동 rebase하지 않고 snapshot reconcile 뒤 새 command로 해결한다. 모든 네트워크 재시도 command는
+UUID `Idempotency-Key`와 canonical body fingerprint를 사용하며 same key/different body는 `409`다.
+
+restore fence는 직전 stream ETag를 요구한다. 성공 transaction은 epoch N+1, 기존 claim 무효화,
+barrier receipt를 함께 commit한다. claim은 external system별 global stream 하나를 lease하고 ACK는
+claim의 global `relay_order` contiguous prefix만 전진한다. NACK permanent/max-attempt는 dead letter로
+stream을 막으며 뒤 순서를 건너뛰지 않는다. replay는 같은 immutable event identity와 fingerprint만
+재활성화한다.
+
+snapshot page는 `snapshot_id`, `restore_epoch`, `high_watermark_cursor`, `count`, `merkle_root`가
+끝까지 고정된다. 상세 byte 계약과 strict event union은 ADR-081이 정본이다. 이 표면은 Map foundation
+PR만으로 enable하지 않으며 PinVi paired consumer와 contract checksum을 통과한 뒤 켠다.
 
 PATCH/DELETE correction UI는 `GET .../{feature_id}/revision`의 body `row_revision`과 응답 header
 `ETag`를 먼저 읽고, 이어서 `GET .../{feature_id}` detail의 `feature.row_revision`과 같을 때만

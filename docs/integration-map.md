@@ -122,7 +122,7 @@
 | 표면 | 현재 인증 경계 | 성공 envelope | 에러 |
 |---|---|---|---|
 | kor-travel-map 공용 read (`RoutePolicy.PUBLIC_KEYED`) | production에서 `X-Kor-Travel-Map-Api-Key` 또는 `X-Kor-Travel-Map-Service-Token`. URL `key` query는 폐기했고 full/user OpenAPI는 route policy에서 같은 OR 계약을 생성한다 | `{data, meta}` — `meta.page.next_cursor` | RFC7807 `problem+json`(top-level `code`) |
-| kor-travel-map service read (`POST /v1/features/{batch,weather/batch}`) | production 필수 `X-Kor-Travel-Map-Service-Token` | 〃 | 〃 |
+| kor-travel-map service resource (`/v1/features/{batch,weather/batch}`, `/v1/service/cache-target*`, `/v1/service/refresh-requests*`) | production 필수 `X-Kor-Travel-Map-Service-Token`; cache stream은 token principal의 consumer/restore/recovery scope와 external system을 추가 결박 | 〃 | 〃 |
 | kor-travel-map admin + canonical ops (`/v1/admin/*`·`/v1/ops/{datasets,pipeline}*`) | same-origin Next.js BFF의 proxy secret + actor + trusted peer CIDR. Docker는 secret 필수·frontend 단일 `/32` | 〃 | 〃 |
 | kor-travel-map ops live WebSocket | BFF가 발급한 짧은 수명 HMAC subprotocol ticket + DB nonce 단일 소비 + bounded lease | WebSocket event frame | 인증/만료는 data frame 없이 close 4401/4408 |
 | kor-travel-map Prometheus `/metrics` | production 필수 `KOR_TRAVEL_MAP_API_METRICS_TOKEN`의 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) | Prometheus exposition | 비-Bearer/불일치 401 |
@@ -158,7 +158,7 @@ C7 live를 통과해 2026-07-27 완료했다. 후속 pair도 같은 capture → 
 | feature batch | 5-state typed DTO, transport 503 stale 유지, opaque UUID 보존 | state classifier와 revision, pinned service OpenAPI |
 | Feature UUID | legacy alias-map DB 이관과 모든 FK/consumer 참조 shadow 검증 | UUID read/write 전환, alias lookup 보존, checksum 일치 |
 | weather | sparse 다중 `targets[]`/`known_at`, item `card_key`·target-local `cards[]` typed consumer | 단일 snapshot bitemporal projection, 공유 card 정규화, metric budget, parent 404 |
-| cache target/refresh | generation·ETag·Idempotency-Key·outbox consumer | service resource와 replay/outbox 활성화 |
+| cache target/refresh | **paired PR 전 미완** — generation·conditional ETag·Idempotency-Key·strict pull consumer | **producer foundation 진행** — service resource, restore fence, same-tx outbox, pull lease/replay/snapshot |
 | public/operator 분리 | 공개 DTO의 raw lineage 의존 0건, operator principal 사용 | route matrix·read-only DB role·표면별 OpenAPI SHA |
 
 Cutover는 consumer 배포 → contract/OpenAPI SHA 확인 → production clone 복구·shadow 검증 → KTM
@@ -175,6 +175,32 @@ typed 422를 포함한다. production API의 cursor signing secret은 다른 run
 현재 compatible pair에 포함된 공개 read·feature batch는 활성 계약이다. sparse weather
 batch와 후속 service resource는 각 T-VN task와 PinVi mirror task가 활성화 시점을 소유한다.
 어느 경우에도 구 계약용 호환 alias는 두지 않는다.
+
+#### cache target paired stream (ADR-081)
+
+cache target 전파는 Map→PinVi callback push가 아니라 PinVi가 Map service stream을 pull하고
+contiguous prefix를 ACK하는 at-least-once 계약이다. 양쪽 공통 event discriminator는
+`event_type`이고 exact 값은 다음 네 개뿐이다.
+
+- `cache_target.state_applied`
+- `cache_target.links_reconciled`
+- `refresh_request.status_changed`
+- `cache_target.reconciled`
+
+Map은 `restore_epoch`, PinVi는 target `source_generation`, Map result writer는
+`target_sequence`를 소유한다. target 의미 순서는 이 tuple이고 global `relay_order` cursor는
+delivery prefix에만 쓴다. event inbox commit과 ACK는 순서가 다르다. PinVi는 inbox dedupe,
+target tuple CAS, DB cache generation, consumer checkpoint를 한 transaction에 먼저 commit하고
+그 뒤 ACK한다. ACK 유실은 동일 event 재전달이며 side effect를 추가하지 않는다.
+
+restore/cutover는 stream GET의 raw ETag를 기준으로 restore-fence command를 호출해 Map epoch를
+N+1로 올린 뒤 writer를 연다. restored payload의 epoch를 신뢰하지 않는다. fixed snapshot은
+active+tombstone Merkle v1과 pinned service OpenAPI를 함께 검증한다. credential, principal scope,
+contract SHA, epoch, snapshot checksum 중 하나라도 맞지 않으면 PinVi consumer는 fail-closed한다.
+
+Map producer foundation PR만 merge된 상태는 `T-VN-41C` 완료나 production enable이 아니다.
+PinVi paired PR → contract pin → isolated restore clone/backfill → Merkle 일치 → duplicate/gap/epoch
+live → soak를 모두 통과한 compatible pair에서만 enable한다.
 
 ### 3.2 feature batch 5-state 계약 (T-VN-11, 적용 완료)
 

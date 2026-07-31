@@ -86,6 +86,19 @@
 - `test_alembic_upgrade.py`가 head revision을 리터럴로 박아 마이그레이션 추가마다
   깨졌다. ScriptDirectory에서 계산하도록 바꿨다.
 
+## 2026-07-31 (codex) — T-VN-41 producer foundation 계약 checkpoint
+
+- exact main `0bdecb1f`에서 clean branch를 만들고 codegraph index 부재를 raw `rg`/read 영향도
+  감사로 대체했다. migration 구현 전 current single head를 다시 확인한다.
+- 단일 적대 계획 리뷰의 최초 CHANGES REQUIRED를 반영해 Map-only 완료 주장을 제거하고 PinVi paired
+  PR/live까지 task checkbox를 open으로 유지했다. revised plan은 승인됐다.
+- ADR-081은 Map-owned positive restore epoch, PinVi source generation, Map target sequence, global
+  delivery order를 분리했다. admin route를 재사용하지 않고 principal-bound ServiceToken resource를 쓴다.
+- target/link/refresh와 outbox same-transaction, external-system single pull stream, contiguous ACK,
+  transient/permanent NACK, dead/replay, active+tombstone fixed snapshot과 exact Merkle byte 계약을 고정했다.
+- 다음 checkpoint는 migration/models와 source/outbox repository다. consumer는 default off이고 paired
+  contract pin과 n150 isolated live 전에는 production에서 enable하지 않는다.
+
 ## 2026-07-31 (codex) — PostGIS-only workflow와 stale T-VN-12 이관
 
 - `postgis-only.yml`을 `workflow_dispatch` 전용으로 추가했다. 선택한 ref, Python 3.13,

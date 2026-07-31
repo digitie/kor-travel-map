@@ -79,6 +79,18 @@ T-VN-H35 배포를 B′ 경로로 진행한다. `0064~0073` 마이그레이션�
 분리해 돌린다. 배포 전 공개 표면 before/after exact count를 restore clone에서 다시
 잰다 — 이번엔 `0073`까지 포함해서.
 
+## 2026-07-31 (codex) — T-VN-41 Map producer foundation docs-first 시작
+
+Map/PinVi paired 계약을 ADR-081로 고정했다. source generation, Map restore epoch, target result
+sequence, queue CAS, ETag를 분리하고 durable natural-key head/tombstone, same-transaction result
+outbox, ServiceToken pull claim/contiguous ACK/NACK/dead/replay, fixed snapshot Merkle v1을 선택했다.
+
+본 Map PR은 producer foundation이며 `T-VN-41A/B/C` 완료가 아니다. PinVi paired consumer,
+pinned service OpenAPI, n150 isolated duplicate/gap/restore epoch live와 checksum equality 전까지 task와
+consumer enable은 open/off로 유지한다.
+
+**다음 한 작업**: docs-first PR checkpoint 뒤 migration과 repository/service protocol을 구현한다.
+
 ## 2026-07-31 (codex) — T-VN-CI-PG 임의 ref PostGIS 수동 gate 완료
 
 `workflow_dispatch` 전용 `.github/workflows/postgis-only.yml`을 추가했다. GitHub UI의

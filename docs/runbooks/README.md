@@ -23,6 +23,7 @@ Codex / Google Antigravity 가 **같은 파일을 공유**한다 — 내용은 �
 | [cross-repo-audit-checklist.md](./cross-repo-audit-checklist.md) | 분기 1회 4-repo 계약/문서 drift 점검(origin/main 실측·계약 대조·전제 신선도·결정 전파) (T-217d) — 연동 지도는 [`../integration-map.md`](../integration-map.md) |
 | [coord-5179-proj-pin.md](./coord-5179-proj-pin.md) | `feature.features.coord_5179`(STORED generated) PROJ 버전 고정·drift 검사·재계산·GiST REINDEX (T-VN-H04) |
 | [invalid-index-recovery.md](./invalid-index-recovery.md) | `CREATE INDEX CONCURRENTLY` 실패로 남는 INVALID index(`indisvalid=false`) 탐지·drop·재빌드 (T-VN-H05) |
+| [cache-target-generation-outbox.md](./cache-target-generation-outbox.md) | ADR-081 cache target restore fence, pull/ACK/NACK, dead replay, fixed snapshot Merkle와 paired live 절차 |
 | [../backup-restore.md](../backup-restore.md) | 독립 app cold backup/restore 경계. 대상: `kor_travel_map` + `kor_travel_map_dagster` + RustFS |
 
 > 환경·도구 1차 문서는 별도다 — 본 runbook은 그걸 **운영 절차로 엮는다**.

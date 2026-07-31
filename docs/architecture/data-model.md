@@ -2533,7 +2533,7 @@ CREATE INDEX idx_feature_change_feature
 - provider reload와 snapshot 누락 정리는 `data_origin='user_request'` row를 삭제하거나
   되살리지 않는다.
 
-### 9.10 `ops.poi_cache_targets` / `ops.poi_cache_target_feature_links` (ADR-045/065, alembic 0009/0058)
+### 9.10 `ops.poi_cache_targets` / generation·outbox 계열 (ADR-045/065/081)
 
 외부 앱 POI/cache target을 `external_system + target_key + 좌표 + 반경`으로 저장하고,
 target 주변 feature와 다대다로 연결한다. 목적은 전체 provider 재적재 없이 저장 POI
@@ -2556,6 +2556,31 @@ target 주변 feature와 다대다로 연결한다. 목적은 전체 provider �
 repository는 `infra.poi_cache_target_repo`가 제공한다. `infra.scope_repo`의
 `resolve_cache_target_keys`와 `infra.feature_update_executor`는 active target 주변
 feature를 계산하고 `ops.poi_cache_target_feature_links`를 재계산한다.
+
+T-VN-41 producer foundation은 projection row와 source 순서를 분리한다. 신규 정규화 table은
+다음 책임을 각각 하나만 소유한다.
+
+| 상태 | identity | 책임 |
+|---|---|---|
+| source control/epoch | `external_system`, `(external_system, restore_epoch)` | Map 소유 양의 epoch, restore fence ETag/barrier와 epoch 이력 |
+| source head | `(external_system, target_key)` | 마지막 source generation, target UUID 또는 durable tombstone |
+| source event | producer `event_id` | Idempotency-Key command, request fingerprint, 적용/replay 결과의 불변 이력 |
+| refresh member | `(request_id, target_id)` | request 시작 시 epoch/generation을 캡처한 late-result fence |
+| outbox event | `event_id`, unique `relay_order` | target/link/refresh 결과와 같은 transaction에서 만든 불변 typed event |
+| delivery/claim | event/claim identity | lease, attempt, retry, contiguous ACK, dead/replay 상태 |
+
+`source_generation`은 target natural key별 PinVi desired-state generation이고,
+`target_sequence`는 같은 source generation에서 Map이 만든 결과 순서다. 기존
+`feature_update_requests.generation` queue CAS와 target `lock_version` ETag는 그대로 별도다.
+soft delete 뒤 새 target UUID가 생겨도 source head/tombstone은 제거하지 않는다.
+
+outbox event의 `event_type`은 ADR-081의 네 strict 값만 허용한다. payload는 versioned typed
+schema와 `source_payload_fingerprint`를 가지며 source event, target, refresh request, job,
+domain command와의 linkage를 보존한다. `ops.ops_live_topic_revisions`는 invalidation signal로만
+유지하고 event stream으로 사용하지 않는다.
+
+fixed snapshot은 active와 tombstone을 같은 MVCC snapshot에 넣고 ADR-081 Merkle v1으로
+checksum한다. legacy target에는 임의 epoch를 백필하지 않으며 첫 권위 snapshot이 head를 채택한다.
 
 ### 9.11 `ops.provider_refresh_policies` (ADR-045 T-205c, alembic 0009/0049/0056)
 
