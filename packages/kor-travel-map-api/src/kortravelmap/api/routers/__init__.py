@@ -16,6 +16,15 @@ from kortravelmap.api.routers.admin_backups import (
     restore_router as admin_restore_router,
 )
 from kortravelmap.api.routers.admin_backups import router as admin_backups_router
+from kortravelmap.api.routers.cache_target_streams import (
+    admin_router as admin_cache_target_streams_router,
+)
+from kortravelmap.api.routers.cache_target_streams import (
+    ops_router as ops_cache_target_streams_router,
+)
+from kortravelmap.api.routers.cache_target_streams import (
+    service_router as service_cache_target_streams_router,
+)
 from kortravelmap.api.routers.admin_features import router as admin_features_router
 from kortravelmap.api.routers.admin_files import router as admin_files_router
 from kortravelmap.api.routers.admin_issues import router as admin_issues_router
@@ -56,6 +65,7 @@ from kortravelmap.api.routers.weather import router as weather_router
 __all__ = [
     "admin_backups_router",
     "admin_auth_router",
+    "admin_cache_target_streams_router",
     "admin_restore_router",
     "admin_weather_router",
     "admin_features_router",
@@ -73,6 +83,7 @@ __all__ = [
     "mois_detail_router",
     "offline_uploads_router",
     "ops_router",
+    "ops_cache_target_streams_router",
     "ops_datasets_router",
     "ops_live_router",
     "ops_logs_router",
@@ -80,6 +91,7 @@ __all__ = [
     "public_status_router",
     "public_providers_router",
     "public_views_router",
+    "service_cache_target_streams_router",
     "weather_router",
     "curated_router",
     "curations_router",

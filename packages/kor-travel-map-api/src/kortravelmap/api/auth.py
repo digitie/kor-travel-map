@@ -17,6 +17,7 @@ ADR-045 D-1 defense-in-depth (ADR-005 amendment): 운영 인증의 **1차 책임
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import ipaddress
 import re
@@ -25,23 +26,24 @@ from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
-from sqlalchemy.ext.asyncio import AsyncSession
-
-if TYPE_CHECKING:
-    from kortravelmap.api.settings import ApiSettings
-
 from kortravelmap.infra.public_api_keys import (
     cached_active_public_api_key_hashes,
     hash_public_api_key,
     public_api_key_matches,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_session
 from kortravelmap.api.response import ProblemDetail
+from kortravelmap.api.settings import CacheTargetServiceScope
+
+if TYPE_CHECKING:
+    from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
     "ADMIN_ACTOR_HEADER",
     "ADMIN_PROXY_SECRET_HEADER",
+    "CACHE_TARGET_CONSUMER_HEADER",
     "METRICS_AUTHORIZATION_SCHEME",
     "OPS_ACTOR",
     "OPS_SCOPE_HEADER",
@@ -50,7 +52,10 @@ __all__ = [
     "PUBLIC_API_KEY_HEADER",
     "SERVICE_TOKEN_HEADER",
     "AdminProxyContext",
+    "CacheTargetServicePrincipalContext",
     "OpsOperatorContext",
+    "require_cache_target_service_principal",
+    "require_cache_target_service_scope",
     "require_admin_frontend",
     "require_metrics_token",
     "require_ops_operator",
@@ -63,6 +68,7 @@ __all__ = [
 
 ADMIN_ACTOR_HEADER = "X-Kor-Travel-Map-Actor"
 ADMIN_PROXY_SECRET_HEADER = "X-Kor-Travel-Map-Admin-Proxy-Secret"
+CACHE_TARGET_CONSUMER_HEADER = "X-Kor-Travel-Map-Cache-Target-Consumer"
 METRICS_AUTHORIZATION_SCHEME = "Bearer"
 OPS_ACTOR = "service:pinvi"
 OPS_SCOPE_HEADER = "X-Kor-Travel-Map-Ops-Scope"
@@ -135,6 +141,16 @@ class OpsOperatorContext:
     """ops route가 신뢰한 audit actor 컨텍스트."""
 
     actor: str
+
+
+@dataclass(frozen=True, slots=True)
+class CacheTargetServicePrincipalContext:
+    """ADR-081 cache-target service principal binding."""
+
+    principal_id: str
+    consumer_id: str
+    scopes: frozenset[CacheTargetServiceScope]
+    external_systems: frozenset[str]
 
 
 def _settings(request: Request) -> ApiSettings:
@@ -381,6 +397,106 @@ async def require_service_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"유효한 {SERVICE_TOKEN_HEADER} 헤더가 필요합니다.",
+        )
+
+
+def _cache_target_auth_error(status_code: int, code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": code, "message": message, "details": {}},
+    )
+
+
+def _token_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+async def require_cache_target_service_principal(
+    request: Request,
+    token: Annotated[str | None, Security(_service_token_scheme)] = None,
+    asserted_consumer_id: Annotated[
+        str | None,
+        Header(
+            alias=CACHE_TARGET_CONSUMER_HEADER,
+            description=(
+                "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 "
+                "cache-target principal registry에서 결정되며, 값이 있으면 결박된 "
+                "consumer_id와 exact match해야 한다."
+            ),
+        ),
+    ] = None,
+) -> CacheTargetServicePrincipalContext:
+    """cache-target 전용 ServiceToken principal을 서버 측 registry로 해석한다."""
+
+    if token is None or token == "":
+        raise _cache_target_auth_error(
+            status.HTTP_401_UNAUTHORIZED,
+            "CACHE_TARGET_SERVICE_TOKEN_REQUIRED",
+            f"{SERVICE_TOKEN_HEADER} 헤더가 필요합니다.",
+        )
+    settings = _settings(request)
+    digest = _token_digest(token)
+    principal = next(
+        (
+            entry
+            for entry in settings.cache_target_service_principals
+            if hmac.compare_digest(entry.token_sha256, digest)
+        ),
+        None,
+    )
+    if principal is None:
+        raise _cache_target_auth_error(
+            status.HTTP_401_UNAUTHORIZED,
+            "CACHE_TARGET_SERVICE_TOKEN_INVALID",
+            f"{SERVICE_TOKEN_HEADER} 헤더가 유효하지 않습니다.",
+        )
+    if (
+        asserted_consumer_id is not None
+        and asserted_consumer_id != principal.consumer_id
+    ):
+        raise _cache_target_auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "CACHE_TARGET_CONSUMER_FORBIDDEN",
+            f"{CACHE_TARGET_CONSUMER_HEADER}가 token principal과 일치하지 않습니다.",
+        )
+    return CacheTargetServicePrincipalContext(
+        principal_id=principal.principal_id,
+        consumer_id=principal.consumer_id,
+        scopes=frozenset(principal.scopes),
+        external_systems=frozenset(principal.external_systems),
+    )
+
+
+def require_cache_target_service_scope(
+    context: CacheTargetServicePrincipalContext,
+    *,
+    scope: CacheTargetServiceScope,
+    external_system: str | None = None,
+) -> None:
+    """route별 scope와 external_system allowlist를 fail-closed로 확인한다."""
+
+    scope_allowed = scope in context.scopes or (
+        scope
+        in {
+            "cache-target:read",
+            "cache-target:claim",
+            "cache-target:ack",
+            "cache-target:nack",
+            "cache-target:snapshot",
+        }
+        and "cache-target:consumer" in context.scopes
+    )
+    if not scope_allowed:
+        raise _cache_target_auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "CACHE_TARGET_SCOPE_FORBIDDEN",
+            f"cache target service principal에 {scope} scope가 없습니다.",
+        )
+    if external_system is not None and external_system not in context.external_systems:
+        raise _cache_target_auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "CACHE_TARGET_EXTERNAL_SYSTEM_FORBIDDEN",
+            "cache target service principal이 이 external_system에 결박되지 않았습니다.",
         )
 
 

@@ -6,14 +6,30 @@ import re
 import secrets
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-__all__ = ["ApiSettings"]
+__all__ = [
+    "ApiSettings",
+    "CacheTargetServicePrincipalSetting",
+    "CacheTargetServiceScope",
+]
 
 
 _BEARER_B64TOKEN_PATTERN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
+_CACHE_TARGET_IDENTIFIER_PATTERN = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
+_CACHE_TARGET_EXTERNAL_SYSTEM_PATTERN = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.:-]{0,111}\Z")
+_LOWER_SHA256_HEX_PATTERN = re.compile(r"\A[0-9a-f]{64}\Z")
 _LOCAL_DEV_CURSOR_SIGNING_KEY = secrets.token_bytes(32)
 _CURSOR_SIGNING_SECRET_NAME = "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"
 _CURSOR_SIGNING_PROTECTED_FIELDS = (
@@ -24,6 +40,110 @@ _CURSOR_SIGNING_PROTECTED_FIELDS = (
     ("metrics token", "metrics_token"),
     ("public API key", "vworld_api_key"),
 )
+
+CacheTargetServiceScope = Literal[
+    "cache-target:consumer",
+    "cache-target:read",
+    "cache-target:claim",
+    "cache-target:ack",
+    "cache-target:nack",
+    "cache-target:snapshot",
+    "cache-target:restore-fence",
+    "cache-target:recovery-replay",
+]
+
+_CACHE_TARGET_SERVICE_SCOPES: frozenset[str] = frozenset(
+    {
+        "cache-target:consumer",
+        "cache-target:read",
+        "cache-target:claim",
+        "cache-target:ack",
+        "cache-target:nack",
+        "cache-target:snapshot",
+        "cache-target:restore-fence",
+        "cache-target:recovery-replay",
+    }
+)
+
+
+class CacheTargetServicePrincipalSetting(BaseModel):
+    """Cache-target service token digest에 결박된 서버 측 principal."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    principal_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description="감사와 idempotency actor에 쓰는 서버 측 principal ID.",
+    )
+    consumer_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description="claim/ACK/NACK에 결박되는 consumer ID.",
+    )
+    token_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        description=(
+            "원문 service token의 lowercase SHA-256 hex. 원문 token은 설정에 저장하지 "
+            "않는다."
+        ),
+    )
+    scopes: list[CacheTargetServiceScope] = Field(
+        min_length=1,
+        description="이 principal이 사용할 수 있는 cache-target scope 목록.",
+    )
+    external_systems: list[str] = Field(
+        min_length=1,
+        description="이 principal에 결박된 external_system allowlist.",
+    )
+
+    @field_validator("principal_id", "consumer_id")
+    @classmethod
+    def _validate_identifier(cls, value: str) -> str:
+        if _CACHE_TARGET_IDENTIFIER_PATTERN.fullmatch(value) is None:
+            raise ValueError(
+                "cache target service principal identifiers must use "
+                "letters, digits, '.', ':', '_' or '-'"
+            )
+        return value
+
+    @field_validator("token_sha256")
+    @classmethod
+    def _validate_token_sha256(cls, value: str) -> str:
+        if _LOWER_SHA256_HEX_PATTERN.fullmatch(value) is None:
+            raise ValueError(
+                "cache target service token digest must be lowercase SHA-256 hex"
+            )
+        return value
+
+    @field_validator("scopes")
+    @classmethod
+    def _validate_scopes(
+        cls,
+        value: list[CacheTargetServiceScope],
+    ) -> list[CacheTargetServiceScope]:
+        if len(value) != len(set(value)):
+            raise ValueError("cache target service scopes must be unique")
+        unknown = set(value) - _CACHE_TARGET_SERVICE_SCOPES
+        if unknown:
+            raise ValueError(
+                "unknown cache target service scopes: " + ", ".join(sorted(unknown))
+            )
+        return value
+
+    @field_validator("external_systems")
+    @classmethod
+    def _validate_external_systems(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("cache target external_system allowlist must be unique")
+        for item in value:
+            if _CACHE_TARGET_EXTERNAL_SYSTEM_PATTERN.fullmatch(item) is None:
+                raise ValueError(
+                    "cache target external_system allowlist values must use "
+                    "letters, digits, '.', ':', '_' or '-' and be at most 112 chars"
+                )
+        return value
 
 
 def _deployable_secret_shape(raw: str) -> bool:
@@ -253,6 +373,16 @@ class ApiSettings(BaseSettings):
             "없는 32자 이상으로 필수화한다(ADR-066 T-VN-01). "
             "``/health`` · ``/version`` · ``/debug`` · ``/admin`` · ``/ops``는 면제(liveness/"
             "operator는 proxy SSO). env ``KOR_TRAVEL_MAP_API_SERVICE_TOKEN``."
+        ),
+    )
+    cache_target_service_principals: list[CacheTargetServicePrincipalSetting] = Field(
+        default_factory=list,
+        description=(
+            "ADR-081 cache-target service principal registry. 각 entry는 원문 "
+            "X-Kor-Travel-Map-Service-Token의 SHA-256 digest를 서버 측 "
+            "principal_id/consumer_id/scope/external_system allowlist에 결박한다. "
+            "기존 service_token 값만으로는 cache-target 권한을 얻지 못한다. env는 "
+            "JSON 배열 ``KOR_TRAVEL_MAP_API_CACHE_TARGET_SERVICE_PRINCIPALS``."
         ),
     )
     cursor_signing_secret: SecretStr | None = Field(
@@ -506,6 +636,25 @@ class ApiSettings(BaseSettings):
         )
         if problems:
             raise ValueError("; ".join(problems))
+        return self
+
+    @model_validator(mode="after")
+    def _validate_cache_target_service_principal_registry(self) -> ApiSettings:
+        """cache-target principal registry는 설정 시점에 fail-fast 검증한다."""
+
+        digests: set[str] = set()
+        principal_ids: set[str] = set()
+        for principal in self.cache_target_service_principals:
+            if principal.token_sha256 in digests:
+                raise ValueError(
+                    "cache target service token digests must be unique"
+                )
+            if principal.principal_id in principal_ids:
+                raise ValueError(
+                    "cache target service principal_id values must be unique"
+                )
+            digests.add(principal.token_sha256)
+            principal_ids.add(principal.principal_id)
         return self
 
     @property

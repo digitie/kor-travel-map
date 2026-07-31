@@ -57,7 +57,11 @@ class CommandPolicy:
         if self.kind is CommandPolicyKind.DOMAIN_LEDGER:
             if self.success_status is None:
                 raise ValueError("domain-ledger policy requires success_status")
-            unsupported = set(self.replay_headers) - {"ETag", "Location"}
+            unsupported = set(self.replay_headers) - {
+                "ETag",
+                "Location",
+                "Retry-After",
+            }
             if unsupported:
                 raise ValueError(
                     f"unsupported terminal response headers: {sorted(unsupported)}"
@@ -304,6 +308,22 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         "DELETE",
         "/v1/admin/poi-cache-targets/{external_system}/{target_key}",
     ): _resource("If-Match generation precondition이 stale 재시도를 차단"),
+    (
+        "POST",
+        "/v1/admin/cache-target-event-dead-letters/{event_id}/replays",
+    ): _domain(
+        "admin.cache-target-dead-letter.replay",
+        _DESTRUCTIVE_RESULT,
+        success_status=202,
+        replay_headers=("Location", "Retry-After"),
+        fingerprint_headers=("If-Match",),
+    ),
+    ("POST", "/v1/admin/cache-target-reconciliations"): _domain(
+        "admin.cache-target-reconciliation.request",
+        _DESTRUCTIVE_RESULT,
+        success_status=202,
+        replay_headers=("Location", "Retry-After"),
+    ),
     ("PUT", "/v1/ops/datasets/refresh-policy"): _resource(
         "provider+dataset resource replacement와 revision precondition이 경계"
     ),
@@ -355,6 +375,53 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ),
     ("POST", "/v1/features/weather/batch"): _query(
         "읽기 batch를 URL 길이와 payload 크기 때문에 POST로 표현"
+    ),
+    (
+        "PUT",
+        "/v1/service/cache-targets/{external_system}/{target_key}",
+    ): _specialized(
+        "cache-target.source.apply",
+        "source event ledger가 Idempotency-Key/body/result를 소유",
+    ),
+    (
+        "DELETE",
+        "/v1/service/cache-targets/{external_system}/{target_key}",
+    ): _specialized(
+        "cache-target.source.delete",
+        "source event ledger와 If-Match가 tombstone 재시도 경계를 소유",
+    ),
+    ("POST", "/v1/service/refresh-requests"): _specialized(
+        "cache-target.refresh-request.create",
+        "기존 feature update idempotency ledger가 refresh request를 소유",
+    ),
+    (
+        "POST",
+        "/v1/service/cache-target-streams/{external_system}/restore-fences",
+    ): _domain(
+        "service.cache-target-restore-fence.create",
+        _DESTRUCTIVE_RESULT,
+        success_status=201,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+    ),
+    ("POST", "/v1/service/cache-target-event-claims"): _specialized(
+        "cache-target.event.claim",
+        "delivery claim ledger가 lease와 idempotent claim replay를 소유",
+    ),
+    ("POST", "/v1/service/cache-target-event-acks"): _specialized(
+        "cache-target.event.ack",
+        "delivery claim ACK state가 contiguous cursor 전진을 소유",
+    ),
+    ("POST", "/v1/service/cache-target-event-nacks"): _specialized(
+        "cache-target.event.nack",
+        "delivery state가 retry/dead 전이와 poison block을 소유",
+    ),
+    (
+        "POST",
+        "/v1/service/cache-target-event-dead-letters/{event_id}/replays",
+    ): _specialized(
+        "cache-target.dead-letter.replay",
+        "delivery state와 If-Match version이 같은 event replay를 소유",
     ),
     ("POST", "/v1/ops/datasets/preview"): _query(
         "provider fixture/live preview를 반환하지만 durable mutation은 없음"

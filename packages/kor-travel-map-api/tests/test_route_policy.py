@@ -324,9 +324,23 @@ def test_service_policy_covers_feature_and_weather_batches() -> None:
     assert {row.path for row in service_rows} == {
         "/v1/features/batch",
         "/v1/features/weather/batch",
+        "/v1/service/cache-target-event-acks",
+        "/v1/service/cache-target-event-claims",
+        "/v1/service/cache-target-event-dead-letters/{event_id}",
+        "/v1/service/cache-target-event-dead-letters/{event_id}/replays",
+        "/v1/service/cache-target-event-nacks",
+        "/v1/service/cache-target-snapshots/{external_system}",
+        "/v1/service/cache-target-streams/{external_system}",
+        "/v1/service/cache-target-streams/{external_system}/restore-fences",
+        "/v1/service/cache-targets/{external_system}/{target_key}",
+        "/v1/service/refresh-requests",
+        "/v1/service/refresh-requests/{request_id}",
     }
     for row in service_rows:
-        assert "require_service_token" in row.observed_enforcement
+        assert {
+            "require_cache_target_service_principal",
+            "require_service_token",
+        } & set(row.observed_enforcement)
 
 
 @pytest.mark.unit
