@@ -922,10 +922,10 @@ def test_blank_feature_id_never_autolinks_on_single_name_match(
 
 
 @pytest.mark.unit
-def test_blank_feature_id_with_address_hint_keeps_unique_match_contract(
+def test_blank_feature_id_with_address_hint_requires_explicit_review(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """이름+주소 유일 후보는 ADR-063 계약대로 자동 링크한다."""
+    """이름+주소 유일 후보도 preview로만 보이고 자동 링크하지 않는다."""
     from kortravelmap.api.routers import curations as module
 
     async def _matches(_session: object, **_kwargs: Any) -> dict[int, tuple[Any, ...]]:
@@ -959,9 +959,14 @@ def test_blank_feature_id_with_address_hint_keeps_unique_match_contract(
 
     assert response.status_code == 200
     row = response.json()["data"]["items"][0]
-    assert row["resolved_feature_id"] == "feature:ganjeolgot"
-    assert row["status"] == "valid"
-    assert row["issues"] == []
+    assert row["resolved_feature_id"] is None
+    assert row["status"] == "review_required"
+    assert [issue["code"] for issue in row["issues"]] == [
+        "address_candidate_requires_review"
+    ]
+    assert [candidate["feature_id"] for candidate in row["candidates"]] == [
+        "feature:ganjeolgot"
+    ]
 
 
 @pytest.mark.unit

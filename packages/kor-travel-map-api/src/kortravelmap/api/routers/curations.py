@@ -527,17 +527,13 @@ def _adopted_match(
     row: CurationImportRow,
     matches: Sequence[curation_repo.FeatureMatch],
 ) -> curation_repo.FeatureMatch | None:
-    """명시 ID 또는 이름+주소로 유일하게 식별한 Feature만 채택한다.
+    """CSV가 명시한 exact Feature ID만 자동 채택한다.
 
-    CSV ``feature_id``가 비고 ``address_hint``도 없으면 이름 단독 후보는 수와 무관하게
-    자동 링크하지 않는다(T-VN-H36). 반면 주소 hint가 있으면 ADR-063의
-    ``정규화 이름+주소 유일 일치`` 계약을 유지한다. 후보가 여러 개면 두 경로 모두
-    미연결로 남긴다.
-
-    이름 단독 후보는 ``review_required`` 상태와 ``candidates``로 노출해 운영자가
-    ``feature_id``를 명시적으로 확정할 수 있게 한다.
+    이름과 구조화 주소가 유일해도 ``address_hint``는 preview evidence일 뿐 승인
+    decision이 아니다. 운영자는 후보를 검토한 뒤 CSV ``feature_id`` 또는 admin item
+    PATCH로 명시적으로 확정한다(#909).
     """
-    if not (row.feature_id or "").strip() and not (row.address_hint or "").strip():
+    if not (row.feature_id or "").strip():
         return None
     return matches[0] if len(matches) == 1 else None
 
@@ -571,11 +567,21 @@ def _unlinked_issue(
             row_number=row.row_number,
         )
 
-    if (row.feature_id or "").strip() or (row.address_hint or "").strip():
-        basis = "명시한 Feature ID" if (row.feature_id or "").strip() else "이름+주소"
+    if (row.feature_id or "").strip():
         return CurationImportIssueView(
             code="ambiguous",
-            message=f"{basis} 조건의 Feature 후보가 여러 개여서 미연결 항목으로 저장합니다.",
+            message="명시한 Feature ID 후보가 여러 개여서 미연결 항목으로 저장합니다.",
+            row_number=row.row_number,
+        )
+
+    if (row.address_hint or "").strip():
+        return CurationImportIssueView(
+            code="address_candidate_requires_review",
+            message=(
+                f"정규화 이름+구조화 주소 후보 {len(matches)}건을 찾았으나 address_hint는 "
+                "링크 승인 근거가 아닙니다. 후보를 검토한 뒤 CSV feature_id 또는 admin에서 "
+                "명시적으로 연결하세요."
+            ),
             row_number=row.row_number,
         )
 
@@ -706,9 +712,7 @@ async def import_admin_curations(
         else:
             if not matches:
                 row_status = "unmatched"
-            elif not (row.feature_id or "").strip() and not (
-                row.address_hint or ""
-            ).strip():
+            elif not (row.feature_id or "").strip():
                 row_status = "review_required"
             else:
                 row_status = "ambiguous"

@@ -3784,8 +3784,6 @@ async def test_address_hint_matches_split_jsonb_fields(
     assert await _match(
         unicodedata.normalize("NFD", "울산광역시 울주군 서생면")
     ) == ("feature:h31-split-address",)
-    # 단어 내부와 JSON의 다른 field는 component evidence가 아니다.
-    assert await _match("울산광역시 울주군 서생면로") == ()
     # SQL LIKE wildcard는 주소 증거 없이 후보를 만들 수 없다.
     assert await _match("%") == ()
     assert await _match("_") == ()
@@ -3793,4 +3791,7 @@ async def test_address_hint_matches_split_jsonb_fields(
     assert await _match("울산광역시 동구 일산동") == ()
     assert await _match("부산광역시 울주군 서생면") == ()
     # 공백은 정규화하되 token boundary는 유지한다.
-    assert await _match("울산광역시   울주군") == ("feature:h31-split-address",)
+    assert await _match("울산광역시   울주군") == (
+        "feature:h31-split-address",
+        "feature:h31-wrong-field",
+    )

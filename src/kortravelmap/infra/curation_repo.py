@@ -17,6 +17,8 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 
+from kortravelmap.core.address import normalize_korean_text
+from kortravelmap.core.curation_address import address_hint_matches
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
 if TYPE_CHECKING:
@@ -76,6 +78,7 @@ _RELATIONS: Final = frozenset(
 )
 _REUSE_POLICIES: Final = frozenset({"allowed", "blocked", "manual_review"})
 _POSTGRES_INTEGER_MAX: Final = 2_147_483_647
+_FEATURE_MATCH_NAME_CANDIDATE_LIMIT: Final = 100
 
 
 @dataclass(frozen=True)
@@ -1310,7 +1313,8 @@ SELECT
     matched.name,
     matched.address,
     matched.lon,
-    matched.lat
+    matched.lat,
+    matched.name_candidate_count
 FROM requested
 CROSS JOIN LATERAL (
     (
@@ -1319,7 +1323,8 @@ CROSS JOIN LATERAL (
             f.name,
             f.address,
             x_extension.ST_X(f.coord) AS lon,
-            x_extension.ST_Y(f.coord) AS lat
+            x_extension.ST_Y(f.coord) AS lat,
+            1::bigint AS name_candidate_count
         FROM feature.features AS f
         WHERE requested.feature_id IS NOT NULL
           AND f.feature_id = requested.feature_id
@@ -1333,41 +1338,16 @@ CROSS JOIN LATERAL (
             f.name,
             f.address,
             x_extension.ST_X(f.coord) AS lon,
-            x_extension.ST_Y(f.coord) AS lat
+            x_extension.ST_Y(f.coord) AS lat,
+            count(*) OVER () AS name_candidate_count
         FROM feature.features AS f
         WHERE requested.feature_id IS NULL
           AND requested.place_name IS NOT NULL
           AND lower(f.name) = lower(requested.place_name)
           AND f.deleted_at IS NULL
           AND f.status NOT IN ('deleted', 'hidden')
-          AND (
-              requested.address_hint IS NULL
-              OR NOT EXISTS (
-                  -- hint를 공백 토큰으로 쪼개 **전부** 포함하는지 본다 (T-VN-H31).
-                  --
-                  -- 이전에는 `f.address::text ILIKE '%' || hint || '%'`로 직렬화 jsonb에
-                  -- 통짜 substring을 걸었다. 그런데 address jsonb는 `sido_name`·
-                  -- `sigungu_name`·`admin`을 **분리 저장**하므로 `'울산광역시 울주군
-                  -- 서생면'` 같은 다중 토큰 hint는 어떤 행에서도 연속 부분문자열이
-                  -- 아니다 — 상세할수록 매칭이 안 되는 역전이 있었다. 실측으로
-                  -- `feature.features`의 8%는 `road`/`legal`이 둘 다 null이고 관광
-                  -- Feature는 그 비율이 더 높아, 도로명/지번 어느 쪽을 넣어도 같은 벽에 막힌다.
-                  --
-                  -- 토큰 AND로 바꾸면 시군구 단독은 물론 `'시도 시군구 읍면동 리'`까지
-                  -- 그대로 작동하고, 토큰이 많을수록 **더 좁아진다**(오링크가 줄어든다).
-                  SELECT 1
-                  FROM unnest(
-                      string_to_array(
-                          btrim(regexp_replace(requested.address_hint, '\\s+', ' ', 'g')),
-                          ' '
-                      )
-                  ) AS hint_token
-                  WHERE hint_token <> ''
-                    AND f.address::text NOT ILIKE '%' || hint_token || '%'
-              )
-          )
         ORDER BY f.feature_id
-        LIMIT 3
+        LIMIT 101
     )
 ) AS matched
 ORDER BY requested.row_number, matched.feature_id
@@ -2486,7 +2466,11 @@ async def resolve_feature_matches(
     *,
     requests: Sequence[FeatureMatchRequest],
 ) -> dict[int, tuple[FeatureMatch, ...]]:
-    """CSV 전체의 exact Feature/name 후보를 한 번의 parameterized query로 찾는다."""
+    """CSV 전체의 exact Feature/name 후보를 한 번의 parameterized query로 찾는다.
+
+    DB는 ``lower(name)`` index로 후보만 좁힌다. 주소는 JSON serialization/SQL pattern을
+    전혀 사용하지 않고 Python의 구조화 literal matcher로 판정한다.
+    """
 
     if not requests:
         return {}
@@ -2494,8 +2478,8 @@ async def resolve_feature_matches(
         {
             "row_number": request.row_number,
             "feature_id": request.feature_id.strip() if request.feature_id else None,
-            "place_name": request.place_name.strip() if request.place_name else None,
-            "address_hint": (request.address_hint.strip() if request.address_hint else None),
+            "place_name": normalize_korean_text(request.place_name),
+            "address_hint": normalize_korean_text(request.address_hint),
         }
         for request in requests
     ]
@@ -2509,9 +2493,27 @@ async def resolve_feature_matches(
         .mappings()
         .all()
     )
+    requests_by_row = {request.row_number: request for request in requests}
     grouped: dict[int, list[FeatureMatch]] = {request.row_number: [] for request in requests}
     for row in rows:
-        grouped[int(row["row_number"])].append(_feature_match(row))
+        row_number = int(row["row_number"])
+        request = requests_by_row[row_number]
+        if (
+            request.feature_id is None
+            and int(row["name_candidate_count"]) > _FEATURE_MATCH_NAME_CANDIDATE_LIMIT
+        ):
+            # 상한 밖 후보를 보지 않고 "유일"로 오판하지 않는다.
+            grouped[row_number].clear()
+            continue
+        match = _feature_match(row)
+        normalized_hint = normalize_korean_text(request.address_hint)
+        if (
+            request.feature_id is None
+            and normalized_hint is not None
+            and not address_hint_matches(match.address, normalized_hint)
+        ):
+            continue
+        grouped[row_number].append(match)
     return {row_number: tuple(items) for row_number, items in grouped.items()}
 
 
