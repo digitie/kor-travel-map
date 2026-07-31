@@ -732,12 +732,30 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   통과했다. prod 모양(`source_rule`) 테스트를 추가해 `xfail(strict=True)`로 고정했다 —
   **xfail 제거가 H41의 완료 조건**이다.
 
-  고치는 길은 두 갈래이고 **결정이 필요하다**:
-  - (a) `fk_curation_link_decisions_item`에 `ON UPDATE CASCADE`. append-only 트리거가
-    RI cascade의 UPDATE를 막으므로, "`curation_item_id`만 바뀌는 UPDATE는 이력 변경이
-    아니다"는 예외를 명시해야 한다. 3개 append-only 테이블 계약을 건드린다.
+  고치는 길은 두 갈래였다:
+  - (a) 관련 FK에 `ON UPDATE CASCADE`. append-only 트리거가 RI cascade의 UPDATE를
+    막으므로, "`curation_item_id`만 바뀌는 UPDATE는 이력 변경이 아니다"는 예외를
+    명시해야 한다.
   - (b) merge의 detach가 PK를 재작성하지 않게 바꾼다. `0045` 전환 트리거의 UUID 충돌을
     피하려고 재작성하는 것이라(주석 `merge_repo.py:770-773`) 대안 설계가 필요하다.
+
+  **(a)로 결정하고 구현 완료** (2026-08-01, `0074_curation_item_rekey_cascade`,
+  같은 브랜치·PR #919). 애초 생각한 것보다 관련 FK가 많았다 — `fk_curation_link_decisions_item`
+  하나가 아니라 **4개**: `fk_curation_import_rows_item` · `fk_curation_link_decisions_item` ·
+  `fk_curation_link_decisions_import_row`(합성 — import row 쪽도 캐스케이드된 뒤에야
+  다시 일관됨) · `fk_curation_link_decisions_supersedes`(자기참조 합성 — supersedes 사슬
+  전체가 같은 item이라는 불변식을 강제).
+
+  append-only 트리거 예외는 `curation_item_id` **하나만** 바뀐 `UPDATE`만 통과시킨다.
+  첫 구현이 `NEW.curation_item_id`를 정적으로 참조해 그 컬럼이 없는
+  `curation_import_batches`에서 `UndefinedColumnError`로 죽었는데, **기존** 테스트
+  `test_link_provenance_is_append_only_fail_closed_and_recoverable`가 잡았다 — jsonb
+  동적 조회로 고쳤다. `models.py`의 ORM FK 선언도 `onupdate="CASCADE"`로 맞췄다(안
+  그러면 `alembic check` drift로 걸린다 — 실제로 걸렸다).
+
+  `apply_feature_merge()`를 실제로 부르는 xfail 테스트가 **XPASS로 전환**돼 수정을
+  1차 확인했고, 변이 2회(CASCADE 제거 / 예외 무조건 통과로 넓힘)로 falsifiability도
+  확인했다. 적대적 리뷰어 2명 + 검증을 붙였다(별도 리포트).
 
   ## 구현 완료 (2026-08-01, `0073_curation_source_rule`)
 
