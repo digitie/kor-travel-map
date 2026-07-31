@@ -151,6 +151,7 @@ function makeAdminCuration(
   overrides: Partial<CurationItemView> = {},
 ): CurationItemView {
   return {
+    accepted_link_decision_id: "admin-map-decision-id",
     address: { road: "세종대로 110" },
     address_hint: "서울 중구",
     archived_at: null,
@@ -160,6 +161,7 @@ function makeAdminCuration(
     created_by: "e2e-admin",
     curation_item_id: "admin-map-curation-item",
     curation_relation: "primary_stop",
+    current_import_row_id: "admin-map-import-row-id",
     dataset_key: "admin-dataset",
     edition_key: "2026",
     external_item_id: "admin-map-official-item",
@@ -171,6 +173,11 @@ function makeAdminCuration(
     item_summary: "admin-only map membership summary",
     item_title: "Admin-only map membership",
     lat: 37.5665,
+    link_actor: "e2e-admin",
+    link_decided_at: MOCK_UPDATED_AT,
+    link_evidence: { source: "e2e-explicit" },
+    link_match_basis: "csv_explicit_feature_id",
+    link_resolver_version: "curation-link-v1",
     lon: 126.978,
     metadata: { visibility: "admin_only" },
     place_name: MOCK_NAME,

@@ -117,6 +117,7 @@ function makeCuration(
   overrides: Partial<CurationItemView> = {},
 ): CurationItemView {
   return {
+    accepted_link_decision_id: "decision-section-depth-001",
     address: { road: "서울특별시 영등포구 여의공원로 120" },
     address_hint: "서울 영등포구",
     archived_at: null,
@@ -126,6 +127,7 @@ function makeCuration(
     created_by: "e2e-admin",
     curation_item_id: "curation-item-section-depth-001",
     curation_relation: "primary_stop",
+    current_import_row_id: "import-row-section-depth-001",
     dataset_key: "tourism-100",
     edition_key: "2025-2026",
     external_item_id: "tourism-100-yeouido",
@@ -137,6 +139,11 @@ function makeCuration(
     item_summary: "2025~2026 선정지",
     item_title: "여의도공원",
     lat: 37.5263,
+    link_actor: "e2e-admin",
+    link_decided_at: "2026-06-08T00:00:00.000Z",
+    link_evidence: { source: "e2e-explicit" },
+    link_match_basis: "csv_explicit_feature_id",
+    link_resolver_version: "curation-link-v1",
     lon: 126.9239,
     metadata: { marker: CURATION_METADATA_MARKER },
     place_name: "여의도공원",

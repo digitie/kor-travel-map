@@ -157,6 +157,7 @@ function makeCuration(
   overrides: Partial<CurationItemView> = {},
 ): CurationItemView {
   return {
+    accepted_link_decision_id: "admin-decision-id",
     address: { road: feature.address_label },
     address_hint: "서울 마포구",
     archived_at: null,
@@ -166,6 +167,7 @@ function makeCuration(
     created_by: "e2e-admin",
     curation_item_id: "admin-curation-item",
     curation_relation: "primary_stop",
+    current_import_row_id: "admin-import-row-id",
     dataset_key: "admin-dataset",
     edition_key: "2026",
     external_item_id: "admin-official-item",
@@ -177,6 +179,11 @@ function makeCuration(
     item_summary: "admin-only membership summary",
     item_title: "Admin only membership",
     lat: feature.lat ?? null,
+    link_actor: "e2e-admin",
+    link_decided_at: MOCK_NOW,
+    link_evidence: { source: "e2e-explicit" },
+    link_match_basis: "csv_explicit_feature_id",
+    link_resolver_version: "curation-link-v1",
     lon: feature.lon ?? null,
     metadata: { visibility: "admin_only" },
     place_name: feature.name,
