@@ -10,6 +10,33 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-31 (codex) — PR #908 H32R/H34R 적대 리뷰 보강 완료
+
+PR #908 사후 리뷰 #911~#914를 구현했다. stale finding close는 provider/dataset별
+`ops.integrity_observation_scopes`, external run별 immutable generation과 receipt,
+run별 dedupe-key observation set으로 정규화했다. authoritative·complete receipt를 가진 최신
+generation만 scope row fence 아래에서 sweep하며, current run과 더 새 partial run의 관측은
+anti-join으로 보호한다. mutable `payload.observed_run_id`는 더 이상 close 근거가 아니다.
+resolved retention op은 실제 consistency maintenance job과 daily schedule에 등록했다.
+
+H34 감사 도구는 linked `feature_name`을 `place_name`과 같은 NFKC·공백·casefold 정책으로
+비교하고 exact-name 후보의 Feature ID를 현재 링크에 결박한다. public scope는 운영 REST와 같은
+`list_feature_curation_groups(public_only=True)`를 재사용하며, 전체 조회와 후보 근거를 하나의
+read-only repeatable-read transaction에서 읽는다. JSON에는 모집단·대상 수·DB snapshot
+identity가 함께 남는다.
+
+검증은 unit+Dagster **2,315건**과 relevant PostgreSQL integration **43건**이 통과했다.
+실제 migrated PostgreSQL에서 A upsert→B upsert→A close,
+더 새 partial 보호, B close→A close, 별도 connection 동시 generation allocation, 0070↔0071
+migration 왕복을 고정했다. public 감사도 committed fixture를 새 `audit_database()` connection이
+읽어 source removed/candidate/draft/admin/private-theme/inactive 제외와 NFKC 후보 ID,
+`repeatable read`·`read only` metadata를 검증한다. ruff 전체, strict mypy(core 120,
+Dagster 23 files), import-linter도 통과했다.
+
+**다음 한 작업**: 전체 relevant gate와 push 전 보안 감사를 끝내고 rebase된 PR #908 head를
+`--force-with-lease`로 올린다. 같은 단일 적대 리뷰어의 exact-head 재검토를 반영한 뒤
+#911~#914를 닫고 병합한다.
+
 ## 2026-07-31 (codex) — T-VN-12A/B/C/D 구현·로컬 gate 완료
 
 55개 write route의 retryable 분류를 정적 registry와 CI 계약으로 고정하고

@@ -34,10 +34,10 @@ barrier로 직렬화한다.
     [~] `T-VN-H34`(H25A/H25B 미충족 AC — 4항목 중 3 완료·1은 H35 배포 대기,
         카테고리 축 신설로 링크 결함 8건 발견) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
-    [x] `T-VN-H32`(주소 검증 finding 자동 close — run_id marker, retention 90일) →
-    [ ] `T-VN-H32R`(#911~#913 — authoritative observation receipt·동시 run fence·
+    [x] `T-VN-H32`(주소 검증 finding 자동 close — 초기 marker, #912 generation으로 대체) →
+    [x] `T-VN-H32R`(#911~#913 — authoritative observation receipt·동시 run fence·
         retention job 등록) →
-    [ ] `T-VN-H34R`(#914 — linked name exact evidence·공개 repeatable-read snapshot) →
+    [x] `T-VN-H34R`(#914 — linked name exact evidence·공개 repeatable-read snapshot) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
     [ ] `T-VN-H22B`(원자적 재분류 command) →
     [ ] `T-VN-H22C`(Admin UI·파괴적 live)
@@ -104,7 +104,7 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(현재 Lane B 후보 `0070_domain_command_ledger`). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(현재 head `0071_integrity_observations`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
@@ -252,7 +252,7 @@ H30A가 durable ledger를 붙였으나 **자동 close는 일부러 넣지 않았
 - `bundles=[]`인 `_load()`는 OpiNet 일일 스킵·MOIS 무레코드 fallback의 **제어 흐름
   sentinel**이라, 빈 finding 집합이 큐 전체를 닫는다.
 
-- [x] T-VN-H32 — **run marker 기반 close** (2026-07-31)
+- [x] T-VN-H32 — **run marker 기반 close** (2026-07-31, #912로 superseded)
 
   **marker는 시각이 아니라 `run_id`다.** 처음엔 `last_seen_at < run_started_at`으로 짰는데
   `dagster/definitions.py:99`에서 `fetched_at` resource가 **`None`**이라 `_fetched_at()`이
@@ -291,7 +291,7 @@ H30A가 durable ledger를 붙였으나 **자동 close는 일부러 넣지 않았
   미침범 / provider 경계 / 빈 `run_id` fail-closed / `resolution` 스탬프·멱등 / retention 양방향),
   n150 CI-parity **2278 passed**, `mypy --strict` **196 files clean**.
 
-- [ ] T-VN-H32R — **PR #908 사후 감사의 close·retention 불변식을 보강한다 (#911~#913)**
+- [x] T-VN-H32R — **PR #908 사후 감사의 close·retention 불변식을 보강한다 (#911~#913)**
 
   exact head `312b1b4b` 적대 리뷰에서 기존 H32 완료 판정을 뒤집는 P1 두 건과 P2 한 건이
   재현됐다. `record_sync_success`는 provider 적재 성공일 뿐 absence를 부정 증거로 쓸 수
@@ -299,17 +299,19 @@ H30A가 durable ledger를 붙였으나 **자동 close는 일부러 넣지 않았
   close가 호출되고, 단일 mutable `observed_run_id`는 A upsert→B upsert→A close 교차에서
   A가 실제 관측한 finding을 resolved 처리한다. retention op도 어떤 Dagster job에 없었다.
 
-  - [ ] **#911** — source snapshot이 authoritative·complete이고 현재 run finding 전량이
+  - [x] **#911** — source snapshot이 authoritative·complete이고 현재 run finding 전량이
     durable하게 기록됐다는 typed receipt가 있을 때만 close한다. empty/partial/transform·load
     일부 실패/finding 저장 실패·`unrecorded_count > 0`은 모두 close 0회로 fail-close한다.
-  - [ ] **#912** — provider+dataset full observation/upsert/sweep을 DB advisory lock 또는
-    단조 generation으로 직렬화한다. process-local lock은 금지하며 A/B 교차 순서를 실제
-    PostgreSQL 회귀로 고정한다.
-  - [ ] **#913** — resolved purge op을 `MAINTENANCE_JOBS`와 schedule이 실제 실행하는 graph에
+  - [x] **#912** — migration 0071이 provider/dataset scope, external run generation,
+    run별 dedupe-key observation set을 정규화한다. scope row lock이 generation 배정과
+    authoritative fence를 직렬화하고, current run과 더 새 partial run의 관측은 immutable
+    anti-join으로 sweep에서 보호한다. A/B 교차·역순·동시 allocation을 실제 PostgreSQL로
+    검증한다.
+  - [x] **#913** — resolved purge op을 `MAINTENANCE_JOBS`와 schedule이 실제 실행하는 graph에
     등록하고 Definitions node·execute-in-process의 retention config/metadata를 검증한다.
 
-  migration은 병행 PR #906의 0070과 충돌하지 않는다. schema가 필요하면 #906 landing 뒤
-  latest main의 단일 head 다음 번호로만 추가한다.
+  migration은 PR #906의 0070 landing 뒤 단일 head를 기준으로
+  `0071_integrity_observations`에 추가했다.
 
 ### T-VN-H25 — 공식 curation 미연결 membership 해소
 
@@ -451,7 +453,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > 않았으면 틀린 결론이 됐다.
   - **정지오코딩 세션 고정** — ~~신설~~ → **완료**: [`scripts/h25b_verify_links.py`](../scripts/h25b_verify_links.py).
     판정 축 3개(행정구역 시도코드 대조 / **카테고리 정합성**(신규) / 동명 유일성).
-    `--all`로 링크된 공식 curation 전수를 훑는다. 단위 테스트는
+    현재는 `--scope public`로 운영 public repository 정본을 훑고, 과거 H25B 내부 승인
+    5건은 `--scope approved`로 명시 분리한다. 단위 테스트는
     [`tests/unit/test_h25b_verify_links.py`](../tests/unit/test_h25b_verify_links.py).
 
     **전수 실행 결과(222건 링크, 2026-07-31)**: 모순 **8건** / 무모순 214건.
@@ -476,18 +479,20 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > 오탐이 됐다. 숙박을 갖춘 휴양림이 그렇게 분류되는 건 정당하다. 축을 "관광이어야 한다"에서
     > **"명백히 대상일 수 없는 유형인가"** 로 뒤집었다(10→8). 두 회귀 모두 단위 테스트로 고정했다.
 
-- [ ] T-VN-H34R — **H34 링크 evidence를 linked target·공개 snapshot에 결박한다 (#914)**
+- [x] T-VN-H34R — **H34 링크 evidence를 linked target·공개 snapshot에 결박한다 (#914)**
 
-  - [ ] `place_name`과 linked `feature_name`을 동일 정규화 함수로 exact 비교하고, 동명
+  - [x] `place_name`과 linked `feature_name`을 동일 정규화 함수로 exact 비교하고, 동명
     후보 query는 count가 아니라 candidate `feature_id`를 반환해 현재 링크와 결박한다.
     linked-name mismatch는 독립 axis/evidence이며 무관한 동명 Feature로 pass할 수 없다.
-  - [ ] `--all` 기본 scope는 공개 curation 정본(`source_present`, included,
+  - [x] `--scope public`은 공개 curation 정본(`source_present`, included,
     collection published/public/unarchived, theme public, `feature.public_features`)을
-    재사용한다. 내부 전체가 필요하면 별도 명시 scope로 분리한다.
-  - [ ] 대상 rows와 name candidate evidence를 read-only repeatable-read transaction
+    repository 함수로 재사용한다. H25B 내부 승인 5건은 `--scope approved`로 분리한다.
+  - [x] 대상 rows와 name candidate evidence를 read-only repeatable-read transaction
     하나에서 읽고 결과에 scope, 대상 수, snapshot identity를 기록한다.
-  - [ ] linked-name mismatch와 source removed/excluded/draft/broken/inactive 공개 경계를
-    회귀 테스트로 고정한다.
+  - [x] linked-name mismatch와 source removed/excluded/draft/admin-only/private-theme/
+    inactive 공개 경계를 회귀 테스트로 고정한다. 실제 migrated PostgreSQL에서 별도
+    connection의 committed fixture를 `audit_database()`로 읽어 transaction isolation과
+    read-only metadata까지 검증한다.
 
 - [x] T-VN-H33 — curation_items 오링크 3건 해제 + 공개 오노출 실증 + ledger 방출 (#890, H36으로 durable해짐) → [`tasks-done.md`](tasks-done.md)
 
