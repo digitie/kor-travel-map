@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kortravelmap.core.cache_target_stream import (
     make_active_cache_target_source,
@@ -20,13 +20,26 @@ from kortravelmap.infra.cache_target_outbox_repo import (
     ack_cache_target_events,
     claim_cache_target_events,
     get_cache_target_dead_letter,
+    list_cache_target_dead_letters,
     nack_cache_target_event,
     replay_cache_target_dead_letter,
+)
+from kortravelmap.infra.cache_target_reconciliation_repo import (
+    complete_cache_target_reconciliation,
+    get_cache_target_operation,
+    get_cache_target_snapshot,
+    list_cache_target_stream_statuses,
+    request_cache_target_reconciliation,
 )
 from kortravelmap.infra.cache_target_restore import (
     CacheTargetRestoreReference,
     fence_restored_cache_target_streams,
     list_cache_target_restore_references,
+)
+from kortravelmap.infra.cache_target_service_repo import (
+    create_cache_target_refresh_request,
+    get_cache_target_refresh_request,
+    get_cache_target_source,
 )
 from kortravelmap.infra.cache_target_stream_repo import (
     CacheTargetStreamConflict,
@@ -522,6 +535,9 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
     )
     assert detail is not None
     assert detail.event.relay_order == blocked_event.relay_order
+    dead_page = await list_cache_target_dead_letters(migrated_session, limit=1)
+    assert len(dead_page.items) == 1
+    assert dead_page.items[0].event.event_id == blocked_event.event_id
     with pytest.raises(CacheTargetStreamConflict) as blocked:
         await claim_cache_target_events(
             migrated_session,
@@ -547,6 +563,10 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
     )
     assert recovery_claim is not None
     assert [event.event_id for event in recovery_claim.events] == [blocked_event.event_id]
+    assert (
+        recovery_claim.events[0].relay_order,
+        recovery_claim.events[0].payload_fingerprint,
+    ) == (blocked_event.relay_order, blocked_event.payload_fingerprint)
     await ack_cache_target_events(
         migrated_session,
         consumer_id=_CONSUMER,
@@ -569,6 +589,343 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
             limit=2,
         )
     assert still_blocked.value.code == "blocked_event_not_head"
+
+
+async def _apply_snapshot_source(
+    session: AsyncSession,
+    *,
+    external_system: str,
+    target_key: str,
+    event_id: str,
+    idempotency_key: str,
+):
+    return await apply_cache_target_source(
+        session,
+        consumer_id=_CONSUMER,
+        source_event_id=event_id,
+        idempotency_key=idempotency_key,
+        external_system=external_system,
+        target_key=target_key,
+        restore_epoch=1,
+        source_generation=1,
+        source=make_active_cache_target_source(
+            lon="126.978",
+            lat="37.5665",
+            radius_km="5",
+            update_enabled=True,
+        ),
+        occurred_at=datetime(2026, 7, 31, 18, 0, tzinfo=UTC),
+        create_only=True,
+    )
+
+
+@pytest.mark.integration
+async def test_fixed_snapshot_pages_ignore_concurrent_committed_write(
+    migrated_engine: AsyncEngine,
+) -> None:
+    system = "snapshot-concurrency-test"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="target-a",
+            event_id="91000000-0000-0000-0000-000000000001",
+            idempotency_key="92000000-0000-0000-0000-000000000001",
+        )
+        await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="target-b",
+            event_id="91000000-0000-0000-0000-000000000002",
+            idempotency_key="92000000-0000-0000-0000-000000000002",
+        )
+
+    async with AsyncSession(migrated_engine) as reader, reader.begin():
+        first = await get_cache_target_snapshot(
+            reader,
+            external_system=system,
+            limit=1,
+        )
+    assert first.count == 2
+    assert first.next_cursor is not None
+
+    async with AsyncSession(migrated_engine) as writer, writer.begin():
+        await _apply_snapshot_source(
+            writer,
+            external_system=system,
+            target_key="target-c",
+            event_id="91000000-0000-0000-0000-000000000003",
+            idempotency_key="92000000-0000-0000-0000-000000000003",
+        )
+
+    async with AsyncSession(migrated_engine) as reader, reader.begin():
+        second = await get_cache_target_snapshot(
+            reader,
+            external_system=system,
+            limit=1,
+            cursor=first.next_cursor,
+        )
+        fresh = await get_cache_target_snapshot(
+            reader,
+            external_system=system,
+            limit=10,
+        )
+    assert second.snapshot_id == first.snapshot_id
+    assert second.count == first.count == 2
+    assert second.merkle_root == first.merkle_root
+    assert [first.items[0].target_key, second.items[0].target_key] == [
+        "target-a",
+        "target-b",
+    ]
+    assert fresh.snapshot_id != first.snapshot_id
+    assert fresh.count == 3
+
+
+async def _reconciliation_command(
+    session: AsyncSession,
+    *,
+    key: str,
+) -> int:
+    fingerprint = canonical_domain_command_fingerprint({"key": key})
+    claim = await create_domain_command_claim(
+        session,
+        actor="admin:test",
+        operation="admin.cache-target-reconciliation.request",
+        idempotency_key=key,
+        request_fingerprint=fingerprint,
+    )
+    return claim.command_id
+
+
+@pytest.mark.integration
+async def test_reconciliation_mismatch_halts_and_exact_match_resumes_empty_stream(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "reconciliation-empty-test"
+    await lock_cache_target_stream(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+    )
+    first_command = await _reconciliation_command(
+        migrated_session,
+        key="93000000-0000-0000-0000-000000000001",
+    )
+    first = await request_cache_target_reconciliation(
+        migrated_session,
+        command_id=first_command,
+        external_system=system,
+        reason="empty mismatch",
+    )
+    mismatch = await complete_cache_target_reconciliation(
+        migrated_session,
+        request_id=first.request_id,
+        actual_merkle_root="f" * 64,
+    )
+    assert mismatch.status == "failed"
+    control = await get_cache_target_stream(
+        migrated_session,
+        external_system=system,
+    )
+    assert control is not None
+    assert control.status == "fenced"
+    assert not control.consumer_enabled
+    with pytest.raises(CacheTargetStreamConflict) as reused:
+        await complete_cache_target_reconciliation(
+            migrated_session,
+            request_id=first.request_id,
+            actual_merkle_root=first.expected_merkle_root,
+        )
+    assert reused.value.code == "reconciliation_receipt_mismatch"
+
+    second_command = await _reconciliation_command(
+        migrated_session,
+        key="93000000-0000-0000-0000-000000000002",
+    )
+    second = await request_cache_target_reconciliation(
+        migrated_session,
+        command_id=second_command,
+        external_system=system,
+        reason="empty exact",
+    )
+    running_operation = await get_cache_target_operation(
+        migrated_session,
+        operation_id=second.operation_id,
+    )
+    assert running_operation is not None
+    assert running_operation.status == "running"
+    succeeded = await complete_cache_target_reconciliation(
+        migrated_session,
+        request_id=second.request_id,
+        actual_merkle_root=second.expected_merkle_root,
+    )
+    assert succeeded.status == "succeeded"
+    succeeded_operation = await get_cache_target_operation(
+        migrated_session,
+        operation_id=second.operation_id,
+    )
+    assert succeeded_operation is not None
+    assert succeeded_operation.status == "succeeded"
+    control = await get_cache_target_stream(
+        migrated_session,
+        external_system=system,
+    )
+    assert control is not None
+    assert control.status == "ready"
+    assert control.consumer_enabled
+    stream_event = (
+        await migrated_session.execute(
+            text(
+                "SELECT event_scope, target_key, target_id, source_generation, "
+                "target_sequence, source_payload_fingerprint "
+                "FROM ops.poi_cache_target_outbox_events "
+                "WHERE reconciliation_request_id = CAST(:request_id AS uuid)"
+            ),
+            {"request_id": second.request_id},
+        )
+    ).one()
+    assert tuple(stream_event) == (
+        "stream",
+        None,
+        None,
+        None,
+        None,
+        second.expected_merkle_root,
+    )
+    statuses = await list_cache_target_stream_statuses(migrated_session, limit=100)
+    status = next(item for item in statuses.items if item.external_system == system)
+    assert status.consumer_enabled
+    assert status.last_snapshot is not None
+    assert status.last_snapshot.count == 0
+
+
+@pytest.mark.integration
+async def test_all_tombstone_reconciliation_emits_stream_scoped_event(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "reconciliation-tombstone-test"
+    created = await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="deleted-target",
+        event_id="94000000-0000-0000-0000-000000000001",
+        idempotency_key="95000000-0000-0000-0000-000000000001",
+    )
+    assert created.target is not None
+    deleted = await apply_cache_target_source(
+        migrated_session,
+        consumer_id=_CONSUMER,
+        source_event_id="94000000-0000-0000-0000-000000000002",
+        idempotency_key="95000000-0000-0000-0000-000000000002",
+        external_system=system,
+        target_key="deleted-target",
+        restore_epoch=1,
+        source_generation=2,
+        source=make_deleted_cache_target_source(),
+        occurred_at=datetime(2026, 7, 31, 18, 1, tzinfo=UTC),
+        create_only=False,
+        expected_target_id=created.target.target_id,
+        expected_lock_version=created.target.lock_version,
+    )
+    assert deleted.target is not None
+    command_id = await _reconciliation_command(
+        migrated_session,
+        key="96000000-0000-0000-0000-000000000001",
+    )
+    request = await request_cache_target_reconciliation(
+        migrated_session,
+        command_id=command_id,
+        external_system=system,
+        reason="tombstone exact",
+    )
+    page = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=10,
+        cursor=None,
+    )
+    assert page.count == 1
+    assert page.items[0].state == "deleted"
+    succeeded = await complete_cache_target_reconciliation(
+        migrated_session,
+        request_id=request.request_id,
+        actual_merkle_root=request.expected_merkle_root,
+    )
+    assert succeeded.status == "succeeded"
+    scopes = (
+        await migrated_session.execute(
+            text(
+                "SELECT event_scope, target_id FROM ops.poi_cache_target_outbox_events "
+                "WHERE external_system = :external_system ORDER BY relay_order"
+            ),
+            {"external_system": system},
+        )
+    ).all()
+    assert scopes[-1] == ("stream", None)
+    assert all(scope == "target" and target_id is not None for scope, target_id in scopes[:-1])
+
+
+@pytest.mark.integration
+async def test_service_source_read_and_refresh_request_idempotency(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "service-refresh-test"
+    created = await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="refresh-target",
+        event_id="97000000-0000-0000-0000-000000000001",
+        idempotency_key="98000000-0000-0000-0000-000000000001",
+    )
+    source = await get_cache_target_source(
+        migrated_session,
+        external_system=system,
+        target_key="refresh-target",
+    )
+    assert created.target is not None
+    assert source is not None
+    assert source.target_id == created.target.target_id
+    assert source.entity_tag is not None
+
+    request = await create_cache_target_refresh_request(
+        migrated_session,
+        principal_id="pinvi-service",
+        consumer_id=_CONSUMER,
+        idempotency_key="99000000-0000-0000-0000-000000000001",
+        external_system=system,
+        target_keys=["refresh-target"],
+        reason="service refresh",
+    )
+    assert request.status == "queued"
+    assert not request.idempotent_replay
+    replay = await create_cache_target_refresh_request(
+        migrated_session,
+        principal_id="pinvi-service",
+        consumer_id=_CONSUMER,
+        idempotency_key="99000000-0000-0000-0000-000000000001",
+        external_system=system,
+        target_keys=["refresh-target"],
+        reason="service refresh",
+    )
+    assert replay.request_id == request.request_id
+    assert replay.idempotent_replay
+    detail = await get_cache_target_refresh_request(
+        migrated_session,
+        request_id=request.request_id,
+    )
+    assert detail is not None
+    assert detail.external_system == system
+    with pytest.raises(CacheTargetStreamConflict) as conflict:
+        await create_cache_target_refresh_request(
+            migrated_session,
+            principal_id="pinvi-service",
+            consumer_id=_CONSUMER,
+            idempotency_key="99000000-0000-0000-0000-000000000001",
+            external_system=system,
+            target_keys=["refresh-target"],
+            reason="different reason",
+        )
+    assert conflict.value.code == "refresh_idempotency_key_reused"
 
 
 @pytest.mark.integration

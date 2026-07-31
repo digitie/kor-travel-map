@@ -74,10 +74,17 @@ outbox로 재사용하지 않는다.
 outbox event 필수 envelope는 다음과 같다.
 
 ```text
-event_id, event_type, external_system, target_key, target_id?,
+event_id, event_type, event_scope, external_system, target_key?, target_id?,
 restore_epoch, source_generation, target_sequence, relay_order,
 source_payload_fingerprint, occurred_at, typed payload
 ```
+
+`event_scope='target'`인 state/link/refresh 세 event는 `target_key`, historical
+`target_id`, `source_generation`, `target_sequence`를 모두 가진다. tombstone도 outbox
+이력에서는 삭제 전 target UUID를 보존하되 source head의 current target UUID는 `NULL`이다.
+`cache_target.reconciled`만 `event_scope='stream'`이며 네 target tuple 필드는 모두 `NULL`이다.
+빈 snapshot과 tombstone-only snapshot에도 fake target을 만들지 않고 stream event 하나를
+기록하며, 이때 `source_payload_fingerprint`는 비교를 통과한 snapshot Merkle root다.
 
 `event_type`은 다음 네 값만 허용한다.
 
@@ -113,6 +120,9 @@ consumer를 ready로 바꾸지 않는다.
 `GET /v1/service/cache-target-snapshots/{external_system}`은 page 전체에서 같은
 `snapshot_id`, `restore_epoch`, `high_watermark_cursor`, `count`, `merkle_root`를 유지하는 MVCC
 snapshot이다. active와 tombstone을 모두 포함한다. leaf row는 다음 다섯 필드만 가진다.
+첫 page는 stream control, outbox high-watermark와 모든 source head를 단일 PostgreSQL statement의
+MVCC view로 읽어 immutable header/item에 고정한다. 후속 page는 같은 snapshot item만 읽으므로
+중간에 새 source write가 commit돼도 count/root/page membership은 바뀌지 않는다.
 
 ```text
 (external_system, target_key, state, source_generation, source_payload_fingerprint)
@@ -163,6 +173,12 @@ T-VN-12 정적 registry에서 generic DB command, 기존 refresh ledger, outbox 
 operator는 ops read에서 epoch/claim/backlog/dead/reconciliation 상태를 보고, admin 표면에서 replay와
 reconciliation command를 실행한다. ServiceToken scope는 consumer read/claim/ack/nack/snapshot,
 restore-fence, recovery replay로 분리한다.
+
+reconciliation command는 active claim을 무효화하고 stream을 먼저 halt한 뒤 fixed snapshot을 만든다.
+consumer checksum receipt가 snapshot root와 정확히 같고 epoch이 그대로이며 dead-letter가 0일 때만
+`ready`/enabled로 전이하고 stream-scoped `cache_target.reconciled` event를 같은 transaction에 기록한다.
+checksum 불일치는 failed receipt를 남기고 fenced/disabled 상태를 유지한다. terminal request에 다른
+checksum을 재사용해서 resume할 수 없다.
 
 ### 8. 활성화
 

@@ -510,12 +510,13 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("event_type", sa.Text(), nullable=False),
+        sa.Column("event_scope", sa.Text(), nullable=False),
         sa.Column("external_system", sa.Text(), nullable=False),
-        sa.Column("target_key", sa.Text(), nullable=False),
+        sa.Column("target_key", sa.Text()),
         sa.Column("target_id", postgresql.UUID(as_uuid=False)),
         sa.Column("restore_epoch", sa.BigInteger(), nullable=False),
-        sa.Column("source_generation", sa.BigInteger(), nullable=False),
-        sa.Column("target_sequence", sa.BigInteger(), nullable=False),
+        sa.Column("source_generation", sa.BigInteger()),
+        sa.Column("target_sequence", sa.BigInteger()),
         sa.Column("source_payload_fingerprint", sa.Text(), nullable=False),
         sa.Column("payload_fingerprint", sa.Text(), nullable=False),
         sa.Column("payload", postgresql.JSONB(), nullable=False),
@@ -551,8 +552,19 @@ def upgrade() -> None:
             name="ck_cache_target_outbox_event_type",
         ),
         sa.CheckConstraint(
-            "restore_epoch > 0 AND source_generation > 0 AND target_sequence > 0",
+            "restore_epoch > 0 AND ("
+            "(event_scope = 'target' AND target_key IS NOT NULL "
+            "AND target_id IS NOT NULL AND source_generation > 0 "
+            "AND target_sequence > 0 AND event_type <> 'cache_target.reconciled') OR "
+            "(event_scope = 'stream' AND target_key IS NULL "
+            "AND target_id IS NULL AND source_generation IS NULL "
+            "AND target_sequence IS NULL AND event_type = 'cache_target.reconciled' "
+            "AND reconciliation_request_id IS NOT NULL))",
             name="ck_cache_target_outbox_versions",
+        ),
+        sa.CheckConstraint(
+            "event_scope IN ('target','stream')",
+            name="ck_cache_target_outbox_scope",
         ),
         sa.CheckConstraint(
             "jsonb_typeof(payload) = 'object'",

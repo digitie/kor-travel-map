@@ -2566,21 +2566,29 @@ T-VN-41 producer foundation은 projection row와 source 순서를 분리한다. 
 | source head | `(external_system, target_key)` | 마지막 source generation, target UUID 또는 durable tombstone |
 | source event | producer `event_id` | Idempotency-Key command, request fingerprint, 적용/replay 결과의 불변 이력 |
 | refresh member | `(request_id, target_id)` | request 시작 시 epoch/generation을 캡처한 late-result fence |
-| outbox event | `event_id`, unique `relay_order` | target/link/refresh 결과와 같은 transaction에서 만든 불변 typed event |
+| outbox event | `event_id`, unique `relay_order` | target/link/refresh/reconciliation 결과와 같은 transaction에서 만든 불변 typed event |
 | delivery/claim | event/claim identity | lease, attempt, retry, contiguous ACK, dead/replay 상태 |
+| fixed snapshot | `snapshot_id`, `(snapshot_id, row_number)` | 한 MVCC view의 epoch/high-watermark/head set과 Merkle root를 immutable page로 고정 |
+| reconciliation | `request_id`, unique `command_id` | checksum receipt, halt/resume와 terminal 성공/실패 이력 |
 
 `source_generation`은 target natural key별 PinVi desired-state generation이고,
 `target_sequence`는 같은 source generation에서 Map이 만든 결과 순서다. 기존
 `feature_update_requests.generation` queue CAS와 target `lock_version` ETag는 그대로 별도다.
 soft delete 뒤 새 target UUID가 생겨도 source head/tombstone은 제거하지 않는다.
 
-outbox event의 `event_type`은 ADR-081의 네 strict 값만 허용한다. payload는 versioned typed
-schema와 `source_payload_fingerprint`를 가지며 source event, target, refresh request, job,
-domain command와의 linkage를 보존한다. `ops.ops_live_topic_revisions`는 invalidation signal로만
-유지하고 event stream으로 사용하지 않는다.
+outbox event의 `event_type`은 ADR-081의 네 strict 값만 허용한다. `event_scope='target'`인
+state/link/refresh는 natural key, historical target UUID, generation, target sequence가 모두
+필수다. `event_scope='stream'`은 `cache_target.reconciled`만 허용하고 네 target tuple은 모두
+`NULL`이다. 따라서 빈/all-tombstone snapshot도 fake target 없이 reconciliation event를 남긴다.
+payload는 versioned typed schema와 `source_payload_fingerprint`를 가지며 source event, target,
+refresh request, job, domain command와의 linkage를 보존한다. `ops.ops_live_topic_revisions`는
+invalidation signal로만 유지하고 event stream으로 사용하지 않는다.
 
-fixed snapshot은 active와 tombstone을 같은 MVCC snapshot에 넣고 ADR-081 Merkle v1으로
-checksum한다. legacy target에는 임의 epoch를 백필하지 않으며 첫 권위 snapshot이 head를 채택한다.
+fixed snapshot은 stream epoch, outbox high-watermark, active/tombstone head 전체를 한 SQL MVCC
+view에서 읽어 ADR-081 Merkle v1으로 checksum한다. page 중 새 write가 commit돼도 immutable item은
+바뀌지 않는다. reconciliation은 먼저 claim을 무효화하고 stream을 halt한다. exact checksum,
+동일 epoch, dead-letter 0을 모두 확인해야만 enable하며 mismatch terminal receipt는 다른 checksum으로
+resume할 수 없다. legacy target에는 임의 epoch를 백필하지 않으며 첫 권위 snapshot이 head를 채택한다.
 
 ### 9.11 `ops.provider_refresh_policies` (ADR-045 T-205c, alembic 0009/0049/0056)
 

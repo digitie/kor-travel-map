@@ -101,8 +101,16 @@
 - restore swap은 env switch 파일 생성 전에 live/restore stream을 비교한다. epoch 회귀와 consumer
   binding drift를 거부하고, 동일 restore-fence 도메인 함수로 전진한 durable receipt가 있을 때만
   cutover 계획을 노출한다. host command retry는 같은 receipt를 replay한다.
-- 다음 checkpoint는 fixed MVCC snapshot/Merkle와 checksum reconciliation이다. consumer는 default
-  off이고 paired contract pin과 n150 isolated live 전에는 production에서 enable하지 않는다.
+- fixed snapshot은 control/high-watermark/head 전체를 한 SQL MVCC view로 캡처하고 immutable
+  header/item을 page한다. page 중 concurrent commit은 기존 snapshot count/root/member를 바꾸지 않는다.
+- reconciliation 시작은 active claim을 무효화하고 stream을 halt한다. checksum mismatch는 terminal
+  failed+disabled를 유지하며 다른 checksum retry로 resume할 수 없다. exact root·동일 epoch·dead 0만
+  ready/enabled로 전이한다. empty/all-tombstone 성공도 fake target 없이 `event_scope=stream` event를
+  같은 transaction에서 기록한다.
+- Service/Admin API placeholder를 실제 source/refresh/claim/DLQ/snapshot/reconciliation/operation
+  repository export에 결합하고 service 전용 OpenAPI를 admin/user 산출물과 분리했다.
+- 다음 checkpoint는 paired PinVi consumer contract pin과 n150 isolated live 검증이다. 그 전에는
+  consumer를 production에서 enable하지 않는다.
 
 ## 2026-07-31 (codex) — PostGIS-only workflow와 stale T-VN-12 이관
 

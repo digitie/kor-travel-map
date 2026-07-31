@@ -30,11 +30,13 @@ __all__ = [
     "CacheTargetDeliveryResult",
     "CacheTargetEventClaim",
     "CacheTargetOutboxEvent",
+    "CacheTargetDeadLetterPage",
     "ack_cache_target_events",
     "cache_target_dead_letter_entity_tag",
     "cache_target_event_cursor",
     "claim_cache_target_events",
     "get_cache_target_dead_letter",
+    "list_cache_target_dead_letters",
     "nack_cache_target_event",
     "parse_cache_target_event_cursor",
     "replay_cache_target_dead_letter",
@@ -49,12 +51,13 @@ _LOWERCASE_HEX = frozenset("0123456789abcdef")
 class CacheTargetOutboxEvent:
     event_id: str
     event_type: str
+    event_scope: Literal["target", "stream"]
     external_system: str
-    target_key: str
+    target_key: str | None
     target_id: str | None
     restore_epoch: int
-    source_generation: int
-    target_sequence: int
+    source_generation: int | None
+    target_sequence: int | None
     relay_order: int
     cursor: str
     source_payload_fingerprint: str
@@ -128,6 +131,12 @@ class CacheTargetDeadLetter:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class CacheTargetDeadLetterPage:
+    items: tuple[CacheTargetDeadLetter, ...]
+    next_cursor: str | None
+
+
 _EXPIRE_CLAIMS_SQL = """
 UPDATE ops.poi_cache_target_outbox_claims
 SET status = 'expired', completed_at = now()
@@ -163,6 +172,7 @@ WHERE external_system = :external_system
 
 _EVENT_COLUMNS = """
 event.event_id, event.event_type, event.external_system, event.target_key,
+event.event_scope,
 event.target_id, event.restore_epoch, event.source_generation,
 event.target_sequence, event.relay_order, event.source_payload_fingerprint,
 event.payload_fingerprint, event.payload, event.occurred_at
@@ -332,6 +342,23 @@ WHERE event.event_id = CAST(:event_id AS uuid)
 
 _LOCK_DEAD_LETTER_SQL = _GET_DEAD_LETTER_SQL + " FOR UPDATE OF delivery"
 
+_LIST_DEAD_LETTERS_SQL = f"""
+SELECT {_EVENT_COLUMNS}, delivery.delivery_version, delivery.attempt_count,
+       delivery.error_class, delivery.error_code, delivery.error_fingerprint,
+       delivery.updated_at
+FROM ops.poi_cache_target_outbox_events AS event
+JOIN ops.poi_cache_target_outbox_deliveries AS delivery
+  ON delivery.event_id = event.event_id
+WHERE delivery.status = 'dead'
+  AND (
+    CAST(:cursor_updated_at AS timestamptz) IS NULL
+    OR (delivery.updated_at, event.event_id) <
+       (CAST(:cursor_updated_at AS timestamptz), CAST(:cursor_event_id AS uuid))
+  )
+ORDER BY delivery.updated_at DESC, event.event_id DESC
+LIMIT :limit
+"""
+
 _REPLAY_DEAD_LETTER_SQL = """
 UPDATE ops.poi_cache_target_outbox_deliveries
 SET status = 'retry', delivery_version = delivery_version + 1,
@@ -393,6 +420,48 @@ def cache_target_dead_letter_entity_tag(event_id: str, delivery_version: int) ->
     return f'"{event_id}:{delivery_version}"'
 
 
+def _encode_dead_letter_cursor(*, updated_at: datetime, event_id: str) -> str:
+    raw = json.dumps(
+        {
+            "event_id": event_id,
+            "kind": "cache_target_dead_letter",
+            "updated_at": updated_at.isoformat(),
+            "v": 1,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _parse_dead_letter_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
+    if cursor is None:
+        return None, None
+    padded = cursor + "=" * (-len(cursor) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("ascii"))
+        updated_at = datetime.fromisoformat(str(payload["updated_at"]))
+        event_id = _canonical_uuid(str(payload["event_id"]), field="event_id")
+    except (
+        binascii.Error,
+        KeyError,
+        TypeError,
+        ValueError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ValueError("유효하지 않은 dead-letter cursor입니다.") from exc
+    if (
+        payload.get("kind") != "cache_target_dead_letter"
+        or payload.get("v") != 1
+        or updated_at.tzinfo is None
+    ):
+        raise ValueError("유효하지 않은 dead-letter cursor입니다.")
+    if _encode_dead_letter_cursor(updated_at=updated_at, event_id=event_id) != cursor:
+        raise ValueError("dead-letter cursor가 canonical encoding이 아닙니다.")
+    return updated_at, event_id
+
+
 def _payload(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         value = json.loads(value)
@@ -407,12 +476,21 @@ def _event(row: Any) -> CacheTargetOutboxEvent:
     return CacheTargetOutboxEvent(
         event_id=str(values["event_id"]),
         event_type=str(values["event_type"]),
+        event_scope=values["event_scope"],
         external_system=str(values["external_system"]),
-        target_key=str(values["target_key"]),
+        target_key=(str(values["target_key"]) if values["target_key"] is not None else None),
         target_id=(str(values["target_id"]) if values["target_id"] is not None else None),
         restore_epoch=int(values["restore_epoch"]),
-        source_generation=int(values["source_generation"]),
-        target_sequence=int(values["target_sequence"]),
+        source_generation=(
+            int(values["source_generation"])
+            if values["source_generation"] is not None
+            else None
+        ),
+        target_sequence=(
+            int(values["target_sequence"])
+            if values["target_sequence"] is not None
+            else None
+        ),
         relay_order=relay_order,
         cursor=cache_target_event_cursor(relay_order),
         source_payload_fingerprint=str(values["source_payload_fingerprint"]),
@@ -859,6 +937,38 @@ async def get_cache_target_dead_letter(
     event_id = _canonical_uuid(event_id, field="event_id")
     row = (await session.execute(text(_GET_DEAD_LETTER_SQL), {"event_id": event_id})).one_or_none()
     return _dead_letter(row) if row is not None else None
+
+
+async def list_cache_target_dead_letters(
+    session: AsyncSession,
+    *,
+    limit: int = 100,
+    cursor: str | None = None,
+) -> CacheTargetDeadLetterPage:
+    """변경 시각 역순 keyset으로 dead-letter를 조회한다."""
+
+    if not 0 < limit <= 500:
+        raise ValueError("limit은 1 이상 500 이하여야 합니다.")
+    cursor_updated_at, cursor_event_id = _parse_dead_letter_cursor(cursor)
+    rows = (
+        await session.execute(
+            text(_LIST_DEAD_LETTERS_SQL),
+            {
+                "cursor_updated_at": cursor_updated_at,
+                "cursor_event_id": cursor_event_id,
+                "limit": limit + 1,
+            },
+        )
+    ).all()
+    items = tuple(_dead_letter(row) for row in rows[:limit])
+    next_cursor = None
+    if len(rows) > limit and items:
+        last = items[-1]
+        next_cursor = _encode_dead_letter_cursor(
+            updated_at=last.updated_at,
+            event_id=last.event.event_id,
+        )
+    return CacheTargetDeadLetterPage(items=items, next_cursor=next_cursor)
 
 
 async def replay_cache_target_dead_letter(

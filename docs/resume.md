@@ -88,13 +88,19 @@ Migration 0073과 source/result outbox repository를 구현했고, Map restore s
 epoch을 복원 DB와 먼저 대조한다. 복원 epoch 회귀나 consumer binding drift는 fail-close하며,
 통과한 모든 stream은 동일 restore-fence 도메인 함수와 durable command receipt로 전진한 뒤에만
 `.env.restore-swap`을 기록한다. 동일 host command 재시도는 epoch을 다시 올리지 않는다.
+Fixed snapshot은 control/high-watermark/head 전체를 한 MVCC statement로 캡처해 immutable page와
+Merkle root로 고정한다. reconciliation은 claim을 무효화하고 stream을 halt하며 checksum exact
+match·동일 epoch·dead-letter 0에서만 resume한다. empty/all-tombstone 성공은 fake target 없이
+`event_scope=stream`인 단일 `cache_target.reconciled` event를 남긴다.
+Service/Admin API adapter는 source/refresh/claim/DLQ/snapshot/reconciliation/operation repository
+export에 직접 결합했고 service 전용 OpenAPI 산출물을 admin/user 계약과 분리해 고정했다.
 
 본 Map PR은 producer foundation이며 `T-VN-41A/B/C` 완료가 아니다. PinVi paired consumer,
 pinned service OpenAPI, n150 isolated duplicate/gap/restore epoch live와 checksum equality 전까지 task와
 consumer enable은 open/off로 유지한다.
 
-**다음 한 작업**: fixed MVCC snapshot/Merkle와 checksum reconciliation·consumer enable 경계를
-구현한다.
+**다음 한 작업**: paired PinVi consumer가 pinned service OpenAPI로 같은 event/schema/checksum을
+검증하게 한 뒤 n150 isolated duplicate/gap/restore epoch live gate를 실행한다.
 
 ## 2026-07-31 (codex) — T-VN-CI-PG 임의 ref PostGIS 수동 gate 완료
 

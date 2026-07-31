@@ -204,11 +204,11 @@ INSERT INTO ops.poi_cache_target_source_events (
 
 _INSERT_OUTBOX_EVENT_SQL = """
 INSERT INTO ops.poi_cache_target_outbox_events (
-    event_id, event_type, external_system, target_key, target_id,
+    event_id, event_type, event_scope, external_system, target_key, target_id,
     restore_epoch, source_generation, target_sequence,
     source_payload_fingerprint, payload_fingerprint, payload, source_event_id
 ) VALUES (
-    CAST(:event_id AS uuid), 'cache_target.state_applied', :external_system,
+    CAST(:event_id AS uuid), 'cache_target.state_applied', 'target', :external_system,
     :target_key, CAST(:target_id AS uuid), :restore_epoch, :source_generation,
     :target_sequence, :source_payload_fingerprint, :payload_fingerprint,
     CAST(:payload AS jsonb), CAST(:source_event_id AS uuid)
@@ -641,7 +641,8 @@ async def apply_cache_target_source(
 
     target: PoiCacheTarget | None
     historical_target_id: str | None
-    event_target_id: str | None
+    head_target_id: str | None
+    outbox_target_id: str
     if isinstance(source, ActiveCacheTargetSourceV1):
         target = await upsert_poi_cache_target(
             session,
@@ -660,7 +661,8 @@ async def apply_cache_target_source(
             on_conflict="move",
         )
         historical_target_id = target.target_id
-        event_target_id = target.target_id
+        head_target_id = target.target_id
+        outbox_target_id = target.target_id
         state: Literal["active", "deleted"] = "active"
         payload: dict[str, Any] = {
             "version": "cache-target-event-v1",
@@ -694,7 +696,8 @@ async def apply_cache_target_source(
             )
         target = deleted.target
         historical_target_id = target.target_id
-        event_target_id = None
+        head_target_id = None
+        outbox_target_id = target.target_id
         state = "deleted"
         payload = {
             "version": "cache-target-event-v1",
@@ -709,7 +712,7 @@ async def apply_cache_target_source(
             {
                 "external_system": external_system,
                 "target_key": target_key,
-                "target_id": event_target_id,
+                "target_id": head_target_id,
                 "state": state,
                 "restore_epoch": restore_epoch,
                 "source_generation": source_generation,
@@ -745,7 +748,7 @@ async def apply_cache_target_source(
                     "event_id": outbox_event_id,
                     "external_system": external_system,
                     "target_key": target_key,
-                    "target_id": event_target_id,
+                    "target_id": outbox_target_id,
                     "restore_epoch": restore_epoch,
                     "source_generation": source_generation,
                     "target_sequence": target_sequence,
@@ -769,7 +772,7 @@ async def apply_cache_target_source(
         {
             "external_system": external_system,
             "target_key": target_key,
-            "target_id": event_target_id,
+            "target_id": head_target_id,
             "state": state,
             "restore_epoch": restore_epoch,
             "source_generation": source_generation,

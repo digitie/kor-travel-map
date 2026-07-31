@@ -166,13 +166,13 @@ WHERE external_system = :external_system
 
 _INSERT_EVENT_SQL = """
 INSERT INTO ops.poi_cache_target_outbox_events (
-    event_id, event_type, external_system, target_key, target_id,
+    event_id, event_type, event_scope, external_system, target_key, target_id,
     restore_epoch, source_generation, target_sequence,
     source_payload_fingerprint, payload_fingerprint, payload,
     refresh_request_id, job_id, domain_command_id,
     reconciliation_request_id
 ) VALUES (
-    CAST(:event_id AS uuid), :event_type, :external_system, :target_key,
+    CAST(:event_id AS uuid), :event_type, 'target', :external_system, :target_key,
     CAST(:target_id AS uuid), :restore_epoch, :source_generation,
     :target_sequence, :source_payload_fingerprint, :payload_fingerprint,
     CAST(:payload AS jsonb), CAST(:refresh_request_id AS uuid),

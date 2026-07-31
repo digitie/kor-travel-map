@@ -4282,8 +4282,19 @@ class PoiCacheTargetOutboxEventRow(Base):
             name=conv("ck_cache_target_outbox_event_type"),
         ),
         CheckConstraint(
-            "restore_epoch > 0 AND source_generation > 0 AND target_sequence > 0",
+            "restore_epoch > 0 AND ("
+            "(event_scope = 'target' AND target_key IS NOT NULL "
+            "AND target_id IS NOT NULL AND source_generation > 0 "
+            "AND target_sequence > 0 AND event_type <> 'cache_target.reconciled') OR "
+            "(event_scope = 'stream' AND target_key IS NULL "
+            "AND target_id IS NULL AND source_generation IS NULL "
+            "AND target_sequence IS NULL AND event_type = 'cache_target.reconciled' "
+            "AND reconciliation_request_id IS NOT NULL))",
             name=conv("ck_cache_target_outbox_versions"),
+        ),
+        CheckConstraint(
+            "event_scope IN ('target','stream')",
+            name=conv("ck_cache_target_outbox_scope"),
         ),
         CheckConstraint(
             "jsonb_typeof(payload) = 'object'",
@@ -4325,8 +4336,9 @@ class PoiCacheTargetOutboxEventRow(Base):
         nullable=False,
     )
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    event_scope: Mapped[str] = mapped_column(Text, nullable=False)
     external_system: Mapped[str] = mapped_column(Text, nullable=False)
-    target_key: Mapped[str] = mapped_column(Text, nullable=False)
+    target_key: Mapped[str | None] = mapped_column(Text)
     target_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
         ForeignKey(
@@ -4336,8 +4348,8 @@ class PoiCacheTargetOutboxEventRow(Base):
         ),
     )
     restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    source_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    target_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_generation: Mapped[int | None] = mapped_column(BigInteger)
+    target_sequence: Mapped[int | None] = mapped_column(BigInteger)
     source_payload_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     payload_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)

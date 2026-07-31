@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+### cache-target generation outbox producer foundation (2026-07-31, T-VN-41)
+
+- **DATABASE (breaking)**: migration `0073_cache_target_outbox`로 source generation/restore epoch,
+  durable head/tombstone, transaction outbox, delivery/claim/dead-letter, fixed snapshot과
+  reconciliation 상태를 정규화했다.
+- **CORRECTNESS**: target/link/refresh 결과 event는 원본 mutation과 같은 transaction에서
+  commit한다. restore swap은 live보다 낮은 epoch와 consumer binding drift를 거부하고 동일
+  restore-fence domain 함수가 성공한 뒤에만 cutover env를 노출한다.
+- **RELAY**: consumer pull claim, contiguous ACK, bounded NACK/dead/replay와 immutable snapshot
+  pagination을 제공한다. checksum mismatch는 stream을 disabled로 유지하고 exact match·동일 epoch·
+  dead-letter 0에서만 resume한다.
+- **CONTRACT**: target event와 stream reconciliation event를 `event_scope`로 분리해 empty 및
+  tombstone-only snapshot에도 fake target tuple을 만들지 않는다.
+
 ### curation 주소 fail-close·행별 provenance (2026-07-31, T-VN-H31R)
 
 - **DATABASE (breaking)**: migration `0072_curation_provenance`로 import batch/row와
