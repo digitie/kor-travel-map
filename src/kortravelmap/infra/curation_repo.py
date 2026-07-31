@@ -1342,7 +1342,29 @@ CROSS JOIN LATERAL (
           AND f.status NOT IN ('deleted', 'hidden')
           AND (
               requested.address_hint IS NULL
-              OR f.address::text ILIKE '%' || requested.address_hint || '%'
+              OR NOT EXISTS (
+                  -- hint를 공백 토큰으로 쪼개 **전부** 포함하는지 본다 (T-VN-H31).
+                  --
+                  -- 이전에는 `f.address::text ILIKE '%' || hint || '%'`로 직렬화 jsonb에
+                  -- 통짜 substring을 걸었다. 그런데 address jsonb는 `sido_name`·
+                  -- `sigungu_name`·`admin`을 **분리 저장**하므로 `'울산광역시 울주군
+                  -- 서생면'` 같은 다중 토큰 hint는 어떤 행에서도 연속 부분문자열이
+                  -- 아니다 — 상세할수록 매칭이 안 되는 역전이 있었다. 실측으로
+                  -- `feature.features`의 8%는 `road`/`legal`이 둘 다 null이고 관광
+                  -- Feature는 그 비율이 더 높아, 도로명/지번 어느 쪽을 넣어도 같은 벽에 막힌다.
+                  --
+                  -- 토큰 AND로 바꾸면 시군구 단독은 물론 `'시도 시군구 읍면동 리'`까지
+                  -- 그대로 작동하고, 토큰이 많을수록 **더 좁아진다**(오링크가 줄어든다).
+                  SELECT 1
+                  FROM unnest(
+                      string_to_array(
+                          btrim(regexp_replace(requested.address_hint, '\\s+', ' ', 'g')),
+                          ' '
+                      )
+                  ) AS hint_token
+                  WHERE hint_token <> ''
+                    AND f.address::text NOT ILIKE '%' || hint_token || '%'
+              )
           )
         ORDER BY f.feature_id
         LIMIT 3
