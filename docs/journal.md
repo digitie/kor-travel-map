@@ -22,11 +22,14 @@
 - 주소 후보를 구조화 field·Unicode/literal hierarchy·versioned alias로 제한하고
   `address_hint` 단독 자동 링크를 제거했다. 등대 105행 sidecar와 manifest를 결박했다.
 - migration `0072_curation_provenance`로 import batch/row와 link decision을 append-only
-  정규화했다. exact current pointer FK, legacy fail-close, admin link audit와 import receipt를
-  추가했다.
-- selective forward recovery와 Feature merge가 승인 근거를 새 decision으로 남기도록 했다.
-  duplicate loser membership은 물리 삭제 대신 revocation+archive tombstone으로 보존한다.
-- 관련 unit/API/PostgreSQL migration·curation·merge 159건, ruff, strict mypy가 통과했다.
+  정규화했다. DB immutable trigger, same-item composite FK, exact current pointer와 legacy
+  fail-close를 강제했다.
+- official 등대 sidecar를 실제 multipart import와 durable row provenance에 결박하고
+  batch/current-row 조회, stable cursor link audit를 추가했다.
+- Feature merge는 non-legacy accepted link만 재승인한다. duplicate loser source가 이기면
+  survivor-owned merge row/decision을 append하고 loser는 revocation+archive로 보존한다.
+- 단일 적대 리뷰 P1 2건·P2 3건·P3 1건을 모두 회귀로 전환했다. PostgreSQL alembic 14,
+  curation 27, merge 28과 API/cursor 38, OpenAPI/route policy 33건이 통과했다.
 
 ## 2026-07-31 (codex) — PR #908 #911~#914 적대 리뷰 보강
 

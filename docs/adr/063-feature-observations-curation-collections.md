@@ -299,7 +299,16 @@ item·target을 가리키도록 강제한다. revoke나 이전 row 재적용은 
 #907 이후 unsafe resolver의 결과를 추정으로 정상화하지 않고 감사 대상으로 격리한다. 공식
 seed는 새 계약으로 재적재해 explicit link와 행별 provenance를 다시 확정한다.
 
-Feature merge도 이 경계를 우회하지 않는다. active membership은 master target을 가리키는
-`forward_recovery` decision을 새로 만들고, duplicate loser membership은 link를 revoke한
-archive tombstone으로 남긴다. 과거처럼 provenance가 참조하는 item을 물리 삭제하거나
-기존 accepted decision과 다른 `feature_id`로 조용히 바꾸지 않는다.
+Feature merge도 이 경계를 우회하지 않는다. 현재 non-legacy accepted decision이 있는 active
+membership만 master target의 `forward_recovery` decision으로 재승인한다.
+`legacy_unattributed`·NULL·revoked link는 accepted pointer 없이 감사 대상으로 남는다.
+duplicate loser membership은 link를 revoke한 archive tombstone으로 보존하고, loser provider
+projection이 이기면 survivor 소유 merge import row와 trusted decision을 새로 append한다.
+과거처럼 provenance가 참조하는 item을 물리 삭제하거나 current row와 다른 source projection을
+조용히 만들지 않는다.
+
+세 history table은 공통 DB trigger가 UPDATE·DELETE·TRUNCATE를 거부하고 batch→row 삭제도
+`RESTRICT`한다. decision의 import row와 supersedes target은 composite FK로 같은 item에만
+속하며 self-supersede를 금지한다. 공식 등대 seed는 admin multipart import에서 exact CSV와
+결박된 sidecar를 hard-require하고, strict 검증한 각 행을 durable row provenance로 저장한다.
+batch/current-row admin 조회와 stable cursor audit가 운영 검토·선택 재적용 근거를 제공한다.

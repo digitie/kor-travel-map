@@ -16,16 +16,22 @@
 `address_hint` 자동 링크를 제거했다. 등대 105행 provenance sidecar는 manifest의 SHA와
 ordered identity에 결박했다. migration `0072_curation_provenance`는 import batch/row와
 link decision을 append-only로 정규화하고 current item의 exact row/target을 composite
-deferred FK로 강제한다. 기존 link는 `legacy_unattributed`로 이관해 public에서 fail-close한다.
+deferred FK로 강제한다. history mutation/truncate는 DB trigger가 거부하고 import/supersedes
+chain은 같은 item만 허용한다. 기존 link는 `legacy_unattributed`로 이관해 public에서
+fail-close한다.
 
 Admin REST는 import `import_batch_id`, item provenance와 `/v1/admin/curations/link-audit`를
-제공한다. 선택적 `forward_recovery`는 대상 collection만 전진하며, Feature merge도 active
-link를 새 decision으로 master에 재승인하고 duplicate loser를 revocation+archive로 보존한다.
-관련 unit/API/PostgreSQL migration·repository·merge **159건**이 통과했고 ruff와 strict mypy도
-green이다.
+제공한다. official 등대 import는 exact sidecar를 hard-require하고 batch/current-row 조회와
+stable audit cursor로 잘림 없는 검토를 지원한다. Feature merge는 non-legacy accepted
+link만 master에 재승인한다. duplicate loser source가 이기면 survivor-owned merge
+row/decision을 append하고 loser를 revocation+archive로 보존한다.
 
-**다음 한 작업**: OpenAPI를 재생성하고 전체 gate·보안 감사를 통과한 exact #910 head를
-lease-safe push한 뒤 단일 적대 리뷰를 요청한다.
+단일 적대 리뷰 P1 2건·P2 3건·P3 1건을 모두 구현·회귀로 전환했다. 현재 focused gate는
+PostgreSQL alembic **14**, curation **27**, merge **28**, API/cursor **38**,
+OpenAPI/route policy **33**건이 통과했다.
+
+**다음 한 작업**: 통합 focused·정적·frontend gate와 보안 감사를 끝내고 새 exact #910 head를
+같은 단일 적대 리뷰어에게 재검토 요청한다.
 
 ## 2026-07-31 (codex) — PR #908 H32R/H34R 적대 리뷰 보강 완료
 
