@@ -167,7 +167,7 @@ RETURNING request_id, external_system, status, snapshot_id,
 """
 
 _LOCK_STREAM_SQL = """
-SELECT external_system, restore_epoch, control_version, status,
+SELECT external_system, consumer_id, restore_epoch, control_version, status,
        blocked_event_id, consumer_enabled
 FROM ops.poi_cache_target_streams
 WHERE external_system = :external_system
@@ -795,11 +795,18 @@ async def complete_cache_target_reconciliation(
     session: AsyncSession,
     *,
     request_id: str,
+    external_system: str,
+    consumer_id: str,
+    snapshot_id: str,
+    expected_restore_epoch: int,
     actual_merkle_root: str,
 ) -> CacheTargetReconciliationResult:
-    """Consumer checksum receipt가 exact match일 때만 stream을 enable한다."""
+    """결박된 consumer의 exact snapshot receipt만 stream을 enable한다."""
 
     request_id = _canonical_uuid(request_id, field="request_id")
+    snapshot_id = _canonical_uuid(snapshot_id, field="snapshot_id")
+    if expected_restore_epoch <= 0:
+        raise ValueError("expected_restore_epoch은 양수여야 합니다.")
     actual_merkle_root = _sha256(actual_merkle_root, field="actual_merkle_root")
     row = (
         await session.execute(
@@ -813,6 +820,31 @@ async def complete_cache_target_reconciliation(
             "reconciliation request가 없습니다.",
         )
     values = row._mapping
+    if (
+        str(values["external_system"]) != external_system
+        or str(values["snapshot_id"]) != snapshot_id
+        or int(values["restore_epoch"]) != expected_restore_epoch
+    ):
+        raise CacheTargetStreamConflict(
+            "reconciliation_precondition_failed",
+            "reconciliation request의 stream, snapshot 또는 restore epoch이 다릅니다.",
+            current={
+                "external_system": str(values["external_system"]),
+                "snapshot_id": str(values["snapshot_id"]),
+                "restore_epoch": int(values["restore_epoch"]),
+            },
+        )
+    stream = (
+        await session.execute(
+            text(_LOCK_STREAM_SQL),
+            {"external_system": external_system},
+        )
+    ).one()
+    if str(stream._mapping["consumer_id"]) != consumer_id:
+        raise CacheTargetStreamConflict(
+            "consumer_mismatch",
+            "service principal consumer_id가 stream binding과 다릅니다.",
+        )
     if str(values["status"]) in ("succeeded", "failed"):
         if str(values["actual_merkle_root"]) != actual_merkle_root:
             raise CacheTargetStreamConflict(
@@ -821,13 +853,6 @@ async def complete_cache_target_reconciliation(
             )
         return _reconciliation(row, replay=True)
 
-    external_system = str(values["external_system"])
-    stream = (
-        await session.execute(
-            text(_LOCK_STREAM_SQL),
-            {"external_system": external_system},
-        )
-    ).one()
     expected = str(values["expected_merkle_root"])
     exact_match = expected == actual_merkle_root
     if exact_match:

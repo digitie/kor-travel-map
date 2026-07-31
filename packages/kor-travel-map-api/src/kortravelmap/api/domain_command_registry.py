@@ -419,9 +419,18 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     (
         "POST",
         "/v1/service/cache-target-event-dead-letters/{event_id}/replays",
-    ): _specialized(
-        "cache-target.dead-letter.replay",
-        "delivery state와 If-Match version이 같은 event replay를 소유",
+    ): _domain(
+        "service.cache-target-dead-letter.replay",
+        _DESTRUCTIVE_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+    ),
+    (
+        "POST",
+        "/v1/service/cache-target-reconciliations/{request_id}/completions",
+    ): _domain(
+        "service.cache-target-reconciliation.complete",
+        "consumer checksum receipt와 terminal resume 결과를 exact replay",
     ),
     ("POST", "/v1/ops/datasets/preview"): _query(
         "provider fixture/live preview를 반환하지만 durable mutation은 없음"

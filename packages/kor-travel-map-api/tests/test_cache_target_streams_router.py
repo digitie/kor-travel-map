@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from kortravelmap.infra.cache_target_stream_repo import CacheTargetStreamConflict
 from pydantic import ValidationError
 
 from kortravelmap.api.app import create_app
@@ -17,6 +18,10 @@ from kortravelmap.api.auth import CACHE_TARGET_CONSUMER_HEADER, SERVICE_TOKEN_HE
 from kortravelmap.api.cache_target_stream_schema import CacheTargetEventRecord
 from kortravelmap.api.cache_target_stream_service import get_cache_target_stream_service
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    DomainCommandFingerprintConflict,
+    DomainCommandReplay,
+)
 from kortravelmap.api.settings import ApiSettings
 
 TOKEN = "cache-target-token-000000000000000000000000"
@@ -48,6 +53,8 @@ class _FakeCacheTargetService:
         self.apply_calls: list[dict[str, Any]] = []
         self.claim_calls: list[dict[str, Any]] = []
         self.reconciliation_calls: list[dict[str, Any]] = []
+        self.reconciliation_completion_calls: list[dict[str, Any]] = []
+        self.reconciliation_completion_error: Exception | None = None
         self.restore_calls: list[dict[str, Any]] = []
         self.replay_calls: list[dict[str, Any]] = []
         self.apply_result: Any = SimpleNamespace(
@@ -93,6 +100,15 @@ class _FakeCacheTargetService:
             status_url="/v1/ops/cache-target-operations/88888888-8888-4888-8888-888888888888",
             retry_after_seconds=5,
         )
+        self.reconciliation_completion_result: Any = SimpleNamespace(
+            operation_id="99999999-9999-4999-8999-999999999999",
+            status="succeeded",
+            status_url=(
+                "/v1/ops/cache-target-operations/"
+                "99999999-9999-4999-8999-999999999999"
+            ),
+            retry_after_seconds=None,
+        )
         self.replay_result: Any = SimpleNamespace(
             event_id=EVENT_ID,
             status="retry",
@@ -133,6 +149,16 @@ class _FakeCacheTargetService:
         self.reconciliation_calls.append(kwargs)
         return self.reconciliation_result
 
+    async def complete_cache_target_reconciliation(
+        self,
+        _session: Any,
+        **kwargs: Any,
+    ) -> Any:
+        self.reconciliation_completion_calls.append(kwargs)
+        if self.reconciliation_completion_error is not None:
+            raise self.reconciliation_completion_error
+        return self.reconciliation_completion_result
+
     async def get_cache_target_dead_letter(
         self,
         _session: Any,
@@ -160,6 +186,7 @@ def _settings(
     token: str = TOKEN,
     scopes: list[str] | None = None,
     external_systems: list[str] | None = None,
+    admin_destructive_enabled: bool = False,
 ) -> ApiSettings:
     return ApiSettings(
         _env_file=None,
@@ -169,6 +196,7 @@ def _settings(
         public_api_key_required=False,
         service_token=None,
         vworld_api_key=None,
+        admin_destructive_enabled=admin_destructive_enabled,
         cache_target_service_principals=[
             {
                 "principal_id": "svc:pinvi",
@@ -302,7 +330,8 @@ def test_cache_target_claim_serializes_stream_scoped_reconciled_event() -> None:
         status="active",
         first_relay_order=10,
         last_relay_order=11,
-        acked_through_relay_order=None,
+        acked_through_relay_order=10,
+        acked_through="opaque-cursor-10",
         lease_expires_at=NOW + timedelta(seconds=60),
         events=[
             SimpleNamespace(
@@ -357,6 +386,7 @@ def test_cache_target_claim_serializes_stream_scoped_reconciled_event() -> None:
     assert response.status_code == 200, response.text
     assert service.claim_calls[0]["external_system"] == EXTERNAL_SYSTEM
     assert service.claim_calls[0]["consumer_id"] == CONSUMER_ID
+    assert response.json()["data"]["acked_through"] == "opaque-cursor-10"
     events = response.json()["data"]["events"]
     assert events[0]["event_scope"] == "target"
     assert events[0]["target_key"] == "target-1"
@@ -410,6 +440,52 @@ def test_refresh_request_rejects_more_than_500_targets_before_service_call() -> 
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("body_patch", "field"),
+    [
+        ({"lease_seconds": 301}, "lease_seconds"),
+        ({"error_fingerprint": "A" * 64}, "error_fingerprint"),
+        ({"error_fingerprint": "a" * 63}, "error_fingerprint"),
+    ],
+)
+def test_cache_target_delivery_bounds_return_stable_422(
+    body_patch: dict[str, Any],
+    field: str,
+) -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service)
+    if field == "lease_seconds":
+        response = client.post(
+            "/v1/service/cache-target-event-claims",
+            headers=_service_headers(),
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": CONSUMER_ID,
+                "limit": 1,
+                **body_patch,
+            },
+        )
+    else:
+        response = client.post(
+            "/v1/service/cache-target-event-nacks",
+            headers=_service_headers(),
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": CONSUMER_ID,
+                "claim_id": CLAIM_ID,
+                "lease_token": LEASE_TOKEN,
+                "event_id": EVENT_ID,
+                "disposition": "permanent",
+                "error_class": "unsupported",
+                **body_patch,
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
 
 
 @pytest.mark.unit
@@ -601,7 +677,7 @@ def test_admin_reconciliation_passes_domain_command_id(
         "complete_domain_command",
         _complete_domain_command,
     )
-    client = _client(service)
+    client = _client(service, settings=_settings(admin_destructive_enabled=True))
 
     response = client.post(
         "/v1/admin/cache-target-reconciliations",
@@ -625,7 +701,196 @@ def test_admin_reconciliation_passes_domain_command_id(
 
 
 @pytest.mark.unit
-def test_service_dead_letter_replay_checks_event_system_allowlist() -> None:
+def test_admin_reconciliation_requires_destructive_gate() -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service, settings=_settings(admin_destructive_enabled=False))
+
+    response = client.post(
+        "/v1/admin/cache-target-reconciliations",
+        headers={"Idempotency-Key": IDEMPOTENCY_KEY},
+        json={"external_system": EXTERNAL_SYSTEM, "reason": "operator request"},
+    )
+
+    assert response.status_code == 403
+    assert service.reconciliation_calls == []
+
+
+@pytest.mark.unit
+def test_service_reconciliation_completion_binds_preconditions_and_ledger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import cache_target_streams as router_module
+
+    service = _FakeCacheTargetService()
+    captured_complete: dict[str, Any] = {}
+
+    async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
+        assert kwargs["actor"] == "svc:pinvi"
+        assert kwargs["operation"] == "service.cache-target-reconciliation.complete"
+        assert kwargs["payload"] == {
+            "request_id": "88888888-8888-4888-8888-888888888888",
+            "body": {
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": CONSUMER_ID,
+                "snapshot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "expected_restore_epoch": 4,
+                "actual_merkle_root": "a" * 64,
+            },
+        }
+        return SimpleNamespace(command_id=789, request_fingerprint="f" * 64)
+
+    async def _complete_domain_command(_session: Any, **kwargs: Any) -> None:
+        captured_complete.update(kwargs)
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
+    monkeypatch.setattr(router_module, "complete_domain_command", _complete_domain_command)
+    client = _client(service, settings=_settings(scopes=["cache-target:snapshot"]))
+    request_id = "88888888-8888-4888-8888-888888888888"
+
+    response = client.post(
+        f"/v1/service/cache-target-reconciliations/{request_id}/completions",
+        headers=_service_headers(),
+        json={
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "snapshot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "expected_restore_epoch": 4,
+            "actual_merkle_root": "a" * 64,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["status"] == "succeeded"
+    assert service.reconciliation_completion_calls == [
+        {
+            "request_id": request_id,
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "snapshot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "expected_restore_epoch": 4,
+            "actual_merkle_root": "a" * 64,
+        }
+    ]
+    assert captured_complete["status_code"] == 200
+
+
+@pytest.mark.unit
+def test_service_reconciliation_completion_distinguishes_412_and_409(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import cache_target_streams as router_module
+
+    service = _FakeCacheTargetService()
+    service.reconciliation_completion_error = CacheTargetStreamConflict(
+        "reconciliation_precondition_failed",
+        "snapshot precondition mismatch",
+        current={"snapshot_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},
+    )
+
+    async def _begin_domain_command(_session: Any, **_kwargs: Any) -> Any:
+        return SimpleNamespace(command_id=792, request_fingerprint="c" * 64)
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
+    client = _client(service, settings=_settings(scopes=["cache-target:snapshot"]))
+    path = (
+        "/v1/service/cache-target-reconciliations/"
+        "88888888-8888-4888-8888-888888888888/completions"
+    )
+    body = {
+        "external_system": EXTERNAL_SYSTEM,
+        "consumer_id": CONSUMER_ID,
+        "snapshot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "expected_restore_epoch": 4,
+        "actual_merkle_root": "a" * 64,
+    }
+    stale = client.post(path, headers=_service_headers(), json=body)
+
+    assert stale.status_code == 412
+    assert stale.json()["code"] == "RECONCILIATION_PRECONDITION_FAILED"
+
+    async def _idempotency_conflict(_session: Any, **_kwargs: Any) -> Any:
+        raise DomainCommandFingerprintConflict(
+            SimpleNamespace(
+                operation="service.cache-target-reconciliation.complete",
+                idempotency_key=IDEMPOTENCY_KEY,
+            )
+        )
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _idempotency_conflict)
+    conflict = client.post(
+        path,
+        headers=_service_headers(),
+        json={**body, "actual_merkle_root": "b" * 64},
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["code"] == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.unit
+def test_service_dead_letter_replay_exact_response_uses_domain_ledger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import cache_target_streams as router_module
+
+    service = _FakeCacheTargetService()
+    service.dead_letter = SimpleNamespace(
+        event=SimpleNamespace(external_system=EXTERNAL_SYSTEM),
+        delivery_version=2,
+    )
+    captured: dict[str, Any] = {}
+
+    async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
+        assert kwargs["actor"] == "svc:pinvi"
+        assert kwargs["operation"] == "service.cache-target-dead-letter.replay"
+        assert kwargs["payload"] == {
+            "event_id": EVENT_ID,
+            "body": {"reason": "manual replay"},
+            "headers": {"If-Match": f'"{EVENT_ID}:2"'},
+        }
+        return SimpleNamespace(command_id=790, request_fingerprint="e" * 64)
+
+    async def _complete_domain_command(_session: Any, **kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
+    monkeypatch.setattr(router_module, "complete_domain_command", _complete_domain_command)
+    client = _client(
+        service,
+        settings=_settings(scopes=["cache-target:recovery-replay"]),
+    )
+    path = f"/v1/service/cache-target-event-dead-letters/{EVENT_ID}/replays"
+    headers = _service_headers(extra={"If-Match": f'"{EVENT_ID}:2"'})
+    first = client.post(path, headers=headers, json={"reason": "manual replay"})
+    assert first.status_code == 200, first.text
+    assert captured["response_headers"] == {"ETag": f'"{EVENT_ID}:3"'}
+    assert len(service.replay_calls) == 1
+
+    replay_record = SimpleNamespace(
+        response_body=captured["response"].model_dump(mode="json"),
+        response_status=200,
+        response_headers=captured["response_headers"],
+    )
+
+    async def _replay_domain_command(_session: Any, **_kwargs: Any) -> Any:
+        raise DomainCommandReplay(replay_record)
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _replay_domain_command)
+    replay = client.post(path, headers=headers, json={"reason": "manual replay"})
+
+    assert replay.status_code == 200
+    assert replay.json() == first.json()
+    assert replay.headers["etag"] == first.headers["etag"]
+    assert replay.headers["idempotency-replayed"] == "true"
+    assert len(service.replay_calls) == 1
+
+
+@pytest.mark.unit
+def test_service_dead_letter_replay_checks_event_system_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import cache_target_streams as router_module
+
     service = _FakeCacheTargetService()
     service.dead_letter = SimpleNamespace(
         event=SimpleNamespace(
@@ -652,6 +917,11 @@ def test_service_dead_letter_replay_checks_event_system_allowlist() -> None:
         entity_tag=f'"{EVENT_ID}:2"',
         updated_at=NOW + timedelta(seconds=1),
     )
+
+    async def _begin_domain_command(_session: Any, **_kwargs: Any) -> Any:
+        return SimpleNamespace(command_id=791, request_fingerprint="d" * 64)
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
     client = _client(
         service,
         settings=_settings(scopes=["cache-target:recovery-replay"]),

@@ -5221,7 +5221,7 @@
           },
           "lease_seconds": {
             "default": 60,
-            "maximum": 600.0,
+            "maximum": 300.0,
             "minimum": 1.0,
             "title": "Lease Seconds",
             "type": "integer"
@@ -5857,8 +5857,9 @@
             "title": "Error Code"
           },
           "error_fingerprint": {
-            "maxLength": 256,
-            "minLength": 1,
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Error Fingerprint",
             "type": "string"
           },
@@ -5911,6 +5912,50 @@
           "meta"
         ],
         "title": "CacheTargetOperationResponse",
+        "type": "object"
+      },
+      "CacheTargetReconciliationCompletionRequest": {
+        "additionalProperties": false,
+        "description": "Consumer fixed-snapshot checksum completion receipt.",
+        "properties": {
+          "actual_merkle_root": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Actual Merkle Root",
+            "type": "string"
+          },
+          "consumer_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Consumer Id",
+            "type": "string"
+          },
+          "expected_restore_epoch": {
+            "minimum": 1.0,
+            "title": "Expected Restore Epoch",
+            "type": "integer"
+          },
+          "external_system": {
+            "maxLength": 112,
+            "minLength": 1,
+            "title": "External System",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "format": "uuid",
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "external_system",
+          "consumer_id",
+          "snapshot_id",
+          "expected_restore_epoch",
+          "actual_merkle_root"
+        ],
+        "title": "CacheTargetReconciliationCompletionRequest",
         "type": "object"
       },
       "CacheTargetReconciliationRequest": {
@@ -45276,6 +45321,102 @@
           }
         ],
         "summary": "Nack Service Cache Target Event",
+        "tags": [
+          "service-cache-target-streams"
+        ]
+      }
+    },
+    "/v1/service/cache-target-reconciliations/{request_id}/completions": {
+      "post": {
+        "operationId": "complete_service_cache_target_reconciliation_v1_service_cache_target_reconciliations__request_id__completions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Cache-Target-Consumer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다.",
+              "title": "X-Kor-Travel-Map-Cache-Target-Consumer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheTargetReconciliationCompletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Complete Service Cache Target Reconciliation",
         "tags": [
           "service-cache-target-streams"
         ]

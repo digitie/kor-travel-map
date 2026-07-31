@@ -129,6 +129,8 @@ class CacheTargetStreamService(Protocol):
 
     async def request_cache_target_reconciliation(self, session: Any, **kwargs: Any) -> Any: ...
 
+    async def complete_cache_target_reconciliation(self, session: Any, **kwargs: Any) -> Any: ...
+
     async def get_cache_target_operation(
         self,
         session: Any,
@@ -253,6 +255,11 @@ class _RepoCacheTargetStreamService:
         from kortravelmap.infra import request_cache_target_reconciliation
 
         return await request_cache_target_reconciliation(session, **kwargs)
+
+    async def complete_cache_target_reconciliation(self, session: Any, **kwargs: Any) -> Any:
+        from kortravelmap.infra import complete_cache_target_reconciliation
+
+        return await complete_cache_target_reconciliation(session, **kwargs)
 
     async def get_cache_target_operation(
         self,

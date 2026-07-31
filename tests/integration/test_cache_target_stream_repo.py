@@ -591,6 +591,105 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
     assert still_blocked.value.code == "blocked_event_not_head"
 
 
+@pytest.mark.integration
+async def test_mid_claim_dead_transition_requires_acked_prefix_then_replays(
+    migrated_session: AsyncSession,
+) -> None:
+    first = await _apply_active(
+        migrated_session,
+        generation=1,
+        event_id="83000000-0000-0000-0000-000000000001",
+        idempotency_key="84000000-0000-0000-0000-000000000001",
+        create_only=True,
+    )
+    assert first.target is not None
+    await _apply_active(
+        migrated_session,
+        generation=2,
+        event_id="83000000-0000-0000-0000-000000000002",
+        idempotency_key="84000000-0000-0000-0000-000000000002",
+        create_only=False,
+        target_id=first.target.target_id,
+        lock_version=first.target.lock_version,
+    )
+    await _ready_stream(migrated_session)
+    claim = await claim_cache_target_events(
+        migrated_session,
+        external_system=_SYSTEM,
+        consumer_id=_CONSUMER,
+        idempotency_key="85000000-0000-0000-0000-000000000001",
+        limit=2,
+    )
+    assert claim is not None
+    leading, poison = claim.events
+
+    with pytest.raises(CacheTargetStreamConflict) as unsafe:
+        await nack_cache_target_event(
+            migrated_session,
+            external_system=_SYSTEM,
+            consumer_id=_CONSUMER,
+            claim_id=claim.claim_id,
+            lease_token=claim.lease_token,
+            event_id=poison.event_id,
+            error_class="permanent",
+            error_code="unsupported_event",
+            error_fingerprint="b" * 64,
+        )
+    assert unsafe.value.code == "dead_letter_requires_prefix_ack"
+
+    partial = await ack_cache_target_events(
+        migrated_session,
+        consumer_id=_CONSUMER,
+        claim_id=claim.claim_id,
+        lease_token=claim.lease_token,
+        through_cursor=leading.cursor,
+        applied=[
+            CacheTargetAppliedReceipt(
+                leading.event_id,
+                leading.payload_fingerprint,
+            )
+        ],
+    )
+    assert partial.status == "active"
+    claim_replay = await claim_cache_target_events(
+        migrated_session,
+        external_system=_SYSTEM,
+        consumer_id=_CONSUMER,
+        idempotency_key="85000000-0000-0000-0000-000000000001",
+        limit=2,
+    )
+    assert claim_replay is not None
+    assert claim_replay.idempotent_replay
+    assert claim_replay.acked_through == leading.cursor
+    dead = await nack_cache_target_event(
+        migrated_session,
+        external_system=_SYSTEM,
+        consumer_id=_CONSUMER,
+        claim_id=claim.claim_id,
+        lease_token=claim.lease_token,
+        event_id=poison.event_id,
+        error_class="permanent",
+        error_code="unsupported_event",
+        error_fingerprint="b" * 64,
+    )
+    assert dead.status == "dead"
+    replayed = await replay_cache_target_dead_letter(
+        migrated_session,
+        event_id=poison.event_id,
+        expected_delivery_version=dead.delivery_version,
+    )
+    assert replayed.status == "retry"
+    recovery = await claim_cache_target_events(
+        migrated_session,
+        external_system=_SYSTEM,
+        consumer_id=_CONSUMER,
+        idempotency_key="85000000-0000-0000-0000-000000000002",
+        limit=2,
+    )
+    assert recovery is not None
+    assert [event.event_id for event in recovery.events] == [poison.event_id]
+
+
 async def _apply_snapshot_source(
     session: AsyncSession,
     *,
@@ -717,9 +816,24 @@ async def test_reconciliation_mismatch_halts_and_exact_match_resumes_empty_strea
         external_system=system,
         reason="empty mismatch",
     )
+    with pytest.raises(CacheTargetStreamConflict) as stale_snapshot:
+        await complete_cache_target_reconciliation(
+            migrated_session,
+            request_id=first.request_id,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            snapshot_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            expected_restore_epoch=1,
+            actual_merkle_root=first.expected_merkle_root,
+        )
+    assert stale_snapshot.value.code == "reconciliation_precondition_failed"
     mismatch = await complete_cache_target_reconciliation(
         migrated_session,
         request_id=first.request_id,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        snapshot_id=first.snapshot_id,
+        expected_restore_epoch=1,
         actual_merkle_root="f" * 64,
     )
     assert mismatch.status == "failed"
@@ -734,6 +848,10 @@ async def test_reconciliation_mismatch_halts_and_exact_match_resumes_empty_strea
         await complete_cache_target_reconciliation(
             migrated_session,
             request_id=first.request_id,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            snapshot_id=first.snapshot_id,
+            expected_restore_epoch=1,
             actual_merkle_root=first.expected_merkle_root,
         )
     assert reused.value.code == "reconciliation_receipt_mismatch"
@@ -757,6 +875,10 @@ async def test_reconciliation_mismatch_halts_and_exact_match_resumes_empty_strea
     succeeded = await complete_cache_target_reconciliation(
         migrated_session,
         request_id=second.request_id,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        snapshot_id=second.snapshot_id,
+        expected_restore_epoch=1,
         actual_merkle_root=second.expected_merkle_root,
     )
     assert succeeded.status == "succeeded"
@@ -849,6 +971,10 @@ async def test_all_tombstone_reconciliation_emits_stream_scoped_event(
     succeeded = await complete_cache_target_reconciliation(
         migrated_session,
         request_id=request.request_id,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        snapshot_id=request.snapshot_id,
+        expected_restore_epoch=1,
         actual_merkle_root=request.expected_merkle_root,
     )
     assert succeeded.status == "succeeded"

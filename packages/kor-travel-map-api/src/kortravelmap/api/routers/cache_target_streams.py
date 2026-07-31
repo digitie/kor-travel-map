@@ -50,6 +50,7 @@ from kortravelmap.api.cache_target_stream_schema import (
     CacheTargetEventRecord,
     CacheTargetNackRequest,
     CacheTargetOperationResponse,
+    CacheTargetReconciliationCompletionRequest,
     CacheTargetReconciliationRequest,
     CacheTargetRecoveryOperationRecord,
     CacheTargetRefreshRequest,
@@ -932,18 +933,7 @@ async def claim_service_cache_target_events(
         status=_getattr(claim, "status"),
         first_relay_order=_getattr(claim, "first_relay_order"),
         last_relay_order=_getattr(claim, "last_relay_order"),
-        acked_through=(
-            str(acked_through)
-            if (
-                acked_through := _getattr(
-                    claim,
-                    "acked_through_relay_order",
-                    _getattr(claim, "acked_through"),
-                )
-            )
-            is not None
-            else None
-        ),
+        acked_through=_getattr(claim, "acked_through"),
         lease_expires_at=_getattr(claim, "lease_expires_at"),
         events=[_event_record(event) for event in _getattr(claim, "events", [])],
         idempotent_replay=_getattr(claim, "idempotent_replay", False),
@@ -1118,7 +1108,6 @@ async def replay_service_cache_target_dead_letter(
     ],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
 ) -> CacheTargetDeliveryResponse:
-    del body, idempotency_key
     started_at = perf_counter()
     require_cache_target_service_scope(context, scope="cache-target:recovery-replay")
     expected_event_id, expected_delivery_version = _delivery_precondition(request)
@@ -1128,7 +1117,19 @@ async def replay_service_cache_target_dead_letter(
             "PRECONDITION_FAILED",
             "If-Match event_id가 replay 대상과 다릅니다.",
         )
+    payload = {
+        "event_id": str(event_id),
+        "body": body.model_dump(mode="json"),
+        "headers": {"If-Match": request.headers.get("if-match")},
+    }
     async with session.begin():
+        command = await begin_domain_command(
+            session,
+            actor=context.principal_id,
+            operation="service.cache-target-dead-letter.replay",
+            idempotency_key=idempotency_key,
+            payload=payload,
+        )
         dead_letter = await stream_service.get_cache_target_dead_letter(
             session,
             event_id=str(event_id),
@@ -1151,17 +1152,88 @@ async def replay_service_cache_target_dead_letter(
             event_id=str(event_id),
             expected_delivery_version=expected_delivery_version,
         )
-    raise_for_cache_target_status(result)
-    record = CacheTargetDeliveryRecord(
-        event_id=_getattr(result, "event_id", event_id),
-        status=_getattr(result, "status"),
-        relay_order=_getattr(result, "relay_order"),
-        delivery_version=_getattr(result, "delivery_version"),
-        entity_tag=_getattr(result, "entity_tag"),
-        retry_after_seconds=_getattr(result, "retry_after_seconds"),
-    )
+        raise_for_cache_target_status(result)
+        record = CacheTargetDeliveryRecord(
+            event_id=_getattr(result, "event_id", event_id),
+            status=_getattr(result, "status"),
+            relay_order=_getattr(result, "relay_order"),
+            delivery_version=_getattr(result, "delivery_version"),
+            entity_tag=_getattr(result, "entity_tag"),
+            retry_after_seconds=_getattr(result, "retry_after_seconds"),
+        )
+        response_body = CacheTargetDeliveryResponse(
+            data=record,
+            meta=_meta(started_at),
+        )
+        await complete_domain_command(
+            session,
+            command=command,
+            response=response_body,
+            status_code=status.HTTP_200_OK,
+            response_headers={"ETag": record.entity_tag},
+        )
     _set_etag(response, record)
-    return CacheTargetDeliveryResponse(data=record, meta=_meta(started_at))
+    return response_body
+
+
+@service_router.post(
+    "/cache-target-reconciliations/{request_id}/completions",
+    response_model=CacheTargetOperationResponse,
+)
+async def complete_service_cache_target_reconciliation(
+    request_id: Annotated[UUID, Path()],
+    body: CacheTargetReconciliationCompletionRequest,
+    session: Annotated[Any, Depends(get_session)],
+    stream_service: Annotated[
+        CacheTargetStreamService,
+        Depends(get_cache_target_stream_service),
+    ],
+    context: Annotated[
+        CacheTargetServicePrincipalContext,
+        Depends(require_cache_target_service_principal),
+    ],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+) -> CacheTargetOperationResponse:
+    started_at = perf_counter()
+    _require_bound_consumer(context, body.consumer_id)
+    require_cache_target_service_scope(
+        context,
+        scope="cache-target:snapshot",
+        external_system=body.external_system,
+    )
+    payload = {
+        "request_id": str(request_id),
+        "body": body.model_dump(mode="json"),
+    }
+    async with session.begin():
+        command = await begin_domain_command(
+            session,
+            actor=context.principal_id,
+            operation="service.cache-target-reconciliation.complete",
+            idempotency_key=idempotency_key,
+            payload=payload,
+        )
+        result = await stream_service.complete_cache_target_reconciliation(
+            session,
+            request_id=str(request_id),
+            external_system=body.external_system,
+            consumer_id=context.consumer_id,
+            snapshot_id=str(body.snapshot_id),
+            expected_restore_epoch=body.expected_restore_epoch,
+            actual_merkle_root=body.actual_merkle_root,
+        )
+        raise_for_cache_target_status(result)
+        response_body = CacheTargetOperationResponse(
+            data=_operation_record(result),
+            meta=_meta(started_at),
+        )
+        await complete_domain_command(
+            session,
+            command=command,
+            response=response_body,
+            status_code=status.HTTP_200_OK,
+        )
+    return response_body
 
 
 @service_router.get(
@@ -1424,6 +1496,7 @@ async def replay_admin_cache_target_dead_letter(
     "/cache-target-reconciliations",
     response_model=CacheTargetOperationResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_admin_destructive_enabled)],
     responses={
         202: {"description": "reconciliation accepted", "headers": _ASYNC_OPERATION_HEADERS}
     },

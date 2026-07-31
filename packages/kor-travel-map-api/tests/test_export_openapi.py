@@ -429,6 +429,7 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
         "/v1/service/cache-target-event-dead-letters/{event_id}",
         "/v1/service/cache-target-event-dead-letters/{event_id}/replays",
         "/v1/service/cache-target-event-nacks",
+        "/v1/service/cache-target-reconciliations/{request_id}/completions",
         "/v1/service/cache-target-snapshots/{external_system}",
         "/v1/service/cache-target-streams/{external_system}",
         "/v1/service/cache-target-streams/{external_system}/restore-fences",
@@ -437,6 +438,12 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
         "/v1/service/refresh-requests/{request_id}",
     }
     assert set(service["components"]["securitySchemes"]) == {"ServiceToken"}
+    completion_path = (
+        "/v1/service/cache-target-reconciliations/{request_id}/completions"
+    )
+    assert completion_path in app.openapi()["paths"]
+    assert completion_path not in module.user_openapi_spec(app.openapi(), app=app)["paths"]
+    assert completion_path in service["paths"]
     for path, method in module._openapi_operations(service):
         assert service["paths"][path][method]["security"] == [{"ServiceToken": []}]
 

@@ -142,6 +142,7 @@ _CACHE_TARGET_PRECONDITION_CODES = frozenset(
     {
         "create_precondition_failed",
         "dead_letter_precondition_failed",
+        "reconciliation_precondition_failed",
         "restore_fence_precondition_failed",
         "target_precondition_failed",
     }

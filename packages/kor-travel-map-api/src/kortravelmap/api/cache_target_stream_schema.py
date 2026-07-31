@@ -30,6 +30,7 @@ __all__ = [
     "CacheTargetOperationResponse",
     "CacheTargetRecoveryOperationRecord",
     "CacheTargetReconciliationRequest",
+    "CacheTargetReconciliationCompletionRequest",
     "CacheTargetRefreshRequest",
     "CacheTargetRefreshRequestRecord",
     "CacheTargetRefreshRequestResponse",
@@ -296,7 +297,7 @@ class CacheTargetClaimRequest(BaseModel):
     external_system: str
     consumer_id: str
     limit: int = Field(default=100, ge=1, le=500)
-    lease_seconds: int = Field(default=60, ge=1, le=600)
+    lease_seconds: int = Field(default=60, ge=1, le=300)
 
 
 class CacheTargetClaimRecord(BaseModel):
@@ -381,7 +382,11 @@ class CacheTargetNackRequest(BaseModel):
     disposition: CacheTargetNackDisposition = "transient"
     error_class: str = Field(min_length=1, max_length=200)
     error_code: str | None = Field(default=None, max_length=200)
-    error_fingerprint: str = Field(min_length=1, max_length=256)
+    error_fingerprint: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     backoff_seconds: int = Field(default=30, ge=1, le=3600)
     max_attempts: int = Field(default=5, ge=1, le=100)
 
@@ -570,6 +575,22 @@ class CacheTargetReconciliationRequest(BaseModel):
 
     external_system: str
     reason: str = Field(min_length=1, max_length=1000)
+
+
+class CacheTargetReconciliationCompletionRequest(BaseModel):
+    """Consumer fixed-snapshot checksum completion receipt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    external_system: str = Field(min_length=1, max_length=112)
+    consumer_id: str = Field(min_length=1, max_length=128)
+    snapshot_id: UUID
+    expected_restore_epoch: int = Field(ge=1)
+    actual_merkle_root: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
 
 class CacheTargetRecoveryOperationRecord(BaseModel):

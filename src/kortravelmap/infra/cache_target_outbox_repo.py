@@ -80,6 +80,14 @@ class CacheTargetEventClaim:
     events: tuple[CacheTargetOutboxEvent, ...]
     idempotent_replay: bool = False
 
+    @property
+    def acked_through(self) -> str | None:
+        """내부 relay order를 외부 opaque cursor로만 노출한다."""
+
+        if self.acked_through_relay_order is None:
+            return None
+        return cache_target_event_cursor(self.acked_through_relay_order)
+
 
 @dataclass(frozen=True, slots=True)
 class CacheTargetAppliedReceipt:
@@ -293,7 +301,14 @@ RETURNING status
 
 _LOCK_NACK_EVENT_SQL = """
 SELECT claimed.event_id, delivery.status, delivery.attempt_count,
-       delivery.delivery_version
+       delivery.delivery_version,
+       NOT EXISTS (
+         SELECT 1
+         FROM ops.poi_cache_target_outbox_claim_events AS earlier
+         WHERE earlier.claim_id = claimed.claim_id
+           AND earlier.position < claimed.position
+           AND earlier.prefix_acked_at IS NULL
+       ) AS is_unacked_head
 FROM ops.poi_cache_target_outbox_claim_events AS claimed
 JOIN ops.poi_cache_target_outbox_deliveries AS delivery
   ON delivery.event_id = claimed.event_id
@@ -884,6 +899,11 @@ async def nack_cache_target_event(
     next_status: Literal["retry", "dead"] = (
         "dead" if error_class == "permanent" or attempt_count >= max_attempts else "retry"
     )
+    if next_status == "dead" and not bool(delivery._mapping["is_unacked_head"]):
+        raise CacheTargetStreamConflict(
+            "dead_letter_requires_prefix_ack",
+            "dead 전이 전 claim의 앞선 event prefix를 먼저 ACK해야 합니다.",
+        )
     await session.execute(text(_INVALIDATE_CLAIM_SQL), {"claim_id": claim_id})
     await session.execute(
         text(_RELEASE_CLAIM_DELIVERIES_SQL),
