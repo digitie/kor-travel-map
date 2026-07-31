@@ -26,7 +26,7 @@ import pytest
 from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from alembic import command
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
@@ -610,5 +610,170 @@ async def test_downgrade_survives_a_supersedes_chain(pg_container: Any) -> None:
         survivor = await _link_state(engine, projection_id)
         assert survivor.match_basis == "forward_recovery"
         assert survivor.supersedes_decision_id is None, "사슬이 삭제된 결정을 계속 가리킨다"
+    finally:
+        await engine.dispose()
+
+
+_MERGE_SEED_SQL = """
+INSERT INTO feature.features (feature_id, kind, name, category, detail, status)
+VALUES
+    (:master, 'place', 'H40 병합 master', '01070100', '{}'::jsonb, 'active'),
+    (:loser, 'place', 'H40 병합 loser', '01070100', '{}'::jsonb, 'active');
+
+INSERT INTO provider_sync.source_entities (
+    source_entity_key, provider, dataset_key,
+    source_entity_type, source_entity_id, first_seen_at, last_seen_at
+)
+VALUES
+    ('h40:se:m', :provider, :dataset, 'place', 'h40-m', now(), now()),
+    ('h40:se:l', :provider, :dataset, 'place', 'h40-l', now(), now());
+
+INSERT INTO provider_sync.source_records (
+    source_record_key, source_entity_key, provider, dataset_key,
+    source_entity_type, source_entity_id,
+    raw_name, raw_data, raw_payload_hash, fetched_at, imported_at
+)
+VALUES
+    (:srk_master, 'h40:se:m', :provider, :dataset, 'place', 'h40-m',
+     'master', '{}'::jsonb, 'h-m', now(), now()),
+    (:srk_loser, 'h40:se:l', :provider, :dataset, 'place', 'h40-l',
+     'loser', '{}'::jsonb, 'h-l', now(), now());
+
+INSERT INTO feature.curated_themes (
+    theme_slug, theme_name, theme_description, theme_group,
+    default_curated, visibility, metadata
+) VALUES ('h40-merge-theme', 'H40 병합 테마', '', 'test', false, 'public', '{}'::jsonb);
+"""
+
+# prod와 같은 모양으로 넣는다 — `selection_origin='source_rule'` + 도달 가능한
+# `source_record_key`. 기존 merge 픽스처는 전부 `'admin'`이라 0073 트리거가 한 번도
+# 돌지 않는다. 그래서 merge 경로의 결함이 전부 green으로 통과했다.
+_MERGE_PROJECTION_SQL = """
+INSERT INTO feature.curated_features (
+    theme_id, feature_id, source_id, source_record_key,
+    curation_status, selection_origin, content_version, selected_by,
+    display_title, display_summary, curation_relation, reuse_policy, metadata
+)
+SELECT theme.theme_id, :feature, source.source_id, :source_key,
+       'curated', 'source_rule', 3, 'concierge-sync',
+       :title, 'H40 병합', 'nearby_option', 'manual_review', '{}'::jsonb
+FROM feature.curated_themes AS theme, feature.curated_sources AS source
+WHERE theme.theme_slug = 'h40-merge-theme' AND source.provider = :provider
+RETURNING curated_feature_id::text
+"""
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "T-VN-H41: `0072`가 만든 fk_curation_link_decisions_item은 ON DELETE RESTRICT에 "
+        "ON UPDATE NO ACTION이다. merge의 legacy-conflict detach"
+        "(`merge_repo._DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL`)는 "
+        "`curation_items.curation_item_id`를 새 UUID로 **재작성**하므로, 그 item에 "
+        "decision이 하나라도 있으면 FK 위반으로 병합 전체가 abort한다. "
+        "`0072`만 적용해도 재현되는 결함이고(0073 무관), 배포와 함께 prod에 도달한다. "
+        "고치려면 append-only 계약(3개 테이블)을 건드려야 해서 별도 결정이 필요하다."
+    ),
+)
+async def test_feature_merge_survives_source_rule_provenance(pg_container: Any) -> None:
+    """`source_rule` provenance가 붙은 link을 가진 Feature도 병합할 수 있어야 한다.
+
+    기존 merge 통합 테스트의 curated 픽스처는 **전부** `selection_origin='admin'`이라
+    0073 트리거가 한 번도 발화하지 않는다. prod는 3,043건이 `source_rule`이므로,
+    그 조합은 어느 테스트도 밟지 않은 채 배포된다. 여기서 그 조합을 밟는다:
+
+    - 병합이 예외 없이 끝난다
+    - 살아남은 link은 신뢰 근거를 **유지**한다 (포인터가 NULL이 되면 안 된다)
+
+    지금은 첫 번째 조건에서 실패한다(xfail). `strict=True`라 결함이 고쳐지면 CI가
+    바로 알려 준다 — xfail을 지우는 것이 T-VN-H41의 완료 조건이다.
+    """
+    from kortravelmap.infra.merge_repo import apply_feature_merge
+
+    dsn = await _fresh_database(pg_container)
+    await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+    engine = make_async_engine(dsn)
+    master, loser = "feature:h40-merge-master", "feature:h40-merge-loser"
+    try:
+        params = {
+            "master": master,
+            "loser": loser,
+            "provider": _PROVIDER,
+            "dataset": _DATASET,
+            "srk_master": "h40:sr:merge-master",
+            "srk_loser": "h40:sr:merge-loser",
+        }
+        async with engine.begin() as connection:
+            for statement in filter(None, (part.strip() for part in _MERGE_SEED_SQL.split(";"))):
+                await connection.execute(text(statement), params)
+            for feature, key, title in (
+                (master, "h40:sr:merge-master", "master projection"),
+                (loser, "h40:sr:merge-loser", "loser projection"),
+            ):
+                await connection.execute(
+                    text(_MERGE_PROJECTION_SQL),
+                    {
+                        "feature": feature,
+                        "source_key": key,
+                        "provider": _PROVIDER,
+                        "title": title,
+                    },
+                )
+
+        # 두 link 모두 source_rule 근거를 갖고 출발하는지 확인한다.
+        async with engine.connect() as connection:
+            trusted_before = (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM feature.curation_items AS item "
+                        "JOIN feature.curation_link_decisions AS d "
+                        "  ON d.decision_id = item.accepted_link_decision_id "
+                        "WHERE d.match_basis = 'source_rule' "
+                        "  AND item.feature_id IN (:master, :loser)"
+                    ),
+                    {"master": master, "loser": loser},
+                )
+            ).scalar_one()
+        assert trusted_before == 2, (
+            f"출발 상태가 prod와 다르다 — source_rule link {trusted_before}건"
+        )
+
+        session_maker = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_maker() as session:
+            outcome = await apply_feature_merge(
+                session,
+                master_id=master,
+                loser_id=loser,
+                merged_by="h40-test",
+                reason="H40 provenance 병합 회귀",
+            )
+            await session.commit()
+        assert outcome.master_feature_id == master
+
+        async with engine.connect() as connection:
+            rows = (
+                await connection.execute(
+                    text(
+                        "SELECT item.curation_item_id::text, item.feature_id, "
+                        "       d.match_basis, d.decision_kind "
+                        "FROM feature.curation_items AS item "
+                        "LEFT JOIN feature.curation_link_decisions AS d "
+                        "  ON d.decision_id = item.accepted_link_decision_id "
+                        "WHERE item.feature_id = :master "
+                        "  AND item.archived_at IS NULL "
+                        "  AND item.source_present"
+                    ),
+                    {"master": master},
+                )
+            ).all()
+
+        assert rows, "병합 후 master에 활성 link이 하나도 남지 않았다"
+        orphaned = [r for r in rows if r.match_basis is None]
+        assert not orphaned, (
+            "병합이 살아남은 link의 신뢰 근거를 지웠다 — "
+            f"근거 없는 link {len(orphaned)}건. 공개 표면에서 조용히 사라진다."
+        )
+        for row in rows:
+            assert row.decision_kind == "accepted"
     finally:
         await engine.dispose()
