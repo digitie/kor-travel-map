@@ -25,6 +25,8 @@ __all__ = [
     "create_data_integrity_violation",
     "get_data_integrity_violation",
     "list_data_integrity_violations",
+    "close_stale_integrity_findings",
+    "purge_resolved_integrity_findings",
     "set_data_integrity_violation_status",
     "sync_integrity_findings",
 ]
@@ -459,3 +461,119 @@ async def sync_integrity_findings(
         upserted = len(result.scalars().all())
 
     return upserted
+
+
+# T-VN-H32 — run marker 기반 close.
+#
+# **왜 한 statement인가.** 이 테이블에는 statement 단위 트리거
+# ``trg_data_integrity_violations_ops_live_revision``이 걸려 있어 statement마다 ``ops_live``
+# revision 단일 행을 갱신한다. finding마다 UPDATE를 돌리면 그 hot row에 배타 락을 N번 잡고
+# 트랜잭션 끝까지 쥐게 되어 ``/admin/issues`` 쓰기를 막고 데드락까지 만든다
+# (``sync_integrity_findings``가 batch upsert인 이유와 같다).
+#
+# **술어 하나하나가 기각된 설계를 피한다.**
+#
+# - ``status = 'open'`` — ``acknowledged``는 사람이 인지한 표시라 **불가침**이다.
+#   기계가 닫지 않는다.
+# - ``payload ->> 'observed_run_id' <> :run_id`` — 이번 run이 **관측하지 못한** 것만 닫는다.
+#   살아 있는 finding은 이번 run의 upsert가 ``observed_run_id``를 현재 run으로 덮으므로
+#   절대 걸리지 않는다. 1차 설계의 배치 sweep은 "이 배치에 없는 것"을 닫아 한 run이 자기
+#   finding을 스스로 resolved 처리했는데, **run 단위 marker**를 쓰면 그 문제가 사라진다.
+#
+#   **시각(``last_seen_at``) 기준을 쓰지 않는 이유** — ``dagster/definitions.py:99``에서
+#   ``fetched_at`` resource가 ``None``이라 ``_fetched_at()``이 **호출할 때마다 새 now()** 를
+#   반환한다. run-end hook에서 그 값을 marker로 쓰면 이번 run의 upsert보다 나중 시각이 되어
+#   **자기 finding을 스스로 닫는다** — 기각된 그 실패모드를 시각 축으로 재현하게 된다.
+#   run_id는 그런 시계 함정이 없다.
+# - ``provider``/``dataset_key`` — provider 경계를 넘지 않는다.
+# - ``payload ->> 'dedupe_key' LIKE 'av2\_%'`` — ``sync_integrity_findings``가 만든 계열만
+#   닫는다. 같은 provider/dataset에 다른 subsystem이 남긴 finding(예: curation mislink)을
+#   쓸어버리지 않기 위한 경계다.
+_CLOSE_STALE_FINDINGS_SQL: Final[str] = """
+UPDATE ops.data_integrity_violations AS v
+   SET status = 'resolved',
+       resolved_at = now(),
+       payload = v.payload || jsonb_build_object('resolution', CAST(:resolution AS jsonb))
+ WHERE v.provider = :provider
+   AND v.dataset_key = :dataset_key
+   AND v.status = 'open'
+   AND v.payload ? 'dedupe_key'
+   AND v.payload ->> 'dedupe_key' LIKE 'av2\_%'
+   AND COALESCE(v.payload ->> 'observed_run_id', '') <> :run_id
+RETURNING v.issue_id
+"""
+
+# resolved 보존 기간이 지난 행을 **삭제**한다 (T-VN-H32).
+#
+# ``acknowledged``는 어떤 경우에도 지우지 않는다 — close 대상도, 삭제 대상도 아니다.
+# ``feature_repo.purge_expired_notices``와 같은 retention 문자열 패턴을 쓴다.
+_PURGE_RESOLVED_FINDINGS_SQL: Final[str] = """
+DELETE FROM ops.data_integrity_violations AS v
+ WHERE v.status = 'resolved'
+   AND v.resolved_at IS NOT NULL
+   AND v.resolved_at < now() - CAST(:retention AS interval)
+RETURNING v.issue_id
+"""
+
+
+async def close_stale_integrity_findings(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    run_id: str,
+) -> int:
+    """이번 run이 관측하지 못한 finding을 닫는다 (T-VN-H32). commit은 호출자 책임.
+
+    **run당 1회, 배치 루프 밖에서** 불러야 한다. 배치마다 부르면 1차 설계가 기각된 그
+    실패모드(한 run이 자기 finding 대부분을 스스로 resolved 처리)를 재현한다.
+
+    또한 **실제로 데이터를 처리한 run에서만** 불러야 한다. ``bundles=[]``인 ``_load()``는
+    OpiNet 일일 스킵·MOIS 무레코드 fallback의 제어 흐름 sentinel이라, 그 경로에서 부르면
+    빈 관측 집합이 큐 전체를 닫는다.
+
+    반환: 닫은 행 수.
+    """
+    if not provider or not dataset_key:
+        raise ValueError("provider/dataset_key는 close 범위에 필수다.")
+    if not run_id:
+        # 빈 run_id면 술어가 모든 행에 참이 되어 큐 전체를 닫는다. fail-closed한다.
+        raise ValueError("run_id는 비어 있을 수 없다 — 빈 값은 큐 전체를 닫는다.")
+    resolution = {
+        "closed_by": "run_marker_sweep",
+        "task": "T-VN-H32",
+        "run_id": run_id,
+        "reason": "이 run이 같은 dedupe_key를 다시 관측하지 않았다",
+    }
+    result = await session.execute(
+        text(_CLOSE_STALE_FINDINGS_SQL),
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "run_id": run_id,
+            "resolution": json.dumps(resolution, ensure_ascii=False),
+        },
+    )
+    return len(result.fetchall())
+
+
+async def purge_resolved_integrity_findings(
+    session: AsyncSession,
+    *,
+    retention: str = "90 days",
+) -> int:
+    """보존 기간이 지난 ``resolved`` finding을 삭제한다 (T-VN-H32). commit은 호출자 책임.
+
+    ``acknowledged``는 사람이 인지한 표시라 **지우지 않는다**. ``open``도 당연히 대상이 아니다.
+
+    기본 90일 — ``feature_repo.purge_expired_notices``(1년)와 같은 패턴이지만 finding은
+    notice와 달리 **운영 신호**라 분기 회고에 필요한 만큼만 둔다.
+
+    반환: 삭제한 행 수.
+    """
+    if not retention.strip():
+        raise ValueError("retention은 비어 있을 수 없다.")
+    result = await session.execute(
+        text(_PURGE_RESOLVED_FINDINGS_SQL), {"retention": retention}
+    )
+    return len(result.fetchall())
