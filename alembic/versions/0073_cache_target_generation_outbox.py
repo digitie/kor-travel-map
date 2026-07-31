@@ -433,7 +433,13 @@ def upgrade() -> None:
             "status",
             sa.Text(),
             nullable=False,
-            server_default=sa.text("'queued'"),
+            server_default=sa.text("'preparing'"),
+        ),
+        sa.Column(
+            "phase_version",
+            sa.BigInteger(),
+            nullable=False,
+            server_default=sa.text("1"),
         ),
         sa.Column("snapshot_id", postgresql.UUID(as_uuid=False)),
         sa.Column("expected_merkle_root", sa.Text()),
@@ -449,27 +455,43 @@ def upgrade() -> None:
         sa.Column("completed_at", sa.DateTime(timezone=True)),
         sa.CheckConstraint(
             "btrim(reason) <> '' AND char_length(reason) <= 1000",
-            name="ck_cache_target_reconciliation_requests_reason",
+            name=op.f("ck_cache_target_reconciliation_requests_reason"),
         ),
         sa.CheckConstraint(
-            "status IN ('queued','running','succeeded','failed')",
-            name="ck_cache_target_reconciliation_requests_status",
+            "status IN ('preparing','running','succeeded','failed')",
+            name=op.f("ck_cache_target_reconciliation_requests_status"),
+        ),
+        sa.CheckConstraint(
+            "phase_version > 0",
+            name=op.f("ck_cache_target_reconciliation_requests_phase_version"),
         ),
         sa.CheckConstraint(
             "expected_merkle_root IS NULL OR "
             "expected_merkle_root ~ '^[0-9a-f]{64}$'",
-            name="ck_cache_target_reconciliation_requests_expected_root",
+            name=op.f("ck_cache_target_reconciliation_requests_expected_root"),
         ),
         sa.CheckConstraint(
             "actual_merkle_root IS NULL OR actual_merkle_root ~ '^[0-9a-f]{64}$'",
-            name="ck_cache_target_reconciliation_requests_actual_root",
+            name=op.f("ck_cache_target_reconciliation_requests_actual_root"),
         ),
         sa.CheckConstraint(
-            "(status = 'queued' AND started_at IS NULL AND completed_at IS NULL) OR "
-            "(status = 'running' AND started_at IS NOT NULL AND completed_at IS NULL) OR "
-            "(status IN ('succeeded','failed') AND started_at IS NOT NULL "
-            "AND completed_at IS NOT NULL)",
-            name="ck_cache_target_reconciliation_requests_lifecycle",
+            "(status = 'preparing' AND started_at IS NOT NULL "
+            "AND completed_at IS NULL AND snapshot_id IS NULL "
+            "AND expected_merkle_root IS NULL AND actual_merkle_root IS NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'running' AND started_at IS NOT NULL "
+            "AND completed_at IS NULL AND snapshot_id IS NOT NULL "
+            "AND expected_merkle_root IS NOT NULL AND actual_merkle_root IS NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'succeeded' AND started_at IS NOT NULL "
+            "AND completed_at IS NOT NULL AND snapshot_id IS NOT NULL "
+            "AND expected_merkle_root IS NOT NULL AND actual_merkle_root IS NOT NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'failed' AND started_at IS NOT NULL "
+            "AND completed_at IS NOT NULL AND snapshot_id IS NOT NULL "
+            "AND expected_merkle_root IS NOT NULL AND actual_merkle_root IS NOT NULL "
+            "AND error_code IS NOT NULL)",
+            name=op.f("ck_cache_target_reconciliation_requests_lifecycle"),
         ),
         sa.ForeignKeyConstraint(
             ["external_system"],

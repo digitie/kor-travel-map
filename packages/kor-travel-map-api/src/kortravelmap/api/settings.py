@@ -49,6 +49,7 @@ CacheTargetServiceScope = Literal[
     "cache-target:nack",
     "cache-target:snapshot",
     "cache-target:restore-fence",
+    "cache-target:recovery",
     "cache-target:recovery-replay",
 ]
 
@@ -61,6 +62,7 @@ _CACHE_TARGET_SERVICE_SCOPES: frozenset[str] = frozenset(
         "cache-target:nack",
         "cache-target:snapshot",
         "cache-target:restore-fence",
+        "cache-target:recovery",
         "cache-target:recovery-replay",
     }
 )

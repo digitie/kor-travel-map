@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CacheTargetOperation",
     "CacheTargetActiveReconciliation",
+    "CacheTargetReconciliationRecord",
     "CacheTargetReconciliationResult",
     "CacheTargetSnapshotItem",
     "CacheTargetSnapshotPage",
@@ -42,13 +43,17 @@ __all__ = [
     "CacheTargetStreamStatus",
     "CacheTargetStreamStatusPage",
     "CacheTargetStreamDiscovery",
+    "begin_cache_target_reconciliation",
+    "cache_target_reconciliation_entity_tag",
     "complete_cache_target_reconciliation",
     "get_cache_target_operation",
+    "get_cache_target_reconciliation",
     "get_cache_target_reconciliation_snapshot",
     "get_cache_target_snapshot",
     "get_cache_target_stream_discovery",
     "list_cache_target_stream_statuses",
     "request_cache_target_reconciliation",
+    "seal_cache_target_reconciliation",
 ]
 
 _SNAPSHOT_TTL_SQL = "interval '1 hour'"
@@ -119,15 +124,34 @@ LIMIT :limit
 
 _GET_RECONCILIATION_SNAPSHOT_SQL = """
 SELECT request.request_id, request.status AS reconciliation_status,
+       request.phase_version,
        snapshot.snapshot_id, snapshot.external_system, snapshot.restore_epoch,
        snapshot.high_watermark_relay_order, snapshot.item_count,
        snapshot.merkle_root, snapshot.created_at, snapshot.expires_at,
-       stream.consumer_id
+       stream.consumer_id, stream.control_version
 FROM ops.poi_cache_target_reconciliation_requests AS request
-JOIN ops.poi_cache_target_snapshots AS snapshot
+LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
   ON snapshot.snapshot_id = request.snapshot_id
 JOIN ops.poi_cache_target_streams AS stream
   ON stream.external_system = request.external_system
+WHERE request.request_id = CAST(:request_id AS uuid)
+"""
+
+_GET_RECONCILIATION_SQL = """
+SELECT request.request_id, request.external_system, request.status,
+       request.phase_version, request.snapshot_id,
+       request.expected_merkle_root, request.actual_merkle_root, request.error_code,
+       request.created_at, request.started_at, request.completed_at,
+       stream.consumer_id, stream.restore_epoch AS stream_restore_epoch,
+       stream.control_version,
+       snapshot.restore_epoch, snapshot.restore_epoch AS snapshot_restore_epoch,
+       snapshot.high_watermark_relay_order, snapshot.item_count,
+       snapshot.merkle_root
+FROM ops.poi_cache_target_reconciliation_requests AS request
+JOIN ops.poi_cache_target_streams AS stream
+  ON stream.external_system = request.external_system
+LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
+  ON snapshot.snapshot_id = request.snapshot_id
 WHERE request.request_id = CAST(:request_id AS uuid)
 """
 
@@ -135,22 +159,23 @@ _GET_STREAM_DISCOVERY_SQL = """
 SELECT stream.external_system, stream.consumer_id, stream.restore_epoch,
        stream.control_version, stream.status, stream.blocked_event_id,
        stream.consumer_enabled, stream.created_at, stream.updated_at,
-       active.request_id, active.reconciliation_status, active.snapshot_id,
-       active.snapshot_restore_epoch, active.item_count, active.merkle_root,
+       active.request_id, active.reconciliation_status, active.phase_version,
+       active.snapshot_id, active.snapshot_restore_epoch, active.item_count, active.merkle_root,
        active.high_watermark_relay_order, active.reconciliation_created_at
 FROM ops.poi_cache_target_streams AS stream
 LEFT JOIN LATERAL (
   SELECT request.request_id, request.status AS reconciliation_status,
+         request.phase_version,
          snapshot.snapshot_id,
          snapshot.restore_epoch AS snapshot_restore_epoch,
          snapshot.item_count, snapshot.merkle_root,
          snapshot.high_watermark_relay_order,
          request.created_at AS reconciliation_created_at
   FROM ops.poi_cache_target_reconciliation_requests AS request
-  JOIN ops.poi_cache_target_snapshots AS snapshot
+  LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
     ON snapshot.snapshot_id = request.snapshot_id
   WHERE request.external_system = stream.external_system
-    AND request.status = 'running'
+    AND request.status IN ('preparing', 'running')
   ORDER BY request.created_at DESC, request.request_id DESC
   LIMIT 1
 ) AS active ON true
@@ -193,17 +218,24 @@ LIMIT :limit
 """
 
 _GET_RECONCILIATION_BY_COMMAND_SQL = """
-SELECT request_id, external_system, status, snapshot_id,
-       expected_merkle_root, actual_merkle_root, error_code,
-       created_at, started_at, completed_at
-FROM ops.poi_cache_target_reconciliation_requests
-WHERE command_id = :command_id
+SELECT request.request_id, request.external_system, request.status,
+       request.phase_version, request.snapshot_id,
+       request.expected_merkle_root, request.actual_merkle_root, request.error_code,
+       snapshot.restore_epoch, snapshot.item_count,
+       stream.control_version,
+       request.created_at, request.started_at, request.completed_at
+FROM ops.poi_cache_target_reconciliation_requests AS request
+JOIN ops.poi_cache_target_streams AS stream
+  ON stream.external_system = request.external_system
+LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
+  ON snapshot.snapshot_id = request.snapshot_id
+WHERE request.command_id = :command_id
 """
 
 _GET_ACTIVE_RECONCILIATION_SQL = """
-SELECT request_id, snapshot_id
+SELECT request_id, status, snapshot_id
 FROM ops.poi_cache_target_reconciliation_requests
-WHERE external_system = :external_system AND status = 'running'
+WHERE external_system = :external_system AND status IN ('preparing', 'running')
 ORDER BY created_at DESC, request_id DESC
 LIMIT 1
 FOR UPDATE
@@ -211,15 +243,40 @@ FOR UPDATE
 
 _INSERT_RECONCILIATION_SQL = """
 INSERT INTO ops.poi_cache_target_reconciliation_requests (
-    request_id, external_system, command_id, reason, status, snapshot_id,
-    expected_merkle_root, started_at
+    request_id, external_system, command_id, reason, status, phase_version,
+    snapshot_id, expected_merkle_root, started_at
 ) VALUES (
     CAST(:request_id AS uuid), :external_system, :command_id, :reason,
-    'running', CAST(:snapshot_id AS uuid), :expected_merkle_root, now()
+    'running', 2, CAST(:snapshot_id AS uuid), :expected_merkle_root, now()
 )
-RETURNING request_id, external_system, status, snapshot_id,
+RETURNING request_id, external_system, status, phase_version, snapshot_id,
           expected_merkle_root, actual_merkle_root, error_code,
           created_at, started_at, completed_at
+"""
+
+_INSERT_PREPARING_RECONCILIATION_SQL = """
+INSERT INTO ops.poi_cache_target_reconciliation_requests (
+    request_id, external_system, command_id, reason, status, phase_version,
+    started_at
+) VALUES (
+    CAST(:request_id AS uuid), :external_system, :command_id, :reason,
+    'preparing', 1, now()
+)
+RETURNING request_id, external_system, status, phase_version, snapshot_id,
+          expected_merkle_root, actual_merkle_root, error_code,
+          created_at, started_at, completed_at
+"""
+
+_CREATE_STREAM_SQL = """
+INSERT INTO ops.poi_cache_target_streams (
+    external_system, consumer_id, restore_epoch, control_version, status,
+    consumer_enabled
+) VALUES (
+    :external_system, :consumer_id, 1, 1, 'fenced', false
+)
+ON CONFLICT (external_system) DO NOTHING
+RETURNING external_system, consumer_id, restore_epoch, control_version, status,
+          blocked_event_id, consumer_enabled
 """
 
 _LOCK_STREAM_SQL = """
@@ -254,23 +311,41 @@ WHERE status = 'leased' AND claim_id = ANY(CAST(:claim_ids AS uuid[]))
 
 _LOCK_RECONCILIATION_SQL = """
 SELECT request.request_id, request.external_system, request.status,
-       request.snapshot_id, request.expected_merkle_root,
+       request.phase_version, request.snapshot_id, request.expected_merkle_root,
        request.actual_merkle_root, request.error_code,
        request.created_at, request.started_at, request.completed_at,
-       snapshot.restore_epoch
+       snapshot.restore_epoch, snapshot.item_count,
+       stream.control_version
 FROM ops.poi_cache_target_reconciliation_requests AS request
-JOIN ops.poi_cache_target_snapshots AS snapshot
+JOIN ops.poi_cache_target_streams AS stream
+  ON stream.external_system = request.external_system
+LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
   ON snapshot.snapshot_id = request.snapshot_id
 WHERE request.request_id = CAST(:request_id AS uuid)
 FOR UPDATE OF request
 """
 
+_SEAL_RECONCILIATION_SQL = """
+UPDATE ops.poi_cache_target_reconciliation_requests
+SET status = 'running',
+    phase_version = phase_version + 1,
+    snapshot_id = CAST(:snapshot_id AS uuid),
+    expected_merkle_root = :expected_merkle_root
+WHERE request_id = CAST(:request_id AS uuid)
+  AND status = 'preparing'
+  AND phase_version = :expected_phase_version
+RETURNING request_id, external_system, status, phase_version, snapshot_id,
+          expected_merkle_root, actual_merkle_root, error_code,
+          created_at, started_at, completed_at
+"""
+
 _COMPLETE_RECONCILIATION_SQL = """
 UPDATE ops.poi_cache_target_reconciliation_requests
 SET status = :status, actual_merkle_root = :actual_merkle_root,
-    error_code = :error_code, completed_at = now()
+    error_code = :error_code, completed_at = now(),
+    phase_version = phase_version + 1
 WHERE request_id = CAST(:request_id AS uuid)
-RETURNING request_id, external_system, status, snapshot_id,
+RETURNING request_id, external_system, status, phase_version, snapshot_id,
           expected_merkle_root, actual_merkle_root, error_code,
           created_at, started_at, completed_at
 """
@@ -360,13 +435,30 @@ class CacheTargetSnapshotStatus:
 @dataclass(frozen=True, slots=True)
 class CacheTargetActiveReconciliation:
     request_id: str
-    status: Literal["running"]
-    snapshot_id: str
+    external_system: str
+    status: Literal["preparing", "running"]
+    phase_version: int
+    snapshot_id: str | None
     restore_epoch: int
-    count: int
-    merkle_root: str
-    high_watermark_cursor: str
+    count: int | None
+    merkle_root: str | None
+    high_watermark_cursor: str | None
+    stream_control_version: int
     created_at: datetime
+
+    @property
+    def entity_tag(self) -> str:
+        return cache_target_reconciliation_entity_tag(
+            self.request_id,
+            self.phase_version,
+        )
+
+    @property
+    def stream_entity_tag(self) -> str:
+        return cache_target_stream_entity_tag(
+            self.external_system,
+            self.stream_control_version,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -414,14 +506,46 @@ class CacheTargetStreamStatusPage:
 
 
 @dataclass(frozen=True, slots=True)
+class CacheTargetReconciliationRecord:
+    request_id: str
+    external_system: str
+    consumer_id: str
+    status: Literal["preparing", "running", "succeeded", "failed"]
+    phase_version: int
+    snapshot_id: str | None
+    restore_epoch: int
+    stream_control_version: int
+    item_count: int | None
+    merkle_root: str | None
+
+    @property
+    def entity_tag(self) -> str:
+        return cache_target_reconciliation_entity_tag(
+            self.request_id,
+            self.phase_version,
+        )
+
+    @property
+    def stream_entity_tag(self) -> str:
+        return cache_target_stream_entity_tag(
+            self.external_system,
+            self.stream_control_version,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CacheTargetReconciliationResult:
     request_id: str
     external_system: str
-    status: Literal["running", "succeeded", "failed"]
-    snapshot_id: str
-    expected_merkle_root: str
+    status: Literal["preparing", "running", "succeeded", "failed"]
+    phase_version: int
+    snapshot_id: str | None
+    expected_merkle_root: str | None
     actual_merkle_root: str | None
     error_code: str | None
+    restore_epoch: int | None
+    item_count: int | None
+    stream_control_version: int | None
     created_at: datetime
     started_at: datetime
     completed_at: datetime | None
@@ -436,8 +560,24 @@ class CacheTargetReconciliationResult:
         return f"/v1/ops/cache-target-operations/{self.request_id}"
 
     @property
+    def entity_tag(self) -> str:
+        return cache_target_reconciliation_entity_tag(
+            self.request_id,
+            self.phase_version,
+        )
+
+    @property
+    def stream_entity_tag(self) -> str | None:
+        if self.stream_control_version is None:
+            return None
+        return cache_target_stream_entity_tag(
+            self.external_system,
+            self.stream_control_version,
+        )
+
+    @property
     def retry_after_seconds(self) -> int | None:
-        return 5 if self.status == "running" else None
+        return 5 if self.status in ("preparing", "running") else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -461,6 +601,13 @@ def _sha256(value: str, *, field: str) -> str:
     if len(value) != 64 or any(character not in _LOWERCASE_HEX for character in value):
         raise ValueError(f"{field}는 lowercase SHA-256 hex여야 합니다.")
     return value
+
+
+def cache_target_reconciliation_entity_tag(request_id: str, phase_version: int) -> str:
+    request_id = _canonical_uuid(request_id, field="request_id")
+    if phase_version <= 0:
+        raise ValueError("phase_version은 양수여야 합니다.")
+    return f'"{request_id}:{phase_version}"'
 
 
 def _snapshot_cursor(snapshot_id: str, row_number: int) -> str:
@@ -551,7 +698,7 @@ def _snapshot_item(row: Any) -> CacheTargetSnapshotItem:
     )
 
 
-async def _create_snapshot(
+async def _build_snapshot_material(
     session: AsyncSession,
     *,
     external_system: str,
@@ -612,17 +759,35 @@ async def _create_snapshot(
             for item in items
         ]
     )
-    snapshot_id = str(uuid4())
-    header = (
+    return (
+        {
+            "snapshot_id": str(uuid4()),
+            "external_system": external_system,
+            "restore_epoch": int(first["restore_epoch"]),
+            "high_watermark_relay_order": int(first["high_watermark_relay_order"]),
+            "item_count": len(items),
+            "merkle_root": merkle_root,
+        },
+        items,
+    )
+
+
+async def _persist_snapshot(
+    session: AsyncSession,
+    *,
+    header: Any,
+    items: tuple[CacheTargetSnapshotItem, ...],
+) -> Any:
+    persisted = (
         await session.execute(
             text(_INSERT_SNAPSHOT_SQL),
             {
-                "snapshot_id": snapshot_id,
-                "external_system": external_system,
-                "restore_epoch": int(first["restore_epoch"]),
-                "high_watermark_relay_order": int(first["high_watermark_relay_order"]),
-                "item_count": len(items),
-                "merkle_root": merkle_root,
+                "snapshot_id": header["snapshot_id"],
+                "external_system": header["external_system"],
+                "restore_epoch": header["restore_epoch"],
+                "high_watermark_relay_order": header["high_watermark_relay_order"],
+                "item_count": header["item_count"],
+                "merkle_root": header["merkle_root"],
             },
         )
     ).one()
@@ -631,7 +796,7 @@ async def _create_snapshot(
             text(_INSERT_SNAPSHOT_ITEM_SQL),
             [
                 {
-                    "snapshot_id": snapshot_id,
+                    "snapshot_id": header["snapshot_id"],
                     "row_number": item.row_number,
                     "external_system": item.external_system,
                     "target_key": item.target_key,
@@ -642,19 +807,23 @@ async def _create_snapshot(
                 for item in items
             ],
         )
-    return (
-        {
-            "snapshot_id": snapshot_id,
-            "external_system": external_system,
-            "restore_epoch": int(first["restore_epoch"]),
-            "high_watermark_relay_order": int(first["high_watermark_relay_order"]),
-            "item_count": len(items),
-            "merkle_root": merkle_root,
-            "created_at": header._mapping["created_at"],
-            "expires_at": header._mapping["expires_at"],
-        },
-        items,
+    return {
+        **header,
+        "created_at": persisted._mapping["created_at"],
+        "expires_at": persisted._mapping["expires_at"],
+    }
+
+
+async def _create_snapshot(
+    session: AsyncSession,
+    *,
+    external_system: str,
+) -> tuple[Any, tuple[CacheTargetSnapshotItem, ...]]:
+    header, items = await _build_snapshot_material(
+        session,
+        external_system=external_system,
     )
+    return await _persist_snapshot(session, header=header, items=items), items
 
 
 async def get_cache_target_snapshot(
@@ -768,6 +937,13 @@ async def get_cache_target_reconciliation_snapshot(
             "consumer_mismatch",
             "service principal consumer_id가 stream binding과 다릅니다.",
         )
+    if str(header["reconciliation_status"]) != "running":
+        raise CacheTargetStreamConflict(
+            "reconciliation_not_sealed",
+            "reconciliation request가 아직 fixed snapshot으로 seal되지 않았습니다.",
+        )
+    if header["snapshot_id"] is None:
+        raise RuntimeError("running reconciliation request에 snapshot_id가 없습니다.")
     snapshot_id = str(header["snapshot_id"])
     after_row_number = 0
     if cursor is not None:
@@ -820,16 +996,38 @@ async def get_cache_target_stream_discovery(
         )
     active = None
     if values["request_id"] is not None:
+        reconciliation_status = str(values["reconciliation_status"])
+        if reconciliation_status not in ("preparing", "running"):
+            raise RuntimeError("active reconciliation status가 유효하지 않습니다.")
+        if reconciliation_status == "running" and values["snapshot_id"] is None:
+            raise RuntimeError("running reconciliation request에 snapshot_id가 없습니다.")
         active = CacheTargetActiveReconciliation(
             request_id=str(values["request_id"]),
-            status="running",
-            snapshot_id=str(values["snapshot_id"]),
-            restore_epoch=int(values["snapshot_restore_epoch"]),
-            count=int(values["item_count"]),
-            merkle_root=str(values["merkle_root"]),
-            high_watermark_cursor=cache_target_event_cursor(
-                int(values["high_watermark_relay_order"])
+            external_system=str(values["external_system"]),
+            status=cast('Literal["preparing", "running"]', reconciliation_status),
+            phase_version=int(values["phase_version"]),
+            snapshot_id=(
+                str(values["snapshot_id"])
+                if values["snapshot_id"] is not None
+                else None
             ),
+            restore_epoch=(
+                int(values["snapshot_restore_epoch"])
+                if values["snapshot_restore_epoch"] is not None
+                else int(values["restore_epoch"])
+            ),
+            count=(
+                int(values["item_count"]) if values["item_count"] is not None else None
+            ),
+            merkle_root=(
+                str(values["merkle_root"]) if values["merkle_root"] is not None else None
+            ),
+            high_watermark_cursor=(
+                cache_target_event_cursor(int(values["high_watermark_relay_order"]))
+                if values["high_watermark_relay_order"] is not None
+                else None
+            ),
+            stream_control_version=int(values["control_version"]),
             created_at=values["reconciliation_created_at"],
         )
     status = str(values["status"])
@@ -914,25 +1112,398 @@ async def list_cache_target_stream_statuses(
 def _reconciliation(row: Any, *, replay: bool) -> CacheTargetReconciliationResult:
     values = row._mapping
     status = str(values["status"])
-    if status not in ("running", "succeeded", "failed"):
+    if status not in ("preparing", "running", "succeeded", "failed"):
         raise RuntimeError("reconciliation status가 유효하지 않습니다.")
     return CacheTargetReconciliationResult(
         request_id=str(values["request_id"]),
         external_system=str(values["external_system"]),
-        status=cast('Literal["running", "succeeded", "failed"]', status),
-        snapshot_id=str(values["snapshot_id"]),
-        expected_merkle_root=str(values["expected_merkle_root"]),
+        status=cast('Literal["preparing", "running", "succeeded", "failed"]', status),
+        phase_version=int(values["phase_version"]),
+        snapshot_id=(
+            str(values["snapshot_id"])
+            if values["snapshot_id"] is not None
+            else None
+        ),
+        expected_merkle_root=(
+            str(values["expected_merkle_root"])
+            if values["expected_merkle_root"] is not None
+            else None
+        ),
         actual_merkle_root=(
             str(values["actual_merkle_root"])
             if values["actual_merkle_root"] is not None
             else None
         ),
         error_code=(str(values["error_code"]) if values["error_code"] is not None else None),
+        restore_epoch=(
+            int(values["restore_epoch"]) if values.get("restore_epoch") is not None else None
+        ),
+        item_count=(
+            int(values["item_count"]) if values.get("item_count") is not None else None
+        ),
+        stream_control_version=(
+            int(values["control_version"])
+            if values.get("control_version") is not None
+            else None
+        ),
         created_at=values["created_at"],
         started_at=values["started_at"],
         completed_at=values["completed_at"],
         idempotent_replay=replay,
     )
+
+
+def _reconciliation_record(row: Any) -> CacheTargetReconciliationRecord:
+    values = row._mapping
+    status = str(values["status"])
+    if status not in ("preparing", "running", "succeeded", "failed"):
+        raise RuntimeError("reconciliation status가 유효하지 않습니다.")
+    restore_epoch = (
+        int(values["snapshot_restore_epoch"])
+        if values["snapshot_restore_epoch"] is not None
+        else int(values["stream_restore_epoch"])
+    )
+    return CacheTargetReconciliationRecord(
+        request_id=str(values["request_id"]),
+        external_system=str(values["external_system"]),
+        consumer_id=str(values["consumer_id"]),
+        status=cast('Literal["preparing", "running", "succeeded", "failed"]', status),
+        phase_version=int(values["phase_version"]),
+        snapshot_id=(
+            str(values["snapshot_id"])
+            if values["snapshot_id"] is not None
+            else None
+        ),
+        restore_epoch=restore_epoch,
+        stream_control_version=int(values["control_version"]),
+        item_count=(
+            int(values["item_count"]) if values["item_count"] is not None else None
+        ),
+        merkle_root=(
+            str(values["merkle_root"]) if values["merkle_root"] is not None else None
+        ),
+    )
+
+
+async def get_cache_target_reconciliation(
+    session: AsyncSession,
+    *,
+    request_id: str,
+) -> CacheTargetReconciliationRecord:
+    """Reconciliation request metadata만 읽는다. Snapshot item은 읽지 않는다."""
+
+    request_id = _canonical_uuid(request_id, field="request_id")
+    row = (
+        await session.execute(
+            text(_GET_RECONCILIATION_SQL),
+            {"request_id": request_id},
+        )
+    ).one_or_none()
+    if row is None:
+        raise CacheTargetStreamConflict(
+            "reconciliation_not_found",
+            "reconciliation request가 없습니다.",
+        )
+    return _reconciliation_record(row)
+
+
+async def _lock_stream_for_reconciliation_begin(
+    session: AsyncSession,
+    *,
+    external_system: str,
+    consumer_id: str,
+    expected_restore_epoch: int,
+    expected_control_version: int | None,
+    create_only: bool,
+) -> Any:
+    if create_only:
+        stream = (
+            await session.execute(
+                text(_CREATE_STREAM_SQL),
+                {"external_system": external_system, "consumer_id": consumer_id},
+            )
+        ).one_or_none()
+        if stream is None:
+            current = (
+                await session.execute(
+                    text(_LOCK_STREAM_SQL),
+                    {"external_system": external_system},
+                )
+            ).one()
+            current_values = current._mapping
+            raise CacheTargetStreamConflict(
+                "reconciliation_precondition_failed",
+                "If-None-Match create에 이미 stream이 존재합니다.",
+                current={
+                    "entity_tag": cache_target_stream_entity_tag(
+                        external_system,
+                        int(current_values["control_version"]),
+                    ),
+                    "restore_epoch": int(current_values["restore_epoch"]),
+                },
+            )
+        values = stream._mapping
+    else:
+        stream = (
+            await session.execute(
+                text(_LOCK_STREAM_SQL),
+                {"external_system": external_system},
+            )
+        ).one_or_none()
+        if stream is None:
+            raise CacheTargetStreamConflict(
+                "stream_not_found",
+                "cache target stream이 없습니다.",
+            )
+        values = stream._mapping
+        if expected_control_version is None:
+            raise ValueError("expected_control_version은 If-Match begin에 필요합니다.")
+        if int(values["control_version"]) != expected_control_version:
+            raise CacheTargetStreamConflict(
+                "reconciliation_precondition_failed",
+                "stream ETag가 현재 control version과 다릅니다.",
+                current={
+                    "entity_tag": cache_target_stream_entity_tag(
+                        external_system,
+                        int(values["control_version"]),
+                    ),
+                    "restore_epoch": int(values["restore_epoch"]),
+                },
+            )
+    if str(values["consumer_id"]) != consumer_id:
+        raise CacheTargetStreamConflict(
+            "consumer_mismatch",
+            "service principal consumer_id가 stream binding과 다릅니다.",
+            current={"consumer_id": str(values["consumer_id"])},
+        )
+    if int(values["restore_epoch"]) != expected_restore_epoch:
+        raise CacheTargetStreamConflict(
+            "reconciliation_precondition_failed",
+            "expected_restore_epoch이 현재 stream epoch와 다릅니다.",
+            current={
+                "restore_epoch": int(values["restore_epoch"]),
+                "entity_tag": cache_target_stream_entity_tag(
+                    external_system,
+                    int(values["control_version"]),
+                ),
+            },
+        )
+    return stream
+
+
+async def _invalidate_reconciliation_claims(
+    session: AsyncSession,
+    *,
+    external_system: str,
+) -> None:
+    invalidated = (
+        await session.execute(
+            text(_INVALIDATE_CLAIMS_SQL),
+            {"external_system": external_system},
+        )
+    ).all()
+    claim_ids = [str(row._mapping["claim_id"]) for row in invalidated]
+    if claim_ids:
+        await session.execute(
+            text(_RELEASE_CLAIM_DELIVERIES_SQL),
+            {"claim_ids": claim_ids},
+        )
+
+
+async def begin_cache_target_reconciliation(
+    session: AsyncSession,
+    *,
+    command_id: int,
+    external_system: str,
+    consumer_id: str,
+    expected_restore_epoch: int,
+    expected_control_version: int | None,
+    create_only: bool,
+    reason: str,
+) -> CacheTargetReconciliationResult:
+    """Stream을 fenced 상태로 만들고 snapshot 없는 preparing request를 시작한다."""
+
+    if command_id <= 0:
+        raise ValueError("command_id는 양수여야 합니다.")
+    if not reason or reason != reason.strip() or len(reason) > 1000:
+        raise ValueError("reason은 trim된 1~1000자 문자열이어야 합니다.")
+    existing = (
+        await session.execute(
+            text(_GET_RECONCILIATION_BY_COMMAND_SQL),
+            {"command_id": command_id},
+        )
+    ).one_or_none()
+    if existing is not None:
+        if str(existing._mapping["external_system"]) != external_system:
+            raise CacheTargetStreamConflict(
+                "reconciliation_command_mismatch",
+                "command가 다른 stream reconciliation에 연결돼 있습니다.",
+            )
+        return _reconciliation(existing, replay=True)
+
+    stream = await _lock_stream_for_reconciliation_begin(
+        session,
+        external_system=external_system,
+        consumer_id=consumer_id,
+        expected_restore_epoch=expected_restore_epoch,
+        expected_control_version=expected_control_version,
+        create_only=create_only,
+    )
+    active = (
+        await session.execute(
+            text(_GET_ACTIVE_RECONCILIATION_SQL),
+            {"external_system": external_system},
+        )
+    ).one_or_none()
+    if active is not None:
+        raise CacheTargetStreamConflict(
+            "reconciliation_active",
+            "stream에 이미 active reconciliation request가 있습니다.",
+            current={
+                "request_id": str(active._mapping["request_id"]),
+                "status": str(active._mapping["status"]),
+                "snapshot_id": (
+                    str(active._mapping["snapshot_id"])
+                    if active._mapping["snapshot_id"] is not None
+                    else None
+                ),
+            },
+        )
+    await _invalidate_reconciliation_claims(session, external_system=external_system)
+    if not create_only:
+        await session.execute(
+            text(_HALT_STREAM_SQL),
+            {"external_system": external_system},
+        )
+    request_id = str(uuid4())
+    await session.execute(
+        text(_INSERT_PREPARING_RECONCILIATION_SQL),
+        {
+            "request_id": request_id,
+            "external_system": external_system,
+            "command_id": command_id,
+            "reason": reason,
+        },
+    )
+    row = (
+        await session.execute(
+            text(_GET_RECONCILIATION_BY_COMMAND_SQL),
+            {"command_id": command_id},
+        )
+    ).one()
+    # ``stream`` keeps the row locked until transaction end; re-query above reads
+    # the post-halt control_version for the response ETag.
+    _ = stream
+    return _reconciliation(row, replay=False)
+
+
+async def seal_cache_target_reconciliation(
+    session: AsyncSession,
+    *,
+    request_id: str,
+    external_system: str,
+    consumer_id: str,
+    expected_phase_version: int,
+    expected_restore_epoch: int,
+    expected_item_count: int,
+    expected_merkle_root: str,
+) -> CacheTargetReconciliationResult:
+    """Preparing request를 expected checksum과 같은 snapshot으로만 running 전환한다."""
+
+    request_id = _canonical_uuid(request_id, field="request_id")
+    expected_merkle_root = _sha256(expected_merkle_root, field="expected_merkle_root")
+    if expected_phase_version <= 0:
+        raise ValueError("expected_phase_version은 양수여야 합니다.")
+    if expected_restore_epoch <= 0:
+        raise ValueError("expected_restore_epoch은 양수여야 합니다.")
+    if expected_item_count < 0:
+        raise ValueError("expected_item_count는 0 이상이어야 합니다.")
+    row = (
+        await session.execute(
+            text(_LOCK_RECONCILIATION_SQL),
+            {"request_id": request_id},
+        )
+    ).one_or_none()
+    if row is None:
+        raise CacheTargetStreamConflict(
+            "reconciliation_not_found",
+            "reconciliation request가 없습니다.",
+        )
+    values = row._mapping
+    if (
+        str(values["external_system"]) != external_system
+        or int(values["phase_version"]) != expected_phase_version
+    ):
+        raise CacheTargetStreamConflict(
+            "reconciliation_precondition_failed",
+            "reconciliation request ETag 또는 stream binding이 다릅니다.",
+            current={
+                "external_system": str(values["external_system"]),
+                "entity_tag": cache_target_reconciliation_entity_tag(
+                    request_id,
+                    int(values["phase_version"]),
+                ),
+            },
+        )
+    if str(values["status"]) != "preparing":
+        raise CacheTargetStreamConflict(
+            "reconciliation_precondition_failed",
+            "reconciliation request가 preparing 상태가 아닙니다.",
+            current={
+                "status": str(values["status"]),
+                "entity_tag": cache_target_reconciliation_entity_tag(
+                    request_id,
+                    int(values["phase_version"]),
+                ),
+            },
+        )
+    stream = (
+        await session.execute(
+            text(_LOCK_STREAM_SQL),
+            {"external_system": external_system},
+        )
+    ).one()
+    if str(stream._mapping["consumer_id"]) != consumer_id:
+        raise CacheTargetStreamConflict(
+            "consumer_mismatch",
+            "service principal consumer_id가 stream binding과 다릅니다.",
+        )
+    header, items = await _build_snapshot_material(
+        session,
+        external_system=external_system,
+    )
+    actual = {
+        "restore_epoch": int(header["restore_epoch"]),
+        "item_count": int(header["item_count"]),
+        "merkle_root": str(header["merkle_root"]),
+    }
+    if actual != {
+        "restore_epoch": expected_restore_epoch,
+        "item_count": expected_item_count,
+        "merkle_root": expected_merkle_root,
+    }:
+        raise CacheTargetStreamConflict(
+            "reconciliation_precondition_failed",
+            "seal expected checksum이 현재 Map source heads와 다릅니다.",
+            current=actual,
+        )
+    persisted = await _persist_snapshot(session, header=header, items=items)
+    await session.execute(
+        text(_SEAL_RECONCILIATION_SQL),
+        {
+            "request_id": request_id,
+            "expected_phase_version": expected_phase_version,
+            "snapshot_id": persisted["snapshot_id"],
+            "expected_merkle_root": persisted["merkle_root"],
+        },
+    )
+    sealed = (
+        await session.execute(
+            text(_GET_RECONCILIATION_SQL),
+            {"request_id": request_id},
+        )
+    ).one()
+    return _reconciliation(sealed, replay=False)
 
 
 async def request_cache_target_reconciliation(
@@ -979,24 +1550,18 @@ async def request_cache_target_reconciliation(
     if active is not None:
         raise CacheTargetStreamConflict(
             "reconciliation_active",
-            "stream에 이미 running reconciliation request가 있습니다.",
+            "stream에 이미 active reconciliation request가 있습니다.",
             current={
                 "request_id": str(active._mapping["request_id"]),
-                "snapshot_id": str(active._mapping["snapshot_id"]),
+                "status": str(active._mapping["status"]),
+                "snapshot_id": (
+                    str(active._mapping["snapshot_id"])
+                    if active._mapping["snapshot_id"] is not None
+                    else None
+                ),
             },
         )
-    invalidated = (
-        await session.execute(
-            text(_INVALIDATE_CLAIMS_SQL),
-            {"external_system": external_system},
-        )
-    ).all()
-    claim_ids = [str(row._mapping["claim_id"]) for row in invalidated]
-    if claim_ids:
-        await session.execute(
-            text(_RELEASE_CLAIM_DELIVERIES_SQL),
-            {"claim_ids": claim_ids},
-        )
+    await _invalidate_reconciliation_claims(session, external_system=external_system)
     await session.execute(
         text(_HALT_STREAM_SQL),
         {"external_system": external_system},
@@ -1016,7 +1581,15 @@ async def request_cache_target_reconciliation(
             },
         )
     ).one()
-    return _reconciliation(inserted, replay=False)
+    row = (
+        await session.execute(
+            text(_GET_RECONCILIATION_BY_COMMAND_SQL),
+            {"command_id": command_id},
+        )
+    ).one()
+    _ = inserted
+    _ = stream
+    return _reconciliation(row, replay=False)
 
 
 async def complete_cache_target_reconciliation(
@@ -1048,6 +1621,13 @@ async def complete_cache_target_reconciliation(
             "reconciliation request가 현재 active request와 다릅니다.",
         )
     values = row._mapping
+    if str(values["status"]) == "preparing":
+        raise CacheTargetStreamConflict(
+            "reconciliation_not_sealed",
+            "reconciliation request가 아직 fixed snapshot으로 seal되지 않았습니다.",
+        )
+    if values["snapshot_id"] is None or values["expected_merkle_root"] is None:
+        raise RuntimeError("sealed reconciliation request에 snapshot/root가 없습니다.")
     if (
         str(values["external_system"]) != external_system
         or str(values["snapshot_id"]) != snapshot_id
@@ -1163,7 +1743,14 @@ async def complete_cache_target_reconciliation(
             text(_INSERT_DELIVERY_SQL),
             {"event_id": inserted_event_id},
         )
-    return _reconciliation(completed, replay=False)
+    _ = completed
+    refreshed = (
+        await session.execute(
+            text(_GET_RECONCILIATION_SQL),
+            {"request_id": request_id},
+        )
+    ).one()
+    return _reconciliation(refreshed, replay=False)
 
 
 async def get_cache_target_operation(

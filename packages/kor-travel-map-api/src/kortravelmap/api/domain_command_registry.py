@@ -67,7 +67,8 @@ class CommandPolicy:
                     f"unsupported terminal response headers: {sorted(unsupported)}"
                 )
             unsupported_fingerprint_headers = set(self.fingerprint_headers) - {
-                "If-Match"
+                "If-Match",
+                "If-None-Match",
             }
             if unsupported_fingerprint_headers:
                 raise ValueError(
@@ -401,6 +402,22 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         "service.cache-target-restore-fence.create",
         _DESTRUCTIVE_RESULT,
         success_status=201,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+    ),
+    ("POST", "/v1/service/cache-target-reconciliations"): _domain(
+        "service.cache-target-reconciliation.begin",
+        _DESTRUCTIVE_RESULT,
+        success_status=201,
+        replay_headers=("ETag", "Location", "Retry-After"),
+        fingerprint_headers=("If-Match", "If-None-Match"),
+    ),
+    (
+        "POST",
+        "/v1/service/cache-target-reconciliations/{request_id}/seals",
+    ): _domain(
+        "service.cache-target-reconciliation.seal",
+        "sealed fixed snapshot 생성과 running phase 전이를 exact replay",
         replay_headers=("ETag",),
         fingerprint_headers=("If-Match",),
     ),

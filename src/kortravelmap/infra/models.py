@@ -4177,8 +4177,12 @@ class PoiCacheTargetReconciliationRequestRow(Base):
             name=conv("ck_cache_target_reconciliation_requests_reason"),
         ),
         CheckConstraint(
-            "status IN ('queued','running','succeeded','failed')",
+            "status IN ('preparing','running','succeeded','failed')",
             name=conv("ck_cache_target_reconciliation_requests_status"),
+        ),
+        CheckConstraint(
+            "phase_version > 0",
+            name=conv("ck_cache_target_reconciliation_requests_phase_version"),
         ),
         CheckConstraint(
             "expected_merkle_root IS NULL OR "
@@ -4190,10 +4194,22 @@ class PoiCacheTargetReconciliationRequestRow(Base):
             name=conv("ck_cache_target_reconciliation_requests_actual_root"),
         ),
         CheckConstraint(
-            "(status = 'queued' AND started_at IS NULL AND completed_at IS NULL) OR "
-            "(status = 'running' AND started_at IS NOT NULL AND completed_at IS NULL) OR "
-            "(status IN ('succeeded','failed') AND started_at IS NOT NULL "
-            "AND completed_at IS NOT NULL)",
+            "(status = 'preparing' AND started_at IS NOT NULL "
+            "AND completed_at IS NULL AND snapshot_id IS NULL "
+            "AND expected_merkle_root IS NULL AND actual_merkle_root IS NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'running' AND started_at IS NOT NULL "
+            "AND completed_at IS NULL AND snapshot_id IS NOT NULL "
+            "AND expected_merkle_root IS NOT NULL AND actual_merkle_root IS NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'succeeded' AND started_at IS NOT NULL "
+            "AND completed_at IS NOT NULL AND snapshot_id IS NOT NULL "
+            "AND expected_merkle_root IS NOT NULL AND actual_merkle_root IS NOT NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'failed' AND started_at IS NOT NULL "
+            "AND completed_at IS NOT NULL AND snapshot_id IS NOT NULL "
+            "AND expected_merkle_root IS NOT NULL AND actual_merkle_root IS NOT NULL "
+            "AND error_code IS NOT NULL)",
             name=conv("ck_cache_target_reconciliation_requests_lifecycle"),
         ),
         UniqueConstraint(
@@ -4237,7 +4253,12 @@ class PoiCacheTargetReconciliationRequestRow(Base):
     status: Mapped[str] = mapped_column(
         Text,
         nullable=False,
-        server_default=text("'queued'"),
+        server_default=text("'preparing'"),
+    )
+    phase_version: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("1"),
     )
     snapshot_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),

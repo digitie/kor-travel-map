@@ -36,7 +36,6 @@ from kortravelmap.api.cache_target_stream_schema import (
     CacheTargetAckRecord,
     CacheTargetAckRequest,
     CacheTargetAckResponse,
-    CacheTargetActiveReconciliation,
     CacheTargetAppliedReceipt,
     CacheTargetClaimRecord,
     CacheTargetClaimRequest,
@@ -51,8 +50,12 @@ from kortravelmap.api.cache_target_stream_schema import (
     CacheTargetEventRecord,
     CacheTargetNackRequest,
     CacheTargetOperationResponse,
+    CacheTargetReconciliationBeginRequest,
     CacheTargetReconciliationCompletionRequest,
+    CacheTargetReconciliationPreparing,
     CacheTargetReconciliationRequest,
+    CacheTargetReconciliationRunning,
+    CacheTargetReconciliationSealRequest,
     CacheTargetRecoveryOperationRecord,
     CacheTargetRefreshRequest,
     CacheTargetRefreshRequestRecord,
@@ -308,6 +311,62 @@ def _stream_precondition(request: Request, *, external_system: str) -> int:
     )
 
 
+def _stream_begin_precondition(
+    request: Request,
+    *,
+    external_system: str,
+) -> tuple[bool, int | None]:
+    if_none_match = _single_header(request, "if-none-match")
+    if_match = _single_header(request, "if-match")
+    if if_none_match is None and if_match is None:
+        raise _http_error(
+            status.HTTP_428_PRECONDITION_REQUIRED,
+            "PRECONDITION_REQUIRED",
+            "stream이 없으면 If-None-Match: *, 있으면 If-Match header가 필요합니다.",
+        )
+    if if_none_match is not None and if_match is not None:
+        raise _http_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "VALIDATION_ERROR",
+            "If-None-Match와 If-Match는 함께 보낼 수 없습니다.",
+        )
+    if if_none_match is not None:
+        if if_none_match != "*":
+            raise _http_error(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "VALIDATION_ERROR",
+                "If-None-Match는 create-only `*`만 허용합니다.",
+            )
+        return True, None
+    assert if_match is not None
+    return False, _strong_stream_version(
+        if_match,
+        external_system=external_system,
+        header_name="If-Match",
+    )
+
+
+def _reconciliation_precondition(request: Request, *, request_id: str) -> int:
+    if_match = _single_header(request, "if-match")
+    if if_match is None:
+        raise _http_error(
+            status.HTTP_428_PRECONDITION_REQUIRED,
+            "PRECONDITION_REQUIRED",
+            "reconciliation If-Match header가 필요합니다.",
+        )
+    precondition_request_id, phase_version = _strong_uuid_version(
+        if_match,
+        header_name="If-Match",
+    )
+    if precondition_request_id != request_id:
+        raise _http_error(
+            status.HTTP_412_PRECONDITION_FAILED,
+            "PRECONDITION_FAILED",
+            "If-Match request_id가 seal 대상과 다릅니다.",
+        )
+    return phase_version
+
+
 def _delivery_precondition(request: Request) -> tuple[str, int]:
     if_match = _single_header(request, "if-match")
     if if_match is None:
@@ -353,16 +412,31 @@ def _stream_control(row: Any) -> CacheTargetStreamControlRecord:
     active = _getattr(row, "active_reconciliation")
     active_record = None
     if active is not None:
-        active_record = CacheTargetActiveReconciliation(
-            request_id=_getattr(active, "request_id"),
-            status=_getattr(active, "status"),
-            snapshot_id=_getattr(active, "snapshot_id"),
-            restore_epoch=_getattr(active, "restore_epoch"),
-            count=_getattr(active, "count"),
-            merkle_root=_getattr(active, "merkle_root"),
-            high_watermark_cursor=_getattr(active, "high_watermark_cursor"),
-            created_at=_getattr(active, "created_at"),
-        )
+        active_status = _getattr(active, "status")
+        if active_status == "preparing":
+            active_record = CacheTargetReconciliationPreparing(
+                request_id=_getattr(active, "request_id"),
+                status="preparing",
+                restore_epoch=_getattr(active, "restore_epoch"),
+                entity_tag=_getattr(active, "entity_tag"),
+                stream_entity_tag=_getattr(active, "stream_entity_tag"),
+                created_at=_getattr(active, "created_at"),
+            )
+        elif active_status == "running":
+            active_record = CacheTargetReconciliationRunning(
+                request_id=_getattr(active, "request_id"),
+                status="running",
+                snapshot_id=_getattr(active, "snapshot_id"),
+                restore_epoch=_getattr(active, "restore_epoch"),
+                count=_getattr(active, "count"),
+                merkle_root=_getattr(active, "merkle_root"),
+                high_watermark_cursor=_getattr(active, "high_watermark_cursor"),
+                entity_tag=_getattr(active, "entity_tag"),
+                stream_entity_tag=_getattr(active, "stream_entity_tag"),
+                created_at=_getattr(active, "created_at"),
+            )
+        else:
+            raise RuntimeError("active reconciliation status가 유효하지 않습니다.")
     return CacheTargetStreamControlRecord(
         external_system=external_system,
         restore_epoch=_getattr(row, "restore_epoch"),
@@ -460,6 +534,8 @@ def _operation_record(row: Any) -> CacheTargetRecoveryOperationRecord:
         operation_id=str(_getattr(row, "operation_id")),
         status=_getattr(row, "status", "accepted"),
         status_url=_getattr(row, "status_url"),
+        entity_tag=_getattr(row, "entity_tag"),
+        stream_entity_tag=_getattr(row, "stream_entity_tag"),
     )
 
 
@@ -473,6 +549,8 @@ def _operation_record_from_result(
         operation_id=str(_getattr(row, "operation_id", operation_id)),
         status=_getattr(row, "operation_status", "accepted"),
         status_url=status_url,
+        entity_tag=_getattr(row, "entity_tag"),
+        stream_entity_tag=_getattr(row, "stream_entity_tag"),
     )
 
 
@@ -982,15 +1060,22 @@ async def ack_service_cache_target_events(
         else receipt
         for receipt in body.applied
     ]
-    async with session.begin():
-        result = await stream_service.ack_cache_target_events(
-            session,
-            consumer_id=context.consumer_id,
-            claim_id=str(body.claim_id),
-            lease_token=body.lease_token,
-            through_cursor=body.through_cursor,
-            applied=applied,
-        )
+    try:
+        async with session.begin():
+            result = await stream_service.ack_cache_target_events(
+                session,
+                consumer_id=context.consumer_id,
+                claim_id=str(body.claim_id),
+                lease_token=str(body.lease_token),
+                through_cursor=body.through_cursor,
+                applied=applied,
+            )
+    except ValueError as exc:
+        raise _http_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "VALIDATION_ERROR",
+            str(exc),
+        ) from exc
     raise_for_cache_target_status(result)
     record = CacheTargetAckRecord(
         claim_id=_getattr(result, "claim_id", body.claim_id),
@@ -1027,20 +1112,27 @@ async def nack_service_cache_target_event(
         scope="cache-target:nack",
         external_system=body.external_system,
     )
-    async with session.begin():
-        result = await stream_service.nack_cache_target_event(
-            session,
-            external_system=body.external_system,
-            consumer_id=context.consumer_id,
-            claim_id=str(body.claim_id),
-            lease_token=body.lease_token,
-            event_id=str(body.event_id),
-            error_class=body.disposition,
-            error_code=body.error_code or body.error_class,
-            error_fingerprint=body.error_fingerprint,
-            backoff_seconds=body.backoff_seconds,
-            max_attempts=body.max_attempts,
-        )
+    try:
+        async with session.begin():
+            result = await stream_service.nack_cache_target_event(
+                session,
+                external_system=body.external_system,
+                consumer_id=context.consumer_id,
+                claim_id=str(body.claim_id),
+                lease_token=str(body.lease_token),
+                event_id=str(body.event_id),
+                error_class=body.disposition,
+                error_code=body.error_code or body.error_class,
+                error_fingerprint=body.error_fingerprint,
+                backoff_seconds=body.backoff_seconds,
+                max_attempts=body.max_attempts,
+            )
+    except ValueError as exc:
+        raise _http_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "VALIDATION_ERROR",
+            str(exc),
+        ) from exc
     raise_for_cache_target_status(result)
     retry_after = _getattr(result, "retry_after_seconds")
     if retry_after is not None:
@@ -1189,6 +1281,178 @@ async def replay_service_cache_target_dead_letter(
             response_headers={"ETag": record.entity_tag},
         )
     _set_etag(response, record)
+    return response_body
+
+
+@service_router.post(
+    "/cache-target-reconciliations",
+    response_model=CacheTargetOperationResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        201: {
+            "description": "two-phase reconciliation begin",
+            "headers": {
+                **_ASYNC_OPERATION_HEADERS,
+                **_ETAG_RESPONSE_HEADER,
+            },
+        },
+        412: {"description": "stale stream ETag or unexpected stream state"},
+        428: {"description": "missing If-Match/If-None-Match"},
+    },
+    openapi_extra={"parameters": [_IF_NONE_MATCH_PARAMETER, _IF_MATCH_PARAMETER]},
+)
+async def begin_service_cache_target_reconciliation(
+    body: CacheTargetReconciliationBeginRequest,
+    request: Request,
+    response: Response,
+    session: Annotated[Any, Depends(get_session)],
+    stream_service: Annotated[
+        CacheTargetStreamService,
+        Depends(get_cache_target_stream_service),
+    ],
+    context: Annotated[
+        CacheTargetServicePrincipalContext,
+        Depends(require_cache_target_service_principal),
+    ],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+) -> CacheTargetOperationResponse:
+    started_at = perf_counter()
+    _require_bound_consumer(context, body.consumer_id)
+    require_cache_target_service_scope(
+        context,
+        scope="cache-target:recovery",
+        external_system=body.external_system,
+    )
+    create_only, expected_control_version = _stream_begin_precondition(
+        request,
+        external_system=body.external_system,
+    )
+    payload = {
+        "body": body.model_dump(mode="json"),
+        "headers": {
+            "If-Match": request.headers.get("if-match"),
+            "If-None-Match": request.headers.get("if-none-match"),
+        },
+    }
+    async with session.begin():
+        command = await begin_domain_command(
+            session,
+            actor=context.principal_id,
+            operation="service.cache-target-reconciliation.begin",
+            idempotency_key=idempotency_key,
+            payload=payload,
+        )
+        result = await stream_service.begin_cache_target_reconciliation(
+            session,
+            command_id=command.command_id,
+            external_system=body.external_system,
+            consumer_id=context.consumer_id,
+            expected_restore_epoch=body.expected_restore_epoch,
+            expected_control_version=expected_control_version,
+            create_only=create_only,
+            reason=body.reason,
+        )
+        raise_for_cache_target_status(result)
+        record = _operation_record(result)
+        response_body = CacheTargetOperationResponse(
+            data=record,
+            meta=_meta(started_at),
+        )
+        response_headers = _async_headers(record, default_retry_after=5)
+        if record.entity_tag is not None:
+            response_headers["ETag"] = record.entity_tag
+        await complete_domain_command(
+            session,
+            command=command,
+            response=response_body,
+            status_code=status.HTTP_201_CREATED,
+            response_headers=response_headers,
+        )
+    _set_async_headers(response, record, default_retry_after=5)
+    if record.entity_tag is not None:
+        response.headers["ETag"] = record.entity_tag
+    return response_body
+
+
+@service_router.post(
+    "/cache-target-reconciliations/{request_id}/seals",
+    response_model=CacheTargetOperationResponse,
+    responses={
+        200: {"description": "two-phase reconciliation sealed", "headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "request ETag or checksum precondition failed"},
+        428: {"description": "missing If-Match"},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_PARAMETER]},
+)
+async def seal_service_cache_target_reconciliation(
+    request_id: Annotated[UUID, Path()],
+    body: CacheTargetReconciliationSealRequest,
+    request: Request,
+    response: Response,
+    session: Annotated[Any, Depends(get_session)],
+    stream_service: Annotated[
+        CacheTargetStreamService,
+        Depends(get_cache_target_stream_service),
+    ],
+    context: Annotated[
+        CacheTargetServicePrincipalContext,
+        Depends(require_cache_target_service_principal),
+    ],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+) -> CacheTargetOperationResponse:
+    started_at = perf_counter()
+    request_id_text = str(request_id)
+    _require_bound_consumer(context, body.consumer_id)
+    require_cache_target_service_scope(
+        context,
+        scope="cache-target:recovery",
+        external_system=body.external_system,
+    )
+    expected_phase_version = _reconciliation_precondition(
+        request,
+        request_id=request_id_text,
+    )
+    payload = {
+        "request_id": request_id_text,
+        "body": body.model_dump(mode="json"),
+        "headers": {"If-Match": request.headers.get("if-match")},
+    }
+    async with session.begin():
+        command = await begin_domain_command(
+            session,
+            actor=context.principal_id,
+            operation="service.cache-target-reconciliation.seal",
+            idempotency_key=idempotency_key,
+            payload=payload,
+        )
+        result = await stream_service.seal_cache_target_reconciliation(
+            session,
+            request_id=request_id_text,
+            external_system=body.external_system,
+            consumer_id=context.consumer_id,
+            expected_phase_version=expected_phase_version,
+            expected_restore_epoch=body.expected_restore_epoch,
+            expected_item_count=body.expected_item_count,
+            expected_merkle_root=body.expected_merkle_root,
+        )
+        raise_for_cache_target_status(result)
+        record = _operation_record(result)
+        response_body = CacheTargetOperationResponse(
+            data=record,
+            meta=_meta(started_at),
+        )
+        response_headers = {}
+        if record.entity_tag is not None:
+            response_headers["ETag"] = record.entity_tag
+        await complete_domain_command(
+            session,
+            command=command,
+            response=response_body,
+            status_code=status.HTTP_200_OK,
+            response_headers=response_headers,
+        )
+    if record.entity_tag is not None:
+        response.headers["ETag"] = record.entity_tag
     return response_body
 
 
@@ -1346,6 +1610,21 @@ async def get_service_cache_target_reconciliation_snapshot(
 ) -> CacheTargetSnapshotResponse:
     started_at = perf_counter()
     require_cache_target_service_scope(context, scope="cache-target:snapshot")
+    metadata = await stream_service.get_cache_target_reconciliation(
+        session,
+        request_id=str(request_id),
+    )
+    if _getattr(metadata, "consumer_id") != context.consumer_id:
+        raise _http_error(
+            status.HTTP_403_FORBIDDEN,
+            "CACHE_TARGET_CONSUMER_FORBIDDEN",
+            "reconciliation request consumer가 token principal과 일치하지 않습니다.",
+        )
+    require_cache_target_service_scope(
+        context,
+        scope="cache-target:snapshot",
+        external_system=_getattr(metadata, "external_system"),
+    )
     page = await stream_service.get_cache_target_reconciliation_snapshot(
         session,
         request_id=str(request_id),
@@ -1354,11 +1633,6 @@ async def get_service_cache_target_reconciliation_snapshot(
         cursor=cursor,
     )
     raise_for_cache_target_status(page)
-    require_cache_target_service_scope(
-        context,
-        scope="cache-target:snapshot",
-        external_system=_getattr(page, "external_system"),
-    )
     return _snapshot_response(
         page,
         started_at=started_at,

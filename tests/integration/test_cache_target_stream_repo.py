@@ -7,8 +7,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kortravelmap.core.cache_target_stream import (
+    SnapshotMerkleRowV1,
     make_active_cache_target_source,
     make_deleted_cache_target_source,
+    snapshot_merkle_root,
 )
 from kortravelmap.infra.cache_target_event_repo import (
     append_cache_target_links_reconciled_events,
@@ -25,13 +27,16 @@ from kortravelmap.infra.cache_target_outbox_repo import (
     replay_cache_target_dead_letter,
 )
 from kortravelmap.infra.cache_target_reconciliation_repo import (
+    begin_cache_target_reconciliation,
     complete_cache_target_reconciliation,
     get_cache_target_operation,
+    get_cache_target_reconciliation,
     get_cache_target_reconciliation_snapshot,
     get_cache_target_snapshot,
     get_cache_target_stream_discovery,
     list_cache_target_stream_statuses,
     request_cache_target_reconciliation,
+    seal_cache_target_reconciliation,
 )
 from kortravelmap.infra.cache_target_restore import (
     CacheTargetRestoreReference,
@@ -937,16 +942,280 @@ async def _reconciliation_command(
     session: AsyncSession,
     *,
     key: str,
+    operation: str = "admin.cache-target-reconciliation.request",
 ) -> int:
     fingerprint = canonical_domain_command_fingerprint({"key": key})
     claim = await create_domain_command_claim(
         session,
         actor="admin:test",
-        operation="admin.cache-target-reconciliation.request",
+        operation=operation,
         idempotency_key=key,
         request_fingerprint=fingerprint,
     )
     return claim.command_id
+
+
+@pytest.mark.integration
+async def test_two_phase_reconciliation_seal_is_exact_and_transactional(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "reconciliation-two-phase-test"
+    begin_command = await _reconciliation_command(
+        migrated_session,
+        key="9e000000-0000-0000-0000-000000000001",
+        operation="service.cache-target-reconciliation.begin",
+    )
+
+    preparing = await begin_cache_target_reconciliation(
+        migrated_session,
+        command_id=begin_command,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        expected_restore_epoch=1,
+        expected_control_version=None,
+        create_only=True,
+        reason="PinVi cutover",
+    )
+
+    assert preparing.status == "preparing"
+    assert preparing.phase_version == 1
+    assert preparing.snapshot_id is None
+    assert preparing.stream_entity_tag == f'"{system}:1"'
+    assert preparing.retry_after_seconds == 5
+
+    replay = await begin_cache_target_reconciliation(
+        migrated_session,
+        command_id=begin_command,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        expected_restore_epoch=1,
+        expected_control_version=None,
+        create_only=True,
+        reason="PinVi cutover",
+    )
+    assert replay.idempotent_replay
+    assert replay.request_id == preparing.request_id
+    assert replay.status == "preparing"
+
+    with pytest.raises(CacheTargetStreamConflict) as preparing_snapshot:
+        await get_cache_target_reconciliation_snapshot(
+            migrated_session,
+            request_id=preparing.request_id,
+            consumer_id=_CONSUMER,
+            limit=1,
+        )
+    assert preparing_snapshot.value.code == "reconciliation_not_sealed"
+
+    head = await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-a",
+        event_id="9e000000-0000-0000-0000-000000000101",
+        idempotency_key="9e000000-0000-0000-0000-000000000201",
+    )
+    expected_root = snapshot_merkle_root(
+        [
+            SnapshotMerkleRowV1(
+                external_system=system,
+                target_key="target-a",
+                state=head.state,
+                source_generation=head.source_generation,
+                source_payload_fingerprint=head.source_payload_fingerprint,
+            )
+        ]
+    )
+
+    with pytest.raises(CacheTargetStreamConflict) as wrong_phase:
+        await seal_cache_target_reconciliation(
+            migrated_session,
+            request_id=preparing.request_id,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            expected_phase_version=2,
+            expected_restore_epoch=1,
+            expected_item_count=1,
+            expected_merkle_root=expected_root,
+        )
+    assert wrong_phase.value.code == "reconciliation_precondition_failed"
+
+    with pytest.raises(CacheTargetStreamConflict) as mismatch:
+        await seal_cache_target_reconciliation(
+            migrated_session,
+            request_id=preparing.request_id,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            expected_phase_version=1,
+            expected_restore_epoch=1,
+            expected_item_count=2,
+            expected_merkle_root=expected_root,
+        )
+    assert mismatch.value.code == "reconciliation_precondition_failed"
+    metadata = await get_cache_target_reconciliation(
+        migrated_session,
+        request_id=preparing.request_id,
+    )
+    assert metadata.status == "preparing"
+    assert metadata.phase_version == 1
+    assert metadata.snapshot_id is None
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshots "
+                "WHERE external_system = :system"
+            ),
+            {"system": system},
+        )
+        == 0
+    )
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
+                "WHERE external_system = :system"
+            ),
+            {"system": system},
+        )
+        == 0
+    )
+
+    sealed = await seal_cache_target_reconciliation(
+        migrated_session,
+        request_id=preparing.request_id,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        expected_phase_version=1,
+        expected_restore_epoch=1,
+        expected_item_count=1,
+        expected_merkle_root=expected_root,
+    )
+    assert sealed.status == "running"
+    assert sealed.phase_version == 2
+    assert sealed.snapshot_id is not None
+    assert sealed.expected_merkle_root == expected_root
+    running = await get_cache_target_stream_discovery(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+    )
+    assert running is not None
+    assert running.active_reconciliation is not None
+    assert running.active_reconciliation.status == "running"
+    assert running.active_reconciliation.snapshot_id == sealed.snapshot_id
+    assert running.active_reconciliation.entity_tag == sealed.entity_tag
+
+    page = await get_cache_target_reconciliation_snapshot(
+        migrated_session,
+        request_id=sealed.request_id,
+        consumer_id=_CONSUMER,
+        limit=10,
+    )
+    assert page.snapshot_id == sealed.snapshot_id
+    assert page.count == 1
+    assert page.merkle_root == expected_root
+
+    completed = await complete_cache_target_reconciliation(
+        migrated_session,
+        request_id=sealed.request_id,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        snapshot_id=sealed.snapshot_id,
+        expected_restore_epoch=1,
+        actual_merkle_root=expected_root,
+    )
+    assert completed.status == "succeeded"
+    assert completed.phase_version == 3
+    resumed = await get_cache_target_stream_discovery(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+    )
+    assert resumed is not None
+    assert resumed.active_reconciliation is None
+    assert resumed.status == "ready"
+    assert resumed.consumer_enabled
+
+
+@pytest.mark.integration
+async def test_two_phase_reconciliation_begin_preconditions(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "reconciliation-two-phase-precondition-test"
+    await lock_cache_target_stream(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+    )
+
+    create_command = await _reconciliation_command(
+        migrated_session,
+        key="9f000000-0000-0000-0000-000000000001",
+        operation="service.cache-target-reconciliation.begin",
+    )
+    with pytest.raises(CacheTargetStreamConflict) as create_existing:
+        await begin_cache_target_reconciliation(
+            migrated_session,
+            command_id=create_command,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            expected_restore_epoch=1,
+            expected_control_version=None,
+            create_only=True,
+            reason="create existing",
+        )
+    assert create_existing.value.code == "reconciliation_precondition_failed"
+
+    stale_command = await _reconciliation_command(
+        migrated_session,
+        key="9f000000-0000-0000-0000-000000000002",
+        operation="service.cache-target-reconciliation.begin",
+    )
+    with pytest.raises(CacheTargetStreamConflict) as stale:
+        await begin_cache_target_reconciliation(
+            migrated_session,
+            command_id=stale_command,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            expected_restore_epoch=1,
+            expected_control_version=2,
+            create_only=False,
+            reason="stale stream etag",
+        )
+    assert stale.value.code == "reconciliation_precondition_failed"
+
+    command = await _reconciliation_command(
+        migrated_session,
+        key="9f000000-0000-0000-0000-000000000003",
+        operation="service.cache-target-reconciliation.begin",
+    )
+    started = await begin_cache_target_reconciliation(
+        migrated_session,
+        command_id=command,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        expected_restore_epoch=1,
+        expected_control_version=1,
+        create_only=False,
+        reason="valid existing stream",
+    )
+    assert started.status == "preparing"
+
+    active_command = await _reconciliation_command(
+        migrated_session,
+        key="9f000000-0000-0000-0000-000000000004",
+        operation="service.cache-target-reconciliation.begin",
+    )
+    with pytest.raises(CacheTargetStreamConflict) as active:
+        await begin_cache_target_reconciliation(
+            migrated_session,
+            command_id=active_command,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            expected_restore_epoch=1,
+            expected_control_version=2,
+            create_only=False,
+            reason="active request exists",
+        )
+    assert active.value.code == "reconciliation_active"
 
 
 @pytest.mark.integration

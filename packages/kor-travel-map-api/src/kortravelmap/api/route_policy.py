@@ -194,6 +194,10 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/service/cache-target-event-dead-letters/{event_id}/replays": (
         RoutePolicy.SERVICE
     ),
+    "/v1/service/cache-target-reconciliations": RoutePolicy.SERVICE,
+    "/v1/service/cache-target-reconciliations/{request_id}/seals": (
+        RoutePolicy.SERVICE
+    ),
     "/v1/service/cache-target-reconciliations/{request_id}/completions": (
         RoutePolicy.SERVICE
     ),

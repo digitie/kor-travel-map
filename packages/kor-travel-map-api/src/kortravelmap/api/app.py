@@ -135,6 +135,7 @@ _CACHE_TARGET_NOT_FOUND_CODES = frozenset(
     {
         "claim_not_found",
         "dead_letter_not_found",
+        "reconciliation_not_found",
         "target_not_found",
     }
 )

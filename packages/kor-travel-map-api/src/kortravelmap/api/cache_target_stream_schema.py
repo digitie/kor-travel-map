@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -30,8 +30,12 @@ __all__ = [
     "CacheTargetNackRequest",
     "CacheTargetOperationResponse",
     "CacheTargetRecoveryOperationRecord",
+    "CacheTargetReconciliationBeginRequest",
     "CacheTargetReconciliationRequest",
     "CacheTargetReconciliationCompletionRequest",
+    "CacheTargetReconciliationPreparing",
+    "CacheTargetReconciliationRunning",
+    "CacheTargetReconciliationSealRequest",
     "CacheTargetRefreshRequest",
     "CacheTargetRefreshRequestRecord",
     "CacheTargetRefreshRequestResponse",
@@ -147,7 +151,20 @@ class CacheTargetSourceMutationResponse(BaseModel):
     meta: Meta
 
 
-class CacheTargetActiveReconciliation(BaseModel):
+class CacheTargetReconciliationPreparing(BaseModel):
+    """Snapshot seal 전 recovery request descriptor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: UUID
+    status: Literal["preparing"]
+    restore_epoch: int = Field(ge=1)
+    entity_tag: str
+    stream_entity_tag: str
+    created_at: datetime
+
+
+class CacheTargetReconciliationRunning(BaseModel):
     """Consumer가 request-bound fixed snapshot을 찾는 active descriptor."""
 
     model_config = ConfigDict(extra="forbid")
@@ -159,7 +176,15 @@ class CacheTargetActiveReconciliation(BaseModel):
     count: int = Field(ge=0)
     merkle_root: str = Field(min_length=64, max_length=64)
     high_watermark_cursor: str
+    entity_tag: str
+    stream_entity_tag: str
     created_at: datetime
+
+
+CacheTargetActiveReconciliation = Annotated[
+    CacheTargetReconciliationPreparing | CacheTargetReconciliationRunning,
+    Field(discriminator="status"),
+]
 
 
 class CacheTargetStreamControlRecord(BaseModel):
@@ -350,7 +375,11 @@ class CacheTargetAppliedReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     event_id: UUID
-    payload_fingerprint: str = Field(min_length=64, max_length=64)
+    payload_fingerprint: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
 
 class CacheTargetAckRequest(BaseModel):
@@ -360,9 +389,17 @@ class CacheTargetAckRequest(BaseModel):
 
     consumer_id: str
     claim_id: UUID
-    lease_token: str
+    lease_token: UUID
     through_cursor: str
     applied: list[CacheTargetAppliedReceipt] = Field(default_factory=list, max_length=500)
+
+    @field_validator("through_cursor")
+    @classmethod
+    def _validate_event_cursor(cls, value: str) -> str:
+        from kortravelmap.infra import parse_cache_target_event_cursor
+
+        parse_cache_target_event_cursor(value)
+        return value
 
 
 class CacheTargetAckRecord(BaseModel):
@@ -394,11 +431,11 @@ class CacheTargetNackRequest(BaseModel):
     external_system: str
     consumer_id: str
     claim_id: UUID
-    lease_token: str
+    lease_token: UUID
     event_id: UUID
     disposition: CacheTargetNackDisposition = "transient"
-    error_class: str = Field(min_length=1, max_length=200)
-    error_code: str | None = Field(default=None, max_length=200)
+    error_class: str = Field(min_length=1, max_length=128)
+    error_code: str | None = Field(default=None, min_length=1, max_length=128)
     error_fingerprint: str = Field(
         min_length=64,
         max_length=64,
@@ -594,6 +631,33 @@ class CacheTargetReconciliationRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class CacheTargetReconciliationBeginRequest(BaseModel):
+    """Service two-phase cutover begin command."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    external_system: str = Field(min_length=1, max_length=112)
+    consumer_id: str = Field(min_length=1, max_length=128)
+    expected_restore_epoch: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class CacheTargetReconciliationSealRequest(BaseModel):
+    """Service two-phase cutover seal command."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    external_system: str = Field(min_length=1, max_length=112)
+    consumer_id: str = Field(min_length=1, max_length=128)
+    expected_restore_epoch: int = Field(ge=1)
+    expected_item_count: int = Field(ge=0)
+    expected_merkle_root: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+
 class CacheTargetReconciliationCompletionRequest(BaseModel):
     """Consumer fixed-snapshot checksum completion receipt."""
 
@@ -618,6 +682,8 @@ class CacheTargetRecoveryOperationRecord(BaseModel):
     operation_id: str
     status: str
     status_url: str | None = None
+    entity_tag: str | None = None
+    stream_entity_tag: str | None = None
 
 
 class CacheTargetOperationResponse(BaseModel):

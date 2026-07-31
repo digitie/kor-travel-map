@@ -132,7 +132,17 @@ class CacheTargetStreamService(Protocol):
         **kwargs: Any,
     ) -> Any: ...
 
+    async def get_cache_target_reconciliation(
+        self,
+        session: Any,
+        **kwargs: Any,
+    ) -> Any: ...
+
     async def list_cache_target_stream_statuses(self, session: Any, **kwargs: Any) -> Any: ...
+
+    async def begin_cache_target_reconciliation(self, session: Any, **kwargs: Any) -> Any: ...
+
+    async def seal_cache_target_reconciliation(self, session: Any, **kwargs: Any) -> Any: ...
 
     async def request_cache_target_reconciliation(self, session: Any, **kwargs: Any) -> Any: ...
 
@@ -267,10 +277,29 @@ class _RepoCacheTargetStreamService:
 
         return await get_cache_target_reconciliation_snapshot(session, **kwargs)
 
+    async def get_cache_target_reconciliation(
+        self,
+        session: Any,
+        **kwargs: Any,
+    ) -> Any:
+        from kortravelmap.infra import get_cache_target_reconciliation
+
+        return await get_cache_target_reconciliation(session, **kwargs)
+
     async def list_cache_target_stream_statuses(self, session: Any, **kwargs: Any) -> Any:
         from kortravelmap.infra import list_cache_target_stream_statuses
 
         return await list_cache_target_stream_statuses(session, **kwargs)
+
+    async def begin_cache_target_reconciliation(self, session: Any, **kwargs: Any) -> Any:
+        from kortravelmap.infra import begin_cache_target_reconciliation
+
+        return await begin_cache_target_reconciliation(session, **kwargs)
+
+    async def seal_cache_target_reconciliation(self, session: Any, **kwargs: Any) -> Any:
+        from kortravelmap.infra import seal_cache_target_reconciliation
+
+        return await seal_cache_target_reconciliation(session, **kwargs)
 
     async def request_cache_target_reconciliation(self, session: Any, **kwargs: Any) -> Any:
         from kortravelmap.infra import request_cache_target_reconciliation
