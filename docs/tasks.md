@@ -27,6 +27,7 @@ barrier로 직렬화한다.
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
+    [ ] `T-VN-H40`(concierge provenance 복구 — **H35 배포 선행 blocker**) →
     [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0072** + 이미지 동시 배포 — #673 blocker;
         2026-07-31 중단, 백업 확보·B′ 경로 확정, 본문 상단 인수 블록 참조) →
     [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
@@ -523,9 +524,54 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 요구사항으로 분해해 대조했다. 3항목 중 둘(오탐 분포 규명 / 규칙 교체)은 충족이고,
 > 셋째("다음 materialize에서 자동 회복되는가")는 **코드 논증만 있고 실증이 없다**.
 > 결정적 blocker는 **prod 미배포**이며 이슈가 신고한 손실(현재 457건)이 실재한다 → `T-VN-H35`.
+> **재기준화(2026-07-31, #910/`0072` 반영)** — #673을 "457건 신규 회복"만으로 종결하면 안 된다.
+> `0072`가 기존 concierge 공개 표면 **3,044건**을 `legacy_unattributed`로 만들어 공개에서
+> 제외하고 복구 경로가 없다(`T-VN-H40`). 따라서 종결 기준은 **두 축**이다 —
+> ① 미적재 457건 신규 회복 ② **기존 concierge 공개 표면 보존/복구**. ①만 달성하고 ②를 잃으면
+> 순 손실이다.
+>
 > 남은 실증은 `T-VN-H30B`. **`T-VN-H30C`·`T-VN-H32`는 #673 범위 밖**이다 —
 > 이슈는 "concierge provider에 한해" 완화를 요구했고 두 task는 그 파생 개선이다.
 > 저장소 열린 이슈는 #673·#819 두 건뿐이고 #673은 epic이 아니다.
+
+- [ ] T-VN-H40 — **concierge curation provenance 복구 (H35 배포 선행 blocker)**
+
+  `0072_curation_provenance`가 기존 link를 전부 `accepted + legacy_unattributed`로 이관하고,
+  `_trusted_link_sql()`이 `match_basis <> 'legacy_unattributed'`를 요구한다. 이 술어는 public
+  collection count/detail·Feature group/detail/list 경로에 **실제로 적용**되므로, 배포 직후
+  기존 공개 curation 링크가 공개 표면에서 사라진다. **fail-close 자체는 ADR-063이 명시한
+  의도된 동작이다**(legacy/unattributed link는 admin 감사 대상으로만 남긴다).
+
+  문제는 **복구 경로가 없다는 것**이다. 현재 존재하는 경로는 셋뿐이다:
+  authoritative CSV 재import(`csv_explicit_feature_id`) / admin 수동 검토(`admin_review`) /
+  이미 non-legacy accepted decision이 있던 merge 대상(제한된 `forward_recovery`).
+
+  - **공식 CSV 222건**은 exact CSV + provenance sidecar를 새 계약으로 재import하면 첫 경로로 복원된다.
+  - **concierge projection 3,044건은 일괄 복원 경로가 코드에도 `tasks.md`에도 없다.**
+    `0065`의 `sync_curated_feature_collection()`은 `curation_items.feature_id`/projection을
+    쓰지만 `curation_import_rows`·`curation_link_decisions`를 만들지 않고,
+    `apply_curated_source_rules()`도 `feature.curated_features`만 갱신한다.
+    → **후속 task로 분리된 것이 아니라 누락이다**(PR #910 작성자 확인).
+
+  > **축소 창은 "최대 한 달"이 아니라 무기한이다.** `40 3 3 * *`는 concierge **원천 Feature
+  > 적재** 스케줄이라 실행돼도 trusted decision을 만들지 않는다.
+  > `curated_features_refresh_daily_schedule`은 기본 STOPPED이고 수동 실행해도 현재
+  > writer/trigger가 decision을 추가하지 않는다. **별도 복구를 구현·실행하기 전까지 회복되지 않는다.**
+  > (초안에서 내가 "월 1회 스케줄이라 최대 한 달"이라 적은 것은 스케줄 이름만 보고
+  > 자연 회복을 가정한 오류다.)
+
+  할 일:
+  - **before/after exact count 확정** — `0063` restore clone에 `0064`→head와 새 이미지를 적용해
+    collection/item/Feature-group별로 잰다. 현재 `3,265→264`는 **0063 실측에서 산출한 예상치**이지
+    배포 인수값이 아니다 — `0065`의 collection/item 재정규화, `source_present`/`status`/`archived_at`,
+    public Feature 상태 필터가 pre 값 자체를 바꾼다.
+  - **one-shot 복구 경로 설계** — `legacy_unattributed`를 이름만 바꾸거나 public 술어를 완화하지
+    **않는다**. concierge source entity/record/rule/Feature identity를 재검증한 immutable evidence로
+    새 import row 또는 좁은 `forward_recovery` decision을 **append**한다.
+  - **ongoing writer 연결** — 신규/갱신 concierge projection도 **같은 transaction에서** trusted
+    decision을 만들게 한다. 안 하면 배포 후 새로 생기는 링크가 같은 문제를 반복한다.
+  - H35에서 **writer reopen 전에** one-shot 복구를 실행하고, 기존 공개 3,044 표면과 #673의
+    미적재 457 회복을 **각각 별도 기준으로** 검증한다.
 
 - [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0072)**
 
@@ -545,6 +591,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > ⚠ **`0072` downgrade는 단방향 손실이다** — `curation_link_decisions`를 drop하므로
   > cutover 이후 기록된 **진짜 provenance까지** 사라지고 재구성이 불가능하다
   > (#910의 존재 이유가 "0072 이전 상태는 근거를 복구할 수 없다"이기 때문).
+  >
+  > ⛔ **배포 선행 blocker: `T-VN-H40`(concierge provenance 복구).** PR #910 작성자 확인 결과
+  > 복구 경로가 **누락**이고 축소 창이 **무기한**이다. H40 완료 전에는 `0072` 포함 배포를
+  > 진행하지 않는다. 이 상태를 "허용 가능한 일시 축소"로 기록해서는 안 된다.
   >
   > ⚠ **공개 curation 표면이 배포 직후 급감할 수 있다.** `_trusted_link_sql()`이
   > `match_basis <> 'legacy_unattributed'`를 요구하는데 `0072` backfill이 기존 링크를 전부

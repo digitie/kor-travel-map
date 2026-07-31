@@ -105,13 +105,55 @@ WATCH: list[tuple[str, str]] = [
             where match_basis='legacy_unattributed'""",
     ),
     (
-        "공개 노출 가능 링크 (0072 후 급감 예상 — PR #910 확인 대기)",
+        "공개 노출 가능 링크 (trusted)",
         """select count(*)::text from feature.curation_items i
             where i.feature_id is not null and i.archived_at is null
               and exists (select 1 from feature.curation_link_decisions d
                            where d.decision_id = i.accepted_link_decision_id
                              and d.decision_kind='accepted'
                              and d.match_basis <> 'legacy_unattributed')""",
+    ),
+]
+
+# ---------------------------------------------------------------------------
+# 공개 표면 게이트 (T-VN-H35 / PR #910 답변 반영)
+#
+# **이전 게이트는 `GET /v1/curations/collections` 200만 봤다.** 그러면 0072가 공개
+# 표면을 3,000건 날려도 **200이 나오므로 통과한다** — "실패해도 통과하는 기준"이다.
+# 이 저장소가 반복해 지적받은 그 형태를 내가 다시 만들었다.
+#
+# 그래서 응답 코드가 아니라 **의미 수치**를 잰다. 임계값은 배포 직전 같은 쿼리로
+# 채취한 pre 값이며, 사전에 하드코딩하지 않는다 — 0065의 재정규화·source_present·
+# public Feature 상태 필터가 pre 값 자체를 바꾸기 때문이다(#910 답변 지적).
+SURFACE: list[tuple[str, str]] = [
+    (
+        "public item 총계",
+        """select count(*)::text from feature.curation_items i
+            join feature.curation_collections c on c.collection_id = i.collection_id
+            where i.archived_at is null and c.visibility = 'public'""",
+    ),
+    (
+        "public collection 총계",
+        """select count(*)::text from feature.curation_collections
+            where visibility = 'public' and status = 'published'""",
+    ),
+    (
+        "표본 Feature-group: 국립세종수목원을 담은 curation 수",
+        """select count(*)::text from feature.curation_items i
+            where i.feature_id = 'f_global_p_2eddbdc1ef5a0c00' and i.archived_at is null""",
+    ),
+    (
+        "link-audit 잔여: decision 없는 링크",
+        """select count(*)::text from feature.curation_items
+            where feature_id is not null and archived_at is null
+              and accepted_link_decision_id is null""",
+    ),
+    (
+        "link-audit 잔여: legacy_unattributed로만 뒷받침된 링크",
+        """select count(*)::text from feature.curation_items i
+            join feature.curation_link_decisions d
+              on d.decision_id = i.accepted_link_decision_id
+            where i.archived_at is null and d.match_basis = 'legacy_unattributed'""",
     ),
 ]
 
@@ -141,6 +183,22 @@ async def main() -> None:
             except Exception as exc:  # noqa: BLE001
                 got = f"(오류: {type(exc).__name__})"
             print(f"       {label}: {got}")
+
+        # 공개 표면 — 배포 전/후를 **같은 쿼리로** 재서 대조한다. 이 값을 기록해 두지
+        # 않으면 "200이니 통과"로 대량 의미 손실을 놓친다.
+        print("\n=== 공개 표면 수치 (배포 전/후 대조용 — 반드시 양쪽에서 채취) ===")
+        for label, sql in SURFACE:
+            try:
+                got = str(await conn.fetchval(sql))
+            except Exception as exc:  # noqa: BLE001
+                got = f"(오류: {type(exc).__name__})"
+            print(f"       {label}: {got}")
+        print(
+            "\n  ⚠ 이 수치는 자동 판정하지 않는다 — 임계값을 하드코딩하면 0065의 재정규화·"
+            "source_present·\n"
+            "     public Feature 상태 필터 때문에 정상 배포가 실패로 읽힌다.\n"
+            "     **배포 직전 같은 스크립트로 pre 값을 채취해 사람이 대조한다.**"
+        )
     finally:
         await conn.close()
 
