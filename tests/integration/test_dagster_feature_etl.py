@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.dto import Address, Coordinate
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 pytestmark = pytest.mark.integration
 
@@ -273,7 +274,7 @@ async def map_client(
         yield client
     finally:
         async with AsyncSession(migrated_engine) as session, session.begin():
-            await session.execute(text(_TRUNCATE_SQL))
+            await truncate_committed_test_rows(session, _TRUNCATE_SQL)
 
 
 async def test_dagster_assets_validate_coordinates_and_load_to_postgis(

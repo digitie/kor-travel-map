@@ -19,6 +19,7 @@ from kortravelmap.infra.models import (
     SourceLinkRow,
     SourceRecordRow,
 )
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -43,7 +44,7 @@ async def map_client(
         yield client
     finally:
         async with AsyncSession(migrated_engine) as session, session.begin():
-            await session.execute(text(_TRUNCATE_SQL))
+            await truncate_committed_test_rows(session, _TRUNCATE_SQL)
 
 
 async def test_consistency_dedup_refresh_client_updates_queue_and_report(

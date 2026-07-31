@@ -45,6 +45,7 @@ from kortravelmap.infra.curation_repo import (
     upsert_curation_theme,
 )
 from kortravelmap.infra.models import SourceEntityRow, SourceRecordRow
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -3166,14 +3167,26 @@ async def test_new_collection_create_add_does_not_deadlock_import(
         await setup.close()
         await creator.close()
         await importer.close()
-        async with migrated_engine.begin() as connection:
-            await connection.execute(
+        async with AsyncSession(
+            migrated_engine, expire_on_commit=False
+        ) as cleanup, cleanup.begin():
+            await truncate_committed_test_rows(
+                cleanup,
+                "TRUNCATE feature.features RESTART IDENTITY CASCADE",
+            )
+            await cleanup.execute(
                 text(
-                    "UPDATE feature.curation_collections "
-                    "SET status = 'archived', archived_at = now() "
-                    "WHERE collection_key = :collection_key"
+                    "DELETE FROM feature.curated_sources "
+                    "WHERE provider = :provider"
                 ),
-                {"collection_key": collection_key},
+                {"provider": provider},
+            )
+            await cleanup.execute(
+                text(
+                    "DELETE FROM feature.curated_themes "
+                    "WHERE theme_slug = :theme_slug"
+                ),
+                {"theme_slug": theme_slug},
             )
 
 

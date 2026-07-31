@@ -24,6 +24,7 @@ from kortravelmap.infra.models import (
     SourceLinkRow,
     SourceRecordRow,
 )
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -123,7 +124,7 @@ async def container_dsn(
     dsn = normalize_async_dsn(pg_container.get_connection_url())  # type: ignore[attr-defined]
     yield dsn
     async with AsyncSession(migrated_engine) as session, session.begin():
-        await session.execute(text(_TRUNCATE_SQL))
+        await truncate_committed_test_rows(session, _TRUNCATE_SQL)
 
 
 async def _queue_status(engine: AsyncEngine, review_id: str) -> str:

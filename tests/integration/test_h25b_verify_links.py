@@ -16,6 +16,7 @@ from kortravelmap.infra.curation_repo import (
     add_curation_item,
     create_curation_collection,
 )
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -227,15 +228,11 @@ async def _cleanup(
     engine: AsyncEngine,
     *,
     token: str,
-    feature_ids: tuple[str, ...],
 ) -> None:
     async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
-        await session.execute(
-            text(
-                "DELETE FROM feature.curation_collections "
-                "WHERE collection_key LIKE :collection_key"
-            ),
-            {"collection_key": f"h34-%:{token}"},
+        await truncate_committed_test_rows(
+            session,
+            "TRUNCATE feature.features RESTART IDENTITY CASCADE",
         )
         await session.execute(
             text(
@@ -247,10 +244,6 @@ async def _cleanup(
                 "private_slug": f"h34-private-{token}",
             },
         )
-        await session.execute(
-            text("DELETE FROM feature.features WHERE feature_id = ANY(:feature_ids)"),
-            {"feature_ids": list(feature_ids)},
-        )
 
 
 async def test_public_audit_uses_committed_repeatable_read_repository_snapshot(
@@ -260,7 +253,7 @@ async def test_public_audit_uses_committed_repeatable_read_repository_snapshot(
         AsyncSession(migrated_engine, expire_on_commit=False) as session,
         session.begin(),
     ):
-        token, public_feature, feature_ids = await _seed_public_scope_boundaries(session)
+        token, public_feature, _feature_ids = await _seed_public_scope_boundaries(session)
 
     try:
         report = await _MOD.audit_database(
@@ -298,5 +291,4 @@ async def test_public_audit_uses_committed_repeatable_read_repository_snapshot(
         await _cleanup(
             migrated_engine,
             token=token,
-            feature_ids=feature_ids,
         )
