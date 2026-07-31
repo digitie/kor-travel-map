@@ -3960,12 +3960,6 @@ class PoiCacheTargetSourceHeadRow(Base):
             name=conv("fk_cache_target_source_heads_target"),
             ondelete="RESTRICT",
         ),
-        UniqueConstraint(
-            "external_system",
-            "target_key",
-            "target_id",
-            name=conv("uq_cache_target_source_heads_target"),
-        ),
         Index(
             "idx_cache_target_source_heads_target",
             "target_id",
@@ -4046,16 +4040,6 @@ class PoiCacheTargetSourceEventRow(Base):
             name=conv("fk_cache_target_source_events_head"),
             ondelete="RESTRICT",
         ),
-        ForeignKeyConstraint(
-            ["external_system", "target_key", "target_id"],
-            [
-                "ops.poi_cache_target_source_heads.external_system",
-                "ops.poi_cache_target_source_heads.target_key",
-                "ops.poi_cache_target_source_heads.target_id",
-            ],
-            name=conv("fk_cache_target_source_events_target"),
-            ondelete="RESTRICT",
-        ),
         UniqueConstraint(
             "external_system",
             "idempotency_key",
@@ -4088,7 +4072,14 @@ class PoiCacheTargetSourceEventRow(Base):
     request_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     source_payload_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
-    target_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    target_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_targets.target_id",
+            name="fk_cache_target_source_events_target",
+            ondelete="RESTRICT",
+        ),
+    )
     refresh_request_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
         ForeignKey(
@@ -4131,11 +4122,10 @@ class PoiCacheTargetRefreshMemberRow(Base):
             name=conv("ck_cache_target_refresh_members_versions"),
         ),
         ForeignKeyConstraint(
-            ["external_system", "target_key", "target_id"],
+            ["external_system", "target_key"],
             [
                 "ops.poi_cache_target_source_heads.external_system",
                 "ops.poi_cache_target_source_heads.target_key",
-                "ops.poi_cache_target_source_heads.target_id",
             ],
             name=conv("fk_cache_target_refresh_members_head"),
             ondelete="RESTRICT",
@@ -4157,7 +4147,15 @@ class PoiCacheTargetRefreshMemberRow(Base):
         ),
         primary_key=True,
     )
-    target_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    target_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_targets.target_id",
+            name="fk_cache_target_refresh_members_target",
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
     external_system: Mapped[str] = mapped_column(Text, nullable=False)
     target_key: Mapped[str] = mapped_column(Text, nullable=False)
     restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -4300,16 +4298,6 @@ class PoiCacheTargetOutboxEventRow(Base):
             name=conv("fk_cache_target_outbox_head"),
             ondelete="RESTRICT",
         ),
-        ForeignKeyConstraint(
-            ["external_system", "target_key", "target_id"],
-            [
-                "ops.poi_cache_target_source_heads.external_system",
-                "ops.poi_cache_target_source_heads.target_key",
-                "ops.poi_cache_target_source_heads.target_id",
-            ],
-            name=conv("fk_cache_target_outbox_target"),
-            ondelete="RESTRICT",
-        ),
         UniqueConstraint(
             "relay_order",
             name=conv("uq_cache_target_outbox_relay_order"),
@@ -4339,7 +4327,14 @@ class PoiCacheTargetOutboxEventRow(Base):
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
     external_system: Mapped[str] = mapped_column(Text, nullable=False)
     target_key: Mapped[str] = mapped_column(Text, nullable=False)
-    target_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    target_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_targets.target_id",
+            name="fk_cache_target_outbox_target",
+            ondelete="RESTRICT",
+        ),
+    )
     restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
     target_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)

@@ -237,12 +237,6 @@ def upgrade() -> None:
             "target_key",
             name="pk_poi_cache_target_source_heads",
         ),
-        sa.UniqueConstraint(
-            "external_system",
-            "target_key",
-            "target_id",
-            name="uq_cache_target_source_heads_target",
-        ),
         schema="ops",
     )
     op.create_index(
@@ -311,12 +305,8 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["external_system", "target_key", "target_id"],
-            [
-                "ops.poi_cache_target_source_heads.external_system",
-                "ops.poi_cache_target_source_heads.target_key",
-                "ops.poi_cache_target_source_heads.target_id",
-            ],
+            ["target_id"],
+            ["ops.poi_cache_targets.target_id"],
             name="fk_cache_target_source_events_target",
             ondelete="RESTRICT",
         ),
@@ -400,13 +390,18 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["external_system", "target_key", "target_id"],
+            ["external_system", "target_key"],
             [
                 "ops.poi_cache_target_source_heads.external_system",
                 "ops.poi_cache_target_source_heads.target_key",
-                "ops.poi_cache_target_source_heads.target_id",
             ],
             name="fk_cache_target_refresh_members_head",
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["target_id"],
+            ["ops.poi_cache_targets.target_id"],
+            name="fk_cache_target_refresh_members_target",
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint(
@@ -573,12 +568,8 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["external_system", "target_key", "target_id"],
-            [
-                "ops.poi_cache_target_source_heads.external_system",
-                "ops.poi_cache_target_source_heads.target_key",
-                "ops.poi_cache_target_source_heads.target_id",
-            ],
+            ["target_id"],
+            ["ops.poi_cache_targets.target_id"],
             name="fk_cache_target_outbox_target",
             ondelete="RESTRICT",
         ),
