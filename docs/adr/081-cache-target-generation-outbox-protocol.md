@@ -110,8 +110,10 @@ precedence에만 사용한다. consumer DB commit 뒤 ACK 전에 죽으면 같�
 effect는 0회 추가다.
 
 `POST /v1/service/cache-target-event-nacks`는 transient 실패를 즉시 lease 해제+bounded backoff로,
-permanent 또는 최대 attempt 실패를 dead letter+stream block으로 전이한다. blocked event 뒤 순서는
-ACK할 수 없다. service dead-letter GET과 Idempotency-Key+If-Match replay는 같은
+permanent 또는 최대 attempt 실패를 dead letter+stream block으로 전이한다. 이 전이는 claim의 첫
+미ACK event에만 허용하며, 중간 poison event 앞의 contiguous prefix는 먼저 ACK해야 한다. 그렇지
+않으면 mutation 없이 `409 dead_letter_requires_prefix_ack`다. blocked event 뒤 순서는 ACK할 수
+없다. service dead-letter GET과 Idempotency-Key+If-Match replay는 같은
 `event_id/relay_order/semantic tuple/fingerprint`만 재활성화한다. snapshot checksum이 다시 맞기 전에는
 consumer를 ready로 바꾸지 않는다.
 
@@ -163,6 +165,7 @@ PinVi는 admin route나 AdminBFF credential을 사용하지 않는다. service �
 - `PUT|GET|DELETE /v1/service/cache-targets/{external_system}/{target_key}`
 - `POST /v1/service/refresh-requests`, `GET /v1/service/refresh-requests/{request_id}`
 - stream control/restore fence, claim/ack/nack, dead-letter/replay, fixed snapshot resource
+- `POST /v1/service/cache-target-reconciliations/{request_id}/completions`
 
 target create는 `If-None-Match: *`, update/delete는 앞서 받은 raw strong `If-Match`와 UUID
 Idempotency-Key를 보낸다. `412`에서 최신 ETag로 자동 rebase하지 않고 snapshot reconcile 뒤 새 명시적
@@ -172,13 +175,17 @@ T-VN-12 정적 registry에서 generic DB command, 기존 refresh ledger, outbox 
 
 operator는 ops read에서 epoch/claim/backlog/dead/reconciliation 상태를 보고, admin 표면에서 replay와
 reconciliation command를 실행한다. ServiceToken scope는 consumer read/claim/ack/nack/snapshot,
-restore-fence, recovery replay로 분리한다.
+restore-fence, recovery replay로 분리한다. admin reconciliation 시작은 active claim을 끊는 복구
+mutation이므로 destructive recovery gate가 켜진 경우에만 허용한다.
 
 reconciliation command는 active claim을 무효화하고 stream을 먼저 halt한 뒤 fixed snapshot을 만든다.
-consumer checksum receipt가 snapshot root와 정확히 같고 epoch이 그대로이며 dead-letter가 0일 때만
-`ready`/enabled로 전이하고 stream-scoped `cache_target.reconciled` event를 같은 transaction에 기록한다.
-checksum 불일치는 failed receipt를 남기고 fenced/disabled 상태를 유지한다. terminal request에 다른
-checksum을 재사용해서 resume할 수 없다.
+consumer는 `cache-target:snapshot` principal로 request ID와 external system/consumer ID/snapshot
+ID/expected epoch/actual Merkle root를 exact 결박한 completion receipt를 제출한다. UUID
+`Idempotency-Key`는 terminal 응답을 재생한다. receipt의 root가 snapshot root와 정확히 같고 epoch이
+그대로이며 dead-letter가 0일 때만 `ready`/enabled로 전이하고 stream-scoped
+`cache_target.reconciled` event를 같은 transaction에 기록한다. checksum 불일치는 failed receipt를
+남기고 fenced/disabled 상태를 유지한다. terminal request에 다른 checksum을 재사용해서 resume할 수
+없다.
 
 ### 8. 활성화
 

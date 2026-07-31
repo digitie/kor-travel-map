@@ -35,6 +35,7 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | service | `POST/GET /v1/service/refresh-requests[/{id}]` | Idempotency-Key, 202 operation resource |
 | service | `/v1/service/cache-target-streams/*`, `/v1/service/cache-target-event-*` | restore fence와 pull claim/ACK/NACK/dead/replay |
 | service | `GET /v1/service/cache-target-snapshots/{system}` | fixed MVCC snapshot, active+tombstone Merkle v1 |
+| service | `POST /v1/service/cache-target-reconciliations/{id}/completions` | snapshot/epoch/Merkle receipt와 원자적 ready 전이 |
 | operator | `/v1/features/{id}/sources|observations` | raw lineage의 유일한 REST 표면 |
 | operator | `/v1/feature-change-requests` | principal actor, revision 재검사 |
 | operator | `/v1/ops/datasets/*`, `/v1/ops/pipeline/*` | ADR-064 canonical control plane 유지 |
@@ -581,6 +582,7 @@ POST /v1/service/cache-target-event-nacks
 GET  /v1/service/cache-target-event-dead-letters/{event_id}
 POST /v1/service/cache-target-event-dead-letters/{event_id}/replays
 GET  /v1/service/cache-target-snapshots/{external_system}
+POST /v1/service/cache-target-reconciliations/{request_id}/completions
 ```
 
 모두 `X-Kor-Travel-Map-Service-Token`을 쓰되 token principal의 `consumer_id`와
@@ -596,12 +598,16 @@ UUID `Idempotency-Key`와 canonical body fingerprint를 사용하며 same key/di
 restore fence는 직전 stream ETag를 요구한다. 성공 transaction은 epoch N+1, 기존 claim 무효화,
 barrier receipt를 함께 commit한다. claim은 external system별 global stream 하나를 lease하고 ACK는
 claim의 global `relay_order` contiguous prefix만 전진한다. NACK permanent/max-attempt는 dead letter로
-stream을 막으며 뒤 순서를 건너뛰지 않는다. replay는 같은 immutable event identity와 fingerprint만
-재활성화한다.
+stream을 막으며 뒤 순서를 건너뛰지 않는다. 첫 미ACK이 아닌 event를 dead 전이하려면 앞 prefix를
+먼저 ACK해야 하고 그렇지 않으면 mutation 없이 `409`다. replay는 같은 immutable event identity와
+fingerprint만 재활성화한다.
 
 snapshot page는 `snapshot_id`, `restore_epoch`, `high_watermark_cursor`, `count`, `merkle_root`가
 끝까지 고정된다. 상세 byte 계약과 strict event union은 ADR-081이 정본이다. 이 표면은 Map foundation
-PR만으로 enable하지 않으며 PinVi paired consumer와 contract checksum을 통과한 뒤 켠다.
+PR만으로 enable하지 않으며 PinVi paired consumer와 contract checksum을 통과한 뒤 켠다. admin
+reconciliation 시작은 destructive recovery gate를 요구한다. consumer completion은
+`cache-target:snapshot` principal과 request/system/consumer/snapshot/epoch/root를 exact 결박하고
+UUID Idempotency-Key로 terminal 응답을 재생한다.
 
 PATCH/DELETE correction UI는 `GET .../{feature_id}/revision`의 body `row_revision`과 응답 header
 `ETag`를 먼저 읽고, 이어서 `GET .../{feature_id}` detail의 `feature.row_revision`과 같을 때만

@@ -16,13 +16,19 @@ ADR-081 producer foundation과 paired PinVi consumer의 준비·복구·검증 �
 
 1. PinVi writer를 fence한 repeatable-read snapshot에서 desired target과 tombstone, source generation,
    source payload fingerprint를 만든다.
-2. Map fixed snapshot을 끝까지 page한다. 모든 page의 `snapshot_id`, epoch, high-watermark, count,
+2. destructive recovery gate를 켠 제한된 admin 경계에서 reconciliation을 시작해 active claim을
+   끊고 stream을 halt한다.
+3. Map fixed snapshot을 끝까지 page한다. 모든 page의 `snapshot_id`, epoch, high-watermark, count,
    Merkle root가 첫 page와 같지 않으면 폐기하고 다시 시작한다.
-3. 두 source projection의 count와 Merkle root를 비교한다. mismatch면 consumer를 켜지 않고 leaf
+4. 두 source projection의 count와 Merkle root를 비교한다. mismatch면 consumer를 켜지 않고 leaf
    identity/fingerprint 차이를 조사한다.
-4. PinVi inbox/replica/checkpoint를 한 transaction에 backfill하고 같은 snapshot을 다시 비교한다.
-5. credential, principal, OpenAPI SHA, epoch, checksum gate가 모두 green일 때만 consumer flag를 켠다.
-6. claim→PinVi DB commit→ACK 순서를 확인하고 backlog가 contiguous하게 줄어드는지 본다.
+5. PinVi inbox/replica/checkpoint를 한 transaction에 backfill하고 같은 snapshot을 다시 비교한다.
+6. `cache-target:snapshot` principal로 request/system/consumer/snapshot/epoch/root를 exact 결박한
+   completion receipt를 UUID Idempotency-Key와 함께 제출한다. exact replay 외 다른 body/key 조합은
+   실패해야 한다.
+7. Map이 `ready`/enabled로 전이한 receipt와 credential, OpenAPI SHA gate가 모두 green일 때만 PinVi
+   consumer flag를 켠다.
+8. claim→PinVi DB commit→ACK 순서를 확인하고 backlog가 contiguous하게 줄어드는지 본다.
 
 ## 3. restore epoch 전환
 
@@ -41,7 +47,9 @@ ADR-081 producer foundation과 paired PinVi consumer의 준비·복구·검증 �
 - ACK 전 consumer crash: lease 만료 뒤 동일 event가 다시 claim돼야 한다. PinVi inbox `event_id`
   UNIQUE와 tuple CAS 때문에 side effect는 추가되지 않아야 한다.
 - transient NACK: persisted `Retry-After`/backoff 뒤 같은 event가 재시도된다. 후속 order는 앞서가지 않는다.
-- permanent 또는 max-attempt NACK: event는 dead letter가 되고 stream은 blocked다. 뒤 cursor를 수동
+- permanent 또는 max-attempt NACK: claim의 첫 미ACK event만 dead letter로 전이할 수 있다. 중간
+  poison event라면 앞 contiguous prefix를 먼저 ACK한다. 이를 생략한 NACK은 mutation 없이
+  `409 dead_letter_requires_prefix_ack`여야 한다. dead 전이 뒤 stream은 blocked며 뒤 cursor를 수동
   skip하거나 새 event로 복제하지 않는다.
 - 복구: dead-letter detail의 ETag와 fingerprint를 대조하고 UUID Idempotency-Key로 replay한다. 같은
   event ID/order/tuple/fingerprint가 pending으로 돌아와 ACK된 뒤 full snapshot Merkle equality를
@@ -55,7 +63,8 @@ production DB에 직접 migration을 자동 적용하지 않는다. exact source
 1. same command/event 중복 전달의 추가 side effect 0.
 2. 의도적으로 한 event를 누락시켜 checksum mismatch를 만들고 exact replay 뒤 equality 회복.
 3. consumer DB commit 뒤 ACK 전 강제 종료, expired lease reclaim과 duplicate ACK.
-4. transient/permanent NACK, max attempt, dead block, ETag+Idempotency replay.
+4. transient/permanent NACK, mid-claim prefix-ACK 강제, max attempt, dead block,
+   ETag+Idempotency replay.
 5. restore fence N+1, full backfill, 과거 epoch event 거부.
 6. target/link/refresh DB rollback 시 대응 outbox 0행.
 7. admin UI에서 backlog/dead/reconciliation 상태와 replay 결과 확인.
