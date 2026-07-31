@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Final
 from sqlalchemy import text
 
 from kortravelmap.core.scoring import MasterCandidate, select_master
+from kortravelmap.infra.curation_link_basis import trusted_basis_sql
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -435,7 +436,7 @@ JOIN archived_groups
      reconciled.external_item_id
 """
 
-_MOVE_CURATION_ITEMS_SQL: Final[str] = """
+_MOVE_CURATION_ITEMS_SQL: Final[str] = f"""
 WITH candidates AS MATERIALIZED (
     SELECT
         item.curation_item_id,
@@ -445,11 +446,7 @@ WITH candidates AS MATERIALIZED (
         current_decision.match_basis AS previous_match_basis,
         COALESCE(
             current_decision.decision_kind = 'accepted'
-            AND current_decision.match_basis IN (
-                'csv_explicit_feature_id',
-                'admin_review',
-                'forward_recovery'
-            ),
+            AND {trusted_basis_sql("current_decision.match_basis")},
             false
         ) AS has_trusted_acceptance,
         (
@@ -1007,16 +1004,10 @@ async def apply_feature_merge(
         {
             "row_number": row_number,
             "survivor_item_id": str(row["survivor_item_id"]),
-            "provider_winner_item_id": str(
-                row["provider_winner_item_id"]
-            ),
+            "provider_winner_item_id": str(row["provider_winner_item_id"]),
         }
         for row_number, row in enumerate(
-            (
-                row
-                for row in duplicate_rows
-                if bool(row["provider_winner_requires_recovery"])
-            ),
+            (row for row in duplicate_rows if bool(row["provider_winner_requires_recovery"])),
             start=1,
         )
     ]
@@ -1040,9 +1031,7 @@ async def apply_feature_merge(
                 await session.execute(
                     text(_INSERT_MERGE_IMPORT_BATCH_SQL),
                     {
-                        "content_sha256": hashlib.sha256(
-                            canonical_batch
-                        ).hexdigest(),
+                        "content_sha256": hashlib.sha256(canonical_batch).hexdigest(),
                         "row_count": len(provider_recovery_pairs),
                         "merge_actor": merge_actor,
                         "metadata": json.dumps(
