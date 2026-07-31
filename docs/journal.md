@@ -28,8 +28,12 @@
   batch/current-row 조회, stable cursor link audit를 추가했다.
 - Feature merge는 non-legacy accepted link만 재승인한다. duplicate loser source가 이기면
   survivor-owned merge row/decision을 append하고 loser는 revocation+archive로 보존한다.
-- 단일 적대 리뷰 P1 2건·P2 3건·P3 1건을 모두 회귀로 전환했다. PostgreSQL alembic 14,
-  curation 27, merge 28과 API/cursor 38, OpenAPI/route policy 33건이 통과했다.
+- 다중 component inactive history+active current는 external item별 canonical
+  survivor/provider/operator winner로 결정하고, legacy 정본 동기화 뒤 loser history를
+  master로 옮겨 projection/current pointer를 보존한다.
+- 단일 적대 리뷰의 최초 P1 2건·P2 3건·P3 1건과 재리뷰 P2 1건을 모두 닫았다. exact
+  `e69f8926` 최종 판정은 P0/P1/P2/P3 0건이다. 관련 195건, merge 29건, legacy clean DB
+  5/5와 admin frontend 286건, 정적/OpenAPI/보안 gate가 통과했다.
 
 ## 2026-07-31 (codex) — PR #908 #911~#914 적대 리뷰 보강
 

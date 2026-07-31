@@ -10,7 +10,7 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
-## 2026-07-31 (codex) — T-VN-H31R #909 구현·PostgreSQL gate 완료
+## 2026-07-31 (codex) — T-VN-H31R #909 단일 적대 리뷰 승인
 
 주소 후보를 구조화 field의 Unicode/literal hierarchy와 versioned alias로 제한하고
 `address_hint` 자동 링크를 제거했다. 등대 105행 provenance sidecar는 manifest의 SHA와
@@ -26,12 +26,17 @@ stable audit cursor로 잘림 없는 검토를 지원한다. Feature merge는 no
 link만 master에 재승인한다. duplicate loser source가 이기면 survivor-owned merge
 row/decision을 append하고 loser를 revocation+archive로 보존한다.
 
-단일 적대 리뷰 P1 2건·P2 3건·P3 1건을 모두 구현·회귀로 전환했다. 현재 focused gate는
-PostgreSQL alembic **14**, curation **27**, merge **28**, API/cursor **38**,
-OpenAPI/route policy **33**건이 통과했다.
+다중 component의 inactive history+active current도 external item별 canonical
+survivor/provider/operator winner 한 쌍으로 결정한다. loser history는 legacy 정본을 먼저
+동기화한 뒤 master history로 이동해 active unique와 current projection을 모두 보존한다.
 
-**다음 한 작업**: 통합 focused·정적·frontend gate와 보안 감사를 끝내고 새 exact #910 head를
-같은 단일 적대 리뷰어에게 재검토 요청한다.
+단일 적대 리뷰의 최초 P1 2건·P2 3건·P3 1건과 재리뷰 신규 P2 1건을 모두 닫았다. exact
+`e69f8926` 최종 판정은 **P0/P1/P2/P3 0건, APPROVED FOR TESTS**다. 관련
+unit/API/실 PostgreSQL **195 passed**, merge **29 passed**, legacy projection clean DB
+**5/5**, admin frontend **286 passed**와 정적/OpenAPI/보안 gate가 통과했다.
+
+**다음 한 작업**: PR #910 CI green·merge로 #909를 닫은 뒤 `T-VN-H35`의 n150 migration/image
+배포와 live 검증을 재개한다.
 
 ## 2026-07-31 (codex) — PR #908 H32R/H34R 적대 리뷰 보강 완료
 
