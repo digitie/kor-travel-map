@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import unicodedata
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -3739,29 +3740,26 @@ async def test_feature_curation_lookup_uses_membership_index(
 async def test_address_hint_matches_split_jsonb_fields(
     migrated_session: AsyncSession,
 ) -> None:
-    """다중 토큰 ``address_hint``가 분리 저장된 address jsonb에도 매칭돼야 한다 (T-VN-H31).
-
-    이전 리졸버는 ``f.address::text ILIKE '%' || hint || '%'``로 **직렬화 jsonb에 통짜
-    substring**을 걸었다. 그런데 address jsonb는 ``sido_name``·``sigungu_name``·``admin``을
-    **분리 저장**하므로 ``'울산광역시 울주군 서생면'`` 같은 hint는 어떤 행에서도 연속
-    부분문자열이 아니다 — **상세할수록 매칭이 안 되는 역전**이 있었다.
-
-    실측 근거: ``feature.features``의 8%는 ``road``/``legal``이 둘 다 null이고 관광 Feature는
-    그 비율이 더 높다. 도로명이든 지번이든 토큰이 2개 이상이면 같은 벽에 막힌다.
-
-    이 테스트는 그 역전을 고정한다 — 토큰이 흩어져 있어도 **전부 포함**하면 매칭되고,
-    토큰이 하나라도 어긋나면 매칭되지 않는다.
-    """
+    """주소 후보는 authoritative field의 정규화된 literal hierarchy만 일치시킨다."""
     await migrated_session.execute(
         text(
             """
             INSERT INTO feature.features (
                 feature_id, kind, name, category, marker_icon, marker_color, address
-            ) VALUES (
-                'feature:h31-split-address', 'place', '토큰분리 등대', '01050400',
-                'place', 'P-09',
-                '{"sido_name":"울산광역시","sigungu_name":"울주군","admin":"서생면"}'::jsonb
-            )
+            ) VALUES
+                (
+                    'feature:h31-split-address', 'place', '토큰분리 등대', '01050400',
+                    'place', 'P-09',
+                    '{"sido_name":"울산광역시","sigungu_name":"울주군",'
+                    '"admin":"울산광역시 울주군 서생면"}'::jsonb
+                ),
+                (
+                    'feature:h31-wrong-field', 'place', '토큰분리 등대', '01050400',
+                    'place', 'P-09',
+                    '{"sido_name":"울산광역시","sigungu_name":"울주군",'
+                    '"admin":"울산광역시 울주군 온산읍",'
+                    '"road":"울산광역시 울주군 서생면로 1"}'::jsonb
+                )
             """
         )
     )
@@ -3780,14 +3778,19 @@ async def test_address_hint_matches_split_jsonb_fields(
         )
         return tuple(m.feature_id for m in matches[1])
 
-    # 토큰이 jsonb에 흩어져 있어도 전부 포함하면 매칭된다.
+    # hierarchy가 맞는 authoritative component만 남는다.
     assert await _match("울산광역시 울주군 서생면") == ("feature:h31-split-address",)
-    # 부분 hint도 성립한다 (토큰이 적을수록 넓다).
-    assert await _match("울주군") == ("feature:h31-split-address",)
-    # hint 없음 = 이름만으로 매칭 (H36이 자동 링크를 막는 경로는 상위 계층이다).
-    assert await _match(None) == ("feature:h31-split-address",)
-    # 토큰이 하나라도 어긋나면 매칭되지 않는다 — 토큰이 많을수록 좁아진다.
+    # NFD 입력도 NFKC/NFC 주소와 같은 의미다.
+    assert await _match(
+        unicodedata.normalize("NFD", "울산광역시 울주군 서생면")
+    ) == ("feature:h31-split-address",)
+    # 단어 내부와 JSON의 다른 field는 component evidence가 아니다.
+    assert await _match("울산광역시 울주군 서생면로") == ()
+    # SQL LIKE wildcard는 주소 증거 없이 후보를 만들 수 없다.
+    assert await _match("%") == ()
+    assert await _match("_") == ()
+    # hierarchy가 하나라도 어긋나면 일치하지 않는다.
     assert await _match("울산광역시 동구 일산동") == ()
     assert await _match("부산광역시 울주군 서생면") == ()
-    # 공백이 여럿이어도 정규화된다.
+    # 공백은 정규화하되 token boundary는 유지한다.
     assert await _match("울산광역시   울주군") == ("feature:h31-split-address",)

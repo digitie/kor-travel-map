@@ -272,3 +272,29 @@ Alembic은 여러 revision을 한 transaction에서 연속 실행할 수 있다.
 `SET CONSTRAINTS ALL IMMEDIATE`로 0065의 `INITIALLY DEFERRED` FK와 sync trigger event를 먼저
 검사·소진하고 나서 `NOT NULL`·unique DDL을 수행한다. event 검증이 실패하면 같은 migration
 transaction 전체가 원자적으로 중단되며 부분 전진하지 않는다.
+
+## 개정 (2026-07-31, T-VN-H31R / #909)
+
+CSV source row, Feature 후보, 운영자가 승인한 link를 서로 다른 사실로 분리한다.
+`address_hint`는 후보 preview를 위한 비권위 evidence이며 그 자체로 current link를 만들지
+못한다. current link는 CSV가 명시한 `feature_id` 또는 admin이 검토 후 승인한 append-only
+decision만 가리킨다.
+
+주소 후보는 JSON 직렬화 검색을 폐기한다. Unicode NFKC와 공백을 정규화한 뒤
+`road`·`legal`·`admin`·`sido_name`·`sigungu_name`의 literal token만 읽고,
+시도→시군구→읍면동→리 hierarchy를 같은 주소 field 안에서 보존한다. `%`와 `_`는
+패턴 문법이 아니라 일반 literal이며 단어 내부 substring은 일치가 아니다. 행정구역 개편명은
+versioned alias 표로 canonicalize하되 서로 다른 hierarchy evidence가 충돌하면 fail-close한다.
+이 matcher는 이름 index로 좁힌 후보의 preview에만 쓰므로 검색 인덱스를 위해 원문 JSON을
+중복 materialize하지 않는다.
+
+성공한 authoritative import는 batch와 각 source row의 exact SHA-256 identity를 append-only로
+저장한다. item은 current import row를 가리키며 원 payload와 구조화 provenance를 보존한다.
+Feature link도 별도 append-only decision으로 actor/time/basis/resolver version/evidence와
+대상 Feature를 기록한다. 현재 item의 `feature_id`와 decision pointer는 composite FK로 같은
+item·target을 가리키도록 강제한다. revoke나 이전 row 재적용은 새 forward decision/import를
+만들고 대상 item만 갱신하며 unrelated collection/item을 되감지 않는다.
+
+기존 provenance 없는 link는 `legacy_unattributed`로 명시하고 공개 승인 근거로 사용하지 않는다.
+#907 이후 unsafe resolver의 결과를 추정으로 정상화하지 않고 감사 대상으로 격리한다. 공식
+seed는 새 계약으로 재적재해 explicit link와 행별 provenance를 다시 확정한다.
