@@ -679,6 +679,66 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > `curation_items`가 서로를 참조한다. `0072`가 그 FK를 DEFERRABLE INITIALLY DEFERRED로
   > 만든 이유가 이것이고, 트리거 안에서 둘을 만들 때 그 성질에 의존한다.
 
+  ## ⚠ 배포 전 남은 것 두 개 (2026-08-01 prod 실측 + 적대 검토)
+
+  `0073`만으로는 H40이 닫히지 않는다. **읽어서 넘길 수 없는 수치가 둘 있다.**
+
+  ### ① 공개 link 3,266 → **3,043**. 223건은 여전히 어둡다 (prod 실측)
+
+  `0073`의 승격 술어는 concierge projection만 통과시킨다. prod에서 직접 셌다:
+
+  ```
+  0072 backfill 대상                    3,266
+  0073 승격 대상                        3,043
+  승격되지 않고 남는 것                    223   ← 전부 public·published·활성
+  ```
+
+  남는 223건의 정체 — 전부 **공식 CSV 큐레이션**이고 지금 공개 표면에 보인다:
+
+  | collection | 건수 |
+  | --- | --- |
+  | `korean-tourism-100:2025-2026` | 58 |
+  | `korean-tourism-100:2023-2024` | 51 |
+  | `arboretum-garden-stamp-tour:2026` | 44 |
+  | `heritage-visit-campaign:*` (11개 route) | 67 |
+  | 기타(`lighthouse-stamp-tour`, `legacy:media-places`) | 3 |
+
+  이들은 `curated_features` 행이 없고(projection이 아니다) `source_record_key`도
+  없다. 대신 `metadata`에 `feature_match_reasons`·`feature_match_partial`·
+  `official_place_name`을 갖고 있고, **`resources/curations/*.csv` 5개 파일이 정확히
+  222행에 `feature_id`를 채워 두고 있다**(486행 중 222행 — DB 링크 수와 일치).
+
+  > **처음에 `metadata`의 `feature_match_partial=false`(199건)로 승격 대상을 가르려
+  > 했는데, 그건 마이그레이션에 휴리스틱을 새기는 것이다.** `0072`는 이미 이 부류를
+  > 위해 `csv_explicit_feature_id` basis와 import batch/row 계보를 만들어 뒀다.
+  > 정본 CSV를 **재import하면** 설계된 경로로 진짜 import 계보와 함께 근거가 붙는다.
+
+  **결론 — 배포 절차에 단계를 하나 넣는다.** 마이그레이션(`0064~0073`) 직후,
+  **새 이미지를 올리기 전에** 공식 curation CSV 5개를 재import한다. 구 이미지는
+  `_trusted_link_sql`을 모르므로 그 구간에도 계속 서빙한다 → **공개 표면 공백 0**.
+  배포 게이트: 재import 후 trusted link이 **3,266**인지 확인하고, 아니면 중단한다.
+
+  ### ② 모든 dedup 병합이 abort한다 — `T-VN-H41` (신규, `0072` 결함)
+
+  `merge_repo._DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL`은
+  `curation_items.curation_item_id`를 **새 UUID로 재작성**한다. `0072`의
+  `fk_curation_link_decisions_item`은 `ON DELETE RESTRICT` + `ON UPDATE NO ACTION`이라,
+  decision이 달린 item이면 그 UPDATE가 FK 위반을 내고 **병합 전체가 롤백된다.**
+
+  `0072`만 적용한 컨테이너에서 재현했다 — `0073`이 만든 결함이 아니다. 다만 `0072`가
+  미배포라 **이번 배포와 함께 prod에 도달**한다. 그리고 기존 merge 통합 테스트의
+  curated 픽스처가 **전부 `selection_origin='admin'`** 이라 0073 트리거가 merge
+  경로에서 한 번도 안 돌았고, 그래서 이번 검토에서 나온 merge 결함 3건이 모두 green으로
+  통과했다. prod 모양(`source_rule`) 테스트를 추가해 `xfail(strict=True)`로 고정했다 —
+  **xfail 제거가 H41의 완료 조건**이다.
+
+  고치는 길은 두 갈래이고 **결정이 필요하다**:
+  - (a) `fk_curation_link_decisions_item`에 `ON UPDATE CASCADE`. append-only 트리거가
+    RI cascade의 UPDATE를 막으므로, "`curation_item_id`만 바뀌는 UPDATE는 이력 변경이
+    아니다"는 예외를 명시해야 한다. 3개 append-only 테이블 계약을 건드린다.
+  - (b) merge의 detach가 PK를 재작성하지 않게 바꾼다. `0045` 전환 트리거의 UUID 충돌을
+    피하려고 재작성하는 것이라(주석 `merge_repo.py:770-773`) 대안 설계가 필요하다.
+
   ## 구현 완료 (2026-08-01, `0073_curation_source_rule`)
 
   확정 설계대로 넣었다. 설계에서 **바뀐 것 하나**: 트리거를 `curated_features`가 아니라
