@@ -1016,7 +1016,7 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
     assert survivor["row_owner"] == before["f_master"]["curation_item_id"]
     assert survivor["row_place_name"] == survivor["place_name"]
     assert survivor["row_metadata"] == survivor["metadata"]
-    assert survivor["provenance"]["loser_import_row_id"] == (
+    assert survivor["provenance"]["provider_winner_import_row_id"] == (
         before["f_loser"]["current_import_row_id"]
     )
     assert survivor["batch_kind"] == "forward_recovery"
@@ -1028,6 +1028,213 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
     assert survivor["supersedes_decision_id"] == (
         before["f_master"]["accepted_link_decision_id"]
     )
+
+
+async def test_duplicate_merge_reconciles_active_and_historical_components(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    common = {
+        "collection_key": "merge-test:2026",
+        "theme_slug": "merge-test",
+        "theme_name": "병합 테스트",
+        "theme_group": "test",
+        "title": "병합 테스트 2026",
+        "edition_key": "2026",
+        "provider": "merge-test-provider",
+        "dataset_key": "duplicate-multi-component",
+        "source_name": "병합 테스트 출처",
+        "source_url": None,
+        "source_item_key": "shared",
+        "address_hint": None,
+        "sort_order": 1,
+        "item_title": None,
+        "item_summary": None,
+    }
+    first_rows = (
+        ResolvedCurationImportRow(
+            row_number=2,
+            source_component_key="component-01",
+            feature_id="f_master",
+            place_name="master current",
+            metadata={"revision": "master-first"},
+            provenance={"fixture": "master-first"},
+            **common,
+        ),
+        ResolvedCurationImportRow(
+            row_number=3,
+            source_component_key="component-02",
+            feature_id="f_loser",
+            place_name="loser historical",
+            metadata={"revision": "loser-history"},
+            provenance={"fixture": "loser-history"},
+            **common,
+        ),
+    )
+    second_rows = (
+        ResolvedCurationImportRow(
+            row_number=2,
+            source_component_key="component-01",
+            feature_id="f_master",
+            place_name="master current",
+            metadata={"revision": "master-second"},
+            provenance={"fixture": "master-second"},
+            **common,
+        ),
+        ResolvedCurationImportRow(
+            row_number=3,
+            source_component_key="component-03",
+            feature_id="f_loser",
+            place_name="loser active winner",
+            metadata={"revision": "loser-active"},
+            provenance={"fixture": "loser-active"},
+            **common,
+        ),
+    )
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        await import_curation_rows(
+            session,
+            rows=first_rows,
+            actor="multi-component-first",
+            source_content_sha256="d" * 64,
+            batch_kind="csv_upload",
+        )
+        await import_curation_rows(
+            session,
+            rows=second_rows,
+            actor="multi-component-second",
+            source_content_sha256="e" * 64,
+            batch_kind="csv_upload",
+        )
+        await session.execute(
+            text(
+                """
+                UPDATE feature.curation_items
+                SET source_updated_at =
+                    source_updated_at + interval '1 hour'
+                WHERE feature_id = 'f_loser'
+                  AND external_item_id = 'shared'
+                  AND source_present
+                """
+            )
+        )
+        before = {
+            str(row["external_component_id"]): dict(row)
+            for row in (
+                (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT
+                                external_component_id,
+                                curation_item_id::text,
+                                source_present,
+                                current_import_row_id::text
+                            FROM feature.curation_items
+                            WHERE external_item_id = 'shared'
+                            ORDER BY external_component_id
+                            """
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        }
+
+        await merge_from_review(
+            session,
+            seeded,
+            merged_by="multi-component-merge",
+            reason="canonical group reconciliation",
+        )
+
+    async with AsyncSession(migrated_engine) as session:
+        rows = (
+            (
+                await session.execute(
+                    text(
+                        """
+                        SELECT
+                            item.external_component_id,
+                            item.feature_id,
+                            item.source_present,
+                            item.archived_at IS NOT NULL AS archived,
+                            item.place_name,
+                            item.metadata,
+                            item.current_import_row_id::text,
+                            import_row.curation_item_id::text AS row_owner,
+                            import_row.provenance
+                        FROM feature.curation_items AS item
+                        LEFT JOIN feature.curation_import_rows AS import_row
+                          ON import_row.import_row_id =
+                             item.current_import_row_id
+                         AND import_row.curation_item_id =
+                             item.curation_item_id
+                        WHERE item.external_item_id = 'shared'
+                        ORDER BY item.external_component_id
+                        """
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+        active_count = (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM feature.curation_items
+                    WHERE external_item_id = 'shared'
+                      AND feature_id = 'f_master'
+                      AND source_present
+                      AND archived_at IS NULL
+                    """
+                )
+            )
+        ).scalar_one()
+
+    by_component = {
+        str(row["external_component_id"]): dict(row) for row in rows
+    }
+    survivor = by_component["component-01"]
+    historical = by_component["component-02"]
+    archived_current = by_component["component-03"]
+
+    assert active_count == 1
+    assert all(row["feature_id"] == "f_master" for row in rows)
+    assert survivor["source_present"] is True
+    assert survivor["archived"] is False
+    assert survivor["place_name"] == "loser active winner"
+    assert survivor["metadata"] == {"revision": "loser-active"}
+    assert survivor["row_owner"] == before["component-01"]["curation_item_id"]
+    assert survivor["current_import_row_id"] not in {
+        before["component-01"]["current_import_row_id"],
+        before["component-03"]["current_import_row_id"],
+    }
+    assert survivor["provenance"]["provider_winner_import_row_id"] == (
+        before["component-03"]["current_import_row_id"]
+    )
+
+    assert historical["source_present"] is False
+    assert historical["archived"] is True
+    assert historical["current_import_row_id"] == (
+        before["component-02"]["current_import_row_id"]
+    )
+    assert historical["row_owner"] == before["component-02"]["curation_item_id"]
+    assert historical["provenance"] == {"fixture": "loser-history"}
+
+    assert archived_current["source_present"] is False
+    assert archived_current["archived"] is True
+    assert archived_current["current_import_row_id"] == (
+        before["component-03"]["current_import_row_id"]
+    )
+    assert archived_current["row_owner"] == (
+        before["component-03"]["curation_item_id"]
+    )
+    assert archived_current["provenance"] == {"fixture": "loser-active"}
 
 
 async def test_merge_moves_legacy_projection_into_canonical_only_master_identity(
@@ -1571,6 +1778,8 @@ async def test_merge_reconciles_source_presence_and_latest_operator_override(
                     FROM feature.curation_items
                     WHERE feature_id = 'f_master'
                       AND external_item_id = 'shared'
+                      AND source_present
+                      AND archived_at IS NULL
                     """
                 )
             )
@@ -1819,7 +2028,7 @@ async def test_merge_tombstone_wins_over_visible_duplicate(
             "archive-operator",
         ),
         (
-            None,
+            "f_master",
             "archived",
             True,
             "primary_stop",
