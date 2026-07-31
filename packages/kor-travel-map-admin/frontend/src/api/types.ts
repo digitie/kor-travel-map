@@ -2469,6 +2469,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/cache-target-reconciliations/{request_id}/completions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Service Cache Target Reconciliation */
+        post: operations["complete_service_cache_target_reconciliation_v1_service_cache_target_reconciliations__request_id__completions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/service/cache-target-snapshots/{external_system}": {
         parameters: {
             query?: never;
@@ -4648,6 +4665,25 @@ export interface components {
         CacheTargetOperationResponse: {
             data: components["schemas"]["CacheTargetRecoveryOperationRecord"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetReconciliationCompletionRequest
+         * @description Consumer fixed-snapshot checksum completion receipt.
+         */
+        CacheTargetReconciliationCompletionRequest: {
+            /** Actual Merkle Root */
+            actual_merkle_root: string;
+            /** Consumer Id */
+            consumer_id: string;
+            /** Expected Restore Epoch */
+            expected_restore_epoch: number;
+            /** External System */
+            external_system: string;
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
         };
         /**
          * CacheTargetReconciliationRequest
@@ -20650,6 +20686,54 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    complete_service_cache_target_reconciliation_v1_service_cache_target_reconciliations__request_id__completions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetReconciliationCompletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetOperationResponse"];
                 };
             };
             /** @description Validation Error */
