@@ -10,6 +10,11 @@ from kortravelmap.core.cache_target_stream import (
     make_active_cache_target_source,
     make_deleted_cache_target_source,
 )
+from kortravelmap.infra.cache_target_event_repo import (
+    append_cache_target_links_reconciled_events,
+    append_cache_target_refresh_status_events,
+    capture_cache_target_refresh_members_by_keys,
+)
 from kortravelmap.infra.cache_target_outbox_repo import (
     CacheTargetAppliedReceipt,
     ack_cache_target_events,
@@ -28,6 +33,7 @@ from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
     create_domain_command_claim,
 )
+from kortravelmap.infra.feature_update_repo import enqueue_feature_update_request
 
 _SYSTEM = "pinvi-test"
 _CONSUMER = "pinvi-cache-consumer"
@@ -507,3 +513,108 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
             limit=2,
         )
     assert still_blocked.value.code == "blocked_event_not_head"
+
+
+@pytest.mark.integration
+async def test_refresh_member_result_events_are_idempotent_and_transactional(
+    migrated_session: AsyncSession,
+) -> None:
+    created = await _apply_active(
+        migrated_session,
+        generation=1,
+        event_id="10000000-0000-0000-0000-000000000041",
+        idempotency_key="20000000-0000-0000-0000-000000000041",
+        create_only=True,
+    )
+    assert created.target is not None
+    request = await enqueue_feature_update_request(
+        migrated_session,
+        scope={
+            "type": "cache_target_keys",
+            "external_system": _SYSTEM,
+            "target_keys": [_TARGET_KEY],
+        },
+    )
+    assert request is not None
+
+    savepoint = await migrated_session.begin_nested()
+    members = await capture_cache_target_refresh_members_by_keys(
+        migrated_session,
+        request_id=request.request_id,
+        external_system=_SYSTEM,
+        target_keys=[_TARGET_KEY],
+    )
+    assert len(members) == 1
+    rolled_back = await append_cache_target_refresh_status_events(
+        migrated_session,
+        request_id=request.request_id,
+        job_id=request.job_id,
+        status="running",
+    )
+    assert rolled_back[0].target_sequence == 2
+    await savepoint.rollback()
+
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_outbox_events "
+                "WHERE refresh_request_id = CAST(:request_id AS uuid)"
+            ),
+            {"request_id": request.request_id},
+        )
+        == 0
+    )
+
+    members = await capture_cache_target_refresh_members_by_keys(
+        migrated_session,
+        request_id=request.request_id,
+        external_system=_SYSTEM,
+        target_keys=[_TARGET_KEY],
+    )
+    assert members[0].restore_epoch == 1
+    assert members[0].source_generation == 1
+    running = await append_cache_target_refresh_status_events(
+        migrated_session,
+        request_id=request.request_id,
+        job_id=request.job_id,
+        status="running",
+    )
+    links = await append_cache_target_links_reconciled_events(
+        migrated_session,
+        request_id=request.request_id,
+        job_id=request.job_id,
+        active_link_counts={created.target.target_id: 3},
+    )
+    done = await append_cache_target_refresh_status_events(
+        migrated_session,
+        request_id=request.request_id,
+        job_id=request.job_id,
+        status="done",
+    )
+    assert [
+        running[0].target_sequence,
+        links[0].target_sequence,
+        done[0].target_sequence,
+    ] == [2, 3, 4]
+    assert links[0].payload["active_link_count"] == 3
+
+    replay = await append_cache_target_refresh_status_events(
+        migrated_session,
+        request_id=request.request_id,
+        job_id=request.job_id,
+        status="done",
+    )
+    assert replay[0].idempotent_replay
+    assert replay[0].event_id == done[0].event_id
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_outbox_deliveries "
+                "WHERE event_id IN ("
+                "SELECT event_id FROM ops.poi_cache_target_outbox_events "
+                "WHERE external_system = :system)"
+            ),
+            {"system": _SYSTEM},
+        )
+        == 4
+    )
