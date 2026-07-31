@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
 from kortravelmap.client import AddressValidationFinding
@@ -31,6 +31,71 @@ FEATURE_LOAD_CHUNK_SIZE: Final[int] = 1000
 
 
 @dataclass(frozen=True)
+class AddressFindingObservationReceipt:
+    """stale close 권한과 provider sync 성공을 분리하는 관측 receipt (#911).
+
+    source snapshot을 끝까지 읽고, 비어 있지 않은 관측의 finding 전량을 durable하게 기록한
+    경우에만 absence를 부정 증거로 사용할 수 있다.
+    """
+
+    authoritative_snapshot_complete: bool
+    source_observations: int
+    findings_observed: int
+    findings_unique: int
+    findings_upserted: int
+    finding_persistence_complete: bool
+
+    @property
+    def permits_stale_close(self) -> bool:
+        """이 관측의 absence가 기존 finding을 닫을 만큼 강한지 반환한다."""
+
+        return (
+            self.authoritative_snapshot_complete
+            and self.source_observations > 0
+            and self.finding_persistence_complete
+            and self.findings_upserted == self.findings_unique
+        )
+
+    def merge(
+        self,
+        other: AddressFindingObservationReceipt,
+    ) -> AddressFindingObservationReceipt:
+        """같은 provider/dataset의 chunk receipt를 합산한다."""
+
+        return AddressFindingObservationReceipt(
+            authoritative_snapshot_complete=(
+                self.authoritative_snapshot_complete
+                and other.authoritative_snapshot_complete
+            ),
+            source_observations=self.source_observations + other.source_observations,
+            findings_observed=self.findings_observed + other.findings_observed,
+            findings_unique=self.findings_unique + other.findings_unique,
+            findings_upserted=self.findings_upserted + other.findings_upserted,
+            finding_persistence_complete=(
+                self.finding_persistence_complete
+                and other.finding_persistence_complete
+            ),
+        )
+
+    def complete_authoritative_snapshot(self) -> AddressFindingObservationReceipt:
+        """모든 chunk source iterator가 정상 종료된 뒤 authoritative로 승격한다."""
+
+        return replace(self, authoritative_snapshot_complete=True)
+
+    def as_metadata(self) -> dict[str, object]:
+        return {
+            "address_observation_authoritative_snapshot_complete": (
+                self.authoritative_snapshot_complete
+            ),
+            "address_observation_source_count": self.source_observations,
+            "address_observation_finding_persistence_complete": (
+                self.finding_persistence_complete
+            ),
+            "address_observation_stale_close_permitted": self.permits_stale_close,
+        }
+
+
+@dataclass(frozen=True)
 class DagsterFeatureLoadResult:
     """Dagster provider load asset 결과."""
 
@@ -39,6 +104,7 @@ class DagsterFeatureLoadResult:
     feature_ids: tuple[str, ...]
     load: FeatureLoadResult
     address_validation: FeatureAddressValidationSummary
+    observation_receipt: AddressFindingObservationReceipt
 
     def as_metadata(self) -> dict[str, object]:
         metadata: dict[str, object] = {
@@ -53,6 +119,7 @@ class DagsterFeatureLoadResult:
             "source_links_updated": self.load.source_links_updated,
         }
         metadata.update(self.address_validation.as_metadata())
+        metadata.update(self.observation_receipt.as_metadata())
         return metadata
 
     def merge(
@@ -68,6 +135,19 @@ class DagsterFeatureLoadResult:
             load=self.load.merge(other.load),
             address_validation=_merge_validation_summaries(
                 self.address_validation, other.address_validation
+            ),
+            observation_receipt=self.observation_receipt.merge(
+                other.observation_receipt
+            ),
+        )
+
+    def complete_authoritative_snapshot(self) -> DagsterFeatureLoadResult:
+        """chunked provider iterator가 정상 종료된 뒤 close 가능한 snapshot으로 승격한다."""
+
+        return replace(
+            self,
+            observation_receipt=(
+                self.observation_receipt.complete_authoritative_snapshot()
             ),
         )
 
@@ -95,6 +175,7 @@ async def load_feature_bundles_for_dagster(
     provider: str,
     dataset_key: str,
     strict_address: bool | str = True,
+    authoritative_snapshot_complete: bool = False,
     chunk_size: int = FEATURE_LOAD_CHUNK_SIZE,
     load_all: Callable[[Sequence[FeatureBundle]], Awaitable[FeatureLoadResult]]
     | None = None,
@@ -109,6 +190,7 @@ async def load_feature_bundles_for_dagster(
         raise ValueError("chunk_size must be positive")
 
     mode = _normalize_address_validation_mode(strict_address)
+    source_observations = len(bundles)
     validation = validate_feature_bundles_address(bundles)
     # drop 모드가 bundles를 재할당하기 **전에** 잡는다 — 그러지 않으면 drop된 레코드의
     # 원천 identity를 잃고 dedupe_key가 payload hash 기반 source_record_key로 되돌아가지
@@ -213,6 +295,14 @@ async def load_feature_bundles_for_dagster(
         feature_ids=tuple(bundle.feature.feature_id for bundle in bundles),
         load=load,
         address_validation=validation,
+        observation_receipt=AddressFindingObservationReceipt(
+            authoritative_snapshot_complete=authoritative_snapshot_complete,
+            source_observations=source_observations,
+            findings_observed=0,
+            findings_unique=0,
+            findings_upserted=0,
+            finding_persistence_complete=False,
+        ),
     )
     metadata = result.as_metadata()
     if dropped_feature_ids:
@@ -232,6 +322,10 @@ async def load_feature_bundles_for_dagster(
         dropped_feature_ids=frozenset(dropped_feature_ids),
         source_identities=source_identities,
     )
+    finding_observed = 0
+    finding_unique = 0
+    finding_upserted = 0
+    finding_persistence_complete = False
     try:
         sync = await client.record_address_validation_findings(
             findings,
@@ -240,6 +334,8 @@ async def load_feature_bundles_for_dagster(
             run_id=_dagster_run_id(context),
         )
     except IntegrityFindingPersistenceError as exc:
+        finding_observed = exc.observed_count
+        finding_unique = exc.unique_count
         metadata.update(
             {
                 "address_validation_findings_observed": exc.observed_count,
@@ -260,6 +356,10 @@ async def load_feature_bundles_for_dagster(
                 },
             ) from None
     else:
+        finding_observed = sync.observed_count
+        finding_unique = sync.unique_count
+        finding_upserted = sync.upserted_count
+        finding_persistence_complete = sync.unrecorded_count == 0
         metadata.update(
             {
                 "address_validation_findings_observed": sync.observed_count,
@@ -283,6 +383,18 @@ async def load_feature_bundles_for_dagster(
                     },
                 )
 
+    result = replace(
+        result,
+        observation_receipt=AddressFindingObservationReceipt(
+            authoritative_snapshot_complete=authoritative_snapshot_complete,
+            source_observations=source_observations,
+            findings_observed=finding_observed,
+            findings_unique=finding_unique,
+            findings_upserted=finding_upserted,
+            finding_persistence_complete=finding_persistence_complete,
+        ),
+    )
+    metadata.update(result.observation_receipt.as_metadata())
     _add_output_metadata(context, metadata)
     return result
 

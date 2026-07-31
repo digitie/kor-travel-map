@@ -12,6 +12,7 @@ from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
 from kortravelmap.infra.feature_repo import FeatureLoadResult
 
 from kortravelmap.dagster.etl import (
+    AddressFindingObservationReceipt,
     DagsterFeatureLoadResult,
     load_feature_bundles_for_dagster,
 )
@@ -95,6 +96,25 @@ class _Client:
         )
 
 
+def _receipt(
+    *,
+    authoritative_snapshot_complete: bool = True,
+    source_observations: int = 1,
+    findings_observed: int = 0,
+    findings_unique: int = 0,
+    findings_upserted: int = 0,
+    finding_persistence_complete: bool = True,
+) -> AddressFindingObservationReceipt:
+    return AddressFindingObservationReceipt(
+        authoritative_snapshot_complete=authoritative_snapshot_complete,
+        source_observations=source_observations,
+        findings_observed=findings_observed,
+        findings_unique=findings_unique,
+        findings_upserted=findings_upserted,
+        finding_persistence_complete=finding_persistence_complete,
+    )
+
+
 def test_dagster_feature_load_result_merge_preserves_name_states() -> None:
     left = DagsterFeatureLoadResult(
         provider="demo",
@@ -110,6 +130,7 @@ def test_dagster_feature_load_result_merge_preserves_name_states() -> None:
             name_state_counts={"matched": 1},
             issues=(),
         ),
+        observation_receipt=_receipt(),
     )
     right = DagsterFeatureLoadResult(
         provider="demo",
@@ -125,6 +146,7 @@ def test_dagster_feature_load_result_merge_preserves_name_states() -> None:
             name_state_counts={"disagreed": 1},
             issues=(),
         ),
+        observation_receipt=_receipt(),
     )
 
     merged = left.merge(right)
@@ -175,6 +197,156 @@ async def test_load_feature_bundles_for_dagster_chunks_db_load(
     assert result.load.bundles_total == 5
     assert result.load.features_inserted == 5
     assert context.metadata[-1]["bundles_total"] == 5
+
+
+async def test_nonempty_complete_snapshot_receipt_permits_stale_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=0,
+            error_count=0,
+            warning_count=0,
+            issues=(),
+        ),
+    )
+
+    result = await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=[_bundle("feature-0")],  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        authoritative_snapshot_complete=True,
+    )
+
+    assert result.observation_receipt.permits_stale_close is True
+    assert (
+        context.metadata[-1]["address_observation_stale_close_permitted"] is True
+    )
+
+
+async def test_empty_snapshot_receipt_never_permits_stale_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=0,
+            error_count=0,
+            warning_count=0,
+            issues=(),
+        ),
+    )
+
+    result = await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=[],  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        authoritative_snapshot_complete=True,
+    )
+
+    assert result.observation_receipt.authoritative_snapshot_complete is True
+    assert result.observation_receipt.source_observations == 0
+    assert result.observation_receipt.permits_stale_close is False
+
+
+@pytest.mark.parametrize("mode", ["off", "drop"])
+async def test_finding_persistence_failure_revokes_stale_close_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=0,
+            error_count=0,
+            warning_count=0,
+            issues=(),
+        ),
+    )
+
+    async def _fail_recording(findings: object, **kwargs: object) -> None:
+        del findings, kwargs
+        raise IntegrityFindingPersistenceError(
+            provider="demo",
+            dataset_key="places",
+            observed_count=1,
+            unique_count=1,
+            error_type="OperationalError",
+        )
+
+    monkeypatch.setattr(client, "record_address_validation_findings", _fail_recording)
+
+    result = await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=[_bundle("feature-0")],  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address=mode,
+        authoritative_snapshot_complete=True,
+    )
+
+    assert result.observation_receipt.finding_persistence_complete is False
+    assert result.observation_receipt.permits_stale_close is False
+
+
+async def test_partial_finding_persistence_revokes_stale_close_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            issues=(_issue("provider_address_mismatch", "feature-0"),),
+        ),
+    )
+
+    async def _record_partially(
+        findings: object, **kwargs: object
+    ) -> IntegrityFindingSyncResult:
+        del findings, kwargs
+        return IntegrityFindingSyncResult(
+            observed_count=1,
+            unique_count=1,
+            upserted_count=0,
+        )
+
+    monkeypatch.setattr(
+        client, "record_address_validation_findings", _record_partially
+    )
+
+    result = await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=[_bundle("feature-0")],  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address="off",
+        authoritative_snapshot_complete=True,
+    )
+
+    assert result.observation_receipt.findings_unique == 1
+    assert result.observation_receipt.findings_upserted == 0
+    assert result.observation_receipt.permits_stale_close is False
 
 
 async def test_load_feature_bundles_for_dagster_uses_atomic_load_all_once(
