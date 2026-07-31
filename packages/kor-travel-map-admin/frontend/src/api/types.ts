@@ -2486,6 +2486,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/cache-target-reconciliations/{request_id}/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Service Cache Target Reconciliation Snapshot */
+        get: operations["get_service_cache_target_reconciliation_snapshot_v1_service_cache_target_reconciliations__request_id__snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/service/cache-target-snapshots/{external_system}": {
         parameters: {
             query?: never;
@@ -4336,6 +4353,40 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * CacheTargetActiveReconciliation
+         * @description Consumer가 request-bound fixed snapshot을 찾는 active descriptor.
+         */
+        CacheTargetActiveReconciliation: {
+            /** Count */
+            count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** High Watermark Cursor */
+            high_watermark_cursor: string;
+            /** Merkle Root */
+            merkle_root: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "running";
+        };
+        /**
          * CacheTargetAppliedReceipt
          * @description Consumer-applied event receipt.
          */
@@ -4924,6 +4975,7 @@ export interface components {
          * @description External-system stream control.
          */
         CacheTargetStreamControlRecord: {
+            active_reconciliation?: components["schemas"]["CacheTargetActiveReconciliation"] | null;
             /** Blocked Event Id */
             blocked_event_id?: string | null;
             /** Consumer Id */
@@ -20734,6 +20786,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CacheTargetOperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_service_cache_target_reconciliation_snapshot_v1_service_cache_target_reconciliations__request_id__snapshot_get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetSnapshotResponse"];
                 };
             };
             /** @description Validation Error */
