@@ -4596,6 +4596,16 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * CacheTargetEventCoordinate
+         * @description Canonical fixed-point coordinate in a target source event.
+         */
+        CacheTargetEventCoordinate: {
+            /** Lat E6 */
+            lat_e6: number;
+            /** Lon E6 */
+            lon_e6: number;
+        };
+        /**
          * CacheTargetEventRecord
          * @description Outbox event delivered to a consumer.
          */
@@ -4625,9 +4635,7 @@ export interface components {
              */
             occurred_at: string;
             /** Payload */
-            payload: {
-                [key: string]: unknown;
-            };
+            payload: components["schemas"]["CacheTargetStateAppliedPayload"] | components["schemas"]["CacheTargetLinksReconciledPayload"] | components["schemas"]["CacheTargetRefreshStatusChangedPayload"] | components["schemas"]["CacheTargetReconciledPayload"];
             /** Payload Fingerprint */
             payload_fingerprint: string;
             /** Relay Order */
@@ -4667,6 +4675,39 @@ export interface components {
              * @enum {string}
              */
             type: "cache_target_keys";
+        };
+        /**
+         * CacheTargetLinksReconciledPayload
+         * @description Exact payload for ``cache_target.links_reconciled``.
+         */
+        CacheTargetLinksReconciledPayload: {
+            /** Active Link Count */
+            active_link_count: number;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "reconciled";
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Version
+             * @constant
+             */
+            version: "cache-target-event-v1";
         };
         /**
          * CacheTargetNackRequest
@@ -4722,6 +4763,36 @@ export interface components {
         CacheTargetOperationResponse: {
             data: components["schemas"]["CacheTargetRecoveryOperationRecord"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetReconciledPayload
+         * @description Exact request-bound fixed snapshot reconciliation receipt.
+         */
+        CacheTargetReconciledPayload: {
+            /** Actual Merkle Root */
+            actual_merkle_root: string;
+            /** Expected Merkle Root */
+            expected_merkle_root: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "succeeded";
+            /**
+             * Version
+             * @constant
+             */
+            version: "cache-target-reconciliation-v1";
         };
         /**
          * CacheTargetReconciliationBeginRequest
@@ -4856,6 +4927,8 @@ export interface components {
             entity_tag?: string | null;
             /** Operation Id */
             operation_id: string;
+            /** Snapshot Id */
+            snapshot_id?: string | null;
             /** Status */
             status: string;
             /** Status Url */
@@ -4903,6 +4976,39 @@ export interface components {
         CacheTargetRefreshRequestResponse: {
             data: components["schemas"]["CacheTargetRefreshRequestRecord"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetRefreshStatusChangedPayload
+         * @description Exact payload for ``refresh_request.status_changed``.
+         */
+        CacheTargetRefreshStatusChangedPayload: {
+            /** Error Code */
+            error_code: string | null;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Version
+             * @constant
+             */
+            version: "cache-target-event-v1";
         };
         /**
          * CacheTargetRestoreFenceRequest
@@ -5076,6 +5182,46 @@ export interface components {
             update_enabled: boolean;
         };
         /**
+         * CacheTargetStateAppliedPayload
+         * @description Exact payload for ``cache_target.state_applied``.
+         */
+        CacheTargetStateAppliedPayload: {
+            /**
+             * Source Event Id
+             * Format: uuid
+             */
+            source_event_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "deleted";
+            target: components["schemas"]["CacheTargetStateAppliedTarget"] | null;
+            /**
+             * Version
+             * @constant
+             */
+            version: "cache-target-event-v1";
+        };
+        /**
+         * CacheTargetStateAppliedTarget
+         * @description Applied active target projection embedded in an outbox event.
+         */
+        CacheTargetStateAppliedTarget: {
+            coord: components["schemas"]["CacheTargetEventCoordinate"];
+            /** Entity Tag */
+            entity_tag: string;
+            /** Radius M */
+            radius_m: number;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Update Enabled */
+            update_enabled: boolean;
+        };
+        /**
          * CacheTargetStreamControlRecord
          * @description External-system stream control.
          */
@@ -5155,6 +5301,8 @@ export interface components {
             retry_count: number;
             /** State */
             state: string;
+            /** Superseded Count */
+            superseded_count: number;
             /**
              * Updated At
              * Format: date-time
