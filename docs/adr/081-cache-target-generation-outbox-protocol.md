@@ -122,6 +122,19 @@ Map 소유 `target_id`, ETag, `target_sequence`는 leaf에서 제외한다. text
 lexicographic 순서로 정렬한다. raw JSON이나 float 표기를 hash하지 않고 versioned typed
 `cache-target-source-v1` serializer를 사용한다.
 
+`cache-target-source-v1`의 active canonical JSON은 정렬 key·compact separator를 사용한 다음 exact
+shape다. 좌표는 0.000001도, 반경은 0.001 km에서 `ROUND_HALF_EVEN`한 뒤 각각 정수
+`lon_e6`/`lat_e6`와 metre `radius_m`로 직렬화한다. 입력 float는 거절하고 Decimal·정수·10진 문자열만
+허용한다. tombstone은 payload를 재사용하지 않고 아래 deleted shape로 고정한다.
+
+```json
+{"coord":{"lat_e6":37566500,"lon_e6":126978000},"radius_m":5000,"state":"active","update_enabled":true,"version":"cache-target-source-v1"}
+{"state":"deleted","version":"cache-target-source-v1"}
+```
+
+`source_payload_fingerprint`는 위 canonical UTF-8 bytes의 lowercase SHA-256 hex다. 양쪽 독립 구현의
+정본 vector는 `contracts/cache-target-source-v1-golden.json`이다.
+
 ```text
 leaf  = SHA256("KTMCTLEAF\0" || u32be(len(system)) || system
                || u32be(len(key)) || key || state_u8

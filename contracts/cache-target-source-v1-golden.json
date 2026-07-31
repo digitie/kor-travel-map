@@ -1,0 +1,81 @@
+{
+  "schema": "cache-target-source-v1",
+  "numeric_contract": {
+    "coordinate_quantum": "0.000001",
+    "coordinate_rounding": "ROUND_HALF_EVEN",
+    "radius_km_quantum": "0.001",
+    "radius_rounding": "ROUND_HALF_EVEN",
+    "serialized_coordinate_unit": "1e-6_degree",
+    "serialized_radius_unit": "metre"
+  },
+  "source_vectors": [
+    {
+      "name": "active_seoul",
+      "input": {
+        "lon": "126.978",
+        "lat": "37.5665",
+        "radius_km": "5.0",
+        "update_enabled": true
+      },
+      "normalized": {
+        "lon_e6": 126978000,
+        "lat_e6": 37566500,
+        "radius_m": 5000
+      },
+      "canonical_utf8": "{\"coord\":{\"lat_e6\":37566500,\"lon_e6\":126978000},\"radius_m\":5000,\"state\":\"active\",\"update_enabled\":true,\"version\":\"cache-target-source-v1\"}",
+      "sha256": "c70067cc150c4840875c6d3e776cbc1e2635eee33cc618031713d96292fcd244"
+    },
+    {
+      "name": "active_half_even",
+      "input": {
+        "lon": "126.1234565",
+        "lat": "37.1234575",
+        "radius_km": "1.2345",
+        "update_enabled": false
+      },
+      "normalized": {
+        "lon_e6": 126123456,
+        "lat_e6": 37123458,
+        "radius_m": 1234
+      },
+      "canonical_utf8": "{\"coord\":{\"lat_e6\":37123458,\"lon_e6\":126123456},\"radius_m\":1234,\"state\":\"active\",\"update_enabled\":false,\"version\":\"cache-target-source-v1\"}",
+      "sha256": "951e025eb6a6ea009489a537aab5258cfd34f0d8adaa58736d1aeeea2b45d1a3"
+    },
+    {
+      "name": "deleted",
+      "canonical_utf8": "{\"state\":\"deleted\",\"version\":\"cache-target-source-v1\"}",
+      "sha256": "19bdc4579a174ebffc034e87d75c67704ec5de25d07db827cc1d728a5272f678"
+    }
+  ],
+  "merkle_v1": {
+    "empty_root": "9c8972e74f4679c107066a03659d9e80e7d598438fa194ff388e9f4fb70aeafd",
+    "expected_nfc_utf8_order": ["A", "é", "가"],
+    "rows": [
+      {
+        "external_system": "pinvi",
+        "target_key": "가",
+        "state": "active",
+        "source_generation": 7,
+        "source_payload_fingerprint": "c70067cc150c4840875c6d3e776cbc1e2635eee33cc618031713d96292fcd244",
+        "leaf_sha256": "b76b55ceb98c87a76d5f964d28641de8af46970b6b065560af44586618b3247a"
+      },
+      {
+        "external_system": "pinvi",
+        "target_key": "A",
+        "state": "deleted",
+        "source_generation": 8,
+        "source_payload_fingerprint": "19bdc4579a174ebffc034e87d75c67704ec5de25d07db827cc1d728a5272f678",
+        "leaf_sha256": "d3720e5b4e4953b5850a01efd8e14af6ce365a7a113eb26c2e1175bb818ed677"
+      },
+      {
+        "external_system": "pinvi",
+        "target_key": "é",
+        "state": "active",
+        "source_generation": 9,
+        "source_payload_fingerprint": "951e025eb6a6ea009489a537aab5258cfd34f0d8adaa58736d1aeeea2b45d1a3",
+        "leaf_sha256": "7f64652815d54c3dda340147ca3694d76abf73cb7737e4d83506830f5aa88b9b"
+      }
+    ],
+    "root": "ed25cecbc240754fc7102150ba814cb3e0a1fe66a668985b024835f3a1c08ba4"
+  }
+}
