@@ -574,6 +574,75 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   projection은 항상 decision 없이 태어나고, `_trusted_link_sql()`에서 제외된다.
   → **#910 답변의 진단이 코드로 확인됐다.**
 
+  ## 판정 (2026-07-31 prod 실측) — **근거는 실재한다. `legacy_unattributed`는 틀린 분류다.**
+
+  ```
+  curated_features            3,044
+    source_record_key   3,044 / 3,044  (100%)  → provider_sync.source_records FK 100% 도달
+    selection_origin    3,044 / 3,044  (100%)  → source_rule 3,043 / admin 1
+    content_version     3,044 / 3,044  (100%)
+  provider              kor-travel-concierge-youtube 3,044
+  legacy collection 링크 3,044 (전부 source_record_key 보유)
+  ```
+
+  **결손 0건이다.** 각 링크에 대해 "이 provider record에서 이 rule로 나왔다"가 **완전히
+  재구성된다**. `0072` backfill의 evidence 문구 *"기존 link의 선택 근거를 안전하게 복구할 수
+  없음"* 은 이 3,044건에 대해서는 **사실이 아니다**.
+
+  `0072`가 틀린 게 아니라 **범위를 넓게 잡았다** — `feature_id IS NOT NULL`이면 무조건
+  `legacy_unattributed`로 이관했고, 그 안에 근거가 완전한 3,044건이 섞였다.
+
+  > **내 초안 두 가지가 틀렸다.**
+  > ① **`forward_recovery` 재사용은 의미 왜곡이다.** 그 값은 merge 경로에서 "합쳐진 대상의
+  >    결정을 앞으로 이어받는다"는 뜻인데(`merge_repo.py:325-460`), concierge projection은
+  >    merge와 무관하다. 이름을 빌려 쓰는 것이다.
+  > ② **"트리거가 자동 발급하면 fail-close가 무력화된다"는 우려는 조건부로만 맞다.**
+  >    근거 유무를 구분하지 않고 전부 승격하면 그렇다. 그러나 `selection_origin='source_rule'`과
+  >    `source_record_key` FK를 **검증한 것만** 승격하면 게이트는 남는다 — 근거 없는 링크는
+  >    여전히 제외된다.
+
+  ## 확정 설계 — `0073`로 `match_basis`에 `source_rule` 추가
+
+  `0072`의 `ck_curation_link_decisions_basis`는 4값(`csv_explicit_feature_id` ·
+  `admin_review` · `legacy_unattributed` · `forward_recovery`)만 허용한다. 여기에
+  **`source_rule`** 을 더한다. 이유는 위 판정 그대로 — 근거의 성격이 기존 4값 어디에도
+  해당하지 않는다.
+
+  `curation_link_decisions`의 NOT NULL 컬럼과 CHECK(실측):
+
+  | 컬럼 | 제약 | `source_rule` decision이 채울 값 |
+  | --- | --- | --- |
+  | `curation_item_id` | NOT NULL, FK→items RESTRICT | projection의 item |
+  | `feature_id` | NOT NULL | `curated_features.feature_id` |
+  | `decision_kind` | `IN ('accepted','revoked')` | `accepted` |
+  | `match_basis` | CHECK 4값 → **5값으로 확장** | `source_rule` |
+  | `resolver_version` | `= btrim() AND <> ''` | `curated_features.content_version` |
+  | `evidence` | `jsonb_typeof = 'object'` | `{source_record_key, selection_origin, content_version, provider}` |
+  | `actor` | `= btrim() AND <> ''` | `curated_features.selected_by` (없으면 `source_rule:<provider>`) |
+  | `supersedes_decision_id` | self와 달라야 함 | 재삽입 시 직전 decision |
+
+  ## 두 갈래
+
+  **① one-shot** — 기존 3,044건에 `source_rule` decision을 append하고 포인터를 채운다.
+  **검증 술어를 명시한다**: `selection_origin='source_rule'` **그리고**
+  `source_record_key`가 `provider_sync.source_records`에 도달할 것. 둘 중 하나라도 실패하면
+  **승격하지 않고 `legacy_unattributed`로 남긴다** — 그게 fail-close를 지키는 지점이다.
+  실측상 3,044건 전부 통과하지만, **술어를 조건 없이 통과시키는 게 아니라 실제로 검사한다.**
+
+  **② ongoing** — `sync_curated_feature_collection()`(`0065`가 최신 정의, `0066`~`0072`
+  아무도 안 고침)이 `curation_items`를 INSERT할 때 같은 transaction에서 decision도 만든다.
+  그 함수는 `NEW`(=`curated_features` 행)를 갖고 있으므로 위 표의 값을 **전부 채울 수 있다** —
+  DB 트리거에 actor/evidence 맥락이 없다는 일반론이 여기서는 해당하지 않는다.
+
+  > **누적 함정** — 트리거가 `curation_items`를 DELETE 후 INSERT하고(`0065:892`)
+  > `0072`의 append-only 트리거가 decision UPDATE/DELETE를 막으므로, 재삽입마다 decision이
+  > 쌓인다. `supersedes_decision_id`로 직전 것을 잇고 `accepted_link_decision_id` 포인터만
+  > 갱신한다. **무한 증식은 `0067` dedupe 사고와 같은 계열이므로 회귀 테스트로 고정한다.**
+  >
+  > **FK 순환** — `curation_items.accepted_link_decision_id` → `curation_link_decisions` →
+  > `curation_items`가 서로를 참조한다. `0072`가 그 FK를 DEFERRABLE INITIALLY DEFERRED로
+  > 만든 이유가 이것이고, 트리거 안에서 둘을 만들 때 그 성질에 의존한다.
+
   ## 두 갈래 — ②가 본질이다
 
   **① one-shot 복구** (기존 3,044건)
