@@ -3795,3 +3795,113 @@ async def test_address_hint_matches_split_jsonb_fields(
         "feature:h31-split-address",
         "feature:h31-wrong-field",
     )
+
+
+async def test_address_candidate_reimport_is_idempotent_and_never_publicly_links(
+    migrated_session: AsyncSession,
+) -> None:
+    """주소 후보는 반복 import에서도 미승인 상태이며 Feature 공개 membership이 아니다."""
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, marker_icon, marker_color, address
+            ) VALUES (
+                'feature:h31-preview-only', 'place', '미승인 등대', '01050400',
+                'place', 'P-09',
+                '{"sido_name":"울산광역시","sigungu_name":"울주군",'
+                '"admin":"울산광역시 울주군 서생면 대송리"}'::jsonb
+            )
+            """
+        )
+    )
+    matches = await resolve_feature_matches(
+        migrated_session,
+        requests=(
+            FeatureMatchRequest(
+                row_number=2,
+                feature_id=None,
+                place_name="미승인 등대",
+                address_hint="울산광역시 울주군 서생면 대송리",
+            ),
+        ),
+    )
+    assert [match.feature_id for match in matches[2]] == ["feature:h31-preview-only"]
+
+    row = ResolvedCurationImportRow(
+        row_number=2,
+        collection_key="h31-preview-only:2026",
+        theme_slug="h31-preview-only",
+        theme_name="주소 후보 검토",
+        theme_group="official",
+        title="주소 후보 검토 목록",
+        edition_key="2026",
+        provider="official-static-source",
+        dataset_key="h31-preview-only",
+        source_name="공식 정적 원천",
+        source_url="https://example.test/h31-preview-only",
+        source_item_key="preview-only-1",
+        source_component_key="primary",
+        feature_id=None,
+        place_name="미승인 등대",
+        address_hint="울산광역시 울주군 서생면 대송리",
+        sort_order=1,
+        item_title="미승인 등대",
+        item_summary=None,
+        metadata={},
+    )
+    first = await import_curation_rows(
+        migrated_session,
+        rows=(row,),
+        actor="official-import",
+    )
+    second = await import_curation_rows(
+        migrated_session,
+        rows=(row,),
+        actor="official-import",
+    )
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curation_collections
+            SET status = 'published', visibility = 'public'
+            WHERE collection_key = 'h31-preview-only:2026'
+            """
+        )
+    )
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curated_themes
+            SET visibility = 'public'
+            WHERE theme_slug = 'h31-preview-only'
+            """
+        )
+    )
+
+    assert first["inserted"] == 1
+    assert second["inserted"] == 0
+    assert second["updated"] == 0
+    assert (
+        await get_feature_curation_group(
+            migrated_session,
+            feature_id="feature:h31-preview-only",
+            public_only=True,
+        )
+        is None
+    )
+    stored_feature_id = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT item.feature_id
+                FROM feature.curation_items AS item
+                JOIN feature.curation_collections AS collection
+                  ON collection.collection_id = item.collection_id
+                WHERE collection.collection_key = 'h31-preview-only:2026'
+                  AND item.external_item_id = 'preview-only-1'
+                """
+            )
+        )
+    ).scalar_one()
+    assert stored_feature_id is None

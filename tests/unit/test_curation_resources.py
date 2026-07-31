@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from kortravelmap.curation_import import CURATION_CSV_HEADERS, parse_curation_csv
+from kortravelmap.curation_provenance import parse_curation_provenance
 
 pytestmark = pytest.mark.unit
 
@@ -25,7 +26,6 @@ def test_curation_resource_manifest_and_csv_contract() -> None:
     assert manifest["encoding"] == "UTF-8"
     assert manifest["delimiter"] == ","
     assert manifest["csv_columns"] == list(CURATION_CSV_HEADERS)
-    assert "source_provenance_json" in CURATION_CSV_HEADERS
 
     for entry in manifest["files"]:
         path = _RESOURCE_DIR / entry["path"]
@@ -90,6 +90,11 @@ def test_lighthouse_provenance_is_row_complete_and_manifest_bound() -> None:
     assert provenance["schema_version"] == 1
     assert provenance["source_csv_sha256"] == lighthouse["sha256"]
     assert len(provenance["rows"]) == lighthouse["expected_rows"] == 105
+    parsed_provenance = parse_curation_provenance(
+        csv_content=(_RESOURCE_DIR / lighthouse["path"]).read_bytes(),
+        provenance_content=provenance_path.read_bytes(),
+    )
+    assert len(parsed_provenance.rows) == 105
 
     with (_RESOURCE_DIR / lighthouse["path"]).open(
         encoding="utf-8", newline=""
@@ -138,3 +143,6 @@ def test_lighthouse_provenance_is_row_complete_and_manifest_bound() -> None:
         if row["derivation"] == "vworld_probe":
             assert row["probe_coordinate"] is not None
             assert row["probe_offset_m"] > 0
+            assert row["resolved_coordinate"] == row["probe_coordinate"]
+        if row["derivation"] == "vworld_forward":
+            assert row["resolved_coordinate"] is not None

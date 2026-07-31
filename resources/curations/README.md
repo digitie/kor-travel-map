@@ -13,6 +13,8 @@
 - `heritage-visit-campaign.csv`: 국가유산 방문 캠페인 10개 길의 기본·플러스 거점 membership 85개.
 - `arboretum-garden-stamp-tour-2026.csv`: 2026 수목원·정원 스탬프투어 운영기관 72개.
 - `lighthouse-stamp-tour.csv`: 등대 스탬프투어 시즌 1~6의 105개 stamp point.
+- `lighthouse-stamp-tour.provenance.json`: 위 등대 105행의 주소 원자료·조회 좌표·
+  probe/forward 결과·정규화 판단 근거.
 - `manifest.json`: 행 수, 공식 출처와 SHA-256 검증값.
 
 ## 열 규칙
@@ -50,6 +52,30 @@ DB에 미연결 공식 item으로 저장되므로 목록 원문은 손실되지 
 등대 시설 항목의 `metadata_json.suggested_category`는 새 place 카테고리
 `01050400`(`관광 > 자연명소 > 등대`)을 사용한다. 박물관 등 비등대 stamp point에는
 이 값을 넣지 않는다.
+
+## 등대 주소 provenance
+
+`lighthouse-stamp-tour.provenance.json`은 CSV 안에 중첩 JSON을 복제하지 않는 별도
+정본이다. `source_csv_sha256`와 CSV 순서 그대로의
+`collection_key + source_item_key + source_component_key`를 함께 검증하므로 행 삽입·
+재정렬·교체가 조용히 근거를 바꾸지 못한다. 각 행은 source URL, 조사 세션 시각,
+역지오코딩 입력 좌표, 실제 육지 probe 좌표와 거리, forward 결과 좌표, VWorld/문서 원
+주소, 정규화 주소, 신뢰도와 판단 메모를 보존한다. `observed_at`은 원 API가 응답 timestamp를
+주지 않아 보존된 조사 세션의 evidence 확정 시각(`2026-07-31T09:21:15+09:00`)으로
+기록했다.
+
+sidecar는 PR #907 작업 세션에 남아 있던 `address-evidence.json`,
+`_geo_consolidated.json`, `_vworld_probe.json`, `_extra9.json`, `_fix2.json`을
+`scripts/build_lighthouse_provenance.py`로 비밀값 없이 변환한 결과다. 원자료를 다시
+확보한 환경에서는 다음처럼 같은 bytes를 재생성한다.
+
+```bash
+python scripts/build_lighthouse_provenance.py \
+  --scratch-dir <h31-evidence-directory> \
+  --csv resources/curations/lighthouse-stamp-tour.csv \
+  --output resources/curations/lighthouse-stamp-tour.provenance.json \
+  --observed-at 2026-07-31T09:21:15+09:00
+```
 
 ## 공식 출처
 
