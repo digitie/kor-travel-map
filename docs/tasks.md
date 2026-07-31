@@ -574,6 +574,27 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   projection은 항상 decision 없이 태어나고, `_trusted_link_sql()`에서 제외된다.
   → **#910 답변의 진단이 코드로 확인됐다.**
 
+  ## 실증 (2026-07-31, 격리 restore clone — prod 무접촉)
+
+  prod 백업(`20260731T065308Z`)을 포트 노출 없는 임시 컨테이너에 복원하고 `0064~0072`를
+  적용해 **직접 셌다.** 그전까지 이 수치는 "코드상 확정·실행 미검증"이었다.
+
+  ```
+  배포 전  linked_items(active)          3,266
+  배포 후  linked_items(active)          3,266    ← 링크 자체는 남는다
+           decision 보유                 3,266
+           legacy_unattributed decision  3,266    ← 전부 이 값
+           ** 공개 노출 가능(trusted)        0    ← 전멸
+  alembic  0064 → 0072  소요 1,754초 (29분)
+  ```
+
+  **내 예상치 "3,265 → 264"가 틀렸다.** 264는 `feature_id IS NULL`이라 애초에 링크가 아니었다.
+  trusted 링크 기준으로는 **3,266 → 0**이다. 즉 `T-VN-H40` 없이 배포하면 **공개 curation이
+  전멸한다.**
+
+  그리고 **마이그레이션 29분은 `ktdctl deploy`의 `--wait-timeout 120`(하드코딩)을 14배
+  초과한다** — B′ 경로(마이그레이션을 배포와 분리)의 근거가 추정이 아니라 실측이 됐다.
+
   ## 판정 (2026-07-31 prod 실측) — **근거는 실재한다. `legacy_unattributed`는 틀린 분류다.**
 
   ```
@@ -698,6 +719,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > ⛔ **배포 선행 blocker: `T-VN-H40`(concierge provenance 복구).** PR #910 작성자 확인 결과
   > 복구 경로가 **누락**이고 축소 창이 **무기한**이다. H40 완료 전에는 `0072` 포함 배포를
   > 진행하지 않는다. 이 상태를 "허용 가능한 일시 축소"로 기록해서는 안 된다.
+  >
+  > ⚠ **공개 curation 표면이 배포 직후 전멸한다(실증).** 격리 restore clone에서
+  > `0064~0072` 적용 후 **공개 노출 가능(trusted) 링크 = 0**(배포 전 3,266). 소요 **1,754초**.
+  > 자세한 것은 `T-VN-H40` 실증 절.
   >
   > ⚠ **공개 curation 표면이 배포 직후 급감할 수 있다.** `_trusted_link_sql()`이
   > `match_basis <> 'legacy_unattributed'`를 요구하는데 `0072` backfill이 기존 링크를 전부

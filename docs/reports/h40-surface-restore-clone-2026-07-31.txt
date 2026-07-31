@@ -1,0 +1,28 @@
+=== 1) 격리 postgres 기동 (포트 노출 없음 — 컨테이너 내부에서만 접근) ===
+  준비됨
+
+=== 2) 백업 복원 (1.2GB — 수 분 소요) ===
+  복원 후 head = 0063_pipeline_root_id
+
+=== 3) 배포 전 공개 표면 ===
+  linked_items(active) = 3266
+
+=== 4) alembic upgrade head (격리 DB에서 0064~0072) ===
+INFO  [alembic.runtime.migration] Running upgrade 0064_price_series_identity -> 0065_curation_source_presence, authoritative 큐레이션 source presence를 membership과 분리한다.
+INFO  [alembic.runtime.migration] Running upgrade 0065_curation_source_presence -> 0066_curation_component_identity, Curation source item과 membership component identity를 분리한다.
+INFO  [alembic.runtime.migration] Running upgrade 0066_curation_component_identity -> 0067_integrity_dedupe_key, integrity finding dedupe key (T-VN-H30A).
+INFO  [alembic.runtime.migration] Running upgrade 0067_integrity_dedupe_key -> 0068_integrity_last_seen, integrity finding 최신 관측 시각·durable FK 정정.
+INFO  [alembic.runtime.migration] Running upgrade 0068_integrity_last_seen -> 0069_weather_series_catalog, weather physical-series registry와 weather-only 공간 인덱스.
+INFO  [alembic.runtime.migration] Running upgrade 0069_weather_series_catalog -> 0070_domain_command_ledger, Actor-scoped domain commands and terminal replay results.
+INFO  [alembic.runtime.migration] Running upgrade 0070_domain_command_ledger -> 0071_integrity_observations, 주소 finding 관측을 불변 run generation으로 정규화한다.
+INFO  [alembic.runtime.migration] Running upgrade 0071_integrity_observations -> 0072_curation_provenance, 큐레이션 import row와 Feature link decision provenance를 정규화한다.
+  head = 0072_curation_provenance   소요 1754초
+
+=== 5) 배포 후 공개 표면 (_trusted_link_sql 술어 그대로) ===
+  linked_items(active)            = 3266
+  decision 보유                    = 3266
+  legacy_unattributed decision     = 3266
+  ** 공개 노출 가능(trusted) 링크  = 0
+
+=== 결론 ===
+  위 '공개 노출 가능(trusted) 링크'가 배포 후 실제 값이다.
