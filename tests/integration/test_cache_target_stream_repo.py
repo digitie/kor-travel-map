@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
+import httpx
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -1216,6 +1219,140 @@ async def test_two_phase_reconciliation_begin_preconditions(
             reason="active request exists",
         )
     assert active.value.code == "reconciliation_active"
+
+
+@pytest.mark.integration
+async def test_two_phase_reconciliation_service_routes_use_one_fresh_session_transaction(
+    migrated_engine: AsyncEngine,
+) -> None:
+    from kortravelmap.api.app import create_app
+    from kortravelmap.api.auth import SERVICE_TOKEN_HEADER
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.settings import ApiSettings
+
+    system = "reconciliation-route-transaction-test"
+    token = "route-transaction-token"
+    begin_key = "9f100000-0000-0000-0000-000000000001"
+    seal_key = "9f100000-0000-0000-0000-000000000002"
+    completion_key = "9f100000-0000-0000-0000-000000000003"
+
+    async def _session() -> AsyncIterator[AsyncSession]:
+        async with AsyncSession(migrated_engine, expire_on_commit=False) as session:
+            yield session
+
+    app = create_app(
+        ApiSettings(
+            _env_file=None,
+            admin_proxy_secret=None,
+            api_call_log_enabled=False,
+            cache_target_service_principals=[
+                {
+                    "principal_id": "svc:pinvi-route-it",
+                    "consumer_id": _CONSUMER,
+                    "token_sha256": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                    "scopes": ["cache-target:recovery", "cache-target:snapshot"],
+                    "external_systems": [system],
+                }
+            ],
+        )
+    )
+    app.dependency_overrides[get_session] = _session
+
+    async with (
+        AsyncSession(migrated_engine, expire_on_commit=False) as setup,
+        setup.begin(),
+    ):
+        begin_command = await _reconciliation_command(
+            setup,
+            key=begin_key,
+            operation="service.cache-target-reconciliation.begin",
+        )
+        preparing = await begin_cache_target_reconciliation(
+            setup,
+            command_id=begin_command,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            expected_restore_epoch=1,
+            expected_control_version=None,
+            create_only=True,
+            reason="route transaction regression",
+        )
+        head = await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="target-a",
+            event_id="9f100000-0000-0000-0000-000000000101",
+            idempotency_key="9f100000-0000-0000-0000-000000000201",
+        )
+    expected_root = snapshot_merkle_root(
+        [
+            SnapshotMerkleRowV1(
+                external_system=system,
+                target_key="target-a",
+                state=head.state,
+                source_generation=head.source_generation,
+                source_payload_fingerprint=head.source_payload_fingerprint,
+            )
+        ]
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        seal = await client.post(
+            f"/v1/service/cache-target-reconciliations/{preparing.request_id}/seals",
+            headers={
+                SERVICE_TOKEN_HEADER: token,
+                "If-Match": f'"{preparing.request_id}:1"',
+                "Idempotency-Key": seal_key,
+            },
+            json={
+                "external_system": system,
+                "consumer_id": _CONSUMER,
+                "expected_restore_epoch": 1,
+                "expected_item_count": 1,
+                "expected_merkle_root": expected_root,
+            },
+        )
+
+    assert seal.status_code == 200, seal.text
+    assert seal.headers["etag"] == f'"{preparing.request_id}:2"'
+
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as verify:
+        metadata = await get_cache_target_reconciliation(
+            verify,
+            request_id=preparing.request_id,
+        )
+    assert metadata.status == "running"
+    assert metadata.snapshot_id is not None
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        completion = await client.post(
+            f"/v1/service/cache-target-reconciliations/{preparing.request_id}/completions",
+            headers={
+                SERVICE_TOKEN_HEADER: token,
+                "Idempotency-Key": completion_key,
+            },
+            json={
+                "external_system": system,
+                "consumer_id": _CONSUMER,
+                "snapshot_id": metadata.snapshot_id,
+                "expected_restore_epoch": 1,
+                "actual_merkle_root": expected_root,
+            },
+        )
+
+    assert completion.status_code == 200, completion.text
+    async with AsyncSession(migrated_engine, expire_on_commit=False) as verify:
+        completed = await get_cache_target_reconciliation(
+            verify,
+            request_id=preparing.request_id,
+        )
+    assert completed.status == "succeeded"
 
 
 @pytest.mark.integration

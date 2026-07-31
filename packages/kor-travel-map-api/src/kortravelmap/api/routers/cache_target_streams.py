@@ -88,6 +88,7 @@ from kortravelmap.api.domain_command_service import (
     idempotent_domain_command,
 )
 from kortravelmap.api.response import Meta, make_meta
+from kortravelmap.api.settings import CacheTargetServiceScope
 
 __all__ = [
     "admin_router",
@@ -590,6 +591,32 @@ def _require_bound_consumer(
             "CACHE_TARGET_CONSUMER_FORBIDDEN",
             "body consumer_id가 token principal과 일치하지 않습니다.",
         )
+
+
+async def _require_reconciliation_metadata_access(
+    session: Any,
+    stream_service: CacheTargetStreamService,
+    *,
+    request_id: str,
+    context: CacheTargetServicePrincipalContext,
+    scope: CacheTargetServiceScope,
+) -> Any:
+    metadata = await stream_service.get_cache_target_reconciliation(
+        session,
+        request_id=request_id,
+    )
+    if _getattr(metadata, "consumer_id") != context.consumer_id:
+        raise _http_error(
+            status.HTTP_403_FORBIDDEN,
+            "CACHE_TARGET_CONSUMER_FORBIDDEN",
+            "reconciliation request consumer가 token principal과 일치하지 않습니다.",
+        )
+    require_cache_target_service_scope(
+        context,
+        scope=scope,
+        external_system=_getattr(metadata, "external_system"),
+    )
+    return metadata
 
 
 @service_router.put(
@@ -1408,22 +1435,24 @@ async def seal_service_cache_target_reconciliation(
 ) -> CacheTargetOperationResponse:
     started_at = perf_counter()
     request_id_text = str(request_id)
-    _require_bound_consumer(context, body.consumer_id)
-    require_cache_target_service_scope(
-        context,
-        scope="cache-target:recovery",
-        external_system=body.external_system,
-    )
-    expected_phase_version = _reconciliation_precondition(
-        request,
-        request_id=request_id_text,
-    )
     payload = {
         "request_id": request_id_text,
         "body": body.model_dump(mode="json"),
         "headers": {"If-Match": request.headers.get("if-match")},
     }
     async with session.begin():
+        await _require_reconciliation_metadata_access(
+            session,
+            stream_service,
+            request_id=request_id_text,
+            context=context,
+            scope="cache-target:recovery",
+        )
+        _require_bound_consumer(context, body.consumer_id)
+        expected_phase_version = _reconciliation_precondition(
+            request,
+            request_id=request_id_text,
+        )
         command = await begin_domain_command(
             session,
             actor=context.principal_id,
@@ -1481,17 +1510,20 @@ async def complete_service_cache_target_reconciliation(
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
 ) -> CacheTargetOperationResponse:
     started_at = perf_counter()
-    _require_bound_consumer(context, body.consumer_id)
-    require_cache_target_service_scope(
-        context,
-        scope="cache-target:snapshot",
-        external_system=body.external_system,
-    )
+    request_id_text = str(request_id)
     payload = {
-        "request_id": str(request_id),
+        "request_id": request_id_text,
         "body": body.model_dump(mode="json"),
     }
     async with session.begin():
+        await _require_reconciliation_metadata_access(
+            session,
+            stream_service,
+            request_id=request_id_text,
+            context=context,
+            scope="cache-target:snapshot",
+        )
+        _require_bound_consumer(context, body.consumer_id)
         command = await begin_domain_command(
             session,
             actor=context.principal_id,
@@ -1501,7 +1533,7 @@ async def complete_service_cache_target_reconciliation(
         )
         result = await stream_service.complete_cache_target_reconciliation(
             session,
-            request_id=str(request_id),
+            request_id=request_id_text,
             external_system=body.external_system,
             consumer_id=context.consumer_id,
             snapshot_id=str(body.snapshot_id),
@@ -1615,21 +1647,12 @@ async def get_service_cache_target_reconciliation_snapshot(
     cursor: Annotated[str | None, Query()] = None,
 ) -> CacheTargetSnapshotResponse:
     started_at = perf_counter()
-    require_cache_target_service_scope(context, scope="cache-target:snapshot")
-    metadata = await stream_service.get_cache_target_reconciliation(
+    await _require_reconciliation_metadata_access(
         session,
+        stream_service,
         request_id=str(request_id),
-    )
-    if _getattr(metadata, "consumer_id") != context.consumer_id:
-        raise _http_error(
-            status.HTTP_403_FORBIDDEN,
-            "CACHE_TARGET_CONSUMER_FORBIDDEN",
-            "reconciliation request consumer가 token principal과 일치하지 않습니다.",
-        )
-    require_cache_target_service_scope(
-        context,
         scope="cache-target:snapshot",
-        external_system=_getattr(metadata, "external_system"),
+        context=context,
     )
     page = await stream_service.get_cache_target_reconciliation_snapshot(
         session,

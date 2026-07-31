@@ -987,6 +987,9 @@ def test_service_reconciliation_seal_uses_request_etag_and_exact_replay(
 
     assert first.status_code == 200, first.text
     assert first.headers["etag"] == f'"{RECONCILIATION_REQUEST_ID}:2"'
+    assert service.reconciliation_metadata_calls == [
+        {"request_id": RECONCILIATION_REQUEST_ID}
+    ]
     assert service.reconciliation_seal_calls == [
         {
             "request_id": RECONCILIATION_REQUEST_ID,
@@ -1019,6 +1022,56 @@ def test_service_reconciliation_seal_uses_request_etag_and_exact_replay(
     assert replay.headers["etag"] == first.headers["etag"]
     assert replay.headers["idempotency-replayed"] == "true"
     assert len(service.reconciliation_seal_calls) == 1
+
+
+@pytest.mark.unit
+def test_service_reconciliation_seal_authorizes_stored_request_before_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import cache_target_streams as router_module
+
+    service = _FakeCacheTargetService()
+    service.reconciliation_metadata_result = SimpleNamespace(
+        request_id=RECONCILIATION_REQUEST_ID,
+        external_system="other",
+        consumer_id=CONSUMER_ID,
+    )
+    ledger_calls: list[dict[str, Any]] = []
+
+    async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
+        ledger_calls.append(kwargs)
+        return SimpleNamespace(command_id=793, request_fingerprint="d" * 64)
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
+    client = _client(
+        service,
+        settings=_settings(
+            scopes=["cache-target:recovery"],
+            external_systems=[EXTERNAL_SYSTEM],
+        ),
+    )
+
+    response = client.post(
+        f"/v1/service/cache-target-reconciliations/{RECONCILIATION_REQUEST_ID}/seals",
+        headers=_service_headers(extra={"If-Match": f'"{RECONCILIATION_REQUEST_ID}:1"'}),
+        json={
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "expected_restore_epoch": 4,
+            "expected_item_count": 1,
+            "expected_merkle_root": "a" * 64,
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "CACHE_TARGET_EXTERNAL_SYSTEM_FORBIDDEN"
+    assert service.reconciliation_metadata_calls == [
+        {"request_id": RECONCILIATION_REQUEST_ID}
+    ]
+    assert ledger_calls == []
+    assert service.reconciliation_seal_calls == []
+    assert service.reconciliation_snapshot_calls == []
+    assert service.reconciliation_completion_calls == []
 
 
 @pytest.mark.unit
@@ -1159,7 +1212,60 @@ def test_reconciliation_discovery_snapshot_and_completion_reject_other_consumer(
     assert discovery.status_code == 403
     assert fixed.status_code == 403
     assert completion.status_code == 403
-    assert service.reconciliation_metadata_calls == [{"request_id": request_id}]
+    assert service.reconciliation_metadata_calls == [
+        {"request_id": request_id},
+        {"request_id": request_id},
+    ]
+    assert service.reconciliation_snapshot_calls == []
+    assert service.reconciliation_completion_calls == []
+
+
+@pytest.mark.unit
+def test_service_reconciliation_completion_authorizes_stored_request_before_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import cache_target_streams as router_module
+
+    service = _FakeCacheTargetService()
+    service.reconciliation_metadata_result = SimpleNamespace(
+        request_id=RECONCILIATION_REQUEST_ID,
+        external_system="other",
+        consumer_id=CONSUMER_ID,
+    )
+    ledger_calls: list[dict[str, Any]] = []
+
+    async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
+        ledger_calls.append(kwargs)
+        return SimpleNamespace(command_id=794, request_fingerprint="e" * 64)
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
+    client = _client(
+        service,
+        settings=_settings(
+            scopes=["cache-target:snapshot"],
+            external_systems=[EXTERNAL_SYSTEM],
+        ),
+    )
+
+    response = client.post(
+        f"/v1/service/cache-target-reconciliations/{RECONCILIATION_REQUEST_ID}/completions",
+        headers=_service_headers(),
+        json={
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "snapshot_id": RECONCILIATION_SNAPSHOT_ID,
+            "expected_restore_epoch": 4,
+            "actual_merkle_root": "a" * 64,
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "CACHE_TARGET_EXTERNAL_SYSTEM_FORBIDDEN"
+    assert service.reconciliation_metadata_calls == [
+        {"request_id": RECONCILIATION_REQUEST_ID}
+    ]
+    assert ledger_calls == []
+    assert service.reconciliation_seal_calls == []
     assert service.reconciliation_snapshot_calls == []
     assert service.reconciliation_completion_calls == []
 
@@ -1219,6 +1325,76 @@ def test_reconciliation_snapshot_missing_request_returns_404() -> None:
     assert response.status_code == 404
     assert response.json()["code"] == "RECONCILIATION_NOT_FOUND"
     assert service.reconciliation_snapshot_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("path_suffix", "headers", "body"),
+    [
+        (
+            "seals",
+            _service_headers(extra={"If-Match": f'"{RECONCILIATION_REQUEST_ID}:1"'}),
+            {
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": CONSUMER_ID,
+                "expected_restore_epoch": 4,
+                "expected_item_count": 1,
+                "expected_merkle_root": "a" * 64,
+            },
+        ),
+        (
+            "completions",
+            _service_headers(),
+            {
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": CONSUMER_ID,
+                "snapshot_id": RECONCILIATION_SNAPSHOT_ID,
+                "expected_restore_epoch": 4,
+                "actual_merkle_root": "a" * 64,
+            },
+        ),
+    ],
+)
+def test_reconciliation_mutations_missing_request_return_404_before_write(
+    monkeypatch: pytest.MonkeyPatch,
+    path_suffix: str,
+    headers: dict[str, str],
+    body: dict[str, Any],
+) -> None:
+    from kortravelmap.api.routers import cache_target_streams as router_module
+
+    service = _FakeCacheTargetService()
+    service.reconciliation_metadata_result = CacheTargetStreamConflict(
+        "reconciliation_not_found",
+        "reconciliation request가 없습니다.",
+    )
+    ledger_calls: list[dict[str, Any]] = []
+
+    async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
+        ledger_calls.append(kwargs)
+        return SimpleNamespace(command_id=795, request_fingerprint="f" * 64)
+
+    monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
+    client = _client(
+        service,
+        settings=_settings(scopes=["cache-target:recovery", "cache-target:snapshot"]),
+    )
+
+    response = client.post(
+        f"/v1/service/cache-target-reconciliations/{RECONCILIATION_REQUEST_ID}/{path_suffix}",
+        headers=headers,
+        json=body,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "RECONCILIATION_NOT_FOUND"
+    assert service.reconciliation_metadata_calls == [
+        {"request_id": RECONCILIATION_REQUEST_ID}
+    ]
+    assert ledger_calls == []
+    assert service.reconciliation_seal_calls == []
+    assert service.reconciliation_snapshot_calls == []
+    assert service.reconciliation_completion_calls == []
 
 
 @pytest.mark.unit

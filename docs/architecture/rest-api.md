@@ -626,6 +626,10 @@ request를 `running`으로 전환하며, seal 성공 응답의 `ETag`도 같은 
 phase version이다. mismatch는 snapshot 저장과 phase 전이를 rollback한 `412`이며 request는
 `preparing`으로 남는다. 두 command 모두 body와 precondition header를 domain ledger fingerprint에
 포함해 same-key/same-body exact response replay와 changed-body `409`를 보장한다.
+seal·request-bound snapshot·completion은 먼저 저장된 reconciliation request metadata를 읽고,
+그 metadata의 `consumer_id`와 `external_system`으로 ServiceToken principal을 검증한 뒤에만 body
+값·ETag·snapshot checksum을 비교한다. 따라서 권한 없는 principal은 다른 system/request의 현재
+snapshot identity나 checksum mismatch 세부 정보를 `412`로 관측할 수 없다.
 
 admin reconciliation 시작은 destructive recovery gate를 요구하며 begin+seal을 한 transaction으로
 수행하는 one-step convenience다. consumer completion은 `cache-target:snapshot` principal과
