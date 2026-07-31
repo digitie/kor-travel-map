@@ -1115,6 +1115,7 @@ SELECT
     incoming.row_number,
     item.curation_item_id::text AS curation_item_id,
     item.feature_id,
+    item.archived_at,
     item.accepted_link_decision_id::text AS accepted_link_decision_id,
     previous_decision.feature_id AS previous_decision_feature_id
 FROM incoming
@@ -3038,6 +3039,16 @@ async def _record_import_provenance(
         "forward_recovery",
     }:
         raise ValueError("지원하지 않는 curation import batch_kind입니다.")
+    decision_match_basis = (
+        "forward_recovery"
+        if effective_kind == "forward_recovery"
+        else "csv_explicit_feature_id"
+    )
+    decision_resolver_version = (
+        "forward-recovery-v1"
+        if effective_kind == "forward_recovery"
+        else "explicit-feature-id-v1"
+    )
 
     import_batch_id = str(
         (
@@ -3093,10 +3104,11 @@ async def _record_import_provenance(
     pointers: list[dict[str, Any]] = []
     for row, row_payload in zip(rows, canonical_rows, strict=True):
         identity = identities[row.row_number]
+        item_is_archived = identity["archived_at"] is not None
         current_feature_id = (
             str(identity["feature_id"]) if identity["feature_id"] else None
         )
-        if current_feature_id != row.feature_id:
+        if not item_is_archived and current_feature_id != row.feature_id:
             raise RuntimeError("import 직후 item Feature가 normalized row와 다릅니다.")
         import_row_id = str(uuid4())
         source_row_sha256 = _canonical_json_sha256(row_payload)
@@ -3110,6 +3122,8 @@ async def _record_import_provenance(
                 "provenance": row.provenance or {},
             }
         )
+        if item_is_archived:
+            continue
         previous_decision_id = (
             str(identity["accepted_link_decision_id"])
             if identity["accepted_link_decision_id"]
@@ -3125,8 +3139,8 @@ async def _record_import_provenance(
                     "feature_id": row.feature_id,
                     "import_row_id": import_row_id,
                     "decision_kind": "accepted",
-                    "match_basis": "csv_explicit_feature_id",
-                    "resolver_version": "explicit-feature-id-v1",
+                    "match_basis": decision_match_basis,
+                    "resolver_version": decision_resolver_version,
                     "evidence": {
                         "source_row_sha256": source_row_sha256,
                         "requested_feature_id": row.feature_id,
@@ -3149,8 +3163,8 @@ async def _record_import_provenance(
                     "feature_id": previous_feature_id,
                     "import_row_id": import_row_id,
                     "decision_kind": "revoked",
-                    "match_basis": "csv_explicit_feature_id",
-                    "resolver_version": "explicit-feature-id-v1",
+                    "match_basis": decision_match_basis,
+                    "resolver_version": decision_resolver_version,
                     "evidence": {
                         "source_row_sha256": source_row_sha256,
                         "previous_feature_id": previous_feature_id,

@@ -217,6 +217,90 @@ async def _seed_pair(engine: AsyncEngine) -> str:
         return str(row.review_id)
 
 
+async def _purge_curation_test_provenance(
+    session: AsyncSession,
+    *,
+    theme_slugs: tuple[str, ...],
+) -> None:
+    """불변 provenance를 쓰는 테스트 fixture만 leaf-first로 완전 정리한다."""
+
+    item_ids = [
+        str(row[0])
+        for row in (
+            await session.execute(
+                text(
+                    """
+                    SELECT item.curation_item_id::text
+                    FROM feature.curation_items AS item
+                    JOIN feature.curation_collections AS collection
+                      ON collection.collection_id = item.collection_id
+                    JOIN feature.curated_themes AS theme
+                      ON theme.theme_id = collection.theme_id
+                    WHERE theme.theme_slug = ANY(CAST(:theme_slugs AS text[]))
+                    """
+                ),
+                {"theme_slugs": list(theme_slugs)},
+            )
+        ).all()
+    ]
+    if not item_ids:
+        return
+    await session.execute(
+        text(
+            """
+            UPDATE feature.curation_items
+            SET current_import_row_id = NULL,
+                accepted_link_decision_id = NULL
+            WHERE curation_item_id = ANY(CAST(:item_ids AS uuid[]))
+            """
+        ),
+        {"item_ids": item_ids},
+    )
+    while True:
+        deleted = (
+            await session.execute(
+                text(
+                    """
+                    DELETE FROM feature.curation_link_decisions AS decision
+                    WHERE decision.curation_item_id =
+                          ANY(CAST(:item_ids AS uuid[]))
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM feature.curation_link_decisions AS child
+                          WHERE child.supersedes_decision_id =
+                                decision.decision_id
+                      )
+                    RETURNING decision.decision_id
+                    """
+                ),
+                {"item_ids": item_ids},
+            )
+        ).all()
+        if not deleted:
+            break
+    await session.execute(
+        text(
+            """
+            DELETE FROM feature.curation_import_rows
+            WHERE curation_item_id = ANY(CAST(:item_ids AS uuid[]))
+            """
+        ),
+        {"item_ids": item_ids},
+    )
+    await session.execute(
+        text(
+            """
+            DELETE FROM feature.curation_import_batches AS batch
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM feature.curation_import_rows AS import_row
+                WHERE import_row.import_batch_id = batch.import_batch_id
+            )
+            """
+        )
+    )
+
+
 async def _links_of(engine: AsyncEngine, feature_id: str) -> set[str]:
     async with AsyncSession(engine) as session:
         result = await session.execute(
@@ -366,6 +450,16 @@ async def seeded(pg_container: object, migrated_engine: AsyncEngine) -> object:
     review_id = await _seed_pair(migrated_engine)
     yield review_id
     async with AsyncSession(migrated_engine) as session, session.begin():
+        await _purge_curation_test_provenance(
+            session,
+            theme_slugs=(
+                "merge-test",
+                "legacy-merge-conflict",
+                "legacy-merge-loser-only",
+                "legacy-merge-conflict-renamed",
+                "legacy-merge-loser-only-renamed",
+            ),
+        )
         for statement in (
             "DELETE FROM ops.feature_merge_history "
             "WHERE master_feature_id IN ('f_master', 'f_loser') "
@@ -1356,8 +1450,9 @@ async def test_merge_tombstone_wins_over_visible_duplicate(
                     SELECT feature_id, status, archived_at IS NOT NULL,
                            curation_relation, reuse_policy,
                            operator_updated_by
-                    FROM feature.curation_items
-                    WHERE external_item_id = 'shared'
+                        FROM feature.curation_items
+                        WHERE external_item_id = 'shared'
+                        ORDER BY feature_id NULLS LAST
                     """
                 )
             )
@@ -1370,7 +1465,15 @@ async def test_merge_tombstone_wins_over_visible_duplicate(
             "primary_stop",
             "blocked",
             "archive-operator",
-        )
+        ),
+        (
+            None,
+            "archived",
+            True,
+            "primary_stop",
+            "blocked",
+            "archive-operator",
+        ),
     ]
 
 
@@ -1618,22 +1721,26 @@ async def test_merge_first_serializes_import_against_feature_lifecycle(
                 task.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await task
-        async with migrated_engine.begin() as connection:
-            await connection.execute(
+        async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await _purge_curation_test_provenance(
+                cleanup,
+                theme_slugs=(theme_slug,),
+            )
+            await cleanup.execute(
                 text(
                     "DELETE FROM feature.curation_collections "
                     "WHERE collection_key = :collection_key"
                 ),
                 {"collection_key": collection_key},
             )
-            await connection.execute(
+            await cleanup.execute(
                 text(
                     "DELETE FROM feature.curated_themes "
                     "WHERE theme_slug = :theme_slug"
                 ),
                 {"theme_slug": theme_slug},
             )
-            await connection.execute(
+            await cleanup.execute(
                 text(
                     "DELETE FROM feature.curated_sources "
                     "WHERE provider = :provider AND dataset_key = 'race'"
@@ -1735,13 +1842,22 @@ async def test_import_first_merge_moves_newly_committed_membership(
             state = (
                 await session.execute(
                     text(
-                        """
-                        SELECT item.feature_id, item.source_present
-                        FROM feature.curation_items AS item
-                        JOIN feature.curation_collections AS collection
-                          ON collection.collection_id = item.collection_id
-                        WHERE collection.collection_key = :collection_key
-                          AND item.external_item_id = 'loser-item'
+                            """
+                            SELECT
+                                item.feature_id,
+                                item.source_present,
+                                decision.match_basis,
+                                decision.resolver_version,
+                                decision.actor,
+                                decision.evidence->>'loser_feature_id'
+                            FROM feature.curation_items AS item
+                            JOIN feature.curation_collections AS collection
+                              ON collection.collection_id = item.collection_id
+                            JOIN feature.curation_link_decisions AS decision
+                              ON decision.decision_id =
+                                 item.accepted_link_decision_id
+                            WHERE collection.collection_key = :collection_key
+                              AND item.external_item_id = 'loser-item'
                         """
                     ),
                     {"collection_key": collection_key},
@@ -1755,7 +1871,14 @@ async def test_import_first_merge_moves_newly_committed_membership(
                     )
                 )
             ).scalar_one()
-        assert state == ("f_master", True)
+        assert state == (
+            "f_master",
+            True,
+            "forward_recovery",
+            "feature-merge-v1",
+            "merge-import-race",
+            "f_loser",
+        )
         assert loser_count == 0
     finally:
         for task in (import_task, merge_task):
@@ -1763,22 +1886,26 @@ async def test_import_first_merge_moves_newly_committed_membership(
                 task.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await task
-        async with migrated_engine.begin() as connection:
-            await connection.execute(
+        async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await _purge_curation_test_provenance(
+                cleanup,
+                theme_slugs=(theme_slug,),
+            )
+            await cleanup.execute(
                 text(
                     "DELETE FROM feature.curation_collections "
                     "WHERE collection_key = :collection_key"
                 ),
                 {"collection_key": collection_key},
             )
-            await connection.execute(
+            await cleanup.execute(
                 text(
                     "DELETE FROM feature.curated_themes "
                     "WHERE theme_slug = :theme_slug"
                 ),
                 {"theme_slug": theme_slug},
             )
-            await connection.execute(
+            await cleanup.execute(
                 text(
                     "DELETE FROM feature.curated_sources "
                     "WHERE provider = :provider AND dataset_key = 'race'"
@@ -1943,22 +2070,26 @@ async def test_merge_first_rechecks_all_membership_writer_feature_lifecycles(
                 task.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await task
-        async with migrated_engine.begin() as connection:
-            await connection.execute(
+        async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await _purge_curation_test_provenance(
+                cleanup,
+                theme_slugs=(theme_slug,),
+            )
+            await cleanup.execute(
                 text(
                     "DELETE FROM feature.curated_features "
                     "WHERE theme_id = CAST(:theme_id AS uuid)"
                 ),
                 {"theme_id": theme_id},
             )
-            await connection.execute(
+            await cleanup.execute(
                 text(
                     "DELETE FROM feature.curation_collections "
                     "WHERE theme_id = CAST(:theme_id AS uuid)"
                 ),
                 {"theme_id": theme_id},
             )
-            await connection.execute(
+            await cleanup.execute(
                 text(
                     "DELETE FROM feature.curated_themes "
                     "WHERE theme_id = CAST(:theme_id AS uuid)"

@@ -19,6 +19,7 @@ from kortravelmap.infra.curation_repo import (
     CurationImportPlan,
     CurationImportResult,
     CurationItem,
+    CurationLinkAudit,
     FeatureCurationGroup,
     FeatureMatch,
 )
@@ -268,6 +269,61 @@ def test_csv_preview_and_commit_keep_unresolved_official_item(
     assert committed_data["removed"] == 2
     assert len(committed_data["removals"]) == committed_data["removed"]
     assert committed_data["collections"] == 1
+    assert committed_data["import_batch_id"] == "55555555-5555-4555-8555-555555555555"
+
+
+@pytest.mark.unit
+def test_admin_link_audit_exposes_fail_closed_items(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    decided_at = datetime(2026, 7, 31, tzinfo=UTC)
+    audit = AsyncMock(
+        return_value=(
+            CurationLinkAudit(
+                curation_item_id=ITEM_ID,
+                collection_key="lighthouse:healing",
+                external_item_id="healing:ganjeolgot",
+                external_component_id="primary",
+                feature_id="feature:legacy-link",
+                place_name="간절곶등대",
+                address_hint="울산광역시 울주군",
+                match_basis="legacy_unattributed",
+                resolver_version="pre-0072-unknown",
+                decided_at=decided_at,
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "list_unattributed_curation_links",
+        audit,
+    )
+
+    response = client.get("/v1/admin/curations/link-audit", params={"limit": 25})
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "items": [
+            {
+                "curation_item_id": ITEM_ID,
+                "collection_key": "lighthouse:healing",
+                "external_item_id": "healing:ganjeolgot",
+                "external_component_id": "primary",
+                "feature_id": "feature:legacy-link",
+                "place_name": "간절곶등대",
+                "address_hint": "울산광역시 울주군",
+                "match_basis": "legacy_unattributed",
+                "resolver_version": "pre-0072-unknown",
+                "decided_at": "2026-07-31T00:00:00Z",
+            }
+        ],
+        "count": 1,
+    }
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs == {"limit": 25}
 
 
 @pytest.mark.unit

@@ -170,8 +170,9 @@ FOR UPDATE OF collection
 # 한 collection 안의 동일 official item을 Feature merge할 때 durable source/tombstone과
 # operator override를 잃지 않는다. provider 파생 필드는 source-present row(동률이면 최신),
 # operator 필드는 전용 operator_updated_at이 최신인 row가 이기며, 어느 한쪽이라도
-# tombstone이면 tombstone이 최우선이다. master UUID를 survivor로 유지한 뒤 loser
-# duplicate만 제거한다.
+# tombstone이면 tombstone이 최우선이다. master UUID를 survivor로 유지하고 loser
+# duplicate는 물리 삭제하지 않는다. Feature link를 철회한 archive tombstone으로
+# 남겨 import/link provenance의 append-only FK를 보존한다.
 _MERGE_DUPLICATE_CURATION_ITEMS_SQL: Final[str] = """
 WITH pairs AS MATERIALIZED (
     SELECT
@@ -211,6 +212,37 @@ WITH pairs AS MATERIALIZED (
      AND loser_item.external_item_id = master_item.external_item_id
     WHERE loser_item.feature_id = :loser
     FOR UPDATE OF master_item, loser_item
+), revocations AS (
+    INSERT INTO feature.curation_link_decisions (
+        curation_item_id,
+        feature_id,
+        decision_kind,
+        match_basis,
+        resolver_version,
+        evidence,
+        actor,
+        supersedes_decision_id
+    )
+    SELECT
+        loser_item.curation_item_id,
+        loser_item.feature_id,
+        'revoked',
+        'forward_recovery',
+        'feature-merge-v1',
+        jsonb_build_object(
+            'operation', 'feature_merge_duplicate_archive',
+            'master_feature_id', CAST(:master AS text),
+            'loser_feature_id', CAST(:loser AS text),
+            'review_id', CAST(:review_id AS text),
+            'reason', CAST(:reason AS text)
+        ),
+        :merge_actor,
+        loser_item.accepted_link_decision_id
+    FROM pairs
+    JOIN feature.curation_items AS loser_item
+      ON loser_item.curation_item_id = pairs.loser_item_id
+    WHERE loser_item.accepted_link_decision_id IS NOT NULL
+    RETURNING curation_item_id
 ), reconciled AS (
     UPDATE feature.curation_items AS survivor
     SET source_record_key = CASE
@@ -301,17 +333,90 @@ WITH pairs AS MATERIALIZED (
     WHERE survivor.curation_item_id = pairs.master_item_id
     RETURNING pairs.loser_item_id
 )
-DELETE FROM feature.curation_items AS loser_item
-USING reconciled
+UPDATE feature.curation_items AS loser_item
+SET feature_id = NULL,
+    accepted_link_decision_id = NULL,
+    source_present = false,
+    status = 'archived',
+    updated_by = :merge_actor,
+    updated_at = now(),
+    archived_at = COALESCE(loser_item.archived_at, now()),
+    metadata = loser_item.metadata || jsonb_build_object(
+        'feature_merge_duplicate_archived', true,
+        'feature_merge_master_id', CAST(:master AS text),
+        'feature_merge_loser_id', CAST(:loser AS text)
+    )
+FROM reconciled
+LEFT JOIN revocations
+  ON revocations.curation_item_id = reconciled.loser_item_id
 WHERE loser_item.curation_item_id = reconciled.loser_item_id
 RETURNING loser_item.curation_item_id
 """
 
 _MOVE_CURATION_ITEMS_SQL: Final[str] = """
-UPDATE feature.curation_items
-SET feature_id = :master, updated_at = now()
-WHERE feature_id = :loser
-RETURNING curation_item_id
+WITH candidates AS MATERIALIZED (
+    SELECT
+        item.curation_item_id,
+        item.feature_id,
+        item.accepted_link_decision_id,
+        (
+            item.archived_at IS NULL
+            AND item.source_present
+            AND item.status <> 'archived'
+        ) AS remains_active
+    FROM feature.curation_items AS item
+    WHERE item.feature_id = :loser
+    FOR UPDATE OF item
+), decisions AS (
+    INSERT INTO feature.curation_link_decisions (
+        curation_item_id,
+        feature_id,
+        decision_kind,
+        match_basis,
+        resolver_version,
+        evidence,
+        actor,
+        supersedes_decision_id
+    )
+    SELECT
+        candidate.curation_item_id,
+        CASE
+            WHEN candidate.remains_active THEN CAST(:master AS text)
+            ELSE candidate.feature_id
+        END,
+        CASE
+            WHEN candidate.remains_active THEN 'accepted'
+            ELSE 'revoked'
+        END,
+        'forward_recovery',
+        'feature-merge-v1',
+        jsonb_build_object(
+            'operation', 'feature_merge_link_retarget',
+            'master_feature_id', CAST(:master AS text),
+            'loser_feature_id', CAST(:loser AS text),
+            'review_id', CAST(:review_id AS text),
+            'reason', CAST(:reason AS text)
+        ),
+        :merge_actor,
+        candidate.accepted_link_decision_id
+    FROM candidates AS candidate
+    WHERE candidate.remains_active
+       OR candidate.accepted_link_decision_id IS NOT NULL
+    RETURNING decision_id, curation_item_id, decision_kind
+)
+UPDATE feature.curation_items AS item
+SET feature_id = :master,
+    accepted_link_decision_id = CASE
+        WHEN decision.decision_kind = 'accepted' THEN decision.decision_id
+        ELSE NULL
+    END,
+    updated_by = :merge_actor,
+    updated_at = now()
+FROM candidates AS candidate
+LEFT JOIN decisions AS decision
+  ON decision.curation_item_id = candidate.curation_item_id
+WHERE item.curation_item_id = candidate.curation_item_id
+RETURNING item.curation_item_id
 """
 
 # Duplicate reconcile가 loser의 최신 operator state/tombstone을 master canonical
@@ -591,13 +696,23 @@ async def apply_feature_merge(
         text(_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL),
         {"master": master_id, "loser": loser_id},
     )
+    merge_actor = (merged_by or "system:feature-merge").strip()
+    if not merge_actor:
+        merge_actor = "system:feature-merge"
+    curation_merge_params = {
+        "master": master_id,
+        "loser": loser_id,
+        "review_id": review_id,
+        "reason": reason,
+        "merge_actor": merge_actor,
+    }
     await session.execute(
         text(_MERGE_DUPLICATE_CURATION_ITEMS_SQL),
-        {"master": master_id, "loser": loser_id},
+        curation_merge_params,
     )
     await session.execute(
         text(_MOVE_CURATION_ITEMS_SQL),
-        {"master": master_id, "loser": loser_id},
+        curation_merge_params,
     )
     await session.execute(
         text(_SYNC_MASTER_LEGACY_PROJECTIONS_SQL),
