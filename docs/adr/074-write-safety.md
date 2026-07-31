@@ -36,10 +36,12 @@
    result는 효과별 output digest/proof가 있어야만 기록한다. `pending`은 성공으로 추정하지 않는다.
 8. backup/create/restore/swap은 동일 session advisory lock
    `maintenance:backup-restore`를 host wrapper process가 fail-fast로 획득하고 child script
-   전체 수명 동안 보유한다. API task 취소·timeout은 새 process group 전체를
-   `TERM → wait → KILL`로 완전히 회수한 뒤 반환한다. API connection에서 획득한 lock을 env
-   flag로 child에게 위임하지 않는다. API 내부 delete도 같은 key를 effect·proof·terminal
-   commit 전체에 직접 보유한다.
+   전체 수명 동안 보유한다. wrapper는 `TERM`/`INT`를 직접 받아 DB session을 유지한 채
+   child process group에 전달하고 제한 시간 뒤 `KILL`로 올린 다음 group 소멸과 direct child
+   reap을 확인한 후에만 종료한다. API task 취소·timeout도 wrapper의 return code가 아니라
+   pipe communication 완료를 기준으로 `TERM → bounded wait → KILL → bounded reap`한다.
+   API connection에서 획득한 lock을 env flag로 child에게 위임하지 않는다. API 내부 delete도
+   같은 key를 effect·proof·terminal commit 전체에 직접 보유한다.
 9. host completion marker는 backup root의 전용 `0700` 디렉터리에서 `O_NOFOLLOW`,
    `O_EXCL`, file/dir `fsync`, Linux `renameat2(RENAME_NOREPLACE)`로 한 번만 생성한다.
    marker는 command/operation/effect/target identity, input digest, effect-specific output

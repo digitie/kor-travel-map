@@ -245,8 +245,10 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
   ambiguity는 fail-close한다. delete는 `deleting + delete_command_id`를 원자 예약하므로
   다른 key의 경쟁 요청은 claim까지 rollback된 `409`로 끝난다.
 - backup/restore/swap은 host wrapper가 `maintenance:backup-restore` session lock을
-  `pg_try_advisory_lock`으로 잡고 child process 전체 수명 동안 보유한다. API cancellation과
-  timeout은 process group을 완전히 회수한 뒤 반환한다. busy는
+  `pg_try_advisory_lock`으로 잡고 child process 전체 수명 동안 보유한다. wrapper가
+  `TERM`/`INT`를 받아 child group의 `TERM → bounded wait → KILL → reap`을 끝낸 뒤 lock을
+  해제하며, API cancellation과 timeout도 wrapper return code와 무관하게 pipe가 닫힐 때까지
+  bounded escalation한다. busy는
   `409 BACKUP_MAINTENANCE_BUSY`와 `Retry-After: 3`이다. API 내부 backup delete는 같은 lock을
   effect·proof·terminal DB commit까지 직접 보유한다. exact command marker/reservation 없는
   기존 backup artifact나 restore target은 새 command 결과로 채택하지 않는다.

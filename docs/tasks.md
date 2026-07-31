@@ -46,8 +46,8 @@ barrier로 직렬화한다.
     [x] `T-VN-H39`(schedule command pending barrier) →
     [x] `T-VN-16B`(weather batch 소비) →
     [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
-    [ ] `T-VN-12A/B/C/D`(domain idempotency, 단일 PR #906 — 1차 적대 리뷰 반영,
-        동일 리뷰어 재검토·n150 파괴적 Live·merge 대기) →
+    [ ] `T-VN-12A/B/C/D`(domain idempotency, 단일 PR #906 — 재검토 P1 signal/lock
+        lifecycle 반영 중, 동일 리뷰어 재검토·n150 파괴적 Live·merge 대기) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [ ] `T-VN-31A` → [ ] `T-VN-31B` → [ ] `T-VN-31C`

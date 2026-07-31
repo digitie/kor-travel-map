@@ -70,11 +70,14 @@ PostgreSQL advisory lock `maintenance:backup-restore`를 잡고 실행된다. lo
 잡혀 있으면 실행은 실패한다. lock bypass 환경변수는 지원하지 않는다.
 
 Admin API도 script wrapper 자체가 lock owner다. API connection이 잡은 lock을 env로
-child에 위임하지 않는다. task 취소·timeout이면 독립 process group 전체를
-`SIGTERM` 후 제한 시간 내 회수하고, 남으면 `SIGKILL`한 뒤에만 반환하므로 API worker가
-사라진 뒤 lock 없이 host 효과만 계속되는 구간이 없다. API 내부 delete의 filesystem
-`rmtree`는 같은 lock을 marker proof와 domain command terminal result commit까지 직접
-보유한다. 경합은 무기한 대기하지 않고 `409 BACKUP_MAINTENANCE_BUSY`와
+child에 위임하지 않는다. wrapper는 `SIGTERM`/`SIGINT`를 기본 동작으로 종료하지 않고,
+DB session을 유지한 채 별도 child process group에 전달한다. 제한 시간 뒤에도 group이
+남으면 `SIGKILL`하고 direct child와 group 소멸을 확인한 뒤에만 lock을 해제한다. API도
+wrapper return code가 이미 정해졌는지가 아니라 stdout/stderr pipe communication 완료를
+기준으로 두 단계 bounded escalation한다. 따라서 TERM을 무시하는 descendant가 pipe를
+잡고 있어도 무기한 대기하거나 lock 없이 host 효과만 계속하지 않는다. API 내부 delete의
+filesystem `rmtree`는 같은 lock을 marker proof와 domain command terminal result commit까지
+직접 보유한다. 경합은 무기한 대기하지 않고 `409 BACKUP_MAINTENANCE_BUSY`와
 `Retry-After: 3`으로 실패한다.
 
 ## 3. 산출물 구조

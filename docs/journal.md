@@ -59,6 +59,12 @@
   PostgreSQL resource-race/ledger와 offline delete integration 9건, 전체 unit+API
   **2,642건**, frontend lint·type-check·286건, OpenAPI/type drift가 통과했다. 동일 리뷰어
   재검토와 n150 파괴적 Live는 다음 checkpoint에서 수행한다.
+- 동일 리뷰어 재검토는 wrapper가 `TERM`으로 먼저 죽어 lock을 놓고 TERM 무시 descendant가
+  살아남는 P1을 추가로 찾았다. wrapper가 DB session을 보유한 채 child group을
+  `TERM → bounded wait → KILL → reap`하고, API도 wrapper return code와 무관하게 pipe 완료를
+  기준으로 escalation하도록 수정했다. 실제 wrapper·TERM 무시 child·별도 PostgreSQL contender와
+  leader 종료 뒤 pipe를 보유한 descendant 회귀 2건, 관련 focused 55건, 전체 unit+API
+  **2,642건**이 통과했다.
 
 ## 2026-07-31 (codex) — T-VN-16C 완료 이관·T-VN-12 단일 PR 착수
 

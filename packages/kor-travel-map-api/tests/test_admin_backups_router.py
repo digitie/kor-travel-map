@@ -302,17 +302,21 @@ async def test_maintenance_lock_is_exact_fail_fast_and_exactly_unlocked() -> Non
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_command_cancellation_reaps_the_entire_process_group(
+async def test_command_cancellation_kills_descendant_after_leader_exits(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.api.routers import admin_backups as router_mod
 
-    pid_file = tmp_path / "child.pid"
-    terminated_file = tmp_path / "terminated"
+    monkeypatch.setattr(router_mod, "_COMMAND_TERMINATE_GRACE_SECONDS", 0.2)
+    monkeypatch.setattr(router_mod, "_COMMAND_KILL_REAP_SECONDS", 2.0)
+    descendant_pid_file = tmp_path / "descendant.pid"
+    leader_terminated_file = tmp_path / "leader-terminated"
     command = (
-        f"echo $$ > {pid_file}; "
-        f"trap 'touch {terminated_file}; exit 0' TERM; "
-        "while true; do sleep 1; done"
+        f"trap 'touch {leader_terminated_file}; exit 0' TERM; "
+        f"(trap '' TERM; echo $BASHPID > {descendant_pid_file}; "
+        "while true; do sleep 1; done) & "
+        "wait"
     )
     plan = router_mod.BackupCommandPlan(
         cwd=str(tmp_path),
@@ -324,19 +328,19 @@ async def test_command_cancellation_reaps_the_entire_process_group(
         router_mod._run_command(plan, timeout_seconds=30.0)
     )
     for _ in range(200):
-        if pid_file.exists():
+        if descendant_pid_file.exists():
             break
         await asyncio.sleep(0.01)
-    assert pid_file.exists()
-    process_group_id = int(pid_file.read_text(encoding="utf-8"))
+    assert descendant_pid_file.exists()
+    descendant_pid = int(descendant_pid_file.read_text(encoding="utf-8"))
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await task
+        await asyncio.wait_for(task, timeout=3.0)
 
-    assert terminated_file.exists()
+    assert leader_terminated_file.exists()
     with pytest.raises(ProcessLookupError):
-        os.killpg(process_group_id, 0)
+        os.kill(descendant_pid, 0)
 
 
 @pytest.fixture

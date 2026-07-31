@@ -42,8 +42,14 @@ reservation과 exact marker 없는 기존 backup/restore 산출물은 성공으�
 전체 unit+API 2,642건, frontend 286건과 lint/type-check/OpenAPI drift,
 ruff·strict mypy·bash syntax가 green이다.
 
-**다음 한 작업**: PR #906 review-fix checkpoint를 push하고 같은 적대 리뷰어가 일반 코드
-수정 전체를 재검토한다. 이어 n150 파괴적 live UI/API, 최종
+재검토에서 wrapper가 `TERM`으로 먼저 종료돼 lock을 놓고 TERM 무시 descendant가 살아남는
+P1을 추가로 확인했다. wrapper가 DB session을 유지한 채 child group의
+`TERM → bounded wait → KILL → reap`을 끝내고, API도 return code가 아니라 pipe 완료를
+기준으로 escalation하도록 수정했다. actual wrapper·PostgreSQL contender와 leader 종료 뒤
+pipe 보유 descendant 회귀 2건, 관련 focused 55건, 전체 unit+API 2,642건은 green이다.
+
+**다음 한 작업**: P1 수정 보안 감사를 마쳐 PR #906에 push하고 같은 적대 리뷰어가 일반
+코드 수정 전체를 재검토한다. 이어 n150 파괴적 live UI/API, 최종
 rebase·merge를 끝낸 뒤 T-VN-12A/B/C/D를 `tasks-done.md`로 한 PR 단위 이관한다.
 
 ## 2026-07-31 (codex) — T-VN-16C 완료·T-VN-12A/B/C/D 단일 PR 전환

@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import shlex
+import signal
+import sys
+from contextlib import suppress
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -162,6 +168,97 @@ async def test_backup_maintenance_lock_fails_fast_when_exact_key_is_busy(
                 {"lock_id": lock_id},
             )
             assert unlocked is True
+
+
+async def test_lock_wrapper_reaps_term_ignoring_child_before_unlock(
+    migrated_engine: AsyncEngine,
+    tmp_path: Path,
+) -> None:
+    from kortravelmap.api.routers.admin_backups import (
+        BackupCommandPlan,
+        _run_command,
+    )
+
+    from kortravelmap.infra.advisory_lock import advisory_lock_key
+
+    project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240
+    child_pid_file = tmp_path / "lock-child.pid"
+    term_observed_file = tmp_path / "lock-child-term"
+    child_command = (
+        f"echo $$ > {shlex.quote(str(child_pid_file))}; "
+        f"trap 'touch {shlex.quote(str(term_observed_file))}' TERM INT; "
+        "while true; do sleep 0.05; done"
+    )
+    plan = BackupCommandPlan(
+        cwd=str(project_root),
+        command=[
+            sys.executable,
+            str(project_root / "scripts" / "with-pg-advisory-lock.py"),
+            "--key",
+            "maintenance:backup-restore",
+            "--dsn",
+            migrated_engine.url.render_as_string(hide_password=False),
+            "--terminate-grace-seconds",
+            "1.0",
+            "--",
+            "bash",
+            "-c",
+            child_command,
+        ],
+        env={},
+        enabled=True,
+    )
+    lock_id = advisory_lock_key("maintenance:backup-restore")
+
+    async def _contender_can_acquire() -> bool:
+        async with migrated_engine.connect() as contender:
+            acquired = bool(
+                await contender.scalar(
+                    text("SELECT pg_try_advisory_lock(:lock_id)"),
+                    {"lock_id": lock_id},
+                )
+            )
+            if acquired:
+                unlocked = await contender.scalar(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": lock_id},
+                )
+                assert unlocked is True
+            return acquired
+
+    task = asyncio.create_task(_run_command(plan, timeout_seconds=30.0))
+    child_pid: int | None = None
+    try:
+        for _ in range(300):
+            if child_pid_file.exists():
+                child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+                break
+            await asyncio.sleep(0.01)
+        assert child_pid is not None
+        assert await _contender_can_acquire() is False
+
+        task.cancel()
+        for _ in range(200):
+            if term_observed_file.exists():
+                break
+            await asyncio.sleep(0.01)
+        assert term_observed_file.exists()
+        assert task.done() is False
+        assert await _contender_can_acquire() is False
+
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=5.0)
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+        assert await _contender_can_acquire() is True
+    finally:
+        if child_pid is not None:
+            with suppress(ProcessLookupError):
+                os.killpg(child_pid, signal.SIGKILL)
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError, RuntimeError):
+                await task
 
 
 async def test_domain_command_ledger_is_actor_and_operation_scoped(

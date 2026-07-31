@@ -80,6 +80,10 @@ restore_router = APIRouter(prefix="/admin/restore", tags=["admin-backups"])
 
 BackupOperation = Literal["backup", "restore", "swap"]
 BackupOperationStatus = Literal["planned", "completed", "failed", "manual_required"]
+# Wrapper의 child-group grace(기본 5초)보다 길어야 wrapper가 lock을 보유한 채
+# SIGKILL·reap을 끝낸 뒤 정상 종료할 수 있다.
+_COMMAND_TERMINATE_GRACE_SECONDS = 7.0
+_COMMAND_KILL_REAP_SECONDS = 5.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,13 +451,31 @@ async def _terminate_process_group(
     process: asyncio.subprocess.Process,
     communication: asyncio.Task[tuple[bytes, bytes]],
 ) -> None:
-    if process.returncode is None:
-        with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGTERM)
-    done, _ = await asyncio.wait({communication}, timeout=5.0)
-    if not done and process.returncode is None:
+    if communication.done():
+        await communication
+        return
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGTERM)
+    done, _ = await asyncio.wait(
+        {communication},
+        timeout=_COMMAND_TERMINATE_GRACE_SECONDS,
+    )
+    if done:
+        await communication
+        return
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+    done, _ = await asyncio.wait(
+        {communication},
+        timeout=_COMMAND_KILL_REAP_SECONDS,
+    )
+    if not done:
+        communication.cancel()
         with suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
+        with suppress(asyncio.CancelledError):
+            await communication
+        raise RuntimeError("backup command process group did not close its pipes")
     await communication
 
 
