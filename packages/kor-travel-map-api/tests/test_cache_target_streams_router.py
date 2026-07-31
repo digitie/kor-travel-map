@@ -16,7 +16,10 @@ from pydantic import ValidationError
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import CACHE_TARGET_CONSUMER_HEADER, SERVICE_TOKEN_HEADER
-from kortravelmap.api.cache_target_stream_schema import CacheTargetEventRecord
+from kortravelmap.api.cache_target_stream_schema import (
+    CacheTargetEventRecord,
+    CacheTargetStreamStatusRecord,
+)
 from kortravelmap.api.cache_target_stream_service import get_cache_target_stream_service
 from kortravelmap.api.db import get_session
 from kortravelmap.api.domain_command_service import (
@@ -349,6 +352,30 @@ def _upsert_body() -> dict[str, Any]:
         "update_enabled": True,
         "occurred_at": NOW.isoformat(),
     }
+
+
+@pytest.mark.unit
+def test_ops_stream_status_requires_superseded_count() -> None:
+    payload = {
+        "external_system": EXTERNAL_SYSTEM,
+        "restore_epoch": 4,
+        "control_version": 3,
+        "consumer_enabled": True,
+        "state": "ready",
+        "pending_count": 0,
+        "leased_count": 0,
+        "retry_count": 0,
+        "dead_count": 0,
+        "delivered_count": 7,
+        "superseded_count": 5,
+        "updated_at": NOW,
+    }
+
+    record = CacheTargetStreamStatusRecord.model_validate(payload)
+    assert record.superseded_count == 5
+    payload.pop("superseded_count")
+    with pytest.raises(ValidationError):
+        CacheTargetStreamStatusRecord.model_validate(payload)
 
 
 @pytest.mark.unit

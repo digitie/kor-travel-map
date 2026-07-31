@@ -1705,6 +1705,7 @@ async def list_ops_cache_target_streams(
                 retry_count=_getattr(row, "retry_count"),
                 dead_count=_getattr(row, "dead_count"),
                 delivered_count=_getattr(row, "delivered_count"),
+                superseded_count=_getattr(row, "superseded_count"),
                 blocked_event_id=_getattr(row, "blocked_event_id"),
                 last_snapshot=(
                     CacheTargetSnapshotStatus(

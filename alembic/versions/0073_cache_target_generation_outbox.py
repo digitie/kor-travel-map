@@ -122,6 +122,7 @@ def upgrade() -> None:
         sa.Column("restore_epoch", sa.BigInteger(), nullable=False),
         sa.Column("previous_control_version", sa.BigInteger(), nullable=False),
         sa.Column("control_version", sa.BigInteger(), nullable=False),
+        sa.Column("superseded_delivery_count", sa.BigInteger(), nullable=False),
         sa.Column("reason", sa.Text(), nullable=False),
         sa.Column("request_fingerprint", sa.Text(), nullable=False),
         sa.Column(
@@ -141,6 +142,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "control_version = previous_control_version + 1",
             name="ck_cache_target_restore_fences_version",
+        ),
+        sa.CheckConstraint(
+            "superseded_delivery_count >= 0",
+            name="ck_cache_target_restore_fences_superseded_count",
         ),
         sa.CheckConstraint(
             "btrim(reason) <> '' AND char_length(reason) <= 1000",
@@ -766,6 +771,7 @@ def upgrade() -> None:
         sa.Column("error_code", sa.Text()),
         sa.Column("error_fingerprint", sa.Text()),
         sa.Column("delivered_at", sa.DateTime(timezone=True)),
+        sa.Column("superseded_at", sa.DateTime(timezone=True)),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
@@ -773,7 +779,7 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
         ),
         sa.CheckConstraint(
-            "status IN ('pending','leased','retry','dead','delivered')",
+            "status IN ('pending','leased','retry','dead','delivered','superseded')",
             name="ck_cache_target_outbox_deliveries_status",
         ),
         sa.CheckConstraint(
@@ -788,6 +794,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "(status = 'delivered') = (delivered_at IS NOT NULL)",
             name="ck_cache_target_outbox_deliveries_delivered",
+        ),
+        sa.CheckConstraint(
+            "(status = 'superseded') = (superseded_at IS NOT NULL)",
+            name="ck_cache_target_outbox_deliveries_superseded",
         ),
         sa.CheckConstraint(
             "error_class IS NULL OR error_class IN ('transient','permanent')",

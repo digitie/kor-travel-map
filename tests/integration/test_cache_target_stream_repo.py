@@ -285,6 +285,7 @@ async def test_generation_gap_and_restore_fence_cas(
     )
     assert (fenced.previous_restore_epoch, fenced.restore_epoch) == (1, 2)
     assert (fenced.previous_control_version, fenced.control_version) == (1, 2)
+    assert fenced.superseded_delivery_count == 1
 
     control = await get_cache_target_stream(
         migrated_session,
@@ -307,6 +308,266 @@ async def test_generation_gap_and_restore_fence_cas(
     )
     assert replay.idempotent_replay
     assert replay.restore_epoch == 2
+    assert replay.superseded_delivery_count == 1
+
+
+@pytest.mark.integration
+async def test_restore_fence_supersedes_prior_epoch_delivery_lifecycle(
+    migrated_session: AsyncSession,
+) -> None:
+    results = []
+    current = None
+    for generation in range(1, 6):
+        result = await _apply_active(
+            migrated_session,
+            generation=generation,
+            event_id=f"31000000-0000-4000-8000-{generation:012d}",
+            idempotency_key=f"41000000-0000-4000-8000-{generation:012d}",
+            create_only=generation == 1,
+            target_id=(current.target.target_id if current is not None else None),
+            lock_version=(current.target.lock_version if current is not None else None),
+        )
+        assert result.target is not None
+        current = result
+        results.append(result)
+
+    delivered, retry, dead, leased, pending = results
+    active_claim_id = "51000000-0000-4000-8000-000000000001"
+    lease_token = "61000000-0000-4000-8000-000000000001"
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.poi_cache_target_outbox_deliveries "
+            "SET status = 'delivered', delivered_at = now(), updated_at = now() "
+            "WHERE event_id = CAST(:event_id AS uuid)"
+        ),
+        {"event_id": delivered.outbox_event_id},
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.poi_cache_target_outbox_deliveries "
+            "SET status = 'retry', available_at = now(), updated_at = now() "
+            "WHERE event_id = CAST(:event_id AS uuid)"
+        ),
+        {"event_id": retry.outbox_event_id},
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.poi_cache_target_outbox_deliveries "
+            "SET status = 'dead', error_class = 'permanent', "
+            "error_code = 'old_epoch_poison', error_fingerprint = :fingerprint, "
+            "updated_at = now() WHERE event_id = CAST(:event_id AS uuid)"
+        ),
+        {"event_id": dead.outbox_event_id, "fingerprint": "d" * 64},
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_outbox_claims ("
+            "claim_id, external_system, consumer_id, idempotency_key, "
+            "request_fingerprint, lease_token, status, first_relay_order, "
+            "last_relay_order, lease_expires_at) VALUES ("
+            "CAST(:claim_id AS uuid), :external_system, :consumer_id, "
+            "CAST(:idempotency_key AS uuid), :request_fingerprint, "
+            "CAST(:lease_token AS uuid), 'active', :relay_order, :relay_order, "
+            "now() + interval '5 minutes')"
+        ),
+        {
+            "claim_id": active_claim_id,
+            "external_system": _SYSTEM,
+            "consumer_id": _CONSUMER,
+            "idempotency_key": "71000000-0000-4000-8000-000000000001",
+            "request_fingerprint": "c" * 64,
+            "lease_token": lease_token,
+            "relay_order": leased.relay_order,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.poi_cache_target_outbox_deliveries "
+            "SET status = 'leased', attempt_count = 1, "
+            "claim_id = CAST(:claim_id AS uuid), "
+            "lease_token = CAST(:lease_token AS uuid), "
+            "lease_expires_at = now() + interval '5 minutes', updated_at = now() "
+            "WHERE event_id = CAST(:event_id AS uuid)"
+        ),
+        {
+            "claim_id": active_claim_id,
+            "lease_token": lease_token,
+            "event_id": leased.outbox_event_id,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.poi_cache_target_streams "
+            "SET status = 'blocked', blocked_event_id = CAST(:event_id AS uuid), "
+            "consumer_enabled = false, updated_at = now() "
+            "WHERE external_system = :external_system"
+        ),
+        {"external_system": _SYSTEM, "event_id": dead.outbox_event_id},
+    )
+
+    before = (
+        await migrated_session.execute(
+            text(
+                "SELECT event.event_id, delivery.status, delivery.delivery_version "
+                "FROM ops.poi_cache_target_outbox_events AS event "
+                "JOIN ops.poi_cache_target_outbox_deliveries AS delivery "
+                "ON delivery.event_id = event.event_id "
+                "WHERE event.external_system = :external_system "
+                "ORDER BY event.relay_order"
+            ),
+            {"external_system": _SYSTEM},
+        )
+    ).all()
+    assert [row.status for row in before] == [
+        "delivered",
+        "retry",
+        "dead",
+        "leased",
+        "pending",
+    ]
+
+    request = {
+        "external_system": _SYSTEM,
+        "expected_restore_epoch": 1,
+        "reason": "supersede prior epoch",
+    }
+    fingerprint = canonical_domain_command_fingerprint(request)
+    command = await create_domain_command_claim(
+        migrated_session,
+        actor=_CONSUMER,
+        operation="cache_target.restore_fence",
+        idempotency_key="81000000-0000-4000-8000-000000000001",
+        request_fingerprint=fingerprint,
+    )
+    fence = await advance_cache_target_restore_fence(
+        migrated_session,
+        external_system=_SYSTEM,
+        consumer_id=_CONSUMER,
+        command_id=command.command_id,
+        expected_restore_epoch=1,
+        expected_control_version=1,
+        reason="supersede prior epoch",
+        request_fingerprint=fingerprint,
+    )
+    assert fence.invalidated_claim_count == 1
+    assert fence.superseded_delivery_count == 4
+
+    after = (
+        await migrated_session.execute(
+            text(
+                "SELECT event.event_id, delivery.status, delivery.delivery_version, "
+                "delivery.claim_id, delivery.superseded_at "
+                "FROM ops.poi_cache_target_outbox_events AS event "
+                "JOIN ops.poi_cache_target_outbox_deliveries AS delivery "
+                "ON delivery.event_id = event.event_id "
+                "WHERE event.external_system = :external_system "
+                "ORDER BY event.relay_order"
+            ),
+            {"external_system": _SYSTEM},
+        )
+    ).all()
+    assert [row.status for row in after] == [
+        "delivered",
+        "superseded",
+        "superseded",
+        "superseded",
+        "superseded",
+    ]
+    assert [row.delivery_version for row in after] == [1, 2, 2, 2, 2]
+    assert after[0].superseded_at is None
+    assert all(row.superseded_at is not None for row in after[1:])
+    assert all(row.claim_id is None for row in after[1:])
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT status FROM ops.poi_cache_target_outbox_claims "
+                "WHERE claim_id = CAST(:claim_id AS uuid)"
+            ),
+            {"claim_id": active_claim_id},
+        )
+        == "invalidated"
+    )
+    assert await get_cache_target_dead_letter(
+        migrated_session,
+        event_id=dead.outbox_event_id,
+    ) is None
+    dead_page = await list_cache_target_dead_letters(migrated_session)
+    assert dead.outbox_event_id not in {
+        item.event.event_id for item in dead_page.items
+    }
+    with pytest.raises(CacheTargetStreamConflict) as stale_replay:
+        await replay_cache_target_dead_letter(
+            migrated_session,
+            event_id=dead.outbox_event_id,
+            expected_delivery_version=2,
+        )
+    assert stale_replay.value.code == "dead_letter_not_found"
+
+    replay = await advance_cache_target_restore_fence(
+        migrated_session,
+        external_system=_SYSTEM,
+        consumer_id=_CONSUMER,
+        command_id=command.command_id,
+        expected_restore_epoch=1,
+        expected_control_version=1,
+        reason="supersede prior epoch",
+        request_fingerprint=fingerprint,
+    )
+    assert replay.idempotent_replay
+    assert replay.superseded_delivery_count == 4
+    replayed_versions = (
+        await migrated_session.execute(
+            text(
+                "SELECT delivery.delivery_version "
+                "FROM ops.poi_cache_target_outbox_events AS event "
+                "JOIN ops.poi_cache_target_outbox_deliveries AS delivery "
+                "ON delivery.event_id = event.event_id "
+                "WHERE event.external_system = :external_system "
+                "ORDER BY event.relay_order"
+            ),
+            {"external_system": _SYSTEM},
+        )
+    ).scalars().all()
+    assert replayed_versions == [1, 2, 2, 2, 2]
+
+    new_epoch = await apply_cache_target_source(
+        migrated_session,
+        consumer_id=_CONSUMER,
+        source_event_id="91000000-0000-4000-8000-000000000001",
+        idempotency_key="a1000000-0000-4000-8000-000000000001",
+        external_system=_SYSTEM,
+        target_key="trip-day-poi:new-epoch",
+        restore_epoch=2,
+        source_generation=1,
+        source=make_active_cache_target_source(
+            lon="126.979",
+            lat="37.567",
+            radius_km="3",
+            update_enabled=True,
+        ),
+        occurred_at=datetime(2026, 8, 1, 12, 0, tzinfo=UTC),
+        create_only=True,
+    )
+    await _ready_stream(migrated_session)
+    new_claim = await claim_cache_target_events(
+        migrated_session,
+        external_system=_SYSTEM,
+        consumer_id=_CONSUMER,
+        idempotency_key="b1000000-0000-4000-8000-000000000001",
+        limit=10,
+    )
+    assert new_claim is not None
+    assert [event.event_id for event in new_claim.events] == [new_epoch.outbox_event_id]
+    assert new_claim.events[0].restore_epoch == 2
+
+    status_page = await list_cache_target_stream_statuses(migrated_session)
+    status = next(item for item in status_page.items if item.external_system == _SYSTEM)
+    assert status.superseded_count == 4
+    assert status.dead_count == 0
+    assert status.delivered_count == 1
+    assert status.pending_count == 0
+    assert status.retry_count == 0
+    assert status.leased_count == 1
 
 
 @pytest.mark.integration

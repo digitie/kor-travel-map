@@ -79,6 +79,18 @@ T-VN-H35 배포를 B′ 경로로 진행한다. `0064~0073` 마이그레이션�
 분리해 돌린다. 배포 전 공개 표면 before/after exact count를 restore clone에서 다시
 잰다 — 이번엔 `0073`까지 포함해서.
 
+## 2026-08-01 (codex) — T-VN-41 prior epoch delivery terminal supersession
+
+restore fence가 active lease만 retry로 풀고 구 epoch pending/retry/dead를 남겨 새 epoch claim을 막던
+P1을 제거했다. epoch N+1 transaction은 더 낮은 epoch의 모든 non-delivered delivery를 terminal
+`superseded`로 종결하고 lease binding, `superseded_at`, version과 fence별 count를 원자 기록한다.
+claim은 현재 epoch만 선택하며 old dead는 DLQ/replay/reconciliation dead gate에서 제외된다. exact fence
+replay는 delivery version을 다시 올리지 않는다. ops/API/admin status는 누적 `superseded_count`를
+backlog/dead와 분리해 노출한다.
+
+**다음 한 작업**: 기능/OpenAPI/admin generated types SHA를 PinVi contract pin에 반영하고 PR CI 및
+isolated restore epoch live에서 old delivery 0회 재전달과 새 epoch 도달을 검증한다.
+
 ## 2026-08-01 (codex) — T-VN-41 reconciliation receipt 인과관계 보강
 
 Map의 `cache_target.reconciled` event payload에 reconciliation `request_id`를 필수로 추가했다.

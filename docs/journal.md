@@ -86,6 +86,19 @@
 - `test_alembic_upgrade.py`가 head revision을 리터럴로 박아 마이그레이션 추가마다
   깨졌다. ScriptDirectory에서 계산하도록 바꿨다.
 
+## 2026-08-01 (codex) — T-VN-41 restore fence superseded terminal 보강
+
+- exact `e315bfc4`, `origin/main` behind 0에서 시작하고 stream/outbox/model codegraph impact를 수정 전에
+  실행했다. 각 직접 영향은 file symbol 1개였으며 migration, reconciliation, API/admin 소비 경계를
+  추가로 추적했다.
+- 0073 clean schema와 ORM delivery 상태에 terminal `superseded`/`superseded_at`을 추가했다. fence는
+  새 epoch보다 낮은 pending/retry/leased/dead 전부를 원자 종결하고 audit count를 receipt에 보존한다.
+- claim은 current epoch의 nonterminal만 잠그고, old dead는 DLQ/replay와 reconciliation dead gate에서
+  제외한다. NACK도 fence와 같은 stream→claim lock 순서를 사용한다. stream/API/admin aggregate는
+  `superseded_count`를 backlog와 별도로 노출한다.
+- PostGIS 회귀는 delivered 보존과 네 non-delivered 상태 supersession, active claim 무효화, old dead
+  조회/replay 불가, exact fence replay의 version 불변, 새 epoch event claim 도달을 한 흐름으로 검증한다.
+
 ## 2026-08-01 (codex) — T-VN-41 reconciled request receipt 보강
 
 - 지정 branch `feat/tvn41-cache-target-generation-outbox`의 exact head `6427358d`와 clean 상태,

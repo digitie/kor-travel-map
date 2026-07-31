@@ -61,6 +61,13 @@ barrier event/receipt를 함께 commit한다. 신규 성공은 `201`, exact repl
 누락은 `428`, stale ETag는 `412`, key/body 또는 expected epoch 불일치는 `409` RFC 7807이다.
 이미 더 높은 epoch가 있으면 새로 증가시키지 않고 최신 control과 full snapshot reconcile을 사용한다.
 
+epoch `N+1` 전이는 같은 transaction에서 epoch `N+1`보다 낮은 모든 non-delivered delivery
+(`pending|retry|leased|dead`)를 terminal `superseded`로 종결한다. 기존 `delivered`는 소비자 적용
+receipt이므로 보존한다. supersession은 lease binding을 제거하고 `superseded_at`과 단조
+`delivery_version`을 기록하며 fence receipt의 `superseded_delivery_count`에 개수를 고정한다. exact
+fence replay는 이 전이를 다시 실행하거나 delivery version을 올리지 않는다. 구 epoch dead letter도
+새 epoch에서 복구할 대상이 아니므로 DLQ/replay와 ready 전이의 dead 집계에서 제외한다.
+
 PinVi restore는 restored writer를 열기 전에 이 command를 호출한다. Map 자체 restore/cutover CLI도
 복원 payload를 외부에 노출하기 전에 같은 domain 함수를 호출한다. 별도 SQL이나 process-local epoch
 생성은 금지한다.
@@ -112,7 +119,8 @@ typed nullable linkage로 보존한다. delivery state와 claim/ack 이력은 �
 PinVi에 callback을 push하지 않는다. principal에 결박된 단일 `consumer_id`가
 `POST /v1/service/cache-target-event-claims`로 external system별 단일 전역 stream을 pull한다.
 claim은 due/retry/만료 lease를 `FOR UPDATE SKIP LOCKED`로 bounded 획득한다. 같은 stream에는 active
-claim 하나만 허용하고, 더 낮은 nonterminal `relay_order`를 건너뛰지 않는다.
+claim 하나만 허용하고, 현재 stream `restore_epoch`의 더 낮은 nonterminal `relay_order`를 건너뛰지
+않는다. terminal `delivered|superseded`와 과거 epoch event는 claim 대상이 아니다.
 
 PinVi는 event inbox dedupe와 target tuple CAS, DB cache generation, consumer checkpoint를 한
 transaction에 commit한 뒤에만 `POST /v1/service/cache-target-event-acks`를 호출한다. ACK의
@@ -126,7 +134,8 @@ permanent 또는 최대 attempt 실패를 dead letter+stream block으로 전이�
 않으면 mutation 없이 `409 dead_letter_requires_prefix_ack`다. blocked event 뒤 순서는 ACK할 수
 없다. service dead-letter GET과 Idempotency-Key+If-Match replay는 같은
 `event_id/relay_order/semantic tuple/fingerprint`만 재활성화한다. snapshot checksum이 다시 맞기 전에는
-consumer를 ready로 바꾸지 않는다.
+consumer를 ready로 바꾸지 않는다. `superseded` event는 dead-letter GET/list에 나타나지 않으며 replay
+요청은 `dead_letter_not_found`로 실패한다.
 
 ### 6. fixed snapshot과 Merkle v1
 

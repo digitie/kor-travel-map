@@ -43,6 +43,7 @@ interface RawCacheTargetStreamStatus {
   retry_count: number;
   dead_count: number;
   delivered_count: number;
+  superseded_count: number;
   blocked_event_id: string | null;
   last_snapshot: RawSnapshotStatus | null;
   updated_at: string;
@@ -112,6 +113,7 @@ export interface CacheTargetStreamStatus {
   retryCount: number;
   deadCount: number;
   deliveredCount: number;
+  supersededCount: number;
   blockedEventId: string | null;
   lastSnapshot: SnapshotStatus | null;
   updatedAt: string;
@@ -199,6 +201,7 @@ function mapStreamStatus(
     restoreEpoch: item.restore_epoch,
     retryCount: item.retry_count,
     state: item.state,
+    supersededCount: item.superseded_count,
     updatedAt: item.updated_at,
   };
 }

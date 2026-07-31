@@ -587,6 +587,10 @@ critical write transaction에 없고, PinVi가 lease claim을 pull한 뒤 자기
 commit하고 contiguous global prefix를 ACK한다. permanent poison은 dead letter로 stream을 막으며
 같은 event를 replay하고 fixed snapshot checksum이 다시 맞기 전에는 ready가 아니다.
 
+restore fence는 새 epoch보다 낮은 `pending|retry|leased|dead` delivery를 같은 transaction에서
+terminal `superseded`로 종결한다. 구 dead도 새 epoch의 DLQ·replay·dead 집계에서 제외하고, claim은
+현재 epoch event만 선택한다. 운영 status는 backlog와 별도로 누적 `superseded_count`를 보여 준다.
+
 snapshot checksum은 active와 tombstone을 모두 포함한 ADR-081 Merkle v1이다. Map/PinVi는
 `cache-target-source-v1` canonical serializer golden vector와 pinned service OpenAPI를 함께
 검증한다. 성공 reconciliation event는 request UUID와 그 request에 seal된 fixed snapshot UUID를
@@ -611,3 +615,5 @@ isolated live 증명 뒤에만 `T-VN-41A/B/C`를 닫는다.
 - claim crash/lease expiry 뒤 동일 event가 재전달돼도 consumer side effect는 0회 추가다.
 - global cursor는 target semantic precedence에 쓰이지 않고 ACK는 contiguous prefix만 전진한다.
 - permanent NACK/dead letter는 후속 order를 block하고 동일 event replay+Merkle 일치 뒤에만 해제된다.
+- restore fence 뒤 구 epoch non-delivered는 모두 superseded이고 old dead는 DLQ/claim을 막지 않는다.
+- 같은 fence command replay는 superseded delivery version을 다시 증가시키지 않는다.

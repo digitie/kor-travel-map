@@ -2567,7 +2567,7 @@ T-VN-41 producer foundation은 projection row와 source 순서를 분리한다. 
 | source event | producer `event_id` | Idempotency-Key command, request fingerprint, 적용/replay 결과의 불변 이력 |
 | refresh member | `(request_id, target_id)` | request 시작 시 epoch/generation을 캡처한 late-result fence |
 | outbox event | `event_id`, unique `relay_order` | target/link/refresh/reconciliation 결과와 같은 transaction에서 만든 불변 typed event |
-| delivery/claim | event/claim identity | lease, attempt, retry, contiguous ACK, dead/replay 상태 |
+| delivery/claim | event/claim identity | lease, attempt, retry, contiguous ACK, dead/replay와 epoch supersession 상태 |
 | fixed snapshot | `snapshot_id`, `(snapshot_id, row_number)` | 한 MVCC view의 epoch/high-watermark/head set과 Merkle root를 immutable page로 고정 |
 | reconciliation | `request_id`, unique `command_id` | checksum receipt, halt/resume와 terminal 성공/실패 이력 |
 
@@ -2583,6 +2583,12 @@ state/link/refresh는 natural key, historical target UUID, generation, target se
 payload는 versioned typed schema와 `source_payload_fingerprint`를 가지며 source event, target,
 refresh request, job, domain command와의 linkage를 보존한다. `ops.ops_live_topic_revisions`는
 invalidation signal로만 유지하고 event stream으로 사용하지 않는다.
+
+delivery status는 `pending|leased|retry|dead|delivered|superseded`다. restore fence는 새 epoch보다
+낮은 모든 non-delivered 상태를 같은 transaction에서 terminal `superseded`로 바꾸고 lease binding을
+지운다. `delivered`는 그대로 보존한다. `superseded_at`과 fence별 `superseded_delivery_count`가 audit
+근거이며 exact fence replay는 delivery version을 다시 올리지 않는다. stream 상태의
+`superseded_count`는 역사적 종결 수이고 backlog/dead 집계에는 포함하지 않는다.
 
 fixed snapshot은 stream epoch, outbox high-watermark, active/tombstone head 전체를 한 SQL MVCC
 view에서 읽어 ADR-081 Merkle v1으로 checksum한다. page 중 새 write가 commit돼도 immutable item은

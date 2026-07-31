@@ -203,7 +203,8 @@ FROM ops.poi_cache_target_outbox_events AS event
 JOIN ops.poi_cache_target_outbox_deliveries AS delivery
   ON delivery.event_id = event.event_id
 WHERE event.external_system = :external_system
-  AND delivery.status <> 'delivered'
+  AND event.restore_epoch = :restore_epoch
+  AND delivery.status IN ('pending','leased','retry','dead')
 ORDER BY event.relay_order
 LIMIT :limit
 FOR UPDATE OF delivery
@@ -229,6 +230,7 @@ SET status = 'leased', attempt_count = attempt_count + 1,
     claim_id = CAST(:claim_id AS uuid), lease_token = CAST(:lease_token AS uuid),
     lease_expires_at = CAST(:lease_expires_at AS timestamptz), updated_at = now()
 WHERE event_id = ANY(CAST(:event_ids AS uuid[]))
+  AND status IN ('pending','retry')
 """
 
 _INSERT_CLAIM_EVENT_SQL = """
@@ -286,6 +288,8 @@ FROM ops.poi_cache_target_outbox_claim_events AS claimed
 WHERE claimed.claim_id = CAST(:claim_id AS uuid)
   AND claimed.relay_order <= :through_relay_order
   AND delivery.event_id = claimed.event_id
+  AND delivery.claim_id = claimed.claim_id
+  AND delivery.status = 'leased'
 """
 
 _UPDATE_CLAIM_ACK_SQL = """
@@ -380,6 +384,7 @@ SET status = 'retry', delivery_version = delivery_version + 1,
     available_at = now(), error_class = NULL, error_code = NULL,
     error_fingerprint = NULL, updated_at = now()
 WHERE event_id = CAST(:event_id AS uuid)
+  AND status = 'dead'
 RETURNING delivery_version, attempt_count
 """
 
@@ -629,7 +634,11 @@ async def claim_cache_target_events(
     rows = (
         await session.execute(
             text(_LOCK_UNDELIVERED_SQL),
-            {"external_system": external_system, "limit": limit},
+            {
+                "external_system": external_system,
+                "restore_epoch": control.restore_epoch,
+                "limit": limit,
+            },
         )
     ).all()
     if not rows:
@@ -870,6 +879,12 @@ async def nack_cache_target_event(
     if max_attempts <= 0:
         raise ValueError("max_attempts는 양수여야 합니다.")
     event_id = _canonical_uuid(event_id, field="event_id")
+    # restore fence와 같은 stream → claim lock 순서를 지켜 교착을 막는다.
+    await lock_cache_target_stream(
+        session,
+        external_system=external_system,
+        consumer_id=consumer_id,
+    )
     claim = await _validated_claim(
         session,
         claim_id=claim_id,

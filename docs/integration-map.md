@@ -194,7 +194,10 @@ target tuple CAS, DB cache generation, consumer checkpoint를 한 transaction에
 그 뒤 ACK한다. ACK 유실은 동일 event 재전달이며 side effect를 추가하지 않는다.
 
 restore/cutover는 stream GET의 raw ETag를 기준으로 restore-fence command를 호출해 Map epoch를
-N+1로 올린 뒤 writer를 연다. restored payload의 epoch를 신뢰하지 않는다. fixed snapshot은
+N+1로 올린 뒤 writer를 연다. 이 transaction은 더 낮은 epoch의 모든 non-delivered delivery를
+terminal `superseded`로 종결하므로 구 pending/retry/lease/dead가 새 epoch claim이나 dead gate에
+섞이지 않는다. exact fence replay는 같은 receipt를 반환하고 delivery version을 바꾸지 않는다.
+restored payload의 epoch를 신뢰하지 않는다. fixed snapshot은
 active+tombstone Merkle v1과 pinned service OpenAPI를 함께 검증한다. credential, principal scope,
 contract SHA, epoch, snapshot checksum 중 하나라도 맞지 않으면 PinVi consumer는 fail-closed한다.
 성공한 `cache_target.reconciled` payload는 exact

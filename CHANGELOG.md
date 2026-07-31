@@ -16,7 +16,8 @@
 - **RELAY**: consumer pull claim, contiguous ACK, bounded NACK/dead/replay와 immutable snapshot
   pagination을 제공한다. checksum mismatch는 stream을 disabled로 유지하고 exact match·동일 epoch·
   dead-letter 0인 completion receipt에서만 resume한다. mid-claim poison은 앞 prefix ACK 전에는
-  dead 전이를 거부한다.
+  dead 전이를 거부한다. restore fence는 구 epoch의 모든 non-delivered delivery를 terminal
+  `superseded`로 원자 종결해 old pending/retry/lease/dead가 새 epoch claim과 복구를 막지 않게 한다.
 - **CONTRACT**: target event와 stream reconciliation event를 `event_scope`로 분리해 empty 및
   tombstone-only snapshot에도 fake target tuple을 만들지 않는다. `cache_target.reconciled`
   payload의 `request_id`는 새 required field이며 request→fixed snapshot receipt 인과관계를

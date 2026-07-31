@@ -23,6 +23,7 @@ type RawStream = {
   retry_count: number;
   dead_count: number;
   delivered_count: number;
+  superseded_count: number;
   blocked_event_id: string | null;
   last_snapshot: {
     snapshot_id: string;
@@ -81,6 +82,7 @@ function streamFixture(): RawStream {
     restore_epoch: 7,
     retry_count: 3,
     state: "blocked",
+    superseded_count: 7,
     updated_at: "2026-07-31T01:22:00.000Z",
   };
 }
@@ -222,6 +224,7 @@ test.describe("/ops/cache-target-streams", () => {
     ).toBeVisible();
     await expect(page.getByRole("row", { name: /pinvi/ })).toBeVisible();
     await expect(page.getByText("2 pending / 1 lease / 3 retry")).toBeVisible();
+    await expect(page.getByRole("row", { name: /pinvi/ })).toContainText("7");
     await expect(page.getByText(MERKLE_ROOT)).toBeVisible();
     await expect(
       page.getByRole("row", { name: /cache_target.links_reconciled/ }),

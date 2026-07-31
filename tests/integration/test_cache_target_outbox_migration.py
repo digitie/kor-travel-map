@@ -77,6 +77,31 @@ async def test_0073_phase_schema_and_downgrade(pg_container: Any) -> None:
                     "'ck_cache_target_reconciliation_requests_lifecycle'"
                 )
             )
+            delivery_status_constraint = await connection.scalar(
+                text(
+                    "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                    "WHERE conrelid = "
+                    "'ops.poi_cache_target_outbox_deliveries'::regclass "
+                    "AND pg_get_constraintdef(oid) LIKE '%pending%' "
+                    "AND pg_get_constraintdef(oid) LIKE '%superseded%'"
+                )
+            )
+            superseded_constraint = await connection.scalar(
+                text(
+                    "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                    "WHERE conrelid = "
+                    "'ops.poi_cache_target_outbox_deliveries'::regclass "
+                    "AND pg_get_constraintdef(oid) LIKE '%superseded_at%'"
+                )
+            )
+            superseded_count_column = await connection.scalar(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'ops' "
+                    "AND table_name = 'poi_cache_target_restore_fences' "
+                    "AND column_name = 'superseded_delivery_count'"
+                )
+            )
             snapshot_item_table = await connection.scalar(
                 text("SELECT to_regclass('ops.poi_cache_target_snapshot_items')")
             )
@@ -91,6 +116,11 @@ async def test_0073_phase_schema_and_downgrade(pg_container: Any) -> None:
         assert lifecycle_constraint is not None
         assert "snapshot_id IS NULL" in lifecycle_constraint
         assert "snapshot_id IS NOT NULL" in lifecycle_constraint
+        assert delivery_status_constraint is not None
+        assert "superseded" in delivery_status_constraint
+        assert superseded_constraint is not None
+        assert "superseded_at" in superseded_constraint
+        assert superseded_count_column == "superseded_delivery_count"
         assert str(snapshot_item_table) == "ops.poi_cache_target_snapshot_items"
         assert str(append_only_function) == "ops.reject_cache_target_history_mutation()"
 

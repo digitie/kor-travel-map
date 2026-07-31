@@ -3873,6 +3873,10 @@ class PoiCacheTargetRestoreFenceRow(Base):
             name=conv("ck_cache_target_restore_fences_version"),
         ),
         CheckConstraint(
+            "superseded_delivery_count >= 0",
+            name=conv("ck_cache_target_restore_fences_superseded_count"),
+        ),
+        CheckConstraint(
             "btrim(reason) <> '' AND char_length(reason) <= 1000",
             name=conv("ck_cache_target_restore_fences_reason"),
         ),
@@ -3916,6 +3920,7 @@ class PoiCacheTargetRestoreFenceRow(Base):
     restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
     previous_control_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
     control_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    superseded_delivery_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -4499,12 +4504,12 @@ class PoiCacheTargetOutboxClaimRow(Base):
 
 
 class PoiCacheTargetOutboxDeliveryRow(Base):
-    """outbox event별 retry/dead/delivered 가변 전달 상태."""
+    """outbox event별 retry/dead/terminal 가변 전달 상태."""
 
     __tablename__ = "poi_cache_target_outbox_deliveries"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending','leased','retry','dead','delivered')",
+            "status IN ('pending','leased','retry','dead','delivered','superseded')",
             name=conv("ck_cache_target_outbox_deliveries_status"),
         ),
         CheckConstraint(
@@ -4520,6 +4525,10 @@ class PoiCacheTargetOutboxDeliveryRow(Base):
         CheckConstraint(
             "(status = 'delivered') = (delivered_at IS NOT NULL)",
             name=conv("ck_cache_target_outbox_deliveries_delivered"),
+        ),
+        CheckConstraint(
+            "(status = 'superseded') = (superseded_at IS NOT NULL)",
+            name=conv("ck_cache_target_outbox_deliveries_superseded"),
         ),
         CheckConstraint(
             "error_class IS NULL OR error_class IN ('transient','permanent')",
@@ -4583,6 +4592,7 @@ class PoiCacheTargetOutboxDeliveryRow(Base):
     error_code: Mapped[str | None] = mapped_column(Text)
     error_fingerprint: Mapped[str | None] = mapped_column(Text)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

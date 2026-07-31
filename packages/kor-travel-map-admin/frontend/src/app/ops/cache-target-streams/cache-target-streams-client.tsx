@@ -241,6 +241,16 @@ const streamColumns: ColumnDef<CacheTargetStreamStatus, unknown>[] = [
     ),
   },
   {
+    accessorKey: "supersededCount",
+    header: "superseded",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <span className="font-mono">
+        {formatCount(row.original.supersededCount)}
+      </span>
+    ),
+  },
+  {
     accessorKey: "updatedAt",
     header: "갱신",
     enableSorting: false,

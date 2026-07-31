@@ -718,6 +718,7 @@ class CacheTargetStreamStatusRecord(BaseModel):
     retry_count: int = Field(ge=0)
     dead_count: int = Field(ge=0)
     delivered_count: int = Field(ge=0)
+    superseded_count: int = Field(ge=0)
     blocked_event_id: UUID | None = None
     last_snapshot: CacheTargetSnapshotStatus | None = None
     updated_at: datetime

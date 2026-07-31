@@ -191,6 +191,8 @@ SELECT stream.external_system, stream.restore_epoch, stream.control_version,
        count(delivery.event_id) FILTER (WHERE delivery.status = 'retry') AS retry_count,
        count(delivery.event_id) FILTER (WHERE delivery.status = 'dead') AS dead_count,
        count(delivery.event_id) FILTER (WHERE delivery.status = 'delivered') AS delivered_count,
+       count(delivery.event_id) FILTER (WHERE delivery.status = 'superseded')
+         AS superseded_count,
        snapshot.snapshot_id, snapshot.item_count, snapshot.merkle_root,
        snapshot.high_watermark_relay_order, snapshot.created_at AS snapshot_created_at
 FROM ops.poi_cache_target_streams AS stream
@@ -356,6 +358,7 @@ FROM ops.poi_cache_target_outbox_events AS event
 JOIN ops.poi_cache_target_outbox_deliveries AS delivery
   ON delivery.event_id = event.event_id
 WHERE event.external_system = :external_system AND delivery.status = 'dead'
+  AND event.restore_epoch = :restore_epoch
 """
 
 _RESUME_STREAM_SQL = """
@@ -494,6 +497,7 @@ class CacheTargetStreamStatus:
     retry_count: int
     dead_count: int
     delivered_count: int
+    superseded_count: int
     blocked_event_id: str | None
     last_snapshot: CacheTargetSnapshotStatus | None
     updated_at: datetime
@@ -1076,6 +1080,7 @@ def _stream_status(row: Any) -> CacheTargetStreamStatus:
         retry_count=int(values["retry_count"]),
         dead_count=int(values["dead_count"]),
         delivered_count=int(values["delivered_count"]),
+        superseded_count=int(values["superseded_count"]),
         blocked_event_id=(
             str(values["blocked_event_id"])
             if values["blocked_event_id"] is not None
@@ -1674,7 +1679,10 @@ async def complete_cache_target_reconciliation(
             (
                 await session.execute(
                     text(_COUNT_DEAD_SQL),
-                    {"external_system": external_system},
+                    {
+                        "external_system": external_system,
+                        "restore_epoch": int(values["restore_epoch"]),
+                    },
                 )
             ).scalar_one()
         )

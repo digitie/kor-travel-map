@@ -15,6 +15,7 @@ type CacheTargetStreamStatus = {
   control_version: number;
   dead_count: number;
   delivered_count: number;
+  superseded_count: number;
   external_system: string;
   last_snapshot: {
     count: number;

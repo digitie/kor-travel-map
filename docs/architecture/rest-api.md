@@ -600,11 +600,17 @@ target create는 `If-None-Match: *`, update/delete는 직전 GET/성공 응답�
 UUID `Idempotency-Key`와 canonical body fingerprint를 사용하며 same key/different body는 `409`다.
 
 restore fence는 직전 stream ETag를 요구한다. 성공 transaction은 epoch N+1, 기존 claim 무효화,
-barrier receipt를 함께 commit한다. claim은 external system별 global stream 하나를 lease하고 ACK는
+barrier receipt와 구 epoch의 모든 `pending|retry|leased|dead` delivery를 terminal `superseded`로
+종결한다. `delivered`는 보존하며 exact fence replay는 delivery version을 다시 증가시키지 않는다.
+claim은 external system별 현재 restore epoch의 global stream 하나를 lease하고 ACK는
 claim의 global `relay_order` contiguous prefix만 전진한다. NACK permanent/max-attempt는 dead letter로
 stream을 막으며 뒤 순서를 건너뛰지 않는다. 첫 미ACK이 아닌 event를 dead 전이하려면 앞 prefix를
 먼저 ACK해야 하고 그렇지 않으면 mutation 없이 `409`다. replay는 같은 immutable event identity와
 fingerprint만 재활성화한다.
+
+ops stream status는 backlog/dead/delivered와 별도로 누적 `superseded_count`를 반환한다. 과거 epoch의
+superseded dead는 dead-letter GET/list/replay와 reconciliation dead 0 gate에서 제외되며, 현재 epoch의
+dead만 새 epoch consumer를 차단한다.
 
 snapshot page는 `snapshot_id`, `restore_epoch`, `high_watermark_cursor`, `count`, `merkle_root`가
 끝까지 고정된다. 상세 byte 계약과 strict event union은 ADR-081이 정본이다. 이 표면은 Map foundation

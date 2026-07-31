@@ -104,6 +104,7 @@ class CacheTargetRestoreFenceResult:
     previous_control_version: int
     control_version: int
     invalidated_claim_count: int
+    superseded_delivery_count: int
     idempotent_replay: bool = False
 
 
@@ -238,7 +239,7 @@ WHERE external_system = :external_system
 _GET_FENCE_BY_COMMAND_SQL = """
 SELECT fence_id, command_id, external_system, consumer_id, request_fingerprint,
        previous_restore_epoch, restore_epoch, previous_control_version,
-       control_version
+       control_version, superseded_delivery_count
 FROM ops.poi_cache_target_restore_fences
 WHERE command_id = :command_id
 """
@@ -251,12 +252,17 @@ WHERE external_system = :external_system
 RETURNING claim_id
 """
 
-_RELEASE_INVALIDATED_DELIVERIES_SQL = """
+_SUPERSEDE_PRIOR_EPOCH_DELIVERIES_SQL = """
 UPDATE ops.poi_cache_target_outbox_deliveries AS delivery
-SET status = 'retry', claim_id = NULL, lease_token = NULL,
-    lease_expires_at = NULL, available_at = now(), updated_at = now()
-WHERE delivery.status = 'leased'
-  AND delivery.claim_id = ANY(CAST(:claim_ids AS uuid[]))
+SET status = 'superseded', delivery_version = delivery_version + 1,
+    claim_id = NULL, lease_token = NULL, lease_expires_at = NULL,
+    superseded_at = now(), updated_at = now()
+FROM ops.poi_cache_target_outbox_events AS event
+WHERE event.event_id = delivery.event_id
+  AND event.external_system = :external_system
+  AND event.restore_epoch < :restore_epoch
+  AND delivery.status IN ('pending','leased','retry','dead')
+RETURNING delivery.event_id
 """
 
 _UPDATE_RESTORE_FENCE_SQL = """
@@ -275,11 +281,11 @@ _INSERT_RESTORE_FENCE_SQL = """
 INSERT INTO ops.poi_cache_target_restore_fences (
     fence_id, external_system, consumer_id, command_id,
     previous_restore_epoch, restore_epoch, previous_control_version,
-    control_version, reason, request_fingerprint
+    control_version, superseded_delivery_count, reason, request_fingerprint
 ) VALUES (
     CAST(:fence_id AS uuid), :external_system, :consumer_id, :command_id,
     :previous_restore_epoch, :restore_epoch, :previous_control_version,
-    :control_version, :reason, :request_fingerprint
+    :control_version, :superseded_delivery_count, :reason, :request_fingerprint
 )
 """
 
@@ -840,6 +846,7 @@ async def advance_cache_target_restore_fence(
             previous_control_version=int(values["previous_control_version"]),
             control_version=int(values["control_version"]),
             invalidated_claim_count=0,
+            superseded_delivery_count=int(values["superseded_delivery_count"]),
             idempotent_replay=True,
         )
 
@@ -874,11 +881,16 @@ async def advance_cache_target_restore_fence(
         )
     ).all()
     claim_ids = [str(row._mapping["claim_id"]) for row in invalidated_rows]
-    if claim_ids:
+    superseded_rows = (
         await session.execute(
-            text(_RELEASE_INVALIDATED_DELIVERIES_SQL),
-            {"claim_ids": claim_ids},
+            text(_SUPERSEDE_PRIOR_EPOCH_DELIVERIES_SQL),
+            {
+                "external_system": external_system,
+                "restore_epoch": control.restore_epoch + 1,
+            },
         )
+    ).all()
+    superseded_delivery_count = len(superseded_rows)
     advanced = (
         await session.execute(
             text(_UPDATE_RESTORE_FENCE_SQL),
@@ -899,6 +911,7 @@ async def advance_cache_target_restore_fence(
             "restore_epoch": restore_epoch,
             "previous_control_version": control.control_version,
             "control_version": control_version,
+            "superseded_delivery_count": superseded_delivery_count,
             "reason": reason,
             "request_fingerprint": request_fingerprint,
         },
@@ -913,4 +926,5 @@ async def advance_cache_target_restore_fence(
         previous_control_version=control.control_version,
         control_version=control_version,
         invalidated_claim_count=len(claim_ids),
+        superseded_delivery_count=superseded_delivery_count,
     )
