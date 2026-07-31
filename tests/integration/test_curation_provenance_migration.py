@@ -35,7 +35,7 @@ from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 pytestmark = pytest.mark.integration
 
 _PRE_REVISION = "0072_curation_provenance"
-_TARGET_REVISION = "0073_curation_source_rule"
+_TARGET_REVISION = "0074_curation_item_rekey_cascade"
 
 _SOURCE_KEY = "h40:sr:concierge-001"
 _SOURCE_KEY_ALT = "h40:sr:concierge-002"
@@ -663,30 +663,21 @@ RETURNING curated_feature_id::text
 """
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "T-VN-H41: `0072`가 만든 fk_curation_link_decisions_item은 ON DELETE RESTRICT에 "
-        "ON UPDATE NO ACTION이다. merge의 legacy-conflict detach"
-        "(`merge_repo._DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL`)는 "
-        "`curation_items.curation_item_id`를 새 UUID로 **재작성**하므로, 그 item에 "
-        "decision이 하나라도 있으면 FK 위반으로 병합 전체가 abort한다. "
-        "`0072`만 적용해도 재현되는 결함이고(0073 무관), 배포와 함께 prod에 도달한다. "
-        "고치려면 append-only 계약(3개 테이블)을 건드려야 해서 별도 결정이 필요하다."
-    ),
-)
 async def test_feature_merge_survives_source_rule_provenance(pg_container: Any) -> None:
     """`source_rule` provenance가 붙은 link을 가진 Feature도 병합할 수 있어야 한다.
 
     기존 merge 통합 테스트의 curated 픽스처는 **전부** `selection_origin='admin'`이라
-    0073 트리거가 한 번도 발화하지 않는다. prod는 3,043건이 `source_rule`이므로,
-    그 조합은 어느 테스트도 밟지 않은 채 배포된다. 여기서 그 조합을 밟는다:
+    0073 트리거가 merge 경로에서 한 번도 발화하지 않는다. prod는 3,043건이
+    `source_rule`이므로, 그 조합은 이 테스트가 생기기 전까지 어느 테스트도 밟지
+    않은 채 배포될 뻔했다.
+
+    T-VN-H41(`0074_curation_item_rekey_cascade`)이 고치기 전에는 여기서
+    `fk_curation_link_decisions_item` 위반으로 실패했다 — merge의
+    legacy-conflict detach가 `curation_item_id`를 재작성하는데 그 FK가
+    `ON UPDATE NO ACTION`이었기 때문이다. 이제는:
 
     - 병합이 예외 없이 끝난다
     - 살아남은 link은 신뢰 근거를 **유지**한다 (포인터가 NULL이 되면 안 된다)
-
-    지금은 첫 번째 조건에서 실패한다(xfail). `strict=True`라 결함이 고쳐지면 CI가
-    바로 알려 준다 — xfail을 지우는 것이 T-VN-H41의 완료 조건이다.
     """
     from kortravelmap.infra.merge_repo import apply_feature_merge
 
@@ -775,5 +766,168 @@ async def test_feature_merge_survives_source_rule_provenance(pg_container: Any) 
         )
         for row in rows:
             assert row.decision_kind == "accepted"
+    finally:
+        await engine.dispose()
+
+
+_REKEY_ONE_ITEM_SQL = """
+UPDATE feature.curation_items
+   SET curation_item_id = CAST(:new_id AS uuid),
+       legacy_projection_id = NULL,
+       updated_at = now()
+ WHERE curation_item_id = CAST(:old_id AS uuid)
+"""
+
+
+async def test_curation_item_rekey_carries_decision_history(pg_container: Any) -> None:
+    """T-VN-H41 — item PK 재작성이 decision을 참조 무결성 위반 없이 따라가야 한다.
+
+    merge의 legacy-conflict detach가 실제로 실행하는 것과 같은 모양의 UPDATE를
+    직접 재현한다. `apply_feature_merge()`를 통째로 부르는 위 테스트보다 좁게,
+    "PK 재작성 그 자체"와 그 캐스케이드만 검증한다 — 이 경로가 바로 append-only
+    예외가 통과시켜야 하는 유일한 긍정 사례다.
+    """
+    from uuid import uuid4
+
+    dsn = await _fresh_database(pg_container)
+    await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+    engine = make_async_engine(dsn)
+    try:
+        await _seed(engine)
+        projection_id = await _insert_projection(engine)
+        before = await _link_state(engine, projection_id)
+        assert before.match_basis == "source_rule"
+
+        new_id = str(uuid4())
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(_REKEY_ONE_ITEM_SQL),
+                {"old_id": projection_id, "new_id": new_id},
+            )
+
+        async with engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        "SELECT item.curation_item_id::text, "
+                        "       decision.curation_item_id::text AS decision_item_id, "
+                        "       decision.match_basis "
+                        "FROM feature.curation_items AS item "
+                        "LEFT JOIN feature.curation_link_decisions AS decision "
+                        "  ON decision.decision_id = item.accepted_link_decision_id "
+                        "WHERE item.curation_item_id = CAST(:new_id AS uuid)"
+                    ),
+                    {"new_id": new_id},
+                )
+            ).one()
+        assert row.curation_item_id == new_id
+        assert row.decision_item_id == new_id, (
+            "decision이 재작성된 item을 따라가지 않았다 — 캐스케이드가 끊겼다"
+        )
+        assert row.match_basis == "source_rule"
+    finally:
+        await engine.dispose()
+
+
+async def test_append_only_exception_never_widens_beyond_curation_item_id(
+    pg_container: Any,
+) -> None:
+    """append-only 예외는 `curation_item_id` **하나만** 바뀔 때만 통과해야 한다.
+
+    T-VN-H41의 FK CASCADE는 부모 키 재작성을 자식 테이블에 실어 나르기 위해
+    append-only 트리거에 예외를 냈다. 그 예외가 넓어지면(다른 컬럼도 같이 바뀌는
+    UPDATE까지 통과하거나, 값이 실제로 바뀌지 않은 no-op까지 통과하면)
+    `curation_link_decisions`의 append-only 계약이 사실상 무력화된다.
+
+    긍정 사례(진짜 재작성 캐스케이드가 통과하는 것)는
+    `test_curation_item_rekey_carries_decision_history`가 이미 증명한다. 여기서는
+    **거부돼야 하는** 세 갈래만 고정한다.
+    """
+    dsn = await _fresh_database(pg_container)
+    await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+    engine = make_async_engine(dsn)
+    try:
+        await _seed(engine)
+        projection_id = await _insert_projection(engine)
+        state = await _link_state(engine, projection_id)
+        assert state.decision_id is not None
+
+        # (1) curation_item_id를 같은 값으로 "바꾸는" no-op — 실제로는 안 바뀌었으므로
+        #     여전히 거부돼야 한다. 예외가 SET 절의 컬럼 이름(문법)이 아니라 값의
+        #     실제 변화(의미)로 판정되는지 확인한다.
+        with pytest.raises(Exception, match="append-only"):
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE feature.curation_link_decisions "
+                        "SET curation_item_id = curation_item_id "
+                        "WHERE decision_id = CAST(:decision_id AS uuid)"
+                    ),
+                    {"decision_id": state.decision_id},
+                )
+
+        # (2) curation_item_id와 함께 다른 컬럼도 바뀌는 UPDATE — 여전히 거부돼야 한다.
+        with pytest.raises(Exception, match="append-only"):
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE feature.curation_link_decisions "
+                        "SET actor = 'attacker-controlled' "
+                        "WHERE decision_id = CAST(:decision_id AS uuid)"
+                    ),
+                    {"decision_id": state.decision_id},
+                )
+
+        # (3) 순수 DELETE — 여전히 거부돼야 한다.
+        with pytest.raises(Exception, match="append-only"):
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "DELETE FROM feature.curation_link_decisions "
+                        "WHERE decision_id = CAST(:decision_id AS uuid)"
+                    ),
+                    {"decision_id": state.decision_id},
+                )
+    finally:
+        await engine.dispose()
+
+
+async def test_0074_downgrade_reverts_fk_and_trigger(pg_container: Any) -> None:
+    """0074만 내리면 rekey가 다시 막혀야 한다 — downgrade가 반쪽만 되돌리면 안 된다.
+
+    FK는 되돌렸는데 트리거 함수는 그대로 두거나, 그 반대인 상태로 남으면
+    관측 불가능한 절반짜리 downgrade가 된다. 0073은 내리지 않아 decision은
+    그대로 살아 있는 채로, rekey가 다시 FK 위반으로 막히는지만 본다.
+    """
+    from uuid import uuid4
+
+    dsn = await _fresh_database(pg_container)
+    await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+    engine = make_async_engine(dsn)
+    try:
+        await _seed(engine)
+        projection_id = await _insert_projection(engine)
+        assert (await _link_state(engine, projection_id)).decision_id is not None
+
+        await engine.dispose()
+        await asyncio.to_thread(_run_alembic, dsn, "0073_curation_source_rule", downgrade=True)
+        engine = make_async_engine(dsn)
+
+        # decision은 그대로 살아 있어야 한다(0073은 안 내렸다) — rekey 시도의 전제.
+        state = await _link_state(engine, projection_id)
+        assert state.decision_id is not None
+
+        new_id = str(uuid4())
+        with pytest.raises(Exception, match="curation_link_decisions"):
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE feature.curation_items "
+                        "SET curation_item_id = CAST(:new_id AS uuid), "
+                        "    legacy_projection_id = NULL, updated_at = now() "
+                        "WHERE curation_item_id = CAST(:old_id AS uuid)"
+                    ),
+                    {"old_id": projection_id, "new_id": new_id},
+                )
     finally:
         await engine.dispose()

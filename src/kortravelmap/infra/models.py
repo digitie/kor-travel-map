@@ -1451,6 +1451,11 @@ class CurationImportRowRow(Base):
             ["feature.curation_items.curation_item_id"],
             name=conv("fk_curation_import_rows_item"),
             ondelete="RESTRICT",
+            # dedup merge의 legacy-conflict detach가 curation_items.curation_item_id를
+            # 재작성한다(`merge_repo._DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL`).
+            # NO ACTION(기본값)이면 그 UPDATE 자체가 FK 위반을 낸다 — T-VN-H41,
+            # `0074_curation_item_rekey_cascade`.
+            onupdate="CASCADE",
         ),
         UniqueConstraint(
             "import_batch_id",
@@ -1535,6 +1540,8 @@ class CurationLinkDecisionRow(Base):
             ["feature.curation_items.curation_item_id"],
             name=conv("fk_curation_link_decisions_item"),
             ondelete="RESTRICT",
+            # T-VN-H41 — `fk_curation_import_rows_item`과 같은 이유.
+            onupdate="CASCADE",
         ),
         ForeignKeyConstraint(
             ["import_row_id", "curation_item_id"],
@@ -1544,6 +1551,9 @@ class CurationLinkDecisionRow(Base):
             ],
             name=conv("fk_curation_link_decisions_import_row"),
             ondelete="RESTRICT",
+            # item이 재작성되면 import row 쪽도 위 FK로 먼저 캐스케이드된다. 이
+            # 합성 FK도 같이 캐스케이드하지 않으면 그 직후 자기모순 상태가 된다.
+            onupdate="CASCADE",
         ),
         ForeignKeyConstraint(
             ["supersedes_decision_id", "curation_item_id"],
@@ -1553,6 +1563,9 @@ class CurationLinkDecisionRow(Base):
             ],
             name=conv("fk_curation_link_decisions_supersedes"),
             ondelete="RESTRICT",
+            # supersedes 사슬은 전부 같은 item에 묶여 있다는 불변식을 이 합성
+            # 키가 강제한다. item이 재작성되면 사슬 전체가 같이 옮겨가야 한다.
+            onupdate="CASCADE",
         ),
         UniqueConstraint(
             "decision_id",
