@@ -154,6 +154,84 @@ def test_marker_rejects_symlink_destination(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "foreign"
 
 
+def test_backup_destination_reservation_is_command_owned_and_create_once(
+    tmp_path: Path,
+) -> None:
+    first = marker_mod.reserve_backup_destination(
+        tmp_path,
+        command_id=41,
+        backup_id="reserved-backup",
+        input_digest="a" * 64,
+    )
+    second = marker_mod.reserve_backup_destination(
+        tmp_path,
+        command_id=41,
+        backup_id="reserved-backup",
+        input_digest="a" * 64,
+    )
+    reservation = (
+        tmp_path
+        / "reserved-backup"
+        / ".domain-command-reservation.json"
+    )
+
+    assert first == second == hashlib.sha256(reservation.read_bytes()).hexdigest()
+    assert reservation.stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "reserved-backup").stat().st_mode & 0o777 == 0o700
+    assert not list(tmp_path.glob(".reserve-*"))
+
+
+def test_backup_destination_reservation_rejects_existing_artifact(
+    tmp_path: Path,
+) -> None:
+    _artifact(tmp_path, "custom")
+
+    with pytest.raises(
+        (FileExistsError, FileNotFoundError, PermissionError),
+    ):
+        marker_mod.reserve_backup_destination(
+            tmp_path,
+            command_id=42,
+            backup_id="custom",
+            input_digest="b" * 64,
+        )
+
+    assert (tmp_path / "custom" / "meta" / "manifest.json").is_file()
+
+
+def test_backup_destination_reservation_survives_post_rename_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_rename = marker_mod._rename_noreplace
+
+    def _crash_after_rename(directory_fd: int, source: str, destination: str) -> None:
+        original_rename(directory_fd, source, destination)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(marker_mod, "_rename_noreplace", _crash_after_rename)
+    with pytest.raises(KeyboardInterrupt):
+        marker_mod.reserve_backup_destination(
+            tmp_path,
+            command_id=43,
+            backup_id="reserved-backup",
+            input_digest="c" * 64,
+        )
+    monkeypatch.setattr(marker_mod, "_rename_noreplace", original_rename)
+
+    marker_mod.reserve_backup_destination(
+        tmp_path,
+        command_id=43,
+        backup_id="reserved-backup",
+        input_digest="c" * 64,
+    )
+    assert (
+        tmp_path
+        / "reserved-backup"
+        / ".domain-command-reservation.json"
+    ).is_file()
+
+
 def test_restore_swap_env_is_fixed_secure_and_uri_encoded(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

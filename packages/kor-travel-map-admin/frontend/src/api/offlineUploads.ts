@@ -211,7 +211,7 @@ export function useOfflineUploads(params: OfflineUploadListParams = {}) {
     queryFn: ({ signal }) => fetchOfflineUploads(params, signal),
     refetchInterval: (query) => {
       const hasActiveUpload = query.state.data?.data.items.some((item) =>
-        ["uploading", "validating", "loading"].includes(item.status),
+        ["uploading", "validating", "loading", "deleting"].includes(item.status),
       );
       return hasActiveUpload ? 2_000 : false;
     },
@@ -226,7 +226,11 @@ export function useOfflineUpload(uploadId: string | null) {
     enabled: uploadId !== null && uploadId.length > 0,
     refetchInterval: (query) => {
       const status = query.state.data?.data.status;
-      return status === "validating" || status === "loading" ? 2_000 : false;
+      return ["uploading", "validating", "loading", "deleting"].includes(
+        status ?? "",
+      )
+        ? 2_000
+        : false;
     },
     staleTime: 2_000,
   });

@@ -14297,7 +14297,7 @@ export interface operations {
     list_offline_upload_requests_v1_admin_offline_uploads_get: {
         parameters: {
             query?: {
-                status?: ("uploading" | "uploaded" | "validating" | "validated" | "validation_failed" | "loading" | "loaded" | "load_failed" | "cancelled") | null;
+                status?: ("uploading" | "uploaded" | "validating" | "validated" | "validation_failed" | "loading" | "loaded" | "load_failed" | "deleting" | "cancelled") | null;
                 provider?: string | null;
                 dataset_key?: string | null;
                 page_size?: number;

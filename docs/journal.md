@@ -45,6 +45,20 @@
   `FileStoreObjectNotFoundError`의 `__all__` 기대값 1건을 수정했다. 나머지 환경 실패는
   subprocess `PATH`의 `.venv/bin`과 optional Dagster dev dependency를 보강했고, 같은 venv의
   clean 재실행에서 전체 **2,634건**이 모두 통과했다.
+- 단일 적대 리뷰어가 exact `d2b42755`에서 4건을 찾아 `CHANGES REQUESTED`했다. 기존 restore
+  target health를 command provenance로 오인한 P1, API connection lock이 child 수명보다 먼저
+  풀릴 수 있는 P1, 다른 key의 동시 offline delete loser가 영구 pending이 되는 P2, 기존 custom
+  backup artifact를 새 command output으로 채택하는 P2다.
+- offline delete는 `deleting + delete_command_id` resource reservation을 claim/execution과 같은
+  transaction에 넣고 owner만 최종 삭제하도록 고쳤다. 실제 두 session 경쟁에서 loser claim이
+  0으로 rollback됨을 검증했다. backup/restore/swap은 wrapper가 child 전체 수명 동안 lock을
+  직접 소유하며 cancellation/timeout에 process group을 완전히 회수한다. create destination은
+  command/input digest reservation 뒤에만 effect를 시작하고, restore/create 모두 exact marker/
+  reservation 없는 기존 산출물을 채택하지 않는다.
+- 리뷰 수정 combined gate는 ruff, strict mypy 178 source, bash syntax, targeted 102건,
+  PostgreSQL resource-race/ledger와 offline delete integration 9건, 전체 unit+API
+  **2,642건**, frontend lint·type-check·286건, OpenAPI/type drift가 통과했다. 동일 리뷰어
+  재검토와 n150 파괴적 Live는 다음 checkpoint에서 수행한다.
 
 ## 2026-07-31 (codex) — T-VN-16C 완료 이관·T-VN-12 단일 PR 착수
 

@@ -45,6 +45,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateTime, shortId } from "@/lib/format";
 
 const statuses: Array<OfflineUploadStatus | "all"> = [
+  "uploading",
   "uploaded",
   "validating",
   "validated",
@@ -52,12 +53,18 @@ const statuses: Array<OfflineUploadStatus | "all"> = [
   "loading",
   "loaded",
   "load_failed",
+  "deleting",
   "cancelled",
   "all",
 ];
 
 const loadableStates = new Set(["uploaded", "validated", "loaded", "load_failed"]);
-const inProgressStates = new Set(["validating", "loading"]);
+const inProgressStates = new Set([
+  "uploading",
+  "validating",
+  "loading",
+  "deleting",
+]);
 const tabularFormats = new Set(["csv", "tsv"]);
 const byteFormatter = new Intl.NumberFormat("ko-KR");
 

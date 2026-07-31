@@ -10,9 +10,10 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import signal
 import stat
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,6 +42,7 @@ from kortravelmap.infra.domain_command_execution_repo import (
 from kortravelmap.infra.domain_command_marker import (
     backup_artifact_output_proof,
     delete_output_proof,
+    reserve_backup_destination,
     restore_output_proof,
     swap_output_proof,
     verify_domain_command_marker,
@@ -411,17 +413,18 @@ async def _run_command(
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
     except OSError as exc:
         raise _command_unavailable(exc, plan) from exc
+    communication = asyncio.create_task(process.communicate())
     try:
         stdout, stderr = await asyncio.wait_for(
-            process.communicate(),
+            asyncio.shield(communication),
             timeout=timeout_seconds,
         )
     except TimeoutError:
-        process.kill()
-        await process.communicate()
+        await _reap_process_group(process, communication)
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail={
@@ -430,11 +433,43 @@ async def _run_command(
                 "details": {"timeout_seconds": timeout_seconds},
             },
         ) from None
+    except BaseException:
+        await _reap_process_group(process, communication)
+        raise
     return _CommandResult(
         returncode=process.returncode if process.returncode is not None else -1,
         stdout=stdout.decode("utf-8", errors="replace"),
         stderr=stderr.decode("utf-8", errors="replace"),
     )
+
+
+async def _terminate_process_group(
+    process: asyncio.subprocess.Process,
+    communication: asyncio.Task[tuple[bytes, bytes]],
+) -> None:
+    if process.returncode is None:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
+    done, _ = await asyncio.wait({communication}, timeout=5.0)
+    if not done and process.returncode is None:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+    await communication
+
+
+async def _reap_process_group(
+    process: asyncio.subprocess.Process,
+    communication: asyncio.Task[tuple[bytes, bytes]],
+) -> None:
+    """반복 cancellation에도 child group 회수를 끝낸 뒤 반환한다."""
+
+    cleanup = asyncio.create_task(_terminate_process_group(process, communication))
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            continue
+    await cleanup
 
 
 async def _write_marker(
@@ -534,7 +569,6 @@ def _plan_with_marker(
                 "KOR_TRAVEL_MAP_COMMAND_BACKUP_ID": execution.backup_id,
                 "KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST": execution.input_digest,
                 "KOR_TRAVEL_MAP_COMMAND_RECOVERY": "1" if recovery else "0",
-                "KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD": "1",
             }
         }
     )
@@ -555,17 +589,7 @@ async def _maintenance_lock(engine: AsyncEngine) -> AsyncIterator[None]:
             ).scalar_one()
         )
         if not acquired:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "BACKUP_MAINTENANCE_BUSY",
-                    "message": "다른 backup/restore command가 실행 중입니다.",
-                    "details": {
-                        "lock_key": "maintenance:backup-restore",
-                    },
-                },
-                headers={"Retry-After": "3"},
-            )
+            raise _maintenance_busy()
         try:
             yield
         finally:
@@ -579,11 +603,39 @@ async def _maintenance_lock(engine: AsyncEngine) -> AsyncIterator[None]:
                 raise RuntimeError("maintenance advisory lock exact unlock failed")
 
 
-async def _maintenance_lock_dependency(
-    engine: Annotated[AsyncEngine, Depends(get_engine)],
-) -> AsyncIterator[None]:
-    async with _maintenance_lock(engine):
-        yield
+def _maintenance_busy() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "BACKUP_MAINTENANCE_BUSY",
+            "message": "다른 backup/restore command가 실행 중입니다.",
+            "details": {
+                "lock_key": "maintenance:backup-restore",
+            },
+        },
+        headers={"Retry-After": "3"},
+    )
+
+
+def _raise_external_command_failure(
+    result: _CommandResult,
+    *,
+    code: str,
+    message: str,
+) -> None:
+    if result.returncode == 3:
+        raise _maintenance_busy()
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail={
+            "code": code,
+            "message": message,
+            "details": {
+                "stderr": result.stderr,
+                "stdout": result.stdout,
+            },
+        },
+    )
 
 
 def _pending_execution(
@@ -617,6 +669,7 @@ async def _prepare_backup_command(
     dagster_db: str | None = None,
     rustfs_volume: str | None = None,
     prepared_result: dict[str, Any] | None = None,
+    start_effect: bool = True,
 ) -> _PreparedBackupCommand:
     started_now = False
     async with session.begin():
@@ -670,7 +723,7 @@ async def _prepare_backup_command(
             status_code=status.HTTP_409_CONFLICT,
             detail="backup command execution identity mismatch",
         )
-    if execution.phase == "prepared":
+    if start_effect and execution.phase == "prepared":
         async with session.begin():
             execution = await start_backup_command_effect(
                 session, command.command_id
@@ -680,6 +733,24 @@ async def _prepare_backup_command(
         command=command,
         execution=execution,
         started_now=started_now,
+    )
+
+
+async def _start_prepared_backup_command(
+    session: AsyncSession,
+    prepared: _PreparedBackupCommand,
+) -> _PreparedBackupCommand:
+    if prepared.execution.phase != "prepared":
+        return prepared
+    async with session.begin():
+        execution = await start_backup_command_effect(
+            session,
+            prepared.command.command_id,
+        )
+    return _PreparedBackupCommand(
+        command=prepared.command,
+        execution=execution,
+        started_now=True,
     )
 
 
@@ -911,7 +982,6 @@ async def delete_backup(
 async def create_backup(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-    _maintenance: Annotated[None, Depends(_maintenance_lock_dependency)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: BackupRunRequest | None = None,
@@ -969,7 +1039,26 @@ async def create_backup(
         payload=command_payload,
         effect_kind="create",
         backup_id=backup_id,
+        start_effect=False,
     )
+    try:
+        await asyncio.to_thread(
+            reserve_backup_destination,
+            settings.backup_root,
+            command_id=prepared.command.command_id,
+            backup_id=backup_id,
+            input_digest=prepared.execution.input_digest,
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "BACKUP_DESTINATION_NOT_OWNED",
+                "message": "backup destination이 다른 artifact 또는 command 소유입니다.",
+                "details": {"backup_id": backup_id, "error": str(exc)},
+            },
+        ) from exc
+    prepared = await _start_prepared_backup_command(session, prepared)
     plan = _plan_with_marker(
         plan,
         prepared,
@@ -996,63 +1085,39 @@ async def create_backup(
     )
     result: _CommandResult | None = None
     if marker_sha256 is None:
-        artifact_path = settings.backup_root / backup_id
-        if not prepared.started_now and artifact_path.exists():
-            if output_proof is None:
-                raise _pending_execution(prepared) from None
-            marker_sha256 = await _write_marker(
-                settings,
-                prepared,
-                effect_state="created",
-                output_proof=output_proof,
+        result = await _run_command(
+            plan,
+            timeout_seconds=settings.backup_command_timeout_seconds,
+        )
+        if result.returncode != 0:
+            _raise_external_command_failure(
+                result,
+                code="BACKUP_COMMAND_FAILED",
+                message="백업 command 실행이 실패했습니다.",
             )
-        else:
-            result = await _run_command(
-                plan,
-                timeout_seconds=settings.backup_command_timeout_seconds,
+        try:
+            output_proof = await asyncio.to_thread(
+                backup_artifact_output_proof,
+                settings.backup_root,
+                backup_id,
             )
-            if result.returncode != 0:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail={
-                        "code": "BACKUP_COMMAND_FAILED",
-                        "message": "백업 command 실행이 실패했습니다.",
-                        "details": {
-                            "stderr": result.stderr,
-                            "stdout": result.stdout,
-                        },
-                    },
-                )
-            try:
-                output_proof = await asyncio.to_thread(
-                    backup_artifact_output_proof,
-                    settings.backup_root,
-                    backup_id,
-                )
-            except (OSError, ValueError) as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail={
-                        "code": "BACKUP_ARTIFACT_INVALID",
-                        "message": "백업 command output 검증에 실패했습니다.",
-                        "details": {"error": str(exc)},
-                    },
-                ) from exc
-            marker_sha256 = await _marker_proof(
-                settings,
-                prepared,
-                effect_state="created",
-                output_proof=output_proof,
-            )
-            if marker_sha256 is None:
-                # create는 complete artifact의 manifest와 모든 checksum을
-                # authoritative하게 재검증할 수 있으므로 marker 재구성이 안전하다.
-                marker_sha256 = await _write_marker(
-                    settings,
-                    prepared,
-                    effect_state="created",
-                    output_proof=output_proof,
-                )
+        except (OSError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "code": "BACKUP_ARTIFACT_INVALID",
+                    "message": "백업 command output 검증에 실패했습니다.",
+                    "details": {"error": str(exc)},
+                },
+            ) from exc
+        marker_sha256 = await _marker_proof(
+            settings,
+            prepared,
+            effect_state="created",
+            output_proof=output_proof,
+        )
+        if marker_sha256 is None:
+            raise _pending_execution(prepared)
     artifact_raw: BackupArtifact | None = None
     try:
         artifact_raw = backup_artifact(settings.backup_root, backup_id)
@@ -1109,7 +1174,6 @@ async def restore_backup(
     request: Request,
     backup_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-    _maintenance: Annotated[None, Depends(_maintenance_lock_dependency)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: RestoreRunRequest | None = None,
@@ -1196,25 +1260,19 @@ async def restore_backup(
         prepared,
         recovery=not prepared.started_now,
     )
-    restore_proofs = tuple(
-        restore_output_proof(
-            settings.backup_root,
-            safe_id,
-            app_db=targets.app_db,
-            dagster_db=targets.dagster_db,
-            rustfs_volume=targets.rustfs_volume,
-            verification=verification,
-        )
-        for verification in (
-            "performed",
-            "recovery_performed",
-        )
+    restore_proof = restore_output_proof(
+        settings.backup_root,
+        safe_id,
+        app_db=targets.app_db,
+        dagster_db=targets.dagster_db,
+        rustfs_volume=targets.rustfs_volume,
+        verification="performed",
     )
-    marker_sha256 = await _marker_proof_variants(
+    marker_sha256 = await _marker_proof(
         settings,
         prepared,
         effect_state="restored",
-        output_proofs=restore_proofs,
+        output_proof=restore_proof,
     )
     result: _CommandResult | None = None
     if marker_sha256 is None:
@@ -1223,22 +1281,16 @@ async def restore_backup(
             timeout_seconds=settings.backup_command_timeout_seconds,
         )
         if result.returncode != 0:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail={
-                    "code": "RESTORE_COMMAND_FAILED",
-                    "message": "restore command 실행이 실패했습니다.",
-                    "details": {
-                        "stderr": result.stderr,
-                        "stdout": result.stdout,
-                    },
-                },
+            _raise_external_command_failure(
+                result,
+                code="RESTORE_COMMAND_FAILED",
+                message="restore command 실행이 실패했습니다.",
             )
-        marker_sha256 = await _marker_proof_variants(
+        marker_sha256 = await _marker_proof(
             settings,
             prepared,
             effect_state="restored",
-            output_proofs=restore_proofs,
+            output_proof=restore_proof,
         )
         if marker_sha256 is None:
             raise _pending_execution(prepared)
@@ -1294,7 +1346,6 @@ async def plan_restore_swap(
     request: Request,
     backup_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-    _maintenance: Annotated[None, Depends(_maintenance_lock_dependency)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: RestoreSwapRequest | None = None,
@@ -1417,16 +1468,10 @@ async def plan_restore_swap(
             timeout_seconds=settings.backup_command_timeout_seconds,
         )
         if result.returncode != 0:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail={
-                    "code": "RESTORE_SWAP_COMMAND_FAILED",
-                    "message": "restore hot-swap command 실행이 실패했습니다.",
-                    "details": {
-                        "stderr": result.stderr,
-                        "stdout": result.stdout,
-                    },
-                },
+            _raise_external_command_failure(
+                result,
+                code="RESTORE_SWAP_COMMAND_FAILED",
+                message="restore hot-swap command 실행이 실패했습니다.",
             )
         try:
             swap_proofs = tuple(

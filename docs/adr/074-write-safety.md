@@ -34,14 +34,20 @@
 7. 객체 저장소·Dagster·filesystem·host script처럼 DB 밖 효과가 있는 command는 도메인별
    execution table에서 `prepared → effect_started → effect_succeeded`를 단조 전이한다. terminal
    result는 효과별 output digest/proof가 있어야만 기록한다. `pending`은 성공으로 추정하지 않는다.
-8. backup/create/delete/restore/swap은 동일 session advisory lock
-   `maintenance:backup-restore`를 API가 fail-fast로 획득하고, 효과 실행부터 durable marker 검증과
-   DB terminal commit까지 한 owner가 보유한다. host script는 API가 이미 lock을 소유했다는 env를
-   받으면 중첩 획득하지 않는다.
+8. backup/create/restore/swap은 동일 session advisory lock
+   `maintenance:backup-restore`를 host wrapper process가 fail-fast로 획득하고 child script
+   전체 수명 동안 보유한다. API task 취소·timeout은 새 process group 전체를
+   `TERM → wait → KILL`로 완전히 회수한 뒤 반환한다. API connection에서 획득한 lock을 env
+   flag로 child에게 위임하지 않는다. API 내부 delete도 같은 key를 effect·proof·terminal
+   commit 전체에 직접 보유한다.
 9. host completion marker는 backup root의 전용 `0700` 디렉터리에서 `O_NOFOLLOW`,
    `O_EXCL`, file/dir `fsync`, Linux `renameat2(RENAME_NOREPLACE)`로 한 번만 생성한다.
    marker는 command/operation/effect/target identity, input digest, effect-specific output
    digest, 완료 시각을 포함한다. 기존 marker는 exact proof가 같을 때만 재사용하며 덮어쓰지 않는다.
+10. caller 지정 backup destination은 `command_id + input_digest + backup_id` reservation을
+    빈 `0700` 디렉터리에 먼저 fsync하고 `RENAME_NOREPLACE`로 공개한 뒤에만 effect를 시작한다.
+    exact reservation·marker가 없는 기존 artifact나 restore target의 단순 health는 새 command의
+    provenance가 아니므로 성공 결과로 채택하지 않는다.
 
 ## 근거
 

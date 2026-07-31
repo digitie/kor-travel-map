@@ -61,14 +61,14 @@ select_python() {
 }
 
 with_maintenance_lock() {
-  if [[ "${KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD:-0}" == "1" || "${KOR_TRAVEL_MAP_MAINTENANCE_LOCK_DISABLED:-0}" == "1" ]]; then
+  if [[ "${1:-}" == "--maintenance-lock-child" ]]; then
     return 0
   fi
   local python_bin
   python_bin="$(select_python)"
   exec "$python_bin" "$ROOT_DIR/scripts/with-pg-advisory-lock.py" \
     --key "maintenance:backup-restore" \
-    -- "$ROOT_DIR/scripts/docker-backup.sh" "$@"
+    -- "$ROOT_DIR/scripts/docker-backup.sh" --maintenance-lock-child "$@"
 }
 
 validate_identifier KOR_TRAVEL_MAP_POSTGRES_DB "$KOR_TRAVEL_MAP_POSTGRES_DB"
@@ -81,6 +81,9 @@ validate_path_component KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET "$KOR_TRAVEL_MAP_OF
 require_command docker
 require_command sha256sum
 with_maintenance_lock "$@"
+if [[ "${1:-}" == "--maintenance-lock-child" ]]; then
+  shift
+fi
 
 compose=(docker compose --env-file /dev/null)
 writer_services=(api frontend dagster dagster-daemon rustfs)
@@ -102,9 +105,20 @@ if [[ "$KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING" != "1" ]]; then
 fi
 
 backup_dir="$KOR_TRAVEL_MAP_BACKUP_ROOT/$KOR_TRAVEL_MAP_BACKUP_ID"
-if [[ -e "$backup_dir" ]]; then
-  echo "backup directory already exists: $backup_dir" >&2
-  exit 1
+if [[ -n "$KOR_TRAVEL_MAP_COMMAND_ID" ]]; then
+  python_bin="$(select_python)"
+  "$python_bin" "$ROOT_DIR/scripts/reserve-backup-destination.py" \
+    --backup-root "$KOR_TRAVEL_MAP_BACKUP_ROOT" \
+    --command-id "$KOR_TRAVEL_MAP_COMMAND_ID" \
+    --backup-id "$KOR_TRAVEL_MAP_BACKUP_ID" \
+    --input-digest "$KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST"
+  rm -rf -- "$backup_dir/postgres" "$backup_dir/rustfs" "$backup_dir/meta"
+else
+  if [[ -e "$backup_dir" ]]; then
+    echo "backup directory already exists: $backup_dir" >&2
+    exit 1
+  fi
+  mkdir -m 700 "$backup_dir"
 fi
 
 mkdir -p "$backup_dir/postgres" "$backup_dir/rustfs" "$backup_dir/meta"

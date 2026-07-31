@@ -242,11 +242,14 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
 - offline upload create는 DB에 `uploading` reservation과 object identity를 먼저 고정하고
   S3 write 뒤 byte/size/content-type/metadata proof와 `uploaded` 전이를 terminal result와
   함께 commit한다. authoritative `NoSuchKey`만 exact PUT 재개를 허용하고 transport/5xx
-  ambiguity는 fail-close한다.
-- backup/restore/swap/delete는 API가 `maintenance:backup-restore` session lock을
-  `pg_try_advisory_lock`으로 잡는다. busy는 `409 BACKUP_MAINTENANCE_BUSY`와
-  `Retry-After: 3`이다. lock은 host 효과, durable marker 검증, terminal DB commit이 모두
-  끝난 뒤 exact unlock한다.
+  ambiguity는 fail-close한다. delete는 `deleting + delete_command_id`를 원자 예약하므로
+  다른 key의 경쟁 요청은 claim까지 rollback된 `409`로 끝난다.
+- backup/restore/swap은 host wrapper가 `maintenance:backup-restore` session lock을
+  `pg_try_advisory_lock`으로 잡고 child process 전체 수명 동안 보유한다. API cancellation과
+  timeout은 process group을 완전히 회수한 뒤 반환한다. busy는
+  `409 BACKUP_MAINTENANCE_BUSY`와 `Retry-After: 3`이다. API 내부 backup delete는 같은 lock을
+  effect·proof·terminal DB commit까지 직접 보유한다. exact command marker/reservation 없는
+  기존 backup artifact나 restore target은 새 command 결과로 채택하지 않는다.
 - admin UI는 resource command slot 또는 create draft slot에 UUID와 submission fingerprint를
   함께 동결한다. response-loss/transport ambiguity에서는 같은 submission만 같은 UUID로
   재시도하며 내용이 달라지면 로컬에서 차단한다. 성공·확정 실패·인증 actor 전환 때 slot을

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -157,8 +159,14 @@ def _domain_command_fakes(
 
     proof_calls: dict[int, int] = {}
 
-    async def _marker_proof(*_args: Any, **_kwargs: Any) -> None:
-        return None
+    async def _marker_proof(
+        _settings: Any,
+        prepared: Any,
+        **_kwargs: Any,
+    ) -> str | None:
+        command_id = int(prepared.command.command_id)
+        proof_calls[command_id] = proof_calls.get(command_id, 0) + 1
+        return "b" * 64 if proof_calls[command_id] > 1 else None
 
     async def _write_marker(*_args: Any, **_kwargs: Any) -> str:
         return "b" * 64
@@ -180,6 +188,11 @@ def _domain_command_fakes(
         router_mod,
         "_marker_proof_variants",
         _marker_proof_variants,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "reserve_backup_destination",
+        lambda *_args, **_kwargs: "d" * 64,
     )
     monkeypatch.setattr(
         router_mod,
@@ -285,6 +298,45 @@ async def test_maintenance_lock_is_exact_fail_fast_and_exactly_unlocked() -> Non
     assert raised.value.status_code == 409
     assert raised.value.detail["code"] == "BACKUP_MAINTENANCE_BUSY"
     assert len(busy.calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_command_cancellation_reaps_the_entire_process_group(
+    tmp_path: Path,
+) -> None:
+    from kortravelmap.api.routers import admin_backups as router_mod
+
+    pid_file = tmp_path / "child.pid"
+    terminated_file = tmp_path / "terminated"
+    command = (
+        f"echo $$ > {pid_file}; "
+        f"trap 'touch {terminated_file}; exit 0' TERM; "
+        "while true; do sleep 1; done"
+    )
+    plan = router_mod.BackupCommandPlan(
+        cwd=str(tmp_path),
+        command=["bash", "-c", command],
+        env={},
+        enabled=True,
+    )
+    task = asyncio.create_task(
+        router_mod._run_command(plan, timeout_seconds=30.0)
+    )
+    for _ in range(200):
+        if pid_file.exists():
+            break
+        await asyncio.sleep(0.01)
+    assert pid_file.exists()
+    process_group_id = int(pid_file.read_text(encoding="utf-8"))
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert terminated_file.exists()
+    with pytest.raises(ProcessLookupError):
+        os.killpg(process_group_id, 0)
 
 
 @pytest.fixture
@@ -490,11 +542,46 @@ def test_execute_backup_uses_command_runner(
     assert body["data"]["status"] == "completed"
     assert body["data"]["artifact"]["backup_id"] == "manual"
     assert seen["plan"].env["KOR_TRAVEL_MAP_BACKUP_ID"] == "manual"
-    assert seen["plan"].env["KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD"] == "1"
+    assert "KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD" not in seen["plan"].env
 
 
 @pytest.mark.unit
-def test_create_backup_recovers_complete_artifact_after_process_crash(
+def test_execute_backup_maps_wrapper_lock_contention_to_retryable_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_backups as router_mod
+
+    async def _busy(*_args: Any, **_kwargs: Any) -> Any:
+        return router_mod._CommandResult(
+            returncode=3,
+            stdout="",
+            stderr="advisory lock is already held",
+        )
+
+    monkeypatch.setattr(router_mod, "_run_command", _busy)
+    app = create_app(
+        ApiSettings(
+            admin_destructive_enabled=True,
+            admin_proxy_secret=None,
+            backup_root=tmp_path,
+            backup_project_root=tmp_path,
+            backup_command_enabled=True,
+        )
+    )
+
+    response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
+        "/v1/admin/backups",
+        json={"backup_id": "manual", "execute": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "BACKUP_MAINTENANCE_BUSY"
+    assert response.headers["Retry-After"] == "3"
+
+
+@pytest.mark.unit
+def test_create_backup_never_adopts_unmarked_artifact_after_process_crash(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -544,8 +631,16 @@ def test_create_backup_recovers_complete_artifact_after_process_crash(
         "get_backup_command_execution",
         AsyncMock(return_value=execution),
     )
-    run = AsyncMock(side_effect=AssertionError("complete artifact must not rerun"))
+    run = AsyncMock(
+        return_value=router_mod._CommandResult(
+            returncode=0,
+            stdout="rerun",
+            stderr="",
+        )
+    )
+    marker_proof = AsyncMock(side_effect=[None, "b" * 64])
     monkeypatch.setattr(router_mod, "_run_command", run)
+    monkeypatch.setattr(router_mod, "_marker_proof", marker_proof)
     app = create_app(
         ApiSettings(
             admin_destructive_enabled=True,
@@ -562,7 +657,49 @@ def test_create_backup_recovers_complete_artifact_after_process_crash(
     )
 
     assert response.status_code == 200
-    run.assert_not_awaited()
+    run.assert_awaited_once()
+    assert response.json()["data"]["stdout"] == "rerun"
+
+
+@pytest.mark.unit
+def test_create_backup_rejects_existing_unreserved_custom_destination_before_effect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.infra import domain_command_marker as marker_mod
+
+    from kortravelmap.api.routers import admin_backups as router_mod
+
+    _write_artifact(tmp_path, "custom")
+    start_effect = AsyncMock()
+    monkeypatch.setattr(
+        router_mod,
+        "reserve_backup_destination",
+        marker_mod.reserve_backup_destination,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "start_backup_command_effect",
+        start_effect,
+    )
+    app = create_app(
+        ApiSettings(
+            admin_destructive_enabled=True,
+            admin_proxy_secret=None,
+            backup_root=tmp_path,
+            backup_project_root=tmp_path,
+            backup_command_enabled=True,
+        )
+    )
+
+    response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
+        "/v1/admin/backups",
+        json={"backup_id": "custom", "execute": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "BACKUP_DESTINATION_NOT_OWNED"
+    start_effect.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -634,7 +771,7 @@ def test_execute_restore_swap_uses_command_runner(
     assert body["data"]["stdout"] == "swapped"
     assert seen["plan"].env["KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY"] == "1"
     assert seen["plan"].env["KOR_TRAVEL_MAP_RESTORE_SWAP_SKIP_VERIFY"] == "1"
-    assert seen["plan"].env["KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD"] == "1"
+    assert "KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD" not in seen["plan"].env
 
 
 @pytest.mark.unit
@@ -734,7 +871,7 @@ def test_restore_commands_resume_started_effect_with_recovery_mode(
 
     assert response.status_code == 200
     assert seen["plan"].env["KOR_TRAVEL_MAP_COMMAND_RECOVERY"] == "1"
-    assert seen["plan"].env["KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD"] == "1"
+    assert "KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD" not in seen["plan"].env
 
 
 @pytest.mark.unit

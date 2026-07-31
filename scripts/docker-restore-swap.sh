@@ -59,17 +59,20 @@ select_python() {
 }
 
 with_maintenance_lock() {
-  if [[ "${KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD:-0}" == "1" || "${KOR_TRAVEL_MAP_MAINTENANCE_LOCK_DISABLED:-0}" == "1" ]]; then
+  if [[ "${1:-}" == "--maintenance-lock-child" ]]; then
     return 0
   fi
   local python_bin
   python_bin="$(select_python)"
   exec "$python_bin" "$ROOT_DIR/scripts/with-pg-advisory-lock.py" \
     --key "maintenance:backup-restore" \
-    -- "$ROOT_DIR/scripts/docker-restore-swap.sh" "$@"
+    -- "$ROOT_DIR/scripts/docker-restore-swap.sh" --maintenance-lock-child "$@"
 }
 
 with_maintenance_lock "$@"
+if [[ "${1:-}" == "--maintenance-lock-child" ]]; then
+  shift
+fi
 
 validate_identifier "$RESTORE_APP_DB" "restore app database"
 validate_identifier "$RESTORE_DAGSTER_DB" "restore Dagster database"

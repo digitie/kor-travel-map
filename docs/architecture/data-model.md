@@ -2632,6 +2632,10 @@ input digest는 준비 뒤 불변이다. `effect_succeeded`에는 operation별 o
 offline upload는 `uploading`을 명시적 reservation 상태로 추가한다. 이 상태는 삭제·검증·적재
 대상이 아니며 create command가 object proof를 확정할 때만 `uploaded`로 전이한다. 따라서
 DB reservation 이전의 orphan object나 object write 이전의 terminal success가 생기지 않는다.
+삭제는 `deleting` 상태와 `delete_command_id → ops.domain_commands`를 같은 transaction에서
+원자 예약한다. owner command만 최종 row 삭제를 수행할 수 있고, 같은 `upload_id`에 다른 key가
+경쟁하면 loser의 claim transaction 전체가 rollback되어 복구 불가능한 claim-only 상태를 남기지
+않는다.
 
 ### 13.3 Filesystem completion proof
 
@@ -2643,10 +2647,12 @@ artifact 부재, restore proof는 source checksum과 검증된 target identity, 
 `planned|applied` 구분과 canonical `.env.restore-swap` 파일 digest다.
 
 marker 파일은 root 밖 경로·symlink·hardlink·foreign owner/mode를 거부하고 최초 exact
-marker를 덮어쓰지 않는다. restore 재시작은 target이 전부 없으면 deterministic 실행을
-재개하고, 전부 있으면 read-only verify 뒤 marker를 복구하며, 일부만 존재하면
-`recreate=true`가 아닌 한 ambiguous partial state로 실패한다. swap은 고정 project child
-`.env.restore-swap`만 쓰며 plan-only와 실제 apply proof를 분리한다.
+marker를 덮어쓰지 않는다. restore 재시작은 exact command/source marker가 있을 때만 완료를
+채택한다. marker 없는 기존 target은 전부 healthy여도 provenance가 아니므로 자동 복구 성공으로
+인증하지 않으며, target 부재면 실행하고 기존/부분 target은 명시적 recreate 또는 운영자
+reconciliation으로 보낸다. backup create도 command/input digest가 fsync된 destination
+reservation을 effect 전에 선점하고, 다른 artifact나 marker 없는 artifact는 채택하지 않는다.
+swap은 고정 project child `.env.restore-swap`만 쓰며 plan-only와 실제 apply proof를 분리한다.
 
 ## 이관된 결정 (구 ADR)
 

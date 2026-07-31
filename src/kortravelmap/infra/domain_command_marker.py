@@ -27,6 +27,7 @@ __all__ = [
     "backup_artifact_output_proof",
     "delete_output_proof",
     "read_domain_command_marker",
+    "reserve_backup_destination",
     "restore_output_proof",
     "swap_output_proof",
     "verify_domain_command_marker",
@@ -34,6 +35,7 @@ __all__ = [
 ]
 
 _MARKER_DIRECTORY = ".domain-command-markers"
+_RESERVATION_FILE = ".domain-command-reservation.json"
 _SAFE_COMPONENT = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
 )
@@ -358,6 +360,155 @@ def _validate_regular_file(metadata: os.stat_result) -> None:
         or metadata.st_nlink != 1
     ):
         raise PermissionError("domain command marker file is not trusted")
+
+
+def _write_all(file_fd: int, body: bytes) -> None:
+    remaining = memoryview(body)
+    while remaining:
+        written = os.write(file_fd, remaining)
+        if written <= 0:
+            raise OSError("durable command proof write made no progress")
+        remaining = remaining[written:]
+
+
+def _reservation_body(
+    *,
+    command_id: int,
+    backup_id: str,
+    input_digest: str,
+) -> bytes:
+    _validate_component(backup_id, label="backup_id")
+    if command_id <= 0:
+        raise ValueError("command_id must be positive")
+    if len(input_digest) != 64 or any(
+        character not in "0123456789abcdef" for character in input_digest
+    ):
+        raise ValueError("input_digest must be lowercase SHA-256")
+    return (
+        json.dumps(
+            {
+                "backup_id": backup_id,
+                "command_id": command_id,
+                "input_digest": input_digest,
+                "schema_version": 1,
+            },
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode()
+
+
+def _validate_reserved_destination(
+    root_fd: int,
+    *,
+    backup_id: str,
+    expected_body: bytes,
+) -> None:
+    artifact_fd = _open_directory_at(root_fd, backup_id)
+    try:
+        metadata = os.fstat(artifact_fd)
+        if (
+            metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+        ):
+            raise PermissionError("backup destination reservation is not trusted")
+        actual_body = _read_regular_file_at(artifact_fd, _RESERVATION_FILE)
+        reservation_metadata = os.stat(
+            _RESERVATION_FILE,
+            dir_fd=artifact_fd,
+            follow_symlinks=False,
+        )
+        _validate_regular_file(reservation_metadata)
+        if actual_body != expected_body:
+            raise FileExistsError(
+                errno.EEXIST,
+                "backup destination is owned by another command",
+                backup_id,
+            )
+    finally:
+        os.close(artifact_fd)
+
+
+def reserve_backup_destination(
+    backup_root: Path,
+    *,
+    command_id: int,
+    backup_id: str,
+    input_digest: str,
+) -> str:
+    """backup destination을 command identity에 원자적으로 예약한다.
+
+    빈 임시 디렉터리에 fsync된 reservation을 먼저 쓴 뒤
+    ``renameat2(RENAME_NOREPLACE)``로 destination을 공개한다. 따라서 기존
+    artifact나 다른 command의 partial output은 새 command가 채택할 수 없다.
+    """
+
+    expected_body = _reservation_body(
+        command_id=command_id,
+        backup_id=backup_id,
+        input_digest=input_digest,
+    )
+    root_fd = os.open(
+        backup_root,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
+    temporary = f".reserve-{command_id}-{secrets.token_hex(16)}"
+    temporary_fd: int | None = None
+    reservation_fd: int | None = None
+    try:
+        os.mkdir(temporary, mode=0o700, dir_fd=root_fd)
+        temporary_fd = _open_directory_at(root_fd, temporary)
+        reservation_fd = os.open(
+            _RESERVATION_FILE,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=temporary_fd,
+        )
+        _validate_regular_file(os.fstat(reservation_fd))
+        _write_all(reservation_fd, expected_body)
+        os.fsync(reservation_fd)
+        os.close(reservation_fd)
+        reservation_fd = None
+        os.fsync(temporary_fd)
+        os.close(temporary_fd)
+        temporary_fd = None
+        try:
+            _rename_noreplace(root_fd, temporary, backup_id)
+        except FileExistsError:
+            cleanup_fd = _open_directory_at(root_fd, temporary)
+            try:
+                os.unlink(_RESERVATION_FILE, dir_fd=cleanup_fd)
+            finally:
+                os.close(cleanup_fd)
+            os.rmdir(temporary, dir_fd=root_fd)
+            _validate_reserved_destination(
+                root_fd,
+                backup_id=backup_id,
+                expected_body=expected_body,
+            )
+        else:
+            _validate_reserved_destination(
+                root_fd,
+                backup_id=backup_id,
+                expected_body=expected_body,
+            )
+        os.fsync(root_fd)
+    except BaseException:
+        if reservation_fd is not None:
+            os.close(reservation_fd)
+        if temporary_fd is not None:
+            with suppress(FileNotFoundError):
+                os.unlink(_RESERVATION_FILE, dir_fd=temporary_fd)
+            os.close(temporary_fd)
+        with suppress(FileNotFoundError):
+            os.rmdir(temporary, dir_fd=root_fd)
+        raise
+    finally:
+        os.close(root_fd)
+    return hashlib.sha256(expected_body).hexdigest()
 
 
 def write_domain_command_marker(

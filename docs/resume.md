@@ -33,9 +33,18 @@ lint/type-check/OpenAPI type drift가 모두 green이다. 새
 `FileStoreObjectNotFoundError` export 기대값을 갱신하고 `.venv/bin` subprocess PATH와
 Dagster dev dependency를 갖춘 동일 venv에서 전체 unit+API **2,634건**도 모두 통과했다.
 
-**다음 한 작업**: PR #906 최신 checkpoint를 push하고 적대 리뷰어 1명의 일반 코드 재검토를
-반영한다. 이어 n150 파괴적 live UI/API, 최종 rebase·merge를 끝낸 뒤 T-VN-12A/B/C/D를
-`tasks-done.md`로 한 PR 단위 이관한다.
+단일 적대 리뷰어의 4개 finding도 반영했다. offline delete는
+`deleting + delete_command_id`를 claim/execution과 원자 예약해 다른 key loser claim을
+rollback한다. backup/restore/swap lock은 host wrapper가 child 전체 수명 동안 소유하고 API
+cancellation/timeout은 process group을 완전히 회수한다. command/input digest destination
+reservation과 exact marker 없는 기존 backup/restore 산출물은 성공으로 채택하지 않는다.
+수정 combined gate는 targeted 102건과 PostgreSQL ledger/resource-race integration 9건,
+전체 unit+API 2,642건, frontend 286건과 lint/type-check/OpenAPI drift,
+ruff·strict mypy·bash syntax가 green이다.
+
+**다음 한 작업**: PR #906 review-fix checkpoint를 push하고 같은 적대 리뷰어가 일반 코드
+수정 전체를 재검토한다. 이어 n150 파괴적 live UI/API, 최종
+rebase·merge를 끝낸 뒤 T-VN-12A/B/C/D를 `tasks-done.md`로 한 PR 단위 이관한다.
 
 ## 2026-07-31 (codex) — T-VN-16C 완료·T-VN-12A/B/C/D 단일 PR 전환
 

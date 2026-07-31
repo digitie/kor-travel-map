@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -40,6 +42,23 @@ def test_docker_backup_script_captures_standalone_backup_bundle() -> None:
     assert "with-pg-advisory-lock.py" in script
     assert "maintenance:backup-restore" in script
     assert "write-domain-command-marker.py" in script
+
+
+@pytest.mark.unit
+def test_maintenance_lock_handoff_is_not_environment_spoofable() -> None:
+    scripts = "\n".join(
+        _read(path)
+        for path in (
+            "scripts/docker-backup.sh",
+            "scripts/docker-restore.sh",
+            "scripts/docker-restore-swap.sh",
+            "scripts/with-pg-advisory-lock.py",
+        )
+    )
+
+    assert "KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD" not in scripts
+    assert "KOR_TRAVEL_MAP_MAINTENANCE_LOCK_DISABLED" not in scripts
+    assert "--maintenance-lock-child" in scripts
 
 
 @pytest.mark.unit
@@ -83,8 +102,8 @@ def test_docker_restore_script_restores_backup_into_staging_targets() -> None:
     assert "with-pg-advisory-lock.py" in script
     assert "maintenance:backup-restore" in script
     assert "KOR_TRAVEL_MAP_COMMAND_RECOVERY" in script
-    assert "refusing ambiguous resume" in script
-    assert "recovery_performed" in script
+    assert "recovering completed restore" not in script
+    assert "recovery_complete" not in script
     assert "write-domain-command-marker.py" in script
 
 
@@ -98,6 +117,74 @@ def test_docker_restore_script_refuses_production_targets_by_default() -> None:
     assert "set KOR_TRAVEL_MAP_RESTORE_RECREATE=1" in script
     assert "docker compose down" not in script
     assert "KOR_TRAVEL_MAP_RESTORE_ALLOW_PRODUCTION" not in script
+
+
+@pytest.mark.unit
+def test_restore_recovery_does_not_adopt_healthy_stale_targets(
+    tmp_path: Path,
+) -> None:
+    backup = tmp_path / "backups" / "backup-1"
+    for relative_path in (
+        "postgres/kor_travel_map.dump",
+        "postgres/kor_travel_map_dagster.dump",
+        "rustfs/rustfs-data.tar.gz",
+        "meta/manifest.json",
+        "meta/SHA256SUMS",
+    ):
+        target = backup / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"fixture")
+    binary_dir = tmp_path / "bin"
+    binary_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+    fake_docker = binary_dir / "docker"
+    fake_docker.write_text(
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$*\" >> {docker_log}\n"
+        "if [[ \"$*\" == *\"SELECT 1 FROM pg_database\"* ]]; then\n"
+        "  printf '1\\n'\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{binary_dir}:{os.environ['PATH']}",
+        "KOR_TRAVEL_MAP_BACKUP_ROOT": str(tmp_path / "backups"),
+        "KOR_TRAVEL_MAP_RESTORE_BACKUP_ID": "backup-1",
+        "KOR_TRAVEL_MAP_RESTORE_APP_DB": "stale_app",
+        "KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB": "stale_dagster",
+        "KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME": "stale-volume",
+        "KOR_TRAVEL_MAP_RESTORE_SKIP_CHECKSUM": "1",
+        "KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS": "1",
+        "KOR_TRAVEL_MAP_RESTORE_RECREATE": "0",
+        "KOR_TRAVEL_MAP_COMMAND_RECOVERY": "1",
+        "KOR_TRAVEL_MAP_COMMAND_MARKER_KEY": "command-91",
+        "KOR_TRAVEL_MAP_COMMAND_ID": "91",
+        "KOR_TRAVEL_MAP_COMMAND_OPERATION": "admin.backup.restore",
+        "KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND": "restore",
+        "KOR_TRAVEL_MAP_COMMAND_BACKUP_ID": "backup-1",
+        "KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST": "a" * 64,
+    }
+
+    completed = subprocess.run(
+        [
+            "bash",
+            str(ROOT / "scripts/docker-restore.sh"),
+            "--maintenance-lock-child",
+            "backup-1",
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert "restore target DB already exists: stale_app" in completed.stderr
+    assert "pg_restore" not in docker_log.read_text(encoding="utf-8")
+    assert not (tmp_path / "backups" / ".domain-command-markers").exists()
 
 
 @pytest.mark.unit

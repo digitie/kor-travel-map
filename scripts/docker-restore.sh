@@ -92,15 +92,20 @@ select_python() {
 }
 
 with_maintenance_lock() {
-  if [[ "${KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD:-0}" == "1" || "${KOR_TRAVEL_MAP_MAINTENANCE_LOCK_DISABLED:-0}" == "1" ]]; then
+  if [[ "${1:-}" == "--maintenance-lock-child" ]]; then
     return 0
   fi
   local python_bin
   python_bin="$(select_python)"
   exec "$python_bin" "$ROOT_DIR/scripts/with-pg-advisory-lock.py" \
     --key "maintenance:backup-restore" \
-    -- "$ROOT_DIR/scripts/docker-restore.sh" "$@"
+    -- "$ROOT_DIR/scripts/docker-restore.sh" --maintenance-lock-child "$@"
 }
+
+with_maintenance_lock "$@"
+if [[ "${1:-}" == "--maintenance-lock-child" ]]; then
+  shift
+fi
 
 if (( $# > 1 )); then
   usage
@@ -146,7 +151,6 @@ checksums="$backup_dir/meta/SHA256SUMS"
 
 require_command docker
 require_command sha256sum
-with_maintenance_lock "$@"
 
 for required_path in "$app_dump" "$dagster_dump" "$rustfs_archive" "$manifest" "$checksums"; do
   if [[ ! -f "$required_path" ]]; then
@@ -220,78 +224,49 @@ restore_database() {
     --analyze-in-stages
 }
 
-recovery_complete=0
 marker_verification="performed"
 if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" == "1" ]]; then
   marker_verification="skipped"
 fi
 
-if [[ "$KOR_TRAVEL_MAP_COMMAND_RECOVERY" == "1" ]]; then
-  expected_targets=2
-  present_targets=0
-  database_exists "$KOR_TRAVEL_MAP_RESTORE_APP_DB" && present_targets=$((present_targets + 1))
-  database_exists "$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB" && present_targets=$((present_targets + 1))
-  if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" != "1" ]]; then
-    expected_targets=3
-    if docker volume inspect "$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" >/dev/null 2>&1; then
-      present_targets=$((present_targets + 1))
+prepare_database "$KOR_TRAVEL_MAP_RESTORE_APP_DB"
+restore_database "$app_dump" "$KOR_TRAVEL_MAP_RESTORE_APP_DB"
+
+prepare_database "$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB"
+restore_database "$dagster_dump" "$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB"
+
+if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" != "1" ]]; then
+  if docker volume inspect "$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" >/dev/null 2>&1; then
+    if [[ "$KOR_TRAVEL_MAP_RESTORE_RECREATE" != "1" ]]; then
+      echo "restore RustFS volume already exists: $KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" >&2
+      echo "set KOR_TRAVEL_MAP_RESTORE_RECREATE=1 to recreate staging targets." >&2
+      exit 1
     fi
+    echo "removing existing staging RustFS volume: $KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME"
+    docker volume rm "$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" >/dev/null
   fi
-  if (( present_targets == expected_targets )); then
-    echo "recovering completed restore from authoritative target verification"
-    KOR_TRAVEL_MAP_RESTORE_APP_DB="$KOR_TRAVEL_MAP_RESTORE_APP_DB" \
-      KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB="$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB" \
-      KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME="$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" \
-      KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS="$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" \
-      bash "$ROOT_DIR/scripts/docker-restore-verify.sh"
-    recovery_complete=1
-    marker_verification="recovery_performed"
-  elif (( present_targets != 0 )) && [[ "$KOR_TRAVEL_MAP_RESTORE_RECREATE" != "1" ]]; then
-    echo "restore recovery found partial targets; refusing ambiguous resume" >&2
-    exit 1
-  fi
+
+  echo "restoring RustFS archive into Docker volume: $KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME"
+  docker run --rm \
+    -v "$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME:/data" \
+    -v "$backup_dir/rustfs:/backup:ro" \
+    alpine:3.20 \
+    sh -c "find /data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && tar xzf /backup/rustfs-data.tar.gz -C /data && chown -R 10001:10001 /data"
 fi
 
-if [[ "$recovery_complete" != "1" ]]; then
-  prepare_database "$KOR_TRAVEL_MAP_RESTORE_APP_DB"
-  restore_database "$app_dump" "$KOR_TRAVEL_MAP_RESTORE_APP_DB"
+echo "restore completed into staging targets"
+echo "app DB: $KOR_TRAVEL_MAP_RESTORE_APP_DB"
+echo "Dagster DB: $KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB"
+if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" != "1" ]]; then
+  echo "RustFS volume: $KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME"
+fi
 
-  prepare_database "$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB"
-  restore_database "$dagster_dump" "$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB"
-
-  if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" != "1" ]]; then
-    if docker volume inspect "$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" >/dev/null 2>&1; then
-      if [[ "$KOR_TRAVEL_MAP_RESTORE_RECREATE" != "1" ]]; then
-        echo "restore RustFS volume already exists: $KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" >&2
-        echo "set KOR_TRAVEL_MAP_RESTORE_RECREATE=1 to recreate staging targets." >&2
-        exit 1
-      fi
-      echo "removing existing staging RustFS volume: $KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME"
-      docker volume rm "$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" >/dev/null
-    fi
-
-    echo "restoring RustFS archive into Docker volume: $KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME"
-    docker run --rm \
-      -v "$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME:/data" \
-      -v "$backup_dir/rustfs:/backup:ro" \
-      alpine:3.20 \
-      sh -c "find /data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && tar xzf /backup/rustfs-data.tar.gz -C /data && chown -R 10001:10001 /data"
-  fi
-
-  echo "restore completed into staging targets"
-  echo "app DB: $KOR_TRAVEL_MAP_RESTORE_APP_DB"
-  echo "Dagster DB: $KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB"
-  if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" != "1" ]]; then
-    echo "RustFS volume: $KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME"
-  fi
-
-  if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" != "1" ]]; then
-    KOR_TRAVEL_MAP_RESTORE_APP_DB="$KOR_TRAVEL_MAP_RESTORE_APP_DB" \
-      KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB="$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB" \
-      KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME="$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" \
-      KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS="$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" \
-      bash "$ROOT_DIR/scripts/docker-restore-verify.sh"
-  fi
+if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" != "1" ]]; then
+  KOR_TRAVEL_MAP_RESTORE_APP_DB="$KOR_TRAVEL_MAP_RESTORE_APP_DB" \
+    KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB="$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB" \
+    KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME="$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" \
+    KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS="$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" \
+    bash "$ROOT_DIR/scripts/docker-restore-verify.sh"
 fi
 
 if [[ -n "$KOR_TRAVEL_MAP_COMMAND_MARKER_KEY" ]]; then

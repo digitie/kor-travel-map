@@ -96,10 +96,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return LOCK_BUSY_EXIT_CODE
 
-        env = os.environ.copy()
-        env["KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD"] = "1"
         try:
-            completed = subprocess.run(args.command, env=env, check=False)
+            completed = subprocess.run(args.command, check=False)
             return completed.returncode
         finally:
             _release_lock(conn, lock_id=lock_id)

@@ -67,14 +67,15 @@ forward journal replay를 함께 준비한다(ADR-075). upstream 재수집은 �
 `scripts/docker-backup.sh`, `scripts/docker-restore.sh`,
 `scripts/docker-restore-swap.sh`는 `scripts/with-pg-advisory-lock.py`를 통해
 PostgreSQL advisory lock `maintenance:backup-restore`를 잡고 실행된다. lock이 이미
-잡혀 있으면 실행은 실패한다. 로컬 실험에서만 mutex를 의도적으로 끄려면
-`KOR_TRAVEL_MAP_MAINTENANCE_LOCK_DISABLED=1`을 사용한다.
+잡혀 있으면 실행은 실패한다. lock bypass 환경변수는 지원하지 않는다.
 
-Admin API 실행은 같은 lock을 `pg_try_advisory_lock`으로 먼저 잡고 host script에
-`KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD=1`을 전달한다. API가 효과 실행, marker proof,
-domain command terminal result commit까지 lock을 유지하므로 delete의 filesystem
-`rmtree`도 create/restore/swap과 경쟁하지 않는다. 경합은 무기한 대기하지 않고
-`409 BACKUP_MAINTENANCE_BUSY`와 `Retry-After: 3`으로 실패한다.
+Admin API도 script wrapper 자체가 lock owner다. API connection이 잡은 lock을 env로
+child에 위임하지 않는다. task 취소·timeout이면 독립 process group 전체를
+`SIGTERM` 후 제한 시간 내 회수하고, 남으면 `SIGKILL`한 뒤에만 반환하므로 API worker가
+사라진 뒤 lock 없이 host 효과만 계속되는 구간이 없다. API 내부 delete의 filesystem
+`rmtree`는 같은 lock을 marker proof와 domain command terminal result commit까지 직접
+보유한다. 경합은 무기한 대기하지 않고 `409 BACKUP_MAINTENANCE_BUSY`와
+`Retry-After: 3`으로 실패한다.
 
 ## 3. 산출물 구조
 
@@ -98,6 +99,15 @@ request digest, manifest·`SHA256SUMS` 또는 restore/swap output digest와 UTC 
 담는다. 전용 디렉터리 `0700`, 파일 `0600`, owner·regular-file·single-link 검증,
 `O_NOFOLLOW|O_EXCL`, file/dir `fsync`, `renameat2(RENAME_NOREPLACE)`를 사용한다. exact
 identity/proof가 아닌 기존 marker는 덮어쓰지 않고 중단한다.
+
+호출자가 `backup_id`를 지정한 create는 artifact를 쓰기 전에
+`command_id + input_digest + backup_id`를
+`data/backups/<backup_id>/.domain-command-reservation.json`에 fsync하고 빈 `0700`
+destination을 `RENAME_NOREPLACE`로 선점한다. exact reservation이 없는 기존 경로는 유효한
+backup처럼 보여도 새 command가 채택하지 않는다. restore도 exact command/source marker가
+없는 기존 DB·volume의 단순 health를 완료 provenance로 인정하지 않는다. marker 없는 재시도는
+target이 없을 때만 실행하며 기존 target은 `recreate` 또는 명시적 운영자 reconciliation이
+필요하다.
 
 ## 4. 검증
 
