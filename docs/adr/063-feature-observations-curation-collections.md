@@ -307,6 +307,14 @@ projection이 이기면 survivor 소유 merge import row와 trusted decision을 
 과거처럼 provenance가 참조하는 item을 물리 삭제하거나 current row와 다른 source projection을
 조용히 만들지 않는다.
 
+한 external item에 source에서 빠진 과거 component와 active component가 공존하는 정상
+상태도 merge 입력이다. duplicate reconcile은 master×loser many-to-many join 결과에 갱신
+우선순위를 맡기지 않는다. external item별 active canonical survivor와 provider winner를
+`source_present`·archive 상태·source revision·UUID 순으로 하나씩 결정하고, 충돌하는 loser
+current는 일반 move 전에 coalesce한다. source-absent 과거 component는 identity와 provenance를
+유지한 master history로 이동하며 active `(collection, external_item, feature)`는 정확히 한
+행만 남는다.
+
 세 history table은 공통 DB trigger가 UPDATE·DELETE·TRUNCATE를 거부하고 batch→row 삭제도
 `RESTRICT`한다. decision의 import row와 supersedes target은 composite FK로 같은 item에만
 속하며 self-supersede를 금지한다. 공식 등대 seed는 admin multipart import에서 exact CSV와

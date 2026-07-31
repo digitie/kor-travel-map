@@ -526,6 +526,12 @@ non-legacy accepted인 active link만 master에 재승인한다. legacy/NULL/rev
 accepted pointer 없이 audit 대상으로 남는다. duplicate loser source projection이 이기면
 survivor item 소유의 merge import row를 append해 current row payload와 projection을
 일치시키고, loser는 revocation 뒤 feature 없는 archive tombstone으로 보존한다.
+동일 external item의 source-absent 과거 component와 active component가 함께 있을 때는
+external item별 canonical survivor/provider winner를 결정적 순서로 각각 하나만 선택한다.
+충돌하는 loser current는 일반 move 전에 coalesce하고, 과거 component는 identity·provenance를
+유지한 채 master history로 이동한다. 따라서 active
+`(collection_id, external_item_id, feature_id)`는 merge 뒤에도 정확히 한 행이고 current
+import row/decision은 실제 winner projection과 일치한다.
 
 membership에는 서로 독립인 두 revision 축을 둔다. `source_updated_at`은 source presence와
 제공자 파생 필드가 바뀐 시각이고, `operator_updated_at`/`operator_updated_by`는

@@ -859,7 +859,11 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     self-supersede를 금지한다.
   - Feature merge는 non-legacy accepted link만 master로 재승인한다. legacy/NULL/revoked
     link는 공개 불가 상태를 유지하고, loser source가 이기면 survivor 소유 merge import
-    row를 append해 current payload·pointer를 일치시킨다.
+    row를 append해 current payload·pointer를 일치시킨다. 같은 external item에
+    `source_present=false` 과거 component와 active component가 함께 있어도 many-to-many
+    pair를 만들지 않는다. external item별 canonical survivor와 provider winner를
+    결정적으로 하나만 고르고, 충돌 loser current는 move 전에 coalesce하며 과거 component
+    identity·provenance는 master history로 보존한다.
   - admin multipart import는 선택 sidecar를 같은 transaction 전에 strict 검증해 row
     provenance로 저장한다. official resource import는 sidecar를 hard-require하고 batch/current
     row provenance 조회를 REST/OpenAPI/admin type으로 제공한다.
