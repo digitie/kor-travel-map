@@ -560,6 +560,40 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > (초안에서 내가 "월 1회 스케줄이라 최대 한 달"이라 적은 것은 스케줄 이름만 보고
   > 자연 회복을 가정한 오류다.)
 
+  ## 조사로 확정된 것 (2026-07-31)
+
+  **`match_basis` 허용값은 4개다**(`0072` `ck_curation_link_decisions_basis`):
+  `csv_explicit_feature_id` · `admin_review` · `legacy_unattributed` · **`forward_recovery`**.
+  즉 **새 값을 만들 필요가 없다** — 복구용 축(`forward_recovery`)이 이미 계약에 있다.
+  문제는 그 생성 경로가 **merge 승인 한 곳뿐**이라는 것이다(`merge_repo.py:339`, `:451`).
+
+  **`0065`가 `sync_curated_feature_collection()`의 최신 정의다.** `0066`~`0072` 어느 것도
+  이 함수를 갱신하지 않는다(전수 확인). 그 함수는 `curated_features` 변경 시
+  `curation_items`를 **DELETE 후 INSERT**하는데(`0065:892`), INSERT 컬럼 목록에
+  `accepted_link_decision_id`·`current_import_row_id`가 **없다**. 그래서 트리거가 만드는
+  projection은 항상 decision 없이 태어나고, `_trusted_link_sql()`에서 제외된다.
+  → **#910 답변의 진단이 코드로 확인됐다.**
+
+  ## 두 갈래 — ②가 본질이다
+
+  **① one-shot 복구** (기존 3,044건)
+  재검증한 immutable evidence로 `forward_recovery` decision을 **append**한다.
+  ⚠ #910이 못박은 제약: `legacy_unattributed`를 이름만 바꾸거나 public 술어를 완화하지 않는다.
+  **재검증 없는 일괄 승격 금지** — `provider_sync.source_entities`와 `feature.curated_features`의
+  source entity/record/rule/Feature identity를 다시 확인해 근거를 만든다.
+
+  **② ongoing writer 연결** (트리거)
+  `sync_curated_feature_collection()`이 `curation_items`를 INSERT할 때 **같은 transaction에서**
+  `curation_link_decisions` 행도 만들고 `accepted_link_decision_id`를 채우게 한다.
+  **①만 하면 배포 후 새로 생기는 concierge 링크가 같은 문제를 반복해 일회성 땜질이 된다.**
+
+  > **트리거에서 decision을 만들 때 주의** — `0072`의 append-only 트리거가
+  > `curation_link_decisions`의 UPDATE/DELETE를 막는다. 트리거가 projection을 **DELETE 후
+  > INSERT**하는 구조라(`0065:892`) 같은 `curation_item_id`로 재삽입될 때마다 decision이
+  > **누적**된다. `supersedes` 체인으로 이전 decision을 잇거나, 재삽입 시 새 decision을
+  > 발급하고 포인터만 갱신하는 설계를 명시해야 한다. 무한 증식은 `0067`의 dedupe 사고와
+  > 같은 계열이다.
+
   할 일:
   - **before/after exact count 확정** — `0063` restore clone에 `0064`→head와 새 이미지를 적용해
     collection/item/Feature-group별로 잰다. 현재 `3,265→264`는 **0063 실측에서 산출한 예상치**이지
