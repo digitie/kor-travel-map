@@ -42,6 +42,7 @@ __all__ = [
     "MAINTENANCE_RETRY_POLICY",
     "MAINTENANCE_JOBS",
     "MAINTENANCE_SCHEDULES",
+    "FINDING_PURGE_DEFAULT_RETENTION",
     "NOTICE_PURGE_DEFAULT_RETENTION",
     "consistency_dedup_refresh_job",
     "purge_expired_notices_op",
@@ -314,13 +315,14 @@ async def purge_expired_notices_op(context: OpExecutionContext) -> dict[str, obj
     tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
     description=(
         "DB 기준 dedup 후보 큐를 갱신한 뒤 F1~F4 consistency report를 저장하고, "
-        "보존 기간이 지난 notice를 정리한다."
+        "보존 기간이 지난 notice와 resolved integrity finding을 정리한다."
     ),
 )
 def consistency_dedup_refresh_job() -> None:
     """운영자가 Dagster UI/API에서 실행하는 consistency/dedup refresh job."""
     run_consistency_check_op(refresh_dedup_candidates_op())
     purge_expired_notices_op()
+    purge_resolved_integrity_findings_op()
 
 
 CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
@@ -334,7 +336,10 @@ CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,
         tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
-        description="dedup 후보 큐 재계산과 consistency report를 일 1회 실행한다.",
+        description=(
+            "dedup 후보 큐·consistency report 갱신과 notice/finding 보존 정리를 "
+            "일 1회 실행한다."
+        ),
     )
 ]
 """consistency/dedup maintenance schedule 목록. 운영 enable 전까지 STOPPED."""
