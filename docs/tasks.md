@@ -31,7 +31,8 @@ barrier로 직렬화한다.
         2026-07-31 중단, 백업 확보·B′ 경로 확정, 본문 상단 인수 블록 참조) →
     [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
     [ ] `T-VN-H30C`(타 provider evidence 재작업) →
-    [ ] `T-VN-H34`(H25A/H25B 미충족 AC 마무리) →
+    [~] `T-VN-H34`(H25A/H25B 미충족 AC — 4항목 중 3 완료·1은 H35 배포 대기,
+        카테고리 축 신설로 링크 결함 8건 발견) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
     [ ] `T-VN-H32`(주소 검증 finding 자동 close — H30A 후속) →
     [ ] `T-VN-H22A`(quarantine read/preview) →
@@ -377,7 +378,22 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > **본문 전제 정정** — "미연결 행에서 전부 NULL"은 맞지만 전체 모집단으로 읽으면 틀린다.
     > 실측: active 3,530건 중 `source_record_key` 보유 **3,044건**. NULL은 공식 CSV 적재분
     > **486건**뿐이고 링크 222 / 미연결 264로 갈린다.
-  - **preview/commit·REST/UI 실데이터 검증** — 역반영 5건이 실제 화면·API에 반영되는지.
+  - **preview/commit·REST/UI 실데이터 검증** — ~~미충족~~ → **REST는 실증 완료(2026-07-31)**,
+    preview는 **prod 미배포로 측정 불가**.
+    > `GET /v1/curations/features/{id}` 실측(prod, service token):
+    > `국립세종수목원` **6건**(공식 3 + concierge legacy 3) / `진해보타닉뮤지엄` 1건 /
+    > `청풍호` 1건. `GET /v1/features/{id}` 200, `GET /v1/curations/collections` 200에
+    > 공식 collection **19건** 공개. **링크는 화면·API에 실제로 반영돼 있다** — 그래서 위
+    > 카테고리 결함도 공개 표면에 그대로 노출된다(진해보타닉뮤지엄이 카페로, 청풍호가 펜션으로).
+    >
+    > **import preview의 H36 게이트 동작은 prod에서 잴 수 없다** — 배포 이미지가 `c8ed6164`라
+    > `_adopted_match`가 없고 `0066`의 `external_component_id`도 없다. `T-VN-H35` 배포 후에만
+    > 실증 가능하다.
+    >
+    > 측정 실수 기록: ① 원격 셸에서 명령치환이 깨져 토큰이 비었고 401을 엔드포인트 인증
+    > 문제로 오독할 뻔했다(스크립트 파일로 해결). ② 응답 구조가 `data.feature`+`data.curations`인데
+    > `data`를 리스트로 기대해 **"0건"으로 잘못 보고**했다. 둘 다 그럴듯한 값이 나와 확인하지
+    > 않았으면 틀린 결론이 됐다.
   - **정지오코딩 세션 고정** — ~~신설~~ → **완료**: [`scripts/h25b_verify_links.py`](../scripts/h25b_verify_links.py).
     판정 축 3개(행정구역 시도코드 대조 / **카테고리 정합성**(신규) / 동명 유일성).
     `--all`로 링크된 공식 curation 전수를 훑는다. 단위 테스트는
