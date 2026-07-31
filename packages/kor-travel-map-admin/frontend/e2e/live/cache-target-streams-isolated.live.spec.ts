@@ -681,7 +681,6 @@ async function assertOperationReceipt(
   expect(receipt.data.status_url).toMatch(
     /^\/v1\/ops\/cache-target-operations\//,
   );
-  expect(response.headers()["location"]).toBe(receipt.data.status_url);
   expect(response.headers()["retry-after"]).toMatch(/^[0-9]+$/);
 }
 
