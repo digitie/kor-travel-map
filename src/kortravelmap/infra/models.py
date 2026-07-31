@@ -2239,6 +2239,10 @@ class OfflineUploadRow(Base):
             "checksum_sha256 ~ '^[0-9a-f]{64}$'",
             name="ck_offline_uploads_checksum_sha256",
         ),
+        CheckConstraint(
+            "(status = 'deleting') = (delete_command_id IS NOT NULL)",
+            name="ck_offline_uploads_delete_owner",
+        ),
         UniqueConstraint(
             "provider",
             "dataset_key",
@@ -2287,6 +2291,10 @@ class OfflineUploadRow(Base):
     load_job_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
         ForeignKey("ops.import_jobs.job_id", ondelete="SET NULL"),
+    )
+    delete_command_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT"),
     )
     created_by: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
@@ -2487,6 +2495,255 @@ class FeatureUpdateRequestIdempotencyRow(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now()"),
+    )
+
+
+class DomainCommandRow(Base):
+    """Actor-scoped immutable command identity."""
+
+    __tablename__ = "domain_commands"
+    __table_args__ = (
+        CheckConstraint(
+            "btrim(actor) <> '' AND char_length(actor) <= 200",
+            name=conv("ck_domain_commands_actor"),
+        ),
+        CheckConstraint(
+            "operation ~ '^[a-z][a-z0-9_.-]{0,127}$'",
+            name=conv("ck_domain_commands_operation"),
+        ),
+        CheckConstraint(
+            "fingerprint_version = 1",
+            name=conv("ck_domain_commands_fingerprint_version"),
+        ),
+        CheckConstraint(
+            "request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_domain_commands_request_fingerprint"),
+        ),
+        UniqueConstraint(
+            "actor",
+            "operation",
+            "idempotency_key",
+            name=conv("uq_domain_commands_actor_operation_key"),
+        ),
+        {"schema": "ops"},
+    )
+
+    command_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
+    actor: Mapped[str] = mapped_column(Text, nullable=False)
+    operation: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    fingerprint_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("1"),
+    )
+    request_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class DomainCommandResultRow(Base):
+    """Actor-scoped immutable terminal command result."""
+
+    __tablename__ = "domain_command_results"
+    __table_args__ = (
+        CheckConstraint(
+            "response_status BETWEEN 200 AND 599",
+            name=conv("ck_domain_command_results_response_status"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(response_body) = 'object'",
+            name=conv("ck_domain_command_results_response_body"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(response_headers) = 'object'",
+            name=conv("ck_domain_command_results_response_headers"),
+        ),
+        {"schema": "ops"},
+    )
+
+    command_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    response_status: Mapped[int] = mapped_column(Integer, nullable=False)
+    response_body: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    response_headers: Mapped[dict[str, str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    completed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class BackupCommandExecutionRow(Base):
+    """Backup/restore side effect의 explicit recovery state machine."""
+
+    __tablename__ = "backup_command_executions"
+    __table_args__ = (
+        CheckConstraint(
+            "effect_kind IN ('create', 'delete', 'restore', 'swap')",
+            name=conv("ck_backup_command_executions_effect_kind"),
+        ),
+        CheckConstraint(
+            "phase IN ('prepared', 'effect_started', 'effect_succeeded')",
+            name=conv("ck_backup_command_executions_phase"),
+        ),
+        CheckConstraint(
+            "input_digest ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_backup_command_executions_input_digest"),
+        ),
+        CheckConstraint(
+            "effect_token ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_backup_command_executions_effect_token"),
+        ),
+        CheckConstraint(
+            "marker_key ~ '^[a-z0-9][a-z0-9_.-]{0,127}$'",
+            name=conv("ck_backup_command_executions_marker_key"),
+        ),
+        CheckConstraint(
+            "(effect_kind <> 'delete') OR "
+            "(prepared_result IS NOT NULL "
+            "AND jsonb_typeof(prepared_result) = 'object')",
+            name=conv("ck_backup_command_executions_delete_result"),
+        ),
+        CheckConstraint(
+            "(phase = 'prepared' AND effect_started_at IS NULL "
+            "AND effect_completed_at IS NULL AND output_digest IS NULL "
+            "AND marker_sha256 IS NULL) OR "
+            "(phase = 'effect_started' AND effect_started_at IS NOT NULL "
+            "AND effect_completed_at IS NULL AND output_digest IS NULL "
+            "AND marker_sha256 IS NULL) OR "
+            "(phase = 'effect_succeeded' AND effect_started_at IS NOT NULL "
+            "AND effect_completed_at IS NOT NULL "
+            "AND output_digest IS NOT NULL "
+            "AND output_digest ~ '^[0-9a-f]{64}$' "
+            "AND marker_sha256 IS NOT NULL "
+            "AND marker_sha256 ~ '^[0-9a-f]{64}$')",
+            name=conv("ck_backup_command_executions_phase_evidence"),
+        ),
+        {"schema": "ops"},
+    )
+
+    command_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    effect_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    effect_token: Mapped[str] = mapped_column(Text, nullable=False)
+    phase: Mapped[str] = mapped_column(Text, nullable=False)
+    backup_id: Mapped[str] = mapped_column(Text, nullable=False)
+    app_db: Mapped[str | None] = mapped_column(Text)
+    dagster_db: Mapped[str | None] = mapped_column(Text)
+    rustfs_volume: Mapped[str | None] = mapped_column(Text)
+    marker_key: Mapped[str] = mapped_column(Text, nullable=False)
+    input_digest: Mapped[str] = mapped_column(Text, nullable=False)
+    prepared_result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    output_digest: Mapped[str | None] = mapped_column(Text)
+    marker_sha256: Mapped[str | None] = mapped_column(Text)
+    prepared_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    effect_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    effect_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+
+class OfflineUploadCommandExecutionRow(Base):
+    """Offline object/Dagster side effect의 explicit recovery state machine."""
+
+    __tablename__ = "offline_upload_command_executions"
+    __table_args__ = (
+        CheckConstraint(
+            "effect_kind IN ('create', 'delete', 'load')",
+            name=conv("ck_offline_upload_command_executions_effect_kind"),
+        ),
+        CheckConstraint(
+            "phase IN ('prepared', 'effect_started', 'effect_succeeded')",
+            name=conv("ck_offline_upload_command_executions_phase"),
+        ),
+        CheckConstraint(
+            "input_digest ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_offline_upload_command_executions_input_digest"),
+        ),
+        CheckConstraint(
+            "(effect_kind <> 'create') OR "
+            "(storage_backend IS NOT NULL AND btrim(storage_backend) <> '' "
+            "AND bucket IS NOT NULL AND btrim(bucket) <> '' "
+            "AND storage_key IS NOT NULL AND btrim(storage_key) <> '' "
+            "AND content_type IS NOT NULL AND btrim(content_type) <> '' "
+            "AND byte_size IS NOT NULL AND byte_size > 0 "
+            "AND content_sha256 IS NOT NULL "
+            "AND content_sha256 ~ '^[0-9a-f]{64}$' "
+            "AND metadata_digest IS NOT NULL "
+            "AND metadata_digest ~ '^[0-9a-f]{64}$')",
+            name=conv("ck_offline_upload_command_executions_create_identity"),
+        ),
+        CheckConstraint(
+            "(phase = 'prepared' AND effect_started_at IS NULL "
+            "AND effect_completed_at IS NULL AND output_digest IS NULL "
+            "AND dagster_run_id IS NULL) OR "
+            "(phase = 'effect_started' AND effect_started_at IS NOT NULL "
+            "AND effect_completed_at IS NULL AND output_digest IS NULL "
+            "AND dagster_run_id IS NULL) OR "
+            "(phase = 'effect_succeeded' AND effect_started_at IS NOT NULL "
+            "AND effect_completed_at IS NOT NULL "
+            "AND output_digest IS NOT NULL "
+            "AND output_digest ~ '^[0-9a-f]{64}$')",
+            name=conv("ck_offline_upload_command_executions_phase_evidence"),
+        ),
+        CheckConstraint(
+            "(effect_kind <> 'load' OR phase <> 'effect_succeeded') OR "
+            "(load_job_id IS NOT NULL AND dagster_run_id IS NOT NULL "
+            "AND btrim(dagster_run_id) <> '')",
+            name=conv("ck_offline_upload_command_executions_load_proof"),
+        ),
+        {"schema": "ops"},
+    )
+
+    command_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    effect_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    phase: Mapped[str] = mapped_column(Text, nullable=False)
+    upload_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    storage_backend: Mapped[str | None] = mapped_column(Text)
+    bucket: Mapped[str | None] = mapped_column(Text)
+    storage_key: Mapped[str | None] = mapped_column(Text)
+    content_type: Mapped[str | None] = mapped_column(Text)
+    byte_size: Mapped[int | None] = mapped_column(BigInteger)
+    content_sha256: Mapped[str | None] = mapped_column(Text)
+    metadata_digest: Mapped[str | None] = mapped_column(Text)
+    load_job_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    dagster_run_id: Mapped[str | None] = mapped_column(Text)
+    input_digest: Mapped[str] = mapped_column(Text, nullable=False)
+    output_digest: Mapped[str | None] = mapped_column(Text)
+    prepared_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    effect_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    effect_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
     )
 
 

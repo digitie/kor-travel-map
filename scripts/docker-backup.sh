@@ -12,6 +12,15 @@ KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB="${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_tr
 KOR_TRAVEL_MAP_BACKUP_ROOT="${KOR_TRAVEL_MAP_BACKUP_ROOT:-$ROOT_DIR/data/backups}"
 KOR_TRAVEL_MAP_BACKUP_ID="${KOR_TRAVEL_MAP_BACKUP_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING="${KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING:-0}"
+KOR_TRAVEL_MAP_COMMAND_ID="${KOR_TRAVEL_MAP_COMMAND_ID:-}"
+KOR_TRAVEL_MAP_COMMAND_OPERATION="${KOR_TRAVEL_MAP_COMMAND_OPERATION:-}"
+KOR_TRAVEL_MAP_COMMAND_RECOVERY="${KOR_TRAVEL_MAP_COMMAND_RECOVERY:-0}"
+KOR_TRAVEL_MAP_COMMAND_EFFECT_TOKEN="${KOR_TRAVEL_MAP_COMMAND_EFFECT_TOKEN:-}"
+KOR_TRAVEL_MAP_COMMAND_FENCE_PREACQUIRED="${KOR_TRAVEL_MAP_COMMAND_FENCE_PREACQUIRED:-0}"
+KOR_TRAVEL_MAP_COMMAND_MARKER_KEY="${KOR_TRAVEL_MAP_COMMAND_MARKER_KEY:-}"
+KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND="${KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND:-}"
+KOR_TRAVEL_MAP_COMMAND_BACKUP_ID="${KOR_TRAVEL_MAP_COMMAND_BACKUP_ID:-}"
+KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST="${KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST:-}"
 
 validate_identifier() {
   local name="$1"
@@ -54,15 +63,18 @@ select_python() {
   fi
 }
 
+# shellcheck source=scripts/domain-command-fence.sh
+source "$ROOT_DIR/scripts/domain-command-fence.sh"
+
 with_maintenance_lock() {
-  if [[ "${KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD:-0}" == "1" || "${KOR_TRAVEL_MAP_MAINTENANCE_LOCK_DISABLED:-0}" == "1" ]]; then
+  if [[ "${1:-}" == "--maintenance-lock-child" ]]; then
     return 0
   fi
   local python_bin
   python_bin="$(select_python)"
   exec "$python_bin" "$ROOT_DIR/scripts/with-pg-advisory-lock.py" \
     --key "maintenance:backup-restore" \
-    -- "$ROOT_DIR/scripts/docker-backup.sh" "$@"
+    -- "$ROOT_DIR/scripts/docker-backup.sh" --maintenance-lock-child "$@"
 }
 
 validate_identifier KOR_TRAVEL_MAP_POSTGRES_DB "$KOR_TRAVEL_MAP_POSTGRES_DB"
@@ -75,6 +87,9 @@ validate_path_component KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET "$KOR_TRAVEL_MAP_OF
 require_command docker
 require_command sha256sum
 with_maintenance_lock "$@"
+if [[ "${1:-}" == "--maintenance-lock-child" ]]; then
+  shift
+fi
 
 compose=(docker compose --env-file /dev/null)
 writer_services=(api frontend dagster dagster-daemon rustfs)
@@ -96,10 +111,14 @@ if [[ "$KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING" != "1" ]]; then
 fi
 
 backup_dir="$KOR_TRAVEL_MAP_BACKUP_ROOT/$KOR_TRAVEL_MAP_BACKUP_ID"
-if [[ -e "$backup_dir" ]]; then
-  echo "backup directory already exists: $backup_dir" >&2
-  exit 1
-fi
+acquire_domain_command_fence
+python_bin="$(select_python)"
+"$python_bin" "$ROOT_DIR/scripts/reserve-backup-destination.py" \
+  --backup-root "$KOR_TRAVEL_MAP_BACKUP_ROOT" \
+  --command-id "$KOR_TRAVEL_MAP_COMMAND_ID" \
+  --backup-id "$KOR_TRAVEL_MAP_BACKUP_ID" \
+  --input-digest "$KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST"
+rm -rf -- "$backup_dir/postgres" "$backup_dir/rustfs" "$backup_dir/meta"
 
 mkdir -p "$backup_dir/postgres" "$backup_dir/rustfs" "$backup_dir/meta"
 
@@ -161,5 +180,16 @@ EOF
   sha256sum "$app_dump" "$dagster_dump" "$rustfs_archive" > meta/SHA256SUMS
 )
 
+python_bin="$(select_python)"
+"$python_bin" "$ROOT_DIR/scripts/write-domain-command-marker.py" \
+  --backup-root "$KOR_TRAVEL_MAP_BACKUP_ROOT" \
+  --command-id "$KOR_TRAVEL_MAP_COMMAND_ID" \
+  --operation "$KOR_TRAVEL_MAP_COMMAND_OPERATION" \
+  --marker-key "$KOR_TRAVEL_MAP_COMMAND_MARKER_KEY" \
+  --effect-kind "$KOR_TRAVEL_MAP_COMMAND_EFFECT_KIND" \
+  --effect-state "created" \
+  --backup-id "$KOR_TRAVEL_MAP_COMMAND_BACKUP_ID" \
+  --input-digest "$KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST"
+release_domain_command_fence
 echo "backup completed: $backup_dir"
 echo "verify with: cd \"$backup_dir\" && sha256sum -c meta/SHA256SUMS"

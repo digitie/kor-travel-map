@@ -31,6 +31,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    domain_command_transaction,
+    idempotent_domain_command,
+)
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
@@ -422,6 +426,7 @@ async def get_review_detail(
     response_model=DedupReviewDecisionResponse,
     responses={404: {"description": "review_id 없음"}, 409: {"description": "전이 불가"}},
 )
+@idempotent_domain_command("admin.dedup-review.decide")
 async def decide_review(
     request: Request,
     review_id: str,
@@ -433,7 +438,7 @@ async def decide_review(
     if body.decision == "merged":
         try:
             async with (
-                session.begin(),
+                domain_command_transaction(session),
                 advisory_lock(session, f"dedup-merge:{review_id}"),
             ):
                 outcome = await merge_dedup_review(
@@ -467,7 +472,7 @@ async def decide_review(
             request=request,
         )
 
-    async with session.begin():
+    async with domain_command_transaction(session):
         changed = await set_dedup_review_decision(
             session,
             review_id,

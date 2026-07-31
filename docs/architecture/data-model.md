@@ -2610,6 +2610,50 @@ make_price_value_key(*, feature_id: str, provider: str, price_domain: str,
 - 인덱스 삭제는 `DROP INDEX CONCURRENTLY IF EXISTS`.
 - 컬럼 타입 변경은 `USING` cast + downtime 또는 새 컬럼 + 백필 + swap.
 
+## 13. Domain command replay와 외부 효과 실행 상태 (T-VN-12)
+
+### 13.1 공통 claim/result
+
+`ops.domain_commands`는 `(actor, operation, idempotency_key)` UNIQUE identity와
+fingerprint version 1, canonical request SHA-256을 저장한다. 행은 생성 뒤 수정·삭제할 수
+없다. `ops.domain_command_results`는 command당 하나의 terminal HTTP status/body/header를
+append-only로 저장하며 claim 없이 존재할 수 없다. DB-only command는 업무 row 변경과 두
+ledger write를 같은 transaction에 둔다.
+
+### 13.2 외부 효과 execution
+
+`ops.offline_upload_command_executions`와 `ops.backup_command_executions`는 공통
+`command_id`를 FK/PK로 사용하고 `prepared → effect_started → effect_succeeded`만 허용한다.
+효과 identity(upload/object key, backup/target/marker key, deterministic Dagster run ID)와
+input digest는 준비 뒤 불변이다. `effect_succeeded`에는 operation별 output digest와 완료
+시각이 필수다. backup 계열은 marker SHA-256도 필수이며 delete는 삭제 전 응답 snapshot을
+`prepared_result` JSONB로 동결한다.
+
+offline upload는 `uploading`을 명시적 reservation 상태로 추가한다. 이 상태는 삭제·검증·적재
+대상이 아니며 create command가 object proof를 확정할 때만 `uploaded`로 전이한다. 따라서
+DB reservation 이전의 orphan object나 object write 이전의 terminal success가 생기지 않는다.
+삭제는 `deleting` 상태와 `delete_command_id → ops.domain_commands`를 같은 transaction에서
+원자 예약한다. owner command만 최종 row 삭제를 수행할 수 있고, 같은 `upload_id`에 다른 key가
+경쟁하면 loser의 claim transaction 전체가 rollback되어 복구 불가능한 claim-only 상태를 남기지
+않는다.
+
+### 13.3 Filesystem completion proof
+
+backup marker에는 schema version, command/operation/marker key, effect kind/state,
+backup/restore target identity, request input digest, effect-specific output proof와 그
+canonical SHA-256, UTC completion time을 넣는다. create proof는 manifest와
+`SHA256SUMS` logical digest 및 모든 checksum 검증, delete proof는 동결 snapshot digest와
+artifact 부재, restore proof는 source checksum과 검증된 target identity, swap proof는
+`planned|applied` 구분과 canonical `.env.restore-swap` 파일 digest다.
+
+marker 파일은 root 밖 경로·symlink·hardlink·foreign owner/mode를 거부하고 최초 exact
+marker를 덮어쓰지 않는다. restore 재시작은 exact command/source marker가 있을 때만 완료를
+채택한다. marker 없는 기존 target은 전부 healthy여도 provenance가 아니므로 자동 복구 성공으로
+인증하지 않으며, target 부재면 실행하고 기존/부분 target은 명시적 recreate 또는 운영자
+reconciliation으로 보낸다. backup create도 command/input digest가 fsync된 destination
+reservation을 effect 전에 선점하고, 다른 artifact나 marker 없는 artifact는 채택하지 않는다.
+swap은 고정 project child `.env.restore-swap`만 쓰며 plan-only와 실제 apply proof를 분리한다.
+
 ## 이관된 결정 (구 ADR)
 
 ADR에서 빼고 본 문서로 이관한 provider/ETL·도메인·알고리즘·운영 결정이다. 각 항목은

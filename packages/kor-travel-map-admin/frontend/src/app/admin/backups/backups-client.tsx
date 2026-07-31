@@ -205,7 +205,6 @@ export function BackupsClient() {
             app_db: null,
             dagster_db: null,
             rustfs_volume: null,
-            env_file: null,
             apply: applySwap,
             execute: executeSwap,
             skip_verify: false,

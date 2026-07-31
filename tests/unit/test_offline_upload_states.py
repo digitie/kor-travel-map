@@ -23,6 +23,7 @@ pytestmark = pytest.mark.unit
 
 def test_offline_upload_state_sets_are_single_source_contract() -> None:
     assert OFFLINE_UPLOAD_STATE_VALUES == (
+        "uploading",
         "uploaded",
         "validating",
         "validated",
@@ -30,10 +31,12 @@ def test_offline_upload_state_sets_are_single_source_contract() -> None:
         "loading",
         "loaded",
         "load_failed",
+        "deleting",
         "cancelled",
     )
     assert set(OFFLINE_UPLOAD_STATE_VALUES) == OFFLINE_UPLOAD_STATES
     assert {
+        "uploading",
         "uploaded",
         "validating",
         "validated",
@@ -41,6 +44,7 @@ def test_offline_upload_state_sets_are_single_source_contract() -> None:
         "loading",
         "loaded",
         "load_failed",
+        "deleting",
         "cancelled",
     } == OFFLINE_UPLOAD_STATES
     assert {
@@ -56,7 +60,12 @@ def test_offline_upload_state_sets_are_single_source_contract() -> None:
     } == OFFLINE_UPLOAD_VALIDATABLE_STATES
     assert {"validated", "load_failed"} == OFFLINE_UPLOAD_TABULAR_LOADABLE_STATES
     assert {"cancelled"} == OFFLINE_UPLOAD_RESERVED_STATES
-    assert {"validating", "loading"} == OFFLINE_UPLOAD_IN_PROGRESS_STATES
+    assert {
+        "uploading",
+        "validating",
+        "loading",
+        "deleting",
+    } == OFFLINE_UPLOAD_IN_PROGRESS_STATES
     assert {
         "uploaded",
         "validated",

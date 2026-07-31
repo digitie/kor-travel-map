@@ -902,10 +902,12 @@ export interface paths {
         post?: never;
         /**
          * 오프라인 업로드 삭제 (정리 lifecycle)
-         * @description 업로드 메타데이터 row를 지우고 저장 객체를 best-effort로 정리한다.
+         * @description 저장 객체 삭제를 확인한 뒤 업로드 메타데이터 row를 지운다.
          *
          *     객체가 이미 없어도(예: RustFS 교체로 원본이 소실된 좀비 업로드, #397)
-         *     삭제는 성공한다. 진행 중(``validating``/``loading``) 업로드는 409.
+         *     S3 ``DeleteObject`` 계약에 따라 삭제는 성공한다. 저장소 응답이 모호하면 command와
+         *     row를 pending으로 남겨 같은 key 재시도가 동일 삭제 effect를 복구한다.
+         *     진행 중(``validating``/``loading``) 업로드의 신규 삭제 command는 409.
          *     같은 checksum 재업로드의 멱등 가드(409)는 row 삭제로 풀린다.
          */
         delete: operations["delete_offline_upload_request_v1_admin_offline_uploads__upload_id__delete"];
@@ -10638,8 +10640,6 @@ export interface components {
             apply: boolean;
             /** Dagster Db */
             dagster_db?: string | null;
-            /** Env File */
-            env_file?: string | null;
             /**
              * Execute
              * @default false
@@ -11200,7 +11200,10 @@ export interface operations {
     create_admin_auth_event_v1_admin_auth_events_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -11271,7 +11274,9 @@ export interface operations {
     create_backup_v1_admin_backups_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -11353,7 +11358,9 @@ export interface operations {
     delete_backup_v1_admin_backups__backup_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 backup_id: string;
             };
@@ -11439,7 +11446,10 @@ export interface operations {
     create_admin_curated_source_rule_route_v1_admin_curated_source_rules_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -11481,7 +11491,10 @@ export interface operations {
     patch_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 rule_id: string;
             };
@@ -11525,7 +11538,10 @@ export interface operations {
     apply_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__apply_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 rule_id: string;
             };
@@ -11608,7 +11624,10 @@ export interface operations {
     create_admin_curated_source_route_v1_admin_curated_sources_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -11650,7 +11669,10 @@ export interface operations {
     patch_admin_curated_source_route_v1_admin_curated_sources__source_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 source_id: string;
             };
@@ -11736,7 +11758,10 @@ export interface operations {
     create_admin_curated_theme_route_v1_admin_curated_themes_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -11778,7 +11803,10 @@ export interface operations {
     patch_admin_curated_theme_route_v1_admin_curated_themes__theme_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 theme_id: string;
             };
@@ -11870,7 +11898,10 @@ export interface operations {
     create_admin_curation_collection_v1_admin_curations_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -11914,7 +11945,9 @@ export interface operations {
             query?: {
                 dry_run?: boolean;
             };
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -12025,7 +12058,10 @@ export interface operations {
     archive_admin_curation_collection_v1_admin_curations__collection_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 collection_id: string;
             };
@@ -12065,7 +12101,10 @@ export interface operations {
     patch_admin_curation_collection_v1_admin_curations__collection_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 collection_id: string;
             };
@@ -12109,7 +12148,10 @@ export interface operations {
     add_admin_curation_item_v1_admin_curations__collection_id__items_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 collection_id: string;
             };
@@ -12153,7 +12195,10 @@ export interface operations {
     archive_admin_curation_item_v1_admin_curations__collection_id__items__curation_item_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 collection_id: string;
                 curation_item_id: string;
@@ -12194,7 +12239,10 @@ export interface operations {
     patch_admin_curation_item_v1_admin_curations__collection_id__items__curation_item_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 collection_id: string;
                 curation_item_id: string;
@@ -12301,7 +12349,10 @@ export interface operations {
     create_feature_route_v1_admin_features_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -12386,7 +12437,10 @@ export interface operations {
     approve_feature_change_request_route_v1_admin_features_change_requests__request_id__approve_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 request_id: string;
             };
@@ -12459,7 +12513,10 @@ export interface operations {
     reject_feature_change_request_route_v1_admin_features_change_requests__request_id__reject_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 request_id: string;
             };
@@ -12572,7 +12629,10 @@ export interface operations {
     create_admin_curated_feature_route_v1_admin_features_curated_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -12654,7 +12714,10 @@ export interface operations {
     delete_admin_curated_feature_route_v1_admin_features_curated__curated_feature_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 curated_feature_id: string;
             };
@@ -12694,7 +12757,10 @@ export interface operations {
     patch_admin_curated_feature_route_v1_admin_features_curated__curated_feature_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 curated_feature_id: string;
             };
@@ -12820,7 +12886,10 @@ export interface operations {
     select_admin_curated_feature_route_v1_admin_features_curated__curated_feature_id__select_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 curated_feature_id: string;
             };
@@ -12864,7 +12933,10 @@ export interface operations {
     unselect_admin_curated_feature_route_v1_admin_features_curated__curated_feature_id__unselect_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 curated_feature_id: string;
             };
@@ -13007,7 +13079,10 @@ export interface operations {
     decide_review_v1_admin_features_dedup_reviews__review_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 review_id: string;
             };
@@ -13165,7 +13240,10 @@ export interface operations {
     decide_review_v1_admin_features_enrichment_reviews__review_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 review_id: string;
             };
@@ -13379,6 +13457,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
                 /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
                 "If-Match": string;
             };
@@ -13464,6 +13544,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
                 /** @description 직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성). */
                 "If-Match": string;
             };
@@ -13548,7 +13630,10 @@ export interface operations {
     deactivate_feature_route_v1_admin_features__feature_id__deactivate_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 feature_id: string;
             };
@@ -13823,7 +13908,10 @@ export interface operations {
     rescan_files_v1_admin_files_rescan_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -13977,7 +14065,10 @@ export interface operations {
     purge_file_v1_admin_files__file_id__purge_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 file_id: number;
             };
@@ -14123,7 +14214,10 @@ export interface operations {
     patch_admin_issue_v1_admin_issues__issue_id__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 issue_id: string;
             };
@@ -14203,7 +14297,7 @@ export interface operations {
     list_offline_upload_requests_v1_admin_offline_uploads_get: {
         parameters: {
             query?: {
-                status?: ("uploaded" | "validating" | "validated" | "validation_failed" | "loading" | "loaded" | "load_failed" | "cancelled") | null;
+                status?: ("uploading" | "uploaded" | "validating" | "validated" | "validation_failed" | "loading" | "loaded" | "load_failed" | "deleting" | "cancelled") | null;
                 provider?: string | null;
                 dataset_key?: string | null;
                 page_size?: number;
@@ -14247,7 +14341,9 @@ export interface operations {
     create_offline_upload_request_v1_admin_offline_uploads_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -14347,7 +14443,9 @@ export interface operations {
     delete_offline_upload_request_v1_admin_offline_uploads__upload_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 upload_id: string;
             };
@@ -14414,7 +14512,9 @@ export interface operations {
     load_offline_upload_request_v1_admin_offline_uploads__upload_id__load_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 upload_id: string;
             };
@@ -14550,7 +14650,10 @@ export interface operations {
     validate_offline_upload_request_v1_admin_offline_uploads__upload_id__validate_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 upload_id: string;
             };
@@ -14997,7 +15100,10 @@ export interface operations {
     post_revoke_public_api_key_v1_admin_public_api_keys__public_api_key_id__revoke_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
             path: {
                 public_api_key_id: string;
             };
@@ -15037,7 +15143,9 @@ export interface operations {
     restore_backup_v1_admin_restore__backup_id__post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 backup_id: string;
             };
@@ -15081,7 +15189,9 @@ export interface operations {
     plan_restore_swap_v1_admin_restore__backup_id__swap_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 backup_id: string;
             };

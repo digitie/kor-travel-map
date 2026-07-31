@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +18,19 @@ from fastapi.testclient import TestClient
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
+
+
+class _Tx:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+class _FakeSession:
+    def begin(self) -> _Tx:
+        return _Tx()
 
 
 def _make_app(tmp_path: Path, **overrides: Any) -> Any:
@@ -31,13 +45,37 @@ def _make_app(tmp_path: Path, **overrides: Any) -> Any:
     app = create_app(settings)
     # get_session은 실제 DB 커넥션을 만든다 — sentinel로 대체(라우터가 세션을
     # 실제로 쓰기 전에 검증/게이트에서 분기하는 경로만 테스트).
-    app.dependency_overrides[get_session] = lambda: SimpleNamespace()
+    app.dependency_overrides[get_session] = _FakeSession
     return app
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> TestClient:
-    return TestClient(_make_app(tmp_path))
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from kortravelmap.api import domain_command_service
+
+    app = _make_app(tmp_path)
+    monkeypatch.setattr(
+        domain_command_service,
+        "begin_domain_command",
+        AsyncMock(
+            return_value=domain_command_service.DomainCommandHandle(
+                command_id=1,
+                actor="local-dev",
+                operation="admin.managed-file.rescan",
+                idempotency_key="95000000-0000-4000-8000-000000000001",
+                request_fingerprint="a" * 64,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        domain_command_service,
+        "complete_domain_command",
+        AsyncMock(),
+    )
+    return TestClient(
+        app,
+        headers={"Idempotency-Key": "95000000-0000-4000-8000-000000000001"},
+    )
 
 
 @pytest.mark.unit

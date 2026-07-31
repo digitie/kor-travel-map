@@ -13,7 +13,7 @@ import mimetypes
 from pathlib import PurePath
 from time import perf_counter
 from typing import Annotated, Any, Final, cast
-from uuid import uuid4
+from uuid import UUID, uuid5
 
 import httpx
 from fastapi import (
@@ -21,13 +21,17 @@ from fastapi import (
     Depends,
     File,
     Form,
+    Header,
     HTTPException,
     Query,
     Request,
     UploadFile,
     status,
 )
-from kortravelmap.core.exceptions import FileStoreError
+from kortravelmap.core.exceptions import (
+    FileStoreError,
+    FileStoreObjectNotFoundError,
+)
 from kortravelmap.core.managed_file_states import (
     MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
 )
@@ -44,18 +48,32 @@ from kortravelmap.geocoding import (
     kor_travel_geo_reverse_geocoder,
 )
 from kortravelmap.infra import file_registry
-from kortravelmap.infra.file_store import S3ObjectStore, build_s3_object_store
-from kortravelmap.infra.jobs_repo import finish_import_job, get_import_job
+from kortravelmap.infra.domain_command_execution_repo import (
+    complete_offline_upload_command_effect,
+    create_offline_upload_command_execution,
+    get_offline_upload_command_execution,
+    start_offline_upload_command_effect,
+)
+from kortravelmap.infra.domain_command_repo import (
+    DomainCommandClaim,
+    canonical_domain_command_fingerprint,
+)
+from kortravelmap.infra.file_store import (
+    S3ObjectStore,
+    build_s3_object_store,
+)
+from kortravelmap.infra.jobs_repo import get_import_job
 from kortravelmap.infra.offline_upload_repo import (
     OfflineUpload,
     OfflineUploadPage,
     OfflineUploadStatusConflict,
-    create_offline_upload,
     delete_offline_upload,
-    finish_offline_upload_load,
+    finalize_offline_upload_reservation,
     get_offline_upload,
     get_offline_upload_by_checksum,
     list_offline_uploads,
+    reserve_offline_upload,
+    reserve_offline_upload_delete,
     reserve_offline_upload_load,
 )
 from kortravelmap.offline_upload import (
@@ -64,16 +82,19 @@ from kortravelmap.offline_upload import (
 )
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api import dagster_graphql
+from kortravelmap.api import dagster_graphql, domain_command_service
 from kortravelmap.api.auth import (
     AdminProxyContext,
     require_admin_destructive_enabled,
     require_admin_frontend,
 )
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    domain_command_transaction,
+    idempotent_domain_command,
+)
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.settings import ApiSettings
 
@@ -91,6 +112,7 @@ __all__ = [
 
 router = APIRouter(prefix="/admin/offline-uploads", tags=["admin-offline-uploads"])
 _LOG = logging.getLogger(__name__)
+_OFFLINE_UPLOAD_COMMAND_NAMESPACE = UUID("4d3855a2-855d-4a69-bf69-151dfae6e2f8")
 
 _MULTIPART_CONTENT_LENGTH_MARGIN_BYTES: Final[int] = 64 * 1024
 _DAGSTER_OFFLINE_UPLOAD_JOB_NAME: Final[str] = "offline_upload_load"
@@ -651,20 +673,6 @@ def _offline_upload_store_from_request(request: Request) -> S3ObjectStore:
     return store
 
 
-async def _rollback_uploaded_object(
-    store: S3ObjectStore,
-    object_key: str,
-) -> None:
-    """DB metadata 생성 실패 시 방금 쓴 offline upload object만 보상 삭제한다."""
-    try:
-        await store.delete_object(object_key)
-    except FileStoreError:
-        _LOG.exception(
-            "offline upload object rollback delete failed: object_key=%s",
-            object_key,
-        )
-
-
 async def _post_graphql(
     graphql_url: str,
     *,
@@ -682,7 +690,12 @@ async def _post_graphql(
     return _dict(payload)
 
 
-def _launch_variables(settings: ApiSettings, upload_id: str) -> dict[str, object]:
+def _launch_variables(
+    settings: ApiSettings,
+    upload_id: str,
+    *,
+    run_id: str,
+) -> dict[str, object]:
     return {
         "executionParams": {
             "selector": {
@@ -699,6 +712,7 @@ def _launch_variables(settings: ApiSettings, upload_id: str) -> dict[str, object
             },
             "mode": "default",
             "executionMetadata": {
+                "runId": run_id,
                 "tags": [
                     {"key": "kor_travel_map.job_kind", "value": "offline_upload_load"},
                     {"key": "kor_travel_map.upload_id", "value": upload_id},
@@ -726,6 +740,8 @@ def _launch_error_detail(result: dict[str, Any]) -> str:
 async def launch_offline_upload_load(
     request: Request,
     upload_id: str,
+    *,
+    run_id: str,
 ) -> _DagsterLaunch:
     """Dagster ``offline_upload_load`` run을 시작한다."""
     settings = _settings_from_request(request)
@@ -734,7 +750,7 @@ async def launch_offline_upload_load(
         payload = await _post_graphql(
             graphql_url,
             query=_DAGSTER_LAUNCH_MUTATION,
-            variables=_launch_variables(settings, upload_id),
+            variables=_launch_variables(settings, upload_id, run_id=run_id),
             timeout_seconds=settings.dagster_request_timeout_seconds,
         )
     except (httpx.HTTPError, ValueError) as exc:
@@ -751,7 +767,10 @@ async def launch_offline_upload_load(
         )
 
     result = _dict(_dict(payload.get("data")).get("launchRun"))
-    if _string(result.get("__typename")) != "LaunchRunSuccess":
+    typename = _string(result.get("__typename"))
+    if typename == "RunConflict":
+        return _DagsterLaunch(run_id=run_id, status="UNKNOWN")
+    if typename != "LaunchRunSuccess":
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=_launch_error_detail(result),
@@ -783,13 +802,13 @@ async def create_offline_upload_request(
     ],
     provider: Annotated[str, Form(min_length=1)],
     dataset_key: Annotated[str, Form(min_length=1)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     sync_scope: Annotated[str, Form(min_length=1)] = "default",
 ) -> OfflineUploadWriteResponse:
     started_at = perf_counter()
     settings = _kor_travel_map_settings_from_request(request)
     max_bytes = settings.offline_upload_max_bytes
     _guard_upload_content_length(request, max_bytes=max_bytes)
-    upload_id = str(uuid4())
     filename = _safe_filename(file.filename)
     detected_format = _detected_format(filename)
     if detected_format not in OFFLINE_UPLOAD_WRITEABLE_FORMATS:
@@ -806,29 +825,62 @@ async def create_offline_upload_request(
 
     content_type = file.content_type or _content_type(filename, detected_format)
     checksum_sha256 = hashlib.sha256(body).hexdigest()
+    operation = "admin.offline-upload.create"
+    upload_id = str(
+        uuid5(
+            _OFFLINE_UPLOAD_COMMAND_NAMESPACE,
+            f"{context.actor}:{operation}:{idempotency_key}",
+        )
+    )
     storage_key = _storage_key(settings, upload_id, filename)
     store = _offline_upload_store_from_request(request)
-    try:
-        stored = await store.write_bytes(
-            storage_key,
-            body,
-            content_type=content_type,
-            metadata={
-                "upload_id": upload_id,
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "sync_scope": sync_scope,
-            },
-        )
-    except FileStoreError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
-        ) from exc
-
-    try:
-        async with session.begin():
-            upload = await create_offline_upload(
+    object_metadata = {
+        "content-sha256": checksum_sha256,
+        "dataset-key": dataset_key,
+        "provider": provider,
+        "sync-scope": sync_scope,
+        "upload-id": upload_id,
+    }
+    metadata_digest = canonical_domain_command_fingerprint(object_metadata)
+    payload = {
+        "provider": provider,
+        "dataset_key": dataset_key,
+        "sync_scope": sync_scope,
+        "filename": filename,
+        "storage_backend": "rustfs",
+        "bucket": store.bucket,
+        "storage_key": storage_key,
+        "content_type": content_type,
+        "byte_size": len(body),
+        "content_sha256": checksum_sha256,
+        "metadata_digest": metadata_digest,
+    }
+    write_object = False
+    async with session.begin():
+        try:
+            command = await domain_command_service.begin_domain_command(
+                session,
+                actor=context.actor,
+                operation=operation,
+                idempotency_key=idempotency_key,
+                payload=payload,
+            )
+            execution = await create_offline_upload_command_execution(
+                session,
+                command_id=command.command_id,
+                effect_kind="create",
+                upload_id=upload_id,
+                storage_backend="rustfs",
+                bucket=store.bucket,
+                storage_key=storage_key,
+                content_type=content_type,
+                byte_size=len(body),
+                content_sha256=checksum_sha256,
+                metadata_digest=metadata_digest,
+                load_job_id=None,
+                input_digest=command.request_fingerprint,
+            )
+            upload = await reserve_offline_upload(
                 session,
                 upload_id=upload_id,
                 provider=provider,
@@ -836,28 +888,164 @@ async def create_offline_upload_request(
                 sync_scope=sync_scope,
                 original_filename=filename,
                 storage_backend="rustfs",
-                storage_key=stored.object_key,
-                byte_size=stored.byte_size,
+                storage_key=storage_key,
+                byte_size=len(body),
                 checksum_sha256=checksum_sha256,
                 detected_format=detected_format,
                 detected_encoding=None,
                 created_by=context.actor,
             )
-    except IntegrityError as exc:
-        await _rollback_uploaded_object(store, stored.object_key)
-        duplicate = await get_offline_upload_by_checksum(
-            session,
-            provider=provider,
-            dataset_key=dataset_key,
-            sync_scope=sync_scope,
-            checksum_sha256=checksum_sha256,
+            if upload is None:
+                duplicate = await get_offline_upload_by_checksum(
+                    session,
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    sync_scope=sync_scope,
+                    checksum_sha256=checksum_sha256,
+                )
+                if duplicate is None:
+                    raise RuntimeError(
+                        "offline upload checksum reservation conflict row is missing"
+                    )
+                raise _duplicate_upload_conflict(duplicate)
+            write_object = True
+        except domain_command_service.DomainCommandPending as pending:
+            command = domain_command_service.DomainCommandHandle(
+                command_id=pending.claim.command_id,
+                actor=pending.claim.actor,
+                operation=pending.claim.operation,
+                idempotency_key=pending.claim.idempotency_key,
+                request_fingerprint=pending.claim.request_fingerprint,
+            )
+            recovered_execution = await get_offline_upload_command_execution(
+                session, command.command_id
+            )
+            if recovered_execution is None:
+                raise
+            execution = recovered_execution
+            upload = await get_offline_upload(session, upload_id)
+            if upload is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="offline upload reservation is missing",
+                ) from pending
+    if (
+        execution.effect_kind != "create"
+        or execution.upload_id != upload_id
+        or execution.storage_backend != "rustfs"
+        or execution.bucket != store.bucket
+        or execution.storage_key != storage_key
+        or execution.content_type != content_type
+        or execution.byte_size != len(body)
+        or execution.content_sha256 != checksum_sha256
+        or execution.metadata_digest != metadata_digest
+        or execution.input_digest != command.request_fingerprint
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="offline upload command execution identity mismatch",
         )
-        if duplicate is not None:
-            raise _duplicate_upload_conflict(duplicate) from exc
-        raise
-    except Exception:  # noqa: BLE001 - DB 원인 보존 + object 보상 삭제
-        await _rollback_uploaded_object(store, stored.object_key)
-        raise
+
+    if execution.phase == "prepared":
+        async with session.begin():
+            execution = await start_offline_upload_command_effect(
+                session, command.command_id
+            )
+        write_object = True
+
+    if execution.phase not in {"effect_started", "effect_succeeded"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="offline upload command phase is invalid",
+        )
+
+    async def _write_exact_object() -> None:
+        try:
+            await store.write_bytes(
+                storage_key,
+                body,
+                content_type=content_type,
+                metadata=object_metadata,
+            )
+        except FileStoreError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+
+    if write_object:
+        await _write_exact_object()
+    else:
+        try:
+            await store.inspect_object(storage_key)
+        except FileStoreObjectNotFoundError:
+            # ``effect_started`` 직후 process가 죽은 경우 authoritative HEAD 404만
+            # deterministic PUT 재실행을 허용한다. timeout/5xx는 아래 proof 경계에서
+            # pending으로 남겨 외부 effect를 추측하지 않는다.
+            await _write_exact_object()
+        except FileStoreError:
+            pass
+
+    try:
+        stored = await store.inspect_object(storage_key)
+        proof_body = await store.read_bytes(storage_key)
+    except (FileStoreError, KeyError) as exc:
+        raise domain_command_service.DomainCommandPending(
+            DomainCommandClaim(
+                command_id=command.command_id,
+                actor=command.actor,
+                operation=command.operation,
+                idempotency_key=command.idempotency_key,
+                fingerprint_version=1,
+                request_fingerprint=command.request_fingerprint,
+                created_at=execution.prepared_at,
+            )
+        ) from exc
+    if (
+        stored.bucket != store.bucket
+        or stored.object_key != storage_key
+        or stored.byte_size != len(body)
+        or stored.content_type != content_type
+        or stored.metadata != object_metadata
+        or canonical_domain_command_fingerprint(stored.metadata)
+        != metadata_digest
+        or hashlib.sha256(proof_body).hexdigest() != checksum_sha256
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="idempotent offline upload object proof mismatch",
+        )
+
+    async with session.begin():
+        upload = await finalize_offline_upload_reservation(
+            session,
+            upload_id=upload_id,
+        )
+        if upload is None:
+            raise HTTPException(status_code=404, detail="offline upload을 찾을 수 없습니다.")
+        response = OfflineUploadWriteResponse(
+            data=_record_from_upload(upload),
+            meta=OfflineUploadWriteMeta(
+                duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+                bucket=stored.bucket,
+                object_key=stored.object_key,
+                content_type=content_type,
+            ),
+        )
+        if execution.phase == "effect_started":
+            await complete_offline_upload_command_effect(
+                session,
+                command.command_id,
+                output_digest=canonical_domain_command_fingerprint(
+                    response.model_dump(mode="json")
+                ),
+            )
+        await domain_command_service.complete_domain_command(
+            session,
+            command=command,
+            response=response,
+            status_code=status.HTTP_201_CREATED,
+        )
     # 파일 registry 등록 hook (H4) — 본 업로드 성공 후 별도 트랜잭션, 실패 무해.
     async with file_registry.registry_guard("offline-upload:register"), session.begin():
         await file_registry.register_file(
@@ -879,15 +1067,7 @@ async def create_offline_upload_request(
                 "sync_scope": sync_scope,
             },
         )
-    return OfflineUploadWriteResponse(
-        data=_record_from_upload(upload),
-        meta=OfflineUploadWriteMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
-            bucket=stored.bucket,
-            object_key=stored.object_key,
-            content_type=content_type,
-        ),
-    )
+    return response
 
 
 @router.get(
@@ -962,45 +1142,165 @@ async def get_offline_upload_request(
 async def delete_offline_upload_request(
     upload_id: str,
     request: Request,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
 ) -> OfflineUploadDeleteResponse:
-    """업로드 메타데이터 row를 지우고 저장 객체를 best-effort로 정리한다.
+    """저장 객체 삭제를 확인한 뒤 업로드 메타데이터 row를 지운다.
 
     객체가 이미 없어도(예: RustFS 교체로 원본이 소실된 좀비 업로드, #397)
-    삭제는 성공한다. 진행 중(``validating``/``loading``) 업로드는 409.
+    S3 ``DeleteObject`` 계약에 따라 삭제는 성공한다. 저장소 응답이 모호하면 command와
+    row를 pending으로 남겨 같은 key 재시도가 동일 삭제 effect를 복구한다.
+    진행 중(``validating``/``loading``) 업로드의 신규 삭제 command는 409.
     같은 checksum 재업로드의 멱등 가드(409)는 row 삭제로 풀린다.
     """
     started_at = perf_counter()
+    operation = "admin.offline-upload.delete"
+    store = _offline_upload_store_from_request(request)
     try:
         async with session.begin():
-            row = await delete_offline_upload(session, upload_id=upload_id)
+            pending_claim: DomainCommandClaim | None = None
+            try:
+                command = await domain_command_service.begin_domain_command(
+                    session,
+                    actor=context.actor,
+                    operation=operation,
+                    idempotency_key=idempotency_key,
+                    payload={"upload_id": upload_id},
+                )
+            except domain_command_service.DomainCommandPending as pending:
+                pending_claim = pending.claim
+                command = domain_command_service.DomainCommandHandle(
+                    command_id=pending.claim.command_id,
+                    actor=pending.claim.actor,
+                    operation=pending.claim.operation,
+                    idempotency_key=pending.claim.idempotency_key,
+                    request_fingerprint=pending.claim.request_fingerprint,
+                )
+                recovered_execution = await get_offline_upload_command_execution(
+                    session, command.command_id
+                )
+                if recovered_execution is None:
+                    raise
+                execution = recovered_execution
+            row = await get_offline_upload(session, upload_id)
             if row is None:
+                if pending_claim is not None:
+                    raise domain_command_service.DomainCommandPending(pending_claim)
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"offline upload 없음: {upload_id!r}",
                 )
+            if pending_claim is None:
+                reserved = await reserve_offline_upload_delete(
+                    session,
+                    upload_id=upload_id,
+                    command_id=command.command_id,
+                )
+                if reserved is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"offline upload 없음: {upload_id!r}",
+                    )
+                row = reserved
+                execution = await create_offline_upload_command_execution(
+                    session,
+                    command_id=command.command_id,
+                    effect_kind="delete",
+                    upload_id=upload_id,
+                    storage_backend=row.storage_backend,
+                    bucket=store.bucket,
+                    storage_key=row.storage_key,
+                    content_type=None,
+                    byte_size=row.byte_size,
+                    content_sha256=row.checksum_sha256,
+                    metadata_digest=None,
+                    load_job_id=None,
+                    input_digest=command.request_fingerprint,
+                )
+            elif (
+                row.status != "deleting"
+                or row.delete_command_id != command.command_id
+            ):
+                raise domain_command_service.DomainCommandPending(pending_claim)
     except OfflineUploadStatusConflict as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
+    if (
+        execution.effect_kind != "delete"
+        or execution.upload_id != upload_id
+        or execution.storage_backend != row.storage_backend
+        or execution.bucket != store.bucket
+        or execution.storage_key != row.storage_key
+        or execution.byte_size != row.byte_size
+        or execution.content_sha256 != row.checksum_sha256
+        or execution.input_digest != command.request_fingerprint
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="offline upload delete execution identity mismatch",
+        )
+    if execution.phase == "prepared":
+        async with session.begin():
+            execution = await start_offline_upload_command_effect(
+                session, command.command_id
+            )
 
-    # DB row 삭제 확정 후 객체 best-effort 삭제. S3 DeleteObject는 미존재 키에도
-    # 성공(멱등)하고, 저장소 오류는 정리 lifecycle을 막지 않도록 기록만 한다.
-    store = _offline_upload_store_from_request(request)
-    object_deleted = True
+    # S3 DeleteObject는 미존재 key에도 성공하므로 effect_started 복구 시 재실행해도
+    # 같은 결과다. DB row와 terminal result는 객체 정리 시도 뒤 한 transaction에서
+    # 확정한다.
     try:
         await store.delete_object(row.storage_key)
-    except FileStoreError:
-        object_deleted = False
+    except FileStoreError as exc:
         _LOG.warning(
-            "offline upload object delete failed (best-effort): upload_id=%s, storage_key=%s",
+            "offline upload object delete outcome is ambiguous; command remains pending: "
+            "upload_id=%s, storage_key=%s",
             upload_id,
             row.storage_key,
             exc_info=True,
         )
-    # 파일 registry hook (H7): 삭제 성공 → deleted, 실패 → delete_failed +
-    # orphan(owner_row_deleted) — #397 zombie object를 발생 즉시 가시화한다.
+        raise domain_command_service.DomainCommandPending(
+            DomainCommandClaim(
+                command_id=command.command_id,
+                actor=command.actor,
+                operation=command.operation,
+                idempotency_key=command.idempotency_key,
+                fingerprint_version=1,
+                request_fingerprint=command.request_fingerprint,
+                created_at=execution.prepared_at,
+            )
+        ) from exc
+    async with session.begin():
+        deleted = await delete_offline_upload(
+            session,
+            upload_id=upload_id,
+            command_id=command.command_id,
+        )
+        if deleted is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"offline upload 없음: {upload_id!r}",
+            )
+        response = OfflineUploadDeleteResponse(
+            data=_record_from_upload(deleted),
+            meta=make_meta(started_at=started_at),
+        )
+        if execution.phase == "effect_started":
+            await complete_offline_upload_command_effect(
+                session,
+                command.command_id,
+                output_digest=canonical_domain_command_fingerprint(
+                    response.model_dump(mode="json")
+                ),
+            )
+        await domain_command_service.complete_domain_command(
+            session,
+            command=command,
+            response=response,
+        )
+    # 파일 registry hook (H7): 객체와 owner row 삭제를 모두 확정한 뒤 deleted로 남긴다.
     async with file_registry.registry_guard("offline-upload:delete"), session.begin():
         registered = await file_registry.register_file(
             session,
@@ -1008,40 +1308,21 @@ async def delete_offline_upload_request(
             location=MANAGED_FILE_LOCATION_OFFLINE_UPLOADS,
             path=row.storage_key,
             kind="upload",
-            provider=row.provider,
-            dataset_key=row.dataset_key,
-            byte_size=row.byte_size,
-            checksum_sha256=row.checksum_sha256,
-            upload_id=row.upload_id,
+            provider=deleted.provider,
+            dataset_key=deleted.dataset_key,
+            byte_size=deleted.byte_size,
+            checksum_sha256=deleted.checksum_sha256,
+            upload_id=deleted.upload_id,
             event_kind=None,
             actor="api:admin",
         )
-        if object_deleted:
-            await file_registry.mark_deleted(
-                session,
-                file_id=registered.file_id,
-                actor="api:admin",
-                detail={"upload_id": upload_id},
-            )
-        else:
-            await file_registry.record_event(
-                session,
-                file_id=registered.file_id,
-                event_kind="delete_failed",
-                actor="api:admin",
-                detail={"upload_id": upload_id},
-            )
-            await file_registry.mark_orphan(
-                session,
-                file_id=registered.file_id,
-                reason="owner_row_deleted",
-                actor="api:admin",
-                detail={"upload_id": upload_id},
-            )
-    return OfflineUploadDeleteResponse(
-        data=_record_from_upload(row),
-        meta=make_meta(started_at=started_at),
-    )
+        await file_registry.mark_deleted(
+            session,
+            file_id=registered.file_id,
+            actor="api:admin",
+            detail={"upload_id": upload_id},
+        )
+    return response
 
 
 @router.get(
@@ -1116,6 +1397,7 @@ async def preview_offline_upload_request(
         502: {"description": "객체 저장소 읽기 실패"},
     },
 )
+@idempotent_domain_command("admin.offline-upload.validate")
 async def validate_offline_upload_request(
     upload_id: str,
     request: Request,
@@ -1136,7 +1418,7 @@ async def validate_offline_upload_request(
                     http,
                     api_key=settings.kor_travel_geo_api_key,
                 )
-                async with session.begin():
+                async with domain_command_transaction(session):
                     row = await get_offline_upload(session, upload_id)
                     if row is None:
                         raise HTTPException(
@@ -1155,7 +1437,7 @@ async def validate_offline_upload_request(
                         reverse_geocoder=kor_travel_geo_reverse_geocoder(kraddr),
                     )
         else:
-            async with session.begin():
+            async with domain_command_transaction(session):
                 row = await get_offline_upload(session, upload_id)
                 if row is None:
                     raise HTTPException(
@@ -1252,49 +1534,126 @@ async def get_offline_upload_validation_request(
 async def load_offline_upload_request(
     upload_id: str,
     request: Request,
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
 ) -> OfflineUploadLaunchResponse:
     started_at = perf_counter()
     _validated_graphql_url(_settings_from_request(request))
     try:
         async with session.begin():
+            pending_claim: DomainCommandClaim | None = None
+            try:
+                command = await domain_command_service.begin_domain_command(
+                    session,
+                    actor=context.actor,
+                    operation="admin.offline-upload.load",
+                    idempotency_key=idempotency_key,
+                    payload={"upload_id": upload_id},
+                )
+            except domain_command_service.DomainCommandPending as pending:
+                pending_claim = pending.claim
+                command = domain_command_service.DomainCommandHandle(
+                    command_id=pending.claim.command_id,
+                    actor=pending.claim.actor,
+                    operation=pending.claim.operation,
+                    idempotency_key=pending.claim.idempotency_key,
+                    request_fingerprint=pending.claim.request_fingerprint,
+                )
+                recovered_execution = await get_offline_upload_command_execution(
+                    session, command.command_id
+                )
+                if recovered_execution is None:
+                    raise
+                execution = recovered_execution
             row = await get_offline_upload(session, upload_id)
             if row is None:
+                if pending_claim is not None:
+                    raise domain_command_service.DomainCommandPending(pending_claim)
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"offline upload 없음: {upload_id!r}",
                 )
-            if not _can_load(row):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=_load_reject_detail(row),
+            if pending_claim is None:
+                if not _can_load(row):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=_load_reject_detail(row),
+                    )
+                loading = await reserve_offline_upload_load(
+                    session, upload_id=upload_id
                 )
-            loading = await reserve_offline_upload_load(session, upload_id=upload_id)
-            if loading is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"offline upload 없음: {upload_id!r}",
+                if loading is None or loading.load_job_id is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"offline upload 없음: {upload_id!r}",
+                    )
+                execution = await create_offline_upload_command_execution(
+                    session,
+                    command_id=command.command_id,
+                    effect_kind="load",
+                    upload_id=upload_id,
+                    storage_backend=row.storage_backend,
+                    bucket=None,
+                    storage_key=row.storage_key,
+                    content_type=None,
+                    byte_size=row.byte_size,
+                    content_sha256=row.checksum_sha256,
+                    metadata_digest=None,
+                    load_job_id=loading.load_job_id,
+                    input_digest=command.request_fingerprint,
                 )
+            else:
+                loading = row
     except OfflineUploadStatusConflict as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
-
-    try:
-        launch = await launch_offline_upload_load(request, upload_id)
-    except HTTPException as exc:
+    if (
+        execution.effect_kind != "load"
+        or execution.upload_id != upload_id
+        or execution.storage_backend != row.storage_backend
+        or execution.storage_key != row.storage_key
+        or execution.byte_size != row.byte_size
+        or execution.content_sha256 != row.checksum_sha256
+        or execution.load_job_id is None
+        or loading.load_job_id != execution.load_job_id
+        or execution.input_digest != command.request_fingerprint
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="offline upload load execution identity mismatch",
+        )
+    load_run_id = execution.load_job_id
+    if load_run_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="offline upload load run identity is missing",
+        )
+    if execution.phase == "prepared":
         async with session.begin():
-            if loading.load_job_id is not None:
-                await finish_import_job(
-                    session,
-                    loading.load_job_id,
-                    status="failed",
-                    error_message=str(exc.detail),
-                )
-            await finish_offline_upload_load(session, upload_id=upload_id, status="load_failed")
-        raise
-    return OfflineUploadLaunchResponse(
+            execution = await start_offline_upload_command_effect(
+                session, command.command_id
+            )
+
+    if execution.phase == "effect_started":
+        launch = await launch_offline_upload_load(
+            request,
+            upload_id,
+            run_id=load_run_id,
+        )
+    elif execution.phase == "effect_succeeded" and execution.dagster_run_id:
+        launch = _DagsterLaunch(
+            run_id=execution.dagster_run_id,
+            status="UNKNOWN",
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="offline upload load proof is incomplete",
+        )
+    response = OfflineUploadLaunchResponse(
         data=_record_from_upload(loading),
         meta=OfflineUploadLaunchMeta(
             duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
@@ -1302,3 +1661,19 @@ async def load_offline_upload_request(
             dagster_status=launch.status,
         ),
     )
+    async with session.begin():
+        if execution.phase == "effect_started":
+            await complete_offline_upload_command_effect(
+                session,
+                command.command_id,
+                output_digest=canonical_domain_command_fingerprint(
+                    response.model_dump(mode="json")
+                ),
+                dagster_run_id=launch.run_id,
+            )
+        await domain_command_service.complete_domain_command(
+            session,
+            command=command,
+            response=response,
+        )
+    return response

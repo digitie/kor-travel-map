@@ -48,6 +48,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_destructive_enabled
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    domain_command_transaction,
+    idempotent_domain_command,
+)
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.settings import ApiSettings
 
@@ -504,6 +508,7 @@ async def file_events(
 
 
 @router.post("/rescan", response_model=ManagedFileRescanResponse)
+@idempotent_domain_command("admin.managed-file.rescan")
 async def rescan_files(
     body: RescanRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -535,7 +540,7 @@ async def rescan_files(
 
     scan_backup = requested is None or MANAGED_FILE_LOCATION_BACKUP_ROOT in requested
     if scan_backup:
-        async with session.begin():
+        async with domain_command_transaction(session):
             results.append(
                 await scan_backup_root(
                     session,
@@ -555,7 +560,7 @@ async def rescan_files(
         or MANAGED_FILE_LOCATION_OFFLINE_UPLOADS in requested
     )
     if backfill_requested:
-        async with session.begin():
+        async with domain_command_transaction(session):
             backfilled = await backfill_offline_upload_rows(
                 session, actor="scan:api:rescan"
             )
@@ -590,6 +595,7 @@ async def rescan_files(
     response_model=ManagedFilePurgeResponse,
     dependencies=[Depends(require_admin_destructive_enabled)],
 )
+@idempotent_domain_command("admin.managed-file.purge")
 async def purge_file(
     file_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -628,7 +634,7 @@ async def purge_file(
                 f"허용: {', '.join(sorted(_PURGEABLE_ORPHAN_REASONS))})."
             ),
         )
-    async with session.begin():
+    async with domain_command_transaction(session):
         await file_registry.mark_deleted(
             session,
             file_id=file_id,

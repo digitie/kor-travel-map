@@ -39,6 +39,7 @@ __all__ = [
     "ImportJobConflictError",
     "ProviderError",
     "FileStoreError",
+    "FileStoreObjectNotFoundError",
     "GeoAuthNotConfiguredError",
     "GeoRequestError",
     "IntegrityFindingPersistenceError",
@@ -129,6 +130,10 @@ class FileStoreError(KorTravelMapError):
 
     HTTP 502 매핑.
     """
+
+
+class FileStoreObjectNotFoundError(FileStoreError):
+    """객체 저장소가 key 부재를 권위 있게 확인했을 때 발생."""
 
 
 class GeoAuthNotConfiguredError(KorTravelMapError):

@@ -12,7 +12,8 @@
 admin router/UI, restore hot-swap env 전환 자동화다. Admin UI는 `/admin/backups`에서
 artifact 목록, backup/restore/swap command plan을 보여준다. host command 실행은 기본
 비활성(`KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED=false`)이며, 운영자가 명시 opt-in할
-때만 API에서 스크립트를 실행한다.
+때만 API에서 스크립트를 실행한다. 세 host script는 DB command identity와 API가 미리 만든
+Docker fence가 없으면 실행을 거부하므로 직접 `npm run docker:*`로 mutation하지 않는다.
 
 ## 1. 전제
 
@@ -27,37 +28,17 @@ docker compose stop api frontend dagster dagster-daemon rustfs
 `postgres`는 멈추지 않는다. RustFS는 멈춘 뒤 같은 named volume을
 `rustfs-perms` service로 읽어 tar archive를 만든다.
 
-실행 셸은 WSL 또는 Git Bash를 사용한다. PowerShell에서는 직접 `.sh`를 실행하지 않고
-WSL에 위임한다.
-
-```powershell
-wsl bash -lc "cd /mnt/f/dev/kor-travel-map-codex && npm run docker:backup"
-```
-
 ## 2. 백업 실행
 
-기본 명령은 다음과 같다.
-
-```bash
-npm run docker:backup
-# 내부 실행: bash scripts/docker-backup.sh
-```
-
-기본 저장 위치는 `data/backups/<UTC timestamp>/`다. 경로와 backup id는 환경변수로
-고정할 수 있다.
-
-```bash
-KOR_TRAVEL_MAP_BACKUP_ROOT=/mnt/f/dev/kor-travel-map/data/backups \
-KOR_TRAVEL_MAP_BACKUP_ID=manual-20260605-standalone \
-npm run docker:backup
-```
+Admin UI `/admin/backups` 또는 `POST /v1/admin/backups`의 `execute=true` command로
+실행한다. UUID `Idempotency-Key`, 인증 actor, 정규화 request fingerprint로 DB execution과
+256-bit `effect_token`을 먼저 고정한다. 기본 저장 위치는
+`data/backups/backup-<Idempotency-Key>/`이며 request의 `backup_id`로 바꿀 수 있다.
 
 write service가 실행 중이면 스크립트는 기본적으로 중단한다. 운영자가 의도적으로
 best-effort snapshot을 남길 때만 다음 opt-in을 사용한다.
 
-```bash
-KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING=1 npm run docker:backup
-```
+API request에서 `allow_running=true`를 명시한다.
 
 이 opt-in 산출물은 진단용 best-effort snapshot이다. vNext cutover rollback 기준점으로 사용할 수
 없다. rollback 기준점은 write fence 뒤 생성하고, fence 이후 write가 있으면 검증된 PITR 또는
@@ -67,8 +48,44 @@ forward journal replay를 함께 준비한다(ADR-075). upstream 재수집은 �
 `scripts/docker-backup.sh`, `scripts/docker-restore.sh`,
 `scripts/docker-restore-swap.sh`는 `scripts/with-pg-advisory-lock.py`를 통해
 PostgreSQL advisory lock `maintenance:backup-restore`를 잡고 실행된다. lock이 이미
-잡혀 있으면 실행은 실패한다. 로컬 실험에서만 mutex를 의도적으로 끄려면
-`KOR_TRAVEL_MAP_MAINTENANCE_LOCK_DISABLED=1`을 사용한다.
+잡혀 있으면 실행은 실패한다. lock bypass 환경변수는 지원하지 않는다.
+
+Admin API도 script wrapper 자체가 lock owner다. API connection이 잡은 lock을 env로
+child에 위임하지 않는다. 다만 API는 같은 lock을 짧게 잡아 global Docker fence를 생성·검증한
+뒤에만 DB phase를 `effect_started`로 전이한다. fence는 고정 이름
+`kor-travel-map-maintenance-effect-fence-v1`과 exact effect token/command/operation/input
+digest/source revision/Image ID label을 가진다. canonical compose `postgres` container의 local
+immutable `sha256:` Image ID만 `--pull=never`로 사용하며 network none, read-only rootfs,
+capability 전체 제거, `no-new-privileges`, 비 root user, PID 제한을 적용한다.
+create의 destination reservation은 같은 maintenance lock 안에서 exact fence 획득에 성공한
+뒤, `effect_started` 전이 직전에만 만든다. foreign fence면 backup root는 바뀌지 않는다.
+reservation 실패 때는 DB phase가 여전히 `prepared`임을 근거로 exact 자기 fence만 해제하며,
+그 해제까지 증명하지 못하면 자동 진행하지 않고 manual reconciliation으로 남긴다.
+
+host script는 mutation 전에 pre-acquired fence의 exact identity·running·hardened shape를 다시
+검사한다. foreign fence가 이미 있으면 새 command는 `prepared`에 남고 mutation 0건으로
+`409 BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED`를 반환한다. Docker daemon 작업은
+local CLI 종료만으로 취소를 증명할 수 없으므로
+effect 시작 뒤에는 non-interruptible supervised 작업이다. wrapper는 `SIGTERM`/`SIGINT`를
+호출자 detach로만 기록하고 child에는 전달하지 않는다. stdout/stderr는 API pipe가 아니라
+임시 파일에 spool하고 direct child와 child process group이 자연 terminal에 도달한 뒤에만
+출력을 재생하고 lock을 해제한다.
+
+API cancellation은 bounded하게 호출 task를 끝내고 timeout은
+`504 BACKUP_COMMAND_TIMEOUT`을 반환하지만 wrapper communication은 background에서 계속된다.
+DB execution phase는 `effect_started`에 남는다. wrapper/API container가 `SIGKILL`, OOM,
+rollout으로 사라져 PostgreSQL lock이 풀려도 daemon fence는 유지된다. marker 없는 동일
+command 재시도는 host script를 호출하지 않고
+`409 BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED`로 끝난다. 다른 command도 같은 fence에서
+막힌다. host script가 create-once marker를 남긴 뒤 재시도하면
+외부 효과를 반복하지 않고 marker proof로 `effect_succeeded`와 terminal response를 확정한다.
+동일 key의 stale `prepared` 요청은 maintenance lock 획득 뒤 execution을 다시 읽는다. 이미
+`effect_started`면 fence를 다시 채택하거나 phase UPDATE를 반복하지 않고 recovered 상태로
+기존 marker 확인·manual reconciliation 경로에 합류한다.
+API 내부 delete의
+filesystem `rmtree`는 같은 lock을 marker proof와 domain command terminal result commit까지
+직접 보유한다. 경합은 무기한 대기하지 않고 `409 BACKUP_MAINTENANCE_BUSY`와
+`Retry-After: 3`으로 실패한다.
 
 ## 3. 산출물 구조
 
@@ -85,6 +102,35 @@ data/backups/<backup_id>/
 
 `manifest.json`은 backup id, 생성 시각, DB 이름, RustFS bucket 이름, 파일 상대 경로를
 담는다. `SHA256SUMS`는 세 산출물의 무결성 검증용이다.
+
+Admin command 실행 때는 `data/backups/.domain-command-markers/command-<id>.json`도
+생성한다. marker는 최초 완료 증거를 create-once로 보존하며 command/operation/effect/target,
+request digest, manifest·`SHA256SUMS` 또는 restore/swap output digest와 UTC 완료 시각을
+담는다. 전용 디렉터리 `0700`, 파일 `0600`, owner·regular-file·single-link 검증,
+`O_NOFOLLOW|O_EXCL`, file/dir `fsync`, `renameat2(RENAME_NOREPLACE)`를 사용한다. exact
+identity/proof가 아닌 기존 marker는 덮어쓰지 않고 중단한다.
+
+호출자가 `backup_id`를 지정한 create는 artifact를 쓰기 전에
+`command_id + input_digest + backup_id`를
+`data/backups/<backup_id>/.domain-command-reservation.json`에 fsync하고 빈 `0700`
+destination을 `RENAME_NOREPLACE`로 선점한다. exact reservation이 없는 기존 경로는 유효한
+backup처럼 보여도 새 command가 채택하지 않는다. restore도 exact command/source marker가
+없는 기존 DB·volume의 단순 health를 완료 provenance로 인정하지 않는다. `effect_started`에서
+marker가 없으면 target 존재 여부와 관계없이 자동 재실행하지 않는다.
+
+### 3.1 hard crash 수동 reconciliation
+
+409 응답의 `details`에 command ID, operation, effect kind, effect token, input digest와 fence
+name이 있다. 먼저 `docker inspect kor-travel-map-maintenance-effect-fence-v1`의 exact labels,
+Image ID, hardened shape와 실제 DB/volume/artifact 상태를 대조한다. workload가 계속 실행
+중이거나 terminal을 증명할 수 없으면 fence와 command를 그대로 둔다.
+
+workload terminal과 effect-specific output proof를 외부 증거로 확인한 경우에만
+`write-domain-command-marker.py`의 해당 effect 인자로 create-once marker를 먼저 기록한다.
+그 marker를 다시 검증한 뒤 `docker-domain-command-fence.py release`에 409의 exact identity를
+전달해 fence를 해제하고 같은 `Idempotency-Key`로 재시도한다. fence를 먼저 `docker rm`하거나
+missing/foreign/mismatched resource를 새 command 결과로 채택하지 않는다. 이 경계는 자동
+recovery가 아니라 외부 operator proof다.
 
 ## 4. 검증
 
@@ -119,11 +165,7 @@ tar tzf rustfs/rustfs-data.tar.gz | sed -n '1,40p'
 | Dagster metadata DB | `kor_travel_map_dagster_restore` |
 | RustFS data | Docker volume `kor-travel-map-rustfs-restore` |
 
-```bash
-npm run docker:restore -- <backup_id>
-# 또는
-KOR_TRAVEL_MAP_RESTORE_BACKUP_ID=<backup_id> npm run docker:restore
-```
+Admin UI의 restore 실행 또는 `POST /v1/admin/restore/<backup_id>`에 `execute=true`로 요청한다.
 
 스크립트는 먼저 `meta/SHA256SUMS`를 검증한 뒤 `pg_restore --clean --if-exists
 --no-owner --no-privileges`로 두 DB를 복원하고, `rustfs/rustfs-data.tar.gz`를 staging
@@ -133,21 +175,16 @@ Docker volume에 푼다. `pg_restore`는 planner 통계를 보존하지 않으�
 `feature.features` 통계 생성을 확인한다. 기존 staging 대상이 있으면 기본적으로 중단한다.
 의도적으로 새로 만들 때만 다음 opt-in을 사용한다.
 
-```bash
-KOR_TRAVEL_MAP_RESTORE_BACKUP_ID=<backup_id> \
-KOR_TRAVEL_MAP_RESTORE_RECREATE=1 \
-npm run docker:restore
-```
+process가 restore 완료와 marker 생성 사이에 종료돼도 동일 command를 자동 recovery mode로
+재실행하지 않는다. 대상이 전부 없거나 전부 healthy인 것만으로 effect terminal/provenance를
+증명할 수 없기 때문이다. §3.1의 외부 operator proof를 거쳐 marker를 만들거나 manual 상태를
+유지한다. API는 input-only marker를 합성하지 않는다.
+
+API request에 `recreate=true`를 명시한다.
 
 대상 이름은 staging 환경별로 바꿀 수 있다.
 
-```bash
-KOR_TRAVEL_MAP_RESTORE_BACKUP_ID=<backup_id> \
-KOR_TRAVEL_MAP_RESTORE_APP_DB=kor_travel_map_restore_20260606 \
-KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB=kor_travel_map_dagster_restore_20260606 \
-KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME=kor-travel-map-rustfs-restore-20260606 \
-npm run docker:restore
-```
+API request의 `app_db`, `dagster_db`, `rustfs_volume`으로 지정한다.
 
 스크립트는 `KOR_TRAVEL_MAP_RESTORE_APP_DB == KOR_TRAVEL_MAP_POSTGRES_DB` 또는
 `KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB == KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB`이면 즉시 실패한다.
@@ -174,7 +211,7 @@ staging 대상으로 바꾸기 전까지 외부 서비스는 영향받지 않는
 ## 7. restore hot-swap env 전환
 
 hot-swap은 운영 DB/volume을 삭제하거나 rename하지 않는다. 검증된 staging 대상 이름을
-서비스 env override로 쓰는 `.env.restore-swap` 파일을 생성한 뒤, 필요하면 compose
+서비스 env override로 쓰는 project root의 고정 `.env.restore-swap` 파일을 생성한 뒤, 필요하면 compose
 서비스를 그 env로 다시 띄운다.
 
 ```bash
@@ -189,6 +226,12 @@ bash scripts/docker-restore-swap.sh
 ```bash
 KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY=1 bash scripts/docker-restore-swap.sh
 ```
+
+env 파일 경로 override는 없다. writer는 project root를 owner·mode 기준으로 검증하고
+symlink/hardlink destination을 거부하며 `0600` temp를 fsync한 뒤 같은 디렉터리에서
+원자 교체한다. DSN user/password/database component는 percent-encode한다. marker의
+`swap_planned`는 env 파일만 준비한 상태, `swap_applied`는 compose 적용을 실행한 상태로
+분리되고 exact env SHA-256을 output proof에 포함한다.
 
 생성되는 env는 다음 세 값을 덮어쓴다.
 
@@ -217,6 +260,12 @@ Admin API는 다음 경로를 제공한다.
 Admin API의 command 실행은 `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED=true`와 요청별
 `execute=true`가 모두 있어야 한다. 따라서 기본 UI/API 사용은 plan-only이며, 운영자가
 command/env를 확인한 뒤 명시적으로 실행한다.
+
+네 mutation과 `DELETE /admin/backups/{backup_id}`는 UUID `Idempotency-Key`가 필수다.
+같은 인증 actor·operation·key와 같은 request는 최초 terminal response를 재생하고 다른
+request는 409다. create는 완전한 artifact checksum을 다시 검증해 crash 뒤 marker를 복구할
+수 있다. delete는 새 command의 대상이 처음부터 없으면 claim을 rollback하고 404를 반환하며,
+이미 시작된 command만 DB에 동결한 삭제 전 snapshot과 artifact 부재 proof로 완료한다.
 
 ## 이관된 결정 (구 ADR)
 

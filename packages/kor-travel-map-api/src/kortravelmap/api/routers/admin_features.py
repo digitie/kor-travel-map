@@ -47,6 +47,10 @@ from kortravelmap.api.auth import (
     require_admin_frontend,
 )
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    domain_command_transaction,
+    idempotent_domain_command,
+)
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.response import ClusterUnit, Meta, make_meta
 from kortravelmap.api.routers.curations import AdminCurationItemView
@@ -1294,6 +1298,7 @@ async def get_feature_detail_route(
 
 
 @router.post("", response_model=AdminFeatureChangeResponse)
+@idempotent_domain_command("admin.feature.create")
 async def create_feature_route(
     body: AdminFeatureCreateRequest,
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
@@ -1304,7 +1309,7 @@ async def create_feature_route(
     feature_id = _create_feature_id(body)
     payload = _payload(body)
     payload["feature_id"] = feature_id
-    async with session.begin():
+    async with domain_command_transaction(session):
         try:
             result = await submit_feature_change_request(
                 session,
@@ -1333,6 +1338,7 @@ async def create_feature_route(
     },
     openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
+@idempotent_domain_command("admin.feature.patch")
 async def patch_feature_route(
     feature_id: str,
     body: AdminFeaturePatchRequest,
@@ -1344,7 +1350,7 @@ async def patch_feature_route(
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
     expected_revision = _require_if_match_revision(request)
-    async with session.begin():
+    async with domain_command_transaction(session):
         try:
             result = await submit_feature_change_request(
                 session,
@@ -1379,6 +1385,7 @@ async def patch_feature_route(
     },
     openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
+@idempotent_domain_command("admin.feature.delete")
 async def delete_feature_route(
     feature_id: str,
     body: AdminFeatureDeleteRequest,
@@ -1390,7 +1397,7 @@ async def delete_feature_route(
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
     expected_revision = _require_if_match_revision(request)
-    async with session.begin():
+    async with domain_command_transaction(session):
         try:
             result = await submit_feature_change_request(
                 session,
@@ -1422,6 +1429,7 @@ async def delete_feature_route(
         200: {"headers": _ETAG_RESPONSE_HEADER},
     },
 )
+@idempotent_domain_command("admin.feature-change.approve")
 async def approve_feature_change_request_route(
     request_id: str,
     body: AdminFeatureReviewActionRequest,
@@ -1430,7 +1438,7 @@ async def approve_feature_change_request_route(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
-    async with session.begin():
+    async with domain_command_transaction(session):
         try:
             result = await apply_feature_change_request(
                 session,
@@ -1457,6 +1465,7 @@ async def approve_feature_change_request_route(
     response_model=AdminFeatureChangeResponse,
     responses={404: {"description": "request 없음"}},
 )
+@idempotent_domain_command("admin.feature-change.reject")
 async def reject_feature_change_request_route(
     request_id: str,
     body: AdminFeatureReviewActionRequest,
@@ -1464,7 +1473,7 @@ async def reject_feature_change_request_route(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureChangeResponse:
     started_at = perf_counter()
-    async with session.begin():
+    async with domain_command_transaction(session):
         result = await reject_feature_change_request(
             session,
             request_id,
@@ -1489,6 +1498,7 @@ async def reject_feature_change_request_route(
         403: {"description": "파괴적 admin 작업 비활성"},
     },
 )
+@idempotent_domain_command("admin.feature.deactivate")
 async def deactivate_feature_route(
     feature_id: str,
     body: AdminFeatureDeactivateRequest,
@@ -1496,7 +1506,7 @@ async def deactivate_feature_route(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminFeatureDeactivateResponse:
     started_at = perf_counter()
-    async with session.begin():
+    async with domain_command_transaction(session):
         try:
             result = await deactivate_feature(
                 session,

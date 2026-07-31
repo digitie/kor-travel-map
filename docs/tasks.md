@@ -46,8 +46,8 @@ barrier로 직렬화한다.
     [x] `T-VN-H39`(schedule command pending barrier) →
     [x] `T-VN-16B`(weather batch 소비) →
     [x] `T-VN-16C`(sparse 다중 날짜 weather batch) →
-    [ ] `T-VN-12A` → [ ] `T-VN-12B` → [ ] `T-VN-12C` →
-    [ ] `T-VN-12D`(domain idempotency, A/B/C/D 단일 PR) →
+    [ ] `T-VN-12A/B/C/D`(domain idempotency, 단일 PR #906 — Docker daemon effect를
+        non-interruptible supervision으로 보강, 동일 리뷰어 재검토·n150 파괴적 Live·merge 대기) →
     [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
 - **Wave 2 barrier 이후**
   - freeze(Lane A): [ ] `T-VN-31A` → [ ] `T-VN-31B` → [ ] `T-VN-31C`
@@ -83,33 +83,31 @@ barrier로 직렬화한다.
   리뷰·Live·CI를 먼저 끝내 PR을 머지한다. Claude Code PR 사후 감사는 task PR 머지 뒤
   별도 후속 단계에서 issue를 만들고 진행하며, 진행 중 task의 PR 생성·머지를 지연시키거나
   그 PR에 새 감사를 합치지 않는다. T-VN-48에는 규칙 변경 전에 완료한 issue #881과 PR #888
-  감사 수정만 유지한다. **Lane A a1 task PR 사후 감사는 독립 적대 리뷰어 2명**을 쓰고,
-  docs-only PR은 작은 delta 규칙에 따라 1명으로 한다(사용자 지시 2026-07-30, issue #893부터).
+  감사 수정만 유지한다. **Lane A a1 task PR 사후 감사도 독립 적대 리뷰어 1명**을 쓰고,
+  docs-only·rebase-only·import 정렬·변수명 교정 같은 기계적 변경은 추가 적대 재리뷰 없이
+  진행한다(사용자 지시 2026-07-31).
 - 첫 reviewable checkpoint부터 원격 feature branch에 작은 의미 단위로 자주 커밋·push하되,
-  PR은 구현·적대 리뷰 반영·실데이터 검증·최종 main rebase를 모두 마친 뒤 **머지 직전**에만
-  연다. 실패하면 검증된 직전 checkpoint부터 재개한다.
-- **Lane A**: PR #869 다음 PR부터 적대적 리뷰어 **2명** 반영 후 n150 **파괴적 live E2E**
+  PR도 첫 checkpoint에서 열고 후속 commit을 계속 붙인다. PR review comment는 진행 중
+  반영하며 실패하면 검증된 직전 checkpoint부터 재개한다.
+- **Lane A**: PR #869 다음 PR부터 적대적 리뷰어 **1명** 반영 후 n150 **파괴적 live E2E**
   (실데이터)로 검증하고 PR·CI green·머지. 작업 중 발견 항목은 tasks.md에 즉시 추가.
-- **Lane B**: PR #869 다음 PR부터 적대적 리뷰어 **2명** 반영 후 n150 **실데이터 파괴적 Live UI
+- **Lane B**: PR #869 다음 PR부터 적대적 리뷰어 **1명** 반영 후 n150 **실데이터 파괴적 Live UI
   E2E**를 통과하고 PR·CI green·머지한다. task 완료 시 상대 lane 2일치 PR 적대 리뷰 관행 유지.
 - **일회성 문서 예외**: 사용자 지시에 따라 PR #870은 코드·DB·runtime 변경이 없는 task 재배치
-  문서 PR이므로 적대적 리뷰어 2명과 문서/보안 gate는 유지하되 파괴적 Live UI를 실행하지 않고
+  문서 PR이므로 당시 문서/보안 gate는 유지하되 파괴적 Live UI를 실행하지 않고
   CI 결과를 기다리지 않고 머지한다. 이 예외는 후속 문서 PR에 자동 승계되지 않는다.
 - **우선순위(서비스 전 단계 — 사용자 지시 2026-07-26)**: **정확성·보안 최우선은 불변**
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(현재 Lane B 후보 `0068_integrity_last_seen`). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(현재 Lane B 후보 `0070_domain_command_ledger`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
-- **리뷰어 수 전환(사용자 지시 2026-07-27)**: 현재 PR #869는 기존 지시대로 1명으로
-  완결한다. 그다음 PR부터 문서 전용·rebase-only·기계적 변경을 포함해 적대적 리뷰어
-  2명을 운용한다. 다만 두 리뷰어가 본 변경의 전체 diff를 함께 검토한 마지막 exact SHA 이후
-  누적 후속 delta 전체가 기존 지적의 국소 반영, 완료 사실 기록 또는 표기·기계적 문서 갱신뿐이면
-  원 리뷰어 1명의 재검토로 마친다. runtime·API 계약·DB schema·migration·보안 동작뿐 아니라
-  task 범위·순서·완료 조건과 CI·deploy·runbook 운영 의미를 바꾸거나 범위가 애매한 변경이 누적
-  delta에 하나라도 섞이면 다시 2명이 전체 누적 delta를 검토하고 기준 SHA를 갱신한다.
+- **리뷰어 수(사용자 지시 2026-07-31)**: 코드·runtime·API·DB·migration·보안 동작을
+  바꾸는 PR은 적대 리뷰어 **1명**이 전체 누적 delta를 검토한다. 리뷰 뒤 새 일반 코드 변경이
+  누적되면 같은 리뷰어가 재검토한다. 리뷰 지적의 국소 반영, 문서 전용 추가 commit,
+  rebase-only, import 정렬·변수명 교정 같은 기계적 변경은 추가 적대 재리뷰 없이 진행한다.
 - pytest와 Playwright를 포함한 모든 검증은 n150 WSL SSH에서 실행한다. mocked e2e도 n150
   Linux가 정본이며, n150에서 실행할 수 없는 브라우저 제약이 확인될 때만 Windows를 fallback으로
   사용한다. live e2e는 항상 n150 파괴적 lane으로 실행한다.
@@ -768,6 +766,25 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 2026-07-31 사용자 지시에 따라 A/B/C/D는 한 PR에서 완결한다. 12A의 정적 inventory와
 CI 완전성 검사가 이후 추가되는 모든 write operation의 retryable 분류와 ledger 등록 여부를
 강제하므로, 아직 구현되지 않은 H22B도 별도 선행 barrier 없이 생성 시점에 같은 계약을 따른다.
+
+PR #906의 세 번째 적대 검토에서 local Docker CLI의 종료가 daemon container 종료를 보장하지
+않는 P1을 확인했다. backup/restore/swap은 effect 시작 뒤 non-interruptible supervised 작업으로
+취급한다. API cancellation/timeout은 bounded 반환하되 wrapper는 child·Docker CLI 자연
+terminal과 marker 생성까지 PostgreSQL lock을 보유한다. actual Docker container 실행 중
+경쟁 lock 거부, terminal 뒤 lock 해제·marker 생성, 동일 command retry의 무재실행 terminal
+회수를 회귀 기준으로 둔다.
+
+네 번째 exact 재현에서는 wrapper/local child group을 `SIGKILL`하면 PostgreSQL session lock은
+풀리지만 daemon workload가 계속되고 marker가 없는 상태에서 기존 recovery가 effect를 다시
+시작하는 P1을 확인했다. DB execution의 immutable `effect_token`, API phase 전 global Docker
+fence pre-acquire, host script mutation 전 exact fence verification으로 보강한다. hard crash
+뒤 동일 command와 다른 command 모두 mutation 0건으로 manual-reconcile에 남고, 외부 operator가
+workload terminal/output proof를 확인해 marker를 기록하기 전에는 fence를 해제하거나 자동
+terminalize하지 않는 actual Docker+PostgreSQL SIGKILL 회귀를 완료 기준에 추가한다.
+create reservation은 같은 maintenance lock 안에서 exact fence 성공 뒤와 `effect_started`
+전이 사이에만 만들고, foreign fence 응답의 backup root byte mutation 0건을 고정한다.
+동일 key stale `prepared` 요청은 lock 획득 뒤 DB phase를 다시 읽어 fence 재채택·0-row
+UPDATE·500 없이 markerless 409/replay 경로에 합류하는 실제 migrated PostgreSQL 회귀를 둔다.
 
 - [ ] T-VN-12A — **retryable command inventory·계약 freeze**
 

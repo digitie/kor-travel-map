@@ -4,7 +4,19 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { deleteJson, getJson, pathWithQuery, postFormData, postJson } from "./client";
+import {
+  clearDomainCreateCommandSlot,
+  deleteJson,
+  domainCommandSlot,
+  domainCreateCommandSlot,
+  fileIdempotencyFingerprint,
+  getJson,
+  pathWithQuery,
+  postFormData,
+  postJson,
+  withDomainIdempotencyFingerprint,
+  withDomainIdempotencySubmission,
+} from "./client";
 import { invalidateOpsDatasetQueries } from "./datasets";
 import type { components, paths } from "./types";
 
@@ -108,43 +120,88 @@ function fetchOfflineUploadValidation(
   );
 }
 
-function createOfflineUpload(
+async function createOfflineUpload(
   body: OfflineUploadCreateRequest,
 ): Promise<OfflineUploadWriteResponse> {
+  const provider = body.provider.trim();
+  const datasetKey = body.datasetKey.trim();
+  const syncScope = body.syncScope?.trim() || "default";
+  const fileIdentity = await fileIdempotencyFingerprint(body.file);
   const form = new FormData();
   form.append("file", body.file);
-  form.append("provider", body.provider);
-  form.append("dataset_key", body.datasetKey);
-  form.append("sync_scope", body.syncScope ?? "default");
-  return postFormData<OfflineUploadWriteResponse>("/v1/admin/offline-uploads", form);
+  form.append("provider", provider);
+  form.append("dataset_key", datasetKey);
+  form.append("sync_scope", syncScope);
+  const operation = "admin.offline-upload.create";
+  return withDomainIdempotencyFingerprint(
+    domainCreateCommandSlot(operation),
+    {
+      provider,
+      dataset_key: datasetKey,
+      sync_scope: syncScope,
+      filename: fileIdentity.filename,
+      content_type: fileIdentity.contentType,
+      byte_size: fileIdentity.byteSize,
+      content_sha256: fileIdentity.contentSha256,
+    },
+    (idempotencyKey) =>
+      postFormData<OfflineUploadWriteResponse>("/v1/admin/offline-uploads", form, {
+        headers: { "Idempotency-Key": idempotencyKey },
+      }),
+    { onRelease: () => clearDomainCreateCommandSlot(operation) },
+  );
 }
 
 function validateOfflineUpload(
   body: OfflineUploadValidateRequest,
 ): Promise<OfflineUploadValidationResponse> {
-  return postJson<OfflineUploadValidationResponse>(
-    `/v1/admin/offline-uploads/${encodeURIComponent(body.uploadId)}/validate`,
-    {
-      sample_size: body.sampleSize ?? 1000,
-      column_mapping: body.columnMapping,
-    },
+  const requestBody = {
+    sample_size: body.sampleSize ?? 1000,
+    column_mapping: body.columnMapping,
+  };
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.offline-upload.validate", body.uploadId),
+    { uploadId: body.uploadId, body: requestBody },
+    (submission, idempotencyKey) =>
+      postJson<OfflineUploadValidationResponse>(
+        `/v1/admin/offline-uploads/${encodeURIComponent(
+          submission.uploadId,
+        )}/validate`,
+        submission.body,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 
 function launchOfflineUploadLoad(
   uploadId: string,
 ): Promise<OfflineUploadLaunchResponse> {
-  return postJson<OfflineUploadLaunchResponse>(
-    `/v1/admin/offline-uploads/${encodeURIComponent(uploadId)}/load`,
-    {},
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.offline-upload.load", uploadId),
+    { uploadId },
+    (submission, idempotencyKey) =>
+      postJson<OfflineUploadLaunchResponse>(
+        `/v1/admin/offline-uploads/${encodeURIComponent(
+          submission.uploadId,
+        )}/load`,
+        {},
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 
 function deleteOfflineUpload(
   uploadId: string,
 ): Promise<OfflineUploadDeleteResponse> {
-  return deleteJson<OfflineUploadDeleteResponse>(
-    `/v1/admin/offline-uploads/${encodeURIComponent(uploadId)}`,
+  return withDomainIdempotencySubmission(
+    domainCommandSlot("admin.offline-upload.delete", uploadId),
+    { uploadId },
+    (submission, idempotencyKey) =>
+      deleteJson<OfflineUploadDeleteResponse>(
+        `/v1/admin/offline-uploads/${encodeURIComponent(submission.uploadId)}`,
+        undefined,
+        { headers: { "Idempotency-Key": idempotencyKey } },
+      ),
   );
 }
 
@@ -154,7 +211,7 @@ export function useOfflineUploads(params: OfflineUploadListParams = {}) {
     queryFn: ({ signal }) => fetchOfflineUploads(params, signal),
     refetchInterval: (query) => {
       const hasActiveUpload = query.state.data?.data.items.some((item) =>
-        ["validating", "loading"].includes(item.status),
+        ["uploading", "validating", "loading", "deleting"].includes(item.status),
       );
       return hasActiveUpload ? 2_000 : false;
     },
@@ -169,7 +226,11 @@ export function useOfflineUpload(uploadId: string | null) {
     enabled: uploadId !== null && uploadId.length > 0,
     refetchInterval: (query) => {
       const status = query.state.data?.data.status;
-      return status === "validating" || status === "loading" ? 2_000 : false;
+      return ["uploading", "validating", "loading", "deleting"].includes(
+        status ?? "",
+      )
+        ? 2_000
+        : false;
     },
     staleTime: 2_000,
   });

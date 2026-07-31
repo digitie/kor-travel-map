@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, postJson, pathWithQuery } from "./client";
+import {
+  domainCommandSlot,
+  getJson,
+  pathWithQuery,
+  postJson,
+  withDomainIdempotencySubmission,
+} from "./client";
 
 export type PublicApiKeyState = "active" | "revoked";
 
@@ -88,9 +94,17 @@ export function useRevokePublicApiKeyMutation() {
   const queryClient = useQueryClient();
   return useMutation<PublicApiKeyRecord, Error, string>({
     mutationFn: async (publicApiKeyId) => {
-      const response = await postJson<{ data: PublicApiKeyRecord }>(
-        `/v1/admin/public-api-keys/${encodeURIComponent(publicApiKeyId)}/revoke`,
-        {},
+      const response = await withDomainIdempotencySubmission(
+        domainCommandSlot("admin.public-api-key.revoke", publicApiKeyId),
+        { publicApiKeyId },
+        (submission, idempotencyKey) =>
+          postJson<{ data: PublicApiKeyRecord }>(
+            `/v1/admin/public-api-keys/${encodeURIComponent(
+              submission.publicApiKeyId,
+            )}/revoke`,
+            {},
+            { headers: { "Idempotency-Key": idempotencyKey } },
+          ),
       );
       return response.data;
     },

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -10,7 +11,16 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import Response
 from kortravelmap.curation_import import (
     CURATION_CSV_HEADERS,
@@ -25,8 +35,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.api import domain_command_service
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    domain_command_transaction,
+    idempotent_domain_command,
+)
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = ["admin_router", "router"]
@@ -626,12 +641,23 @@ async def import_admin_curations(
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     file: Annotated[UploadFile, File(description="UTF-8 CSV 파일")],
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     dry_run: Annotated[bool, Query()] = True,
 ) -> CurationImportResponse:
     """CSV를 preview하거나 오류 없는 전체 파일을 원자적으로 멱등 반영한다."""
     started_at = perf_counter()
     content = await file.read(CURATION_CSV_MAX_BYTES + 1)
     preview = parse_curation_csv(content)
+    command = await domain_command_service.begin_domain_command(
+        session,
+        actor=context.actor,
+        operation="admin.curation.import",
+        idempotency_key=idempotency_key,
+        payload={
+            "content_sha256": hashlib.sha256(content).hexdigest(),
+            "dry_run": dry_run,
+        },
+    )
     matches_by_row = await curation_repo.resolve_feature_matches(
         session,
         requests=tuple(
@@ -791,7 +817,6 @@ async def import_admin_curations(
             result = await curation_repo.import_curation_rows(
                 session, rows=resolved_rows, actor=context.actor
             )
-            await session.commit()
     except IntegrityError as exc:
         await session.rollback()
         raise _conflict(exc) from exc
@@ -805,7 +830,7 @@ async def import_admin_curations(
         item.status in {"unmatched", "review_required", "ambiguous"}
         for item in item_views
     )
-    return CurationImportResponse(
+    response = CurationImportResponse(
         data=CurationImportData(
             dry_run=dry_run,
             rows_total=preview.rows_total,
@@ -823,6 +848,13 @@ async def import_admin_curations(
         ),
         meta=make_meta(request, started_at=started_at),
     )
+    await domain_command_service.complete_domain_command(
+        session,
+        command=command,
+        response=response,
+    )
+    await session.commit()
+    return response
 
 
 @router.get("", response_model=FeatureCurationGroupsResponse)
@@ -1012,6 +1044,7 @@ async def get_admin_curation_collection(
 
 
 @admin_router.post("", response_model=AdminCurationCollectionResponse, status_code=201)
+@idempotent_domain_command("admin.curation-collection.create")
 async def create_admin_curation_collection(
     request: Request,
     body: CurationCollectionCreateRequest,
@@ -1020,7 +1053,7 @@ async def create_admin_curation_collection(
 ) -> AdminCurationCollectionResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             theme_id: str
             if body.theme_id is None:
                 assert body.theme_slug is not None
@@ -1058,6 +1091,7 @@ async def create_admin_curation_collection(
 
 
 @admin_router.patch("/{collection_id}", response_model=AdminCurationCollectionResponse)
+@idempotent_domain_command("admin.curation-collection.patch")
 async def patch_admin_curation_collection(
     request: Request,
     collection_id: UUID,
@@ -1067,7 +1101,7 @@ async def patch_admin_curation_collection(
 ) -> AdminCurationCollectionResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             updates = body.model_dump(exclude_unset=True)
             for field in ("theme_id", "source_id"):
                 if updates.get(field) is not None:
@@ -1100,6 +1134,7 @@ async def patch_admin_curation_collection(
 
 
 @admin_router.delete("/{collection_id}", response_model=AdminCurationCollectionResponse)
+@idempotent_domain_command("admin.curation-collection.archive")
 async def archive_admin_curation_collection(
     request: Request,
     collection_id: UUID,
@@ -1107,7 +1142,7 @@ async def archive_admin_curation_collection(
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationCollectionResponse:
     started_at = perf_counter()
-    async with session.begin():
+    async with domain_command_transaction(session):
         collection = await curation_repo.archive_curation_collection(
             session, collection_id=str(collection_id), actor=context.actor
         )
@@ -1131,6 +1166,7 @@ async def archive_admin_curation_collection(
     response_model=AdminCurationItemResponse,
     status_code=201,
 )
+@idempotent_domain_command("admin.curation-item.create")
 async def add_admin_curation_item(
     request: Request,
     collection_id: UUID,
@@ -1140,7 +1176,7 @@ async def add_admin_curation_item(
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             item, inserted = await curation_repo.add_curation_item(
                 session,
                 collection_id=str(collection_id),
@@ -1168,6 +1204,7 @@ async def add_admin_curation_item(
     "/{collection_id}/items/{curation_item_id}",
     response_model=AdminCurationItemResponse,
 )
+@idempotent_domain_command("admin.curation-item.patch")
 async def patch_admin_curation_item(
     request: Request,
     collection_id: UUID,
@@ -1178,7 +1215,7 @@ async def patch_admin_curation_item(
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             item = await curation_repo.update_curation_item(
                 session,
                 collection_id=str(collection_id),
@@ -1202,6 +1239,7 @@ async def patch_admin_curation_item(
     "/{collection_id}/items/{curation_item_id}",
     response_model=AdminCurationItemResponse,
 )
+@idempotent_domain_command("admin.curation-item.archive")
 async def archive_admin_curation_item(
     request: Request,
     collection_id: UUID,
@@ -1211,7 +1249,7 @@ async def archive_admin_curation_item(
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
     try:
-        async with session.begin():
+        async with domain_command_transaction(session):
             item = await curation_repo.archive_curation_item(
                 session,
                 collection_id=str(collection_id),

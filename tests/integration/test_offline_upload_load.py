@@ -43,6 +43,7 @@ from kortravelmap.infra.offline_upload_repo import (
     get_offline_upload_by_checksum,
     list_offline_uploads,
     mark_offline_upload_loading,
+    reserve_offline_upload_delete,
     reserve_offline_upload_load,
 )
 from kortravelmap.infra.pipeline_cancellation_repo import (
@@ -641,14 +642,26 @@ async def test_delete_offline_upload_unblocks_same_checksum_reupload(
     )
 
     async with AsyncSession(migrated_engine) as session, session.begin():
-        deleted = await delete_offline_upload(session, upload_id=upload_id)
+        command_id = await _reserve_delete(session, upload_id)
+        deleted = await delete_offline_upload(
+            session,
+            upload_id=upload_id,
+            command_id=command_id,
+        )
     assert deleted is not None
     assert deleted.upload_id == upload_id
     assert deleted.checksum_sha256 == checksum
 
     async with AsyncSession(migrated_engine) as session:
         assert await get_offline_upload(session, upload_id) is None
-        assert await delete_offline_upload(session, upload_id=upload_id) is None
+        assert (
+            await delete_offline_upload(
+                session,
+                upload_id=upload_id,
+                command_id=command_id,
+            )
+            is None
+        )
 
     # 같은 provider/dataset/scope/checksum 재업로드가 더는 unique 제약에 안 걸린다.
     second_id = await _create_upload(
@@ -690,7 +703,7 @@ async def test_delete_offline_upload_rejects_in_progress_and_keeps_jobs(
     # 진행 중(loading) row는 삭제 거부.
     with pytest.raises(OfflineUploadStatusConflict):
         async with AsyncSession(migrated_engine) as session, session.begin():
-            await delete_offline_upload(session, upload_id=upload_id)
+            await _reserve_delete(session, upload_id)
 
     async with AsyncSession(migrated_engine) as session, session.begin():
         finished = await finish_offline_upload_load(
@@ -701,9 +714,14 @@ async def test_delete_offline_upload_rejects_in_progress_and_keeps_jobs(
         assert finished is not None
 
     async with AsyncSession(migrated_engine) as session, session.begin():
-        deleted = await delete_offline_upload(session, upload_id=upload_id)
+        command_id = await _reserve_delete(session, upload_id)
+        deleted = await delete_offline_upload(
+            session,
+            upload_id=upload_id,
+            command_id=command_id,
+        )
     assert deleted is not None
-    assert deleted.status == "load_failed"
+    assert deleted.status == "deleting"
 
     # 연관 import job row는 audit 기록으로 남는다.
     async with AsyncSession(migrated_engine) as session:
@@ -714,6 +732,34 @@ async def test_delete_offline_upload_rejects_in_progress_and_keeps_jobs(
             )
         ).one_or_none()
     assert job_row is not None
+
+
+async def _reserve_delete(session: AsyncSession, upload_id: str) -> int:
+    command_id = await session.scalar(
+        text(
+            """
+            INSERT INTO ops.domain_commands (
+              actor, operation, idempotency_key, request_fingerprint
+            ) VALUES (
+              'integration:offline-delete',
+              'admin.offline-upload.delete',
+              x_extension.gen_random_uuid(),
+              repeat('a', 64)
+            )
+            RETURNING command_id
+            """
+        )
+    )
+    assert command_id is not None
+    reserved = await reserve_offline_upload_delete(
+        session,
+        upload_id=upload_id,
+        command_id=command_id,
+    )
+    assert reserved is not None
+    assert reserved.status == "deleting"
+    assert reserved.delete_command_id == command_id
+    return command_id
 
 
 async def _create_upload(

@@ -10,6 +10,76 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-07-31 (codex) — T-VN-12A/B/C/D 구현·로컬 gate 완료
+
+55개 write route의 retryable 분류를 정적 registry와 CI 계약으로 고정하고
+`ops.domain_commands`/`domain_command_results` 공통 ledger를 Feature·curation·review·
+file·offline·backup command에 연결했다. DB-only command는 업무 변경과 result를 한
+transaction에서 끝내며, offline/backup 외부 효과는 별도 execution 상태와 output proof를
+terminal 전제에 둔다. offline create는 `uploading` DB reservation 뒤 S3 write를 실행하고,
+authoritative object 부재만 exact PUT 재개를 허용한다.
+
+backup/restore/swap/delete는 API가 같은 `maintenance:backup-restore` lock을 fail-fast로
+보유한 채 host effect·secure create-once marker·terminal DB commit까지 끝낸다. restore
+partial target은 fail-close하고 swap은 고정 `.env.restore-swap`의 planned/applied proof를
+분리했다. UI는 stable resource/draft slot에 UUID와 submission fingerprint를 동결하고 다른
+submission retry를 차단하며 로그인·로그아웃 actor 경계에서 key 저장소를 지운다. delete/load는
+현재 row precondition보다 claim/replay/conflict를 먼저 확정해 terminal retry를 상태 변화가
+가로막지 않으며, 저장소 삭제 결과가 모호하면 row와 command를 pending으로 보존한다.
+
+OpenAPI·TypeScript 생성물은 최신이며 ruff와 strict mypy가 통과했다. backend targeted
+74건, 실제 PostgreSQL ledger/migration/maintenance-lock integration 6건, frontend 286건과
+lint/type-check/OpenAPI type drift가 모두 green이다. 새
+`FileStoreObjectNotFoundError` export 기대값을 갱신하고 `.venv/bin` subprocess PATH와
+Dagster dev dependency를 갖춘 동일 venv에서 전체 unit+API **2,634건**도 모두 통과했다.
+
+단일 적대 리뷰어의 4개 finding도 반영했다. offline delete는
+`deleting + delete_command_id`를 claim/execution과 원자 예약해 다른 key loser claim을
+rollback한다. backup/restore/swap lock은 host wrapper가 child 전체 수명 동안 소유하고 API
+cancellation/timeout은 process group을 완전히 회수한다. command/input digest destination
+reservation과 exact marker 없는 기존 backup/restore 산출물은 성공으로 채택하지 않는다.
+수정 combined gate는 targeted 102건과 PostgreSQL ledger/resource-race integration 9건,
+전체 unit+API 2,642건, frontend 286건과 lint/type-check/OpenAPI drift,
+ruff·strict mypy·bash syntax가 green이다.
+
+재검토에서 wrapper가 `TERM`으로 먼저 종료돼 lock을 놓고 TERM 무시 descendant가 살아남는
+P1을 추가로 확인해 group reap 방식으로 보강했지만, 세 번째 검토는 local Docker CLI를
+회수해도 daemon container가 계속될 수 있음을 실제 재현했다. 시작된 backup/restore/swap은
+취소 가능한 process가 아니라 non-interruptible supervised effect로 다시 정의했다. API
+cancellation/timeout은 bounded 반환하고 DB phase는 `effect_started`에 남기되, 별도 session의
+wrapper는 임시 output spool과 PostgreSQL lock을 child/Docker CLI 자연 terminal까지 유지한다.
+실제 TERM-ignore Docker container 실행 중 경쟁 lock 거부, terminal 뒤 lock 해제와 durable
+marker 생성, 동일 command retry의 무재실행 `completed`, API cancellation/timeout bounded
+detach 회귀 4건이 green이다. 관련 focused 49건, PostgreSQL/Docker ledger integration 8건,
+전체 unit+API **2,644건**, ruff·strict mypy(core 120/API 58/Dagster 23)·import 경계·
+OpenAPI drift·prod redaction도 모두 통과했다.
+
+네 번째 재검토는 wrapper와 local child group을 hard kill하면 session lock만 풀리고 daemon
+workload는 계속되는 P1을 재현했다. `ops.backup_command_executions.effect_token`을 immutable
+identity로 추가하고, API가 같은 maintenance lock 안에서 hardened global Docker fence를
+pre-acquire한 뒤에만 `effect_started`를 commit하도록 바꿨다. 세 host script는 mutation 전에
+exact fence를 다시 검증하고 marker 기록 뒤 exact identity로만 해제한다. marker 없는
+`effect_started` retry는 `_run_command` 호출 전 explicit manual-reconcile 409로 끝나며,
+foreign fence를 만난 새 command는 `prepared`와 mutation 0건을 유지한다. local immutable
+Image ID/no-pull와 runtime hardening unit 4건, router 26건, 실제 Docker+PostgreSQL에서
+wrapper/child SIGKILL·lock 해제·orphan workload/fence 유지·동일/다른 retry mutation 0건·외부
+operator proof marker 뒤 exact 해제를 고정한 integration 1건이 통과했다.
+marker proof 뒤 exact fence release와 recovery-env 우회 차단까지 포함한 최종 전체
+unit+API는 **2,650건**, domain ledger migration/Docker integration은 **9건**이 통과했다.
+ruff 전체, strict mypy(core 120/API+helper 59/Dagster 23), import 경계, OpenAPI 재생성·drift,
+frontend TypeScript drift/type-check, bash syntax, prod redaction도 모두 green이다.
+최종 P2 보강은 create reservation을 exact fence 성공 뒤·phase 전이 앞으로 옮겨 foreign
+fence에서 backup root를 byte-for-byte 보존한다. reservation 자체가 실패하면 아직
+`prepared`인 exact 자기 fence만 정리한다. stale `prepared` 동일 key는 maintenance lock 뒤
+DB phase를 재조회해 두 번째 fence 채택/UPDATE를 하지 않고 markerless 409 경로에 합류한다.
+router/fence/runbook focused **43건**과 실제 migrated PostgreSQL stale snapshot 회귀 **1건**이
+통과했다.
+
+**다음 한 작업**: 전체 backend/migration/OpenAPI/lint gate와 push 전 보안 감사를 마쳐
+PR #906에 작은 commit을 추가하고 같은 적대 리뷰어가 exact head를 재검토한다. 이어
+n150 파괴적 live UI/API, 최종
+rebase·merge를 끝낸 뒤 T-VN-12A/B/C/D를 `tasks-done.md`로 한 PR 단위 이관한다.
+
 ## 2026-07-31 (codex) — T-VN-16C 완료·T-VN-12A/B/C/D 단일 PR 전환
 
 Map PR #902와 PinVi PR #421이 모두 병합됐고 sparse 다중 날짜 weather batch의

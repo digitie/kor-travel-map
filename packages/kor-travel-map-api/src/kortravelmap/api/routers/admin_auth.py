@@ -25,6 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    commit_domain_command_transaction,
+    idempotent_domain_command,
+)
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = ["router"]
@@ -188,6 +192,7 @@ def _key_record(row: PublicApiKeyRow) -> PublicApiKeyRecord:
 
 
 @router.post("/auth-events", response_model=AdminAuthEventResponse)
+@idempotent_domain_command("admin.auth-event.create")
 async def create_admin_auth_event(
     body: AdminAuthEventCreateRequest,
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
@@ -210,7 +215,7 @@ async def create_admin_auth_event(
         user_agent=body.user_agent,
         request_id=body.request_id,
     )
-    await session.commit()
+    await commit_domain_command_transaction(session)
     return AdminAuthEventResponse(
         data=AdminAuthEventData(item=_auth_record(item)),
         meta=make_meta(started_at=started_at),
@@ -281,6 +286,7 @@ async def post_public_api_key(
     "/public-api-keys/{public_api_key_id}/revoke",
     response_model=PublicApiKeyResponse,
 )
+@idempotent_domain_command("admin.public-api-key.revoke")
 async def post_revoke_public_api_key(
     public_api_key_id: str,
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
@@ -299,7 +305,7 @@ async def post_revoke_public_api_key(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"active public API key not found: {public_api_key_id}",
         )
-    await session.commit()
+    await commit_domain_command_transaction(session)
     return PublicApiKeyResponse(
         data=_key_record(item),
         meta=make_meta(started_at=started_at),

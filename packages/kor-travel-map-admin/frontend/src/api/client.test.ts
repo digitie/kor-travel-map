@@ -2,10 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiClientError,
+  DomainIdempotencySubmissionMismatchError,
+  fileIdempotencyFingerprint,
   getJson,
   idempotencyOperationKey,
   postJson,
   readFrozenIdempotencySubmission,
+  withDomainIdempotencyFingerprint,
+  withDomainIdempotencySubmission,
   withFrozenIdempotencySubmission,
   withIdempotencyKey,
 } from "./client";
@@ -38,10 +42,11 @@ function stubFetchStatus(status: number) {
 
 function stubIdempotencyBrowser(keys: string[]) {
   const values = new Map<string, string>();
+  const subtle = globalThis.crypto.subtle;
   const randomUUID = vi.fn(
     () => keys.shift() ?? "ffffffff-ffff-4fff-8fff-ffffffffffff",
   );
-  vi.stubGlobal("crypto", { randomUUID });
+  vi.stubGlobal("crypto", { randomUUID, subtle });
   vi.stubGlobal("window", {
     sessionStorage: {
       getItem: (key: string) => values.get(key) ?? null,
@@ -95,6 +100,26 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
     expect(first).toMatch(/^request:create:[0-9a-f]{64}$/);
     expect(first).not.toContain("민감한 운영 사유");
     expect(changed).not.toBe(first);
+  });
+
+  it("file idempotency fingerprint는 실제 bytes SHA-256을 사용한다", async () => {
+    const first = await fileIdempotencyFingerprint(
+      new File(["same bytes"], "upload.csv", { type: "Text/CSV" }),
+    );
+    const sameBytes = await fileIdempotencyFingerprint(
+      new File(["same bytes"], "upload.csv", { type: "text/csv" }),
+    );
+    const changedBytes = await fileIdempotencyFingerprint(
+      new File(["different bytes"], "upload.csv", { type: "text/csv" }),
+    );
+
+    expect(first).toMatchObject({
+      byteSize: 10,
+      contentType: "text/csv",
+      filename: "upload.csv",
+    });
+    expect(first.contentSha256).toBe(sameBytes.contentSha256);
+    expect(first.contentSha256).not.toBe(changedBytes.contentSha256);
   });
 
   it("signal 미지정 시에도 동작한다(undefined)", async () => {
@@ -264,6 +289,99 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
     expect(randomUUID).toHaveBeenCalledTimes(2);
   });
 
+  it("fingerprint-only domain slot은 다른 파일 재선택을 같은 command로 보내지 않는다", async () => {
+    const randomUUID = stubIdempotencyBrowser([
+      "45454545-4545-4545-8545-454545454545",
+    ]);
+    const seen: string[] = [];
+    const slot = "admin.offline-upload.create:draft:test";
+    const original = {
+      byte_size: 10,
+      content_sha256: "a".repeat(64),
+      dataset_key: "dataset",
+      provider: "provider",
+      sync_scope: "default",
+    };
+    const changed = {
+      ...original,
+      content_sha256: "b".repeat(64),
+    };
+
+    await expect(
+      withDomainIdempotencyFingerprint(slot, original, async (key) => {
+        seen.push(key);
+        throw new TypeError("response lost");
+      }),
+    ).rejects.toThrow("response lost");
+
+    await expect(
+      withDomainIdempotencyFingerprint(slot, changed, async (key) => {
+        seen.push(key);
+        return "should not send";
+      }),
+    ).rejects.toBeInstanceOf(DomainIdempotencySubmissionMismatchError);
+
+    await withDomainIdempotencyFingerprint(slot, original, async (key) => {
+      seen.push(key);
+      return "ok";
+    });
+
+    expect(seen).toEqual([
+      "45454545-4545-4545-8545-454545454545",
+      "45454545-4545-4545-8545-454545454545",
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it("domain submission slot은 restore body 변경 재시도를 차단한다", async () => {
+    const randomUUID = stubIdempotencyBrowser([
+      "67676767-6767-4767-8767-676767676767",
+    ]);
+    const seen: Array<{ body: { execute: boolean }; key: string }> = [];
+    const slot = "admin.backup.restore:backup-1";
+    const original = { backupId: "backup-1", body: { execute: false } };
+    const changed = { backupId: "backup-1", body: { execute: true } };
+
+    await expect(
+      withDomainIdempotencySubmission(
+        slot,
+        original,
+        async (submission, key) => {
+          seen.push({ body: submission.body, key });
+          throw new TypeError("response lost");
+        },
+      ),
+    ).rejects.toThrow("response lost");
+
+    await expect(
+      withDomainIdempotencySubmission(
+        slot,
+        changed,
+        async (submission, key) => {
+          seen.push({ body: submission.body, key });
+          return "should not send";
+        },
+      ),
+    ).rejects.toBeInstanceOf(DomainIdempotencySubmissionMismatchError);
+
+    await withDomainIdempotencySubmission(slot, original, async (submission, key) => {
+      seen.push({ body: submission.body, key });
+      return "ok";
+    });
+
+    expect(seen).toEqual([
+      {
+        body: { execute: false },
+        key: "67676767-6767-4767-8767-676767676767",
+      },
+      {
+        body: { execute: false },
+        key: "67676767-6767-4767-8767-676767676767",
+      },
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(1);
+  });
+
   it("운영자 해제가 확정된 schedule key는 frozen submission을 폐기한다", async () => {
     const randomUUID = stubIdempotencyBrowser([
       "12121212-1212-4212-8212-121212121212",
@@ -353,6 +471,48 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
     expect(randomUUID).toHaveBeenCalledTimes(1);
   });
 
+  it("domain command pending은 결과 확인 전까지 같은 key를 유지한다", async () => {
+    const randomUUID = stubIdempotencyBrowser([
+      "56565656-5656-4656-8656-565656565656",
+    ]);
+    const seen: string[] = [];
+    const pending = new ApiClientError(
+      "domain command pending",
+      409,
+      "/v1/admin/features/feature-1",
+      {
+        code: "IDEMPOTENCY_RESULT_PENDING",
+        detail: "terminal result is pending",
+        details: {
+          idempotency_key: "56565656-5656-4656-8656-565656565656",
+          operation: "admin.feature.patch",
+        },
+        errors: [],
+        request_id: "request-pending",
+        status: 409,
+        title: "terminal result is pending",
+        type: "https://kor-travel-map/errors/idempotency-result-pending",
+      },
+    );
+
+    await expect(
+      withIdempotencyKey("admin.feature.patch:pending", async (key) => {
+        seen.push(key);
+        throw pending;
+      }),
+    ).rejects.toBe(pending);
+    await withIdempotencyKey("admin.feature.patch:pending", async (key) => {
+      seen.push(key);
+      return "ok";
+    });
+
+    expect(seen).toEqual([
+      "56565656-5656-4656-8656-565656565656",
+      "56565656-5656-4656-8656-565656565656",
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(1);
+  });
+
   it("terminal audit 결과가 불명확한 성공 응답도 같은 key를 유지한다", async () => {
     const randomUUID = stubIdempotencyBrowser([
       "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
@@ -418,6 +578,49 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
     expect(seen).toEqual([
       "11111111-1111-4111-8111-111111111111",
       "22222222-2222-4222-8222-222222222222",
+    ]);
+    expect(randomUUID).toHaveBeenCalledTimes(2);
+  });
+
+  it("확정·기록된 domain 4xx 뒤에는 idempotency key를 폐기한다", async () => {
+    const randomUUID = stubIdempotencyBrowser([
+      "57575757-5757-4757-8757-575757575757",
+      "68686868-6868-4868-8868-686868686868",
+    ]);
+    const seen: string[] = [];
+    const confirmedFailure = new ApiClientError(
+      "known domain failure",
+      409,
+      "/v1/admin/features/feature-1",
+      {
+        code: "ADMIN_FEATURE_CONFLICT",
+        detail: "known domain failure",
+        details: {
+          outcome_certainty: "confirmed",
+          audit_status: "recorded",
+        },
+        errors: [],
+        request_id: "request-domain-confirmed",
+        status: 409,
+        title: "known domain failure",
+        type: "https://kor-travel-map/errors/admin-feature-conflict",
+      },
+    );
+
+    await expect(
+      withIdempotencyKey("admin.feature.patch:confirmed", async (key) => {
+        seen.push(key);
+        throw confirmedFailure;
+      }),
+    ).rejects.toBe(confirmedFailure);
+    await withIdempotencyKey("admin.feature.patch:confirmed", async (key) => {
+      seen.push(key);
+      return "ok";
+    });
+
+    expect(seen).toEqual([
+      "57575757-5757-4757-8757-575757575757",
+      "68686868-6868-4868-8868-686868686868",
     ]);
     expect(randomUUID).toHaveBeenCalledTimes(2);
   });

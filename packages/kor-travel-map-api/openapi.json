@@ -24304,18 +24304,6 @@
             ],
             "title": "Dagster Db"
           },
-          "env_file": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Env File"
-          },
           "execute": {
             "default": false,
             "title": "Execute",
@@ -25880,6 +25868,20 @@
       "post": {
         "description": "Next.js login/logout API가 기록하는 admin 인증 감사 이벤트.",
         "operationId": "create_admin_auth_event_v1_admin_auth_events_post",
+        "parameters": [
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -25972,6 +25974,18 @@
       "post": {
         "description": "Plan or run a cold backup command.",
         "operationId": "create_backup_v1_admin_backups_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -26043,6 +26057,16 @@
             "required": true,
             "schema": {
               "title": "Backup Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -26303,6 +26327,20 @@
       },
       "post": {
         "operationId": "create_admin_curated_source_rule_route_v1_admin_curated_source_rules_post",
+        "parameters": [
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -26366,6 +26404,18 @@
             "required": true,
             "schema": {
               "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -26433,6 +26483,18 @@
             "required": true,
             "schema": {
               "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -26595,6 +26657,20 @@
       },
       "post": {
         "operationId": "create_admin_curated_source_route_v1_admin_curated_sources_post",
+        "parameters": [
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -26658,6 +26734,18 @@
             "required": true,
             "schema": {
               "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -26812,6 +26900,20 @@
       },
       "post": {
         "operationId": "create_admin_curated_theme_route_v1_admin_curated_themes_post",
+        "parameters": [
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -26875,6 +26977,18 @@
             "required": true,
             "schema": {
               "title": "Theme Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -27124,6 +27238,20 @@
       },
       "post": {
         "operationId": "create_admin_curation_collection_v1_admin_curations_post",
+        "parameters": [
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -27190,6 +27318,16 @@
               "default": true,
               "title": "Dry Run",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -27295,6 +27433,18 @@
             "schema": {
               "format": "uuid",
               "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -27409,6 +27559,18 @@
               "title": "Collection Id",
               "type": "string"
             }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -27475,6 +27637,18 @@
             "schema": {
               "format": "uuid",
               "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -27555,6 +27729,18 @@
               "title": "Curation Item Id",
               "type": "string"
             }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -27619,6 +27805,18 @@
             "schema": {
               "format": "uuid",
               "title": "Curation Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -28012,6 +28210,20 @@
       },
       "post": {
         "operationId": "create_feature_route_v1_admin_features_post",
+        "parameters": [
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -28201,6 +28413,18 @@
               "title": "Request Id",
               "type": "string"
             }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -28304,6 +28528,18 @@
             "required": true,
             "schema": {
               "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -28749,6 +28985,20 @@
       },
       "post": {
         "operationId": "create_admin_curated_feature_route_v1_admin_features_curated_post",
+        "parameters": [
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -28812,6 +29062,18 @@
             "required": true,
             "schema": {
               "title": "Curated Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -28922,6 +29184,18 @@
             "required": true,
             "schema": {
               "title": "Curated Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -29122,6 +29396,18 @@
               "title": "Curated Feature Id",
               "type": "string"
             }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -29187,6 +29473,18 @@
             "required": true,
             "schema": {
               "title": "Curated Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -29553,6 +29851,18 @@
               "title": "Review Id",
               "type": "string"
             }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -29877,6 +30187,18 @@
             "required": true,
             "schema": {
               "title": "Review Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -30368,6 +30690,18 @@
             }
           },
           {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
             "description": "직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성).",
             "in": "header",
             "name": "If-Match",
@@ -30555,6 +30889,18 @@
             }
           },
           {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
             "description": "직전 GET body/ETag의 row_revision strong ETag (correction 낙관적 동시성).",
             "in": "header",
             "name": "If-Match",
@@ -30675,6 +31021,18 @@
             "required": true,
             "schema": {
               "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -31246,6 +31604,20 @@
       "post": {
         "description": "api-가시 location(backup_root) 동기 재스캔 + DB backfill.\n\ndagster 소유 location(mois_source/object_store/offline_uploads 실체)은 여기서\n스캔할 수 없으므로 ``deferred_locations`` 로 안내한다 — 즉시성이 필요하면\nDagster ``managed_file_scan`` job을 수동 실행한다(6시간 스케줄과 동일 로직).",
         "operationId": "rescan_files_v1_admin_files_rescan_post",
+        "parameters": [
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -31487,6 +31859,18 @@
             "schema": {
               "title": "File Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -31888,6 +32272,18 @@
               "title": "Issue Id",
               "type": "string"
             }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -31995,6 +32391,7 @@
               "anyOf": [
                 {
                   "enum": [
+                    "uploading",
                     "uploaded",
                     "validating",
                     "validated",
@@ -32002,6 +32399,7 @@
                     "loading",
                     "loaded",
                     "load_failed",
+                    "deleting",
                     "cancelled"
                   ],
                   "type": "string"
@@ -32118,6 +32516,18 @@
       },
       "post": {
         "operationId": "create_offline_upload_request_v1_admin_offline_uploads_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "multipart/form-data": {
@@ -32183,7 +32593,7 @@
     },
     "/v1/admin/offline-uploads/{upload_id}": {
       "delete": {
-        "description": "업로드 메타데이터 row를 지우고 저장 객체를 best-effort로 정리한다.\n\n객체가 이미 없어도(예: RustFS 교체로 원본이 소실된 좀비 업로드, #397)\n삭제는 성공한다. 진행 중(``validating``/``loading``) 업로드는 409.\n같은 checksum 재업로드의 멱등 가드(409)는 row 삭제로 풀린다.",
+        "description": "저장 객체 삭제를 확인한 뒤 업로드 메타데이터 row를 지운다.\n\n객체가 이미 없어도(예: RustFS 교체로 원본이 소실된 좀비 업로드, #397)\nS3 ``DeleteObject`` 계약에 따라 삭제는 성공한다. 저장소 응답이 모호하면 command와\nrow를 pending으로 남겨 같은 key 재시도가 동일 삭제 effect를 복구한다.\n진행 중(``validating``/``loading``) 업로드의 신규 삭제 command는 409.\n같은 checksum 재업로드의 멱등 가드(409)는 row 삭제로 풀린다.",
         "operationId": "delete_offline_upload_request_v1_admin_offline_uploads__upload_id__delete",
         "parameters": [
           {
@@ -32192,6 +32602,16 @@
             "required": true,
             "schema": {
               "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -32344,6 +32764,16 @@
             "required": true,
             "schema": {
               "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -32530,6 +32960,18 @@
             "required": true,
             "schema": {
               "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -33259,6 +33701,18 @@
               "title": "Public Api Key Id",
               "type": "string"
             }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -33315,6 +33769,16 @@
             "required": true,
             "schema": {
               "title": "Backup Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -33390,6 +33854,16 @@
             "required": true,
             "schema": {
               "title": "Backup Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }

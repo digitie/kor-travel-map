@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
-from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
+from kortravelmap.core.exceptions import (
+    FileStoreObjectNotFoundError,
+    GeoAuthNotConfiguredError,
+    GeoRequestError,
+)
 from kortravelmap.infra.file_store import StoredObject
 from kortravelmap.infra.jobs_repo import ImportJob
 from kortravelmap.infra.offline_upload_repo import (
@@ -20,7 +26,6 @@ from kortravelmap.infra.offline_upload_repo import (
 from kortravelmap.offline_upload import validate_offline_tabular_upload
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
-from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
@@ -46,6 +51,7 @@ class _FakeSession:
 
 class _FakeStore:
     def __init__(self, objects: dict[str, bytes] | None = None) -> None:
+        self.bucket = "kor-travel-map-uploads"
         self.calls: list[dict[str, Any]] = []
         self.deleted: list[str] = []
         self.objects = objects or {}
@@ -74,7 +80,30 @@ class _FakeStore:
             bucket="kor-travel-map-uploads",
             object_key=storage_key,
             byte_size=len(body),
-            checksum_sha256="a" * 64,
+            checksum_sha256=hashlib.sha256(body).hexdigest(),
+            content_type=content_type or "application/octet-stream",
+            metadata=dict(metadata or {}),
+        )
+
+    async def inspect_object(self, storage_key: str) -> StoredObject:
+        call = next(
+            (
+                item
+                for item in reversed(self.calls)
+                if item["storage_key"] == storage_key
+            ),
+            None,
+        )
+        if call is None:
+            raise FileStoreObjectNotFoundError(storage_key)
+        body = self.objects[storage_key]
+        return StoredObject(
+            bucket="kor-travel-map-uploads",
+            object_key=storage_key,
+            byte_size=len(body),
+            checksum_sha256=hashlib.sha256(body).hexdigest(),
+            content_type=call["content_type"],
+            metadata=dict(call["metadata"] or {}),
         )
 
     async def delete_object(self, storage_key: str) -> None:
@@ -88,14 +117,150 @@ def session() -> _FakeSession:
 
 
 @pytest.fixture
-def client(session: _FakeSession) -> TestClient:
+def client(
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> TestClient:
+    from kortravelmap.infra.domain_command_execution_repo import (
+        OfflineUploadCommandExecution,
+    )
+
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
     app = create_app(ApiSettings(admin_destructive_enabled=True))
 
     async def _fake_session() -> AsyncIterator[_FakeSession]:
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
-    return TestClient(app)
+    monkeypatch.setattr(
+        domain_command_service,
+        "begin_domain_command",
+        AsyncMock(
+            return_value=domain_command_service.DomainCommandHandle(
+                command_id=1,
+                actor="local-dev",
+                operation="admin.offline-upload.create",
+                idempotency_key="95000000-0000-4000-8000-000000000001",
+                request_fingerprint="a" * 64,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        domain_command_service,
+        "complete_domain_command",
+        AsyncMock(),
+    )
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    executions: dict[int, OfflineUploadCommandExecution] = {}
+
+    async def _create_execution(
+        _session: object,
+        **kwargs: Any,
+    ) -> OfflineUploadCommandExecution:
+        execution = OfflineUploadCommandExecution(
+            command_id=int(kwargs["command_id"]),
+            effect_kind=str(kwargs["effect_kind"]),
+            phase="prepared",
+            upload_id=str(kwargs["upload_id"]),
+            storage_backend=kwargs["storage_backend"],
+            bucket=kwargs["bucket"],
+            storage_key=kwargs["storage_key"],
+            content_type=kwargs["content_type"],
+            byte_size=kwargs["byte_size"],
+            content_sha256=kwargs["content_sha256"],
+            metadata_digest=kwargs["metadata_digest"],
+            load_job_id=kwargs["load_job_id"],
+            dagster_run_id=None,
+            input_digest=str(kwargs["input_digest"]),
+            output_digest=None,
+            prepared_at=now,
+            effect_started_at=None,
+            effect_completed_at=None,
+        )
+        executions[execution.command_id] = execution
+        return execution
+
+    async def _get_execution(
+        _session: object,
+        command_id: int,
+    ) -> OfflineUploadCommandExecution | None:
+        return executions.get(command_id)
+
+    async def _start_execution(
+        _session: object,
+        command_id: int,
+    ) -> OfflineUploadCommandExecution:
+        execution = replace(
+            executions[command_id],
+            phase="effect_started",
+            effect_started_at=now,
+        )
+        executions[command_id] = execution
+        return execution
+
+    monkeypatch.setattr(
+        router_mod,
+        "create_offline_upload_command_execution",
+        _create_execution,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "get_offline_upload_command_execution",
+        _get_execution,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "start_offline_upload_command_effect",
+        _start_execution,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "complete_offline_upload_command_effect",
+        AsyncMock(),
+    )
+
+    async def _reserve_delete(
+        _session: object,
+        *,
+        upload_id: str,
+        command_id: int,
+    ) -> OfflineUpload | None:
+        row = await router_mod.get_offline_upload(_session, upload_id)
+        if row is None:
+            return None
+        if row.status in {"uploading", "validating", "loading", "deleting"}:
+            raise OfflineUploadStatusConflict(
+                upload_id=upload_id,
+                current_status=row.status,
+                target_status="deleting",
+                allowed_statuses=frozenset(
+                    {
+                        "uploaded",
+                        "validated",
+                        "validation_failed",
+                        "loaded",
+                        "load_failed",
+                        "cancelled",
+                    }
+                ),
+            )
+        return replace(
+            row,
+            status="deleting",
+            delete_command_id=command_id,
+        )
+
+    monkeypatch.setattr(
+        router_mod,
+        "reserve_offline_upload_delete",
+        _reserve_delete,
+    )
+    return TestClient(
+        app,
+        headers={"Idempotency-Key": "95000000-0000-4000-8000-000000000001"},
+    )
 
 
 def _upload(
@@ -177,8 +342,10 @@ def test_create_offline_upload_writes_object_and_metadata(
     store = _FakeStore()
     upload_body = b'{"feature":{"feature_id":"f1"}}\n'
     expected_checksum = hashlib.sha256(upload_body).hexdigest()
+    reserved: OfflineUpload | None = None
 
     async def _create(_session: Any, **kwargs: Any) -> OfflineUpload:
+        nonlocal reserved
         assert kwargs["provider"] == "offline-test-provider"
         assert kwargs["dataset_key"] == "offline_jsonl"
         assert kwargs["storage_backend"] == "rustfs"
@@ -187,14 +354,21 @@ def test_create_offline_upload_writes_object_and_metadata(
         assert kwargs["checksum_sha256"] == expected_checksum
         # T-VN-20 (ADR-066 D-2): created_by는 인증 principal(local-dev)에서만 파생한다.
         assert kwargs["created_by"] == "local-dev"
-        return _upload(
+        reserved = _upload(
             upload_id=kwargs["upload_id"],
+            state="uploading",
             storage_key=kwargs["storage_key"],
             checksum_sha256=kwargs["checksum_sha256"],
         )
+        return reserved
+
+    async def _finalize(_session: Any, **_kwargs: Any) -> OfflineUpload:
+        assert reserved is not None
+        return replace(reserved, status="uploaded")
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
-    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "finalize_offline_upload_reservation", _finalize)
 
     response = client.post(
         "/v1/admin/offline-uploads",
@@ -219,13 +393,12 @@ def test_create_offline_upload_writes_object_and_metadata(
     assert body["meta"]["object_key"].startswith("offline-uploads/")
     assert store.calls[0]["body"] == b'{"feature":{"feature_id":"f1"}}\n'
     assert store.calls[0]["metadata"]["provider"] == "offline-test-provider"
-    # 1: upload 생성 tx, 2: best-effort managed-file registry 등록 hook의 별도 tx
-    # (registry_guard가 hook 실패를 무해화하므로 위 201 응답/store 동작은 불변).
-    assert session.begin_count == 2
+    # claim+DB 예약, effect_started, 증명+terminal result, registry hook.
+    assert session.begin_count == 4
 
 
 @pytest.mark.unit
-def test_create_offline_upload_duplicate_checksum_rolls_back_object(
+def test_create_offline_upload_duplicate_checksum_stops_before_object_store(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -234,8 +407,8 @@ def test_create_offline_upload_duplicate_checksum_rolls_back_object(
     store = _FakeStore()
     existing = _upload(upload_id="00000000-0000-0000-0000-000000000099")
 
-    async def _create(_session: Any, **_kwargs: Any) -> OfflineUpload:
-        raise IntegrityError("insert offline upload", {}, Exception("duplicate"))
+    async def _reserve(_session: Any, **_kwargs: Any) -> None:
+        return None
 
     async def _duplicate(_session: Any, **kwargs: Any) -> OfflineUpload:
         assert kwargs["provider"] == "p"
@@ -244,7 +417,7 @@ def test_create_offline_upload_duplicate_checksum_rolls_back_object(
         return existing
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
-    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _reserve)
     monkeypatch.setattr(router_mod, "get_offline_upload_by_checksum", _duplicate)
 
     response = client.post(
@@ -263,7 +436,8 @@ def test_create_offline_upload_duplicate_checksum_rolls_back_object(
     body = response.json()
     assert body["code"] == "OFFLINE_UPLOAD_DUPLICATE"
     assert body["details"]["upload_id"] == existing.upload_id
-    assert store.deleted == [store.calls[0]["storage_key"]]
+    assert store.calls == []
+    assert store.deleted == []
 
 
 @pytest.mark.unit
@@ -274,11 +448,14 @@ def test_create_offline_upload_accepts_csv(
     from kortravelmap.api.routers import offline_uploads as router_mod
 
     store = _FakeStore()
+    reserved: OfflineUpload | None = None
 
     async def _create(_session: Any, **kwargs: Any) -> OfflineUpload:
+        nonlocal reserved
         assert kwargs["detected_format"] == "csv"
-        return _upload(
+        reserved = _upload(
             upload_id=kwargs["upload_id"],
+            state="uploading",
             storage_key=kwargs["storage_key"],
             original_filename="features.csv",
             detected_format="csv",
@@ -286,9 +463,15 @@ def test_create_offline_upload_accepts_csv(
             byte_size=kwargs["byte_size"],
             checksum_sha256=kwargs["checksum_sha256"],
         )
+        return reserved
+
+    async def _finalize(_session: Any, **_kwargs: Any) -> OfflineUpload:
+        assert reserved is not None
+        return replace(reserved, status="uploaded")
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
-    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "finalize_offline_upload_reservation", _finalize)
 
     response = client.post(
         "/v1/admin/offline-uploads",
@@ -301,6 +484,144 @@ def test_create_offline_upload_accepts_csv(
 
 
 @pytest.mark.unit
+def test_create_offline_upload_restarts_exact_put_after_started_crash(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from uuid import uuid5
+
+    from kortravelmap.infra.domain_command_execution_repo import (
+        OfflineUploadCommandExecution,
+    )
+    from kortravelmap.infra.domain_command_repo import (
+        DomainCommandClaim,
+        canonical_domain_command_fingerprint,
+    )
+
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
+    key = "95000000-0000-4000-8000-000000000001"
+    operation = "admin.offline-upload.create"
+    body = b'{"feature":{"feature_id":"f1"}}\n'
+    checksum = hashlib.sha256(body).hexdigest()
+    settings = KorTravelMapSettings(_env_file=None)
+    client.app.state.kor_travel_map_settings = settings
+    upload_id = str(
+        uuid5(
+            router_mod._OFFLINE_UPLOAD_COMMAND_NAMESPACE,
+            f"local-dev:{operation}:{key}",
+        )
+    )
+    storage_key = router_mod._storage_key(settings, upload_id, "features.jsonl")
+    content_type = "application/x-ndjson"
+    metadata = {
+        "content-sha256": checksum,
+        "dataset-key": "d",
+        "provider": "p",
+        "sync-scope": "default",
+        "upload-id": upload_id,
+    }
+    metadata_digest = canonical_domain_command_fingerprint(metadata)
+    fingerprint = canonical_domain_command_fingerprint(
+        {
+            "provider": "p",
+            "dataset_key": "d",
+            "sync_scope": "default",
+            "filename": "features.jsonl",
+            "storage_backend": "rustfs",
+            "bucket": settings.offline_upload_bucket,
+            "storage_key": storage_key,
+            "content_type": content_type,
+            "byte_size": len(body),
+            "content_sha256": checksum,
+            "metadata_digest": metadata_digest,
+        }
+    )
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    claim = DomainCommandClaim(
+        command_id=99,
+        actor="local-dev",
+        operation=operation,
+        idempotency_key=key,
+        fingerprint_version=1,
+        request_fingerprint=fingerprint,
+        created_at=now,
+    )
+    execution = OfflineUploadCommandExecution(
+        command_id=99,
+        effect_kind="create",
+        phase="effect_started",
+        upload_id=upload_id,
+        storage_backend="rustfs",
+        bucket=settings.offline_upload_bucket,
+        storage_key=storage_key,
+        content_type=content_type,
+        byte_size=len(body),
+        content_sha256=checksum,
+        metadata_digest=metadata_digest,
+        load_job_id=None,
+        dagster_run_id=None,
+        input_digest=fingerprint,
+        output_digest=None,
+        prepared_at=now,
+        effect_started_at=now,
+        effect_completed_at=None,
+    )
+    reserved = _upload(
+        upload_id=upload_id,
+        state="uploading",
+        storage_key=storage_key,
+        dataset_key="d",
+        byte_size=len(body),
+        checksum_sha256=checksum,
+    )
+    store = _FakeStore()
+    client.app.state.offline_upload_store = store
+
+    async def _pending(*_args: Any, **_kwargs: Any) -> Any:
+        raise domain_command_service.DomainCommandPending(claim)
+
+    async def _get_execution(*_args: Any, **_kwargs: Any) -> Any:
+        return execution
+
+    async def _get_upload(*_args: Any, **_kwargs: Any) -> OfflineUpload:
+        return reserved
+
+    async def _finalize(*_args: Any, **_kwargs: Any) -> OfflineUpload:
+        return replace(reserved, status="uploaded")
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _pending)
+    monkeypatch.setattr(
+        router_mod,
+        "get_offline_upload_command_execution",
+        _get_execution,
+    )
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get_upload)
+    monkeypatch.setattr(
+        router_mod,
+        "finalize_offline_upload_reservation",
+        _finalize,
+    )
+    monkeypatch.setattr(
+        router_mod,
+        "start_offline_upload_command_effect",
+        AsyncMock(side_effect=AssertionError("effect already started")),
+    )
+
+    response = client.post(
+        "/v1/admin/offline-uploads",
+        data={"provider": "p", "dataset_key": "d"},
+        files={"file": ("features.jsonl", body, content_type)},
+    )
+
+    assert response.status_code == 201
+    assert len(store.calls) == 1
+    assert store.calls[0]["storage_key"] == storage_key
+    assert store.calls[0]["metadata"] == metadata
+
+
+@pytest.mark.unit
 def test_offline_upload_store_is_reused_from_app_state(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -309,6 +630,7 @@ def test_offline_upload_store_is_reused_from_app_state(
 
     store = _FakeStore()
     build_count = 0
+    reserved: OfflineUpload | None = None
 
     def _build_store(_settings: Any) -> _FakeStore:
         nonlocal build_count
@@ -316,16 +638,24 @@ def test_offline_upload_store_is_reused_from_app_state(
         return store
 
     async def _create(_session: Any, **kwargs: Any) -> OfflineUpload:
-        return _upload(
+        nonlocal reserved
+        reserved = _upload(
             upload_id=kwargs["upload_id"],
+            state="uploading",
             storage_key=kwargs["storage_key"],
             dataset_key=kwargs["dataset_key"],
             byte_size=kwargs["byte_size"],
             checksum_sha256=kwargs["checksum_sha256"],
         )
+        return reserved
+
+    async def _finalize(_session: Any, **_kwargs: Any) -> OfflineUpload:
+        assert reserved is not None
+        return replace(reserved, status="uploaded")
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", _build_store)
-    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "finalize_offline_upload_reservation", _finalize)
 
     for filename in ("features-a.jsonl", "features-b.jsonl"):
         response = client.post(
@@ -470,7 +800,7 @@ def test_create_app_lifespan_closes_cached_offline_upload_s3_client() -> None:
 
 
 @pytest.mark.unit
-def test_create_offline_upload_deletes_object_when_metadata_insert_fails(
+def test_create_offline_upload_stops_before_object_when_reservation_fails(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -479,12 +809,12 @@ def test_create_offline_upload_deletes_object_when_metadata_insert_fails(
     store = _FakeStore()
 
     async def _create(_session: Any, **_kwargs: Any) -> OfflineUpload:
-        raise RuntimeError("metadata insert failed")
+        raise RuntimeError("metadata reservation failed")
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
-    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload", _create)
 
-    with pytest.raises(RuntimeError, match="metadata insert failed"):
+    with pytest.raises(RuntimeError, match="metadata reservation failed"):
         client.post(
             "/v1/admin/offline-uploads",
             data={"provider": "p", "dataset_key": "d"},
@@ -497,8 +827,8 @@ def test_create_offline_upload_deletes_object_when_metadata_insert_fails(
             },
         )
 
-    assert store.calls
-    assert store.deleted == [store.calls[0]["storage_key"]]
+    assert store.calls == []
+    assert store.deleted == []
     assert store.objects == {}
 
 
@@ -600,10 +930,11 @@ def test_load_offline_upload_launches_dagster(
         assert kwargs["upload_id"] == upload.upload_id
         return reserved
 
-    async def _launch(_request: Any, upload_id: str) -> Any:
+    async def _launch(_request: Any, upload_id: str, *, run_id: str) -> Any:
         order.append("launch")
         assert upload_id == upload.upload_id
-        return router_mod._DagsterLaunch(run_id="dagster-run-1", status="QUEUED")
+        assert run_id == reserved.load_job_id
+        return router_mod._DagsterLaunch(run_id=run_id, status="QUEUED")
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "reserve_offline_upload_load", _reserve)
@@ -616,7 +947,7 @@ def test_load_offline_upload_launches_dagster(
     assert body["data"]["upload_id"] == "00000000-0000-0000-0000-000000000001"
     assert body["data"]["status"] == "loading"
     assert body["data"]["load_job_id"] == "10000000-0000-0000-0000-000000000001"
-    assert body["meta"]["dagster_run_id"] == "dagster-run-1"
+    assert body["meta"]["dagster_run_id"] == reserved.load_job_id
     assert order == ["reserve", "launch"]
 
 
@@ -655,7 +986,10 @@ def test_load_offline_upload_rejects_invalid_dagster_url_before_db_or_http(
 
     with TestClient(app) as test_client:
         response = test_client.post(
-            "/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load"
+            "/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load",
+            headers={
+                "Idempotency-Key": "95000000-0000-4000-8000-000000000001"
+            },
         )
 
     assert response.status_code == 502
@@ -678,6 +1012,7 @@ def test_dagster_launch_variables_use_settings() -> None:
     variables = router_mod._launch_variables(
         settings,
         "00000000-0000-0000-0000-000000000001",
+        run_id="10000000-0000-0000-0000-000000000001",
     )
 
     selector = variables["executionParams"]["selector"]
@@ -686,6 +1021,9 @@ def test_dagster_launch_variables_use_settings() -> None:
     assert selector["repositoryLocationName"] == "kortravelmap.dagster.custom"
     assert run_config["ops"]["load_offline_upload"]["config"]["upload_id"] == (
         "00000000-0000-0000-0000-000000000001"
+    )
+    assert variables["executionParams"]["executionMetadata"]["runId"] == (
+        "10000000-0000-0000-0000-000000000001"
     )
 
 
@@ -721,16 +1059,13 @@ def test_load_offline_upload_rejects_concurrent_reserve(
 
 
 @pytest.mark.unit
-def test_load_offline_upload_marks_failed_when_launch_fails(
+def test_load_offline_upload_keeps_reservation_pending_when_launch_is_ambiguous(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fastapi import HTTPException
 
     from kortravelmap.api.routers import offline_uploads as router_mod
-
-    finished_jobs: list[dict[str, str]] = []
-    finished_upload_statuses: list[str] = []
 
     async def _get(_session: Any, upload_id: str) -> OfflineUpload:
         return _upload(upload_id=upload_id)
@@ -742,46 +1077,68 @@ def test_load_offline_upload_marks_failed_when_launch_fails(
             load_job_id="10000000-0000-0000-0000-000000000001",
         )
 
-    async def _launch(_request: Any, _upload_id: str) -> Any:
+    async def _launch(_request: Any, _upload_id: str, *, run_id: str) -> Any:
+        assert run_id == "10000000-0000-0000-0000-000000000001"
         raise HTTPException(status_code=502, detail="Dagster launch failed")
-
-    async def _finish(_session: Any, *, upload_id: str, status: str) -> OfflineUpload:
-        finished_upload_statuses.append(status)
-        return _upload(upload_id=upload_id, state=status)
-
-    async def _finish_import_job(
-        _session: Any,
-        job_id: str,
-        *,
-        status: str,
-        error_message: str | None = None,
-    ) -> ImportJob:
-        finished_jobs.append(
-            {
-                "job_id": job_id,
-                "status": status,
-                "error_message": error_message or "",
-            }
-        )
-        return _import_job(job_id=job_id, state=status, error_message=error_message)
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "reserve_offline_upload_load", _reserve)
     monkeypatch.setattr(router_mod, "launch_offline_upload_load", _launch)
-    monkeypatch.setattr(router_mod, "finish_import_job", _finish_import_job)
-    monkeypatch.setattr(router_mod, "finish_offline_upload_load", _finish)
 
     response = client.post("/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
 
     assert response.status_code == 502
-    assert finished_jobs == [
-        {
-            "job_id": "10000000-0000-0000-0000-000000000001",
-            "status": "failed",
-            "error_message": "Dagster launch failed",
-        }
-    ]
-    assert finished_upload_statuses == ["load_failed"]
+
+
+@pytest.mark.unit
+def test_load_offline_upload_terminal_replay_precedes_loading_state_lookup(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.infra.domain_command_repo import DomainCommandRecord
+
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    replay_body = {
+        "data": {"upload_id": "00000000-0000-0000-0000-000000000001"},
+        "meta": {
+            "duration_ms": 3,
+            "dagster_run_id": "10000000-0000-0000-0000-000000000001",
+            "dagster_status": "STARTED",
+        },
+    }
+    record = DomainCommandRecord(
+        command_id=1,
+        actor="local-dev",
+        operation="admin.offline-upload.load",
+        idempotency_key="95000000-0000-4000-8000-000000000001",
+        fingerprint_version=1,
+        request_fingerprint="a" * 64,
+        response_status=200,
+        response_body=replay_body,
+        response_headers={},
+        claimed_at=now,
+        completed_at=now,
+    )
+
+    async def _replay(*_args: Any, **_kwargs: Any) -> Any:
+        raise domain_command_service.DomainCommandReplay(record)
+
+    async def _get(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("terminal replay must precede loading row precondition")
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _replay)
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+
+    response = client.post(
+        "/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Idempotency-Replayed"] == "true"
+    assert response.json() == replay_body
 
 
 @pytest.mark.unit
@@ -1084,10 +1441,21 @@ def test_delete_offline_upload_removes_row_and_object(
     upload = _upload(state="loaded")
     store = _FakeStore({upload.storage_key: b'{"feature":{"feature_id":"f1"}}\n'})
 
-    async def _delete(_session: Any, *, upload_id: str) -> OfflineUpload:
+    async def _delete(
+        _session: Any,
+        *,
+        upload_id: str,
+        command_id: int,
+    ) -> OfflineUpload:
+        assert upload_id == upload.upload_id
+        assert command_id == 1
+        return replace(upload, status="deleting", delete_command_id=command_id)
+
+    async def _get(_session: Any, upload_id: str) -> OfflineUpload:
         assert upload_id == upload.upload_id
         return upload
 
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
 
@@ -1096,45 +1464,139 @@ def test_delete_offline_upload_removes_row_and_object(
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["upload_id"] == upload.upload_id
-    assert body["data"]["status"] == "loaded"
+    assert body["data"]["status"] == "deleting"
     assert "duration_ms" in body["meta"]
     assert store.deleted == [upload.storage_key]
     assert store.objects == {}
-    # 1: 삭제 tx, 2: best-effort managed-file registry 반영 hook의 별도 tx
-    # (registry_guard가 hook 실패를 무해화하므로 위 200 응답/store 동작은 불변).
-    assert session.begin_count == 2
+    assert session.begin_count == 4
 
 
 @pytest.mark.unit
-def test_delete_offline_upload_succeeds_for_zombie_without_object(
+def test_delete_offline_upload_retries_same_effect_after_ambiguous_store_failure(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """RustFS 교체로 원본 객체가 소실된 좀비 업로드도 row 정리는 성공한다(#397)."""
     from kortravelmap.core.exceptions import FileStoreError
+    from kortravelmap.infra.domain_command_repo import DomainCommandClaim
 
+    from kortravelmap.api import domain_command_service
     from kortravelmap.api.routers import offline_uploads as router_mod
 
     upload = _upload()
+    deleted_rows: list[str] = []
+    begin_calls = 0
+    now = datetime(2026, 7, 31, tzinfo=UTC)
 
-    class _BrokenStore(_FakeStore):
+    class _FlakyStore(_FakeStore):
         async def delete_object(self, storage_key: str) -> None:
+            attempt = len(self.deleted) + 1
             await super().delete_object(storage_key)
-            raise FileStoreError(f"객체 저장소 삭제 실패: key={storage_key!r}")
+            if attempt == 1:
+                raise FileStoreError(f"객체 저장소 삭제 실패: key={storage_key!r}")
 
-    store = _BrokenStore()
+    store = _FlakyStore({upload.storage_key: b"payload"})
 
-    async def _delete(_session: Any, *, upload_id: str) -> OfflineUpload:
+    async def _delete(
+        _session: Any,
+        *,
+        upload_id: str,
+        command_id: int,
+    ) -> OfflineUpload:
+        deleted_rows.append(upload_id)
+        return replace(upload, status="deleting", delete_command_id=command_id)
+
+    async def _get(_session: Any, upload_id: str) -> OfflineUpload:
+        if begin_calls > 1:
+            return replace(upload, status="deleting", delete_command_id=1)
         return upload
 
+    async def _begin(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal begin_calls
+        begin_calls += 1
+        if begin_calls == 1:
+            return domain_command_service.DomainCommandHandle(
+                command_id=1,
+                actor="local-dev",
+                operation="admin.offline-upload.delete",
+                idempotency_key="95000000-0000-4000-8000-000000000001",
+                request_fingerprint="a" * 64,
+            )
+        raise domain_command_service.DomainCommandPending(
+            DomainCommandClaim(
+                command_id=1,
+                actor="local-dev",
+                operation="admin.offline-upload.delete",
+                idempotency_key="95000000-0000-4000-8000-000000000001",
+                fingerprint_version=1,
+                request_fingerprint="a" * 64,
+                created_at=now,
+            )
+        )
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _begin)
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
 
-    response = client.delete(f"/v1/admin/offline-uploads/{upload.upload_id}")
+    first = client.delete(f"/v1/admin/offline-uploads/{upload.upload_id}")
+
+    assert first.status_code == 409
+    assert first.json()["code"] == "IDEMPOTENCY_RESULT_PENDING"
+    assert deleted_rows == []
+
+    second = client.delete(f"/v1/admin/offline-uploads/{upload.upload_id}")
+
+    assert second.status_code == 200
+    assert second.json()["data"]["upload_id"] == upload.upload_id
+    assert store.deleted == [upload.storage_key, upload.storage_key]
+    assert deleted_rows == [upload.upload_id]
+
+
+@pytest.mark.unit
+def test_delete_offline_upload_terminal_replay_precedes_missing_row_lookup(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.infra.domain_command_repo import DomainCommandRecord
+
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import offline_uploads as router_mod
+
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    replay_body = {
+        "data": {"upload_id": "00000000-0000-0000-0000-000000000001"},
+        "meta": {"duration_ms": 3},
+    }
+    record = DomainCommandRecord(
+        command_id=1,
+        actor="local-dev",
+        operation="admin.offline-upload.delete",
+        idempotency_key="95000000-0000-4000-8000-000000000001",
+        fingerprint_version=1,
+        request_fingerprint="a" * 64,
+        response_status=200,
+        response_body=replay_body,
+        response_headers={},
+        claimed_at=now,
+        completed_at=now,
+    )
+
+    async def _replay(*_args: Any, **_kwargs: Any) -> Any:
+        raise domain_command_service.DomainCommandReplay(record)
+
+    async def _get(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("terminal replay must precede current row lookup")
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _replay)
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+
+    response = client.delete(
+        "/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001"
+    )
 
     assert response.status_code == 200
-    assert response.json()["data"]["upload_id"] == upload.upload_id
-    assert store.deleted == [upload.storage_key]
+    assert response.headers["Idempotency-Replayed"] == "true"
+    assert response.json() == replay_body
 
 
 @pytest.mark.unit
@@ -1142,14 +1604,27 @@ def test_delete_offline_upload_returns_404_for_missing_row(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from kortravelmap.api import domain_command_service
     from kortravelmap.api.routers import offline_uploads as router_mod
 
     store = _FakeStore()
+    order: list[str] = []
 
-    async def _delete(_session: Any, *, upload_id: str) -> None:
-        return None
+    async def _get(_session: Any, upload_id: str) -> None:
+        order.append("row")
 
-    monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)
+    async def _begin(*_args: Any, **_kwargs: Any) -> Any:
+        order.append("claim")
+        return domain_command_service.DomainCommandHandle(
+            command_id=1,
+            actor="local-dev",
+            operation="admin.offline-upload.delete",
+            idempotency_key="95000000-0000-4000-8000-000000000001",
+            request_fingerprint="a" * 64,
+        )
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _begin)
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
 
     response = client.delete(
@@ -1158,6 +1633,7 @@ def test_delete_offline_upload_returns_404_for_missing_row(
 
     assert response.status_code == 404
     assert store.deleted == []
+    assert order == ["claim", "row"]
 
 
 @pytest.mark.unit
@@ -1169,24 +1645,10 @@ def test_delete_offline_upload_rejects_in_progress_job(
 
     store = _FakeStore()
 
-    async def _delete(_session: Any, *, upload_id: str) -> OfflineUpload:
-        raise OfflineUploadStatusConflict(
-            upload_id=upload_id,
-            current_status="loading",
-            target_status="deleted",
-            allowed_statuses=frozenset(
-                {
-                    "uploaded",
-                    "validated",
-                    "validation_failed",
-                    "loaded",
-                    "load_failed",
-                    "cancelled",
-                }
-            ),
-        )
+    async def _get(_session: Any, upload_id: str) -> OfflineUpload:
+        return _upload(upload_id=upload_id, state="loading")
 
-    monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
 
     response = client.delete(
@@ -1205,7 +1667,12 @@ def test_delete_offline_upload_blocked_when_destructive_disabled(
 ) -> None:
     from kortravelmap.api.routers import offline_uploads as router_mod
 
-    async def _delete(_session: Any, *, upload_id: str) -> OfflineUpload:
+    async def _delete(
+        _session: Any,
+        *,
+        upload_id: str,
+        command_id: int,
+    ) -> OfflineUpload:
         raise AssertionError("destructive kill-switch must reject before repo delete")
 
     monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)
