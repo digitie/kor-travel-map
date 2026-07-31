@@ -419,6 +419,31 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 저장소 열린 이슈는 #673·#819 두 건뿐이고 #673은 epic이 아니다.
 
 - [x] T-VN-H40 — **concierge curation provenance 복구** (0073+0074, #919/#925 — 재생성 후 재적재분 4,424건 100% `source_rule` 실측(2026-08-04)로 완결) → [`tasks-done.md`](tasks-done.md)
+- [ ] T-VN-H35R — **prod external PostgreSQL recovery gate 제품화**
+
+  H35 이후 external DB용 app·Dagster custom dump가 실제로 복원 가능한지 증명하는
+  production-only gate를 제품화한다. 기존 standalone `scripts/docker-backup.sh`는 prod external
+  DB를 대상으로 하지 않으므로 재사용하지 않는다.
+
+  산출물:
+  - `docs/runbooks/h35-prod-external-db-recovery.md` — root-only 설치·실행·failure recovery runbook.
+  - `scripts/run-prod-external-db-recovery-gate.sh` — pinned PostgreSQL 16 client/PostGIS 16 scratch
+    image, root `0600` `PGSERVICEFILE`/`PGPASSFILE`, docker-manager global mutation lock, writer
+    quiescence 재검증, custom dump, SHA-256, `pg_restore --list`, disposable scratch restore,
+    Alembic/schema/핵심 row-count equality를 수행하는 gate.
+  - `tests/unit/test_h35_prod_external_db_recovery_gate.py` — production-only opt-in, credential
+    non-exposure, digest pin, scratch 격리, fail-close cleanup 계약을 고정한다.
+
+  acceptance:
+  - production 명시 opt-in·root-owned immutable git archive snapshot 없이는 fail-close한다.
+  - app DB와 Dagster DB를 같은 writer-quiesced window에서 dump하고, dump 뒤에도 writer 0건을
+    재확인한다.
+  - source credential은 argv/log/artifact/Docker metadata에 평문으로 남기지 않는다.
+  - scratch server는 고정 PostGIS digest, unique `--internal` network, no published ports,
+    no host bind, scratch-only `POSTGRES_HOST_AUTH_METHOD=trust`로 disposable하게 만든다.
+  - 실패 시 원본 DB는 불변이고, `BLOCKED`/failure journal/scratch identity를 남긴 채 임의 cleanup을
+    금지한다.
+
 
 - [x] T-VN-H35 — **prod 마이그레이션 지연 해소** (2026-08-04 재정의판 종결 — 0072 사고로 cutover 소멸 → 빈 DB `0078` 재생성+재적재로 대체, 2026-08-05 배포에서 head `0082` 도달·live 검증 완료. cutover 설계 이력 전문은 tasks-done) → [`tasks-done.md`](tasks-done.md)
 
