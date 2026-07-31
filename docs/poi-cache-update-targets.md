@@ -589,7 +589,9 @@ commit하고 contiguous global prefix를 ACK한다. permanent poison은 dead let
 
 snapshot checksum은 active와 tombstone을 모두 포함한 ADR-081 Merkle v1이다. Map/PinVi는
 `cache-target-source-v1` canonical serializer golden vector와 pinned service OpenAPI를 함께
-검증한다. producer foundation만으로 task를 완료 표시하지 않으며 paired PinVi consumer와 n150
+검증한다. 성공 reconciliation event는 request UUID와 그 request에 seal된 fixed snapshot UUID를
+exact payload에 함께 기록하고 expected root를 envelope fingerprint에도 반복해 인과관계를 고정한다.
+producer foundation만으로 task를 완료 표시하지 않으며 paired PinVi consumer와 n150
 isolated live 증명 뒤에만 `T-VN-41A/B/C`를 닫는다.
 
 ## 12. 테스트 기준

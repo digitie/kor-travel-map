@@ -85,6 +85,17 @@ source_payload_fingerprint, occurred_at, typed payload
 `cache_target.reconciled`만 `event_scope='stream'`이며 네 target tuple 필드는 모두 `NULL`이다.
 빈 snapshot과 tombstone-only snapshot에도 fake target을 만들지 않고 stream event 하나를
 기록하며, 이때 `source_payload_fingerprint`는 비교를 통과한 snapshot Merkle root다.
+이 event의 typed payload는 추가 필드 없이 아래 여섯 필드를 exact contract로 사용한다.
+
+```text
+request_id, snapshot_id, actual_merkle_root, expected_merkle_root, status, version
+```
+
+`request_id`는 completion이 terminal 처리한 reconciliation request UUID이고 `snapshot_id`는 그
+request에 seal된 fixed snapshot UUID다. 두 root가 같은 성공 receipt만 발행하므로
+`source_payload_fingerprint == expected_merkle_root == actual_merkle_root`다. `status`는
+`succeeded`, `version`은 `cache-target-reconciliation-v1`이다. 따라서 consumer는 event가 어느
+request와 fixed snapshot의 terminal receipt인지 payload만으로도 exact 결박할 수 있다.
 
 `event_type`은 다음 네 값만 허용한다.
 
@@ -200,7 +211,8 @@ ID/expected epoch/actual Merkle root를 exact 결박한 completion receipt를 �
 그대로이며 dead-letter가 0일 때만 `ready`/enabled로 전이하고 stream-scoped
 `cache_target.reconciled` event를 같은 transaction에 기록한다. checksum 불일치는 failed receipt를
 남기고 fenced/disabled 상태를 유지한다. terminal request에 다른 checksum을 재사용해서 resume할 수
-없다.
+없다. 성공 event는 request UUID와 seal된 snapshot UUID를 payload에 함께 싣고, expected root를
+`source_payload_fingerprint`에도 동일하게 기록한다.
 
 ### 8. 활성화
 

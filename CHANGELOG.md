@@ -18,7 +18,9 @@
   dead-letter 0인 completion receipt에서만 resume한다. mid-claim poison은 앞 prefix ACK 전에는
   dead 전이를 거부한다.
 - **CONTRACT**: target event와 stream reconciliation event를 `event_scope`로 분리해 empty 및
-  tombstone-only snapshot에도 fake target tuple을 만들지 않는다.
+  tombstone-only snapshot에도 fake target tuple을 만들지 않는다. `cache_target.reconciled`
+  payload의 `request_id`는 새 required field이며 request→fixed snapshot receipt 인과관계를
+  `snapshot_id`와 함께 고정한다.
 - **OPENAPI (breaking)**: 공개 사용자와 서버 간 profile을 분리했다.
   `@kor-travel-map/user-client`는 `RoutePolicy.SERVICE` batch 타입을 더는 노출하지 않으며,
   서버 간 소비자는 `openapi.service.json`을 pin한다.

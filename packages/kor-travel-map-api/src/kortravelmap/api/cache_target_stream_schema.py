@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -31,6 +31,7 @@ __all__ = [
     "CacheTargetEventRecord",
     "CacheTargetNackRequest",
     "CacheTargetOperationResponse",
+    "CacheTargetReconciledPayload",
     "CacheTargetRecoveryOperationRecord",
     "CacheTargetReconciliationBeginRequest",
     "CacheTargetReconciliationRequest",
@@ -269,6 +270,101 @@ class CacheTargetRefreshRequestResponse(BaseModel):
     meta: Meta
 
 
+class CacheTargetEventCoordinate(BaseModel):
+    """Canonical fixed-point coordinate in a target source event."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lon_e6: int
+    lat_e6: int
+
+
+class CacheTargetStateAppliedTarget(BaseModel):
+    """Applied active target projection embedded in an outbox event."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_id: UUID
+    entity_tag: str
+    coord: CacheTargetEventCoordinate
+    radius_m: int = Field(ge=0)
+    update_enabled: bool
+
+
+class CacheTargetStateAppliedPayload(BaseModel):
+    """Exact payload for ``cache_target.state_applied``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal["cache-target-event-v1"]
+    state: Literal["active", "deleted"]
+    source_event_id: UUID
+    target: CacheTargetStateAppliedTarget | None
+
+    @model_validator(mode="after")
+    def _validate_target_state(self) -> CacheTargetStateAppliedPayload:
+        if self.state == "active" and self.target is None:
+            raise ValueError("active state event에는 target이 필요합니다.")
+        if self.state == "deleted" and self.target is not None:
+            raise ValueError("deleted state event의 target은 null이어야 합니다.")
+        return self
+
+
+class CacheTargetLinksReconciledPayload(BaseModel):
+    """Exact payload for ``cache_target.links_reconciled``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal["cache-target-event-v1"]
+    request_id: UUID
+    job_id: UUID
+    status: Literal["reconciled"]
+    target_id: UUID
+    active_link_count: int = Field(ge=0)
+
+
+class CacheTargetRefreshStatusChangedPayload(BaseModel):
+    """Exact payload for ``refresh_request.status_changed``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal["cache-target-event-v1"]
+    request_id: UUID
+    job_id: UUID
+    status: Literal["queued", "running", "done", "failed", "cancelled"]
+    target_id: UUID
+    error_code: str | None
+
+
+class CacheTargetReconciledPayload(BaseModel):
+    """Exact request-bound fixed snapshot reconciliation receipt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: UUID
+    snapshot_id: UUID
+    actual_merkle_root: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=MERKLE_ROOT_PATTERN,
+    )
+    expected_merkle_root: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=MERKLE_ROOT_PATTERN,
+    )
+    status: Literal["succeeded"]
+    version: Literal["cache-target-reconciliation-v1"]
+
+
+CacheTargetEventPayload = (
+    CacheTargetStateAppliedPayload
+    | CacheTargetLinksReconciledPayload
+    | CacheTargetRefreshStatusChangedPayload
+    | CacheTargetReconciledPayload
+)
+
+
 def _validate_cache_target_event_scope(
     *,
     event_scope: CacheTargetEventScope,
@@ -321,7 +417,7 @@ class CacheTargetEventRecord(BaseModel):
     cursor: str
     source_payload_fingerprint: str = Field(min_length=64, max_length=64)
     payload_fingerprint: str = Field(min_length=64, max_length=64)
-    payload: dict[str, Any]
+    payload: CacheTargetEventPayload
     occurred_at: datetime
 
     @model_validator(mode="after")
@@ -334,6 +430,14 @@ class CacheTargetEventRecord(BaseModel):
             source_generation=self.source_generation,
             target_sequence=self.target_sequence,
         )
+        payload_types: dict[CacheTargetEventType, type[BaseModel]] = {
+            "cache_target.state_applied": CacheTargetStateAppliedPayload,
+            "cache_target.links_reconciled": CacheTargetLinksReconciledPayload,
+            "refresh_request.status_changed": CacheTargetRefreshStatusChangedPayload,
+            "cache_target.reconciled": CacheTargetReconciledPayload,
+        }
+        if not isinstance(self.payload, payload_types[self.event_type]):
+            raise ValueError("event_type과 payload contract가 일치하지 않습니다.")
         return self
 
 

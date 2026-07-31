@@ -79,6 +79,21 @@ T-VN-H35 배포를 B′ 경로로 진행한다. `0064~0073` 마이그레이션�
 분리해 돌린다. 배포 전 공개 표면 before/after exact count를 restore clone에서 다시
 잰다 — 이번엔 `0073`까지 포함해서.
 
+## 2026-08-01 (codex) — T-VN-41 reconciliation receipt 인과관계 보강
+
+Map의 `cache_target.reconciled` event payload에 reconciliation `request_id`를 필수로 추가했다.
+typed payload는 request/snapshot UUID, actual/expected Merkle root, succeeded status와 contract
+version 여섯 필드만 허용하며, envelope `source_payload_fingerprint`는 expected root와 같도록
+integration/API/OpenAPI 회귀를 고정했다. 이제 PinVi는 request→sealed fixed snapshot→terminal
+receipt 인과관계를 inbox commit에서 직접 검증할 수 있다.
+
+functional producer/schema/test/docs commit과 생성된 service OpenAPI artifact commit은 별도 SHA로
+분리해 PinVi contract pin provenance가 두 경계를 각각 추적한다. paired PinVi consumer와 n150
+isolated live 전까지 `T-VN-41A/B/C`와 production enable은 계속 open/off다.
+
+**다음 한 작업**: PinVi generation 2 contract pin을 두 Map SHA와 service OpenAPI SHA-256에 맞춘 뒤
+PR CI와 isolated request/snapshot receipt live를 통과시킨다.
+
 ## 2026-07-31 (codex) — T-VN-41 Map producer foundation docs-first 시작
 
 Map/PinVi paired 계약을 ADR-081로 고정했다. source generation, Map restore epoch, target result

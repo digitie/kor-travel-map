@@ -1458,14 +1458,14 @@ async def test_reconciliation_mismatch_halts_and_exact_match_resumes_empty_strea
         await migrated_session.execute(
             text(
                 "SELECT event_scope, target_key, target_id, source_generation, "
-                "target_sequence, source_payload_fingerprint "
+                "target_sequence, source_payload_fingerprint, payload "
                 "FROM ops.poi_cache_target_outbox_events "
                 "WHERE reconciliation_request_id = CAST(:request_id AS uuid)"
             ),
             {"request_id": second.request_id},
         )
     ).one()
-    assert tuple(stream_event) == (
+    assert tuple(stream_event[:6]) == (
         "stream",
         None,
         None,
@@ -1473,6 +1473,14 @@ async def test_reconciliation_mismatch_halts_and_exact_match_resumes_empty_strea
         None,
         second.expected_merkle_root,
     )
+    assert stream_event.payload == {
+        "request_id": second.request_id,
+        "snapshot_id": second.snapshot_id,
+        "actual_merkle_root": second.expected_merkle_root,
+        "expected_merkle_root": second.expected_merkle_root,
+        "status": "succeeded",
+        "version": "cache-target-reconciliation-v1",
+    }
     statuses = await list_cache_target_stream_statuses(migrated_session, limit=100)
     status = next(item for item in statuses.items if item.external_system == system)
     assert status.consumer_enabled

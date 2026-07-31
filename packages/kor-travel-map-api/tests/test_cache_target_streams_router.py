@@ -445,7 +445,18 @@ def test_cache_target_claim_serializes_stream_scoped_reconciled_event() -> None:
                 cursor="cursor-10",
                 source_payload_fingerprint="a" * 64,
                 payload_fingerprint="b" * 64,
-                payload={"state": "active"},
+                payload={
+                    "version": "cache-target-event-v1",
+                    "state": "active",
+                    "source_event_id": SOURCE_EVENT_ID,
+                    "target": {
+                        "target_id": TARGET_ID,
+                        "entity_tag": f'"{TARGET_ID}:7"',
+                        "coord": {"lon_e6": 126_978_400, "lat_e6": 37_566_500},
+                        "radius_m": 1_000,
+                        "update_enabled": True,
+                    },
+                },
                 occurred_at=NOW,
             ),
             SimpleNamespace(
@@ -462,7 +473,14 @@ def test_cache_target_claim_serializes_stream_scoped_reconciled_event() -> None:
                 cursor="cursor-11",
                 source_payload_fingerprint="c" * 64,
                 payload_fingerprint="d" * 64,
-                payload={"status": "reconciled"},
+                payload={
+                    "request_id": RECONCILIATION_REQUEST_ID,
+                    "snapshot_id": RECONCILIATION_SNAPSHOT_ID,
+                    "actual_merkle_root": "c" * 64,
+                    "expected_merkle_root": "c" * 64,
+                    "status": "succeeded",
+                    "version": "cache-target-reconciliation-v1",
+                },
                 occurred_at=NOW + timedelta(seconds=1),
             ),
         ],
@@ -497,6 +515,14 @@ def test_cache_target_claim_serializes_stream_scoped_reconciled_event() -> None:
     assert events[1]["source_generation"] is None
     assert events[1]["target_sequence"] is None
     assert events[1]["source_payload_fingerprint"] == "c" * 64
+    assert events[1]["payload"] == {
+        "request_id": RECONCILIATION_REQUEST_ID,
+        "snapshot_id": RECONCILIATION_SNAPSHOT_ID,
+        "actual_merkle_root": "c" * 64,
+        "expected_merkle_root": "c" * 64,
+        "status": "succeeded",
+        "version": "cache-target-reconciliation-v1",
+    }
 
 
 @pytest.mark.unit
@@ -516,7 +542,12 @@ def test_cache_target_event_record_rejects_inconsistent_stream_scope() -> None:
             cursor="cursor-1",
             source_payload_fingerprint="a" * 64,
             payload_fingerprint="b" * 64,
-            payload={},
+            payload={
+                "version": "cache-target-event-v1",
+                "state": "deleted",
+                "source_event_id": SOURCE_EVENT_ID,
+                "target": None,
+            },
             occurred_at=NOW,
         )
 

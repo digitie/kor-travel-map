@@ -197,6 +197,10 @@ restore/cutover는 stream GET의 raw ETag를 기준으로 restore-fence command�
 N+1로 올린 뒤 writer를 연다. restored payload의 epoch를 신뢰하지 않는다. fixed snapshot은
 active+tombstone Merkle v1과 pinned service OpenAPI를 함께 검증한다. credential, principal scope,
 contract SHA, epoch, snapshot checksum 중 하나라도 맞지 않으면 PinVi consumer는 fail-closed한다.
+성공한 `cache_target.reconciled` payload는 exact
+`{request_id, snapshot_id, actual_merkle_root, expected_merkle_root, status, version}`이며,
+envelope의 `source_payload_fingerprint`는 expected root와 같다. PinVi는 이 request/snapshot identity를
+inbox receipt와 함께 원자적으로 보존한다.
 
 Map producer foundation PR만 merge된 상태는 `T-VN-41C` 완료나 production enable이 아니다.
 PinVi paired PR → contract pin → isolated restore clone/backfill → Merkle 일치 → duplicate/gap/epoch

@@ -493,6 +493,19 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert {"type": "null"} in event_properties["target_id"]["anyOf"]
     assert {"type": "null"} in event_properties["source_generation"]["anyOf"]
     assert {"type": "null"} in event_properties["target_sequence"]["anyOf"]
+    assert "CacheTargetReconciledPayload" in _refs(event_properties["payload"])
+    reconciled_payload = schemas["CacheTargetReconciledPayload"]
+    assert set(reconciled_payload["required"]) == {
+        "request_id",
+        "snapshot_id",
+        "actual_merkle_root",
+        "expected_merkle_root",
+        "status",
+        "version",
+    }
+    assert reconciled_payload["additionalProperties"] is False
+    assert reconciled_payload["properties"]["request_id"]["format"] == "uuid"
+    assert reconciled_payload["properties"]["snapshot_id"]["format"] == "uuid"
     refresh_target_keys = schemas["CacheTargetRefreshRequest"]["properties"]["target_keys"]
     assert refresh_target_keys["maxItems"] == 500
     assert "PublicCuratedFeatureView" not in schemas

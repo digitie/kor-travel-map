@@ -1710,6 +1710,7 @@ async def complete_cache_target_reconciliation(
     if exact_match:
         event_id = str(uuid4())
         payload = {
+            "request_id": request_id,
             "actual_merkle_root": actual_merkle_root,
             "expected_merkle_root": expected,
             "snapshot_id": str(values["snapshot_id"]),

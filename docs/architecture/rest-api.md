@@ -610,6 +610,11 @@ snapshot page는 `snapshot_id`, `restore_epoch`, `high_watermark_cursor`, `count
 끝까지 고정된다. 상세 byte 계약과 strict event union은 ADR-081이 정본이다. 이 표면은 Map foundation
 PR만으로 enable하지 않으며 PinVi paired consumer와 contract checksum을 통과한 뒤 켠다.
 
+`cache_target.reconciled`의 payload는
+`request_id`, `snapshot_id`, `actual_merkle_root`, `expected_merkle_root`, `status`, `version`
+여섯 필드만 허용한다. `source_payload_fingerprint`는 `expected_merkle_root`와 같아야 하며,
+request→fixed snapshot→terminal receipt 인과관계를 consumer가 검증할 수 있어야 한다.
+
 초기 cutover는 service recovery principal의 2단계 reconciliation으로 수행한다.
 `POST /v1/service/cache-target-reconciliations`는 UUID `Idempotency-Key`와 `If-None-Match: *`
 (stream 없음) 또는 직전 stream control `If-Match`를 요구하고, claim을 끊고 stream을 fenced 상태로

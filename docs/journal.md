@@ -86,6 +86,21 @@
 - `test_alembic_upgrade.py`가 head revision을 리터럴로 박아 마이그레이션 추가마다
   깨졌다. ScriptDirectory에서 계산하도록 바꿨다.
 
+## 2026-08-01 (codex) — T-VN-41 reconciled request receipt 보강
+
+- 지정 branch `feat/tvn41-cache-target-generation-outbox`의 exact head `6427358d`와 clean 상태,
+  `origin/main` behind 0을 확인해 rebase를 생략했다.
+- 임시 worktree의 codegraph를 1회 초기화하고 reconciliation producer와 API schema impact를 수정 전에
+  실행했다. 두 파일 모두 codegraph 직접 영향은 file symbol 1개였고 실제 소비 경계인 repo/API/
+  OpenAPI 테스트를 함께 고정했다.
+- 성공 `cache_target.reconciled` payload에 `request_id`를 추가하고 strict typed payload union에서 exact
+  `{request_id, snapshot_id, actual_merkle_root, expected_merkle_root, status, version}`를 강제했다.
+  repo integration은 payload 전체와 `source_payload_fingerprint == expected root`를 단언한다.
+- API/OpenAPI 회귀는 request/snapshot UUID format, 추가 필드 금지, 여섯 required field와 claim
+  직렬화를 검증한다. 계약 문서는 request→fixed snapshot→terminal receipt 인과관계를 명시했다.
+- focused API **50건**, PostgreSQL integration **1건**, targeted strict mypy **2 files**가 통과했다.
+  functional owner와 생성 artifact는 PinVi contract pin provenance를 위해 별도 commit으로 확정한다.
+
 ## 2026-07-31 (codex) — T-VN-41 producer foundation 계약 checkpoint
 
 - exact main `0bdecb1f`에서 clean branch를 만들고 codegraph index 부재를 raw `rg`/read 영향도
