@@ -27,7 +27,7 @@ barrier로 직렬화한다.
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
-    [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0069** + 이미지 동시 배포 — #673 blocker;
+    [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0072** + 이미지 동시 배포 — #673 blocker;
         2026-07-31 중단, 백업 확보·B′ 경로 확정, 본문 상단 인수 블록 참조) →
     [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
     [ ] `T-VN-H30C`(타 provider evidence 재작업) →
@@ -433,6 +433,29 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > **본문 전제 정정** — "미연결 행에서 전부 NULL"은 맞지만 전체 모집단으로 읽으면 틀린다.
     > 실측: active 3,530건 중 `source_record_key` 보유 **3,044건**. NULL은 공식 CSV 적재분
     > **486건**뿐이고 링크 222 / 미연결 264로 갈린다.
+
+    > **정정 (2026-07-31, #910/`0072` 반영) — 내가 틀린 것은 실측이 아니라 범위다.**
+    > 위 실측(CSV provider = 캠페인 주관기관 / `source_entities` provider = 수집 라이브러리,
+    > 서로 다른 네임스페이스)은 **그대로 유효하고 #910도 같은 판단을 한다** — `0072`가 기존
+    > link를 `match_basis='legacy_unattributed'` · `resolver_version='pre-0072-unknown'` ·
+    > evidence "기존 link의 선택 근거를 안전하게 복구할 수 없음"으로 backfill한다.
+    > 즉 "기존 링크의 근거는 추정하지 않는다"는 결론은 동일하다.
+    >
+    > 틀린 것은 거기서 **"따라서 이 AC는 달성 불가"로 건너뛴 것**이다. AC 원문은
+    > "provider provenance — **설계 또는 불가 확정**"이었는데 나는 "설계" 갈래를
+    > **기존 스키마 안에서만** 탐색했다("조인 경로를 만들려면 기관↔라이브러리 매핑을
+    > 발명해야 한다"). **스키마 변경을 검토 범위에서 뺀 것이 오류다.**
+    >
+    > #910이 택한 축은 provider 귀속이 아니라 **import 행위(act) 귀속**이다 —
+    > `curation_import_batches`(어떤 바이트를 누가 언제) / `curation_import_rows`(그 batch의
+    > 어느 행이 어느 item이 됐는가) / `curation_link_decisions`(그 link를 누가 무슨 근거로
+    > accept 했는가). 이 축은 provider 파이프라인을 거치지 않는 공식 CSV 적재에도
+    > **정의상 항상 존재한다** — 사람이 파일을 올린 행위 자체가 출처다.
+    > 내가 "공식 CSV는 provider 파이프라인을 거치지 않으므로 대응 행이 없는 것이 정상"이라고
+    > 쓴 그 문장이 **다른 provenance 축이 필요하다는 신호**였는데, 나는 그것을 AC 종료
+    > 신호로 읽었다.
+    >
+    > 따라서 이 항목은 "불가"가 아니라 **"기존 스키마 안에서는 불가 / 새 축으로 해소(#910)"**다.
   - **preview/commit·REST/UI 실데이터 검증** — ~~미충족~~ → **REST는 실증 완료(2026-07-31)**,
     preview는 **prod 미배포로 측정 불가**.
     > `GET /v1/curations/features/{id}` 실측(prod, service token):
@@ -504,7 +527,29 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 이슈는 "concierge provider에 한해" 완화를 요구했고 두 task는 그 파생 개선이다.
 > 저장소 열린 이슈는 #673·#819 두 건뿐이고 #673은 epic이 아니다.
 
-- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0069)**
+- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0072)**
+
+  > **범위 갱신 (2026-07-31)** — `0070_domain_command_ledger`·
+  > `0071_integrity_observation_generations`가 이미 main에 있고 #910이 `0072_curation_provenance`를
+  > 더한다. **간극은 9개**다.
+  >
+  > **`0070`·`0071`·`0072`는 `autocommit_block()`을 쓰지 않아 all-or-nothing이다** —
+  > 부분 적용 창은 `0064`·`0068`·`0069`에만 있다. `0072` 도중 죽으면 DB는 `0071`에 깨끗이
+  > 남고 재실행이 처음부터 다시 한다.
+  >
+  > `0072` 실측(prod `0063` 기준): 파괴적 statement **0개**. backfill은 `feature_id IS NOT NULL`
+  > **3,266행**에 decision 행 생성 + `curation_items` UPDATE. `curation_item_id` PK 1:1 조인이라
+  > `feature_id IS NULL` 264행은 술어상 도달 불가. append-only 트리거 6개는 **전부 신규
+  > 테이블에만** 붙어 기존 쓰기 경로를 깨지 않는다.
+  >
+  > ⚠ **`0072` downgrade는 단방향 손실이다** — `curation_link_decisions`를 drop하므로
+  > cutover 이후 기록된 **진짜 provenance까지** 사라지고 재구성이 불가능하다
+  > (#910의 존재 이유가 "0072 이전 상태는 근거를 복구할 수 없다"이기 때문).
+  >
+  > ⚠ **공개 curation 표면이 배포 직후 급감할 수 있다.** `_trusted_link_sql()`이
+  > `match_basis <> 'legacy_unattributed'`를 요구하는데 `0072` backfill이 기존 링크를 전부
+  > 그 값으로 기록한다. 코드상 확정·실행 미검증이며 #910에 확인 요청을 남겼다
+  > (PR #910 코멘트). **#673의 concierge 표면과 겹치므로 배포 전 답을 받아야 한다.**
 
   > ## 2026-07-31 중단 시점 상태 — **다음 사람이 여기서 이어받는다**
   >
@@ -810,6 +855,19 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > 불확실성의 모양이 실제와 달라진다.
 
 - [ ] T-VN-H31 — **등대 공급원 부재 해소 (H25A 파생, 전제 재확인됨)**
+
+  > **`address_hint` 계약 변경 (2026-07-31, #909/#910)**
+  > #907이 `address_hint` 매칭을 **공백 토큰 AND**로 고치고(직렬화 jsonb 통짜 substring이라
+  > 다중 토큰이 매칭 안 되던 역전을 수정) 등대 105행을 출처 확인해 채웠다.
+  > **#910이 그 자동 링크를 fail-close로 막았다** — `address_hint` 단독으로는 자동 채택하지
+  > 않고, 구조화 주소 matcher와 행별 provenance(`0072`)를 요구한다.
+  >
+  > 즉 "주소가 있으면 링크를 연다"는 내 전제가 **근거로 불충분하다**는 판정이다.
+  > 채워 넣은 105행의 주소 자체는 버려지지 않고 sidecar provenance
+  > (`lighthouse-stamp-tour.provenance.json`)로 옮겨 **행별 근거**를 갖는다.
+  >
+  > 등대 feature 공급원 부재는 **그대로 남는다** — CSV에 `feature_id`가 2건뿐이라
+  > 새 계약으로 재import해도 105 중 2만 복원된다.
 
   공식 curation 미연결 261건 중 **103건이 등대**이며 105개 중 2개만 링크됐다. ADR-034 9단계
   provider 순서에 등대를 공급하는 provider가 없다 — curation 매칭으로는 해소되지 않는다.
