@@ -394,7 +394,7 @@ WITH locked_items AS MATERIALIZED (
         ) AS provider_winner_requires_recovery
 ), archived AS (
     UPDATE feature.curation_items AS loser_item
-    SET feature_id = :master,
+    SET feature_id = NULL,
         accepted_link_decision_id = NULL,
         source_present = false,
         status = 'archived',
@@ -754,6 +754,26 @@ WHERE item.feature_id = :master
 RETURNING legacy.curated_feature_id
 """
 
+# Legacy projection 동기화 전에는 duplicate history의 target을 비워 둔다. 같은
+# collection/external item에서 survivor와 archived history가 모두 master를 가리키면
+# 0065 legacy trigger의 target identity 조회가 둘 중 하나를 임의 선택해 active master
+# projection을 detach할 수 있다. 정본 projection을 먼저 동기화한 뒤 history만 master로
+# 옮기며 source/current pointer는 건드리지 않는다.
+_MOVE_ARCHIVED_DUPLICATE_CURATION_HISTORY_SQL: Final[str] = """
+UPDATE feature.curation_items AS item
+SET feature_id = :master,
+    updated_at = now()
+WHERE item.feature_id IS NULL
+  AND NOT item.source_present
+  AND item.archived_at IS NOT NULL
+  AND item.metadata @> jsonb_build_object(
+      'feature_merge_duplicate_archived', true,
+      'feature_merge_master_id', CAST(:master AS text),
+      'feature_merge_loser_id', CAST(:loser AS text)
+  )
+RETURNING item.curation_item_id
+"""
+
 # 0045 전환 trigger는 legacy curated_feature UUID와 같은 curation_item UUID를 다시
 # 만든다. master에도 같은 theme의 active legacy row가 있으면 loser legacy row를
 # active 상태로 옮길 수 없으므로, 먼저 해당 item의 UUID를 분리해 richer membership을
@@ -1054,6 +1074,10 @@ async def apply_feature_merge(
     await session.execute(
         text(_SYNC_MASTER_LEGACY_PROJECTIONS_SQL),
         {"master": master_id},
+    )
+    await session.execute(
+        text(_MOVE_ARCHIVED_DUPLICATE_CURATION_HISTORY_SQL),
+        {"master": master_id, "loser": loser_id},
     )
     await session.execute(
         text(_MOVE_LEGACY_CURATED_FEATURES_SQL),
