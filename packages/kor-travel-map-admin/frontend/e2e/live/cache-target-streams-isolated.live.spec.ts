@@ -59,6 +59,7 @@ type CacheTargetOperationResponse = {
   data: {
     entity_tag?: string | null;
     operation_id: string;
+    snapshot_id?: string | null;
     status: string;
     status_url: string | null;
     stream_entity_tag?: string | null;
@@ -195,17 +196,26 @@ test.describe("/ops/cache-target-streams isolated live recovery", () => {
       .getByRole("button", { name: "reconciliation 요청" })
       .click();
     const reconciliationResponse = await reconciliationResponsePromise;
-    await assertOperationReceipt(reconciliationResponse, {
-      expectedBody: {
-        external_system: config.externalSystem,
-        reason: reconciliationReason,
+    const reconciliationReceipt = await assertOperationReceipt(
+      reconciliationResponse,
+      {
+        expectedBody: {
+          external_system: config.externalSystem,
+          reason: reconciliationReason,
+        },
+        expectedStatus: 202,
       },
-      expectedStatus: 202,
-    });
+    );
+    const reconciliationSnapshotId = reconciliationReceipt.data.snapshot_id;
+    if (typeof reconciliationSnapshotId !== "string") {
+      throw new Error("reconciliation receipt snapshot_id가 없습니다.");
+    }
+    expect(reconciliationSnapshotId).toMatch(UUID_PATTERN);
+    expect(reconciliationSnapshotId).not.toBe(config.expectedSnapshotId);
     await expect(page.getByRole("status")).toContainText("복구 명령 접수");
 
     await expect
-      .poll(() => finalReadiness(page, config), {
+      .poll(() => finalReadiness(page, config, reconciliationSnapshotId), {
         intervals: [1_000, 2_000, 5_000],
         timeout: config.pollTimeoutMs,
       })
@@ -215,7 +225,7 @@ test.describe("/ops/cache-target-streams isolated live recovery", () => {
         count: config.expectedCount,
         dead: 0,
         merkleRoot: config.expectedMerkleRoot,
-        snapshotId: config.expectedSnapshotId,
+        snapshotId: reconciliationSnapshotId,
         state: "ready",
       });
 
@@ -667,7 +677,7 @@ async function assertOperationReceipt(
     expectedIfMatch?: string;
     expectedStatus: number;
   },
-): Promise<void> {
+): Promise<CacheTargetOperationResponse> {
   expect(response.status()).toBe(options.expectedStatus);
   const requestHeaders = response.request().headers();
   expect(requestHeaders["idempotency-key"]).toMatch(UUID_PATTERN);
@@ -682,6 +692,7 @@ async function assertOperationReceipt(
     /^\/v1\/ops\/cache-target-operations\//,
   );
   expect(response.headers()["retry-after"]).toMatch(/^[0-9]+$/);
+  return receipt;
 }
 
 function waitForBffResponse(
@@ -699,6 +710,7 @@ function waitForBffResponse(
 async function finalReadiness(
   page: Page,
   config: EvidenceConfig,
+  expectedSnapshotId: string,
 ): Promise<{
   backlog: number;
   blockedEventId: string | null;
@@ -738,14 +750,15 @@ async function finalReadiness(
       state: "missing",
     };
   }
+  const snapshotId = stream.last_snapshot?.snapshot_id ?? null;
   return {
     backlog: backlogCount(stream),
     blockedEventId: stream.blocked_event_id,
     count: stream.last_snapshot?.count ?? null,
     dead: stream.dead_count,
     merkleRoot: stream.last_snapshot?.merkle_root ?? null,
-    snapshotId: stream.last_snapshot?.snapshot_id ?? null,
-    state: stream.state,
+    snapshotId,
+    state: snapshotId === expectedSnapshotId ? stream.state : "snapshot_mismatch",
   };
 }
 

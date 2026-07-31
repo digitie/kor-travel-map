@@ -1431,6 +1431,7 @@ async def test_reconciliation_mismatch_halts_and_exact_match_resumes_empty_strea
     )
     assert running_operation is not None
     assert running_operation.status == "running"
+    assert running_operation.snapshot_id == second.snapshot_id
     succeeded = await complete_cache_target_reconciliation(
         migrated_session,
         request_id=second.request_id,
@@ -1447,6 +1448,7 @@ async def test_reconciliation_mismatch_halts_and_exact_match_resumes_empty_strea
     )
     assert succeeded_operation is not None
     assert succeeded_operation.status == "succeeded"
+    assert succeeded_operation.snapshot_id == second.snapshot_id
     control = await get_cache_target_stream(
         migrated_session,
         external_system=system,

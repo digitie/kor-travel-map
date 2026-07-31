@@ -214,6 +214,11 @@ ID/expected epoch/actual Merkle root를 exact 결박한 completion receipt를 �
 없다. 성공 event는 request UUID와 seal된 snapshot UUID를 payload에 함께 싣고, expected root를
 `source_payload_fingerprint`에도 동일하게 기록한다.
 
+one-step admin reconciliation의 operation receipt와 이후 operation 조회는 request에 seal된
+`snapshot_id`를 반환한다. live 검증은 요청 전 설정 snapshot이 아니라 이 receipt의 UUID를 기준으로
+최종 stream `last_snapshot.snapshot_id`가 같은지 확인한다. service begin처럼 아직 snapshot을 만들지
+않은 `preparing` operation에서는 `snapshot_id`가 `null`이다.
+
 ### 8. 활성화
 
 Map foundation과 PinVi paired consumer가 모두 merge되기 전에는 relay consumer를 켜지 않는다.

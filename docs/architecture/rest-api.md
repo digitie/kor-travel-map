@@ -644,6 +644,11 @@ consumer는 `running` descriptor에서 request와 fixed snapshot identity를 발
 snapshot만 page한다. `preparing` request나 일반 snapshot read가 새로 만든 snapshot은 completion
 근거가 아니다.
 
+admin one-step reconciliation의 `CacheTargetOperationResponse.data.snapshot_id`는 해당 request가
+생성·seal한 fixed snapshot UUID다. operation 조회도 같은 값을 유지하며, 아직 snapshot이 없는 service
+begin `preparing` receipt에서는 `null`이다. isolated live gate는 요청 전에 주입된 snapshot ID를
+재사용하지 않고 이 operation receipt의 ID와 최종 stream `last_snapshot.snapshot_id`를 비교한다.
+
 PATCH/DELETE correction UI는 `GET .../{feature_id}/revision`의 body `row_revision`과 응답 header
 `ETag`를 먼저 읽고, 이어서 `GET .../{feature_id}` detail의 `feature.row_revision`과 같을 때만
 불변 `CorrectionBasis`를 확정한다. 둘이 다르면 경쟁 갱신이므로 제한 횟수만 다시 읽고 실패 시

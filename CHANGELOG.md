@@ -20,7 +20,8 @@
 - **CONTRACT**: target event와 stream reconciliation event를 `event_scope`로 분리해 empty 및
   tombstone-only snapshot에도 fake target tuple을 만들지 않는다. `cache_target.reconciled`
   payload의 `request_id`는 새 required field이며 request→fixed snapshot receipt 인과관계를
-  `snapshot_id`와 함께 고정한다.
+  `snapshot_id`와 함께 고정한다. admin reconciliation operation receipt도 생성한
+  `snapshot_id`를 반환해 후속 stream read가 같은 snapshot에 도달했는지 검증할 수 있다.
 - **OPENAPI (breaking)**: 공개 사용자와 서버 간 profile을 분리했다.
   `@kor-travel-map/user-client`는 `RoutePolicy.SERVICE` batch 타입을 더는 노출하지 않으며,
   서버 간 소비자는 `openapi.service.json`을 pin한다.

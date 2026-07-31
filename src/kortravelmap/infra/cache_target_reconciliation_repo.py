@@ -387,7 +387,7 @@ VALUES (CAST(:event_id AS uuid), 'pending')
 """
 
 _GET_OPERATION_SQL = """
-SELECT request_id, status
+SELECT request_id, status, snapshot_id
 FROM ops.poi_cache_target_reconciliation_requests
 WHERE request_id = CAST(:operation_id AS uuid)
 """
@@ -584,6 +584,7 @@ class CacheTargetReconciliationResult:
 class CacheTargetOperation:
     operation_id: str
     status: str
+    snapshot_id: str | None = None
 
     @property
     def status_url(self) -> str:
@@ -1770,6 +1771,11 @@ async def get_cache_target_operation(
         return CacheTargetOperation(
             operation_id=str(row._mapping["request_id"]),
             status=str(row._mapping["status"]),
+            snapshot_id=(
+                str(row._mapping["snapshot_id"])
+                if row._mapping["snapshot_id"] is not None
+                else None
+            ),
         )
     delivery = (
         await session.execute(

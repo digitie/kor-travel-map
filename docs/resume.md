@@ -87,6 +87,10 @@ version 여섯 필드만 허용하며, envelope `source_payload_fingerprint`는 
 integration/API/OpenAPI 회귀를 고정했다. 이제 PinVi는 request→sealed fixed snapshot→terminal
 receipt 인과관계를 inbox commit에서 직접 검증할 수 있다.
 
+admin one-step reconciliation의 operation receipt와 operation 조회에도 request-bound `snapshot_id`를
+노출했다. isolated live gate는 응답 UUID가 초기 설정 snapshot과 다름을 확인하고, 최종 stream
+`last_snapshot`이 바로 그 응답 UUID로 전이될 때까지 기다린다.
+
 functional producer/schema/test/docs commit과 생성된 service OpenAPI artifact commit은 별도 SHA로
 분리해 PinVi contract pin provenance가 두 경계를 각각 추적한다. paired PinVi consumer와 n150
 isolated live 전까지 `T-VN-41A/B/C`와 production enable은 계속 open/off다.

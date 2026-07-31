@@ -540,6 +540,7 @@ def _operation_record(row: Any) -> CacheTargetRecoveryOperationRecord:
     return CacheTargetRecoveryOperationRecord(
         operation_id=str(_getattr(row, "operation_id")),
         status=_getattr(row, "status", "accepted"),
+        snapshot_id=_getattr(row, "snapshot_id"),
         status_url=_getattr(row, "status_url"),
         entity_tag=_getattr(row, "entity_tag"),
         stream_entity_tag=_getattr(row, "stream_entity_tag"),
@@ -555,6 +556,7 @@ def _operation_record_from_result(
     return CacheTargetRecoveryOperationRecord(
         operation_id=str(_getattr(row, "operation_id", operation_id)),
         status=_getattr(row, "operation_status", "accepted"),
+        snapshot_id=_getattr(row, "snapshot_id"),
         status_url=status_url,
         entity_tag=_getattr(row, "entity_tag"),
         stream_entity_tag=_getattr(row, "stream_entity_tag"),

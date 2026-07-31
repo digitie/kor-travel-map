@@ -799,6 +799,7 @@ class CacheTargetRecoveryOperationRecord(BaseModel):
 
     operation_id: str
     status: str
+    snapshot_id: UUID | None = None
     status_url: str | None = None
     entity_tag: str | None = None
     stream_entity_tag: str | None = None

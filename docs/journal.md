@@ -98,6 +98,9 @@
   repo integration은 payload 전체와 `source_payload_fingerprint == expected root`를 단언한다.
 - API/OpenAPI 회귀는 request/snapshot UUID format, 추가 필드 금지, 여섯 required field와 claim
   직렬화를 검증한다. 계약 문서는 request→fixed snapshot→terminal receipt 인과관계를 명시했다.
+- admin one-step reconciliation receipt와 operation 조회에 request-bound `snapshot_id`를 노출했다.
+  isolated live는 receipt UUID가 초기 설정 snapshot과 다르고 최종 `last_snapshot`과 같은지 검증하며,
+  중간 `running` 상태 관측은 요구하지 않는다.
 - focused API **50건**, PostgreSQL integration **1건**, targeted strict mypy **2 files**가 통과했다.
   functional owner와 생성 artifact는 PinVi contract pin provenance를 위해 별도 commit으로 확정한다.
 

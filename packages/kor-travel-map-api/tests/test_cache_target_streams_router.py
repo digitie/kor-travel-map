@@ -105,6 +105,7 @@ class _FakeCacheTargetService:
         self.reconciliation_result: Any = SimpleNamespace(
             operation_id=RECONCILIATION_REQUEST_ID,
             status="running",
+            snapshot_id=RECONCILIATION_SNAPSHOT_ID,
             status_url=f"/v1/ops/cache-target-operations/{RECONCILIATION_REQUEST_ID}",
             retry_after_seconds=5,
         )
@@ -119,6 +120,7 @@ class _FakeCacheTargetService:
         self.reconciliation_seal_result: Any = SimpleNamespace(
             operation_id=RECONCILIATION_REQUEST_ID,
             status="running",
+            snapshot_id=RECONCILIATION_SNAPSHOT_ID,
             status_url=f"/v1/ops/cache-target-operations/{RECONCILIATION_REQUEST_ID}",
             retry_after_seconds=5,
             entity_tag=f'"{RECONCILIATION_REQUEST_ID}:2"',
@@ -141,6 +143,7 @@ class _FakeCacheTargetService:
         self.reconciliation_completion_result: Any = SimpleNamespace(
             operation_id="99999999-9999-4999-8999-999999999999",
             status="succeeded",
+            snapshot_id=RECONCILIATION_SNAPSHOT_ID,
             status_url=(
                 "/v1/ops/cache-target-operations/"
                 "99999999-9999-4999-8999-999999999999"
@@ -839,6 +842,7 @@ def test_admin_reconciliation_passes_domain_command_id(
     assert response.status_code == 202, response.text
     assert response.headers["location"] == service.reconciliation_result.status_url
     assert response.headers["retry-after"] == "5"
+    assert response.json()["data"]["snapshot_id"] == RECONCILIATION_SNAPSHOT_ID
     assert service.reconciliation_calls[0]["command_id"] == 456
     assert service.reconciliation_calls[0]["external_system"] == EXTERNAL_SYSTEM
     assert captured_complete["status_code"] == 202
@@ -913,6 +917,7 @@ def test_service_reconciliation_begin_uses_recovery_scope_and_ledger(
     assert response.json()["data"] == {
         "operation_id": RECONCILIATION_REQUEST_ID,
         "status": "preparing",
+        "snapshot_id": None,
         "status_url": f"/v1/ops/cache-target-operations/{RECONCILIATION_REQUEST_ID}",
         "entity_tag": f'"{RECONCILIATION_REQUEST_ID}:1"',
         "stream_entity_tag": f'"{EXTERNAL_SYSTEM}:3"',
