@@ -34,6 +34,7 @@ barrier로 직렬화한다.
     [~] `T-VN-H34`(H25A/H25B 미충족 AC — 4항목 중 3 완료·1은 H35 배포 대기,
         카테고리 축 신설로 링크 결함 8건 발견) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
+    [ ] `T-VN-H31R`(#909/PR #910 적대 리뷰 반영 중) →
     [x] `T-VN-H32`(주소 검증 finding 자동 close — 초기 marker, #912 generation으로 대체) →
     [x] `T-VN-H32R`(#911~#913 — authoritative observation receipt·동시 run fence·
         retention job 등록) →
@@ -847,6 +848,24 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   할 일: 등대 원천 데이터 확보·CSV 스키마 확정 → 변환 함수 + 적재 경로 → 무결성 게이트 →
   ADR-080 → 링크 판정(별도).
+
+- [ ] T-VN-H31R — **curation 주소·행별 provenance fail-close를 DB/REST 경계까지 완결한다 (#909, PR #910)**
+
+  exact head `e526b8b1` 단일 적대 리뷰에서 P1 2건·P2 3건·P3 1건이 확인돼 완료
+  처리를 되돌렸다. 같은 PR에서 다음 AC를 모두 닫는다.
+
+  - import batch/row/link decision은 DB immutable trigger로 `UPDATE`/`DELETE`를 거부하고
+    batch→row는 `RESTRICT`한다. import row와 superseded decision은 같은 item만 참조하며
+    self-supersede를 금지한다.
+  - Feature merge는 non-legacy accepted link만 master로 재승인한다. legacy/NULL/revoked
+    link는 공개 불가 상태를 유지하고, loser source가 이기면 survivor 소유 merge import
+    row를 append해 current payload·pointer를 일치시킨다.
+  - admin multipart import는 선택 sidecar를 같은 transaction 전에 strict 검증해 row
+    provenance로 저장한다. official resource import는 sidecar를 hard-require하고 batch/current
+    row provenance 조회를 REST/OpenAPI/admin type으로 제공한다.
+  - link audit는 stable cursor와 `has_more`/`next_cursor`로 잘림을 숨기지 않는다.
+  - 각 우회 경로를 실 PostgreSQL/API 회귀로 고정하고 새 exact head를 같은 단일 적대
+    리뷰어가 재검토해 P0/P1/P2 0건을 확인한 뒤 완료 처리한다.
 
 ### T-VN-H22 — 0065 curation owner quarantine 재분류
 

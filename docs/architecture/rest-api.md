@@ -513,8 +513,16 @@ source record 연결을 제거한 미연결 item으로 투영한다.
 `current_import_row_id`, `accepted_link_decision_id`, `link_match_basis`,
 `link_resolver_version`, `link_evidence`, `link_actor`, `link_decided_at`을 반환한다.
 CSV commit 응답은 새 append-only receipt의 `import_batch_id`를 반환하고 dry-run은 null이다.
+multipart의 선택 `provenance_file`은 CSV digest·ordered identity를 commit 전에 strict
+검증해 각 durable import row의 provenance로 같은 transaction에 저장한다. official
+resource collection은 sidecar가 없거나 검증에 실패하면 import 전체를 거부한다.
+`GET /v1/admin/curations/import-batches/{import_batch_id}`와
+`GET /v1/admin/curations/items/{curation_item_id}/current-import-row`는 batch와 current row
+payload/provenance를 admin에 반환한다.
+
 `GET /v1/admin/curations/link-audit`는 현재 연결됐지만 공개 승인에 쓸 수 없는
-provenance-less/legacy item을 최대 10,000건까지 조회한다.
+provenance-less/legacy item을 `(collection_id, curation_item_id)` stable cursor로 조회하고
+`has_more`/`next_cursor`를 반환한다. limit 잘림을 전체 `count`로 오해하게 만들지 않는다.
 
 ### 2.5 `/v1/admin/*` — 운영자 (인프라 SSO + kill-switch)
 ```

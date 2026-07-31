@@ -406,7 +406,7 @@ CREATE TABLE feature.curation_import_batches (
 CREATE TABLE feature.curation_import_rows (
   import_row_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
   import_batch_id UUID NOT NULL
-    REFERENCES feature.curation_import_batches(import_batch_id) ON DELETE CASCADE,
+    REFERENCES feature.curation_import_batches(import_batch_id) ON DELETE RESTRICT,
   curation_item_id UUID NOT NULL
     REFERENCES feature.curation_items(curation_item_id) ON DELETE RESTRICT,
   row_number INTEGER NOT NULL CHECK (row_number > 0),
@@ -423,8 +423,7 @@ CREATE TABLE feature.curation_link_decisions (
   curation_item_id UUID NOT NULL
     REFERENCES feature.curation_items(curation_item_id) ON DELETE RESTRICT,
   feature_id TEXT NOT NULL,
-  import_row_id UUID
-    REFERENCES feature.curation_import_rows(import_row_id) ON DELETE RESTRICT,
+  import_row_id UUID,
   decision_kind TEXT NOT NULL CHECK (decision_kind IN ('accepted','revoked')),
   match_basis TEXT NOT NULL CHECK (
     match_basis IN (
@@ -436,8 +435,15 @@ CREATE TABLE feature.curation_link_decisions (
   evidence JSONB NOT NULL DEFAULT '{}'::jsonb,
   actor TEXT NOT NULL,
   decided_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  supersedes_decision_id UUID
-    REFERENCES feature.curation_link_decisions(decision_id) ON DELETE RESTRICT,
+  supersedes_decision_id UUID,
+  CHECK (supersedes_decision_id IS DISTINCT FROM decision_id),
+  FOREIGN KEY (import_row_id, curation_item_id)
+    REFERENCES feature.curation_import_rows(import_row_id, curation_item_id)
+    ON DELETE RESTRICT,
+  FOREIGN KEY (supersedes_decision_id, curation_item_id)
+    REFERENCES feature.curation_link_decisions(decision_id, curation_item_id)
+    ON DELETE RESTRICT,
+  UNIQUE (decision_id, curation_item_id),
   UNIQUE (decision_id, curation_item_id, feature_id)
 );
 
@@ -452,6 +458,25 @@ ALTER TABLE feature.curation_items
     decision_id, curation_item_id, feature_id
   )
   ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+CREATE FUNCTION feature.reject_curation_history_mutation()
+RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION '% is append-only', TG_TABLE_NAME
+    USING ERRCODE = '55000';
+END;
+$$;
+
+CREATE TRIGGER trg_curation_import_batches_immutable
+  BEFORE UPDATE OR DELETE ON feature.curation_import_batches
+  FOR EACH ROW EXECUTE FUNCTION feature.reject_curation_history_mutation();
+CREATE TRIGGER trg_curation_import_rows_immutable
+  BEFORE UPDATE OR DELETE ON feature.curation_import_rows
+  FOR EACH ROW EXECUTE FUNCTION feature.reject_curation_history_mutation();
+CREATE TRIGGER trg_curation_link_decisions_immutable
+  BEFORE UPDATE OR DELETE ON feature.curation_link_decisions
+  FOR EACH ROW EXECUTE FUNCTION feature.reject_curation_history_mutation();
 ```
 
 `feature_id`는 의도적으로 nullable이다. CSV의 공식 항목을 기존 Feature와 안전하게
@@ -489,12 +514,18 @@ item 중 현재 target과 정확히 일치하는 non-legacy accepted decision이
 admin collection/item projection은 actor 필드를 포함하고 collection
 상세에서는 미연결·비공개·보관 item까지 조회할 수 있다.
 
-import batch·row와 link decision은 append-only다. 같은 파일의 멱등 재적재도 별도 receipt를
-남기되 current pointer만 새 exact row/decision으로 전진한다. `forward_recovery`는 선택한
-collection/item만 갱신하고 다른 pointer를 되감지 않는다. Feature merge도 link를 무근거로
-바꾸거나 item을 물리 삭제하지 않는다. active link는 `forward_recovery` decision으로
-master에 재승인하고 duplicate loser는 revocation 뒤 feature 없는 archive tombstone으로
-보존한다.
+import batch·row와 link decision은 immutable trigger가 `UPDATE`/`DELETE`를 거부하는
+append-only history다. batch 삭제도 row를 cascade하지 않는다. 같은 파일의 멱등 재적재도
+별도 receipt를 남기되 current pointer만 새 exact row/decision으로 전진한다. decision의
+import row와 supersedes chain은 composite FK로 같은 item에만 속하며 self-supersede를
+금지한다.
+
+`forward_recovery`는 선택한 collection/item만 갱신하고 다른 pointer를 되감지 않는다.
+Feature merge도 link를 무근거로 바꾸거나 item을 물리 삭제하지 않는다. 현재 decision이
+non-legacy accepted인 active link만 master에 재승인한다. legacy/NULL/revoked link는
+accepted pointer 없이 audit 대상으로 남는다. duplicate loser source projection이 이기면
+survivor item 소유의 merge import row를 append해 current row payload와 projection을
+일치시키고, loser는 revocation 뒤 feature 없는 archive tombstone으로 보존한다.
 
 membership에는 서로 독립인 두 revision 축을 둔다. `source_updated_at`은 source presence와
 제공자 파생 필드가 바뀐 시각이고, `operator_updated_at`/`operator_updated_by`는

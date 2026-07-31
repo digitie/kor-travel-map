@@ -3,25 +3,6 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
-## 2026-07-31 — T-VN-H31R curation 주소 fail-close·행별 provenance
-
-- [x] **T-VN-H31R — 주소 후보를 비권위 preview로 제한하고 #909를 완결**
-
-  주소 검색을 구조화 field·Unicode/literal hierarchy·versioned alias 기준으로 바꾸고
-  `address_hint`만으로는 link를 만들지 않는다. 등대 105행은 별도 provenance sidecar와
-  manifest SHA/ordered identity로 결박했다.
-
-  migration `0072_curation_provenance`는 import batch/row와 accepted/revoked link decision을
-  append-only로 저장한다. current item은 exact row/decision을 composite FK로 가리키며,
-  기존 link는 `legacy_unattributed` 감사 대상으로 이관해 public에서 fail-close한다.
-  선택적 forward recovery와 Feature merge도 새 decision만 append하고 다른 item을 되감거나
-  provenance가 참조하는 loser item을 물리 삭제하지 않는다.
-
-  Admin REST는 import `import_batch_id`, item provenance 필드와
-  `GET /v1/admin/curations/link-audit`를 제공한다. wrong-field/substring/wildcard/
-  NFC-NFD/행정명 alias/동명이인/멱등 재적재/선택적 recovery/public 오노출/EXPLAIN과
-  migration backfill을 unit·실 PostgreSQL 테스트로 고정했다.
-
 ## 2026-07-31 — PR #732 설계 결정의 현재 정본 반영
 
 - [x] **T-VN-DOC-732 — 인증·canonical ops·C6c/C7 문서 정합성**

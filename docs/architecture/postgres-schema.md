@@ -96,8 +96,13 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
   승인으로 추정하지 않고 legacy 감사 대상으로 backfill한다.
 - import는 성공 batch와 각 normalized row를 append-only로 기록한다. item의
   `current_import_row_id`와 `accepted_link_decision_id`는 composite deferrable FK로 exact
-  item/target을 강제한다. 선택적 `forward_recovery`와 Feature merge는 새 decision을
-  append하고 current pointer만 전진시키며 duplicate loser item은 물리 삭제하지 않는다.
+  item/target을 강제한다. 세 history table의 immutable trigger는 직접 `UPDATE`/`DELETE`를
+  거부하고 batch→row FK도 `RESTRICT`한다. decision의 import row와 supersedes target은
+  같은 item만 허용하며 self-supersede를 거부한다.
+- 선택적 `forward_recovery`와 Feature merge는 이미 non-legacy accepted인 link만 새
+  decision으로 재승인한다. legacy/NULL/revoked link는 공개 불가 상태를 유지한다. duplicate
+  loser source가 이기면 survivor 소유 merge row를 append해 projection/current pointer를
+  함께 전진시키고 loser item은 물리 삭제하지 않는다.
 - 수동 item 추가·수정·보관은 parent collection row를 먼저 잠그고 collection의
   `updated_by`/`updated_at`도 함께 갱신한다.
 - CSV authoritative replace는 transaction advisory lock으로 직렬화한 뒤 대상 collection을
