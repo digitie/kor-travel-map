@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from kortravelmap.api.response import Meta
 
+MERKLE_ROOT_PATTERN = r"^[0-9a-f]{64}$"
+
 __all__ = [
     "CacheTargetAckRequest",
     "CacheTargetAckRecord",
@@ -174,7 +176,11 @@ class CacheTargetReconciliationRunning(BaseModel):
     snapshot_id: UUID
     restore_epoch: int = Field(ge=1)
     count: int = Field(ge=0)
-    merkle_root: str = Field(min_length=64, max_length=64)
+    merkle_root: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=MERKLE_ROOT_PATTERN,
+    )
     high_watermark_cursor: str
     entity_tag: str
     stream_entity_tag: str
@@ -560,7 +566,11 @@ class CacheTargetSnapshotData(BaseModel):
     restore_epoch: int = Field(ge=1)
     high_watermark_cursor: str
     count: int = Field(ge=0)
-    merkle_root: str = Field(min_length=64, max_length=64)
+    merkle_root: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=MERKLE_ROOT_PATTERN,
+    )
     items: list[CacheTargetSnapshotRow]
 
 
@@ -580,7 +590,11 @@ class CacheTargetSnapshotStatus(BaseModel):
 
     snapshot_id: str
     count: int = Field(ge=0)
-    merkle_root: str = Field(min_length=64, max_length=64)
+    merkle_root: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=MERKLE_ROOT_PATTERN,
+    )
     high_watermark_cursor: str
     created_at: datetime
 
@@ -654,7 +668,7 @@ class CacheTargetReconciliationSealRequest(BaseModel):
     expected_merkle_root: str = Field(
         min_length=64,
         max_length=64,
-        pattern=r"^[0-9a-f]{64}$",
+        pattern=MERKLE_ROOT_PATTERN,
     )
 
 
@@ -670,7 +684,7 @@ class CacheTargetReconciliationCompletionRequest(BaseModel):
     actual_merkle_root: str = Field(
         min_length=64,
         max_length=64,
-        pattern=r"^[0-9a-f]{64}$",
+        pattern=MERKLE_ROOT_PATTERN,
     )
 
 

@@ -429,7 +429,9 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
         "/v1/service/cache-target-event-dead-letters/{event_id}",
         "/v1/service/cache-target-event-dead-letters/{event_id}/replays",
         "/v1/service/cache-target-event-nacks",
+        "/v1/service/cache-target-reconciliations",
         "/v1/service/cache-target-reconciliations/{request_id}/completions",
+        "/v1/service/cache-target-reconciliations/{request_id}/seals",
         "/v1/service/cache-target-reconciliations/{request_id}/snapshot",
         "/v1/service/cache-target-snapshots/{external_system}",
         "/v1/service/cache-target-streams/{external_system}",
@@ -440,7 +442,9 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     }
     assert set(service["components"]["securitySchemes"]) == {"ServiceToken"}
     service_only_paths = {
+        "/v1/service/cache-target-reconciliations",
         "/v1/service/cache-target-reconciliations/{request_id}/completions",
+        "/v1/service/cache-target-reconciliations/{request_id}/seals",
         "/v1/service/cache-target-reconciliations/{request_id}/snapshot",
     }
     for path in service_only_paths:
@@ -454,6 +458,25 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert "FeatureBatchResponse" in schemas
     assert "WeatherBatchResponse" in schemas
     assert "CacheTargetClaimResponse" in schemas
+    begin_headers = {
+        parameter["name"]: parameter
+        for parameter in service["paths"]["/v1/service/cache-target-reconciliations"]["post"][
+            "parameters"
+        ]
+        if parameter.get("in") == "header"
+    }
+    assert begin_headers["If-Match"]["required"] is False
+    assert begin_headers["If-None-Match"]["required"] is False
+    seal_headers = {
+        parameter["name"]: parameter
+        for parameter in service["paths"][
+            "/v1/service/cache-target-reconciliations/{request_id}/seals"
+        ]["post"]["parameters"]
+        if parameter.get("in") == "header"
+    }
+    assert seal_headers["If-Match"]["required"] is True
+    running_schema = schemas["CacheTargetReconciliationRunning"]
+    assert running_schema["properties"]["merkle_root"]["pattern"] == r"^[0-9a-f]{64}$"
     event_schema = schemas["CacheTargetEventRecord"]
     event_properties = event_schema["properties"]
     assert {

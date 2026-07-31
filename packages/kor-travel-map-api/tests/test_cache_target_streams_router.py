@@ -906,6 +906,42 @@ def test_service_reconciliation_begin_uses_recovery_scope_and_ledger(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("extra_headers", "expected_status"),
+    [
+        ({}, 428),
+        (
+            {
+                "If-None-Match": "*",
+                "If-Match": f'"{EXTERNAL_SYSTEM}:2"',
+            },
+            422,
+        ),
+    ],
+)
+def test_service_reconciliation_begin_requires_exactly_one_stream_precondition(
+    extra_headers: dict[str, str],
+    expected_status: int,
+) -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service, settings=_settings(scopes=["cache-target:recovery"]))
+
+    response = client.post(
+        "/v1/service/cache-target-reconciliations",
+        headers=_service_headers(extra=extra_headers),
+        json={
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "expected_restore_epoch": 4,
+            "reason": "PinVi restore cutover",
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert service.reconciliation_begin_calls == []
+
+
+@pytest.mark.unit
 def test_service_reconciliation_seal_uses_request_etag_and_exact_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -116,6 +116,10 @@ _IF_MATCH_PARAMETER = {
     "description": "직전 GET/성공 응답의 raw strong ETag.",
     "schema": {"type": "string"},
 }
+_OPTIONAL_IF_MATCH_PARAMETER = {
+    **_IF_MATCH_PARAMETER,
+    "required": False,
+}
 _IF_NONE_MATCH_PARAMETER = {
     "name": "If-None-Match",
     "in": "header",
@@ -410,7 +414,9 @@ def _stream_control(row: Any) -> CacheTargetStreamControlRecord:
     control_version = _getattr(row, "control_version")
     default_state = "fenced" if _getattr(row, "fence_id") is not None else "active"
     active = _getattr(row, "active_reconciliation")
-    active_record = None
+    active_record: (
+        CacheTargetReconciliationPreparing | CacheTargetReconciliationRunning | None
+    ) = None
     if active is not None:
         active_status = _getattr(active, "status")
         if active_status == "preparing":
@@ -1299,7 +1305,7 @@ async def replay_service_cache_target_dead_letter(
         412: {"description": "stale stream ETag or unexpected stream state"},
         428: {"description": "missing If-Match/If-None-Match"},
     },
-    openapi_extra={"parameters": [_IF_NONE_MATCH_PARAMETER, _IF_MATCH_PARAMETER]},
+    openapi_extra={"parameters": [_IF_NONE_MATCH_PARAMETER, _OPTIONAL_IF_MATCH_PARAMETER]},
 )
 async def begin_service_cache_target_reconciliation(
     body: CacheTargetReconciliationBeginRequest,

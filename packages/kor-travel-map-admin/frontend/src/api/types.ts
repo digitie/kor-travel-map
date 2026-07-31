@@ -2469,6 +2469,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/cache-target-reconciliations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Begin Service Cache Target Reconciliation */
+        post: operations["begin_service_cache_target_reconciliation_v1_service_cache_target_reconciliations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/service/cache-target-reconciliations/{request_id}/completions": {
         parameters: {
             query?: never;
@@ -2480,6 +2497,23 @@ export interface paths {
         put?: never;
         /** Complete Service Cache Target Reconciliation */
         post: operations["complete_service_cache_target_reconciliation_v1_service_cache_target_reconciliations__request_id__completions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-reconciliations/{request_id}/seals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Seal Service Cache Target Reconciliation */
+        post: operations["seal_service_cache_target_reconciliation_v1_service_cache_target_reconciliations__request_id__seals_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4339,7 +4373,10 @@ export interface components {
             claim_id: string;
             /** Consumer Id */
             consumer_id: string;
-            /** Lease Token */
+            /**
+             * Lease Token
+             * Format: uuid
+             */
             lease_token: string;
             /** Through Cursor */
             through_cursor: string;
@@ -4351,40 +4388,6 @@ export interface components {
         CacheTargetAckResponse: {
             data: components["schemas"]["CacheTargetAckRecord"];
             meta: components["schemas"]["Meta"];
-        };
-        /**
-         * CacheTargetActiveReconciliation
-         * @description Consumer가 request-bound fixed snapshot을 찾는 active descriptor.
-         */
-        CacheTargetActiveReconciliation: {
-            /** Count */
-            count: number;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** High Watermark Cursor */
-            high_watermark_cursor: string;
-            /** Merkle Root */
-            merkle_root: string;
-            /**
-             * Request Id
-             * Format: uuid
-             */
-            request_id: string;
-            /** Restore Epoch */
-            restore_epoch: number;
-            /**
-             * Snapshot Id
-             * Format: uuid
-             */
-            snapshot_id: string;
-            /**
-             * Status
-             * @constant
-             */
-            status: "running";
         };
         /**
          * CacheTargetAppliedReceipt
@@ -4701,7 +4704,10 @@ export interface components {
             event_id: string;
             /** External System */
             external_system: string;
-            /** Lease Token */
+            /**
+             * Lease Token
+             * Format: uuid
+             */
             lease_token: string;
             /**
              * Max Attempts
@@ -4716,6 +4722,20 @@ export interface components {
         CacheTargetOperationResponse: {
             data: components["schemas"]["CacheTargetRecoveryOperationRecord"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetReconciliationBeginRequest
+         * @description Service two-phase cutover begin command.
+         */
+        CacheTargetReconciliationBeginRequest: {
+            /** Consumer Id */
+            consumer_id: string;
+            /** Expected Restore Epoch */
+            expected_restore_epoch: number;
+            /** External System */
+            external_system: string;
+            /** Reason */
+            reason: string;
         };
         /**
          * CacheTargetReconciliationCompletionRequest
@@ -4737,6 +4757,33 @@ export interface components {
             snapshot_id: string;
         };
         /**
+         * CacheTargetReconciliationPreparing
+         * @description Snapshot seal 전 recovery request descriptor.
+         */
+        CacheTargetReconciliationPreparing: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Entity Tag */
+            entity_tag: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            status: "preparing";
+            /** Stream Entity Tag */
+            stream_entity_tag: string;
+        };
+        /**
          * CacheTargetReconciliationRequest
          * @description Admin reconciliation command body.
          */
@@ -4747,16 +4794,74 @@ export interface components {
             reason: string;
         };
         /**
+         * CacheTargetReconciliationRunning
+         * @description Consumer가 request-bound fixed snapshot을 찾는 active descriptor.
+         */
+        CacheTargetReconciliationRunning: {
+            /** Count */
+            count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Entity Tag */
+            entity_tag: string;
+            /** High Watermark Cursor */
+            high_watermark_cursor: string;
+            /** Merkle Root */
+            merkle_root: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            status: "running";
+            /** Stream Entity Tag */
+            stream_entity_tag: string;
+        };
+        /**
+         * CacheTargetReconciliationSealRequest
+         * @description Service two-phase cutover seal command.
+         */
+        CacheTargetReconciliationSealRequest: {
+            /** Consumer Id */
+            consumer_id: string;
+            /** Expected Item Count */
+            expected_item_count: number;
+            /** Expected Merkle Root */
+            expected_merkle_root: string;
+            /** Expected Restore Epoch */
+            expected_restore_epoch: number;
+            /** External System */
+            external_system: string;
+        };
+        /**
          * CacheTargetRecoveryOperationRecord
          * @description Accepted recovery operation receipt.
          */
         CacheTargetRecoveryOperationRecord: {
+            /** Entity Tag */
+            entity_tag?: string | null;
             /** Operation Id */
             operation_id: string;
             /** Status */
             status: string;
             /** Status Url */
             status_url?: string | null;
+            /** Stream Entity Tag */
+            stream_entity_tag?: string | null;
         };
         /**
          * CacheTargetRefreshRequest
@@ -4975,7 +5080,8 @@ export interface components {
          * @description External-system stream control.
          */
         CacheTargetStreamControlRecord: {
-            active_reconciliation?: components["schemas"]["CacheTargetActiveReconciliation"] | null;
+            /** Active Reconciliation */
+            active_reconciliation?: (components["schemas"]["CacheTargetReconciliationPreparing"] | components["schemas"]["CacheTargetReconciliationRunning"]) | null;
             /** Blocked Event Id */
             blocked_event_id?: string | null;
             /** Consumer Id */
@@ -20760,6 +20866,80 @@ export interface operations {
             };
         };
     };
+    begin_service_cache_target_reconciliation_v1_service_cache_target_reconciliations_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+                /** @description create-only command에는 정확히 `*`를 보낸다. */
+                "If-None-Match"?: string;
+                /** @description 직전 GET/성공 응답의 raw strong ETag. */
+                "If-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetReconciliationBeginRequest"];
+            };
+        };
+        responses: {
+            /** @description two-phase reconciliation begin */
+            201: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    /** @description accepted recovery operation status URL. */
+                    Location?: string;
+                    /** @description status URL 재조회 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetOperationResponse"];
+                };
+            };
+            /** @description stale stream ETag or unexpected stream state */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description missing If-Match/If-None-Match */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     complete_service_cache_target_reconciliation_v1_service_cache_target_reconciliations__request_id__completions_post: {
         parameters: {
             query?: never;
@@ -20790,6 +20970,76 @@ export interface operations {
             };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    seal_service_cache_target_reconciliation_v1_service_cache_target_reconciliations__request_id__seals_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+                /** @description 직전 GET/성공 응답의 raw strong ETag. */
+                "If-Match": string;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetReconciliationSealRequest"];
+            };
+        };
+        responses: {
+            /** @description two-phase reconciliation sealed */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetOperationResponse"];
+                };
+            };
+            /** @description request ETag or checksum precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description missing If-Match */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };
