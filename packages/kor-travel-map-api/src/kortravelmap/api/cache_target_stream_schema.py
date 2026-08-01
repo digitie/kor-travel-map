@@ -249,8 +249,39 @@ class CacheTargetRestoreFenceRecord(CacheTargetStreamControlRecord):
 
     불변조건: `superseded_reconciliation_count == 0` iff
     `superseded_reconciliation_request_id == null`이고, count가 `1` iff request ID가
-    non-null이다.
+    UUID다. runtime validator와 OpenAPI object-level `oneOf`가 같은 두 조합만 허용한다.
     """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "oneOf": [
+                {
+                    "properties": {
+                        "superseded_reconciliation_count": {"const": 0},
+                        "superseded_reconciliation_request_id": {"type": "null"},
+                    },
+                    "required": [
+                        "superseded_reconciliation_count",
+                        "superseded_reconciliation_request_id",
+                    ],
+                },
+                {
+                    "properties": {
+                        "superseded_reconciliation_count": {"const": 1},
+                        "superseded_reconciliation_request_id": {
+                            "format": "uuid",
+                            "type": "string",
+                        },
+                    },
+                    "required": [
+                        "superseded_reconciliation_count",
+                        "superseded_reconciliation_request_id",
+                    ],
+                },
+            ]
+        },
+    )
 
     fence_id: UUID
     previous_restore_epoch: int = Field(ge=1)
@@ -843,7 +874,7 @@ class CacheTargetRecoveryOperationRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    operation_id: str
+    operation_id: UUID
     status: CacheTargetRecoveryOperationStatus
     snapshot_id: UUID | None = None
     status_url: str | None = None

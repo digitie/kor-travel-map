@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator
 from kortravelmap.infra import cache_target_event_cursor
 from kortravelmap.infra.cache_target_stream_repo import CacheTargetStreamConflict
 from pydantic import ValidationError
@@ -18,6 +19,7 @@ from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import CACHE_TARGET_CONSUMER_HEADER, SERVICE_TOKEN_HEADER
 from kortravelmap.api.cache_target_stream_schema import (
     CacheTargetEventRecord,
+    CacheTargetRecoveryOperationRecord,
     CacheTargetRestoreFenceRecord,
     CacheTargetStreamStatusRecord,
 )
@@ -447,18 +449,66 @@ def test_restore_fence_receipt_accepts_correlated_reconciliation_fields(
 
 
 @pytest.mark.unit
-def test_restore_fence_openapi_documents_receipt_correlation_invariant() -> None:
+def test_restore_fence_openapi_encodes_receipt_correlation_invariant() -> None:
     client = _client(_FakeCacheTargetService())
 
     schema = client.app.openapi()["components"]["schemas"][
         "CacheTargetRestoreFenceRecord"
     ]
 
-    assert schema["description"] == (
-        "Restore-fence control state와 durable effect receipt.\n\n"
-        "불변조건: `superseded_reconciliation_count == 0` iff\n"
-        "`superseded_reconciliation_request_id == null`이고, count가 `1` iff "
-        "request ID가\nnon-null이다."
+    assert schema["oneOf"] == [
+        {
+            "properties": {
+                "superseded_reconciliation_count": {"const": 0},
+                "superseded_reconciliation_request_id": {"type": "null"},
+            },
+            "required": [
+                "superseded_reconciliation_count",
+                "superseded_reconciliation_request_id",
+            ],
+        },
+        {
+            "properties": {
+                "superseded_reconciliation_count": {"const": 1},
+                "superseded_reconciliation_request_id": {
+                    "format": "uuid",
+                    "type": "string",
+                },
+            },
+            "required": [
+                "superseded_reconciliation_count",
+                "superseded_reconciliation_request_id",
+            ],
+        },
+    ]
+
+    validator = Draft202012Validator(
+        schema,
+        format_checker=Draft202012Validator.FORMAT_CHECKER,
+    )
+    assert validator.is_valid(
+        _restore_fence_record_payload(
+            superseded_reconciliation_count=0,
+            superseded_reconciliation_request_id=None,
+        )
+    )
+    assert validator.is_valid(
+        _restore_fence_record_payload(
+            superseded_reconciliation_count=1,
+            superseded_reconciliation_request_id=RECONCILIATION_REQUEST_ID,
+        )
+    )
+    assert not validator.is_valid(
+        _restore_fence_record_payload(
+            superseded_reconciliation_count=0,
+            superseded_reconciliation_request_id=RECONCILIATION_REQUEST_ID,
+        )
+    )
+    assert not validator.is_valid(
+        _restore_fence_record_payload(
+            superseded_reconciliation_count=1,
+            superseded_reconciliation_request_id=None,
+        )
     )
 
 
@@ -501,6 +551,29 @@ def test_ops_recovery_operation_exposes_superseded_status_enum() -> None:
         "CacheTargetRecoveryOperationRecord"
     ]
     assert "superseded" in operation_schema["properties"]["status"]["enum"]
+    assert operation_schema["properties"]["operation_id"]["format"] == "uuid"
+
+
+@pytest.mark.unit
+def test_ops_recovery_operation_rejects_non_uuid_operation_id() -> None:
+    with pytest.raises(ValidationError, match="UUID"):
+        CacheTargetRecoveryOperationRecord.model_validate(
+            {
+                "operation_id": "not-a-uuid",
+                "status": "accepted",
+            }
+        )
+
+    service = _FakeCacheTargetService()
+    service.operation_result = SimpleNamespace(
+        operation_id="not-a-uuid",
+        status="accepted",
+        snapshot_id=None,
+        status_url=None,
+    )
+    client = _client(service)
+    with pytest.raises(ValidationError, match="UUID"):
+        client.get(f"/v1/ops/cache-target-operations/{RECONCILIATION_REQUEST_ID}")
 
 
 @pytest.mark.unit

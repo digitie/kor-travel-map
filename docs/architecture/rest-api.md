@@ -601,11 +601,12 @@ reconciliation을 terminal `superseded`/`restore_fenced`로 원자 종결한다.
 최초 count/UUID/version을 그대로 반환하며 구 request의 snapshot/seal/completion은
 `RECONCILIATION_SUPERSEDED` `409`다.
 HTTP DTO는 `superseded_reconciliation_count == 0` iff request ID가 `null`, count가 `1` iff
-request ID가 non-null인 상관 불변식을 after validator로 강제한다. OpenAPI schema description도
-동일한 exact 계약 문장을 노출해 consumer contract pin이 검증할 수 있게 한다.
+request ID가 UUID인 상관 불변식을 after validator로 강제한다. OpenAPI 3.1 schema도 object-level
+`oneOf`의 `0/null`, `1/format: uuid` 두 branch로 같은 관계를 기계 검증 가능하게 고정한다.
 `GET /v1/ops/cache-target-operations/{operation_id}`의 status는 자유 문자열이 아니라 reconciliation
 `preparing|running|succeeded|failed|superseded`, delivery
-`pending|leased|retry|dead|delivered|superseded`, admin 접수 `accepted`의 합집합 enum이다.
+`pending|leased|retry|dead|delivered|superseded`, admin 접수 `accepted`의 합집합 enum이다. 응답
+`operation_id`는 UUID이며 non-UUID producer 결과는 응답 직렬화 전에 fail-close한다.
 
 target create는 `If-None-Match: *`, update/delete는 직전 GET/성공 응답의 raw strong ETag를
 `If-Match`로 보낸다. `source_generation`은 ETag나 queue generation을 대체하지 않는다. `412`는

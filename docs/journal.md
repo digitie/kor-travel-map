@@ -92,9 +92,10 @@
   응답 계약으로 변경을 한정했다.
 - Pydantic after validator는 count `0` iff UUID `null`, count `1` iff UUID non-null을
   강제하며 두 valid/두 invalid 조합을 schema 회귀로 고정한다.
-- OpenAPI가 필드 간 상관을 직접 표현하지 못하는 경계는
-  `CacheTargetRestoreFenceRecord.description`의 exact invariant 문구로 노출하고 테스트한다.
-- API/OpenAPI 집중 회귀 **57건**, targeted Ruff, strict mypy, diff-check가 통과했다.
+- OpenAPI 3.1 object-level `oneOf`도 `0/null`, `1/format: uuid` 두 branch만 허용해 PinVi가
+  필드 상관관계를 기계 검증할 수 있다. recovery operation ID도 UUID schema/runtime 계약으로
+  좁혀 임의 문자열 producer 결과를 fail-close한다.
+- API/OpenAPI 집중 회귀, targeted Ruff, strict mypy, diff-check와 admin type 생성 검증을 통과했다.
 
 ## 2026-08-01 (codex) — T-VN-41 restore fence active reconciliation supersession
 
