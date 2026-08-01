@@ -17,12 +17,30 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-01 — H35 게이트 ① 실증, 그리고 내가 정한 게이트 값이 틀렸음을 발견
+
+- 격리 clone에서 **실제 import 경로**를 태워 게이트를 재현했다(HTTP/인증만 제외):
+  배포 전 **3,265** → 마이그레이션 직후 **3,043**(-222) → CSV 재import 후 **3,265**(±0).
+  CSV 222행 전량 채택(미채택 0), `csv_explicit_feature_id` decision 222건 생성.
+- **게이트 값 정정.** 1차 실행이 3,265로 나와 내가 문서에 박은 기대값 3,266에 1
+  모자랐다. 추적하니 그 1건은 `[빵이네] 강원도여행정보`(`selection_origin=admin`,
+  **`item_status='rejected'`**)였고, 공개 목록 술어는 `i.status = 'included'`를
+  요구한다(`curation_repo.py:589`) — **애초에 공개 표면에 없던 항목**이다.
+- 즉 **3,266은 "링크 수"이지 "공개 노출 수"가 아니다.** 링크 수를 게이트로 쓰면
+  정상 배포에서도 FAIL이 뜬다. 게이트를 공개 목록과 같은 술어(`status='included'` +
+  collection public/published + theme public + trusted decision)로 바꿨다.
+- 같은 이유로 **공백은 223이 아니라 222**다. 내 공백 측정 쿼리가 `status <> 'archived'`만
+  걸러 `rejected`를 포함시킨 오류였다.
+- 교훈: 코드 경로로 "복구된다"까지는 맞게 확정했지만(222행 전량 채택으로 확인됨),
+  **그 결과를 판정할 게이트 값 자체를 실행 없이 정한 것이 오류였다.**
+
 ## 2026-08-01 — #918·#919 머지, H35 배포 절차 확정
 
 - 두 PR 모두 8/8 CI green으로 머지(`origin/main` = `e1afb1cf`). `0073`(H40) +
   `0074`(H41)가 main에 있다.
-- 격리 restore clone(`0064~0074`)에서 재측정: trusted **3,266 → 3,043**, 공백 **223건**.
-  prod 직접 조회 결과와 정확히 일치한다. H41 FK 4개 CASCADE, item PK 재작성 성공 확인.
+- 격리 restore clone(`0064~0074`)에서 재측정: trusted **3,266 → 3,043**.
+  (~~공백 223건~~ → **정정: 공개 공백은 222건.** 위 게이트 실증 항목 참조.)
+  H41 FK 4개 CASCADE, item PK 재작성 성공 확인.
 - **복원 스크립트 자체의 결함을 먼저 잡았다** — `postgis/postgis` 베이스 이미지가
   초기화 때 postgis류 extension을 `public`에 깔아 두는 탓에, 덤프의
   `CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA x_extension`이 **조용히 no-op**
