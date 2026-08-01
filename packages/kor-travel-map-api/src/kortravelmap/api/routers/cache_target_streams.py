@@ -68,7 +68,9 @@ from kortravelmap.api.cache_target_stream_schema import (
     CacheTargetSnapshotRow,
     CacheTargetSnapshotStatus,
     CacheTargetSourceDeleteRequest,
+    CacheTargetSourceMutationRecord,
     CacheTargetSourceMutationResponse,
+    CacheTargetSourceReadResponse,
     CacheTargetSourceRecord,
     CacheTargetSourceUpsertRequest,
     CacheTargetStreamControlRecord,
@@ -411,6 +413,22 @@ def _source_record(
     )
 
 
+def _source_mutation_record(
+    row: Any,
+    *,
+    external_system: str,
+    target_key: str,
+    fallback_fingerprint: str,
+) -> CacheTargetSourceMutationRecord:
+    read_record = _source_record(
+        row,
+        external_system=external_system,
+        target_key=target_key,
+        fallback_fingerprint=fallback_fingerprint,
+    )
+    return CacheTargetSourceMutationRecord.model_validate(read_record.model_dump())
+
+
 def _stream_control(row: Any) -> CacheTargetStreamControlRecord:
     external_system = _getattr(row, "external_system")
     control_version = _getattr(row, "control_version")
@@ -709,7 +727,7 @@ async def put_service_cache_target(
             expected_lock_version=expected_lock_version,
         )
     raise_for_cache_target_status(result)
-    record = _source_record(
+    record = _source_mutation_record(
         result,
         external_system=external_system,
         target_key=target_key,
@@ -721,7 +739,7 @@ async def put_service_cache_target(
 
 @service_router.get(
     "/cache-targets/{external_system}/{target_key}",
-    response_model=CacheTargetSourceMutationResponse,
+    response_model=CacheTargetSourceReadResponse,
     responses={
         200: {"description": "target source read", "headers": _ETAG_RESPONSE_HEADER},
         404: {"description": "target source not found"},
@@ -741,7 +759,7 @@ async def get_service_cache_target(
         Depends(require_cache_target_service_principal),
     ],
     include_deleted: Annotated[bool, Query()] = False,
-) -> CacheTargetSourceMutationResponse:
+) -> CacheTargetSourceReadResponse:
     started_at = perf_counter()
     require_cache_target_service_scope(
         context,
@@ -762,7 +780,7 @@ async def get_service_cache_target(
         )
     record = _source_record(row, external_system=external_system, target_key=target_key)
     _set_etag(response, record)
-    return CacheTargetSourceMutationResponse(data=record, meta=_meta(started_at))
+    return CacheTargetSourceReadResponse(data=record, meta=_meta(started_at))
 
 
 @service_router.delete(
@@ -818,7 +836,7 @@ async def delete_service_cache_target(
             expected_lock_version=expected_lock_version,
         )
     raise_for_cache_target_status(result)
-    record = _source_record(
+    record = _source_mutation_record(
         result,
         external_system=external_system,
         target_key=target_key,

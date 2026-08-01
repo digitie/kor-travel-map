@@ -5179,16 +5179,58 @@ export interface components {
             source_generation: number;
         };
         /**
+         * CacheTargetSourceMutationRecord
+         * @description PUT/DELETE가 commit한 exact target incarnation receipt.
+         */
+        CacheTargetSourceMutationRecord: {
+            /** Entity Tag */
+            entity_tag: string;
+            /** External System */
+            external_system: string;
+            /** Occurred At */
+            occurred_at?: string | null;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /** Source Generation */
+            source_generation: number;
+            /** Source Payload Fingerprint */
+            source_payload_fingerprint: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "deleted";
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Target Key */
+            target_key: string;
+            /** Target Sequence */
+            target_sequence?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
          * CacheTargetSourceMutationResponse
          * @description Service target PUT/DELETE response.
          */
         CacheTargetSourceMutationResponse: {
+            data: components["schemas"]["CacheTargetSourceMutationRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetSourceReadResponse
+         * @description Service target GET response.
+         */
+        CacheTargetSourceReadResponse: {
             data: components["schemas"]["CacheTargetSourceRecord"];
             meta: components["schemas"]["Meta"];
         };
         /**
          * CacheTargetSourceRecord
-         * @description Target source projection representation.
+         * @description Nullable tombstone identity를 허용하는 target source read projection.
          */
         CacheTargetSourceRecord: {
             /** Entity Tag */
@@ -21511,7 +21553,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CacheTargetSourceMutationResponse"];
+                    "application/json": components["schemas"]["CacheTargetSourceReadResponse"];
                 };
             };
             /** @description target source not found */

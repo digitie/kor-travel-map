@@ -63,6 +63,17 @@ T-VN-41 lane이 Playwright buildx 빌드 + 라이브 스택 2벌을 **현재 사
 범위 `0064~0074`, 3(마이그레이션)과 4(`ktdctl deploy`) **사이에 CSV 재import**를 넣는다.
 (중단 게이트 값은 위 게이트 실증 항목에서 **공개 노출 item = 3,265**로 정정됐다.)
 
+## 2026-08-01 (codex) — T-VN-41 immutable DELETE/PUT receipt
+
+`0076_cache_target_receipt`이 applied source event의 target UUID와 apply 시점 `lock_version`을 append-only
+영수증으로 고정한다. DELETE exact replay는 mutable tombstone row가 사후 UPDATE돼도 이 immutable
+version으로 최초 post-delete ETag를 복원한다. 0075 기존 active receipt는 outbox ETag에서, DELETE는
+transaction timestamp가 일치하는 tombstone에서만 backfill하고 불확실한 drift는 migration을 중단한다.
+PUT/DELETE response는 non-null UUID `target_id`/`entity_tag` DTO, GET은 nullable read DTO로 분리했다.
+
+**다음 한 작업**: OpenAPI/export/types와 Alembic metadata gate를 포함한 Map 전체 검증 뒤 Map/PinVi 교차
+E2E에서 응답 유실 DELETE exact retry와 후속 새 incarnation PUT의 수렴을 재확인한다.
+
 ## 2026-08-01 (codex) — T-VN-41 migration을 main 최신 head 뒤의 `0075`로 선형화
 
 PR #917을 main에 rebase하면서 T-VN-H40/H41의 `0073_curation_source_rule`과

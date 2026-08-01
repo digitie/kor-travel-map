@@ -91,6 +91,19 @@ class _FakeCacheTargetService:
             occurred_at=NOW,
             updated_at=NOW,
         )
+        self.source_result: Any = SimpleNamespace(
+            external_system=EXTERNAL_SYSTEM,
+            target_key="target-1",
+            state="deleted",
+            restore_epoch=1,
+            source_generation=2,
+            source_payload_fingerprint="b" * 64,
+            target_sequence=1,
+            target_id=None,
+            entity_tag=None,
+            occurred_at=NOW,
+            updated_at=NOW,
+        )
         self.stream = SimpleNamespace(
             external_system=EXTERNAL_SYSTEM,
             restore_epoch=4,
@@ -190,6 +203,9 @@ class _FakeCacheTargetService:
     async def apply_cache_target_source(self, _session: Any, **kwargs: Any) -> Any:
         self.apply_calls.append(kwargs)
         return self.apply_result
+
+    async def get_cache_target_source(self, _session: Any, **_kwargs: Any) -> Any:
+        return self.source_result
 
     async def get_cache_target_stream(
         self,
@@ -582,6 +598,83 @@ def test_put_cache_target_uses_bound_principal_and_create_precondition() -> None
     assert service.apply_calls[0]["consumer_id"] == CONSUMER_ID
     assert service.apply_calls[0]["create_only"] is True
     assert service.apply_calls[0]["expected_target_id"] is None
+
+
+@pytest.mark.unit
+def test_delete_cache_target_replay_preserves_historical_identity_and_etag() -> None:
+    service = _FakeCacheTargetService()
+    entity_tag = f'"{TARGET_ID}:8"'
+    service.apply_result = SimpleNamespace(
+        external_system=EXTERNAL_SYSTEM,
+        target_key="target-1",
+        state="deleted",
+        restore_epoch=1,
+        source_generation=2,
+        source_payload_fingerprint="b" * 64,
+        target_sequence=1,
+        target_id=TARGET_ID,
+        entity_tag=entity_tag,
+        target=None,
+        occurred_at=NOW,
+        updated_at=NOW,
+        idempotent_replay=True,
+    )
+    client = _client(service)
+
+    response = client.request(
+        "DELETE",
+        f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
+        headers=_service_headers(extra={"If-Match": f'"{TARGET_ID}:7"'}),
+        json={
+            "source_event_id": SOURCE_EVENT_ID,
+            "restore_epoch": 1,
+            "source_generation": 2,
+            "occurred_at": NOW.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["etag"] == entity_tag
+    assert response.json()["data"]["state"] == "deleted"
+    assert response.json()["data"]["target_id"] == TARGET_ID
+    assert response.json()["data"]["entity_tag"] == entity_tag
+
+
+@pytest.mark.unit
+def test_get_deleted_cache_target_keeps_nullable_read_projection() -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service)
+
+    response = client.get(
+        f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1?include_deleted=true",
+        headers=_service_headers(),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["state"] == "deleted"
+    assert response.json()["data"]["target_id"] is None
+    assert response.json()["data"]["entity_tag"] is None
+    assert "etag" not in response.headers
+
+
+@pytest.mark.unit
+def test_delete_mutation_rejects_nullable_target_receipt() -> None:
+    service = _FakeCacheTargetService()
+    service.apply_result = service.source_result
+    client = _client(service)
+
+    with pytest.raises(ValidationError, match="target_id"):
+        client.request(
+            "DELETE",
+            f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
+            headers=_service_headers(extra={"If-Match": f'"{TARGET_ID}:7"'}),
+            json={
+                "source_event_id": SOURCE_EVENT_ID,
+                "restore_epoch": 1,
+                "source_generation": 2,
+                "occurred_at": NOW.isoformat(),
+            },
+        )
 
 
 @pytest.mark.unit

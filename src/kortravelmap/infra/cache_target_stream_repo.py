@@ -26,6 +26,7 @@ from kortravelmap.infra.domain_command_repo import canonical_domain_command_fing
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     delete_poi_cache_target,
+    poi_cache_target_entity_tag,
     upsert_poi_cache_target,
 )
 
@@ -89,6 +90,8 @@ class CacheTargetSourceApplyResult:
     target_sequence: int
     source_payload_fingerprint: str
     payload: dict[str, Any]
+    target_id: str
+    entity_tag: str
     target: PoiCacheTarget | None
     idempotent_replay: bool
 
@@ -155,11 +158,19 @@ FOR UPDATE
 _GET_SOURCE_REPLAY_SQL = """
 SELECT source.event_id AS source_event_id, source.external_system,
        source.target_key, source.restore_epoch, source.source_generation,
+       source.operation, source.outcome,
        source.request_fingerprint, source.source_payload_fingerprint,
        source.target_id AS historical_target_id,
+       source.target_lock_version AS receipt_target_lock_version,
+       target.deleted_at AS historical_target_deleted_at,
        outbox.event_id AS outbox_event_id, outbox.relay_order,
+       outbox.target_id AS outbox_target_id,
        outbox.target_sequence, outbox.payload
 FROM ops.poi_cache_target_source_events AS source
+JOIN ops.poi_cache_targets AS target
+  ON target.target_id = source.target_id
+ AND target.external_system = source.external_system
+ AND target.target_key = source.target_key
 JOIN ops.poi_cache_target_outbox_events AS outbox
   ON outbox.source_event_id = source.event_id
  AND outbox.event_type = 'cache_target.state_applied'
@@ -196,12 +207,14 @@ _INSERT_SOURCE_EVENT_SQL = """
 INSERT INTO ops.poi_cache_target_source_events (
     event_id, external_system, target_key, idempotency_key, operation,
     restore_epoch, source_generation, request_fingerprint,
-    source_payload_fingerprint, outcome, target_id, occurred_at
+    source_payload_fingerprint, outcome, target_id, target_lock_version,
+    occurred_at
 ) VALUES (
     CAST(:event_id AS uuid), :external_system, :target_key,
     CAST(:idempotency_key AS uuid), :operation, :restore_epoch,
     :source_generation, :request_fingerprint, :source_payload_fingerprint,
-    'applied', CAST(:target_id AS uuid), CAST(:occurred_at AS timestamptz)
+    'applied', CAST(:target_id AS uuid), :target_lock_version,
+    CAST(:occurred_at AS timestamptz)
 )
 """
 
@@ -465,12 +478,50 @@ def _json_object(value: Any) -> dict[str, Any]:
     return {str(key): item for key, item in value.items()}
 
 
+def _replay_target_identity(
+    values: Any,
+    *,
+    state: Literal["active", "deleted"],
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    target_id = str(values["historical_target_id"])
+    target_lock_version = int(values["receipt_target_lock_version"])
+    if (
+        values["outcome"] != "applied"
+        or target_lock_version < 1
+        or str(values["outbox_target_id"]) != target_id
+    ):
+        raise ValueError("저장된 source receipt의 target identity가 유효하지 않습니다.")
+    entity_tag = poi_cache_target_entity_tag(target_id, target_lock_version)
+    target_payload = payload.get("target")
+    if state == "deleted":
+        if (
+            values["operation"] != "delete"
+            or target_payload is not None
+            or values["historical_target_deleted_at"] is None
+        ):
+            raise ValueError("저장된 deleted source receipt의 target material이 유효하지 않습니다.")
+        return target_id, entity_tag
+    if values["operation"] != "upsert" or not isinstance(target_payload, dict):
+        raise ValueError("저장된 active source receipt의 target material이 유효하지 않습니다.")
+    payload_target_id = target_payload.get("target_id")
+    payload_entity_tag = target_payload.get("entity_tag")
+    if payload_target_id != target_id or payload_entity_tag != entity_tag:
+        raise ValueError("저장된 active source receipt의 target identity가 유효하지 않습니다.")
+    return target_id, entity_tag
+
+
 def _replay_result(row: Any) -> CacheTargetSourceApplyResult:
     values = row._mapping
     payload = _json_object(values["payload"])
     state = payload.get("state")
     if state not in ("active", "deleted"):
         raise ValueError("저장된 state_applied payload state가 유효하지 않습니다.")
+    target_id, entity_tag = _replay_target_identity(
+        values,
+        state=state,
+        payload=payload,
+    )
     return CacheTargetSourceApplyResult(
         source_event_id=str(values["source_event_id"]),
         outbox_event_id=str(values["outbox_event_id"]),
@@ -483,6 +534,8 @@ def _replay_result(row: Any) -> CacheTargetSourceApplyResult:
         target_sequence=int(values["target_sequence"]),
         source_payload_fingerprint=str(values["source_payload_fingerprint"]),
         payload=payload,
+        target_id=target_id,
+        entity_tag=entity_tag,
         target=None,
         idempotent_replay=True,
     )
@@ -756,6 +809,7 @@ async def apply_cache_target_source(
             "request_fingerprint": request_fingerprint,
             "source_payload_fingerprint": source_fingerprint,
             "target_id": historical_target_id,
+            "target_lock_version": target.lock_version,
             "occurred_at": occurred_at.astimezone(UTC),
         },
     )
@@ -816,6 +870,8 @@ async def apply_cache_target_source(
         target_sequence=target_sequence,
         source_payload_fingerprint=source_fingerprint,
         payload=payload,
+        target_id=historical_target_id,
+        entity_tag=target.entity_tag,
         target=target,
         idempotent_replay=False,
     )

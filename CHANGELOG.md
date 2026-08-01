@@ -9,12 +9,15 @@
 
 - **DATABASE (breaking)**: migration `0075_cache_target_outbox`로 source generation/restore epoch,
   durable head/tombstone, transaction outbox, delivery/claim/dead-letter, fixed snapshot과
-  reconciliation 상태를 정규화했다.
+  reconciliation 상태를 정규화했다. 후속 `0076_cache_target_receipt`은 applied source event에 당시
+  target `lock_version`을 불변 영수증으로 고정하고 검증 가능한 0075 행만 backfill한다.
 - **CORRECTNESS**: target/link/refresh 결과 event는 원본 mutation과 같은 transaction에서
   commit한다. restore swap은 live보다 낮은 epoch와 consumer binding drift를 거부하고 동일
   restore-fence domain 함수가 성공한 뒤에만 cutover env를 노출한다.
   fence가 대체한 reconciliation은 request UUID만 참조하지 않고 stream identity와 함께 composite FK로
-  결박해 다른 stream receipt INSERT와 referenced parent stream 변경을 DB에서 거부한다.
+  결박해 다른 stream receipt INSERT와 referenced parent stream 변경을 DB에서 거부한다. PUT/DELETE exact
+  replay는 mutable target row가 아니라 immutable source receipt의 historical target UUID/version으로
+  최초 strong ETag를 exact 반환한다.
 - **RELAY**: consumer pull claim, contiguous ACK, bounded NACK/dead/replay와 immutable snapshot
   pagination을 제공한다. checksum mismatch는 stream을 disabled로 유지하고 exact match·동일 epoch·
   dead-letter 0인 completion receipt에서만 resume한다. mid-claim poison은 앞 prefix ACK 전에는
@@ -31,7 +34,8 @@
   durable fence receipt 그대로 노출하며 exact replay도 최초 값과 version을 보존한다. HTTP
   DTO와 OpenAPI object-level `oneOf`는 대체 reconciliation 수가 `0`이면 UUID가 `null`,
   `1`이면 `format: uuid`인 상관 불변식을 fail-close한다. recovery operation receipt의
-  `operation_id`도 UUID로 좁힌다.
+  `operation_id`도 UUID로 좁힌다. target PUT/DELETE response는 non-null UUID `target_id`와
+  `entity_tag` 전용 DTO를 쓰며, nullable tombstone identity는 GET read projection에만 남긴다.
 - **OPENAPI (breaking)**: 공개 사용자와 서버 간 profile을 분리했다.
   `@kor-travel-map/user-client`는 `RoutePolicy.SERVICE` batch 타입을 더는 노출하지 않으며,
   서버 간 소비자는 `openapi.service.json`을 pin한다.

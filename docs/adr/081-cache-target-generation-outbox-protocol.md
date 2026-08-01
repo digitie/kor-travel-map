@@ -41,7 +41,7 @@ Map DB는 다음 정규화 상태를 둔다.
 - source head: `(external_system, target_key)`별 마지막 epoch/generation, target UUID 또는 durable
   tombstone, 마지막 source event/command.
 - source event ledger: producer `event_id`, Idempotency-Key command UUID, operation, 자연키, epoch,
-  generation, canonical request fingerprint와 적용 결과를 불변 보존한다.
+  generation, canonical request fingerprint, 적용 target UUID와 당시 `lock_version`을 불변 보존한다.
 - refresh membership: request가 시작할 때 target UUID와 epoch/generation을 캡처해 늦은 job 결과가
   새 target 세대의 결과로 가장하지 못하게 한다.
 
@@ -49,6 +49,9 @@ Map DB는 다음 정규화 상태를 둔다.
 `409`다. 낮은 generation과 과거 epoch는 projection을 바꾸지 않는다. active target row가 삭제·재생성돼도
 head/tombstone은 남아 stale resurrection을 차단한다. 기존 target에는 가짜 epoch 0을 백필하지 않고 첫
 권위 snapshot이 identity를 채택한다.
+PUT/DELETE replay의 strong ETag는 mutable target row의 현재 version이 아니라 source event ledger에
+고정된 apply 시점 `target_id + target_lock_version`으로 복원한다. 따라서 tombstone row가 사후 UPDATE돼도
+최초 DELETE receipt가 변하지 않는다.
 
 ### 3. restore fence
 

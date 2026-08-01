@@ -1813,12 +1813,107 @@
         "title": "CacheTargetSourceDeleteRequest",
         "type": "object"
       },
+      "CacheTargetSourceMutationRecord": {
+        "additionalProperties": false,
+        "description": "PUT/DELETE가 commit한 exact target incarnation receipt.",
+        "properties": {
+          "entity_tag": {
+            "title": "Entity Tag",
+            "type": "string"
+          },
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "restore_epoch": {
+            "minimum": 1.0,
+            "title": "Restore Epoch",
+            "type": "integer"
+          },
+          "source_generation": {
+            "minimum": 1.0,
+            "title": "Source Generation",
+            "type": "integer"
+          },
+          "source_payload_fingerprint": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Source Payload Fingerprint",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "deleted"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_key": {
+            "title": "Target Key",
+            "type": "string"
+          },
+          "target_sequence": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Sequence"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "external_system",
+          "target_key",
+          "state",
+          "restore_epoch",
+          "source_generation",
+          "source_payload_fingerprint",
+          "target_id",
+          "entity_tag"
+        ],
+        "title": "CacheTargetSourceMutationRecord",
+        "type": "object"
+      },
       "CacheTargetSourceMutationResponse": {
         "additionalProperties": false,
         "description": "Service target PUT/DELETE response.",
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/CacheTargetSourceRecord"
+            "$ref": "#/components/schemas/CacheTargetSourceMutationRecord"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"
@@ -1831,9 +1926,27 @@
         "title": "CacheTargetSourceMutationResponse",
         "type": "object"
       },
+      "CacheTargetSourceReadResponse": {
+        "additionalProperties": false,
+        "description": "Service target GET response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CacheTargetSourceRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CacheTargetSourceReadResponse",
+        "type": "object"
+      },
       "CacheTargetSourceRecord": {
         "additionalProperties": false,
-        "description": "Target source projection representation.",
+        "description": "Nullable tombstone identity를 허용하는 target source read projection.",
         "properties": {
           "entity_tag": {
             "anyOf": [
@@ -4861,7 +4974,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CacheTargetSourceMutationResponse"
+                  "$ref": "#/components/schemas/CacheTargetSourceReadResponse"
                 }
               }
             },

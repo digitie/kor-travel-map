@@ -4061,6 +4061,15 @@ class PoiCacheTargetSourceEventRow(Base):
             "restore_epoch > 0 AND source_generation > 0",
             name=conv("ck_cache_target_source_events_versions"),
         ),
+        CheckConstraint(
+            "target_lock_version IS NULL OR target_lock_version > 0",
+            name=conv("ck_cache_target_source_events_target_lock_version"),
+        ),
+        CheckConstraint(
+            "outcome <> 'applied' OR "
+            "(target_id IS NOT NULL AND target_lock_version IS NOT NULL)",
+            name=conv("ck_cache_target_source_events_applied_target_receipt"),
+        ),
         ForeignKeyConstraint(
             ["external_system", "target_key"],
             [
@@ -4110,6 +4119,7 @@ class PoiCacheTargetSourceEventRow(Base):
             ondelete="RESTRICT",
         ),
     )
+    target_lock_version: Mapped[int | None] = mapped_column(BigInteger)
     refresh_request_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
         ForeignKey(

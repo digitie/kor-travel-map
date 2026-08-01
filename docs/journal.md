@@ -61,6 +61,20 @@
 - 앞서 "swap 고갈은 위험 신호"라고 한 것은 **정정한다** — sudo로도 VmSwap을 잡은
   프로세스가 없고 `available` 7.9Gi다. 유휴 스왑이지 메모리 압박이 아니다.
 
+## 2026-08-01 (codex) — T-VN-41 immutable target source receipt
+
+- cache-target DELETE 성공 뒤 응답 유실로 같은 command를 exact retry하면 source ledger replay가
+  historical target identity를 버려 `target_id`/`entity_tag`가 `null`이 되던 결함을 수정했다.
+- n150에 적용된 `0075`를 수정하지 않고 선형 migration `0076_cache_target_receipt`을 추가했다. applied
+  source event마다 당시 `target_lock_version`을 append-only ledger에 고정한다. 기존 active는 immutable
+  outbox ETag, DELETE는 delete transaction timestamp가 일치하는 tombstone만 backfill하며 drift는
+  migration을 중단한다.
+- replay는 mutable target row의 현재 version을 읽지 않는다. tombstone 사후 UPDATE 뒤에도 ledger의
+  historical UUID/version으로 최초 strong ETag를 exact 복원하고, source/outbox material 불일치는
+  fail-close한다.
+- PUT/DELETE response는 non-null UUID `target_id`와 `entity_tag` 전용 DTO를 사용한다. GET read DTO만
+  deleted head의 nullable identity를 유지하며 OpenAPI와 생성 TypeScript를 같은 계약으로 갱신했다.
+
 ## 2026-08-01 (codex) — T-VN-41 migration rebase 선형화
 
 - PR #917의 46개 commit을 최신 main에 rebase했다. 기능 commit은 range-diff에서 동일했고,

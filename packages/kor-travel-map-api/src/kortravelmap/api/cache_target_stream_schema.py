@@ -48,7 +48,9 @@ __all__ = [
     "CacheTargetSnapshotRow",
     "CacheTargetSnapshotStatus",
     "CacheTargetSourceDeleteRequest",
+    "CacheTargetSourceMutationRecord",
     "CacheTargetSourceMutationResponse",
+    "CacheTargetSourceReadResponse",
     "CacheTargetSourceRecord",
     "CacheTargetSourceUpsertRequest",
     "CacheTargetStreamControlResponse",
@@ -143,7 +145,7 @@ class CacheTargetSourceDeleteRequest(BaseModel):
 
 
 class CacheTargetSourceRecord(BaseModel):
-    """Target source projection representation."""
+    """Nullable tombstone identity를 허용하는 target source read projection."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -160,8 +162,35 @@ class CacheTargetSourceRecord(BaseModel):
     updated_at: datetime | None = None
 
 
+class CacheTargetSourceMutationRecord(BaseModel):
+    """PUT/DELETE가 commit한 exact target incarnation receipt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    external_system: str
+    target_key: str
+    state: CacheTargetSourceState
+    restore_epoch: int = Field(ge=1)
+    source_generation: int = Field(ge=1)
+    source_payload_fingerprint: str = Field(min_length=64, max_length=64)
+    target_id: UUID
+    entity_tag: str
+    target_sequence: int | None = Field(default=None, ge=0)
+    occurred_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class CacheTargetSourceMutationResponse(BaseModel):
     """Service target PUT/DELETE response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: CacheTargetSourceMutationRecord
+    meta: Meta
+
+
+class CacheTargetSourceReadResponse(BaseModel):
+    """Service target GET response."""
 
     model_config = ConfigDict(extra="forbid")
 

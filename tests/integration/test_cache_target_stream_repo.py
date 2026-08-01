@@ -163,6 +163,15 @@ async def test_source_generation_outbox_replay_tombstone_and_recreate(
     assert updated.target is not None
     assert updated.target.target_id == first_target.target_id
     assert updated.target.lock_version > first_target.lock_version
+    created_after_update_replay = await _apply_active(
+        migrated_session,
+        generation=1,
+        event_id="10000000-0000-0000-0000-000000000001",
+        idempotency_key="20000000-0000-0000-0000-000000000001",
+        create_only=True,
+    )
+    assert created_after_update_replay.entity_tag == created.entity_tag
+    assert created_after_update_replay.target_id == created.target_id
 
     deleted = await apply_cache_target_source(
         migrated_session,
@@ -181,6 +190,43 @@ async def test_source_generation_outbox_replay_tombstone_and_recreate(
     )
     assert deleted.state == "deleted"
     assert deleted.payload["target"] is None
+    assert deleted.target is not None
+    receipt_lock_version = await migrated_session.scalar(
+        text(
+            "SELECT target_lock_version "
+            "FROM ops.poi_cache_target_source_events "
+            "WHERE event_id = '10000000-0000-0000-0000-000000000003'"
+        )
+    )
+    drifted_lock_version = await migrated_session.scalar(
+        text(
+            "UPDATE ops.poi_cache_targets SET name = 'post-delete drift' "
+            "WHERE target_id = CAST(:target_id AS uuid) RETURNING lock_version"
+        ),
+        {"target_id": deleted.target_id},
+    )
+    assert receipt_lock_version == deleted.target.lock_version
+    assert drifted_lock_version == deleted.target.lock_version + 1
+
+    delete_replay = await apply_cache_target_source(
+        migrated_session,
+        consumer_id=_CONSUMER,
+        source_event_id="10000000-0000-0000-0000-000000000003",
+        idempotency_key="20000000-0000-0000-0000-000000000003",
+        external_system=_SYSTEM,
+        target_key=_TARGET_KEY,
+        restore_epoch=1,
+        source_generation=3,
+        source=make_deleted_cache_target_source(),
+        occurred_at=datetime(2026, 7, 31, 12, 3, tzinfo=UTC),
+        create_only=False,
+        expected_target_id=updated.target.target_id,
+        expected_lock_version=updated.target.lock_version,
+    )
+    assert delete_replay.idempotent_replay
+    assert delete_replay.target is None
+    assert delete_replay.target_id == deleted.target_id
+    assert delete_replay.entity_tag == deleted.entity_tag
 
     recreated = await _apply_active(
         migrated_session,

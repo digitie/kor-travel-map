@@ -458,6 +458,32 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert "FeatureBatchResponse" in schemas
     assert "WeatherBatchResponse" in schemas
     assert "CacheTargetClaimResponse" in schemas
+    mutation_record = schemas["CacheTargetSourceMutationRecord"]
+    assert {"target_id", "entity_tag"} <= set(mutation_record["required"])
+    assert mutation_record["properties"]["target_id"]["format"] == "uuid"
+    assert "anyOf" not in mutation_record["properties"]["target_id"]
+    assert "anyOf" not in mutation_record["properties"]["entity_tag"]
+    read_record = schemas["CacheTargetSourceRecord"]
+    assert {"type": "null"} in read_record["properties"]["target_id"]["anyOf"]
+    assert {"type": "null"} in read_record["properties"]["entity_tag"]["anyOf"]
+    target_path = service["paths"][
+        "/v1/service/cache-targets/{external_system}/{target_key}"
+    ]
+    assert _refs(target_path["put"]["responses"]["200"]) == {
+        "CacheTargetSourceMutationResponse"
+    }
+    assert _refs(target_path["delete"]["responses"]["200"]) == {
+        "CacheTargetSourceMutationResponse"
+    }
+    assert _refs(target_path["get"]["responses"]["200"]) == {
+        "CacheTargetSourceReadResponse"
+    }
+    assert _refs(schemas["CacheTargetSourceMutationResponse"]["properties"]["data"]) == {
+        "CacheTargetSourceMutationRecord"
+    }
+    assert _refs(schemas["CacheTargetSourceReadResponse"]["properties"]["data"]) == {
+        "CacheTargetSourceRecord"
+    }
     begin_headers = {
         parameter["name"]: parameter
         for parameter in service["paths"]["/v1/service/cache-target-reconciliations"]["post"][

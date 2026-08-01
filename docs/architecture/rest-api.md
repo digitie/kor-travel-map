@@ -612,6 +612,11 @@ target create는 `If-None-Match: *`, update/delete는 직전 GET/성공 응답�
 `If-Match`로 보낸다. `source_generation`은 ETag나 queue generation을 대체하지 않는다. `412`는
 자동 rebase하지 않고 snapshot reconcile 뒤 새 command로 해결한다. 모든 네트워크 재시도 command는
 UUID `Idempotency-Key`와 canonical body fingerprint를 사용하며 same key/different body는 `409`다.
+DELETE exact replay `200`은 tombstone head의 nullable identity를 반환하지 않고, 최초 DELETE가 만든
+historical `target_id`와 post-delete strong ETag를 immutable source receipt에서 그대로 반환한다.
+mutation 응답 DTO는 두 필드를 non-null로 강제하고 GET read projection만 tombstone의 nullable identity를
+허용한다. 이 ETag는 삭제된 incarnation의 재생 영수증이며 후속 create/update precondition으로 재사용하지
+않는다.
 
 restore fence는 직전 stream ETag를 요구한다. 성공 transaction은 epoch N+1, 기존 claim 무효화,
 barrier receipt와 구 epoch의 모든 `pending|retry|leased|dead` delivery를 terminal `superseded`로
