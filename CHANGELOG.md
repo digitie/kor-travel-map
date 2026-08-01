@@ -25,6 +25,18 @@
   `superseded`로 원자 종결해 old pending/retry/lease/dead가 새 epoch claim과 복구를 막지 않게 한다.
   같은 fence는 기존 `preparing|running` reconciliation도 terminal `superseded`로 종결해 새 epoch
   reconciliation이 즉시 시작되게 한다.
+- **SNAPSHOT/GC**: generic snapshot first page를 응답 transaction에서 durable commit하고
+  `created_at`/`expires_at`, 75분 server handoff TTL, system별 live copy 2개와 100,000 item 상한을
+  공개한다. 경합·수명·barrier/build timeout은 retryable `503`, copy capacity는 동적
+  `429 Retry-After`, item 초과는 `413`으로 fail-close한다. 만료·미참조 material은 reader-safe
+  foreground GC와 기본 중지 상태의 hourly background drain이 bounded batch로 정리한다.
+- **DATABASE/CORRECTNESS (breaking)**: outbox `relay_order` Identity를 제거했다. DB trigger가 system
+  stream을 잠근 뒤 명시적 global sequence에서 번호를 배정하고 application은 stream →
+  head/target/link 순서로 미리 잠근다. 따라서 번호는 전역 unique지만 commit-safe prefix는 각
+  external system 안에서만 성립하며, raw/future writer도 allocation-before-lock을 우회할 수 없다.
+  `external_system`/`target_key`는 API·repository·DB에서 trim된 Unicode NFC를 강제해 NFC-equivalent
+  durable head/request가 Merkle snapshot이나 refresh lookup을 오염시키는 경로를 닫았다.
+  `cache_target_keys` scope의 `target_key` 상한도 root identity와 같은 512자로 합쳤다.
 - **CONTRACT**: target event와 stream reconciliation event를 `event_scope`로 분리해 empty 및
   tombstone-only snapshot에도 fake target tuple을 만들지 않는다. `cache_target.reconciled`
   payload의 `request_id`는 새 required field이며 request→fixed snapshot receipt 인과관계를

@@ -3611,8 +3611,16 @@ class PoiCacheTargetRow(Base):
         CheckConstraint(
             "external_system <> '' AND char_length(external_system) <= 112 "
             "AND external_system = "
-            f"btrim(external_system, {_CANONICAL_WHITESPACE_SQL})",
+            f"btrim(external_system, {_CANONICAL_WHITESPACE_SQL}) "
+            "AND external_system = normalize(external_system, NFC)",
             name=conv("ck_poi_cache_targets_external_system_identity"),
+        ),
+        CheckConstraint(
+            "target_key <> '' AND char_length(target_key) <= 512 "
+            "AND target_key = "
+            f"btrim(target_key, {_CANONICAL_WHITESPACE_SQL}) "
+            "AND target_key = normalize(target_key, NFC)",
+            name=conv("ck_poi_cache_targets_target_key_identity"),
         ),
         Index(
             "uq_poi_cache_targets_active_key",
@@ -3787,7 +3795,10 @@ class PoiCacheTargetStreamRow(Base):
     __tablename__ = "poi_cache_target_streams"
     __table_args__ = (
         CheckConstraint(
-            "btrim(external_system) <> '' AND char_length(external_system) <= 112",
+            "external_system <> '' AND char_length(external_system) <= 112 "
+            "AND external_system = "
+            f"btrim(external_system, {_CANONICAL_WHITESPACE_SQL}) "
+            "AND external_system = normalize(external_system, NFC)",
             name=conv("ck_cache_target_streams_external_system"),
         ),
         CheckConstraint(
@@ -3965,7 +3976,10 @@ class PoiCacheTargetSourceHeadRow(Base):
             name=conv("ck_cache_target_source_heads_fingerprint"),
         ),
         CheckConstraint(
-            "btrim(target_key) <> '' AND char_length(target_key) <= 512",
+            "target_key <> '' AND char_length(target_key) <= 512 "
+            "AND target_key = "
+            f"btrim(target_key, {_CANONICAL_WHITESPACE_SQL}) "
+            "AND target_key = normalize(target_key, NFC)",
             name=conv("ck_cache_target_source_heads_key"),
         ),
         CheckConstraint(
@@ -4409,13 +4423,18 @@ class PoiCacheTargetOutboxEventRow(Base):
             "external_system",
             "relay_order",
         ),
+        Index(
+            "idx_cache_target_outbox_state_material_order",
+            "external_system",
+            text("relay_order DESC"),
+            postgresql_where=text("event_type = 'cache_target.state_applied'"),
+        ),
         {"schema": "ops"},
     )
 
     event_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
     relay_order: Mapped[int] = mapped_column(
         BigInteger,
-        Identity(always=True),
         nullable=False,
     )
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -4734,6 +4753,8 @@ class PoiCacheTargetSnapshotRow(Base):
         ),
         CheckConstraint(
             "restore_epoch > 0 AND high_watermark_relay_order >= 0 "
+            "AND material_high_watermark_relay_order >= 0 "
+            "AND high_watermark_relay_order >= material_high_watermark_relay_order "
             "AND item_count >= 0",
             name=conv("ck_cache_target_snapshots_counts"),
         ),
@@ -4757,6 +4778,12 @@ class PoiCacheTargetSnapshotRow(Base):
             "expires_at",
             "snapshot_id",
         ),
+        Index(
+            "idx_cache_target_snapshots_stream_expiry",
+            "external_system",
+            "expires_at",
+            "snapshot_id",
+        ),
         {"schema": "ops"},
     )
 
@@ -4776,6 +4803,10 @@ class PoiCacheTargetSnapshotRow(Base):
     )
     restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
     high_watermark_relay_order: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+    material_high_watermark_relay_order: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,
     )

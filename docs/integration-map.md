@@ -188,10 +188,20 @@ contiguous prefix를 ACK하는 at-least-once 계약이다. 양쪽 공통 event d
 - `cache_target.reconciled`
 
 Map은 `restore_epoch`, PinVi는 target `source_generation`, Map result writer는
-`target_sequence`를 소유한다. target 의미 순서는 이 tuple이고 global `relay_order` cursor는
-delivery prefix에만 쓴다. event inbox commit과 ACK는 순서가 다르다. PinVi는 inbox dedupe,
+`target_sequence`를 소유한다. target 의미 순서는 이 tuple이고 global sequence가 배정한
+`relay_order` cursor는 external system별 delivery prefix에만 쓴다. event inbox commit과 ACK는 순서가 다르다. PinVi는 inbox dedupe,
 target tuple CAS, DB cache generation, consumer checkpoint를 한 transaction에 먼저 commit하고
 그 뒤 ACK한다. ACK 유실은 동일 event 재전달이며 side effect를 추가하지 않는다.
+`external_system`과 `target_key`는 양쪽 모두 trim된 Unicode NFC canonical form으로 전송한다.
+`target_key` 상한은 source와 refresh scope 모두 512자다. Map API/repository/DB가 비정규 identity를
+거부하므로 NFC-equivalent identity를 별도 target/request로 생성해 snapshot Merkle이나 refresh를
+오염시킬 수 없다.
+
+Map의 모든 outbox writer transaction은 system stream을 head/target/link보다 먼저 잠근다. DB trigger는
+그 stream lock 뒤에만 global sequence에서 `relay_order`를 배정하므로 각 external system cursor는 같은
+stream에서 늦게 commit되는 더 낮은 event를 추월하지 않는 commit-safe prefix다. global sequence는 번호의
+전역 uniqueness만 제공하고 서로 다른 stream의 commit 순서를 보장하지 않는다. snapshot reuse cursor는 생성 당시의 안전한 lower-bound로
+유지될 수 있으므로 PinVi는 그 뒤 event를 재조회하고 immutable inbox receipt로 중복을 제거한다.
 
 restore/cutover는 stream GET의 raw ETag를 기준으로 restore-fence command를 호출해 Map epoch를
 N+1로 올린 뒤 writer를 연다. 이 transaction은 더 낮은 epoch의 모든 non-delivered delivery를

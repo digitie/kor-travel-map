@@ -7,11 +7,20 @@ from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from kortravelmap.core.cache_target_stream import (
+    validate_cache_target_external_system,
+    validate_cache_target_key,
+)
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from kortravelmap.api.response import Meta
 
 MERKLE_ROOT_PATTERN = r"^[0-9a-f]{64}$"
+_SNAPSHOT_HIGH_WATERMARK_DESCRIPTION = (
+    "이 immutable snapshot material이 안전하게 포함한 global outbox replay lower-bound. "
+    "snapshot 생성 뒤 생긴 비material event가 있으면 현재 global max보다 과거일 수 있으므로, "
+    "consumer는 이 cursor 이후 event를 중복 허용 방식으로 모두 재처리해야 한다."
+)
 
 __all__ = [
     "CacheTargetAckRequest",
@@ -92,6 +101,24 @@ CacheTargetStreamState = Literal[
     "restore_fenced",
 ]
 CacheTargetNackDisposition = Literal["transient", "permanent"]
+CanonicalCacheTargetExternalSystem = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=112,
+        description="Trimmed Unicode NFC canonical external system identity.",
+    ),
+    AfterValidator(validate_cache_target_external_system),
+]
+CanonicalCacheTargetKey = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=512,
+        description="Trimmed Unicode NFC canonical cache target identity.",
+    ),
+    AfterValidator(validate_cache_target_key),
+]
 
 
 def _reject_float(value: object, *, field: str) -> object:
@@ -226,7 +253,7 @@ class CacheTargetReconciliationRunning(BaseModel):
         max_length=64,
         pattern=MERKLE_ROOT_PATTERN,
     )
-    high_watermark_cursor: str
+    high_watermark_cursor: str = Field(description=_SNAPSHOT_HIGH_WATERMARK_DESCRIPTION)
     entity_tag: str
     stream_entity_tag: str
     created_at: datetime
@@ -348,9 +375,19 @@ class CacheTargetRefreshRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    external_system: str
-    target_keys: list[str] = Field(min_length=1, max_length=500)
+    external_system: CanonicalCacheTargetExternalSystem
+    target_keys: list[CanonicalCacheTargetKey] = Field(
+        min_length=1,
+        max_length=500,
+        json_schema_extra={"uniqueItems": True},
+    )
     reason: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def _validate_unique_target_keys(self) -> CacheTargetRefreshRequest:
+        if len(self.target_keys) != len(set(self.target_keys)):
+            raise ValueError("target_keys items must be unique")
+        return self
 
 
 class CacheTargetRefreshRequestRecord(BaseModel):
@@ -551,7 +588,7 @@ class CacheTargetClaimRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    external_system: str
+    external_system: CanonicalCacheTargetExternalSystem
     consumer_id: str
     limit: int = Field(default=100, ge=1, le=500)
     lease_seconds: int = Field(default=60, ge=1, le=300)
@@ -643,7 +680,7 @@ class CacheTargetNackRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    external_system: str
+    external_system: CanonicalCacheTargetExternalSystem
     consumer_id: str
     claim_id: UUID
     lease_token: UUID
@@ -772,7 +809,7 @@ class CacheTargetSnapshotData(BaseModel):
 
     snapshot_id: str
     restore_epoch: int = Field(ge=1)
-    high_watermark_cursor: str
+    high_watermark_cursor: str = Field(description=_SNAPSHOT_HIGH_WATERMARK_DESCRIPTION)
     count: int = Field(ge=0)
     merkle_root: str = Field(
         min_length=64,
@@ -782,9 +819,10 @@ class CacheTargetSnapshotData(BaseModel):
     created_at: datetime = Field(description="고정 snapshot material 생성 시각.")
     expires_at: datetime = Field(
         description=(
-            "generic snapshot cursor의 만료 시각. generic first page는 최소 1시간의 "
-            "잔여 traversal window를 보장하며, reconciliation-bound snapshot은 "
-            "request가 running인 동안 이 시각과 무관하게 page할 수 있다."
+            "generic snapshot cursor의 만료 시각. generic first page는 서버 handoff 직전 "
+            "최소 75분을 검사하고 15분 response margin을 둬 client 수신 후 최소 60분의 "
+            "traversal window를 보장한다. reconciliation-bound snapshot은 request가 "
+            "running인 동안 이 시각과 무관하게 page할 수 있다."
         )
     )
     items: list[CacheTargetSnapshotRow]
@@ -811,7 +849,7 @@ class CacheTargetSnapshotStatus(BaseModel):
         max_length=64,
         pattern=MERKLE_ROOT_PATTERN,
     )
-    high_watermark_cursor: str
+    high_watermark_cursor: str = Field(description=_SNAPSHOT_HIGH_WATERMARK_DESCRIPTION)
     created_at: datetime
 
 
@@ -858,7 +896,7 @@ class CacheTargetReconciliationRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    external_system: str
+    external_system: CanonicalCacheTargetExternalSystem
     reason: str = Field(min_length=1, max_length=1000)
 
 
@@ -867,7 +905,7 @@ class CacheTargetReconciliationBeginRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    external_system: str = Field(min_length=1, max_length=112)
+    external_system: CanonicalCacheTargetExternalSystem
     consumer_id: str = Field(min_length=1, max_length=128)
     expected_restore_epoch: int = Field(ge=1)
     reason: str = Field(min_length=1, max_length=1000)
@@ -878,7 +916,7 @@ class CacheTargetReconciliationSealRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    external_system: str = Field(min_length=1, max_length=112)
+    external_system: CanonicalCacheTargetExternalSystem
     consumer_id: str = Field(min_length=1, max_length=128)
     expected_restore_epoch: int = Field(ge=1)
     expected_item_count: int = Field(ge=0)
@@ -894,7 +932,7 @@ class CacheTargetReconciliationCompletionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    external_system: str = Field(min_length=1, max_length=112)
+    external_system: CanonicalCacheTargetExternalSystem
     consumer_id: str = Field(min_length=1, max_length=128)
     snapshot_id: UUID
     expected_restore_epoch: int = Field(ge=1)

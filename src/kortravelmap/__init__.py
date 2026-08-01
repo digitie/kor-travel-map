@@ -38,6 +38,7 @@ from pkgutil import extend_path
 
 from kortravelmap.client import (
     AsyncKorTravelMapClient,
+    CacheTargetSnapshotGcDrainResult,
     DagsterFeatureOperationCursor,
     DagsterFeatureOperationMutation,
     DagsterFeatureOperationPage,
@@ -54,6 +55,7 @@ __path__ = extend_path(__path__, __name__)
 
 __all__ = [
     "AsyncKorTravelMapClient",
+    "CacheTargetSnapshotGcDrainResult",
     "DagsterFeatureOperationCursor",
     "DagsterFeatureOperationMutation",
     "DagsterFeatureOperationPage",

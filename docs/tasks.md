@@ -1347,8 +1347,29 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   lease/retry/dead-letter/replay가 있는 relay와 DB 대조 reconciliation을 추가한다. backfill checksum
   뒤 critical path 밖에서 PinVi 소비를 enable하고 누락·중복·restore epoch 전환을 live로 증명한다.
   - [x] 일반 snapshot first page를 route transaction으로 durable commit하고 실제 만료 시각을 노출한다.
-  - [x] 동일 stream/version single-flight reuse와 만료·미참조 snapshot bounded GC를 구현한다.
+  - [x] source-material watermark reuse와 75분 server handoff/1시간 client receipt gate를 구현한다.
+  - [x] stream share barrier와 snapshot 내부 exact material watermark로 lock-wait stale MVCC 누락을 막는다.
+  - [x] 모든 outbox writer transaction을 stream → head/target/link 잠금 순서로 직렬화해 system별 relay
+    cursor를 해당 stream의 commit-safe contiguous prefix로 만든다.
+  - [x] DB trigger가 stream lock 뒤 relay sequence를 배정해 raw/future writer에도 같은 순서를 강제한다.
+  - [x] barrier 5초 lock timeout/30초 statement timeout과 retryable `503`으로 hung writer를 bound한다.
+  - [x] capture/persist 30초 timeout을 별도 retryable `snapshot_build_timeout`으로 구분한다.
+  - [x] system별 미만료 generic snapshot을 2개로 제한하고 동적 `429 + Retry-After` admission을 구현한다.
+  - [x] 단일 snapshot 100,000 item ceiling과 초과 `413` fail-close로 process memory를 bound한다.
+  - [x] 만료·미참조 snapshot의 reader-safe foreground bounded GC를 구현한다.
+  - [x] 전역 mutex·system round-robin·batch commit·시간/statement/no-progress 예산을 가진 hourly
+    background GC와 exact 종료 backlog/total/unexpired/referenced metric을 구현한다.
+  - [ ] n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 tick 순서로 검증하고,
+    GC 처리량이 유입률을 상회하며 remaining backlog가 0인지 증명한다. referenced snapshot 증가율과
+    보존 임계치 alert도 함께 확인한다.
   - [ ] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
+    PinVi system별 snapshot concurrency 1, `429/503 Retry-After` backoff, `413` non-retry,
+    credential별 gateway limit 또는 동등한 외부 rate-limit과 실제 호출 cadence를 증명한다.
+
+- [ ] T-VN-41S — **snapshot materialization streaming·audit compaction 확장 (#922, C enable 비차단)**
+
+  DB-side/bounded streaming Merkle materialization, receipt/material 공유, terminal audit item compaction,
+  item/byte admission과 relation bytes/dead-tuple/vacuum metric을 1M+ synthetic/n150 soak로 검증한다.
 
 ## Wave 2 상세 — 구조 전환
 

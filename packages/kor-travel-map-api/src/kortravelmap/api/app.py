@@ -114,6 +114,7 @@ _ERROR_CODE_BY_STATUS: dict[int, str] = {
     409: "CONFLICT",
     413: "PAYLOAD_TOO_LARGE",
     422: "VALIDATION_ERROR",
+    429: "TOO_MANY_REQUESTS",
     500: "INTERNAL_ERROR",
     501: "NOT_IMPLEMENTED",
     502: "BAD_GATEWAY",
@@ -155,8 +156,16 @@ _CACHE_TARGET_FORBIDDEN_CODES = frozenset(
     }
 )
 _CACHE_TARGET_UNAVAILABLE_CODES = frozenset(
-    {"snapshot_busy", "stream_version_exhausted"}
+    {
+        "snapshot_barrier_timeout",
+        "snapshot_build_timeout",
+        "snapshot_busy",
+        "snapshot_ttl_too_short",
+        "stream_version_exhausted",
+    }
 )
+_CACHE_TARGET_TOO_MANY_REQUEST_CODES = frozenset({"snapshot_capacity_exceeded"})
+_CACHE_TARGET_PAYLOAD_TOO_LARGE_CODES = frozenset({"snapshot_item_limit_exceeded"})
 
 _OPS_CANONICAL_PREFIXES = (
     "/v1/ops/datasets",
@@ -472,7 +481,27 @@ def _cache_target_stream_conflict_status(code: str) -> int:
         return 403
     if code in _CACHE_TARGET_UNAVAILABLE_CODES:
         return 503
+    if code in _CACHE_TARGET_TOO_MANY_REQUEST_CODES:
+        return 429
+    if code in _CACHE_TARGET_PAYLOAD_TOO_LARGE_CODES:
+        return 413
     return 409
+
+
+def _cache_target_retry_after(exc: CacheTargetStreamConflict) -> str | None:
+    if exc.code in {
+        "snapshot_barrier_timeout",
+        "snapshot_build_timeout",
+        "snapshot_busy",
+        "snapshot_ttl_too_short",
+    }:
+        return "1"
+    if exc.code != "snapshot_capacity_exceeded":
+        return None
+    value = exc.current.get("retry_after_seconds")
+    if type(value) is not int:
+        return "1"
+    return str(min(max(value, 1), 7_200))
 
 
 def _http_error_payload(
@@ -749,13 +778,14 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         exc: CacheTargetStreamConflict,
     ) -> JSONResponse:
         status_code = _cache_target_stream_conflict_status(exc.code)
+        retry_after = _cache_target_retry_after(exc)
         return _error_response(
             status_code=status_code,
             code=exc.code.upper(),
             message=str(exc),
             details=exc.current,
             request_id=_request_id(request),
-            headers={"Retry-After": "1"} if exc.code == "snapshot_busy" else None,
+            headers={"Retry-After": retry_after} if retry_after is not None else None,
         )
 
     @application.exception_handler(Exception)

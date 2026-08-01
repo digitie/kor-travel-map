@@ -17,10 +17,12 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.cache_target_stream import (
     SnapshotMerkleRowV1,
     snapshot_merkle_root,
+    validate_cache_target_external_system,
 )
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.cache_target_outbox_repo import cache_target_event_cursor
@@ -38,6 +40,8 @@ __all__ = [
     "CacheTargetActiveReconciliation",
     "CacheTargetReconciliationRecord",
     "CacheTargetReconciliationResult",
+    "CacheTargetSnapshotGcBacklog",
+    "CacheTargetSnapshotGcBatchResult",
     "CacheTargetSnapshotItem",
     "CacheTargetSnapshotPage",
     "CacheTargetSnapshotStatus",
@@ -53,18 +57,34 @@ __all__ = [
     "get_cache_target_snapshot",
     "get_cache_target_stream_discovery",
     "list_cache_target_stream_statuses",
+    "observe_expired_cache_target_snapshot_backlog",
+    "prune_expired_cache_target_snapshots_batch",
     "request_cache_target_reconciliation",
     "seal_cache_target_reconciliation",
 ]
 
 _SNAPSHOT_TTL_SQL = "interval '2 hours'"
 _SNAPSHOT_REUSE_MIN_TTL_SQL = "interval '75 minutes'"
+_SNAPSHOT_RETURN_MIN_TTL_SQL = "interval '75 minutes'"
 _SNAPSHOT_ITEM_PRUNE_LIMIT = 1000
 _SNAPSHOT_HEADER_PRUNE_LIMIT = 100
+_GENERIC_SNAPSHOT_COPY_LIMIT = 2
+_SNAPSHOT_CAPACITY_RETRY_AFTER_MAX_SECONDS = 7_200
+_SNAPSHOT_BUILD_STATEMENT_TIMEOUT = "30s"
+_SNAPSHOT_BARRIER_LOCK_TIMEOUT = "5s"
+_SNAPSHOT_ITEM_LIMIT = 100_000
+_SNAPSHOT_CAPTURE_LIMIT = _SNAPSHOT_ITEM_LIMIT + 1
 _LOWERCASE_HEX = frozenset("0123456789abcdef")
 
 _LOCK_SNAPSHOT_STREAM_SQL = """
 SELECT pg_try_advisory_xact_lock(CAST(:lock_id AS bigint))
+"""
+
+_BARRIER_SNAPSHOT_STREAM_SQL = """
+SELECT stream.external_system
+FROM ops.poi_cache_target_streams AS stream
+WHERE stream.external_system = :external_system
+FOR SHARE OF stream
 """
 
 _GET_SNAPSHOT_IDENTITY_SQL = """
@@ -73,10 +93,10 @@ SELECT stream.restore_epoch,
          SELECT max(event.relay_order)
          FROM ops.poi_cache_target_outbox_events AS event
          WHERE event.external_system = stream.external_system
-       ), 0) AS high_watermark_relay_order
+           AND event.event_type = 'cache_target.state_applied'
+       ), 0) AS material_high_watermark_relay_order
 FROM ops.poi_cache_target_streams AS stream
 WHERE stream.external_system = :external_system
-FOR SHARE OF stream
 """
 
 _CAPTURE_VIEW_SQL = """
@@ -86,6 +106,12 @@ SELECT stream.external_system, stream.restore_epoch,
          FROM ops.poi_cache_target_outbox_events AS event
          WHERE event.external_system = stream.external_system
        ), 0) AS high_watermark_relay_order,
+       COALESCE((
+         SELECT max(event.relay_order)
+         FROM ops.poi_cache_target_outbox_events AS event
+         WHERE event.external_system = stream.external_system
+           AND event.event_type = 'cache_target.state_applied'
+       ), 0) AS material_high_watermark_relay_order,
        head.target_key, head.state, head.source_generation,
        head.source_payload_fingerprint
 FROM ops.poi_cache_target_streams AS stream
@@ -96,6 +122,7 @@ LEFT JOIN LATERAL (
   FROM ops.poi_cache_target_source_heads AS source
   WHERE source.external_system = stream.external_system
   ORDER BY sort_key
+  LIMIT :capture_limit
 ) AS head ON true
 WHERE stream.external_system = :external_system
 ORDER BY head.sort_key
@@ -105,13 +132,21 @@ FOR SHARE OF stream
 _INSERT_SNAPSHOT_SQL = f"""
 INSERT INTO ops.poi_cache_target_snapshots (
     snapshot_id, external_system, restore_epoch,
-    high_watermark_relay_order, item_count, merkle_root, expires_at
-) VALUES (
-    CAST(:snapshot_id AS uuid), :external_system, :restore_epoch,
-    :high_watermark_relay_order, :item_count, :merkle_root,
-    now() + {_SNAPSHOT_TTL_SQL}
+    high_watermark_relay_order, material_high_watermark_relay_order,
+    item_count, merkle_root, created_at, expires_at
 )
+SELECT
+    CAST(:snapshot_id AS uuid), :external_system, :restore_epoch,
+    :high_watermark_relay_order, :material_high_watermark_relay_order,
+    :item_count, :merkle_root,
+    materialized_at, materialized_at + {_SNAPSHOT_TTL_SQL}
+FROM (SELECT clock_timestamp() AS materialized_at) AS clock
 RETURNING created_at, expires_at
+"""
+
+_CHECK_SNAPSHOT_RETURN_TTL_SQL = f"""
+SELECT CAST(:expires_at AS timestamptz)
+       >= clock_timestamp() + {_SNAPSHOT_RETURN_MIN_TTL_SQL}
 """
 
 _INSERT_SNAPSHOT_ITEM_SQL = """
@@ -126,7 +161,8 @@ INSERT INTO ops.poi_cache_target_snapshot_items (
 
 _GET_SNAPSHOT_SQL = """
 SELECT snapshot_id, external_system, restore_epoch,
-       high_watermark_relay_order, item_count, merkle_root,
+       high_watermark_relay_order, material_high_watermark_relay_order,
+       item_count, merkle_root,
        created_at, expires_at, expires_at > now() AS valid
 FROM ops.poi_cache_target_snapshots
 WHERE snapshot_id = CAST(:snapshot_id AS uuid)
@@ -135,12 +171,14 @@ FOR SHARE
 
 _GET_REUSABLE_SNAPSHOT_SQL = f"""
 SELECT snapshot.snapshot_id, snapshot.external_system, snapshot.restore_epoch,
-       snapshot.high_watermark_relay_order, snapshot.item_count,
+       snapshot.high_watermark_relay_order,
+       snapshot.material_high_watermark_relay_order, snapshot.item_count,
        snapshot.merkle_root, snapshot.created_at, snapshot.expires_at
 FROM ops.poi_cache_target_snapshots AS snapshot
 WHERE snapshot.external_system = :external_system
   AND snapshot.restore_epoch = :restore_epoch
-  AND snapshot.high_watermark_relay_order = :high_watermark_relay_order
+  AND snapshot.material_high_watermark_relay_order
+      = :material_high_watermark_relay_order
   AND snapshot.expires_at > now() + {_SNAPSHOT_REUSE_MIN_TTL_SQL}
   AND NOT EXISTS (
     SELECT 1
@@ -150,6 +188,44 @@ WHERE snapshot.external_system = :external_system
 ORDER BY snapshot.created_at DESC, snapshot.snapshot_id DESC
 LIMIT 1
 FOR SHARE OF snapshot
+"""
+
+_GET_GENERIC_SNAPSHOT_CAPACITY_SQL = f"""
+WITH candidates AS MATERIALIZED (
+  SELECT snapshot.expires_at
+  FROM ops.poi_cache_target_snapshots AS snapshot
+  WHERE snapshot.external_system = :external_system
+    AND snapshot.expires_at > clock_timestamp()
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_reconciliation_requests AS request
+      WHERE request.snapshot_id = snapshot.snapshot_id
+    )
+  ORDER BY snapshot.expires_at, snapshot.snapshot_id
+  LIMIT {_GENERIC_SNAPSHOT_COPY_LIMIT}
+), capacity AS (
+  SELECT count(*) AS snapshot_count,
+         min(expires_at) AS oldest_expires_at
+  FROM candidates
+)
+SELECT snapshot_count, oldest_expires_at,
+       GREATEST(
+         1,
+         LEAST(
+           {_SNAPSHOT_CAPACITY_RETRY_AFTER_MAX_SECONDS},
+           ceil(extract(epoch FROM oldest_expires_at - clock_timestamp()))::integer
+         )
+       ) AS retry_after_seconds
+FROM capacity
+"""
+
+_SET_SNAPSHOT_BARRIER_TIMEOUTS_SQL = """
+SELECT set_config('lock_timeout', :lock_timeout, true),
+       set_config('statement_timeout', :statement_timeout, true)
+"""
+
+_RESET_SNAPSHOT_BARRIER_LOCK_TIMEOUT_SQL = """
+SELECT set_config('lock_timeout', '0', true)
 """
 
 _PRUNE_EXPIRED_SNAPSHOT_ITEMS_SQL = """
@@ -200,6 +276,75 @@ DELETE FROM ops.poi_cache_target_snapshots AS snapshot
 USING candidates
 WHERE snapshot.snapshot_id = candidates.snapshot_id
 RETURNING snapshot.snapshot_id
+"""
+
+_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL = """
+SELECT snapshot.external_system
+FROM ops.poi_cache_target_snapshots AS snapshot
+WHERE snapshot.expires_at <= now()
+  AND NOT EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_target_reconciliation_requests AS request
+    WHERE request.snapshot_id = snapshot.snapshot_id
+  )
+  AND (
+    CAST(:after_external_system AS text) IS NULL
+    OR snapshot.external_system COLLATE "C"
+       > CAST(:after_external_system AS text) COLLATE "C"
+  )
+GROUP BY snapshot.external_system
+ORDER BY snapshot.external_system COLLATE "C"
+LIMIT 1
+"""
+
+_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL = """
+SELECT EXISTS (
+  SELECT 1
+  FROM ops.poi_cache_target_snapshots AS snapshot
+  WHERE snapshot.expires_at <= now()
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_reconciliation_requests AS request
+      WHERE request.snapshot_id = snapshot.snapshot_id
+    )
+) AS has_more
+"""
+
+_OBSERVE_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL = """
+WITH snapshot_inventory AS MATERIALIZED (
+  SELECT snapshot.snapshot_id,
+         snapshot.expires_at <= now() AS expired,
+         EXISTS (
+           SELECT 1
+           FROM ops.poi_cache_target_reconciliation_requests AS request
+           WHERE request.snapshot_id = snapshot.snapshot_id
+         ) AS referenced
+  FROM ops.poi_cache_target_snapshots AS snapshot
+), header_counts AS (
+  SELECT count(*) AS total_headers,
+         count(*) FILTER (WHERE expired AND NOT referenced) AS remaining_headers,
+         count(*) FILTER (WHERE NOT expired AND NOT referenced)
+           AS unexpired_unreferenced_headers,
+         count(*) FILTER (WHERE referenced) AS referenced_headers
+  FROM snapshot_inventory
+), item_counts AS (
+  SELECT count(*) AS total_items,
+         count(*) FILTER (WHERE inventory.expired AND NOT inventory.referenced)
+           AS remaining_items,
+         count(*) FILTER (WHERE NOT inventory.expired AND NOT inventory.referenced)
+           AS unexpired_unreferenced_items,
+         count(*) FILTER (WHERE inventory.referenced) AS referenced_items
+  FROM ops.poi_cache_target_snapshot_items AS item
+  JOIN snapshot_inventory AS inventory
+    ON inventory.snapshot_id = item.snapshot_id
+)
+SELECT item_counts.remaining_items, header_counts.remaining_headers,
+       item_counts.total_items, header_counts.total_headers,
+       item_counts.unexpired_unreferenced_items,
+       header_counts.unexpired_unreferenced_headers,
+       item_counts.referenced_items, header_counts.referenced_headers
+FROM item_counts
+CROSS JOIN header_counts
 """
 
 _GET_SNAPSHOT_ITEMS_SQL = """
@@ -518,6 +663,30 @@ class CacheTargetSnapshotPage:
 
 
 @dataclass(frozen=True, slots=True)
+class CacheTargetSnapshotGcBatchResult:
+    """만료 snapshot background GC 한 transaction의 결과."""
+
+    external_system: str | None
+    deleted_items: int
+    deleted_headers: int
+    has_more: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CacheTargetSnapshotGcBacklog:
+    """background GC 종료 시점의 정확한 전역 backlog 관측값."""
+
+    remaining_items: int
+    remaining_headers: int
+    total_items: int = 0
+    total_headers: int = 0
+    unexpired_unreferenced_items: int = 0
+    unexpired_unreferenced_headers: int = 0
+    referenced_items: int = 0
+    referenced_headers: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class CacheTargetSnapshotStatus:
     snapshot_id: str
     count: int
@@ -794,23 +963,87 @@ def _snapshot_item(row: Any) -> CacheTargetSnapshotItem:
     )
 
 
+def _enforce_snapshot_item_limit(item_count: int) -> None:
+    if item_count <= _SNAPSHOT_ITEM_LIMIT:
+        return
+    raise CacheTargetStreamConflict(
+        "snapshot_item_limit_exceeded",
+        "snapshot item 수가 in-memory materialization 상한을 초과했습니다.",
+        current={
+            "item_count_lower_bound": item_count,
+            "item_limit": _SNAPSHOT_ITEM_LIMIT,
+        },
+    )
+
+
+async def _barrier_snapshot_stream(
+    session: AsyncSession,
+    *,
+    external_system: str,
+) -> None:
+    await session.execute(
+        text(_SET_SNAPSHOT_BARRIER_TIMEOUTS_SQL),
+        {
+            "lock_timeout": _SNAPSHOT_BARRIER_LOCK_TIMEOUT,
+            "statement_timeout": _SNAPSHOT_BUILD_STATEMENT_TIMEOUT,
+        },
+    )
+    try:
+        barrier = (
+            await session.execute(
+                text(_BARRIER_SNAPSHOT_STREAM_SQL),
+                {"external_system": external_system},
+            )
+        ).one_or_none()
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) in {"55P03", "57014"}:
+            raise CacheTargetStreamConflict(
+                "snapshot_barrier_timeout",
+                "snapshot stream writer barrier 대기 시간이 초과되었습니다.",
+            ) from exc
+        raise
+    await session.execute(text(_RESET_SNAPSHOT_BARRIER_LOCK_TIMEOUT_SQL))
+    if barrier is None:
+        raise CacheTargetStreamConflict(
+            "stream_not_found",
+            "snapshot을 만들 cache target stream이 없습니다.",
+        )
+
+
 async def _build_snapshot_material(
     session: AsyncSession,
     *,
     external_system: str,
 ) -> tuple[Any, tuple[CacheTargetSnapshotItem, ...]]:
-    rows = (
-        await session.execute(
-            text(_CAPTURE_VIEW_SQL),
-            {"external_system": external_system},
-        )
-    ).all()
+    await _barrier_snapshot_stream(
+        session,
+        external_system=external_system,
+    )
+    try:
+        rows = (
+            await session.execute(
+                text(_CAPTURE_VIEW_SQL),
+                {
+                    "external_system": external_system,
+                    "capture_limit": _SNAPSHOT_CAPTURE_LIMIT,
+                },
+            )
+        ).all()
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) == "57014":
+            raise CacheTargetStreamConflict(
+                "snapshot_build_timeout",
+                "snapshot materialization query 제한 시간이 초과되었습니다.",
+            ) from exc
+        raise
     if not rows:
         raise CacheTargetStreamConflict(
             "stream_not_found",
             "snapshot을 만들 cache target stream이 없습니다.",
         )
     first = rows[0]._mapping
+    captured_item_count = len(rows) if first["target_key"] is not None else 0
+    _enforce_snapshot_item_limit(captured_item_count)
     items = tuple(
         CacheTargetSnapshotItem(
             external_system=str(row._mapping["external_system"]),
@@ -861,6 +1094,9 @@ async def _build_snapshot_material(
             "external_system": external_system,
             "restore_epoch": int(first["restore_epoch"]),
             "high_watermark_relay_order": int(first["high_watermark_relay_order"]),
+            "material_high_watermark_relay_order": int(
+                first["material_high_watermark_relay_order"]
+            ),
             "item_count": len(items),
             "merkle_root": merkle_root,
         },
@@ -874,35 +1110,48 @@ async def _persist_snapshot(
     header: Any,
     items: tuple[CacheTargetSnapshotItem, ...],
 ) -> Any:
-    persisted = (
-        await session.execute(
-            text(_INSERT_SNAPSHOT_SQL),
-            {
-                "snapshot_id": header["snapshot_id"],
-                "external_system": header["external_system"],
-                "restore_epoch": header["restore_epoch"],
-                "high_watermark_relay_order": header["high_watermark_relay_order"],
-                "item_count": header["item_count"],
-                "merkle_root": header["merkle_root"],
-            },
-        )
-    ).one()
-    if items:
-        await session.execute(
-            text(_INSERT_SNAPSHOT_ITEM_SQL),
-            [
+    try:
+        persisted = (
+            await session.execute(
+                text(_INSERT_SNAPSHOT_SQL),
                 {
                     "snapshot_id": header["snapshot_id"],
-                    "row_number": item.row_number,
-                    "external_system": item.external_system,
-                    "target_key": item.target_key,
-                    "state": item.state,
-                    "source_generation": item.source_generation,
-                    "source_payload_fingerprint": item.source_payload_fingerprint,
-                }
-                for item in items
-            ],
-        )
+                    "external_system": header["external_system"],
+                    "restore_epoch": header["restore_epoch"],
+                    "high_watermark_relay_order": header[
+                        "high_watermark_relay_order"
+                    ],
+                    "material_high_watermark_relay_order": header[
+                        "material_high_watermark_relay_order"
+                    ],
+                    "item_count": header["item_count"],
+                    "merkle_root": header["merkle_root"],
+                },
+            )
+        ).one()
+        if items:
+            await session.execute(
+                text(_INSERT_SNAPSHOT_ITEM_SQL),
+                [
+                    {
+                        "snapshot_id": header["snapshot_id"],
+                        "row_number": item.row_number,
+                        "external_system": item.external_system,
+                        "target_key": item.target_key,
+                        "state": item.state,
+                        "source_generation": item.source_generation,
+                        "source_payload_fingerprint": item.source_payload_fingerprint,
+                    }
+                    for item in items
+                ],
+            )
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) == "57014":
+            raise CacheTargetStreamConflict(
+                "snapshot_build_timeout",
+                "snapshot persistence query 제한 시간이 초과되었습니다.",
+            ) from exc
+        raise
     return {
         **header,
         "created_at": persisted._mapping["created_at"],
@@ -943,6 +1192,128 @@ async def _prune_expired_generic_snapshots(
     )
 
 
+async def _snapshot_has_minimum_return_ttl(
+    session: AsyncSession,
+    *,
+    expires_at: datetime,
+) -> bool:
+    return bool(
+        (
+            await session.execute(
+                text(_CHECK_SNAPSHOT_RETURN_TTL_SQL),
+                {"expires_at": expires_at},
+            )
+        ).scalar_one()
+    )
+
+
+async def prune_expired_cache_target_snapshots_batch(
+    session: AsyncSession,
+    *,
+    after_external_system: str | None = None,
+    item_limit: int = _SNAPSHOT_ITEM_PRUNE_LIMIT,
+    header_limit: int = _SNAPSHOT_HEADER_PRUNE_LIMIT,
+) -> CacheTargetSnapshotGcBatchResult:
+    """만료·미참조 snapshot을 한 system/한 transaction 분량만 정리한다.
+
+    system 선택은 ``COLLATE \"C\"`` exact keyset 순서이며 마지막 system 뒤에서는
+    처음으로 한 번 wrap한다. 큰 단일 stream이 다른 stream의 GC를 독점하지 않도록
+    호출 1회는 system 하나만 처리한다. item/header 삭제는 reader의 ``FOR SHARE``와
+    충돌하면 ``SKIP LOCKED``하고, reconciliation request가 한 번이라도 참조한
+    snapshot은 대상에서 영구 제외한다.
+
+    transaction commit/rollback은 호출자 책임이다. ``has_more``는 index-friendly
+    ``EXISTS`` 관측만 수행한다. 정확한 전역 count는 drain 종료 시
+    :func:`observe_expired_cache_target_snapshot_backlog`를 별도 transaction에서 한 번
+    호출해 구한다.
+    """
+    if not 0 < item_limit <= 10_000:
+        raise ValueError("item_limit은 1 이상 10000 이하여야 합니다.")
+    if not 0 < header_limit <= 1_000:
+        raise ValueError("header_limit은 1 이상 1000 이하여야 합니다.")
+
+    system_row = (
+        await session.execute(
+            text(_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL),
+            {"after_external_system": after_external_system},
+        )
+    ).one_or_none()
+    if system_row is None and after_external_system is not None:
+        system_row = (
+            await session.execute(
+                text(_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL),
+                {"after_external_system": None},
+            )
+        ).one_or_none()
+
+    external_system: str | None = None
+    deleted_items = 0
+    deleted_headers = 0
+    if system_row is not None:
+        external_system = str(system_row._mapping["external_system"])
+        deleted_items = len(
+            (
+                await session.execute(
+                    text(_PRUNE_EXPIRED_SNAPSHOT_ITEMS_SQL),
+                    {
+                        "external_system": external_system,
+                        "limit": item_limit,
+                    },
+                )
+            ).all()
+        )
+        deleted_headers = len(
+            (
+                await session.execute(
+                    text(_PRUNE_EXPIRED_SNAPSHOT_HEADERS_SQL),
+                    {
+                        "external_system": external_system,
+                        "limit": header_limit,
+                    },
+                )
+            ).all()
+        )
+
+    has_more = bool(
+        (
+            await session.execute(text(_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL))
+        ).scalar_one()
+    )
+    return CacheTargetSnapshotGcBatchResult(
+        external_system=external_system,
+        deleted_items=deleted_items,
+        deleted_headers=deleted_headers,
+        has_more=has_more,
+    )
+
+
+async def observe_expired_cache_target_snapshot_backlog(
+    session: AsyncSession,
+) -> CacheTargetSnapshotGcBacklog:
+    """만료·미참조 snapshot의 정확한 전역 item/header backlog를 관측한다.
+
+    대규모 ``count(*)``는 batch마다 반복하지 않고 drain 종료/예산 도달 시 별도
+    transaction에서 한 번만 호출한다. transaction commit/rollback은 호출자 책임이다.
+    """
+    row = (
+        await session.execute(text(_OBSERVE_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL))
+    ).one()
+    return CacheTargetSnapshotGcBacklog(
+        remaining_items=int(row._mapping["remaining_items"]),
+        remaining_headers=int(row._mapping["remaining_headers"]),
+        total_items=int(row._mapping["total_items"]),
+        total_headers=int(row._mapping["total_headers"]),
+        unexpired_unreferenced_items=int(
+            row._mapping["unexpired_unreferenced_items"]
+        ),
+        unexpired_unreferenced_headers=int(
+            row._mapping["unexpired_unreferenced_headers"]
+        ),
+        referenced_items=int(row._mapping["referenced_items"]),
+        referenced_headers=int(row._mapping["referenced_headers"]),
+    )
+
+
 async def _create_generic_snapshot(
     session: AsyncSession,
     *,
@@ -963,6 +1334,10 @@ async def _create_generic_snapshot(
             "snapshot_busy",
             "같은 stream의 generic snapshot 생성이 이미 진행 중입니다.",
         )
+    await _barrier_snapshot_stream(
+        session,
+        external_system=external_system,
+    )
     identity_row = (
         await session.execute(
             text(_GET_SNAPSHOT_IDENTITY_SQL),
@@ -981,8 +1356,8 @@ async def _create_generic_snapshot(
             {
                 "external_system": external_system,
                 "restore_epoch": int(identity["restore_epoch"]),
-                "high_watermark_relay_order": int(
-                    identity["high_watermark_relay_order"]
+                "material_high_watermark_relay_order": int(
+                    identity["material_high_watermark_relay_order"]
                 ),
             },
         )
@@ -999,7 +1374,30 @@ async def _create_generic_snapshot(
                 },
             )
         ).all()
-        return header, tuple(_snapshot_item(item) for item in item_rows)
+        if await _snapshot_has_minimum_return_ttl(
+            session,
+            expires_at=cast(datetime, header["expires_at"]),
+        ):
+            return header, tuple(_snapshot_item(item) for item in item_rows)
+    capacity_row = (
+        await session.execute(
+            text(_GET_GENERIC_SNAPSHOT_CAPACITY_SQL),
+            {"external_system": external_system},
+        )
+    ).one()
+    capacity = capacity_row._mapping
+    if int(capacity["snapshot_count"]) >= _GENERIC_SNAPSHOT_COPY_LIMIT:
+        oldest_expires_at = cast(datetime, capacity["oldest_expires_at"])
+        raise CacheTargetStreamConflict(
+            "snapshot_capacity_exceeded",
+            "미만료 generic snapshot copy 상한에 도달했습니다.",
+            current={
+                "snapshot_count": int(capacity["snapshot_count"]),
+                "snapshot_limit": _GENERIC_SNAPSHOT_COPY_LIMIT,
+                "oldest_expires_at": oldest_expires_at.isoformat(),
+                "retry_after_seconds": int(capacity["retry_after_seconds"]),
+            },
+        )
     await _prune_expired_generic_snapshots(
         session,
         external_system=external_system,
@@ -1008,6 +1406,14 @@ async def _create_generic_snapshot(
         session,
         external_system=external_system,
     )
+    if not await _snapshot_has_minimum_return_ttl(
+        session,
+        expires_at=cast(datetime, header["expires_at"]),
+    ):
+        raise CacheTargetStreamConflict(
+            "snapshot_ttl_too_short",
+            "새 snapshot의 서버 handoff 시점 TTL이 75분 미만입니다.",
+        )
     return header, items[:limit]
 
 
@@ -1529,6 +1935,7 @@ async def begin_cache_target_reconciliation(
 ) -> CacheTargetReconciliationResult:
     """Stream을 fenced 상태로 만들고 snapshot 없는 preparing request를 시작한다."""
 
+    validate_cache_target_external_system(external_system)
     if command_id <= 0:
         raise ValueError("command_id는 양수여야 합니다.")
     if not reason or reason != reason.strip() or len(reason) > 1000:

@@ -462,8 +462,34 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert {"created_at", "expires_at"} <= set(snapshot_data["required"])
     assert snapshot_data["properties"]["created_at"]["format"] == "date-time"
     assert snapshot_data["properties"]["expires_at"]["format"] == "date-time"
-    assert "최소 1시간" in snapshot_data["properties"]["expires_at"]["description"]
-    assert "running" in snapshot_data["properties"]["expires_at"]["description"]
+    expires_description = snapshot_data["properties"]["expires_at"]["description"]
+    assert "서버 handoff 직전 최소 75분" in expires_description
+    assert "client 수신 후 최소 60분" in expires_description
+    assert "running" in expires_description
+    high_watermark_description = snapshot_data["properties"][
+        "high_watermark_cursor"
+    ]["description"]
+    assert "replay lower-bound" in high_watermark_description
+    assert "중복 허용" in high_watermark_description
+    snapshot_responses = service["paths"][
+        "/v1/service/cache-target-snapshots/{external_system}"
+    ]["get"]["responses"]
+    capacity_response = snapshot_responses["429"]
+    retry_after_schema = capacity_response["headers"]["Retry-After"]["schema"]
+    assert retry_after_schema == {"type": "integer", "minimum": 1, "maximum": 7_200}
+    assert "application/problem+json" in capacity_response["content"]
+    assert "413" in snapshot_responses
+    assert "503" in snapshot_responses
+    assert "Retry-After" in snapshot_responses["503"]["headers"]
+    assert "headers" not in snapshot_responses["413"]
+    seal_responses = service["paths"][
+        "/v1/service/cache-target-reconciliations/{request_id}/seals"
+    ]["post"]["responses"]
+    assert "413" in seal_responses
+    assert "503" in seal_responses
+    assert "Retry-After" in seal_responses["503"]["headers"]
+    assert "headers" not in seal_responses["413"]
+    assert "application/problem+json" in seal_responses["413"]["content"]
     mutation_record = schemas["CacheTargetSourceMutationRecord"]
     assert {"target_id", "entity_tag", "target_sequence"} <= set(mutation_record["required"])
     assert mutation_record["properties"]["target_id"]["format"] == "uuid"
@@ -542,6 +568,7 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert reconciled_payload["properties"]["snapshot_id"]["format"] == "uuid"
     refresh_target_keys = schemas["CacheTargetRefreshRequest"]["properties"]["target_keys"]
     assert refresh_target_keys["maxItems"] == 500
+    assert refresh_target_keys["uniqueItems"] is True
     assert "PublicCuratedFeatureView" not in schemas
     assert "AdminFeatureListResponse" not in schemas
 

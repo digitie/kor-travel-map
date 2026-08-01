@@ -15,6 +15,10 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import text
 
+from kortravelmap.core.cache_target_stream import (
+    validate_cache_target_external_system,
+    validate_cache_target_key,
+)
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.domain_command_repo import canonical_domain_command_fingerprint
 
@@ -30,6 +34,7 @@ __all__ = [
     "append_cache_target_refresh_status_events",
     "capture_cache_target_refresh_members",
     "capture_cache_target_refresh_members_by_keys",
+    "lock_cache_target_result_streams",
 ]
 
 CacheTargetResultEventType = Literal[
@@ -88,6 +93,7 @@ JOIN ops.poi_cache_targets AS target
   ON target.target_id = head.target_id
 WHERE head.state = 'active'
   AND head.target_id::text = ANY(CAST(:target_ids AS text[]))
+  AND head.external_system = ANY(CAST(:external_systems AS text[]))
   AND target.deleted_at IS NULL
 ORDER BY head.external_system, head.target_key
 FOR KEY SHARE OF head
@@ -113,6 +119,43 @@ WHERE head.external_system = :external_system
 ORDER BY head.external_system, head.target_key
 FOR KEY SHARE OF head
 ON CONFLICT (request_id, target_id) DO NOTHING
+"""
+
+_SELECT_REFRESH_MEMBER_SYSTEMS_SQL = """
+SELECT DISTINCT head.external_system
+FROM ops.poi_cache_target_source_heads AS head
+JOIN ops.poi_cache_targets AS target
+  ON target.target_id = head.target_id
+WHERE head.state = 'active'
+  AND head.target_id::text = ANY(CAST(:target_ids AS text[]))
+  AND target.deleted_at IS NULL
+"""
+
+_SELECT_REFRESH_KEY_SYSTEMS_SQL = """
+SELECT DISTINCT head.external_system
+FROM ops.poi_cache_target_source_heads AS head
+JOIN ops.poi_cache_targets AS target
+  ON target.target_id = head.target_id
+WHERE head.external_system = :external_system
+  AND head.target_key = ANY(CAST(:target_keys AS text[]))
+  AND head.state = 'active'
+  AND target.deleted_at IS NULL
+  AND target.update_enabled
+  AND target.refresh_policy <> 'disabled'
+"""
+
+_LOCK_RESULT_STREAMS_SQL = """
+SELECT stream.external_system
+FROM ops.poi_cache_target_streams AS stream
+WHERE stream.external_system = ANY(CAST(:external_systems AS text[]))
+ORDER BY stream.external_system COLLATE "C"
+FOR UPDATE OF stream
+"""
+
+_SELECT_REQUEST_MEMBER_SYSTEMS_SQL = """
+SELECT DISTINCT member.external_system
+FROM ops.poi_cache_target_refresh_members AS member
+WHERE member.request_id = CAST(:request_id AS uuid)
 """
 
 _SELECT_REFRESH_MEMBERS_SQL = """
@@ -207,6 +250,51 @@ def _canonical_uuid(value: str, *, field: str) -> str:
         raise ValueError(f"{field}는 canonical UUID여야 합니다.") from exc
 
 
+async def _lock_result_streams(
+    session: AsyncSession,
+    *,
+    external_systems: Sequence[str],
+) -> None:
+    systems = tuple(sorted(set(external_systems), key=lambda value: value.encode()))
+    if not systems:
+        return
+    locked = (
+        (
+            await session.execute(
+                text(_LOCK_RESULT_STREAMS_SQL),
+                {"external_systems": list(systems)},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(locked) != len(systems):
+        raise RuntimeError("captured cache target stream이 사라졌습니다.")
+
+
+async def lock_cache_target_result_streams(
+    session: AsyncSession,
+    *,
+    request_id: str,
+) -> None:
+    """result mutation 전에 request member stream을 C-order로 선취한다."""
+    request_id = _canonical_uuid(request_id, field="request_id")
+    systems = (
+        (
+            await session.execute(
+                text(_SELECT_REQUEST_MEMBER_SYSTEMS_SQL),
+                {"request_id": request_id},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    await _lock_result_streams(
+        session,
+        external_systems=tuple(str(value) for value in systems),
+    )
+
+
 def _member(row: Any) -> CacheTargetRefreshMember:
     values = row._mapping
     return CacheTargetRefreshMember(
@@ -267,10 +355,30 @@ async def capture_cache_target_refresh_members(
         sorted({_canonical_uuid(value, field="target_id") for value in target_ids})
     )
     if canonical_target_ids:
-        await session.execute(
-            text(_CAPTURE_REFRESH_MEMBERS_SQL),
-            {"request_id": request_id, "target_ids": list(canonical_target_ids)},
+        systems = (
+            (
+                await session.execute(
+                    text(_SELECT_REFRESH_MEMBER_SYSTEMS_SQL),
+                    {"target_ids": list(canonical_target_ids)},
+                )
+            )
+            .scalars()
+            .all()
         )
+        locked_systems = tuple(str(value) for value in systems)
+        if locked_systems:
+            await _lock_result_streams(
+                session,
+                external_systems=locked_systems,
+            )
+            await session.execute(
+                text(_CAPTURE_REFRESH_MEMBERS_SQL),
+                {
+                    "request_id": request_id,
+                    "target_ids": list(canonical_target_ids),
+                    "external_systems": list(locked_systems),
+                },
+            )
     rows = (
         await session.execute(
             text(_SELECT_REFRESH_MEMBERS_SQL),
@@ -289,20 +397,37 @@ async def capture_cache_target_refresh_members_by_keys(
 ) -> tuple[CacheTargetRefreshMember, ...]:
     """``cache_target_keys`` request의 active source tuple을 시작 시점에 고정한다."""
     request_id = _canonical_uuid(request_id, field="request_id")
-    if not external_system or external_system != external_system.strip():
-        raise ValueError("external_system은 trim된 비어 있지 않은 문자열이어야 합니다.")
-    canonical_keys = tuple(sorted({str(value) for value in target_keys}))
-    if any(not key or key != key.strip() for key in canonical_keys):
-        raise ValueError("target_key는 trim된 비어 있지 않은 문자열이어야 합니다.")
+    validate_cache_target_external_system(external_system)
+    canonical_keys = tuple(sorted(set(target_keys)))
+    for target_key in canonical_keys:
+        validate_cache_target_key(target_key)
     if canonical_keys:
-        await session.execute(
-            text(_CAPTURE_REFRESH_MEMBERS_BY_KEYS_SQL),
-            {
-                "request_id": request_id,
-                "external_system": external_system,
-                "target_keys": list(canonical_keys),
-            },
+        systems = (
+            (
+                await session.execute(
+                    text(_SELECT_REFRESH_KEY_SYSTEMS_SQL),
+                    {
+                        "external_system": external_system,
+                        "target_keys": list(canonical_keys),
+                    },
+                )
+            )
+            .scalars()
+            .all()
         )
+        if systems:
+            await _lock_result_streams(
+                session,
+                external_systems=(external_system,),
+            )
+            await session.execute(
+                text(_CAPTURE_REFRESH_MEMBERS_BY_KEYS_SQL),
+                {
+                    "request_id": request_id,
+                    "external_system": external_system,
+                    "target_keys": list(canonical_keys),
+                },
+            )
     return await capture_cache_target_refresh_members(
         session,
         request_id=request_id,
@@ -338,6 +463,10 @@ async def _append_result_event(
         "cache-target-result:"
         f"{member.external_system}:{member.target_key}:"
         f"{member.restore_epoch}:{member.source_generation}"
+    )
+    await _lock_result_streams(
+        session,
+        external_systems=(member.external_system,),
     )
     await session.execute(
         text("SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))"),
@@ -415,6 +544,10 @@ async def append_cache_target_refresh_status_events(
     """captured member별 refresh status event를 같은 transaction에 기록한다."""
     if status not in ("queued", "running", "done", "failed", "cancelled"):
         raise ValueError("지원하지 않는 refresh status입니다.")
+    await lock_cache_target_result_streams(
+        session,
+        request_id=request_id,
+    )
     members = await capture_cache_target_refresh_members(
         session,
         request_id=request_id,
@@ -456,6 +589,10 @@ async def append_cache_target_links_reconciled_events(
     }
     if any(count < 0 for count in counts.values()):
         raise ValueError("active_link_count는 음수일 수 없습니다.")
+    await lock_cache_target_result_streams(
+        session,
+        request_id=request_id,
+    )
     members = await capture_cache_target_refresh_members(
         session,
         request_id=request_id,

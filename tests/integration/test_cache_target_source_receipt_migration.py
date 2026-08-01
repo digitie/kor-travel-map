@@ -16,7 +16,9 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from alembic import command
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from kortravelmap.infra.models import (
+    PoiCacheTargetOutboxEventRow,
     PoiCacheTargetReconciliationRequestRow,
+    PoiCacheTargetSnapshotRow,
     PoiCacheTargetSourceEventRow,
 )
 
@@ -26,6 +28,8 @@ _PRE_REVISION = "0075_cache_target_outbox"
 _TARGET_REVISION = "0076_cache_target_receipt"
 _SNAPSHOT_GC_REVISION = "0077_cache_target_snapshot_gc"
 _SNAPSHOT_GC_INDEX = "idx_cache_target_reconciliation_requests_snapshot_status"
+_SNAPSHOT_MATERIAL_INDEX = "idx_cache_target_outbox_state_material_order"
+_SNAPSHOT_CAPACITY_INDEX = "idx_cache_target_snapshots_stream_expiry"
 _ACTIVE_TARGET_ID = "10000000-0000-4000-8000-000000000001"
 _DELETED_TARGET_ID = "10000000-0000-4000-8000-000000000002"
 _ACTIVE_EVENT_ID = "20000000-0000-4000-8000-000000000001"
@@ -218,12 +222,46 @@ async def test_0076_receipt_backfill_drift_guard_and_downgrade(
                     "AND NOT tgisinternal"
                 )
             )
+            relay_trigger = await connection.scalar(
+                text(
+                    "SELECT tgname FROM pg_trigger "
+                    "WHERE tgrelid = 'ops.poi_cache_target_outbox_events'::regclass "
+                    "AND tgname = 'trg_cache_target_outbox_assign_relay_order' "
+                    "AND NOT tgisinternal"
+                )
+            )
+            relay_sequence = await connection.scalar(
+                text(
+                    "SELECT to_regclass("
+                    "'ops.poi_cache_target_outbox_relay_order_seq')::text"
+                )
+            )
+            relay_identity = await connection.scalar(
+                text(
+                    "SELECT is_identity FROM information_schema.columns "
+                    "WHERE table_schema = 'ops' "
+                    "AND table_name = 'poi_cache_target_outbox_events' "
+                    "AND column_name = 'relay_order'"
+                )
+            )
+            material_watermark_column = await connection.scalar(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'ops' "
+                    "AND table_name = 'poi_cache_target_snapshots' "
+                    "AND column_name = 'material_high_watermark_relay_order'"
+                )
+            )
         assert receipts == {_ACTIVE_EVENT_ID: 5, _DELETED_EVENT_ID: 9}
         assert constraints == {
             "ck_cache_target_source_events_target_lock_version",
             "ck_cache_target_source_events_applied_target_receipt",
         }
         assert trigger == "trg_poi_cache_target_source_events_append_only"
+        assert relay_trigger == "trg_cache_target_outbox_assign_relay_order"
+        assert relay_sequence == "ops.poi_cache_target_outbox_relay_order_seq"
+        assert relay_identity == "NO"
+        assert material_watermark_column == "material_high_watermark_relay_order"
 
         column = PoiCacheTargetSourceEventRow.__table__.c.target_lock_version
         assert isinstance(column.type, BigInteger)
@@ -259,12 +297,45 @@ async def test_0076_receipt_backfill_drift_guard_and_downgrade(
                 ),
                 {"index_name": _SNAPSHOT_GC_INDEX},
             )
+            snapshot_material_index = await connection.scalar(
+                text(
+                    "SELECT indexdef FROM pg_indexes "
+                    "WHERE schemaname = 'ops' "
+                    "AND tablename = 'poi_cache_target_outbox_events' "
+                    "AND indexname = :index_name"
+                ),
+                {"index_name": _SNAPSHOT_MATERIAL_INDEX},
+            )
+            snapshot_capacity_index = await connection.scalar(
+                text(
+                    "SELECT indexdef FROM pg_indexes "
+                    "WHERE schemaname = 'ops' "
+                    "AND tablename = 'poi_cache_target_snapshots' "
+                    "AND indexname = :index_name"
+                ),
+                {"index_name": _SNAPSHOT_CAPACITY_INDEX},
+            )
         assert snapshot_gc_index is not None
         assert "(snapshot_id, status)" in str(snapshot_gc_index)
         assert "WHERE (snapshot_id IS NOT NULL)" in str(snapshot_gc_index)
         assert _SNAPSHOT_GC_INDEX in {
             index.name
             for index in PoiCacheTargetReconciliationRequestRow.__table__.indexes
+        }
+        assert snapshot_material_index is not None
+        assert "(external_system, relay_order DESC)" in str(snapshot_material_index)
+        assert "WHERE (event_type = 'cache_target.state_applied'::text)" in str(
+            snapshot_material_index
+        )
+        assert _SNAPSHOT_MATERIAL_INDEX in {
+            index.name for index in PoiCacheTargetOutboxEventRow.__table__.indexes
+        }
+        assert snapshot_capacity_index is not None
+        assert "(external_system, expires_at, snapshot_id)" in str(
+            snapshot_capacity_index
+        )
+        assert _SNAPSHOT_CAPACITY_INDEX in {
+            index.name for index in PoiCacheTargetSnapshotRow.__table__.indexes
         }
 
         await target_engine.dispose()
@@ -283,7 +354,23 @@ async def test_0076_receipt_backfill_drift_guard_and_downgrade(
                 ),
                 {"index_name": _SNAPSHOT_GC_INDEX},
             )
+            removed_snapshot_material_index = await connection.scalar(
+                text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE schemaname = 'ops' AND indexname = :index_name"
+                ),
+                {"index_name": _SNAPSHOT_MATERIAL_INDEX},
+            )
+            removed_snapshot_capacity_index = await connection.scalar(
+                text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE schemaname = 'ops' AND indexname = :index_name"
+                ),
+                {"index_name": _SNAPSHOT_CAPACITY_INDEX},
+            )
         assert removed_snapshot_gc_index is None
+        assert removed_snapshot_material_index is None
+        assert removed_snapshot_capacity_index is None
 
         await target_engine.dispose()
         await asyncio.to_thread(
@@ -315,6 +402,30 @@ async def test_0076_receipt_backfill_drift_guard_and_downgrade(
         await target_engine.dispose()
         with pytest.raises(IntegrityError, match="source receipt backfill drift"):
             await asyncio.to_thread(_run_alembic, target_dsn, _TARGET_REVISION)
+
+        await target_engine.dispose()
+        await asyncio.to_thread(
+            _run_alembic,
+            target_dsn,
+            "0074_curation_item_rekey_cascade",
+            downgrade=True,
+        )
+        target_engine = make_async_engine(target_dsn)
+        async with target_engine.connect() as connection:
+            removed_relay_sequence = await connection.scalar(
+                text(
+                    "SELECT to_regclass("
+                    "'ops.poi_cache_target_outbox_relay_order_seq')::text"
+                )
+            )
+            removed_relay_function = await connection.scalar(
+                text(
+                    "SELECT to_regprocedure("
+                    "'ops.assign_cache_target_outbox_relay_order()')::text"
+                )
+            )
+        assert removed_relay_sequence is None
+        assert removed_relay_function is None
     finally:
         await target_engine.dispose()
         async with admin_engine.connect() as connection:

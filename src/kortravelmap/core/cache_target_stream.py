@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal, DecimalException, InvalidOperation
 from typing import Final, Literal, TypeAlias
 
+from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
+
 __all__ = [
     "CACHE_TARGET_SOURCE_VERSION",
     "ActiveCacheTargetSourceV1",
@@ -26,6 +28,8 @@ __all__ = [
     "make_deleted_cache_target_source",
     "snapshot_leaf_digest",
     "snapshot_merkle_root",
+    "validate_cache_target_external_system",
+    "validate_cache_target_key",
 ]
 
 CACHE_TARGET_SOURCE_VERSION: Final[Literal["cache-target-source-v1"]] = (
@@ -44,6 +48,26 @@ _LOWERCASE_HEX: Final[frozenset[str]] = frozenset("0123456789abcdef")
 _LEAF_DOMAIN: Final[bytes] = b"KTMCTLEAF\x00"
 _NODE_DOMAIN: Final[bytes] = b"KTMCTNODE\x00"
 _EMPTY_DOMAIN: Final[bytes] = b"KTMCTEMPTY\x00"
+
+
+def validate_cache_target_external_system(value: str) -> str:
+    """외부 system identity의 단일 Unicode 정규형을 강제한다."""
+    if not value or value != value.strip():
+        raise ValueError("external_system은 trim된 비어 있지 않은 문자열이어야 합니다.")
+    if len(value) > MAX_EXTERNAL_SYSTEM_NAME_LENGTH:
+        raise ValueError(f"external_system은 {MAX_EXTERNAL_SYSTEM_NAME_LENGTH}자 이하여야 합니다.")
+    if value != unicodedata.normalize("NFC", value):
+        raise ValueError("external_system은 NFC 정규형이어야 합니다.")
+    return value
+
+
+def validate_cache_target_key(value: str) -> str:
+    """cache target 자연키의 단일 Unicode 정규형을 강제한다."""
+    if not value or value != value.strip() or len(value) > 512:
+        raise ValueError("target_key는 trim된 1~512자 문자열이어야 합니다.")
+    if value != unicodedata.normalize("NFC", value):
+        raise ValueError("target_key는 NFC 정규형이어야 합니다.")
+    return value
 
 
 @dataclass(frozen=True, slots=True)

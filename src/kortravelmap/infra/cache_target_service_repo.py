@@ -8,6 +8,10 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from sqlalchemy import text
 
+from kortravelmap.core.cache_target_stream import (
+    validate_cache_target_external_system,
+    validate_cache_target_key,
+)
 from kortravelmap.infra.cache_target_stream_repo import CacheTargetStreamConflict
 from kortravelmap.infra.domain_command_repo import canonical_domain_command_fingerprint
 from kortravelmap.infra.feature_update_repo import (
@@ -158,16 +162,22 @@ async def create_cache_target_refresh_request(
 ) -> CacheTargetRefreshRequestResult:
     """기존 feature-update ledger에 ServiceToken request identity를 결합한다."""
 
+    validate_cache_target_external_system(external_system)
+    canonical_target_keys = tuple(target_keys)
+    for target_key in canonical_target_keys:
+        validate_cache_target_key(target_key)
     actor = f"cache-target:{principal_id}:{consumer_id}"
     if len(actor) > 200:
         raise ValueError("principal_id와 consumer_id 결합 길이는 200 이하여야 합니다.")
-    if not target_keys or len(target_keys) > 500:
+    if not canonical_target_keys or len(canonical_target_keys) > 500:
         raise ValueError("target_keys는 1개 이상 500개 이하여야 합니다.")
+    if len(canonical_target_keys) != len(set(canonical_target_keys)):
+        raise ValueError("target_keys는 중복될 수 없습니다.")
     request_payload = {
         "consumer_id": consumer_id,
         "external_system": external_system,
         "reason": reason,
-        "target_keys": list(target_keys),
+        "target_keys": list(canonical_target_keys),
         "version": "cache-target-refresh-request-v1",
     }
     fingerprint = canonical_domain_command_fingerprint(request_payload)
@@ -213,7 +223,7 @@ async def create_cache_target_refresh_request(
         scope={
             "type": "cache_target_keys",
             "external_system": external_system,
-            "target_keys": list(target_keys),
+            "target_keys": list(canonical_target_keys),
         },
         run_mode="queued",
         operator=actor,

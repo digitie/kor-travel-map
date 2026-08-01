@@ -19,8 +19,9 @@ from kortravelmap.core.cache_target_stream import (
     CacheTargetSourceV1,
     DeletedCacheTargetSourceV1,
     cache_target_source_fingerprint,
+    validate_cache_target_external_system,
+    validate_cache_target_key,
 )
-from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.domain_command_repo import canonical_domain_command_fingerprint
 from kortravelmap.infra.poi_cache_target_repo import (
@@ -321,14 +322,9 @@ INSERT INTO ops.poi_cache_target_restore_fences (
 
 
 def _validate_identity(external_system: str, target_key: str | None = None) -> None:
-    if not external_system or external_system != external_system.strip():
-        raise ValueError("external_system은 trim된 비어 있지 않은 문자열이어야 합니다.")
-    if len(external_system) > MAX_EXTERNAL_SYSTEM_NAME_LENGTH:
-        raise ValueError(f"external_system은 {MAX_EXTERNAL_SYSTEM_NAME_LENGTH}자 이하여야 합니다.")
-    if target_key is not None and (
-        not target_key or target_key != target_key.strip() or len(target_key) > 512
-    ):
-        raise ValueError("target_key는 trim된 1~512자 문자열이어야 합니다.")
+    validate_cache_target_external_system(external_system)
+    if target_key is not None:
+        validate_cache_target_key(target_key)
 
 
 def _canonical_uuid(value: str, *, field: str) -> str:

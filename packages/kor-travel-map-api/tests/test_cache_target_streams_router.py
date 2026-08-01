@@ -93,6 +93,7 @@ class _FakeCacheTargetService:
             status_url=(f"/v1/ops/cache-target-operations/{RECONCILIATION_REQUEST_ID}"),
         )
         self.restore_calls: list[dict[str, Any]] = []
+        self.refresh_calls: list[dict[str, Any]] = []
         self.replay_calls: list[dict[str, Any]] = []
         self.apply_result: Any = SimpleNamespace(
             external_system=EXTERNAL_SYSTEM,
@@ -239,6 +240,14 @@ class _FakeCacheTargetService:
             delivery_version=3,
             entity_tag=f'"{EVENT_ID}:3"',
         )
+        self.refresh_result: Any = SimpleNamespace(
+            request_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            status="queued",
+            status_url="/v1/service/refresh-requests/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            retry_after_seconds=5,
+            created_at=NOW,
+            updated_at=NOW,
+        )
 
     async def apply_cache_target_source(self, _session: Any, **kwargs: Any) -> Any:
         self.apply_calls.append(kwargs)
@@ -266,6 +275,10 @@ class _FakeCacheTargetService:
     ) -> Any:
         self.restore_calls.append(kwargs)
         return self.restore_result
+
+    async def create_refresh_request(self, _session: Any, **kwargs: Any) -> Any:
+        self.refresh_calls.append(kwargs)
+        return self.refresh_result
 
     async def claim_cache_target_events(self, _session: Any, **kwargs: Any) -> Any:
         self.claim_calls.append(kwargs)
@@ -798,6 +811,46 @@ def test_put_cache_target_rejects_float_decimal_inputs() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("invalid_target_key", ["e\u0301", "\u3000target-1"])
+def test_put_cache_target_rejects_noncanonical_target_key_before_service_call(
+    invalid_target_key: str,
+) -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service)
+
+    response = client.put(
+        f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/{invalid_target_key}",
+        headers=_service_headers(extra={"If-None-Match": "*"}),
+        json=_upsert_body(),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert service.apply_calls == []
+
+
+@pytest.mark.unit
+def test_reconciliation_begin_rejects_noncanonical_system_before_service_call() -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service, settings=_settings(scopes=["cache-target:recovery"]))
+
+    response = client.post(
+        "/v1/service/cache-target-reconciliations",
+        headers=_service_headers(extra={"If-None-Match": "*"}),
+        json={
+            "external_system": "\u3000pinvi",
+            "consumer_id": CONSUMER_ID,
+            "expected_restore_epoch": 4,
+            "reason": "PinVi restore cutover",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert service.reconciliation_begin_calls == []
+
+
+@pytest.mark.unit
 def test_cache_target_claim_serializes_stream_scoped_reconciled_event() -> None:
     service = _FakeCacheTargetService()
     service.claim_result = SimpleNamespace(
@@ -949,6 +1002,51 @@ def test_refresh_request_rejects_more_than_500_targets_before_service_call() -> 
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.unit
+def test_refresh_request_rejects_duplicate_targets_before_service_call() -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service, settings=_settings(scopes=["cache-target:consumer"]))
+
+    response = client.post(
+        "/v1/service/refresh-requests",
+        headers={
+            **_service_headers(),
+            "Idempotency-Key": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        },
+        json={
+            "external_system": EXTERNAL_SYSTEM,
+            "target_keys": ["target-1", "target-1"],
+            "reason": "operator refresh",
+        },
+    )
+
+    assert response.status_code == 422
+    assert service.refresh_calls == []
+
+
+@pytest.mark.unit
+def test_refresh_request_accepts_full_root_target_key_length() -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service, settings=_settings(scopes=["cache-target:consumer"]))
+    target_key = "x" * 512
+
+    response = client.post(
+        "/v1/service/refresh-requests",
+        headers={
+            **_service_headers(),
+            "Idempotency-Key": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        },
+        json={
+            "external_system": EXTERNAL_SYSTEM,
+            "target_keys": [target_key],
+            "reason": "operator refresh",
+        },
+    )
+
+    assert response.status_code == 202, response.text
+    assert service.refresh_calls[0]["target_keys"] == [target_key]
 
 
 @pytest.mark.unit
@@ -1546,10 +1644,22 @@ def test_service_snapshot_rolls_back_route_owned_transaction_on_error() -> None:
 
 
 @pytest.mark.unit
-def test_service_snapshot_busy_is_retryable_without_waiting() -> None:
+@pytest.mark.parametrize(
+    ("code", "expected_code"),
+    [
+        ("snapshot_barrier_timeout", "SNAPSHOT_BARRIER_TIMEOUT"),
+        ("snapshot_build_timeout", "SNAPSHOT_BUILD_TIMEOUT"),
+        ("snapshot_busy", "SNAPSHOT_BUSY"),
+        ("snapshot_ttl_too_short", "SNAPSHOT_TTL_TOO_SHORT"),
+    ],
+)
+def test_service_snapshot_unavailable_is_retryable_without_waiting(
+    code: str,
+    expected_code: str,
+) -> None:
     service = _FakeCacheTargetService()
     service.snapshot_error = CacheTargetStreamConflict(
-        "snapshot_busy",
+        code,
         "snapshot already in progress",
     )
     session = _FakeSession()
@@ -1566,7 +1676,75 @@ def test_service_snapshot_busy_is_retryable_without_waiting() -> None:
 
     assert response.status_code == 503
     assert response.headers["retry-after"] == "1"
-    assert response.json()["code"] == "SNAPSHOT_BUSY"
+    assert response.json()["code"] == expected_code
+    assert session.commit_calls == 0
+    assert session.rollback_calls == 1
+
+
+@pytest.mark.unit
+def test_service_snapshot_capacity_returns_oldest_expiry_retry_after() -> None:
+    service = _FakeCacheTargetService()
+    service.snapshot_error = CacheTargetStreamConflict(
+        "snapshot_capacity_exceeded",
+        "snapshot capacity reached",
+        current={
+            "snapshot_count": 2,
+            "snapshot_limit": 2,
+            "oldest_expires_at": "2026-08-01T12:45:00+00:00",
+            "retry_after_seconds": 2_701,
+        },
+    )
+    session = _FakeSession()
+    client = _client(
+        service,
+        settings=_settings(scopes=["cache-target:snapshot"]),
+        session=session,
+    )
+
+    response = client.get(
+        f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
+        headers=_service_headers(),
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "2701"
+    problem = response.json()
+    assert problem["code"] == "SNAPSHOT_CAPACITY_EXCEEDED"
+    assert problem["details"]["snapshot_limit"] == 2
+    assert problem["details"]["oldest_expires_at"] == (
+        "2026-08-01T12:45:00+00:00"
+    )
+    assert session.commit_calls == 0
+    assert session.rollback_calls == 1
+
+
+@pytest.mark.unit
+def test_service_snapshot_item_ceiling_returns_non_retryable_payload_too_large() -> None:
+    service = _FakeCacheTargetService()
+    service.snapshot_error = CacheTargetStreamConflict(
+        "snapshot_item_limit_exceeded",
+        "snapshot item capacity reached",
+        current={"item_count_lower_bound": 100_001, "item_limit": 100_000},
+    )
+    session = _FakeSession()
+    client = _client(
+        service,
+        settings=_settings(scopes=["cache-target:snapshot"]),
+        session=session,
+    )
+
+    response = client.get(
+        f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
+        headers=_service_headers(),
+    )
+
+    assert response.status_code == 413
+    assert "retry-after" not in response.headers
+    assert response.json()["code"] == "SNAPSHOT_ITEM_LIMIT_EXCEEDED"
+    assert response.json()["details"] == {
+        "item_count_lower_bound": 100_001,
+        "item_limit": 100_000,
+    }
     assert session.commit_calls == 0
     assert session.rollback_calls == 1
 

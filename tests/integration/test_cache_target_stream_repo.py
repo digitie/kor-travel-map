@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
@@ -17,8 +19,10 @@ from kortravelmap.core.cache_target_stream import (
     make_deleted_cache_target_source,
     snapshot_merkle_root,
 )
+from kortravelmap.infra import cache_target_event_repo as result_event_repo
 from kortravelmap.infra import cache_target_reconciliation_repo as snapshot_repo
 from kortravelmap.infra.cache_target_event_repo import (
+    CacheTargetRefreshMember,
     append_cache_target_links_reconciled_events,
     append_cache_target_refresh_status_events,
     capture_cache_target_refresh_members_by_keys,
@@ -26,6 +30,7 @@ from kortravelmap.infra.cache_target_event_repo import (
 from kortravelmap.infra.cache_target_outbox_repo import (
     CacheTargetAppliedReceipt,
     ack_cache_target_events,
+    cache_target_event_cursor,
     claim_cache_target_events,
     get_cache_target_dead_letter,
     list_cache_target_dead_letters,
@@ -41,6 +46,8 @@ from kortravelmap.infra.cache_target_reconciliation_repo import (
     get_cache_target_snapshot,
     get_cache_target_stream_discovery,
     list_cache_target_stream_statuses,
+    observe_expired_cache_target_snapshot_backlog,
+    prune_expired_cache_target_snapshots_batch,
     request_cache_target_reconciliation,
     seal_cache_target_reconciliation,
 )
@@ -1347,6 +1354,162 @@ async def _apply_snapshot_source(
 
 
 @pytest.mark.integration
+async def test_non_nfc_identity_cannot_poison_snapshot(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "snapshot-nfc-test"
+    canonical_key = "poi:\u00e9"
+    noncanonical_key = "poi:e\u0301"
+
+    def _scope(target_key: str) -> str:
+        return json.dumps(
+            {
+                "type": "cache_target_keys",
+                "external_system": system,
+                "target_keys": [target_key],
+                "scope_mode": "center_radius",
+            }
+        )
+
+    assert await migrated_session.scalar(
+        text(
+            "SELECT ops.is_valid_feature_update_scope("
+            "'cache_target_keys', CAST(:scope AS jsonb))"
+        ),
+        {"scope": _scope("x" * 512)},
+    )
+    assert not await migrated_session.scalar(
+        text(
+            "SELECT ops.is_valid_feature_update_scope("
+            "'cache_target_keys', CAST(:scope AS jsonb))"
+        ),
+        {"scope": _scope("x" * 513)},
+    )
+    assert not await migrated_session.scalar(
+        text(
+            "SELECT ops.is_valid_feature_update_scope("
+            "'cache_target_keys', CAST(:scope AS jsonb))"
+        ),
+        {"scope": _scope(noncanonical_key)},
+    )
+
+    with pytest.raises(ValueError, match="target_key.*NFC"):
+        await _apply_snapshot_source(
+            migrated_session,
+            external_system=system,
+            target_key=noncanonical_key,
+            event_id="90a00000-0000-0000-0000-000000000001",
+            idempotency_key="90b00000-0000-0000-0000-000000000001",
+        )
+    with pytest.raises(ValueError, match="target_key.*trim"):
+        await _apply_snapshot_source(
+            migrated_session,
+            external_system=system,
+            target_key="\u3000poi:space",
+            event_id="90a00000-0000-0000-0000-000000000003",
+            idempotency_key="90b00000-0000-0000-0000-000000000003",
+        )
+    with pytest.raises(IntegrityError):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "INSERT INTO ops.poi_cache_target_streams ("
+                    "external_system, consumer_id, restore_epoch, control_version, "
+                    "status, consumer_enabled) VALUES ("
+                    ":external_system, :consumer_id, 1, 1, 'fenced', false)"
+                ),
+                {
+                    "external_system": "\u3000snapshot-space-test",
+                    "consumer_id": _CONSUMER,
+                },
+            )
+    constraint_rows = (
+        await migrated_session.execute(
+            text(
+                "SELECT relation.relname AS table_name, "
+                "pg_get_constraintdef(constraint_row.oid) AS definition "
+                "FROM pg_constraint AS constraint_row "
+                "JOIN pg_class AS relation ON relation.oid = constraint_row.conrelid "
+                "JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace "
+                "WHERE namespace.nspname = 'ops' "
+                "AND constraint_row.contype = 'c' "
+                "AND relation.relname = ANY(:table_names)"
+            ),
+            {
+                "table_names": [
+                    "poi_cache_targets",
+                    "poi_cache_target_streams",
+                    "poi_cache_target_source_heads",
+                ]
+            },
+        )
+    ).mappings()
+    canonical_identity_tables = {
+        str(row["table_name"])
+        for row in constraint_rows
+        if "btrim" in str(row["definition"]).lower()
+        and "normalize" in str(row["definition"]).lower()
+    }
+    assert canonical_identity_tables == {
+        "poi_cache_targets",
+        "poi_cache_target_streams",
+        "poi_cache_target_source_heads",
+    }
+
+    head = await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key=canonical_key,
+        event_id="90a00000-0000-0000-0000-000000000002",
+        idempotency_key="90b00000-0000-0000-0000-000000000002",
+    )
+    with pytest.raises(IntegrityError) as constraint_error:
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "UPDATE ops.poi_cache_targets SET target_key = :target_key "
+                    "WHERE target_id = CAST(:target_id AS uuid)"
+                ),
+                {"target_key": noncanonical_key, "target_id": head.target_id},
+            )
+    assert "ck_poi_cache_targets_target_key_identity" in str(constraint_error.value)
+    with pytest.raises(IntegrityError) as root_trim_constraint_error:
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "UPDATE ops.poi_cache_targets SET target_key = :target_key "
+                    "WHERE target_id = CAST(:target_id AS uuid)"
+                ),
+                {"target_key": "\u3000poi:space", "target_id": head.target_id},
+            )
+    assert "ck_poi_cache_targets_target_key_identity" in str(
+        root_trim_constraint_error.value
+    )
+    with pytest.raises(IntegrityError):
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "UPDATE ops.poi_cache_target_source_heads "
+                    "SET target_key = :target_key "
+                    "WHERE external_system = :external_system AND target_key = :canonical_key"
+                ),
+                {
+                    "target_key": "\u3000poi:space",
+                    "external_system": system,
+                    "canonical_key": canonical_key,
+                },
+            )
+
+    snapshot = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=10,
+    )
+    assert snapshot.count == 1
+    assert [item.target_key for item in snapshot.items] == [canonical_key]
+
+
+@pytest.mark.integration
 async def test_fixed_snapshot_pages_ignore_concurrent_committed_write(
     migrated_engine: AsyncEngine,
 ) -> None:
@@ -1459,6 +1622,365 @@ async def test_generic_snapshot_try_lock_fails_fast_and_then_reuses(
 
 
 @pytest.mark.integration
+async def test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers(
+    migrated_engine: AsyncEngine,
+) -> None:
+    system = "snapshot-outbox-prefix-test"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        first = await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="target-a",
+            event_id="9a100000-0000-4000-8000-000000000011",
+            idempotency_key="9a200000-0000-4000-8000-000000000011",
+        )
+    member = CacheTargetRefreshMember(
+        request_id="9a300000-0000-4000-8000-000000000011",
+        target_id=first.target_id,
+        external_system=system,
+        target_key="target-a",
+        restore_epoch=1,
+        source_generation=1,
+        source_payload_fingerprint=first.source_payload_fingerprint,
+        created_at=datetime(2026, 8, 1, 0, 0, tzinfo=UTC),
+    )
+
+    low_writer = AsyncSession(migrated_engine)
+    low_tx = await low_writer.begin()
+    low_state = await _apply_snapshot_source(
+        low_writer,
+        external_system=system,
+        target_key="target-b",
+        event_id="9a100000-0000-4000-8000-000000000012",
+        idempotency_key="9a200000-0000-4000-8000-000000000012",
+    )
+
+    async def _append_high_result():
+        async with AsyncSession(migrated_engine) as writer, writer.begin():
+            row = (
+                await writer.execute(
+                    text(
+                        "INSERT INTO ops.poi_cache_target_outbox_events ("
+                        "event_id, relay_order, event_type, event_scope, external_system, "
+                        "target_key, target_id, restore_epoch, source_generation, "
+                        "target_sequence, source_payload_fingerprint, "
+                        "payload_fingerprint, payload) VALUES ("
+                        "'9a500000-0000-4000-8000-000000000011', 1, "
+                        "'cache_target.links_reconciled', 'target', "
+                        ":external_system, 'target-a', CAST(:target_id AS uuid), "
+                        "1, 1, 2, :source_fingerprint, :payload_fingerprint, "
+                        "CAST(:payload AS jsonb)) "
+                        "RETURNING event_id::text, relay_order"
+                    ),
+                    {
+                        "external_system": system,
+                        "target_id": member.target_id,
+                        "source_fingerprint": member.source_payload_fingerprint,
+                        "payload_fingerprint": "4" * 64,
+                        "payload": '{"version":1,"ordinal":"high"}',
+                    },
+                )
+            ).one()
+            return str(row[0]), int(row[1])
+
+    async def _read_snapshot():
+        async with AsyncSession(migrated_engine) as reader, reader.begin():
+            return await get_cache_target_snapshot(
+                reader,
+                external_system=system,
+                limit=10,
+            )
+
+    high_task: asyncio.Task[tuple[str, int]] | None = None
+    snapshot_task: asyncio.Task[Any] | None = None
+    try:
+        high_task = asyncio.create_task(_append_high_result())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(high_task), timeout=0.2)
+        snapshot_task = asyncio.create_task(_read_snapshot())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(snapshot_task), timeout=0.2)
+
+        await low_tx.commit()
+        high_event_id, high_relay_order = await asyncio.wait_for(high_task, timeout=5)
+        page = await asyncio.wait_for(snapshot_task, timeout=5)
+    finally:
+        pending_tasks = tuple(
+            task
+            for task in (high_task, snapshot_task)
+            if task is not None and not task.done()
+        )
+        for task in pending_tasks:
+            task.cancel()
+        if pending_tasks:
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+        if low_tx.is_active:
+            await low_tx.rollback()
+        await low_writer.close()
+
+    assert low_state.relay_order < high_relay_order
+    assert high_relay_order != 1
+    assert page.high_watermark_cursor == cache_target_event_cursor(
+        high_relay_order
+    )
+    assert {item.target_key for item in page.items} == {"target-a", "target-b"}
+    async with AsyncSession(migrated_engine) as observer, observer.begin():
+        persisted_orders = (
+            await observer.execute(
+                text(
+                    "SELECT high_watermark_relay_order, "
+                    "material_high_watermark_relay_order "
+                    "FROM ops.poi_cache_target_snapshots "
+                    "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+                ),
+                {"snapshot_id": page.snapshot_id},
+            )
+        ).one()
+        missing_state = await observer.scalar(
+            text(
+                "SELECT count(*) "
+                "FROM ops.poi_cache_target_outbox_events AS event "
+                "WHERE event.external_system = :external_system "
+                "AND event.event_type = 'cache_target.state_applied' "
+                "AND event.relay_order <= :high_watermark "
+                "AND NOT EXISTS ("
+                "SELECT 1 FROM ops.poi_cache_target_snapshot_items AS item "
+                "WHERE item.snapshot_id = CAST(:snapshot_id AS uuid) "
+                "AND item.target_key = event.target_key)"
+            ),
+            {
+                "external_system": system,
+                "high_watermark": high_relay_order,
+                "snapshot_id": page.snapshot_id,
+            },
+        )
+    assert tuple(persisted_orders) == (
+        high_relay_order,
+        low_state.relay_order,
+    )
+    assert missing_state == 0
+
+    async with AsyncSession(migrated_engine) as writer, writer.begin():
+        later = await result_event_repo._append_result_event(  # pyright: ignore[reportPrivateUsage]
+            writer,
+            member=member,
+            event_type="cache_target.links_reconciled",
+            payload={"version": 1, "ordinal": "later"},
+            refresh_request_id=None,
+            job_id=None,
+        )
+    async with AsyncSession(migrated_engine) as reader, reader.begin():
+        reused = await get_cache_target_snapshot(
+            reader,
+            external_system=system,
+            limit=10,
+        )
+        replay_ids = set(
+            (
+                await reader.execute(
+                    text(
+                        "SELECT event_id::text "
+                        "FROM ops.poi_cache_target_outbox_events "
+                        "WHERE external_system = :external_system "
+                        "AND relay_order > :high_watermark"
+                    ),
+                    {
+                        "external_system": system,
+                        "high_watermark": high_relay_order,
+                    },
+                )
+            ).scalars()
+        )
+    assert reused.snapshot_id == page.snapshot_id
+    assert reused.high_watermark_cursor == page.high_watermark_cursor
+    assert high_event_id != later.event_id
+    assert replay_ids == {later.event_id}
+
+
+@pytest.mark.integration
+async def test_refresh_capture_locks_stream_before_head_and_avoids_source_deadlock(
+    migrated_engine: AsyncEngine,
+) -> None:
+    system = "refresh-lock-order-test"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        initial = await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="target-a",
+            event_id="9b100000-0000-4000-8000-000000000011",
+            idempotency_key="9b200000-0000-4000-8000-000000000011",
+        )
+        request = await enqueue_feature_update_request(
+            setup,
+            scope={
+                "type": "cache_target_keys",
+                "external_system": system,
+                "target_keys": ["target-a"],
+            },
+        )
+    assert initial.target is not None
+    assert request is not None
+    request_id = request.request_id
+    captured = asyncio.Event()
+    allow_append = asyncio.Event()
+
+    async def _capture_and_append():
+        async with AsyncSession(migrated_engine) as refresh, refresh.begin():
+            members = await capture_cache_target_refresh_members_by_keys(
+                refresh,
+                request_id=request_id,
+                external_system=system,
+                target_keys=("target-a",),
+            )
+            captured.set()
+            await allow_append.wait()
+            events = await append_cache_target_refresh_status_events(
+                refresh,
+                request_id=request_id,
+                job_id=request.job_id,
+                status="running",
+            )
+            return members, events
+
+    async def _update_source():
+        await captured.wait()
+        async with AsyncSession(migrated_engine) as source, source.begin():
+            return await apply_cache_target_source(
+                source,
+                consumer_id=_CONSUMER,
+                source_event_id="9b100000-0000-4000-8000-000000000012",
+                idempotency_key="9b200000-0000-4000-8000-000000000012",
+                external_system=system,
+                target_key="target-a",
+                restore_epoch=1,
+                source_generation=2,
+                source=make_active_cache_target_source(
+                    lon="126.978",
+                    lat="37.5665",
+                    radius_km="6",
+                    update_enabled=True,
+                ),
+                occurred_at=datetime(2026, 8, 1, 1, 0, tzinfo=UTC),
+                create_only=False,
+                expected_target_id=initial.target.target_id,
+                expected_lock_version=initial.target.lock_version,
+            )
+
+    refresh_task: asyncio.Task[Any] | None = None
+    source_task: asyncio.Task[Any] | None = None
+    try:
+        refresh_task = asyncio.create_task(_capture_and_append())
+        await asyncio.wait_for(captured.wait(), timeout=5)
+        source_task = asyncio.create_task(_update_source())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(source_task), timeout=0.2)
+        allow_append.set()
+        members, events = await asyncio.wait_for(refresh_task, timeout=5)
+        updated = await asyncio.wait_for(source_task, timeout=5)
+    finally:
+        allow_append.set()
+        pending_tasks = tuple(
+            task
+            for task in (refresh_task, source_task)
+            if task is not None and not task.done()
+        )
+        for task in pending_tasks:
+            task.cancel()
+        if pending_tasks:
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+
+    assert len(members) == len(events) == 1
+    assert events[0].relay_order < updated.relay_order
+
+
+@pytest.mark.integration
+async def test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "snapshot-material-watermark-test"
+    applied = await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-a",
+        event_id="9e000000-0000-4000-8000-000000000011",
+        idempotency_key="9f000000-0000-4000-8000-000000000011",
+    )
+    first = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=10,
+    )
+    nonmaterial_relay_order = await migrated_session.scalar(
+        text(
+            "INSERT INTO ops.poi_cache_target_outbox_events ("
+            "event_id, event_type, event_scope, external_system, target_key, "
+            "target_id, restore_epoch, source_generation, target_sequence, "
+            "source_payload_fingerprint, payload_fingerprint, payload) VALUES ("
+            "'a0000000-0000-4000-8000-000000000011', "
+            "'cache_target.links_reconciled', 'target', :external_system, "
+            "'target-a', CAST(:target_id AS uuid), 1, 1, 2, :source_fingerprint, "
+            ":payload_fingerprint, CAST('{}' AS jsonb)) RETURNING relay_order"
+        ),
+        {
+            "external_system": system,
+            "target_id": applied.target_id,
+            "source_fingerprint": applied.source_payload_fingerprint,
+            "payload_fingerprint": "4" * 64,
+        },
+    )
+    assert nonmaterial_relay_order is not None
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.poi_cache_target_source_heads SET target_sequence = 2 "
+            "WHERE external_system = :external_system AND target_key = 'target-a'"
+        ),
+        {"external_system": system},
+    )
+
+    reused = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=10,
+    )
+    assert reused.snapshot_id == first.snapshot_id
+    assert reused.high_watermark_cursor == first.high_watermark_cursor
+    assert reused.high_watermark_cursor != cache_target_event_cursor(
+        int(nonmaterial_relay_order)
+    )
+
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-b",
+        event_id="9e000000-0000-4000-8000-000000000012",
+        idempotency_key="9f000000-0000-4000-8000-000000000012",
+    )
+    fresh = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=10,
+    )
+    assert fresh.snapshot_id != first.snapshot_id
+    assert fresh.count == 2
+    await migrated_session.execute(text("SET LOCAL enable_seqscan = off"))
+    plan = "\n".join(
+        str(line)
+        for line in (
+            await migrated_session.execute(
+                text(
+                    "EXPLAIN (COSTS OFF) SELECT max(event.relay_order) "
+                    "FROM ops.poi_cache_target_outbox_events AS event "
+                    "WHERE event.external_system = :external_system "
+                    "AND event.event_type = 'cache_target.state_applied'"
+                ),
+                {"external_system": system},
+            )
+        ).scalars()
+    )
+    assert "idx_cache_target_outbox_state_material_order" in plan
+
+
+@pytest.mark.integration
 async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
     migrated_session: AsyncSession,
 ) -> None:
@@ -1481,11 +2003,12 @@ async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
         text(
             "INSERT INTO ops.poi_cache_target_snapshots ("
             "snapshot_id, external_system, restore_epoch, "
-            "high_watermark_relay_order, item_count, merkle_root, "
+            "high_watermark_relay_order, material_high_watermark_relay_order, "
+            "item_count, merkle_root, "
             "created_at, expires_at) VALUES "
-            "(CAST(:expired_id AS uuid), :external_system, 1, 0, 1001, "
+            "(CAST(:expired_id AS uuid), :external_system, 1, 0, 0, 1001, "
             ":expired_root, now() - interval '2 hours', now() - interval '1 hour'), "
-            "(CAST(:referenced_id AS uuid), :external_system, 1, 0, 1, "
+            "(CAST(:referenced_id AS uuid), :external_system, 1, 0, 0, 1, "
             ":referenced_root, now() - interval '2 hours', now() - interval '1 hour')"
         ),
         {
@@ -1578,19 +2101,14 @@ async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
         {"snapshot_id": referenced_id},
     ) == 1
 
-    await _apply_snapshot_source(
+    background_gc = await prune_expired_cache_target_snapshots_batch(
         migrated_session,
-        external_system=system,
-        target_key="target-c",
-        event_id="95000000-0000-4000-8000-000000000003",
-        idempotency_key="96000000-0000-4000-8000-000000000003",
+        item_limit=1_000,
+        header_limit=100,
     )
-    second_gc = await get_cache_target_snapshot(
-        migrated_session,
-        external_system=system,
-        limit=1,
-    )
-    assert second_gc.snapshot_id != first_gc.snapshot_id
+    assert background_gc.external_system == system
+    assert background_gc.deleted_items == 1
+    assert background_gc.deleted_headers == 1
     assert await migrated_session.scalar(
         text(
             "SELECT count(*) FROM ops.poi_cache_target_snapshots "
@@ -1605,6 +2123,210 @@ async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
         ),
         {"snapshot_id": referenced_id},
     ) == 1
+
+
+@pytest.mark.integration
+async def test_generic_snapshot_capacity_excludes_expired_and_referenced_copies(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "snapshot-capacity-test"
+    before = await observe_expired_cache_target_snapshot_backlog(migrated_session)
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-a",
+        event_id="a1000000-0000-4000-8000-000000000011",
+        idempotency_key="a2000000-0000-4000-8000-000000000011",
+    )
+    unreferenced_id = "a3000000-0000-4000-8000-000000000011"
+    expired_id = "a3000000-0000-4000-8000-000000000012"
+    referenced_id = "a3000000-0000-4000-8000-000000000013"
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshots ("
+            "snapshot_id, external_system, restore_epoch, "
+            "high_watermark_relay_order, material_high_watermark_relay_order, "
+            "item_count, merkle_root, "
+            "created_at, expires_at) VALUES "
+            "(CAST(:unreferenced_id AS uuid), :external_system, 1, 0, 0, 0, "
+            ":empty_root, now() - interval '10 minutes', now() + interval '90 minutes'), "
+            "(CAST(:expired_id AS uuid), :external_system, 1, 0, 0, 0, "
+            ":empty_root, now() - interval '3 hours', now() - interval '1 hour'), "
+            "(CAST(:referenced_id AS uuid), :external_system, 1, 0, 0, 0, "
+            ":empty_root, now() - interval '10 minutes', now() + interval '90 minutes')"
+        ),
+        {
+            "unreferenced_id": unreferenced_id,
+            "expired_id": expired_id,
+            "referenced_id": referenced_id,
+            "external_system": system,
+            "empty_root": snapshot_merkle_root([]),
+        },
+    )
+    command_id = await _reconciliation_command(
+        migrated_session,
+        key="a4000000-0000-4000-8000-000000000011",
+        operation="snapshot.capacity.reference",
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_reconciliation_requests ("
+            "request_id, external_system, command_id, reason, status, "
+            "phase_version, snapshot_id, expected_merkle_root, "
+            "actual_merkle_root, started_at, completed_at) VALUES ("
+            "CAST(:request_id AS uuid), :external_system, :command_id, "
+            "'capacity exclusion regression', 'succeeded', 3, "
+            "CAST(:snapshot_id AS uuid), :empty_root, :empty_root, now(), now())"
+        ),
+        {
+            "request_id": "a5000000-0000-4000-8000-000000000011",
+            "external_system": system,
+            "command_id": command_id,
+            "snapshot_id": referenced_id,
+            "empty_root": snapshot_merkle_root([]),
+        },
+    )
+
+    created = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=10,
+    )
+    assert created.snapshot_id not in {unreferenced_id, expired_id, referenced_id}
+    assert await migrated_session.scalar(
+        text(
+            "SELECT count(*) FROM ops.poi_cache_target_snapshots "
+            "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+        ),
+        {"snapshot_id": expired_id},
+    ) == 0
+
+    inventory = await observe_expired_cache_target_snapshot_backlog(migrated_session)
+    assert inventory.remaining_headers == before.remaining_headers
+    assert inventory.total_headers == before.total_headers + 3
+    assert inventory.total_items == before.total_items + 1
+    assert (
+        inventory.unexpired_unreferenced_headers
+        == before.unexpired_unreferenced_headers + 2
+    )
+    assert (
+        inventory.unexpired_unreferenced_items
+        == before.unexpired_unreferenced_items + 1
+    )
+    assert inventory.referenced_headers == before.referenced_headers + 1
+    assert inventory.referenced_items == before.referenced_items
+
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-b",
+        event_id="a1000000-0000-4000-8000-000000000012",
+        idempotency_key="a2000000-0000-4000-8000-000000000012",
+    )
+    with pytest.raises(CacheTargetStreamConflict) as capacity:
+        await get_cache_target_snapshot(
+            migrated_session,
+            external_system=system,
+            limit=10,
+        )
+    assert capacity.value.code == "snapshot_capacity_exceeded"
+    assert capacity.value.current["snapshot_count"] == 2
+    assert capacity.value.current["snapshot_limit"] == 2
+    assert 1 <= capacity.value.current["retry_after_seconds"] <= 7_200
+
+
+@pytest.mark.integration
+async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
+    migrated_session: AsyncSession,
+) -> None:
+    first_system = "snapshot-background-gc-a"
+    second_system = "snapshot-background-gc-z"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=first_system,
+        target_key="target-a",
+        event_id="a1000000-0000-4000-8000-000000000001",
+        idempotency_key="a2000000-0000-4000-8000-000000000001",
+    )
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=second_system,
+        target_key="target-z",
+        event_id="a1000000-0000-4000-8000-000000000002",
+        idempotency_key="a2000000-0000-4000-8000-000000000002",
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshots ("
+            "snapshot_id, external_system, restore_epoch, "
+            "high_watermark_relay_order, material_high_watermark_relay_order, "
+            "item_count, merkle_root, "
+            "created_at, expires_at) VALUES "
+            "('a3000000-0000-4000-8000-000000000001', :first_system, "
+            "1, 0, 0, 2, :first_root, now() - interval '2 hours', "
+            "now() - interval '1 hour'), "
+            "('a3000000-0000-4000-8000-000000000002', :second_system, "
+            "1, 0, 0, 1, :second_root, now() - interval '2 hours', "
+            "now() - interval '1 hour')"
+        ),
+        {
+            "first_system": first_system,
+            "second_system": second_system,
+            "first_root": "1" * 64,
+            "second_root": "2" * 64,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshot_items ("
+            "snapshot_id, row_number, external_system, target_key, state, "
+            "source_generation, source_payload_fingerprint) VALUES "
+            "('a3000000-0000-4000-8000-000000000001', 1, :first_system, "
+            "'a-1', 'active', 1, :fingerprint), "
+            "('a3000000-0000-4000-8000-000000000001', 2, :first_system, "
+            "'a-2', 'active', 1, :fingerprint), "
+            "('a3000000-0000-4000-8000-000000000002', 1, :second_system, "
+            "'z-1', 'active', 1, :fingerprint)"
+        ),
+        {
+            "first_system": first_system,
+            "second_system": second_system,
+            "fingerprint": "3" * 64,
+        },
+    )
+
+    first = await prune_expired_cache_target_snapshots_batch(
+        migrated_session,
+        item_limit=1,
+        header_limit=1,
+    )
+    second = await prune_expired_cache_target_snapshots_batch(
+        migrated_session,
+        after_external_system=first.external_system,
+        item_limit=1,
+        header_limit=1,
+    )
+    wrapped = await prune_expired_cache_target_snapshots_batch(
+        migrated_session,
+        after_external_system=second.external_system,
+        item_limit=1,
+        header_limit=1,
+    )
+    backlog = await observe_expired_cache_target_snapshot_backlog(migrated_session)
+
+    assert (first.external_system, second.external_system, wrapped.external_system) == (
+        first_system,
+        second_system,
+        first_system,
+    )
+    assert (first.deleted_items, first.deleted_headers, first.has_more) == (1, 0, True)
+    assert (second.deleted_items, second.deleted_headers, second.has_more) == (1, 1, True)
+    assert (wrapped.deleted_items, wrapped.deleted_headers, wrapped.has_more) == (
+        1,
+        1,
+        False,
+    )
+    assert backlog.remaining_items == backlog.remaining_headers == 0
 
 
 @pytest.mark.integration
@@ -2495,6 +3217,40 @@ async def test_service_source_read_and_refresh_request_idempotency(
     assert source is not None
     assert source.target_id == created.target.target_id
     assert source.entity_tag is not None
+
+    request_count = await migrated_session.scalar(
+        text("SELECT count(*) FROM ops.feature_update_requests")
+    )
+    with pytest.raises(ValueError, match="target_key.*NFC"):
+        await create_cache_target_refresh_request(
+            migrated_session,
+            principal_id="pinvi-service",
+            consumer_id=_CONSUMER,
+            idempotency_key="99000000-0000-0000-0000-000000000009",
+            external_system=system,
+            target_keys=["refresh:e\u0301"],
+            reason="invalid identity",
+        )
+    assert (
+        await migrated_session.scalar(text("SELECT count(*) FROM ops.feature_update_requests"))
+        == request_count
+    )
+    member_count = await migrated_session.scalar(
+        text("SELECT count(*) FROM ops.poi_cache_target_refresh_members")
+    )
+    with pytest.raises(ValueError, match="target_key.*NFC"):
+        await capture_cache_target_refresh_members_by_keys(
+            migrated_session,
+            request_id="99000000-0000-0000-0000-000000000008",
+            external_system=system,
+            target_keys=["refresh:e\u0301"],
+        )
+    assert (
+        await migrated_session.scalar(
+            text("SELECT count(*) FROM ops.poi_cache_target_refresh_members")
+        )
+        == member_count
+    )
 
     request = await create_cache_target_refresh_request(
         migrated_session,

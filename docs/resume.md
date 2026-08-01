@@ -10,6 +10,17 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — T-VN-41 canonical Unicode identity 보강
+
+최종 적대 리뷰에서 NFC-equivalent `target_key` 두 개가 raw text 자연키로는 공존하지만 Merkle leaf에서
+같은 identity로 축약되어 snapshot을 영구 500으로 막는 P1을 발견했다. `external_system`과 `target_key`를
+API 422, repository, `poi_cache_targets`/stream/source-head/feature-update scope DB CHECK에서 trim된 NFC
+canonical form으로 강제했다. `cache_target_keys`도 root 자연키와 같은 512자 상한을 사용한다. 비정규
+source·refresh scope는 durable head/request 생성 전에 거부하고 정확한 constraint와 snapshot 회귀를 추가했다.
+
+**다음 한 작업**: exact WIP 두 독립 재리뷰와 전체 gate를 통과한 뒤 Map final commit/OpenAPI를 PinVi에
+재핀하고 n150 100,000/100,001 snapshot live gate를 실행한다.
+
 ## 2026-08-01 (codex) — T-VN-41 fixed snapshot durability·bounded GC
 
 service 일반 snapshot 첫 page가 repository에서 header/items를 INSERT하고도 read-only session 종료 때
@@ -17,13 +28,37 @@ rollback되어, 응답 UUID의 다음 cursor가 사라지는 P1을 live E2E에�
 포함한 transaction을 소유해 commit 실패/예외에는 200을 내지 않도록 고쳤다. 응답에는
 `created_at`/`expires_at`을 필수로 노출한다.
 
-내구화 뒤 retry마다 full snapshot이 영구 누적되지 않도록 generic 경로만 external-system single-flight로
-분리했다. 현재 epoch/outbox high-watermark가 같고 75분 이상 유효한 미참조 snapshot은 persisted page를
-재사용하며, 경합은 대기하지 않고 `503 + Retry-After`다. 만료·미참조 item/header는 parent/item lock을
-함께 잡은 제한 배치로만 정리하고 reconciliation이 참조하는 checksum 감사 snapshot은 보존한다.
+내구화 뒤 full snapshot이 누적되지 않도록 generic 경로를 single-flight로 분리했다. source head와 같은
+transaction에서 증가하는 `cache_target.state_applied` material watermark를 global cursor와 별도 header에
+저장하고 epoch/watermark가 현재 값과 exact할 때만 재사용한다. advisory lock 뒤 별도 stream share barrier
+statement가 기존 outbox writer 완료 뒤 identity/head를 읽게 해 lock-wait stale MVCC 누락을 막는다.
+모든 outbox writer transaction은 head/target/link 접근 전에 stream을 잠그고 여러 system이면 정렬 순서로
+모두 선취한다. 이 stream → head/target/link 순서로 각 system cursor가 같은 stream에서 늦게 commit되는
+더 낮은 relay를 추월하지 않는 commit-safe contiguous prefix가 되게 한다. 번호의 global uniqueness는
+서로 다른 stream 사이의 commit 순서를 뜻하지 않는다.
+DB trigger는 stream lock을 재확인한 뒤 명시적 global sequence에서 relay를 배정한다. Identity/default의
+trigger 전 할당을 제거해 raw/future insert도 allocation-before-lock 순서를 우회하지 못한다.
+link/refresh/stream-reconciled event는 재사용을 깨지 않는다. 재사용 cursor는 safe replay lower-bound라
+consumer가 이후 event를 idempotent하게 다시 읽는다. Map은 handoff 전 75분, PinVi는 실제 수신 시 60분의
+잔여수명을 각각 검사하며 부족하면 `503 + Retry-After` 또는 consumer fail-close다.
+barrier lock wait 5초/statement 30초를 넘기면 single-flight를 해제하고 barrier/build별 retryable `503`으로
+실패한다.
+
+reuse miss 시 system별 미만료·미참조 generic snapshot이 2개면 세 번째 full copy를 거부한다. 가장 오래된
+expiry까지 동적 `429 + Retry-After`를 반환해 유효 cursor를 삭제하지 않고 live 저장량을 stream
+cardinality의 2배로 제한한다. request-bound 감사 snapshot은 admission count에서 제외한다.
+단일 materialization은 100,001행에서 잘라 100,000 item 초과를 tuple/Merkle 생성 전에
+`413 snapshot_item_limit_exceeded`로 거부한다. 향후 bounded streaming/material 공유는 #922로 분리했다.
+
+hourly background drain은 전역 physical-connection try-lock, system round-robin, batch별 새 transaction,
+3,300초/statement/no-progress 예산을 사용한다. exact remaining과 total/unexpired/referenced count는 종료
+시 한 번만 세고 overlap skip에서는 unknown이다. 기본 1,000×2,000은 실행당 상한이므로 production enable
+전에 n150에서 migration, 수동 GC, schedule ON, 다음 tick의 backlog 0 순서 확인이 필수다.
+reconciliation 감사 snapshot은 terminal 상태도 보존하므로 referenced 증가율과 보존 임계치 alert를
+별도로 검증한다.
 
 **다음 한 작업**: 독립 적대적 리뷰 2건과 Map/PinVi CI를 통과시킨 뒤 exact image를 다시 빌드해 n150
-isolated live UI recovery E2E와 최종 prod gate를 완료한다.
+격리 GC soak·isolated live UI recovery E2E와 최종 prod gate를 완료한다.
 
 ## 2026-08-01 — H35 게이트 ① 실증 완료 (CSV 재import로 공개 표면 3,265 복원)
 

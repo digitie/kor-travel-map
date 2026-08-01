@@ -19,6 +19,12 @@ best-effort callback은 누락·중복·복구 epoch 전환을 재구성하지 �
 
 ## 결정
 
+`external_system`과 `target_key`는 trim/길이 조건뿐 아니라 Unicode NFC canonical form을 물리 DB
+CHECK와 repository/API 경계에서 강제한다. NFC-equivalent 문자열을 서로 다른 자연키로 저장한 뒤 Merkle
+leaf에서 같은 identity로 축약하는 상태는 허용하지 않는다. non-NFC service path는 source write 전에
+`422 VALIDATION_ERROR`로 거부한다. source와 `cache_target_keys` refresh scope의 `target_key`는 동일한
+512자 상한을 사용하고, 물리 feature-update scope validator도 trim/NFC/길이를 재검증한다.
+
 ### 1. 서로 다른 네 단조값
 
 | 값 | 소유자와 의미 |
@@ -30,8 +36,9 @@ best-effort callback은 누락·중복·복구 epoch 전환을 재구성하지 �
 | `target_sequence BIGINT` | 같은 `(restore_epoch, source_generation, target)`에 속한 Map 결과 event의 순서다. |
 
 event 의미 순서는 target partition의
-`(restore_epoch, source_generation, target_sequence)`다. 전역 `relay_order`와 opaque cursor는
-delivery prefix와 paging에만 쓰며 상태 신선도 판단에 사용하지 않는다.
+`(restore_epoch, source_generation, target_sequence)`다. global sequence에서 unique하게 배정한
+`relay_order`와 opaque cursor는 external system별 delivery prefix와 paging에만 쓰며 상태 신선도나
+서로 다른 stream의 commit 순서 판단에 사용하지 않는다.
 
 ### 2. source head와 불변 이력
 
@@ -149,7 +156,8 @@ claim 하나만 허용하고, 현재 stream `restore_epoch`의 더 낮은 nonter
 
 PinVi는 event inbox dedupe와 target tuple CAS, DB cache generation, consumer checkpoint를 한
 transaction에 commit한 뒤에만 `POST /v1/service/cache-target-event-acks`를 호출한다. ACK의
-`through_cursor`는 claim 안의 contiguous global `relay_order` prefix다. target tuple은 semantic
+`through_cursor`는 claim의 `external_system` 안에서 contiguous한 `relay_order` prefix다. 번호는 global
+sequence에서 배정되어 전역 unique지만 서로 다른 stream 사이의 commit 순서를 뜻하지 않는다. target tuple은 semantic
 precedence에만 사용한다. consumer DB commit 뒤 ACK 전에 죽으면 같은 `event_id`가 재전달되며 side
 effect는 0회 추가다.
 
@@ -177,15 +185,64 @@ UUID를 성공 응답으로 내보내지 않는다. 응답은 `created_at`과 `e
 숨기지 않는다. 같은 external system의 동시 생성은 transaction advisory try-lock으로 single-flight하며,
 경합 요청은 대기열을 만들지 않고 `503 snapshot_busy`와 `Retry-After`를 받는다.
 
-모든 source head 변경은 같은 transaction의 `cache_target.state_applied` outbox relay order를 전진한다.
-따라서 현재 `(restore_epoch, high_watermark_relay_order)`와 일치하고 75분보다 긴 수명이 남은 일반
-snapshot은 full head 재주사 없이 재사용할 수 있다. 새 snapshot의 TTL은 2시간이며, 15분의 서버 처리
-margin을 제외해 client가 첫 응답을 받은 뒤에도 최소 1시간의 traversal window를 보장한다.
-reconciliation seal은 이 재사용 경로를 통하지 않고
-항상 request 전용 snapshot을 만든다. 만료된 일반 snapshot은 reconciliation request가 한 건도 참조하지
-않을 때만 item 1,000행/header 100행 이하의 `SKIP LOCKED` 배치로 정리한다. page reader는 header share
-lock을 transaction 종료까지 유지하므로 GC가 header와 item 사이를 잘라 빈 반복 page를 만들 수 없다.
-reconciliation이 참조하는 snapshot은 terminal 상태라도 checksum 감사 영수증이므로 GC하지 않는다.
+모든 source head material 변경은 같은 transaction의 `cache_target.state_applied` outbox relay order를
+전진한다. link/refresh 및 stream-scope `cache_target.reconciled` event는 snapshot leaf 밖의 상태만
+바꾸므로 material version을 전진시키지 않는다.
+재사용 identity는 `(restore_epoch, material_high_watermark_relay_order)`이며 partial index
+`(external_system, relay_order DESC) WHERE event_type='cache_target.state_applied'`로 조회한다. snapshot의
+내부 header에 capture 당시 material watermark를 global cursor와 별도 저장하고, 현재 material watermark와
+exact equality이며 75분보다 긴 수명이 남을 때만 full head 재주사 없이 재사용한다.
+
+snapshot transaction은 advisory single-flight 획득 뒤 **별도 SQL statement**로 stream row `FOR SHARE`
+barrier를 먼저 완료한다. 기존 outbox writer가 끝날 때까지 기다리고 transaction 끝까지 새 writer를
+막은 뒤, 후속 statement에서 identity/reuse/head를 읽는다. 단일 READ COMMITTED statement에서 lock wait와
+subquery를 섞어 pre-wait MVCC head에 post-wait cursor를 결합하지 않는다. `state_applied`, link/refresh,
+`cache_target.reconciled`를 포함한 모든 outbox writer transaction은 head/target/link를 읽거나 잠그기
+전에 같은 stream row를 `FOR UPDATE`로 잠그며, 잠금 순서는 항상 stream → head/target/link이다.
+여러 system을 다루면 `external_system` 정렬 순서로 stream을 먼저 모두 잠근다. 따라서 각
+`external_system`의 `high_watermark_cursor`는 같은 stream에서 늦게 commit되는 더 낮은 relay order를
+추월하지 않는 commit-safe contiguous prefix다. DB `BEFORE INSERT` trigger가 stream lock을 재확인한
+**뒤** 명시적 global sequence에서
+`relay_order`를 배정하며, column default/Identity가 trigger보다 먼저 번호를 소비하게 두지 않는다.
+application의 사전 stream lock은 trigger가 head/target lock 뒤 stream을 기다리는 역순 교착을 막고,
+trigger는 raw SQL이나 미래 writer도 allocation-before-lock 계약을 우회하지 못하게 한다.
+barrier 전에 transaction-local `lock_timeout=5s`, `statement_timeout=30s`를 설정한다. hung writer 때문에
+기한을 넘기면 advisory single-flight를 해제하고 `503 snapshot_barrier_timeout + Retry-After: 1`로
+fail-close한다.
+barrier 이후 capture/item persist statement가 30초를 넘기면 별도
+`503 snapshot_build_timeout + Retry-After: 1`로 rollback해 lock wait와 build 병목을 구분한다.
+
+`high_watermark_cursor`는 snapshot 생성 시 고정한 external-system-scoped relay prefix다. 재사용 뒤에는 현재 outbox의
+exact max가 아니라 안전한 replay lower-bound일 수 있고 절대 상향 수정하지 않는다. consumer는 이
+cursor 뒤 event를 모두 다시 읽고 immutable inbox receipt로 중복 제거한다. fresh/reuse 모두 응답 DTO
+구성 전 DB clock으로 75분의 server handoff floor를 검사하며 부족하면 `503 snapshot_ttl_too_short`와
+`Retry-After: 1`로 실패한다. PinVi는 실제 수신 시 다시 60분 이상을 요구한다. 이 15분 margin은
+commit·serialization·network 지연을 흡수하며, 새 snapshot TTL은 2시간이다.
+
+single-flight 안에서 reuse가 실패하면 같은 system의 미만료·미참조 generic snapshot 수를 센다. 두 개가
+이미 있으면 세 번째 full copy를 만들지 않고 가장 오래된 expiry까지의 DB-clock 초를
+`429 snapshot_capacity_exceeded`와 `Retry-After`로 반환한다. 유효 cursor를 조기 삭제하지 않으면서
+generic live storage를 최대 `2 × stream cardinality`로 제한한다. reconciliation이 참조하는 snapshot은
+이 admission count에서 제외한다.
+
+한 번의 materialization은 source head를 최대 100,001행까지만 읽고 tuple/Merkle 생성 전에 100,000 item
+ceiling을 검사한다. 초과하면 부분 snapshot을 저장하지 않고 `413 snapshot_item_limit_exceeded`로
+fail-close한다. 이 ceiling은 Python O(N) peak memory를 제한하는 pre-streaming 안전 경계이며, DB-side
+bounded streaming/material 공유로 확장하는 후속은 #922가 소유한다.
+
+reconciliation seal은 재사용하지 않고 항상 request 전용 snapshot을 만든다. 만료된 일반 snapshot은
+reconciliation request가 참조하지 않을 때만 item 1,000행/header 100행 이하의 `SKIP LOCKED` 배치로
+정리한다. page reader의 header share lock은 GC가 빈 반복 page를 만드는 race를 막는다. terminal request가
+참조하는 snapshot도 checksum 감사 영수증이므로 보존한다.
+
+foreground GC는 요청 transaction의 부수 정리일 뿐 retention 정본이 아니다. hourly
+`cache_target_snapshot_gc`는 별도 physical connection의 session advisory try-lock으로 중복 실행을 즉시
+skip하고 external system을 keyset round-robin하며 batch마다 새 transaction을 commit한다. 기본 예산은
+1,000 item × 2,000 batch, 최대 3,300초, statement timeout 30초다. 한 full round 동안 진척이 없으면
+busy-loop 대신 종료한다. 2,000,000 item은 실행당 설정 상한이지 실측 처리량 보장이 아니다. exact
+remaining count와 total/unexpired-generic/referenced header·item count는 종료 시 한 번만 관측하고 mutex
+skip에서는 unknown이다. backlog/observation retry는 경보 대상이며 기본 `STOPPED` schedule은 consumer
+production enable 전에 켜고 n150 처리량을 확인한다.
 
 초기 cutover는 service recovery principal의 `begin → writer backfill → seal` 두 단계로 고정한다.
 begin은 stream을 fenced 상태로 만들고 active claim을 끊지만 snapshot을 만들지 않는 `preparing`
@@ -277,6 +334,10 @@ Map foundation과 PinVi paired consumer가 모두 merge되기 전에는 relay co
 PinVi는 기본 off이며 credential, principal scope, pinned OpenAPI SHA, active epoch, full snapshot,
 Merkle/count/high-watermark 일치 중 하나라도 없으면 fail-closed한다. consumer 배포 → contract pin →
 restore clone/snapshot backfill → checksum 일치 → consumer enable → duplicate/gap/epoch live → soak 순서다.
+production enable 전 PinVi는 snapshot 요청 동시성을 system별 1로 제한하고 `429/503`의
+`Retry-After`를 지키며, `413 snapshot_item_limit_exceeded`를 자동 재시도하지 않음을 live로 증명한다.
+credential별 gateway limit 또는 동등한 외부 rate-limit과 실제 호출 cadence도 함께 기록한다. 이 gate가
+없으면 100,001행 sentinel scan을 반복할 수 있으므로 consumer를 enable하지 않는다.
 
 ## 근거
 
@@ -290,7 +351,7 @@ restore epoch를 소유하면 restored producer payload가 epoch를 되감을 �
 - **긍정**: target/link/update와 event 사이 dual-write가 사라지고 restore 뒤 stale resurrection을 막는다.
 - **긍정**: consumer 장애와 poison event가 critical write를 막지 않으면서 운영자가 재현·재생할 수 있다.
 - **부정**: source/head/event/outbox/delivery/snapshot 상태와 두 저장소 golden vector 운영이 추가된다.
-- **부정**: strict global prefix는 poison event 해결 전 같은 stream 후속 전파를 의도적으로 멈춘다.
+- **부정**: strict stream prefix는 poison event 해결 전 같은 stream 후속 전파를 의도적으로 멈춘다.
 - **전환**: Map PR은 producer foundation일 뿐 `T-VN-41C` 완료가 아니다. PinVi paired PR, contract pin,
   n150 isolated live 증명 전까지 `T-VN-41A/B/C`는 open으로 유지한다.
 

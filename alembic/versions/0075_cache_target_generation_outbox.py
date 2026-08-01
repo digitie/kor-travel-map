@@ -20,6 +20,129 @@ depends_on: str | Sequence[str] | None = None
 
 
 _SHA256_CHECK = "VALUE ~ '^[0-9a-f]{64}$'"
+_CANONICAL_WHITESPACE_SQL = (
+    "(' ' || chr(9) || chr(10) || chr(11) || chr(12) || chr(13) "
+    "|| chr(28) || chr(29) || chr(30) || chr(31) || chr(133) "
+    "|| chr(160) || chr(5760) || chr(8192) || chr(8193) || chr(8194) "
+    "|| chr(8195) || chr(8196) || chr(8197) || chr(8198) || chr(8199) "
+    "|| chr(8200) || chr(8201) || chr(8202) || chr(8232) || chr(8233) "
+    "|| chr(8239) || chr(8287) || chr(12288))"
+)
+_FEATURE_SCOPE_CONSTRAINT = "ck_feature_update_requests_scope_shape"
+_PRE_CACHE_TARGET_SCOPE_VALIDATOR = "is_valid_feature_update_scope_0074"
+
+
+def _upgrade_feature_scope_validator() -> None:
+    """cache target scope identity를 root/source 계약과 동일하게 만든다."""
+    op.drop_constraint(
+        op.f(_FEATURE_SCOPE_CONSTRAINT),
+        "feature_update_requests",
+        schema="ops",
+        type_="check",
+    )
+    op.execute(
+        "ALTER FUNCTION ops.is_valid_feature_update_scope(text, jsonb) "
+        f"RENAME TO {_PRE_CACHE_TARGET_SCOPE_VALIDATOR}"
+    )
+    op.execute(
+        """
+        CREATE FUNCTION ops.is_valid_feature_update_scope(
+          p_scope_type text,
+          p_scope jsonb
+        ) RETURNS boolean
+        LANGUAGE plpgsql
+        IMMUTABLE
+        STRICT
+        PARALLEL SAFE
+        AS $$
+        DECLARE
+          item jsonb;
+          text_value text;
+          seen_values text[] := ARRAY[]::text[];
+          canonical_whitespace text := ' '
+            || chr(9) || chr(10) || chr(11) || chr(12) || chr(13)
+            || chr(28) || chr(29) || chr(30) || chr(31) || chr(133)
+            || chr(160) || chr(5760) || chr(8192) || chr(8193) || chr(8194)
+            || chr(8195) || chr(8196) || chr(8197) || chr(8198) || chr(8199)
+            || chr(8200) || chr(8201) || chr(8202) || chr(8232) || chr(8233)
+            || chr(8239) || chr(8287) || chr(12288);
+        BEGIN
+          IF p_scope_type <> 'cache_target_keys' THEN
+            RETURN ops.is_valid_feature_update_scope_0074(p_scope_type, p_scope);
+          END IF;
+          IF jsonb_typeof(p_scope) IS DISTINCT FROM 'object'
+             OR jsonb_typeof(p_scope->'type') IS DISTINCT FROM 'string'
+             OR p_scope->>'type' IS DISTINCT FROM p_scope_type
+             OR p_scope - ARRAY[
+                  'type', 'external_system', 'target_keys', 'radius_km', 'scope_mode'
+                ]::text[] <> '{}'::jsonb
+             OR jsonb_typeof(p_scope->'external_system') IS DISTINCT FROM 'string'
+             OR jsonb_typeof(p_scope->'target_keys') IS DISTINCT FROM 'array'
+             OR jsonb_typeof(p_scope->'scope_mode') IS DISTINCT FROM 'string'
+             OR jsonb_array_length(p_scope->'target_keys') > 500 THEN
+            RETURN false;
+          END IF;
+          text_value := p_scope->>'external_system';
+          IF text_value = ''
+             OR char_length(text_value) > 112
+             OR text_value <> btrim(text_value, canonical_whitespace)
+             OR text_value <> normalize(text_value, NFC)
+             OR p_scope->>'scope_mode' NOT IN ('center_radius', 'sigungu_by_radius') THEN
+            RETURN false;
+          END IF;
+          IF p_scope ? 'radius_km' THEN
+            IF jsonb_typeof(p_scope->'radius_km') IS DISTINCT FROM 'number'
+               OR (p_scope->>'radius_km')::numeric <= 0
+               OR (p_scope->>'radius_km')::numeric > 500 THEN
+              RETURN false;
+            END IF;
+          END IF;
+          FOR item IN SELECT value FROM jsonb_array_elements(p_scope->'target_keys')
+          LOOP
+            IF jsonb_typeof(item) IS DISTINCT FROM 'string' THEN
+              RETURN false;
+            END IF;
+            text_value := item #>> '{}';
+            IF text_value = ''
+               OR char_length(text_value) > 512
+               OR text_value <> btrim(text_value, canonical_whitespace)
+               OR text_value <> normalize(text_value, NFC)
+               OR text_value = ANY(seen_values) THEN
+              RETURN false;
+            END IF;
+            seen_values := array_append(seen_values, text_value);
+          END LOOP;
+          RETURN true;
+        END;
+        $$
+        """
+    )
+    op.create_check_constraint(
+        op.f(_FEATURE_SCOPE_CONSTRAINT),
+        "feature_update_requests",
+        "ops.is_valid_feature_update_scope(scope_type, scope)",
+        schema="ops",
+    )
+
+
+def _downgrade_feature_scope_validator() -> None:
+    op.drop_constraint(
+        op.f(_FEATURE_SCOPE_CONSTRAINT),
+        "feature_update_requests",
+        schema="ops",
+        type_="check",
+    )
+    op.execute("DROP FUNCTION ops.is_valid_feature_update_scope(text, jsonb)")
+    op.execute(
+        f"ALTER FUNCTION ops.{_PRE_CACHE_TARGET_SCOPE_VALIDATOR}(text, jsonb) "
+        "RENAME TO is_valid_feature_update_scope"
+    )
+    op.create_check_constraint(
+        op.f(_FEATURE_SCOPE_CONSTRAINT),
+        "feature_update_requests",
+        "ops.is_valid_feature_update_scope(scope_type, scope)",
+        schema="ops",
+    )
 
 
 def _sha256_check(column: str, name: str) -> sa.CheckConstraint:
@@ -30,6 +153,29 @@ def _sha256_check(column: str, name: str) -> sa.CheckConstraint:
 
 
 def upgrade() -> None:
+    _upgrade_feature_scope_validator()
+    op.drop_constraint(
+        op.f("ck_poi_cache_targets_external_system_identity"),
+        "poi_cache_targets",
+        schema="ops",
+        type_="check",
+    )
+    op.create_check_constraint(
+        op.f("ck_poi_cache_targets_external_system_identity"),
+        "poi_cache_targets",
+        "external_system <> '' AND char_length(external_system) <= 112 "
+        f"AND external_system = btrim(external_system, {_CANONICAL_WHITESPACE_SQL}) "
+        "AND external_system = normalize(external_system, NFC)",
+        schema="ops",
+    )
+    op.create_check_constraint(
+        op.f("ck_poi_cache_targets_target_key_identity"),
+        "poi_cache_targets",
+        "target_key <> '' AND char_length(target_key) <= 512 "
+        f"AND target_key = btrim(target_key, {_CANONICAL_WHITESPACE_SQL}) "
+        "AND target_key = normalize(target_key, NFC)",
+        schema="ops",
+    )
     op.create_index(
         "uq_poi_cache_targets_source_identity",
         "poi_cache_targets",
@@ -75,7 +221,9 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
         ),
         sa.CheckConstraint(
-            "btrim(external_system) <> '' AND char_length(external_system) <= 112",
+            "external_system <> '' AND char_length(external_system) <= 112 "
+            f"AND external_system = btrim(external_system, {_CANONICAL_WHITESPACE_SQL}) "
+            "AND external_system = normalize(external_system, NFC)",
             name="ck_cache_target_streams_external_system",
         ),
         sa.CheckConstraint(
@@ -223,7 +371,9 @@ def upgrade() -> None:
             "ck_cache_target_source_heads_fingerprint",
         ),
         sa.CheckConstraint(
-            "btrim(target_key) <> '' AND char_length(target_key) <= 512",
+            "target_key <> '' AND char_length(target_key) <= 512 "
+            f"AND target_key = btrim(target_key, {_CANONICAL_WHITESPACE_SQL}) "
+            "AND target_key = normalize(target_key, NFC)",
             name="ck_cache_target_source_heads_key",
         ),
         sa.CheckConstraint(
@@ -572,13 +722,13 @@ def upgrade() -> None:
         ondelete="RESTRICT",
     )
 
+    op.execute("CREATE SEQUENCE ops.poi_cache_target_outbox_relay_order_seq AS bigint")
     op.create_table(
         "poi_cache_target_outbox_events",
         sa.Column("event_id", postgresql.UUID(as_uuid=False), nullable=False),
         sa.Column(
             "relay_order",
             sa.BigInteger(),
-            sa.Identity(always=True),
             nullable=False,
         ),
         sa.Column("event_type", sa.Text(), nullable=False),
@@ -710,6 +860,35 @@ def upgrade() -> None:
         "poi_cache_target_outbox_events",
         ["external_system", "relay_order"],
         schema="ops",
+    )
+    op.execute(
+        """
+        CREATE FUNCTION ops.assign_cache_target_outbox_relay_order()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        SET search_path = pg_catalog, ops
+        AS $function$
+        BEGIN
+          PERFORM 1
+          FROM ops.poi_cache_target_streams AS stream
+          WHERE stream.external_system = NEW.external_system
+          FOR UPDATE OF stream;
+          IF NOT FOUND THEN
+            RAISE EXCEPTION 'cache target stream does not exist'
+              USING ERRCODE = '23503';
+          END IF;
+          NEW.relay_order := nextval(
+            'ops.poi_cache_target_outbox_relay_order_seq'::regclass
+          );
+          RETURN NEW;
+        END;
+        $function$
+        """
+    )
+    op.execute(
+        "CREATE TRIGGER trg_cache_target_outbox_assign_relay_order "
+        "BEFORE INSERT ON ops.poi_cache_target_outbox_events "
+        "FOR EACH ROW EXECUTE FUNCTION ops.assign_cache_target_outbox_relay_order()"
     )
 
     op.create_table(
@@ -957,6 +1136,11 @@ def upgrade() -> None:
         sa.Column("external_system", sa.Text(), nullable=False),
         sa.Column("restore_epoch", sa.BigInteger(), nullable=False),
         sa.Column("high_watermark_relay_order", sa.BigInteger(), nullable=False),
+        sa.Column(
+            "material_high_watermark_relay_order",
+            sa.BigInteger(),
+            nullable=False,
+        ),
         sa.Column("item_count", sa.BigInteger(), nullable=False),
         sa.Column("merkle_root", sa.Text(), nullable=False),
         sa.Column(
@@ -971,7 +1155,10 @@ def upgrade() -> None:
             "ck_cache_target_snapshots_merkle_root",
         ),
         sa.CheckConstraint(
-            "restore_epoch > 0 AND high_watermark_relay_order >= 0 AND item_count >= 0",
+            "restore_epoch > 0 AND high_watermark_relay_order >= 0 "
+            "AND material_high_watermark_relay_order >= 0 "
+            "AND high_watermark_relay_order >= material_high_watermark_relay_order "
+            "AND item_count >= 0",
             name="ck_cache_target_snapshots_counts",
         ),
         sa.CheckConstraint(
@@ -1121,6 +1308,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    _downgrade_feature_scope_validator()
+    op.execute(
+        "DROP TRIGGER trg_cache_target_outbox_assign_relay_order "
+        "ON ops.poi_cache_target_outbox_events"
+    )
     for table_name in (
         "poi_cache_target_snapshot_items",
         "poi_cache_target_snapshots",
@@ -1189,6 +1381,8 @@ def downgrade() -> None:
         schema="ops",
     )
     op.drop_table("poi_cache_target_outbox_events", schema="ops")
+    op.execute("DROP FUNCTION ops.assign_cache_target_outbox_relay_order()")
+    op.execute("DROP SEQUENCE ops.poi_cache_target_outbox_relay_order_seq")
     op.drop_constraint(
         "fk_cache_target_restore_fences_superseded_reconciliation",
         "poi_cache_target_restore_fences",
@@ -1235,6 +1429,25 @@ def downgrade() -> None:
     op.drop_index(
         "uq_poi_cache_targets_source_identity",
         table_name="poi_cache_targets",
+        schema="ops",
+    )
+    op.drop_constraint(
+        op.f("ck_poi_cache_targets_target_key_identity"),
+        "poi_cache_targets",
+        schema="ops",
+        type_="check",
+    )
+    op.drop_constraint(
+        op.f("ck_poi_cache_targets_external_system_identity"),
+        "poi_cache_targets",
+        schema="ops",
+        type_="check",
+    )
+    op.create_check_constraint(
+        op.f("ck_poi_cache_targets_external_system_identity"),
+        "poi_cache_targets",
+        "external_system <> '' AND char_length(external_system) <= 112 "
+        f"AND external_system = btrim(external_system, {_CANONICAL_WHITESPACE_SQL})",
         schema="ops",
     )
     op.execute("DROP FUNCTION ops.reject_cache_target_history_mutation()")

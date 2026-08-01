@@ -17,18 +17,56 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-02 (codex) — T-VN-41 NFC-equivalent snapshot poison 차단
+
+- 적대 리뷰에서 `é`와 `e\u0301` 같은 raw text head가 별개로 저장된 뒤 Merkle NFC identity에서 충돌해
+  generic/reconciliation snapshot을 지속적으로 실패시키는 P1을 확인했다.
+- source/refresh/ops scope API는 trim되지 않았거나 non-NFC인 identity를 `422 VALIDATION_ERROR`로 거부한다.
+  stream/POI/feature-update repository도 같은 규칙을 적용하고 물리 DB는 root target, stream, source head,
+  feature-update scope CHECK로 우회 insert를 막는다. scope `target_key` 상한은 root와 같은 512자로 합쳤다.
+- API 호출 전 거부, raw DB constraint, 512자 refresh, canonical 1행 snapshot 성공을 실제 PostgreSQL
+  회귀로 고정했다.
+
 ## 2026-08-01 (codex) — T-VN-41 fixed snapshot 내구성·수명 보강
 
 - n150 isolated live E2E에서 일반 snapshot 첫 page가 200/UUID를 반환하지만 route session이 commit하지
   않아 header/items가 rollback되고 다음 cursor가 사라지는 P1을 재현했다.
 - service route가 snapshot 생성·상태 검사·응답 DTO 구성을 한 transaction으로 묶고, 독립 request
   session에서 동일 UUID/root의 다음 page가 보이는 실제 PostGIS HTTP 회귀를 추가했다.
-- generic 생성은 try-lock single-flight와 epoch/high-watermark cheap identity로 유효 snapshot을 재사용해
-  retry storm이 full head scan/full copy를 반복하지 않는다. 경합은 `503 snapshot_busy`와
-  `Retry-After`로 fail-fast한다.
+- generic 생성은 try-lock single-flight와 epoch/source-material watermark로 snapshot을 재사용한다.
+  `cache_target.state_applied`만 재사용을 무효화하며 link/refresh/stream-reconciled event는 전체 복사를
+  만들지 않는다. 재사용 cursor는 safe replay lower-bound라 consumer가 이후 event를 inbox receipt로
+  중복 제거한다.
+- 단일 READ COMMITTED statement가 material writer lock을 기다리며 pre-wait head에 더 높은 global cursor를
+  결합할 수 있는 P0를 stream `FOR SHARE` barrier 별도 statement로 막았다. snapshot header는 global
+  cursor와 material watermark를 분리 저장하고 현재 material watermark와 exact equality로만 재사용한다.
+  이어서 서로 다른 target writer의 미커밋 낮은 relay를 더 높은 global cursor가 추월할 수 있는 P0를
+  발견했다. 모든 outbox writer transaction이 head/target/link 접근 전에 stream `FOR UPDATE`를 획득하고,
+  여러 system이면 정렬 순서로 모두 선취한다. 이 stream → head/target/link 순서가 각 system cursor를
+  해당 stream의 commit-safe contiguous prefix로 만든다. global sequence는 번호 uniqueness만 제공하며
+  서로 다른 stream 사이의 commit 순서를 의미하지 않는다.
+- DB `BEFORE INSERT` trigger가 stream lock 뒤 명시적 global sequence에서 relay를 배정한다.
+  Identity/default의 trigger 전 번호 할당 race를 제거하고 raw/future writer에도 같은 불변식을 강제한다.
+- barrier 전에 5초 lock timeout과 30초 statement timeout을 설정해 hung writer가 advisory single-flight를
+  무기한 점유하지 못하게 한다. timeout은 `503 snapshot_barrier_timeout + Retry-After: 1`로 변환한다.
+- barrier 이후 capture/persist 30초 초과는 `503 snapshot_build_timeout + Retry-After: 1`로 구분한다.
+- fresh/reuse handoff 전 75분, PinVi 수신 시 60분 traversal window를 이중 검증한다. 경합과 수명 부족은
+  각각 `503 snapshot_busy`, `503 snapshot_ttl_too_short`와 `Retry-After: 1`로 fail-fast한다.
+- reuse miss 시 system별 미만료·미참조 generic snapshot을 최대 2개로 제한한다. 세 번째 copy는 oldest
+  expiry 기반 `429 snapshot_capacity_exceeded + Retry-After`로 거부해 유효 cursor 보존과 live storage
+  상한 `2 × stream cardinality`를 함께 만족한다.
+- capture는 최대 100,001행만 읽고 100,000 item을 넘으면 Python tuple/Merkle 생성 전에
+  `413 snapshot_item_limit_exceeded`로 fail-close한다. bounded streaming/material 공유는 #922가 소유한다.
 - 만료·미참조 snapshot만 item/header 제한 배치로 정리한다. reader header share lock과 GC의
   parent+item `SKIP LOCKED`를 결합해 header 읽기와 item 읽기 사이 CASCADE/직접 DELETE race를 막는다.
   reconciliation이 참조하는 snapshot은 terminal 상태도 immutable 감사 영수증으로 보존한다.
+- hourly background GC는 전역 try-lock, system round-robin, batch별 commit과 time/statement/no-progress
+  예산을 사용한다. exact remaining/total/unexpired/referenced count는 종료 시 한 번만 관측하고 overlap
+  skip에서는 unknown이다. 기본 2백만 item은 실행당 상한이므로 production enable 전에 n150 soak와
+  schedule enable이 필수다.
+- physical connection lock을 정식 지원하도록 advisory helper 타입을 `AsyncSession | AsyncConnection`으로
+  넓혔다. codegraph는 `try_advisory_lock` caller 18개, `advisory_lock` caller 20개, 영향 59 symbols를
+  확인했고 기존 caller는 모두 `AsyncSession`, 신규 GC caller만 `AsyncConnection`이다.
 
 ## 2026-08-01 — H35 게이트 ① 실증, 그리고 내가 정한 게이트 값이 틀렸음을 발견
 

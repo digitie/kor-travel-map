@@ -10,8 +10,12 @@ from math import isfinite
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
+from kortravelmap.core.cache_target_stream import (
+    validate_cache_target_external_system,
+    validate_cache_target_key,
+)
 from pydantic import (
+    AfterValidator,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -69,17 +73,24 @@ NonEmptyString = Annotated[
 ]
 ExternalSystemName = Annotated[
     str,
-    StringConstraints(
-        strip_whitespace=True,
+    Field(
         min_length=1,
-        max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH,
+        max_length=112,
+        description="Trimmed Unicode NFC canonical external system identity.",
     ),
+    AfterValidator(validate_cache_target_external_system),
 ]
 FeatureIdString = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)
 ]
 TargetKeyString = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)
+    str,
+    Field(
+        min_length=1,
+        max_length=512,
+        description="Trimmed Unicode NFC canonical cache target identity.",
+    ),
+    AfterValidator(validate_cache_target_key),
 ]
 AuditReason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 MAX_PROVIDER_FILTERS = 32

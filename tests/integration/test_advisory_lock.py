@@ -24,6 +24,7 @@ pytestmark = pytest.mark.integration
 
 _KEY = "test:advisory:mois-bulk"
 _OTHER = "test:advisory:other"
+_SNAPSHOT_GC_KEY = "cache-target-snapshot-gc"
 
 
 async def test_try_lock_mutual_exclusion_and_release(pg_engine: AsyncEngine) -> None:
@@ -92,3 +93,21 @@ async def test_client_provider_run_lock_excludes_other_process_path(
             assert acquired is False
         async with try_advisory_lock(competitor, key) as acquired:
             assert acquired is True
+
+
+async def test_snapshot_gc_lock_survives_acquisition_commit_and_skips_overlap(
+    pg_engine: AsyncEngine,
+) -> None:
+    """session lock은 획득 transaction commit 뒤에도 같은 backend에서 유지된다."""
+    client = AsyncKorTravelMapClient(pg_engine)
+    async with pg_engine.connect() as owner, try_advisory_lock(
+        owner,
+        _SNAPSHOT_GC_KEY,
+    ) as acquired:
+        assert acquired
+        await owner.commit()
+        result = await client.drain_expired_cache_target_snapshots()
+        assert result.acquired is False
+        assert result.skipped is True
+        assert result.remaining_items is None
+        assert result.remaining_headers is None

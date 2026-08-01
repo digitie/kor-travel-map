@@ -217,6 +217,9 @@
             "type": "string"
           },
           "external_system": {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
+            "maxLength": 112,
+            "minLength": 1,
             "title": "External System",
             "type": "string"
           },
@@ -856,6 +859,9 @@
             "type": "string"
           },
           "external_system": {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
+            "maxLength": 112,
+            "minLength": 1,
             "title": "External System",
             "type": "string"
           },
@@ -968,6 +974,7 @@
             "type": "integer"
           },
           "external_system": {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
             "maxLength": 112,
             "minLength": 1,
             "title": "External System",
@@ -1012,6 +1019,7 @@
             "type": "integer"
           },
           "external_system": {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
             "maxLength": 112,
             "minLength": 1,
             "title": "External System",
@@ -1096,6 +1104,7 @@
             "type": "string"
           },
           "high_watermark_cursor": {
+            "description": "이 immutable snapshot material이 안전하게 포함한 global outbox replay lower-bound. snapshot 생성 뒤 생긴 비material event가 있으면 현재 global max보다 과거일 수 있으므로, consumer는 이 cursor 이후 event를 중복 허용 방식으로 모두 재처리해야 한다.",
             "title": "High Watermark Cursor",
             "type": "string"
           },
@@ -1174,6 +1183,7 @@
             "type": "integer"
           },
           "external_system": {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
             "maxLength": 112,
             "minLength": 1,
             "title": "External System",
@@ -1274,6 +1284,9 @@
         "description": "Service refresh request creation body.",
         "properties": {
           "external_system": {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
+            "maxLength": 112,
+            "minLength": 1,
             "title": "External System",
             "type": "string"
           },
@@ -1285,12 +1298,16 @@
           },
           "target_keys": {
             "items": {
+              "description": "Trimmed Unicode NFC canonical cache target identity.",
+              "maxLength": 512,
+              "minLength": 1,
               "type": "string"
             },
             "maxItems": 500,
             "minItems": 1,
             "title": "Target Keys",
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           }
         },
         "required": [
@@ -1687,12 +1704,13 @@
             "type": "string"
           },
           "expires_at": {
-            "description": "generic snapshot cursor의 만료 시각. generic first page는 최소 1시간의 잔여 traversal window를 보장하며, reconciliation-bound snapshot은 request가 running인 동안 이 시각과 무관하게 page할 수 있다.",
+            "description": "generic snapshot cursor의 만료 시각. generic first page는 서버 handoff 직전 최소 75분을 검사하고 15분 response margin을 둬 client 수신 후 최소 60분의 traversal window를 보장한다. reconciliation-bound snapshot은 request가 running인 동안 이 시각과 무관하게 page할 수 있다.",
             "format": "date-time",
             "title": "Expires At",
             "type": "string"
           },
           "high_watermark_cursor": {
+            "description": "이 immutable snapshot material이 안전하게 포함한 global outbox replay lower-bound. snapshot 생성 뒤 생긴 비material event가 있으면 현재 global max보다 과거일 수 있으므로, consumer는 이 cursor 이후 event를 중복 허용 방식으로 모두 재처리해야 한다.",
             "title": "High Watermark Cursor",
             "type": "string"
           },
@@ -4299,6 +4317,16 @@
             },
             "description": "request ETag or checksum precondition failed"
           },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "snapshot item 수가 100,000개 materialization 상한을 초과함."
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -4318,6 +4346,25 @@
               }
             },
             "description": "missing If-Match"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "snapshot writer barrier 또는 materialization 제한 시간 초과.",
+            "headers": {
+              "Retry-After": {
+                "description": "snapshot 작업 재시도 전 최소 대기 시간(초).",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -4450,10 +4497,12 @@
         "operationId": "get_service_cache_target_snapshot_v1_service_cache_target_snapshots__external_system__get",
         "parameters": [
           {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
             "in": "path",
             "name": "external_system",
             "required": true,
             "schema": {
+              "description": "Trimmed Unicode NFC canonical external system identity.",
               "maxLength": 112,
               "minLength": 1,
               "title": "External System",
@@ -4518,6 +4567,16 @@
             },
             "description": "Successful Response"
           },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "snapshot item 수가 100,000개 materialization 상한을 초과함."
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -4527,6 +4586,45 @@
               }
             },
             "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "미만료·미참조 generic snapshot copy 상한 도달. 가장 오래된 snapshot 만료 뒤 재시도한다.",
+            "headers": {
+              "Retry-After": {
+                "description": "가장 오래된 snapshot 만료까지의 DB 기준 대기 시간(초).",
+                "schema": {
+                  "maximum": 7200,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "snapshot 생성 경합, handoff TTL 부족, writer barrier 또는 materialization 제한 시간 초과.",
+            "headers": {
+              "Retry-After": {
+                "description": "snapshot 작업 재시도 전 최소 대기 시간(초).",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -4555,10 +4653,12 @@
         "operationId": "get_service_cache_target_stream_v1_service_cache_target_streams__external_system__get",
         "parameters": [
           {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
             "in": "path",
             "name": "external_system",
             "required": true,
             "schema": {
+              "description": "Trimmed Unicode NFC canonical external system identity.",
               "maxLength": 112,
               "minLength": 1,
               "title": "External System",
@@ -4650,10 +4750,12 @@
         "operationId": "create_service_restore_fence_v1_service_cache_target_streams__external_system__restore_fences_post",
         "parameters": [
           {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
             "in": "path",
             "name": "external_system",
             "required": true,
             "schema": {
+              "description": "Trimmed Unicode NFC canonical external system identity.",
               "maxLength": 112,
               "minLength": 1,
               "title": "External System",
@@ -4784,10 +4886,12 @@
         "operationId": "delete_service_cache_target_v1_service_cache_targets__external_system___target_key__delete",
         "parameters": [
           {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
             "in": "path",
             "name": "external_system",
             "required": true,
             "schema": {
+              "description": "Trimmed Unicode NFC canonical external system identity.",
               "maxLength": 112,
               "minLength": 1,
               "title": "External System",
@@ -4795,10 +4899,12 @@
             }
           },
           {
+            "description": "Trimmed Unicode NFC canonical cache target identity.",
             "in": "path",
             "name": "target_key",
             "required": true,
             "schema": {
+              "description": "Trimmed Unicode NFC canonical cache target identity.",
               "maxLength": 512,
               "minLength": 1,
               "title": "Target Key",
@@ -4927,10 +5033,12 @@
         "operationId": "get_service_cache_target_v1_service_cache_targets__external_system___target_key__get",
         "parameters": [
           {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
             "in": "path",
             "name": "external_system",
             "required": true,
             "schema": {
+              "description": "Trimmed Unicode NFC canonical external system identity.",
               "maxLength": 112,
               "minLength": 1,
               "title": "External System",
@@ -4938,10 +5046,12 @@
             }
           },
           {
+            "description": "Trimmed Unicode NFC canonical cache target identity.",
             "in": "path",
             "name": "target_key",
             "required": true,
             "schema": {
+              "description": "Trimmed Unicode NFC canonical cache target identity.",
               "maxLength": 512,
               "minLength": 1,
               "title": "Target Key",
@@ -5041,10 +5151,12 @@
         "operationId": "put_service_cache_target_v1_service_cache_targets__external_system___target_key__put",
         "parameters": [
           {
+            "description": "Trimmed Unicode NFC canonical external system identity.",
             "in": "path",
             "name": "external_system",
             "required": true,
             "schema": {
+              "description": "Trimmed Unicode NFC canonical external system identity.",
               "maxLength": 112,
               "minLength": 1,
               "title": "External System",
@@ -5052,10 +5164,12 @@
             }
           },
           {
+            "description": "Trimmed Unicode NFC canonical cache target identity.",
             "in": "path",
             "name": "target_key",
             "required": true,
             "schema": {
+              "description": "Trimmed Unicode NFC canonical cache target identity.",
               "maxLength": 512,
               "minLength": 1,
               "title": "Target Key",

@@ -21,7 +21,10 @@ from typing import TYPE_CHECKING, Any, Final, Literal, Protocol
 
 from sqlalchemy import text
 
-from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
+from kortravelmap.core.cache_target_stream import (
+    validate_cache_target_external_system,
+    validate_cache_target_key,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -249,19 +252,18 @@ def canonicalize_feature_update_scope(scope: Mapping[str, Any]) -> dict[str, Any
         scope_mode = scope.get("scope_mode", "center_radius")
         if scope_mode not in {"center_radius", "sigungu_by_radius"}:
             raise ValueError("scope_mode must be 'center_radius' or 'sigungu_by_radius'")
-        target_keys = [
-            _canonical_scope_text(value, field_name="target_keys item", max_length=256)
-            for value in raw_keys
-        ]
+        try:
+            target_keys = [validate_cache_target_key(value) for value in raw_keys]
+            external_system = validate_cache_target_external_system(
+                scope["external_system"]
+            )
+        except (AttributeError, TypeError) as exc:
+            raise ValueError("cache target identity must be a string") from exc
         if len(target_keys) != len(set(target_keys)):
             raise ValueError("target_keys items must be unique")
         cache_payload: dict[str, Any] = {
             "type": scope_type,
-            "external_system": _canonical_scope_text(
-                scope["external_system"],
-                field_name="external_system",
-                max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH,
-            ),
+            "external_system": external_system,
             "target_keys": target_keys,
             "scope_mode": scope_mode,
         }

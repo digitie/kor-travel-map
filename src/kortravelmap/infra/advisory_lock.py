@@ -38,11 +38,12 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from sqlalchemy.ext.asyncio import AsyncSession
+AdvisoryLockExecutor = AsyncSession | AsyncConnection
 
 __all__ = [
     "advisory_lock_key",
@@ -68,7 +69,7 @@ def advisory_lock_key(key: str) -> int:
 
 @asynccontextmanager
 async def advisory_lock(
-    session: AsyncSession, key: str | int
+    session: AdvisoryLockExecutor, key: str | int
 ) -> AsyncIterator[None]:
     """**Blocking** session-level advisory lock (``pg_advisory_lock``).
 
@@ -101,7 +102,7 @@ async def advisory_lock(
 
 @asynccontextmanager
 async def try_advisory_lock(
-    session: AsyncSession, key: str | int
+    session: AdvisoryLockExecutor, key: str | int
 ) -> AsyncIterator[bool]:
     """**Non-blocking** session-level advisory lock (``pg_try_advisory_lock``).
 

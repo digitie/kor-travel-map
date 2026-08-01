@@ -593,6 +593,11 @@ POST /v1/service/cache-target-reconciliations/{request_id}/completions
 external system을 exact 결박한다. scope는 consumer read/claim/ack/nack/snapshot,
 restore-fence, recovery replay, recovery cutover로 분리한다. PinVi에 admin proxy secret이나
 ops mutation 권한을 주지 않는다.
+`external_system`과 `target_key`는 trim된 Unicode NFC canonical identity만 허용한다. `target_key`는
+source path/body와 `cache_target_keys` scope에서 모두 512자 이하이다. repository와 DB CHECK도 같은
+규칙을 강제하며, 비정규 service/admin/ops 입력은 `422 VALIDATION_ERROR`다. NFC-equivalent 두 문자열이
+서로 다른 durable head/request가 된 뒤 Merkle identity나 refresh lookup에서 충돌할 수 없다. refresh
+`target_keys`는 1~500개의 중복 없는 canonical key 배열이며 중복도 service 호출 전에 `422`로 거부한다.
 
 restore-fence `201`의 `data`는 새 stream control과 함께 `fence_id`, 직전 epoch/control version,
 `invalidated_claim_count`, `superseded_delivery_count`, `superseded_reconciliation_count`, nullable
@@ -623,7 +628,8 @@ restore fence는 직전 stream ETag를 요구한다. 성공 transaction은 epoch
 barrier receipt와 구 epoch의 모든 `pending|retry|leased|dead` delivery를 terminal `superseded`로
 종결한다. `delivered`는 보존하며 exact fence replay는 delivery version을 다시 증가시키지 않는다.
 claim은 external system별 현재 restore epoch의 global stream 하나를 lease하고 ACK는
-claim의 global `relay_order` contiguous prefix만 전진한다. NACK permanent/max-attempt는 dead letter로
+claim의 external-system-scoped `relay_order` contiguous prefix만 전진한다. 번호는 global sequence에서
+전역 unique하게 배정되지만 서로 다른 stream 사이의 commit 순서를 뜻하지 않는다. NACK permanent/max-attempt는 dead letter로
 stream을 막으며 뒤 순서를 건너뛰지 않는다. 첫 미ACK이 아닌 event를 dead 전이하려면 앞 prefix를
 먼저 ACK해야 하고 그렇지 않으면 mutation 없이 `409`다. replay는 같은 immutable event identity와
 fingerprint만 재활성화한다.
@@ -635,11 +641,34 @@ dead만 새 epoch consumer를 차단한다.
 snapshot page는 `snapshot_id`, `restore_epoch`, `high_watermark_cursor`, `count`, `merkle_root`가
 끝까지 고정되며 `created_at`/`expires_at`으로 cursor의 실제 수명을 함께 공개한다. 첫 page의 immutable
 header/item INSERT와 성공 응답은 하나의 route transaction으로 commit한다. 동일 stream/version의
-유효한 일반 snapshot은 single-flight로 재사용하고, 생성 경합은 `503 snapshot_busy`와
-`Retry-After: 1`로 즉시 실패한다. 만료·미참조 일반 snapshot만 bounded GC하며 reconciliation request가
-참조하는 snapshot은 terminal 이후에도 보존한다. 상세 byte·reuse/GC 계약과 strict event union은
-ADR-081이 정본이다. 이 표면은 Map foundation PR만으로 enable하지 않으며 PinVi paired consumer와
-contract checksum을 통과한 뒤 켠다.
+유효한 일반 snapshot은 내부 header에 global cursor와 분리 저장한 source-material
+`cache_target.state_applied` watermark 및 restore epoch가 현재 값과 exact할 때 재사용한다. 별도 stream
+`FOR SHARE` barrier statement가 기존 outbox writer 완료 뒤 identity/head를 읽고 새 writer를 막는다.
+모든 outbox event writer transaction은 head/target/link 접근 전에 stream을 `FOR UPDATE`로 잠그고
+stream → head/target/link 순서를 지킨다. 여러 system이면 정렬 순서로 stream을 먼저 모두 잠가 각
+external system cursor를 해당 stream의 commit-safe contiguous prefix로 만든다.
+`relay_order`는 Identity/default가 아니라 DB trigger가 stream lock 획득 뒤 명시적 sequence에서 배정한다.
+application 사전 잠금은 교착 방지, trigger는 모든 insert의 allocation 순서 강제를 각각 소유한다.
+link/refresh/stream-reconciled event는 재사용을 깨지 않는다. 재사용 cursor는
+현재 outbox exact max가 아니라 immutable safe replay lower-bound일 수 있으므로 consumer가 이후 event를
+다시 읽어 중복을 제거한다. server handoff 직전 75분 floor를 통과하지 못한 수명 부족과 생성 경합은 각각
+`503 snapshot_ttl_too_short`, `503 snapshot_busy`와 `Retry-After: 1`로 실패한다. consumer는 실제 수신
+시 60분 floor를 다시 검사한다.
+barrier lock wait는 5초, snapshot statement는 30초로 제한하며 초과는
+각각 `503 snapshot_barrier_timeout`, `503 snapshot_build_timeout`과 `Retry-After: 1`로 반환한다.
+
+reuse miss 뒤 system별 미만료·미참조 generic snapshot이 이미 2개면 세 번째 복사를 만들지 않는다.
+가장 오래된 expiry까지 `429 snapshot_capacity_exceeded + Retry-After`로 대기시켜 유효 cursor를 보존하고
+live generic 저장량을 stream cardinality의 2배로 제한한다. request-bound snapshot은 이 count에서 제외한다.
+단일 snapshot은 100,000 item ceiling을 넘으면 부분 material을 만들지 않고
+`413 snapshot_item_limit_exceeded`로 실패한다. 후속 #922가 bounded streaming으로 이 경계를 확장한다.
+
+만료·미참조 일반 snapshot만 bounded GC하며 reconciliation request가 참조하면 terminal 이후에도
+보존한다. hourly background GC는 전역 try-lock, system round-robin, batch별 commit, 시간/statement/
+no-progress 예산을 사용하고 종료 시 expired backlog와 total/unexpired/referenced count를 한 번만 기록한다.
+실행당 기본 2백만 item은 설정 상한이며 n150 실측 처리량 보장이 아니다. 기본 STOPPED schedule은
+production enable 전에 켜고 backlog 경보를 확인한다. 상세 계약은 ADR-081이 정본이며 PinVi paired
+contract checksum 통과 뒤에만 enable한다.
 
 `cache_target.reconciled`의 payload는
 `request_id`, `snapshot_id`, `actual_merkle_root`, `expected_merkle_root`, `status`, `version`

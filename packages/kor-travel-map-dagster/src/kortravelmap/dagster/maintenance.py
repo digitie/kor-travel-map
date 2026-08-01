@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from time import monotonic
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.infra.consistency import DEDUP_PENDING_WARN_THRESHOLD
@@ -35,6 +36,8 @@ if TYPE_CHECKING:
 _PERMISSIVE_CONFIG = cast(Any, Permissive)
 
 __all__ = [
+    "CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS",
+    "CACHE_TARGET_SNAPSHOT_GC_SCHEDULES",
     "CONSISTENCY_DEDUP_REFRESH_JOB_TAGS",
     "CONSISTENCY_DEDUP_REFRESH_SCHEDULES",
     "DEFAULT_DEDUP_SCOPE_PAIRS",
@@ -45,6 +48,8 @@ __all__ = [
     "FINDING_PURGE_DEFAULT_RETENTION",
     "NOTICE_PURGE_DEFAULT_RETENTION",
     "consistency_dedup_refresh_job",
+    "cache_target_snapshot_gc_job",
+    "drain_expired_cache_target_snapshots_op",
     "purge_expired_notices_op",
     "purge_resolved_integrity_findings_op",
     "refresh_dedup_candidates_op",
@@ -57,6 +62,13 @@ CONSISTENCY_DEDUP_REFRESH_JOB_TAGS: Final[dict[str, str]] = {
     "kor_travel_map.timezone": KST_TIMEZONE,
 }
 """consistency/dedup refresh Dagster job 공통 tag."""
+
+CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS: Final[dict[str, str]] = {
+    "kor_travel_map.job_scope": "maintenance",
+    "kor_travel_map.job_kind": "cache_target_snapshot_gc",
+    "kor_travel_map.timezone": KST_TIMEZONE,
+}
+"""cache-target snapshot background GC job 공통 tag."""
 
 MAINTENANCE_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
     max_retries=3,
@@ -106,6 +118,34 @@ _CONSISTENCY_CONFIG_SCHEMA: Final[dict[str, object]] = {
         Int,
         default_value=DEDUP_PENDING_WARN_THRESHOLD,
         description="F4 pending dedup backlog WARN 임계값.",
+    ),
+}
+
+_CACHE_TARGET_SNAPSHOT_GC_CONFIG_SCHEMA: Final[dict[str, object]] = {
+    "max_batches": Field(
+        Int,
+        default_value=2_000,
+        description="실행당 최대 batch 수(기본 item 처리 용량 2,000,000건).",
+    ),
+    "max_seconds": Field(
+        Int,
+        default_value=3_300,
+        description="hourly schedule 다음 실행 전 drain 종료 시간 예산(초).",
+    ),
+    "item_limit": Field(
+        Int,
+        default_value=1_000,
+        description="system별 transaction에서 삭제할 snapshot item 상한.",
+    ),
+    "header_limit": Field(
+        Int,
+        default_value=100,
+        description="system별 transaction에서 삭제할 빈 snapshot header 상한.",
+    ),
+    "batch_statement_timeout_ms": Field(
+        Int,
+        default_value=30_000,
+        description="각 GC/observation transaction의 PostgreSQL statement timeout(ms).",
     ),
 }
 
@@ -310,6 +350,86 @@ async def purge_expired_notices_op(context: OpExecutionContext) -> dict[str, obj
     return metadata
 
 
+@op(
+    name="drain_expired_cache_target_snapshots",
+    required_resource_keys={"kor_travel_map_client"},
+    config_schema=_CACHE_TARGET_SNAPSHOT_GC_CONFIG_SCHEMA,
+    retry_policy=MAINTENANCE_RETRY_POLICY,
+)
+async def drain_expired_cache_target_snapshots_op(
+    context: OpExecutionContext,
+) -> dict[str, object]:
+    """만료·미참조 cache-target snapshot을 독립 batch transaction으로 정리한다."""
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    config = cast(Mapping[str, object], context.op_config)
+    max_batches = _int_config(config.get("max_batches"), default=2_000)
+    item_limit = _int_config(config.get("item_limit"), default=1_000)
+    started_at = monotonic()
+    result = await client.drain_expired_cache_target_snapshots(
+        max_batches=max_batches,
+        max_seconds=_int_config(config.get("max_seconds"), default=3_300),
+        item_limit=item_limit,
+        header_limit=_int_config(config.get("header_limit"), default=100),
+        batch_statement_timeout_ms=_int_config(
+            config.get("batch_statement_timeout_ms"),
+            default=30_000,
+        ),
+    )
+    elapsed_seconds = max(monotonic() - started_at, 0.001)
+    backlog_observed = result.remaining_items is not None
+    metadata: dict[str, object] = {
+        "acquired": result.acquired,
+        "skipped": result.skipped,
+        "batches": result.batches,
+        "deleted_items": result.deleted_items,
+        "deleted_headers": result.deleted_headers,
+        "remaining_items": (
+            result.remaining_items
+            if result.remaining_items is not None
+            else "not_observed"
+        ),
+        "remaining_headers": (
+            result.remaining_headers
+            if result.remaining_headers is not None
+            else "not_observed"
+        ),
+        "total_items": result.total_items if result.total_items is not None else "not_observed",
+        "total_headers": (
+            result.total_headers if result.total_headers is not None else "not_observed"
+        ),
+        "unexpired_unreferenced_items": (
+            result.unexpired_unreferenced_items
+            if result.unexpired_unreferenced_items is not None
+            else "not_observed"
+        ),
+        "unexpired_unreferenced_headers": (
+            result.unexpired_unreferenced_headers
+            if result.unexpired_unreferenced_headers is not None
+            else "not_observed"
+        ),
+        "referenced_items": (
+            result.referenced_items
+            if result.referenced_items is not None
+            else "not_observed"
+        ),
+        "referenced_headers": (
+            result.referenced_headers
+            if result.referenced_headers is not None
+            else "not_observed"
+        ),
+        "backlog_observed": backlog_observed,
+        "backlog_alert": bool(
+            backlog_observed
+            and ((result.remaining_items or 0) > 0 or (result.remaining_headers or 0) > 0)
+        ),
+        "capacity_item_ceiling": max_batches * item_limit,
+        "elapsed_seconds": elapsed_seconds,
+        "deleted_items_per_hour": result.deleted_items / elapsed_seconds * 3_600,
+    }
+    context.add_output_metadata(metadata)
+    return metadata
+
+
 @job(
     name="consistency_dedup_refresh",
     tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
@@ -323,6 +443,19 @@ def consistency_dedup_refresh_job() -> None:
     run_consistency_check_op(refresh_dedup_candidates_op())
     purge_expired_notices_op()
     purge_resolved_integrity_findings_op()
+
+
+@job(
+    name="cache_target_snapshot_gc",
+    tags=CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS,
+    description=(
+        "만료·미참조 cache-target snapshot item/header를 system round-robin batch로 "
+        "정리하고 정확한 잔여 backlog를 기록한다."
+    ),
+)
+def cache_target_snapshot_gc_job() -> None:
+    """hourly cache-target snapshot background GC 전용 job."""
+    drain_expired_cache_target_snapshots_op()
 
 
 CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
@@ -344,8 +477,33 @@ CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
 ]
 """consistency/dedup maintenance schedule 목록. 운영 enable 전까지 STOPPED."""
 
-MAINTENANCE_JOBS: Final = [consistency_dedup_refresh_job]
-MAINTENANCE_SCHEDULES: Final = CONSISTENCY_DEDUP_REFRESH_SCHEDULES
+CACHE_TARGET_SNAPSHOT_GC_SCHEDULES: Final = [
+    ScheduleDefinition(
+        name="cache_target_snapshot_gc_hourly_schedule",
+        job=cache_target_snapshot_gc_job,
+        cron_schedule=cron_for_schedule(
+            "cache_target_snapshot_gc_hourly_schedule",
+            "15 * * * *",
+        ),
+        execution_timezone=KST_TIMEZONE,
+        default_status=DefaultScheduleStatus.STOPPED,
+        tags=CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS,
+        description=(
+            "만료 cache-target snapshot backlog를 매시 15분에 최대 200만 item 용량으로 "
+            "정리한다. 운영 enable 전까지 STOPPED."
+        ),
+    )
+]
+"""cache-target snapshot GC hourly schedule. 운영 enable 전까지 STOPPED."""
+
+MAINTENANCE_JOBS: Final = [
+    consistency_dedup_refresh_job,
+    cache_target_snapshot_gc_job,
+]
+MAINTENANCE_SCHEDULES: Final = [
+    *CONSISTENCY_DEDUP_REFRESH_SCHEDULES,
+    *CACHE_TARGET_SNAPSHOT_GC_SCHEDULES,
+]
 
 
 def _resource_object(context: OpExecutionContext, name: str) -> object:

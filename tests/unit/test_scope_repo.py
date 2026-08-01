@@ -440,7 +440,7 @@ async def test_count_features_matching_scope_validation_errors() -> None:
         await count_features_matching_scope(object(), {"type": "unknown"})
 
 
-def test_canonicalize_feature_update_scope_materializes_defaults_and_strips_text() -> None:
+def test_canonicalize_feature_update_scope_materializes_defaults_and_strips_generic_text() -> None:
     assert canonicalize_feature_update_scope(
         {
             "type": "sigungu_by_radius",
@@ -468,8 +468,8 @@ def test_canonicalize_feature_update_scope_materializes_defaults_and_strips_text
     assert canonicalize_feature_update_scope(
         {
             "type": "cache_target_keys",
-            "external_system": " pinvi ",
-            "target_keys": ["\tpoi-1\n"],
+            "external_system": "pinvi",
+            "target_keys": ["poi-1"],
             "radius_km": None,
         }
     ) == {
@@ -522,6 +522,21 @@ def test_canonicalize_feature_update_scope_materializes_defaults_and_strips_text
             "target_keys": ["poi-1", "poi-1"],
         },
         {
+            "type": "cache_target_keys",
+            "external_system": " pinvi ",
+            "target_keys": ["poi-1"],
+        },
+        {
+            "type": "cache_target_keys",
+            "external_system": "pinvi",
+            "target_keys": ["poi:e\u0301"],
+        },
+        {
+            "type": "cache_target_keys",
+            "external_system": "pinvi",
+            "target_keys": ["x" * 513],
+        },
+        {
             "type": "center_radius",
             "center": {"lon": 10**1000, "lat": 37},
             "radius_km": 1,
@@ -531,5 +546,17 @@ def test_canonicalize_feature_update_scope_materializes_defaults_and_strips_text
 def test_canonicalize_feature_update_scope_rejects_noncanonical_contract(
     scope: dict[str, object],
 ) -> None:
-    with pytest.raises(ValueError, match="must|unsupported|bbox"):
+    with pytest.raises(ValueError, match="must|unsupported|bbox|이어야|NFC|문자열"):
         canonicalize_feature_update_scope(scope)
+
+
+def test_cache_target_scope_accepts_full_root_identity_length() -> None:
+    target_key = "x" * 512
+
+    assert canonicalize_feature_update_scope(
+        {
+            "type": "cache_target_keys",
+            "external_system": "pinvi",
+            "target_keys": [target_key],
+        }
+    )["target_keys"] == [target_key]

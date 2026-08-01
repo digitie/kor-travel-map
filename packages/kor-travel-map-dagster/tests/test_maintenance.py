@@ -5,15 +5,21 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from kortravelmap.client import DedupRefreshResult, IntegrityFindingSyncResult
+from kortravelmap.client import (
+    CacheTargetSnapshotGcDrainResult,
+    DedupRefreshResult,
+    IntegrityFindingSyncResult,
+)
 from kortravelmap.core.dedup import DedupCandidate
 from kortravelmap.infra.consistency import CaseResult, ConsistencyReport
 from kortravelmap.infra.dedup_refresh_repo import DedupRefreshScope
 from kortravelmap.infra.dedup_repo import DedupQueueResult
 
+import kortravelmap.dagster.maintenance as maintenance_mod
 from kortravelmap.dagster.maintenance import (
     DEFAULT_DEDUP_SCOPE_PAIRS,
     MAINTENANCE_RETRY_POLICY,
+    cache_target_snapshot_gc_job,
     consistency_dedup_refresh_job,
 )
 
@@ -30,6 +36,27 @@ class _Client:
         self.consistency_calls: list[dict[str, Any]] = []
         self.notice_purge_calls: list[str] = []
         self.finding_purge_calls: list[str] = []
+        self.snapshot_gc_calls: list[dict[str, object]] = []
+
+    async def drain_expired_cache_target_snapshots(
+        self, **kwargs: object
+    ) -> CacheTargetSnapshotGcDrainResult:
+        self.snapshot_gc_calls.append(kwargs)
+        return CacheTargetSnapshotGcDrainResult(
+            acquired=True,
+            skipped=False,
+            batches=3,
+            deleted_items=2_500,
+            deleted_headers=4,
+            remaining_items=17,
+            remaining_headers=2,
+            total_items=10_000,
+            total_headers=20,
+            unexpired_unreferenced_items=4_000,
+            unexpired_unreferenced_headers=8,
+            referenced_items=5_983,
+            referenced_headers=10,
+        )
 
     async def purge_expired_notices(self, *, retention: str = "1 year") -> int:
         self.notice_purge_calls.append(retention)
@@ -253,6 +280,109 @@ def test_consistency_dedup_refresh_ops_have_retry_policy() -> None:
         retry_by_name["purge_resolved_integrity_findings"]
         == MAINTENANCE_RETRY_POLICY
     )
+
+
+def test_cache_target_snapshot_gc_job_reports_metadata_and_has_retry_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _Client()
+    clock = iter([100.0, 110.0])
+    monkeypatch.setattr(maintenance_mod, "monotonic", lambda: next(clock))
+
+    result = cache_target_snapshot_gc_job.execute_in_process(
+        run_config={
+            "ops": {
+                "drain_expired_cache_target_snapshots": {
+                    "config": {
+                        "max_batches": 25,
+                        "max_seconds": 45,
+                        "item_limit": 800,
+                        "header_limit": 40,
+                        "batch_statement_timeout_ms": 5_000,
+                    }
+                }
+            }
+        },
+        resources={"kor_travel_map_client": client},
+    )
+
+    assert result.success
+    assert client.snapshot_gc_calls == [
+        {
+            "max_batches": 25,
+            "max_seconds": 45,
+            "item_limit": 800,
+            "header_limit": 40,
+            "batch_statement_timeout_ms": 5_000,
+        }
+    ]
+    assert result.output_for_node("drain_expired_cache_target_snapshots") == {
+        "acquired": True,
+        "skipped": False,
+        "batches": 3,
+        "deleted_items": 2_500,
+        "deleted_headers": 4,
+        "remaining_items": 17,
+        "remaining_headers": 2,
+        "total_items": 10_000,
+        "total_headers": 20,
+        "unexpired_unreferenced_items": 4_000,
+        "unexpired_unreferenced_headers": 8,
+        "referenced_items": 5_983,
+        "referenced_headers": 10,
+        "backlog_observed": True,
+        "backlog_alert": True,
+        "capacity_item_ceiling": 20_000,
+        "elapsed_seconds": 10.0,
+        "deleted_items_per_hour": 900_000.0,
+    }
+    retry_by_name = {
+        node_def.name: node_def.retry_policy
+        for node_def in cache_target_snapshot_gc_job.all_node_defs
+    }
+    assert (
+        retry_by_name["drain_expired_cache_target_snapshots"]
+        == MAINTENANCE_RETRY_POLICY
+    )
+
+
+def test_cache_target_snapshot_gc_job_marks_skipped_backlog_unobserved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _SkippedClient:
+        async def drain_expired_cache_target_snapshots(
+            self, **_kwargs: object
+        ) -> CacheTargetSnapshotGcDrainResult:
+            return CacheTargetSnapshotGcDrainResult(
+                acquired=False,
+                skipped=True,
+                batches=0,
+                deleted_items=0,
+                deleted_headers=0,
+                remaining_items=None,
+                remaining_headers=None,
+            )
+
+    clock = iter([200.0, 201.0])
+    monkeypatch.setattr(maintenance_mod, "monotonic", lambda: next(clock))
+    result = cache_target_snapshot_gc_job.execute_in_process(
+        resources={"kor_travel_map_client": _SkippedClient()},
+    )
+
+    assert result.success
+    output = result.output_for_node("drain_expired_cache_target_snapshots")
+    assert output["acquired"] is False
+    assert output["skipped"] is True
+    assert output["remaining_items"] == "not_observed"
+    assert output["remaining_headers"] == "not_observed"
+    assert output["total_items"] == "not_observed"
+    assert output["total_headers"] == "not_observed"
+    assert output["unexpired_unreferenced_items"] == "not_observed"
+    assert output["unexpired_unreferenced_headers"] == "not_observed"
+    assert output["referenced_items"] == "not_observed"
+    assert output["referenced_headers"] == "not_observed"
+    assert output["backlog_observed"] is False
+    assert output["backlog_alert"] is False
 
 
 def _refresh_result(

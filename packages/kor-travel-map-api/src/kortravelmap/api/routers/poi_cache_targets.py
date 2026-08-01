@@ -18,7 +18,10 @@ from fastapi import (
     Response,
     status,
 )
-from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
+from kortravelmap.core.cache_target_stream import (
+    validate_cache_target_external_system,
+    validate_cache_target_key,
+)
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     PoiCacheTargetConflict,
@@ -29,6 +32,7 @@ from kortravelmap.infra.poi_cache_target_repo import (
     upsert_poi_cache_target,
 )
 from pydantic import (
+    AfterValidator,
     AliasChoices,
     BaseModel,
     ConfigDict,
@@ -67,6 +71,39 @@ ProviderOverrideKey = Annotated[
 MetadataLabel = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=64),
+]
+_ExternalSystemPath = Annotated[
+    str,
+    AfterValidator(validate_cache_target_external_system),
+    Path(
+        min_length=1,
+        max_length=112,
+        description="Trimmed Unicode NFC canonical external system identity.",
+    ),
+]
+_TargetKeyPath = Annotated[
+    str,
+    AfterValidator(validate_cache_target_key),
+    Path(
+        min_length=1,
+        max_length=512,
+        description="Trimmed Unicode NFC canonical cache target identity.",
+    ),
+]
+
+
+def _validate_optional_external_system(value: str | None) -> str | None:
+    return value if value is None else validate_cache_target_external_system(value)
+
+
+_ExternalSystemQuery = Annotated[
+    str | None,
+    AfterValidator(_validate_optional_external_system),
+    Query(
+        min_length=1,
+        max_length=112,
+        description="Trimmed Unicode NFC canonical external system identity.",
+    ),
 ]
 
 router = APIRouter(
@@ -418,11 +455,8 @@ def _unprocessable(exc: ValueError) -> HTTPException:
     },
 )
 async def put_poi_cache_target(
-    external_system: Annotated[
-        str,
-        Path(min_length=1, max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH),
-    ],
-    target_key: str,
+    external_system: _ExternalSystemPath,
+    target_key: _TargetKeyPath,
     body: PoiCacheTargetUpsertRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
     response: Response,
@@ -469,10 +503,7 @@ async def put_poi_cache_target(
 )
 async def list_poi_cache_target_records(
     session: Annotated[AsyncSession, Depends(get_session)],
-    external_system: Annotated[
-        str | None,
-        Query(min_length=1, max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH),
-    ] = None,
+    external_system: _ExternalSystemQuery = None,
     update_enabled: Annotated[bool | None, Query()] = None,
     include_deleted: Annotated[bool, Query()] = False,
     page_size: Annotated[int, Query(ge=1, le=500)] = 200,
@@ -512,11 +543,8 @@ async def list_poi_cache_target_records(
     },
 )
 async def get_poi_cache_target_record(
-    external_system: Annotated[
-        str,
-        Path(min_length=1, max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH),
-    ],
-    target_key: str,
+    external_system: _ExternalSystemPath,
+    target_key: _TargetKeyPath,
     session: Annotated[AsyncSession, Depends(get_session)],
     response: Response,
     include_deleted: Annotated[bool, Query()] = False,
@@ -553,11 +581,8 @@ async def get_poi_cache_target_record(
     openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 async def delete_poi_cache_target_record(
-    external_system: Annotated[
-        str,
-        Path(min_length=1, max_length=MAX_EXTERNAL_SYSTEM_NAME_LENGTH),
-    ],
-    target_key: str,
+    external_system: _ExternalSystemPath,
+    target_key: _TargetKeyPath,
     session: Annotated[AsyncSession, Depends(get_session)],
     request: Request,
     response: Response,

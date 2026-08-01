@@ -21,8 +21,10 @@ from kortravelmap.core.cache_target_stream import (
     cache_target_source_fingerprint,
     make_active_cache_target_source,
     make_deleted_cache_target_source,
+    validate_cache_target_external_system,
+    validate_cache_target_key,
 )
-from pydantic import BaseModel
+from pydantic import AfterValidator, BaseModel
 
 from kortravelmap.api.auth import (
     AdminProxyContext,
@@ -99,6 +101,26 @@ __all__ = [
     "service_router",
 ]
 
+
+_ExternalSystemPath = Annotated[
+    str,
+    AfterValidator(validate_cache_target_external_system),
+    Path(
+        min_length=1,
+        max_length=112,
+        description="Trimmed Unicode NFC canonical external system identity.",
+    ),
+]
+_TargetKeyPath = Annotated[
+    str,
+    AfterValidator(validate_cache_target_key),
+    Path(
+        min_length=1,
+        max_length=512,
+        description="Trimmed Unicode NFC canonical cache target identity.",
+    ),
+]
+
 service_router = APIRouter(
     prefix="/service",
     tags=["service-cache-target-streams"],
@@ -146,6 +168,12 @@ _ASYNC_OPERATION_HEADERS = {
         "description": "status URL 재조회 전 최소 대기 시간(초).",
         "schema": {"type": "integer"},
     },
+}
+_SNAPSHOT_RETRY_AFTER_HEADER = {
+    "Retry-After": {
+        "description": "snapshot 작업 재시도 전 최소 대기 시간(초).",
+        "schema": {"type": "integer", "minimum": 1},
+    }
 }
 
 
@@ -671,8 +699,8 @@ async def _require_reconciliation_metadata_access(
     openapi_extra={"parameters": [_IF_NONE_MATCH_PARAMETER, _IF_MATCH_PARAMETER]},
 )
 async def put_service_cache_target(
-    external_system: Annotated[str, Path(min_length=1, max_length=112)],
-    target_key: Annotated[str, Path(min_length=1, max_length=512)],
+    external_system: _ExternalSystemPath,
+    target_key: _TargetKeyPath,
     body: CacheTargetSourceUpsertRequest,
     request: Request,
     response: Response,
@@ -746,8 +774,8 @@ async def put_service_cache_target(
     },
 )
 async def get_service_cache_target(
-    external_system: Annotated[str, Path(min_length=1, max_length=112)],
-    target_key: Annotated[str, Path(min_length=1, max_length=512)],
+    external_system: _ExternalSystemPath,
+    target_key: _TargetKeyPath,
     response: Response,
     session: Annotated[Any, Depends(get_session)],
     stream_service: Annotated[
@@ -794,8 +822,8 @@ async def get_service_cache_target(
     openapi_extra={"parameters": [_IF_MATCH_PARAMETER]},
 )
 async def delete_service_cache_target(
-    external_system: Annotated[str, Path(min_length=1, max_length=112)],
-    target_key: Annotated[str, Path(min_length=1, max_length=512)],
+    external_system: _ExternalSystemPath,
+    target_key: _TargetKeyPath,
     body: CacheTargetSourceDeleteRequest,
     request: Request,
     response: Response,
@@ -852,7 +880,7 @@ async def delete_service_cache_target(
     responses={200: {"headers": _ETAG_RESPONSE_HEADER}, 404: {"description": "stream 없음"}},
 )
 async def get_service_cache_target_stream(
-    external_system: Annotated[str, Path(min_length=1, max_length=112)],
+    external_system: _ExternalSystemPath,
     response: Response,
     session: Annotated[Any, Depends(get_session)],
     stream_service: Annotated[
@@ -894,7 +922,7 @@ async def get_service_cache_target_stream(
     openapi_extra={"parameters": [_IF_MATCH_PARAMETER]},
 )
 async def create_service_restore_fence(
-    external_system: Annotated[str, Path(min_length=1, max_length=112)],
+    external_system: _ExternalSystemPath,
     body: CacheTargetRestoreFenceRequest,
     request: Request,
     response: Response,
@@ -1453,6 +1481,13 @@ async def begin_service_cache_target_reconciliation(
     response_model=CacheTargetOperationResponse,
     responses={
         200: {"description": "two-phase reconciliation sealed", "headers": _ETAG_RESPONSE_HEADER},
+        413: {
+            "description": "snapshot item 수가 100,000개 materialization 상한을 초과함."
+        },
+        503: {
+            "description": "snapshot writer barrier 또는 materialization 제한 시간 초과.",
+            "headers": _SNAPSHOT_RETRY_AFTER_HEADER,
+        },
         412: {"description": "request ETag or checksum precondition failed"},
         428: {"description": "missing If-Match"},
     },
@@ -1598,9 +1633,33 @@ async def complete_service_cache_target_reconciliation(
 @service_router.get(
     "/cache-target-snapshots/{external_system}",
     response_model=CacheTargetSnapshotResponse,
+    responses={
+        413: {
+            "description": "snapshot item 수가 100,000개 materialization 상한을 초과함."
+        },
+        429: {
+            "description": (
+                "미만료·미참조 generic snapshot copy 상한 도달. 가장 오래된 "
+                "snapshot 만료 뒤 재시도한다."
+            ),
+            "headers": {
+                "Retry-After": {
+                    "description": "가장 오래된 snapshot 만료까지의 DB 기준 대기 시간(초).",
+                    "schema": {"type": "integer", "minimum": 1, "maximum": 7_200},
+                }
+            },
+        },
+        503: {
+            "description": (
+                "snapshot 생성 경합, handoff TTL 부족, writer barrier 또는 "
+                "materialization 제한 시간 초과."
+            ),
+            "headers": _SNAPSHOT_RETRY_AFTER_HEADER,
+        },
+    },
 )
 async def get_service_cache_target_snapshot(
-    external_system: Annotated[str, Path(min_length=1, max_length=112)],
+    external_system: _ExternalSystemPath,
     session: Annotated[Any, Depends(get_session)],
     stream_service: Annotated[
         CacheTargetStreamService,
@@ -1915,7 +1974,14 @@ async def replay_admin_cache_target_dead_letter(
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(require_admin_destructive_enabled)],
     responses={
-        202: {"description": "reconciliation accepted", "headers": _ASYNC_OPERATION_HEADERS}
+        202: {"description": "reconciliation accepted", "headers": _ASYNC_OPERATION_HEADERS},
+        413: {
+            "description": "snapshot item 수가 100,000개 materialization 상한을 초과함."
+        },
+        503: {
+            "description": "snapshot writer barrier 또는 materialization 제한 시간 초과.",
+            "headers": _SNAPSHOT_RETRY_AFTER_HEADER,
+        },
     },
 )
 async def request_admin_cache_target_reconciliation(

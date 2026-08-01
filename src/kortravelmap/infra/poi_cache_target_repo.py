@@ -17,7 +17,10 @@ from uuid import UUID
 
 from sqlalchemy import text
 
-from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
+from kortravelmap.core.cache_target_stream import (
+    validate_cache_target_external_system,
+    validate_cache_target_key,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -90,13 +93,7 @@ SELECT EXISTS (
 """
 
 def _validate_exact_external_system(external_system: str) -> None:
-    if not external_system or external_system != external_system.strip():
-        raise ValueError("external_system must be trimmed and non-empty")
-    if len(external_system) > MAX_EXTERNAL_SYSTEM_NAME_LENGTH:
-        raise ValueError(
-            "external_system must contain at most "
-            f"{MAX_EXTERNAL_SYSTEM_NAME_LENGTH} characters"
-        )
+    validate_cache_target_external_system(external_system)
 
 
 async def list_active_target_coords(
@@ -369,8 +366,7 @@ def _validate_target(
     on_conflict: OnConflict,
 ) -> None:
     _validate_exact_external_system(external_system)
-    if not target_key:
-        raise ValueError("target_key must be non-empty")
+    validate_cache_target_key(target_key)
     if not 124.0 <= lon <= 132.0 or not 33.0 <= lat <= 39.5:
         raise ValueError("coord must be inside Korea lon/lat bounds")
     if radius_km <= 0 or radius_km > 100:

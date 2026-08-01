@@ -23,6 +23,7 @@ from kortravelmap.infra.cache_target_event_repo import (
     append_cache_target_links_reconciled_events,
     append_cache_target_refresh_status_events,
     capture_cache_target_refresh_members_by_keys,
+    lock_cache_target_result_streams,
 )
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
@@ -480,6 +481,10 @@ async def _sync_cache_target_links(
     *,
     request: FeatureUpdateRequest,
 ) -> None:
+    await lock_cache_target_result_streams(
+        session,
+        request_id=request.request_id,
+    )
     target_ids = tuple(target.target_id for target in resolution.cache_targets)
     links = await sync_poi_cache_target_feature_links(
         session,
@@ -706,6 +711,10 @@ async def _finish_failed_execution(
                 request.request_id,
                 expected_generation=request.generation,
                 owner_dagster_run_id=owner_dagster_run_id,
+            )
+            await lock_cache_target_result_streams(
+                session,
+                request_id=request.request_id,
             )
             await mark_poi_cache_targets_refresh_failed(session, target_ids)
             failed = await finish_update_request(
@@ -1022,6 +1031,13 @@ async def _execute_feature_update_request_locked(
                 started.request_id,
                 expected_generation=started.generation,
                 owner_dagster_run_id=dagster_run_id,
+            )
+            # 공개 capture API는 scope 종류와 무관하게 request member를 결박할 수 있다.
+            # final target/link mutation 전에 member stream을 모두 선취해 source writer와
+            # 같은 stream → target 잠금 순서를 유지한다.
+            await lock_cache_target_result_streams(
+                session,
+                request_id=started.request_id,
             )
             final_resolution = plan.resolution
             if started.scope_type == "cache_target_keys":
