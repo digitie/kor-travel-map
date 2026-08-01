@@ -6338,6 +6338,19 @@
             "title": "Snapshot Id"
           },
           "status": {
+            "enum": [
+              "accepted",
+              "pending",
+              "leased",
+              "retry",
+              "dead",
+              "delivered",
+              "preparing",
+              "running",
+              "succeeded",
+              "failed",
+              "superseded"
+            ],
             "title": "Status",
             "type": "string"
           },
@@ -6541,6 +6554,161 @@
         "title": "CacheTargetRefreshStatusChangedPayload",
         "type": "object"
       },
+      "CacheTargetRestoreFenceRecord": {
+        "additionalProperties": false,
+        "description": "Restore-fence control state와 durable effect receipt.",
+        "properties": {
+          "active_reconciliation": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "preparing": "#/components/schemas/CacheTargetReconciliationPreparing",
+                    "running": "#/components/schemas/CacheTargetReconciliationRunning"
+                  },
+                  "propertyName": "status"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CacheTargetReconciliationPreparing"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CacheTargetReconciliationRunning"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Reconciliation"
+          },
+          "blocked_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Event Id"
+          },
+          "consumer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumer Id"
+          },
+          "control_version": {
+            "minimum": 1.0,
+            "title": "Control Version",
+            "type": "integer"
+          },
+          "entity_tag": {
+            "title": "Entity Tag",
+            "type": "string"
+          },
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "fence_id": {
+            "format": "uuid",
+            "title": "Fence Id",
+            "type": "string"
+          },
+          "invalidated_claim_count": {
+            "minimum": 0.0,
+            "title": "Invalidated Claim Count",
+            "type": "integer"
+          },
+          "previous_control_version": {
+            "minimum": 1.0,
+            "title": "Previous Control Version",
+            "type": "integer"
+          },
+          "previous_restore_epoch": {
+            "minimum": 1.0,
+            "title": "Previous Restore Epoch",
+            "type": "integer"
+          },
+          "restore_epoch": {
+            "minimum": 1.0,
+            "title": "Restore Epoch",
+            "type": "integer"
+          },
+          "state": {
+            "default": "active",
+            "enum": [
+              "active",
+              "blocked",
+              "disabled",
+              "fenced",
+              "ready",
+              "restore_fenced"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "superseded_delivery_count": {
+            "minimum": 0.0,
+            "title": "Superseded Delivery Count",
+            "type": "integer"
+          },
+          "superseded_reconciliation_count": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Superseded Reconciliation Count",
+            "type": "integer"
+          },
+          "superseded_reconciliation_request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded Reconciliation Request Id"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "external_system",
+          "restore_epoch",
+          "control_version",
+          "entity_tag",
+          "fence_id",
+          "previous_restore_epoch",
+          "previous_control_version",
+          "invalidated_claim_count",
+          "superseded_delivery_count",
+          "superseded_reconciliation_count",
+          "superseded_reconciliation_request_id"
+        ],
+        "title": "CacheTargetRestoreFenceRecord",
+        "type": "object"
+      },
       "CacheTargetRestoreFenceRequest": {
         "additionalProperties": false,
         "description": "Restore-fence command body.",
@@ -6574,7 +6742,7 @@
         "description": "Restore-fence command result.",
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/CacheTargetStreamControlRecord"
+            "$ref": "#/components/schemas/CacheTargetRestoreFenceRecord"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"
