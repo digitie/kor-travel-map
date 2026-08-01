@@ -71,6 +71,7 @@ from kortravelmap.core.pipeline_cancellation_states import (
     PIPELINE_CANCELLATION_ROOT_KIND_VALUES,
     PIPELINE_CANCELLATION_STATUS_VALUES,
 )
+from kortravelmap.infra.curation_link_basis import ALL_LINK_BASES
 
 _CANONICAL_WHITESPACE_SQL = (
     "(' ' || chr(9) || chr(10) || chr(11) || chr(12) || chr(13) "
@@ -308,9 +309,7 @@ class FeatureRow(Base):
     # 공개 술어 partial GiST(idx_features_*_gist, WHERE deleted_at IS NULL)만
     # __table_args__에 명시적으로 유지한다 — 자동 full은 write 비용만 늘리고 공개
     # 조회는 partial로 충분하다. 0061이 DB의 자동 full 3개를 drop한다.
-    coord: Mapped[Any | None] = mapped_column(
-        Geometry("POINT", srid=4326, spatial_index=False)
-    )
+    coord: Mapped[Any | None] = mapped_column(Geometry("POINT", srid=4326, spatial_index=False))
     coord_precision_digits: Mapped[int | None] = mapped_column(SmallInteger)
     coord_5179: Mapped[Any | None] = mapped_column(
         Geometry("POINT", srid=5179, spatial_index=False),
@@ -319,9 +318,7 @@ class FeatureRow(Base):
             persisted=True,
         ),
     )
-    geom: Mapped[Any | None] = mapped_column(
-        Geometry("GEOMETRY", srid=4326, spatial_index=False)
-    )
+    geom: Mapped[Any | None] = mapped_column(Geometry("GEOMETRY", srid=4326, spatial_index=False))
 
     # 주소 (kortravelmap.dto.Address 직렬화, ADR-041 — kraddr-base 흡수).
     address: Mapped[dict[str, Any]] = mapped_column(
@@ -386,7 +383,6 @@ class FeatureRow(Base):
         nullable=False,
         server_default=text("1"),
     )
-
 
     user_change_kind: Mapped[str | None] = mapped_column(Text)
     user_change_status: Mapped[str | None] = mapped_column(Text)
@@ -1206,8 +1202,7 @@ class CurationItemRow(Base):
     __table_args__ = (
         CheckConstraint("btrim(external_item_id) <> ''", name="external_id"),
         CheckConstraint(
-            "external_component_id <> '' "
-            "AND external_component_id = btrim(external_component_id)",
+            "external_component_id <> '' AND external_component_id = btrim(external_component_id)",
             name="external_component_id_canonical",
         ),
         CheckConstraint("btrim(place_name) <> ''", name="place_name"),
@@ -1456,6 +1451,11 @@ class CurationImportRowRow(Base):
             ["feature.curation_items.curation_item_id"],
             name=conv("fk_curation_import_rows_item"),
             ondelete="RESTRICT",
+            # dedup merge의 legacy-conflict detach가 curation_items.curation_item_id를
+            # 재작성한다(`merge_repo._DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL`).
+            # NO ACTION(기본값)이면 그 UPDATE 자체가 FK 위반을 낸다 — T-VN-H41,
+            # `0074_curation_item_rekey_cascade`.
+            onupdate="CASCADE",
         ),
         UniqueConstraint(
             "import_batch_id",
@@ -1514,15 +1514,13 @@ class CurationLinkDecisionRow(Base):
             name=conv("ck_curation_link_decisions_kind"),
         ),
         CheckConstraint(
-            "match_basis IN ("
-            "'csv_explicit_feature_id','admin_review','legacy_unattributed',"
-            "'forward_recovery'"
-            ")",
+            # 값 목록은 `curation_link_basis`가 소유한다. 여기 열거하면 값이 늘 때
+            # 세 곳(DB CHECK / 공개·merge 술어 / 이 metadata)이 따로 놀게 된다.
+            f"match_basis IN ({_sql_text_literals(tuple(sorted(ALL_LINK_BASES)))})",
             name=conv("ck_curation_link_decisions_basis"),
         ),
         CheckConstraint(
-            "resolver_version = btrim(resolver_version) "
-            "AND resolver_version <> ''",
+            "resolver_version = btrim(resolver_version) AND resolver_version <> ''",
             name=conv("ck_curation_link_decisions_resolver"),
         ),
         CheckConstraint(
@@ -1542,6 +1540,8 @@ class CurationLinkDecisionRow(Base):
             ["feature.curation_items.curation_item_id"],
             name=conv("fk_curation_link_decisions_item"),
             ondelete="RESTRICT",
+            # T-VN-H41 — `fk_curation_import_rows_item`과 같은 이유.
+            onupdate="CASCADE",
         ),
         ForeignKeyConstraint(
             ["import_row_id", "curation_item_id"],
@@ -1551,6 +1551,9 @@ class CurationLinkDecisionRow(Base):
             ],
             name=conv("fk_curation_link_decisions_import_row"),
             ondelete="RESTRICT",
+            # item이 재작성되면 import row 쪽도 위 FK로 먼저 캐스케이드된다. 이
+            # 합성 FK도 같이 캐스케이드하지 않으면 그 직후 자기모순 상태가 된다.
+            onupdate="CASCADE",
         ),
         ForeignKeyConstraint(
             ["supersedes_decision_id", "curation_item_id"],
@@ -1560,6 +1563,9 @@ class CurationLinkDecisionRow(Base):
             ],
             name=conv("fk_curation_link_decisions_supersedes"),
             ondelete="RESTRICT",
+            # supersedes 사슬은 전부 같은 item에 묶여 있다는 불변식을 이 합성
+            # 키가 강제한다. item이 재작성되면 사슬 전체가 같이 옮겨가야 한다.
+            onupdate="CASCADE",
         ),
         UniqueConstraint(
             "decision_id",
@@ -2942,9 +2948,7 @@ class BackupCommandExecutionRow(Base):
         server_default=text("now()"),
     )
     effect_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    effect_completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    effect_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class OfflineUploadCommandExecutionRow(Base):
@@ -3024,9 +3028,7 @@ class OfflineUploadCommandExecutionRow(Base):
         server_default=text("now()"),
     )
     effect_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    effect_completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    effect_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # =============================================================================
@@ -3480,9 +3482,7 @@ class DataIntegrityViolationRow(Base):
             "uq_violations_open_dedupe_key",
             text("(payload ->> 'dedupe_key')"),
             unique=True,
-            postgresql_where=text(
-                "status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'"
-            ),
+            postgresql_where=text("status IN ('open', 'acknowledged') AND payload ? 'dedupe_key'"),
         ),
         Index(
             "idx_violations_feature",

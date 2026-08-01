@@ -307,6 +307,24 @@ async def _run_alembic_upgrade(dsn: str, revision: str = "head") -> None:
     await asyncio.to_thread(command.upgrade, cfg, revision)
 
 
+def _alembic_head_revision() -> str:
+    """현재 script directory의 head revision.
+
+    이 값을 리터럴로 박으면 마이그레이션을 하나 추가할 때마다 무관한 테스트가
+    깨진다(`0073`에서 실제로 그랬다). 검사하려는 것은 "재시도 후 head까지
+    올라왔는가"이지 특정 revision 이름이 아니다.
+    """
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    project_root = Path(__file__).resolve().parents[2]
+    cfg = Config(str(project_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(project_root / "alembic"))
+    return ScriptDirectory.from_config(cfg).get_current_head() or ""
+
+
 @pytest.fixture(scope="session")
 async def pg_engine_with_migrations(pg_container: object) -> object:
     """``pg_engine``과 동일하지만 alembic 적용 후 yield.
@@ -786,7 +804,7 @@ async def test_weather_migration_reuses_valid_index_after_partial_failure(
             ).scalar_one()
 
         assert relfilenode_after == relfilenode_before
-        assert migration_head == "0072_curation_provenance"
+        assert migration_head == _alembic_head_revision()
     finally:
         if retry_engine is not None:
             await retry_engine.dispose()

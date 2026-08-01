@@ -23,6 +23,7 @@ from kortravelmap.core.curation_address import (
     CURATION_ADDRESS_RESOLVER_VERSION,
     address_hint_matches,
 )
+from kortravelmap.infra.curation_link_basis import trusted_basis_sql
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
 if TYPE_CHECKING:
@@ -297,11 +298,9 @@ class CurationImportResult(TypedDict):
     import_batch_id: str | None
 
 
-_COLLECTION_COUNT_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql(
-    "count_pf"
-)
-_COLLECTION_PUBLIC_COUNT_NOTICE_FILTER_SQL: Final[str] = (
-    public_active_notice_filter_sql("public_count_pf")
+_COLLECTION_COUNT_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("count_pf")
+_COLLECTION_PUBLIC_COUNT_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql(
+    "public_count_pf"
 )
 _ITEM_PUBLIC_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("pf")
 
@@ -317,7 +316,7 @@ def _trusted_link_sql(item_alias: str) -> str:
                   {item_alias}.curation_item_id
           AND trusted_decision.feature_id = {item_alias}.feature_id
           AND trusted_decision.decision_kind = 'accepted'
-          AND trusted_decision.match_basis <> 'legacy_unattributed'
+          AND {trusted_basis_sql("trusted_decision.match_basis")}
     )
     """
 
@@ -1752,20 +1751,12 @@ def _item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
         curation_relation=str(row["curation_relation"]),
         reuse_policy=str(row["reuse_policy"]),
         metadata=_object(row["metadata"]),
-        current_import_row_id=(
-            str(value) if (value := row.get("current_import_row_id")) else None
-        ),
+        current_import_row_id=(str(value) if (value := row.get("current_import_row_id")) else None),
         accepted_link_decision_id=(
-            str(value)
-            if (value := row.get("accepted_link_decision_id"))
-            else None
+            str(value) if (value := row.get("accepted_link_decision_id")) else None
         ),
-        link_match_basis=(
-            str(value) if (value := row.get("link_match_basis")) else None
-        ),
-        link_resolver_version=(
-            str(value) if (value := row.get("link_resolver_version")) else None
-        ),
+        link_match_basis=(str(value) if (value := row.get("link_match_basis")) else None),
+        link_resolver_version=(str(value) if (value := row.get("link_resolver_version")) else None),
         link_evidence=_object(row.get("link_evidence")),
         link_actor=str(value) if (value := row.get("link_actor")) else None,
         link_decided_at=row.get("link_decided_at"),
@@ -1824,9 +1815,7 @@ def _link_audit(row: RowMapping | Mapping[str, Any]) -> CurationLinkAudit:
         place_name=str(row["place_name"]),
         address_hint=row["address_hint"],
         match_basis=str(row["match_basis"]) if row["match_basis"] else None,
-        resolver_version=(
-            str(row["resolver_version"]) if row["resolver_version"] else None
-        ),
+        resolver_version=(str(row["resolver_version"]) if row["resolver_version"] else None),
         decided_at=row["decided_at"],
     )
 
@@ -2063,9 +2052,7 @@ async def get_curation_import_batch(
         .mappings()
         .all()
     )
-    return _import_batch(batch_row), tuple(
-        _import_row_receipt(row) for row in row_rows
-    )
+    return _import_batch(batch_row), tuple(_import_row_receipt(row) for row in row_rows)
 
 
 async def get_current_curation_import_row(
@@ -2119,10 +2106,7 @@ async def _lock_curation_write_boundary(session: AsyncSession) -> None:
     """Theme·collection·Feature 순서가 다른 공식/수동 writer를 직렬화한다."""
 
     await session.execute(
-        text(
-            "SELECT pg_advisory_xact_lock("
-            "hashtextextended('kortravelmap:curation-import', 0))"
-        )
+        text("SELECT pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0))")
     )
 
 
@@ -2398,9 +2382,7 @@ async def add_curation_item(
             )
         ).scalar_one_or_none()
         if duplicate_feature_exists is not None:
-            raise ValueError(
-                "같은 외부 항목의 다른 component가 이미 이 Feature를 참조합니다."
-            )
+            raise ValueError("같은 외부 항목의 다른 component가 이미 이 Feature를 참조합니다.")
     row = (
         (
             await session.execute(
@@ -2451,9 +2433,7 @@ async def add_curation_item(
         .one()
     )
     previous_decision_id = (
-        str(previous_decision["decision_id"])
-        if previous_decision["decision_id"]
-        else None
+        str(previous_decision["decision_id"]) if previous_decision["decision_id"] else None
     )
     if feature_id is not None:
         await _record_manual_link_decision(
@@ -2615,9 +2595,7 @@ async def update_curation_item(
         "external_item_id",
         "external_component_id",
     } & normalized.keys():
-        target_external_item_id = str(
-            normalized.get("external_item_id", current.external_item_id)
-        )
+        target_external_item_id = str(normalized.get("external_item_id", current.external_item_id))
         target_external_component_id = str(
             normalized.get(
                 "external_component_id",
@@ -2666,9 +2644,7 @@ async def update_curation_item(
                 )
             ).scalar_one_or_none()
             if duplicate_feature_exists is not None:
-                raise ValueError(
-                    "같은 외부 항목의 다른 component가 이미 이 Feature를 참조합니다."
-                )
+                raise ValueError("같은 외부 항목의 다른 component가 이미 이 Feature를 참조합니다.")
     clauses: list[str] = []
     params: dict[str, Any] = {
         "collection_id": collection_id,
@@ -2745,12 +2721,8 @@ async def update_curation_item(
             )
     if operator_owned_changed:
         target_status = str(normalized.get("status", current.status))
-        target_relation = str(
-            normalized.get("curation_relation", current.curation_relation)
-        )
-        target_reuse_policy = str(
-            normalized.get("reuse_policy", current.reuse_policy)
-        )
+        target_relation = str(normalized.get("curation_relation", current.curation_relation))
+        target_reuse_policy = str(normalized.get("reuse_policy", current.reuse_policy))
         await session.execute(
             text(
                 """
@@ -2801,9 +2773,7 @@ async def update_curation_item(
             {
                 "curation_item_id": curation_item_id,
                 "collection_id": collection_id,
-                "legacy_status": (
-                    "curated" if target_status == "included" else target_status
-                ),
+                "legacy_status": ("curated" if target_status == "included" else target_status),
                 "curation_relation": target_relation,
                 "reuse_policy": target_reuse_policy,
                 "actor": actor,
@@ -2935,12 +2905,8 @@ async def list_unattributed_curation_links_page(
                 text(_LIST_UNATTRIBUTED_LINKS_SQL),
                 {
                     "limit": effective_limit + 1,
-                    "cursor_collection_id": (
-                        decoded_cursor[0] if decoded_cursor else None
-                    ),
-                    "cursor_curation_item_id": (
-                        decoded_cursor[1] if decoded_cursor else None
-                    ),
+                    "cursor_collection_id": (decoded_cursor[0] if decoded_cursor else None),
+                    "cursor_curation_item_id": (decoded_cursor[1] if decoded_cursor else None),
                 },
             )
         )
@@ -3272,14 +3238,10 @@ async def _record_import_provenance(
     }:
         raise ValueError("지원하지 않는 curation import batch_kind입니다.")
     decision_match_basis = (
-        "forward_recovery"
-        if effective_kind == "forward_recovery"
-        else "csv_explicit_feature_id"
+        "forward_recovery" if effective_kind == "forward_recovery" else "csv_explicit_feature_id"
     )
     decision_resolver_version = (
-        "forward-recovery-v1"
-        if effective_kind == "forward_recovery"
-        else "explicit-feature-id-v1"
+        "forward-recovery-v1" if effective_kind == "forward_recovery" else "explicit-feature-id-v1"
     )
 
     import_batch_id = str(
@@ -3337,9 +3299,7 @@ async def _record_import_provenance(
     for row, row_payload in zip(rows, canonical_rows, strict=True):
         identity = identities[row.row_number]
         item_is_archived = identity["archived_at"] is not None
-        current_feature_id = (
-            str(identity["feature_id"]) if identity["feature_id"] else None
-        )
+        current_feature_id = str(identity["feature_id"]) if identity["feature_id"] else None
         if not item_is_archived and current_feature_id != row.feature_id:
             raise RuntimeError("import 직후 item Feature가 normalized row와 다릅니다.")
         import_row_id = str(uuid4())
@@ -3376,12 +3336,8 @@ async def _record_import_provenance(
                     "evidence": {
                         "source_row_sha256": source_row_sha256,
                         "requested_feature_id": row.feature_id,
-                        "normalized_place_name": normalize_korean_text(
-                            row.place_name
-                        ),
-                        "normalized_address_hint": normalize_korean_text(
-                            row.address_hint
-                        ),
+                        "normalized_place_name": normalize_korean_text(row.place_name),
+                        "normalized_address_hint": normalize_korean_text(row.address_hint),
                     },
                     "supersedes_decision_id": previous_decision_id,
                 }
@@ -3576,9 +3532,7 @@ async def import_curation_rows(
         await _lock_curation_write_boundary(session)
         collection_keys = sorted({row.collection_key for row in rows})
         await _lock_collection_keys(session, collection_keys)
-        feature_ids = sorted(
-            {str(row.feature_id) for row in rows if row.feature_id is not None}
-        )
+        feature_ids = sorted({str(row.feature_id) for row in rows if row.feature_id is not None})
         if feature_ids:
             active_feature_ids = set(
                 (
