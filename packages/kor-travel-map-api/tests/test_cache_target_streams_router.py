@@ -72,9 +72,7 @@ class _FakeCacheTargetService:
             operation_id=RECONCILIATION_REQUEST_ID,
             status="superseded",
             snapshot_id=RECONCILIATION_SNAPSHOT_ID,
-            status_url=(
-                f"/v1/ops/cache-target-operations/{RECONCILIATION_REQUEST_ID}"
-            ),
+            status_url=(f"/v1/ops/cache-target-operations/{RECONCILIATION_REQUEST_ID}"),
         )
         self.restore_calls: list[dict[str, Any]] = []
         self.replay_calls: list[dict[str, Any]] = []
@@ -161,10 +159,7 @@ class _FakeCacheTargetService:
             operation_id="99999999-9999-4999-8999-999999999999",
             status="succeeded",
             snapshot_id=RECONCILIATION_SNAPSHOT_ID,
-            status_url=(
-                "/v1/ops/cache-target-operations/"
-                "99999999-9999-4999-8999-999999999999"
-            ),
+            status_url=("/v1/ops/cache-target-operations/99999999-9999-4999-8999-999999999999"),
             retry_after_seconds=None,
         )
         self.reconciliation_snapshot_result: Any = SimpleNamespace(
@@ -394,9 +389,7 @@ def _restore_fence_record_payload(
         "invalidated_claim_count": 2,
         "superseded_delivery_count": 4,
         "superseded_reconciliation_count": superseded_reconciliation_count,
-        "superseded_reconciliation_request_id": (
-            superseded_reconciliation_request_id
-        ),
+        "superseded_reconciliation_request_id": (superseded_reconciliation_request_id),
     }
 
 
@@ -452,9 +445,7 @@ def test_restore_fence_receipt_accepts_correlated_reconciliation_fields(
 def test_restore_fence_openapi_encodes_receipt_correlation_invariant() -> None:
     client = _client(_FakeCacheTargetService())
 
-    schema = client.app.openapi()["components"]["schemas"][
-        "CacheTargetRestoreFenceRecord"
-    ]
+    schema = client.app.openapi()["components"]["schemas"]["CacheTargetRestoreFenceRecord"]
 
     assert schema["oneOf"] == [
         {
@@ -541,9 +532,7 @@ def test_ops_recovery_operation_exposes_superseded_status_enum() -> None:
     service = _FakeCacheTargetService()
     client = _client(service)
 
-    response = client.get(
-        f"/v1/ops/cache-target-operations/{RECONCILIATION_REQUEST_ID}"
-    )
+    response = client.get(f"/v1/ops/cache-target-operations/{RECONCILIATION_REQUEST_ID}")
 
     assert response.status_code == 200, response.text
     assert response.json()["data"]["status"] == "superseded"
@@ -1253,9 +1242,7 @@ def test_service_reconciliation_seal_uses_request_etag_and_exact_replay(
 
     assert first.status_code == 200, first.text
     assert first.headers["etag"] == f'"{RECONCILIATION_REQUEST_ID}:2"'
-    assert service.reconciliation_metadata_calls == [
-        {"request_id": RECONCILIATION_REQUEST_ID}
-    ]
+    assert service.reconciliation_metadata_calls == [{"request_id": RECONCILIATION_REQUEST_ID}]
     assert service.reconciliation_seal_calls == [
         {
             "request_id": RECONCILIATION_REQUEST_ID,
@@ -1331,9 +1318,7 @@ def test_service_reconciliation_seal_authorizes_stored_request_before_write(
 
     assert response.status_code == 403
     assert response.json()["code"] == "CACHE_TARGET_EXTERNAL_SYSTEM_FORBIDDEN"
-    assert service.reconciliation_metadata_calls == [
-        {"request_id": RECONCILIATION_REQUEST_ID}
-    ]
+    assert service.reconciliation_metadata_calls == [{"request_id": RECONCILIATION_REQUEST_ID}]
     assert ledger_calls == []
     assert service.reconciliation_seal_calls == []
     assert service.reconciliation_snapshot_calls == []
@@ -1527,9 +1512,7 @@ def test_service_reconciliation_completion_authorizes_stored_request_before_writ
 
     assert response.status_code == 403
     assert response.json()["code"] == "CACHE_TARGET_EXTERNAL_SYSTEM_FORBIDDEN"
-    assert service.reconciliation_metadata_calls == [
-        {"request_id": RECONCILIATION_REQUEST_ID}
-    ]
+    assert service.reconciliation_metadata_calls == [{"request_id": RECONCILIATION_REQUEST_ID}]
     assert ledger_calls == []
     assert service.reconciliation_seal_calls == []
     assert service.reconciliation_snapshot_calls == []
@@ -1568,9 +1551,7 @@ def test_reconciliation_snapshot_checks_external_system_before_item_read() -> No
 
     assert response.status_code == 403
     assert response.json()["code"] == "CACHE_TARGET_EXTERNAL_SYSTEM_FORBIDDEN"
-    assert service.reconciliation_metadata_calls == [
-        {"request_id": RECONCILIATION_REQUEST_ID}
-    ]
+    assert service.reconciliation_metadata_calls == [{"request_id": RECONCILIATION_REQUEST_ID}]
     assert service.reconciliation_snapshot_calls == []
 
 
@@ -1654,9 +1635,7 @@ def test_reconciliation_mutations_missing_request_return_404_before_write(
 
     assert response.status_code == 404
     assert response.json()["code"] == "RECONCILIATION_NOT_FOUND"
-    assert service.reconciliation_metadata_calls == [
-        {"request_id": RECONCILIATION_REQUEST_ID}
-    ]
+    assert service.reconciliation_metadata_calls == [{"request_id": RECONCILIATION_REQUEST_ID}]
     assert ledger_calls == []
     assert service.reconciliation_seal_calls == []
     assert service.reconciliation_snapshot_calls == []
@@ -1682,8 +1661,7 @@ def test_service_reconciliation_completion_distinguishes_412_and_409(
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
     client = _client(service, settings=_settings(scopes=["cache-target:snapshot"]))
     path = (
-        "/v1/service/cache-target-reconciliations/"
-        "88888888-8888-4888-8888-888888888888/completions"
+        "/v1/service/cache-target-reconciliations/88888888-8888-4888-8888-888888888888/completions"
     )
     body = {
         "external_system": EXTERNAL_SYSTEM,

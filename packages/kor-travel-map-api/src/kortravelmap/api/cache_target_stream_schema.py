@@ -690,7 +690,6 @@ class CacheTargetDeadLetterRecord(BaseModel):
         return self
 
 
-
 class CacheTargetDeadLetterListData(BaseModel):
     """Dead-letter list data."""
 
