@@ -4446,7 +4446,10 @@ export interface components {
         CacheTargetClaimRequest: {
             /** Consumer Id */
             consumer_id: string;
-            /** External System */
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
             external_system: string;
             /**
              * Lease Seconds
@@ -4658,7 +4661,10 @@ export interface components {
          * @description 외부 POI/cache target key 목록 기반 갱신 scope.
          */
         CacheTargetKeysScope: {
-            /** External System */
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
             external_system: string;
             /** Radius Km */
             radius_km?: number | null;
@@ -4743,7 +4749,10 @@ export interface components {
              * Format: uuid
              */
             event_id: string;
-            /** External System */
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
             external_system: string;
             /**
              * Lease Token
@@ -4803,7 +4812,10 @@ export interface components {
             consumer_id: string;
             /** Expected Restore Epoch */
             expected_restore_epoch: number;
-            /** External System */
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
             external_system: string;
             /** Reason */
             reason: string;
@@ -4819,7 +4831,10 @@ export interface components {
             consumer_id: string;
             /** Expected Restore Epoch */
             expected_restore_epoch: number;
-            /** External System */
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
             external_system: string;
             /**
              * Snapshot Id
@@ -4859,7 +4874,10 @@ export interface components {
          * @description Admin reconciliation command body.
          */
         CacheTargetReconciliationRequest: {
-            /** External System */
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
             external_system: string;
             /** Reason */
             reason: string;
@@ -4878,7 +4896,10 @@ export interface components {
             created_at: string;
             /** Entity Tag */
             entity_tag: string;
-            /** High Watermark Cursor */
+            /**
+             * High Watermark Cursor
+             * @description 이 immutable snapshot material이 안전하게 포함한 global outbox replay lower-bound. snapshot 생성 뒤 생긴 비material event가 있으면 현재 global max보다 과거일 수 있으므로, consumer는 이 cursor 이후 event를 중복 허용 방식으로 모두 재처리해야 한다.
+             */
             high_watermark_cursor: string;
             /** Merkle Root */
             merkle_root: string;
@@ -4915,7 +4936,10 @@ export interface components {
             expected_merkle_root: string;
             /** Expected Restore Epoch */
             expected_restore_epoch: number;
-            /** External System */
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
             external_system: string;
         };
         /**
@@ -4947,7 +4971,10 @@ export interface components {
          * @description Service refresh request creation body.
          */
         CacheTargetRefreshRequest: {
-            /** External System */
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
             external_system: string;
             /** Reason */
             reason: string;
@@ -5110,10 +5137,13 @@ export interface components {
             /**
              * Expires At
              * Format: date-time
-             * @description generic snapshot cursor의 만료 시각. generic first page는 최소 1시간의 잔여 traversal window를 보장하며, reconciliation-bound snapshot은 request가 running인 동안 이 시각과 무관하게 page할 수 있다.
+             * @description generic snapshot cursor의 만료 시각. generic first page는 서버 handoff 직전 최소 75분을 검사하고 15분 response margin을 둬 client 수신 후 최소 60분의 traversal window를 보장한다. reconciliation-bound snapshot은 request가 running인 동안 이 시각과 무관하게 page할 수 있다.
              */
             expires_at: string;
-            /** High Watermark Cursor */
+            /**
+             * High Watermark Cursor
+             * @description 이 immutable snapshot material이 안전하게 포함한 global outbox replay lower-bound. snapshot 생성 뒤 생긴 비material event가 있으면 현재 global max보다 과거일 수 있으므로, consumer는 이 cursor 이후 event를 중복 허용 방식으로 모두 재처리해야 한다.
+             */
             high_watermark_cursor: string;
             /** Items */
             items: components["schemas"]["CacheTargetSnapshotRow"][];
@@ -5163,7 +5193,10 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /** High Watermark Cursor */
+            /**
+             * High Watermark Cursor
+             * @description 이 immutable snapshot material이 안전하게 포함한 global outbox replay lower-bound. snapshot 생성 뒤 생긴 비material event가 있으면 현재 global max보다 과거일 수 있으므로, consumer는 이 cursor 이후 event를 중복 허용 방식으로 모두 재처리해야 한다.
+             */
             high_watermark_cursor: string;
             /** Merkle Root */
             merkle_root: string;
@@ -13116,9 +13149,29 @@ export interface operations {
                     "application/json": components["schemas"]["CacheTargetOperationResponse"];
                 };
             };
+            /** @description snapshot item 수가 100,000개 materialization 상한을 초과함. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description snapshot writer barrier 또는 materialization 제한 시간 초과. */
+            503: {
+                headers: {
+                    /** @description snapshot 작업 재시도 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -16642,6 +16695,7 @@ export interface operations {
     list_poi_cache_target_records_v1_admin_poi_cache_targets_get: {
         parameters: {
             query?: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system?: string | null;
                 update_enabled?: boolean | null;
                 include_deleted?: boolean;
@@ -16690,7 +16744,9 @@ export interface operations {
             };
             header?: never;
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
                 target_key: string;
             };
             cookie?: never;
@@ -16742,7 +16798,9 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
                 target_key: string;
             };
             cookie?: never;
@@ -16801,7 +16859,9 @@ export interface operations {
                 "If-Match": string;
             };
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
                 target_key: string;
             };
             cookie?: never;
@@ -21295,6 +21355,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description snapshot item 수가 100,000개 materialization 상한을 초과함. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -21307,6 +21376,17 @@ export interface operations {
             /** @description missing If-Match */
             428: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description snapshot writer barrier 또는 materialization 제한 시간 초과. */
+            503: {
+                headers: {
+                    /** @description snapshot 작업 재시도 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -21381,6 +21461,7 @@ export interface operations {
                 "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
             };
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
             };
             cookie?: never;
@@ -21396,9 +21477,40 @@ export interface operations {
                     "application/json": components["schemas"]["CacheTargetSnapshotResponse"];
                 };
             };
+            /** @description snapshot item 수가 100,000개 materialization 상한을 초과함. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 미만료·미참조 generic snapshot copy 상한 도달. 가장 오래된 snapshot 만료 뒤 재시도한다. */
+            429: {
+                headers: {
+                    /** @description 가장 오래된 snapshot 만료까지의 DB 기준 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description snapshot 생성 경합, handoff TTL 부족, writer barrier 또는 materialization 제한 시간 초과. */
+            503: {
+                headers: {
+                    /** @description snapshot 작업 재시도 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -21424,6 +21536,7 @@ export interface operations {
                 "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
             };
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
             };
             cookie?: never;
@@ -21481,6 +21594,7 @@ export interface operations {
                 "If-Match": string;
             };
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
             };
             cookie?: never;
@@ -21550,7 +21664,9 @@ export interface operations {
                 "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
             };
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
                 target_key: string;
             };
             cookie?: never;
@@ -21610,7 +21726,9 @@ export interface operations {
                 "If-Match": string;
             };
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
                 target_key: string;
             };
             cookie?: never;
@@ -21681,7 +21799,9 @@ export interface operations {
                 "If-Match": string;
             };
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
                 target_key: string;
             };
             cookie?: never;
