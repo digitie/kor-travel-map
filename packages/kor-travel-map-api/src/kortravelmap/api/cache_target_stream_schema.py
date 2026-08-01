@@ -245,7 +245,12 @@ class CacheTargetRestoreFenceRequest(BaseModel):
 
 
 class CacheTargetRestoreFenceRecord(CacheTargetStreamControlRecord):
-    """Restore-fence control state와 durable effect receipt."""
+    """Restore-fence control state와 durable effect receipt.
+
+    불변조건: `superseded_reconciliation_count == 0` iff
+    `superseded_reconciliation_request_id == null`이고, count가 `1` iff request ID가
+    non-null이다.
+    """
 
     fence_id: UUID
     previous_restore_epoch: int = Field(ge=1)
@@ -254,6 +259,19 @@ class CacheTargetRestoreFenceRecord(CacheTargetStreamControlRecord):
     superseded_delivery_count: int = Field(ge=0)
     superseded_reconciliation_count: int = Field(ge=0, le=1)
     superseded_reconciliation_request_id: UUID | None
+
+    @model_validator(mode="after")
+    def validate_superseded_reconciliation_receipt(
+        self,
+    ) -> CacheTargetRestoreFenceRecord:
+        count_has_request = self.superseded_reconciliation_count == 1
+        request_is_present = self.superseded_reconciliation_request_id is not None
+        if count_has_request != request_is_present:
+            raise ValueError(
+                "superseded_reconciliation_count와 "
+                "superseded_reconciliation_request_id가 일치해야 합니다."
+            )
+        return self
 
 
 class CacheTargetRestoreFenceResponse(BaseModel):

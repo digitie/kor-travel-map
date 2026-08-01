@@ -600,6 +600,9 @@ restore-fence `201`의 `data`는 새 stream control과 함께 `fence_id`, 직전
 reconciliation을 terminal `superseded`/`restore_fenced`로 원자 종결한다. exact Idempotency-Key replay는
 최초 count/UUID/version을 그대로 반환하며 구 request의 snapshot/seal/completion은
 `RECONCILIATION_SUPERSEDED` `409`다.
+HTTP DTO는 `superseded_reconciliation_count == 0` iff request ID가 `null`, count가 `1` iff
+request ID가 non-null인 상관 불변식을 after validator로 강제한다. OpenAPI schema description도
+동일한 exact 계약 문장을 노출해 consumer contract pin이 검증할 수 있게 한다.
 `GET /v1/ops/cache-target-operations/{operation_id}`의 status는 자유 문자열이 아니라 reconciliation
 `preparing|running|succeeded|failed|superseded`, delivery
 `pending|leased|retry|dead|delivered|superseded`, admin 접수 `accepted`의 합집합 enum이다.

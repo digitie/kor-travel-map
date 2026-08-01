@@ -26,7 +26,9 @@
   `snapshot_id`와 함께 고정한다. admin reconciliation operation receipt도 생성한
   `snapshot_id`를 반환해 후속 stream read가 같은 snapshot에 도달했는지 검증할 수 있다.
   restore-fence 응답은 무효화 claim 수, 대체 delivery 수, 대체 reconciliation 수와 request UUID를
-  durable fence receipt 그대로 노출하며 exact replay도 최초 값과 version을 보존한다.
+  durable fence receipt 그대로 노출하며 exact replay도 최초 값과 version을 보존한다. HTTP
+  DTO는 대체 reconciliation 수가 `0`이면 UUID가 `null`, `1`이면 UUID가 non-null인
+  상관 불변식을 fail-close한다.
 - **OPENAPI (breaking)**: 공개 사용자와 서버 간 profile을 분리했다.
   `@kor-travel-map/user-client`는 `RoutePolicy.SERVICE` batch 타입을 더는 노출하지 않으며,
   서버 간 소비자는 `openapi.service.json`을 pin한다.

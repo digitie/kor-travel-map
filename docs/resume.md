@@ -79,6 +79,16 @@ T-VN-H35 배포를 B′ 경로로 진행한다. `0064~0073` 마이그레이션�
 분리해 돌린다. 배포 전 공개 표면 before/after exact count를 restore clone에서 다시
 잰다 — 이번엔 `0073`까지 포함해서.
 
+## 2026-08-01 (codex) — T-VN-41 restore fence receipt 상관 불변식
+
+DB CHECK에 있던 `superseded_reconciliation_count`/request UUID 상관 불변식을 HTTP
+응답 DTO에도 fail-close로 맞췄다. count `0`/UUID `null`, count `1`/UUID non-null만
+허용하고 나머지 두 조합은 validation error다. JSON Schema가 필드 간 관계를 직접
+표현하지 못하므로 OpenAPI description의 exact invariant 문구를 회귀로 고정한다.
+
+**다음 한 작업**: PinVi contract pin을 새 functional owner SHA와 service OpenAPI SHA-256으로
+갱신하고 producer/consumer CI와 isolated restore contract를 검증한다.
+
 ## 2026-08-01 (codex) — T-VN-41 restore fence reconciliation 교착 제거
 
 restore fence가 active `preparing|running` reconciliation을 남겨 구 completion은 epoch 변경으로

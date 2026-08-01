@@ -18,6 +18,7 @@ from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import CACHE_TARGET_CONSUMER_HEADER, SERVICE_TOKEN_HEADER
 from kortravelmap.api.cache_target_stream_schema import (
     CacheTargetEventRecord,
+    CacheTargetRestoreFenceRecord,
     CacheTargetStreamStatusRecord,
 )
 from kortravelmap.api.cache_target_stream_service import get_cache_target_stream_service
@@ -372,6 +373,93 @@ def _upsert_body() -> dict[str, Any]:
         "update_enabled": True,
         "occurred_at": NOW.isoformat(),
     }
+
+
+def _restore_fence_record_payload(
+    *,
+    superseded_reconciliation_count: int,
+    superseded_reconciliation_request_id: str | None,
+) -> dict[str, Any]:
+    return {
+        "external_system": EXTERNAL_SYSTEM,
+        "restore_epoch": 5,
+        "control_version": 3,
+        "entity_tag": f'"{EXTERNAL_SYSTEM}:3"',
+        "state": "fenced",
+        "fence_id": "77777777-7777-4777-8777-777777777777",
+        "previous_restore_epoch": 4,
+        "previous_control_version": 2,
+        "invalidated_claim_count": 2,
+        "superseded_delivery_count": 4,
+        "superseded_reconciliation_count": superseded_reconciliation_count,
+        "superseded_reconciliation_request_id": (
+            superseded_reconciliation_request_id
+        ),
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("count", "request_id"),
+    [
+        (0, RECONCILIATION_REQUEST_ID),
+        (1, None),
+    ],
+)
+def test_restore_fence_receipt_rejects_uncorrelated_reconciliation_fields(
+    count: int,
+    request_id: str | None,
+) -> None:
+    with pytest.raises(ValidationError, match="request_id가 일치해야"):
+        CacheTargetRestoreFenceRecord.model_validate(
+            _restore_fence_record_payload(
+                superseded_reconciliation_count=count,
+                superseded_reconciliation_request_id=request_id,
+            )
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("count", "request_id"),
+    [
+        (0, None),
+        (1, RECONCILIATION_REQUEST_ID),
+    ],
+)
+def test_restore_fence_receipt_accepts_correlated_reconciliation_fields(
+    count: int,
+    request_id: str | None,
+) -> None:
+    record = CacheTargetRestoreFenceRecord.model_validate(
+        _restore_fence_record_payload(
+            superseded_reconciliation_count=count,
+            superseded_reconciliation_request_id=request_id,
+        )
+    )
+
+    assert record.superseded_reconciliation_count == count
+    assert (
+        str(record.superseded_reconciliation_request_id)
+        if record.superseded_reconciliation_request_id is not None
+        else None
+    ) == request_id
+
+
+@pytest.mark.unit
+def test_restore_fence_openapi_documents_receipt_correlation_invariant() -> None:
+    client = _client(_FakeCacheTargetService())
+
+    schema = client.app.openapi()["components"]["schemas"][
+        "CacheTargetRestoreFenceRecord"
+    ]
+
+    assert schema["description"] == (
+        "Restore-fence control state와 durable effect receipt.\n\n"
+        "불변조건: `superseded_reconciliation_count == 0` iff\n"
+        "`superseded_reconciliation_request_id == null`이고, count가 `1` iff "
+        "request ID가\nnon-null이다."
+    )
 
 
 @pytest.mark.unit

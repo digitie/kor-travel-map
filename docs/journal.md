@@ -86,6 +86,16 @@
 - `test_alembic_upgrade.py`가 head revision을 리터럴로 박아 마이그레이션 추가마다
   깨졌다. ScriptDirectory에서 계산하도록 바꿨다.
 
+## 2026-08-01 (codex) — T-VN-41 restore fence receipt HTTP 상관 불변식
+
+- codegraph sync 후 `CacheTargetRestoreFenceRecord`의 schema/route 영향을 확인하고 HTTP
+  응답 계약으로 변경을 한정했다.
+- Pydantic after validator는 count `0` iff UUID `null`, count `1` iff UUID non-null을
+  강제하며 두 valid/두 invalid 조합을 schema 회귀로 고정한다.
+- OpenAPI가 필드 간 상관을 직접 표현하지 못하는 경계는
+  `CacheTargetRestoreFenceRecord.description`의 exact invariant 문구로 노출하고 테스트한다.
+- API/OpenAPI 집중 회귀 **57건**, targeted Ruff, strict mypy, diff-check가 통과했다.
+
 ## 2026-08-01 (codex) — T-VN-41 restore fence active reconciliation supersession
 
 - exact head `0755070d`와 clean 상태에서 시작해 `CacheTargetRestoreFenceResult`와
