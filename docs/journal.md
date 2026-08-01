@@ -61,6 +61,16 @@
 - 앞서 "swap 고갈은 위험 신호"라고 한 것은 **정정한다** — sudo로도 VmSwap을 잡은
   프로세스가 없고 `available` 7.9Gi다. 유휴 스왑이지 메모리 압박이 아니다.
 
+## 2026-08-01 (codex) — T-VN-41 migration rebase 선형화
+
+- PR #917의 46개 commit을 최신 main에 rebase했다. 기능 commit은 range-diff에서 동일했고,
+  `test_alembic_upgrade.py`는 main의 동적 head 탐지를 보존했다.
+- main에 새 `0073`/`0074`가 있으므로 cache-target migration을
+  `0075_cache_target_outbox`로 재번호화하고 `0074_curation_item_rekey_cascade`를 parent로 삼았다.
+  병렬 head나 호환용 merge revision은 두지 않았다.
+- 새 PostGIS DB에서 전체 체인 upgrade/downgrade를 실행하고, focused 회귀는 직접 predecessor
+  `0074`에서 `0075`로 올린 뒤 다시 `0074`로 내려 H40/H41 스키마를 보존하는 경계를 고정했다.
+
 ## 2026-08-01 — T-VN-H40 `0073` 구현: source-rule link provenance
 
 - `0072`가 공개 표면 fail-close를 넣으며 기존 link을 전부 `legacy_unattributed`로

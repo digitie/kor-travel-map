@@ -63,6 +63,18 @@ T-VN-41 lane이 Playwright buildx 빌드 + 라이브 스택 2벌을 **현재 사
 범위 `0064~0074`, 3(마이그레이션)과 4(`ktdctl deploy`) **사이에 CSV 재import**를 넣는다.
 (중단 게이트 값은 위 게이트 실증 항목에서 **공개 노출 item = 3,265**로 정정됐다.)
 
+## 2026-08-01 (codex) — T-VN-41 migration을 main 최신 head 뒤의 `0075`로 선형화
+
+PR #917을 main에 rebase하면서 T-VN-H40/H41의 `0073_curation_source_rule`과
+`0074_curation_item_rekey_cascade`를 먼저 적용하고, cache-target generation/outbox 스키마를
+`0075_cache_target_outbox`로 재번호화했다. 호환용 merge revision이나 병렬 Alembic head를 만들지
+않고 `0072 → 0073 → 0074 → 0075` 단일 체인을 유지한다. 새 PostGIS DB에서 전체 체인
+upgrade/downgrade와 직접 경계 `0074 ↔ 0075` 왕복 검증을 통과했다.
+
+**다음 한 작업**: 독립 적대적 리뷰어 2명이 지적한 rebase 후 PinVi provenance 재핀과
+`0074 ↔ 0075` 직접 downgrade 검증을 반영하고, exact head CI와 n150 격리 live UI recovery
+E2E를 다시 통과시킨 뒤 Map/PinVi PR을 순서대로 머지한다.
+
 ## 2026-08-01 — T-VN-H40 `0073` 구현 완료, T-VN-H35 배포는 여전히 대기
 
 `0073_curation_source_rule`을 넣었다. `0072`가 공개 표면 fail-close를 넣으면서 기존

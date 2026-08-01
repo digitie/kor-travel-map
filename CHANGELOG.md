@@ -7,7 +7,7 @@
 
 ### cache-target generation outbox producer foundation (2026-07-31, T-VN-41)
 
-- **DATABASE (breaking)**: migration `0073_cache_target_outbox`로 source generation/restore epoch,
+- **DATABASE (breaking)**: migration `0075_cache_target_outbox`로 source generation/restore epoch,
   durable head/tombstone, transaction outbox, delivery/claim/dead-letter, fixed snapshot과
   reconciliation 상태를 정규화했다.
 - **CORRECTNESS**: target/link/refresh 결과 event는 원본 mutation과 같은 transaction에서

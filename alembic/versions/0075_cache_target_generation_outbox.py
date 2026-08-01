@@ -1,7 +1,7 @@
 """cache target generation, restore fence와 result outbox를 정규화한다.
 
-Revision ID: 0073_cache_target_outbox
-Revises: 0072_curation_provenance
+Revision ID: 0075_cache_target_outbox
+Revises: 0074_curation_item_rekey_cascade
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0073_cache_target_outbox"
-down_revision: str | Sequence[str] | None = "0072_curation_provenance"
+revision: str = "0075_cache_target_outbox"
+down_revision: str | Sequence[str] | None = "0074_curation_item_rekey_cascade"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

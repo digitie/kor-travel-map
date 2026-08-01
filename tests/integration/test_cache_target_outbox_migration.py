@@ -1,4 +1,4 @@
-"""0073 cache target outbox migration 회귀."""
+"""0075 cache target outbox migration 회귀."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from kortravelmap.infra.models import (
 
 pytestmark = pytest.mark.integration
 
-_PRE_REVISION = "0072_curation_provenance"
-_TARGET_REVISION = "0073_cache_target_outbox"
+_PRE_REVISION = "0074_curation_item_rekey_cascade"
+_TARGET_REVISION = "0075_cache_target_outbox"
 
 
 def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
@@ -36,9 +36,9 @@ def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
         command.upgrade(config, revision)
 
 
-async def test_0073_phase_schema_and_downgrade(pg_container: Any) -> None:
+async def test_0075_phase_schema_and_downgrade(pg_container: Any) -> None:
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
-    database = f"cache_target_0073_{uuid4().hex}"
+    database = f"cache_target_0075_{uuid4().hex}"
     target_dsn = make_url(admin_dsn).set(database=database).render_as_string(
         hide_password=False
     )
@@ -232,9 +232,48 @@ async def test_0073_phase_schema_and_downgrade(pg_container: Any) -> None:
             append_only_function = await connection.scalar(
                 text("SELECT to_regprocedure('ops.reject_cache_target_history_mutation()')")
             )
+            source_rule_function = await connection.scalar(
+                text(
+                    "SELECT to_regprocedure("
+                    "'feature.issue_curation_source_rule_decision()')"
+                )
+            )
+            source_rule_trigger = await connection.scalar(
+                text(
+                    "SELECT tgname FROM pg_trigger "
+                    "WHERE tgrelid = 'feature.curation_items'::regclass "
+                    "AND tgname = 'trg_curation_items_source_rule_decision' "
+                    "AND NOT tgisinternal"
+                )
+            )
+            rekey_function = await connection.scalar(
+                text(
+                    "SELECT to_regprocedure("
+                    "'feature.reject_curation_history_mutation()')"
+                )
+            )
+            cascaded_fk_count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM pg_constraint "
+                    "WHERE connamespace = 'feature'::regnamespace "
+                    "AND contype = 'f' AND confupdtype = 'c' "
+                    "AND conname IN ("
+                    "'fk_curation_import_rows_item',"
+                    "'fk_curation_link_decisions_item',"
+                    "'fk_curation_link_decisions_import_row',"
+                    "'fk_curation_link_decisions_supersedes')"
+                )
+            )
             revision = await connection.scalar(text("SELECT version_num FROM alembic_version"))
         assert request_table is None
         assert append_only_function is None
+        assert (
+            str(source_rule_function)
+            == "feature.issue_curation_source_rule_decision()"
+        )
+        assert source_rule_trigger == "trg_curation_items_source_rule_decision"
+        assert str(rekey_function) == "feature.reject_curation_history_mutation()"
+        assert cascaded_fk_count == 4
         assert revision == _PRE_REVISION
     finally:
         await target_engine.dispose()
