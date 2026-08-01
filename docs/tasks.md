@@ -610,6 +610,23 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   그리고 **마이그레이션 29분은 `ktdctl deploy`의 `--wait-timeout 120`(하드코딩)을 14배
   초과한다** — B′ 경로(마이그레이션을 배포와 분리)의 근거가 추정이 아니라 실측이 됐다.
 
+  > **정정 (2026-08-01) — 이 1,754초는 배포 시간의 근거로 쓸 수 없다.**
+  > 같은 절차를 `0074`까지 포함해 다시 재니 개발 환경(WSL)에서 **79.9초**가 나왔다.
+  > 22배 차이의 원인을 조사하니 **측정 조건 자체가 배포 조건과 다르다**:
+  > `scripts/h35/h35_migrate.sh`는 마이그레이션 **전에 dagster-daemon을 정지시키는데**,
+  > 1,754초 측정도 이번 n150 재측정도 **dagster가 도는 상태에서** 쟀다.
+  > n150 실측 시도 중 확인한 그 시점 호스트 상태 — 4코어에 load average 11.6,
+  > iowait 44.7%, 동시에 T-VN-41 lane의 Playwright buildx 빌드 + 제품 스택 2벌 라이브
+  > 검증 + prod dagster ETL이 함께 돌고 있었다(누적 I/O 66GB read/91GB write 유발로
+  > 판단해 측정을 중단하고 정리했다).
+  >
+  > **결론: 두 수치 모두 경합을 잰 것이고 어느 쪽도 배포 시간이 아니다.** 다만
+  > **B′ 경로 자체는 유지한다** — 배포 절차가 이미 dagster를 멈추고 시간 제한 없는
+  > 일회성 컨테이너로 마이그레이션을 돌리므로, 정확한 초수를 몰라도 `--wait-timeout 120`
+  > 리스크가 구조적으로 제거된다. 즉 이 수치는 **B′의 근거로 필요하지 않다.**
+  > (하드웨어 무관한 논리 결과 — trusted 3,043/공백 223, H41 FK CASCADE 동작 — 는
+  > 격리 clone에서 정상 검증됐다.)
+
   ## 판정 (2026-07-31 prod 실측) — **근거는 실재한다. `legacy_unattributed`는 틀린 분류다.**
 
   ```
@@ -713,10 +730,30 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > 위해 `csv_explicit_feature_id` basis와 import batch/row 계보를 만들어 뒀다.
   > 정본 CSV를 **재import하면** 설계된 경로로 진짜 import 계보와 함께 근거가 붙는다.
 
-  **결론 — 배포 절차에 단계를 하나 넣는다.** 마이그레이션(`0064~0073`) 직후,
+  **결론 — 배포 절차에 단계를 하나 넣는다.** 마이그레이션(`0064~0074`) 직후,
   **새 이미지를 올리기 전에** 공식 curation CSV 5개를 재import한다. 구 이미지는
   `_trusted_link_sql`을 모르므로 그 구간에도 계속 서빙한다 → **공개 표면 공백 0**.
   배포 게이트: 재import 후 trusted link이 **3,266**인지 확인하고, 아니면 중단한다.
+
+  #### 재import가 정말 복구하는지 — 코드 경로로 확정 (2026-08-01)
+
+  "재import하면 붙는다"는 처음엔 **추론이었다.** #907/#910이 자동 링크를 조였으므로
+  조인 resolver가 이 222건을 더 이상 채택하지 않을 가능성이 실재했다. 경로를 따라가
+  확정했다:
+
+  1. `_RESOLVE_FEATURES_BATCH_SQL`(`curation_repo.py:1608`)의 UNION 첫 분기는
+     `requested.feature_id IS NOT NULL`일 때 **그 feature_id로 정확히 1행**만 낸다
+     (`deleted_at IS NULL AND status NOT IN ('deleted','hidden')` 조건). 이름 기반
+     후보 탐색(둘째 분기)은 `feature_id IS NULL`일 때만 돈다.
+  2. `_adopted_match`(`routers/curations.py:618`)는 *"CSV가 명시한 exact Feature ID만
+     자동 채택한다"* — `row.feature_id`가 있고 `len(matches) == 1`이면 채택한다.
+  3. 채택되면 `import_curation_rows`가 `match_basis='csv_explicit_feature_id'` decision을
+     만들고 `supersedes_decision_id`로 직전 결정을 이으며 `accepted_link_decision_id`를
+     채운다(`curation_repo.py:3324` 부근).
+
+  **#907/#910이 제거한 것은 `address_hint` 단독 자동 링크이고, 명시 `feature_id`
+  경로는 그대로다.** 따라서 CSV 222행(전부 `feature_id` 보유)은 대상 Feature가 살아
+  있는 한 전량 복구된다 — 이것이 `0073`에 휴리스틱을 넣지 않고 재import로 미룬 근거다.
 
   ### ② 모든 dedup 병합이 abort한다 — `T-VN-H41` (신규, `0072` 결함)
 
@@ -875,6 +912,23 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > 3→4 사이에 prod가 **새 스키마 + 구 이미지**로 잠깐 돈다. `0069` 방향은 무해하지만
   > **`0065`가 arbiter 인덱스를 바꾸므로 그 창에 curation write가 들어오면 깨진다** — writer를
   > 멈춘 채 곧바로 4로 넘어간다.
+  >
+  > ### 확정된 최종 순서 (2026-08-01, H40/H41 반영)
+  > 범위가 `0064~0072`에서 **`0064~0074`**로 늘었고, 3과 4 **사이에** CSV 재import가 들어간다.
+  >
+  > | # | 단계 | 왜 이 위치인가 |
+  > | --- | --- | --- |
+  > | 1 | writer-quiesced 백업 | 유일 복구점(`archive_mode=off`) |
+  > | 2 | candidate build-only | fence 아래 성립 |
+  > | 3 | `alembic upgrade head` (일회성 컨테이너, dagster 정지, 시간제한 없음) | `--wait-timeout 120` 회피 |
+  > | **3.5** | **공식 curation CSV 5개 재import** | `0072`가 어둡게 만든 **223건**을 되살린다. 이 시점엔 구 이미지가 서빙 중이고 구 이미지는 `_trusted_link_sql`을 모르므로 **사용자에게 보이는 공백이 0**이다. 4 이후로 미루면 그 순간부터 223건이 사라진다. |
+  > | 4 | `ktdctl pinvi-pair deploy` | 이미 head라 entrypoint upgrade가 no-op |
+  > | 5 | 실증 | 아래 게이트 |
+  >
+  > **3.5의 중단 게이트**: 재import 후 trusted link이 **3,266**이어야 한다.
+  > 3,043이면 재import가 안 붙은 것이고, 그 상태로 4를 진행하면 안 된다.
+  > 확인 쿼리는 `curation_link_basis.trusted_basis_sql()`이 만드는 술어를 그대로 쓴다
+  > (열거 하드코딩 금지 — 값이 늘면 게이트만 뒤처진다).
   >
   > ### 배포 target
   > **실행 시점 `origin/main`**(사용자 확정, 0069 포함). main이 계속 전진하므로

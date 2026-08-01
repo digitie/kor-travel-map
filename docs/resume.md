@@ -10,6 +10,36 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-01 — H40/H41 머지 완료, H35 배포 절차 확정 (B′ + CSV 재import)
+
+PR **#918**(문서·스크립트)과 **#919**(`0073`+`0074`)를 8/8 CI green으로 머지했다
+(`origin/main` = `e1afb1cf`). H40의 `0073`(source-rule provenance)과 H41의
+`0074`(curation_item_id rekey CASCADE)가 모두 main에 있다.
+
+**격리 restore clone 재측정으로 확정한 것** — prod 백업을 포트 노출 없는 임시
+컨테이너에 복원하고 `0064~0074`를 적용:
+- trusted link **3,266 → 3,043**, 공백 **223건**(전부 공식 CSV 큐레이션, prod 직접
+  조회 결과와 정확히 일치)
+- H41 FK 4개 전부 `ON UPDATE CASCADE`, decision 달린 item의 PK 재작성 실제 성공
+
+**223건 복구 경로를 코드로 확정했다.** "재import하면 붙는다"는 추론이었는데,
+#907/#910이 자동 링크를 조인 탓에 안 붙을 가능성이 있었다. `_RESOLVE_FEATURES_BATCH_SQL`
+첫 UNION 분기가 명시 `feature_id`로 정확히 1행을 내고 `_adopted_match`가 그것만 채택하므로,
+**조인 것은 `address_hint` 단독 링크이고 명시 `feature_id` 경로는 그대로**다 → 222행 전량 복구된다.
+
+**소요 시간 수치는 폐기했다.** 근거였던 1,754초와 이번 79.9초 모두 **dagster가 도는
+상태**에서 쟀는데 실제 배포는 `h35_migrate.sh`가 dagster를 멈추고 돌린다 — 둘 다 경합을
+잰 값이다. 다만 B′는 시간제한 없는 일회성 컨테이너를 쓰므로 **정확한 초수가 필요 없다.**
+
+n150 재측정 시도는 중단했다: 그 시점 4코어 박스에 load 11.6 / iowait 44.7%였고
+T-VN-41 lane이 Playwright buildx 빌드 + 라이브 스택 2벌을 **현재 사용 중**이라
+(컨테이너 9개, `RestartCount=0`) 정리도 불가능했다. 내 측정 프로세스·컨테이너는 정리했다.
+
+**다음 한 작업**: H35 배포 실행. 절차는 `docs/tasks.md`의 "확정된 최종 순서" 표 —
+범위 `0064~0074`, 3(마이그레이션)과 4(`ktdctl deploy`) **사이에 CSV 재import**를 넣고,
+재import 후 trusted link이 **3,266**인지 확인하는 중단 게이트를 건다. 배포는 비가역이라
+실행 전 사용자 확인이 필요하다.
+
 ## 2026-08-01 — T-VN-H40 `0073` 구현 완료, T-VN-H35 배포는 여전히 대기
 
 `0073_curation_source_rule`을 넣었다. `0072`가 공개 표면 fail-close를 넣으면서 기존
