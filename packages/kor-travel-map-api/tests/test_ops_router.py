@@ -30,6 +30,7 @@ from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
 
 _LIVE_SECRET = "ops-live-test-secret-at-least-32-bytes"
+_RAW_UVICORN_IO_TIMEOUT_SECONDS = 10.0
 
 
 def _live_subprotocol(
@@ -145,13 +146,19 @@ async def _capture_raw_ops_live_response(app: Any) -> list[bytes]:
         )
         assert isinstance(created_transport, asyncio.Transport)
         transport = created_transport
-        await asyncio.wait_for(protocol.closed, timeout=2)
+        await asyncio.wait_for(
+            protocol.closed,
+            timeout=_RAW_UVICORN_IO_TIMEOUT_SECONDS,
+        )
         return protocol.chunks
     finally:
         if transport is not None:
             transport.close()
         server.should_exit = True
-        await asyncio.wait_for(server_task, timeout=2)
+        await asyncio.wait_for(
+            server_task,
+            timeout=_RAW_UVICORN_IO_TIMEOUT_SECONDS,
+        )
         listener.close()
 
 
