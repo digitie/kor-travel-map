@@ -4929,8 +4929,11 @@ export interface components {
             operation_id: string;
             /** Snapshot Id */
             snapshot_id?: string | null;
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "accepted" | "pending" | "leased" | "retry" | "dead" | "delivered" | "preparing" | "running" | "succeeded" | "failed" | "superseded";
             /** Status Url */
             status_url?: string | null;
             /** Stream Entity Tag */
@@ -5011,6 +5014,51 @@ export interface components {
             version: "cache-target-event-v1";
         };
         /**
+         * CacheTargetRestoreFenceRecord
+         * @description Restore-fence control state와 durable effect receipt.
+         */
+        CacheTargetRestoreFenceRecord: {
+            /** Active Reconciliation */
+            active_reconciliation?: (components["schemas"]["CacheTargetReconciliationPreparing"] | components["schemas"]["CacheTargetReconciliationRunning"]) | null;
+            /** Blocked Event Id */
+            blocked_event_id?: string | null;
+            /** Consumer Id */
+            consumer_id?: string | null;
+            /** Control Version */
+            control_version: number;
+            /** Entity Tag */
+            entity_tag: string;
+            /** External System */
+            external_system: string;
+            /**
+             * Fence Id
+             * Format: uuid
+             */
+            fence_id: string;
+            /** Invalidated Claim Count */
+            invalidated_claim_count: number;
+            /** Previous Control Version */
+            previous_control_version: number;
+            /** Previous Restore Epoch */
+            previous_restore_epoch: number;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /**
+             * State
+             * @default active
+             * @enum {string}
+             */
+            state: "active" | "blocked" | "disabled" | "fenced" | "ready" | "restore_fenced";
+            /** Superseded Delivery Count */
+            superseded_delivery_count: number;
+            /** Superseded Reconciliation Count */
+            superseded_reconciliation_count: number;
+            /** Superseded Reconciliation Request Id */
+            superseded_reconciliation_request_id: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
          * CacheTargetRestoreFenceRequest
          * @description Restore-fence command body.
          */
@@ -5027,7 +5075,7 @@ export interface components {
          * @description Restore-fence command result.
          */
         CacheTargetRestoreFenceResponse: {
-            data: components["schemas"]["CacheTargetStreamControlRecord"];
+            data: components["schemas"]["CacheTargetRestoreFenceRecord"];
             meta: components["schemas"]["Meta"];
         };
         /**
