@@ -17,6 +17,19 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-01 (codex) — T-VN-41 fixed snapshot 내구성·수명 보강
+
+- n150 isolated live E2E에서 일반 snapshot 첫 page가 200/UUID를 반환하지만 route session이 commit하지
+  않아 header/items가 rollback되고 다음 cursor가 사라지는 P1을 재현했다.
+- service route가 snapshot 생성·상태 검사·응답 DTO 구성을 한 transaction으로 묶고, 독립 request
+  session에서 동일 UUID/root의 다음 page가 보이는 실제 PostGIS HTTP 회귀를 추가했다.
+- generic 생성은 try-lock single-flight와 epoch/high-watermark cheap identity로 유효 snapshot을 재사용해
+  retry storm이 full head scan/full copy를 반복하지 않는다. 경합은 `503 snapshot_busy`와
+  `Retry-After`로 fail-fast한다.
+- 만료·미참조 snapshot만 item/header 제한 배치로 정리한다. reader header share lock과 GC의
+  parent+item `SKIP LOCKED`를 결합해 header 읽기와 item 읽기 사이 CASCADE/직접 DELETE race를 막는다.
+  reconciliation이 참조하는 snapshot은 terminal 상태도 immutable 감사 영수증으로 보존한다.
+
 ## 2026-08-01 — H35 게이트 ① 실증, 그리고 내가 정한 게이트 값이 틀렸음을 발견
 
 - 격리 clone에서 **실제 import 경로**를 태워 게이트를 재현했다(HTTP/인증만 제외):

@@ -22,6 +22,7 @@ from kortravelmap.core.cache_target_stream import (
     SnapshotMerkleRowV1,
     snapshot_merkle_root,
 )
+from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.cache_target_outbox_repo import cache_target_event_cursor
 from kortravelmap.infra.cache_target_stream_repo import (
     CacheTargetStreamConflict,
@@ -56,8 +57,27 @@ __all__ = [
     "seal_cache_target_reconciliation",
 ]
 
-_SNAPSHOT_TTL_SQL = "interval '1 hour'"
+_SNAPSHOT_TTL_SQL = "interval '2 hours'"
+_SNAPSHOT_REUSE_MIN_TTL_SQL = "interval '75 minutes'"
+_SNAPSHOT_ITEM_PRUNE_LIMIT = 1000
+_SNAPSHOT_HEADER_PRUNE_LIMIT = 100
 _LOWERCASE_HEX = frozenset("0123456789abcdef")
+
+_LOCK_SNAPSHOT_STREAM_SQL = """
+SELECT pg_try_advisory_xact_lock(CAST(:lock_id AS bigint))
+"""
+
+_GET_SNAPSHOT_IDENTITY_SQL = """
+SELECT stream.restore_epoch,
+       COALESCE((
+         SELECT max(event.relay_order)
+         FROM ops.poi_cache_target_outbox_events AS event
+         WHERE event.external_system = stream.external_system
+       ), 0) AS high_watermark_relay_order
+FROM ops.poi_cache_target_streams AS stream
+WHERE stream.external_system = :external_system
+FOR SHARE OF stream
+"""
 
 _CAPTURE_VIEW_SQL = """
 SELECT stream.external_system, stream.restore_epoch,
@@ -110,6 +130,76 @@ SELECT snapshot_id, external_system, restore_epoch,
        created_at, expires_at, expires_at > now() AS valid
 FROM ops.poi_cache_target_snapshots
 WHERE snapshot_id = CAST(:snapshot_id AS uuid)
+FOR SHARE
+"""
+
+_GET_REUSABLE_SNAPSHOT_SQL = f"""
+SELECT snapshot.snapshot_id, snapshot.external_system, snapshot.restore_epoch,
+       snapshot.high_watermark_relay_order, snapshot.item_count,
+       snapshot.merkle_root, snapshot.created_at, snapshot.expires_at
+FROM ops.poi_cache_target_snapshots AS snapshot
+WHERE snapshot.external_system = :external_system
+  AND snapshot.restore_epoch = :restore_epoch
+  AND snapshot.high_watermark_relay_order = :high_watermark_relay_order
+  AND snapshot.expires_at > now() + {_SNAPSHOT_REUSE_MIN_TTL_SQL}
+  AND NOT EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_target_reconciliation_requests AS request
+    WHERE request.snapshot_id = snapshot.snapshot_id
+  )
+ORDER BY snapshot.created_at DESC, snapshot.snapshot_id DESC
+LIMIT 1
+FOR SHARE OF snapshot
+"""
+
+_PRUNE_EXPIRED_SNAPSHOT_ITEMS_SQL = """
+WITH candidates AS (
+  SELECT item.snapshot_id, item.row_number
+  FROM ops.poi_cache_target_snapshot_items AS item
+  JOIN ops.poi_cache_target_snapshots AS snapshot
+    ON snapshot.snapshot_id = item.snapshot_id
+  WHERE snapshot.external_system = :external_system
+    AND snapshot.expires_at <= now()
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_reconciliation_requests AS request
+      WHERE request.snapshot_id = snapshot.snapshot_id
+    )
+  ORDER BY item.snapshot_id, item.row_number
+  LIMIT :limit
+  FOR UPDATE OF snapshot, item SKIP LOCKED
+)
+DELETE FROM ops.poi_cache_target_snapshot_items AS item
+USING candidates
+WHERE item.snapshot_id = candidates.snapshot_id
+  AND item.row_number = candidates.row_number
+RETURNING item.snapshot_id, item.row_number
+"""
+
+_PRUNE_EXPIRED_SNAPSHOT_HEADERS_SQL = """
+WITH candidates AS (
+  SELECT snapshot.snapshot_id
+  FROM ops.poi_cache_target_snapshots AS snapshot
+  WHERE snapshot.external_system = :external_system
+    AND snapshot.expires_at <= now()
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_reconciliation_requests AS request
+      WHERE request.snapshot_id = snapshot.snapshot_id
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshot_items AS item
+      WHERE item.snapshot_id = snapshot.snapshot_id
+    )
+  ORDER BY snapshot.expires_at, snapshot.snapshot_id
+  LIMIT :limit
+  FOR UPDATE OF snapshot SKIP LOCKED
+)
+DELETE FROM ops.poi_cache_target_snapshots AS snapshot
+USING candidates
+WHERE snapshot.snapshot_id = candidates.snapshot_id
+RETURNING snapshot.snapshot_id
 """
 
 _GET_SNAPSHOT_ITEMS_SQL = """
@@ -135,6 +225,7 @@ LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
 JOIN ops.poi_cache_target_streams AS stream
   ON stream.external_system = request.external_system
 WHERE request.request_id = CAST(:request_id AS uuid)
+FOR SHARE OF request, stream
 """
 
 _GET_RECONCILIATION_SQL = """
@@ -831,6 +922,95 @@ async def _create_snapshot(
     return await _persist_snapshot(session, header=header, items=items), items
 
 
+async def _prune_expired_generic_snapshots(
+    session: AsyncSession,
+    *,
+    external_system: str,
+) -> None:
+    await session.execute(
+        text(_PRUNE_EXPIRED_SNAPSHOT_ITEMS_SQL),
+        {
+            "external_system": external_system,
+            "limit": _SNAPSHOT_ITEM_PRUNE_LIMIT,
+        },
+    )
+    await session.execute(
+        text(_PRUNE_EXPIRED_SNAPSHOT_HEADERS_SQL),
+        {
+            "external_system": external_system,
+            "limit": _SNAPSHOT_HEADER_PRUNE_LIMIT,
+        },
+    )
+
+
+async def _create_generic_snapshot(
+    session: AsyncSession,
+    *,
+    external_system: str,
+    limit: int,
+) -> tuple[Any, tuple[CacheTargetSnapshotItem, ...]]:
+    lock_id = advisory_lock_key(f"cache-target-snapshot:{external_system}")
+    acquired = bool(
+        (
+            await session.execute(
+                text(_LOCK_SNAPSHOT_STREAM_SQL),
+                {"lock_id": lock_id},
+            )
+        ).scalar_one()
+    )
+    if not acquired:
+        raise CacheTargetStreamConflict(
+            "snapshot_busy",
+            "같은 stream의 generic snapshot 생성이 이미 진행 중입니다.",
+        )
+    identity_row = (
+        await session.execute(
+            text(_GET_SNAPSHOT_IDENTITY_SQL),
+            {"external_system": external_system},
+        )
+    ).one_or_none()
+    if identity_row is None:
+        raise CacheTargetStreamConflict(
+            "stream_not_found",
+            "snapshot을 만들 cache target stream이 없습니다.",
+        )
+    identity = identity_row._mapping
+    reusable = (
+        await session.execute(
+            text(_GET_REUSABLE_SNAPSHOT_SQL),
+            {
+                "external_system": external_system,
+                "restore_epoch": int(identity["restore_epoch"]),
+                "high_watermark_relay_order": int(
+                    identity["high_watermark_relay_order"]
+                ),
+            },
+        )
+    ).one_or_none()
+    if reusable is not None:
+        header = dict(reusable._mapping)
+        item_rows = (
+            await session.execute(
+                text(_GET_SNAPSHOT_ITEMS_SQL),
+                {
+                    "snapshot_id": header["snapshot_id"],
+                    "after_row_number": 0,
+                    "limit": limit,
+                },
+            )
+        ).all()
+        return header, tuple(_snapshot_item(item) for item in item_rows)
+    await _prune_expired_generic_snapshots(
+        session,
+        external_system=external_system,
+    )
+    header, items = await _create_snapshot(
+        session,
+        external_system=external_system,
+    )
+    return header, items[:limit]
+
+
 async def get_cache_target_snapshot(
     session: AsyncSession,
     *,
@@ -843,11 +1023,11 @@ async def get_cache_target_snapshot(
     if not 0 < limit <= 1000:
         raise ValueError("limit은 1 이상 1000 이하여야 합니다.")
     if cursor is None:
-        header, fixed_items = await _create_snapshot(
+        header, items = await _create_generic_snapshot(
             session,
             external_system=external_system,
+            limit=limit,
         )
-        items = fixed_items[:limit]
         after_row_number = 0
     else:
         snapshot_id, after_row_number = _parse_snapshot_cursor(cursor)
@@ -955,6 +1135,15 @@ async def get_cache_target_reconciliation_snapshot(
     if header["snapshot_id"] is None:
         raise RuntimeError("running reconciliation request에 snapshot_id가 없습니다.")
     snapshot_id = str(header["snapshot_id"])
+    snapshot_row = (
+        await session.execute(
+            text(_GET_SNAPSHOT_SQL),
+            {"snapshot_id": snapshot_id},
+        )
+    ).one_or_none()
+    if snapshot_row is None:
+        raise RuntimeError("running reconciliation request의 snapshot이 없습니다.")
+    header.update(dict(snapshot_row._mapping))
     after_row_number = 0
     if cursor is not None:
         cursor_snapshot_id, after_row_number = _parse_snapshot_cursor(cursor)

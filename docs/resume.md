@@ -10,6 +10,21 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-01 (codex) — T-VN-41 fixed snapshot durability·bounded GC
+
+service 일반 snapshot 첫 page가 repository에서 header/items를 INSERT하고도 read-only session 종료 때
+rollback되어, 응답 UUID의 다음 cursor가 사라지는 P1을 live E2E에서 발견했다. route가 DTO 구성까지
+포함한 transaction을 소유해 commit 실패/예외에는 200을 내지 않도록 고쳤다. 응답에는
+`created_at`/`expires_at`을 필수로 노출한다.
+
+내구화 뒤 retry마다 full snapshot이 영구 누적되지 않도록 generic 경로만 external-system single-flight로
+분리했다. 현재 epoch/outbox high-watermark가 같고 75분 이상 유효한 미참조 snapshot은 persisted page를
+재사용하며, 경합은 대기하지 않고 `503 + Retry-After`다. 만료·미참조 item/header는 parent/item lock을
+함께 잡은 제한 배치로만 정리하고 reconciliation이 참조하는 checksum 감사 snapshot은 보존한다.
+
+**다음 한 작업**: 독립 적대적 리뷰 2건과 Map/PinVi CI를 통과시킨 뒤 exact image를 다시 빌드해 n150
+isolated live UI recovery E2E와 최종 prod gate를 완료한다.
+
 ## 2026-08-01 — H35 게이트 ① 실증 완료 (CSV 재import로 공개 표면 3,265 복원)
 
 배포 게이트를 격리 clone에서 **실제 import 경로로 재현**했다(`parse_curation_csv` →

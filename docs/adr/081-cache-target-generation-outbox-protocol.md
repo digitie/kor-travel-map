@@ -171,6 +171,22 @@ snapshot이다. active와 tombstone을 모두 포함한다. leaf row는 다음 �
 MVCC view로 읽어 immutable header/item에 고정한다. 후속 page는 같은 snapshot item만 읽으므로
 중간에 새 source write가 commit돼도 count/root/page membership은 바뀌지 않는다.
 
+일반 snapshot의 첫 page는 header/item 저장과 HTTP 성공 응답을 route 소유 transaction 하나로
+묶는다. commit이 실패하거나 응답 DTO 검증이 실패하면 snapshot 전체를 rollback하며, commit되지 않은
+UUID를 성공 응답으로 내보내지 않는다. 응답은 `created_at`과 `expires_at`을 포함해 cursor 수명을
+숨기지 않는다. 같은 external system의 동시 생성은 transaction advisory try-lock으로 single-flight하며,
+경합 요청은 대기열을 만들지 않고 `503 snapshot_busy`와 `Retry-After`를 받는다.
+
+모든 source head 변경은 같은 transaction의 `cache_target.state_applied` outbox relay order를 전진한다.
+따라서 현재 `(restore_epoch, high_watermark_relay_order)`와 일치하고 75분보다 긴 수명이 남은 일반
+snapshot은 full head 재주사 없이 재사용할 수 있다. 새 snapshot의 TTL은 2시간이며, 15분의 서버 처리
+margin을 제외해 client가 첫 응답을 받은 뒤에도 최소 1시간의 traversal window를 보장한다.
+reconciliation seal은 이 재사용 경로를 통하지 않고
+항상 request 전용 snapshot을 만든다. 만료된 일반 snapshot은 reconciliation request가 한 건도 참조하지
+않을 때만 item 1,000행/header 100행 이하의 `SKIP LOCKED` 배치로 정리한다. page reader는 header share
+lock을 transaction 종료까지 유지하므로 GC가 header와 item 사이를 잘라 빈 반복 page를 만들 수 없다.
+reconciliation이 참조하는 snapshot은 terminal 상태라도 checksum 감사 영수증이므로 GC하지 않는다.
+
 초기 cutover는 service recovery principal의 `begin → writer backfill → seal` 두 단계로 고정한다.
 begin은 stream을 fenced 상태로 만들고 active claim을 끊지만 snapshot을 만들지 않는 `preparing`
 reconciliation request만 남긴다. seal은 PinVi가 계산한 expected epoch/count/Merkle root를 body로 받아

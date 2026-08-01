@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -16,6 +17,7 @@ from kortravelmap.core.cache_target_stream import (
     make_deleted_cache_target_source,
     snapshot_merkle_root,
 )
+from kortravelmap.infra import cache_target_reconciliation_repo as snapshot_repo
 from kortravelmap.infra.cache_target_event_repo import (
     append_cache_target_links_reconciled_events,
     append_cache_target_refresh_status_events,
@@ -1374,6 +1376,16 @@ async def test_fixed_snapshot_pages_ignore_concurrent_committed_write(
     assert first.count == 2
     assert first.next_cursor is not None
 
+    async with AsyncSession(migrated_engine) as reader, reader.begin():
+        reused = await get_cache_target_snapshot(
+            reader,
+            external_system=system,
+            limit=1,
+        )
+    assert reused.snapshot_id == first.snapshot_id
+    assert reused.created_at == first.created_at
+    assert reused.expires_at == first.expires_at
+
     async with AsyncSession(migrated_engine) as writer, writer.begin():
         await _apply_snapshot_source(
             writer,
@@ -1404,6 +1416,292 @@ async def test_fixed_snapshot_pages_ignore_concurrent_committed_write(
     ]
     assert fresh.snapshot_id != first.snapshot_id
     assert fresh.count == 3
+
+
+@pytest.mark.integration
+async def test_generic_snapshot_try_lock_fails_fast_and_then_reuses(
+    migrated_engine: AsyncEngine,
+) -> None:
+    system = "snapshot-try-lock-test"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="target-a",
+            event_id="9c000000-0000-4000-8000-000000000011",
+            idempotency_key="9d000000-0000-4000-8000-000000000011",
+        )
+
+    async with AsyncSession(migrated_engine) as owner:
+        owner_tx = await owner.begin()
+        first = await get_cache_target_snapshot(
+            owner,
+            external_system=system,
+            limit=1,
+        )
+        async with AsyncSession(migrated_engine) as contender, contender.begin():
+            with pytest.raises(CacheTargetStreamConflict) as busy:
+                await get_cache_target_snapshot(
+                    contender,
+                    external_system=system,
+                    limit=1,
+                )
+            assert busy.value.code == "snapshot_busy"
+        await owner_tx.commit()
+
+    async with AsyncSession(migrated_engine) as retry, retry.begin():
+        reused = await get_cache_target_snapshot(
+            retry,
+            external_system=system,
+            limit=1,
+        )
+    assert reused.snapshot_id == first.snapshot_id
+
+
+@pytest.mark.integration
+async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "snapshot-gc-test"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-a",
+        event_id="95000000-0000-4000-8000-000000000001",
+        idempotency_key="96000000-0000-4000-8000-000000000001",
+    )
+    current = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=1,
+    )
+    expired_id = "97000000-0000-4000-8000-000000000001"
+    referenced_id = "97000000-0000-4000-8000-000000000002"
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshots ("
+            "snapshot_id, external_system, restore_epoch, "
+            "high_watermark_relay_order, item_count, merkle_root, "
+            "created_at, expires_at) VALUES "
+            "(CAST(:expired_id AS uuid), :external_system, 1, 0, 1001, "
+            ":expired_root, now() - interval '2 hours', now() - interval '1 hour'), "
+            "(CAST(:referenced_id AS uuid), :external_system, 1, 0, 1, "
+            ":referenced_root, now() - interval '2 hours', now() - interval '1 hour')"
+        ),
+        {
+            "expired_id": expired_id,
+            "referenced_id": referenced_id,
+            "external_system": system,
+            "expired_root": "c" * 64,
+            "referenced_root": "d" * 64,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshot_items ("
+            "snapshot_id, row_number, external_system, target_key, state, "
+            "source_generation, source_payload_fingerprint) "
+            "SELECT CAST(:snapshot_id AS uuid), value, :external_system, "
+            "'expired-' || value::text, 'active', 1, :fingerprint "
+            "FROM generate_series(1, 1001) AS value"
+        ),
+        {
+            "snapshot_id": expired_id,
+            "external_system": system,
+            "fingerprint": "e" * 64,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshot_items ("
+            "snapshot_id, row_number, external_system, target_key, state, "
+            "source_generation, source_payload_fingerprint) VALUES ("
+            "CAST(:snapshot_id AS uuid), 1, :external_system, 'referenced', "
+            "'active', 1, :fingerprint)"
+        ),
+        {
+            "snapshot_id": referenced_id,
+            "external_system": system,
+            "fingerprint": "f" * 64,
+        },
+    )
+    command_id = await _reconciliation_command(
+        migrated_session,
+        key="98000000-0000-4000-8000-000000000001",
+        operation="snapshot.gc.reference",
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_reconciliation_requests ("
+            "request_id, external_system, command_id, reason, status, "
+            "phase_version, snapshot_id, expected_merkle_root, "
+            "actual_merkle_root, started_at, completed_at) VALUES ("
+            "CAST(:request_id AS uuid), :external_system, :command_id, "
+            "'preserve terminal snapshot', 'succeeded', 3, "
+            "CAST(:snapshot_id AS uuid), :merkle_root, :merkle_root, now(), now())"
+        ),
+        {
+            "request_id": "99000000-0000-4000-8000-000000000001",
+            "external_system": system,
+            "command_id": command_id,
+            "snapshot_id": referenced_id,
+            "merkle_root": "d" * 64,
+        },
+    )
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-b",
+        event_id="95000000-0000-4000-8000-000000000002",
+        idempotency_key="96000000-0000-4000-8000-000000000002",
+    )
+
+    first_gc = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=1,
+    )
+    assert first_gc.snapshot_id != current.snapshot_id
+    remaining = await migrated_session.scalar(
+        text(
+            "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
+            "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+        ),
+        {"snapshot_id": expired_id},
+    )
+    assert remaining == 1
+    assert await migrated_session.scalar(
+        text(
+            "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
+            "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+        ),
+        {"snapshot_id": referenced_id},
+    ) == 1
+
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-c",
+        event_id="95000000-0000-4000-8000-000000000003",
+        idempotency_key="96000000-0000-4000-8000-000000000003",
+    )
+    second_gc = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=1,
+    )
+    assert second_gc.snapshot_id != first_gc.snapshot_id
+    assert await migrated_session.scalar(
+        text(
+            "SELECT count(*) FROM ops.poi_cache_target_snapshots "
+            "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+        ),
+        {"snapshot_id": expired_id},
+    ) == 0
+    assert await migrated_session.scalar(
+        text(
+            "SELECT count(*) FROM ops.poi_cache_target_snapshots "
+            "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+        ),
+        {"snapshot_id": referenced_id},
+    ) == 1
+
+
+@pytest.mark.integration
+async def test_cursor_header_share_lock_makes_direct_item_gc_skip_snapshot(
+    migrated_engine: AsyncEngine,
+) -> None:
+    system = "snapshot-reader-gc-lock-test"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="target-a",
+            event_id="9a000000-0000-4000-8000-000000000011",
+            idempotency_key="9b000000-0000-4000-8000-000000000011",
+        )
+        await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="target-b",
+            event_id="9a000000-0000-4000-8000-000000000012",
+            idempotency_key="9b000000-0000-4000-8000-000000000012",
+        )
+    async with AsyncSession(migrated_engine) as creator, creator.begin():
+        snapshot = await get_cache_target_snapshot(
+            creator,
+            external_system=system,
+            limit=1,
+        )
+    async with AsyncSession(migrated_engine) as expire, expire.begin():
+        await expire.execute(text("SET LOCAL session_replication_role = replica"))
+        await expire.execute(
+            text(
+                "UPDATE ops.poi_cache_target_snapshots "
+                "SET expires_at = clock_timestamp() + interval '1 second' "
+                "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+            ),
+            {"snapshot_id": snapshot.snapshot_id},
+        )
+
+    async with AsyncSession(migrated_engine) as reader, reader.begin():
+        header = (
+            await reader.execute(
+                text(snapshot_repo._GET_SNAPSHOT_SQL),  # pyright: ignore[reportPrivateUsage]
+                {"snapshot_id": snapshot.snapshot_id},
+            )
+        ).one()
+        assert bool(header.valid)
+        await asyncio.sleep(1.2)
+
+        async with AsyncSession(migrated_engine) as writer, writer.begin():
+            await _apply_snapshot_source(
+                writer,
+                external_system=system,
+                target_key="target-c",
+                event_id="9a000000-0000-4000-8000-000000000013",
+                idempotency_key="9b000000-0000-4000-8000-000000000013",
+            )
+        async with AsyncSession(migrated_engine) as pruner, pruner.begin():
+            await get_cache_target_snapshot(
+                pruner,
+                external_system=system,
+                limit=1,
+            )
+        item_rows = (
+            await reader.execute(
+                text(snapshot_repo._GET_SNAPSHOT_ITEMS_SQL),  # pyright: ignore[reportPrivateUsage]
+                {
+                    "snapshot_id": snapshot.snapshot_id,
+                    "after_row_number": 0,
+                    "limit": 10,
+                },
+            )
+        ).all()
+        assert len(item_rows) == 2
+
+    async with AsyncSession(migrated_engine) as writer, writer.begin():
+        await _apply_snapshot_source(
+            writer,
+            external_system=system,
+            target_key="target-d",
+            event_id="9a000000-0000-4000-8000-000000000014",
+            idempotency_key="9b000000-0000-4000-8000-000000000014",
+        )
+    async with AsyncSession(migrated_engine) as pruner, pruner.begin():
+        await get_cache_target_snapshot(
+            pruner,
+            external_system=system,
+            limit=1,
+        )
+    async with AsyncSession(migrated_engine) as probe:
+        assert await probe.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshots "
+                "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+            ),
+            {"snapshot_id": snapshot.snapshot_id},
+        ) == 0
 
 
 @pytest.mark.integration

@@ -46,13 +46,29 @@ NOW = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
 
 
 class _FakeSession:
+    def __init__(self) -> None:
+        self.begin_calls = 0
+        self.commit_calls = 0
+        self.rollback_calls = 0
+
     def begin(self) -> Any:
+        self.begin_calls += 1
+        session = self
+
         class _Tx:
             async def __aenter__(self) -> None:
                 return None
 
-            async def __aexit__(self, *_exc: object) -> None:
-                return None
+            async def __aexit__(
+                self,
+                exc_type: object,
+                _exc: object,
+                _traceback: object,
+            ) -> None:
+                if exc_type is None:
+                    session.commit_calls += 1
+                else:
+                    session.rollback_calls += 1
 
         return _Tx()
 
@@ -62,12 +78,14 @@ class _FakeCacheTargetService:
         self.apply_calls: list[dict[str, Any]] = []
         self.claim_calls: list[dict[str, Any]] = []
         self.reconciliation_calls: list[dict[str, Any]] = []
+        self.snapshot_calls: list[dict[str, Any]] = []
         self.reconciliation_begin_calls: list[dict[str, Any]] = []
         self.reconciliation_seal_calls: list[dict[str, Any]] = []
         self.reconciliation_metadata_calls: list[dict[str, Any]] = []
         self.reconciliation_completion_calls: list[dict[str, Any]] = []
         self.reconciliation_snapshot_calls: list[dict[str, Any]] = []
         self.reconciliation_completion_error: Exception | None = None
+        self.snapshot_error: Exception | None = None
         self.operation_result: Any = SimpleNamespace(
             operation_id=RECONCILIATION_REQUEST_ID,
             status="superseded",
@@ -182,6 +200,8 @@ class _FakeCacheTargetService:
             high_watermark_cursor="snapshot-high-watermark",
             count=1,
             merkle_root="a" * 64,
+            created_at=NOW,
+            expires_at=NOW + timedelta(hours=1),
             items=[
                 SimpleNamespace(
                     external_system=EXTERNAL_SYSTEM,
@@ -192,6 +212,26 @@ class _FakeCacheTargetService:
                 )
             ],
             next_cursor=None,
+        )
+        self.snapshot_result: Any = SimpleNamespace(
+            snapshot_id=RECONCILIATION_SNAPSHOT_ID,
+            external_system=EXTERNAL_SYSTEM,
+            restore_epoch=4,
+            high_watermark_cursor="snapshot-high-watermark",
+            count=1,
+            merkle_root="a" * 64,
+            created_at=NOW,
+            expires_at=NOW + timedelta(hours=1),
+            items=[
+                SimpleNamespace(
+                    external_system=EXTERNAL_SYSTEM,
+                    target_key="target-1",
+                    state="active",
+                    source_generation=1,
+                    source_payload_fingerprint="b" * 64,
+                )
+            ],
+            next_cursor="next-snapshot-page",
         )
         self.replay_result: Any = SimpleNamespace(
             event_id=EVENT_ID,
@@ -285,6 +325,16 @@ class _FakeCacheTargetService:
             raise CacheTargetStreamConflict("consumer_mismatch", "consumer mismatch")
         return self.reconciliation_snapshot_result
 
+    async def get_cache_target_snapshot(
+        self,
+        _session: Any,
+        **kwargs: Any,
+    ) -> Any:
+        self.snapshot_calls.append(kwargs)
+        if self.snapshot_error is not None:
+            raise self.snapshot_error
+        return self.snapshot_result
+
     async def get_cache_target_dead_letter(
         self,
         _session: Any,
@@ -350,11 +400,12 @@ def _client(
     service: _FakeCacheTargetService,
     *,
     settings: ApiSettings | None = None,
+    session: _FakeSession | None = None,
 ) -> TestClient:
     app = create_app(settings or _settings())
 
     async def _fake_session() -> AsyncIterator[_FakeSession]:
-        yield _FakeSession()
+        yield session or _FakeSession()
 
     app.dependency_overrides[get_session] = _fake_session
     app.dependency_overrides[get_cache_target_stream_service] = lambda: service
@@ -1436,6 +1487,88 @@ def test_service_reconciliation_seal_authorizes_stored_request_before_write(
     assert service.reconciliation_seal_calls == []
     assert service.reconciliation_snapshot_calls == []
     assert service.reconciliation_completion_calls == []
+
+
+@pytest.mark.unit
+def test_service_snapshot_commits_route_owned_transaction() -> None:
+    service = _FakeCacheTargetService()
+    session = _FakeSession()
+    client = _client(
+        service,
+        settings=_settings(scopes=["cache-target:snapshot"]),
+        session=session,
+    )
+
+    response = client.get(
+        f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}?page_size=1",
+        headers=_service_headers(),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["snapshot_id"] == RECONCILIATION_SNAPSHOT_ID
+    assert response.json()["data"]["created_at"] == NOW.isoformat().replace("+00:00", "Z")
+    assert response.json()["data"]["expires_at"] == (
+        NOW + timedelta(hours=1)
+    ).isoformat().replace("+00:00", "Z")
+    assert response.json()["meta"]["page"]["next_cursor"] == "next-snapshot-page"
+    assert session.begin_calls == 1
+    assert session.commit_calls == 1
+    assert session.rollback_calls == 0
+    assert service.snapshot_calls == [
+        {
+            "external_system": EXTERNAL_SYSTEM,
+            "limit": 1,
+            "cursor": None,
+        }
+    ]
+
+
+@pytest.mark.unit
+def test_service_snapshot_rolls_back_route_owned_transaction_on_error() -> None:
+    service = _FakeCacheTargetService()
+    service.snapshot_error = RuntimeError("snapshot failed after write")
+    session = _FakeSession()
+    client = _client(
+        service,
+        settings=_settings(scopes=["cache-target:snapshot"]),
+        session=session,
+    )
+
+    with pytest.raises(RuntimeError, match="snapshot failed after write"):
+        client.get(
+            f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
+            headers=_service_headers(),
+        )
+
+    assert session.begin_calls == 1
+    assert session.commit_calls == 0
+    assert session.rollback_calls == 1
+
+
+@pytest.mark.unit
+def test_service_snapshot_busy_is_retryable_without_waiting() -> None:
+    service = _FakeCacheTargetService()
+    service.snapshot_error = CacheTargetStreamConflict(
+        "snapshot_busy",
+        "snapshot already in progress",
+    )
+    session = _FakeSession()
+    client = _client(
+        service,
+        settings=_settings(scopes=["cache-target:snapshot"]),
+        session=session,
+    )
+
+    response = client.get(
+        f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
+        headers=_service_headers(),
+    )
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert response.json()["code"] == "SNAPSHOT_BUSY"
+    assert session.commit_calls == 0
+    assert session.rollback_calls == 1
 
 
 @pytest.mark.unit

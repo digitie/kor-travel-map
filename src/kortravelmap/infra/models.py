@@ -4274,6 +4274,12 @@ class PoiCacheTargetReconciliationRequestRow(Base):
             "request_id",
         ),
         Index(
+            "idx_cache_target_reconciliation_requests_snapshot_status",
+            "snapshot_id",
+            "status",
+            postgresql_where=text("snapshot_id IS NOT NULL"),
+        ),
+        Index(
             "uq_cache_target_reconciliation_requests_active_stream",
             "external_system",
             unique=True,

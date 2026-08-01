@@ -458,6 +458,12 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert "FeatureBatchResponse" in schemas
     assert "WeatherBatchResponse" in schemas
     assert "CacheTargetClaimResponse" in schemas
+    snapshot_data = schemas["CacheTargetSnapshotData"]
+    assert {"created_at", "expires_at"} <= set(snapshot_data["required"])
+    assert snapshot_data["properties"]["created_at"]["format"] == "date-time"
+    assert snapshot_data["properties"]["expires_at"]["format"] == "date-time"
+    assert "최소 1시간" in snapshot_data["properties"]["expires_at"]["description"]
+    assert "running" in snapshot_data["properties"]["expires_at"]["description"]
     mutation_record = schemas["CacheTargetSourceMutationRecord"]
     assert {"target_id", "entity_tag", "target_sequence"} <= set(mutation_record["required"])
     assert mutation_record["properties"]["target_id"]["format"] == "uuid"

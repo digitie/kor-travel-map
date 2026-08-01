@@ -633,8 +633,13 @@ superseded dead는 dead-letter GET/list/replay와 reconciliation dead 0 gate에�
 dead만 새 epoch consumer를 차단한다.
 
 snapshot page는 `snapshot_id`, `restore_epoch`, `high_watermark_cursor`, `count`, `merkle_root`가
-끝까지 고정된다. 상세 byte 계약과 strict event union은 ADR-081이 정본이다. 이 표면은 Map foundation
-PR만으로 enable하지 않으며 PinVi paired consumer와 contract checksum을 통과한 뒤 켠다.
+끝까지 고정되며 `created_at`/`expires_at`으로 cursor의 실제 수명을 함께 공개한다. 첫 page의 immutable
+header/item INSERT와 성공 응답은 하나의 route transaction으로 commit한다. 동일 stream/version의
+유효한 일반 snapshot은 single-flight로 재사용하고, 생성 경합은 `503 snapshot_busy`와
+`Retry-After: 1`로 즉시 실패한다. 만료·미참조 일반 snapshot만 bounded GC하며 reconciliation request가
+참조하는 snapshot은 terminal 이후에도 보존한다. 상세 byte·reuse/GC 계약과 strict event union은
+ADR-081이 정본이다. 이 표면은 Map foundation PR만으로 enable하지 않으며 PinVi paired consumer와
+contract checksum을 통과한 뒤 켠다.
 
 `cache_target.reconciled`의 payload는
 `request_id`, `snapshot_id`, `actual_merkle_root`, `expected_merkle_root`, `status`, `version`

@@ -5101,6 +5101,18 @@ export interface components {
         CacheTargetSnapshotData: {
             /** Count */
             count: number;
+            /**
+             * Created At
+             * Format: date-time
+             * @description 고정 snapshot material 생성 시각.
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description generic snapshot cursor의 만료 시각. generic first page는 최소 1시간의 잔여 traversal window를 보장하며, reconciliation-bound snapshot은 request가 running인 동안 이 시각과 무관하게 page할 수 있다.
+             */
+            expires_at: string;
             /** High Watermark Cursor */
             high_watermark_cursor: string;
             /** Items */

@@ -1619,18 +1619,19 @@ async def get_service_cache_target_snapshot(
         scope="cache-target:snapshot",
         external_system=external_system,
     )
-    page = await stream_service.get_cache_target_snapshot(
-        session,
-        external_system=external_system,
-        limit=page_size,
-        cursor=cursor,
-    )
-    raise_for_cache_target_status(page)
-    return _snapshot_response(
-        page,
-        started_at=started_at,
-        page_size=page_size,
-    )
+    async with session.begin():
+        page = await stream_service.get_cache_target_snapshot(
+            session,
+            external_system=external_system,
+            limit=page_size,
+            cursor=cursor,
+        )
+        raise_for_cache_target_status(page)
+        return _snapshot_response(
+            page,
+            started_at=started_at,
+            page_size=page_size,
+        )
 
 
 def _snapshot_response(
@@ -1645,6 +1646,8 @@ def _snapshot_response(
         high_watermark_cursor=_getattr(page, "high_watermark_cursor"),
         count=_getattr(page, "count"),
         merkle_root=_getattr(page, "merkle_root"),
+        created_at=_getattr(page, "created_at"),
+        expires_at=_getattr(page, "expires_at"),
         items=[
             CacheTargetSnapshotRow(
                 external_system=_getattr(row, "external_system"),

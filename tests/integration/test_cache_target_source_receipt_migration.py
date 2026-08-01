@@ -15,12 +15,17 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from alembic import command
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-from kortravelmap.infra.models import PoiCacheTargetSourceEventRow
+from kortravelmap.infra.models import (
+    PoiCacheTargetReconciliationRequestRow,
+    PoiCacheTargetSourceEventRow,
+)
 
 pytestmark = pytest.mark.integration
 
 _PRE_REVISION = "0075_cache_target_outbox"
 _TARGET_REVISION = "0076_cache_target_receipt"
+_SNAPSHOT_GC_REVISION = "0077_cache_target_snapshot_gc"
+_SNAPSHOT_GC_INDEX = "idx_cache_target_reconciliation_requests_snapshot_status"
 _ACTIVE_TARGET_ID = "10000000-0000-4000-8000-000000000001"
 _DELETED_TARGET_ID = "10000000-0000-4000-8000-000000000002"
 _ACTIVE_EVENT_ID = "20000000-0000-4000-8000-000000000001"
@@ -240,6 +245,45 @@ async def test_0076_receipt_backfill_drift_guard_and_downgrade(
                         ),
                         {"event_id": _DELETED_EVENT_ID},
                     )
+
+        await target_engine.dispose()
+        await asyncio.to_thread(_run_alembic, target_dsn, _SNAPSHOT_GC_REVISION)
+        target_engine = make_async_engine(target_dsn)
+        async with target_engine.connect() as connection:
+            snapshot_gc_index = await connection.scalar(
+                text(
+                    "SELECT indexdef FROM pg_indexes "
+                    "WHERE schemaname = 'ops' "
+                    "AND tablename = 'poi_cache_target_reconciliation_requests' "
+                    "AND indexname = :index_name"
+                ),
+                {"index_name": _SNAPSHOT_GC_INDEX},
+            )
+        assert snapshot_gc_index is not None
+        assert "(snapshot_id, status)" in str(snapshot_gc_index)
+        assert "WHERE (snapshot_id IS NOT NULL)" in str(snapshot_gc_index)
+        assert _SNAPSHOT_GC_INDEX in {
+            index.name
+            for index in PoiCacheTargetReconciliationRequestRow.__table__.indexes
+        }
+
+        await target_engine.dispose()
+        await asyncio.to_thread(
+            _run_alembic,
+            target_dsn,
+            _TARGET_REVISION,
+            downgrade=True,
+        )
+        target_engine = make_async_engine(target_dsn)
+        async with target_engine.connect() as connection:
+            removed_snapshot_gc_index = await connection.scalar(
+                text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE schemaname = 'ops' AND indexname = :index_name"
+                ),
+                {"index_name": _SNAPSHOT_GC_INDEX},
+            )
+        assert removed_snapshot_gc_index is None
 
         await target_engine.dispose()
         await asyncio.to_thread(

@@ -1680,6 +1680,18 @@
             "title": "Count",
             "type": "integer"
           },
+          "created_at": {
+            "description": "고정 snapshot material 생성 시각.",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "generic snapshot cursor의 만료 시각. generic first page는 최소 1시간의 잔여 traversal window를 보장하며, reconciliation-bound snapshot은 request가 running인 동안 이 시각과 무관하게 page할 수 있다.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
           "high_watermark_cursor": {
             "title": "High Watermark Cursor",
             "type": "string"
@@ -1714,6 +1726,8 @@
           "high_watermark_cursor",
           "count",
           "merkle_root",
+          "created_at",
+          "expires_at",
           "items"
         ],
         "title": "CacheTargetSnapshotData",

@@ -154,7 +154,9 @@ _CACHE_TARGET_FORBIDDEN_CODES = frozenset(
         "consumer_mismatch",
     }
 )
-_CACHE_TARGET_UNAVAILABLE_CODES = frozenset({"stream_version_exhausted"})
+_CACHE_TARGET_UNAVAILABLE_CODES = frozenset(
+    {"snapshot_busy", "stream_version_exhausted"}
+)
 
 _OPS_CANONICAL_PREFIXES = (
     "/v1/ops/datasets",
@@ -753,6 +755,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             message=str(exc),
             details=exc.current,
             request_id=_request_id(request),
+            headers={"Retry-After": "1"} if exc.code == "snapshot_busy" else None,
         )
 
     @application.exception_handler(Exception)

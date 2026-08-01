@@ -779,6 +779,14 @@ class CacheTargetSnapshotData(BaseModel):
         max_length=64,
         pattern=MERKLE_ROOT_PATTERN,
     )
+    created_at: datetime = Field(description="고정 snapshot material 생성 시각.")
+    expires_at: datetime = Field(
+        description=(
+            "generic snapshot cursor의 만료 시각. generic first page는 최소 1시간의 "
+            "잔여 traversal window를 보장하며, reconciliation-bound snapshot은 "
+            "request가 running인 동안 이 시각과 무관하게 page할 수 있다."
+        )
+    )
     items: list[CacheTargetSnapshotRow]
 
 

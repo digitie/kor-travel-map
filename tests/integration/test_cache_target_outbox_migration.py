@@ -154,6 +154,22 @@ async def test_0075_phase_schema_and_downgrade(pg_container: Any) -> None:
             append_only_function = await connection.scalar(
                 text("SELECT to_regprocedure('ops.reject_cache_target_history_mutation()')")
             )
+            snapshot_update_trigger = await connection.scalar(
+                text(
+                    "SELECT pg_get_triggerdef(oid) FROM pg_trigger "
+                    "WHERE tgrelid = 'ops.poi_cache_target_snapshots'::regclass "
+                    "AND tgname = 'trg_poi_cache_target_snapshots_append_only'"
+                )
+            )
+            snapshot_item_update_trigger = await connection.scalar(
+                text(
+                    "SELECT pg_get_triggerdef(oid) FROM pg_trigger "
+                    "WHERE tgrelid = "
+                    "'ops.poi_cache_target_snapshot_items'::regclass "
+                    "AND tgname = "
+                    "'trg_poi_cache_target_snapshot_items_append_only'"
+                )
+            )
         assert revision == _TARGET_REVISION
         assert phase_column == "phase_version"
         assert status_constraint is not None
@@ -186,6 +202,10 @@ async def test_0075_phase_schema_and_downgrade(pg_container: Any) -> None:
         )
         assert str(snapshot_item_table) == "ops.poi_cache_target_snapshot_items"
         assert str(append_only_function) == "ops.reject_cache_target_history_mutation()"
+        assert "BEFORE UPDATE" in str(snapshot_update_trigger)
+        assert "DELETE" not in str(snapshot_update_trigger)
+        assert "BEFORE UPDATE" in str(snapshot_item_update_trigger)
+        assert "DELETE" not in str(snapshot_item_update_trigger)
 
         reconciliation_constraints = {
             constraint.name: constraint

@@ -1346,6 +1346,9 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
   lease/retry/dead-letter/replay가 있는 relay와 DB 대조 reconciliation을 추가한다. backfill checksum
   뒤 critical path 밖에서 PinVi 소비를 enable하고 누락·중복·restore epoch 전환을 live로 증명한다.
+  - [x] 일반 snapshot first page를 route transaction으로 durable commit하고 실제 만료 시각을 노출한다.
+  - [x] 동일 stream/version single-flight reuse와 만료·미참조 snapshot bounded GC를 구현한다.
+  - [ ] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
 
 ## Wave 2 상세 — 구조 전환
 
