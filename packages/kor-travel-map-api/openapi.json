@@ -6556,7 +6556,7 @@
       },
       "CacheTargetRestoreFenceRecord": {
         "additionalProperties": false,
-        "description": "Restore-fence control state와 durable effect receipt.",
+        "description": "Restore-fence control state와 durable effect receipt.\n\n불변조건: `superseded_reconciliation_count == 0` iff\n`superseded_reconciliation_request_id == null`이고, count가 `1` iff request ID가\nnon-null이다.",
         "properties": {
           "active_reconciliation": {
             "anyOf": [
