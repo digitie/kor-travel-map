@@ -4925,7 +4925,10 @@ export interface components {
         CacheTargetRecoveryOperationRecord: {
             /** Entity Tag */
             entity_tag?: string | null;
-            /** Operation Id */
+            /**
+             * Operation Id
+             * Format: uuid
+             */
             operation_id: string;
             /** Snapshot Id */
             snapshot_id?: string | null;
@@ -5019,7 +5022,7 @@ export interface components {
          *
          *     불변조건: `superseded_reconciliation_count == 0` iff
          *     `superseded_reconciliation_request_id == null`이고, count가 `1` iff request ID가
-         *     non-null이다.
+         *     UUID다. runtime validator와 OpenAPI object-level `oneOf`가 같은 두 조합만 허용한다.
          */
         CacheTargetRestoreFenceRecord: {
             /** Active Reconciliation */
@@ -5061,7 +5064,16 @@ export interface components {
             superseded_reconciliation_request_id: string | null;
             /** Updated At */
             updated_at?: string | null;
-        };
+        } & ({
+            /** @constant */
+            superseded_reconciliation_count: 0;
+            superseded_reconciliation_request_id: null;
+        } | {
+            /** @constant */
+            superseded_reconciliation_count: 1;
+            /** Format: uuid */
+            superseded_reconciliation_request_id: string;
+        });
         /**
          * CacheTargetRestoreFenceRequest
          * @description Restore-fence command body.
