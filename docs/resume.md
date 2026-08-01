@@ -69,7 +69,8 @@ T-VN-41 lane이 Playwright buildx 빌드 + 라이브 스택 2벌을 **현재 사
 영수증으로 고정한다. DELETE exact replay는 mutable tombstone row가 사후 UPDATE돼도 이 immutable
 version으로 최초 post-delete ETag를 복원한다. 0075 기존 active receipt는 outbox ETag에서, DELETE는
 transaction timestamp가 일치하는 tombstone에서만 backfill하고 불확실한 drift는 migration을 중단한다.
-PUT/DELETE response는 non-null UUID `target_id`/`entity_tag` DTO, GET은 nullable read DTO로 분리했다.
+PUT/DELETE response는 non-null UUID `target_id`/`entity_tag`와 양의 `target_sequence` DTO로 generation
+4-tuple을 완성했고, GET은 identity/sequence가 nullable인 read DTO로 분리했다.
 
 **다음 한 작업**: OpenAPI/export/types와 Alembic metadata gate를 포함한 Map 전체 검증 뒤 Map/PinVi 교차
 E2E에서 응답 유실 DELETE exact retry와 후속 새 incarnation PUT의 수렴을 재확인한다.

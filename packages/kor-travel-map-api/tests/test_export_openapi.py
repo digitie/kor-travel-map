@@ -459,13 +459,15 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert "WeatherBatchResponse" in schemas
     assert "CacheTargetClaimResponse" in schemas
     mutation_record = schemas["CacheTargetSourceMutationRecord"]
-    assert {"target_id", "entity_tag"} <= set(mutation_record["required"])
+    assert {"target_id", "entity_tag", "target_sequence"} <= set(mutation_record["required"])
     assert mutation_record["properties"]["target_id"]["format"] == "uuid"
     assert "anyOf" not in mutation_record["properties"]["target_id"]
     assert "anyOf" not in mutation_record["properties"]["entity_tag"]
+    assert mutation_record["properties"]["target_sequence"]["minimum"] == 1
     read_record = schemas["CacheTargetSourceRecord"]
     assert {"type": "null"} in read_record["properties"]["target_id"]["anyOf"]
     assert {"type": "null"} in read_record["properties"]["entity_tag"]["anyOf"]
+    assert {"type": "null"} in read_record["properties"]["target_sequence"]["anyOf"]
     target_path = service["paths"][
         "/v1/service/cache-targets/{external_system}/{target_key}"
     ]

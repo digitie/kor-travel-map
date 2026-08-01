@@ -175,7 +175,7 @@ class CacheTargetSourceMutationRecord(BaseModel):
     source_payload_fingerprint: str = Field(min_length=64, max_length=64)
     target_id: UUID
     entity_tag: str
-    target_sequence: int | None = Field(default=None, ge=0)
+    target_sequence: int = Field(ge=1)
     occurred_at: datetime | None = None
     updated_at: datetime | None = None
 

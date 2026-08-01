@@ -5208,7 +5208,7 @@ export interface components {
             /** Target Key */
             target_key: string;
             /** Target Sequence */
-            target_sequence?: number | null;
+            target_sequence: number;
             /** Updated At */
             updated_at?: string | null;
         };

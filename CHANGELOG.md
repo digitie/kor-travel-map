@@ -34,8 +34,9 @@
   durable fence receipt 그대로 노출하며 exact replay도 최초 값과 version을 보존한다. HTTP
   DTO와 OpenAPI object-level `oneOf`는 대체 reconciliation 수가 `0`이면 UUID가 `null`,
   `1`이면 `format: uuid`인 상관 불변식을 fail-close한다. recovery operation receipt의
-  `operation_id`도 UUID로 좁힌다. target PUT/DELETE response는 non-null UUID `target_id`와
-  `entity_tag` 전용 DTO를 쓰며, nullable tombstone identity는 GET read projection에만 남긴다.
+  `operation_id`도 UUID로 좁힌다. target PUT/DELETE response는 non-null UUID `target_id`, `entity_tag`,
+  양의 `target_sequence` 전용 DTO로 generation 4-tuple을 완성하며, nullable tombstone identity/sequence는
+  GET read projection에만 남긴다.
 - **OPENAPI (breaking)**: 공개 사용자와 서버 간 profile을 분리했다.
   `@kor-travel-map/user-client`는 `RoutePolicy.SERVICE` batch 타입을 더는 노출하지 않으며,
   서버 간 소비자는 `openapi.service.json`을 pin한다.

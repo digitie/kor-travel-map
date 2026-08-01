@@ -72,8 +72,9 @@
 - replay는 mutable target row의 현재 version을 읽지 않는다. tombstone 사후 UPDATE 뒤에도 ledger의
   historical UUID/version으로 최초 strong ETag를 exact 복원하고, source/outbox material 불일치는
   fail-close한다.
-- PUT/DELETE response는 non-null UUID `target_id`와 `entity_tag` 전용 DTO를 사용한다. GET read DTO만
-  deleted head의 nullable identity를 유지하며 OpenAPI와 생성 TypeScript를 같은 계약으로 갱신했다.
+- PUT/DELETE response는 non-null UUID `target_id`, `entity_tag`, 양의 `target_sequence` 전용 DTO를 사용해
+  generation 4-tuple을 완성한다. GET read DTO만 deleted head의 nullable identity/sequence를 유지하며
+  OpenAPI와 생성 TypeScript를 같은 계약으로 갱신했다.
 
 ## 2026-08-01 (codex) — T-VN-41 migration rebase 선형화
 

@@ -595,6 +595,7 @@ def test_put_cache_target_uses_bound_principal_and_create_precondition() -> None
     assert response.status_code == 200, response.text
     assert response.headers["etag"] == f'"{TARGET_ID}:7"'
     assert response.json()["data"]["target_id"] == TARGET_ID
+    assert response.json()["data"]["target_sequence"] == 1
     assert service.apply_calls[0]["consumer_id"] == CONSUMER_ID
     assert service.apply_calls[0]["create_only"] is True
     assert service.apply_calls[0]["expected_target_id"] is None
@@ -643,6 +644,7 @@ def test_delete_cache_target_replay_preserves_historical_identity_and_etag() -> 
 @pytest.mark.unit
 def test_get_deleted_cache_target_keeps_nullable_read_projection() -> None:
     service = _FakeCacheTargetService()
+    service.source_result.target_sequence = None
     client = _client(service)
 
     response = client.get(
@@ -654,7 +656,25 @@ def test_get_deleted_cache_target_keeps_nullable_read_projection() -> None:
     assert response.json()["data"]["state"] == "deleted"
     assert response.json()["data"]["target_id"] is None
     assert response.json()["data"]["entity_tag"] is None
+    assert response.json()["data"]["target_sequence"] is None
     assert "etag" not in response.headers
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("target_sequence", [None, 0])
+def test_put_mutation_rejects_nonpositive_or_null_target_sequence(
+    target_sequence: int | None,
+) -> None:
+    service = _FakeCacheTargetService()
+    service.apply_result.target_sequence = target_sequence
+    client = _client(service)
+
+    with pytest.raises(ValidationError, match="target_sequence"):
+        client.put(
+            f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
+            headers=_service_headers(extra={"If-None-Match": "*"}),
+            json=_upsert_body(),
+        )
 
 
 @pytest.mark.unit

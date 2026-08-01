@@ -1871,16 +1871,9 @@
             "type": "string"
           },
           "target_sequence": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Sequence"
+            "minimum": 1.0,
+            "title": "Target Sequence",
+            "type": "integer"
           },
           "updated_at": {
             "anyOf": [
@@ -1903,7 +1896,8 @@
           "source_generation",
           "source_payload_fingerprint",
           "target_id",
-          "entity_tag"
+          "entity_tag",
+          "target_sequence"
         ],
         "title": "CacheTargetSourceMutationRecord",
         "type": "object"
