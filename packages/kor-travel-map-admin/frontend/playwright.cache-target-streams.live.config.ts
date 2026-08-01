@@ -10,10 +10,11 @@ const artifactRoot =
     "admin-frontend-cache-target-streams-live",
   );
 const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
+const parsedBaseURL = URL.canParse(baseURL) ? new URL(baseURL) : null;
 const isolatedHttpOrigin =
   process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK === "1" &&
-  new URL(baseURL).protocol === "http:"
-    ? new URL(baseURL).origin
+  parsedBaseURL?.protocol === "http:"
+    ? parsedBaseURL.origin
     : null;
 
 /**
