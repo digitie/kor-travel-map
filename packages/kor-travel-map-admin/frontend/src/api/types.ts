@@ -5016,6 +5016,10 @@ export interface components {
         /**
          * CacheTargetRestoreFenceRecord
          * @description Restore-fence control state와 durable effect receipt.
+         *
+         *     불변조건: `superseded_reconciliation_count == 0` iff
+         *     `superseded_reconciliation_request_id == null`이고, count가 `1` iff request ID가
+         *     non-null이다.
          */
         CacheTargetRestoreFenceRecord: {
             /** Active Reconciliation */
