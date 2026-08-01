@@ -27,7 +27,8 @@ barrier로 직렬화한다.
     [~] `T-VN-H25B`(CSV 역반영 5건·매칭 재실행 — 3건 오링크 배제, 미충족 AC는 H34) →
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
-    [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0069** + 이미지 동시 배포 — #673 blocker;
+    [ ] `T-VN-H40`(concierge provenance 복구 — **H35 배포 선행 blocker**) →
+    [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0072** + 이미지 동시 배포 — #673 blocker;
         2026-07-31 중단, 백업 확보·B′ 경로 확정, 본문 상단 인수 블록 참조) →
     [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
     [ ] `T-VN-H30C`(타 provider evidence 재작업) →
@@ -433,6 +434,29 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > **본문 전제 정정** — "미연결 행에서 전부 NULL"은 맞지만 전체 모집단으로 읽으면 틀린다.
     > 실측: active 3,530건 중 `source_record_key` 보유 **3,044건**. NULL은 공식 CSV 적재분
     > **486건**뿐이고 링크 222 / 미연결 264로 갈린다.
+
+    > **정정 (2026-07-31, #910/`0072` 반영) — 내가 틀린 것은 실측이 아니라 범위다.**
+    > 위 실측(CSV provider = 캠페인 주관기관 / `source_entities` provider = 수집 라이브러리,
+    > 서로 다른 네임스페이스)은 **그대로 유효하고 #910도 같은 판단을 한다** — `0072`가 기존
+    > link를 `match_basis='legacy_unattributed'` · `resolver_version='pre-0072-unknown'` ·
+    > evidence "기존 link의 선택 근거를 안전하게 복구할 수 없음"으로 backfill한다.
+    > 즉 "기존 링크의 근거는 추정하지 않는다"는 결론은 동일하다.
+    >
+    > 틀린 것은 거기서 **"따라서 이 AC는 달성 불가"로 건너뛴 것**이다. AC 원문은
+    > "provider provenance — **설계 또는 불가 확정**"이었는데 나는 "설계" 갈래를
+    > **기존 스키마 안에서만** 탐색했다("조인 경로를 만들려면 기관↔라이브러리 매핑을
+    > 발명해야 한다"). **스키마 변경을 검토 범위에서 뺀 것이 오류다.**
+    >
+    > #910이 택한 축은 provider 귀속이 아니라 **import 행위(act) 귀속**이다 —
+    > `curation_import_batches`(어떤 바이트를 누가 언제) / `curation_import_rows`(그 batch의
+    > 어느 행이 어느 item이 됐는가) / `curation_link_decisions`(그 link를 누가 무슨 근거로
+    > accept 했는가). 이 축은 provider 파이프라인을 거치지 않는 공식 CSV 적재에도
+    > **정의상 항상 존재한다** — 사람이 파일을 올린 행위 자체가 출처다.
+    > 내가 "공식 CSV는 provider 파이프라인을 거치지 않으므로 대응 행이 없는 것이 정상"이라고
+    > 쓴 그 문장이 **다른 provenance 축이 필요하다는 신호**였는데, 나는 그것을 AC 종료
+    > 신호로 읽었다.
+    >
+    > 따라서 이 항목은 "불가"가 아니라 **"기존 스키마 안에서는 불가 / 새 축으로 해소(#910)"**다.
   - **preview/commit·REST/UI 실데이터 검증** — ~~미충족~~ → **REST는 실증 완료(2026-07-31)**,
     preview는 **prod 미배포로 측정 불가**.
     > `GET /v1/curations/features/{id}` 실측(prod, service token):
@@ -500,11 +524,313 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 요구사항으로 분해해 대조했다. 3항목 중 둘(오탐 분포 규명 / 규칙 교체)은 충족이고,
 > 셋째("다음 materialize에서 자동 회복되는가")는 **코드 논증만 있고 실증이 없다**.
 > 결정적 blocker는 **prod 미배포**이며 이슈가 신고한 손실(현재 457건)이 실재한다 → `T-VN-H35`.
+> **재기준화(2026-07-31, #910/`0072` 반영)** — #673을 "457건 신규 회복"만으로 종결하면 안 된다.
+> `0072`가 기존 concierge 공개 표면 **3,044건**을 `legacy_unattributed`로 만들어 공개에서
+> 제외하고 복구 경로가 없다(`T-VN-H40`). 따라서 종결 기준은 **두 축**이다 —
+> ① 미적재 457건 신규 회복 ② **기존 concierge 공개 표면 보존/복구**. ①만 달성하고 ②를 잃으면
+> 순 손실이다.
+>
 > 남은 실증은 `T-VN-H30B`. **`T-VN-H30C`·`T-VN-H32`는 #673 범위 밖**이다 —
 > 이슈는 "concierge provider에 한해" 완화를 요구했고 두 task는 그 파생 개선이다.
 > 저장소 열린 이슈는 #673·#819 두 건뿐이고 #673은 epic이 아니다.
 
-- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0069)**
+- [ ] T-VN-H40 — **concierge curation provenance 복구 (H35 배포 선행 blocker)**
+
+  `0072_curation_provenance`가 기존 link를 전부 `accepted + legacy_unattributed`로 이관하고,
+  `_trusted_link_sql()`이 `match_basis <> 'legacy_unattributed'`를 요구한다. 이 술어는 public
+  collection count/detail·Feature group/detail/list 경로에 **실제로 적용**되므로, 배포 직후
+  기존 공개 curation 링크가 공개 표면에서 사라진다. **fail-close 자체는 ADR-063이 명시한
+  의도된 동작이다**(legacy/unattributed link는 admin 감사 대상으로만 남긴다).
+
+  문제는 **복구 경로가 없다는 것**이다. 현재 존재하는 경로는 셋뿐이다:
+  authoritative CSV 재import(`csv_explicit_feature_id`) / admin 수동 검토(`admin_review`) /
+  이미 non-legacy accepted decision이 있던 merge 대상(제한된 `forward_recovery`).
+
+  - **공식 CSV 222건**은 exact CSV + provenance sidecar를 새 계약으로 재import하면 첫 경로로 복원된다.
+  - **concierge projection 3,044건은 일괄 복원 경로가 코드에도 `tasks.md`에도 없다.**
+    `0065`의 `sync_curated_feature_collection()`은 `curation_items.feature_id`/projection을
+    쓰지만 `curation_import_rows`·`curation_link_decisions`를 만들지 않고,
+    `apply_curated_source_rules()`도 `feature.curated_features`만 갱신한다.
+    → **후속 task로 분리된 것이 아니라 누락이다**(PR #910 작성자 확인).
+
+  > **축소 창은 "최대 한 달"이 아니라 무기한이다.** `40 3 3 * *`는 concierge **원천 Feature
+  > 적재** 스케줄이라 실행돼도 trusted decision을 만들지 않는다.
+  > `curated_features_refresh_daily_schedule`은 기본 STOPPED이고 수동 실행해도 현재
+  > writer/trigger가 decision을 추가하지 않는다. **별도 복구를 구현·실행하기 전까지 회복되지 않는다.**
+  > (초안에서 내가 "월 1회 스케줄이라 최대 한 달"이라 적은 것은 스케줄 이름만 보고
+  > 자연 회복을 가정한 오류다.)
+
+  ## 조사로 확정된 것 (2026-07-31)
+
+  **`match_basis` 허용값은 4개다**(`0072` `ck_curation_link_decisions_basis`):
+  `csv_explicit_feature_id` · `admin_review` · `legacy_unattributed` · **`forward_recovery`**.
+  그 생성 경로는 **merge 승인 한 곳뿐**이다(`merge_repo.py:339`, `:451`).
+  (이 문단은 처음에 "복구용 축이 이미 있으니 **새 값을 만들 필요가 없다**"고 적었으나
+  아래 판정에서 뒤집혔다 — `forward_recovery`는 "합쳐진 대상의 결정을 이어받는다"는
+  merge 전용 의미라 projection에 빌려 쓰면 의미가 왜곡된다. `0073`은 `source_rule`을 더한다.)
+
+  **`0065`가 `sync_curated_feature_collection()`의 최신 정의다.** `0066`~`0072` 어느 것도
+  이 함수를 갱신하지 않는다(전수 확인). 그 함수가 `curation_items`에 쓰는 어느 경로에도
+  `accepted_link_decision_id`가 **없다**. 그래서 트리거가 만드는 projection은 항상
+  decision 없이 태어나고, `_trusted_link_sql()`에서 제외된다.
+  → **#910 답변의 진단이 코드로 확인됐다.**
+
+  > **정정(2026-07-31 실행 확인)** — 위 문단은 처음에 "`curation_items`를 DELETE 후
+  > INSERT한다(`0065:892`)"고 적었는데 **틀렸다.** `0065` 파일에는 이 함수 정의가 두 번
+  > 나오고 `:835`는 **downgrade가 되돌리는 옛 본문**이다. 실제 최신 정의(`:28`)는 DELETE 없이
+  > targeted UPDATE 여러 개 + `INSERT ... ON CONFLICT DO NOTHING`을 쓴다. 컨테이너에 `0072`를
+  > 올리고 직접 확인했다 — projection UPDATE 후 item의 `ctid`는 바뀌지만
+  > `accepted_link_decision_id` 포인터는 **살아남는다**(재작성이 아니라 갱신).
+  >
+  > 이 오독은 결론을 두 개 바꿀 뻔했다: ① `fk_curation_link_decisions_item`이
+  > `ON DELETE RESTRICT`라 "0072 배포 후 concierge writer가 통째로 죽는다"고 볼 뻔했다 —
+  > 직접 DELETE는 실제로 RESTRICT에 막히지만(확인함) 트리거가 DELETE를 하지 않으므로
+  > 그 경로는 발생하지 않는다. ② "재삽입마다 decision이 누적된다"는 우려도 같은 이유로
+  > 성립하지 않는다. 그래도 누적 축은 **회귀 테스트로 고정했다** — 미래에 writer가 바뀌면
+  > 되살아나는 위험이기 때문이다.
+
+  ## 실증 (2026-07-31, 격리 restore clone — prod 무접촉)
+
+  prod 백업(`20260731T065308Z`)을 포트 노출 없는 임시 컨테이너에 복원하고 `0064~0072`를
+  적용해 **직접 셌다.** 그전까지 이 수치는 "코드상 확정·실행 미검증"이었다.
+
+  ```
+  배포 전  linked_items(active)          3,266
+  배포 후  linked_items(active)          3,266    ← 링크 자체는 남는다
+           decision 보유                 3,266
+           legacy_unattributed decision  3,266    ← 전부 이 값
+           ** 공개 노출 가능(trusted)        0    ← 전멸
+  alembic  0064 → 0072  소요 1,754초 (29분)
+  ```
+
+  **내 예상치 "3,265 → 264"가 틀렸다.** 264는 `feature_id IS NULL`이라 애초에 링크가 아니었다.
+  trusted 링크 기준으로는 **3,266 → 0**이다. 즉 `T-VN-H40` 없이 배포하면 **공개 curation이
+  전멸한다.**
+
+  그리고 **마이그레이션 29분은 `ktdctl deploy`의 `--wait-timeout 120`(하드코딩)을 14배
+  초과한다** — B′ 경로(마이그레이션을 배포와 분리)의 근거가 추정이 아니라 실측이 됐다.
+
+  ## 판정 (2026-07-31 prod 실측) — **근거는 실재한다. `legacy_unattributed`는 틀린 분류다.**
+
+  ```
+  curated_features            3,044
+    source_record_key   3,044 / 3,044  (100%)  → provider_sync.source_records FK 100% 도달
+    selection_origin    3,044 / 3,044  (100%)  → source_rule 3,043 / admin 1
+    content_version     3,044 / 3,044  (100%)
+  provider              kor-travel-concierge-youtube 3,044
+  legacy collection 링크 3,044 (전부 source_record_key 보유)
+  ```
+
+  **결손 0건이다.** 각 링크에 대해 "이 provider record에서 이 rule로 나왔다"가 **완전히
+  재구성된다**. `0072` backfill의 evidence 문구 *"기존 link의 선택 근거를 안전하게 복구할 수
+  없음"* 은 이 3,044건에 대해서는 **사실이 아니다**.
+
+  `0072`가 틀린 게 아니라 **범위를 넓게 잡았다** — `feature_id IS NOT NULL`이면 무조건
+  `legacy_unattributed`로 이관했고, 그 안에 근거가 완전한 3,044건이 섞였다.
+
+  > **내 초안 두 가지가 틀렸다.**
+  > ① **`forward_recovery` 재사용은 의미 왜곡이다.** 그 값은 merge 경로에서 "합쳐진 대상의
+  >    결정을 앞으로 이어받는다"는 뜻인데(`merge_repo.py:325-460`), concierge projection은
+  >    merge와 무관하다. 이름을 빌려 쓰는 것이다.
+  > ② **"트리거가 자동 발급하면 fail-close가 무력화된다"는 우려는 조건부로만 맞다.**
+  >    근거 유무를 구분하지 않고 전부 승격하면 그렇다. 그러나 `selection_origin='source_rule'`과
+  >    `source_record_key` FK를 **검증한 것만** 승격하면 게이트는 남는다 — 근거 없는 링크는
+  >    여전히 제외된다.
+
+  ## 확정 설계 — `0073`로 `match_basis`에 `source_rule` 추가
+
+  `0072`의 `ck_curation_link_decisions_basis`는 4값(`csv_explicit_feature_id` ·
+  `admin_review` · `legacy_unattributed` · `forward_recovery`)만 허용한다. 여기에
+  **`source_rule`** 을 더한다. 이유는 위 판정 그대로 — 근거의 성격이 기존 4값 어디에도
+  해당하지 않는다.
+
+  `curation_link_decisions`의 NOT NULL 컬럼과 CHECK(실측):
+
+  | 컬럼 | 제약 | `source_rule` decision이 채울 값 |
+  | --- | --- | --- |
+  | `curation_item_id` | NOT NULL, FK→items RESTRICT | projection의 item |
+  | `feature_id` | NOT NULL | `curated_features.feature_id` |
+  | `decision_kind` | `IN ('accepted','revoked')` | `accepted` |
+  | `match_basis` | CHECK 4값 → **5값으로 확장** | `source_rule` |
+  | `resolver_version` | `= btrim() AND <> ''` | `curated_features.content_version` |
+  | `evidence` | `jsonb_typeof = 'object'` | `{source_record_key, selection_origin, content_version, provider}` |
+  | `actor` | `= btrim() AND <> ''` | `curated_features.selected_by` (없으면 `source_rule:<provider>`) |
+  | `supersedes_decision_id` | self와 달라야 함 | 재삽입 시 직전 decision |
+
+  ## 두 갈래
+
+  **① one-shot** — 기존 3,044건에 `source_rule` decision을 append하고 포인터를 채운다.
+  **검증 술어를 명시한다**: `selection_origin='source_rule'` **그리고**
+  `source_record_key`가 `provider_sync.source_records`에 도달할 것. 둘 중 하나라도 실패하면
+  **승격하지 않고 `legacy_unattributed`로 남긴다** — 그게 fail-close를 지키는 지점이다.
+  실측상 3,044건 전부 통과하지만, **술어를 조건 없이 통과시키는 게 아니라 실제로 검사한다.**
+
+  **② ongoing** — `sync_curated_feature_collection()`(`0065`가 최신 정의, `0066`~`0072`
+  아무도 안 고침)이 `curation_items`를 INSERT할 때 같은 transaction에서 decision도 만든다.
+  그 함수는 `NEW`(=`curated_features` 행)를 갖고 있으므로 위 표의 값을 **전부 채울 수 있다** —
+  DB 트리거에 actor/evidence 맥락이 없다는 일반론이 여기서는 해당하지 않는다.
+
+  > **누적 축** — `0072`의 append-only 트리거가 decision UPDATE/DELETE를 막으므로, 발급
+  > 조건이 느슨하면 decision이 단조 증가한다. 처음엔 "트리거가 item을 DELETE 후 INSERT하니
+  > 재삽입마다 쌓인다"고 봤으나 그 전제는 위 정정대로 **틀렸다**. 그래도 갱신 1회마다
+  > 1건씩 쌓는 설계는 얼마든지 가능하므로 **회귀 테스트로 고정한다**(`0067` dedupe 계열).
+  >
+  > **FK 순환** — `curation_items.accepted_link_decision_id` → `curation_link_decisions` →
+  > `curation_items`가 서로를 참조한다. `0072`가 그 FK를 DEFERRABLE INITIALLY DEFERRED로
+  > 만든 이유가 이것이고, 트리거 안에서 둘을 만들 때 그 성질에 의존한다.
+
+  ## ⚠ 배포 전 남은 것 두 개 (2026-08-01 prod 실측 + 적대 검토)
+
+  `0073`만으로는 H40이 닫히지 않는다. **읽어서 넘길 수 없는 수치가 둘 있다.**
+
+  ### ① 공개 link 3,266 → **3,043**. 223건은 여전히 어둡다 (prod 실측)
+
+  `0073`의 승격 술어는 concierge projection만 통과시킨다. prod에서 직접 셌다:
+
+  ```
+  0072 backfill 대상                    3,266
+  0073 승격 대상                        3,043
+  승격되지 않고 남는 것                    223   ← 전부 public·published·활성
+  ```
+
+  남는 223건의 정체 — 전부 **공식 CSV 큐레이션**이고 지금 공개 표면에 보인다:
+
+  | collection | 건수 |
+  | --- | --- |
+  | `korean-tourism-100:2025-2026` | 58 |
+  | `korean-tourism-100:2023-2024` | 51 |
+  | `arboretum-garden-stamp-tour:2026` | 44 |
+  | `heritage-visit-campaign:*` (11개 route) | 67 |
+  | 기타(`lighthouse-stamp-tour`, `legacy:media-places`) | 3 |
+
+  이들은 `curated_features` 행이 없고(projection이 아니다) `source_record_key`도
+  없다. 대신 `metadata`에 `feature_match_reasons`·`feature_match_partial`·
+  `official_place_name`을 갖고 있고, **`resources/curations/*.csv` 5개 파일이 정확히
+  222행에 `feature_id`를 채워 두고 있다**(486행 중 222행 — DB 링크 수와 일치).
+
+  > **처음에 `metadata`의 `feature_match_partial=false`(199건)로 승격 대상을 가르려
+  > 했는데, 그건 마이그레이션에 휴리스틱을 새기는 것이다.** `0072`는 이미 이 부류를
+  > 위해 `csv_explicit_feature_id` basis와 import batch/row 계보를 만들어 뒀다.
+  > 정본 CSV를 **재import하면** 설계된 경로로 진짜 import 계보와 함께 근거가 붙는다.
+
+  **결론 — 배포 절차에 단계를 하나 넣는다.** 마이그레이션(`0064~0073`) 직후,
+  **새 이미지를 올리기 전에** 공식 curation CSV 5개를 재import한다. 구 이미지는
+  `_trusted_link_sql`을 모르므로 그 구간에도 계속 서빙한다 → **공개 표면 공백 0**.
+  배포 게이트: 재import 후 trusted link이 **3,266**인지 확인하고, 아니면 중단한다.
+
+  ### ② 모든 dedup 병합이 abort한다 — `T-VN-H41` (신규, `0072` 결함)
+
+  `merge_repo._DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL`은
+  `curation_items.curation_item_id`를 **새 UUID로 재작성**한다. `0072`의
+  `fk_curation_link_decisions_item`은 `ON DELETE RESTRICT` + `ON UPDATE NO ACTION`이라,
+  decision이 달린 item이면 그 UPDATE가 FK 위반을 내고 **병합 전체가 롤백된다.**
+
+  `0072`만 적용한 컨테이너에서 재현했다 — `0073`이 만든 결함이 아니다. 다만 `0072`가
+  미배포라 **이번 배포와 함께 prod에 도달**한다. 그리고 기존 merge 통합 테스트의
+  curated 픽스처가 **전부 `selection_origin='admin'`** 이라 0073 트리거가 merge
+  경로에서 한 번도 안 돌았고, 그래서 이번 검토에서 나온 merge 결함 3건이 모두 green으로
+  통과했다. prod 모양(`source_rule`) 테스트를 추가해 `xfail(strict=True)`로 고정했다 —
+  **xfail 제거가 H41의 완료 조건**이다.
+
+  고치는 길은 두 갈래였다:
+  - (a) 관련 FK에 `ON UPDATE CASCADE`. append-only 트리거가 RI cascade의 UPDATE를
+    막으므로, "`curation_item_id`만 바뀌는 UPDATE는 이력 변경이 아니다"는 예외를
+    명시해야 한다.
+  - (b) merge의 detach가 PK를 재작성하지 않게 바꾼다. `0045` 전환 트리거의 UUID 충돌을
+    피하려고 재작성하는 것이라(주석 `merge_repo.py:770-773`) 대안 설계가 필요하다.
+
+  **(a)로 결정하고 구현 완료** (2026-08-01, `0074_curation_item_rekey_cascade`,
+  같은 브랜치·PR #919). 애초 생각한 것보다 관련 FK가 많았다 — `fk_curation_link_decisions_item`
+  하나가 아니라 **4개**: `fk_curation_import_rows_item` · `fk_curation_link_decisions_item` ·
+  `fk_curation_link_decisions_import_row`(합성 — import row 쪽도 캐스케이드된 뒤에야
+  다시 일관됨) · `fk_curation_link_decisions_supersedes`(자기참조 합성 — supersedes 사슬
+  전체가 같은 item이라는 불변식을 강제).
+
+  append-only 트리거 예외는 `curation_item_id` **하나만** 바뀐 `UPDATE`만 통과시킨다.
+  첫 구현이 `NEW.curation_item_id`를 정적으로 참조해 그 컬럼이 없는
+  `curation_import_batches`에서 `UndefinedColumnError`로 죽었는데, **기존** 테스트
+  `test_link_provenance_is_append_only_fail_closed_and_recoverable`가 잡았다 — jsonb
+  동적 조회로 고쳤다. `models.py`의 ORM FK 선언도 `onupdate="CASCADE"`로 맞췄다(안
+  그러면 `alembic check` drift로 걸린다 — 실제로 걸렸다).
+
+  `apply_feature_merge()`를 실제로 부르는 xfail 테스트가 **XPASS로 전환**돼 수정을
+  1차 확인했고, 변이 2회(CASCADE 제거 / 예외 무조건 통과로 넓힘)로 falsifiability도
+  확인했다. 적대적 리뷰어 2명 + 검증을 붙였다(별도 리포트).
+
+  ## 구현 완료 (2026-08-01, `0073_curation_source_rule`)
+
+  확정 설계대로 넣었다. 설계에서 **바뀐 것 하나**: 트리거를 `curated_features`가 아니라
+  **`curation_items`** 에 단다(`trg_curation_items_source_rule_decision`).
+  `sync_curated_feature_collection()`은 link을 만드는 지점이 **둘**(신규 item INSERT,
+  `source_change` 시 `feature_id` UPDATE)이고 merge/detach 불변식이 얽힌 800줄이라,
+  그 안을 두 군데 고치는 것보다 불변식이 실제로 사는 자리 — "feature_id를 가진 item에는
+  근거가 있어야 한다" — 에 거는 편이 두 지점을 모두 덮고 앞으로 생길 writer도 덮는다.
+
+  검증 술어는 **4조건**으로 늘렸다(설계의 2조건 + link 정합성 2개):
+  `selection_origin='source_rule'` · `projection.feature_id = item.feature_id` ·
+  `projection.source_record_key = item.source_record_key` · 그 key가
+  `provider_sync.source_records`에 도달. 하나라도 실패하면 `legacy_unattributed`로 남는다.
+
+  **함께 고친 것 — 승인 근거 판정이 두 곳에 다른 모양으로 있었다.** 공개 표면은
+  denylist(`<> 'legacy_unattributed'`), merge 재타게팅은 whitelist(3값 열거,
+  `merge_repo._MOVE_CURATION_ITEMS_SQL`). 값이 늘 때 whitelist만 뒤처지면 **공개 표면은
+  노출하는 link을 merge가 `revoked`로 끊는다** — 어느 쪽도 오류를 내지 않아 "링크가
+  언젠가 사라짐"으로만 나타난다. `infra/curation_link_basis.py` 한 곳으로 모으고
+  양쪽 다 whitelist로 맞췄다(모르는 근거를 기본 신뢰하지 않는 쪽이 `0072` 원칙과 같은 방향).
+
+  게이트: unit **1821 passed** · 관련 integration **91 passed** ·
+  `ruff`/`mypy --strict`(123 files)/`lint-imports`(4 kept). 새 통합 테스트 6건은
+  **변이 2회로 falsifiability를 확인**했다 — 검증 술어에서 `selection_origin`을 빼면
+  fail-close 테스트 2건이, 재진입 가드를 빼면 누적·멱등 테스트 3건이 죽는다.
+
+  곁가지로 `test_alembic_upgrade.py`가 head revision을 리터럴로 박고 있어 마이그레이션을
+  추가할 때마다 깨졌다. ScriptDirectory에서 계산하도록 바꿨다.
+
+  남은 할 일:
+  - **before/after exact count 확정** — `0063` restore clone에 `0064`→head와 새 이미지를 적용해
+  - **before/after exact count 확정** — `0063` restore clone에 `0064`→head와 새 이미지를 적용해
+    collection/item/Feature-group별로 잰다. 현재 `3,265→264`는 **0063 실측에서 산출한 예상치**이지
+    배포 인수값이 아니다 — `0065`의 collection/item 재정규화, `source_present`/`status`/`archived_at`,
+    public Feature 상태 필터가 pre 값 자체를 바꾼다.
+  - **one-shot 복구 경로 설계** — `legacy_unattributed`를 이름만 바꾸거나 public 술어를 완화하지
+    **않는다**. concierge source entity/record/rule/Feature identity를 재검증한 immutable evidence로
+    새 import row 또는 좁은 `forward_recovery` decision을 **append**한다.
+  - **ongoing writer 연결** — 신규/갱신 concierge projection도 **같은 transaction에서** trusted
+    decision을 만들게 한다. 안 하면 배포 후 새로 생기는 링크가 같은 문제를 반복한다.
+  - H35에서 **writer reopen 전에** one-shot 복구를 실행하고, 기존 공개 3,044 표면과 #673의
+    미적재 457 회복을 **각각 별도 기준으로** 검증한다.
+
+- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0072)**
+
+  > **범위 갱신 (2026-07-31)** — `0070_domain_command_ledger`·
+  > `0071_integrity_observation_generations`가 이미 main에 있고 #910이 `0072_curation_provenance`를
+  > 더한다. **간극은 9개**다.
+  >
+  > **`0070`·`0071`·`0072`는 `autocommit_block()`을 쓰지 않아 all-or-nothing이다** —
+  > 부분 적용 창은 `0064`·`0068`·`0069`에만 있다. `0072` 도중 죽으면 DB는 `0071`에 깨끗이
+  > 남고 재실행이 처음부터 다시 한다.
+  >
+  > `0072` 실측(prod `0063` 기준): 파괴적 statement **0개**. backfill은 `feature_id IS NOT NULL`
+  > **3,266행**에 decision 행 생성 + `curation_items` UPDATE. `curation_item_id` PK 1:1 조인이라
+  > `feature_id IS NULL` 264행은 술어상 도달 불가. append-only 트리거 6개는 **전부 신규
+  > 테이블에만** 붙어 기존 쓰기 경로를 깨지 않는다.
+  >
+  > ⚠ **`0072` downgrade는 단방향 손실이다** — `curation_link_decisions`를 drop하므로
+  > cutover 이후 기록된 **진짜 provenance까지** 사라지고 재구성이 불가능하다
+  > (#910의 존재 이유가 "0072 이전 상태는 근거를 복구할 수 없다"이기 때문).
+  >
+  > ⛔ **배포 선행 blocker: `T-VN-H40`(concierge provenance 복구).** PR #910 작성자 확인 결과
+  > 복구 경로가 **누락**이고 축소 창이 **무기한**이다. H40 완료 전에는 `0072` 포함 배포를
+  > 진행하지 않는다. 이 상태를 "허용 가능한 일시 축소"로 기록해서는 안 된다.
+  >
+  > ⚠ **공개 curation 표면이 배포 직후 전멸한다(실증).** 격리 restore clone에서
+  > `0064~0072` 적용 후 **공개 노출 가능(trusted) 링크 = 0**(배포 전 3,266). 소요 **1,754초**.
+  > 자세한 것은 `T-VN-H40` 실증 절.
+  >
+  > ⚠ **공개 curation 표면이 배포 직후 급감할 수 있다.** `_trusted_link_sql()`이
+  > `match_basis <> 'legacy_unattributed'`를 요구하는데 `0072` backfill이 기존 링크를 전부
+  > 그 값으로 기록한다. 코드상 확정·실행 미검증이며 #910에 확인 요청을 남겼다
+  > (PR #910 코멘트). **#673의 concierge 표면과 겹치므로 배포 전 답을 받아야 한다.**
 
   > ## 2026-07-31 중단 시점 상태 — **다음 사람이 여기서 이어받는다**
   >
@@ -810,6 +1136,19 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > 불확실성의 모양이 실제와 달라진다.
 
 - [ ] T-VN-H31 — **등대 공급원 부재 해소 (H25A 파생, 전제 재확인됨)**
+
+  > **`address_hint` 계약 변경 (2026-07-31, #909/#910)**
+  > #907이 `address_hint` 매칭을 **공백 토큰 AND**로 고치고(직렬화 jsonb 통짜 substring이라
+  > 다중 토큰이 매칭 안 되던 역전을 수정) 등대 105행을 출처 확인해 채웠다.
+  > **#910이 그 자동 링크를 fail-close로 막았다** — `address_hint` 단독으로는 자동 채택하지
+  > 않고, 구조화 주소 matcher와 행별 provenance(`0072`)를 요구한다.
+  >
+  > 즉 "주소가 있으면 링크를 연다"는 내 전제가 **근거로 불충분하다**는 판정이다.
+  > 채워 넣은 105행의 주소 자체는 버려지지 않고 sidecar provenance
+  > (`lighthouse-stamp-tour.provenance.json`)로 옮겨 **행별 근거**를 갖는다.
+  >
+  > 등대 feature 공급원 부재는 **그대로 남는다** — CSV에 `feature_id`가 2건뿐이라
+  > 새 계약으로 재import해도 105 중 2만 복원된다.
 
   공식 curation 미연결 261건 중 **103건이 등대**이며 105개 중 2개만 링크됐다. ADR-034 9단계
   provider 순서에 등대를 공급하는 provider가 없다 — curation 매칭으로는 해소되지 않는다.
