@@ -700,17 +700,17 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   `0073`만으로는 H40이 닫히지 않는다. **읽어서 넘길 수 없는 수치가 둘 있다.**
 
-  ### ① 공개 link 3,266 → **3,043**. 223건은 여전히 어둡다 (prod 실측)
+  ### ① 공개 노출 item 3,265 → **3,043**. 222건이 어두워진다 (격리 clone 실증)
 
-  `0073`의 승격 술어는 concierge projection만 통과시킨다. prod에서 직접 셌다:
+  `0073`의 승격 술어는 concierge projection만 통과시킨다. 격리 restore clone에서
+  배포 전/후를 **공개 목록 술어 그대로** 셌다:
 
   ```
-  0072 backfill 대상                    3,266
-  0073 승격 대상                        3,043
-  승격되지 않고 남는 것                    223   ← 전부 public·published·활성
+  배포 전 (0063, prod 현재)          공개 노출 item  3,265
+  마이그레이션 직후 (0064~0074)      공개 노출 item  3,043   ← -222
   ```
 
-  남는 223건의 정체 — 전부 **공식 CSV 큐레이션**이고 지금 공개 표면에 보인다:
+  어두워지는 222건 — 전부 **공식 CSV 큐레이션**이다:
 
   | collection | 건수 |
   | --- | --- |
@@ -718,7 +718,13 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   | `korean-tourism-100:2023-2024` | 51 |
   | `arboretum-garden-stamp-tour:2026` | 44 |
   | `heritage-visit-campaign:*` (11개 route) | 67 |
-  | 기타(`lighthouse-stamp-tour`, `legacy:media-places`) | 3 |
+  | `lighthouse-stamp-tour:*` | 2 |
+
+  > **정정 — 앞서 "223건"이라고 적은 것은 틀렸다.** 그 223번째는
+  > `[빵이네] 강원도여행정보`(`selection_origin=admin`, **`item_status='rejected'`**)인데,
+  > 공개 목록 술어가 `i.status = 'included'`를 요구하므로(`curation_repo.py:589`)
+  > **애초에 공개 표면에 없던 항목**이다. 내 공백 측정 쿼리가 `status <> 'archived'`만
+  > 걸러 `rejected`를 포함시킨 오류였다. 실제 공개 공백은 **222**다.
 
   이들은 `curated_features` 행이 없고(projection이 아니다) `source_record_key`도
   없다. 대신 `metadata`에 `feature_match_reasons`·`feature_match_partial`·
@@ -733,7 +739,27 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   **결론 — 배포 절차에 단계를 하나 넣는다.** 마이그레이션(`0064~0074`) 직후,
   **새 이미지를 올리기 전에** 공식 curation CSV 5개를 재import한다. 구 이미지는
   `_trusted_link_sql`을 모르므로 그 구간에도 계속 서빙한다 → **공개 표면 공백 0**.
-  배포 게이트: 재import 후 trusted link이 **3,266**인지 확인하고, 아니면 중단한다.
+  배포 게이트: 재import 후 **공개 노출 item = 3,265**(배포 전과 동일)인지 확인한다.
+
+  #### 게이트 실증 — 격리 clone에서 재현 완료 (2026-08-01)
+
+  실제 import 경로(`parse_curation_csv` → `resolve_feature_matches` →
+  `_adopted_match` → `import_curation_rows`; HTTP/인증만 제외)를 격리 clone에 태웠다:
+
+  ```
+  배포 전 baseline                   공개 노출 item  3,265
+  마이그레이션 직후 (재import 전)     공개 노출 item  3,043   (-222)
+  CSV 재import 후                    공개 노출 item  3,265   (±0)  ← PASS
+  ```
+
+  CSV 222행 **전량 채택**(미채택 0), `csv_explicit_feature_id` decision 222건 생성.
+  파일별 채택: arboretum 44 / heritage 67 / kt100-2023 51 / kt100-2025 58 / lighthouse 2.
+
+  > **게이트 값으로 "trusted link 수"를 쓰면 안 된다.** 링크 수 기준으로는 3,265가
+  > 나오는데(3,043 + 222), 위 `rejected` 1건 때문에 "3,266이어야 한다"는 기대와
+  > 어긋나 **정상 배포에서도 FAIL**이 뜬다. 게이트는 반드시 **공개 목록 술어로 센
+  > item 수**(`status='included'` + collection public/published + theme public +
+  > trusted decision)를 쓴다.
 
   #### 재import가 정말 복구하는지 — 코드 경로로 확정 (2026-08-01)
 
@@ -925,10 +951,35 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   > | 4 | `ktdctl pinvi-pair deploy` | 이미 head라 entrypoint upgrade가 no-op |
   > | 5 | 실증 | 아래 게이트 |
   >
-  > **3.5의 중단 게이트**: 재import 후 trusted link이 **3,266**이어야 한다.
-  > 3,043이면 재import가 안 붙은 것이고, 그 상태로 4를 진행하면 안 된다.
-  > 확인 쿼리는 `curation_link_basis.trusted_basis_sql()`이 만드는 술어를 그대로 쓴다
-  > (열거 하드코딩 금지 — 값이 늘면 게이트만 뒤처진다).
+  > **3.5의 중단 게이트**: 재import 후 **공개 노출 item = 3,265**(배포 전과 동일)이어야
+  > 한다. 3,043이면 재import가 안 붙은 것이고, 그 상태로 4를 진행하면 안 된다.
+  > 격리 clone에서 이 세 수(3,265 → 3,043 → 3,265)를 실제로 재현했다.
+  >
+  > **"trusted link 수"를 게이트로 쓰지 마라** — 링크 수로는 `rejected`인
+  > `[빵이네] 강원도여행정보` 1건 때문에 3,265가 나오는데, 그걸 3,266으로 기대하면
+  > **정상 배포에서도 FAIL**이 뜬다. 공개 목록과 같은 술어로 센다:
+  >
+  > ```sql
+  > SELECT count(*)
+  > FROM feature.curation_items item
+  > JOIN feature.curation_collections c ON c.collection_id = item.collection_id
+  > JOIN feature.curated_themes t ON t.theme_id = c.theme_id
+  > WHERE item.archived_at IS NULL AND c.archived_at IS NULL
+  >   AND item.status = 'included'
+  >   AND c.status = 'published' AND c.visibility = 'public'
+  >   AND t.visibility = 'public'
+  >   AND EXISTS (SELECT 1 FROM feature.curation_link_decisions td
+  >               WHERE td.decision_id = item.accepted_link_decision_id
+  >                 AND td.curation_item_id = item.curation_item_id
+  >                 AND td.feature_id = item.feature_id
+  >                 AND td.decision_kind = 'accepted'
+  >                 AND <trusted_basis_sql('td.match_basis')>)
+  > ```
+  >
+  > `<trusted_basis_sql(...)>`는 `curation_link_basis.trusted_basis_sql()`이 만드는
+  > 술어를 그대로 넣는다 — basis 값을 게이트에 하드코딩하면 값이 늘 때 게이트만 뒤처진다.
+  > **배포 전 baseline은 `0072` 이전이라 decision이 없으므로** 그 EXISTS 대신
+  > `item.feature_id IS NOT NULL`로 센다(같은 3,265가 나온다).
   >
   > ### 배포 target
   > **실행 시점 `origin/main`**(사용자 확정, 0069 포함). main이 계속 전진하므로
