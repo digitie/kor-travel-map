@@ -477,7 +477,10 @@ async function loginWithRealUiPassword(
   const response = await responsePromise;
   expect(browserStatus).toBe(200);
   expect(response.status()).toBe(200);
-  expect(response.headers()["set-cookie"]).toContain(SESSION_COOKIE_NAME);
+  const setCookieHeaders = await response.headerValues("set-cookie");
+  expect(
+    setCookieHeaders.some((header) => header.includes(SESSION_COOKIE_NAME)),
+  ).toBe(true);
   const cookies = await context.cookies();
   expect(
     cookies.some(
