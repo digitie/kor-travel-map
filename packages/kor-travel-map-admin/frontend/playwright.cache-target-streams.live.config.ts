@@ -10,6 +10,11 @@ const artifactRoot =
     "admin-frontend-cache-target-streams-live",
   );
 const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
+const isolatedHttpOrigin =
+  process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK === "1" &&
+  new URL(baseURL).protocol === "http:"
+    ? new URL(baseURL).origin
+    : null;
 
 /**
  * ADR-081 cache-target stream isolated live acceptance.
@@ -33,6 +38,14 @@ export default defineConfig({
   use: {
     ...devices["Desktop Chrome"],
     baseURL,
+    launchOptions:
+      isolatedHttpOrigin === null
+        ? undefined
+        : {
+            args: [
+              `--unsafely-treat-insecure-origin-as-secure=${isolatedHttpOrigin}`,
+            ],
+          },
     screenshot: "off",
     trace: "off",
     video: "off",

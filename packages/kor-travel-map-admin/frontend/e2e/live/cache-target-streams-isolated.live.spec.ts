@@ -126,6 +126,17 @@ test.describe("/ops/cache-target-streams isolated live recovery", () => {
     const observed = installBrowserBoundaryAssertions(page);
 
     await loginWithRealUiPassword(page, context);
+    expect(
+      await page.evaluate(() => ({
+        isSecureContext: globalThis.isSecureContext,
+        randomUUID: typeof globalThis.crypto?.randomUUID === "function",
+        subtleCrypto: globalThis.crypto?.subtle !== undefined,
+      })),
+    ).toEqual({
+      isSecureContext: true,
+      randomUUID: true,
+      subtleCrypto: true,
+    });
     await assertNoServiceTokenInBrowserState(page, context);
 
     await page.goto("/ops/cache-target-streams");
