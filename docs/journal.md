@@ -17,6 +17,32 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-01 — #918·#919 머지, H35 배포 절차 확정
+
+- 두 PR 모두 8/8 CI green으로 머지(`origin/main` = `e1afb1cf`). `0073`(H40) +
+  `0074`(H41)가 main에 있다.
+- 격리 restore clone(`0064~0074`)에서 재측정: trusted **3,266 → 3,043**, 공백 **223건**.
+  prod 직접 조회 결과와 정확히 일치한다. H41 FK 4개 CASCADE, item PK 재작성 성공 확인.
+- **복원 스크립트 자체의 결함을 먼저 잡았다** — `postgis/postgis` 베이스 이미지가
+  초기화 때 postgis류 extension을 `public`에 깔아 두는 탓에, 덤프의
+  `CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA x_extension`이 **조용히 no-op**
+  되고 geometry 컬럼을 쓰는 테이블(`feature.features` 등)이 통째로 안 만들어졌다.
+  복원 전에 그 extension들을 먼저 지우도록 고쳐 `feature.features` 1,030,661행 복원 확인.
+  (`--clean --if-exists`는 오히려 topology 스키마 이중 생성으로 죽어서 쓰지 않는다.)
+- **223건 복구 경로를 추론에서 확정으로 바꿨다.** #907/#910이 자동 링크를 조여서
+  재import가 안 붙을 가능성이 있었는데, `_RESOLVE_FEATURES_BATCH_SQL`의 첫 UNION 분기가
+  명시 `feature_id`로 정확히 1행을 내고 `_adopted_match`가 그것만 채택한다 — 조인 것은
+  `address_hint` 단독 링크이고 명시 경로는 그대로다.
+- **소요 시간 수치 2개를 모두 폐기했다.** 1,754초(이전)와 79.9초(이번) 둘 다 dagster가
+  도는 상태에서 쟀는데 실제 배포는 dagster를 멈추고 돌린다 — 조건이 다르다. B′는
+  시간제한 없는 일회성 컨테이너를 쓰므로 정확한 초수가 애초에 필요 없다.
+- n150 재측정은 **중단**했다. 4코어에 load 11.6/iowait 44.7%였고, 조사해 보니 고장이
+  아니라 T-VN-41 lane이 Playwright buildx 빌드 + 라이브 스택 2벌을 **지금 쓰고 있는**
+  것이었다(컨테이너 9개, `RestartCount=0`, 1분 전 재생성됨). 정리 불가라 판단하고
+  내 프로세스·컨테이너만 회수했다.
+- 앞서 "swap 고갈은 위험 신호"라고 한 것은 **정정한다** — sudo로도 VmSwap을 잡은
+  프로세스가 없고 `available` 7.9Gi다. 유휴 스왑이지 메모리 압박이 아니다.
+
 ## 2026-08-01 — T-VN-H40 `0073` 구현: source-rule link provenance
 
 - `0072`가 공개 표면 fail-close를 넣으며 기존 link을 전부 `legacy_unattributed`로
