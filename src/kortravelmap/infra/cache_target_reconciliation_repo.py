@@ -514,7 +514,7 @@ class CacheTargetReconciliationRecord:
     request_id: str
     external_system: str
     consumer_id: str
-    status: Literal["preparing", "running", "succeeded", "failed"]
+    status: Literal["preparing", "running", "succeeded", "failed", "superseded"]
     phase_version: int
     snapshot_id: str | None
     restore_epoch: int
@@ -541,7 +541,7 @@ class CacheTargetReconciliationRecord:
 class CacheTargetReconciliationResult:
     request_id: str
     external_system: str
-    status: Literal["preparing", "running", "succeeded", "failed"]
+    status: Literal["preparing", "running", "succeeded", "failed", "superseded"]
     phase_version: int
     snapshot_id: str | None
     expected_merkle_root: str | None
@@ -942,6 +942,11 @@ async def get_cache_target_reconciliation_snapshot(
             "consumer_mismatch",
             "service principal consumer_id가 stream binding과 다릅니다.",
         )
+    if str(header["reconciliation_status"]) == "superseded":
+        raise CacheTargetStreamConflict(
+            "reconciliation_superseded",
+            "restore fence가 reconciliation request를 대체했습니다.",
+        )
     if str(header["reconciliation_status"]) != "running":
         raise CacheTargetStreamConflict(
             "reconciliation_not_sealed",
@@ -1118,12 +1123,15 @@ async def list_cache_target_stream_statuses(
 def _reconciliation(row: Any, *, replay: bool) -> CacheTargetReconciliationResult:
     values = row._mapping
     status = str(values["status"])
-    if status not in ("preparing", "running", "succeeded", "failed"):
+    if status not in ("preparing", "running", "succeeded", "failed", "superseded"):
         raise RuntimeError("reconciliation status가 유효하지 않습니다.")
     return CacheTargetReconciliationResult(
         request_id=str(values["request_id"]),
         external_system=str(values["external_system"]),
-        status=cast('Literal["preparing", "running", "succeeded", "failed"]', status),
+        status=cast(
+            'Literal["preparing", "running", "succeeded", "failed", "superseded"]',
+            status,
+        ),
         phase_version=int(values["phase_version"]),
         snapshot_id=(
             str(values["snapshot_id"])
@@ -1162,7 +1170,7 @@ def _reconciliation(row: Any, *, replay: bool) -> CacheTargetReconciliationResul
 def _reconciliation_record(row: Any) -> CacheTargetReconciliationRecord:
     values = row._mapping
     status = str(values["status"])
-    if status not in ("preparing", "running", "succeeded", "failed"):
+    if status not in ("preparing", "running", "succeeded", "failed", "superseded"):
         raise RuntimeError("reconciliation status가 유효하지 않습니다.")
     restore_epoch = (
         int(values["snapshot_restore_epoch"])
@@ -1173,7 +1181,10 @@ def _reconciliation_record(row: Any) -> CacheTargetReconciliationRecord:
         request_id=str(values["request_id"]),
         external_system=str(values["external_system"]),
         consumer_id=str(values["consumer_id"]),
-        status=cast('Literal["preparing", "running", "succeeded", "failed"]', status),
+        status=cast(
+            'Literal["preparing", "running", "succeeded", "failed", "superseded"]',
+            status,
+        ),
         phase_version=int(values["phase_version"]),
         snapshot_id=(
             str(values["snapshot_id"])
@@ -1424,6 +1435,22 @@ async def seal_cache_target_reconciliation(
         raise ValueError("expected_restore_epoch은 양수여야 합니다.")
     if expected_item_count < 0:
         raise ValueError("expected_item_count는 0 이상이어야 합니다.")
+    stream = (
+        await session.execute(
+            text(_LOCK_STREAM_SQL),
+            {"external_system": external_system},
+        )
+    ).one_or_none()
+    if stream is None:
+        raise CacheTargetStreamConflict(
+            "reconciliation_precondition_failed",
+            "reconciliation request의 stream binding이 다릅니다.",
+        )
+    if str(stream._mapping["consumer_id"]) != consumer_id:
+        raise CacheTargetStreamConflict(
+            "consumer_mismatch",
+            "service principal consumer_id가 stream binding과 다릅니다.",
+        )
     row = (
         await session.execute(
             text(_LOCK_RECONCILIATION_SQL),
@@ -1436,15 +1463,35 @@ async def seal_cache_target_reconciliation(
             "reconciliation request가 없습니다.",
         )
     values = row._mapping
-    if (
-        str(values["external_system"]) != external_system
-        or int(values["phase_version"]) != expected_phase_version
-    ):
+    if str(values["external_system"]) != external_system:
         raise CacheTargetStreamConflict(
             "reconciliation_precondition_failed",
-            "reconciliation request ETag 또는 stream binding이 다릅니다.",
+            "reconciliation request의 stream binding이 다릅니다.",
             current={
                 "external_system": str(values["external_system"]),
+                "entity_tag": cache_target_reconciliation_entity_tag(
+                    request_id,
+                    int(values["phase_version"]),
+                ),
+            },
+        )
+    if str(values["status"]) == "superseded":
+        raise CacheTargetStreamConflict(
+            "reconciliation_superseded",
+            "restore fence가 reconciliation request를 대체했습니다.",
+            current={
+                "status": "superseded",
+                "entity_tag": cache_target_reconciliation_entity_tag(
+                    request_id,
+                    int(values["phase_version"]),
+                ),
+            },
+        )
+    if int(values["phase_version"]) != expected_phase_version:
+        raise CacheTargetStreamConflict(
+            "reconciliation_precondition_failed",
+            "reconciliation request ETag가 현재 phase version과 다릅니다.",
+            current={
                 "entity_tag": cache_target_reconciliation_entity_tag(
                     request_id,
                     int(values["phase_version"]),
@@ -1462,17 +1509,6 @@ async def seal_cache_target_reconciliation(
                     int(values["phase_version"]),
                 ),
             },
-        )
-    stream = (
-        await session.execute(
-            text(_LOCK_STREAM_SQL),
-            {"external_system": external_system},
-        )
-    ).one()
-    if str(stream._mapping["consumer_id"]) != consumer_id:
-        raise CacheTargetStreamConflict(
-            "consumer_mismatch",
-            "service principal consumer_id가 stream binding과 다릅니다.",
         )
     header, items = await _build_snapshot_material(
         session,
@@ -1615,6 +1651,22 @@ async def complete_cache_target_reconciliation(
     if expected_restore_epoch <= 0:
         raise ValueError("expected_restore_epoch은 양수여야 합니다.")
     actual_merkle_root = _sha256(actual_merkle_root, field="actual_merkle_root")
+    stream = (
+        await session.execute(
+            text(_LOCK_STREAM_SQL),
+            {"external_system": external_system},
+        )
+    ).one_or_none()
+    if stream is None:
+        raise CacheTargetStreamConflict(
+            "reconciliation_precondition_failed",
+            "reconciliation request의 stream binding이 다릅니다.",
+        )
+    if str(stream._mapping["consumer_id"]) != consumer_id:
+        raise CacheTargetStreamConflict(
+            "consumer_mismatch",
+            "service principal consumer_id가 stream binding과 다릅니다.",
+        )
     row = (
         await session.execute(
             text(_LOCK_RECONCILIATION_SQL),
@@ -1627,6 +1679,24 @@ async def complete_cache_target_reconciliation(
             "reconciliation request가 현재 active request와 다릅니다.",
         )
     values = row._mapping
+    if str(values["external_system"]) != external_system:
+        raise CacheTargetStreamConflict(
+            "reconciliation_precondition_failed",
+            "reconciliation request의 stream binding이 다릅니다.",
+            current={"external_system": str(values["external_system"])},
+        )
+    if str(values["status"]) == "superseded":
+        raise CacheTargetStreamConflict(
+            "reconciliation_superseded",
+            "restore fence가 reconciliation request를 대체했습니다.",
+            current={
+                "status": "superseded",
+                "entity_tag": cache_target_reconciliation_entity_tag(
+                    request_id,
+                    int(values["phase_version"]),
+                ),
+            },
+        )
     if str(values["status"]) == "preparing":
         raise CacheTargetStreamConflict(
             "reconciliation_not_sealed",
@@ -1647,17 +1717,6 @@ async def complete_cache_target_reconciliation(
                 "snapshot_id": str(values["snapshot_id"]),
                 "restore_epoch": int(values["restore_epoch"]),
             },
-        )
-    stream = (
-        await session.execute(
-            text(_LOCK_STREAM_SQL),
-            {"external_system": external_system},
-        )
-    ).one()
-    if str(stream._mapping["consumer_id"]) != consumer_id:
-        raise CacheTargetStreamConflict(
-            "consumer_mismatch",
-            "service principal consumer_id가 stream binding과 다릅니다.",
         )
     if str(values["status"]) in ("succeeded", "failed"):
         if str(values["actual_merkle_root"]) != actual_merkle_root:

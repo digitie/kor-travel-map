@@ -65,6 +65,14 @@ class _FakeCacheTargetService:
         self.reconciliation_completion_calls: list[dict[str, Any]] = []
         self.reconciliation_snapshot_calls: list[dict[str, Any]] = []
         self.reconciliation_completion_error: Exception | None = None
+        self.operation_result: Any = SimpleNamespace(
+            operation_id=RECONCILIATION_REQUEST_ID,
+            status="superseded",
+            snapshot_id=RECONCILIATION_SNAPSHOT_ID,
+            status_url=(
+                f"/v1/ops/cache-target-operations/{RECONCILIATION_REQUEST_ID}"
+            ),
+        )
         self.restore_calls: list[dict[str, Any]] = []
         self.replay_calls: list[dict[str, Any]] = []
         self.apply_result: Any = SimpleNamespace(
@@ -101,7 +109,10 @@ class _FakeCacheTargetService:
             restore_epoch=5,
             previous_control_version=2,
             control_version=3,
-            invalidated_claim_count=0,
+            invalidated_claim_count=2,
+            superseded_delivery_count=4,
+            superseded_reconciliation_count=1,
+            superseded_reconciliation_request_id=RECONCILIATION_REQUEST_ID,
         )
         self.dead_letter: Any | None = None
         self.claim_result: Any | None = None
@@ -269,6 +280,15 @@ class _FakeCacheTargetService:
         assert event_id == EVENT_ID
         return self.dead_letter
 
+    async def get_cache_target_operation(
+        self,
+        _session: Any,
+        *,
+        operation_id: str,
+    ) -> Any:
+        assert operation_id == RECONCILIATION_REQUEST_ID
+        return self.operation_result
+
     async def replay_cache_target_dead_letter(
         self,
         _session: Any,
@@ -376,6 +396,23 @@ def test_ops_stream_status_requires_superseded_count() -> None:
     payload.pop("superseded_count")
     with pytest.raises(ValidationError):
         CacheTargetStreamStatusRecord.model_validate(payload)
+
+
+@pytest.mark.unit
+def test_ops_recovery_operation_exposes_superseded_status_enum() -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service)
+
+    response = client.get(
+        f"/v1/ops/cache-target-operations/{RECONCILIATION_REQUEST_ID}"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["status"] == "superseded"
+    operation_schema = client.app.openapi()["components"]["schemas"][
+        "CacheTargetRecoveryOperationRecord"
+    ]
+    assert "superseded" in operation_schema["properties"]["status"]["enum"]
 
 
 @pytest.mark.unit
@@ -785,7 +822,12 @@ def test_restore_fence_uses_stream_etag_and_domain_command_claim(
 
     assert response.status_code == 201, response.text
     assert response.headers["etag"] == f'"{EXTERNAL_SYSTEM}:3"'
-    assert response.json()["data"]["state"] == "fenced"
+    data = response.json()["data"]
+    assert data["state"] == "fenced"
+    assert data["invalidated_claim_count"] == 2
+    assert data["superseded_delivery_count"] == 4
+    assert data["superseded_reconciliation_count"] == 1
+    assert data["superseded_reconciliation_request_id"] == RECONCILIATION_REQUEST_ID
     assert service.restore_calls[0]["command_id"] == 123
     assert service.restore_calls[0]["expected_control_version"] == 2
     assert captured_complete["status_code"] == 201

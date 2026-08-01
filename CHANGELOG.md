@@ -18,11 +18,15 @@
   dead-letter 0인 completion receipt에서만 resume한다. mid-claim poison은 앞 prefix ACK 전에는
   dead 전이를 거부한다. restore fence는 구 epoch의 모든 non-delivered delivery를 terminal
   `superseded`로 원자 종결해 old pending/retry/lease/dead가 새 epoch claim과 복구를 막지 않게 한다.
+  같은 fence는 기존 `preparing|running` reconciliation도 terminal `superseded`로 종결해 새 epoch
+  reconciliation이 즉시 시작되게 한다.
 - **CONTRACT**: target event와 stream reconciliation event를 `event_scope`로 분리해 empty 및
   tombstone-only snapshot에도 fake target tuple을 만들지 않는다. `cache_target.reconciled`
   payload의 `request_id`는 새 required field이며 request→fixed snapshot receipt 인과관계를
   `snapshot_id`와 함께 고정한다. admin reconciliation operation receipt도 생성한
   `snapshot_id`를 반환해 후속 stream read가 같은 snapshot에 도달했는지 검증할 수 있다.
+  restore-fence 응답은 무효화 claim 수, 대체 delivery 수, 대체 reconciliation 수와 request UUID를
+  durable fence receipt 그대로 노출하며 exact replay도 최초 값과 version을 보존한다.
 - **OPENAPI (breaking)**: 공개 사용자와 서버 간 profile을 분리했다.
   `@kor-travel-map/user-client`는 `RoutePolicy.SERVICE` batch 타입을 더는 노출하지 않으며,
   서버 간 소비자는 `openapi.service.json`을 pin한다.

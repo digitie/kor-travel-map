@@ -102,6 +102,30 @@ async def test_0073_phase_schema_and_downgrade(pg_container: Any) -> None:
                     "AND column_name = 'superseded_delivery_count'"
                 )
             )
+            fence_receipt_columns = set(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_schema = 'ops' "
+                            "AND table_name = 'poi_cache_target_restore_fences' "
+                            "AND column_name IN ("
+                            "'invalidated_claim_count',"
+                            "'superseded_reconciliation_count',"
+                            "'superseded_reconciliation_request_id')"
+                        )
+                    )
+                ).scalars()
+            )
+            active_reconciliation_index = await connection.scalar(
+                text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE schemaname = 'ops' "
+                    "AND tablename = 'poi_cache_target_reconciliation_requests' "
+                    "AND indexname = "
+                    "'uq_cache_target_reconciliation_requests_active_stream'"
+                )
+            )
             snapshot_item_table = await connection.scalar(
                 text("SELECT to_regclass('ops.poi_cache_target_snapshot_items')")
             )
@@ -113,14 +137,25 @@ async def test_0073_phase_schema_and_downgrade(pg_container: Any) -> None:
         assert status_constraint is not None
         assert "preparing" in status_constraint
         assert "running" in status_constraint
+        assert "superseded" in status_constraint
         assert lifecycle_constraint is not None
         assert "snapshot_id IS NULL" in lifecycle_constraint
         assert "snapshot_id IS NOT NULL" in lifecycle_constraint
+        assert "restore_fenced" in lifecycle_constraint
         assert delivery_status_constraint is not None
         assert "superseded" in delivery_status_constraint
         assert superseded_constraint is not None
         assert "superseded_at" in superseded_constraint
         assert superseded_count_column == "superseded_delivery_count"
+        assert fence_receipt_columns == {
+            "invalidated_claim_count",
+            "superseded_reconciliation_count",
+            "superseded_reconciliation_request_id",
+        }
+        assert (
+            active_reconciliation_index
+            == "uq_cache_target_reconciliation_requests_active_stream"
+        )
         assert str(snapshot_item_table) == "ops.poi_cache_target_snapshot_items"
         assert str(append_only_function) == "ops.reject_cache_target_history_mutation()"
 

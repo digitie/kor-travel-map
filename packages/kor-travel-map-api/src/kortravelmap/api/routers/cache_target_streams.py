@@ -60,6 +60,7 @@ from kortravelmap.api.cache_target_stream_schema import (
     CacheTargetRefreshRequest,
     CacheTargetRefreshRequestRecord,
     CacheTargetRefreshRequestResponse,
+    CacheTargetRestoreFenceRecord,
     CacheTargetRestoreFenceRequest,
     CacheTargetRestoreFenceResponse,
     CacheTargetSnapshotData,
@@ -455,6 +456,26 @@ def _stream_control(row: Any) -> CacheTargetStreamControlRecord:
         blocked_event_id=_getattr(row, "blocked_event_id"),
         active_reconciliation=active_record,
         updated_at=_getattr(row, "updated_at"),
+    )
+
+
+def _restore_fence(row: Any) -> CacheTargetRestoreFenceRecord:
+    control = _stream_control(row)
+    return CacheTargetRestoreFenceRecord(
+        **control.model_dump(),
+        fence_id=_getattr(row, "fence_id"),
+        previous_restore_epoch=_getattr(row, "previous_restore_epoch"),
+        previous_control_version=_getattr(row, "previous_control_version"),
+        invalidated_claim_count=_getattr(row, "invalidated_claim_count"),
+        superseded_delivery_count=_getattr(row, "superseded_delivery_count"),
+        superseded_reconciliation_count=_getattr(
+            row,
+            "superseded_reconciliation_count",
+        ),
+        superseded_reconciliation_request_id=_getattr(
+            row,
+            "superseded_reconciliation_request_id",
+        ),
     )
 
 
@@ -905,7 +926,7 @@ async def create_service_restore_fence(
             request_fingerprint=command.request_fingerprint,
         )
         raise_for_cache_target_status(result)
-        record = _stream_control(result)
+        record = _restore_fence(result)
         response_body = CacheTargetRestoreFenceResponse(
             data=record,
             meta=_meta(started_at),

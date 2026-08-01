@@ -590,6 +590,9 @@ commit하고 contiguous global prefix를 ACK한다. permanent poison은 dead let
 restore fence는 새 epoch보다 낮은 `pending|retry|leased|dead` delivery를 같은 transaction에서
 terminal `superseded`로 종결한다. 구 dead도 새 epoch의 DLQ·replay·dead 집계에서 제외하고, claim은
 현재 epoch event만 선택한다. 운영 status는 backlog와 별도로 누적 `superseded_count`를 보여 준다.
+동시에 active reconciliation은 terminal `superseded`/`restore_fenced`로 종결하고 active slot을
+비운다. fence receipt와 service 응답은 claim/delivery/reconciliation count 및 대체 request UUID를
+고정하므로 재시도도 같은 결과를 반환하고 새 epoch reconciliation은 즉시 begin할 수 있다.
 
 snapshot checksum은 active와 tombstone을 모두 포함한 ADR-081 Merkle v1이다. Map/PinVi는
 `cache-target-source-v1` canonical serializer golden vector와 pinned service OpenAPI를 함께
@@ -617,3 +620,6 @@ isolated live 증명 뒤에만 `T-VN-41A/B/C`를 닫는다.
 - permanent NACK/dead letter는 후속 order를 block하고 동일 event replay+Merkle 일치 뒤에만 해제된다.
 - restore fence 뒤 구 epoch non-delivered는 모두 superseded이고 old dead는 DLQ/claim을 막지 않는다.
 - 같은 fence command replay는 superseded delivery version을 다시 증가시키지 않는다.
+- preparing/running 중 restore fence가 오면 구 request의 snapshot/seal/completion은 모두
+  `reconciliation_superseded`이고 새 epoch begin은 즉시 성공한다.
+- fence exact replay는 최초 무효화/대체 count, 대체 reconciliation UUID와 모든 phase version을 보존한다.

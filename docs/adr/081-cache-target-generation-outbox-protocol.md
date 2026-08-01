@@ -68,6 +68,18 @@ receipt이므로 보존한다. supersession은 lease binding을 제거하고 `su
 fence replay는 이 전이를 다시 실행하거나 delivery version을 올리지 않는다. 구 epoch dead letter도
 새 epoch에서 복구할 대상이 아니므로 DLQ/replay와 ready 전이의 dead 집계에서 제외한다.
 
+같은 fence transaction은 해당 stream의 active `preparing|running` reconciliation을 terminal
+`superseded`로 바꾸고 `phase_version`을 1 올리며 `completed_at`과
+`error_code='restore_fenced'`를 기록한다. preparing 출발은 snapshot/root가 계속 `NULL`이고 running
+출발은 seal된 snapshot/expected root를 audit로 보존하되 actual root는 `NULL`이다. stream별 active
+request는 partial unique index로 최대 하나이며, supersession 뒤 snapshot/seal/completion은
+`reconciliation_superseded`로 거부되고 새 epoch begin은 즉시 가능하다. fence receipt는
+`invalidated_claim_count`, `superseded_delivery_count`, `superseded_reconciliation_count`,
+`superseded_reconciliation_request_id`를 저장한다. service 응답과 exact replay는 이 최초 receipt와
+epoch/control/phase version을 그대로 반환하며 terminal 전이를 다시 실행하지 않는다.
+ops recovery operation status 계약에도 `superseded`를 strict enum으로 포함해 consumer가 terminal
+대체를 자유 문자열 fallback 없이 판별한다.
+
 PinVi restore는 restored writer를 열기 전에 이 command를 호출한다. Map 자체 restore/cutover CLI도
 복원 payload를 외부에 노출하기 전에 같은 domain 함수를 호출한다. 별도 SQL이나 process-local epoch
 생성은 금지한다.
@@ -155,6 +167,8 @@ rollback한 `412`다. begin 요청의 precondition은 stream control ETag 또는
 `If-None-Match: *`이고, begin/seal 응답과 seal `If-Match`는 reconciliation request
 `request_id:phase_version` ETag를 사용한다. begin/seal은 모두 UUID `Idempotency-Key`와 precondition
 header를 domain ledger에 포함해 exact response replay와 changed-body `409`를 보장한다.
+restore fence가 active request를 대체하면 request는 terminal `superseded`가 되며, 구 request의
+snapshot 조회·seal·completion으로 새 epoch stream을 다시 열 수 없다.
 
 ```text
 (external_system, target_key, state, source_generation, source_payload_fingerprint)

@@ -197,6 +197,10 @@ restore/cutover는 stream GET의 raw ETag를 기준으로 restore-fence command�
 N+1로 올린 뒤 writer를 연다. 이 transaction은 더 낮은 epoch의 모든 non-delivered delivery를
 terminal `superseded`로 종결하므로 구 pending/retry/lease/dead가 새 epoch claim이나 dead gate에
 섞이지 않는다. exact fence replay는 같은 receipt를 반환하고 delivery version을 바꾸지 않는다.
+이때 Map은 active `preparing|running` reconciliation도 terminal `superseded`로 종결하고 fence 응답에
+대체한 request UUID와 count를 포함한다. PinVi는 이 UUID가 자기 active request라면 구
+snapshot/seal/completion을 중단하고 새 epoch stream ETag로 begin부터 다시 시작한다. exact fence
+replay의 claim/delivery/reconciliation count와 request UUID는 최초 응답과 같아야 한다.
 restored payload의 epoch를 신뢰하지 않는다. fixed snapshot은
 active+tombstone Merkle v1과 pinned service OpenAPI를 함께 검증한다. credential, principal scope,
 contract SHA, epoch, snapshot checksum 중 하나라도 맞지 않으면 PinVi consumer는 fail-closed한다.

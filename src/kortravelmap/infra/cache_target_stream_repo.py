@@ -105,6 +105,8 @@ class CacheTargetRestoreFenceResult:
     control_version: int
     invalidated_claim_count: int
     superseded_delivery_count: int
+    superseded_reconciliation_count: int
+    superseded_reconciliation_request_id: str | None
     idempotent_replay: bool = False
 
 
@@ -239,7 +241,8 @@ WHERE external_system = :external_system
 _GET_FENCE_BY_COMMAND_SQL = """
 SELECT fence_id, command_id, external_system, consumer_id, request_fingerprint,
        previous_restore_epoch, restore_epoch, previous_control_version,
-       control_version, superseded_delivery_count
+       control_version, invalidated_claim_count, superseded_delivery_count,
+       superseded_reconciliation_count, superseded_reconciliation_request_id
 FROM ops.poi_cache_target_restore_fences
 WHERE command_id = :command_id
 """
@@ -265,6 +268,15 @@ WHERE event.event_id = delivery.event_id
 RETURNING delivery.event_id
 """
 
+_SUPERSEDE_ACTIVE_RECONCILIATION_SQL = """
+UPDATE ops.poi_cache_target_reconciliation_requests
+SET status = 'superseded', phase_version = phase_version + 1,
+    completed_at = now(), error_code = 'restore_fenced'
+WHERE external_system = :external_system
+  AND status IN ('preparing','running')
+RETURNING request_id
+"""
+
 _UPDATE_RESTORE_FENCE_SQL = """
 UPDATE ops.poi_cache_target_streams
 SET restore_epoch = restore_epoch + 1,
@@ -281,11 +293,16 @@ _INSERT_RESTORE_FENCE_SQL = """
 INSERT INTO ops.poi_cache_target_restore_fences (
     fence_id, external_system, consumer_id, command_id,
     previous_restore_epoch, restore_epoch, previous_control_version,
-    control_version, superseded_delivery_count, reason, request_fingerprint
+    control_version, invalidated_claim_count, superseded_delivery_count,
+    superseded_reconciliation_count, superseded_reconciliation_request_id,
+    reason, request_fingerprint
 ) VALUES (
     CAST(:fence_id AS uuid), :external_system, :consumer_id, :command_id,
     :previous_restore_epoch, :restore_epoch, :previous_control_version,
-    :control_version, :superseded_delivery_count, :reason, :request_fingerprint
+    :control_version, :invalidated_claim_count, :superseded_delivery_count,
+    :superseded_reconciliation_count,
+    CAST(:superseded_reconciliation_request_id AS uuid),
+    :reason, :request_fingerprint
 )
 """
 
@@ -845,8 +862,16 @@ async def advance_cache_target_restore_fence(
             restore_epoch=int(values["restore_epoch"]),
             previous_control_version=int(values["previous_control_version"]),
             control_version=int(values["control_version"]),
-            invalidated_claim_count=0,
+            invalidated_claim_count=int(values["invalidated_claim_count"]),
             superseded_delivery_count=int(values["superseded_delivery_count"]),
+            superseded_reconciliation_count=int(
+                values["superseded_reconciliation_count"]
+            ),
+            superseded_reconciliation_request_id=(
+                str(values["superseded_reconciliation_request_id"])
+                if values["superseded_reconciliation_request_id"] is not None
+                else None
+            ),
             idempotent_replay=True,
         )
 
@@ -891,6 +916,20 @@ async def advance_cache_target_restore_fence(
         )
     ).all()
     superseded_delivery_count = len(superseded_rows)
+    superseded_reconciliation_rows = (
+        await session.execute(
+            text(_SUPERSEDE_ACTIVE_RECONCILIATION_SQL),
+            {"external_system": external_system},
+        )
+    ).all()
+    superseded_reconciliation_ids = [
+        str(row._mapping["request_id"]) for row in superseded_reconciliation_rows
+    ]
+    if len(superseded_reconciliation_ids) > 1:
+        raise RuntimeError("stream에 active reconciliation이 둘 이상 존재합니다.")
+    superseded_reconciliation_request_id = (
+        superseded_reconciliation_ids[0] if superseded_reconciliation_ids else None
+    )
     advanced = (
         await session.execute(
             text(_UPDATE_RESTORE_FENCE_SQL),
@@ -911,7 +950,14 @@ async def advance_cache_target_restore_fence(
             "restore_epoch": restore_epoch,
             "previous_control_version": control.control_version,
             "control_version": control_version,
+            "invalidated_claim_count": len(claim_ids),
             "superseded_delivery_count": superseded_delivery_count,
+            "superseded_reconciliation_count": len(
+                superseded_reconciliation_ids
+            ),
+            "superseded_reconciliation_request_id": (
+                superseded_reconciliation_request_id
+            ),
             "reason": reason,
             "request_fingerprint": request_fingerprint,
         },
@@ -927,4 +973,8 @@ async def advance_cache_target_restore_fence(
         control_version=control_version,
         invalidated_claim_count=len(claim_ids),
         superseded_delivery_count=superseded_delivery_count,
+        superseded_reconciliation_count=len(superseded_reconciliation_ids),
+        superseded_reconciliation_request_id=(
+            superseded_reconciliation_request_id
+        ),
     )

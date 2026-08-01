@@ -122,7 +122,13 @@ def upgrade() -> None:
         sa.Column("restore_epoch", sa.BigInteger(), nullable=False),
         sa.Column("previous_control_version", sa.BigInteger(), nullable=False),
         sa.Column("control_version", sa.BigInteger(), nullable=False),
+        sa.Column("invalidated_claim_count", sa.BigInteger(), nullable=False),
         sa.Column("superseded_delivery_count", sa.BigInteger(), nullable=False),
+        sa.Column("superseded_reconciliation_count", sa.BigInteger(), nullable=False),
+        sa.Column(
+            "superseded_reconciliation_request_id",
+            postgresql.UUID(as_uuid=False),
+        ),
         sa.Column("reason", sa.Text(), nullable=False),
         sa.Column("request_fingerprint", sa.Text(), nullable=False),
         sa.Column(
@@ -146,6 +152,17 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "superseded_delivery_count >= 0",
             name="ck_cache_target_restore_fences_superseded_count",
+        ),
+        sa.CheckConstraint(
+            "invalidated_claim_count >= 0",
+            name="ck_cache_target_restore_fences_invalidated_claim_count",
+        ),
+        sa.CheckConstraint(
+            "(superseded_reconciliation_count = 0 "
+            "AND superseded_reconciliation_request_id IS NULL) OR "
+            "(superseded_reconciliation_count = 1 "
+            "AND superseded_reconciliation_request_id IS NOT NULL)",
+            name="ck_cache_target_restore_fences_superseded_reconciliation",
         ),
         sa.CheckConstraint(
             "btrim(reason) <> '' AND char_length(reason) <= 1000",
@@ -463,7 +480,7 @@ def upgrade() -> None:
             name=op.f("ck_cache_target_reconciliation_requests_reason"),
         ),
         sa.CheckConstraint(
-            "status IN ('preparing','running','succeeded','failed')",
+            "status IN ('preparing','running','succeeded','failed','superseded')",
             name=op.f("ck_cache_target_reconciliation_requests_status"),
         ),
         sa.CheckConstraint(
@@ -495,7 +512,12 @@ def upgrade() -> None:
             "(status = 'failed' AND started_at IS NOT NULL "
             "AND completed_at IS NOT NULL AND snapshot_id IS NOT NULL "
             "AND expected_merkle_root IS NOT NULL AND actual_merkle_root IS NOT NULL "
-            "AND error_code IS NOT NULL)",
+            "AND error_code IS NOT NULL) OR "
+            "(status = 'superseded' AND started_at IS NOT NULL "
+            "AND completed_at IS NOT NULL AND actual_merkle_root IS NULL "
+            "AND error_code = 'restore_fenced' AND "
+            "((snapshot_id IS NULL AND expected_merkle_root IS NULL) OR "
+            "(snapshot_id IS NOT NULL AND expected_merkle_root IS NOT NULL)))",
             name=op.f("ck_cache_target_reconciliation_requests_lifecycle"),
         ),
         sa.ForeignKeyConstraint(
@@ -525,6 +547,24 @@ def upgrade() -> None:
         "poi_cache_target_reconciliation_requests",
         ["external_system", "status", sa.text("created_at DESC"), "request_id"],
         schema="ops",
+    )
+    op.create_index(
+        "uq_cache_target_reconciliation_requests_active_stream",
+        "poi_cache_target_reconciliation_requests",
+        ["external_system"],
+        unique=True,
+        schema="ops",
+        postgresql_where=sa.text("status IN ('preparing','running')"),
+    )
+    op.create_foreign_key(
+        "fk_cache_target_restore_fences_superseded_reconciliation",
+        "poi_cache_target_restore_fences",
+        "poi_cache_target_reconciliation_requests",
+        ["superseded_reconciliation_request_id"],
+        ["request_id"],
+        source_schema="ops",
+        referent_schema="ops",
+        ondelete="RESTRICT",
     )
 
     op.create_table(
@@ -1144,6 +1184,17 @@ def downgrade() -> None:
         schema="ops",
     )
     op.drop_table("poi_cache_target_outbox_events", schema="ops")
+    op.drop_constraint(
+        "fk_cache_target_restore_fences_superseded_reconciliation",
+        "poi_cache_target_restore_fences",
+        schema="ops",
+        type_="foreignkey",
+    )
+    op.drop_index(
+        "uq_cache_target_reconciliation_requests_active_stream",
+        table_name="poi_cache_target_reconciliation_requests",
+        schema="ops",
+    )
     op.drop_index(
         "idx_cache_target_reconciliation_requests_stream_status",
         table_name="poi_cache_target_reconciliation_requests",

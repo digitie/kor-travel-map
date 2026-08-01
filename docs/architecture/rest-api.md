@@ -594,6 +594,16 @@ external system을 exact 결박한다. scope는 consumer read/claim/ack/nack/sna
 restore-fence, recovery replay, recovery cutover로 분리한다. PinVi에 admin proxy secret이나
 ops mutation 권한을 주지 않는다.
 
+restore-fence `201`의 `data`는 새 stream control과 함께 `fence_id`, 직전 epoch/control version,
+`invalidated_claim_count`, `superseded_delivery_count`, `superseded_reconciliation_count`, nullable
+`superseded_reconciliation_request_id`를 반환한다. fence는 active `preparing|running`
+reconciliation을 terminal `superseded`/`restore_fenced`로 원자 종결한다. exact Idempotency-Key replay는
+최초 count/UUID/version을 그대로 반환하며 구 request의 snapshot/seal/completion은
+`RECONCILIATION_SUPERSEDED` `409`다.
+`GET /v1/ops/cache-target-operations/{operation_id}`의 status는 자유 문자열이 아니라 reconciliation
+`preparing|running|succeeded|failed|superseded`, delivery
+`pending|leased|retry|dead|delivered|superseded`, admin 접수 `accepted`의 합집합 enum이다.
+
 target create는 `If-None-Match: *`, update/delete는 직전 GET/성공 응답의 raw strong ETag를
 `If-Match`로 보낸다. `source_generation`은 ETag나 queue generation을 대체하지 않는다. `412`는
 자동 rebase하지 않고 snapshot reconcile 뒤 새 command로 해결한다. 모든 네트워크 재시도 command는

@@ -3877,6 +3877,17 @@ class PoiCacheTargetRestoreFenceRow(Base):
             name=conv("ck_cache_target_restore_fences_superseded_count"),
         ),
         CheckConstraint(
+            "invalidated_claim_count >= 0",
+            name=conv("ck_cache_target_restore_fences_invalidated_claim_count"),
+        ),
+        CheckConstraint(
+            "(superseded_reconciliation_count = 0 "
+            "AND superseded_reconciliation_request_id IS NULL) OR "
+            "(superseded_reconciliation_count = 1 "
+            "AND superseded_reconciliation_request_id IS NOT NULL)",
+            name=conv("ck_cache_target_restore_fences_superseded_reconciliation"),
+        ),
+        CheckConstraint(
             "btrim(reason) <> '' AND char_length(reason) <= 1000",
             name=conv("ck_cache_target_restore_fences_reason"),
         ),
@@ -3920,7 +3931,17 @@ class PoiCacheTargetRestoreFenceRow(Base):
     restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
     previous_control_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
     control_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    invalidated_claim_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
     superseded_delivery_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    superseded_reconciliation_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    superseded_reconciliation_request_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_target_reconciliation_requests.request_id",
+            name="fk_cache_target_restore_fences_superseded_reconciliation",
+            ondelete="RESTRICT",
+        ),
+    )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -4182,7 +4203,7 @@ class PoiCacheTargetReconciliationRequestRow(Base):
             name=conv("ck_cache_target_reconciliation_requests_reason"),
         ),
         CheckConstraint(
-            "status IN ('preparing','running','succeeded','failed')",
+            "status IN ('preparing','running','succeeded','failed','superseded')",
             name=conv("ck_cache_target_reconciliation_requests_status"),
         ),
         CheckConstraint(
@@ -4214,7 +4235,12 @@ class PoiCacheTargetReconciliationRequestRow(Base):
             "(status = 'failed' AND started_at IS NOT NULL "
             "AND completed_at IS NOT NULL AND snapshot_id IS NOT NULL "
             "AND expected_merkle_root IS NOT NULL AND actual_merkle_root IS NOT NULL "
-            "AND error_code IS NOT NULL)",
+            "AND error_code IS NOT NULL) OR "
+            "(status = 'superseded' AND started_at IS NOT NULL "
+            "AND completed_at IS NOT NULL AND actual_merkle_root IS NULL "
+            "AND error_code = 'restore_fenced' AND "
+            "((snapshot_id IS NULL AND expected_merkle_root IS NULL) OR "
+            "(snapshot_id IS NOT NULL AND expected_merkle_root IS NOT NULL)))",
             name=conv("ck_cache_target_reconciliation_requests_lifecycle"),
         ),
         UniqueConstraint(
@@ -4227,6 +4253,12 @@ class PoiCacheTargetReconciliationRequestRow(Base):
             "status",
             text("created_at DESC"),
             "request_id",
+        ),
+        Index(
+            "uq_cache_target_reconciliation_requests_active_stream",
+            "external_system",
+            unique=True,
+            postgresql_where=text("status IN ('preparing','running')"),
         ),
         {"schema": "ops"},
     )

@@ -2569,7 +2569,7 @@ T-VN-41 producer foundation은 projection row와 source 순서를 분리한다. 
 | outbox event | `event_id`, unique `relay_order` | target/link/refresh/reconciliation 결과와 같은 transaction에서 만든 불변 typed event |
 | delivery/claim | event/claim identity | lease, attempt, retry, contiguous ACK, dead/replay와 epoch supersession 상태 |
 | fixed snapshot | `snapshot_id`, `(snapshot_id, row_number)` | 한 MVCC view의 epoch/high-watermark/head set과 Merkle root를 immutable page로 고정 |
-| reconciliation | `request_id`, unique `command_id` | checksum receipt, halt/resume와 terminal 성공/실패 이력 |
+| reconciliation | `request_id`, unique `command_id` | checksum receipt, halt/resume와 terminal 성공/실패/복원 대체 이력 |
 
 `source_generation`은 target natural key별 PinVi desired-state generation이고,
 `target_sequence`는 같은 source generation에서 Map이 만든 결과 순서다. 기존
@@ -2589,6 +2589,14 @@ delivery status는 `pending|leased|retry|dead|delivered|superseded`다. restore 
 지운다. `delivered`는 그대로 보존한다. `superseded_at`과 fence별 `superseded_delivery_count`가 audit
 근거이며 exact fence replay는 delivery version을 다시 올리지 않는다. stream 상태의
 `superseded_count`는 역사적 종결 수이고 backlog/dead 집계에는 포함하지 않는다.
+
+restore fence receipt는 최초 `invalidated_claim_count`, `superseded_delivery_count`,
+`superseded_reconciliation_count`와 nullable `superseded_reconciliation_request_id`를 불변 저장한다.
+reconciliation은 stream별 `preparing|running` partial unique index로 active 하나만 허용한다. fence가
+active request를 만나면 `status='superseded'`, `error_code='restore_fenced'`, `completed_at=now()`와
+증가한 `phase_version`으로 원자 종결한다. preparing 출발은 snapshot/expected root가 `NULL`, running
+출발은 둘 다 non-`NULL`인 채 보존하고 두 경우 모두 actual root는 `NULL`이다. 이 shape는 DB CHECK로
+강제하며 exact fence replay는 receipt count/UUID나 request phase version을 바꾸지 않는다.
 
 fixed snapshot은 stream epoch, outbox high-watermark, active/tombstone head 전체를 한 SQL MVCC
 view에서 읽어 ADR-081 Merkle v1으로 checksum한다. page 중 새 write가 commit돼도 immutable item은

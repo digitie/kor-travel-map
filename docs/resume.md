@@ -79,6 +79,20 @@ T-VN-H35 배포를 B′ 경로로 진행한다. `0064~0073` 마이그레이션�
 분리해 돌린다. 배포 전 공개 표면 before/after exact count를 restore clone에서 다시
 잰다 — 이번엔 `0073`까지 포함해서.
 
+## 2026-08-01 (codex) — T-VN-41 restore fence reconciliation 교착 제거
+
+restore fence가 active `preparing|running` reconciliation을 남겨 구 completion은 epoch 변경으로
+실패하고 새 begin은 active 충돌로 실패하던 P1을 제거했다. fence transaction은 구 request를 terminal
+`superseded`/`restore_fenced`로 종결하고 phase version을 올려 active slot을 비운다. preparing과
+running의 snapshot/root shape는 별도 DB CHECK로 보존하고 stream별 active request는 partial unique
+index로 하나만 허용한다. 구 request의 snapshot/seal/completion은 모두 명시적 conflict다.
+
+durable fence receipt와 service 응답은 최초 claim 무효화 수, delivery 대체 수, reconciliation 대체
+수와 request UUID를 노출한다. exact replay는 이 값과 epoch/control/phase version을 바꾸지 않는다.
+
+**다음 한 작업**: 생성 service OpenAPI와 admin types를 별도 commit으로 고정하고 PinVi pin/PR CI 및
+isolated restore에서 구 request 차단과 새 epoch begin을 검증한다.
+
 ## 2026-08-01 (codex) — T-VN-41 prior epoch delivery terminal supersession
 
 restore fence가 active lease만 retry로 풀고 구 epoch pending/retry/dead를 남겨 새 epoch claim을 막던

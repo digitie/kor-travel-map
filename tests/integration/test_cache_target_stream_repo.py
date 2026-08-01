@@ -571,6 +571,178 @@ async def test_restore_fence_supersedes_prior_epoch_delivery_lifecycle(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("seal_before_fence", [False, True], ids=["preparing", "running"])
+async def test_restore_fence_supersedes_active_reconciliation_and_allows_new_begin(
+    migrated_session: AsyncSession,
+    *,
+    seal_before_fence: bool,
+) -> None:
+    suffix = 2 if seal_before_fence else 1
+    system = f"reconciliation-restore-fence-{suffix}"
+    begin_command = await _reconciliation_command(
+        migrated_session,
+        key=f"8a000000-0000-4000-8000-{suffix:012d}",
+        operation="service.cache-target-reconciliation.begin",
+    )
+    active = await begin_cache_target_reconciliation(
+        migrated_session,
+        command_id=begin_command,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        expected_restore_epoch=1,
+        expected_control_version=None,
+        create_only=True,
+        reason="restore-fence lifecycle test",
+    )
+    empty_root = snapshot_merkle_root([])
+    if seal_before_fence:
+        active = await seal_cache_target_reconciliation(
+            migrated_session,
+            request_id=active.request_id,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            expected_phase_version=1,
+            expected_restore_epoch=1,
+            expected_item_count=0,
+            expected_merkle_root=empty_root,
+        )
+        assert active.status == "running"
+
+    fence_request = {
+        "external_system": system,
+        "expected_restore_epoch": 1,
+        "reason": "replace active reconciliation",
+    }
+    fence_fingerprint = canonical_domain_command_fingerprint(fence_request)
+    fence_command = await create_domain_command_claim(
+        migrated_session,
+        actor=_CONSUMER,
+        operation="cache_target.restore_fence",
+        idempotency_key=f"8b000000-0000-4000-8000-{suffix:012d}",
+        request_fingerprint=fence_fingerprint,
+    )
+    fence = await advance_cache_target_restore_fence(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        command_id=fence_command.command_id,
+        expected_restore_epoch=1,
+        expected_control_version=1,
+        reason="replace active reconciliation",
+        request_fingerprint=fence_fingerprint,
+    )
+
+    assert fence.invalidated_claim_count == 0
+    assert fence.superseded_delivery_count == 0
+    assert fence.superseded_reconciliation_count == 1
+    assert fence.superseded_reconciliation_request_id == active.request_id
+    expected_phase_version = 3 if seal_before_fence else 2
+    terminal = (
+        await migrated_session.execute(
+            text(
+                "SELECT status, phase_version, snapshot_id, expected_merkle_root, "
+                "actual_merkle_root, error_code, completed_at "
+                "FROM ops.poi_cache_target_reconciliation_requests "
+                "WHERE request_id = CAST(:request_id AS uuid)"
+            ),
+            {"request_id": active.request_id},
+        )
+    ).one()
+    assert terminal.status == "superseded"
+    assert terminal.phase_version == expected_phase_version
+    assert terminal.completed_at is not None
+    assert terminal.actual_merkle_root is None
+    assert terminal.error_code == "restore_fenced"
+    assert (terminal.snapshot_id is not None) is seal_before_fence
+    assert (terminal.expected_merkle_root is not None) is seal_before_fence
+
+    replay = await advance_cache_target_restore_fence(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        command_id=fence_command.command_id,
+        expected_restore_epoch=1,
+        expected_control_version=1,
+        reason="replace active reconciliation",
+        request_fingerprint=fence_fingerprint,
+    )
+    assert replay.idempotent_replay
+    assert replay.invalidated_claim_count == fence.invalidated_claim_count
+    assert replay.superseded_delivery_count == fence.superseded_delivery_count
+    assert replay.superseded_reconciliation_count == 1
+    assert replay.superseded_reconciliation_request_id == active.request_id
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT phase_version "
+                "FROM ops.poi_cache_target_reconciliation_requests "
+                "WHERE request_id = CAST(:request_id AS uuid)"
+            ),
+            {"request_id": active.request_id},
+        )
+        == expected_phase_version
+    )
+
+    discovery = await get_cache_target_stream_discovery(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+    )
+    assert discovery is not None
+    assert discovery.active_reconciliation is None
+
+    with pytest.raises(CacheTargetStreamConflict) as stale_snapshot:
+        await get_cache_target_reconciliation_snapshot(
+            migrated_session,
+            request_id=active.request_id,
+            consumer_id=_CONSUMER,
+        )
+    assert stale_snapshot.value.code == "reconciliation_superseded"
+    with pytest.raises(CacheTargetStreamConflict) as stale_seal:
+        await seal_cache_target_reconciliation(
+            migrated_session,
+            request_id=active.request_id,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            expected_phase_version=expected_phase_version,
+            expected_restore_epoch=1,
+            expected_item_count=0,
+            expected_merkle_root=empty_root,
+        )
+    assert stale_seal.value.code == "reconciliation_superseded"
+    with pytest.raises(CacheTargetStreamConflict) as stale_completion:
+        await complete_cache_target_reconciliation(
+            migrated_session,
+            request_id=active.request_id,
+            external_system=system,
+            consumer_id=_CONSUMER,
+            snapshot_id=active.snapshot_id
+            or f"8c000000-0000-4000-8000-{suffix:012d}",
+            expected_restore_epoch=1,
+            actual_merkle_root=empty_root,
+        )
+    assert stale_completion.value.code == "reconciliation_superseded"
+
+    new_begin_command = await _reconciliation_command(
+        migrated_session,
+        key=f"8d000000-0000-4000-8000-{suffix:012d}",
+        operation="service.cache-target-reconciliation.begin",
+    )
+    new_begin = await begin_cache_target_reconciliation(
+        migrated_session,
+        command_id=new_begin_command,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        expected_restore_epoch=2,
+        expected_control_version=2,
+        create_only=False,
+        reason="new epoch reconciliation",
+    )
+    assert new_begin.status == "preparing"
+    assert new_begin.request_id != active.request_id
+
+
+@pytest.mark.integration
 async def test_restore_swap_fence_replays_and_rejects_epoch_regression(
     migrated_session: AsyncSession,
 ) -> None:

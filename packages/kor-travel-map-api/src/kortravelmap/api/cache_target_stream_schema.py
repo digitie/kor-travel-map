@@ -33,6 +33,7 @@ __all__ = [
     "CacheTargetOperationResponse",
     "CacheTargetReconciledPayload",
     "CacheTargetRecoveryOperationRecord",
+    "CacheTargetRecoveryOperationStatus",
     "CacheTargetReconciliationBeginRequest",
     "CacheTargetReconciliationRequest",
     "CacheTargetReconciliationCompletionRequest",
@@ -55,6 +56,7 @@ __all__ = [
     "CacheTargetStreamStatusListData",
     "CacheTargetStreamStatusRecord",
     "CacheTargetRestoreFenceRequest",
+    "CacheTargetRestoreFenceRecord",
     "CacheTargetRestoreFenceResponse",
 ]
 
@@ -66,6 +68,19 @@ CacheTargetEventType = Literal[
 ]
 CacheTargetEventScope = Literal["target", "stream"]
 CacheTargetSourceState = Literal["active", "deleted"]
+CacheTargetRecoveryOperationStatus = Literal[
+    "accepted",
+    "pending",
+    "leased",
+    "retry",
+    "dead",
+    "delivered",
+    "preparing",
+    "running",
+    "succeeded",
+    "failed",
+    "superseded",
+]
 CacheTargetStreamState = Literal[
     "active",
     "blocked",
@@ -229,12 +244,24 @@ class CacheTargetRestoreFenceRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class CacheTargetRestoreFenceRecord(CacheTargetStreamControlRecord):
+    """Restore-fence control state와 durable effect receipt."""
+
+    fence_id: UUID
+    previous_restore_epoch: int = Field(ge=1)
+    previous_control_version: int = Field(ge=1)
+    invalidated_claim_count: int = Field(ge=0)
+    superseded_delivery_count: int = Field(ge=0)
+    superseded_reconciliation_count: int = Field(ge=0, le=1)
+    superseded_reconciliation_request_id: UUID | None
+
+
 class CacheTargetRestoreFenceResponse(BaseModel):
     """Restore-fence command result."""
 
     model_config = ConfigDict(extra="forbid")
 
-    data: CacheTargetStreamControlRecord
+    data: CacheTargetRestoreFenceRecord
     meta: Meta
 
 
@@ -799,7 +826,7 @@ class CacheTargetRecoveryOperationRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     operation_id: str
-    status: str
+    status: CacheTargetRecoveryOperationStatus
     snapshot_id: UUID | None = None
     status_url: str | None = None
     entity_tag: str | None = None

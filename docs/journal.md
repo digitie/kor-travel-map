@@ -86,6 +86,21 @@
 - `test_alembic_upgrade.py`가 head revision을 리터럴로 박아 마이그레이션 추가마다
   깨졌다. ScriptDirectory에서 계산하도록 바꿨다.
 
+## 2026-08-01 (codex) — T-VN-41 restore fence active reconciliation supersession
+
+- exact head `0755070d`와 clean 상태에서 시작해 `CacheTargetRestoreFenceResult`와
+  `CacheTargetReconciliationResult` codegraph impact를 확인했다.
+- 0073 clean schema/ORM에 terminal `superseded` lifecycle, `restore_fenced` 사유, stream별 active
+  partial unique index를 추가했다. fence는 stream lock 아래 claim/delivery/reconciliation을 함께
+  종결하고 seal/completion도 같은 stream→request lock 순서로 맞췄다.
+- append-only fence receipt는 `invalidated_claim_count`, delivery/reconciliation superseded count와
+  nullable request UUID를 저장한다. repository와 service response는 exact replay에서도 최초 receipt와
+  version을 반환한다.
+- PostGIS 회귀는 preparing/running 양쪽의 lifecycle shape, old snapshot/seal/completion 거부, phase
+  불변 replay와 새 epoch begin 성공을 검증한다. API 회귀는 fence 응답의 모든 audit field를 고정한다.
+- 관련 PostGIS/migration **20건**, API/OpenAPI **52건**, targeted Ruff, strict mypy **5 files**,
+  import-linter **4 contracts**가 통과했다.
+
 ## 2026-08-01 (codex) — T-VN-41 restore fence superseded terminal 보강
 
 - exact `e315bfc4`, `origin/main` behind 0에서 시작하고 stream/outbox/model codegraph impact를 수정 전에
