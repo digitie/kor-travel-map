@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kortravelmap.core.cache_target_stream import (
@@ -740,6 +741,142 @@ async def test_restore_fence_supersedes_active_reconciliation_and_allows_new_beg
     )
     assert new_begin.status == "preparing"
     assert new_begin.request_id != active.request_id
+
+
+@pytest.mark.integration
+async def test_restore_fence_reconciliation_reference_is_stream_scoped(
+    migrated_session: AsyncSession,
+) -> None:
+    source_system = "reconciliation-fence-source"
+    other_system = "reconciliation-fence-other"
+    source_command = await _reconciliation_command(
+        migrated_session,
+        key="8e000000-0000-4000-8000-000000000001",
+        operation="service.cache-target-reconciliation.begin",
+    )
+    source_request = await begin_cache_target_reconciliation(
+        migrated_session,
+        command_id=source_command,
+        external_system=source_system,
+        consumer_id=_CONSUMER,
+        expected_restore_epoch=1,
+        expected_control_version=None,
+        create_only=True,
+        reason="stream-scoped fence source",
+    )
+    other_command = await _reconciliation_command(
+        migrated_session,
+        key="8e000000-0000-4000-8000-000000000002",
+        operation="service.cache-target-reconciliation.begin",
+    )
+    other_request = await begin_cache_target_reconciliation(
+        migrated_session,
+        command_id=other_command,
+        external_system=other_system,
+        consumer_id=_CONSUMER,
+        expected_restore_epoch=1,
+        expected_control_version=None,
+        create_only=True,
+        reason="stream-scoped fence other",
+    )
+
+    fence_request = {
+        "external_system": source_system,
+        "expected_restore_epoch": 1,
+        "reason": "stream-scoped fence",
+    }
+    fence_fingerprint = canonical_domain_command_fingerprint(fence_request)
+    fence_command = await create_domain_command_claim(
+        migrated_session,
+        actor=_CONSUMER,
+        operation="cache_target.restore_fence",
+        idempotency_key="8e000000-0000-4000-8000-000000000003",
+        request_fingerprint=fence_fingerprint,
+    )
+    fence = await advance_cache_target_restore_fence(
+        migrated_session,
+        external_system=source_system,
+        consumer_id=_CONSUMER,
+        command_id=fence_command.command_id,
+        expected_restore_epoch=1,
+        expected_control_version=1,
+        reason="stream-scoped fence",
+        request_fingerprint=fence_fingerprint,
+    )
+    assert fence.superseded_reconciliation_count == 1
+    assert fence.superseded_reconciliation_request_id == source_request.request_id
+
+    replay = await advance_cache_target_restore_fence(
+        migrated_session,
+        external_system=source_system,
+        consumer_id=_CONSUMER,
+        command_id=fence_command.command_id,
+        expected_restore_epoch=1,
+        expected_control_version=1,
+        reason="stream-scoped fence",
+        request_fingerprint=fence_fingerprint,
+    )
+    assert replay.idempotent_replay
+    assert replay.superseded_reconciliation_request_id == source_request.request_id
+
+    cross_fingerprint = canonical_domain_command_fingerprint(
+        {"external_system": source_system, "request_id": other_request.request_id}
+    )
+    cross_command = await create_domain_command_claim(
+        migrated_session,
+        actor=_CONSUMER,
+        operation="cache_target.restore_fence",
+        idempotency_key="8e000000-0000-4000-8000-000000000004",
+        request_fingerprint=cross_fingerprint,
+    )
+    with pytest.raises(IntegrityError) as cross_insert:
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "INSERT INTO ops.poi_cache_target_restore_fences ("
+                    "external_system, consumer_id, command_id, "
+                    "previous_restore_epoch, restore_epoch, "
+                    "previous_control_version, control_version, "
+                    "invalidated_claim_count, superseded_delivery_count, "
+                    "superseded_reconciliation_count, "
+                    "superseded_reconciliation_request_id, reason, "
+                    "request_fingerprint) VALUES ("
+                    ":external_system, :consumer_id, :command_id, 2, 3, 2, 3, "
+                    "0, 0, 1, CAST(:request_id AS uuid), :reason, :fingerprint)"
+                ),
+                {
+                    "external_system": source_system,
+                    "consumer_id": _CONSUMER,
+                    "command_id": cross_command.command_id,
+                    "request_id": other_request.request_id,
+                    "reason": "cross-stream insert must fail",
+                    "fingerprint": cross_fingerprint,
+                },
+            )
+    assert getattr(cross_insert.value.orig, "sqlstate", None) == "23503"
+    assert (
+        "fk_cache_target_restore_fences_superseded_reconciliation"
+        in str(cross_insert.value.orig)
+    )
+
+    with pytest.raises(IntegrityError) as cross_update:
+        async with migrated_session.begin_nested():
+            await migrated_session.execute(
+                text(
+                    "UPDATE ops.poi_cache_target_reconciliation_requests "
+                    "SET external_system = :other_system "
+                    "WHERE request_id = CAST(:request_id AS uuid)"
+                ),
+                {
+                    "other_system": other_system,
+                    "request_id": source_request.request_id,
+                },
+            )
+    assert getattr(cross_update.value.orig, "sqlstate", None) == "23503"
+    assert (
+        "fk_cache_target_restore_fences_superseded_reconciliation"
+        in str(cross_update.value.orig)
+    )
 
 
 @pytest.mark.integration

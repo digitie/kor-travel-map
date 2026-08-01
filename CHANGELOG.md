@@ -13,6 +13,8 @@
 - **CORRECTNESS**: target/link/refresh 결과 event는 원본 mutation과 같은 transaction에서
   commit한다. restore swap은 live보다 낮은 epoch와 consumer binding drift를 거부하고 동일
   restore-fence domain 함수가 성공한 뒤에만 cutover env를 노출한다.
+  fence가 대체한 reconciliation은 request UUID만 참조하지 않고 stream identity와 함께 composite FK로
+  결박해 다른 stream receipt INSERT와 referenced parent stream 변경을 DB에서 거부한다.
 - **RELAY**: consumer pull claim, contiguous ACK, bounded NACK/dead/replay와 immutable snapshot
   pagination을 제공한다. checksum mismatch는 stream을 disabled로 유지하고 exact match·동일 epoch·
   dead-letter 0인 completion receipt에서만 resume한다. mid-claim poison은 앞 prefix ACK 전에는

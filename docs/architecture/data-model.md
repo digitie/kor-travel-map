@@ -2592,6 +2592,10 @@ delivery status는 `pending|leased|retry|dead|delivered|superseded`다. restore 
 
 restore fence receipt는 최초 `invalidated_claim_count`, `superseded_delivery_count`,
 `superseded_reconciliation_count`와 nullable `superseded_reconciliation_request_id`를 불변 저장한다.
+reconciliation의 `(external_system, request_id)` unique key와 fence의
+`(external_system, superseded_reconciliation_request_id)` composite FK가 request UUID뿐 아니라
+stream 소속까지 같은 DB relation으로 결박한다. nullable request ID는 `MATCH SIMPLE`로 허용하되
+기존 count/UUID CHECK가 `0/null`만 허용하므로 부분 참조가 유효한 receipt로 가장할 수 없다.
 reconciliation은 stream별 `preparing|running` partial unique index로 active 하나만 허용한다. fence가
 active request를 만나면 `status='superseded'`, `error_code='restore_fenced'`, `completed_at=now()`와
 증가한 `phase_version`으로 원자 종결한다. preparing 출발은 snapshot/expected root가 `NULL`, running

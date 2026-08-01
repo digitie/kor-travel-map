@@ -79,6 +79,18 @@ T-VN-H35 배포를 B′ 경로로 진행한다. `0064~0073` 마이그레이션�
 분리해 돌린다. 배포 전 공개 표면 before/after exact count를 restore clone에서 다시
 잰다 — 이번엔 `0073`까지 포함해서.
 
+## 2026-08-01 (codex) — T-VN-41 restore fence stream identity 결박
+
+restore fence의 대체 reconciliation 참조를 단일 UUID FK에서
+`(external_system, superseded_reconciliation_request_id)` composite FK로 강화했다. referenced
+reconciliation의 `(external_system, request_id)` unique key와 결합하므로 다른 stream의 유효한 UUID를
+receipt에 넣거나 parent stream을 사후 변경할 수 없다. nullable receipt는 기존 count/UUID CHECK와
+`MATCH SIMPLE`이 함께 `0/null`만 허용한다. clean migration upgrade/downgrade와 ORM metadata,
+same-stream exact replay, cross-stream raw INSERT/UPDATE 거부를 PostGIS에서 검증한다.
+
+**다음 한 작업**: Map/PinVi exact functional head를 독립 적대적 리뷰어 2명이 다시 검토하고,
+두 리뷰의 P0~P2가 없을 때 exact candidate image로 n150 isolated/live recovery를 실행한다.
+
 ## 2026-08-01 (codex) — T-VN-41 restore fence receipt 상관 불변식
 
 DB CHECK에 있던 `superseded_reconciliation_count`/request UUID 상관 불변식을 HTTP

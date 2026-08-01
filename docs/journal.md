@@ -86,6 +86,21 @@
 - `test_alembic_upgrade.py`가 head revision을 리터럴로 박아 마이그레이션 추가마다
   깨졌다. ScriptDirectory에서 계산하도록 바꿨다.
 
+## 2026-08-01 (codex) — T-VN-41 restore fence stream-scoped FK
+
+- exact head `0399d680`에서 codegraph sync/impact를 실행하고 restore fence와 reconciliation ORM,
+  0073 clean migration, 관련 PostGIS 회귀로 변경 범위를 한정했다.
+- reconciliation에 `(external_system, request_id)` unique key를 추가하고 fence의 nullable request
+  참조를 같은 두 열의 composite FK로 교체했다. count/UUID CHECK와 `MATCH SIMPLE`을 조합해
+  `0/null`은 유지하면서 다른 stream UUID의 INSERT와 referenced parent stream UPDATE를 막는다.
+- migration은 reconciliation table 생성 시 unique key를 먼저 만들고 late fence FK를 생성한다.
+  downgrade는 fence FK를 먼저 제거한 뒤 reconciliation table을 내려 순환 의존을 남기지 않는다.
+- clean migration metadata와 ORM constraint name/column order/delete rule을 exact 검증하고,
+  same-stream fence/replay 및 raw cross-stream `23503` 음성 회귀를 고정했다.
+- focused PostGIS/migration **21건**, Ruff, strict mypy **1 file**, import-linter **4 contracts**,
+  OpenAPI all-profile drift check가 통과했다. service OpenAPI SHA-256은 변경 전후
+  `4bca03b2f67a24a9e36b628561a6e598955a208420eb8e9f30e7a0c16a701066`으로 동일하다.
+
 ## 2026-08-01 (codex) — T-VN-41 restore fence receipt HTTP 상관 불변식
 
 - codegraph sync 후 `CacheTargetRestoreFenceRecord`의 schema/route 영향을 확인하고 HTTP

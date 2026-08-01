@@ -80,6 +80,12 @@ epoch/control/phase version을 그대로 반환하며 terminal 전이를 다시 
 DB CHECK와 HTTP DTO는 모두 `superseded_reconciliation_count == 0` iff request ID가 `NULL`,
 count가 `1` iff request ID가 UUID인 상관 불변식을 강제한다. OpenAPI 3.1도 object-level
 `oneOf`의 `0/null`, `1/format: uuid` 두 branch로 이 관계를 기계 계약화한다.
+reconciliation은 `(external_system, request_id)` unique key도 제공하고 fence의
+`(external_system, superseded_reconciliation_request_id)`는 이 key를 composite FK로 참조한다.
+따라서 전역 UUID가 우연히 유효해도 다른 stream의 reconciliation을 fence receipt로 기록할 수 없다.
+request ID가 `NULL`인 receipt는 PostgreSQL `MATCH SIMPLE`과 앞의 count/UUID CHECK를 조합해
+`0/null`일 때만 허용한다. referenced reconciliation의 `external_system`을 사후 변경해 fence와
+stream 소속을 갈라놓는 update도 같은 FK가 거부한다.
 ops recovery operation status 계약에도 `superseded`를 strict enum으로 포함해 consumer가 terminal
 대체를 자유 문자열 fallback 없이 판별한다. operation receipt의 `operation_id`도 UUID로 고정해
 다른 식별자 namespace나 임의 문자열이 recovery 인과관계에 들어오는 것을 거부한다.

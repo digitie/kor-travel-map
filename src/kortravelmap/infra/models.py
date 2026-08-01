@@ -3900,6 +3900,15 @@ class PoiCacheTargetRestoreFenceRow(Base):
             "restore_epoch",
             name=conv("uq_cache_target_restore_fences_epoch"),
         ),
+        ForeignKeyConstraint(
+            ["external_system", "superseded_reconciliation_request_id"],
+            [
+                "ops.poi_cache_target_reconciliation_requests.external_system",
+                "ops.poi_cache_target_reconciliation_requests.request_id",
+            ],
+            name="fk_cache_target_restore_fences_superseded_reconciliation",
+            ondelete="RESTRICT",
+        ),
         {"schema": "ops"},
     )
 
@@ -3936,11 +3945,6 @@ class PoiCacheTargetRestoreFenceRow(Base):
     superseded_reconciliation_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
     superseded_reconciliation_request_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey(
-            "ops.poi_cache_target_reconciliation_requests.request_id",
-            name="fk_cache_target_restore_fences_superseded_reconciliation",
-            ondelete="RESTRICT",
-        ),
     )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
@@ -4246,6 +4250,11 @@ class PoiCacheTargetReconciliationRequestRow(Base):
         UniqueConstraint(
             "command_id",
             name=conv("uq_cache_target_reconciliation_requests_command"),
+        ),
+        UniqueConstraint(
+            "external_system",
+            "request_id",
+            name=conv("uq_cache_target_reconciliation_requests_stream_request"),
         ),
         Index(
             "idx_cache_target_reconciliation_requests_stream_status",

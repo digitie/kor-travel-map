@@ -9,11 +9,15 @@ from uuid import uuid4
 
 import pytest
 from alembic.config import Config
-from sqlalchemy import text
+from sqlalchemy import ForeignKeyConstraint, UniqueConstraint, text
 from sqlalchemy.engine import make_url
 
 from alembic import command
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
+from kortravelmap.infra.models import (
+    PoiCacheTargetReconciliationRequestRow,
+    PoiCacheTargetRestoreFenceRow,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -126,6 +130,24 @@ async def test_0073_phase_schema_and_downgrade(pg_container: Any) -> None:
                     "'uq_cache_target_reconciliation_requests_active_stream'"
                 )
             )
+            stream_request_unique = await connection.scalar(
+                text(
+                    "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                    "WHERE conrelid = "
+                    "'ops.poi_cache_target_reconciliation_requests'::regclass "
+                    "AND conname = "
+                    "'uq_cache_target_reconciliation_requests_stream_request'"
+                )
+            )
+            stream_scoped_fence_fk = await connection.scalar(
+                text(
+                    "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                    "WHERE conrelid = "
+                    "'ops.poi_cache_target_restore_fences'::regclass "
+                    "AND conname = "
+                    "'fk_cache_target_restore_fences_superseded_reconciliation'"
+                )
+            )
             snapshot_item_table = await connection.scalar(
                 text("SELECT to_regclass('ops.poi_cache_target_snapshot_items')")
             )
@@ -156,8 +178,44 @@ async def test_0073_phase_schema_and_downgrade(pg_container: Any) -> None:
             active_reconciliation_index
             == "uq_cache_target_reconciliation_requests_active_stream"
         )
+        assert stream_request_unique == "UNIQUE (external_system, request_id)"
+        assert stream_scoped_fence_fk == (
+            "FOREIGN KEY (external_system, superseded_reconciliation_request_id) "
+            "REFERENCES ops.poi_cache_target_reconciliation_requests"
+            "(external_system, request_id) ON DELETE RESTRICT"
+        )
         assert str(snapshot_item_table) == "ops.poi_cache_target_snapshot_items"
         assert str(append_only_function) == "ops.reject_cache_target_history_mutation()"
+
+        reconciliation_constraints = {
+            constraint.name: constraint
+            for constraint in PoiCacheTargetReconciliationRequestRow.__table__.constraints
+        }
+        orm_unique = reconciliation_constraints[
+            "uq_cache_target_reconciliation_requests_stream_request"
+        ]
+        assert isinstance(orm_unique, UniqueConstraint)
+        assert [column.name for column in orm_unique.columns] == [
+            "external_system",
+            "request_id",
+        ]
+        fence_constraints = {
+            constraint.name: constraint
+            for constraint in PoiCacheTargetRestoreFenceRow.__table__.constraints
+        }
+        orm_fence_fk = fence_constraints[
+            "fk_cache_target_restore_fences_superseded_reconciliation"
+        ]
+        assert isinstance(orm_fence_fk, ForeignKeyConstraint)
+        assert [column.name for column in orm_fence_fk.columns] == [
+            "external_system",
+            "superseded_reconciliation_request_id",
+        ]
+        assert [element.target_fullname for element in orm_fence_fk.elements] == [
+            "ops.poi_cache_target_reconciliation_requests.external_system",
+            "ops.poi_cache_target_reconciliation_requests.request_id",
+        ]
+        assert orm_fence_fk.ondelete == "RESTRICT"
 
         await target_engine.dispose()
         await asyncio.to_thread(

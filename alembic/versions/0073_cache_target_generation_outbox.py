@@ -540,6 +540,11 @@ def upgrade() -> None:
             "command_id",
             name="uq_cache_target_reconciliation_requests_command",
         ),
+        sa.UniqueConstraint(
+            "external_system",
+            "request_id",
+            name="uq_cache_target_reconciliation_requests_stream_request",
+        ),
         schema="ops",
     )
     op.create_index(
@@ -560,8 +565,8 @@ def upgrade() -> None:
         "fk_cache_target_restore_fences_superseded_reconciliation",
         "poi_cache_target_restore_fences",
         "poi_cache_target_reconciliation_requests",
-        ["superseded_reconciliation_request_id"],
-        ["request_id"],
+        ["external_system", "superseded_reconciliation_request_id"],
+        ["external_system", "request_id"],
         source_schema="ops",
         referent_schema="ops",
         ondelete="RESTRICT",
