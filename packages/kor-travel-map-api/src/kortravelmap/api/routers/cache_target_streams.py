@@ -670,6 +670,7 @@ async def _require_reconciliation_metadata_access(
     context: CacheTargetServicePrincipalContext,
     scope: CacheTargetServiceScope,
 ) -> Any:
+    require_cache_target_service_scope(context, scope=scope)
     metadata = await stream_service.get_cache_target_reconciliation(
         session,
         request_id=request_id,

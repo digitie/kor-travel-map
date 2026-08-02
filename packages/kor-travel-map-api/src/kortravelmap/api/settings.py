@@ -685,6 +685,7 @@ class ApiSettings(BaseSettings):
             tuple[str, tuple[str, ...]],
             set[CacheTargetServiceRole],
         ] = {}
+        consumer_binding_owners: dict[str, tuple[str, ...]] = {}
         external_system_owners: dict[str, tuple[str, tuple[str, ...]]] = {}
         for principal in self.cache_target_service_principals:
             if principal.token_sha256 in digests:
@@ -696,7 +697,17 @@ class ApiSettings(BaseSettings):
                     "cache target service principal_id values must be unique"
                 )
             role = _CACHE_TARGET_SERVICE_SCOPES_ROLE[frozenset(principal.scopes)]
-            binding = (principal.consumer_id, tuple(principal.external_systems))
+            external_systems = tuple(principal.external_systems)
+            existing_consumer_binding = consumer_binding_owners.setdefault(
+                principal.consumer_id,
+                external_systems,
+            )
+            if existing_consumer_binding != external_systems:
+                raise ValueError(
+                    "cache target consumer_id must own exactly one canonical binding: "
+                    f"{principal.consumer_id}"
+                )
+            binding = (principal.consumer_id, external_systems)
             for external_system in principal.external_systems:
                 existing_binding = external_system_owners.setdefault(
                     external_system,
@@ -732,6 +743,7 @@ class ApiSettings(BaseSettings):
             "ops cancel token": self.ops_cancel_token,
             "metrics token": self.metrics_token,
             "cursor signing secret": self.cursor_signing_secret,
+            "public API key": self.vworld_api_key,
         }
         for protected_name, protected_secret in protected_secrets.items():
             protected_raw = _optional_secret_text(

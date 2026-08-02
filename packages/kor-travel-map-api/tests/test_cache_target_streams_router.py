@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 from kortravelmap.infra import cache_target_event_cursor
@@ -35,6 +36,7 @@ COMMAND_TOKEN = "cache-target-command-token-00000000000000000000"
 CONSUMER_TOKEN = "cache-target-consumer-token-0000000000000000000"
 RESTORE_TOKEN = "cache-target-restore-token-00000000000000000000"
 RECOVERY_TOKEN = "cache-target-recovery-token-0000000000000000000"
+OTHER_CONSUMER_TOKEN = "cache-target-other-consumer-token-000000000000000"
 TOKEN = CONSUMER_TOKEN
 CONSUMER_ID = "pinvi-consumer"
 EXTERNAL_SYSTEM = "pinvi"
@@ -130,6 +132,12 @@ _SERVICE_OPERATION_CONTRACT = {
         "consumer",
     ),
 }
+_TOKEN_BY_ROLE = {
+    "command": COMMAND_TOKEN,
+    "consumer": CONSUMER_TOKEN,
+    "restore": RESTORE_TOKEN,
+    "recovery": RECOVERY_TOKEN,
+}
 
 
 class _FakeSession:
@@ -162,6 +170,7 @@ class _FakeSession:
 
 class _FakeCacheTargetService:
     def __init__(self) -> None:
+        self.all_calls: list[str] = []
         self.apply_calls: list[dict[str, Any]] = []
         self.claim_calls: list[dict[str, Any]] = []
         self.reconciliation_calls: list[dict[str, Any]] = []
@@ -337,10 +346,12 @@ class _FakeCacheTargetService:
         )
 
     async def apply_cache_target_source(self, _session: Any, **kwargs: Any) -> Any:
+        self.all_calls.append("apply_cache_target_source")
         self.apply_calls.append(kwargs)
         return self.apply_result
 
     async def get_cache_target_source(self, _session: Any, **_kwargs: Any) -> Any:
+        self.all_calls.append("get_cache_target_source")
         return self.source_result
 
     async def get_cache_target_stream(
@@ -350,6 +361,7 @@ class _FakeCacheTargetService:
         external_system: str,
         consumer_id: str,
     ) -> Any:
+        self.all_calls.append("get_cache_target_stream")
         assert external_system == EXTERNAL_SYSTEM
         if consumer_id != CONSUMER_ID:
             raise CacheTargetStreamConflict("consumer_mismatch", "consumer mismatch")
@@ -360,14 +372,17 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("advance_cache_target_restore_fence")
         self.restore_calls.append(kwargs)
         return self.restore_result
 
     async def create_refresh_request(self, _session: Any, **kwargs: Any) -> Any:
+        self.all_calls.append("create_refresh_request")
         self.refresh_calls.append(kwargs)
         return self.refresh_result
 
     async def claim_cache_target_events(self, _session: Any, **kwargs: Any) -> Any:
+        self.all_calls.append("claim_cache_target_events")
         self.claim_calls.append(kwargs)
         return self.claim_result
 
@@ -376,6 +391,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("request_cache_target_reconciliation")
         self.reconciliation_calls.append(kwargs)
         return self.reconciliation_result
 
@@ -384,6 +400,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("begin_cache_target_reconciliation")
         self.reconciliation_begin_calls.append(kwargs)
         return self.reconciliation_begin_result
 
@@ -392,6 +409,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("seal_cache_target_reconciliation")
         self.reconciliation_seal_calls.append(kwargs)
         return self.reconciliation_seal_result
 
@@ -400,6 +418,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("complete_cache_target_reconciliation")
         self.reconciliation_completion_calls.append(kwargs)
         if self.reconciliation_completion_error is not None:
             raise self.reconciliation_completion_error
@@ -410,6 +429,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("get_cache_target_reconciliation")
         self.reconciliation_metadata_calls.append(kwargs)
         if isinstance(self.reconciliation_metadata_result, Exception):
             raise self.reconciliation_metadata_result
@@ -420,6 +440,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("get_cache_target_reconciliation_snapshot")
         self.reconciliation_snapshot_calls.append(kwargs)
         if kwargs["consumer_id"] != CONSUMER_ID:
             raise CacheTargetStreamConflict("consumer_mismatch", "consumer mismatch")
@@ -430,6 +451,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("get_cache_target_snapshot")
         self.snapshot_calls.append(kwargs)
         if self.snapshot_error is not None:
             raise self.snapshot_error
@@ -441,6 +463,7 @@ class _FakeCacheTargetService:
         *,
         event_id: str,
     ) -> Any | None:
+        self.all_calls.append("get_cache_target_dead_letter")
         assert event_id == EVENT_ID
         return self.dead_letter
 
@@ -450,6 +473,7 @@ class _FakeCacheTargetService:
         *,
         operation_id: str,
     ) -> Any:
+        self.all_calls.append("get_cache_target_operation")
         assert operation_id == RECONCILIATION_REQUEST_ID
         return self.operation_result
 
@@ -458,6 +482,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("replay_cache_target_dead_letter")
         self.replay_calls.append(kwargs)
         return self.replay_result
 
@@ -557,6 +582,120 @@ def _service_headers(
     if extra:
         headers.update(extra)
     return headers
+
+
+def _request_service_operation(
+    client: TestClient,
+    route: tuple[str, str],
+    *,
+    token: str,
+) -> Any:
+    method, template = route
+    path = (
+        template.replace("{external_system}", EXTERNAL_SYSTEM)
+        .replace("{target_key}", "target-1")
+        .replace("{request_id}", RECONCILIATION_REQUEST_ID)
+        .replace("{event_id}", EVENT_ID)
+    )
+    headers = _service_headers(token=token)
+    body: dict[str, Any] | None = None
+    if route == (
+        "put",
+        "/v1/service/cache-targets/{external_system}/{target_key}",
+    ):
+        headers["If-None-Match"] = "*"
+        body = _upsert_body()
+    elif route == (
+        "delete",
+        "/v1/service/cache-targets/{external_system}/{target_key}",
+    ):
+        headers["If-Match"] = f'"{TARGET_ID}:7"'
+        body = {
+            "source_event_id": SOURCE_EVENT_ID,
+            "restore_epoch": 1,
+            "source_generation": 2,
+            "occurred_at": NOW.isoformat(),
+        }
+    elif route == (
+        "post",
+        "/v1/service/cache-target-streams/{external_system}/restore-fences",
+    ):
+        headers["If-Match"] = f'"{EXTERNAL_SYSTEM}:2"'
+        body = {
+            "consumer_id": CONSUMER_ID,
+            "expected_restore_epoch": 4,
+            "reason": "operator-requested restore barrier",
+        }
+    elif route == ("post", "/v1/service/refresh-requests"):
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "target_keys": ["target-1"],
+            "reason": "operator refresh",
+        }
+    elif route == ("post", "/v1/service/cache-target-event-claims"):
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "limit": 1,
+            "lease_seconds": 60,
+        }
+    elif route == ("post", "/v1/service/cache-target-event-acks"):
+        body = {
+            "consumer_id": CONSUMER_ID,
+            "claim_id": CLAIM_ID,
+            "lease_token": LEASE_TOKEN,
+            "through_cursor": cache_target_event_cursor(1),
+            "applied": [],
+        }
+    elif route == ("post", "/v1/service/cache-target-event-nacks"):
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "claim_id": CLAIM_ID,
+            "lease_token": LEASE_TOKEN,
+            "event_id": EVENT_ID,
+            "disposition": "permanent",
+            "error_class": "unsupported",
+            "error_fingerprint": "a" * 64,
+        }
+    elif route == (
+        "post",
+        "/v1/service/cache-target-event-dead-letters/{event_id}/replays",
+    ):
+        headers["If-Match"] = f'"{EVENT_ID}:2"'
+        body = {"reason": "manual replay"}
+    elif route == ("post", "/v1/service/cache-target-reconciliations"):
+        headers["If-None-Match"] = "*"
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "expected_restore_epoch": 4,
+            "reason": "PinVi restore cutover",
+        }
+    elif route == (
+        "post",
+        "/v1/service/cache-target-reconciliations/{request_id}/seals",
+    ):
+        headers["If-Match"] = f'"{RECONCILIATION_REQUEST_ID}:2"'
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "expected_restore_epoch": 4,
+            "expected_item_count": 1,
+            "expected_merkle_root": "a" * 64,
+        }
+    elif route == (
+        "post",
+        "/v1/service/cache-target-reconciliations/{request_id}/completions",
+    ):
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "snapshot_id": RECONCILIATION_SNAPSHOT_ID,
+            "expected_restore_epoch": 4,
+            "actual_merkle_root": "a" * 64,
+        }
+    return client.request(method.upper(), path, headers=headers, json=body)
 
 
 def _upsert_body() -> dict[str, Any]:
@@ -1489,6 +1628,22 @@ def test_cache_target_registry_rejects_protected_secret_digest_collision(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "cache_role_token",
+    [COMMAND_TOKEN, CONSUMER_TOKEN, RESTORE_TOKEN, RECOVERY_TOKEN],
+)
+def test_cache_target_registry_rejects_public_api_key_digest_collision(
+    cache_role_token: str,
+) -> None:
+    with pytest.raises(ValueError, match="distinct from public API key"):
+        ApiSettings(
+            _env_file=None,
+            cache_target_service_principals=_principal_registry(),
+            vworld_api_key=cache_role_token,
+        )
+
+
+@pytest.mark.unit
 def test_cache_target_openapi_declares_route_scope_and_caller_role_contract() -> None:
     schema = create_app(_settings()).openapi()
     actual: dict[tuple[str, str], str] = {}
@@ -1506,6 +1661,74 @@ def test_cache_target_openapi_declares_route_scope_and_caller_role_contract() ->
     for route, (required_scope, caller_role) in _SERVICE_OPERATION_CONTRACT.items():
         assert actual[route] == required_scope
         assert required_scope in _ROLE_SCOPES[caller_role]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("route", list(_SERVICE_OPERATION_CONTRACT))
+def test_cache_target_runtime_uses_inventory_required_scope_before_service_call(
+    route: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import cache_target_streams as router_module
+
+    required_scope, caller_role = _SERVICE_OPERATION_CONTRACT[route]
+    captured_scopes: list[str] = []
+
+    def _capture_scope(
+        _context: Any,
+        *,
+        scope: str,
+        external_system: str | None = None,
+    ) -> None:
+        del external_system
+        captured_scopes.append(scope)
+        raise HTTPException(status_code=418, detail="scope captured before lookup")
+
+    monkeypatch.setattr(
+        router_module,
+        "require_cache_target_service_scope",
+        _capture_scope,
+    )
+    service = _FakeCacheTargetService()
+    client = _client(service)
+
+    response = _request_service_operation(
+        client,
+        route,
+        token=_TOKEN_BY_ROLE[caller_role],
+    )
+
+    assert response.status_code == 418, (route, response.text)
+    assert captured_scopes == [required_scope]
+    assert service.all_calls == []
+
+
+_WRONG_ROLE_OPERATION_CASES = [
+    (route, wrong_role)
+    for route, (_scope, caller_role) in _SERVICE_OPERATION_CONTRACT.items()
+    for wrong_role in _TOKEN_BY_ROLE
+    if wrong_role != caller_role
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("route", "wrong_role"), _WRONG_ROLE_OPERATION_CASES)
+def test_cache_target_inventory_wrong_roles_are_forbidden_before_service_call(
+    route: tuple[str, str],
+    wrong_role: str,
+) -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service)
+
+    response = _request_service_operation(
+        client,
+        route,
+        token=_TOKEN_BY_ROLE[wrong_role],
+    )
+
+    assert response.status_code == 403, (route, wrong_role, response.text)
+    assert response.json()["code"] == "CACHE_TARGET_SCOPE_FORBIDDEN"
+    assert service.all_calls == []
 
 
 @pytest.mark.unit
@@ -1577,6 +1800,31 @@ def test_cache_target_registry_rejects_split_or_overlapping_binding_ownership() 
 
 
 @pytest.mark.unit
+def test_cache_target_registry_rejects_same_consumer_disjoint_bindings() -> None:
+    other_group = _principal_registry(external_systems=["other"])
+    for index, principal in enumerate(other_group):
+        principal["principal_id"] = f"svc:other-{index}"
+        principal["token_sha256"] = _token_sha256(
+            f"cache-target-other-token-{index}-000000000000000000"
+        )
+
+    with pytest.raises(ValueError, match="exactly one canonical binding"):
+        _settings(principals=[*_principal_registry(), *other_group])
+
+
+@pytest.mark.unit
+def test_cache_target_registry_accepts_sorted_multi_system_union_binding() -> None:
+    settings = _settings(
+        principals=_principal_registry(external_systems=["other", EXTERNAL_SYSTEM]),
+    )
+
+    assert all(
+        principal.external_systems == ["other", EXTERNAL_SYSTEM]
+        for principal in settings.cache_target_service_principals
+    )
+
+
+@pytest.mark.unit
 def test_cache_target_registry_accepts_multiple_disjoint_complete_groups() -> None:
     other_group = _principal_registry(
         consumer_id="other-consumer",
@@ -1591,6 +1839,65 @@ def test_cache_target_registry_accepts_multiple_disjoint_complete_groups() -> No
     settings = _settings(principals=[*_principal_registry(), *other_group])
 
     assert len(settings.cache_target_service_principals) == 8
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("route", ["ack", "nack"])
+def test_cross_binding_consumer_mutations_are_forbidden_before_service_call(
+    route: str,
+) -> None:
+    other_group = _principal_registry(
+        consumer_id="other-consumer",
+        external_systems=["other"],
+    )
+    for index, principal in enumerate(other_group):
+        principal["principal_id"] = f"svc:other-{index}"
+        token = (
+            OTHER_CONSUMER_TOKEN
+            if principal["scopes"][0] == "cache-target:read"
+            else f"cache-target-other-token-{index}-000000000000000000"
+        )
+        principal["token_sha256"] = _token_sha256(token)
+    service = _FakeCacheTargetService()
+    client = _client(
+        service,
+        settings=_settings(principals=[*_principal_registry(), *other_group]),
+    )
+
+    if route == "ack":
+        response = client.post(
+            "/v1/service/cache-target-event-acks",
+            headers={SERVICE_TOKEN_HEADER: OTHER_CONSUMER_TOKEN},
+            json={
+                "consumer_id": CONSUMER_ID,
+                "claim_id": CLAIM_ID,
+                "lease_token": LEASE_TOKEN,
+                "through_cursor": cache_target_event_cursor(1),
+                "applied": [],
+            },
+        )
+    else:
+        response = client.post(
+            "/v1/service/cache-target-event-nacks",
+            headers={SERVICE_TOKEN_HEADER: OTHER_CONSUMER_TOKEN},
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": "other-consumer",
+                "claim_id": CLAIM_ID,
+                "lease_token": LEASE_TOKEN,
+                "event_id": EVENT_ID,
+                "disposition": "permanent",
+                "error_class": "unsupported",
+                "error_fingerprint": "a" * 64,
+            },
+        )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] in {
+        "CACHE_TARGET_CONSUMER_FORBIDDEN",
+        "CACHE_TARGET_EXTERNAL_SYSTEM_FORBIDDEN",
+    }
+    assert service.all_calls == []
 
 
 @pytest.mark.unit
