@@ -10,6 +10,23 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — H35 NO-GO 구조·PostGIS 리허설 해소
+
+`0075~0078` final verify를 relation/column/PK·UK·FK·CHECK/index/trigger/function/sequence의 PostgreSQL
+semantic catalog fingerprint 검증으로 강화했다. constraint column/action/validation/deferrability,
+index expression/predicate/valid-ready-live, trigger enabled/bound function, function body/config/volatility,
+relay sequence ownership과 scope validator를 exact하게 고정한다.
+
+실제 PostGIS에서 `0063→0078`, CSV5, generation-7 stream/source/snapshot/reconciliation/outbox/delivery/
+claim, bounded GC 최초·replay와 final evidence를 한 번에 재현했다. drop·동명이형 constraint/index/trigger,
+invalid/not-ready index, disabled trigger, function drift와 stale/expired/mixed/Merkle, 네 backlog, foreign GC
+observation, `csv5→verify` chain skip를 모두 mutation 0으로 거부한다. GC observation ID는
+`h35:{transaction_id}:cache-target-snapshot-gc:v1` golden vector로 고정했다. 운영 순서는
+`csv5 → gc → exact 5-writer final fence → Map verify → PinVi final boundary`로 정렬했다.
+
+**다음 한 작업**: Docker-manager의 동일 observation ID·receipt round-trip 및 전체 CI와 보안 감사를
+exact 양쪽 HEAD에서 확인하고, 동일 독립 리뷰어의 재승인을 받는다.
+
 ## 2026-08-02 (codex) — H35 5단계 receipt CI fixture 정렬
 
 PR #924의 Python 3.11/3.12/3.13 CI는 모두 같은 기존 unit fixture가 새 공통 receipt key

@@ -18,9 +18,13 @@ mode `0600` durable journal을 잡고 다음을 직렬 실행한다.
 1. writer fence와 mutation-zero 증명
 2. Map app DB·Map Dagster DB·Pin DB와 manager state/env/manifest의 결합 백업
 3. Map helper `preflight` → `migrate` → `csv5`
-4. generation 7 bootstrap·initial·enable·canary 뒤 final all-writer stop
-5. Map helper `gc` → `verify`
-6. forward 경계 확정 또는 결합 복원
+4. generation 7 bootstrap·initial·enable·canary
+5. Map helper `gc`
+6. Map API·Map Dagster web·Map Dagster daemon·PinVi API·PinVi Dagster의 정확한 5개 writer를
+   durable final fence로 모두 정지
+7. Map helper `verify`
+8. PinVi final boundary 확정
+9. forward 경계 확정 또는 결합 복원
 
 Map 저장소는 자격증명과 운영 경로를 모르는 다섯 helper만 제공한다. helper는 lock/journal,
 backup/restore, container/process stop/start/recreate, ingress, image tag, daemon enablement를 다루지
@@ -54,21 +58,28 @@ manager journal의 상태는 아래 순서만 허용한다. 모든 transition은
 release provenance를 검증한 뒤 원자적으로 기록한다.
 
 ```text
-opened
+prepared
+  -> writers_fencing
   -> writers_fenced
-  -> backup_verified
+  -> backups_committed
+  -> candidate_built
+  -> pin_preflight_verified
   -> map_preflight_verified
-  -> map_schema_0078
-  -> csv5_restored
-  -> generation7_bootstrapped
-  -> initial_verified
-  -> enabled
+  -> map_database_forwarded
+  -> databases_forwarded
+  -> csv_forwarded
+  -> generation_bootstrapped
+  -> initial_committed
+  -> sync_enabled
   -> canary_verified
-  -> final_writers_stopped
-  -> map_gc_verified
-  -> map_verified
+  -> gc_started
+  -> gc_verified
+  -> final_writers_fencing
+  -> final_writers_fenced
+  -> map_final_verified
+  -> final_boundary_verified
   -> forward_committed
-  -> closed
+  -> runtime_activated
 ```
 
 `forward_committed` 전에는 결합 복원만 허용한다. 그 뒤에는 옛 DB/state/env/manifest 복원을
@@ -186,8 +197,10 @@ vector가 다르면 실행 전에 실패해야 한다. receipt에는 요청값�
 
 ### 5.4 `gc`
 
+- generation 7 canary가 검증된 뒤, durable final 5-writer fence를 시작하기 **전에** 실행한다.
 - 기존 `AsyncKorTravelMapClient.drain_expired_cache_target_snapshots`만 호출한다.
-- observation run ID는 outer cutover transaction UUID에서 결정적으로 파생하며 retry도 같다.
+- observation run ID는 outer cutover transaction UUID에서
+  `h35:{transaction_id}:cache-target-snapshot-gc:v1`로 결정적으로 파생하며 retry도 같다.
 - 새 ledger나 `0079`를 만들지 않는다. 기존 session advisory lock, batch transaction,
   `ON CONFLICT DO NOTHING` observation을 그대로 쓴다.
 - retry 승인 기준은 attempt별 삭제 건수가 아니다. 최종 expired·unreferenced item/header backlog 0,
@@ -196,16 +209,23 @@ vector가 다르면 실행 전에 실패해야 한다. receipt에는 요청값�
 
 ### 5.5 `verify`
 
+- `gc_verified` 뒤 정확한 5개 writer의 durable final fence가 모두 확인된 다음 실행하며, PinVi final
+  boundary 확정보다 먼저 끝나야 한다.
 - schema: `0078_cache_target_gc_observe`
 - 공개 item: **3,265**
 - `0075`~`0078` 검증:
-  - identity/NFC/trim/length CHECK와 FK가 최종 이름·shape로 존재하고 validate됨
-  - generation outbox·source receipt·snapshot GC·GC observation table/constraint/index가 exact
+  - identity/NFC/trim/length CHECK와 PK/UK/FK가 canonical 정의, local/ref column 순서, action,
+    validation, deferrability까지 exact
+  - 필수 index가 uniqueness/method/ordered expression/predicate와
+    `indisvalid`/`indisready`/`indislive`까지 exact
+  - append-only/no-truncate trigger가 relation/event/timing/level/enabled/bound function까지 exact
+  - relay-order function·sequence와 scope validator가 signature/body/config/volatility/owner·ownership까지
+    exact
   - outbox/receipt 자연키 및 monotonic/unique 계약 위반 0
   - invalid index와 orphan FK 0
   - bounded GC와 observation retention 설정이 schema/config 계약과 일치
 - `runtime_mutation_count = 0`, `external_event_count = 0`
-- final all-writer stop 뒤 HTTP 없이 하나의 repeatable-read DB view에서 PinVi stream을 검증한다.
+- durable final 5-writer fence 뒤 HTTP 없이 하나의 repeatable-read DB view에서 PinVi stream을 검증한다.
 - 최신 unexpired snapshot의 restore epoch, header/item count, snapshot item·live source head Merkle
   root와 material watermark를 같은 view에서 다시 계산해 mixed·stale·invalid hash를 거부한다.
 - active reconciliation, delivery 없는 outbox, active claim, non-terminal delivery backlog가 각각 0이다.
@@ -291,7 +311,8 @@ DB만, image만, Map만, Pin만 되돌리는 부분 rollback은 금지한다. �
 - **Agent B — 검증 소유**: helper black-box unit/integration test, writer registry 전수성 test,
   `0063→0078` scratch rehearsal harness와 mutation-zero matrix. Agent A 소유 파일을 수정하지 않는다.
 - **Docker-manager worker — orchestration 소유**: one-process lock/journal, backup/restore,
-  generation 7 bootstrap/enable/canary, final writer stop, stale receipt 차단, coupled release provenance.
+  generation 7 bootstrap/enable/canary, GC 뒤 exact 5-writer final fence, Map verify 뒤 PinVi final boundary,
+  stale receipt 차단, coupled release provenance.
 
 Agent A/B는 이 문서의 receipt key·phase 순서·exact gate를 임의로 바꾸지 않는다. 계약 변경은 먼저
 문서 PR에 반영하고 두 작업을 같은 exact head에 rebase한다. 구현·검증·manager 결합이 모두 끝난

@@ -14,10 +14,6 @@ import sys
 from collections.abc import Sequence
 from typing import Never, cast
 
-from kortravelmap.cli._h35_cache_target import (
-    collect_cache_target_final_evidence,
-    run_gc,
-)
 from kortravelmap.cli._h35_contract import (
     CONTRACT_VERSION,
     OPERATIONS,
@@ -31,24 +27,23 @@ from kortravelmap.cli._h35_contract import (
     receipt,
     receipt_digest,
 )
-from kortravelmap.cli._h35_csv5 import (
-    EXPECTED_CSV_ACCEPTED,
-    EXPECTED_CSV_FILES,
-    EXPECTED_CSV_ROWS,
-    collect_csv5_verify_state,
-    run_csv5,
-)
-from kortravelmap.cli._h35_schema import (
-    EXPECTED_POST_PUBLIC,
-    TARGET_SCHEMA,
-    collect_verify_state,
-    image_revision_check,
-    run_migrate,
-    run_preflight,
-)
 
 
 async def _run_verify(request: H35Request) -> Receipt:
+    from kortravelmap.cli._h35_cache_target import collect_cache_target_final_evidence
+    from kortravelmap.cli._h35_csv5 import (
+        EXPECTED_CSV_ACCEPTED,
+        EXPECTED_CSV_FILES,
+        EXPECTED_CSV_ROWS,
+        collect_csv5_verify_state,
+    )
+    from kortravelmap.cli._h35_schema import (
+        EXPECTED_POST_PUBLIC,
+        TARGET_SCHEMA,
+        collect_verify_state,
+        image_revision_check,
+    )
+
     (
         schema_request,
         schema_identity_check,
@@ -118,12 +113,20 @@ async def _run_verify(request: H35Request) -> Receipt:
 
 async def _execute(request: H35Request) -> Receipt:
     if request.operation == "preflight":
+        from kortravelmap.cli._h35_schema import run_preflight
+
         return await run_preflight(request)
     if request.operation == "migrate":
+        from kortravelmap.cli._h35_schema import run_migrate
+
         return await run_migrate(request)
     if request.operation == "csv5":
+        from kortravelmap.cli._h35_csv5 import run_csv5
+
         return await run_csv5(request)
     if request.operation == "gc":
+        from kortravelmap.cli._h35_cache_target import run_gc
+
         return await run_gc(request)
     return await _run_verify(request)
 

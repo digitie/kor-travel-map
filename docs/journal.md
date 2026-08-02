@@ -17,6 +17,24 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-02 (codex) — H35 NO-GO semantic catalog·실제 PostGIS 음수 행렬
+
+- `0075~0078` table/column/constraint/index/trigger/function/sequence를 structured PostgreSQL catalog로
+  읽고 canonical SHA-256을 비교한다. 이름만 같은 오정의, invalid/not-ready index, disabled trigger,
+  function body/config drift와 relay sequence/scope validator drift를 모두 fail-close한다.
+- 실제 PostGIS 리허설은 `0063→0078→CSV5→GC→verify`를 수행한다. generation-7의 ready stream,
+  source head, current/expired referenced/unreferenced snapshot, reconciliation, terminal outbox/delivery/claim을
+  seed하고 GC 삭제·참조 보존·동일 transaction replay·deterministic observation과 exact 16-key receipt/
+  14-key evidence를 검증했다.
+- 구조 drop·동명이형과 stale/expired/mixed/invalid Merkle, non-ready stream, reconciliation/outbox/claim/
+  delivery backlog, foreign observation, chain skip를 모두 evidence 미발급·runtime/외부 event/DB mutation
+  0으로 거부한다.
+- argv 검증 전 DB/CSV/GC 구현을 eager import하던 entrypoint를 유효 request dispatch 뒤 lazy import로
+  바꿨다. NTFS 부하에서도 15초 보안 경계 timeout을 늘리지 않고 invalid argv가 결정적으로 종료되며,
+  실패했던 단일 case 3회 반복이 모두 통과했다.
+- runbook/tasks의 후반 canonical 순서를 `csv5 → gc → Map API·Map Dagster web·Map Dagster daemon·
+  PinVi API·PinVi Dagster final fence → Map verify → PinVi final boundary`로 맞췄다.
+
 ## 2026-08-02 (codex) — H35 contract CI fixture 후속
 
 - 세 Python CI가 공통으로 실패한 `test_phase_chain_accepts_exact_receipts`를 조사했다. 기존 fixture의

@@ -175,6 +175,8 @@ _INDEX_SIGNATURES: Final[dict[str, tuple[str, ...]]] = {
         "coord_5179 is not null",
     ),
 }
+
+
 def _dsn() -> str:
     value = os.environ.get("KOR_TRAVEL_MAP_PG_DSN")
     if not value:
@@ -727,10 +729,7 @@ async def verify_0075_0078(
     ]
     return checks, {
         "invalid_indexes": invalid_indexes,
-        **{
-            f"catalog_{category}": len(objects)
-            for category, objects in sorted(catalog.items())
-        },
+        **{f"catalog_{category}": len(objects) for category, objects in sorted(catalog.items())},
     }
 
 

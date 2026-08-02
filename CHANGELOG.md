@@ -14,6 +14,14 @@
   ready stream, 양의 restore epoch/control version, 최신 unexpired snapshot header/item/live source
   Merkle·watermark 일치와 reconciliation/outbox/claim/delivery backlog 0을 증명하는
   `ktm-cache-target-final-evidence/v1` object를 반환하고 다른 phase와 거부 응답은 `null`이다.
+- **DATABASE/VERIFY**: `0075~0078`의 constraint/index/trigger/function/sequence를 이름이 아니라 canonical
+  PostgreSQL semantic catalog로 검증한다. 동명이형 정의, invalid/not-ready index, disabled trigger와
+  function/ownership drift를 mutation 0으로 거부한다.
+- **REHEARSAL**: 실제 PostGIS에서 `0063→0078→CSV5→GC→verify`, GC replay, generation-7 final state와
+  stale/expired/mixed/Merkle/네 backlog 음수 행렬을 검증했다. 운영 순서는 GC 뒤 exact 5-writer final
+  fence, Map verify, PinVi final boundary로 고정한다.
+- **CLI**: invalid argv/request는 phase별 DB·CSV·GC 구현을 import하기 전에 좁은 오류 envelope로
+  종료해, 느린 filesystem에서도 비밀 비반사 process 경계가 timeout에 의존하지 않는다.
 
 ### cache-target generation outbox producer foundation (2026-07-31, T-VN-41)
 

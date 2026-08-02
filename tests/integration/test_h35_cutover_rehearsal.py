@@ -61,6 +61,17 @@ _LIVE_MERKLE_ROOT = snapshot_merkle_root(
         )
     ]
 )
+_MIXED_MERKLE_ROOT = snapshot_merkle_root(
+    [
+        SnapshotMerkleRowV1(
+            external_system="pinvi",
+            target_key="mixed-target",
+            state="deleted",
+            source_generation=1,
+            source_payload_fingerprint=_SOURCE_FINGERPRINT,
+        )
+    ]
+)
 
 
 def _run_alembic(dsn: str, revision: str) -> None:
@@ -621,6 +632,467 @@ async def _snapshot_gc_state(dsn: str) -> dict[str, int]:
         await engine.dispose()
 
 
+async def _database_state_digest(dsn: str) -> str:
+    """verify 호출 전후 generation-7 DB row의 exact mutation-zero digest."""
+    engine = make_async_engine(dsn)
+    try:
+        async with engine.connect() as connection:
+            value = await connection.scalar(
+                text(
+                    """
+                    SELECT md5(concat_ws('|',
+                      COALESCE((SELECT jsonb_agg(to_jsonb(row_value) ORDER BY external_system)
+                        FROM (SELECT * FROM ops.poi_cache_target_streams) AS row_value)::text,
+                        'null'),
+                      COALESCE((SELECT jsonb_agg(to_jsonb(row_value)
+                                                ORDER BY external_system, target_key)
+                        FROM (SELECT * FROM ops.poi_cache_target_source_heads) AS row_value)::text,
+                        'null'),
+                      COALESCE((SELECT jsonb_agg(to_jsonb(row_value) ORDER BY snapshot_id)
+                        FROM (SELECT * FROM ops.poi_cache_target_snapshots) AS row_value)::text,
+                        'null'),
+                      COALESCE((SELECT jsonb_agg(to_jsonb(row_value)
+                                                ORDER BY snapshot_id, row_number)
+                        FROM (SELECT * FROM ops.poi_cache_target_snapshot_items)
+                          AS row_value)::text,
+                        'null'),
+                      COALESCE((SELECT jsonb_agg(to_jsonb(row_value) ORDER BY request_id)
+                        FROM (SELECT * FROM ops.poi_cache_target_reconciliation_requests)
+                          AS row_value)::text, 'null'),
+                      COALESCE((SELECT jsonb_agg(to_jsonb(row_value) ORDER BY event_id)
+                        FROM (SELECT * FROM ops.poi_cache_target_outbox_events) AS row_value)::text,
+                        'null'),
+                      COALESCE((SELECT jsonb_agg(to_jsonb(row_value) ORDER BY claim_id)
+                        FROM (SELECT * FROM ops.poi_cache_target_outbox_claims) AS row_value)::text,
+                        'null'),
+                      COALESCE((SELECT jsonb_agg(to_jsonb(row_value) ORDER BY event_id)
+                        FROM (SELECT * FROM ops.poi_cache_target_outbox_deliveries)
+                          AS row_value)::text,
+                        'null'),
+                      COALESCE((SELECT jsonb_agg(to_jsonb(row_value) ORDER BY observation_id)
+                        FROM (SELECT * FROM ops.poi_cache_target_snapshot_gc_observations)
+                          AS row_value)::text, 'null')
+                    ))
+                    """
+                )
+            )
+            assert isinstance(value, str)
+            return value
+    finally:
+        await engine.dispose()
+
+
+async def _execute_sql(dsn: str, *statements: str) -> None:
+    engine = make_async_engine(dsn)
+    try:
+        async with engine.begin() as connection:
+            for statement in statements:
+                await connection.exec_driver_sql(statement)
+    finally:
+        await engine.dispose()
+
+
+async def _sql_scalar(dsn: str, query: str) -> str:
+    engine = make_async_engine(dsn)
+    try:
+        async with engine.connect() as connection:
+            value = await connection.scalar(text(query))
+            assert isinstance(value, str)
+            return value
+    finally:
+        await engine.dispose()
+
+
+async def _assert_verify_rejected_without_mutation(
+    dsn: str,
+    *,
+    identity: str,
+    gc_receipt: Receipt,
+    failed_check_prefix: str,
+) -> Receipt:
+    before = await _database_state_digest(dsn)
+    rejected = await _execute(_request("verify", database_identity=identity, prior=gc_receipt))
+    assert rejected["status"] == "rejected"
+    assert rejected["cache_target_evidence"] is None
+    assert rejected["runtime_mutation_count"] == 0
+    assert rejected["external_event_count"] == 0
+    assert any(
+        str(value["name"]).startswith(failed_check_prefix) and value["passed"] is False
+        for value in rejected["checks"]
+    )
+    assert await _database_state_digest(dsn) == before
+    return rejected
+
+
+async def _assert_structural_negative_matrix(
+    dsn: str,
+    *,
+    identity: str,
+    gc_receipt: Receipt,
+) -> None:
+    constraint_name = "ck_poi_cache_target_streams_ck_cache_target_streams_versions"
+    constraint_definition = await _sql_scalar(
+        dsn,
+        "SELECT pg_get_constraintdef(oid, true) FROM pg_constraint "
+        "WHERE conrelid='ops.poi_cache_target_streams'::regclass "
+        f"AND conname='{constraint_name}'",
+    )
+    await _execute_sql(
+        dsn,
+        f"ALTER TABLE ops.poi_cache_target_streams DROP CONSTRAINT {constraint_name}",
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="0075_0078_constraints_semantic",
+    )
+    await _execute_sql(
+        dsn,
+        "ALTER TABLE ops.poi_cache_target_streams "
+        f"ADD CONSTRAINT {constraint_name} CHECK (restore_epoch > 0)",
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="0075_0078_constraints_semantic",
+    )
+    await _execute_sql(
+        dsn,
+        f"ALTER TABLE ops.poi_cache_target_streams DROP CONSTRAINT {constraint_name}",
+        "ALTER TABLE ops.poi_cache_target_streams "
+        f"ADD CONSTRAINT {constraint_name} {constraint_definition}",
+    )
+
+    index_definition = await _sql_scalar(
+        dsn,
+        "SELECT pg_get_indexdef('ops.idx_cache_target_source_heads_target'::regclass)",
+    )
+    await _execute_sql(
+        dsn,
+        "DROP INDEX ops.idx_cache_target_source_heads_target",
+        "CREATE INDEX idx_cache_target_source_heads_target "
+        "ON ops.poi_cache_target_source_heads (target_key)",
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="0075_0078_indexes_semantic",
+    )
+    await _execute_sql(
+        dsn,
+        "DROP INDEX ops.idx_cache_target_source_heads_target",
+        index_definition,
+    )
+
+    await _execute_sql(
+        dsn,
+        "UPDATE pg_catalog.pg_index SET indisvalid=false, indisready=false "
+        "WHERE indexrelid='ops.idx_cache_target_snapshots_expiry'::regclass",
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="0075_0078_indexes_semantic",
+    )
+    await _execute_sql(
+        dsn,
+        "UPDATE pg_catalog.pg_index SET indisvalid=true, indisready=true "
+        "WHERE indexrelid='ops.idx_cache_target_snapshots_expiry'::regclass",
+    )
+
+    await _execute_sql(
+        dsn,
+        "ALTER TABLE ops.poi_cache_target_source_events "
+        "DISABLE TRIGGER trg_poi_cache_target_source_events_append_only",
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="0075_0078_triggers_semantic",
+    )
+    await _execute_sql(
+        dsn,
+        "ALTER TABLE ops.poi_cache_target_source_events "
+        "ENABLE TRIGGER trg_poi_cache_target_source_events_append_only",
+    )
+
+    trigger_definition = await _sql_scalar(
+        dsn,
+        "SELECT pg_get_triggerdef(oid, true) FROM pg_trigger "
+        "WHERE tgrelid='ops.poi_cache_target_source_events'::regclass "
+        "AND tgname='trg_poi_cache_target_source_events_append_only'",
+    )
+    await _execute_sql(
+        dsn,
+        "DROP TRIGGER trg_poi_cache_target_source_events_append_only "
+        "ON ops.poi_cache_target_source_events",
+        "CREATE TRIGGER trg_poi_cache_target_source_events_append_only "
+        "BEFORE DELETE ON ops.poi_cache_target_source_events FOR EACH ROW "
+        "EXECUTE FUNCTION ops.reject_cache_target_history_mutation()",
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="0075_0078_triggers_semantic",
+    )
+    await _execute_sql(
+        dsn,
+        "DROP TRIGGER trg_poi_cache_target_source_events_append_only "
+        "ON ops.poi_cache_target_source_events",
+        trigger_definition,
+    )
+
+    function_definition = await _sql_scalar(
+        dsn,
+        "SELECT pg_get_functiondef('ops.assign_cache_target_outbox_relay_order()'::regprocedure)",
+    )
+    await _execute_sql(
+        dsn,
+        """
+        CREATE OR REPLACE FUNCTION ops.assign_cache_target_outbox_relay_order()
+        RETURNS trigger LANGUAGE plpgsql
+        SET search_path TO 'pg_catalog', 'ops'
+        AS $function$
+        BEGIN
+          NEW.relay_order := 1;
+          RETURN NEW;
+        END;
+        $function$
+        """,
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="0075_0078_functions_semantic",
+    )
+    await _execute_sql(dsn, function_definition)
+
+
+async def _insert_negative_snapshot(
+    dsn: str,
+    *,
+    snapshot_id: str,
+    restore_epoch: int,
+    target_key: str,
+    merkle_root: str,
+    expired: bool = False,
+) -> None:
+    created_at_sql = "now() - interval '2 hours'" if expired else "now() + interval '1 minute'"
+    expires_at_sql = "now() - interval '1 hour'" if expired else "now() + interval '2 hours'"
+    engine = make_async_engine(dsn)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    f"""
+                    INSERT INTO ops.poi_cache_target_snapshots (
+                      snapshot_id, external_system, restore_epoch,
+                      high_watermark_relay_order, material_high_watermark_relay_order,
+                      item_count, merkle_root, created_at, expires_at
+                    ) VALUES (
+                      CAST(:snapshot_id AS uuid), 'pinvi', :restore_epoch, 1, 0, 1,
+                      :merkle_root, {created_at_sql}, {expires_at_sql}
+                    )
+                    """
+                ),
+                {
+                    "snapshot_id": snapshot_id,
+                    "restore_epoch": restore_epoch,
+                    "merkle_root": merkle_root,
+                },
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.poi_cache_target_snapshot_items (
+                      snapshot_id, row_number, external_system, target_key, state,
+                      source_generation, source_payload_fingerprint
+                    ) VALUES (
+                      CAST(:snapshot_id AS uuid), 1, 'pinvi', :target_key, 'deleted',
+                      1, :fingerprint
+                    )
+                    """
+                ),
+                {
+                    "snapshot_id": snapshot_id,
+                    "target_key": target_key,
+                    "fingerprint": _SOURCE_FINGERPRINT,
+                },
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _delete_snapshot(dsn: str, snapshot_id: str) -> None:
+    await _execute_sql(
+        dsn,
+        f"DELETE FROM ops.poi_cache_target_snapshots WHERE snapshot_id='{snapshot_id}'::uuid",
+    )
+
+
+async def _assert_evidence_negative_matrix(
+    dsn: str,
+    *,
+    identity: str,
+    gc_receipt: Receipt,
+) -> None:
+    for suffix, restore_epoch, target_key, root, expired, failed_check_prefix in (
+        ("1", 2, _TARGET_KEY, _LIVE_MERKLE_ROOT, False, "pinvi_snapshot_"),
+        ("2", 1, "mixed-target", _MIXED_MERKLE_ROOT, False, "pinvi_snapshot_"),
+        ("3", 1, _TARGET_KEY, "f" * 64, False, "pinvi_snapshot_"),
+        ("4", 1, _TARGET_KEY, _LIVE_MERKLE_ROOT, True, "gc_remaining_"),
+    ):
+        snapshot_id = f"70000000-0000-0000-0000-00000000000{suffix}"
+        await _insert_negative_snapshot(
+            dsn,
+            snapshot_id=snapshot_id,
+            restore_epoch=restore_epoch,
+            target_key=target_key,
+            merkle_root=root,
+            expired=expired,
+        )
+        await _assert_verify_rejected_without_mutation(
+            dsn,
+            identity=identity,
+            gc_receipt=gc_receipt,
+            failed_check_prefix=failed_check_prefix,
+        )
+        await _delete_snapshot(dsn, snapshot_id)
+
+    await _execute_sql(
+        dsn,
+        "UPDATE ops.poi_cache_target_streams "
+        "SET status='fenced', consumer_enabled=false WHERE external_system='pinvi'",
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="pinvi_stream_ready",
+    )
+    await _execute_sql(
+        dsn,
+        "UPDATE ops.poi_cache_target_streams "
+        "SET status='ready', consumer_enabled=true WHERE external_system='pinvi'",
+    )
+
+    await _execute_sql(
+        dsn,
+        "DELETE FROM ops.poi_cache_target_outbox_deliveries "
+        f"WHERE event_id='{_OUTBOX_EVENT_ID}'::uuid",
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="outbox_backlog_zero",
+    )
+    await _execute_sql(
+        dsn,
+        "INSERT INTO ops.poi_cache_target_outbox_deliveries "
+        f"(event_id, status, delivered_at) VALUES "
+        f"('{_OUTBOX_EVENT_ID}'::uuid, 'delivered', now())",
+    )
+
+    await _execute_sql(
+        dsn,
+        "UPDATE ops.poi_cache_target_outbox_deliveries "
+        "SET status='retry', delivered_at=NULL "
+        f"WHERE event_id='{_OUTBOX_EVENT_ID}'::uuid",
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="delivery_backlog_zero",
+    )
+    await _execute_sql(
+        dsn,
+        "UPDATE ops.poi_cache_target_outbox_deliveries "
+        "SET status='delivered', delivered_at=now() "
+        f"WHERE event_id='{_OUTBOX_EVENT_ID}'::uuid",
+    )
+
+    await _execute_sql(
+        dsn,
+        "UPDATE ops.poi_cache_target_outbox_claims "
+        "SET status='active', completed_at=NULL, lease_expires_at=now() + interval '1 hour' "
+        f"WHERE claim_id='{_CLAIM_ID}'::uuid",
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="claim_backlog_zero",
+    )
+    await _execute_sql(
+        dsn,
+        "UPDATE ops.poi_cache_target_outbox_claims "
+        "SET status='acked', completed_at=now(), lease_expires_at=now() - interval '1 minute' "
+        f"WHERE claim_id='{_CLAIM_ID}'::uuid",
+    )
+
+    await _execute_sql(
+        dsn,
+        """
+        WITH command AS (
+          INSERT INTO ops.domain_commands (
+            actor, operation, idempotency_key, request_fingerprint
+          ) VALUES (
+            'system:h35', 'cache-target.reconcile',
+            '80000000-0000-0000-0000-000000000001',
+            'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+          ) RETURNING command_id
+        )
+        INSERT INTO ops.poi_cache_target_reconciliation_requests (
+          request_id, external_system, command_id, reason, status, phase_version,
+          started_at
+        ) SELECT
+          '80000000-0000-0000-0000-000000000002'::uuid, 'pinvi', command_id,
+          'H35 active backlog', 'preparing', 1, now()
+        FROM command
+        """,
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="reconciliation_backlog_zero",
+    )
+    await _execute_sql(
+        dsn,
+        "UPDATE ops.poi_cache_target_reconciliation_requests "
+        "SET status='superseded', completed_at=now(), error_code='restore_fenced' "
+        "WHERE request_id='80000000-0000-0000-0000-000000000002'::uuid",
+    )
+
+    observation_run_id = cache_target_gc_observation_run_id(_TRANSACTION_ID)
+    await _execute_sql(
+        dsn,
+        "UPDATE ops.poi_cache_target_snapshot_gc_observations "
+        f"SET dagster_run_id='foreign-observation' WHERE dagster_run_id='{observation_run_id}'",
+    )
+    await _assert_verify_rejected_without_mutation(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+        failed_check_prefix="gc_observation_exists",
+    )
+    await _execute_sql(
+        dsn,
+        "UPDATE ops.poi_cache_target_snapshot_gc_observations "
+        f"SET dagster_run_id='{observation_run_id}' "
+        "WHERE dagster_run_id='foreign-observation'",
+    )
+
+
 async def _assert_mixed_partial_state_rejected(dsn: str) -> None:
     engine = make_async_engine(dsn)
     try:
@@ -692,15 +1164,11 @@ async def test_h35_exact_surface_network_free_rehearsal(
         await _assert_mixed_partial_state_rejected(dsn)
         assert await _schema_and_public_count(dsn) == before_rejections
 
-        preflight = await _execute(
-            _request("preflight", database_identity=identity, prior=None)
-        )
+        preflight = await _execute(_request("preflight", database_identity=identity, prior=None))
         assert preflight["status"] == "accepted"
         assert preflight["row_counts"]["public_items"] == 3_265
 
-        migrate = await _execute(
-            _request("migrate", database_identity=identity, prior=preflight)
-        )
+        migrate = await _execute(_request("migrate", database_identity=identity, prior=preflight))
         failed_migrate_checks = [
             value for value in migrate["checks"] if value["passed"] is not True
         ]
@@ -723,9 +1191,7 @@ async def test_h35_exact_surface_network_free_rehearsal(
             "rejected": 0,
         }
 
-        csv5_replay = await _execute(
-            _request("csv5", database_identity=identity, prior=migrate)
-        )
+        csv5_replay = await _execute(_request("csv5", database_identity=identity, prior=migrate))
         assert csv5_replay["status"] == "accepted"
         assert csv5_replay["row_counts"] == csv5["row_counts"]
 
@@ -749,9 +1215,7 @@ async def test_h35_exact_surface_network_free_rehearsal(
         assert gc["row_counts"]["referenced_items"] == 2
         assert gc["cache_target_evidence"] is None
 
-        gc_replay = await _execute(
-            _request("gc", database_identity=identity, prior=csv5)
-        )
+        gc_replay = await _execute(_request("gc", database_identity=identity, prior=csv5))
         assert gc_replay["status"] == "accepted"
         assert gc_replay["row_counts"]["deleted_headers"] == 0
         assert gc_replay["row_counts"]["deleted_items"] == 0
@@ -765,9 +1229,7 @@ async def test_h35_exact_surface_network_free_rehearsal(
             "observations": 1,
         }
 
-        verify = await _execute(
-            _request("verify", database_identity=identity, prior=gc_replay)
-        )
+        verify = await _execute(_request("verify", database_identity=identity, prior=gc_replay))
         assert verify["status"] == "accepted"
         assert verify["schema_after"] == _TARGET_REVISION
         assert verify["row_counts"]["public_items"] == 3_265
@@ -827,6 +1289,21 @@ async def test_h35_exact_surface_network_free_rehearsal(
             "stream_control_etag": '"pinvi:1"',
             "stream_state": "ready",
         }
+        await _assert_structural_negative_matrix(
+            dsn,
+            identity=identity,
+            gc_receipt=gc_replay,
+        )
+        await _assert_evidence_negative_matrix(
+            dsn,
+            identity=identity,
+            gc_receipt=gc_replay,
+        )
+        final_verify = await _execute(
+            _request("verify", database_identity=identity, prior=gc_replay)
+        )
+        assert final_verify["status"] == "accepted"
+        assert final_verify["cache_target_evidence"] == evidence
         assert await _external_event_count(dsn) == event_count
         assert external_hosts == []
     finally:

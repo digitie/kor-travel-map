@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from kortravelmap.cli._h35_cache_target import cache_target_gc_observation_run_id
 from kortravelmap.cli._h35_contract import (
     CONTRACT_VERSION,
     DATABASE_IDENTITY_GOLDEN_VECTOR,
@@ -60,9 +61,7 @@ def _receipt(
         "schema_before": schema_before,
         "schema_after": schema_after,
         "forward_boundary": (
-            "not_crossed"
-            if schema_after == "0063_pipeline_root_id"
-            else "schema_0078"
+            "not_crossed" if schema_after == "0063_pipeline_root_id" else "schema_0078"
         ),
         "row_counts": {},
         "checks": [],
@@ -80,6 +79,12 @@ def test_database_identity_golden_vector_is_exact() -> None:
             system_identifier=DATABASE_IDENTITY_GOLDEN_VECTOR["system_identifier"],
         )
         == DATABASE_IDENTITY_GOLDEN_VECTOR["digest"]
+    )
+
+
+def test_cache_target_gc_observation_run_id_golden_vector_is_exact() -> None:
+    assert cache_target_gc_observation_run_id(_TRANSACTION_ID) == (
+        "h35:00000000-0000-0000-0000-000000000001:cache-target-snapshot-gc:v1"
     )
 
 
@@ -219,6 +224,21 @@ def test_phase_chain_accepts_exact_receipts() -> None:
 
     assert parsed.prior_receipt == gc
     assert parsed.prior_receipt_digest == receipt_digest(gc)
+
+
+def test_verify_rejects_csv5_to_verify_chain_skip() -> None:
+    csv5 = _receipt(
+        "csv5",
+        schema_before="0078_cache_target_gc_observe",
+        schema_after="0078_cache_target_gc_observe",
+        prior_receipt_digest="3" * 64,
+    )
+
+    with pytest.raises(H35ContractError):
+        parse_request(
+            json.dumps(_request("verify", prior_receipt=csv5)),
+            operation="verify",
+        )
 
 
 @pytest.mark.parametrize(

@@ -871,8 +871,11 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   `0072`/`0078` 일부를 잘못 검증한다. 그대로 실행하지 않는다. 새 정본은
   [`runbooks/h35-prod-migration-cutover.md`](runbooks/h35-prod-migration-cutover.md)다.
 
-  **공통 계약**: Docker-manager가 backup/migrate/CSV/bootstrap/initial/enable/canary/GC/verify
-  전체의 one-process global lock과 mode `0600` durable journal을 소유한다. Map은 credential/path-free
+  **공통 계약**: Docker-manager가 backup/migrate/CSV/bootstrap/initial/enable/canary/GC/final fence/
+  verify/Pin finalize 전체의 one-process global lock과 mode `0600` durable journal을 소유한다.
+  canonical 후반 순서는 `csv5 → canary → gc → exact 5-writer final fence → Map verify → PinVi final
+  boundary`다. exact writer 5개는 Map API·Map Dagster web·Map Dagster daemon·PinVi API·PinVi
+  Dagster다. Map은 credential/path-free
   `preflight`·`migrate`·`csv5`·`gc`·`verify` helper와 typed receipt만 제공하고 runtime을 재기동하지
   않는다. Map API/Dagster와 Pin writer를 모두 fence하며 old daemon 자동 재기동은 금지한다.
   exact gate는 **공개 3,265 → migration 3,043 → CSV5 accepted 222/rejected 0 → 공개 3,265**다.
@@ -882,9 +885,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   - [x] **Agent A — Map helper**: `scripts/h35/h35_cutover.py`, typed request/receipt, `0064`/`0068`/
     `0069` partial probe, `0070~0078` transactional 확인, CSV5 멱등성, 기존 client 기반 bounded GC,
     PinVi final DB evidence. orchestration·runtime 수정 금지.
-  - [ ] **Agent B — 검증**: helper black-box/integration test, Map API/Dagster+Pin writer registry
-    전수성, mutation-zero matrix, 최신 writer-fenced dump clone의 prod-network-free `0063→0078`
-    rehearsal harness. Agent A 소유 파일 수정 금지.
+  - [x] **Agent B — 검증**: 실제 PostGIS에서 helper `0063→0078→CSV5→GC→verify`, GC replay,
+    generation-7 stream/source/snapshot/reconciliation/outbox/delivery/claim을 재현했다. 구조 catalog
+    동명이형·drop·invalid/not-ready/disabled/function drift와 stale/expired/mixed/Merkle/backlog/chain-skip를
+    mutation 0으로 거부한다. 최신 writer-fenced prod dump clone 리허설은 결합 barrier에 남긴다.
   - [ ] **결합 barrier**: PR #923 merge 뒤 양쪽을 최신 `origin/main`에 rebase하고, Docker-manager
     typed journal/receipt와 결합한 최종 exact HEAD를 적대 리뷰어 1명이 승인한다. 구현·검증·manager
     결합 전에는 리뷰를 요청하지 않으며, 그 전에는 n150 실행 금지.
