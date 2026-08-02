@@ -475,18 +475,7 @@ def require_cache_target_service_scope(
 ) -> None:
     """route별 scope와 external_system allowlist를 fail-closed로 확인한다."""
 
-    scope_allowed = scope in context.scopes or (
-        scope
-        in {
-            "cache-target:read",
-            "cache-target:claim",
-            "cache-target:ack",
-            "cache-target:nack",
-            "cache-target:snapshot",
-        }
-        and "cache-target:consumer" in context.scopes
-    )
-    if not scope_allowed:
+    if scope not in context.scopes:
         raise _cache_target_auth_error(
             status.HTTP_403_FORBIDDEN,
             "CACHE_TARGET_SCOPE_FORBIDDEN",

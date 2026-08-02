@@ -10,6 +10,35 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — T-VN-41 command principal 최소 권한 구현
+
+source PUT/DELETE와 refresh create에 relay consumer umbrella를 재사용하면 writer token이 read/claim/ack/
+nack/snapshot까지 획득하는 권한 역전이 생긴다. exact `cache-target:command`를 추가하고 기존
+`cache-target:consumer` umbrella는 enum·validator·인증 fallback에서 clean cut 제거하기로 했다. command
+principal도 consumer·snapshot·recovery 경로를 호출할 수 없다.
+
+한 canonical `(consumer_id, sorted external_systems)` binding마다 command, consumer, restore, recovery
+exact 역할 profile을 각각 하나씩 요구한다. 다중 disjoint binding은 허용하되 external system 소유권,
+token digest, `principal_id`는 전역 unique다. 단, 같은 `consumer_id`는 정확히 한 canonical binding만
+소유하며 여러 system은 한 sorted union으로 표현한다. 역할 누락·중복·혼합/부분 scope, 비정렬 allowlist와
+설정된 admin/service/ops/metrics/cursor secret 및 public VWorld/API key digest 충돌도 fail-close한다.
+
+17개 service cache-target/refresh operation에 machine-readable `x-required-service-scope`를 넣고 route →
+scope → caller role → runtime passed scope를 하나의 inventory로 고정했다. 51개 wrong-role 조합은
+metadata/domain service 호출 0회에서 `403`이다. request-bound reconciliation은 scope-only 검사 뒤에만
+metadata를 조회하고 consumer/system 결박을 다시 검사한다. command writer가 PUT/DELETE CAS 후 source GET이나 refresh
+`Location` polling GET을 수행할 때는 consumer credential로 전환해야 한다. generation 7 exact pair pin을
+writer/backfill/consumer 활성화의 선행 조건으로 옮겼다.
+
+full/service OpenAPI와 admin generated types를 재생성했다. service SHA-256은
+`622ea54c98e9b0c09592cf84aced36227992c6bdf256742a3532b892f0efccf2`다. router 172건, OpenAPI export
+12건, API strict mypy 61개 파일, 대상 Ruff, OpenAPI all drift, frontend `gen:types:check`가 통과했다.
+PinVi contract generation 7 재핀과 caller credential 전환은 아직 완료하지 않았고 별도 paired PR이
+소유한다.
+
+**다음 한 작업**: public-key/consumer-owner hardening을 포함한 새 exact head를 두 독립 적대 리뷰에 다시
+넘겨 GO를 받은 뒤 최종 전체 gate를 실행한다.
+
 ## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
 
 Dagster run metadata만으로 직전값을 찾는 stateless 추정은 metadata 정리·재실행·op retry에 따라 기준선이

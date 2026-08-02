@@ -45839,7 +45839,8 @@
         "summary": "Ack Service Cache Target Events",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:ack"
       }
     },
     "/v1/service/cache-target-event-claims": {
@@ -45925,7 +45926,8 @@
         "summary": "Claim Service Cache Target Events",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:claim"
       }
     },
     "/v1/service/cache-target-event-dead-letters/{event_id}": {
@@ -46019,7 +46021,8 @@
         "summary": "Get Service Cache Target Dead Letter",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:recovery-replay"
       }
     },
     "/v1/service/cache-target-event-dead-letters/{event_id}/replays": {
@@ -46152,7 +46155,8 @@
         "summary": "Replay Service Cache Target Dead Letter",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:recovery-replay"
       }
     },
     "/v1/service/cache-target-event-nacks": {
@@ -46246,7 +46250,8 @@
         "summary": "Nack Service Cache Target Event",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:nack"
       }
     },
     "/v1/service/cache-target-reconciliations": {
@@ -46390,7 +46395,8 @@
         "summary": "Begin Service Cache Target Reconciliation",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:recovery"
       }
     },
     "/v1/service/cache-target-reconciliations/{request_id}/completions": {
@@ -46486,7 +46492,8 @@
         "summary": "Complete Service Cache Target Reconciliation",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:snapshot"
       }
     },
     "/v1/service/cache-target-reconciliations/{request_id}/seals": {
@@ -46648,7 +46655,8 @@
         "summary": "Seal Service Cache Target Reconciliation",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:recovery"
       }
     },
     "/v1/service/cache-target-reconciliations/{request_id}/snapshot": {
@@ -46752,7 +46760,8 @@
         "summary": "Get Service Cache Target Reconciliation Snapshot",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:snapshot"
       }
     },
     "/v1/service/cache-target-snapshots/{external_system}": {
@@ -46908,7 +46917,8 @@
         "summary": "Get Service Cache Target Snapshot",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:snapshot"
       }
     },
     "/v1/service/cache-target-streams/{external_system}": {
@@ -47005,7 +47015,8 @@
         "summary": "Get Service Cache Target Stream",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:read"
       }
     },
     "/v1/service/cache-target-streams/{external_system}/restore-fences": {
@@ -47141,11 +47152,13 @@
         "summary": "Create Service Restore Fence",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:restore-fence"
       }
     },
     "/v1/service/cache-targets/{external_system}/{target_key}": {
       "delete": {
+        "description": "exact `cache-target:command` scope 전용 source tombstone 적용.",
         "operationId": "delete_service_cache_target_v1_service_cache_targets__external_system___target_key__delete",
         "parameters": [
           {
@@ -47290,7 +47303,8 @@
         "summary": "Delete Service Cache Target",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:command"
       },
       "get": {
         "operationId": "get_service_cache_target_v1_service_cache_targets__external_system___target_key__get",
@@ -47408,9 +47422,11 @@
         "summary": "Get Service Cache Target",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:read"
       },
       "put": {
+        "description": "exact `cache-target:command` scope 전용 source upsert.",
         "operationId": "put_service_cache_target_v1_service_cache_targets__external_system___target_key__put",
         "parameters": [
           {
@@ -47564,11 +47580,13 @@
         "summary": "Put Service Cache Target",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:command"
       }
     },
     "/v1/service/refresh-requests": {
       "post": {
+        "description": "exact `cache-target:command` scope 전용 refresh request 생성.",
         "operationId": "create_service_refresh_request_v1_service_refresh_requests_post",
         "parameters": [
           {
@@ -47664,7 +47682,8 @@
         "summary": "Create Service Refresh Request",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:command"
       }
     },
     "/v1/service/refresh-requests/{request_id}": {
@@ -47750,7 +47769,8 @@
         "summary": "Get Service Refresh Request",
         "tags": [
           "service-cache-target-streams"
-        ]
+        ],
+        "x-required-service-scope": "cache-target:read"
       }
     },
     "/version": {

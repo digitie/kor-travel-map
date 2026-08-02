@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 from kortravelmap.infra import cache_target_event_cursor
@@ -31,7 +32,12 @@ from kortravelmap.api.domain_command_service import (
 )
 from kortravelmap.api.settings import ApiSettings
 
-TOKEN = "cache-target-token-000000000000000000000000"
+COMMAND_TOKEN = "cache-target-command-token-00000000000000000000"
+CONSUMER_TOKEN = "cache-target-consumer-token-0000000000000000000"
+RESTORE_TOKEN = "cache-target-restore-token-00000000000000000000"
+RECOVERY_TOKEN = "cache-target-recovery-token-0000000000000000000"
+OTHER_CONSUMER_TOKEN = "cache-target-other-consumer-token-000000000000000"
+TOKEN = CONSUMER_TOKEN
 CONSUMER_ID = "pinvi-consumer"
 EXTERNAL_SYSTEM = "pinvi"
 SOURCE_EVENT_ID = "11111111-1111-4111-8111-111111111111"
@@ -43,6 +49,95 @@ LEASE_TOKEN = "66666666-6666-4666-8666-666666666666"
 RECONCILIATION_REQUEST_ID = "88888888-8888-4888-8888-888888888888"
 RECONCILIATION_SNAPSHOT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 NOW = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+
+_ROLE_SCOPES = {
+    "command": {"cache-target:command"},
+    "consumer": {
+        "cache-target:read",
+        "cache-target:claim",
+        "cache-target:ack",
+        "cache-target:nack",
+        "cache-target:snapshot",
+    },
+    "restore": {"cache-target:restore-fence"},
+    "recovery": {"cache-target:recovery", "cache-target:recovery-replay"},
+}
+_SERVICE_OPERATION_CONTRACT = {
+    ("put", "/v1/service/cache-targets/{external_system}/{target_key}"): (
+        "cache-target:command",
+        "command",
+    ),
+    ("get", "/v1/service/cache-targets/{external_system}/{target_key}"): (
+        "cache-target:read",
+        "consumer",
+    ),
+    ("delete", "/v1/service/cache-targets/{external_system}/{target_key}"): (
+        "cache-target:command",
+        "command",
+    ),
+    ("get", "/v1/service/cache-target-streams/{external_system}"): (
+        "cache-target:read",
+        "consumer",
+    ),
+    ("post", "/v1/service/cache-target-streams/{external_system}/restore-fences"): (
+        "cache-target:restore-fence",
+        "restore",
+    ),
+    ("post", "/v1/service/refresh-requests"): (
+        "cache-target:command",
+        "command",
+    ),
+    ("get", "/v1/service/refresh-requests/{request_id}"): (
+        "cache-target:read",
+        "consumer",
+    ),
+    ("post", "/v1/service/cache-target-event-claims"): (
+        "cache-target:claim",
+        "consumer",
+    ),
+    ("post", "/v1/service/cache-target-event-acks"): (
+        "cache-target:ack",
+        "consumer",
+    ),
+    ("post", "/v1/service/cache-target-event-nacks"): (
+        "cache-target:nack",
+        "consumer",
+    ),
+    ("get", "/v1/service/cache-target-event-dead-letters/{event_id}"): (
+        "cache-target:recovery-replay",
+        "recovery",
+    ),
+    ("post", "/v1/service/cache-target-event-dead-letters/{event_id}/replays"): (
+        "cache-target:recovery-replay",
+        "recovery",
+    ),
+    ("post", "/v1/service/cache-target-reconciliations"): (
+        "cache-target:recovery",
+        "recovery",
+    ),
+    ("post", "/v1/service/cache-target-reconciliations/{request_id}/seals"): (
+        "cache-target:recovery",
+        "recovery",
+    ),
+    ("post", "/v1/service/cache-target-reconciliations/{request_id}/completions"): (
+        "cache-target:snapshot",
+        "consumer",
+    ),
+    ("get", "/v1/service/cache-target-snapshots/{external_system}"): (
+        "cache-target:snapshot",
+        "consumer",
+    ),
+    ("get", "/v1/service/cache-target-reconciliations/{request_id}/snapshot"): (
+        "cache-target:snapshot",
+        "consumer",
+    ),
+}
+_TOKEN_BY_ROLE = {
+    "command": COMMAND_TOKEN,
+    "consumer": CONSUMER_TOKEN,
+    "restore": RESTORE_TOKEN,
+    "recovery": RECOVERY_TOKEN,
+}
 
 
 class _FakeSession:
@@ -75,6 +170,7 @@ class _FakeSession:
 
 class _FakeCacheTargetService:
     def __init__(self) -> None:
+        self.all_calls: list[str] = []
         self.apply_calls: list[dict[str, Any]] = []
         self.claim_calls: list[dict[str, Any]] = []
         self.reconciliation_calls: list[dict[str, Any]] = []
@@ -250,10 +346,12 @@ class _FakeCacheTargetService:
         )
 
     async def apply_cache_target_source(self, _session: Any, **kwargs: Any) -> Any:
+        self.all_calls.append("apply_cache_target_source")
         self.apply_calls.append(kwargs)
         return self.apply_result
 
     async def get_cache_target_source(self, _session: Any, **_kwargs: Any) -> Any:
+        self.all_calls.append("get_cache_target_source")
         return self.source_result
 
     async def get_cache_target_stream(
@@ -263,6 +361,7 @@ class _FakeCacheTargetService:
         external_system: str,
         consumer_id: str,
     ) -> Any:
+        self.all_calls.append("get_cache_target_stream")
         assert external_system == EXTERNAL_SYSTEM
         if consumer_id != CONSUMER_ID:
             raise CacheTargetStreamConflict("consumer_mismatch", "consumer mismatch")
@@ -273,14 +372,17 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("advance_cache_target_restore_fence")
         self.restore_calls.append(kwargs)
         return self.restore_result
 
     async def create_refresh_request(self, _session: Any, **kwargs: Any) -> Any:
+        self.all_calls.append("create_refresh_request")
         self.refresh_calls.append(kwargs)
         return self.refresh_result
 
     async def claim_cache_target_events(self, _session: Any, **kwargs: Any) -> Any:
+        self.all_calls.append("claim_cache_target_events")
         self.claim_calls.append(kwargs)
         return self.claim_result
 
@@ -289,6 +391,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("request_cache_target_reconciliation")
         self.reconciliation_calls.append(kwargs)
         return self.reconciliation_result
 
@@ -297,6 +400,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("begin_cache_target_reconciliation")
         self.reconciliation_begin_calls.append(kwargs)
         return self.reconciliation_begin_result
 
@@ -305,6 +409,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("seal_cache_target_reconciliation")
         self.reconciliation_seal_calls.append(kwargs)
         return self.reconciliation_seal_result
 
@@ -313,6 +418,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("complete_cache_target_reconciliation")
         self.reconciliation_completion_calls.append(kwargs)
         if self.reconciliation_completion_error is not None:
             raise self.reconciliation_completion_error
@@ -323,6 +429,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("get_cache_target_reconciliation")
         self.reconciliation_metadata_calls.append(kwargs)
         if isinstance(self.reconciliation_metadata_result, Exception):
             raise self.reconciliation_metadata_result
@@ -333,6 +440,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("get_cache_target_reconciliation_snapshot")
         self.reconciliation_snapshot_calls.append(kwargs)
         if kwargs["consumer_id"] != CONSUMER_ID:
             raise CacheTargetStreamConflict("consumer_mismatch", "consumer mismatch")
@@ -343,6 +451,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("get_cache_target_snapshot")
         self.snapshot_calls.append(kwargs)
         if self.snapshot_error is not None:
             raise self.snapshot_error
@@ -354,6 +463,7 @@ class _FakeCacheTargetService:
         *,
         event_id: str,
     ) -> Any | None:
+        self.all_calls.append("get_cache_target_dead_letter")
         assert event_id == EVENT_ID
         return self.dead_letter
 
@@ -363,6 +473,7 @@ class _FakeCacheTargetService:
         *,
         operation_id: str,
     ) -> Any:
+        self.all_calls.append("get_cache_target_operation")
         assert operation_id == RECONCILIATION_REQUEST_ID
         return self.operation_result
 
@@ -371,6 +482,7 @@ class _FakeCacheTargetService:
         _session: Any,
         **kwargs: Any,
     ) -> Any:
+        self.all_calls.append("replay_cache_target_dead_letter")
         self.replay_calls.append(kwargs)
         return self.replay_result
 
@@ -379,14 +491,54 @@ def _token_sha256(token: str = TOKEN) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _principal_registry(
+    *,
+    consumer_id: str = CONSUMER_ID,
+    external_systems: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    systems = external_systems or [EXTERNAL_SYSTEM]
+    return [
+        {
+            "principal_id": "svc:pinvi-command",
+            "consumer_id": consumer_id,
+            "token_sha256": _token_sha256(COMMAND_TOKEN),
+            "scopes": ["cache-target:command"],
+            "external_systems": systems,
+        },
+        {
+            "principal_id": "svc:pinvi-consumer",
+            "consumer_id": consumer_id,
+            "token_sha256": _token_sha256(CONSUMER_TOKEN),
+            "scopes": [
+                "cache-target:read",
+                "cache-target:claim",
+                "cache-target:ack",
+                "cache-target:nack",
+                "cache-target:snapshot",
+            ],
+            "external_systems": systems,
+        },
+        {
+            "principal_id": "svc:pinvi-restore",
+            "consumer_id": consumer_id,
+            "token_sha256": _token_sha256(RESTORE_TOKEN),
+            "scopes": ["cache-target:restore-fence"],
+            "external_systems": systems,
+        },
+        {
+            "principal_id": "svc:pinvi-recovery",
+            "consumer_id": consumer_id,
+            "token_sha256": _token_sha256(RECOVERY_TOKEN),
+            "scopes": ["cache-target:recovery", "cache-target:recovery-replay"],
+            "external_systems": systems,
+        },
+    ]
+
+
 def _settings(
     *,
-    token: str = TOKEN,
-    scopes: list[str] | None = None,
-    external_systems: list[str] | None = None,
+    principals: list[dict[str, Any]] | None = None,
     admin_destructive_enabled: bool = False,
-    consumer_id: str = CONSUMER_ID,
-    principal_id: str = "svc:pinvi",
 ) -> ApiSettings:
     return ApiSettings(
         _env_file=None,
@@ -397,15 +549,7 @@ def _settings(
         service_token=None,
         vworld_api_key=None,
         admin_destructive_enabled=admin_destructive_enabled,
-        cache_target_service_principals=[
-            {
-                "principal_id": principal_id,
-                "consumer_id": consumer_id,
-                "token_sha256": _token_sha256(token),
-                "scopes": scopes or ["cache-target:consumer"],
-                "external_systems": external_systems or [EXTERNAL_SYSTEM],
-            }
-        ],
+        cache_target_service_principals=principals or _principal_registry(),
     )
 
 
@@ -438,6 +582,120 @@ def _service_headers(
     if extra:
         headers.update(extra)
     return headers
+
+
+def _request_service_operation(
+    client: TestClient,
+    route: tuple[str, str],
+    *,
+    token: str,
+) -> Any:
+    method, template = route
+    path = (
+        template.replace("{external_system}", EXTERNAL_SYSTEM)
+        .replace("{target_key}", "target-1")
+        .replace("{request_id}", RECONCILIATION_REQUEST_ID)
+        .replace("{event_id}", EVENT_ID)
+    )
+    headers = _service_headers(token=token)
+    body: dict[str, Any] | None = None
+    if route == (
+        "put",
+        "/v1/service/cache-targets/{external_system}/{target_key}",
+    ):
+        headers["If-None-Match"] = "*"
+        body = _upsert_body()
+    elif route == (
+        "delete",
+        "/v1/service/cache-targets/{external_system}/{target_key}",
+    ):
+        headers["If-Match"] = f'"{TARGET_ID}:7"'
+        body = {
+            "source_event_id": SOURCE_EVENT_ID,
+            "restore_epoch": 1,
+            "source_generation": 2,
+            "occurred_at": NOW.isoformat(),
+        }
+    elif route == (
+        "post",
+        "/v1/service/cache-target-streams/{external_system}/restore-fences",
+    ):
+        headers["If-Match"] = f'"{EXTERNAL_SYSTEM}:2"'
+        body = {
+            "consumer_id": CONSUMER_ID,
+            "expected_restore_epoch": 4,
+            "reason": "operator-requested restore barrier",
+        }
+    elif route == ("post", "/v1/service/refresh-requests"):
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "target_keys": ["target-1"],
+            "reason": "operator refresh",
+        }
+    elif route == ("post", "/v1/service/cache-target-event-claims"):
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "limit": 1,
+            "lease_seconds": 60,
+        }
+    elif route == ("post", "/v1/service/cache-target-event-acks"):
+        body = {
+            "consumer_id": CONSUMER_ID,
+            "claim_id": CLAIM_ID,
+            "lease_token": LEASE_TOKEN,
+            "through_cursor": cache_target_event_cursor(1),
+            "applied": [],
+        }
+    elif route == ("post", "/v1/service/cache-target-event-nacks"):
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "claim_id": CLAIM_ID,
+            "lease_token": LEASE_TOKEN,
+            "event_id": EVENT_ID,
+            "disposition": "permanent",
+            "error_class": "unsupported",
+            "error_fingerprint": "a" * 64,
+        }
+    elif route == (
+        "post",
+        "/v1/service/cache-target-event-dead-letters/{event_id}/replays",
+    ):
+        headers["If-Match"] = f'"{EVENT_ID}:2"'
+        body = {"reason": "manual replay"}
+    elif route == ("post", "/v1/service/cache-target-reconciliations"):
+        headers["If-None-Match"] = "*"
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "expected_restore_epoch": 4,
+            "reason": "PinVi restore cutover",
+        }
+    elif route == (
+        "post",
+        "/v1/service/cache-target-reconciliations/{request_id}/seals",
+    ):
+        headers["If-Match"] = f'"{RECONCILIATION_REQUEST_ID}:2"'
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "expected_restore_epoch": 4,
+            "expected_item_count": 1,
+            "expected_merkle_root": "a" * 64,
+        }
+    elif route == (
+        "post",
+        "/v1/service/cache-target-reconciliations/{request_id}/completions",
+    ):
+        body = {
+            "external_system": EXTERNAL_SYSTEM,
+            "consumer_id": CONSUMER_ID,
+            "snapshot_id": RECONCILIATION_SNAPSHOT_ID,
+            "expected_restore_epoch": 4,
+            "actual_merkle_root": "a" * 64,
+        }
+    return client.request(method.upper(), path, headers=headers, json=body)
 
 
 def _upsert_body() -> dict[str, Any]:
@@ -652,7 +910,7 @@ def test_put_cache_target_uses_bound_principal_and_create_precondition() -> None
 
     response = client.put(
         f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
-        headers=_service_headers(extra={"If-None-Match": "*"}),
+        headers=_service_headers(token=COMMAND_TOKEN, extra={"If-None-Match": "*"}),
         json=_upsert_body(),
     )
 
@@ -689,7 +947,10 @@ def test_delete_cache_target_replay_preserves_historical_identity_and_etag() -> 
     response = client.request(
         "DELETE",
         f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
-        headers=_service_headers(extra={"If-Match": f'"{TARGET_ID}:7"'}),
+        headers=_service_headers(
+            token=COMMAND_TOKEN,
+            extra={"If-Match": f'"{TARGET_ID}:7"'},
+        ),
         json={
             "source_event_id": SOURCE_EVENT_ID,
             "restore_epoch": 1,
@@ -736,7 +997,10 @@ def test_put_mutation_rejects_nonpositive_or_null_target_sequence(
     with pytest.raises(ValidationError, match="target_sequence"):
         client.put(
             f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
-            headers=_service_headers(extra={"If-None-Match": "*"}),
+            headers=_service_headers(
+                token=COMMAND_TOKEN,
+                extra={"If-None-Match": "*"},
+            ),
             json=_upsert_body(),
         )
 
@@ -751,7 +1015,10 @@ def test_delete_mutation_rejects_nullable_target_receipt() -> None:
         client.request(
             "DELETE",
             f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
-            headers=_service_headers(extra={"If-Match": f'"{TARGET_ID}:7"'}),
+            headers=_service_headers(
+                token=COMMAND_TOKEN,
+                extra={"If-Match": f'"{TARGET_ID}:7"'},
+            ),
             json={
                 "source_event_id": SOURCE_EVENT_ID,
                 "restore_epoch": 1,
@@ -768,7 +1035,7 @@ def test_put_cache_target_rejects_missing_precondition_before_service_call() -> 
 
     response = client.put(
         f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
-        headers=_service_headers(),
+        headers=_service_headers(token=COMMAND_TOKEN),
         json=_upsert_body(),
     )
 
@@ -785,7 +1052,10 @@ def test_put_cache_target_maps_result_precondition_failure_to_412() -> None:
 
     response = client.put(
         f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
-        headers=_service_headers(extra={"If-Match": f'"{TARGET_ID}:7"'}),
+        headers=_service_headers(
+            token=COMMAND_TOKEN,
+            extra={"If-Match": f'"{TARGET_ID}:7"'},
+        ),
         json=_upsert_body(),
     )
 
@@ -802,7 +1072,7 @@ def test_put_cache_target_rejects_float_decimal_inputs() -> None:
 
     response = client.put(
         f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
-        headers=_service_headers(extra={"If-None-Match": "*"}),
+        headers=_service_headers(token=COMMAND_TOKEN, extra={"If-None-Match": "*"}),
         json=body,
     )
 
@@ -820,7 +1090,7 @@ def test_put_cache_target_rejects_noncanonical_target_key_before_service_call(
 
     response = client.put(
         f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/{invalid_target_key}",
-        headers=_service_headers(extra={"If-None-Match": "*"}),
+        headers=_service_headers(token=COMMAND_TOKEN, extra={"If-None-Match": "*"}),
         json=_upsert_body(),
     )
 
@@ -832,11 +1102,14 @@ def test_put_cache_target_rejects_noncanonical_target_key_before_service_call(
 @pytest.mark.unit
 def test_reconciliation_begin_rejects_noncanonical_system_before_service_call() -> None:
     service = _FakeCacheTargetService()
-    client = _client(service, settings=_settings(scopes=["cache-target:recovery"]))
+    client = _client(service)
 
     response = client.post(
         "/v1/service/cache-target-reconciliations",
-        headers=_service_headers(extra={"If-None-Match": "*"}),
+        headers=_service_headers(
+            token=RECOVERY_TOKEN,
+            extra={"If-None-Match": "*"},
+        ),
         json={
             "external_system": "\u3000pinvi",
             "consumer_id": CONSUMER_ID,
@@ -919,7 +1192,7 @@ def test_cache_target_claim_serializes_stream_scoped_reconciled_event() -> None:
             ),
         ],
     )
-    client = _client(service, settings=_settings(scopes=["cache-target:claim"]))
+    client = _client(service)
 
     response = client.post(
         "/v1/service/cache-target-event-claims",
@@ -989,11 +1262,11 @@ def test_cache_target_event_record_rejects_inconsistent_stream_scope() -> None:
 @pytest.mark.unit
 def test_refresh_request_rejects_more_than_500_targets_before_service_call() -> None:
     service = _FakeCacheTargetService()
-    client = _client(service, settings=_settings(scopes=["cache-target:consumer"]))
+    client = _client(service)
 
     response = client.post(
         "/v1/service/refresh-requests",
-        headers=_service_headers(),
+        headers=_service_headers(token=COMMAND_TOKEN),
         json={
             "external_system": EXTERNAL_SYSTEM,
             "target_keys": [f"target-{index}" for index in range(501)],
@@ -1007,12 +1280,12 @@ def test_refresh_request_rejects_more_than_500_targets_before_service_call() -> 
 @pytest.mark.unit
 def test_refresh_request_rejects_duplicate_targets_before_service_call() -> None:
     service = _FakeCacheTargetService()
-    client = _client(service, settings=_settings(scopes=["cache-target:consumer"]))
+    client = _client(service)
 
     response = client.post(
         "/v1/service/refresh-requests",
         headers={
-            **_service_headers(),
+            **_service_headers(token=COMMAND_TOKEN),
             "Idempotency-Key": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
         },
         json={
@@ -1029,13 +1302,13 @@ def test_refresh_request_rejects_duplicate_targets_before_service_call() -> None
 @pytest.mark.unit
 def test_refresh_request_accepts_full_root_target_key_length() -> None:
     service = _FakeCacheTargetService()
-    client = _client(service, settings=_settings(scopes=["cache-target:consumer"]))
+    client = _client(service)
     target_key = "x" * 512
 
     response = client.post(
         "/v1/service/refresh-requests",
         headers={
-            **_service_headers(),
+            **_service_headers(token=COMMAND_TOKEN),
             "Idempotency-Key": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
         },
         json={
@@ -1116,6 +1389,187 @@ def test_cache_target_delivery_bounds_return_stable_422(
 
 
 @pytest.mark.unit
+def test_removed_cache_target_consumer_umbrella_is_rejected_by_registry() -> None:
+    principals = _principal_registry()
+    principals[0]["scopes"] = ["cache-target:consumer"]
+    with pytest.raises(ValidationError) as exc_info:
+        _settings(principals=principals)
+
+    assert exc_info.value.errors()[0]["input"] == "cache-target:consumer"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("role", "token"),
+    [
+        ("consumer", CONSUMER_TOKEN),
+        ("restore", RESTORE_TOKEN),
+        ("recovery", RECOVERY_TOKEN),
+    ],
+)
+@pytest.mark.parametrize("command_route", ["put", "delete", "refresh"])
+def test_non_command_roles_cannot_call_command_routes(
+    role: str,
+    token: str,
+    command_route: str,
+) -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service)
+
+    if command_route == "put":
+        response = client.put(
+            f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
+            headers=_service_headers(token=token, extra={"If-None-Match": "*"}),
+            json=_upsert_body(),
+        )
+    elif command_route == "delete":
+        response = client.request(
+            "DELETE",
+            f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
+            headers=_service_headers(
+                token=token,
+                extra={"If-Match": f'"{TARGET_ID}:7"'},
+            ),
+            json={
+                "source_event_id": SOURCE_EVENT_ID,
+                "restore_epoch": 1,
+                "source_generation": 2,
+                "occurred_at": NOW.isoformat(),
+            },
+        )
+    else:
+        response = client.post(
+            "/v1/service/refresh-requests",
+            headers=_service_headers(token=token),
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "target_keys": ["target-1"],
+                "reason": "operator refresh",
+            },
+        )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "CACHE_TARGET_SCOPE_FORBIDDEN"
+    assert role in {"consumer", "restore", "recovery"}
+    assert service.apply_calls == []
+    assert service.refresh_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "consumer_or_recovery_route",
+    [
+        "read",
+        "claim",
+        "ack",
+        "nack",
+        "snapshot",
+        "restore-fence",
+        "recovery",
+        "recovery-replay",
+    ],
+)
+def test_command_scope_cannot_call_other_role_routes(
+    consumer_or_recovery_route: str,
+) -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service)
+
+    if consumer_or_recovery_route == "read":
+        response = client.get(
+            f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
+            headers=_service_headers(token=COMMAND_TOKEN),
+        )
+    elif consumer_or_recovery_route == "claim":
+        response = client.post(
+            "/v1/service/cache-target-event-claims",
+            headers=_service_headers(token=COMMAND_TOKEN),
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": CONSUMER_ID,
+                "limit": 1,
+                "lease_seconds": 60,
+            },
+        )
+    elif consumer_or_recovery_route == "ack":
+        response = client.post(
+            "/v1/service/cache-target-event-acks",
+            headers={SERVICE_TOKEN_HEADER: COMMAND_TOKEN},
+            json={
+                "consumer_id": CONSUMER_ID,
+                "claim_id": CLAIM_ID,
+                "lease_token": LEASE_TOKEN,
+                "through_cursor": cache_target_event_cursor(1),
+                "applied": [],
+            },
+        )
+    elif consumer_or_recovery_route == "nack":
+        response = client.post(
+            "/v1/service/cache-target-event-nacks",
+            headers={SERVICE_TOKEN_HEADER: COMMAND_TOKEN},
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": CONSUMER_ID,
+                "claim_id": CLAIM_ID,
+                "lease_token": LEASE_TOKEN,
+                "event_id": EVENT_ID,
+                "disposition": "permanent",
+                "error_class": "unsupported",
+                "error_fingerprint": "a" * 64,
+            },
+        )
+    elif consumer_or_recovery_route == "snapshot":
+        response = client.get(
+            f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
+            headers=_service_headers(token=COMMAND_TOKEN),
+        )
+    elif consumer_or_recovery_route == "restore-fence":
+        response = client.post(
+            f"/v1/service/cache-target-streams/{EXTERNAL_SYSTEM}/restore-fences",
+            headers=_service_headers(
+                token=COMMAND_TOKEN,
+                extra={"If-Match": f'"{EXTERNAL_SYSTEM}:2"'},
+            ),
+            json={
+                "consumer_id": CONSUMER_ID,
+                "expected_restore_epoch": 4,
+                "reason": "operator-requested restore barrier",
+            },
+        )
+    elif consumer_or_recovery_route == "recovery":
+        response = client.post(
+            "/v1/service/cache-target-reconciliations",
+            headers=_service_headers(
+                token=COMMAND_TOKEN,
+                extra={"If-None-Match": "*"},
+            ),
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": CONSUMER_ID,
+                "expected_restore_epoch": 4,
+                "reason": "PinVi restore cutover",
+            },
+        )
+    else:
+        response = client.post(
+            f"/v1/service/cache-target-event-dead-letters/{EVENT_ID}/replays",
+            headers=_service_headers(
+                token=COMMAND_TOKEN,
+                extra={"If-Match": f'"{EVENT_ID}:2"'},
+            ),
+            json={"reason": "manual replay"},
+        )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "CACHE_TARGET_SCOPE_FORBIDDEN"
+    assert service.claim_calls == []
+    assert service.restore_calls == []
+    assert service.reconciliation_begin_calls == []
+    assert service.snapshot_calls == []
+    assert service.replay_calls == []
+
+
+@pytest.mark.unit
 def test_cache_target_service_token_must_be_registered() -> None:
     service = _FakeCacheTargetService()
     client = _client(service)
@@ -1138,33 +1592,318 @@ def test_cache_target_service_token_must_be_registered() -> None:
 
 @pytest.mark.unit
 def test_cache_target_principal_registry_rejects_duplicate_token_digest() -> None:
-    base = {
-        "consumer_id": CONSUMER_ID,
-        "token_sha256": _token_sha256(),
-        "scopes": ["cache-target:read"],
-        "external_systems": [EXTERNAL_SYSTEM],
-    }
-
+    principals = _principal_registry()
+    principals[1]["token_sha256"] = principals[0]["token_sha256"]
     with pytest.raises(ValueError, match="token digests must be unique"):
+        _settings(principals=principals)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "protected_overrides",
+    [
+        {"admin_proxy_secret": COMMAND_TOKEN},
+        {"service_token": COMMAND_TOKEN},
+        {"metrics_token": COMMAND_TOKEN},
+        {"cursor_signing_secret": COMMAND_TOKEN},
+        {
+            "ops_read_token": COMMAND_TOKEN,
+            "ops_cancel_token": "distinct-ops-cancel-token-000000000000000000",
+        },
+        {
+            "ops_read_token": "distinct-ops-read-token-00000000000000000000",
+            "ops_cancel_token": COMMAND_TOKEN,
+        },
+    ],
+)
+def test_cache_target_registry_rejects_protected_secret_digest_collision(
+    protected_overrides: dict[str, str],
+) -> None:
+    with pytest.raises(ValueError, match="digest must be distinct"):
         ApiSettings(
             _env_file=None,
-            admin_proxy_secret=None,
-            ops_cancel_token=None,
-            ops_read_token=None,
-            public_api_key_required=False,
-            service_token=None,
-            vworld_api_key=None,
-            cache_target_service_principals=[
-                {"principal_id": "svc:pinvi-a", **base},
-                {"principal_id": "svc:pinvi-b", **base},
-            ],
+            cache_target_service_principals=_principal_registry(),
+            **protected_overrides,
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "cache_role_token",
+    [COMMAND_TOKEN, CONSUMER_TOKEN, RESTORE_TOKEN, RECOVERY_TOKEN],
+)
+def test_cache_target_registry_rejects_public_api_key_digest_collision(
+    cache_role_token: str,
+) -> None:
+    with pytest.raises(ValueError, match="distinct from public API key"):
+        ApiSettings(
+            _env_file=None,
+            cache_target_service_principals=_principal_registry(),
+            vworld_api_key=cache_role_token,
+        )
+
+
+@pytest.mark.unit
+def test_cache_target_openapi_declares_route_scope_and_caller_role_contract() -> None:
+    schema = create_app(_settings()).openapi()
+    actual: dict[tuple[str, str], str] = {}
+    for path, path_item in schema["paths"].items():
+        if not path.startswith(
+            ("/v1/service/cache-target", "/v1/service/refresh-requests")
+        ):
+            continue
+        for method, operation in path_item.items():
+            if method not in {"get", "put", "post", "delete"}:
+                continue
+            actual[(method, path)] = operation["x-required-service-scope"]
+
+    assert set(actual) == set(_SERVICE_OPERATION_CONTRACT)
+    for route, (required_scope, caller_role) in _SERVICE_OPERATION_CONTRACT.items():
+        assert actual[route] == required_scope
+        assert required_scope in _ROLE_SCOPES[caller_role]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("route", list(_SERVICE_OPERATION_CONTRACT))
+def test_cache_target_runtime_uses_inventory_required_scope_before_service_call(
+    route: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import cache_target_streams as router_module
+
+    required_scope, caller_role = _SERVICE_OPERATION_CONTRACT[route]
+    captured_scopes: list[str] = []
+
+    def _capture_scope(
+        _context: Any,
+        *,
+        scope: str,
+        external_system: str | None = None,
+    ) -> None:
+        del external_system
+        captured_scopes.append(scope)
+        raise HTTPException(status_code=418, detail="scope captured before lookup")
+
+    monkeypatch.setattr(
+        router_module,
+        "require_cache_target_service_scope",
+        _capture_scope,
+    )
+    service = _FakeCacheTargetService()
+    client = _client(service)
+
+    response = _request_service_operation(
+        client,
+        route,
+        token=_TOKEN_BY_ROLE[caller_role],
+    )
+
+    assert response.status_code == 418, (route, response.text)
+    assert captured_scopes == [required_scope]
+    assert service.all_calls == []
+
+
+_WRONG_ROLE_OPERATION_CASES = [
+    (route, wrong_role)
+    for route, (_scope, caller_role) in _SERVICE_OPERATION_CONTRACT.items()
+    for wrong_role in _TOKEN_BY_ROLE
+    if wrong_role != caller_role
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("route", "wrong_role"), _WRONG_ROLE_OPERATION_CASES)
+def test_cache_target_inventory_wrong_roles_are_forbidden_before_service_call(
+    route: tuple[str, str],
+    wrong_role: str,
+) -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service)
+
+    response = _request_service_operation(
+        client,
+        route,
+        token=_TOKEN_BY_ROLE[wrong_role],
+    )
+
+    assert response.status_code == 403, (route, wrong_role, response.text)
+    assert response.json()["code"] == "CACHE_TARGET_SCOPE_FORBIDDEN"
+    assert service.all_calls == []
+
+
+@pytest.mark.unit
+def test_cache_target_registry_accepts_exact_profiles_as_scope_sets() -> None:
+    principals = _principal_registry()
+    principals[1]["scopes"] = list(reversed(principals[1]["scopes"]))
+    principals[3]["scopes"] = list(reversed(principals[3]["scopes"]))
+
+    settings = _settings(principals=principals)
+
+    assert len(settings.cache_target_service_principals) == 4
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "invalid_scopes",
+    [
+        ["cache-target:command", "cache-target:read"],
+        ["cache-target:read"],
+        ["cache-target:recovery-replay"],
+    ],
+)
+def test_cache_target_registry_rejects_mixed_or_incomplete_role_profiles(
+    invalid_scopes: list[str],
+) -> None:
+    principals = _principal_registry()
+    principals[0]["scopes"] = invalid_scopes
+
+    with pytest.raises(ValidationError, match="exact role profile"):
+        _settings(principals=principals)
+
+
+@pytest.mark.unit
+def test_cache_target_registry_rejects_missing_or_duplicate_binding_roles() -> None:
+    missing = _principal_registry()[:-1]
+    with pytest.raises(ValueError, match="missing exact roles"):
+        _settings(principals=missing)
+
+    duplicate = _principal_registry()
+    duplicate.append(
+        {
+            **duplicate[0],
+            "principal_id": "svc:pinvi-command-duplicate",
+            "token_sha256": _token_sha256(
+                "cache-target-command-duplicate-token-000000000000"
+            ),
+        }
+    )
+    with pytest.raises(ValueError, match="exactly one principal"):
+        _settings(principals=duplicate)
+
+
+@pytest.mark.unit
+def test_cache_target_registry_rejects_split_or_overlapping_binding_ownership() -> None:
+    split = _principal_registry()
+    split[3]["consumer_id"] = "other-consumer"
+    with pytest.raises(ValueError, match="one binding owner"):
+        _settings(principals=split)
+
+    overlap = _principal_registry()
+    other_group = _principal_registry(consumer_id="other-consumer")
+    for index, principal in enumerate(other_group):
+        principal["principal_id"] = f"svc:other-{index}"
+        principal["token_sha256"] = _token_sha256(
+            f"cache-target-other-token-{index}-000000000000000000"
+        )
+    with pytest.raises(ValueError, match="one binding owner"):
+        _settings(principals=[*overlap, *other_group])
+
+
+@pytest.mark.unit
+def test_cache_target_registry_rejects_same_consumer_disjoint_bindings() -> None:
+    other_group = _principal_registry(external_systems=["other"])
+    for index, principal in enumerate(other_group):
+        principal["principal_id"] = f"svc:other-{index}"
+        principal["token_sha256"] = _token_sha256(
+            f"cache-target-other-token-{index}-000000000000000000"
+        )
+
+    with pytest.raises(ValueError, match="exactly one canonical binding"):
+        _settings(principals=[*_principal_registry(), *other_group])
+
+
+@pytest.mark.unit
+def test_cache_target_registry_accepts_sorted_multi_system_union_binding() -> None:
+    settings = _settings(
+        principals=_principal_registry(external_systems=["other", EXTERNAL_SYSTEM]),
+    )
+
+    assert all(
+        principal.external_systems == ["other", EXTERNAL_SYSTEM]
+        for principal in settings.cache_target_service_principals
+    )
+
+
+@pytest.mark.unit
+def test_cache_target_registry_accepts_multiple_disjoint_complete_groups() -> None:
+    other_group = _principal_registry(
+        consumer_id="other-consumer",
+        external_systems=["other"],
+    )
+    for index, principal in enumerate(other_group):
+        principal["principal_id"] = f"svc:other-{index}"
+        principal["token_sha256"] = _token_sha256(
+            f"cache-target-other-token-{index}-000000000000000000"
+        )
+
+    settings = _settings(principals=[*_principal_registry(), *other_group])
+
+    assert len(settings.cache_target_service_principals) == 8
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("route", ["ack", "nack"])
+def test_cross_binding_consumer_mutations_are_forbidden_before_service_call(
+    route: str,
+) -> None:
+    other_group = _principal_registry(
+        consumer_id="other-consumer",
+        external_systems=["other"],
+    )
+    for index, principal in enumerate(other_group):
+        principal["principal_id"] = f"svc:other-{index}"
+        token = (
+            OTHER_CONSUMER_TOKEN
+            if principal["scopes"][0] == "cache-target:read"
+            else f"cache-target-other-token-{index}-000000000000000000"
+        )
+        principal["token_sha256"] = _token_sha256(token)
+    service = _FakeCacheTargetService()
+    client = _client(
+        service,
+        settings=_settings(principals=[*_principal_registry(), *other_group]),
+    )
+
+    if route == "ack":
+        response = client.post(
+            "/v1/service/cache-target-event-acks",
+            headers={SERVICE_TOKEN_HEADER: OTHER_CONSUMER_TOKEN},
+            json={
+                "consumer_id": CONSUMER_ID,
+                "claim_id": CLAIM_ID,
+                "lease_token": LEASE_TOKEN,
+                "through_cursor": cache_target_event_cursor(1),
+                "applied": [],
+            },
+        )
+    else:
+        response = client.post(
+            "/v1/service/cache-target-event-nacks",
+            headers={SERVICE_TOKEN_HEADER: OTHER_CONSUMER_TOKEN},
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": "other-consumer",
+                "claim_id": CLAIM_ID,
+                "lease_token": LEASE_TOKEN,
+                "event_id": EVENT_ID,
+                "disposition": "permanent",
+                "error_class": "unsupported",
+                "error_fingerprint": "a" * 64,
+            },
+        )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] in {
+        "CACHE_TARGET_CONSUMER_FORBIDDEN",
+        "CACHE_TARGET_EXTERNAL_SYSTEM_FORBIDDEN",
+    }
+    assert service.all_calls == []
 
 
 @pytest.mark.unit
 def test_cache_target_consumer_header_is_only_exact_binding_check() -> None:
     service = _FakeCacheTargetService()
-    client = _client(service, settings=_settings(scopes=["cache-target:read"]))
+    client = _client(service)
 
     response = client.get(
         f"/v1/service/cache-target-streams/{EXTERNAL_SYSTEM}",
@@ -1181,7 +1920,9 @@ def test_cache_target_consumer_header_is_only_exact_binding_check() -> None:
 @pytest.mark.unit
 def test_cache_target_service_scope_and_system_are_fail_closed() -> None:
     service = _FakeCacheTargetService()
-    settings = _settings(scopes=["cache-target:read"], external_systems=["other"])
+    settings = _settings(
+        principals=_principal_registry(external_systems=["other"]),
+    )
     client = _client(service, settings=settings)
 
     response = client.get(
@@ -1203,7 +1944,7 @@ def test_restore_fence_uses_stream_etag_and_domain_command_claim(
     captured_complete: dict[str, Any] = {}
 
     async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
-        assert kwargs["actor"] == "svc:pinvi"
+        assert kwargs["actor"] == "svc:pinvi-restore"
         assert kwargs["operation"] == "service.cache-target-restore-fence.create"
         assert kwargs["idempotency_key"].hex == IDEMPOTENCY_KEY.replace("-", "")
         return SimpleNamespace(command_id=123, request_fingerprint="b" * 64)
@@ -1217,14 +1958,14 @@ def test_restore_fence_uses_stream_etag_and_domain_command_claim(
         "complete_domain_command",
         _complete_domain_command,
     )
-    client = _client(
-        service,
-        settings=_settings(scopes=["cache-target:restore-fence"]),
-    )
+    client = _client(service)
 
     response = client.post(
         f"/v1/service/cache-target-streams/{EXTERNAL_SYSTEM}/restore-fences",
-        headers=_service_headers(extra={"If-Match": f'"{EXTERNAL_SYSTEM}:2"'}),
+        headers=_service_headers(
+            token=RESTORE_TOKEN,
+            extra={"If-Match": f'"{EXTERNAL_SYSTEM}:2"'},
+        ),
         json={
             "consumer_id": CONSUMER_ID,
             "expected_restore_epoch": 4,
@@ -1260,14 +2001,14 @@ def test_restore_fence_rejects_other_stream_etag_before_domain_claim(
         return SimpleNamespace(command_id=123, request_fingerprint="b" * 64)
 
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
-    client = _client(
-        service,
-        settings=_settings(scopes=["cache-target:restore-fence"]),
-    )
+    client = _client(service)
 
     response = client.post(
         f"/v1/service/cache-target-streams/{EXTERNAL_SYSTEM}/restore-fences",
-        headers=_service_headers(extra={"If-Match": '"other:2"'}),
+        headers=_service_headers(
+            token=RESTORE_TOKEN,
+            extra={"If-Match": '"other:2"'},
+        ),
         json={
             "consumer_id": CONSUMER_ID,
             "expected_restore_epoch": 4,
@@ -1358,7 +2099,7 @@ def test_service_reconciliation_begin_uses_recovery_scope_and_ledger(
     captured_complete: dict[str, Any] = {}
 
     async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
-        assert kwargs["actor"] == "svc:pinvi"
+        assert kwargs["actor"] == "svc:pinvi-recovery"
         assert kwargs["operation"] == "service.cache-target-reconciliation.begin"
         assert kwargs["idempotency_key"].hex == IDEMPOTENCY_KEY.replace("-", "")
         assert kwargs["payload"] == {
@@ -1377,11 +2118,14 @@ def test_service_reconciliation_begin_uses_recovery_scope_and_ledger(
 
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
     monkeypatch.setattr(router_module, "complete_domain_command", _complete_domain_command)
-    client = _client(service, settings=_settings(scopes=["cache-target:recovery"]))
+    client = _client(service)
 
     response = client.post(
         "/v1/service/cache-target-reconciliations",
-        headers=_service_headers(extra={"If-None-Match": "*"}),
+        headers=_service_headers(
+            token=RECOVERY_TOKEN,
+            extra={"If-None-Match": "*"},
+        ),
         json={
             "external_system": EXTERNAL_SYSTEM,
             "consumer_id": CONSUMER_ID,
@@ -1441,11 +2185,11 @@ def test_service_reconciliation_begin_requires_exactly_one_stream_precondition(
     expected_status: int,
 ) -> None:
     service = _FakeCacheTargetService()
-    client = _client(service, settings=_settings(scopes=["cache-target:recovery"]))
+    client = _client(service)
 
     response = client.post(
         "/v1/service/cache-target-reconciliations",
-        headers=_service_headers(extra=extra_headers),
+        headers=_service_headers(token=RECOVERY_TOKEN, extra=extra_headers),
         json={
             "external_system": EXTERNAL_SYSTEM,
             "consumer_id": CONSUMER_ID,
@@ -1468,7 +2212,7 @@ def test_service_reconciliation_seal_uses_request_etag_and_exact_replay(
     captured_complete: dict[str, Any] = {}
 
     async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
-        assert kwargs["actor"] == "svc:pinvi"
+        assert kwargs["actor"] == "svc:pinvi-recovery"
         assert kwargs["operation"] == "service.cache-target-reconciliation.seal"
         assert kwargs["idempotency_key"].hex == IDEMPOTENCY_KEY.replace("-", "")
         assert kwargs["payload"] == {
@@ -1489,9 +2233,12 @@ def test_service_reconciliation_seal_uses_request_etag_and_exact_replay(
 
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
     monkeypatch.setattr(router_module, "complete_domain_command", _complete_domain_command)
-    client = _client(service, settings=_settings(scopes=["cache-target:recovery"]))
+    client = _client(service)
     path = f"/v1/service/cache-target-reconciliations/{RECONCILIATION_REQUEST_ID}/seals"
-    headers = _service_headers(extra={"If-Match": f'"{RECONCILIATION_REQUEST_ID}:1"'})
+    headers = _service_headers(
+        token=RECOVERY_TOKEN,
+        extra={"If-Match": f'"{RECONCILIATION_REQUEST_ID}:1"'},
+    )
     body = {
         "external_system": EXTERNAL_SYSTEM,
         "consumer_id": CONSUMER_ID,
@@ -1558,17 +2305,14 @@ def test_service_reconciliation_seal_authorizes_stored_request_before_write(
         return SimpleNamespace(command_id=793, request_fingerprint="d" * 64)
 
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
-    client = _client(
-        service,
-        settings=_settings(
-            scopes=["cache-target:recovery"],
-            external_systems=[EXTERNAL_SYSTEM],
-        ),
-    )
+    client = _client(service)
 
     response = client.post(
         f"/v1/service/cache-target-reconciliations/{RECONCILIATION_REQUEST_ID}/seals",
-        headers=_service_headers(extra={"If-Match": f'"{RECONCILIATION_REQUEST_ID}:1"'}),
+        headers=_service_headers(
+            token=RECOVERY_TOKEN,
+            extra={"If-Match": f'"{RECONCILIATION_REQUEST_ID}:1"'},
+        ),
         json={
             "external_system": EXTERNAL_SYSTEM,
             "consumer_id": CONSUMER_ID,
@@ -1591,11 +2335,7 @@ def test_service_reconciliation_seal_authorizes_stored_request_before_write(
 def test_service_snapshot_commits_route_owned_transaction() -> None:
     service = _FakeCacheTargetService()
     session = _FakeSession()
-    client = _client(
-        service,
-        settings=_settings(scopes=["cache-target:snapshot"]),
-        session=session,
-    )
+    client = _client(service, session=session)
 
     response = client.get(
         f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}?page_size=1",
@@ -1626,11 +2366,7 @@ def test_service_snapshot_rolls_back_route_owned_transaction_on_error() -> None:
     service = _FakeCacheTargetService()
     service.snapshot_error = RuntimeError("snapshot failed after write")
     session = _FakeSession()
-    client = _client(
-        service,
-        settings=_settings(scopes=["cache-target:snapshot"]),
-        session=session,
-    )
+    client = _client(service, session=session)
 
     with pytest.raises(RuntimeError, match="snapshot failed after write"):
         client.get(
@@ -1663,11 +2399,7 @@ def test_service_snapshot_unavailable_is_retryable_without_waiting(
         "snapshot already in progress",
     )
     session = _FakeSession()
-    client = _client(
-        service,
-        settings=_settings(scopes=["cache-target:snapshot"]),
-        session=session,
-    )
+    client = _client(service, session=session)
 
     response = client.get(
         f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
@@ -1695,11 +2427,7 @@ def test_service_snapshot_capacity_returns_oldest_expiry_retry_after() -> None:
         },
     )
     session = _FakeSession()
-    client = _client(
-        service,
-        settings=_settings(scopes=["cache-target:snapshot"]),
-        session=session,
-    )
+    client = _client(service, session=session)
 
     response = client.get(
         f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
@@ -1727,11 +2455,7 @@ def test_service_snapshot_item_ceiling_returns_non_retryable_payload_too_large()
         current={"item_count_lower_bound": 100_001, "item_limit": 100_000},
     )
     session = _FakeSession()
-    client = _client(
-        service,
-        settings=_settings(scopes=["cache-target:snapshot"]),
-        session=session,
-    )
+    client = _client(service, session=session)
 
     response = client.get(
         f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
@@ -1771,7 +2495,7 @@ def test_service_reconciliation_completion_binds_preconditions_and_ledger(
     captured_complete: dict[str, Any] = {}
 
     async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
-        assert kwargs["actor"] == "svc:pinvi"
+        assert kwargs["actor"] == "svc:pinvi-consumer"
         assert kwargs["operation"] == "service.cache-target-reconciliation.complete"
         assert kwargs["payload"] == {
             "request_id": RECONCILIATION_REQUEST_ID,
@@ -1790,10 +2514,7 @@ def test_service_reconciliation_completion_binds_preconditions_and_ledger(
 
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
     monkeypatch.setattr(router_module, "complete_domain_command", _complete_domain_command)
-    client = _client(
-        service,
-        settings=_settings(scopes=["cache-target:read", "cache-target:snapshot"]),
-    )
+    client = _client(service)
     request_id = RECONCILIATION_REQUEST_ID
 
     discovery = client.get(
@@ -1856,9 +2577,7 @@ def test_reconciliation_discovery_snapshot_and_completion_reject_other_consumer(
     client = _client(
         service,
         settings=_settings(
-            scopes=["cache-target:read", "cache-target:snapshot"],
-            consumer_id="other-consumer",
-            principal_id="svc:other",
+            principals=_principal_registry(consumer_id="other-consumer"),
         ),
     )
     request_id = "88888888-8888-4888-8888-888888888888"
@@ -1914,13 +2633,7 @@ def test_service_reconciliation_completion_authorizes_stored_request_before_writ
         return SimpleNamespace(command_id=794, request_fingerprint="e" * 64)
 
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
-    client = _client(
-        service,
-        settings=_settings(
-            scopes=["cache-target:snapshot"],
-            external_systems=[EXTERNAL_SYSTEM],
-        ),
-    )
+    client = _client(service)
 
     response = client.post(
         f"/v1/service/cache-target-reconciliations/{RECONCILIATION_REQUEST_ID}/completions",
@@ -1960,13 +2673,7 @@ def test_reconciliation_snapshot_checks_external_system_before_item_read() -> No
         entity_tag=f'"{RECONCILIATION_REQUEST_ID}:2"',
         stream_entity_tag='"other:2"',
     )
-    client = _client(
-        service,
-        settings=_settings(
-            scopes=["cache-target:snapshot"],
-            external_systems=[EXTERNAL_SYSTEM],
-        ),
-    )
+    client = _client(service)
 
     response = client.get(
         f"/v1/service/cache-target-reconciliations/{RECONCILIATION_REQUEST_ID}/snapshot",
@@ -1986,7 +2693,7 @@ def test_reconciliation_snapshot_missing_request_returns_404() -> None:
         "reconciliation_not_found",
         "reconciliation request가 없습니다.",
     )
-    client = _client(service, settings=_settings(scopes=["cache-target:snapshot"]))
+    client = _client(service)
 
     response = client.get(
         f"/v1/service/cache-target-reconciliations/{RECONCILIATION_REQUEST_ID}/snapshot",
@@ -2004,7 +2711,10 @@ def test_reconciliation_snapshot_missing_request_returns_404() -> None:
     [
         (
             "seals",
-            _service_headers(extra={"If-Match": f'"{RECONCILIATION_REQUEST_ID}:1"'}),
+            _service_headers(
+                token=RECOVERY_TOKEN,
+                extra={"If-Match": f'"{RECONCILIATION_REQUEST_ID}:1"'},
+            ),
             {
                 "external_system": EXTERNAL_SYSTEM,
                 "consumer_id": CONSUMER_ID,
@@ -2046,10 +2756,7 @@ def test_reconciliation_mutations_missing_request_return_404_before_write(
         return SimpleNamespace(command_id=795, request_fingerprint="f" * 64)
 
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
-    client = _client(
-        service,
-        settings=_settings(scopes=["cache-target:recovery", "cache-target:snapshot"]),
-    )
+    client = _client(service)
 
     response = client.post(
         f"/v1/service/cache-target-reconciliations/{RECONCILIATION_REQUEST_ID}/{path_suffix}",
@@ -2083,7 +2790,7 @@ def test_service_reconciliation_completion_distinguishes_412_and_409(
         return SimpleNamespace(command_id=792, request_fingerprint="c" * 64)
 
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
-    client = _client(service, settings=_settings(scopes=["cache-target:snapshot"]))
+    client = _client(service)
     path = (
         "/v1/service/cache-target-reconciliations/88888888-8888-4888-8888-888888888888/completions"
     )
@@ -2145,7 +2852,7 @@ def test_service_dead_letter_replay_exact_response_uses_domain_ledger(
     captured: dict[str, Any] = {}
 
     async def _begin_domain_command(_session: Any, **kwargs: Any) -> Any:
-        assert kwargs["actor"] == "svc:pinvi"
+        assert kwargs["actor"] == "svc:pinvi-recovery"
         assert kwargs["operation"] == "service.cache-target-dead-letter.replay"
         assert kwargs["payload"] == {
             "event_id": EVENT_ID,
@@ -2159,12 +2866,12 @@ def test_service_dead_letter_replay_exact_response_uses_domain_ledger(
 
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
     monkeypatch.setattr(router_module, "complete_domain_command", _complete_domain_command)
-    client = _client(
-        service,
-        settings=_settings(scopes=["cache-target:recovery-replay"]),
-    )
+    client = _client(service)
     path = f"/v1/service/cache-target-event-dead-letters/{EVENT_ID}/replays"
-    headers = _service_headers(extra={"If-Match": f'"{EVENT_ID}:2"'})
+    headers = _service_headers(
+        token=RECOVERY_TOKEN,
+        extra={"If-Match": f'"{EVENT_ID}:2"'},
+    )
     first = client.post(path, headers=headers, json={"reason": "manual replay"})
     assert first.status_code == 200, first.text
     assert captured["response_headers"] == {"ETag": f'"{EVENT_ID}:3"'}
@@ -2226,14 +2933,14 @@ def test_service_dead_letter_replay_checks_event_system_allowlist(
         return SimpleNamespace(command_id=791, request_fingerprint="d" * 64)
 
     monkeypatch.setattr(router_module, "begin_domain_command", _begin_domain_command)
-    client = _client(
-        service,
-        settings=_settings(scopes=["cache-target:recovery-replay"]),
-    )
+    client = _client(service)
 
     response = client.post(
         f"/v1/service/cache-target-event-dead-letters/{EVENT_ID}/replays",
-        headers=_service_headers(extra={"If-Match": f'"{EVENT_ID}:2"'}),
+        headers=_service_headers(
+            token=RECOVERY_TOKEN,
+            extra={"If-Match": f'"{EVENT_ID}:2"'},
+        ),
         json={"reason": "manual replay"},
     )
 

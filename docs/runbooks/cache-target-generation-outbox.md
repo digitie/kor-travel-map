@@ -5,10 +5,18 @@ ADR-081 producer foundation과 paired PinVi consumer의 준비·복구·검증 �
 
 ## 1. 사전 조건
 
-1. Map/PinVi exact source commit과 pinned service OpenAPI SHA를 기록한다.
+1. Map/PinVi exact source commit과 service OpenAPI SHA가 PinVi compatible pair의 **contract generation
+   7**로 이미 pin돼 있어야 한다. generation 6이거나 exact pair/SHA가 다르면 command writer, backfill,
+   refresh command와 consumer를 모두 켜지 않는다.
 2. Map DB의 단일 Alembic head와 `alembic check`를 확인한다.
-3. ServiceToken principal을 consumer, restore-fence, recovery replay, recovery cutover scope로
-   분리하고 서로 다른 external system이나 admin route에 사용할 수 없는지 확인한다.
+3. 한 canonical `(consumer_id, sorted external_systems)` binding마다 다음 exact 역할 token 네 개가 각각
+   하나인지 확인한다: command=`{command}`, consumer=`{read,claim,ack,nack,snapshot}`,
+   restore=`{restore-fence}`, recovery=`{recovery,recovery-replay}`. command token은 source PUT/DELETE와
+   refresh create만, consumer token은 read/relay/snapshot만 호출해야 한다. 제거된
+   `cache-target:consumer`가 registry에서 수용되거나 command token으로 consumer/restore/recovery
+   route가 허용되면 중단한다. 같은 `consumer_id`를 서로 다른 system tuple의 binding으로 나누지 말고
+   필요한 system을 한 sorted union으로 합친다. 역할 token 원문은 public VWorld/API key를 포함한 다른
+   configured credential과 공유하지 않는다.
 4. Map target stream은 blocked/dead 0이고 PinVi consumer flag는 off여야 한다.
 5. snapshot serializer/Merkle golden vector가 양쪽 exact commit에서 모두 통과해야 한다.
 
@@ -19,8 +27,11 @@ ADR-081 producer foundation과 paired PinVi consumer의 준비·복구·검증 �
 2. `cache-target:recovery` principal로 stream ETag를 조건부 전송해 reconciliation begin을 호출한다.
    stream이 아직 없으면 `If-None-Match: *`로 시작하고, 응답의 `preparing` request ID,
    reconciliation ETag, body의 `stream_entity_tag`를 각각 기록한다.
-3. PinVi writer snapshot의 desired target/tombstone을 Map service PUT/DELETE로 backfill한다. 이때
-   restore epoch는 begin receipt와 같아야 하며 claim consumer는 아직 켜지 않는다.
+3. `cache-target:command` principal로 PinVi writer snapshot의 desired target/tombstone을 Map service
+   PUT/DELETE로 backfill한다. 이때 restore epoch는 begin receipt와 같아야 하며 claim consumer는 아직
+   켜지 않는다. PUT/DELETE의 최신 ETag를 다시 읽어 CAS를 이어갈 때는 command token이 아니라
+   `cache-target:read`가 든 consumer token으로 source GET을 호출한다. refresh create의 `Location`을
+   polling할 때도 같은 consumer token으로 refresh GET을 호출한다.
 4. begin에서 받은 request ID와 reconciliation ETag를 `If-Match`로 보내 seal을 호출한다. seal body에는
    PinVi writer snapshot에서 계산한 `expected_restore_epoch`, `expected_item_count`,
    `expected_merkle_root`를 넣는다. Map의 현재 source heads와 다르면 `412`로 실패하고 request는

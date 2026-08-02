@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import secrets
 from collections.abc import Mapping
@@ -42,7 +43,7 @@ _CURSOR_SIGNING_PROTECTED_FIELDS = (
 )
 
 CacheTargetServiceScope = Literal[
-    "cache-target:consumer",
+    "cache-target:command",
     "cache-target:read",
     "cache-target:claim",
     "cache-target:ack",
@@ -52,10 +53,11 @@ CacheTargetServiceScope = Literal[
     "cache-target:recovery",
     "cache-target:recovery-replay",
 ]
+CacheTargetServiceRole = Literal["command", "consumer", "restore", "recovery"]
 
 _CACHE_TARGET_SERVICE_SCOPES: frozenset[str] = frozenset(
     {
-        "cache-target:consumer",
+        "cache-target:command",
         "cache-target:read",
         "cache-target:claim",
         "cache-target:ack",
@@ -66,6 +68,29 @@ _CACHE_TARGET_SERVICE_SCOPES: frozenset[str] = frozenset(
         "cache-target:recovery-replay",
     }
 )
+_CACHE_TARGET_SERVICE_ROLE_SCOPES: dict[
+    CacheTargetServiceRole,
+    frozenset[CacheTargetServiceScope],
+] = {
+    "command": frozenset({"cache-target:command"}),
+    "consumer": frozenset(
+        {
+            "cache-target:read",
+            "cache-target:claim",
+            "cache-target:ack",
+            "cache-target:nack",
+            "cache-target:snapshot",
+        }
+    ),
+    "restore": frozenset({"cache-target:restore-fence"}),
+    "recovery": frozenset(
+        {"cache-target:recovery", "cache-target:recovery-replay"}
+    ),
+}
+_CACHE_TARGET_SERVICE_SCOPES_ROLE: dict[
+    frozenset[CacheTargetServiceScope],
+    CacheTargetServiceRole,
+] = {scopes: role for role, scopes in _CACHE_TARGET_SERVICE_ROLE_SCOPES.items()}
 
 
 class CacheTargetServicePrincipalSetting(BaseModel):
@@ -132,6 +157,10 @@ class CacheTargetServicePrincipalSetting(BaseModel):
             raise ValueError(
                 "unknown cache target service scopes: " + ", ".join(sorted(unknown))
             )
+        if frozenset(value) not in _CACHE_TARGET_SERVICE_SCOPES_ROLE:
+            raise ValueError(
+                "cache target service scopes must match one exact role profile"
+            )
         return value
 
     @field_validator("external_systems")
@@ -145,6 +174,10 @@ class CacheTargetServicePrincipalSetting(BaseModel):
                     "cache target external_system allowlist values must use "
                     "letters, digits, '.', ':', '_' or '-' and be at most 112 chars"
                 )
+        if value != sorted(value):
+            raise ValueError(
+                "cache target external_system allowlist must use canonical sorted order"
+            )
         return value
 
 
@@ -644,8 +677,16 @@ class ApiSettings(BaseSettings):
     def _validate_cache_target_service_principal_registry(self) -> ApiSettings:
         """cache-target principal registry는 설정 시점에 fail-fast 검증한다."""
 
+        if not self.cache_target_service_principals:
+            return self
         digests: set[str] = set()
         principal_ids: set[str] = set()
+        roles_by_binding: dict[
+            tuple[str, tuple[str, ...]],
+            set[CacheTargetServiceRole],
+        ] = {}
+        consumer_binding_owners: dict[str, tuple[str, ...]] = {}
+        external_system_owners: dict[str, tuple[str, tuple[str, ...]]] = {}
         for principal in self.cache_target_service_principals:
             if principal.token_sha256 in digests:
                 raise ValueError(
@@ -655,8 +696,70 @@ class ApiSettings(BaseSettings):
                 raise ValueError(
                     "cache target service principal_id values must be unique"
                 )
+            role = _CACHE_TARGET_SERVICE_SCOPES_ROLE[frozenset(principal.scopes)]
+            external_systems = tuple(principal.external_systems)
+            existing_consumer_binding = consumer_binding_owners.setdefault(
+                principal.consumer_id,
+                external_systems,
+            )
+            if existing_consumer_binding != external_systems:
+                raise ValueError(
+                    "cache target consumer_id must own exactly one canonical binding: "
+                    f"{principal.consumer_id}"
+                )
+            binding = (principal.consumer_id, external_systems)
+            for external_system in principal.external_systems:
+                existing_binding = external_system_owners.setdefault(
+                    external_system,
+                    binding,
+                )
+                if existing_binding != binding:
+                    raise ValueError(
+                        "cache target external_system must have exactly one binding owner: "
+                        f"{external_system}"
+                    )
+            binding_roles = roles_by_binding.setdefault(binding, set())
+            if role in binding_roles:
+                raise ValueError(
+                    "cache target service binding role must have exactly one principal: "
+                    f"{role}"
+                )
             digests.add(principal.token_sha256)
             principal_ids.add(principal.principal_id)
+            binding_roles.add(role)
+        for binding, roles in roles_by_binding.items():
+            missing_roles = set(_CACHE_TARGET_SERVICE_ROLE_SCOPES) - roles
+            if missing_roles:
+                consumer_id, external_systems = binding
+                raise ValueError(
+                    "cache target service binding is missing exact roles for "
+                    f"consumer_id={consumer_id}, external_systems={list(external_systems)}: "
+                    + ", ".join(sorted(missing_roles))
+                )
+        protected_secrets = {
+            "admin proxy secret": self.admin_proxy_secret,
+            "service token": self.service_token,
+            "ops read token": self.ops_read_token,
+            "ops cancel token": self.ops_cancel_token,
+            "metrics token": self.metrics_token,
+            "cursor signing secret": self.cursor_signing_secret,
+            "public API key": self.vworld_api_key,
+        }
+        for protected_name, protected_secret in protected_secrets.items():
+            protected_raw = _optional_secret_text(
+                protected_secret,
+                setting_name=protected_name,
+            )
+            if protected_raw is None:
+                continue
+            protected_digest = hashlib.sha256(
+                protected_raw.encode("utf-8")
+            ).hexdigest()
+            if protected_digest in digests:
+                raise ValueError(
+                    "cache target service token digest must be distinct from "
+                    f"{protected_name}"
+                )
         return self
 
     @property

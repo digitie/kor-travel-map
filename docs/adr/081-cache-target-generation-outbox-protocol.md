@@ -306,9 +306,58 @@ T-VN-12 정적 registry에서 generic DB command, 기존 refresh ledger, outbox 
 하나로 분류한다.
 
 operator는 ops read에서 epoch/claim/backlog/dead/reconciliation 상태를 보고, admin 표면에서 replay와
-reconciliation command를 실행한다. ServiceToken scope는 consumer read/claim/ack/nack/snapshot,
-restore-fence, recovery replay, recovery cutover로 분리한다. admin reconciliation 시작은 active claim을 끊는 복구
-mutation이므로 destructive recovery gate가 켜진 경우에만 허용한다.
+reconciliation command를 실행한다. ServiceToken registry의 한 binding은 canonical
+`(consumer_id, sorted external_systems)`로 식별하고 다음 네 exact 역할 principal을 각각 정확히 하나씩
+가진다. scope 비교는 순서가 아니라 집합 동등성이다.
+
+| 호출 역할 | exact scope 집합 |
+|---|---|
+| command | `{cache-target:command}` |
+| consumer | `{cache-target:read, cache-target:claim, cache-target:ack, cache-target:nack, cache-target:snapshot}` |
+| restore | `{cache-target:restore-fence}` |
+| recovery | `{cache-target:recovery, cache-target:recovery-replay}` |
+
+서로 겹치지 않는 complete binding 여러 개는 서로 다른 `consumer_id`에만 허용한다. 한 `consumer_id`는
+전역에서 정확히 한 canonical sorted external-system tuple만 소유하며, 여러 system을 소비하면 분할
+binding이 아니라 한 sorted union binding으로 표현한다. external system 하나도 전역에서 한 binding만
+소유한다. token digest와 `principal_id`도 전역 unique다. 역할 누락·중복, mixed/partial/extra scope,
+비정렬 allowlist, external system 중복 소유는 설정 검증에서 기동을 막는다. 역할 token digest는 설정된
+admin proxy/service/ops/metrics/cursor secret과 public VWorld/API key 원문의 SHA-256과도 달라야 한다.
+local-dev의 미설정 cursor process fallback은 비교 대상이 아니다. 이 consumer 단일 소유권 때문에 body에
+external system이 없는 ACK도 다른 binding의 claim을 같은 consumer identity로 제거할 수 없다. NACK처럼
+system이 있는 mutation은 consumer와 system을 모두 검사한다.
+
+기존 `cache-target:consumer`는 read/claim/ack/nack/snapshot의 호환 umbrella로 남기지 않고
+enum·validator·인증 fallback에서 clean cut 제거한다. command principal도 consumer·snapshot·recovery
+경로를 호출할 수 없다. 따라서 PinVi writer와 relay consumer는 서로 다른 최소 권한 token을 사용한다.
+command writer가 PUT/DELETE CAS를 위해 source를 다시 읽거나 refresh `Location`을 polling할 때는 command
+credential을 계속 쓰지 않고 consumer credential로 전환한다. admin reconciliation 시작은 active claim을
+끊는 복구 mutation이므로 destructive recovery gate가 켜진 경우에만 허용한다.
+
+각 service operation은 OpenAPI의 `x-required-service-scope`로 다음 계약을 기계 판독 가능하게 노출한다.
+runtime도 같은 단일 inventory의 exact scope를 사용하며 모든 다른 역할 token은 metadata/domain service를
+호출하기 전에 `403`이어야 한다. request-bound seal/completion/snapshot은 scope-only 검사를 먼저 하고,
+통과한 경우에만 reconciliation metadata를 읽은 뒤 consumer와 external system 결박을 다시 검사한다.
+
+| method/path | scope | 호출 역할 |
+|---|---|---|
+| `PUT /v1/service/cache-targets/{external_system}/{target_key}` | `cache-target:command` | command |
+| `GET /v1/service/cache-targets/{external_system}/{target_key}` | `cache-target:read` | consumer |
+| `DELETE /v1/service/cache-targets/{external_system}/{target_key}` | `cache-target:command` | command |
+| `GET /v1/service/cache-target-streams/{external_system}` | `cache-target:read` | consumer |
+| `POST /v1/service/cache-target-streams/{external_system}/restore-fences` | `cache-target:restore-fence` | restore |
+| `POST /v1/service/refresh-requests` | `cache-target:command` | command |
+| `GET /v1/service/refresh-requests/{request_id}` | `cache-target:read` | consumer |
+| `POST /v1/service/cache-target-event-claims` | `cache-target:claim` | consumer |
+| `POST /v1/service/cache-target-event-acks` | `cache-target:ack` | consumer |
+| `POST /v1/service/cache-target-event-nacks` | `cache-target:nack` | consumer |
+| `GET /v1/service/cache-target-event-dead-letters/{event_id}` | `cache-target:recovery-replay` | recovery |
+| `POST /v1/service/cache-target-event-dead-letters/{event_id}/replays` | `cache-target:recovery-replay` | recovery |
+| `POST /v1/service/cache-target-reconciliations` | `cache-target:recovery` | recovery |
+| `POST /v1/service/cache-target-reconciliations/{request_id}/seals` | `cache-target:recovery` | recovery |
+| `POST /v1/service/cache-target-reconciliations/{request_id}/completions` | `cache-target:snapshot` | consumer |
+| `GET /v1/service/cache-target-snapshots/{external_system}` | `cache-target:snapshot` | consumer |
+| `GET /v1/service/cache-target-reconciliations/{request_id}/snapshot` | `cache-target:snapshot` | consumer |
 
 reconciliation command는 active claim을 무효화하고 stream을 먼저 halt한 뒤 fixed snapshot을 만든다.
 stream control read는 현재 active reconciliation의 request ID와 request에 결박된 fixed snapshot
@@ -338,6 +387,13 @@ production enable 전 PinVi는 snapshot 요청 동시성을 system별 1로 제�
 `Retry-After`를 지키며, `413 snapshot_item_limit_exceeded`를 자동 재시도하지 않음을 live로 증명한다.
 credential별 gateway limit 또는 동등한 외부 rate-limit과 실제 호출 cadence도 함께 기록한다. 이 gate가
 없으면 100,001행 sentinel scan을 반복할 수 있으므로 consumer를 enable하지 않는다.
+
+`cache-target:command`의 exact 분리는 서버 간 인증 의미가 바뀌는 breaking contract다. OpenAPI의
+security scheme 형태가 그대로여도 generation 6 pin을 재사용하지 않는다. Map service OpenAPI를 다시
+export하고 그 SHA를 PinVi에 pin한 조합부터 **contract generation 7**로 기록한다. generation 7은 command
+token이 source PUT/DELETE·refresh create만 성공하고 consumer/restore/recovery 경로는 `403`, consumer
+exact scope가 command 경로는 `403`, 제거된 `cache-target:consumer` 설정은 validation error임을 contract
+test로 증명해야 한다.
 
 ## 근거
 

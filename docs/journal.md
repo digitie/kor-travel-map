@@ -17,6 +17,30 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-02 (codex) — T-VN-41 command principal clean cut
+
+- source PUT/DELETE와 refresh create는 exact `cache-target:command`만 허용한다.
+- `cache-target:consumer` umbrella는 enum·validator·인증 fallback에서 clean cut 제거한다. command
+  principal의 consumer·snapshot·recovery 접근도 `403`으로 고정한다.
+- 인증 의미가 달라지는 breaking contract로 판단해 service OpenAPI 재핀과 PinVi contract generation 7을
+  요구한다. generation 6 조합으로 command 표면을 활성화하지 않는다.
+- settings literal/registry와 인증 fallback에서 consumer umbrella를 제거하고 source PUT/DELETE·refresh
+  create 세 route를 command scope로 바꿨다. 한 canonical binding의 command/consumer/restore/recovery
+  exact 역할 profile, 전역 system owner/digest/principal uniqueness, configured protected secret digest
+  분리를 설정 검증으로 고정했다. 같은 `consumer_id`는 한 canonical sorted system tuple만 소유하고 여러
+  system은 union binding으로 표현한다. public VWorld/API key와 네 역할 digest 충돌도 기동을 막는다.
+- 17개 service operation의 OpenAPI `x-required-service-scope`와 caller role 표를 추가했다. command writer는
+  PUT/DELETE 후 source GET과 refresh `Location` polling GET에서 consumer credential로 전환한다. 같은
+  inventory가 runtime passed scope를 검증하며 모든 51개 wrong-role 조합은 service/metadata 호출 전에
+  `403`이다. request-bound helper는 scope-only 검사 뒤에만 metadata를 조회한다.
+- generation 7 exact pair pin을 command writer/backfill/consumer 활성화의 사전 조건으로 옮겼다. Map
+  service OpenAPI SHA는 `622ea54c98e9b0c09592cf84aced36227992c6bdf256742a3532b892f0efccf2`이며 PinVi
+  재핀은 아직 미완료다.
+- command→read/claim/ack/nack/snapshot/restore/recovery direct route와 비command role→command route,
+  제거된 consumer umbrella, invalid registry, cross-binding ACK/NACK를 회귀로 고정했다. router 172건,
+  OpenAPI export 12건,
+  API strict mypy 61개 파일, 대상 Ruff, OpenAPI all drift, frontend generated types check가 통과했다.
+
 ## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
 
 - job metadata history 조회는 Dagster storage retention과 retry attempt에 결합되므로 운영 정본으로 쓰지
