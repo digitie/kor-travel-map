@@ -1,14 +1,14 @@
 # H35 prod 마이그레이션 cutover 보정 runbook
 
-> 상태: **설계 승인 전 실행 금지**
+> 상태: **구현 검증·최종 승인 전 실행 금지**
 >
 > 대상: `0063_pipeline_root_id`에서 `0078_cache_target_gc_observe`로 가는 H35 cutover
 >
 > 관계: `T-VN-H35`, `T-VN-41`, Docker-manager generation 7
 
-이 문서는 과거 H35 runbook과 현재 `scripts/h35/`를 실행 절차로 인정하지 않는다. 과거 문서는
-적대 감사 두 번에서 `NO_GO`였고, 현재 helper는 `0072`와 `0078`의 일부 표면만 잘못 검증한다.
-새 구현·격리 리허설·정확한 2인 리뷰·사용자 승인이 모두 끝나기 전에는 H35를 실행하지 않는다.
+이 문서는 적대 감사 두 번에서 `NO_GO`였던 과거 H35 runbook과 그때의 부분 helper를 실행 절차로
+인정하지 않는다. 이를 대체하는 다섯 typed helper도 독립 검증·격리 리허설·최종 exact HEAD
+적대 리뷰 1건·사용자 승인이 모두 끝나기 전에는 prod에서 실행하지 않는다.
 
 ## 1. 단일 소유 경계
 
@@ -17,11 +17,12 @@ mode `0600` durable journal을 잡고 다음을 직렬 실행한다.
 
 1. writer fence와 mutation-zero 증명
 2. Map app DB·Map Dagster DB·Pin DB와 manager state/env/manifest의 결합 백업
-3. Map helper `preflight` → `migrate` → `csv5` → `verify`
-4. generation 7 bootstrap·initial·enable·canary·GC
-5. forward 경계 확정 또는 결합 복원
+3. Map helper `preflight` → `migrate` → `csv5`
+4. generation 7 bootstrap·initial·enable·canary 뒤 final all-writer stop
+5. Map helper `gc` → `verify`
+6. forward 경계 확정 또는 결합 복원
 
-Map 저장소는 자격증명과 운영 경로를 모르는 네 helper만 제공한다. helper는 lock/journal,
+Map 저장소는 자격증명과 운영 경로를 모르는 다섯 helper만 제공한다. helper는 lock/journal,
 backup/restore, container/process stop/start/recreate, ingress, image tag, daemon enablement를 다루지
 않는다. helper가 runtime을 재기동하거나 외부 event를 내면 그 phase는 실패다.
 
@@ -59,12 +60,13 @@ opened
   -> map_preflight_verified
   -> map_schema_0078
   -> csv5_restored
-  -> map_verified
   -> generation7_bootstrapped
   -> initial_verified
   -> enabled
   -> canary_verified
-  -> gc_verified
+  -> final_writers_stopped
+  -> map_gc_verified
+  -> map_verified
   -> forward_committed
   -> closed
 ```
@@ -75,12 +77,13 @@ opened
 
 ## 4. Map typed helper 계약
 
-계획 CLI는 다음 네 operation만 가진다.
+계획 CLI는 다음 다섯 operation만 가진다.
 
 ```text
 python scripts/h35/h35_cutover.py preflight
 python scripts/h35/h35_cutover.py migrate
 python scripts/h35/h35_cutover.py csv5
+python scripts/h35/h35_cutover.py gc
 python scripts/h35/h35_cutover.py verify
 ```
 
@@ -98,7 +101,7 @@ request는 stdin의 단일 JSON이고 receipt는 stdout의 단일 JSON line이�
 | key | 계약 |
 | --- | --- |
 | `contract_version` | 최초 구현은 `h35-map/v1` |
-| `operation` | `preflight`, `migrate`, `csv5`, `verify` 중 하나 |
+| `operation` | `preflight`, `migrate`, `csv5`, `gc`, `verify` 중 하나 |
 | `transaction_id` | manager가 발급한 UUID; window 전체에서 동일 |
 | `status` | `accepted`, `rejected`, `failed` |
 | `source_revision` | candidate Map exact 40-hex revision |
@@ -111,10 +114,12 @@ request는 stdin의 단일 JSON이고 receipt는 stdout의 단일 JSON line이�
 | `checks` | 이름·기대·관측·통과 여부를 가진 typed check 목록 |
 | `runtime_mutation_count` | 항상 `0`이어야 함 |
 | `external_event_count` | 항상 `0`이어야 함 |
+| `cache_target_evidence` | `preflight`/`migrate`/`csv5`/`gc`는 `null`; accepted `verify`만 exact object |
 
 같은 `transaction_id + request_digest + prior_receipt_digest` 재호출만 멱등 receipt를 재발급할 수
 있다. 하나라도 다르면 DB mutation 전에 거부한다. receipt 순서는
-`preflight(null)` → `migrate(preflight)` → `csv5(migrate)` → `verify(csv5)`다.
+`preflight(null)` → `migrate(preflight)` → `csv5(migrate)` → `gc(csv5)` → `verify(gc)`다.
+Docker-manager는 key와 타입을 임의 확장하지 않고 receipt 전체와 digest를 journal에 저장한다.
 
 ### 4.1 live DB identity v1
 
@@ -179,7 +184,17 @@ vector가 다르면 실행 전에 실패해야 한다. receipt에는 요청값�
 
 `3,043` 상태에서 CSV5가 성공하지 못하면 새 runtime을 시작하지 않는다.
 
-### 5.4 `verify`
+### 5.4 `gc`
+
+- 기존 `AsyncKorTravelMapClient.drain_expired_cache_target_snapshots`만 호출한다.
+- observation run ID는 outer cutover transaction UUID에서 결정적으로 파생하며 retry도 같다.
+- 새 ledger나 `0079`를 만들지 않는다. 기존 session advisory lock, batch transaction,
+  `ON CONFLICT DO NOTHING` observation을 그대로 쓴다.
+- retry 승인 기준은 attempt별 삭제 건수가 아니다. 최종 expired·unreferenced item/header backlog 0,
+  GC 전후 referenced item/header 보존, stored observation과 fresh referenced count 일치다.
+- `cache_target_evidence`는 `null`이고 runtime mutation과 외부 event는 0이다.
+
+### 5.5 `verify`
 
 - schema: `0078_cache_target_gc_observe`
 - 공개 item: **3,265**
@@ -190,6 +205,28 @@ vector가 다르면 실행 전에 실패해야 한다. receipt에는 요청값�
   - invalid index와 orphan FK 0
   - bounded GC와 observation retention 설정이 schema/config 계약과 일치
 - `runtime_mutation_count = 0`, `external_event_count = 0`
+- final all-writer stop 뒤 HTTP 없이 하나의 repeatable-read DB view에서 PinVi stream을 검증한다.
+- 최신 unexpired snapshot의 restore epoch, header/item count, snapshot item·live source head Merkle
+  root와 material watermark를 같은 view에서 다시 계산해 mixed·stale·invalid hash를 거부한다.
+- active reconciliation, delivery 없는 outbox, active claim, non-terminal delivery backlog가 각각 0이다.
+- `gc`의 deterministic observation이 존재하고 fresh referenced count와 같아야 한다.
+
+accepted `verify.cache_target_evidence`는 아래 exact key만 가진다.
+
+| key | exact 계약 |
+| --- | --- |
+| `contract_version` | `ktm-cache-target-final-evidence/v1` |
+| `external_system` | `pinvi` |
+| `stream_state` | `ready` |
+| `consumer_id` | 비어 있지 않은 canonical 문자열 |
+| `restore_epoch`, `control_version` | 양의 정수 |
+| `stream_control_etag`, `high_watermark_cursor` | 비어 있지 않은 canonical 문자열 |
+| `snapshot_count` | 0 이상 정수 |
+| `snapshot_merkle_root` | lowercase SHA-256 hex |
+| `reconciliation_backlog_count` | `0` |
+| `outbox_backlog_count` | `0` |
+| `claim_backlog_count` | `0` |
+| `delivery_backlog_count` | `0` |
 
 ## 6. writer fence 완전성
 
@@ -249,15 +286,16 @@ DB만, image만, Map만, Pin만 되돌리는 부분 rollback은 금지한다. �
 이 문서 commit을 exact 공통 head로 삼아 Map Agent A/B가 병렬 작업할 수 있다.
 
 - **Agent A — helper 구현 소유**: `scripts/h35/h35_cutover.py`와 helper 내부 typed request/receipt,
-  네 operation, migration partial probe, CSV5 멱등성. runtime/orchestration 코드는 수정하지 않는다.
+  다섯 operation, migration partial probe, CSV5 멱등성, 기존 client 기반 GC와 final DB evidence.
+  runtime/orchestration 코드는 수정하지 않는다.
 - **Agent B — 검증 소유**: helper black-box unit/integration test, writer registry 전수성 test,
   `0063→0078` scratch rehearsal harness와 mutation-zero matrix. Agent A 소유 파일을 수정하지 않는다.
 - **Docker-manager worker — orchestration 소유**: one-process lock/journal, backup/restore,
-  generation 7 bootstrap/enable/canary/GC, stale receipt 차단, coupled release provenance.
+  generation 7 bootstrap/enable/canary, final writer stop, stale receipt 차단, coupled release provenance.
 
 Agent A/B는 이 문서의 receipt key·phase 순서·exact gate를 임의로 바꾸지 않는다. 계약 변경은 먼저
-문서 PR에 반영하고 두 작업을 같은 exact head에 rebase한다. 구현 merge 전에는 A/B 각각 독립 리뷰,
-결합 뒤에는 누적 delta exact 2인 적대 리뷰가 필요하다.
+문서 PR에 반영하고 두 작업을 같은 exact head에 rebase한다. 구현·검증·manager 결합이 모두 끝난
+최종 exact HEAD만 적대 리뷰어 1명이 검토하며, 그 전에는 리뷰를 요청하지 않는다.
 
 ## 10. 구현 완료 전 검증 행렬
 
@@ -269,6 +307,9 @@ Agent A/B는 이 문서의 receipt key·phase 순서·exact gate를 임의로 �
 | `0064`/`0068`/`0069` 각 partial checkpoint | 허용 shape만 forward 재개, 나머지 fail-close |
 | `0070`~`0078` 중간 실패 | 해당 revision transaction rollback, 이전 head 보존 |
 | CSV 5개 중 누락/변조/거부 1건 | accepted gate 실패, runtime 시작 0 |
+| GC retry 또는 첫 attempt 중단 | 삭제 건수와 무관하게 final backlog·referenced·observation 상태로 수렴 |
+| stale/mixed snapshot 또는 invalid Merkle | `verify` 거부, evidence 발급 0 |
+| PinVi non-ready 또는 backlog 1건 이상 | `verify` 거부, HTTP/external event 0 |
 | unfinished manager journal에서 다른 operation | 전부 mutation 0으로 거부 |
 | pre-forward restore | DB 3종+state/env/manifest+old images 결합 복원 |
 | post-forward old restore | mutation 0으로 거부 |
@@ -280,7 +321,7 @@ Agent A/B는 이 문서의 receipt key·phase 순서·exact gate를 임의로 �
 - [ ] PR #923 이후 `origin/main`에 rebase되고 Map/Pin exact release가 고정됨
 - [ ] Map Agent A/B 구현과 Docker-manager orchestration이 동일 receipt contract 사용
 - [ ] 최신 writer-fenced dump clone의 network-free `0063→0078` 리허설 green
-- [ ] exact 2인 적대 리뷰 green
+- [ ] 최종 exact HEAD 적대 리뷰 1건 green
 - [ ] 모든 mutation-zero matrix green
 - [ ] push 전 보안 감사와 CI green
 - [ ] 사용자의 명시적 n150 실행 승인

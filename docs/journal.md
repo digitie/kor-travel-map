@@ -17,6 +17,21 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-02 (codex) — H35 GC·final cache-target evidence 구현
+
+- typed receipt chain을 `preflight→migrate→csv5→gc→verify`로 바꾸고 모든 receipt의 exact top-level
+  key에 `cache_target_evidence`를 포함했다. accepted verify 외에는 항상 `null`이다.
+- `gc`는 신규 ledger/migration 없이 기존 bounded client를 호출한다. deterministic observation run ID,
+  기존 advisory lock·batch transaction·멱등 observation을 유지하고 final backlog 0, referenced 보존,
+  stored/fresh referenced 일치만 승인 기준으로 삼았다. lock 연결과 batch 연결을 함께 쓰도록 helper
+  pool을 2개로 제한했다.
+- final verify는 HTTP 없이 하나의 read-only repeatable-read PostgreSQL view에서 PinVi stream과 최신
+  unexpired snapshot을 읽는다. snapshot item과 live source head Merkle를 각각 재계산해 header/count/
+  material watermark와 모두 비교하고 reconciliation/outbox/claim/delivery backlog, GC backlog와
+  deterministic observation이 모두 수렴했을 때만 exact v1 증적을 발급한다.
+- runbook/tasks의 다섯 helper와 최종 exact HEAD 단일 적대 리뷰 규칙을 정렬했다. 테스트와 manager
+  orchestration은 별도 소유자에게 남겼으며 아직 리뷰를 요청하지 않는다.
+
 ## 2026-08-02 (codex) — H35 Agent A helper·image boundary 구현
 
 - `scripts/h35/h35_cutover.py`를 thin entrypoint로 만들고 contract/schema/CSV5 private module 3개로

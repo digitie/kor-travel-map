@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### H35 typed cutover GC·최종 cache-target 증적 (2026-08-02, T-VN-H35/T-VN-41)
+
+- **OPERATIONS**: Map cutover helper 순서를 `preflight→migrate→csv5→gc→verify`로 확장했다. `gc`는 기존
+  bounded snapshot GC와 `0078` observation만 사용하며 deterministic replay는 attempt별 삭제 수가 아닌
+  최종 backlog 0·referenced 보존·fresh observation 수렴으로 승인한다.
+- **CONTRACT**: 모든 receipt에 exact `cache_target_evidence` field가 생긴다. accepted `verify`만 PinVi
+  ready stream, 양의 restore epoch/control version, 최신 unexpired snapshot header/item/live source
+  Merkle·watermark 일치와 reconciliation/outbox/claim/delivery backlog 0을 증명하는
+  `ktm-cache-target-final-evidence/v1` object를 반환하고 다른 phase와 거부 응답은 `null`이다.
+
 ### cache-target generation outbox producer foundation (2026-07-31, T-VN-41)
 
 - **SECURITY (breaking)**: source PUT/DELETE와 refresh create는 exact `cache-target:command`만 허용한다.

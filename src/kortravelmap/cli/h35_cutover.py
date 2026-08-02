@@ -14,6 +14,10 @@ import sys
 from collections.abc import Sequence
 from typing import Never, cast
 
+from kortravelmap.cli._h35_cache_target import (
+    collect_cache_target_final_evidence,
+    run_gc,
+)
 from kortravelmap.cli._h35_contract import (
     CONTRACT_VERSION,
     OPERATIONS,
@@ -56,13 +60,26 @@ async def _run_verify(request: H35Request) -> Receipt:
     csv_request, csv_identity_check, csv_state, csv_public = await collect_csv5_verify_state(
         request
     )
+    (
+        evidence_request,
+        evidence_identity_check,
+        cache_target_evidence,
+        evidence_checks,
+        evidence_counts,
+    ) = await collect_cache_target_final_evidence(request)
     checks = [
         schema_identity_check,
         csv_identity_check,
+        evidence_identity_check,
         check(
             "database_identity_cross_read",
             expected=schema_request.database_identity,
             observed=csv_request.database_identity,
+        ),
+        check(
+            "database_identity_evidence_cross_read",
+            expected=schema_request.database_identity,
+            observed=evidence_request.database_identity,
         ),
         image_revision_check(request),
         check("schema_verify", expected=TARGET_SCHEMA, observed=schema),
@@ -76,6 +93,7 @@ async def _run_verify(request: H35Request) -> Receipt:
             observed=csv_state["accepted"],
         ),
         *structural_checks,
+        *evidence_checks,
     ]
     accepted = all(value.get("passed") is True for value in checks)
     return receipt(
@@ -91,8 +109,10 @@ async def _run_verify(request: H35Request) -> Receipt:
             "rejected": 0,
             "rows": csv_state["rows"],
             **structural_counts,
+            **evidence_counts,
         },
         checks=checks,
+        cache_target_evidence=(cache_target_evidence if accepted else None),
     )
 
 
@@ -103,6 +123,8 @@ async def _execute(request: H35Request) -> Receipt:
         return await run_migrate(request)
     if request.operation == "csv5":
         return await run_csv5(request)
+    if request.operation == "gc":
+        return await run_gc(request)
     return await _run_verify(request)
 
 

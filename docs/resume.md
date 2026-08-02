@@ -10,6 +10,25 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — H35 GC·PinVi 최종 DB 증적 hardening
+
+Map helper 체인을 `preflight→migrate→csv5→gc→verify`로 완성했다. `gc`는 outer cutover transaction
+UUID에서 결정적으로 만든 observation run ID로 기존
+`AsyncKorTravelMapClient.drain_expired_cache_target_snapshots`만 호출한다. session advisory lock,
+batch transaction, `0078` observation의 `ON CONFLICT` 멱등성을 그대로 사용하며 attempt 삭제 건수가
+아니라 최종 expired·unreferenced backlog 0, referenced 보존, 저장 observation과 fresh count 일치로
+재실행을 승인한다.
+
+모든 receipt에 `cache_target_evidence` exact key를 추가했다. 앞 네 phase와 rejected verify는 `null`이고,
+accepted verify만 read-only repeatable-read view에서 PinVi ready stream, 양의 epoch/version, unexpired 최신
+snapshot header/item/live source Merkle와 material watermark 일치, 네 backlog 0, deterministic GC
+observation 일치를 확인한 `ktm-cache-target-final-evidence/v1` object를 발급한다. mixed/stale snapshot,
+invalid hash, non-ready/blocked stream과 backlog는 fail-close한다.
+
+**다음 한 작업**: Agent B가 새 5단계 receipt·GC replay·증적 반례 black-box/integration matrix를
+소유하고 Docker-manager가 receipt 전체 exact validator와 journal을 결합한다. 모두 합친 최종 exact
+HEAD에만 적대 리뷰어 1명을 요청하며, 그 전에는 n150을 실행하지 않는다.
+
 ## 2026-08-02 (codex) — H35 Map typed helper Agent A 구현
 
 candidate API image에 credential/path-free `preflight`·`migrate`·`csv5`·`verify` helper와 canonical

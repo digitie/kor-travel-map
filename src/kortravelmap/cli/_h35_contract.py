@@ -20,28 +20,32 @@ DATABASE_IDENTITY_GOLDEN_VECTOR: Final = {
     "digest": "9bca9b82ad2304759581ebf16e724461fcfd7c657e2b41ce5ae3ae54847dee5a",
 }
 
-Operation = Literal["preflight", "migrate", "csv5", "verify"]
+Operation = Literal["preflight", "migrate", "csv5", "gc", "verify"]
 Status = Literal["accepted", "rejected", "failed"]
 JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 Receipt = dict[str, JsonValue]
+CacheTargetEvidence = dict[str, JsonValue]
 
-OPERATIONS: Final[tuple[Operation, ...]] = ("preflight", "migrate", "csv5", "verify")
+OPERATIONS: Final[tuple[Operation, ...]] = ("preflight", "migrate", "csv5", "gc", "verify")
 _PREVIOUS_OPERATION: Final[dict[Operation, Operation | None]] = {
     "preflight": None,
     "migrate": "preflight",
     "csv5": "migrate",
-    "verify": "csv5",
+    "gc": "csv5",
+    "verify": "gc",
 }
 _EXPECTED_PRIOR_SCHEMA: Final[dict[Operation, str | None]] = {
     "preflight": None,
     "migrate": "0063_pipeline_root_id",
     "csv5": "0078_cache_target_gc_observe",
+    "gc": "0078_cache_target_gc_observe",
     "verify": "0078_cache_target_gc_observe",
 }
 _EXPECTED_RECEIPT_BOUNDARY: Final[dict[Operation, str]] = {
     "preflight": "not_crossed",
     "migrate": "schema_0078",
     "csv5": "schema_0078",
+    "gc": "schema_0078",
     "verify": "schema_0078",
 }
 _REQUEST_KEYS: Final = frozenset(
@@ -72,6 +76,25 @@ _RECEIPT_KEYS: Final = frozenset(
         "checks",
         "runtime_mutation_count",
         "external_event_count",
+        "cache_target_evidence",
+    }
+)
+_CACHE_TARGET_EVIDENCE_KEYS: Final = frozenset(
+    {
+        "contract_version",
+        "external_system",
+        "stream_state",
+        "consumer_id",
+        "restore_epoch",
+        "control_version",
+        "stream_control_etag",
+        "high_watermark_cursor",
+        "snapshot_count",
+        "snapshot_merkle_root",
+        "reconciliation_backlog_count",
+        "outbox_backlog_count",
+        "claim_backlog_count",
+        "delivery_backlog_count",
     }
 )
 _SHA256_LENGTH: Final = 64
@@ -217,8 +240,8 @@ def _validate_receipt_payload(raw: Mapping[str, object], *, previous: Operation)
         raise H35ContractError("prior_receipt schema revision이 잘못되었습니다.")
     if previous == "preflight" and schema_before != "0063_pipeline_root_id":
         raise H35ContractError("preflight schema_before가 잘못되었습니다.")
-    if previous == "csv5" and schema_before != "0078_cache_target_gc_observe":
-        raise H35ContractError("csv5 schema_before가 잘못되었습니다.")
+    if previous in {"csv5", "gc"} and schema_before != "0078_cache_target_gc_observe":
+        raise H35ContractError(f"{previous} schema_before가 잘못되었습니다.")
     row_counts = raw.get("row_counts")
     if not isinstance(row_counts, dict) or any(
         not isinstance(name, str)
@@ -246,6 +269,8 @@ def _validate_receipt_payload(raw: Mapping[str, object], *, previous: Operation)
         raise H35ContractError("prior_receipt.runtime_mutation_count가 잘못되었습니다.")
     if type(raw.get("external_event_count")) is not int or raw.get("external_event_count") != 0:
         raise H35ContractError("prior_receipt.external_event_count가 잘못되었습니다.")
+    if raw.get("cache_target_evidence") is not None:
+        raise H35ContractError("prior_receipt.cache_target_evidence가 잘못되었습니다.")
     raw_prior_digest = raw.get("prior_receipt_digest")
     if previous == "preflight":
         if raw_prior_digest is not None:
@@ -360,6 +385,46 @@ def all_pass(checks: Sequence[Mapping[str, JsonValue]]) -> bool:
     return all(value.get("passed") is True for value in checks)
 
 
+def validate_cache_target_evidence(value: object) -> CacheTargetEvidence:
+    """final verify가 manager에 넘길 cache-target evidence exact shape를 검증한다."""
+    raw = _mapping(value, field="cache_target_evidence")
+    if frozenset(raw) != _CACHE_TARGET_EVIDENCE_KEYS:
+        raise H35ContractError("cache_target_evidence key 집합이 contract와 다릅니다.")
+    expected_literals = {
+        "contract_version": "ktm-cache-target-final-evidence/v1",
+        "external_system": "pinvi",
+        "stream_state": "ready",
+    }
+    for key, expected in expected_literals.items():
+        if raw.get(key) != expected:
+            raise H35ContractError(f"cache_target_evidence.{key}가 잘못되었습니다.")
+    for key in ("consumer_id", "stream_control_etag", "high_watermark_cursor"):
+        item = raw.get(key)
+        if not isinstance(item, str) or not item or item != item.strip():
+            raise H35ContractError(f"cache_target_evidence.{key}가 잘못되었습니다.")
+    for key in ("restore_epoch", "control_version"):
+        item = raw.get(key)
+        if type(item) is not int or item <= 0:
+            raise H35ContractError(f"cache_target_evidence.{key}가 잘못되었습니다.")
+    snapshot_count = raw.get("snapshot_count")
+    if type(snapshot_count) is not int or snapshot_count < 0:
+        raise H35ContractError("cache_target_evidence.snapshot_count가 잘못되었습니다.")
+    strict_hex(
+        raw.get("snapshot_merkle_root"),
+        length=_SHA256_LENGTH,
+        field="cache_target_evidence.snapshot_merkle_root",
+    )
+    for key in (
+        "reconciliation_backlog_count",
+        "outbox_backlog_count",
+        "claim_backlog_count",
+        "delivery_backlog_count",
+    ):
+        if type(raw.get(key)) is not int or raw.get(key) != 0:
+            raise H35ContractError(f"cache_target_evidence.{key}가 잘못되었습니다.")
+    return cast("CacheTargetEvidence", raw)
+
+
 def receipt(
     request: H35Request,
     *,
@@ -369,7 +434,12 @@ def receipt(
     forward_boundary: str,
     row_counts: Mapping[str, int],
     checks: Sequence[Mapping[str, JsonValue]],
+    cache_target_evidence: CacheTargetEvidence | None = None,
 ) -> Receipt:
+    if request.operation == "verify" and status == "accepted":
+        cache_target_evidence = validate_cache_target_evidence(cache_target_evidence)
+    elif cache_target_evidence is not None:
+        raise H35ContractError("final accepted verify 외 evidence는 null이어야 합니다.")
     return {
         "contract_version": CONTRACT_VERSION,
         "operation": request.operation,
@@ -386,6 +456,7 @@ def receipt(
         "checks": [dict(value) for value in checks],
         "runtime_mutation_count": 0,
         "external_event_count": 0,
+        "cache_target_evidence": cache_target_evidence,
     }
 
 
@@ -395,6 +466,7 @@ __all__ = [
     "DATABASE_IDENTITY_PREFIX",
     "DATABASE_IDENTITY_ROLE",
     "OPERATIONS",
+    "CacheTargetEvidence",
     "H35ContractError",
     "H35IdentityError",
     "H35Request",
@@ -410,4 +482,5 @@ __all__ = [
     "receipt",
     "receipt_digest",
     "strict_hex",
+    "validate_cache_target_evidence",
 ]
