@@ -219,8 +219,12 @@ source PUT/DELETE와 refresh create는 exact `cache-target:command` principal만
 `(consumer_id, sorted external_systems)` binding은 command=`{command}`,
 consumer=`{read,claim,ack,nack,snapshot}`, restore=`{restore-fence}`,
 recovery=`{recovery,recovery-replay}` 네 역할을 각각 정확히 하나 가져야 한다. complete하고 서로 겹치지
-않는 binding 여러 개는 허용하지만 external system의 binding 소유권, token digest, `principal_id`는 전역
-unique다. 각 17개 operation은 OpenAPI `x-required-service-scope`로 요구 scope를 노출한다. command
+않는 binding 여러 개는 서로 다른 consumer에만 허용한다. 한 `consumer_id`는 정확히 한 canonical system
+tuple을 소유하며 여러 system은 한 sorted union binding으로 표현한다. 이 규칙이 external-system 없는
+ACK의 cross-binding claim 제거를 막는다. external system의 binding 소유권, token digest,
+`principal_id`는 전역 unique이며 public VWorld/API key와 역할 token digest 재사용도 기동을 막는다. 각
+17개 operation은 OpenAPI `x-required-service-scope`로 요구 scope를 노출하고 runtime도 같은 inventory를
+사용한다. request-bound reconciliation은 scope를 metadata 조회 전에 검사한다. command
 writer가 PUT/DELETE 후 source GET으로 CAS를 이어가거나 refresh `Location`을 polling하는 GET에서는
 consumer credential로 명시적으로 전환한다. command principal은 consumer·snapshot·restore·recovery를
 호출하지 못한다. 이 권한 분리부터 Map service OpenAPI SHA를 다시 pin하고 compatible pair를 contract

@@ -1348,7 +1348,8 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   뒤 critical path 밖에서 PinVi 소비를 enable하고 누락·중복·restore epoch 전환을 live로 증명한다.
   - [x] source PUT/DELETE·refresh create를 exact `cache-target:command`로 분리하고 기존 consumer umbrella를
     clean cut 제거한다. command→consumer/snapshot/recovery와 consumer exact scope→command 양방향 `403` 회귀,
-    exact 4-role binding 검증, 17 operation의 machine-readable scope 계약, service OpenAPI 재export를
+    exact 4-role binding과 consumer ID 단일 canonical system owner 검증, public API key digest 분리,
+    17 operation의 machine-readable/runtime scope와 wrong-role zero-call 계약, service OpenAPI 재export를
     완료한다.
   - [ ] PinVi command writer가 CAS source GET과 refresh `Location` polling에서 consumer credential로
     전환하도록 구현하고 새 service OpenAPI SHA를 compatible pair contract generation 7에 재핀한다.

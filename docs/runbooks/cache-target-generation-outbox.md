@@ -14,7 +14,9 @@ ADR-081 producer foundation과 paired PinVi consumer의 준비·복구·검증 �
    restore=`{restore-fence}`, recovery=`{recovery,recovery-replay}`. command token은 source PUT/DELETE와
    refresh create만, consumer token은 read/relay/snapshot만 호출해야 한다. 제거된
    `cache-target:consumer`가 registry에서 수용되거나 command token으로 consumer/restore/recovery
-   route가 허용되면 중단한다.
+   route가 허용되면 중단한다. 같은 `consumer_id`를 서로 다른 system tuple의 binding으로 나누지 말고
+   필요한 system을 한 sorted union으로 합친다. 역할 token 원문은 public VWorld/API key를 포함한 다른
+   configured credential과 공유하지 않는다.
 4. Map target stream은 blocked/dead 0이고 PinVi consumer flag는 off여야 한다.
 5. snapshot serializer/Merkle golden vector가 양쪽 exact commit에서 모두 통과해야 한다.
 

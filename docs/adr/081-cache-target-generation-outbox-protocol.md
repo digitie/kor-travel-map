@@ -317,11 +317,15 @@ reconciliation command를 실행한다. ServiceToken registry의 한 binding은 
 | restore | `{cache-target:restore-fence}` |
 | recovery | `{cache-target:recovery, cache-target:recovery-replay}` |
 
-서로 겹치지 않는 complete binding 여러 개는 허용하지만 external system 하나는 전역에서 한 binding만
+서로 겹치지 않는 complete binding 여러 개는 서로 다른 `consumer_id`에만 허용한다. 한 `consumer_id`는
+전역에서 정확히 한 canonical sorted external-system tuple만 소유하며, 여러 system을 소비하면 분할
+binding이 아니라 한 sorted union binding으로 표현한다. external system 하나도 전역에서 한 binding만
 소유한다. token digest와 `principal_id`도 전역 unique다. 역할 누락·중복, mixed/partial/extra scope,
 비정렬 allowlist, external system 중복 소유는 설정 검증에서 기동을 막는다. 역할 token digest는 설정된
-admin proxy/service/ops/metrics/cursor secret 원문의 SHA-256과도 달라야 한다. local-dev의 미설정 cursor
-process fallback은 비교 대상이 아니다.
+admin proxy/service/ops/metrics/cursor secret과 public VWorld/API key 원문의 SHA-256과도 달라야 한다.
+local-dev의 미설정 cursor process fallback은 비교 대상이 아니다. 이 consumer 단일 소유권 때문에 body에
+external system이 없는 ACK도 다른 binding의 claim을 같은 consumer identity로 제거할 수 없다. NACK처럼
+system이 있는 mutation은 consumer와 system을 모두 검사한다.
 
 기존 `cache-target:consumer`는 read/claim/ack/nack/snapshot의 호환 umbrella로 남기지 않고
 enum·validator·인증 fallback에서 clean cut 제거한다. command principal도 consumer·snapshot·recovery
@@ -331,6 +335,9 @@ credential을 계속 쓰지 않고 consumer credential로 전환한다. admin re
 끊는 복구 mutation이므로 destructive recovery gate가 켜진 경우에만 허용한다.
 
 각 service operation은 OpenAPI의 `x-required-service-scope`로 다음 계약을 기계 판독 가능하게 노출한다.
+runtime도 같은 단일 inventory의 exact scope를 사용하며 모든 다른 역할 token은 metadata/domain service를
+호출하기 전에 `403`이어야 한다. request-bound seal/completion/snapshot은 scope-only 검사를 먼저 하고,
+통과한 경우에만 reconciliation metadata를 읽은 뒤 consumer와 external system 결박을 다시 검사한다.
 
 | method/path | scope | 호출 역할 |
 |---|---|---|
