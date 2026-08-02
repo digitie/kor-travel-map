@@ -38,6 +38,12 @@ _EXPECTED_PRIOR_SCHEMA: Final[dict[Operation, str | None]] = {
     "csv5": "0078_cache_target_gc_observe",
     "verify": "0078_cache_target_gc_observe",
 }
+_EXPECTED_RECEIPT_BOUNDARY: Final[dict[Operation, str]] = {
+    "preflight": "not_crossed",
+    "migrate": "schema_0078",
+    "csv5": "schema_0078",
+    "verify": "schema_0078",
+}
 _REQUEST_KEYS: Final = frozenset(
     {
         "contract_version",
@@ -183,6 +189,71 @@ def _mapping(value: object, *, field: str) -> dict[str, object]:
     return cast("dict[str, object]", value)
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise H35ContractError("JSON object의 key는 중복될 수 없습니다.")
+        value[key] = item
+    return value
+
+
+def _reject_non_json_constant(_value: str) -> object:
+    raise H35ContractError("JSON에는 non-finite number를 사용할 수 없습니다.")
+
+
+def _validate_receipt_payload(raw: Mapping[str, object], *, previous: Operation) -> None:
+    expected_boundary = _EXPECTED_RECEIPT_BOUNDARY[previous]
+    if raw.get("forward_boundary") != expected_boundary:
+        raise H35ContractError("prior_receipt.forward_boundary가 이전 phase와 다릅니다.")
+    schema_before = raw.get("schema_before")
+    schema_after = raw.get("schema_after")
+    if (
+        not isinstance(schema_before, str)
+        or re.fullmatch(r"[0-9]{4}_[a-z0-9_]+", schema_before) is None
+        or not isinstance(schema_after, str)
+        or re.fullmatch(r"[0-9]{4}_[a-z0-9_]+", schema_after) is None
+    ):
+        raise H35ContractError("prior_receipt schema revision이 잘못되었습니다.")
+    if previous == "preflight" and schema_before != "0063_pipeline_root_id":
+        raise H35ContractError("preflight schema_before가 잘못되었습니다.")
+    if previous == "csv5" and schema_before != "0078_cache_target_gc_observe":
+        raise H35ContractError("csv5 schema_before가 잘못되었습니다.")
+    row_counts = raw.get("row_counts")
+    if not isinstance(row_counts, dict) or any(
+        not isinstance(name, str)
+        or not name
+        or name != name.strip()
+        or type(value) is not int
+        or value < 0
+        for name, value in row_counts.items()
+    ):
+        raise H35ContractError("prior_receipt.row_counts가 잘못되었습니다.")
+    checks = raw.get("checks")
+    if not isinstance(checks, list):
+        raise H35ContractError("prior_receipt.checks가 잘못되었습니다.")
+    for value in checks:
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"name", "expected", "observed", "passed"}
+            or not isinstance(value.get("name"), str)
+            or not value["name"]
+            or value["name"] != value["name"].strip()
+            or value.get("passed") is not True
+        ):
+            raise H35ContractError("prior_receipt check가 잘못되었습니다.")
+    if type(raw.get("runtime_mutation_count")) is not int or raw.get("runtime_mutation_count") != 0:
+        raise H35ContractError("prior_receipt.runtime_mutation_count가 잘못되었습니다.")
+    if type(raw.get("external_event_count")) is not int or raw.get("external_event_count") != 0:
+        raise H35ContractError("prior_receipt.external_event_count가 잘못되었습니다.")
+    raw_prior_digest = raw.get("prior_receipt_digest")
+    if previous == "preflight":
+        if raw_prior_digest is not None:
+            raise H35ContractError("preflight prior_receipt_digest는 null이어야 합니다.")
+    else:
+        strict_hex(raw_prior_digest, length=_SHA256_LENGTH, field="prior_receipt_digest")
+
+
 def _validate_prior_receipt(
     value: object,
     *,
@@ -219,13 +290,18 @@ def _validate_prior_receipt(
         if raw.get(key) != expected_value:
             raise H35ContractError(f"prior_receipt.{key}가 이전 phase와 다릅니다.")
     strict_hex(raw.get("request_digest"), length=_SHA256_LENGTH, field="request_digest")
+    _validate_receipt_payload(raw, previous=previous)
     return cast("Receipt", raw)
 
 
 def parse_request(raw_content: str, *, operation: Operation) -> H35Request:
     """stdin 단일 JSON request를 strict하게 검증한다."""
     try:
-        raw_value = json.loads(raw_content)
+        raw_value = json.loads(
+            raw_content,
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_non_json_constant,
+        )
     except json.JSONDecodeError as exc:
         raise H35ContractError("stdin은 단일 JSON object여야 합니다.") from exc
     raw = _mapping(raw_value, field="request")
