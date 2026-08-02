@@ -766,7 +766,10 @@ async def verify_0075_0078(
     indexes = await _names(connection, "SELECT indexname FROM pg_indexes WHERE schemaname='ops'")
     triggers = await _names(
         connection,
-        "SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema='ops'",
+        "SELECT trg.tgname FROM pg_catalog.pg_trigger AS trg "
+        "JOIN pg_catalog.pg_class AS rel ON rel.oid=trg.tgrelid "
+        "JOIN pg_catalog.pg_namespace AS ns ON ns.oid=rel.relnamespace "
+        "WHERE ns.nspname='ops' AND NOT trg.tgisinternal",
     )
     invalid_indexes = int(
         (
@@ -787,10 +790,10 @@ async def verify_0075_0078(
         (
             await connection.scalar(
                 text(
-                    "SELECT count(*) FROM pg_catalog.pg_constraint AS constraint "
-                    "JOIN pg_catalog.pg_class AS class ON class.oid=constraint.conrelid "
+                    "SELECT count(*) FROM pg_catalog.pg_constraint AS con "
+                    "JOIN pg_catalog.pg_class AS class ON class.oid=con.conrelid "
                     "JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid=class.relnamespace "
-                    "WHERE NOT constraint.convalidated AND namespace.nspname='ops' "
+                    "WHERE NOT con.convalidated AND namespace.nspname='ops' "
                     "AND class.relname=ANY(CAST(:relations AS text[]))"
                 ),
                 {"relations": expected_relations},
