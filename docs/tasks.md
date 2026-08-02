@@ -879,7 +879,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   문서 exact head 뒤 다음 두 단위는 같은 파일을 소유하지 않아 병렬 가능하다.
 
-  - [ ] **Agent A — Map helper**: `scripts/h35/h35_cutover.py`, typed request/receipt, `0064`/`0068`/
+  - [x] **Agent A — Map helper**: `scripts/h35/h35_cutover.py`, typed request/receipt, `0064`/`0068`/
     `0069` partial probe, `0070~0078` transactional 확인, CSV5 멱등성. orchestration·runtime 수정 금지.
   - [ ] **Agent B — 검증**: helper black-box/integration test, Map API/Dagster+Pin writer registry
     전수성, mutation-zero matrix, 최신 writer-fenced dump clone의 prod-network-free `0063→0078`

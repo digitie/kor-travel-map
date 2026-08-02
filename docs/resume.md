@@ -10,6 +10,23 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — H35 Map typed helper Agent A 구현
+
+candidate API image에 credential/path-free `preflight`·`migrate`·`csv5`·`verify` helper와 canonical
+CSV5 resource를 포함했다. 계약·schema·CSV5를 서로 독립인 private module로 분리했고, stdin/argv
+실패도 stderr 없이 secret-free JSON 한 줄로만 반환한다. live DB identity는 transaction UUID,
+`map_application`, `current_database()`, PostgreSQL system identifier의 NUL-framed SHA-256을 매 phase
+mutation 전에 재계산한다. `0064`/`0068`/`0069` partial state는 revision별 단일 statement prefix와
+canonical access path만 허용하며, Alembic 출력은 bounded internal sink에 버린다.
+
+CSV5는 image 내 manifest/hash와 5개·486행·accepted 222/rejected 0을 고정하고 exact complete state만
+멱등 skip한다. focused Ruff, strict mypy, import-linter, curation unit 36개와 기존 0064/0068/0069
+migration integration 3개가 통과했다.
+
+**다음 한 작업**: Agent B가 helper black-box/mutation-zero matrix와 scratch `0063→0078` rehearsal을
+독립 구현하고, Docker-manager typed journal과 결합한 누적 delta를 적대 리뷰한다. 그 전에는 n150을
+실행하지 않는다.
+
 ## 2026-08-02 (codex) — H35×T-VN41 cutover 보정 문서 checkpoint
 
 과거 H35 `NO_GO` runbook과 `0072`/`0078` 일부만 보는 helper를 실행 정본에서 제외했다.

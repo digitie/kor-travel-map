@@ -17,6 +17,23 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-02 (codex) — H35 Agent A helper·image boundary 구현
+
+- `scripts/h35/h35_cutover.py`를 thin entrypoint로 만들고 contract/schema/CSV5 private module 3개로
+  분리했다. schema와 CSV5는 서로 import하지 않으며 public surface는 main과 typed contract뿐이다.
+- request/prior receipt를 exact key·digest·phase chain으로 검증한다. argv/request 오류와 내부 실패는
+  raw 입력·예외·DSN을 반사하지 않는 stdout JSON 한 줄이며 stderr는 항상 비운다.
+- live DB identity v1은 canonical transaction UUID, 고정 role `map_application`, DB 이름, PostgreSQL
+  system identifier를 NUL framing한 SHA-256이다. DB에서 매 phase 재계산하며 요청값은 receipt에
+  echo하지 않는다.
+- `0064`/`0068`/`0069` 재진입은 해당 down-revision의 canonical index statement prefix와 단일 invalid
+  residue만 허용한다. wrong-revision·mixed family·unknown invalid index는 mutation 전에 거부한다.
+- canonical CSV5 manifest/asset hash, 5개·486행·accepted 222/rejected 0, 공개 `3,265`와 exact complete
+  state 멱등성을 한 transaction에서 검증한다. API image에는 helper와 `resources/curations`만 좁게
+  copy하고 OCI revision을 helper source revision과 결속했다.
+- 검증: focused Ruff, strict mypy, import-linter, curation unit 36개, 기존 0064/0068/0069 migration
+  integration 3개 통과. 전체 black-box/scratch rehearsal은 독립 Agent B 소유로 남긴다.
+
 ## 2026-08-02 (codex) — H35×T-VN41 보정 설계 재기준화
 
 - 과거 H35 runbook은 두 차례 `NO_GO` 뒤 삭제된 2,841줄 실행 초안이며 현재 `scripts/h35/`도

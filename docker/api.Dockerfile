@@ -27,6 +27,7 @@ LABEL org.opencontainers.image.revision="$KOR_TRAVEL_MAP_GIT_COMMIT"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    KOR_TRAVEL_MAP_IMAGE_REVISION="$KOR_TRAVEL_MAP_GIT_COMMIT" \
     KOR_TRAVEL_MAP_API_PROFILE=production
 
 WORKDIR /app
@@ -41,8 +42,10 @@ COPY --from=builder /install /usr/local
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY docker/api-entrypoint.sh ./docker/api-entrypoint.sh
+COPY --chown=appuser:appuser scripts/h35/h35_cutover.py ./scripts/h35/h35_cutover.py
+COPY --chown=appuser:appuser resources/curations ./resources/curations
 
-RUN chmod +x ./docker/api-entrypoint.sh \
+RUN chmod +x ./docker/api-entrypoint.sh ./scripts/h35/h35_cutover.py \
     && chown -R appuser:appuser /app
 
 USER appuser

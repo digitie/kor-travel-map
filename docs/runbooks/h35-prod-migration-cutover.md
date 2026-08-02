@@ -89,6 +89,10 @@ request는 stdin의 단일 JSON이고 receipt는 stdout의 단일 JSON line이�
 넣지 않는다. `csv5`는 exact source revision의 image에 포함된 canonical 5-file bundle만 읽고
 임의 host path를 받지 않는다.
 
+성공·거부·실패 모두 stderr는 비어 있고 stdout은 JSON 한 줄뿐이어야 한다. argv/request를
+검증하기 전의 실패는 `contract_version`, `status=failed`, 비밀 없는 stable `error_code`만 가진
+좁은 error envelope를 쓴다. raw argv, stdin, 예외 메시지·클래스·traceback은 반사하지 않는다.
+
 공통 receipt key는 다음과 같다.
 
 | key | 계약 |
@@ -111,6 +115,27 @@ request는 stdin의 단일 JSON이고 receipt는 stdout의 단일 JSON line이�
 같은 `transaction_id + request_digest + prior_receipt_digest` 재호출만 멱등 receipt를 재발급할 수
 있다. 하나라도 다르면 DB mutation 전에 거부한다. receipt 순서는
 `preflight(null)` → `migrate(preflight)` → `csv5(migrate)` → `verify(csv5)`다.
+
+### 4.1 live DB identity v1
+
+helper는 각 phase의 DB mutation 전에 `pg_control_system()` 접근 권한과 `alembic_version` 정확히
+1행을 확인하고, request 값을 echo하지 않고 live DB에서 다음 바이트를 다시 만든다. 모든 필드는
+ASCII subset UTF-8이며 prefix, 각 separator와 마지막 terminator는 모두 NUL(`0x00`)이다.
+
+```text
+b"h35-db-identity-v1\0"
++ canonical_transaction_uuid + b"\0"
++ b"map_application\0"
++ current_database() + b"\0"
++ pg_control_system().system_identifier(decimal) + b"\0"
+```
+
+`database`는 `[a-z][a-z0-9_]{0,62}`, system identifier는 ASCII decimal 1~32자리만 허용한다.
+위 바이트의 SHA-256 lowercase hex가 `database_identity`다. golden vector는 transaction
+`00000000-0000-0000-0000-000000000001`, database `kor_travel_map`, system identifier
+`12345678901234567890`일 때
+`9bca9b82ad2304759581ebf16e724461fcfd7c657e2b41ce5ae3ae54847dee5a`다. 두 저장소 구현은 이
+vector가 다르면 실행 전에 실패해야 한다. receipt에는 요청값이 아니라 live 재계산값만 쓴다.
 
 ## 5. exact phase gate
 
