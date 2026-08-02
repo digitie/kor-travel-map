@@ -670,6 +670,27 @@ no-progress 예산을 사용하고 종료 시 expired backlog와 total/unexpired
 production enable 전에 켜고 backlog 경보를 확인한다. 상세 계약은 ADR-081이 정본이며 PinVi paired
 contract checksum 통과 뒤에만 enable한다.
 
+referenced snapshot은 reconciliation 감사 영수증이라 GC가 삭제하지 않는다. 따라서 job execution
+metadata만 직전값으로 추정하지 않고, acquired GC run의 `Dagster run_id`와 referenced item/header count를
+`ops.poi_cache_target_snapshot_gc_observations`에 기록한다. insert identity 순서는 GC 전역 lock 안의 실제
+drain 순서이며 같은 run retry는 최초 관측치와 증가율 기준선 분류를 재사용한다. 최소 간격 미달이나
+적격 baseline 또는 직전 acquired보다 동일/역행한 DB 시각 표본은 다음 증가율 기준선으로 승격하지
+않아 짧은 재실행이 이후 급증을 흡수하지
+않는다. 각 행은 이 적격 기준선과 별도로 직전 acquired count도 복사해, 짧은 표본 뒤 감소를 간격과
+무관하게 탐지한다. overlap skip은 관측치를 만들지 않는다. 관측 이력은 기본 90일 보존한다.
+
+hourly job은 현재 count와 직전 적격 baseline의 관측 시각·count·delta·시간당 증가율을 exact metadata로
+남긴다. 두 관측 간격이 기본 300초 미만이면 증가율은 `not_observed`이며 임의 추정하지 않는다. 기본
+ceiling은 referenced item 16,800,000/header 168, 증가율은 item 100,000/hour/header 1/hour다. 현재
+PinVi의 단일 snapshot 최대 100,000 item과 hourly cadence에서 7일치 보존량을 초기 guardrail로 삼은
+값이며, 다중 external system이나 reconciliation cadence 변경 시 run config에서 함께 조정한다. 어느
+ceiling이든 초과하면 `referenced_alert=true`, exact reason 목록과 Dagster warning을 남기되 GC 성공을
+실패로 바꾸거나 불필요한 retry를 유발하지 않는다. item/header 감소는 최소 간격과 무관하게 별도
+inventory-loss reason으로 경보한다. overlap skip, acquired 후 관측 불능, 비전진 DB 시각은 threshold
+false로 숨기지 않고 별도 observation issue reason과 warning을 남긴다. 첫 acquired run은 절대량
+ceiling만 평가한다. 관측 테이블은 파생 데이터이므로 앱 rollback 때 보존하고 0078 이상으로 forward
+recovery한다. 명시적 schema downgrade만 이를 폐기하며 재-upgrade 뒤 첫 run부터 기준선을 다시 만든다.
+
 `cache_target.reconciled`의 payload는
 `request_id`, `snapshot_id`, `actual_merkle_root`, `expected_merkle_root`, `status`, `version`
 여섯 필드만 허용한다. `source_payload_fingerprint`는 `expected_merkle_root`와 같아야 하며,

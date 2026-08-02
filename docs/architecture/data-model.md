@@ -2570,6 +2570,7 @@ T-VN-41 producer foundation은 projection row와 source 순서를 분리한다. 
 | delivery/claim | event/claim identity | lease, attempt, retry, contiguous ACK, dead/replay와 epoch supersession 상태 |
 | fixed snapshot | `snapshot_id`, `(snapshot_id, row_number)` | 한 MVCC view의 epoch/high-watermark/head set과 Merkle root를 immutable page로 고정 |
 | reconciliation | `request_id`, unique `command_id` | checksum receipt, halt/resume와 terminal 성공/실패/복원 대체 이력 |
+| GC referenced 관측 | `observation_id`, unique `dagster_run_id` | acquired GC run의 referenced count, 복사된 증가율 기준선과 승격 여부 |
 
 `source_generation`은 target natural key별 PinVi desired-state generation이고,
 `target_sequence`는 같은 source generation에서 Map이 만든 결과 순서다. 기존
@@ -2607,6 +2608,23 @@ view에서 읽어 ADR-081 Merkle v1으로 checksum한다. page 중 새 write가 
 바뀌지 않는다. reconciliation은 먼저 claim을 무효화하고 stream을 halt한다. exact checksum,
 동일 epoch, dead-letter 0을 모두 확인해야만 enable하며 mismatch terminal receipt는 다른 checksum으로
 resume할 수 없다. legacy target에는 임의 epoch를 백필하지 않으며 첫 권위 snapshot이 head를 채택한다.
+
+`ops.poi_cache_target_snapshot_gc_observations`는 감사 snapshot 자체가 아니라 그 개수를 다시 셀 수
+있는 파생 운영 관측이다. 새 행은 직전 acquired 행의 run/time/count와 마지막
+`growth_baseline_eligible=true` 행의 run/time/count를 서로 다른 컬럼에 복사한다. 감소 경보는 직전
+acquired count와 비교하고 증가율은 적격 baseline과 비교한다. DB 시각이 적격 baseline과 직전 acquired
+시각보다 모두 전진했고 run에 영속된 최소
+간격을 충족한 행만 다음 기준선으로
+승격한다. 따라서 짧은 재실행·동일/역행 DB 시각 표본은 감사할 수 있지만 후속 증가율 기준선을
+오염시키지 않는다. count 감소는 간격과 무관한 inventory-loss 경보다. run ID unique는 retry가 최초
+관측·두 기준선·최소 간격 분류를 바꾸지 못하게 한다. DB CHECK도 baseline all-or-none과
+`growth_baseline_eligible` 시간식을 재계산해 raw writer 우회를 막는다. 기본 90일 retention은 `observed_at` index로
+정리하고 partial eligible index로 기준선을 찾는다.
+
+이 테이블은 파생·폐기 가능한 데이터이므로 앱 바이너리만 0077 호환 버전으로 rollback할 때 DB는
+0078에 두고 테이블과 관측을 보존한다. 정상 복구는 0078 이상 앱으로 forward 배포하는 것이다.
+명시적 Alembic downgrade만 테이블을 파괴하며, 다시 0078로 upgrade하면 빈 테이블로 재생성되어 첫
+acquired run이 새 기준선이 된다. snapshot/reconciliation 원본은 이 경로에서 삭제되지 않는다.
 
 ### 9.11 `ops.provider_refresh_policies` (ADR-045 T-205c, alembic 0009/0049/0056)
 

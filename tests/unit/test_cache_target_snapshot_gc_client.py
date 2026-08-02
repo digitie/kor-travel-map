@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -13,6 +14,9 @@ from kortravelmap.client import AsyncKorTravelMapClient, CacheTargetSnapshotGcDr
 from kortravelmap.infra.cache_target_reconciliation_repo import (
     CacheTargetSnapshotGcBacklog,
     CacheTargetSnapshotGcBatchResult,
+)
+from kortravelmap.infra.cache_target_snapshot_gc_observation_repo import (
+    CacheTargetSnapshotGcObservation,
 )
 from kortravelmap.infra.db import make_async_engine
 
@@ -130,6 +134,7 @@ async def test_snapshot_gc_drain_uses_global_try_lock_and_transaction_per_batch(
         return next(batches)
 
     observation_calls: list[int] = []
+    trend_calls: list[dict[str, object]] = []
 
     async def _observe(session: _Session) -> CacheTargetSnapshotGcBacklog:
         observation_calls.append(session.number)
@@ -144,12 +149,46 @@ async def test_snapshot_gc_drain_uses_global_try_lock_and_transaction_per_batch(
             referenced_headers=5,
         )
 
+    async def _record_trend(
+        session: _Session,
+        **kwargs: object,
+    ) -> CacheTargetSnapshotGcObservation:
+        trend_calls.append({"session": session.number, **kwargs})
+        return CacheTargetSnapshotGcObservation(
+            observation_id=2,
+            dagster_run_id="dagster-run-2",
+            observed_at=datetime(2026, 8, 2, 1, 0, tzinfo=UTC),
+            referenced_items=17,
+            referenced_headers=4,
+            previous_observation_run_id="dagster-run-1",
+            previous_observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+            previous_referenced_items=10,
+            previous_referenced_headers=4,
+            growth_baseline_run_id="dagster-run-1",
+            growth_baseline_observed_at=datetime(
+                2026, 8, 2, 0, 0, tzinfo=UTC
+            ),
+            growth_baseline_referenced_items=10,
+            growth_baseline_referenced_headers=4,
+            growth_baseline_eligible=True,
+            growth_min_interval_seconds=300,
+        )
+
     monkeypatch.setattr(client_mod, "try_advisory_lock", _try_lock)
     monkeypatch.setattr(client_mod, "repo_prune_cache_target_snapshots_batch", _batch)
     monkeypatch.setattr(client_mod, "repo_observe_cache_target_snapshot_backlog", _observe)
+    monkeypatch.setattr(
+        client_mod,
+        "repo_record_cache_target_snapshot_gc_observation",
+        _record_trend,
+    )
 
     try:
-        result = await client.drain_expired_cache_target_snapshots()
+        result = await client.drain_expired_cache_target_snapshots(
+            observation_run_id="dagster-run-2",
+            observation_retention_days=30,
+            observation_growth_min_interval_seconds=300,
+        )
     finally:
         await engine.dispose()
 
@@ -167,6 +206,20 @@ async def test_snapshot_gc_drain_uses_global_try_lock_and_transaction_per_batch(
         unexpired_unreferenced_headers=4,
         referenced_items=18,
         referenced_headers=5,
+        observation_run_id="dagster-run-2",
+        observed_at=datetime(2026, 8, 2, 1, 0, tzinfo=UTC),
+        observation_referenced_items=17,
+        observation_referenced_headers=4,
+        previous_observation_run_id="dagster-run-1",
+        previous_observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        previous_referenced_items=10,
+        previous_referenced_headers=4,
+        growth_baseline_observation_run_id="dagster-run-1",
+        growth_baseline_observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        growth_baseline_referenced_items=10,
+        growth_baseline_referenced_headers=4,
+        observation_growth_baseline_eligible=True,
+        observation_growth_min_interval_seconds=300,
     )
     assert lock_calls == ["cache-target-snapshot-gc"]
     assert lock_commits_at_batch == [1, 2]
@@ -183,6 +236,16 @@ async def test_snapshot_gc_drain_uses_global_try_lock_and_transaction_per_batch(
         },
     ]
     assert observation_calls == [2]
+    assert trend_calls == [
+        {
+            "session": 2,
+            "dagster_run_id": "dagster-run-2",
+            "referenced_items": 18,
+            "referenced_headers": 5,
+            "retention_days": 30,
+            "growth_min_interval_seconds": 300,
+        }
+    ]
     assert len(factory.sessions) == 3
     assert [session.begin_entries for session in factory.sessions] == [1, 1, 1]
     assert [session.begin_exits for session in factory.sessions] == [1, 1, 1]

@@ -17,6 +17,23 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
+
+- job metadata history 조회는 Dagster storage retention과 retry attempt에 결합되므로 운영 정본으로 쓰지
+  않았다. `0078_cache_target_gc_observe`가 run ID unique/identity PK/count CHECK/시간 index를 가진 bounded
+  observation table을 추가한다.
+- GC 전역 lock을 보유한 마지막 observation transaction에서 exact referenced count와 run ID를 함께
+  기록한다. 같은 run retry는 최초 row, 직전 acquired, 적격 baseline 분류를 재사용한다. 짧은/비전진 표본은 다음
+  baseline으로 승격하지 않고 overlap skip은 기록하지 않는다. 90일 이전 관측은 새 표본 기록 때 정리한다.
+- Dagster config는 절대 item/header ceiling, 시간당 증가 ceiling, 최소 관측 간격, 이력 보존일을 검증한다.
+  exact current/previous/growth-baseline/delta/rate/threshold/reason metadata와 warning을 남긴다. 감소는 직전 acquired 대비 간격과 무관한
+  inventory-loss, skip/unavailable/nonforward는 별도 observation issue로 구분한다.
+- 관측 table은 파생·폐기 가능하다. app-only rollback은 0078 schema/data를 보존해 forward recovery하고,
+  명시적 0077 downgrade만 table을 버리며 0078 재-upgrade가 빈 기준선부터 재개한다.
+- Dagster/client 단위 17건, PostgreSQL baseline/loss/clock/config-change/advisory/retry/retention/raw CHECK 및 ORM/DB parity 11건,
+  0078 app-preserve·downgrade·forward 1건과 Alembic metadata 2건이 통과했다. targeted Ruff,
+  strict mypy 131개 source file, import-linter 4개 contract도 통과했다.
+
 ## 2026-08-02 (codex) — T-VN-41 NFC-equivalent snapshot poison 차단
 
 - 적대 리뷰에서 `é`와 `e\u0301` 같은 raw text head가 별개로 저장된 뒤 Merkle NFC identity에서 충돌해

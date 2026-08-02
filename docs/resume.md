@@ -10,6 +10,28 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
+
+Dagster run metadata만으로 직전값을 찾는 stateless 추정은 metadata 정리·재실행·op retry에 따라 기준선이
+달라져 채택하지 않았다. migration `0078_cache_target_gc_observe`로 acquired GC run별 referenced
+item/header count를 `ops.poi_cache_target_snapshot_gc_observations`에 영속화했다. GC 전역 lock 안에서
+관측 identity를 배정하고 같은 `Dagster run_id` retry는 최초 row와 분류를 재사용하며 overlap skip은
+표본에서 제외한다. 직전 acquired와 마지막 적격 baseline을 각 row에 별도로 복사하고, 300초 미달·동일/역행 DB 시각 표본은
+다음 baseline으로 승격하지 않는다. config가 달라져도 직전 acquired보다 비전진한 표본은 fail-close하므로
+짧은 재실행이 이후 급증을 흡수하지 않는다. 이력은 기본 90일로 bounded다.
+
+hourly op는 직전 acquired 대비 loss delta와 마지막 적격 baseline 대비 elapsed seconds·시간당 증가율,
+item/header 보존 ceiling을 exact metadata로 남긴다. 기본 ceiling은 16,800,000 item/168 header,
+증가율은 100,000 item/hour와 1
+header/hour이며 300초 미만 간격은 증가율을 추정하지 않는다. 초과는 reason별 boolean, 통합
+`referenced_alert`, Dagster warning으로 드러내되 정상 GC를 retry하지 않는다. count 감소는 간격과
+무관한 inventory-loss 경보이며 overlap/unavailable/nonforward는 threshold와 별도 observation issue다.
+관측은 파생 데이터라 app-only rollback에서 table을 보존하고 forward recovery한다. 명시적 downgrade는
+table을 폐기하며 0078 재-upgrade 뒤 빈 기준선부터 안전하게 재개한다.
+
+**다음 한 작업**: n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 hourly tick을 연속 실행해
+실제 관측 delta/rate와 임계값 warning을 확인하고, GC 유입률 상회·remaining backlog 0를 함께 증명한다.
+
 ## 2026-08-02 (codex) — T-VN-41 canonical Unicode identity 보강
 
 최종 적대 리뷰에서 NFC-equivalent `target_key` 두 개가 raw text 자연키로는 공존하지만 Merkle leaf에서

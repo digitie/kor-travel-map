@@ -1359,6 +1359,9 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
   - [x] 만료·미참조 snapshot의 reader-safe foreground bounded GC를 구현한다.
   - [x] 전역 mutex·system round-robin·batch commit·시간/statement/no-progress 예산을 가진 hourly
     background GC와 exact 종료 backlog/total/unexpired/referenced metric을 구현한다.
+  - [x] acquired GC run별 referenced item/header count를 Map DB에 멱등 영속화하고 직전 적격 baseline
+    대비 시간당 증가율·보존 ceiling, 직전 acquired 대비 간격 무관 inventory loss 및 관측 불능을 Dagster metadata와
+    warning alert로 노출한다.
   - [ ] n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 tick 순서로 검증하고,
     GC 처리량이 유입률을 상회하며 remaining backlog가 0인지 증명한다. referenced snapshot 증가율과
     보존 임계치 alert도 함께 확인한다.

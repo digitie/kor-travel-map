@@ -30,6 +30,11 @@
   공개한다. 경합·수명·barrier/build timeout은 retryable `503`, copy capacity는 동적
   `429 Retry-After`, item 초과는 `413`으로 fail-close한다. 만료·미참조 material은 reader-safe
   foreground GC와 기본 중지 상태의 hourly background drain이 bounded batch로 정리한다.
+  acquired GC run의 referenced item/header count는 Map DB에 90일간 멱등 보존하며, hourly job이 직전
+  적격 baseline 대비 시간당 증가율과 설정 가능한 보존 ceiling 초과를 exact metadata·warning으로
+  알린다. 짧은/비전진 run은 증가율 기준선으로 승격하지 않고 count 감소는 직전 acquired 대비
+  간격과 무관한 inventory-loss,
+  overlap/unavailable/nonforward는 별도 관측 품질 경고로 노출한다.
 - **DATABASE/CORRECTNESS (breaking)**: outbox `relay_order` Identity를 제거했다. DB trigger가 system
   stream을 잠근 뒤 명시적 global sequence에서 번호를 배정하고 application은 stream →
   head/target/link 순서로 미리 잠근다. 따라서 번호는 전역 unique지만 commit-safe prefix는 각

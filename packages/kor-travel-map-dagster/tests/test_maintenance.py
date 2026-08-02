@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from dagster import Failure
 from kortravelmap.client import (
     CacheTargetSnapshotGcDrainResult,
     DedupRefreshResult,
@@ -56,6 +58,20 @@ class _Client:
             unexpired_unreferenced_headers=8,
             referenced_items=5_983,
             referenced_headers=10,
+            observation_run_id=str(kwargs["observation_run_id"]),
+            observed_at=datetime(2026, 8, 2, 1, 0, tzinfo=UTC),
+            observation_referenced_items=5_983,
+            observation_referenced_headers=10,
+            previous_observation_run_id="previous-run",
+            previous_observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+            previous_referenced_items=4_983,
+            previous_referenced_headers=9,
+            growth_baseline_observation_run_id="previous-run",
+            growth_baseline_observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+            growth_baseline_referenced_items=4_983,
+            growth_baseline_referenced_headers=9,
+            observation_growth_baseline_eligible=True,
+            observation_growth_min_interval_seconds=300,
         )
 
     async def purge_expired_notices(self, *, retention: str = "1 year") -> int:
@@ -299,6 +315,12 @@ def test_cache_target_snapshot_gc_job_reports_metadata_and_has_retry_policy(
                         "item_limit": 800,
                         "header_limit": 40,
                         "batch_statement_timeout_ms": 5_000,
+                        "referenced_item_ceiling": 5_000,
+                        "referenced_header_ceiling": 9,
+                        "referenced_item_growth_ceiling_per_hour": 900,
+                        "referenced_header_growth_ceiling_per_hour": 0,
+                        "referenced_growth_min_interval_seconds": 300,
+                        "observation_retention_days": 30,
                     }
                 }
             }
@@ -307,15 +329,17 @@ def test_cache_target_snapshot_gc_job_reports_metadata_and_has_retry_policy(
     )
 
     assert result.success
-    assert client.snapshot_gc_calls == [
-        {
-            "max_batches": 25,
-            "max_seconds": 45,
-            "item_limit": 800,
-            "header_limit": 40,
-            "batch_statement_timeout_ms": 5_000,
-        }
-    ]
+    assert len(client.snapshot_gc_calls) == 1
+    assert client.snapshot_gc_calls[0] == {
+        "max_batches": 25,
+        "max_seconds": 45,
+        "item_limit": 800,
+        "header_limit": 40,
+        "batch_statement_timeout_ms": 5_000,
+        "observation_run_id": result.run_id,
+        "observation_retention_days": 30,
+        "observation_growth_min_interval_seconds": 300,
+    }
     assert result.output_for_node("drain_expired_cache_target_snapshots") == {
         "acquired": True,
         "skipped": False,
@@ -335,6 +359,56 @@ def test_cache_target_snapshot_gc_job_reports_metadata_and_has_retry_policy(
         "capacity_item_ceiling": 20_000,
         "elapsed_seconds": 10.0,
         "deleted_items_per_hour": 900_000.0,
+        "referenced_observation_available": True,
+        "referenced_observation_status": "observed",
+        "referenced_observation_issue": False,
+        "referenced_observation_issue_reasons": [],
+        "referenced_observation_run_id": result.run_id,
+        "referenced_observed_at": "2026-08-02T01:00:00+00:00",
+        "referenced_observation_items": 5_983,
+        "referenced_observation_headers": 10,
+        "previous_referenced_observation_run_id": "previous-run",
+        "previous_referenced_observed_at": "2026-08-02T00:00:00+00:00",
+        "previous_referenced_items": 4_983,
+        "previous_referenced_headers": 9,
+        "growth_baseline_observation_run_id": "previous-run",
+        "growth_baseline_observed_at": "2026-08-02T00:00:00+00:00",
+        "growth_baseline_referenced_items": 4_983,
+        "growth_baseline_referenced_headers": 9,
+        "referenced_observation_growth_baseline_eligible": True,
+        "referenced_observation_elapsed_seconds": 3_600.0,
+        "referenced_items_delta": 1_000,
+        "referenced_headers_delta": 1,
+        "referenced_growth_baseline_elapsed_seconds": 3_600.0,
+        "referenced_items_growth_baseline_delta": 1_000,
+        "referenced_headers_growth_baseline_delta": 1,
+        "referenced_growth_rate_observed": True,
+        "referenced_growth_unobserved_reason": "observed",
+        "referenced_items_growth_per_hour": 1_000.0,
+        "referenced_headers_growth_per_hour": 1.0,
+        "referenced_item_ceiling": 5_000,
+        "referenced_header_ceiling": 9,
+        "referenced_item_growth_ceiling_per_hour": 900,
+        "referenced_header_growth_ceiling_per_hour": 0,
+        "referenced_growth_min_interval_seconds": 300,
+        "referenced_observation_retention_days": 30,
+        "referenced_item_ceiling_alert": True,
+        "referenced_header_ceiling_alert": True,
+        "referenced_retention_ceiling_alert": True,
+        "referenced_item_growth_alert": True,
+        "referenced_header_growth_alert": True,
+        "referenced_growth_alert": True,
+        "referenced_item_inventory_loss_alert": False,
+        "referenced_header_inventory_loss_alert": False,
+        "referenced_inventory_loss_alert": False,
+        "referenced_alert": True,
+        "referenced_alert_reasons": [
+            "referenced_item_ceiling",
+            "referenced_header_ceiling",
+            "referenced_item_growth",
+            "referenced_header_growth",
+        ],
+        "referenced_requires_attention": True,
     }
     retry_by_name = {
         node_def.name: node_def.retry_policy
@@ -383,6 +457,242 @@ def test_cache_target_snapshot_gc_job_marks_skipped_backlog_unobserved(
     assert output["referenced_headers"] == "not_observed"
     assert output["backlog_observed"] is False
     assert output["backlog_alert"] is False
+    assert output["referenced_observation_available"] is False
+    assert output["referenced_observation_status"] == "overlap_skipped"
+    assert output["referenced_observation_issue"] is True
+    assert output["referenced_observation_issue_reasons"] == [
+        "gc_overlap_skipped"
+    ]
+    assert output["referenced_growth_rate_observed"] is False
+    assert output["referenced_observation_run_id"] == "not_observed"
+    assert output["referenced_items_growth_per_hour"] == "not_observed"
+    assert output["referenced_retention_ceiling_alert"] is False
+    assert output["referenced_growth_alert"] is False
+    assert output["referenced_alert"] is False
+    assert output["referenced_alert_reasons"] == []
+    assert output["referenced_requires_attention"] is True
+
+
+def test_cache_target_snapshot_gc_first_observation_checks_only_ceiling() -> None:
+    sample = CacheTargetSnapshotGcDrainResult(
+        acquired=True,
+        skipped=False,
+        batches=1,
+        deleted_items=0,
+        deleted_headers=0,
+        remaining_items=0,
+        remaining_headers=0,
+        referenced_items=101,
+        referenced_headers=2,
+        observation_run_id="first-run",
+        observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        observation_referenced_items=101,
+        observation_referenced_headers=2,
+        observation_growth_baseline_eligible=True,
+        observation_growth_min_interval_seconds=300,
+    )
+
+    metadata = maintenance_mod._cache_target_referenced_alert_metadata(
+        sample,
+        item_ceiling=100,
+        header_ceiling=2,
+        item_growth_ceiling_per_hour=1,
+        header_growth_ceiling_per_hour=1,
+        growth_min_interval_seconds=300,
+        observation_retention_days=90,
+    )
+
+    assert metadata["referenced_item_ceiling_alert"] is True
+    assert metadata["referenced_header_ceiling_alert"] is False
+    assert metadata["referenced_growth_rate_observed"] is False
+    assert metadata["referenced_growth_alert"] is False
+    assert metadata["referenced_alert_reasons"] == ["referenced_item_ceiling"]
+
+
+def test_cache_target_snapshot_gc_does_not_extrapolate_short_interval() -> None:
+    sample = CacheTargetSnapshotGcDrainResult(
+        acquired=True,
+        skipped=False,
+        batches=1,
+        deleted_items=0,
+        deleted_headers=0,
+        remaining_items=0,
+        remaining_headers=0,
+        referenced_items=200,
+        referenced_headers=3,
+        observation_run_id="second-run",
+        observed_at=datetime(2026, 8, 2, 0, 1, tzinfo=UTC),
+        observation_referenced_items=200,
+        observation_referenced_headers=3,
+        growth_baseline_observation_run_id="first-run",
+        growth_baseline_observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        growth_baseline_referenced_items=100,
+        growth_baseline_referenced_headers=2,
+        previous_observation_run_id="first-run",
+        previous_observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        previous_referenced_items=100,
+        previous_referenced_headers=2,
+        observation_growth_baseline_eligible=False,
+        observation_growth_min_interval_seconds=300,
+    )
+
+    metadata = maintenance_mod._cache_target_referenced_alert_metadata(
+        sample,
+        item_ceiling=1_000,
+        header_ceiling=10,
+        item_growth_ceiling_per_hour=1,
+        header_growth_ceiling_per_hour=1,
+        growth_min_interval_seconds=300,
+        observation_retention_days=90,
+    )
+
+    assert metadata["referenced_items_delta"] == 100
+    assert metadata["referenced_observation_elapsed_seconds"] == 60.0
+    assert metadata["referenced_growth_rate_observed"] is False
+    assert metadata["referenced_items_growth_per_hour"] == "not_observed"
+    assert metadata["referenced_growth_alert"] is False
+    assert metadata["referenced_growth_unobserved_reason"] == (
+        "minimum_interval_not_reached"
+    )
+
+
+def test_cache_target_snapshot_gc_alerts_inventory_loss_without_min_interval() -> None:
+    sample = CacheTargetSnapshotGcDrainResult(
+        acquired=True,
+        skipped=False,
+        batches=1,
+        deleted_items=0,
+        deleted_headers=0,
+        remaining_items=0,
+        remaining_headers=0,
+        observation_run_id="loss-run",
+        observed_at=datetime(2026, 8, 2, 0, 1, tzinfo=UTC),
+        observation_referenced_items=90,
+        observation_referenced_headers=1,
+        growth_baseline_observation_run_id="baseline-run",
+        growth_baseline_observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        growth_baseline_referenced_items=100,
+        growth_baseline_referenced_headers=2,
+        previous_observation_run_id="baseline-run",
+        previous_observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        previous_referenced_items=100,
+        previous_referenced_headers=2,
+        observation_growth_baseline_eligible=False,
+        observation_growth_min_interval_seconds=300,
+    )
+
+    metadata = maintenance_mod._cache_target_referenced_alert_metadata(
+        sample,
+        item_ceiling=1_000,
+        header_ceiling=10,
+        item_growth_ceiling_per_hour=1_000,
+        header_growth_ceiling_per_hour=10,
+        growth_min_interval_seconds=300,
+        observation_retention_days=90,
+    )
+
+    assert metadata["referenced_growth_rate_observed"] is False
+    assert metadata["referenced_item_inventory_loss_alert"] is True
+    assert metadata["referenced_header_inventory_loss_alert"] is True
+    assert metadata["referenced_inventory_loss_alert"] is True
+    assert metadata["referenced_alert_reasons"] == [
+        "referenced_item_inventory_loss",
+        "referenced_header_inventory_loss",
+    ]
+
+
+def test_cache_target_snapshot_gc_marks_unavailable_and_nonforward_separately() -> None:
+    unavailable = CacheTargetSnapshotGcDrainResult(
+        acquired=True,
+        skipped=False,
+        batches=1,
+        deleted_items=0,
+        deleted_headers=0,
+        remaining_items=0,
+        remaining_headers=0,
+    )
+    unavailable_metadata = maintenance_mod._cache_target_referenced_alert_metadata(
+        unavailable,
+        item_ceiling=1_000,
+        header_ceiling=10,
+        item_growth_ceiling_per_hour=1_000,
+        header_growth_ceiling_per_hour=10,
+        growth_min_interval_seconds=300,
+        observation_retention_days=90,
+    )
+    assert unavailable_metadata["referenced_observation_status"] == "unavailable"
+    assert unavailable_metadata["referenced_observation_issue_reasons"] == [
+        "referenced_observation_unavailable"
+    ]
+    assert unavailable_metadata["referenced_alert"] is False
+    assert unavailable_metadata["referenced_requires_attention"] is True
+
+    nonforward = CacheTargetSnapshotGcDrainResult(
+        acquired=True,
+        skipped=False,
+        batches=1,
+        deleted_items=0,
+        deleted_headers=0,
+        remaining_items=0,
+        remaining_headers=0,
+        observation_run_id="clock-run",
+        observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        observation_referenced_items=10,
+        observation_referenced_headers=1,
+        growth_baseline_observation_run_id="baseline-run",
+        growth_baseline_observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        growth_baseline_referenced_items=10,
+        growth_baseline_referenced_headers=1,
+        previous_observation_run_id="baseline-run",
+        previous_observed_at=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        previous_referenced_items=10,
+        previous_referenced_headers=1,
+        observation_growth_baseline_eligible=False,
+        observation_growth_min_interval_seconds=300,
+    )
+    nonforward_metadata = maintenance_mod._cache_target_referenced_alert_metadata(
+        nonforward,
+        item_ceiling=1_000,
+        header_ceiling=10,
+        item_growth_ceiling_per_hour=1_000,
+        header_growth_ceiling_per_hour=10,
+        growth_min_interval_seconds=300,
+        observation_retention_days=90,
+    )
+    assert nonforward_metadata["referenced_observation_status"] == (
+        "non_forward_database_clock"
+    )
+    assert nonforward_metadata["referenced_observation_issue_reasons"] == [
+        "non_forward_database_clock"
+    ]
+    assert nonforward_metadata["referenced_growth_unobserved_reason"] == (
+        "non_forward_database_clock"
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "minimum", "maximum"),
+    [
+        (0, 1, None),
+        (10_001, 1, 10_000),
+        (-1, 0, None),
+        (3_651, 1, 3_650),
+    ],
+)
+def test_cache_target_snapshot_gc_rejects_invalid_config(
+    value: int,
+    minimum: int,
+    maximum: int | None,
+) -> None:
+    with pytest.raises(Failure, match="test_value config") as exc_info:
+        maintenance_mod._bounded_int_config(
+            value,
+            name="test_value",
+            default=1,
+            minimum=minimum,
+            maximum=maximum,
+        )
+    assert exc_info.value.allow_retries is False
 
 
 def _refresh_result(

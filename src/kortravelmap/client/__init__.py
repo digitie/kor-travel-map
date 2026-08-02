@@ -84,6 +84,9 @@ from kortravelmap.infra.cache_target_reconciliation_repo import (
 from kortravelmap.infra.cache_target_reconciliation_repo import (
     prune_expired_cache_target_snapshots_batch as repo_prune_cache_target_snapshots_batch,
 )
+from kortravelmap.infra.cache_target_snapshot_gc_observation_repo import (
+    record_cache_target_snapshot_gc_observation as repo_record_cache_target_snapshot_gc_observation,
+)
 from kortravelmap.infra.consistency import (
     DEDUP_PENDING_WARN_THRESHOLD,
     DEDUP_SCORE_REGRESSION_WARN_POINTS,
@@ -491,6 +494,20 @@ class CacheTargetSnapshotGcDrainResult:
     unexpired_unreferenced_headers: int | None = None
     referenced_items: int | None = None
     referenced_headers: int | None = None
+    observation_run_id: str | None = None
+    observed_at: datetime | None = None
+    observation_referenced_items: int | None = None
+    observation_referenced_headers: int | None = None
+    previous_observation_run_id: str | None = None
+    previous_observed_at: datetime | None = None
+    previous_referenced_items: int | None = None
+    previous_referenced_headers: int | None = None
+    growth_baseline_observation_run_id: str | None = None
+    growth_baseline_observed_at: datetime | None = None
+    growth_baseline_referenced_items: int | None = None
+    growth_baseline_referenced_headers: int | None = None
+    observation_growth_baseline_eligible: bool | None = None
+    observation_growth_min_interval_seconds: int | None = None
 
 
 class AsyncKorTravelMapClient:
@@ -557,6 +574,9 @@ class AsyncKorTravelMapClient:
         item_limit: int = 1_000,
         header_limit: int = 100,
         batch_statement_timeout_ms: int = 30_000,
+        observation_run_id: str | None = None,
+        observation_retention_days: int = 90,
+        observation_growth_min_interval_seconds: int = 300,
     ) -> CacheTargetSnapshotGcDrainResult:
         """만료·미참조 cache-target snapshot backlog를 제한 내에서 비운다.
 
@@ -581,6 +601,24 @@ class AsyncKorTravelMapClient:
             raise ValueError(
                 "batch_statement_timeout_ms는 1 이상 300000 이하여야 합니다."
             )
+        if observation_run_id is not None:
+            if (
+                observation_run_id != observation_run_id.strip()
+                or not observation_run_id
+                or len(observation_run_id) > 255
+            ):
+                raise ValueError(
+                    "observation_run_id는 trim된 1~255자 문자열이어야 합니다."
+                )
+            if not 1 <= observation_retention_days <= 3_650:
+                raise ValueError(
+                    "observation_retention_days는 1 이상 3650 이하여야 합니다."
+                )
+            if not 1 <= observation_growth_min_interval_seconds <= 86_400:
+                raise ValueError(
+                    "observation_growth_min_interval_seconds는 1 이상 86400 "
+                    "이하여야 합니다."
+                )
 
         # AsyncConnection context가 physical connection을 끝까지 pin한다. lock 획득
         # transaction은 즉시 commit하되 session-level advisory lock은 같은 backend에
@@ -670,6 +708,20 @@ class AsyncKorTravelMapClient:
                 backlog = await repo_observe_cache_target_snapshot_backlog(
                     observation_session
                 )
+                observation = None
+                if observation_run_id is not None:
+                    observation = (
+                        await repo_record_cache_target_snapshot_gc_observation(
+                            observation_session,
+                            dagster_run_id=observation_run_id,
+                            referenced_items=backlog.referenced_items,
+                            referenced_headers=backlog.referenced_headers,
+                            retention_days=observation_retention_days,
+                            growth_min_interval_seconds=(
+                                observation_growth_min_interval_seconds
+                            ),
+                        )
+                    )
 
             return CacheTargetSnapshotGcDrainResult(
                 acquired=True,
@@ -689,6 +741,66 @@ class AsyncKorTravelMapClient:
                 ),
                 referenced_items=backlog.referenced_items,
                 referenced_headers=backlog.referenced_headers,
+                observation_run_id=(
+                    observation.dagster_run_id if observation is not None else None
+                ),
+                observed_at=(observation.observed_at if observation is not None else None),
+                observation_referenced_items=(
+                    observation.referenced_items if observation is not None else None
+                ),
+                observation_referenced_headers=(
+                    observation.referenced_headers if observation is not None else None
+                ),
+                previous_observation_run_id=(
+                    observation.previous_observation_run_id
+                    if observation is not None
+                    else None
+                ),
+                previous_observed_at=(
+                    observation.previous_observed_at
+                    if observation is not None
+                    else None
+                ),
+                previous_referenced_items=(
+                    observation.previous_referenced_items
+                    if observation is not None
+                    else None
+                ),
+                previous_referenced_headers=(
+                    observation.previous_referenced_headers
+                    if observation is not None
+                    else None
+                ),
+                growth_baseline_observation_run_id=(
+                    observation.growth_baseline_run_id
+                    if observation is not None
+                    else None
+                ),
+                growth_baseline_observed_at=(
+                    observation.growth_baseline_observed_at
+                    if observation is not None
+                    else None
+                ),
+                growth_baseline_referenced_items=(
+                    observation.growth_baseline_referenced_items
+                    if observation is not None
+                    else None
+                ),
+                growth_baseline_referenced_headers=(
+                    observation.growth_baseline_referenced_headers
+                    if observation is not None
+                    else None
+                ),
+                observation_growth_baseline_eligible=(
+                    observation.growth_baseline_eligible
+                    if observation is not None
+                    else None
+                ),
+                observation_growth_min_interval_seconds=(
+                    observation.growth_min_interval_seconds
+                    if observation is not None
+                    else None
+                ),
             )
 
     # ─── write (transaction 소유) ──────────────────────────────────────────

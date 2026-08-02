@@ -172,6 +172,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | cache target source control/head/event | source/natural/event identity | **T-VN-41 producer foundation 목표(ADR-081)** — Map-owned positive restore epoch, durable natural-key generation+tombstone, immutable source replay ledger |
 | cache target result outbox/delivery | event/relay/claim identity | **T-VN-41 producer foundation 목표(ADR-081)** — same-transaction typed outbox, global delivery order, lease/retry/dead/replay와 contiguous ACK |
 | `poi_cache_target_feature_links` | `(target_id, feature_id)` | **구현됨(alembic 0009, ADR-045 T-205c)** — target 주변 feature link, provider/dataset, distance_m, relation, active |
+| `poi_cache_target_snapshot_gc_observations` | `observation_id BIGINT IDENTITY` | **구현됨(alembic 0078, T-VN-41C)** — acquired Dagster run UNIQUE, referenced count, immutable 직전 acquired/growth baseline copy, eligible 승격과 run별 최소 간격; 기본 90일 파생 관측 |
 | `provider_refresh_policies` | `(provider, dataset_key)` | **구현됨(alembic 0009 + 0049, ADR-045 T-205c)** — source_kind, targeted_policy, interval/rate-limit/max_concurrent, 명시적 `stale_after_minutes`, rate_limit_source, enabled |
 | `api_call_log` | `id BIGSERIAL` | provider, endpoint, status, latency_ms, occurred_at; BRIN(occurred_at) |
 | `feature_consistency_reports` | `report_id UUID` | ADR-033 Phase 1; batch_id, started_at/finished_at, severity_max CHECK(OK/WARN/ERROR), cases/summary JSONB |
@@ -179,6 +180,16 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `feature_change_requests` | `request_id UUID` | **구현됨(alembic 0021)** — place/event 사용자 요청 add/update/delete queue. review_mode(require_review/immediate), state(pending/applied/rejected), payload JSONB, reviewer/applied timestamp |
 
 ## 4. 인덱스 카탈로그
+
+`ops.poi_cache_target_snapshot_gc_observations`는 retention scan용
+`idx_cache_target_snapshot_gc_observations_time(observed_at)`와 마지막 적격 기준선 탐색용 partial
+`idx_cache_target_snapshot_gc_observations_growth_baseline(observation_id) WHERE growth_baseline_eligible`
+를 가진다. count는 0 이상, 최소 간격은 1~86,400초이며 직전 acquired와 growth baseline의 각 네
+컬럼은 모두 NULL이거나 모두 채워져야 한다. 첫 관측만 growth baseline 없이 eligible일 수 있고,
+그 밖의 `growth_baseline_eligible`은 DB가 `observed_at > growth baseline`,
+`observed_at > previous acquired` 및 최소 간격 식과 일치하도록 강제한다.
+앱 rollback은 0078 DB를 보존하고 forward
+recovery하며, 명시적 0077 downgrade는 파생 관측 테이블을 버리고 0078 재-upgrade가 빈 표본부터 재개한다.
 
 ### 4.1 `feature.features`
 

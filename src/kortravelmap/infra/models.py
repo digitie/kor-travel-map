@@ -135,6 +135,7 @@ __all__ = [
     "PoiCacheTargetOutboxClaimEventRow",
     "PoiCacheTargetSnapshotRow",
     "PoiCacheTargetSnapshotItemRow",
+    "PoiCacheTargetSnapshotGcObservationRow",
     "ProviderRefreshPolicyRow",
     "DagsterScheduleAuditEventRow",
     "DagsterScheduleActiveClaimRow",
@@ -4862,6 +4863,120 @@ class PoiCacheTargetSnapshotItemRow(Base):
     state: Mapped[str] = mapped_column(Text, nullable=False)
     source_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_payload_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class PoiCacheTargetSnapshotGcObservationRow(Base):
+    """Acquired background GC run별 referenced snapshot 보존 추세."""
+
+    __tablename__ = "poi_cache_target_snapshot_gc_observations"
+    __table_args__ = (
+        CheckConstraint(
+            "(previous_observation_run_id IS NULL "
+            "AND previous_observed_at IS NULL "
+            "AND previous_referenced_items IS NULL "
+            "AND previous_referenced_headers IS NULL) OR "
+            "(previous_observation_run_id IS NOT NULL "
+            "AND previous_observation_run_id = btrim(previous_observation_run_id) "
+            "AND previous_observation_run_id <> '' "
+            "AND length(previous_observation_run_id) <= 255 "
+            "AND previous_observation_run_id <> dagster_run_id "
+            "AND previous_observed_at IS NOT NULL "
+            "AND previous_referenced_items IS NOT NULL "
+            "AND previous_referenced_items >= 0 "
+            "AND previous_referenced_headers IS NOT NULL "
+            "AND previous_referenced_headers >= 0)",
+            name=conv("ck_cache_target_snapshot_gc_observations_previous"),
+        ),
+        CheckConstraint(
+            "dagster_run_id = btrim(dagster_run_id) "
+            "AND dagster_run_id <> '' "
+            "AND length(dagster_run_id) <= 255",
+            name=conv("ck_cache_target_snapshot_gc_observations_run_id"),
+        ),
+        CheckConstraint(
+            "referenced_items >= 0 AND referenced_headers >= 0",
+            name=conv("ck_cache_target_snapshot_gc_observations_counts"),
+        ),
+        CheckConstraint(
+            "growth_min_interval_seconds BETWEEN 1 AND 86400",
+            name=conv("ck_cache_target_snapshot_gc_observations_growth_interval"),
+        ),
+        CheckConstraint(
+            "(growth_baseline_run_id IS NULL "
+            "AND growth_baseline_observed_at IS NULL "
+            "AND growth_baseline_referenced_items IS NULL "
+            "AND growth_baseline_referenced_headers IS NULL) OR "
+            "(growth_baseline_run_id IS NOT NULL "
+            "AND growth_baseline_run_id = btrim(growth_baseline_run_id) "
+            "AND growth_baseline_run_id <> '' "
+            "AND length(growth_baseline_run_id) <= 255 "
+            "AND growth_baseline_run_id <> dagster_run_id "
+            "AND growth_baseline_observed_at IS NOT NULL "
+            "AND growth_baseline_referenced_items IS NOT NULL "
+            "AND growth_baseline_referenced_items >= 0 "
+            "AND growth_baseline_referenced_headers IS NOT NULL "
+            "AND growth_baseline_referenced_headers >= 0)",
+            name=conv("ck_cache_target_snapshot_gc_observations_growth_baseline"),
+        ),
+        CheckConstraint(
+            "(growth_baseline_run_id IS NULL "
+            "AND growth_baseline_eligible = ("
+            "previous_observation_run_id IS NULL "
+            "OR observed_at > previous_observed_at)) OR "
+            "(growth_baseline_run_id IS NOT NULL "
+            "AND growth_baseline_eligible = ("
+            "observed_at > growth_baseline_observed_at "
+            "AND (previous_observation_run_id IS NULL "
+            "OR observed_at > previous_observed_at) "
+            "AND extract(epoch FROM observed_at - growth_baseline_observed_at) "
+            ">= growth_min_interval_seconds))",
+            name=conv("ck_cache_target_snapshot_gc_observations_eligibility"),
+        ),
+        UniqueConstraint(
+            "dagster_run_id",
+            name=conv("uq_cache_target_snapshot_gc_observations_run_id"),
+        ),
+        Index(
+            "idx_cache_target_snapshot_gc_observations_time",
+            "observed_at",
+        ),
+        Index(
+            "idx_cache_target_snapshot_gc_observations_growth_baseline",
+            "observation_id",
+            postgresql_where=text("growth_baseline_eligible"),
+        ),
+        {"schema": "ops"},
+    )
+
+    observation_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
+    dagster_run_id: Mapped[str] = mapped_column(Text, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
+    referenced_items: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    referenced_headers: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    previous_observation_run_id: Mapped[str | None] = mapped_column(Text)
+    previous_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    previous_referenced_items: Mapped[int | None] = mapped_column(BigInteger)
+    previous_referenced_headers: Mapped[int | None] = mapped_column(BigInteger)
+    growth_baseline_run_id: Mapped[str | None] = mapped_column(Text)
+    growth_baseline_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    growth_baseline_referenced_items: Mapped[int | None] = mapped_column(BigInteger)
+    growth_baseline_referenced_headers: Mapped[int | None] = mapped_column(BigInteger)
+    growth_baseline_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    growth_min_interval_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False
+    )
 
 
 class ProviderRefreshPolicyRow(Base):
