@@ -697,7 +697,10 @@ async def _require_reconciliation_metadata_access(
         412: {"description": "stale If-Match"},
         428: {"description": "missing If-Match/If-None-Match"},
     },
-    openapi_extra={"parameters": [_IF_NONE_MATCH_PARAMETER, _IF_MATCH_PARAMETER]},
+    openapi_extra={
+        "x-required-service-scope": "cache-target:command",
+        "parameters": [_IF_NONE_MATCH_PARAMETER, _IF_MATCH_PARAMETER],
+    },
 )
 async def put_service_cache_target(
     external_system: _ExternalSystemPath,
@@ -773,6 +776,7 @@ async def put_service_cache_target(
         200: {"description": "target source read", "headers": _ETAG_RESPONSE_HEADER},
         404: {"description": "target source not found"},
     },
+    openapi_extra={"x-required-service-scope": "cache-target:read"},
 )
 async def get_service_cache_target(
     external_system: _ExternalSystemPath,
@@ -821,7 +825,10 @@ async def get_service_cache_target(
         412: {"description": "stale If-Match"},
         428: {"description": "missing If-Match"},
     },
-    openapi_extra={"parameters": [_IF_MATCH_PARAMETER]},
+    openapi_extra={
+        "x-required-service-scope": "cache-target:command",
+        "parameters": [_IF_MATCH_PARAMETER],
+    },
 )
 async def delete_service_cache_target(
     external_system: _ExternalSystemPath,
@@ -880,6 +887,7 @@ async def delete_service_cache_target(
     "/cache-target-streams/{external_system}",
     response_model=CacheTargetStreamControlResponse,
     responses={200: {"headers": _ETAG_RESPONSE_HEADER}, 404: {"description": "stream 없음"}},
+    openapi_extra={"x-required-service-scope": "cache-target:read"},
 )
 async def get_service_cache_target_stream(
     external_system: _ExternalSystemPath,
@@ -921,7 +929,10 @@ async def get_service_cache_target_stream(
         412: {"description": "stale stream ETag"},
         428: {"description": "missing If-Match"},
     },
-    openapi_extra={"parameters": [_IF_MATCH_PARAMETER]},
+    openapi_extra={
+        "x-required-service-scope": "cache-target:restore-fence",
+        "parameters": [_IF_MATCH_PARAMETER],
+    },
 )
 async def create_service_restore_fence(
     external_system: _ExternalSystemPath,
@@ -1001,6 +1012,7 @@ async def create_service_restore_fence(
             "headers": _ASYNC_OPERATION_HEADERS,
         }
     },
+    openapi_extra={"x-required-service-scope": "cache-target:command"},
 )
 async def create_service_refresh_request(
     body: CacheTargetRefreshRequest,
@@ -1049,6 +1061,7 @@ async def create_service_refresh_request(
     "/refresh-requests/{request_id}",
     response_model=CacheTargetRefreshRequestResponse,
     responses={404: {"description": "refresh request 없음"}},
+    openapi_extra={"x-required-service-scope": "cache-target:read"},
 )
 async def get_service_refresh_request(
     request_id: Annotated[UUID, Path()],
@@ -1092,6 +1105,7 @@ async def get_service_refresh_request(
 @service_router.post(
     "/cache-target-event-claims",
     response_model=CacheTargetClaimResponse,
+    openapi_extra={"x-required-service-scope": "cache-target:claim"},
 )
 async def claim_service_cache_target_events(
     body: CacheTargetClaimRequest,
@@ -1143,6 +1157,7 @@ async def claim_service_cache_target_events(
 @service_router.post(
     "/cache-target-event-acks",
     response_model=CacheTargetAckResponse,
+    openapi_extra={"x-required-service-scope": "cache-target:ack"},
 )
 async def ack_service_cache_target_events(
     body: CacheTargetAckRequest,
@@ -1196,6 +1211,7 @@ async def ack_service_cache_target_events(
     "/cache-target-event-nacks",
     response_model=CacheTargetDeliveryResponse,
     responses={409: {"headers": {"Retry-After": _ASYNC_OPERATION_HEADERS["Retry-After"]}}},
+    openapi_extra={"x-required-service-scope": "cache-target:nack"},
 )
 async def nack_service_cache_target_event(
     body: CacheTargetNackRequest,
@@ -1257,6 +1273,7 @@ async def nack_service_cache_target_event(
     "/cache-target-event-dead-letters/{event_id}",
     response_model=CacheTargetDeadLetterDetailResponse,
     responses={200: {"headers": _ETAG_RESPONSE_HEADER}, 404: {"description": "dead letter 없음"}},
+    openapi_extra={"x-required-service-scope": "cache-target:recovery-replay"},
 )
 async def get_service_cache_target_dead_letter(
     event_id: Annotated[UUID, Path()],
@@ -1303,7 +1320,10 @@ async def get_service_cache_target_dead_letter(
         412: {"description": "stale delivery ETag"},
         428: {"description": "missing If-Match"},
     },
-    openapi_extra={"parameters": [_IF_MATCH_PARAMETER]},
+    openapi_extra={
+        "x-required-service-scope": "cache-target:recovery-replay",
+        "parameters": [_IF_MATCH_PARAMETER],
+    },
 )
 async def replay_service_cache_target_dead_letter(
     event_id: Annotated[UUID, Path()],
@@ -1404,7 +1424,10 @@ async def replay_service_cache_target_dead_letter(
         412: {"description": "stale stream ETag or unexpected stream state"},
         428: {"description": "missing If-Match/If-None-Match"},
     },
-    openapi_extra={"parameters": [_IF_NONE_MATCH_PARAMETER, _OPTIONAL_IF_MATCH_PARAMETER]},
+    openapi_extra={
+        "x-required-service-scope": "cache-target:recovery",
+        "parameters": [_IF_NONE_MATCH_PARAMETER, _OPTIONAL_IF_MATCH_PARAMETER],
+    },
 )
 async def begin_service_cache_target_reconciliation(
     body: CacheTargetReconciliationBeginRequest,
@@ -1494,7 +1517,10 @@ async def begin_service_cache_target_reconciliation(
         412: {"description": "request ETag or checksum precondition failed"},
         428: {"description": "missing If-Match"},
     },
-    openapi_extra={"parameters": [_IF_MATCH_PARAMETER]},
+    openapi_extra={
+        "x-required-service-scope": "cache-target:recovery",
+        "parameters": [_IF_MATCH_PARAMETER],
+    },
 )
 async def seal_service_cache_target_reconciliation(
     request_id: Annotated[UUID, Path()],
@@ -1573,6 +1599,7 @@ async def seal_service_cache_target_reconciliation(
 @service_router.post(
     "/cache-target-reconciliations/{request_id}/completions",
     response_model=CacheTargetOperationResponse,
+    openapi_extra={"x-required-service-scope": "cache-target:snapshot"},
 )
 async def complete_service_cache_target_reconciliation(
     request_id: Annotated[UUID, Path()],
@@ -1660,6 +1687,7 @@ async def complete_service_cache_target_reconciliation(
             "headers": _SNAPSHOT_RETRY_AFTER_HEADER,
         },
     },
+    openapi_extra={"x-required-service-scope": "cache-target:snapshot"},
 )
 async def get_service_cache_target_snapshot(
     external_system: _ExternalSystemPath,
@@ -1737,6 +1765,7 @@ def _snapshot_response(
 @service_router.get(
     "/cache-target-reconciliations/{request_id}/snapshot",
     response_model=CacheTargetSnapshotResponse,
+    openapi_extra={"x-required-service-scope": "cache-target:snapshot"},
 )
 async def get_service_cache_target_reconciliation_snapshot(
     request_id: Annotated[UUID, Path()],
