@@ -10,6 +10,17 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — H35×T-VN41 cutover 보정 문서 checkpoint
+
+과거 H35 `NO_GO` runbook과 `0072`/`0078` 일부만 보는 helper를 실행 정본에서 제외했다.
+새 runbook은 Docker-manager one-process lock/journal과 Map의 credential/path-free typed helper 경계를
+분리하고, 공개 표면 `3,265→3,043→3,265`, CSV5 accepted `222`/rejected `0`, `0075` preflight,
+`0075→0078` 구조 검증을 exact gate로 고정한다. Map Agent A(helper)와 Agent B(검증)는 이 문서의
+exact head를 공통 계약으로 병렬 구현할 수 있다.
+
+**다음 한 작업**: 문서 PR의 exact head를 적대 리뷰 2명에게 맡겨 설계 승인을 받은 뒤에만 Agent A/B
+구현을 시작한다. PR #923이 포함된 최신 `origin/main`에 rebase했으며, 그 전에는 n150을 실행하지 않는다.
+
 ## 2026-08-02 (codex) — T-VN-41 command principal 최소 권한 구현
 
 source PUT/DELETE와 refresh create에 relay consumer umbrella를 재사용하면 writer token이 read/claim/ack/

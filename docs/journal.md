@@ -17,6 +17,19 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-02 (codex) — H35×T-VN41 보정 설계 재기준화
+
+- 과거 H35 runbook은 두 차례 `NO_GO` 뒤 삭제된 2,841줄 실행 초안이며 현재 `scripts/h35/`도
+  `0072`/`0078` 일부만 검증한다. 둘 다 prod 실행 근거로 쓰지 않도록 새 tracked runbook을
+  **구현·승인 전 실행 금지** 상태로 만들었다.
+- Docker-manager가 H35 전체 one-process global lock·mode `0600` journal·결합 backup/restore를
+  소유하고, Map은 `preflight`/`migrate`/`csv5`/`verify` typed helper만 소유하도록 경계를 고정했다.
+- exact gate는 공개 `3,265→3,043`, CSV5 accepted `222`/rejected `0`, 공개 `3,265`다. `0075`
+  기존 행 identity/NFC/trim/length/CHECK/FK preflight와 `0075~0078` schema/index/outbox/GC verify를
+  추가했다.
+- Map helper 구현과 black-box/리허설 검증을 Agent A/B 독립 소유 파일로 분리했다. 이 문서 exact
+  head의 적대 리뷰 2건 전에는 구현과 n150 실행을 시작하지 않는다.
+
 ## 2026-08-02 (codex) — T-VN-41 command principal clean cut
 
 - source PUT/DELETE와 refresh create는 exact `cache-target:command`만 허용한다.
