@@ -6,10 +6,10 @@ import asyncio
 import io
 import os
 import unicodedata
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import Final, cast
+from typing import Final
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -17,6 +17,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from alembic import command
+from kortravelmap.cli._h35_catalog import (
+    EXPECTED_CATALOG_FINGERPRINTS,
+    catalog_fingerprints,
+    collect_catalog_objects,
+)
 from kortravelmap.cli._h35_contract import (
     H35IdentityError,
     H35Request,
@@ -170,65 +175,6 @@ _INDEX_SIGNATURES: Final[dict[str, tuple[str, ...]]] = {
         "coord_5179 is not null",
     ),
 }
-_EXPECTED_TABLES: Final = frozenset(
-    {
-        "poi_cache_target_streams",
-        "poi_cache_target_restore_fences",
-        "poi_cache_target_source_heads",
-        "poi_cache_target_source_events",
-        "poi_cache_target_refresh_members",
-        "poi_cache_target_reconciliation_requests",
-        "poi_cache_target_outbox_events",
-        "poi_cache_target_outbox_claims",
-        "poi_cache_target_outbox_deliveries",
-        "poi_cache_target_outbox_claim_events",
-        "poi_cache_target_snapshots",
-        "poi_cache_target_snapshot_items",
-        "poi_cache_target_snapshot_gc_observations",
-    }
-)
-_EXPECTED_INDEXES: Final = frozenset(
-    {
-        "uq_poi_cache_targets_source_identity",
-        "idx_cache_target_source_heads_target",
-        "idx_cache_target_source_events_head_time",
-        "idx_cache_target_refresh_members_target",
-        "idx_cache_target_reconciliation_requests_stream_status",
-        "uq_cache_target_reconciliation_requests_active_stream",
-        "idx_cache_target_outbox_stream_order",
-        "uq_cache_target_outbox_claims_active_stream",
-        "idx_cache_target_outbox_claims_lease",
-        "idx_cache_target_outbox_deliveries_due",
-        "idx_cache_target_outbox_deliveries_claim",
-        "idx_cache_target_claim_events_applied_gap",
-        "idx_cache_target_snapshots_stream_time",
-        "idx_cache_target_snapshots_expiry",
-        "idx_cache_target_reconciliation_requests_snapshot_status",
-        "idx_cache_target_outbox_state_material_order",
-        "idx_cache_target_snapshots_stream_expiry",
-        "idx_cache_target_snapshot_gc_observations_time",
-        "idx_cache_target_snapshot_gc_observations_growth_baseline",
-    }
-)
-_EXPECTED_TRIGGERS: Final = frozenset(
-    {
-        "trg_cache_target_outbox_assign_relay_order",
-        "trg_poi_cache_target_restore_fences_append_only",
-        "trg_poi_cache_target_restore_fences_no_truncate",
-        "trg_poi_cache_target_source_events_append_only",
-        "trg_poi_cache_target_source_events_no_truncate",
-        "trg_poi_cache_target_refresh_members_append_only",
-        "trg_poi_cache_target_refresh_members_no_truncate",
-        "trg_poi_cache_target_outbox_events_append_only",
-        "trg_poi_cache_target_outbox_events_no_truncate",
-        "trg_poi_cache_target_snapshots_append_only",
-        "trg_poi_cache_target_snapshots_no_truncate",
-        "trg_poi_cache_target_snapshot_items_append_only",
-        "trg_poi_cache_target_snapshot_items_no_truncate",
-    }
-)
-
-
 def _dsn() -> str:
     value = os.environ.get("KOR_TRAVEL_MAP_PG_DSN")
     if not value:
@@ -749,28 +695,11 @@ async def run_migrate(request: H35Request) -> Receipt:
     )
 
 
-async def _names(connection: AsyncConnection, query: str) -> set[str]:
-    return set(map(str, (await connection.execute(text(query))).scalars()))
-
-
-def _json_strings(values: Iterable[str]) -> JsonValue:
-    return cast("JsonValue", sorted(values))
-
-
 async def verify_0075_0078(
     connection: AsyncConnection,
 ) -> tuple[list[dict[str, JsonValue]], dict[str, int]]:
-    tables = await _names(
-        connection, "SELECT table_name FROM information_schema.tables WHERE table_schema='ops'"
-    )
-    indexes = await _names(connection, "SELECT indexname FROM pg_indexes WHERE schemaname='ops'")
-    triggers = await _names(
-        connection,
-        "SELECT trg.tgname FROM pg_catalog.pg_trigger AS trg "
-        "JOIN pg_catalog.pg_class AS rel ON rel.oid=trg.tgrelid "
-        "JOIN pg_catalog.pg_namespace AS ns ON ns.oid=rel.relnamespace "
-        "WHERE ns.nspname='ops' AND NOT trg.tgisinternal",
-    )
+    catalog = await collect_catalog_objects(connection)
+    fingerprints = catalog_fingerprints(catalog)
     invalid_indexes = int(
         (
             await connection.scalar(
@@ -785,87 +714,23 @@ async def verify_0075_0078(
         )
         or 0
     )
-    expected_relations = sorted(_EXPECTED_TABLES)
-    unvalidated = int(
-        (
-            await connection.scalar(
-                text(
-                    "SELECT count(*) FROM pg_catalog.pg_constraint AS con "
-                    "JOIN pg_catalog.pg_class AS class ON class.oid=con.conrelid "
-                    "JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid=class.relnamespace "
-                    "WHERE NOT con.convalidated AND namespace.nspname='ops' "
-                    "AND class.relname=ANY(CAST(:relations AS text[]))"
-                ),
-                {"relations": expected_relations},
-            )
-        )
-        or 0
-    )
-    receipt_columns = await _names(
-        connection,
-        "SELECT column_name FROM information_schema.columns WHERE table_schema='ops' "
-        "AND table_name='poi_cache_target_source_events' AND column_name='target_lock_version'",
-    )
-    receipt_constraints = await _names(
-        connection,
-        "SELECT conname FROM pg_catalog.pg_constraint "
-        "WHERE conrelid='ops.poi_cache_target_source_events'::regclass "
-        "AND conname IN ('ck_cache_target_source_events_target_lock_version',"
-        "'ck_cache_target_source_events_applied_target_receipt')",
-    )
-    sequence_exists = bool(
-        await connection.scalar(
-            text("SELECT to_regclass('ops.poi_cache_target_outbox_relay_order_seq') IS NOT NULL")
-        )
-    )
-    function_exists = bool(
-        await connection.scalar(
-            text(
-                "SELECT to_regprocedure('ops.assign_cache_target_outbox_relay_order()') IS NOT NULL"
-            )
-        )
-    )
     checks = [
-        check(
-            "0075_0078_tables",
-            expected=_json_strings(expected_relations),
-            observed=_json_strings(_EXPECTED_TABLES & tables),
+        *(
+            check(
+                f"0075_0078_{category}_semantic",
+                expected=expected,
+                observed=fingerprints.get(category, "missing"),
+            )
+            for category, expected in sorted(EXPECTED_CATALOG_FINGERPRINTS.items())
         ),
-        check(
-            "0075_0078_indexes",
-            expected=_json_strings(_EXPECTED_INDEXES),
-            observed=_json_strings(_EXPECTED_INDEXES & indexes),
-        ),
-        check(
-            "0075_history_triggers",
-            expected=_json_strings(_EXPECTED_TRIGGERS),
-            observed=_json_strings(_EXPECTED_TRIGGERS & triggers),
-        ),
-        check(
-            "0076_receipt_column",
-            expected=_json_strings(["target_lock_version"]),
-            observed=_json_strings(receipt_columns),
-        ),
-        check(
-            "0076_receipt_constraints",
-            expected=_json_strings(
-                [
-                    "ck_cache_target_source_events_applied_target_receipt",
-                    "ck_cache_target_source_events_target_lock_version",
-                ]
-            ),
-            observed=_json_strings(receipt_constraints),
-        ),
-        check("0075_outbox_sequence", expected=True, observed=sequence_exists),
-        check("0075_outbox_function", expected=True, observed=function_exists),
         check("invalid_app_indexes", expected=0, observed=invalid_indexes),
-        check("unvalidated_0075_0078_constraints", expected=0, observed=unvalidated),
     ]
     return checks, {
         "invalid_indexes": invalid_indexes,
-        "outbox_tables": len(_EXPECTED_TABLES & tables),
-        "receipt_columns": len(receipt_columns),
-        "unvalidated_constraints": unvalidated,
+        **{
+            f"catalog_{category}": len(objects)
+            for category, objects in sorted(catalog.items())
+        },
     }
 
 
