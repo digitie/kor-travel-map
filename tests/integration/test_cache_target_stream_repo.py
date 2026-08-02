@@ -2867,7 +2867,8 @@ async def test_two_phase_reconciliation_service_routes_use_one_fresh_session_tra
     from kortravelmap.api.settings import ApiSettings
 
     system = "reconciliation-route-transaction-test"
-    token = "route-transaction-token"
+    recovery_token = "route-transaction-recovery-token"
+    consumer_token = "route-transaction-consumer-token"
     begin_key = "9f100000-0000-0000-0000-000000000001"
     seal_key = "9f100000-0000-0000-0000-000000000002"
     completion_key = "9f100000-0000-0000-0000-000000000003"
@@ -2883,12 +2884,34 @@ async def test_two_phase_reconciliation_service_routes_use_one_fresh_session_tra
             api_call_log_enabled=False,
             cache_target_service_principals=[
                 {
-                    "principal_id": "svc:pinvi-route-it",
+                    "principal_id": f"svc:pinvi-route-it-{role}",
                     "consumer_id": _CONSUMER,
-                    "token_sha256": hashlib.sha256(token.encode("utf-8")).hexdigest(),
-                    "scopes": ["cache-target:recovery", "cache-target:snapshot"],
+                    "token_sha256": hashlib.sha256(
+                        {
+                            "command": "route-transaction-command-token",
+                            "consumer": consumer_token,
+                            "restore": "route-transaction-restore-token",
+                            "recovery": recovery_token,
+                        }[role].encode("utf-8")
+                    ).hexdigest(),
+                    "scopes": scopes,
                     "external_systems": [system],
                 }
+                for role, scopes in {
+                    "command": ["cache-target:command"],
+                    "consumer": [
+                        "cache-target:read",
+                        "cache-target:claim",
+                        "cache-target:ack",
+                        "cache-target:nack",
+                        "cache-target:snapshot",
+                    ],
+                    "restore": ["cache-target:restore-fence"],
+                    "recovery": [
+                        "cache-target:recovery",
+                        "cache-target:recovery-replay",
+                    ],
+                }.items()
             ],
         )
     )
@@ -2939,7 +2962,7 @@ async def test_two_phase_reconciliation_service_routes_use_one_fresh_session_tra
         seal = await client.post(
             f"/v1/service/cache-target-reconciliations/{preparing.request_id}/seals",
             headers={
-                SERVICE_TOKEN_HEADER: token,
+                SERVICE_TOKEN_HEADER: recovery_token,
                 "If-Match": f'"{preparing.request_id}:1"',
                 "Idempotency-Key": seal_key,
             },
@@ -2970,7 +2993,7 @@ async def test_two_phase_reconciliation_service_routes_use_one_fresh_session_tra
         completion = await client.post(
             f"/v1/service/cache-target-reconciliations/{preparing.request_id}/completions",
             headers={
-                SERVICE_TOKEN_HEADER: token,
+                SERVICE_TOKEN_HEADER: consumer_token,
                 "Idempotency-Key": completion_key,
             },
             json={

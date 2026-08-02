@@ -23,6 +23,33 @@ _CONSUMER = "snapshot-api-consumer"
 _TOKEN = "snapshot-api-token-000000000000000000000000"
 
 
+def _service_principals() -> list[dict[str, object]]:
+    role_scopes = {
+        "command": ["cache-target:command"],
+        "consumer": [
+            "cache-target:read",
+            "cache-target:claim",
+            "cache-target:ack",
+            "cache-target:nack",
+            "cache-target:snapshot",
+        ],
+        "restore": ["cache-target:restore-fence"],
+        "recovery": ["cache-target:recovery", "cache-target:recovery-replay"],
+    }
+    return [
+        {
+            "principal_id": f"svc:snapshot-api-{role}",
+            "consumer_id": _CONSUMER,
+            "token_sha256": hashlib.sha256(
+                (_TOKEN if role == "consumer" else f"{_TOKEN}-{role}").encode()
+            ).hexdigest(),
+            "scopes": scopes,
+            "external_systems": [_SYSTEM],
+        }
+        for role, scopes in role_scopes.items()
+    ]
+
+
 async def _apply_source(
     session: AsyncSession,
     *,
@@ -90,15 +117,7 @@ async def test_snapshot_first_page_commits_for_next_request_session(
         public_api_key_required=False,
         service_token=None,
         vworld_api_key=None,
-        cache_target_service_principals=[
-            {
-                "principal_id": "svc:snapshot-api",
-                "consumer_id": _CONSUMER,
-                "token_sha256": hashlib.sha256(_TOKEN.encode()).hexdigest(),
-                "scopes": ["cache-target:snapshot"],
-                "external_systems": [_SYSTEM],
-            }
-        ],
+        cache_target_service_principals=_service_principals(),
     )
     app = create_app(settings)
 
