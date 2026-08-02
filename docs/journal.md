@@ -17,6 +17,13 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-02 (codex) — H35 contract CI fixture 후속
+
+- 세 Python CI가 공통으로 실패한 `test_phase_chain_accepts_exact_receipts`를 조사했다. 기존 fixture의
+  receipt에 새 exact key가 없고 verify가 여전히 csv5를 직접 prior로 사용한 계약 drift였다.
+- 생산 validator는 유지하고 fixture에 `cache_target_evidence: null`과 `gc` receipt를 추가해
+  `preflight→migrate→csv5→gc→verify`를 재현했다. contract unit 46건과 대상 Ruff가 통과했다.
+
 ## 2026-08-02 (codex) — H35 GC·final cache-target evidence 구현
 
 - typed receipt chain을 `preflight→migrate→csv5→gc→verify`로 바꾸고 모든 receipt의 exact top-level

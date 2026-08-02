@@ -68,6 +68,7 @@ def _receipt(
         "checks": [],
         "runtime_mutation_count": 0,
         "external_event_count": 0,
+        "cache_target_evidence": None,
     }
 
 
@@ -200,14 +201,24 @@ def test_phase_chain_accepts_exact_receipts() -> None:
         schema_after="0078_cache_target_gc_observe",
         prior_receipt_digest=csv5_request.prior_receipt_digest,
     )
+    gc_request = parse_request(
+        json.dumps(_request("gc", prior_receipt=csv5)),
+        operation="gc",
+    )
+    gc = _receipt(
+        "gc",
+        schema_before="0078_cache_target_gc_observe",
+        schema_after="0078_cache_target_gc_observe",
+        prior_receipt_digest=gc_request.prior_receipt_digest,
+    )
 
     parsed = parse_request(
-        json.dumps(_request("verify", prior_receipt=csv5)),
+        json.dumps(_request("verify", prior_receipt=gc)),
         operation="verify",
     )
 
-    assert parsed.prior_receipt == csv5
-    assert parsed.prior_receipt_digest == receipt_digest(csv5)
+    assert parsed.prior_receipt == gc
+    assert parsed.prior_receipt_digest == receipt_digest(gc)
 
 
 @pytest.mark.parametrize(

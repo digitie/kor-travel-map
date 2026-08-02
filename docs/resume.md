@@ -10,6 +10,16 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — H35 5단계 receipt CI fixture 정렬
+
+PR #924의 Python 3.11/3.12/3.13 CI는 모두 같은 기존 unit fixture가 새 공통 receipt key
+`cache_target_evidence`와 `csv5→gc→verify` chain을 반영하지 않아 1건 실패했다. 생산 validator는
+그 누락을 의도대로 거부했으므로 느슨하게 만들지 않고 fixture에 앞 phase evidence `null`과 `gc`
+receipt를 추가했다. H35 contract unit **46건**과 대상 Ruff가 통과했다.
+
+**다음 한 작업**: Agent B의 GC/final evidence 반례 matrix와 Docker-manager 전체 receipt validator를
+결합한 최종 exact HEAD에서 전체 CI를 통과시킨 뒤 단일 적대 리뷰를 요청한다.
+
 ## 2026-08-02 (codex) — H35 GC·PinVi 최종 DB 증적 hardening
 
 Map helper 체인을 `preflight→migrate→csv5→gc→verify`로 완성했다. `gc`는 outer cutover transaction
