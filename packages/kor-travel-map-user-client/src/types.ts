@@ -204,23 +204,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/features/batch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** feature 5-state trip_card batch 조회 (service read) */
-        post: operations["get_features_batch_v1_features_batch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/features/in-bounds": {
         parameters: {
             query?: never;
@@ -300,23 +283,6 @@ export interface paths {
         get: operations["list_weather_alert_history_v1_features_weather_alerts_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/features/weather/batch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** feature weather bitemporal batch 조회 (service read) */
-        post: operations["get_feature_weather_batch_v1_features_weather_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -926,136 +892,6 @@ export interface components {
             /** Status */
             status: string;
         };
-        /**
-         * FeatureBatchData
-         * @description feature batch 5-state data payload.
-         */
-        FeatureBatchData: {
-            /** Items */
-            items: (components["schemas"]["FeatureBatchFoundItem"] | components["schemas"]["FeatureBatchRetiredItem"] | components["schemas"]["FeatureBatchSuppressedItem"] | components["schemas"]["FeatureBatchMissingItem"] | components["schemas"]["FeatureBatchUnchangedItem"])[];
-        };
-        /**
-         * FeatureBatchFoundItem
-         * @description 공개 feature의 최신 trip_card.
-         */
-        FeatureBatchFoundItem: {
-            /** Feature Id */
-            feature_id: string;
-            /**
-             * Row Revision
-             * Format: int64
-             */
-            row_revision: number;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            state: "found";
-            trip_card: components["schemas"]["FeatureTripCard"];
-        };
-        /**
-         * FeatureBatchMissingItem
-         * @description 저장소에 존재하지 않는 feature.
-         */
-        FeatureBatchMissingItem: {
-            /** Feature Id */
-            feature_id: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            state: "missing";
-        };
-        /**
-         * FeatureBatchRequest
-         * @description 5-state feature batch 조회 요청 (service read).
-         */
-        FeatureBatchRequest: {
-            /** Items */
-            items: components["schemas"]["FeatureBatchRequestItem"][];
-            /**
-             * Projection
-             * @description 서버 정의 고정 projection. raw/detail projection은 선택할 수 없다.
-             * @default trip_card
-             * @constant
-             */
-            projection: "trip_card";
-        };
-        /**
-         * FeatureBatchRequestItem
-         * @description feature batch 요청 1건.
-         */
-        FeatureBatchRequestItem: {
-            /** Feature Id */
-            feature_id: string;
-            /**
-             * Known Row Revision
-             * @description 소비자가 보유한 trip_card의 PostgreSQL bigint row_revision(최대 9223372036854775807). 일치하면 unchanged.
-             */
-            known_row_revision?: number | null;
-        };
-        /**
-         * FeatureBatchResponse
-         * @description ``POST /features/batch`` 응답.
-         */
-        FeatureBatchResponse: {
-            data: components["schemas"]["FeatureBatchData"];
-            meta: components["schemas"]["Meta"];
-        };
-        /**
-         * FeatureBatchRetiredItem
-         * @description lifecycle tombstone이 확인된 feature.
-         */
-        FeatureBatchRetiredItem: {
-            /** Feature Id */
-            feature_id: string;
-            /**
-             * Row Revision
-             * Format: int64
-             */
-            row_revision: number;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            state: "retired";
-        };
-        /**
-         * FeatureBatchSuppressedItem
-         * @description 존재하지만 현재 공개 projection에 없는 feature.
-         */
-        FeatureBatchSuppressedItem: {
-            /** Feature Id */
-            feature_id: string;
-            /**
-             * Row Revision
-             * Format: int64
-             */
-            row_revision: number;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            state: "suppressed";
-        };
-        /**
-         * FeatureBatchUnchangedItem
-         * @description 소비자 revision과 동일한 공개 feature.
-         */
-        FeatureBatchUnchangedItem: {
-            /** Feature Id */
-            feature_id: string;
-            /**
-             * Row Revision
-             * Format: int64
-             */
-            row_revision: number;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            state: "unchanged";
-        };
         /** FeatureCurationGroupResponse */
         FeatureCurationGroupResponse: {
             data: components["schemas"]["FeatureCurationGroupView"];
@@ -1264,32 +1100,6 @@ export interface components {
             status: string;
             /** @description kind=weather일 때 현재/예보 marker 요약. */
             weather_summary?: components["schemas"]["WeatherSummaryOut"] | null;
-        };
-        /**
-         * FeatureTripCard
-         * @description 여행 일정 POI 표시에 필요한 공개-안전 고정 projection.
-         */
-        FeatureTripCard: {
-            /** Address */
-            address: {
-                [key: string]: unknown;
-            };
-            /** Category */
-            category: string;
-            /** Feature Id */
-            feature_id: string;
-            /** Kind */
-            kind: string;
-            /** Lat */
-            lat: number | null;
-            /** Lon */
-            lon: number | null;
-            /** Marker Color */
-            marker_color: string | null;
-            /** Marker Icon */
-            marker_icon: string | null;
-            /** Name */
-            name: string;
         };
         /**
          * FeatureWeatherResponse
@@ -2841,137 +2651,6 @@ export interface components {
             name: string;
         };
         /**
-         * WeatherBatchCardOut
-         * @description 한 target 안에서 같은 source bundle을 공유하는 weather card.
-         */
-        WeatherBatchCardOut: {
-            /** Card Key */
-            card_key: string;
-            /** Current */
-            current: components["schemas"]["WeatherMetricOut"][];
-            /** Is Stale */
-            is_stale: boolean;
-            /** Latest At */
-            latest_at?: string | null;
-            /** Source Styles */
-            source_styles: string[];
-            /** Timeline */
-            timeline: components["schemas"]["WeatherMetricOut"][];
-        };
-        /**
-         * WeatherBatchData
-         * @description 한 DB snapshot에서 계산한 다중 target weather batch data.
-         */
-        WeatherBatchData: {
-            /**
-             * Known At
-             * Format: date-time
-             */
-            known_at: string;
-            /** Targets */
-            targets: components["schemas"]["WeatherBatchTargetData"][];
-        };
-        /**
-         * WeatherBatchFoundItem
-         * @description 공개 parent와 target의 공유 weather card 참조.
-         */
-        WeatherBatchFoundItem: {
-            /** Card Key */
-            card_key: string;
-            /** Feature Id */
-            feature_id: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            state: "found";
-        };
-        /**
-         * WeatherBatchNoDataItem
-         * @description 공개 parent는 있으나 cutoff에 맞는 weather가 없는 item.
-         */
-        WeatherBatchNoDataItem: {
-            /** Feature Id */
-            feature_id: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            state: "no_data";
-        };
-        /**
-         * WeatherBatchRequest
-         * @description 여러 시각을 한 snapshot statement로 읽는 sparse weather 요청.
-         */
-        WeatherBatchRequest: {
-            /**
-             * Known At
-             * Format: date-time
-             * @description 소비자가 허용하는 지식 cutoff(UTC offset 필수).
-             */
-            known_at: string;
-            /**
-             * Targets
-             * @description target_at 오름차순 group. 전체 target×feature pair는 2000개 이하이고, pairs + 5×전체 고유 Feature 수는 2500 이하.
-             */
-            targets: components["schemas"]["WeatherBatchTargetRequest"][];
-        };
-        /**
-         * WeatherBatchResponse
-         * @description ``POST /features/weather/batch`` 응답.
-         */
-        WeatherBatchResponse: {
-            data: components["schemas"]["WeatherBatchData"];
-            meta: components["schemas"]["Meta"];
-        };
-        /**
-         * WeatherBatchRetiredItem
-         * @description 현재 공개 parent가 아니어서 weather를 제공할 수 없는 item.
-         */
-        WeatherBatchRetiredItem: {
-            /** Feature Id */
-            feature_id: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            state: "retired";
-        };
-        /**
-         * WeatherBatchTargetData
-         * @description target 시각 하나의 weather snapshot.
-         */
-        WeatherBatchTargetData: {
-            /** Cards */
-            cards: components["schemas"]["WeatherBatchCardOut"][];
-            /** Items */
-            items: (components["schemas"]["WeatherBatchFoundItem"] | components["schemas"]["WeatherBatchNoDataItem"] | components["schemas"]["WeatherBatchRetiredItem"])[];
-            /**
-             * Target At
-             * Format: date-time
-             */
-            target_at: string;
-            /**
-             * Timeline Until
-             * Format: date-time
-             */
-            timeline_until: string;
-        };
-        /**
-         * WeatherBatchTargetRequest
-         * @description 한 시각에 실제로 필요한 Feature ID 집합.
-         */
-        WeatherBatchTargetRequest: {
-            /** Feature Ids */
-            feature_ids: string[];
-            /**
-             * Target At
-             * Format: date-time
-             * @description 예보·관측이 설명해야 하는 시각(UTC offset 필수).
-             */
-            target_at: string;
-        };
-        /**
          * WeatherCardData
          * @description ``GET /features/{feature_id}/weather`` data payload.
          */
@@ -3542,57 +3221,6 @@ export interface operations {
             };
         };
     };
-    get_features_batch_v1_features_batch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FeatureBatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatureBatchResponse"];
-                };
-            };
-            /** @description 서로 다른 item 1~200개 필요 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description FEATURE_BATCH_UNAVAILABLE — feature 저장소 연결/조회 실패 */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
     list_public_features_in_bounds_v1_features_in_bounds_get: {
         parameters: {
             query: {
@@ -3863,66 +3491,6 @@ export interface operations {
             };
             /** @description Validation Error */
             422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    get_feature_weather_batch_v1_features_weather_batch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WeatherBatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WeatherBatchResponse"];
-                };
-            };
-            /** @description WEATHER_BATCH_RESULT_LIMIT_EXCEEDED — source-series 작업량, metric row 또는 payload byte 예산 초과 */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description target 1~366개, target별 고유 Feature ID 1~200개, Feature ID 256자 이하, 전체 pair 2,000개·planning work 2,500 이하와 aware datetime 필요 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description WEATHER_BATCH_UNAVAILABLE — weather 저장소 연결/조회 실패 */
-            503: {
                 headers: {
                     [name: string]: unknown;
                 };

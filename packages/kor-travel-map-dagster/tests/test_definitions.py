@@ -111,6 +111,9 @@ def test_feature_update_job_and_sensors_registered() -> None:
     assert defs.get_job_def("consistency_dedup_refresh").name == (
         "consistency_dedup_refresh"
     )
+    assert defs.get_job_def("cache_target_snapshot_gc").name == (
+        "cache_target_snapshot_gc"
+    )
     assert defs.get_job_def("full_load_batch_consistency_gate").name == (
         "full_load_batch_consistency_gate"
     )
@@ -458,6 +461,17 @@ def test_consistency_dedup_refresh_schedule_registered() -> None:
     assert schedule.job_name == "consistency_dedup_refresh"
     assert schedule.tags["kor_travel_map.job_scope"] == "maintenance"
     assert schedule.tags["kor_travel_map.job_kind"] == "consistency_dedup_refresh"
+
+
+def test_cache_target_snapshot_gc_hourly_schedule_registered() -> None:
+    schedule = defs.resolve_schedule_def("cache_target_snapshot_gc_hourly_schedule")
+    assert schedule.name == "cache_target_snapshot_gc_hourly_schedule"
+    assert schedule.cron_schedule == "15 * * * *"
+    assert schedule.execution_timezone == KST_TIMEZONE
+    assert schedule.default_status == DefaultScheduleStatus.STOPPED
+    assert schedule.job_name == "cache_target_snapshot_gc"
+    assert schedule.tags["kor_travel_map.job_scope"] == "maintenance"
+    assert schedule.tags["kor_travel_map.job_kind"] == "cache_target_snapshot_gc"
 
 
 def test_curated_features_refresh_schedule_registered() -> None:

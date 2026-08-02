@@ -57,4 +57,5 @@ jobs:
             --profile all \
             --check \
             --output packages/kor-travel-map-api/openapi.json \
-            --user-output packages/kor-travel-map-api/openapi.user.json
+            --user-output packages/kor-travel-map-api/openapi.user.json \
+            --service-output packages/kor-travel-map-api/openapi.service.json

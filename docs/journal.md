@@ -17,6 +17,74 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
+
+- job metadata history 조회는 Dagster storage retention과 retry attempt에 결합되므로 운영 정본으로 쓰지
+  않았다. `0078_cache_target_gc_observe`가 run ID unique/identity PK/count CHECK/시간 index를 가진 bounded
+  observation table을 추가한다.
+- GC 전역 lock을 보유한 마지막 observation transaction에서 exact referenced count와 run ID를 함께
+  기록한다. 같은 run retry는 최초 row, 직전 acquired, 적격 baseline 분류를 재사용한다. 짧은/비전진 표본은 다음
+  baseline으로 승격하지 않고 overlap skip은 기록하지 않는다. 90일 이전 관측은 새 표본 기록 때 정리한다.
+- Dagster config는 절대 item/header ceiling, 시간당 증가 ceiling, 최소 관측 간격, 이력 보존일을 검증한다.
+  exact current/previous/growth-baseline/delta/rate/threshold/reason metadata와 warning을 남긴다. 감소는 직전 acquired 대비 간격과 무관한
+  inventory-loss, skip/unavailable/nonforward는 별도 observation issue로 구분한다.
+- 관측 table은 파생·폐기 가능하다. app-only rollback은 0078 schema/data를 보존해 forward recovery하고,
+  명시적 0077 downgrade만 table을 버리며 0078 재-upgrade가 빈 기준선부터 재개한다.
+- Dagster/client 단위 17건, PostgreSQL baseline/loss/clock/config-change/advisory/retry/retention/raw CHECK 및 ORM/DB parity 11건,
+  0078 app-preserve·downgrade·forward 1건과 Alembic metadata 2건이 통과했다. targeted Ruff,
+  strict mypy 131개 source file, import-linter 4개 contract도 통과했다.
+
+## 2026-08-02 (codex) — T-VN-41 NFC-equivalent snapshot poison 차단
+
+- 적대 리뷰에서 `é`와 `e\u0301` 같은 raw text head가 별개로 저장된 뒤 Merkle NFC identity에서 충돌해
+  generic/reconciliation snapshot을 지속적으로 실패시키는 P1을 확인했다.
+- source/refresh/ops scope API는 trim되지 않았거나 non-NFC인 identity를 `422 VALIDATION_ERROR`로 거부한다.
+  stream/POI/feature-update repository도 같은 규칙을 적용하고 물리 DB는 root target, stream, source head,
+  feature-update scope CHECK로 우회 insert를 막는다. scope `target_key` 상한은 root와 같은 512자로 합쳤다.
+- API 호출 전 거부, raw DB constraint, 512자 refresh, canonical 1행 snapshot 성공을 실제 PostgreSQL
+  회귀로 고정했다.
+
+## 2026-08-01 (codex) — T-VN-41 fixed snapshot 내구성·수명 보강
+
+- n150 isolated live E2E에서 일반 snapshot 첫 page가 200/UUID를 반환하지만 route session이 commit하지
+  않아 header/items가 rollback되고 다음 cursor가 사라지는 P1을 재현했다.
+- service route가 snapshot 생성·상태 검사·응답 DTO 구성을 한 transaction으로 묶고, 독립 request
+  session에서 동일 UUID/root의 다음 page가 보이는 실제 PostGIS HTTP 회귀를 추가했다.
+- generic 생성은 try-lock single-flight와 epoch/source-material watermark로 snapshot을 재사용한다.
+  `cache_target.state_applied`만 재사용을 무효화하며 link/refresh/stream-reconciled event는 전체 복사를
+  만들지 않는다. 재사용 cursor는 safe replay lower-bound라 consumer가 이후 event를 inbox receipt로
+  중복 제거한다.
+- 단일 READ COMMITTED statement가 material writer lock을 기다리며 pre-wait head에 더 높은 global cursor를
+  결합할 수 있는 P0를 stream `FOR SHARE` barrier 별도 statement로 막았다. snapshot header는 global
+  cursor와 material watermark를 분리 저장하고 현재 material watermark와 exact equality로만 재사용한다.
+  이어서 서로 다른 target writer의 미커밋 낮은 relay를 더 높은 global cursor가 추월할 수 있는 P0를
+  발견했다. 모든 outbox writer transaction이 head/target/link 접근 전에 stream `FOR UPDATE`를 획득하고,
+  여러 system이면 정렬 순서로 모두 선취한다. 이 stream → head/target/link 순서가 각 system cursor를
+  해당 stream의 commit-safe contiguous prefix로 만든다. global sequence는 번호 uniqueness만 제공하며
+  서로 다른 stream 사이의 commit 순서를 의미하지 않는다.
+- DB `BEFORE INSERT` trigger가 stream lock 뒤 명시적 global sequence에서 relay를 배정한다.
+  Identity/default의 trigger 전 번호 할당 race를 제거하고 raw/future writer에도 같은 불변식을 강제한다.
+- barrier 전에 5초 lock timeout과 30초 statement timeout을 설정해 hung writer가 advisory single-flight를
+  무기한 점유하지 못하게 한다. timeout은 `503 snapshot_barrier_timeout + Retry-After: 1`로 변환한다.
+- barrier 이후 capture/persist 30초 초과는 `503 snapshot_build_timeout + Retry-After: 1`로 구분한다.
+- fresh/reuse handoff 전 75분, PinVi 수신 시 60분 traversal window를 이중 검증한다. 경합과 수명 부족은
+  각각 `503 snapshot_busy`, `503 snapshot_ttl_too_short`와 `Retry-After: 1`로 fail-fast한다.
+- reuse miss 시 system별 미만료·미참조 generic snapshot을 최대 2개로 제한한다. 세 번째 copy는 oldest
+  expiry 기반 `429 snapshot_capacity_exceeded + Retry-After`로 거부해 유효 cursor 보존과 live storage
+  상한 `2 × stream cardinality`를 함께 만족한다.
+- capture는 최대 100,001행만 읽고 100,000 item을 넘으면 Python tuple/Merkle 생성 전에
+  `413 snapshot_item_limit_exceeded`로 fail-close한다. bounded streaming/material 공유는 #922가 소유한다.
+- 만료·미참조 snapshot만 item/header 제한 배치로 정리한다. reader header share lock과 GC의
+  parent+item `SKIP LOCKED`를 결합해 header 읽기와 item 읽기 사이 CASCADE/직접 DELETE race를 막는다.
+  reconciliation이 참조하는 snapshot은 terminal 상태도 immutable 감사 영수증으로 보존한다.
+- hourly background GC는 전역 try-lock, system round-robin, batch별 commit과 time/statement/no-progress
+  예산을 사용한다. exact remaining/total/unexpired/referenced count는 종료 시 한 번만 관측하고 overlap
+  skip에서는 unknown이다. 기본 2백만 item은 실행당 상한이므로 production enable 전에 n150 soak와
+  schedule enable이 필수다.
+- physical connection lock을 정식 지원하도록 advisory helper 타입을 `AsyncSession | AsyncConnection`으로
+  넓혔다. codegraph는 `try_advisory_lock` caller 18개, `advisory_lock` caller 20개, 영향 59 symbols를
+  확인했고 기존 caller는 모두 `AsyncSession`, 신규 GC caller만 `AsyncConnection`이다.
+
 ## 2026-08-01 — H35 게이트 ① 실증, 그리고 내가 정한 게이트 값이 틀렸음을 발견
 
 - 격리 clone에서 **실제 import 경로**를 태워 게이트를 재현했다(HTTP/인증만 제외):
@@ -61,6 +129,31 @@
 - 앞서 "swap 고갈은 위험 신호"라고 한 것은 **정정한다** — sudo로도 VmSwap을 잡은
   프로세스가 없고 `available` 7.9Gi다. 유휴 스왑이지 메모리 압박이 아니다.
 
+## 2026-08-01 (codex) — T-VN-41 immutable target source receipt
+
+- cache-target DELETE 성공 뒤 응답 유실로 같은 command를 exact retry하면 source ledger replay가
+  historical target identity를 버려 `target_id`/`entity_tag`가 `null`이 되던 결함을 수정했다.
+- n150에 적용된 `0075`를 수정하지 않고 선형 migration `0076_cache_target_receipt`을 추가했다. applied
+  source event마다 당시 `target_lock_version`을 append-only ledger에 고정한다. 기존 active는 immutable
+  outbox ETag, DELETE는 delete transaction timestamp가 일치하는 tombstone만 backfill하며 drift는
+  migration을 중단한다.
+- replay는 mutable target row의 현재 version을 읽지 않는다. tombstone 사후 UPDATE 뒤에도 ledger의
+  historical UUID/version으로 최초 strong ETag를 exact 복원하고, source/outbox material 불일치는
+  fail-close한다.
+- PUT/DELETE response는 non-null UUID `target_id`, `entity_tag`, 양의 `target_sequence` 전용 DTO를 사용해
+  generation 4-tuple을 완성한다. GET read DTO만 deleted head의 nullable identity/sequence를 유지하며
+  OpenAPI와 생성 TypeScript를 같은 계약으로 갱신했다.
+
+## 2026-08-01 (codex) — T-VN-41 migration rebase 선형화
+
+- PR #917의 46개 commit을 최신 main에 rebase했다. 기능 commit은 range-diff에서 동일했고,
+  `test_alembic_upgrade.py`는 main의 동적 head 탐지를 보존했다.
+- main에 새 `0073`/`0074`가 있으므로 cache-target migration을
+  `0075_cache_target_outbox`로 재번호화하고 `0074_curation_item_rekey_cascade`를 parent로 삼았다.
+  병렬 head나 호환용 merge revision은 두지 않았다.
+- 새 PostGIS DB에서 전체 체인 upgrade/downgrade를 실행하고, focused 회귀는 직접 predecessor
+  `0074`에서 `0075`로 올린 뒤 다시 `0074`로 내려 H40/H41 스키마를 보존하는 경계를 고정했다.
+
 ## 2026-08-01 — T-VN-H40 `0073` 구현: source-rule link provenance
 
 - `0072`가 공개 표면 fail-close를 넣으며 기존 link을 전부 `legacy_unattributed`로
@@ -85,6 +178,104 @@
   재진입 가드를 빼면 누적·멱등 3건이 죽는다.
 - `test_alembic_upgrade.py`가 head revision을 리터럴로 박아 마이그레이션 추가마다
   깨졌다. ScriptDirectory에서 계산하도록 바꿨다.
+
+## 2026-08-01 (codex) — T-VN-41 restore fence stream-scoped FK
+
+- exact head `0399d680`에서 codegraph sync/impact를 실행하고 restore fence와 reconciliation ORM,
+  0073 clean migration, 관련 PostGIS 회귀로 변경 범위를 한정했다.
+- reconciliation에 `(external_system, request_id)` unique key를 추가하고 fence의 nullable request
+  참조를 같은 두 열의 composite FK로 교체했다. count/UUID CHECK와 `MATCH SIMPLE`을 조합해
+  `0/null`은 유지하면서 다른 stream UUID의 INSERT와 referenced parent stream UPDATE를 막는다.
+- migration은 reconciliation table 생성 시 unique key를 먼저 만들고 late fence FK를 생성한다.
+  downgrade는 fence FK를 먼저 제거한 뒤 reconciliation table을 내려 순환 의존을 남기지 않는다.
+- clean migration metadata와 ORM constraint name/column order/delete rule을 exact 검증하고,
+  same-stream fence/replay 및 raw cross-stream `23503` 음성 회귀를 고정했다.
+- focused PostGIS/migration **21건**, Ruff, strict mypy **1 file**, import-linter **4 contracts**,
+  OpenAPI all-profile drift check가 통과했다. service OpenAPI SHA-256은 변경 전후
+  `4bca03b2f67a24a9e36b628561a6e598955a208420eb8e9f30e7a0c16a701066`으로 동일하다.
+
+## 2026-08-01 (codex) — T-VN-41 restore fence receipt HTTP 상관 불변식
+
+- codegraph sync 후 `CacheTargetRestoreFenceRecord`의 schema/route 영향을 확인하고 HTTP
+  응답 계약으로 변경을 한정했다.
+- Pydantic after validator는 count `0` iff UUID `null`, count `1` iff UUID non-null을
+  강제하며 두 valid/두 invalid 조합을 schema 회귀로 고정한다.
+- OpenAPI 3.1 object-level `oneOf`도 `0/null`, `1/format: uuid` 두 branch만 허용해 PinVi가
+  필드 상관관계를 기계 검증할 수 있다. recovery operation ID도 UUID schema/runtime 계약으로
+  좁혀 임의 문자열 producer 결과를 fail-close한다.
+- API/OpenAPI 집중 회귀, targeted Ruff, strict mypy, diff-check와 admin type 생성 검증을 통과했다.
+
+## 2026-08-01 (codex) — T-VN-41 restore fence active reconciliation supersession
+
+- exact head `0755070d`와 clean 상태에서 시작해 `CacheTargetRestoreFenceResult`와
+  `CacheTargetReconciliationResult` codegraph impact를 확인했다.
+- 0073 clean schema/ORM에 terminal `superseded` lifecycle, `restore_fenced` 사유, stream별 active
+  partial unique index를 추가했다. fence는 stream lock 아래 claim/delivery/reconciliation을 함께
+  종결하고 seal/completion도 같은 stream→request lock 순서로 맞췄다.
+- append-only fence receipt는 `invalidated_claim_count`, delivery/reconciliation superseded count와
+  nullable request UUID를 저장한다. repository와 service response는 exact replay에서도 최초 receipt와
+  version을 반환한다.
+- PostGIS 회귀는 preparing/running 양쪽의 lifecycle shape, old snapshot/seal/completion 거부, phase
+  불변 replay와 새 epoch begin 성공을 검증한다. API 회귀는 fence 응답의 모든 audit field를 고정한다.
+- 관련 PostGIS/migration **20건**, API/OpenAPI **52건**, targeted Ruff, strict mypy **5 files**,
+  import-linter **4 contracts**가 통과했다.
+
+## 2026-08-01 (codex) — T-VN-41 restore fence superseded terminal 보강
+
+- exact `e315bfc4`, `origin/main` behind 0에서 시작하고 stream/outbox/model codegraph impact를 수정 전에
+  실행했다. 각 직접 영향은 file symbol 1개였으며 migration, reconciliation, API/admin 소비 경계를
+  추가로 추적했다.
+- 0073 clean schema와 ORM delivery 상태에 terminal `superseded`/`superseded_at`을 추가했다. fence는
+  새 epoch보다 낮은 pending/retry/leased/dead 전부를 원자 종결하고 audit count를 receipt에 보존한다.
+- claim은 current epoch의 nonterminal만 잠그고, old dead는 DLQ/replay와 reconciliation dead gate에서
+  제외한다. NACK도 fence와 같은 stream→claim lock 순서를 사용한다. stream/API/admin aggregate는
+  `superseded_count`를 backlog와 별도로 노출한다.
+- PostGIS 회귀는 delivered 보존과 네 non-delivered 상태 supersession, active claim 무효화, old dead
+  조회/replay 불가, exact fence replay의 version 불변, 새 epoch event claim 도달을 한 흐름으로 검증한다.
+
+## 2026-08-01 (codex) — T-VN-41 reconciled request receipt 보강
+
+- 지정 branch `feat/tvn41-cache-target-generation-outbox`의 exact head `6427358d`와 clean 상태,
+  `origin/main` behind 0을 확인해 rebase를 생략했다.
+- 임시 worktree의 codegraph를 1회 초기화하고 reconciliation producer와 API schema impact를 수정 전에
+  실행했다. 두 파일 모두 codegraph 직접 영향은 file symbol 1개였고 실제 소비 경계인 repo/API/
+  OpenAPI 테스트를 함께 고정했다.
+- 성공 `cache_target.reconciled` payload에 `request_id`를 추가하고 strict typed payload union에서 exact
+  `{request_id, snapshot_id, actual_merkle_root, expected_merkle_root, status, version}`를 강제했다.
+  repo integration은 payload 전체와 `source_payload_fingerprint == expected root`를 단언한다.
+- API/OpenAPI 회귀는 request/snapshot UUID format, 추가 필드 금지, 여섯 required field와 claim
+  직렬화를 검증한다. 계약 문서는 request→fixed snapshot→terminal receipt 인과관계를 명시했다.
+- admin one-step reconciliation receipt와 operation 조회에 request-bound `snapshot_id`를 노출했다.
+  isolated live는 receipt UUID가 초기 설정 snapshot과 다르고 최종 `last_snapshot`과 같은지 검증하며,
+  중간 `running` 상태 관측은 요구하지 않는다.
+- focused API **50건**, PostgreSQL integration **1건**, targeted strict mypy **2 files**가 통과했다.
+  functional owner와 생성 artifact는 PinVi contract pin provenance를 위해 별도 commit으로 확정한다.
+
+## 2026-07-31 (codex) — T-VN-41 producer foundation 계약 checkpoint
+
+- exact main `0bdecb1f`에서 clean branch를 만들고 codegraph index 부재를 raw `rg`/read 영향도
+  감사로 대체했다. migration 구현 전 current single head를 다시 확인한다.
+- 단일 적대 계획 리뷰의 최초 CHANGES REQUIRED를 반영해 Map-only 완료 주장을 제거하고 PinVi paired
+  PR/live까지 task checkbox를 open으로 유지했다. revised plan은 승인됐다.
+- ADR-081은 Map-owned positive restore epoch, PinVi source generation, Map target sequence, global
+  delivery order를 분리했다. admin route를 재사용하지 않고 principal-bound ServiceToken resource를 쓴다.
+- target/link/refresh와 outbox same-transaction, external-system single pull stream, contiguous ACK,
+  transient/permanent NACK, dead/replay, active+tombstone fixed snapshot과 exact Merkle byte 계약을 고정했다.
+- migration 0073, source/result outbox와 claim/ACK/NACK/dead/replay repository를 구현했다. target,
+  link snapshot, refresh running/done/failed와 typed event는 같은 transaction에서 commit/rollback한다.
+- restore swap은 env switch 파일 생성 전에 live/restore stream을 비교한다. epoch 회귀와 consumer
+  binding drift를 거부하고, 동일 restore-fence 도메인 함수로 전진한 durable receipt가 있을 때만
+  cutover 계획을 노출한다. host command retry는 같은 receipt를 replay한다.
+- fixed snapshot은 control/high-watermark/head 전체를 한 SQL MVCC view로 캡처하고 immutable
+  header/item을 page한다. page 중 concurrent commit은 기존 snapshot count/root/member를 바꾸지 않는다.
+- reconciliation 시작은 active claim을 무효화하고 stream을 halt한다. checksum mismatch는 terminal
+  failed+disabled를 유지하며 다른 checksum retry로 resume할 수 없다. exact root·동일 epoch·dead 0만
+  ready/enabled로 전이한다. empty/all-tombstone 성공도 fake target 없이 `event_scope=stream` event를
+  같은 transaction에서 기록한다.
+- Service/Admin API placeholder를 실제 source/refresh/claim/DLQ/snapshot/reconciliation/operation
+  repository export에 결합하고 service 전용 OpenAPI를 admin/user 산출물과 분리했다.
+- 다음 checkpoint는 paired PinVi consumer contract pin과 n150 isolated live 검증이다. 그 전에는
+  consumer를 production에서 enable하지 않는다.
 
 ## 2026-07-31 (codex) — PostGIS-only workflow와 stale T-VN-12 이관
 

@@ -97,8 +97,6 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/features/{feature_id}/weather/forecast",
         "/v1/features/weather/forecast",
         "/v1/features/weather/alerts",
-        "/v1/features/weather/batch",
-        "/v1/features/batch",
         "/v1/public/beaches",
         "/v1/public/beaches/map-markers",
         "/v1/public/beaches/{feature_id}",
@@ -131,8 +129,10 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
             ]
 
     schemas = user["components"]["schemas"]
-    assert "FeatureBatchResponse" in schemas
-    assert "WeatherBatchResponse" in schemas
+    assert "FeatureBatchResponse" not in schemas
+    assert "WeatherBatchResponse" not in schemas
+    assert "CacheTargetClaimResponse" not in schemas
+    assert "CacheTargetEventRecord" not in schemas
     assert "BeachPublicView" in schemas
     assert "FestivalPublicView" in schemas
     assert "PublicCuratedFeatureView" in schemas
@@ -380,6 +380,7 @@ def test_route_policy_full_and_user_operations_match_bidirectionally() -> None:
     app = create_app(ApiSettings())
     full = app.openapi()
     user = module.user_openapi_spec(full, app=app)
+    service = module.service_openapi_spec(full, app=app)
 
     route_operations = {
         (row.schema_path, method.lower())
@@ -398,9 +399,178 @@ def test_route_policy_full_and_user_operations_match_bidirectionally() -> None:
         for method in row.methods
         if method.lower() in module.HTTP_METHODS
     }
+    expected_service_operations = {
+        (row.schema_path, method.lower())
+        for row in build_route_policy_matrix(app)
+        if row.include_in_schema
+        and not row.is_websocket
+        and row.policy in module.SERVICE_ROUTE_POLICIES
+        for method in row.methods
+        if method.lower() in module.HTTP_METHODS
+    }
 
     assert full_operations == route_operations
     assert module._openapi_operations(user) == expected_user_operations
+    assert module._openapi_operations(service) == expected_service_operations
+
+
+@pytest.mark.unit
+def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -> None:
+    module = _load_script_module()
+    app = create_app(ApiSettings())
+    service = module.service_openapi_spec(app.openapi(), app=app)
+
+    assert service["info"]["title"] == "kor-travel-map-service"
+    assert set(service["paths"]) == {
+        "/v1/features/batch",
+        "/v1/features/weather/batch",
+        "/v1/service/cache-target-event-acks",
+        "/v1/service/cache-target-event-claims",
+        "/v1/service/cache-target-event-dead-letters/{event_id}",
+        "/v1/service/cache-target-event-dead-letters/{event_id}/replays",
+        "/v1/service/cache-target-event-nacks",
+        "/v1/service/cache-target-reconciliations",
+        "/v1/service/cache-target-reconciliations/{request_id}/completions",
+        "/v1/service/cache-target-reconciliations/{request_id}/seals",
+        "/v1/service/cache-target-reconciliations/{request_id}/snapshot",
+        "/v1/service/cache-target-snapshots/{external_system}",
+        "/v1/service/cache-target-streams/{external_system}",
+        "/v1/service/cache-target-streams/{external_system}/restore-fences",
+        "/v1/service/cache-targets/{external_system}/{target_key}",
+        "/v1/service/refresh-requests",
+        "/v1/service/refresh-requests/{request_id}",
+    }
+    assert set(service["components"]["securitySchemes"]) == {"ServiceToken"}
+    service_only_paths = {
+        "/v1/service/cache-target-reconciliations",
+        "/v1/service/cache-target-reconciliations/{request_id}/completions",
+        "/v1/service/cache-target-reconciliations/{request_id}/seals",
+        "/v1/service/cache-target-reconciliations/{request_id}/snapshot",
+    }
+    for path in service_only_paths:
+        assert path in app.openapi()["paths"]
+        assert path not in module.user_openapi_spec(app.openapi(), app=app)["paths"]
+        assert path in service["paths"]
+    for path, method in module._openapi_operations(service):
+        assert service["paths"][path][method]["security"] == [{"ServiceToken": []}]
+
+    schemas = service["components"]["schemas"]
+    assert "FeatureBatchResponse" in schemas
+    assert "WeatherBatchResponse" in schemas
+    assert "CacheTargetClaimResponse" in schemas
+    snapshot_data = schemas["CacheTargetSnapshotData"]
+    assert {"created_at", "expires_at"} <= set(snapshot_data["required"])
+    assert snapshot_data["properties"]["created_at"]["format"] == "date-time"
+    assert snapshot_data["properties"]["expires_at"]["format"] == "date-time"
+    expires_description = snapshot_data["properties"]["expires_at"]["description"]
+    assert "서버 handoff 직전 최소 75분" in expires_description
+    assert "client 수신 후 최소 60분" in expires_description
+    assert "running" in expires_description
+    high_watermark_description = snapshot_data["properties"][
+        "high_watermark_cursor"
+    ]["description"]
+    assert "replay lower-bound" in high_watermark_description
+    assert "중복 허용" in high_watermark_description
+    snapshot_responses = service["paths"][
+        "/v1/service/cache-target-snapshots/{external_system}"
+    ]["get"]["responses"]
+    capacity_response = snapshot_responses["429"]
+    retry_after_schema = capacity_response["headers"]["Retry-After"]["schema"]
+    assert retry_after_schema == {"type": "integer", "minimum": 1, "maximum": 7_200}
+    assert "application/problem+json" in capacity_response["content"]
+    assert "413" in snapshot_responses
+    assert "503" in snapshot_responses
+    assert "Retry-After" in snapshot_responses["503"]["headers"]
+    assert "headers" not in snapshot_responses["413"]
+    seal_responses = service["paths"][
+        "/v1/service/cache-target-reconciliations/{request_id}/seals"
+    ]["post"]["responses"]
+    assert "413" in seal_responses
+    assert "503" in seal_responses
+    assert "Retry-After" in seal_responses["503"]["headers"]
+    assert "headers" not in seal_responses["413"]
+    assert "application/problem+json" in seal_responses["413"]["content"]
+    mutation_record = schemas["CacheTargetSourceMutationRecord"]
+    assert {"target_id", "entity_tag", "target_sequence"} <= set(mutation_record["required"])
+    assert mutation_record["properties"]["target_id"]["format"] == "uuid"
+    assert "anyOf" not in mutation_record["properties"]["target_id"]
+    assert "anyOf" not in mutation_record["properties"]["entity_tag"]
+    assert mutation_record["properties"]["target_sequence"]["minimum"] == 1
+    read_record = schemas["CacheTargetSourceRecord"]
+    assert {"type": "null"} in read_record["properties"]["target_id"]["anyOf"]
+    assert {"type": "null"} in read_record["properties"]["entity_tag"]["anyOf"]
+    assert {"type": "null"} in read_record["properties"]["target_sequence"]["anyOf"]
+    target_path = service["paths"][
+        "/v1/service/cache-targets/{external_system}/{target_key}"
+    ]
+    assert _refs(target_path["put"]["responses"]["200"]) == {
+        "CacheTargetSourceMutationResponse"
+    }
+    assert _refs(target_path["delete"]["responses"]["200"]) == {
+        "CacheTargetSourceMutationResponse"
+    }
+    assert _refs(target_path["get"]["responses"]["200"]) == {
+        "CacheTargetSourceReadResponse"
+    }
+    assert _refs(schemas["CacheTargetSourceMutationResponse"]["properties"]["data"]) == {
+        "CacheTargetSourceMutationRecord"
+    }
+    assert _refs(schemas["CacheTargetSourceReadResponse"]["properties"]["data"]) == {
+        "CacheTargetSourceRecord"
+    }
+    begin_headers = {
+        parameter["name"]: parameter
+        for parameter in service["paths"]["/v1/service/cache-target-reconciliations"]["post"][
+            "parameters"
+        ]
+        if parameter.get("in") == "header"
+    }
+    assert begin_headers["If-Match"]["required"] is False
+    assert begin_headers["If-None-Match"]["required"] is False
+    seal_headers = {
+        parameter["name"]: parameter
+        for parameter in service["paths"][
+            "/v1/service/cache-target-reconciliations/{request_id}/seals"
+        ]["post"]["parameters"]
+        if parameter.get("in") == "header"
+    }
+    assert seal_headers["If-Match"]["required"] is True
+    running_schema = schemas["CacheTargetReconciliationRunning"]
+    assert running_schema["properties"]["merkle_root"]["pattern"] == r"^[0-9a-f]{64}$"
+    event_schema = schemas["CacheTargetEventRecord"]
+    event_properties = event_schema["properties"]
+    assert {
+        "event_scope",
+        "payload",
+        "source_payload_fingerprint",
+        "target_key",
+        "target_id",
+        "source_generation",
+        "target_sequence",
+    } <= set(event_properties)
+    assert set(event_properties["event_scope"]["enum"]) == {"target", "stream"}
+    assert {"type": "null"} in event_properties["target_key"]["anyOf"]
+    assert {"type": "null"} in event_properties["target_id"]["anyOf"]
+    assert {"type": "null"} in event_properties["source_generation"]["anyOf"]
+    assert {"type": "null"} in event_properties["target_sequence"]["anyOf"]
+    assert "CacheTargetReconciledPayload" in _refs(event_properties["payload"])
+    reconciled_payload = schemas["CacheTargetReconciledPayload"]
+    assert set(reconciled_payload["required"]) == {
+        "request_id",
+        "snapshot_id",
+        "actual_merkle_root",
+        "expected_merkle_root",
+        "status",
+        "version",
+    }
+    assert reconciled_payload["additionalProperties"] is False
+    assert reconciled_payload["properties"]["request_id"]["format"] == "uuid"
+    assert reconciled_payload["properties"]["snapshot_id"]["format"] == "uuid"
+    refresh_target_keys = schemas["CacheTargetRefreshRequest"]["properties"]["target_keys"]
+    assert refresh_target_keys["maxItems"] == 500
+    assert refresh_target_keys["uniqueItems"] is True
+    assert "PublicCuratedFeatureView" not in schemas
+    assert "AdminFeatureListResponse" not in schemas
 
 
 @pytest.mark.unit
@@ -420,6 +590,7 @@ def test_public_security_matches_route_policy_in_full_and_user_specs() -> None:
     app = create_app(ApiSettings())
     full = app.openapi()
     user = module.user_openapi_spec(full, app=app)
+    service = module.service_openapi_spec(full, app=app)
     policies = {
         row.schema_path: row.policy
         for row in build_route_policy_matrix(app)
@@ -434,7 +605,7 @@ def test_public_security_matches_route_policy_in_full_and_user_specs() -> None:
         RoutePolicy.SERVICE: [{"ServiceToken": []}],
     }
 
-    for spec in (full, user):
+    for spec in (full, user, service):
         for path, method in module._openapi_operations(spec):
             policy = policies[path]
             operation = spec["paths"][path][method]

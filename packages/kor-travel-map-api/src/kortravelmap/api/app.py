@@ -31,6 +31,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
+from kortravelmap.infra import CacheTargetStreamConflict
 from kortravelmap.infra.log_repo import record_api_call
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
@@ -67,6 +68,7 @@ from kortravelmap.api.route_policy import (
 from kortravelmap.api.routers import (
     admin_auth_router,
     admin_backups_router,
+    admin_cache_target_streams_router,
     admin_curated_router,
     admin_curations_router,
     admin_features_router,
@@ -84,6 +86,7 @@ from kortravelmap.api.routers import (
     features_router,
     mois_detail_router,
     offline_uploads_router,
+    ops_cache_target_streams_router,
     ops_datasets_router,
     ops_live_router,
     ops_logs_router,
@@ -93,6 +96,7 @@ from kortravelmap.api.routers import (
     public_providers_router,
     public_status_router,
     public_views_router,
+    service_cache_target_streams_router,
     weather_router,
 )
 from kortravelmap.api.settings import ApiSettings
@@ -110,6 +114,7 @@ _ERROR_CODE_BY_STATUS: dict[int, str] = {
     409: "CONFLICT",
     413: "PAYLOAD_TOO_LARGE",
     422: "VALIDATION_ERROR",
+    429: "TOO_MANY_REQUESTS",
     500: "INTERNAL_ERROR",
     501: "NOT_IMPLEMENTED",
     502: "BAD_GATEWAY",
@@ -126,6 +131,41 @@ _PROBLEM_DEFAULT_DESCRIPTION = (
     "핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 "
     "(docs/architecture/rest-api.md §1.5)."
 )
+
+_CACHE_TARGET_NOT_FOUND_CODES = frozenset(
+    {
+        "claim_not_found",
+        "dead_letter_not_found",
+        "reconciliation_not_found",
+        "target_not_found",
+    }
+)
+_CACHE_TARGET_PRECONDITION_CODES = frozenset(
+    {
+        "create_precondition_failed",
+        "dead_letter_precondition_failed",
+        "reconciliation_precondition_failed",
+        "restore_fence_precondition_failed",
+        "target_precondition_failed",
+    }
+)
+_CACHE_TARGET_FORBIDDEN_CODES = frozenset(
+    {
+        "claim_binding_mismatch",
+        "consumer_mismatch",
+    }
+)
+_CACHE_TARGET_UNAVAILABLE_CODES = frozenset(
+    {
+        "snapshot_barrier_timeout",
+        "snapshot_build_timeout",
+        "snapshot_busy",
+        "snapshot_ttl_too_short",
+        "stream_version_exhausted",
+    }
+)
+_CACHE_TARGET_TOO_MANY_REQUEST_CODES = frozenset({"snapshot_capacity_exceeded"})
+_CACHE_TARGET_PAYLOAD_TOO_LARGE_CODES = frozenset({"snapshot_item_limit_exceeded"})
 
 _OPS_CANONICAL_PREFIXES = (
     "/v1/ops/datasets",
@@ -432,6 +472,38 @@ def _status_error_code(status_code: int) -> str:
     return "ERROR"
 
 
+def _cache_target_stream_conflict_status(code: str) -> int:
+    if code in _CACHE_TARGET_NOT_FOUND_CODES:
+        return 404
+    if code in _CACHE_TARGET_PRECONDITION_CODES:
+        return 412
+    if code in _CACHE_TARGET_FORBIDDEN_CODES:
+        return 403
+    if code in _CACHE_TARGET_UNAVAILABLE_CODES:
+        return 503
+    if code in _CACHE_TARGET_TOO_MANY_REQUEST_CODES:
+        return 429
+    if code in _CACHE_TARGET_PAYLOAD_TOO_LARGE_CODES:
+        return 413
+    return 409
+
+
+def _cache_target_retry_after(exc: CacheTargetStreamConflict) -> str | None:
+    if exc.code in {
+        "snapshot_barrier_timeout",
+        "snapshot_build_timeout",
+        "snapshot_busy",
+        "snapshot_ttl_too_short",
+    }:
+        return "1"
+    if exc.code != "snapshot_capacity_exceeded":
+        return None
+    value = exc.current.get("retry_after_seconds")
+    if type(value) is not int:
+        return "1"
+    return str(min(max(value, 1), 7_200))
+
+
 def _http_error_payload(
     detail: object,
     *,
@@ -700,6 +772,22 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             request_id=_request_id(request),
         )
 
+    @application.exception_handler(CacheTargetStreamConflict)
+    async def cache_target_stream_conflict_handler(
+        request: Request,
+        exc: CacheTargetStreamConflict,
+    ) -> JSONResponse:
+        status_code = _cache_target_stream_conflict_status(exc.code)
+        retry_after = _cache_target_retry_after(exc)
+        return _error_response(
+            status_code=status_code,
+            code=exc.code.upper(),
+            message=str(exc),
+            details=exc.current,
+            request_id=_request_id(request),
+            headers={"Retry-After": retry_after} if retry_after is not None else None,
+        )
+
     @application.exception_handler(Exception)
     async def unhandled_exception_handler(
         request: Request,
@@ -823,6 +911,10 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             prefix="/v1",
             dependencies=public_dependencies,
         )
+        application.include_router(
+            service_cache_target_streams_router,
+            prefix="/v1",
+        )
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
         # raw provider payload이므로 local-dev debug mount에서도 operator BFF를
         # 요구한다. production은 debug_routes_enabled=false라 route 자체가 없다.
@@ -916,6 +1008,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             prefix="/v1",
             dependencies=admin_dependencies,
         )
+        application.include_router(
+            admin_cache_target_streams_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
 
     if ops_routes_enabled:
         observability_dependencies = [Depends(require_ops_operator)]
@@ -927,6 +1024,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         application.include_router(ops_live_router, prefix="/v1")
         application.include_router(
             ops_logs_router,
+            prefix="/v1",
+            dependencies=observability_dependencies,
+        )
+        application.include_router(
+            ops_cache_target_streams_router,
             prefix="/v1",
             dependencies=observability_dependencies,
         )

@@ -20,7 +20,12 @@ Usage:
         --profile user \\
         --output packages/kor-travel-map-api/openapi.user.json
 
-    # 3. CI drift 검증 (변경 있으면 exit 1)
+    # 3. service spec 생성 + 저장
+    python packages/kor-travel-map-api/scripts/export_openapi.py \\
+        --profile service \\
+        --output packages/kor-travel-map-api/openapi.service.json
+
+    # 4. CI drift 검증 (변경 있으면 exit 1)
     python packages/kor-travel-map-api/scripts/export_openapi.py \\
         --profile all --check
 """
@@ -38,13 +43,14 @@ from fastapi import FastAPI
 
 from kortravelmap.api.route_policy import RoutePolicy, build_route_policy_matrix
 
-OpenApiProfile = Literal["admin", "user"]
+OpenApiProfile = Literal["admin", "user", "service"]
 
 API_OPENAPI_PATH = Path("packages/kor-travel-map-api/openapi.json")
 USER_OPENAPI_PATH = Path("packages/kor-travel-map-api/openapi.user.json")
+SERVICE_OPENAPI_PATH = Path("packages/kor-travel-map-api/openapi.service.json")
 
 # ADR-048/T-216g: 현재 pre-1.0 단계의 기계 정본은 ``/v1`` 경로를 in-place로
-# 갱신하는 admin/user spec 2종이다. v1.0.0 GA 이후 breaking change는 ``/v2``와
+# 갱신하는 admin/user/service spec 3종이다. v1.0.0 GA 이후 breaking change는 ``/v2``와
 # major별 별도 export 파일을 추가하고, N-1 지원 정책은 문서/CI에서 함께 고정한다.
 HTTP_METHODS: frozenset[str] = frozenset(
     {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
@@ -53,9 +59,9 @@ USER_ROUTE_POLICIES: frozenset[RoutePolicy] = frozenset(
     {
         RoutePolicy.PUBLIC_UNAUTHENTICATED,
         RoutePolicy.PUBLIC_KEYED,
-        RoutePolicy.SERVICE,
     }
 )
+SERVICE_ROUTE_POLICIES: frozenset[RoutePolicy] = frozenset({RoutePolicy.SERVICE})
 USER_RESPONSE_FORBIDDEN_PROPERTIES: frozenset[str] = frozenset(
     {
         "source_record_key",
@@ -170,18 +176,20 @@ def _openapi_operations(spec: dict[str, Any]) -> set[tuple[str, str]]:
     }
 
 
-def _user_operations(
+def _profile_operations(
     app: FastAPI,
     spec: dict[str, Any],
+    *,
+    allowed_policies: frozenset[RoutePolicy],
 ) -> dict[str, frozenset[str]]:
-    """조립 route metadata와 full spec에서 user operation을 자동 파생한다."""
+    """조립 route metadata와 full spec에서 profile operation을 자동 파생한다."""
 
-    route_policies: dict[str, RoutePolicy] = {}
+    route_policy_by_path: dict[str, RoutePolicy] = {}
     mounted_operations: set[tuple[str, str]] = set()
     for row in build_route_policy_matrix(app):
         if row.is_websocket or not row.include_in_schema:
             continue
-        route_policies[row.schema_path] = row.policy
+        route_policy_by_path[row.schema_path] = row.policy
         mounted_operations.update(
             (row.schema_path, method.lower())
             for method in row.methods
@@ -196,8 +204,8 @@ def _user_operations(
 
     selected: dict[str, set[str]] = {}
     for path, method in full_operations:
-        policy = route_policies[path]
-        if policy in USER_ROUTE_POLICIES:
+        policy = route_policy_by_path[path]
+        if policy in allowed_policies:
             selected.setdefault(path, set()).add(method)
     return {path: frozenset(methods) for path, methods in sorted(selected.items())}
 
@@ -344,7 +352,11 @@ def _validate_user_response_schemas(spec: dict[str, Any]) -> None:
 def user_openapi_spec(spec: dict[str, Any], *, app: FastAPI) -> dict[str, Any]:
     """조립된 route policy에서 user-facing subset spec을 파생한다."""
 
-    user_operations = _user_operations(app, spec)
+    user_operations = _profile_operations(
+        app,
+        spec,
+        allowed_policies=USER_ROUTE_POLICIES,
+    )
     out = copy.deepcopy(spec)
     out["info"] = {
         **out.get("info", {}),
@@ -372,6 +384,39 @@ def user_openapi_spec(spec: dict[str, Any], *, app: FastAPI) -> dict[str, Any]:
     return out
 
 
+def service_openapi_spec(spec: dict[str, Any], *, app: FastAPI) -> dict[str, Any]:
+    """조립된 route policy에서 service-to-service subset spec을 파생한다."""
+
+    service_operations = _profile_operations(
+        app,
+        spec,
+        allowed_policies=SERVICE_ROUTE_POLICIES,
+    )
+    out = copy.deepcopy(spec)
+    out["info"] = {
+        **out.get("info", {}),
+        "title": "kor-travel-map-service",
+        "description": (
+            "Service-to-service subset of kor-travel-map OpenAPI. "
+            "Public user, admin, debug, and ops routes are intentionally excluded."
+        ),
+    }
+    filtered_paths: dict[str, Any] = {}
+    for path, allowed_methods in service_operations.items():
+        path_item = spec.get("paths", {}).get(path)
+        if not isinstance(path_item, dict):
+            continue
+        filtered_item: dict[str, Any] = {}
+        for key, value in path_item.items():
+            if key in HTTP_METHODS and key not in allowed_methods:
+                continue
+            filtered_item[key] = value
+        if any(method in filtered_item for method in allowed_methods):
+            filtered_paths[path] = filtered_item
+    out["paths"] = filtered_paths
+    return _prune_security_schemes(_prune_schemas(out))
+
+
 def _profile_spec(
     app: FastAPI,
     spec: dict[str, Any],
@@ -379,6 +424,8 @@ def _profile_spec(
 ) -> dict[str, Any]:
     if profile == "admin":
         return spec
+    if profile == "service":
+        return service_openapi_spec(spec, app=app)
     return user_openapi_spec(spec, app=app)
 
 
@@ -421,6 +468,8 @@ def check(output: Path, *, profile: OpenApiProfile = "admin") -> int:
 def _output_for_profile(args: argparse.Namespace, profile: OpenApiProfile) -> Path:
     if profile == "admin":
         return cast(Path, args.output)
+    if profile == "service":
+        return cast(Path, args.service_output)
     return cast(Path, args.user_output)
 
 
@@ -428,9 +477,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--profile",
-        choices=("admin", "user", "all"),
+        choices=("admin", "user", "service", "all"),
         default="admin",
-        help="export 대상 spec profile. all은 admin/user를 모두 처리.",
+        help="export 대상 spec profile. all은 admin/user/service를 모두 처리.",
     )
     parser.add_argument(
         "--output",
@@ -445,6 +494,12 @@ def main(argv: list[str] | None = None) -> int:
         help="user OpenAPI 저장/비교 대상 경로.",
     )
     parser.add_argument(
+        "--service-output",
+        type=Path,
+        default=SERVICE_OPENAPI_PATH,
+        help="service OpenAPI 저장/비교 대상 경로.",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="CI 모드 — drift 발견 시 exit 1 (저장하지 않음)",
@@ -452,7 +507,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     profiles: tuple[OpenApiProfile, ...] = (
-        ("admin", "user") if args.profile == "all" else (cast(OpenApiProfile, args.profile),)
+        ("admin", "user", "service")
+        if args.profile == "all"
+        else (cast(OpenApiProfile, args.profile),)
     )
     if args.check:
         failed = False

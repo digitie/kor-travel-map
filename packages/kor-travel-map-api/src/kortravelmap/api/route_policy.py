@@ -39,6 +39,7 @@ from starlette.routing import WebSocketRoute
 
 from kortravelmap.api.auth import (
     require_admin_frontend,
+    require_cache_target_service_principal,
     require_metrics_token,
     require_ops_operator,
     require_public_api_key,
@@ -79,6 +80,7 @@ class RoutePolicyError(RuntimeError):
 
 #: 관측 가능한 enforcing dependency — dependency callable identity로만 판정한다.
 _ENFORCEMENT_BY_CALLABLE: dict[Callable[..., Any], str] = {
+    require_cache_target_service_principal: "require_cache_target_service_principal",
     require_public_api_key: "require_public_api_key",
     require_service_token: "require_service_token",
     require_admin_frontend: "require_admin_frontend",
@@ -180,6 +182,31 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     # -- service — service-to-service surface (X-Kor-Travel-Map-Service-Token).
     "/v1/features/batch": RoutePolicy.SERVICE,
     "/v1/features/weather/batch": RoutePolicy.SERVICE,
+    "/v1/service/cache-targets/{external_system}/{target_key}": RoutePolicy.SERVICE,
+    "/v1/service/cache-target-streams/{external_system}": RoutePolicy.SERVICE,
+    "/v1/service/cache-target-streams/{external_system}/restore-fences": (
+        RoutePolicy.SERVICE
+    ),
+    "/v1/service/cache-target-event-claims": RoutePolicy.SERVICE,
+    "/v1/service/cache-target-event-acks": RoutePolicy.SERVICE,
+    "/v1/service/cache-target-event-nacks": RoutePolicy.SERVICE,
+    "/v1/service/cache-target-event-dead-letters/{event_id}": RoutePolicy.SERVICE,
+    "/v1/service/cache-target-event-dead-letters/{event_id}/replays": (
+        RoutePolicy.SERVICE
+    ),
+    "/v1/service/cache-target-reconciliations": RoutePolicy.SERVICE,
+    "/v1/service/cache-target-reconciliations/{request_id}/seals": (
+        RoutePolicy.SERVICE
+    ),
+    "/v1/service/cache-target-reconciliations/{request_id}/completions": (
+        RoutePolicy.SERVICE
+    ),
+    "/v1/service/cache-target-reconciliations/{request_id}/snapshot": (
+        RoutePolicy.SERVICE
+    ),
+    "/v1/service/cache-target-snapshots/{external_system}": RoutePolicy.SERVICE,
+    "/v1/service/refresh-requests": RoutePolicy.SERVICE,
+    "/v1/service/refresh-requests/{request_id}": RoutePolicy.SERVICE,
     # -- operator/debug — raw provider payload은 local-dev debug mount에서만
     #    노출하되 mount된 route도 trusted admin BFF를 요구한다. production은
     #    debug_routes_enabled=false로 route 자체를 내린다.
@@ -222,6 +249,10 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/curations/{collection_id}/items/{curation_item_id}": (
         RoutePolicy.OPERATOR
     ),
+    "/v1/admin/cache-target-event-dead-letters/{event_id}/replays": (
+        RoutePolicy.OPERATOR
+    ),
+    "/v1/admin/cache-target-reconciliations": RoutePolicy.OPERATOR,
     "/v1/admin/dedup-reviews": RoutePolicy.OPERATOR,
     "/v1/admin/dedup-reviews/{review_id}": RoutePolicy.OPERATOR,
     "/v1/admin/enrichment-reviews": RoutePolicy.OPERATOR,
@@ -300,6 +331,10 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
         RoutePolicy.OPERATOR
     ),
     "/v1/ops/pipeline/schedules/{schedule_name}/commands": RoutePolicy.OPERATOR,
+    "/v1/ops/cache-target-streams": RoutePolicy.OPERATOR,
+    "/v1/ops/cache-target-event-dead-letters": RoutePolicy.OPERATOR,
+    "/v1/ops/cache-target-event-dead-letters/{event_id}": RoutePolicy.OPERATOR,
+    "/v1/ops/cache-target-operations/{operation_id}": RoutePolicy.OPERATOR,
     # -- operator — ops-live WebSocket (#725 HMAC ticket 재사용, ADR-064).
     "/v1/ops/live": RoutePolicy.OPERATOR,
     # -- operator — 존치 ops 관측 read(BFF 또는 ops:read principal).
@@ -464,7 +499,13 @@ def _wiring_satisfied(row: RoutePolicyMatrixRow) -> bool:
     if row.policy is RoutePolicy.PUBLIC_KEYED:
         return "require_public_api_key" in observed
     if row.policy is RoutePolicy.SERVICE:
-        return "require_service_token" in observed
+        return bool(
+            observed
+            & {
+                "require_service_token",
+                "require_cache_target_service_principal",
+            }
+        )
     if row.policy is RoutePolicy.OPERATOR:
         return bool(observed & _OPERATOR_ENFORCEMENTS)
     if row.policy is RoutePolicy.METRICS:

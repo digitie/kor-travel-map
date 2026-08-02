@@ -664,6 +664,24 @@ Dagster tick의 skip 사유로 남긴다. 따라서 10분보다 실행이 길어
 feature update worker 실행에는 `kor_travel_map_client`와 `feature_update_runner` resource가
 필수다. 실패 알림은 선택 resource `feature_update_failure_notifier`로 연결한다.
 
+## 14.1 cache target outbox와 reconciliation 경계 (ADR-081)
+
+API와 main library repository는 target/link/refresh 결과와 outbox event를 같은 PostgreSQL
+transaction에 기록한다. 여기에는 원격 HTTP I/O가 없다. main library는 delivery claim/ACK/NACK,
+snapshot/Merkle 계산에 필요한 DB helper와 typed DTO만 제공하며 `dagster`를 import하지 않는다.
+
+PinVi consumer는 Map의 ServiceToken claim API를 pull하므로 Map Dagster가 callback을 push하지 않는다.
+Dagster maintenance는 다음 운영 보조만 담당한다.
+
+- 만료 lease reclaim·attempt/dead 상태의 주기 관측과 retention
+- fixed snapshot/reconciliation receipt의 checksum 재검증
+- backlog/dead/blocked stream metric과 operator-visible 상태 갱신
+
+restore fence, replay, ACK/NACK의 정본은 API/domain transaction이다. Dagster run 상태나
+`ops_live_topic_revisions`를 outbox delivery 상태로 추론하지 않는다. schedule은 paired consumer가
+backfill/checksum gate를 통과할 때까지 기본 `STOPPED`이고, 중지해도 critical writer와 outbox 보존은
+계속된다.
+
 ## 15. 본 라이브러리가 노출하는 helper 요약
 
 `AsyncKorTravelMapClient`:

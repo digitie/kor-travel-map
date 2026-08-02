@@ -7,7 +7,8 @@
 > **이미 반영된 변경 이력**으로 읽는다(구 `limit`/CSV-bbox/`count` 형태는 더는 존재하지 않음).
 > **범위**: kor-travel-map **전 표면**(공개/user + admin + ops + debug)의 **단일 계약 정본**
 > (ADR-048 #9).
-> **정본 우선순위**: 기계 정본 = `packages/kor-travel-map-api/openapi.json`·`openapi.user.json`.
+> **정본 우선순위**: 기계 정본 = `packages/kor-travel-map-api/openapi.json`·
+> `openapi.user.json`·`openapi.service.json`.
 > 충돌 시 **OpenAPI 우선**. 결정 = ADR-048.
 > **전환 정책(ADR-048)**: 호환성 미고려 — `/v1` clean cut, 구 경로/alias 없음.
 > **표기**: 🆕 신규 · 🔁 변경 · ⚠️ 제거 · ✅#317 = #317로 이미 구현.
@@ -30,8 +31,12 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | public-keyed | `GET /v1/collections`, `GET /v1/collections/{id}` | collection/item 단일 curation read 정본 |
 | service | `POST /v1/features/batch` | `found|retired|suppressed|missing|unchanged` + revision; transport 503 분리 |
 | service | `POST /v1/features/weather/batch` | sparse `targets[]`/`known_at` 다중 시각 bitemporal query |
-| service | `PUT/DELETE /v1/service/cache-targets/{system}/{key}` | 단조 `source_generation`, ETag/If-Match |
+| service | `PUT/GET/DELETE /v1/service/cache-targets/{system}/{key}` | 단조 source generation, If-None-Match/ETag/If-Match, Idempotency-Key |
 | service | `POST/GET /v1/service/refresh-requests[/{id}]` | Idempotency-Key, 202 operation resource |
+| service | `/v1/service/cache-target-streams/*`, `/v1/service/cache-target-event-*` | restore fence와 pull claim/ACK/NACK/dead/replay |
+| service | `GET /v1/service/cache-target-snapshots/{system}` | fixed MVCC snapshot, active+tombstone Merkle v1 |
+| service | `GET /v1/service/cache-target-reconciliations/{id}/snapshot` | active request에 결박된 fixed snapshot paging |
+| service | `POST /v1/service/cache-target-reconciliations/{id}/completions` | snapshot/epoch/Merkle receipt와 원자적 ready 전이 |
 | operator | `/v1/features/{id}/sources|observations` | raw lineage의 유일한 REST 표면 |
 | operator | `/v1/feature-change-requests` | principal actor, revision 재검사 |
 | operator | `/v1/ops/datasets/*`, `/v1/ops/pipeline/*` | ADR-064 canonical control plane 유지 |
@@ -543,9 +548,8 @@ GET/POST /v1/admin/offline-uploads  (+ {upload_id}[/preview|/validate|/validatio
 DELETE /v1/admin/offline-uploads/{upload_id}           # ✅#397 정리 lifecycle(진행중 409·객체 best-effort 삭제)
 GET    /v1/admin/poi-cache-targets
 GET/PUT/DELETE /v1/admin/poi-cache-targets/{external_system}/{target_key}  # 복합 자연키 + ETag/If-Match 삭제
-# T-214f 결정: POI cache target write(PUT/DELETE)는 admin/operator flow 전용.
-# PinVi 직접 write 미허용 — service-safe /v1/poi-cache-targets/* write 경로 안 둠.
-# PinVi는 등록된 target 기준 read(GET /v1/features/nearby/by-target)만 소비.
+# T-214f의 PinVi 직접 write 금지는 ADR-081이 service route에 한해 supersede한다.
+# PinVi는 admin/AdminBFF를 사용하지 않고 아래 ServiceToken resource만 사용한다.
 GET/POST /v1/admin/backups   GET /v1/admin/backups/{backup_id}
 DELETE /v1/admin/backups/{backup_id}                   # 🆕 정리 lifecycle
 POST   /v1/admin/restore/{backup_id}[/swap]            # kill-switch
@@ -564,6 +568,167 @@ DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id} # item soft 
 GET    /v1/admin/curations/import-template.csv          # UTF-8 BOM CSV 양식 다운로드
 POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 authoritative replace
 ```
+
+### 2.6 cache target service stream (ADR-081, T-VN-41 producer foundation)
+
+```text
+PUT|GET|DELETE /v1/service/cache-targets/{external_system}/{target_key}
+POST /v1/service/refresh-requests
+GET  /v1/service/refresh-requests/{request_id}
+GET  /v1/service/cache-target-streams/{external_system}
+POST /v1/service/cache-target-streams/{external_system}/restore-fences
+POST /v1/service/cache-target-event-claims
+POST /v1/service/cache-target-event-acks
+POST /v1/service/cache-target-event-nacks
+GET  /v1/service/cache-target-event-dead-letters/{event_id}
+POST /v1/service/cache-target-event-dead-letters/{event_id}/replays
+GET  /v1/service/cache-target-snapshots/{external_system}
+POST /v1/service/cache-target-reconciliations
+POST /v1/service/cache-target-reconciliations/{request_id}/seals
+GET  /v1/service/cache-target-reconciliations/{request_id}/snapshot
+POST /v1/service/cache-target-reconciliations/{request_id}/completions
+```
+
+모두 `X-Kor-Travel-Map-Service-Token`을 쓰되 token principal의 `consumer_id`와
+external system을 exact 결박한다. scope는 consumer read/claim/ack/nack/snapshot,
+restore-fence, recovery replay, recovery cutover로 분리한다. PinVi에 admin proxy secret이나
+ops mutation 권한을 주지 않는다.
+`external_system`과 `target_key`는 trim된 Unicode NFC canonical identity만 허용한다. `target_key`는
+source path/body와 `cache_target_keys` scope에서 모두 512자 이하이다. repository와 DB CHECK도 같은
+규칙을 강제하며, 비정규 service/admin/ops 입력은 `422 VALIDATION_ERROR`다. NFC-equivalent 두 문자열이
+서로 다른 durable head/request가 된 뒤 Merkle identity나 refresh lookup에서 충돌할 수 없다. refresh
+`target_keys`는 1~500개의 중복 없는 canonical key 배열이며 중복도 service 호출 전에 `422`로 거부한다.
+
+restore-fence `201`의 `data`는 새 stream control과 함께 `fence_id`, 직전 epoch/control version,
+`invalidated_claim_count`, `superseded_delivery_count`, `superseded_reconciliation_count`, nullable
+`superseded_reconciliation_request_id`를 반환한다. fence는 active `preparing|running`
+reconciliation을 terminal `superseded`/`restore_fenced`로 원자 종결한다. exact Idempotency-Key replay는
+최초 count/UUID/version을 그대로 반환하며 구 request의 snapshot/seal/completion은
+`RECONCILIATION_SUPERSEDED` `409`다.
+HTTP DTO는 `superseded_reconciliation_count == 0` iff request ID가 `null`, count가 `1` iff
+request ID가 UUID인 상관 불변식을 after validator로 강제한다. OpenAPI 3.1 schema도 object-level
+`oneOf`의 `0/null`, `1/format: uuid` 두 branch로 같은 관계를 기계 검증 가능하게 고정한다.
+`GET /v1/ops/cache-target-operations/{operation_id}`의 status는 자유 문자열이 아니라 reconciliation
+`preparing|running|succeeded|failed|superseded`, delivery
+`pending|leased|retry|dead|delivered|superseded`, admin 접수 `accepted`의 합집합 enum이다. 응답
+`operation_id`는 UUID이며 non-UUID producer 결과는 응답 직렬화 전에 fail-close한다.
+
+target create는 `If-None-Match: *`, update/delete는 직전 GET/성공 응답의 raw strong ETag를
+`If-Match`로 보낸다. `source_generation`은 ETag나 queue generation을 대체하지 않는다. `412`는
+자동 rebase하지 않고 snapshot reconcile 뒤 새 command로 해결한다. 모든 네트워크 재시도 command는
+UUID `Idempotency-Key`와 canonical body fingerprint를 사용하며 same key/different body는 `409`다.
+DELETE exact replay `200`은 tombstone head의 nullable identity를 반환하지 않고, 최초 DELETE가 만든
+historical `target_id`와 post-delete strong ETag를 immutable source receipt에서 그대로 반환한다.
+mutation 응답 DTO는 `target_id`, `entity_tag`, 양의 `target_sequence`를 required non-null로 강제해
+`restore_epoch + source_generation + target_sequence + target_id` generation 4-tuple을 완성한다. GET read
+projection만 tombstone의 nullable identity와 `target_sequence`를 허용한다. 이 ETag는 삭제된 incarnation의
+재생 영수증이며 후속 create/update precondition으로 재사용하지 않는다.
+
+restore fence는 직전 stream ETag를 요구한다. 성공 transaction은 epoch N+1, 기존 claim 무효화,
+barrier receipt와 구 epoch의 모든 `pending|retry|leased|dead` delivery를 terminal `superseded`로
+종결한다. `delivered`는 보존하며 exact fence replay는 delivery version을 다시 증가시키지 않는다.
+claim은 external system별 현재 restore epoch의 global stream 하나를 lease하고 ACK는
+claim의 external-system-scoped `relay_order` contiguous prefix만 전진한다. 번호는 global sequence에서
+전역 unique하게 배정되지만 서로 다른 stream 사이의 commit 순서를 뜻하지 않는다. NACK permanent/max-attempt는 dead letter로
+stream을 막으며 뒤 순서를 건너뛰지 않는다. 첫 미ACK이 아닌 event를 dead 전이하려면 앞 prefix를
+먼저 ACK해야 하고 그렇지 않으면 mutation 없이 `409`다. replay는 같은 immutable event identity와
+fingerprint만 재활성화한다.
+
+ops stream status는 backlog/dead/delivered와 별도로 누적 `superseded_count`를 반환한다. 과거 epoch의
+superseded dead는 dead-letter GET/list/replay와 reconciliation dead 0 gate에서 제외되며, 현재 epoch의
+dead만 새 epoch consumer를 차단한다.
+
+snapshot page는 `snapshot_id`, `restore_epoch`, `high_watermark_cursor`, `count`, `merkle_root`가
+끝까지 고정되며 `created_at`/`expires_at`으로 cursor의 실제 수명을 함께 공개한다. 첫 page의 immutable
+header/item INSERT와 성공 응답은 하나의 route transaction으로 commit한다. 동일 stream/version의
+유효한 일반 snapshot은 내부 header에 global cursor와 분리 저장한 source-material
+`cache_target.state_applied` watermark 및 restore epoch가 현재 값과 exact할 때 재사용한다. 별도 stream
+`FOR SHARE` barrier statement가 기존 outbox writer 완료 뒤 identity/head를 읽고 새 writer를 막는다.
+모든 outbox event writer transaction은 head/target/link 접근 전에 stream을 `FOR UPDATE`로 잠그고
+stream → head/target/link 순서를 지킨다. 여러 system이면 정렬 순서로 stream을 먼저 모두 잠가 각
+external system cursor를 해당 stream의 commit-safe contiguous prefix로 만든다.
+`relay_order`는 Identity/default가 아니라 DB trigger가 stream lock 획득 뒤 명시적 sequence에서 배정한다.
+application 사전 잠금은 교착 방지, trigger는 모든 insert의 allocation 순서 강제를 각각 소유한다.
+link/refresh/stream-reconciled event는 재사용을 깨지 않는다. 재사용 cursor는
+현재 outbox exact max가 아니라 immutable safe replay lower-bound일 수 있으므로 consumer가 이후 event를
+다시 읽어 중복을 제거한다. server handoff 직전 75분 floor를 통과하지 못한 수명 부족과 생성 경합은 각각
+`503 snapshot_ttl_too_short`, `503 snapshot_busy`와 `Retry-After: 1`로 실패한다. consumer는 실제 수신
+시 60분 floor를 다시 검사한다.
+barrier lock wait는 5초, snapshot statement는 30초로 제한하며 초과는
+각각 `503 snapshot_barrier_timeout`, `503 snapshot_build_timeout`과 `Retry-After: 1`로 반환한다.
+
+reuse miss 뒤 system별 미만료·미참조 generic snapshot이 이미 2개면 세 번째 복사를 만들지 않는다.
+가장 오래된 expiry까지 `429 snapshot_capacity_exceeded + Retry-After`로 대기시켜 유효 cursor를 보존하고
+live generic 저장량을 stream cardinality의 2배로 제한한다. request-bound snapshot은 이 count에서 제외한다.
+단일 snapshot은 100,000 item ceiling을 넘으면 부분 material을 만들지 않고
+`413 snapshot_item_limit_exceeded`로 실패한다. 후속 #922가 bounded streaming으로 이 경계를 확장한다.
+
+만료·미참조 일반 snapshot만 bounded GC하며 reconciliation request가 참조하면 terminal 이후에도
+보존한다. hourly background GC는 전역 try-lock, system round-robin, batch별 commit, 시간/statement/
+no-progress 예산을 사용하고 종료 시 expired backlog와 total/unexpired/referenced count를 한 번만 기록한다.
+실행당 기본 2백만 item은 설정 상한이며 n150 실측 처리량 보장이 아니다. 기본 STOPPED schedule은
+production enable 전에 켜고 backlog 경보를 확인한다. 상세 계약은 ADR-081이 정본이며 PinVi paired
+contract checksum 통과 뒤에만 enable한다.
+
+referenced snapshot은 reconciliation 감사 영수증이라 GC가 삭제하지 않는다. 따라서 job execution
+metadata만 직전값으로 추정하지 않고, acquired GC run의 `Dagster run_id`와 referenced item/header count를
+`ops.poi_cache_target_snapshot_gc_observations`에 기록한다. insert identity 순서는 GC 전역 lock 안의 실제
+drain 순서이며 같은 run retry는 최초 관측치와 증가율 기준선 분류를 재사용한다. 최소 간격 미달이나
+적격 baseline 또는 직전 acquired보다 동일/역행한 DB 시각 표본은 다음 증가율 기준선으로 승격하지
+않아 짧은 재실행이 이후 급증을 흡수하지
+않는다. 각 행은 이 적격 기준선과 별도로 직전 acquired count도 복사해, 짧은 표본 뒤 감소를 간격과
+무관하게 탐지한다. overlap skip은 관측치를 만들지 않는다. 관측 이력은 기본 90일 보존한다.
+
+hourly job은 현재 count와 직전 적격 baseline의 관측 시각·count·delta·시간당 증가율을 exact metadata로
+남긴다. 두 관측 간격이 기본 300초 미만이면 증가율은 `not_observed`이며 임의 추정하지 않는다. 기본
+ceiling은 referenced item 16,800,000/header 168, 증가율은 item 100,000/hour/header 1/hour다. 현재
+PinVi의 단일 snapshot 최대 100,000 item과 hourly cadence에서 7일치 보존량을 초기 guardrail로 삼은
+값이며, 다중 external system이나 reconciliation cadence 변경 시 run config에서 함께 조정한다. 어느
+ceiling이든 초과하면 `referenced_alert=true`, exact reason 목록과 Dagster warning을 남기되 GC 성공을
+실패로 바꾸거나 불필요한 retry를 유발하지 않는다. item/header 감소는 최소 간격과 무관하게 별도
+inventory-loss reason으로 경보한다. overlap skip, acquired 후 관측 불능, 비전진 DB 시각은 threshold
+false로 숨기지 않고 별도 observation issue reason과 warning을 남긴다. 첫 acquired run은 절대량
+ceiling만 평가한다. 관측 테이블은 파생 데이터이므로 앱 rollback 때 보존하고 0078 이상으로 forward
+recovery한다. 명시적 schema downgrade만 이를 폐기하며 재-upgrade 뒤 첫 run부터 기준선을 다시 만든다.
+
+`cache_target.reconciled`의 payload는
+`request_id`, `snapshot_id`, `actual_merkle_root`, `expected_merkle_root`, `status`, `version`
+여섯 필드만 허용한다. `source_payload_fingerprint`는 `expected_merkle_root`와 같아야 하며,
+request→fixed snapshot→terminal receipt 인과관계를 consumer가 검증할 수 있어야 한다.
+
+초기 cutover는 service recovery principal의 2단계 reconciliation으로 수행한다.
+`POST /v1/service/cache-target-reconciliations`는 UUID `Idempotency-Key`와 `If-None-Match: *`
+(stream 없음) 또는 직전 stream control `If-Match`를 요구하고, claim을 끊고 stream을 fenced 상태로
+만든 뒤 snapshot 없이 `preparing` request를 만든다. begin 응답의 `ETag`는 stream이 아니라
+reconciliation request entity(`request_id:phase_version`)이며, fenced stream control ETag는 body
+`stream_entity_tag`에 별도로 반환한다. PinVi writer는 이 fenced epoch에서 desired target/tombstone을
+PUT/DELETE로 backfill한다.
+
+`POST /v1/service/cache-target-reconciliations/{request_id}/seals`는 begin 응답의 reconciliation
+`ETag`를 `If-Match`로 요구하고 UUID `Idempotency-Key`를 받는다. body의 `external_system`,
+`consumer_id`, `expected_restore_epoch`, `expected_item_count`, `expected_merkle_root`를 현재 Map
+source heads와 같은 transaction에서 비교한다. exact match일 때만 immutable fixed snapshot을 저장하고
+request를 `running`으로 전환하며, seal 성공 응답의 `ETag`도 같은 reconciliation request의 새
+phase version이다. mismatch는 snapshot 저장과 phase 전이를 rollback한 `412`이며 request는
+`preparing`으로 남는다. 두 command 모두 body와 precondition header를 domain ledger fingerprint에
+포함해 same-key/same-body exact response replay와 changed-body `409`를 보장한다.
+seal·request-bound snapshot·completion은 먼저 저장된 reconciliation request metadata를 읽고,
+그 metadata의 `consumer_id`와 `external_system`으로 ServiceToken principal을 검증한 뒤에만 body
+값·ETag·snapshot checksum을 비교한다. 따라서 권한 없는 principal은 다른 system/request의 현재
+snapshot identity나 checksum mismatch 세부 정보를 `412`로 관측할 수 없다.
+
+admin reconciliation 시작은 destructive recovery gate를 요구하며 begin+seal을 한 transaction으로
+수행하는 one-step convenience다. consumer completion은 `cache-target:snapshot` principal과
+request/system/consumer/snapshot/epoch/root를 exact 결박하고 UUID Idempotency-Key로 terminal 응답을
+재생한다. stream read의 active reconciliation descriptor는 `preparing|running` strict union이며
+consumer는 `running` descriptor에서 request와 fixed snapshot identity를 발견한 뒤 request-bound
+snapshot만 page한다. `preparing` request나 일반 snapshot read가 새로 만든 snapshot은 completion
+근거가 아니다.
+
+admin one-step reconciliation의 `CacheTargetOperationResponse.data.snapshot_id`는 해당 request가
+생성·seal한 fixed snapshot UUID다. operation 조회도 같은 값을 유지하며, 아직 snapshot이 없는 service
+begin `preparing` receipt에서는 `null`이다. isolated live gate는 요청 전에 주입된 snapshot ID를
+재사용하지 않고 이 operation receipt의 ID와 최종 stream `last_snapshot.snapshot_id`를 비교한다.
 
 PATCH/DELETE correction UI는 `GET .../{feature_id}/revision`의 body `row_revision`과 응답 header
 `ETag`를 먼저 읽고, 이어서 `GET .../{feature_id}` detail의 `feature.row_revision`과 같을 때만
@@ -1029,17 +1194,18 @@ codegraph impact 선행). raw `text()` SQL이 물리명을 써서 ORM attr만으
 
 도메인/process/운영 성격이라 ADR에서 빼고 본 REST API 정본으로 이관한 결정들이다.
 
-- **OpenAPI export 정책 — 첫 라우터부터 활성화 + 이원 drift gate** (구 ADR-031): FastAPI 첫
+- **OpenAPI export 정책 — 첫 라우터부터 활성화 + profile drift gate** (구 ADR-031): FastAPI 첫
   라우터 등장 PR부터 `packages/kor-travel-map-api/openapi.json`(admin profile)과
-  `openapi.user.json`(사용자 profile)을 저장소에 커밋하고, `scripts/export_openapi.py
+  `openapi.user.json`(사용자 profile), `openapi.service.json`(서버 간 profile)을 저장소에
+  커밋하고, `scripts/export_openapi.py
   --profile all --check`를 `.github/workflows/openapi.yml` CI drift gate로 돌린다. 라우터/DTO
   변경 PR은 반드시 openapi diff를 동반(누락 시 CI fail)하므로, 라우터 변경의 외부 효과(frontend
   type·외부 도구)가 PR diff에서 즉시 가시화되고 frontend 도입 시 type drift 부담이 0이 된다.
   메인 라이브러리 `kortravelmap`은 FastAPI 미의존(ADR-020)이라 본 정책은 항상 api/admin 패키지
   한정이다.
-- **OpenAPI 이원화 + SemVer 버저닝** (구 ADR-031, ADR-045 D-3 amendment): API가 admin과
-  사용자(공개) 양쪽에 서비스되므로 OpenAPI를 admin schema(`/admin`·`/ops`·`/debug`·`/features`
-  admin 뷰)와 사용자 schema(`/features` 공개 뷰)로 별도 export + 별도 drift gate(CI 2개)한다.
+- **OpenAPI profile 분리 + SemVer 버저닝** (구 ADR-031, ADR-045 D-3 amendment): OpenAPI를
+  admin 전체 schema, 사용자 공개 schema, `ServiceToken` 서버 간 schema로 별도 export하고
+  profile별 drift를 함께 검사한다. 사용자 profile에는 `RoutePolicy.SERVICE`를 섞지 않는다.
   spec 버저닝은 SemVer(필드 추가=minor / 제거·의미변경=major), 변경은 CHANGELOG `### API`
   섹션에 기록하고 frontend client는 `openapi-typescript` codegen으로 생성한다. (기계 정본 우선순위는
   §0 헤더 참조 — 충돌 시 OpenAPI 우선.)

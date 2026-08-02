@@ -98,6 +98,11 @@ const NAV_GROUPS = [
         label: "POI 캐시 대상",
         icon: RouteIcon,
       },
+      {
+        href: "/ops/cache-target-streams",
+        label: "캐시 전파",
+        icon: ActivityIcon,
+      },
     ],
   },
   {

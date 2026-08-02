@@ -30,6 +30,7 @@ from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
 
 _LIVE_SECRET = "ops-live-test-secret-at-least-32-bytes"
+_RAW_UVICORN_IO_TIMEOUT_SECONDS = 30.0
 
 
 def _live_subprotocol(
@@ -86,6 +87,7 @@ class _RawWebSocketClient(asyncio.Protocol):
         self._request = request
         self.chunks: list[bytes] = []
         self.closed = asyncio.get_running_loop().create_future()
+        self.websocket_close_frame_received = asyncio.get_running_loop().create_future()
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         assert isinstance(transport, asyncio.Transport)
@@ -93,13 +95,31 @@ class _RawWebSocketClient(asyncio.Protocol):
 
     def data_received(self, data: bytes) -> None:
         self.chunks.append(bytes(data))
+        response = b"".join(self.chunks)
+        header_end = response.find(b"\r\n\r\n")
+        if header_end < 0:
+            return
+        frame = response[header_end + 4 :]
+        if len(frame) < 2 or frame[0] != 0x88 or frame[1] & 0x80:
+            return
+        payload_length = frame[1] & 0x7F
+        if (
+            payload_length < 126
+            and len(frame) >= payload_length + 2
+            and not self.websocket_close_frame_received.done()
+        ):
+            self.websocket_close_frame_received.set_result(None)
 
     def connection_lost(self, exc: Exception | None) -> None:
         if not self.closed.done():
             self.closed.set_result(exc)
 
 
-async def _capture_raw_ops_live_response(app: Any) -> list[bytes]:
+async def _capture_raw_ops_live_response(
+    app: Any,
+    *,
+    stop_after_websocket_close_frame: bool = False,
+) -> list[bytes]:
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(("127.0.0.1", 0))
@@ -145,13 +165,21 @@ async def _capture_raw_ops_live_response(app: Any) -> list[bytes]:
         )
         assert isinstance(created_transport, asyncio.Transport)
         transport = created_transport
-        await asyncio.wait_for(protocol.closed, timeout=2)
+        completion = (
+            protocol.websocket_close_frame_received
+            if stop_after_websocket_close_frame
+            else protocol.closed
+        )
+        await asyncio.wait_for(completion, timeout=_RAW_UVICORN_IO_TIMEOUT_SECONDS)
         return protocol.chunks
     finally:
         if transport is not None:
             transport.close()
         server.should_exit = True
-        await asyncio.wait_for(server_task, timeout=2)
+        await asyncio.wait_for(
+            server_task,
+            timeout=_RAW_UVICORN_IO_TIMEOUT_SECONDS,
+        )
         listener.close()
 
 
@@ -820,7 +848,10 @@ async def test_ops_live_real_uvicorn_separates_handshake_and_auth_close() -> Non
 
     app.dependency_overrides[get_session] = _fake_session
     for attempt in range(5):
-        chunks = await _capture_raw_ops_live_response(app)
+        chunks = await _capture_raw_ops_live_response(
+            app,
+            stop_after_websocket_close_frame=True,
+        )
         response = b"".join(chunks)
         header_end = response.index(b"\r\n\r\n") + 4
 
@@ -837,7 +868,7 @@ async def test_ops_live_real_uvicorn_separates_handshake_and_auth_close() -> Non
 
         assert response.startswith(b"HTTP/1.1 101 Switching Protocols\r\n")
         frame = response[header_end:]
-        assert frame[0] & 0x0F == 0x08
+        assert frame[0] == 0x88
         assert frame[1] & 0x80 == 0
         payload_length = frame[1] & 0x7F
         assert payload_length < 126

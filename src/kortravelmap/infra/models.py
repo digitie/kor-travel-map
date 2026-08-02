@@ -123,6 +123,19 @@ __all__ = [
     "DataIntegrityViolationRow",
     "PoiCacheTargetRow",
     "PoiCacheTargetFeatureLinkRow",
+    "PoiCacheTargetStreamRow",
+    "PoiCacheTargetRestoreFenceRow",
+    "PoiCacheTargetSourceHeadRow",
+    "PoiCacheTargetSourceEventRow",
+    "PoiCacheTargetRefreshMemberRow",
+    "PoiCacheTargetReconciliationRequestRow",
+    "PoiCacheTargetOutboxEventRow",
+    "PoiCacheTargetOutboxClaimRow",
+    "PoiCacheTargetOutboxDeliveryRow",
+    "PoiCacheTargetOutboxClaimEventRow",
+    "PoiCacheTargetSnapshotRow",
+    "PoiCacheTargetSnapshotItemRow",
+    "PoiCacheTargetSnapshotGcObservationRow",
     "ProviderRefreshPolicyRow",
     "DagsterScheduleAuditEventRow",
     "DagsterScheduleActiveClaimRow",
@@ -3599,8 +3612,16 @@ class PoiCacheTargetRow(Base):
         CheckConstraint(
             "external_system <> '' AND char_length(external_system) <= 112 "
             "AND external_system = "
-            f"btrim(external_system, {_CANONICAL_WHITESPACE_SQL})",
+            f"btrim(external_system, {_CANONICAL_WHITESPACE_SQL}) "
+            "AND external_system = normalize(external_system, NFC)",
             name=conv("ck_poi_cache_targets_external_system_identity"),
+        ),
+        CheckConstraint(
+            "target_key <> '' AND char_length(target_key) <= 512 "
+            "AND target_key = "
+            f"btrim(target_key, {_CANONICAL_WHITESPACE_SQL}) "
+            "AND target_key = normalize(target_key, NFC)",
+            name=conv("ck_poi_cache_targets_target_key_identity"),
         ),
         Index(
             "uq_poi_cache_targets_active_key",
@@ -3608,6 +3629,13 @@ class PoiCacheTargetRow(Base):
             "target_key",
             unique=True,
             postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "uq_poi_cache_targets_source_identity",
+            "target_id",
+            "external_system",
+            "target_key",
+            unique=True,
         ),
         Index(
             "idx_poi_cache_targets_coord_5179",
@@ -3760,6 +3788,1195 @@ class PoiCacheTargetFeatureLinkRow(Base):
         server_default=text("now()"),
     )
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PoiCacheTargetStreamRow(Base):
+    """외부 system별 cache target stream control."""
+
+    __tablename__ = "poi_cache_target_streams"
+    __table_args__ = (
+        CheckConstraint(
+            "external_system <> '' AND char_length(external_system) <= 112 "
+            "AND external_system = "
+            f"btrim(external_system, {_CANONICAL_WHITESPACE_SQL}) "
+            "AND external_system = normalize(external_system, NFC)",
+            name=conv("ck_cache_target_streams_external_system"),
+        ),
+        CheckConstraint(
+            "btrim(consumer_id) <> '' AND char_length(consumer_id) <= 128",
+            name=conv("ck_cache_target_streams_consumer"),
+        ),
+        CheckConstraint(
+            "restore_epoch > 0 AND control_version > 0",
+            name=conv("ck_cache_target_streams_versions"),
+        ),
+        CheckConstraint(
+            "status IN ('ready','fenced','blocked')",
+            name=conv("ck_cache_target_streams_status"),
+        ),
+        CheckConstraint(
+            "(status = 'blocked') = (blocked_event_id IS NOT NULL)",
+            name=conv("ck_cache_target_streams_blocked"),
+        ),
+        {"schema": "ops"},
+    )
+
+    external_system: Mapped[str] = mapped_column(Text, primary_key=True)
+    consumer_id: Mapped[str] = mapped_column(Text, nullable=False)
+    restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    control_version: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("1"),
+    )
+    status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'fenced'"),
+    )
+    blocked_event_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_target_outbox_events.event_id",
+            name="fk_cache_target_streams_blocked_event",
+            ondelete="RESTRICT",
+        ),
+    )
+    last_barrier_command_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ops.domain_commands.command_id",
+            name="fk_cache_target_streams_barrier_command",
+            ondelete="RESTRICT",
+        ),
+    )
+    consumer_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class PoiCacheTargetRestoreFenceRow(Base):
+    """restore epoch CAS와 barrier receipt의 불변 이력."""
+
+    __tablename__ = "poi_cache_target_restore_fences"
+    __table_args__ = (
+        CheckConstraint(
+            "request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_restore_fences_fingerprint"),
+        ),
+        CheckConstraint(
+            "restore_epoch = previous_restore_epoch + 1",
+            name=conv("ck_cache_target_restore_fences_epoch"),
+        ),
+        CheckConstraint(
+            "control_version = previous_control_version + 1",
+            name=conv("ck_cache_target_restore_fences_version"),
+        ),
+        CheckConstraint(
+            "superseded_delivery_count >= 0",
+            name=conv("ck_cache_target_restore_fences_superseded_count"),
+        ),
+        CheckConstraint(
+            "invalidated_claim_count >= 0",
+            name=conv("ck_cache_target_restore_fences_invalidated_claim_count"),
+        ),
+        CheckConstraint(
+            "(superseded_reconciliation_count = 0 "
+            "AND superseded_reconciliation_request_id IS NULL) OR "
+            "(superseded_reconciliation_count = 1 "
+            "AND superseded_reconciliation_request_id IS NOT NULL)",
+            name=conv("ck_cache_target_restore_fences_superseded_reconciliation"),
+        ),
+        CheckConstraint(
+            "btrim(reason) <> '' AND char_length(reason) <= 1000",
+            name=conv("ck_cache_target_restore_fences_reason"),
+        ),
+        UniqueConstraint(
+            "command_id",
+            name=conv("uq_cache_target_restore_fences_command"),
+        ),
+        UniqueConstraint(
+            "external_system",
+            "restore_epoch",
+            name=conv("uq_cache_target_restore_fences_epoch"),
+        ),
+        ForeignKeyConstraint(
+            ["external_system", "superseded_reconciliation_request_id"],
+            [
+                "ops.poi_cache_target_reconciliation_requests.external_system",
+                "ops.poi_cache_target_reconciliation_requests.request_id",
+            ],
+            name="fk_cache_target_restore_fences_superseded_reconciliation",
+            ondelete="RESTRICT",
+        ),
+        {"schema": "ops"},
+    )
+
+    fence_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    external_system: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "ops.poi_cache_target_streams.external_system",
+            name="fk_cache_target_restore_fences_stream",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    consumer_id: Mapped[str] = mapped_column(Text, nullable=False)
+    command_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ops.domain_commands.command_id",
+            name="fk_cache_target_restore_fences_command",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    previous_restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    previous_control_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    control_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    invalidated_claim_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    superseded_delivery_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    superseded_reconciliation_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    superseded_reconciliation_request_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class PoiCacheTargetSourceHeadRow(Base):
+    """natural key별 source generation head와 durable tombstone."""
+
+    __tablename__ = "poi_cache_target_source_heads"
+    __table_args__ = (
+        CheckConstraint(
+            "source_payload_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_source_heads_fingerprint"),
+        ),
+        CheckConstraint(
+            "target_key <> '' AND char_length(target_key) <= 512 "
+            "AND target_key = "
+            f"btrim(target_key, {_CANONICAL_WHITESPACE_SQL}) "
+            "AND target_key = normalize(target_key, NFC)",
+            name=conv("ck_cache_target_source_heads_key"),
+        ),
+        CheckConstraint(
+            "state IN ('active','deleted')",
+            name=conv("ck_cache_target_source_heads_state"),
+        ),
+        CheckConstraint(
+            "restore_epoch > 0 AND source_generation > 0 AND target_sequence >= 0",
+            name=conv("ck_cache_target_source_heads_versions"),
+        ),
+        CheckConstraint(
+            "state <> 'active' OR target_id IS NOT NULL",
+            name=conv("ck_cache_target_source_heads_active_target"),
+        ),
+        ForeignKeyConstraint(
+            ["target_id", "external_system", "target_key"],
+            [
+                "ops.poi_cache_targets.target_id",
+                "ops.poi_cache_targets.external_system",
+                "ops.poi_cache_targets.target_key",
+            ],
+            name=conv("fk_cache_target_source_heads_target"),
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "idx_cache_target_source_heads_target",
+            "target_id",
+            unique=True,
+            postgresql_where=text("target_id IS NOT NULL"),
+        ),
+        {"schema": "ops"},
+    )
+
+    external_system: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "ops.poi_cache_target_streams.external_system",
+            name="fk_cache_target_source_heads_stream",
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    target_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    target_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_payload_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    last_source_event_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_target_source_events.event_id",
+            name="fk_cache_target_source_heads_last_event",
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
+    target_sequence: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("0"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class PoiCacheTargetSourceEventRow(Base):
+    """source command의 immutable event/replay ledger."""
+
+    __tablename__ = "poi_cache_target_source_events"
+    __table_args__ = (
+        CheckConstraint(
+            "request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_source_events_request_fingerprint"),
+        ),
+        CheckConstraint(
+            "source_payload_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_source_events_payload_fingerprint"),
+        ),
+        CheckConstraint(
+            "operation IN ('upsert','delete')",
+            name=conv("ck_cache_target_source_events_operation"),
+        ),
+        CheckConstraint(
+            "outcome IN ('applied','stale')",
+            name=conv("ck_cache_target_source_events_outcome"),
+        ),
+        CheckConstraint(
+            "restore_epoch > 0 AND source_generation > 0",
+            name=conv("ck_cache_target_source_events_versions"),
+        ),
+        CheckConstraint(
+            "target_lock_version IS NULL OR target_lock_version > 0",
+            name=conv("ck_cache_target_source_events_target_lock_version"),
+        ),
+        CheckConstraint(
+            "outcome <> 'applied' OR "
+            "(target_id IS NOT NULL AND target_lock_version IS NOT NULL)",
+            name=conv("ck_cache_target_source_events_applied_target_receipt"),
+        ),
+        ForeignKeyConstraint(
+            ["external_system", "target_key"],
+            [
+                "ops.poi_cache_target_source_heads.external_system",
+                "ops.poi_cache_target_source_heads.target_key",
+            ],
+            name=conv("fk_cache_target_source_events_head"),
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "external_system",
+            "idempotency_key",
+            name=conv("uq_cache_target_source_events_idempotency"),
+        ),
+        UniqueConstraint(
+            "external_system",
+            "target_key",
+            "restore_epoch",
+            "source_generation",
+            name=conv("uq_cache_target_source_events_generation"),
+        ),
+        Index(
+            "idx_cache_target_source_events_head_time",
+            "external_system",
+            "target_key",
+            text("recorded_at DESC"),
+            "event_id",
+        ),
+        {"schema": "ops"},
+    )
+
+    event_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    external_system: Mapped[str] = mapped_column(Text, nullable=False)
+    target_key: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    operation: Mapped[str] = mapped_column(Text, nullable=False)
+    restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    source_payload_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    target_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_targets.target_id",
+            name="fk_cache_target_source_events_target",
+            ondelete="RESTRICT",
+        ),
+    )
+    target_lock_version: Mapped[int | None] = mapped_column(BigInteger)
+    refresh_request_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.feature_update_requests.request_id",
+            name="fk_cache_target_source_events_refresh_request",
+            ondelete="RESTRICT",
+        ),
+    )
+    job_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.import_jobs.job_id",
+            name="fk_cache_target_source_events_job",
+            ondelete="RESTRICT",
+        ),
+    )
+    domain_command_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ops.domain_commands.command_id",
+            name="fk_cache_target_source_events_domain_command",
+            ondelete="RESTRICT",
+        ),
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class PoiCacheTargetRefreshMemberRow(Base):
+    """refresh request 시작 시 캡처한 target source stamp."""
+
+    __tablename__ = "poi_cache_target_refresh_members"
+    __table_args__ = (
+        CheckConstraint(
+            "restore_epoch > 0 AND source_generation > 0",
+            name=conv("ck_cache_target_refresh_members_versions"),
+        ),
+        ForeignKeyConstraint(
+            ["external_system", "target_key"],
+            [
+                "ops.poi_cache_target_source_heads.external_system",
+                "ops.poi_cache_target_source_heads.target_key",
+            ],
+            name=conv("fk_cache_target_refresh_members_head"),
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "idx_cache_target_refresh_members_target",
+            "target_id",
+            "request_id",
+        ),
+        {"schema": "ops"},
+    )
+
+    request_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.feature_update_requests.request_id",
+            name="fk_cache_target_refresh_members_request",
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    target_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_targets.target_id",
+            name="fk_cache_target_refresh_members_target",
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    external_system: Mapped[str] = mapped_column(Text, nullable=False)
+    target_key: Mapped[str] = mapped_column(Text, nullable=False)
+    restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class PoiCacheTargetReconciliationRequestRow(Base):
+    """operator가 요청한 snapshot reconciliation lifecycle."""
+
+    __tablename__ = "poi_cache_target_reconciliation_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "btrim(reason) <> '' AND char_length(reason) <= 1000",
+            name=conv("ck_cache_target_reconciliation_requests_reason"),
+        ),
+        CheckConstraint(
+            "status IN ('preparing','running','succeeded','failed','superseded')",
+            name=conv("ck_cache_target_reconciliation_requests_status"),
+        ),
+        CheckConstraint(
+            "phase_version > 0",
+            name=conv("ck_cache_target_reconciliation_requests_phase_version"),
+        ),
+        CheckConstraint(
+            "expected_merkle_root IS NULL OR "
+            "expected_merkle_root ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_reconciliation_requests_expected_root"),
+        ),
+        CheckConstraint(
+            "actual_merkle_root IS NULL OR actual_merkle_root ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_reconciliation_requests_actual_root"),
+        ),
+        CheckConstraint(
+            "(status = 'preparing' AND started_at IS NOT NULL "
+            "AND completed_at IS NULL AND snapshot_id IS NULL "
+            "AND expected_merkle_root IS NULL AND actual_merkle_root IS NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'running' AND started_at IS NOT NULL "
+            "AND completed_at IS NULL AND snapshot_id IS NOT NULL "
+            "AND expected_merkle_root IS NOT NULL AND actual_merkle_root IS NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'succeeded' AND started_at IS NOT NULL "
+            "AND completed_at IS NOT NULL AND snapshot_id IS NOT NULL "
+            "AND expected_merkle_root IS NOT NULL AND actual_merkle_root IS NOT NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'failed' AND started_at IS NOT NULL "
+            "AND completed_at IS NOT NULL AND snapshot_id IS NOT NULL "
+            "AND expected_merkle_root IS NOT NULL AND actual_merkle_root IS NOT NULL "
+            "AND error_code IS NOT NULL) OR "
+            "(status = 'superseded' AND started_at IS NOT NULL "
+            "AND completed_at IS NOT NULL AND actual_merkle_root IS NULL "
+            "AND error_code = 'restore_fenced' AND "
+            "((snapshot_id IS NULL AND expected_merkle_root IS NULL) OR "
+            "(snapshot_id IS NOT NULL AND expected_merkle_root IS NOT NULL)))",
+            name=conv("ck_cache_target_reconciliation_requests_lifecycle"),
+        ),
+        UniqueConstraint(
+            "command_id",
+            name=conv("uq_cache_target_reconciliation_requests_command"),
+        ),
+        UniqueConstraint(
+            "external_system",
+            "request_id",
+            name=conv("uq_cache_target_reconciliation_requests_stream_request"),
+        ),
+        Index(
+            "idx_cache_target_reconciliation_requests_stream_status",
+            "external_system",
+            "status",
+            text("created_at DESC"),
+            "request_id",
+        ),
+        Index(
+            "idx_cache_target_reconciliation_requests_snapshot_status",
+            "snapshot_id",
+            "status",
+            postgresql_where=text("snapshot_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_cache_target_reconciliation_requests_active_stream",
+            "external_system",
+            unique=True,
+            postgresql_where=text("status IN ('preparing','running')"),
+        ),
+        {"schema": "ops"},
+    )
+
+    request_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    external_system: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "ops.poi_cache_target_streams.external_system",
+            name="fk_cache_target_reconciliation_requests_stream",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    command_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ops.domain_commands.command_id",
+            name="fk_cache_target_reconciliation_requests_command",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'preparing'"),
+    )
+    phase_version: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("1"),
+    )
+    snapshot_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_target_snapshots.snapshot_id",
+            name="fk_cache_target_reconciliation_requests_snapshot",
+            ondelete="RESTRICT",
+        ),
+    )
+    expected_merkle_root: Mapped[str | None] = mapped_column(Text)
+    actual_merkle_root: Mapped[str | None] = mapped_column(Text)
+    error_code: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PoiCacheTargetOutboxEventRow(Base):
+    """PinVi에 전달하는 immutable cache target result event."""
+
+    __tablename__ = "poi_cache_target_outbox_events"
+    __table_args__ = (
+        CheckConstraint(
+            "source_payload_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_outbox_source_fingerprint"),
+        ),
+        CheckConstraint(
+            "payload_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_outbox_payload_fingerprint"),
+        ),
+        CheckConstraint(
+            "event_type IN ("
+            "'cache_target.state_applied',"
+            "'cache_target.links_reconciled',"
+            "'refresh_request.status_changed',"
+            "'cache_target.reconciled'"
+            ")",
+            name=conv("ck_cache_target_outbox_event_type"),
+        ),
+        CheckConstraint(
+            "restore_epoch > 0 AND ("
+            "(event_scope = 'target' AND target_key IS NOT NULL "
+            "AND target_id IS NOT NULL AND source_generation > 0 "
+            "AND target_sequence > 0 AND event_type <> 'cache_target.reconciled') OR "
+            "(event_scope = 'stream' AND target_key IS NULL "
+            "AND target_id IS NULL AND source_generation IS NULL "
+            "AND target_sequence IS NULL AND event_type = 'cache_target.reconciled' "
+            "AND reconciliation_request_id IS NOT NULL))",
+            name=conv("ck_cache_target_outbox_versions"),
+        ),
+        CheckConstraint(
+            "event_scope IN ('target','stream')",
+            name=conv("ck_cache_target_outbox_scope"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(payload) = 'object'",
+            name=conv("ck_cache_target_outbox_payload"),
+        ),
+        ForeignKeyConstraint(
+            ["external_system", "target_key"],
+            [
+                "ops.poi_cache_target_source_heads.external_system",
+                "ops.poi_cache_target_source_heads.target_key",
+            ],
+            name=conv("fk_cache_target_outbox_head"),
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "relay_order",
+            name=conv("uq_cache_target_outbox_relay_order"),
+        ),
+        UniqueConstraint(
+            "external_system",
+            "target_key",
+            "restore_epoch",
+            "source_generation",
+            "target_sequence",
+            name=conv("uq_cache_target_outbox_semantic_order"),
+        ),
+        Index(
+            "idx_cache_target_outbox_stream_order",
+            "external_system",
+            "relay_order",
+        ),
+        Index(
+            "idx_cache_target_outbox_state_material_order",
+            "external_system",
+            text("relay_order DESC"),
+            postgresql_where=text("event_type = 'cache_target.state_applied'"),
+        ),
+        {"schema": "ops"},
+    )
+
+    event_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    relay_order: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    event_scope: Mapped[str] = mapped_column(Text, nullable=False)
+    external_system: Mapped[str] = mapped_column(Text, nullable=False)
+    target_key: Mapped[str | None] = mapped_column(Text)
+    target_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_targets.target_id",
+            name="fk_cache_target_outbox_target",
+            ondelete="RESTRICT",
+        ),
+    )
+    restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_generation: Mapped[int | None] = mapped_column(BigInteger)
+    target_sequence: Mapped[int | None] = mapped_column(BigInteger)
+    source_payload_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    source_event_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_target_source_events.event_id",
+            name="fk_cache_target_outbox_source_event",
+            ondelete="RESTRICT",
+        ),
+    )
+    refresh_request_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.feature_update_requests.request_id",
+            name="fk_cache_target_outbox_refresh_request",
+            ondelete="RESTRICT",
+        ),
+    )
+    job_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.import_jobs.job_id",
+            name="fk_cache_target_outbox_job",
+            ondelete="RESTRICT",
+        ),
+    )
+    domain_command_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ops.domain_commands.command_id",
+            name="fk_cache_target_outbox_domain_command",
+            ondelete="RESTRICT",
+        ),
+    )
+    reconciliation_request_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_target_reconciliation_requests.request_id",
+            name="fk_cache_target_outbox_reconciliation_request",
+            ondelete="RESTRICT",
+        ),
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class PoiCacheTargetOutboxClaimRow(Base):
+    """external system global stream의 단일 active lease."""
+
+    __tablename__ = "poi_cache_target_outbox_claims"
+    __table_args__ = (
+        CheckConstraint(
+            "request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_outbox_claims_fingerprint"),
+        ),
+        CheckConstraint(
+            "status IN ('active','acked','expired','invalidated')",
+            name=conv("ck_cache_target_outbox_claims_status"),
+        ),
+        CheckConstraint(
+            "first_relay_order > 0 AND last_relay_order >= first_relay_order",
+            name=conv("ck_cache_target_outbox_claims_order"),
+        ),
+        CheckConstraint(
+            "acked_through_relay_order IS NULL OR "
+            "acked_through_relay_order BETWEEN first_relay_order AND last_relay_order",
+            name=conv("ck_cache_target_outbox_claims_ack_order"),
+        ),
+        CheckConstraint(
+            "(status = 'active' AND completed_at IS NULL) OR "
+            "(status <> 'active' AND completed_at IS NOT NULL)",
+            name=conv("ck_cache_target_outbox_claims_completion"),
+        ),
+        UniqueConstraint(
+            "external_system",
+            "idempotency_key",
+            name=conv("uq_cache_target_outbox_claims_idempotency"),
+        ),
+        Index(
+            "uq_cache_target_outbox_claims_active_stream",
+            "external_system",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+        Index(
+            "idx_cache_target_outbox_claims_lease",
+            "lease_expires_at",
+            "external_system",
+            postgresql_where=text("status = 'active'"),
+        ),
+        {"schema": "ops"},
+    )
+
+    claim_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    external_system: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "ops.poi_cache_target_streams.external_system",
+            name="fk_cache_target_outbox_claims_stream",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    consumer_id: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    lease_token: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    first_relay_order: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_relay_order: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    acked_through_relay_order: Mapped[int | None] = mapped_column(BigInteger)
+    lease_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PoiCacheTargetOutboxDeliveryRow(Base):
+    """outbox event별 retry/dead/terminal 가변 전달 상태."""
+
+    __tablename__ = "poi_cache_target_outbox_deliveries"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','leased','retry','dead','delivered','superseded')",
+            name=conv("ck_cache_target_outbox_deliveries_status"),
+        ),
+        CheckConstraint(
+            "delivery_version > 0 AND attempt_count >= 0",
+            name=conv("ck_cache_target_outbox_deliveries_versions"),
+        ),
+        CheckConstraint(
+            "(status = 'leased') = "
+            "(claim_id IS NOT NULL AND lease_token IS NOT NULL "
+            "AND lease_expires_at IS NOT NULL)",
+            name=conv("ck_cache_target_outbox_deliveries_lease"),
+        ),
+        CheckConstraint(
+            "(status = 'delivered') = (delivered_at IS NOT NULL)",
+            name=conv("ck_cache_target_outbox_deliveries_delivered"),
+        ),
+        CheckConstraint(
+            "(status = 'superseded') = (superseded_at IS NOT NULL)",
+            name=conv("ck_cache_target_outbox_deliveries_superseded"),
+        ),
+        CheckConstraint(
+            "error_class IS NULL OR error_class IN ('transient','permanent')",
+            name=conv("ck_cache_target_outbox_deliveries_error_class"),
+        ),
+        CheckConstraint(
+            "error_fingerprint IS NULL OR error_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_outbox_deliveries_error_fingerprint"),
+        ),
+        Index(
+            "idx_cache_target_outbox_deliveries_due",
+            "available_at",
+            "event_id",
+            postgresql_where=text("status IN ('pending','retry')"),
+        ),
+        Index(
+            "idx_cache_target_outbox_deliveries_claim",
+            "claim_id",
+            "event_id",
+            postgresql_where=text("claim_id IS NOT NULL"),
+        ),
+        {"schema": "ops"},
+    )
+
+    event_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_target_outbox_events.event_id",
+            name="fk_cache_target_outbox_deliveries_event",
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    delivery_version: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("1"),
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    claim_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_target_outbox_claims.claim_id",
+            name="fk_cache_target_outbox_deliveries_claim",
+            ondelete="RESTRICT",
+        ),
+    )
+    lease_token: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_class: Mapped[str | None] = mapped_column(Text)
+    error_code: Mapped[str | None] = mapped_column(Text)
+    error_fingerprint: Mapped[str | None] = mapped_column(Text)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
+class PoiCacheTargetOutboxClaimEventRow(Base):
+    """claim event의 consumer 적용과 contiguous ACK 사이 durable gap."""
+
+    __tablename__ = "poi_cache_target_outbox_claim_events"
+    __table_args__ = (
+        CheckConstraint(
+            "relay_order > 0 AND position > 0",
+            name=conv("ck_cache_target_claim_events_order"),
+        ),
+        CheckConstraint(
+            "ack_payload_fingerprint IS NULL OR "
+            "ack_payload_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_claim_events_fingerprint"),
+        ),
+        CheckConstraint(
+            "prefix_acked_at IS NULL OR consumer_applied_at IS NOT NULL",
+            name=conv("ck_cache_target_claim_events_ack"),
+        ),
+        UniqueConstraint(
+            "claim_id",
+            "relay_order",
+            name=conv("uq_cache_target_claim_events_order"),
+        ),
+        UniqueConstraint(
+            "claim_id",
+            "position",
+            name=conv("uq_cache_target_claim_events_position"),
+        ),
+        Index(
+            "idx_cache_target_claim_events_applied_gap",
+            "claim_id",
+            "relay_order",
+            postgresql_where=text(
+                "consumer_applied_at IS NOT NULL AND prefix_acked_at IS NULL"
+            ),
+        ),
+        {"schema": "ops"},
+    )
+
+    claim_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_target_outbox_claims.claim_id",
+            name="fk_cache_target_claim_events_claim",
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    event_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_target_outbox_events.event_id",
+            name="fk_cache_target_claim_events_event",
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    relay_order: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    consumer_applied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    prefix_acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ack_payload_fingerprint: Mapped[str | None] = mapped_column(Text)
+
+
+class PoiCacheTargetSnapshotRow(Base):
+    """한 MVCC view에서 만든 fixed paged reconciliation snapshot."""
+
+    __tablename__ = "poi_cache_target_snapshots"
+    __table_args__ = (
+        CheckConstraint(
+            "merkle_root ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_snapshots_merkle_root"),
+        ),
+        CheckConstraint(
+            "restore_epoch > 0 AND high_watermark_relay_order >= 0 "
+            "AND material_high_watermark_relay_order >= 0 "
+            "AND high_watermark_relay_order >= material_high_watermark_relay_order "
+            "AND item_count >= 0",
+            name=conv("ck_cache_target_snapshots_counts"),
+        ),
+        CheckConstraint(
+            "expires_at > created_at",
+            name=conv("ck_cache_target_snapshots_expiry"),
+        ),
+        UniqueConstraint(
+            "snapshot_id",
+            "external_system",
+            name=conv("uq_cache_target_snapshots_stream"),
+        ),
+        Index(
+            "idx_cache_target_snapshots_stream_time",
+            "external_system",
+            text("created_at DESC"),
+            "snapshot_id",
+        ),
+        Index(
+            "idx_cache_target_snapshots_expiry",
+            "expires_at",
+            "snapshot_id",
+        ),
+        Index(
+            "idx_cache_target_snapshots_stream_expiry",
+            "external_system",
+            "expires_at",
+            "snapshot_id",
+        ),
+        {"schema": "ops"},
+    )
+
+    snapshot_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    external_system: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "ops.poi_cache_target_streams.external_system",
+            name="fk_cache_target_snapshots_stream",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    high_watermark_relay_order: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+    material_high_watermark_relay_order: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+    item_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    merkle_root: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PoiCacheTargetSnapshotItemRow(Base):
+    """snapshot에 고정한 NFC byte-order canonical row."""
+
+    __tablename__ = "poi_cache_target_snapshot_items"
+    __table_args__ = (
+        CheckConstraint(
+            "source_payload_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_cache_target_snapshot_items_fingerprint"),
+        ),
+        CheckConstraint(
+            "row_number > 0 AND source_generation > 0",
+            name=conv("ck_cache_target_snapshot_items_versions"),
+        ),
+        CheckConstraint(
+            "state IN ('active','deleted')",
+            name=conv("ck_cache_target_snapshot_items_state"),
+        ),
+        ForeignKeyConstraint(
+            ["snapshot_id", "external_system"],
+            [
+                "ops.poi_cache_target_snapshots.snapshot_id",
+                "ops.poi_cache_target_snapshots.external_system",
+            ],
+            name=conv("fk_cache_target_snapshot_items_snapshot"),
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "snapshot_id",
+            "external_system",
+            "target_key",
+            name=conv("uq_cache_target_snapshot_items_key"),
+        ),
+        {"schema": "ops"},
+    )
+
+    snapshot_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    row_number: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    external_system: Mapped[str] = mapped_column(Text, nullable=False)
+    target_key: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    source_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_payload_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class PoiCacheTargetSnapshotGcObservationRow(Base):
+    """Acquired background GC run별 referenced snapshot 보존 추세."""
+
+    __tablename__ = "poi_cache_target_snapshot_gc_observations"
+    __table_args__ = (
+        CheckConstraint(
+            "(previous_observation_run_id IS NULL "
+            "AND previous_observed_at IS NULL "
+            "AND previous_referenced_items IS NULL "
+            "AND previous_referenced_headers IS NULL) OR "
+            "(previous_observation_run_id IS NOT NULL "
+            "AND previous_observation_run_id = btrim(previous_observation_run_id) "
+            "AND previous_observation_run_id <> '' "
+            "AND length(previous_observation_run_id) <= 255 "
+            "AND previous_observation_run_id <> dagster_run_id "
+            "AND previous_observed_at IS NOT NULL "
+            "AND previous_referenced_items IS NOT NULL "
+            "AND previous_referenced_items >= 0 "
+            "AND previous_referenced_headers IS NOT NULL "
+            "AND previous_referenced_headers >= 0)",
+            name=conv("ck_cache_target_snapshot_gc_observations_previous"),
+        ),
+        CheckConstraint(
+            "dagster_run_id = btrim(dagster_run_id) "
+            "AND dagster_run_id <> '' "
+            "AND length(dagster_run_id) <= 255",
+            name=conv("ck_cache_target_snapshot_gc_observations_run_id"),
+        ),
+        CheckConstraint(
+            "referenced_items >= 0 AND referenced_headers >= 0",
+            name=conv("ck_cache_target_snapshot_gc_observations_counts"),
+        ),
+        CheckConstraint(
+            "growth_min_interval_seconds BETWEEN 1 AND 86400",
+            name=conv("ck_cache_target_snapshot_gc_observations_growth_interval"),
+        ),
+        CheckConstraint(
+            "(growth_baseline_run_id IS NULL "
+            "AND growth_baseline_observed_at IS NULL "
+            "AND growth_baseline_referenced_items IS NULL "
+            "AND growth_baseline_referenced_headers IS NULL) OR "
+            "(growth_baseline_run_id IS NOT NULL "
+            "AND growth_baseline_run_id = btrim(growth_baseline_run_id) "
+            "AND growth_baseline_run_id <> '' "
+            "AND length(growth_baseline_run_id) <= 255 "
+            "AND growth_baseline_run_id <> dagster_run_id "
+            "AND growth_baseline_observed_at IS NOT NULL "
+            "AND growth_baseline_referenced_items IS NOT NULL "
+            "AND growth_baseline_referenced_items >= 0 "
+            "AND growth_baseline_referenced_headers IS NOT NULL "
+            "AND growth_baseline_referenced_headers >= 0)",
+            name=conv("ck_cache_target_snapshot_gc_observations_growth_baseline"),
+        ),
+        CheckConstraint(
+            "(growth_baseline_run_id IS NULL "
+            "AND growth_baseline_eligible = ("
+            "previous_observation_run_id IS NULL "
+            "OR observed_at > previous_observed_at)) OR "
+            "(growth_baseline_run_id IS NOT NULL "
+            "AND growth_baseline_eligible = ("
+            "observed_at > growth_baseline_observed_at "
+            "AND (previous_observation_run_id IS NULL "
+            "OR observed_at > previous_observed_at) "
+            "AND extract(epoch FROM observed_at - growth_baseline_observed_at) "
+            ">= growth_min_interval_seconds))",
+            name=conv("ck_cache_target_snapshot_gc_observations_eligibility"),
+        ),
+        UniqueConstraint(
+            "dagster_run_id",
+            name=conv("uq_cache_target_snapshot_gc_observations_run_id"),
+        ),
+        Index(
+            "idx_cache_target_snapshot_gc_observations_time",
+            "observed_at",
+        ),
+        Index(
+            "idx_cache_target_snapshot_gc_observations_growth_baseline",
+            "observation_id",
+            postgresql_where=text("growth_baseline_eligible"),
+        ),
+        {"schema": "ops"},
+    )
+
+    observation_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
+    dagster_run_id: Mapped[str] = mapped_column(Text, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
+    referenced_items: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    referenced_headers: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    previous_observation_run_id: Mapped[str | None] = mapped_column(Text)
+    previous_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    previous_referenced_items: Mapped[int | None] = mapped_column(BigInteger)
+    previous_referenced_headers: Mapped[int | None] = mapped_column(BigInteger)
+    growth_baseline_run_id: Mapped[str | None] = mapped_column(Text)
+    growth_baseline_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    growth_baseline_referenced_items: Mapped[int | None] = mapped_column(BigInteger)
+    growth_baseline_referenced_headers: Mapped[int | None] = mapped_column(BigInteger)
+    growth_baseline_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    growth_min_interval_seconds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False
+    )
 
 
 class ProviderRefreshPolicyRow(Base):

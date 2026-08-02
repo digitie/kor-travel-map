@@ -3504,6 +3504,36 @@ def test_create_request_idempotency_replays_and_rejects_mismatch(
             "/v1/ops/pipeline/requests",
             {
                 "scope": {
+                    "type": "cache_target_keys",
+                    "external_system": "pinvi",
+                    "target_keys": ["poi:e\u0301"],
+                }
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests",
+            {
+                "scope": {
+                    "type": "cache_target_keys",
+                    "external_system": " pinvi ",
+                    "target_keys": ["poi-1"],
+                }
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests",
+            {
+                "scope": {
+                    "type": "cache_target_keys",
+                    "external_system": "pinvi",
+                    "target_keys": ["x" * 513],
+                }
+            },
+        ),
+        (
+            "/v1/ops/pipeline/requests",
+            {
+                "scope": {
                     "type": "center_radius",
                     "center": {"lon": "127.0", "lat": 37.0},
                     "radius_km": 5,

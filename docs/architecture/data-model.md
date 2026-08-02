@@ -2533,7 +2533,7 @@ CREATE INDEX idx_feature_change_feature
 - provider reload와 snapshot 누락 정리는 `data_origin='user_request'` row를 삭제하거나
   되살리지 않는다.
 
-### 9.10 `ops.poi_cache_targets` / `ops.poi_cache_target_feature_links` (ADR-045/065, alembic 0009/0058)
+### 9.10 `ops.poi_cache_targets` / generation·outbox 계열 (ADR-045/065/081)
 
 외부 앱 POI/cache target을 `external_system + target_key + 좌표 + 반경`으로 저장하고,
 target 주변 feature와 다대다로 연결한다. 목적은 전체 provider 재적재 없이 저장 POI
@@ -2556,6 +2556,75 @@ target 주변 feature와 다대다로 연결한다. 목적은 전체 provider �
 repository는 `infra.poi_cache_target_repo`가 제공한다. `infra.scope_repo`의
 `resolve_cache_target_keys`와 `infra.feature_update_executor`는 active target 주변
 feature를 계산하고 `ops.poi_cache_target_feature_links`를 재계산한다.
+
+T-VN-41 producer foundation은 projection row와 source 순서를 분리한다. 신규 정규화 table은
+다음 책임을 각각 하나만 소유한다.
+
+| 상태 | identity | 책임 |
+|---|---|---|
+| source control/epoch | `external_system`, `(external_system, restore_epoch)` | Map 소유 양의 epoch, restore fence ETag/barrier와 epoch 이력 |
+| source head | `(external_system, target_key)` | 마지막 source generation, target UUID 또는 durable tombstone |
+| source event | producer `event_id` | Idempotency-Key command, request fingerprint, 적용/replay 결과의 불변 이력 |
+| refresh member | `(request_id, target_id)` | request 시작 시 epoch/generation을 캡처한 late-result fence |
+| outbox event | `event_id`, unique `relay_order` | target/link/refresh/reconciliation 결과와 같은 transaction에서 만든 불변 typed event |
+| delivery/claim | event/claim identity | lease, attempt, retry, contiguous ACK, dead/replay와 epoch supersession 상태 |
+| fixed snapshot | `snapshot_id`, `(snapshot_id, row_number)` | 한 MVCC view의 epoch/high-watermark/head set과 Merkle root를 immutable page로 고정 |
+| reconciliation | `request_id`, unique `command_id` | checksum receipt, halt/resume와 terminal 성공/실패/복원 대체 이력 |
+| GC referenced 관측 | `observation_id`, unique `dagster_run_id` | acquired GC run의 referenced count, 복사된 증가율 기준선과 승격 여부 |
+
+`source_generation`은 target natural key별 PinVi desired-state generation이고,
+`target_sequence`는 같은 source generation에서 Map이 만든 결과 순서다. 기존
+`feature_update_requests.generation` queue CAS와 target `lock_version` ETag는 그대로 별도다.
+soft delete 뒤 새 target UUID가 생겨도 source head/tombstone은 제거하지 않는다.
+
+outbox event의 `event_type`은 ADR-081의 네 strict 값만 허용한다. `event_scope='target'`인
+state/link/refresh는 natural key, historical target UUID, generation, target sequence가 모두
+필수다. `event_scope='stream'`은 `cache_target.reconciled`만 허용하고 네 target tuple은 모두
+`NULL`이다. 따라서 빈/all-tombstone snapshot도 fake target 없이 reconciliation event를 남긴다.
+payload는 versioned typed schema와 `source_payload_fingerprint`를 가지며 source event, target,
+refresh request, job, domain command와의 linkage를 보존한다. `ops.ops_live_topic_revisions`는
+invalidation signal로만 유지하고 event stream으로 사용하지 않는다.
+
+delivery status는 `pending|leased|retry|dead|delivered|superseded`다. restore fence는 새 epoch보다
+낮은 모든 non-delivered 상태를 같은 transaction에서 terminal `superseded`로 바꾸고 lease binding을
+지운다. `delivered`는 그대로 보존한다. `superseded_at`과 fence별 `superseded_delivery_count`가 audit
+근거이며 exact fence replay는 delivery version을 다시 올리지 않는다. stream 상태의
+`superseded_count`는 역사적 종결 수이고 backlog/dead 집계에는 포함하지 않는다.
+
+restore fence receipt는 최초 `invalidated_claim_count`, `superseded_delivery_count`,
+`superseded_reconciliation_count`와 nullable `superseded_reconciliation_request_id`를 불변 저장한다.
+reconciliation의 `(external_system, request_id)` unique key와 fence의
+`(external_system, superseded_reconciliation_request_id)` composite FK가 request UUID뿐 아니라
+stream 소속까지 같은 DB relation으로 결박한다. nullable request ID는 `MATCH SIMPLE`로 허용하되
+기존 count/UUID CHECK가 `0/null`만 허용하므로 부분 참조가 유효한 receipt로 가장할 수 없다.
+reconciliation은 stream별 `preparing|running` partial unique index로 active 하나만 허용한다. fence가
+active request를 만나면 `status='superseded'`, `error_code='restore_fenced'`, `completed_at=now()`와
+증가한 `phase_version`으로 원자 종결한다. preparing 출발은 snapshot/expected root가 `NULL`, running
+출발은 둘 다 non-`NULL`인 채 보존하고 두 경우 모두 actual root는 `NULL`이다. 이 shape는 DB CHECK로
+강제하며 exact fence replay는 receipt count/UUID나 request phase version을 바꾸지 않는다.
+
+fixed snapshot은 stream epoch, outbox high-watermark, active/tombstone head 전체를 한 SQL MVCC
+view에서 읽어 ADR-081 Merkle v1으로 checksum한다. page 중 새 write가 commit돼도 immutable item은
+바뀌지 않는다. reconciliation은 먼저 claim을 무효화하고 stream을 halt한다. exact checksum,
+동일 epoch, dead-letter 0을 모두 확인해야만 enable하며 mismatch terminal receipt는 다른 checksum으로
+resume할 수 없다. legacy target에는 임의 epoch를 백필하지 않으며 첫 권위 snapshot이 head를 채택한다.
+
+`ops.poi_cache_target_snapshot_gc_observations`는 감사 snapshot 자체가 아니라 그 개수를 다시 셀 수
+있는 파생 운영 관측이다. 새 행은 직전 acquired 행의 run/time/count와 마지막
+`growth_baseline_eligible=true` 행의 run/time/count를 서로 다른 컬럼에 복사한다. 감소 경보는 직전
+acquired count와 비교하고 증가율은 적격 baseline과 비교한다. DB 시각이 적격 baseline과 직전 acquired
+시각보다 모두 전진했고 run에 영속된 최소
+간격을 충족한 행만 다음 기준선으로
+승격한다. 따라서 짧은 재실행·동일/역행 DB 시각 표본은 감사할 수 있지만 후속 증가율 기준선을
+오염시키지 않는다. count 감소는 간격과 무관한 inventory-loss 경보다. run ID unique는 retry가 최초
+관측·두 기준선·최소 간격 분류를 바꾸지 못하게 한다. DB CHECK도 baseline all-or-none과
+`growth_baseline_eligible` 시간식을 재계산해 raw writer 우회를 막는다. 기본 90일 retention은 `observed_at` index로
+정리하고 partial eligible index로 기준선을 찾는다.
+
+이 테이블은 파생·폐기 가능한 데이터이므로 앱 바이너리만 0077 호환 버전으로 rollback할 때 DB는
+0078에 두고 테이블과 관측을 보존한다. 정상 복구는 0078 이상 앱으로 forward 배포하는 것이다.
+명시적 Alembic downgrade만 테이블을 파괴하며, 다시 0078로 upgrade하면 빈 테이블로 재생성되어 첫
+acquired run이 새 기준선이 된다. snapshot/reconciliation 원본은 이 경로에서 삭제되지 않는다.
 
 ### 9.11 `ops.provider_refresh_policies` (ADR-045 T-205c, alembic 0009/0049/0056)
 

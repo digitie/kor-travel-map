@@ -19,6 +19,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.advisory_lock import advisory_lock_key
+from kortravelmap.infra.cache_target_event_repo import (
+    append_cache_target_links_reconciled_events,
+    append_cache_target_refresh_status_events,
+    capture_cache_target_refresh_members_by_keys,
+    lock_cache_target_result_streams,
+)
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
     FeatureUpdateRequest,
@@ -472,10 +478,17 @@ async def build_feature_update_execution_plan(
 async def _sync_cache_target_links(
     session: AsyncSession,
     resolution: ScopeResolution,
+    *,
+    request: FeatureUpdateRequest,
 ) -> None:
-    await sync_poi_cache_target_feature_links(
+    await lock_cache_target_result_streams(
         session,
-        target_ids=tuple(target.target_id for target in resolution.cache_targets),
+        request_id=request.request_id,
+    )
+    target_ids = tuple(target.target_id for target in resolution.cache_targets)
+    links = await sync_poi_cache_target_feature_links(
+        session,
+        target_ids=target_ids,
         candidates=tuple(
             PoiCacheTargetFeatureLinkCandidate(
                 target_id=match.target_id,
@@ -487,6 +500,17 @@ async def _sync_cache_target_links(
             )
             for match in resolution.cache_target_matches
         ),
+    )
+    active_link_counts = dict.fromkeys(target_ids, 0)
+    for link in links:
+        active_link_counts[link.target_id] = (
+            active_link_counts.get(link.target_id, 0) + 1
+        )
+    await append_cache_target_links_reconciled_events(
+        session,
+        request_id=request.request_id,
+        job_id=request.job_id,
+        active_link_counts=active_link_counts,
     )
 
 
@@ -688,6 +712,10 @@ async def _finish_failed_execution(
                 expected_generation=request.generation,
                 owner_dagster_run_id=owner_dagster_run_id,
             )
+            await lock_cache_target_result_streams(
+                session,
+                request_id=request.request_id,
+            )
             await mark_poi_cache_targets_refresh_failed(session, target_ids)
             failed = await finish_update_request(
                 session,
@@ -699,6 +727,13 @@ async def _finish_failed_execution(
             )
             if failed is None:
                 raise _FeatureUpdateExecutionStopped
+            await append_cache_target_refresh_status_events(
+                session,
+                request_id=failed.request_id,
+                job_id=failed.job_id,
+                status="failed",
+                error_code=event_code,
+            )
             if event_code is not None:
                 event = await record_import_job_event(
                     session,
@@ -903,6 +938,21 @@ async def _execute_feature_update_request_locked(
             if claimed is None:
                 raise _FeatureUpdateExecutionStopped
             started = claimed
+            if started.scope_type == "cache_target_keys":
+                await capture_cache_target_refresh_members_by_keys(
+                    session,
+                    request_id=started.request_id,
+                    external_system=str(started.scope["external_system"]),
+                    target_keys=tuple(
+                        str(value) for value in started.scope["target_keys"]
+                    ),
+                )
+            await append_cache_target_refresh_status_events(
+                session,
+                request_id=started.request_id,
+                job_id=started.job_id,
+                status="running",
+            )
 
         async with session.begin():
             await _guard_execution_phase(
@@ -982,6 +1032,13 @@ async def _execute_feature_update_request_locked(
                 expected_generation=started.generation,
                 owner_dagster_run_id=dagster_run_id,
             )
+            # 공개 capture API는 scope 종류와 무관하게 request member를 결박할 수 있다.
+            # final target/link mutation 전에 member stream을 모두 선취해 source writer와
+            # 같은 stream → target 잠금 순서를 유지한다.
+            await lock_cache_target_result_streams(
+                session,
+                request_id=started.request_id,
+            )
             final_resolution = plan.resolution
             if started.scope_type == "cache_target_keys":
                 final_resolution = await _final_resolution(
@@ -989,7 +1046,11 @@ async def _execute_feature_update_request_locked(
                     started,
                     sigungu_resolver=sigungu_resolver,
                 )
-                await _sync_cache_target_links(session, final_resolution)
+                await _sync_cache_target_links(
+                    session,
+                    final_resolution,
+                    request=started,
+                )
 
             final_matched_scope = _matched_scope(
                 final_resolution,
@@ -1019,6 +1080,12 @@ async def _execute_feature_update_request_locked(
             )
             if done is None:
                 raise _FeatureUpdateExecutionStopped
+            await append_cache_target_refresh_status_events(
+                session,
+                request_id=done.request_id,
+                job_id=done.job_id,
+                status="done",
+            )
         return FeatureUpdateExecutionResult(
             request=done,
             plan=FeatureUpdateExecutionPlan(

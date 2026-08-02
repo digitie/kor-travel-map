@@ -200,7 +200,8 @@ CREATE INDEX idx_poi_cache_targets_next_refresh
 
 Alembic 0058의 BEFORE UPDATE trigger는 caller가 어떤 값을 보내더라도
 `NEW.lock_version = OLD.lock_version + 1`을 강제한다. HTTP strong ETag와 body `entity_tag`는
-`"{lowercase-canonical-uuid}:{positive-version}"`이다.
+따옴표 자체를 포함한 `"{lowercase-canonical-uuid}:{positive-version}"` raw 문자열이다. consumer는
+이를 분해·재합성하지 않고 응답 header와 body 값을 그대로 `If-Match`에 사용한다.
 
 ### 6.2 `ops.poi_cache_target_feature_links`
 
@@ -567,7 +568,38 @@ DB 규칙:
 4. ✅ `scope.type='cache_target_keys'` dry-run/실행 scope 해석.
 5. ✅ target feature link 계산과 저장(T-206d executor).
 6. ✅ Dagster queue 실행 연결(T-208e sensor).
-7. Admin UI target 목록/상세/정책 편집(backend API 완료 후 후속 UI 작업).
+7. ✅ Admin UI target 목록/상세/등록/삭제. relay/dead/reconciliation 상태와 recovery action은
+   T-VN-41 producer foundation에서 확장한다.
+
+### 11.1 vNext generation/outbox producer foundation (ADR-081, T-VN-41)
+
+기존 admin target resource는 운영자 수동 관리와 ETag CAS를 유지한다. PinVi 전파는 admin route를
+재사용하지 않고 ServiceToken 전용 `/v1/service/cache-targets/*`, refresh operation, stream
+control, pull claim/ACK/NACK, dead/replay, fixed snapshot resource를 사용한다.
+
+`feature_update_requests.generation`, target `lock_version`, Map `restore_epoch`, PinVi
+`source_generation`, result `target_sequence`, delivery `relay_order`는 서로 다른 값이다. 특히
+source generation을 target row에만 저장하지 않는다. 별도 natural-key head와 durable tombstone이
+삭제 후 재생성까지 fence하고, producer event ledger가 Idempotency-Key/body/result replay를 보존한다.
+
+target/link/refresh 결과와 strict typed outbox event는 같은 transaction에서 기록한다. relay I/O는
+critical write transaction에 없고, PinVi가 lease claim을 pull한 뒤 자기 DB에 inbox+projection을
+commit하고 contiguous global prefix를 ACK한다. permanent poison은 dead letter로 stream을 막으며
+같은 event를 replay하고 fixed snapshot checksum이 다시 맞기 전에는 ready가 아니다.
+
+restore fence는 새 epoch보다 낮은 `pending|retry|leased|dead` delivery를 같은 transaction에서
+terminal `superseded`로 종결한다. 구 dead도 새 epoch의 DLQ·replay·dead 집계에서 제외하고, claim은
+현재 epoch event만 선택한다. 운영 status는 backlog와 별도로 누적 `superseded_count`를 보여 준다.
+동시에 active reconciliation은 terminal `superseded`/`restore_fenced`로 종결하고 active slot을
+비운다. fence receipt와 service 응답은 claim/delivery/reconciliation count 및 대체 request UUID를
+고정하므로 재시도도 같은 결과를 반환하고 새 epoch reconciliation은 즉시 begin할 수 있다.
+
+snapshot checksum은 active와 tombstone을 모두 포함한 ADR-081 Merkle v1이다. Map/PinVi는
+`cache-target-source-v1` canonical serializer golden vector와 pinned service OpenAPI를 함께
+검증한다. 성공 reconciliation event는 request UUID와 그 request에 seal된 fixed snapshot UUID를
+exact payload에 함께 기록하고 expected root를 envelope fingerprint에도 반복해 인과관계를 고정한다.
+producer foundation만으로 task를 완료 표시하지 않으며 paired PinVi consumer와 n150
+isolated live 증명 뒤에만 `T-VN-41A/B/C`를 닫는다.
 
 ## 12. 테스트 기준
 
@@ -580,3 +612,14 @@ DB 규칙:
 - provider override가 rate limit을 넘으면 422.
 - `GET /features/nearby/by-target` 목록 응답에 detail JSONB/raw payload가 없다.
 - 모든 응답 item에 KST aware `last_updated_at`이 있다.
+- same event/body retry는 최초 결과를 replay하고 다른 body는 `409`다.
+- 낮은 source generation, 과거 restore epoch, tombstone보다 오래된 create는 projection을 바꾸지 않는다.
+- target/link/refresh transaction rollback은 대응 outbox event도 남기지 않는다.
+- claim crash/lease expiry 뒤 동일 event가 재전달돼도 consumer side effect는 0회 추가다.
+- global cursor는 target semantic precedence에 쓰이지 않고 ACK는 contiguous prefix만 전진한다.
+- permanent NACK/dead letter는 후속 order를 block하고 동일 event replay+Merkle 일치 뒤에만 해제된다.
+- restore fence 뒤 구 epoch non-delivered는 모두 superseded이고 old dead는 DLQ/claim을 막지 않는다.
+- 같은 fence command replay는 superseded delivery version을 다시 증가시키지 않는다.
+- preparing/running 중 restore fence가 오면 구 request의 snapshot/seal/completion은 모두
+  `reconciliation_superseded`이고 새 epoch begin은 즉시 성공한다.
+- fence exact replay는 최초 무효화/대체 count, 대체 reconciliation UUID와 모든 phase version을 보존한다.

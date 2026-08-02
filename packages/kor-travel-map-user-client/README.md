@@ -11,9 +11,8 @@ ADR-048/T-216g 기계 정본)에서 `openapi-typescript`로 생성한 **TypeScri
   gate(`gen:types:check`)로 spec과 고정한다.
 - T-222b부터 `BeachPublicView`/`FestivalPublicView`와 `/v1/public/*` 공개 해수욕장·
   축제 view 경로를 named alias와 compile-time 경로 단언에 포함한다.
-- T-VN-16C weather batch는 sparse `targets[]`와 target-local `cards[]`를 사용한다.
-  `found` item의 `card_key`로 같은 target의 `WeatherBatchCard`를 찾아야 하며 item에
-  metric을 직접 기대하지 않는다.
+- `RoutePolicy.SERVICE`인 feature/weather batch와 cache-target 표면은 이 사용자
+  산출물에 포함하지 않는다. 서버 간 소비자는 `openapi.service.json`을 별도로 pin한다.
 
 ## 인증 계약
 
@@ -34,8 +33,8 @@ ADR-048/T-216g 기계 정본)에서 `openapi-typescript`로 생성한 **TypeScri
    안전하다.
 2. **자체 codegen** — 같은 `openapi.user.json`을 같은 `openapi-typescript` 버전
    (`package.json` devDependencies 참조)으로 생성. 본 패키지의 컴파일 타임 표면
-   단언(`_SurfaceAssertions`)이 ADR-048 불변식(batch `found`/`meta.page`/평면
-   `lon`·`lat`/`/v1` 경로)을 CI에서 보증한다.
+   단언(`_SurfaceAssertions`)이 ADR-048 불변식(`meta.page`/평면 `lon`·`lat`/
+   공개 `/v1` 경로)을 CI에서 보증한다.
 
 ## 갱신 절차 (본 repo)
 

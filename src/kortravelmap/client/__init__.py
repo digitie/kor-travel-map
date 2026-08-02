@@ -39,9 +39,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from time import monotonic
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.core.dedup import find_dedup_candidates, find_sibling_candidates
@@ -60,7 +62,7 @@ from kortravelmap.enrichment import (
     find_place_phone_candidates,
 )
 from kortravelmap.infra import feature_update_repo as fur_repo
-from kortravelmap.infra.advisory_lock import advisory_lock
+from kortravelmap.infra.advisory_lock import advisory_lock, try_advisory_lock
 from kortravelmap.infra.batch_dag import (
     BatchDagCancellationWon,
     BatchDagMvPrepared,
@@ -75,6 +77,15 @@ from kortravelmap.infra.batch_dag import (
     reload_batch_phase_loss_result,
     run_batch_consistency_phase,
     start_batch_mv_phase,
+)
+from kortravelmap.infra.cache_target_reconciliation_repo import (
+    observe_expired_cache_target_snapshot_backlog as repo_observe_cache_target_snapshot_backlog,
+)
+from kortravelmap.infra.cache_target_reconciliation_repo import (
+    prune_expired_cache_target_snapshots_batch as repo_prune_cache_target_snapshots_batch,
+)
+from kortravelmap.infra.cache_target_snapshot_gc_observation_repo import (
+    record_cache_target_snapshot_gc_observation as repo_record_cache_target_snapshot_gc_observation,
 )
 from kortravelmap.infra.consistency import (
     DEDUP_PENDING_WARN_THRESHOLD,
@@ -339,6 +350,7 @@ __all__ = [
     "AirQualityLoadResult",
     "AsyncKorTravelMapClient",
     "BatchDagRunResult",
+    "CacheTargetSnapshotGcDrainResult",
     "ConciergeThemeSyncResult",
     "CuratedFeatureCandidatesResult",
     "CuratedFeatureStatusSweepResult",
@@ -465,6 +477,39 @@ class IntegrityFindingSyncResult:
         return max(0, self.unique_count - self.upserted_count)
 
 
+@dataclass(frozen=True, slots=True)
+class CacheTargetSnapshotGcDrainResult:
+    """만료 cache-target snapshot background drain 실행 결과."""
+
+    acquired: bool
+    skipped: bool
+    batches: int
+    deleted_items: int
+    deleted_headers: int
+    remaining_items: int | None
+    remaining_headers: int | None
+    total_items: int | None = None
+    total_headers: int | None = None
+    unexpired_unreferenced_items: int | None = None
+    unexpired_unreferenced_headers: int | None = None
+    referenced_items: int | None = None
+    referenced_headers: int | None = None
+    observation_run_id: str | None = None
+    observed_at: datetime | None = None
+    observation_referenced_items: int | None = None
+    observation_referenced_headers: int | None = None
+    previous_observation_run_id: str | None = None
+    previous_observed_at: datetime | None = None
+    previous_referenced_items: int | None = None
+    previous_referenced_headers: int | None = None
+    growth_baseline_observation_run_id: str | None = None
+    growth_baseline_observed_at: datetime | None = None
+    growth_baseline_referenced_items: int | None = None
+    growth_baseline_referenced_headers: int | None = None
+    observation_growth_baseline_eligible: bool | None = None
+    observation_growth_min_interval_seconds: int | None = None
+
+
 class AsyncKorTravelMapClient:
     """라이브러리 진입점 — DB 적재/조회 + dedup 후보 동기화 오케스트레이션.
 
@@ -520,6 +565,243 @@ class AsyncKorTravelMapClient:
             advisory_lock(session, key),
         ):
             yield
+
+    async def drain_expired_cache_target_snapshots(
+        self,
+        *,
+        max_batches: int = 2_000,
+        max_seconds: float = 3_300,
+        item_limit: int = 1_000,
+        header_limit: int = 100,
+        batch_statement_timeout_ms: int = 30_000,
+        observation_run_id: str | None = None,
+        observation_retention_days: int = 90,
+        observation_growth_min_interval_seconds: int = 300,
+    ) -> CacheTargetSnapshotGcDrainResult:
+        """만료·미참조 cache-target snapshot backlog를 제한 내에서 비운다.
+
+        별도 lock session의 session-level try-lock으로 process 전역 중복 drain을
+        즉시 skip한다. 획득한 실행은 batch마다 새 session/transaction을 열어 commit해
+        장시간 transaction과 대량 rollback을 피한다. repo가 반환한 system을 keyset
+        cursor로 넘겨 exact 정렬 round-robin을 유지한다. 각 transaction에는 local
+        ``statement_timeout``을 적용하고, 한 바퀴 동안 삭제 진척이 없으면 reader lock
+        backlog를 남긴 채 종료한다. batch에서는 ``EXISTS``만 확인하고 정확한 전역
+        remaining count는 종료 시 별도 observation transaction에서 한 번만 센다. 취소
+        예외는 잡지 않아 transaction rollback과 lock 해제 뒤 호출자에게 그대로 전파한다.
+        """
+        if max_batches <= 0:
+            raise ValueError("max_batches는 1 이상이어야 합니다.")
+        if max_seconds <= 0:
+            raise ValueError("max_seconds는 0보다 커야 합니다.")
+        if not 0 < item_limit <= 10_000:
+            raise ValueError("item_limit은 1 이상 10000 이하여야 합니다.")
+        if not 0 < header_limit <= 1_000:
+            raise ValueError("header_limit은 1 이상 1000 이하여야 합니다.")
+        if not 0 < batch_statement_timeout_ms <= 300_000:
+            raise ValueError(
+                "batch_statement_timeout_ms는 1 이상 300000 이하여야 합니다."
+            )
+        if observation_run_id is not None:
+            if (
+                observation_run_id != observation_run_id.strip()
+                or not observation_run_id
+                or len(observation_run_id) > 255
+            ):
+                raise ValueError(
+                    "observation_run_id는 trim된 1~255자 문자열이어야 합니다."
+                )
+            if not 1 <= observation_retention_days <= 3_650:
+                raise ValueError(
+                    "observation_retention_days는 1 이상 3650 이하여야 합니다."
+                )
+            if not 1 <= observation_growth_min_interval_seconds <= 86_400:
+                raise ValueError(
+                    "observation_growth_min_interval_seconds는 1 이상 86400 "
+                    "이하여야 합니다."
+                )
+
+        # AsyncConnection context가 physical connection을 끝까지 pin한다. lock 획득
+        # transaction은 즉시 commit하되 session-level advisory lock은 같은 backend에
+        # 남고, finally의 unlock도 동일 connection에서 실행된다.
+        async with self._engine.connect() as lock_connection, try_advisory_lock(
+            lock_connection,
+            "cache-target-snapshot-gc",
+        ) as acquired:
+            await lock_connection.commit()
+            if not acquired:
+                return CacheTargetSnapshotGcDrainResult(
+                    acquired=False,
+                    skipped=True,
+                    batches=0,
+                    deleted_items=0,
+                    deleted_headers=0,
+                    remaining_items=None,
+                    remaining_headers=None,
+                )
+            batches = 0
+            deleted_items = 0
+            deleted_headers = 0
+            deadline = monotonic() + max_seconds
+            after_external_system: str | None = None
+            systems_seen_in_round: set[str] = set()
+            round_deleted = 0
+
+            while batches < max_batches:
+                remaining_seconds = deadline - monotonic()
+                if remaining_seconds <= 0:
+                    break
+                statement_timeout_ms = min(
+                    batch_statement_timeout_ms,
+                    max(1, int(remaining_seconds * 1_000)),
+                )
+                async with (
+                    self._session_factory() as batch_session,
+                    batch_session.begin(),
+                ):
+                    await batch_session.execute(
+                        text(
+                            "SELECT set_config("
+                            "'statement_timeout', :timeout, true)"
+                        ),
+                        {"timeout": f"{statement_timeout_ms}ms"},
+                    )
+                    batch = await repo_prune_cache_target_snapshots_batch(
+                        batch_session,
+                        after_external_system=after_external_system,
+                        item_limit=item_limit,
+                        header_limit=header_limit,
+                    )
+                batches += 1
+                batch_deleted = batch.deleted_items + batch.deleted_headers
+                deleted_items += batch.deleted_items
+                deleted_headers += batch.deleted_headers
+                after_external_system = batch.external_system
+
+                no_progress_round = False
+                if batch.external_system is None:
+                    no_progress_round = batch.has_more and batch_deleted == 0
+                elif batch.external_system in systems_seen_in_round:
+                    no_progress_round = round_deleted == 0 and batch_deleted == 0
+                    systems_seen_in_round = {batch.external_system}
+                    round_deleted = batch_deleted
+                else:
+                    systems_seen_in_round.add(batch.external_system)
+                    round_deleted += batch_deleted
+                # acquisition transaction을 오래 유지하지 않으면서 pinned backend의
+                # 생존과 lock 소유를 batch 사이에 확인한다.
+                await lock_connection.execute(text("SELECT 1"))
+                await lock_connection.commit()
+                if not batch.has_more or no_progress_round:
+                    break
+
+            async with (
+                self._session_factory() as observation_session,
+                observation_session.begin(),
+            ):
+                await observation_session.execute(
+                    text(
+                        "SELECT set_config("
+                        "'statement_timeout', :timeout, true)"
+                    ),
+                    {"timeout": f"{batch_statement_timeout_ms}ms"},
+                )
+                backlog = await repo_observe_cache_target_snapshot_backlog(
+                    observation_session
+                )
+                observation = None
+                if observation_run_id is not None:
+                    observation = (
+                        await repo_record_cache_target_snapshot_gc_observation(
+                            observation_session,
+                            dagster_run_id=observation_run_id,
+                            referenced_items=backlog.referenced_items,
+                            referenced_headers=backlog.referenced_headers,
+                            retention_days=observation_retention_days,
+                            growth_min_interval_seconds=(
+                                observation_growth_min_interval_seconds
+                            ),
+                        )
+                    )
+
+            return CacheTargetSnapshotGcDrainResult(
+                acquired=True,
+                skipped=False,
+                batches=batches,
+                deleted_items=deleted_items,
+                deleted_headers=deleted_headers,
+                remaining_items=backlog.remaining_items,
+                remaining_headers=backlog.remaining_headers,
+                total_items=backlog.total_items,
+                total_headers=backlog.total_headers,
+                unexpired_unreferenced_items=(
+                    backlog.unexpired_unreferenced_items
+                ),
+                unexpired_unreferenced_headers=(
+                    backlog.unexpired_unreferenced_headers
+                ),
+                referenced_items=backlog.referenced_items,
+                referenced_headers=backlog.referenced_headers,
+                observation_run_id=(
+                    observation.dagster_run_id if observation is not None else None
+                ),
+                observed_at=(observation.observed_at if observation is not None else None),
+                observation_referenced_items=(
+                    observation.referenced_items if observation is not None else None
+                ),
+                observation_referenced_headers=(
+                    observation.referenced_headers if observation is not None else None
+                ),
+                previous_observation_run_id=(
+                    observation.previous_observation_run_id
+                    if observation is not None
+                    else None
+                ),
+                previous_observed_at=(
+                    observation.previous_observed_at
+                    if observation is not None
+                    else None
+                ),
+                previous_referenced_items=(
+                    observation.previous_referenced_items
+                    if observation is not None
+                    else None
+                ),
+                previous_referenced_headers=(
+                    observation.previous_referenced_headers
+                    if observation is not None
+                    else None
+                ),
+                growth_baseline_observation_run_id=(
+                    observation.growth_baseline_run_id
+                    if observation is not None
+                    else None
+                ),
+                growth_baseline_observed_at=(
+                    observation.growth_baseline_observed_at
+                    if observation is not None
+                    else None
+                ),
+                growth_baseline_referenced_items=(
+                    observation.growth_baseline_referenced_items
+                    if observation is not None
+                    else None
+                ),
+                growth_baseline_referenced_headers=(
+                    observation.growth_baseline_referenced_headers
+                    if observation is not None
+                    else None
+                ),
+                observation_growth_baseline_eligible=(
+                    observation.growth_baseline_eligible
+                    if observation is not None
+                    else None
+                ),
+                observation_growth_min_interval_seconds=(
+                    observation.growth_min_interval_seconds
+                    if observation is not None
+                    else None
+                ),
+            )
 
     # ─── write (transaction 소유) ──────────────────────────────────────────
 

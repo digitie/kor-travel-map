@@ -5,6 +5,59 @@
 
 ## [Unreleased]
 
+### cache-target generation outbox producer foundation (2026-07-31, T-VN-41)
+
+- **DATABASE (breaking)**: migration `0075_cache_target_outbox`로 source generation/restore epoch,
+  durable head/tombstone, transaction outbox, delivery/claim/dead-letter, fixed snapshot과
+  reconciliation 상태를 정규화했다. 후속 `0076_cache_target_receipt`은 applied source event에 당시
+  target `lock_version`을 불변 영수증으로 고정하고 검증 가능한 0075 행만 backfill한다.
+- **CORRECTNESS**: target/link/refresh 결과 event는 원본 mutation과 같은 transaction에서
+  commit한다. restore swap은 live보다 낮은 epoch와 consumer binding drift를 거부하고 동일
+  restore-fence domain 함수가 성공한 뒤에만 cutover env를 노출한다.
+  fence가 대체한 reconciliation은 request UUID만 참조하지 않고 stream identity와 함께 composite FK로
+  결박해 다른 stream receipt INSERT와 referenced parent stream 변경을 DB에서 거부한다. PUT/DELETE exact
+  replay는 mutable target row가 아니라 immutable source receipt의 historical target UUID/version으로
+  최초 strong ETag를 exact 반환한다.
+- **RELAY**: consumer pull claim, contiguous ACK, bounded NACK/dead/replay와 immutable snapshot
+  pagination을 제공한다. checksum mismatch는 stream을 disabled로 유지하고 exact match·동일 epoch·
+  dead-letter 0인 completion receipt에서만 resume한다. mid-claim poison은 앞 prefix ACK 전에는
+  dead 전이를 거부한다. restore fence는 구 epoch의 모든 non-delivered delivery를 terminal
+  `superseded`로 원자 종결해 old pending/retry/lease/dead가 새 epoch claim과 복구를 막지 않게 한다.
+  같은 fence는 기존 `preparing|running` reconciliation도 terminal `superseded`로 종결해 새 epoch
+  reconciliation이 즉시 시작되게 한다.
+- **SNAPSHOT/GC**: generic snapshot first page를 응답 transaction에서 durable commit하고
+  `created_at`/`expires_at`, 75분 server handoff TTL, system별 live copy 2개와 100,000 item 상한을
+  공개한다. 경합·수명·barrier/build timeout은 retryable `503`, copy capacity는 동적
+  `429 Retry-After`, item 초과는 `413`으로 fail-close한다. 만료·미참조 material은 reader-safe
+  foreground GC와 기본 중지 상태의 hourly background drain이 bounded batch로 정리한다.
+  acquired GC run의 referenced item/header count는 Map DB에 90일간 멱등 보존하며, hourly job이 직전
+  적격 baseline 대비 시간당 증가율과 설정 가능한 보존 ceiling 초과를 exact metadata·warning으로
+  알린다. 짧은/비전진 run은 증가율 기준선으로 승격하지 않고 count 감소는 직전 acquired 대비
+  간격과 무관한 inventory-loss,
+  overlap/unavailable/nonforward는 별도 관측 품질 경고로 노출한다.
+- **DATABASE/CORRECTNESS (breaking)**: outbox `relay_order` Identity를 제거했다. DB trigger가 system
+  stream을 잠근 뒤 명시적 global sequence에서 번호를 배정하고 application은 stream →
+  head/target/link 순서로 미리 잠근다. 따라서 번호는 전역 unique지만 commit-safe prefix는 각
+  external system 안에서만 성립하며, raw/future writer도 allocation-before-lock을 우회할 수 없다.
+  `external_system`/`target_key`는 API·repository·DB에서 trim된 Unicode NFC를 강제해 NFC-equivalent
+  durable head/request가 Merkle snapshot이나 refresh lookup을 오염시키는 경로를 닫았다.
+  `cache_target_keys` scope의 `target_key` 상한도 root identity와 같은 512자로 합쳤다.
+- **CONTRACT**: target event와 stream reconciliation event를 `event_scope`로 분리해 empty 및
+  tombstone-only snapshot에도 fake target tuple을 만들지 않는다. `cache_target.reconciled`
+  payload의 `request_id`는 새 required field이며 request→fixed snapshot receipt 인과관계를
+  `snapshot_id`와 함께 고정한다. admin reconciliation operation receipt도 생성한
+  `snapshot_id`를 반환해 후속 stream read가 같은 snapshot에 도달했는지 검증할 수 있다.
+  restore-fence 응답은 무효화 claim 수, 대체 delivery 수, 대체 reconciliation 수와 request UUID를
+  durable fence receipt 그대로 노출하며 exact replay도 최초 값과 version을 보존한다. HTTP
+  DTO와 OpenAPI object-level `oneOf`는 대체 reconciliation 수가 `0`이면 UUID가 `null`,
+  `1`이면 `format: uuid`인 상관 불변식을 fail-close한다. recovery operation receipt의
+  `operation_id`도 UUID로 좁힌다. target PUT/DELETE response는 non-null UUID `target_id`, `entity_tag`,
+  양의 `target_sequence` 전용 DTO로 generation 4-tuple을 완성하며, nullable tombstone identity/sequence는
+  GET read projection에만 남긴다.
+- **OPENAPI (breaking)**: 공개 사용자와 서버 간 profile을 분리했다.
+  `@kor-travel-map/user-client`는 `RoutePolicy.SERVICE` batch 타입을 더는 노출하지 않으며,
+  서버 간 소비자는 `openapi.service.json`을 pin한다.
+
 ### curation 주소 fail-close·행별 provenance (2026-07-31, T-VN-H31R)
 
 - **DATABASE (breaking)**: migration `0072_curation_provenance`로 import batch/row와

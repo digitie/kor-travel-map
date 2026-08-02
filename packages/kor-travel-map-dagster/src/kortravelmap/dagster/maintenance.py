@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from time import monotonic
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.infra.consistency import DEDUP_PENDING_WARN_THRESHOLD
@@ -15,6 +16,7 @@ from dagster import (
     Backoff,
     Bool,
     DefaultScheduleStatus,
+    Failure,
     Field,
     Int,
     OpExecutionContext,
@@ -35,6 +37,8 @@ if TYPE_CHECKING:
 _PERMISSIVE_CONFIG = cast(Any, Permissive)
 
 __all__ = [
+    "CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS",
+    "CACHE_TARGET_SNAPSHOT_GC_SCHEDULES",
     "CONSISTENCY_DEDUP_REFRESH_JOB_TAGS",
     "CONSISTENCY_DEDUP_REFRESH_SCHEDULES",
     "DEFAULT_DEDUP_SCOPE_PAIRS",
@@ -45,6 +49,8 @@ __all__ = [
     "FINDING_PURGE_DEFAULT_RETENTION",
     "NOTICE_PURGE_DEFAULT_RETENTION",
     "consistency_dedup_refresh_job",
+    "cache_target_snapshot_gc_job",
+    "drain_expired_cache_target_snapshots_op",
     "purge_expired_notices_op",
     "purge_resolved_integrity_findings_op",
     "refresh_dedup_candidates_op",
@@ -57,6 +63,13 @@ CONSISTENCY_DEDUP_REFRESH_JOB_TAGS: Final[dict[str, str]] = {
     "kor_travel_map.timezone": KST_TIMEZONE,
 }
 """consistency/dedup refresh Dagster job 공통 tag."""
+
+CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS: Final[dict[str, str]] = {
+    "kor_travel_map.job_scope": "maintenance",
+    "kor_travel_map.job_kind": "cache_target_snapshot_gc",
+    "kor_travel_map.timezone": KST_TIMEZONE,
+}
+"""cache-target snapshot background GC job 공통 tag."""
 
 MAINTENANCE_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
     max_retries=3,
@@ -106,6 +119,64 @@ _CONSISTENCY_CONFIG_SCHEMA: Final[dict[str, object]] = {
         Int,
         default_value=DEDUP_PENDING_WARN_THRESHOLD,
         description="F4 pending dedup backlog WARN 임계값.",
+    ),
+}
+
+_CACHE_TARGET_SNAPSHOT_GC_CONFIG_SCHEMA: Final[dict[str, object]] = {
+    "max_batches": Field(
+        Int,
+        default_value=2_000,
+        description="실행당 최대 batch 수(기본 item 처리 용량 2,000,000건).",
+    ),
+    "max_seconds": Field(
+        Int,
+        default_value=3_300,
+        description="hourly schedule 다음 실행 전 drain 종료 시간 예산(초).",
+    ),
+    "item_limit": Field(
+        Int,
+        default_value=1_000,
+        description="system별 transaction에서 삭제할 snapshot item 상한.",
+    ),
+    "header_limit": Field(
+        Int,
+        default_value=100,
+        description="system별 transaction에서 삭제할 빈 snapshot header 상한.",
+    ),
+    "batch_statement_timeout_ms": Field(
+        Int,
+        default_value=30_000,
+        description="각 GC/observation transaction의 PostgreSQL statement timeout(ms).",
+    ),
+    "referenced_item_ceiling": Field(
+        Int,
+        default_value=16_800_000,
+        description="영구 참조 snapshot item 보존량 alert ceiling.",
+    ),
+    "referenced_header_ceiling": Field(
+        Int,
+        default_value=168,
+        description="영구 참조 snapshot header 보존량 alert ceiling.",
+    ),
+    "referenced_item_growth_ceiling_per_hour": Field(
+        Int,
+        default_value=100_000,
+        description="직전 적격 baseline 대비 referenced item 시간당 증가 alert ceiling.",
+    ),
+    "referenced_header_growth_ceiling_per_hour": Field(
+        Int,
+        default_value=1,
+        description="직전 적격 baseline 대비 referenced header 시간당 증가 alert ceiling.",
+    ),
+    "referenced_growth_min_interval_seconds": Field(
+        Int,
+        default_value=300,
+        description="증가율 alert를 평가할 두 관측 사이 최소 간격(초).",
+    ),
+    "observation_retention_days": Field(
+        Int,
+        default_value=90,
+        description="run별 referenced count 관측 이력 보존 일수.",
     ),
 }
 
@@ -310,6 +381,170 @@ async def purge_expired_notices_op(context: OpExecutionContext) -> dict[str, obj
     return metadata
 
 
+@op(
+    name="drain_expired_cache_target_snapshots",
+    required_resource_keys={"kor_travel_map_client"},
+    config_schema=_CACHE_TARGET_SNAPSHOT_GC_CONFIG_SCHEMA,
+    retry_policy=MAINTENANCE_RETRY_POLICY,
+)
+async def drain_expired_cache_target_snapshots_op(
+    context: OpExecutionContext,
+) -> dict[str, object]:
+    """만료·미참조 cache-target snapshot을 독립 batch transaction으로 정리한다."""
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    config = cast(Mapping[str, object], context.op_config)
+    max_batches = _bounded_int_config(
+        config.get("max_batches"), name="max_batches", default=2_000, minimum=1
+    )
+    max_seconds = _bounded_int_config(
+        config.get("max_seconds"), name="max_seconds", default=3_300, minimum=1
+    )
+    item_limit = _bounded_int_config(
+        config.get("item_limit"),
+        name="item_limit",
+        default=1_000,
+        minimum=1,
+        maximum=10_000,
+    )
+    header_limit = _bounded_int_config(
+        config.get("header_limit"),
+        name="header_limit",
+        default=100,
+        minimum=1,
+        maximum=1_000,
+    )
+    statement_timeout_ms = _bounded_int_config(
+        config.get("batch_statement_timeout_ms"),
+        name="batch_statement_timeout_ms",
+        default=30_000,
+        minimum=1,
+        maximum=300_000,
+    )
+    item_ceiling = _bounded_int_config(
+        config.get("referenced_item_ceiling"),
+        name="referenced_item_ceiling",
+        default=16_800_000,
+        minimum=0,
+    )
+    header_ceiling = _bounded_int_config(
+        config.get("referenced_header_ceiling"),
+        name="referenced_header_ceiling",
+        default=168,
+        minimum=0,
+    )
+    item_growth_ceiling = _bounded_int_config(
+        config.get("referenced_item_growth_ceiling_per_hour"),
+        name="referenced_item_growth_ceiling_per_hour",
+        default=100_000,
+        minimum=0,
+    )
+    header_growth_ceiling = _bounded_int_config(
+        config.get("referenced_header_growth_ceiling_per_hour"),
+        name="referenced_header_growth_ceiling_per_hour",
+        default=1,
+        minimum=0,
+    )
+    growth_min_interval_seconds = _bounded_int_config(
+        config.get("referenced_growth_min_interval_seconds"),
+        name="referenced_growth_min_interval_seconds",
+        default=300,
+        minimum=1,
+        maximum=86_400,
+    )
+    observation_retention_days = _bounded_int_config(
+        config.get("observation_retention_days"),
+        name="observation_retention_days",
+        default=90,
+        minimum=1,
+        maximum=3_650,
+    )
+    started_at = monotonic()
+    result = await client.drain_expired_cache_target_snapshots(
+        max_batches=max_batches,
+        max_seconds=max_seconds,
+        item_limit=item_limit,
+        header_limit=header_limit,
+        batch_statement_timeout_ms=statement_timeout_ms,
+        observation_run_id=context.run_id,
+        observation_retention_days=observation_retention_days,
+        observation_growth_min_interval_seconds=growth_min_interval_seconds,
+    )
+    elapsed_seconds = max(monotonic() - started_at, 0.001)
+    backlog_observed = result.remaining_items is not None
+    metadata: dict[str, object] = {
+        "acquired": result.acquired,
+        "skipped": result.skipped,
+        "batches": result.batches,
+        "deleted_items": result.deleted_items,
+        "deleted_headers": result.deleted_headers,
+        "remaining_items": (
+            result.remaining_items
+            if result.remaining_items is not None
+            else "not_observed"
+        ),
+        "remaining_headers": (
+            result.remaining_headers
+            if result.remaining_headers is not None
+            else "not_observed"
+        ),
+        "total_items": result.total_items if result.total_items is not None else "not_observed",
+        "total_headers": (
+            result.total_headers if result.total_headers is not None else "not_observed"
+        ),
+        "unexpired_unreferenced_items": (
+            result.unexpired_unreferenced_items
+            if result.unexpired_unreferenced_items is not None
+            else "not_observed"
+        ),
+        "unexpired_unreferenced_headers": (
+            result.unexpired_unreferenced_headers
+            if result.unexpired_unreferenced_headers is not None
+            else "not_observed"
+        ),
+        "referenced_items": (
+            result.referenced_items
+            if result.referenced_items is not None
+            else "not_observed"
+        ),
+        "referenced_headers": (
+            result.referenced_headers
+            if result.referenced_headers is not None
+            else "not_observed"
+        ),
+        "backlog_observed": backlog_observed,
+        "backlog_alert": bool(
+            backlog_observed
+            and ((result.remaining_items or 0) > 0 or (result.remaining_headers or 0) > 0)
+        ),
+        "capacity_item_ceiling": max_batches * item_limit,
+        "elapsed_seconds": elapsed_seconds,
+        "deleted_items_per_hour": result.deleted_items / elapsed_seconds * 3_600,
+    }
+    metadata.update(
+        _cache_target_referenced_alert_metadata(
+            result,
+            item_ceiling=item_ceiling,
+            header_ceiling=header_ceiling,
+            item_growth_ceiling_per_hour=item_growth_ceiling,
+            header_growth_ceiling_per_hour=header_growth_ceiling,
+            growth_min_interval_seconds=growth_min_interval_seconds,
+            observation_retention_days=observation_retention_days,
+        )
+    )
+    if metadata["referenced_alert"]:
+        context.log.warning(
+            "cache-target referenced snapshot 보존 alert: %s",
+            metadata["referenced_alert_reasons"],
+        )
+    if metadata["referenced_observation_issue"]:
+        context.log.warning(
+            "cache-target referenced snapshot 관측 품질 경고: %s",
+            metadata["referenced_observation_issue_reasons"],
+        )
+    context.add_output_metadata(metadata)
+    return metadata
+
+
 @job(
     name="consistency_dedup_refresh",
     tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
@@ -323,6 +558,19 @@ def consistency_dedup_refresh_job() -> None:
     run_consistency_check_op(refresh_dedup_candidates_op())
     purge_expired_notices_op()
     purge_resolved_integrity_findings_op()
+
+
+@job(
+    name="cache_target_snapshot_gc",
+    tags=CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS,
+    description=(
+        "만료·미참조 cache-target snapshot item/header를 system round-robin batch로 "
+        "정리하고 정확한 잔여 backlog와 referenced 보존 추세 alert를 기록한다."
+    ),
+)
+def cache_target_snapshot_gc_job() -> None:
+    """hourly cache-target snapshot background GC 전용 job."""
+    drain_expired_cache_target_snapshots_op()
 
 
 CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
@@ -344,8 +592,33 @@ CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
 ]
 """consistency/dedup maintenance schedule 목록. 운영 enable 전까지 STOPPED."""
 
-MAINTENANCE_JOBS: Final = [consistency_dedup_refresh_job]
-MAINTENANCE_SCHEDULES: Final = CONSISTENCY_DEDUP_REFRESH_SCHEDULES
+CACHE_TARGET_SNAPSHOT_GC_SCHEDULES: Final = [
+    ScheduleDefinition(
+        name="cache_target_snapshot_gc_hourly_schedule",
+        job=cache_target_snapshot_gc_job,
+        cron_schedule=cron_for_schedule(
+            "cache_target_snapshot_gc_hourly_schedule",
+            "15 * * * *",
+        ),
+        execution_timezone=KST_TIMEZONE,
+        default_status=DefaultScheduleStatus.STOPPED,
+        tags=CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS,
+        description=(
+            "만료 cache-target snapshot backlog를 매시 15분에 최대 200만 item 용량으로 "
+            "정리하고 referenced 보존 추세를 경보한다. 운영 enable 전까지 STOPPED."
+        ),
+    )
+]
+"""cache-target snapshot GC hourly schedule. 운영 enable 전까지 STOPPED."""
+
+MAINTENANCE_JOBS: Final = [
+    consistency_dedup_refresh_job,
+    cache_target_snapshot_gc_job,
+]
+MAINTENANCE_SCHEDULES: Final = [
+    *CONSISTENCY_DEDUP_REFRESH_SCHEDULES,
+    *CACHE_TARGET_SNAPSHOT_GC_SCHEDULES,
+]
 
 
 def _resource_object(context: OpExecutionContext, name: str) -> object:
@@ -411,6 +684,295 @@ def _int_config(value: object, *, default: int) -> int:
     if isinstance(value, int | str):
         return int(value)
     raise TypeError("정수 config 값이어야 함")
+
+
+def _bounded_int_config(
+    value: object,
+    *,
+    name: str,
+    default: int,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    try:
+        result = _int_config(value, default=default)
+    except (TypeError, ValueError) as exc:
+        raise Failure(
+            description=f"{name} config가 정수가 아닙니다.",
+            allow_retries=False,
+        ) from exc
+    if result < minimum or (maximum is not None and result > maximum):
+        suffix = f"{maximum} 이하" if maximum is not None else ""
+        conjunction = " " if suffix else ""
+        raise Failure(
+            description=(
+                f"{name} config는 {minimum} 이상{conjunction}{suffix}이어야 합니다."
+            ),
+            allow_retries=False,
+        )
+    return result
+
+
+def _cache_target_referenced_alert_metadata(
+    result: Any,
+    *,
+    item_ceiling: int,
+    header_ceiling: int,
+    item_growth_ceiling_per_hour: int,
+    header_growth_ceiling_per_hour: int,
+    growth_min_interval_seconds: int,
+    observation_retention_days: int,
+) -> dict[str, object]:
+    not_observed = "not_observed"
+    current_items = result.observation_referenced_items
+    current_headers = result.observation_referenced_headers
+    observed_at = result.observed_at
+    baseline_observed_at = result.growth_baseline_observed_at
+    baseline_items = result.growth_baseline_referenced_items
+    baseline_headers = result.growth_baseline_referenced_headers
+    previous_observed_at = result.previous_observed_at
+    previous_items = result.previous_referenced_items
+    previous_headers = result.previous_referenced_headers
+    observation_available = (
+        current_items is not None
+        and current_headers is not None
+        and observed_at is not None
+        and result.observation_run_id is not None
+    )
+    growth_elapsed_seconds: float | None = None
+    growth_item_delta: int | None = None
+    growth_header_delta: int | None = None
+    if (
+        observation_available
+        and baseline_observed_at is not None
+        and baseline_items is not None
+        and baseline_headers is not None
+    ):
+        growth_elapsed_seconds = (
+            observed_at - baseline_observed_at
+        ).total_seconds()
+        growth_item_delta = current_items - baseline_items
+        growth_header_delta = current_headers - baseline_headers
+    previous_elapsed_seconds: float | None = None
+    item_delta: int | None = None
+    header_delta: int | None = None
+    if (
+        observation_available
+        and previous_observed_at is not None
+        and previous_items is not None
+        and previous_headers is not None
+    ):
+        previous_elapsed_seconds = (
+            observed_at - previous_observed_at
+        ).total_seconds()
+        item_delta = current_items - previous_items
+        header_delta = current_headers - previous_headers
+    persisted_min_interval = (
+        result.observation_growth_min_interval_seconds
+        if result.observation_growth_min_interval_seconds is not None
+        else growth_min_interval_seconds
+    )
+    growth_observed = bool(
+        growth_elapsed_seconds is not None
+        and result.observation_growth_baseline_eligible is True
+        and (
+            previous_elapsed_seconds is None
+            or previous_elapsed_seconds > 0
+        )
+        and growth_elapsed_seconds >= persisted_min_interval
+        and growth_elapsed_seconds > 0
+    )
+    item_growth_per_hour = (
+        growth_item_delta / growth_elapsed_seconds * 3_600
+        if growth_observed
+        and growth_item_delta is not None
+        and growth_elapsed_seconds is not None
+        else None
+    )
+    header_growth_per_hour = (
+        growth_header_delta / growth_elapsed_seconds * 3_600
+        if growth_observed
+        and growth_header_delta is not None
+        and growth_elapsed_seconds is not None
+        else None
+    )
+    item_ceiling_alert = bool(
+        observation_available and current_items > item_ceiling
+    )
+    header_ceiling_alert = bool(
+        observation_available and current_headers > header_ceiling
+    )
+    item_growth_alert = bool(
+        item_growth_per_hour is not None
+        and item_growth_per_hour > item_growth_ceiling_per_hour
+    )
+    header_growth_alert = bool(
+        header_growth_per_hour is not None
+        and header_growth_per_hour > header_growth_ceiling_per_hour
+    )
+    item_inventory_loss_alert = bool(item_delta is not None and item_delta < 0)
+    header_inventory_loss_alert = bool(
+        header_delta is not None and header_delta < 0
+    )
+    non_forward_clock = bool(
+        (
+            previous_elapsed_seconds is not None
+            and previous_elapsed_seconds <= 0
+        )
+        or (
+            growth_elapsed_seconds is not None
+            and growth_elapsed_seconds <= 0
+        )
+    )
+    if result.skipped:
+        observation_status = "overlap_skipped"
+        observation_issue_reasons = ["gc_overlap_skipped"]
+    elif not observation_available:
+        observation_status = "unavailable"
+        observation_issue_reasons = ["referenced_observation_unavailable"]
+    elif non_forward_clock:
+        observation_status = "non_forward_database_clock"
+        observation_issue_reasons = ["non_forward_database_clock"]
+    else:
+        observation_status = "observed"
+        observation_issue_reasons = []
+    if not observation_available:
+        growth_unobserved_reason = "referenced_observation_unavailable"
+    elif baseline_observed_at is None:
+        growth_unobserved_reason = "first_observation"
+    elif non_forward_clock:
+        growth_unobserved_reason = "non_forward_database_clock"
+    elif not growth_observed:
+        growth_unobserved_reason = "minimum_interval_not_reached"
+    else:
+        growth_unobserved_reason = "observed"
+    reasons = [
+        reason
+        for reason, active in (
+            ("referenced_item_ceiling", item_ceiling_alert),
+            ("referenced_header_ceiling", header_ceiling_alert),
+            ("referenced_item_growth", item_growth_alert),
+            ("referenced_header_growth", header_growth_alert),
+            ("referenced_item_inventory_loss", item_inventory_loss_alert),
+            ("referenced_header_inventory_loss", header_inventory_loss_alert),
+        )
+        if active
+    ]
+    return {
+        "referenced_observation_available": observation_available,
+        "referenced_observation_status": observation_status,
+        "referenced_observation_issue": bool(observation_issue_reasons),
+        "referenced_observation_issue_reasons": observation_issue_reasons,
+        "referenced_observation_run_id": (
+            result.observation_run_id if observation_available else not_observed
+        ),
+        "referenced_observed_at": (
+            observed_at.isoformat() if observation_available else not_observed
+        ),
+        "referenced_observation_items": (
+            current_items if observation_available else not_observed
+        ),
+        "referenced_observation_headers": (
+            current_headers if observation_available else not_observed
+        ),
+        "previous_referenced_observation_run_id": (
+            result.previous_observation_run_id
+            if result.previous_observation_run_id is not None
+            else not_observed
+        ),
+        "previous_referenced_observed_at": (
+            previous_observed_at.isoformat()
+            if previous_observed_at is not None
+            else not_observed
+        ),
+        "previous_referenced_items": (
+            previous_items if previous_items is not None else not_observed
+        ),
+        "previous_referenced_headers": (
+            previous_headers if previous_headers is not None else not_observed
+        ),
+        "growth_baseline_observation_run_id": (
+            result.growth_baseline_observation_run_id
+            if result.growth_baseline_observation_run_id is not None
+            else not_observed
+        ),
+        "growth_baseline_observed_at": (
+            baseline_observed_at.isoformat()
+            if baseline_observed_at is not None
+            else not_observed
+        ),
+        "growth_baseline_referenced_items": (
+            baseline_items if baseline_items is not None else not_observed
+        ),
+        "growth_baseline_referenced_headers": (
+            baseline_headers if baseline_headers is not None else not_observed
+        ),
+        "referenced_observation_growth_baseline_eligible": (
+            result.observation_growth_baseline_eligible
+            if observation_available
+            else not_observed
+        ),
+        "referenced_observation_elapsed_seconds": (
+            previous_elapsed_seconds
+            if previous_elapsed_seconds is not None
+            else not_observed
+        ),
+        "referenced_items_delta": item_delta if item_delta is not None else not_observed,
+        "referenced_headers_delta": (
+            header_delta if header_delta is not None else not_observed
+        ),
+        "referenced_growth_baseline_elapsed_seconds": (
+            growth_elapsed_seconds
+            if growth_elapsed_seconds is not None
+            else not_observed
+        ),
+        "referenced_items_growth_baseline_delta": (
+            growth_item_delta
+            if growth_item_delta is not None
+            else not_observed
+        ),
+        "referenced_headers_growth_baseline_delta": (
+            growth_header_delta
+            if growth_header_delta is not None
+            else not_observed
+        ),
+        "referenced_growth_rate_observed": growth_observed,
+        "referenced_growth_unobserved_reason": growth_unobserved_reason,
+        "referenced_items_growth_per_hour": (
+            item_growth_per_hour
+            if item_growth_per_hour is not None
+            else not_observed
+        ),
+        "referenced_headers_growth_per_hour": (
+            header_growth_per_hour
+            if header_growth_per_hour is not None
+            else not_observed
+        ),
+        "referenced_item_ceiling": item_ceiling,
+        "referenced_header_ceiling": header_ceiling,
+        "referenced_item_growth_ceiling_per_hour": item_growth_ceiling_per_hour,
+        "referenced_header_growth_ceiling_per_hour": (
+            header_growth_ceiling_per_hour
+        ),
+        "referenced_growth_min_interval_seconds": persisted_min_interval,
+        "referenced_observation_retention_days": observation_retention_days,
+        "referenced_item_ceiling_alert": item_ceiling_alert,
+        "referenced_header_ceiling_alert": header_ceiling_alert,
+        "referenced_retention_ceiling_alert": (
+            item_ceiling_alert or header_ceiling_alert
+        ),
+        "referenced_item_growth_alert": item_growth_alert,
+        "referenced_header_growth_alert": header_growth_alert,
+        "referenced_growth_alert": item_growth_alert or header_growth_alert,
+        "referenced_item_inventory_loss_alert": item_inventory_loss_alert,
+        "referenced_header_inventory_loss_alert": header_inventory_loss_alert,
+        "referenced_inventory_loss_alert": (
+            item_inventory_loss_alert or header_inventory_loss_alert
+        ),
+        "referenced_alert": bool(reasons),
+        "referenced_alert_reasons": reasons,
+        "referenced_requires_attention": bool(reasons or observation_issue_reasons),
+    }
 
 
 def _datetime_config(value: object) -> datetime | None:

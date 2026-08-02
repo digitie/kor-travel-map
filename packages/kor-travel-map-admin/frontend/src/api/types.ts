@@ -96,6 +96,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/cache-target-event-dead-letters/{event_id}/replays": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replay Admin Cache Target Dead Letter */
+        post: operations["replay_admin_cache_target_dead_letter_v1_admin_cache_target_event_dead_letters__event_id__replays_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/cache-target-reconciliations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Admin Cache Target Reconciliation */
+        post: operations["request_admin_cache_target_reconciliation_v1_admin_cache_target_reconciliations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/curated-source-rules": {
         parameters: {
             query?: never;
@@ -1643,6 +1677,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/cache-target-event-dead-letters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Ops Cache Target Dead Letters */
+        get: operations["list_ops_cache_target_dead_letters_v1_ops_cache_target_event_dead_letters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/cache-target-event-dead-letters/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ops Cache Target Dead Letter */
+        get: operations["get_ops_cache_target_dead_letter_v1_ops_cache_target_event_dead_letters__event_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/cache-target-operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ops Cache Target Operation */
+        get: operations["get_ops_cache_target_operation_v1_ops_cache_target_operations__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/cache-target-streams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Ops Cache Target Streams */
+        get: operations["list_ops_cache_target_streams_v1_ops_cache_target_streams_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/consistency/issues": {
         parameters: {
             query?: never;
@@ -2274,6 +2376,263 @@ export interface paths {
          * @description 축제 공개 상세 view.
          */
         get: operations["get_public_festival_v1_public_festivals__feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-event-acks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ack Service Cache Target Events */
+        post: operations["ack_service_cache_target_events_v1_service_cache_target_event_acks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-event-claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Claim Service Cache Target Events */
+        post: operations["claim_service_cache_target_events_v1_service_cache_target_event_claims_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-event-dead-letters/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Service Cache Target Dead Letter */
+        get: operations["get_service_cache_target_dead_letter_v1_service_cache_target_event_dead_letters__event_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-event-dead-letters/{event_id}/replays": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replay Service Cache Target Dead Letter */
+        post: operations["replay_service_cache_target_dead_letter_v1_service_cache_target_event_dead_letters__event_id__replays_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-event-nacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Nack Service Cache Target Event */
+        post: operations["nack_service_cache_target_event_v1_service_cache_target_event_nacks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-reconciliations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Begin Service Cache Target Reconciliation */
+        post: operations["begin_service_cache_target_reconciliation_v1_service_cache_target_reconciliations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-reconciliations/{request_id}/completions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Service Cache Target Reconciliation */
+        post: operations["complete_service_cache_target_reconciliation_v1_service_cache_target_reconciliations__request_id__completions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-reconciliations/{request_id}/seals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Seal Service Cache Target Reconciliation */
+        post: operations["seal_service_cache_target_reconciliation_v1_service_cache_target_reconciliations__request_id__seals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-reconciliations/{request_id}/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Service Cache Target Reconciliation Snapshot */
+        get: operations["get_service_cache_target_reconciliation_snapshot_v1_service_cache_target_reconciliations__request_id__snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-snapshots/{external_system}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Service Cache Target Snapshot */
+        get: operations["get_service_cache_target_snapshot_v1_service_cache_target_snapshots__external_system__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-streams/{external_system}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Service Cache Target Stream */
+        get: operations["get_service_cache_target_stream_v1_service_cache_target_streams__external_system__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-target-streams/{external_system}/restore-fences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Service Restore Fence */
+        post: operations["create_service_restore_fence_v1_service_cache_target_streams__external_system__restore_fences_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/cache-targets/{external_system}/{target_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Service Cache Target */
+        get: operations["get_service_cache_target_v1_service_cache_targets__external_system___target_key__get"];
+        /** Put Service Cache Target */
+        put: operations["put_service_cache_target_v1_service_cache_targets__external_system___target_key__put"];
+        post?: never;
+        /** Delete Service Cache Target */
+        delete: operations["delete_service_cache_target_v1_service_cache_targets__external_system___target_key__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/refresh-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Service Refresh Request */
+        post: operations["create_service_refresh_request_v1_service_refresh_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/refresh-requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Service Refresh Request */
+        get: operations["get_service_refresh_request_v1_service_refresh_requests__request_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3982,11 +4341,330 @@ export interface components {
             provenance_file?: string | null;
         };
         /**
+         * CacheTargetAckRecord
+         * @description ACK result.
+         */
+        CacheTargetAckRecord: {
+            /** Accepted Count */
+            accepted_count: number;
+            /** Acked Through */
+            acked_through: string;
+            /**
+             * Claim Id
+             * Format: uuid
+             */
+            claim_id: string;
+            /** Consumer Id */
+            consumer_id: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * CacheTargetAckRequest
+         * @description ACK contiguous global prefix for a claim.
+         */
+        CacheTargetAckRequest: {
+            /** Applied */
+            applied?: components["schemas"]["CacheTargetAppliedReceipt"][];
+            /**
+             * Claim Id
+             * Format: uuid
+             */
+            claim_id: string;
+            /** Consumer Id */
+            consumer_id: string;
+            /**
+             * Lease Token
+             * Format: uuid
+             */
+            lease_token: string;
+            /** Through Cursor */
+            through_cursor: string;
+        };
+        /**
+         * CacheTargetAckResponse
+         * @description ACK response.
+         */
+        CacheTargetAckResponse: {
+            data: components["schemas"]["CacheTargetAckRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetAppliedReceipt
+         * @description Consumer-applied event receipt.
+         */
+        CacheTargetAppliedReceipt: {
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /** Payload Fingerprint */
+            payload_fingerprint: string;
+        };
+        /**
+         * CacheTargetClaimRecord
+         * @description Claim lease and event page.
+         */
+        CacheTargetClaimRecord: {
+            /** Acked Through */
+            acked_through?: string | null;
+            /**
+             * Claim Id
+             * Format: uuid
+             */
+            claim_id: string;
+            /** Consumer Id */
+            consumer_id: string;
+            /** Events */
+            events: components["schemas"]["CacheTargetEventRecord"][];
+            /** External System */
+            external_system: string;
+            /** First Relay Order */
+            first_relay_order?: number | null;
+            /**
+             * Idempotent Replay
+             * @default false
+             */
+            idempotent_replay: boolean;
+            /** Last Relay Order */
+            last_relay_order?: number | null;
+            /**
+             * Lease Expires At
+             * Format: date-time
+             */
+            lease_expires_at: string;
+            /** Lease Token */
+            lease_token: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * CacheTargetClaimRequest
+         * @description Consumer pull claim request.
+         */
+        CacheTargetClaimRequest: {
+            /** Consumer Id */
+            consumer_id: string;
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
+            external_system: string;
+            /**
+             * Lease Seconds
+             * @default 60
+             */
+            lease_seconds: number;
+            /**
+             * Limit
+             * @default 100
+             */
+            limit: number;
+        };
+        /**
+         * CacheTargetClaimResponse
+         * @description Consumer claim response.
+         */
+        CacheTargetClaimResponse: {
+            data: components["schemas"]["CacheTargetClaimRecord"] | null;
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetDeadLetterDetailResponse
+         * @description Dead-letter detail response.
+         */
+        CacheTargetDeadLetterDetailResponse: {
+            data: components["schemas"]["CacheTargetDeadLetterRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetDeadLetterListData
+         * @description Dead-letter list data.
+         */
+        CacheTargetDeadLetterListData: {
+            /** Items */
+            items: components["schemas"]["CacheTargetDeadLetterRecord"][];
+        };
+        /**
+         * CacheTargetDeadLetterListResponse
+         * @description Dead-letter list response.
+         */
+        CacheTargetDeadLetterListResponse: {
+            data: components["schemas"]["CacheTargetDeadLetterListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetDeadLetterRecord
+         * @description Dead-letter event detail for service and ops reads.
+         */
+        CacheTargetDeadLetterRecord: {
+            /** Attempt Count */
+            attempt_count: number;
+            /** Delivery Version */
+            delivery_version: number;
+            /** Entity Tag */
+            entity_tag: string;
+            /** Error Class */
+            error_class?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /**
+             * Event Scope
+             * @enum {string}
+             */
+            event_scope: "target" | "stream";
+            /**
+             * Event Type
+             * @enum {string}
+             */
+            event_type: "cache_target.state_applied" | "cache_target.links_reconciled" | "refresh_request.status_changed" | "cache_target.reconciled";
+            /** External System */
+            external_system?: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Payload Fingerprint */
+            payload_fingerprint: string;
+            /** Relay Order */
+            relay_order: number;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /** Source Generation */
+            source_generation?: number | null;
+            /** Target Id */
+            target_id?: string | null;
+            /** Target Key */
+            target_key?: string | null;
+            /** Target Sequence */
+            target_sequence?: number | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * CacheTargetDeadLetterReplayRequest
+         * @description Replay command body.
+         */
+        CacheTargetDeadLetterReplayRequest: {
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * CacheTargetDecimalCoordinate
+         * @description Input-only lon/lat values for canonical source hashing.
+         */
+        CacheTargetDecimalCoordinate: {
+            /** Lat */
+            lat: number | string;
+            /** Lon */
+            lon: number | string;
+        };
+        /**
+         * CacheTargetDeliveryRecord
+         * @description Mutable delivery state after NACK/replay.
+         */
+        CacheTargetDeliveryRecord: {
+            /** Delivery Version */
+            delivery_version: number;
+            /** Entity Tag */
+            entity_tag: string;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /** Relay Order */
+            relay_order?: number | null;
+            /** Retry After Seconds */
+            retry_after_seconds?: number | null;
+            /** Status */
+            status: string;
+        };
+        /**
+         * CacheTargetDeliveryResponse
+         * @description NACK/replay service response.
+         */
+        CacheTargetDeliveryResponse: {
+            data: components["schemas"]["CacheTargetDeliveryRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetEventCoordinate
+         * @description Canonical fixed-point coordinate in a target source event.
+         */
+        CacheTargetEventCoordinate: {
+            /** Lat E6 */
+            lat_e6: number;
+            /** Lon E6 */
+            lon_e6: number;
+        };
+        /**
+         * CacheTargetEventRecord
+         * @description Outbox event delivered to a consumer.
+         */
+        CacheTargetEventRecord: {
+            /** Cursor */
+            cursor: string;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /**
+             * Event Scope
+             * @enum {string}
+             */
+            event_scope: "target" | "stream";
+            /**
+             * Event Type
+             * @enum {string}
+             */
+            event_type: "cache_target.state_applied" | "cache_target.links_reconciled" | "refresh_request.status_changed" | "cache_target.reconciled";
+            /** External System */
+            external_system: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Payload */
+            payload: components["schemas"]["CacheTargetStateAppliedPayload"] | components["schemas"]["CacheTargetLinksReconciledPayload"] | components["schemas"]["CacheTargetRefreshStatusChangedPayload"] | components["schemas"]["CacheTargetReconciledPayload"];
+            /** Payload Fingerprint */
+            payload_fingerprint: string;
+            /** Relay Order */
+            relay_order: number;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /** Source Generation */
+            source_generation?: number | null;
+            /** Source Payload Fingerprint */
+            source_payload_fingerprint: string;
+            /** Target Id */
+            target_id?: string | null;
+            /** Target Key */
+            target_key?: string | null;
+            /** Target Sequence */
+            target_sequence?: number | null;
+        };
+        /**
          * CacheTargetKeysScope
          * @description 외부 POI/cache target key 목록 기반 갱신 scope.
          */
         CacheTargetKeysScope: {
-            /** External System */
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
             external_system: string;
             /** Radius Km */
             radius_km?: number | null;
@@ -4003,6 +4681,784 @@ export interface components {
              * @enum {string}
              */
             type: "cache_target_keys";
+        };
+        /**
+         * CacheTargetLinksReconciledPayload
+         * @description Exact payload for ``cache_target.links_reconciled``.
+         */
+        CacheTargetLinksReconciledPayload: {
+            /** Active Link Count */
+            active_link_count: number;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "reconciled";
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Version
+             * @constant
+             */
+            version: "cache-target-event-v1";
+        };
+        /**
+         * CacheTargetNackRequest
+         * @description NACK a claimed event.
+         */
+        CacheTargetNackRequest: {
+            /**
+             * Backoff Seconds
+             * @default 30
+             */
+            backoff_seconds: number;
+            /**
+             * Claim Id
+             * Format: uuid
+             */
+            claim_id: string;
+            /** Consumer Id */
+            consumer_id: string;
+            /**
+             * Disposition
+             * @default transient
+             * @enum {string}
+             */
+            disposition: "transient" | "permanent";
+            /** Error Class */
+            error_class: string;
+            /** Error Code */
+            error_code?: string | null;
+            /** Error Fingerprint */
+            error_fingerprint: string;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
+            external_system: string;
+            /**
+             * Lease Token
+             * Format: uuid
+             */
+            lease_token: string;
+            /**
+             * Max Attempts
+             * @default 5
+             */
+            max_attempts: number;
+        };
+        /**
+         * CacheTargetOperationResponse
+         * @description Recovery operation response.
+         */
+        CacheTargetOperationResponse: {
+            data: components["schemas"]["CacheTargetRecoveryOperationRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetReconciledPayload
+         * @description Exact request-bound fixed snapshot reconciliation receipt.
+         */
+        CacheTargetReconciledPayload: {
+            /** Actual Merkle Root */
+            actual_merkle_root: string;
+            /** Expected Merkle Root */
+            expected_merkle_root: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "succeeded";
+            /**
+             * Version
+             * @constant
+             */
+            version: "cache-target-reconciliation-v1";
+        };
+        /**
+         * CacheTargetReconciliationBeginRequest
+         * @description Service two-phase cutover begin command.
+         */
+        CacheTargetReconciliationBeginRequest: {
+            /** Consumer Id */
+            consumer_id: string;
+            /** Expected Restore Epoch */
+            expected_restore_epoch: number;
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
+            external_system: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * CacheTargetReconciliationCompletionRequest
+         * @description Consumer fixed-snapshot checksum completion receipt.
+         */
+        CacheTargetReconciliationCompletionRequest: {
+            /** Actual Merkle Root */
+            actual_merkle_root: string;
+            /** Consumer Id */
+            consumer_id: string;
+            /** Expected Restore Epoch */
+            expected_restore_epoch: number;
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
+            external_system: string;
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+        };
+        /**
+         * CacheTargetReconciliationPreparing
+         * @description Snapshot seal 전 recovery request descriptor.
+         */
+        CacheTargetReconciliationPreparing: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Entity Tag */
+            entity_tag: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            status: "preparing";
+            /** Stream Entity Tag */
+            stream_entity_tag: string;
+        };
+        /**
+         * CacheTargetReconciliationRequest
+         * @description Admin reconciliation command body.
+         */
+        CacheTargetReconciliationRequest: {
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
+            external_system: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * CacheTargetReconciliationRunning
+         * @description Consumer가 request-bound fixed snapshot을 찾는 active descriptor.
+         */
+        CacheTargetReconciliationRunning: {
+            /** Count */
+            count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Entity Tag */
+            entity_tag: string;
+            /**
+             * High Watermark Cursor
+             * @description 이 immutable snapshot material이 안전하게 포함한 global outbox replay lower-bound. snapshot 생성 뒤 생긴 비material event가 있으면 현재 global max보다 과거일 수 있으므로, consumer는 이 cursor 이후 event를 중복 허용 방식으로 모두 재처리해야 한다.
+             */
+            high_watermark_cursor: string;
+            /** Merkle Root */
+            merkle_root: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            status: "running";
+            /** Stream Entity Tag */
+            stream_entity_tag: string;
+        };
+        /**
+         * CacheTargetReconciliationSealRequest
+         * @description Service two-phase cutover seal command.
+         */
+        CacheTargetReconciliationSealRequest: {
+            /** Consumer Id */
+            consumer_id: string;
+            /** Expected Item Count */
+            expected_item_count: number;
+            /** Expected Merkle Root */
+            expected_merkle_root: string;
+            /** Expected Restore Epoch */
+            expected_restore_epoch: number;
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
+            external_system: string;
+        };
+        /**
+         * CacheTargetRecoveryOperationRecord
+         * @description Accepted recovery operation receipt.
+         */
+        CacheTargetRecoveryOperationRecord: {
+            /** Entity Tag */
+            entity_tag?: string | null;
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /** Snapshot Id */
+            snapshot_id?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "accepted" | "pending" | "leased" | "retry" | "dead" | "delivered" | "preparing" | "running" | "succeeded" | "failed" | "superseded";
+            /** Status Url */
+            status_url?: string | null;
+            /** Stream Entity Tag */
+            stream_entity_tag?: string | null;
+        };
+        /**
+         * CacheTargetRefreshRequest
+         * @description Service refresh request creation body.
+         */
+        CacheTargetRefreshRequest: {
+            /**
+             * External System
+             * @description Trimmed Unicode NFC canonical external system identity.
+             */
+            external_system: string;
+            /** Reason */
+            reason: string;
+            /** Target Keys */
+            target_keys: string[];
+        };
+        /**
+         * CacheTargetRefreshRequestRecord
+         * @description Refresh request status.
+         */
+        CacheTargetRefreshRequestRecord: {
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Retry After Seconds */
+            retry_after_seconds?: number | null;
+            /** Status */
+            status: string;
+            /** Status Url */
+            status_url: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * CacheTargetRefreshRequestResponse
+         * @description Service refresh request response.
+         */
+        CacheTargetRefreshRequestResponse: {
+            data: components["schemas"]["CacheTargetRefreshRequestRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetRefreshStatusChangedPayload
+         * @description Exact payload for ``refresh_request.status_changed``.
+         */
+        CacheTargetRefreshStatusChangedPayload: {
+            /** Error Code */
+            error_code: string | null;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "done" | "failed" | "cancelled";
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Version
+             * @constant
+             */
+            version: "cache-target-event-v1";
+        };
+        /**
+         * CacheTargetRestoreFenceRecord
+         * @description Restore-fence control state와 durable effect receipt.
+         *
+         *     불변조건: `superseded_reconciliation_count == 0` iff
+         *     `superseded_reconciliation_request_id == null`이고, count가 `1` iff request ID가
+         *     UUID다. runtime validator와 OpenAPI object-level `oneOf`가 같은 두 조합만 허용한다.
+         */
+        CacheTargetRestoreFenceRecord: {
+            /** Active Reconciliation */
+            active_reconciliation?: (components["schemas"]["CacheTargetReconciliationPreparing"] | components["schemas"]["CacheTargetReconciliationRunning"]) | null;
+            /** Blocked Event Id */
+            blocked_event_id?: string | null;
+            /** Consumer Id */
+            consumer_id?: string | null;
+            /** Control Version */
+            control_version: number;
+            /** Entity Tag */
+            entity_tag: string;
+            /** External System */
+            external_system: string;
+            /**
+             * Fence Id
+             * Format: uuid
+             */
+            fence_id: string;
+            /** Invalidated Claim Count */
+            invalidated_claim_count: number;
+            /** Previous Control Version */
+            previous_control_version: number;
+            /** Previous Restore Epoch */
+            previous_restore_epoch: number;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /**
+             * State
+             * @default active
+             * @enum {string}
+             */
+            state: "active" | "blocked" | "disabled" | "fenced" | "ready" | "restore_fenced";
+            /** Superseded Delivery Count */
+            superseded_delivery_count: number;
+            /** Superseded Reconciliation Count */
+            superseded_reconciliation_count: number;
+            /** Superseded Reconciliation Request Id */
+            superseded_reconciliation_request_id: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        } & ({
+            /** @constant */
+            superseded_reconciliation_count: 0;
+            superseded_reconciliation_request_id: null;
+        } | {
+            /** @constant */
+            superseded_reconciliation_count: 1;
+            /** Format: uuid */
+            superseded_reconciliation_request_id: string;
+        });
+        /**
+         * CacheTargetRestoreFenceRequest
+         * @description Restore-fence command body.
+         */
+        CacheTargetRestoreFenceRequest: {
+            /** Consumer Id */
+            consumer_id: string;
+            /** Expected Restore Epoch */
+            expected_restore_epoch: number;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * CacheTargetRestoreFenceResponse
+         * @description Restore-fence command result.
+         */
+        CacheTargetRestoreFenceResponse: {
+            data: components["schemas"]["CacheTargetRestoreFenceRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetSnapshotData
+         * @description Fixed snapshot page.
+         */
+        CacheTargetSnapshotData: {
+            /** Count */
+            count: number;
+            /**
+             * Created At
+             * Format: date-time
+             * @description 고정 snapshot material 생성 시각.
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description generic snapshot cursor의 만료 시각. generic first page는 서버 handoff 직전 최소 75분을 검사하고 15분 response margin을 둬 client 수신 후 최소 60분의 traversal window를 보장한다. reconciliation-bound snapshot은 request가 running인 동안 이 시각과 무관하게 page할 수 있다.
+             */
+            expires_at: string;
+            /**
+             * High Watermark Cursor
+             * @description 이 immutable snapshot material이 안전하게 포함한 global outbox replay lower-bound. snapshot 생성 뒤 생긴 비material event가 있으면 현재 global max보다 과거일 수 있으므로, consumer는 이 cursor 이후 event를 중복 허용 방식으로 모두 재처리해야 한다.
+             */
+            high_watermark_cursor: string;
+            /** Items */
+            items: components["schemas"]["CacheTargetSnapshotRow"][];
+            /** Merkle Root */
+            merkle_root: string;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /** Snapshot Id */
+            snapshot_id: string;
+        };
+        /**
+         * CacheTargetSnapshotResponse
+         * @description Service snapshot response.
+         */
+        CacheTargetSnapshotResponse: {
+            data: components["schemas"]["CacheTargetSnapshotData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetSnapshotRow
+         * @description Fixed snapshot leaf row.
+         */
+        CacheTargetSnapshotRow: {
+            /** External System */
+            external_system: string;
+            /** Source Generation */
+            source_generation: number;
+            /** Source Payload Fingerprint */
+            source_payload_fingerprint: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "deleted";
+            /** Target Key */
+            target_key: string;
+        };
+        /**
+         * CacheTargetSnapshotStatus
+         * @description Ops stream status nested snapshot summary.
+         */
+        CacheTargetSnapshotStatus: {
+            /** Count */
+            count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * High Watermark Cursor
+             * @description 이 immutable snapshot material이 안전하게 포함한 global outbox replay lower-bound. snapshot 생성 뒤 생긴 비material event가 있으면 현재 global max보다 과거일 수 있으므로, consumer는 이 cursor 이후 event를 중복 허용 방식으로 모두 재처리해야 한다.
+             */
+            high_watermark_cursor: string;
+            /** Merkle Root */
+            merkle_root: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+        };
+        /**
+         * CacheTargetSourceDeleteRequest
+         * @description Service desired-state tombstone source event.
+         */
+        CacheTargetSourceDeleteRequest: {
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /**
+             * Source Event Id
+             * Format: uuid
+             */
+            source_event_id: string;
+            /** Source Generation */
+            source_generation: number;
+        };
+        /**
+         * CacheTargetSourceMutationRecord
+         * @description PUT/DELETE가 commit한 exact target incarnation receipt.
+         */
+        CacheTargetSourceMutationRecord: {
+            /** Entity Tag */
+            entity_tag: string;
+            /** External System */
+            external_system: string;
+            /** Occurred At */
+            occurred_at?: string | null;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /** Source Generation */
+            source_generation: number;
+            /** Source Payload Fingerprint */
+            source_payload_fingerprint: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "deleted";
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Target Key */
+            target_key: string;
+            /** Target Sequence */
+            target_sequence: number;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * CacheTargetSourceMutationResponse
+         * @description Service target PUT/DELETE response.
+         */
+        CacheTargetSourceMutationResponse: {
+            data: components["schemas"]["CacheTargetSourceMutationRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetSourceReadResponse
+         * @description Service target GET response.
+         */
+        CacheTargetSourceReadResponse: {
+            data: components["schemas"]["CacheTargetSourceRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetSourceRecord
+         * @description Nullable tombstone identity를 허용하는 target source read projection.
+         */
+        CacheTargetSourceRecord: {
+            /** Entity Tag */
+            entity_tag?: string | null;
+            /** External System */
+            external_system: string;
+            /** Occurred At */
+            occurred_at?: string | null;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /** Source Generation */
+            source_generation: number;
+            /** Source Payload Fingerprint */
+            source_payload_fingerprint: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "deleted";
+            /** Target Id */
+            target_id?: string | null;
+            /** Target Key */
+            target_key: string;
+            /** Target Sequence */
+            target_sequence?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * CacheTargetSourceUpsertRequest
+         * @description Service desired-state active source event.
+         */
+        CacheTargetSourceUpsertRequest: {
+            coord: components["schemas"]["CacheTargetDecimalCoordinate"];
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Radius Km */
+            radius_km: number | string;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /**
+             * Source Event Id
+             * Format: uuid
+             */
+            source_event_id: string;
+            /** Source Generation */
+            source_generation: number;
+            /**
+             * Update Enabled
+             * @default true
+             */
+            update_enabled: boolean;
+        };
+        /**
+         * CacheTargetStateAppliedPayload
+         * @description Exact payload for ``cache_target.state_applied``.
+         */
+        CacheTargetStateAppliedPayload: {
+            /**
+             * Source Event Id
+             * Format: uuid
+             */
+            source_event_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "deleted";
+            target: components["schemas"]["CacheTargetStateAppliedTarget"] | null;
+            /**
+             * Version
+             * @constant
+             */
+            version: "cache-target-event-v1";
+        };
+        /**
+         * CacheTargetStateAppliedTarget
+         * @description Applied active target projection embedded in an outbox event.
+         */
+        CacheTargetStateAppliedTarget: {
+            coord: components["schemas"]["CacheTargetEventCoordinate"];
+            /** Entity Tag */
+            entity_tag: string;
+            /** Radius M */
+            radius_m: number;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Update Enabled */
+            update_enabled: boolean;
+        };
+        /**
+         * CacheTargetStreamControlRecord
+         * @description External-system stream control.
+         */
+        CacheTargetStreamControlRecord: {
+            /** Active Reconciliation */
+            active_reconciliation?: (components["schemas"]["CacheTargetReconciliationPreparing"] | components["schemas"]["CacheTargetReconciliationRunning"]) | null;
+            /** Blocked Event Id */
+            blocked_event_id?: string | null;
+            /** Consumer Id */
+            consumer_id?: string | null;
+            /** Control Version */
+            control_version: number;
+            /** Entity Tag */
+            entity_tag: string;
+            /** External System */
+            external_system: string;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /**
+             * State
+             * @default active
+             * @enum {string}
+             */
+            state: "active" | "blocked" | "disabled" | "fenced" | "ready" | "restore_fenced";
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * CacheTargetStreamControlResponse
+         * @description Service stream control response.
+         */
+        CacheTargetStreamControlResponse: {
+            data: components["schemas"]["CacheTargetStreamControlRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetStreamStatusListData
+         * @description Ops stream status list data.
+         */
+        CacheTargetStreamStatusListData: {
+            /** Items */
+            items: components["schemas"]["CacheTargetStreamStatusRecord"][];
+        };
+        /**
+         * CacheTargetStreamStatusListResponse
+         * @description Ops stream status list response.
+         */
+        CacheTargetStreamStatusListResponse: {
+            data: components["schemas"]["CacheTargetStreamStatusListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CacheTargetStreamStatusRecord
+         * @description Ops stream status row.
+         */
+        CacheTargetStreamStatusRecord: {
+            /** Blocked Event Id */
+            blocked_event_id?: string | null;
+            /** Consumer Enabled */
+            consumer_enabled: boolean;
+            /** Control Version */
+            control_version: number;
+            /** Dead Count */
+            dead_count: number;
+            /** Delivered Count */
+            delivered_count: number;
+            /** External System */
+            external_system: string;
+            last_snapshot?: components["schemas"]["CacheTargetSnapshotStatus"] | null;
+            /** Leased Count */
+            leased_count: number;
+            /** Pending Count */
+            pending_count: number;
+            /** Restore Epoch */
+            restore_epoch: number;
+            /** Retry Count */
+            retry_count: number;
+            /** State */
+            state: string;
+            /** Superseded Count */
+            superseded_count: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * CategoriesData
@@ -11594,6 +13050,145 @@ export interface operations {
             };
         };
     };
+    replay_admin_cache_target_dead_letter_v1_admin_cache_target_event_dead_letters__event_id__replays_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+                /** @description 직전 GET/성공 응답의 raw strong ETag. */
+                "If-Match": string;
+            };
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetDeadLetterReplayRequest"];
+            };
+        };
+        responses: {
+            /** @description replay accepted */
+            202: {
+                headers: {
+                    /** @description accepted recovery operation status URL. */
+                    Location?: string;
+                    /** @description status URL 재조회 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetOperationResponse"];
+                };
+            };
+            /** @description stale delivery ETag */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description missing If-Match */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    request_admin_cache_target_reconciliation_v1_admin_cache_target_reconciliations_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetReconciliationRequest"];
+            };
+        };
+        responses: {
+            /** @description reconciliation accepted */
+            202: {
+                headers: {
+                    /** @description accepted recovery operation status URL. */
+                    Location?: string;
+                    /** @description status URL 재조회 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetOperationResponse"];
+                };
+            };
+            /** @description snapshot item 수가 100,000개 materialization 상한을 초과함. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description snapshot writer barrier 또는 materialization 제한 시간 초과. */
+            503: {
+                headers: {
+                    /** @description snapshot 작업 재시도 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     list_admin_curated_source_rules_route_v1_admin_curated_source_rules_get: {
         parameters: {
             query?: {
@@ -15100,6 +16695,7 @@ export interface operations {
     list_poi_cache_target_records_v1_admin_poi_cache_targets_get: {
         parameters: {
             query?: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system?: string | null;
                 update_enabled?: boolean | null;
                 include_deleted?: boolean;
@@ -15148,7 +16744,9 @@ export interface operations {
             };
             header?: never;
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
                 target_key: string;
             };
             cookie?: never;
@@ -15200,7 +16798,9 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
                 target_key: string;
             };
             cookie?: never;
@@ -15259,7 +16859,9 @@ export interface operations {
                 "If-Match": string;
             };
             path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
                 external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
                 target_key: string;
             };
             cookie?: never;
@@ -16929,6 +18531,200 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiCallLogsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_ops_cache_target_dead_letters_v1_ops_cache_target_event_dead_letters_get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetDeadLetterListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_ops_cache_target_dead_letter_v1_ops_cache_target_event_dead_letters__event_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetDeadLetterDetailResponse"];
+                };
+            };
+            /** @description dead letter 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_ops_cache_target_operation_v1_ops_cache_target_operations__operation_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetOperationResponse"];
+                };
+            };
+            /** @description operation 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_ops_cache_target_streams_v1_ops_cache_target_streams_get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetStreamStatusListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -19103,6 +20899,1048 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicFestivalDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    ack_service_cache_target_events_v1_service_cache_target_event_acks_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetAckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetAckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    claim_service_cache_target_events_v1_service_cache_target_event_claims_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetClaimRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetClaimResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_service_cache_target_dead_letter_v1_service_cache_target_event_dead_letters__event_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetDeadLetterDetailResponse"];
+                };
+            };
+            /** @description dead letter 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    replay_service_cache_target_dead_letter_v1_service_cache_target_event_dead_letters__event_id__replays_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+                /** @description 직전 GET/성공 응답의 raw strong ETag. */
+                "If-Match": string;
+            };
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetDeadLetterReplayRequest"];
+            };
+        };
+        responses: {
+            /** @description dead letter replayed */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetDeliveryResponse"];
+                };
+            };
+            /** @description stale delivery ETag */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description missing If-Match */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    nack_service_cache_target_event_v1_service_cache_target_event_nacks_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetNackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetDeliveryResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description status URL 재조회 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    begin_service_cache_target_reconciliation_v1_service_cache_target_reconciliations_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+                /** @description create-only command에는 정확히 `*`를 보낸다. */
+                "If-None-Match"?: string;
+                /** @description 직전 GET/성공 응답의 raw strong ETag. */
+                "If-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetReconciliationBeginRequest"];
+            };
+        };
+        responses: {
+            /** @description two-phase reconciliation begin */
+            201: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    /** @description accepted recovery operation status URL. */
+                    Location?: string;
+                    /** @description status URL 재조회 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetOperationResponse"];
+                };
+            };
+            /** @description stale stream ETag or unexpected stream state */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description missing If-Match/If-None-Match */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    complete_service_cache_target_reconciliation_v1_service_cache_target_reconciliations__request_id__completions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetReconciliationCompletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetOperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    seal_service_cache_target_reconciliation_v1_service_cache_target_reconciliations__request_id__seals_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+                /** @description 직전 GET/성공 응답의 raw strong ETag. */
+                "If-Match": string;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetReconciliationSealRequest"];
+            };
+        };
+        responses: {
+            /** @description two-phase reconciliation sealed */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetOperationResponse"];
+                };
+            };
+            /** @description request ETag or checksum precondition failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description snapshot item 수가 100,000개 materialization 상한을 초과함. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description missing If-Match */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description snapshot writer barrier 또는 materialization 제한 시간 초과. */
+            503: {
+                headers: {
+                    /** @description snapshot 작업 재시도 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_service_cache_target_reconciliation_snapshot_v1_service_cache_target_reconciliations__request_id__snapshot_get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetSnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_service_cache_target_snapshot_v1_service_cache_target_snapshots__external_system__get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
+                external_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetSnapshotResponse"];
+                };
+            };
+            /** @description snapshot item 수가 100,000개 materialization 상한을 초과함. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 미만료·미참조 generic snapshot copy 상한 도달. 가장 오래된 snapshot 만료 뒤 재시도한다. */
+            429: {
+                headers: {
+                    /** @description 가장 오래된 snapshot 만료까지의 DB 기준 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description snapshot 생성 경합, handoff TTL 부족, writer barrier 또는 materialization 제한 시간 초과. */
+            503: {
+                headers: {
+                    /** @description snapshot 작업 재시도 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_service_cache_target_stream_v1_service_cache_target_streams__external_system__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
+                external_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetStreamControlResponse"];
+                };
+            };
+            /** @description stream 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    create_service_restore_fence_v1_service_cache_target_streams__external_system__restore_fences_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+                /** @description 직전 GET/성공 응답의 raw strong ETag. */
+                "If-Match": string;
+            };
+            path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
+                external_system: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetRestoreFenceRequest"];
+            };
+        };
+        responses: {
+            /** @description restore fence advanced */
+            201: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetRestoreFenceResponse"];
+                };
+            };
+            /** @description stale stream ETag */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description missing If-Match */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_service_cache_target_v1_service_cache_targets__external_system___target_key__get: {
+        parameters: {
+            query?: {
+                include_deleted?: boolean;
+            };
+            header?: {
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
+                external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
+                target_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description target source read */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetSourceReadResponse"];
+                };
+            };
+            /** @description target source not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    put_service_cache_target_v1_service_cache_targets__external_system___target_key__put: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+                /** @description create-only command에는 정확히 `*`를 보낸다. */
+                "If-None-Match"?: string;
+                /** @description 직전 GET/성공 응답의 raw strong ETag. */
+                "If-Match": string;
+            };
+            path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
+                external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
+                target_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetSourceUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description target source applied */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetSourceMutationResponse"];
+                };
+            };
+            /** @description stale If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description missing If-Match/If-None-Match */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    delete_service_cache_target_v1_service_cache_targets__external_system___target_key__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+                /** @description 직전 GET/성공 응답의 raw strong ETag. */
+                "If-Match": string;
+            };
+            path: {
+                /** @description Trimmed Unicode NFC canonical external system identity. */
+                external_system: string;
+                /** @description Trimmed Unicode NFC canonical cache target identity. */
+                target_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetSourceDeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description target tombstone applied */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetSourceMutationResponse"];
+                };
+            };
+            /** @description stale If-Match */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description missing If-Match */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    create_service_refresh_request_v1_service_refresh_requests_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CacheTargetRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description refresh request accepted */
+            202: {
+                headers: {
+                    /** @description accepted recovery operation status URL. */
+                    Location?: string;
+                    /** @description status URL 재조회 전 최소 대기 시간(초). */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetRefreshRequestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_service_refresh_request_v1_service_refresh_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 선택 확인용 consumer ID. 권한은 이 헤더가 아니라 서버 측 cache-target principal registry에서 결정되며, 값이 있으면 결박된 consumer_id와 exact match해야 한다. */
+                "X-Kor-Travel-Map-Cache-Target-Consumer"?: string | null;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetRefreshRequestResponse"];
+                };
+            };
+            /** @description refresh request 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description Validation Error */

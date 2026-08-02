@@ -10,6 +10,78 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
+
+Dagster run metadata만으로 직전값을 찾는 stateless 추정은 metadata 정리·재실행·op retry에 따라 기준선이
+달라져 채택하지 않았다. migration `0078_cache_target_gc_observe`로 acquired GC run별 referenced
+item/header count를 `ops.poi_cache_target_snapshot_gc_observations`에 영속화했다. GC 전역 lock 안에서
+관측 identity를 배정하고 같은 `Dagster run_id` retry는 최초 row와 분류를 재사용하며 overlap skip은
+표본에서 제외한다. 직전 acquired와 마지막 적격 baseline을 각 row에 별도로 복사하고, 300초 미달·동일/역행 DB 시각 표본은
+다음 baseline으로 승격하지 않는다. config가 달라져도 직전 acquired보다 비전진한 표본은 fail-close하므로
+짧은 재실행이 이후 급증을 흡수하지 않는다. 이력은 기본 90일로 bounded다.
+
+hourly op는 직전 acquired 대비 loss delta와 마지막 적격 baseline 대비 elapsed seconds·시간당 증가율,
+item/header 보존 ceiling을 exact metadata로 남긴다. 기본 ceiling은 16,800,000 item/168 header,
+증가율은 100,000 item/hour와 1
+header/hour이며 300초 미만 간격은 증가율을 추정하지 않는다. 초과는 reason별 boolean, 통합
+`referenced_alert`, Dagster warning으로 드러내되 정상 GC를 retry하지 않는다. count 감소는 간격과
+무관한 inventory-loss 경보이며 overlap/unavailable/nonforward는 threshold와 별도 observation issue다.
+관측은 파생 데이터라 app-only rollback에서 table을 보존하고 forward recovery한다. 명시적 downgrade는
+table을 폐기하며 0078 재-upgrade 뒤 빈 기준선부터 안전하게 재개한다.
+
+**다음 한 작업**: n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 hourly tick을 연속 실행해
+실제 관측 delta/rate와 임계값 warning을 확인하고, GC 유입률 상회·remaining backlog 0를 함께 증명한다.
+
+## 2026-08-02 (codex) — T-VN-41 canonical Unicode identity 보강
+
+최종 적대 리뷰에서 NFC-equivalent `target_key` 두 개가 raw text 자연키로는 공존하지만 Merkle leaf에서
+같은 identity로 축약되어 snapshot을 영구 500으로 막는 P1을 발견했다. `external_system`과 `target_key`를
+API 422, repository, `poi_cache_targets`/stream/source-head/feature-update scope DB CHECK에서 trim된 NFC
+canonical form으로 강제했다. `cache_target_keys`도 root 자연키와 같은 512자 상한을 사용한다. 비정규
+source·refresh scope는 durable head/request 생성 전에 거부하고 정확한 constraint와 snapshot 회귀를 추가했다.
+
+**다음 한 작업**: exact WIP 두 독립 재리뷰와 전체 gate를 통과한 뒤 Map final commit/OpenAPI를 PinVi에
+재핀하고 n150 100,000/100,001 snapshot live gate를 실행한다.
+
+## 2026-08-01 (codex) — T-VN-41 fixed snapshot durability·bounded GC
+
+service 일반 snapshot 첫 page가 repository에서 header/items를 INSERT하고도 read-only session 종료 때
+rollback되어, 응답 UUID의 다음 cursor가 사라지는 P1을 live E2E에서 발견했다. route가 DTO 구성까지
+포함한 transaction을 소유해 commit 실패/예외에는 200을 내지 않도록 고쳤다. 응답에는
+`created_at`/`expires_at`을 필수로 노출한다.
+
+내구화 뒤 full snapshot이 누적되지 않도록 generic 경로를 single-flight로 분리했다. source head와 같은
+transaction에서 증가하는 `cache_target.state_applied` material watermark를 global cursor와 별도 header에
+저장하고 epoch/watermark가 현재 값과 exact할 때만 재사용한다. advisory lock 뒤 별도 stream share barrier
+statement가 기존 outbox writer 완료 뒤 identity/head를 읽게 해 lock-wait stale MVCC 누락을 막는다.
+모든 outbox writer transaction은 head/target/link 접근 전에 stream을 잠그고 여러 system이면 정렬 순서로
+모두 선취한다. 이 stream → head/target/link 순서로 각 system cursor가 같은 stream에서 늦게 commit되는
+더 낮은 relay를 추월하지 않는 commit-safe contiguous prefix가 되게 한다. 번호의 global uniqueness는
+서로 다른 stream 사이의 commit 순서를 뜻하지 않는다.
+DB trigger는 stream lock을 재확인한 뒤 명시적 global sequence에서 relay를 배정한다. Identity/default의
+trigger 전 할당을 제거해 raw/future insert도 allocation-before-lock 순서를 우회하지 못한다.
+link/refresh/stream-reconciled event는 재사용을 깨지 않는다. 재사용 cursor는 safe replay lower-bound라
+consumer가 이후 event를 idempotent하게 다시 읽는다. Map은 handoff 전 75분, PinVi는 실제 수신 시 60분의
+잔여수명을 각각 검사하며 부족하면 `503 + Retry-After` 또는 consumer fail-close다.
+barrier lock wait 5초/statement 30초를 넘기면 single-flight를 해제하고 barrier/build별 retryable `503`으로
+실패한다.
+
+reuse miss 시 system별 미만료·미참조 generic snapshot이 2개면 세 번째 full copy를 거부한다. 가장 오래된
+expiry까지 동적 `429 + Retry-After`를 반환해 유효 cursor를 삭제하지 않고 live 저장량을 stream
+cardinality의 2배로 제한한다. request-bound 감사 snapshot은 admission count에서 제외한다.
+단일 materialization은 100,001행에서 잘라 100,000 item 초과를 tuple/Merkle 생성 전에
+`413 snapshot_item_limit_exceeded`로 거부한다. 향후 bounded streaming/material 공유는 #922로 분리했다.
+
+hourly background drain은 전역 physical-connection try-lock, system round-robin, batch별 새 transaction,
+3,300초/statement/no-progress 예산을 사용한다. exact remaining과 total/unexpired/referenced count는 종료
+시 한 번만 세고 overlap skip에서는 unknown이다. 기본 1,000×2,000은 실행당 상한이므로 production enable
+전에 n150에서 migration, 수동 GC, schedule ON, 다음 tick의 backlog 0 순서 확인이 필수다.
+reconciliation 감사 snapshot은 terminal 상태도 보존하므로 referenced 증가율과 보존 임계치 alert를
+별도로 검증한다.
+
+**다음 한 작업**: 독립 적대적 리뷰 2건과 Map/PinVi CI를 통과시킨 뒤 exact image를 다시 빌드해 n150
+격리 GC soak·isolated live UI recovery E2E와 최종 prod gate를 완료한다.
+
 ## 2026-08-01 — H35 게이트 ① 실증 완료 (CSV 재import로 공개 표면 3,265 복원)
 
 배포 게이트를 격리 clone에서 **실제 import 경로로 재현**했다(`parse_curation_csv` →
@@ -63,6 +135,30 @@ T-VN-41 lane이 Playwright buildx 빌드 + 라이브 스택 2벌을 **현재 사
 범위 `0064~0074`, 3(마이그레이션)과 4(`ktdctl deploy`) **사이에 CSV 재import**를 넣는다.
 (중단 게이트 값은 위 게이트 실증 항목에서 **공개 노출 item = 3,265**로 정정됐다.)
 
+## 2026-08-01 (codex) — T-VN-41 immutable DELETE/PUT receipt
+
+`0076_cache_target_receipt`이 applied source event의 target UUID와 apply 시점 `lock_version`을 append-only
+영수증으로 고정한다. DELETE exact replay는 mutable tombstone row가 사후 UPDATE돼도 이 immutable
+version으로 최초 post-delete ETag를 복원한다. 0075 기존 active receipt는 outbox ETag에서, DELETE는
+transaction timestamp가 일치하는 tombstone에서만 backfill하고 불확실한 drift는 migration을 중단한다.
+PUT/DELETE response는 non-null UUID `target_id`/`entity_tag`와 양의 `target_sequence` DTO로 generation
+4-tuple을 완성했고, GET은 identity/sequence가 nullable인 read DTO로 분리했다.
+
+**다음 한 작업**: OpenAPI/export/types와 Alembic metadata gate를 포함한 Map 전체 검증 뒤 Map/PinVi 교차
+E2E에서 응답 유실 DELETE exact retry와 후속 새 incarnation PUT의 수렴을 재확인한다.
+
+## 2026-08-01 (codex) — T-VN-41 migration을 main 최신 head 뒤의 `0075`로 선형화
+
+PR #917을 main에 rebase하면서 T-VN-H40/H41의 `0073_curation_source_rule`과
+`0074_curation_item_rekey_cascade`를 먼저 적용하고, cache-target generation/outbox 스키마를
+`0075_cache_target_outbox`로 재번호화했다. 호환용 merge revision이나 병렬 Alembic head를 만들지
+않고 `0072 → 0073 → 0074 → 0075` 단일 체인을 유지한다. 새 PostGIS DB에서 전체 체인
+upgrade/downgrade와 직접 경계 `0074 ↔ 0075` 왕복 검증을 통과했다.
+
+**다음 한 작업**: 독립 적대적 리뷰어 2명이 지적한 rebase 후 PinVi provenance 재핀과
+`0074 ↔ 0075` 직접 downgrade 검증을 반영하고, exact head CI와 n150 격리 live UI recovery
+E2E를 다시 통과시킨 뒤 Map/PinVi PR을 순서대로 머지한다.
+
 ## 2026-08-01 — T-VN-H40 `0073` 구현 완료, T-VN-H35 배포는 여전히 대기
 
 `0073_curation_source_rule`을 넣었다. `0072`가 공개 표면 fail-close를 넣으면서 기존
@@ -78,6 +174,97 @@ T-VN-H35 배포를 B′ 경로로 진행한다. `0064~0073` 마이그레이션�
 `ktdctl deploy`의 하드코딩 `--wait-timeout 120`을 크게 넘으므로 마이그레이션을 배포와
 분리해 돌린다. 배포 전 공개 표면 before/after exact count를 restore clone에서 다시
 잰다 — 이번엔 `0073`까지 포함해서.
+
+## 2026-08-01 (codex) — T-VN-41 restore fence stream identity 결박
+
+restore fence의 대체 reconciliation 참조를 단일 UUID FK에서
+`(external_system, superseded_reconciliation_request_id)` composite FK로 강화했다. referenced
+reconciliation의 `(external_system, request_id)` unique key와 결합하므로 다른 stream의 유효한 UUID를
+receipt에 넣거나 parent stream을 사후 변경할 수 없다. nullable receipt는 기존 count/UUID CHECK와
+`MATCH SIMPLE`이 함께 `0/null`만 허용한다. clean migration upgrade/downgrade와 ORM metadata,
+same-stream exact replay, cross-stream raw INSERT/UPDATE 거부를 PostGIS에서 검증한다.
+
+**다음 한 작업**: Map/PinVi exact functional head를 독립 적대적 리뷰어 2명이 다시 검토하고,
+두 리뷰의 P0~P2가 없을 때 exact candidate image로 n150 isolated/live recovery를 실행한다.
+
+## 2026-08-01 (codex) — T-VN-41 restore fence receipt 상관 불변식
+
+DB CHECK에 있던 `superseded_reconciliation_count`/request UUID 상관 불변식을 HTTP
+응답 DTO에도 fail-close로 맞췄다. count `0`/UUID `null`, count `1`/UUID non-null만
+허용하고 나머지 두 조합은 validation error다. OpenAPI 3.1 object-level `oneOf`도 같은
+`0/null`, `1/format: uuid` branch를 기계 계약으로 고정한다. recovery operation ID는
+UUID로 타입화해 임의 문자열 producer 결과가 consumer 인과관계로 전달되지 않게 했다.
+
+**다음 한 작업**: PinVi contract pin을 새 functional owner SHA와 service OpenAPI SHA-256으로
+갱신하고 producer/consumer CI와 isolated restore contract를 검증한다.
+
+## 2026-08-01 (codex) — T-VN-41 restore fence reconciliation 교착 제거
+
+restore fence가 active `preparing|running` reconciliation을 남겨 구 completion은 epoch 변경으로
+실패하고 새 begin은 active 충돌로 실패하던 P1을 제거했다. fence transaction은 구 request를 terminal
+`superseded`/`restore_fenced`로 종결하고 phase version을 올려 active slot을 비운다. preparing과
+running의 snapshot/root shape는 별도 DB CHECK로 보존하고 stream별 active request는 partial unique
+index로 하나만 허용한다. 구 request의 snapshot/seal/completion은 모두 명시적 conflict다.
+
+durable fence receipt와 service 응답은 최초 claim 무효화 수, delivery 대체 수, reconciliation 대체
+수와 request UUID를 노출한다. exact replay는 이 값과 epoch/control/phase version을 바꾸지 않는다.
+
+**다음 한 작업**: 생성 service OpenAPI와 admin types를 별도 commit으로 고정하고 PinVi pin/PR CI 및
+isolated restore에서 구 request 차단과 새 epoch begin을 검증한다.
+
+## 2026-08-01 (codex) — T-VN-41 prior epoch delivery terminal supersession
+
+restore fence가 active lease만 retry로 풀고 구 epoch pending/retry/dead를 남겨 새 epoch claim을 막던
+P1을 제거했다. epoch N+1 transaction은 더 낮은 epoch의 모든 non-delivered delivery를 terminal
+`superseded`로 종결하고 lease binding, `superseded_at`, version과 fence별 count를 원자 기록한다.
+claim은 현재 epoch만 선택하며 old dead는 DLQ/replay/reconciliation dead gate에서 제외된다. exact fence
+replay는 delivery version을 다시 올리지 않는다. ops/API/admin status는 누적 `superseded_count`를
+backlog/dead와 분리해 노출한다.
+
+**다음 한 작업**: 기능/OpenAPI/admin generated types SHA를 PinVi contract pin에 반영하고 PR CI 및
+isolated restore epoch live에서 old delivery 0회 재전달과 새 epoch 도달을 검증한다.
+
+## 2026-08-01 (codex) — T-VN-41 reconciliation receipt 인과관계 보강
+
+Map의 `cache_target.reconciled` event payload에 reconciliation `request_id`를 필수로 추가했다.
+typed payload는 request/snapshot UUID, actual/expected Merkle root, succeeded status와 contract
+version 여섯 필드만 허용하며, envelope `source_payload_fingerprint`는 expected root와 같도록
+integration/API/OpenAPI 회귀를 고정했다. 이제 PinVi는 request→sealed fixed snapshot→terminal
+receipt 인과관계를 inbox commit에서 직접 검증할 수 있다.
+
+admin one-step reconciliation의 operation receipt와 operation 조회에도 request-bound `snapshot_id`를
+노출했다. isolated live gate는 응답 UUID가 초기 설정 snapshot과 다름을 확인하고, 최종 stream
+`last_snapshot`이 바로 그 응답 UUID로 전이될 때까지 기다린다.
+
+functional producer/schema/test/docs commit과 생성된 service OpenAPI artifact commit은 별도 SHA로
+분리해 PinVi contract pin provenance가 두 경계를 각각 추적한다. paired PinVi consumer와 n150
+isolated live 전까지 `T-VN-41A/B/C`와 production enable은 계속 open/off다.
+
+**다음 한 작업**: PinVi generation 2 contract pin을 두 Map SHA와 service OpenAPI SHA-256에 맞춘 뒤
+PR CI와 isolated request/snapshot receipt live를 통과시킨다.
+
+## 2026-07-31 (codex) — T-VN-41 Map producer foundation docs-first 시작
+
+Map/PinVi paired 계약을 ADR-081로 고정했다. source generation, Map restore epoch, target result
+sequence, queue CAS, ETag를 분리하고 durable natural-key head/tombstone, same-transaction result
+outbox, ServiceToken pull claim/contiguous ACK/NACK/dead/replay, fixed snapshot Merkle v1을 선택했다.
+Migration 0073과 source/result outbox repository를 구현했고, Map restore swap은 live stream
+epoch을 복원 DB와 먼저 대조한다. 복원 epoch 회귀나 consumer binding drift는 fail-close하며,
+통과한 모든 stream은 동일 restore-fence 도메인 함수와 durable command receipt로 전진한 뒤에만
+`.env.restore-swap`을 기록한다. 동일 host command 재시도는 epoch을 다시 올리지 않는다.
+Fixed snapshot은 control/high-watermark/head 전체를 한 MVCC statement로 캡처해 immutable page와
+Merkle root로 고정한다. reconciliation은 claim을 무효화하고 stream을 halt하며 checksum exact
+match·동일 epoch·dead-letter 0에서만 resume한다. empty/all-tombstone 성공은 fake target 없이
+`event_scope=stream`인 단일 `cache_target.reconciled` event를 남긴다.
+Service/Admin API adapter는 source/refresh/claim/DLQ/snapshot/reconciliation/operation repository
+export에 직접 결합했고 service 전용 OpenAPI 산출물을 admin/user 계약과 분리해 고정했다.
+
+본 Map PR은 producer foundation이며 `T-VN-41A/B/C` 완료가 아니다. PinVi paired consumer,
+pinned service OpenAPI, n150 isolated duplicate/gap/restore epoch live와 checksum equality 전까지 task와
+consumer enable은 open/off로 유지한다.
+
+**다음 한 작업**: paired PinVi consumer가 pinned service OpenAPI로 같은 event/schema/checksum을
+검증하게 한 뒤 n150 isolated duplicate/gap/restore epoch live gate를 실행한다.
 
 ## 2026-07-31 (codex) — T-VN-CI-PG 임의 ref PostGIS 수동 gate 완료
 

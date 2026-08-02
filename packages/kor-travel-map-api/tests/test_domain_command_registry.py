@@ -42,7 +42,7 @@ def test_every_openapi_write_operation_has_exact_static_policy() -> None:
     writes = _openapi_writes()
 
     assert set(COMMAND_REGISTRY) == set(writes)
-    assert len(writes) == 55
+    assert len(writes) == 68
 
 
 def test_registered_domain_and_specialized_ledgers_have_stable_operation_names() -> None:
@@ -114,9 +114,14 @@ def test_generic_domain_ledger_is_admin_bff_only() -> None:
         if policy.kind is CommandPolicyKind.DOMAIN_LEDGER
     }
 
-    assert all(path.startswith("/v1/admin/") for _, path in routes)
     for key in routes:
-        assert writes[key]["security"] == [{"AdminBFF": []}], key
+        method, path = key
+        assert method in _WRITE_METHODS
+        if path.startswith("/v1/admin/"):
+            assert writes[key]["security"] == [{"AdminBFF": []}], key
+        else:
+            assert path.startswith("/v1/service/")
+            assert writes[key]["security"] == [{"ServiceToken": []}], key
 
 
 def test_domain_terminal_contract_matches_declared_openapi_success_response() -> None:
@@ -141,8 +146,16 @@ def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
         if policy.kind is CommandPolicyKind.DOMAIN_LEDGER
         and policy.fingerprint_headers
     } == {
+        "admin.cache-target-dead-letter.replay": ("If-Match",),
         "admin.feature.patch": ("If-Match",),
         "admin.feature.delete": ("If-Match",),
+        "service.cache-target-dead-letter.replay": ("If-Match",),
+        "service.cache-target-reconciliation.begin": (
+            "If-Match",
+            "If-None-Match",
+        ),
+        "service.cache-target-reconciliation.seal": ("If-Match",),
+        "service.cache-target-restore-fence.create": ("If-Match",),
     }
 
 

@@ -169,6 +169,33 @@ def test_put_poi_cache_target_rejects_impossible_external_system_before_transact
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("method", "path", "params"),
+    [
+        ("GET", "/v1/admin/poi-cache-targets/external-app/poi:e\u0301", None),
+        ("DELETE", "/v1/admin/poi-cache-targets/external-app/poi:e\u0301", None),
+        ("GET", "/v1/admin/poi-cache-targets", {"external_system": " pinvi "}),
+    ],
+)
+def test_admin_cache_target_reads_reject_noncanonical_identity_before_repository(
+    client: TestClient,
+    session: _FakeSession,
+    method: str,
+    path: str,
+    params: dict[str, str] | None,
+) -> None:
+    response = client.request(
+        method,
+        path,
+        params=params,
+        headers={"If-Match": f'"{TARGET_ID}:7"'},
+    )
+
+    assert response.status_code == 422
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
 def test_put_poi_cache_target_uses_transaction(
     client: TestClient,
     session: _FakeSession,
