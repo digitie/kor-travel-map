@@ -7,6 +7,10 @@
 
 ### cache-target generation outbox producer foundation (2026-07-31, T-VN-41)
 
+- **SECURITY (breaking)**: source PUT/DELETE와 refresh create는 exact `cache-target:command`만 허용한다.
+  기존 `cache-target:consumer` umbrella는 read/claim/ack/nack/snapshot에만 적용되고 command로 승격되지
+  않으며, command principal도 consumer·snapshot·recovery 경로를 호출할 수 없다. PinVi는 재export한
+  service OpenAPI를 pin하고 compatible pair를 contract generation 7로 올려야 한다.
 - **DATABASE (breaking)**: migration `0075_cache_target_outbox`로 source generation/restore epoch,
   durable head/tombstone, transaction outbox, delivery/claim/dead-letter, fixed snapshot과
   reconciliation 상태를 정규화했다. 후속 `0076_cache_target_receipt`은 applied source event에 당시

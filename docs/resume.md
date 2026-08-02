@@ -10,6 +10,18 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — T-VN-41 command principal 최소 권한 설계 동결
+
+source PUT/DELETE와 refresh create에 relay consumer umbrella를 재사용하면 writer token이 read/claim/ack/
+nack/snapshot까지 획득하는 권한 역전이 생긴다. exact `cache-target:command`를 추가하고 기존
+`cache-target:consumer` umbrella는 consumer read/claim/ack/nack/snapshot에만 한정하기로 했다. command
+principal도 consumer·snapshot·recovery 경로를 호출할 수 없다.
+
+이 변경은 OpenAPI security scheme 형태가 같더라도 인증 의미가 바뀌는 breaking contract이므로 Map
+service OpenAPI를 재export·재핀하고 PinVi compatible pair를 contract generation 7로 올린다.
+
+**다음 한 작업**: scope registry와 세 command route를 변경하고 양방향 권한 격리 회귀를 추가한다.
+
 ## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
 
 Dagster run metadata만으로 직전값을 찾는 stateless 추정은 metadata 정리·재실행·op retry에 따라 기준선이

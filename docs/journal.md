@@ -17,6 +17,14 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-02 (codex) — T-VN-41 command principal 문서 우선 동결
+
+- source PUT/DELETE와 refresh create는 exact `cache-target:command`만 허용한다.
+- `cache-target:consumer` umbrella는 read/claim/ack/nack/snapshot만 포함하고 command를 포함하지 않는다.
+  command principal의 consumer·snapshot·recovery 접근도 `403`으로 고정한다.
+- 인증 의미가 달라지는 breaking contract로 판단해 service OpenAPI 재핀과 PinVi contract generation 7을
+  요구한다. generation 6 조합으로 command 표면을 활성화하지 않는다.
+
 ## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
 
 - job metadata history 조회는 Dagster storage retention과 retry attempt에 결합되므로 운영 정본으로 쓰지

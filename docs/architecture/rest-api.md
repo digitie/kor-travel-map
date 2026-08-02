@@ -590,9 +590,11 @@ POST /v1/service/cache-target-reconciliations/{request_id}/completions
 ```
 
 모두 `X-Kor-Travel-Map-Service-Token`을 쓰되 token principal의 `consumer_id`와
-external system을 exact 결박한다. scope는 consumer read/claim/ack/nack/snapshot,
-restore-fence, recovery replay, recovery cutover로 분리한다. PinVi에 admin proxy secret이나
-ops mutation 권한을 주지 않는다.
+external system을 exact 결박한다. source PUT/DELETE와 refresh create는 exact
+`cache-target:command`를 요구한다. read/claim/ack/nack/snapshot, restore-fence, recovery replay,
+recovery cutover는 별도 scope다. 기존 `cache-target:consumer` umbrella는 consumer read/claim/ack/
+nack/snapshot만 포함하며 command를 포함하지 않는다. command principal도 consumer·snapshot·recovery
+경로를 호출할 수 없다. PinVi에 admin proxy secret이나 ops mutation 권한을 주지 않는다.
 `external_system`과 `target_key`는 trim된 Unicode NFC canonical identity만 허용한다. `target_key`는
 source path/body와 `cache_target_keys` scope에서 모두 512자 이하이다. repository와 DB CHECK도 같은
 규칙을 강제하며, 비정규 service/admin/ops 입력은 `422 VALIDATION_ERROR`다. NFC-equivalent 두 문자열이

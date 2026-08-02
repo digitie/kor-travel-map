@@ -214,6 +214,11 @@ replay의 claim/delivery/reconciliation count와 request UUID는 최초 응답�
 restored payload의 epoch를 신뢰하지 않는다. fixed snapshot은
 active+tombstone Merkle v1과 pinned service OpenAPI를 함께 검증한다. credential, principal scope,
 contract SHA, epoch, snapshot checksum 중 하나라도 맞지 않으면 PinVi consumer는 fail-closed한다.
+source PUT/DELETE와 refresh create는 exact `cache-target:command` principal만 사용한다. 기존
+`cache-target:consumer` umbrella는 read/claim/ack/nack/snapshot 호환 권한일 뿐 command를 포함하지
+않으며, command principal도 consumer·snapshot·recovery를 호출하지 못한다. 이 권한 분리부터 Map service
+OpenAPI SHA를 다시 pin하고 compatible pair를 contract generation 7로 올린다. generation 6 조합은
+command 표면 활성화에 사용할 수 없다.
 성공한 `cache_target.reconciled` payload는 exact
 `{request_id, snapshot_id, actual_merkle_root, expected_merkle_root, status, version}`이며,
 envelope의 `source_payload_fingerprint`는 expected root와 같다. PinVi는 이 request/snapshot identity를
