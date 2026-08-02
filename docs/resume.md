@@ -17,15 +17,23 @@ nack/snapshot까지 획득하는 권한 역전이 생긴다. exact `cache-target
 `cache-target:consumer` umbrella는 enum·validator·인증 fallback에서 clean cut 제거하기로 했다. command
 principal도 consumer·snapshot·recovery 경로를 호출할 수 없다.
 
-이 변경은 OpenAPI security scheme 형태가 같더라도 인증 의미가 바뀌는 breaking contract이므로 Map
-service OpenAPI를 재export했다. PinVi compatible pair는 이 SHA를 재핀하고 contract generation 7로
-올려야 한다.
+한 canonical `(consumer_id, sorted external_systems)` binding마다 command, consumer, restore, recovery
+exact 역할 profile을 각각 하나씩 요구한다. 다중 disjoint binding은 허용하되 external system 소유권,
+token digest, `principal_id`는 전역 unique다. 역할 누락·중복·혼합/부분 scope, 비정렬 allowlist와 설정된
+admin/service/ops/metrics/cursor secret digest 충돌도 fail-close한다.
 
-exact scope registry와 세 command route를 변경했다. command token의 read/claim/ack/nack/snapshot/recovery
-접근, 모든 비command exact scope의 PUT/DELETE/refresh create 접근, 제거된 consumer umbrella 설정을
-각각 fail-close 회귀로 고정했다.
+17개 service cache-target/refresh operation에 machine-readable `x-required-service-scope`를 넣고 route →
+scope → caller role을 테스트로 고정했다. command writer가 PUT/DELETE CAS 후 source GET이나 refresh
+`Location` polling GET을 수행할 때는 consumer credential로 전환해야 한다. generation 7 exact pair pin을
+writer/backfill/consumer 활성화의 선행 조건으로 옮겼다.
 
-**다음 한 작업**: exact WIP를 두 독립 적대 리뷰에 넘기고 지적을 반영한 뒤 최종 전체 gate를 실행한다.
+full/service OpenAPI와 admin generated types를 재생성했다. service SHA-256은
+`622ea54c98e9b0c09592cf84aced36227992c6bdf256742a3532b892f0efccf2`다. router 96건, OpenAPI export
+12건, API strict mypy 61개 파일, 대상 Ruff, OpenAPI all drift, frontend `gen:types:check`가 통과했다.
+PinVi contract generation 7 재핀과 caller credential 전환은 아직 완료하지 않았고 별도 paired PR이
+소유한다.
+
+**다음 한 작업**: 새 exact head를 두 독립 적대 리뷰에 다시 넘겨 GO를 받은 뒤 최종 전체 gate를 실행한다.
 
 ## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
 

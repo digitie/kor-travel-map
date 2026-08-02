@@ -589,12 +589,25 @@ GET  /v1/service/cache-target-reconciliations/{request_id}/snapshot
 POST /v1/service/cache-target-reconciliations/{request_id}/completions
 ```
 
-모두 `X-Kor-Travel-Map-Service-Token`을 쓰되 token principal의 `consumer_id`와
-external system을 exact 결박한다. source PUT/DELETE와 refresh create는 exact
-`cache-target:command`를 요구한다. read/claim/ack/nack/snapshot, restore-fence, recovery replay,
-recovery cutover는 별도 exact scope다. 기존 `cache-target:consumer` umbrella는 enum·validator·인증
-fallback에서 clean cut 제거한다. command principal도 consumer·snapshot·recovery 경로를 호출할 수 없다.
-PinVi에 admin proxy secret이나 ops mutation 권한을 주지 않는다.
+모두 `X-Kor-Travel-Map-Service-Token`을 쓰되 token principal의 `consumer_id`와 external system을 exact
+결박한다. 한 canonical `(consumer_id, sorted external_systems)` binding은 다음 네 역할을 각각 정확히
+하나 갖는다.
+
+| 역할 | exact scope 집합 | 호출 |
+|---|---|---|
+| command | `{cache-target:command}` | source PUT/DELETE, refresh create |
+| consumer | `{cache-target:read, cache-target:claim, cache-target:ack, cache-target:nack, cache-target:snapshot}` | source/stream/refresh read, relay, snapshot/completion |
+| restore | `{cache-target:restore-fence}` | restore fence |
+| recovery | `{cache-target:recovery, cache-target:recovery-replay}` | reconciliation begin/seal, dead-letter read/replay |
+
+scope 목록의 순서는 의미가 없지만 exact 집합 밖 mixed/partial/extra profile, 역할 누락·중복, 비정렬 system
+allowlist는 기동을 막는다. 서로 겹치지 않는 complete binding 여러 개는 허용하며 external system
+소유권, token digest, `principal_id`는 전역 unique다. 각 service operation은 OpenAPI
+`x-required-service-scope`로 요구 scope를 노출한다. 기존 `cache-target:consumer` umbrella는
+enum·validator·인증 fallback에서 clean cut 제거한다. command principal도 consumer·snapshot·restore·
+recovery 경로를 호출할 수 없다. command writer가 PUT/DELETE 후 source GET으로 CAS를 이어가거나 refresh
+`Location`을 polling할 때는 consumer credential로 전환한다. PinVi에 admin proxy secret이나 ops mutation
+권한을 주지 않는다.
 `external_system`과 `target_key`는 trim된 Unicode NFC canonical identity만 허용한다. `target_key`는
 source path/body와 `cache_target_keys` scope에서 모두 512자 이하이다. repository와 DB CHECK도 같은
 규칙을 강제하며, 비정규 service/admin/ops 입력은 `422 VALIDATION_ERROR`다. NFC-equivalent 두 문자열이

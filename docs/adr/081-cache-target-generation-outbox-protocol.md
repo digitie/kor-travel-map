@@ -306,13 +306,51 @@ T-VN-12 정적 registry에서 generic DB command, 기존 refresh ledger, outbox 
 하나로 분류한다.
 
 operator는 ops read에서 epoch/claim/backlog/dead/reconciliation 상태를 보고, admin 표면에서 replay와
-reconciliation command를 실행한다. ServiceToken scope는 source PUT/DELETE와 refresh create 전용
-`cache-target:command`, consumer read/claim/ack/nack/snapshot, restore-fence, recovery replay,
-recovery cutover로 분리한다. 기존 `cache-target:consumer`는 read/claim/ack/nack/snapshot의 호환
-umbrella로 남기지 않고 enum·validator·인증 fallback에서 clean cut 제거한다. command principal도
-consumer·snapshot·recovery 경로를 호출할 수 없다. 따라서 PinVi writer와 relay consumer는 서로 다른 최소 권한 token을
-사용한다. admin reconciliation 시작은 active claim을 끊는 복구 mutation이므로 destructive recovery
-gate가 켜진 경우에만 허용한다.
+reconciliation command를 실행한다. ServiceToken registry의 한 binding은 canonical
+`(consumer_id, sorted external_systems)`로 식별하고 다음 네 exact 역할 principal을 각각 정확히 하나씩
+가진다. scope 비교는 순서가 아니라 집합 동등성이다.
+
+| 호출 역할 | exact scope 집합 |
+|---|---|
+| command | `{cache-target:command}` |
+| consumer | `{cache-target:read, cache-target:claim, cache-target:ack, cache-target:nack, cache-target:snapshot}` |
+| restore | `{cache-target:restore-fence}` |
+| recovery | `{cache-target:recovery, cache-target:recovery-replay}` |
+
+서로 겹치지 않는 complete binding 여러 개는 허용하지만 external system 하나는 전역에서 한 binding만
+소유한다. token digest와 `principal_id`도 전역 unique다. 역할 누락·중복, mixed/partial/extra scope,
+비정렬 allowlist, external system 중복 소유는 설정 검증에서 기동을 막는다. 역할 token digest는 설정된
+admin proxy/service/ops/metrics/cursor secret 원문의 SHA-256과도 달라야 한다. local-dev의 미설정 cursor
+process fallback은 비교 대상이 아니다.
+
+기존 `cache-target:consumer`는 read/claim/ack/nack/snapshot의 호환 umbrella로 남기지 않고
+enum·validator·인증 fallback에서 clean cut 제거한다. command principal도 consumer·snapshot·recovery
+경로를 호출할 수 없다. 따라서 PinVi writer와 relay consumer는 서로 다른 최소 권한 token을 사용한다.
+command writer가 PUT/DELETE CAS를 위해 source를 다시 읽거나 refresh `Location`을 polling할 때는 command
+credential을 계속 쓰지 않고 consumer credential로 전환한다. admin reconciliation 시작은 active claim을
+끊는 복구 mutation이므로 destructive recovery gate가 켜진 경우에만 허용한다.
+
+각 service operation은 OpenAPI의 `x-required-service-scope`로 다음 계약을 기계 판독 가능하게 노출한다.
+
+| method/path | scope | 호출 역할 |
+|---|---|---|
+| `PUT /v1/service/cache-targets/{external_system}/{target_key}` | `cache-target:command` | command |
+| `GET /v1/service/cache-targets/{external_system}/{target_key}` | `cache-target:read` | consumer |
+| `DELETE /v1/service/cache-targets/{external_system}/{target_key}` | `cache-target:command` | command |
+| `GET /v1/service/cache-target-streams/{external_system}` | `cache-target:read` | consumer |
+| `POST /v1/service/cache-target-streams/{external_system}/restore-fences` | `cache-target:restore-fence` | restore |
+| `POST /v1/service/refresh-requests` | `cache-target:command` | command |
+| `GET /v1/service/refresh-requests/{request_id}` | `cache-target:read` | consumer |
+| `POST /v1/service/cache-target-event-claims` | `cache-target:claim` | consumer |
+| `POST /v1/service/cache-target-event-acks` | `cache-target:ack` | consumer |
+| `POST /v1/service/cache-target-event-nacks` | `cache-target:nack` | consumer |
+| `GET /v1/service/cache-target-event-dead-letters/{event_id}` | `cache-target:recovery-replay` | recovery |
+| `POST /v1/service/cache-target-event-dead-letters/{event_id}/replays` | `cache-target:recovery-replay` | recovery |
+| `POST /v1/service/cache-target-reconciliations` | `cache-target:recovery` | recovery |
+| `POST /v1/service/cache-target-reconciliations/{request_id}/seals` | `cache-target:recovery` | recovery |
+| `POST /v1/service/cache-target-reconciliations/{request_id}/completions` | `cache-target:snapshot` | consumer |
+| `GET /v1/service/cache-target-snapshots/{external_system}` | `cache-target:snapshot` | consumer |
+| `GET /v1/service/cache-target-reconciliations/{request_id}/snapshot` | `cache-target:snapshot` | consumer |
 
 reconciliation command는 active claim을 무효화하고 stream을 먼저 halt한 뒤 fixed snapshot을 만든다.
 stream control read는 현재 active reconciliation의 request ID와 request에 결박된 fixed snapshot

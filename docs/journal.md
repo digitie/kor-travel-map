@@ -25,10 +25,17 @@
 - 인증 의미가 달라지는 breaking contract로 판단해 service OpenAPI 재핀과 PinVi contract generation 7을
   요구한다. generation 6 조합으로 command 표면을 활성화하지 않는다.
 - settings literal/registry와 인증 fallback에서 consumer umbrella를 제거하고 source PUT/DELETE·refresh
-  create 세 route를 command scope로 바꿨다. 생성된 full/service OpenAPI에도 exact scope 설명을 넣었다.
-- command→read/claim/ack/nack/snapshot/recovery 6종과 비command exact scope 8종→command route 3종,
-  제거된 consumer umbrella validation을 회귀로 고정했다. targeted router/OpenAPI test, Ruff, API strict
-  mypy와 OpenAPI drift check를 실행한다.
+  create 세 route를 command scope로 바꿨다. 한 canonical binding의 command/consumer/restore/recovery
+  exact 역할 profile, 전역 system owner/digest/principal uniqueness, configured protected secret digest
+  분리를 설정 검증으로 고정했다.
+- 17개 service operation의 OpenAPI `x-required-service-scope`와 caller role 표를 추가했다. command writer는
+  PUT/DELETE 후 source GET과 refresh `Location` polling GET에서 consumer credential로 전환한다.
+- generation 7 exact pair pin을 command writer/backfill/consumer 활성화의 사전 조건으로 옮겼다. Map
+  service OpenAPI SHA는 `622ea54c98e9b0c09592cf84aced36227992c6bdf256742a3532b892f0efccf2`이며 PinVi
+  재핀은 아직 미완료다.
+- command→read/claim/ack/nack/snapshot/restore/recovery direct route와 비command role→command route,
+  제거된 consumer umbrella와 invalid registry를 회귀로 고정했다. router 96건, OpenAPI export 12건,
+  API strict mypy 61개 파일, 대상 Ruff, OpenAPI all drift, frontend generated types check가 통과했다.
 
 ## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
 

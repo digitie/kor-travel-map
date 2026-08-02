@@ -2597,10 +2597,16 @@ export interface paths {
         };
         /** Get Service Cache Target */
         get: operations["get_service_cache_target_v1_service_cache_targets__external_system___target_key__get"];
-        /** Put Service Cache Target */
+        /**
+         * Put Service Cache Target
+         * @description exact `cache-target:command` scope 전용 source upsert.
+         */
         put: operations["put_service_cache_target_v1_service_cache_targets__external_system___target_key__put"];
         post?: never;
-        /** Delete Service Cache Target */
+        /**
+         * Delete Service Cache Target
+         * @description exact `cache-target:command` scope 전용 source tombstone 적용.
+         */
         delete: operations["delete_service_cache_target_v1_service_cache_targets__external_system___target_key__delete"];
         options?: never;
         head?: never;
@@ -2616,7 +2622,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Service Refresh Request */
+        /**
+         * Create Service Refresh Request
+         * @description exact `cache-target:command` scope 전용 refresh request 생성.
+         */
         post: operations["create_service_refresh_request_v1_service_refresh_requests_post"];
         delete?: never;
         options?: never;

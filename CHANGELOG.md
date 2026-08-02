@@ -9,8 +9,13 @@
 
 - **SECURITY (breaking)**: source PUT/DELETE와 refresh create는 exact `cache-target:command`만 허용한다.
   기존 `cache-target:consumer` umbrella는 enum·validator·인증 fallback에서 clean cut 제거하며,
-  command principal도 consumer·snapshot·recovery 경로를 호출할 수 없다. PinVi는 재export한
-  service OpenAPI를 pin하고 compatible pair를 contract generation 7로 올려야 한다.
+  command principal도 consumer·snapshot·restore·recovery 경로를 호출할 수 없다. canonical
+  consumer/system binding마다 command, consumer, restore, recovery exact 역할 profile을 각각 하나씩
+  요구하고 역할 누락·중복·혼합, system 중복 소유, digest/principal ID 중복을 fail-close한다. 설정된
+  admin/service/ops/metrics/cursor secret과 같은 원문 token digest도 거부한다. 17개 service operation은
+  OpenAPI `x-required-service-scope`를 제공한다. command writer는 CAS source GET과 refresh `Location`
+  polling에서 consumer credential로 전환해야 한다. PinVi는 재export한 service OpenAPI를 pin하고
+  compatible pair를 contract generation 7로 올려야 한다.
 - **DATABASE (breaking)**: migration `0075_cache_target_outbox`로 source generation/restore epoch,
   durable head/tombstone, transaction outbox, delivery/claim/dead-letter, fixed snapshot과
   reconciliation 상태를 정규화했다. 후속 `0076_cache_target_receipt`은 applied source event에 당시

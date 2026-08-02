@@ -122,7 +122,7 @@
 | 표면 | 현재 인증 경계 | 성공 envelope | 에러 |
 |---|---|---|---|
 | kor-travel-map 공용 read (`RoutePolicy.PUBLIC_KEYED`) | production에서 `X-Kor-Travel-Map-Api-Key` 또는 `X-Kor-Travel-Map-Service-Token`. URL `key` query는 폐기했고 full/user OpenAPI는 route policy에서 같은 OR 계약을 생성한다 | `{data, meta}` — `meta.page.next_cursor` | RFC7807 `problem+json`(top-level `code`) |
-| kor-travel-map service resource (`/v1/features/{batch,weather/batch}`, `/v1/service/cache-target*`, `/v1/service/refresh-requests*`) | production 필수 `X-Kor-Travel-Map-Service-Token`; cache stream은 token principal의 consumer/restore/recovery scope와 external system을 추가 결박 | 〃 | 〃 |
+| kor-travel-map service resource (`/v1/features/{batch,weather/batch}`, `/v1/service/cache-target*`, `/v1/service/refresh-requests*`) | production 필수 `X-Kor-Travel-Map-Service-Token`; cache-target은 command=`{command}`, consumer=`{read,claim,ack,nack,snapshot}`, restore=`{restore-fence}`, recovery=`{recovery,recovery-replay}` exact 역할 principal과 canonical consumer/system binding을 추가 결박 | 〃 | 〃 |
 | kor-travel-map admin + canonical ops (`/v1/admin/*`·`/v1/ops/{datasets,pipeline}*`) | same-origin Next.js BFF의 proxy secret + actor + trusted peer CIDR. Docker는 secret 필수·frontend 단일 `/32` | 〃 | 〃 |
 | kor-travel-map ops live WebSocket | BFF가 발급한 짧은 수명 HMAC subprotocol ticket + DB nonce 단일 소비 + bounded lease | WebSocket event frame | 인증/만료는 data frame 없이 close 4401/4408 |
 | kor-travel-map Prometheus `/metrics` | production 필수 `KOR_TRAVEL_MAP_API_METRICS_TOKEN`의 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) | Prometheus exposition | 비-Bearer/불일치 401 |
@@ -215,10 +215,16 @@ restored payload의 epoch를 신뢰하지 않는다. fixed snapshot은
 active+tombstone Merkle v1과 pinned service OpenAPI를 함께 검증한다. credential, principal scope,
 contract SHA, epoch, snapshot checksum 중 하나라도 맞지 않으면 PinVi consumer는 fail-closed한다.
 source PUT/DELETE와 refresh create는 exact `cache-target:command` principal만 사용한다. 기존
-`cache-target:consumer` umbrella는 registry와 인증 fallback에서 clean cut 제거하며 read/claim/ack/nack/
-snapshot도 각 exact scope만 사용한다. command principal도 consumer·snapshot·recovery를 호출하지 못한다. 이 권한 분리부터 Map service
-OpenAPI SHA를 다시 pin하고 compatible pair를 contract generation 7로 올린다. generation 6 조합은
-command 표면 활성화에 사용할 수 없다.
+`cache-target:consumer` umbrella는 registry와 인증 fallback에서 clean cut 제거한다. 한 canonical
+`(consumer_id, sorted external_systems)` binding은 command=`{command}`,
+consumer=`{read,claim,ack,nack,snapshot}`, restore=`{restore-fence}`,
+recovery=`{recovery,recovery-replay}` 네 역할을 각각 정확히 하나 가져야 한다. complete하고 서로 겹치지
+않는 binding 여러 개는 허용하지만 external system의 binding 소유권, token digest, `principal_id`는 전역
+unique다. 각 17개 operation은 OpenAPI `x-required-service-scope`로 요구 scope를 노출한다. command
+writer가 PUT/DELETE 후 source GET으로 CAS를 이어가거나 refresh `Location`을 polling하는 GET에서는
+consumer credential로 명시적으로 전환한다. command principal은 consumer·snapshot·restore·recovery를
+호출하지 못한다. 이 권한 분리부터 Map service OpenAPI SHA를 다시 pin하고 compatible pair를 contract
+generation 7로 올린다. generation 6 조합은 command 표면 활성화에 사용할 수 없다.
 성공한 `cache_target.reconciled` payload는 exact
 `{request_id, snapshot_id, actual_merkle_root, expected_merkle_root, status, version}`이며,
 envelope의 `source_payload_fingerprint`는 expected root와 같다. PinVi는 이 request/snapshot identity를
