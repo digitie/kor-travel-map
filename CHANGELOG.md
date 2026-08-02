@@ -5,6 +5,27 @@
 
 ## [Unreleased]
 
+### H35 typed cutover GC·최종 cache-target 증적 (2026-08-02, T-VN-H35/T-VN-41)
+
+- **OPERATIONS**: Map cutover helper 순서를 `preflight→migrate→csv5→gc→verify`로 확장했다. `gc`는 기존
+  bounded snapshot GC와 `0078` observation만 사용하며 deterministic replay는 attempt별 삭제 수가 아닌
+  최종 backlog 0·referenced 보존·fresh observation 수렴으로 승인한다.
+- **CONTRACT**: 모든 receipt에 exact `cache_target_evidence` field가 생긴다. accepted `verify`만 PinVi
+  ready stream, 양의 restore epoch/control version, 최신 unexpired snapshot header/item/live source
+  Merkle·watermark 일치와 reconciliation/outbox/claim/delivery backlog 0을 증명하는
+  `ktm-cache-target-final-evidence/v1` object를 반환하고 다른 phase와 거부 응답은 `null`이다.
+- **DATABASE/VERIFY**: `0075~0078`의 constraint/index/trigger/function/sequence를 이름이 아니라 canonical
+  PostgreSQL semantic catalog로 검증한다. 동명이형 정의, invalid/not-ready index, disabled trigger와
+  function/ownership drift를 mutation 0으로 거부한다.
+- **DATABASE/VERIFY**: scope validator는 top-level뿐 아니라 필수 `_0074(text,jsonb)`와
+  `_0052(text,jsonb)` delegate의 exact schema/name/args/result/body/config/함수 속성/owner까지 고정한다.
+  여섯 scope valid/invalid truth table로 legacy delegate chain과 generation-7 경계를 end-to-end 검증한다.
+- **REHEARSAL**: 실제 PostGIS에서 `0063→0078→CSV5→GC→verify`, GC replay, generation-7 final state와
+  stale/expired/mixed/Merkle/네 backlog 음수 행렬을 검증했다. 운영 순서는 GC 뒤 exact 5-writer final
+  fence, Map verify, PinVi final boundary로 고정한다.
+- **CLI**: invalid argv/request는 phase별 DB·CSV·GC 구현을 import하기 전에 좁은 오류 envelope로
+  종료해, 느린 filesystem에서도 비밀 비반사 process 경계가 timeout에 의존하지 않는다.
+
 ### cache-target generation outbox producer foundation (2026-07-31, T-VN-41)
 
 - **SECURITY (breaking)**: source PUT/DELETE와 refresh create는 exact `cache-target:command`만 허용한다.

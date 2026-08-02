@@ -10,6 +10,94 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — H35 scope validator delegate-chain fingerprint 보완
+
+재리뷰에서 top-level `ops.is_valid_feature_update_scope(text,jsonb)`가 의존하는
+`ops.is_valid_feature_update_scope_0074(text,jsonb)`와
+`ops.is_valid_feature_update_scope_0052(text,jsonb)`가 function inventory에서 빠진 P1을 확인했다.
+required inventory를 schema-qualified exact regprocedure 5개로 바꾸고 각 함수의 name/identity args/result,
+body/config/volatility/parallel/security-definer/leakproof/strict/owner를 canonical fingerprint에 포함했다.
+
+실제 PostGIS `0063→0078→CSV5→GC/replay→verify`에서 여섯 scope의 대표 valid/invalid와 generation-7
+512자 target key 경계를 top/0074/0052 각각 실행했다. 두 delegate별 동명 exact-signature body/config/
+속성 drift와 동명 wrong args+result drift도 verify가 DB/runtime/external mutation 0으로 거부함을 확인했다.
+
+**다음 한 작업**: 새 exact HEAD의 CI와 보안 감사를 통과시키고 동일 유일 reviewer의 재승인을 받는다.
+
+## 2026-08-02 (codex) — H35 NO-GO 구조·PostGIS 리허설 해소
+
+`0075~0078` final verify를 relation/column/PK·UK·FK·CHECK/index/trigger/function/sequence의 PostgreSQL
+semantic catalog fingerprint 검증으로 강화했다. constraint column/action/validation/deferrability,
+index expression/predicate/valid-ready-live, trigger enabled/bound function, function body/config/volatility,
+relay sequence ownership과 scope validator를 exact하게 고정한다.
+
+실제 PostGIS에서 `0063→0078`, CSV5, generation-7 stream/source/snapshot/reconciliation/outbox/delivery/
+claim, bounded GC 최초·replay와 final evidence를 한 번에 재현했다. drop·동명이형 constraint/index/trigger,
+invalid/not-ready index, disabled trigger, function drift와 stale/expired/mixed/Merkle, 네 backlog, foreign GC
+observation, `csv5→verify` chain skip를 모두 mutation 0으로 거부한다. GC observation ID는
+`h35:{transaction_id}:cache-target-snapshot-gc:v1` golden vector로 고정했다. 운영 순서는
+`csv5 → gc → exact 5-writer final fence → Map verify → PinVi final boundary`로 정렬했다.
+
+**다음 한 작업**: Docker-manager의 동일 observation ID·receipt round-trip 및 전체 CI와 보안 감사를
+exact 양쪽 HEAD에서 확인하고, 동일 독립 리뷰어의 재승인을 받는다.
+
+## 2026-08-02 (codex) — H35 5단계 receipt CI fixture 정렬
+
+PR #924의 Python 3.11/3.12/3.13 CI는 모두 같은 기존 unit fixture가 새 공통 receipt key
+`cache_target_evidence`와 `csv5→gc→verify` chain을 반영하지 않아 1건 실패했다. 생산 validator는
+그 누락을 의도대로 거부했으므로 느슨하게 만들지 않고 fixture에 앞 phase evidence `null`과 `gc`
+receipt를 추가했다. H35 contract unit **46건**과 대상 Ruff가 통과했다.
+
+**다음 한 작업**: Agent B의 GC/final evidence 반례 matrix와 Docker-manager 전체 receipt validator를
+결합한 최종 exact HEAD에서 전체 CI를 통과시킨 뒤 단일 적대 리뷰를 요청한다.
+
+## 2026-08-02 (codex) — H35 GC·PinVi 최종 DB 증적 hardening
+
+Map helper 체인을 `preflight→migrate→csv5→gc→verify`로 완성했다. `gc`는 outer cutover transaction
+UUID에서 결정적으로 만든 observation run ID로 기존
+`AsyncKorTravelMapClient.drain_expired_cache_target_snapshots`만 호출한다. session advisory lock,
+batch transaction, `0078` observation의 `ON CONFLICT` 멱등성을 그대로 사용하며 attempt 삭제 건수가
+아니라 최종 expired·unreferenced backlog 0, referenced 보존, 저장 observation과 fresh count 일치로
+재실행을 승인한다.
+
+모든 receipt에 `cache_target_evidence` exact key를 추가했다. 앞 네 phase와 rejected verify는 `null`이고,
+accepted verify만 read-only repeatable-read view에서 PinVi ready stream, 양의 epoch/version, unexpired 최신
+snapshot header/item/live source Merkle와 material watermark 일치, 네 backlog 0, deterministic GC
+observation 일치를 확인한 `ktm-cache-target-final-evidence/v1` object를 발급한다. mixed/stale snapshot,
+invalid hash, non-ready/blocked stream과 backlog는 fail-close한다.
+
+**다음 한 작업**: Agent B가 새 5단계 receipt·GC replay·증적 반례 black-box/integration matrix를
+소유하고 Docker-manager가 receipt 전체 exact validator와 journal을 결합한다. 모두 합친 최종 exact
+HEAD에만 적대 리뷰어 1명을 요청하며, 그 전에는 n150을 실행하지 않는다.
+
+## 2026-08-02 (codex) — H35 Map typed helper Agent A 구현
+
+candidate API image에 credential/path-free `preflight`·`migrate`·`csv5`·`verify` helper와 canonical
+CSV5 resource를 포함했다. 계약·schema·CSV5를 서로 독립인 private module로 분리했고, stdin/argv
+실패도 stderr 없이 secret-free JSON 한 줄로만 반환한다. live DB identity는 transaction UUID,
+`map_application`, `current_database()`, PostgreSQL system identifier의 NUL-framed SHA-256을 매 phase
+mutation 전에 재계산한다. `0064`/`0068`/`0069` partial state는 revision별 단일 statement prefix와
+canonical access path만 허용하며, Alembic 출력은 bounded internal sink에 버린다.
+
+CSV5는 image 내 manifest/hash와 5개·486행·accepted 222/rejected 0을 고정하고 exact complete state만
+멱등 skip한다. focused Ruff, strict mypy, import-linter, curation unit 36개와 기존 0064/0068/0069
+migration integration 3개가 통과했다.
+
+**다음 한 작업**: Agent B가 helper black-box/mutation-zero matrix와 scratch `0063→0078` rehearsal을
+독립 구현하고, Docker-manager typed journal과 결합한 누적 delta를 적대 리뷰한다. 그 전에는 n150을
+실행하지 않는다.
+
+## 2026-08-02 (codex) — H35×T-VN41 cutover 보정 문서 checkpoint
+
+과거 H35 `NO_GO` runbook과 `0072`/`0078` 일부만 보는 helper를 실행 정본에서 제외했다.
+새 runbook은 Docker-manager one-process lock/journal과 Map의 credential/path-free typed helper 경계를
+분리하고, 공개 표면 `3,265→3,043→3,265`, CSV5 accepted `222`/rejected `0`, `0075` preflight,
+`0075→0078` 구조 검증을 exact gate로 고정한다. Map Agent A(helper)와 Agent B(검증)는 이 문서의
+exact head를 공통 계약으로 병렬 구현할 수 있다.
+
+**다음 한 작업**: 문서 PR의 exact head를 적대 리뷰 2명에게 맡겨 설계 승인을 받은 뒤에만 Agent A/B
+구현을 시작한다. PR #923이 포함된 최신 `origin/main`에 rebase했으며, 그 전에는 n150을 실행하지 않는다.
+
 ## 2026-08-02 (codex) — T-VN-41 command principal 최소 권한 구현
 
 source PUT/DELETE와 refresh create에 relay consumer umbrella를 재사용하면 writer token이 read/claim/ack/

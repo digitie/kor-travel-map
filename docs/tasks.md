@@ -28,8 +28,8 @@ barrier로 직렬화한다.
     [x] `T-VN-H33`(오링크 3건 해제 — 공개 오노출 해소, H36으로 durable) →
     [x] `T-VN-H36`(import 이름 단독 자동링크 금지 — H35 이미지에 포함 필수) →
     [ ] `T-VN-H40`(concierge provenance 복구 — **H35 배포 선행 blocker**) →
-    [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0072** + 이미지 동시 배포 — #673 blocker;
-        2026-07-31 중단, 백업 확보·B′ 경로 확정, 본문 상단 인수 블록 참조) →
+    [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0078** + generation 7 cutover — #673 blocker;
+        과거 runbook·현재 helper `NO_GO`, 보정 설계 본문 상단 참조) →
     [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
     [ ] `T-VN-H30C`(타 provider evidence 재작업) →
     [~] `T-VN-H34`(H25A/H25B 미충족 AC — 4항목 중 3 완료·1은 H35 배포 대기,
@@ -103,7 +103,7 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(현재 head `0071_integrity_observations`). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(현재 head `0078_cache_target_gc_observe`). 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
@@ -863,7 +863,42 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   - H35에서 **writer reopen 전에** one-shot 복구를 실행하고, 기존 공개 3,044 표면과 #673의
     미적재 457 회복을 **각각 별도 기준으로** 검증한다.
 
-- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0072)**
+- [ ] T-VN-H35 — **prod 마이그레이션 지연 해소 (0064~0078)**
+
+  ### H35×T-VN41 cutover 보정 subtask (2026-08-02)
+
+  과거 2,841줄 H35 runbook은 적대 감사 두 번에서 `NO_GO`였고 현재 `scripts/h35/`도
+  `0072`/`0078` 일부를 잘못 검증한다. 그대로 실행하지 않는다. 새 정본은
+  [`runbooks/h35-prod-migration-cutover.md`](runbooks/h35-prod-migration-cutover.md)다.
+
+  **공통 계약**: Docker-manager가 backup/migrate/CSV/bootstrap/initial/enable/canary/GC/final fence/
+  verify/Pin finalize 전체의 one-process global lock과 mode `0600` durable journal을 소유한다.
+  canonical 후반 순서는 `csv5 → canary → gc → exact 5-writer final fence → Map verify → PinVi final
+  boundary`다. exact writer 5개는 Map API·Map Dagster web·Map Dagster daemon·PinVi API·PinVi
+  Dagster다. Map은 credential/path-free
+  `preflight`·`migrate`·`csv5`·`gc`·`verify` helper와 typed receipt만 제공하고 runtime을 재기동하지
+  않는다. Map API/Dagster와 Pin writer를 모두 fence하며 old daemon 자동 재기동은 금지한다.
+  exact gate는 **공개 3,265 → migration 3,043 → CSV5 accepted 222/rejected 0 → 공개 3,265**다.
+
+  문서 exact head 뒤 다음 두 단위는 같은 파일을 소유하지 않아 병렬 가능하다.
+
+  - [x] **Agent A — Map helper**: `scripts/h35/h35_cutover.py`, typed request/receipt, `0064`/`0068`/
+    `0069` partial probe, `0070~0078` transactional 확인, CSV5 멱등성, 기존 client 기반 bounded GC,
+    PinVi final DB evidence. orchestration·runtime 수정 금지.
+  - [x] **Agent B — 검증**: 실제 PostGIS에서 helper `0063→0078→CSV5→GC→verify`, GC replay,
+    generation-7 stream/source/snapshot/reconciliation/outbox/delivery/claim을 재현했다. 구조 catalog
+    동명이형·drop·invalid/not-ready/disabled/function drift와 stale/expired/mixed/Merkle/backlog/chain-skip를
+    mutation 0으로 거부한다. scope validator는 top/0074/0052 exact regprocedure 전체를 fingerprint하고,
+    여섯 scope valid/invalid truth table와 delegate별 body/config/속성/signature/result drift를 실제
+    PostGIS에서 검증한다. 최신 writer-fenced prod dump clone 리허설은 결합 barrier에 남긴다.
+  - [ ] **결합 barrier**: PR #923 merge 뒤 양쪽을 최신 `origin/main`에 rebase하고, Docker-manager
+    typed journal/receipt와 결합한 최종 exact HEAD를 적대 리뷰어 1명이 승인한다. 구현·검증·manager
+    결합 전에는 리뷰를 요청하지 않으며, 그 전에는 n150 실행 금지.
+
+  `0075` 적용 전 existing-row identity/NFC/trim/length/CHECK/FK 위반이 전부 0이어야 한다.
+  `0075~0078`의 schema/index/outbox/source receipt/GC observation을 최종 verify한다. 일반 image-only
+  rollback은 불안전하다. forward 경계 전에는 Map app·Dagster·Pin DB와 manager state/env/manifest를
+  결합 복원한 뒤 옛 image를 마지막에 올리고, 경계 뒤에는 옛 restore를 거부한다.
 
   > **범위 갱신 (2026-07-31)** — `0070_domain_command_ledger`·
   > `0071_integrity_observation_generations`가 이미 main에 있고 #910이 `0072_curation_provenance`를
