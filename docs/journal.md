@@ -17,6 +17,19 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-02 (codex) — H35 scope validator legacy delegate P1 해소
+
+- function catalog 대상을 proname allowlist에서 exact schema-qualified regprocedure inventory로 바꿨다.
+  relay/append-only 함수와 top-level scope validator에 더해 `_0074(text,jsonb)`와
+  `_0052(text,jsonb)`가 반드시 존재하고 full semantic payload가 일치해야 한다.
+- 실제 PostGIS에서 `feature_ids`, `center_radius`, `sigungu_by_radius`, `bbox`, `provider_dataset`,
+  `cache_target_keys`의 대표 valid/invalid를 top/0074/0052에 모두 호출했다. generation-7의 512자
+  target key는 top-level만 승인하고 legacy delegate는 거부하는 migration 경계도 고정했다.
+- 두 delegate를 각각 같은 signature의 false body + 다른 config/volatility/parallel/security/strict로
+  교체하고, 원본을 rename한 뒤 같은 이름의 `(text,text) RETURNS text`로 바꾼 경우를 모두
+  `0075_0078_functions_semantic` 실패·mutation 0으로 거부했다.
+- 새 PostgreSQL 16 function catalog fingerprint와 전체 H35 리허설을 갱신했고 실제 리허설이 통과했다.
+
 ## 2026-08-02 (codex) — H35 NO-GO semantic catalog·실제 PostGIS 음수 행렬
 
 - `0075~0078` table/column/constraint/index/trigger/function/sequence를 structured PostgreSQL catalog로

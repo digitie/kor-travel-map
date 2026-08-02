@@ -31,10 +31,12 @@ _EXTRA_CONSTRAINTS: Final = (
     "ck_poi_cache_targets_external_system_identity",
     "ck_poi_cache_targets_target_key_identity",
 )
-_FUNCTIONS: Final = (
-    "assign_cache_target_outbox_relay_order",
-    "is_valid_feature_update_scope",
-    "reject_cache_target_history_mutation",
+_FUNCTION_SIGNATURES: Final = (
+    "ops.assign_cache_target_outbox_relay_order()",
+    "ops.is_valid_feature_update_scope(text,jsonb)",
+    "ops.is_valid_feature_update_scope_0074(text,jsonb)",
+    "ops.is_valid_feature_update_scope_0052(text,jsonb)",
+    "ops.reject_cache_target_history_mutation()",
 )
 
 # PostgreSQL 16/PostGIS 3.5에서 0075→0078 migration이 만든 structured catalog의
@@ -43,7 +45,7 @@ _FUNCTIONS: Final = (
 EXPECTED_CATALOG_FINGERPRINTS: Final[dict[str, str]] = {
     "columns": "8604ad59e72300f206103d73108e98a451de3e4c06c45190ac8c249c2919c0f5",
     "constraints": "f87104501ca458143d4f1858aac2948fd9f95307ec724aa76c55e2f3658d8401",
-    "functions": "d31fbef85f4e4b9643ac7c41afd21a81d01ae437d3ee90c6b5954a81176daf5e",
+    "functions": "652c068ef0fe961d54d18e6cac7b407b76c41b5e55decc6cbd23c86d8ef14dc5",
     "indexes": "3c58c7b00f2f2ad43665077daa4600e0a6fc3cf84f3ffba1746bb3caf2000d80",
     "relations": "7cf9f623113c6de15bcc98c6c26c2263f423b583449155a9f715a86bc7e756cf",
     "sequence": "c5afb8ec28f1183f74023fc907459e6b8fc751e197943064a238ee0a34632230",
@@ -199,9 +201,14 @@ ORDER BY identity
 """
 
 _FUNCTIONS_SQL: Final = """
+WITH required AS (
+  SELECT signature, pg_catalog.to_regprocedure(signature) AS function_oid
+  FROM unnest(CAST(:function_signatures AS text[])) AS item(signature)
+)
 SELECT ns.nspname || '.' || proc.proname || '('
          || pg_catalog.pg_get_function_identity_arguments(proc.oid) || ')' AS identity,
        jsonb_build_object(
+         'required_signature', required.signature,
          'schema', ns.nspname,
          'name', proc.proname,
          'identity_arguments', pg_catalog.pg_get_function_identity_arguments(proc.oid),
@@ -217,12 +224,12 @@ SELECT ns.nspname || '.' || proc.proname || '('
          'body', proc.prosrc,
          'owner_matches_outbox_table', proc.proowner=outbox.relowner
        ) AS payload
-FROM pg_catalog.pg_proc AS proc
+FROM required
+JOIN pg_catalog.pg_proc AS proc ON proc.oid=required.function_oid
 JOIN pg_catalog.pg_namespace AS ns ON ns.oid=proc.pronamespace
 JOIN pg_catalog.pg_language AS lang ON lang.oid=proc.prolang
 JOIN pg_catalog.pg_class AS outbox
   ON outbox.oid=to_regclass('ops.poi_cache_target_outbox_events')
-WHERE ns.nspname='ops' AND proc.proname=ANY(CAST(:functions AS text[]))
 ORDER BY identity
 """
 
@@ -276,7 +283,7 @@ async def collect_catalog_objects(
     parameters = {
         "tables": list(_TABLES),
         "extra_constraints": list(_EXTRA_CONSTRAINTS),
-        "functions": list(_FUNCTIONS),
+        "function_signatures": list(_FUNCTION_SIGNATURES),
     }
     catalog: dict[str, dict[str, object]] = {}
     for category, query in _CATALOG_QUERIES.items():

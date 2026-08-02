@@ -724,6 +724,222 @@ async def _assert_verify_rejected_without_mutation(
     return rejected
 
 
+async def _assert_scope_validator_truth_table(dsn: str) -> None:
+    """0052→0074→0075 delegate chain의 여섯 scope 의미를 end-to-end 고정한다."""
+    cases: tuple[tuple[str, str, dict[str, object], tuple[bool, bool, bool]], ...] = (
+        (
+            "feature_ids_valid",
+            "feature_ids",
+            {"type": "feature_ids", "feature_ids": ["feature-a", "feature-b"]},
+            (True, True, True),
+        ),
+        (
+            "feature_ids_duplicate",
+            "feature_ids",
+            {"type": "feature_ids", "feature_ids": ["feature-a", "feature-a"]},
+            (False, False, False),
+        ),
+        (
+            "center_radius_valid",
+            "center_radius",
+            {
+                "type": "center_radius",
+                "center": {"lon": 127.0, "lat": 37.5},
+                "radius_km": 5,
+            },
+            (True, True, True),
+        ),
+        (
+            "center_radius_invalid_latitude",
+            "center_radius",
+            {
+                "type": "center_radius",
+                "center": {"lon": 127.0, "lat": 91},
+                "radius_km": 5,
+            },
+            (False, False, False),
+        ),
+        (
+            "sigungu_by_radius_valid",
+            "sigungu_by_radius",
+            {
+                "type": "sigungu_by_radius",
+                "center": {"lon": 126.978, "lat": 37.5665},
+                "radius_km": 20,
+                "match": "intersects",
+            },
+            (True, True, True),
+        ),
+        (
+            "sigungu_by_radius_invalid_match",
+            "sigungu_by_radius",
+            {
+                "type": "sigungu_by_radius",
+                "center": {"lon": 126.978, "lat": 37.5665},
+                "radius_km": 20,
+                "match": "contains",
+            },
+            (False, False, False),
+        ),
+        (
+            "bbox_valid",
+            "bbox",
+            {
+                "type": "bbox",
+                "min_lon": 126.0,
+                "min_lat": 36.0,
+                "max_lon": 128.0,
+                "max_lat": 38.0,
+            },
+            (True, True, True),
+        ),
+        (
+            "bbox_invalid_order",
+            "bbox",
+            {
+                "type": "bbox",
+                "min_lon": 128.0,
+                "min_lat": 36.0,
+                "max_lon": 126.0,
+                "max_lat": 38.0,
+            },
+            (False, False, False),
+        ),
+        (
+            "provider_dataset_valid",
+            "provider_dataset",
+            {
+                "type": "provider_dataset",
+                "provider": "python-kma-api",
+                "dataset_key": "kma_short_forecast",
+                "sync_scope": "target_grids",
+            },
+            (True, True, True),
+        ),
+        (
+            "provider_dataset_invalid_blank",
+            "provider_dataset",
+            {
+                "type": "provider_dataset",
+                "provider": "",
+                "dataset_key": "kma_short_forecast",
+            },
+            (False, False, False),
+        ),
+        (
+            "cache_target_generation7_valid",
+            "cache_target_keys",
+            {
+                "type": "cache_target_keys",
+                "external_system": "pinvi",
+                "target_keys": ["target-a"],
+                "radius_km": 10,
+                "scope_mode": "center_radius",
+            },
+            (True, True, True),
+        ),
+        (
+            "cache_target_generation7_duplicate",
+            "cache_target_keys",
+            {
+                "type": "cache_target_keys",
+                "external_system": "pinvi",
+                "target_keys": ["target-a", "target-a"],
+                "scope_mode": "sigungu_by_radius",
+            },
+            (False, False, False),
+        ),
+        (
+            "cache_target_generation7_512_boundary",
+            "cache_target_keys",
+            {
+                "type": "cache_target_keys",
+                "external_system": "pinvi",
+                "target_keys": ["x" * 512],
+                "scope_mode": "center_radius",
+            },
+            (True, False, False),
+        ),
+    )
+    engine = make_async_engine(dsn)
+    try:
+        async with engine.connect() as connection:
+            for label, scope_type, scope, expected in cases:
+                row = (
+                    await connection.execute(
+                        text(
+                            "SELECT "
+                            "ops.is_valid_feature_update_scope(:scope_type, "
+                            "CAST(:scope AS jsonb)), "
+                            "ops.is_valid_feature_update_scope_0074(:scope_type, "
+                            "CAST(:scope AS jsonb)), "
+                            "ops.is_valid_feature_update_scope_0052(:scope_type, "
+                            "CAST(:scope AS jsonb))"
+                        ),
+                        {"scope_type": scope_type, "scope": json.dumps(scope)},
+                    )
+                ).one()
+                assert tuple(row) == expected, label
+    finally:
+        await engine.dispose()
+
+
+async def _assert_scope_delegate_drift_matrix(
+    dsn: str,
+    *,
+    identity: str,
+    gc_receipt: Receipt,
+) -> None:
+    for function_name in (
+        "is_valid_feature_update_scope_0074",
+        "is_valid_feature_update_scope_0052",
+    ):
+        function_definition = await _sql_scalar(
+            dsn,
+            f"SELECT pg_get_functiondef('ops.{function_name}(text,jsonb)'::regprocedure)",
+        )
+        await _execute_sql(
+            dsn,
+            f"""
+            CREATE OR REPLACE FUNCTION ops.{function_name}(
+              p_scope_type text, p_scope jsonb
+            ) RETURNS boolean
+            LANGUAGE sql VOLATILE CALLED ON NULL INPUT SECURITY DEFINER LEAKPROOF
+            PARALLEL UNSAFE SET search_path TO pg_catalog
+            AS $function$ SELECT false $function$
+            """,
+        )
+        await _assert_verify_rejected_without_mutation(
+            dsn,
+            identity=identity,
+            gc_receipt=gc_receipt,
+            failed_check_prefix="0075_0078_functions_semantic",
+        )
+        await _execute_sql(dsn, function_definition)
+
+        saved_name = f"{function_name}_h35_saved"
+        await _execute_sql(
+            dsn,
+            f"ALTER FUNCTION ops.{function_name}(text,jsonb) RENAME TO {saved_name}",
+            f"""
+            CREATE FUNCTION ops.{function_name}(p_scope_type text, p_scope text)
+            RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE
+            AS $function$ SELECT p_scope_type || p_scope $function$
+            """,
+        )
+        await _assert_verify_rejected_without_mutation(
+            dsn,
+            identity=identity,
+            gc_receipt=gc_receipt,
+            failed_check_prefix="0075_0078_functions_semantic",
+        )
+        await _execute_sql(
+            dsn,
+            f"DROP FUNCTION ops.{function_name}(text,text)",
+            f"ALTER FUNCTION ops.{saved_name}(text,jsonb) RENAME TO {function_name}",
+        )
+
+
 async def _assert_structural_negative_matrix(
     dsn: str,
     *,
@@ -873,6 +1089,11 @@ async def _assert_structural_negative_matrix(
         failed_check_prefix="0075_0078_functions_semantic",
     )
     await _execute_sql(dsn, function_definition)
+    await _assert_scope_delegate_drift_matrix(
+        dsn,
+        identity=identity,
+        gc_receipt=gc_receipt,
+    )
 
 
 async def _insert_negative_snapshot(
@@ -1194,6 +1415,7 @@ async def test_h35_exact_surface_network_free_rehearsal(
         csv5_replay = await _execute(_request("csv5", database_identity=identity, prior=migrate))
         assert csv5_replay["status"] == "accepted"
         assert csv5_replay["row_counts"] == csv5["row_counts"]
+        await _assert_scope_validator_truth_table(dsn)
 
         await _seed_generation7_final_state(dsn)
         event_count = await _external_event_count(dsn)

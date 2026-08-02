@@ -10,6 +10,20 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-02 (codex) — H35 scope validator delegate-chain fingerprint 보완
+
+재리뷰에서 top-level `ops.is_valid_feature_update_scope(text,jsonb)`가 의존하는
+`ops.is_valid_feature_update_scope_0074(text,jsonb)`와
+`ops.is_valid_feature_update_scope_0052(text,jsonb)`가 function inventory에서 빠진 P1을 확인했다.
+required inventory를 schema-qualified exact regprocedure 5개로 바꾸고 각 함수의 name/identity args/result,
+body/config/volatility/parallel/security-definer/leakproof/strict/owner를 canonical fingerprint에 포함했다.
+
+실제 PostGIS `0063→0078→CSV5→GC/replay→verify`에서 여섯 scope의 대표 valid/invalid와 generation-7
+512자 target key 경계를 top/0074/0052 각각 실행했다. 두 delegate별 동명 exact-signature body/config/
+속성 drift와 동명 wrong args+result drift도 verify가 DB/runtime/external mutation 0으로 거부함을 확인했다.
+
+**다음 한 작업**: 새 exact HEAD의 CI와 보안 감사를 통과시키고 동일 유일 reviewer의 재승인을 받는다.
+
 ## 2026-08-02 (codex) — H35 NO-GO 구조·PostGIS 리허설 해소
 
 `0075~0078` final verify를 relation/column/PK·UK·FK·CHECK/index/trigger/function/sequence의 PostgreSQL

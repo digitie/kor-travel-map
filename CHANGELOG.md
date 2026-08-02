@@ -17,6 +17,9 @@
 - **DATABASE/VERIFY**: `0075~0078`의 constraint/index/trigger/function/sequence를 이름이 아니라 canonical
   PostgreSQL semantic catalog로 검증한다. 동명이형 정의, invalid/not-ready index, disabled trigger와
   function/ownership drift를 mutation 0으로 거부한다.
+- **DATABASE/VERIFY**: scope validator는 top-level뿐 아니라 필수 `_0074(text,jsonb)`와
+  `_0052(text,jsonb)` delegate의 exact schema/name/args/result/body/config/함수 속성/owner까지 고정한다.
+  여섯 scope valid/invalid truth table로 legacy delegate chain과 generation-7 경계를 end-to-end 검증한다.
 - **REHEARSAL**: 실제 PostGIS에서 `0063→0078→CSV5→GC→verify`, GC replay, generation-7 final state와
   stale/expired/mixed/Merkle/네 backlog 음수 행렬을 검증했다. 운영 순서는 GC 뒤 exact 5-writer final
   fence, Map verify, PinVi final boundary로 고정한다.

@@ -888,7 +888,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   - [x] **Agent B — 검증**: 실제 PostGIS에서 helper `0063→0078→CSV5→GC→verify`, GC replay,
     generation-7 stream/source/snapshot/reconciliation/outbox/delivery/claim을 재현했다. 구조 catalog
     동명이형·drop·invalid/not-ready/disabled/function drift와 stale/expired/mixed/Merkle/backlog/chain-skip를
-    mutation 0으로 거부한다. 최신 writer-fenced prod dump clone 리허설은 결합 barrier에 남긴다.
+    mutation 0으로 거부한다. scope validator는 top/0074/0052 exact regprocedure 전체를 fingerprint하고,
+    여섯 scope valid/invalid truth table와 delegate별 body/config/속성/signature/result drift를 실제
+    PostGIS에서 검증한다. 최신 writer-fenced prod dump clone 리허설은 결합 barrier에 남긴다.
   - [ ] **결합 barrier**: PR #923 merge 뒤 양쪽을 최신 `origin/main`에 rebase하고, Docker-manager
     typed journal/receipt와 결합한 최종 exact HEAD를 적대 리뷰어 1명이 승인한다. 구현·검증·manager
     결합 전에는 리뷰를 요청하지 않으며, 그 전에는 n150 실행 금지.

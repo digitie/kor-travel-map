@@ -219,8 +219,11 @@ vector가 다르면 실행 전에 실패해야 한다. receipt에는 요청값�
   - 필수 index가 uniqueness/method/ordered expression/predicate와
     `indisvalid`/`indisready`/`indislive`까지 exact
   - append-only/no-truncate trigger가 relation/event/timing/level/enabled/bound function까지 exact
-  - relay-order function·sequence와 scope validator가 signature/body/config/volatility/owner·ownership까지
-    exact
+  - relay-order function·sequence와 scope validator가 signature/body/config/volatility/parallel/
+    security-definer/leakproof/strict/owner·ownership까지 exact. scope validator는 top-level
+    `ops.is_valid_feature_update_scope(text,jsonb)`뿐 아니라 필수 delegate
+    `ops.is_valid_feature_update_scope_0074(text,jsonb)`와
+    `ops.is_valid_feature_update_scope_0052(text,jsonb)`도 같은 기준으로 고정
   - outbox/receipt 자연키 및 monotonic/unique 계약 위반 0
   - invalid index와 orphan FK 0
   - bounded GC와 observation retention 설정이 schema/config 계약과 일치
@@ -331,6 +334,8 @@ Agent A/B는 이 문서의 receipt key·phase 순서·exact gate를 임의로 �
 | GC retry 또는 첫 attempt 중단 | 삭제 건수와 무관하게 final backlog·referenced·observation 상태로 수렴 |
 | stale/mixed snapshot 또는 invalid Merkle | `verify` 거부, evidence 발급 0 |
 | PinVi non-ready 또는 backlog 1건 이상 | `verify` 거부, HTTP/external event 0 |
+| scope validator top/0074/0052 body·config·속성·signature/result drift | `verify` 거부, DB/runtime/external mutation 0 |
+| 여섯 scope 대표 valid/invalid truth table | 0052→0074→top delegate chain의 migration 정본 결과와 exact 일치 |
 | unfinished manager journal에서 다른 operation | 전부 mutation 0으로 거부 |
 | pre-forward restore | DB 3종+state/env/manifest+old images 결합 복원 |
 | post-forward old restore | mutation 0으로 거부 |
