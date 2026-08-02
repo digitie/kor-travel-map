@@ -17,13 +17,18 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
-## 2026-08-02 (codex) — T-VN-41 command principal 문서 우선 동결
+## 2026-08-02 (codex) — T-VN-41 command principal clean cut
 
 - source PUT/DELETE와 refresh create는 exact `cache-target:command`만 허용한다.
-- `cache-target:consumer` umbrella는 read/claim/ack/nack/snapshot만 포함하고 command를 포함하지 않는다.
-  command principal의 consumer·snapshot·recovery 접근도 `403`으로 고정한다.
+- `cache-target:consumer` umbrella는 enum·validator·인증 fallback에서 clean cut 제거한다. command
+  principal의 consumer·snapshot·recovery 접근도 `403`으로 고정한다.
 - 인증 의미가 달라지는 breaking contract로 판단해 service OpenAPI 재핀과 PinVi contract generation 7을
   요구한다. generation 6 조합으로 command 표면을 활성화하지 않는다.
+- settings literal/registry와 인증 fallback에서 consumer umbrella를 제거하고 source PUT/DELETE·refresh
+  create 세 route를 command scope로 바꿨다. 생성된 full/service OpenAPI에도 exact scope 설명을 넣었다.
+- command→read/claim/ack/nack/snapshot/recovery 6종과 비command exact scope 8종→command route 3종,
+  제거된 consumer umbrella validation을 회귀로 고정했다. targeted router/OpenAPI test, Ruff, API strict
+  mypy와 OpenAPI drift check를 실행한다.
 
 ## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
 

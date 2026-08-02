@@ -309,8 +309,8 @@ operator는 ops read에서 epoch/claim/backlog/dead/reconciliation 상태를 보
 reconciliation command를 실행한다. ServiceToken scope는 source PUT/DELETE와 refresh create 전용
 `cache-target:command`, consumer read/claim/ack/nack/snapshot, restore-fence, recovery replay,
 recovery cutover로 분리한다. 기존 `cache-target:consumer`는 read/claim/ack/nack/snapshot의 호환
-umbrella일 뿐 `cache-target:command`를 절대 포함하지 않는다. command principal도 consumer·snapshot·
-recovery 경로를 호출할 수 없다. 따라서 PinVi writer와 relay consumer는 서로 다른 최소 권한 token을
+umbrella로 남기지 않고 enum·validator·인증 fallback에서 clean cut 제거한다. command principal도
+consumer·snapshot·recovery 경로를 호출할 수 없다. 따라서 PinVi writer와 relay consumer는 서로 다른 최소 권한 token을
 사용한다. admin reconciliation 시작은 active claim을 끊는 복구 mutation이므로 destructive recovery
 gate가 켜진 경우에만 허용한다.
 
@@ -347,7 +347,8 @@ credential별 gateway limit 또는 동등한 외부 rate-limit과 실제 호출 
 security scheme 형태가 그대로여도 generation 6 pin을 재사용하지 않는다. Map service OpenAPI를 다시
 export하고 그 SHA를 PinVi에 pin한 조합부터 **contract generation 7**로 기록한다. generation 7은 command
 token이 source PUT/DELETE·refresh create만 성공하고 consumer/restore/recovery 경로는 `403`, consumer
-exact scope와 `cache-target:consumer` umbrella가 command 경로는 `403`임을 contract test로 증명해야 한다.
+exact scope가 command 경로는 `403`, 제거된 `cache-target:consumer` 설정은 validation error임을 contract
+test로 증명해야 한다.
 
 ## 근거
 

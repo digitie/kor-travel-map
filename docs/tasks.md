@@ -1346,8 +1346,8 @@ read/decision/write/UI를 한 PR에 몰지 않는다.
 
   lease/retry/dead-letter/replay가 있는 relay와 DB 대조 reconciliation을 추가한다. backfill checksum
   뒤 critical path 밖에서 PinVi 소비를 enable하고 누락·중복·restore epoch 전환을 live로 증명한다.
-  - [ ] source PUT/DELETE·refresh create를 exact `cache-target:command`로 분리하고 기존 consumer umbrella의
-    command 승격을 차단한다. command→consumer/snapshot/recovery와 consumer→command 양방향 `403` 회귀,
+  - [x] source PUT/DELETE·refresh create를 exact `cache-target:command`로 분리하고 기존 consumer umbrella를
+    clean cut 제거한다. command→consumer/snapshot/recovery와 consumer exact scope→command 양방향 `403` 회귀,
     service OpenAPI 재export, PinVi contract generation 7 재핀을 완료한다.
   - [x] 일반 snapshot first page를 route transaction으로 durable commit하고 실제 만료 시각을 노출한다.
   - [x] source-material watermark reuse와 75분 server handoff/1시간 client receipt gate를 구현한다.

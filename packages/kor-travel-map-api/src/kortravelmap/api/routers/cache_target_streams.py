@@ -691,6 +691,7 @@ async def _require_reconciliation_metadata_access(
 @service_router.put(
     "/cache-targets/{external_system}/{target_key}",
     response_model=CacheTargetSourceMutationResponse,
+    description="exact `cache-target:command` scope 전용 source upsert.",
     responses={
         200: {"description": "target source applied", "headers": _ETAG_RESPONSE_HEADER},
         412: {"description": "stale If-Match"},
@@ -718,7 +719,7 @@ async def put_service_cache_target(
     started_at = perf_counter()
     require_cache_target_service_scope(
         context,
-        scope="cache-target:consumer",
+        scope="cache-target:command",
         external_system=external_system,
     )
     create_only, expected_target_id, expected_lock_version = _target_write_precondition(
@@ -814,6 +815,7 @@ async def get_service_cache_target(
 @service_router.delete(
     "/cache-targets/{external_system}/{target_key}",
     response_model=CacheTargetSourceMutationResponse,
+    description="exact `cache-target:command` scope 전용 source tombstone 적용.",
     responses={
         200: {"description": "target tombstone applied", "headers": _ETAG_RESPONSE_HEADER},
         412: {"description": "stale If-Match"},
@@ -841,7 +843,7 @@ async def delete_service_cache_target(
     started_at = perf_counter()
     require_cache_target_service_scope(
         context,
-        scope="cache-target:consumer",
+        scope="cache-target:command",
         external_system=external_system,
     )
     expected_target_id, expected_lock_version = _delete_precondition(request)
@@ -992,6 +994,7 @@ async def create_service_restore_fence(
     "/refresh-requests",
     response_model=CacheTargetRefreshRequestResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    description="exact `cache-target:command` scope 전용 refresh request 생성.",
     responses={
         202: {
             "description": "refresh request accepted",
@@ -1016,7 +1019,7 @@ async def create_service_refresh_request(
     started_at = perf_counter()
     require_cache_target_service_scope(
         context,
-        scope="cache-target:consumer",
+        scope="cache-target:command",
         external_system=body.external_system,
     )
     async with session.begin():

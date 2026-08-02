@@ -47146,6 +47146,7 @@
     },
     "/v1/service/cache-targets/{external_system}/{target_key}": {
       "delete": {
+        "description": "exact `cache-target:command` scope 전용 source tombstone 적용.",
         "operationId": "delete_service_cache_target_v1_service_cache_targets__external_system___target_key__delete",
         "parameters": [
           {
@@ -47411,6 +47412,7 @@
         ]
       },
       "put": {
+        "description": "exact `cache-target:command` scope 전용 source upsert.",
         "operationId": "put_service_cache_target_v1_service_cache_targets__external_system___target_key__put",
         "parameters": [
           {
@@ -47569,6 +47571,7 @@
     },
     "/v1/service/refresh-requests": {
       "post": {
+        "description": "exact `cache-target:command` scope 전용 refresh request 생성.",
         "operationId": "create_service_refresh_request_v1_service_refresh_requests_post",
         "parameters": [
           {

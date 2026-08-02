@@ -9,7 +9,7 @@ ADR-081 producer foundation과 paired PinVi consumer의 준비·복구·검증 �
 2. Map DB의 단일 Alembic head와 `alembic check`를 확인한다.
 3. ServiceToken principal을 command, consumer, restore-fence, recovery replay, recovery cutover scope로
    분리한다. command token은 source PUT/DELETE와 refresh create만, consumer token은 relay와 snapshot만
-   호출해야 한다. 기존 `cache-target:consumer` umbrella로 command가 허용되거나 command token으로
+   호출해야 한다. 제거된 `cache-target:consumer`가 registry에서 수용되거나 command token으로
    read/claim/ack/nack/snapshot/recovery가 허용되면 중단한다.
 4. Map target stream은 blocked/dead 0이고 PinVi consumer flag는 off여야 한다.
 5. snapshot serializer/Merkle golden vector가 양쪽 exact commit에서 모두 통과해야 한다.

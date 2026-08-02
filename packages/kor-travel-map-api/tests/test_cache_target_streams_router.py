@@ -402,7 +402,14 @@ def _settings(
                 "principal_id": principal_id,
                 "consumer_id": consumer_id,
                 "token_sha256": _token_sha256(token),
-                "scopes": scopes or ["cache-target:consumer"],
+                "scopes": scopes
+                or [
+                    "cache-target:read",
+                    "cache-target:claim",
+                    "cache-target:ack",
+                    "cache-target:nack",
+                    "cache-target:snapshot",
+                ],
                 "external_systems": external_systems or [EXTERNAL_SYSTEM],
             }
         ],
@@ -648,7 +655,7 @@ def test_ops_recovery_operation_rejects_non_uuid_operation_id() -> None:
 @pytest.mark.unit
 def test_put_cache_target_uses_bound_principal_and_create_precondition() -> None:
     service = _FakeCacheTargetService()
-    client = _client(service)
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
 
     response = client.put(
         f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
@@ -684,7 +691,7 @@ def test_delete_cache_target_replay_preserves_historical_identity_and_etag() -> 
         updated_at=NOW,
         idempotent_replay=True,
     )
-    client = _client(service)
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
 
     response = client.request(
         "DELETE",
@@ -731,7 +738,7 @@ def test_put_mutation_rejects_nonpositive_or_null_target_sequence(
 ) -> None:
     service = _FakeCacheTargetService()
     service.apply_result.target_sequence = target_sequence
-    client = _client(service)
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
 
     with pytest.raises(ValidationError, match="target_sequence"):
         client.put(
@@ -745,7 +752,7 @@ def test_put_mutation_rejects_nonpositive_or_null_target_sequence(
 def test_delete_mutation_rejects_nullable_target_receipt() -> None:
     service = _FakeCacheTargetService()
     service.apply_result = service.source_result
-    client = _client(service)
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
 
     with pytest.raises(ValidationError, match="target_id"):
         client.request(
@@ -764,7 +771,7 @@ def test_delete_mutation_rejects_nullable_target_receipt() -> None:
 @pytest.mark.unit
 def test_put_cache_target_rejects_missing_precondition_before_service_call() -> None:
     service = _FakeCacheTargetService()
-    client = _client(service)
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
 
     response = client.put(
         f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
@@ -781,7 +788,7 @@ def test_put_cache_target_rejects_missing_precondition_before_service_call() -> 
 def test_put_cache_target_maps_result_precondition_failure_to_412() -> None:
     service = _FakeCacheTargetService()
     service.apply_result = SimpleNamespace(status="precondition_failed")
-    client = _client(service)
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
 
     response = client.put(
         f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
@@ -798,7 +805,7 @@ def test_put_cache_target_rejects_float_decimal_inputs() -> None:
     service = _FakeCacheTargetService()
     body = _upsert_body()
     body["radius_km"] = 1.25
-    client = _client(service)
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
 
     response = client.put(
         f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
@@ -816,7 +823,7 @@ def test_put_cache_target_rejects_noncanonical_target_key_before_service_call(
     invalid_target_key: str,
 ) -> None:
     service = _FakeCacheTargetService()
-    client = _client(service)
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
 
     response = client.put(
         f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/{invalid_target_key}",
@@ -989,7 +996,7 @@ def test_cache_target_event_record_rejects_inconsistent_stream_scope() -> None:
 @pytest.mark.unit
 def test_refresh_request_rejects_more_than_500_targets_before_service_call() -> None:
     service = _FakeCacheTargetService()
-    client = _client(service, settings=_settings(scopes=["cache-target:consumer"]))
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
 
     response = client.post(
         "/v1/service/refresh-requests",
@@ -1007,7 +1014,7 @@ def test_refresh_request_rejects_more_than_500_targets_before_service_call() -> 
 @pytest.mark.unit
 def test_refresh_request_rejects_duplicate_targets_before_service_call() -> None:
     service = _FakeCacheTargetService()
-    client = _client(service, settings=_settings(scopes=["cache-target:consumer"]))
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
 
     response = client.post(
         "/v1/service/refresh-requests",
@@ -1029,7 +1036,7 @@ def test_refresh_request_rejects_duplicate_targets_before_service_call() -> None
 @pytest.mark.unit
 def test_refresh_request_accepts_full_root_target_key_length() -> None:
     service = _FakeCacheTargetService()
-    client = _client(service, settings=_settings(scopes=["cache-target:consumer"]))
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
     target_key = "x" * 512
 
     response = client.post(
@@ -1113,6 +1120,146 @@ def test_cache_target_delivery_bounds_return_stable_422(
     assert response.json()["code"] == "VALIDATION_ERROR"
     assert service.claim_calls == []
     assert service.reconciliation_snapshot_calls == []
+
+
+@pytest.mark.unit
+def test_removed_cache_target_consumer_umbrella_is_rejected_by_registry() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        _settings(scopes=["cache-target:consumer"])
+
+    assert exc_info.value.errors()[0]["input"] == "cache-target:consumer"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "scope",
+    [
+        "cache-target:read",
+        "cache-target:claim",
+        "cache-target:ack",
+        "cache-target:nack",
+        "cache-target:snapshot",
+        "cache-target:restore-fence",
+        "cache-target:recovery",
+        "cache-target:recovery-replay",
+    ],
+)
+@pytest.mark.parametrize("command_route", ["put", "delete", "refresh"])
+def test_non_command_exact_scopes_cannot_call_command_routes(
+    scope: str,
+    command_route: str,
+) -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service, settings=_settings(scopes=[scope]))
+
+    if command_route == "put":
+        response = client.put(
+            f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
+            headers=_service_headers(extra={"If-None-Match": "*"}),
+            json=_upsert_body(),
+        )
+    elif command_route == "delete":
+        response = client.request(
+            "DELETE",
+            f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
+            headers=_service_headers(extra={"If-Match": f'"{TARGET_ID}:7"'}),
+            json={
+                "source_event_id": SOURCE_EVENT_ID,
+                "restore_epoch": 1,
+                "source_generation": 2,
+                "occurred_at": NOW.isoformat(),
+            },
+        )
+    else:
+        response = client.post(
+            "/v1/service/refresh-requests",
+            headers=_service_headers(),
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "target_keys": ["target-1"],
+                "reason": "operator refresh",
+            },
+        )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "CACHE_TARGET_SCOPE_FORBIDDEN"
+    assert service.apply_calls == []
+    assert service.refresh_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "consumer_or_recovery_route",
+    ["read", "claim", "ack", "nack", "snapshot", "recovery"],
+)
+def test_command_scope_cannot_call_consumer_snapshot_or_recovery_routes(
+    consumer_or_recovery_route: str,
+) -> None:
+    service = _FakeCacheTargetService()
+    client = _client(service, settings=_settings(scopes=["cache-target:command"]))
+
+    if consumer_or_recovery_route == "read":
+        response = client.get(
+            f"/v1/service/cache-targets/{EXTERNAL_SYSTEM}/target-1",
+            headers=_service_headers(),
+        )
+    elif consumer_or_recovery_route == "claim":
+        response = client.post(
+            "/v1/service/cache-target-event-claims",
+            headers=_service_headers(),
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": CONSUMER_ID,
+                "limit": 1,
+                "lease_seconds": 60,
+            },
+        )
+    elif consumer_or_recovery_route == "ack":
+        response = client.post(
+            "/v1/service/cache-target-event-acks",
+            headers={SERVICE_TOKEN_HEADER: TOKEN},
+            json={
+                "consumer_id": CONSUMER_ID,
+                "claim_id": CLAIM_ID,
+                "lease_token": LEASE_TOKEN,
+                "through_cursor": cache_target_event_cursor(1),
+                "applied": [],
+            },
+        )
+    elif consumer_or_recovery_route == "nack":
+        response = client.post(
+            "/v1/service/cache-target-event-nacks",
+            headers={SERVICE_TOKEN_HEADER: TOKEN},
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": CONSUMER_ID,
+                "claim_id": CLAIM_ID,
+                "lease_token": LEASE_TOKEN,
+                "event_id": EVENT_ID,
+                "disposition": "permanent",
+                "error_class": "unsupported",
+                "error_fingerprint": "a" * 64,
+            },
+        )
+    elif consumer_or_recovery_route == "snapshot":
+        response = client.get(
+            f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
+            headers=_service_headers(),
+        )
+    else:
+        response = client.post(
+            "/v1/service/cache-target-reconciliations",
+            headers=_service_headers(extra={"If-None-Match": "*"}),
+            json={
+                "external_system": EXTERNAL_SYSTEM,
+                "consumer_id": CONSUMER_ID,
+                "expected_restore_epoch": 4,
+                "reason": "PinVi restore cutover",
+            },
+        )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "CACHE_TARGET_SCOPE_FORBIDDEN"
 
 
 @pytest.mark.unit

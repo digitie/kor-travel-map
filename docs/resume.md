@@ -10,17 +10,22 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
-## 2026-08-02 (codex) — T-VN-41 command principal 최소 권한 설계 동결
+## 2026-08-02 (codex) — T-VN-41 command principal 최소 권한 구현
 
 source PUT/DELETE와 refresh create에 relay consumer umbrella를 재사용하면 writer token이 read/claim/ack/
 nack/snapshot까지 획득하는 권한 역전이 생긴다. exact `cache-target:command`를 추가하고 기존
-`cache-target:consumer` umbrella는 consumer read/claim/ack/nack/snapshot에만 한정하기로 했다. command
+`cache-target:consumer` umbrella는 enum·validator·인증 fallback에서 clean cut 제거하기로 했다. command
 principal도 consumer·snapshot·recovery 경로를 호출할 수 없다.
 
 이 변경은 OpenAPI security scheme 형태가 같더라도 인증 의미가 바뀌는 breaking contract이므로 Map
-service OpenAPI를 재export·재핀하고 PinVi compatible pair를 contract generation 7로 올린다.
+service OpenAPI를 재export했다. PinVi compatible pair는 이 SHA를 재핀하고 contract generation 7로
+올려야 한다.
 
-**다음 한 작업**: scope registry와 세 command route를 변경하고 양방향 권한 격리 회귀를 추가한다.
+exact scope registry와 세 command route를 변경했다. command token의 read/claim/ack/nack/snapshot/recovery
+접근, 모든 비command exact scope의 PUT/DELETE/refresh create 접근, 제거된 consumer umbrella 설정을
+각각 fail-close 회귀로 고정했다.
+
+**다음 한 작업**: exact WIP를 두 독립 적대 리뷰에 넘기고 지적을 반영한 뒤 최종 전체 gate를 실행한다.
 
 ## 2026-08-02 (codex) — T-VN-41C referenced snapshot 보존 추세 alert
 

@@ -42,7 +42,7 @@ _CURSOR_SIGNING_PROTECTED_FIELDS = (
 )
 
 CacheTargetServiceScope = Literal[
-    "cache-target:consumer",
+    "cache-target:command",
     "cache-target:read",
     "cache-target:claim",
     "cache-target:ack",
@@ -55,7 +55,7 @@ CacheTargetServiceScope = Literal[
 
 _CACHE_TARGET_SERVICE_SCOPES: frozenset[str] = frozenset(
     {
-        "cache-target:consumer",
+        "cache-target:command",
         "cache-target:read",
         "cache-target:claim",
         "cache-target:ack",
