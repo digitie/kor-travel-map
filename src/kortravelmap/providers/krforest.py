@@ -52,6 +52,8 @@ from kortravelmap.core.ids import (
 from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.dto import (
     Address,
+    AdminClaimKind,
+    AdminEvidence,
     Coordinate,
     Feature,
     FeatureBundle,
@@ -208,17 +210,62 @@ def _derived_key(name: str | None, *parts: str | None) -> str:
     return "::".join(chunks)
 
 
+_CLAIM_KIND_BY_LENGTH: Final[dict[int, AdminClaimKind]] = {
+    10: "bjd",
+    8: "emd",
+    5: "sigungu",
+    2: "sido",
+}
+
+
+def _claim_from_region_code(value: str | None) -> tuple[str, AdminClaimKind] | None:
+    """provider payload의 ``region_code``를 ``AdminEvidence`` claim 축으로 바꾼다.
+
+    원천 `python-krforest-api`는 ``_REGION_CODE_KEYS``(``region_code``/``EMD_CD``/
+    ``EMNDN_CD``/``STD_SGGCD``/``법정동코드``)를 **우선순위만으로** 읽고 길이·숫자 검증을
+    전혀 하지 않는다(`parser.py`의 ``str(value).strip()``). 즉 DBF가 수치 필드면
+    ``"4173025000.0"`` 같은 값도 올 수 있고, 자릿수 체계도 데이터셋마다 다를 수 있다.
+
+    `AdminEvidence`의 필드 validator는 그런 값에 **ValueError를 던지므로**, 여기서
+    거르지 않으면 asset 전체가 죽는다. 지원 길이(10/8/5/2)와 숫자만 통과시키고 나머지는
+    조용히 ``None``으로 떨어뜨린다 — 무장은 관측을 늘리는 일이지 적재를 막는 일이 아니다.
+
+    실측(2026-08-03 prod): arboretum 205건 전량이 8자리 숫자 = ``emd``다.
+    """
+    if value is None:
+        return None
+    text = value.strip()
+    if not text.isdigit():
+        return None
+    kind = _CLAIM_KIND_BY_LENGTH.get(len(text))
+    if kind is None:
+        return None
+    return text, kind
+
+
 async def _resolve_address(
     *,
     coord: Coordinate | None,
     road_text: str | None,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
-) -> Address:
-    """좌표 reverse + 주소 geocode로 행정코드를 보강한 ``Address``를 만든다."""
+) -> tuple[Address, Address | None, bool]:
+    """좌표 reverse + 주소 geocode로 행정코드를 보강한 ``Address``를 만든다.
+
+    반환: ``(address, reverse_geo, reverse_attempted)``.
+
+    ``reverse_geo``를 **따로** 돌려주는 이유는 `AdminEvidence`의 obs 축이 오직 좌표
+    reverse 결과여야 하기 때문이다. 아래 ``geo``는 `address_resolver`(provider 주소
+    문자열의 정지오코딩)로도 채워지므로, 그대로 obs로 쓰면 claim_text와 출처가 같아져
+    **자기 자신과 비교**하게 된다(`mois.py`가 같은 이유로 분리한다).
+    """
     geo: Address | None = None
+    reverse_geo: Address | None = None
+    reverse_attempted = False
     if coord is not None and reverse_geocoder is not None:
+        reverse_attempted = True
         geo = await reverse_geocoder(coord)
+        reverse_geo = geo
     if (geo is None or geo.bjd_code is None) and address_resolver is not None:
         resolved = await address_resolver(Address(road=road_text))
         if resolved is not None and resolved.bjd_code is not None:
@@ -231,7 +278,7 @@ async def _resolve_address(
     sido_code = (
         (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
     )
-    return Address(
+    address = Address(
         road=road_text,
         admin=geo.admin if geo is not None else None,
         bjd_code=bjd_code,
@@ -243,6 +290,7 @@ async def _resolve_address(
         sido_name=geo.sido_name if geo is not None else None,
         sigungu_name=geo.sigungu_name if geo is not None else None,
     )
+    return address, reverse_geo, reverse_attempted
 
 
 def _build_place_bundle(
@@ -260,8 +308,13 @@ def _build_place_bundle(
     raw_data: dict[str, Any],
     raw_address: str | None,
     fetched_at: datetime,
+    admin_evidence: AdminEvidence | None = None,
 ) -> FeatureBundle:
-    """공통 place ``FeatureBundle`` 조립(휴양림/수목원 공용)."""
+    """공통 place ``FeatureBundle`` 조립(휴양림/수목원 공용).
+
+    ``admin_evidence``는 수목원(arboretums)에서만 채워진다 — 휴양림 payload에는 행정코드
+    필드 자체가 없다(원천 ``StandardRecreationForest``의 유일한 코드는 제공기관코드다).
+    """
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=KRFOREST_PROVIDER_NAME,
@@ -322,6 +375,7 @@ def _build_place_bundle(
         feature=feature,
         source_record=source_record,
         source_link=source_link,
+        admin_evidence=admin_evidence,
     )
 
 
@@ -338,7 +392,7 @@ async def _recreation_forest_to_bundle(
     name = item.name or ""
     coord = _coord_of(item.latitude, item.longitude)
     road_text = normalize_korean_text(item.address)
-    address = await _resolve_address(
+    address, _reverse_geo, _reverse_attempted = await _resolve_address(
         coord=coord,
         road_text=road_text,
         reverse_geocoder=reverse_geocoder,
@@ -387,11 +441,24 @@ async def _arboretum_to_bundle(
     name = item.name or ""
     coord = _coord_of(item.latitude, item.longitude)
     road_text = normalize_korean_text(item.address)
-    address = await _resolve_address(
+    address, reverse_geo, reverse_attempted = await _resolve_address(
         coord=coord,
         road_text=road_text,
         reverse_geocoder=reverse_geocoder,
         address_resolver=address_resolver,
+    )
+    # T-VN-H30C: MOIS와 달리 위 reverse는 payload 코드 유무와 무관하게 호출되므로
+    # obs(좌표 reverse)와 claim(payload region_code)이 **동시에** 성립한다 → grade="dual".
+    # 즉 MOIS에서 구조적으로 불가능했던 staleness 대조가 여기서는 실제로 발화한다.
+    claim = _claim_from_region_code(item.region_code)
+    admin_evidence = AdminEvidence(
+        # obs 축은 **좌표 reverse** 결과만이다. `address`는 address_resolver(주소 문자열
+        # 정지오코딩)로도 채워질 수 있어 그대로 쓰면 claim_text와 출처가 같아진다.
+        obs_code=reverse_geo.bjd_code if reverse_geo is not None else None,
+        reverse_attempted=reverse_attempted,
+        claim_code=claim[0] if claim is not None else None,
+        claim_kind=claim[1] if claim is not None else None,
+        claim_text=item.address or None,
     )
     natural_key = _derived_key(name, item.region_code or item.region_name)
     raw_data: dict[str, Any] = {
@@ -424,6 +491,7 @@ async def _arboretum_to_bundle(
         raw_data=raw_data,
         raw_address=item.address,
         fetched_at=fetched_at,
+        admin_evidence=admin_evidence,
     )
 
 

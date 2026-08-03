@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -33,9 +33,7 @@ from kortravelmap.providers.krforest import (
 KST = timezone(timedelta(hours=9))
 
 
-def recreation_forests_to_bundles(
-    items: Iterable[Any], **kwargs: Any
-) -> list[FeatureBundle]:
+def recreation_forests_to_bundles(items: Iterable[Any], **kwargs: Any) -> list[FeatureBundle]:
     return asyncio.run(_recreation_forests_async(items, **kwargs))
 
 
@@ -118,9 +116,7 @@ def _now() -> datetime:
 
 @pytest.mark.unit
 def test_recreation_forest_bundle_per_item_and_order() -> None:
-    bundles = recreation_forests_to_bundles(
-        [_FOREST_1, _FOREST_NO_CODE], fetched_at=_now()
-    )
+    bundles = recreation_forests_to_bundles([_FOREST_1, _FOREST_NO_CODE], fetched_at=_now())
     assert len(bundles) == 2
     assert bundles[0].source_record.source_entity_id == "KFS-0001"
 
@@ -202,9 +198,7 @@ def test_bundle_fk_consistency_and_determinism() -> None:
 @pytest.mark.unit
 def test_naive_fetched_at_rejected() -> None:
     with pytest.raises(ValueError, match="aware"):
-        recreation_forests_to_bundles(
-            [_FOREST_1], fetched_at=datetime(2026, 6, 7, 12, 0, 0)
-        )
+        recreation_forests_to_bundles([_FOREST_1], fetched_at=datetime(2026, 6, 7, 12, 0, 0))
 
 
 @pytest.mark.unit
@@ -217,3 +211,175 @@ def test_reverse_geocoder_fills_bjd_code() -> None:
     )[0]
     assert bundle.feature.address.bjd_code == "4151025000"
     assert bundle.feature.feature_id.startswith("f_4151025000_p_")
+
+
+# -- T-VN-H30C: AdminEvidence 무장 -----------------------------------------
+#
+# krforest가 MOIS와 다른 지점: `_resolve_address`의 reverse 호출 조건에 payload 코드가
+# **없다**. 따라서 obs(좌표 reverse)와 claim(payload region_code)이 동시에 성립해
+# `grade == "dual"`이 실제로 나오고 staleness 축이 발화한다.
+#
+# prod 실측(2026-08-03): arboretum 205건 전량이 8자리 숫자 = `emd`.
+
+
+def _rg(bjd: str | None):
+    """지정한 bjd_code를 돌려주는 reverse geocoder."""
+
+    async def _fake(coord: Coordinate) -> Address | None:
+        if bjd is None:
+            return None
+        return Address(bjd_code=bjd, sigungu_code=bjd[:5], sido_code=bjd[:2])
+
+    return _fake
+
+
+@pytest.mark.unit
+def test_arboretum_admin_evidence_is_dual_and_detects_staleness() -> None:
+    """payload 코드와 reverse 결과가 어긋나면 dual + staleness warning이 나온다."""
+    from kortravelmap.dagster.validation import validate_feature_bundle_address
+
+    item = replace(_ARB_1, region_code="36110340")  # 8자리 = emd
+    bundle = arboretums_to_bundles([item], fetched_at=_now(), reverse_geocoder=_rg("3611010900"))[0]
+
+    evidence = bundle.admin_evidence
+    assert evidence is not None
+    assert evidence.grade == "dual", "krforest는 MOIS와 달리 dual이 성립해야 한다"
+    assert evidence.claim_kind == "emd"
+    assert evidence.claim_code == "36110340"
+    assert evidence.obs_code == "3611010900"
+
+    codes = validate_feature_bundle_address(bundle).issue_codes
+    assert any(code.startswith("admin_code_stale_") for code in codes), (
+        f"staleness warning이 나오지 않았다: {codes}"
+    )
+
+
+@pytest.mark.unit
+def test_arboretum_admin_evidence_no_issue_when_codes_agree() -> None:
+    """같은 행정구역이면 warning을 만들지 않는다 — 오탐 방지."""
+    from kortravelmap.dagster.validation import validate_feature_bundle_address
+
+    item = replace(_ARB_1, region_code="36110340")
+    bundle = arboretums_to_bundles([item], fetched_at=_now(), reverse_geocoder=_rg("3611034000"))[0]
+
+    assert bundle.admin_evidence is not None
+    assert bundle.admin_evidence.grade == "dual"
+    codes = validate_feature_bundle_address(bundle).issue_codes
+    assert not [code for code in codes if code.startswith("admin_code_stale_")]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("region_code", "expected_kind"),
+    [
+        ("4173025000", "bjd"),
+        ("36110340", "emd"),
+        ("36110", "sigungu"),
+        ("36", "sido"),
+    ],
+)
+def test_arboretum_claim_kind_dispatch_by_length(region_code: str, expected_kind: str) -> None:
+    """길이 → claim_kind 디스패치. 어긋나면 DTO validator가 ValueError를 던진다."""
+    item = replace(_ARB_1, region_code=region_code)
+    bundle = arboretums_to_bundles([item], fetched_at=_now())[0]
+
+    evidence = bundle.admin_evidence
+    assert evidence is not None
+    assert evidence.claim_code == region_code
+    assert evidence.claim_kind == expected_kind
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "region_code",
+    [
+        "4173025000.0",  # DBF 수치 필드가 float로 읽힌 경우
+        "36-110",
+        "세종",
+        "",
+        "   ",
+        "1",  # 1자리
+        "361",  # 3자리
+        "3611",  # 4자리
+        "361103",  # 6자리
+        "3611034",  # 7자리
+        "361103400",  # 9자리
+        "36110340000",  # 11자리
+    ],
+)
+def test_arboretum_rejects_unsupported_region_code_without_raising(
+    region_code: str,
+) -> None:
+    """지원하지 않는 형태는 조용히 claim 없음으로 떨어진다 — asset이 죽으면 안 된다.
+
+    원천 `python-krforest-api`는 region_code에 길이·숫자 검증을 전혀 하지 않는다
+    (`parser.py`의 `str(value).strip()`). `AdminEvidence` validator는 그런 값에
+    ValueError를 던지므로, provider에서 거르지 않으면 **적재 전체가 중단된다**.
+    """
+    item = replace(_ARB_1, region_code=region_code)
+    bundle = arboretums_to_bundles([item], fetched_at=_now())[0]
+
+    evidence = bundle.admin_evidence
+    assert evidence is not None
+    assert evidence.claim_code is None
+    assert evidence.claim_kind is None
+
+
+@pytest.mark.unit
+def test_arboretum_obs_axis_is_reverse_only_not_address_resolver() -> None:
+    """obs 축은 좌표 reverse 결과만이다 — 정지오코딩 결과가 섞이면 자기 비교가 된다.
+
+    `address_resolver`는 provider **주소 문자열**을 정지오코딩한 것이라 claim_text와
+    출처가 같다. 그걸 obs로 쓰면 "payload가 payload와 다른가"를 묻게 된다.
+    """
+
+    async def _no_reverse(coord: Coordinate) -> Address | None:
+        return None
+
+    async def _resolver(address: Address) -> Address | None:
+        return Address(bjd_code="3611010900", sigungu_code="36110", sido_code="36")
+
+    item = replace(_ARB_1, region_code="36110340")
+    bundle = arboretums_to_bundles(
+        [item],
+        fetched_at=_now(),
+        reverse_geocoder=_no_reverse,
+        address_resolver=_resolver,
+    )[0]
+
+    # address 자체는 resolver 결과로 채워진다.
+    assert bundle.feature.address.bjd_code == "3611010900"
+    # 그러나 obs 축은 비어 있어야 한다.
+    evidence = bundle.admin_evidence
+    assert evidence is not None
+    assert evidence.obs_code is None
+    assert evidence.grade == "claim_only"
+
+
+@pytest.mark.unit
+def test_recreation_forest_never_has_claim_axis() -> None:
+    """휴양림 payload에는 행정코드 필드가 없다 — 누가 나중에 발명하지 못하게 고정."""
+    bundle = recreation_forests_to_bundles(
+        [_FOREST_1], fetched_at=_now(), reverse_geocoder=_rg("4151025000")
+    )[0]
+    evidence = bundle.admin_evidence
+    assert evidence is None or evidence.claim_code is None
+
+
+@pytest.mark.unit
+def test_arming_does_not_add_findings_for_records_without_claim() -> None:
+    """무장 부수효과 중립성 — claim이 없는 레코드의 issue 집합이 늘지 않는다.
+
+    MOIS 무장은 `reverse_geocode_not_attempted`를 새로 터뜨렸다. krforest는 prod asset이
+    geocoder를 항상 주입하므로 그 위험이 없다는 것을 고정한다.
+    """
+    from kortravelmap.dagster.validation import validate_feature_bundle_address
+
+    item = replace(_ARB_1, region_code=None)
+    bundle = arboretums_to_bundles([item], fetched_at=_now(), reverse_geocoder=_rg("3611010900"))[0]
+
+    codes = set(validate_feature_bundle_address(bundle).issue_codes)
+    assert "reverse_geocode_not_attempted" not in codes
+    assert not [code for code in codes if code.startswith("admin_code_stale_")]
+    assert bundle.admin_evidence is not None
+    assert bundle.admin_evidence.grade == "obs_only"

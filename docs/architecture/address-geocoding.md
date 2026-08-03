@@ -228,8 +228,13 @@ admin `/admin/integrity` 페이지에 노출.
 
 ### 7.1 collect 단계 (provider 변환 시)
 
+> ⚠ 아래는 **개념 예시**다. `providers/visitkorea.py`에 `festival_to_bundles`는
+> **존재하지 않는다** — 그 모듈은 reverse를 호출하지 않고 `FeatureBundle`도 만들지 않는
+> enrichment-only 경로다(§8.1). 실제 구현 참고는 `providers/krforest.py`의
+> `_resolve_address`나 `providers/mois.py`를 보라.
+
 ```python
-# providers/visitkorea.py
+# (개념 예시 — 실재 함수 아님)
 async def festival_to_bundles(items, *, fetched_at, reverse_geocoder=None):
     for item in items:
         # 1. provider 응답은 raw/provenance. 저장 정본은 kor-travel-geo 결과.
@@ -318,7 +323,7 @@ await load_feature_rows(
 | provider | 좌표 출처 | reverse geocoder 권장 |
 |----------|---------|---------------------|
 | VisitKorea | mapx/mapy (WGS84) | 권장 — areaCode가 표준 코드 아님 |
-| MOIS | EPSG:5174 → WGS84 변환 | **필수** — sigun_code가 관할기관 코드 |
+| MOIS | EPSG:5174 → WGS84 변환 | 조건부 — `legal_dong_code`가 **없을 때만** 호출(아래 §8.1) |
 | OpiNet | KATEC EPSG:5181 → WGS84 변환 | **필수** — sigun_code가 OpiNet 코드 |
 | KHOA beach | lat/lon (WGS84) | 권장 — sidoNm/gugunNm 한글 |
 | krheritage | longitude/latitude (WGS84, GIS에서) | 권장 |
@@ -327,6 +332,39 @@ await load_feature_rows(
 | standard_data | 위경도 (WGS84, 표준데이터별) | 권장 |
 | KMA weather | 격자 (nx, ny) — 좌표 변환 별도 | 적용 X (관측소 좌표는 별도 reference) |
 | 전화번호 보강 | (좌표 안 다룸) | 적용 X |
+
+### 8.1 `AdminEvidence` staleness 축 무장 조건 (T-VN-H30C)
+
+`AdminEvidence`는 provider payload가 준 행정코드(`claim_code`)와 **좌표 reverse가 관측한**
+코드(`obs_code`)를 대조해 "캐시된 코드가 좌표 변경을 따라가지 못했다"를 탐지한다.
+위치 검증이 **아니다**. `admin_code_stale_*` finding은 `grade == "dual"`(둘 다 존재)일
+때만 발화한다(`dagster/validation.py`의 `_admin_code_stale_issues`).
+
+따라서 무장 가치는 **payload 코드 유무가 아니라 두 축이 동시에 성립하는가**로 갈린다.
+
+| provider | dual 성립 | 근거 |
+|---|---|---|
+| kor_travel_concierge | **가능** — 실측 1,372/1,477(92%) | payload 코드가 있어도 reverse를 무조건 호출 |
+| krforest arboretums | **가능** — 205건 전량 claim 보유 | `_resolve_address`의 reverse 조건에 payload 코드가 없음 |
+| krforest recreation_forests | 불가(claim 축 부재) | payload에 행정코드 필드 자체가 없음(제공기관코드뿐) |
+| MOIS | **구조적으로 불가** | 아래 참조 |
+| VisitKorea | 불가(obs 축·운반체 부재) | reverse를 호출하지 않고 `FeatureBundle`을 만들지 않는 enrichment-only |
+
+**MOIS가 구조적으로 불가능한 이유.** `providers/mois.py`는
+`if bjd_code is None and coord is not None and reverse_geocoder is not None:` 안에서만
+reverse를 부른다. 즉 `legal_dong_code`가 있으면 obs 축이 아예 생기지 않아
+`obs_code`와 `claim_code`가 **상호배타**다 — `grade`는 영원히 `claim_only`이고
+staleness 축은 발화하지 않는다.
+
+이 생략은 **정확성이 아니라 비용 판단**이다(977k 레코드에 대한 reverse 호출).
+대조를 원하면 reverse를 강제해야 하고, 그건 별도 비용 결정이다. 무장 자체는
+`unarmed`(미계측)와 `claim_only`(계측했으나 대조 불가)를 구분해 주므로 의미가 있지만,
+**탐지 증가는 0건**이라는 점을 기대치로 못박는다.
+
+**VisitKorea 주의.** `l_dong_regn_cd`/`l_dong_signgu_cd`는 VisitKorea 고유 코드가 아니라
+실제 법정동 체계가 맞다(2+3 = 시군구 5자리 상한). 그러나 그 모듈은 reverse를 호출하지
+않고 `FeatureBundle`을 만들지 않는 enrichment-only 경로라 `AdminEvidence`를 실을 자리가
+없다. 무장해도 `claim_only` 상한이며 MOIS와 같은 결론이 된다 — 원인만 다르다.
 
 ## 9. 운영시간 (Opening hours) — 본 도큐먼트 외
 
