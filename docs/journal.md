@@ -17,6 +17,45 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-03 — H35 적대 리뷰에서 helper 결함 2건 (PR #925)
+
+- 최종 exact HEAD `d50bb2c5`에 적대 리뷰어 2명 + refute/reproduce 검증(15 에이전트).
+  **리뷰어 findings 6건은 전부 기각**됐고 synthesizer가 직접 측정하며 찾은 2건이 남았다.
+  둘 다 격리 컨테이너에서 독립 재현했다 — 리뷰의 실제 가치는 findings 목록이 아니라
+  검증 과정에서 나왔다.
+- **결함 ①** `_INDEX_SIGNATURES`의 `kind = 'weather'::text`가 어떤 DB와도 일치하지 않는다.
+  `feature.features.kind`가 `character varying`이라 PostgreSQL이 항상
+  `((kind)::text = 'weather'::text)`로 deparse한다. 이 index가 영구 non-canonical →
+  head에서 partial probe 통과 불가(수정 전 실패 1 → 후 7건 전부 통과).
+  → `run_migrate`의 forward 재개 경로가 죽는다. migrate commit 뒤 receipt 유실 시
+  csv5도 못 가고 migrate도 영구 rejected → 남은 출구가 PITR 없는 prod의 dump 복원.
+- **결함 ②** 공개 카운트에 `source_present`가 빠져 de-publish를 못 잡는다.
+  실측: item 1건 source-absent → 실제 API 3,042인데 게이트는 3,043 유지.
+  **내가 이슈 #99에 올린 SQL도 같은 결함이라 정정했다.**
+- 기존 회귀가 못 잡은 이유: 단위는 합성 `_states()` 맵, 리허설은 `_PRE_REVISION`에서만
+  probe — **실제 `pg_get_indexdef`를 head에서 검사하는 경로가 없었다.** 회귀 3건 추가,
+  전부 변이로 falsifiability 확인.
+- **n150 실행은 하지 않았다.** 승인은 받았지만 pin된 `d50bb2c5`가 이 결함을 포함하고,
+  orchestration 소유자인 Docker-manager가 실제 cutover를 여러 차례 시도해 전부 pre-forward
+  fail-close 후 rollback한 뒤 지금은 T-049 진단 도구를 구현 중이다(PR #100/#101 머지).
+- Docker-manager 이슈 #99에 확정 gate 값 + 이번 결함 + pin 갱신 요청을 남겼다.
+
+## 2026-08-03 — H35 §5 gate 실 prod 데이터 실측 (0063→0078)
+
+- runbook §5 선언값을 실제 prod 백업 clone에서 확인했다(prod 무접촉, 포트 노출 없음):
+  preflight `0063` / 3,265 · migrate `0078_cache_target_gc_observe` / 3,043 / invalid index 0 ·
+  csv5 파일 5 / accepted 222 / rejected 0 / 3,265 — **전 항목 일치**.
+- 재검증이 필요했던 이유: 내 이전 실측은 `0074` head 기준인데 그 뒤 `0075~0078`이 추가됐다.
+  **`0075~0078`이 curation 공개 표면을 바꾸지 않는다**가 추론에서 실측으로 확정됐다.
+- 파일별 accepted: arboretum 44 / heritage 67 / kt100-2023 51 / kt100-2025 58 / lighthouse 2.
+- **이 실측의 한계를 runbook §10.1에 명시했다** — helper를 우회해 마이그레이션과
+  `import_curation_rows`를 직접 호출한 것이라 §11의 "network-free 리허설"(helper 경유)을
+  대체하지 않는다. transaction UUID 체인을 안 태웠으므로 §5.3 멱등 계약도 검증하지 않는다
+  (helper 우회 시 CSV 재호출로 decision 222건 증가, 공개 item은 3,265 불변 — append-only
+  성질상 예상되는 동작이지만 멱등 판정은 helper 경유로만 한다).
+- 소요 70.9초는 dagster 없는 개발 환경 수치라 배포 시간 근거로 쓰지 않는다(기존 폐기 방침 유지).
+- T-VN-41(#917/#923/#924) codex 머지 완료 확인, n150 load 11.6 → **0.76** 정상화.
+
 ## 2026-08-02 (codex) — H35 scope validator legacy delegate P1 해소
 
 - function catalog 대상을 proname allowlist에서 exact schema-qualified regprocedure inventory로 바꿨다.

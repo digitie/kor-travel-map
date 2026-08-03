@@ -29,6 +29,7 @@ from kortravelmap.cli._h35_contract import (
 from kortravelmap.cli._h35_schema import partial_probe
 from kortravelmap.cli.h35_cutover import _execute
 from kortravelmap.core.cache_target_stream import SnapshotMerkleRowV1, snapshot_merkle_root
+from kortravelmap.infra.curation_link_basis import trusted_basis_sql
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
 pytestmark = pytest.mark.integration
@@ -1528,5 +1529,171 @@ async def test_h35_exact_surface_network_free_rehearsal(
         assert final_verify["cache_target_evidence"] == evidence
         assert await _external_event_count(dsn) == event_count
         assert external_hosts == []
+    finally:
+        await _drop_database(admin_dsn, database)
+
+
+async def test_partial_probe_passes_at_target_schema(pg_container: Any) -> None:
+    """head까지 올린 실제 DB에서 partial probe가 통과해야 한다 — migrate 재시도 경로.
+
+    `run_migrate`의 `if schema_before != TARGET_SCHEMA: upgrade`는 동일 request 재발행 시
+    이미 head인 DB에 accepted receipt를 돌려주기 위한 것이다(runbook §2/§4의 forward 재개).
+    그런데 그 앞의 `partial_statement_prefix_canonical` 게이트가 head에서 통과하지 못하면
+    재시도가 **무조건 거부**되어 그 경로 자체가 죽는다. 그 상태의 유일한 출구는 PITR 없는
+    prod의 단일 dump 복원이므로 반드시 고정한다.
+
+    실제로 그런 결함이 있었다: `idx_features_public_weather_coord_5179_gist` signature가
+    `kind = 'weather'::text`를 요구했는데 `feature.features.kind`가 `character varying`이라
+    PostgreSQL은 항상 `((kind)::text = 'weather'::text)`로 deparse한다 — 어떤 DB에서도
+    일치하지 않아 이 index가 영구히 non-canonical이었다.
+
+    기존 테스트가 놓친 이유: 단위 테스트는 합성 `_states()` 맵을 쓰고 리허설은
+    `_PRE_REVISION`에서만 probe해서, **실제 `pg_get_indexdef` 출력을 head에서 검사하는
+    경로가 없었다.**
+    """
+    admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
+    database, dsn = await _create_database(admin_dsn)
+    try:
+        await asyncio.to_thread(_run_alembic, dsn, "head")
+        engine = make_async_engine(dsn)
+        try:
+            async with engine.connect() as connection:
+                checks = await partial_probe(connection, _TARGET_REVISION)
+                failed = [str(value["name"]) for value in checks if value.get("passed") is not True]
+            assert not failed, (
+                f"head({_TARGET_REVISION})에서 partial probe가 실패했다 — "
+                f"migrate 재시도가 영구 불가해진다: {failed}"
+            )
+        finally:
+            await engine.dispose()
+    finally:
+        await _drop_database(admin_dsn, database)
+
+
+async def test_index_signatures_match_real_indexdef(pg_container: Any) -> None:
+    """모든 index signature fragment가 실제 `pg_get_indexdef` 출력과 일치해야 한다.
+
+    signature를 손으로 적으면 PostgreSQL의 deparse 형태(특히 `character varying` 컬럼의
+    `(col)::text` 캐스트)와 어긋나기 쉽고, 어긋나면 그 index는 조용히 영구
+    non-canonical이 된다. head에 존재하는 index 전부를 전수 확인한다.
+    """
+    from kortravelmap.cli._h35_schema import _INDEX_SIGNATURES
+
+    admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
+    database, dsn = await _create_database(admin_dsn)
+    try:
+        await asyncio.to_thread(_run_alembic, dsn, "head")
+        engine = make_async_engine(dsn)
+        try:
+            async with engine.connect() as connection:
+                rows = (
+                    await connection.execute(
+                        text(
+                            "select indexname, lower(indexdef) as indexdef "
+                            "from pg_indexes "
+                            "where schemaname in ('feature','ops','provider_sync')"
+                        )
+                    )
+                ).all()
+            actual = {str(name): str(definition) for name, definition in rows}
+
+            checked = 0
+            mismatched: list[str] = []
+            for index_name, fragments in _INDEX_SIGNATURES.items():
+                definition = actual.get(index_name)
+                if definition is None:
+                    # head에 없는 index(구 revision 전용)는 이 테스트 대상이 아니다.
+                    continue
+                checked += 1
+                for fragment in fragments:
+                    if fragment.lower() not in definition:
+                        mismatched.append(f"{index_name}: {fragment!r} not in {definition!r}")
+            assert checked > 0, "head에서 확인된 signature가 하나도 없다 — 테스트가 공회전한다"
+            assert not mismatched, "signature가 실제 indexdef와 불일치한다:\n" + "\n".join(
+                mismatched
+            )
+        finally:
+            await engine.dispose()
+    finally:
+        await _drop_database(admin_dsn, database)
+
+
+async def test_public_count_detects_source_absent_item(pg_container: Any) -> None:
+    """공개 item 카운트가 `source_present`를 반영해야 한다 — de-publish 감지.
+
+    실제 공개 목록 술어(`curation_repo._LIST_FEATURE_ITEMS_SQL`)는 `AND i.source_present`를
+    포함한다. helper의 카운트가 이를 빼면, csv5의 authoritative replace가 기존 item을
+    source-absent로 만들었을 때 **API에서는 사라졌는데 게이트는 같은 수를 계속 보고**한다.
+    그 상태로 verify가 통과하면 공개 표면 축소를 아무도 못 잡는다.
+
+    현재 데이터에는 `source_present=false`인 active item이 0건이라 정상 경로에서 두 계산이
+    같은 값을 낸다 — 그래서 실제로 하나를 source-absent로 만들어 차이를 강제한다.
+    """
+    from kortravelmap.cli._h35_schema import _public_count
+
+    admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
+    database, dsn = await _create_database(admin_dsn)
+    try:
+        await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION)
+        await _seed_exact_pre_cutover_surface(dsn)
+        await asyncio.to_thread(_run_alembic, dsn, "head")
+
+        engine = make_async_engine(dsn)
+        try:
+            async with engine.connect() as connection:
+                before = await _public_count(connection, migrated=True)
+            assert before > 0, "픽스처가 공개 item을 만들지 못했다 — 테스트가 공회전한다"
+
+            # 반드시 **공개로 집계되는** item을 골라야 한다. 아무 included item이나
+            # 고르면 그 item이 애초에 공개 집합 밖(비공개 collection·미신뢰 link)일 수
+            # 있어 카운트가 안 움직이고, 테스트가 통과하는 것처럼 보인다.
+            async with engine.begin() as connection:
+                target = (
+                    await connection.execute(
+                        text(
+                            f"""
+                            SELECT item.curation_item_id
+                            FROM feature.curation_items AS item
+                            JOIN feature.curation_collections AS collection
+                              ON collection.collection_id = item.collection_id
+                            JOIN feature.curated_themes AS theme
+                              ON theme.theme_id = collection.theme_id
+                            WHERE item.archived_at IS NULL
+                              AND collection.archived_at IS NULL
+                              AND item.source_present
+                              AND item.status = 'included'
+                              AND collection.status = 'published'
+                              AND collection.visibility = 'public'
+                              AND theme.visibility = 'public'
+                              AND EXISTS (
+                                  SELECT 1 FROM feature.curation_link_decisions AS decision
+                                  WHERE decision.decision_id = item.accepted_link_decision_id
+                                    AND decision.curation_item_id = item.curation_item_id
+                                    AND decision.feature_id = item.feature_id
+                                    AND decision.decision_kind = 'accepted'
+                                    AND {trusted_basis_sql("decision.match_basis")}
+                              )
+                            LIMIT 1
+                            """
+                        )
+                    )
+                ).scalar_one()
+                await connection.execute(
+                    text(
+                        "UPDATE feature.curation_items SET source_present = false "
+                        "WHERE curation_item_id = :target"
+                    ),
+                    {"target": target},
+                )
+
+            async with engine.connect() as connection:
+                after = await _public_count(connection, migrated=True)
+
+            assert after == before - 1, (
+                "source_present=false로 바뀐 item이 공개 카운트에서 빠지지 않았다 — "
+                f"{before} -> {after}. de-publish를 게이트가 놓친다."
+            )
+        finally:
+            await engine.dispose()
     finally:
         await _drop_database(admin_dsn, database)

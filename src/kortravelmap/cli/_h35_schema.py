@@ -170,8 +170,12 @@ _INDEX_SIGNATURES: Final[dict[str, tuple[str, ...]]] = {
         "coalesce(valid_at, observed_at, valid_from, issued_at)",
     ),
     "idx_features_public_weather_coord_5179_gist": (
+        # `feature.features.kind`는 `character varying`이라(0002) PostgreSQL이
+        # 술어를 항상 `((kind)::text = 'weather'::text)`로 deparse한다.
+        # `kind = 'weather'::text`로 적으면 **어떤 DB에서도 일치하지 않아** 이 index가
+        # 영구히 non-canonical이 되고, head에서 partial probe가 통과할 수 없다.
         "on feature.features using gist (coord_5179)",
-        "kind = 'weather'::text",
+        "(kind)::text = 'weather'::text",
         "coord_5179 is not null",
     ),
 }
@@ -252,6 +256,12 @@ def _public_count_sql(*, migrated: bool) -> str:
         if migrated
         else "AND item.feature_id IS NOT NULL"
     )
+    # `curation_items.source_present`는 `0065`가 만든다. preflight는 `0063`에서 돌므로
+    # 그 컬럼이 아직 없어 조건부로만 넣는다. 공개 목록 술어
+    # (`curation_repo._LIST_FEATURE_ITEMS_SQL`)는 `AND i.source_present`를 포함하므로,
+    # migrate 이후 이것을 빼면 source-absent가 된 item을 계속 공개로 세어 **de-publish를
+    # 게이트가 놓친다**(격리 clone에서 재현함 — 실제 API 3,042인데 게이트는 3,043 보고).
+    source_present_predicate = "AND item.source_present" if migrated else ""
     return f"""
         SELECT count(*)::bigint
         FROM feature.curation_items AS item
@@ -259,6 +269,7 @@ def _public_count_sql(*, migrated: bool) -> str:
           ON collection.collection_id = item.collection_id
         JOIN feature.curated_themes AS theme ON theme.theme_id = collection.theme_id
         WHERE item.archived_at IS NULL AND collection.archived_at IS NULL
+          {source_present_predicate}
           AND item.status = 'included' AND collection.status = 'published'
           AND collection.visibility = 'public' AND theme.visibility = 'public'
           {link_predicate}

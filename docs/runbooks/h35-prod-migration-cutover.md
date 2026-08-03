@@ -342,6 +342,49 @@ Agent A/B는 이 문서의 receipt key·phase 순서·exact gate를 임의로 �
 | production attestor/canary injection | 우회 불가, mutation 0으로 거부 |
 | cache contract 미설정 기존 경로 | 현재 의미를 보존 |
 
+## 10.1 실 prod 데이터 gate 실측 (2026-08-03)
+
+§5가 선언한 gate 값을 **합성 데이터가 아니라 실제 prod 백업 clone**에서 확인했다.
+writer-quiesced dump `krtour_map-20260731T065308Z.dump`를 포트 노출 없는 임시 컨테이너에
+복원하고 `0063→0078`을 적용했다 — prod 무접촉, 네트워크 미사용.
+
+| phase | 항목 | 선언값 | 실측 |
+| --- | --- | --- | --- |
+| preflight | schema | `0063_pipeline_root_id` | 일치 |
+| preflight | 공개 item | 3,265 | **3,265** |
+| migrate | head | `0078_cache_target_gc_observe` | 일치 |
+| migrate | 공개 item | 3,043 | **3,043** |
+| migrate | invalid index | 0 | **0** |
+| csv5 | canonical CSV 파일 수 | 5 | **5** |
+| csv5 | accepted | 222 | **222** |
+| csv5 | rejected | 0 | **0** |
+| csv5 | 공개 item | 3,265 | **3,265** |
+
+파일별 accepted: arboretum 44 / heritage 67 / kt100-2023 51 / kt100-2025 58 / lighthouse 2.
+`0063→0078` 적용 소요는 이 환경에서 70.9초였다(§ 아래 주의 참조).
+
+**이 실측이 확정하는 것**: `0075~0078`(cache_target 계열)이 curation 공개 표면을 바꾸지
+않는다. 이전 실측은 `0074` head 기준이었고 4개가 추가된 뒤에도 세 수(3,265 → 3,043 →
+3,265)가 그대로 재현된다.
+
+**공개 item은 반드시 공개 목록 술어로 센다** — `item.status='included'` + collection
+published/public + theme public + trusted accepted decision. raw trusted-link 수를 쓰면
+`[빵이네] 강원도여행정보`(`status='rejected'`) 때문에 정상 배포에서도 불일치가 난다.
+basis 열거는 하드코딩하지 말고 `curation_link_basis.trusted_basis_sql()`을 쓴다.
+
+> **이 실측이 확정하지 **못하는** 것 — 승인 조건과 혼동하지 마라.**
+> - helper를 거치지 않고 마이그레이션과 `import_curation_rows`를 직접 호출한 결과다.
+>   따라서 §11의 "network-free `0063→0078` 리허설" 항목(= helper 경유)을 대체하지 않는다.
+>   그 항목은 `tests/integration/test_h35_cutover_rehearsal.py`가 소유한다.
+> - transaction UUID·prior receipt 체인을 태우지 않았으므로 §5.3의 "같은 transaction UUID
+>   재호출 무누적"을 검증하지 않는다. helper를 우회해 CSV bundle을 두 번 직접 호출하면
+>   decision이 222건 늘어난다(공개 item은 3,265로 불변). append-only ledger 성질상
+>   예상되는 동작이지만, **멱등 판정은 helper 경유로만 한다.**
+> - 소요 70.9초는 dagster가 돌지 않는 개발 환경 수치다. 배포 시간의 근거로 쓰지 마라
+>   (`docs/tasks.md`의 시간 수치 폐기 항목 참조).
+> - dump는 2026-07-31 시점이다. 실제 cutover는 그 시점의 fresh writer-fenced dump로
+>   preflight 수를 다시 확인한다 — 공개 item 3,265는 그때 재확인 대상이다.
+
 ## 11. 실행 승인 조건
 
 - [ ] PR #923 이후 `origin/main`에 rebase되고 Map/Pin exact release가 고정됨

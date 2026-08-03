@@ -313,6 +313,7 @@ def _public_count_sql() -> str:
           ON collection.collection_id=item.collection_id
         JOIN feature.curated_themes AS theme ON theme.theme_id=collection.theme_id
         WHERE item.archived_at IS NULL AND collection.archived_at IS NULL
+          AND item.source_present
           AND item.status='included' AND collection.status='published'
           AND collection.visibility='public' AND theme.visibility='public'
           AND EXISTS (SELECT 1 FROM feature.curation_link_decisions AS decision
