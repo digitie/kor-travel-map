@@ -10,6 +10,40 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-03 — H35 적대 리뷰: 실행 전 잡아야 했던 helper 결함 2건 (PR #925)
+
+최종 exact HEAD `d50bb2c5`에 적대 리뷰어 2명 + refute/reproduce 검증(15 에이전트)을 붙였다.
+리뷰어가 낸 findings 6건은 **전부 기각**됐고, synthesizer가 직접 측정하며 찾은 2건이
+살아남았다. 둘 다 격리 컨테이너에서 독립 재현했다.
+
+**① `idx_features_public_weather_coord_5179_gist` signature가 어떤 DB와도 안 맞는다.**
+`kind = 'weather'::text`를 요구하는데 `feature.features.kind`가 `character varying`이라
+PostgreSQL은 항상 `((kind)::text = 'weather'::text)`로 deparse한다. 이 index가 영구
+non-canonical이 되고 **head에서 partial probe가 통과할 수 없다**(수정 전 실패 1건 →
+수정 후 7건 전부 통과).
+
+파급이 크다 — `run_migrate`의 forward 재개 경로(`schema_before != TARGET_SCHEMA`면 upgrade)가
+그 앞 게이트에 막혀 **죽는다**. migrate commit 뒤 receipt를 잃으면 csv5는 accepted prior
+receipt를 요구해 못 가고 migrate는 다시는 accepted를 못 낸다 → DB는 정확히 목표 상태인데
+남은 출구가 **PITR 없는 prod의 단일 dump 복원**이 된다.
+
+**② 공개 item 카운트가 `source_present`를 빠뜨려 de-publish를 못 잡는다.**
+실제 공개 술어(`_LIST_FEATURE_ITEMS_SQL`)는 `AND i.source_present`를 포함하는데 helper
+카운트 두 곳에 없었다. 실측: item 1건을 source-absent로 만들면 실제 API는 3,042인데
+게이트는 3,043을 계속 보고한다. **내가 이슈 #99에 올린 SQL에도 같은 결함이 있어 정정했다.**
+
+기존 회귀가 못 잡은 이유도 고쳤다 — 단위는 합성 `_states()` 맵, 리허설은 `_PRE_REVISION`
+에서만 probe라 실제 `pg_get_indexdef`를 head에서 검사하는 경로가 없었다. 회귀 3건을
+추가하고 전부 변이로 falsifiability를 확인했다.
+
+**n150 실행은 하지 않았다.** 사용자 승인은 받았지만 (a) pin된 `d50bb2c5`가 이 결함 2건을
+포함하고, (b) orchestration 소유자인 Docker-manager가 실제 cutover를 여러 차례 시도해 전부
+pre-forward fail-close 후 rollback한 상태이며 지금은 T-049 진단 도구를 구현 중이다
+(PR #100/#101 머지). Docker-manager 이슈 #99에 확정 gate 값과 이번 결함, pin 갱신 요청을 남겼다.
+
+**다음 한 작업**: PR #925 CI green 확인 후 머지 → 이슈 #99에 새 SHA 통보 →
+`map_release_revision` pin 갱신은 Docker-manager 소유. 그 뒤 다음 백로그 작업으로 이동.
+
 ## 2026-08-03 — H35 §5 gate를 실 prod 데이터로 실측 (0063→0078 전 구간 일치)
 
 runbook §5가 선언한 phase gate 값을 **실제 prod 백업 clone**에서 확인했다(prod 무접촉,

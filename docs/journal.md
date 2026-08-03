@@ -17,6 +17,29 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-03 — H35 적대 리뷰에서 helper 결함 2건 (PR #925)
+
+- 최종 exact HEAD `d50bb2c5`에 적대 리뷰어 2명 + refute/reproduce 검증(15 에이전트).
+  **리뷰어 findings 6건은 전부 기각**됐고 synthesizer가 직접 측정하며 찾은 2건이 남았다.
+  둘 다 격리 컨테이너에서 독립 재현했다 — 리뷰의 실제 가치는 findings 목록이 아니라
+  검증 과정에서 나왔다.
+- **결함 ①** `_INDEX_SIGNATURES`의 `kind = 'weather'::text`가 어떤 DB와도 일치하지 않는다.
+  `feature.features.kind`가 `character varying`이라 PostgreSQL이 항상
+  `((kind)::text = 'weather'::text)`로 deparse한다. 이 index가 영구 non-canonical →
+  head에서 partial probe 통과 불가(수정 전 실패 1 → 후 7건 전부 통과).
+  → `run_migrate`의 forward 재개 경로가 죽는다. migrate commit 뒤 receipt 유실 시
+  csv5도 못 가고 migrate도 영구 rejected → 남은 출구가 PITR 없는 prod의 dump 복원.
+- **결함 ②** 공개 카운트에 `source_present`가 빠져 de-publish를 못 잡는다.
+  실측: item 1건 source-absent → 실제 API 3,042인데 게이트는 3,043 유지.
+  **내가 이슈 #99에 올린 SQL도 같은 결함이라 정정했다.**
+- 기존 회귀가 못 잡은 이유: 단위는 합성 `_states()` 맵, 리허설은 `_PRE_REVISION`에서만
+  probe — **실제 `pg_get_indexdef`를 head에서 검사하는 경로가 없었다.** 회귀 3건 추가,
+  전부 변이로 falsifiability 확인.
+- **n150 실행은 하지 않았다.** 승인은 받았지만 pin된 `d50bb2c5`가 이 결함을 포함하고,
+  orchestration 소유자인 Docker-manager가 실제 cutover를 여러 차례 시도해 전부 pre-forward
+  fail-close 후 rollback한 뒤 지금은 T-049 진단 도구를 구현 중이다(PR #100/#101 머지).
+- Docker-manager 이슈 #99에 확정 gate 값 + 이번 결함 + pin 갱신 요청을 남겼다.
+
 ## 2026-08-03 — H35 §5 gate 실 prod 데이터 실측 (0063→0078)
 
 - runbook §5 선언값을 실제 prod 백업 clone에서 확인했다(prod 무접촉, 포트 노출 없음):
