@@ -31,7 +31,8 @@ barrier로 직렬화한다.
     [ ] `T-VN-H35`(prod 마이그레이션 지연 **0064~0078** + generation 7 cutover — #673 blocker;
         과거 runbook·현재 helper `NO_GO`, 보정 설계 본문 상단 참조) →
     [ ] `T-VN-H30B`(같은 snapshot 실적재·인증 API 재검증) →
-    [ ] `T-VN-H30C`(타 provider evidence 재작업) →
+    [x] `T-VN-H30C`(타 provider evidence — krforest arboretums 무장, visitkorea/MOIS는
+        dual 불가 판정·문서 고정) →
     [~] `T-VN-H34`(H25A/H25B 미충족 AC — 4항목 중 3 완료·1은 H35 배포 대기,
         카테고리 축 신설로 링크 결함 8건 발견) →
     [ ] `T-VN-H31`(등대 공급원 부재 — H25A 파생) →
@@ -221,7 +222,7 @@ barrier로 직렬화한다.
     검증하고, live endpoint credential/network 없이 resource override로 ordered item을
     재생한다. 이 artifact 외 입력을 섞거나 H30B 시점의 live export를 다시 조회하지 않는다.
 
-- [ ] T-VN-H30C — **타 provider `AdminEvidence` 무장 (미완 — 재작업 필요)**
+- [x] T-VN-H30C — **타 provider `AdminEvidence` 무장** (2026-08-03 완료)
 
   MOIS만 무장했으나 **탐지 증가는 0건**이다. MOIS는 payload에 `legal_dong_code`가 있으면
   역지오코딩을 아예 호출하지 않으므로 `obs_code`와 `claim_code`가 **상호배타**이고
@@ -238,6 +239,43 @@ barrier로 직렬화한다.
   재작업 시: krforest·visitkorea를 조사해 무장하고, MOIS는 reverse를 강제하지 않는 한
   staleness 대조가 불가능함을 설계 문서(`docs/architecture/address-geocoding.md`,
   `dto/admin_evidence.py`)에 고정한다. provider 고유 코드(VisitKorea `areaCode` 등)는 넣지 않는다.
+
+  ## 결과 (2026-08-03)
+
+  **krforest arboretums만 무장했다. visitkorea는 무장하지 않는 것이 옳다는 판정이다.**
+
+  판정 기준을 "payload에 행정코드가 있는가"에서 **"obs·claim 두 축이 동시에 성립하는가"**로
+  바꿨다. `admin_code_stale_*`는 `grade == "dual"`일 때만 발화하므로 그것이 실질 기준이다.
+
+  | provider | dual | 근거 |
+  | --- | --- | --- |
+  | krforest arboretums | **가능** | `_resolve_address`의 reverse 조건에 payload 코드가 없다 |
+  | krforest recreation_forests | 불가 | payload에 행정코드 필드 자체가 없음(제공기관코드뿐) |
+  | visitkorea | 불가 | reverse 미호출 + `FeatureBundle` 미생성(enrichment-only) — 실을 자리가 없다 |
+  | MOIS | 구조적 불가 | `legal_dong_code`가 있으면 reverse를 건너뛰어 obs/claim 상호배타 |
+
+  **선행 게이트를 prod에서 실측했다** — arboretum 205건 **전량**이 `region_code`를 갖고
+  전부 8자리 숫자(`emd`)다. 조사가 우려한 세 리스크(전량 null / 자릿수 혼재 /
+  `"4173025000.0"` 형태 오염)가 모두 해소됐다.
+
+  구현:
+  - `_resolve_address`가 `(address, reverse_geo, reverse_attempted)`를 반환하도록 바꿨다.
+    obs 축은 **좌표 reverse 결과만**이어야 한다 — `address`는 `address_resolver`(주소
+    문자열 정지오코딩)로도 채워져 그대로 쓰면 claim_text와 출처가 같아진다(`mois.py` 선례).
+  - `_claim_from_region_code`가 숫자·지원 길이(10/8/5/2)만 통과시킨다. 원천이 길이·숫자
+    검증을 전혀 하지 않으므로 거르지 않으면 DTO validator의 ValueError로 **asset 전체가
+    죽는다**.
+  - 휴양림 경로는 `admin_evidence=None` 유지.
+
+  회귀 8종을 추가하고 변이로 falsifiability를 확인했다(무장 제거 시 관련 테스트가 죽는다):
+  dual+staleness 발화 / 코드 일치 시 미발화 / 길이 디스패치 4종 / 미지원 형태 12종 무예외
+  거부 / obs 오염 금지 / 휴양림 claim 부재 / **무장 부수효과 중립성**(MOIS 무장이
+  `reverse_geocode_not_attempted`를 새로 터뜨린 전례가 있어 고정).
+
+  문서 정정도 함께 했다 — `address-geocoding.md` §8 표의 "MOIS reverse **필수**"는 코드와
+  정면 모순이라 조건부로 고치고, §8.1에 provider별 무장 조건표를 신설했다. §7.1의
+  `providers/visitkorea.py :: festival_to_bundles` 예시는 **실재하지 않는 함수**라
+  개념 예시임을 명시했다(그대로 두면 "visitkorea에 이미 bundle 경로가 있다"는 오인이 재발).
 
 ### T-VN-H32 — 주소 검증 finding 자동 close (H30A 후속)
 

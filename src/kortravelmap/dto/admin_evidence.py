@@ -18,6 +18,25 @@ provider payload가 실어 보낸 행정코드와 지금 역지오코딩한 행�
 **producer가 캐시한 코드가 낡았다**는 뜻이다(해당 producer는 코드가 이미 있으면 갱신하지
 않는다). 그래서 이 축은 staleness 검출로만 쓰고, 위치 판정 근거로 쓰지 않는다.
 
+provider별 무장 성립 조건 (T-VN-H30C)
+--------------------------------------
+``grade == "dual"``이 아니면 ``admin_code_stale_*`` finding은 발화하지 않는다. 그리고
+dual은 **payload 코드 유무가 아니라 두 축이 동시에 성립하는가**로 갈린다:
+
+- ``kor_travel_concierge`` — 가능. payload 코드가 있어도 reverse를 무조건 호출한다.
+- ``krforest`` arboretums — 가능. ``_resolve_address``의 reverse 조건에 payload 코드가
+  없다. prod 실측 205건 전량이 8자리(``emd``) claim을 갖는다.
+- ``krforest`` recreation_forests — 불가. payload에 행정코드 필드가 없다.
+- ``mois`` — **구조적으로 불가**. ``legal_dong_code``가 있으면 reverse를 건너뛰므로
+  obs/claim이 상호배타다. 무장은 ``unarmed``와 ``claim_only``를 구분할 뿐이고
+  **탐지 증가는 0건**이다. 대조하려면 reverse를 강제해야 하는데 977k 레코드 호출은
+  별도 비용 결정이다.
+- ``visitkorea`` — 불가. reverse를 호출하지 않고 ``FeatureBundle``도 만들지 않는
+  enrichment-only라 evidence를 실을 자리가 없다. ``l_dong_*``는 진짜 법정동 체계가
+  맞지만(시군구 5자리 상한) 그것과 무관하게 obs 축이 없다.
+
+자세한 표는 ``docs/architecture/address-geocoding.md`` §8.1.
+
 이 구분을 문서에 박아 두는 이유
 --------------------------------
 T-VN-H28B 1차 구현은 staleness 축을 "권위 있는 교차검증"으로 오인해 독립 축을 삭제했다.
