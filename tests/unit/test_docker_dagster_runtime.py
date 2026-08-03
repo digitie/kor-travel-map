@@ -1005,22 +1005,29 @@ _MIGRATION_BASE_ENV: Final = {
 
 
 def _migration_stub_path(
-    tmp_path: Path, *, image_head: str, heads_script: str | None = None
+    tmp_path: Path,
+    *,
+    image_head: str,
+    heads_script: str | None = None,
+    current_script: str | None = None,
 ) -> tuple[str, Path]:
     """`alembic heads`가 ``image_head``를 내고, `upgrade`는 흔적을 남기는 stub.
 
     흔적 파일이 있으면 **DB를 건드렸다**는 뜻이다. 게이트가 막았는지 여부를 이걸로 판정한다.
-    ``heads_script``를 주면 heads 분기를 통째로 바꾼다 (multi-head·실행 실패 재현용).
+    ``heads_script``/``current_script``를 주면 해당 분기를 통째로 바꾼다
+    (multi-head·실행 실패·stale-image 재현용).
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     marker = tmp_path / "upgrade-ran"
     heads_body = heads_script if heads_script is not None else f"echo '{image_head} (head)'"
+    current_body = current_script if current_script is not None else "true"
     alembic = bin_dir / "alembic"
     alembic.write_text(
         "#!/bin/sh\n"
         'case "$1" in\n'
         f"  heads) {heads_body} ;;\n"
+        f"  current) {current_body} ;;\n"
         f"  upgrade) echo ran > '{marker}' ;;\n"
         "esac\n"
         "exit 0\n",
@@ -1087,56 +1094,91 @@ def test_api_container_migrates_when_alembic_head_matches(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
-def test_api_container_skips_migration_when_mode_is_none(tmp_path: Path) -> None:
-    """`MODE=none`이면 기동이 schema를 바꾸지 않는다.
+@pytest.mark.parametrize("mode_value", ["none", "auto", "off", ""])
+def test_api_container_rejects_removed_migration_mode_env(
+    tmp_path: Path, mode_value: str
+) -> None:
+    """`KOR_TRAVEL_MAP_MIGRATION_MODE`는 제거됐다 — 어떤 값이든 거부한다.
 
-    H35 typed helper처럼 orchestrator가 migration을 소유할 때 필요하다. 기동이 몰래
-    schema를 올리면 preflight/migrate/verify receipt 계약이 의미를 잃는다.
+    `MODE=none`(orchestrator 소유 migration)은 명분이던 H35 typed helper가 같은 사고
+    대응에서 사문화되며 소비자 없는 fail-open 스위치만 남았다(적대 리뷰 F2). 조용히
+    무시하면 none을 기대한 배포에서 migration이 몰래 돌게 되므로, 설정 자체를 거부한다.
     """
     path, marker = _migration_stub_path(
         tmp_path, image_head="0078_cache_target_gc_observe"
     )
-    result = _run_entrypoint(path, {"KOR_TRAVEL_MAP_MIGRATION_MODE": "none"})
-
-    assert result.returncode == 0, result.stderr
-    assert not marker.exists(), "MODE=none인데 alembic upgrade가 실행됐다."
-
-
-@pytest.mark.unit
-def test_api_container_rejects_unknown_migration_mode(tmp_path: Path) -> None:
-    """오타가 조용히 `auto`로 떨어지면 안 된다 — 끄려던 사람이 켠 채로 배포하게 된다."""
-    path, marker = _migration_stub_path(
-        tmp_path, image_head="0078_cache_target_gc_observe"
-    )
-    result = _run_entrypoint(path, {"KOR_TRAVEL_MAP_MIGRATION_MODE": "off"})
+    result = _run_entrypoint(path, {"KOR_TRAVEL_MAP_MIGRATION_MODE": mode_value})
 
     assert result.returncode != 0, result.stdout
-    assert not marker.exists()
-    assert "auto 또는 none" in result.stderr
+    assert not marker.exists(), "제거된 MODE env가 설정됐는데 migration이 실행됐다."
+    assert "was removed" in result.stderr
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "env_name",
-    ["KOR_TRAVEL_MAP_MIGRATION_MODE", "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD"],
-)
-def test_api_container_rejects_set_but_empty_migration_env(
-    tmp_path: Path, env_name: str
-) -> None:
+def test_api_container_rejects_set_but_empty_expected_head(tmp_path: Path) -> None:
     """set-but-empty가 조용히 게이트를 끄면 안 된다 (적대 리뷰 결함 2).
 
     compose의 `${HOST_VAR:-}` 패턴에서 host env가 누락되면 빈 값이 들어온다. 그때
-    MODE는 auto로 접혀 orchestrator가 끄려던 migration이 돌고, EXPECTED_HEAD는 검사가
-    무음으로 사라진다 — pin 전달 실패가 곧 게이트 해제가 된다. 같은 스크립트의 profile
-    검사가 세운 set-vs-unset 규약과도 어긋난다. 빈 값은 명시적으로 거부한다.
+    EXPECTED_HEAD 검사가 무음으로 사라진다 — pin 전달 실패가 곧 게이트 해제가 된다.
+    같은 스크립트의 profile 검사가 세운 set-vs-unset 규약대로 빈 값을 거부한다.
     """
     path, marker = _migration_stub_path(
         tmp_path, image_head="0078_cache_target_gc_observe"
     )
-    result = _run_entrypoint(path, {env_name: ""})
+    result = _run_entrypoint(path, {"KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": ""})
 
     assert result.returncode != 0, result.stdout
-    assert not marker.exists(), f"{env_name}가 빈 값인데 migration이 실행됐다."
+    assert not marker.exists(), "EXPECTED_HEAD가 빈 값인데 migration이 실행됐다."
+
+
+@pytest.mark.unit
+def test_api_container_fails_fast_when_db_is_ahead_of_image(tmp_path: Path) -> None:
+    """DB revision이 이미지 chain에 없으면 retry 없이 즉시, 이유를 말하며 죽는다 (F3).
+
+    재생성 후 stale `latest-main`(0072) 이미지가 또 배포되면 — 사고의 원인이던 바로 그
+    태그 드리프트 — DB(0078)가 이미지보다 앞서 이 경로로 떨어진다. 종전에는 30회×2s
+    동안 같은 오류를 반복한 뒤 일시 오류와 같은 종말 메시지로 죽어 원인 판별이 늦었다.
+    `alembic current`가 같은 오류를 즉시 내므로 한 번 읽어 먼저 판정한다.
+    """
+    path, marker = _migration_stub_path(
+        tmp_path,
+        image_head="0072_curation_provenance",
+        current_script=(
+            "echo \"FAILED: Can't locate revision identified by "
+            "'0078_cache_target_gc_observe'\"; exit 255"
+        ),
+    )
+    result = _run_entrypoint(path, {})
+
+    assert result.returncode != 0, result.stdout
+    assert not marker.exists(), "stale 이미지인데 upgrade가 실행됐다."
+    assert "stale image" in result.stderr
+    assert "Can't locate revision" in result.stderr, (
+        "실제 alembic 오류 원문이 로그에 없다 — 운영자가 원인을 추적할 수 없다."
+    )
+    assert "retrying" not in result.stderr, "영구 오류를 retry 루프로 두드렸다."
+
+
+@pytest.mark.unit
+def test_api_container_transient_db_error_still_reaches_retry_loop(
+    tmp_path: Path,
+) -> None:
+    """일시 오류(연결 실패 등)는 종전대로 retry 루프가 처리한다 — fast-fail이 앗아가면 안 된다."""
+    path, marker = _migration_stub_path(
+        tmp_path,
+        image_head="0078_cache_target_gc_observe",
+        current_script='echo "connection refused" >&2; exit 1',
+    )
+    result = _run_entrypoint(
+        path,
+        {
+            "KOR_TRAVEL_MAP_MIGRATION_RETRIES": "1",
+        },
+    )
+
+    # upgrade stub은 성공하므로 retry 루프 1회째에 통과해 기동까지 가야 한다.
+    assert result.returncode == 0, result.stderr
+    assert marker.exists(), "일시 오류 뒤 retry 루프가 upgrade를 실행하지 않았다."
 
 
 @pytest.mark.unit
@@ -1157,7 +1199,7 @@ def test_api_container_refuses_multi_head_image(tmp_path: Path) -> None:
 
     assert result.returncode != 0, result.stdout
     assert not marker.exists(), "head가 둘인데 migration이 실행됐다."
-    assert "하나가 아닙니다" in result.stderr
+    assert "more than one alembic head" in result.stderr
 
 
 @pytest.mark.unit
@@ -1182,9 +1224,12 @@ def test_api_container_reports_broken_alembic_as_such_not_as_mismatch(
 
     assert result.returncode != 0, result.stdout
     assert not marker.exists()
-    assert "실행이 실패했습니다" in result.stderr, result.stderr
-    assert "기대값과 다릅니다" not in result.stderr, (
-        "alembic 실행 실패가 revision 불일치로 오진됐다."
+    assert "alembic heads failed" in result.stderr, result.stderr
+    assert "does not match" not in result.stderr, (
+        "alembic 실행 실패가 head 불일치로 오진됐다."
+    )
+    assert "FAILED: No script_location" in result.stderr, (
+        "alembic이 stdout에 남긴 실제 원인이 로그에 없다 (적대 리뷰 F4)."
     )
 
 
