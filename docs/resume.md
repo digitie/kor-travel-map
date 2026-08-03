@@ -10,6 +10,39 @@
 | [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
 | [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
 
+## 2026-08-03 — H22 착수 전 실측: 격리 대상이 0건이고 구조상 0건이다 (PR #929)
+
+Lane A 다음 항목 T-VN-H22A(quarantine read model)를 시작하기 전에 규모부터 쟀다. 계획이
+전제한 "격리된 canonical-only item"이 **이 DB에는 하나도 없다.**
+
+라이브 prod 읽기 전용 실측에서 `curation_items` 3,530건이 **2×2의 대각선만** 채운다 —
+legacy-marker collection 52개는 `curated_features` 투영본 3,044건만 담고, CSV collection은
+네이티브 486건(`korean-tourism-100`·`arboretum`·`lighthouse`·`heritage`)만 담는다. 격리는
+**비대각 칸**(legacy collection 안의 네이티브 item)을 요구하는데 그 칸이 비어 있다.
+격리 clone에 `0065`를 실제로 적용해도 quarantine 0개/0건이었다. marker 생성자는 `0065`
+하나뿐이고 1회성이라 **배포 후에도 영구 0건**이다.
+
+그래서 **H22A/B/C 셋 다 대상이 없다.** 셋의 유일한 목적이 "격리된 item의 운영자 재분류"인데
+재분류할 것이 영구히 없다. 조사가 함께 경고한 "배포 직후 `[0065 격리]` collection이 admin
+UI에 설명 없이 등장" 문제도 collection이 생성되지 않아 소멸한다.
+
+**종결 여부는 사용자 결정으로 남겼다** — 축소가 아니라 대상 소멸이라 임의로 닫지 않았다.
+대신 전제를 배포 게이트에 박았다: H35 verify가 `quarantine_collections`·`quarantine_items`를
+0으로 검사하고, 0이 아니면 거부하며 **원인을 이름으로 지목**한다. 격리가 생기면 item이
+public→admin_only로 빠져 `public_items_verify`가 어차피 깨지지만 그때는 "3,265가 아니라
+3,043"이라는 원인 불명 숫자 차이다. 이 검사가 H22를 여는 유일한 신호다.
+
+회귀는 "0이다"를 확인하지 않는다 — 시드에 legacy-marker collection이 없어 공회전이 된다.
+대신 legacy collection 안에 네이티브 item을 **실제로 만들어** `0065`가 격리하게 한 뒤 검사가
+거부하는지 본다(픽스처가 격리를 못 만들면 `quarantine_items >= 1`에서 먼저 깨진다).
+
+부수로 내 informational 쿼리의 3값 논리 버그를 잡았다 — `NOT (… OR …)`에서 `migrated_from`
+키가 없는 collection은 `NULL OR false = NULL` → `NOT NULL = NULL`로 걸러진다. 격리 건수는
+`0065`와 같은 긍정형 술어라 영향 없었고, 합이 3,044 ≠ 3,530으로 안 맞아 발견했다.
+
+**다음 한 작업**: 사용자가 H22 종결을 결정하면 반영하고, 아니면 Lane A의 그다음 항목으로
+넘어간다. H35는 여전히 Docker-manager 이슈 #99(pin이 결함 있는 `d50bb2c5`에 묶여 있음) 대기.
+
 ## 2026-08-03 — H35 적대 리뷰: 실행 전 잡아야 했던 helper 결함 2건 (PR #925)
 
 최종 exact HEAD `d50bb2c5`에 적대 리뷰어 2명 + refute/reproduce 검증(15 에이전트)을 붙였다.

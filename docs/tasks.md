@@ -1405,6 +1405,51 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 migration 0065가 원 projection durable link 없는 canonical-only item을 보존한 quarantine은
 read/decision/write/UI를 한 PR에 몰지 않는다.
 
+#### 선행 실측 (2026-08-03) — **격리 대상은 0건이고, 구조상 0건이다**
+
+착수 전 규모를 재 보니 **격리될 item이 하나도 없다**. 계획을 세울 때 전제한
+"canonical-only item이 격리돼 있다"는 상태가 이 DB에는 존재하지 않는다.
+
+- 라이브 prod(`krtour_map`, 읽기 전용) — `curation_items` 3,530건이 **2×2의 대각선만**
+  채운다: legacy-marker collection 52개는 `curated_features` 투영본 3,044건만 담고,
+  CSV collection은 네이티브 486건(`korean-tourism-100`·`arboretum`·`lighthouse`·
+  `heritage`)만 담는다. 격리는 **비대각 칸**(legacy collection 안의 네이티브 item)을
+  요구하는데 그 칸이 비어 있다 → 0건. dangling collection 참조도 0.
+- 격리 restore clone에 `0065`를 **실제로 적용**해도 quarantine collection 0개 / item 0건.
+- `legacy:quarantine`·`migration_quarantine` marker를 쓰는 코드는 `0065` **하나뿐**이다
+  (런타임·다른 migration·admin UI 어디에도 생성 경로가 없음). `0065`는 1회성이므로
+  **배포 후에도 영구 0건**이다.
+
+  주의: 처음 낸 "legacy 밖 item 0건"은 3값 논리 버그였다 —
+  `NOT (metadata->>'migrated_from' = '…' OR key LIKE 'legacy:%')`에서 키가 없는
+  collection은 `NULL OR false = NULL` → `NOT NULL = NULL`로 걸러진다. 격리 건수 자체는
+  `0065`와 같은 **긍정형** 술어를 써서 영향이 없었다.
+
+**따라서 H22A/B/C는 대상이 없다.** 셋 다 "격리된 item을 운영자가 재분류한다"가 유일한
+목적인데 재분류할 것이 영구히 없다. 세 과제를 지금 구현하면 소비자 없는 계약·UI가 남는다.
+조사가 함께 지적한 "배포 직후 `[0065 격리]` collection이 admin UI에 설명 없이 등장한다"는
+경고도 collection이 생성되지 않으므로 함께 소멸한다.
+
+- **판정 보류 — 사용자 결정 대기.** 축소가 아니라 **보류/종결** 여부라 임의로 닫지 않는다.
+- **대신 배포 게이트가 이 전제를 스스로 재게 했다**(#929): H35 verify가
+  `quarantine_collections`·`quarantine_items`를 0으로 검사한다. 0이 아니면 verify가
+  거부하고 **원인을 이름으로 지목**한다 — 이 조건이 H22를 여는 유일한 신호다.
+  (검사가 없으면 격리 발생 시 item이 public→admin_only로 빠져 `public_items_verify`가
+  "3,265가 아니라 3,043"이라는 원인 불명 숫자 차이로만 깨진다.)
+
+미해결로 남은 계획상 모호함 — 착수하게 되면 먼저 정해야 한다:
+
+- **"후보 theme/source"에 대응하는 스키마가 없다.** 존재하는 것은 quarantine collection이
+  복사 보관한 theme/source와 원본 collection의 현재값 **두 벌**뿐이다. 이 둘을 나란히
+  보여주는 것으로 읽으면 구현 가능하지만, "추천 후보"를 의도한 것이라면 같은 항목의
+  "자동 target 추정은 하지 않는다"와 정면으로 충돌한다.
+- item 행에는 격리 표시 컬럼이 **없다**. `0065`는 `collection_id`만 바꿔 옮기므로 "격리
+  근거"는 collection marker(`created_by='migration:0065'` +
+  `metadata.migration_quarantine`) + `metadata.original_collection_id` 역참조로
+  **재구성**해야 하고, 이동된 item과 이후 수동 추가된 item은 구분할 수 없다.
+- 페이지네이션은 ADR-048 `meta.page.next_cursor` 봉투를 쓴다. `/admin/link-audit`의
+  `data.{count,has_more,next_cursor}`는 ADR-048 **위반 잔재**라 선례로 삼지 않는다.
+
 - [ ] T-VN-H22A — **quarantine read model·conflict preview**
 
   원본 collection·후보 theme/source·격리 근거와 exact identity conflict를 side effect 없이

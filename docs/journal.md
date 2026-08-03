@@ -17,6 +17,34 @@
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
 
+## 2026-08-03 — H22 착수 전 실측: 격리 대상 0건, 구조상 0건 (PR #929)
+
+- Lane A 다음 항목 T-VN-H22A(quarantine read model)를 시작하기 전에 **규모부터 쟀다.**
+  계획이 전제한 "격리된 canonical-only item"이 이 DB에는 **하나도 없다.**
+- 라이브 prod 읽기 전용 실측 — `curation_items` 3,530건이 **2×2의 대각선만** 채운다:
+  legacy-marker collection 52개는 `curated_features` 투영본 3,044건만, CSV collection은
+  네이티브 486건만 담는다. 격리는 **비대각 칸**(legacy 안의 네이티브)을 요구하는데 비어
+  있다. dangling collection 참조 0. 격리 clone에 `0065`를 실제로 적용해도 0개/0건.
+- `legacy:quarantine`·`migration_quarantine` marker 생성자는 `0065` **하나뿐**이고
+  1회성이라 **배포 후에도 영구 0건**이다. 조사가 함께 경고한 "배포 직후 `[0065 격리]`
+  collection이 admin UI에 설명 없이 등장" 문제도 collection 자체가 안 생겨 소멸한다.
+- **내 informational 쿼리에 3값 논리 버그가 있었다** — `NOT (metadata->>'migrated_from'
+  = '…' OR key LIKE 'legacy:%')`는 키가 없는 collection에서 `NULL OR false = NULL` →
+  `NOT NULL = NULL`로 걸러져 "legacy 밖 486건"을 0으로 보고했다. 격리 건수는 `0065`와
+  같은 **긍정형** 술어를 써서 영향 없었지만, 합이 3,044 ≠ 3,530으로 안 맞아 잡았다.
+- **전제를 배포 게이트에 박았다.** H35 verify가 `quarantine_collections`·
+  `quarantine_items`를 0으로 검사한다. 격리가 생기면 item이 public→admin_only로 빠져
+  `public_items_verify`가 어차피 깨지지만 그때는 "3,265가 아니라 3,043"이라는 원인 불명
+  숫자 차이다. 이 검사는 **원인을 이름으로 지목**하고, 그것이 H22를 여는 유일한 신호다.
+- 회귀는 "0이다"를 확인하지 않는다 — 시드에 legacy-marker collection이 아예 없어 공회전이
+  된다. 대신 **legacy collection 안에 네이티브 item을 실제로 만들어** `0065`가 격리하게 한
+  뒤 검사가 거부하는지 본다. 픽스처가 격리를 못 만들면 `quarantine_items >= 1`에서 먼저
+  깨지도록 공회전 방지 단언을 넣었다.
+- **H22A/B/C 종결 여부는 사용자 결정으로 남겼다** — 축소가 아니라 대상 소멸이라 임의로
+  닫지 않는다. 착수하게 될 경우 먼저 풀어야 할 모호함 3건은 `docs/tasks.md`에 적었다
+  (특히 "후보 theme/source"는 대응 스키마가 없고, 추천으로 읽으면 같은 항목의
+  "자동 target 추정 금지"와 충돌한다).
+
 ## 2026-08-03 — H35 적대 리뷰에서 helper 결함 2건 (PR #925)
 
 - 최종 exact HEAD `d50bb2c5`에 적대 리뷰어 2명 + refute/reproduce 검증(15 에이전트).

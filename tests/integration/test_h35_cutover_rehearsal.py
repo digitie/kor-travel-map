@@ -1697,3 +1697,90 @@ async def test_public_count_detects_source_absent_item(pg_container: Any) -> Non
             await engine.dispose()
     finally:
         await _drop_database(admin_dsn, database)
+
+
+async def test_verify_rejects_when_0065_quarantines_an_item(pg_container: Any) -> None:
+    """`0065` quarantine이 발생하면 verify가 그 사실을 이름으로 밝히며 거부해야 한다.
+
+    quarantine은 legacy-marker collection 안에 있는 **canonical-only item**(=
+    `curated_features` 투영본이 아닌 item)이 있을 때만 생긴다. 2026-08-03 라이브 prod
+    실측에서 그 교집합은 비어 있어(legacy collection엔 투영본만, CSV collection엔
+    네이티브만) 정상 경로로는 0건이다 — 그래서 **실제로 그 교집합을 만들어** 검사가
+    작동하는지 본다. 만들지 않으면 이 테스트는 `0 == 0`을 확인하는 공회전이 된다.
+
+    quarantine이 생기면 item이 public collection에서 admin-only로 빠져나가므로
+    `public_items_verify`도 함께 깨진다. 그 신호만으로는 "3,265가 아니라 3,043"이라는
+    숫자 차이라 원인을 알 수 없다. 이 검사의 값어치는 원인을 이름으로 지목하는 것이고,
+    그것이 T-VN-H22(quarantine 재분류)를 열어야 하는 유일한 조건이다.
+    """
+    from kortravelmap.cli._h35_schema import verify_0075_0078
+
+    admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
+    database, dsn = await _create_database(admin_dsn)
+    try:
+        await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION)
+        await _seed_exact_pre_cutover_surface(dsn)
+
+        engine = make_async_engine(dsn)
+        try:
+            async with engine.begin() as connection:
+                # 시드는 legacy-marker collection을 만들지 않는다. 하나를 marker로 지정하고
+                # 그 안에 네이티브 item을 넣어야 0065의 격리 조건이 성립한다.
+                collection_id = (
+                    await connection.execute(
+                        text(
+                            "UPDATE feature.curation_collections SET metadata = "
+                            "coalesce(metadata, '{}'::jsonb) || "
+                            '\'{"migrated_from": "feature.curated_features"}\'::jsonb '
+                            "WHERE collection_id = (SELECT collection_id "
+                            "FROM feature.curation_items LIMIT 1) "
+                            "RETURNING collection_id"
+                        )
+                    )
+                ).scalar_one()
+
+                # 형제 행을 복사해 NOT NULL 컬럼을 빠짐없이 채운다. 바꾸는 것은 세 가지뿐:
+                # 새 `curation_item_id`(어떤 `curated_feature_id`와도 안 겹쳐 투영본이
+                # 아니게 됨), 고유 `external_item_id`(중복 병합 회피), `feature_id=NULL`
+                # (0066의 active-source-feature 유일성과 충돌 회피 — 공개 집계에서도 빠진다).
+                await connection.execute(
+                    text(
+                        """
+                        INSERT INTO feature.curation_items
+                        SELECT (jsonb_populate_record(
+                            NULL::feature.curation_items,
+                            to_jsonb(source) || jsonb_build_object(
+                                'curation_item_id', x_extension.gen_random_uuid(),
+                                'external_item_id', 'h22a-native-probe',
+                                'feature_id', NULL
+                            )
+                        )).*
+                        FROM feature.curation_items AS source
+                        WHERE source.collection_id = :collection_id
+                        LIMIT 1
+                        """
+                    ),
+                    {"collection_id": collection_id},
+                )
+
+            await asyncio.to_thread(_run_alembic, dsn, "head")
+
+            async with engine.connect() as connection:
+                checks, counts = await verify_0075_0078(connection)
+
+            assert counts["quarantine_items"] >= 1, (
+                "0065가 네이티브 item을 격리하지 않았다 — 픽스처가 격리 조건을 만들지 "
+                f"못해 테스트가 공회전한다. counts={counts['quarantine_items']}"
+            )
+            by_name = {str(entry["name"]): entry for entry in checks}
+            assert by_name["quarantine_items"]["passed"] is False, (
+                "격리가 실제로 발생했는데 quarantine_items 검사가 통과했다 — "
+                "게이트가 격리를 못 잡는다."
+            )
+            assert by_name["quarantine_collections"]["passed"] is False, (
+                "격리 collection이 생겼는데 quarantine_collections 검사가 통과했다."
+            )
+        finally:
+            await engine.dispose()
+    finally:
+        await _drop_database(admin_dsn, database)

@@ -40,6 +40,17 @@ TARGET_SCHEMA: Final = "0078_cache_target_gc_observe"
 EXPECTED_PRE_PUBLIC: Final = 3_265
 EXPECTED_MIGRATED_PUBLIC: Final = 3_043
 EXPECTED_POST_PUBLIC: Final = 3_265
+# `0065`는 legacy-marker collection 안의 canonical-only item(= `curated_features`
+# 투영본이 아닌 item)을 admin-only quarantine collection으로 옮긴다. 2026-08-03 라이브
+# prod(`krtour_map`) 읽기 전용 실측에서 그 교집합은 비어 있다 — legacy collection 52개는
+# 투영본 3,044건만, CSV collection은 네이티브 486건만 담아 2×2가 대각선만 채운다. 격리
+# clone에 `0065`를 실제로 적용해도 0이었다.
+#
+# 0이 아니면 item이 public collection에서 admin-only로 빠져나간 것이라 어차피
+# `public_items_verify`가 깨진다. 이 검사는 그 실패를 "3,265가 아니라 3,043"이라는 모호한
+# 신호 대신 정확한 원인으로 바꾸고, 동시에 T-VN-H22(quarantine 재분류 UI)를 열어야 하는
+# 유일한 조건을 배포 시점에 스스로 재게 한다.
+EXPECTED_POST_QUARANTINE: Final = 0
 _ALEMBIC_CONFIG_PATH: Final = Path("alembic.ini")
 
 _CANONICAL_WHITESPACE: Final = "".join(
@@ -278,6 +289,27 @@ def _public_count_sql(*, migrated: bool) -> str:
 
 async def _public_count(connection: AsyncConnection, *, migrated: bool) -> int:
     return int((await connection.scalar(text(_public_count_sql(migrated=migrated)))) or 0)
+
+
+# `0065`가 quarantine collection에 박는 marker 그대로 읽는다. `created_by`만 보면 `0065`가
+# 만든 다른 행과 섞이므로 metadata marker를 함께 요구한다. LEFT JOIN이라 item이 0건인
+# quarantine collection도 collection 쪽에는 잡힌다.
+_QUARANTINE_COUNT_SQL: Final = """
+    SELECT
+        count(DISTINCT quarantine.collection_id)::bigint AS collections,
+        count(item.curation_item_id)::bigint AS items
+    FROM feature.curation_collections AS quarantine
+    LEFT JOIN feature.curation_items AS item
+      ON item.collection_id = quarantine.collection_id
+    WHERE quarantine.created_by = 'migration:0065'
+      AND quarantine.metadata @> '{"migration_quarantine": "0065"}'::jsonb
+"""
+
+
+async def _quarantine_counts(connection: AsyncConnection) -> tuple[int, int]:
+    """`0065` quarantine의 collection 수와 item 수."""
+    row = (await connection.execute(text(_QUARANTINE_COUNT_SQL))).one()
+    return int(row.collections or 0), int(row.items or 0)
 
 
 def _canonical_identity_issues(value: object, *, maximum: int) -> set[str]:
@@ -727,6 +759,7 @@ async def verify_0075_0078(
         )
         or 0
     )
+    quarantine_collections, quarantine_items = await _quarantine_counts(connection)
     checks = [
         *(
             check(
@@ -737,9 +770,21 @@ async def verify_0075_0078(
             for category, expected in sorted(EXPECTED_CATALOG_FINGERPRINTS.items())
         ),
         check("invalid_app_indexes", expected=0, observed=invalid_indexes),
+        check(
+            "quarantine_collections",
+            expected=EXPECTED_POST_QUARANTINE,
+            observed=quarantine_collections,
+        ),
+        check(
+            "quarantine_items",
+            expected=EXPECTED_POST_QUARANTINE,
+            observed=quarantine_items,
+        ),
     ]
     return checks, {
         "invalid_indexes": invalid_indexes,
+        "quarantine_collections": quarantine_collections,
+        "quarantine_items": quarantine_items,
         **{f"catalog_{category}": len(objects) for category, objects in sorted(catalog.items())},
     }
 
@@ -772,6 +817,7 @@ async def collect_verify_state(
 
 __all__ = [
     "EXPECTED_POST_PUBLIC",
+    "EXPECTED_POST_QUARANTINE",
     "PRE_SCHEMA",
     "TARGET_SCHEMA",
     "collect_verify_state",
