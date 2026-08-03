@@ -258,6 +258,10 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         "/v1/admin/curations/{collection_id}/items/{curation_item_id}",
     ): _domain("admin.curation-item.archive", _MUTATION_RESULT),
     (
+        "POST",
+        "/v1/admin/curations/quarantine/{collection_id}/reclassify",
+    ): _domain("admin.curation-quarantine.reclassify", _MUTATION_RESULT),
+    (
         "PATCH",
         "/v1/admin/features/dedup-reviews/{review_id}",
     ): _domain("admin.dedup-review.decide", _MUTATION_RESULT),

@@ -24,6 +24,14 @@ from kortravelmap.infra.curation_repo import (
     CurationImportRowReceipt,
     CurationItem,
     CurationLinkAudit,
+    CurationQuarantineCollection,
+    CurationQuarantineItem,
+    CurationQuarantineItemsPreview,
+    CurationQuarantineMoveConflict,
+    CurationQuarantineMoveConflictError,
+    CurationQuarantineOriginalCollection,
+    CurationQuarantineSourceRef,
+    CurationQuarantineThemeRef,
     FeatureCurationGroup,
     FeatureMatch,
 )
@@ -1394,3 +1402,420 @@ def test_explicit_feature_id_still_links(
     assert row["resolved_feature_id"] == "feature:active"
     assert row["status"] == "valid"
     assert row["issues"] == []
+
+
+def _quarantine_collection_row() -> CurationQuarantineCollection:
+    return CurationQuarantineCollection(
+        collection_id=_uuid("quarantine-collection"),
+        collection_key=f"legacy:quarantine:{_uuid('quarantine-collection')}",
+        title="[0065 격리] 등대 스탬프투어",
+        edition_key="season-5",
+        status="draft",
+        visibility="admin_only",
+        created_by="migration:0065",
+        item_count=2,
+        marker_intact=True,
+        quarantine_theme=CurationQuarantineThemeRef(
+            theme_id=_uuid("quarantine-theme"),
+            theme_slug="lighthouse-stamp-tour",
+            theme_name="등대 스탬프투어",
+            theme_group="official",
+            visibility="public",
+        ),
+        quarantine_source=CurationQuarantineSourceRef(
+            source_id=_uuid("quarantine-source"),
+            provider="korea-navigation-aids-agency",
+            dataset_key="lighthouse-stamp-tour",
+            source_name="국립등대박물관",
+        ),
+        original_collection=CurationQuarantineOriginalCollection(
+            collection_id=_uuid("original-collection"),
+            title="등대 스탬프투어",
+            status="published",
+            visibility="public",
+            exists=True,
+            theme=CurationQuarantineThemeRef(
+                theme_id=_uuid("original-theme"),
+                theme_slug="lighthouse-stamp-tour-2026",
+                theme_name="등대 스탬프투어 2026",
+                theme_group="official",
+                visibility="public",
+            ),
+            source=None,
+        ),
+    )
+
+
+@pytest.mark.unit
+def test_admin_quarantine_list_uses_adr048_page_envelope(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`data.items` + `meta.page.{page_size,next_cursor}` 봉투 고정.
+
+    link-audit의 ADR-048 위반 shape(`data.{count,has_more,next_cursor}`)를
+    따라하지 않는다.
+    """
+    from kortravelmap.api.routers import curations as module
+
+    listing = AsyncMock(return_value=((_quarantine_collection_row(),), "opaque-next"))
+    monkeypatch.setattr(
+        module.curation_repo,
+        "list_curation_quarantine_collections",
+        listing,
+    )
+
+    response = client.get("/v1/admin/curations/quarantine", params={"page_size": 25})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"data", "meta"}
+    assert set(body["data"]) == {"items"}
+    row = body["data"]["items"][0]
+    assert row["collection_id"] == _uuid("quarantine-collection")
+    assert row["marker_intact"] is True
+    assert row["item_count"] == 2
+    assert row["quarantine_theme"]["theme_slug"] == "lighthouse-stamp-tour"
+    assert row["quarantine_source"]["provider"] == "korea-navigation-aids-agency"
+    assert row["original_collection"]["exists"] is True
+    assert row["original_collection"]["theme"]["theme_slug"] == (
+        "lighthouse-stamp-tour-2026"
+    )
+    assert row["original_collection"]["source"] is None
+    page = body["meta"]["page"]
+    assert page["page_size"] == 25
+    assert "next_cursor" in page
+    assert page["next_cursor"] == "opaque-next"
+    assert listing.await_args.kwargs == {"limit": 25, "cursor": None}
+
+
+@pytest.mark.unit
+def test_admin_quarantine_list_serializes_exhausted_cursor_as_null(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    listing = AsyncMock(return_value=((), None))
+    monkeypatch.setattr(
+        module.curation_repo,
+        "list_curation_quarantine_collections",
+        listing,
+    )
+
+    response = client.get("/v1/admin/curations/quarantine")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["items"] == []
+    assert body["meta"]["page"]["page_size"] == 50
+    assert "next_cursor" in body["meta"]["page"]
+    assert body["meta"]["page"]["next_cursor"] is None
+
+
+@pytest.mark.unit
+def test_admin_quarantine_items_expose_conflict_preview(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    preview = CurationQuarantineItemsPreview(
+        target_collection_id=_uuid("original-collection"),
+        target_missing=False,
+        target_archived=False,
+        items=(
+            CurationQuarantineItem(
+                curation_item_id=_uuid("quarantine-item-movable"),
+                external_item_id="probe-1",
+                external_component_id="primary",
+                feature_id=None,
+                place_name="간절곶등대",
+                status="included",
+                source_present=True,
+                archived_at=None,
+                conflict_kind="movable",
+                conflict_item_id=None,
+            ),
+            CurationQuarantineItem(
+                curation_item_id=_uuid("quarantine-item-conflict"),
+                external_item_id="probe-2",
+                external_component_id="primary",
+                feature_id="feature:shared",
+                place_name="겹치는 관광지",
+                status="included",
+                source_present=True,
+                archived_at=None,
+                conflict_kind="component_identity_conflict",
+                conflict_item_id=_uuid("occupant-item"),
+            ),
+        ),
+    )
+    items = AsyncMock(return_value=(preview, None))
+    monkeypatch.setattr(module.curation_repo, "list_curation_quarantine_items", items)
+
+    response = client.get(
+        f"/v1/admin/curations/quarantine/{_uuid('quarantine-collection')}/items",
+        params={"target_collection_id": _uuid("explicit-target")},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["target_collection_id"] == _uuid("original-collection")
+    assert data["target_missing"] is False
+    assert data["target_archived"] is False
+    assert [item["conflict_kind"] for item in data["items"]] == [
+        "movable",
+        "component_identity_conflict",
+    ]
+    assert data["items"][1]["conflict_item_id"] == _uuid("occupant-item")
+    assert "next_cursor" in response.json()["meta"]["page"]
+    assert items.await_args.kwargs == {
+        "collection_id": _uuid("quarantine-collection"),
+        "target_collection_id": _uuid("explicit-target"),
+        "limit": 50,
+        "cursor": None,
+    }
+
+
+@pytest.mark.unit
+def test_admin_quarantine_items_404_without_canonical_marker(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    items = AsyncMock(return_value=None)
+    monkeypatch.setattr(module.curation_repo, "list_curation_quarantine_items", items)
+
+    response = client.get(
+        f"/v1/admin/curations/quarantine/{_uuid('not-quarantine')}/items"
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.unit
+def test_reclassify_idempotency_lifecycle(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """최초 200 → 같은 key+같은 body는 `Idempotency-Replayed: true` 재생 →
+    같은 key+다른 body는 409 `IDEMPOTENCY_KEY_REUSED`."""
+    from kortravelmap.infra.domain_command_repo import (
+        DomainCommandClaim,
+        DomainCommandRecord,
+    )
+
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import curations as module
+
+    move = AsyncMock(return_value=((_uuid("moved-item"),), True))
+    monkeypatch.setattr(module.curation_repo, "move_curation_quarantine_items", move)
+    path = f"/v1/admin/curations/quarantine/{_uuid('quarantine-collection')}/reclassify"
+
+    first = client.post(path, json={"action": "move"})
+
+    assert first.status_code == 200
+    assert first.json()["data"] == {
+        "action": "move",
+        "moved_item_ids": [_uuid("moved-item")],
+        "quarantine_collection_deleted": True,
+        "collection_id": None,
+        "collection_key": None,
+    }
+    assert move.await_args.kwargs == {
+        "collection_id": _uuid("quarantine-collection"),
+        "target_collection_id": None,
+        "item_ids": None,
+        "actor": "local-dev",
+    }
+
+    now = datetime(2026, 8, 4, tzinfo=UTC)
+    record = DomainCommandRecord(
+        command_id=1,
+        actor="local-dev",
+        operation="admin.curation-quarantine.reclassify",
+        idempotency_key="95000000-0000-4000-8000-000000000001",
+        fingerprint_version=1,
+        request_fingerprint="a" * 64,
+        response_status=200,
+        response_body=first.json(),
+        response_headers={},
+        claimed_at=now,
+        completed_at=now,
+    )
+
+    async def _replay(*_args: Any, **_kwargs: Any) -> Any:
+        raise domain_command_service.DomainCommandReplay(record)
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _replay)
+    move.reset_mock()
+
+    replayed = client.post(path, json={"action": "move"})
+
+    assert replayed.status_code == 200
+    assert replayed.headers["Idempotency-Replayed"] == "true"
+    assert replayed.json() == first.json()
+    move.assert_not_awaited()
+
+    claim = DomainCommandClaim(
+        command_id=1,
+        actor="local-dev",
+        operation="admin.curation-quarantine.reclassify",
+        idempotency_key="95000000-0000-4000-8000-000000000001",
+        fingerprint_version=1,
+        request_fingerprint="a" * 64,
+        created_at=now,
+    )
+
+    async def _conflicted(*_args: Any, **_kwargs: Any) -> Any:
+        raise domain_command_service.DomainCommandFingerprintConflict(claim)
+
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", _conflicted)
+
+    reused = client.post(
+        path,
+        json={"action": "move", "item_ids": [_uuid("other-item")]},
+    )
+
+    assert reused.status_code == 409
+    assert reused.json()["code"] == "IDEMPOTENCY_KEY_REUSED"
+    move.assert_not_awaited()
+
+
+@pytest.mark.unit
+def test_reclassify_move_conflict_fails_closed_with_conflict_detail(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    conflict = CurationQuarantineMoveConflictError(
+        (
+            CurationQuarantineMoveConflict(
+                curation_item_id=_uuid("quarantine-item-conflict"),
+                conflict_kind="component_identity_conflict",
+                conflict_item_id=_uuid("occupant-item"),
+            ),
+        )
+    )
+    move = AsyncMock(side_effect=conflict)
+    monkeypatch.setattr(module.curation_repo, "move_curation_quarantine_items", move)
+
+    response = client.post(
+        f"/v1/admin/curations/quarantine/{_uuid('quarantine-collection')}/reclassify",
+        json={"action": "move"},
+    )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == "CURATION_QUARANTINE_MOVE_CONFLICT"
+    assert body["details"]["conflicts"] == [
+        {
+            "curation_item_id": _uuid("quarantine-item-conflict"),
+            "conflict_kind": "component_identity_conflict",
+            "conflict_item_id": _uuid("occupant-item"),
+        }
+    ]
+
+
+@pytest.mark.unit
+def test_reclassify_confirm_standalone_returns_confirmed_key(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    confirm = AsyncMock(
+        return_value=(_uuid("quarantine-collection"), "lighthouse:standalone")
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "confirm_curation_quarantine_standalone",
+        confirm,
+    )
+
+    response = client.post(
+        f"/v1/admin/curations/quarantine/{_uuid('quarantine-collection')}/reclassify",
+        json={
+            "action": "confirm_standalone",
+            "collection_key": "lighthouse:standalone",
+            "title": "등대 독립 확정",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "action": "confirm_standalone",
+        "moved_item_ids": None,
+        "quarantine_collection_deleted": None,
+        "collection_id": _uuid("quarantine-collection"),
+        "collection_key": "lighthouse:standalone",
+    }
+    assert confirm.await_args.kwargs == {
+        "collection_id": _uuid("quarantine-collection"),
+        "collection_key": "lighthouse:standalone",
+        "title": "등대 독립 확정",
+        "actor": "local-dev",
+    }
+
+
+@pytest.mark.unit
+def test_reclassify_missing_quarantine_maps_lookup_error_to_404(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    move = AsyncMock(side_effect=LookupError("curation quarantine collection 없음"))
+    monkeypatch.setattr(module.curation_repo, "move_curation_quarantine_items", move)
+
+    response = client.post(
+        f"/v1/admin/curations/quarantine/{_uuid('not-quarantine')}/reclassify",
+        json={"action": "move"},
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"action": "move", "collection_key": "not-allowed"},
+        {"action": "move", "item_ids": []},
+        {"action": "confirm_standalone"},
+        {"action": "confirm_standalone", "collection_key": "only-key"},
+        {
+            "action": "confirm_standalone",
+            "collection_key": "k",
+            "title": "t",
+            "item_ids": ["22222222-2222-4222-8222-222222222222"],
+        },
+    ],
+)
+def test_reclassify_rejects_action_field_mismatch(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    body: dict[str, Any],
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    move = AsyncMock()
+    confirm = AsyncMock()
+    monkeypatch.setattr(module.curation_repo, "move_curation_quarantine_items", move)
+    monkeypatch.setattr(
+        module.curation_repo,
+        "confirm_curation_quarantine_standalone",
+        confirm,
+    )
+
+    response = client.post(
+        f"/v1/admin/curations/quarantine/{_uuid('quarantine-collection')}/reclassify",
+        json=body,
+    )
+
+    assert response.status_code == 422
+    move.assert_not_awaited()
+    confirm.assert_not_awaited()
