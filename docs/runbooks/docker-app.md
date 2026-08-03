@@ -288,7 +288,17 @@ KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh
 ```
 
 API 컨테이너는 Postgres healthcheck 이후 `alembic upgrade head`를 실행하고 uvicorn을
-띄운다. `dagster-db-init`는 `kor_travel_map_dagster` DB 존재를 보장한다. `dagster`는
+띄운다. 기동 마이그레이션에는 두 가지 통제가 있다 (2026-08-03 prod 0072 사고 후속,
+PR #931):
+
+- `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` — 설정 시, 이미지가 담은 alembic head가 이
+  값과 다르면 **DB 연결 전에** 기동을 거부한다(chain이 모자란 이미지의 배포 차단).
+  set-but-empty도 거부한다. 표준 compose는 이 값을 넣지 않는다(local-dev 불필요) —
+  production 결선은 배포 orchestrator compose가 명시 값으로 소유한다.
+- DB의 revision이 이미지 chain에 없으면(stale 이미지 재배포) retry 없이 즉시 실패한다 —
+  `alembic current`로 선판정. 연결 실패 같은 일시 오류는 종전대로 retry 루프
+  (`KOR_TRAVEL_MAP_MIGRATION_RETRIES`, 기본 30회)가 처리한다.
+- `KOR_TRAVEL_MAP_MIGRATION_MODE`는 존재하지 않는다 — 설정돼 있으면 기동을 거부한다. `dagster-db-init`는 `kor_travel_map_dagster` DB 존재를 보장한다. `dagster`는
 Dagster webserver, `dagster-daemon`은 schedule/sensor daemon이다. `rustfs-init`는
 `kor-travel-map`과 `kor-travel-map-uploads` bucket을 생성한다. host `5432` 공유 DB를 쓰려면
 `KOR_TRAVEL_MAP_DB_EXTERNAL=true` 또는 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true` 모드로

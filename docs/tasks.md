@@ -947,10 +947,17 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
      1.2G, sha256 `bbba5216…379f`. **복원 검증 완료**(격리 clone, pg_restore 오류 0줄,
      1,817초; postgis 이미지는 init 완료 후 **새 DB를 만들어** 복원해야 한다 — `POSTGRES_DB`
      에는 확장이 미리 심어져 충돌). H22C 파괴적 live e2e의 실데이터 픽스처 후보로도 쓴다.
-  2. [x] 재발 방지 게이트 — PR #931(`KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` /
-     `MODE=none`), Docker-manager 쪽 image↔pin 일치 검사는 이슈 #109로 요청.
+  2. [x] 재발 방지 게이트 — PR #931(`KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`; 2차 적대
+     리뷰 F2로 `MODE=none`은 도입 전 제거 — 명분이던 H35 helper가 사문화돼 소비자 없는
+     fail-open 스위치였다). Docker-manager 쪽 image↔pin 일치 검사는 이슈 #109로 요청.
+     **주의(2차 리뷰 F1)**: prod compose(manager 소유)는 고정 `environment:` 목록이라
+     호스트 export만으로는 이 env가 컨테이너에 **전달되지 않는다** — 게이트를 켜려면
+     manager compose에 명시 값 결선이 필요하다(별도 이슈로 요청). 그 전까지 게이트는
+     표준 compose·local-dev에서 꺼져 있는 것이 정상이다.
   3. [ ] `main`(#931 포함)으로 api 이미지 재빌드·배포 → 빈 `krtour_map` 재생성 →
-     entrypoint가 `0078` 직행 (EXPECTED_HEAD=`0078_cache_target_gc_observe` 지정).
+     entrypoint가 `0078` 직행. 재생성 배포의 head 검증은 **빌드 단계 수동 게이트**로
+     한다(`docker run --rm <image> alembic heads` = `0078` 아니면 배포 금지) — env 결선이
+     manager에 없는 동안의 대체 통제.
   4. [ ] 데이터 재적재 — provider ETL dagster job들 + `curated_features_refresh_job`
      (concierge 3,044) + CSV 큐레이션 5종 재import (features 적재 후).
   5. [ ] `0078`에서 공개 표면·quarantine 0건 확인 후 H30B·H34 잔여·H40 실행 해제.

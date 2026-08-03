@@ -209,6 +209,88 @@ if [ -n "$cursor_signing_secret" ]; then
   fi
 fi
 
+# schema 변경이 **컨테이너 기동의 부수효과**로 일어나는 것에 대한 방어.
+#
+# 2026-08-03 prod 사고: pin(`map_release_revision`)은 목표 revision을 가리키는데 실제로는
+# alembic chain이 `0072`까지만 담긴 옛 이미지가 배포됐다. 이 스크립트가 조건 없이
+# `alembic upgrade head`를 돌려 prod schema를 `0063` -> `0072`로 올린 뒤 **오류 없이**
+# 끝냈다. 그 이미지 기준으로는 head까지 간 것이 맞기 때문이다. 그런데 `0072`는 공개
+# 큐레이션 링크를 신뢰 불가 상태로 두고 `0073`이 그것을 복구하는 구조라, 공개 표면이
+# 0건이 됐다.
+#
+# KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD — 이미지가 담은 migration chain의 head가
+# 기대값과 다르면 **마이그레이션 전에** 죽는다. DB를 건드리지 않으므로 중간 상태가
+# 생기지 않는다. 위 사고는 이 값만 넣었으면 잡혔다. 이 게이트는 chain만 검증한다 —
+# head가 우연히 같은 stale 이미지는 image↔pin 대조(배포측 몫)가 잡아야 한다.
+#
+# 배포측 결선이 없으면 게이트는 꺼진 것과 같다. 표준 compose는 이 값을 넣지 않으며
+# (local-dev는 필요 없음), production 결선은 배포 orchestrator(docker-manager) compose가
+# 명시 값으로 소유한다.
+#
+# MODE=none(orchestrator 소유 migration)은 도입 직후 제거됐다 — 명분이던 H35 typed
+# helper가 같은 사고 대응에서 사문화됐고(tasks.md 재정의), 소비자 없는 fail-open
+# 스위치만 남기 때문이다(적대 리뷰 F2). 설정돼 있으면 조용히 무시하지 않고 거부한다.
+if [ "${KOR_TRAVEL_MAP_MIGRATION_MODE+x}" = "x" ]; then
+  echo "KOR_TRAVEL_MAP_MIGRATION_MODE was removed; startup migration is always on" >&2
+  exit 1
+fi
+
+# set-but-empty는 거부한다 — 위 profile 검사와 같은 규약이다. compose `${HOST:-}`
+# 패턴에서 host env 누락이 조용한 게이트 해제가 되면 안 된다.
+if [ "${KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD+x}" = "x" ]; then
+  expected_head="$KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD"
+  if [ -z "$expected_head" ]; then
+    echo "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD is set but empty; refusing to silently disable the head gate" >&2
+    exit 1
+  fi
+else
+  expected_head=""
+fi
+
+if [ -n "$expected_head" ]; then
+  # `alembic heads`는 script 디렉터리만 읽는다 — DB 연결 전에 판정할 수 있다.
+  # 주의: alembic은 CommandError를 **stdout**에 쓰고 비정상 종료한다(stderr 아님).
+  # 출력 내용이 아니라 exit code로 실행 실패를 먼저 판정해야 오진 메시지가 나가지 않는다.
+  if ! heads_raw="$(alembic heads 2>/dev/null)"; then
+    echo "alembic heads failed; the image alembic configuration is broken" >&2
+    echo "(cannot evaluate KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD; the DB was not touched)" >&2
+    printf '%s\n' "$heads_raw" >&2
+    exit 1
+  fi
+  image_heads="$(printf '%s\n' "$heads_raw" | awk 'NF {print $1}')"
+  if [ -z "$image_heads" ]; then
+    echo "alembic heads printed nothing (cannot evaluate KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD)" >&2
+    exit 1
+  fi
+  head_count="$(printf '%s\n' "$image_heads" | grep -c '^')"
+  if [ "$head_count" != "1" ]; then
+    echo "the image has more than one alembic head: $(printf '%s' "$image_heads" | tr '\n' ' ')" >&2
+    exit 1
+  fi
+  if [ "$image_heads" != "$expected_head" ]; then
+    echo "the image alembic head does not match the expected head" >&2
+    echo "  expected: ${expected_head}" >&2
+    echo "  image:    ${image_heads}" >&2
+    echo "the deployed image was not built with the intended migration chain; the DB was not touched" >&2
+    exit 1
+  fi
+fi
+
+# 영구 오류를 retry로 두드리지 않는다. DB의 revision이 이미지 chain에 없으면(= 이미지가
+# DB보다 뒤처짐 — stale 이미지 재배포) `alembic upgrade head`는 30회 내내 같은 이유로
+# 실패한다. `alembic current`는 같은 오류를 즉시 내므로 한 번 읽어 먼저 판정한다 —
+# 읽기 전용이고, 연결 실패 같은 일시 오류는 아래 retry 루프가 그대로 처리한다.
+if ! current_raw="$(alembic current 2>&1)"; then
+  case "$current_raw" in
+    *"Can't locate revision"*)
+      echo "the DB alembic revision is not part of this image's migration chain" >&2
+      echo "(the image is older than the DB — a stale image was deployed; the DB was not touched)" >&2
+      printf '%s\n' "$current_raw" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 retries="${KOR_TRAVEL_MAP_MIGRATION_RETRIES:-30}"
 sleep_seconds="${KOR_TRAVEL_MAP_MIGRATION_RETRY_SLEEP_SECONDS:-2}"
 attempt=1

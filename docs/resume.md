@@ -18,11 +18,14 @@ migration이 `0063 → 0072`를 적용, 공개 큐레이션 표면이 **0건**�
 사문화(tasks.md 재정의 블록), tvn41은 무영향(자체 DB, 실측).
 
 사고 시점 dump는 아카이브·복원검증 완료(`~/backups/krtour_map_0072_*.dump`, 오류 0줄).
-재발 방지: PR #931(entrypoint EXPECTED_HEAD/MODE 게이트) + Docker-manager 이슈 #109
-(image↔pin 일치 게이트). npm audit 전면 실패는 PR #932로 해소.
+재발 방지: PR #931(entrypoint EXPECTED_HEAD 게이트 + DB-ahead 즉시 실패; `MODE=none`은
+2차 적대 리뷰로 도입 전 제거) + Docker-manager 이슈 #109(image↔pin 일치 게이트).
+npm audit 전면 실패는 PR #932로 해소. **주의**: prod compose(manager 소유)는 고정 env
+목록이라 EXPECTED_HEAD 결선은 manager compose 수정이 필요하다(별도 이슈) — 그 전까지
+재생성 배포의 head 검증은 빌드 단계 수동 게이트(`alembic heads`=`0078`)로 한다.
 
-**다음 한 작업**: #932·#931 머지 → n150에서 main 기준 api 이미지 재빌드·배포 → 빈
-`krtour_map` 재생성(`0078` 직행, EXPECTED_HEAD 지정) → 재적재(provider ETL +
+**다음 한 작업**: #932·#931 머지 → n150에서 main 기준 api 이미지 재빌드(head 수동 검증)
+·배포 → 빈 `krtour_map` 재생성(`0078` 직행) → 재적재(provider ETL +
 `curated_features_refresh_job` + CSV 5종) → 확인 후 **T-VN-H22 단일 PR**(사용자 지시)
 → Lane A 다음 항목 순차 진행.
 
